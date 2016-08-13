@@ -325,14 +325,15 @@ unpackDim arr_name (Imp.ConstSize c) i = do
   let shape_name = Field arr_name "shape"
   let constant_c = Constant $ value c
   let constant_i = Constant $ value i
-  stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "shape dimension is incorrect for the constant dimension"
+  stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "constant dimension wrong"
 
 unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Field arr_name "shape"
   let src = Index shape_name $ IdxExp $ Constant $ value i
   let dest = Var $ pretty var
   let makeNumpy = simpleCall "np.int32" [src]
-  stm $ Assign dest makeNumpy
+  stm $ Try [Assert (BinOp "==" dest makeNumpy) "variant dimension wrong"]
+        [Catch (Var "NameError") [Assign dest makeNumpy]]
 
 hashSizeVars :: [Imp.Param] -> HM.HashMap VName VName
 hashSizeVars = mconcat . map hashSizeVars'

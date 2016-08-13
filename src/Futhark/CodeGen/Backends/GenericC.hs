@@ -274,6 +274,9 @@ item x = tell $ mempty { accItems = DL.singleton x }
 instance C.ToIdent VName where
   toIdent = C.toIdent . zEncodeString . textual
 
+instance C.ToExp VName where
+  toExp v _ = [C.cexp|$id:v|]
+
 stm :: C.Stm -> CompilerM op s ()
 stm (C.Block items _) = mapM_ item items
 stm (C.Default s _) = stm s
@@ -602,23 +605,27 @@ prepareArg (MemParam name size (Space sid)) = do
 prepareArg p = return $ var $ paramName p
 
 readInputs :: Bool -> [Param] -> [ValueDecl] -> [C.Stm]
-readInputs refcount inputparams = map $ readInput refcount memsizes
+readInputs refcount inputparams = snd . mapAccumL (readInput refcount memsizes) mempty
   where memsizes = sizeVars inputparams
 
-readInput :: Bool -> HM.HashMap VName VName -> ValueDecl -> C.Stm
-readInput _ _ (ScalarValue t name) =
-  readPrimStm (var name) t
-readInput refcount memsizes (ArrayValue name t shape)
+readInput :: Bool -> HM.HashMap VName VName -> [VName] -> ValueDecl
+          -> ([VName], C.Stm)
+readInput _ _ known_sizes (ScalarValue t name) =
+  (known_sizes, readPrimStm (var name) t)
+readInput refcount memsizes known_sizes (ArrayValue name t shape)
   | Just f <- readFun t =
   -- We need to create an array for the array parser to put
   -- the shapes.
   let t' = primTypeToCType t
       rank = length shape
-      maybeCopyDim (ConstSize _) _ =
-        Nothing
-      maybeCopyDim (VarSize dimname) i =
-        Just [C.cstm|$id:dimname = shape[$int:i];|]
-      copyshape = catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
+      maybeCopyDim (ConstSize x) i =
+        assertSameSize x [C.cexp|shape[$int:i]|]
+      maybeCopyDim (VarSize d) i
+        | d `elem` known_sizes =
+            assertSameSize d [C.cexp|shape[$int:i]|]
+        | otherwise =
+            [C.cstm|$id:d = shape[$int:i];|]
+      copyshape = zipWith maybeCopyDim shape [0..rank-1]
       memsize = cproduct $ [C.cexp|sizeof($ty:t')|] :
                              [ [C.cexp|shape[$int:i]|] |
                               i <- [0..rank-1] ]
@@ -626,7 +633,8 @@ readInput refcount memsizes (ArrayValue name t shape)
         Nothing -> []
         Just sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
       dest = rawMem' refcount $ var name
-  in [C.cstm|{
+  in (known_sizes ++ wrote_sizes,
+      [C.cstm|{
         typename int64_t shape[$int:rank];
         if (read_array(sizeof($ty:t'),
                        $id:f,
@@ -638,9 +646,19 @@ readInput refcount memsizes (ArrayValue name t shape)
         }
         $stms:copyshape
         $stms:copymemsize
-      }|]
+      }|])
   | otherwise =
-    [C.cstm|panic(1, "Cannot read %s.\n", $string:(pretty t));|]
+    (known_sizes, [C.cstm|panic(1, "Cannot read %s.\n", $string:(pretty t));|])
+  where wrote_sizes = mapMaybe isVarSize shape
+        isVarSize ConstSize{} = Nothing
+        isVarSize (VarSize d) = Just d
+
+        assertSameSize expected got =
+          [C.cstm|if ($exp:expected != $exp:got) {
+                    fprintf(stderr, "Parameter %s has bad dimension (expected %d, got %d).\n",
+                            $string:(baseString name), $exp:expected, $exp:got);
+                    abort();
+                  }|]
 
 sizeVars :: [Param] -> HM.HashMap VName VName
 sizeVars = mconcat . map sizeVars'
