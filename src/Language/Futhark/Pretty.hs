@@ -94,23 +94,23 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (ArrayTypeBase ShapeDecl as vn) where
   ppr (PrimArray et (ShapeDecl ds) u _) =
-    ppr u <> foldl f (ppr et) ds
-    where f s AnyDim       = brackets s
-          f s (NamedDim v) = brackets $ s <> comma <> ppr v
-          f s (ConstDim n) = brackets $ s <> comma <> ppr n
+    ppr u <> mconcat (map (brackets . f) ds) <> ppr et
+    where f AnyDim       = mempty
+          f (NamedDim v) = ppr v
+          f (ConstDim n) = ppr n
 
   ppr (TupleArray et (ShapeDecl ds) u) =
-    ppr u <> foldl f (parens $ commasep $ map ppr et) ds
-    where f s AnyDim       = brackets s
-          f s (NamedDim v) = brackets $ s <> comma <> ppr v
-          f s (ConstDim n) = brackets $ s <> comma <> ppr n
+    ppr u <> mconcat (map (brackets . f) ds) <> parens (commasep $ map ppr et)
+    where f AnyDim       = mempty
+          f (NamedDim v) = ppr v
+          f (ConstDim n) = ppr n
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) where
   ppr (PrimArray et (Rank n) u _) =
-    ppr u <> foldl (.) id (replicate n brackets) (ppr et)
+    ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
   ppr (TupleArray ts (Rank n) u) =
-    ppr u <> foldl (.) id (replicate n brackets)
-    (parens $ commasep $ map ppr ts)
+    ppr u <> mconcat (replicate n (brackets mempty)) <>
+    parens (commasep $ map ppr ts)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
   ppr (Prim et) = ppr et
