@@ -72,11 +72,13 @@ data ProgramTest =
               }
   deriving (Show)
 
+-- | How to test a program.
 data TestAction
   = CompileTimeFailure ExpectedError
   | RunCases [TestRun]
   deriving (Show)
 
+-- | The error expected for a negative test.
 data ExpectedError = AnyError
                    | ThisError T.Text Regex
 
@@ -84,15 +86,19 @@ instance Show ExpectedError where
   show AnyError = "AnyError"
   show (ThisError r _) = "ThisError " ++ show r
 
+-- | How a program can be transformed.
 data StructurePipeline = KernelsPipeline (Pipeline SOACS Kernels)
                        | SOACSPipeline (Pipeline SOACS SOACS)
 
+-- | A structure test specifies a compilation pipeline, as well as
+-- metrics for the program coming out the other end.
 data StructureTest = StructureTest StructurePipeline AstMetrics
 
 instance Show StructureTest where
   show (StructureTest _ metrics) =
     "StructureTest <config> " ++ show metrics
 
+-- | The conditions under which a test case is to be run.
 data RunMode
   = CompiledOnly -- ^ Cannot run with interpreter.
   | InterpretedOnly -- ^ Only run with interpreter.
@@ -101,6 +107,7 @@ data RunMode
   | InterpretedAndCompiled -- ^ Can be interpreted or compiled.
   deriving (Eq, Show)
 
+-- | A condition for execution, input, and expected result.
 data TestRun = TestRun
                { runMode :: RunMode
                , runInput :: Values
@@ -108,10 +115,12 @@ data TestRun = TestRun
                }
              deriving (Show)
 
+-- | Several Values - either literally, or by reference to a file.
 data Values = Values [Value]
             | InFile FilePath
             deriving (Show)
 
+-- | How a test case is expected to terminate.
 data ExpectedResult values
   = Succeeds (Maybe values) -- ^ Execution suceeds, with or without
                             -- expected result values.
@@ -291,6 +300,9 @@ getValues dir (InFile file) = do
     Right vs -> return vs
   where file' = dir </> file
 
+-- | Extract a textual representation of some 'Values'.  In the IO
+-- monad because this might involve reading from a file.  There is no
+-- guarantee that the resulting text yields a readable value.
 getValuesText :: MonadIO m => FilePath -> Values -> m T.Text
 getValuesText _ (Values vs) =
   return $ T.unlines $ map prettyText vs
