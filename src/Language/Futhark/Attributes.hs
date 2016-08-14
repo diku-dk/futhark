@@ -347,12 +347,6 @@ peelArray n (Array (TupleArray et shape u)) = do
   return $ Array $ TupleArray et shape' u
 peelArray _ _ = Nothing
 
--- | Return the immediate row-type of an array.  For @[[int]]@, this
--- would be @[int]@.
-rowType :: (ArrayShape (shape vn), Monoid (as vn)) =>
-           TypeBase shape as vn -> TypeBase shape as vn
-rowType = stripArray 1
-
 -- | A type is a primitive type if it is not an array and any component
 -- types are prim types.
 primType :: TypeBase shape as vn -> Bool
