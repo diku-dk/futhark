@@ -6,7 +6,6 @@ module Language.Futhark.Renamer
   (
   -- * Tagging
     tagProg
-  , tagProg'
 
   -- * Untagging
   , untagProg
@@ -33,11 +32,8 @@ import Futhark.FreshNames
 -- binding into account, such that the resulting 'VName's are unique.
 -- The semantics of the program are unaffected, under the assumption
 -- that the program was correct to begin with.
-tagProg :: ProgBase NoInfo Name -> (ProgBase NoInfo VName, VNameSource)
-tagProg = tagProg' blankNameSource
-
-tagProg' :: VNameSource -> ProgBase NoInfo Name  -> (ProgBase NoInfo VName, VNameSource)
-tagProg' src prog = let (decs , src') = runReader (runStateT f src) env
+tagProg :: VNameSource -> ProgBase NoInfo Name  -> (ProgBase NoInfo VName, VNameSource)
+tagProg src prog = let (decs , src') = runReader (runStateT f src) env
                     in (Prog decs, src')
 
   where env = RenameEnv HM.empty newVNameFromName
