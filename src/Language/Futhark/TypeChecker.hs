@@ -31,7 +31,7 @@ import Prelude
 
 import Language.Futhark
 import Language.Futhark.Renamer
-  (tagProg', untagPattern)
+  (tagProg, untagPattern)
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 
@@ -630,7 +630,7 @@ checkProg prog = do
   checkedProg <- runTypeM initialScope src $ Prog <$> checkProg' (progDecs prog')
   return $ flattenProgFunctions checkedProg
   where
-    (prog', src) = tagProg' blankNameSource prog
+    (prog', src) = tagProg blankNameSource prog
 
 checkProg' :: [DecBase NoInfo VName] -> TypeM [DecBase Info VName]
 checkProg' decs = do
