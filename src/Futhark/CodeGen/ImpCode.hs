@@ -94,6 +94,10 @@ data ValueDecl = ArrayValue VName PrimType [DimSize]
                | ScalarValue PrimType VName
                deriving (Show)
 
+-- | A imperative function, containing the body as well as its
+-- low-level inputs and outouts, as well as its high-level arguments
+-- and results.  The latter are only used if the function is an entry
+-- point.
 data FunctionT a = Function { functionEntry :: Bool
                             , functionOutput :: [Param]
                             , functionInput :: [Param]
@@ -103,6 +107,7 @@ data FunctionT a = Function { functionEntry :: Bool
                             }
                  deriving (Show)
 
+-- | Type alias for namespace control.
 type Function = FunctionT
 
 data Code a = Skip
