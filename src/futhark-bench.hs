@@ -67,6 +67,10 @@ resultsToJSON = JSON.JSObject . JSON.toJSObject . map benchResultToJSObject
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
+  -- We force line buffering to ensure that we produce running output.
+  -- Otherwise, CI tools and the like may believe we are hung and kill
+  -- us.
+  hSetBuffering stdout LineBuffering
   benchmarks <- testSpecsFromPaths paths
   results <- mapM (uncurry $ runBenchmark opts) benchmarks
   case optJSON opts of
