@@ -322,6 +322,11 @@ reportText first failed passed remaining =
 
 runTests :: TestConfig -> [FilePath] -> IO ()
 runTests config paths = do
+  -- We force line buffering to ensure that we produce running output.
+  -- Otherwise, CI tools and the like may believe we are hung and kill
+  -- us.
+  hSetBuffering stdout LineBuffering
+
   let mode = configTestMode config
   all_tests <- map (makeTestCase config mode) <$> testSpecsFromPaths paths
 
