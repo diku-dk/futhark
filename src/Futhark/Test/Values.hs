@@ -318,7 +318,10 @@ readValues = readValues' . dropSpaces
 
 -- Comparisons
 
+-- | Two values differ in some way.
 data Mismatch = PrimValueMismatch (Int,Int) PrimValue PrimValue
+              -- ^ The position the value number and a flat index
+              -- into the array.
               | ArrayShapeMismatch Int [Int] [Int]
               | TypeMismatch Int PrimType PrimType
               | ValueCountMismatch Int Int
