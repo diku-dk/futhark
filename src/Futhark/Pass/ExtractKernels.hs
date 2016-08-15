@@ -188,6 +188,8 @@ type KernelsBinding = Out.Binding Out.Kernels
 type InKernelBinding = Out.Binding Out.InKernel
 type InKernelLambda = Out.Lambda Out.InKernel
 
+-- | Transform a program using SOACs to a program using explicit
+-- kernels, using the kernel extraction transformation.
 extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
   Pass { passName = "extract kernels"
