@@ -1,4 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | It is well known that fully parallel loops can always be
+-- interchanged inwards with a sequential loop.  This module
+-- implements that transformation.
 module Futhark.Pass.ExtractKernels.Interchange
        (
          SeqLoop (..)
@@ -19,6 +22,8 @@ import Futhark.Tools
 
 import Prelude
 
+-- | An encoding of a sequential do-loop with no existential context,
+-- alongside its result pattern.
 data SeqLoop = SeqLoop Pattern [(FParam, SubExp)] LoopForm Body
 
 seqLoopBinding :: SeqLoop -> Binding
