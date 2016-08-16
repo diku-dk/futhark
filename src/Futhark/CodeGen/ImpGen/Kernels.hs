@@ -1072,38 +1072,38 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
   acc_dest <- ImpGen.destinationFromParams acc_params
 
   ImpGen.declaringLParams (acc_params++arr_params) $
-    ImpGen.declaringPrimVar block_size int32 $
-    ImpGen.declaringPrimVar block_offset int32 $ do
+    ImpGen.declaringPrimVar block_size int32 $ do
+    -- If the GroupStream is morally just a do-loop, generate simpler code.
+    case mapM isSimpleThreadInSpace $ bodyBindings body of
+      Just stms' | Constant (IntValue (Int32Value 1)) <- maxchunk -> do
+        let body' = body { bodyBindings = stms' }
+        body'' <- ImpGen.withPrimVar block_offset int32 $
+                  allThreads constants $ ImpGen.compileBody acc_dest body'
+        ImpGen.emit $ Imp.SetScalar block_size 1
+        ImpGen.emit $ Imp.If (kernelThreadActive constants)
+          (Imp.For block_offset w' body'') mempty
 
-    -- If the GroupStream is morally just a do-loop, move the
-    -- active-threads check outside the loop.
-    let (around_loop, body') =
-          case mapM isSimpleThreadInSpace $ bodyBindings body of
-            Just stms' -> (flip (Imp.If (kernelThreadActive constants)) mempty,
-                           body { bodyBindings = stms' })
-            Nothing -> (id, body)
+      _ -> ImpGen.declaringPrimVar block_offset int32 $ do
+        body' <- ImpGen.collect $ ImpGen.compileBody acc_dest body
 
-    body'' <- ImpGen.collect $ ImpGen.compileBody acc_dest body'
+        ImpGen.emit $ Imp.SetScalar block_offset 0
+        zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
 
-    ImpGen.emit $ Imp.SetScalar block_offset 0
-    zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
+        let not_at_end =
+              Imp.CmpOp (CmpSlt Int32) block_offset' w'
+            set_block_size =
+              Imp.If (Imp.CmpOp (CmpSlt Int32)
+                       (w' - block_offset')
+                       max_block_size)
+              (Imp.SetScalar block_size (w' - block_offset'))
+              (Imp.SetScalar block_size max_block_size)
+            increase_offset =
+              Imp.SetScalar block_offset $
+              block_offset' + max_block_size
 
-    let not_at_end =
-          Imp.CmpOp (CmpSlt Int32) block_offset' w'
-        set_block_size =
-          Imp.If (Imp.CmpOp (CmpSlt Int32)
-                   (w' - block_offset')
-                   max_block_size)
-          (Imp.SetScalar block_size (w' - block_offset'))
-          (Imp.SetScalar block_size max_block_size)
-        increase_offset =
-          Imp.SetScalar block_offset $
-          block_offset' + max_block_size
-
-    ImpGen.emit $
-      around_loop $
-      Imp.While not_at_end $
-      set_block_size <> body'' <> increase_offset
+        ImpGen.emit $
+          Imp.While not_at_end $
+          set_block_size <> body' <> increase_offset
 
     zipWithM_ ImpGen.compileSubExpTo final_targets $
       map (Var . paramName) acc_params
