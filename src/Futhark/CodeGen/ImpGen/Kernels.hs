@@ -1071,11 +1071,13 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
       max_block_size = ImpGen.compileSubExp maxchunk
   acc_dest <- ImpGen.destinationFromParams acc_params
 
+  zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
+
   ImpGen.declaringLParams (acc_params++arr_params) $
     ImpGen.declaringPrimVar block_size int32 $ do
     -- If the GroupStream is morally just a do-loop, generate simpler code.
     case mapM isSimpleThreadInSpace $ bodyBindings body of
-      Just stms' | Constant (IntValue (Int32Value 1)) <- maxchunk -> do
+      Just stms' | max_block_size == 1 -> do
         let body' = body { bodyBindings = stms' }
         body'' <- ImpGen.withPrimVar block_offset int32 $
                   allThreads constants $ ImpGen.compileBody acc_dest body'
@@ -1087,7 +1089,6 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
         body' <- ImpGen.collect $ ImpGen.compileBody acc_dest body
 
         ImpGen.emit $ Imp.SetScalar block_offset 0
-        zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
 
         let not_at_end =
               Imp.CmpOp (CmpSlt Int32) block_offset' w'
