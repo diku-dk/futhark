@@ -926,7 +926,6 @@ groupBindingsByGuard :: KernelConstants
 groupBindingsByGuard constants bnds =
   map collapse $ groupBy sameGuard $ zip (map bindingGuard bnds) bnds
   where bindingGuard (Let _ _ Op{}) = Nothing
-        bindingGuard (Let _ _ If{}) = Nothing
         bindingGuard _ = Just $ kernelThreadActive constants
 
         sameGuard (g1, _) (g2, _) = g1 == g2
