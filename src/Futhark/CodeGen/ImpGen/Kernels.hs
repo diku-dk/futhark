@@ -908,14 +908,15 @@ compileKernelBindings constants ungrouped_bnds m =
   where compileGroupedKernelBindings' [] = m
         compileGroupedKernelBindings' ((g, bnds):rest_bnds) =
           ImpGen.declaringScope (castScope $ scopeOf bnds) $ do
-            protect g =<< ImpGen.collect (mapM_ compileKernelBinding bnds)
+            protect g $ mapM_ compileKernelBinding bnds
             compileGroupedKernelBindings' rest_bnds
 
-        protect Nothing body =
-          ImpGen.emit body
-        protect (Just (Imp.Constant (BoolValue True))) body =
-          ImpGen.emit body
-        protect (Just g) body =
+        protect Nothing body_m =
+          body_m
+        protect (Just (Imp.Constant (BoolValue True))) body_m =
+          body_m
+        protect (Just g) body_m = do
+          body <- allThreads constants body_m
           ImpGen.emit $ Imp.If g body mempty
 
         compileKernelBinding (Let pat _ e) = do
@@ -957,15 +958,11 @@ compileKernelExp _ dest (SplitSpace o w i max_is elems_per_thread)
 
 compileKernelExp constants dest (Combine cspace _ body)
   | Just dest' <- ImpGen.Destination <$> mapM index (ImpGen.valueDestinations dest) = do
-      copy <- ImpGen.subImpM_ (inKernelOperations constants') $
-              ImpGen.compileBody dest' body
+      copy <- allThreads constants $ ImpGen.compileBody dest' body
       ImpGen.emit $ Imp.Op Imp.Barrier
       ImpGen.emit $ Imp.If (isActive cspace) copy mempty
       ImpGen.emit $ Imp.Op Imp.Barrier
-        where constants' =
-                constants { kernelThreadActive = Imp.Constant (BoolValue True) }
-
-              index (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
+        where index (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
                 Just $ ImpGen.ArrayDestination
                 (ImpGen.CopyIntoMemory
                   (ImpGen.sliceArray loc $ map (ImpGen.varIndex . fst) cspace))
@@ -1119,6 +1116,11 @@ compileKernelExp _ dest e =
                          "  " ++ show dest,
                          "for kernel expression",
                          "  " ++ pretty e]
+
+allThreads :: KernelConstants -> InKernelGen () -> InKernelGen Imp.KernelCode
+allThreads constants = ImpGen.subImpM_ $ inKernelOperations constants'
+  where constants' =
+          constants { kernelThreadActive = Imp.Constant (BoolValue True) }
 
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
                     -> InKernelGen ()
