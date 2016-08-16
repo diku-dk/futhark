@@ -167,19 +167,6 @@ tileInBindings branch_variant initial_variance initial_kspace kstms = do
           return ((kspace', extra_bnds ++ bnds),
                   Let pat attr $ Op $ GroupStream w maxchunk lam' accs arrs)
 
-        tileInKernelStatement (kspace, extra_bnds)
-          (Let pat attr (If cond tbranch fbranch ts)) = do
-
-          (t_bnds, kspace', tbranch') <-
-            tileInBody branch_variant' variance kspace tbranch
-          (f_bnds, kspace'', fbranch') <-
-            tileInBody branch_variant' variance kspace' fbranch
-          return ((kspace'', extra_bnds<>t_bnds<>f_bnds),
-                  Let pat attr $ If cond tbranch' fbranch' ts)
-            where branch_variant' =
-                    case cond of Var v -> HM.lookupDefault mempty v variance
-                                 _     -> mempty
-
         tileInKernelStatement acc stm =
           return (acc, stm)
 
