@@ -148,7 +148,7 @@ instance (Attributes lore,
 
   simplifyOp (Combine cspace ts body) = do
     (body_res', body_bnds') <-
-      Engine.blockIf Engine.isNotSafe $
+      Engine.blockIf (Engine.isFalse False) $
       Engine.simplifyBody (map (const Observe) ts) body
     body' <- mkBodyM body_bnds' body_res'
     Combine
