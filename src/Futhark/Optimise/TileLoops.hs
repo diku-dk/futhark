@@ -289,19 +289,34 @@ is2dTileable :: MonadFreshNames m =>
              -> Maybe (SubExp -> [VName] -> m (LParam InKernel, [Binding InKernel]))
 is2dTileable branch_variant kspace variance block_size arr block_param = do
   guard $ HS.null branch_variant
+  pt <- case rowType $ paramType block_param of
+          Prim pt -> return pt
+          _       -> Nothing
   (permute, permute_perm, permute_dims) <- invariantToAtLeastOneDimension
   Just $ \tile_size local_is -> do
     let [variant_i, invariant_i] = permute local_is
         perm = permute_perm [0,1]
+        [(global_i,global_d),_] = rearrangeShape perm $ spaceDimensions kspace
     outer_block_param <- do
       name <- newVName $ baseString (paramName block_param) ++ "_outer"
       return block_param { paramName = name }
 
-    read_elem_bnd <- do
+    (elem_name, read_elem_bnds) <- flip runBinderT mempty $ do
+      do_index <- newVName "do_index"
+      addBinding $ mkLet' [] [Ident do_index $ Prim Bool] $
+        PrimOp $ CmpOp (CmpSlt Int32) (Var global_i) global_d
+      read_name <- newVName $ baseString (paramName outer_block_param) ++ "_elem_read"
+      let read_bnd = mkLet' [] [Ident read_name $ Prim pt] $
+                     PrimOp $ Index [] (paramName outer_block_param) [Var invariant_i]
+      dummy_name <- newVName $ baseString (paramName outer_block_param) ++ "_elem_dummy"
+      let dummy_bnd = mkLet' [] [Ident dummy_name $ Prim pt] $
+                      PrimOp $ SubExp $ Constant $ blankPrimValue pt
       name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
-      return $
-        mkLet' [] [Ident name $ rowType $ paramType outer_block_param] $
-        PrimOp $ Index [] (paramName outer_block_param) [Var invariant_i]
+      addBinding $ mkLet' [] [Ident name $ Prim pt] $ If (Var do_index)
+        (Body () [read_bnd] [Var read_name])
+        (Body () [dummy_bnd] [Var dummy_name]) $
+        staticShapes [Prim pt]
+      return name
 
     let block_size_2d = Shape $ permute_dims [tile_size, block_size]
         block_cspace = zip local_is $ permute_dims [tile_size,block_size]
@@ -310,10 +325,9 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
     let block_pe =
           PatElem block_name_2d BindVar $
           rowType (paramType outer_block_param) `arrayOfShape` block_size_2d
-        write_block_stms =
-          [ Let (Pattern [] [block_pe]) () $ Op $ Combine block_cspace [patElemType pe] $
-            Body () [read_elem_bnd] [Var $ patElemName pe]
-          | pe <- patternElements $ bindingPattern read_elem_bnd ]
+        write_block_stm =
+         Let (Pattern [] [block_pe]) () $ Op $ Combine block_cspace [Prim pt] $
+          Body () read_elem_bnds [Var elem_name]
 
     block_param_aux_name <- newVName $ baseString $ paramName block_param
     let block_param_aux = Ident block_param_aux_name $
@@ -324,7 +338,7 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
            mkLet' [] [paramIdent block_param] $
             PrimOp $ Index [] (identName block_param_aux) [Var variant_i]]
 
-    return (outer_block_param, write_block_stms ++ index_block_kstms)
+    return (outer_block_param, write_block_stm : index_block_kstms)
 
   where invariantToAtLeastOneDimension :: Maybe ([a] -> [a], [b] -> [b], [c] -> [c])
         invariantToAtLeastOneDimension = do
