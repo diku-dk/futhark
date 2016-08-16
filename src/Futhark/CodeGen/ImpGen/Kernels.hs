@@ -913,6 +913,8 @@ compileKernelBindings constants ungrouped_bnds m =
 
         protect Nothing body =
           ImpGen.emit body
+        protect (Just (Imp.Constant (BoolValue True))) body =
+          ImpGen.emit body
         protect (Just g) body =
           ImpGen.emit $ Imp.If g body mempty
 
