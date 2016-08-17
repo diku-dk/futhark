@@ -700,16 +700,14 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
 
 fuseInBody :: Body -> FusionGM Body
 
-fuseInBody (Body _ (Let pat lore e:bnds) res) = do
+fuseInBody (Body _ (Let pat () e:bnds) res) = do
   maybesoac <- SOAC.fromExp e
+  body' <- bindingPat pat $ fuseInBody $ mkBody bnds res
   case maybesoac of
-    Right soac ->
-      bindingPat pat (fuseInBody (mkBody bnds res)) >>=
-      replaceSOAC pat soac
-    _ -> do
-      Body _ bnds' res' <- bindingPat pat $ fuseInBody $ mkBody bnds res
-      e'                <- fuseInExp e
-      return $ mkBody (Let pat lore e':bnds') res'
+    Right soac -> do soac_bnds <- replaceSOAC pat soac
+                     return $ insertBindings soac_bnds body'
+    _ -> do e' <- fuseInExp e
+            return $ insertBindings [Let pat () e'] body'
 
 fuseInBody (Body () [] res) =
   return $ Body () [] res
@@ -748,9 +746,9 @@ fuseInExtLambda (ExtLambda params body rtp) = do
   body' <- binding (map paramIdent params) $ fuseInBody body
   return $ ExtLambda params body' rtp
 
-replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
-replaceSOAC (Pattern _ []) _ body = return body
-replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
+replaceSOAC :: Pattern -> SOAC -> FusionGM [Binding]
+replaceSOAC (Pattern _ []) _ = return []
+replaceSOAC pat@(Pattern _ (patElem : _)) soac = do
   fres  <- asks fusedRes
   let pat_nm = patElemName patElem
       names  = patternIdents pat
@@ -758,7 +756,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
     Nothing  -> do
       (e,bnds) <- runBinder $ SOAC.toExp soac
       e'    <- fuseInExp e
-      return $ insertBindings bnds $ mkLet' [] names e' `insertBinding` body
+      return $ bnds++[mkLet' [] names e']
     Just knm ->
       case HM.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ Error
@@ -769,10 +767,10 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
             badFusionGM $ Error
             ("In Fusion.hs, replaceSOAC, unfused kernel "
              ++"still in result: "++pretty names)
-          insertKerSOAC (outNames ker) ker body
+          insertKerSOAC (outNames ker) ker
 
-insertKerSOAC :: [VName] -> FusedKer -> Body -> FusionGM Body
-insertKerSOAC names ker body = do
+insertKerSOAC :: [VName] -> FusedKer -> FusionGM [Binding]
+insertKerSOAC names ker = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
@@ -780,10 +778,8 @@ insertKerSOAC names ker body = do
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
-  runBodyBinder $ do
-    transformOutput (outputTransform ker) names $
-      SOAC.setLambda lam'' new_soac
-    return body
+  runBinder_ $ transformOutput (outputTransform ker) names $
+    SOAC.setLambda lam'' new_soac
 
 ---------------------------------------------------
 ---------------------------------------------------
