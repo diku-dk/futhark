@@ -73,7 +73,7 @@ instance HasScope SOACS FusionGM where
     where toScope = HM.map varEntryType
 
 ------------------------------------------------------------------------
---- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
+--- Monadic Helpers: bind/new/runFusionGatherM, etc
 ------------------------------------------------------------------------
 
 -- | Binds an array name to the set of used-array vars
@@ -536,11 +536,6 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
       equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
--- fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Scan cs w lam args)):bnds) res) = do
---   let (ne, arrs) = unzip args
---       equivsoac = Futhark.Scanomap cs w lam lam ne arrs
---   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
-
 fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
@@ -789,8 +784,7 @@ insertKerSOAC names ker body = do
     transformOutput (outputTransform ker) names $
       SOAC.setLambda lam'' new_soac
     return body
--- futhark-test -c ../futhark-benchmarks/CalibVolDiff.fut
--- futhark -e --inline-functions --cse -e -o ../futhark-benchmarks/CalibVolDiff.fut > good.fut
+
 ---------------------------------------------------
 ---------------------------------------------------
 ---- HELPERS
