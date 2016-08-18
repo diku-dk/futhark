@@ -475,7 +475,7 @@ printStm (ArrayValue mem memsize space bt (outer:shape)) e = do
     puts "]"]
     where ppArrayType :: PrimType -> Int -> String
           ppArrayType t 0 = pretty t
-          ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"
+          ppArrayType t n = "[]" ++ ppArrayType t (n-1)
 
           puts s = Exp $ simpleCall "sys.stdout.write" [StringLiteral s]
 
