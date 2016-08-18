@@ -34,6 +34,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , NotSOAC (..)
   , fromExp
   , toExp
+  , toSOAC
   -- * SOAC inputs
   , Input (..)
   , varInput
@@ -461,27 +462,31 @@ width (Write _cs len _lam _ivs _as) = len
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
          SOAC (Lore m) -> m (Exp (Lore m))
+toExp soac = Op <$> toSOAC soac
 
-toExp (Map cs w l as) =
-  Op <$> (Futhark.Map cs w l <$> inputsToSubExps as)
-toExp (Reduce cs w comm l args) =
-  Op <$> (Futhark.Reduce cs w comm l <$> (zip es <$> inputsToSubExps as))
+-- | Convert a SOAC to a Futhark-level SOAC.
+toSOAC :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
+          SOAC (Lore m) -> m (Futhark.SOAC (Lore m))
+toSOAC (Map cs w l as) =
+  Futhark.Map cs w l <$> inputsToSubExps as
+toSOAC (Reduce cs w comm l args) =
+  Futhark.Reduce cs w comm l <$> (zip es <$> inputsToSubExps as)
   where (es, as) = unzip args
-toExp (Scan cs w l args) =
-  Op <$> (Futhark.Scan cs w l <$> (zip es <$> inputsToSubExps as))
+toSOAC (Scan cs w l args) =
+  Futhark.Scan cs w l <$> (zip es <$> inputsToSubExps as)
   where (es, as) = unzip args
-toExp (Redomap cs w comm l1 l2 es as) =
-  Op <$> (Futhark.Redomap cs w comm l1 l2 es <$> inputsToSubExps as)
-toExp (Scanomap cs w l1 l2 es as) =
-  Op <$> (Futhark.Scanomap cs w l1 l2 es <$> inputsToSubExps as)
-toExp (Stream cs w form lam inps) = Op <$> do
+toSOAC (Redomap cs w comm l1 l2 es as) =
+  Futhark.Redomap cs w comm l1 l2 es <$> inputsToSubExps as
+toSOAC (Scanomap cs w l1 l2 es as) =
+  Futhark.Scanomap cs w l1 l2 es <$> inputsToSubExps as
+toSOAC (Stream cs w form lam inps) = do
   let extrtp = staticShapes $ lambdaReturnType lam
       extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
   inpexp <- inputsToSubExps inps
   return $ Futhark.Stream cs w form extlam inpexp
-toExp (Write cs len lam ivs as) = do
+toSOAC (Write cs len lam ivs as) = do
   ivs' <- inputsToSubExps ivs
-  return $ Op $ Futhark.Write cs len lam ivs' as
+  return $ Futhark.Write cs len lam ivs' as
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
