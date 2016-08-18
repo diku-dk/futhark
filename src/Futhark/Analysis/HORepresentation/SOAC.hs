@@ -491,9 +491,6 @@ toSOAC (Write cs len lam ivs as) = do
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
 data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
-             | InvalidArrayInput SubExp -- ^ One of the input arrays has an
-                                        -- invalid form, i.e. cannot be
-                                        -- converted to an 'Input' value.
                deriving (Show)
 
 -- | Either convert an expression to the normalised SOAC
