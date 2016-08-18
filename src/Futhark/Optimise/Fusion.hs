@@ -579,14 +579,6 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
                         _                  -> [lam]
       reduceLike soac lambdas $ getStreamAccums form
 
-    Left (SOAC.InvalidArrayInput inpe) ->
-      badFusionGM $ Error
-      ("In Fusion.hs, "++pretty inpe++" is not valid array input.")
-
-    _ | [pe] <- patternValueElements pat,
-        Just (src,trns) <- SOAC.transformFromExp e ->
-      bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
-
     _ -> do
       let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
       bres <- gatherBindingPattern pat $ fusionGatherBody fres body
@@ -606,10 +598,14 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lambda
           greedyFuse rem_bnds used_lam blres (pat, soac, consumed)
 
-fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
-  let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
-  bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
-  foldM fusionGatherExp bres (e:pat_vars)
+fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
+  | [pe] <- patternValueElements pat,
+    Just (src,trns) <- SOAC.transformFromExp e =
+      bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
+  | otherwise = do
+      let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
+      bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
+      foldM fusionGatherExp bres (e:pat_vars)
 
 fusionGatherBody fres (Body _ [] res) =
   foldM fusionGatherExp fres $ map (PrimOp . SubExp) res
