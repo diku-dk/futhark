@@ -837,7 +837,7 @@ copyNewlyConsumed was_consumed soac =
           let free_consumed = consumedByLambda lam `HS.difference`
                 HS.fromList (map paramName $ lambdaParams lam)
           (bnds, subst) <-
-            foldM copyFree (mempty, mempty) free_consumed
+            foldM copyFree (mempty, mempty) $ HS.toList free_consumed
           let lam' = Aliases.removeLambdaAliases lam
           return $ if null bnds
                    then lam'
