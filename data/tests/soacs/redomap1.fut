@@ -9,6 +9,8 @@
 --           [8i32, 9i32]]
 --          False
 -- }
+-- input { 0 0 }
+-- output { empty([]i32) True }
 
 fun ([][]int, bool) main(int n, int m) =
   let ass = map (fn [m]int (int l) =>

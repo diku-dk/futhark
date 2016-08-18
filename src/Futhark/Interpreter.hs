@@ -652,8 +652,10 @@ evalSOAC (Redomap cs w _ redfun foldfun accexp arrexps) = do
   w' <- asInt "evalPrimOp Split" =<< evalSubExp w
   vs <- evalSOAC $  Scanomap cs w redfun foldfun accexp arrexps
   let (acc_arrs, arrs) = splitAt (length accexp) vs
-  accs <- forM acc_arrs $ \acc_arr ->
-    indexArrayValue "<redomap result>" acc_arr [w' - 1]
+  accs <- if w' == 0
+          then mapM evalSubExp accexp
+          else forM acc_arrs $ \acc_arr ->
+                 indexArrayValue "<redomap result>" acc_arr [w' - 1]
   return $ accs++arrs
 
 evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do

@@ -1179,7 +1179,7 @@ compileFunBody outputs code = do
 
 ppArrayType :: PrimType -> Int -> String
 ppArrayType t 0 = pretty t
-ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"
+ppArrayType t n = "[]" ++ ppArrayType t (n-1)
 
 declareAndSet :: Code op -> Maybe (VName, PrimType, Exp, Code op)
 declareAndSet (DeclareScalar name t :>>: (SetScalar dest e :>>: c))
