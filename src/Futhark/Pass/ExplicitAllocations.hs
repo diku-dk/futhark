@@ -523,7 +523,7 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner GroupSize
           handleOp NumGroups =
             return $ Inner NumGroups
-          handleOp (ScanKernel cs w size lam foldlam nes arrs) = subAllocM noOp $ do
+          handleOp (ScanKernel cs w size lam foldlam nes arrs) = do
             lam' <- allocInScanLambda lam (length nes) $ kernelWorkgroupSize size
             foldlam' <- allocInScanLambda foldlam (length nes) $ kernelWorkgroupSize size
             return $ Inner $ ScanKernel cs w size lam' foldlam' nes arrs
@@ -531,8 +531,6 @@ allocInFun (FunDef entry fname rettype params fbody) =
             Inner . Kernel cs space ts <$>
             localScope (scopeOfKernelSpace space)
             (allocInKernelBody kbody)
-
-          noOp = fail "Cannot handle kernel expressions inside scan kernels."
 
           handleKernelExp (SplitArray o w i num_is elems_per_thread arrs) =
             return $ Inner $ SplitArray o w i num_is elems_per_thread arrs
@@ -639,7 +637,7 @@ allocInExp e = mapExpM alloc e
 allocInScanLambda :: Lambda InInKernel
                   -> Int
                   -> SubExp
-                  -> AllocM InInKernel OutInKernel (Lambda OutInKernel)
+                  -> AllocM Kernels ExplicitMemory (Lambda OutInKernel)
 allocInScanLambda lam num_accs workgroup_size = do
   let (i, other_index_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
@@ -653,16 +651,19 @@ allocInScanLambda lam num_accs workgroup_size = do
   arr_params' <-
     allocInScanParameters workgroup_size this_index other_index arr_params
 
-  allocInLambda (Param i (Scalar int32) :
-                 other_index_param { paramAttr = Scalar int32 } :
-                 acc_params' ++ arr_params')
+  subAllocM noOp $
+    allocInLambda (Param i (Scalar int32) :
+                   other_index_param { paramAttr = Scalar int32 } :
+                   acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
+
+  where noOp = fail "Cannot handle kernel expressions inside scan kernels."
 
 allocInScanParameters :: SubExp
                       -> SE.ScalExp
                       -> SE.ScalExp
                       -> [LParam InInKernel]
-                      -> AllocM InInKernel OutInKernel [LParam OutInKernel]
+                      -> AllocM Kernels ExplicitMemory [LParam OutInKernel]
 allocInScanParameters workgroup_size my_id offset = mapM allocInScanParameter
   where allocInScanParameter p =
           case paramType p of
