@@ -399,8 +399,8 @@ simplifyBinOp _ _ (BinOp FMul{} e1 e2)
   | isCt1 e2 = Just $ SubExp e1
 
 simplifyBinOp look _ (BinOp (SMod t) e1 e2)
-  | isCt1 e2 = Just $ SubExp e1
-  | e1 == e2 = binOpRes $ IntValue $ intValue t (1 :: Int)
+  | isCt1 e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
+  | e1 == e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
   | Var v1 <- e1,
     Just (PrimOp (BinOp SMod{} e3 e4)) <- look v1,
     e4 == e2 = Just $ SubExp e3
@@ -411,11 +411,10 @@ simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt0 e2 = Nothing
 
 simplifyBinOp _ _ (BinOp (SRem t) e1 e2)
-  | isCt0 e2 = Just $ SubExp e1
+  | isCt1 e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = binOpRes $ IntValue $ intValue t (1 :: Int)
 
 simplifyBinOp _ _ (BinOp SQuot{} e1 e2)
-  | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing
 
