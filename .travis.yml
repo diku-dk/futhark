@@ -40,11 +40,6 @@ script:
  - futhark-test data/tests --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
  - futhark-test data/tests -t --exclude=no_opencl --compiler=futhark-pyopencl # Also test OpenCL code generation
 
- # Let us try checking out the benchmark suite for some more tests.
- - git clone https://github.com/HIPERFIT/futhark-benchmarks.git
- - futhark-test --travis futhark-benchmarks
- - futhark-test --travis -t --compiler=futhark-pyopencl futhark-benchmarks
-
  # Check for style issues.
  - if [ "$STACK_YAML" = stack.yaml ]; then
      stack install hlint --fast && tools/style-check.sh src;
