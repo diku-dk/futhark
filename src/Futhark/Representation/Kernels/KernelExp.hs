@@ -40,7 +40,7 @@ import qualified Futhark.TypeCheck as TC
 
 data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                     | SplitSpace StreamOrd SubExp SubExp SubExp SubExp
-                    | Combine [(VName,SubExp)] [Type] (Body lore)
+                    | Combine [(VName,SubExp)] [Type] SubExp (Body lore)
                     | GroupReduce SubExp
                       (Lambda lore) [(SubExp,VName)]
                     | GroupStream SubExp SubExp
@@ -70,7 +70,7 @@ instance Attributes lore => TypedOp (KernelExp lore) where
             in arr_t `setArrayShape` ExtShape chunk_shape
   opType SplitSpace{} =
     pure $ staticShapes [Prim int32]
-  opType (Combine ispace ts _) =
+  opType (Combine ispace ts _ _) =
     pure $ staticShapes $ map (`arrayOfShape` shape) ts
     where shape = Shape $ map snd ispace
   opType (GroupReduce _ lam _) =
@@ -83,8 +83,8 @@ instance Attributes lore => FreeIn (KernelExp lore) where
     freeIn [w, i, num_is, elems_per_thread] <> freeIn vs
   freeIn (SplitSpace _ w i num_is elems_per_thread) =
     freeIn [w, i, num_is, elems_per_thread]
-  freeIn (Combine cspace ts body) =
-    freeIn cspace <> freeIn ts <> freeInBody body
+  freeIn (Combine cspace ts active body) =
+    freeIn cspace <> freeIn ts <> freeIn active <> freeInBody body
   freeIn (GroupReduce w lam input) =
     freeIn w <> freeInLambda lam <> freeIn input
   freeIn (GroupStream w maxchunk lam accs arrs) =
@@ -139,8 +139,9 @@ instance Attributes lore => Substitute (KernelExp lore) where
     (substituteNames subst i)
     (substituteNames subst max_is)
     (substituteNames subst elems_per_thread)
-  substituteNames subst (Combine cspace ts v) =
-    Combine (substituteNames subst cspace) ts (substituteNames subst v)
+  substituteNames subst (Combine cspace ts active v) =
+    Combine (substituteNames subst cspace) ts
+    (substituteNames subst active) (substituteNames subst v)
   substituteNames subst (GroupReduce w lam input) =
     GroupReduce (substituteNames subst w)
     (substituteNames subst lam) (substituteNames subst input)
@@ -176,8 +177,8 @@ instance (Attributes lore, Renameable lore) => Rename (KernelExp lore) where
     <*> rename i
     <*> rename num_is
     <*> rename elems_per_thread
-  rename (Combine cspace ts v) =
-    Combine <$> rename cspace <*> rename ts <*> rename v
+  rename (Combine cspace ts active v) =
+    Combine <$> rename cspace <*> rename ts <*> rename active <*> rename v
   rename (GroupReduce w lam input) =
     GroupReduce <$> rename w <*> rename lam <*> rename input
   rename (GroupStream w maxchunk lam accs arrs) =
@@ -212,8 +213,8 @@ instance (Attributes lore,
           analyseGroupStreamLambda (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             Alias.analyseBody body
-  addOpAliases (Combine ispace ts body) =
-    Combine ispace ts $ Alias.analyseBody body
+  addOpAliases (Combine ispace ts active body) =
+    Combine ispace ts active $ Alias.analyseBody body
 
   removeOpAliases (GroupReduce w lam input) =
     GroupReduce w (removeLambdaAliases lam) input
@@ -223,8 +224,8 @@ instance (Attributes lore,
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             removeBodyAliases body
 
-  removeOpAliases (Combine ispace ts body) =
-    Combine ispace ts $ removeBodyAliases body
+  removeOpAliases (Combine ispace ts active body) =
+    Combine ispace ts active $ removeBodyAliases body
   removeOpAliases (SplitArray o w i num_is elems_per_thread arrs) =
     SplitArray o w i num_is elems_per_thread arrs
   removeOpAliases (SplitSpace o w i num_is elems_per_thread) =
@@ -241,8 +242,8 @@ instance (Attributes lore,
     SplitSpace o w i num_is elems_per_thread
   addOpRanges (GroupReduce w lam input) =
     GroupReduce w (Range.runRangeM $ Range.analyseLambda lam) input
-  addOpRanges (Combine ispace ts body) =
-    Combine ispace ts $ Range.runRangeM $ Range.analyseBody body
+  addOpRanges (Combine ispace ts active body) =
+    Combine ispace ts active $ Range.runRangeM $ Range.analyseBody body
   addOpRanges (GroupStream w maxchunk lam accs arrs) =
     GroupStream w maxchunk lam' accs arrs
     where lam' = analyseGroupStreamLambda lam
@@ -257,8 +258,8 @@ instance (Attributes lore,
     where removeGroupStreamLambdaRanges (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             removeBodyRanges body
-  removeOpRanges (Combine ispace ts body) =
-    Combine ispace ts $ removeBodyRanges body
+  removeOpRanges (Combine ispace ts active body) =
+    Combine ispace ts active $ removeBodyRanges body
   removeOpRanges (SplitArray o w i num_is elems_per_thread arrs) =
     SplitArray o w i num_is elems_per_thread arrs
   removeOpRanges (SplitSpace o w i num_is elems_per_thread) =
@@ -275,8 +276,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
             (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
             removeBodyWisdom body
-  removeOpWisdom (Combine ispace ts body) =
-    Combine ispace ts $ removeBodyWisdom body
+  removeOpWisdom (Combine ispace ts active body) =
+    Combine ispace ts active $ removeBodyWisdom body
   removeOpWisdom (SplitArray o w i num_is elems_per_thread arrs) =
     SplitArray o w i num_is elems_per_thread arrs
   removeOpWisdom (SplitSpace o w i num_is elems_per_thread) =
@@ -303,10 +304,11 @@ typeCheckKernelExp (SplitArray _ w i num_is elems_per_thread arrs) = do
 typeCheckKernelExp (SplitSpace _ w i num_is elems_per_thread) =
   mapM_ (TC.require [Prim int32]) [w, i, num_is, elems_per_thread]
 
-typeCheckKernelExp (Combine cspace ts body) = do
+typeCheckKernelExp (Combine cspace ts active body) = do
   mapM_ (TC.requireI [Prim int32]) is
   mapM_ TC.checkType ts
   mapM_ (TC.require [Prim int32]) ws
+  TC.require [Prim Bool] active
   TC.checkLambdaBody ts body
   where (is, ws) = unzip cspace
 
@@ -371,8 +373,9 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
                       ppr i <+> text "<" <+> ppr num_is])
     where suff = case o of InOrder -> ""
                            Disorder -> "Unordered"
-  ppr (Combine cspace ts body) =
-    text "combine" <> apply (map f cspace ++ [apply (map ppr ts)]) <+> text "{" </>
+  ppr (Combine cspace ts active body) =
+    text "combine" <>
+    apply (map f cspace ++ [apply (map ppr ts), ppr active]) <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
     where f (i, w) = ppr i <+> text "<" <+> ppr w

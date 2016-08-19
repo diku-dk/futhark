@@ -956,11 +956,12 @@ compileKernelExp _ dest (SplitSpace o w i max_is elems_per_thread)
         where comm = case o of Disorder -> Commutative
                                InOrder -> Noncommutative
 
-compileKernelExp constants dest (Combine cspace _ body)
+compileKernelExp constants dest (Combine cspace _ active body)
   | Just dest' <- ImpGen.Destination <$> mapM index (ImpGen.valueDestinations dest) = do
       copy <- allThreads constants $ ImpGen.compileBody dest' body
       ImpGen.emit $ Imp.Op Imp.Barrier
-      ImpGen.emit $ Imp.If (isActive cspace) copy mempty
+      ImpGen.emit $ Imp.If (Imp.BinOp LogAnd (isActive cspace) $
+                            ImpGen.compileSubExp active) copy mempty
       ImpGen.emit $ Imp.Op Imp.Barrier
         where index (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
                 Just $ ImpGen.ArrayDestination

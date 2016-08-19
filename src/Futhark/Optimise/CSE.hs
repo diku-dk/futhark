@@ -191,8 +191,8 @@ cseInKernelBody (Kernel.KernelBody bodyattr bnds res) = do
   return $ Kernel.KernelBody bodyattr bnds' res
 
 instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (KernelExp.KernelExp lore) where
-  cseInOp (KernelExp.Combine cspace ts body) =
-    subCSE $ KernelExp.Combine cspace ts <$> cseInBody body
+  cseInOp (KernelExp.Combine cspace ts active body) =
+    subCSE $ KernelExp.Combine cspace ts active <$> cseInBody body
   cseInOp (KernelExp.GroupReduce w lam input) =
     subCSE $ KernelExp.GroupReduce w <$> cseInLambda lam <*> pure input
   cseInOp (KernelExp.GroupStream w max_chunk lam nes arrs) =
