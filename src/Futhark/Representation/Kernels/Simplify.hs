@@ -146,7 +146,7 @@ instance (Attributes lore,
     <*> Engine.simplify num_is
     <*> Engine.simplify elems_per_thread
 
-  simplifyOp (Combine cspace ts body) = do
+  simplifyOp (Combine cspace ts active body) = do
     (body_res', body_bnds') <-
       Engine.blockIf (Engine.isFalse False) $
       Engine.simplifyBody (map (const Observe) ts) body
@@ -154,6 +154,7 @@ instance (Attributes lore,
     Combine
       <$> mapM Engine.simplify cspace
       <*> mapM Engine.simplify ts
+      <*> Engine.simplify active
       <*> pure body'
 
   simplifyOp (GroupReduce w lam input) = do

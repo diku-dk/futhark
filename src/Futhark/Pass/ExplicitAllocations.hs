@@ -536,8 +536,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner $ SplitArray o w i num_is elems_per_thread arrs
           handleKernelExp (SplitSpace o w i num_is elems_per_thread) =
             return $ Inner $ SplitSpace o w i num_is elems_per_thread
-          handleKernelExp (Combine cspace ts body) =
-            Inner . Combine cspace ts <$> allocInBodyNoDirect body
+          handleKernelExp (Combine cspace ts active body) =
+            Inner . Combine cspace ts active <$> allocInBodyNoDirect body
           handleKernelExp (GroupReduce w lam input) = do
             summaries <- mapM lookupArraySummary arrs
             lam' <- allocInReduceLambda lam summaries
@@ -871,7 +871,7 @@ kernelExpHints e =
 
 inKernelExpHints :: (Allocator lore m, Op lore ~ MemOp (KernelExp somelore)) =>
                     Exp lore -> m [ExpHint]
-inKernelExpHints (Op (Inner (Combine cspace ts _))) =
+inKernelExpHints (Op (Inner (Combine cspace ts _ _))) =
   forM ts $ \t -> do
     alloc_dims <- mapM dimAllocationSize $ dims ++ arrayDims t
     let ixfun = IxFun.iota $ map SE.intSubExpToScalExp alloc_dims

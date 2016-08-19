@@ -129,7 +129,8 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
     pe_name <- newVName "chunk_fold_red"
     return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
   let combine_reds = [ Let (Pattern [] [pe']) () $ Op $
-                       Combine [(spaceLocalId space, group_size)] [patElemType pe] $
+                       Combine [(spaceLocalId space, group_size)] [patElemType pe]
+                       (constant True) $
                        Body () [] [Var $ patElemName pe]
                      | (pe', pe) <- zip chunk_red_pes' chunk_red_pes ]
 
@@ -174,7 +175,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
       arr' <- newVName $ baseString arr_index ++ "_combined"
       let pe = PatElem arr' BindVar $ red_t `arrayOfRow` group_size
       return (Let (Pattern [] [pe]) () $
-              Op $ Combine [(spaceLocalId space, group_size)] [red_t] $
+              Op $ Combine [(spaceLocalId space, group_size)] [red_t] (constant True) $
               Body () [] [Var arr_index],
               arr')
 
