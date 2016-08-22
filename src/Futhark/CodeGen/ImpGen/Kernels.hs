@@ -7,7 +7,7 @@ module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
   )
   where
-import Debug.Trace
+
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Applicative
@@ -642,9 +642,7 @@ isMapTransposeKernel bt
     Just (r1, r2, _) <- isMapTranspose perm =
     isOk (product srcshape') (product destshape') srcshape' id r1 r2 dest_offset src_offset
   | otherwise =
-    trace (unlines ["not a map-transpose:",
-                    pretty destIxFun,
-                    pretty srcIxFun]) Nothing
+    Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
 
