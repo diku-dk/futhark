@@ -110,7 +110,7 @@ Does not recognise nested tuples or nested arrays.")
   `(
 
     ;; Function declarations
-    (,(concat "fun[[:space:]\n]+" futhark-type
+    (,(concat "\\(?:fun\\|entry\\)[[:space:]\n]+" futhark-type
               "[[:space:]\n]+\\(" futhark-var "\\)")
      . '(1 font-lock-function-name-face))
 
@@ -212,7 +212,8 @@ constituents match each other's indentation."
             (current-column))
 
        ;; Align function definitions to column 0.
-       (and (futhark-looking-at-word "fun")
+       (and (or (futhark-looking-at-word "fun")
+                (futhark-looking-at-word "entry"))
             0)
 
        ;; Align closing parentheses and commas to opening
@@ -350,7 +351,9 @@ constituents match each other's indentation."
        ;; Otherwise, if the previous keyword is "fun", align to a single
        ;; indent level.
        (and
-        (string= "fun" (save-excursion (futhark-first-keyword-backward)))
+        (let ((first-keyword (save-excursion (futhark-first-keyword-backward))))
+          (or (string= "fun" first-keyword)
+              (string= "entry" first-keyword)))
         futhark-indent-level)
 
        ;; Otherwise, align to the previous non-empty line.
@@ -432,8 +435,14 @@ Set mark and return t if found; return nil otherwise."
         (topp (save-excursion (or (ignore-errors
                                     (backward-up-list 1)
                                     (point))
-                                  (futhark-find-keyword-backward-raw "fun")
-                                  0)))
+                                  (max
+                                   (or (save-excursion
+                                         (futhark-find-keyword-backward-raw "fun"))
+                                       0)
+                                   (or (save-excursion
+                                         (futhark-find-keyword-backward-raw "entry"))
+                                       0))
+                                  )))
         (result nil)
         )
 
