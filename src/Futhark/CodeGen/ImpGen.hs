@@ -99,6 +99,7 @@ import Futhark.CodeGen.ImpCode
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
 import Futhark.Util
 import Futhark.Util.IntegralExp
@@ -529,10 +530,12 @@ defCompilePrimOp (Destination [target]) (CmpOp bop x y) =
 defCompilePrimOp (Destination [_]) (Assert e loc) =
   emit $ Imp.Assert (compileSubExp e) loc
 
-defCompilePrimOp (Destination [target]) (Index _ src idxs) = do
-  t <- lookupType src
-  when (length idxs == arrayRank t) $
-    copyDWIMDest target [] (Var src) $ map (`SE.subExpToScalExp` int32) idxs
+defCompilePrimOp (Destination [target]) (Index _ src slice)
+  | Just idxs <- sliceIndices slice =
+      copyDWIMDest target [] (Var src) $ map (`SE.subExpToScalExp` int32) idxs
+
+defCompilePrimOp _ Index{} =
+  return ()
 
 defCompilePrimOp (Destination [dest]) (Replicate n se) = do
   i <- newVName "i"
@@ -904,23 +907,22 @@ destinationFromPattern (Pattern ctxElems valElems) =
                         | isctx mem = SetMemory mem $ nullifyFreeDim memsize
                         | otherwise = CopyIntoMemory $ MemLocation mem shape ixfun
                   return $ ArrayDestination memdest shape'
-                BindInPlace _ _ is ->
-                  case patElemRequires patElem of
-                    Prim _ -> do
+                BindInPlace _ _ slice ->
+                  case (length $ sliceDims slice,
+                        sliceIndices slice) of
+                    (_, Just is) -> do
                       (_, space, elemOffset) <-
                         fullyIndexArray'
                         (MemLocation mem shape ixfun)
                         (map (`SE.subExpToScalExp` int32) is)
                         bt
                       return $ ArrayElemDestination mem bt space elemOffset
-                    Array _ shape' _ ->
+                    (r, Nothing) ->
                       let memdest = sliceArray (MemLocation mem shape ixfun) $
-                                    map (`SE.subExpToScalExp` int32) is
+                                    map (fmap (`SE.subExpToScalExp` int32)) slice
                       in return $
                          ArrayDestination (CopyIntoMemory memdest) $
-                         replicate (shapeRank shape') Nothing
-                    Mem {} ->
-                      throwError "destinationFromPattern: cannot do an in-place bind of a memory block."
+                         replicate r Nothing
 
             MemVar (MemEntry memsize _)
               | Imp.VarSize memsize' <- memsize, isctx memsize' ->
@@ -954,25 +956,25 @@ readFromArray name indices = do
   return $ Imp.Index mem i (entryArrayElemType arr) space
 
 sliceArray :: MemLocation
-           -> [SE.ScalExp]
+           -> Slice SE.ScalExp
            -> MemLocation
-sliceArray (MemLocation mem shape ixfun) indices =
-  MemLocation mem (drop (length indices) shape) $
-  IxFun.applyInd ixfun indices
+sliceArray (MemLocation mem shape ixfun) slice =
+  MemLocation mem (update shape slice) $ IxFun.slice ixfun slice
+  where update (d:ds) (DimSlice{}:is) = d : update ds is
+        update (_:ds) (DimFix{}:is) = update ds is
+        update _      _               = []
 
 offsetArray :: MemLocation
             -> SE.ScalExp
             -> MemLocation
 offsetArray (MemLocation mem shape ixfun) offset =
-  MemLocation mem shape $
-  IxFun.offsetIndex ixfun offset
+  MemLocation mem shape $ IxFun.offsetIndex ixfun offset
 
 strideArray :: MemLocation
             -> SE.ScalExp
             -> MemLocation
 strideArray (MemLocation mem shape ixfun) stride =
-  MemLocation mem shape $
-  IxFun.strideIndex ixfun stride
+  MemLocation mem shape $ IxFun.strideIndex ixfun stride
 
 subExpNotArray :: SubExp -> ImpM lore op Bool
 subExpNotArray se = subExpType se >>= \case
@@ -1041,8 +1043,8 @@ copyArrayDWIM :: PrimType
               -> MemLocation -> [SE.ScalExp]
               -> ImpM lore op (Imp.Code op)
 copyArrayDWIM bt
-  destlocation@(MemLocation _ destshape _) destis
-  srclocation@(MemLocation _ srcshape _) srcis
+  destlocation@(MemLocation _ destshape dest_ixfun) destis
+  srclocation@(MemLocation _ srcshape src_ixfun) srcis
 
   | length srcis == length srcshape, length destis == length destshape = do
   (targetmem, destspace, targetoffset) <-
@@ -1053,8 +1055,10 @@ copyArrayDWIM bt
     Imp.Index srcmem srcoffset bt srcspace
 
   | otherwise = do
-      let destlocation' = sliceArray destlocation destis
-          srclocation'  = sliceArray srclocation  srcis
+      let destlocation' =
+            sliceArray destlocation $ fullSliceNum (IxFun.shape dest_ixfun) $ map DimFix destis
+          srclocation'  =
+            sliceArray srclocation $ fullSliceNum (IxFun.shape src_ixfun) $ map DimFix srcis
       if destlocation' == srclocation'
         then return mempty -- Copy would be no-op.
         else collect $ copy bt destlocation' srclocation' $

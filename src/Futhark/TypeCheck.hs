@@ -99,10 +99,9 @@ data ErrorCase lore =
   -- ^ A variable was attempted used after being
   -- consumed.  The last location is the point of
   -- consumption.
-  | IndexingError Int Int
-  -- ^ Too many indices provided.  The first integer is
-  -- the number of dimensions in the array being
-  -- indexed.
+  | SlicingError Int Int
+  -- ^ Wrong number of indices provided.  The first integer is the
+  -- number of dimensions in the array being indexed.
   | BadAnnotation String Type Type
   -- ^ One of the type annotations fails to match with the
   -- derived type.  The string is a description of the
@@ -168,7 +167,7 @@ instance Checkable lore => Show (ErrorCase lore) where
   show (UseAfterConsume name) =
     "Variable " ++ textual name ++ " used" ++
     ", but it was previously consumed.  (Possibly through aliasing.)"
-  show (IndexingError dims got) =
+  show (SlicingError dims got) =
     show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
   show (BadAnnotation desc expected got) =
     "Annotation of \"" ++ desc ++ "\" type of expression is " ++ pretty expected ++
@@ -749,9 +748,9 @@ checkPrimOp (Index cs ident idxes) = do
   mapM_ (requireI [Prim Cert]) cs
   vt <- lookupType ident
   observe ident
-  when (arrayRank vt < length idxes) $
-    bad $ IndexingError (arrayRank vt) (length idxes)
-  mapM_ (require [Prim int32]) idxes
+  when (arrayRank vt /= length idxes) $
+    bad $ SlicingError (arrayRank vt) (length idxes)
+  mapM_ checkDimIndex idxes
 
 checkPrimOp (Iota e x s) = do
   require [Prim int32] e
@@ -968,21 +967,23 @@ checkPatElem (PatElem name bindage attr) = do
   checkBindage bindage
   checkLetBoundLore name attr
 
+checkDimIndex :: Checkable lore =>
+                 DimIndex SubExp -> TypeM lore ()
+checkDimIndex (DimFix i) = require [Prim int32] i
+checkDimIndex (DimSlice i n) = mapM_ (require [Prim int32]) [i,n]
+
 checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()
 checkBindage BindVar = return ()
 checkBindage (BindInPlace cs src is) = do
   mapM_ (requireI [Prim Cert]) cs
   srct <- lookupType src
-  mapM_ (require [Prim int32]) is
+  mapM_ checkDimIndex is
 
   consume =<< lookupAliases src
 
-  -- Check that the new value has the same type as what is already
-  -- there (It does not have to be unique, though.)
-  case peelArray (length is) srct of
-    Nothing -> bad $ IndexingError (arrayRank srct) (length is)
-    Just _  -> return ()
+  when (arrayRank srct /= length is) $
+    bad $ SlicingError (arrayRank srct) (length is)
 
 checkBinding :: Checkable lore =>
                 Pattern (Aliases lore) -> Exp (Aliases lore)

@@ -292,7 +292,7 @@ allocsForPattern sizeidents validents rts hints = do
             BindVar ->
               return $ PatElem (identName ident) bindage $
               ArrayMem bt shape u mem ixfun
-            BindInPlace _ src is -> do
+            BindInPlace _ src slice -> do
               (destmem,destixfun) <- lift $ lookupArraySummary src
               if destmem == mem && destixfun == ixfun
                 then return $ PatElem (identName ident) bindage $
@@ -304,13 +304,13 @@ allocsForPattern sizeidents validents rts hints = do
                 -- it wants to first, then copy it to our intended
                 -- destination in an extra binding.
                 tmp_buffer <- lift $
-                              newIdent (baseString (identName ident)<>"_buffer")
-                              (stripArray (length is) $ identType ident)
+                              newIdent (baseString (identName ident)<>"_ext_buffer")
+                              (identType ident `setArrayDims` sliceDims slice)
                 tell ([], [],
                       [ArrayCopy (identName ident) bindage $
                        identName tmp_buffer])
                 return $ PatElem (identName tmp_buffer) BindVar $
-                  ArrayMem bt (stripDims (length is) shape) u mem ixfun
+                  ArrayMem bt (arrayShape $ identType tmp_buffer) u mem ixfun
 
         ReturnsArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
@@ -318,7 +318,7 @@ allocsForPattern sizeidents validents rts hints = do
             return $ PatElem (identName ident) bindage summary
 
         ReturnsArray bt _ u (Just ReturnsNewBlock{})
-          | BindInPlace _ _ is <- bindage -> do
+          | BindInPlace _ _ slice <- bindage -> do
               -- The expression returns its own memory, but the pattern
               -- wants to store it somewhere else.  We first let it
               -- store the value where it wants, then we copy it to the
@@ -327,14 +327,14 @@ allocsForPattern sizeidents validents rts hints = do
               -- possible (e.g. function calls).
               tmp_buffer <- lift $
                             newIdent (baseString (identName ident)<>"_ext_buffer")
-                            (stripArray (length is) $ identType ident)
+                            (identType ident `setArrayDims` sliceDims slice)
               (memsize,mem,(_,ixfun)) <- lift $ memForBindee tmp_buffer
               tell ([PatElem (identName memsize) BindVar $ Scalar int32],
                     [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                     [ArrayCopy (identName ident) bindage $
                      identName tmp_buffer])
               return $ PatElem (identName tmp_buffer) BindVar $
-                ArrayMem bt (stripDims (length is) shape) u (identName mem) ixfun
+                ArrayMem bt (arrayShape $ identType tmp_buffer) u (identName mem) ixfun
 
         ReturnsArray bt _ u _ -> do
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
@@ -669,10 +669,10 @@ allocInScanParameters workgroup_size my_id offset = mapM allocInScanParameter
           case paramType p of
             t@(Array bt shape u) -> do
               (_, shared_mem) <- allocForLocalArray workgroup_size t
-              let ixfun = IxFun.applyInd
-                          (IxFun.iota $ map SE.intSubExpToScalExp $
-                           workgroup_size : arrayDims t)
-                          [my_id + offset]
+              let ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp $
+                               workgroup_size : arrayDims t
+                  ixfun = IxFun.slice ixfun_base $
+                          fullSliceNum (IxFun.shape ixfun_base) [DimFix $ my_id + offset]
               return p { paramAttr = ArrayMem bt shape u shared_mem ixfun }
             Prim bt ->
               return p { paramAttr = Scalar bt }
@@ -709,7 +709,8 @@ allocInReduceParameters my_id offset = mapM allocInReduceParameter
   where allocInReduceParameter (p, (mem, ixfun)) =
           case paramType p of
             (Array bt shape u) ->
-              let ixfun' = IxFun.applyInd ixfun [my_id + offset]
+              let ixfun' = IxFun.slice ixfun $
+                           fullSliceNum (IxFun.shape ixfun) [DimFix $ my_id + offset]
               in return p { paramAttr = ArrayMem bt shape u mem ixfun' }
             Prim bt ->
               return p { paramAttr = Scalar bt }

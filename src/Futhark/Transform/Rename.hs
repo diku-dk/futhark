@@ -307,6 +307,10 @@ instance Rename () where
 instance Rename ExtRetType where
   rename = fmap ExtRetType . mapM rename . retTypeValues
 
+instance Rename d => Rename (DimIndex d) where
+  rename (DimFix i) = DimFix <$> rename i
+  rename (DimSlice i n) = DimSlice <$> rename i <*> rename n
+
 -- | Lores in which all annotations are renameable.
 type Renameable lore = (Rename (LetAttr lore),
                         Rename (ExpAttr lore),

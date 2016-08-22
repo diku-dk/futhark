@@ -10,7 +10,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , permute
        , rotate
        , reshape
-       , applyInd
+       , slice
        , base
        , rebase
        , shape
@@ -21,6 +21,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        )
        where
 
+import Data.Maybe
 import Data.Monoid
 import Data.List
 
@@ -29,7 +30,8 @@ import Prelude hiding (div, mod, quot, rem)
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 
-import Futhark.Representation.AST.Syntax (DimChange(..), ShapeChange)
+import Futhark.Representation.AST.Syntax
+  (DimChange(..), ShapeChange, DimIndex(..), Slice, sliceDims)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -45,7 +47,7 @@ data IxFun num = Direct (Shape num)
                | Offset (IxFun num) num
                | Permute (IxFun num) Permutation
                | Rotate (IxFun num) (Indices num)
-               | Index (IxFun num) (Indices num)
+               | Index (IxFun num) (Slice num)
                | Reshape (IxFun num) (ShapeChange num)
                | Stride (IxFun num) num
 
@@ -61,7 +63,12 @@ instance (IntegralCond num, Eq num) => Eq (IxFun num) where
   Rotate ixfun1 offsets1 == Rotate ixfun2 offsets2 =
     ixfun1 == ixfun2 && offsets1 == offsets2
   Index ixfun1 is1 == Index ixfun2 is2 =
-    ixfun1 == ixfun2 && is1 == is2
+    ixfun1 == ixfun2 && length is1 == length is2 && and (zipWith eqIndex is1 is2)
+    -- Two DimSlices are considered equal even if their slice lengths
+    -- are not equal, as this allows us to get rid of reshapes.
+    where eqIndex (DimFix i) (DimFix j) = i == j
+          eqIndex (DimSlice i _) (DimSlice j _) = i == j
+          eqIndex _ _ = False
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
     ixfun1 == ixfun2 && length shape1 == length shape2
   _ == _ = False
@@ -98,7 +105,7 @@ instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num) wh
   substituteNames subst (Rotate fun offsets) =
     Rotate (substituteNames subst fun) offsets
   substituteNames subst (Index fun is) =
-    Index
+    slice
     (substituteNames subst fun)
     (map (substituteNames subst) is)
   substituteNames subst (Reshape fun newshape) =
@@ -142,8 +149,11 @@ index (Rotate fun offsets) is element_size =
   index fun (zipWith mod (zipWith (+) is offsets) dims) element_size
   where dims = shape fun
 
-index (Index fun is1) is2 element_size =
-  index fun (is1 ++ is2) element_size
+index (Index fun js) is element_size =
+  index fun (adjust js is) element_size
+  where adjust (DimFix j:js') is' = j : adjust js' is'
+        adjust (DimSlice j _:js') (i:is') = j + i : adjust js' is'
+        adjust _ _ = []
 
 index (Reshape fun newshape) is element_size =
   let new_indices = reshapeIndex (shape fun) (newDims newshape) is
@@ -197,35 +207,25 @@ reshape ixfun newshape
       ixfun
   | rank ixfun == length newshape,
     Just _ <- shapeCoercion newshape =
-      case ixfun of
-        Permute ixfun' perm ->
-          let ixfun'' = reshape ixfun' $
-                rearrangeShape (rearrangeInverse perm) newshape
-          in Permute ixfun'' perm
-
-        Offset ixfun' offset ->
-          Offset (reshape ixfun' newshape) offset
-
-        Index ixfun' is ->
-          let unchanged_shape =
-                map DimCoercion $ take (length is) $ shape ixfun'
-              newshape' = unchanged_shape ++ newshape
-          in applyInd (reshape ixfun' newshape') is
-
-        Direct _ ->
-          Direct $ map newDim newshape
-
-        _ ->
-          Reshape ixfun newshape
+      ixfun
   | otherwise =
       Reshape ixfun newshape
 
-applyInd :: IntegralCond num =>
-            IxFun num -> Indices num -> IxFun num
-applyInd (Index ixfun mis) is =
-  Index ixfun $ mis ++ is
-applyInd ixfun [] = ixfun
-applyInd ixfun is = Index ixfun is
+slice :: (Eq num, IntegralCond num) =>
+         IxFun num -> Slice num -> IxFun num
+slice ixfun is
+  -- Avoid identity slicing.
+  | is == map (DimSlice 0) (shape ixfun) = ixfun
+slice (Index ixfun mis) is =
+  Index ixfun $ reslice mis is
+  where reslice mis' [] = mis'
+        reslice (DimFix j:mis') is' =
+          DimFix j : reslice mis' is'
+        reslice (_:mis') (i:is') =
+          i : reslice mis' is'
+        reslice _ _ = error "IndexFunction slice: invalid arguments"
+slice ixfun [] = ixfun
+slice ixfun is = Index ixfun is
 
 rank :: IntegralCond num =>
         IxFun num -> Int
@@ -241,8 +241,8 @@ shape (Rotate ixfun _) =
   shape ixfun
 shape (Offset ixfun _) =
   shape ixfun
-shape (Index ixfun indices) =
-  drop (length indices) $ shape ixfun
+shape (Index _ how) =
+  sliceDims how
 shape (Reshape _ dims) =
   map newDim dims
 shape (Stride ixfun _) =
@@ -279,13 +279,13 @@ rebase new_base (Permute ixfun perm) =
 rebase new_base (Rotate ixfun offsets) =
   rotate (rebase new_base ixfun) offsets
 rebase new_base (Index ixfun is) =
-  applyInd (rebase new_base ixfun) is
+  slice (rebase new_base ixfun) is
 rebase new_base (Reshape ixfun new_shape) =
   reshape (rebase new_base ixfun) new_shape
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.
-linearWithOffset :: IntegralCond num =>
+linearWithOffset :: (Eq num, IntegralCond num) =>
                     IxFun num -> num -> Maybe num
 linearWithOffset (Direct _) _ =
   Just 0
@@ -298,13 +298,20 @@ linearWithOffset (Offset ixfun n) element_size = do
 linearWithOffset (Reshape ixfun _) element_size =
  linearWithOffset ixfun element_size
 linearWithOffset (Index ixfun is) element_size = do
+  is' <- fixingOuter is inner_shape
   inner_offset <- linearWithOffset ixfun element_size
   let slices = take m $ drop 1 $ sliceSizes $ shape ixfun
-  return $ inner_offset + sum (zipWith (*) slices is) * element_size
+  return $ inner_offset + sum (zipWith (*) slices is') * element_size
   where m = length is
+        inner_shape = shape ixfun
+        fixingOuter (DimFix i:is') (d:ds) = (i:) <$> fixingOuter is' ds
+        fixingOuter is' ds | is' == map (DimSlice 0) ds = Just []
+        fixingOuter _ _ = Nothing
+        isIndex (DimFix i) = Just i
+        isIndex _            = Nothing
 linearWithOffset _ _ = Nothing
 
-rearrangeWithOffset :: IntegralCond num =>
+rearrangeWithOffset :: (Eq num, IntegralCond num) =>
                        IxFun num -> num -> Maybe (num, [(Int,num)])
 rearrangeWithOffset (Reshape ixfun _) element_size =
   rearrangeWithOffset ixfun element_size

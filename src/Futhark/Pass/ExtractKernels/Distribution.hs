@@ -447,7 +447,7 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
         removeIdentityMappingGeneral bound_in_nesting pat res
   in (pat', res', identity_map, expand_target)
 
-tryDistribute :: (MonadFreshNames m, HasScope Kernels m, MonadLogger m) =>
+tryDistribute :: (MonadFreshNames m, LocalScope Kernels m, MonadLogger m) =>
                  Nestings -> Targets -> [Binding InKernel]
               -> m (Maybe (Targets, [Binding Kernels]))
 tryDistribute _ targets [] =
@@ -457,7 +457,9 @@ tryDistribute nest targets stms =
   createKernelNest nest dist_body >>=
   \case
     Just (targets', distributed) -> do
-      (w_bnds, kernel_bnd) <- constructKernel distributed inner_body
+      let targets_scope = mconcat $ map (scopeOf . fst) $ uncurry (:) targets'
+      (w_bnds, kernel_bnd) <- localScope targets_scope $
+        constructKernel distributed inner_body
       distributed' <- renameBinding kernel_bnd
       logMsg $ "distributing\n" ++
         unlines (map pretty stms) ++

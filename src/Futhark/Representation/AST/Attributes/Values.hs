@@ -6,15 +6,16 @@ module Futhark.Representation.AST.Attributes.Values
          valueType
        , valueShape
 
-         -- * Rearranging
+         -- * Frobbing arrays
        , permuteArray
        , rotateArray
        , concatArrays
        , splitArray
+       , flatSlice
        )
        where
 
-import Data.Array
+import Data.Array hiding (indices)
 import Data.List
 
 import Prelude
@@ -120,3 +121,20 @@ split i ss (d:ds) xs =
               (splits2, _) = unzip splits_and_shapes2
           in zip (zipWith (++) splits1 splits2) shapes1
 split _ _ ds xs = [(xs, ds)]
+
+-- | The row-major flat indices of the given slice in an array of the
+-- given shape.
+flatSlice :: Slice Int -> [Int] -> [Int]
+flatSlice slice shape = indices slice shape [0..product shape-1]
+
+indices :: Slice Int -> [Int] -> [a] -> [a]
+indices (DimFix i:is) (_:ds) xs =
+  let rows = chunk (product ds) xs
+  in case drop i rows of
+       [] -> error "Values indices: out of bounds"
+       xs':_ -> indices is ds xs'
+indices (DimSlice i n:is) (_:ds) xs =
+  let rows = chunk (product ds) xs
+      sliced_rows = take n $ drop i rows
+  in concatMap (indices is ds) sliced_rows
+indices _ _ xs = xs

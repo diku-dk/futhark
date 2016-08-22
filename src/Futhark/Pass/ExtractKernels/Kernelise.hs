@@ -123,9 +123,11 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
   arr_params_chunked <- forM arr_params $ \arr_param ->
     newParam (baseString (paramName arr_param) <> "_chunked") $
     paramType arr_param `arrayOfRow` Var dummy_chunk_size
-  let index_bnds = do (p, arr) <- zip arr_params $ map paramName arr_params_chunked
-                      return $ mkLet' [] [paramIdent p] $
-                        PrimOp $ Index cs arr [constant (0::Int32)]
+  let index_bnds = do
+        (p, arr, arr_t) <- zip3 arr_params (map paramName arr_params_chunked)
+                           (map paramType arr_params_chunked)
+        return $ mkLet' [] [paramIdent p] $
+          PrimOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
 
   redomap_kbody <- transformBody $ index_bnds `insertBindings` redomap_loop
 
@@ -174,12 +176,15 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
       outarr_param_new <- newParam' (<>"_new") outarr_param
       return (outarr_param_new,
               mkLet [] [(paramIdent outarr_param_new,
-                         BindInPlace [] (paramName outarr_param) [Var i])] $
+                         BindInPlace [] (paramName outarr_param) $
+                         fullSlice (paramType outarr_param) [DimFix $ Var i])] $
               PrimOp $ SubExp se)
 
-  let index_stms = do (p, arr) <- zip params $ map paramName params_chunked
-                      return $ mkLet' [] [paramIdent p] $
-                        PrimOp $ Index cs arr [constant (0::Int32)]
+  let index_stms = do
+        (p, arr, arr_t) <- zip3 params (map paramName params_chunked) $
+                           map paramType params_chunked
+        return $ mkLet' [] [paramIdent p] $
+          PrimOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
       kbody' = Out.Body () (index_stms++kstms++write_elems) $
                map (Var . paramName) outarr_params_new
 

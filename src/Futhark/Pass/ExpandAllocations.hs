@@ -181,7 +181,9 @@ expandedAllocations num_threads thread_index thread_allocs = do
           let perm = [length old_shape, 0] ++ [1..length old_shape-1]
               root_ixfun = IxFun.iota (old_shape ++ [SE.intSubExpToScalExp num_threads])
               permuted_ixfun = IxFun.permute root_ixfun perm
-              offset_ixfun = IxFun.applyInd permuted_ixfun [SE.Id thread_index int32]
+              offset_ixfun = IxFun.slice permuted_ixfun $
+                             fullSliceNum (IxFun.shape permuted_ixfun)
+                             [DimFix $ SE.Id thread_index int32]
           in offset_ixfun
 
 data RebaseMap = RebaseMap {

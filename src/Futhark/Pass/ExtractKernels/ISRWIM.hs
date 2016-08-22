@@ -75,8 +75,12 @@ irwim res_pat cs w comm red_fun red_input
       arrs' <- transposedArrays arrs
       -- FIXME?  Can we reasonably assume that the accumulator is a
       -- replicate?  We also assume that it is non-empty.
-      let indexAcc (Var v) = letSubExp "acc" $ PrimOp $ Index [] v [intConst Int32 0]
-          indexAcc Constant{} = fail "irwim: array accumulator is a constant."
+      let indexAcc (Var v) = do
+            v_t <- lookupType v
+            letSubExp "acc" $ PrimOp $ Index [] v $
+              fullSlice v_t [DimFix $ intConst Int32 0]
+          indexAcc Constant{} =
+            fail "irwim: array accumulator is a constant."
       accs' <- mapM indexAcc accs
 
       let (_red_acc_params, red_elem_params) =
