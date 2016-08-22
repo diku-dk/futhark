@@ -65,8 +65,8 @@ instance Pretty Commutativity where
 
 instance Pretty Value where
   ppr (PrimVal bv) = ppr bv
-  ppr (ArrayVal a t shape)
-    | null $ elems a = text "empty" <> parens (ppr row_t)
+  ppr (ArrayVal _ t shape)
+    | product shape == 0 = text "empty" <> parens (ppr row_t)
     where row_t = Array t (Rank $ length shape - 1) NoUniqueness
   ppr (ArrayVal a t (_:rowshape@(_:_))) =
     brackets $ commastack

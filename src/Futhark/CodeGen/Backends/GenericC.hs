@@ -474,7 +474,7 @@ printArrayStm mem bt (dim:shape) = do
       bt'  = primTypeToCType bt
   printelem <- printArrayStm (var v) bt shape
   return [C.cstm|{
-               if ($exp:dim' == 0) {
+               if ($exp:shape' == 0) {
                    printf("empty(%s)", $exp:(ppArrayType bt (length shape)));
                } else {
                    int $id:i;

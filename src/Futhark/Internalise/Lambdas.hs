@@ -75,7 +75,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
         index0 arg = do
           arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
           arg_t <- lookupType arg'
-          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' $ fullSlice arg_t [DimFix zero]
+          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' $ fullSlice arg_t [I.DimFix zero]
 
 internaliseFoldLambda :: InternaliseLambda
                       -> (InternaliseM Certificates -> InternaliseM Certificates)

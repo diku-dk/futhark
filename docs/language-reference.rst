@@ -305,6 +305,14 @@ be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
 array is returned.
 
+``a[i:j]``
+~~~~~~~~
+
+Return a slice of the array ``a`` from index ``i`` to ``j``, the
+latter inclusive and the latter exclusive.  Slicing of multiple
+dimensions can be done by separating with commas, and may be
+intermixed freely with indexing.  It is an error if ``j < n``.
+
 ``e.i``
 ~~~~~~~
 

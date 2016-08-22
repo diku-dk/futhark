@@ -653,8 +653,8 @@ transformSOAC pat (Write cs len lam ivs as) = do
         return $ resultBody [Var res]
 
       in_bounds_branch <- runBodyBinder $ do
-        res <- letInPlace "write_out_inside_bounds" cs (identName arrayOut) [indexCur] $
-          PrimOp $ SubExp valueCur
+        res <- letInPlace "write_out_inside_bounds" cs (identName arrayOut)
+          (fullSlice (identType arrayOut) [DimFix indexCur]) $ PrimOp $ SubExp valueCur
         return $ resultBody [Var res]
 
       letExp "write_out"
@@ -733,7 +733,9 @@ letwith :: Transformer m =>
 letwith cs ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
-  let update k v = letInPlace "lw_dest" cs k [i'] $ PrimOp $ SubExp v
+  let update k v = do
+        k_t <- lookupType k
+        letInPlace "lw_dest" cs k (fullSlice k_t [DimFix i']) $ PrimOp $ SubExp v
   zipWithM update ks vs'
 
 pexp :: Applicative f => SubExp -> f (AST.Exp lore)

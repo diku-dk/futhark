@@ -84,12 +84,11 @@ letExp desc e = do
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
-              String -> Certificates -> VName -> [SubExp] -> Exp (Lore m)
+              String -> Certificates -> VName -> Slice SubExp -> Exp (Lore m)
            -> m VName
-letInPlace desc cs src is e = do
+letInPlace desc cs src slice e = do
   v <- newVName desc
-  src_t <- lookupType src
-  idents <- letBindNames [(v,BindInPlace cs src $ fullSlice src_t (map DimFix is))] e
+  idents <- letBindNames [(v,BindInPlace cs src slice)] e
   case idents of
     [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e

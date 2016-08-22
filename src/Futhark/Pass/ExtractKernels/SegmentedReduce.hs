@@ -50,7 +50,8 @@ regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps = d
     mapM_ addBinding =<< blockedReduction red_pat cs segment_size comm lam lam nes arrs
 
     loop_vals' <- forM (zip loop_vals $ patternValueNames red_pat) $ \(loop_param, red_out) ->
-      letInPlace (baseString (paramName loop_param)) [] (paramName loop_param) [Var i] $
+      letInPlace (baseString (paramName loop_param)) [] (paramName loop_param)
+      (fullSlice (paramType loop_param) [DimFix $ Var i]) $
       PrimOp $ SubExp $ Var red_out
 
     return $ resultBody $ map Var loop_vals'
