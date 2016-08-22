@@ -51,6 +51,8 @@ module Futhark.Representation.AST.Syntax.Core
 import Control.Applicative
 import Control.Monad.State
 import Data.Array
+import Data.Foldable hiding (and)
+import Data.Traversable hiding (mapM)
 import Data.Hashable
 import Data.Maybe
 import Data.Monoid

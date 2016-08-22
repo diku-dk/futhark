@@ -21,6 +21,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        )
        where
 
+import Control.Applicative
 import Data.Maybe
 import Data.Monoid
 import Data.List
