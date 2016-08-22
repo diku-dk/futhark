@@ -32,7 +32,7 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax
-  (DimChange(..), ShapeChange, DimIndex(..), Slice, sliceDims)
+  (ShapeChange, DimIndex(..), Slice, sliceDims)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -305,11 +305,9 @@ linearWithOffset (Index ixfun is) element_size = do
   return $ inner_offset + sum (zipWith (*) slices is') * element_size
   where m = length is
         inner_shape = shape ixfun
-        fixingOuter (DimFix i:is') (d:ds) = (i:) <$> fixingOuter is' ds
+        fixingOuter (DimFix i:is') (_:ds) = (i:) <$> fixingOuter is' ds
         fixingOuter is' ds | is' == map (DimSlice 0) ds = Just []
         fixingOuter _ _ = Nothing
-        isIndex (DimFix i) = Just i
-        isIndex _            = Nothing
 linearWithOffset _ _ = Nothing
 
 rearrangeWithOffset :: (Eq num, IntegralCond num) =>
