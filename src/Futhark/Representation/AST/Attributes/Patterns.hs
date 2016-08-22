@@ -33,7 +33,7 @@ module Futhark.Representation.AST.Attributes.Patterns
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
-  (stripArray, Typed(..), DeclTyped(..))
+  (elemType, arrayOfShape, Typed(..), DeclTyped(..))
 
 -- | The 'Type' of a parameter.
 paramType :: Typed attr => ParamT attr -> Type
@@ -65,8 +65,8 @@ patElemRequires (PatElem _ bindage attr) =
 bindageRequires :: Type -> Bindage -> Type
 bindageRequires t BindVar =
   t
-bindageRequires t (BindInPlace _ _ is) =
-  stripArray (length is) t
+bindageRequires t (BindInPlace _ _ slice) =
+  Prim (elemType t) `arrayOfShape` Shape (sliceDims slice)
 
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr

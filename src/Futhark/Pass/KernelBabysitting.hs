@@ -7,6 +7,7 @@ module Futhark.Pass.KernelBabysitting
        )
        where
 
+import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
@@ -187,7 +188,7 @@ transformKernelBody num_threads cs (KernelBody () stms res) =
           | otherwise =
               rearrangeScanReduceInput cs num_threads padding w w_padded elems_per_thread arr
 
-type ArrayIndexTransform m = VName -> [SubExp] -> m (Maybe (VName, [SubExp]))
+type ArrayIndexTransform m = VName -> Slice SubExp -> m (Maybe (VName, Slice SubExp))
 
 traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                   ArrayIndexTransform f
@@ -227,25 +228,26 @@ traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
 
 
 -- Not a hashmap, as SubExp is not hashable.
-type Replacements = M.Map (VName, [SubExp]) VName
+type Replacements = M.Map (VName, Slice SubExp) VName
 
 ensureCoalescedAccess :: MonadBinder m =>
                          ExpMap
                       -> [VName]
                       -> (VName -> Maybe Type)
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
-  seen <- gets $ M.lookup (arr, is)
+ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
+  seen <- gets $ M.lookup (arr, slice)
 
   case (seen, boundOutside arr) of
     -- Already took care of this case elsewhere.
     (Just arr', _) ->
-      pure $ Just (arr', is)
+      pure $ Just (arr', slice)
 
     (Nothing, Just t)
       -- We are fully indexing the array with thread IDs, but the
       -- indices are in a permuted order.
-      | length is == arrayRank t,
+      | Just is <- sliceIndices slice,
+        length is == arrayRank t,
         is' <- coalescedIndexes (map Var thread_gids) is,
         Just perm <- is' `isPermutationOf` is,
         perm /= [0..length perm-1] ->
@@ -254,7 +256,8 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, so we assume (HEURISTIC!)
       -- that the remaining dimensions will be traversed sequentially.
-      | length is < arrayRank t,
+      | (is, rem_slice) <- splitSlice slice,
+        not $ null rem_slice,
         is /= map Var (take (length is) thread_gids) ||
          length is == length thread_gids -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
@@ -269,8 +272,13 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
     _ -> return Nothing
 
   where replace arr' = do
-          modify $ M.insert (arr, is) arr'
-          return $ Just (arr', is)
+          modify $ M.insert (arr, slice) arr'
+          return $ Just (arr', slice)
+
+splitSlice :: Slice SubExp -> ([SubExp], Slice SubExp)
+splitSlice [] = ([], [])
+splitSlice (DimFix i:is) = first (i:) $ splitSlice is
+splitSlice is = ([], is)
 
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: (Eq a, Show a) => [a] -> [a] -> [a]

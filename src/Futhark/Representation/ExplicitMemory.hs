@@ -109,6 +109,7 @@ import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import Futhark.Construct (fullSliceNum)
 import Futhark.Optimise.Simplifier.Lore
 import Futhark.Representation.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
@@ -908,16 +909,16 @@ expReturns (PrimOp (Split _ i sizeexps v)) = do
                        perm_inv)
            newShapes offsets
 
-expReturns (PrimOp (Index _ v is)) = do
-  (et, shape, mem, ixfun) <- arrayVarReturns v
-  case stripDims (length is) shape of
-    Shape []     ->
+expReturns (PrimOp (Index _ v slice)) = do
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  case sliceDims slice of
+    []     ->
       return [ReturnsScalar et]
-    Shape dims ->
+    dims ->
       return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
              Just $ ReturnsInBlock mem $
-             IxFun.applyInd ixfun
-             (map (`SE.subExpToScalExp` int32) is)]
+             IxFun.slice ixfun
+             (map (fmap (`SE.subExpToScalExp` int32)) slice)]
 
 expReturns (PrimOp op) =
   extReturns . staticShapes <$> primOpType op
@@ -988,21 +989,19 @@ instance OpReturns InKernel where
       return $ ReturnsArray bt ext_shape NoUniqueness $ Just $ ReturnsInBlock mem $
         case o of
           InOrder ->
-            let newshape = [DimNew num_threads', DimNew elems_per_thread']
-            in IxFun.applyInd
-               (IxFun.reshape ixfun $
-                 newshape ++
-                 map (DimNew . SE.intSubExpToScalExp) row_dims)
-               [SE.intSubExpToScalExp thread_id]
+            let newshape = [DimNew num_threads', DimNew elems_per_thread'] ++
+                           map (DimNew . SE.intSubExpToScalExp) row_dims
+            in IxFun.slice (IxFun.reshape ixfun newshape) $
+               fullSliceNum (newDims newshape) [DimFix $ SE.intSubExpToScalExp thread_id]
           Disorder ->
-            let newshape = [DimNew elems_per_thread', DimNew num_threads']
+            let newshape = [DimNew elems_per_thread', DimNew num_threads'] ++
+                           map (DimNew . SE.intSubExpToScalExp) row_dims
                 perm = [1,0] ++ [2..IxFun.rank ixfun]
-            in IxFun.applyInd
-               (IxFun.permute (IxFun.reshape ixfun $
-                               newshape ++
-                               map (DimNew . SE.intSubExpToScalExp) row_dims)
-                 perm)
-               [SE.intSubExpToScalExp thread_id]
+            in IxFun.slice
+               (IxFun.permute (IxFun.reshape ixfun newshape) perm) $
+               fullSliceNum (rearrangeShape perm $ newDims newshape)
+               [DimFix $ SE.intSubExpToScalExp thread_id]
+
   opReturns (Inner (GroupStream _ _ lam _ _)) =
     forM (groupStreamAccParams lam) $ \param ->
       case paramAttr param of

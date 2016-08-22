@@ -585,8 +585,9 @@ soacToStream soac = do
                        (constant (1::Int32))
       -- 3. let lasteel_ids = scan0_ids[outerszm1id]
           lelbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ PrimOp $
-                                           Index cs (identName arrid)
-                                           [Futhark.Var $ identName outszm1id]
+                                           Index cs (identName arrid) $
+                                           fullSlice (identType arrid)
+                                           [DimFix $ Futhark.Var $ identName outszm1id]
                            ) lastel_ids scan0_ids
       -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
       maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) lam

@@ -25,7 +25,7 @@ import Futhark.Construct
 import Futhark.MonadFreshNames
 import Futhark.Util
 
-type IndexSubstitution attr = (Certificates, VName, attr, [SubExp])
+type IndexSubstitution attr = (Certificates, VName, attr, Slice SubExp)
 type IndexSubstitutions attr = [(VName, IndexSubstitution attr)]
 
 typeEnvFromSubstitutions :: LetAttr lore ~ attr =>
@@ -73,7 +73,7 @@ substituteIndicesInPattern substs pat = do
           | Just (cs2, src2, src2attr, is2) <- lookup src substs = do
               let attr' = attr `setType` typeOf src2attr
               return (update src name (cs2, name, attr', is2) substs',
-                      PatElem name (BindInPlace (cs++cs2) src2 (is2++is)) attr')
+                      PatElem name (BindInPlace (cs++cs2) src2 $ is2++is) attr')
         sub substs' patElem =
           return (substs', patElem)
 

@@ -120,7 +120,8 @@ checkForUpdates pat res = foldM checkForUpdate res $ patternElements pat
   where checkForUpdate res' (PatElem _ BindVar _) =
           return res'
         checkForUpdate res' (PatElem _ (BindInPlace _ src is) _) = do
-          res'' <- foldM fusionGatherSubExp res' (Var src : is)
+          res'' <- foldM addVarToInfusible res' $
+                   src : HS.toList (mconcat $ map freeIn is)
           let aliases = [src]
               inspectKer k =
                 let inplace' = foldl (flip HS.insert) (inplace k) aliases
@@ -639,7 +640,7 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   where merge = ctx ++ val
 
 fusionGatherExp fres (PrimOp (Index _ idd inds)) =
-  foldM fusionGatherSubExp fres (Var idd : inds)
+  foldM addVarToInfusible fres $ idd : HS.toList (mconcat $ map freeIn inds)
 
 fusionGatherExp fres (If cond e_then e_else _) = do
     let null_res = mkFreshFusionRes

@@ -27,7 +27,7 @@ data DesiredUpdate attr =
                 , updateType :: attr -- ^ Type of result.
                 , updateCertificates :: Certificates
                 , updateSource :: VName
-                , updateIndices :: [SubExp]
+                , updateIndices :: Slice SubExp
                 , updateValue :: VName
                 }
   deriving (Show)

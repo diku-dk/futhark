@@ -673,6 +673,10 @@ instance Simplifiable (TypeBase Shape u) where
   simplify (Prim bt) =
     return $ Prim bt
 
+instance Simplifiable d => Simplifiable (DimIndex d) where
+  simplify (DimFix i) = DimFix <$> simplify i
+  simplify (DimSlice i n) = DimSlice <$> simplify i <*> simplify n
+
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m)
                -> Maybe [SubExp] -> [Maybe VName]

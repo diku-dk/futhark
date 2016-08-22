@@ -37,6 +37,11 @@ module Futhark.Representation.AST.Syntax.Core
          , ParamT (..)
          , Param
          , Bindage (..)
+         , DimIndex (..)
+         , Slice
+         , dimFix
+         , sliceIndices
+         , sliceDims
          , PatElemT (..)
 
          -- * Miscellaneous
@@ -47,6 +52,7 @@ import Control.Applicative
 import Control.Monad.State
 import Data.Array
 import Data.Hashable
+import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
@@ -225,10 +231,52 @@ type Param = ParamT
 instance Functor ParamT where
   fmap f (Param name attr) = Param name (f attr)
 
+
+-- | How to index a single dimension of an array.
+data DimIndex d = DimFix
+                  d -- ^ Fix index in this dimension.
+                | DimSlice d d
+                  -- ^ A slice starting from there and continuing for
+                  -- this many elements.
+                  deriving (Eq, Ord, Show)
+
+instance Functor DimIndex where
+  fmap f (DimFix i) = DimFix $ f i
+  fmap f (DimSlice i j) = DimSlice (f i) (f j)
+
+instance Foldable DimIndex where
+  foldMap f (DimFix d) = f d
+  foldMap f (DimSlice i j) = f i <> f j
+
+instance Traversable DimIndex where
+  traverse f (DimFix d) = DimFix <$> f d
+  traverse f (DimSlice i j) = DimSlice <$> f i <*> f j
+
+-- | A list of 'DimFix's, indicating how an array should be sliced.
+-- Whenever a function accepts a 'Slice', that slice should be total,
+-- i.e, cover all dimensions of the array.  Deviators should be
+-- indicated by taking a list of 'DimIndex'es instead.
+type Slice d = [DimIndex d]
+
+-- | If the argument is a 'DimFix', return its component.
+dimFix :: DimIndex d -> Maybe d
+dimFix (DimFix d) = Just d
+dimFix _ = Nothing
+
+-- | If the slice is all 'DimFix's, return the components.
+sliceIndices :: Slice d -> Maybe [d]
+sliceIndices = mapM dimFix
+
+-- | The dimensions of the array produced by this slice.
+sliceDims :: Slice d -> [d]
+sliceDims = mapMaybe dimSlice
+  where dimSlice (DimSlice _ d) = Just d
+        dimSlice DimFix{}       = Nothing
+
 -- | How a name in a let-binding is bound - either as a plain
 -- variable, or in the form of an in-place update.
 data Bindage = BindVar -- ^ Bind as normal.
-             | BindInPlace Certificates VName [SubExp]
+             | BindInPlace Certificates VName (Slice SubExp)
                -- ^ Perform an in-place update, in which the value
                -- being bound is inserted at the given index in the
                -- array referenced by the 'VName'.  Note that the

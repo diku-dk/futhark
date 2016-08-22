@@ -45,7 +45,7 @@ regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps = d
 
     arrs <- forM segmented_arrs $ \segmented_arr ->
       letExp (baseString segmented_arr ++ "_indexed") $
-      PrimOp $ Index [] segmented_arr [Var i]
+      PrimOp $ Index [] segmented_arr [DimFix $ Var i]
 
     mapM_ addBinding =<< blockedReduction red_pat cs segment_size comm lam lam nes arrs
 
@@ -98,8 +98,9 @@ regularSegmentedReduceAsScan segment_size num_segments nest_sizes flat_pat pat c
                      (map (SE.intSubExpToScalExp . Var) is)
         offset = (segment_id + 1) * SE.intSubExpToScalExp segment_size - 1
     j <- letSubExp "j" =<< SE.fromScalExp offset
-    vals <- forM (patternValueNames flat_pat) $ \arr ->
-      letSubExp "v" $ PrimOp $ Index [] arr [j]
+    vals <- forM (patternValueIdents flat_pat) $ \arr ->
+      letSubExp "v" $ PrimOp $ Index [] (identName arr) $
+      fullSlice (identType arr) [DimFix j]
     return $ resultBody vals
 
   (mapk_bnds, mapk) <- mapKernelFromBody [] num_segments (zip is nest_sizes) [] acct body

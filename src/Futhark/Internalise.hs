@@ -128,8 +128,10 @@ internaliseExp desc (E.Index e idxs loc) = do
   idxs' <- mapM (internaliseExp1 "i") idxs
   vs <- internaliseExpToVars "indexed" e
   csidx' <- boundsChecks loc vs idxs'
-  let index v = I.PrimOp $ I.Index csidx' v idxs'
-  letSubExps desc (map index vs)
+  let index v = do
+        v_t <- lookupType v
+        return $ I.PrimOp $ I.Index csidx' v $ fullSlice v_t $ map DimFix idxs'
+  letSubExps desc =<< mapM index vs
 
 internaliseExp desc (E.TupleIndex e i (Info rt) _) =
   take n . drop i' <$> internaliseExp desc e

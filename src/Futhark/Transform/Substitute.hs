@@ -171,8 +171,10 @@ instance Substitute ExtRetType where
     ExtRetType $ map (substituteNames substs) ts
 
 instance Substitute d => Substitute (DimChange d) where
-  substituteNames substs =
-    fmap $ substituteNames substs
+  substituteNames substs = fmap $ substituteNames substs
+
+instance Substitute d => Substitute (DimIndex d) where
+  substituteNames substs = fmap $ substituteNames substs
 
 -- | Lores in which all annotations support name
 -- substitution.
