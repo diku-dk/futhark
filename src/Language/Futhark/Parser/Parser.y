@@ -581,7 +581,15 @@ LoopForm : for Id '<' Exp
            { For FromDownTo (zeroExpression (srclocOf $1)) $4 $2 }
          | while Exp      { While $2 }
 
-Index : '[' Exps ']'                  { $2 }
+Index :: { [UncheckedDimIndex] }
+     : '[' DimIndices ']'                  { $2 }
+
+DimIndices : DimIndex ',' DimIndices { $1 : $3 }
+           | DimIndex          { [$1] }
+
+DimIndex :: { UncheckedDimIndex }
+         : Exp { DimFix $1 }
+         | Exp ':' Exp { DimSlice $1 $3 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }

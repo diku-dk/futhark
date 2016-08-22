@@ -179,7 +179,7 @@ renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
 renameExp (LetWith dest src idxs ve body loc) = do
   src' <- repl src
-  idxs' <- mapM renameExp idxs
+  idxs' <- mapM renameDimIndex idxs
   ve' <- renameExp ve
   bind [dest] $ do
     dest' <- repl dest
@@ -328,6 +328,12 @@ renamePattern (TuplePattern pats pos) = do
   return $ TuplePattern pats' pos
 renamePattern (Wildcard NoInfo loc) =
   pure $ Wildcard NoInfo loc
+
+renameDimIndex :: (Eq f, Hashable f, Eq t, Hashable t) =>
+                  DimIndexBase NoInfo f
+               -> RenameM f t (DimIndexBase NoInfo t)
+renameDimIndex (DimFix i) = DimFix <$> renameExp i
+renameDimIndex (DimSlice i j) = DimSlice <$> renameExp i <*> renameExp j
 
 patternNames :: PatternBase ty f -> [IdentBase ty f]
 patternNames (Id ident) = [ident]

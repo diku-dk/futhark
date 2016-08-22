@@ -84,6 +84,7 @@ module Language.Futhark.Attributes
   , UncheckedIdent
   , UncheckedTypeDecl
   , UncheckedUserTypeDecl
+  , UncheckedDimIndex
   , UncheckedExp
   , UncheckedLambda
   , UncheckedPattern
@@ -592,7 +593,9 @@ typeOf (Apply _ _ (Info t) _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
-  stripArray (length idx) (typeOf ident)
+  stripArray (length $ filter isFix idx) (typeOf ident)
+  where isFix DimFix{} = True
+        isFix _        = False
 typeOf (TupleIndex _ _ (Info t) _) = t
 typeOf (Iota _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
 typeOf (Shape _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
@@ -854,6 +857,9 @@ type UncheckedTypeDecl = TypeDeclBase NoInfo Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name
+
+-- | An index with no type annotations.
+type UncheckedDimIndex = DimIndexBase NoInfo Name
 
 -- | An expression with no type annotations.
 type UncheckedExp = ExpBase NoInfo Name
