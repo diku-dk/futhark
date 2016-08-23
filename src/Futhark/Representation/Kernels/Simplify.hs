@@ -18,13 +18,13 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.Either
-import Data.List hiding (any, all)
+import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
-import Prelude hiding (any, all)
+import Prelude
 
 import Futhark.Representation.Kernels
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
@@ -38,6 +38,7 @@ import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Rephrase (castBinding)
 
 simplifyKernels :: MonadFreshNames m => Prog Kernels -> m (Prog Kernels)
@@ -265,9 +266,8 @@ kernelRules = (std_td_rules <>
                [fuseScanIota
                , removeInvariantKernelResults
                ],
-               std_bu_rules)
+               std_bu_rules <> [distributeKernelResults])
   where (std_td_rules, std_bu_rules) = standardRules
-
 
 iotaParams :: ST.SymbolTable lore
            -> [ParamT attr]
@@ -408,6 +408,55 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
         checkForInvarianceResult _ =
           return True
 removeInvariantKernelResults _ _ = cannotSimplify
+
+-- Some kernel results can be moved outside the kernel, which can
+-- simplify further analysis.
+distributeKernelResults :: (LocalScope (Lore m) m, MonadBinder m,
+                            Lore m ~ Wise Kernels) =>
+                           BottomUpRule m
+distributeKernelResults (vtable, used)
+  (Let (Pattern [] kpes) attr
+    (Op (Kernel kcs kspace ts (KernelBody _ kstms kres)))) = do
+  -- Iterate through the bindings.  For each, we check whether it is
+  -- in kres and can be moved outside.  If so, we remove it from kres
+  -- and kpes and make it a binding outside.
+  (kpes', kres', kstms_rev) <- localScope (scopeOfKernelSpace kspace) $
+    foldM distribute (kpes, kres, []) kstms
+
+  guard $ kpes' /= kpes
+
+  addBinding $ Let (Pattern [] kpes') attr $
+    Op $ Kernel kcs kspace ts $ mkWiseKernelBody () (reverse kstms_rev) kres'
+  where
+    distribute (kpes', kres', kstms_rev) bnd
+      | Let (Pattern [] [pe]) _ (PrimOp (Index cs arr slice)) <- bnd,
+        kspace_slice <- map (DimFix . Var . fst) $ spaceDimensions kspace,
+        kspace_slice `isPrefixOf` slice,
+        remaining_slice <- drop (length kspace_slice) slice,
+        all (isJust . flip ST.lookup vtable) $ HS.toList $ freeIn remaining_slice,
+        Just (kpe, kpes'', kres'') <- isResult kpes' kres' pe = do
+          let outer_slice = map (DimSlice (constant (0::Int32)) . snd) $
+                            spaceDimensions kspace
+              index kpe' = letBind_ (Pattern [] [kpe']) $ PrimOp $ Index (kcs<>cs) arr $
+                           outer_slice <> remaining_slice
+          if patElemName kpe `UT.isConsumed` used
+            then do precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
+                    index kpe { patElemName = precopy }
+                    letBind_ (Pattern [] [kpe]) $ PrimOp $ Copy precopy
+            else index kpe
+          return (kpes'', kres'', kstms_rev)
+
+    distribute (kpes', kres', kstms_rev) bnd =
+      return (kpes', kres', bnd : kstms_rev)
+
+    isResult kpes' kres' pe =
+      case partition ((==pe_ret) . snd) $ zip kpes' kres' of
+        ([(kpe,_)], kpes_and_kres)
+          | (kpes'', kres'') <- unzip kpes_and_kres ->
+              Just (kpe, kpes'', kres'')
+        _ -> Nothing
+      where pe_ret = ThreadsReturn ThreadsInSpace $ Var $ patElemName pe
+distributeKernelResults _ _ = cannotSimplify
 
 inKernelRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
