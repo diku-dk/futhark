@@ -432,7 +432,8 @@ readInput decl@(Imp.ArrayValue _ bt dims) =
       reader' = Var $ readerElem bt
       bt' = Var $ compilePrimType bt
       stdin = Var "sys.stdin"
-  in Assign (Var $ extValueDeclName decl) $ simpleCall "read_array" [stdin, reader', rank', bt']
+  in Assign (Var $ extValueDeclName decl) $ simpleCall "read_array"
+     [stdin, reader', StringLiteral $ pretty bt, rank', bt']
 
 printPrimStm :: PyExp -> PrimType -> PyStmt
 printPrimStm val t =

@@ -132,8 +132,50 @@ static int read_array_elems(struct array_reader *reader, int dims) {
   return ret;
 }
 
+static int read_empty_array(const char *type_name, int64_t *shape, int64_t dims) {
+  char c;
+  if (scanf("empty") == EOF) {
+    return 1;
+  }
+
+  c = getchar();
+  if (c != '(') {
+    return 1;
+  }
+
+  for (int i = 0; i < dims-1; i++) {
+    c = getchar();
+    if (c != '[') {
+      return 1;
+    }
+    c = getchar();
+    if (c != ']') {
+      return 1;
+    }
+  }
+
+  int n = strlen(type_name);
+  for (int i = 0; i < n; i++) {
+    c = getchar();
+    if (c != type_name[i]) {
+      return 1;
+    }
+  }
+
+  if (getchar() != ')') {
+    return 1;
+  }
+
+  for (int i = 0; i < dims; i++) {
+    shape[i] = 0;
+  }
+
+  return 0;
+}
+
 static int read_array(int64_t elem_size, int (*elem_reader)(void*),
-               void **data, int64_t *shape, int64_t dims) {
+                      const char *type_name,
+                      void **data, int64_t *shape, int64_t dims) {
   int ret;
   struct array_reader reader;
   int64_t read_dims = 0;
@@ -149,6 +191,10 @@ static int read_array(int64_t elem_size, int (*elem_reader)(void*),
       }
       break;
     }
+  }
+
+  if (read_dims == 0) {
+    return read_empty_array(type_name, shape, dims);
   }
 
   if (read_dims != dims) {

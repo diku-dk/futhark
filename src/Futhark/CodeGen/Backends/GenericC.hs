@@ -637,7 +637,7 @@ readInput refcount memsizes known_sizes (ArrayValue name t shape)
       [C.cstm|{
         typename int64_t shape[$int:rank];
         if (read_array(sizeof($ty:t'),
-                       $id:f,
+                       $id:f, $string:(pretty t),
                        (void**)& $exp:dest,
                        shape,
                        $int:(length shape))
