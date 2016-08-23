@@ -902,7 +902,7 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
     bad $ TypeError pos $ "Source '" ++ pretty (baseName $ identName src) ++
     "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
-  case peelArray (length idxes) (unInfo $ identType src') of
+  case peelArray (length $ filter isFix idxes') (unInfo $ identType src') of
     Nothing -> bad $ IndexingError
                      (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
@@ -912,6 +912,8 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
         (scope, _) <- checkBinding (Id d) destt' mempty
         body' <- consuming src' $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
+  where isFix DimFix{} = True
+        isFix _        = False
 
 checkExp (Index e idxes pos) = do
   e' <- checkExp e
