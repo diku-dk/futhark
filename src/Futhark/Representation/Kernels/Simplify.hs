@@ -423,11 +423,14 @@ distributeKernelResults (vtable, used)
   (kpes', kres', kstms_rev) <- localScope (scopeOfKernelSpace kspace) $
     foldM distribute (kpes, kres, []) kstms
 
-  guard $ kpes' /= kpes
+  when (kpes' == kpes)
+    cannotSimplify
 
   addBinding $ Let (Pattern [] kpes') attr $
     Op $ Kernel kcs kspace ts $ mkWiseKernelBody () (reverse kstms_rev) kres'
   where
+    free_in_kstms = mconcat $ map freeInBinding kstms
+
     distribute (kpes', kres', kstms_rev) bnd
       | Let (Pattern [] [pe]) _ (PrimOp (Index cs arr slice)) <- bnd,
         kspace_slice <- map (DimFix . Var . fst) $ spaceDimensions kspace,
@@ -444,7 +447,10 @@ distributeKernelResults (vtable, used)
                     index kpe { patElemName = precopy }
                     letBind_ (Pattern [] [kpe]) $ PrimOp $ Copy precopy
             else index kpe
-          return (kpes'', kres'', kstms_rev)
+          return (kpes'', kres'',
+                  if patElemName pe `HS.member` free_in_kstms
+                  then bnd : kstms_rev
+                  else kstms_rev)
 
     distribute (kpes', kres', kstms_rev) bnd =
       return (kpes', kres', bnd : kstms_rev)
