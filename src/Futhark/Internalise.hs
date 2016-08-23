@@ -313,7 +313,8 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   (idxs', idx_cs) <- unzip <$> zipWithM (internaliseDimIndex loc) dims idxs
   let comb sname ve' = do
         sname_t <- lookupType sname
-        let rowtype = I.stripArray (length idxs) sname_t
+        let slice = fullSlice sname_t idxs'
+            rowtype = sname_t `setArrayDims` sliceDims slice
         ve'' <- ensureShape asserting loc rowtype "lw_val_correct_shape" ve'
         letInPlace "letwith_dst" (concat idx_cs) sname (fullSlice sname_t idxs') $
           PrimOp $ SubExp ve''
