@@ -326,7 +326,7 @@ typeCheckKernelExp (GroupStream w maxchunk lam accs arrs) = do
   TC.require [Prim int32] w
   TC.require [Prim int32] maxchunk
 
-  acc_args <- mapM (fmap TC.noArgAliases . TC.checkArg) accs
+  acc_args <- mapM TC.checkArg accs
   arr_args <- TC.checkSOACArrayArgs w arrs
 
   checkGroupStreamLambda acc_args arr_args

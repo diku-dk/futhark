@@ -487,7 +487,7 @@ typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
 
   let index_arg = (Prim int32, mempty)
   arrargs <- TC.checkSOACArrayArgs w arrs
-  accargs <- mapM TC.checkArg nes
+  accargs <- mapM (fmap TC.noArgAliases . TC.checkArg) nes
   TC.checkLambda foldfun $ index_arg : index_arg : accargs ++ arrargs
 
   TC.checkLambda fun $ index_arg : index_arg : accargs ++ accargs

@@ -302,8 +302,8 @@ instance Checkable lore =>
     where varType (name, attr) = Just (name, attr)
 
 runTypeM :: Env lore -> TypeM lore a
-         -> Either (TypeError lore) a
-runTypeM env (TypeM m) = fst <$> evalRWST m env ()
+         -> Either (TypeError lore) (a, Consumption)
+runTypeM env (TypeM m) = evalRWST m env ()
 
 bad :: ErrorCase lore -> TypeM lore a
 bad e = do
@@ -521,7 +521,7 @@ checkProg prog = do
                     , envContext = []
                     }
 
-  runTypeM typeenv $ do
+  fmap fst $ runTypeM typeenv $ do
     ftable <- buildFtable
     local (\env -> env { envFtable = ftable }) $
       mapM_ (noDataflow . checkFun) $ progFunctions prog'
@@ -643,7 +643,7 @@ subCheck m = do
   typeenv <- newEnv <$> ask
   case runTypeM typeenv m of
     Left err -> bad $ TypeError $ show err
-    Right x -> return x
+    Right (x, cons) -> tell cons >> return x
     where newEnv :: Env lore -> Env newlore
           newEnv (Env vtable ftable ctx) =
             Env (HM.map coerceVar vtable) ftable ctx
