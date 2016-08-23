@@ -228,6 +228,9 @@ instance FreeIn LoopForm where
 instance FreeIn d => FreeIn (DimChange d) where
   freeIn = Data.Foldable.foldMap freeIn
 
+instance FreeIn d => FreeIn (DimIndex d) where
+  freeIn = Data.Foldable.foldMap freeIn
+
 instance FreeIn attr => FreeIn (PatternT attr) where
   freeIn (Pattern context values) =
     mconcat $ map freeIn $ context ++ values

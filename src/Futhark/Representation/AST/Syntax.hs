@@ -178,9 +178,7 @@ data PrimOp lore
 
   -- Primitive array operations
 
-  | Index Certificates
-          VName
-          [SubExp]
+  | Index Certificates VName (Slice SubExp)
 
   -- ^ 3rd arg are (optional) certificates for bounds
   -- checking.  If given (even as an empty list), no

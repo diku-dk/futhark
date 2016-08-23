@@ -39,6 +39,7 @@ module Language.Futhark.Syntax
   , BinOp (..)
   , IdentBase (..)
   , ParamBase (..)
+  , DimIndexBase(..)
   , ExpBase(..)
   , LoopFormBase (..)
   , ForLoopDirection (..)
@@ -355,6 +356,11 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Geq
              deriving (Eq, Ord, Show, Enum, Bounded)
 
+-- | An indexing of a single dimension.
+data DimIndexBase f vn = DimFix (ExpBase f vn)
+                       | DimSlice (ExpBase f vn) (ExpBase f vn)
+deriving instance Showable f vn => Show (DimIndexBase f vn)
+
 -- | The Futhark expression language.
 --
 -- In a value of type @Exp tt vn@, all 'Type' values are kept as @tt@
@@ -398,11 +404,11 @@ data ExpBase f vn =
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
-                      [ExpBase f vn] (ExpBase f vn)
+                      [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
             | Index (ExpBase f vn)
-                    [ExpBase f vn]
+                    [DimIndexBase f vn]
                     SrcLoc
 
             | TupleIndex (ExpBase f vn) Int (f (CompTypeBase vn)) SrcLoc

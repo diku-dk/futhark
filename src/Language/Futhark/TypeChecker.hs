@@ -894,7 +894,7 @@ checkExp (LetPat pat e body pos) = do
 
 checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
   src' <- checkIdent src
-  idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
+  idxes' <- mapM checkDimIndex idxes
   let destt' = unInfo (identType src') `setAliases` HS.empty
       dest' = Ident dest (Info destt') destpos
 
@@ -902,7 +902,7 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
     bad $ TypeError pos $ "Source '" ++ pretty (baseName $ identName src) ++
     "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
-  case peelArray (length idxes) (unInfo $ identType src') of
+  case peelArray (length $ filter isFix idxes') (unInfo $ identType src') of
     Nothing -> bad $ IndexingError
                      (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
@@ -912,13 +912,15 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
         (scope, _) <- checkBinding (Id d) destt' mempty
         body' <- consuming src' $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
+  where isFix DimFix{} = True
+        isFix _        = False
 
 checkExp (Index e idxes pos) = do
   e' <- checkExp e
   let vt = typeOf e'
   when (arrayRank vt < length idxes) $
     bad $ IndexingError (arrayRank vt) (length idxes) pos
-  idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
+  idxes' <- mapM checkDimIndex idxes
   return $ Index e' idxes' pos
 
 checkExp (TupleIndex e i NoInfo loc) = do
@@ -1409,6 +1411,14 @@ checkPolyBinOp op tl e1 e2 pos = do
   e2' <- require tl =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info t') pos
+
+checkDimIndex :: DimIndexBase NoInfo VName -> TypeM DimIndex
+checkDimIndex (DimFix i) =
+  DimFix <$> (require [Prim $ Signed Int32] =<< checkExp i)
+checkDimIndex (DimSlice i j) =
+  DimSlice
+  <$> (require [Prim $ Signed Int32] =<< checkExp i)
+  <*> (require [Prim $ Signed Int32] =<< checkExp j)
 
 sequentially :: TypeM a -> (a -> Occurences -> TypeM b) -> TypeM b
 sequentially m1 m2 = do

@@ -28,7 +28,7 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
-import Futhark.Tools (partitionChunkedKernelLambdaParameters)
+import Futhark.Tools (partitionChunkedKernelLambdaParameters, fullSliceNum)
 import Futhark.Util (splitAt3)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralCond)
 
@@ -206,8 +206,8 @@ kernelCompiler
         ImpGen.Destination fold_x_targets <- ImpGen.destinationFromParams fold_x_params
 
         let indexMapTarget (ImpGen.ArrayDestination
-                              (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
-              let dest_loc' = ImpGen.sliceArray dest_loc [ImpGen.varIndex fold_lam_i]
+                            (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.sliceArray dest_loc [DimFix $ ImpGen.varIndex fold_lam_i]
               return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
                 Nothing : dest_dims
             indexMapTarget _ =
@@ -726,7 +726,7 @@ writeFinalResult is (ImpGen.ArrayDestination memdest _) acc_param
             ImpGen.ArrayElemDestination out_arr_mem bt space offset
         ds -> do
           let destloc = ImpGen.MemLocation out_arr_mem (drop 1 out_shape) $
-                        IxFun.applyInd ixfun $ map ImpGen.varIndex is
+                        IxFun.slice ixfun $ map (DimFix . ImpGen.varIndex) is
           return $
             ImpGen.ArrayDestination (ImpGen.CopyIntoMemory destloc) $
             map (const Nothing) ds
@@ -956,19 +956,23 @@ compileKernelExp _ dest (SplitSpace o w i max_is elems_per_thread)
         where comm = case o of Disorder -> Commutative
                                InOrder -> Noncommutative
 
-compileKernelExp constants dest (Combine cspace _ active body)
-  | Just dest' <- ImpGen.Destination <$> mapM index (ImpGen.valueDestinations dest) = do
+compileKernelExp constants dest (Combine cspace ts active body)
+  | Just dest' <- ImpGen.Destination <$> zipWithM index ts (ImpGen.valueDestinations dest) = do
       copy <- allThreads constants $ ImpGen.compileBody dest' body
       ImpGen.emit $ Imp.Op Imp.Barrier
       ImpGen.emit $ Imp.If (Imp.BinOp LogAnd (isActive cspace) $
                             ImpGen.compileSubExp active) copy mempty
       ImpGen.emit $ Imp.Op Imp.Barrier
-        where index (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
-                Just $ ImpGen.ArrayDestination
-                (ImpGen.CopyIntoMemory
-                  (ImpGen.sliceArray loc $ map (ImpGen.varIndex . fst) cspace))
-                shape
-              index _ = Nothing
+        where index t (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
+                let space_dims = map (ImpGen.varIndex . fst) cspace
+                    t_dims = map SE.intSubExpToScalExp $ arrayDims t
+                in Just $ ImpGen.ArrayDestination
+                   (ImpGen.CopyIntoMemory
+                     (ImpGen.sliceArray loc $
+                      fullSliceNum (space_dims++t_dims) $
+                      map (DimFix . ImpGen.varIndex . fst) cspace))
+                   shape
+              index _ _ = Nothing
 
 compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) = do
   skip_waves <- newVName "skip_waves"

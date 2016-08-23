@@ -474,7 +474,7 @@ printArrayStm mem bt (dim:shape) = do
       bt'  = primTypeToCType bt
   printelem <- printArrayStm (var v) bt shape
   return [C.cstm|{
-               if ($exp:dim' == 0) {
+               if ($exp:dim' * $exp:shape' == 0) {
                    printf("empty(%s)", $exp:(ppArrayType bt (length shape)));
                } else {
                    int $id:i;
@@ -637,7 +637,7 @@ readInput refcount memsizes known_sizes (ArrayValue name t shape)
       [C.cstm|{
         typename int64_t shape[$int:rank];
         if (read_array(sizeof($ty:t'),
-                       $id:f,
+                       $id:f, $string:(pretty t),
                        (void**)& $exp:dest,
                        shape,
                        $int:(length shape))

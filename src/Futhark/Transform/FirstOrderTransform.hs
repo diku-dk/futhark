@@ -124,7 +124,7 @@ transformSOAC pat (Map cs width fun arrs) = do
   loopbody <- runBodyBinder $
               localScope (HM.insert i IndexInfo $
                           scopeOfFParams $ map fst merge) $ do
-    x <- bindLambda fun (index cs arrs (Var i))
+    x <- bindLambda fun =<< index cs arrs (Var i)
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var dests
   letBind_ pat $ DoLoop [] merge (ForLoop i width) loopbody
@@ -135,9 +135,8 @@ transformSOAC pat (Reduce cs width _ fun args) = do
   arrexps' <- mapM (copyIfArray . Var) arrexps
   let merge = loopMerge (inarrs++acc) (arrexps'++initacc)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
-    acc' <- bindLambda fun
-            (map (PrimOp . SubExp . Var . identName) acc ++
-             index cs (map identName inarrs) (Var i))
+    acc' <- bindLambda fun . (map (PrimOp . SubExp . Var . identName) acc ++) =<<
+            index cs (map identName inarrs) (Var i)
     return $ resultBody (map (Var . identName) inarrs ++ acc')
   pat' <- discardPattern (map identType inarrs) pat
   letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
@@ -152,10 +151,10 @@ transformSOAC pat (Scan cs width fun args) = do
   let arr_names = map identName arr
       merge = loopMerge (acc++arr) (initacc++map Var initarr)
   loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
-    x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
-                              index cs arrexps (Var i))
+    x <- bindLambda fun . (map (PrimOp . SubExp . Var . identName) acc++) =<<
+         index cs arrexps (Var i)
     dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) x
-    irows <- letSubExps "row" $ index cs dests $ Var i
+    irows <- letSubExps "row" =<< index cs dests (Var i)
     rowcopies <- mapM copyIfArray irows
     return $ resultBody $ rowcopies ++ map Var dests
   pat' <- discardPattern (map identType acc) pat
@@ -180,12 +179,12 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
       merge = loopMerge (acc++arr++mapoutarrs) (initacc++map Var initarr ++ map Var initmaparrs)
   loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
     -- Bind function parameters to arguments.
-    x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
-                              index cs arrexps (Var i))
+    x <- bindLambda fun . (map (PrimOp . SubExp . Var . identName) acc ++) =<<
+         index cs arrexps (Var i)
     -- Set function destinations
     dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) (take (length accexps) x)
     mapdests <- letwith cs map_names (pexp (Var i)) $ map (PrimOp . SubExp) (drop (length accexps) x)
-    irows <- letSubExps "row" $ index cs dests $ Var i
+    irows <- letSubExps "row" =<< index cs dests (Var i)
     rowcopies <- mapM copyIfArray irows
     return $ resultBody $ rowcopies ++ map Var dests ++ map Var mapdests
   pat' <- discardPattern (map identType acc) pat
@@ -575,7 +574,8 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                   localScope (HM.singleton alloclid IndexInfo) $
                                   localScope (scopeOfFParams $ map fst alloc_merge) $ do
                                     (aldest:_) <- letwith css [identName bnew] (pexp $ Var alloclid)
-                                                  [PrimOp $ Index css (identName glboutid) [Var alloclid]]
+                                                  [PrimOp $ Index css (identName glboutid)
+                                                   [DimFix $ Var alloclid]]
                                     return $ resultBody [Var aldest]
                                 let alloopres = DoLoop []
                                                   (loopMerge [bnew] [Var bnew0])
@@ -604,8 +604,10 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                               (pure $ PrimOp $ SubExp ivv)
                               (pure $ PrimOp $ SubExp $ Var loopid)
                 myLetBind ivvplidexp ivvplid
-                (dest:_) <- letwith css [identName glboutLid] (pexp (Var $ identName ivvplid))--[indexp]
-                                        [PrimOp $ Index css locoutid [Var loopid]]
+                locoutid_t <- lookupType locoutid
+                (dest:_) <- letwith css [identName glboutLid] (pexp (Var $ identName ivvplid))
+                                        [PrimOp $ Index css locoutid $
+                                          fullSlice locoutid_t [DimFix (Var loopid)]]
                 return $ resultBody [Var dest]
             -- make loop
             let loopres = DoLoop [] outmerge
@@ -628,8 +630,9 @@ transformSOAC pat (Write cs len lam ivs as) = do
   loopBody <- runBodyBinder $
     localScope (HM.insert iter IndexInfo $
                 scopeOfFParams $ map fst merge) $ do
-    ivs' <- forM ivs
-      $ \iv -> letSubExp "write_iv" $ PrimOp $ Index cs iv [Var iter]
+    ivs' <- forM ivs $ \iv -> do
+      iv_t <- lookupType iv
+      letSubExp "write_iv" $ PrimOp $ Index cs iv $ fullSlice iv_t [DimFix $ Var iter]
     ivs'' <- bindLambda lam (map (PrimOp . SubExp) ivs')
 
     let indexes = take ivsLen ivs''
@@ -650,8 +653,8 @@ transformSOAC pat (Write cs len lam ivs as) = do
         return $ resultBody [Var res]
 
       in_bounds_branch <- runBodyBinder $ do
-        res <- letInPlace "write_out_inside_bounds" cs (identName arrayOut) [indexCur] $
-          PrimOp $ SubExp valueCur
+        res <- letInPlace "write_out_inside_bounds" cs (identName arrayOut)
+          (fullSlice (identType arrayOut) [DimFix indexCur]) $ PrimOp $ SubExp valueCur
         return $ resultBody [Var res]
 
       letExp "write_out"
@@ -713,10 +716,12 @@ copyIfArrayName v = do
    Array {} -> letExp (baseString v ++ "_first_order_copy") $ PrimOp $ Copy v
    _        -> return v
 
-index :: Certificates -> [VName] -> SubExp
-      -> [AST.Exp lore]
-index cs arrs i = flip map arrs $ \arr ->
-  PrimOp $ Index cs arr [i]
+index :: (HasScope lore m, Monad m) =>
+         Certificates -> [VName] -> SubExp
+      -> m [AST.Exp lore]
+index cs arrs i = forM arrs $ \arr -> do
+  arr_t <- lookupType arr
+  return $ PrimOp $ Index cs arr $ fullSlice arr_t [DimFix i]
 
 resultArray :: Transformer m => [Type] -> m [VName]
 resultArray = mapM oneArray
@@ -728,8 +733,9 @@ letwith :: Transformer m =>
 letwith cs ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
-  let update k v =
-        letInPlace "lw_dest" cs k [i'] $ PrimOp $ SubExp v
+  let update k v = do
+        k_t <- lookupType k
+        letInPlace "lw_dest" cs k (fullSlice k_t [DimFix i']) $ PrimOp $ SubExp v
   zipWithM update ks vs'
 
 pexp :: Applicative f => SubExp -> f (AST.Exp lore)
@@ -810,9 +816,9 @@ doLoopMapAccumL' cs width innerfun accexps arrexps maparrs = do
       merge = loopMerge' (map withUniqueness $ inarrs++acc++outarrs)
               (map Var arrexps++initacc++map Var maparrs)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
-    accxis<- bindLambda (removeLambdaAliases innerfun)
-             (map (PrimOp . SubExp . Var . identName) acc ++
-              index cs (map identName inarrs) (Var i))
+    accxis<- bindLambda (removeLambdaAliases innerfun) .
+             (map (PrimOp . SubExp . Var . identName) acc ++) =<<
+              index cs (map identName inarrs) (Var i)
     let (acc', xis) = splitAt acc_num accxis
     dests <- letwith cs (map identName outarrs) (pexp (Var i)) $
              map (PrimOp . SubExp) xis

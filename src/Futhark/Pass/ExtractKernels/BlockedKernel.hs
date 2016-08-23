@@ -95,8 +95,9 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
 
   addBinding $ Let step_two_pat () $ Op step_two
 
-  forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
-    addBinding $ mkLet' [] [x] $ PrimOp $ Index [] arr [constant (0 :: Int32)]
+  forM_ (zip (patternIdents step_two_pat) (patternIdents pat)) $ \(arr, x) ->
+    addBinding $ mkLet' [] [x] $ PrimOp $ Index [] (identName arr) $
+    fullSlice (identType arr) [DimFix $ constant (0 :: Int32)]
   where mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
           arrayOfRow (identType ident) chunk_size
@@ -167,7 +168,8 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
     fmap unzip $ forM (zip red_ts arrs) $ \(t, arr) -> do
       arr_index <- newVName (baseString arr ++ "_index")
       return (Let (Pattern [] [PatElem arr_index BindVar t]) () $
-              PrimOp $ Index [] arr [Var thread_id]
+              PrimOp $ Index [] arr $
+              fullSlice (t `arrayOfRow` group_size) [DimFix (Var thread_id)]
              , arr_index)
 
   (combine_arrs, arrs') <-
@@ -449,8 +451,9 @@ blockedScan pat cs w lam foldlam nes arrs = do
             carry_in_index <-
               letSubExp "carry_in_index" $
               PrimOp $ BinOp (Sub Int32) group_id one
+            arr_t <- lookupType arr
             letBindNames'_ [paramName p] $
-              PrimOp $ Index [] arr [carry_in_index]
+              PrimOp $ Index [] arr $ fullSlice arr_t [DimFix carry_in_index]
           return $ lambdaBody lam'''
     group_lasts <-
       letTupExp "final_result" =<<
@@ -543,8 +546,10 @@ mapKernelSkeleton w inputs = do
 
   read_input_bnds <- forM inputs $ \inp -> do
     let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
+    arr_t <- lookupType $ kernelInputArray inp
     return $ Let (Pattern [] [pe]) () $
-      PrimOp $ Index [] (kernelInputArray inp) (kernelInputIndices inp)
+      PrimOp $ Index [] (kernelInputArray inp) $
+      fullSlice arr_t $ map DimFix $ kernelInputIndices inp
 
   let ksize = (num_groups, Var group_size_v, num_threads)
   return (ksize_bnds, ksize, read_input_bnds)

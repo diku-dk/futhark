@@ -65,8 +65,8 @@ instance Pretty Commutativity where
 
 instance Pretty Value where
   ppr (PrimVal bv) = ppr bv
-  ppr (ArrayVal a t shape)
-    | null $ elems a = text "empty" <> parens (ppr row_t)
+  ppr (ArrayVal _ t shape)
+    | product shape == 0 = text "empty" <> parens (ppr row_t)
     where row_t = Array t (Rank $ length shape - 1) NoUniqueness
   ppr (ArrayVal a t (_:rowshape@(_:_))) =
     brackets $ commastack
@@ -339,6 +339,10 @@ convOp s from to = text s <> text "_" <> ppr from <> text "_" <> ppr to
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se
   ppr (DimNew      se) = ppr se
+
+instance Pretty d => Pretty (DimIndex d) where
+  ppr (DimFix i) = ppr i
+  ppr (DimSlice i n) = ppr i <> text ":+" <> ppr n
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commasep $ map ppr bs

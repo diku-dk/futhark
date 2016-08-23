@@ -5,7 +5,7 @@ module Language.Futhark
   , module Language.Futhark.Pretty
   , module Language.Futhark.Traversals
 
-  , Ident, Parameter, Exp, Lambda
+  , Ident, Parameter, DimIndex, Exp, Lambda
   , Pattern, FunDef, Prog
   , Type, StructType, ArrayType
   )
@@ -22,6 +22,9 @@ type Ident = IdentBase Info VName
 -- | A name with a type, but no aliasing information.  Used for
 -- denoting function parameters.
 type Parameter = ParamBase Info VName
+
+-- | An index with type information.
+type DimIndex = DimIndexBase Info VName
 
 -- | An expression with type information.
 type Exp = ExpBase Info VName

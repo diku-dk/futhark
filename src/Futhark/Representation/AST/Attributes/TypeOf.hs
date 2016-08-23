@@ -41,6 +41,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
 import Control.Applicative
 import Control.Monad.Reader
 import Data.List
+import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 import Data.Traversable hiding (mapM)
@@ -85,9 +86,12 @@ primOpType CmpOp{} =
   pure [Prim Bool]
 primOpType (ConvOp conv _) =
   pure [Prim $ snd $ convTypes conv]
-primOpType (Index _ ident idx) =
+primOpType (Index _ ident slice) =
   result <$> lookupType ident
-  where result t = [stripArray (length idx) t]
+  where result t = [Prim (elemType t) `arrayOfShape` shape]
+        shape = Shape $ mapMaybe dimSize slice
+        dimSize (DimSlice _ d) = Just d
+        dimSize DimFix{} = Nothing
 primOpType (Iota n _ _) =
   pure [arrayOf (Prim $ IntType Int32) (Shape [n]) NoUniqueness]
 primOpType (Replicate ne e) =
