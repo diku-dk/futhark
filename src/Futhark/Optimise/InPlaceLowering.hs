@@ -129,7 +129,7 @@ optimiseBindings (bnd:bnds) m = do
   where boundHere = patternNames $ bindingPattern bnd
 
         checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
-            | [PatElem v (BindInPlace cs src [i]) attr] <- patternElements pat,
+            | [PatElem v (BindInPlace cs src [DimFix i]) attr] <- patternElements pat,
               PrimOp (SubExp (Var ve)) <- e = do
                 forwarded <- maybeForward ve v attr cs src i
                 return $ if forwarded
@@ -303,7 +303,7 @@ maybeForward v dest_nm dest_attr cs src i = do
   optimisable <- isOptimisable v
   not_prim <- not . primType <$> lookupType v
   if available && certs_available && samebody && optimisable && not_prim then do
-    let fwd = DesiredUpdate dest_nm dest_attr cs src [i] v
+    let fwd = DesiredUpdate dest_nm dest_attr cs src [DimFix i] v
     tell mempty { forwardThese = [fwd] }
     return True
     else return False

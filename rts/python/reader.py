@@ -2,6 +2,8 @@
 # reading stdin when compiling standalone programs with the Python
 # code generator.
 
+import numpy as np
+
 lookahead_buffer = []
 
 def reset_lookahead():
@@ -163,22 +165,35 @@ def read_bool(f):
     else:
         raise ValueError
 
-def read_array_elems(f, elem_reader):
-    skip_spaces(f)
-    parse_specific_char(f, '[')
-    xs = sepBy(elem_reader, read_comma, f)
-    skip_spaces(f)
-    parse_specific_char(f, ']')
-    return xs
+def read_empty_array(f, type_name, rank):
+    parse_specific_string(f, 'empty')
+    parse_specific_char(f, '(')
+    for i in range(rank):
+        parse_specific_string(f, '[]')
+    parse_specific_string(f, type_name)
+    parse_specific_char(f, ')')
+    return []
 
-def read_array_helper(f, elem_reader, rank):
+def read_array_elems(f, elem_reader, type_name, rank):
+    skip_spaces(f)
+    try:
+        parse_specific_char(f, '[')
+    except ValueError:
+        return read_empty_array(f, type_name, rank)
+    else:
+        xs = sepBy(elem_reader, read_comma, f)
+        skip_spaces(f)
+        parse_specific_char(f, ']')
+        return xs
+
+def read_array_helper(f, elem_reader, type_name, rank):
     def nested_row_reader(_):
-        return read_array_helper(f, elem_reader, rank-1)
+        return read_array_helper(f, elem_reader, type_name, rank-1)
     if rank == 1:
         row_reader = elem_reader
     else:
         row_reader = nested_row_reader
-    return read_array_elems(f, row_reader)
+    return read_array_elems(f, row_reader, type_name, rank-1)
 
 def expected_array_dims(l, rank):
   if rank > 1:
@@ -211,8 +226,8 @@ def read_double_signed(f):
 
     return v
 
-def read_array(f, elem_reader, rank, bt):
-    elems = read_array_helper(f, elem_reader, rank)
+def read_array(f, elem_reader, type_name, rank, bt):
+    elems = read_array_helper(f, elem_reader, type_name, rank)
     dims = expected_array_dims(elems, rank)
     verify_array_dims(elems, dims)
     return np.array(elems, dtype=bt)

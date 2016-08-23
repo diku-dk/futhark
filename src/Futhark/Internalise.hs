@@ -125,11 +125,15 @@ internaliseExp _ (E.Var var) = do
     Just substs -> return $ map I.Var substs
 
 internaliseExp desc (E.Index e idxs loc) = do
-  idxs' <- mapM (internaliseExp1 "i") idxs
   vs <- internaliseExpToVars "indexed" e
-  csidx' <- boundsChecks loc vs idxs'
-  let index v = I.PrimOp $ I.Index csidx' v idxs'
-  letSubExps desc (map index vs)
+  dims <- case vs of
+            [] -> return [] -- Will this happen?
+            v:_ -> I.arrayDims <$> lookupType v
+  (idxs', idx_cs) <- unzip <$> zipWithM (internaliseDimIndex loc) dims idxs
+  let index v = do
+        v_t <- lookupType v
+        return $ I.PrimOp $ I.Index (concat idx_cs) v $ fullSlice v_t idxs'
+  letSubExps desc =<< mapM index vs
 
 internaliseExp desc (E.TupleIndex e i (Info rt) _) =
   take n . drop i' <$> internaliseExp desc e
@@ -301,14 +305,18 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
-  idxs' <- mapM (internaliseExp1 "idx") idxs
   srcs <- internaliseExpToVars "src" $ E.Var src
   ves <- internaliseExp "lw_val" ve
-  idxcs' <- boundsChecks loc srcs idxs'
+  dims <- case srcs of
+            [] -> return [] -- Will this happen?
+            v:_ -> I.arrayDims <$> lookupType v
+  (idxs', idx_cs) <- unzip <$> zipWithM (internaliseDimIndex loc) dims idxs
   let comb sname ve' = do
-        rowtype <- I.stripArray (length idxs) <$> lookupType sname
+        sname_t <- lookupType sname
+        let slice = fullSlice sname_t idxs'
+            rowtype = sname_t `setArrayDims` sliceDims slice
         ve'' <- ensureShape asserting loc rowtype "lw_val_correct_shape" ve'
-        letInPlace "letwith_dst" idxcs' sname idxs' $
+        letInPlace "letwith_dst" (concat idx_cs) sname (fullSlice sname_t idxs') $
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
@@ -693,6 +701,24 @@ internaliseExp desc (E.Write i v as loc) = do
   aws <- mapM (fmap (arraySize 0) . lookupType) sas
   letTupExp' desc $ I.Op $ I.Write [] len lam sivs $ zip aws sas
 
+internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
+                    -> InternaliseM (I.DimIndex SubExp, Certificates)
+internaliseDimIndex loc w (E.DimFix i) = do
+  i' <- internaliseExp1 "i" i
+  cs <- assertingOne $ boundsCheck loc w i'
+  return (I.DimFix i', cs)
+internaliseDimIndex loc w (E.DimSlice i j) = do
+  i' <- internaliseExp1 "i" i
+  j' <- internaliseExp1 "j" j
+  cs_i <- assertingOne $ boundsCheck loc w i'
+  cs_j <- assertingOne $ do
+    wp1 <- letSubExp "wp1" $ PrimOp $ I.BinOp (Add Int32) j' (constant (1::Int32))
+    boundsCheck loc wp1 j'
+  cs_pos <- assertingOne $
+    letExp "pos" =<< eAssert (pure $ PrimOp $ I.CmpOp (CmpSle Int32) i' j') loc
+  n <- letSubExp "n" $ PrimOp $ I.BinOp (Sub Int32) j' i'
+  return (I.DimSlice i' n, cs_i <> cs_j <> cs_pos)
+
 internaliseScanOrReduce :: String -> String
                         -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
                         -> (E.Lambda, E.Exp, E.Exp, SrcLoc)
@@ -1005,19 +1031,13 @@ assertingOne :: InternaliseM VName
              -> InternaliseM I.Certificates
 assertingOne m = asserting $ fmap pure m
 
-boundsChecks :: SrcLoc -> [VName] -> [I.SubExp] -> InternaliseM I.Certificates
-boundsChecks _ []    _  = return []
-boundsChecks loc (v:_) es =
-  asserting $ zipWithM (boundsCheck loc v) [0..] es
-
-boundsCheck :: SrcLoc -> VName -> Int -> I.SubExp -> InternaliseM I.VName
-boundsCheck loc v i e = do
-  size <- arraySize i <$> lookupType v
+boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
+boundsCheck loc w e = do
   let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
       lowerBound = I.PrimOp $
                    I.CmpOp (I.CmpSle I.Int32) (I.constant (0 :: I.Int32)) e
       upperBound = I.PrimOp $
-                   I.CmpOp (I.CmpSlt I.Int32) e size
+                   I.CmpOp (I.CmpSlt I.Int32) e w
   letExp "bounds_check" =<< eAssert check loc
 
 shadowIdentsInExp :: [(VName, I.SubExp)] -> [Binding] -> I.SubExp

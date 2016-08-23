@@ -82,12 +82,12 @@ mapExpM tv (LetPat pat e body loc) =
 mapExpM tv (LetWith dest src idxexps vexp body loc) =
   pure LetWith <*>
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
-       mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
+       mapM (mapDimIndexM tv) idxexps <*> mapOnExp tv vexp <*>
        mapOnExp tv body <*> pure loc
 mapExpM tv (Index arr idxexps loc) =
   pure Index <*>
        mapOnExp tv arr <*>
-       mapM (mapOnExp tv) idxexps <*>
+       mapM (mapDimIndexM tv) idxexps <*>
        pure loc
 mapExpM tv (TupleIndex e i NoInfo loc) =
   TupleIndex <$> mapOnExp tv e <*> pure i <*> pure NoInfo <*> pure loc
@@ -185,6 +185,13 @@ mapDimDecl :: (Applicative m, Monad m) =>
 mapDimDecl tv (NamedDim vn) = NamedDim <$> mapOnName tv vn
 mapDimDecl _ (ConstDim k) = pure $ ConstDim k
 mapDimDecl _ AnyDim = pure AnyDim
+
+mapDimIndexM :: (Applicative m, Monad m) =>
+                MapperBase vnf vnt m
+             -> DimIndexBase NoInfo vnf
+             -> m (DimIndexBase NoInfo vnt)
+mapDimIndexM tv (DimFix j) = DimFix <$> mapExpM tv j
+mapDimIndexM tv (DimSlice i j) = DimSlice <$> mapExpM tv i <*> mapExpM tv j
 
 mapTypeM :: (Applicative m, Monad m, Traversable f) =>
             MapperBase vnf vnt m

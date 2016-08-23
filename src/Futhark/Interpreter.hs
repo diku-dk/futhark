@@ -39,7 +39,7 @@ data InterpreterError =
       -- ^ The specified start function does not exist.
     | InvalidFunctionArguments Name (Maybe [TypeBase Rank NoUniqueness]) [TypeBase Rank NoUniqueness]
       -- ^ The arguments given to a function were mistyped.
-    | IndexOutOfBounds String [Int] [Int]
+    | IndexOutOfBounds String [Int] (Slice Int)
       -- ^ First @Int@ is array shape, second is attempted index.
     | SplitOutOfBounds String [Int] [Int]
       -- ^ First @[Int]@ is array shape, second is attempted split
@@ -70,8 +70,8 @@ instance Show InterpreterError where
     intercalate ", " (map pretty expected) ++
     " but got argument(s) of type " ++
     intercalate ", " (map pretty got) ++ "."
-  show (IndexOutOfBounds var arrsz i) =
-    "Array index " ++ show i ++ " out of bounds in array '" ++
+  show (IndexOutOfBounds var arrsz slice) =
+    "Array index " ++ pretty slice ++ " out of bounds in array '" ++
     var ++ "', of size " ++ show arrsz ++ "."
   show (SplitOutOfBounds var arrsz sizes) =
     "Split not valid for sizes " ++ show sizes ++
@@ -130,26 +130,20 @@ bindVar :: Bindage -> Value
 bindVar BindVar val =
   return val
 
-bindVar (BindInPlace _ src is) val = do
+bindVar (BindInPlace _ src slice) val = do
   srcv <- lookupVar src
-  is' <- mapM (asInt "bindInPlace" <=< evalSubExp) is
+  slice' <- mapM evalDimIndex slice
   case srcv of
     ArrayVal arr bt shape -> do
-      flatidx <- indexArray (textual src) shape is'
-      if length is' == length shape then
-        case val of
-          PrimVal bv ->
-            return $ ArrayVal (arr // [(flatidx, bv)]) bt shape
-          _ ->
-            bad $ TypeError "bindVar BindInPlace, full indices given, but replacement value is not a prim value"
-      else
-        case val of
-          ArrayVal valarr _ valshape ->
-            let updates =
-                  [ (flatidx + i, valarr ! i) | i <- [0..product valshape-1] ]
-            in return $ ArrayVal (arr // updates) bt shape
-          PrimVal _ ->
-            bad $ TypeError "bindVar BindInPlace, incomplete indices given, but replacement value is not array"
+      is <- indexArray (textual src) slice' shape
+      case (is, val) of
+        ([i], PrimVal bv) ->
+          return $ ArrayVal (arr // [(i, bv)]) bt shape
+        (_, ArrayVal valarr _ _) ->
+          let updates = zip is $ elems valarr
+          in return $ ArrayVal (arr // updates) bt shape
+        (_, PrimVal _) ->
+          bad $ TypeError "bindVar BindInPlace, incomplete indices given, but replacement value is not array"
     _ ->
       bad $ TypeError "bindVar BindInPlace, source is not array"
 
@@ -230,16 +224,15 @@ soacArrays w [] = do
   return $ genericReplicate w' []
 soacArrays _ names = transpose <$> mapM (arrToList <=< lookupVar) names
 
-indexArray :: String -> [Int] -> [Int]
-           -> FutharkM Int
-indexArray name shape is
-  | and (zipWith (<=) is shape),
-    all (0<=) is,
-    length is <= length shape =
-      let slicesizes = map product $ drop 1 $ tails shape
-      in return $ sum $ zipWith (*) is slicesizes
+indexArray :: String -> Slice Int -> [Int] -> FutharkM [Int]
+indexArray name slice shape
+  | length slice == length shape,
+    is <- flatSlice slice shape,
+    all (<product shape) is,
+    all (0<=) is =
+      return is
  | otherwise =
-      bad $ IndexOutOfBounds name shape is
+      bad $ IndexOutOfBounds name shape slice
 
 
 --------------------------------------------------
@@ -395,6 +388,14 @@ evalSubExp :: SubExp -> FutharkM Value
 evalSubExp (Var ident)  = lookupVar ident
 evalSubExp (Constant v) = return $ PrimVal v
 
+evalDimIndex :: DimIndex SubExp -> FutharkM (DimIndex Int)
+evalDimIndex (DimFix d) =
+  DimFix <$> (asInt "evalDimIndex" =<< evalSubExp d)
+evalDimIndex (DimSlice d n) =
+  DimSlice
+  <$> (asInt "evalDimIndex" =<< evalSubExp d)
+  <*> (asInt "evalDimIndex" =<< evalSubExp n)
+
 evalBody :: Body -> FutharkM [Value]
 
 evalBody (Body _ [] es) =
@@ -497,10 +498,10 @@ evalPrimOp unop@(UnOp op e) = do
     Just v' -> return [PrimVal v']
     Nothing -> bad $ TypeError $ "Cannot UnOp: " ++ unwords [pretty unop, pretty v]
 
-evalPrimOp (Index _ ident idxs) = do
+evalPrimOp (Index _ ident slice) = do
   v <- lookupVar ident
-  idxs' <- mapM (asInt "Index" <=< evalSubExp) idxs
-  pure <$> indexArrayValue (textual ident) v idxs'
+  slice' <- mapM evalDimIndex slice
+  pure <$> indexArrayValue v slice'
 
 evalPrimOp (Iota e x s) = do
   v1 <- evalSubExp e
@@ -649,13 +650,14 @@ evalSOAC (Scan _ w fun inputs) = do
 
 evalSOAC (Redomap cs w _ redfun foldfun accexp arrexps) = do
   -- SO LAZY: redomap is scanomap, after which we index the last elements.
-  w' <- asInt "evalPrimOp Split" =<< evalSubExp w
+  w' <- asInt "evalPrimOp Redomap" =<< evalSubExp w
   vs <- evalSOAC $  Scanomap cs w redfun foldfun accexp arrexps
   let (acc_arrs, arrs) = splitAt (length accexp) vs
   accs <- if w' == 0
           then mapM evalSubExp accexp
           else forM acc_arrs $ \acc_arr ->
-                 indexArrayValue "<redomap result>" acc_arr [w' - 1]
+                 indexArrayValue acc_arr $ DimFix (w' - 1) :
+                 map (DimSlice 0) (drop 1 $ valueShape acc_arr)
   return $ accs++arrs
 
 evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do
@@ -731,17 +733,15 @@ toArrayVal err v = case v of
   ArrayVal a b c -> return (a, b, c)
   _ -> bad $ TypeError err
 
-indexArrayValue :: String -> Value -> [Int] -> FutharkM Value
-indexArrayValue ident (ArrayVal arr bt shape) idxs = do
-  flatidx <- indexArray ident shape idxs
-  if length idxs == length shape
-    then return $ PrimVal $ arr ! flatidx
-    else let resshape = drop (length idxs) shape
-             ressize  = product resshape
-         in return $ ArrayVal (listArray (0,ressize-1)
-                               [ arr ! (flatidx+i) | i <- [0..ressize-1] ])
-            bt resshape
-indexArrayValue _ _ _ = bad $ TypeError "indexArrayValue: ident is not an array"
+indexArrayValue :: Value -> Slice Int -> FutharkM Value
+indexArrayValue (ArrayVal arr bt shape) slice =
+  return $
+  case (sliceDims slice, flatSlice slice shape) of
+    ([], [i]) ->
+      PrimVal $ arr ! i
+    (ds, is) ->
+      ArrayVal (listArray (0,product ds-1) [ arr ! i | i <- is ]) bt ds
+indexArrayValue _ _ = bad $ TypeError "indexArrayValue: argument is not an array"
 
 evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do

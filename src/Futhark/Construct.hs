@@ -17,7 +17,6 @@ module Futhark.Construct
   , eNot
   , eAbs
   , eSignum
-  , eIndex
   , eCopy
   , eAssert
   , eValue
@@ -34,6 +33,8 @@ module Futhark.Construct
 
   , foldBinOp
   , binOpLambda
+  , fullSlice
+  , fullSliceNum
 
   , module Futhark.Binder
 
@@ -83,11 +84,11 @@ letExp desc e = do
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
-              String -> Certificates -> VName -> [SubExp] -> Exp (Lore m)
+              String -> Certificates -> VName -> Slice SubExp -> Exp (Lore m)
            -> m VName
-letInPlace desc cs src is e = do
+letInPlace desc cs src slice e = do
   v <- newVName desc
-  idents <- letBindNames [(v,BindInPlace cs src is)] e
+  idents <- letBindNames [(v,BindInPlace cs src slice)] e
   case idents of
     [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
@@ -195,13 +196,6 @@ eSignum em = do
     _ ->
       fail $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
-eIndex :: MonadBinder m =>
-          Certificates -> VName -> [m (Exp (Lore m))]
-       -> m (Exp (Lore m))
-eIndex cs a idxs = do
-  idxs' <- letSubExps "i" =<< sequence idxs
-  return $ PrimOp $ Index cs a idxs'
-
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eCopy e = do e' <- letExp "copy_arg" =<< e
@@ -285,6 +279,21 @@ binOpLambda bop t = do
            , lambdaReturnType = [Prim t]
            , lambdaBody       = body
            }
+
+-- | @fullSlice t slice@ returns @slice@, but with 'DimSlice's of
+-- entire dimensions appended to the full dimensionality of @t@.  This
+-- function is used to turn incomplete indexing complete, as required
+-- by 'Index'.
+fullSlice :: Type -> [DimIndex SubExp] -> Slice SubExp
+fullSlice t slice =
+  slice ++
+  map (DimSlice (constant (0::Int32)))
+  (drop (length slice) $ arrayDims t)
+
+-- | Like 'fullSlice', but the dimensions are simply numeric.
+fullSliceNum :: Num d => [d] -> [DimIndex d] -> Slice d
+fullSliceNum dims slice =
+  slice ++ map (DimSlice 0) (drop (length slice) dims)
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore

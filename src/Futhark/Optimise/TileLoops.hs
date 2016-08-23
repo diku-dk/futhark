@@ -271,7 +271,7 @@ tile1d kspace block_size block_param = do
     name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
     return $
       mkLet' [] [Ident name $ rowType $ paramType outer_block_param] $
-      PrimOp $ Index [] (paramName outer_block_param) [Var ltid]
+      PrimOp $ Index [] (paramName outer_block_param) [DimFix $ Var ltid]
 
   let block_cspace = [(ltid,block_size)]
       block_pe =
@@ -306,7 +306,8 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
                        PrimOp $ CmpOp (CmpSlt Int32) (Var global_i) global_d
     elem_name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
     let read_elem_bnd = mkLet' [] [Ident elem_name $ Prim pt] $
-                        PrimOp $ Index [] (paramName outer_block_param) [Var invariant_i]
+                        PrimOp $ Index [] (paramName outer_block_param) $
+                        fullSlice (paramType outer_block_param) [DimFix $ Var invariant_i]
 
     let block_size_2d = Shape $ permute_dims [tile_size, block_size]
         block_cspace = zip local_is $ permute_dims [tile_size,block_size]
@@ -327,7 +328,8 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
           [mkLet' [] [block_param_aux] $
             PrimOp $ Rearrange [] perm block_name_2d,
            mkLet' [] [paramIdent block_param] $
-            PrimOp $ Index [] (identName block_param_aux) [Var variant_i]]
+            PrimOp $ Index [] (identName block_param_aux) $
+            fullSlice (identType block_param_aux) [DimFix $ Var variant_i]]
 
     return (outer_block_param, do_index_bnd : write_block_stm : index_block_kstms)
 

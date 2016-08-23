@@ -417,9 +417,10 @@ simplifyKnownIterationSOAC _ (Let pat _ (Op (Map cs (Constant k) fun arrs)))
       zipWithM_ bindParam (lambdaParams fun) arrs
       ses <- bodyBind $ lambdaBody fun
       zipWithM_ bindResult (patternValueElements pat) ses
-        where bindParam p a =
+        where bindParam p a = do
+                a_t <- lookupType a
                 letBindNames'_ [paramName p] $
-                PrimOp $ Index cs a [constant (0::Int32)]
+                  PrimOp $ Index cs a $ fullSlice a_t [DimFix $ constant (0::Int32)]
               bindResult pe se =
                 letBindNames'_ [patElemName pe] $
                 PrimOp $ ArrayLit [se] $ rowType $ patElemType pe

@@ -513,41 +513,56 @@ simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) _ (PrimOp (Index cs idd 
 
 simplifyIndex _ _ = cannotSimplify
 
-data IndexResult = IndexResult Certificates VName [SubExp]
+data IndexResult = IndexResult Certificates VName (Slice SubExp)
                  | SubExpResult SubExp
 
 simplifyIndexing :: MonadBinder m =>
                     ST.SymbolTable lore -> TypeLookup
-                 -> VName -> [SubExp] -> Bool
+                 -> VName -> Slice SubExp -> Bool
                  -> Maybe (m IndexResult)
 simplifyIndexing vtable seType idd inds consuming =
   case asPrimOp =<< defOf idd of
+    _ | Just t <- seType (Var idd),
+        inds == map (DimSlice (constant (0::Int))) (arrayDims t) ->
+          Just $ pure $ SubExpResult $ Var idd
+
     Nothing -> Nothing
 
     Just (SubExp (Var v)) -> Just $ pure $ IndexResult [] v inds
 
     Just (Iota _ (Constant (IntValue (Int32Value 0))) (Constant (IntValue (Int32Value 1))))
-      | [ii] <- inds ->
+      | [DimFix ii] <- inds ->
           Just $ pure $ SubExpResult ii
 
     Just (Iota _ x s)
-      | [ii] <- inds ->
+      | [DimFix ii] <- inds ->
           Just $
           fmap SubExpResult $ letSubExp "index_iota" <=< SE.fromScalExp $
           SE.intSubExpToScalExp ii * SE.intSubExpToScalExp s +
           SE.intSubExpToScalExp x
 
-    Just (Rotate cs offsets a)
-      | length offsets == length inds -> Just $ do
-          dims <- arrayDims <$> lookupType a
-          let adjust (i, o, d) = do
-                i_m_o <- letSubExp "i_p_o" $ PrimOp $ BinOp (Add Int32) i o
-                letSubExp "rot_i" $ PrimOp $ BinOp (SMod Int32) i_m_o d
-          inds' <- mapM adjust $ zip3 inds offsets dims
-          pure $ IndexResult cs a inds'
+    Just (Rotate cs offsets a) -> Just $ do
+      dims <- arrayDims <$> lookupType a
+      let adjustI i o d = do
+            i_m_o <- letSubExp "i_p_o" $ PrimOp $ BinOp (Add Int32) i o
+            letSubExp "rot_i" (PrimOp $ BinOp (SMod Int32) i_m_o d)
+          adjust (DimFix i, o, d) =
+            DimFix <$> adjustI i o d
+          adjust (DimSlice i n, o, d) =
+            DimSlice <$> adjustI i o d <*> pure n
+      IndexResult cs a <$> mapM adjust (zip3 inds offsets dims)
 
     Just (Index cs aa ais) ->
-      Just $ pure $ IndexResult cs aa (ais ++ inds)
+      Just $ fmap (IndexResult cs aa) $ do
+      let adjust (DimFix j:js') is' = (DimFix j:) <$> adjust js' is'
+          adjust (DimSlice j _:js') (DimFix i:is') = do
+            j_p_i <- letSubExp "j_p_i" $ PrimOp $ BinOp (Add Int32) j i
+            (DimFix j_p_i:) <$> adjust js' is'
+          adjust (DimSlice j _:js') (DimSlice i n:is') = do
+            j_p_i <- letSubExp "j_p_i" $ PrimOp $ BinOp (Add Int32) j i
+            (DimSlice j_p_i n:) <$> adjust js' is'
+          adjust _ _ = return []
+      adjust ais inds
 
     Just (Replicate _ (Var vv))
       | [_]   <- inds, not consuming -> Just $ pure $ SubExpResult $ Var vv
@@ -557,9 +572,11 @@ simplifyIndexing vtable seType idd inds consuming =
       | [_] <- inds, not consuming -> Just $ pure $ SubExpResult val
 
     Just (Rearrange cs perm src)
-       | rearrangeReach perm <= length inds ->
-         let inds' = rearrangeShape (take (length inds) $ rearrangeInverse perm) inds
+       | rearrangeReach perm <= length (takeWhile isIndex inds) ->
+         let inds' = rearrangeShape (rearrangeInverse perm) inds
          in Just $ pure $ IndexResult cs src inds'
+      where isIndex DimFix{} = True
+            isIndex _          = False
 
     Just (Copy src)
       -- We cannot just remove a copy of a rearrange, because it might
@@ -588,7 +605,7 @@ simplifyIndexing vtable seType idd inds consuming =
       | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ pure $ IndexResult cs v2 inds
 
-    Just (Concat cs d x xs _) | Just (ibef, i, iaft) <- focusNth d inds -> Just $ do
+    Just (Concat cs d x xs _) | Just (ibef, DimFix i, iaft) <- focusNth d inds -> Just $ do
       res_t <- stripArray (length inds) <$> lookupType x
       x_len <- arraySize d <$> lookupType x
       xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
@@ -600,12 +617,12 @@ simplifyIndexing vtable seType idd inds consuming =
       let xs_and_starts = zip (reverse xs) starts
 
       let mkBranch [] =
-            letSubExp "index_concat" $ PrimOp $ Index cs x (ibef++i:iaft)
+            letSubExp "index_concat" $ PrimOp $ Index cs x $ ibef ++ DimFix i : iaft
           mkBranch ((x', start):xs_and_starts') = do
             cmp <- letSubExp "index_concat_cmp" $ PrimOp $ CmpOp (CmpSle Int32) start i
             (thisres, thisbnds) <- collectBindings $ do
               i' <- letSubExp "index_concat_i" $ PrimOp $ BinOp (Sub Int32) i start
-              letSubExp "index_concat" $ PrimOp $ Index cs x' (ibef++i':iaft)
+              letSubExp "index_concat" $ PrimOp $ Index cs x' $ ibef ++ DimFix i' : iaft
             thisbody <- mkBodyM thisbnds [thisres]
             (altres, altbnds) <- collectBindings $ mkBranch xs_and_starts'
             altbody <- mkBodyM altbnds [altres]
@@ -613,7 +630,7 @@ simplifyIndexing vtable seType idd inds consuming =
       SubExpResult <$> mkBranch xs_and_starts
 
     Just (ArrayLit ses _)
-      | Constant (IntValue (Int32Value i)) : inds' <- inds,
+      | DimFix (Constant (IntValue (Int32Value i))) : inds' <- inds,
         Just se <- maybeNth i ses ->
         case inds' of
           [] -> Just $ pure $ SubExpResult se
@@ -622,7 +639,7 @@ simplifyIndexing vtable seType idd inds consuming =
 
     _ -> case ST.entryBinding =<< ST.lookup idd vtable of
            Just (Let split_pat _ (PrimOp (Split cs2 0 ns idd2)))
-             | first_index : rest_indices <- inds -> Just $ do
+             | DimFix first_index : rest_indices <- inds -> Just $ do
                -- Figure out the extra offset that we should add to the first index.
                let plus = eBinOp (Add Int32)
                    esum [] = return $ PrimOp $ SubExp $ constant (0 :: Int32)
@@ -638,18 +655,19 @@ simplifyIndexing vtable seType idd inds consuming =
                    offset <- letSubExp "offset" offset_e
                    offset_index <- letSubExp "offset_index" $
                                    PrimOp $ BinOp (Add Int32) first_index offset
-                   return $ IndexResult cs2 idd2 (offset_index:rest_indices)
+                   return $ IndexResult cs2 idd2 $ DimFix offset_index:rest_indices
            _ -> Nothing
 
     where defOf = (`ST.lookupExp` vtable)
 
 simplifyIndexIntoReshape :: MonadBinder m => TopDownRule m
-simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
-  | Just (Reshape cs2 newshape idd2) <- asPrimOp =<< ST.lookupExp idd vtable,
+simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd slice)))
+  | Just inds <- sliceIndices slice,
+    Just (Reshape cs2 newshape idd2) <- asPrimOp =<< ST.lookupExp idd vtable,
     length newshape == length inds =
       case shapeCoercion newshape of
         Just _ ->
-          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 inds
+          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 slice
         Nothing -> do
           -- Linearise indices and map to old index space.
           oldshape <- arrayDims <$> lookupType idd2
@@ -659,7 +677,7 @@ simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
                              (map SE.intSubExpToScalExp inds)
           new_inds' <-
             mapM (letSubExp "new_index" <=< SE.fromScalExp) new_inds
-          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 new_inds'
+          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 $ map DimFix new_inds'
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
 

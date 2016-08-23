@@ -116,10 +116,10 @@ mapExpM tv (Apply fname args ret) = do
              (,) <$> mapOnSubExp tv arg <*> pure d
   pure (Apply fname) <*> pure args' <*>
     mapOnRetType tv ret
-mapExpM tv (PrimOp (Index cs arr idxexps)) =
+mapExpM tv (PrimOp (Index cs arr slice)) =
   PrimOp <$> (pure Index <*> mapOnCertificates tv cs <*>
-                 mapOnVName tv arr <*>
-                 mapM (mapOnSubExp tv) idxexps)
+              mapOnVName tv arr <*>
+              mapM (Data.Traversable.traverse (mapOnSubExp tv)) slice)
 mapExpM tv (PrimOp (Iota n x s)) =
   PrimOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s)
 mapExpM tv (PrimOp (Replicate nexp vexp)) =
