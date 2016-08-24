@@ -396,7 +396,7 @@ expCompiler
 
   makeAllMemoryGlobal $ do
     body <- ImpGen.subImpM_ (inKernelOperations constants) $
-      ImpGen.copyDWIMDest dest is' se $ drop (length dims) is'
+      ImpGen.copyDWIMDest dest is' se $ drop (length ds) is'
 
     (group_size, num_groups) <- computeMapKernelGroups $
                                 product $ map ImpGen.compileSubExp dims
