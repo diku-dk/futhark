@@ -122,8 +122,10 @@ mapExpM tv (PrimOp (Index cs arr slice)) =
               mapM (Data.Traversable.traverse (mapOnSubExp tv)) slice)
 mapExpM tv (PrimOp (Iota n x s)) =
   PrimOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s)
-mapExpM tv (PrimOp (Replicate nexp vexp)) =
-  PrimOp <$> (pure Replicate <*> mapOnSubExp tv nexp <*> mapOnSubExp tv vexp)
+mapExpM tv (PrimOp (Replicate shape vexp)) =
+  PrimOp <$> (Replicate
+               <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape))
+               <*> mapOnSubExp tv vexp)
 mapExpM tv (PrimOp (Scratch t shape)) =
   PrimOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
 mapExpM tv (PrimOp (Reshape cs shape arrexp)) =

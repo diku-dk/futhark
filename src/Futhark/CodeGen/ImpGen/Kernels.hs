@@ -383,26 +383,26 @@ expCompiler
   return ImpGen.Done
 
 expCompiler
-  (ImpGen.Destination [dest]) (PrimOp (Replicate n se)) = do
+  (ImpGen.Destination [dest]) (PrimOp (Replicate (Shape ds) se)) = do
   constants <- simpleKernelConstants "replicate"
 
   t <- subExpType se
   let thread_gid = kernelGlobalThreadId constants
       row_dims = arrayDims t
-      dims = n : row_dims
+      dims = ds ++ row_dims
       is' = unflattenIndex (map SE.intSubExpToScalExp dims) $
             ImpGen.varIndex thread_gid
-      n' = ImpGen.compileSubExp n
+      ds' = map ImpGen.compileSubExp ds
 
   makeAllMemoryGlobal $ do
     body <- ImpGen.subImpM_ (inKernelOperations constants) $
-      ImpGen.copyDWIMDest dest is' se $ drop 1 is'
+      ImpGen.copyDWIMDest dest is' se $ drop (length dims) is'
 
     (group_size, num_groups) <- computeMapKernelGroups $
                                 product $ map ImpGen.compileSubExp dims
 
     (body_uses, _) <- computeKernelUses []
-                      (freeIn body <> freeIn [n'])
+                      (freeIn body <> freeIn ds')
                       [thread_gid]
 
     ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {

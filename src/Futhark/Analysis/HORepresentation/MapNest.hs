@@ -112,7 +112,7 @@ fromSOAC' bound (SOAC.Map cs w lam inps) = do
       let subst = HM.fromList $
                   zip (map identName boundUsedInBody) (map identName newParams)
           inps' = map (substituteNames subst) inps ++
-                  map (SOAC.addTransform (SOAC.Replicate w) . SOAC.identInput)
+                  map (SOAC.addTransform (SOAC.Replicate $ Shape [w]) . SOAC.identInput)
                   boundUsedInBody
           lam' =
             lam { lambdaBody =
@@ -176,4 +176,4 @@ fixInputs w ourInps childInps =
     inspect (remPs, newInps) (param, SOAC.Input ts a t) = do
       param' <- newNameFromString (baseString param ++ "_rep")
       return (remPs, (param',
-                      SOAC.Input (ts SOAC.|> SOAC.Replicate w) a t) : newInps)
+                      SOAC.Input (ts SOAC.|> SOAC.Replicate (Shape [w])) a t) : newInps)

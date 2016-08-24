@@ -397,10 +397,11 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
           | isInvariant se =
               case threads of
                 AllThreads -> do
-                  letBindNames'_ [patElemName pe] $ PrimOp $ Replicate num_threads se
+                  letBindNames'_ [patElemName pe] $ PrimOp $
+                    Replicate (Shape [num_threads]) se
                   return False
                 ThreadsInSpace -> do
-                  let rep a d = PrimOp . Replicate d <$> letSubExp "rep" a
+                  let rep a d = PrimOp . Replicate (Shape [d]) <$> letSubExp "rep" a
                   letBindNames'_ [patElemName pe] =<<
                     foldM rep (PrimOp (SubExp se)) (reverse space_dims)
                   return False

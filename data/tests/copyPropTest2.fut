@@ -5,6 +5,7 @@
 --   91
 --   126
 -- }
+-- structure { Replicate 0 }
 fun int getInt ( ) = 10
 fun []int plus1([]int x) = map(fn int(int y)=>y+1, x)
 

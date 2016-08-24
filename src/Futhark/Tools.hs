@@ -152,7 +152,7 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $
                   PrimOp $ SubExp $ intConst Int32 1
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
-                   PrimOp $ Replicate (Var chunk_name) $
+                   PrimOp $ Replicate (Shape [Var chunk_name]) $
                    Var $ paramName unchunked_arr_param |
                    (arr_param, unchunked_arr_param) <-
                      zip arr_params unchunked_arr_params ]

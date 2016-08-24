@@ -94,9 +94,10 @@ primOpType (Index _ ident slice) =
         dimSize DimFix{} = Nothing
 primOpType (Iota n _ _) =
   pure [arrayOf (Prim $ IntType Int32) (Shape [n]) NoUniqueness]
-primOpType (Replicate ne e) =
-  result <$> subExpType e
-  where result t = [arrayOf t (Shape [ne]) NoUniqueness]
+primOpType (Replicate (Shape []) e) =
+  pure <$> subExpType e
+primOpType (Replicate shape e) =
+  pure . flip arrayOfShape shape <$> subExpType e
 primOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
 primOpType (Reshape _ [] e) =

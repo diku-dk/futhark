@@ -725,7 +725,7 @@ pullReshape _ _ = fail "Cannot pull reshape"
 -- by adding another dimension to the SOAC.
 pullReplicate :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pullReplicate soac@SOAC.Map{} ots
-  | SOAC.Replicate n SOAC.:< ots' <- SOAC.viewf ots = do
+  | SOAC.Replicate (Shape [n]) SOAC.:< ots' <- SOAC.viewf ots = do
       let rettype = SOAC.typeOf soac
       body <- runBodyBinder $ do
         names <- letTupExp "pull_replicate" =<< SOAC.toExp soac

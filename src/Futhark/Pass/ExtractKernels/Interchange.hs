@@ -78,7 +78,7 @@ interchangeLoop
               return $ Var arr
         expandedInit param_name se =
           letSubExp (param_name <> "_expanded_init") $
-            PrimOp $ Replicate w se
+            PrimOp $ Replicate (Shape [w]) se
 
         expand (merge_param, merge_init) = do
           expanded_param <-
