@@ -417,28 +417,28 @@ distributeKernelResults :: (LocalScope (Lore m) m, MonadBinder m,
                            BottomUpRule m
 distributeKernelResults (vtable, used)
   (Let (Pattern [] kpes) attr
-    (Op (Kernel kcs kspace ts (KernelBody _ kstms kres)))) = do
+    (Op (Kernel kcs kspace kts (KernelBody _ kstms kres)))) = do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.
-  (kpes', kres', kstms_rev) <- localScope (scopeOfKernelSpace kspace) $
-    foldM distribute (kpes, kres, []) kstms
+  (kpes', kts', kres', kstms_rev) <- localScope (scopeOfKernelSpace kspace) $
+    foldM distribute (kpes, kts, kres, []) kstms
 
   when (kpes' == kpes)
     cannotSimplify
 
   addBinding $ Let (Pattern [] kpes') attr $
-    Op $ Kernel kcs kspace ts $ mkWiseKernelBody () (reverse kstms_rev) kres'
+    Op $ Kernel kcs kspace kts' $ mkWiseKernelBody () (reverse kstms_rev) kres'
   where
     free_in_kstms = mconcat $ map freeInBinding kstms
 
-    distribute (kpes', kres', kstms_rev) bnd
+    distribute (kpes', kts', kres', kstms_rev) bnd
       | Let (Pattern [] [pe]) _ (PrimOp (Index cs arr slice)) <- bnd,
         kspace_slice <- map (DimFix . Var . fst) $ spaceDimensions kspace,
         kspace_slice `isPrefixOf` slice,
         remaining_slice <- drop (length kspace_slice) slice,
         all (isJust . flip ST.lookup vtable) $ HS.toList $ freeIn remaining_slice,
-        Just (kpe, kpes'', kres'') <- isResult kpes' kres' pe = do
+        Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (DimSlice (constant (0::Int32)) . snd) $
                             spaceDimensions kspace
               index kpe' = letBind_ (Pattern [] [kpe']) $ PrimOp $ Index (kcs<>cs) arr $
@@ -448,21 +448,21 @@ distributeKernelResults (vtable, used)
                     index kpe { patElemName = precopy }
                     letBind_ (Pattern [] [kpe]) $ PrimOp $ Copy precopy
             else index kpe
-          return (kpes'', kres'',
+          return (kpes'', kts'', kres'',
                   if patElemName pe `HS.member` free_in_kstms
                   then bnd : kstms_rev
                   else kstms_rev)
 
-    distribute (kpes', kres', kstms_rev) bnd =
-      return (kpes', kres', bnd : kstms_rev)
+    distribute (kpes', kts', kres', kstms_rev) bnd =
+      return (kpes', kts', kres', bnd : kstms_rev)
 
-    isResult kpes' kres' pe =
-      case partition ((==pe_ret) . snd) $ zip kpes' kres' of
-        ([(kpe,_)], kpes_and_kres)
-          | (kpes'', kres'') <- unzip kpes_and_kres ->
-              Just (kpe, kpes'', kres'')
+    isResult kpes' kts' kres' pe =
+      case partition matches $ zip3 kpes' kts' kres' of
+        ([(kpe,_,_)], kpes_and_kres)
+          | (kpes'', kts'', kres'') <- unzip3 kpes_and_kres ->
+              Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
-      where pe_ret = ThreadsReturn ThreadsInSpace $ Var $ patElemName pe
+      where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
 distributeKernelResults _ _ = cannotSimplify
 
 inKernelRules :: (MonadBinder m,
