@@ -97,7 +97,7 @@ data ArrayTransform = Rearrange Certificates [Int]
                     -- ^ A reshaping of the outer dimension.
                     | ReshapeInner Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of everything but the outer dimension.
-                    | Replicate SubExp
+                    | Replicate Shape
                     -- ^ Replicate the rows of the array a number of times.
                       deriving (Show, Eq, Ord)
 
@@ -217,8 +217,8 @@ transformFromExp (PrimOp (Futhark.Rearrange cs perm v)) =
   Just (v, Rearrange cs perm)
 transformFromExp (PrimOp (Futhark.Reshape cs shape v)) =
   Just (v, Reshape cs shape)
-transformFromExp (PrimOp (Futhark.Replicate n (Futhark.Var v))) =
-  Just (v, Replicate n)
+transformFromExp (PrimOp (Futhark.Replicate shape (Futhark.Var v))) =
+  Just (v, Replicate shape)
 transformFromExp _ = Nothing
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
@@ -300,8 +300,8 @@ inputArray (Input _ v _) = v
 inputType :: Input -> Type
 inputType (Input (ArrayTransforms ts) _ at) =
   Foldable.foldl transformType at ts
-  where transformType t (Replicate n) =
-          arrayOf t (Shape [n]) NoUniqueness
+  where transformType t (Replicate shape) =
+          arrayOfShape t shape
         transformType t (Rearrange _ perm) =
           rearrangeType perm t
         transformType t (Reshape _ shape) =

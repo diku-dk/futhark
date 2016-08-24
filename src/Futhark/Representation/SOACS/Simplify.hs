@@ -203,7 +203,7 @@ liftIdentityMapping _ (Let pat _ (Op (Map cs outersize fun arrs))) =
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = ((Pattern [] [outId], PrimOp $ Replicate outersize e) : invariant,
+          | freeOrConst e = ((Pattern [] [outId], PrimOp $ Replicate (Shape [outersize]) e) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
@@ -255,9 +255,12 @@ removeReplicateInput vtable fun arrs
           partitionEithers $ zipWith isReplicate arr_params arrs
 
         isReplicate p v
-          | Just (Replicate _ e) <-
+          | Just (Replicate (Shape (_:ds)) e) <-
             asPrimOp =<< ST.lookupExp v vtable =
-              Right ([paramName p], PrimOp $ SubExp e)
+              Right ([paramName p],
+                     case ds of
+                       [] -> PrimOp $ SubExp e
+                       _  -> PrimOp $ Replicate (Shape ds) e)
           | otherwise =
               Left (p, v)
 

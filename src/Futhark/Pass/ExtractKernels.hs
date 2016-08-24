@@ -665,15 +665,16 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
     _ ->
       addBindingToKernel bnd acc
 
-maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
+maybeDistributeBinding (Let pat attr (PrimOp (Replicate (Shape (d:ds)) v))) acc
   | [t] <- patternTypes pat = do
       -- XXX: We need a temporary dummy binding to prevent an empty
       -- map body.  The kernel extractor does not like empty map
       -- bodies.
       tmp <- newVName "tmp"
       let rowt = rowType t
-          newbnd = Let pat attr $ Op $ Map [] n lam []
-          tmpbnd = Let (Pattern [] [PatElem tmp BindVar rowt]) () $ PrimOp $ SubExp v
+          newbnd = Let pat attr $ Op $ Map [] d lam []
+          tmpbnd = Let (Pattern [] [PatElem tmp BindVar rowt]) () $
+                   PrimOp $ Replicate (Shape ds) v
           lam = Lambda { lambdaReturnType = [rowt]
                        , lambdaParams = []
                        , lambdaBody = mkBody [tmpbnd] [Var tmp]
@@ -818,7 +819,7 @@ isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
                       -- the loop nesting. We will have to replicate
                       -- it.
                       arr' <- letExp (baseString arr ++ "_repd") $
-                              PrimOp $ Replicate segment_size $ Var arr
+                              PrimOp $ Replicate (Shape [segment_size]) $ Var arr
                       return (ne, arr')
           _ ->
             fail "Input not free or outermost."

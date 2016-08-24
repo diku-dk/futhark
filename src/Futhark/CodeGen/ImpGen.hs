@@ -537,11 +537,12 @@ defCompilePrimOp (Destination [target]) (Index _ src slice)
 defCompilePrimOp _ Index{} =
   return ()
 
-defCompilePrimOp (Destination [dest]) (Replicate n se) = do
-  i <- newVName "i"
-  declaringLoopVar i $
-    emit =<< (Imp.For i (compileSubExp n) <$>
-              collect (copyDWIMDest dest [varIndex i] se []))
+defCompilePrimOp (Destination [dest]) (Replicate (Shape ds) se) = do
+  is <- replicateM (length ds) (newVName "i")
+  let ds' = map compileSubExp ds
+  declaringLoopVars is $ do
+    copy_elem <- collect $ copyDWIMDest dest (map varIndex is) se []
+    emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 
 defCompilePrimOp (Destination [_]) Scratch{} =
   return ()

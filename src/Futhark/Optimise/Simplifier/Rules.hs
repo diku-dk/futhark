@@ -65,12 +65,12 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , removeIdentityInPlace
                , simplifyBranchContext
                , simplifyBranchResultComparison
+               , simplifyReplicate
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
-                , simplifyReplicate
                 , simplifyIndex
                 ]
 
@@ -343,13 +343,25 @@ simplifyRotate vtable (Let pat _ (PrimOp (Rotate cs offsets v)))
 
 simplifyRotate _ _ = cannotSimplify
 
-simplifyReplicate :: MonadBinder m => BottomUpRule m
-simplifyReplicate (vtable, used) (Let pat _ (PrimOp (Replicate (Constant n) (Var v))))
-  | oneIsh n,
-    not $ any (`UT.isConsumed` used) $ v : patternNames pat,
-    Just shape <- arrayDims <$> ST.lookupType v vtable,
-    not $ null shape =
-      letBind_ pat $ PrimOp $ Reshape [] (map DimNew $ constant (1::Int32) : shape) v
+simplifyReplicate :: MonadBinder m => TopDownRule m
+simplifyReplicate vtable
+  (Let pat@(Pattern [] [pe]) _ (PrimOp (Replicate (Shape ds) (Var v))))
+  | (_, ds') <- partition isCt1 ds,
+    Just v_t <- ST.lookupType v vtable,
+    ds' /= ds,
+    not $ null ds' && primType v_t = do
+      v' <- letExp "replicate" $ PrimOp $ Replicate (Shape ds') $ Var v
+      letBind_ pat $ PrimOp $ Reshape [] (map DimNew $ arrayDims $ patElemType pe) v'
+simplifyReplicate _ (Let pat _ (PrimOp (Replicate (Shape []) se@Constant{}))) =
+  letBind_ pat $ PrimOp $ SubExp se
+simplifyReplicate _ (Let pat _ (PrimOp (Replicate (Shape []) (Var v)))) = do
+  v_t <- lookupType v
+  letBind_ pat $ PrimOp $ if primType v_t
+                          then SubExp $ Var v
+                          else Copy v
+simplifyReplicate vtable (Let pat _ (PrimOp (Replicate shape (Var v))))
+  | Just (PrimOp (Replicate shape2 se)) <- ST.lookupExp v vtable =
+      letBind_ pat $ PrimOp $ Replicate (shape<>shape2) se
 simplifyReplicate _ _ = cannotSimplify
 
 simplifyCmpOp :: LetTopDownRule lore u
@@ -564,12 +576,22 @@ simplifyIndexing vtable seType idd inds consuming =
           adjust _ _ = return []
       adjust ais inds
 
-    Just (Replicate _ (Var vv))
+    Just (Replicate (Shape [_]) (Var vv))
       | [_]   <- inds, not consuming -> Just $ pure $ SubExpResult $ Var vv
       | _:is' <- inds, not consuming -> Just $ pure $ IndexResult [] vv is'
 
-    Just (Replicate _ val@(Constant _))
+    Just (Replicate (Shape [_]) val@(Constant _))
       | [_] <- inds, not consuming -> Just $ pure $ SubExpResult val
+
+    Just (Replicate (Shape ds) v)
+      | (ds_inds, rest_inds) <- splitAt (length ds) inds,
+        (ds', ds_inds') <- unzip $ mapMaybe index ds_inds,
+        ds' /= ds ->
+        Just $ do
+          arr <- letExp "smaller_replicate" $ PrimOp $ Replicate (Shape ds') v
+          return $ IndexResult [] arr $ ds_inds' ++ rest_inds
+      where index DimFix{} = Nothing
+            index (DimSlice _ n) = Just (n, DimSlice (constant (0::Int32)) n)
 
     Just (Rearrange cs perm src)
        | rearrangeReach perm <= length (takeWhile isIndex inds) ->

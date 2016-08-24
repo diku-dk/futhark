@@ -328,7 +328,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
 internaliseExp desc (E.Replicate ne ve _) = do
   ne' <- internaliseExp1 "n" ne
   ves <- internaliseExp "replicate_v" ve
-  letSubExps desc [I.PrimOp $ I.Replicate ne' ve' | ve' <- ves ]
+  letSubExps desc $ I.PrimOp . I.Replicate (I.Shape [ne']) <$> ves
 
 internaliseExp desc (E.Shape e _) = do
   ks <- internaliseExp (desc<>"_shape") e

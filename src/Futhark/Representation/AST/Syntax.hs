@@ -199,8 +199,8 @@ data PrimOp lore
   -- Array construction.
   | Iota SubExp SubExp SubExp
   -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@
-  | Replicate SubExp SubExp
-  -- ^ @replicate(3,1) = [1, 1, 1]@
+  | Replicate Shape SubExp
+  -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
   | Scratch PrimType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 

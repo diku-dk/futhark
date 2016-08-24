@@ -518,23 +518,23 @@ evalPrimOp (Iota e x s) = do
         bad $ NegativeIota $ fromIntegral x'
     _ -> bad $ TypeError "evalPrimOp Iota"
 
-evalPrimOp (Replicate e1 e2) = do
-  v1 <- evalSubExp e1
+evalPrimOp (Replicate (Shape ds) e2) = do
+  ds' <- mapM (asInt32 "Replicate" <=< evalSubExp) ds
+  let n = product ds'
   v2 <- evalSubExp e2
-  case v1 of
-    PrimVal (IntValue (Int32Value x))
-      | x >= 0    ->
-        case v2 of
-          PrimVal bv ->
-            return [ArrayVal (listArray (0,fromIntegral x-1) (genericReplicate x bv))
-                    (primValueType bv)
-                    [fromIntegral x]]
-          ArrayVal arr bt shape ->
-            return [ArrayVal (listArray (0,fromIntegral x*product shape-1)
-                              (concat $ genericReplicate x $ elems arr))
-                    bt (fromIntegral x:shape)]
-      | otherwise -> bad $ NegativeReplicate $ fromIntegral x
-    _   -> bad $ TypeError "evalPrimOp Replicate"
+  case find (<0) ds' of
+    Just x ->
+      bad $ NegativeReplicate $ fromIntegral x
+    Nothing ->
+      case v2 of
+        PrimVal bv ->
+          return [ArrayVal (listArray (0,fromIntegral n-1) (genericReplicate n bv))
+                  (primValueType bv) $
+                  map fromIntegral ds']
+        ArrayVal arr bt shape ->
+          return [ArrayVal (listArray (0,fromIntegral n*product shape-1)
+                            (concat $ genericReplicate n $ elems arr))
+                  bt $ map fromIntegral ds'++shape]
 
 evalPrimOp (Scratch bt shape) = do
   shape' <- mapM (asInt "evalPrimOp Scratch" <=< evalSubExp) shape

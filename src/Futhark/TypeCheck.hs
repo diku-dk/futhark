@@ -757,8 +757,8 @@ checkPrimOp (Iota e x s) = do
   require [Prim int32] x
   require [Prim int32] s
 
-checkPrimOp (Replicate countexp valexp) = do
-  require [Prim int32] countexp
+checkPrimOp (Replicate (Shape dims) valexp) = do
+  mapM_ (require [Prim int32]) dims
   void $ checkSubExp valexp
 
 checkPrimOp (Scratch _ shape) =
