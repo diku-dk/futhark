@@ -5,7 +5,7 @@
 -- ==
 -- tags { no_python }
 -- input { 100 }       output { 4950 }
--- compiled input { 100000000 } output { 887459712 }
+-- compiled input { 1000000 } output { 1783293664i32 }
 -- structure distributed { ScanKernel 2 Iota 0 }
 
 fun int main(int n) =
