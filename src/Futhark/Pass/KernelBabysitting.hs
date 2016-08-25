@@ -281,9 +281,17 @@ splitSlice (DimFix i:is) = first (i:) $ splitSlice is
 splitSlice is = ([], is)
 
 -- Try to move thread indexes into their proper position.
-coalescedIndexes :: (Eq a, Show a) => [a] -> [a] -> [a]
+coalescedIndexes :: [SubExp] -> [SubExp] -> [SubExp]
 coalescedIndexes tgids is =
-  reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
+  if (num_is > 0 && (not $ null tgids)) && ( (last is) == (last tgids) || (any isCt is) )
+  -- Do Nothing if:
+  -- 1. the innermost index is the innermost thread id
+  --    (because access is already coalesced)
+  -- 2. any of the indices is a constant, i.e., kernel free variable
+  --    (because it would transpose a bigger array then needed -- big overhead).
+  then is
+  -- Otherwise try fix coalescing
+  else reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
   where num_is = length is
 
         move is_rev (i, tgid)
@@ -304,6 +312,10 @@ coalescedIndexes tgids is =
         update 0 x (_:ys) = x : ys
         update i x (y:ys) = y : update (i-1) x ys
         update _ _ []     = error "coalescedIndexes: update"
+
+        isCt :: SubExp -> Bool
+        isCt (Constant _) = True
+        isCt (Var      _) = False
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
