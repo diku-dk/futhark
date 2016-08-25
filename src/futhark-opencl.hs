@@ -1,6 +1,5 @@
 module Main (main) where
 
-import Control.Category ((>>>))
 import Control.Monad.IO.Class
 import Data.Maybe
 import System.FilePath
@@ -12,20 +11,9 @@ import qualified System.Info
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
-import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
-import Futhark.Pass.ExplicitAllocations
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
-import Futhark.Optimise.InPlaceLowering
-import Futhark.Optimise.CSE
-import Futhark.Optimise.TileLoops
-import Futhark.Pass.Simplify
-import Futhark.Pass.ExtractKernels
-import Futhark.Pass.KernelBabysitting
-import Futhark.Pass.ExpandAllocations
-import Futhark.Pass.CoalesceMemoryAccesses
 import Futhark.Util.Options
-import Futhark.Optimise.DoubleBuffer
 
 main :: IO ()
 main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
@@ -35,7 +23,7 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  compilerPipeline (openclCodeAction filepath config) filepath
+  gpuPipeline (openclCodeAction filepath config) filepath
 
 openclCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 openclCodeAction filepath config =
@@ -91,26 +79,3 @@ outputFilePath srcfile =
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
   newFutharkConfig { futharkVerbose = compilerVerbose config }
-
-compilerPipeline :: Pipeline SOACS ExplicitMemory
-compilerPipeline =
-  standardPipeline >>>
-  onePass extractKernels >>>
-  passes [ simplifyKernels
-         , babysitKernels
-         , simplifyKernels
-         , tileLoops
-         , performCSE True
-         , simplifyKernels
-         , inPlaceLowering
-         ] >>>
-  onePass explicitAllocations >>>
-  passes [ simplifyExplicitMemory
-         , performCSE False
-         , simplifyExplicitMemory
-         , doubleBuffer
-         , simplifyExplicitMemory
-         , expandAllocations
-         , coalesceMemoryAccesses
-         , simplifyExplicitMemory
-         ]

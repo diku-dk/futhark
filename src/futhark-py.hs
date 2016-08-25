@@ -1,6 +1,5 @@
 module Main (main) where
 
-import Control.Category ((>>>))
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe
@@ -11,16 +10,9 @@ import System.Console.GetOpt
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
-import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
-import Futhark.Pass.ExplicitAllocations
 import qualified Futhark.CodeGen.Backends.SequentialPython as SequentialPy
-import Futhark.Optimise.InPlaceLowering
-import Futhark.Optimise.CSE
-import Futhark.Pass.FirstOrderTransform
-import Futhark.Pass.Simplify
 import Futhark.Util.Options
-import Futhark.Optimise.DoubleBuffer
 
 import Prelude
 
@@ -32,8 +24,7 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  compilerPipeline (pyCodeAction filepath config) filepath
-
+  sequentialPipeline (pyCodeAction filepath config) filepath
 
 pyCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 pyCodeAction filepath config =
@@ -90,18 +81,3 @@ outputFilePath srcfile =
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
   newFutharkConfig { futharkVerbose = compilerVerbose config }
-
-compilerPipeline :: Pipeline SOACS ExplicitMemory
-compilerPipeline =
-  standardPipeline >>>
-  onePass firstOrderTransform >>>
-  passes [ simplifyKernels
-         , inPlaceLowering
-         ] >>>
-  onePass explicitAllocations >>>
-  passes [ simplifyExplicitMemory
-         , performCSE False
-         , simplifyExplicitMemory
-         , doubleBuffer
-         , simplifyExplicitMemory
-         ]
