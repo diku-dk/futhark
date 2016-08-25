@@ -35,7 +35,7 @@ compileProg module_name prog = do
 
       let defines =
             [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
-             Assign (Var "cl_group_size") $ Constant $ value (512::Int32),
+             Assign (Var "cl_group_size") $ Constant $ value (256::Int32),
              Assign (Var "synchronous") $ Constant $ value False,
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
