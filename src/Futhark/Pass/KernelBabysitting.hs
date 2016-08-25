@@ -283,7 +283,7 @@ splitSlice is = ([], is)
 -- Try to move thread indexes into their proper position.
 coalescedIndexes :: [SubExp] -> [SubExp] -> [SubExp]
 coalescedIndexes tgids is =
-  if (num_is > 0 && (not $ null tgids)) && ( (last is) == (last tgids) || (any isCt is) )
+  if num_is > 0 && not (null tgids) && (last is == last tgids || any isCt is)
   -- Do Nothing if:
   -- 1. the innermost index is the innermost thread id
   --    (because access is already coalesced)
