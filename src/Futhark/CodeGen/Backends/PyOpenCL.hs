@@ -36,6 +36,7 @@ compileProg module_name prog = do
       let defines =
             [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
              Assign (Var "cl_group_size") $ Constant $ value (256::Int32),
+             Assign (Var "cl_num_groups") $ Constant $ value (128::Int32),
              Assign (Var "synchronous") $ Constant $ value False,
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
@@ -86,10 +87,10 @@ asLong x = Call "long" [Arg x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetNumGroups v) =
-  Py.stm $ Assign (Var (textual v)) $ Constant $ value (128::Int32)
+  Py.stm $ Assign (Var (textual v)) $ Var "cl_num_groups"
 
 callKernel (Imp.GetGroupSize v) =
-  Py.stm $ Assign (Var (textual v)) $ Constant $ value (512::Int32)
+  Py.stm $ Assign (Var (textual v)) $ Var "cl_group_size"
 
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
