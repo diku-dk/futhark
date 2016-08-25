@@ -7,7 +7,7 @@
 --
 -- ==
 -- tags { no_python }
--- compiled input { [1,2,3] 1000001 } output { 901824 }
+-- compiled input { [1,2,3] 100001 } output { 366240i32 }
 
 fun int main([n]int a, int m) =
   let contribs = replicate(m, a) in
