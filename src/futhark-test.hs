@@ -281,8 +281,9 @@ applyModeToAction mode (RunCases cases) =
   RunCases $ mapMaybe (applyModeToCase mode) cases
 
 applyModeToCase :: TestMode -> TestRun -> Maybe TestRun
-applyModeToCase OnlyInterpret run =
-  Just run { runMode = InterpretedOnly }
+applyModeToCase OnlyInterpret run
+  | CompiledOnly <- runMode run = Nothing
+  | otherwise = Just run { runMode = InterpretedOnly }
 applyModeToCase OnlyCompile run =
   Just run { runMode = CompiledOnly }
 applyModeToCase OnTravis run | runMode run == NoTravis =
