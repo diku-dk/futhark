@@ -17,6 +17,7 @@ import Futhark.Pass.ExplicitAllocations
 import qualified Futhark.CodeGen.Backends.PyOpenCL as PyOpenCL
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.CSE
+import Futhark.Optimise.TileLoops
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.KernelBabysitting
@@ -98,6 +99,7 @@ compilerPipeline =
   passes [ simplifyKernels
          , babysitKernels
          , simplifyKernels
+         , tileLoops
          , performCSE True
          , simplifyKernels
          , inPlaceLowering

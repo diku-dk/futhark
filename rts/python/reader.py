@@ -3,6 +3,7 @@
 # code generator.
 
 import numpy as np
+import string
 
 lookahead_buffer = []
 
@@ -78,13 +79,25 @@ def sepBy(p, sep, *args):
 def parse_int(f):
     s = ''
     c = get_char(f)
-    while c != None:
-        if c.isdigit():
-            s += c
-            c = get_char(f)
-        else:
-            unget_char(f, c)
-            break
+    if c == '0' and peek_char(f) in ['x', 'X']:
+        c = get_char(f) # skip X
+        c = get_char(f)
+        while c != None:
+            if c in string.hexdigits:
+                s += c
+                c = get_char(f)
+            else:
+                unget_char(f, c)
+                s = str(int(s, 16))
+                break
+    else:
+        while c != None:
+            if c.isdigit():
+                s += c
+                c = get_char(f)
+            else:
+                unget_char(f, c)
+                break
     optional(read_int_trailer, f)
     return s
 
