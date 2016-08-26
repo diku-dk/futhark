@@ -394,8 +394,14 @@ FloatType :: { (FloatType, SrcLoc) }
           | f64  { (Float64, $1) }
 
 Params :: { [ParamBase NoInfo Name] }
-Params : id ':' UserTypeDecl { let L pos (ID name) = $1 in [Param name $3 pos] }
-       | Params ',' Params   { $1 ++ $3 }
+Params : Param ',' SomeParams   { $1 : $3 }
+       | Param                  { [$1] }
+       |                        { [] }
+
+SomeParams : Param                { [$1] }
+           | Param ',' SomeParams { $1 : $3 }
+
+Param : id ':' UserTypeDecl { let L pos (ID name) = $1 in Param name $3 pos }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -574,10 +580,14 @@ LoopForm : for Id '<' Exp
          | while Exp      { While $2 }
 
 Slice :: { [UncheckedDimIndex] }
-     : '[' DimIndices ']'                  { $2 }
+      : '[' DimIndices ']'               { $2 }
 
-DimIndices : DimIndices ',' DimIndices { $1 ++ $3 }
-           | DimIndex                  { [$1] }
+DimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
+           | DimIndex                    { [$1] }
+           |                             { [] }
+
+SomeDimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
+               | DimIndex                    { [$1] }
 
 DimIndex :: { UncheckedDimIndex }
          : Exp { DimFix $1 }
