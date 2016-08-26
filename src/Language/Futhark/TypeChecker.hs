@@ -371,11 +371,6 @@ newIdent s t loc = do
   s' <- newID $ nameFromString s
   return $ Ident s' (Info t) loc
 
-newParam :: String -> Type -> SrcLoc -> TypeM (ParamBase NoInfo VName)
-newParam s t loc = do
-  s' <- newIDFromString s
-  return $ Param s' (TypeDecl (contractTypeBase t) NoInfo) loc
-
 liftEither :: Either TypeError a -> TypeM a
 liftEither = either bad return
 
@@ -476,8 +471,8 @@ bindingParams params m =
   -- presently non-bound shape annotations.
   binding (map fromParam params) $
   -- Figure out the not already bound shape annotations.
-  binding (concat [ mapMaybe (inspectDim $ srclocOf param) $
-                    nestedDims' $ paramDeclaredType param
+  binding (concat [ mapMaybe (inspectDim (srclocOf param)) $
+                    maybe [] nestedDims' $ paramDeclaredType param
                   | param <- params])
   m
   where inspectDim _ AnyDim =
@@ -611,14 +606,19 @@ buildScopeFromDecs decs = do
     buildTAtable = typeAliasTableFromProg (mapMaybe (isType . FunOrTypeDec) decs)
 
     expandFun scope fntable (FunDef _ (name,_) (TypeDecl ret NoInfo) args _ pos) = do
-        let argtypes = map paramDeclaredType args
-            (prefixes, _) = envBreadcrumb scope
-            look tname tloc =
-              maybe (throwError $ UndefinedQualName tloc tname) return $
-              typeFromScope tname scope
-        ret' <- expandType look ret
-        argtypes' <- mapM (expandType look) argtypes
-        return $ HM.insert name ( (prefixes, name) , ret' , argtypes' , pos) fntable
+      argtypes <- forM args $ \arg ->
+        case paramDeclaredType arg of
+          Just t -> return t
+          Nothing -> bad $ TypeError (srclocOf arg) $
+                     "Missing type declaration for parameter " ++
+                     pretty (baseName (paramName arg))
+      let (prefixes, _) = envBreadcrumb scope
+          look tname tloc =
+            maybe (throwError $ UndefinedQualName tloc tname) return $
+            typeFromScope tname scope
+      ret' <- expandType look ret
+      argtypes' <- mapM (expandType look) argtypes
+      return $ HM.insert name ( (prefixes, name) , ret' , argtypes' , pos) fntable
     rmLoc (longname, ret,args,_) = (longname, ret, args)
     addLoc (longname, t, ts) = (longname, t, ts, noLoc)
 
@@ -715,10 +715,9 @@ checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
 checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
   rettype' <- checkTypeDecl rettype
   let rettype_structural = toStructural $ unInfo $ expandedType rettype'
-  params' <- checkParams
-  body' <- bindingParams params' $ do
-    checkRetType loc $ unInfo $ expandedType rettype'
-    checkExp body
+  params' <- mapM checkParam params
+  body' <- bindingParams params' $
+           checkFunBody fname params' body (Just rettype') loc
 
   checkReturnAlias rettype_structural params' $ typeOf body'
 
@@ -730,37 +729,9 @@ checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
       unless (okEntryPointParamType (paramType param)) $
         bad $ InvalidEntryPointParamType (srclocOf param) fname (baseName $ paramName param)
 
-  if toStructural (typeOf body') `subtypeOf` rettype_structural then
-    return $ FunDef entry fullname rettype' params' body' loc
-  else bad $ ReturnTypeError loc fname rettype_structural $ toStructural $ typeOf body'
+  return $ FunDef entry fullname rettype' params' body' loc
 
-  where
-        checkParams = do
-          -- First find all normal parameters (checking for duplicates).
-          params1' <- foldM checkNormParams [] params
-          -- Then check shape annotations (where duplicates are OK, as
-          -- long as it's not a duplicate of a normal parameter.)
-          mapM_ checkDimDecls params1'
-          return $ reverse params1'
-
-        checkNormParams knownparams param
-          | paramName param `elem` map paramName knownparams =
-            bad $ DupParamError fname (baseName $ paramName param) loc
-          | otherwise = do
-              -- For now, the expanded type is the same as the declared type.
-              param' <- checkParam param
-              return $ param' : knownparams
-
-        checkDimDecls param
-          | Just name <- find (`elem` map paramName params) boundDims =
-            bad $ DupParamError fname (baseName name) loc
-          | otherwise =
-            return ()
-          where boundDims = mapMaybe boundDim $ nestedDims $ paramType param
-                boundDim (NamedDim name) = Just name
-                boundDim _ = Nothing
-
-        notAliasingParam params' names =
+  where notAliasingParam params' names =
           forM_ params' $ \p ->
             when (not (unique $ paramType p) &&
                   paramName p `HS.member` names) $
@@ -795,6 +766,47 @@ checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
         okEntryPointParamType (Array TupleArray{}) = False
         okEntryPointParamType (Array _) = True
 
+checkFunBody :: Name
+             -> [ParamBase Info VName]
+             -> ExpBase NoInfo VName
+             -> Maybe (TypeDeclBase Info VName)
+             -> SrcLoc
+             -> TypeM Exp
+checkFunBody fname params body maybe_rettype loc = do
+  validateParams
+  body' <- checkExp body
+
+  case maybe_rettype of
+    Just rettype -> do
+      checkRetType loc $ unInfo $ expandedType rettype
+      let rettype_structural = toStructural $ unInfo $ expandedType rettype
+      unless (toStructural (typeOf body') `subtypeOf` rettype_structural) $
+        bad $ ReturnTypeError loc fname rettype_structural $ toStructural $ typeOf body'
+    Nothing -> return ()
+
+  return body'
+
+  where validateParams = do
+          -- First find all normal parameters (checking for duplicates).
+          params' <- foldM checkNormParams [] params
+          -- Then check shape annotations (where duplicates are OK, as
+          -- long as it's not a duplicate of a normal parameter.)
+          mapM_ checkDimDecls params'
+
+        checkNormParams knownparams param
+          | paramName param `elem` map paramName knownparams =
+              bad $ DupParamError fname (baseName $ paramName param) loc
+          | otherwise =
+              return $ param : knownparams
+
+        checkDimDecls param
+          | Just name <- find (`elem` map paramName params) boundDims =
+            bad $ DupParamError fname (baseName name) loc
+          | otherwise =
+            return ()
+          where boundDims = mapMaybe boundDim $ nestedDims $ paramType param
+                boundDim (NamedDim name) = Just name
+                boundDim _ = Nothing
 
 checkExp :: ExpBase NoInfo VName
          -> TypeM Exp
@@ -881,7 +893,7 @@ checkExp (Apply fname args _ loc) = do
       let rettype' = returnType (removeShapeAnnotations ftype)
                      (map diet paramtypes) (map typeOf args')
 
-      checkFuncall (Just fname) loc paramtypes ftype argflows
+      checkFuncall (Just fname) loc paramtypes argflows
 
       return $ Apply longname (zip args' $ map diet paramtypes) (Info rettype') loc
 
@@ -1366,8 +1378,20 @@ checkIdent (Ident name _ pos) = do
 
 checkParam :: ParamBase NoInfo VName
            -> TypeM (ParamBase Info VName)
-checkParam (Param name decl loc) =
-  Param name <$> checkTypeDecl decl <*> pure loc
+checkParam (Param name (Just decl) NoInfo loc) = do
+  decl' <- checkTypeDecl decl
+  return $ Param name (Just decl') (expandedType decl') loc
+checkParam (Param name Nothing NoInfo loc) =
+  bad $ TypeError loc $ "Missing type ascription for parameter " ++ baseString name
+
+checkLambdaParam :: ParamBase NoInfo VName
+                 -> StructTypeBase VName
+                 -> TypeM (ParamBase Info VName)
+checkLambdaParam (Param name (Just decl) NoInfo loc) _ = do
+  decl' <- checkTypeDecl decl
+  return $ Param name (Just decl') (expandedType decl') loc
+checkLambdaParam (Param name Nothing NoInfo loc) t =
+  return $ Param name Nothing (Info $ t `setUniqueness` Nonunique) loc
 
 checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
@@ -1476,9 +1500,9 @@ checkArg arg = do
   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
 checkFuncall :: Maybe QualName -> SrcLoc
-             -> [StructType] -> StructType -> [Arg]
+             -> [StructType] -> [Arg]
              -> TypeM ()
-checkFuncall fname loc paramtypes _ args = do
+checkFuncall fname loc paramtypes args = do
   let argts = map argType args
 
   unless (validApply paramtypes argts) $
@@ -1498,42 +1522,31 @@ consumeArg loc at _       = [observation (aliases at) loc]
 
 checkLambda :: LambdaBase NoInfo VName -> [Arg]
             -> TypeM Lambda
-checkLambda (AnonymFun params body ret pos) args = do
-  params' <- mapM checkParam params
-  case () of
-    _ | length params == length args -> do
-          FunDef _ _ ret' params'' body' _ <-
-            noUnique $ checkFun (FunDef False (nameFromString "<anonymous>", blankLongname) ret params body pos)
-          checkFuncall Nothing pos (map paramType params') (unInfo $ expandedType ret') args
-          return $ AnonymFun params'' body' ret' pos
-      | [(Tuple ets, _, _)] <- args,
-        validApply (map paramType params') ets -> do
-          -- The function expects N parameters, but the argument is a
-          -- single N-tuple whose types match the parameters.
-          -- Generate a shim to make it fit.
-          FunDef _ _ ret' _ body' _ <-
-            noUnique $ checkFun (FunDef False (nameFromString "<anonymous>", blankLongname ) ret params body pos)
-          tupident <- newIdent "tup_shim"
-                      (Tuple $ map (fromStruct .
-                                    removeShapeAnnotations .
-                                    paramType) params')
-                      pos
-          let untype ident = ident { identType = NoInfo }
-              paramtype = UserTuple (map paramDeclaredType params) pos
-              tupparam = Param (identName tupident) (TypeDecl paramtype NoInfo) $
-                         srclocOf tupident
-              tupfun = AnonymFun [tupparam] tuplet ret pos
-              tuplet = LetPat (TuplePattern (map (Id . untype . fromParam) params') pos)
-                              (Var $ untype tupident) body pos
-          _ <- checkLambda tupfun args
-          return $ AnonymFun params' body' ret' pos
-      | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params') ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+checkLambda (AnonymFun params body ret loc) args
+  | length params == length args = do
+      params' <- zipWithM checkLambdaParam params $
+                 map ((`setAliases` NoInfo) . vacuousShapeAnnotations . argType) args
+      ret' <- checkTypeDecl ret
+      body' <- bindingParams params' $
+        checkFunBody (nameFromString "<anonymous>") params' body (Just ret') loc
+      checkFuncall Nothing loc (map paramType params') args
+      return $ AnonymFun params' body' ret' loc
+  | [(Tuple ets, arg_occ, arg_loc)] <- args,
+    length params == length ets = do
+      -- The function expects N parameters, but the argument is a
+      -- single N-tuple.  Simulate a call with N arguments instead.
+      let args' = case ets of
+                    first_t:ts -> (first_t `setUniqueness` Nonunique, arg_occ, arg_loc) :
+                                  [(t `setUniqueness` Nonunique, mempty, arg_loc) | t <- ts]
+                    [] -> []
+      checkLambda (AnonymFun params body ret loc) args'
+  | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun fname curryargexps _ pos) args = do
+checkLambda (CurryFun fname curryargexps _ loc) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   bnd <- asks (funFromScope fname)
   case bnd of
-    Nothing -> bad $ UnknownFunctionError fname pos
+    Nothing -> bad $ UnknownFunctionError fname loc
     Just (longname, rt, paramtypes) -> do
 
       let rettype' = fromStruct $ removeShapeAnnotations rt
@@ -1541,39 +1554,28 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
       case () of
         _ | [(Tuple ets, _, _)] <- args,
             validApply paramtypes ets -> do
-              -- Same shimming as in the case for anonymous functions.
-              let mkparam i t = newIdent ("param_" ++ show i) t pos
+              -- Similar shimming as in the case for anonymous functions.
+              let mkparam i t = newIdent ("param_" ++ show i) t loc
 
               params <- zipWithM mkparam [(0::Int)..] paramtypes'
               paramname <- newIDFromString "x"
 
-              let paramtype = Tuple paramtypes
-                  paramtype' = contractTypeBase paramtype
-                  tupparam = Param paramname (TypeDecl paramtype' NoInfo) pos
-                  tuplet = LetPat (TuplePattern (map (Id . untype) params) pos)
-                           (Var $ Ident paramname NoInfo pos) body pos
+              let tupparam = Param paramname Nothing NoInfo loc
+                  tuplet = LetPat (TuplePattern (map (Id . untype) params) loc)
+                           (Var $ Ident paramname NoInfo loc) body loc
                   tupfun = AnonymFun [tupparam] tuplet
-                           (TypeDecl (contractTypeBase rt) NoInfo) pos
+                           (TypeDecl (contractTypeBase rt) NoInfo) loc
                   body = Apply fname [(Var $ untype param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes']
-                         NoInfo pos
+                         NoInfo loc
               void $ checkLambda tupfun args
-              return $ CurryFun longname curryargexps' (Info rettype') pos
+              return $ CurryFun longname curryargexps' (Info rettype') loc
           | otherwise -> do
               case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
                 _           -> return ()
-              let mkparam i t = newParam ("param_" ++ show i) t pos
-                  asIdent p = Ident (paramName p) NoInfo $ srclocOf p
-              params <- zipWithM mkparam [(0::Int)..] $
-                        drop (length curryargs) paramtypes'
-              let fun = AnonymFun params body
-                        (TypeDecl (contractTypeBase rt) NoInfo) pos
-                  body = Apply fname (zip (curryargexps++map (Var . asIdent) params) $
-                                      map diet paramtypes)
-                         NoInfo pos
-              void $ checkLambda fun args
-              return $ CurryFun longname curryargexps' (Info rettype') pos
+              checkFuncall Nothing loc paramtypes $ curryargs ++ args
+              return $ CurryFun longname curryargexps' (Info rettype') loc
     where untype ident = ident { identType = NoInfo }
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do

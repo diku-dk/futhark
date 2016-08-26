@@ -83,11 +83,13 @@ repl (Ident name NoInfo loc) = do
 declRepl :: (Eq f, Hashable f) =>
             ParamBase NoInfo f
          -> RenameM f t (ParamBase NoInfo t)
-declRepl (Param name (TypeDecl tp NoInfo) loc) = do
+declRepl (Param name (Just (TypeDecl tp NoInfo)) NoInfo loc) = do
   name' <- replName name
   tp' <- renameUserType tp
-  return $ Param name' (TypeDecl tp' NoInfo) loc
-
+  return $ Param name' (Just (TypeDecl tp' NoInfo)) NoInfo loc
+declRepl (Param name Nothing NoInfo loc) = do
+  name' <- replName name
+  return $ Param name' Nothing NoInfo loc
 
 replName :: (Eq f, Hashable f) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
@@ -111,8 +113,7 @@ bindParams :: (Ord f, Hashable f) =>
            -> RenameM f t a
 bindParams params =
   bindNames (map paramName params) .
-  bindNames (concatMap (mapMaybe inspectDim . nestedDims' . paramDeclaredType) params)
---  bindNames (concatMap (mapMaybe inspectDim . nestedDims . paramDeclaredType) params)
+  bindNames (concatMap (mapMaybe inspectDim . maybe [] nestedDims' . paramDeclaredType) params)
   where inspectDim AnyDim =
           Nothing
         inspectDim (ConstDim _) =
