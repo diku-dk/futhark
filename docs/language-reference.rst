@@ -366,8 +366,8 @@ An array consisting of ``n`` copies of ``a``.
 ``shape(a)``
 ~~~~~~~~~~~~~~
 
-The shape array ``a`` as an integer array.  It is often more readable
-to use shape declaration names instead of ``shape``.
+The shape of array ``a`` as an integer array.  It is often more
+readable to use shape declaration names instead of ``shape``.
 
 ``split((i_1, ..., i_n), a)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
