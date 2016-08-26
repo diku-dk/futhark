@@ -1065,7 +1065,7 @@ checkExp (Partition funs arrexp pos) = do
 
   return $ Partition funs' arrexp' pos
 
-checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr pos) = do
+checkExp (Stream form lam@(AnonymFun lam_ps _ (Just (TypeDecl lam_rtp NoInfo)) NoInfo _) arr pos) = do
   lam_ps' <- mapM checkParam lam_ps
   let isArrayType arrtp =
         case arrtp of
@@ -1522,15 +1522,18 @@ consumeArg loc at _       = [observation (aliases at) loc]
 
 checkLambda :: LambdaBase NoInfo VName -> [Arg]
             -> TypeM Lambda
-checkLambda (AnonymFun params body ret loc) args
+checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
   | length params == length args = do
       params' <- zipWithM checkLambdaParam params $
                  map ((`setAliases` NoInfo) . vacuousShapeAnnotations . argType) args
-      ret' <- checkTypeDecl ret
+      maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
       body' <- bindingParams params' $
-        checkFunBody (nameFromString "<anonymous>") params' body (Just ret') loc
+        checkFunBody (nameFromString "<anonymous>") params' body maybe_ret' loc
       checkFuncall Nothing loc (map paramType params') args
-      return $ AnonymFun params' body' ret' loc
+      let ret' = case maybe_ret' of
+                   Nothing -> flip setAliases NoInfo $ vacuousShapeAnnotations $ typeOf body'
+                   Just (TypeDecl _ (Info ret)) -> ret
+      return $ AnonymFun params' body' maybe_ret' (Info ret') loc
   | [(Tuple ets, arg_occ, arg_loc)] <- args,
     length params == length ets = do
       -- The function expects N parameters, but the argument is a
@@ -1539,7 +1542,7 @@ checkLambda (AnonymFun params body ret loc) args
                     first_t:ts -> (first_t `setUniqueness` Nonunique, arg_occ, arg_loc) :
                                   [(t `setUniqueness` Nonunique, mempty, arg_loc) | t <- ts]
                     [] -> []
-      checkLambda (AnonymFun params body ret loc) args'
+      checkLambda (AnonymFun params body maybe_ret NoInfo loc) args'
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do
@@ -1563,8 +1566,7 @@ checkLambda (CurryFun fname curryargexps _ loc) args = do
               let tupparam = Param paramname Nothing NoInfo loc
                   tuplet = LetPat (TuplePattern (map (Id . untype) params) loc)
                            (Var $ Ident paramname NoInfo loc) body loc
-                  tupfun = AnonymFun [tupparam] tuplet
-                           (TypeDecl (contractTypeBase rt) NoInfo) loc
+                  tupfun = AnonymFun [tupparam] tuplet Nothing NoInfo loc
                   body = Apply fname [(Var $ untype param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes']
                          NoInfo loc

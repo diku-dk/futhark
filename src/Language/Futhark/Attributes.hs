@@ -691,7 +691,7 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
 -- | The specified return type of a lambda.
 lambdaReturnType :: Ord vn =>
                     LambdaBase Info vn -> TypeBase Rank NoInfo vn
-lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations $ unInfo $ expandedType t
+lambdaReturnType (AnonymFun _ _ _ (Info t) _) = removeShapeAnnotations t
 lambdaReturnType (CurryFun _ _ (Info t) _) = toStruct t
 lambdaReturnType (UnOpFun _ _ (Info t) _) = toStruct t
 lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toStruct t

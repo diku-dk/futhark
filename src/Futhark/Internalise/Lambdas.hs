@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Internalise.Lambdas
   ( InternaliseLambda
   , internaliseMapLambda
@@ -12,6 +13,7 @@ import Control.Applicative
 import Control.Monad
 import Data.List
 import Data.Loc
+import qualified Data.HashSet as HS
 
 import Language.Futhark as E
 import Futhark.Representation.SOACS as I
@@ -19,6 +21,8 @@ import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
+import Futhark.Representation.SOACS.Simplify (simplifyLambda)
+import Futhark.Optimise.DeadVarElim (deadCodeElimLambda)
 
 import Prelude hiding (mapM)
 
@@ -61,17 +65,30 @@ bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM ()
 bindMapShapes inner_shapes sizefun args outer_shape
   | null $ I.lambdaReturnType sizefun = return ()
-  | otherwise =
-    letBind_ (basicPattern' [] inner_shapes) =<<
-    eIf isempty emptybranch nonemptybranch
-  where zero = constant (0::I.Int32)
-        isempty = eCmpOp (I.CmpEq I.int32)
-                  (pure $ I.PrimOp $ I.SubExp outer_shape)
-                  (pure $ I.PrimOp $ SubExp zero)
-        emptybranch =
+  | otherwise = do
+      let size_args = replicate (length $ lambdaParams sizefun) Nothing
+      sizefun' <- deadCodeElimLambda <$> simplifyLambda sizefun Nothing size_args
+      let sizefun_safe =
+            all (I.safeExp . I.bindingExp) $ I.bodyBindings $ I.lambdaBody sizefun'
+          sizefun_arg_invariant =
+            not $ any (`HS.member` freeInBody (I.lambdaBody sizefun')) $
+            map I.paramName $ lambdaParams sizefun'
+      if sizefun_safe && sizefun_arg_invariant
+        then do ses <- bodyBind $ lambdaBody sizefun'
+                forM_ (zip inner_shapes ses) $ \(v, se) ->
+                  letBind_ (basicPattern' [] [v]) $ I.PrimOp $ I.SubExp se
+        else letBind_ (basicPattern' [] inner_shapes) =<<
+             eIf isempty emptybranch nonemptybranch
+
+  where emptybranch =
           pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
         nonemptybranch = insertBindingsM $
           resultBody <$> (eLambda sizefun =<< mapM index0 args)
+
+        isempty = eCmpOp (I.CmpEq I.int32)
+                  (pure $ I.PrimOp $ I.SubExp outer_shape)
+                  (pure $ I.PrimOp $ SubExp zero)
+        zero = constant (0::I.Int32)
         index0 arg = do
           arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
           arg_t <- lookupType arg'

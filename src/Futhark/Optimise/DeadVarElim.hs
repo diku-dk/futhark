@@ -4,6 +4,7 @@ module Futhark.Optimise.DeadVarElim
        ( deadCodeElim
        , deadCodeElimFun
        , deadCodeElimBody
+       , deadCodeElimLambda
        )
   where
 
@@ -69,6 +70,11 @@ deadCodeElimFun (FunDef entry fname rettype args body) =
 -- | Applies Dead-Code Elimination to just a single body.
 deadCodeElimBody :: Attributes lore => Body lore -> Body lore
 deadCodeElimBody = fst . runDCElimM . deadCodeElimBodyM
+
+-- | Applies Dead-Code Elimination to just a single lambda.
+deadCodeElimLambda :: Attributes lore => Lambda lore -> Lambda lore
+deadCodeElimLambda lam =
+  lam { lambdaBody = fst $ runDCElimM $ deadCodeElimBodyM $ lambdaBody lam }
 
 --------------------------------------------------------------------
 --------------------------------------------------------------------

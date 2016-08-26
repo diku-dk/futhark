@@ -317,7 +317,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBa
   ppr (CurryFun fname [] _ _) = text $ longnameToString fname
   ppr (CurryFun fname curryargs _ _) =
     text (longnameToString fname) <+> apply (map ppr curryargs)
-  ppr (AnonymFun params body rettype _) =
+  ppr (AnonymFun params body rettype _ _) =
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)

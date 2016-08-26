@@ -499,7 +499,7 @@ internaliseExp desc (E.Partition lams arr _) = do
       I.identName partition_perm
   where n = length lams + 1
 
-internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr _) = do
+internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body maybe_ret lamrtp pos) arr _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
   accs' <- case form of
              E.MapLike _         -> return []
@@ -512,7 +512,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
                               NoUniqueness
                               | t <- rowts
                              ]
-                 lamf = AnonymFun remparams body lamrtp pos
+                 lamf = AnonymFun remparams body maybe_ret lamrtp pos
              lam'' <- internaliseStreamLambda internaliseLambda asserting lamf accs' lam_arrs'
              return $ lam'' { extLambdaParams = fmap I.fromDecl chunk' : extLambdaParams lam'' }
   form' <- case form of
@@ -888,13 +888,13 @@ simpleCmpOp desc op x y =
 
 internaliseLambda :: InternaliseLambda
 
-internaliseLambda (E.AnonymFun params body (TypeDecl _ (Info rettype)) _) (Just rowtypes) = do
+internaliseLambda (E.AnonymFun params body _ (Info rettype) _) (Just rowtypes) = do
   (body', params') <- bindingLambdaParams params rowtypes $
                       internaliseBody body
   (rettype', _) <- internaliseReturnType rettype
   return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.AnonymFun params body (TypeDecl _ (Info rettype)) _) Nothing = do
+internaliseLambda (E.AnonymFun params body _ (Info rettype) _) Nothing = do
   (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
     body' <- internaliseBody body
     (rettype', _) <- internaliseReturnType rettype
@@ -947,21 +947,21 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
 
 internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
-  internaliseLambda (E.AnonymFun params body (typeToTypeDecl rettype') loc) rowts
+  internaliseLambda (E.AnonymFun params body Nothing (Info rettype') loc) rowts
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
-  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
+  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
+  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
-  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
+  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
 
 unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
@@ -1015,10 +1015,6 @@ binOpCurriedToLambda op paramtype rettype e swap = do
   return ([param],
           E.BinOp op x' y' (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
-
-typeToTypeDecl :: E.TypeBase ShapeDecl NoInfo VName
-               -> E.TypeDeclBase Info VName
-typeToTypeDecl t = TypeDecl (E.contractTypeBase t) $ Info t
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
