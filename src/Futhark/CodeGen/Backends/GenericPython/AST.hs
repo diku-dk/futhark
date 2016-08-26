@@ -93,8 +93,12 @@ instance Pretty PyExp where
     ppr (Constant (IntValue (Int16Value v))) = text "np.int16" <> parens (text $ show v)
     ppr (Constant (IntValue (Int32Value v))) = text "np.int32" <> parens (text $ show v)
     ppr (Constant (IntValue (Int64Value v))) = text "np.int64" <> parens (text $ show v)
-    ppr (Constant (FloatValue (Float32Value v))) = text "np.float32" <> parens (text $ show v)
-    ppr (Constant (FloatValue (Float64Value v))) = text "np.float64" <> parens (text $ show v)
+    ppr (Constant (FloatValue (Float32Value v))) = text "np.float32" <> parens v'
+      where v' | isInfinite v = text $ if v > 0 then "np.inf" else "-np.inf"
+               | otherwise =  parens $ text $ show v
+    ppr (Constant (FloatValue (Float64Value v))) = text "np.float64" <> parens v'
+      where v' | isInfinite v = text $ if v > 0 then "np.inf" else "-np.inf"
+               | otherwise =  text $ show v
     ppr (Constant Checked) = text "Checked"
     ppr (Constant (BoolValue b)) = ppr b
     ppr (StringLiteral s) = text $ show s
