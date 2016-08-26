@@ -399,10 +399,7 @@ FloatType :: { (FloatType, SrcLoc) }
           | f64  { (Float64, $1) }
 
 Params :: { [ParamBase NoInfo Name] }
-Params : UserTypeDecl id ',' Params { let L pos (ID name) = $2 in (Param name $1 pos) : $4 }
-       | UserTypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
-
-       | id ':' UserTypeDecl ',' Params { let L pos (ID name) = $1 in (Param name $3 pos) : $5 }
+Params : id ':' UserTypeDecl ',' Params { let L pos (ID name) = $1 in (Param name $3 pos) : $5 }
        | id ':' UserTypeDecl            { let L pos (ID name) = $1 in [Param name $3 pos] }
 
 Exp  :: { UncheckedExp }
