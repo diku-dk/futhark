@@ -10,7 +10,7 @@
 --   [[0,0,0], [0,0,0], [0,42,0]]
 -- }
 
-fun [][]int main(int n, int i, int j, int x) =
+fun main(n: int, i: int, j: int, x: int): [][]int =
   let a = replicate(n, replicate(n, 0)) in
   let b = replicate(n, 0) in
   let b[i] = x in

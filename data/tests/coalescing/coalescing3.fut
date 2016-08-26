@@ -6,8 +6,8 @@
 --           [5i32, 5i32, 1i32, 10i32, 10i32, 1i32, 2i32],
 --           [4i32, 3i32, 6i32, 11i32, 1i32, 6i32, 1i32]] }
 
-fun [][]int main(*[n][m]int rss) =
-  map(fn [m]int (*[]int rs) =>
+fun main(rss: *[n][m]int): [][]int =
+  map(fn (rs: *[]int): [m]int  =>
         loop (rs) = for i < m do
           let rs[i] = rs[i] + 1
           in rs

@@ -7,7 +7,7 @@
 --   [9,6,5,4,3,2]
 -- }
 
-fun int add(int x, int y) = x + y
+fun add(x: int, y: int): int = x + y
 
-fun []int main([]int a) =
+fun main(a: []int): []int =
   map(add(1), a)

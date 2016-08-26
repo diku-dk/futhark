@@ -16,8 +16,7 @@
 --    [[0, 0, 1], [5, 6, 7]]]
 -- }
 
-fun [n][t][m]int
-  main([k]i32 indexes,
-       [k][t][m]int values,
-       *[n][t][m]int array) =
+fun main(indexes: [k]i32,
+       values: [k][t][m]int,
+       array: *[n][t][m]int): [n][t][m]int =
   write(indexes, values, array)

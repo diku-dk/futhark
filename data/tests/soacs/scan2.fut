@@ -14,10 +14,10 @@
 --   2.000000
 -- }
 
-fun f64 main([][][]f64 bb_mat, [][]f64 e_rows) =
+fun main(bb_mat: [][][]f64, e_rows: [][]f64): f64 =
   let md_st = [42.0] in
-  let a = map(fn [][]f64 ([][]f64 bb_arr_431) =>
-                scan(fn []f64 ([]f64 x_657, []f64 y_658) => [2.0],
+  let a = map(fn (bb_arr_431: [][]f64): [][]f64  =>
+                scan(fn (x_657: []f64, y_658: []f64): []f64  => [2.0],
                      md_st, e_rows)
              , bb_mat) in
   a[0,0,0]

@@ -1,14 +1,14 @@
 -- This program does not contain a redomap on its own, but fusion will
 -- give rise to one.
 
-fun int grayCode(int x) =
+fun grayCode(x: int): int =
   (x >> 1) ^ x
 
-fun bool testBit(int n, int ind) =
+fun testBit(n: int, ind: int): bool =
   let t = (1 << ind) in (n & t) == t
 
-fun int main(int n, [num_bits]int dir_vs) =
-  let reldv_vals = map( fn int (int dv, int i) =>
+fun main(n: int, dir_vs: [num_bits]int): int =
+  let reldv_vals = map( fn (dv: int, i: int): int  =>
                           if testBit(grayCode(n),i)
                           then dv else 0
                       , zip(dir_vs,iota(num_bits)) ) in

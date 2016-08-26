@@ -41,7 +41,7 @@ First-order Futhark
 An Futhark program consists of a sequence of *function definitions*,
 of the following form::
 
-   fun return_type name(params...) = body
+   fun name(params...) : return_type = body
 
 A function must declare both its return type and the types of all its
 parameters.  All functions (except for inline anonymous functions; see
@@ -50,7 +50,7 @@ Symbolic constants are not supported, although 0-ary functions can be
 defined.  As a concrete example, here is the recursive definition of
 the factorial function in Futhark::
 
-  fun int fact(int n) =
+  fun fact(n: int) : int =
     if n == 0 then 1
               else n * fact(n-1)
 
@@ -112,11 +112,11 @@ tuples, but this can only be done in ``let``-bindings, and not
 directly in a function argument list.  Specifically, the following
 function definition is not valid::
 
-  fun int sumpair((int, int) (x, y)) = x + y -- WRONG!
+  fun sumpair((x, y): (int, int)): int = x + y -- WRONG!
 
 Instead, we must use a ``let``-binding explicitly, as follows::
 
-  fun int sumpair((int, int) t) =
+  fun sumpair(t: (int, int)): int =
     let (x,y) = t in x + y
 
 Pattern-matching in a binding is the only way to access the components
@@ -133,14 +133,14 @@ Futhark has a built-in syntax for expressing certain tail-recursive
 functions.  Consider the following tail-recursive formulation of a
 function for computing the Fibonacci numbers::
 
-  fun int fib(int n) = fibhelper(1,1,n)
+  fun fib(n: int): int = fibhelper(1,1,n)
 
-  fun int fibhelper(int x, int y, int n) =
+  fun fibhelper(x: int, y: int, n: int): int =
     if n == 1 then x else fibhelper(y, x+y, n-1)
 
 We can rewrite this using the ``loop`` construct::
 
-  fun int fib(int n) =
+  fun fib(n: int): int =
     loop ((x, y) = (1,1)) = for i < n do
                               (y, x+y)
     in x
@@ -173,7 +173,7 @@ For example, denoting by ``t`` the type of ``x``, this loop::
 
 has the semantics of a call to this tail-recursive function::
 
-  fun t f(int i, int n, t x) =
+  fun f(i: int, n: int, x: t): t =
     if i >= n then x
        else f(i+1, n, g(x))
 
@@ -197,7 +197,7 @@ used for convergence loops, where the number of iterations cannot be
 predicted in advance.  For example, the following program doubles a
 given number until it exceeds a given threshold value::
 
-  fun int main(int x, int bound) =
+  fun main(x: int, bound: int): int =
     loop (x) = while x < bound do x * 2
     in x
 
@@ -208,7 +208,7 @@ For brevity, the initial value expression can be elided, in which case
 an expression equivalent to the pattern is implied.  This is easier to
 understand with an example.  The loop::
 
-  fun int fib(int n) =
+  fun fib(n: int): int =
     let x = 1
     let y = 1
     loop ((x, y) = (x, y)) = for i < n do (y, x+y)
@@ -216,7 +216,7 @@ understand with an example.  The loop::
 
 can also be written::
 
-  fun int fib(int n) =
+  fun fib(n: int): int =
     let x = 1
     let y = 1
     loop ((x, y)) = for i < n do (y, x+y)
@@ -258,7 +258,7 @@ simply a case of normal name shadowing.
 For example, this loop implements the "imperative" version of matrix
 multiplication of an ``m * o`` with an ``o * n`` matrix::
 
-  fun [m][n]f32 matmult([m][o]f32 a, [o][n]f32 b) =
+  fun matmult(a: [m][o]f32,  b: [o][n]f32): [m][n]f32 =
     let res = replicate(m, replicate(n,0f32)) in
     loop (res) = for i < m do
         loop (res) = for j < n do
@@ -308,7 +308,7 @@ optional curried arguments), or an operator (possibly with one operand
 curried):
 
 .. productionlist::
-   lambda: "fn" `rettype` (`param`...) "=>" `e`
+   lambda: "fn" (`param`...) : `rettype` "=>" `e`
          : `fname`
          : `fname` (`e`, ..., `e`)
          : `op` `e`
@@ -337,7 +337,7 @@ may occasionally prove useful to express certain algorithms in an
 imperative style.  Consider a function for computing the *n* first
 Fibonacci numbers::
 
-  fun []int fib(int n) =
+  fun fib(n: int): []int =
     -- Create "empty" array.
     let arr = iota(n) in
     -- Fill array with Fibonacci numbers.
@@ -377,7 +377,7 @@ guaranteed.
 The simplest way to introduce uniqueness types is through examples.
 To that end, let us consider the following function definition::
 
-  fun *[]int modify(*[]int a, int i, int x) =
+  fun modify(a: *[]int, i: int, x: int): *[]int =
     let b = a with [i] <- a[i] + x in
     b
 
@@ -428,7 +428,7 @@ analysis in greater detail.
 
 Let us consider the definition of a function returning a unique array::
 
-  fun *[]int f([]int a) = body
+  fun f(a: []int): *[]int = body
 
 Note that the argument, ``a``, is non-unique, and hence we cannot
 modify it.  There is another restriction as well: ``a`` must not be
@@ -463,7 +463,7 @@ rules:
     of a call to the function is the only reference to that value.  An
     example violation::
 
-      fun *[]int broken([][]int a, int i) =
+      fun broken(a: [][]int, i: int): *[]int =
         a[i] -- Return value aliased with 'a'.
 
   **Uniqueness Rule 3**

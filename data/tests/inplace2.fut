@@ -14,6 +14,6 @@
 -- input { [1,2,3,4,5] [1,2,3] -1 }
 -- error: Assertion.*failed
 
-fun []int main(*[n]int as, [m]int bs, int i) =
+fun main(as: *[n]int, bs: [m]int, i: int): []int =
   let as[i:i+m] = bs
   in as

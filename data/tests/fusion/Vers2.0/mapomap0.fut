@@ -11,7 +11,7 @@
 --      Map 1 
 -- }
 --
-fun ([]f64,[]f64,[]f64) main([]f64 arr) =
+fun main(arr: []f64): ([]f64,[]f64,[]f64) =
     let x = map    (+ 1.0, arr) in
     let y = zipWith(+,  x, arr) in
     let r = map    (+ 5.0, arr) in

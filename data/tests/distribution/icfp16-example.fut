@@ -24,17 +24,17 @@
 --   ScanKernel 2
 -- }
 
-fun ([n][m][m]int, [n][m]int) main([n][m]int pss) =
+fun main(pss: [n][m]int): ([n][m][m]int, [n][m]int) =
   let (asss, bss) =
-    unzip(map(fn ([m][m]int, [m]int) ([]int ps) =>
-                let ass = map(fn [m]int (int p) =>
+    unzip(map(fn (ps: []int): ([m][m]int, [m]int)  =>
+                let ass = map(fn (p: int): [m]int  =>
                                 let cs = scan(+, 0, iota(p))
                                 let f = reduce(+, 0, cs)
                                 let as = map(+f, ps)
                                 in as,
                               ps)
                 loop (bs=ps) = for i < n do
-                  let bs' = map(fn int ([]int as, int b) =>
+                  let bs' = map(fn (as: []int, b: int): int  =>
                                   let d = reduce(+, 0, as)
                                   let e = d + b
                                   let b' = 2 * e

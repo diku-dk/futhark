@@ -6,4 +6,4 @@
 type t0 = []t1
 type t1 = []t0
 
-fun t1 main(t1 x) = x
+fun main(x: t1): t1 = x

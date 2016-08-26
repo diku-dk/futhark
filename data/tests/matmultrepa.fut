@@ -8,19 +8,19 @@
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
 -- structure { Map 2 Map/Map/Redomap 1 }
-fun int redplus1([]int  a) = reduce(+, 0, a)
-fun [n]int redplus2([n][]int a) = map(redplus1, a)
+fun redplus1(a: []int): int = reduce(+, 0, a)
+fun redplus2(a: [n][]int): [n]int = map(redplus1, a)
 
-fun  [m]int mul1([m]int a, [m]int b) = zipWith(*, a, b)
-fun [n][m]int mul2([n][m]int a, [n][m]int b) = zipWith(mul1, a, b)
+fun mul1(a: [m]int, b: [m]int): [m]int = zipWith(*, a, b)
+fun mul2(a: [n][m]int, b: [n][m]int): [n][m]int = zipWith(mul1, a, b)
 
-fun [n][m]int  replin(int n, [m]int a) = replicate(n, a)
+fun replin(n: int, a: [m]int): [n][m]int = replicate(n, a)
 
-fun [n][n]int matmultFun([n][m]int a, [m][n]int b ) =
+fun matmultFun(a: [n][m]int, b: [m][n]int ): [n][n]int =
     let br  = replicate( n, transpose(b) ) in
     let ar  = map      ( replin(n),    a ) in
     let abr = map  (mul2, zip(ar, br))     in
         map(redplus2, abr)
 
-fun [n][n]int main([n][m]int x, [m][n]int y) =
+fun main(x: [n][m]int, y: [m][n]int): [n][n]int =
   matmultFun(x, y)

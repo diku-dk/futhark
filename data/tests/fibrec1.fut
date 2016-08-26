@@ -5,6 +5,6 @@
 -- output {
 --   8
 -- }
-fun int fib(int n) = if n < 2 then 1 else fib(n-1) + fib(n-2)
+fun fib(n: int): int = if n < 2 then 1 else fib(n-1) + fib(n-2)
 
-fun int main(int n) = fib(n)
+fun main(n: int): int = fib(n)

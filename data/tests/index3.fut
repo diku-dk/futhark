@@ -6,7 +6,7 @@
 --   Assert 0
 -- }
 
-fun int main(bool b) =
+fun main(b: bool): int =
   let a = [1,2,3] in
   let i = if b then 0 else 1 in
   a[i]

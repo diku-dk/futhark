@@ -14,12 +14,12 @@
 -- }
 
 
-fun int grayCode(int x) = (x >> 1) ^ x
+fun grayCode(x: int): int = (x >> 1) ^ x
 
 ----------------------------------------
 --/ Sobol Generator
 ----------------------------------------
-fun bool testBit(int n, int ind) =
+fun testBit(n: int, ind: int): bool =
     let t = (1 << ind) in (n & t) == t
 
 ----------------------------------------------------------------/
@@ -28,26 +28,26 @@ fun bool testBit(int n, int ind) =
 ----    Currently Futhark hoists it outside, but this will
 ----    not allow fusing the filter with reduce => redomap,
 ----------------------------------------------------------------/
-fun int xorInds(int n, [num_bits]int dir_vs) =
-    let reldv_vals = map( fn int (int dv, int i) =>
+fun xorInds(n: int, dir_vs: [num_bits]int): int =
+    let reldv_vals = map( fn (dv: int, i: int): int  =>
                             if testBit(grayCode(n),i)
                             then dv else 0
                         , zip(dir_vs,iota(num_bits)) ) in
     reduce( ^, 0, reldv_vals )
 
-fun []int sobolIndI ( [][]int dir_vs, int n ) =
+fun sobolIndI (dir_vs:  [][]int, n: int ): []int =
     map( xorInds(n), dir_vs )
 
-fun []f64 sobolIndR( [][num_bits]int dir_vs, int n ) =
+fun sobolIndR(dir_vs:  [][num_bits]int, n: int ): []f64 =
     let divisor = 2.0 ** f64(num_bits) in
     let arri    = sobolIndI( dir_vs, n )     in
-        map( fn f64 (int x) => f64(x) / divisor, arri )
+        map( fn (x: int): f64  => f64(x) / divisor, arri )
 
 --------------------------------/
 ---- STRENGTH-REDUCED FORMULA
 --------------------------------/
 
-fun int index_of_least_significant_0(int num_bits, int n) =
+fun index_of_least_significant_0(num_bits: int, n: int): int =
   let (goon,k) = (True,0) in
   loop ((goon,k,n)) =
         for i < num_bits do
@@ -58,33 +58,33 @@ fun int index_of_least_significant_0(int num_bits, int n) =
           else      (False,k,   n   )
   in k
 
-fun [len]int recM( [len][num_bits]int sob_dirs, int i ) =
+fun recM(sob_dirs:  [len][num_bits]int, i: int ): [len]int =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map( fn int([]int row) => unsafe row[bit], sob_dirs )
+  map( fn (row: []int): int => unsafe row[bit], sob_dirs )
 
-fun [chunk][sobvctsz]f64 sobolChunk([len][num_bits]int dir_vs, int n, int chunk, int sobvctsz) =
+fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int, sobvctsz: int): [chunk][sobvctsz]f64 =
   let sob_fact= 1.0 / f64(1 << num_bits)       in
   let sob_beg = sobolIndI(dir_vs, n+1)             in
-  let contrbs = map( fn [len]int (int k) =>
+  let contrbs = map( fn (k: int): [len]int  =>
                         let sob = k + n in
                         if(k==0) then sobolIndI(dir_vs, n+1)
                         else recM(dir_vs, k+n)
                    , iota(chunk) )                 in
-  let vct_ints= scan( fn []int ([]int x, []int y) =>
+  let vct_ints= scan( fn (x: []int, y: []int): []int  =>
                         zipWith(^, x, y)
                     , replicate(len, 0), contrbs ) in
-  map( fn [len]f64 ([]int xs) =>
-             map ( fn f64 (int x) =>
+  map( fn (xs: []int): [len]f64  =>
+             map ( fn (x: int): f64  =>
                      f64(x) * sob_fact
                  , xs)
          , vct_ints)
 
-fun f64 main( int num_dates, int num_und, int num_mc_it,
-               [][num_bits]int dir_vs_nosz ) =
+fun main(num_dates:  int, num_und: int, num_mc_it: int,
+               dir_vs_nosz: [][num_bits]int ): f64 =
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = streamMap( fn [][sobvctsz]f64 (int chunk, []int ns) =>
+  let sobol_mat = streamMap( fn (chunk: int, ns: []int): [][sobvctsz]f64  =>
                                 sobolChunk(dir_vs, ns[0], chunk, sobvctsz)
                            , iota(num_mc_it) ) in
-  reduce (+, 0.0, map ( fn f64 ([]f64 row) => reduce(+, 0.0, row), sobol_mat ) )
+  reduce (+, 0.0, map ( fn (row: []f64): f64  => reduce(+, 0.0, row), sobol_mat ) )

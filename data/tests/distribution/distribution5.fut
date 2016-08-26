@@ -20,10 +20,10 @@
 --   Concat 1
 -- }
 
-fun ([][]int,[][]int) main([n][an][]int a, [n][bn]int b) =
-  unzip(zipWith(fn ([bn]int,[an]int) ([][]int a_row, []int b_row) =>
+fun main(a: [n][an][]int, b: [n][bn]int): ([][]int,[][]int) =
+  unzip(zipWith(fn (a_row: [][]int, b_row: []int): ([bn]int,[an]int)  =>
                   (map(-1, b_row),
-                   map(fn int ([]int a_row_row) =>
+                   map(fn (a_row_row: []int): int  =>
                          let x = map(+1, a_row_row) in
                          reduce(+, 0, concat(x,x))
                       , a_row)),

@@ -8,6 +8,6 @@
 --   16
 -- }
 
-fun int main(int x, int bound) =
+fun main(x: int, bound: int): int =
   loop (x) = while x < bound do x * 2
   in x

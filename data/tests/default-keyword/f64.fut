@@ -7,4 +7,4 @@
 
 default(f64)
 
-fun f64 main() = 0.1
+fun main(): f64 = 0.1

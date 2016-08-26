@@ -8,16 +8,16 @@
 
 type t = int
 struct NumLib  {
-  fun t plus(t a, t b) = a + b
+  fun plus(a: t, b: t): t = a + b
   struct BestNumbers {
-    fun t four() = 4
-    fun t seven() = 42
-    fun t six() = 41
+    fun four(): t = 4
+    fun seven(): t = 42
+    fun six(): t = 41
   }
 }
 
 
-fun int localplus(int a, int b) = NumLib.plus (a,b)
+fun localplus(a: int, b: int): int = NumLib.plus (a,b)
 
-fun int main(int a, int b) =
+fun main(a: int, b: int): int =
   localplus(NumLib.BestNumbers.four() ,   2)

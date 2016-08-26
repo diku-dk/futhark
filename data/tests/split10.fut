@@ -10,6 +10,6 @@
 --   [[4,3],[3,2]]
 --   [[2,1]]
 -- }
-fun ([][]int, [][]int, [][]int) main(int n, int m, [][]int a) =
+fun main(n: int, m: int, a: [][]int): ([][]int, [][]int, [][]int) =
   let (xs,ys,zs) = split( (n,m), a)in
   (zs,xs,ys)

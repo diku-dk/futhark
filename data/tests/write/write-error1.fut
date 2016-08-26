@@ -6,6 +6,6 @@
 -- input { [0] [1,2] }
 -- error:
 
-fun []int main([n]int is, [m]int vs) =
+fun main(is: [n]int, vs: [m]int): []int =
   let a = replicate(10, 0)
   in write(is, vs, a)

@@ -2,7 +2,7 @@
 -- ==
 -- error:
 
-fun *[]int main() =
+fun main(): *[]int =
   let n = 10 in
   let a = iota(n) in
   let c = let a = a in let a[0] = 42 in a

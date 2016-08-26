@@ -7,4 +7,4 @@
 
 default(i8)
 
-fun i8 main() = 0
+fun main(): i8 = 0

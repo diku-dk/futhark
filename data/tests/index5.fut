@@ -3,5 +3,5 @@
 -- ==
 -- input { 3 2 } output { 2 }
 
-fun int main(int n, int i) =
+fun main(n: int, i: int): int =
   iota(n)[i]

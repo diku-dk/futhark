@@ -29,5 +29,5 @@ struct M1
 
 type baz = M1.baz -- is defined at l. 13
 
-fun baz main(int a, float b) = (1,2,3)
+fun main(a: int, b: float): baz = (1,2,3)
   

@@ -10,5 +10,5 @@
 --   [6.0f32, 9.0f32, 12.0f32]
 -- }
 
-fun []f32 main(f32 a, []f32 x, []f32 y) =
+fun main(a: f32, x: []f32, y: []f32): []f32 =
   zipWith(+, map(a*, x), y)

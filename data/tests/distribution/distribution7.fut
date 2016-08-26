@@ -4,9 +4,9 @@
 -- ==
 -- structure distributed { Kernel 2 }
 
-fun []int main([][n]int a) =
-  map(fn int ([]int a_row) =>
-        streamSeq( fn int (int chunk, int acc, []int c) =>
+fun main(a: [][n]int): []int =
+  map(fn (a_row: []int): int  =>
+        streamSeq( fn (chunk: int, acc: int, c: []int): int  =>
                      let w = filter( >6, c ) in
                      let w_sum = reduce(+, 0, w) in
                      acc+w_sum

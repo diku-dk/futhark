@@ -10,10 +10,9 @@
 -- }
 -- structure { Write 1 }
 
-fun [n]i32
-  main([k]i32 indexes,
-       [k]i32 values,
-       *[n]i32 array) =
+fun main(indexes: [k]i32,
+       values: [k]i32,
+       array: *[n]i32): [n]i32 =
   let indexes' = map(+1, indexes)
   let array' = write(indexes', values, array)
   in array'

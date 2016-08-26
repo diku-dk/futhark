@@ -10,8 +10,7 @@
 --   [[1.0f32, 1.2f32], [5.0f32, 4.3f32], [4.0f32, 44.2f32]]
 -- }
 
-fun [n][m]f32
-  main([k]i32 indexes,
-       [k][m]f32 values,
-       *[n][m]f32 array) =
+fun main(indexes: [k]i32,
+       values: [k][m]f32,
+       array: *[n][m]f32): [n][m]f32 =
   write(indexes, values, array)

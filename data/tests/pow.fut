@@ -31,5 +31,5 @@
 --   65536
 -- }
 
-fun int main (int x, int y) =
+fun main (x: int, y: int): int =
     x ** y

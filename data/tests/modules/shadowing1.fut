@@ -9,15 +9,15 @@
 -- }
 
 type best_type = float
-fun best_type best_number() = 6.0
+fun best_number(): best_type = 6.0
 struct M0 
   {
     type best_type = int
-    fun best_type best_number() = 6
+    fun best_number(): best_type = 6
     struct M1 
       {
-        fun best_type best_number() = 6
+        fun best_number(): best_type = 6
       }
   }
 
-fun (float, int, int) main() = (best_number() , M0.best_number() , M0.M1.best_number())
+fun main(): (float, int, int) = (best_number() , M0.best_number() , M0.M1.best_number())

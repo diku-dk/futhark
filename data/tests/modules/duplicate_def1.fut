@@ -7,12 +7,12 @@
 type foo = int
 struct Foo
   {
-    fun int foo() = 1
+    fun foo(): int = 1
     struct Foo
       {
         type foo = float
-        fun foo foo() = 2.0
+        fun foo(): foo = 2.0
       }
   }
 
-fun (foo, Foo.Foo.foo) main() = ( Foo.foo() , Foo.Foo.foo())
+fun main(): (foo, Foo.Foo.foo) = ( Foo.foo() , Foo.Foo.foo())

@@ -13,7 +13,7 @@
 --   [1, 0, 7, 4, 1]
 -- }
 
-fun ([]int, []int, []int, []int, []int, []int) main([]int xs, []int ys) =
+fun main(xs: []int, ys: []int): ([]int, []int, []int, []int, []int, []int) =
   let (x,y,z) = partition(<, ==, zip(xs,ys))
   let (x1,x2) = unzip(x)
   let (y1,y2) = unzip(y)

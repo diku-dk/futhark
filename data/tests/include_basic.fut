@@ -9,4 +9,4 @@
 
 include include_basic_includee
 
-fun i32 main(i32 s) = includee_function(s) + 1
+fun main(s: i32): i32 = includee_function(s) + 1

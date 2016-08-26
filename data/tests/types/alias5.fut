@@ -2,5 +2,5 @@
 
 type uniqlist = *[]int
 
-fun []uniqlist main([][]int p) =
+fun main(p: [][]int): []uniqlist =
   p

@@ -6,6 +6,6 @@
 -- output {
 --   [1, 4]
 -- }
-fun []int main([]int a, []int b) =
-  let (c,d) = unzip(filter(fn bool (int x, int y) => x+y < 0, zip(a,b))) in
+fun main(a: []int, b: []int): []int =
+  let (c,d) = unzip(filter(fn (x: int, y: int): bool  => x+y < 0, zip(a,b))) in
   filter(0<, d)

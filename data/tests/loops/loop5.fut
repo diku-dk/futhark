@@ -4,7 +4,7 @@
 -- output {
 --   [0, 1, 3, 6, 10, 15, 21, 28, 36, 45]
 -- }
-fun []int main() =
+fun main(): []int =
     let n = 10 in
     let x = copy(iota(n))   in
     loop (x) =

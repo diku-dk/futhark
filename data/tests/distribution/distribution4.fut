@@ -8,8 +8,8 @@
 -- ==
 -- structure distributed { Kernel 2 }
 
-fun ([][]int,[][]int) main([n][an]int a, [n][bn]int b) =
-  unzip(zipWith(fn ([an]int,[bn]int) ([]int a_row, []int b_row) =>
+fun main(a: [n][an]int, b: [n][bn]int): ([][]int,[][]int) =
+  unzip(zipWith(fn (a_row: []int, b_row: []int): ([an]int,[bn]int)  =>
                   (map(+1, a_row),
                    map(-1, b_row)),
                 a, b))

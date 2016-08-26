@@ -6,7 +6,7 @@
 -- input { 2i16 } output { 32769i32 }
 -- input { 33799i16 } output { 28110i32 }
 
-fun u32 main(u16 a) =
+fun main(a: u16): u32 =
   let b = 0x10001u32 in
   let u = 0i32 in
   let v = 1i32 in

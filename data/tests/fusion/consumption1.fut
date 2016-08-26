@@ -3,11 +3,11 @@
 -- ==
 -- structure { Map 1 }
 
-fun [m][n]int main([n]int as, [m]bool bs) =
-  let css = map(fn [n]int (bool b) =>
+fun main(as: [n]int, bs: [m]bool): [m][n]int =
+  let css = map(fn (b: bool): [n]int  =>
                   if b then iota(n) else as,
                 bs)
-  let dss = map (fn [n]int (*[n]int cs) =>
+  let dss = map (fn (cs: *[n]int): [n]int  =>
                    let cs[0] = 42
                    in cs,
                  css)

@@ -5,7 +5,7 @@
 -- output {
 --   [1,2,3]
 -- }
-fun []int main( [n]int  arr) =
+fun main(arr:  [n]int): []int =
   let  newarr  =
        (let notused  = arr
         in copy(replicate(n , 0)))

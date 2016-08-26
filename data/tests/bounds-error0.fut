@@ -3,5 +3,5 @@
 -- input { [1,2,3] 4 }
 -- error: Assertion.*failed
 
-fun int main([]int a, int i) =
+fun main(a: []int, i: int): int =
   a[i]

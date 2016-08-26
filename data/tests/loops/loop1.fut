@@ -4,7 +4,7 @@
 -- output {
 --   [1, 5, 9]
 -- }
-fun []int main() =
+fun main(): []int =
   let arr = [(0,1), (2,3), (4,5)] in
   let n = shape(arr)[0] in
   let outarr = replicate(n, (0,0)) in

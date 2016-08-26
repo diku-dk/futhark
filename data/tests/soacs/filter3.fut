@@ -7,10 +7,10 @@
 --   [True, True, True]
 --   [1, -2, 42]
 -- }
-fun ([]bool,[]int) main([]int xs1, []bool xs2) =
-  let tmp = filter(fn bool ((int,bool) x) =>
+fun main(xs1: []int, xs2: []bool): ([]bool,[]int) =
+  let tmp = filter(fn (x: (int,bool)): bool  =>
                      let (i,b) = x in b
                   , zip(xs1,xs2)) in
-  unzip(map(fn (bool,int) ((int,bool) x) =>
+  unzip(map(fn (x: (int,bool)): (bool,int)  =>
               let (i,b) = x in (b,i)
            , tmp))

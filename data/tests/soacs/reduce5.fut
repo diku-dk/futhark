@@ -5,8 +5,8 @@
 -- input { [[1,2,3], [4,5,6], [6,7,8]] }
 -- output { [11i32, 14i32, 17i32] }
 
-fun []int main([n][m]int xss) =
-  reduceComm(fn []int ([]int xs, []int ys) =>
+fun main(xss: [n][m]int): []int =
+  reduceComm(fn (xs: []int, ys: []int): []int  =>
                loop (zs = replicate(m, 0)) = for i < m do
                  let zs[i] = xs[i] + ys[i]
                  in zs

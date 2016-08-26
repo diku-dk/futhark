@@ -4,5 +4,5 @@
 -- input { 2 } output { [4] }
 -- structure { Map 0 }
 
-fun [1]int main(int x) =
+fun main(x: int): [1]int =
   map(+x, replicate(1, x))

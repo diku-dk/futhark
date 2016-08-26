@@ -5,4 +5,4 @@
 -- input { 2 }
 -- output { [0,1] }
 
-fun []int main(int n) = iota(n)
+fun main(n: int): []int = iota(n)

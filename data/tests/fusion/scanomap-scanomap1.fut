@@ -10,7 +10,7 @@
 -- structure {
 --   Scanomap 1
 -- }
-fun ([]int, []int, []int) main([]int inp) =
+fun main(inp: []int): ([]int, []int, []int) =
   let a = map(+1, inp)
   let b = scan(+, 0, a) in
   let c = scan(*, 1, a) in

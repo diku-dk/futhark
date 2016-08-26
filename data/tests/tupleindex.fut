@@ -5,7 +5,7 @@
 --   0
 --   1
 -- }
-fun (int, int) main() =
+fun main(): (int, int) =
   let arr = [(0,1), (2,3), (4,5)] in
   let n = shape(arr)[0] in
   let outarr = replicate(n, (0,0)) in

@@ -23,15 +23,15 @@
 --    [[[16, 14, 12],
 --      [22, 20, 18]]]]
 -- }
-fun []int addRows ([]int xs, []int ys) =
+fun addRows (xs: []int, ys: []int): []int =
   map(+, zip (xs,ys))
 
-fun [][][][]int main ([][][][]int xssss, []int cs, int y) =
-  map (fn [][][]int ([][][]int xsss, int c) =>
+fun main (xssss: [][][][]int, cs: []int, y: int): [][][][]int =
+  map (fn (xsss: [][][]int, c: int): [][][]int  =>
          unsafe
          let yss = reshape ( (2,c), xsss ) in
-         map (fn [][]int ([][]int xss) =>
-                map(fn []int ([]int xs, []int ys) =>
+         map (fn (xss: [][]int): [][]int  =>
+                map(fn (xs: []int, ys: []int): []int  =>
                       addRows(xs,ys)
                    , zip (xss, yss))
             , xsss)

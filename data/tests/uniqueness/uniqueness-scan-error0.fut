@@ -3,6 +3,6 @@
 -- ==
 -- error:
 
-fun []int main(*[]int a) =
-  let b = scan(fn *[]int (*[]int acc, *[]int i) => acc, a, replicate(10,iota(10))) in
+fun main(a: *[]int): []int =
+  let b = scan(fn (acc: *[]int, i: *[]int): *[]int  => acc, a, replicate(10,iota(10))) in
   size(0,a)+size(0,b) -- Should fail, because a has been consumed!

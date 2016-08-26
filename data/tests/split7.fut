@@ -17,17 +17,17 @@
 --   [0.000000, 0.600000, 0.950000]
 -- }
 
-fun []f64 take(int n, []f64 a) =
+fun take(n: int, a: []f64): []f64 =
   let (first, rest) = unsafe split( (n), a) in
   first
 
-fun []f64 fftmp([n][]f64 md_c) =
-  map( fn f64 (int j) =>
+fun fftmp(md_c: [n][]f64): []f64 =
+  map( fn (j: int): f64  =>
          let x = take(j,md_c[j])
          in  reduce(+, 0.0, x),
        iota(n)
      )
 
-fun []f64 main([][][]f64 all_md_c) =
+fun main(all_md_c: [][][]f64): []f64 =
   let md_c = all_md_c[0] in
   fftmp(md_c)

@@ -6,7 +6,7 @@
 -- output { [[1,1], [2,2], [3,3]] }
 -- structure distributed { Kernel 1 }
 
-fun [n][m]int main([n]int xs, int m) =
-  map(fn [m]int (int x) =>
+fun main(xs: [n]int, m: int): [n][m]int =
+  map(fn (x: int): [m]int  =>
         replicate(m, x),
       xs)

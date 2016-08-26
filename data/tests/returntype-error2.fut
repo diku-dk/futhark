@@ -2,4 +2,4 @@
 -- ==
 -- error:
 
-fun int main() = 2.0
+fun main(): int = 2.0

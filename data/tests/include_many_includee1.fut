@@ -1,4 +1,4 @@
 -- ==
 -- tags { disable }
 
-fun i32 includee1_function(i32 x) = x + 6
+fun includee1_function(x: i32): i32 = x + 6

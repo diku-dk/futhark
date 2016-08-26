@@ -6,11 +6,11 @@
 -- output {
 --   [[4,4,4],[7,9,11]]
 -- }
-fun []int addRows ([]int xs, []int ys) =
+fun addRows (xs: []int, ys: []int): []int =
   map(+, zip (xs,ys))
 
-fun [][]int addMatricies ([][]int a, [][]int b) =
+fun addMatricies (a: [][]int, b: [][]int): [][]int =
   map (addRows, zip (a,b))
 
-fun [][]int main([][]int a, [][]int b) =
+fun main(a: [][]int, b: [][]int): [][]int =
   addMatricies(a,b)

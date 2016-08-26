@@ -3,8 +3,7 @@
 -- ==
 -- error:
 
-fun [n]i32
-  main([k]i32 indexes,
-       [k]f32 values,
-       *[n]i32 array) =
+fun main(indexes: [k]i32,
+       values: [k]f32,
+       array: *[n]i32): [n]i32 =
   write(indexes, values, array)

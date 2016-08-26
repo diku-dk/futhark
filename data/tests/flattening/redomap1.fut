@@ -6,11 +6,11 @@
 -- output {
 --   [12, 27]
 -- }
-fun [m]int main ([m][n]int xss, [m][n]int yss) =
+fun main (xss: [m][n]int, yss: [m][n]int): [m]int =
     let final_res =
-      map(fn int ([n]int xs, [n]int ys) =>
+      map(fn (xs: [n]int, ys: [n]int): int  =>
             let tmp =
-              map (fn int (int x, int y) => x+y
+              map (fn (x: int, y: int): int  => x+y
                   , zip (xs,ys)) in
             reduce(+,0,tmp)
          , zip(xss,yss))

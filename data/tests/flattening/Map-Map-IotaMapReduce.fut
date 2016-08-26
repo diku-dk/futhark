@@ -8,9 +8,9 @@
 -- , [21, 7, 0 ]
 -- ]
 -- }
-fun [][]int main ([m][n]int xss, [m]int ys) =
-  map( fn [n]int ([n]int xs, int y) =>
-         map (fn int (int x) =>
+fun main (xss: [m][n]int, ys: [m]int): [][]int =
+  map( fn (xs: [n]int, y: int): [n]int  =>
+         map (fn (x: int): int  =>
                 let tmp1 = iota(x) in
                 let tmp2 = map(*y,tmp1) in
                 reduce(+,0,tmp2)

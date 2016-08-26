@@ -5,5 +5,5 @@
 -- input { -1f32 0f32 } output { True True }
 -- input { -1f32 1f32 } output { False True }
 
-fun (bool, bool) main(f32 x, f32 y) =
+fun main(x: f32, y: f32): (bool, bool) =
   (isinf32(x / y), isnan32(sqrt32(x)))

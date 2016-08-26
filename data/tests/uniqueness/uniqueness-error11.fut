@@ -2,9 +2,9 @@
 -- ==
 -- error:
 
-fun int f(int x) = x
+fun f(x: int): int = x
 
-fun int main() =
+fun main(): int =
     let n = 10 in
     let a = iota(n) in
     let b = iota(n) in

@@ -5,9 +5,9 @@
 -- output {
 --    [2.0, 3.0, 4.0, 5.0, 0.0]
 -- }
-fun []f64 main( [m]f64 result ) =
+fun main(result:  [m]f64 ): []f64 =
   -- 0 <= i < m AND 0 <= j < n
-  map ( fn f64 (int j) =>
+  map ( fn (j: int): f64  =>
             if j < (m-1)
             then unsafe result[j+1]
             else 0.0

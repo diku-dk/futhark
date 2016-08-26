@@ -5,4 +5,4 @@
 -- input { 3.1415927f32 } output { -8.742278e-8f32 }
 -- input { -3.1415927f32 } output { 8.742278e-8f32 }
 
-fun f32 main(f32 x) = sin32(x)
+fun main(x: f32): f32 = sin32(x)

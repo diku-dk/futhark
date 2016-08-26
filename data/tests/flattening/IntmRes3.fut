@@ -22,14 +22,14 @@
 --    [[[32, 31, 30],
 --      [35, 34, 33]]]]
 -- }
-fun []int addToRow ([]int xs, int y) =
-  map(fn int (int x) => x+y, xs)
+fun addToRow (xs: []int, y: int): []int =
+  map(fn (x: int): int  => x+y, xs)
 
-fun [][][][]int main ([][][][]int xssss, []int cs, int y) =
-  map (fn [][][]int ([][][]int xsss, int c) =>
+fun main (xssss: [][][][]int, cs: []int, y: int): [][][][]int =
+  map (fn (xsss: [][][]int, c: int): [][][]int  =>
          let y' = y * c + c in
-         map (fn [][]int ([][]int xss) =>
-                map(fn []int ([]int xs) =>
+         map (fn (xss: [][]int): [][]int  =>
+                map(fn (xs: []int): []int  =>
                       addToRow(xs,y')
                    , xss)
             , xsss)

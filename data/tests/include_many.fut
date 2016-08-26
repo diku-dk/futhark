@@ -10,6 +10,6 @@
 include include_many_includee0
 include include_many_includee1
 
-fun i32 main(i32 s) =
+fun main(s: i32): i32 =
   includee0_function(s)
   + includee1_function(s) * includee0_includee_function(s)

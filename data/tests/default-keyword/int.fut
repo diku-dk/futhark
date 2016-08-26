@@ -7,4 +7,4 @@
 --   0i32
 -- }
 
-fun int main() = 0
+fun main(): int = 0

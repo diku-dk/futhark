@@ -1,5 +1,5 @@
 type t = int
 type ts = []t
 
-fun ts main(ts xs, t x) =
+fun main(xs: ts, x: t): ts =
   map(+x, xs)

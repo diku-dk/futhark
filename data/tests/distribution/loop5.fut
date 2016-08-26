@@ -4,10 +4,10 @@
 --
 -- structure distributed { Map/Loop 0 }
 
-fun [n][m][k]int main(*[n][m][k]int a) =
-  map(fn [m][k]int (*[m][k]int a_r) =>
+fun main(a: *[n][m][k]int): [n][m][k]int =
+  map(fn (a_r: *[m][k]int): [m][k]int  =>
         loop(a_r) = for i < m do
-          map(fn *[k]int (*[k]int a_r_r) =>
+          map(fn (a_r_r: *[k]int): *[k]int  =>
                 loop(a_r_r) = for i < k-2 do
                   let a_r_r[i+2] =
                     a_r_r[i+2] + a_r_r[i] - a_r_r[i+1] in

@@ -34,9 +34,9 @@
 -- }
 
 
-fun ([]f64,[]f64) tridag(  int  nn,
-                            *[]f64 b, *[]f64 d,
-                            []f64 a, []f64 c ) =
+fun tridag(nn:   int,
+                            b: *[]f64, d: *[]f64,
+                            a: []f64, c: []f64 ): ([]f64,[]f64) =
     if (nn == 1)
     --then ( b, zipWith(fn f64 (f64 x, f64 y) => x / y, d, b) )
     then (b, [d[0]/b[0]])
@@ -57,10 +57,10 @@ fun ([]f64,[]f64) tridag(  int  nn,
             (b, d)
 
 
-fun ([]f64,[]f64) main() =
+fun main(): ([]f64,[]f64) =
     let nn = reduce(+, 0, [1,2,3,4]) in
     let a = replicate(nn, 3.33) in
-    let b = map(fn f64 (int x) => f64(x) + 1.0, iota(nn)) in
-    let c = map(fn f64 (int x) => 1.11*f64(x) + 0.5, iota(nn)) in
-    let d = map(fn f64 (int x) => 1.01*f64(x) + 0.25, iota(nn)) in
+    let b = map(fn (x: int): f64  => f64(x) + 1.0, iota(nn)) in
+    let c = map(fn (x: int): f64  => 1.11*f64(x) + 0.5, iota(nn)) in
+    let d = map(fn (x: int): f64  => 1.01*f64(x) + 0.25, iota(nn)) in
         tridag(nn, b, d, a, c)

@@ -4,7 +4,7 @@
 -- input { 2 -3 [1,-2,3] }
 -- output { 2 3 [1,2,3] }
 
-fun (int,int,[]int) main(int x, int y, []int a) =
+fun main(x: int, y: int, a: []int): (int,int,[]int) =
   (abs x,
    abs y,
    map(abs,a))

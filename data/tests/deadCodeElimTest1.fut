@@ -5,9 +5,9 @@
 -- output {
 --   -1
 -- }
-fun int neg(int x) = -x
+fun neg(x: int): int = -x
 
-fun int main(int a) =
+fun main(a: int): int =
   let b = a + 100      in
   let x = iota(a)      in
   let c = b + 200      in

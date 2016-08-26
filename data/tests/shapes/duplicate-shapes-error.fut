@@ -3,5 +3,5 @@
 -- ==
 -- error:
 
-fun []int main(f64 n, [n]int a) =
+fun main(n: f64, a: [n]int): []int =
   map(+2, a)

@@ -6,8 +6,8 @@
 
 -- Approach: filter to get the numbers we are interested in, then sum
 -- them.  Ideally this will be fused into a single loop.
-fun int main(int bound) =
+fun main(bound: int): int =
   reduce(+, 0,
-         filter(fn bool (int x) =>
+         filter(fn (x: int): bool  =>
                   x % 3 == 0 || x % 5 == 0,
                 iota(bound)))

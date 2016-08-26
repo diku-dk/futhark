@@ -60,7 +60,7 @@ different sizes::
   -- compiled input { 100000000 }
   -- output { 887459712 }
 
-  fun int main(int n) =
+  fun main(n: int): int =
     reduce(+, 0, iota(n))
 
 SEE ALSO

@@ -9,7 +9,6 @@
 -- }
 -- structure { Write 1 }
 
-fun [n]i32
-  main([k]i32 indexes,
-       *[n]i32 array) =
+fun main(indexes: [k]i32,
+       array: *[n]i32): [n]i32 =
   write(indexes, replicate(k, 5), array)

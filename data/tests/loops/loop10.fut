@@ -5,7 +5,7 @@
 -- input { 5 [1,2,3,4,5] }
 -- output { empty(int) }
 
-fun []int main(int l, [n]int a) =
+fun main(l: int, a: [n]int): []int =
   loop (b = replicate(n-l, 0)) = for n > i >= l do
     let j = n - i - 1 in
     let b[j] = a[i] in

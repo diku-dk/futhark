@@ -10,5 +10,5 @@
 -- input { [1,2,3,4,5] 1 0 }
 -- error: Assertion.*failed
 
-fun []int main([n]int as, int i, int j) =
+fun main(as: [n]int, i: int, j: int): []int =
   as[i:j]

@@ -6,9 +6,9 @@
 --   0
 -- }
 
-fun int f(*[]int a) = a[0]
+fun f(a: *[]int): int = a[0]
 
-fun int main() =
+fun main(): int =
     let n = 10 in
     let b = iota(n) in
     let a = b in -- Alias a to b.

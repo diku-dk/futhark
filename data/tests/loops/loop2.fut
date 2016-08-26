@@ -7,6 +7,6 @@
 --   861
 -- }
 
-fun int main(int n) =
+fun main(n: int): int =
   loop (x = 0) = for i < n do x + i in
   x

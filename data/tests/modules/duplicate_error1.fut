@@ -6,8 +6,8 @@ type foo = int
 
 struct Foo
   {
-    fun foo foo() = 1
+    fun foo(): foo = 1
   }
 type foo = float
 
-fun int main() = 0
+fun main(): int = 0

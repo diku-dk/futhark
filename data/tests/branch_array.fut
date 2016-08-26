@@ -8,10 +8,10 @@
 -- input { False 3 }
 -- output { [1337,1337,1337] }
 
-fun []int f([n]int a) = a
+fun f(a: [n]int): []int = a
 
-fun []int g(int n) = replicate(n, 1337)
+fun g(n: int): []int = replicate(n, 1337)
 
-fun []int main(bool b, int n) =
+fun main(b: bool, n: int): []int =
   let a = iota(n) in
   if b then f(a) else g(n)

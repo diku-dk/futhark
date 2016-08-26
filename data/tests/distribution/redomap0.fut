@@ -15,7 +15,7 @@
 --
 -- structure distributed { Kernel 1 }
 
-fun []int main([][]int a) =
-  map(fn int ([]int a_r) =>
+fun main(a: [][]int): []int =
+  map(fn (a_r: []int): int  =>
         reduce(+, 0, map(+1, a_r)),
       a)

@@ -16,27 +16,27 @@
 --   [351.0, 504.0, 675.0, 864.0]
 --   [10, 22, 36, 52, 70, 90]
 -- }
-fun (int,[]int,[][]int,[]f64,[]f64,[]int) main(int m, *[n]int as) =
+fun main(m: int, as: *[n]int): (int,[]int,[][]int,[]f64,[]f64,[]int) =
   let b = map(+10, as)
   let c =
-    streamSeq( fn ((int,[]int),[][m]int,[]f64,[]f64,[]int) (int chunk, (int, [m]int) acc2, *[]int c) =>
+    streamSeq( fn (chunk: int, acc2: (int, [m]int), c: *[]int): ((int,[]int),[][m]int,[]f64,[]f64,[]int)  =>
                  let (acc0, acc) = acc2                in
-                 let x = map ( fn []int (int c) =>
+                 let x = map ( fn (c: int): []int  =>
                                  map(+c, iota(m))
                              , c )                     in
-                 let y0= scan( fn []int ([]int acc, []int x) =>
+                 let y0= scan( fn (acc: []int, x: []int): []int  =>
                                  zipWith(+, acc, x)
                              , replicate(m,0), x )     in
-                 let y = map ( fn []int ([]int y0) =>
+                 let y = map ( fn (y0: []int): []int  =>
                                  zipWith(+, acc, y0)
                              , y0 )                    in
-                 let z = map ( fn f64 ([]int y) =>
-                                 let rs = map( fn f64 (int u) =>
+                 let z = map ( fn (y: []int): f64  =>
+                                 let rs = map( fn (u: int): f64  =>
                                                  f64(3*u)
                                              , y )
                                  in  reduce(+, 0.0, rs )
                              , y )                     in
-                 let w = filter( fn bool (f64 z) =>
+                 let w = filter( fn (z: f64): bool  =>
                                      (z / 55.0) > 4.0
                                , z )                   in
 --                 let D = scan (+, 0, c)                in

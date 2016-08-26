@@ -7,4 +7,4 @@
 --   0.1f64
 -- }
 
-fun float main() = 0.1
+fun main(): float = 0.1

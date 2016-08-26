@@ -1,10 +1,10 @@
 -- ==
 -- error:
-fun int f((int, *[]int) t) =
+fun f(t: (int, *[]int)): int =
     let (x, a) = t in
     x
 
-fun int main() =
+fun main(): int =
     let n = 10 in
     let a = iota(n) in
     let t = (5, a) in
