@@ -27,14 +27,14 @@
 -- }
 -- structure distributed { }
 
-fun []int addRows ([]int xs, []int ys) =
+fun addRows (xs: []int, ys: []int): []int =
   zipWith(+, xs, ys)
 
-fun [][][][]int main ([][][][]int xssss, []int cs) =
-  zipWith(fn [][][]int ([][][]int xsss, int c) =>
+fun main (xssss: [][][][]int, cs: []int): [][][][]int =
+  zipWith(fn (xsss: [][][]int, c: int): [][][]int  =>
             let yss = unsafe reshape ( (2,c), xsss ) in
-            map (fn [][]int ([][]int xss) =>
-                   zipWith(fn []int ([]int xs, []int ys) =>
+            map (fn (xss: [][]int): [][]int  =>
+                   zipWith(fn (xs: []int, ys: []int): []int  =>
                              -- An implicit reshape will go here that
                              -- cannot be distributed - this messed up
                              -- the compiler.

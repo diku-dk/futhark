@@ -1,3 +1,3 @@
 type best_type = int
 
-fun best_type main(int x) = x
+fun main(x: int): best_type = x

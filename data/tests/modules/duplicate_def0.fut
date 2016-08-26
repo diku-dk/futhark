@@ -5,10 +5,10 @@
 -- output { 4 }
 
 type foo = int
-fun foo foo(int a) = a + a
+fun foo(a: int): foo = a + a
 struct Foo
   {
-    fun int one() = 1
+    fun one(): int = 1
   }
 
-fun int main(int x) = x
+fun main(x: int): int = x

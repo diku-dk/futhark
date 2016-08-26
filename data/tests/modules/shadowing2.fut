@@ -10,17 +10,17 @@
 
 struct M0 
   {
-    fun int foo() = 1
+    fun foo(): int = 1
   }
 
 struct M1 
   {
-    fun int bar() = M0.foo()
+    fun bar(): int = M0.foo()
     struct M0 
       {
-        fun int foo() = 10
+        fun foo(): int = 10
       }
-    fun int baz() = M0.foo()
+    fun baz(): int = M0.foo()
   }
   
-fun int main() = M0.foo() + M1.bar() + M1.baz()
+fun main(): int = M0.foo() + M1.bar() + M1.baz()

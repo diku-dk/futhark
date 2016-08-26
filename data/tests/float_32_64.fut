@@ -6,5 +6,5 @@
 -- ==
 -- input { 3.14f64 } output { 3.0f32 }
 
-fun f32 main(f64 x) =
+fun main(x: f64): f32 =
   f32(int(x))

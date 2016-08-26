@@ -6,15 +6,15 @@
 --
 -- From issue #191.
 
-fun *[numBins]i32 reduceBins(*[numBins]i32 acc, *[numBins]i32 elm) =
+fun reduceBins(acc: *[numBins]i32, elm: *[numBins]i32): *[numBins]i32 =
     loop (newVal = acc) = for i < numBins do
         let newVal[i] = newVal[i] + elm[i] in newVal
     in
         newVal
 
-fun []i32 main() =
+fun main(): []i32 =
     let
-        (rrs, drs) = unzip(map(fn (*[]i32, *[]i32) (i32 i) => (replicate(2, 0), replicate(2, 0)), iota(1)))
+        (rrs, drs) = unzip(map(fn (i: i32): (*[]i32, *[]i32)  => (replicate(2, 0), replicate(2, 0)), iota(1)))
     in
     loop ((res, rr, dr) = (replicate(2, 0),
                            reduce(reduceBins, replicate(3, 0), rrs),

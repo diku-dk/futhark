@@ -19,7 +19,7 @@
 -- input { 2  8u16 } output { 1u16 }
 -- input { 2 65528u16 } output { 1u16 }
 
-fun u16 main(int f, u16 x) =
+fun main(f: int, x: u16): u16 =
   if      f == 0 then -x
   else if f == 1 then abs(x)
   else                signum(x)

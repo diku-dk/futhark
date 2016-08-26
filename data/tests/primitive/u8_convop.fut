@@ -7,6 +7,6 @@
 -- input { 255u8 } output { -1i8 -1i16 -1i32 -1i64
 --                           255u8 255u16 255u32 255u64 }
 
-fun (i8,i16,i32,i64, u8, u16, u32, u64) main(u8 x) =
+fun main(x: u8): (i8,i16,i32,i64, u8, u16, u32, u64) =
   (i8(x), i16(x), i32(x), i64(x),
    u8(x), u16(x), u32(x), u64(x))

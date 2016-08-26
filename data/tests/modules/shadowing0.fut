@@ -8,14 +8,14 @@
 --  2
 -- }
 
-fun int number() = 1
+fun number(): int = 1
 struct M0 
   {
-    fun int number() = 2
+    fun number(): int = 2
     struct M1 
       {
-        fun int foo() = number()
+        fun foo(): int = number()
       }
   }
 
-fun int main() = M0.M1.foo()
+fun main(): int = M0.M1.foo()

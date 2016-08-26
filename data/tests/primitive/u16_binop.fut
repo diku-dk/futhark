@@ -25,7 +25,7 @@
 -- input { 3 7u16 6u16 } output { 52113u16 }
 -- input { 3 7u16 7u16 } output { 37111u16 }
 
-fun u16 main(int f, u16 x, u16 y) =
+fun main(f: int, x: u16, y: u16): u16 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

@@ -12,17 +12,17 @@
 
 -- These two functions define the satisfaction property.  pred2 must
 -- be transitive.
-fun bool pred1(int x) =
+fun pred1(x: int): bool =
   True
 
-fun bool pred2(int x, int y) =
+fun pred2(x: int, y: int): bool =
   x <= y
 
-fun int max(int x, int y) =
+fun max(x: int, y: int): int =
   if x > y then x else y
 
-fun (int,int,int,int,int,int) redOp((int,int,int,int,int,int) x,
-                                    (int,int,int,int,int,int) y) =
+fun redOp(x: (int,int,int,int,int,int),
+                                    y: (int,int,int,int,int,int)): (int,int,int,int,int,int) =
   let (lssx, lisx, lcsx, tlx, firstx, lastx) = x in
   let (lssy, lisy, lcsy, tly, firsty, lasty) = y in
 
@@ -37,11 +37,11 @@ fun (int,int,int,int,int,int) redOp((int,int,int,int,int,int) x,
 
   (newlss, newlis, newlcs, tlx+tly, first, last)
 
-fun (int,int,int,int,int,int) mapOp (int x) =
+fun mapOp (x: int): (int,int,int,int,int,int) =
   let xmatch = if pred1(x) then 1 else 0 in
   (xmatch, xmatch, xmatch, 1, x, x)
 
-fun int main([]int xs) =
+fun main(xs: []int): int =
   let (x,_,_,_,_,_) =
     reduce(redOp, (0,0,0,0,0,0), map(mapOp, xs)) in
   x

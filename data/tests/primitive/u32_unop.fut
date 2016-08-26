@@ -19,7 +19,7 @@
 -- input { 2  8u32 } output { 1u32 }
 -- input { 2 4294967288u32 } output { 1u32 }
 
-fun u32 main(int f, u32 x) =
+fun main(f: int, x: u32): u32 =
   if      f == 0 then -x
   else if f == 1 then abs(x)
   else                signum(x)

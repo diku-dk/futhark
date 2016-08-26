@@ -15,17 +15,17 @@
 
 -- constants
 
-fun int strike() = 100
-fun int bankDays() = 252
-fun int s0() = 100
-fun f64 r() = f64(0.03)
-fun f64 alpha() = f64(0.07)
-fun f64 sigma() = f64(0.20)
+fun strike(): int = 100
+fun bankDays(): int = 252
+fun s0(): int = 100
+fun r(): f64 = f64(0.03)
+fun alpha(): f64 = f64(0.07)
+fun sigma(): f64 = f64(0.20)
 
-fun f64 maxF64(f64 x, f64 y) =
+fun maxF64(x: f64, y: f64): f64 =
   if x < y then y else x
 
-fun f64 binom(int expiry) =
+fun binom(expiry: int): f64 =
   let n = expiry * bankDays() in
   let dt = f64(expiry) / f64(n) in
   let u = exp64(alpha()*dt+sigma()*sqrt64(dt)) in
@@ -51,5 +51,5 @@ fun f64 binom(int expiry) =
                              map(qDR*, put_init))))) in
   put[0]
 
-fun f64 main(int expiry) =
+fun main(expiry: int): f64 =
   binom(expiry)

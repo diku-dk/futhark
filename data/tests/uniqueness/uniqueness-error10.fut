@@ -2,9 +2,9 @@
 -- ==
 -- error:
 
-fun []int f(*[]int a) = a
+fun f(a: *[]int): []int = a
 
-fun ([]int, []int) main() =
+fun main(): ([]int, []int) =
     let n = 10 in
     let a = iota(n) in
     let b = iota(n) in

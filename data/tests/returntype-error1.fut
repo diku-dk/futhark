@@ -2,8 +2,8 @@
 -- ==
 -- error:
 
-fun []int f(*[]int a) = a -- OK, because unique is a subtype of nonunique
+fun f(a: *[]int): []int = a -- OK, because unique is a subtype of nonunique
 
-fun *[]int g([]int a) = a -- Wrong!
+fun g(a: []int): *[]int = a -- Wrong!
 
-fun int main() = 0
+fun main(): int = 0

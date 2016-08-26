@@ -6,11 +6,11 @@
 -- output {
 --   24730855
 -- }
-fun int fun1(int a, int b) = a + b
+fun fun1(a: int, b: int): int = a + b
 
-fun int fun2(int a, int b) = fun1(a,b) * (a+b)
+fun fun2(a: int, b: int): int = fun1(a,b) * (a+b)
 
-fun int fun3(int a, int b) = fun2(a,b) + a + b
+fun fun3(a: int, b: int): int = fun2(a,b) + a + b
 
-fun int main(int n, int m) =
+fun main(n: int, m: int): int =
   fun1(n,m) + fun2(n+n,m+m) + fun3(3*n,3*m) + fun2(2,n) + fun3(n,3)

@@ -8,4 +8,4 @@
 -- input { 1f32 -1f32 } output { 2.356194f32 }
 -- input { -1f32 -1f32 } output { -2.356194f32 }
 
-fun f32 main(f32 x, f32 y) = atan2_32(x,y)
+fun main(x: f32, y: f32): f32 = atan2_32(x,y)

@@ -3,5 +3,5 @@
 -- ==
 -- structure { Assert 0 }
 
-fun ([n]int,[n]int) main([n]int a, [m]int b) =
+fun main(a: [n]int, b: [m]int): ([n]int,[n]int) =
   unzip(unsafe zip(a, b))

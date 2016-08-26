@@ -7,4 +7,4 @@
 
 default(i16)
 
-fun i16 main() = 0
+fun main(): i16 = 0

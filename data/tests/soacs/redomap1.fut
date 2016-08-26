@@ -12,11 +12,11 @@
 -- input { 0 0 }
 -- output { empty([]i32) True }
 
-fun ([][]int, bool) main(int n, int m) =
-  let ass = map (fn [m]int (int l) =>
+fun main(n: int, m: int): ([][]int, bool) =
+  let ass = map (fn (l: int): [m]int  =>
                    map(+l*m, iota(m)),
                  iota(n))
-  let ps = zipWith(fn bool ([]int as, int i) =>
+  let ps = zipWith(fn (as: []int, i: int): bool  =>
                      unsafe as[i] % 2 == 0,
                    ass, map(%m, iota(n)))
   in (ass, reduce(&&, True, ps))

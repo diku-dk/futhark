@@ -7,5 +7,5 @@
 -- input { [[[1,2],[4,5],[7,8]]] [[[3,2],[6,5],[9,8]]] }
 -- output { [[[1,2],[4,5],[7,8],[3,2],[6,5],[9,8]]] }
 
-fun [n][][m]int main([n][][m]int xs, [n][][m]int ys) =
+fun main(xs: [n][][m]int, ys: [n][][m]int): [n][][m]int =
   concat@1(xs, ys)

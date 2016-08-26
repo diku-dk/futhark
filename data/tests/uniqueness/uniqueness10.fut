@@ -6,7 +6,7 @@
 --   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 -- }
 
-fun *[]int main() =
+fun main(): *[]int =
   let n = 10 in
   let a = iota(n) in
   let c = let (a, b) = (iota(n), a) in let a[0] = 42 in a

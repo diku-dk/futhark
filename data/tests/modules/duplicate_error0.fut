@@ -2,11 +2,11 @@
 -- ==
 -- error: .*Dup.*
 
-fun int bar() = 1
+fun bar(): int = 1
 struct Foo
   {
-    fun foo foo() = 1
+    fun foo(): foo = 1
   }
-fun int bar() = 2
+fun bar(): int = 2
 
-fun int main() = 0
+fun main(): int = 0

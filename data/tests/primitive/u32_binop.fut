@@ -25,7 +25,7 @@
 -- input { 3 47u32 6u32 } output { 2189280737u32 }
 -- input { 3 47u32 7u32 } output { 4111946831u32 }
 
-fun u32 main(int f, u32 x, u32 y) =
+fun main(f: int, x: u32, y: u32): u32 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

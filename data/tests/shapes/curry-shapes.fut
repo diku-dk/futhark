@@ -14,8 +14,8 @@
 --    [5,6,10,0]]
 -- }
 
-fun [n]int oneToEach([n]int r) =
+fun oneToEach(r: [n]int): [n]int =
   map(+1, r)
 
-fun [][]int main([][]int a) =
+fun main(a: [][]int): [][]int =
   map(oneToEach, a)

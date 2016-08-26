@@ -5,5 +5,5 @@
 -- input { -1f64 0f64 } output { True True }
 -- input { -1f64 1f64 } output { False True }
 
-fun (bool, bool) main(f64 x, f64 y) =
+fun main(x: f64, y: f64): (bool, bool) =
   (isinf64(x / y), isnan64(sqrt64(x)))

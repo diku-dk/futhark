@@ -7,8 +7,8 @@
 --   False
 --   0
 -- }
-fun (bool,int) main(int n) =
-  let (a,b) = reduce(fn (bool,int) ((bool,int) acc, (bool,int) elem) =>
+fun main(n: int): (bool,int) =
+  let (a,b) = reduce(fn (acc: (bool,int), elem: (bool,int)): (bool,int)  =>
                        let (accx, accy) = acc in
                        let (x, y) = elem in
                        (accx && x,

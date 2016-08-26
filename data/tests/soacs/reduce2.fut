@@ -6,5 +6,5 @@
 -- output {
 --   285
 -- }
-fun int main([]int a, []int b) =
+fun main(a: []int, b: []int): int =
     reduce(+, 0, map(*, zip(a,b)))

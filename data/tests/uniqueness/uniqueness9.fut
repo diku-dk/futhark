@@ -7,7 +7,7 @@
 --   0
 -- }
 
-fun int main() =
+fun main(): int =
   let n = 10 in
   let inarr  = copy(replicate(n, 0)) in
   loop ( outarr  = inarr ) = for i < n  do

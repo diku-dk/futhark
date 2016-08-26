@@ -9,7 +9,7 @@
 -- output {
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
-fun [m][n]int matmult([m][o]int a, [o][n]int b) =
+fun matmult(a: [m][o]int, b: [o][n]int): [m][n]int =
   let res = replicate(m, replicate(n,0)) in
   loop (res) = for i < m do
       loop (res) = for j < n do
@@ -20,5 +20,5 @@ fun [m][n]int matmult([m][o]int a, [o][n]int b) =
       in res
   in res
 
-fun [][]int main([][]int x, [][]int y) =
+fun main(x: [][]int, y: [][]int): [][]int =
   matmult(x, y)

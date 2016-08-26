@@ -12,5 +12,5 @@
 -- output { 887459712 }
 -- structure distributed { Iota 0 }
 
-fun int main(int n) =
+fun main(n: int): int =
   reduce(+, 0, iota(n))

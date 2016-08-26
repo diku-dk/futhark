@@ -9,9 +9,9 @@
 -- tags { no_python }
 -- compiled input { [1,2,3] 100001 } output { 366240i32 }
 
-fun int main([n]int a, int m) =
+fun main(a: [n]int, m: int): int =
   let contribs = replicate(m, a) in
-  let res = scan( fn []int ([]int x, []int y) => zipWith(+, x, y)
+  let res = scan( fn (x: []int, y: []int): []int  => zipWith(+, x, y)
                 , a
                 , contribs
                 ) in

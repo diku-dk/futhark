@@ -9,5 +9,5 @@
 --   True
 -- }
 
-fun (bool,bool) main(int x, int y) =
+fun main(x: int, y: int): (bool,bool) =
   (x > y, x >= y)

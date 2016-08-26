@@ -4,6 +4,6 @@
 -- input { [1,2,3] [4,5,6] 2 } output { 3 }
 -- structure { Concat 0 }
 
-fun int main([]int as, []int bs, int i) =
+fun main(as: []int, bs: []int, i: int): int =
   let cs = concat(as,bs)
   in cs[i]

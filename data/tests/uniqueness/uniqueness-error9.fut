@@ -3,11 +3,11 @@
 -- ==
 -- error:
 
-fun []int f((int, int) x, (int, int, []int) t) =
+fun f(x: (int, int), t: (int, int, []int)): []int =
     let (x, y, a) = t in
     a
 
-fun []int main() =
+fun main(): []int =
     let n = 10 in
     let a = iota(n) in
     let t = (3, 4, a) in

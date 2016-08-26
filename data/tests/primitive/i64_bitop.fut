@@ -56,7 +56,7 @@
 -- input { 5 -1i64  0i64 } output { -1i64 }
 -- input { 5 -1i64  1i64 } output { 9223372036854775807i64 }
 
-fun i64 main(int f, i64 x, i64 y) =
+fun main(f: int, x: i64, y: i64): i64 =
   if      f == 0 then x & y
   else if f == 1 then x | y
   else if f == 2 then x ^ y

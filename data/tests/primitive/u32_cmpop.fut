@@ -6,5 +6,5 @@
 -- input { 4294967295u32 1u32 } output { False False False }
 -- input {  1u32 4294967295u32 } output { True False True }
 
-fun (bool, bool, bool) main(u32 x, u32 y) =
+fun main(x: u32, y: u32): (bool, bool, bool) =
   (x < y, x == y, x <= y)

@@ -25,7 +25,7 @@
 -- input { 3 3u8 6u8 } output { 217u8 }
 -- input { 3 3u8 7u8 } output { 139u8 }
 
-fun u8 main(int f, u8 x, u8 y) =
+fun main(f: int, x: u8, y: u8): u8 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

@@ -7,5 +7,5 @@
 -- output {
 --   [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5, 6, 7]]
 -- }
-fun [][]int main([]int a) =
-  map(fn []int (int n) => iota(n), a)
+fun main(a: []int): [][]int =
+  map(fn (n: int): []int  => iota(n), a)

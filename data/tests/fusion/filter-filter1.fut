@@ -6,12 +6,12 @@
 -- output {
 --   [20, 30, 40, 60, 80, 90]
 -- }
-fun bool div2(int x) = x % 2 == 0
+fun div2(x: int): bool = x % 2 == 0
 
-fun bool div3(int x) = x % 3 == 0
+fun div3(x: int): bool = x % 3 == 0
 
-fun []int main([]int a, []int b) =
-  let (c1,c2) = unzip(filter(fn bool (int x, int y) =>
+fun main(a: []int, b: []int): []int =
+  let (c1,c2) = unzip(filter(fn (x: int, y: int): bool  =>
                                div2(x) || div3(y),
                              zip(a,b))) in
   filter(div2, c2)

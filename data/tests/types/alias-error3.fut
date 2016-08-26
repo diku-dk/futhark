@@ -6,4 +6,4 @@
 type mydup = int
 type mydup = f32
 
-fun int main(int x) = x
+fun main(x: int): int = x

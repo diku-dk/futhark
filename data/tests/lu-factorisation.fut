@@ -10,7 +10,7 @@
 --    [0.000000, -1.500000]]
 -- }
 
-fun (*[][]f64, *[][]f64) lu_inplace(*[n][]f64 a) =
+fun lu_inplace(a: *[n][]f64): (*[][]f64, *[][]f64) =
   loop ((a,l,u) = (a,
                    replicate(n,replicate(n,0.0)),
                    replicate(n,replicate(n,0.0)))) =
@@ -30,5 +30,5 @@ fun (*[][]f64, *[][]f64) lu_inplace(*[n][]f64 a) =
     in
   (l,u)
 
-fun ([][]f64, [][]f64) main([][]f64 a) =
+fun main(a: [][]f64): ([][]f64, [][]f64) =
   lu_inplace(copy(a))

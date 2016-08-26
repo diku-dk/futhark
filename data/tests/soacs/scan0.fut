@@ -8,6 +8,6 @@
 -- compiled input { 1000000 } output { 1783293664i32 }
 -- structure distributed { ScanKernel 2 Iota 0 }
 
-fun int main(int n) =
+fun main(n: int): int =
   let a = scan(+, 0, iota(n))
   in a[n-1]

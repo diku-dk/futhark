@@ -3,5 +3,5 @@
 -- ==
 -- structure { Assert 1 }
 
-fun (int,int) main([]int a, int i, int j) =
+fun main(a: []int, i: int, j: int): (int,int) =
   (unsafe a[i], a[j])

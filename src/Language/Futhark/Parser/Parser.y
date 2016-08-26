@@ -328,18 +328,18 @@ IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString na
              | sid '.' IncludeParts { let L pos (SID name) = $1 in nameToString name : $3 }
              | sid { let L pos (SID name) = $1 in [nameToString name] }
 
-Fun     : fun UserTypeDecl id '(' Params ')' '=' Exp
-                        { let L pos (ID name) = $3
-                            in FunDef (name==defaultEntryPoint) (name, blankLongname) $2 $5 $8 pos }
-        | fun UserTypeDecl id '(' ')' '=' Exp
-                        { let L pos (ID name) = $3
-                            in FunDef (name==defaultEntryPoint) (name, blankLongname) $2 [] $7 pos }
-        | entry UserTypeDecl id '(' Params ')' '=' Exp
-                        { let L pos (ID name) = $3
-                            in FunDef True (name, blankLongname) $2 $5 $8 pos }
-        | entry UserTypeDecl id '(' ')' '=' Exp
-                        { let L pos (ID name) = $3
-                            in FunDef True (name, blankLongname) $2 [] $7 pos }
+Fun     : fun id '(' Params ')' ':' UserTypeDecl '=' Exp
+                        { let L pos (ID name) = $2
+                          in FunDef (name==defaultEntryPoint) (name, blankLongname) $7 $4 $9 pos }
+        | fun id '(' ')' ':'  UserTypeDecl '=' Exp
+                        { let L pos (ID name) = $2
+                          in FunDef (name==defaultEntryPoint) (name, blankLongname) $6 [] $8 pos }
+        | entry id '(' Params ')' ':'  UserTypeDecl '=' Exp
+                        { let L pos (ID name) = $2
+                          in FunDef True (name, blankLongname) $7 $4 $9 pos }
+        | entry id '(' ')' ':'  UserTypeDecl '=' Exp
+                        { let L pos (ID name) = $2
+                          in FunDef True (name, blankLongname) $6 [] $8 pos }
 ;
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
@@ -401,6 +401,9 @@ FloatType :: { (FloatType, SrcLoc) }
 Params :: { [ParamBase NoInfo Name] }
 Params : UserTypeDecl id ',' Params { let L pos (ID name) = $2 in (Param name $1 pos) : $4 }
        | UserTypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
+
+       | id ':' UserTypeDecl ',' Params { let L pos (ID name) = $1 in (Param name $3 pos) : $5 }
+       | id ':' UserTypeDecl            { let L pos (ID name) = $1 in [Param name $3 pos] }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -606,8 +609,8 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '(' Patterns ')' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
-         : fn UserTypeDecl '(' Params ')' '=>' Exp
-           { AnonymFun $4 $7 $2 $1 }
+         : fn '(' Params ')' ':' UserTypeDecl '=>' Exp
+           { AnonymFun $3 $8 $6 $1 }
          | QualName '(' Exps ')'
            { CurryFun (fst $1) $3 NoInfo (snd $1) }
          | QualName '(' ')'

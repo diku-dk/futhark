@@ -8,14 +8,14 @@
 
 default(f32)
 
-fun f32 main ([]f32 xs, f32 mux, f32 eps) =
+fun main (xs: []f32, mux: f32, eps: f32): f32 =
   let g = exactYhat(xs, mux + eps)
   let h = exactYhat(xs, mux - eps)
   in g + h
 
-fun f32 exactYhat([]f32 xs, f32 x) =
+fun exactYhat(xs: []f32, x: f32): f32 =
   let ups = map(+x, xs)
   let lo = reduce(max, 0.0, ups)
   in lo + ups[0]
 
-fun f32 max(f32 a, f32 b) = if(a < b) then b else a
+fun max(a: f32, b: f32): f32 = if(a < b) then b else a

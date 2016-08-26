@@ -45,7 +45,7 @@
 
 default(f32)
 
-fun *[]f32 tridagSeq( [n]f32 a,*[]f32 b,[]f32 c,*[]f32 y ) =
+fun tridagSeq(a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
     loop ((y, b)) =
       for i < n-1 do
         let i    = i + 1              in
@@ -61,12 +61,12 @@ fun *[]f32 tridagSeq( [n]f32 a,*[]f32 b,[]f32 c,*[]f32 y ) =
                  in  y
     in  y
 
-fun *[n][m]f32 implicitMethod( [m][3]f32 myD,  [m][3]f32 myDD,
-                               [n][m]f32 myMu, [n][m]f32 myVar,
-                               [n][m]f32 u,          f32 dtInv  ) =
-  map( fn *[]f32 ( ([]f32,[]f32,*[]f32) tup )  =>
+fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
+                               myMu: [n][m]f32, myVar: [n][m]f32,
+                               u: [n][m]f32,          dtInv: f32  ): *[n][m]f32 =
+  map( fn (tup:  ([]f32,[]f32,*[]f32) ): *[]f32   =>
          let (mu_row,var_row,u_row) = tup in
-         let abc = map( fn (f32,f32,f32) ((f32,f32,[]f32,[]f32) tup) =>
+         let abc = map( fn (tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  =>
                           let (mu, var, d, dd) = tup in
                           ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                           , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
@@ -79,10 +79,9 @@ fun *[n][m]f32 implicitMethod( [m][3]f32 myD,  [m][3]f32 myDD,
      , zip(myMu,myVar,copy(u))
      )
 
-fun *[num_samples][n][m]f32
-  main( [m][3]f32 myD,  [m][3]f32 myDD,
-        [n][m]f32 myMu, [n][m]f32 myVar,
-        *[n][m]f32 u,    f32     dtInv,
-        int num_samples) =
+fun main(myD:  [m][3]f32,  myDD: [m][3]f32,
+        myMu: [n][m]f32, myVar: [n][m]f32,
+        u: *[n][m]f32,    dtInv: f32,
+        num_samples: int): *[num_samples][n][m]f32 =
   map(implicitMethod(myD,myDD,myMu,myVar,u),
       map (*dtInv,map (/f32(num_samples),map(f32,map(+1,iota(num_samples))))))

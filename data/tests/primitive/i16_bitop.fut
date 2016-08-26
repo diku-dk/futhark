@@ -56,7 +56,7 @@
 -- input { 5 -1i16  0i16 } output { -1i16 }
 -- input { 5 -1i16  1i16 } output { 32767i16 }
 
-fun i16 main(int f, i16 x, i16 y) =
+fun main(f: int, x: i16, y: i16): i16 =
   if      f == 0 then x & y
   else if f == 1 then x | y
   else if f == 2 then x ^ y

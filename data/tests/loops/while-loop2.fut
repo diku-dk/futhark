@@ -8,10 +8,10 @@
 --   [5, 4, 2, 8, 6, 9, 9]
 -- }
 
-fun bool pointlessly_consume(int x, *[]int a) =
+fun pointlessly_consume(x: int, a: *[]int): bool =
   x < reduce(+, 0, a)
 
-fun []int main(*[]int a, int i) =
+fun main(a: *[]int, i: int): []int =
   loop (a) = while pointlessly_consume(a[i], copy(iota(i))) do
     let a[i] = a[i] + 1 in
     a in

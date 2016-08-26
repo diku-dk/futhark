@@ -2,10 +2,10 @@
 -- ==
 -- error: .*Unknown.*
 
-fun int try_me() = M0.number()
+fun try_me(): int = M0.number()
 struct M0 
   {
-    fun int number() = 42
+    fun number(): int = 42
   }
 
-fun int main() = try_me()
+fun main(): int = try_me()

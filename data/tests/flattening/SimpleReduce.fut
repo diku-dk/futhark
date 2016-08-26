@@ -5,7 +5,7 @@
 -- output {
 --   [ 6, 18, 27 ]
 -- }
-fun []int main ([][]int xss) =
-  map (fn int ([]int xs ) =>
+fun main (xss: [][]int): []int =
+  map (fn (xs: []int ): int  =>
          reduce(+, 0, xs)
       , xss)

@@ -1,8 +1,8 @@
 -- ==
-fun f64 f(f64 a        ) = a + 3.0
-fun f64 g(f64 a        ) = a * 3.0
+fun f(a: f64        ): f64 = a + 3.0
+fun g(a: f64        ): f64 = a * 3.0
 
-fun f64 main([]f64 arr) =
+fun main(arr: []f64): f64 =
     let x = map(f, arr) in
     let y = map(f, x)   in
     let z = map(g, x)   in

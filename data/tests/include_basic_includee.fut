@@ -2,4 +2,4 @@
 -- ==
 -- tags { disable }
 
-fun i32 includee_function(i32 t) = t * 4
+fun includee_function(t: i32): i32 = t * 4

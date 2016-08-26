@@ -6,5 +6,5 @@
 -- input { 255u8 1u8 } output { False False False }
 -- input {  1u8 255u8 } output { True False True }
 
-fun (bool, bool, bool) main(u8 x, u8 y) =
+fun main(x: u8, y: u8): (bool, bool, bool) =
   (x < y, x == y, x <= y)

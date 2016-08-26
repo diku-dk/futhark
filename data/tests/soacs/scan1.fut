@@ -5,4 +5,4 @@
 -- output {
 --   [1, 3, 6, 10, 15, 21, 28, 36, 45]
 -- }
-fun []int main([]int a) = scan(+, 0, a)
+fun main(a: []int): []int = scan(+, 0, a)

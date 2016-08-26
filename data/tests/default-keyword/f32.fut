@@ -7,4 +7,4 @@
 
 default(f32)
 
-fun f32 main() = 0.1
+fun main(): f32 = 0.1

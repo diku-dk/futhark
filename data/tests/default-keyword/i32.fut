@@ -7,4 +7,4 @@
 
 default(i32)
 
-fun i32 main() = 0
+fun main(): i32 = 0

@@ -15,5 +15,5 @@
 --   -1073741824
 -- }
 
-fun (int, int, int, int) main(int a, int b) =
+fun main(a: int, b: int): (int, int, int, int) =
   (a, a+1, b-1, b>>1)

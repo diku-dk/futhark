@@ -45,9 +45,9 @@
 --      enddo
 --    enddo
 
-fun int min(int a, int b) = if(a<b) then a else b
+fun min(a: int, b: int): int = if(a<b) then a else b
 
-fun [][]int floydSbsImp(int n, *[][]int d) =
+fun floydSbsImp(n: int, d: *[][]int): [][]int =
     let dT = copy(transpose(d)) in
     loop (d) = for i < n do
         loop (d) = for j < n do
@@ -58,6 +58,6 @@ fun [][]int floydSbsImp(int n, *[][]int d) =
         in d
     in d
 
-fun [][]int main() =
+fun main(): [][]int =
     let arr = [[2,4,5], [1,1000,3], [3,7,1]] in
     floydSbsImp(3, copy(arr))

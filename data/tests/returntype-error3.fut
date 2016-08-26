@@ -4,7 +4,7 @@
 -- error:
 
 -- The two arrays must not alias each other, because they are unique.
-fun (*[]int, *[]int) main() =
+fun main(): (*[]int, *[]int) =
   let n = 10 in
   let a = iota(n) in
   if 1 == 2 then (a, iota(n)) else (iota(n), a)

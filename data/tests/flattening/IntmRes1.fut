@@ -12,11 +12,11 @@
 --    [24, 25, 26],
 --    [33, 34, 35]]
 -- }
-fun []int addToRow ([]int xs, int y) =
-  map(fn int (int x) => x+y, xs)
+fun addToRow (xs: []int, y: int): []int =
+  map(fn (x: int): int  => x+y, xs)
 
-fun [][]int main ([][]int xss, []int cs, int y) =
-  map (fn []int ([]int xs, int c) =>
+fun main (xss: [][]int, cs: []int, y: int): [][]int =
+  map (fn (xs: []int, c: int): []int  =>
          let y' = y * c + c in
          let zs = addToRow(xs,y') in
          zs

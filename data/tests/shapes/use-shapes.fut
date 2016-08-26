@@ -7,5 +7,5 @@
 --   [49,1344,12,11,10,9,8]
 -- }
 
-fun []int main([n]int a) =
+fun main(a: [n]int): []int =
   map(+n, a)

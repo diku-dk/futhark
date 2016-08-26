@@ -4,9 +4,9 @@
 -- output {
 --   0
 -- }
-fun int f(*[][]int a) = a[0,0]
+fun f(a: *[][]int): int = a[0,0]
 
-fun int main() =
+fun main(): int =
     let n = 10 in
     let a = copy(replicate(n, iota(n))) in
     let b = copy(replicate(n, iota(n))) in

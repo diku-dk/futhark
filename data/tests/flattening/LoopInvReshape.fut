@@ -8,8 +8,8 @@
 --          xs[i*z + j]
 --       , zip(ys,zs,is,js))
 
-fun []int main ([]int xs, [n]int ys, [n]int zs, [n]int is, [n]int js) =
-  map (fn int (int y, int z, int i, int j) =>
+fun main (xs: []int, ys: [n]int, zs: [n]int, is: [n]int, js: [n]int): []int =
+  map (fn (y: int, z: int, i: int, j: int): int  =>
          unsafe
          let tmp = reshape( (y,z) , xs ) in
          tmp[i,j]

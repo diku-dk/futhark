@@ -6,5 +6,5 @@
 -- output {
 --   [-2, -256, -1]
 -- }
-fun []int main([]int a) =
+fun main(a: []int): []int =
     map(~, a)

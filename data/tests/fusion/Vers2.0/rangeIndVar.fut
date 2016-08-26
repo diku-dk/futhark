@@ -6,7 +6,7 @@
 --   33
 -- }
 
-fun int main([m]int arr) =
+fun main(arr: [m]int): int =
   let k = 0 in
   loop (k) = 
     for i < m-1 do

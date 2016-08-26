@@ -25,17 +25,17 @@
 --     [[19, 17, 15],
 --      [19, 17, 15]]]]
 -- }
-fun []int add1 ([]int xs, []int ys) =
+fun add1 (xs: []int, ys: []int): []int =
   map(+, zip (xs,ys))
 
-fun [][]int add2 ([][]int xs, [][]int ys) =
+fun add2 (xs: [][]int, ys: [][]int): [][]int =
   map (add1, zip (xs,ys))
 
-fun [][][]int add3 ([][][]int xs, [][][]int ys) =
+fun add3 (xs: [][][]int, ys: [][][]int): [][][]int =
   map (add2, zip (xs,ys))
 
-fun [][][][]int add4 ([][][][]int xs, [][][][]int ys) =
+fun add4 (xs: [][][][]int, ys: [][][][]int): [][][][]int =
   map (add3, zip (xs,ys))
 
-fun [][][][]int main([][][][]int a, [][][][]int b) =
+fun main(a: [][][][]int, b: [][][][]int): [][][][]int =
   add4(a,b)

@@ -2,5 +2,5 @@
 
 type matrix = [][]int
 
-fun matrix main(*matrix m) =
+fun main(m: *matrix): matrix =
   let m[0,0] = 0 in m

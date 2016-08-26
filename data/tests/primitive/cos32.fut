@@ -5,4 +5,4 @@
 -- input { 3.1415927f32 } output { -1f32 }
 -- input { -3.1415927f32 } output { -1f32 }
 
-fun f32 main(f32 x) = cos32(x)
+fun main(x: f32): f32 = cos32(x)

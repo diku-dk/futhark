@@ -4,7 +4,7 @@
 -- output {
 --   0
 -- }
-fun int main() =
+fun main(): int =
   let n = 10 in
   let a = iota(n) in
   let b = iota(n) in

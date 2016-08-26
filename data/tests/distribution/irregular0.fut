@@ -11,7 +11,7 @@
 --   Kernel/DoLoop 1
 -- }
 
-fun []int main([]int a) =
-  map(fn int (int i) =>
+fun main(a: []int): []int =
+  map(fn (i: int): int  =>
         reduce(+, 0, map(+1,iota(i))),
       a)

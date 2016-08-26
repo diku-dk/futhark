@@ -5,4 +5,4 @@
 
 type foo = bar
 
-fun foo main(foo x) = x
+fun main(x: foo): foo = x

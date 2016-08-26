@@ -2,7 +2,7 @@
 -- checking should fail sensibly.
 -- ==
 -- error:
-fun []([]int,[]int) main () =
+fun main (): []([]int,[]int) =
   [ ([1,2], [3,4,5]),
     ([4], [1,2,3,4])
   ]

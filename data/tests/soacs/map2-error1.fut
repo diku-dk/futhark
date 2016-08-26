@@ -2,4 +2,4 @@
 -- ==
 -- error:
 
-fun ([]int) main([]int a) = map(fn int (int x) => x + 2, a)
+fun main(a: []int): ([]int) = map(fn (x: int): int  => x + 2, a)

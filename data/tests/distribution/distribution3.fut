@@ -11,12 +11,12 @@
 --
 -- structure distributed { Map 0 Kernel 4 ScanKernel 4 }
 
-fun [][][]int main([][n][m]int a) =
-  map(fn [m][n]int ([][]int a_row) =>
-        let b = map(fn []int ([]int a_row_row) =>
+fun main(a: [][n][m]int): [][][]int =
+  map(fn (a_row: [][]int): [m][n]int  =>
+        let b = map(fn (a_row_row: []int): []int  =>
                       scan(+, 0, a_row_row)
                    , a_row) in
-        map(fn []int ([]int b_col) =>
+        map(fn (b_col: []int): []int  =>
               scan(+, 0, b_col)
            , transpose(b))
      , a)

@@ -4,7 +4,7 @@
 -- ==
 -- structure { DoLoop/Negate 0 }
 
-fun []int main(*[]int a, *[]int b, int n) =
+fun main(a: *[]int, b: *[]int, n: int): []int =
   loop ((a,b)) = for i < n do
     let a[i] = a[i] + 1 in
     let b[i] = -b[i] in

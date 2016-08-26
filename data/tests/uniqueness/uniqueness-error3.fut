@@ -1,6 +1,6 @@
 -- ==
 -- error:
-fun int main() =
+fun main(): int =
     let n = 10 in
     let a = iota(n) in
     let b = a in -- b and a alias each other.

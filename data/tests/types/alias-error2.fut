@@ -5,4 +5,4 @@
 
 type t = int
 
-fun t main(*t x) = x
+fun main(x: *t): t = x

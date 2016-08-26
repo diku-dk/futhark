@@ -3,11 +3,10 @@
 -- ==
 -- structure { Map 1 Write 1 }
 
-fun ([n]i32, [n]i32)
-  main([k]i32 indexes,
-       [k]i32 values,
-       *[n]i32 array) =
-  let (indexes', baggage) = unzip(map(fn (i32, i32) (i32 i, i32 v) =>
+fun main(indexes: [k]i32,
+       values: [k]i32,
+       array: *[n]i32): ([n]i32, [n]i32) =
+  let (indexes', baggage) = unzip(map(fn (i: i32, v: i32): (i32, i32)  =>
                                         (i + 1, v + 1), zip(indexes, values)))
   let array' = write(indexes', values, array)
   in (array', baggage)

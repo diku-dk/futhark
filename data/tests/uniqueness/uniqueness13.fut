@@ -6,10 +6,10 @@
 --   [1.000000]
 --   [2.000000]
 -- }
-fun ([]f64,[]f64) f(*[]int b_1) =
+fun f(b_1: *[]int): ([]f64,[]f64) =
   ([1.0],[2.0])
 
-fun ([]f64, []f64) main(int n) =
+fun main(n: int): ([]f64, []f64) =
   let a = iota(n) in
   let x = f(a) in
   x

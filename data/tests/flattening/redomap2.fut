@@ -6,8 +6,8 @@
 -- output {
 --   27
 -- }
-fun int main ([n]int xs, [n]int ys) =
+fun main (xs: [n]int, ys: [n]int): int =
   let tmp =
-    map (fn int (int x, int y) => x+y
+    map (fn (x: int, y: int): int  => x+y
         , zip (xs,ys)) in
   reduce(+,0,tmp)

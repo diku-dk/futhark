@@ -1,4 +1,4 @@
 -- ==
 -- tags { disable }
 
-fun i32 includee0_includee_function(i32 x) = x - 3
+fun includee0_includee_function(x: i32): i32 = x - 3

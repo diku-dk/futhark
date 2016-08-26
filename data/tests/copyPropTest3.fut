@@ -4,12 +4,12 @@
 -- output {
 --   70
 -- }
-fun int getInt() = 10
+fun getInt(): int = 10
 
-fun int myfun( (int,int,(int,int)) x ) =
+fun myfun(x:  (int,int,(int,int)) ): int =
     let (a,b,(c,d)) = x in a + b + c + d
 
-fun int main() =
+fun main(): int =
     let n  = getInt()          in   -- Int
     let a  = (n, n, (n*0+5,n))   in
 

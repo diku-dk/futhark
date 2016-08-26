@@ -3,7 +3,7 @@
 -- ordering.
 -- ==
 
-fun [][]f64 main(int n, int i, f64 x) =
+fun main(n: int, i: int, x: f64): [][]f64 =
     let res = replicate(n,(replicate(n,0.0))) in
     let (u, uu) = (replicate(n,0.0),
                    replicate(n,0.0)) in

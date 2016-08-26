@@ -17,7 +17,7 @@
 --    Redomap  1
 -- }
 --
-fun (f64,[]f64,[]f64,[]f64,[]f64) main([]f64 arr) =
+fun main(arr: []f64): (f64,[]f64,[]f64,[]f64,[]f64) =
     let sa = scan(+, 0.0, arr) in
     let b  = map (*  2.0, sa ) in
     let sb = scan(+, 0.0, b  ) in

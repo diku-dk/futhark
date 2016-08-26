@@ -10,7 +10,7 @@
 --   [7, 8, 9, 10, 11, 12]
 -- }
 
-fun []int main([]int a, int i, int bound) =
+fun main(a: []int, i: int, bound: int): []int =
   loop (a) = while a[i] < bound do
     map(+ (1), a) in
   a

@@ -33,10 +33,10 @@ modified.
 Function Declarations
 ---------------------
 
-A function declaration must specify the return type, name, parameters,
-and body of the function::
+A function declaration must specify the name name, parameters, return
+type, and body of the function::
 
-  fun rettype_type name(params...) = body
+  fun name(params...): rettype = body
 
 Type inference is not supported, and functions are fully
 monomorphic.  Optionally, the programmer may put *shape declarations*
@@ -44,7 +44,7 @@ in the return type and parameter types.  These can be used to express
 invariants about the shapes of arrays that are accepted or produced by
 the function, e.g::
 
-  fun [n]int f([n]int a) =
+  fun f(a: [n]int): [n]int =
     map(+1, a)
 
 The above declaration specifies a function that takes an array
@@ -58,12 +58,12 @@ The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  fun int dotProduct([n]int a, [n]int b) =
+  fun dotProduct(a: [n]int, b: [n]int): int =
     reduce(+, 0, zipWith(*, a, b))
 
 Or matrix multiplication::
 
-  fun [n][n]int matMult([n][m]int x, [m][n]int y) =
+  fun matMult(x: [n][m]int, y: [m][n]int): [n][n]int =
     ...
 
 The dimension names bound in a parameter shape declaration can be used
@@ -145,21 +145,21 @@ The syntax is as in the following example::
         struct F32
           {
             type t = ( f32 , f32 , f32 )
-            fun t add(t a , t b) =
+            fun add(a: t , b: t): t =
               let (a1, a2, a3) = a in
               let (b1, b2, b3) = b in
               (a1 + b1, a2 + b2 , a3 + b3)
         
-            fun t subtract(t a , t b) =
+            fun subtract(a: t , b: t): t =
               let (a1, a2, a3) = a in
               let (b1, b2, b3) = b in
               (a1 - b1, a2 - b2 , a3 - b3)
         
-            fun t scale(f32 k , t a) =
+            fun scale(k: f32 , a: t):t =
               let (a1, a2, a3) = a in
               (a1 * k, a2 * k , a3 * k)
         
-            fun f32 dot(t a , t b) =
+            fun dot(a: t , b: t): f32 =
               let (a1, a2, a3) = a in
               let (b1, b2, b3) = b in
               a1*b1 + a2*b2 + a3*b3
@@ -173,16 +173,16 @@ The syntax is as in the following example::
               let (b1, b2, b3) = b in
               (a1 + b1, a2 + b2 , a3 + b3)
         
-            fun t subtract(t a , t b) =
+            fun subtract(a: t, b: t): t =
               let (a1, a2, a3) = a in
               let (b1, b2, b3) = b in
               (a1 - b1, a2 - b2 , a3 - b3)
         
-            fun t scale(int k , t a) =
+            fun scale(k: int, a: t): t =
               let (a1, a2, a3) = a in
               (a1 * k, a2 * k , a3 * k)
         
-            fun int dot(t a , t b) =
+            fun dot(a: t, b: t): int =
               let (a1, a2, a3) = a in
               let (b1, b2, b3) = b in
               a1*b1 + a2*b2 + a3*b3
@@ -195,7 +195,7 @@ Functions and types within these structures can be accessed using common dot not
     include Vec3
 
     type vector = Vec3.Int.t
-    fun vector double(vector v) = Vec3.Int.plus(v,v)
+    fun double(v: vector): vector = Vec3.Int.plus(v,v)
 
 Structures names must begin with a capital letter.
 

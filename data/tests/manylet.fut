@@ -1,7 +1,7 @@
 -- Parser test.  'in' is optional except at the end of a chain of
 -- let/loop-bindings.
 
-fun [n]int main(*[n]int a, int x) =
+fun main(a: *[n]int, x: int): [n]int =
   let y = x + 2
   let z = y + 3 + x
   loop ((a,z)) = for i < n do

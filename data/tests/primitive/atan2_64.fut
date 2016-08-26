@@ -8,4 +8,4 @@
 -- input { 1f64 -1f64 } output { 2.356194f64 }
 -- input { -1f64 -1f64 } output { -2.356194f64 }
 
-fun f64 main(f64 x, f64 y) = atan2_64(x,y)
+fun main(x: f64, y: f64): f64 = atan2_64(x,y)

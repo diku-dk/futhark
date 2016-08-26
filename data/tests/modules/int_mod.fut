@@ -7,11 +7,11 @@
 -- }
 
 struct IntLib  {
-    fun int plus(int a, int b) = a + b
-    fun int numberFour() = 4
+    fun plus(a: int, b: int): int = a + b
+    fun numberFour(): int = 4
   }
 
-fun int localplus(int a, int b) = IntLib.plus (a,b)
+fun localplus(a: int, b: int): int = IntLib.plus (a,b)
 
-fun int main(int a, int b) =
+fun main(a: int, b: int): int =
   localplus(a,b)

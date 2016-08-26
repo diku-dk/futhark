@@ -7,5 +7,5 @@
 -- input {  1i64 -1i64 } output { False False False }
 -- input { -2i64 -1i64 } output { True False True }
 
-fun (bool, bool, bool) main(i64 x, i64 y) =
+fun main(x: i64, y: i64): (bool, bool, bool) =
   (x < y, x == y, x <= y)

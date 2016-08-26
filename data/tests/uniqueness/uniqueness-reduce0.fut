@@ -9,9 +9,9 @@
 --   [1i32, 11i32, 21i32, 31i32, 41i32, 51i32, 61i32, 71i32, 81i32, 91i32]
 -- }
 
-fun []int main(*[]int a,[]int b) =
+fun main(a: *[]int,b: []int): []int =
   let (x,y) =
-    reduce(fn (*[]int, []int) ((*[]int, []int) acc, ([]int, []int) arr) =>
+    reduce(fn (acc: (*[]int, []int), arr: ([]int, []int)): (*[]int, []int)  =>
              let (a1,b1) = acc
              let (a2,b2) = arr
              in (zipWith(+, a1, a2),

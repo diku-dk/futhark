@@ -9,6 +9,6 @@
 --   [[1],[2],[42],[4],[5]]
 -- }
 
-fun [][]int main(*[][n]int a, int i, int v) =
+fun main(a: *[][n]int, i: int, v: int): [][]int =
   let a[i] = replicate(n,v)
   in a

@@ -3,6 +3,6 @@
 -- ==
 -- error:
 
-fun (*[]int, *[]int) main(int n) =
+fun main(n: int): (*[]int, *[]int) =
   let a = iota(n) in
   (a, a)

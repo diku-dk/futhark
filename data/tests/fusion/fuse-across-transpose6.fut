@@ -40,41 +40,39 @@
 -- }
 -- structure { Map/Scanomap 1 Map 1 }
 
-fun []f64 take(int n, []f64 a) = let (first, rest) = split((n), a) in first
+fun take(n: int, a: []f64): []f64 = let (first, rest) = split((n), a) in first
 
-fun [num_dates][num_und]f64
-  correlateDeltas([num_und][num_und]f64 md_c,
-                  [num_dates][num_und]f64 zds) =
-  map( fn [num_und]f64 ([num_und]f64 zi) =>
-         map( fn f64 (int j) =>
+fun correlateDeltas(md_c: [num_und][num_und]f64,
+                  zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =
+  map( fn (zi: [num_und]f64): [num_und]f64  =>
+         map( fn (j: int): f64  =>
                 let x = zipWith( *, take(j+1,zi), take(j+1,md_c[j]) )
                 in  reduce( +, 0.0, x )
             , iota(num_und) )
      , zds )
 
-fun [num_und]f64 combineVs(  [num_und]f64 n_row,
-                               [num_und]f64 vol_row,
-                               [num_und]f64 dr_row ) =
+fun combineVs(n_row:   [num_und]f64,
+                               vol_row: [num_und]f64,
+                               dr_row: [num_und]f64 ): [num_und]f64 =
   map(+, zip(dr_row, map(*, zip(n_row, vol_row ) )))
 
-fun [num_dates][num_und]f64
-  mkPrices([num_und]f64             md_starts,
-           [num_dates][num_und]f64 md_vols,
-           [num_dates][num_und]f64 md_drifts,
-           [num_dates][num_und]f64 noises) =
+fun mkPrices(md_starts: [num_und]f64,
+           md_vols: [num_dates][num_und]f64,
+           md_drifts: [num_dates][num_und]f64,
+           noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let c_rows = map( combineVs, zip(noises, md_vols, md_drifts) )
-  let e_rows = map( fn [num_und]f64 ([]f64 x) => map(exp64, x)
+  let e_rows = map( fn (x: []f64): [num_und]f64  => map(exp64, x)
                   , c_rows
                   )
-  in  scan( fn []f64 ([]f64 x, []f64 y) => zipWith(*, x, y)
+  in  scan( fn (x: []f64, y: []f64): []f64  => zipWith(*, x, y)
           , md_starts, e_rows )
 
   -- Formerly blackScholes.
-fun [num_dates][num_und]f64 main([num_und][num_und]f64 md_c,
-                                    [num_dates][num_und]f64 md_vols,
-                                    [num_dates][num_und]f64 md_drifts,
-                                    [num_und]f64            md_starts,
-                                    [num_und][num_dates]f64 bb_arr) =
+fun main(md_c: [num_und][num_und]f64,
+                                    md_vols: [num_dates][num_und]f64,
+                                    md_drifts: [num_dates][num_und]f64,
+                                    md_starts: [num_und]f64,
+                                    bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
   -- I don't want to include the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose(bb_arr) in

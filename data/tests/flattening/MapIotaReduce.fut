@@ -5,8 +5,8 @@
 -- output {
 --   [0, 1, 3, 6]
 -- }
-fun []int main ([]int xs) =
-  map( fn int (int x) =>
+fun main (xs: []int): []int =
+  map( fn (x: int): int  =>
          let tmp = iota(x) in
          reduce(+,0,tmp)
      , xs)

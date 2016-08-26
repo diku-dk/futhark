@@ -13,9 +13,9 @@
 --    [10, 11, 12, 13, 14, 15, 16, 17]]
 -- }
 
-fun [n][k]int main(int n, int m, int k) =
+fun main(n: int, m: int, k: int): [n][k]int =
   let a = replicate(n, iota(m)) in
-  zipWith(fn [k]int (int i, [m]int r) =>
+  zipWith(fn (i: int, r: [m]int): [k]int  =>
             let x = reduce(+, 0, r)
             in map(+i, map(+x, iota(k))),
           iota(n), a)

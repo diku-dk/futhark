@@ -5,8 +5,8 @@
 -- output {
 --   [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 -- }
-fun int intsqrt(int x) =
+fun intsqrt(x: int): int =
     int(sqrt32(f32(x)))
 
-fun [][]int main ([n]int a) =
+fun main (a: [n]int): [][]int =
     reshape((intsqrt(n), intsqrt(n)), a)

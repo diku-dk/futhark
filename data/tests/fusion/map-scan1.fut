@@ -8,6 +8,6 @@
 -- structure {
 --   Scanomap 1
 -- }
-fun []int main([]int a) =
+fun main(a: []int): []int =
   let b = scan(+, 0, map(+2,a)) in
   b
