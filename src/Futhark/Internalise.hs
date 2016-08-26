@@ -919,7 +919,8 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
         ext_params <- forM ext_param_ts $ \param_t -> do
           name <- newVName "not_curried"
           return E.Param { E.paramName = name
-                         , E.paramTypeDecl = typeToTypeDecl param_t
+                         , E.paramTypeDecl = Nothing
+                         , E.paramTypeInfo = Info param_t
                          , E.paramSrcLoc = noLoc
                          }
         bindingParams ext_params $ \shape_params value_params -> do
@@ -967,7 +968,8 @@ unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
   let t = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = typeToTypeDecl t
+      param = E.Param { E.paramTypeDecl = Nothing
+                      , E.paramTypeInfo = Info t
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
@@ -981,12 +983,14 @@ binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
   let xtype' = E.vacuousShapeAnnotations $ E.toStruct xtype
-      param_x = E.Param { E.paramTypeDecl = typeToTypeDecl xtype'
+      param_x = E.Param { E.paramTypeDecl = Nothing
+                        , E.paramTypeInfo = Info xtype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = x_name
                         }
       ytype' = E.vacuousShapeAnnotations $ E.toStruct ytype
-      param_y = E.Param { E.paramTypeDecl = typeToTypeDecl ytype'
+      param_y = E.Param { E.paramTypeDecl = Nothing
+                        , E.paramTypeInfo = Info ytype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = y_name
                         }
@@ -1002,7 +1006,8 @@ binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let paramtype' = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = typeToTypeDecl paramtype'
+      param = E.Param { E.paramTypeDecl = Nothing
+                      , E.paramTypeInfo = Info paramtype'
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }

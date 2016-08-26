@@ -707,25 +707,23 @@ toParam :: Ord vn =>
            IdentBase Info vn
         -> ParamBase Info vn
 toParam (Ident name (Info t) loc) =
-  Param name (TypeDecl t' $ Info t'') loc
-  where
-    t'  = contractTypeBase t
-    t'' = vacuousShapeAnnotations $ toStruct t
+  Param name Nothing (Info t') loc
+  where t' = vacuousShapeAnnotations $ toStruct t
 
 -- | Turn a parameter into an identifier.
 fromParam :: Ord vn =>
              ParamBase Info vn
           -> IdentBase Info vn
-fromParam (Param name (TypeDecl _ (Info t)) loc) =
+fromParam (Param name _ (Info t) loc) =
   Ident name (Info $ removeShapeAnnotations $ fromStruct t) loc
 
 paramType :: ParamBase Info vn
           -> StructTypeBase vn
-paramType = unInfo . expandedType . paramTypeDecl
+paramType = unInfo . paramTypeInfo
 
 paramDeclaredType :: ParamBase f vn
-                  -> UserType vn
-paramDeclaredType = declaredType . paramTypeDecl
+                  -> Maybe (UserType vn)
+paramDeclaredType = fmap declaredType . paramTypeDecl
 
 -- | As 'patNames', but returns a the set of names (which means that
 -- information about ordering is destroyed - make sure this is what

@@ -401,7 +401,8 @@ Params : Param ',' SomeParams   { $1 : $3 }
 SomeParams : Param                { [$1] }
            | Param ',' SomeParams { $1 : $3 }
 
-Param : id ':' UserTypeDecl { let L pos (ID name) = $1 in Param name $3 pos }
+Param : id ':' UserTypeDecl { let L loc (ID name) = $1 in Param name (Just $3) NoInfo loc }
+      | id                  { let L loc (ID name) = $1 in Param name Nothing NoInfo loc }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }

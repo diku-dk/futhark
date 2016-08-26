@@ -10,8 +10,8 @@
 -- structure { Map 2 Map/Map/Redomap 1 }
 
 fun main(x: [n][m]int, y: [m][p]int): [n][p]int =
-  map(fn (xr: [m]int): [p]int  =>
-        map(fn (yc: [m]int): int  =>
+  map(fn (xr): [p]int =>
+        map(fn (yc): int =>
               reduce(+, 0, zipWith(*, xr, yc)),
             transpose(y)),
       x)

@@ -302,12 +302,12 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
 
--- | A name with no aliasing information, but known type.  These are
--- used for function parameters.
+-- | Parameters for functions, both anonymous and named.
 data ParamBase f vn = Param { paramName :: vn
-                            , paramTypeDecl :: TypeDeclBase f vn
+                            , paramTypeDecl :: Maybe (TypeDeclBase f vn)
+                            , paramTypeInfo :: f (StructTypeBase vn)
                             , paramSrcLoc :: SrcLoc
-                          }
+                            }
 deriving instance Showable f vn => Show (ParamBase f vn)
 
 instance Eq vn => Eq (ParamBase f vn) where
