@@ -179,6 +179,7 @@ import Language.Futhark.Core(blankLongname)
       val             { L $$ VAL }
 
 %nonassoc ifprec letprec curryprec
+%left ','
 %left '||'
 %left '&&'
 %left '&' '^' '|'
@@ -331,15 +332,9 @@ IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString na
 Fun     : fun id '(' Params ')' ':' UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
                           in FunDef (name==defaultEntryPoint) (name, blankLongname) $7 $4 $9 pos }
-        | fun id '(' ')' ':'  UserTypeDecl '=' Exp
-                        { let L pos (ID name) = $2
-                          in FunDef (name==defaultEntryPoint) (name, blankLongname) $6 [] $8 pos }
         | entry id '(' Params ')' ':'  UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
                           in FunDef True (name, blankLongname) $7 $4 $9 pos }
-        | entry id '(' ')' ':'  UserTypeDecl '=' Exp
-                        { let L pos (ID name) = $2
-                          in FunDef True (name, blankLongname) $6 [] $8 pos }
 ;
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
@@ -399,8 +394,8 @@ FloatType :: { (FloatType, SrcLoc) }
           | f64  { (Float64, $1) }
 
 Params :: { [ParamBase NoInfo Name] }
-Params : id ':' UserTypeDecl ',' Params { let L pos (ID name) = $1 in (Param name $3 pos) : $5 }
-       | id ':' UserTypeDecl            { let L pos (ID name) = $1 in [Param name $3 pos] }
+Params : id ':' UserTypeDecl { let L pos (ID name) = $1 in [Param name $3 pos] }
+       | Params ',' Params   { $1 ++ $3 }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -524,7 +519,7 @@ Exp  :: { UncheckedExp }
 
      | LetExp         { $1 }
 
-     | Exp Index
+     | Exp Slice
                       { Index $1 $2 (srclocOf $1) }
 
      | Exp '.' NaturalInt { TupleIndex $1 $3 NoInfo $ srclocOf $1 }
@@ -552,14 +547,11 @@ LetExp :: { UncheckedExp }
      | let '(' Patterns ')' '=' Exp LetBody
                       { LetPat (TuplePattern $3 $1) $6 $7 $1 }
 
-     | let Id '=' Id with Index '<-' Exp LetBody
+     | let Id '=' Id with Slice '<-' Exp LetBody
                       { LetWith $2 $4 $6 $8 $9 $1 }
 
-     | let Id Index '=' Exp LetBody
+     | let Id Slice '=' Exp LetBody
                       { LetWith $2 $2 $3 $5 $6 $1 }
-
-     | let Id '[' ']' '=' Exp LetBody
-                      { LetWith $2 $2 [] $6 $7 $1 }
 
      | loop '(' Pattern ')' '=' LoopForm do Exp LetBody
                       {% liftM (\t -> DoLoop $3 t $6 $8 $9 $1)
@@ -581,11 +573,11 @@ LoopForm : for Id '<' Exp
            { For FromDownTo (zeroExpression (srclocOf $1)) $4 $2 }
          | while Exp      { While $2 }
 
-Index :: { [UncheckedDimIndex] }
+Slice :: { [UncheckedDimIndex] }
      : '[' DimIndices ']'                  { $2 }
 
-DimIndices : DimIndex ',' DimIndices { $1 : $3 }
-           | DimIndex          { [$1] }
+DimIndices : DimIndices ',' DimIndices { $1 ++ $3 }
+           | DimIndex                  { [$1] }
 
 DimIndex :: { UncheckedDimIndex }
          : Exp { DimFix $1 }
