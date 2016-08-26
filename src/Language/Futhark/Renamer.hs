@@ -299,12 +299,16 @@ rename = Mapper {
 
 renameLambda :: (Eq f, Hashable f, Eq t, Hashable t) =>
                 LambdaBase NoInfo f -> RenameM f t (LambdaBase NoInfo t)
-renameLambda (AnonymFun params body (TypeDecl ret NoInfo) pos) =
+renameLambda (AnonymFun params body maybe_ret NoInfo loc) =
   bindNames (map paramName params) $ do
     params' <- mapM declRepl params
     body' <- renameExp body
-    ret' <- renameUserType ret
-    return (AnonymFun params' body' (TypeDecl ret' NoInfo) pos)
+    maybe_ret' <- case maybe_ret of
+                    Just (TypeDecl ret NoInfo) ->
+                      Just <$> (TypeDecl <$> renameUserType ret <*> pure NoInfo)
+                    Nothing ->
+                      return Nothing
+    return $ AnonymFun params' body' maybe_ret' NoInfo loc
 renameLambda (CurryFun fname curryargexps NoInfo pos) = do
   curryargexps' <- mapM renameExp curryargexps
   return (CurryFun fname curryargexps' NoInfo pos)

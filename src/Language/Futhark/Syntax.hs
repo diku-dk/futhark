@@ -577,8 +577,8 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
                         deriving (Eq, Ord, Show)
 
 -- | Anonymous Function
-data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
-                      -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
+data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
+                      -- ^ @fn (x: bool, z: char):int => if(x) then ord(z) else ord(z)+1 *)@
                       | CurryFun QualName [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
                       | UnOpFun UnOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
@@ -592,7 +592,7 @@ data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (TypeDeclBase f
 deriving instance Showable f vn => Show (LambdaBase f vn)
 
 instance Located (LambdaBase f vn) where
-  locOf (AnonymFun _ _ _ loc)         = locOf loc
+  locOf (AnonymFun _ _ _ _ loc)         = locOf loc
   locOf (CurryFun  _ _ _ loc)         = locOf loc
   locOf (UnOpFun _ _ _ loc)           = locOf loc
   locOf (BinOpFun _ _ _ _ loc)        = locOf loc

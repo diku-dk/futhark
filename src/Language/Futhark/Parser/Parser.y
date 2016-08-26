@@ -610,7 +610,9 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
 
 FunAbstr :: { UncheckedLambda }
          : fn '(' Params ')' ':' UserTypeDecl '=>' Exp
-           { AnonymFun $3 $8 $6 $1 }
+           { AnonymFun $3 $8 (Just $6) NoInfo $1 }
+         | fn '(' Params ')' '=>' Exp
+           { AnonymFun $3 $6 Nothing NoInfo $1 }
          | QualName '(' Exps ')'
            { CurryFun (fst $1) $3 NoInfo (snd $1) }
          | QualName '(' ')'
