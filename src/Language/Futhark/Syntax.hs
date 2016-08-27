@@ -407,6 +407,9 @@ data ExpBase f vn =
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
+            | Update (IdentBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
+            -- ^ In-place update.
+
             | Index (ExpBase f vn)
                     [DimIndexBase f vn]
                     SrcLoc
@@ -540,6 +543,7 @@ instance Located (ExpBase f vn) where
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
+  locOf (Update _ _ _ pos) = locOf pos
   locOf (Index _ _ pos) = locOf pos
   locOf (TupleIndex _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
@@ -600,15 +604,15 @@ instance Located (LambdaBase f vn) where
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
-data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
-                       | Id (IdentBase f vn)
-                       | Wildcard (f (CompTypeBase vn)) SrcLoc -- Nothing, i.e. underscore.
+data PatternBase f vn = TuplePattern [PatternBase f vn] (Maybe (TypeDeclBase f vn)) SrcLoc
+                      | Id (IdentBase f vn) (Maybe (TypeDeclBase f vn))
+                      | Wildcard (f (CompTypeBase vn)) (Maybe (TypeDeclBase f vn)) SrcLoc -- Nothing, i.e. underscore.
 deriving instance Showable f vn => Show (PatternBase f vn)
 
 instance Located (PatternBase f vn) where
-  locOf (TuplePattern _ loc) = locOf loc
-  locOf (Id ident) = locOf ident
-  locOf (Wildcard _ loc) = locOf loc
+  locOf (TuplePattern _ _ loc) = locOf loc
+  locOf (Id ident _) = locOf ident
+  locOf (Wildcard _ _ loc) = locOf loc
 
 -- | Function Declarations
 data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool

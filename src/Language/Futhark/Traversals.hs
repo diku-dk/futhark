@@ -84,6 +84,9 @@ mapExpM tv (LetWith dest src idxexps vexp body loc) =
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
        mapM (mapDimIndexM tv) idxexps <*> mapOnExp tv vexp <*>
        mapOnExp tv body <*> pure loc
+mapExpM tv (Update v idxexps vexp loc) =
+  pure Update <*> mapOnIdent tv v <*>
+       mapM (mapDimIndexM tv) idxexps <*> mapOnExp tv vexp <*> pure loc
 mapExpM tv (Index arr idxexps loc) =
   pure Index <*>
        mapOnExp tv arr <*>

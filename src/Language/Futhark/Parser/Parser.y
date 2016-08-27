@@ -190,6 +190,7 @@ import Language.Futhark.Core(blankLongname)
 
 %left '*' '/' '%' '//' '%%'
 %left pow
+%left ':'
 %nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '.'
 %nonassoc '['
@@ -401,8 +402,7 @@ Params : Param ',' SomeParams   { $1 : $3 }
 SomeParams : Param                { [$1] }
            | Param ',' SomeParams { $1 : $3 }
 
-Param : id ':' UserTypeDecl { let L loc (ID name) = $1 in Param name (Just $3) NoInfo loc }
-      | id                  { let L loc (ID name) = $1 in Param name Nothing NoInfo loc }
+Param : id MaybeAscription { let L loc (ID name) = $1 in Param name $2 NoInfo loc }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -531,6 +531,9 @@ Exp  :: { UncheckedExp }
 
      | Exp '.' NaturalInt { TupleIndex $1 $3 NoInfo $ srclocOf $1 }
 
+     | Id with Slice '<-' Exp %prec letprec
+                         { Update $1 $3 $5 $ srclocOf $1 }
+
      | streamMap       '(' FunAbstr ',' Exp ')'
                          { Stream (MapLike InOrder)  $3 $5 $1 }
      | streamMapPer    '(' FunAbstr ',' Exp ')'
@@ -545,19 +548,10 @@ Exp  :: { UncheckedExp }
                          { Write $3 $5 $7 $1 }
 
 LetExp :: { UncheckedExp }
-     : let Id '=' Exp LetBody
-                      { LetPat (Id $2) $4 $5 $1 }
+     : let Pattern '=' Exp LetBody
+                      { LetPat $2 $4 $5 $1 }
 
-     | let '_' '=' Exp LetBody
-                      { LetPat (Wildcard NoInfo $2) $4 $5 $1 }
-
-     | let '(' Patterns ')' '=' Exp LetBody
-                      { LetPat (TuplePattern $3 $1) $6 $7 $1 }
-
-     | let Id '=' Id with Slice '<-' Exp LetBody
-                      { LetWith $2 $4 $6 $8 $9 $1 }
-
-     | let Id Slice '=' Exp LetBody
+     | let VarId Slice '=' Exp LetBody
                       { LetWith $2 $2 $3 $5 $6 $1 }
 
      | loop '(' Pattern ')' '=' LoopForm do Exp LetBody
@@ -599,20 +593,23 @@ Exps : Exp ',' Exps { $1 : $3 }
 
 Id : QualName { let (([], name), loc) = $1 in Ident name NoInfo loc }
 
+VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
+
 Patterns : Pattern ',' Patterns  { $1 : $3 }
          | Pattern               { [$1] }
-         |                       { [] }
-;
 
-Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
-      | '_' { Wildcard NoInfo $1 }
-      | '(' Patterns ')' { TuplePattern $2 $1 }
+Pattern : VarId MaybeAscription { Id $1 $2 }
+      | '_' MaybeAscription { Wildcard NoInfo $2 $1 }
+      | '(' Pattern ')' { $2 }
+      | '(' Pattern ',' Patterns ')' MaybeAscription { TuplePattern ($2:$4) $6 $1 }
+
+MaybeAscription :: { Maybe (TypeDeclBase NoInfo Name) }
+MaybeAscription : ':' UserTypeDecl { Just $2 }
+                |                  { Nothing }
 
 FunAbstr :: { UncheckedLambda }
-         : fn '(' Params ')' ':' UserTypeDecl '=>' Exp
-           { AnonymFun $3 $8 (Just $6) NoInfo $1 }
-         | fn '(' Params ')' '=>' Exp
-           { AnonymFun $3 $6 Nothing NoInfo $1 }
+         : fn '(' Params ')' MaybeAscription '=>' Exp
+           { AnonymFun $3 $7 $5 NoInfo $1 }
          | QualName '(' Exps ')'
            { CurryFun (fst $1) $3 NoInfo (snd $1) }
          | QualName '(' ')'
@@ -800,9 +797,9 @@ arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
-patternExp (Id ident) = return $ Var ident
-patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
-patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+patternExp (Id ident _) = return $ Var ident
+patternExp (TuplePattern pats _ loc) = TupLit <$> (mapM patternExp pats) <*> return loc
+patternExp (Wildcard _ _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
 zeroExpression :: SrcLoc -> UncheckedExp
 zeroExpression = Literal $ PrimValue $ SignedValue $ Int32Value 0

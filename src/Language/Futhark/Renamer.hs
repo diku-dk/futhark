@@ -188,7 +188,7 @@ renameExp (LetWith dest src idxs ve body loc) = do
     return $ LetWith dest' src' idxs' ve' body' loc
 renameExp (LetPat pat e body pos) = do
   e1' <- renameExp e
-  bind (patternNames pat) $ do
+  bind (patIdents pat) $ do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
@@ -198,7 +198,7 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
     For dir lbound loopvar ubound -> do
       lbound' <- renameExp lbound
       ubound' <- renameExp ubound
-      bind (patternNames mergepat) $ do
+      bind (patIdents mergepat) $ do
         mergepat' <- renamePattern mergepat
         letbody' <- renameExp letbody
         bind [loopvar] $ do
@@ -207,7 +207,7 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
           return $ DoLoop mergepat' mergeexp'
             (For dir lbound' loopvar' ubound') loopbody' letbody' pos
     While cond ->
-      bind (patternNames mergepat) $ do
+      bind (patIdents mergepat) $ do
         mergepat' <- renamePattern mergepat
         letbody' <- renameExp letbody
         cond' <- renameExp cond
@@ -323,24 +323,23 @@ renameLambda (CurryBinOpRight bop x NoInfo NoInfo loc) =
   CurryBinOpRight bop <$> renameExp x <*>
   pure NoInfo <*> pure NoInfo <*> pure loc
 
-renamePattern :: (Eq f, Hashable f) =>
+renamePattern :: (Eq f, Hashable f, Eq t, Hashable t) =>
                  PatternBase NoInfo f -> RenameM f t (PatternBase NoInfo t)
-renamePattern (Id ident) = do
-  ident' <- repl ident
-  return $ Id ident'
-renamePattern (TuplePattern pats pos) = do
-  pats' <- mapM renamePattern pats
-  return $ TuplePattern pats' pos
-renamePattern (Wildcard NoInfo loc) =
-  pure $ Wildcard NoInfo loc
+renamePattern (Id ident ascript) =
+  Id <$> repl ident <*> renameAscription ascript
+renamePattern (TuplePattern pats ascript loc) =
+  TuplePattern <$> mapM renamePattern pats <*> renameAscription ascript <*> pure loc
+renamePattern (Wildcard NoInfo ascript loc) =
+  Wildcard NoInfo <$> renameAscription ascript <*> pure loc
+
+renameAscription :: (Eq f, Hashable f, Eq t, Hashable t) =>
+                    Maybe (TypeDeclBase NoInfo f)
+                 -> RenameM f t (Maybe (TypeDeclBase NoInfo t))
+renameAscription Nothing = return Nothing
+renameAscription (Just t) = Just <$> renameUserTypeDecl t
 
 renameDimIndex :: (Eq f, Hashable f, Eq t, Hashable t) =>
                   DimIndexBase NoInfo f
                -> RenameM f t (DimIndexBase NoInfo t)
 renameDimIndex (DimFix i) = DimFix <$> renameExp i
 renameDimIndex (DimSlice i j) = DimSlice <$> renameExp i <*> renameExp j
-
-patternNames :: PatternBase ty f -> [IdentBase ty f]
-patternNames (Id ident) = [ident]
-patternNames (TuplePattern pats _) = concatMap patternNames pats
-patternNames (Wildcard _ _) = []

@@ -302,7 +302,8 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
     internaliseExp desc letbody
 
   where addAnother t =
-          TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
+          TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) Nothing (srclocOf t), t]
+          Nothing noLoc
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $ E.Var src
@@ -320,10 +321,17 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
-  bindingPattern (E.Id name) dstt $ \pat' -> do
+  bindingPattern (E.Id name Nothing) dstt $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
       letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
+
+-- Pretend we saw a let-with instead.
+internaliseExp desc (E.Update src idxs ve loc) = do
+  dest_name <- newVName "update_dest"
+  let dest_ident = E.Ident dest_name (E.identType src) noLoc
+      body = E.Var dest_ident
+  internaliseExp desc $ E.LetWith dest_ident src idxs ve body loc
 
 internaliseExp desc (E.Replicate ne ve _) = do
   ne' <- internaliseExp1 "n" ne
