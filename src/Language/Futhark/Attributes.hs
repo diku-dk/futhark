@@ -592,6 +592,7 @@ typeOf (Var ident) =
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
+typeOf (Update ident _ _ _) = unInfo (identType ident) `setAliases` mempty
 typeOf (Index ident idx _) =
   stripArray (length $ filter isFix idx) (typeOf ident)
   where isFix DimFix{} = True
@@ -734,9 +735,9 @@ patNameSet = HS.map identName . patIdentSet
 -- | The list of idents bound in the given pattern.  The order of
 -- idents is given by the pre-order traversal of the pattern.
 patIdents :: (Eq vn, Hashable vn) => PatternBase ty vn -> [IdentBase ty vn]
-patIdents (Id ident)     = [ident]
-patIdents (TuplePattern pats _) = mconcat $ map patIdents pats
-patIdents (Wildcard _ _) = []
+patIdents (Id ident _)            = [ident]
+patIdents (TuplePattern pats _ _) = mconcat $ map patIdents pats
+patIdents Wildcard{}              = []
 
 -- | As 'patIdents', but returns a the set of names (which means that
 -- information about ordering is destroyed - make sure this is what

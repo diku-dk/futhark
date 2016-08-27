@@ -35,8 +35,8 @@ instance AliasAnnotation Info where
     []   -> d
     l:ls -> foldl (</>) l ls </> d
     where aliasComment' Wildcard{} = []
-          aliasComment' (TuplePattern pats _) = concatMap aliasComment' pats
-          aliasComment' (Id ident) =
+          aliasComment' (TuplePattern pats _ _) = concatMap aliasComment' pats
+          aliasComment' (Id ident _) =
             case clean . HS.toList . aliases $ unInfo $ identType ident of
               [] -> []
               als -> [oneline $
@@ -244,6 +244,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
       text "with" <+> brackets (commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
+  pprPrec _ (Update v idxs ve _) =
+    ppr v <+>
+    text "with" <+> brackets (commasep (map ppr idxs)) <+>
+    text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (TupleIndex e i _ _) =
@@ -309,17 +313,21 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopForm
     text "while" <+> ppr cond
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
-  ppr (Id ident)     = ppr ident
-  ppr (TuplePattern pats _) = parens $ commasep $ map ppr pats
-  ppr (Wildcard _ _) = text "_"
+  ppr (Id ident ascript)     = ppr ident <> ppAscription ascript
+  ppr (TuplePattern pats ascript _) = parens (commasep $ map ppr pats) <> ppAscription ascript
+  ppr (Wildcard _ ascript _) = text "_" <> ppAscription ascript
+
+ppAscription :: (Eq vn, Hashable vn, Pretty vn) => Maybe (TypeDeclBase ty vn) -> Doc
+ppAscription Nothing = mempty
+ppAscription (Just t) = text ":" <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ longnameToString fname
   ppr (CurryFun fname curryargs _ _) =
     text (longnameToString fname) <+> apply (map ppr curryargs)
-  ppr (AnonymFun params body rettype _ _) =
-    text "fn" <+> ppr rettype <+>
-    apply (map ppParam params) <+>
+  ppr (AnonymFun params body ascript _ _) =
+    text "fn" <+>
+    apply (map ppParam params) <> ppAscription ascript <+>
     text "=>" </> indent 2 (ppr body)
   ppr (UnOpFun unop _ _ _) =
     ppr unop
