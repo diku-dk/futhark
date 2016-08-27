@@ -52,7 +52,7 @@ module Language.Futhark.Attributes
   , addAliases
   , setUniqueness
   , tupleArrayElemToType
-  , contractTypeBase
+
   -- ** Removing and adding names
   --
   -- $names
@@ -766,37 +766,6 @@ builtInFunctions = HM.fromList $ map namify
                    ,("isnan64", (Bool, [FloatType Float64]))
                    ]
   where namify (k,v) = (nameFromString k, v)
-
-
-contractTypeBase :: (ArrayShape (shape vn), Ord vn) =>
-                    TypeBase shape als vn
-                 -> UserType vn
-contractTypeBase (Prim p) = UserPrim p noLoc
-contractTypeBase arrtp@(Array tps) =
-  let grow t d = UserArray t d noLoc
-      roottype = contractArrayTypeBase tps
-      array = foldl grow roottype $ replicate (arrayRank arrtp) AnyDim
-  in case uniqueness arrtp of
-    Unique -> UserUnique array noLoc
-    Nonunique -> array
-contractTypeBase (Tuple types) =
-  UserTuple (map contractTypeBase types) noLoc
-
-contractArrayTypeBase :: ArrayTypeBase shape als vn
-                      -> UserType vn
-contractArrayTypeBase (PrimArray p _ _ _) =
-  UserPrim p noLoc
-contractArrayTypeBase (TupleArray tps _ _) =
-  UserTuple (map contractTupleArrayElemTypeBase tps) noLoc
-
-contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase shape als vn
-                               -> UserType vn
-contractTupleArrayElemTypeBase (PrimArrayElem p _ _) =
-  UserPrim p noLoc
-contractTupleArrayElemTypeBase (ArrayArrayElem arrtpbase) =
-  contractArrayTypeBase arrtpbase
-contractTupleArrayElemTypeBase (TupleArrayElem tps) =
-  UserTuple (map contractTupleArrayElemTypeBase tps) noLoc
 
 funsFromProg :: ProgBase f vn -> [FunDefBase f vn]
 funsFromProg prog = mapMaybe isFun $ progDecs prog
