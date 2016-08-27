@@ -598,10 +598,11 @@ VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
 Patterns : Pattern ',' Patterns  { $1 : $3 }
          | Pattern               { [$1] }
 
-Pattern : VarId MaybeAscription { Id $1 $2 }
-      | '_' MaybeAscription { Wildcard NoInfo $2 $1 }
+Pattern : VarId { Id $1 }
+      | '_' { Wildcard NoInfo $1 }
       | '(' Pattern ')' { $2 }
-      | '(' Pattern ',' Patterns ')' MaybeAscription { TuplePattern ($2:$4) $6 $1 }
+      | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
+      | Pattern ':' UserTypeDecl { PatternAscription $1 $3 }
 
 MaybeAscription :: { Maybe (TypeDeclBase NoInfo Name) }
 MaybeAscription : ':' UserTypeDecl { Just $2 }
@@ -797,9 +798,9 @@ arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
-patternExp (Id ident _) = return $ Var ident
-patternExp (TuplePattern pats _ loc) = TupLit <$> (mapM patternExp pats) <*> return loc
-patternExp (Wildcard _ _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+patternExp (Id ident) = return $ Var ident
+patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
+patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
 zeroExpression :: SrcLoc -> UncheckedExp
 zeroExpression = Literal $ PrimValue $ SignedValue $ Int32Value 0

@@ -735,9 +735,10 @@ patNameSet = HS.map identName . patIdentSet
 -- | The list of idents bound in the given pattern.  The order of
 -- idents is given by the pre-order traversal of the pattern.
 patIdents :: (Eq vn, Hashable vn) => PatternBase ty vn -> [IdentBase ty vn]
-patIdents (Id ident _)            = [ident]
-patIdents (TuplePattern pats _ _) = mconcat $ map patIdents pats
+patIdents (Id ident)              = [ident]
+patIdents (TuplePattern pats _)   = mconcat $ map patIdents pats
 patIdents Wildcard{}              = []
+patIdents (PatternAscription p _) = patIdents p
 
 -- | As 'patIdents', but returns a the set of names (which means that
 -- information about ordering is destroyed - make sure this is what

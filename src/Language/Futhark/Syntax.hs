@@ -604,15 +604,17 @@ instance Located (LambdaBase f vn) where
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
-data PatternBase f vn = TuplePattern [PatternBase f vn] (Maybe (TypeDeclBase f vn)) SrcLoc
-                      | Id (IdentBase f vn) (Maybe (TypeDeclBase f vn))
-                      | Wildcard (f (CompTypeBase vn)) (Maybe (TypeDeclBase f vn)) SrcLoc -- Nothing, i.e. underscore.
+data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
+                      | Id (IdentBase f vn)
+                      | Wildcard (f (CompTypeBase vn)) SrcLoc -- Nothing, i.e. underscore.
+                      | PatternAscription (PatternBase f vn) (TypeDeclBase f vn)
 deriving instance Showable f vn => Show (PatternBase f vn)
 
 instance Located (PatternBase f vn) where
-  locOf (TuplePattern _ _ loc) = locOf loc
-  locOf (Id ident _) = locOf ident
-  locOf (Wildcard _ _ loc) = locOf loc
+  locOf (TuplePattern _ loc) = locOf loc
+  locOf (Id ident) = locOf ident
+  locOf (Wildcard _ loc) = locOf loc
+  locOf (PatternAscription p _) = locOf p
 
 -- | Function Declarations
 data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool

@@ -116,13 +116,15 @@ bindingFlatPattern = bindingFlatPattern' []
       error "bindingFlatPattern: insufficient identifiers in pattern."
 
 flattenPattern :: MonadFreshNames m => E.Pattern -> m [E.Ident]
-flattenPattern (E.Wildcard t _ loc) = do
+flattenPattern (E.Wildcard t loc) = do
   name <- newVName "nameless"
   return [E.Ident name t loc]
-flattenPattern (E.Id v _) =
+flattenPattern (E.Id v) =
   return [v]
-flattenPattern (E.TuplePattern pats _ _) =
+flattenPattern (E.TuplePattern pats _) =
   concat <$> mapM flattenPattern pats
+flattenPattern (E.PatternAscription p _) =
+  flattenPattern p
 
 bindingPattern :: E.Pattern -> [I.ExtType] -> (I.Pattern -> InternaliseM a)
                 -> InternaliseM a

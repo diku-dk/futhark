@@ -302,8 +302,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
     internaliseExp desc letbody
 
   where addAnother t =
-          TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) Nothing (srclocOf t), t]
-          Nothing noLoc
+          TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $ E.Var src
@@ -321,7 +320,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
-  bindingPattern (E.Id name Nothing) dstt $ \pat' -> do
+  bindingPattern (E.Id name) dstt $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
       letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
