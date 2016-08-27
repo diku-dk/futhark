@@ -921,7 +921,7 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
       sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
         when (identName src `HS.member` aliases (typeOf ve')) $
           bad $ BadLetWithValue pos
-        (scope, _) <- checkBinding (Id d Nothing) destt' mempty
+        (scope, _) <- checkBinding (Id d) destt' mempty
         body' <- consuming src' $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
   where isFix DimFix{} = True
@@ -1249,18 +1249,20 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 
   let consumed_merge = patNameSet mergepat' `HS.intersection`
                        allConsumed bodyflow
-      uniquePat (Wildcard (Info t) ascript wloc) =
-        Wildcard (Info $ t `setUniqueness` Nonunique) ascript wloc
-      uniquePat (Id (Ident name (Info t) iloc) ascript)
+      uniquePat (Wildcard (Info t) wloc) =
+        Wildcard (Info $ t `setUniqueness` Nonunique) wloc
+      uniquePat (Id (Ident name (Info t) iloc))
         | name `HS.member` consumed_merge =
             let t' = t `setUniqueness` Unique `setAliases` mempty
-            in Id (Ident name (Info t') iloc) ascript
+            in Id (Ident name (Info t') iloc)
         | otherwise =
             let t' = case t of Tuple{} -> t
                                _       -> t `setUniqueness` Nonunique
-            in Id (Ident name (Info t') iloc) ascript
-      uniquePat (TuplePattern pats ascript ploc) =
-        TuplePattern (map uniquePat pats) ascript ploc
+            in Id (Ident name (Info t') iloc)
+      uniquePat (TuplePattern pats ploc) =
+        TuplePattern (map uniquePat pats) ploc
+      uniquePat (PatternAscription p t) =
+        PatternAscription (uniquePat p) t
 
       -- Make the pattern unique where needed.
       mergepat'' = uniquePat mergepat'
@@ -1276,7 +1278,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- returned for a unique merge parameter does not alias anything
   -- else returned.
   bound_outside <- asks $ HS.fromList . HM.keys . envVtable
-  let checkMergeReturn (Id ident _) t
+  let checkMergeReturn (Id ident) t
         | unique $ unInfo $ identType ident,
           v:_ <- HS.toList $ aliases t `HS.intersection` bound_outside =
             lift $ bad $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
@@ -1293,15 +1295,15 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
             if unique (unInfo $ identType ident)
               then put (cons<>aliases t, obs)
               else put (cons, obs<>aliases t)
-      checkMergeReturn (TuplePattern pats _ _) (Tuple ts) =
+      checkMergeReturn (TuplePattern pats _) (Tuple ts) =
         zipWithM_ checkMergeReturn pats ts
       checkMergeReturn _ _ =
         return ()
   evalStateT (checkMergeReturn mergepat'' $ typeOf loopbody') (mempty, mempty)
 
-  let consumeMerge (Id (Ident _ (Info pt) ploc) _) mt
+  let consumeMerge (Id (Ident _ (Info pt) ploc)) mt
         | unique pt = consume ploc $ aliases mt
-      consumeMerge (TuplePattern pats _ _) (Tuple ts) =
+      consumeMerge (TuplePattern pats _) (Tuple ts) =
         zipWithM_ consumeMerge pats ts
       consumeMerge _ _ =
         return ()
@@ -1477,30 +1479,24 @@ checkBinding pat et dflow = do
   (pat', idds) <-
     runStateT (checkBinding' pat et) []
   return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
-  where checkBinding' (Id (Ident name NoInfo pos) ascript) t = do
-          ascript' <- checkAscription ascript t
-          let t' = typeOf $ Var $ Ident name (Info t) pos
-          add $ Ident name (Info t') pos
-          return $ Id (Ident name (Info t') pos) ascript'
-        checkBinding' (TuplePattern pats ascript pos) (Tuple ts)
-          | length pats == length ts = do
-          ascript' <- checkAscription ascript $ Tuple ts
-          pats' <- zipWithM checkBinding' pats ts
-          return $ TuplePattern pats' ascript' pos
-        checkBinding' (Wildcard NoInfo ascript loc) t = do
-          ascript' <- checkAscription ascript t
-          return $ Wildcard (Info t) ascript' loc
-        checkBinding' _ _ =
-          explode
-
-        checkAscription Nothing _ =
-          return Nothing
-        checkAscription (Just td) (t::Type) = do
+  where checkBinding' (PatternAscription p td) t = do
           td' <- lift $ checkTypeDecl td
           let expected = removeShapeAnnotations $ unInfo $ expandedType td'
           if toStruct t `subtypeOf` expected
-          then return $ Just td'
+          then PatternAscription <$> checkBinding' p t <*> pure td'
           else explode
+        checkBinding' (Id (Ident name NoInfo pos)) t = do
+          let t' = typeOf $ Var $ Ident name (Info t) pos
+          add $ Ident name (Info t') pos
+          return $ Id (Ident name (Info t') pos)
+        checkBinding' (TuplePattern pats pos) (Tuple ts)
+          | length pats == length ts = do
+          pats' <- zipWithM checkBinding' pats ts
+          return $ TuplePattern pats' pos
+        checkBinding' (Wildcard NoInfo loc) t =
+          return $ Wildcard (Info t) loc
+        checkBinding' _ _ =
+          explode
 
         add ident = do
           bnd <- gets $ find (==ident)
@@ -1592,7 +1588,7 @@ checkLambda (CurryFun fname curryargexps _ loc) args = do
               paramname <- newIDFromString "x"
 
               let tupparam = Param paramname Nothing NoInfo loc
-                  tuplet = LetPat (TuplePattern (map (flip Id Nothing . untype) params) Nothing loc)
+                  tuplet = LetPat (TuplePattern (map (Id . untype) params) loc)
                            (Var $ Ident paramname NoInfo loc) body loc
                   tupfun = AnonymFun [tupparam] tuplet Nothing NoInfo loc
                   body = Apply fname [(Var $ untype param, diet paramt) |
@@ -1708,9 +1704,10 @@ checkDim loc (NamedDim name) = do
     _                   -> bad $ DimensionNotInteger loc $ baseName name
 
 patternType :: Pattern -> Type
-patternType (Wildcard (Info t) _ _) = t
-patternType (Id ident _) = unInfo $ identType ident
-patternType (TuplePattern pats _ _) = Tuple $ map patternType pats
+patternType (Wildcard (Info t) _) = t
+patternType (Id ident) = unInfo $ identType ident
+patternType (TuplePattern pats _) = Tuple $ map patternType pats
+patternType (PatternAscription p _) = patternType p
 
 expandType :: (Applicative m, MonadError TypeError m) =>
                (QualName -> SrcLoc -> m (StructTypeBase VName))

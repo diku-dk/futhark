@@ -325,18 +325,14 @@ renameLambda (CurryBinOpRight bop x NoInfo NoInfo loc) =
 
 renamePattern :: (Eq f, Hashable f, Eq t, Hashable t) =>
                  PatternBase NoInfo f -> RenameM f t (PatternBase NoInfo t)
-renamePattern (Id ident ascript) =
-  Id <$> repl ident <*> renameAscription ascript
-renamePattern (TuplePattern pats ascript loc) =
-  TuplePattern <$> mapM renamePattern pats <*> renameAscription ascript <*> pure loc
-renamePattern (Wildcard NoInfo ascript loc) =
-  Wildcard NoInfo <$> renameAscription ascript <*> pure loc
-
-renameAscription :: (Eq f, Hashable f, Eq t, Hashable t) =>
-                    Maybe (TypeDeclBase NoInfo f)
-                 -> RenameM f t (Maybe (TypeDeclBase NoInfo t))
-renameAscription Nothing = return Nothing
-renameAscription (Just t) = Just <$> renameUserTypeDecl t
+renamePattern (Id ident) =
+  Id <$> repl ident
+renamePattern (TuplePattern pats loc) =
+  TuplePattern <$> mapM renamePattern pats <*> pure loc
+renamePattern (Wildcard NoInfo loc) =
+  return $ Wildcard NoInfo loc
+renamePattern (PatternAscription p t) =
+  PatternAscription <$> renamePattern p <*> renameUserTypeDecl t
 
 renameDimIndex :: (Eq f, Hashable f, Eq t, Hashable t) =>
                   DimIndexBase NoInfo f

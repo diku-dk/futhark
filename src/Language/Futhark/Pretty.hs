@@ -35,8 +35,9 @@ instance AliasAnnotation Info where
     []   -> d
     l:ls -> foldl (</>) l ls </> d
     where aliasComment' Wildcard{} = []
-          aliasComment' (TuplePattern pats _ _) = concatMap aliasComment' pats
-          aliasComment' (Id ident _) =
+          aliasComment' (PatternAscription p _) = aliasComment' p
+          aliasComment' (TuplePattern pats _) = concatMap aliasComment' pats
+          aliasComment' (Id ident) =
             case clean . HS.toList . aliases $ unInfo $ identType ident of
               [] -> []
               als -> [oneline $
@@ -313,9 +314,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopForm
     text "while" <+> ppr cond
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
-  ppr (Id ident ascript)     = ppr ident <> ppAscription ascript
-  ppr (TuplePattern pats ascript _) = parens (commasep $ map ppr pats) <> ppAscription ascript
-  ppr (Wildcard _ ascript _) = text "_" <> ppAscription ascript
+  ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
+  ppr (Id ident)     = ppr ident
+  ppr (TuplePattern pats _) = parens $ commasep $ map ppr pats
+  ppr (Wildcard _ _) = text "_"
 
 ppAscription :: (Eq vn, Hashable vn, Pretty vn) => Maybe (TypeDeclBase ty vn) -> Doc
 ppAscription Nothing = mempty

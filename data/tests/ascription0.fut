@@ -4,5 +4,5 @@
 -- error: .*cannot match.*
 
 fun main(x: int, y:int): int =
-  let ((a: int), b: int) : (bool,bool) = (x,y)
+  let (((a): int), b: int) : (bool,bool) = (x,y)
   in (a,b)
