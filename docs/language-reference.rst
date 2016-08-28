@@ -546,7 +546,7 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``write(iss, vss, as_1, ..., as_n)``
+``write iss vss (as_1, ..., as_n)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``write`` expression calculates the equivalent of this imperative
@@ -562,8 +562,8 @@ code::
       as[i] = v
 
 All ``iss`` and ``vss`` arrays must be of the same outer size.  Use
-``zip`` to use several of those arrays as arguments.  ``write`` does
-its work in-place and consumes all ``as`` arrays.
+``zip`` to use several of those arrays as arguments.  ``write`` acts
+in-place and consumes all ``as`` arrays.
 
 Arrays of Tuples
 ----------------

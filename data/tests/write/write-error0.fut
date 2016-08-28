@@ -4,4 +4,4 @@
 -- error: .*unique.*
 
 fun main(a: []int): []int =
-  write([0], [1], a)
+  write ([0]) ([1]) (a)
