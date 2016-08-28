@@ -347,34 +347,32 @@ internaliseExp desc (E.Unsafe e _) =
   local (\env -> env { envDoBoundsChecks = False }) $
   internaliseExp desc e
 
-internaliseExp _ (E.Zip _ [] _) =
-  return []
+internaliseExp _ (E.Zip _ e loc) = do
+  e' <- internaliseExpToVars "zip_arg" e
+  case e' of
+    e_key:es_unchecked -> do
+      -- We will reshape all of es_unchecked' to have the same outer
+      -- size as ts.  We will not change any of the inner dimensions.
+      -- This will cause a runtime error if the outer sizes do not match,
+      -- thus preserving the semantics of zip().
+      w <- arraySize 0 <$> lookupType e_key
+      let reshapeToOuter e_unchecked' = do
+            unchecked_t <- lookupType e_unchecked'
+            case I.arrayDims unchecked_t of
+              []      -> return e_unchecked' -- Probably type error
+              outer:inner -> do
+                cmp <- letSubExp "zip_cmp" $ I.PrimOp $
+                       I.CmpOp (I.CmpEq I.int32) w outer
+                c   <- assertingOne $
+                       letExp "zip_assert" $ I.PrimOp $
+                       I.Assert cmp loc
+                letExp (postfix e_unchecked' "_zip_res") $
+                  shapeCoerce c (w:inner) e_unchecked'
+      es' <- mapM reshapeToOuter es_unchecked
+      return $ map I.Var $ e_key : es'
+    [] -> return []
 
-internaliseExp _ (E.Zip _ (e:es) loc) = do
-  e' <- internaliseExpToVars "zip_arg" $ fst e
-  es_unchecked' <- mapM (internaliseExpToVars "zip_arg" . fst) es
-  -- Now we will reshape all of es_unchecked' to have the same outer
-  -- size as e'.  We will not change any of the outer dimensions.
-  -- This will cause a runtime error if the outer sizes do not match,
-  -- thus preserving the semantics of zip().
-  e_outer <- arraysSize 0 <$> mapM lookupType e'
-  let reshapeToOuter e_unchecked' = do
-        unchecked_t <- lookupType e_unchecked'
-        case I.arrayDims unchecked_t of
-          []      -> return e_unchecked' -- Probably type error
-          outer:inner -> do
-            cmp <- letSubExp "zip_cmp" $ I.PrimOp $
-                   I.CmpOp (I.CmpEq I.int32) e_outer outer
-            c   <- assertingOne $
-                   letExp "zip_assert" $ I.PrimOp $
-                   I.Assert cmp loc
-            letExp (postfix e_unchecked' "_zip_res") $
-              shapeCoerce c (e_outer:inner) e_unchecked'
-  es' <- mapM (mapM reshapeToOuter) es_unchecked'
-  return $ concatMap (map I.Var) $ e' : es'
-
-  where
-    postfix i s = baseString i ++ s
+  where postfix i s = baseString i ++ s
 
 internaliseExp _ (E.Transpose e _) =
   internaliseOperation "transpose" e $ \v ->

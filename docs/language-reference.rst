@@ -331,7 +331,7 @@ Access field ``i`` of the expression ``e``, which must be of
 tuple-type.  The fields are indexed from zero.  ``i`` must be a
 literal integer, not an arbitrary expression.
 
-``zip(x, y, z)``
+``zip (x, y, z)``
 ~~~~~~~~~~~~~~~~~~
 
 Zips together the elements of the outer dimensions of arrays ``x``,
@@ -342,7 +342,7 @@ number of arrays may be passed to ``unzip``.  If *n* arrays are given,
 the result will be a single-dimensional array of *n*-tuples (where the
 the tuple components may themselves be arrays).
 
-``zip@i(x, y, z)``
+``zip@i (x, y, z)``
 ~~~~~~~~~~~~~~~~~~
 
 Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``

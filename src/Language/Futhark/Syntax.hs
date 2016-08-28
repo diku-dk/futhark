@@ -491,10 +491,10 @@ data ExpBase f vn =
             | Write (ExpBase f vn) (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ @write([0, 2, -1], [9, 7, 0], [3, 4, 5]) = [9, 4, 7]@.
 
-            | Zip Int [(ExpBase f vn, f (CompTypeBase vn))] SrcLoc
-            -- ^ Normal zip supporting variable number of arguments.
-            -- The type paired to each expression is the full type of
-            -- the array returned by that expression.
+            | Zip Int (ExpBase f vn) SrcLoc
+            -- ^ Conventional zip taking a tuple of arrays as an
+            -- argument.  The annotation indicates the tuple element
+            -- types.
 
             | Unzip (ExpBase f vn) [f (CompTypeBase vn)] SrcLoc
             -- ^ Unzip that can unzip to tuples of arbitrary size.
