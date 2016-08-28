@@ -488,8 +488,8 @@ Exp  :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 $1 }
-     | write           '(' Exp ',' Exp ',' Exps ')'
-                         { Write $3 $5 $7 $1 }
+     | write Atom Atom '(' Exps ')'
+                         { Write $2 $3 $5 $1 }
 
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
      | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }

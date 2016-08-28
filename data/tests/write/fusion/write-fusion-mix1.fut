@@ -18,6 +18,6 @@ fun main(numbers: [k]i32,
   let indexes1 = map((+2), numbers)
   let values0 = map((+3), numbers)
   let values1 = map((+4), numbers)
-  let array0' = write(indexes0, values0, array0)
-  let array1' = write(indexes1, values1, array1)
+  let array0' = write indexes0 values0 (array0)
+  let array1' = write indexes1 values1 (array1)
   in (array0', array1')

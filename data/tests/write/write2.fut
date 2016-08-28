@@ -19,4 +19,4 @@
 fun main(indexes: [k]i32,
        values: [k][t][m]int,
        array: *[n][t][m]int): [n][t][m]int =
-  write(indexes, values, array)
+  write indexes values (array)

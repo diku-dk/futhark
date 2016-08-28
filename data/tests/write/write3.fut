@@ -12,5 +12,5 @@ fun main(n: i32): bool =
   let indexes = iota(n)
   let values = map((+2), indexes)
   let array = map((+5), indexes)
-  let array' = write(indexes, values, array)
+  let array' = write indexes values (array)
   in reduce((&&), True, (map((==), zip(array', values))))

@@ -9,5 +9,5 @@ fun main(indexes: [k]i32,
        values: [k]i32,
        array: *[n]i32): [n]i32 =
   let indexes' = map(fn (i: i32): i32  => unsafe array[i], indexes)
-  let array' = write(indexes', values, array)
+  let array' = write indexes' values (array)
   in array'

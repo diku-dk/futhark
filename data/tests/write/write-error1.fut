@@ -8,4 +8,4 @@
 
 fun main(is: [n]int, vs: [m]int): []int =
   let a = replicate 10 0
-  in write(is, vs, a)
+  in write is vs (a)
