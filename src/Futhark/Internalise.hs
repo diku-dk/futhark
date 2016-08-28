@@ -897,12 +897,11 @@ internaliseLambda (E.AnonymFun params body _ (Info rettype) _) (Just rowtypes) =
     (rettype', _) <- internaliseReturnType rettype
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.AnonymFun params body _ (Info rettype) _) Nothing = do
-  (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
+internaliseLambda (E.AnonymFun params body _ (Info rettype) _) Nothing =
+  bindingParams params $ \shapeparams valparams -> do
     body' <- internaliseBody body
     (rettype', _) <- internaliseReturnType rettype
-    return (body', shapeparams ++ valparams, rettype')
-  return (map (fmap I.fromDecl) params', body', map I.fromDecl rettype')
+    return (map (fmap I.fromDecl) $ shapeparams ++ valparams, body', map I.fromDecl rettype')
 
 internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
   fun_entry <- lookupFunction fname'
