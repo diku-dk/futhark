@@ -8,10 +8,10 @@
 -- input { [2,6,3,5,2,8,1,4,2,2,5,3,5,7,4,1] }
 -- output { 35 }
 
-fun min(x: int, y: int): int =
+fun min(x: int) (y: int): int =
   if x < y then x else y
 
-fun max(x: int, y: int): int =
+fun max(x: int) (y: int): int =
   if x < y then y else x
 
 fun reverse(a: [n]int): [n]int =
@@ -20,5 +20,5 @@ fun reverse(a: [n]int): [n]int =
 fun main(a: []int): int =
   let highestToTheLeft = scan(max, 0, a) in
   let highestToTheRight = reverse(scan(max, 0, reverse(a))) in
-  let waterLevels = zipWith(min, highestToTheLeft, highestToTheRight) in
-  reduce(+, 0, zipWith(-, waterLevels, a))
+  let waterLevels = zipWith(fn (x,y) => min x y, highestToTheLeft, highestToTheRight) in
+  reduce((+), 0, zipWith((-), waterLevels, a))

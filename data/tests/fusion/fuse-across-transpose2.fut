@@ -9,6 +9,6 @@ fun main(a_1: [n][m]int, a_2: [n][m]int): [][]int =
                     row),
                 a)
   let c = map(fn (row: [](int,int)): [n]int  =>
-                map(+ , row),
+                map((+) , row),
               transpose(b))
   in c

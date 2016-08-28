@@ -13,5 +13,5 @@
 
 fun main(a: []int): []int =
   map(fn (i: int): int  =>
-        reduce(+, 0, map(+1,iota(i))),
+        reduce((+), 0, map((+1),iota(i))),
       a)

@@ -7,19 +7,15 @@ module Language.Futhark.Attributes
   (
     builtInFunctions
 
-  -- * Parameter handling
-  , toParam
-  , fromParam
-  , paramType
-  , paramDeclaredType
-
   -- * Queries on expressions
   , typeOf
   , commutative
 
   -- * Queries on patterns
   , patNameSet
-  , patIdents
+  , patIdentSet
+  , patternType
+  , patternStructType
 
   -- * Queries on types
   , primType
@@ -309,11 +305,6 @@ toStructural :: (ArrayShape (shape vn)) =>
                 TypeBase shape as vn
              -> TypeBase Rank NoInfo ()
 toStructural = removeNames . removeShapeAnnotations
-
--- | -- | Remove aliasing information from a type.
--- | toStruct :: TypeBase shape as vn
--- |          -> TypeBase shape NoInfo vn
--- | toStruct t = t `setAliases` NoInfo
 
 -- | Remove aliasing information from a type.
 toStruct :: TypeBase shape as vn
@@ -703,48 +694,41 @@ lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
 commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
--- | Turn an identifier into a parameter.
-toParam :: Ord vn =>
-           IdentBase Info vn
-        -> ParamBase Info vn
-toParam (Ident name (Info t) loc) =
-  Param name Nothing (Info t') loc
-  where t' = vacuousShapeAnnotations $ toStruct t
+-- | The set of names bound in a pattern, including dimension declarations.
+patNameSet :: (Ord vn, Eq vn, Hashable vn) => PatternBase NoInfo vn -> HS.HashSet vn
+patNameSet =  HS.fromList . map identName . patIdentsGen sizeIdent
+  where sizeIdent name = Ident name NoInfo
 
--- | Turn a parameter into an identifier.
-fromParam :: Ord vn =>
-             ParamBase Info vn
-          -> IdentBase Info vn
-fromParam (Param name _ (Info t) loc) =
-  Ident name (Info $ removeShapeAnnotations $ fromStruct t) loc
+-- | The set of identifiers bound in a pattern, including dimension declarations.
+patIdentSet :: (Ord vn, Eq vn, Hashable vn) => PatternBase Info vn -> HS.HashSet (IdentBase Info vn)
+patIdentSet = HS.fromList . patIdentsGen sizeIdent
+  where sizeIdent name = Ident name (Info $ Prim $ Signed Int32)
 
-paramType :: ParamBase Info vn
-          -> StructTypeBase vn
-paramType = unInfo . paramTypeInfo
+patIdentsGen :: (Ord vn, Eq vn, Hashable vn) =>
+                (vn -> SrcLoc -> IdentBase f vn) -> PatternBase f vn
+             -> [IdentBase f vn]
+patIdentsGen _ (Id ident)              = [ident]
+patIdentsGen f (TuplePattern pats _)   = mconcat $ map (patIdentsGen f) pats
+patIdentsGen _ Wildcard{}              = []
+patIdentsGen f (PatternAscription p t) =
+  patIdentsGen f p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
+  where dimIdent _ AnyDim = Nothing
+        dimIdent _ (ConstDim _) = Nothing
+        dimIdent loc (NamedDim name) = Just $ f name loc
 
-paramDeclaredType :: ParamBase f vn
-                  -> Maybe (UserType vn)
-paramDeclaredType = fmap declaredType . paramTypeDecl
+-- | The type of values bound by the pattern.
+patternType :: PatternBase Info VName -> CompTypeBase VName
+patternType (Wildcard (Info t) _) = t
+patternType (Id ident) = unInfo $ identType ident
+patternType (TuplePattern pats _) = Tuple $ map patternType pats
+patternType (PatternAscription p _) = patternType p
 
--- | As 'patNames', but returns a the set of names (which means that
--- information about ordering is destroyed - make sure this is what
--- you want).
-patNameSet :: (Eq vn, Hashable vn) => PatternBase ty vn -> HS.HashSet vn
-patNameSet = HS.map identName . patIdentSet
-
--- | The list of idents bound in the given pattern.  The order of
--- idents is given by the pre-order traversal of the pattern.
-patIdents :: (Eq vn, Hashable vn) => PatternBase ty vn -> [IdentBase ty vn]
-patIdents (Id ident)              = [ident]
-patIdents (TuplePattern pats _)   = mconcat $ map patIdents pats
-patIdents Wildcard{}              = []
-patIdents (PatternAscription p _) = patIdents p
-
--- | As 'patIdents', but returns a the set of names (which means that
--- information about ordering is destroyed - make sure this is what
--- you want).
-patIdentSet :: (Eq vn, Hashable vn) => PatternBase ty vn -> HS.HashSet (IdentBase ty vn)
-patIdentSet = HS.fromList . patIdents
+-- | The type matched by the pattern, including shape declarations if present.
+patternStructType :: PatternBase Info VName -> StructTypeBase VName
+patternStructType (PatternAscription _ td) = unInfo $ expandedType td
+patternStructType (Id v) = vacuousShapeAnnotations $ toStruct $ unInfo $ identType v
+patternStructType (TuplePattern ps _) = Tuple $ map patternStructType ps
+patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
 -- | A map of all built-in functions and their types.
 builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])

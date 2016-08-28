@@ -8,8 +8,8 @@
 default(float)
 
 -- Some useful (for mc2) Futhark extensions.
-fun sum(xs: []float): float = reduce(+, 0.0, xs)
-fun mean(xs: [n]float): float = sum(map(/float(n), xs))
+fun sum(xs: []float): float = reduce((+), 0.0, xs)
+fun mean(xs: [n]float): float = sum(map((/float(n)), xs))
 
 
 -- Vasicek model parameters.

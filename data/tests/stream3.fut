@@ -8,10 +8,8 @@
 --
 -- }
 fun main(m: int, a: *[n]int): []int =
-  streamMap( fn (chunk: int, c: *[]int): []int  =>
-                    let w = filter( >6, c ) in
-                    w
-        , a
-        )
+  streamMap( fn (chunk: int) (c: *[]int): []int  =>
+               filter((>6), c )
+           , a)
 
 

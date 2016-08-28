@@ -15,7 +15,7 @@
 -- }
 
 fun oneToEach(r: [n]int): [n]int =
-  map(+1, r)
+  map((+1), r)
 
 fun main(a: [][]int): [][]int =
   map(oneToEach, a)

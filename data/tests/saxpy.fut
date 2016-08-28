@@ -11,4 +11,4 @@
 -- }
 
 fun main(a: f32, x: []f32, y: []f32): []f32 =
-  zipWith(+, map(a*, x), y)
+  zipWith((+), map((a*), x), y)

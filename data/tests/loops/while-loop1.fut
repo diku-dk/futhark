@@ -12,5 +12,5 @@
 
 fun main(a: []int, i: int, bound: int): []int =
   loop (a) = while a[i] < bound do
-    map(+ (1), a) in
+    map((+1), a) in
   a

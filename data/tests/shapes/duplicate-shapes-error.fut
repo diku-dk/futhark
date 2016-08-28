@@ -4,4 +4,4 @@
 -- error:
 
 fun main(n: f64, a: [n]int): []int =
-  map(+2, a)
+  map((+)2, a)

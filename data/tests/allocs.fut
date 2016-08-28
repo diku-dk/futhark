@@ -7,9 +7,9 @@
 fun main(a: [n]int): int =
   loop(b = iota(10)) = for i < n do
     (let m = a[i]
-     in if m < shape(b)[0]
+     in if m < (shape b)[0]
         then b
         else map(fn (j: int): int  =>
-                   j + unsafe b[j % shape(b)[0]],
+                   j + unsafe b[j % (shape b)[0]],
                  iota(m)))
-  in reduce(+, 0, b)
+  in reduce((+), 0, b)

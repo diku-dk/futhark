@@ -6,7 +6,7 @@ fun f(a: f64        ): f64 = a + 3.0
 fun g(a: f64        ): f64 = a * 3.0
 fun h1(a1: f64, a2: f64, a3: f64): f64 = a1 * a2 + a3
 --fun f64 h2((f64,f64) a23) = let (a2,a3) = a23 in a2 * a3
-fun h2(a1: f64, a23: (f64,f64)): f64 = let (a2,a3) = a23 in a2 * a3 - a1
+fun h2(a1: f64) (a23: (f64,f64)): f64 = let (a2,a3) = a23 in a2 * a3 - a1
 
 fun main(arr: []f64): []f64 =
     let x = map(f, arr) in

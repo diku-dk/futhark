@@ -28,7 +28,7 @@
 -- structure distributed { }
 
 fun addRows (xs: []int, ys: []int): []int =
-  zipWith(+, xs, ys)
+  zipWith((+), xs, ys)
 
 fun main (xssss: [][][][]int, cs: []int): [][][][]int =
   zipWith(fn (xsss: [][][]int, c: int): [][][]int  =>

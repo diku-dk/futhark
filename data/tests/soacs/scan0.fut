@@ -9,5 +9,5 @@
 -- structure distributed { ScanKernel 2 Iota 0 }
 
 fun main(n: int): int =
-  let a = scan(+, 0, iota(n))
+  let a = scan((+), 0, iota(n))
   in a[n-1]

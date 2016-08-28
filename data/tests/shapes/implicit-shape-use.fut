@@ -28,11 +28,9 @@ fun main(num_und:
   in  bb_mat
 
 
-fun brownianBridgeDates (bb_inds: 
-                [3][num_dates]int,
-                bb_data: [3][num_dates]f64,
-                 gauss: [num_dates]f64
-            ): []f64 =
+fun brownianBridgeDates (bb_inds: [3][num_dates]int)
+                        (bb_data: [3][num_dates]f64)
+                        (gauss: [num_dates]f64): []f64 =
     let bi = bb_inds[0] in
     let li = bb_inds[1] in
     let ri = bb_inds[2] in
@@ -77,5 +75,5 @@ fun brownianBridge (num_und:
     let gauss2d  = reshape((num_dates,num_und), gaussian_arr) in
     let gauss2dT = transpose(gauss2d) in
       transpose(
-        map( brownianBridgeDates(bb_inds, bb_data), gauss2dT )
+        map(brownianBridgeDates bb_inds bb_data, gauss2dT )
       )

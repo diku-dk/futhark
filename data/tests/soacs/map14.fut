@@ -5,4 +5,4 @@ fun main(x: int, y: int, a: []int, b: []int): []int =
                 let v = x + y in
                 (v, 2*av),
               a) in
-  map(+, c)
+  map((+), c)

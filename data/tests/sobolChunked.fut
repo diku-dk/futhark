@@ -30,12 +30,12 @@ fun testBit(n: int, ind: int): bool =
 ----    Currently Futhark hoists it outside, but this will
 ----    not allow fusing the filter with reduce => redomap,
 -----------------------------------------------------------------
-fun xorInds(n: int, dir_vs: [num_bits]int): int =
+fun xorInds(n: int) (dir_vs: [num_bits]int): int =
     let reldv_vals = map( fn (dv: int, i: int): int  =>
                             if testBit(grayCode(n),i)
                             then dv else 0
                         , zip(dir_vs,iota(num_bits)) ) in
-    reduce( ^, 0, reldv_vals )
+    reduce((^), 0, reldv_vals )
 
 fun sobolIndI (dir_vs:  [][]int, n: int ): []int =
     map( xorInds(n), dir_vs )
@@ -74,8 +74,8 @@ fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
                         if(k==0) then sob_beg
                         else recM(dir_vs, k+n)
                    , iota(chunk) )                 in
-  let vct_ints= scan( fn (x: []int, y: []int): []int  =>
-                        zipWith(^, x, y)
+  let vct_ints= scan( fn (x: []int) (y: []int): []int  =>
+                        zipWith((^), x, y)
                     , replicate(len, 0), contrbs ) in
   map( fn (xs: []int): []f64  =>
              map ( fn (x: int): f64  =>
@@ -93,7 +93,7 @@ fun main(num_mc_it: int,
                   num_und: int): [][]f64 =
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
-  let sobol_mat = streamMap( fn (chunk: int, ns: []int): [][sobvctsz]f64  =>
+  let sobol_mat = streamMap( fn (chunk: int) (ns: []int): [][sobvctsz]f64  =>
                                 sobolChunk(dir_vs, ns[0], chunk)
                            , iota(num_mc_it) ) in
 

@@ -5,4 +5,4 @@
 -- output {
 --   [1, 2, 3]
 -- }
-fun main(a: []int): []int = filter(0<, a)
+fun main(a: []int): []int = filter((0<), a)

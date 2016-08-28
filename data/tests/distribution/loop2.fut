@@ -18,6 +18,6 @@ fun main(a: [n][m][k]int): [n][k]int =
   map(fn (a_r: [m][k]int): [k]int  =>
         let acc = a_r[0] in
         loop(acc) = for i < m do
-          zipWith(+, acc, a_r[i]) in
+          zipWith((+), acc, a_r[i]) in
         acc
      , a)

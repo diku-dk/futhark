@@ -38,7 +38,6 @@ module Language.Futhark.Syntax
   , UnOp (..)
   , BinOp (..)
   , IdentBase (..)
-  , ParamBase (..)
   , DimIndexBase(..)
   , ExpBase(..)
   , LoopFormBase (..)
@@ -301,24 +300,6 @@ instance Located (IdentBase ty vn) where
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
-
--- | Parameters for functions, both anonymous and named.
-data ParamBase f vn = Param { paramName :: vn
-                            , paramTypeDecl :: Maybe (TypeDeclBase f vn)
-                            , paramTypeInfo :: f (StructTypeBase vn)
-                            , paramSrcLoc :: SrcLoc
-                            }
-deriving instance Showable f vn => Show (ParamBase f vn)
-
-instance Eq vn => Eq (ParamBase f vn) where
-  x == y = paramName x == paramName y
-
-instance Located (ParamBase f vn) where
-  locOf = locOf . paramSrcLoc
-
-instance Hashable vn => Hashable (ParamBase f vn) where
-  hashWithSalt salt = hashWithSalt salt . paramName
-
 -- | Unary operators.
 data UnOp = Not
           | Negate
@@ -580,8 +561,8 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
                                    -- upper bound to the lower bound.
                         deriving (Eq, Ord, Show)
 
--- | Anonymous Function
-data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
+-- | Anonymous function passed to a SOAC.
+data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if(x) then ord(z) else ord(z)+1 *)@
                       | CurryFun QualName [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
@@ -621,7 +602,7 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
                               , funDefName :: FunName
                               , funDefRetType :: TypeDeclBase f vn
-                              , funDefParams :: [ParamBase f vn]
+                              , funDefParams :: [PatternBase f vn]
                               , funDefBody :: ExpBase f vn
                               , funDefLocation :: SrcLoc
                               }
@@ -666,14 +647,6 @@ data DecBase f vn = FunOrTypeDec (FunOrTypeDecBase f vn)
                   | SigDec (SigDefBase f vn)
                   | ModDec (ModDefBase f vn)
 deriving instance Showable f vn => Show (DecBase f vn)
-
--- | data ProgBase f vn =
--- |          Prog  { progTypes :: [TypeDefBase f vn]
--- |                , progFunctions :: [FunDefBase f vn]
--- |                , progSignatures :: [SigDefBase f vn]
--- |                , progModules :: [ModDefBase f vn]
--- |                }
--- | deriving instance Showable f vn => Show (ProgBase f vn)
 
 data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)

@@ -8,7 +8,7 @@ default(f32)
 fun iota32(num: i32): [num]f32 =
     map(f32, iota(num))
 
-fun reduceBins(acc: *[numBins]i64, elm: *[numBins]i64): *[numBins]i64 =
+fun reduceBins(acc: *[numBins]i64) (elm: *[numBins]i64): *[numBins]i64 =
     loop (newVal = acc) = for i < numBins do
         let newVal[i] = newVal[i] + elm[i] in newVal
     in

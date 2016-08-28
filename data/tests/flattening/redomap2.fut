@@ -10,4 +10,4 @@ fun main (xs: [n]int, ys: [n]int): int =
   let tmp =
     map (fn (x: int, y: int): int  => x+y
         , zip (xs,ys)) in
-  reduce(+,0,tmp)
+  reduce((+),0,tmp)

@@ -8,4 +8,4 @@
 -- }
 
 fun main(a: [n]int): []int =
-  map(+n, a)
+  map((+n), a)

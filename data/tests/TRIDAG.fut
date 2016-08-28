@@ -58,7 +58,7 @@ fun tridag(nn:   int,
 
 
 fun main(): ([]f64,[]f64) =
-    let nn = reduce(+, 0, [1,2,3,4]) in
+    let nn = reduce((+), 0, [1,2,3,4]) in
     let a = replicate(nn, 3.33) in
     let b = map(fn (x: int): f64  => f64(x) + 1.0, iota(nn)) in
     let c = map(fn (x: int): f64  => 1.11*f64(x) + 0.5, iota(nn)) in

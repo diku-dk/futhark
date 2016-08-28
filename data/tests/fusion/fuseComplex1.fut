@@ -16,7 +16,7 @@ fun g (p:  (f64,f64,f64,f64) ): (f64,f64) =
 --    let {a1,a2,a3,a4,a5} = p in a1+a2+a3+a4+a5
 
 
-fun myop (p:  (f64,f64,f64,f64,f64), q: (f64,f64,f64,f64,f64) ): (f64,f64,f64,f64,f64) =
+fun myop (p: (f64,f64,f64,f64,f64)) (q: (f64,f64,f64,f64,f64)): (f64,f64,f64,f64,f64) =
     let (a1,a2,a3,a4,a5) = p in
     let (b1,b2,b3,b4,b5) = q in
         (a1+b1,a2+b2,a3+b3,a4+b4,a5+b5)
@@ -28,4 +28,4 @@ fun main(x1: []f64, x2: [][]f64): (f64,f64,f64,f64,f64) =
     let (q1, q2)     = unzip( map( g , zip(y3,z1,y2,y3) ) )  in
 --    let res          = map  ( myop, zip(q1,q2,z2,y1,y3) )    in
 --        res[3]
-    reduce( myop, (0.0,0.0,0.0,0.0,0.0), zip(q1, q2, z2, y1, y3) )
+    reduce(myop, (0.0,0.0,0.0,0.0,0.0), zip(q1, q2, z2, y1, y3) )

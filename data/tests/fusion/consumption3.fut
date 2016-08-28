@@ -11,7 +11,7 @@ fun main(as: [n]int, bs: [m]bool): [m][n]int =
                    let cs[0] = 42
                    in cs,
                  css)
-  in scan(fn (ds0: *[]int, ds1: *[]int): [n]int  =>
+  in scan(fn (ds0: *[]int) (ds1: *[]int): [n]int  =>
             loop (ds0) = for i < n do
               let ds0[i] = ds0[i] + ds1[i]
               in ds0

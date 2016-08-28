@@ -22,7 +22,7 @@ fun r(): f64 = f64(0.03)
 fun alpha(): f64 = f64(0.07)
 fun sigma(): f64 = f64(0.20)
 
-fun maxF64(x: f64, y: f64): f64 =
+fun maxF64(x: f64) (y: f64): f64 =
   if x < y then y else x
 
 fun binom(expiry: int): f64 =
@@ -35,20 +35,21 @@ fun binom(expiry: int): f64 =
   let qUR = q/stepR in
   let qDR = (f64(1.0)-q)/stepR in
 
-  let uPow = map(u **, map(f64, iota(n+1))) in
-  let dPow = map(d **, map(f64, map(n-, iota(n+1)))) in
-  let st = map(f64(s0())*, map(*, zip(uPow, dPow))) in
-  let finalPut = map(maxF64(f64(0.0)), map(f64(strike())-, st)) in
-  loop (put = finalPut) = for n+1 > i >= 1 do
+  let uPow = map((u**), map(f64, iota(n+1))) in
+  let dPow = map((d**), map(f64, map((n-), iota(n+1)))) in
+  let st = map((f64(s0())*), map((*), zip(uPow, dPow))) in
+  let finalPut = map(maxF64(f64(0.0)), map((f64(strike())-), st)) in
+  loop (put = finalPut) = for (n+1) > i >= 1 do
     let (uPow_start, _) = split((i), uPow) in
     let (_, dPow_end) = split((n+1-i), dPow) in
-    let st = map(f64(s0())*, map(*, zip(uPow_start, dPow_end))) in
+    let st = map((f64(s0())*), map((*), zip(uPow_start, dPow_end))) in
     let (_, put_tail) = split((1), put) in
-    let (put_init, _) = split((shape(put)[0]-1), put) in
-    map(maxF64, zip(map(f64(strike())-, st),
-                     map(+,
-                         zip(map(qUR*, put_tail),
-                             map(qDR*, put_init))))) in
+    let (put_init, _) = split(((shape put)[0]-1), put) in
+    map(fn (x,y) => maxF64 x y,
+        zip(map((f64(strike())-), st),
+            map((+),
+                zip(map((qUR*), put_tail),
+                    map((qDR*), put_init))))) in
   put[0]
 
 fun main(expiry: int): f64 =

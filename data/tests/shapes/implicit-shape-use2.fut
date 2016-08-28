@@ -8,14 +8,14 @@
 -- }
 
 fun combineVs(n_row:   [num_und]f64,
-                               vol_row: [num_und]f64
-): [num_und]f64 =
-    map(*, zip(n_row, vol_row ) )
+              vol_row: [num_und]f64
+             ): [num_und]f64 =
+  map((*), zip(n_row, vol_row ) )
 
 fun mkPrices(md_vols:   [num_dates][num_und]f64,
-           noises: [num_dates][num_und]f64
-): [num_dates][num_und]f64 =
-    map( combineVs, zip(noises, md_vols) )
+             noises: [num_dates][num_und]f64
+            ): [num_dates][num_und]f64 =
+  map(combineVs, zip(noises, md_vols))
 
 
 fun main(vol: [][]f64, noises: [][]f64): [][]f64 = mkPrices(vol,noises)

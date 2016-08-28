@@ -122,10 +122,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) wh
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
   ppr (UserPrim et _) = ppr et
   ppr (UserUnique t _) = text "*" <> ppr t
-  ppr (UserArray at d _) = brackets (ppr at <> f d)
+  ppr (UserArray at d _) = brackets (f d) <> ppr at
     where f AnyDim = mempty
-          f (NamedDim v) = comma <+> ppr v
-          f (ConstDim n) = comma <+> ppr n
+          f (NamedDim v) = ppr v
+          f (ConstDim n) = ppr n
   ppr (UserTuple ts _) = parens $ commasep $ map ppr ts
   ppr (UserTypeAlias name _) = ppr name
 
@@ -137,13 +137,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
 
-instance Pretty vn => Pretty (ParamBase f vn) where
-  ppr = ppr . paramName
-
 instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
-
-
 
 instance Pretty UnOp where
   ppr Not = text "!"
@@ -364,13 +359,11 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeDefB
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBase ty vn) where
   ppr (FunDef entry (name, _) rettype args body _) =
-    text fun <+> ppr rettype <+>
-    text (nameToString name) <//>
-    apply (map ppParam args) <+>
-    equals </> indent 2 (ppr body)
+    text fun <+> text (nameToString name) <+>
+    spread (map ppParam args) <> text ":" <+> ppr rettype <+> equals </>
+    indent 2 (ppr body)
     where fun | entry     = "entry"
               | otherwise = "fun"
-
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDefBase ty vn) where
   ppr (SigDef name sigdecls _) =
@@ -382,10 +375,9 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDeclB
   ppr (FunSig name params rettype) =
     text (nameToString name) <+> ppList params <+> ppr rettype
 
-
-
-ppParam :: (Eq vn, Hashable vn, Pretty vn) => ParamBase t vn -> Doc
-ppParam param = ppr (paramDeclaredType param) <+> ppr param
+ppParam :: (Eq vn, Hashable vn, Pretty vn) => PatternBase t vn -> Doc
+ppParam (Id param) = ppr param
+ppParam p = parens $ ppr p
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) =>
                Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc

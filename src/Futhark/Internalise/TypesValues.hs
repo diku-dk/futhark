@@ -100,9 +100,9 @@ internaliseDeclType' ddi (E.Array at) =
           Ext <$> knownOrNewId name
         internaliseDim AssertDims (NamedDim name) = do
           subst <- asks $ HM.lookup name . envSubsts
-          I.Free . I.Var <$> case subst of
+          I.Free <$> case subst of
             Just [v] -> return v
-            _        -> fail $ "Shape declaration " ++ pretty name ++ " not found"
+            _        -> fail $ "internaliseDeclType': Shape declaration " ++ pretty name ++ " not found"
 
 internaliseType :: Ord vn =>
                    E.TypeBase E.Rank als vn

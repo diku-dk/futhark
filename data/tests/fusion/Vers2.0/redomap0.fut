@@ -15,8 +15,8 @@
 default(f32)
 
 fun main(arr: []f32): (f32,[]f32,[]f32) =
-    let x = map    (+ 1.0, arr) in
-    let y = zipWith(+,  x, arr) in
-    let r = reduce (+,0.0, arr) in
+    let x = map    ((+1.0), arr) in
+    let y = zipWith((+),  x, arr) in
+    let r = reduce ((+),0.0, arr) in
     (r,x,y)
 

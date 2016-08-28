@@ -5,22 +5,22 @@
 --   [[2,4,5],[1,5,3],[3,7,1]]
 -- }
 
-fun min(a: int, b: int): int = if(a<b) then a else b
+fun min(a: int) (b: int): int = if(a<b) then a else b
 fun plus1(a:  []int,  b: []int): []int = [1]
 
 struct M0 
   {
-    fun min1(a: []int, b: []int): []int = map(min, zip(a, b))
+    fun min1(a: []int, b: []int): []int = map(fn (x,y) => min x y, zip(a, b))
     fun redmin1(a:  []int): int = reduce(min, 1200, a)
     fun redmin2(a: [][]int): []int = map(redmin1, a)
 
     struct M1 
       {
-        fun plus1(a:  []int,  b: []int): []int = map(+, zip(a, b))
+        fun plus1(a:  []int,  b: []int): []int = map((+), zip(a, b))
         fun plus2(a: [][]int, b: [][]int): [][]int = map(plus1, zip(a, b))
       }
 
-    fun replin(len: int, a: []int): [][]int = replicate(len, a)
+    fun replin(len: int) (a: []int): [][]int = replicate(len, a)
   }
 
 fun floydSbsFun(n: int, d: [][]int ): [][]int =

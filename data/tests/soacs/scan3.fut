@@ -6,6 +6,6 @@
 
 fun main(i: int, n: int): (int, int) =
   let a = iota(n)
-  let b = map(+2, a)
-  let c = scan(+, 0, a)
+  let b = map((+2), a)
+  let c = scan((+), 0, a)
   in (b[i], c[i])
