@@ -18,5 +18,5 @@
 --   1338
 -- }
 fun main(n: int, i: int, a: [][]int): (int,int) =
-  let (a,b) = split( (n), a[i]) in
+  let (a,b) = split (n) a[i] in
   (reduce((+), 0, a), reduce((+), 0, b))

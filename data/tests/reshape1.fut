@@ -9,4 +9,4 @@ fun intsqrt(x: int): int =
     int(sqrt32(f32(x)))
 
 fun main (a: [n]int): [][]int =
-    reshape((intsqrt(n), intsqrt(n)), a)
+    reshape (intsqrt(n), intsqrt(n)) a

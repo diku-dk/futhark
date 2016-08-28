@@ -30,14 +30,14 @@ fun seqRedSumP(lastr: float, ws: [n]float): float =
   if n == 0
   then lastr
   else
-    let (w0, wns) = split((1),ws) in
+    let (w0, wns) = split (1) ws in
     seqRedSumP(nextrP(lastr, w0[0]), wns)
 
 fun seqRedSumQ(lastr: float, ws: [n]float): float =
   if n == 0
   then lastr
   else
-    let (w0, wns) = split((1),ws) in
+    let (w0, wns) = split (1) ws in
     lastr + seqRedSumQ(nextrQ(lastr, w0[0]), wns)
 
 fun mc1(wpss: [][]float): []float =

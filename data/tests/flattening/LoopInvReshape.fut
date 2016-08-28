@@ -11,6 +11,6 @@
 fun main (xs: []int, ys: [n]int, zs: [n]int, is: [n]int, js: [n]int): []int =
   map (fn (y: int, z: int, i: int, j: int): int  =>
          unsafe
-         let tmp = reshape( (y,z) , xs ) in
-         tmp[i,j]
+         let tmp = reshape (y,z) xs
+         in tmp[i,j]
       , zip(ys,zs,is,js))

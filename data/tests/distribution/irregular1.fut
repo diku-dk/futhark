@@ -32,7 +32,7 @@ fun addRows (xs: []int, ys: []int): []int =
 
 fun main (xssss: [][][][]int, cs: []int): [][][][]int =
   zipWith(fn (xsss: [][][]int, c: int): [][][]int  =>
-            let yss = unsafe reshape ( (2,c), xsss ) in
+            let yss = unsafe reshape (2,c) xsss in
             map (fn (xss: [][]int): [][]int  =>
                    zipWith(fn (xs: []int, ys: []int): []int  =>
                              -- An implicit reshape will go here that

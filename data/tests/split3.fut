@@ -9,4 +9,4 @@
 --   [5.000000]
 -- }
 fun main(n: int, a: []f64): ([]f64, []f64) =
-  split( (n), a)
+  split (n) a

@@ -15,4 +15,4 @@ fun main(a: [n]int, m: int): int =
                 , a
                 , contribs
                 ) in
-  reduce((^), 0, reshape((n*m), res))
+  reduce((^), 0, reshape (n*m) res)

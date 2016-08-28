@@ -18,7 +18,7 @@
 -- }
 
 fun take(n: int, a: []f64): []f64 =
-  let (first, rest) = unsafe split( (n), a) in
+  let (first, rest) = unsafe split (n) a in
   first
 
 fun fftmp(md_c: [n][]f64): []f64 =

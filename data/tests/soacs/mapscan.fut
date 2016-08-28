@@ -11,4 +11,4 @@ fun main(n: int, m: int): int =
   let b = map (fn (a_r: [m]int): [m]int  =>
                  scan((+), 0, a_r),
                a) in
-  reduce((^), 0, reshape((n*m), b))
+  reduce((^), 0, reshape (n*m) b)

@@ -196,7 +196,7 @@ import Language.Futhark.Core(blankLongname)
 %nonassoc '['
 %nonassoc Id
 %left juxtprec
-%left indexprec iota shape copy transpose
+%left indexprec iota shape copy transpose rotate rearrange split shape
 %%
 
 
@@ -419,23 +419,23 @@ Exp  :: { UncheckedExp }
 
      | replicate Atom Atom { Replicate $2 $3 $1 }
 
-     | reshape '(' '(' Exps ')' ',' Exp ')'
-                      { Reshape $4 $7 $1 }
+     | reshape '(' Exps ')' Atom
+                      { Reshape $3 $5 $1 }
 
-     | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
-                      { Rearrange $4 $7 $1 }
+     | rearrange '(' NaturalInts ')' Atom
+                      { Rearrange $3 $5 $1 }
 
      | transpose Atom { Transpose $2 $1 }
 
-     | rotate '@' NaturalInt '(' Exp ',' Exp ')' { Rotate $3 $5 $7 $1 }
+     | rotate '@' NaturalInt Atom Atom { Rotate $3 $4 $5 $1 }
 
-     | rotate '(' Exp ',' Exp ')' { Rotate 0 $3 $5 $1 }
+     | rotate Atom Atom { Rotate 0 $2 $3 $1 }
 
-     | split '(' '(' Exps ')' ',' Exp ')'
-                      { Split 0 $4 $7 $1 }
+     | split '(' Exps ')' Atom
+                      { Split 0 $3 $5 $1 }
 
-     | split '@' NaturalInt '(' '(' Exps ')' ',' Exp ')'
-                      { Split $3 $6 $9 $1 }
+     | split '@' NaturalInt '(' Exps ')' Atom
+                      { Split $3 $5 $7 $1 }
 
      | concat '(' Exp ',' Exps ')'
                       { Concat 0 $3 $5 $1 }

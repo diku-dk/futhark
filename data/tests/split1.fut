@@ -7,4 +7,4 @@
 --   [9.000000, 8.000000]
 -- }
 fun main(n: int, a: []f64): []f64 =
-  let (first, rest) = split( (n), a) in first
+  let (first, rest) = split (n) a in first
