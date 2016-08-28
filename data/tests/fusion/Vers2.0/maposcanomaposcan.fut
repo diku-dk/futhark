@@ -18,10 +18,10 @@
 -- }
 --
 fun main(arr: []f64): (f64,[]f64,[]f64,[]f64,[]f64) =
-    let sa = scan(+, 0.0, arr) in
-    let b  = map (*  2.0, sa ) in
-    let sb = scan(+, 0.0, b  ) in
-    let c  = map (+  5.0, sb ) in
-    let r  = reduce(*, 1.0, b ) in
+    let sa = scan((+), 0.0, arr) in
+    let b  = map ((*2.0), sa ) in
+    let sb = scan((+), 0.0, b  ) in
+    let c  = map ((+5.0), sb ) in
+    let r  = reduce((*), 1.0, b ) in
     (r, sa, b, sb, c)
 

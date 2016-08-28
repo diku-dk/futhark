@@ -43,18 +43,18 @@
 fun take(n: int, a: []f64): []f64 = let (first, rest) = split((n), a) in first
 
 fun correlateDeltas(md_c: [num_und][num_und]f64,
-                  zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =
+                    zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   map( fn (zi: [num_und]f64): [num_und]f64  =>
          map( fn (j: int): f64  =>
-                let x = zipWith( *, take(j+1,zi), take(j+1,md_c[j]) )
-                in  reduce( +, 0.0, x )
+                let x = zipWith((*), take(j+1,zi), take(j+1,md_c[j]) )
+                in  reduce((+), 0.0, x )
             , iota(num_und) )
      , zds )
 
 fun combineVs(n_row:   [num_und]f64,
-                               vol_row: [num_und]f64,
-                               dr_row: [num_und]f64 ): [num_und]f64 =
-  map(+, zip(dr_row, map(*, zip(n_row, vol_row ) )))
+              vol_row: [num_und]f64,
+              dr_row: [num_und]f64 ): [num_und]f64 =
+  map((+), zip(dr_row, map((*), zip(n_row, vol_row ) )))
 
 fun mkPrices(md_starts: [num_und]f64,
            md_vols: [num_dates][num_und]f64,
@@ -64,15 +64,15 @@ fun mkPrices(md_starts: [num_und]f64,
   let e_rows = map( fn (x: []f64): [num_und]f64  => map(exp64, x)
                   , c_rows
                   )
-  in  scan( fn (x: []f64, y: []f64): []f64  => zipWith(*, x, y)
+  in  scan( fn (x: []f64) (y: []f64): []f64  => zipWith((*), x, y)
           , md_starts, e_rows )
 
   -- Formerly blackScholes.
 fun main(md_c: [num_und][num_und]f64,
-                                    md_vols: [num_dates][num_und]f64,
-                                    md_drifts: [num_dates][num_und]f64,
-                                    md_starts: [num_und]f64,
-                                    bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
+         md_vols: [num_dates][num_und]f64,
+         md_drifts: [num_dates][num_und]f64,
+         md_starts: [num_und]f64,
+         bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
   -- I don't want to include the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose(bb_arr) in

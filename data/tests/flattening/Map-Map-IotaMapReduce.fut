@@ -12,7 +12,7 @@ fun main (xss: [m][n]int, ys: [m]int): [][]int =
   map( fn (xs: [n]int, y: int): [n]int  =>
          map (fn (x: int): int  =>
                 let tmp1 = iota(x) in
-                let tmp2 = map(*y,tmp1) in
-                reduce(+,0,tmp2)
+                let tmp2 = map((*y),tmp1) in
+                reduce((+),0,tmp2)
              , xs)
      , zip(xss, ys) )

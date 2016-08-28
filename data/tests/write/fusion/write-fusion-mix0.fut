@@ -20,8 +20,8 @@ fun main(indexes0: [k]i32,
        values1: [k]i32,
        array0: *[n]i32,
        array1: *[n]i32): ([n]i32, [n]i32) =
-  let values0' = map(+4, values0)
-  let values1' = map(*3, values1)
+  let values0' = map((+4), values0)
+  let values1' = map((*3), values1)
   let array0' = write(indexes0, values0', array0)
   let array1' = write(indexes1, values1', array1)
   in (array0', array1')

@@ -10,5 +10,5 @@
 -- }
 fun main(a: []int): []int =
   let (_,b) = unzip(map(fn (x: int): (int,int)  => (x+2,x-2), a)) in
-  let c = scan(+, 0, b) in
+  let c = scan((+), 0, b) in
   c

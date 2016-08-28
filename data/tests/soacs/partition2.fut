@@ -14,7 +14,7 @@
 -- }
 
 fun main(xs: []int, ys: []int): ([]int, []int, []int, []int, []int, []int) =
-  let (x,y,z) = partition(<, ==, zip(xs,ys))
+  let (x,y,z) = partition(((<), (==)), zip(xs,ys))
   let (x1,x2) = unzip(x)
   let (y1,y2) = unzip(y)
   let (z1,z2) = unzip(z)

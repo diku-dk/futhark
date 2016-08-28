@@ -9,7 +9,7 @@
 --   [[1,2], [3,4], [6,7]]
 -- }
 
-fun take(n: int, r: []int): []int =
+fun take (n: int) (r: []int): []int =
   let (part, _) = split( (n), r) in
   part
 

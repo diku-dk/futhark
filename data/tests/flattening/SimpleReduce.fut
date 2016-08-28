@@ -7,5 +7,5 @@
 -- }
 fun main (xss: [][]int): []int =
   map (fn (xs: []int ): int  =>
-         reduce(+, 0, xs)
+         reduce((+), 0, xs)
       , xss)

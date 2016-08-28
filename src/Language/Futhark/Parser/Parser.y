@@ -178,7 +178,7 @@ import Language.Futhark.Core(blankLongname)
       end             { L $$ END }
       val             { L $$ VAL }
 
-%nonassoc ifprec letprec curryprec
+%left ifprec letprec
 %left ','
 %left '||'
 %left '&&'
@@ -195,6 +195,8 @@ import Language.Futhark.Core(blankLongname)
 %nonassoc '.'
 %nonassoc '['
 %nonassoc Id
+%left juxtprec
+%left indexprec iota shape copy transpose
 %%
 
 
@@ -278,7 +280,7 @@ DefaultDec :: { () }
 
 QualName :: { (QualName , SrcLoc) }
          : sid '.' QualName { let L loc (SID qual) = $1; ((quals, name), _) = $3
-                             in ((qual:quals, name), loc) }
+                              in ((qual:quals, name), loc) }
          | id { let L loc (ID name) = $1 in (([], name), loc) }
 ;
 
@@ -330,12 +332,12 @@ IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString na
              | sid '.' IncludeParts { let L pos (SID name) = $1 in nameToString name : $3 }
              | sid { let L pos (SID name) = $1 in [nameToString name] }
 
-Fun     : fun id '(' Params ')' ':' UserTypeDecl '=' Exp
+Fun     : fun id Params ':' UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef (name==defaultEntryPoint) (name, blankLongname) $7 $4 $9 pos }
-        | entry id '(' Params ')' ':'  UserTypeDecl '=' Exp
+                          in FunDef (name==defaultEntryPoint) (name, blankLongname) $5 $3 $7 pos }
+        | entry id Params ':'  UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef True (name, blankLongname) $7 $4 $9 pos }
+                          in FunDef True (name, blankLongname) $5 $3 $7 pos }
 ;
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
@@ -394,71 +396,26 @@ FloatType :: { (FloatType, SrcLoc) }
           | f32  { (Float32, $1) }
           | f64  { (Float64, $1) }
 
-Params :: { [ParamBase NoInfo Name] }
-Params : Param ',' SomeParams   { $1 : $3 }
-       | Param                  { [$1] }
-       |                        { [] }
+Params :: { [PatternBase NoInfo Name] }
+       :              { [] }
+       | Param Params { $1 : $2 }
 
-SomeParams : Param                { [$1] }
-           | Param ',' SomeParams { $1 : $3 }
-
-Param : id MaybeAscription { let L loc (ID name) = $1 in Param name $2 NoInfo loc }
+Param :: { PatternBase NoInfo Name }
+Param : VarId                        { Id $1 }
+      | '_'                          { Wildcard NoInfo $1 }
+      | '(' ')'                      { TuplePattern [] $1 }
+      | '(' Pattern ')'              { $2 }
+      | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
 
 Exp  :: { UncheckedExp }
-     : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
-     | stringlit      {% let L pos (STRINGLIT s) = $1 in do
-                             s' <- mapM (getIntValue . fromIntegral . ord) s
-                             t <- lift $ gets parserIntType
-                             return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
-     | Id %prec letprec { Var $1 }
-     | empty '(' UserTypeDecl ')' { Empty $3 $1 }
-     | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
-     | '(' Exp ',' Exps ')'   { TupLit ($2:$4) $1 }
-     | '('      ')'   { TupLit [] $1 }
-     | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
-     | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }
-     | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
-     | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
-     | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
-     | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
-     | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
-     | '-' Exp %prec '~' { UnOp Negate $2 $1 }
-     | '!' Exp        { UnOp Not $2 $1 }
-     | '~' Exp        { UnOp Complement $2 $1 }
-     | abs Exp        { UnOp Abs $2 $1 }
-     | signum Exp     { UnOp Signum $2 $1 }
-     | SignedType '(' Exp ')' { UnOp (ToSigned (fst $1)) $3 (snd $1) }
-     | UnsignedType '(' Exp ')' { UnOp (ToUnsigned (fst $1)) $3 (snd $1) }
-     | FloatType '(' Exp ')' { UnOp (ToFloat (fst $1)) $3 (snd $1) }
-     | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
-     | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
-     | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
-     | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
-     | Exp '&&' Exp   { BinOp LogAnd $1 $3 NoInfo $2 }
-     | Exp '||' Exp   { BinOp LogOr $1 $3 NoInfo $2 }
-     | Exp '&' Exp    { BinOp Band $1 $3 NoInfo $2 }
-     | Exp '|' Exp    { BinOp Bor $1 $3 NoInfo $2 }
-     | Exp '^' Exp    { BinOp Xor $1 $3 NoInfo $2 }
-
-     | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
-     | Exp '!=' Exp   { BinOp NotEqual $1 $3 NoInfo $2 }
-     | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
-     | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
-     | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }
-     | Exp '>=' Exp   { BinOp Geq  $1 $3 NoInfo $2 }
-
-     | if Exp then Exp else Exp %prec ifprec
+     : if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
 
-     | QualName '(' Exps ')'
-       { Apply (fst $1) [ (arg, Observe) | arg <- $3 ] NoInfo (snd $1)
-                      }
-     | QualName '(' ')'     { Apply (fst $1) [] NoInfo (snd $1) }
+     | LetExp %prec letprec { $1 }
 
-     | iota '(' Exp ')' { Iota $3 $1 }
+     | iota Exp { Iota $2 $1 }
 
-     | shape '(' Exp ')'
-                      { Shape $3 $1 }
+     | shape Exp { Shape $2 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
@@ -468,7 +425,7 @@ Exp  :: { UncheckedExp }
      | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
                       { Rearrange $4 $7 $1 }
 
-     | transpose '(' Exp ')' { Transpose $3 $1 }
+     | transpose Exp { Transpose $2 $1 }
 
      | rotate '@' NaturalInt '(' Exp ',' Exp ')' { Rotate $3 $5 $7 $1 }
 
@@ -506,33 +463,20 @@ Exp  :: { UncheckedExp }
      | zip '@' NaturalInt '(' Exps ')'
                       { Zip $3 (map (\x -> (x, NoInfo)) $5) $1 }
 
-     | unzip '(' Exp ')'
-                      { Unzip $3 [] $1 }
+     | unzip Exp      { Unzip $2 [] $1 }
 
      | unsafe Exp     { Unsafe $2 $1 }
 
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 $1 }
 
-     | partition '(' FunAbstrsThenExp ')'
-                      { Partition (fst $3) (snd $3) $1 }
+     | partition '(' '(' FunAbstrs ')' ',' Exp ')'
+                      { Partition $4 $7 $1 }
 
      | zipWith '(' FunAbstr ',' Exps ')'
                       { Map $3 (Zip 0 (map (\x -> (x, NoInfo)) $5) $1) $1 }
 
-     | copy '(' Exp ')' { Copy $3 $1 }
-
-     | '(' Exp ')' { $2 }
-
-     | LetExp         { $1 }
-
-     | Exp Slice
-                      { Index $1 $2 (srclocOf $1) }
-
-     | Exp '.' NaturalInt { TupleIndex $1 $3 NoInfo $ srclocOf $1 }
-
-     | Id with Slice '<-' Exp %prec letprec
-                         { Update $1 $3 $5 $ srclocOf $1 }
+     | copy Exp       { Copy $2 $1 }
 
      | streamMap       '(' FunAbstr ',' Exp ')'
                          { Stream (MapLike InOrder)  $3 $5 $1 }
@@ -546,6 +490,67 @@ Exp  :: { UncheckedExp }
                          { Stream (Sequential $5) $3 $7 $1 }
      | write           '(' Exp ',' Exp ',' Exps ')'
                          { Write $3 $5 $7 $1 }
+
+     | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
+     | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }
+     | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
+     | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
+     | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
+     | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
+     | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
+     | '-' Exp %prec '~' { UnOp Negate $2 $1 }
+     | '!' Exp        { UnOp Not $2 $1 }
+     | '~' Exp        { UnOp Complement $2 $1 }
+     | abs Exp        { UnOp Abs $2 $1 }
+     | signum Exp     { UnOp Signum $2 $1 }
+     | SignedType Exp %prec indexprec
+       { UnOp (ToSigned (fst $1)) $2 (snd $1) }
+     | UnsignedType Exp %prec indexprec
+       { UnOp (ToUnsigned (fst $1)) $2 (snd $1) }
+     | FloatType Exp %prec indexprec
+       { UnOp (ToFloat (fst $1)) $2 (snd $1) }
+     | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
+     | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
+     | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
+     | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
+     | Exp '&&' Exp   { BinOp LogAnd $1 $3 NoInfo $2 }
+     | Exp '||' Exp   { BinOp LogOr $1 $3 NoInfo $2 }
+     | Exp '&' Exp    { BinOp Band $1 $3 NoInfo $2 }
+     | Exp '|' Exp    { BinOp Bor $1 $3 NoInfo $2 }
+     | Exp '^' Exp    { BinOp Xor $1 $3 NoInfo $2 }
+
+     | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
+     | Exp '!=' Exp   { BinOp NotEqual $1 $3 NoInfo $2 }
+     | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
+     | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
+     | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }
+     | Exp '>=' Exp   { BinOp Geq  $1 $3 NoInfo $2 }
+     | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
+     | Apply
+       { let (fname, args, loc) = $1 in Apply fname [ (arg, Observe) | arg <- args ] NoInfo loc }
+     | Atom %prec juxtprec { $1 }
+
+Apply : Apply Atom %prec juxtprec
+        { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
+      | QualName Atom %prec juxtprec
+        { (fst $1, [$2], snd $1) }
+
+Atom :: { UncheckedExp }
+Atom : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
+     | stringlit      {% let L pos (STRINGLIT s) = $1 in do
+                             s' <- mapM (getIntValue . fromIntegral . ord) s
+                             t <- lift $ gets parserIntType
+                             return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
+     | QualName %prec letprec     {% fmap Var $ identFromQualName $1 }
+     | empty '(' UserTypeDecl ')' { Empty $3 $1 }
+     | '(' Exp ')'                { $2 }
+     | '(' Exp ',' Exps ')'       { TupLit ($2:$4) $1 }
+     | '('      ')'               { TupLit [] $1 }
+     | Atom Slice %prec indexprec { Index $1 $2 (srclocOf $1) }
+     | Atom '.' NaturalInt{ TupleIndex $1 $3 NoInfo $ srclocOf $1 }
+     | QualName with Slice '<-' '(' Exp ')'  {% do
+                                                 v <- identFromQualName $1
+                                                 return $ Update v $3 $6 $ srclocOf (snd $1) }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
@@ -562,15 +567,15 @@ LetExp :: { UncheckedExp }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
-    | LetExp { $1 }
+    | LetExp %prec letprec { $1 }
 
-LoopForm : for Id '<' Exp
+LoopForm : for VarId '<' Exp
            { For FromUpTo (zeroExpression (srclocOf $1)) $2 $4 }
-         | for Exp '<=' Id '<' Exp
+         | for Atom '<=' VarId '<' Exp
            { For FromUpTo $2 $4 $6 }
-         | for Exp '>' Id '>=' Exp
+         | for Atom '>' VarId '>=' Exp
            { For FromDownTo $6 $4 $2 }
-         | for Exp '>' Id
+         | for Atom '>' VarId
            { For FromDownTo (zeroExpression (srclocOf $1)) $4 $2 }
          | while Exp      { While $2 }
 
@@ -591,8 +596,6 @@ DimIndex :: { UncheckedDimIndex }
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
 
-Id : QualName { let (([], name), loc) = $1 in Ident name NoInfo loc }
-
 VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
 
 Patterns : Pattern ',' Patterns  { $1 : $3 }
@@ -600,6 +603,7 @@ Patterns : Pattern ',' Patterns  { $1 : $3 }
 
 Pattern : VarId { Id $1 }
       | '_' { Wildcard NoInfo $1 }
+      | '(' ')' { TuplePattern [] $1 }
       | '(' Pattern ')' { $2 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
       | Pattern ':' UserTypeDecl { PatternAscription $1 $3 }
@@ -608,35 +612,37 @@ MaybeAscription :: { Maybe (TypeDeclBase NoInfo Name) }
 MaybeAscription : ':' UserTypeDecl { Just $2 }
                 |                  { Nothing }
 
-FunAbstr :: { UncheckedLambda }
-         : fn '(' Params ')' MaybeAscription '=>' Exp
-           { AnonymFun $3 $7 $5 NoInfo $1 }
-         | QualName '(' Exps ')'
-           { CurryFun (fst $1) $3 NoInfo (snd $1) }
-         | QualName '(' ')'
-           { CurryFun (fst $1) [] NoInfo (snd $1) }
-         | QualName
-           { CurryFun (fst $1) [] NoInfo (snd $1) }
-           -- Minus is handed explicitly here because I could figure
-           -- out how to resolve the ambiguity with negation.
+Curry : Curry Atom %prec juxtprec
+        { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
+      | QualName %prec juxtprec
+        { (fst $1, [], snd $1) }
 
-         | '-' Exp
-           { CurryBinOpRight Minus $2 NoInfo NoInfo $1 }
-         | '-'
+
+FunAbstr :: { UncheckedLambda }
+         : fn Params MaybeAscription '=>' Exp
+           { AnonymFun $2 $5 $3 NoInfo $1 }
+         | Curry
+           { let (fname, args, loc) = $1 in CurryFun fname args NoInfo loc }
+
+           -- Minus is handed explicitly here because I could not
+           -- figure out how to resolve the ambiguity with negation.
+         | '(' '-' Exp ')'
+           { CurryBinOpRight Minus $3 NoInfo NoInfo $1 }
+         | '(' '-' ')'
            { BinOpFun Minus NoInfo NoInfo NoInfo $1 }
-         | Exp '-'
-           { CurryBinOpLeft Minus $1 NoInfo NoInfo (srclocOf $1) }
-         | BinOp Exp
-           { CurryBinOpRight (fst $1) $2 NoInfo NoInfo (snd $1) }
-         | Exp BinOp
-           { CurryBinOpLeft (fst $2) $1 NoInfo NoInfo (snd $2) }
-         | BinOp
-           { BinOpFun (fst $1) NoInfo NoInfo NoInfo (snd $1) }
+         | '(' Exp '-' ')'
+           { CurryBinOpLeft Minus $2 NoInfo NoInfo (srclocOf $1) }
+         | '(' BinOp Exp ')'
+           { CurryBinOpRight (fst $2) $3 NoInfo NoInfo $1 }
+         | '(' Exp BinOp ')'
+           { CurryBinOpLeft (fst $3) $2 NoInfo NoInfo $1 }
+         | '(' BinOp ')'
+           { BinOpFun (fst $2) NoInfo NoInfo NoInfo $1 }
          | UnOp
            { UnOpFun (fst $1) NoInfo NoInfo (snd $1) }
 
-FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
-                 | FunAbstr ',' FunAbstrsThenExp { ($1 : fst $3, snd $3) }
+FunAbstrs : FunAbstr ',' FunAbstrs { $1 : $3 }
+          | FunAbstr               { [$1] }
 
 Value : IntValue { $1 }
       | FloatValue { $1 }
@@ -801,6 +807,12 @@ patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+
+identFromQualName :: (QualName, SrcLoc) -> ParserMonad UncheckedIdent
+identFromQualName (([], name), loc) =
+  return $ Ident name NoInfo loc
+identFromQualName (_, loc) =
+  throwError $ "Identifier cannot be qualified at " ++ locStr loc
 
 zeroExpression :: SrcLoc -> UncheckedExp
 zeroExpression = Literal $ PrimValue $ SignedValue $ Int32Value 0

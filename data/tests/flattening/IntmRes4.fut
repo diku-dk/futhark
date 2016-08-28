@@ -24,7 +24,7 @@
 --      [22, 20, 18]]]]
 -- }
 fun addRows (xs: []int, ys: []int): []int =
-  map(+, zip (xs,ys))
+  map((+), zip (xs,ys))
 
 fun main (xssss: [][][][]int, cs: []int, y: int): [][][][]int =
   map (fn (xsss: [][][]int, c: int): [][][]int  =>

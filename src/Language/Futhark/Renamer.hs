@@ -80,17 +80,6 @@ repl (Ident name NoInfo loc) = do
   name' <- replName name
   return $ Ident name' NoInfo loc
 
-declRepl :: (Eq f, Hashable f) =>
-            ParamBase NoInfo f
-         -> RenameM f t (ParamBase NoInfo t)
-declRepl (Param name (Just (TypeDecl tp NoInfo)) NoInfo loc) = do
-  name' <- replName name
-  tp' <- renameUserType tp
-  return $ Param name' (Just (TypeDecl tp' NoInfo)) NoInfo loc
-declRepl (Param name Nothing NoInfo loc) = do
-  name' <- replName name
-  return $ Param name' Nothing NoInfo loc
-
 replName :: (Eq f, Hashable f) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
                 asks (HM.lookup name . envNameMap)
@@ -106,20 +95,6 @@ bindNames varnames body = do
 
 bind :: (Eq f, Hashable f) => [IdentBase x f] -> RenameM f t a -> RenameM f t a
 bind = bindNames . map identName
-
-bindParams :: (Ord f, Hashable f) =>
-              [ParamBase NoInfo f]
-           -> RenameM f t a
-           -> RenameM f t a
-bindParams params =
-  bindNames (map paramName params) .
-  bindNames (concatMap (mapMaybe inspectDim . maybe [] nestedDims' . paramDeclaredType) params)
-  where inspectDim AnyDim =
-          Nothing
-        inspectDim (ConstDim _) =
-          Nothing
-        inspectDim (NamedDim name) =
-          Just name
 
 renameDec :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
              DecBase NoInfo f -> RenameM f t (DecBase NoInfo t)
@@ -144,10 +119,10 @@ renameDec (FunOrTypeDec funortype) =
 renameFun :: (Ord f, Hashable f, Eq t, Hashable t) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
 renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
-  bindParams params $
+ bindNames (concatMap (HS.toList . patNameSet) params) $
     FunDef entry fname <$>
     (TypeDecl <$> renameUserType ret <*> pure NoInfo) <*>
-    mapM declRepl params <*>
+    mapM renamePattern params <*>
     renameExp body <*>
     pure pos
 
@@ -176,7 +151,7 @@ renameModule (ModDef name moddecs loc) = do
   moddecs' <- mapM renameDec moddecs
   return $ ModDef name moddecs' loc
 
-renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
+renameExp :: (Ord f, Eq f, Hashable f, Eq t, Hashable t) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
 renameExp (LetWith dest src idxs ve body loc) = do
   src' <- repl src
@@ -188,7 +163,7 @@ renameExp (LetWith dest src idxs ve body loc) = do
     return $ LetWith dest' src' idxs' ve' body' loc
 renameExp (LetPat pat e body pos) = do
   e1' <- renameExp e
-  bind (patIdents pat) $ do
+  bindNames (HS.toList $ patNameSet pat) $ do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
@@ -198,7 +173,7 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
     For dir lbound loopvar ubound -> do
       lbound' <- renameExp lbound
       ubound' <- renameExp ubound
-      bind (patIdents mergepat) $ do
+      bindNames (HS.toList $ patNameSet mergepat) $ do
         mergepat' <- renamePattern mergepat
         letbody' <- renameExp letbody
         bind [loopvar] $ do
@@ -207,7 +182,7 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
           return $ DoLoop mergepat' mergeexp'
             (For dir lbound' loopvar' ubound') loopbody' letbody' pos
     While cond ->
-      bind (patIdents mergepat) $ do
+      bindNames (HS.toList $ patNameSet mergepat) $ do
         mergepat' <- renamePattern mergepat
         letbody' <- renameExp letbody
         cond' <- renameExp cond
@@ -285,7 +260,7 @@ renameTypeGeneric renameShape renameAliases = renameType'
 
 
 
-rename :: (Eq f, Hashable f, Eq t, Hashable t) =>
+rename :: (Ord f, Eq f, Hashable f, Eq t, Hashable t) =>
           MapperBase f t (RenameM f t)
 rename = Mapper {
            mapOnExp = renameExp
@@ -297,11 +272,11 @@ rename = Mapper {
          , mapOnValue = return
          }
 
-renameLambda :: (Eq f, Hashable f, Eq t, Hashable t) =>
+renameLambda :: (Ord f, Eq f, Hashable f, Eq t, Hashable t) =>
                 LambdaBase NoInfo f -> RenameM f t (LambdaBase NoInfo t)
 renameLambda (AnonymFun params body maybe_ret NoInfo loc) =
-  bindNames (map paramName params) $ do
-    params' <- mapM declRepl params
+  bindNames (concatMap (HS.toList . patNameSet) params) $ do
+    params' <- mapM renamePattern params
     body' <- renameExp body
     maybe_ret' <- case maybe_ret of
                     Just (TypeDecl ret NoInfo) ->
@@ -334,7 +309,7 @@ renamePattern (Wildcard NoInfo loc) =
 renamePattern (PatternAscription p t) =
   PatternAscription <$> renamePattern p <*> renameUserTypeDecl t
 
-renameDimIndex :: (Eq f, Hashable f, Eq t, Hashable t) =>
+renameDimIndex :: (Ord f, Eq f, Hashable f, Eq t, Hashable t) =>
                   DimIndexBase NoInfo f
                -> RenameM f t (DimIndexBase NoInfo t)
 renameDimIndex (DimFix i) = DimFix <$> renameExp i

@@ -45,15 +45,15 @@
 --      enddo
 --    enddo
 
-fun min(a: int, b: int): int = if(a<b) then a else b
+fun min(a: int) (b: int): int = if(a<b) then a else b
 
 fun floydSbsImp(n: int, d: *[][]int): [][]int =
     let dT = copy(transpose(d)) in
     loop (d) = for i < n do
         loop (d) = for j < n do
-            let sumrow = map(+, zip(d[i], dT[j])) in
-            let minrow = reduce (min, 1200, sumrow)    in
-            let minrow = min(d[i,j], minrow)        in
+            let sumrow = map((+), zip(d[i], dT[j])) in
+            let minrow = reduce(min, 1200, sumrow)    in
+            let minrow = min d[i,j] minrow        in
             let d[i,j] = minrow in d
         in d
     in d

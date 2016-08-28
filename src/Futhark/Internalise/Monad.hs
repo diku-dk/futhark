@@ -3,7 +3,6 @@ module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
   , throwError
-  , ShapeTable
   , FunTable
   , VarSubstitutions
   , InternaliseEnv(..)
@@ -39,13 +38,11 @@ data FunBinding = FunBinding
                   , externalFun :: (E.StructType, [E.StructType])
                   }
 
-type ShapeTable = HM.HashMap VName [SubExp]
-
 type FunTable = HM.HashMap Name FunBinding
 
 -- | A mapping from external variable names to the corresponding
--- internalised identifiers.
-type VarSubstitutions = HM.HashMap VName [VName]
+-- internalised subexpressions.
+type VarSubstitutions = HM.HashMap VName [SubExp]
 
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions

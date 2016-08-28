@@ -28,14 +28,14 @@ fun main(pss: [n][m]int): ([n][m][m]int, [n][m]int) =
   let (asss, bss) =
     unzip(map(fn (ps: []int): ([m][m]int, [m]int)  =>
                 let ass = map(fn (p: int): [m]int  =>
-                                let cs = scan(+, 0, iota(p))
-                                let f = reduce(+, 0, cs)
-                                let as = map(+f, ps)
+                                let cs = scan((+), 0, iota(p))
+                                let f = reduce((+), 0, cs)
+                                let as = map((+f), ps)
                                 in as,
                               ps)
                 loop (bs=ps) = for i < n do
                   let bs' = map(fn (as: []int, b: int): int  =>
-                                  let d = reduce(+, 0, as)
+                                  let d = reduce((+), 0, as)
                                   let e = d + b
                                   let b' = 2 * e
                                   in b',

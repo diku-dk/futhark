@@ -68,7 +68,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
                                                 (shapes++values)
                                                )
                                , externalFun = (rettype,
-                                                map E.paramType params)
+                                                map E.patternStructType params)
                                })
 
         builtinFtable = HM.map addBuiltin E.builtInFunctions
@@ -85,10 +85,8 @@ internaliseFun (E.FunDef entry (fname,_) (TypeDecl _ (Info rettype)) params body
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape asserting loc
              (map I.fromDecl rettype') firstbody
-    return $ I.FunDef entry
-      fname (ExtRetType rettype')
-      (shapeparams ++ params')
-      body'
+    return $ I.FunDef entry fname
+      (ExtRetType rettype') (shapeparams ++ params') body'
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) _) =
@@ -122,7 +120,7 @@ internaliseExp _ (E.Var var) = do
   subst <- asks $ HM.lookup (E.identName var) . envSubsts
   case subst of
     Nothing     -> (:[]) . I.Var <$> internaliseIdent var
-    Just substs -> return $ map I.Var substs
+    Just substs -> return substs
 
 internaliseExp desc (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
@@ -188,8 +186,7 @@ internaliseExp desc (E.Apply fname args _ _) = do
   case rettype_fun $ map (,I.Prim int32) shapeargs ++ zip args' argts of
     Nothing -> fail $ "Cannot apply " ++ pretty fname' ++ " to arguments " ++
                pretty (shapeargs ++ args')
-    Just rettype ->
-      letTupExp' desc $ I.Apply fname' args'' rettype
+    Just rettype -> letTupExp' desc $ I.Apply fname' args'' rettype
   where
     fname' = longnameToName fname
 
@@ -230,9 +227,8 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
     E.While cond ->
       return (id, Right cond)
 
-  mergeparams <- map E.toParam <$> flattenPattern mergepat
   (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
-    wrap $ bindingParams mergeparams $ \shapepat mergepat' ->
+    wrap $ bindingParams [mergepat] $ \shapepat mergepat' ->
     internaliseBodyBindings loopbody $ \ses -> do
       sets <- mapM subExpType ses
       let shapeinit = argShapes
@@ -895,11 +891,11 @@ simpleCmpOp desc op x y =
 
 internaliseLambda :: InternaliseLambda
 
-internaliseLambda (E.AnonymFun params body _ (Info rettype) _) (Just rowtypes) = do
-  (body', params') <- bindingLambdaParams params rowtypes $
-                      internaliseBody body
-  (rettype', _) <- internaliseReturnType rettype
-  return (params', body', map I.fromDecl rettype')
+internaliseLambda (E.AnonymFun params body _ (Info rettype) _) (Just rowtypes) =
+  bindingLambdaParams params rowtypes $ \params' -> do
+    body' <- internaliseBody body
+    (rettype', _) <- internaliseReturnType rettype
+    return (params', body', map I.fromDecl rettype')
 
 internaliseLambda (E.AnonymFun params body _ (Info rettype) _) Nothing = do
   (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
@@ -925,11 +921,7 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
         let (_, ext_param_ts) = externalFun fun_entry
         ext_params <- forM ext_param_ts $ \param_t -> do
           name <- newVName "not_curried"
-          return E.Param { E.paramName = name
-                         , E.paramTypeDecl = Nothing
-                         , E.paramTypeInfo = Info param_t
-                         , E.paramSrcLoc = noLoc
-                         }
+          return $ E.Id $ E.Ident name (Info $ E.fromStruct $ E.removeShapeAnnotations param_t) noLoc
         bindingParams ext_params $ \shape_params value_params -> do
           let params = map (fmap I.fromDecl) $ shape_params ++ value_params
               valargs = curargs' ++ map (I.Var . I.paramName) value_params
@@ -974,14 +966,9 @@ unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
-  let t = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = Nothing
-                      , E.paramTypeInfo = Info t
-                      , E.paramSrcLoc = noLoc
-                      , E.paramName = paramname
-                      }
-  return ([param],
-          E.UnOp op (E.Var $ E.fromParam param) noLoc,
+  let ident = E.Ident paramname (Info paramtype) noLoc
+  return ([E.Id ident],
+          E.UnOp op (E.Var ident) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
@@ -989,21 +976,10 @@ binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
-  let xtype' = E.vacuousShapeAnnotations $ E.toStruct xtype
-      param_x = E.Param { E.paramTypeDecl = Nothing
-                        , E.paramTypeInfo = Info xtype'
-                        , E.paramSrcLoc = noLoc
-                        , E.paramName = x_name
-                        }
-      ytype' = E.vacuousShapeAnnotations $ E.toStruct ytype
-      param_y = E.Param { E.paramTypeDecl = Nothing
-                        , E.paramTypeInfo = Info ytype'
-                        , E.paramSrcLoc = noLoc
-                        , E.paramName = y_name
-                        }
-  return ([param_x, param_y],
-          E.BinOp op (E.Var $ E.fromParam param_x)
-          (E.Var $ E.fromParam param_y) (Info rettype) noLoc,
+  let ident_x = E.Ident x_name (Info xtype) noLoc
+      ident_y = E.Ident y_name (Info ytype) noLoc
+  return ([E.Id ident_x, E.Id ident_y],
+          E.BinOp op (E.Var ident_x) (E.Var ident_y) (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
@@ -1012,14 +988,9 @@ binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
                      -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
-  let paramtype' = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = Nothing
-                      , E.paramTypeInfo = Info paramtype'
-                      , E.paramSrcLoc = noLoc
-                      , E.paramName = paramname
-                      }
-      (x', y') = swap (E.Var $ E.fromParam param, e)
-  return ([param],
+  let ident = E.Ident paramname (Info paramtype) noLoc
+      (x', y') = swap (E.Var ident, e)
+  return ([E.Id ident],
           E.BinOp op x' y' (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 

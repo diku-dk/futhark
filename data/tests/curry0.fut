@@ -9,4 +9,4 @@
 -- }
 
 fun main(a: []int): ([]int,[]int) =
-  (map(- 2, a), map(2 -, a))
+  (map((- 2), a), map((2 -), a))

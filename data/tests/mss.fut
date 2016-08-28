@@ -6,8 +6,8 @@
 fun max(x: int, y: int): int =
   if x > y then x else y
 
-fun redOp(x: (int,int,int,int),
-                            y: (int,int,int,int)): (int,int,int,int) =
+fun redOp(x: (int,int,int,int))
+         (y: (int,int,int,int)): (int,int,int,int) =
   let (mssx, misx, mcsx, tsx) = x in
   let (mssy, misy, mcsy, tsy) = y in
   ( max(mssx, max(mssy, mcsx + misy))

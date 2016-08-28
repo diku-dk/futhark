@@ -41,16 +41,17 @@ First-order Futhark
 An Futhark program consists of a sequence of *function definitions*,
 of the following form::
 
-   fun name(params...) : return_type = body
+   fun name params... : return_type = body
 
 A function must declare both its return type and the types of all its
 parameters.  All functions (except for inline anonymous functions; see
 below) are defined globally.  Futhark does not use type inference.
-Symbolic constants are not supported, although 0-ary functions can be
-defined.  As a concrete example, here is the recursive definition of
-the factorial function in Futhark::
+Symbolic constants are not supported, although you can define a
+function that accepts an empty tuple as argument.  As a concrete
+example, here is the recursive definition of the factorial function in
+Futhark::
 
-  fun fact(n: int) : int =
+  fun fact(n: int): int =
     if n == 0 then 1
               else n * fact(n-1)
 
@@ -108,23 +109,26 @@ The final ``in`` is still necessary.
 
 Two-way ``if-then-else`` is the only branching construct in Futhark.
 Pattern matching is supported in a limited way for taking apart
-tuples, but this can only be done in ``let``-bindings, and not
-directly in a function argument list.  Specifically, the following
-function definition is not valid::
+tuples, for example::
 
-  fun sumpair((x, y): (int, int)): int = x + y -- WRONG!
+  fun sumpair((x, y): (int, int)): int = x + y
 
-Instead, we must use a ``let``-binding explicitly, as follows::
+We can also add the type ascription on the tuple components::
 
-  fun sumpair(t: (int, int)): int =
-    let (x,y) = t in x + y
+  fun sumpair(x: int, y: int): int = x + y
 
-Pattern-matching in a binding is the only way to access the components
-of a tuple.
+Apart from pattern-matching, the components of a tuple can also be
+accessed by using the field access operator (``.``)::
 
-Function calls are written as the function name followed by the
-arguments enclosed in parentheses.  All function calls must be fully
-saturated - currying is only permitted in SOACs_.
+  fun sumpair(p: (int, int)): int = p.0 + p.1
+
+Only some expressions can be on the left-hand side of the dot,
+although you can enclose any expression in parentheses to make it
+acceptable.  The right-hand-side must be a literal integer.
+
+Function calls are written as the function name with the arguments
+juxtaposed.  All function calls must be fully saturated - currying is
+only permitted in SOACs_.
 
 Sequential Loops
 ~~~~~~~~~~~~~~~~
@@ -189,7 +193,9 @@ optimisation by the Futhark compiler.
 Apart from the ``i < n`` form, which loops from zero, Futhark also
 supports the ``v <= i < n`` form which starts at ``v``.  We can also
 invert the order of iteration by writing ``n > i`` or ``n > i >= v``,
-which loops down from the upper bound to the lower.
+which loops down from the upper bound to the lower.  Due to parser
+limitations, most non-atomic expressions will have to be parenthesised
+when used as the left-hand bound.
 
 Apart from ``for``-loops, Futhark also supports ``while`` loops.
 These do not provide as much information to the compiler, but can be
@@ -235,17 +241,18 @@ some elements have been changed.  General modification of array
 elements is done using the ``let-with`` construct.  In its most
 general form, it looks as follows::
 
-  let dest = src with [indexes] <- value
+  let dest = src with [indexes] <- (value)
   in body
 
 This evaluates ``body`` with ``dest`` bound to the value of ``src``,
 except that the element(s) at the position given by ``indexes`` take
-on the new value ``value``.  The given indexes need not be complete,
-but in that case, ``value`` must be an array of the proper size.  As
-an example, here's how we could replace the third row of an ``n * 3``
-array::
+on the new value ``value``.  Due to parser limitations, the
+parenthesis around ``value`` are not optional.  The given indexes need
+not be complete, but in that case, ``value`` must be an array of the
+proper size.  As an example, here's how we could replace the third row
+of an ``n * 3`` array::
 
-  let b = a with [2] <- [1,2,3] in b
+  let b = a with [2] <- ([1,2,3]) in b
 
 As a convenience, whenever ``dest`` and ``src`` are the same, we can
 write::
@@ -378,7 +385,7 @@ The simplest way to introduce uniqueness types is through examples.
 To that end, let us consider the following function definition::
 
   fun modify(a: *[]int, i: int, x: int): *[]int =
-    let b = a with [i] <- a[i] + x in
+    let b = a with [i] <- (a[i] + x) in
     b
 
 The function call ``modify(a,i,x)`` returns ``a``, but where the

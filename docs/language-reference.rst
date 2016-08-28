@@ -257,6 +257,12 @@ be of integer type.  The following operators are supported: ``^``,
 arithmetic shift right and left, and logical shift right.  Shift
 amounts must be non-negative.
 
+``f x y z``
+~~~~~~~~~~~
+
+Apply the function ``f`` to the arguments ``x``, ``y`` and ``z``.
+Function application binds tightly, but not as tighly as indexing.
+
 ``x && y``
 ~~~~~~~~~~
 
@@ -338,7 +344,7 @@ Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``
 is equivalent to unadorned ``zip``.  This form is useful when zipping
 multidimensional arrays along the innermost dimensions.
 
-``unzip(a)``
+``unzip a``
 ~~~~~~~~~~~~
 
 If the type of ``a`` is ``[(t_1, ..., t_n)]``, the result is a tuple
@@ -353,7 +359,7 @@ with ``e``.  This is useful if the compiler is otherwise unable to
 avoid bounds checks (e.g. when using indirect indexes), but you really
 do not want them here.
 
-``iota(n)``
+``iota n``
 ~~~~~~~~~~~
 
 An array of the integers from ``0`` to ``n-1``.
@@ -363,7 +369,7 @@ An array of the integers from ``0`` to ``n-1``.
 
 An array consisting of ``n`` copies of ``a``.
 
-``shape(a)``
+``shape a``
 ~~~~~~~~~~~~~~
 
 The shape of array ``a`` as an integer array.  It is often more
@@ -399,7 +405,7 @@ Concatenate arrays across dimension ``i``, with the outermost
 dimension being ``0``.  The ``i`` must be a compile-time integer
 constant, i.e. ``i`` cannot be a variable.
 
-``copy(a)``
+``copy a``
 ~~~~~~~~~~~
 Return a deep copy of the argument.  Semantically, this is just
 the identity function, but it has special semantics related to
@@ -553,22 +559,6 @@ code::
 All ``iss`` and ``vss`` arrays must be of the same outer size.  Use
 ``zip`` to use several of those arrays as arguments.  ``write`` does
 its work in-place and consumes all ``as`` arrays.
-
-Tuple Shimming
---------------
-
-In a SOAC, if the given function expects *n* arguments of types
-``t_1=, ..., t_n``, but the SOAC will call the function with a
-single argument of type ``(t_1, ..., t_n)`` (that is,
-a tuple), the Futhark compiler will automatically generate an anonymous
-unwrapping function.  This allows the following expression to
-type-check (and run)::
-
-  map(+, zip(as, bs))
-
-Without the tuple shimming, the above would cause an error, as ``+``
-is a function that takes two arguments, but is passed a two-element
-tuple by ``map``.
 
 Arrays of Tuples
 ----------------

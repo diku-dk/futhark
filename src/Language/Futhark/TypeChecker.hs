@@ -122,7 +122,7 @@ data TypeError =
   | InvalidField SrcLoc Type String
   | InvalidEntryPointReturnType SrcLoc Name
   -- ^ Invalid entry point return type.
-  | InvalidEntryPointParamType SrcLoc Name Name
+  | InvalidEntryPointParamType SrcLoc Name (PatternBase NoInfo Name)
   -- ^ Invalid entry point return type.
 
 instance Show TypeError where
@@ -234,8 +234,8 @@ instance Show TypeError where
     "Entry point '" ++ nameToString fname ++ "' at " ++ locStr loc ++
      " has invalid return type.\n" ++
     "Entry points may not return nested tuples.  Sorry."
-  show (InvalidEntryPointParamType loc fname pname) =
-    "Entry point '" ++ nameToString fname ++ "' parameter '" ++ nameToString pname ++
+  show (InvalidEntryPointParamType loc fname p) =
+    "Entry point '" ++ nameToString fname ++ "' parameter '" ++ pretty p ++
     "' at " ++ locStr loc ++ " has has invalid type.\n" ++
     "Entry point parameters may not be tuples.  Sorry."
 
@@ -466,21 +466,7 @@ binding bnds = check . local (`bindVars` bnds)
                 divide s = (s `HS.intersection` names, s `HS.difference` names)
 
 bindingParams :: [Parameter] -> TypeM a -> TypeM a
-bindingParams params m =
-  -- We need to bind both the identifiers themselves, as well as any
-  -- presently non-bound shape annotations.
-  binding (map fromParam params) $
-  -- Figure out the not already bound shape annotations.
-  binding (concat [ mapMaybe (inspectDim (srclocOf param)) $
-                    maybe [] nestedDims' $ paramDeclaredType param
-                  | param <- params])
-  m
-  where inspectDim _ AnyDim =
-          Nothing
-        inspectDim _ (ConstDim _) =
-          Nothing
-        inspectDim loc (NamedDim name) =
-          Just $ Ident name (Info $ Prim $ Signed Int32) loc
+bindingParams = binding . HS.toList . HS.unions . map patIdentSet
 
 lookupVar :: VName -> SrcLoc -> TypeM Type
 lookupVar name pos = do
@@ -605,13 +591,20 @@ buildScopeFromDecs decs = do
 
     buildTAtable = typeAliasTableFromProg (mapMaybe (isType . FunOrTypeDec) decs)
 
-    expandFun scope fntable (FunDef _ (name,_) (TypeDecl ret NoInfo) args _ pos) = do
-      argtypes <- forM args $ \arg ->
-        case paramDeclaredType arg of
+    paramDeclaredType (PatternAscription _ t) =
+      Just $ declaredType t
+    paramDeclaredType (TuplePattern ps loc) =
+      UserTuple <$> mapM paramDeclaredType ps <*> pure loc
+    paramDeclaredType _ =
+      Nothing
+
+    expandFun scope fntable (FunDef _ (name,_) (TypeDecl ret NoInfo) params _ pos) = do
+      argtypes <- forM params $ \param ->
+        case paramDeclaredType param of
           Just t -> return t
-          Nothing -> bad $ TypeError (srclocOf arg) $
-                     "Missing type declaration for parameter " ++
-                     pretty (baseName (paramName arg))
+          Nothing -> bad $ TypeError (srclocOf param) $
+                     "Missing type information for parameter " ++
+                     pretty (untagPattern param)
       let (prefixes, _) = envBreadcrumb scope
           look tname tloc =
             maybe (throwError $ UndefinedQualName tloc tname) return $
@@ -627,8 +620,8 @@ buildScopeFromDecs decs = do
 -- information.
 checkProg :: UncheckedProg -> Either TypeError (Prog, VNameSource)
 checkProg prog = do
-  checkedProg <- runTypeM initialScope src $ Prog <$> checkProg' (progDecs prog')
-  return $ flattenProgFunctions checkedProg
+  prog_checked <- runTypeM initialScope src $ Prog <$> checkProg' (progDecs prog')
+  return $ flattenProgFunctions prog_checked
   where
     (prog', src) = tagProg blankNameSource prog
 
@@ -713,31 +706,25 @@ initialFtable = HM.fromList $ map addBuiltin $ HM.toList builtInFunctions
 
 checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
 checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
-  rettype' <- checkTypeDecl rettype
-  let rettype_structural = toStructural $ unInfo $ expandedType rettype'
-  params' <- mapM checkParam params
-  body' <- bindingParams params' $
-           checkFunBody fname params' body (Just rettype') loc
+  params' <- mapM (`checkParam` NoneInferred) params
+  bindingParams params' $ do
+    rettype' <- checkTypeDecl rettype
+    body' <- checkFunBody fname body (Just rettype') loc
+    let rettype_structural = toStructural $ unInfo $ expandedType rettype'
 
-  checkReturnAlias rettype_structural params' $ typeOf body'
+    checkReturnAlias rettype_structural params' $ typeOf body'
 
-  when entry $ do
-    unless (okEntryPointReturnType (unInfo $ expandedType rettype')) $
-      bad $ InvalidEntryPointReturnType loc fname
+    when entry $ do
+      unless (okEntryPointType (unInfo $ expandedType rettype')) $
+        bad $ InvalidEntryPointReturnType loc fname
 
-    forM_ params' $ \param ->
-      unless (okEntryPointParamType (paramType param)) $
-        bad $ InvalidEntryPointParamType (srclocOf param) fname (baseName $ paramName param)
+      forM_ (zip params' params) $ \(param, orig_param) ->
+        unless (okEntryPointType (patternType param)) $
+          bad $ InvalidEntryPointParamType (srclocOf param) fname $ untagPattern orig_param
 
-  return $ FunDef entry fullname rettype' params' body' loc
+    return $ FunDef entry fullname rettype' params' body' loc
 
-  where notAliasingParam params' names =
-          forM_ params' $ \p ->
-            when (not (unique $ paramType p) &&
-                  paramName p `HS.member` names) $
-              bad $ ReturnAliased fname (baseName $ paramName p) loc
-
-        -- | Check that unique return values do not alias a
+  where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
         checkReturnAlias rettp params' =
           foldM_ (checkReturnAlias' params') HS.empty . returnAliasing rettp
@@ -752,14 +739,24 @@ checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
             bad $ UniqueReturnAliased fname loc
           | otherwise = return $ seen `HS.union` tag Nonunique names
 
+        notAliasingParam params' names =
+          forM_ params' $ \p ->
+          let consumedNonunique p' =
+                not (unique $ unInfo $ identType p') && (identName p' `HS.member` names)
+          in case find consumedNonunique $ HS.toList $ patIdentSet p of
+               Just p' ->
+                 bad $ ReturnAliased fname (baseName $ identName p') loc
+               Nothing ->
+                 return ()
+
         tag u = HS.map $ \name -> (u, name)
 
         returnAliasing (Tuple ets1) (Tuple ets2) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
-        okEntryPointReturnType (Tuple ts) = all okEntryPointParamType ts
-        okEntryPointReturnType t = okEntryPointParamType t
+        okEntryPointType (Tuple ts) = all okEntryPointParamType ts
+        okEntryPointType t = okEntryPointParamType t
 
         okEntryPointParamType Tuple{} = False
         okEntryPointParamType (Prim _) = True
@@ -767,13 +764,11 @@ checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
         okEntryPointParamType (Array _) = True
 
 checkFunBody :: Name
-             -> [ParamBase Info VName]
              -> ExpBase NoInfo VName
              -> Maybe (TypeDeclBase Info VName)
              -> SrcLoc
              -> TypeM Exp
-checkFunBody fname params body maybe_rettype loc = do
-  validateParams
+checkFunBody fname body maybe_rettype loc = do
   body' <- checkExp body
 
   case maybe_rettype of
@@ -785,28 +780,6 @@ checkFunBody fname params body maybe_rettype loc = do
     Nothing -> return ()
 
   return body'
-
-  where validateParams = do
-          -- First find all normal parameters (checking for duplicates).
-          params' <- foldM checkNormParams [] params
-          -- Then check shape annotations (where duplicates are OK, as
-          -- long as it's not a duplicate of a normal parameter.)
-          mapM_ checkDimDecls params'
-
-        checkNormParams knownparams param
-          | paramName param `elem` map paramName knownparams =
-              bad $ DupParamError fname (baseName $ paramName param) loc
-          | otherwise =
-              return $ param : knownparams
-
-        checkDimDecls param
-          | Just name <- find (`elem` map paramName params) boundDims =
-            bad $ DupParamError fname (baseName name) loc
-          | otherwise =
-            return ()
-          where boundDims = mapMaybe boundDim $ nestedDims $ paramType param
-                boundDim (NamedDim name) = Just name
-                boundDim _ = Nothing
 
 checkExp :: ExpBase NoInfo VName
          -> TypeM Exp
@@ -1084,17 +1057,11 @@ checkExp (Partition funs arrexp pos) = do
 
   return $ Partition funs' arrexp' pos
 
-checkExp (Stream form lam@(AnonymFun lam_ps _ (Just (TypeDecl lam_rtp NoInfo)) NoInfo _) arr pos) = do
-  lam_ps' <- mapM checkParam lam_ps
+checkExp (Stream form lam arr pos) = do
   let isArrayType arrtp =
         case arrtp of
           Array _ -> True
           _       -> False
-  let isArrayType' arrtp =
-        case arrtp of
-          UserUnique t _ -> isArrayType' t
-          UserArray{}    -> True
-          _              -> False
   let lit_int0 = Literal (PrimValue $ SignedValue $ Int32Value 0) pos
   [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
   -- arr must have an array type
@@ -1130,59 +1097,18 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (Just (TypeDecl lam_rtp NoInfo)) N
   when (any (`HM.member` usages) arr_aliasses) $
      bad $ TypeError pos "Stream with input array used inside lambda."
   -- check that the result type of lambda matches the accumulator part
-  _ <- case macctup of
-        Just (acc',_) ->
-            case lambdaReturnType lam' of
-                Tuple (acctp:_) ->
-                     unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
-                        bad $ TypeError pos ("Stream with accumulator-type missmatch"++
-                                             "or result arrays of non-array type.")
-                rtp' -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
-                        bad $ TypeError pos "Stream with accumulator-type missmatch."
-        Nothing -> return ()
-  -- check outerdim of Lambda's streamed-in array params are NOT specified,
-  -- and that return type inner dimens are all specified but not as other
-  -- lambda parameters!
-  (chunk,lam_arr_tp)<- case macctup of
-                         Just _ -> case lam_ps' of
-                                     [ch,_,arrpar] -> return (paramName ch,
-                                                              paramType arrpar)
-                                     _ -> bad $ TypeError pos "Stream's lambda should have three args."
-                         Nothing-> case lam_ps' of
-                                     [ch,  arrpar] -> return (paramName ch,
-                                                              paramType arrpar)
-                                     _ -> bad $ TypeError pos "Stream's lambda should have three args."
-  let outer_dims = arrayDims lam_arr_tp
-  _ <- case head outer_dims of
-        AnyDim      -> return ()
-        NamedDim _  -> return ()
-        ConstDim _  -> bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
-                                            " be specified since it is "++pretty chunk++"by default.")
+  case macctup of
+    Just (acc',_) ->
+      case lambdaReturnType lam' of
+        Tuple (acctp:_) ->
+          unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
+          bad $ TypeError pos ("Stream with accumulator-type missmatch"++
+                                "or result arrays of non-array type.")
+        rtp' -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
+          bad $ TypeError pos "Stream with accumulator-type missmatch."
+    Nothing -> return ()
 
-  _ <- case lam_rtp of
-        UserTuple res_tps _ -> do
-            let res_arr_tps = tail res_tps
-            if all isArrayType' res_arr_tps
-            then do let lam_params = HS.fromList $ map paramName lam_ps'
-                        arr_iner_dims = concatMap (tail . arrayDims') res_arr_tps
-                        boundDim (NamedDim name) = return $ Just name
-                        boundDim (ConstDim _   ) = return Nothing
-                        boundDim _               =
-                            bad $ TypeError pos $ "Stream's lambda: inner dimensions of the"++
-                                                  " streamed-result arrays MUST be specified!"
-                    rtp_iner_syms <- catMaybes <$> mapM boundDim arr_iner_dims
-                    case find (`HS.member` lam_params) rtp_iner_syms of
-                      Just name -> bad $ TypeError pos $
-                                          "Stream's lambda: " ++ pretty (baseName name) ++
-                                          " cannot specify a variant inner result shape"
-                      _ -> return ()
-            else bad $ TypeError pos "Stream with result arrays of non-array type."
-        _ -> return ()-- means that no array is streamed out!
-  -- finally return type-checked stream!
   return $ Stream form' lam' arr' pos
-
-checkExp (Stream _ _ _ pos) =
-  bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
 checkExp (Split i splitexps arrexp loc) = do
   splitexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) splitexps
@@ -1247,7 +1173,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
         return (While condexp',
                 loopbody')
 
-  let consumed_merge = patNameSet mergepat' `HS.intersection`
+  let consumed_merge = HS.map identName (patIdentSet mergepat') `HS.intersection`
                        allConsumed bodyflow
       uniquePat (Wildcard (Info t) wloc) =
         Wildcard (Info $ t `setUniqueness` Nonunique) wloc
@@ -1312,7 +1238,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 
   occur $ mergeflow `seqOccurences` merge_consume
 
-  binding (patIdents mergepat'') $ do
+  binding (HS.toList $ patIdentSet mergepat'') $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat'' mergeexp'
                     form'
@@ -1398,22 +1324,43 @@ checkIdent (Ident name _ pos) = do
   vt <- lookupVar name pos
   return $ Ident name (Info vt) pos
 
-checkParam :: ParamBase NoInfo VName
-           -> TypeM (ParamBase Info VName)
-checkParam (Param name (Just decl) NoInfo loc) = do
-  decl' <- checkTypeDecl decl
-  return $ Param name (Just decl') (expandedType decl') loc
-checkParam (Param name Nothing NoInfo loc) =
-  bad $ TypeError loc $ "Missing type ascription for parameter " ++ baseString name
+data InferredType = NoneInferred
+                  | Inferred Type
+                  | Ascribed Type
 
-checkLambdaParam :: ParamBase NoInfo VName
-                 -> StructTypeBase VName
-                 -> TypeM (ParamBase Info VName)
-checkLambdaParam (Param name (Just decl) NoInfo loc) _ = do
-  decl' <- checkTypeDecl decl
-  return $ Param name (Just decl') (expandedType decl') loc
-checkLambdaParam (Param name Nothing NoInfo loc) t =
-  return $ Param name Nothing (Info $ t `setUniqueness` Nonunique) loc
+checkParam :: PatternBase NoInfo VName -> InferredType
+           -> TypeM Parameter
+checkParam (Id (Ident name NoInfo loc)) (Inferred t) =
+  return $ Id (Ident name (Info $ t `setUniqueness` Nonunique) loc)
+checkParam (Id (Ident name NoInfo loc)) (Ascribed t) =
+  return $ Id (Ident name (Info t) loc)
+checkParam (Wildcard _ loc) (Inferred t) =
+  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
+checkParam (Wildcard _ loc) (Ascribed t) =
+  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
+checkParam (TuplePattern ps loc) (Inferred (Tuple ts)) =
+  TuplePattern <$> zipWithM checkParam ps (map Inferred ts) <*> pure loc
+checkParam (TuplePattern ps loc) (Ascribed (Tuple ts)) =
+  TuplePattern <$> zipWithM checkParam ps (map Ascribed ts) <*> pure loc
+checkParam p@TuplePattern{} (Inferred t) =
+  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty (untagPattern p) ++ " cannot match " ++ pretty t
+checkParam p@TuplePattern{} (Ascribed t) =
+  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty (untagPattern p) ++ " cannot match " ++ pretty t
+checkParam (TuplePattern ps loc) NoneInferred =
+  TuplePattern <$> zipWithM checkParam ps (repeat NoneInferred) <*> pure loc
+checkParam fullp@(PatternAscription p td) maybe_outer_t = do
+  td' <- checkTypeDecl td
+  let t' = fromStruct $ removeShapeAnnotations $ unInfo $ expandedType td'
+      maybe_outer_t' = case maybe_outer_t of Inferred t -> Just t
+                                             Ascribed t -> Just t
+                                             NoneInferred -> Nothing
+  case maybe_outer_t' of
+    Just outer_t
+      | not (outer_t `subtypeOf` t') ->
+          bad $ InvalidPatternError (untagPattern fullp) (toStructural outer_t) Nothing $ srclocOf p
+    _ -> PatternAscription <$> checkParam p (Ascribed t') <*> pure td'
+checkParam p NoneInferred =
+  bad $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty (untagPattern p)
 
 checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
@@ -1548,25 +1495,15 @@ checkLambda :: LambdaBase NoInfo VName -> [Arg]
             -> TypeM Lambda
 checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
   | length params == length args = do
-      params' <- zipWithM checkLambdaParam params $
-                 map ((`setAliases` NoInfo) . vacuousShapeAnnotations . argType) args
+      params' <- zipWithM checkParam params $ map (Inferred . argType) args
       maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
       body' <- bindingParams params' $
-        checkFunBody (nameFromString "<anonymous>") params' body maybe_ret' loc
-      checkFuncall Nothing loc (map paramType params') args
+        checkFunBody (nameFromString "<anonymous>") body maybe_ret' loc
+      checkFuncall Nothing loc (map patternStructType params') args
       let ret' = case maybe_ret' of
                    Nothing -> flip setAliases NoInfo $ vacuousShapeAnnotations $ typeOf body'
                    Just (TypeDecl _ (Info ret)) -> ret
       return $ AnonymFun params' body' maybe_ret' (Info ret') loc
-  | [(Tuple ets, arg_occ, arg_loc)] <- args,
-    length params == length ets = do
-      -- The function expects N parameters, but the argument is a
-      -- single N-tuple.  Simulate a call with N arguments instead.
-      let args' = case ets of
-                    first_t:ts -> (first_t `setUniqueness` Nonunique, arg_occ, arg_loc) :
-                                  [(t `setUniqueness` Nonunique, mempty, arg_loc) | t <- ts]
-                    [] -> []
-      checkLambda (AnonymFun params body maybe_ret NoInfo loc) args'
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do
@@ -1575,34 +1512,12 @@ checkLambda (CurryFun fname curryargexps _ loc) args = do
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (longname, rt, paramtypes) -> do
-
       let rettype' = fromStruct $ removeShapeAnnotations rt
-          paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
-      case () of
-        _ | [(Tuple ets, _, _)] <- args,
-            validApply paramtypes ets -> do
-              -- Similar shimming as in the case for anonymous functions.
-              let mkparam i t = newIdent ("param_" ++ show i) t loc
-
-              params <- zipWithM mkparam [(0::Int)..] paramtypes'
-              paramname <- newIDFromString "x"
-
-              let tupparam = Param paramname Nothing NoInfo loc
-                  tuplet = LetPat (TuplePattern (map (Id . untype) params) loc)
-                           (Var $ Ident paramname NoInfo loc) body loc
-                  tupfun = AnonymFun [tupparam] tuplet Nothing NoInfo loc
-                  body = Apply fname [(Var $ untype param, diet paramt) |
-                                      (param, paramt) <- zip params paramtypes']
-                         NoInfo loc
-              void $ checkLambda tupfun args
-              return $ CurryFun longname curryargexps' (Info rettype') loc
-          | otherwise -> do
-              case find (unique . snd) $ zip curryargexps paramtypes of
-                Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
-                _           -> return ()
-              checkFuncall Nothing loc paramtypes $ curryargs ++ args
-              return $ CurryFun longname curryargexps' (Info rettype') loc
-    where untype ident = ident { identType = NoInfo }
+      case find (unique . snd) $ zip curryargexps paramtypes of
+        Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
+        _           -> return ()
+      checkFuncall Nothing loc paramtypes $ curryargs ++ args
+      return $ CurryFun longname curryargexps' (Info rettype') loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
   var <- newIdent "x" (argType arg) loc
@@ -1702,12 +1617,6 @@ checkDim loc (NamedDim name) = do
   case t of
     Prim (Signed Int32) -> return ()
     _                   -> bad $ DimensionNotInteger loc $ baseName name
-
-patternType :: Pattern -> Type
-patternType (Wildcard (Info t) _) = t
-patternType (Id ident) = unInfo $ identType ident
-patternType (TuplePattern pats _) = Tuple $ map patternType pats
-patternType (PatternAscription p _) = patternType p
 
 expandType :: (Applicative m, MonadError TypeError m) =>
                (QualName -> SrcLoc -> m (StructTypeBase VName))

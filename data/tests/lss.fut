@@ -21,8 +21,8 @@ fun pred2(x: int, y: int): bool =
 fun max(x: int, y: int): int =
   if x > y then x else y
 
-fun redOp(x: (int,int,int,int,int,int),
-                                    y: (int,int,int,int,int,int)): (int,int,int,int,int,int) =
+fun redOp(x: (int,int,int,int,int,int)) (y: (int,int,int,int,int,int)):
+  (int,int,int,int,int,int) =
   let (lssx, lisx, lcsx, tlx, firstx, lastx) = x in
   let (lssy, lisy, lcsy, tly, firsty, lasty) = y in
 

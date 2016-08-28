@@ -49,6 +49,6 @@ fun main(numX: int, numY: int, numT: int, s0: f64, strike: f64, t: f64, alpha: f
     let u = implicitMethod( myDx, myDxx, myMuX, myVarX, u, 1.0 ) in
     -- implicitY
     let y = map( fn (u_row: []f64): []f64  =>
-                   map(+1.0, u_row),
+                   map((+1.0), u_row),
                    transpose(u)) in
     y[0,0]

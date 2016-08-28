@@ -13,10 +13,8 @@
 fun main(ass: [n][m]int, bss: [n][m]f32): ([][]f32, [][]int) =
   unzip(zipWith(fn (as: []int, bs: []f32): ([m]f32, [m]int)  =>
                   let (asum, bsum) =
-                    unzip(scan(fn (x: (int, f32), y: (int, f32)): (int, f32)  =>
-                             let (x_a, x_b) = x
-                             let (y_a, y_b) = y
-                             in (x_a + y_a, x_b + y_b),
+                    unzip(scan(fn (x_a,x_b) (y_a,y_b)  =>
+                                 (x_a + y_a, x_b + y_b),
                            (0, 0f32), zip(as, bs)))
                   in (bsum, asum),
                 ass, bss))

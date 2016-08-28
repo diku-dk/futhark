@@ -62,8 +62,9 @@ fun tridagSeq(a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
     in  y
 
 fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
-                               myMu: [n][m]f32, myVar: [n][m]f32,
-                               u: [n][m]f32,          dtInv: f32  ): *[n][m]f32 =
+                   myMu: [n][m]f32, myVar: [n][m]f32,
+                   u: [n][m]f32)
+                  (dtInv: f32): *[n][m]f32 =
   map( fn (tup:  ([]f32,[]f32,*[]f32) ): *[]f32   =>
          let (mu_row,var_row,u_row) = tup in
          let abc = map( fn (tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  =>
@@ -84,4 +85,4 @@ fun main(myD:  [m][3]f32,  myDD: [m][3]f32,
         u: *[n][m]f32,    dtInv: f32,
         num_samples: int): *[num_samples][n][m]f32 =
   map(implicitMethod(myD,myDD,myMu,myVar,u),
-      map (*dtInv,map (/f32(num_samples),map(f32,map(+1,iota(num_samples))))))
+      map((*dtInv),map ((/f32(num_samples)),map(f32,map((+1),iota(num_samples))))))

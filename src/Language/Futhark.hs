@@ -19,9 +19,8 @@ import Language.Futhark.Traversals
 -- | An identifier with type- and aliasing information information.
 type Ident = IdentBase Info VName
 
--- | A name with a type, but no aliasing information.  Used for
--- denoting function parameters.
-type Parameter = ParamBase Info VName
+-- | A parameter is just a pattern.
+type Parameter = Pattern
 
 -- | An index with type information.
 type DimIndex = DimIndexBase Info VName

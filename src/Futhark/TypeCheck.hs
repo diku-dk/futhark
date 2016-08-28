@@ -462,11 +462,9 @@ lookupFun fname args = do
     Nothing -> bad $ UnknownFunctionError fname
     Just (ftype, params) -> do
       argts <- mapM subExpType args
-      case applyRetType ftype params $
-           zip args argts of
+      case applyRetType ftype params $ zip args argts of
         Nothing ->
-          bad $ ParameterMismatch (Just fname)
-          (map paramType params) argts
+          bad $ ParameterMismatch (Just fname) (map paramType params) argts
         Just rt ->
           return (rt, map paramDeclType params)
 
