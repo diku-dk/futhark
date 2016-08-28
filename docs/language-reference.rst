@@ -311,6 +311,11 @@ be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
 array is returned.
 
+Indexing binds very tightly.  For example, the expression ``a b [i]``
+means "apply the function ``a`` to the expression ``b[i]``, *not*
+"apply the function ``a`` to the expressions ``b`` and ``[i]``.  When
+the latter is desired, enclose the literal array with parentheses.
+
 ``a[i:j]``
 ~~~~~~~~
 
@@ -364,7 +369,7 @@ do not want them here.
 
 An array of the integers from ``0`` to ``n-1``.
 
-``replicate(n, x)``
+``replicate n x``
 ~~~~~~~~~~~~~~~~~~~
 
 An array consisting of ``n`` copies of ``a``.

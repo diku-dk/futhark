@@ -10,7 +10,7 @@
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
 fun matmult(a: [m][o]int, b: [o][n]int): [m][n]int =
-  let res = replicate(m, replicate(n,0)) in
+  let res = replicate m (replicate n 0) in
   loop (res) = for i < m do
       loop (res) = for j < n do
           loop (partsum = 0) = for k < o do

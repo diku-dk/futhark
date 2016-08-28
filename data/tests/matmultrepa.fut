@@ -14,10 +14,10 @@ fun redplus2(a: [n][]int): [n]int = map(redplus1, a)
 fun mul1(a: [m]int, b: [m]int): [m]int = zipWith((*), a, b)
 fun mul2(a: [n][m]int, b: [n][m]int): [n][m]int = zipWith(mul1, a, b)
 
-fun replin(n: int) (a: [m]int): [n][m]int = replicate(n, a)
+fun replin(n: int) (a: [m]int): [n][m]int = replicate n a
 
 fun matmultFun(a: [n][m]int, b: [m][n]int ): [n][n]int =
-    let br  = replicate( n, transpose(b) ) in
+    let br  = replicate n (transpose b) in
     let ar  = map      ( replin n,    a ) in
     let abr = map  (mul2, zip(ar, br))     in
         map(redplus2, abr)

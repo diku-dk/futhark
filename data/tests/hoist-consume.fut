@@ -13,4 +13,4 @@ fun fib(a: *[]int, i: int, n: int): *[]int =
   else if i < 2 then fib(a,i+1,n)
                 else fib(a,i+1,n)
 
-fun main(n: int): []int = fib(replicate(n,42),0,n)
+fun main(n: int): []int = fib(replicate n 42,0,n)

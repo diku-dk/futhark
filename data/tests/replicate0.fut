@@ -16,6 +16,6 @@
 --    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]
 -- }
 fun main(n: int): [][]int =
-    let x  = iota(n)     in
-    let y  = replicate(n,   x) in
-    y
+    let x  = iota n
+    let y  = replicate n x
+    in y

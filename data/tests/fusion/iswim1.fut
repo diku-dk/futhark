@@ -9,7 +9,7 @@
 fun main(input: [][3]int): [][]int =
   let x = scan(fn (a: []int) (b: []int): [3]int  =>
                  map((+), zip(a, b)),
-               replicate(3, 0), input) in
+               replicate 3 0, input) in
   map(fn (r: []int): [3]int  =>
         map((+2), r),
       x)

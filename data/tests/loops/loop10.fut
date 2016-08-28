@@ -6,7 +6,7 @@
 -- output { empty(int) }
 
 fun main(l: int, a: [n]int): []int =
-  loop (b = replicate(n-l, 0)) = for n > i >= l do
+  loop (b = replicate (n-l) 0) = for n > i >= l do
     let j = n - i - 1 in
     let b[j] = a[i] in
     b

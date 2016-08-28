@@ -5,5 +5,5 @@
 fun main(as: [][m]int): []int =
   reduceComm(fn (acc: []int) (r: []int): []int  =>
                zipWith((+), acc, r),
-             replicate(m, 0),
+             replicate m 0,
              as)

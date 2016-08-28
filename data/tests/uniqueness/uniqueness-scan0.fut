@@ -13,7 +13,7 @@ fun main(a: *[]int,b: []int): int =
   let c =
     scan(fn (acc: (*[]int, []int)) (i: ([]int, []int)): (*[]int, []int)  =>
              let (a2,b2) = acc in (a2,b2),
-           (a,b), zip(replicate(10,iota(10)),
-                      replicate(10,iota(10)))) in
+           (a,b), zip(replicate 10 (iota 10),
+                      replicate 10 (iota 10))) in
   (shape c)[0] + (shape b)[0] -- Should be OK, because only a has been
                               -- consumed.

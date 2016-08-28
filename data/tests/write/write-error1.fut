@@ -7,5 +7,5 @@
 -- error:
 
 fun main(is: [n]int, vs: [m]int): []int =
-  let a = replicate(10, 0)
+  let a = replicate 10 0
   in write(is, vs, a)

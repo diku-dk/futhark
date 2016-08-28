@@ -21,5 +21,5 @@ fun main(n_histo: int, n_image: int): *[n_histo]f32 =
                          unsafe let acc[ind] = acc[ind] + 1.0 in
                          acc
                      in  acc
-              , replicate(n_histo,0.0), as
+              , replicate n_histo 0.0, as
               )

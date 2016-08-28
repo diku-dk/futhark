@@ -76,7 +76,7 @@ fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
                    , iota(chunk) )                 in
   let vct_ints= scan( fn (x: []int) (y: []int): []int  =>
                         zipWith((^), x, y)
-                    , replicate(len, 0), contrbs ) in
+                    , replicate len 0, contrbs ) in
   map( fn (xs: []int): []f64  =>
              map ( fn (x: int): f64  =>
                      f64(x) * sob_fact

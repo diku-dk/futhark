@@ -26,7 +26,7 @@ fun main(m: int, as: *[n]int): (int,[]int,[][]int,[]f64,[]f64,[]int) =
                              , c )                     in
                  let y0= scan( fn (acc: []int) (x: []int): []int  =>
                                  zipWith((+), acc, x)
-                             , replicate(m,0), x )     in
+                             , replicate m 0, x )     in
                  let y = map ( fn (y0: []int): []int  =>
                                  zipWith((+), acc, y0)
                              , y0 )                    in
@@ -49,5 +49,5 @@ fun main(m: int, as: *[n]int): (int,[]int,[][]int,[]f64,[]f64,[]int) =
                          in  c
                  in ( (c[chunk-1],y[chunk-1]), y, z, w, c )
 
-             , (0,replicate(m,0)), b )
+             , (0,replicate m 0), b )
   in ((c.0).0, (c.0).1, c.1, c.2, c.3, c.4)

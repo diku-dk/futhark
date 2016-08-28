@@ -36,5 +36,5 @@
 -- }
 
 fun main(n: int, m: int, l: int): [][][]int =
-  let a = replicate(n, replicate(m, iota(l)))
+  let a = replicate n (replicate m (iota l))
   in rotate@1(-1, a)

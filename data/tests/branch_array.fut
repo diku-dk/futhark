@@ -10,7 +10,7 @@
 
 fun f(a: [n]int): []int = a
 
-fun g(n: int): []int = replicate(n, 1337)
+fun g(n: int): []int = replicate n 1337
 
 fun main(b: bool, n: int): []int =
   let a = iota(n) in

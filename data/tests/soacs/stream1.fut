@@ -16,4 +16,4 @@ fun main(xss: [n][m]int): [m]int =
                  loop (acc) = for i < chunk_sz do
                    vecadd acc chunk[i]
                  in acc,
-               replicate(m, 0), xss)
+               replicate m 0, xss)

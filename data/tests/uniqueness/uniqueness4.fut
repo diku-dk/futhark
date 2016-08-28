@@ -10,8 +10,8 @@
 
 fun main(): ([]f64, []f64) =
   let n = 10 in
-  loop (looparr = (copy(replicate(n,0.0)),
-                   copy(replicate(n,0.0)))) = for i < n  do
+  loop (looparr = (copy(replicate n 0.0),
+                   copy(replicate n 0.0))) = for i < n  do
     let (a, b) = looparr in
     let a[ i ] = 0.0 in
     let b[ i ] = 0.0 in
