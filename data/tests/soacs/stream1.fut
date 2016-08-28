@@ -11,9 +11,9 @@ fun vecadd(xs: *[m]int) (ys: [m]int): *[m]int =
   in xs
 
 fun main(xss: [n][m]int): [m]int =
-  streamRedPer(vecadd,
+  streamRedPer vecadd (
                fn chunk_sz (acc: *[m]int) (chunk: [][m]int): *[m]int  =>
                  loop (acc) = for i < chunk_sz do
                    vecadd acc chunk[i]
-                 in acc,
-               replicate m 0, xss)
+                 in acc) (
+               replicate m 0) xss

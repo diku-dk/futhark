@@ -3,7 +3,7 @@
 -- but may confuse the type checker.
 -- ==
 fun main(a:  [][]f64, b: *[][]f64): *[][]f64 =
-  map(fn (tup:  ([]f64,*[]f64) ): *[]f64   =>
+  map (fn (tup:  ([]f64,*[]f64) ): *[]f64   =>
 	let (a_row, b_row) = tup in
-	b_row,
+	b_row) (
       zip(a,b))

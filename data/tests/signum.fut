@@ -8,4 +8,4 @@ fun main(x: int, y: int, z: int, a: []int): (int,int,int,[]int) =
   (signum x,
    signum y,
    signum z,
-   map(signum,a))
+   map signum a)

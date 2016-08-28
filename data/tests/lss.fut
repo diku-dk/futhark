@@ -43,5 +43,5 @@ fun mapOp (x: int): (int,int,int,int,int,int) =
 
 fun main(xs: []int): int =
   let (x,_,_,_,_,_) =
-    reduce(redOp, (0,0,0,0,0,0), map(mapOp, xs)) in
+    reduce redOp (0,0,0,0,0,0) (map mapOp xs) in
   x

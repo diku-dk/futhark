@@ -114,24 +114,23 @@
 -- structure distributed { Kernel 4 ScanKernel 2 }
 
 fun main(nfeatures: int, npoints: int, nclusters: int): [nclusters][nfeatures]f32 =
-  let membership = map((%nclusters), iota(npoints)) in
+  let membership = map (%nclusters) (iota(npoints)) in
   let features_in_cluster = replicate nclusters (npoints / nclusters) in
   -- Just generate some random-seeming points.
-  let points = map(fn (i: int): [nfeatures]f32  =>
-                     map((*100f32), map(sin32, map(f32, map((^i), iota(nfeatures)))))
-                  , iota(npoints)) in
-  streamRedPer(fn (acc: *[nclusters][nfeatures]f32)
+  let points = map (fn (i: int): [nfeatures]f32  =>
+                     map (*100f32) (map sin32 (map f32 (map (^i) (iota(nfeatures)))))
+                  ) (iota(npoints)) in
+  streamRedPer (fn (acc: *[nclusters][nfeatures]f32)
                   (elem: *[nclusters][nfeatures]f32): *[nclusters][nfeatures]f32  =>
-                 zipWith(fn (x: []f32, y: []f32): [nfeatures]f32  =>
-                           zipWith((+), x, y),
-                         acc, elem),
+                 zipWith (fn (x: []f32, y: []f32): [nfeatures]f32  =>
+                           zipWith (+) x y) acc elem) (
                  fn (chunk: int)
                     (acc: *[nclusters][nfeatures]f32)
                     (inp: []([nfeatures]f32,int)): *[nclusters][nfeatures]f32  =>
                    loop (acc) = for i < chunk do
                      let (point, c) = inp[i] in
-                     unsafe let acc[c] = zipWith((+), acc[c], map((/f32(features_in_cluster[c])), point)) in
+                     unsafe let acc[c] = zipWith (+) (acc[c]) (map (/f32(features_in_cluster[c])) point) in
                      acc in
-                   acc,
-               replicate nclusters (replicate nfeatures 0.0f32),
+                   acc) (
+               replicate nclusters (replicate nfeatures 0.0f32)) (
                zip(points, membership))

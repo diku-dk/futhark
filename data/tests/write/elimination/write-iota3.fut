@@ -12,6 +12,6 @@
 -- structure { Write 1 }
 
 fun main(k: i32, array0: *[n]i32, array1: *[n]i32): ([n]i32, [n]i32) =
-  write (iota(k), map((-1), iota(k)))
-        (map((+3), iota(k)), map((+2), iota(k)))
+  write (iota(k), map (-1) (iota(k)))
+        (map (+3) (iota(k)), map (+2) (iota(k)))
         (array0, array1)

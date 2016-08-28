@@ -12,8 +12,8 @@
 --   Scanomap 1
 -- }
 fun main(inp: []int): ([]int, []int, []int, []int) =
-  let a = map((+1), inp)
-  let b = scan((+), 0, a) in
-  let c = map((+1), a)
-  let d = scan((*), 1, c) in
+  let a = map (+1) inp
+  let b = scan (+) 0 a in
+  let c = map (+1) a
+  let d = scan (*) 1 c in
   (a, b, c, d)

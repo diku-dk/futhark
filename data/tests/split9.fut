@@ -14,4 +14,4 @@ fun take (n: int) (r: []int): []int =
   part
 
 fun main(rs: [][]int, n: int): [][]int =
-  map(take(n), rs)
+  map (take(n)) rs

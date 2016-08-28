@@ -9,5 +9,5 @@
 --   Scanomap 1
 -- }
 fun main(a: []int): []int =
-  let b = scan((+), 0, map((+2),a)) in
+  let b = scan (+) 0 (map (+2) a) in
   b

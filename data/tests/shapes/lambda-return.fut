@@ -20,6 +20,5 @@ fun multiply(a: []int, n: int): []int =
 
 fun main(a: [m][]int, x: int): [][]int =
   let n = m * (2 ** (x-1))
-  in map(fn (r: []int): [n]int  =>
-           multiply(r,x),
-         a)
+  in map (fn (r: []int): [n]int  =>
+           multiply(r,x)) a

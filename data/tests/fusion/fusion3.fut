@@ -12,9 +12,9 @@ fun opp(x: f64) (a: f64) (b: f64): f64 = x*(a+b)
 
 fun main(arr: []f64): f64 =
     let arr2 = replicate 5 arr in
-    let y = map( fn (x: []f64): f64   =>
-                    let a = map(f, x) in
-                    let b = reduce(opp(1.0), 0.0, a) in
+    let y = map (fn (x: []f64): f64   =>
+                    let a = map f x in
+                    let b = reduce (opp(1.0)) (0.0) a in
                     b
-                , arr2)
+                ) arr2
     in y[0]

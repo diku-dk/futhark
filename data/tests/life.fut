@@ -22,10 +22,10 @@ fun bint(b: bool): int = if b then 1 else 0
 fun intb(x: int): bool = if x == 0 then False else True
 
 fun to_bool_board(board: [][]int): [][]bool =
-  map(fn (r: []int): []bool  => map(intb, r), board)
+  map (fn (r: []int): []bool  => map intb r) board
 
 fun to_int_board(board: [][]bool): [][]int =
-  map(fn (r: []bool): []int  => map(bint, r), board)
+  map (fn (r: []bool): []int  => map bint r) board
 
 fun cell_neighbors(i: int, j: int, board: [n][m]bool): int =
   unsafe
@@ -38,23 +38,22 @@ fun cell_neighbors(i: int, j: int, board: [n][m]bool): int =
   bint(board[below,left]) + bint(board[below,j]) + bint(board[below,right])
 
 fun all_neighbours(board: [n][m]bool): [n][m]int =
-  map(fn (i: int): []int  =>
-        map(fn (j: int): int  =>
-              cell_neighbors(i,j,board),
-            iota(m)),
+  map (fn (i: int): []int  =>
+        map (fn (j: int): int  =>
+              cell_neighbors(i,j,board)) (
+            iota(m))) (
         iota(n))
 
 fun iteration(board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
-  zipWith(fn (lives_r: []int, board_r: []bool): []bool  =>
-            zipWith(fn (neighbors: int, alive: bool): bool  =>
+  zipWith (fn (lives_r: []int, board_r: []bool): []bool  =>
+            zipWith (fn (neighbors: int, alive: bool): bool  =>
                       if neighbors < 2
                       then False
                       else if neighbors == 3 then True
                       else if alive && neighbors < 4 then True
-                      else False,
-                    lives_r, board_r),
-            lives, board)
+                      else False) (
+                    lives_r) (board_r)) lives board
 
 fun main(int_board: [][]int, iterations: int): [][]int =
   -- We accept the board as integers for convenience, and then we

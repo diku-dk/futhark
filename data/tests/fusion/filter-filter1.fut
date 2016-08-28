@@ -11,7 +11,7 @@ fun div2(x: int): bool = x % 2 == 0
 fun div3(x: int): bool = x % 3 == 0
 
 fun main(a: []int, b: []int): []int =
-  let (c1,c2) = unzip(filter(fn (x: int, y: int): bool  =>
-                               div2(x) || div3(y),
+  let (c1,c2) = unzip(filter (fn (x: int, y: int): bool  =>
+                               div2(x) || div3(y)) (
                              zip(a,b))) in
-  filter(div2, c2)
+  filter div2 c2

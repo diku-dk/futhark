@@ -37,8 +37,8 @@
 
 fun main(num_iterations: int, a: [n][m]f64): [][]f64 =
   loop (a) = for i < num_iterations do
-    map(fn (i: int): []f64  =>
-          map(fn (j: int): f64  =>
+    map (fn (i: int): []f64  =>
+          map (fn (j: int): f64  =>
                 let center = unsafe a[i,j] in
                 let north = if i == 0 then center else unsafe a[i-1,j] in
                 let east = if j == m-1 then center else unsafe a[i,j+1] in
@@ -50,6 +50,6 @@ fun main(num_iterations: int, a: [n][m]f64): [][]f64 =
                 factor*east +
                 factor*south +
                 factor*west
-             , iota(m))
-       , iota(n)) in
+             ) (iota(m))
+       ) (iota(n)) in
   a

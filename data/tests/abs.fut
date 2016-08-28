@@ -7,4 +7,4 @@
 fun main(x: int, y: int, a: []int): (int,int,[]int) =
   (abs x,
    abs y,
-   map(abs,a))
+   map abs a)

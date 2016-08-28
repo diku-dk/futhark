@@ -288,11 +288,11 @@ fun go (x: (bool,f64,f64,f64)): f64 =
      x_expRT * (1.0 - cndD2) - price * (1.0 - cndD1)
 
 fun blackscholes (xs: [](bool,f64,f64,f64)): []f64 =
-   map (go, xs)
+   map  go xs
 
 fun main (years: int): []f64 =
   let days = years*365 in
-  let a = map((+1), iota(days)) in
-  let a = map(f64, a) in
-  let a = map(fn (x: f64): (bool,f64,f64,f64)  => (True, 58.0 + 4.0 * x / f64(days), 65.0, x / 365.0), a) in
+  let a = map (+1) (iota(days)) in
+  let a = map f64 a in
+  let a = map (fn (x: f64): (bool,f64,f64,f64)  => (True, 58.0 + 4.0 * x / f64(days), 65.0, x / 365.0)) a in
   blackscholes(a)

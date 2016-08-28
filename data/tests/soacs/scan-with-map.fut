@@ -11,8 +11,6 @@
 
 fun main(a: [n]int, m: int): int =
   let contribs = replicate m a in
-  let res = scan( fn (x: []int) (y: []int): []int => zipWith((+), x, y)
-                , a
-                , contribs
-                ) in
-  reduce((^), 0, reshape (n*m) res)
+  let res = scan (fn (x: []int) (y: []int): []int => zipWith (+) x y
+                ) a contribs in
+  reduce (^) 0 (reshape (n*m) res)
