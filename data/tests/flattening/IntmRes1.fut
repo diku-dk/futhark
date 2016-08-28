@@ -13,11 +13,11 @@
 --    [33, 34, 35]]
 -- }
 fun addToRow (xs: []int, y: int): []int =
-  map(fn (x: int): int  => x+y, xs)
+  map (fn (x: int): int  => x+y) xs
 
 fun main (xss: [][]int, cs: []int, y: int): [][]int =
-  map (fn (xs: []int, c: int): []int  =>
+  map  (fn (xs: []int, c: int): []int  =>
          let y' = y * c + c in
          let zs = addToRow(xs,y') in
          zs
-      , zip (xss,cs))
+      ) (zip (xss,cs))

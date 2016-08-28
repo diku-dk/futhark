@@ -13,7 +13,7 @@ fun g (x: int): int = x
 
 fun main(): int =
   let a      = copy(iota(10))  in
-  let x      = map(f, a) in
+  let x      = map f a in
   let a[1]   = 3         in
-  let y      = map(g, x) in
+  let y      = map g x in
   y[0]

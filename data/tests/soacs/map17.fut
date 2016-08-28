@@ -20,7 +20,7 @@ fun doInPlaceUpdate(bb_inds: [3][num_dates]int)
 fun mapInPlaceUpdate(bb_inds: [3][num_dates]int)
                     (bb_data: [3][num_dates]f64)
                     (gauss2dT: [num_und][num_dates]f64): [][]f64 =
-  map(doInPlaceUpdate bb_inds bb_data, gauss2dT)
+  map (doInPlaceUpdate bb_inds bb_data) gauss2dT
 
 ----------------------------------------
 -- MAIN
@@ -29,4 +29,4 @@ fun mapInPlaceUpdate(bb_inds: [3][num_dates]int)
 fun main(bb_inds: [3][num_dates]int,
                     bb_data: [3][num_dates]f64,
                     gauss_mat: [][num_und][num_dates]f64): [][][]f64 =
-  map ( mapInPlaceUpdate bb_inds bb_data, gauss_mat )
+  map  (mapInPlaceUpdate bb_inds bb_data) (gauss_mat )

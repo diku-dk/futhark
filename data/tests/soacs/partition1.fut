@@ -14,4 +14,4 @@ fun divisible_by_two(x: int): bool = x % 2 == 0
 fun divisible_by_three(x: int): bool = x % 3 == 0
 
 fun main(a: []int): ([]int, []int, []int) =
-  partition((divisible_by_two, divisible_by_three), a)
+  partition (divisible_by_two, divisible_by_three) a

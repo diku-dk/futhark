@@ -12,9 +12,9 @@ fun f(x: (int, f64)) (y: f64): f64 =
 
 fun g(x: [](f64,f64)) (y: f64): f64 =
     let (a,b) = unzip(x) in
-    y + reduce((+), 0.0, a) + reduce((+), 0.0, b)
+    y + reduce (+) (0.0) a + reduce (+) (0.0) b
 
 fun main(a: []f64): f64 =
-  let b = map(f ((5,6.0)), a) in
-  let c = map(g (zip([1.0,2.0,3.0], [4.0,5.0,6.0])), a) in
-  reduce((+), 0.0, b) + reduce((+), 0.0, c)
+  let b = map (f ((5,6.0))) a in
+  let c = map (g (zip([1.0,2.0,3.0], [4.0,5.0,6.0]))) a in
+  reduce (+) (0.0) b + reduce (+) (0.0) c

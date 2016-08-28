@@ -12,12 +12,12 @@ fun take(n: int, a: []f64): []f64 = let (first, rest) = split (n) a in first
 fun correlateDeltas(md_c:  [num_und][num_und]f64,
                  zds: [num_dates][num_und]f64
 ): [num_dates][num_und]f64 =
-    map( fn (zi: [num_und]f64): [num_und]f64  =>
-            map( fn (j: int): f64  =>
-                    let x = zipWith( (*), zi, md_c[j] )
-                    in  reduce( (+), 0.0, x )
-               , iota(num_und) )
-       , zds )
+    map (fn (zi: [num_und]f64): [num_und]f64  =>
+            map (fn (j: int): f64  =>
+                    let x = zipWith (*) zi (md_c[j] )
+                    in  reduce (+) (0.0) x
+               ) (iota(num_und) )
+       ) zds
 
 fun blackScholes(md_c: 
                 [num_und][num_und]f64,
@@ -27,8 +27,8 @@ fun blackScholes(md_c:
                 bb_arr: [num_dates][num_und]f64
            ): [num_dates][num_und]f64 =
     let noises = correlateDeltas(md_c, bb_arr) in
-        scan( fn (x: []f64) (y: []f64): []f64  => zipWith((*), x, y)
-            , md_starts, noises )
+        scan (fn (x: []f64) (y: []f64): []f64  => zipWith (*) x y
+            ) (md_starts) noises
 
 
 fun main(md_cs: 

@@ -31,14 +31,14 @@ fun testBit(n: int, ind: int): bool =
 ----    not allow fusing the filter with reduce => redomap,
 -----------------------------------------------------------------
 fun xorInds(n: int) (dir_vs: [num_bits]int): int =
-    let reldv_vals = map( fn (dv: int, i: int): int  =>
+    let reldv_vals = map (fn (dv: int, i: int): int  =>
                             if testBit(grayCode(n),i)
                             then dv else 0
-                        , zip(dir_vs,iota(num_bits)) ) in
-    reduce((^), 0, reldv_vals )
+                        ) (zip(dir_vs,iota(num_bits)) ) in
+    reduce (^) 0 (reldv_vals )
 
 fun sobolIndI (dir_vs:  [][]int, n: int ): []int =
-    map( xorInds(n), dir_vs )
+    map (xorInds(n)) (dir_vs )
 
 --------------------------------
 ---- STRENGTH-REDUCED FORMULA
@@ -56,32 +56,32 @@ fun index_of_least_significant_0(num_bits: int, n: int): int =
 
 fun sobolRecI(sob_dir_vs: [][num_bits]int, prev: []int, n: int): []int =
   let bit = index_of_least_significant_0(num_bits,n) in
-  map (fn (vct_prev: ([]int,int)): int  =>
+  map  (fn (vct_prev: ([]int,int)): int  =>
          let (vct_row, prev) = vct_prev in
          vct_row[bit] ^ prev
-      , zip(sob_dir_vs,prev))
+      ) (zip(sob_dir_vs,prev))
 
 fun recM(sob_dirs:  [][num_bits]int, i: int ): []int =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map( fn (row: []int): int => unsafe row[bit], sob_dirs )
+  map (fn (row: []int): int => unsafe row[bit]) (sob_dirs )
 
 -- computes sobol numbers: n,..,n+chunk-1
 fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
   let sob_fact= 1.0 / f64(1 << num_bits)       in
   let sob_beg = sobolIndI(dir_vs, n+1)             in
-  let contrbs = map( fn (k: int): []int  =>
+  let contrbs = map (fn (k: int): []int  =>
                         let sob = k + n in
                         if(k==0) then sob_beg
                         else recM(dir_vs, k+n)
-                   , iota(chunk) )                 in
-  let vct_ints= scan( fn (x: []int) (y: []int): []int  =>
-                        zipWith((^), x, y)
-                    , replicate len 0, contrbs ) in
-  map( fn (xs: []int): []f64  =>
-             map ( fn (x: int): f64  =>
+                   ) (iota(chunk) )                 in
+  let vct_ints= scan (fn (x: []int) (y: []int): []int  =>
+                        zipWith (^) x y
+                    ) (replicate len 0) contrbs in
+  map (fn (xs: []int): []f64  =>
+             map  (fn (x: int): f64  =>
                      f64(x) * sob_fact
-                 , xs)
-         , vct_ints)
+                 ) xs
+         ) (vct_ints)
 
 ----------------------------------------
 -- MAIN
@@ -93,8 +93,8 @@ fun main(num_mc_it: int,
                   num_und: int): [][]f64 =
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz in
-  let sobol_mat = streamMap( fn (chunk: int) (ns: []int): [][sobvctsz]f64  =>
+  let sobol_mat = streamMap (fn (chunk: int) (ns: []int): [][sobvctsz]f64  =>
                                 sobolChunk(dir_vs, ns[0], chunk)
-                           , iota(num_mc_it) ) in
+                           ) (iota(num_mc_it) ) in
 
   sobol_mat

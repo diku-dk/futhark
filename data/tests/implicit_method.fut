@@ -65,24 +65,24 @@ fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
                    myMu: [n][m]f32, myVar: [n][m]f32,
                    u: [n][m]f32)
                   (dtInv: f32): *[n][m]f32 =
-  map( fn (tup:  ([]f32,[]f32,*[]f32) ): *[]f32   =>
+  map (fn (tup:  ([]f32,[]f32,*[]f32) ): *[]f32   =>
          let (mu_row,var_row,u_row) = tup in
-         let abc = map( fn (tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  =>
+         let abc = map (fn (tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  =>
                           let (mu, var, d, dd) = tup in
                           ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                           , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
                           , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])
                           )
-                      ,zip(mu_row,var_row,myD,myDD)
+                      ) (zip(mu_row,var_row,myD,myDD)
                       ) in
          let (a,b,c) = unzip(abc) in
          tridagSeq( a, b, c, u_row )
-     , zip(myMu,myVar,copy(u))
+     ) (zip(myMu,myVar,copy(u))
      )
 
 fun main(myD:  [m][3]f32,  myDD: [m][3]f32,
         myMu: [n][m]f32, myVar: [n][m]f32,
         u: *[n][m]f32,    dtInv: f32,
         num_samples: int): *[num_samples][n][m]f32 =
-  map(implicitMethod(myD,myDD,myMu,myVar,u),
-      map((*dtInv),map ((/f32(num_samples)),map(f32,map((+1),iota(num_samples))))))
+  map (implicitMethod(myD,myDD,myMu,myVar,u)) (
+      map (*dtInv) (map  (/f32(num_samples)) (map f32 (map (+1) (iota(num_samples))))))

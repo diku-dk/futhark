@@ -12,4 +12,4 @@ struct F {
     fun plus(a: int) (b: int): int = a+b
   }
 
-fun main(a: []int): int = reduce(F.plus , 0 , a)
+fun main(a: []int): int = reduce F.plus 0 a

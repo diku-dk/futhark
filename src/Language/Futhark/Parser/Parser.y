@@ -196,7 +196,7 @@ import Language.Futhark.Core(blankLongname)
 %nonassoc '['
 %nonassoc Id
 %left juxtprec
-%left indexprec iota shape copy transpose rotate rearrange split shape
+%left indexprec iota shape copy transpose rotate rearrange split shape reduce map scan filter partition zipWith streamRed streamRedPer streamMap streamMapPer streamSeq
 %%
 
 
@@ -309,10 +309,16 @@ BinOp :: { (BinOp, SrcLoc) }
       | '<<'    { (ShiftL, $1) }
 
 UnOp :: { (UnOp, SrcLoc) }
+     : OpLikeUnOp { $1 }
+     | FuncLikeUnOp { $1 }
+
+OpLikeUnOp :: { (UnOp, SrcLoc) }
      : '~' { (Complement, $1) }
      | '!' { (Not, $1) }
+
+FuncLikeUnOp :: { (UnOp, SrcLoc) }
+     : signum { (Signum, $1) }
      | abs { (Abs, $1) }
-     | signum { (Signum, $1) }
      | SignedType { (ToSigned (fst $1), snd $1) }
      | UnsignedType { (ToUnsigned (fst $1), snd $1) }
      | FloatType { (ToFloat (fst $1), snd $1) }
@@ -444,18 +450,18 @@ Exp  :: { UncheckedExp }
                       { Concat $3 $5 $7 $1 }
 
 
-     | reduce '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Reduce (commutativity $3) $3 $5 $7 $1 }
+     | reduce FunAbstr Atom Atom
+                      { Reduce (commutativity $2) $2 $3 $4 $1 }
 
-     | reduceComm '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Reduce Commutative $3 $5 $7 $1 }
+     | reduceComm FunAbstr Atom Atom
+                      { Reduce Commutative $2 $3 $4 $1 }
 
 
-     | map '(' FunAbstr ',' Exp ')'
-                      { Map $3 $5 $1 }
+     | map FunAbstr Atom
+                      { Map $2 $3 $1 }
 
-     | scan '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Scan $3 $5 $7 $1 }
+     | scan FunAbstr Atom Atom
+                      { Scan $2 $3 $4 $1 }
 
      | zip Atom
                       { Zip 0 $2 $1 }
@@ -467,27 +473,27 @@ Exp  :: { UncheckedExp }
 
      | unsafe Exp     { Unsafe $2 $1 }
 
-     | filter '(' FunAbstr ',' Exp ')'
-                      { Filter $3 $5 $1 }
+     | filter FunAbstr Atom
+                      { Filter $2 $3 $1 }
 
-     | partition '(' '(' FunAbstrs ')' ',' Exp ')'
-                      { Partition $4 $7 $1 }
+     | partition '(' FunAbstrs ')' Atom
+                      { Partition $3 $5 $1 }
 
-     | zipWith '(' FunAbstr ',' Exps ')'
-                      { Map $3 (Zip 0 (TupLit $5 $1) $1) $1 }
+     | zipWith FunAbstr Atoms
+                      { Map $2 (Zip 0 (TupLit $3 $1) $1) $1 }
 
-     | copy Exp       { Copy $2 $1 }
+     | copy Atom      { Copy $2 $1 }
 
-     | streamMap       '(' FunAbstr ',' Exp ')'
-                         { Stream (MapLike InOrder)  $3 $5 $1 }
-     | streamMapPer    '(' FunAbstr ',' Exp ')'
-                         { Stream (MapLike Disorder) $3 $5 $1 }
-     | streamRed       '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike InOrder (commutativity $3) $3 $7) $5 $9 $1 }
-     | streamRedPer    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
-     | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (Sequential $5) $3 $7 $1 }
+     | streamMap       FunAbstr Atom
+                         { Stream (MapLike InOrder)  $2 $3 $1 }
+     | streamMapPer    FunAbstr Atom
+                         { Stream (MapLike Disorder) $2 $3 $1 }
+     | streamRed       FunAbstr FunAbstr Atom Atom
+                         { Stream (RedLike InOrder (commutativity $2) $2 $4) $3 $5 $1 }
+     | streamRedPer    FunAbstr FunAbstr Atom Atom
+                         { Stream (RedLike Disorder Commutative $2 $4) $3 $5 $1 }
+     | streamSeq       FunAbstr Atom Atom
+                         { Stream (Sequential $3) $2 $4 $1 }
      | write Atom Atom '(' Exps ')'
                          { Write $2 $3 $5 $1 }
 
@@ -545,6 +551,9 @@ Atom : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
                                                  v <- identFromQualName $1
                                                  return $ Update v $3 $6 $ srclocOf (snd $1) }
 
+Atoms :: { [UncheckedExp] }
+      : Atom { [$1] }
+      | Atom Atoms { $1 : $2 }
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
                       { LetPat $2 $4 $5 $1 }
@@ -605,18 +614,18 @@ MaybeAscription :: { Maybe (TypeDeclBase NoInfo Name) }
 MaybeAscription : ':' UserTypeDecl { Just $2 }
                 |                  { Nothing }
 
-Curry : Curry Atom %prec juxtprec
+Curry : Curry Atom
         { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
-      | QualName %prec juxtprec
-        { (fst $1, [], snd $1) }
-
+      | QualName Atom %prec indexprec
+        { (fst $1, [$2], snd $1) }
 
 FunAbstr :: { UncheckedLambda }
-         : fn Params MaybeAscription '=>' Exp
-           { AnonymFun $2 $5 $3 NoInfo $1 }
-         | Curry
-           { let (fname, args, loc) = $1 in CurryFun fname args NoInfo loc }
-
+         : '(' fn Params MaybeAscription '=>' Exp ')'
+           { AnonymFun $3 $6 $4 NoInfo $1 }
+         | QualName
+           { CurryFun (fst $1) [] NoInfo (snd $1) }
+         | '(' Curry ')'
+           { let (fname, args, loc) = $2 in CurryFun fname args NoInfo loc }
            -- Minus is handed explicitly here because I could not
            -- figure out how to resolve the ambiguity with negation.
          | '(' '-' Exp ')'
@@ -631,7 +640,9 @@ FunAbstr :: { UncheckedLambda }
            { CurryBinOpLeft (fst $3) $2 NoInfo NoInfo $1 }
          | '(' BinOp ')'
            { BinOpFun (fst $2) NoInfo NoInfo NoInfo $1 }
-         | UnOp
+         | '(' OpLikeUnOp ')'
+           { UnOpFun (fst $2) NoInfo NoInfo $1 }
+         | FuncLikeUnOp
            { UnOpFun (fst $1) NoInfo NoInfo (snd $1) }
 
 FunAbstrs : FunAbstr ',' FunAbstrs { $1 : $3 }

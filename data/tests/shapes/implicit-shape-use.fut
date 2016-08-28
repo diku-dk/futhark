@@ -21,9 +21,9 @@ fun main(num_und:
              arr_usz: []f64
 ): [][]f64 =
   let arr    = reshape (num_dates*num_und) arr_usz in
-  let bb_data= map(fn (row: []int): []f64  =>
-                        map(f64,row)
-                  , bb_inds )   in
+  let bb_data= map (fn (row: []int): []f64  =>
+                        map f64 row
+                  ) (bb_inds )   in
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
   in  bb_mat
 
@@ -75,5 +75,5 @@ fun brownianBridge (num_und:
     let gauss2d  = reshape (num_dates,num_und) gaussian_arr in
     let gauss2dT = transpose(gauss2d) in
       transpose(
-        map(brownianBridgeDates bb_inds bb_data, gauss2dT )
+        map (brownianBridgeDates bb_inds bb_data) gauss2dT
       )

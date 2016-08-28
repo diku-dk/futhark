@@ -10,4 +10,4 @@
 fun add(x: int) (y: int): int = x + y
 
 fun main(a: []int): []int =
-  map(add(1), a)
+  map (add(1)) a

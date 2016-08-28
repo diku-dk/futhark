@@ -15,7 +15,7 @@
 -- }
 
 fun main(gausses: [num_dates]f64): [][]f64 =
-  map(seqloop(num_dates), gausses)
+  map (seqloop(num_dates)) gausses
 
 fun seqloop (num_dates: int) (gauss: f64): [num_dates]f64 =
   let bbrow = replicate num_dates 0.0f64   in

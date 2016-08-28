@@ -9,7 +9,7 @@
 -- }
 
 fun pointlessly_consume(x: int, a: *[]int): bool =
-  x < reduce((+), 0, a)
+  x < reduce (+) 0 a
 
 fun main(a: *[]int, i: int): []int =
   loop (a) = while pointlessly_consume(a[i], copy(iota(i))) do

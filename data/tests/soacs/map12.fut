@@ -9,6 +9,5 @@
 --   [[1,1337,3], [4,1337,6]]
 -- }
 fun main(a: *[][]int, i: int, x: int): *[][]int =
-  map(fn (r: *[]int): *[]int  =>
-        let r[i] = x in r,
-      a)
+  map (fn (r: *[]int): *[]int  =>
+        let r[i] = x in r) a

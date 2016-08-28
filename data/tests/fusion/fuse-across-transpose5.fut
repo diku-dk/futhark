@@ -9,7 +9,7 @@ fun main(a: [n][m]int): [][]int =
   let foo = replicate m (iota n) in
   let bar = replicate m (iota n) in
   let b = replicate n (iota m) in
-  let c = map(fn (xs: []int, ys: []int,zs: []int): []int  =>
-                map(fn (x: int, y: int, z: int): int  => x+y*z, zip(xs,ys,zs)),
+  let c = map (fn (xs: []int, ys: []int,zs: []int): []int  =>
+                map (fn (x: int, y: int, z: int): int  => x+y*z) (zip(xs,ys,zs))) (
               zip(foo,bar,transpose(b))) in
   c

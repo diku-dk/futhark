@@ -7,4 +7,4 @@
 --   [-2, -256, -1]
 -- }
 fun main(a: []int): []int =
-    map(~, a)
+    map (~) a

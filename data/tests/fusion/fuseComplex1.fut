@@ -23,9 +23,9 @@ fun myop (p: (f64,f64,f64,f64,f64)) (q: (f64,f64,f64,f64,f64)): (f64,f64,f64,f64
 
 --fun f64
 fun main(x1: []f64, x2: [][]f64): (f64,f64,f64,f64,f64) =
-    let (y1, y2, y3) = unzip( map( f1, zip(x1, x2[1]  ) ) )  in
-    let (z1, z2)     = unzip( map( f2, zip(y1, y2     ) ) )  in
-    let (q1, q2)     = unzip( map( g , zip(y3,z1,y2,y3) ) )  in
+    let (y1, y2, y3) = unzip( map f1 (zip(x1, x2[1]  ) ) )  in
+    let (z1, z2)     = unzip( map f2 (zip(y1, y2     ) ) )  in
+    let (q1, q2)     = unzip( map g (zip(y3,z1,y2,y3) ) )  in
 --    let res          = map  ( myop, zip(q1,q2,z2,y1,y3) )    in
 --        res[3]
-    reduce(myop, (0.0,0.0,0.0,0.0,0.0), zip(q1, q2, z2, y1, y3) )
+    reduce myop (0.0,0.0,0.0,0.0,0.0) (zip(q1, q2, z2, y1, y3) )

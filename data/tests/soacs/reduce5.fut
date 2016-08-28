@@ -10,5 +10,5 @@ fun main(xss: [n][m]int): []int =
                loop (zs = replicate m 0) = for i < m do
                  let zs[i] = xs[i] + ys[i]
                  in zs
-               in zs,
-             replicate m 0, xss)
+               in zs)
+             (replicate m 0) xss

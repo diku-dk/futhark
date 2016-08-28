@@ -7,7 +7,7 @@
 -- }
 -- structure { Replicate 0 }
 fun getInt (): int = 10
-fun plus1(x: []int): []int = map(fn (y: int): int=>y+1, x)
+fun plus1(x: []int): []int = map (fn (y: int): int=>y+1) x
 
 fun main(): (int,int) =
     let n  = getInt()          in   -- Int

@@ -13,4 +13,4 @@
 -- structure distributed { Iota 0 }
 
 fun main(n: int): int =
-  reduce((+), 0, iota(n))
+  reduce (+) 0 (iota(n))

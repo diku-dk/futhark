@@ -6,14 +6,14 @@
 -- }
 -- structure { Replicate 0 }
 fun getInt (): int = if((1-1)*3 + (3/3 - 1) == 0) then (15 / 3)*2 else 10000000
-fun plus1(x: []int): []int = map(fn (y: int): int=>y+1, x)
+fun plus1(x: []int): []int = map (fn (y: int): int=>y+1) x
 
 fun main(): int =
     let n  = getInt()          in   -- Int
     let x  = iota(n)           in   -- [n]Int
     let m  = (n*1)+(n*0)       in   -- n :: Int
     let y  = replicate m x     in   -- [n][n]Int
-    let u  = map(plus1, y)     in   -- [n][n]Int
+    let u  = map plus1 y     in   -- [n][n]Int
     let z  = replicate (m+n) y in   -- [[n][n]Int,m+n]
     let v  = u[m/2-1]          in   -- [n]Int
     let o  = (m +(2-4/2))*1    in   -- n :: Int

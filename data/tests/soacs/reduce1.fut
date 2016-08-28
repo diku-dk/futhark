@@ -5,4 +5,4 @@
 -- output {
 --   362880
 -- }
-fun main(a: []int): int = reduce((*), 1, a)
+fun main(a: []int): int = reduce (*) 1 a

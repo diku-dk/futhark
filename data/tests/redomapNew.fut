@@ -22,16 +22,15 @@
 -- }
 
 fun main(arr: []int): ([]int,[][][]int) =
-  let vs = map(fn (a: int): []int  =>
-                  map( fn (x: int): int  => 2*x*a
-                     , iota(3) )
-              ,  arr)
-  in (reduce(fn a b => zipWith((+), a, b),
-             replicate 3 0, vs),
-      map(fn (r: []int): [][]int  =>
-             transpose(replicate 5 r),
-          vs))
+  let vs = map (fn (a: int): []int  =>
+                  map (fn (x: int): int  => 2*x*a
+                     ) (iota(3) )
+              ) arr
+  in (reduce (fn a b => zipWith (+) a b) (
+             replicate 3 0) vs,
+      map (fn (r: []int): [][]int  =>
+             transpose(replicate 5 r)) vs)
 
 
 fun main0(arr: []int): int =
-  reduce((+), 0, map((2*), arr))
+  reduce (+) 0 (map (2*) arr)

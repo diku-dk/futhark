@@ -505,36 +505,36 @@ ways.  Their purpose is to give the compiler as much freedom and
 information is possible, in order to enable it to maximise the
 parallelism of the generated code.
 
-``map(f, a)``
+``map f a``
 ~~~~~~~~~~~~~
 
 Apply ``f`` to every element of ``a`` and return the resulting array.
 
-``zipWith(f, a_1, ..., a_n)``
+``zipWith f a_1 ... a_n``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Syntactic sugar for ``map(f, zip(a_1, ..., a_n))``.
 
-``reduce(f, x, a)``
+``reduce f x a``
 ~~~~~~~~~~~~~~~~~~~
 
 Left-reduction with ``f`` across the elements of ``a``, with ``x`` as
 the neutral element for ``f``.  The function ``f`` must be
 associative.  If it is not, the evaluation result is not defined.
 
-``scan(f, x, a)``
+``scan f x a``
 ~~~~~~~~~~~~~~~~~~~
 
 Inclusive prefix scan.  Has the same caveats with respect to
 associativity as ``reduce``.
 
-``filter(f, a)``
+``filter f a``
 ~~~~~~~~~~~~~~~~
 
 Remove all those elements of ``a`` that do not satisfy the predicate
 ``f``.
 
-``partition(f_1, ..., f_n, a)``
+``partition (f_1, ..., f_n) a``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Divide the array ``a`` into disjoint partitions based on the given
