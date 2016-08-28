@@ -380,7 +380,7 @@ An array consisting of ``n`` copies of ``a``.
 The shape of array ``a`` as an integer array.  It is often more
 readable to use shape declaration names instead of ``shape``.
 
-``split((i_1, ..., i_n), a)``
+``split (i_1, ..., i_n) a``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Partitions the given array ``a`` into ``n+1`` disjoint arrays
@@ -389,7 +389,7 @@ The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
 
 Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
 
-``split@i((i_1, ..., i_n), a)``
+``split@i (i_1, ..., i_n) a``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Splits an array across dimension ``i``, with the outermost dimension
@@ -416,14 +416,14 @@ Return a deep copy of the argument.  Semantically, this is just
 the identity function, but it has special semantics related to
 uniqueness types as described in :ref:`uniqueness-types`.
 
-``reshape((d_1, ..., d_n), a)``
+``reshape (d_1, ..., d_n) a``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Reshape the elements of ``a`` into an ``n``-dimensional array of the
 specified shape.  The number of elements in ``a`` must be equal to the
 product of the new dimensions.
 
-``rearrange((d_1, ..., d_n), a)``
+``rearrange (d_1, ..., d_n) a``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Permute the dimensions in the array, returning a new array.
@@ -432,12 +432,12 @@ For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
 a[y,z,x]``.
 
 
-``transpose(a)``
+``transpose a``
 ~~~~~~~~~~~~~~~~
 
 Return the transpose of ``a``, which must be a two-dimensional array.
 
-``rotate@d(i, a)``
+``rotate@d i a``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.

@@ -8,4 +8,4 @@
 --                                                                           600]]]
 -- }
 fun main(a: [][][]int): [][][]int =
-  rearrange((0,2,1),a)
+  rearrange (0,2,1) a

@@ -14,4 +14,4 @@
 
 
 fun main(i: int, arr: [][][]int): [][][]int =
-  rotate@2(i,rearrange((2,1,0), rotate(i,arr)))
+  rotate@2 i (rearrange (2,1,0) (rotate i arr))

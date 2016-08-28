@@ -9,7 +9,7 @@
 --   Redomap 0
 -- }
 
-fun take(n: int, a: []f64): []f64 = let (first, rest) = unsafe split((n), a) in first
+fun take(n: int, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in first
 
 fun fftmp(num_paths: int, md_c: [][]f64) (zi: []f64): []f64 =
     map( fn (j: int): f64  =>

@@ -8,4 +8,4 @@
 --   [4,1,0,9]
 -- }
 fun main(a: [7]int): ([3]int, [4]int) =
-  split((3), a)
+  split (3) a

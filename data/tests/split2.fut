@@ -10,5 +10,5 @@
 -- }
 fun main(n: int, a1: []f64, a2: []int): ([]f64, []int) =
   let b = zip(a1,a2) in
-  let (first, rest) = split( (n), b) in
+  let (first, rest) = split (n) b in
   unzip(first)

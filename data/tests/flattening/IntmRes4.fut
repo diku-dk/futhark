@@ -29,7 +29,7 @@ fun addRows (xs: []int, ys: []int): []int =
 fun main (xssss: [][][][]int, cs: []int, y: int): [][][][]int =
   map (fn (xsss: [][][]int, c: int): [][][]int  =>
          unsafe
-         let yss = reshape ( (2,c), xsss ) in
+         let yss = reshape (2,c) xsss in
          map (fn (xss: [][]int): [][]int  =>
                 map(fn (xs: []int, ys: []int): []int  =>
                       addRows(xs,ys)

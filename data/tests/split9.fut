@@ -10,7 +10,7 @@
 -- }
 
 fun take (n: int) (r: []int): []int =
-  let (part, _) = split( (n), r) in
+  let (part, _) = split (n) r in
   part
 
 fun main(rs: [][]int, n: int): [][]int =

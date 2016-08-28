@@ -82,7 +82,7 @@ fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int, sobvctsz: int): [
 fun main(num_dates:  int, num_und: int, num_mc_it: int,
                dir_vs_nosz: [][num_bits]int ): f64 =
   let sobvctsz  = num_dates*num_und in
-  let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
+  let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz in
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
   let sobol_mat = streamMap( fn (chunk: int) (ns: []int): [][sobvctsz]f64  =>
                                 sobolChunk(dir_vs, ns[0], chunk, sobvctsz)

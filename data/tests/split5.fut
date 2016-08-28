@@ -9,4 +9,4 @@
 --   [[2,1],[1,0]]
 -- }
 fun main(n: int, a: [][]int): ([][]int, [][]int) =
-  split( (n), a)
+  split (n) a

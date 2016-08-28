@@ -40,7 +40,7 @@
 -- }
 -- structure { Map/Scanomap 1 Map 1 }
 
-fun take(n: int, a: []f64): []f64 = let (first, rest) = split((n), a) in first
+fun take(n: int, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
 fun correlateDeltas(md_c: [num_und][num_und]f64,
                     zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =

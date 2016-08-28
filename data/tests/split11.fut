@@ -6,4 +6,4 @@
 -- }
 
 fun main(xs: [][]int): ([][]int, [][]int) =
-  split@1((1), xs)
+  split@1 (1) xs
