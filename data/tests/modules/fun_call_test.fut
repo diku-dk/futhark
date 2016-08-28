@@ -20,11 +20,11 @@ struct M0
         fun plus2(a: [][]int, b: [][]int): [][]int = map(plus1, zip(a, b))
       }
 
-    fun replin(len: int) (a: []int): [][]int = replicate(len, a)
+    fun replin(len: int) (a: []int): [][]int = replicate len a
   }
 
 fun floydSbsFun(n: int, d: [][]int ): [][]int =
-    let d3  = replicate( n, transpose(d) ) in
+    let d3  = replicate n (transpose d) in
     let d2  = map      ( M0.replin(n),   d  ) in
     let abr = map(M0.M1.plus2, zip(d3, d2))       in
     let partial = map(M0.redmin2, abr)        in

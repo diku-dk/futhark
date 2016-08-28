@@ -5,4 +5,4 @@
 -- structure { Map 0 }
 
 fun main(x: int): [1]int =
-  map((+x), replicate(1, x))
+  map((+x), replicate 1 x)

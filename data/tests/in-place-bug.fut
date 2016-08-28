@@ -40,7 +40,7 @@ fun main(numX: int, numY: int, numT: int, s0: f64, strike: f64, t: f64, alpha: f
     let (myDx, myDxx) = (empty([]f64), empty([]f64)) in
     let (myDy, myDyy) = (empty([]f64), empty([]f64)) in
     let myResult = copy(empty([]f64)) in
-    let myMuX  = replicate(numY, replicate(numX, 0.0)) in
+    let myMuX  = replicate numY (replicate numX 0.0) in
     let myVarX = map(fn (yj: f64): []f64  => map(exp64, myX ), myY) in
 
     -- explicitX

@@ -115,7 +115,7 @@
 
 fun main(nfeatures: int, npoints: int, nclusters: int): [nclusters][nfeatures]f32 =
   let membership = map((%nclusters), iota(npoints)) in
-  let features_in_cluster = replicate(nclusters, npoints / nclusters) in
+  let features_in_cluster = replicate nclusters (npoints / nclusters) in
   -- Just generate some random-seeming points.
   let points = map(fn (i: int): [nfeatures]f32  =>
                      map((*100f32), map(sin32, map(f32, map((^i), iota(nfeatures)))))
@@ -133,5 +133,5 @@ fun main(nfeatures: int, npoints: int, nclusters: int): [nclusters][nfeatures]f3
                      unsafe let acc[c] = zipWith((+), acc[c], map((/f32(features_in_cluster[c])), point)) in
                      acc in
                    acc,
-               replicate(nclusters,replicate(nfeatures,0.0f32)),
+               replicate nclusters (replicate nfeatures 0.0f32),
                zip(points, membership))

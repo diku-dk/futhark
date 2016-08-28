@@ -8,5 +8,5 @@
 
 fun main(xs: [n]int, m: int): [n][m]int =
   map(fn (x: int): [m]int  =>
-        replicate(m, x),
+        replicate m x,
       xs)

@@ -10,5 +10,5 @@
 -- }
 
 fun main(a: *[][n]int, i: int, v: int): [][]int =
-  let a[i] = replicate(n,v)
+  let a[i] = replicate n v
   in a

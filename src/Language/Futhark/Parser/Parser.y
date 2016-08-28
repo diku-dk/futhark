@@ -107,7 +107,7 @@ import Language.Futhark.Core(blankLongname)
       '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
       '>='            { L $$ GEQ }
-      pow             { L $$ POW }
+      '**'            { L $$ POW }
       '<<'            { L $$ SHIFTL }
       '>>'            { L $$ SHIFTR }
       '>>>'           { L $$ ZSHIFTR }
@@ -189,7 +189,7 @@ import Language.Futhark.Core(blankLongname)
 %left '+' '-'
 
 %left '*' '/' '%' '//' '%%'
-%left pow
+%left '**'
 %left ':'
 %nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '.'
@@ -300,7 +300,7 @@ BinOp :: { (BinOp, SrcLoc) }
       | '>='    { (Geq, $1) }
       | '&&'    { (LogAnd, $1) }
       | '||'    { (LogOr, $1) }
-      | pow     { (Pow, $1) }
+      | '**'    { (Pow, $1) }
       | '^'     { (Xor, $1) }
       | '&'     { (Band, $1) }
       | '|'     { (Bor, $1) }
@@ -413,11 +413,11 @@ Exp  :: { UncheckedExp }
 
      | LetExp %prec letprec { $1 }
 
-     | iota Exp { Iota $2 $1 }
+     | iota Atom { Iota $2 $1 }
 
-     | shape Exp { Shape $2 $1 }
+     | shape Atom { Shape $2 $1 }
 
-     | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
+     | replicate Atom Atom { Replicate $2 $3 $1 }
 
      | reshape '(' '(' Exps ')' ',' Exp ')'
                       { Reshape $4 $7 $1 }
@@ -425,7 +425,7 @@ Exp  :: { UncheckedExp }
      | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
                       { Rearrange $4 $7 $1 }
 
-     | transpose Exp { Transpose $2 $1 }
+     | transpose Atom { Transpose $2 $1 }
 
      | rotate '@' NaturalInt '(' Exp ',' Exp ')' { Rotate $3 $5 $7 $1 }
 
@@ -463,7 +463,7 @@ Exp  :: { UncheckedExp }
      | zip '@' NaturalInt '(' Exps ')'
                       { Zip $3 (map (\x -> (x, NoInfo)) $5) $1 }
 
-     | unzip Exp      { Unzip $2 [] $1 }
+     | unzip Atom      { Unzip $2 [] $1 }
 
      | unsafe Exp     { Unsafe $2 $1 }
 
@@ -498,18 +498,11 @@ Exp  :: { UncheckedExp }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
      | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
      | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
-     | '-' Exp %prec '~' { UnOp Negate $2 $1 }
-     | '!' Exp        { UnOp Not $2 $1 }
-     | '~' Exp        { UnOp Complement $2 $1 }
-     | abs Exp        { UnOp Abs $2 $1 }
-     | signum Exp     { UnOp Signum $2 $1 }
-     | SignedType Exp %prec indexprec
-       { UnOp (ToSigned (fst $1)) $2 (snd $1) }
-     | UnsignedType Exp %prec indexprec
-       { UnOp (ToUnsigned (fst $1)) $2 (snd $1) }
-     | FloatType Exp %prec indexprec
-       { UnOp (ToFloat (fst $1)) $2 (snd $1) }
-     | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
+     | '-' Exp %prec juxtprec
+       { UnOp Negate $2 $1 }
+     | UnOp Exp %prec juxtprec
+       { UnOp (fst $1) $2 (snd $1) }
+     | Exp '**' Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }

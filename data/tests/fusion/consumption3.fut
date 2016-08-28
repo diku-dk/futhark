@@ -16,4 +16,4 @@ fun main(as: [n]int, bs: [m]bool): [m][n]int =
               let ds0[i] = ds0[i] + ds1[i]
               in ds0
             in ds0,
-          replicate(n, 0), dss)
+          replicate n 0, dss)

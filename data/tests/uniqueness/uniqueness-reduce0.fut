@@ -17,6 +17,6 @@ fun main(a: *[]int,b: []int): []int =
              in (zipWith((+), a1, a2),
                  zipWith((*), b1, b2)),
            (a,b),
-           zip(copy(replicate(10,iota(10))),
-               replicate(10,iota(10)))) in
-  map((+), zip(b, x)) -- Should be OK, because only a has been consumed.
+           zip(copy(replicate 10 (iota 10)),
+               replicate 10 (iota 10)))
+  in map((+), zip(b, x)) -- Should be OK, because only a has been consumed.

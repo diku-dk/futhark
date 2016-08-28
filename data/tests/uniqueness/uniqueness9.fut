@@ -9,7 +9,7 @@
 
 fun main(): int =
   let n = 10 in
-  let inarr  = copy(replicate(n, 0)) in
+  let inarr  = copy(replicate n 0) in
   loop ( outarr  = inarr ) = for i < n  do
       if i == 0
       then outarr

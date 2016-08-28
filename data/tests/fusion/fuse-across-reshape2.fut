@@ -7,7 +7,7 @@
 fun main(): [][]int =
   let n = 9 in
   let a = map(fn (i: int): []int  =>
-                replicate(n,i),
+                replicate n i,
               iota(n)) in
   let b = reshape((3,3,9),a) in
   map (fn (row: [][]int): []int  =>

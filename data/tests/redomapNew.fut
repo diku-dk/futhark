@@ -27,9 +27,9 @@ fun main(arr: []int): ([]int,[][][]int) =
                      , iota(3) )
               ,  arr)
   in (reduce(fn a b => zipWith((+), a, b),
-             replicate(3,0), vs),
+             replicate 3 0, vs),
       map(fn (r: []int): [][]int  =>
-             transpose(replicate(5, r)),
+             transpose(replicate 5 r),
           vs))
 
 

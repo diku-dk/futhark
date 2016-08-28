@@ -19,7 +19,7 @@ fun main(input1: [][]int, input2: [][]int): [][]int =
                        (a1x+b1x,a2x+b2x),
                     zip(a1,a2,b1,b2)),
                --zip(iota(3), iota(3)), input) in
-               zip(replicate(3,0), replicate(3,0)), input) in
+               zip(replicate 3 0, replicate 3 0), input) in
   map(fn (r: [](int,int)): []int  =>
         map((+), r),
       x)

@@ -13,8 +13,8 @@ fun main(): (int,int) =
     let n  = getInt()          in   -- Int
     let x  = iota(n)     in   -- [n]Int
     let m  = (n * (5-4))       in
-    let y  = copy(replicate(n,   x)) in   -- [n][n]Int copy necessary as y otherwise aliases x.
-    let z  = copy(replicate(n+n, y)) in   -- [[n][n]Int,m+n]; copy necessary as z otherwise aliases x.
+    let y  = copy(replicate n x) in   -- [n][n]Int copy necessary as y otherwise aliases x.
+    let z  = copy(replicate (n+n) y) in   -- [[n][n]Int,m+n]; copy necessary as z otherwise aliases x.
     let q  = z[n-2]            in   -- [n][n]Int
 
     loop ((m,x)) =

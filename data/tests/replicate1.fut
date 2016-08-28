@@ -6,7 +6,7 @@
 -- structure distributed { Replicate 1 }
 fun main(n: int): int =
   let x  = iota(n)     in
-  let y  = replicate(n,   x) in
+  let y  = replicate n x in
   -- Hack to force manifestation.
   let y[0,0] = 10 in
   reduce((+), 0, reshape((n*n), y))

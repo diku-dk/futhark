@@ -13,4 +13,4 @@ fun main(as: [n]int, bs: [m]bool): [n]int =
                  css)
   in reduce(fn (ds0: []int) (ds1: []int): [n]int  =>
               zipWith((+), ds0, ds1),
-            replicate(n, 0), dss)
+            replicate n 0, dss)
