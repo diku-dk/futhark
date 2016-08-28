@@ -980,16 +980,18 @@ checkExp (Rotate d offexp arrexp loc) = do
     " which has only " ++ show rank ++ " dimensions."
   return $ Rotate d offexp' arrexp' loc
 
-checkExp (Zip i arrexps loc) = do
-  arrexps' <- mapM (checkExp . fst) arrexps
-  arrts <- forM arrexps' $ \arrexp -> do
-    let arrt = typeOf arrexp
-    when (arrayRank arrt < 1+i) $
-      bad $ TypeError (srclocOf arrexp) $
-      "Type of expression is not array with at least " ++ show (1+i) ++
-      " dimensions, but " ++ pretty arrt ++ "."
-    return arrt
-  return $ Zip i (zip arrexps' $ map Info arrts) loc
+checkExp (Zip i e loc) = do
+  e' <- checkExp e
+  case typeOf e' of
+    Tuple ts -> do
+      forM_ ts $ \arrt ->
+        when (arrayRank arrt < 1+i) $
+        bad $ TypeError (srclocOf e) $
+        "Expected array with at least " ++ show (1+i) ++
+        " dimensions, but got " ++ pretty arrt ++ "."
+      return $ Zip i e' loc
+    t ->
+      bad $ TypeError (srclocOf e) $ "zip expects a tuple, not " ++ pretty t
 
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
