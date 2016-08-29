@@ -26,25 +26,25 @@ module Language.Futhark.Traversals
   )
   where
 
-import Control.Applicative
-import Control.Monad
-import Data.Traversable hiding (mapM, forM)
+import           Control.Applicative
+import           Control.Monad
+import           Data.Traversable        hiding (forM, mapM)
 
-import Prelude
+import           Prelude
 
-import Language.Futhark.Syntax
+import           Language.Futhark.Syntax
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
 -- given child.
 data MapperBase vnf vnt m = Mapper {
-    mapOnExp :: ExpBase NoInfo vnf -> m (ExpBase NoInfo vnt)
-  , mapOnLambda :: LambdaBase NoInfo vnf -> m (LambdaBase NoInfo vnt)
-  , mapOnType :: CompTypeBase vnf -> m (CompTypeBase vnt)
+    mapOnExp     :: ExpBase NoInfo vnf -> m (ExpBase NoInfo vnt)
+  , mapOnLambda  :: LambdaBase NoInfo vnf -> m (LambdaBase NoInfo vnt)
+  , mapOnType    :: CompTypeBase vnf -> m (CompTypeBase vnt)
   , mapOnPattern :: PatternBase NoInfo vnf -> m (PatternBase NoInfo vnt)
-  , mapOnIdent :: IdentBase NoInfo vnf -> m (IdentBase NoInfo vnt)
-  , mapOnName :: vnf -> m vnt
-  , mapOnValue :: Value -> m Value
+  , mapOnIdent   :: IdentBase NoInfo vnf -> m (IdentBase NoInfo vnt)
+  , mapOnName    :: vnf -> m vnt
+  , mapOnValue   :: Value -> m Value
   }
 
 -- | Map a monadic action across the immediate children of an
@@ -101,7 +101,7 @@ mapExpM tv (Shape e loc) =
 mapExpM tv (Replicate nexp vexp loc) =
   pure Replicate <*> mapOnExp tv nexp <*> mapOnExp tv vexp <*> pure loc
 mapExpM tv (Reshape shape arrexp loc) =
-  pure Reshape <*> mapM (mapOnExp tv) shape <*>
+  pure Reshape <*> mapOnExp tv shape <*>
                    mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Transpose e loc) =
   Transpose <$> mapOnExp tv e <*> pure loc
@@ -139,9 +139,7 @@ mapExpM tv (Stream form fun arr loc) =
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapOnExp tv acc
 mapExpM tv (Split i splitexps arrexp loc) =
-  Split i <$>
-  mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
-  pure loc
+  Split i <$> mapOnExp tv splitexps <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Concat i x ys loc) =
   Concat i <$> mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
@@ -182,14 +180,14 @@ mapDimDecl :: (Applicative m, Monad m) =>
            -> DimDecl vnf
            -> m (DimDecl vnt)
 mapDimDecl tv (NamedDim vn) = NamedDim <$> mapOnName tv vn
-mapDimDecl _ (ConstDim k) = pure $ ConstDim k
-mapDimDecl _ AnyDim = pure AnyDim
+mapDimDecl _ (ConstDim k)   = pure $ ConstDim k
+mapDimDecl _ AnyDim         = pure AnyDim
 
 mapDimIndexM :: (Applicative m, Monad m) =>
                 MapperBase vnf vnt m
              -> DimIndexBase NoInfo vnf
              -> m (DimIndexBase NoInfo vnt)
-mapDimIndexM tv (DimFix j) = DimFix <$> mapExpM tv j
+mapDimIndexM tv (DimFix j)     = DimFix <$> mapExpM tv j
 mapDimIndexM tv (DimSlice i j) = DimSlice <$> mapExpM tv i <*> mapExpM tv j
 
 mapTypeM :: (Applicative m, Monad m, Traversable f) =>

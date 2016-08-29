@@ -425,8 +425,8 @@ Exp  :: { UncheckedExp }
 
      | replicate Atom Atom { Replicate $2 $3 $1 }
 
-     | reshape '(' Exps ')' Atom
-                      { Reshape $3 $5 $1 }
+     | reshape Atom Atom
+                      { Reshape $2 $3 $1 }
 
      | rearrange '(' NaturalInts ')' Atom
                       { Rearrange $3 $5 $1 }
@@ -437,11 +437,11 @@ Exp  :: { UncheckedExp }
 
      | rotate Atom Atom { Rotate 0 $2 $3 $1 }
 
-     | split '(' Exps ')' Atom
-                      { Split 0 $3 $5 $1 }
+     | split Atom Atom
+                      { Split 0 $2 $3 $1 }
 
-     | split '@' NaturalInt '(' Exps ')' Atom
-                      { Split $3 $5 $7 $1 }
+     | split '@' NaturalInt Atom Atom
+                      { Split $3 $4 $5 $1 }
 
      | concat Atoms
                       { Concat 0 (fst $2) (snd $2) $1 }
