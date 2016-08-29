@@ -7,10 +7,10 @@
 --   [[4,4,4],[7,9,11]]
 -- }
 fun addRows (xs: []int, ys: []int): []int =
-  map (+) (zip (xs,ys))
+  map (+) (zip  xs ys)
 
 fun addMatricies (a: [][]int, b: [][]int): [][]int =
-  map  addRows (zip (a,b))
+  map  addRows (zip  a b)
 
 fun main(a: [][]int, b: [][]int): [][]int =
   addMatricies(a,b)

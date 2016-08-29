@@ -7,4 +7,4 @@
 -- output { [[1,2,3], [4,5,6],[7,8,9], [10,11,12]] }
 
 fun main(a: [][n]int, b: [n][]int, c: [][n]int): [][]int =
-  concat(a, transpose(b), c)
+  concat a (transpose(b)) c

@@ -20,4 +20,4 @@ fun main (xss: [][]int, cs: []int, y: int): [][]int =
          let y' = y * c + c in
          let zs = addToRow(xs,y') in
          zs
-      ) (zip (xss,cs))
+      ) (zip  xss cs)

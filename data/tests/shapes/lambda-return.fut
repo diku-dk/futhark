@@ -16,7 +16,7 @@
 -- }
 
 fun multiply(a: []int, n: int): []int =
-  if n == 1 then a else multiply(concat(a,a), n-1)
+  if n == 1 then a else multiply(concat a a, n-1)
 
 fun main(a: [m][]int, x: int): [][]int =
   let n = m * (2 ** (x-1))

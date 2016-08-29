@@ -32,7 +32,7 @@ fun xorInds(n: int) (dir_vs: [num_bits]int): int =
     let reldv_vals = map (fn (dv: int, i: int): int  =>
                             if testBit(grayCode(n),i)
                             then dv else 0
-                        ) (zip(dir_vs,iota(num_bits)) ) in
+                        ) (zip (dir_vs) (iota(num_bits)) ) in
     reduce (^) 0 (reldv_vals )
 
 fun sobolIndI (dir_vs:  [][]int, n: int ): []int =

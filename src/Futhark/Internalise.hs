@@ -347,8 +347,8 @@ internaliseExp desc (E.Unsafe e _) =
   local (\env -> env { envDoBoundsChecks = False }) $
   internaliseExp desc e
 
-internaliseExp _ (E.Zip _ e loc) = do
-  e' <- internaliseExpToVars "zip_arg" e
+internaliseExp _ (E.Zip _ e es loc) = do
+  e' <- internaliseExpToVars "zip_arg" $ TupLit (e:es) loc
   case e' of
     e_key:es_unchecked -> do
       -- We will reshape all of es_unchecked' to have the same outer

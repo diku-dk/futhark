@@ -16,6 +16,6 @@ fun main(a: *[]int,b: []int): []int =
              let (a2,b2) = arr
              in (zipWith (+) a1 a2,
                  zipWith (*) b1 b2)) (a,b) (
-           zip(copy(replicate 10 (iota 10)),
+           zip (copy(replicate 10 (iota 10))) (
                replicate 10 (iota 10)))
-  in map (+) (zip(b, x)) -- Should be OK, because only a has been consumed.
+  in map (+) (zip b x) -- Should be OK, because only a has been consumed.

@@ -13,5 +13,5 @@ fun main(arr: []f64): f64 =
     let b = map f arr in
     let x = map f b   in
     let y = map g b   in
-    let z = map (h(x[1])) (zip(x,y)) in
+    let z = map (h(x[1])) (zip x y) in
     z[0] --+ y[0]

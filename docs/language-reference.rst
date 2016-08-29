@@ -331,7 +331,7 @@ Access field ``i`` of the expression ``e``, which must be of
 tuple-type.  The fields are indexed from zero.  ``i`` must be a
 literal integer, not an arbitrary expression.
 
-``zip (x, y, z)``
+``zip x y z``
 ~~~~~~~~~~~~~~~~~~
 
 Zips together the elements of the outer dimensions of arrays ``x``,
@@ -342,7 +342,7 @@ number of arrays may be passed to ``unzip``.  If *n* arrays are given,
 the result will be a single-dimensional array of *n*-tuples (where the
 the tuple components may themselves be arrays).
 
-``zip@i (x, y, z)``
+``zip@i x y z``
 ~~~~~~~~~~~~~~~~~~
 
 Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``
@@ -396,14 +396,14 @@ Splits an array across dimension ``i``, with the outermost dimension
 being ``0``.  The ``i`` must be a compile-time integer constant,
 i.e. ``i`` cannot be a variable.
 
-``concat(a_1, ..., a_n)``
+``concat a_1 ..., a_n``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Concatenate the rows/elements of several arrays.  The shape of the
 arrays must be identical in all but the first dimension.  This is
 equivalent to ``concat@0`` (see below).
 
-``concat@i(a_1, ..., a_n)``
+``concat@i a_1 ... a_n``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Concatenate arrays across dimension ``i``, with the outermost
@@ -513,7 +513,7 @@ Apply ``f`` to every element of ``a`` and return the resulting array.
 ``zipWith f a_1 ... a_n``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Syntactic sugar for ``map(f, zip(a_1, ..., a_n))``.
+Syntactic sugar for ``map(f, zip a_1 ... a_n)``.
 
 ``reduce f x a``
 ~~~~~~~~~~~~~~~~~~~

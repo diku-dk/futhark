@@ -133,4 +133,4 @@ fun main(nfeatures: int, npoints: int, nclusters: int): [nclusters][nfeatures]f3
                      acc in
                    acc) (
                replicate nclusters (replicate nfeatures 0.0f32)) (
-               zip(points, membership))
+               zip points membership)

@@ -12,4 +12,4 @@ fun main(xs: *[]int, as: *[m][n]f64): [][]f64 =
                 if (j < 2*i) && (xs[j] == j)
                 then a[j*i] else 0.0
              ) (iota(n))
-      ) (zip(iota(m), as) )
+      ) (zip (iota(m)) as )

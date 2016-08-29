@@ -601,11 +601,9 @@ typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` HS.empty
   where et = lambdaReturnType f
 typeOf (Reduce _ fun _ _ _) =
   lambdaReturnType fun `setAliases` mempty
-typeOf (Zip i e _) =
+typeOf (Zip i e es _) =
   Array $ TupleArray (zipWith typeToTupleArrayElem es_ts es_us) (Rank (1+i)) u
-  where ts' = case typeOf e of
-                Tuple ts -> ts
-                t        -> [t]
+  where ts' = map typeOf $ e:es
         es_ts = map (stripArray (1+i)) ts'
         es_us = map uniqueness ts'
         u     = mconcat es_us

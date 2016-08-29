@@ -8,4 +8,4 @@
 -- output { [[1,2,3,2,1],[4,5,6,5,4],[7,8,9,8,7]] }
 
 fun main(xs: [n][]int, ys: [n][]int): [n][]int =
-  concat@1(xs, ys)
+  concat@1 xs ys

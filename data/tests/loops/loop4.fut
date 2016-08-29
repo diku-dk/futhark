@@ -10,5 +10,5 @@
 
 fun main(xs: []int, n: int): []int =
   loop (xs) = for i < n do
-    concat(xs,xs)
+    concat xs xs
   in xs

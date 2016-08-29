@@ -27,4 +27,4 @@ fun main (xsss: [][][]int, cs: []int, y: int): [][][]int =
          map (fn (xs: []int): []int  =>
                addToRow(xs,y')
             ) xss
-      ) (zip (xsss,cs))
+      ) (zip  xsss cs)
