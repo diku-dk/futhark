@@ -15,4 +15,4 @@ fun main (xss: [m][n]int, ys: [m]int): [][]int =
                 let tmp2 = map (*y) tmp1 in
                 reduce (+) 0 tmp2
              ) xs
-     ) (zip(xss, ys) )
+     ) (zip xss ys )

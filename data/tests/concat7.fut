@@ -6,5 +6,5 @@
 -- structure { Concat 0 }
 
 fun main(as: [][]int, bs: [][]int, i: int, j: int): int =
-  let cs = concat@1(as,bs)
+  let cs = concat@1 as bs
   in cs[i,j]

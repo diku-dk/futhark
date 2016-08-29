@@ -46,7 +46,7 @@ fun mc1step(wps: []float): float =
   seqRedSumP(r0(), wps)
 
 fun mc2(wqsss: [][][]float, r1s: []float): []float =
-  map mc2sim (zip(wqsss, r1s))
+  map mc2sim (zip wqsss r1s)
 fun mc2sim(arg: ([tn][]float, float)): float =
   let ( wqss, r1 ) = arg in
   let sum_r = zipWith mc2step wqss (replicate tn r1) in

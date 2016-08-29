@@ -491,10 +491,9 @@ data ExpBase f vn =
             | Write (ExpBase f vn) (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ @write([0, 2, -1], [9, 7, 0], [3, 4, 5]) = [9, 4, 7]@.
 
-            | Zip Int (ExpBase f vn) SrcLoc
-            -- ^ Conventional zip taking a tuple of arrays as an
-            -- argument.  The annotation indicates the tuple element
-            -- types.
+            | Zip Int (ExpBase f vn) [ExpBase f vn] SrcLoc
+            -- ^ Conventional zip taking multiple arrays as arguments.
+            -- The annotation indicates the tuple element types.
 
             | Unzip (ExpBase f vn) [f (CompTypeBase vn)] SrcLoc
             -- ^ Unzip that can unzip to tuples of arbitrary size.
@@ -536,7 +535,7 @@ instance Located (ExpBase f vn) where
   locOf (Rotate _ _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
-  locOf (Zip _ _ pos) = locOf pos
+  locOf (Zip _ _ _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos

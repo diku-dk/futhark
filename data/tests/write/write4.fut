@@ -18,4 +18,4 @@ fun main(indexes: [k]i32,
        valuesB: [k]i32,
        arrayA: *[m]i32,
        arrayB: *[n]i32): ([m]i32, [n]i32) =
-  write (zip(indexes, indexes)) (zip(valuesA, valuesB)) (arrayA, arrayB)
+  write (zip indexes indexes) (zip valuesA valuesB) (arrayA, arrayB)

@@ -443,11 +443,11 @@ Exp  :: { UncheckedExp }
      | split '@' NaturalInt '(' Exps ')' Atom
                       { Split $3 $5 $7 $1 }
 
-     | concat '(' Exp ',' Exps ')'
-                      { Concat 0 $3 $5 $1 }
+     | concat Atoms
+                      { Concat 0 (fst $2) (snd $2) $1 }
 
-     | concat '@' NaturalInt '(' Exp ',' Exps ')'
-                      { Concat $3 $5 $7 $1 }
+     | concat '@' NaturalInt Atoms
+                      { Concat $3 (fst $4) (snd $4) $1 }
 
 
      | reduce FunAbstr Atom Atom
@@ -463,11 +463,11 @@ Exp  :: { UncheckedExp }
      | scan FunAbstr Atom Atom
                       { Scan $2 $3 $4 $1 }
 
-     | zip Atom
-                      { Zip 0 $2 $1 }
+     | zip Atoms
+                      { Zip 0 (fst $2) (snd $2) $1 }
 
-     | zip '@' NaturalInt Atom
-                      { Zip $3 $4 $1 }
+     | zip '@' NaturalInt Atoms
+                      { Zip $3 (fst $4) (snd $4) $1 }
 
      | unzip Atom      { Unzip $2 [] $1 }
 
@@ -480,7 +480,7 @@ Exp  :: { UncheckedExp }
                       { Partition $3 $5 $1 }
 
      | zipWith FunAbstr Atoms
-                      { Map $2 (Zip 0 (TupLit $3 $1) $1) $1 }
+                      { Map $2 (Zip 0 (fst $3) (snd $3) $1) $1 }
 
      | copy Atom      { Copy $2 $1 }
 
@@ -551,9 +551,10 @@ Atom : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
                                                  v <- identFromQualName $1
                                                  return $ Update v $3 $6 $ srclocOf (snd $1) }
 
-Atoms :: { [UncheckedExp] }
-      : Atom { [$1] }
-      | Atom Atoms { $1 : $2 }
+Atoms :: { (UncheckedExp, [UncheckedExp]) }
+      : Atom { ($1, []) }
+      | Atom Atoms { ($1, fst $2 : snd $2) }
+
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
                       { LetPat $2 $4 $5 $1 }

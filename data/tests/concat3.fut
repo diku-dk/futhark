@@ -10,4 +10,4 @@
 --   ]
 -- }
 fun main(a: [][]int, b: [][]int): [][]int =
-    concat(a,b,a,b)
+    concat a b a b

@@ -34,7 +34,7 @@ fun xorInds(n: int) (dir_vs: [num_bits]int): int =
     let reldv_vals = map (fn (dv: int, i: int): int  =>
                             if testBit(grayCode(n),i)
                             then dv else 0
-                        ) (zip(dir_vs,iota(num_bits)) ) in
+                        ) (zip (dir_vs) (iota(num_bits)) ) in
     reduce (^) 0 (reldv_vals )
 
 fun sobolIndI (dir_vs:  [][]int, n: int ): []int =
@@ -59,7 +59,7 @@ fun sobolRecI(sob_dir_vs: [][num_bits]int, prev: []int, n: int): []int =
   map  (fn (vct_prev: ([]int,int)): int  =>
          let (vct_row, prev) = vct_prev in
          vct_row[bit] ^ prev
-      ) (zip(sob_dir_vs,prev))
+      ) (zip (sob_dir_vs) prev)
 
 fun recM(sob_dirs:  [][num_bits]int, i: int ): []int =
   let bit= index_of_least_significant_0(num_bits,i) in

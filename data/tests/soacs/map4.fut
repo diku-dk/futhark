@@ -15,6 +15,6 @@ fun inner(a: [][](int,int)): []int =
 fun main(a1: [][]int, a2: [][]int): []int =
   let a = map (fn (p: ([]int,[]int)): [](int,int)  =>
                 let (p1,p2) = p in
-                zip(p1,p2)) (
-              zip(a1,a2)) in
+                zip p1 p2) (
+              zip a1 a2) in
   inner(a)

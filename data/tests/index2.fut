@@ -11,5 +11,5 @@
 -- }
 
 fun main(a: []int, b: []f64, i: int): (int,f64) =
-  let c = zip(a,b)
+  let c = zip a b
   in c[i]

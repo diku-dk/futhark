@@ -33,4 +33,4 @@ fun main (xssss: [][][][]int, cs: []int, y: int): [][][][]int =
                       addToRow(xs,y')
                    ) xss
             ) xsss
-      ) (zip (xssss,cs))
+      ) (zip  xssss cs)

@@ -38,7 +38,7 @@ fun main(pss: [n][m]int): ([n][m][m]int, [n][m]int) =
                                   let e = d + b
                                   let b' = 2 * e
                                   in b') (
-                                zip(ass, bs))
+                                zip ass bs)
                   in bs'
                 in (ass, bs)) pss)
   in (asss, bss)

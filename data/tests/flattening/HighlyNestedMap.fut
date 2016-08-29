@@ -26,16 +26,16 @@
 --      [19, 17, 15]]]]
 -- }
 fun add1 (xs: []int, ys: []int): []int =
-  map (+) (zip (xs,ys))
+  map (+) (zip  xs ys)
 
 fun add2 (xs: [][]int, ys: [][]int): [][]int =
-  map  add1 (zip (xs,ys))
+  map  add1 (zip  xs ys)
 
 fun add3 (xs: [][][]int, ys: [][][]int): [][][]int =
-  map  add2 (zip (xs,ys))
+  map  add2 (zip  xs ys)
 
 fun add4 (xs: [][][][]int, ys: [][][][]int): [][][][]int =
-  map  add3 (zip (xs,ys))
+  map  add3 (zip  xs ys)
 
 fun main(a: [][][][]int, b: [][][][]int): [][][][]int =
   add4(a,b)

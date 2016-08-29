@@ -5,5 +5,5 @@
 -- structure { Concat 0 }
 
 fun main(as: []int, bs: []int, i: int): int =
-  let cs = concat(as,bs)
+  let cs = concat as bs
   in cs[i]
