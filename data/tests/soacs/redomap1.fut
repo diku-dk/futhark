@@ -16,6 +16,6 @@ fun main(n: int, m: int): ([][]int, bool) =
   let ass = map  (fn (l: int): [m]int  =>
                    map (+l*m) (iota(m))) (
                  iota(n))
-  let ps = zipWith (fn (as: []int, i: int): bool  =>
+  let ps = zipWith (fn (as: []int) (i: int): bool  =>
                      unsafe as[i] % 2 == 0) ass (map (%m) (iota(n)))
   in (ass, reduce (&&) True ps)

@@ -46,8 +46,8 @@ fun all_neighbours(board: [n][m]bool): [n][m]int =
 
 fun iteration(board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
-  zipWith (fn (lives_r: []int, board_r: []bool): []bool  =>
-            zipWith (fn (neighbors: int, alive: bool): bool  =>
+  zipWith (fn (lives_r: []int) (board_r: []bool): []bool  =>
+            zipWith (fn (neighbors: int) (alive: bool): bool  =>
                       if neighbors < 2
                       then False
                       else if neighbors == 3 then True

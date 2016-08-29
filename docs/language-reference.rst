@@ -513,7 +513,10 @@ Apply ``f`` to every element of ``a`` and return the resulting array.
 ``zipWith f a_1 ... a_n``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Syntactic sugar for ``map(f, zip a_1 ... a_n)``.
+Apply ``f`` to every element of ``a_1 ... a_n`` and return the
+resulting array.  Differs from ``map(f, zip a_1 ... a_n)`` in that
+``f`` is called with ``n`` arguments, where in the latter case it is
+called with a single ``n``-tuple argument.
 
 ``reduce f x a``
 ~~~~~~~~~~~~~~~~~~~

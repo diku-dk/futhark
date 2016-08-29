@@ -458,7 +458,10 @@ Exp  :: { UncheckedExp }
 
 
      | map FunAbstr Atom
-                      { Map $2 $3 $1 }
+                      { Map $2 [$3] $1 }
+
+     | zipWith FunAbstr Atoms
+                      { Map $2 (fst $3:snd $3) $1 }
 
      | scan FunAbstr Atom Atom
                       { Scan $2 $3 $4 $1 }
@@ -478,9 +481,6 @@ Exp  :: { UncheckedExp }
 
      | partition '(' FunAbstrs ')' Atom
                       { Partition $3 $5 $1 }
-
-     | zipWith FunAbstr Atoms
-                      { Map $2 (Zip 0 (fst $3) (snd $3) $1) $1 }
 
      | copy Atom      { Copy $2 $1 }
 

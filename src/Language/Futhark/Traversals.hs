@@ -110,7 +110,7 @@ mapExpM tv (Rotate d e a loc) =
 mapExpM tv (Rearrange perm e loc) =
   pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
-  pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
+  pure Map <*> mapOnLambda tv fun <*> mapM (mapOnExp tv) e <*> pure loc
 mapExpM tv (Reduce comm fun startexp arrexp loc) =
   Reduce comm <$> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc

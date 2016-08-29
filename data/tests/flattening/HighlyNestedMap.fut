@@ -26,7 +26,7 @@
 --      [19, 17, 15]]]]
 -- }
 fun add1 (xs: []int, ys: []int): []int =
-  map (+) (zip  xs ys)
+  zipWith (+) xs ys
 
 fun add2 (xs: [][]int, ys: [][]int): [][]int =
   map  add1 (zip  xs ys)

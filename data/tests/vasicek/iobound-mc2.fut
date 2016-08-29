@@ -51,8 +51,7 @@ fun mc2sim(arg: ([tn][]float, float)): float =
   let ( wqss, r1 ) = arg in
   let sum_r = zipWith mc2step wqss (replicate tn r1) in
   mean(sum_r)
-fun mc2step(arg: ([]float, float)): float =
-  let ( wqs, r1 ) = arg in
+fun mc2step (wqs: []float) (r1: float): float =
   seqRedSumQ(r1, wqs)
 
 fun main(wpss: [][]float, wqsss: [][][]float): []float = --mc1(wpss)

@@ -442,8 +442,12 @@ data ExpBase f vn =
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
-            | Map (LambdaBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.
+            | Map (LambdaBase f vn) [ExpBase f vn] SrcLoc
+             -- ^ @map((+1), [1, 2, ..., n]) = [2, 3, ..., n+1]@.
+             -- OR
+             -- ^ @zipWith((+), [1, 2, ..., n], [1, 2, ..., n]) = [2, 4, ... , 2*n]@.
+             --
+             -- @map@ with exactly one array argument, otherwise @zipWith@.
 
             | Reduce Commutativity (LambdaBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@.
