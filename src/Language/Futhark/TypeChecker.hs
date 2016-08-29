@@ -1009,10 +1009,10 @@ checkExp (Unzip e _ pos) = do
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
 
-checkExp (Map fun arrexp pos) = do
-  (arrexp', arg) <- checkSOACArrayArg arrexp
-  fun' <- checkLambda fun [arg]
-  return (Map fun' arrexp' pos)
+checkExp (Map fun arrexps pos) = do
+  (arrexps', args) <- unzip <$> mapM checkSOACArrayArg arrexps
+  fun' <- checkLambda fun args
+  return $ Map fun' arrexps' pos
 
 checkExp (Reduce comm fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
@@ -1565,7 +1565,6 @@ checkPolyLambdaOp op curryargexps args pos = do
   let argts = [ argt | (argt, _, _) <- args ]
   tp <- case curryargexpts ++ argts of
           [t1, t2] | t1 == t2 -> return t1
-          [Tuple [t1,t2]] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map toStructural l
   xname <- newIDFromString "x"
   yname <- newIDFromString "y"

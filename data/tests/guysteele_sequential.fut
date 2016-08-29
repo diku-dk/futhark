@@ -20,5 +20,5 @@ fun reverse(a: [n]int): [n]int =
 fun main(a: []int): int =
   let highestToTheLeft = scan max 0 a in
   let highestToTheRight = reverse(scan max 0 (reverse(a))) in
-  let waterLevels = zipWith (fn (x,y) => min x y) highestToTheLeft highestToTheRight in
+  let waterLevels = zipWith min highestToTheLeft highestToTheRight in
   reduce (+) 0 (zipWith (-) waterLevels a)

@@ -12,8 +12,8 @@ fun take(n: int, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in fi
 
 fun fftmp(num_paths: int, md_c: [][]f64) (zi: []f64): []f64 =
     map (fn (j: int): f64  =>
-            let x = map (*) (zip (take(j+1,zi)) (take(j+1,unsafe md_c[j])) )
-                in  reduce (+) (0.0) x
+            let x = zipWith (*) (take(j+1,zi)) (take(j+1,unsafe md_c[j]))
+            in  reduce (+) (0.0) x
          ) (iota(num_paths)
        )
 
