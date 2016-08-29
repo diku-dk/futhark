@@ -48,12 +48,12 @@ default(f32)
 fun tridagSeq(a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
     loop ((y, b)) =
       for i < n-1 do
-        let i    = i + 1             
-        let beta = a[i] / b[i-1]     
+        let i    = i + 1
+        let beta = a[i] / b[i-1]
         let b[i] = b[i] - beta*c[i-1]
         let y[i] = y[i] - beta*y[i-1]
         in  (y, b)
-   
+
     let y[n-1] = y[n-1]/b[n-1] in
     loop (y) = for j < n - 1 do
                  let i    = n - 2 - j

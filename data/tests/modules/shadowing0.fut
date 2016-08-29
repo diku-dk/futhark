@@ -9,10 +9,10 @@
 -- }
 
 fun number(): int = 1
-struct M0 
+struct M0
   {
     fun number(): int = 2
-    struct M1 
+    struct M1
       {
         fun foo(): int = number()
       }

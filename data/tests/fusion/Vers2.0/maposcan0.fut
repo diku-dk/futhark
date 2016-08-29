@@ -6,8 +6,8 @@
 --   [1.0,-3.0,-5.4]
 --   [2.0,-6.0,-10.8]
 -- }
--- structure { 
---    Stream 1 
+-- structure {
+--    Stream 1
 --    Scan   1
 --    Map    1
 -- }

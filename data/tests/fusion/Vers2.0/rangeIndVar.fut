@@ -8,7 +8,7 @@
 
 fun main(arr: [m]int): int =
   let k = 0 in
-  loop (k) = 
+  loop (k) =
     for i < m-1 do
       if i % 3 == 0
       then k + 1

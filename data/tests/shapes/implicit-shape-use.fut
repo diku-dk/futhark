@@ -15,7 +15,7 @@
 --    [0.0, 0.0, 0.0]]
 -- }
 
-fun main(num_und: 
+fun main(num_und:
               int,
              bb_inds: [3][num_dates]int,
              arr_usz: []f64
@@ -23,7 +23,7 @@ fun main(num_und:
   let arr    = reshape (num_dates*num_und) arr_usz
   let bb_data= map (fn (row: []int): []f64  =>
                         map f64 row
-                  ) (bb_inds )  
+                  ) (bb_inds )
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
   in  bb_mat
 
@@ -66,7 +66,7 @@ fun brownianBridgeDates (bb_inds: [3][num_dates]int)
             in  bbrow
        in bbrow
 
-fun brownianBridge (num_und: 
+fun brownianBridge (num_und:
                 int,
                 bb_inds: [3][num_dates]int,
                 bb_data: [3][num_dates]f64,

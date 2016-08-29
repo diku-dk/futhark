@@ -67,13 +67,13 @@ fun recM(sob_dirs:  [][num_bits]int, i: int ): []int =
 
 -- computes sobol numbers: n,..,n+chunk-1
 fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
-  let sob_fact= 1.0 / f64(1 << num_bits)      
-  let sob_beg = sobolIndI(dir_vs, n+1)            
+  let sob_fact= 1.0 / f64(1 << num_bits)
+  let sob_beg = sobolIndI(dir_vs, n+1)
   let contrbs = map (fn (k: int): []int  =>
                         let sob = k + n in
                         if(k==0) then sob_beg
                         else recM(dir_vs, k+n)
-                   ) (iota(chunk) )                
+                   ) (iota(chunk) )
   let vct_ints= scan (fn (x: []int) (y: []int): []int  =>
                         zipWith (^) x y
                     ) (replicate len 0) contrbs in
