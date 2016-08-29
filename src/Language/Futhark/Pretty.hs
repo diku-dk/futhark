@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
 -- for the AST defined in "Language.Futhark.Syntax" and re-exports
 -- "Futhark.Util.Pretty" for convenience.
@@ -8,18 +9,18 @@ module Language.Futhark.Pretty
   )
   where
 
-import Data.Array
-import Data.Monoid
-import Data.Hashable
-import Data.Word
-import qualified Data.HashSet as HS
+import           Data.Array
+import           Data.Hashable
+import qualified Data.HashSet                as HS
+import           Data.Monoid
+import           Data.Word
 
-import Prelude
+import           Prelude
 
-import Futhark.Util.Pretty
+import           Futhark.Util.Pretty
 
-import Language.Futhark.Syntax
-import Language.Futhark.Attributes
+import           Language.Futhark.Attributes
+import           Language.Futhark.Syntax
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
@@ -59,13 +60,13 @@ instance Pretty Value where
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
 instance Pretty PrimType where
-  ppr (Unsigned Int8) = text "u8"
+  ppr (Unsigned Int8)  = text "u8"
   ppr (Unsigned Int16) = text "u16"
   ppr (Unsigned Int32) = text "u32"
   ppr (Unsigned Int64) = text "u64"
-  ppr (Signed t) = ppr t
-  ppr (FloatType t) = ppr t
-  ppr Bool = text "bool"
+  ppr (Signed t)       = ppr t
+  ppr (FloatType t)    = ppr t
+  ppr Bool             = text "bool"
 
 instance Pretty PrimValue where
   ppr (UnsignedValue (Int8Value v)) =
@@ -114,7 +115,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) wh
     parens (commasep $ map ppr ts)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
-  ppr (Prim et) = ppr et
+  ppr (Prim et)  = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = parens $ commasep $ map ppr ts
 
@@ -123,14 +124,14 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
   ppr (UserPrim et _) = ppr et
   ppr (UserUnique t _) = text "*" <> ppr t
   ppr (UserArray at d _) = brackets (f d) <> ppr at
-    where f AnyDim = mempty
+    where f AnyDim       = mempty
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
   ppr (UserTuple ts _) = parens $ commasep $ map ppr ts
   ppr (UserTypeAlias name _) = ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
-  ppr (Prim et) = ppr et
+  ppr (Prim et)  = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = parens $ commasep $ map ppr ts
 
@@ -141,55 +142,55 @@ instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
 
 instance Pretty UnOp where
-  ppr Not = text "!"
-  ppr Negate = text "-"
-  ppr Complement = text "~"
-  ppr Abs = text "abs "
-  ppr Signum = text "signum "
-  ppr (ToFloat t) = ppr t
-  ppr (ToSigned t) = ppr (Signed t)
+  ppr Not            = text "!"
+  ppr Negate         = text "-"
+  ppr Complement     = text "~"
+  ppr Abs            = text "abs "
+  ppr Signum         = text "signum "
+  ppr (ToFloat t)    = ppr t
+  ppr (ToSigned t)   = ppr (Signed t)
   ppr (ToUnsigned t) = ppr (Unsigned t)
 
 instance Pretty BinOp where
-  ppr Plus = text "+"
-  ppr Minus = text "-"
-  ppr Pow = text "**"
-  ppr Times = text "*"
-  ppr Divide = text "/"
-  ppr Mod = text "%"
-  ppr Quot = text "//"
-  ppr Rem = text "%%"
-  ppr ShiftR = text ">>"
-  ppr ZShiftR = text ">>>"
-  ppr ShiftL = text "<<"
-  ppr Band = text "&"
-  ppr Xor = text "^"
-  ppr Bor = text "|"
-  ppr LogAnd = text "&&"
-  ppr LogOr = text "||"
-  ppr Equal = text "=="
+  ppr Plus     = text "+"
+  ppr Minus    = text "-"
+  ppr Pow      = text "**"
+  ppr Times    = text "*"
+  ppr Divide   = text "/"
+  ppr Mod      = text "%"
+  ppr Quot     = text "//"
+  ppr Rem      = text "%%"
+  ppr ShiftR   = text ">>"
+  ppr ZShiftR  = text ">>>"
+  ppr ShiftL   = text "<<"
+  ppr Band     = text "&"
+  ppr Xor      = text "^"
+  ppr Bor      = text "|"
+  ppr LogAnd   = text "&&"
+  ppr LogOr    = text "||"
+  ppr Equal    = text "=="
   ppr NotEqual = text "!="
-  ppr Less = text "<"
-  ppr Leq = text "<="
-  ppr Greater = text ">="
-  ppr Geq = text ">="
+  ppr Less     = text "<"
+  ppr Leq      = text "<="
+  ppr Greater  = text ">="
+  ppr Geq      = text ">="
 
 
 
 hasArrayLit :: ExpBase ty vn -> Bool
-hasArrayLit ArrayLit{} = True
-hasArrayLit (TupLit es2 _) = any hasArrayLit es2
+hasArrayLit ArrayLit{}      = True
+hasArrayLit (TupLit es2 _)  = any hasArrayLit es2
 hasArrayLit (Literal val _) = hasArrayVal val
-hasArrayLit _ = False
+hasArrayLit _               = False
 
 hasArrayVal :: Value -> Bool
-hasArrayVal ArrayValue{} = True
+hasArrayVal ArrayValue{}  = True
 hasArrayVal (TupValue vs) = any hasArrayVal vs
-hasArrayVal _ = False
+hasArrayVal _             = False
 
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndexBase ty vn) where
-  ppr (DimFix e) = ppr e
+  ppr (DimFix e)     = ppr e
   ppr (DimSlice i j) = ppr i <> text ":" <> ppr j
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
@@ -219,17 +220,17 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
     ppr body
     where mparens = if p == -1 then id else parens
           linebreak = case e of
-                        Map{} -> True
-                        Reduce{} -> True
-                        Filter{} -> True
-                        Scan{} -> True
-                        DoLoop{} -> True
-                        LetPat{} -> True
-                        LetWith{} -> True
+                        Map{}                  -> True
+                        Reduce{}               -> True
+                        Filter{}               -> True
+                        Scan{}                 -> True
+                        DoLoop{}               -> True
+                        LetPat{}               -> True
+                        LetWith{}              -> True
                         Literal ArrayValue{} _ -> False
-                        If{} -> True
-                        ArrayLit{} -> False
-                        _ -> hasArrayLit e
+                        If{}                   -> True
+                        ArrayLit{}             -> False
+                        _                      -> hasArrayLit e
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppr dest <+> list (map ppr idxs) <+>
@@ -254,7 +255,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape shape e _) =
-    text "reshape" <> apply [apply (map ppr shape), ppr e]
+    text "reshape" <+> ppr shape <+> ppr e
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   pprPrec _ (Transpose e _) =
@@ -273,7 +274,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
             parens ( ppList [lam] </> commasep [ppr arr] )
       RedLike o comm lam0 acc ->
         let ord_str = if o == Disorder then "Per" else ""
-            comm_str = case comm of Commutative -> "Comm"
+            comm_str = case comm of Commutative    -> "Comm"
                                     Noncommutative -> ""
         in  text ("streamRed"++ord_str++comm_str) <>
             parens ( ppList [lam0, lam] </> commasep [ppr acc, ppr arr] )
@@ -288,7 +289,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 9 e
   pprPrec _ (Split i e a _) =
-    text "split@" <> ppr i <> apply [ppr e, ppr a]
+    text "split@" <> ppr i <+> ppr e <+> ppr a
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
@@ -311,12 +312,12 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopForm
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
-  ppr (Id ident)     = ppr ident
-  ppr (TuplePattern pats _) = parens $ commasep $ map ppr pats
-  ppr (Wildcard _ _) = text "_"
+  ppr (Id ident)              = ppr ident
+  ppr (TuplePattern pats _)   = parens $ commasep $ map ppr pats
+  ppr (Wildcard _ _)          = text "_"
 
 ppAscription :: (Eq vn, Hashable vn, Pretty vn) => Maybe (TypeDeclBase ty vn) -> Doc
-ppAscription Nothing = mempty
+ppAscription Nothing  = mempty
 ppAscription (Just t) = text ":" <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBase ty vn) where
@@ -341,8 +342,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase ty vn) where
   ppr (FunOrTypeDec dec) = ppr dec
-  ppr (SigDec sig) = ppr sig
-  ppr (ModDec modd) = ppr modd
+  ppr (SigDec sig)       = ppr sig
+  ppr (ModDec modd)      = ppr modd
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModDefBase ty vn) where
   ppr (ModDef name moddecls _) =
@@ -378,7 +379,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDeclB
 
 ppParam :: (Eq vn, Hashable vn, Pretty vn) => PatternBase t vn -> Doc
 ppParam (Id param) = ppr param
-ppParam p = parens $ ppr p
+ppParam p          = parens $ ppr p
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) =>
                Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
@@ -386,31 +387,31 @@ prettyBinOp p bop x y = parensIf (p > precedence bop) $
                         pprPrec (precedence bop) x <+/>
                         ppr bop <+>
                         pprPrec (rprecedence bop) y
-  where precedence LogAnd = 0
-        precedence LogOr = 0
-        precedence Band = 1
-        precedence Bor = 1
-        precedence Xor = 1
-        precedence Equal = 2
+  where precedence LogAnd   = 0
+        precedence LogOr    = 0
+        precedence Band     = 1
+        precedence Bor      = 1
+        precedence Xor      = 1
+        precedence Equal    = 2
         precedence NotEqual = 2
-        precedence Less = 2
-        precedence Leq = 2
-        precedence Greater = 2
-        precedence Geq = 2
-        precedence ShiftL = 3
-        precedence ShiftR = 3
-        precedence ZShiftR = 3
-        precedence Plus = 4
-        precedence Minus = 4
-        precedence Times = 5
-        precedence Divide = 5
-        precedence Mod = 5
-        precedence Quot = 5
-        precedence Rem = 5
-        precedence Pow = 6
-        rprecedence Minus = 10
+        precedence Less     = 2
+        precedence Leq      = 2
+        precedence Greater  = 2
+        precedence Geq      = 2
+        precedence ShiftL   = 3
+        precedence ShiftR   = 3
+        precedence ZShiftR  = 3
+        precedence Plus     = 4
+        precedence Minus    = 4
+        precedence Times    = 5
+        precedence Divide   = 5
+        precedence Mod      = 5
+        precedence Quot     = 5
+        precedence Rem      = 5
+        precedence Pow      = 6
+        rprecedence Minus  = 10
         rprecedence Divide = 10
-        rprecedence op = precedence op
+        rprecedence op     = precedence op
 
 ppSOAC :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty, Pretty fn) =>
           String -> [fn] -> [ExpBase ty vn] -> Doc

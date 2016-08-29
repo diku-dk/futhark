@@ -950,10 +950,17 @@ checkExp (Replicate countexp valexp pos) = do
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 
-checkExp (Reshape shapeexps arrexp pos) = do
-  shapeexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) shapeexps
+checkExp (Reshape shapeexp arrexp loc) = do
+  shapeexp' <- checkExp shapeexp
   arrexp' <- checkExp arrexp
-  return (Reshape shapeexps' arrexp' pos)
+
+  case typeOf shapeexp' of
+    Tuple ts | all (==(Prim $ Signed Int32)) ts -> return ()
+    Prim (Signed Int32) -> return ()
+    t -> bad $ TypeError loc $ "Shape argument " ++ pretty shapeexp ++
+      " to reshape must be i32 or tuple of i32s, but is " ++ pretty t
+
+  return $ Reshape shapeexp' arrexp' loc
 
 checkExp (Rearrange perm arrexp pos) = do
   arrexp' <- checkExp arrexp
@@ -1111,15 +1118,22 @@ checkExp (Stream form lam arr pos) = do
 
   return $ Stream form' lam' arr' pos
 
-checkExp (Split i splitexps arrexp loc) = do
-  splitexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) splitexps
+checkExp (Split i splitexp arrexp loc) = do
+  splitexp' <- checkExp splitexp
   arrexp' <- checkExp arrexp
+
+  case typeOf splitexp' of
+    Tuple ts | all (==(Prim $ Signed Int32)) ts -> return ()
+    Prim (Signed Int32) -> return ()
+    _ -> bad $ TypeError loc $ "Argument " ++ pretty splitexp ++
+         " to split must be integer or tuple of integers."
+
   let t = typeOf arrexp'
   when (arrayRank t <= i) $
     bad $ TypeError loc $ "Cannot split array " ++ pretty arrexp'
     ++ " of type " ++ pretty t
     ++ " across dimension " ++ pretty i ++ "."
-  return $ Split i splitexps' arrexp' loc
+  return $ Split i splitexp' arrexp' loc
 
 checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp

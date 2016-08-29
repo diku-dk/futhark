@@ -426,7 +426,9 @@ product of the new dimensions.
 ``rearrange (d_1, ..., d_n) a``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Permute the dimensions in the array, returning a new array.
+Permute the dimensions in the array, returning a new array.  The
+``d_i`` must be *static* integers, and constitute a proper
+length-``n`` permutation.
 
 For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
 a[y,z,x]``.

@@ -391,7 +391,7 @@ internaliseExp _ (E.Rotate d offset e _) = do
     return $ I.Rotate [] offsets v
 
 internaliseExp _ (E.Reshape shape e loc) = do
-  shape' <- mapM (internaliseExp1 "shape") shape
+  shape' <- internaliseExp "shape" shape
   internaliseOperation "reshape" e $ \v -> do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
@@ -403,8 +403,8 @@ internaliseExp _ (E.Reshape shape e loc) = do
     return $ I.Reshape shapeOk (DimNew <$> shape') v
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
 
-internaliseExp _ (E.Split i splitexps arrexp loc) = do
-  splits' <- mapM (internaliseExp1 "n") splitexps
+internaliseExp _ (E.Split i splitexp arrexp loc) = do
+  splits' <- internaliseExp "n" splitexp
   -- Note that @arrs@ is an array, because of array-of-tuples transformation
   arrs <- internaliseExpToVars "split_arr" arrexp
   split_dim <- arraysSize i <$> mapM lookupType arrs
