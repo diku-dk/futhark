@@ -6,9 +6,9 @@
 -- }
 -- structure { Map 2 }
 fun main(): [][]int =
-  let n = 9 in
-  let a = map (+1) (iota(n)) in
-  let b = reshape (3,3) a in
+  let n = 9
+  let a = map (+1) (iota(n))
+  let b = reshape (3,3) a
   let c = transpose b in
   map  (fn (row: []int): []int  =>
          map  (*2) row) c

@@ -11,8 +11,8 @@
 -- }
 
 fun main(n: int, i: int, j: int, x: int): [][]int =
-  let a = replicate n (replicate n 0) in
-  let b = replicate n 0 in
-  let b[i] = x in
+  let a = replicate n (replicate n 0)
+  let b = replicate n 0
+  let b[i] = x
   let a[j] = b in
   a

@@ -9,6 +9,6 @@ fun f(b_1: *[]int): *[]int =
   copy(iota(10))
 
 fun main(n: int): []int =
-  let a = iota(n) in
+  let a = iota(n)
   let x = if n == 0 then a else f(a) in
   x

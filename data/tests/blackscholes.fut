@@ -263,8 +263,8 @@ fun horner (x: f64): f64 =
 fun fabs (x: f64): f64 = if x < 0.0 then -x else x
 
 fun cnd0 (d: f64): f64 =
-   let k        = 1.0 / (1.0 + 0.2316419 * fabs(d)) in
-   let p        = horner(k) in
+   let k        = 1.0 / (1.0 + 0.2316419 * fabs(d))
+   let p        = horner(k)
    let rsqrt2pi = 0.39894228040143267793994605993438 in
    rsqrt2pi * exp64(-0.5*d*d) * p
 
@@ -273,14 +273,14 @@ fun cnd (d: f64): f64 =
    in if 0.0 < d then 1.0 - c else c
 
 fun go (x: (bool,f64,f64,f64)): f64 =
-   let (call, price, strike, years) = x in
-   let r       = 0.08 in  -- riskfree
-   let v       = 0.30 in  -- volatility
-   let v_sqrtT = v * sqrt64(years) in
-   let d1      = (log64(price / strike) + (r + 0.5 * v * v) * years) / v_sqrtT in
-   let d2      = d1 - v_sqrtT in
-   let cndD1   = cnd(d1) in
-   let cndD2   = cnd(d2) in
+   let (call, price, strike, years) = x
+   let r       = 0.08  -- riskfree
+   let v       = 0.30  -- volatility
+   let v_sqrtT = v * sqrt64(years)
+   let d1      = (log64(price / strike) + (r + 0.5 * v * v) * years) / v_sqrtT
+   let d2      = d1 - v_sqrtT
+   let cndD1   = cnd(d1)
+   let cndD2   = cnd(d2)
    let x_expRT = strike * exp64(-r * years) in
    if call then
      price * cndD1 - x_expRT * cndD2
@@ -291,8 +291,8 @@ fun blackscholes (xs: [](bool,f64,f64,f64)): []f64 =
    map  go xs
 
 fun main (years: int): []f64 =
-  let days = years*365 in
-  let a = map (+1) (iota(days)) in
-  let a = map f64 a in
+  let days = years*365
+  let a = map (+1) (iota(days))
+  let a = map f64 a
   let a = map (fn (x: f64): (bool,f64,f64,f64)  => (True, 58.0 + 4.0 * x / f64(days), 65.0, x / 365.0)) a in
   blackscholes(a)

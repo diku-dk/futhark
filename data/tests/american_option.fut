@@ -26,24 +26,24 @@ fun maxF64(x: f64) (y: f64): f64 =
   if x < y then y else x
 
 fun binom(expiry: int): f64 =
-  let n = expiry * bankDays() in
-  let dt = f64(expiry) / f64(n) in
-  let u = exp64(alpha()*dt+sigma()*sqrt64(dt)) in
-  let d = exp64(alpha()*dt-sigma()*sqrt64(dt)) in
-  let stepR = exp64(r()*dt) in
-  let q = (stepR-d)/(u-d) in
-  let qUR = q/stepR in
-  let qDR = (f64(1.0)-q)/stepR in
+  let n = expiry * bankDays()
+  let dt = f64(expiry) / f64(n)
+  let u = exp64(alpha()*dt+sigma()*sqrt64(dt))
+  let d = exp64(alpha()*dt-sigma()*sqrt64(dt))
+  let stepR = exp64(r()*dt)
+  let q = (stepR-d)/(u-d)
+  let qUR = q/stepR
+  let qDR = (f64(1.0)-q)/stepR
 
-  let uPow = map (u**) (map f64 (iota(n+1))) in
-  let dPow = map (d**) (map f64 (map (n-) (iota(n+1)))) in
-  let st = map (f64(s0())*) (zipWith (*) uPow dPow) in
+  let uPow = map (u**) (map f64 (iota(n+1)))
+  let dPow = map (d**) (map f64 (map (n-) (iota(n+1))))
+  let st = map (f64(s0())*) (zipWith (*) uPow dPow)
   let finalPut = map (maxF64(f64(0.0))) (map (f64(strike())-) st) in
   loop (put = finalPut) = for (n+1) > i >= 1 do
-    let (uPow_start, _) = split (i) uPow in
-    let (_, dPow_end) = split (n+1-i) dPow in
-    let st = map (f64(s0())*) (zipWith (*) uPow_start dPow_end) in
-    let (_, put_tail) = split (1) put in
+    let (uPow_start, _) = split (i) uPow
+    let (_, dPow_end) = split (n+1-i) dPow
+    let st = map (f64(s0())*) (zipWith (*) uPow_start dPow_end)
+    let (_, put_tail) = split (1) put
     let (put_init, _) = split ((shape put)[0]-1) put in
     map (fn (x,y) => maxF64 x y)
     (zip

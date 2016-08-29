@@ -48,15 +48,15 @@ default(f32)
 fun tridagSeq(a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
     loop ((y, b)) =
       for i < n-1 do
-        let i    = i + 1              in
-        let beta = a[i] / b[i-1]      in
-        let b[i] = b[i] - beta*c[i-1] in
+        let i    = i + 1             
+        let beta = a[i] / b[i-1]     
+        let b[i] = b[i] - beta*c[i-1]
         let y[i] = y[i] - beta*y[i-1]
         in  (y, b)
-    in
+   
     let y[n-1] = y[n-1]/b[n-1] in
     loop (y) = for j < n - 1 do
-                 let i    = n - 2 - j in
+                 let i    = n - 2 - j
                  let y[i] = (y[i] - c[i]*y[i+1]) / b[i]
                  in  y
     in  y
@@ -66,7 +66,7 @@ fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
                    u: [n][m]f32)
                   (dtInv: f32): *[n][m]f32 =
   map (fn (tup:  ([]f32,[]f32,*[]f32) ): *[]f32   =>
-         let (mu_row,var_row,u_row) = tup in
+         let (mu_row,var_row,u_row) = tup
          let abc = map (fn (tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  =>
                           let (mu, var, d, dd) = tup in
                           ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
@@ -74,7 +74,7 @@ fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
                           , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])
                           )
                       ) (zip (mu_row) (var_row) myD myDD
-                      ) in
+                      )
          let (a,b,c) = unzip(abc) in
          tridagSeq( a, b, c, u_row )
      ) (zip myMu myVar (copy(u))

@@ -10,7 +10,7 @@
 -- compiled input { [1,2,3] 100001 } output { 366240i32 }
 
 fun main(a: [n]int, m: int): int =
-  let contribs = replicate m a in
+  let contribs = replicate m a
   let res = scan (fn (x: []int) (y: []int): []int => zipWith (+) x y
                 ) a contribs in
   reduce (^) 0 (reshape (n*m) res)

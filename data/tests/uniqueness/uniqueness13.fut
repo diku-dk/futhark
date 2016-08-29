@@ -10,6 +10,6 @@ fun f(b_1: *[]int): ([]f64,[]f64) =
   ([1.0],[2.0])
 
 fun main(n: int): ([]f64, []f64) =
-  let a = iota(n) in
+  let a = iota(n)
   let x = f(a) in
   x

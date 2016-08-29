@@ -3,8 +3,8 @@
 -- output { [[10, 7], [12, 9], [14, 11]] }
 -- structure { Map 2 }
 fun main(a: [n][m]int, b: [n][m]int): [][]int =
-  let a2 = map (fn (r: []int): [n]int  => map (+1) r) (transpose(a)) in
-  let b2 = map (fn (r: []int): [n]int  => map (+1) r) (transpose(b)) in
+  let a2 = map (fn (r: []int): [n]int  => map (+1) r) (transpose(a))
+  let b2 = map (fn (r: []int): [n]int  => map (+1) r) (transpose(b))
   let c  = map (fn (rp: ([]int,[]int)): [n]int  =>
                  let (rx,ry) = rp in
                  zipWith (+) rx ry)

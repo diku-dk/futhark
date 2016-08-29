@@ -17,9 +17,9 @@
 default(f32)
 
 fun main(arr: []f32): (f32,[]f32,[]f32,[]f32,[]f32) =
-    let xy = map (fn (a: f32): (f32,f32)  => (a+1.0,a+2.0)) arr in
-    let (x,y) = unzip(xy) in
-    let z  = map (*2.0) x in
-    let w  = map (*3.0) y in
+    let xy = map (fn (a: f32): (f32,f32)  => (a+1.0,a+2.0)) arr
+    let (x,y) = unzip(xy)
+    let z  = map (*2.0) x
+    let w  = map (*3.0) y
     let r  = reduce  (+) (0.0) arr in
     (r,x,y,z,w)

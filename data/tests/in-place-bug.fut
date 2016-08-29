@@ -20,7 +20,7 @@ fun implicitMethod(myD:  [][]f64,  myDD: [][]f64,
                               myMu: [][]f64, myVar: [][]f64,
                              u: [][]f64,    dtInv: f64  ): [][]f64 =
   map (fn (tup:  ([]f64,[]f64,[]f64) ): []f64   =>
-         let (mu_row,var_row,u_row) = tup in
+         let (mu_row,var_row,u_row) = tup
          let abc = map (fn (tup: (f64,f64,[]f64,[]f64)): (f64,f64,f64)  =>
                           let (mu, var, d, dd) = tup in
                           ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
@@ -28,25 +28,25 @@ fun implicitMethod(myD:  [][]f64,  myDD: [][]f64,
                           , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])
                           )
                       ) (zip (mu_row) (var_row) myD myDD
-                      ) in
+                      )
          let (a,b,c) = unzip(abc) in
          tridagSeq( a, copy(b), c, u_row )
      ) (zip myMu myVar u
      )
 
 fun main(numX: int, numY: int, numT: int, s0: f64, strike: f64, t: f64, alpha: f64, nu: f64, beta: f64): f64 =
-    let myX = map f64 (iota(numX)) in
-    let myY = map f64 (iota(numY)) in
-    let (myDx, myDxx) = (empty([]f64), empty([]f64)) in
-    let (myDy, myDyy) = (empty([]f64), empty([]f64)) in
-    let myResult = copy(empty([]f64)) in
-    let myMuX  = replicate numY (replicate numX 0.0) in
-    let myVarX = map (fn (yj: f64): []f64  => map exp64 myX) myY in
+    let myX = map f64 (iota(numX))
+    let myY = map f64 (iota(numY))
+    let (myDx, myDxx) = (empty([]f64), empty([]f64))
+    let (myDy, myDyy) = (empty([]f64), empty([]f64))
+    let myResult = copy(empty([]f64))
+    let myMuX  = replicate numY (replicate numX 0.0)
+    let myVarX = map (fn (yj: f64): []f64  => map exp64 myX) myY
 
     -- explicitX
-    let u = explicitMethod( myDx, myDxx, myMuX, myVarX, myResult ) in
+    let u = explicitMethod( myDx, myDxx, myMuX, myVarX, myResult )
     -- implicitX
-    let u = implicitMethod( myDx, myDxx, myMuX, myVarX, u, 1.0 ) in
+    let u = implicitMethod( myDx, myDxx, myMuX, myVarX, u, 1.0 )
     -- implicitY
     let y = map (fn (u_row: []f64): []f64  =>
                    map (+1.0) (u_row)) (

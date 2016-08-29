@@ -42,15 +42,15 @@ fun tridag(nn:   int,
     then (b, [d[0]/b[0]])
     else
         loop((b, d)) = for i < (nn-1) do
-            let xm     = a[i+1] / b[i]    in
-            let b[i+1] = b[i+1] - xm*c[i] in
+            let xm     = a[i+1] / b[i]   
+            let b[i+1] = b[i+1] - xm*c[i]
             let d[i+1] = d[i+1] - xm*d[i] in
             (b, d)
-        in
+       
         let d[nn-1] = d[nn-1] / b[nn-1]   in
 
         loop(d)    = for i < (nn-1) do
-            let k = nn - 2 - i                       in
+            let k = nn - 2 - i                      
             let d[k] = ( d[k] - c[k]*d[k+1] ) / b[k] in
             d
         in
@@ -58,9 +58,9 @@ fun tridag(nn:   int,
 
 
 fun main(): ([]f64,[]f64) =
-    let nn = reduce (+) 0 ([1,2,3,4]) in
-    let a = replicate nn 3.33 in
-    let b = map (fn (x: int): f64  => f64(x) + 1.0) (iota(nn)) in
-    let c = map (fn (x: int): f64  => 1.11*f64(x) + 0.5) (iota(nn)) in
+    let nn = reduce (+) 0 ([1,2,3,4])
+    let a = replicate nn 3.33
+    let b = map (fn (x: int): f64  => f64(x) + 1.0) (iota(nn))
+    let c = map (fn (x: int): f64  => 1.11*f64(x) + 0.5) (iota(nn))
     let d = map (fn (x: int): f64  => 1.01*f64(x) + 0.25) (iota(nn)) in
         tridag(nn, b, d, a, c)

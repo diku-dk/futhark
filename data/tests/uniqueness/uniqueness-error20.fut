@@ -3,6 +3,6 @@
 -- error:
 
 fun main(n: int): int =
-  let a = iota(n) in
+  let a = iota(n)
   let b = map (fn (x: int): int  => let a[x] = 4 in a[x]) (iota(n)) in
   0

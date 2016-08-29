@@ -8,7 +8,7 @@
 -- }
 fun main (xs: [n]int, ys: [n]int): []int =
   map (fn (x: int, y: int): int  =>
-         let tmp1 = iota(x) in
+         let tmp1 = iota(x)
          let tmp2 = map (*y) tmp1 in
          reduce (+) 0 tmp2
      ) (zip xs ys )

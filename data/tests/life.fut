@@ -29,9 +29,9 @@ fun to_int_board(board: [][]bool): [][]int =
 
 fun cell_neighbors(i: int, j: int, board: [n][m]bool): int =
   unsafe
-  let above = (i - 1) % n in
-  let below = (i + 1) % n in
-  let right = (j + 1) % m in
+  let above = (i - 1) % n
+  let below = (i + 1) % n
+  let right = (j + 1) % m
   let left = (j - 1) % m in
   bint(board[above,left]) + bint(board[above,j]) + bint(board[above,right]) +
   bint(board[i,left]) + bint(board[i,right]) +

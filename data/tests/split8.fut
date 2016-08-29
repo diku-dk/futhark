@@ -8,6 +8,6 @@
 --   [[1,2,3], [6,5,4], [7,8,9]]
 -- }
 fun main(a: *[][n]int, b: []int, i: int): [][]int =
-  let (br, _) = split (n) b in
+  let (br, _) = split (n) b
   let a[i] = br in
   a

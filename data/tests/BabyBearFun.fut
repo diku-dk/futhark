@@ -60,9 +60,9 @@ fun plus2(a: [][]int, b: [][]int): [][]int = map plus1 (zip a b)
 fun replin(len: int) (a: []int): [][]int = replicate len a
 
 fun floydSbsFun(n: int, d: [][]int ): [][]int =
-    let d3  = replicate n (transpose d) in
-    let d2  = map       (replin(n)) d in
-    let abr = map plus2 (zip d3 d2)       in
+    let d3  = replicate n (transpose d)
+    let d2  = map       (replin(n)) d
+    let abr = map plus2 (zip d3 d2)      
     let partial = map redmin2 abr        in
         map min1 (zip partial d )
 

@@ -20,13 +20,13 @@
 fun funF(x: int, y: int, z: int): int = x & y | ~x & z
 
 fun rotateL (x: int, i: int): int =
-  let post = x << i in
+  let post = x << i
   let pre = (x >> i) & (~(0xFFFFFFFF << i)) in
   post | pre
 
 fun frob(a: int, b: int, c: int, d: int): (int, int, int, int) =
-  let w = 0x97989910 in
-  let f' = funF(b,c,d) in
+  let w = 0x97989910
+  let f' = funF(b,c,d)
   let a' = b + rotateL((a + f' + w + 0xd76aa478), 7) in
   (d, a', b, c)
 

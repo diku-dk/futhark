@@ -23,8 +23,8 @@ fun doCompute(data1:
 ): *[numBins2]i64 =
     let value = map (fn (x: f32): *[numBins2]i64  =>
             let vals = map (fn (y: f32): *[numBins2]i64  =>
-                    let dot = x*y in
-                    let dBins = replicate numBins2 0i64 in
+                    let dot = x*y
+                    let dBins = replicate numBins2 0i64
                     let dBins[0] = 1i64 in dBins
                 ) data2
             in
@@ -45,7 +45,7 @@ fun main(numBins: int): *[]i64 =
           (replicate (numBins*2) 0i64,
            reduce reduceBins (replicate (numBins+2) 0i64) rrs,
            reduce reduceBins (replicate (numBins+2) 0i64) drs)) = for i < numBins do
-      let res[i*2] = dr[i+1] in
+      let res[i*2] = dr[i+1]
       let res[i*2+1] = rr[i+1] in
       (res, rr, dr)
     in res

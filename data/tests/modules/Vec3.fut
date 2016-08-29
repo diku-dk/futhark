@@ -6,12 +6,12 @@ struct Vec3
       {
         type t = ( f32 , f32 , f32 )
         fun add(a: t , b: t): t =
-          let (a1, a2, a3) = a in
+          let (a1, a2, a3) = a
           let (b1, b2, b3) = b in
           (a1 + b1, a2 + b2 , a3 + b3)
     
         fun subtract(a: t , b: t): t =
-          let (a1, a2, a3) = a in
+          let (a1, a2, a3) = a
           let (b1, b2, b3) = b in
           (a1 - b1, a2 - b2 , a3 - b3)
     
@@ -20,7 +20,7 @@ struct Vec3
           (a1 * k, a2 * k , a3 * k)
     
         fun dot(a: t , b: t): f32 =
-          let (a1, a2, a3) = a in
+          let (a1, a2, a3) = a
           let (b1, b2, b3) = b in
           a1*b1 + a2*b2 + a3*b3
       }
@@ -29,12 +29,12 @@ struct Vec3
       {
         type t = ( int , int , int )
         fun add(a: t , b: t): t =
-          let (a1, a2, a3) = a in
+          let (a1, a2, a3) = a
           let (b1, b2, b3) = b in
           (a1 + b1, a2 + b2 , a3 + b3)
     
         fun subtract(a: t , b: t): t =
-          let (a1, a2, a3) = a in
+          let (a1, a2, a3) = a
           let (b1, b2, b3) = b in
           (a1 - b1, a2 - b2 , a3 - b3)
     
@@ -43,7 +43,7 @@ struct Vec3
           (a1 * k, a2 * k , a3 * k)
     
         fun dot(a: t , b: t): int =
-          let (a1, a2, a3) = a in
+          let (a1, a2, a3) = a
           let (b1, b2, b3) = b in
           a1*b1 + a2*b2 + a3*b3
       }

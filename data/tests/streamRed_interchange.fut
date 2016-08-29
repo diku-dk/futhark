@@ -114,8 +114,8 @@
 -- structure distributed { Kernel 4 ScanKernel 2 }
 
 fun main(nfeatures: int, npoints: int, nclusters: int): [nclusters][nfeatures]f32 =
-  let membership = map (%nclusters) (iota(npoints)) in
-  let features_in_cluster = replicate nclusters (npoints / nclusters) in
+  let membership = map (%nclusters) (iota(npoints))
+  let features_in_cluster = replicate nclusters (npoints / nclusters)
   -- Just generate some random-seeming points.
   let points = map (fn (i: int): [nfeatures]f32  =>
                      map (*100f32) (map sin32 (map f32 (map (^i) (iota(nfeatures)))))
