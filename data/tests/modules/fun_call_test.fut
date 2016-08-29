@@ -24,9 +24,9 @@ struct M0
   }
 
 fun floydSbsFun(n: int, d: [][]int ): [][]int =
-    let d3  = replicate n (transpose d) in
-    let d2  = map       (M0.replin(n)) d in
-    let abr = map M0.M1.plus2 (zip d3 d2)       in
+    let d3  = replicate n (transpose d)
+    let d2  = map       (M0.replin(n)) d
+    let abr = map M0.M1.plus2 (zip d3 d2)      
     let partial = map M0.redmin2 abr        in
         map M0.min1 (zip partial d )
 

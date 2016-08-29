@@ -7,18 +7,18 @@
 -- input { 33799i16 } output { 28110i32 }
 
 fun main(a: u16): u32 =
-  let b = 0x10001u32 in
-  let u = 0i32 in
+  let b = 0x10001u32
+  let u = 0i32
   let v = 1i32 in
   loop ((a,b,u,v)) = while a > 0u16 do
-    let q = b / u32(a) in
-    let r = b % u32(a) in
+    let q = b / u32(a)
+    let r = b % u32(a)
 
-    let b = u32(a) in
-    let a = u16(r) in
+    let b = u32(a)
+    let a = u16(r)
 
-    let t = v in
-    let v = u - i32(q) * v in
+    let t = v
+    let v = u - i32(q) * v
     let u = t in
     (a,b,u,v) in
 

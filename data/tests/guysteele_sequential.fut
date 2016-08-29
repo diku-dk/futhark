@@ -18,7 +18,7 @@ fun reverse(a: [n]int): [n]int =
   map (fn (i: int): int  => a[n-i-1]) (iota(n))
 
 fun main(a: []int): int =
-  let highestToTheLeft = scan max 0 a in
-  let highestToTheRight = reverse(scan max 0 (reverse(a))) in
+  let highestToTheLeft = scan max 0 a
+  let highestToTheRight = reverse(scan max 0 (reverse(a)))
   let waterLevels = zipWith min highestToTheLeft highestToTheRight in
   reduce (+) 0 (zipWith (-) waterLevels a)

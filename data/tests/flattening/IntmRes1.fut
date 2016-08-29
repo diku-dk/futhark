@@ -17,7 +17,7 @@ fun addToRow (xs: []int, y: int): []int =
 
 fun main (xss: [][]int, cs: []int, y: int): [][]int =
   map  (fn (xs: []int, c: int): []int  =>
-         let y' = y * c + c in
+         let y' = y * c + c
          let zs = addToRow(xs,y') in
          zs
       ) (zip  xss cs)

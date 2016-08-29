@@ -9,7 +9,7 @@ fun h1(a1: f64, a2: f64, a3: f64): f64 = a1 * a2 + a3
 fun h2(a1: f64) (a23: (f64,f64)): f64 = let (a2,a3) = a23 in a2 * a3 - a1
 
 fun main(arr: []f64): []f64 =
-    let x = map f arr in
+    let x = map f arr
     let y = map g arr in
     if arr[0] < 0.0
     then map h1 (zip x y x)

@@ -17,8 +17,8 @@
 
 -- From http://stackoverflow.com/a/12996028
 fun hash(x: int): int =
-  let x = ((x >> 16) ^ x) * 0x45d9f3b in
-  let x = ((x >> 16) ^ x) * 0x45d9f3b in
+  let x = ((x >> 16) ^ x) * 0x45d9f3b
+  let x = ((x >> 16) ^ x) * 0x45d9f3b
   let x = ((x >> 16) ^ x) in
   x
 

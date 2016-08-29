@@ -1,7 +1,7 @@
 -- ==
 -- error:
 fun f(t: ([]int,*[]int)): int =
-  let (a,b) = t in
+  let (a,b) = t
   let b[0] = 1337 in
   a[0]
 

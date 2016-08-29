@@ -5,8 +5,8 @@ fun f(t: (int, *[]int)): int =
     x
 
 fun main(): int =
-    let n = 10 in
-    let a = iota(n) in
-    let t = (5, a) in
+    let n = 10
+    let a = iota(n)
+    let t = (5, a)
     let c = f(t) in
     a[0]

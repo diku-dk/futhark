@@ -23,16 +23,16 @@ fun max(x: int, y: int): int =
 
 fun redOp(x: (int,int,int,int,int,int)) (y: (int,int,int,int,int,int)):
   (int,int,int,int,int,int) =
-  let (lssx, lisx, lcsx, tlx, firstx, lastx) = x in
-  let (lssy, lisy, lcsy, tly, firsty, lasty) = y in
+  let (lssx, lisx, lcsx, tlx, firstx, lastx) = x
+  let (lssy, lisy, lcsy, tly, firsty, lasty) = y
 
-  let connect = pred2(lastx, firsty) in
+  let connect = pred2(lastx, firsty)
   let newlss = if connect then max(lcsx + lisy,
                                    max(lssx, lssy))
-                          else max(lssx, lssy) in
-  let newlis = if lisx == tlx && connect then lisx + lisy else lisx in
-  let newlcs = if lcsy == tly && connect then lcsy + lcsx else lcsy in
-  let first = if tlx == 0 then firsty else firstx in
+                          else max(lssx, lssy)
+  let newlis = if lisx == tlx && connect then lisx + lisy else lisx
+  let newlcs = if lcsy == tly && connect then lcsy + lcsx else lcsy
+  let first = if tlx == 0 then firsty else firstx
   let last  = if tly == 0 then lastx else lasty in
 
   (newlss, newlis, newlcs, tlx+tly, first, last)

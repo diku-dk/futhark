@@ -3,8 +3,8 @@
 -- error:
 
 fun main(): int =
-  let n = 10 in
-  let a = iota(n) in
+  let n = 10
+  let a = iota(n)
   let b = iota(n) in
   loop (b) = for i < n do
                let a[i] = i in -- Error, because a is free and

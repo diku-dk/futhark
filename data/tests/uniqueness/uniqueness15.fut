@@ -23,7 +23,7 @@ fun main(): []i32 =
                            reduce reduceBins (replicate 3 0) rrs,
                            reduce reduceBins (replicate 3 0) drs
                           )) = for i < 1 do
-        let res[i*2] = dr[i+1] in
+        let res[i*2] = dr[i+1]
         let res[i*2+1] = rr[i+1] in
         (res, rr, dr)
     in

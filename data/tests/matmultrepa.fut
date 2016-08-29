@@ -17,8 +17,8 @@ fun mul2(a: [n][m]int, b: [n][m]int): [n][m]int = map mul1 (zip a b)
 fun replin(n: int) (a: [m]int): [n][m]int = replicate n a
 
 fun matmultFun(a: [n][m]int, b: [m][n]int ): [n][n]int =
-    let br  = replicate n (transpose b) in
-    let ar  = map       (replin n) a in
+    let br  = replicate n (transpose b)
+    let ar  = map       (replin n) a
     let abr = map   mul2 (zip ar br)     in
         map redplus2 abr
 

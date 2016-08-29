@@ -5,7 +5,7 @@
 --   [0, 1, 3, 6, 10, 15, 21, 28, 36, 45]
 -- }
 fun main(): []int =
-    let n = 10 in
+    let n = 10
     let x = copy(iota(n))   in
     loop (x) =
         for i < n-1 do

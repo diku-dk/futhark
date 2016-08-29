@@ -20,10 +20,10 @@ fun main(num_und:
              bb_inds: [3][num_dates]int,
              arr_usz: []f64
 ): [][]f64 =
-  let arr    = reshape (num_dates*num_und) arr_usz in
+  let arr    = reshape (num_dates*num_und) arr_usz
   let bb_data= map (fn (row: []int): []f64  =>
                         map f64 row
-                  ) (bb_inds )   in
+                  ) (bb_inds )  
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
   in  bb_mat
 
@@ -31,26 +31,26 @@ fun main(num_und:
 fun brownianBridgeDates (bb_inds: [3][num_dates]int)
                         (bb_data: [3][num_dates]f64)
                         (gauss: [num_dates]f64): []f64 =
-    let bi = bb_inds[0] in
-    let li = bb_inds[1] in
-    let ri = bb_inds[2] in
-    let sd = bb_data[0] in
-    let lw = bb_data[1] in
-    let rw = bb_data[2] in
+    let bi = bb_inds[0]
+    let li = bb_inds[1]
+    let ri = bb_inds[2]
+    let sd = bb_data[0]
+    let lw = bb_data[1]
+    let rw = bb_data[2]
 
-    let bbrow = replicate num_dates 0.0 in
+    let bbrow = replicate num_dates 0.0
     let bbrow[ bi[0]-1 ] = sd[0] * gauss[0] in
 
     loop (bbrow) =
         for i < num_dates-1 do  -- use i+1 since i in 1 .. num_dates-1
             unsafe
-            let j  = li[i+1] - 1 in
-            let k  = ri[i+1] - 1 in
-            let l  = bi[i+1] - 1 in
+            let j  = li[i+1] - 1
+            let k  = ri[i+1] - 1
+            let l  = bi[i+1] - 1
 
-            let wk = unsafe bbrow [k  ] in
-            let zi = gauss [i+1] in
-            let tmp= rw[i+1] * wk + sd[i+1] * zi in
+            let wk = unsafe bbrow [k  ]
+            let zi = gauss [i+1]
+            let tmp= rw[i+1] * wk + sd[i+1] * zi
 
             let bbrow[ l ] = if( j == -1)
                              then tmp
@@ -61,7 +61,7 @@ fun brownianBridgeDates (bb_inds: [3][num_dates]int)
         --   needs delayed arrays to be mapped nicely!
     in loop (bbrow) =
         for ii < num_dates-1 do
-            let i = num_dates - (ii+1) in
+            let i = num_dates - (ii+1)
             let bbrow[i] = bbrow[i] - bbrow[i-1]
             in  bbrow
        in bbrow
@@ -72,7 +72,7 @@ fun brownianBridge (num_und:
                 bb_data: [3][num_dates]f64,
                  gaussian_arr: []f64
             ): [][]f64 =
-    let gauss2d  = reshape (num_dates,num_und) gaussian_arr in
+    let gauss2d  = reshape (num_dates,num_und) gaussian_arr
     let gauss2dT = transpose(gauss2d) in
       transpose(
         map (brownianBridgeDates bb_inds bb_data) gauss2dT

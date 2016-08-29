@@ -11,7 +11,7 @@
 --   5
 -- }
 fun tupfun(x:  (int,(f64,int)), y: (int,(f64,int)) ): int =
-    let (x1, x2) = x in
+    let (x1, x2) = x
     let (y1, y2) = y in
         x1 + y1
     --let (x0, (x1,x2)) = x in

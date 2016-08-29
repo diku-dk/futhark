@@ -17,10 +17,10 @@
 --
 fun mul2(x: []f64) (i: int): f64 = x[i]*2.0
 fun main(arr: [n]f64): (f64,[]f64,f64,[]f64,f64,[]f64) =
-    let r1 = reduce (+) (0.0) arr in
-    let x  = map    (+1.0) arr in
-    let r2 = reduce (*) (1.0) x in
-    let y  = map (mul2(x)) (iota(n)) in
-    let z  = map f64 (iota(n)) in
+    let r1 = reduce (+) (0.0) arr
+    let x  = map    (+1.0) arr
+    let r2 = reduce (*) (1.0) x
+    let y  = map (mul2(x)) (iota(n))
+    let z  = map f64 (iota(n))
     let r3 = reduce (+) (0.0) z in
     (r1,x,r2,y,r3,z)

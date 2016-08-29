@@ -6,11 +6,11 @@
 --    [ 0 , 1 , 1 , 2 , 3 , 5 , 8 , 13 , 21 , 34  ]
 -- }
 fun computefibs(arr: *[n]int): *[]int =
-    let arr[0] = 0 in
+    let arr[0] = 0
     let arr[1] = 1 in
     loop (arr) = for i < n-2 do
-                   let x = arr[i] in
-                   let y = arr[i+1] in
+                   let x = arr[i]
+                   let y = arr[i+1]
                    let arr[i+2] = x + y
                    in arr
     in arr

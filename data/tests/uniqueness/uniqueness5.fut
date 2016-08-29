@@ -9,11 +9,11 @@
 -- }
 
 fun main(): ([][]f64,[][]f64) =
-  let n = 10 in
+  let n = 10
   let arrtup = (replicate n ([0.0]), replicate n ([0.0])) in
   loop (outarr = copy(arrtup)) = for i < n  do
-    let (a, b)  = outarr in
-    let a[i] = [0.0] in
+    let (a, b)  = outarr
+    let a[i] = [0.0]
     let b[i] = [0.0] in
     (a, b)
   in outarr

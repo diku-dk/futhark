@@ -7,6 +7,6 @@
 -- }
 
 fun main(b: bool): int =
-  let a = [1,2,3] in
+  let a = [1,2,3]
   let i = if b then 0 else 1 in
   a[i]

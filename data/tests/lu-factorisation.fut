@@ -17,7 +17,7 @@ fun lu_inplace(a: *[n][]f64): (*[][]f64, *[][]f64) =
     for k < n do
       let u[k,k] = a[k,k] in
       loop ((l,u)) = for i < n-k do
-          let l[i+k,k] = a[i+k,k]/u[k,k] in
+          let l[i+k,k] = a[i+k,k]/u[k,k]
           let u[k,i+k] = a[k,i+k] in
           (l,u)
         in

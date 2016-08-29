@@ -67,13 +67,13 @@ fun recM(sob_dirs:  [][num_bits]int, i: int ): []int =
 
 -- computes sobol numbers: n,..,n+chunk-1
 fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
-  let sob_fact= 1.0 / f64(1 << num_bits)       in
-  let sob_beg = sobolIndI(dir_vs, n+1)             in
+  let sob_fact= 1.0 / f64(1 << num_bits)      
+  let sob_beg = sobolIndI(dir_vs, n+1)            
   let contrbs = map (fn (k: int): []int  =>
                         let sob = k + n in
                         if(k==0) then sob_beg
                         else recM(dir_vs, k+n)
-                   ) (iota(chunk) )                 in
+                   ) (iota(chunk) )                
   let vct_ints= scan (fn (x: []int) (y: []int): []int  =>
                         zipWith (^) x y
                     ) (replicate len 0) contrbs in
@@ -91,8 +91,8 @@ fun main(num_mc_it: int,
                   dir_vs_nosz: [][num_bits]int,
                   num_dates: int,
                   num_und: int): [][]f64 =
-  let sobvctsz  = num_dates*num_und in
-  let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz in
+  let sobvctsz  = num_dates*num_und
+  let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz
   let sobol_mat = streamMap (fn (chunk: int) (ns: []int): [][sobvctsz]f64  =>
                                 sobolChunk(dir_vs, ns[0], chunk)
                            ) (iota(num_mc_it) ) in
