@@ -12,6 +12,6 @@ fun main(): int =
     let b = copy(replicate n (iota n)) in
     loop (a) = for i < n do
                  let a[i] = b[i] in a -- Does not alias a to b, because let-with is in-place!
-              
+
     let x = f(b) in -- Consumes only b.
     a[0,0] -- OK

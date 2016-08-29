@@ -20,25 +20,25 @@ fun main(m: int, as: *[n]int): (int,[]int,[][]int,[]f64,[]f64,[]int) =
   let b = map (+10) as
   let c =
     streamSeq (fn (chunk: int) (acc2: (int, [m]int)) (c: *[]int): ((int,[]int),[][m]int,[]f64,[]f64,[]int)  =>
-                 let (acc0, acc) = acc2               
+                 let (acc0, acc) = acc2
                  let x = map  (fn (c: int): []int  =>
                                  map (+c) (iota(m))
-                             ) c                    
+                             ) c
                  let y0= scan (fn (acc: []int) (x: []int): []int  =>
                                  zipWith (+) acc x
-                             ) (replicate m 0) x    
+                             ) (replicate m 0) x
                  let y = map  (fn (y0: []int): []int  =>
                                  zipWith (+) acc y0
-                             ) y0                   
+                             ) y0
                  let z = map  (fn (y: []int): f64  =>
                                  let rs = map (fn (u: int): f64  =>
                                                  f64(3*u)
                                              ) y
                                  in  reduce (+) (0.0) rs
-                             ) y                    
+                             ) y
                  let w = filter (fn (z: f64): bool  =>
                                      (z / 55.0) > 4.0
-                               ) z                  
+                               ) z
 --                 let D = scan ((+), 0, c)                in
 --                 let E = map (+acc0, D)                in
                  -- c becomes scan + 0 c

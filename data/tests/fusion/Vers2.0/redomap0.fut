@@ -7,8 +7,8 @@
 --   [2.0f32, -3.0f32, -1.4f32]
 --   [3.0f32, -7.0f32, -3.8f32]
 -- }
--- structure { 
---      Redomap 1 
+-- structure {
+--      Redomap 1
 -- }
 --
 

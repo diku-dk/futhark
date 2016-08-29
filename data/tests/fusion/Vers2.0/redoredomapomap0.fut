@@ -10,8 +10,8 @@
 --   3.0
 --   [0.0,1.0,2.0]
 -- }
--- structure { 
---      Map 1 
+-- structure {
+--      Map 1
 --      Redomap 1
 -- }
 --

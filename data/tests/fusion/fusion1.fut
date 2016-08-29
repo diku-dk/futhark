@@ -12,7 +12,7 @@ fun h(a: f64, b: f64): f64 = a * b - (a + b)
 fun main(arr: []f64): f64 =
     let b = map f arr
     --let arr[1] = 3.33   in
-    let x = map f b  
-    let y = map g b  
+    let x = map f b
+    let y = map g b
     let z = map h (zip x y) in
     z[0]

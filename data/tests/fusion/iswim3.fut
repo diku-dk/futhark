@@ -19,7 +19,7 @@ fun correlateDeltas(md_c:  [num_und][num_und]f64,
                ) (iota(num_und) )
        ) zds
 
-fun blackScholes(md_c: 
+fun blackScholes(md_c:
                 [num_und][num_und]f64,
                 md_vols: [num_dates][num_und]f64,
                 md_drifts: [num_dates][num_und]f64,
@@ -31,7 +31,7 @@ fun blackScholes(md_c:
             ) (md_starts) noises
 
 
-fun main(md_cs: 
+fun main(md_cs:
              [num_und][num_und]f64,
              md_vols: [num_dates][num_und]f64,
              md_drifts: [num_dates][num_und]f64,

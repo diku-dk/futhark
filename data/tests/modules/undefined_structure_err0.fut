@@ -3,7 +3,7 @@
 -- error: .*Unknown.*
 
 fun try_me(): int = M0.number()
-struct M0 
+struct M0
   {
     fun number(): int = 42
   }

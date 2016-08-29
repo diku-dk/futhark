@@ -14,7 +14,7 @@ fun reduceBins(acc: *[numBins]i64) (elm: *[numBins]i64): *[numBins]i64 =
     in
         newVal
 
-fun doCompute(data1: 
+fun doCompute(data1:
     [num1]f32,
     data2: [num2]f32,
     numBins: i32,

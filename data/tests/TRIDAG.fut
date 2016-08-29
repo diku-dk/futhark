@@ -42,15 +42,15 @@ fun tridag(nn:   int,
     then (b, [d[0]/b[0]])
     else
         loop((b, d)) = for i < (nn-1) do
-            let xm     = a[i+1] / b[i]   
+            let xm     = a[i+1] / b[i]
             let b[i+1] = b[i+1] - xm*c[i]
             let d[i+1] = d[i+1] - xm*d[i] in
             (b, d)
-       
+
         let d[nn-1] = d[nn-1] / b[nn-1]   in
 
         loop(d)    = for i < (nn-1) do
-            let k = nn - 2 - i                      
+            let k = nn - 2 - i
             let d[k] = ( d[k] - c[k]*d[k+1] ) / b[k] in
             d
         in

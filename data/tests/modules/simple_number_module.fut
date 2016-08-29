@@ -9,7 +9,7 @@
 type t = int
 struct NumLib  {
     fun plus(a: t, b: t): t = a + b
-  struct BestNumbers  
+  struct BestNumbers
     {
       fun four(): t = 4
       fun seven(): t = 42

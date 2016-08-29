@@ -10,6 +10,6 @@ fun g(a: f64        ): f64 = a * 3.0
 
 fun main(arr: []f64): f64 =
     let x = map f arr
-    let y = map g x  
+    let y = map g x
     let z = map g y   in
     z[0]
