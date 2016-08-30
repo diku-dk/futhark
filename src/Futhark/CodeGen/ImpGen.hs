@@ -478,7 +478,7 @@ defCompileExp dest (Apply fname args _) = do
      map compileSubExp <$>
      filterM subExpNotArray (map fst args))
 
-defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
+defCompileExp targets (BasicOp op) = defCompileBasicOp targets op
 
 defCompileExp (Destination dest) (DoLoop ctx val form body) =
   declaringFParams mergepat $ do
@@ -507,47 +507,47 @@ defCompileExp dest (Op op) = do
   opc <- asks envOpCompiler
   opc dest op
 
-defCompilePrimOp :: Destination -> PrimOp lore -> ImpM lore op ()
+defCompileBasicOp :: Destination -> BasicOp lore -> ImpM lore op ()
 
-defCompilePrimOp (Destination [target]) (SubExp se) =
+defCompileBasicOp (Destination [target]) (SubExp se) =
   compileSubExpTo target se
 
-defCompilePrimOp (Destination [target]) (UnOp Not e) =
+defCompileBasicOp (Destination [target]) (UnOp Not e) =
   writeExp target $ Imp.UnOp Imp.Not $ compileSubExp e
 
-defCompilePrimOp (Destination [target]) (UnOp op e) =
+defCompileBasicOp (Destination [target]) (UnOp op e) =
   writeExp target $ Imp.UnOp op $ compileSubExp e
 
-defCompilePrimOp (Destination [target]) (ConvOp conv e) =
+defCompileBasicOp (Destination [target]) (ConvOp conv e) =
   writeExp target $ Imp.ConvOp conv $ compileSubExp e
 
-defCompilePrimOp (Destination [target]) (BinOp bop x y) =
+defCompileBasicOp (Destination [target]) (BinOp bop x y) =
   writeExp target $ Imp.BinOp bop (compileSubExp x) (compileSubExp y)
 
-defCompilePrimOp (Destination [target]) (CmpOp bop x y) =
+defCompileBasicOp (Destination [target]) (CmpOp bop x y) =
   writeExp target $ Imp.CmpOp bop (compileSubExp x) (compileSubExp y)
 
-defCompilePrimOp (Destination [_]) (Assert e loc) =
+defCompileBasicOp (Destination [_]) (Assert e loc) =
   emit $ Imp.Assert (compileSubExp e) loc
 
-defCompilePrimOp (Destination [target]) (Index _ src slice)
+defCompileBasicOp (Destination [target]) (Index _ src slice)
   | Just idxs <- sliceIndices slice =
       copyDWIMDest target [] (Var src) $ map (`SE.subExpToScalExp` int32) idxs
 
-defCompilePrimOp _ Index{} =
+defCompileBasicOp _ Index{} =
   return ()
 
-defCompilePrimOp (Destination [dest]) (Replicate (Shape ds) se) = do
+defCompileBasicOp (Destination [dest]) (Replicate (Shape ds) se) = do
   is <- replicateM (length ds) (newVName "i")
   let ds' = map compileSubExp ds
   declaringLoopVars is $ do
     copy_elem <- collect $ copyDWIMDest dest (map varIndex is) se []
     emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
 
-defCompilePrimOp (Destination [_]) Scratch{} =
+defCompileBasicOp (Destination [_]) Scratch{} =
   return ()
 
-defCompilePrimOp (Destination [dest]) (Iota n e s) = do
+defCompileBasicOp (Destination [dest]) (Iota n e s) = do
   i <- newVName "i"
   x <- newVName "x"
   emit $ Imp.DeclareScalar x int32
@@ -557,13 +557,13 @@ defCompilePrimOp (Destination [dest]) (Iota n e s) = do
                             compileSubExp e + Imp.ScalarVar i * compileSubExp s
                           copyDWIMDest dest [varIndex i] (Var x) []))
 
-defCompilePrimOp (Destination [target]) (Copy src) =
+defCompileBasicOp (Destination [target]) (Copy src) =
   compileSubExpTo target $ Var src
 
-defCompilePrimOp _ Split{} =
+defCompileBasicOp _ Split{} =
   return () -- Yes, really.
 
-defCompilePrimOp
+defCompileBasicOp
   (Destination [ArrayDestination (CopyIntoMemory (MemLocation destmem destshape destixfun)) _])
   (Concat _ i x ys _) = do
     xtype <- lookupType x
@@ -582,25 +582,25 @@ defCompilePrimOp
           yentry <- lookupArray y
           let srcloc = entryArrayLocation yentry
               rows = case drop i $ entryArrayShape yentry of
-                      []  -> error $ "defCompilePrimOp Concat: empty array shape for " ++ pretty y
+                      []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
                       r:_ -> innerExp $ Imp.dimSizeToExp r
           copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
           emit $ Imp.SetScalar offs_glb $ Imp.ScalarVar offs_glb + rows
 
-defCompilePrimOp (Destination [dest]) (ArrayLit es _) =
+defCompileBasicOp (Destination [dest]) (ArrayLit es _) =
   forM_ (zip [0..] es) $ \(i,e) ->
   copyDWIMDest dest [constIndex i] e []
 
-defCompilePrimOp _ Rearrange{} =
+defCompileBasicOp _ Rearrange{} =
   return ()
 
-defCompilePrimOp _ Rotate{} =
+defCompileBasicOp _ Rotate{} =
   return ()
 
-defCompilePrimOp _ Reshape{} =
+defCompileBasicOp _ Reshape{} =
   return ()
 
-defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
+defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
   | (sizedests, arrdest) <- splitAt n dests,
     Just sizenames <- mapM fromScalarDestination sizedests,
     Just destlocs <- mapM arrDestLoc arrdest = do
@@ -683,10 +683,10 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
         arrDestLoc _ =
           Nothing
 
-defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
+defCompileBasicOp (Destination []) _ = return () -- No arms, no cake.
 
-defCompilePrimOp target e =
-  throwError $ "ImpGen.defCompilePrimOp: Invalid target\n  " ++
+defCompileBasicOp target e =
+  throwError $ "ImpGen.defCompileBasicOp: Invalid target\n  " ++
   show target ++ "\nfor expression\n  " ++ pretty e
 
 writeExp :: ValueDestination -> Imp.Exp -> ImpM lore op ()

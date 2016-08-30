@@ -40,7 +40,7 @@ nonuniqueParams params =
       let param' = Param param_name $ paramType param
       localScope (scopeOfLParams [param']) $
         letBindNames_ [(paramName param,BindVar)] $
-        PrimOp $ Copy $ paramName param'
+        BasicOp $ Copy $ paramName param'
       return param'
     else
       return param
@@ -84,7 +84,7 @@ redomapToMapAndReduce (Pattern [] patelems) lore
     newmap_lam =
       let tobnd = take (length accs) $ map paramIdent $ lambdaParams redmap_lam
           params' = drop (length accs) $ lambdaParams redmap_lam
-          bndaccs = zipWith (\i acc -> mkLet' []  [i] (PrimOp $ SubExp acc))
+          bndaccs = zipWith (\i acc -> mkLet' []  [i] (BasicOp $ SubExp acc))
                             tobnd accs
           body = lambdaBody redmap_lam
           bnds' = bndaccs ++ bodyBindings body
@@ -100,11 +100,11 @@ sequentialStreamWholeArrayBindings :: Bindable lore =>
 sequentialStreamWholeArrayBindings width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
-      chunk_bnd = mkLet' [] [paramIdent chunk_param] $ PrimOp $ SubExp width
-      acc_bnds = [ mkLet' [] [paramIdent acc_param] $ PrimOp $ SubExp acc
+      chunk_bnd = mkLet' [] [paramIdent chunk_param] $ BasicOp $ SubExp width
+      acc_bnds = [ mkLet' [] [paramIdent acc_param] $ BasicOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
-                   PrimOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
+                   BasicOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
   in (chunk_bnd :
@@ -123,9 +123,9 @@ sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
 sequentialStreamWholeArray pat cs width nes fun arrs = do
   let (body_bnds,res) = sequentialStreamWholeArrayBindings width nes fun arrs
       reshapeRes t (Var v)
-        | null (arrayDims t) = PrimOp $ SubExp $ Var v
+        | null (arrayDims t) = BasicOp $ SubExp $ Var v
         | otherwise          = shapeCoerce cs (arrayDims t) v
-      reshapeRes _ se        = PrimOp $ SubExp se
+      reshapeRes _ se        = BasicOp $ SubExp se
       res_bnds =
         [ mkLet' [] [ident] $ reshapeRes (identType ident) se
         | (ident,se) <- zip (patternValueIdents pat) res]
@@ -134,7 +134,7 @@ sequentialStreamWholeArray pat cs width nes fun arrs = do
   shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
   forM_ (HM.toList shapemap) $ \(name,se) ->
     when (name `elem` patternContextNames pat) $
-      addBinding =<< mkLetNames' [name] (PrimOp $ SubExp se)
+      addBinding =<< mkLetNames' [name] (BasicOp $ SubExp se)
   mapM_ addBinding res_bnds
 
 singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
@@ -150,9 +150,9 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
     pure (rowType $ paramType arr_param)
   let chunk_name = paramName chunk_param
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $
-                  PrimOp $ SubExp $ intConst Int32 1
+                  BasicOp $ SubExp $ intConst Int32 1
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
-                   PrimOp $ Replicate (Shape [Var chunk_name]) $
+                   BasicOp $ Replicate (Shape [Var chunk_name]) $
                    Var $ paramName unchunked_arr_param |
                    (arr_param, unchunked_arr_param) <-
                      zip arr_params unchunked_arr_params ]

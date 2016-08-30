@@ -313,7 +313,7 @@ lookupSubExp :: VName -> SymbolTable lore -> Maybe SubExp
 lookupSubExp name vtable = do
   e <- lookupExp name vtable
   case e of
-    PrimOp (SubExp se) -> Just se
+    BasicOp (SubExp se) -> Just se
     _                  -> Nothing
 
 lookupScalExp :: VName -> SymbolTable lore -> Maybe ScalExp
@@ -506,7 +506,7 @@ insertFreeVar name attr = insertEntry name entry
 
 updateBounds :: Annotations lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
-  case runReader (toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond) types of
+  case runReader (toScalExp (`lookupScalExp` vtable) $ BasicOp $ SubExp cond) types of
     Nothing    -> vtable
     Just cond' ->
       let cond'' | isTrue    = cond'

@@ -121,15 +121,15 @@ tileInBindings branch_variant initial_variance initial_kspace kstms = do
           -- XXX: empty scope here.  Hopefully OK.
           ((tile_size, tiled_group_size), tile_size_bnds) <- flip runBinderT mempty $ do
             group_size_float <-
-              letSubExp "group_size_float" $ PrimOp $ ConvOp (SIToFP Int32 Float32) group_size
+              letSubExp "group_size_float" $ BasicOp $ ConvOp (SIToFP Int32 Float32) group_size
             tile_size_float <-
               letSubExp "tile_size_float" $
               Apply (nameFromString "sqrt32") [(group_size_float,Observe)] $
               primRetType $ FloatType Float32
             tile_size <- letSubExp "tile_size" $
-                         PrimOp $ ConvOp (FPToSI Float32 Int32) tile_size_float
+                         BasicOp $ ConvOp (FPToSI Float32 Int32) tile_size_float
             tiled_group_size <- letSubExp "tiled_group_size" $
-                                PrimOp $ BinOp (Mul Int32) tile_size tile_size
+                                BasicOp $ BinOp (Mul Int32) tile_size tile_size
             return (tile_size, tiled_group_size)
 
           space <- forM gspace $ \(gtid,gdim) -> do
@@ -215,7 +215,7 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
           inner_ldim <- newVName "inner_ldim"
           let is_group_size_smaller =
                 mkLet' [] [Ident smaller $ Prim Bool] $
-                PrimOp $ CmpOp (CmpSlt Int32) (spaceGroupSize kspace) inner_gdim
+                BasicOp $ CmpOp (CmpSlt Int32) (spaceGroupSize kspace) inner_gdim
               smaller_body = Body () [] [spaceGroupSize kspace]
               not_smaller_body = Body () [] [inner_gdim]
               compute_tiled_group_size =
@@ -234,7 +234,7 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
               eDivRoundingUp Int32 (eSubExp threads_necessary) (eSubExp $ Var inner_ldim)
             num_threads <-
               letSubExp "num_threads" $
-              PrimOp $ BinOp (Mul Int32) groups_necessary (Var inner_ldim)
+              BasicOp $ BinOp (Mul Int32) groups_necessary (Var inner_ldim)
             return (num_threads, groups_necessary)
 
           let kspace' = kspace { spaceGroupSize = Var inner_ldim
@@ -271,7 +271,7 @@ tile1d kspace block_size block_param = do
     name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
     return $
       mkLet' [] [Ident name $ rowType $ paramType outer_block_param] $
-      PrimOp $ Index [] (paramName outer_block_param) [DimFix $ Var ltid]
+      BasicOp $ Index [] (paramName outer_block_param) [DimFix $ Var ltid]
 
   let block_cspace = [(ltid,block_size)]
       block_pe =
@@ -303,10 +303,10 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
 
     do_index <- newVName "do_index"
     let do_index_bnd = mkLet' [] [Ident do_index $ Prim Bool] $
-                       PrimOp $ CmpOp (CmpSlt Int32) (Var global_i) global_d
+                       BasicOp $ CmpOp (CmpSlt Int32) (Var global_i) global_d
     elem_name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
     let read_elem_bnd = mkLet' [] [Ident elem_name $ Prim pt] $
-                        PrimOp $ Index [] (paramName outer_block_param) $
+                        BasicOp $ Index [] (paramName outer_block_param) $
                         fullSlice (paramType outer_block_param) [DimFix $ Var invariant_i]
 
     let block_size_2d = Shape $ permute_dims [tile_size, block_size]
@@ -326,9 +326,9 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
                           rearrangeType perm $ patElemType block_pe
     let index_block_kstms =
           [mkLet' [] [block_param_aux] $
-            PrimOp $ Rearrange [] perm block_name_2d,
+            BasicOp $ Rearrange [] perm block_name_2d,
            mkLet' [] [paramIdent block_param] $
-            PrimOp $ Index [] (identName block_param_aux) $
+            BasicOp $ Index [] (identName block_param_aux) $
             fullSlice (identType block_param_aux) [DimFix $ Var variant_i]]
 
     return (outer_block_param, do_index_bnd : write_block_stm : index_block_kstms)
@@ -370,5 +370,5 @@ sufficientGroups gspace tile_size group_size = do
   num_groups <- letSubExp "num_groups" =<<
                 foldBinOp (Mul Int32) (constant (1::Int32)) groups_in_dims
   num_threads <- letSubExp "num_threads" $
-                 PrimOp $ BinOp (Mul Int32) num_groups group_size
+                 BasicOp $ BinOp (Mul Int32) num_groups group_size
   return (num_threads, num_groups)

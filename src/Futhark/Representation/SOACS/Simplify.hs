@@ -199,11 +199,11 @@ liftIdentityMapping _ (Let pat _ (Op (Map cs outersize fun arrs))) =
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup v inputMap =
-            ((Pattern [] [outId], PrimOp $ SubExp $ Var inp) : invariant,
+            ((Pattern [] [outId], BasicOp $ SubExp $ Var inp) : invariant,
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = ((Pattern [] [outId], PrimOp $ Replicate (Shape [outersize]) e) : invariant,
+          | freeOrConst e = ((Pattern [] [outId], BasicOp $ Replicate (Shape [outersize]) e) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
@@ -256,11 +256,11 @@ removeReplicateInput vtable fun arrs
 
         isReplicate p v
           | Just (Replicate (Shape (_:ds)) e) <-
-            asPrimOp =<< ST.lookupExp v vtable =
+            asBasicOp =<< ST.lookupExp v vtable =
               Right ([paramName p],
                      case ds of
-                       [] -> PrimOp $ SubExp e
-                       _  -> PrimOp $ Replicate (Shape ds) e)
+                       [] -> BasicOp $ SubExp e
+                       _  -> BasicOp $ Replicate (Shape ds) e)
           | otherwise =
               Left (p, v)
 
@@ -305,12 +305,12 @@ simplifyClosedFormReduce _ _ = cannotSimplify
 -- This simplistic rule is only valid here, and not after we introduce
 -- memory.
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
-removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) | False = do
+removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (BasicOp (Copy v))) | False = do
   t <- lookupType v
   let originalNotUsedAnymore =
         not (any (`UT.used` used) $ vnameAliases v)
   if primType t || originalNotUsedAnymore
-    then letBind_ (Pattern [] [d]) $ PrimOp $ SubExp $ Var v
+    then letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
     else cannotSimplify
 removeUnnecessaryCopy _ _ = cannotSimplify
 
@@ -331,7 +331,7 @@ simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr))) = d
         argpattps   = map patElemType $ drop (length patels - length rtp) patels
     (newpats,newsubexps) <- unzip . reverse <$>
                             foldM gatherPat [] (zip3 rtp rtp' argpattps)
-    let newexps' = map (PrimOp . SubExp) newsubexps
+    let newexps' = map (BasicOp . SubExp) newsubexps
         rmvdpatels = concatMap patternElements newpats
         patels' = concatMap (\p-> if p `elem` rmvdpatels then [] else [p]) patels
         (ctx,vals) = splitAt (length patels' - length rtp') patels'
@@ -423,8 +423,8 @@ simplifyKnownIterationSOAC _ (Let pat _ (Op (Map cs (Constant k) fun arrs)))
         where bindParam p a = do
                 a_t <- lookupType a
                 letBindNames'_ [paramName p] $
-                  PrimOp $ Index cs a $ fullSlice a_t [DimFix $ constant (0::Int32)]
+                  BasicOp $ Index cs a $ fullSlice a_t [DimFix $ constant (0::Int32)]
               bindResult pe se =
                 letBindNames'_ [patElemName pe] $
-                PrimOp $ ArrayLit [se] $ rowType $ patElemType pe
+                BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
 simplifyKnownIterationSOAC _ _ = cannotSimplify

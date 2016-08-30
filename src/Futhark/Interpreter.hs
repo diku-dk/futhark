@@ -421,7 +421,7 @@ evalExp (Apply fname args rettype) = do
   args' <- mapM (evalSubExp . fst) args
   vs <- evalFuncall fname args'
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs
-evalExp (PrimOp op) = evalPrimOp op
+evalExp (BasicOp op) = evalBasicOp op
 
 evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar boundexp) loopbody) = do
   bound <- evalSubExp boundexp
@@ -459,19 +459,19 @@ evalExp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
 
 evalExp (Op op) = evalSOAC op
 
-evalPrimOp :: PrimOp -> FutharkM [Value]
+evalBasicOp :: BasicOp -> FutharkM [Value]
 
-evalPrimOp (SubExp se) =
+evalBasicOp (SubExp se) =
   single <$> evalSubExp se
 
-evalPrimOp (ArrayLit es rt) = do
-  rowshape <- mapM (asInt "evalPrimOp ArrayLit" <=< evalSubExp) $ arrayDims rt
+evalBasicOp (ArrayLit es rt) = do
+  rowshape <- mapM (asInt "evalBasicOp ArrayLit" <=< evalSubExp) $ arrayDims rt
   single <$> (arrayVal <$>
               mapM evalSubExp es <*>
               pure (elemType rt) <*>
               pure (length es : rowshape))
 
-evalPrimOp binop@(BinOp op e1 e2) = do
+evalBasicOp binop@(BinOp op e1 e2) = do
   v1 <- asPrimitive "BinOp" =<< evalSubExp e1
   v2 <- asPrimitive "BinOp" =<< evalSubExp e2
   case doBinOp op v1 v2 of
@@ -479,31 +479,31 @@ evalPrimOp binop@(BinOp op e1 e2) = do
     Nothing -> bad $ TypeError $ "Cannot BinOp: " ++ unwords [pretty binop, pretty v1, pretty v2]
 
 
-evalPrimOp e@(CmpOp cmp e1 e2) = do
+evalBasicOp e@(CmpOp cmp e1 e2) = do
   v1 <- asPrimitive "CmpOp" =<< evalSubExp e1
   v2 <- asPrimitive "CmpOp" =<< evalSubExp e2
   case doCmpOp cmp v1 v2 of
     Just b -> return [PrimVal $ BoolValue b]
     Nothing -> bad $ TypeError $ "Cannot compare: " ++ unwords [pretty e, pretty v1, pretty v2]
 
-evalPrimOp e@(ConvOp op x) = do
+evalBasicOp e@(ConvOp op x) = do
   v <- asPrimitive "ConvOp" =<< evalSubExp x
   case doConvOp op v of
     Just v' -> return [PrimVal v']
     Nothing -> bad $ TypeError $ "Cannot convert: " ++ unwords [pretty e, pretty v]
 
-evalPrimOp unop@(UnOp op e) = do
+evalBasicOp unop@(UnOp op e) = do
   v <- asPrimitive "UnOp" =<< evalSubExp e
   case doUnOp op v of
     Just v' -> return [PrimVal v']
     Nothing -> bad $ TypeError $ "Cannot UnOp: " ++ unwords [pretty unop, pretty v]
 
-evalPrimOp (Index _ ident slice) = do
+evalBasicOp (Index _ ident slice) = do
   v <- lookupVar ident
   slice' <- mapM evalDimIndex slice
   pure <$> indexArrayValue v slice'
 
-evalPrimOp (Iota e x s) = do
+evalBasicOp (Iota e x s) = do
   v1 <- evalSubExp e
   v2 <- evalSubExp x
   v3 <- evalSubExp s
@@ -516,9 +516,9 @@ evalPrimOp (Iota e x s) = do
                 int32 [fromIntegral e']]
       | otherwise ->
         bad $ NegativeIota $ fromIntegral x'
-    _ -> bad $ TypeError "evalPrimOp Iota"
+    _ -> bad $ TypeError "evalBasicOp Iota"
 
-evalPrimOp (Replicate (Shape ds) e2) = do
+evalBasicOp (Replicate (Shape ds) e2) = do
   ds' <- mapM (asInt32 "Replicate" <=< evalSubExp) ds
   let n = product ds'
   v2 <- evalSubExp e2
@@ -536,52 +536,52 @@ evalPrimOp (Replicate (Shape ds) e2) = do
                             (concat $ genericReplicate n $ elems arr))
                   bt $ map fromIntegral ds'++shape]
 
-evalPrimOp (Scratch bt shape) = do
-  shape' <- mapM (asInt "evalPrimOp Scratch" <=< evalSubExp) shape
+evalBasicOp (Scratch bt shape) = do
+  shape' <- mapM (asInt "evalBasicOp Scratch" <=< evalSubExp) shape
   let nelems = product shape'
       vals = genericReplicate nelems v
   return [ArrayVal (listArray (0,fromIntegral nelems-1) vals) bt shape']
   where v = blankPrimValue bt
 
-evalPrimOp e@(Reshape _ shapeexp arrexp) = do
-  shape <- mapM (asInt "evalPrimOp Reshape" <=< evalSubExp) $ newDims shapeexp
+evalBasicOp e@(Reshape _ shapeexp arrexp) = do
+  shape <- mapM (asInt "evalBasicOp Reshape" <=< evalSubExp) $ newDims shapeexp
   arr <- lookupVar arrexp
   case arr of
     ArrayVal vs bt oldshape
       | product oldshape == product shape ->
         return $ single $ ArrayVal vs bt shape
       | otherwise ->
-        bad $ InvalidArrayShape (PrimOp e) oldshape shape
+        bad $ InvalidArrayShape (BasicOp e) oldshape shape
     _ ->
       bad $ TypeError "Reshape given a non-array argument"
 
-evalPrimOp (Rearrange _ perm arrexp) =
+evalBasicOp (Rearrange _ perm arrexp) =
   single . permuteArray perm <$> lookupVar arrexp
 
-evalPrimOp (Rotate _ offsets arrexp) = do
-  offsets' <- mapM (asInt "evalPrimOp rotate" <=< evalSubExp) offsets
+evalBasicOp (Rotate _ offsets arrexp) = do
+  offsets' <- mapM (asInt "evalBasicOp rotate" <=< evalSubExp) offsets
   single . rotateArray offsets' <$> lookupVar arrexp
 
-evalPrimOp (Split _ i sizeexps arrexp) = do
-  sizes <- mapM (asInt "evalPrimOp Split" <=< evalSubExp) sizeexps
+evalBasicOp (Split _ i sizeexps arrexp) = do
+  sizes <- mapM (asInt "evalBasicOp Split" <=< evalSubExp) sizeexps
   arr <- lookupVar arrexp
   return $ splitArray i sizes arr
 
-evalPrimOp (Concat _ i arr1exp arr2exps _) = do
+evalBasicOp (Concat _ i arr1exp arr2exps _) = do
   arr1  <- lookupVar arr1exp
   arr2s <- mapM lookupVar arr2exps
   return [foldl (concatArrays i) arr1 arr2s]
 
-evalPrimOp (Copy v) = single <$> lookupVar v
+evalBasicOp (Copy v) = single <$> lookupVar v
 
-evalPrimOp (Assert e loc) = do
+evalBasicOp (Assert e loc) = do
   v <- evalSubExp e
   case v of PrimVal (BoolValue True) ->
               return [PrimVal Checked]
             _ ->
               bad $ AssertFailed loc
 
-evalPrimOp (Partition _ n flags arrs) = do
+evalBasicOp (Partition _ n flags arrs) = do
   flags_elems <- arrToList =<< lookupVar flags
   arrvs <- mapM lookupVar arrs
   let ets = map (elemType . valueType) arrvs
@@ -650,7 +650,7 @@ evalSOAC (Scan _ w fun inputs) = do
 
 evalSOAC (Redomap cs w _ redfun foldfun accexp arrexps) = do
   -- SO LAZY: redomap is scanomap, after which we index the last elements.
-  w' <- asInt "evalPrimOp Redomap" =<< evalSubExp w
+  w' <- asInt "evalBasicOp Redomap" =<< evalSubExp w
   vs <- evalSOAC $  Scanomap cs w redfun foldfun accexp arrexps
   let (acc_arrs, arrs) = splitAt (length accexp) vs
   accs <- if w' == 0

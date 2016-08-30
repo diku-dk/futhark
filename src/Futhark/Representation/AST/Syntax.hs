@@ -37,7 +37,7 @@ module Futhark.Representation.AST.Syntax
   , Result
   , BodyT(..)
   , Body
-  , PrimOp (..)
+  , BasicOp (..)
   , UnOp (..)
   , BinOp (..)
   , CmpOp (..)
@@ -148,7 +148,7 @@ type ShapeChange d = [DimChange d]
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
-data PrimOp lore
+data BasicOp lore
   = SubExp SubExp
     -- ^ Subexpressions, doubling as tuple literals if the
     -- list has anything but a single element.
@@ -227,9 +227,9 @@ data PrimOp lore
 
 -- | The root Futhark expression type.  The 'Op' constructor contains
 -- a lore-specific operation.  Do-loops, branches and function calls
--- are special.  Everything else is a simple 'PrimOp'.
+-- are special.  Everything else is a simple 'BasicOp'.
 data ExpT lore
-  = PrimOp (PrimOp lore)
+  = BasicOp (BasicOp lore)
     -- ^ A simple (non-recursive) operation.
 
   | Apply  Name [(SubExp, Diet)] (RetType lore)

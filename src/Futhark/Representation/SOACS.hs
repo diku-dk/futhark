@@ -9,7 +9,7 @@ module Futhark.Representation.SOACS
        , Body
        , Binding
        , Pattern
-       , PrimOp
+       , BasicOp
        , Exp
        , Lambda
        , ExtLambda
@@ -30,7 +30,7 @@ module Futhark.Representation.SOACS
        , AST.PatternT(Pattern)
        , AST.PatElemT(PatElem)
        , AST.ProgT(Prog)
-       , AST.ExpT(PrimOp)
+       , AST.ExpT(BasicOp)
        , AST.FunDefT(FunDef)
        , AST.ParamT(Param)
        )
@@ -40,7 +40,7 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, Exp, Body, Binding,
+  hiding (Prog, BasicOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType, PatElem)
 import Futhark.Representation.SOACS.SOAC
@@ -64,7 +64,7 @@ instance Annotations SOACS where
 instance Attributes SOACS where
 
 type Prog = AST.Prog SOACS
-type PrimOp = AST.PrimOp SOACS
+type BasicOp = AST.BasicOp SOACS
 type Exp = AST.Exp SOACS
 type Body = AST.Body SOACS
 type Binding = AST.Binding SOACS

@@ -178,10 +178,10 @@ instance PrettyLore lore => Pretty (Binding lore) where
                         DoLoop{} -> True
                         Op{} -> True
                         If{} -> True
-                        PrimOp ArrayLit{} -> False
+                        BasicOp ArrayLit{} -> False
                         _ -> False
 
-instance Pretty (PrimOp lore) where
+instance Pretty (BasicOp lore) where
   ppr (SubExp se) = ppr se
   ppr (ArrayLit [] rt) =
     text "empty" <> parens (ppr rt)
@@ -229,7 +229,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
                      text "then" <+> align (ppr t) </>
                      text "else" <+> align (ppr f)
-  ppr (PrimOp op) = ppr op
+  ppr (BasicOp op) = ppr op
   ppr (Apply fname args _) = text (nameToString fname) <>
                              apply (map (align . ppr . fst) args)
   ppr (Op op) = ppr op

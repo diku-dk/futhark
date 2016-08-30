@@ -41,7 +41,7 @@ import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.AST
 import           Futhark.Representation.ExplicitMemory
                  hiding (Prog, Body, Binding, Pattern, PatElem,
-                         PrimOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
+                         BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import qualified Futhark.Analysis.ScalExp as SE
 import           Futhark.Pass
@@ -231,7 +231,7 @@ allocBindings merge = runWriterT . zipWithM allocation merge
               bound = ArrayMem bt shape NoUniqueness mem v_ixfun
           tell [Let (Pattern []
                      [PatElem v_copy BindVar bound]) () $
-                PrimOp $ Copy v]
+                BasicOp $ Copy v]
           return (f, Var v_copy)
         allocation (f, se) _ =
           return (f, se)
@@ -255,7 +255,7 @@ doubleBufferResult valparams buffered (Body () bnds res) =
           let t = resultType $ paramType fparam
               summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness bufname ixfun
               copybnd = Let (Pattern [] [PatElem copyname BindVar summary]) () $
-                        PrimOp $ Copy v
+                        BasicOp $ Copy v
           in (Just copybnd, Var copyname)
 
         buffer _ _ se =

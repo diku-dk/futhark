@@ -23,7 +23,7 @@ import Futhark.Pass
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
        hiding (Prog, Body, Binding, Pattern, PatElem,
-               PrimOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
+               BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
@@ -173,7 +173,7 @@ expandedAllocations num_threads thread_index thread_allocs = do
           let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int32]
               allocpat = Pattern [] [PatElem mem BindVar $
                                      MemMem (Var total_size) space]
-          return ([Let sizepat () $ PrimOp $ BinOp (Mul Int32) num_threads per_thread_size,
+          return ([Let sizepat () $ BasicOp $ BinOp (Mul Int32) num_threads per_thread_size,
                    Let allocpat () $ Op $ Alloc (Var total_size) space],
                    HM.singleton mem newBase)
 

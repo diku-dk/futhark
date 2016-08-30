@@ -34,25 +34,25 @@ regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps = d
 
   loop_vals <- zipWithM mergeParam (patternValueNames pat) acct
   loop_vals_init <- forM acct $ \t ->
-    letSubExp "segmented_reduce_scratch" $ PrimOp $ Scratch (elemType t) (num_segments : arrayDims t)
+    letSubExp "segmented_reduce_scratch" $ BasicOp $ Scratch (elemType t) (num_segments : arrayDims t)
 
   segmented_arrs <- forM (zip full_arrs acct) $ \(arr, t) ->
     let newshape = map DimNew $ num_segments : segment_size : arrayDims t
-    in letExp (baseString arr ++ "_segmented") $ PrimOp $ Reshape [] newshape arr
+    in letExp (baseString arr ++ "_segmented") $ BasicOp $ Reshape [] newshape arr
 
   loop_body <- runBodyBinder $ localScope (scopeOfFParams loop_vals) $ do
     red_pat <- Pattern [] <$> zipWithM redPatElem (patternValueNames pat) acct
 
     arrs <- forM segmented_arrs $ \segmented_arr ->
       letExp (baseString segmented_arr ++ "_indexed") $
-      PrimOp $ Index [] segmented_arr [DimFix $ Var i]
+      BasicOp $ Index [] segmented_arr [DimFix $ Var i]
 
     mapM_ addBinding =<< blockedReduction red_pat cs segment_size comm lam lam nes arrs
 
     loop_vals' <- forM (zip loop_vals $ patternValueNames red_pat) $ \(loop_param, red_out) ->
       letInPlace (baseString (paramName loop_param)) [] (paramName loop_param)
       (fullSlice (paramType loop_param) [DimFix $ Var i]) $
-      PrimOp $ SubExp $ Var red_out
+      BasicOp $ SubExp $ Var red_out
 
     return $ resultBody $ map Var loop_vals'
 
@@ -62,7 +62,7 @@ regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps = d
     (ForLoop i num_segments) loop_body
 
   forM_ (zip (patternValueElements pat) (patternValueNames flat_pat)) $ \(to, from) ->
-    letBind_ (Pattern [] [to]) $ PrimOp $
+    letBind_ (Pattern [] [to]) $ BasicOp $
     Reshape [] (map DimNew $ arrayDims $ patElemType to) from
 
   where redPatElem pe_name t = do
@@ -100,7 +100,7 @@ regularSegmentedReduceAsScan segment_size num_segments nest_sizes flat_pat pat c
         offset = (segment_id + 1) * SE.intSubExpToScalExp segment_size - 1
     j <- letSubExp "j" =<< SE.fromScalExp offset
     vals <- forM (patternValueIdents flat_pat) $ \arr ->
-      letSubExp "v" $ PrimOp $ Index [] (identName arr) $
+      letSubExp "v" $ BasicOp $ Index [] (identName arr) $
       fullSlice (identType arr) [DimFix j]
     return $ resultBody vals
 

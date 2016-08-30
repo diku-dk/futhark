@@ -22,7 +22,7 @@ module Futhark.Representation.AST.Attributes
 
   -- * Extra tools
   , funDefByName
-  , asPrimOp
+  , asBasicOp
   , safeExp
   , subExpVars
   , subExpVar
@@ -84,33 +84,33 @@ builtInFunctions = HM.fromList $ map namify
 funDefByName :: Name -> Prog lore -> Maybe (FunDef lore)
 funDefByName fname = find ((fname ==) . funDefName) . progFunctions
 
--- | If the expression is a 'PrimOp', return that 'PrimOp', otherwise 'Nothing'.
-asPrimOp :: Exp lore -> Maybe (PrimOp lore)
-asPrimOp (PrimOp op) = Just op
-asPrimOp _           = Nothing
+-- | If the expression is a 'BasicOp', return that 'BasicOp', otherwise 'Nothing'.
+asBasicOp :: Exp lore -> Maybe (BasicOp lore)
+asBasicOp (BasicOp op) = Just op
+asBasicOp _           = Nothing
 
 -- | An expression is safe if it is always well-defined (assuming that
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: IsOp (Op lore) => Exp lore -> Bool
-safeExp (PrimOp op) = safePrimOp op
-  where safePrimOp (BinOp SDiv{} _ (Constant y)) = not $ zeroIsh y
-        safePrimOp (BinOp SDiv{} _ _) = False
-        safePrimOp (BinOp UDiv{} _ (Constant y)) = not $ zeroIsh y
-        safePrimOp (BinOp UDiv{} _ _) = False
-        safePrimOp (BinOp SMod{} _ (Constant y)) = not $ zeroIsh y
-        safePrimOp (BinOp SMod{} _ _) = False
-        safePrimOp (BinOp UMod{} _ (Constant y)) = not $ zeroIsh y
-        safePrimOp (BinOp UMod{} _ _) = False
-        safePrimOp (BinOp Pow{} (Constant x) _) = not $ zeroIsh x
-        safePrimOp (BinOp Pow{} _ _) = False
-        safePrimOp BinOp{} = True
-        safePrimOp SubExp{} = True
-        safePrimOp UnOp{} = True
-        safePrimOp CmpOp{} = True
-        safePrimOp ConvOp{} = True
-        safePrimOp _ = False
+safeExp (BasicOp op) = safeBasicOp op
+  where safeBasicOp (BinOp SDiv{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp SDiv{} _ _) = False
+        safeBasicOp (BinOp UDiv{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp UDiv{} _ _) = False
+        safeBasicOp (BinOp SMod{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp SMod{} _ _) = False
+        safeBasicOp (BinOp UMod{} _ (Constant y)) = not $ zeroIsh y
+        safeBasicOp (BinOp UMod{} _ _) = False
+        safeBasicOp (BinOp Pow{} (Constant x) _) = not $ zeroIsh x
+        safeBasicOp (BinOp Pow{} _ _) = False
+        safeBasicOp BinOp{} = True
+        safeBasicOp SubExp{} = True
+        safeBasicOp UnOp{} = True
+        safeBasicOp CmpOp{} = True
+        safeBasicOp ConvOp{} = True
+        safeBasicOp _ = False
 
 safeExp DoLoop{} = False
 safeExp Apply{} = False

@@ -75,8 +75,8 @@ bindingMetrics :: OpMetrics (Op lore) => Binding lore -> MetricsM ()
 bindingMetrics = expMetrics . bindingExp
 
 expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()
-expMetrics (PrimOp op) =
-  seen "PrimOp" >> primOpMetrics op
+expMetrics (BasicOp op) =
+  seen "BasicOp" >> primOpMetrics op
 expMetrics (DoLoop _ _ ForLoop{} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
 expMetrics (DoLoop _ _ WhileLoop{} body) =
@@ -90,7 +90,7 @@ expMetrics (Apply fname _ _) =
 expMetrics (Op op) =
   opMetrics op
 
-primOpMetrics :: PrimOp lore -> MetricsM ()
+primOpMetrics :: BasicOp lore -> MetricsM ()
 primOpMetrics (SubExp _) = seen "SubExp"
 primOpMetrics ArrayLit{} = seen "ArrayLit"
 primOpMetrics BinOp{} = seen "BinOp"

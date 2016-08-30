@@ -130,7 +130,7 @@ optimiseBindings (bnd:bnds) m = do
 
         checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
             | [PatElem v (BindInPlace cs src [DimFix i]) attr] <- patternElements pat,
-              PrimOp (SubExp (Var ve)) <- e = do
+              BasicOp (SubExp (Var ve)) <- e = do
                 forwarded <- maybeForward ve v attr cs src i
                 return $ if forwarded
                          then bnds'
@@ -187,7 +187,7 @@ updateBinding fwd =
              (updateCertificates fwd)
              (updateSource fwd)
              (updateIndices fwd))] $
-  PrimOp $ SubExp $ Var $ updateValue fwd
+  BasicOp $ SubExp $ Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)
                       deriving (Monad, Applicative, Functor,

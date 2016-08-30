@@ -89,7 +89,7 @@ ensureShapeVar asserting loc t name v
     oldshape <- arrayDims <$> lookupType v
     let checkDim desired has =
           letExp "shape_cert" =<<
-          eAssert (pure $ PrimOp $ CmpOp (CmpEq int32) desired has) loc
+          eAssert (pure $ BasicOp $ CmpOp (CmpEq int32) desired has) loc
     certs <- asserting $ zipWithM checkDim newshape oldshape
     letExp name $ shapeCoerce certs newshape v
   | otherwise = return v

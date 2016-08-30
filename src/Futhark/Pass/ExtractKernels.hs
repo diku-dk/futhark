@@ -528,7 +528,7 @@ unbalancedLambda lam =
         unbalancedBinding bound (If _ tbranch fbranch _) =
           unbalancedBody bound tbranch || unbalancedBody bound fbranch
 
-        unbalancedBinding _ (PrimOp _) =
+        unbalancedBinding _ (BasicOp _) =
           False
         unbalancedBinding _ (Apply fname _ _) =
           not $ isBuiltInFunction fname
@@ -665,7 +665,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
     _ ->
       addBindingToKernel bnd acc
 
-maybeDistributeBinding (Let pat attr (PrimOp (Replicate (Shape (d:ds)) v))) acc
+maybeDistributeBinding (Let pat attr (BasicOp (Replicate (Shape (d:ds)) v))) acc
   | [t] <- patternTypes pat = do
       -- XXX: We need a temporary dummy binding to prevent an empty
       -- map body.  The kernel extractor does not like empty map
@@ -674,27 +674,27 @@ maybeDistributeBinding (Let pat attr (PrimOp (Replicate (Shape (d:ds)) v))) acc
       let rowt = rowType t
           newbnd = Let pat attr $ Op $ Map [] d lam []
           tmpbnd = Let (Pattern [] [PatElem tmp BindVar rowt]) () $
-                   PrimOp $ Replicate (Shape ds) v
+                   BasicOp $ Replicate (Shape ds) v
           lam = Lambda { lambdaReturnType = [rowt]
                        , lambdaParams = []
                        , lambdaBody = mkBody [tmpbnd] [Var tmp]
                        }
       maybeDistributeBinding newbnd acc
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc =
+maybeDistributeBinding bnd@(Let _ _ (BasicOp Copy{})) acc =
   distributeSingleUnaryBinding acc bnd $ \_ outerpat arr ->
-  addKernel [Let outerpat () $ PrimOp $ Copy arr]
+  addKernel [Let outerpat () $ BasicOp $ Copy arr]
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp (Rearrange cs perm _))) acc =
+maybeDistributeBinding bnd@(Let _ _ (BasicOp (Rearrange cs perm _))) acc =
   distributeSingleUnaryBinding acc bnd $ \nest outerpat arr -> do
     let r = length (snd nest) + 1
         perm' = [0..r-1] ++ map (+r) perm
-    addKernel [Let outerpat () $ PrimOp $ Rearrange cs perm' arr]
+    addKernel [Let outerpat () $ BasicOp $ Rearrange cs perm' arr]
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp (Reshape cs reshape _))) acc =
+maybeDistributeBinding bnd@(Let _ _ (BasicOp (Reshape cs reshape _))) acc =
   distributeSingleUnaryBinding acc bnd $ \nest outerpat arr -> do
     let reshape' = map DimCoercion (kernelNestWidths nest) ++ reshape
-    addKernel [Let outerpat () $ PrimOp $ Reshape cs reshape' arr]
+    addKernel [Let outerpat () $ BasicOp $ Reshape cs reshape' arr]
 
 maybeDistributeBinding bnd acc =
   addBindingToKernel bnd acc
@@ -762,7 +762,7 @@ segmentedScanKernel nest perm cs segment_size lam scan_inps =
             bindage = patElemBindage dst_pat_elem
             dims = arrayDims $ identType ident
         addBinding $ mkLet [] [(ident, bindage)] $
-          PrimOp $ Reshape [] (map DimNew dims) flat
+          BasicOp $ Reshape [] (map DimNew dims) flat
 
 regularSegmentedReduceKernel :: KernelNest
                              -> [Int]
@@ -819,7 +819,7 @@ isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
                       -- the loop nesting. We will have to replicate
                       -- it.
                       arr' <- letExp (baseString arr ++ "_repd") $
-                              PrimOp $ Replicate (Shape [segment_size]) $ Var arr
+                              BasicOp $ Replicate (Shape [segment_size]) $ Var arr
                       return (ne, arr')
           _ ->
             fail "Input not free or outermost."
@@ -832,7 +832,7 @@ isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
     -- We must make sure all inputs are of size
     -- segment_size*nesting_size.
     total_num_elements <-
-      letSubExp "total_num_elements" $ PrimOp $ BinOp (Mul Int32) segment_size nesting_size
+      letSubExp "total_num_elements" $ BasicOp $ BinOp (Mul Int32) segment_size nesting_size
 
     let flatten (ne, arr) = do
           ne_shape <- arrayShape <$> subExpType ne
@@ -841,9 +841,9 @@ isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
                         (shapeRank arr_shape - shapeRank ne_shape)
                         arr_shape
           arr_manifest <- letExp (baseString arr ++ "_manifest") $
-                          PrimOp $ Copy arr
+                          BasicOp $ Copy arr
           arr' <- letExp (baseString arr ++ "_flat") $
-                  PrimOp $ Reshape [] reshape arr_manifest
+                  BasicOp $ Reshape [] reshape arr_manifest
           return (ne, arr')
 
     op_inps' <- mapM flatten =<< sequence mk_inps

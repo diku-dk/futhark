@@ -92,7 +92,7 @@ transformBinding (Let pat () e)
 
                       PatElem name BindVar attr,
 
-                      Let (Pattern [] [pat_elem]) () $ PrimOp $ Copy name)
+                      Let (Pattern [] [pat_elem]) () $ BasicOp $ Copy name)
             attr ->
               fail $ "Invalid attribute for let-binding of scan or reduce kernel return: " ++ pretty attr
 

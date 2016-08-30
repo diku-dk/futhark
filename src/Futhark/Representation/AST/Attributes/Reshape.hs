@@ -52,7 +52,7 @@ newShape = Shape . newDims
 -- 'DimCoercion's.
 shapeCoerce :: Certificates -> [SubExp] -> VName -> Exp lore
 shapeCoerce cs newdims arr =
-  PrimOp $ Reshape cs (map DimCoercion newdims) arr
+  BasicOp $ Reshape cs (map DimCoercion newdims) arr
 
 -- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the outer @n@ dimensions of @oldshape@ with @newshape@.

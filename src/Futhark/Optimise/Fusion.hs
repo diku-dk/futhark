@@ -581,7 +581,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
       reduceLike soac lambdas $ getStreamAccums form
 
     _ -> do
-      let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
+      let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
       bres <- gatherBindingPattern pat $ fusionGatherBody fres body
       foldM fusionGatherExp bres (e:pat_vars)
   where body = mkBody bnds res
@@ -604,12 +604,12 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
     Just (src,trns) <- SOAC.transformFromExp e =
       bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
   | otherwise = do
-      let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
+      let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
       bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
       foldM fusionGatherExp bres (e:pat_vars)
 
 fusionGatherBody fres (Body _ [] res) =
-  foldM fusionGatherExp fres $ map (PrimOp . SubExp) res
+  foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 
@@ -639,7 +639,7 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   return $ unionFusionRes new_res' fres''
   where merge = ctx ++ val
 
-fusionGatherExp fres (PrimOp (Index _ idd inds)) =
+fusionGatherExp fres (BasicOp (Index _ idd inds)) =
   foldM addVarToInfusible fres $ idd : HS.toList (mconcat $ map freeIn inds)
 
 fusionGatherExp fres (If cond e_then e_else _) = do
@@ -831,7 +831,7 @@ copyNewlyConsumed was_consumed soac =
 
         copyConsumedArr a
           | a `HS.member` newly_consumed =
-            letExp (baseString a <> "_copy") $ PrimOp $ Copy a
+            letExp (baseString a <> "_copy") $ BasicOp $ Copy a
           | otherwise = return a
 
         copyFreeInLambda lam = do
@@ -849,7 +849,7 @@ copyNewlyConsumed was_consumed soac =
 
         copyFree (bnds, subst) v = do
           v_copy <- newVName $ baseString v <> "_copy"
-          copy <- mkLetNamesM' [v_copy] $ PrimOp $ Copy v
+          copy <- mkLetNamesM' [v_copy] $ BasicOp $ Copy v
           return (copy:bnds, HM.insert v v_copy subst)
 
 ---------------------------------------------------

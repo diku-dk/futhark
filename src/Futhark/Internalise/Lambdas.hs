@@ -76,7 +76,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'
                 forM_ (zip inner_shapes ses) $ \(v, se) ->
-                  letBind_ (basicPattern' [] [v]) $ I.PrimOp $ I.SubExp se
+                  letBind_ (basicPattern' [] [v]) $ I.BasicOp $ I.SubExp se
         else letBind_ (basicPattern' [] inner_shapes) =<<
              eIf isempty emptybranch nonemptybranch
 
@@ -86,13 +86,13 @@ bindMapShapes inner_shapes sizefun args outer_shape
           resultBody <$> (eLambda sizefun =<< mapM index0 args)
 
         isempty = eCmpOp (I.CmpEq I.int32)
-                  (pure $ I.PrimOp $ I.SubExp outer_shape)
-                  (pure $ I.PrimOp $ SubExp zero)
+                  (pure $ I.BasicOp $ I.SubExp outer_shape)
+                  (pure $ I.BasicOp $ SubExp zero)
         zero = constant (0::I.Int32)
         index0 arg = do
-          arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
+          arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
           arg_t <- lookupType arg'
-          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' $ fullSlice arg_t [I.DimFix zero]
+          letSubExp "elem" $ I.BasicOp $ I.Index [] arg' $ fullSlice arg_t [I.DimFix zero]
 
 internaliseFoldLambda :: InternaliseLambda
                       -> (InternaliseM Certificates -> InternaliseM Certificates)
@@ -139,7 +139,7 @@ internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
       acc_params  = take acc_len params
       map_bodyres = drop acc_len $ I.bodyResult body
       acc_bindings= map (\(ac_var,ac_val) ->
-                            mkLet' [] [paramIdent ac_var] (PrimOp $ SubExp ac_val)
+                            mkLet' [] [paramIdent ac_var] (BasicOp $ SubExp ac_val)
                         ) (zip acc_params nes)
 
       map_bindings= acc_bindings ++ bodyBindings body
@@ -247,7 +247,7 @@ internalisePartitionLambdas internaliseLambda lams args = do
               next_lam_body <-
                 mkCombinedLambdaBody (map paramIdent lam_params) (i+1) lams'
               let parambnds =
-                    [ mkLet' [] [paramIdent top] $ I.PrimOp $ I.SubExp $ I.Var $ I.identName fromp
+                    [ mkLet' [] [paramIdent top] $ I.BasicOp $ I.SubExp $ I.Var $ I.identName fromp
                     | (top,fromp) <- zip lam_params params ]
                   branchbnd = mkLet' [] [intres] $ I.If boolres
                               (resultBody [constant i])

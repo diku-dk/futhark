@@ -22,7 +22,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.Kernels
        hiding (Prog, Body, Binding, Pattern, PatElem,
-               PrimOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
+               BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import Futhark.Tools
 import Futhark.Pass
 import Futhark.Util
@@ -58,8 +58,8 @@ type ExpMap = HM.HashMap VName (Binding Kernels)
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case HM.lookup name m of
-    Just (Let _ _ (PrimOp (Rearrange _ perm _))) -> Just $ Just perm
-    Just (Let _ _ (PrimOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
+    Just (Let _ _ (BasicOp (Rearrange _ perm _))) -> Just $ Just perm
+    Just (Let _ _ (BasicOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
     Just (Let pat _ (Op (Kernel _ _ ts _))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
@@ -123,7 +123,7 @@ paddedScanReduceInput :: SubExp -> SubExp
 paddedScanReduceInput w num_threads = do
   w_padded <- letSubExp "padded_size" =<<
               eRoundToMultipleOf Int32 (eSubExp w) (eSubExp num_threads)
-  padding <- letSubExp "padding" $ PrimOp $ BinOp (Sub Int32) w_padded w
+  padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int32) w_padded w
   return (w_padded, padding)
 
 rearrangeScanReduceInput :: MonadBinder m =>
@@ -140,9 +140,9 @@ rearrangeScanReduceInput cs num_threads padding w w_padded elements_per_thread a
               padding_shape = arr_shape `setOuterDim` padding
           arr_padding <-
             letExp (baseString arr <> "_padding") $
-            PrimOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
+            BasicOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
           letExp (baseString arr <> "_padded") $
-            PrimOp $ Concat [] 0 arr [arr_padding] w_padded
+            BasicOp $ Concat [] 0 arr [arr_padding] w_padded
 
         rearrange arr_name arr_padded row_type = do
           let row_dims = arrayDims row_type
@@ -151,21 +151,21 @@ rearrangeScanReduceInput cs num_threads padding w w_padded elements_per_thread a
               tr_perm_inv = rearrangeInverse tr_perm
           arr_extradim <-
             letExp (arr_name <> "_extradim") $
-            PrimOp $ Reshape cs (map DimNew $ shapeDims extradim_shape) arr_padded
+            BasicOp $ Reshape cs (map DimNew $ shapeDims extradim_shape) arr_padded
           arr_extradim_tr <-
             letExp (arr_name <> "_extradim_tr") $
-            PrimOp $ Rearrange [] tr_perm arr_extradim
+            BasicOp $ Rearrange [] tr_perm arr_extradim
           arr_extradim_manifested <-
             letExp (arr_name <> "_extradim_manifested") $
-            PrimOp $ Copy arr_extradim_tr
+            BasicOp $ Copy arr_extradim_tr
           arr_extradim_inv_tr <-
             letExp (arr_name <> "_extradim_inv_tr") $
-            PrimOp $ Rearrange [] tr_perm_inv arr_extradim_manifested
+            BasicOp $ Rearrange [] tr_perm_inv arr_extradim_manifested
           arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
-            PrimOp $ Reshape [] (reshapeOuter [DimNew w_padded] 2 extradim_shape)
+            BasicOp $ Reshape [] (reshapeOuter [DimNew w_padded] 2 extradim_shape)
             arr_extradim_inv_tr
           letExp (arr_name <> "_inv_tr_init") $
-            PrimOp $ Split [] 0 [w] arr_inv_tr
+            BasicOp $ Split [] 0 [w] arr_inv_tr
 
 transformKernelBody :: SubExp -> Certificates
                     -> KernelBody InKernel
@@ -207,12 +207,12 @@ traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
         onBody (Body battr bnds bres) =
           Body battr <$> mapM onBinding bnds <*> pure bres
 
-        onBinding (Let pat attr (PrimOp (Index cs arr is))) =
+        onBinding (Let pat attr (BasicOp (Index cs arr is))) =
           Let pat attr . oldOrNew <$> f arr is
           where oldOrNew Nothing =
-                  PrimOp $ Index cs arr is
+                  BasicOp $ Index cs arr is
                 oldOrNew (Just (arr', is')) =
-                  PrimOp $ Index cs arr' is'
+                  BasicOp $ Index cs arr' is'
         onBinding (Let pat attr e) =
           Let pat attr <$> mapExpM mapper e
 
@@ -332,13 +332,13 @@ rearrangeInput manifest perm arr = do
   -- will hopefully be removed by the simplifier.
   manifested <- if isJust manifest then flatInput arr else return arr
   transposed <- letExp (baseString arr ++ "_tr") $
-                PrimOp $ Rearrange [] perm manifested
+                BasicOp $ Rearrange [] perm manifested
   tr_manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                   PrimOp $ Copy transposed
+                   BasicOp $ Copy transposed
   letExp (baseString arr ++ "_inv_tr") $
-    PrimOp $ Rearrange [] inv_perm tr_manifested
+    BasicOp $ Rearrange [] inv_perm tr_manifested
 
 flatInput :: MonadBinder m =>
              VName -> m VName
 flatInput arr =
-  letExp (baseString arr ++ "_manifested") $ PrimOp $ Copy arr
+  letExp (baseString arr ++ "_manifested") $ BasicOp $ Copy arr

@@ -95,9 +95,9 @@ substituteIndicesInExp substs e = do
           let consumingSubst substs' v
                 | Just (cs2, src2, src2attr, is2) <- lookup v substs = do
                     row <- letExp (baseString v ++ "_row") $
-                           PrimOp $ Index cs2 src2 is2
+                           BasicOp $ Index cs2 src2 is2
                     row_copy <- letExp (baseString v ++ "_row_copy") $
-                                PrimOp $ Copy row
+                                BasicOp $ Copy row
                     return $ update v v ([],
                                          row_copy,
                                          src2attr `setType`
@@ -120,9 +120,9 @@ substituteIndicesInVar :: MonadBinder m =>
                        -> m VName
 substituteIndicesInVar substs v
   | Just ([], src2, _, []) <- lookup v substs =
-    letExp (baseString src2) $ PrimOp $ SubExp $ Var src2
+    letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
   | Just (cs2, src2, _, is2) <- lookup v substs =
-    letExp "idx" $ PrimOp $ Index cs2 src2 is2
+    letExp "idx" $ BasicOp $ Index cs2 src2 is2
   | otherwise =
     return v
 

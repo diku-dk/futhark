@@ -41,7 +41,7 @@ subExpAliases :: SubExp -> Names
 subExpAliases Constant{} = mempty
 subExpAliases (Var v)    = vnameAliases v
 
-primOpAliases :: PrimOp lore -> [Names]
+primOpAliases :: BasicOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
 primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
 primOpAliases BinOp{} = [mempty]
@@ -89,7 +89,7 @@ expAliases (If _ tb fb _) =
   ifAliases
   (bodyAliases tb, consumedInBody tb)
   (bodyAliases fb, consumedInBody fb)
-expAliases (PrimOp op) = primOpAliases op
+expAliases (BasicOp op) = primOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
   map (`HS.difference` merge_names) val_aliases
   where (_ctx_aliases, val_aliases) =

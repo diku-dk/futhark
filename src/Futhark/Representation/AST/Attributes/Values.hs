@@ -59,7 +59,7 @@ permuteArray perm (ArrayVal inarr et oldshape) =
         picks (n:ns) = [ i:is | is <- picks ns, i <- [0..n-1] ]
 permuteArray _ v = v
 
--- | Rotate the elements of an array as per the 'Rotate' PrimOp.
+-- | Rotate the elements of an array as per the 'Rotate' BasicOp.
 rotateArray :: [Int] -> Value -> Value
 rotateArray ks (ArrayVal inarr et shape) =
   ArrayVal (listArray (bounds inarr) $ rotate ks shape $ elems inarr) et shape
@@ -78,7 +78,7 @@ rotate (k:ks) (d:ds) xs =
   in concat new_rows
 rotate _ _ xs = xs
 
--- | Concatenate two arrays as per the 'Concat' PrimOp.
+-- | Concatenate two arrays as per the 'Concat' BasicOp.
 concatArrays :: Int -> Value -> Value -> Value
 concatArrays i (ArrayVal arr1 et shape1) (ArrayVal arr2 _ shape2) =
   ArrayVal (listArray (0,product shape3-1) $ concatenate xcs xs ycs ys) et shape3

@@ -154,7 +154,7 @@ addBindingEngine :: MonadEngine m =>
 addBindingEngine bnd = do
   modifyVtable $ ST.insertBinding bnd
   case bindingExp bnd of
-    PrimOp (Assert se _) -> asserted se
+    BasicOp (Assert se _) -> asserted se
     _                    -> return ()
   needBinding bnd
 
@@ -196,7 +196,7 @@ asserted Constant{} =
   return ()
 asserted (Var name) = do
   se <- ST.lookupExp name <$> getVtable
-  case se of Just (PrimOp (CmpOp CmpEq{} x y)) -> do
+  case se of Just (BasicOp (CmpOp CmpEq{} x y)) -> do
                case x of Var xvar ->
                            tellNeed $ Need [] $
                            UT.equalToUsage xvar y
@@ -400,11 +400,11 @@ isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
 isNotCheap :: BlockPred m
 isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
-        cheap (PrimOp BinOp{})   = True
-        cheap (PrimOp SubExp{})  = True
-        cheap (PrimOp UnOp{})    = True
-        cheap (PrimOp CmpOp{})   = True
-        cheap (PrimOp ConvOp{})  = True
+        cheap (BasicOp BinOp{})   = True
+        cheap (BasicOp SubExp{})  = True
+        cheap (BasicOp UnOp{})    = True
+        cheap (BasicOp CmpOp{})   = True
+        cheap (BasicOp ConvOp{})  = True
         cheap DoLoop{}           = False
         cheap _                  = True -- Used to be False, but
                                         -- let's try it out.

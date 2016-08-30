@@ -173,7 +173,7 @@ scalExpRange :: SE.ScalExp -> Range
 scalExpRange se =
   (Just $ ScalarBound se, Just $ ScalarBound se)
 
-primOpRanges :: PrimOp lore -> [Range]
+primOpRanges :: BasicOp lore -> [Range]
 primOpRanges (SubExp se) =
   [rangeOf se]
 
@@ -222,7 +222,7 @@ primOpRanges _ =
 -- | Ranges of the value parts of the expression.
 expRanges :: (Ranged lore, TypedOp (Op lore)) =>
              Exp lore -> [Range]
-expRanges (PrimOp op) =
+expRanges (BasicOp op) =
   primOpRanges op
 expRanges (If _ tbranch fbranch _) =
   zip

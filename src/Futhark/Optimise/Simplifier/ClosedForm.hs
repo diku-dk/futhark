@@ -60,7 +60,7 @@ foldClosedForm look pat lam accs arrs = do
                 (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames'_ [isEmpty] $
-    PrimOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
+    BasicOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
     (resultBodyM accs)
@@ -79,7 +79,7 @@ loopClosedForm pat merge i bound body = do
                 (map identName mergeidents) body mergeexp
   isEmpty <- newVName "bound_is_zero"
   letBindNames'_ [isEmpty] $
-    PrimOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
+    BasicOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
   letBindNames'_ (patternNames pat) =<<
     eIf (eSubExp $ Var isEmpty)
     (resultBodyM mergeexp)
@@ -112,7 +112,7 @@ checkResults pat size untouchable knownBindings params body accs = do
                   untouchable
 
         checkResult (p, Var v) (accparam, acc) = do
-          e@(PrimOp (BinOp bop x y)) <- liftMaybe $ HM.lookup v bndMap
+          e@(BasicOp (BinOp bop x y)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
           let isThisAccum = (==Var accparam)
@@ -126,17 +126,17 @@ checkResults pat size untouchable knownBindings params body accs = do
           case bop of
               LogAnd -> do
                 letBindNames'_ [v] e
-                letBindNames'_ [p] $ PrimOp $ BinOp LogAnd this el
+                letBindNames'_ [p] $ BasicOp $ BinOp LogAnd this el
               Add t | Just properly_typed_size <- properIntSize t -> do
                         size' <- properly_typed_size
                         letBindNames'_ [p] =<<
                           eBinOp (Add t) (eSubExp this)
-                          (pure $ PrimOp $ BinOp (Mul t) el size')
+                          (pure $ BasicOp $ BinOp (Mul t) el size')
               FAdd t | Just properly_typed_size <- properFloatSize t -> do
                         size' <- properly_typed_size
                         letBindNames'_ [p] =<<
                           eBinOp (FAdd t) (eSubExp this)
-                          (pure $ PrimOp $ BinOp (FMul t) el size')
+                          (pure $ BasicOp $ BinOp (FMul t) el size')
               _ -> cannotSimplify -- Um... sorry.
 
         checkResult _ _ = cannotSimplify
@@ -148,11 +148,11 @@ checkResults pat size untouchable knownBindings params body accs = do
 
         properIntSize Int32 = Just $ return size
         properIntSize t = Just $ letSubExp "converted_size" $
-                          PrimOp $ ConvOp (SExt Int32 t) size
+                          BasicOp $ ConvOp (SExt Int32 t) size
 
         properFloatSize t =
           Just $ letSubExp "converted_size" $
-          PrimOp $ ConvOp (SIToFP Int32 t) size
+          BasicOp $ ConvOp (SIToFP Int32 t) size
 
 determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [VName]
                        -> HM.HashMap VName SubExp
@@ -166,7 +166,7 @@ determineKnownBindings look lam accs arrs =
                       zip (map paramName arrparams) arrs
 
         isReplicate (p, v)
-          | Just (PrimOp (Replicate _ ve)) <- look v = Just (p, ve)
+          | Just (BasicOp (Replicate _ ve)) <- look v = Just (p, ve)
         isReplicate _ = Nothing
 
 makeBindMap :: Body lore -> HM.HashMap VName (Exp lore)

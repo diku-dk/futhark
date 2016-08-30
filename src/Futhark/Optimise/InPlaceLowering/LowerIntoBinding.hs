@@ -48,20 +48,20 @@ lowerUpdate (Let pat _ (DoLoop ctx val form body)) updates = do
     return $
       prebnds ++ [mkLet' ctxpat valpat $ DoLoop ctx' val' form body'] ++ postbnds
 lowerUpdate
-  (Let pat _ (PrimOp (SubExp (Var v))))
+  (Let pat _ (BasicOp (SubExp (Var v))))
   [DesiredUpdate bindee_nm bindee_attr cs src is val]
   | patternNames pat == [src] =
     Just $
       return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
                          BindInPlace cs v is)] $
-              PrimOp $ SubExp $ Var val]
+              BasicOp $ SubExp $ Var val]
 lowerUpdate
   (Let (Pattern [] [PatElem v BindVar v_attr]) _ e)
   [DesiredUpdate bindee_nm bindee_attr cs src is val]
   | v == val =
     Just $ return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
                               BindInPlace cs src is)] e,
-                   mkLet' [] [Ident v $ typeOf v_attr] $ PrimOp $ Index cs bindee_nm is]
+                   mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index cs bindee_nm is]
 lowerUpdate _ _ =
   Nothing
 
@@ -136,8 +136,8 @@ lowerUpdateIntoLoop updates pat ctx val body = do
                            (updateIndices update))]
                 elmident = Ident (updateValue update) $
                            rowType $ snd $ updateType update
-            tell ([mkLet [] updpat $ PrimOp $ SubExp $ snd $ mergeParam summary],
-                  [mkLet' [] [elmident] $ PrimOp $ Index []
+            tell ([mkLet [] updpat $ BasicOp $ SubExp $ snd $ mergeParam summary],
+                  [mkLet' [] [elmident] $ BasicOp $ Index []
                    (updateName update) (updateIndices update)])
             return $ Right (Param
                             mergename
@@ -226,5 +226,5 @@ manipulateResult summaries substs = do
         return $ Var nm
     substRes res_se (_, (cs, nm, attr, is)) = do
       v' <- newIdent' (++"_updated") $ Ident nm $ typeOf attr
-      tell [mkLet [] [(v', BindInPlace cs nm is)] $ PrimOp $ SubExp res_se]
+      tell [mkLet [] [(v', BindInPlace cs nm is)] $ BasicOp $ SubExp res_se]
       return $ Var $ identName v'

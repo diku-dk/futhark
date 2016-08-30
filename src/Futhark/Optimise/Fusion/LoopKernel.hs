@@ -49,17 +49,17 @@ transformOutput ts names = descend ts
           case SOAC.viewf ts' of
             SOAC.EmptyF ->
               forM_ (zip names validents) $ \(k, valident) ->
-              letBindNames' [k] $ PrimOp $ SubExp $ Var $ identName valident
+              letBindNames' [k] $ BasicOp $ SubExp $ Var $ identName valident
             t SOAC.:< ts'' -> do
               let es = map (applyTransform t) validents
                   mkPat (Ident nm tp) = Pattern [] [PatElem nm BindVar tp]
               opts <- concat <$> mapM primOpType es
               newIds <- forM (zip names opts) $ \(k, opt) ->
                 newIdent (baseString k) opt
-              zipWithM_ letBind (map mkPat newIds) $ map PrimOp es
+              zipWithM_ letBind (map mkPat newIds) $ map BasicOp es
               descend ts'' newIds
 
-applyTransform :: SOAC.ArrayTransform -> Ident -> PrimOp
+applyTransform :: SOAC.ArrayTransform -> Ident -> BasicOp
 applyTransform (SOAC.Rearrange cs perm) v =
   Rearrange cs perm $ identName v
 applyTransform (SOAC.Reshape cs shape) v =
