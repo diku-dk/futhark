@@ -213,11 +213,11 @@ combineTransforms _ _ = Nothing
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
 transformFromExp :: Exp lore -> Maybe (VName, ArrayTransform)
-transformFromExp (PrimOp (Futhark.Rearrange cs perm v)) =
+transformFromExp (BasicOp (Futhark.Rearrange cs perm v)) =
   Just (v, Rearrange cs perm)
-transformFromExp (PrimOp (Futhark.Reshape cs shape v)) =
+transformFromExp (BasicOp (Futhark.Reshape cs shape v)) =
   Just (v, Reshape cs shape)
-transformFromExp (PrimOp (Futhark.Replicate shape (Futhark.Var v))) =
+transformFromExp (BasicOp (Futhark.Replicate shape (Futhark.Var v))) =
   Just (v, Replicate shape)
 transformFromExp _ = Nothing
 
@@ -276,21 +276,21 @@ inputsToSubExps = mapM inputToExp'
           foldlM transform a ts
 
         transform ia (Replicate n) =
-          letExp "repeat" $ PrimOp $ Futhark.Replicate n (Futhark.Var ia)
+          letExp "repeat" $ BasicOp $ Futhark.Replicate n (Futhark.Var ia)
 
         transform ia (Rearrange cs perm) =
-          letExp "rearrange" $ PrimOp $ Futhark.Rearrange cs perm ia
+          letExp "rearrange" $ BasicOp $ Futhark.Rearrange cs perm ia
 
         transform ia (Reshape cs shape) =
-          letExp "reshape" $ PrimOp $ Futhark.Reshape cs shape ia
+          letExp "reshape" $ BasicOp $ Futhark.Reshape cs shape ia
 
         transform ia (ReshapeOuter cs shape) = do
           shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
-          letExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia
+          letExp "reshape_outer" $ BasicOp $ Futhark.Reshape cs shape' ia
 
         transform ia (ReshapeInner cs shape) = do
           shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
-          letExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia
+          letExp "reshape_inner" $ BasicOp $ Futhark.Reshape cs shape' ia
 
 -- | Return the array name of the input.
 inputArray :: Input -> VName
@@ -579,12 +579,12 @@ soacToStream soac = do
       let insoac = Futhark.Scan cs chvar lam' $ zip nes (map paramName strm_inpids)
           insbnd = mkLet' [] scan0_ids $ Op insoac
       -- 2. let outerszm1id = chunksize - 1
-          outszm1bnd = mkLet' [] [outszm1id] $ PrimOp $
+          outszm1bnd = mkLet' [] [outszm1id] $ BasicOp $
                        BinOp (Sub Int32)
                        (Futhark.Var $ paramName chunk_param)
                        (constant (1::Int32))
       -- 3. let lasteel_ids = scan0_ids[outerszm1id]
-          lelbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ PrimOp $
+          lelbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ BasicOp $
                                            Index cs (identName arrid) $
                                            fullSlice (identType arrid)
                                            [DimFix $ Futhark.Var $ identName outszm1id]
@@ -671,7 +671,7 @@ soacToStream soac = do
                 (accpars, rempars) = (  take (length accs) lampars,
                                         drop (length accs) lampars  )
                 parbnds = zipWith (\ par se -> mkLet' [] [paramIdent par]
-                                                         (PrimOp $ SubExp se)
+                                                         (BasicOp $ SubExp se)
                                   ) accpars accs
                 plus_bdy = lambdaBody plus
                 newlambdy = Body (bodyLore plus_bdy)
@@ -684,7 +684,7 @@ soacToStream soac = do
           mkPlusBnds plus accels = do
             plus' <- renameLambda plus
             let parbnds = zipWith (\ par se -> mkLet' [] [paramIdent par]
-                                                         (PrimOp $ SubExp se)
+                                                         (BasicOp $ SubExp se)
                                   ) (lambdaParams plus') accels
                 body = lambdaBody plus'
             return $ body { bodyBindings = parbnds ++ bodyBindings body }

@@ -31,7 +31,7 @@ import Prelude
 import Futhark.Representation.AST
 import Futhark.Representation.Kernels
        hiding (Prog, Body, Binding, Pattern, PatElem,
-               PrimOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
+               BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -79,7 +79,7 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
 
   arrs_copies <- forM arrs $ \arr ->
     if arr `HS.member` consumed_in_fold then
-      letExp (baseString arr <> "_copy") $ PrimOp $ Copy arr
+      letExp (baseString arr <> "_copy") $ BasicOp $ Copy arr
     else return arr
 
   step_one <- chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs_copies
@@ -96,7 +96,7 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
   addBinding $ Let step_two_pat () $ Op step_two
 
   forM_ (zip (patternIdents step_two_pat) (patternIdents pat)) $ \(arr, x) ->
-    addBinding $ mkLet' [] [x] $ PrimOp $ Index [] (identName arr) $
+    addBinding $ mkLet' [] [x] $ BasicOp $ Index [] (identName arr) $
     fullSlice (identType arr) [DimFix $ constant (0 :: Int32)]
   where mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
@@ -168,7 +168,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
     fmap unzip $ forM (zip red_ts arrs) $ \(t, arr) -> do
       arr_index <- newVName (baseString arr ++ "_index")
       return (Let (Pattern [] [PatElem arr_index BindVar t]) () $
-              PrimOp $ Index [] arr $
+              BasicOp $ Index [] arr $
               fullSlice (t `arrayOfRow` group_size) [DimFix (Var thread_id)]
              , arr_index)
 
@@ -255,8 +255,8 @@ kerneliseLambda nes lam = do
 
       mkAccInit p (Var v)
         | not $ primType $ paramType p =
-            mkLet' [] [paramIdent p] $ PrimOp $ Copy v
-      mkAccInit p x = mkLet' [] [paramIdent p] $ PrimOp $ SubExp x
+            mkLet' [] [paramIdent p] $ BasicOp $ Copy v
+      mkAccInit p x = mkLet' [] [paramIdent p] $ BasicOp $ SubExp x
       acc_init_bnds = zipWith mkAccInit fold_acc_params nes
   return lam { lambdaBody = insertBindings acc_init_bnds $
                             lambdaBody lam
@@ -279,7 +279,7 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   let arr_idents = drop (length nes) $ patternIdents pat
   map_out_arrs <- forM arr_idents $ \(Ident name t) ->
     letExp (baseString name <> "_out_in") $
-    PrimOp $ Scratch (elemType t) (arrayDims t)
+    BasicOp $ Scratch (elemType t) (arrayDims t)
 
   mapM_ addBinding =<<
     blockedReductionStream pat cs w comm reduce_lam fold_lam' nes
@@ -354,9 +354,9 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   let (chunk_red_ses, chunk_map_ses) =
         splitAt num_nonconcat $ bodyResult $ lambdaBody lam
       fold_chunk = bodyBindings (lambdaBody lam) ++
-                   [ Let (Pattern [] [pe]) () $ PrimOp $ SubExp se
+                   [ Let (Pattern [] [pe]) () $ BasicOp $ SubExp se
                    | (pe,se) <- zip chunk_red_pes chunk_red_ses ] ++
-                   [ Let (Pattern [] [pe]) () $ PrimOp $ SubExp se
+                   [ Let (Pattern [] [pe]) () $ BasicOp $ SubExp se
                    | (pe,se) <- zip chunk_map_pes chunk_map_ses ]
 
   return (chunk_red_pes, chunk_map_pes, chunk_stm ++ fold_chunk)
@@ -368,7 +368,7 @@ blockedKernelSize w = do
   group_size <- letSubExp "group_size" $ Op GroupSize
 
   num_threads <-
-    letSubExp "num_threads" $ PrimOp $ BinOp (Mul Int32) num_groups group_size
+    letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32) num_groups group_size
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
@@ -438,22 +438,22 @@ blockedScan pat cs w lam foldlam nes arrs = do
   chunks_per_group <- letSubExp "chunks_per_group" =<<
     eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
   elems_per_group <- letSubExp "elements_per_group" $
-    PrimOp $ BinOp (Mul Int32) chunks_per_group group_size
+    BasicOp $ BinOp (Mul Int32) chunks_per_group group_size
 
   result_map_body <- runBodyBinder $ localScope (scopeOfLParams $ map kernelInputParam result_map_input) $ do
     group_id <-
       letSubExp "group_id" $
-      PrimOp $ BinOp (SQuot Int32) (Var j) elems_per_group
+      BasicOp $ BinOp (SQuot Int32) (Var j) elems_per_group
     let do_nothing =
           pure $ resultBody $ map (Var . paramName) arr_params
         add_carry_in = runBodyBinder $ do
           forM_ (zip acc_params group_carry_out_scanned) $ \(p, arr) -> do
             carry_in_index <-
               letSubExp "carry_in_index" $
-              PrimOp $ BinOp (Sub Int32) group_id one
+              BasicOp $ BinOp (Sub Int32) group_id one
             arr_t <- lookupType arr
             letBindNames'_ [paramName p] $
-              PrimOp $ Index [] arr $ fullSlice arr_t [DimFix carry_in_index]
+              BasicOp $ Index [] arr $ fullSlice arr_t [DimFix carry_in_index]
           return $ lambdaBody lam'''
     group_lasts <-
       letTupExp "final_result" =<<
@@ -496,7 +496,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
 
   body <- runBodyBinder $ localScope (scopeOfLParams params) $ do
     new_flag <- letSubExp "new_flag" $
-                PrimOp $ BinOp LogOr (Var x_flag) (Var y_flag)
+                BasicOp $ BinOp LogOr (Var x_flag) (Var y_flag)
     seg_res <- letTupExp "seg_res" $ If (Var y_flag)
       (resultBody $ map (Var . paramName) y_params)
       (lambdaBody lam)
@@ -507,9 +507,9 @@ blockedSegmentedScan segment_size pat cs w lam input = do
   flags_body <-
     runBodyBinder $ localScope (HM.singleton flags_i IndexInfo) $ do
       segment_index <- letSubExp "segment_index" $
-                       PrimOp $ BinOp (SRem Int32) (Var flags_i) segment_size
+                       BasicOp $ BinOp (SRem Int32) (Var flags_i) segment_size
       start_of_segment <- letSubExp "start_of_segment" $
-                          PrimOp $ CmpOp (CmpEq int32) segment_index zero
+                          BasicOp $ CmpOp (CmpEq int32) segment_index zero
       flag <- letSubExp "flag" $
               If start_of_segment (resultBody [true]) (resultBody [false]) [Prim Bool]
       return $ resultBody [flag]
@@ -548,7 +548,7 @@ mapKernelSkeleton w inputs = do
     let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
     arr_t <- lookupType $ kernelInputArray inp
     return $ Let (Pattern [] [pe]) () $
-      PrimOp $ Index [] (kernelInputArray inp) $
+      BasicOp $ Index [] (kernelInputArray inp) $
       fullSlice arr_t $ map DimFix $ kernelInputIndices inp
 
   let ksize = (num_groups, Var group_size_v, num_threads)
@@ -562,7 +562,7 @@ numThreadsAndGroups w group_size = do
   num_groups <- letSubExp "num_groups" =<< eDivRoundingUp Int32
     (eSubExp w) (eSubExp group_size)
   num_threads <- letSubExp "num_threads" $
-    PrimOp $ BinOp (Mul Int32) num_groups group_size
+    BasicOp $ BinOp (Mul Int32) num_groups group_size
   return (num_threads, num_groups)
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>

@@ -477,8 +477,8 @@ matchSubExpTypes e1 e2 = do
   t1 <- subExpType e1
   t2 <- subExpType e2
   unless (t1 == t2) $
-    bad $ UnifyError (PrimOp $ SubExp e1) t1
-    (PrimOp $ SubExp e2) t2
+    bad $ UnifyError (BasicOp $ SubExp e1) t1
+    (BasicOp $ SubExp e2) t2
 
 -- | @checkAnnotation loc s t1 t2@ checks if @t2@ is equal to
 -- @t1@.  If not, a 'BadAnnotation' is raised.
@@ -494,7 +494,7 @@ require :: Checkable lore => [Type] -> SubExp -> TypeM lore ()
 require ts se = do
   t <- checkSubExp se
   unless (t `elem` ts) $
-    bad $ UnexpectedType (PrimOp $ SubExp se) t ts
+    bad $ UnexpectedType (BasicOp $ SubExp se) t ts
 
 -- | Variant of 'require' working on variable names.
 requireI :: Checkable lore => [Type] -> VName -> TypeM lore ()
@@ -712,16 +712,16 @@ checkBody (Body (_,lore) bnds res) = do
   checkBindings bnds $ checkResult res
   checkBodyLore lore
 
-checkPrimOp :: Checkable lore =>
-               PrimOp (Aliases lore) -> TypeM lore ()
+checkBasicOp :: Checkable lore =>
+               BasicOp (Aliases lore) -> TypeM lore ()
 
-checkPrimOp (SubExp es) =
+checkBasicOp (SubExp es) =
   void $ checkSubExp es
 
-checkPrimOp (ArrayLit [] _) =
+checkBasicOp (ArrayLit [] _) =
   return ()
 
-checkPrimOp (ArrayLit (e:es') t) = do
+checkBasicOp (ArrayLit (e:es') t) = do
   let check elemt eleme = do
         elemet <- checkSubExp eleme
         unless (elemet == elemt) $
@@ -734,15 +734,15 @@ checkPrimOp (ArrayLit (e:es') t) = do
 
   mapM_ (check et) es'
 
-checkPrimOp (UnOp op e) = require [Prim $ unOpType op] e
+checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 
-checkPrimOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
+checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 
-checkPrimOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
+checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 
-checkPrimOp (ConvOp op e) = require [Prim $ fst $ convTypes op] e
+checkBasicOp (ConvOp op e) = require [Prim $ fst $ convTypes op] e
 
-checkPrimOp (Index cs ident idxes) = do
+checkBasicOp (Index cs ident idxes) = do
   mapM_ (requireI [Prim Cert]) cs
   vt <- lookupType ident
   observe ident
@@ -750,19 +750,19 @@ checkPrimOp (Index cs ident idxes) = do
     bad $ SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
 
-checkPrimOp (Iota e x s) = do
+checkBasicOp (Iota e x s) = do
   require [Prim int32] e
   require [Prim int32] x
   require [Prim int32] s
 
-checkPrimOp (Replicate (Shape dims) valexp) = do
+checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int32]) dims
   void $ checkSubExp valexp
 
-checkPrimOp (Scratch _ shape) =
+checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 
-checkPrimOp (Reshape cs newshape arrexp) = do
+checkBasicOp (Reshape cs newshape arrexp) = do
   rank <- arrayRank <$> checkArrIdent arrexp
   mapM_ (requireI [Prim Cert]) cs
   mapM_ (require [Prim int32] . newDim) newshape
@@ -777,14 +777,14 @@ checkPrimOp (Reshape cs newshape arrexp) = do
           | otherwise =
             return ()
 
-checkPrimOp (Rearrange cs perm arr) = do
+checkBasicOp (Rearrange cs perm arr) = do
   mapM_ (requireI [Prim Cert]) cs
   arrt <- lookupType arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError perm rank $ Just arr
 
-checkPrimOp (Rotate cs rots arr) = do
+checkBasicOp (Rotate cs rots arr) = do
   arrt <- lookupType arr
   mapM_ (requireI [Prim Cert]) cs
   let rank = arrayRank arrt
@@ -792,7 +792,7 @@ checkPrimOp (Rotate cs rots arr) = do
     bad $ TypeError $ "Cannot rotate " ++ show (length rots) ++
     " dimensions of " ++ show rank ++ "-dimensional array."
 
-checkPrimOp (Split cs i sizeexps arrexp) = do
+checkBasicOp (Split cs i sizeexps arrexp) = do
   mapM_ (requireI [Prim Cert]) cs
   mapM_ (require [Prim int32]) sizeexps
   t <- checkArrIdent arrexp
@@ -802,7 +802,7 @@ checkPrimOp (Split cs i sizeexps arrexp) = do
     ++ " of type " ++ pretty t
     ++ " along dimension " ++ pretty i ++ "."
 
-checkPrimOp (Concat cs i arr1exp arr2exps ressize) = do
+checkBasicOp (Concat cs i arr1exp arr2exps ressize) = do
   mapM_ (requireI [Prim Cert]) cs
   arr1t  <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
@@ -814,13 +814,13 @@ checkPrimOp (Concat cs i arr1exp arr2exps ressize) = do
     pretty arr1t ++ " and " ++ intercalate ", " (map pretty arr2ts)
   require [Prim int32] ressize
 
-checkPrimOp (Copy e) =
+checkBasicOp (Copy e) =
   void $ checkArrIdent e
 
-checkPrimOp (Assert e _) =
+checkBasicOp (Assert e _) =
   require [Prim Bool] e
 
-checkPrimOp (Partition cs _ flags arrs) = do
+checkBasicOp (Partition cs _ flags arrs) = do
   mapM_ (requireI [Prim Cert]) cs
   flagst <- lookupType flags
   unless (rowType flagst == Prim int32) $
@@ -835,7 +835,7 @@ checkPrimOp (Partition cs _ flags arrs) = do
 checkExp :: Checkable lore =>
             Exp (Aliases lore) -> TypeM lore ()
 
-checkExp (PrimOp op) = checkPrimOp op
+checkExp (BasicOp op) = checkBasicOp op
 
 checkExp (If e1 e2 e3 ts) = do
   require [Prim Bool] e1

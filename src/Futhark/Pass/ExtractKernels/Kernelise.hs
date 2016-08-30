@@ -127,7 +127,7 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
         (p, arr, arr_t) <- zip3 arr_params (map paramName arr_params_chunked)
                            (map paramType arr_params_chunked)
         return $ mkLet' [] [paramIdent p] $
-          PrimOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
+          BasicOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
 
   redomap_kbody <- transformBody $ index_bnds `insertBindings` redomap_loop
 
@@ -147,7 +147,7 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
 
 resultArray :: MonadBinder m => [Type] -> m [VName]
 resultArray = mapM oneArray
-  where oneArray t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
+  where oneArray t = letExp "result" $ BasicOp $ Scratch (elemType t) (arrayDims t)
 
 mapIsh :: Transformer m =>
           Pattern
@@ -178,13 +178,13 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
               mkLet [] [(paramIdent outarr_param_new,
                          BindInPlace [] (paramName outarr_param) $
                          fullSlice (paramType outarr_param) [DimFix $ Var i])] $
-              PrimOp $ SubExp se)
+              BasicOp $ SubExp se)
 
   let index_stms = do
         (p, arr, arr_t) <- zip3 params (map paramName params_chunked) $
                            map paramType params_chunked
         return $ mkLet' [] [paramIdent p] $
-          PrimOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
+          BasicOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
       kbody' = Out.Body () (index_stms++kstms++write_elems) $
                map (Var . paramName) outarr_params_new
 

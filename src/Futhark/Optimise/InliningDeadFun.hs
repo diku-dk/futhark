@@ -137,7 +137,7 @@ inlineInBody
           Var v <- se =
             mkLet' [] [ident] $ shapeCoerce [] (arrayDims t) v
         | otherwise =
-          mkLet' [] [ident] $ PrimOp $ SubExp se
+          mkLet' [] [ident] $ BasicOp $ SubExp se
 inlineInBody inlcallees (Body () (bnd:bnds) res) =
   let bnd' = inlineInBinding inlcallees bnd
       Body () bnds' res' = inlineInBody inlcallees $ Body () bnds res

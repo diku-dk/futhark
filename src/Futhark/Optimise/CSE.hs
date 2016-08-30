@@ -124,7 +124,7 @@ cseInBinding consumed (Let pat eattr e) m = do
       Just subpat ->
         local (addNameSubst pat' subpat) $ do
           let lets =
-                [ Let (Pattern [] [patElem']) eattr $ PrimOp $ SubExp $ Var $ patElemName patElem
+                [ Let (Pattern [] [patElem']) eattr $ BasicOp $ SubExp $ Var $ patElemName patElem
                 | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
                   let patElem' = patElem { patElemName = name }
                 ]

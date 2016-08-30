@@ -66,7 +66,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
                                 | Ident name t <- lam2redparams ++ HM.keys inputmap ]
                , lambdaBody   = new_body2'
                }
-        new_body2 = let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
+        new_body2 = let bnds res = [ mkLet' [] [p] $ BasicOp $ SubExp e
                                    | (p,e) <- zip pat res]
                         bindLambda res =
                             bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
@@ -148,7 +148,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
-          mkLet' [] [to] (PrimOp $ SubExp $ Var from)
+          mkLet' [] [to] (BasicOp $ SubExp $ Var from)
           `insertBinding` b
 
 fuseRedomap :: Bindable lore =>

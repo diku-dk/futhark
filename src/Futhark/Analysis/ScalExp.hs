@@ -218,7 +218,7 @@ intSubExpToScalExp se = subExpToScalExp se $ IntType Int32
 
 toScalExp :: (HasScope t f, Monad f) =>
              LookupVar -> Exp lore -> f (Maybe ScalExp)
-toScalExp look (PrimOp (SubExp (Var v)))
+toScalExp look (BasicOp (SubExp (Var v)))
   | Just se <- look v =
     return $ Just se
   | otherwise = do
@@ -228,26 +228,26 @@ toScalExp look (PrimOp (SubExp (Var v)))
         return $ Just $ Id v bt
       _ ->
         return Nothing
-toScalExp _ (PrimOp (SubExp (Constant val)))
+toScalExp _ (BasicOp (SubExp (Constant val)))
   | typeIsOK $ primValueType val =
     return $ Just $ Val val
-toScalExp look (PrimOp (CmpOp (CmpSlt t) x y))
+toScalExp look (BasicOp (CmpOp (CmpSlt t) x y))
   | typeIsOK $ IntType t =
   Just . RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-toScalExp look (PrimOp (CmpOp (CmpSle t) x y))
+toScalExp look (BasicOp (CmpOp (CmpSle t) x y))
   | typeIsOK $ IntType t =
   Just . RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-toScalExp look (PrimOp (CmpOp (CmpEq t) x y))
+toScalExp look (BasicOp (CmpOp (CmpEq t) x y))
   | typeIsOK t = do
   x' <- subExpToScalExp' look x
   y' <- subExpToScalExp' look y
   return $ Just $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
-toScalExp look (PrimOp (BinOp (Sub t) (Constant x) y))
+toScalExp look (BasicOp (BinOp (Sub t) (Constant x) y))
   | typeIsOK $ IntType t, zeroIsh x =
   Just . SNeg <$> subExpToScalExp' look y
-toScalExp look (PrimOp (UnOp AST.Not e)) =
+toScalExp look (BasicOp (UnOp AST.Not e)) =
   Just . SNot <$> subExpToScalExp' look e
-toScalExp look (PrimOp (BinOp bop x y))
+toScalExp look (BasicOp (BinOp bop x y))
   | Just f <- binOpScalExp bop =
   Just <$> (f <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 
@@ -337,8 +337,8 @@ binOpScalExp bop = snd <$> find ((==bop) . fst)
 fromScalExp :: MonadBinder m => ScalExp
              -> m (Exp (Lore m))
 fromScalExp = convert
-  where convert (Val val) = return $ PrimOp $ SubExp $ Constant val
-        convert (Id v _)  = return $ PrimOp $ SubExp $ Var v
+  where convert (Val val) = return $ BasicOp $ SubExp $ Constant val
+        convert (Id v _)  = return $ BasicOp $ SubExp $ Var v
         convert (SNeg se) = eNegate $ convert se
         convert (SNot se) = eNot $ convert se
         convert (SAbs se) = eAbs $ convert se
@@ -387,7 +387,7 @@ fromScalExp = convert
                 | otherwise = (next, cur)
           in eIf cmp (eBody [pure pick]) (eBody [pure discard])
 
-        zero = PrimOp $ SubExp $ intConst Int32 0
+        zero = BasicOp $ SubExp $ intConst Int32 0
 
 instance FreeIn ScalExp where
   freeIn (Val   _) = mempty

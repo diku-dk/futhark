@@ -72,7 +72,7 @@ mapType outersize f = [ arrayOf t (Shape [outersize]) NoUniqueness
 
 -- | The type of a primitive operation.
 primOpType :: HasScope t m =>
-              PrimOp lore -> m [Type]
+              BasicOp lore -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
 primOpType (ArrayLit es rt) =
@@ -136,7 +136,7 @@ expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
-expExtType (PrimOp op)    = staticShapes <$> primOpType op
+expExtType (BasicOp op)    = staticShapes <$> primOpType op
 expExtType (Op op)        = opType op
 
 -- | The number of values returned by an expression.

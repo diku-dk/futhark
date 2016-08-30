@@ -352,7 +352,7 @@ expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 expCompiler
   (ImpGen.Destination
     [ImpGen.ArrayDestination (ImpGen.CopyIntoMemory destloc) _])
-  (PrimOp (Iota n x s)) = do
+  (BasicOp (Iota n x s)) = do
   thread_gid <- newVName "thread_gid"
 
   makeAllMemoryGlobal $ do
@@ -383,7 +383,7 @@ expCompiler
   return ImpGen.Done
 
 expCompiler
-  (ImpGen.Destination [dest]) (PrimOp (Replicate (Shape ds) se)) = do
+  (ImpGen.Destination [dest]) (BasicOp (Replicate (Shape ds) se)) = do
   constants <- simpleKernelConstants "replicate"
 
   t <- subExpType se
@@ -524,7 +524,7 @@ inKernelCopy :: ImpGen.CopyCompiler InKernel Imp.KernelOp
 inKernelCopy = ImpGen.copyElementWise
 
 inKernelExpCompiler :: ImpGen.ExpCompiler InKernel Imp.KernelOp
-inKernelExpCompiler _ (PrimOp (Assert _ loc)) =
+inKernelExpCompiler _ (BasicOp (Assert _ loc)) =
   fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
 inKernelExpCompiler _ e =
   return $ ImpGen.CompileExp e

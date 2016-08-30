@@ -286,7 +286,7 @@ fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
         (uncurry (flip mkBodyM) =<<) $ collectBindings $ localScope (castScope $ scopeOf foldlam) $ do
           forM_ iota_params $ \(p, x) ->
             letBindNames'_ [paramName p] $
-            PrimOp $ BinOp (Add Int32) (Var thread_index) x
+            BasicOp $ BinOp (Add Int32) (Var thread_index) x
           mapM_ addBinding $ bodyBindings $ lambdaBody foldlam
           return $ bodyResult $ lambdaBody foldlam
       let (arr_params', arrs') = unzip params_and_arrs
@@ -326,16 +326,16 @@ fuseSplitIota vtable (Let (Pattern [size] chunks) _
       case o of
         InOrder -> do
           start_offset <- letSubExp "iota_start_offset" $
-            PrimOp $ BinOp (Mul Int32) i elems_per_thread
+            BasicOp $ BinOp (Mul Int32) i elems_per_thread
           start <- letSubExp "iota_start" $
-            PrimOp $ BinOp (Add Int32) start_offset iota_start
+            BasicOp $ BinOp (Add Int32) start_offset iota_start
           letBindNames'_ [patElemName iota_pe] $
-            PrimOp $ Iota (Var $ patElemName size) start $ constant (1::Int32)
+            BasicOp $ Iota (Var $ patElemName size) start $ constant (1::Int32)
         Disorder -> do
           start <- letSubExp "iota_start" $
-            PrimOp $ BinOp (Add Int32) i iota_start
+            BasicOp $ BinOp (Add Int32) i iota_start
           letBindNames'_ [patElemName iota_pe] $
-            PrimOp $ Iota (Var $ patElemName size) start num_is
+            BasicOp $ Iota (Var $ patElemName size) start num_is
 fuseSplitIota _ _ = cannotSimplify
 
 fuseStreamIota :: (LocalScope (Lore m) m,
@@ -351,9 +351,9 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
 
       body' <- insertBindingsM $ do
         start <- letSubExp "iota_start" $
-            PrimOp $ BinOp (Add Int32) (Var offset) iota_start
+            BasicOp $ BinOp (Add Int32) (Var offset) iota_start
         letBindNames'_ [paramName iota_param] $
-          PrimOp $ Iota (Var chunk_size) start $ constant (1::Int32)
+          BasicOp $ Iota (Var chunk_size) start $ constant (1::Int32)
         return $ groupStreamLambdaBody lam
       let lam' = lam { groupStreamArrParams = arr_params',
                        groupStreamLambdaBody = body'
@@ -363,7 +363,7 @@ fuseStreamIota _ _ = cannotSimplify
 
 isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp) (a, VName)
 isIota vtable chunk arr
-  | Just (PrimOp (Iota _ x (Constant s))) <- ST.lookupExp arr vtable,
+  | Just (BasicOp (Iota _ x (Constant s))) <- ST.lookupExp arr vtable,
     oneIsh s =
       Left (chunk, x)
   | otherwise =
@@ -397,13 +397,13 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
           | isInvariant se =
               case threads of
                 AllThreads -> do
-                  letBindNames'_ [patElemName pe] $ PrimOp $
+                  letBindNames'_ [patElemName pe] $ BasicOp $
                     Replicate (Shape [num_threads]) se
                   return False
                 ThreadsInSpace -> do
-                  let rep a d = PrimOp . Replicate (Shape [d]) <$> letSubExp "rep" a
+                  let rep a d = BasicOp . Replicate (Shape [d]) <$> letSubExp "rep" a
                   letBindNames'_ [patElemName pe] =<<
-                    foldM rep (PrimOp (SubExp se)) (reverse space_dims)
+                    foldM rep (BasicOp (SubExp se)) (reverse space_dims)
                   return False
                 _ -> return True
         checkForInvarianceResult _ =
@@ -433,7 +433,7 @@ distributeKernelResults (vtable, used)
     free_in_kstms = mconcat $ map freeInBinding kstms
 
     distribute (kpes', kts', kres', kstms_rev) bnd
-      | Let (Pattern [] [pe]) _ (PrimOp (Index cs arr slice)) <- bnd,
+      | Let (Pattern [] [pe]) _ (BasicOp (Index cs arr slice)) <- bnd,
         kspace_slice <- map (DimFix . Var . fst) $ spaceDimensions kspace,
         kspace_slice `isPrefixOf` slice,
         remaining_slice <- drop (length kspace_slice) slice,
@@ -441,12 +441,12 @@ distributeKernelResults (vtable, used)
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (DimSlice (constant (0::Int32)) . snd) $
                             spaceDimensions kspace
-              index kpe' = letBind_ (Pattern [] [kpe']) $ PrimOp $ Index (kcs<>cs) arr $
+              index kpe' = letBind_ (Pattern [] [kpe']) $ BasicOp $ Index (kcs<>cs) arr $
                            outer_slice <> remaining_slice
           if patElemName kpe `UT.isConsumed` used
             then do precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
                     index kpe { patElemName = precopy }
-                    letBind_ (Pattern [] [kpe]) $ PrimOp $ Copy precopy
+                    letBind_ (Pattern [] [kpe]) $ BasicOp $ Copy precopy
             else index kpe
           return (kpes'', kts'', kres'',
                   if patElemName pe `HS.member` free_in_kstms

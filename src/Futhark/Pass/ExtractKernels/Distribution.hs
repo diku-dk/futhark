@@ -234,7 +234,7 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
 
   w' <- newVName "nesting_size"
   let w_bnd = mkLet' [] [Ident w' $ Prim int32] $
-              PrimOp $ BinOp (Mul Int32) w nesting_w
+              BasicOp $ BinOp (Mul Int32) w nesting_w
 
   let inps' = map fixupInput inps
       isParam inp =

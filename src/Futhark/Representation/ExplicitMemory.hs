@@ -869,31 +869,31 @@ expReturns :: (Monad m, HasScope lore m,
                ExplicitMemorish lore) =>
               Exp lore -> m [ExpReturns]
 
-expReturns (PrimOp (SubExp (Var v))) = do
+expReturns (BasicOp (SubExp (Var v))) = do
   r <- varReturns v
   return [r]
 
-expReturns (PrimOp (Reshape _ newshape v)) = do
+expReturns (BasicOp (Reshape _ newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   return [ReturnsArray et (ExtShape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $
           IxFun.reshape ixfun $ map (fmap SE.intSubExpToScalExp) newshape]
 
-expReturns (PrimOp (Rearrange _ perm v)) = do
+expReturns (BasicOp (Rearrange _ perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
       dims'  = rearrangeShape perm dims
   return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (PrimOp (Rotate _ offsets v)) = do
+expReturns (BasicOp (Rotate _ offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let offsets' = map (`SE.subExpToScalExp` int32) offsets
       ixfun' = IxFun.rotate ixfun offsets'
   return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (PrimOp (Split _ i sizeexps v)) = do
+expReturns (BasicOp (Split _ i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps
       offsets =  0 : scanl1 (+) (map (`SE.subExpToScalExp` int32) sizeexps)
@@ -909,7 +909,7 @@ expReturns (PrimOp (Split _ i sizeexps v)) = do
                        perm_inv)
            newShapes offsets
 
-expReturns (PrimOp (Index _ v slice)) = do
+expReturns (BasicOp (Index _ v slice)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   case sliceDims slice of
     []     ->
@@ -920,7 +920,7 @@ expReturns (PrimOp (Index _ v slice)) = do
              IxFun.slice ixfun
              (map (fmap (`SE.subExpToScalExp` int32)) slice)]
 
-expReturns (PrimOp op) =
+expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
 
 expReturns (DoLoop ctx val _ _) =

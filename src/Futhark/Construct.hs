@@ -68,12 +68,12 @@ import Futhark.Util
 
 letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
-letSubExp _ (PrimOp (SubExp se)) = return se
+letSubExp _ (BasicOp (SubExp se)) = return se
 letSubExp desc e = Var <$> letExp desc e
 
 letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m VName
-letExp _ (PrimOp (SubExp (Var v))) =
+letExp _ (BasicOp (SubExp (Var v))) =
   return v
 letExp desc e = do
   n <- length <$> expExtType e
@@ -104,7 +104,7 @@ letExps desc = mapM $ letExp desc
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
           -> m [VName]
-letTupExp _ (PrimOp (SubExp (Var v))) =
+letTupExp _ (BasicOp (SubExp (Var v))) =
   return [v]
 letTupExp name e = do
   numValues <- length <$> expExtType e
@@ -114,13 +114,13 @@ letTupExp name e = do
 letTupExp' :: (MonadBinder m) =>
               String -> Exp (Lore m)
            -> m [SubExp]
-letTupExp' _ (PrimOp (SubExp se)) = return [se]
+letTupExp' _ (BasicOp (SubExp se)) = return [se]
 letTupExp' name ses = do vs <- letTupExp name ses
                          return $ map Var vs
 
 eSubExp :: MonadBinder m =>
            SubExp -> m (Exp (Lore m))
-eSubExp = pure . PrimOp . SubExp
+eSubExp = pure . BasicOp . SubExp
 
 eIf :: MonadBinder m =>
        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
@@ -138,7 +138,7 @@ eBinOp :: MonadBinder m =>
 eBinOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
-  return $ PrimOp $ BinOp op x' y'
+  return $ BasicOp $ BinOp op x' y'
 
 eCmpOp :: MonadBinder m =>
           CmpOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -146,7 +146,7 @@ eCmpOp :: MonadBinder m =>
 eCmpOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
-  return $ PrimOp $ CmpOp op x' y'
+  return $ BasicOp $ CmpOp op x' y'
 
 eNegate :: MonadBinder m =>
            m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -156,10 +156,10 @@ eNegate em = do
   t <- subExpType e'
   case t of
     Prim (IntType int_t) ->
-      return $ PrimOp $
+      return $ BasicOp $
       BinOp (Sub int_t) (intConst int_t 0) e'
     Prim (FloatType float_t) ->
-      return $ PrimOp $
+      return $ BasicOp $
       BinOp (FSub float_t) (floatConst float_t 0) e'
     _ ->
       fail $ "eNegate: operand " ++ pretty e ++ " has invalid type."
@@ -168,7 +168,7 @@ eNot :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
 eNot e = do
   e' <- letSubExp "not_arg" =<< e
-  return $ PrimOp $ UnOp Not e'
+  return $ BasicOp $ UnOp Not e'
 
 eAbs :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -178,9 +178,9 @@ eAbs em = do
   t <- subExpType e'
   case t of
     Prim (IntType int_t) ->
-      return $ PrimOp $ UnOp (Abs int_t) e'
+      return $ BasicOp $ UnOp (Abs int_t) e'
     Prim (FloatType float_t) ->
-      return $ PrimOp $ UnOp (FAbs float_t) e'
+      return $ BasicOp $ UnOp (FAbs float_t) e'
     _ ->
       fail $ "eAbs: operand " ++ pretty e ++ " has invalid type."
 
@@ -192,26 +192,26 @@ eSignum em = do
   t <- subExpType e'
   case t of
     Prim (IntType int_t) ->
-      return $ PrimOp $ UnOp (SSignum int_t) e'
+      return $ BasicOp $ UnOp (SSignum int_t) e'
     _ ->
       fail $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eCopy e = do e' <- letExp "copy_arg" =<< e
-             return $ PrimOp $ Copy e'
+             return $ BasicOp $ Copy e'
 
 eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> SrcLoc -> m (Exp (Lore m))
 eAssert e loc = do e' <- letSubExp "assert_arg" =<< e
-                   return $ PrimOp $ Assert e' loc
+                   return $ BasicOp $ Assert e' loc
 
 eValue :: MonadBinder m => Value -> m (Exp (Lore m))
 eValue (PrimVal bv) =
-  return $ PrimOp $ SubExp $ Constant bv
+  return $ BasicOp $ SubExp $ Constant bv
 eValue (ArrayVal a bt [_]) = do
   let ses = map Constant $ A.elems a
-  return $ PrimOp $ ArrayLit ses $ Prim bt
+  return $ BasicOp $ ArrayLit ses $ Prim bt
 eValue (ArrayVal a bt shape) = do
   let rowshape = drop 1 shape
       rowsize  = product rowshape
@@ -220,7 +220,7 @@ eValue (ArrayVal a bt shape) = do
       rowtype = Array bt (Shape $ map (intConst Int32 . toInteger) rowshape)
                 NoUniqueness
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
-  return $ PrimOp $ ArrayLit ses rowtype
+  return $ BasicOp $ ArrayLit ses rowtype
 
 eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]
@@ -233,7 +233,7 @@ eBody es = insertBindingsM $ do
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
 eLambda lam args = do zipWithM_ letBindNames params $
-                        map (PrimOp . SubExp) args
+                        map (BasicOp . SubExp) args
                       bodyBind $ lambdaBody lam
   where params = [ [(param, BindVar)] |
                    param <- map paramName $ lambdaParams lam ]
@@ -257,9 +257,9 @@ eRoundToMultipleOf t x d =
 foldBinOp :: MonadBinder m =>
              BinOp -> SubExp -> [SubExp] -> m (Exp (Lore m))
 foldBinOp _ ne [] =
-  return $ PrimOp $ SubExp ne
+  return $ BasicOp $ SubExp ne
 foldBinOp bop ne (e:es) =
-  eBinOp bop (pure $ PrimOp $ SubExp e) (foldBinOp bop ne es)
+  eBinOp bop (pure $ BasicOp $ SubExp e) (foldBinOp bop ne es)
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
@@ -271,7 +271,7 @@ binOpLambda bop t = do
   x   <- newVName "x"
   y   <- newVName "y"
   (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
-    res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y)
+    res <- letSubExp "res" $ BasicOp $ BinOp bop (Var x) (Var y)
     return $ resultBody [res]
   return Lambda {
              lambdaParams     = [Param x (Prim t),

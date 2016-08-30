@@ -95,19 +95,19 @@ mapBody f (Body attr bnds res) = Body attr (map f bnds) res
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM :: (Applicative m, Monad m) =>
            Mapper flore tlore m -> Exp flore -> m (Exp tlore)
-mapExpM tv (PrimOp (SubExp se)) =
-  PrimOp <$> (SubExp <$> mapOnSubExp tv se)
-mapExpM tv (PrimOp (ArrayLit els rowt)) =
-  PrimOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*>
+mapExpM tv (BasicOp (SubExp se)) =
+  BasicOp <$> (SubExp <$> mapOnSubExp tv se)
+mapExpM tv (BasicOp (ArrayLit els rowt)) =
+  BasicOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*>
               mapOnType (mapOnSubExp tv) rowt)
-mapExpM tv (PrimOp (BinOp bop x y)) =
-  PrimOp <$> (BinOp bop <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
-mapExpM tv (PrimOp (CmpOp op x y)) =
-  PrimOp <$> (CmpOp op <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
-mapExpM tv (PrimOp (ConvOp conv x)) =
-  PrimOp <$> (ConvOp conv <$> mapOnSubExp tv x)
-mapExpM tv (PrimOp (UnOp op x)) =
-  PrimOp <$> (UnOp op <$> mapOnSubExp tv x)
+mapExpM tv (BasicOp (BinOp bop x y)) =
+  BasicOp <$> (BinOp bop <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
+mapExpM tv (BasicOp (CmpOp op x y)) =
+  BasicOp <$> (CmpOp op <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
+mapExpM tv (BasicOp (ConvOp conv x)) =
+  BasicOp <$> (ConvOp conv <$> mapOnSubExp tv x)
+mapExpM tv (BasicOp (UnOp op x)) =
+  BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
 mapExpM tv (If c texp fexp ts) =
   pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
        mapM (mapOnExtType tv) ts
@@ -116,41 +116,41 @@ mapExpM tv (Apply fname args ret) = do
              (,) <$> mapOnSubExp tv arg <*> pure d
   pure (Apply fname) <*> pure args' <*>
     mapOnRetType tv ret
-mapExpM tv (PrimOp (Index cs arr slice)) =
-  PrimOp <$> (pure Index <*> mapOnCertificates tv cs <*>
+mapExpM tv (BasicOp (Index cs arr slice)) =
+  BasicOp <$> (pure Index <*> mapOnCertificates tv cs <*>
               mapOnVName tv arr <*>
               mapM (Data.Traversable.traverse (mapOnSubExp tv)) slice)
-mapExpM tv (PrimOp (Iota n x s)) =
-  PrimOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s)
-mapExpM tv (PrimOp (Replicate shape vexp)) =
-  PrimOp <$> (Replicate
+mapExpM tv (BasicOp (Iota n x s)) =
+  BasicOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s)
+mapExpM tv (BasicOp (Replicate shape vexp)) =
+  BasicOp <$> (Replicate
                <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape))
                <*> mapOnSubExp tv vexp)
-mapExpM tv (PrimOp (Scratch t shape)) =
-  PrimOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
-mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
-  PrimOp <$> (pure Reshape <*> mapOnCertificates tv cs <*>
+mapExpM tv (BasicOp (Scratch t shape)) =
+  BasicOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
+mapExpM tv (BasicOp (Reshape cs shape arrexp)) =
+  BasicOp <$> (pure Reshape <*> mapOnCertificates tv cs <*>
                  mapM (Data.Traversable.traverse (mapOnSubExp tv)) shape <*>
                  mapOnVName tv arrexp)
-mapExpM tv (PrimOp (Rearrange cs perm e)) =
-  PrimOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>
+mapExpM tv (BasicOp (Rearrange cs perm e)) =
+  BasicOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>
                  pure perm <*> mapOnVName tv e)
-mapExpM tv (PrimOp (Rotate cs es e)) =
-  PrimOp <$> (pure Rotate <*> mapOnCertificates tv cs <*>
+mapExpM tv (BasicOp (Rotate cs es e)) =
+  BasicOp <$> (pure Rotate <*> mapOnCertificates tv cs <*>
               mapM (mapOnSubExp tv) es <*> mapOnVName tv e)
-mapExpM tv (PrimOp (Split cs i sizeexps arrexp)) =
-  PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*> pure i <*>
+mapExpM tv (BasicOp (Split cs i sizeexps arrexp)) =
+  BasicOp <$> (pure Split <*> mapOnCertificates tv cs <*> pure i <*>
               mapM (mapOnSubExp tv) sizeexps <*> mapOnVName tv arrexp)
-mapExpM tv (PrimOp (Concat cs i x ys size)) =
-  PrimOp <$> (pure Concat <*> mapOnCertificates tv cs <*> pure i <*>
+mapExpM tv (BasicOp (Concat cs i x ys size)) =
+  BasicOp <$> (pure Concat <*> mapOnCertificates tv cs <*> pure i <*>
               mapOnVName tv x <*> mapM (mapOnVName tv) ys <*>
               mapOnSubExp tv size)
-mapExpM tv (PrimOp (Copy e)) =
-  PrimOp <$> (pure Copy <*> mapOnVName tv e)
-mapExpM tv (PrimOp (Assert e loc)) =
-  PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
-mapExpM tv (PrimOp (Partition cs n flags arr)) =
-  PrimOp <$> (pure Partition <*> mapOnCertificates tv cs <*>
+mapExpM tv (BasicOp (Copy e)) =
+  BasicOp <$> (pure Copy <*> mapOnVName tv e)
+mapExpM tv (BasicOp (Assert e loc)) =
+  BasicOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
+mapExpM tv (BasicOp (Partition cs n flags arr)) =
+  BasicOp <$> (pure Partition <*> mapOnCertificates tv cs <*>
               pure n <*>
               mapOnVName tv flags <*>
               mapM (mapOnVName tv) arr)

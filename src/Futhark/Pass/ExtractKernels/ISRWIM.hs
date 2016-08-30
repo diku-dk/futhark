@@ -28,7 +28,7 @@ iswim res_pat cs w scan_fun scan_input
   | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun = Just $ do
       let (accs, arrs) = unzip scan_input
       arrs' <- transposedArrays arrs
-      accs' <- mapM (letExp "acc" . PrimOp . SubExp) accs
+      accs' <- mapM (letExp "acc" . BasicOp . SubExp) accs
 
       let map_arrs' = accs' ++ arrs'
           (scan_acc_params, scan_elem_params) =
@@ -59,7 +59,7 @@ iswim res_pat cs w scan_fun scan_input
                  (patternValueIdents res_pat')) $ \(to, from) -> do
         let perm = [1,0] ++ [2..arrayRank (identType from)-1]
         addBinding $ Let (basicPattern' [] [to]) () $
-                     PrimOp $ Rearrange [] perm $ identName from
+                     BasicOp $ Rearrange [] perm $ identName from
   | otherwise = Nothing
 
 irwim :: (MonadBinder m, Lore m ~ SOACS, LocalScope SOACS m) =>
@@ -77,7 +77,7 @@ irwim res_pat cs w comm red_fun red_input
       -- replicate?  We also assume that it is non-empty.
       let indexAcc (Var v) = do
             v_t <- lookupType v
-            letSubExp "acc" $ PrimOp $ Index [] v $
+            letSubExp "acc" $ BasicOp $ Index [] v $
               fullSlice v_t [DimFix $ intConst Int32 0]
           indexAcc Constant{} =
             fail "irwim: array accumulator is a constant."
@@ -125,7 +125,7 @@ transposedArrays :: MonadBinder m => [VName] -> m [VName]
 transposedArrays arrs = forM arrs $ \arr -> do
   t <- lookupType arr
   let perm = [1,0] ++ [2..arrayRank t-1]
-  letExp (baseString arr) $ PrimOp $ Rearrange [] perm arr
+  letExp (baseString arr) $ BasicOp $ Rearrange [] perm arr
 
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =

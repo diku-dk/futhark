@@ -130,7 +130,7 @@ internaliseExp desc (E.Index e idxs loc) = do
   (idxs', idx_cs) <- unzip <$> zipWithM (internaliseDimIndex loc) dims idxs
   let index v = do
         v_t <- lookupType v
-        return $ I.PrimOp $ I.Index (concat idx_cs) v $ fullSlice v_t idxs'
+        return $ I.BasicOp $ I.Index (concat idx_cs) v $ fullSlice v_t idxs'
   letSubExps desc =<< mapM index vs
 
 internaliseExp desc (E.TupleIndex e i (Info rt) _) =
@@ -147,7 +147,7 @@ internaliseExp desc (E.TupLit es _) =
 internaliseExp desc (E.ArrayLit [] (Info et) _) =
   letSubExps desc $ map arrayLit $ internaliseType et
   where arrayLit et' =
-          I.PrimOp $ I.ArrayLit [] $ et' `annotateArrayShape` []
+          I.BasicOp $ I.ArrayLit [] $ et' `annotateArrayShape` []
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -156,11 +156,11 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
       let rowtypes = map zeroDim $ internaliseType rowtype
           zeroDim t = t `I.setArrayShape`
                       I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
-          arraylit rt = I.PrimOp $ I.ArrayLit [] rt
+          arraylit rt = I.BasicOp $ I.ArrayLit [] rt
       letSubExps desc $ map arraylit rowtypes
     e' : _ -> do
       rowtypes <- mapM subExpType e'
-      let arraylit ks rt = I.PrimOp $ I.ArrayLit ks rt
+      let arraylit ks rt = I.BasicOp $ I.ArrayLit ks rt
       letSubExps desc $ zipWith arraylit (transpose es') rowtypes
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) loc) =
@@ -195,7 +195,7 @@ internaliseExp desc (E.LetPat pat e body _) = do
   t <- I.staticShapes <$> mapM I.subExpType ses
   bindingPattern pat t $ \pat' -> do
     forM_ (zip (patternIdents pat') ses) $ \(p,se) ->
-      letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp se
+      letBind (basicPattern' [] [p]) $ I.BasicOp $ I.SubExp se
     internaliseExp desc body
 
 internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
@@ -207,20 +207,20 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       lbound' <- internaliseExp1 "lower_bound" lbound
       ubound' <- internaliseExp1 "upper_bound" ubound
       num_iterations <- letSubExp "num_iterations" $
-                        PrimOp $ I.BinOp (I.Sub I.Int32) ubound' lbound'
+                        BasicOp $ I.BinOp (I.Sub I.Int32) ubound' lbound'
       i' <- internaliseIdent i
       j <- newVName $ baseString i'
       let i_ident = I.Ident i' $ I.Prim I.int32
       i_bnds <- case dir of
         E.FromUpTo ->
           return [mkLet' [] [i_ident] $
-                  I.PrimOp $ I.BinOp (I.Add I.Int32) lbound' (I.Var j)]
+                  I.BasicOp $ I.BinOp (I.Add I.Int32) lbound' (I.Var j)]
         E.FromDownTo -> do
           upper_bound_less_one <-
             letSubExp "upper_bound_less_one" $
-            PrimOp $ I.BinOp (I.Sub I.Int32) ubound' (constant (1 :: I.Int32))
+            BasicOp $ I.BinOp (I.Sub I.Int32) ubound' (constant (1 :: I.Int32))
           return [mkLet' [] [i_ident] $
-                  I.PrimOp $ I.BinOp (I.Sub I.Int32) upper_bound_less_one (I.Var j)]
+                  I.BasicOp $ I.BinOp (I.Sub I.Int32) upper_bound_less_one (I.Var j)]
       return ( bindingIdentTypes [I.Ident j $ I.Prim I.int32, i_ident] .
                extraBodyBindings i_bnds
              , Left (j, num_iterations))
@@ -313,12 +313,12 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
             rowtype = sname_t `setArrayDims` sliceDims slice
         ve'' <- ensureShape asserting loc rowtype "lw_val_correct_shape" ve'
         letInPlace "letwith_dst" (concat idx_cs) sname (fullSlice sname_t idxs') $
-          PrimOp $ SubExp ve''
+          BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
   bindingPattern (E.Id name) dstt $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
-      letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
+      letBind (basicPattern' [] [p]) $ I.BasicOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
 
 -- Pretend we saw a let-with instead.
@@ -331,13 +331,13 @@ internaliseExp desc (E.Update src idxs ve loc) = do
 internaliseExp desc (E.Replicate ne ve _) = do
   ne' <- internaliseExp1 "n" ne
   ves <- internaliseExp "replicate_v" ve
-  letSubExps desc $ I.PrimOp . I.Replicate (I.Shape [ne']) <$> ves
+  letSubExps desc $ I.BasicOp . I.Replicate (I.Shape [ne']) <$> ves
 
 internaliseExp desc (E.Shape e _) = do
   ks <- internaliseExp (desc<>"_shape") e
   case ks of
     (k:_) -> do kt <- I.subExpType k
-                letSubExps desc [I.PrimOp $ I.ArrayLit (I.arrayDims kt) $ I.Prim int32]
+                letSubExps desc [I.BasicOp $ I.ArrayLit (I.arrayDims kt) $ I.Prim int32]
     _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
 
 internaliseExp desc (E.Unzip e _ _) =
@@ -361,10 +361,10 @@ internaliseExp _ (E.Zip _ e es loc) = do
             case I.arrayDims unchecked_t of
               []      -> return e_unchecked' -- Probably type error
               outer:inner -> do
-                cmp <- letSubExp "zip_cmp" $ I.PrimOp $
+                cmp <- letSubExp "zip_cmp" $ I.BasicOp $
                        I.CmpOp (I.CmpEq I.int32) w outer
                 c   <- assertingOne $
-                       letExp "zip_assert" $ I.PrimOp $
+                       letExp "zip_assert" $ I.BasicOp $
                        I.Assert cmp loc
                 letExp (postfix e_unchecked' "_zip_res") $
                   shapeCoerce c (w:inner) e_unchecked'
@@ -411,18 +411,18 @@ internaliseExp _ (E.Split i splitexp arrexp loc) = do
 
   -- Assertions
   indexAsserts <- asserting $ do
-    let indexConds = zipWith (\beg end -> PrimOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
+    let indexConds = zipWith (\beg end -> BasicOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
                      (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
     indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
     forM indexChecks$ \cnd ->
-      letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc
+      letExp "split_index_assert" $ BasicOp $ I.Assert cnd loc
 
   -- Calculate diff between each split index
-  let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp (I.Sub I.Int32) end beg)
+  let sizeExps = zipWith (\beg end -> BasicOp $ I.BinOp (I.Sub I.Int32) end beg)
                  (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
   sizeVars <- mapM (letSubExp "split_size") sizeExps
   splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
-                                   PrimOp $ I.Split indexAsserts i sizeVars arr
+                                   BasicOp $ I.Split indexAsserts i sizeVars arr
 
   return $ concat $ transpose splitExps
 
@@ -439,7 +439,7 @@ internaliseExp desc (E.Concat i x ys loc) = do
         yts <- mapM lookupType yarrs
         let matches n m =
               letExp "match" =<<
-              eAssert (pure $ I.PrimOp $ I.CmpOp (I.CmpEq I.int32) n m) loc
+              eAssert (pure $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) n m) loc
             x_inner_dims  = dropAt i 1 $ I.arrayDims xt
             ys_inner_dims = map (dropAt i 1 . I.arrayDims) yts
             updims = zipWith3 updims' [0..] (I.arrayDims xt)
@@ -451,11 +451,11 @@ internaliseExp desc (E.Concat i x ys loc) = do
           yt <- lookupType yarr
           letExp "concat_y_reshaped" $
             shapeCoerce matchcs (updims $ I.arrayDims yt) yarr
-        return $ I.PrimOp $ I.Concat [] i xarr yarrs' ressize
+        return $ I.BasicOp $ I.Concat [] i xarr yarrs' ressize
   letSubExps desc =<< zipWithM conc xs (transpose yss)
 
     where
-        sumdims xsize ysize = letSubExp "conc_tmp" $ I.PrimOp $
+        sumdims xsize ysize = letSubExp "conc_tmp" $ I.BasicOp $
                                         I.BinOp (I.Add I.Int32) xsize ysize
 
 internaliseExp _ (E.Map _ [] _) = return []
@@ -484,10 +484,10 @@ internaliseExp desc (E.Filter lam arr _) = do
   filter_size <- newIdent "filter_size" $ I.Prim int32
   filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
   addBinding $ mkLet' [] (filter_size : filter_perms) $
-    I.PrimOp $ I.Partition [] 1 flags arrs
+    I.BasicOp $ I.Partition [] 1 flags arrs
   forM filter_perms $ \filter_perm ->
     letSubExp desc $
-      I.PrimOp $ I.Split [] 0 [I.Var $ I.identName filter_size] $
+      I.BasicOp $ I.Split [] 0 [I.Var $ I.identName filter_size] $
       I.identName filter_perm
 
 internaliseExp desc (E.Partition lams arr _) = do
@@ -499,9 +499,9 @@ internaliseExp desc (E.Partition lams arr _) = do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Prim int32
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
     addBinding $ mkLet' [] (partition_sizes++[partition_perm]) $
-      I.PrimOp $ I.Partition [] n flags [arr']
+      I.BasicOp $ I.Partition [] n flags [arr']
     letTupExp desc $
-      I.PrimOp $ I.Split [] 0 (map (I.Var . I.identName) partition_sizes) $
+      I.BasicOp $ I.Split [] 0 (map (I.Var . I.identName) partition_sizes) $
       I.identName partition_perm
   where n = length lams + 1
 
@@ -540,7 +540,7 @@ internaliseExp _ E.Stream{} =
 
 internaliseExp desc (E.Iota e _) = do
   e' <- internaliseExp1 "n" e
-  letTupExp' desc $ I.PrimOp $
+  letTupExp' desc $ I.BasicOp $
     I.Iota e' (constant (0::Int32)) (constant (1::Int32))
 
 internaliseExp _ (E.Literal v _) =
@@ -566,13 +566,13 @@ internaliseExp desc (E.BinOp bop xe ye _ _) = do
 
 internaliseExp desc (E.UnOp E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e
-  letTupExp' desc $ I.PrimOp $ I.UnOp I.Not e'
+  letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
 
 internaliseExp desc (E.UnOp E.Complement e _) = do
   e' <- internaliseExp1 "complement_arg" e
   et <- subExpType e'
   case et of I.Prim (I.IntType t) ->
-               letTupExp' desc $ I.PrimOp $ I.UnOp (I.Complement t) e'
+               letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
              _ ->
                fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
 
@@ -580,67 +580,67 @@ internaliseExp desc (E.UnOp E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
   case et of I.Prim (I.IntType t) ->
-               letTupExp' desc $ I.PrimOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
+               letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
              I.Prim (I.FloatType t) ->
-               letTupExp' desc $ I.PrimOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
+               letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
              _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
 internaliseExp desc (E.UnOp E.Abs e _) = do
   e' <- internaliseExp1 "abs_arg" e
   case E.typeOf e of
     E.Prim (E.Signed t) ->
-      letTupExp' desc $ I.PrimOp $ I.UnOp (I.Abs t) e'
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Abs t) e'
     E.Prim (E.Unsigned _) ->
       return [e']
     E.Prim (E.FloatType t) ->
-      letTupExp' desc $ I.PrimOp $ I.UnOp (I.FAbs t) e'
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
 
 internaliseExp desc (E.UnOp E.Signum e _) = do
   e' <- internaliseExp1 "signum_arg" e
   case E.typeOf e of
     E.Prim (E.Signed t) ->
-      letTupExp' desc $ I.PrimOp $ I.UnOp (I.SSignum t) e'
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.SSignum t) e'
     E.Prim (E.Unsigned t) ->
-      letTupExp' desc $ I.PrimOp $ I.UnOp (I.USignum t) e'
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
 
 internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
   e' <- internaliseExp1 "tofloat_arg" e
   case E.typeOf e of
     E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.SIToFP int_from float_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
     E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.UIToFP int_from float_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.UIToFP int_from float_to) e'
     E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (FPConv float_from float_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
 
 internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
     E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.SExt int_from int_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
     E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.SExt int_from int_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
     E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.FPToSI float_from int_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToSigned"
 
 internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
     E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.ZExt int_from int_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
     E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.ZExt int_from int_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
     E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.FPToUI float_from int_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
 
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
-  letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
+  letSubExps desc [I.BasicOp $ I.Copy se | se <- ses]
 
 internaliseExp desc (E.Write i v as loc) = do
   sis <- internaliseExpToVars "write_arg_i" i
@@ -665,15 +665,15 @@ internaliseExp desc (E.Write i v as loc) = do
 
     -- Generate an assertion and reshapes to ensure that sv and si are the same
     -- size.
-    cmp <- letSubExp "write_cmp" $ I.PrimOp $
+    cmp <- letSubExp "write_cmp" $ I.BasicOp $
       I.CmpOp (I.CmpEq I.int32) si_len sv_len
     c   <- assertingOne $
-      letExp "write_cert" $ I.PrimOp $
+      letExp "write_cert" $ I.BasicOp $
       I.Assert cmp loc
     si' <- letExp (baseString si ++ "_write_si") $
-      I.PrimOp $ I.SubExp $ I.Var si
+      I.BasicOp $ I.SubExp $ I.Var si
     sv' <- letExp (baseString sv ++ "_write_sv") $
-      I.PrimOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
+      I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
 
     return (tv, si', sv')
   let (tvs, sis', svs') = unzip3 resTemp
@@ -696,7 +696,7 @@ internaliseExp desc (E.Write i v as loc) = do
   -- But it can get funky later on if fused with something else.
   (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
     results <- forM bodyNames $ \name -> letSubExp "write_res"
-                                         $ I.PrimOp $ I.SubExp $ I.Var name
+                                         $ I.BasicOp $ I.SubExp $ I.Var name
     return $ resultBody results
 
   let lam = Lambda { I.lambdaParams = bodyParams
@@ -718,11 +718,11 @@ internaliseDimIndex loc w (E.DimSlice i j) = do
   j' <- internaliseExp1 "j" j
   cs_i <- assertingOne $ boundsCheck loc w i'
   cs_j <- assertingOne $ do
-    wp1 <- letSubExp "wp1" $ PrimOp $ I.BinOp (Add Int32) j' (constant (1::Int32))
+    wp1 <- letSubExp "wp1" $ BasicOp $ I.BinOp (Add Int32) j' (constant (1::Int32))
     boundsCheck loc wp1 j'
   cs_pos <- assertingOne $
-    letExp "pos" =<< eAssert (pure $ PrimOp $ I.CmpOp (CmpSle Int32) i' j') loc
-  n <- letSubExp "n" $ PrimOp $ I.BinOp (Sub Int32) j' i'
+    letExp "pos" =<< eAssert (pure $ BasicOp $ I.CmpOp (CmpSle Int32) i' j') loc
+  n <- letSubExp "n" $ BasicOp $ I.BinOp (Sub Int32) j' i'
   return (I.DimSlice i' n, cs_i <> cs_j <> cs_pos)
 
 internaliseScanOrReduce :: String -> String
@@ -756,15 +756,15 @@ internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
   mapM asIdent =<< internaliseExp desc e
   where asIdent (I.Var v) = return v
-        asIdent se        = letExp desc $ I.PrimOp $ I.SubExp se
+        asIdent se        = letExp desc $ I.BasicOp $ I.SubExp se
 
 internaliseOperation :: String
                      -> E.Exp
-                     -> (I.VName -> InternaliseM I.PrimOp)
+                     -> (I.VName -> InternaliseM I.BasicOp)
                      -> InternaliseM [I.SubExp]
 internaliseOperation s e op = do
   vs <- internaliseExpToVars s e
-  letSubExps s =<< mapM (fmap I.PrimOp . op) vs
+  letSubExps s =<< mapM (fmap I.BasicOp . op) vs
 
 internaliseBinOp :: String
                  -> E.BinOp
@@ -847,8 +847,8 @@ internaliseBinOp desc E.LogOr x y _ _ =
 internaliseBinOp desc E.Equal x y t _ =
   simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y
 internaliseBinOp desc E.NotEqual x y t _ = do
-  eq <- letSubExp (desc++"true") $ I.PrimOp $ I.CmpOp (I.CmpEq $ internalisePrimType t) x y
-  fmap pure $ letSubExp desc $ I.PrimOp $ I.UnOp I.Not eq
+  eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq $ internalisePrimType t) x y
+  fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
 internaliseBinOp desc E.Less x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSlt t) x y
 internaliseBinOp desc E.Less x y (E.Unsigned t) _ =
@@ -882,14 +882,14 @@ simpleBinOp :: String
             -> I.SubExp -> I.SubExp
             -> InternaliseM [I.SubExp]
 simpleBinOp desc bop x y =
-  letTupExp' desc $ I.PrimOp $ I.BinOp bop x y
+  letTupExp' desc $ I.BasicOp $ I.BinOp bop x y
 
 simpleCmpOp :: String
             -> I.CmpOp
             -> I.SubExp -> I.SubExp
             -> InternaliseM [I.SubExp]
 simpleCmpOp desc op x y =
-  letTupExp' desc $ I.PrimOp $ I.CmpOp op x y
+  letTupExp' desc $ I.BasicOp $ I.CmpOp op x y
 
 
 internaliseLambda :: InternaliseLambda
@@ -1015,9 +1015,9 @@ assertingOne m = asserting $ fmap pure m
 boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc w e = do
   let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
-      lowerBound = I.PrimOp $
+      lowerBound = I.BasicOp $
                    I.CmpOp (I.CmpSle I.Int32) (I.constant (0 :: I.Int32)) e
-      upperBound = I.PrimOp $
+      upperBound = I.BasicOp $
                    I.CmpOp (I.CmpSlt I.Int32) e w
   letExp "bounds_check" =<< eAssert check loc
 
@@ -1034,7 +1034,7 @@ shadowIdentsInExp substs bnds res = do
           | otherwise =
             return $ HM.insert name v nameSubsts
         handleSubst nameSubsts (name, se) = do
-          letBindNames'_ [name] $ PrimOp $ SubExp se
+          letBindNames'_ [name] $ BasicOp $ SubExp se
           return nameSubsts
     nameSubsts <- foldM handleSubst HM.empty substs
     mapM_ addBinding $ substituteNames nameSubsts bnds

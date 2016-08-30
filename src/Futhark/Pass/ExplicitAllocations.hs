@@ -53,7 +53,7 @@ bindAllocBinding (SizeComputation name se) = do
 bindAllocBinding (Allocation name size space) =
   letBindNames'_ [name] $ Op $ Alloc size space
 bindAllocBinding (ArrayCopy name bindage src) =
-  letBindNames_ [(name,bindage)] $ PrimOp $ Copy src
+  letBindNames_ [(name,bindage)] $ BasicOp $ Copy src
 
 class (MonadFreshNames m, HasScope lore m, ExplicitMemorish lore) =>
       Allocator lore m where
@@ -140,7 +140,7 @@ instance Allocable fromlore OutInKernel =>
   addAllocBinding (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
-    letBindNames_ [(name, bindage)] $ PrimOp $ Copy src
+    letBindNames_ [(name, bindage)] $ BasicOp $ Copy src
 
   dimAllocationSize (Var v) =
     fromMaybe (Var v) <$> asks (HM.lookup v . chunkMap)
@@ -156,7 +156,7 @@ instance Allocable fromlore OutInKernel =>
   addAllocBinding (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
-    letBindNames_ [(name, bindage)] $ PrimOp $ Copy src
+    letBindNames_ [(name, bindage)] $ BasicOp $ Copy src
 
   dimAllocationSize (Var v) =
     fromMaybe (Var v) <$> asks (HM.lookup v . chunkMap)
@@ -471,7 +471,7 @@ allocLinearArray s v = do
   let pat = Pattern [] [PatElem (identName v') BindVar $
                         directIndexFunction (elemType t) (arrayShape t)
                         NoUniqueness mem t]
-  addBinding $ Let pat () $ PrimOp $ Copy v
+  addBinding $ Let pat () $ BasicOp $ Copy v
   return (size, mem, Var $ identName v')
 
 funcallArgs :: (Allocable fromlore tolore,

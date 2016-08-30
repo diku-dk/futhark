@@ -18,7 +18,7 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, Exp, Body, Binding,
+  hiding (Prog, BasicOp, Exp, Body, Binding,
           Pattern, PatElem, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType)
 import Futhark.Representation.ExplicitMemory
@@ -133,7 +133,7 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
             | Just _ <- lookup pat_elem concretised = do
                 v_copy <- newVName $ textual v <> "_copy"
                 letBind_ (Pattern [] [PatElem v_copy BindVar $ patElemAttr pat_elem]) $
-                  PrimOp $ Copy v
+                  BasicOp $ Copy v
                 return $ Var v_copy
           updateResult _ se =
             return se
@@ -182,8 +182,8 @@ unExistentialiseMemory _ _ = cannotSimplify
 copyCopyToCopy :: (MonadBinder m,
                    LetAttr (Lore m) ~ (VarWisdom, MemBound u)) =>
                   TopDownRule m
-copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (PrimOp (Copy v1)))
-  | Just (PrimOp (Copy v2)) <- ST.lookupExp v1 vtable,
+copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (BasicOp (Copy v1)))
+  | Just (BasicOp (Copy v2)) <- ST.lookupExp v1 vtable,
 
     Just (_, ArrayMem _ _ _ srcmem src_ixfun) <-
       ST.entryLetBoundAttr =<< ST.lookup v1 vtable,
@@ -196,12 +196,12 @@ copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (PrimOp (Copy v1)))
 
     src_space == dest_space, dest_ixfun == src_ixfun =
 
-      letBind_ pat $ PrimOp $ Copy v2
+      letBind_ pat $ BasicOp $ Copy v2
 
-copyCopyToCopy vtable (Let pat _ (PrimOp (Copy v0)))
-  | Just (PrimOp (Rearrange cs perm v1)) <- ST.lookupExp v0 vtable,
-    Just (PrimOp (Copy v2)) <- ST.lookupExp v1 vtable = do
-      v0' <- letExp "rearrange_v0" $ PrimOp $ Rearrange cs perm v2
-      letBind_ pat $ PrimOp $ Copy v0'
+copyCopyToCopy vtable (Let pat _ (BasicOp (Copy v0)))
+  | Just (BasicOp (Rearrange cs perm v1)) <- ST.lookupExp v0 vtable,
+    Just (BasicOp (Copy v2)) <- ST.lookupExp v1 vtable = do
+      v0' <- letExp "rearrange_v0" $ BasicOp $ Rearrange cs perm v2
+      letBind_ pat $ BasicOp $ Copy v0'
 
 copyCopyToCopy _ _ = cannotSimplify
