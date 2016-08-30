@@ -68,18 +68,21 @@ module Futhark.Representation.Primitive
        , oneIsh
        , primBitSize
        , primByteSize
+
+       -- * Prettyprinting
+       , convOpFun
        )
        where
 
-import Control.Applicative
-import Data.Hashable
-import Data.Int (Int8, Int16, Int32, Int64)
-import Data.Bits
-import Data.Word
+import           Control.Applicative
+import           Data.Bits
+import           Data.Hashable
+import           Data.Int            (Int16, Int32, Int64, Int8)
+import           Data.Word
 
-import Prelude
+import           Prelude
 
-import Futhark.Util.Pretty
+import           Futhark.Util.Pretty
 
 -- | An integer type.  Note that signedness is not a property of the
 -- type, but a property of the operations performed on values of these
@@ -94,7 +97,7 @@ instance Hashable IntType where
   hashWithSalt salt = hashWithSalt salt . fromEnum
 
 instance Pretty IntType where
-  ppr Int8 = text "i8"
+  ppr Int8  = text "i8"
   ppr Int16 = text "i16"
   ppr Int32 = text "i32"
   ppr Int64 = text "i64"
@@ -128,14 +131,14 @@ instance Enum PrimType where
   toEnum 6 = Bool
   toEnum _ = Cert
 
-  fromEnum (IntType Int8) = 0
-  fromEnum (IntType Int16) = 1
-  fromEnum (IntType Int32) = 2
-  fromEnum (IntType Int64) = 3
+  fromEnum (IntType Int8)      = 0
+  fromEnum (IntType Int16)     = 1
+  fromEnum (IntType Int32)     = 2
+  fromEnum (IntType Int64)     = 3
   fromEnum (FloatType Float32) = 4
   fromEnum (FloatType Float64) = 5
-  fromEnum Bool = 6
-  fromEnum Cert = 7
+  fromEnum Bool                = 6
+  fromEnum Cert                = 7
 
 instance Bounded PrimType where
   minBound = IntType Int8
@@ -145,10 +148,10 @@ instance Hashable PrimType where
   hashWithSalt salt = hashWithSalt salt . fromEnum
 
 instance Pretty PrimType where
-  ppr (IntType t) = ppr t
+  ppr (IntType t)   = ppr t
   ppr (FloatType t) = ppr t
-  ppr Bool = text "bool"
-  ppr Cert = text "cert"
+  ppr Bool          = text "bool"
+  ppr Cert          = text "cert"
 
 -- | An integer value.
 data IntValue = Int8Value !Int8
@@ -158,20 +161,20 @@ data IntValue = Int8Value !Int8
                deriving (Eq, Ord, Show)
 
 instance Pretty IntValue where
-  ppr (Int8Value v) = text $ show v ++ "i8"
+  ppr (Int8Value v)  = text $ show v ++ "i8"
   ppr (Int16Value v) = text $ show v ++ "i16"
   ppr (Int32Value v) = text $ show v ++ "i32"
   ppr (Int64Value v) = text $ show v ++ "i64"
 
 -- | Create an 'IntValue' from a type and an 'Integer'.
 intValue :: Integral int => IntType -> int -> IntValue
-intValue Int8 = Int8Value . fromIntegral
+intValue Int8  = Int8Value . fromIntegral
 intValue Int16 = Int16Value . fromIntegral
 intValue Int32 = Int32Value . fromIntegral
 intValue Int64 = Int64Value . fromIntegral
 
 intValueType :: IntValue -> IntType
-intValueType Int8Value{} = Int8
+intValueType Int8Value{}  = Int8
 intValueType Int16Value{} = Int16
 intValueType Int32Value{} = Int32
 intValueType Int64Value{} = Int64
@@ -203,30 +206,30 @@ data PrimValue = IntValue !IntValue
                deriving (Eq, Ord, Show)
 
 instance Pretty PrimValue where
-  ppr (IntValue v) = ppr v
-  ppr (BoolValue b) = text $ show b
+  ppr (IntValue v)   = ppr v
+  ppr (BoolValue b)  = text $ show b
   ppr (FloatValue v) = ppr v
-  ppr Checked = text "Checked"
+  ppr Checked        = text "Checked"
 
 -- | The type of a basic value.
 primValueType :: PrimValue -> PrimType
-primValueType (IntValue v) = IntType $ intValueType v
+primValueType (IntValue v)   = IntType $ intValueType v
 primValueType (FloatValue v) = FloatType $ floatValueType v
-primValueType BoolValue{} = Bool
-primValueType Checked = Cert
+primValueType BoolValue{}    = Bool
+primValueType Checked        = Cert
 
 -- | A "blank" value of the given primitive type - this is zero, or
 -- whatever is close to it.  Don't depend on this value, but use it
 -- for e.g. creating arrays to be populated by do-loops.
 blankPrimValue :: PrimType -> PrimValue
-blankPrimValue (IntType Int8) = IntValue $ Int8Value 0
-blankPrimValue (IntType Int16) = IntValue $ Int16Value 0
-blankPrimValue (IntType Int32) = IntValue $ Int32Value 0
-blankPrimValue (IntType Int64) = IntValue $ Int64Value 0
+blankPrimValue (IntType Int8)      = IntValue $ Int8Value 0
+blankPrimValue (IntType Int16)     = IntValue $ Int16Value 0
+blankPrimValue (IntType Int32)     = IntValue $ Int32Value 0
+blankPrimValue (IntType Int64)     = IntValue $ Int64Value 0
 blankPrimValue (FloatType Float32) = FloatValue $ Float32Value 0.0
 blankPrimValue (FloatType Float64) = FloatValue $ Float64Value 0.0
-blankPrimValue Bool = BoolValue False
-blankPrimValue Cert = Checked
+blankPrimValue Bool                = BoolValue False
+blankPrimValue Cert                = Checked
 
 -- | Various unary operators.  It is a bit ad-hoc what is a unary
 -- operator and what is a built-in function.  Perhaps these should all
@@ -330,13 +333,13 @@ data ConvOp = ZExt IntType IntType
              deriving (Eq, Ord, Show)
 
 doUnOp :: UnOp -> PrimValue -> Maybe PrimValue
-doUnOp Not (BoolValue b) = Just $ BoolValue $ not b
+doUnOp Not (BoolValue b)         = Just $ BoolValue $ not b
 doUnOp Complement{} (IntValue v) = Just $ IntValue $ doComplement v
-doUnOp Abs{} (IntValue v) = Just $ IntValue $ doAbs v
-doUnOp FAbs{} (FloatValue v) = Just $ FloatValue $ doFAbs v
-doUnOp SSignum{} (IntValue v) = Just $ IntValue $ doSSignum v
-doUnOp USignum{} (IntValue v) = Just $ IntValue $ doUSignum v
-doUnOp _ _ = Nothing
+doUnOp Abs{} (IntValue v)        = Just $ IntValue $ doAbs v
+doUnOp FAbs{} (FloatValue v)     = Just $ FloatValue $ doFAbs v
+doUnOp SSignum{} (IntValue v)    = Just $ IntValue $ doSSignum v
+doUnOp USignum{} (IntValue v)    = Just $ IntValue $ doUSignum v
+doUnOp _ _                       = Nothing
 
 -- | E.g., @~(~1) = 1@.
 doComplement :: IntValue -> IntValue
@@ -359,29 +362,29 @@ doUSignum :: IntValue -> IntValue
 doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
 
 doBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
-doBinOp Add{} = doIntBinOp doAdd
-doBinOp FAdd{} = doFloatBinOp doFAdd
-doBinOp Sub{} = doIntBinOp doSub
-doBinOp FSub{} = doFloatBinOp doFSub
-doBinOp Mul{} = doIntBinOp doMul
-doBinOp FMul{} = doFloatBinOp doFMul
-doBinOp UDiv{} = doRiskyIntBinOp doUDiv
-doBinOp SDiv{} = doRiskyIntBinOp doSDiv
-doBinOp FDiv{} = doFloatBinOp doFDiv
-doBinOp UMod{} = doRiskyIntBinOp doUMod
-doBinOp SMod{} = doRiskyIntBinOp doSMod
-doBinOp SQuot{} = doRiskyIntBinOp doSQuot
-doBinOp SRem{} = doRiskyIntBinOp doSRem
-doBinOp Shl{} = doIntBinOp doShl
-doBinOp LShr{} = doIntBinOp doLShr
-doBinOp AShr{} = doIntBinOp doAShr
-doBinOp And{} = doIntBinOp doAnd
-doBinOp Or{} = doIntBinOp doOr
-doBinOp Xor{} = doIntBinOp doXor
-doBinOp Pow{} = doIntBinOp doPow
-doBinOp FPow{} = doFloatBinOp doFPow
+doBinOp Add{}    = doIntBinOp doAdd
+doBinOp FAdd{}   = doFloatBinOp doFAdd
+doBinOp Sub{}    = doIntBinOp doSub
+doBinOp FSub{}   = doFloatBinOp doFSub
+doBinOp Mul{}    = doIntBinOp doMul
+doBinOp FMul{}   = doFloatBinOp doFMul
+doBinOp UDiv{}   = doRiskyIntBinOp doUDiv
+doBinOp SDiv{}   = doRiskyIntBinOp doSDiv
+doBinOp FDiv{}   = doFloatBinOp doFDiv
+doBinOp UMod{}   = doRiskyIntBinOp doUMod
+doBinOp SMod{}   = doRiskyIntBinOp doSMod
+doBinOp SQuot{}  = doRiskyIntBinOp doSQuot
+doBinOp SRem{}   = doRiskyIntBinOp doSRem
+doBinOp Shl{}    = doIntBinOp doShl
+doBinOp LShr{}   = doIntBinOp doLShr
+doBinOp AShr{}   = doIntBinOp doAShr
+doBinOp And{}    = doIntBinOp doAnd
+doBinOp Or{}     = doIntBinOp doOr
+doBinOp Xor{}    = doIntBinOp doXor
+doBinOp Pow{}    = doIntBinOp doPow
+doBinOp FPow{}   = doFloatBinOp doFPow
 doBinOp LogAnd{} = doBoolBinOp (&&)
-doBinOp LogOr{} = doBoolBinOp (||)
+doBinOp LogOr{}  = doBoolBinOp (||)
 
 doIntBinOp :: (IntValue -> IntValue -> IntValue) -> PrimValue -> PrimValue
            -> Maybe PrimValue
@@ -510,20 +513,20 @@ doFPow :: FloatValue -> FloatValue -> FloatValue
 doFPow v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 ** floatToDouble v2
 
 doConvOp :: ConvOp -> PrimValue -> Maybe PrimValue
-doConvOp (ZExt _ to) (IntValue v) = Just $ IntValue $ doZExt v to
-doConvOp (SExt _ to) (IntValue v) = Just $ IntValue $ doSExt v to
+doConvOp (ZExt _ to) (IntValue v)     = Just $ IntValue $ doZExt v to
+doConvOp (SExt _ to) (IntValue v)     = Just $ IntValue $ doSExt v to
 doConvOp (FPConv _ to) (FloatValue v) = Just $ FloatValue $ doFPConv v to
 doConvOp (FPToUI _ to) (FloatValue v) = Just $ IntValue $ doFPToUI v to
 doConvOp (FPToSI _ to) (FloatValue v) = Just $ IntValue $ doFPToSI v to
-doConvOp (UIToFP _ to) (IntValue v) = Just $ FloatValue $ doUIToFP v to
-doConvOp (SIToFP _ to) (IntValue v) = Just $ FloatValue $ doSIToFP v to
-doConvOp _ _ = Nothing
+doConvOp (UIToFP _ to) (IntValue v)   = Just $ FloatValue $ doUIToFP v to
+doConvOp (SIToFP _ to) (IntValue v)   = Just $ FloatValue $ doSIToFP v to
+doConvOp _ _                          = Nothing
 
 -- | Zero-extend the given integer value to the size of the given
 -- type.  If the type is smaller than the given value, the result is a
 -- truncation.
 doZExt :: IntValue -> IntType -> IntValue
-doZExt (Int8Value x) t = intValue t $ toInteger (fromIntegral x :: Word8)
+doZExt (Int8Value x) t  = intValue t $ toInteger (fromIntegral x :: Word8)
 doZExt (Int16Value x) t = intValue t $ toInteger (fromIntegral x :: Word16)
 doZExt (Int32Value x) t = intValue t $ toInteger (fromIntegral x :: Word32)
 doZExt (Int64Value x) t = intValue t $ toInteger (fromIntegral x :: Word64)
@@ -532,7 +535,7 @@ doZExt (Int64Value x) t = intValue t $ toInteger (fromIntegral x :: Word64)
 -- type.  If the type is smaller than the given value, the result is a
 -- truncation.
 doSExt :: IntValue -> IntType -> IntValue
-doSExt (Int8Value x) t = intValue t $ toInteger x
+doSExt (Int8Value x) t  = intValue t $ toInteger x
 doSExt (Int16Value x) t = intValue t $ toInteger x
 doSExt (Int32Value x) t = intValue t $ toInteger x
 doSExt (Int64Value x) t = intValue t $ toInteger x
@@ -563,14 +566,14 @@ doSIToFP :: IntValue -> FloatType -> FloatValue
 doSIToFP v t = floatValue t $ intToInt64 v
 
 doCmpOp :: CmpOp -> PrimValue -> PrimValue -> Maybe Bool
-doCmpOp CmpEq{} v1 v2 = Just $ v1 == v2
-doCmpOp CmpUlt{} (IntValue v1) (IntValue v2) = Just $ doCmpUlt v1 v2
-doCmpOp CmpUle{} (IntValue v1) (IntValue v2) = Just $ doCmpUle v1 v2
-doCmpOp CmpSlt{} (IntValue v1) (IntValue v2) = Just $ doCmpSlt v1 v2
-doCmpOp CmpSle{} (IntValue v1) (IntValue v2) = Just $ doCmpSle v1 v2
+doCmpOp CmpEq{} v1 v2                            = Just $ v1 == v2
+doCmpOp CmpUlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpUlt v1 v2
+doCmpOp CmpUle{} (IntValue v1) (IntValue v2)     = Just $ doCmpUle v1 v2
+doCmpOp CmpSlt{} (IntValue v1) (IntValue v2)     = Just $ doCmpSlt v1 v2
+doCmpOp CmpSle{} (IntValue v1) (IntValue v2)     = Just $ doCmpSle v1 v2
 doCmpOp FCmpLt{} (FloatValue v1) (FloatValue v2) = Just $ doFCmpLt v1 v2
 doCmpOp FCmpLe{} (FloatValue v1) (FloatValue v2) = Just $ doFCmpLe v1 v2
-doCmpOp _ _ _ = Nothing
+doCmpOp _ _ _                                    = Nothing
 
 -- | Compare any two primtive values for exact equality.
 doCmpEq :: PrimValue -> PrimValue -> Bool
@@ -601,13 +604,13 @@ doFCmpLe :: FloatValue -> FloatValue -> Bool
 doFCmpLe = (<=)
 
 intToWord64 :: IntValue -> Word64
-intToWord64 (Int8Value v) = fromIntegral (fromIntegral v :: Word8)
+intToWord64 (Int8Value v)  = fromIntegral (fromIntegral v :: Word8)
 intToWord64 (Int16Value v) = fromIntegral (fromIntegral v :: Word16)
 intToWord64 (Int32Value v) = fromIntegral (fromIntegral v :: Word32)
 intToWord64 (Int64Value v) = fromIntegral (fromIntegral v :: Word64)
 
 intToInt64 :: IntValue -> Int64
-intToInt64 (Int8Value v) = fromIntegral v
+intToInt64 (Int8Value v)  = fromIntegral v
 intToInt64 (Int16Value v) = fromIntegral v
 intToInt64 (Int32Value v) = fromIntegral v
 intToInt64 (Int64Value v) = fromIntegral v
@@ -622,8 +625,8 @@ floatToDouble (Float64Value v) = v
 
 -- | Return respectively the source and destination types of a conversion operator.
 convTypes :: ConvOp -> (PrimType, PrimType)
-convTypes (ZExt t1 t2) = (IntType t1, IntType t2)
-convTypes (SExt t1 t2) = (IntType t1, IntType t2)
+convTypes (ZExt t1 t2)   = (IntType t1, IntType t2)
+convTypes (SExt t1 t2)   = (IntType t1, IntType t2)
 convTypes (FPConv t1 t2) = (FloatType t1, FloatType t2)
 convTypes (FPToUI t1 t2) = (FloatType t1, IntType t2)
 convTypes (FPToSI t1 t2) = (FloatType t1, IntType t2)
@@ -632,64 +635,64 @@ convTypes (SIToFP t1 t2) = (IntType t1, FloatType t2)
 
 -- | The result type of a binary operator.
 binOpType :: BinOp -> PrimType
-binOpType (Add t) = IntType t
-binOpType (Sub t) = IntType t
-binOpType (Mul t) = IntType t
-binOpType (SDiv t) = IntType t
-binOpType (SMod t) = IntType t
+binOpType (Add t)   = IntType t
+binOpType (Sub t)   = IntType t
+binOpType (Mul t)   = IntType t
+binOpType (SDiv t)  = IntType t
+binOpType (SMod t)  = IntType t
 binOpType (SQuot t) = IntType t
-binOpType (SRem t) = IntType t
-binOpType (UDiv t) = IntType t
-binOpType (UMod t) = IntType t
-binOpType (Shl t) = IntType t
-binOpType (LShr t) = IntType t
-binOpType (AShr t) = IntType t
-binOpType (And t) = IntType t
-binOpType (Or t) = IntType t
-binOpType (Xor t) = IntType t
-binOpType (Pow t) = IntType t
-binOpType (FPow t) = FloatType t
-binOpType LogAnd = Bool
-binOpType LogOr = Bool
-binOpType (FAdd t) = FloatType t
-binOpType (FSub t) = FloatType t
-binOpType (FMul t) = FloatType t
-binOpType (FDiv t) = FloatType t
+binOpType (SRem t)  = IntType t
+binOpType (UDiv t)  = IntType t
+binOpType (UMod t)  = IntType t
+binOpType (Shl t)   = IntType t
+binOpType (LShr t)  = IntType t
+binOpType (AShr t)  = IntType t
+binOpType (And t)   = IntType t
+binOpType (Or t)    = IntType t
+binOpType (Xor t)   = IntType t
+binOpType (Pow t)   = IntType t
+binOpType (FPow t)  = FloatType t
+binOpType LogAnd    = Bool
+binOpType LogOr     = Bool
+binOpType (FAdd t)  = FloatType t
+binOpType (FSub t)  = FloatType t
+binOpType (FMul t)  = FloatType t
+binOpType (FDiv t)  = FloatType t
 
 -- | The operand and result type of a unary operator.
 unOpType :: UnOp -> PrimType
-unOpType (SSignum t) = IntType t
-unOpType (USignum t) = IntType t
-unOpType Not = Bool
+unOpType (SSignum t)    = IntType t
+unOpType (USignum t)    = IntType t
+unOpType Not            = Bool
 unOpType (Complement t) = IntType t
-unOpType (Abs t) = IntType t
-unOpType (FAbs t) = FloatType t
+unOpType (Abs t)        = IntType t
+unOpType (FAbs t)       = FloatType t
 
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool
-zeroIsh (IntValue (Int8Value k)) = k == 0
-zeroIsh (IntValue (Int16Value k)) = k == 0
-zeroIsh (IntValue (Int32Value k)) = k == 0
-zeroIsh (IntValue (Int64Value k)) = k == 0
+zeroIsh (IntValue (Int8Value k))      = k == 0
+zeroIsh (IntValue (Int16Value k))     = k == 0
+zeroIsh (IntValue (Int32Value k))     = k == 0
+zeroIsh (IntValue (Int64Value k))     = k == 0
 zeroIsh (FloatValue (Float32Value k)) = k == 0
 zeroIsh (FloatValue (Float64Value k)) = k == 0
-zeroIsh (BoolValue False) = True
-zeroIsh _ = False
+zeroIsh (BoolValue False)             = True
+zeroIsh _                             = False
 
 -- | Is the given value kind of one?
 oneIsh :: PrimValue -> Bool
-oneIsh (IntValue (Int8Value k)) = k == 1
-oneIsh (IntValue (Int16Value k)) = k == 1
-oneIsh (IntValue (Int32Value k)) = k == 1
-oneIsh (IntValue (Int64Value k)) = k == 1
+oneIsh (IntValue (Int8Value k))      = k == 1
+oneIsh (IntValue (Int16Value k))     = k == 1
+oneIsh (IntValue (Int32Value k))     = k == 1
+oneIsh (IntValue (Int64Value k))     = k == 1
 oneIsh (FloatValue (Float32Value k)) = k == 1
 oneIsh (FloatValue (Float64Value k)) = k == 1
-oneIsh (BoolValue True) = True
-oneIsh _ = False
+oneIsh (BoolValue True)              = True
+oneIsh _                             = False
 
 -- | Is the given integer value kind of zero?
 zeroIshInt :: IntValue -> Bool
-zeroIshInt (Int8Value k) = k == 0
+zeroIshInt (Int8Value k)  = k == 0
 zeroIshInt (Int16Value k) = k == 0
 zeroIshInt (Int32Value k) = k == 0
 zeroIshInt (Int64Value k) = k == 0
@@ -700,14 +703,14 @@ primBitSize = (*8) . primByteSize
 
 -- | The size of a value of a given primitive type in eight-bit bytes.
 primByteSize :: Num a => PrimType -> a
-primByteSize (IntType t) = intByteSize t
+primByteSize (IntType t)   = intByteSize t
 primByteSize (FloatType t) = floatByteSize t
-primByteSize Bool = 1
-primByteSize Cert = 1
+primByteSize Bool          = 1
+primByteSize Cert          = 1
 
 -- | The size of a value of a given integer type in eight-bit bytes.
 intByteSize :: Num a => IntType -> a
-intByteSize Int8 = 1
+intByteSize Int8  = 1
 intByteSize Int16 = 2
 intByteSize Int32 = 4
 intByteSize Int64 = 8
@@ -716,3 +719,73 @@ intByteSize Int64 = 8
 floatByteSize :: Num a => FloatType -> a
 floatByteSize Float32 = 4
 floatByteSize Float64 = 8
+
+-- Prettyprinting instances
+
+instance Pretty BinOp where
+  ppr (Add t)   = taggedI "add" t
+  ppr (FAdd t)  = taggedF "fadd" t
+  ppr (Sub t)   = taggedI "sub" t
+  ppr (FSub t)  = taggedF "fsub" t
+  ppr (Mul t)   = taggedI "mul" t
+  ppr (FMul t)  = taggedF "fmul" t
+  ppr (UDiv t)  = taggedI "udiv" t
+  ppr (UMod t)  = taggedI "umod" t
+  ppr (SDiv t)  = taggedI "sdiv" t
+  ppr (SMod t)  = taggedI "smod" t
+  ppr (SQuot t) = taggedI "squot" t
+  ppr (SRem t)  = taggedI "srem" t
+  ppr (FDiv t)  = taggedF "fdiv" t
+  ppr (Shl t)   = taggedI "shl" t
+  ppr (LShr t)  = taggedI "lshr" t
+  ppr (AShr t)  = taggedI "ashr" t
+  ppr (And t)   = taggedI "and" t
+  ppr (Or t)    = taggedI "or" t
+  ppr (Xor t)   = taggedI "xor" t
+  ppr (Pow t)   = taggedI "pow" t
+  ppr (FPow t)  = taggedF "fpow" t
+  ppr LogAnd    = text "logand"
+  ppr LogOr     = text "logor"
+
+instance Pretty CmpOp where
+  ppr (CmpEq t)  = text "eq_" <> ppr t
+  ppr (CmpUlt t) = taggedI "ult" t
+  ppr (CmpUle t) = taggedI "ule" t
+  ppr (CmpSlt t) = taggedI "slt" t
+  ppr (CmpSle t) = taggedI "sle" t
+  ppr (FCmpLt t) = taggedF "lt" t
+  ppr (FCmpLe t) = taggedF "le" t
+
+instance Pretty ConvOp where
+  ppr op = convOp (convOpFun op) from to
+    where (from, to) = convTypes op
+
+instance Pretty UnOp where
+  ppr Not            = text "!"
+  ppr (Abs t)        = taggedI "abs" t
+  ppr (FAbs t)       = taggedF "fabs" t
+  ppr (SSignum t)    = taggedI "ssignum" t
+  ppr (USignum t)    = taggedI "usignum" t
+  ppr (Complement t) = taggedI "~" t
+
+convOpFun :: ConvOp -> String
+convOpFun ZExt{}   = "zext"
+convOpFun SExt{}   = "sext"
+convOpFun FPConv{} = "fpconv"
+convOpFun FPToUI{} = "fptoui"
+convOpFun FPToSI{} = "fptosi"
+convOpFun UIToFP{} = "uitofp"
+convOpFun SIToFP{} = "sitofp"
+
+taggedI :: String -> IntType -> Doc
+taggedI s Int8  = text $ s ++ "8"
+taggedI s Int16 = text $ s ++ "16"
+taggedI s Int32 = text $ s ++ "32"
+taggedI s Int64 = text $ s ++ "64"
+
+taggedF :: String -> FloatType -> Doc
+taggedF s Float32 = text $ s ++ "32"
+taggedF s Float64 = text $ s ++ "64"
+
+convOp :: (Pretty from, Pretty to) => String -> from -> to -> Doc
+convOp s from to = text s <> text "_" <> ppr from <> text "_" <> ppr to
