@@ -528,17 +528,6 @@ simplifyScal :: ScalExp -> AlgSimplifyM ScalExp
 simplifyScal (Val v) = return $ Val v
 simplifyScal (Id  x t) = return $ Id  x t
 
-simplifyScal (SOneIfZero x) = SOneIfZero <$> simplifyScal x
-simplifyScal (SIfZero x t f) = SIfZero <$>
-                               simplifyScal x <*>
-                               simplifyScal t <*>
-                               simplifyScal f
-simplifyScal (SIfLessThan a b t f) = SIfLessThan <$>
-                                     simplifyScal a <*>
-                                     simplifyScal b <*>
-                                     simplifyScal t <*>
-                                     simplifyScal f
-
 simplifyScal e@SNot{} = fromDNF =<< simplifyDNF =<< toDNF e
 simplifyScal e@SLogAnd{} = fromDNF =<< simplifyDNF =<< toDNF e
 simplifyScal e@SLogOr{} = fromDNF =<< simplifyDNF =<< toDNF e
@@ -1090,9 +1079,6 @@ negateSimplified :: ScalExp -> AlgSimplifyM ScalExp
 negateSimplified (SNeg e) = return e
 negateSimplified (SNot e) = return e
 negateSimplified (SAbs e) = return $ SAbs e
-negateSimplified (SOneIfZero e) = return $ SOneIfZero e
-negateSimplified (SIfZero x t f) = return $ SIfZero x t f
-negateSimplified (SIfLessThan a b t f) = return $ SIfLessThan a b t f
 negateSimplified (SSignum e) =
   SSignum <$> negateSimplified e
 negateSimplified e@(Val v) = do

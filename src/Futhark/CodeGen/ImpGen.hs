@@ -1247,19 +1247,6 @@ scalExpToImpExp (SE.SAbs e) =
   abs <$> scalExpToImpExp e
 scalExpToImpExp (SE.SNeg e) =
   (0-) <$> scalExpToImpExp e
-scalExpToImpExp (SE.SOneIfZero e) =
-  oneIfZero <$> scalExpToImpExp e
-scalExpToImpExp (SE.SIfZero c t f) =
-  ifZero <$>
-  scalExpToImpExp c <*>
-  scalExpToImpExp t <*>
-  scalExpToImpExp f
-scalExpToImpExp (SE.SIfLessThan a b t f) =
-  ifLessThan <$>
-  scalExpToImpExp a <*>
-  scalExpToImpExp b <*>
-  scalExpToImpExp t <*>
-  scalExpToImpExp f
 scalExpToImpExp _ =
   Nothing
 

@@ -16,7 +16,6 @@
 -- slightly easier to write.
 module Futhark.Util.IntegralExp
        ( IntegralExp (..)
-       , IntegralCond (..)
        , Wrapped (..)
        , quotRoundingUp
        )
@@ -27,11 +26,6 @@ class Num e => IntegralExp e where
   rem :: e -> e -> e
   div :: e -> e -> e
   mod :: e -> e -> e
-
-class IntegralExp e => IntegralCond e where
-  ifZero :: e -> e -> e -> e
-  ifLessThan :: e -> e -> e -> e -> e
-  oneIfZero :: e -> e
 
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
@@ -61,16 +55,7 @@ instance Integral a => IntegralExp (Wrapped a) where
   div = liftOp2 Prelude.div
   mod = liftOp2 Prelude.mod
 
-instance (Eq a, Ord a, Integral a) => IntegralCond (Wrapped a) where
-  ifZero 0 x _ = x
-  ifZero _ _ y = y
-  ifLessThan a b x y
-    | a < b     = x
-    | otherwise = y
-  oneIfZero 0 = 1
-  oneIfZero x = x
-
 -- | Like 'quot', but rounds up.
-quotRoundingUp :: IntegralCond num => num -> num -> num
+quotRoundingUp :: IntegralExp num => num -> num -> num
 quotRoundingUp x y =
   (x + y - 1) `Futhark.Util.IntegralExp.quot` y
