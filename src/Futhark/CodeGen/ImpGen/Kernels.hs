@@ -30,7 +30,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters, fullSliceNum)
 import Futhark.Util (splitAt3)
-import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralCond)
+import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralExp)
 
 type CallKernelGen = ImpGen.ImpM ExplicitMemory Imp.HostOp
 type InKernelGen = ImpGen.ImpM InKernel Imp.KernelOp
@@ -1217,7 +1217,7 @@ setSpaceIndices space =
         ImpGen.emit $ Imp.SetScalar i e
   where global_tid = spaceGlobalId space
 
-unflattenNestedIndex :: IntegralCond num => [num] -> [num] -> num -> [(num,num)]
+unflattenNestedIndex :: IntegralExp num => [num] -> [num] -> num -> [(num,num)]
 unflattenNestedIndex global_dims group_dims global_id =
   zip global_is local_is
   where num_groups_dims = zipWith quotRoundingUp global_dims group_dims

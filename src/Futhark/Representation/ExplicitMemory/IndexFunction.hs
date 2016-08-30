@@ -54,7 +54,7 @@ data IxFun num = Direct (Shape num)
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
-instance (IntegralCond num, Eq num) => Eq (IxFun num) where
+instance (IntegralExp num, Eq num) => Eq (IxFun num) where
   Direct _ == Direct _ =
     True
   Offset ixfun1 offset1 == Offset ixfun2 offset2 =
@@ -96,7 +96,7 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Stride fun stride) =
     ppr fun <> text "*" <> ppr stride
 
-instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num) where
+instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) where
   substituteNames _ (Direct n) =
     Direct n
   substituteNames subst (Offset fun k) =
@@ -129,10 +129,10 @@ instance FreeIn num => FreeIn (IxFun num) where
   freeIn (Reshape ixfun dims) =
     freeIn ixfun <> freeIn dims
 
-instance (Eq num, IntegralCond num, Substitute num, Rename num) => Rename (IxFun num) where
+instance (Eq num, IntegralExp num, Substitute num, Rename num) => Rename (IxFun num) where
   rename = substituteRename
 
-index :: (Pretty num, IntegralCond num) =>
+index :: (Pretty num, IntegralExp num) =>
          IxFun num -> Indices num -> num -> num
 
 index (Direct dims) is element_size =
@@ -166,20 +166,20 @@ index (Stride fun stride) (i:is) element_size =
 index ixfun [] _ =
   error $ "Empty index list provided to " ++ pretty ixfun
 
-iota :: IntegralCond num =>
+iota :: IntegralExp num =>
         Shape num -> IxFun num
 iota = Direct
 
-offsetIndex :: (Eq num, IntegralCond num) =>
+offsetIndex :: (Eq num, IntegralExp num) =>
                IxFun num -> num -> IxFun num
 offsetIndex ixfun i | i == 0 = ixfun
 offsetIndex ixfun i = Offset ixfun i
 
-strideIndex :: IntegralCond num =>
+strideIndex :: IntegralExp num =>
                IxFun num -> num -> IxFun num
 strideIndex = Stride
 
-permute :: IntegralCond num =>
+permute :: IntegralExp num =>
            IxFun num -> Permutation -> IxFun num
 permute (Permute ixfun oldperm) perm
   | rearrangeInverse oldperm == perm = ixfun
@@ -188,13 +188,13 @@ permute ixfun perm
   | perm == sort perm = ixfun
   | otherwise = Permute ixfun perm
 
-rotate :: IntegralCond num =>
+rotate :: IntegralExp num =>
           IxFun num -> Indices num -> IxFun num
 rotate (Rotate ixfun old_offsets) offsets =
   Rotate ixfun $ zipWith (+) old_offsets offsets
 rotate ixfun offsets = Rotate ixfun offsets
 
-reshape :: (Eq num, IntegralCond num) =>
+reshape :: (Eq num, IntegralExp num) =>
            IxFun num -> ShapeChange num -> IxFun num
 
 reshape Direct{} newshape =
@@ -212,7 +212,7 @@ reshape ixfun newshape
   | otherwise =
       Reshape ixfun newshape
 
-slice :: (Eq num, IntegralCond num) =>
+slice :: (Eq num, IntegralExp num) =>
          IxFun num -> Slice num -> IxFun num
 slice ixfun is
   -- Avoid identity slicing.
@@ -228,11 +228,11 @@ slice (Index ixfun mis) is =
 slice ixfun [] = ixfun
 slice ixfun is = Index ixfun is
 
-rank :: IntegralCond num =>
+rank :: IntegralExp num =>
         IxFun num -> Int
 rank = length . shape
 
-shape :: IntegralCond num =>
+shape :: IntegralExp num =>
          IxFun num -> Shape num
 shape (Direct dims) =
   dims
@@ -265,7 +265,7 @@ base (Reshape ixfun _) =
 base (Stride ixfun _) =
   base ixfun
 
-rebase :: (Eq num, IntegralCond num) =>
+rebase :: (Eq num, IntegralExp num) =>
           IxFun num
        -> IxFun num
        -> IxFun num
@@ -286,7 +286,7 @@ rebase new_base (Reshape ixfun new_shape) =
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.
-linearWithOffset :: (Eq num, IntegralCond num) =>
+linearWithOffset :: (Eq num, IntegralExp num) =>
                     IxFun num -> num -> Maybe num
 linearWithOffset (Direct _) _ =
   Just 0
@@ -310,7 +310,7 @@ linearWithOffset (Index ixfun is) element_size = do
         fixingOuter _ _ = Nothing
 linearWithOffset _ _ = Nothing
 
-rearrangeWithOffset :: (Eq num, IntegralCond num) =>
+rearrangeWithOffset :: (Eq num, IntegralExp num) =>
                        IxFun num -> num -> Maybe (num, [(Int,num)])
 rearrangeWithOffset (Reshape ixfun _) element_size =
   rearrangeWithOffset ixfun element_size
@@ -320,6 +320,6 @@ rearrangeWithOffset (Permute ixfun perm) element_size = do
 rearrangeWithOffset _ _ =
   Nothing
 
-isDirect :: (Eq num, IntegralCond num) => IxFun num -> Bool
+isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isDirect =
   maybe False (==0) . flip linearWithOffset 1

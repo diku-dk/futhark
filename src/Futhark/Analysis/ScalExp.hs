@@ -71,10 +71,6 @@ data ScalExp= Val     PrimValue
             | RelExp  RelOp0  ScalExp
             | SLogAnd ScalExp ScalExp
             | SLogOr  ScalExp ScalExp
-
-            | SOneIfZero ScalExp
-            | SIfZero ScalExp ScalExp ScalExp
-            | SIfLessThan ScalExp ScalExp ScalExp ScalExp
               deriving (Eq, Ord, Show)
 
 instance Num ScalExp where
@@ -102,11 +98,6 @@ instance IntegralExp ScalExp where
   div = SDiv
   mod = SMod
 
-instance IntegralCond ScalExp where
-  ifZero = SIfZero
-  ifLessThan = SIfLessThan
-  oneIfZero = SOneIfZero
-
 instance Pretty ScalExp where
   pprPrec _ (Val val) = ppr $ PrimVal val
   pprPrec _ (Id v _) = ppr v
@@ -128,14 +119,6 @@ instance Pretty ScalExp where
   pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e 0
   pprPrec _ (MaxMin True es) = text "min" <> parens (commasep $ map ppr es)
   pprPrec _ (MaxMin False es) = text "max" <> parens (commasep $ map ppr es)
-  pprPrec prec (SIfLessThan a b t f) =
-    parensIf (prec >= 0) $
-    ppr a <+> text "<" <+> ppr b <+> text "?" <+> ppr t <+> text ":" <+> ppr f
-  pprPrec prec (SIfZero x t f) =
-    parensIf (prec >= 0) $
-    ppr x <+> text "== 0" <+> ppr t <+> text ":" <+> ppr f
-  pprPrec _ (SOneIfZero x) =
-    text "oneIfZero" <> parens (ppr x)
 
 ppBinOp :: Int -> String -> Int -> Int -> ScalExp -> ScalExp -> Doc
 ppBinOp p bop precedence rprecedence x y =
@@ -164,16 +147,6 @@ instance Substitute ScalExp where
               RelExp r x -> RelExp r $ substituteNames subst x
               SLogAnd x y -> substituteNames subst x `SLogAnd` substituteNames subst y
               SLogOr x y -> substituteNames subst x `SLogOr` substituteNames subst y
-              SOneIfZero x -> SOneIfZero $ substituteNames subst x
-              SIfZero x t f -> SIfZero
-                               (substituteNames subst x)
-                               (substituteNames subst t)
-                               (substituteNames subst f)
-              SIfLessThan a b t f -> SIfLessThan
-                                     (substituteNames subst a)
-                                     (substituteNames subst b)
-                                     (substituteNames subst t)
-                                     (substituteNames subst f)
 
 instance Rename ScalExp where
   rename = substituteRename
@@ -198,9 +171,6 @@ scalExpType (SLogOr  _ _) = Bool
 scalExpType (RelExp  _ _) = Bool
 scalExpType (MaxMin _ []) = IntType Int32 -- arbitrary and probably wrong.
 scalExpType (MaxMin _ (e:_)) = scalExpType e
-scalExpType (SOneIfZero e) = scalExpType e
-scalExpType (SIfZero _ t _) = scalExpType t
-scalExpType (SIfLessThan _ _ t _) = scalExpType t
 
 -- | A function that checks whether a variable name corresponds to a
 -- scalar expression.
@@ -293,16 +263,6 @@ expandScalExp look (SPow x y) = SPow (expandScalExp look x) (expandScalExp look 
 expandScalExp look (SLogAnd x y) = SLogAnd (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SLogOr x y) = SLogOr (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (RelExp relop x) = RelExp relop $ expandScalExp look x
-expandScalExp look (SOneIfZero x) = SOneIfZero $ expandScalExp look x
-expandScalExp look (SIfZero x t f) = SIfZero
-                                     (expandScalExp look x)
-                                     (expandScalExp look t)
-                                     (expandScalExp look f)
-expandScalExp look (SIfLessThan a b t f) = SIfLessThan
-                                           (expandScalExp look a)
-                                           (expandScalExp look b)
-                                           (expandScalExp look t)
-                                           (expandScalExp look f)
 
 -- | "Smart constructor" that checks whether we are subtracting zero,
 -- and if so just returns the first argument.
@@ -360,22 +320,6 @@ fromScalExp = convert
           e'  <- convert e
           es' <- mapM convert es
           foldM (select isMin) e' es'
-        convert (SOneIfZero e) = do
-          e' <- letSubExp "one_if_zero_arg" =<< convert e
-          eIf
-            (eCmpOp (CmpEq int32) (eSubExp e') (pure zero))
-            (eBody [eSubExp $ intConst Int32 1])
-            (eBody [eSubExp e'])
-        convert (SIfZero x t f) =
-          eIf
-          (eCmpOp (CmpEq int32) (convert x) (pure zero))
-          (eBody [convert t])
-          (eBody [convert f])
-        convert (SIfLessThan a b t f) =
-          eIf
-          (eCmpOp (CmpSlt Int32) (convert a) (convert b))
-          (eBody [convert t])
-          (eBody [convert f])
 
         arithBinOp bop x y =
           eBinOp bop (convert x) (convert y)
@@ -409,6 +353,3 @@ instance FreeIn ScalExp where
   freeIn (RelExp LTH0 e) = freeIn e
   freeIn (RelExp LEQ0 e) = freeIn e
   freeIn (MaxMin _  es) = mconcat $ map freeIn es
-  freeIn (SOneIfZero e) = freeIn e
-  freeIn (SIfZero x t f) = freeIn x <> freeIn t <> freeIn f
-  freeIn (SIfLessThan a b t f) = freeIn a <> freeIn b <> freeIn t <> freeIn f

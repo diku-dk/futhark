@@ -193,14 +193,6 @@ instance IntegralExp Exp where
   _ `rem` 1 = 0
   x `rem` y = BinOp (SRem Int32) x y
 
-instance IntegralCond Exp where
-  oneIfZero x =
-    Cond (CmpOp (CmpEq $ IntType Int32) x 0) 1 x
-  ifZero c =
-    Cond (CmpOp (CmpEq $ IntType Int32) c 0)
-  ifLessThan a b =
-    Cond (CmpOp (CmpSlt Int32) a b)
-
 -- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
 -- type.
 newtype Count u = Count { innerExp :: Exp }
