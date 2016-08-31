@@ -42,11 +42,11 @@ type Code = Imp.Code OpenCL
 type KernelName = String
 
 -- | An argument to be passed to a kernel.
-data KernelArg = ValueArg Exp PrimType
+data KernelArg = ValueKArg Exp PrimType
                  -- ^ Pass the value of this scalar expression as argument.
-               | MemArg VName
+               | MemKArg VName
                  -- ^ Pass this pointer as argument.
-               | SharedMemoryArg (Count Bytes)
+               | SharedMemoryKArg (Count Bytes)
                  -- ^ Create this much local memory per workgroup.
                deriving (Show)
 

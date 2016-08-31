@@ -73,7 +73,7 @@ tupleField i = "elem_" ++ show i
 -- | @tupleFieldExp e i@ is the expression for accesing field @i@ of
 -- tuple @e@.  If @e@ is an lvalue, so will the resulting expression
 -- be.
-tupleFieldExp :: C.Exp -> Int -> C.Exp
+tupleFieldExp :: C.ToExp a => a -> Int -> C.Exp
 tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 
 -- | @funName f@ is the name of the C function corresponding to

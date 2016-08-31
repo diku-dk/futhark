@@ -112,11 +112,11 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
      Arg kernel_dims', Arg workgroup_dims]
   finishIfSynchronous
   where processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
-        processKernelArg (Imp.ValueArg e bt) = do
+        processKernelArg (Imp.ValueKArg e bt) = do
           e' <- Py.compileExp e
           return $ Call (Py.compilePrimToNp bt) [Arg e']
-        processKernelArg (Imp.MemArg v) = return $ Var $ pretty v
-        processKernelArg (Imp.SharedMemoryArg (Imp.Count num_bytes)) = do
+        processKernelArg (Imp.MemKArg v) = return $ Var $ pretty v
+        processKernelArg (Imp.SharedMemoryKArg (Imp.Count num_bytes)) = do
           num_bytes' <- Py.compileExp num_bytes
           return $ Call "cl.LocalMemory" [Arg $ asLong num_bytes']
 

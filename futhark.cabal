@@ -63,6 +63,8 @@ Library
                    Futhark.Analysis.Range
                    Futhark.Analysis.Rephrase
                    Futhark.Analysis.ScalExp
+                   Futhark.Analysis.PrimExp
+                   Futhark.Analysis.PrimExp.Convert
                    Futhark.Analysis.SymbolTable
                    Futhark.Analysis.Usage
                    Futhark.Analysis.UsageTable
