@@ -9,8 +9,6 @@ module Futhark.Analysis.ScalExp
   , expandScalExp
   , LookupVar
   , fromScalExp
-  , sproduct
-  , ssum
   , freeIn
   , module Futhark.Representation.Primitive
   )
@@ -269,18 +267,6 @@ expandScalExp look (RelExp relop x) = RelExp relop $ expandScalExp look x
 sminus :: ScalExp -> ScalExp -> ScalExp
 sminus x (Val v) | zeroIsh v = x
 sminus x y = x `SMinus` y
-
--- | Take the product of a list of 'ScalExp's, or the integer @1@ if
--- the list is empty.
-sproduct :: [ScalExp] -> ScalExp
-sproduct []       = Val $ IntValue $ Int32Value 1
-sproduct (se:ses) = foldl STimes se ses
-
--- | Take the sum of a list of 'ScalExp's, or the integer @0@ if the
--- list is empty.
-ssum :: [ScalExp] -> ScalExp
-ssum []       = Val $ IntValue $ Int32Value 0
-ssum (se:ses) = foldl SPlus se ses
 
  -- XXX: Only integers and booleans, OK?
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
