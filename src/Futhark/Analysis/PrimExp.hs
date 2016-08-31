@@ -5,6 +5,7 @@ module Futhark.Analysis.PrimExp
   ( PrimExp (..)
   , evalPrimExp
   , primExpType
+  , coerceIntPrimExp
 
   , module Futhark.Representation.Primitive
   ) where
@@ -210,6 +211,13 @@ oneIshExp _            = False
 valueExp :: PrimExp v -> Maybe PrimValue
 valueExp (ValueExp v) = Just v
 valueExp _            = Nothing
+
+-- | If the given 'PrimExp' is a constant of the wrong integer type,
+-- coerce it to the given integer type.  This is a workaround for an
+-- issue in the 'Num' instance.
+coerceIntPrimExp :: IntType -> PrimExp v -> PrimExp v
+coerceIntPrimExp t (ValueExp (IntValue v)) = ValueExp $ IntValue $ doSExt v t
+coerceIntPrimExp _ e                       = e
 
 -- Prettyprinting instances
 
