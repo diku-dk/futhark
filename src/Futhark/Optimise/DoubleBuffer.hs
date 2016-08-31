@@ -42,8 +42,6 @@ import           Futhark.Representation.AST
 import           Futhark.Representation.ExplicitMemory
                  hiding (Prog, Body, Binding, Pattern, PatElem,
                          BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import qualified Futhark.Analysis.ScalExp as SE
 import           Futhark.Pass
 
 doubleBuffer :: Pass ExplicitMemory ExplicitMemory
@@ -167,7 +165,7 @@ optimiseLoop ctx val body = do
 -- | The booleans indicate whether we should also play with the
 -- initial merge values.
 data DoubleBuffer lore = BufferAlloc VName SubExp Space Bool
-                       | BufferCopy VName (IxFun.IxFun SE.ScalExp) VName Bool
+                       | BufferCopy VName IxFun VName Bool
                        -- ^ First name is the memory block to copy to,
                        -- second is the name of the array copy.
                        | NoBuffer

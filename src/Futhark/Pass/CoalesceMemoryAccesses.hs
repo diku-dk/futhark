@@ -30,7 +30,6 @@ import Futhark.Representation.ExplicitMemory
 import Futhark.Tools
 import Futhark.Pass
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import qualified Futhark.Analysis.ScalExp as SE
 
 coalesceMemoryAccesses :: Pass ExplicitMemory ExplicitMemory
 coalesceMemoryAccesses =
@@ -78,14 +77,15 @@ transformBinding (Let pat () e)
                             perm = [1..length imaginary_dims-1] ++ [0]
                             tr_dims = rearrangeShape perm imaginary_dims
                         in ArrayMem bt (Shape old_dims) u coalescing_mem $
-                           IxFun.reshape (IxFun.permute (IxFun.iota $ map SE.intSubExpToScalExp tr_dims)
+                           IxFun.reshape (IxFun.permute
+                                           (IxFun.iota $ map (primExpFromSubExp int32) tr_dims)
                                           (rearrangeInverse perm)) $
-                           map (DimNew . SE.intSubExpToScalExp) old_dims
+                           map (DimNew . primExpFromSubExp int32) old_dims
                     | otherwise =
                         let perm = [1..length old_dims-1] ++ [0]
                             tr_dims = rearrangeShape perm old_dims
                         in ArrayMem bt (Shape old_dims) u coalescing_mem $
-                           IxFun.permute (IxFun.iota $ map SE.intSubExpToScalExp tr_dims)
+                           IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) tr_dims)
                            (rearrangeInverse perm)
 
               return (Let (Pattern [] [alloc_pat_elem]) () $ Op $ Alloc memsize space,

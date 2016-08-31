@@ -28,7 +28,6 @@ import Futhark.Pass.ExplicitAllocations
   (simplifiable, arraySizeInBytesExp)
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Construct
@@ -120,7 +119,7 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
             return ()
           Var size_v ->
             letBindNames'_ [size_v] =<<
-            SE.fromScalExp (arraySizeInBytesExp $ patElemType pat_elem)
+            toExp (arraySizeInBytesExp $ patElemType pat_elem)
         letBindNames'_ [mem] $ Op $ Alloc size space
 
       -- Update the branches to contain Copy expressions putting the

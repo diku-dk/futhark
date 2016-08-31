@@ -59,6 +59,7 @@ module Futhark.Representation.ExplicitMemory
        , MemOp (..)
        , MemBound (..)
        , MemReturn (..)
+       , IxFun
        , Returns (..)
        , ExpReturns
        , BodyReturns
@@ -73,6 +74,7 @@ module Futhark.Representation.ExplicitMemory
        , lookupArraySummary
        , fullyDirect
        , ixFunMatchesInnerShape
+
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -80,6 +82,7 @@ module Futhark.Representation.ExplicitMemory
        , module Futhark.Representation.AST.Syntax
        , module Futhark.Representation.Kernels.Kernel
        , module Futhark.Representation.Kernels.KernelExp
+       , module Futhark.Analysis.PrimExp.Convert
        )
 where
 
@@ -97,7 +100,6 @@ import Prelude
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
-import qualified Futhark.Analysis.ScalExp as SE
 
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
@@ -107,6 +109,7 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Construct (fullSliceNum)
@@ -222,13 +225,16 @@ instance Annotations InKernel where
   type RetType    InKernel = [FunReturns]
   type Op         InKernel = MemOp (KernelExp InKernel)
 
+-- | The index function representation used for memory annotations.
+type IxFun = IxFun.IxFun (PrimExp VName)
+
 -- | A summary of the memory information for every let-bound identifier
 -- and function parameter.
 data MemBound u = Scalar PrimType
                  -- ^ The corresponding identifier is a
                  -- scalar.  It must not be of array type.
                | MemMem SubExp Space
-               | ArrayMem PrimType Shape u VName (IxFun.IxFun SE.ScalExp)
+               | ArrayMem PrimType Shape u VName IxFun
                  -- ^ The array is stored in the named memory block,
                  -- and with the given index function.  The index
                  -- function maps indices in the array to /element/
@@ -319,7 +325,7 @@ instance PP.Pretty (PatElemT (MemBound NoUniqueness)) where
 
 -- | A description of the memory properties of an array being returned
 -- by an operation.
-data MemReturn = ReturnsInBlock VName (IxFun.IxFun SE.ScalExp)
+data MemReturn = ReturnsInBlock VName IxFun
                  -- ^ The array is located in a memory block that is
                  -- already in scope.
                | ReturnsNewBlock Int (Maybe SubExp)
@@ -723,7 +729,7 @@ lookupMemBound name = do
     IndexInfo -> return $ Scalar int32
 
 lookupArraySummary :: (ExplicitMemorish lore, HasScope lore m, Monad m) =>
-                      VName -> m (VName, IxFun.IxFun SE.ScalExp)
+                      VName -> m (VName, IxFun.IxFun (PrimExp VName))
 lookupArraySummary name = do
   summary <- lookupMemBound name
   case summary of
@@ -841,7 +847,7 @@ extReturns ts =
 
 arrayVarReturns :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
                    VName
-                -> m (PrimType, Shape, VName, IxFun.IxFun SE.ScalExp)
+                -> m (PrimType, Shape, VName, IxFun.IxFun (PrimExp VName))
 arrayVarReturns v = do
   summary <- lookupMemBound v
   case summary of
@@ -877,7 +883,7 @@ expReturns (BasicOp (Reshape _ newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   return [ReturnsArray et (ExtShape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $
-          IxFun.reshape ixfun $ map (fmap SE.intSubExpToScalExp) newshape]
+          IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape]
 
 expReturns (BasicOp (Rearrange _ perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
@@ -888,7 +894,7 @@ expReturns (BasicOp (Rearrange _ perm v)) = do
 
 expReturns (BasicOp (Rotate _ offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let offsets' = map (`SE.subExpToScalExp` int32) offsets
+  let offsets' = map (primExpFromSubExp int32) offsets
       ixfun' = IxFun.rotate ixfun offsets'
   return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
@@ -896,7 +902,7 @@ expReturns (BasicOp (Rotate _ offsets v)) = do
 expReturns (BasicOp (Split _ i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps
-      offsets =  0 : scanl1 (+) (map (`SE.subExpToScalExp` int32) sizeexps)
+      offsets =  0 : scanl1 (+) (map (primExpFromSubExp int32) sizeexps)
       r = shapeRank shape
       perm = [i] ++ [0..i-1] ++ [i+1..r-1]
       perm_inv = rearrangeInverse perm
@@ -918,7 +924,7 @@ expReturns (BasicOp (Index _ v slice)) = do
       return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
              Just $ ReturnsInBlock mem $
              IxFun.slice ixfun
-             (map (fmap (`SE.subExpToScalExp` int32)) slice)]
+             (map (fmap (primExpFromSubExp int32)) slice)]
 
 expReturns (BasicOp op) =
   extReturns . staticShapes <$> primOpType op
@@ -983,24 +989,24 @@ instance OpReturns InKernel where
       (mem, ixfun) <- lookupArraySummary arr
       let row_dims = drop 1 $ arrayDims arr_t
           bt = elemType arr_t
-          num_threads' = SE.intSubExpToScalExp num_threads
-          elems_per_thread' = SE.intSubExpToScalExp elems_per_thread
+          num_threads' = primExpFromSubExp int32 num_threads
+          elems_per_thread' = primExpFromSubExp int32 elems_per_thread
           ext_shape = ExtShape $ Ext 0 : map Free row_dims
       return $ ReturnsArray bt ext_shape NoUniqueness $ Just $ ReturnsInBlock mem $
         case o of
           InOrder ->
             let newshape = [DimNew num_threads', DimNew elems_per_thread'] ++
-                           map (DimNew . SE.intSubExpToScalExp) row_dims
+                           map (DimNew . primExpFromSubExp int32) row_dims
             in IxFun.slice (IxFun.reshape ixfun newshape) $
-               fullSliceNum (newDims newshape) [DimFix $ SE.intSubExpToScalExp thread_id]
+               fullSliceNum (newDims newshape) [DimFix $ primExpFromSubExp int32 thread_id]
           Disorder ->
             let newshape = [DimNew elems_per_thread', DimNew num_threads'] ++
-                           map (DimNew . SE.intSubExpToScalExp) row_dims
+                           map (DimNew . primExpFromSubExp int32) row_dims
                 perm = [1,0] ++ [2..IxFun.rank ixfun]
             in IxFun.slice
                (IxFun.permute (IxFun.reshape ixfun newshape) perm) $
                fullSliceNum (rearrangeShape perm $ newDims newshape)
-               [DimFix $ SE.intSubExpToScalExp thread_id]
+               [DimFix $ primExpFromSubExp int32 thread_id]
 
   opReturns (Inner (GroupStream _ _ lam _ _)) =
     forM (groupStreamAccParams lam) $ \param ->
@@ -1111,11 +1117,11 @@ applyFunReturns rets params args
 
 -- | Is an array of the given shape stored fully flat row-major with
 -- the given index function?
-fullyDirect :: Shape -> IxFun.IxFun SE.ScalExp -> Bool
+fullyDirect :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
 fullyDirect shape ixfun =
   IxFun.isDirect ixfun && ixFunMatchesInnerShape shape ixfun
 
-ixFunMatchesInnerShape :: Shape -> IxFun.IxFun SE.ScalExp -> Bool
+ixFunMatchesInnerShape :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
 ixFunMatchesInnerShape shape ixfun =
   drop 1 (IxFun.shape ixfun) == drop 1 shape'
-  where shape' = map SE.intSubExpToScalExp $ shapeDims shape
+  where shape' = map (primExpFromSubExp int32) $ shapeDims shape

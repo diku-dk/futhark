@@ -15,7 +15,6 @@ import Data.Monoid
 
 import Prelude hiding (div, quot)
 
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util
@@ -179,21 +178,21 @@ expandedAllocations num_threads thread_index thread_allocs = do
 
         newBase old_shape =
           let perm = [length old_shape, 0] ++ [1..length old_shape-1]
-              root_ixfun = IxFun.iota (old_shape ++ [SE.intSubExpToScalExp num_threads])
+              root_ixfun = IxFun.iota (old_shape ++ [primExpFromSubExp int32 num_threads])
               permuted_ixfun = IxFun.permute root_ixfun perm
               offset_ixfun = IxFun.slice permuted_ixfun $
                              fullSliceNum (IxFun.shape permuted_ixfun)
-                             [DimFix $ SE.Id thread_index int32]
+                             [DimFix $ LeafExp thread_index int32]
           in offset_ixfun
 
 data RebaseMap = RebaseMap {
-    rebaseMap :: HM.HashMap VName ([SE.ScalExp] -> IxFun.IxFun SE.ScalExp)
+    rebaseMap :: HM.HashMap VName ([PrimExp VName] -> IxFun)
     -- ^ A map from memory block names to new index function bases.
   , indexVariable :: VName
   , kernelWidth :: SubExp
   }
 
-lookupNewBase :: VName -> [SE.ScalExp] -> RebaseMap -> Maybe (IxFun.IxFun SE.ScalExp)
+lookupNewBase :: VName -> [PrimExp VName] -> RebaseMap -> Maybe IxFun
 lookupNewBase name dims = fmap ($dims) . HM.lookup name . rebaseMap
 
 offsetMemoryInKernelBody :: RebaseMap -> KernelBody InKernel
