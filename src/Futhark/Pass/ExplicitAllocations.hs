@@ -48,7 +48,7 @@ data AllocBinding = SizeComputation VName (PrimExp VName)
 bindAllocBinding :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
                     AllocBinding -> m ()
 bindAllocBinding (SizeComputation name pe) =
-  letBindNames'_ [name] =<< toExp pe
+  letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 pe)
 bindAllocBinding (Allocation name size space) =
   letBindNames'_ [name] $ Op $ Alloc size space
 bindAllocBinding (ArrayCopy name bindage src) =
@@ -135,7 +135,7 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 instance Allocable fromlore OutInKernel =>
          Allocator ExplicitMemory (AllocM fromlore ExplicitMemory) where
   addAllocBinding (SizeComputation name se) =
-    letBindNames'_ [name] =<< toExp se
+    letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 se)
   addAllocBinding (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
@@ -151,7 +151,7 @@ instance Allocable fromlore OutInKernel =>
 instance Allocable fromlore OutInKernel =>
          Allocator OutInKernel (AllocM fromlore OutInKernel) where
   addAllocBinding (SizeComputation name se) =
-    letBindNames'_ [name] =<< toExp se
+    letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 se)
   addAllocBinding (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
