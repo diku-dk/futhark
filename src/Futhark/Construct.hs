@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Futhark.Construct
   ( letSubExp
   , letSubExps
@@ -47,6 +49,8 @@ module Futhark.Construct
 
   -- * Convenience
   , simpleMkLetNames
+
+  , ToExp(..)
   )
 where
 
@@ -414,3 +418,14 @@ simpleMkLetNames names e = do
         return $ PatElem name bindage srct
   valElems <- zipWithM mkValElem names ts
   return $ Let (Pattern shapeElems valElems) () e
+
+-- | Instances of this class can be converted to Futhark expressions
+-- within a 'MonadBinder'.
+class ToExp a where
+  toExp :: MonadBinder m => a -> m (Exp (Lore m))
+
+instance ToExp SubExp where
+  toExp = return . BasicOp . SubExp
+
+instance ToExp VName where
+  toExp = return . BasicOp . SubExp . Var

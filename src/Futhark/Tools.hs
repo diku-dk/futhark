@@ -14,6 +14,9 @@ module Futhark.Tools
   , partitionChunkedKernelFoldParameters
 
   , intraproceduralTransformation
+
+  -- * Primitive expressions
+  , module Futhark.Analysis.PrimExp.Convert
   )
 where
 
@@ -29,6 +32,7 @@ import Futhark.Representation.AST
 import Futhark.Representation.SOACS.SOAC
 import Futhark.MonadFreshNames
 import Futhark.Construct
+import Futhark.Analysis.PrimExp.Convert
 
 nonuniqueParams :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
                    [LParam lore] -> m ([LParam lore], [Binding lore])

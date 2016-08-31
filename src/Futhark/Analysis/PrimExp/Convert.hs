@@ -1,8 +1,10 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | Converting back and forth between 'PrimExp's.
 module Futhark.Analysis.PrimExp.Convert
   (
     primExpToExp
   , primExpFromExp
+  , primExpFromSubExp
 
     -- * Module reexport
     , module Futhark.Analysis.PrimExp
@@ -37,6 +39,9 @@ primExpToExp _ (ValueExp v) =
 primExpToExp f (LeafExp v _) =
   f v
 
+instance ToExp v => ToExp (PrimExp v) where
+  toExp = primExpToExp toExp
+
 primExpToSubExp :: MonadBinder m =>
                    String -> (v -> m (Exp (Lore m))) -> PrimExp v -> m SubExp
 primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
@@ -48,15 +53,20 @@ primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
 primExpFromExp :: (Applicative m, Monad m) =>
                   (Exp lore -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
-  BinOpExp op <$> primExpFromSubExp f x <*> primExpFromSubExp f y
+  BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y
 primExpFromExp f (BasicOp (CmpOp op x y)) =
-  CmpOpExp op <$> primExpFromSubExp f x <*> primExpFromSubExp f y
+  CmpOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y
 primExpFromExp f (BasicOp (UnOp op x)) =
-  UnOpExp op <$> primExpFromSubExp f x
+  UnOpExp op <$> primExpFromSubExpM f x
 primExpFromExp f (BasicOp (ConvOp op x)) =
-  ConvOpExp op <$> primExpFromSubExp f x
+  ConvOpExp op <$> primExpFromSubExpM f x
 primExpFromExp f e = f e
 
-primExpFromSubExp :: (Applicative m, Monad m) =>
+primExpFromSubExpM :: (Applicative m, Monad m) =>
                      (Exp lore -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
-primExpFromSubExp f = primExpFromExp f . BasicOp . SubExp
+primExpFromSubExpM f = primExpFromExp f . BasicOp . SubExp
+
+-- | Convert 'SubExp's of a given type.
+primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
+primExpFromSubExp t (Var v)      = LeafExp v t
+primExpFromSubExp _ (Constant v) = ValueExp v

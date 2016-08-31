@@ -18,6 +18,8 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 
+import Prelude hiding (div, mod, quot, rem)
+
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplifier.Lore
   (mkWiseBody,
@@ -30,26 +32,23 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Optimise.Simplifier.Simple (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Pass
-
-import Prelude
+import Futhark.Util.IntegralExp
 
 type InInKernel = Futhark.Representation.Kernels.InKernel
 type OutInKernel = Futhark.Representation.ExplicitMemory.InKernel
 
-data AllocBinding = SizeComputation VName SE.ScalExp
+data AllocBinding = SizeComputation VName (PrimExp VName)
                   | Allocation VName SubExp Space
                   | ArrayCopy VName Bindage VName
                     deriving (Eq, Ord, Show)
 
 bindAllocBinding :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
                     AllocBinding -> m ()
-bindAllocBinding (SizeComputation name se) = do
-  e <- SE.fromScalExp se
-  letBindNames'_ [name] e
+bindAllocBinding (SizeComputation name pe) =
+  letBindNames'_ [name] =<< toExp pe
 bindAllocBinding (Allocation name size space) =
   letBindNames'_ [name] $ Op $ Alloc size space
 bindAllocBinding (ArrayCopy name bindage src) =
@@ -73,7 +72,7 @@ allocateMemory desc size space = do
   return v
 
 computeSize :: Allocator lore m =>
-               String -> SE.ScalExp -> m SubExp
+               String -> PrimExp VName -> m SubExp
 computeSize desc se = do
   v <- newVName desc
   addAllocBinding $ SizeComputation v se
@@ -136,7 +135,7 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 instance Allocable fromlore OutInKernel =>
          Allocator ExplicitMemory (AllocM fromlore ExplicitMemory) where
   addAllocBinding (SizeComputation name se) =
-    letBindNames'_ [name] =<< SE.fromScalExp se
+    letBindNames'_ [name] =<< toExp se
   addAllocBinding (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
@@ -152,7 +151,7 @@ instance Allocable fromlore OutInKernel =>
 instance Allocable fromlore OutInKernel =>
          Allocator OutInKernel (AllocM fromlore OutInKernel) where
   addAllocBinding (SizeComputation name se) =
-    letBindNames'_ [name] =<< SE.fromScalExp se
+    letBindNames'_ [name] =<< toExp se
   addAllocBinding (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
@@ -208,17 +207,17 @@ runPatAllocM (PatAllocM m) mems =
   modifyNameSource $ frob . runRWS m mems
   where frob (a,s,w) = ((a,w),s)
 
-arraySizeInBytesExp :: Type -> SE.ScalExp
+arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
-  SE.sproduct $
-  primByteSize (elemType t) :
-  map (`SE.subExpToScalExp` int32) (arrayDims t)
+  product $
+  (ValueExp $ IntValue $ Int32Value $ primByteSize $ elemType t) :
+  map (primExpFromSubExp int32) (arrayDims t)
 
-arraySizeInBytesExpM :: Allocator lore m => Type -> m SE.ScalExp
+arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t =
-  SE.sproduct .
-  (primByteSize (elemType t) :) .
-  map (`SE.subExpToScalExp` int32) <$>
+  product .
+  ((ValueExp $ IntValue $ Int32Value $ primByteSize $ elemType t):) .
+  map (primExpFromSubExp int32) <$>
   mapM dimAllocationSize (arrayDims t)
 
 arraySizeInBytes :: Allocator lore m => Type -> m SubExp
@@ -236,7 +235,7 @@ allocForLocalArray :: Allocator lore m =>
                       SubExp -> Type -> m (SubExp, VName)
 allocForLocalArray workgroup_size t = do
   size <- computeSize "local_bytes" =<<
-          (SE.intSubExpToScalExp workgroup_size*) <$>
+          (primExpFromSubExp int32 workgroup_size*) <$>
           arraySizeInBytesExpM t
   m <- allocateMemory "local_mem" size $ Space "local"
   return (size, m)
@@ -362,7 +361,8 @@ summaryForBindage t@(Array bt shape u) BindVar NoHint = do
   return $ directIndexFunction bt shape u m t
 summaryForBindage t BindVar (Hint ixfun space) = do
   let bt = elemType t
-  bytes <- computeSize "bytes" $ product $ primByteSize bt : IxFun.base ixfun
+  bytes <- computeSize "bytes" $ product $
+           fromIntegral (primByteSize (elemType t)::Int32) : IxFun.base ixfun
   m <- allocateMemory "mem" bytes space
   return $ ArrayMem bt (arrayShape t) NoUniqueness m ixfun
 summaryForBindage _ (BindInPlace _ src _) _ =
@@ -372,19 +372,19 @@ memForBindee :: (MonadFreshNames m) =>
                 Ident
              -> m (Ident,
                    Ident,
-                   (Ident, IxFun.IxFun SE.ScalExp))
+                   (Ident, IxFun))
 memForBindee ident = do
   size <- newIdent (memname <> "_size") (Prim int32)
   mem <- newIdent memname $ Mem (Var $ identName size) DefaultSpace
   return (size,
           mem,
-          (ident, IxFun.iota $ map SE.intSubExpToScalExp $ arrayDims t))
+          (ident, IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t))
   where  memname = baseString (identName ident) <> "_mem"
          t       = identType ident
 
 directIndexFunction :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIndexFunction bt shape u mem t =
-  ArrayMem bt shape u mem $ IxFun.iota $ map SE.intSubExpToScalExp $ arrayDims t
+  ArrayMem bt shape u mem $ IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t
 
 allocInFParams :: (Allocable fromlore tolore) =>
                   [FParam fromlore] ->
@@ -405,7 +405,7 @@ allocInFParam param =
   case paramDeclType param of
     Array bt shape u -> do
       let memname = baseString (paramName param) <> "_mem"
-          ixfun = IxFun.iota $ map SE.intSubExpToScalExp $ shapeDims shape
+          ixfun = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
       memsize <- lift $ newVName (memname <> "_size")
       mem <- lift $ newVName memname
       tell ([Param memsize $ Scalar int32],
@@ -643,9 +643,9 @@ allocInScanLambda lam num_accs workgroup_size = do
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
         splitAt num_accs actual_params
-      this_index = SE.Id i int32 `SE.SRem`
-                   SE.intSubExpToScalExp workgroup_size
-      other_index = SE.Id (paramName other_index_param) int32
+      this_index = LeafExp i int32 `rem`
+                   primExpFromSubExp int32 workgroup_size
+      other_index = LeafExp (paramName other_index_param) int32
   acc_params' <-
     allocInScanParameters workgroup_size this_index 0 acc_params
   arr_params' <-
@@ -660,8 +660,8 @@ allocInScanLambda lam num_accs workgroup_size = do
   where noOp = fail "Cannot handle kernel expressions inside scan kernels."
 
 allocInScanParameters :: SubExp
-                      -> SE.ScalExp
-                      -> SE.ScalExp
+                      -> PrimExp VName
+                      -> PrimExp VName
                       -> [LParam InInKernel]
                       -> AllocM Kernels ExplicitMemory [LParam OutInKernel]
 allocInScanParameters workgroup_size my_id offset = mapM allocInScanParameter
@@ -669,7 +669,7 @@ allocInScanParameters workgroup_size my_id offset = mapM allocInScanParameter
           case paramType p of
             t@(Array bt shape u) -> do
               (_, shared_mem) <- allocForLocalArray workgroup_size t
-              let ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp $
+              let ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) $
                                workgroup_size : arrayDims t
                   ixfun = IxFun.slice ixfun_base $
                           fullSliceNum (IxFun.shape ixfun_base) [DimFix $ my_id + offset]
@@ -680,15 +680,15 @@ allocInScanParameters workgroup_size my_id offset = mapM allocInScanParameter
               return p { paramAttr = MemMem size space }
 
 allocInReduceLambda :: Lambda InInKernel
-                    -> [(VName, IxFun.IxFun SE.ScalExp)]
+                    -> [(VName, IxFun)]
                     -> AllocM InInKernel OutInKernel (Lambda OutInKernel)
 allocInReduceLambda lam input_summaries = do
   let (i, other_offset_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
         splitAt (length input_summaries) actual_params
-      this_index = SE.Id i int32
-      other_offset = SE.Id (paramName other_offset_param) int32
+      this_index = LeafExp i int32
+      other_offset = LeafExp (paramName other_offset_param) int32
   acc_params' <-
     allocInReduceParameters this_index 0 $
     zip acc_params input_summaries
@@ -701,9 +701,9 @@ allocInReduceLambda lam input_summaries = do
                  acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
-allocInReduceParameters :: SE.ScalExp
-                        -> SE.ScalExp
-                        -> [(LParam InInKernel, (VName, IxFun.IxFun SE.ScalExp))]
+allocInReduceParameters :: PrimExp VName
+                        -> PrimExp VName
+                        -> [(LParam InInKernel, (VName, IxFun))]
                         -> AllocM InInKernel OutInKernel [LParam ExplicitMemory]
 allocInReduceParameters my_id offset = mapM allocInReduceParameter
   where allocInReduceParameter (p, (mem, ixfun)) =
@@ -717,8 +717,8 @@ allocInReduceParameters my_id offset = mapM allocInReduceParameter
             Mem size space ->
               return p { paramAttr = MemMem size space }
 
-allocInChunkedParameters :: SE.ScalExp
-                        -> [(LParam InInKernel, (VName, IxFun.IxFun SE.ScalExp))]
+allocInChunkedParameters :: PrimExp VName
+                        -> [(LParam InInKernel, (VName, IxFun))]
                         -> AllocM InInKernel OutInKernel [LParam OutInKernel]
 allocInChunkedParameters offset = mapM allocInChunkedParameter
   where allocInChunkedParameter (p, (mem, ixfun)) =
@@ -769,7 +769,7 @@ sizeSubst _ = mempty
 allocInGroupStreamLambda :: SubExp
                          -> GroupStreamLambda InInKernel
                          -> [MemBound NoUniqueness]
-                         -> [(VName, IxFun.IxFun SE.ScalExp)]
+                         -> [(VName, IxFun)]
                          -> AllocM InInKernel OutInKernel (GroupStreamLambda OutInKernel)
 allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
@@ -777,7 +777,7 @@ allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries = do
   acc_params' <-
     allocInAccParameters acc_params acc_summaries
   arr_params' <-
-    allocInChunkedParameters (SE.Id block_offset int32) $
+    allocInChunkedParameters (LeafExp block_offset int32) $
     zip arr_params arr_summaries
 
   body' <- localScope (HM.insert block_size IndexInfo $
@@ -826,7 +826,7 @@ bindPatternWithAllocations types names e = do
   return pat
 
 data ExpHint = NoHint
-             | Hint (IxFun.IxFun SE.ScalExp) Space
+             | Hint IxFun Space
 
 kernelExpHints :: (Allocator lore m, Op lore ~ MemOp (Kernel somelore)) =>
                   Exp lore -> m [ExpHint]
@@ -845,7 +845,7 @@ kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
                      [0..length space_dims-1]
               perm_inv = rearrangeInverse perm
               dims_perm = rearrangeShape perm dims
-              ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp dims_perm
+              ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) dims_perm
               ixfun_rearranged = IxFun.permute ixfun_base perm_inv
           in ixfun_rearranged
 
@@ -861,9 +861,9 @@ kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
           return $ Hint (innermost [w] t_dims) DefaultSpace
 
         hint Prim{} (ConcatReturns InOrder w elems_per_thread _) = do
-          let ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp [num_threads,elems_per_thread]
+          let ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) [num_threads,elems_per_thread]
               ixfun_tr = IxFun.permute ixfun_base [1,0]
-              ixfun = IxFun.reshape ixfun_tr $ map (DimNew . SE.intSubExpToScalExp) [w]
+              ixfun = IxFun.reshape ixfun_tr $ map (DimNew . primExpFromSubExp int32) [w]
           return $ Hint ixfun DefaultSpace
 
         hint _ _ = return NoHint
@@ -875,7 +875,7 @@ inKernelExpHints :: (Allocator lore m, Op lore ~ MemOp (KernelExp somelore)) =>
 inKernelExpHints (Op (Inner (Combine cspace ts _ _))) =
   forM ts $ \t -> do
     alloc_dims <- mapM dimAllocationSize $ dims ++ arrayDims t
-    let ixfun = IxFun.iota $ map SE.intSubExpToScalExp alloc_dims
+    let ixfun = IxFun.iota $ map (primExpFromSubExp int32) alloc_dims
     return $ Hint ixfun $ Space "local"
   where dims = map snd cspace
 

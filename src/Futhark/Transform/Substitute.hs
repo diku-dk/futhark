@@ -18,6 +18,7 @@ import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
+import Futhark.Analysis.PrimExp
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.
@@ -174,6 +175,9 @@ instance Substitute d => Substitute (DimChange d) where
   substituteNames substs = fmap $ substituteNames substs
 
 instance Substitute d => Substitute (DimIndex d) where
+  substituteNames substs = fmap $ substituteNames substs
+
+instance Substitute v => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
 
 -- | Lores in which all annotations support name

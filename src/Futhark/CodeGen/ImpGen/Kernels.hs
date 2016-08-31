@@ -25,7 +25,6 @@ import Futhark.Representation.ExplicitMemory hiding (kernelNumThreads)
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
-import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters, fullSliceNum)
@@ -390,7 +389,7 @@ expCompiler
   let thread_gid = kernelGlobalThreadId constants
       row_dims = arrayDims t
       dims = ds ++ row_dims
-      is' = unflattenIndex (map SE.intSubExpToScalExp dims) $
+      is' = unflattenIndex (map (primExpFromSubExp int32) dims) $
             ImpGen.varIndex thread_gid
   ds' <- mapM ImpGen.compileSubExp ds
 
@@ -466,10 +465,10 @@ callKernelCopy bt
     ixFunMatchesInnerShape
       (Shape $ map ImpGen.dimSizeToSubExp srcshape) srcIxFun,
     Just destoffset <-
-      ImpGen.scalExpToImpExp =<<
+      ImpGen.compilePrimExp <$>
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
-      ImpGen.scalExpToImpExp =<<
+      ImpGen.compilePrimExp <$>
       IxFun.linearWithOffset srcIxFun bt_size = do
         let row_size = product $ map ImpGen.dimSizeToExp $ drop 1 srcshape
         srcspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory srcmem
@@ -485,7 +484,7 @@ callKernelCopy bt
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
   let shape = map Imp.sizeToExp srcshape
-      shape_se = map ImpGen.sizeToScalExp srcshape
+      shape_se = map ImpGen.dimSizeToPrimExp srcshape
       dest_is = unflattenIndex shape_se $ ImpGen.varIndex global_thread_index
       src_is = dest_is
 
@@ -629,16 +628,16 @@ isMapTransposeKernel bt
   (ImpGen.MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     (perm, destshape) <- unzip perm_and_destshape,
-    Just destshape' <- mapM ImpGen.scalExpToImpExp destshape,
-    Just srcshape' <- mapM ImpGen.scalExpToImpExp $ IxFun.shape srcIxFun,
+    destshape' <- map ImpGen.compilePrimExp destshape,
+    srcshape' <- map ImpGen.compilePrimExp $ IxFun.shape srcIxFun,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
     isOk (product srcshape') (product destshape') destshape' swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
     (perm, srcshape) <- unzip perm_and_srcshape,
-    Just srcshape' <- mapM ImpGen.scalExpToImpExp srcshape,
-    Just destshape' <- mapM ImpGen.scalExpToImpExp $ IxFun.shape destIxFun,
+    srcshape' <- map ImpGen.compilePrimExp srcshape,
+    destshape' <- map ImpGen.compilePrimExp $ IxFun.shape destIxFun,
     Just (r1, r2, _) <- isMapTranspose perm =
     isOk (product srcshape') (product destshape') srcshape' id r1 r2 dest_offset src_offset
   | otherwise =
@@ -647,9 +646,9 @@ isMapTransposeKernel bt
         swap (x,y) = (y,x)
 
         isOk src_elems dest_elems shape f r1 r2 dest_offset src_offset = do
-          dest_offset' <- ImpGen.scalExpToImpExp dest_offset
-          src_offset' <- ImpGen.scalExpToImpExp src_offset
-          let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
+          let dest_offset' = ImpGen.compilePrimExp dest_offset
+              src_offset' = ImpGen.compilePrimExp src_offset
+              (num_arrays, size_x, size_y) = getSizes shape f r1 r2
           return (dest_offset', src_offset',
                   num_arrays, size_x, size_y,
                   src_elems, dest_elems)
@@ -965,7 +964,7 @@ compileKernelExp constants dest (Combine cspace ts active body)
       ImpGen.emit $ Imp.Op Imp.Barrier
         where index t (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
                 let space_dims = map (ImpGen.varIndex . fst) cspace
-                    t_dims = map SE.intSubExpToScalExp $ arrayDims t
+                    t_dims = map (primExpFromSubExp int32) $ arrayDims t
                 in Just $ ImpGen.ArrayDestination
                    (ImpGen.CopyIntoMemory
                      (ImpGen.sliceArray loc $
@@ -1154,7 +1153,7 @@ compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
 compileKernelResult constants dest (ConcatReturns InOrder _ per_thread_elems what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
   let dest_loc_offset = ImpGen.offsetArray dest_loc $
-                        SE.intSubExpToScalExp per_thread_elems *
+                        primExpFromSubExp int32 per_thread_elems *
                         ImpGen.varIndex (kernelGlobalThreadId constants)
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
   ImpGen.copyDWIMDest dest' [] (Var what) []
@@ -1164,7 +1163,7 @@ compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
   let dest_loc' = ImpGen.strideArray
                   (ImpGen.offsetArray dest_loc $
                    ImpGen.varIndex (kernelGlobalThreadId constants)) $
-                  ImpGen.sizeToScalExp (kernelNumThreads constants)
+                  ImpGen.dimSizeToPrimExp (kernelNumThreads constants)
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
   ImpGen.copyDWIMDest dest' [] (Var what) []
 
@@ -1180,7 +1179,7 @@ compileKernelResult constants dest (WriteReturn rw _arr i e) = do
       write = Imp.BinOpExp LogAnd (kernelThreadActive constants) condInBounds
 
   actual_body' <- ImpGen.collect $
-    ImpGen.copyDWIMDest dest [SE.subExpToScalExp i int32] e []
+    ImpGen.copyDWIMDest dest [primExpFromSubExp int32 i] e []
   ImpGen.emit $ Imp.If write actual_body' Imp.Skip
 
 isActive :: [(VName, SubExp)] -> Imp.Exp
