@@ -68,15 +68,27 @@ instance FreeIn v => FreeIn (PrimExp v) where
 instance Pretty v => Num (PrimExp v) where
   x + y | zeroIshExp x = y
         | zeroIshExp y = x
+        | IntType t <- primExpType x,
+          Just z <- constFold (doBinOp $ Add t) x y = z
+        | FloatType t <- primExpType x,
+          Just z <- constFold (doBinOp $ FAdd t) x y = z
         | Just z <- msum [asIntOp Add x y, asFloatOp FAdd x y] = z
         | otherwise = numBad "+" (x,y)
 
   x - y | zeroIshExp y = x
+        | IntType t <- primExpType x,
+          Just z <- constFold (doBinOp $ Sub t) x y = z
+        | FloatType t <- primExpType x,
+          Just z <- constFold (doBinOp $ FSub t) x y = z
         | Just z <- msum [asIntOp Sub x y, asFloatOp FSub x y] = z
         | otherwise = numBad "-" (x,y)
 
   x * y | oneIshExp x = y
         | oneIshExp y = x
+        | IntType t <- primExpType x,
+          Just z <- constFold (doBinOp $ Mul t) x y = z
+        | FloatType t <- primExpType x,
+          Just z <- constFold (doBinOp $ FMul t) x y = z
         | Just z <- msum [asIntOp Mul x y, asFloatOp FMul x y] = z
         | otherwise = numBad "*" (x,y)
 
@@ -139,6 +151,13 @@ asFloatExp t (ValueExp (IntValue v)) =
 asFloatExp _ _ =
   Nothing
 
+constFold :: (PrimValue -> PrimValue -> Maybe PrimValue)
+            -> PrimExp v -> PrimExp v
+            -> Maybe (PrimExp v)
+constFold f x y = do x' <- valueExp x
+                     y' <- valueExp y
+                     ValueExp <$> f x' y'
+
 numBad :: Pretty a => String -> a -> b
 numBad s x =
   error $ "Invalid argument to PrimExp method " ++ s ++ ": " ++ pretty x
@@ -186,6 +205,11 @@ zeroIshExp _            = False
 oneIshExp :: PrimExp v -> Bool
 oneIshExp (ValueExp v) = oneIsh v
 oneIshExp _            = False
+
+-- | Is the expression a constant value?
+valueExp :: PrimExp v -> Maybe PrimValue
+valueExp (ValueExp v) = Just v
+valueExp _            = Nothing
 
 -- Prettyprinting instances
 
