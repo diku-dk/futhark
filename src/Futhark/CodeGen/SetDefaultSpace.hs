@@ -60,7 +60,9 @@ setBodySpace space (SetScalar name e) =
 setBodySpace space (SetMem to from old_space) =
   SetMem to from $ setSpace space old_space
 setBodySpace space (Call dests fname args) =
-  Call dests fname $ map (setExpSpace space) args
+  Call dests fname $ map setArgSpace args
+  where setArgSpace (MemArg m) = MemArg m
+        setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
 setBodySpace space (Assert e loc) =
   Assert (setExpSpace space e) loc
 setBodySpace _ (Op op) =
@@ -71,10 +73,10 @@ setCountSpace space (Count e) =
   Count $ setExpSpace space e
 
 setExpSpace :: Space -> Exp -> Exp
-setExpSpace space (Index mem i bt DefaultSpace) =
-  Index mem i bt space
-setExpSpace _ e =
-  e
+setExpSpace space = fmap setLeafSpace
+  where setLeafSpace (Index mem i bt DefaultSpace) =
+          Index mem i bt space
+        setLeafSpace e = e
 
 setSpace :: Space -> Space -> Space
 setSpace space DefaultSpace = space

@@ -1,4 +1,7 @@
-{-# LANGUAGE TupleSections, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE  GeneralizedNewtypeDeriving #-}
 -- | Imperative intermediate language used as a stepping stone in code generation.
 --
 -- This is a generic representation parametrised on an extensible
@@ -21,11 +24,11 @@ module Futhark.CodeGen.ImpCode
   , SpaceId
   , Code (..)
   , PrimValue (..)
-  , Exp (..)
-  , BinOp (..)
-  , CmpOp (..)
-  , ConvOp (..)
-  , UnOp (..)
+  , ExpLeaf (..)
+  , Exp
+  , Arg (..)
+  , var
+  , index
 
     -- * Typed enumerations
   , Count (..)
@@ -47,6 +50,7 @@ module Futhark.CodeGen.ImpCode
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
   , module Futhark.Representation.Primitive
+  , module Futhark.Analysis.PrimExp
   )
   where
 
@@ -67,6 +71,7 @@ import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
+import Futhark.Analysis.PrimExp
 
 import Futhark.Util.Pretty hiding (space)
 
@@ -127,7 +132,7 @@ data Code a = Skip
             | SetScalar VName Exp
             | SetMem VName VName Space
               -- ^ Must be in same space.
-            | Call [VName] Name [Exp]
+            | Call [VName] Name [Arg]
             | If Exp (Code a) (Code a)
             | Assert Exp SrcLoc
             | Comment String (Code a)
@@ -143,55 +148,20 @@ instance Monoid (Code a) where
   x    `mappend` Skip = x
   x    `mappend` y    = x :>>: y
 
-data Exp = Constant PrimValue
-         | BinOp BinOp Exp Exp
-         | CmpOp CmpOp Exp Exp
-         | ConvOp ConvOp Exp
-         | UnOp UnOp Exp
-         | Index VName (Count Bytes) PrimType Space
-         | ScalarVar VName
-         | SizeOf PrimType
-         | Cond Exp Exp Exp
+data ExpLeaf = ScalarVar VName
+             | SizeOf PrimType
+             | Index VName (Count Bytes) PrimType Space
            deriving (Eq, Show)
+
+type Exp = PrimExp ExpLeaf
+
+-- | A function call argument.
+data Arg = ExpArg Exp
+         | MemArg VName
+         deriving (Show)
 
 -- FIXME: At the moment, the Num instances (and family) assume that we
 -- only operate on Int32 values.
-
-instance Num Exp where
-  0 + y = y
-  x + 0 = x
-  x + y = BinOp (Add Int32) x y
-
-  x - 0 = x
-  x - y = BinOp (Sub Int32) x y
-
-  0 * _ = 0
-  _ * 0 = 0
-  1 * y = y
-  y * 1 = y
-  x * y = BinOp (Mul Int32) x y
-
-  abs = UnOp (Abs Int32)
-  signum = UnOp (SSignum Int32)
-  fromInteger = Constant . IntValue . Int32Value . fromInteger
-  negate x = 0 - x
-
-instance IntegralExp Exp where
-  0 `div` _ = 0
-  x `div` 1 = x
-  x `div` y = BinOp (SDiv Int32) x y
-
-  0 `mod` _ = 0
-  _ `mod` 1 = 0
-  x `mod` y = BinOp (SMod Int32) x y
-
-  0 `quot` _ = 0
-  x `quot` 1 = x
-  x `quot` y = BinOp (SQuot Int32) x y
-
-  0 `rem` _ = 0
-  _ `rem` 1 = 0
-  x `rem` y = BinOp (SRem Int32) x y
 
 -- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
 -- type.
@@ -213,7 +183,7 @@ bytes = Count
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
 withElemType :: Count Elements -> PrimType -> Count Bytes
-withElemType (Count e) t = bytes $ e * SizeOf t
+withElemType (Count e) t = bytes $ e * LeafExp (SizeOf t) (IntType Int32)
 
 dimSizeToExp :: DimSize -> Count Elements
 dimSizeToExp = elements . sizeToExp
@@ -222,8 +192,14 @@ memSizeToExp :: MemSize -> Count Bytes
 memSizeToExp = bytes . sizeToExp
 
 sizeToExp :: Size -> Exp
-sizeToExp (VarSize v)   = ScalarVar v
-sizeToExp (ConstSize x) = Constant $ IntValue $ Int32Value $ fromIntegral x
+sizeToExp (VarSize v)   = LeafExp (ScalarVar v) (IntType Int32)
+sizeToExp (ConstSize x) = ValueExp $ IntValue $ Int32Value $ fromIntegral x
+
+var :: VName -> PrimType -> Exp
+var = LeafExp . ScalarVar
+
+index :: VName -> Count Bytes -> PrimType -> Space -> Exp
+index arr i t s = LeafExp (Index arr i t s) t
 
 -- Prettyprinting definitions.
 
@@ -307,27 +283,11 @@ instance Pretty op => Pretty (Code op) where
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
 
-instance Pretty Exp where
-  ppr (Constant v) = ppr v
-  ppr (BinOp op x y) =
-    ppr op <> parens (ppr x <> comma <+> ppr y)
-  ppr (CmpOp op x y) =
-    ppr op <> parens (ppr x <> comma <+> ppr y)
-  ppr (ConvOp conv x) =
-    text "convert" <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
-    where (fromtype, totype) = convTypes conv
-  ppr (UnOp Not{} x) =
-    text "not" <+> ppr x
-  ppr (UnOp Complement{} x) =
-    text "~" <+> ppr x
-  ppr (UnOp Abs{} x) =
-    text "abs" <> parens (ppr x)
-  ppr (UnOp FAbs{} x) =
-    text "fabs" <> parens (ppr x)
-  ppr (UnOp SSignum{} x) =
-    text "ssignum" <> parens (ppr x)
-  ppr (UnOp USignum{} x) =
-    text "usignum" <> parens (ppr x)
+instance Pretty Arg where
+  ppr (MemArg m) = ppr m
+  ppr (ExpArg e) = ppr e
+
+instance Pretty ExpLeaf where
   ppr (ScalarVar v) =
     ppr v
   ppr (Index v is bt space) =
@@ -336,8 +296,6 @@ instance Pretty Exp where
                                  Space s      -> text "@" <> text s
   ppr (SizeOf t) =
     text "sizeof" <> parens (ppr t)
-  ppr (Cond c t f) =
-    ppr c <+> text "?" <+> ppr t <+> text ":" <+> ppr f
 
 instance Functor Functions where
   fmap = fmapDefault
@@ -444,16 +402,14 @@ instance FreeIn a => FreeIn (Code a) where
   freeIn (Comment _ code) =
     freeIn code
 
-instance FreeIn Exp where
-  freeIn (Constant _) = mempty
-  freeIn (BinOp _ x y) = freeIn x <> freeIn y
-  freeIn (UnOp _ x) = freeIn x
-  freeIn (CmpOp _ x y) = freeIn x <> freeIn y
-  freeIn (ConvOp _ x) = freeIn x
+instance FreeIn ExpLeaf where
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
-  freeIn (Cond c t f) = freeIn c <> freeIn t <> freeIn f
+
+instance FreeIn Arg where
+  freeIn (MemArg m) = freeIn m
+  freeIn (ExpArg e) = freeIn e
 
 instance FreeIn Size where
   freeIn (VarSize name) = HS.singleton name
@@ -494,7 +450,9 @@ memoryUsage _ (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
 memoryUsage _ (SetScalar _ e) =
   expMemoryUsage e
 memoryUsage _ (Call _ _ es) =
-  foldr (HM.unionWith (<>) . expMemoryUsage) mempty es
+  foldr (HM.unionWith (<>) . inArg) mempty es
+  where inArg MemArg{} = mempty
+        inArg (ExpArg e) = expMemoryUsage e
 memoryUsage f (If e c1 c2) =
   foldr (HM.unionWith (<>)) mempty
   [expMemoryUsage e, memoryUsage f c1, memoryUsage f c2]
@@ -514,22 +472,10 @@ memoryUsage _ DeclareScalar{}  =
   HM.empty
 
 expMemoryUsage :: Exp -> HM.HashMap VName (HS.HashSet PrimType)
-expMemoryUsage (Index mem (Count e) bt _) =
-  HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
-expMemoryUsage (BinOp _ e1 e2) =
-  HM.unionWith (<>) (expMemoryUsage e1) (expMemoryUsage e2)
-expMemoryUsage (CmpOp _ e1 e2) =
-  HM.unionWith (<>) (expMemoryUsage e1) (expMemoryUsage e2)
-expMemoryUsage (UnOp _ e) =
-  expMemoryUsage e
-expMemoryUsage (ConvOp _ e) =
-  expMemoryUsage e
-expMemoryUsage (Cond e1 e2 e3) =
-  foldr (HM.unionWith (<>)) mempty
-  [expMemoryUsage e1, expMemoryUsage e2, expMemoryUsage e3]
-expMemoryUsage (ScalarVar _) =
-  HM.empty
-expMemoryUsage (SizeOf _) =
-  HM.empty
-expMemoryUsage Constant{} =
-  HM.empty
+expMemoryUsage = foldMap leafMemoryUsage
+  where leafMemoryUsage (Index mem (Count e) bt _) =
+          HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
+        leafMemoryUsage (ScalarVar _) =
+          HM.empty
+        leafMemoryUsage (SizeOf _) =
+          HM.empty

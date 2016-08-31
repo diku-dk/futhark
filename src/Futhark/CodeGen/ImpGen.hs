@@ -38,6 +38,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Building Blocks
   , compileSubExp
+  , compileSubExpOfType
   , compileSubExpTo
   , compileAlloc
   , subExpToDimSize
@@ -436,9 +437,10 @@ compileLoopBody mergenames (Body _ bnds ses) = do
     copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
       subExpType se >>= \case
         Prim bt  -> do
+          se' <- compileSubExp se
           emit $ Imp.DeclareScalar tmp bt
-          emit $ Imp.SetScalar tmp $ compileSubExp se
-          return $ emit $ Imp.SetScalar d $ Imp.ScalarVar tmp
+          emit $ Imp.SetScalar tmp se'
+          return $ emit $ Imp.SetScalar d $ Imp.var tmp bt
         Mem _ space | Var v <- se -> do
           emit $ Imp.DeclareMem tmp space
           emit $ Imp.SetMem tmp v space
@@ -467,16 +469,21 @@ compileExp targets e m = do
 defCompileExp :: ExplicitMemorish lore => Destination -> Exp lore -> ImpM lore op ()
 
 defCompileExp dest (If cond tbranch fbranch _) = do
+  cond' <- compileSubExp cond
   tcode <- collect $ compileBody dest tbranch
   fcode <- collect $ compileBody dest fbranch
-  emit $ Imp.If (compileSubExp cond) tcode fcode
+  emit $ Imp.If cond' tcode fcode
 
 defCompileExp dest (Apply fname args _) = do
   targets <- funcallTargets dest
-  emit =<<
-    (Imp.Call targets fname .
-     map compileSubExp <$>
-     filterM subExpNotArray (map fst args))
+  args' <- catMaybes <$> mapM compileArg args
+  emit $ Imp.Call targets fname args'
+  where compileArg (se, _) = do
+          t <- subExpType se
+          case (se, t) of
+            (_, Prim pt)    -> return $ Just $ Imp.ExpArg $ compileSubExpOfType pt se
+            (Var v, Mem{}) -> return $ Just $ Imp.MemArg v
+            _              -> return Nothing
 
 defCompileExp targets (BasicOp op) = defCompileBasicOp targets op
 
@@ -486,14 +493,13 @@ defCompileExp (Destination dest) (DoLoop ctx val form body) =
       na <- subExpNotArray se
       when na $
         copyDWIM (paramName p) [] se []
-    let (bindForm, emitForm) =
-          case form of
-            ForLoop i bound ->
-              (declaringLoopVar i,
-               emit . Imp.For i (compileSubExp bound))
-            WhileLoop cond ->
-              (id,
-               emit . Imp.While (Imp.ScalarVar cond))
+    (bindForm, emitForm) <-
+      case form of
+        ForLoop i bound -> do
+          bound' <- compileSubExp bound
+          return (declaringLoopVar i, emit . Imp.For i bound')
+        WhileLoop cond ->
+          return (id, emit . Imp.While (Imp.var cond Bool))
 
     bindForm $ do
       body' <- compileLoopBody mergenames body
@@ -512,23 +518,27 @@ defCompileBasicOp :: Destination -> BasicOp lore -> ImpM lore op ()
 defCompileBasicOp (Destination [target]) (SubExp se) =
   compileSubExpTo target se
 
-defCompileBasicOp (Destination [target]) (UnOp Not e) =
-  writeExp target $ Imp.UnOp Imp.Not $ compileSubExp e
+defCompileBasicOp (Destination [target]) (UnOp op e) = do
+  e' <- compileSubExp e
+  writeExp target $ Imp.UnOpExp op e'
 
-defCompileBasicOp (Destination [target]) (UnOp op e) =
-  writeExp target $ Imp.UnOp op $ compileSubExp e
+defCompileBasicOp (Destination [target]) (ConvOp conv e) = do
+  e' <- compileSubExp e
+  writeExp target $ Imp.ConvOpExp conv e'
 
-defCompileBasicOp (Destination [target]) (ConvOp conv e) =
-  writeExp target $ Imp.ConvOp conv $ compileSubExp e
+defCompileBasicOp (Destination [target]) (BinOp bop x y) = do
+  x' <- compileSubExp x
+  y' <- compileSubExp y
+  writeExp target $ Imp.BinOpExp bop x' y'
 
-defCompileBasicOp (Destination [target]) (BinOp bop x y) =
-  writeExp target $ Imp.BinOp bop (compileSubExp x) (compileSubExp y)
+defCompileBasicOp (Destination [target]) (CmpOp bop x y) = do
+  x' <- compileSubExp x
+  y' <- compileSubExp y
+  writeExp target $ Imp.CmpOpExp bop x' y'
 
-defCompileBasicOp (Destination [target]) (CmpOp bop x y) =
-  writeExp target $ Imp.CmpOp bop (compileSubExp x) (compileSubExp y)
-
-defCompileBasicOp (Destination [_]) (Assert e loc) =
-  emit $ Imp.Assert (compileSubExp e) loc
+defCompileBasicOp (Destination [_]) (Assert e loc) = do
+  e' <- compileSubExp e
+  emit $ Imp.Assert e' loc
 
 defCompileBasicOp (Destination [target]) (Index _ src slice)
   | Just idxs <- sliceIndices slice =
@@ -539,7 +549,7 @@ defCompileBasicOp _ Index{} =
 
 defCompileBasicOp (Destination [dest]) (Replicate (Shape ds) se) = do
   is <- replicateM (length ds) (newVName "i")
-  let ds' = map compileSubExp ds
+  ds' <- mapM compileSubExp ds
   declaringLoopVars is $ do
     copy_elem <- collect $ copyDWIMDest dest (map varIndex is) se []
     emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
@@ -550,11 +560,13 @@ defCompileBasicOp (Destination [_]) Scratch{} =
 defCompileBasicOp (Destination [dest]) (Iota n e s) = do
   i <- newVName "i"
   x <- newVName "x"
+  n' <- compileSubExp n
+  e' <- compileSubExp e
+  s' <- compileSubExp s
   emit $ Imp.DeclareScalar x int32
   declaringLoopVar i $ withPrimVar x int32 $
-    emit =<< (Imp.For i (compileSubExp n) <$>
-              collect (do emit $ Imp.SetScalar x $
-                            compileSubExp e + Imp.ScalarVar i * compileSubExp s
+    emit =<< (Imp.For i n' <$>
+              collect (do emit $ Imp.SetScalar x $ e' + Imp.var i int32 * s'
                           copyDWIMDest dest [varIndex i] (Var x) []))
 
 defCompileBasicOp (Destination [target]) (Copy src) =
@@ -585,7 +597,7 @@ defCompileBasicOp
                       []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
                       r:_ -> innerExp $ Imp.dimSizeToExp r
           copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
-          emit $ Imp.SetScalar offs_glb $ Imp.ScalarVar offs_glb + rows
+          emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
 defCompileBasicOp (Destination [dest]) (ArrayLit es _) =
   forM_ (zip [0..] es) $ \(i,e) ->
@@ -606,7 +618,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
     Just destlocs <- mapM arrDestLoc arrdest = do
   i <- newVName "i"
   declaringLoopVar i $ do
-    outer_dim <- compileSubExp . arraySize 0 <$> lookupType flags
+    outer_dim <- compileSubExp =<< (arraySize 0 <$> lookupType flags)
     -- We will use 'i' to index the flag array and the value array.
     -- Note that they have the same outer size ('outer_dim').
     read_flags_i <- readFromArray flags [varIndex i]
@@ -628,8 +640,8 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
     eqclass <- newVName "eqclass"
     emit $ Imp.DeclareScalar eqclass int32
     let mkSizeLoopBody code c sizevar =
-          Imp.If (Imp.CmpOp (CmpEq int32) (Imp.ScalarVar eqclass) (fromIntegral c))
-          (Imp.SetScalar sizevar $ Imp.ScalarVar sizevar + 1)
+          Imp.If (Imp.CmpOpExp (CmpEq int32) (Imp.var eqclass int32) (fromIntegral c))
+          (Imp.SetScalar sizevar $ Imp.var sizevar int32 + 1)
           code
         sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
     emit $ Imp.For i outer_dim $
@@ -644,7 +656,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
       partition_offset <- lift $ newVName "partition_offset"
       lift $ emit $ Imp.DeclareScalar partition_offset int32
       lift $ emit $ Imp.SetScalar partition_offset cur_offset
-      put $ Imp.ScalarVar partition_offset + Imp.ScalarVar size
+      put $ Imp.var partition_offset int32 + Imp.var size int32
       return partition_offset
 
     -- We create the memory location we use when writing a result
@@ -664,14 +676,14 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
       destloc [varIndex partition_cur_offset]
       srcloc [varIndex i]
     let mkWriteLoopBody code c offsetvar =
-          Imp.If (Imp.CmpOp (CmpEq int32) (Imp.ScalarVar eqclass) (fromIntegral c))
+          Imp.If (Imp.CmpOpExp (CmpEq int32) (Imp.var eqclass int32) (fromIntegral c))
           (Imp.SetScalar partition_cur_offset
-             (Imp.ScalarVar offsetvar)
+             (Imp.var offsetvar int32)
            <>
            mconcat copy_elements
            <>
            Imp.SetScalar offsetvar
-             (Imp.ScalarVar offsetvar + 1))
+             (Imp.var offsetvar int32 + 1))
           code
         writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
     emit $ Imp.For i outer_dim $
@@ -836,11 +848,18 @@ sizeToScalExp (Imp.ConstSize x) = fromIntegral x
 compileSubExpTo :: ValueDestination -> SubExp -> ImpM lore op ()
 compileSubExpTo dest se = copyDWIMDest dest [] se []
 
-compileSubExp :: SubExp -> Imp.Exp
+compileSubExp :: SubExp -> ImpM lore op Imp.Exp
 compileSubExp (Constant v) =
-  Imp.Constant v
-compileSubExp (Var v) =
-  Imp.ScalarVar v
+  return $ Imp.ValueExp v
+compileSubExp (Var v) = do
+  t <- lookupType v
+  case t of
+    Prim pt -> return $ Imp.var v pt
+    _       -> throwError $ "compileSubExp: SubExp is not a primitive type: " ++ pretty v
+
+compileSubExpOfType :: PrimType -> SubExp -> Imp.Exp
+compileSubExpOfType _ (Constant v) = Imp.ValueExp v
+compileSubExpOfType t (Var v) = Imp.var v t
 
 varIndex :: VName -> SE.ScalExp
 varIndex name = SE.Id name int32
@@ -954,7 +973,7 @@ readFromArray name indices = do
   arr <- lookupArray name
   (mem, space, i) <-
     fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
-  return $ Imp.Index mem i (entryArrayElemType arr) space
+  return $ Imp.index mem i (entryArrayElemType arr) space
 
 sliceArray :: MemLocation
            -> Slice SE.ScalExp
@@ -1034,7 +1053,7 @@ copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshap
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $ foldl (.) id (zipWith Imp.For is bounds) $
         Imp.Write destmem (bytes $ fromJust $ scalExpToImpExp destidx) bt destspace $
-        Imp.Index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
+        Imp.index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
   where bt_size = primByteSize bt
 
 -- | Copy from here to there; both destination and source may be
@@ -1053,7 +1072,7 @@ copyArrayDWIM bt
   (srcmem, srcspace, srcoffset) <-
     fullyIndexArray' srclocation srcis bt
   return $ Imp.Write targetmem targetoffset bt destspace $
-    Imp.Index srcmem srcoffset bt srcspace
+    Imp.index srcmem srcoffset bt srcspace
 
   | otherwise = do
       let destlocation' =
@@ -1077,16 +1096,16 @@ copyDWIMDest _ _ (Constant v) (_:_) =
 copyDWIMDest dest dest_is (Constant v) [] =
   case dest of
   ScalarDestination name ->
-    emit $ Imp.SetScalar name $ Imp.Constant v
+    emit $ Imp.SetScalar name $ Imp.ValueExp v
   ArrayElemDestination dest_mem _ dest_space dest_i ->
-    emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.Constant v
+    emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.ValueExp v
   MemoryDestination{} ->
     throwError $
     unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
   ArrayDestination (CopyIntoMemory dest_loc) _ -> do
     (dest_mem, dest_space, dest_i) <-
       fullyIndexArray' dest_loc dest_is bt
-    emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.Constant v
+    emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.ValueExp v
   ArrayDestination{} ->
     throwError $
     unwords ["copyDWIMDest: constant source", pretty v,
@@ -1122,15 +1141,14 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       throwError $
       unwords ["copyDWIMDest: prim-typed target", pretty name, "with nonzero indices."]
 
-    (ScalarDestination name, ScalarVar{}) ->
-      emit $ Imp.SetScalar name $ Imp.ScalarVar src
+    (ScalarDestination name, ScalarVar (ScalarEntry pt)) ->
+      emit $ Imp.SetScalar name $ Imp.var src pt
 
     (ScalarDestination name, ArrayVar arr) -> do
       let bt = entryArrayElemType arr
       (mem, space, i) <-
         fullyIndexArray' (entryArrayLocation arr) src_is bt
-      emit $ Imp.SetScalar name $
-        Imp.Index mem i bt space
+      emit $ Imp.SetScalar name $ Imp.index mem i bt space
 
     (ArrayElemDestination{}, _) | not $ null dest_is->
       throwError $
@@ -1138,7 +1156,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
 
     (ArrayElemDestination dest_mem _ dest_space dest_i,
      ScalarVar (ScalarEntry bt)) ->
-      emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.ScalarVar src
+      emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.var src bt
 
     (ArrayElemDestination dest_mem _ dest_space dest_i, ArrayVar src_arr)
       | length (entryArrayShape src_arr) == length src_is -> do
@@ -1146,7 +1164,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
           (src_mem, src_space, src_i) <-
             fullyIndexArray' (entryArrayLocation src_arr) src_is bt
           emit $ Imp.Write dest_mem dest_i bt dest_space $
-            Imp.Index src_mem src_i bt src_space
+            Imp.index src_mem src_i bt src_space
 
     (ArrayElemDestination{}, ArrayVar{}) ->
       throwError $
@@ -1163,7 +1181,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
     (ArrayDestination (CopyIntoMemory dest_loc) _, ScalarVar (ScalarEntry bt)) -> do
       (dest_mem, dest_space, dest_i) <-
         fullyIndexArray' dest_loc dest_is bt
-      emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.ScalarVar src
+      emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.var src bt
 
     (ArrayDestination{} , ScalarVar{}) ->
       throwError $
@@ -1215,18 +1233,18 @@ copyDWIM dest dest_is src src_is = do
 compileAlloc :: Destination -> SubExp -> Space
              -> ImpM lore op ()
 compileAlloc (Destination [MemoryDestination mem sizevar]) e space = do
+  e' <- compileSubExp e
   emit $ Imp.Allocate mem (Imp.bytes e') space
   case sizevar of Just sizevar' -> emit $ Imp.SetScalar sizevar' e'
                   Nothing       -> return ()
-    where e' = compileSubExp e
 compileAlloc dest _ _ =
   throwError $ "compileAlloc: Invalid destination: " ++ show dest
 
 scalExpToImpExp :: ScalExp -> Maybe Imp.Exp
 scalExpToImpExp (SE.Val x) =
-  Just $ Imp.Constant x
-scalExpToImpExp (SE.Id v _) =
-  Just $ Imp.ScalarVar v
+  Just $ Imp.ValueExp x
+scalExpToImpExp (SE.Id v t) =
+  Just $ Imp.LeafExp (Imp.ScalarVar v) t
 scalExpToImpExp (SE.SPlus e1 e2) =
   (+) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.SMinus e1 e2) =

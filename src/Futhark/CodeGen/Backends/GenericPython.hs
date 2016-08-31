@@ -645,13 +645,28 @@ compilePrimValue Checked = Var "Cert"
 
 compileExp :: Imp.Exp -> CompilerM op s PyExp
 
--- Had to explicitly declare each constant value because memmove
--- typeclashes with python types and numpy types
-compileExp (Imp.Constant v) = return $ compilePrimValue v
+compileExp (Imp.ValueExp v) = return $ compilePrimValue v
 
-compileExp (Imp.ScalarVar vname) = return (Var $ pretty vname)
+compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
+  return $ Var $ pretty vname
 
-compileExp (Imp.BinOp op x y) = do
+compileExp (Imp.LeafExp (Imp.SizeOf t) _) = do
+  let t' = compileSizeOfType t
+  let readInt = read t' :: Int32
+  return $ Constant $ value readInt
+
+compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace) _) = do
+  iexp' <- compileExp iexp
+  let bt' = compilePrimType bt
+  let nptype = compilePrimToNp bt
+  return $ simpleCall "indexArray" [Var $ pretty src, iexp', Var bt', Var nptype]
+
+compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space)) _) =
+  join $ asks envReadScalar
+    <*> pure src <*> compileExp iexp
+    <*> pure restype <*> pure space
+
+compileExp (Imp.BinOpExp op x y) = do
   (x', y', simple) <- compileBinOpLike x y
   case op of
     Add{} -> simple "+"
@@ -669,11 +684,11 @@ compileExp (Imp.BinOp op x y) = do
     LogOr{} -> simple "or"
     _ -> return $ simpleCall (pretty op) [x', y']
 
-compileExp (Imp.ConvOp conv x) = do
+compileExp (Imp.ConvOpExp conv x) = do
   x' <- compileExp x
   return $ simpleCall (pretty conv) [x']
 
-compileExp (Imp.CmpOp cmp x y) = do
+compileExp (Imp.CmpOpExp cmp x y) = do
   (x', y', simple) <- compileBinOpLike x y
   case cmp of
     CmpEq{} -> simple "=="
@@ -681,31 +696,9 @@ compileExp (Imp.CmpOp cmp x y) = do
     FCmpLe{} -> simple "<="
     _ -> return $ simpleCall (pretty cmp) [x', y']
 
-compileExp (Imp.UnOp op exp1) = do
+compileExp (Imp.UnOpExp op exp1) = do
   exp1' <- compileExp exp1
   return $ UnOp (compileUnOp op) exp1'
-
-compileExp (Imp.Cond exp1 exp2 exp3) = do
-  exp1' <- compileExp exp1
-  exp2' <- compileExp exp2
-  exp3' <- compileExp exp3
-  return $ Cond exp1' exp2' exp3'
-
-compileExp (Imp.SizeOf t) = do
-  let t' = compileSizeOfType t
-  let readInt = read t' :: Int32
-  return $ Constant $ value readInt
-
-compileExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace) = do
-  iexp' <- compileExp iexp
-  let bt' = compilePrimType bt
-  let nptype = compilePrimToNp bt
-  return $ simpleCall "indexArray" [Var $ pretty src, iexp', Var bt', Var nptype]
-
-compileExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space)) =
-  join $ asks envReadScalar
-    <*> pure src <*> compileExp iexp
-    <*> pure restype <*> pure space
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 
@@ -755,13 +748,15 @@ compileCode (Imp.Assert e loc) = do
   stm $ Assert e' $ locStr loc
 
 compileCode (Imp.Call dests fname args) = do
-  args' <- mapM compileExp args
+  args' <- mapM compileArg args
   let dests' = tupleOrSingle $ fmap Var (map pretty dests)
       fname'
         | isBuiltInFunction fname = futharkFun (pretty  fname)
         | otherwise               = "self." ++ futharkFun (pretty  fname)
       call' = simpleCall fname' args'
   stm $ Assign dests' call'
+  where compileArg (Imp.MemArg m) = return $ Var $ pretty m
+        compileArg (Imp.ExpArg e) = compileExp e
 
 compileCode (Imp.SetMem dest src _) = do
   let src' = Var (pretty src)

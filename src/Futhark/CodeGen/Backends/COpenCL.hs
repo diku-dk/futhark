@@ -194,19 +194,19 @@ callKernel (LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM GenericC.compileExp kernel_size
   workgroup_size' <- mapM GenericC.compileExp workgroup_size
   launchKernel name kernel_size' workgroup_size'
-  where setKernelArg i (ValueArg e bt) = do
+  where setKernelArg i (ValueKArg e bt) = do
           v <- GenericC.compileExpToName "kernel_arg" bt e
           GenericC.stm [C.cstm|
             OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v));
           |]
 
-        setKernelArg i (MemArg v) = do
+        setKernelArg i (MemKArg v) = do
           v' <- GenericC.rawMem v
           GenericC.stm [C.cstm|
             OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($exp:v'), &$exp:v'));
           |]
 
-        setKernelArg i (SharedMemoryArg num_bytes) = do
+        setKernelArg i (SharedMemoryKArg num_bytes) = do
           num_bytes' <- GenericC.compileExp $ innerExp num_bytes
           GenericC.stm [C.cstm|
             OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, $exp:num_bytes', NULL));

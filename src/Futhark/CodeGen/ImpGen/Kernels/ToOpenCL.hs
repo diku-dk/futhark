@@ -256,23 +256,24 @@ kernelArgs :: CallKernel -> [KernelArg]
 kernelArgs (Map kernel) =
   map useToArg $ mapKernelUses kernel
 kernelArgs (AnyKernel kernel) =
-  map (SharedMemoryArg . memSizeToExp . localMemorySize)
+  map (SharedMemoryKArg . memSizeToExp . localMemorySize)
       (kernelLocalMemory kernel) ++
   map useToArg (kernelUses kernel)
   where localMemorySize (_, size, _) = size
 kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems in_elems out_elems) =
-  [ MemArg destmem
-  , ValueArg destoffset int32
-  , MemArg srcmem
-  , ValueArg srcoffset int32
-  , ValueArg x_elems int32
-  , ValueArg y_elems int32
-  , ValueArg in_elems int32
-  , ValueArg out_elems int32
-  , SharedMemoryArg shared_memory
+  [ MemKArg destmem
+  , ValueKArg destoffset int32
+  , MemKArg srcmem
+  , ValueKArg srcoffset int32
+  , ValueKArg x_elems int32
+  , ValueKArg y_elems int32
+  , ValueKArg in_elems int32
+  , ValueKArg out_elems int32
+  , SharedMemoryKArg shared_memory
   ]
   where shared_memory =
-          bytes $ (transposeBlockDim + 1) * transposeBlockDim * SizeOf bt
+          bytes $ (transposeBlockDim + 1) * transposeBlockDim *
+          LeafExp (SizeOf bt) (IntType Int32)
 
 kernelAndWorkgroupSize :: CallKernel -> ([Exp], [Exp])
 kernelAndWorkgroupSize (Map kernel) =
@@ -292,11 +293,11 @@ kernelAndWorkgroupSize (MapTranspose _ _ _ _ _ num_arrays x_elems y_elems _ _) =
           e + ((transposeBlockDim -
                 (e `impRem` transposeBlockDim)) `impRem`
                transposeBlockDim)
-        impRem = BinOp $ SRem Int32
+        impRem = BinOpExp $ SRem Int32
 
 useToArg :: KernelUse -> KernelArg
-useToArg (MemoryUse mem _) = MemArg mem
-useToArg (ScalarUse v bt)  = ValueArg (ScalarVar v) bt
+useToArg (MemoryUse mem _) = MemKArg mem
+useToArg (ScalarUse v bt)  = ValueKArg (LeafExp (ScalarVar v) bt) bt
 
 typesInKernel :: CallKernel -> HS.HashSet PrimType
 typesInKernel (Map kernel) = typesInCode $ mapKernelBody kernel
@@ -317,7 +318,9 @@ typesInCode (Write _ (Count e1) t _ e2) =
   typesInExp e1 <> HS.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e
 typesInCode SetMem{} = mempty
-typesInCode (Call _ _ es) = mconcat $ map typesInExp es
+typesInCode (Call _ _ es) = mconcat $ map typesInArg es
+  where typesInArg MemArg{} = mempty
+        typesInArg (ExpArg e) = typesInExp e
 typesInCode (If e c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _) = typesInExp e
@@ -325,13 +328,12 @@ typesInCode (Comment _ c) = typesInCode c
 typesInCode Op{} = mempty
 
 typesInExp :: Exp -> HS.HashSet PrimType
-typesInExp (Constant v) = HS.singleton $ primValueType v
-typesInExp (BinOp _ e1 e2) = typesInExp e1 <> typesInExp e2
-typesInExp (CmpOp _ e1 e2) = typesInExp e1 <> typesInExp e2
-typesInExp (ConvOp op e) = HS.fromList [from, to] <> typesInExp e
+typesInExp (ValueExp v) = HS.singleton $ primValueType v
+typesInExp (BinOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
+typesInExp (CmpOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
+typesInExp (ConvOpExp op e) = HS.fromList [from, to] <> typesInExp e
   where (from, to) = convTypes op
-typesInExp (UnOp _ e) = typesInExp e
-typesInExp (Index _ (Count e) t _) = HS.singleton t <> typesInExp e
-typesInExp ScalarVar{} = mempty
-typesInExp (SizeOf t) = HS.singleton t
-typesInExp (Cond e1 e2 e3) = typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInExp (UnOpExp _ e) = typesInExp e
+typesInExp (LeafExp (Index _ (Count e) t _) _) = HS.singleton t <> typesInExp e
+typesInExp (LeafExp ScalarVar{} _) = mempty
+typesInExp (LeafExp (SizeOf t) _) = HS.singleton t
