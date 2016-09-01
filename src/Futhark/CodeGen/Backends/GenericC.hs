@@ -29,6 +29,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileFun
   , compileCode
   , compileExp
+  , compilePrimExp
   , compileExpToName
   , dimSizeToExp
   , rawMem
@@ -929,57 +930,65 @@ compileExpToName desc t e = do
 
 compileExp :: Exp -> CompilerM op s C.Exp
 
-compileExp (ValueExp val) = return $ compilePrimValue val
+compileExp = compilePrimExp compileLeaf
+  where compileLeaf (ScalarVar src) =
+          return [C.cexp|$id:src|]
 
-compileExp (LeafExp (ScalarVar src) _) =
-  return [C.cexp|$id:src|]
+        compileLeaf (Index src (Count iexp) restype DefaultSpace) = do
+          src' <- rawMem src
+          derefPointer src'
+            <$> compileExp iexp
+            <*> pure [C.cty|$ty:(primTypeToCType restype)*|]
 
-compileExp (LeafExp (Index src (Count iexp) restype DefaultSpace) _) = do
-  src' <- rawMem src
-  derefPointer src'
-    <$> compileExp iexp
-    <*> pure [C.cty|$ty:(primTypeToCType restype)*|]
+        compileLeaf (Index src (Count iexp) restype (Space space)) =
+          join $ asks envReadScalar
+          <*> rawMem src <*> compileExp iexp
+          <*> pure (primTypeToCType restype) <*> pure space
 
-compileExp (LeafExp (Index src (Count iexp) restype (Space space)) _) =
-  join $ asks envReadScalar
-    <*> rawMem src <*> compileExp iexp
-    <*> pure (primTypeToCType restype) <*> pure space
+        compileLeaf (SizeOf t) =
+          return [C.cexp|(sizeof($ty:t'))|]
+          where t' = primTypeToCType t
 
-compileExp (LeafExp (SizeOf t) _) =
-  return [C.cexp|(sizeof($ty:t'))|]
-  where t' = primTypeToCType t
+-- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
+compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
 
-compileExp (UnOpExp Complement{} x) = do
-  x' <- compileExp x
+compilePrimExp _ (ValueExp val) =
+  return $ compilePrimValue val
+
+compilePrimExp f (LeafExp v _) =
+  f v
+
+compilePrimExp f (UnOpExp Complement{} x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|~$exp:x'|]
 
-compileExp (UnOpExp Not{} x) = do
-  x' <- compileExp x
+compilePrimExp f (UnOpExp Not{} x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|!$exp:x'|]
 
-compileExp (UnOpExp Abs{} x) = do
-  x' <- compileExp x
+compilePrimExp f (UnOpExp Abs{} x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|abs($exp:x')|]
 
-compileExp (UnOpExp (FAbs Float32) x) = do
-  x' <- compileExp x
+compilePrimExp f (UnOpExp (FAbs Float32) x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|(float)fabs($exp:x')|]
 
-compileExp (UnOpExp (FAbs Float64) x) = do
-  x' <- compileExp x
+compilePrimExp f (UnOpExp (FAbs Float64) x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|fabs($exp:x')|]
 
-compileExp (UnOpExp SSignum{} x) = do
-  x' <- compileExp x
+compilePrimExp f (UnOpExp SSignum{} x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
 
-compileExp (UnOpExp USignum{} x) = do
-  x' <- compileExp x
+compilePrimExp f (UnOpExp USignum{} x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
 
-compileExp (CmpOpExp cmp x y) = do
-  x' <- compileExp x
-  y' <- compileExp y
+compilePrimExp f (CmpOpExp cmp x y) = do
+  x' <- compilePrimExp f x
+  y' <- compilePrimExp f y
   return $ case cmp of
     CmpEq{} -> [C.cexp|$exp:x' == $exp:y'|]
 
@@ -988,13 +997,13 @@ compileExp (CmpOpExp cmp x y) = do
 
     _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
 
-compileExp (ConvOpExp conv x) = do
-  x' <- compileExp x
+compilePrimExp f (ConvOpExp conv x) = do
+  x' <- compilePrimExp f x
   return [C.cexp|$id:(pretty conv)($exp:x')|]
 
-compileExp (BinOpExp bop x y) = do
-  x' <- compileExp x
-  y' <- compileExp y
+compilePrimExp f (BinOpExp bop x y) = do
+  x' <- compilePrimExp f x
+  y' <- compilePrimExp f y
   return $ case bop of
              Add{} -> [C.cexp|$exp:x' + $exp:y'|]
              FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]

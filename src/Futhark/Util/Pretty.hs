@@ -5,6 +5,7 @@ module Futhark.Util.Pretty
        , prettyDoc
        , prettyTuple
        , prettyText
+       , prettyOneLine
 
        , apply
        , oneLine
@@ -25,6 +26,10 @@ pretty = PP.pretty 80 . ppr
 -- | Prettyprint a value to a 'Text', wrapped to 80 characters.
 prettyText :: Pretty a => a -> Text
 prettyText = LT.toStrict . PP.prettyLazyText 80 . ppr
+
+-- | Prettyprint a value without any width restriction.
+prettyOneLine :: Pretty a => a -> String
+prettyOneLine = ($"") . displayS . renderCompact . oneLine . ppr
 
 -- | Re-export of 'PP.pretty'.
 prettyDoc :: Int -> Doc -> String

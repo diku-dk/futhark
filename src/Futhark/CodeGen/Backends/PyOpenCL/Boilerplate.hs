@@ -28,7 +28,7 @@ device_type = self.ctx.get_info(cl.context_info.DEVICES)[0].type
 lockstep_width = 1
 $set_lockstep_width
 if (len(fut_opencl_src) >= 0):
-  program = cl.Program(self.ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={}".format(FUT_BLOCK_DIM), "-DLOCKSTEP_WIDTH={}".format(lockstep_width)])
+  program = cl.Program(self.ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={} -DLOCKSTEP_WIDTH={} -DDEFAULT_GROUP_SIZE={} -DDEFAULT_NUM_GROUPS={} -DDEFAULT_TILE_SIZE={}".format(FUT_BLOCK_DIM, lockstep_width, cl_group_size, cl_num_groups, cl_tile_size)])
 
 $assign'
 |]

@@ -9,6 +9,7 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 import Control.Applicative
 import Control.Monad.State
 import Data.List
+import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 
@@ -26,7 +27,8 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (pretty, prettyOneLine)
 
 -- | Translate a kernels-program to an OpenCL-program.
 kernelsToOpenCL :: ImpKernels.Program
@@ -54,14 +56,14 @@ type UsedFunctions = [(String,C.Func)] -- The ordering is important!
 data OpenClRequirements =
   OpenClRequirements { _kernelUsedFunctions :: UsedFunctions
                      , _kernelUsedTypes :: HS.HashSet PrimType
+                     , _kernelConstants :: [(VName, KernelConstExp)]
                      }
 
 instance Monoid OpenClRequirements where
-  mempty =
-    OpenClRequirements mempty mempty
+  mempty = OpenClRequirements mempty mempty mempty
 
-  OpenClRequirements used1 ts1 `mappend` OpenClRequirements used2 ts2 =
-    OpenClRequirements (nubBy cmpFst $ used1 <> used2) (ts1 <> ts2)
+  OpenClRequirements used1 ts1 consts1 `mappend` OpenClRequirements used2 ts2 consts2 =
+    OpenClRequirements (nubBy cmpFst $ used1 <> used2) (ts1 <> ts2) (consts1 <> consts2)
     where cmpFst (x, _) (y, _) = x == y
 
 inKernelOperations :: GenericC.Operations KernelOp UsedFunctions
@@ -124,7 +126,7 @@ compileKernel called@(Map kernel) =
 
       used_funs = GenericC.compUserState s
 
-      params = map useAsParam $ mapKernelUses kernel
+      params = mapMaybe useAsParam $ mapKernelUses kernel
 
       kernel_funs = functionsCalled $ mapKernelBody kernel
 
@@ -133,8 +135,10 @@ compileKernel called@(Map kernel) =
                  const uint $id:(mapKernelThreadNum kernel) = get_global_id(0);
                  $items:funbody
              }|])],
-            OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) $
-            typesInKernel called)
+            OpenClRequirements
+              (used_funs ++ requiredFunctions kernel_funs)
+              (typesInKernel called)
+              (mapMaybe useAsConst $ mapKernelUses kernel))
 
 compileKernel called@(AnyKernel kernel) =
   let (kernel_body, s) =
@@ -143,7 +147,7 @@ compileKernel called@(AnyKernel kernel) =
 
       used_funs = GenericC.compUserState s
 
-      use_params = map useAsParam $ kernelUses kernel
+      use_params = mapMaybe useAsParam $ kernelUses kernel
 
       kernel_funs = functionsCalled $ kernelBody kernel
 
@@ -159,8 +163,10 @@ compileKernel called@(AnyKernel kernel) =
                   $items:local_memory_init
                   $items:kernel_body
              }|])],
-            OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) $
-            typesInKernel called)
+            OpenClRequirements
+              (used_funs ++ requiredFunctions kernel_funs)
+              (typesInKernel called)
+              (mapMaybe useAsConst $ kernelUses kernel))
   where prepareLocalMemory (mem, _, bt) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
           let bt' = GenericC.primTypeToCType bt
@@ -173,12 +179,18 @@ compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _ _ _) =
          mempty)
   where ty = GenericC.primTypeToCType bt
 
-useAsParam :: KernelUse -> C.Param
+useAsParam :: KernelUse -> Maybe C.Param
 useAsParam (ScalarUse name bt) =
   let ctp = GenericC.primTypeToCType bt
-  in [C.cparam|$ty:ctp $id:name|]
+  in Just [C.cparam|$ty:ctp $id:name|]
 useAsParam (MemoryUse name _) =
-  [C.cparam|__global unsigned char *$id:name|]
+  Just [C.cparam|__global unsigned char *$id:name|]
+useAsParam ConstUse{} =
+  Nothing
+
+useAsConst :: KernelUse -> Maybe (VName, KernelConstExp)
+useAsConst (ConstUse v e) = Just (v,e)
+useAsConst _ = Nothing
 
 requiredFunctions :: HS.HashSet Name -> [(String, C.Func)]
 requiredFunctions kernel_funs =
@@ -213,7 +225,7 @@ openClCode kernels =
            (_, kernel_func) <- kernels ]
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
-genOpenClPrelude (OpenClRequirements used_funs ts) =
+genOpenClPrelude (OpenClRequirements used_funs ts consts) =
   [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
 typedef char int8_t;
@@ -228,8 +240,17 @@ typedef ulong uint64_t;
 |] ++
   cIntOps ++ cFloat32Ops ++
   (if uses_float64 then cFloat64Ops ++ cFloatConvOps else []) ++
-  [ [C.cedecl|$func:used_fun|] | (_, used_fun) <- used_funs ]
+  [ [C.cedecl|$func:used_fun|] | (_, used_fun) <- used_funs ] ++
+  [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
   where uses_float64 = FloatType Float64 `HS.member` ts
+        constToDefine (name, e) =
+          let (e', _) = GenericC.runCompilerM (Functions [])
+                        inKernelOperations blankNameSource mempty $
+                        GenericC.compilePrimExp compileKernelConst e
+          in unwords ["#define", zEncodeString (pretty name), "("++prettyOneLine e'++")"]
+        compileKernelConst GroupSizeConst = return [C.cexp|DEFAULT_GROUP_SIZE|]
+        compileKernelConst NumGroupsConst = return [C.cexp|DEFAULT_NUM_GROUPS|]
+        compileKernelConst TileSizeConst = return [C.cexp|DEFAULT_TILE_SIZE|]
 
 mapKernelName :: MapKernel -> String
 mapKernelName k = "kernel_"++ mapKernelDesc k ++ show (baseTag $ mapKernelThreadNum k)
@@ -254,11 +275,11 @@ callKernel (ImpKernels.GetGroupSize v) =
 
 kernelArgs :: CallKernel -> [KernelArg]
 kernelArgs (Map kernel) =
-  map useToArg $ mapKernelUses kernel
+  mapMaybe useToArg $ mapKernelUses kernel
 kernelArgs (AnyKernel kernel) =
   map (SharedMemoryKArg . memSizeToExp . localMemorySize)
       (kernelLocalMemory kernel) ++
-  map useToArg (kernelUses kernel)
+  mapMaybe useToArg (kernelUses kernel)
   where localMemorySize (_, size, _) = size
 kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems in_elems out_elems) =
   [ MemKArg destmem
@@ -295,9 +316,10 @@ kernelAndWorkgroupSize (MapTranspose _ _ _ _ _ num_arrays x_elems y_elems _ _) =
                transposeBlockDim)
         impRem = BinOpExp $ SRem Int32
 
-useToArg :: KernelUse -> KernelArg
-useToArg (MemoryUse mem _) = MemKArg mem
-useToArg (ScalarUse v bt)  = ValueKArg (LeafExp (ScalarVar v) bt) bt
+useToArg :: KernelUse -> Maybe KernelArg
+useToArg (MemoryUse mem _) = Just $ MemKArg mem
+useToArg (ScalarUse v bt)  = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
+useToArg ConstUse{}        = Nothing
 
 typesInKernel :: CallKernel -> HS.HashSet PrimType
 typesInKernel (Map kernel) = typesInCode $ mapKernelBody kernel

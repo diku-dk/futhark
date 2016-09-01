@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.Kernels
   )
   where
 
+import Control.Arrow ((&&&))
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Applicative
@@ -111,7 +112,7 @@ kernelCompiler dest (Kernel _ space _ kernel_body) = do
     ImpGen.declaringPrimVar wave_size int32 $
     ImpGen.declaringPrimVar inner_group_size int32 $
     ImpGen.declaringPrimVar thread_active Bool $
-    ImpGen.declaringScope (scopeOfKernelSpace space) $ do
+    ImpGen.declaringScope Nothing (scopeOfKernelSpace space) $ do
 
     ImpGen.emit $
       Imp.Op (Imp.GetGlobalId global_tid 0) <>
@@ -533,7 +534,7 @@ inKernelExpCompiler _ e =
 
 computeKernelUses :: FreeIn a =>
                      a -> [VName]
-                  -> ImpGen.ImpM lore op ([Imp.KernelUse], [(VName, Imp.Size)])
+                  -> CallKernelGen ([Imp.KernelUse], [(VName, Imp.Size)])
 computeKernelUses kernel_body bound_in_kernel = do
     let actually_free = freeIn kernel_body `HS.difference` HS.fromList bound_in_kernel
 
@@ -544,7 +545,7 @@ computeKernelUses kernel_body bound_in_kernel = do
     local_memory <- localMemoryUse actually_free
     return (nub reads_from, nub local_memory)
 
-readsFromSet :: Names -> ImpGen.ImpM lore op [Imp.KernelUse]
+readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
 readsFromSet free =
   fmap catMaybes $
   forM (HS.toList free) $ \var -> do
@@ -555,9 +556,24 @@ readsFromSet free =
       Mem memsize _ -> Just <$> (Imp.MemoryUse var <$>
                                  ImpGen.subExpToDimSize memsize)
       Prim bt ->
-        if bt == Cert
-        then return Nothing
-        else return $ Just $ Imp.ScalarUse var bt
+        isConstExp var >>= \case
+          Just ce -> return $ Just $ Imp.ConstUse var ce
+          Nothing | bt == Cert -> return Nothing
+                  | otherwise  -> return $ Just $ Imp.ScalarUse var bt
+
+isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
+isConstExp v = do
+  vtable <- asks ImpGen.envVtable
+  let lookupConstExp name = constExp =<< hasExp =<< HM.lookup name vtable
+      kernelConst (Op (Inner NumGroups)) = Just $ LeafExp Imp.NumGroupsConst int32
+      kernelConst (Op (Inner GroupSize)) = Just $ LeafExp Imp.GroupSizeConst int32
+      kernelConst (BasicOp (SubExp (Var name))) = lookupConstExp name
+      kernelConst _              = Nothing
+      constExp = primExpFromExp kernelConst
+  return $ lookupConstExp v
+  where hasExp (ImpGen.ArrayVar e _) = e
+        hasExp (ImpGen.ScalarVar e _) = e
+        hasExp (ImpGen.MemVar e _) = e
 
 localMemoryUse :: Names -> ImpGen.ImpM lore op [(VName, Imp.Size)]
 localMemoryUse free =
@@ -581,9 +597,9 @@ makeAllMemoryGlobal =
   local $ \env -> env { ImpGen.envVtable = HM.map globalMemory $ ImpGen.envVtable env
                       , ImpGen.envDefaultSpace = Imp.Space "global"
                       }
-  where globalMemory (ImpGen.MemVar entry)
+  where globalMemory (ImpGen.MemVar _ entry)
           | ImpGen.entryMemSpace entry /= Space "local" =
-              ImpGen.MemVar entry { ImpGen.entryMemSpace = Imp.Space "global" }
+              ImpGen.MemVar Nothing entry { ImpGen.entryMemSpace = Imp.Space "global" }
         globalMemory entry =
           entry
 
@@ -886,7 +902,8 @@ compileKernelBindings constants ungrouped_bnds m =
   compileGroupedKernelBindings' $ groupBindingsByGuard constants ungrouped_bnds
   where compileGroupedKernelBindings' [] = m
         compileGroupedKernelBindings' ((g, bnds):rest_bnds) =
-          ImpGen.declaringScope (castScope $ scopeOf bnds) $ do
+          ImpGen.declaringScopes
+          (map ((Just . bindingExp) &&& (castScope . scopeOf)) bnds) $ do
             protect g $ mapM_ compileKernelBinding bnds
             compileGroupedKernelBindings' rest_bnds
 

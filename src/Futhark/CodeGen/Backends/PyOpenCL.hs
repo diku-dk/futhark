@@ -37,6 +37,7 @@ compileProg module_name prog = do
             [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
              Assign (Var "cl_group_size") $ Constant $ value (256::Int32),
              Assign (Var "cl_num_groups") $ Constant $ value (128::Int32),
+             Assign (Var "cl_tile_size") $ Constant $ value (32::Int32),
              Assign (Var "synchronous") $ Constant $ value False,
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,

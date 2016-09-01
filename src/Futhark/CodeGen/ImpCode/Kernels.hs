@@ -7,6 +7,8 @@ module Futhark.CodeGen.ImpCode.Kernels
   , FunctionT (Function)
   , Code
   , KernelCode
+  , KernelConst (..)
+  , KernelConstExp
   , HostOp (..)
   , KernelOp (..)
   , CallKernel (..)
@@ -39,6 +41,15 @@ type Function = Imp.Function HostOp
 type Code = Imp.Code CallKernel
 -- | Code inside a kernel.
 type KernelCode = Imp.Code KernelOp
+
+-- | A run-time constant related to kernels.
+data KernelConst = GroupSizeConst
+                 | NumGroupsConst
+                 | TileSizeConst
+                 deriving (Eq, Ord, Show)
+
+-- | An expression whose variables are kernel constants.
+type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel CallKernel
             | GetNumGroups VName
@@ -89,6 +100,7 @@ type LocalMemoryUse = (VName, MemSize, PrimType)
 
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName Imp.DimSize
+               | ConstUse VName KernelConstExp
                  deriving (Eq, Show)
 
 getKernels :: Program -> [CallKernel]
@@ -101,11 +113,18 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
           bt1 == bt2
         sameKernel _ _ = False
 
+instance Pretty KernelConst where
+  ppr NumGroupsConst = text "$num_groups()"
+  ppr GroupSizeConst = text "$group_size()"
+  ppr TileSizeConst = text "$tile_size()"
+
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =
     text "scalar_copy" <> parens (commasep [ppr name, ppr t])
   ppr (MemoryUse name size) =
     text "mem_copy" <> parens (commasep [ppr name, ppr size])
+  ppr (ConstUse name e) =
+    text "const" <> parens (commasep [ppr name, ppr e])
 
 instance Pretty HostOp where
   ppr (GetNumGroups dest) =

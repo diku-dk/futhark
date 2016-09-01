@@ -17,6 +17,7 @@ static int cl_debug = 0;
 
 static size_t cl_group_size = 256;
 static size_t cl_num_groups = 128;
+static size_t cl_tile_size = 32;
 static size_t cl_lockstep_width = 1;
 
 struct opencl_device_option {
@@ -335,7 +336,7 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
   prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
   assert(error == 0);
   char compile_opts[1024];
-  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d", FUT_BLOCK_DIM, cl_lockstep_width);
+  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d -DDEFAULT_GROUP_SIZE=%d -DDEFAULT_NUM_GROUPS=%d  -DDEFAULT_TILE_SIZE=%d", FUT_BLOCK_DIM, cl_lockstep_width, cl_group_size, cl_num_groups, cl_tile_size);
   OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
   free(fut_opencl_src);
 
