@@ -126,7 +126,7 @@ kernelCompiler dest (Kernel _ space _ kernel_body) = do
 
     compileKernelBody dest constants kernel_body
 
-  (uses, local_memory) <- computeKernelUses (ImpGen.valueDestinations dest) kernel_body' bound_in_kernel
+  (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
   let local_memory_aligned = map (ensureAlignment $ alignmentMap kernel_body') local_memory
 
   ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
@@ -330,7 +330,7 @@ kernelCompiler
                                  global_id] ++
                                 map Imp.paramName acc_mem_params
 
-          (uses, more_local_mem) <- computeKernelUses dest (freeIn body) bound_in_kernel
+          (uses, more_local_mem) <- computeKernelUses(freeIn body) bound_in_kernel
           let local_mem = map (ensureAlignment $ alignmentMap body) $
                           acc_local_mem <> more_local_mem
 
@@ -367,7 +367,7 @@ expCompiler
 
     (group_size, num_groups) <- computeMapKernelGroups n'
 
-    (body_uses, _) <- computeKernelUses []
+    (body_uses, _) <- computeKernelUses
                       (freeIn body <> freeIn [n',x',s'])
                       [thread_gid]
 
@@ -401,7 +401,7 @@ expCompiler
     dims' <- mapM ImpGen.compileSubExp dims
     (group_size, num_groups) <- computeMapKernelGroups $ product dims'
 
-    (body_uses, _) <- computeKernelUses []
+    (body_uses, _) <- computeKernelUses
                       (freeIn body <> freeIn ds')
                       [thread_gid]
 
@@ -508,7 +508,7 @@ callKernelCopy bt
     (group_size, num_groups) <- computeMapKernelGroups kernel_size
 
     let bound_in_kernel = [global_thread_index]
-    (body_uses, _) <- computeKernelUses [] (kernel_size, body) bound_in_kernel
+    (body_uses, _) <- computeKernelUses (kernel_size, body) bound_in_kernel
 
     ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel
       { Imp.mapKernelThreadNum = global_thread_index
@@ -532,40 +532,17 @@ inKernelExpCompiler _ e =
   return $ ImpGen.CompileExp e
 
 computeKernelUses :: FreeIn a =>
-                     [ImpGen.ValueDestination]
-                  -> a -> [VName]
+                     a -> [VName]
                   -> ImpGen.ImpM lore op ([Imp.KernelUse], [(VName, Imp.Size)])
-computeKernelUses dest kernel_body bound_in_kernel = do
-    -- Find the memory blocks containing the output arrays.
-    let dest_mems = mapMaybe destMem dest
-        destMem (ImpGen.ArrayDestination
-                 (ImpGen.CopyIntoMemory
-                  (ImpGen.MemLocation mem _ _)) _) =
-          Just mem
-        destMem _ =
-          Nothing
-
-        actually_free = freeIn kernel_body `HS.difference`
-                        HS.fromList (dest_mems <> bound_in_kernel)
+computeKernelUses kernel_body bound_in_kernel = do
+    let actually_free = freeIn kernel_body `HS.difference` HS.fromList bound_in_kernel
 
     -- Compute the variables that we need to pass to the kernel.
     reads_from <- readsFromSet actually_free
 
-    -- Compute what memory to copy out.  Must be allocated on device
-    -- before kernel execution anyway.
-    writes_to <- fmap catMaybes $ forM dest $ \case
-      (ImpGen.ArrayDestination
-       (ImpGen.CopyIntoMemory
-        (ImpGen.MemLocation mem _ _)) _) -> do
-        memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
-        return $ Just $ Imp.MemoryUse mem memsize
-      _ ->
-        return Nothing
-
     -- Are we using any local memory?
     local_memory <- localMemoryUse actually_free
-    return (nub $ reads_from ++ writes_to,
-            nub local_memory)
+    return (nub reads_from, nub local_memory)
 
 readsFromSet :: Names -> ImpGen.ImpM lore op [Imp.KernelUse]
 readsFromSet free =
