@@ -47,11 +47,11 @@ module Futhark.CodeGen.ImpGen
   , declaringFParams
   , declaringVarEntry
   , declaringScope
+  , declaringScopes
   , withParams
   , declaringPrimVar
   , declaringPrimVars
   , withPrimVar
-  , modifyingArrays
   , compileBody
   , defCompileBody
   , compileBindings
@@ -170,9 +170,9 @@ data ScalarEntry = ScalarEntry {
   }
 
 -- | Every non-scalar variable must be associated with an entry.
-data VarEntry = ArrayVar ArrayEntry
-              | ScalarVar ScalarEntry
-              | MemVar MemEntry
+data VarEntry lore = ArrayVar (Maybe (Exp lore)) ArrayEntry
+                   | ScalarVar (Maybe (Exp lore)) ScalarEntry
+                   | MemVar (Maybe (Exp lore)) MemEntry
 
 -- | When compiling a body, this is a description of where the result
 -- should end up.
@@ -200,7 +200,7 @@ data ArrayMemoryDestination = SetMemory VName (Maybe VName)
                             deriving (Show)
 
 data Env lore op = Env {
-    envVtable :: HM.HashMap VName VarEntry
+    envVtable :: HM.HashMap VName (VarEntry lore)
   , envExpCompiler :: ExpCompiler lore op
   , envBodyCompiler :: BodyCompiler lore op
   , envOpCompiler :: OpCompiler lore op
@@ -230,14 +230,14 @@ instance MonadFreshNames (ImpM lore op) where
 
 instance HasScope SOACS (ImpM lore op) where
   askScope = HM.map (LetInfo . entryType) <$> asks envVtable
-    where entryType (MemVar memEntry) =
+    where entryType (MemVar _ memEntry) =
             Mem (dimSizeToSubExp $ entryMemSize memEntry) (entryMemSpace memEntry)
-          entryType (ArrayVar arrayEntry) =
+          entryType (ArrayVar _ arrayEntry) =
             Array
             (entryArrayElemType arrayEntry)
             (Shape $ map dimSizeToSubExp $ entryArrayShape arrayEntry)
             NoUniqueness
-          entryType (ScalarVar scalarEntry) =
+          entryType (ScalarVar _ scalarEntry) =
             Prim $ entryScalarType scalarEntry
 
 runImpM :: ImpM lore op a
@@ -258,12 +258,16 @@ subImpM ops (ImpM m) = do
                      , envBodyCompiler = opsBodyCompiler ops
                      , envCopyCompiler = opsCopyCompiler ops
                      , envOpCompiler = opsOpCompiler ops
+                     , envVtable = HM.map scrubExps $ envVtable env
                      }
        src of
     Left err -> throwError err
     Right (x, src', code) -> do
       putNameSource src'
       return (x, code)
+  where scrubExps (ArrayVar _ entry) = ArrayVar Nothing entry
+        scrubExps (MemVar _ entry) = MemVar Nothing entry
+        scrubExps (ScalarVar _ entry) = ScalarVar Nothing entry
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
@@ -448,7 +452,7 @@ compileLoopBody mergenames (Body _ bnds ses) = do
 compileBindings :: ExplicitMemorish lore => [Binding lore] -> ImpM lore op a -> ImpM lore op a
 compileBindings []     m = m
 compileBindings (Let pat _ e:bs) m =
-  declaringVars (patternElements pat) $ do
+  declaringVars (Just e) (patternElements pat) $ do
     dest <- destinationFromPattern pat
     compileExp dest e $ compileBindings bs m
 
@@ -706,16 +710,16 @@ writeExp (ArrayElemDestination destmem bt space elemoffset) e =
 writeExp target e =
   throwError $ "Cannot write " ++ pretty e ++ " to " ++ show target
 
-insertInVtable :: VName -> VarEntry -> Env lore op -> Env lore op
+insertInVtable :: VName -> VarEntry lore -> Env lore op -> Env lore op
 insertInVtable name entry env =
   env { envVtable = HM.insert name entry $ envVtable env }
 
 withArray :: ArrayDecl -> ImpM lore op a -> ImpM lore op a
 withArray (ArrayDecl name bt location) m = do
-  let entry = ArrayVar ArrayEntry {
-          entryArrayLocation = location
-        , entryArrayElemType = bt
-        }
+  let entry = ArrayVar Nothing ArrayEntry
+              { entryArrayLocation = location
+              , entryArrayElemType = bt
+              }
   local (insertInVtable name entry) m
 
 withArrays :: [ArrayDecl] -> ImpM lore op a -> ImpM lore op a
@@ -726,54 +730,53 @@ withParams = flip $ foldr withParam
 
 withParam :: Imp.Param -> ImpM lore op a -> ImpM lore op a
 withParam (Imp.MemParam name memsize space) =
-  let entry = MemVar MemEntry {
-          entryMemSize = memsize
-        , entryMemSpace = space
-        }
+  let entry = MemVar Nothing MemEntry { entryMemSize = memsize
+                                      , entryMemSpace = space
+                                      }
   in local $ insertInVtable name entry
 withParam (Imp.ScalarParam name bt) =
-  let entry = ScalarVar ScalarEntry { entryScalarType = bt
-                                    }
+  let entry = ScalarVar Nothing ScalarEntry { entryScalarType = bt }
   in local $ insertInVtable name entry
 
-declaringVars :: ExplicitMemorish lore => [PatElem lore] -> ImpM lore op a -> ImpM lore op a
-declaringVars = flip $ foldr declaringVar
-  where declaringVar = declaringScope . scopeOf
+declaringVars :: ExplicitMemorish lore =>
+                 Maybe (Exp lore) -> [PatElem lore] -> ImpM lore op a -> ImpM lore op a
+declaringVars e = flip $ foldr declaringVar
+  where declaringVar = declaringScope e . scopeOf
 
 declaringFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore op a -> ImpM lore op a
-declaringFParams = declaringScope . scopeOfFParams
+declaringFParams = declaringScope Nothing . scopeOfFParams
 
 declaringLParams :: ExplicitMemorish lore => [LParam lore] -> ImpM lore op a -> ImpM lore op a
-declaringLParams = declaringScope . scopeOfLParams
+declaringLParams = declaringScope Nothing . scopeOfLParams
 
-declaringVarEntry :: VName -> VarEntry -> ImpM lore op a -> ImpM lore op a
+declaringVarEntry :: VName -> VarEntry lore -> ImpM lore op a -> ImpM lore op a
 declaringVarEntry name entry m = do
   case entry of
-    MemVar entry' ->
+    MemVar _ entry' ->
       emit $ Imp.DeclareMem name $ entryMemSpace entry'
-    ScalarVar entry' ->
+    ScalarVar _ entry' ->
       emit $ Imp.DeclareScalar name $ entryScalarType entry'
-    ArrayVar _ ->
+    ArrayVar _ _ ->
       return ()
   local (insertInVtable name entry) m
 
 declaringPrimVar :: VName -> PrimType -> ImpM lore op a -> ImpM lore op a
 declaringPrimVar name bt =
-  declaringVarEntry name $ ScalarVar $ ScalarEntry bt
+  declaringVarEntry name $ ScalarVar Nothing $ ScalarEntry bt
 
 declaringPrimVars :: [(VName,PrimType)] -> ImpM lore op a -> ImpM lore op a
 declaringPrimVars = flip $ foldr (uncurry declaringPrimVar)
 
-declaringName :: VName -> NameInfo ExplicitMemory -> ImpM lore op a -> ImpM lore op a
-declaringName name info m =
+declaringName :: Maybe (Exp lore) -> VName -> NameInfo ExplicitMemory
+              -> ImpM lore op a -> ImpM lore op a
+declaringName e name info m =
   case infoAttr info of
     Scalar bt -> do
-      let entry = ScalarVar ScalarEntry { entryScalarType    = bt
-                                        }
+      let entry = ScalarVar e ScalarEntry { entryScalarType = bt }
       declaringVarEntry name entry m
     MemMem size space -> do
       size' <- subExpToDimSize size
-      let entry = MemVar MemEntry {
+      let entry = MemVar e MemEntry {
               entryMemSize = size'
             , entryMemSpace = space
             }
@@ -781,7 +784,7 @@ declaringName name info m =
     ArrayMem bt shape _ mem ixfun -> do
       shape' <- mapM subExpToDimSize $ shapeDims shape
       let location = MemLocation mem shape' ixfun
-          entry = ArrayVar ArrayEntry {
+          entry = ArrayVar e ArrayEntry {
               entryArrayLocation = location
             , entryArrayElemType = bt
             }
@@ -791,12 +794,15 @@ declaringName name info m =
         infoAttr (LParamInfo attr) = attr
         infoAttr IndexInfo = Scalar int32
 
-declaringScope :: Scope ExplicitMemory -> ImpM lore op a -> ImpM lore op a
-declaringScope scope m = foldr (uncurry declaringName) m $ HM.toList scope
+declaringScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op a -> ImpM lore op a
+declaringScope e scope m = foldr (uncurry $ declaringName e) m $ HM.toList scope
+
+declaringScopes :: [(Maybe (Exp lore), Scope ExplicitMemory)] -> ImpM lore op a -> ImpM lore op a
+declaringScopes es_and_scopes m = foldr (uncurry declaringScope) m es_and_scopes
 
 withPrimVar :: VName -> PrimType -> ImpM lore op a -> ImpM lore op a
 withPrimVar name bt =
-  local (insertInVtable name $ ScalarVar $ ScalarEntry bt)
+  local (insertInVtable name $ ScalarVar Nothing $ ScalarEntry bt)
 
 declaringLoopVars :: [VName] -> ImpM lore op a -> ImpM lore op a
 declaringLoopVars = flip $ foldr declaringLoopVar
@@ -804,16 +810,6 @@ declaringLoopVars = flip $ foldr declaringLoopVar
 declaringLoopVar :: VName -> ImpM lore op a -> ImpM lore op a
 declaringLoopVar name =
   withPrimVar name int32
-
-modifyingArrays :: [VName] -> (ArrayEntry -> ArrayEntry)
-                -> ImpM lore op a -> ImpM lore op a
-modifyingArrays arrs f m = do
-  vtable <- asks envVtable
-  let inspect name (ArrayVar entry)
-        | name `elem` arrs = ArrayVar $ f entry
-      inspect _ entry = entry
-      vtable' =  HM.mapWithKey inspect vtable
-  local (\env -> env { envVtable = vtable' }) m
 
 -- | Remove the array targets.
 funcallTargets :: Destination -> ImpM lore op [VName]
@@ -863,7 +859,7 @@ varIndex name = LeafExp name int32
 constIndex :: Int -> PrimExp VName
 constIndex = fromIntegral
 
-lookupVar :: VName -> ImpM lore op VarEntry
+lookupVar :: VName -> ImpM lore op (VarEntry lore)
 lookupVar name = do
   res <- asks $ HM.lookup name . envVtable
   case res of
@@ -874,8 +870,8 @@ lookupArray :: VName -> ImpM lore op ArrayEntry
 lookupArray name = do
   res <- lookupVar name
   case res of
-    ArrayVar entry -> return entry
-    _              -> throwError $ "ImpGen.lookupArray: not an array: " ++ textual name
+    ArrayVar _ entry -> return entry
+    _                -> throwError $ "ImpGen.lookupArray: not an array: " ++ textual name
 
 arrayLocation :: VName -> ImpM lore op MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
@@ -884,8 +880,8 @@ lookupMemory :: VName -> ImpM lore op MemEntry
 lookupMemory name = do
   res <- lookupVar name
   case res of
-    MemVar entry -> return entry
-    _            -> throwError $ "Unknown memory block: " ++ textual name
+    MemVar _ entry -> return entry
+    _              -> throwError $ "Unknown memory block: " ++ textual name
 
 destinationFromParam :: Param (MemBound u) -> ImpM lore op ValueDestination
 destinationFromParam param
@@ -910,7 +906,7 @@ destinationFromPattern (Pattern ctxElems valElems) =
           let name = patElemName patElem
           entry <- lookupVar name
           case entry of
-            ArrayVar (ArrayEntry (MemLocation mem shape ixfun) bt) ->
+            ArrayVar _ (ArrayEntry (MemLocation mem shape ixfun) bt) ->
               case patElemBindage patElem of
                 BindVar -> do
                   let nullifyFreeDim (Imp.ConstSize _) = Nothing
@@ -940,13 +936,13 @@ destinationFromPattern (Pattern ctxElems valElems) =
                          ArrayDestination (CopyIntoMemory memdest) $
                          replicate r Nothing
 
-            MemVar (MemEntry memsize _)
+            MemVar _ (MemEntry memsize _)
               | Imp.VarSize memsize' <- memsize, isctx memsize' ->
                 return $ MemoryDestination name $ Just memsize'
               | otherwise ->
                 return $ MemoryDestination name Nothing
 
-            ScalarVar (ScalarEntry _) ->
+            ScalarVar{} ->
               return $ ScalarDestination name
 
 fullyIndexArray :: VName -> [PrimExp VName]
@@ -1109,7 +1105,7 @@ copyDWIMDest dest dest_is (Constant v) [] =
 copyDWIMDest dest dest_is (Var src) src_is = do
   src_entry <- lookupVar src
   case (dest, src_entry) of
-    (MemoryDestination mem memsizetarget, MemVar (MemEntry memsize space)) -> do
+    (MemoryDestination mem memsizetarget, MemVar _ (MemEntry memsize space)) -> do
       emit $ Imp.SetMem mem src space
       case memsizetarget of
         Nothing ->
@@ -1126,7 +1122,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       throwError $
       unwords ["copyDWIMDest: source", pretty src, "is a memory block."]
 
-    (_, ScalarVar (ScalarEntry _)) | not $ null src_is ->
+    (_, ScalarVar _ (ScalarEntry _)) | not $ null src_is ->
       throwError $
       unwords ["copyDWIMDest: prim-typed source", pretty src, "with nonzero indices."]
 
@@ -1135,10 +1131,10 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       throwError $
       unwords ["copyDWIMDest: prim-typed target", pretty name, "with nonzero indices."]
 
-    (ScalarDestination name, ScalarVar (ScalarEntry pt)) ->
+    (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
       emit $ Imp.SetScalar name $ Imp.var src pt
 
-    (ScalarDestination name, ArrayVar arr) -> do
+    (ScalarDestination name, ArrayVar _ arr) -> do
       let bt = entryArrayElemType arr
       (mem, space, i) <-
         fullyIndexArray' (entryArrayLocation arr) src_is bt
@@ -1149,10 +1145,10 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       unwords ["copyDWIMDest: array elemenent destination given indices:", pretty dest_is]
 
     (ArrayElemDestination dest_mem _ dest_space dest_i,
-     ScalarVar (ScalarEntry bt)) ->
+     ScalarVar _ (ScalarEntry bt)) ->
       emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.var src bt
 
-    (ArrayElemDestination dest_mem _ dest_space dest_i, ArrayVar src_arr)
+    (ArrayElemDestination dest_mem _ dest_space dest_i, ArrayVar _ src_arr)
       | length (entryArrayShape src_arr) == length src_is -> do
           let bt = entryArrayElemType src_arr
           (src_mem, src_space, src_i) <-
@@ -1166,13 +1162,13 @@ copyDWIMDest dest dest_is (Var src) src_is = do
                pretty src,
                "with incomplete indexing."]
 
-    (ArrayDestination (CopyIntoMemory dest_loc) dest_dims, ArrayVar src_arr) -> do
+    (ArrayDestination (CopyIntoMemory dest_loc) dest_dims, ArrayVar _ src_arr) -> do
       let src_loc = entryArrayLocation src_arr
           bt = entryArrayElemType src_arr
       emit =<< copyArrayDWIM bt dest_loc dest_is src_loc src_is
       zipWithM_ maybeSetShape dest_dims $ entryArrayShape src_arr
 
-    (ArrayDestination (CopyIntoMemory dest_loc) _, ScalarVar (ScalarEntry bt)) -> do
+    (ArrayDestination (CopyIntoMemory dest_loc) _, ScalarVar _ (ScalarEntry bt)) -> do
       (dest_mem, dest_space, dest_i) <-
         fullyIndexArray' dest_loc dest_is bt
       emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.var src bt
@@ -1182,7 +1178,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       "copyDWIMDest: array destination but scalar source" <>
       pretty src
 
-    (ArrayDestination (SetMemory dest_mem dest_memsize) dest_dims, ArrayVar src_arr) -> do
+    (ArrayDestination (SetMemory dest_mem dest_memsize) dest_dims, ArrayVar _ src_arr) -> do
       let src_mem = memLocationName $ entryArrayLocation src_arr
       space <- entryMemSpace <$> lookupMemory src_mem
       srcmemsize <- entryMemSize <$> lookupMemory src_mem
@@ -1209,15 +1205,15 @@ copyDWIM dest dest_is src src_is = do
   dest_entry <- lookupVar dest
   let dest_target =
         case dest_entry of
-          ScalarVar _ ->
+          ScalarVar _ _ ->
             ScalarDestination dest
 
-          ArrayVar (ArrayEntry (MemLocation mem shape ixfun) _) ->
+          ArrayVar _ (ArrayEntry (MemLocation mem shape ixfun) _) ->
             ArrayDestination
             (CopyIntoMemory (MemLocation mem shape ixfun)) $
             replicate (length shape) Nothing
 
-          MemVar _ ->
+          MemVar _ _ ->
             MemoryDestination dest Nothing
   copyDWIMDest dest_target dest_is src src_is
 
