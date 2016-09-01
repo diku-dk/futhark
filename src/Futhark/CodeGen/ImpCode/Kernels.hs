@@ -54,6 +54,8 @@ data CallKernel = Map MapKernel
 data MapKernel = MapKernel { mapKernelThreadNum :: VName
                              -- ^ Binding position - also serves as a unique
                              -- name for the kernel.
+                           , mapKernelDesc :: String
+                           -- ^ Used to name the kernel for readability.
                            , mapKernelBody :: Imp.Code KernelOp
                            , mapKernelUses :: [KernelUse]
                            , mapKernelNumGroups :: DimSize

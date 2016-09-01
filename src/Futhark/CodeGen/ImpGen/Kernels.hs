@@ -371,8 +371,9 @@ expCompiler
                       (freeIn body <> freeIn [n',x',s'])
                       [thread_gid]
 
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
-        Imp.mapKernelThreadNum = thread_gid
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel
+      { Imp.mapKernelThreadNum = thread_gid
+      , Imp.mapKernelDesc = "iota"
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
       , Imp.mapKernelGroupSize = Imp.VarSize group_size
       , Imp.mapKernelSize = n'
@@ -404,8 +405,9 @@ expCompiler
                       (freeIn body <> freeIn ds')
                       [thread_gid]
 
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
-        Imp.mapKernelThreadNum = thread_gid
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel
+      { Imp.mapKernelThreadNum = thread_gid
+      , Imp.mapKernelDesc = "replicate"
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
       , Imp.mapKernelGroupSize = Imp.VarSize group_size
       , Imp.mapKernelSize = product dims'
@@ -508,8 +510,9 @@ callKernelCopy bt
     let bound_in_kernel = [global_thread_index]
     (body_uses, _) <- computeKernelUses [] (kernel_size, body) bound_in_kernel
 
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
-        Imp.mapKernelThreadNum = global_thread_index
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel
+      { Imp.mapKernelThreadNum = global_thread_index
+      , Imp.mapKernelDesc = "copy"
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
       , Imp.mapKernelGroupSize = Imp.VarSize group_size
       , Imp.mapKernelSize = kernel_size
