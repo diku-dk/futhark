@@ -232,7 +232,7 @@ typedef ulong uint64_t;
   where uses_float64 = FloatType Float64 `HS.member` ts
 
 mapKernelName :: MapKernel -> String
-mapKernelName = ("map_kernel_"++) . show . baseTag . mapKernelThreadNum
+mapKernelName k = "kernel_"++ mapKernelDesc k ++ show (baseTag $ mapKernelThreadNum k)
 
 calledKernelName :: CallKernel -> String
 calledKernelName (Map k) =
