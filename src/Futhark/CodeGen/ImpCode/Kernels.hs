@@ -54,6 +54,7 @@ type KernelConstExp = PrimExp KernelConst
 data HostOp = CallKernel CallKernel
             | GetNumGroups VName
             | GetGroupSize VName
+            | GetTileSize VName
             deriving (Show)
 
 data CallKernel = Map MapKernel

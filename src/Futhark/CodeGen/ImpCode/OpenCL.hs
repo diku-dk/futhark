@@ -54,6 +54,7 @@ data KernelArg = ValueKArg Exp PrimType
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | GetNumGroups VName
             | GetGroupSize VName
+            | GetTileSize VName
             deriving (Show)
 
 -- | The block size when transposing.

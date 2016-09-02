@@ -523,6 +523,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner GroupSize
           handleOp NumGroups =
             return $ Inner NumGroups
+          handleOp TileSize =
+            return $ Inner TileSize
           handleOp (ScanKernel cs w size lam foldlam nes arrs) = do
             lam' <- allocInScanLambda lam (length nes) $ kernelWorkgroupSize size
             foldlam' <- allocInScanLambda foldlam (length nes) $ kernelWorkgroupSize size

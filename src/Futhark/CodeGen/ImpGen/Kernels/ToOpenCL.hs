@@ -23,7 +23,7 @@ import Futhark.Representation.AST.Attributes.Types (int32)
 import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.SimpleRepresentation
-import Futhark.CodeGen.ImpCode.Kernels hiding (Program, GetNumGroups, GetGroupSize)
+import Futhark.CodeGen.ImpCode.Kernels hiding (Program, GetNumGroups, GetGroupSize, GetTileSize)
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
@@ -279,6 +279,8 @@ callKernel (ImpKernels.GetNumGroups v) =
   GetNumGroups v
 callKernel (ImpKernels.GetGroupSize v) =
   GetGroupSize v
+callKernel (ImpKernels.GetTileSize v) =
+  GetTileSize v
 
 kernelArgs :: CallKernel -> [KernelArg]
 kernelArgs (Map kernel) =
