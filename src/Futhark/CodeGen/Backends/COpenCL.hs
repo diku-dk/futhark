@@ -188,6 +188,8 @@ callKernel (GetNumGroups v) =
   GenericC.stm [C.cstm|$id:v = cl_num_groups;|]
 callKernel (GetGroupSize v) =
   GenericC.stm [C.cstm|$id:v = cl_group_size;|]
+callKernel (GetTileSize v) =
+  GenericC.stm [C.cstm|$id:v = cl_tile_size;|]
 
 callKernel (LaunchKernel name args kernel_size workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args

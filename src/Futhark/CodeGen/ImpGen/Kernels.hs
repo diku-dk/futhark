@@ -81,6 +81,10 @@ kernelCompiler dest GroupSize = do
   [v] <- ImpGen.funcallTargets dest
   ImpGen.emit $ Imp.Op $ Imp.GetGroupSize v
 
+kernelCompiler dest TileSize = do
+  [v] <- ImpGen.funcallTargets dest
+  ImpGen.emit $ Imp.Op $ Imp.GetTileSize v
+
 kernelCompiler dest (Kernel _ space _ kernel_body) = do
 
   num_groups' <- ImpGen.subExpToDimSize $ spaceNumGroups space
@@ -583,6 +587,7 @@ isConstExp v = do
   let lookupConstExp name = constExp =<< hasExp =<< HM.lookup name vtable
       kernelConst (Op (Inner NumGroups)) = Just $ LeafExp Imp.NumGroupsConst int32
       kernelConst (Op (Inner GroupSize)) = Just $ LeafExp Imp.GroupSizeConst int32
+      kernelConst (Op (Inner TileSize)) = Just $ LeafExp Imp.TileSizeConst int32
       kernelConst (BasicOp (SubExp (Var name))) = lookupConstExp name
       kernelConst _              = Nothing
       constExp = primExpFromExp kernelConst

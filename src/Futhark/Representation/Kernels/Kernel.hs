@@ -69,6 +69,7 @@ data Kernel lore =
     [VName]
   | NumGroups
   | GroupSize
+  | TileSize
 
   | Kernel Certificates
     KernelSpace
@@ -181,6 +182,7 @@ mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
   mapM (mapOnKernelVName tv) arrs
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
+mapKernelM _ TileSize = pure TileSize
 mapKernelM tv (Kernel cs space ts kernel_body) =
   Kernel <$> mapOnKernelCertificates tv cs <*>
   mapOnKernelSpace space <*>
@@ -385,6 +387,8 @@ kernelType NumGroups =
   [Prim int32]
 kernelType GroupSize =
   [Prim int32]
+kernelType TileSize =
+  [Prim int32]
 
 chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
@@ -474,6 +478,7 @@ instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kern
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
+  usageInOp TileSize = mempty
 
 consumedInKernelBody :: (Attributes lore, Aliased lore) =>
                         KernelBody lore -> Names
@@ -506,6 +511,7 @@ typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
+typeCheckKernel TileSize = return ()
 
 typeCheckKernel (Kernel cs space kts kbody) = do
   mapM_ (TC.requireI [Prim Cert]) cs
@@ -584,6 +590,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
+  opMetrics TileSize = seen "TileSize"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr (ScanKernel cs w kernel_size fun foldfun nes arrs) =
@@ -595,6 +602,7 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr fun <> comma </> ppr foldfun)
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
+  ppr TileSize = text "$tile_size()"
 
   ppr (Kernel cs space ts body) =
     ppCertificates' cs <>

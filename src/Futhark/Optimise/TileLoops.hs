@@ -115,19 +115,9 @@ tileInBindings branch_variant initial_variance initial_kspace kstms = do
               zipWithM (is2dTileable branch_variant kspace variance chunk_size)
               arrs arr_chunk_params = do
 
-          -- We assume that the group size is tile_size*tile_size.
-          let group_size = spaceGroupSize kspace
-
           -- XXX: empty scope here.  Hopefully OK.
           ((tile_size, tiled_group_size), tile_size_bnds) <- flip runBinderT mempty $ do
-            group_size_float <-
-              letSubExp "group_size_float" $ BasicOp $ ConvOp (SIToFP Int32 Float32) group_size
-            tile_size_float <-
-              letSubExp "tile_size_float" $
-              Apply (nameFromString "sqrt32") [(group_size_float,Observe)] $
-              primRetType $ FloatType Float32
-            tile_size <- letSubExp "tile_size" $
-                         BasicOp $ ConvOp (FPToSI Float32 Int32) tile_size_float
+            tile_size <- letSubExp "tile_size" $ Op TileSize
             tiled_group_size <- letSubExp "tiled_group_size" $
                                 BasicOp $ BinOp (Mul Int32) tile_size tile_size
             return (tile_size, tiled_group_size)

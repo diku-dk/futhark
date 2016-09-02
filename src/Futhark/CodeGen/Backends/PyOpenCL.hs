@@ -89,9 +89,10 @@ asLong x = Call "long" [Arg x]
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetNumGroups v) =
   Py.stm $ Assign (Var (textual v)) $ Var "cl_num_groups"
-
 callKernel (Imp.GetGroupSize v) =
   Py.stm $ Assign (Var (textual v)) $ Var "cl_group_size"
+callKernel (Imp.GetTileSize v) =
+  Py.stm $ Assign (Var (textual v)) $ Var "cl_tile_size"
 
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
