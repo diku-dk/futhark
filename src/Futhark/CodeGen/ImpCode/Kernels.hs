@@ -94,9 +94,8 @@ data Kernel = Kernel
               }
             deriving (Show)
 
--- ^ In-kernel name, per-workgroup size in bytes, and
--- alignment restriction.
-type LocalMemoryUse = (VName, MemSize, PrimType)
+-- ^ In-kernel name and per-workgroup size in bytes.
+type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
 
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName Imp.DimSize
@@ -170,9 +169,10 @@ instance Pretty Kernel where
                                     kernelLocalMemory kernel) </>
      text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
-    where ppLocalMemory (name, size, bt) =
-            ppr name <+> parens (ppr size <+> text "bytes" <> comma <+>
-                                text "align to" <+> ppr bt)
+    where ppLocalMemory (name, Left size) =
+            ppr name <+> parens (ppr size <+> text "bytes")
+          ppLocalMemory (name, Right size) =
+            ppr name <+> parens (ppr size <+> text "bytes (const)")
 
 instance FreeIn MapKernel where
   freeIn kernel =

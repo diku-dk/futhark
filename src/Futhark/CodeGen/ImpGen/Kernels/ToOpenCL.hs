@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Identity
 import Data.List
 import Data.Maybe
 import Data.Monoid
@@ -156,7 +157,7 @@ compileKernel called@(AnyKernel kernel) =
         flip evalState (blankNameSource :: VNameSource) $
         mapM prepareLocalMemory $ kernelLocalMemory kernel
 
-      params = local_memory_params ++ use_params
+      params = catMaybes local_memory_params ++ use_params
 
   in Right ([(name,
              [C.cfun|__kernel void $id:name ($params:params) {
@@ -167,11 +168,14 @@ compileKernel called@(AnyKernel kernel) =
               (used_funs ++ requiredFunctions kernel_funs)
               (typesInKernel called)
               (mapMaybe useAsConst $ kernelUses kernel))
-  where prepareLocalMemory (mem, _, bt) = do
+  where prepareLocalMemory (mem, Left _) = do
           mem_aligned <- newVName $ baseString mem ++ "_aligned"
-          let bt' = GenericC.primTypeToCType bt
-          return ([C.cparam|__local volatile $ty:bt'* restrict $id:mem_aligned|],
+          return (Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
                   [C.citem|__local volatile char* restrict $id:mem = $id:mem_aligned;|])
+        prepareLocalMemory (mem, Right size) = do
+          let size' = compilePrimExp size
+          return (Nothing,
+                  [C.citem|ALIGNED_LOCAL_MEMORY($id:mem, $exp:size');|])
         name = calledKernelName called
 
 compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _ _ _) =
@@ -237,6 +241,8 @@ typedef uchar uint8_t;
 typedef ushort uint16_t;
 typedef uint uint32_t;
 typedef ulong uint64_t;
+
+$esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attribute__ ((align))")
 |] ++
   cIntOps ++ cFloat32Ops ++
   (if uses_float64 then cFloat64Ops ++ cFloatConvOps else []) ++
@@ -244,11 +250,12 @@ typedef ulong uint64_t;
   [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
   where uses_float64 = FloatType Float64 `HS.member` ts
         constToDefine (name, e) =
-          let (e', _) = GenericC.runCompilerM (Functions [])
-                        inKernelOperations blankNameSource mempty $
-                        GenericC.compilePrimExp compileKernelConst e
+          let e' = compilePrimExp e
           in unwords ["#define", zEncodeString (pretty name), "("++prettyOneLine e'++")"]
-        compileKernelConst GroupSizeConst = return [C.cexp|DEFAULT_GROUP_SIZE|]
+
+compilePrimExp :: PrimExp KernelConst -> C.Exp
+compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
+  where compileKernelConst GroupSizeConst = return [C.cexp|DEFAULT_GROUP_SIZE|]
         compileKernelConst NumGroupsConst = return [C.cexp|DEFAULT_NUM_GROUPS|]
         compileKernelConst TileSizeConst = return [C.cexp|DEFAULT_TILE_SIZE|]
 
@@ -277,10 +284,11 @@ kernelArgs :: CallKernel -> [KernelArg]
 kernelArgs (Map kernel) =
   mapMaybe useToArg $ mapKernelUses kernel
 kernelArgs (AnyKernel kernel) =
-  map (SharedMemoryKArg . memSizeToExp . localMemorySize)
-      (kernelLocalMemory kernel) ++
+  mapMaybe (fmap (SharedMemoryKArg . memSizeToExp) . localMemorySize)
+  (kernelLocalMemory kernel) ++
   mapMaybe useToArg (kernelUses kernel)
-  where localMemorySize (_, size, _) = size
+  where localMemorySize (_, Left size) = Just size
+        localMemorySize (_, Right{}) = Nothing
 kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems in_elems out_elems) =
   [ MemKArg destmem
   , ValueKArg destoffset int32

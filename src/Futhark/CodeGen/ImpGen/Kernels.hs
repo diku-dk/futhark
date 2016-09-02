@@ -128,11 +128,10 @@ kernelCompiler dest (Kernel _ space _ kernel_body) = do
     compileKernelBody dest constants kernel_body
 
   (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
-  let local_memory_aligned = map (ensureAlignment $ alignmentMap kernel_body') local_memory
 
   ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = kernel_body'
-            , Imp.kernelLocalMemory = local_memory_aligned
+            , Imp.kernelLocalMemory = local_memory
             , Imp.kernelUses = uses
             , Imp.kernelNumGroups = num_groups'
             , Imp.kernelGroupSize = group_size'
@@ -331,9 +330,8 @@ kernelCompiler
                                  global_id] ++
                                 map Imp.paramName acc_mem_params
 
-          (uses, more_local_mem) <- computeKernelUses(freeIn body) bound_in_kernel
-          let local_mem = map (ensureAlignment $ alignmentMap body) $
-                          acc_local_mem <> more_local_mem
+          (uses, more_local_mem) <- computeKernelUses (freeIn body) bound_in_kernel
+          let local_mem = acc_local_mem <> more_local_mem
 
           ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = body
@@ -534,7 +532,7 @@ inKernelExpCompiler _ e =
 
 computeKernelUses :: FreeIn a =>
                      a -> [VName]
-                  -> CallKernelGen ([Imp.KernelUse], [(VName, Imp.Size)])
+                  -> CallKernelGen ([Imp.KernelUse], [Imp.LocalMemoryUse])
 computeKernelUses kernel_body bound_in_kernel = do
     let actually_free = freeIn kernel_body `HS.difference` HS.fromList bound_in_kernel
 
@@ -542,7 +540,7 @@ computeKernelUses kernel_body bound_in_kernel = do
     reads_from <- readsFromSet actually_free
 
     -- Are we using any local memory?
-    local_memory <- localMemoryUse actually_free
+    local_memory <- computeLocalMemoryUse actually_free
     return (nub reads_from, nub local_memory)
 
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
@@ -561,6 +559,24 @@ readsFromSet free =
           Nothing | bt == Cert -> return Nothing
                   | otherwise  -> return $ Just $ Imp.ScalarUse var bt
 
+computeLocalMemoryUse :: Names -> CallKernelGen [Imp.LocalMemoryUse]
+computeLocalMemoryUse free =
+  fmap catMaybes $
+  forM (HS.toList free) $ \var -> do
+    t <- lookupType var
+    case t of
+      Mem memsize (Space "local") -> do
+        memsize' <- localMemSize =<< ImpGen.subExpToDimSize memsize
+        return $ Just (var, memsize')
+      _ -> return Nothing
+
+localMemSize :: Imp.MemSize -> CallKernelGen (Either Imp.MemSize Imp.KernelConstExp)
+localMemSize (Imp.ConstSize x) =
+  return $ Right $ ValueExp $ IntValue $ Int32Value x
+localMemSize (Imp.VarSize v) = isConstExp v >>= \case
+  Nothing -> return $ Left $ Imp.VarSize v
+  Just e  -> return $ Right e
+
 isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
 isConstExp v = do
   vtable <- asks ImpGen.envVtable
@@ -574,17 +590,6 @@ isConstExp v = do
   where hasExp (ImpGen.ArrayVar e _) = e
         hasExp (ImpGen.ScalarVar e _) = e
         hasExp (ImpGen.MemVar e _) = e
-
-localMemoryUse :: Names -> ImpGen.ImpM lore op [(VName, Imp.Size)]
-localMemoryUse free =
-  fmap catMaybes $
-  forM (HS.toList free) $ \var -> do
-    t <- lookupType var
-    case t of
-      Mem memsize (Space "local") -> do
-        memsize' <- ImpGen.subExpToDimSize memsize
-        return $ Just (var, memsize')
-      _ -> return Nothing
 
 -- | Change every memory block to be in the global address space,
 -- except those who are in the local memory space.  This only affects
@@ -656,7 +661,7 @@ isMapTransposeKernel bt
 
 createAccMem :: Imp.DimSize
              -> Param (MemBound NoUniqueness)
-             -> ImpGen.ImpM lore op (Imp.Param, (VName, Imp.Size))
+             -> CallKernelGen (Imp.Param, Imp.LocalMemoryUse)
 createAccMem local_size param
   | Prim bt <- paramType param = do
       mem_shared <- newVName (baseString (paramName param) <> "_mem_local")
@@ -667,13 +672,15 @@ createAccMem local_size param
         Imp.SetScalar total_size $
         Imp.LeafExp (Imp.SizeOf bt) int32 *
         Imp.innerExp (ImpGen.dimSizeToExp local_size)
+      size' <- localMemSize $ Imp.VarSize total_size
       return (Imp.MemParam mem_shared (Imp.VarSize total_size) $ Space "local",
-              (mem_shared, Imp.VarSize total_size))
+              (mem_shared, size'))
   | ArrayMem _ _ _ mem _ <- paramAttr param = do
       mem_size <-
         ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
+      mem_size' <- localMemSize mem_size
       return (Imp.MemParam mem mem_size $ Space "local",
-              (mem, mem_size))
+              (mem, mem_size'))
   | otherwise =
       fail $ "createAccMem: cannot deal with accumulator param " ++
       pretty param
@@ -831,27 +838,6 @@ inWaveScan wave_size local_id acc_local_mem scan_lam = do
      Imp.SetScalar skip_threads (Imp.var skip_threads int32 * 2))
   where wave_id = Imp.BinOpExp (SQuot Int32) (Imp.var local_id int32) wave_size
         in_wave_id = Imp.var local_id int32 - wave_id * wave_size
-
-type AlignmentMap = HM.HashMap VName PrimType
-
-lookupAlignment :: VName -> AlignmentMap -> PrimType
-lookupAlignment = HM.lookupDefault smallestType
-
-smallestType :: PrimType
-smallestType = Bool
-
-alignmentMap :: Imp.KernelCode  -> AlignmentMap
-alignmentMap = HM.map alignment . Imp.memoryUsage (const mempty)
-  where alignment = HS.foldr mostRestrictive smallestType
-        mostRestrictive bt1 bt2 =
-          if (primByteSize bt1 :: Int) > primByteSize bt2
-          then bt1 else bt2
-
-ensureAlignment :: AlignmentMap
-                -> (VName, Imp.Size)
-                -> Imp.LocalMemoryUse
-ensureAlignment alignments (name, size) =
-  (name, size, lookupAlignment name alignments)
 
 data KernelConstants = KernelConstants
                        { kernelGlobalThreadId :: VName
