@@ -60,6 +60,8 @@ primExpFromExp f (BasicOp (UnOp op x)) =
   UnOpExp op <$> primExpFromSubExpM f x
 primExpFromExp f (BasicOp (ConvOp op x)) =
   ConvOpExp op <$> primExpFromSubExpM f x
+primExpFromExp _ (BasicOp (SubExp (Constant v))) =
+  return $ ValueExp v
 primExpFromExp f e = f e
 
 primExpFromSubExpM :: (Applicative m, Monad m) =>
