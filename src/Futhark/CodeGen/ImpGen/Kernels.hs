@@ -1063,7 +1063,7 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
     ImpGen.declaringPrimVar block_size int32 $
       -- If the GroupStream is morally just a do-loop, generate simpler code.
       case mapM isSimpleThreadInSpace $ bodyBindings body of
-        Just stms' | max_block_size == 1 -> do
+        Just stms' | ValueExp x <- max_block_size, oneIsh x -> do
           let body' = body { bodyBindings = stms' }
           body'' <- ImpGen.withPrimVar block_offset int32 $
                     allThreads constants $ ImpGen.compileBody acc_dest body'
