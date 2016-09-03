@@ -74,7 +74,7 @@ compileProg prog = do
                   ]
 
 writeOpenCLScalar :: GenericC.WriteScalar OpenCL ()
-writeOpenCLScalar mem i t "device" val = do
+writeOpenCLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
   GenericC.stm [C.cstm|{
                    $ty:t $id:val' = $exp:val;
@@ -84,11 +84,11 @@ writeOpenCLScalar mem i t "device" val = do
                                           &$id:val',
                                           0, NULL, NULL));
                 }|]
-writeOpenCLScalar _ _ _ space _ =
+writeOpenCLScalar _ _ _ space _ _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
 
 readOpenCLScalar :: GenericC.ReadScalar OpenCL ()
-readOpenCLScalar mem i t "device" = do
+readOpenCLScalar mem i t "device" _ = do
   val <- newVName "read_res"
   GenericC.decl [C.cdecl|$ty:t $id:val;|]
   GenericC.stm [C.cstm|
@@ -99,7 +99,7 @@ readOpenCLScalar mem i t "device" = do
                                        0, NULL, NULL));
               |]
   return [C.cexp|$id:val|]
-readOpenCLScalar _ _ _ space =
+readOpenCLScalar _ _ _ space _ =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: GenericC.Allocate OpenCL ()

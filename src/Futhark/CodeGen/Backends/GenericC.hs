@@ -95,13 +95,13 @@ type MemoryType op s = SpaceId -> CompilerM op s C.Type
 
 -- | Write a scalar to the given memory block with the given index and
 -- in the given memory space.
-type WriteScalar op s = C.Exp -> C.Exp -> C.Type -> SpaceId -> C.Exp
-                        -> CompilerM op s ()
+type WriteScalar op s =
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
 
 -- | Read a scalar from the given memory block with the given index and
 -- in the given memory space.
-type ReadScalar op s = C.Exp -> C.Exp -> C.Type -> SpaceId
-                       -> CompilerM op s C.Exp
+type ReadScalar op s =
+  C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> CompilerM op s C.Exp
 
 -- | Allocate a memory block of the given size in the given memory
 -- space, saving a reference in the given variable name.
@@ -908,16 +908,20 @@ derefPointer ptr i res_t =
   [C.cexp|*(($ty:res_t)&($exp:ptr[$exp:i]))|]
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
-writeScalarPointerWithQuals quals_f dest i elemtype space v = do
+writeScalarPointerWithQuals quals_f dest i elemtype space vol v = do
   quals <- quals_f space
-  let deref = derefPointer dest i
-              [C.cty|$tyquals:quals $ty:elemtype*|]
+  let quals' = case vol of Volatile -> [C.ctyquals|volatile|] ++ quals
+                           Nonvolatile -> quals
+      deref = derefPointer dest i
+              [C.cty|$tyquals:quals' $ty:elemtype*|]
   stm [C.cstm|$exp:deref = $exp:v;|]
 
 readScalarPointerWithQuals :: PointerQuals op s -> ReadScalar op s
-readScalarPointerWithQuals quals_f dest i elemtype space = do
+readScalarPointerWithQuals quals_f dest i elemtype space vol = do
   quals <- quals_f space
-  return $ derefPointer dest i [C.cty|$tyquals:quals $ty:elemtype*|]
+  let quals' = case vol of Volatile -> [C.ctyquals|volatile|] ++ quals
+                           Nonvolatile -> quals
+  return $ derefPointer dest i [C.cty|$tyquals:quals' $ty:elemtype*|]
 
 compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
 compileExpToName _ _ (LeafExp (ScalarVar v) _) =
@@ -934,16 +938,18 @@ compileExp = compilePrimExp compileLeaf
   where compileLeaf (ScalarVar src) =
           return [C.cexp|$id:src|]
 
-        compileLeaf (Index src (Count iexp) restype DefaultSpace) = do
+        compileLeaf (Index src (Count iexp) restype DefaultSpace vol) = do
           src' <- rawMem src
           derefPointer src'
             <$> compileExp iexp
-            <*> pure [C.cty|$ty:(primTypeToCType restype)*|]
+            <*> pure [C.cty|$tyquals:vol' $ty:(primTypeToCType restype)*|]
+            where vol' = case vol of Volatile -> [C.ctyquals|volatile|]
+                                     Nonvolatile -> []
 
-        compileLeaf (Index src (Count iexp) restype (Space space)) =
+        compileLeaf (Index src (Count iexp) restype (Space space) vol) =
           join $ asks envReadScalar
           <*> rawMem src <*> compileExp iexp
-          <*> pure (primTypeToCType restype) <*> pure space
+          <*> pure (primTypeToCType restype) <*> pure space <*> pure vol
 
         compileLeaf (SizeOf t) =
           return [C.cexp|(sizeof($ty:t'))|]
@@ -1098,20 +1104,23 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
 
-compileCode (Write dest (Count idx) elemtype DefaultSpace elemexp) = do
+compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
            <$> compileExp idx
-           <*> pure [C.cty|$ty:(primTypeToCType elemtype)*|]
+           <*> pure [C.cty|$tyquals:vol' $ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
+  where vol' = case vol of Volatile -> [C.ctyquals|volatile|]
+                           Nonvolatile -> []
 
-compileCode (Write dest (Count idx) elemtype (Space space) elemexp) =
+compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
     <*> compileExp idx
     <*> pure (primTypeToCType elemtype)
     <*> pure space
+    <*> pure vol
     <*> compileExp elemexp
 
 compileCode (DeclareMem name space) =

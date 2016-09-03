@@ -655,13 +655,13 @@ compileExp (Imp.LeafExp (Imp.SizeOf t) _) = do
   let readInt = read t' :: Int32
   return $ Constant $ value readInt
 
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace) _) = do
+compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace _) _) = do
   iexp' <- compileExp iexp
   let bt' = compilePrimType bt
   let nptype = compilePrimToNp bt
   return $ simpleCall "indexArray" [Var $ pretty src, iexp', Var bt', Var nptype]
 
-compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space)) _) =
+compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
   join $ asks envReadScalar
     <*> pure src <*> compileExp iexp
     <*> pure restype <*> pure space
@@ -792,7 +792,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
     <*> pure src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size <*> pure (IntType Int32) -- FIXME
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace elemexp) = do
+compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
   let dest' = Var $ pretty dest
@@ -800,7 +800,7 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace elemexp) = do
   let ctype = simpleCall elemtype' [elemexp']
   stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) elemexp) =
+compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $ asks envWriteScalar
     <*> pure dest
     <*> compileExp idx

@@ -38,9 +38,9 @@ setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n)
   setCountSpace space n
   where dest_space' = setSpace space dest_space
         src_space' = setSpace space src_space
-setBodySpace space (Write dest dest_offset bt dest_space e) =
-  Write dest (setCountSpace space dest_offset) bt (setSpace space dest_space) $
-  setExpSpace space e
+setBodySpace space (Write dest dest_offset bt dest_space vol e) =
+  Write dest (setCountSpace space dest_offset) bt (setSpace space dest_space)
+  vol (setExpSpace space e)
 setBodySpace space (c1 :>>: c2) =
   setBodySpace space c1 :>>: setBodySpace space c2
 setBodySpace space (For i e body) =
@@ -74,8 +74,8 @@ setCountSpace space (Count e) =
 
 setExpSpace :: Space -> Exp -> Exp
 setExpSpace space = fmap setLeafSpace
-  where setLeafSpace (Index mem i bt DefaultSpace) =
-          Index mem i bt space
+  where setLeafSpace (Index mem i bt DefaultSpace vol) =
+          Index mem i bt space vol
         setLeafSpace e = e
 
 setSpace :: Space -> Space -> Space

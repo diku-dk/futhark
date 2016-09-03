@@ -365,7 +365,7 @@ expCompiler
     x' <- ImpGen.compileSubExp x
     s' <- ImpGen.compileSubExp s
 
-    let body = Imp.Write destmem destidx int32 destspace $
+    let body = Imp.Write destmem destidx int32 destspace Imp.Nonvolatile $
                Imp.var thread_gid int32 * s' + x'
 
     (group_size, num_groups) <- computeMapKernelGroups n'
@@ -497,8 +497,8 @@ callKernelCopy bt
     (_, destspace, destidx) <- ImpGen.fullyIndexArray' destloc dest_is bt
     (_, srcspace, srcidx) <- ImpGen.fullyIndexArray' srcloc src_is bt
 
-    let body = Imp.Write destmem destidx bt destspace $
-               Imp.index srcmem srcidx bt srcspace
+    let body = Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
+               Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
     destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
     let writes_to = [Imp.MemoryUse destmem destmem_size]
@@ -696,7 +696,7 @@ writeParamToLocalMemory :: Typed (MemBound u) =>
 writeParamToLocalMemory i (mem, _) param
   | Prim t <- paramType param =
       ImpGen.emit $
-      Imp.Write mem (bytes i') bt (Space "local") $
+      Imp.Write mem (bytes i') bt (Space "local") Imp.Volatile $
       Imp.var (paramName param) t
   | otherwise =
       return ()
@@ -710,7 +710,7 @@ readParamFromLocalMemory index i param (l_mem, _)
   | Prim _ <- paramType param =
       ImpGen.emit $
       Imp.SetScalar (paramName param) $
-      Imp.index l_mem (bytes i') bt (Space "local")
+      Imp.index l_mem (bytes i') bt (Space "local") Imp.Volatile
   | otherwise =
       ImpGen.emit $
       Imp.SetScalar index i
@@ -806,7 +806,7 @@ inWaveScan :: Imp.Exp
            -> [(VName, t)]
            -> Lambda InKernel
            -> InKernelGen ()
-inWaveScan wave_size local_id acc_local_mem scan_lam = do
+inWaveScan wave_size local_id acc_local_mem scan_lam = ImpGen.everythingVolatile $ do
   skip_threads <- newVName "skip_threads"
   let in_wave_thread_active =
         Imp.CmpOpExp (CmpSle Int32) (Imp.var skip_threads int32) in_wave_id
@@ -986,15 +986,13 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
     let read_reduce_args = zipWithM_ (readReduceArgument offset)
                            reduce_arr_params arrs
         reduce_acc_dest = ImpGen.Destination reduce_acc_targets
+        do_reduce = do ImpGen.comment "read array element" read_reduce_args
+                       ImpGen.compileBody reduce_acc_dest $ lambdaBody lam
+                       zipWithM_ (writeReduceOpResult local_tid)
+                         reduce_acc_params arrs
 
-    reduce_op <- ImpGen.collect $ do
-      ImpGen.comment "read array element" read_reduce_args
-      ImpGen.compileBody reduce_acc_dest $ lambdaBody lam
-
-    write_reduce_op_result <-
-      ImpGen.collect $
-      zipWithM_ (writeReduceOpResult local_tid)
-      reduce_acc_params arrs
+    in_wave_reduce <- ImpGen.collect $ ImpGen.everythingVolatile do_reduce
+    cross_wave_reduce <- ImpGen.collect do_reduce
 
     let wave_size = Imp.sizeToExp $ kernelWaveSize constants
         group_size = Imp.sizeToExp $ kernelGroupSize constants
@@ -1011,7 +1009,7 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
           Imp.SetScalar offset 1 <>
           Imp.While doing_in_wave_reductions
             (Imp.If apply_in_in_wave_iteration
-             (reduce_op <> write_reduce_op_result) mempty <>
+             in_wave_reduce mempty <>
              Imp.SetScalar offset (Imp.var offset int32 * 2))
 
         doing_cross_wave_reductions =
@@ -1030,7 +1028,7 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
             (Imp.Op Imp.Barrier <>
              Imp.SetScalar offset (Imp.var skip_waves int32 * wave_size) <>
              Imp.If apply_in_cross_wave_iteration
-             (reduce_op <> write_reduce_op_result) mempty <>
+             cross_wave_reduce mempty <>
              Imp.SetScalar skip_waves (Imp.var skip_waves int32 * 2))
 
     ImpGen.emit $
