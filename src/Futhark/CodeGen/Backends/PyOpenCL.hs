@@ -35,9 +35,6 @@ compileProg module_name prog = do
 
       let defines =
             [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
-             Assign (Var "cl_group_size") $ Constant $ value (256::Int32),
-             Assign (Var "cl_num_groups") $ Constant $ value (128::Int32),
-             Assign (Var "cl_tile_size") $ Constant $ value (32::Int32),
              Assign (Var "synchronous") $ Constant $ value False,
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
@@ -53,7 +50,10 @@ compileProg module_name prog = do
       let constructor = Py.Constructor [ "self"
                                        , "interactive=False"
                                        , "platform_pref=preferred_platform"
-                                       , "device_pref=preferred_device"]
+                                       , "device_pref=preferred_device"
+                                       , "group_size=256"
+                                       , "num_groups=128"
+                                       , "tile_size=32"]
                         [Escape $ openClInit assign]
           options = [ Option { optionLongName = "platform"
                              , optionShortName = Just 'p'
@@ -88,11 +88,11 @@ asLong x = Call "long" [Arg x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetNumGroups v) =
-  Py.stm $ Assign (Var (textual v)) $ Var "cl_num_groups"
+  Py.stm $ Assign (Var (textual v)) $ Var "self.num_groups"
 callKernel (Imp.GetGroupSize v) =
-  Py.stm $ Assign (Var (textual v)) $ Var "cl_group_size"
+  Py.stm $ Assign (Var (textual v)) $ Var "self.group_size"
 callKernel (Imp.GetTileSize v) =
-  Py.stm $ Assign (Var (textual v)) $ Var "cl_tile_size"
+  Py.stm $ Assign (Var (textual v)) $ Var "self.tile_size"
 
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
