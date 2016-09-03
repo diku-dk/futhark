@@ -26,6 +26,7 @@ module Futhark.CodeGen.ImpCode
   , PrimValue (..)
   , ExpLeaf (..)
   , Exp
+  , Volatility (..)
   , Arg (..)
   , var
   , index
@@ -128,7 +129,7 @@ data Code a = Skip
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName (Count Bytes) PrimType Space Exp
+            | Write VName (Count Bytes) PrimType Space Volatility Exp
             | SetScalar VName Exp
             | SetMem VName VName Space
               -- ^ Must be in same space.
@@ -142,6 +143,10 @@ data Code a = Skip
             | Op a
             deriving (Show)
 
+-- | The volatility of a memory access.
+data Volatility = Volatile | Nonvolatile
+                deriving (Eq, Ord, Show)
+
 instance Monoid (Code a) where
   mempty = Skip
   Skip `mappend` y    = y
@@ -150,7 +155,7 @@ instance Monoid (Code a) where
 
 data ExpLeaf = ScalarVar VName
              | SizeOf PrimType
-             | Index VName (Count Bytes) PrimType Space
+             | Index VName (Count Bytes) PrimType Space Volatility
            deriving (Eq, Show)
 
 type Exp = PrimExp ExpLeaf
@@ -198,8 +203,8 @@ sizeToExp (ConstSize x) = ValueExp $ IntValue $ Int32Value $ fromIntegral x
 var :: VName -> PrimType -> Exp
 var = LeafExp . ScalarVar
 
-index :: VName -> Count Bytes -> PrimType -> Space -> Exp
-index arr i t s = LeafExp (Index arr i t s) t
+index :: VName -> Count Bytes -> PrimType -> Space -> Volatility -> Exp
+index arr i t s vol = LeafExp (Index arr i t s vol) t
 
 -- Prettyprinting definitions.
 
@@ -255,9 +260,11 @@ instance Pretty op => Pretty (Code op) where
     text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
   ppr (Allocate name e space) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
-  ppr (Write name i bt space val) =
-    ppr name <> langle <> ppr bt <> ppr space <> rangle <> brackets (ppr i) <+>
+  ppr (Write name i bt space vol val) =
+    ppr name <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr i) <+>
     text "<-" <+> ppr val
+    where vol' = case vol of Volatile -> text "volatile "
+                             Nonvolatile -> mempty
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
   ppr (SetMem dest from space) =
@@ -290,10 +297,13 @@ instance Pretty Arg where
 instance Pretty ExpLeaf where
   ppr (ScalarVar v) =
     ppr v
-  ppr (Index v is bt space) =
-    ppr v <> langle <> ppr bt <> space' <> rangle <> brackets (ppr is)
+  ppr (Index v is bt space vol) =
+    ppr v <> langle <> vol' <> ppr bt <> space' <> rangle <> brackets (ppr is)
     where space' = case space of DefaultSpace -> mempty
                                  Space s      -> text "@" <> text s
+          vol' = case vol of Volatile -> text "volatile "
+                             Nonvolatile -> mempty
+
   ppr (SizeOf t) =
     text "sizeof" <> parens (ppr t)
 
@@ -345,8 +355,8 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
-  traverse _ (Write name i bt val space) =
-    pure $ Write name i bt val space
+  traverse _ (Write name i bt val space vol) =
+    pure $ Write name i bt val space vol
   traverse _ (SetScalar name val) =
     pure $ SetScalar name val
   traverse _ (SetMem dest from space) =
@@ -387,7 +397,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
   freeIn (SetMem x y _) =
     freeIn x <> freeIn y
-  freeIn (Write v i _ _ e) =
+  freeIn (Write v i _ _ _ e) =
     freeIn v <> freeIn i <> freeIn e
   freeIn (SetScalar x y) =
     freeIn x <> freeIn y
@@ -403,7 +413,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn code
 
 instance FreeIn ExpLeaf where
-  freeIn (Index v e _ _) = freeIn v <> freeIn e
+  freeIn (Index v e _ _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
 
@@ -435,7 +445,7 @@ functionsCalled _ = mempty
 memoryUsage :: (op -> HM.HashMap VName (HS.HashSet PrimType))
             -> Code op
             -> HM.HashMap VName (HS.HashSet PrimType)
-memoryUsage _ (Write mem _ bt _ e) =
+memoryUsage _ (Write mem _ bt _ _ e) =
   HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
 memoryUsage f (c1 :>>: c2) =
   HM.unionWith (<>) (memoryUsage f c1) (memoryUsage f c2)
@@ -473,7 +483,7 @@ memoryUsage _ DeclareScalar{}  =
 
 expMemoryUsage :: Exp -> HM.HashMap VName (HS.HashSet PrimType)
 expMemoryUsage = foldMap leafMemoryUsage
-  where leafMemoryUsage (Index mem (Count e) bt _) =
+  where leafMemoryUsage (Index mem (Count e) bt _ _) =
           HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
         leafMemoryUsage (ScalarVar _) =
           HM.empty

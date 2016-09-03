@@ -44,7 +44,7 @@ kernelsToOpenCL prog = do
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
-pointerQuals "local"      = return [C.ctyquals|__local volatile|]
+pointerQuals "local"      = return [C.ctyquals|__local|]
 pointerQuals "private"    = return [C.ctyquals|__private|]
 pointerQuals "constant"   = return [C.ctyquals|__constant|]
 pointerQuals "write_only" = return [C.ctyquals|__write_only|]
@@ -346,7 +346,7 @@ typesInCode (DeclareScalar _ t) = HS.singleton t
 typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
-typesInCode (Write _ (Count e1) t _ e2) =
+typesInCode (Write _ (Count e1) t _ _ e2) =
   typesInExp e1 <> HS.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e
 typesInCode SetMem{} = mempty
@@ -366,6 +366,6 @@ typesInExp (CmpOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
 typesInExp (ConvOpExp op e) = HS.fromList [from, to] <> typesInExp e
   where (from, to) = convTypes op
 typesInExp (UnOpExp _ e) = typesInExp e
-typesInExp (LeafExp (Index _ (Count e) t _) _) = HS.singleton t <> typesInExp e
+typesInExp (LeafExp (Index _ (Count e) t _ _) _) = HS.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
 typesInExp (LeafExp (SizeOf t) _) = HS.singleton t
