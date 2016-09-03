@@ -108,7 +108,7 @@ kernelCompiler dest (Kernel _ space _ kernel_body) = do
   let constants = KernelConstants global_tid local_tid group_id
                   (Imp.VarSize inner_group_size) num_threads'
                   (Imp.VarSize wave_size) (zip space_is space_dims')
-                  (Imp.var thread_active Bool)
+                  (Imp.var thread_active Bool) mempty
 
   kernel_body' <-
     makeAllMemoryGlobal $
@@ -179,7 +179,7 @@ kernelCompiler
         constants = KernelConstants global_id local_id group_id
                     local_size num_threads
                     (Imp.VarSize wave_size) []
-                    (Imp.ValueExp $ BoolValue True)
+                    (Imp.ValueExp $ BoolValue True) mempty
 
     (acc_mem_params, acc_local_mem) <-
       unzip <$> mapM (createAccMem local_size) fold_x_params
@@ -853,6 +853,9 @@ data KernelConstants = KernelConstants
                        , kernelWaveSize :: Imp.DimSize
                        , kernelDimensions :: [(VName, Imp.Exp)]
                        , kernelThreadActive :: Imp.Exp
+                       , kernelStreamed :: [(VName, Imp.DimSize)]
+                       -- ^ Chunk sizez and their maximum size.  Hint
+                       -- for unrolling.
                        }
 
 -- FIXME: wing a KernelConstants structure for use in Replicate
@@ -867,7 +870,7 @@ simpleKernelConstants desc = do
   return $ KernelConstants
     thread_gtid thread_ltid thread_gid
     (Imp.ConstSize 0) (Imp.ConstSize 0) (Imp.ConstSize 0)
-    [] (Imp.ValueExp $ BoolValue True)
+    [] (Imp.ValueExp $ BoolValue True) mempty
 
 compileKernelBody :: ImpGen.Destination
                   -> KernelConstants
@@ -1066,11 +1069,23 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
           body'' <- ImpGen.withPrimVar block_offset int32 $
                     allThreads constants $ ImpGen.compileBody acc_dest body'
           ImpGen.emit $ Imp.SetScalar block_size 1
-          ImpGen.emit $ Imp.If (kernelThreadActive constants)
-            (Imp.For block_offset w' body'') mempty
+
+          -- Check if loop is candidate for unrolling.
+          let loop =
+                case w of
+                  Var w_var | Just w_bound <- lookup w_var $ kernelStreamed constants,
+                              w_bound /= Imp.ConstSize 1->
+                              -- Candidate for unrolling, so generate two loops.
+                              Imp.If (CmpOpExp (CmpEq int32) w' (Imp.sizeToExp w_bound))
+                              (Imp.For block_offset (Imp.sizeToExp w_bound) body'')
+                              (Imp.For block_offset w' body'')
+                  _ -> Imp.For block_offset w' body''
+
+          ImpGen.emit $ Imp.If (kernelThreadActive constants) loop mempty
 
         _ -> ImpGen.declaringPrimVar block_offset int32 $ do
-          body' <- ImpGen.collect $ ImpGen.compileBody acc_dest body
+          body' <- streaming constants block_size maxchunk $
+                   ImpGen.compileBody acc_dest body
 
           ImpGen.emit $ Imp.SetScalar block_offset 0
 
@@ -1106,6 +1121,13 @@ allThreads :: KernelConstants -> InKernelGen () -> InKernelGen Imp.KernelCode
 allThreads constants = ImpGen.subImpM_ $ inKernelOperations constants'
   where constants' =
           constants { kernelThreadActive = Imp.ValueExp (BoolValue True) }
+
+streaming :: KernelConstants -> VName -> SubExp -> InKernelGen () -> InKernelGen Imp.KernelCode
+streaming constants chunksize bound m = do
+  bound' <- ImpGen.subExpToDimSize bound
+  let constants' =
+        constants { kernelStreamed = (chunksize, bound') : kernelStreamed constants }
+  ImpGen.subImpM_ (inKernelOperations constants') m
 
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
                     -> InKernelGen ()
