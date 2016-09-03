@@ -133,6 +133,9 @@ instance Pretty HostOp where
   ppr (GetGroupSize dest) =
     ppr dest <+> text "<-" <+>
     text "get_group_size()"
+  ppr (GetTileSize dest) =
+    ppr dest <+> text "<-" <+>
+    text "get_tile_size()"
   ppr (CallKernel c) =
     ppr c
 
