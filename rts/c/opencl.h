@@ -300,10 +300,18 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
   OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                                  sizeof(size_t), &max_group_size, NULL));
 
+  size_t max_tile_size = sqrt(max_group_size);
+
   if (max_group_size < cl_group_size) {
     fprintf(stderr, "Warning: Device limits group size to %zu (setting was %zu)\n",
             max_group_size, cl_group_size);
     cl_group_size = max_group_size;
+  }
+
+  if (max_tile_size < cl_tile_size) {
+    fprintf(stderr, "Warning: Device limits tile size to %zu (setting was %zu)\n",
+            max_tile_size, cl_tile_size);
+    cl_tile_size = max_tile_size;
   }
 
   cl_context_properties properties[] = {

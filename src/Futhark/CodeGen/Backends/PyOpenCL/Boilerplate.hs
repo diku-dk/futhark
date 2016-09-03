@@ -22,17 +22,25 @@ openClInit :: String -> String
 openClInit assign = T.unpack [text|
 self.ctx = get_prefered_context(interactive, platform_pref, device_pref)
 self.queue = cl.CommandQueue(self.ctx)
+self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
  # XXX: Assuming just a single device here.
 platform_name = self.ctx.get_info(cl.context_info.DEVICES)[0].platform.name
-device_type = self.ctx.get_info(cl.context_info.DEVICES)[0].type
+device_type = self.device.type
 lockstep_width = 1
 $set_lockstep_width
+max_tile_size = int(np.sqrt(self.device.max_work_group_size))
+if (tile_size * tile_size > self.device.max_work_group_size):
+  sys.stderr.write('Warning" Device limits tile size to {} (setting was {})\n'.format(max_tile_size, tile_size))
+  tile_size = max_tile_size
+self.group_size = group_size
+self.num_groups = num_groups
+self.tile_size = tile_size
 if (len(fut_opencl_src) >= 0):
   program = cl.Program(self.ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={}".format(FUT_BLOCK_DIM),
                                                         "-DLOCKSTEP_WIDTH={}".format(lockstep_width),
-                                                        "-DDEFAULT_GROUP_SIZE={}".format(cl_group_size),
-                                                        "-DDEFAULT_NUM_GROUPS={}".format(cl_num_groups),
-                                                        "-DDEFAULT_TILE_SIZE={}".format(cl_tile_size)])
+                                                        "-DDEFAULT_GROUP_SIZE={}".format(group_size),
+                                                        "-DDEFAULT_NUM_GROUPS={}".format(num_groups),
+                                                        "-DDEFAULT_TILE_SIZE={}".format(tile_size)])
 
 $assign'
 |]
