@@ -15,6 +15,8 @@ For more information, see [the website](http://futhark-lang.org).
 The [incomplete documentation is
 here](http://futhark.readthedocs.io).
 
+[Installation instructions here.](http://futhark.readthedocs.io/en/latest/installation.html)
+
 Statistics
 ==========
 
