@@ -10,4 +10,4 @@
 -- structure { Write 1 }
 
 fun main(k: i32, array: *[n]i32): [n]i32 =
-  write (iota(k)) (iota(k)) (array)
+  write (iota k) (iota k) array
