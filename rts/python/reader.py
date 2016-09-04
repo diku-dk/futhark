@@ -108,7 +108,7 @@ def parse_int_signed(f):
     if c == '-' and peek_char(f).isdigit():
       s = c + parse_int(f)
     else:
-      if c <> '+':
+      if c != '+':
           unget_char(f, c)
       s = parse_int(f)
 
