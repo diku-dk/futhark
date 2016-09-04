@@ -19,7 +19,7 @@ fun main(indexes: [k]i32,
        array1: *[n]i32,
        array2: *[n]i32,
        array3: *[n]i32): ([n]i32, [n]i32, [n]i32) =
-  let array1' = write indexes values (array1)
-  let array2' = write indexes values (array2)
-  let array3' = write indexes values (array3)
+  let array1' = write indexes values array1
+  let array2' = write indexes values array2
+  let array3' = write indexes values array3
   in (array1', array2', array3')

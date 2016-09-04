@@ -551,24 +551,24 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``write iss vss (as_1, ..., as_n)``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``write (is_1, ..., is_n) (vs_1, ..., vs_n) (as_1, ..., as_n)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``write`` expression calculates the equivalent of this imperative
 code::
 
   for iter in 0..n-1 do
-    is = iss[iter]
-    vs = vss[iter]
+    is = is_iter
+    vs = vs_iter
     as = as_iter
     for index in 0..shape(is)[0]-1:
       i = is[index]
       v = vs[index]
       as[i] = v
 
-All ``iss`` and ``vss`` arrays must be of the same outer size.  Use
-``zip`` to use several of those arrays as arguments.  ``write`` acts
-in-place and consumes all ``as`` arrays.
+All ``is`` and ``vs`` arrays must have the same outer size.  ``write`` acts
+in-place and consumes all ``as`` arrays.  When ``n = 1``, type just the arrays
+(since Futhark does not support singleton tuples).
 
 Arrays of Tuples
 ----------------

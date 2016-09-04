@@ -642,11 +642,14 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.BasicOp $ I.Copy se | se <- ses]
 
-internaliseExp desc (E.Write i v as loc) = do
-  sis <- internaliseExpToVars "write_arg_i" i
-  svs <- internaliseExpToVars "write_arg_v" v
-  sas0 <- forM as $ internaliseExpToVars "write_arg_a"
-  sas <- mapM (ensureSingleElement "Futhark.Internalise.internaliseExp: Every I/O array in 'write' must be a non-tuple.") sas0
+internaliseExp desc (E.Write is vs as loc) = do
+  let internaliseWriteArrays name xs =
+        mapM (ensureSingleElement
+              "Every I/O array in 'write' must be a non-tuple.")
+        =<< mapM (internaliseExpToVars name) xs
+  sis <- internaliseWriteArrays "write_arg_i" is
+  svs <- internaliseWriteArrays "write_arg_v" vs
+  sas <- internaliseWriteArrays "write_arg_a" as
 
   when (length sis /= length sas) $
     fail ("Futhark.Internalise.internaliseExp: number of write sis and sas tuples is not the same"
