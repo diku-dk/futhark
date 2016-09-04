@@ -640,7 +640,7 @@ typeOf (Split _ splitexps e _) =
                                      _        -> 1
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (DoLoop _ _ _ _ body _) = typeOf body
-typeOf (Write _i _v as _) = case as of
+typeOf (Write _is _vs as _) = case as of
   [a] -> typeOf a `setAliases` HS.empty
   _   -> Tuple $ map (\a -> typeOf a `setAliases` HS.empty) as
 

@@ -1260,32 +1260,23 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     loopbody' letbody' loc
 
 checkExp (Write is vs as pos) = do
-  is' <- checkExp is
-  vs' <- checkExp vs
+  is' <- mapM checkExp is
+  vs' <- mapM checkExp vs
   (as', aflows) <- unzip <$> mapM (collectOccurences . checkExp) as
 
-  checkWriteIndexes $ typeOf is'
+  -- Check indexes.
+  forM_ is' $ \e ->
+    case typeOf e of
+      Array (PrimArray (Signed Int32) (Rank 1) _ _) ->
+        return ()
+      _ -> bad $ TypeError pos
+           "A write index array must consist of signed 32-bit ints only."
 
+  -- Check that values arrays and I/O arrays have the same structure.
+  forM_ (zip vs' as') $ uncurry unifyExpTypes
+
+  -- Check that all I/O arrays are properly unique.
   let ats = map typeOf as'
-
-  let avbad = bad $ TypeError pos "Write value arrays and I/O arrays do not have the same type"
-  case as' of
-    [a] -> void $ unifyExpTypes vs' a
-    _ -> case typeOf vs' of
-      Array (TupleArray primElems (Rank rankP) _) ->
-        forM_ (zip ats primElems) $ \(at, p) -> case (at, p) of
-          (Array (PrimArray ptA (Rank rankA) _ _),
-           PrimArrayElem ptP _ _) ->
-            unless (rankP == rankA && ptP == ptA) avbad
-          _ -> avbad
-      Tuple primElems ->
-        forM_ (zip ats primElems) $ \(at, p) -> case (at, p) of
-          (Array (PrimArray ptA (Rank rankA) _ _),
-           Array (PrimArray ptP (Rank rankP) _ _)) ->
-            unless (rankP == rankA && ptP == ptA) avbad
-          _ -> avbad
-      _ -> avbad
-
   if all unique ats
     then forM_ (zip aflows ats) $ \(aflow, at) ->
            occur $ aflow `seqOccurences` [consumption (aliases at) pos]
@@ -1295,24 +1286,6 @@ checkExp (Write is vs as pos) = do
          ", which are not all unique."
 
   return (Write is' vs' as' pos)
-
-  -- FIXME: This code is a bit messy.
-  where checkWriteIndexes it = case it of
-          Array (PrimArray (Signed Int32) (Rank 1) _uniqueness _annotations) ->
-            return ()
-          Array (TupleArray exps (Rank 1) _uniqueness) ->
-            forM_ exps $ \e -> case e of
-              PrimArrayElem (Signed Int32) _ _ ->
-                return ()
-              _ -> widxbad
-          Tuple exps ->
-            forM_ exps $ \e -> case e of
-              Array (PrimArray (Signed Int32) (Rank 1) _ _) ->
-                return ()
-              _ -> widxbad
-          _ -> widxbad
-
-        widxbad = bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
 
 checkSOACArrayArg :: ExpBase NoInfo VName
                   -> TypeM (Exp, Arg)

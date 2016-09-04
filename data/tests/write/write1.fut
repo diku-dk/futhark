@@ -13,4 +13,4 @@
 fun main(indexes: [k]i32,
        values: [k][m]f32,
        array: *[n][m]f32): [n][m]f32 =
-  write indexes values (array)
+  write indexes values array

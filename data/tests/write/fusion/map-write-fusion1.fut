@@ -14,5 +14,5 @@ fun main(indexes: [k]i32,
        values: [k]i32,
        array: *[n]i32): [n]i32 =
   let values' = zipWith (+) indexes values
-  let array' = write indexes values' (array)
+  let array' = write indexes values' array
   in array'
