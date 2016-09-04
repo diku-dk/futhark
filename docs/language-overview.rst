@@ -303,24 +303,24 @@ maximises the amount of parallelism that the compiler is able to take
 advantage of.
 
 .. productionlist::
-   e: "map" "(" `lambda` "," `e` ")"
-    : "zipWith" "(" `lambda` "," `e` "," ... "," `e` ")"
-    : "filter" "(" `lambda` "," `e` ")"
-    : "partition" "(" `lambda` "," ... `lambda` "," `e` ")"
-    : "reduce" "(" `lambda` "," `e` "," `e` ")"
-    : "scan" "(" `lambda` "," `e` "," `e` ")"
+   e: "map" `lambda` `e`
+    : "zipWith" `lambda` `e`  ... `e`
+    : "filter" `lambda` `e`
+    : "partition" "(" `lambda` "," ... `lambda` ")" `e`
+    : "reduce" `lambda` `e` `e`
+    : "scan" `lambda` `e` `e`
 
 A lambda can be an anonymous function, the name of a function (with
 optional curried arguments), or an operator (possibly with one operand
 curried):
 
 .. productionlist::
-   lambda: "fn" (`param`...) : `rettype` "=>" `e`
+   lambda: "fn" `param`... : `rettype` "=>" `e`
          : `fname`
-         : `fname` (`e`, ..., `e`)
-         : `op` `e`
-         : `e` `op`
-         : `op`
+         : "(" `fname` `e` ... `e` ")"
+         : "(" `op` `e` ")"
+         : "(" `e` `op` ")"
+         : "(" `op` ")"
 
 The semantics of the SOACs is identical to the similarly-named
 higher-order functions found in many functional languages.  For
@@ -339,8 +339,8 @@ programmer.
 Uniqueness Types
 ----------------
 
-While Futhark is uncomprosingly a pure functional language, it
-may occasionally prove useful to express certain algorithms in an
+While Futhark is uncompromisingly a pure functional language, it may
+occasionally prove useful to express certain algorithms in an
 imperative style.  Consider a function for computing the *n* first
 Fibonacci numbers::
 
