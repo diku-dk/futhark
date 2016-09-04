@@ -46,7 +46,6 @@ module Futhark.CodeGen.ImpCode
 
     -- * Analysis
   , functionsCalled
-  , memoryUsage
 
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
@@ -62,7 +61,6 @@ import Data.Loc
 import Data.Traversable
 import Data.Foldable
 import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (foldr)
 
@@ -432,60 +430,3 @@ functionsCalled (For _ _ body) = functionsCalled body
 functionsCalled (While _ body) = functionsCalled body
 functionsCalled (Call _ fname _) = HS.singleton fname
 functionsCalled _ = mempty
-
--- | Return a mapping from every memory block read or written, to the
--- set of types that are read or written from that block.  If a memory
--- block is never used in an 'Index' expression or 'Write' statement,
--- it will not appear in the map.  Note that this in particular means
--- that a memory block will not appear if it is only used in a 'Copy'
--- statement.
---
--- This function is intended to help figure out alignment restrictions
--- for memory blocks.
-memoryUsage :: (op -> HM.HashMap VName (HS.HashSet PrimType))
-            -> Code op
-            -> HM.HashMap VName (HS.HashSet PrimType)
-memoryUsage _ (Write mem _ bt _ _ e) =
-  HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
-memoryUsage f (c1 :>>: c2) =
-  HM.unionWith (<>) (memoryUsage f c1) (memoryUsage f c2)
-memoryUsage f (For _ e c)  =
-  HM.unionWith (<>) (expMemoryUsage e) (memoryUsage f c)
-memoryUsage f (While e c)  =
-  HM.unionWith (<>) (expMemoryUsage e) (memoryUsage f c)
-memoryUsage _ (Allocate _ (Count e) _) =
-  expMemoryUsage e
-memoryUsage _ (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
-  foldr (HM.unionWith (<>) . expMemoryUsage) mempty [e1, e2, e3]
-memoryUsage _ (SetScalar _ e) =
-  expMemoryUsage e
-memoryUsage _ (Call _ _ es) =
-  foldr (HM.unionWith (<>) . inArg) mempty es
-  where inArg MemArg{} = mempty
-        inArg (ExpArg e) = expMemoryUsage e
-memoryUsage f (If e c1 c2) =
-  foldr (HM.unionWith (<>)) mempty
-  [expMemoryUsage e, memoryUsage f c1, memoryUsage f c2]
-memoryUsage _ (Assert e _) =
-  expMemoryUsage e
-memoryUsage f (Comment _ c) =
-  memoryUsage f c
-memoryUsage f (Op op) =
-  f op
-memoryUsage _ SetMem{} =
-  HM.empty
-memoryUsage _ Skip =
-  HM.empty
-memoryUsage _ DeclareMem{}  =
-  HM.empty
-memoryUsage _ DeclareScalar{}  =
-  HM.empty
-
-expMemoryUsage :: Exp -> HM.HashMap VName (HS.HashSet PrimType)
-expMemoryUsage = foldMap leafMemoryUsage
-  where leafMemoryUsage (Index mem (Count e) bt _ _) =
-          HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
-        leafMemoryUsage (ScalarVar _) =
-          HM.empty
-        leafMemoryUsage (SizeOf _) =
-          HM.empty
