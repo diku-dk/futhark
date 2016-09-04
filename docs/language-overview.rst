@@ -315,16 +315,17 @@ optional curried arguments), or an operator (possibly with one operand
 curried):
 
 .. productionlist::
-   lambda: "fn" `param`... : `rettype` "=>" `e`
+   lambda: "(" "fn" `param`... : `rettype` "=>" `e` ")"
          : `fname`
          : "(" `fname` `e` ... `e` ")"
          : "(" `op` `e` ")"
          : "(" `e` `op` ")"
          : "(" `op` ")"
 
-The semantics of the SOACs is identical to the similarly-named
-higher-order functions found in many functional languages.  For
-specifics, see :ref:`language-reference`.
+Parameter- and return type ascriptions are optional in anonymous
+functions.  The semantics of the SOACs is identical to the
+similarly-named higher-order functions found in many functional
+languages.  For specifics, see :ref:`language-reference`.
 
 The ``scan`` SOAC performs an inclusive prefix scan, and returns an
 array of the same outer size as the original array.  The functions
