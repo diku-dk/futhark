@@ -495,7 +495,7 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Write [ExpBase f vn] [ExpBase f vn] [ExpBase f vn] SrcLoc
+            | Write (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
             -- ^ @write [0, 2, -1] [9, 7, 0] [3, 4, 5] = [9, 4, 7]@.
 
             | Zip Int (ExpBase f vn) [ExpBase f vn] SrcLoc

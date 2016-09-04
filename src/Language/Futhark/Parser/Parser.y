@@ -495,7 +495,7 @@ Exp  :: { UncheckedExp }
      | streamSeq       FunAbstr Atom Atom
                          { Stream (Sequential $3) $2 $4 $1 }
      | write Atom Atom Atom
-                         { Write (atomToList $2) (atomToList $3) (atomToList $4) $1 }
+                         { Write $2 $3 $4 $1 }
 
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
      | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }
@@ -901,10 +901,4 @@ lexer cont = do
 parseError :: L Token -> ParserMonad a
 parseError (L _ EOF) = throwError "Parse error: End of file"
 parseError tok       = throwError $ "Parse error at " ++ locStr (srclocOf tok)
-
--- If tuple, return its elements.
-atomToList :: UncheckedExp -> [UncheckedExp]
-atomToList e = case e of
-    TupLit xs _ -> xs
-    _ -> [e]
 }
