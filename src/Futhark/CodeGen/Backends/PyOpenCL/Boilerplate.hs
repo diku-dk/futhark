@@ -30,7 +30,7 @@ lockstep_width = 1
 $set_lockstep_width
 max_tile_size = int(np.sqrt(self.device.max_work_group_size))
 if (tile_size * tile_size > self.device.max_work_group_size):
-  sys.stderr.write('Warning" Device limits tile size to {} (setting was {})\n'.format(max_tile_size, tile_size))
+  sys.stderr.write('Warning: Device limits tile size to {} (setting was {})\n'.format(max_tile_size, tile_size))
   tile_size = max_tile_size
 self.group_size = group_size
 self.num_groups = num_groups
