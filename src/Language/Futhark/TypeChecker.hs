@@ -1259,33 +1259,31 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     form'
                     loopbody' letbody' loc
 
-checkExp (Write is vs as pos) = do
-  is' <- mapM checkExp is
-  vs' <- mapM checkExp vs
-  (as', aflows) <- unzip <$> mapM (collectOccurences . checkExp) as
+checkExp (Write i v a pos) = do
+  i' <- checkExp i
+  v' <- checkExp v
+  (a', aflow) <- collectOccurences . checkExp $ a
 
-  -- Check indexes.
-  forM_ is' $ \e ->
-    case typeOf e of
-      Array (PrimArray (Signed Int32) (Rank 1) _ _) ->
-        return ()
-      _ -> bad $ TypeError pos
-           "A write index array must consist of signed 32-bit ints only."
+  -- Check indexes type.
+  case typeOf i' of
+    Array (PrimArray (Signed Int32) (Rank 1) _ _) ->
+      return ()
+    _ -> bad $ TypeError pos
+         "A write index array must consist of signed 32-bit ints only."
 
   -- Check that values arrays and I/O arrays have the same structure.
-  forM_ (zip vs' as') $ uncurry unifyExpTypes
+  void $ unifyExpTypes v' a'
 
   -- Check that all I/O arrays are properly unique.
-  let ats = map typeOf as'
-  if all unique ats
-    then forM_ (zip aflows ats) $ \(aflow, at) ->
-           occur $ aflow `seqOccurences` [consumption (aliases at) pos]
-    else bad $ TypeError pos $ "Write sources '" ++
-         intercalate ", " (map pretty as') ++
-         "' have types " ++ intercalate ", " (map pretty ats) ++
-         ", which are not all unique."
+  let at = typeOf a'
+  if unique at
+    then occur $ aflow `seqOccurences` [consumption (aliases at) pos]
+    else bad $ TypeError pos $ "Write source '" ++
+         pretty a' ++
+         "' has type " ++ pretty at ++
+         ", which is not unique."
 
-  return (Write is' vs' as' pos)
+  return (Write i' v' a' pos)
 
 checkSOACArrayArg :: ExpBase NoInfo VName
                   -> TypeM (Exp, Arg)
