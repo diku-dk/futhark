@@ -642,21 +642,16 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.BasicOp $ I.Copy se | se <- ses]
 
-internaliseExp desc (E.Write i v as loc) = do
-  sis <- internaliseExpToVars "write_arg_i" i
-  svs <- internaliseExpToVars "write_arg_v" v
-  sas0 <- forM as $ internaliseExpToVars "write_arg_a"
-  sas <- mapM (ensureSingleElement "Futhark.Internalise.internaliseExp: Every I/O array in 'write' must be a non-tuple.") sas0
+internaliseExp desc (E.Write i v a loc) = do
+  let internaliseWriteArray name x =
+        ensureSingleElement
+        "Every I/O array in 'write' must be a non-tuple."
+        =<< internaliseExpToVars name x
+  si <- internaliseWriteArray "write_arg_i" i
+  sv <- internaliseWriteArray "write_arg_v" v
+  sa <- internaliseWriteArray "write_arg_a" a
 
-  when (length sis /= length sas) $
-    fail ("Futhark.Internalise.internaliseExp: number of write sis and sas tuples is not the same"
-          ++ " (sis: " ++ show (length sis) ++ ", sas: " ++ show (length sas) ++ ")")
-
-  when (length svs /= length sas) $
-    fail ("Futhark.Internalise.internaliseExp: number of write svs and sas tuples is not the same"
-          ++ " (svs: " ++ show (length svs) ++ ", sas: " ++ show (length sas) ++ ")")
-
-  resTemp <- forM (zip sis svs) $ \(si, sv) -> do
+  (tv, si', sv') <- do
     tv <- rowType <$> lookupType sv -- the element type
     si_shape <- arrayShape <$> lookupType si
     let si_len = shapeSize 0 si_shape
@@ -676,20 +671,17 @@ internaliseExp desc (E.Write i v as loc) = do
       I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
 
     return (tv, si', sv')
-  let (tvs, sis', svs') = unzip3 resTemp
 
-  -- Just pick something.  All sis and svs are supposed to be the same size.
-  si_shape <- arrayShape <$> lookupType (head sis)
+  si_shape <- arrayShape <$> lookupType si'
   let len = shapeSize 0 si_shape
 
-  let indexTypes = replicate (length tvs) (I.Prim (IntType Int32))
-      valueTypes = tvs
-      bodyTypes = indexTypes ++ valueTypes
+  let indexType = I.Prim (IntType Int32)
+      bodyTypes = [indexType, tv]
 
-  indexNames <- replicateM (length indexTypes) $ newVName "write_index"
-  valueNames <- replicateM (length valueTypes) $ newVName "write_value"
+  indexName <- newVName "write_index"
+  valueName <- newVName "write_value"
 
-  let bodyNames = indexNames ++ valueNames
+  let bodyNames = [indexName, valueName]
   let bodyParams = zipWith I.Param bodyNames bodyTypes
 
   -- This body is pretty boring right now, as every input is exactly the output.
@@ -703,9 +695,9 @@ internaliseExp desc (E.Write i v as loc) = do
                    , I.lambdaReturnType = bodyTypes
                    , I.lambdaBody = body
                    }
-      sivs = sis' ++ svs'
-  aws <- mapM (fmap (arraySize 0) . lookupType) sas
-  letTupExp' desc $ I.Op $ I.Write [] len lam sivs $ zip aws sas
+      sivs = [si', sv']
+  aw <- fmap (arraySize 0) . lookupType $ sa
+  letTupExp' desc $ I.Op $ I.Write [] len lam sivs [(aw, sa)]
 
 internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
                     -> InternaliseM (I.DimIndex SubExp, Certificates)

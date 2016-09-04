@@ -148,8 +148,9 @@ mapExpM tv (DoLoop mergepat mergeexp form loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapLoopFormM tv form <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (Write i v as loc) =
-  Write <$> mapOnExp tv i <*> mapOnExp tv v <*> mapM (mapOnExp tv) as <*> pure loc
+mapExpM tv (Write i v a loc) =
+  Write <$> mapOnExp tv i <*> mapOnExp tv v
+  <*> mapOnExp tv a <*> pure loc
 
 mapLoopFormM :: (Applicative m, Monad m) =>
                 MapperBase vnf vnt m
