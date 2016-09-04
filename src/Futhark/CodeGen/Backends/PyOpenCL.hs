@@ -84,7 +84,7 @@ compileProg module_name prog = do
 -- We have many casts to 'long', because PyOpenCL may get confused at
 -- the 32-bit numbers that ImpCode uses for offsets and the like.
 asLong :: PyExp -> PyExp
-asLong x = Call "long" [Arg x]
+asLong x = Call "np.long" [Arg x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetNumGroups v) =
