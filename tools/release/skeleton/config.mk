@@ -1,5 +1,5 @@
 # Customize below to fit your system
 
 # paths
-PREFIX ?= justhere
+PREFIX ?= /usr/local/
 MANPREFIX = ${PREFIX}/share/man
