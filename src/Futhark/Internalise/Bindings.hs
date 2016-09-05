@@ -38,7 +38,7 @@ internaliseBindee bindee =
     return (name, t)
   where base = nameToString $ baseName $ E.identName bindee
 
-bindingParams :: [E.Parameter]
+bindingParams :: [E.Pattern]
               -> ([I.FParam] -> [I.FParam] -> InternaliseM a)
               -> InternaliseM a
 bindingParams params m = do
@@ -54,7 +54,7 @@ bindingParams params m = do
     local (\env -> env { envSubsts = shapesubst `HM.union` envSubsts env}) $
     m shape_params valueparams
 
-bindingLambdaParams :: [E.Parameter] -> [I.Type]
+bindingLambdaParams :: [E.Pattern] -> [I.Type]
                     -> ([I.LParam] -> InternaliseM a)
                     -> InternaliseM a
 bindingLambdaParams params ts m = do

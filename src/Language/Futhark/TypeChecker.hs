@@ -45,7 +45,6 @@ data TypeError =
     (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
   | ReturnTypeError SrcLoc Name (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
   | DupDefinitionError Name SrcLoc SrcLoc
-  | DupParamError Name Name SrcLoc
   | DupPatternError Name SrcLoc SrcLoc
   | InvalidPatternError (PatternBase NoInfo Name)
     (TypeBase Rank NoInfo ()) (Maybe String) SrcLoc
@@ -98,12 +97,8 @@ instance Show TypeError where
   show (DupDefinitionError name pos1 pos2) =
     "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
-  show (DupParamError funname paramname pos) =
-    "Parameter " ++ pretty paramname ++
-    " mentioned multiple times in argument list of function " ++
-    nameToString funname ++ " at " ++ locStr pos ++ "."
   show (DupPatternError name pos1 pos2) =
-    "Variable " ++ pretty name ++ " bound twice in tuple pattern; at " ++
+    "Duplicate binding of '" ++ pretty name ++ "'; at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (InvalidPatternError pat t desc loc) =
     "Pattern " ++ pretty pat ++
@@ -416,8 +411,10 @@ binding bnds = check . local (`bindVars` bnds)
                 names = HS.fromList $ map identName bnds
                 divide s = (s `HS.intersection` names, s `HS.difference` names)
 
-bindingParams :: [Parameter] -> TypeM a -> TypeM a
-bindingParams = binding . HS.toList . HS.unions . map patIdentSet
+bindingPattern :: [Pattern] -> TypeM a -> TypeM a
+bindingPattern ps m = do
+  checkForDuplicateNames ps
+  binding (HS.toList $ HS.unions $ map patIdentSet ps) m
 
 lookupVar :: VName -> SrcLoc -> TypeM Type
 lookupVar name pos = do
@@ -657,8 +654,10 @@ initialFtable = HM.fromList $ map addBuiltin $ HM.toList builtInFunctions
 
 checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
 checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
-  params' <- mapM (`checkParam` NoneInferred) params
-  bindingParams params' $ do
+  params' <- mapM (`checkPattern` NoneInferred) params
+  checkForDuplicateNames params'
+
+  bindingPattern params' $ do
     rettype' <- checkTypeDecl rettype
     body' <- checkFunBody fname body (Just rettype') loc
     let rettype_structural = toStructural $ unInfo $ expandedType rettype'
@@ -822,8 +821,8 @@ checkExp (Apply fname args _ loc) = do
       return $ Apply longname (zip args' $ map diet paramtypes) (Info rettype') loc
 
 checkExp (LetPat pat e body pos) = do
-  (e', dataflow) <- collectOccurences $ checkExp e
-  (scope, pat') <- checkBinding pat (typeOf e') dataflow
+  (e', dflow) <- collectOccurences $ checkExp e
+  (scope, pat') <- checkBinding pat (typeOf e') dflow
   scope $ do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
@@ -1265,39 +1264,56 @@ data InferredType = NoneInferred
                   | Inferred Type
                   | Ascribed Type
 
-checkParam :: PatternBase NoInfo VName -> InferredType
-           -> TypeM Parameter
-checkParam (Id (Ident name NoInfo loc)) (Inferred t) =
-  return $ Id (Ident name (Info $ t `setUniqueness` Nonunique) loc)
-checkParam (Id (Ident name NoInfo loc)) (Ascribed t) =
-  return $ Id (Ident name (Info t) loc)
-checkParam (Wildcard _ loc) (Inferred t) =
+checkPattern :: PatternBase NoInfo VName -> InferredType
+             -> TypeM Pattern
+checkPattern (Id (Ident name NoInfo loc)) (Inferred t) =
+  let t' = typeOf $ Var $ Ident name (Info t) loc
+  in return $ Id (Ident name (Info $ t' `setUniqueness` Nonunique) loc)
+checkPattern (Id (Ident name NoInfo loc)) (Ascribed t) =
+  let t' = typeOf $ Var $ Ident name (Info t) loc
+  in return $ Id (Ident name (Info t') loc)
+checkPattern (Wildcard _ loc) (Inferred t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
-checkParam (Wildcard _ loc) (Ascribed t) =
+checkPattern (Wildcard _ loc) (Ascribed t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
-checkParam (TuplePattern ps loc) (Inferred (Tuple ts)) =
-  TuplePattern <$> zipWithM checkParam ps (map Inferred ts) <*> pure loc
-checkParam (TuplePattern ps loc) (Ascribed (Tuple ts)) =
-  TuplePattern <$> zipWithM checkParam ps (map Ascribed ts) <*> pure loc
-checkParam p@TuplePattern{} (Inferred t) =
+checkPattern (TuplePattern ps loc) (Inferred (Tuple ts)) =
+  TuplePattern <$> zipWithM checkPattern ps (map Inferred ts) <*> pure loc
+checkPattern (TuplePattern ps loc) (Ascribed (Tuple ts)) =
+  TuplePattern <$> zipWithM checkPattern ps (map Ascribed ts) <*> pure loc
+checkPattern p@TuplePattern{} (Inferred t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty (untagPattern p) ++ " cannot match " ++ pretty t
-checkParam p@TuplePattern{} (Ascribed t) =
+checkPattern p@TuplePattern{} (Ascribed t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty (untagPattern p) ++ " cannot match " ++ pretty t
-checkParam (TuplePattern ps loc) NoneInferred =
-  TuplePattern <$> zipWithM checkParam ps (repeat NoneInferred) <*> pure loc
-checkParam fullp@(PatternAscription p td) maybe_outer_t = do
+checkPattern (TuplePattern ps loc) NoneInferred =
+  TuplePattern <$> zipWithM checkPattern ps (repeat NoneInferred) <*> pure loc
+checkPattern fullp@(PatternAscription p td) maybe_outer_t = do
   td' <- checkTypeDecl td
-  let t' = fromStruct $ removeShapeAnnotations $ unInfo $ expandedType td'
-      maybe_outer_t' = case maybe_outer_t of Inferred t -> Just t
+  let maybe_outer_t' = case maybe_outer_t of Inferred t -> Just t
                                              Ascribed t -> Just t
                                              NoneInferred -> Nothing
+      t' = fromStruct (removeShapeAnnotations $ unInfo $ expandedType td')
+           `addAliases` (<> maybe mempty aliases maybe_outer_t')
   case maybe_outer_t' of
     Just outer_t
       | not (outer_t `subtypeOf` t') ->
           bad $ InvalidPatternError (untagPattern fullp) (toStructural outer_t) Nothing $ srclocOf p
-    _ -> PatternAscription <$> checkParam p (Ascribed t') <*> pure td'
-checkParam p NoneInferred =
+    _ -> PatternAscription <$> checkPattern p (Ascribed t') <*> pure td'
+checkPattern p NoneInferred =
   bad $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty (untagPattern p)
+
+checkForDuplicateNames :: [Pattern] -> TypeM ()
+checkForDuplicateNames = flip evalStateT mempty . mapM_ check
+  where check (Id v) = seeing v
+        check Wildcard{} = return ()
+        check (TuplePattern ps _) = mapM_ check ps
+        check (PatternAscription p _) = check p
+
+        seeing v = do
+          let name = baseName $ identName v
+          seen <- get
+          case HM.lookup name seen of
+            Just loc -> lift $ bad $ DupPatternError name (srclocOf v) loc
+            Nothing -> modify $ HM.insert name $ srclocOf v
 
 checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
@@ -1360,37 +1376,9 @@ sequentially m1 m2 = do
 checkBinding :: PatternBase NoInfo VName -> Type -> Occurences
              -> TypeM (TypeM a -> TypeM a, Pattern)
 checkBinding pat et dflow = do
-  (pat', idds) <-
-    runStateT (checkBinding' pat et) []
-  return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
-  where checkBinding' (PatternAscription p td) t = do
-          td' <- lift $ checkTypeDecl td
-          let expected = removeShapeAnnotations $ unInfo $ expandedType td'
-          if toStruct t `subtypeOf` expected
-          then PatternAscription <$> checkBinding' p t <*> pure td'
-          else explode
-        checkBinding' (Id (Ident name NoInfo pos)) t = do
-          let t' = typeOf $ Var $ Ident name (Info t) pos
-          add $ Ident name (Info t') pos
-          return $ Id (Ident name (Info t') pos)
-        checkBinding' (TuplePattern pats pos) (Tuple ts)
-          | length pats == length ts = do
-          pats' <- zipWithM checkBinding' pats ts
-          return $ TuplePattern pats' pos
-        checkBinding' (Wildcard NoInfo loc) t =
-          return $ Wildcard (Info t) loc
-        checkBinding' _ _ =
-          explode
-
-        add ident = do
-          bnd <- gets $ find (==ident)
-          case bnd of
-            Nothing -> modify (ident:)
-            Just (Ident name _ pos2) ->
-              lift $ bad $ DupPatternError (baseName name) (srclocOf ident) pos2
-        explode = lift $ bad $
-                  InvalidPatternError (untagPattern pat) (toStructural et) Nothing $
-                  srclocOf pat
+  -- Not technically an ascription, but we want the pattern to have exactly the type of 'e'.
+  pat' <- checkPattern pat $ Ascribed et
+  return (\m -> sequentially (tell dflow) (const . const $ bindingPattern [pat'] m), pat')
 
 validApply :: [StructTypeBase VName] -> [Type] -> Bool
 validApply expected got =
@@ -1432,9 +1420,10 @@ checkLambda :: LambdaBase NoInfo VName -> [Arg]
             -> TypeM Lambda
 checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
   | length params == length args = do
-      params' <- zipWithM checkParam params $ map (Inferred . argType) args
+      params' <- zipWithM checkPattern params $
+                 map (Inferred . (`setAliases` mempty) . argType) args
       maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
-      body' <- bindingParams params' $
+      body' <- bindingPattern params' $
         checkFunBody (nameFromString "<anonymous>") body maybe_ret' loc
       checkFuncall Nothing loc (map patternStructType params') args
       let ret' = case maybe_ret' of

@@ -957,7 +957,7 @@ internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc
   internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
 
 unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
-                -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
+                -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
   let ident = E.Ident paramname (Info paramtype) noLoc
@@ -966,7 +966,7 @@ unOpFunToLambda op paramtype rettype = do
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
-                 -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
+                 -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
@@ -979,7 +979,7 @@ binOpFunToLambda op xtype ytype rettype = do
 binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
-                     -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
+                     -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let ident = E.Ident paramname (Info paramtype) noLoc
