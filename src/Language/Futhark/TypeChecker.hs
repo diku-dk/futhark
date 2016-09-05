@@ -259,11 +259,15 @@ seqOccurences occurs1 occurs2 =
 
 altOccurences :: Occurences -> Occurences -> Occurences
 altOccurences occurs1 occurs2 =
-  filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
-  where filt occ =
-          occ { consumed = consumed occ `HS.difference` postcons
-              , observed = observed occ `HS.difference` postcons }
-        postcons = allConsumed occurs2
+  filter (not . nullOccurence) $ map filt1 occurs1 ++ map filt2 occurs2
+  where filt1 occ =
+          occ { consumed = consumed occ `HS.difference` cons2
+              , observed = observed occ `HS.difference` cons2 }
+        filt2 occ =
+          occ { consumed = consumed occ
+              , observed = observed occ `HS.difference` cons1 }
+        cons1 = allConsumed occurs1
+        cons2 = allConsumed occurs2
 
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
@@ -293,8 +297,9 @@ instance Monoid Warnings where
 instance Show Warnings where
   show (Warnings []) = ""
   show (Warnings ws) =
-    intercalate "\n\n" (map showWarning $ sortBy (comparing fst) ws) ++ "\n"
-    where showWarning (loc, w) =
+    intercalate "\n\n" ws' ++ "\n"
+    where ws' = map showWarning $ sortBy (flip $ comparing fst) ws
+          showWarning (loc, w) =
             "Warning at " ++ locStr loc ++ ":\n  " ++ w
 
 singleWarning :: SrcLoc -> String -> Warnings
@@ -364,7 +369,7 @@ consume loc als = occur [consumption als loc]
 -- computation.
 consuming :: Ident -> TypeM a -> TypeM a
 consuming (Ident name (Info t) loc) m = do
-  consume loc $ aliases t
+  consume loc $ name `HS.insert` aliases t
   local consume' m
   where consume' env =
           env { envVtable = HM.insert name (WasConsumed loc) $ envVtable env }
@@ -373,6 +378,9 @@ collectOccurences :: TypeM a -> TypeM (a, Occurences)
 collectOccurences m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
+
+tapOccurences :: TypeM a -> TypeM (a, Occurences)
+tapOccurences = listen
 
 maybeCheckOccurences :: Occurences -> TypeM ()
 maybeCheckOccurences = liftEither . checkOccurences
@@ -398,6 +406,11 @@ noUnique :: TypeM a -> TypeM a
 noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
   where f (Bound t)         = Bound $ t `setUniqueness` Nonunique
         f (WasConsumed loc) = WasConsumed loc
+
+onlySelfAliasing :: TypeM a -> TypeM a
+onlySelfAliasing = local (\env -> env { envVtable = HM.mapWithKey f $ envVtable env})
+  where f k (Bound t)       = Bound $ t `addAliases` HS.intersection (HS.singleton k)
+        f _ (WasConsumed loc) = WasConsumed loc
 
 binding :: [Ident] -> TypeM a -> TypeM a
 binding bnds = check . local (`bindVars` bnds)
@@ -448,7 +461,20 @@ binding bnds = check . local (`bindVars` bnds)
 bindingPattern :: [Pattern] -> TypeM a -> TypeM a
 bindingPattern ps m = do
   checkForDuplicateNames ps
-  binding (HS.toList $ HS.unions $ map patIdentSet ps) m
+  binding (HS.toList $ HS.unions $ map patIdentSet ps) $ do
+    -- Perform an observation of every declared dimension.  This
+    -- prevents unused-name warnings for otherwise unused dimensions.
+    mapM_ observe $ concatMap patternDims ps
+    m
+
+patternDims :: Pattern -> [Ident]
+patternDims (TuplePattern pats _) = concatMap patternDims pats
+patternDims (PatternAscription p t) =
+  patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
+  where dimIdent _ AnyDim            = Nothing
+        dimIdent _ (ConstDim _)      = Nothing
+        dimIdent loc (NamedDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
+patternDims _ = []
 
 lookupVar :: VName -> SrcLoc -> TypeM Type
 lookupVar name pos = do
@@ -829,8 +855,7 @@ checkExp (UnOp (ToUnsigned t) e loc) = do
 
 checkExp (If e1 e2 e3 _ pos) = do
   e1' <- require [Prim Bool] =<< checkExp e1
-  ((e2', e3'), dflow) <- collectOccurences $ checkExp e2 `alternative` checkExp e3
-  tell dflow
+  ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
   brancht <- unifyExpTypes e2' e3'
   let t' = addAliases brancht
            (`HS.difference` allConsumed dflow)
@@ -1143,27 +1168,28 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- the merge parameters are being consumed.  For this, we first need
   -- to check the merge pattern, which requires the (initial) merge
   -- expression.
-  ((mergeexp', bindExtra), mergeflow) <-
-    collectOccurences $ do
-      mergeexp' <- checkExp mergeexp
-      return $
-        case form of
-          For _ _ (Ident loopvar _ _) _ ->
-            let iparam = Ident loopvar (Info $ Prim $ Signed Int32) loc
-            in (mergeexp', [iparam])
-          While _ ->
-            (mergeexp', [])
+  ((mergeexp', bindExtra), mergeflow) <- collectOccurences $ do
+    mergeexp' <- checkExp mergeexp
+    return $ case form of
+               For _ _ (Ident loopvar _ lvloc) _ ->
+                 let iparam = Ident loopvar (Info $ Prim $ Signed Int32) lvloc
+                 in (mergeexp', [iparam])
+               While _ ->
+                 (mergeexp', [])
 
-  -- Check the loop body.
-  mergepat' <- checkPattern mergepat $ Ascribed $ typeOf mergeexp'
-  ((form', loopbody'), bodyflow) <-
-    noUnique $ bindingPattern [mergepat'] $ binding bindExtra $ collectOccurences $
+  -- Check the loop body.  Play a little with occurences to ensure it
+  -- does not look like none of the merge variables are being used.
+  mergepat' <- checkPattern mergepat $ Ascribed $ typeOf mergeexp' `setAliases` mempty
+  (((form', loopbody'), bodyflow), freeflow) <-
+    noUnique $ collectOccurences $ bindingPattern [mergepat'] $
+    onlySelfAliasing $ binding bindExtra $ tapOccurences $
     case form of
-      For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
+      For dir lboundexp i_ident uboundexp -> do
         lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp
         uboundexp' <- require [Prim $ Signed Int32] =<< checkExp uboundexp
         loopbody' <- checkExp loopbody
-        return (For dir lboundexp' (Ident loopvar (Info $ Prim $ Signed Int32) loopvarloc) uboundexp',
+        let i_ident' = i_ident { identType = Info $ Prim $ Signed Int32 }
+        return (For dir lboundexp' i_ident' uboundexp',
                 loopbody')
       While condexp -> do
         (condexp', condflow) <-
@@ -1237,10 +1263,14 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   ((), merge_consume) <-
     collectOccurences $ consumeMerge mergepat'' $ typeOf mergeexp'
 
-  occur $ mergeflow `seqOccurences` merge_consume
+  let loopOccur = do
+        occur $ mergeflow `seqOccurences` freeflow `seqOccurences` merge_consume
+        mapM_ observe $ HS.toList $ patIdentSet mergepat''
 
   binding (HS.toList $ patIdentSet mergepat'') $ do
-    letbody' <- checkExp letbody
+    -- It is OK for merge parameters to not occur here, because they
+    -- might be useful for the loop body.
+    letbody' <- sequentially loopOccur $ \_ _ -> checkExp letbody
     return $ DoLoop mergepat'' mergeexp'
                     form'
                     loopbody' letbody' loc
@@ -1573,6 +1603,7 @@ checkDim _ (ConstDim _) =
   return ()
 checkDim loc (NamedDim name) = do
   t <- lookupVar name loc
+  observe $ Ident name (Info (Prim (Signed Int32))) loc
   case t of
     Prim (Signed Int32) -> return ()
     _                   -> bad $ DimensionNotInteger loc $ baseName name
