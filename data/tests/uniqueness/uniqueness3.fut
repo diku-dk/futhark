@@ -10,5 +10,5 @@ fun main(): ([]f64,[]f64) =
   let arrs = (copy(replicate n 0.0), copy(replicate n 0.0))
   let (arr1, arr2) = arrs
   let arr1[0] = 1.0
-  let arr2[0] = 2.0 in
-  (arr1, arr2)
+  let arr2[0] = 2.0
+  in (arr1, arr2)

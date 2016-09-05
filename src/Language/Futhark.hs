@@ -5,7 +5,7 @@ module Language.Futhark
   , module Language.Futhark.Pretty
   , module Language.Futhark.Traversals
 
-  , Ident, Parameter, DimIndex, Exp, Lambda
+  , Ident, DimIndex, Exp, Lambda
   , Pattern, FunDef, Prog
   , Type, StructType, ArrayType
   )
@@ -18,9 +18,6 @@ import Language.Futhark.Traversals
 
 -- | An identifier with type- and aliasing information information.
 type Ident = IdentBase Info VName
-
--- | A parameter is just a pattern.
-type Parameter = Pattern
 
 -- | An index with type information.
 type DimIndex = DimIndexBase Info VName
