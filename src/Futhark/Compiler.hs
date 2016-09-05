@@ -35,12 +35,15 @@ import Futhark.Representation.AST
 import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
 
-data FutharkConfig = FutharkConfig {
-    futharkVerbose :: Maybe (Maybe FilePath)
-}
+data FutharkConfig = FutharkConfig
+                     { futharkVerbose :: Maybe (Maybe FilePath)
+                     , futharkWarn :: Bool -- ^ Warn if True.
+                     }
 
 newFutharkConfig :: FutharkConfig
-newFutharkConfig = FutharkConfig { futharkVerbose = Nothing }
+newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
+                                 , futharkWarn = True
+                                 }
 
 dumpError :: FutharkConfig -> CompileError -> IO ()
 dumpError config err = do
@@ -86,7 +89,9 @@ runPipelineOnSource :: FutharkConfig
 runPipelineOnSource config pipeline filename srccode = do
   parsed_prog <- parseSourceProgram filename srccode
 
-  (tagged_ext_prog, namesrc) <- typeCheckSourceProgram parsed_prog
+  (tagged_ext_prog, warnings, namesrc) <- typeCheckSourceProgram parsed_prog
+  when (futharkWarn config) $
+    liftIO $ hPutStr stderr $ show warnings
   putNameSource namesrc
   res <- internaliseProg tagged_ext_prog
   case res of
@@ -109,11 +114,11 @@ parseSourceProgram filename file_contents = do
     Right prog -> return prog
 
 typeCheckSourceProgram :: E.UncheckedProg
-                       -> FutharkM (E.Prog, VNameSource)
+                       -> FutharkM (E.Prog, E.Warnings, VNameSource)
 typeCheckSourceProgram prog =
   case E.checkProg prog of
     Left err    -> compileError (T.pack $ show err) ()
-    Right prog' -> return prog'
+    Right success -> return success
 
 typeCheckInternalProgram :: I.Prog -> FutharkM ()
 typeCheckInternalProgram prog =
