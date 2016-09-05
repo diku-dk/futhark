@@ -302,7 +302,9 @@ instance Show Warnings where
   show (Warnings []) = ""
   show (Warnings ws) =
     intercalate "\n\n" ws' ++ "\n"
-    where ws' = map showWarning $ sortBy (flip $ comparing fst) ws
+    where ws' = map showWarning $ sortBy (comparing (off . locOf . fst)) ws
+          off NoLoc = 0
+          off (Loc p _) = posCoff p
           showWarning (loc, w) =
             "Warning at " ++ locStr loc ++ ":\n  " ++ w
 
