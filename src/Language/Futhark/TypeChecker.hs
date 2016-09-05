@@ -8,7 +8,6 @@
 module Language.Futhark.TypeChecker
   ( checkProg
   , TypeError
-  , Scope(..)
   )
   where
 
