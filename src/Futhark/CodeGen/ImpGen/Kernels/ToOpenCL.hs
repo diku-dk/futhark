@@ -260,7 +260,8 @@ compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
         compileKernelConst TileSizeConst = return [C.cexp|DEFAULT_TILE_SIZE|]
 
 mapKernelName :: MapKernel -> String
-mapKernelName k = "kernel_"++ mapKernelDesc k ++ show (baseTag $ mapKernelThreadNum k)
+mapKernelName k = "kernel_"++ mapKernelDesc k ++ "_" ++
+                  show (baseTag $ mapKernelThreadNum k)
 
 calledKernelName :: CallKernel -> String
 calledKernelName (Map k) =
