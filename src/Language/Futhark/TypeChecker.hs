@@ -820,14 +820,16 @@ checkExp (Apply fname args _ loc) = do
 
       return $ Apply longname (zip args' $ map diet paramtypes) (Info rettype') loc
 
-checkExp (LetPat pat e body pos) = do
-  (e', dflow) <- collectOccurences $ checkExp e
-  (scope, pat') <- checkBinding pat (typeOf e') dflow
-  scope $ do
-    body' <- checkExp body
-    return $ LetPat pat' e' body' pos
+checkExp (LetPat pat e body pos) =
+  sequentially (checkExp e) $ \e' _ -> do
+    -- Not technically an ascription, but we want the pattern to have
+    -- exactly the type of 'e'.
+    pat' <- checkPattern pat $ Ascribed $ typeOf e'
+    bindingPattern [pat'] $ do
+      body' <- checkExp body
+      return $ LetPat pat' e' body' pos
 
-checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
+checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
   src' <- checkIdent src
   idxes' <- mapM checkDimIndex idxes
   let destt' = unInfo (identType src') `setAliases` HS.empty
@@ -844,8 +846,7 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
       sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
         when (identName src `HS.member` aliases (typeOf ve')) $
           bad $ BadLetWithValue pos
-        (scope, _) <- checkBinding (Id d) destt' mempty
-        body' <- consuming src' $ scope $ checkExp body
+        body' <- consuming src' $ binding [dest'] $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
   where isFix DimFix{} = True
         isFix _        = False
@@ -1119,9 +1120,9 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
             (mergeexp', [])
 
   -- Check the loop body.
-  (firstscope, mergepat') <- checkBinding mergepat (typeOf mergeexp') mempty
+  mergepat' <- checkPattern mergepat $ Ascribed $ typeOf mergeexp'
   ((form', loopbody'), bodyflow) <-
-    noUnique $ firstscope $ binding bindExtra $ collectOccurences $
+    noUnique $ bindingPattern [mergepat'] $ binding bindExtra $ collectOccurences $
     case form of
       For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
         lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp
@@ -1372,13 +1373,6 @@ sequentially m1 m2 = do
   (b, m2flow) <- collectOccurences $ m2 a m1flow
   occur $ m1flow `seqOccurences` m2flow
   return b
-
-checkBinding :: PatternBase NoInfo VName -> Type -> Occurences
-             -> TypeM (TypeM a -> TypeM a, Pattern)
-checkBinding pat et dflow = do
-  -- Not technically an ascription, but we want the pattern to have exactly the type of 'e'.
-  pat' <- checkPattern pat $ Ascribed et
-  return (\m -> sequentially (tell dflow) (const . const $ bindingPattern [pat'] m), pat')
 
 validApply :: [StructTypeBase VName] -> [Type] -> Bool
 validApply expected got =
