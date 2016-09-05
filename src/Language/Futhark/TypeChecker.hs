@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 -- | The type checker checks whether the program is type-consistent.
 -- Whether type annotations are already present is irrelevant, but if
 -- they are, the type checker will signal an error if they are wrong.
@@ -8,6 +8,7 @@
 module Language.Futhark.TypeChecker
   ( checkProg
   , TypeError
+  , Warnings
   )
   where
 
@@ -22,6 +23,7 @@ import Data.List
 import Data.Loc
 import Data.Maybe
 import Data.Either
+import Data.Ord
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -239,8 +241,14 @@ checkOccurences = void . HM.traverseWithKey comb . usageMap
   where comb _    []     = Right ()
         comb name (u:us) = foldM_ (combineOccurences name) u us
 
+allObserved :: Occurences -> Names VName
+allObserved = HS.unions . map observed
+
 allConsumed :: Occurences -> Names VName
 allConsumed = HS.unions . map consumed
+
+allOccuring :: Occurences -> Names VName
+allOccuring occs = allConsumed occs <> allObserved occs
 
 seqOccurences :: Occurences -> Occurences -> Occurences
 seqOccurences occurs1 occurs2 =
@@ -276,6 +284,21 @@ initialScope = Scope  HM.empty
                       HM.empty
                       ([] , nameFromString "")
 
+newtype Warnings = Warnings [(SrcLoc, String)]
+
+instance Monoid Warnings where
+  mempty = Warnings mempty
+  Warnings ws1 `mappend` Warnings ws2 = Warnings $ ws1 <> ws2
+
+instance Show Warnings where
+  show (Warnings []) = ""
+  show (Warnings ws) =
+    intercalate "\n\n" (map showWarning $ sortBy (comparing fst) ws) ++ "\n"
+    where showWarning (loc, w) =
+            "Warning at " ++ locStr loc ++ ":\n  " ++ w
+
+singleWarning :: SrcLoc -> String -> Warnings
+singleWarning loc problem = Warnings [(loc, problem)]
 
 -- | The type checker runs in this monad.  The 'Either' monad is used
 -- for error handling.
@@ -283,7 +306,7 @@ newtype TypeM a = TypeM (RWST
                          Scope       -- Reader
                          Occurences  -- Writer
                          VNameSource -- State
-                         (Except TypeError) -- Inner monad
+                         (WriterT Warnings (Except TypeError)) -- Inner monad
                          a)
   deriving (Monad, Functor, Applicative,
             MonadReader Scope,
@@ -292,13 +315,16 @@ newtype TypeM a = TypeM (RWST
             MonadError TypeError)
 
 runTypeM :: Scope -> VNameSource -> TypeM a
-         -> Either TypeError (a, VNameSource)
+         -> Either TypeError (a, Warnings, VNameSource)
 runTypeM env src (TypeM m) = do
-  (x, src', _) <- runExcept $ runRWST m env src
-  return (x, src')
+  ((x, src', _), ws) <- runExcept $ runWriterT $ runRWST m env src
+  return (x, ws, src')
 
 bad :: TypeError -> TypeM a
 bad = throwError
+
+warn :: SrcLoc -> String -> TypeM ()
+warn loc problem = TypeM $ lift $ tell $ singleWarning loc problem
 
 newName :: VName -> TypeM VName
 newName s = do src <- get
@@ -324,12 +350,10 @@ occur :: Occurences -> TypeM ()
 occur = tell
 
 -- | Proclaim that we have made read-only use of the given variable.
--- No-op unless the variable is array-typed.
 observe :: Ident -> TypeM ()
-observe (Ident nm (Info t) loc)
-  | primType t = return ()
-  | otherwise   = let als = nm `HS.insert` aliases t
-                  in occur [observation als loc]
+observe (Ident nm (Info t) loc) =
+  let als = nm `HS.insert` aliases t
+  in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
 consume :: SrcLoc -> Names VName -> TypeM ()
@@ -352,6 +376,13 @@ collectOccurences m = pass $ do
 
 maybeCheckOccurences :: Occurences -> TypeM ()
 maybeCheckOccurences = liftEither . checkOccurences
+
+checkIfUsed :: Occurences -> Ident -> TypeM ()
+checkIfUsed occs v
+  | not $ identName v `HS.member` allOccuring occs =
+      warn (srclocOf v) $ "Unused variable '"++pretty (baseName $ identName v)++"'."
+  | otherwise =
+      return ()
 
 alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
@@ -394,6 +425,9 @@ binding bnds = check . local (`bindVars` bnds)
         check m = do
           (a, usages) <- collectBindingsOccurences m
           maybeCheckOccurences usages
+
+          mapM_ (checkIfUsed usages) bnds
+
           return a
 
         -- Collect and remove all occurences in @bnds@.  This relies
@@ -566,10 +600,11 @@ buildScopeFromDecs decs = do
 -- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
 -- information.
-checkProg :: UncheckedProg -> Either TypeError (Prog, VNameSource)
+checkProg :: UncheckedProg -> Either TypeError (Prog, Warnings, VNameSource)
 checkProg prog = do
-  prog_checked <- runTypeM initialScope src $ Prog <$> checkProg' (progDecs prog')
-  return $ flattenProgFunctions prog_checked
+  (prog_checked, ws, src') <-
+    runTypeM initialScope src $ Prog <$> checkProg' (progDecs prog')
+  return (flattenProgFunctions prog_checked, ws, src')
   where
     (prog', src) = tagProg blankNameSource prog
 
@@ -1384,6 +1419,9 @@ type Arg = (Type, Occurences, SrcLoc)
 argType :: Arg -> Type
 argType (t, _, _) = t
 
+argOccurences :: Arg -> Occurences
+argOccurences (_, occs, _) = occs
+
 checkArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
 checkArg arg = do
   (arg', dflow) <- collectOccurences $ checkExp arg
@@ -1472,6 +1510,7 @@ checkCurryBinOp f binop x loc arg = do
   x' <- checkExp x
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
+  occur $ argOccurences arg
   binding [y, xvar] $ do
     e <- checkExp (BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc)
     return $ f binop x' (Info $ argType arg) (Info $ typeOf e) loc
@@ -1498,6 +1537,7 @@ checkPolyLambdaOp op curryargexps args pos = do
                                    [yident $ Info tp])
                     (e1:e2:_) -> return (e1, e2, [])
   rettype <- typeOf <$> binding params (checkBinOp op x y pos)
+  mapM_ (occur . argOccurences) args
   return $ BinOpFun op (Info tp) (Info tp) (Info rettype) pos
   where fname = nameToQualName $ nameFromString $ pretty op
 
@@ -1655,13 +1695,13 @@ checkForDuplicateTypes = foldM_ check mempty
               where name = typeAlias def
 
 
-flattenProgFunctions :: (Prog, a) -> (Prog, a)
-flattenProgFunctions (prog, a) = let
-  topLongname = ([], nameFromString "")
-  bottomFuns = map (giveLongname topLongname) $ mapMaybe isFun $ progDecs prog
-  moduleFuns = concatMap (flattenModule topLongname) $ mapMaybe isMod $ progDecs prog
-  funs = map (FunOrTypeDec . FunDec) (bottomFuns ++ moduleFuns)
-  in (Prog funs , a)
+flattenProgFunctions :: Prog -> Prog
+flattenProgFunctions prog =
+  let topLongname = ([], nameFromString "")
+      bottomFuns = map (giveLongname topLongname) $ mapMaybe isFun $ progDecs prog
+      moduleFuns = concatMap (flattenModule topLongname) $ mapMaybe isMod $ progDecs prog
+      funs = map (FunOrTypeDec . FunDec) (bottomFuns ++ moduleFuns)
+  in Prog funs
 
 flattenModule :: QualName -> ModDefBase f vn -> [FunDefBase f vn]
 flattenModule longName modd =

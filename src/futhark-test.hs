@@ -74,16 +74,19 @@ data RunResult = ErrorResult Int T.Text
 progNotFound :: T.Text -> T.Text
 progNotFound s = s <> ": command not found"
 
+structTestConfig :: FutharkConfig
+structTestConfig = newFutharkConfig { futharkWarn = False }
+
 optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
 optimisedProgramMetrics (SOACSPipeline pipeline) program = do
-  res <- io $ runFutharkM (runPipelineOnProgram newFutharkConfig pipeline program) False
+  res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline program) False
   case res of
     Left err ->
       throwError $ errorDesc err
     Right prog ->
       return $ progMetrics prog
 optimisedProgramMetrics (KernelsPipeline pipeline) program = do
-  res <- io $ runFutharkM (runPipelineOnProgram newFutharkConfig pipeline program) False
+  res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline program) False
   case res of
     Left err ->
       throwError $ errorDesc err
