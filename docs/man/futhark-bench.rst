@@ -42,6 +42,13 @@ OPTIONS
 
   Write raw results in JSON format to the specified file.
 
+--pass-option=opt
+
+  Pass an option to benchmark programs that are being run.  For
+  example, we might want to run OpenCL programs on a specific device::
+
+    futhark-bench prog.fut --compiler=futhark-opencl --pass-option=-dHawaii
+
 EXAMPLES
 ========
 
@@ -51,7 +58,7 @@ different sizes::
   -- How quickly can we reduce arrays?
   --
   -- ==
-  -- input { 0 }
+  -- nobench input { 0 }
   -- output { 0 }
   -- input { 100 }
   -- output { 4950 }
