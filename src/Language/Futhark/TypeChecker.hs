@@ -7,7 +7,7 @@
 -- names.
 module Language.Futhark.TypeChecker
   ( checkProg
-  , TypeError(..)
+  , TypeError
   , Scope(..)
   )
   where
@@ -41,89 +41,41 @@ import qualified Futhark.FreshNames
 -- instance for this type produces a human-readable description.
 data TypeError =
     TypeError SrcLoc String
-  -- ^ A general error happened at the given position and
-  -- for the given reason.
   | UnifyError SrcLoc (TypeBase Rank NoInfo ()) SrcLoc (TypeBase Rank NoInfo ())
-  -- ^ Types of two expressions failed to unify.
   | UnexpectedType SrcLoc
     (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
-  -- ^ Expression of type was not one of the expected
-  -- types.
   | ReturnTypeError SrcLoc Name (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
-  -- ^ The body of a function definition has a different
-  -- type than its declaration.
   | DupDefinitionError Name SrcLoc SrcLoc
-  -- ^ Two functions have been defined with the same name.
   | DupParamError Name Name SrcLoc
-  -- ^ Two function parameters share the same name.
   | DupPatternError Name SrcLoc SrcLoc
-  -- ^ Two pattern variables share the same name.
   | InvalidPatternError (PatternBase NoInfo Name)
     (TypeBase Rank NoInfo ()) (Maybe String) SrcLoc
-  -- ^ The pattern is not compatible with the type or is otherwise
-  -- inconsistent.
   | UnknownVariableError Name SrcLoc
-  -- ^ Unknown variable of the given name referenced at the given spot.
   | UnknownFunctionError QualName SrcLoc
-  -- ^ Unknown function of the given name called at the given spot.
   | ParameterMismatch (Maybe QualName) SrcLoc
     (Either Int [TypeBase Rank NoInfo ()]) [TypeBase Rank NoInfo ()]
-  -- ^ A function (possibly anonymous) was called with
-  -- invalid arguments.  The third argument is either the
-  -- number of parameters, or the specific types of
-  -- parameters accepted (sometimes, only the former can
-  -- be determined).
   | UseAfterConsume Name SrcLoc SrcLoc
-  -- ^ A variable was attempted used after being
-  -- consumed.  The last location is the point of
-  -- consumption.
   | IndexingError Int Int SrcLoc
-  -- ^ Too many indices provided.  The first integer is
-  -- the number of dimensions in the array being
-  -- indexed.
   | BadAnnotation SrcLoc String
     (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
-  -- ^ One of the type annotations fails to match with the
-  -- derived type.  The string is a description of the
-  -- role of the type.  The last type is the new derivation.
   | BadTupleAnnotation SrcLoc String
     [Maybe (TypeBase Rank NoInfo ())] [TypeBase Rank NoInfo ()]
-  -- ^ One of the tuple type annotations fails to
-  -- match with the derived type.  The string is a
-  -- description of the role of the type.  The last
-  -- type is the elemens of the new derivation.
   | CurriedConsumption QualName SrcLoc
-  -- ^ A function is being curried with an argument to be consumed.
   | BadLetWithValue SrcLoc
-  -- ^ The new value for an array slice in let-with is aliased to the source.
   | ReturnAliased Name Name SrcLoc
-  -- ^ The unique return value of the function aliases
-  -- one of the function parameters.
   | UniqueReturnAliased Name SrcLoc
-  -- ^ A unique element of the tuple returned by the
-  -- function aliases some other element of the tuple.
   | NotAnArray SrcLoc (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
   | PermutationError SrcLoc [Int] Int (Maybe Name)
-  -- ^ The permutation is not valid.
   | DimensionNotInteger SrcLoc Name
-  -- ^ A dimension annotation was a non-integer variable.
   | CyclicalTypeDefinition SrcLoc Name
-  -- ^ Type alias has been defined cyclically.
   | UndefinedAlias SrcLoc Name
-  -- ^ Type alias is referenced, but not defined
   | DupTypeAlias SrcLoc Name
-  -- ^ Type alias has been defined twice
   | DupSigError SrcLoc Name
-  -- ^ Signature has been defined twice
   | InvalidUniqueness SrcLoc (TypeBase Rank NoInfo ())
-  -- ^ Uniqueness attribute applied to non-array.
   | UndefinedQualName SrcLoc QualName
-  -- ^ Undefined longname
   | InvalidField SrcLoc Type String
   | InvalidEntryPointReturnType SrcLoc Name
-  -- ^ Invalid entry point return type.
   | InvalidEntryPointParamType SrcLoc Name (PatternBase NoInfo Name)
-  -- ^ Invalid entry point return type.
 
 instance Show TypeError where
   show (TypeError pos msg) =
