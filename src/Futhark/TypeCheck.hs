@@ -69,62 +69,25 @@ import Futhark.Util.Pretty (Pretty, prettyDoc, indent, ppr, text, (<+>), align)
 -- instance for this type produces a human-readable description.
 data ErrorCase lore =
     TypeError String
-  -- ^ A general error happened for the given reason.
-  | UnifyError (Exp lore) Type (Exp lore) Type
-  -- ^ Types of two expressions failed to unify.
   | UnexpectedType (Exp lore) Type [Type]
-  -- ^ Expression of type was not one of the expected
-  -- types.
   | ReturnTypeError Name [ExtType] [ExtType]
-  -- ^ The body of a function definition has a different
-  -- type than its declaration.
   | DupDefinitionError Name
-  -- ^ Two functions have been defined with the same name.
   | DupParamError Name VName
-  -- ^ Two function parameters share the same name.
   | DupPatternError VName
-  -- ^ Two pattern variables share the same name.
   | InvalidPatternError (Pattern (Aliases lore)) [ExtType] (Maybe String)
-  -- ^ The pattern is not compatible with the type or is otherwise
-  -- inconsistent.
   | UnknownVariableError VName
-  -- ^ Unknown variable of the given name referenced.
   | UnknownFunctionError Name
-  -- ^ Unknown function of the given name called.
   | ParameterMismatch (Maybe Name) [Type] [Type]
-  -- ^ A function (possibly anonymous) was called with invalid
-  -- arguments.  The second argument is the specific types of
-  -- parameters accepted.
-  | UseAfterConsume VName
-  -- ^ A variable was attempted used after being
-  -- consumed.  The last location is the point of
-  -- consumption.
   | SlicingError Int Int
-  -- ^ Wrong number of indices provided.  The first integer is the
-  -- number of dimensions in the array being indexed.
   | BadAnnotation String Type Type
-  -- ^ One of the type annotations fails to match with the
-  -- derived type.  The string is a description of the
-  -- role of the type.  The last type is the new derivation.
   | ReturnAliased Name VName
-  -- ^ The unique return value of the function aliases
-  -- one of the function parameters.
   | UniqueReturnAliased Name
-  -- ^ A unique element of the tuple returned by the
-  -- function aliases some other element of the tuple.
   | NotAnArray VName Type
-  -- ^ The given variable is not array-typed.
   | PermutationError [Int] Int (Maybe VName)
-  -- ^ The permutation is not valid.
 
 instance Checkable lore => Show (ErrorCase lore) where
   show (TypeError msg) =
     "Type error:\n" ++ msg
-  show (UnifyError e1 t1 e2 t2) =
-    "Cannot unify type " ++ pretty t1 ++
-    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e1) ++
-    "\nwith type " ++ pretty t2 ++
-    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e2)
   show (UnexpectedType e _ []) =
     "Type of expression\n" ++
     prettyDoc 160 (indent 2 $ ppr e) ++
@@ -164,9 +127,6 @@ instance Checkable lore => Show (ErrorCase lore) where
             (length expected, intercalate ", " $ map pretty expected)
           ngot = length got
           fname' = maybe "anonymous function" (("function "++) . nameToString) fname
-  show (UseAfterConsume name) =
-    "Variable " ++ textual name ++ " used" ++
-    ", but it was previously consumed.  (Possibly through aliasing.)"
   show (SlicingError dims got) =
     show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
   show (BadAnnotation desc expected got) =
@@ -467,18 +427,6 @@ lookupFun fname args = do
           bad $ ParameterMismatch (Just fname) (map paramType params) argts
         Just rt ->
           return (rt, map paramDeclType params)
-
--- | Determine if the types of two subexpressions are identical.
--- Causes a 'TypeError vn' if they fail to match, and otherwise
--- returns their common type.
-matchSubExpTypes :: Checkable lore =>
-                    SubExp -> SubExp -> TypeM lore ()
-matchSubExpTypes e1 e2 = do
-  t1 <- subExpType e1
-  t2 <- subExpType e2
-  unless (t1 == t2) $
-    bad $ UnifyError (BasicOp $ SubExp e1) t1
-    (BasicOp $ SubExp e2) t2
 
 -- | @checkAnnotation loc s t1 t2@ checks if @t2@ is equal to
 -- @t1@.  If not, a 'BadAnnotation' is raised.
@@ -945,7 +893,6 @@ checkCmpOp :: Checkable lore =>
 checkCmpOp (CmpEq t) x y = do
   require [Prim t] x
   require [Prim t] y
-  matchSubExpTypes x y
 checkCmpOp (CmpUlt t) x y = checkBinOpArgs (IntType t) x y
 checkCmpOp (CmpUle t) x y = checkBinOpArgs (IntType t) x y
 checkCmpOp (CmpSlt t) x y = checkBinOpArgs (IntType t) x y
