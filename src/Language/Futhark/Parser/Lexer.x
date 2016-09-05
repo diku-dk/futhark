@@ -90,6 +90,7 @@ tokens :-
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
   [a-z] [a-zA-Z0-9_']*     { tokenS keyword }
+  "_" [a-zA-Z0-9'] [a-zA-Z0-9_']* { tokenS keyword }
   "True"                   { tokenS $ const TRUE }
   "False"                  { tokenS $ const FALSE }
   [A-Z] [a-zA-Z0-9_']*     { tokenS $ SID . nameFromText }

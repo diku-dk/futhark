@@ -76,6 +76,7 @@ data TypeError =
   | InvalidField SrcLoc Type String
   | InvalidEntryPointReturnType SrcLoc Name
   | InvalidEntryPointParamType SrcLoc Name (PatternBase NoInfo Name)
+  | UnderscoreUse SrcLoc Name
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -186,6 +187,9 @@ instance Show TypeError where
     "Entry point '" ++ nameToString fname ++ "' parameter '" ++ pretty p ++
     "' at " ++ locStr loc ++ " has has invalid type.\n" ++
     "Entry point parameters may not be tuples.  Sorry."
+  show (UnderscoreUse loc name) =
+    "Use of " ++ nameToString name ++ " at " ++ locStr loc ++
+    ": variables prefixed with underscore must not be accessed."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (QualName, StructTypeBase VName, [StructTypeBase VName])
@@ -387,7 +391,8 @@ maybeCheckOccurences = liftEither . checkOccurences
 
 checkIfUsed :: Occurences -> Ident -> TypeM ()
 checkIfUsed occs v
-  | not $ identName v `HS.member` allOccuring occs =
+  | not $ identName v `HS.member` allOccuring occs,
+    not $ "_" `isPrefixOf` pretty (identName v) =
       warn (srclocOf v) $ "Unused variable '"++pretty (baseName $ identName v)++"'."
   | otherwise =
       return ()
@@ -481,7 +486,8 @@ lookupVar name pos = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
     Nothing -> bad $ UnknownVariableError (baseName name) pos
-    Just (Bound t) -> return t
+    Just (Bound t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse pos (baseName name)
+                   | otherwise -> return t
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
 
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
