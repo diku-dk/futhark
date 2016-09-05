@@ -32,21 +32,25 @@ human-readable explanation of the test program.  It is separated from
 the test cases by a line containing just ``==``.  The format of a test
 case is as follows::
 
-  [compiled] input {
+  [compiled|nobench|notravis] input {
     values...
   }
   output { values... } | error: regex
 
 If ``compiled`` is present before the ``input`` keyword, this test
 case will never be passed to the interpreter.  This is useful for test
-cases that are annoyingly slow to interpret.  After the ``input``
-block, the expected result of the test case is written as either
-another block of values, or an expected run-time error, in which a
-regular expression can be used to specify the exact error message
-expected.  If no regular expression is given, any error message is
-accepted.  If neither ``output`` nor ``error`` is given, the program
-will be expected to execute succesfully, but its output will not be
-validated.
+cases that are annoyingly slow to interpret.  The ``nobench`` keyword
+is for data sets that are too small to be worth benchmarking, and only
+has meaning to futhark-bench(1).  The ``notravis`` keyword is used by
+the ``--travis`` option (see below).
+
+After the ``input`` block, the expected result of the test case is
+written as either another block of values, or an expected run-time
+error, in which a regular expression can be used to specify the exact
+error message expected.  If no regular expression is given, any error
+message is accepted.  If neither ``output`` nor ``error`` is given,
+the program will be expected to execute succesfully, but its output
+will not be validated.
 
 Alternatively, instead of input-output pairs, the test cases can
 simply be a description of an expected compile time type error::
@@ -64,12 +68,27 @@ Instead, you can write an N-tuple as its constituent N values.  Beware
 of syntax errors in the values - the errors reported by
 ``futhark-test`` are very poor.
 
+An optional metadata section is permitted before the test cases.  This
+section can contain arbitrary tags that classify the benchmark::
+
+  tags { names... }
+
+Tag are sequences of alphanumeric characters, with each tag seperated
+by whitespace.  Any program with the ``disable`` tag is ignored by
+``futhark-test``.
+
 For many usage examples, see the ``data/tests`` directory in the
 Futhark source directory.  A simple example can be found in
 ``EXAMPLES`` below.
 
 OPTIONS
 =======
+
+--travis
+  Disable test of input sets marked ``notravis``.
+
+--exclude=tag
+  Ignore benchmarks with the specified tag.
 
 -c
   Only compile - do not run any interpreters.
@@ -78,10 +97,9 @@ OPTIONS
   Only interpret - do not run any code generators.
 
 -t
-  Only type-check - do not run programs at all.
+  Compile, but do not run.
 
 --compiler=program
-
   The program used to compile Futhark programs.  This option can be
   passed multiple times, resulting in multiple compilers being used
   for each test case.  The specified program must support the same
@@ -96,6 +114,13 @@ OPTIONS
   Like ``--compiler``, but for when execution has been disabled with
   ``-t``.
 
+--pass-option=opt
+
+  Pass an option to benchmark programs that are being run.  For
+  example, we might want to run OpenCL programs on a specific device::
+
+    futhark-bench prog.fut --compiler=futhark-opencl --pass-option=-dHawaii
+
 EXAMPLES
 ========
 
@@ -103,6 +128,7 @@ The following program tests simple indexing and bounds checking::
 
   -- Test simple indexing of an array.
   -- ==
+  -- tags { firsttag secondtag }
   -- input {
   --   [4,3,2,1]
   --   1
