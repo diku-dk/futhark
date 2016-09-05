@@ -317,7 +317,7 @@ means "apply the function ``a`` to the expression ``b[i]``, *not*
 the latter is desired, enclose the literal array with parentheses.
 
 ``a[i:j]``
-~~~~~~~~
+~~~~~~~~~~
 
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
 latter inclusive and the latter exclusive.  Slicing of multiple
