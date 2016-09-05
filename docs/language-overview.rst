@@ -28,12 +28,14 @@ Lexical Syntax
 The syntax of Futhark is derived from Haskell and Standard ML,
 although somewhat less flexible.  Futhark is not whitespace-sensitive,
 and indentation is only used for readability.  An identifier starts
-with a lowercase letter, followed by any number of letters, digits and
-underscores.  A structure identifier starts with an uppercase letter.
-Numeric, string and character literals use the same notation as
-Haskell (which is very similar to C), including all escape characters.
-Comments are indicated with ``--`` and span to end of line.  Block
-comments are not presently supported.
+with a lowercase letter, followed by any number of letters, digits,
+apostrophes and underscores.  An identifier may also start with an
+underscore, which is used to indicate that the name will not be used.
+A structure identifier starts with an uppercase letter.  Numeric,
+string and character literals use the same notation as Haskell (which
+is very similar to C), including all escape characters.  Comments are
+indicated with ``--`` and span to end of line.  Block comments are not
+presently supported.
 
 First-order Futhark
 -------------------
