@@ -456,8 +456,8 @@ evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
-not be complete, but in that case, the value of ``v`` must be an array
-of the proper size.
+not be complete and can also be a slice, but in these cases, the value
+of ``v`` must be an array of the proper size.
 
 ``if c then a else b``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -520,7 +520,17 @@ called with a single ``n``-tuple argument.
 
 Left-reduction with ``f`` across the elements of ``a``, with ``x`` as
 the neutral element for ``f``.  The function ``f`` must be
-associative.  If it is not, the evaluation result is not defined.
+associative.  If it is not, the return value is unspecified.
+
+``reduceComm f x a``
+~~~~~~~~~~~~~~~~~~~
+
+Like ``reduce``, but with the added guarantee that the function ``f``
+is *commutative*.  This lets the compiler generate more efficient
+code.  If ``f`` is not commutative, the return value is unspecified.
+You do not need to explicitly use ``reduceComm`` with built-in
+operators like ``+`` - the compiler already knows that these are
+commutative.
 
 ``scan f x a``
 ~~~~~~~~~~~~~~~~~~~
@@ -560,7 +570,10 @@ code::
 The ``is`` and ``vs`` arrays must have the same outer size.  ``write``
 acts in-place and consumes the ``as`` array, returning a new array
 that has the same type and elements as ``as``, except for the indices
-in ``is``.
+in ``is``.  If ``is`` contains duplicates (i.e. several writes are
+performed to the same location), the result is unspecified.  It is not
+guaranteed that one of the duplicate writes will complete atomically -
+they may be interleaved.
 
 Arrays of Tuples
 ----------------
