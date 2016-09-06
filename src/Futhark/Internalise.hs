@@ -642,62 +642,55 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.BasicOp $ I.Copy se | se <- ses]
 
-internaliseExp desc (E.Write i v a loc) = do
-  let internaliseWriteArray name x =
-        ensureSingleElement
-        "Every I/O array in 'write' must be a non-tuple."
-        =<< internaliseExpToVars name x
-  si <- internaliseWriteArray "write_arg_i" i
-  sv <- internaliseWriteArray "write_arg_v" v
-  sa <- internaliseWriteArray "write_arg_a" a
+internaliseExp desc (E.Write si v a loc) = do
+  si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
+  svs <- internaliseExpToVars "write_arg_v" v
+  sas <- internaliseExpToVars "write_arg_a" a
 
-  (tv, si', sv') <- do
+  si_shape <- arrayShape <$> lookupType si'
+  let si_w = shapeSize 0 si_shape
+
+  (tvs, svs') <- fmap unzip $ forM svs $ \sv -> do
     tv <- rowType <$> lookupType sv -- the element type
-    si_shape <- arrayShape <$> lookupType si
-    let si_len = shapeSize 0 si_shape
     sv_shape <- arrayShape <$> lookupType sv
-    let sv_len = shapeSize 0 sv_shape
+    let sv_w = shapeSize 0 sv_shape
 
-    -- Generate an assertion and reshapes to ensure that sv and si are the same
+    -- Generate an assertion and reshapes to ensure that sv and si' are the same
     -- size.
     cmp <- letSubExp "write_cmp" $ I.BasicOp $
-      I.CmpOp (I.CmpEq I.int32) si_len sv_len
+      I.CmpOp (I.CmpEq I.int32) si_w sv_w
     c   <- assertingOne $
       letExp "write_cert" $ I.BasicOp $
       I.Assert cmp loc
-    si' <- letExp (baseString si ++ "_write_si") $
-      I.BasicOp $ I.SubExp $ I.Var si
     sv' <- letExp (baseString sv ++ "_write_sv") $
-      I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
+      I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
-    return (tv, si', sv')
-
-  si_shape <- arrayShape <$> lookupType si'
-  let len = shapeSize 0 si_shape
+    return (tv, sv')
 
   let indexType = I.Prim (IntType Int32)
-      bodyTypes = [indexType, tv]
+      bodyTypes = replicate (length tvs) indexType ++ tvs
 
   indexName <- newVName "write_index"
-  valueName <- newVName "write_value"
+  valueNames <- replicateM (length tvs) $ newVName "write_value"
 
-  let bodyNames = [indexName, valueName]
+  let bodyNames = indexName : valueNames
   let bodyParams = zipWith I.Param bodyNames bodyTypes
 
   -- This body is pretty boring right now, as every input is exactly the output.
   -- But it can get funky later on if fused with something else.
   (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
-    results <- forM bodyNames $ \name -> letSubExp "write_res"
-                                         $ I.BasicOp $ I.SubExp $ I.Var name
+    let outs = replicate (length valueNames) indexName ++ valueNames
+    results <- forM outs $ \name ->
+      letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
     return $ resultBody results
 
   let lam = Lambda { I.lambdaParams = bodyParams
                    , I.lambdaReturnType = bodyTypes
                    , I.lambdaBody = body
                    }
-      sivs = [si', sv']
-  aw <- fmap (arraySize 0) . lookupType $ sa
-  letTupExp' desc $ I.Op $ I.Write [] len lam sivs [(aw, sa)]
+      sivs = si' : svs'
+  aws <- mapM (fmap (arraySize 0) . lookupType) sas
+  letTupExp' desc $ I.Op $ I.Write [] si_w lam sivs $ zip aws sas
 
 internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
                     -> InternaliseM (I.DimIndex SubExp, Certificates)
@@ -733,10 +726,6 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ f [] w lam' input
-
-ensureSingleElement :: Monad m => String -> [a] -> m a
-ensureSingleElement _desc [x] = return x
-ensureSingleElement desc _ = fail desc
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
