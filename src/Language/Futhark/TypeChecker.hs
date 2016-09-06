@@ -918,25 +918,6 @@ checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
   where isFix DimFix{} = True
         isFix _        = False
 
-checkExp (Update v idxes ve loc) = do
-  v' <- checkIdent v
-  idxes' <- mapM checkDimIndex idxes
-
-  unless (unique $ unInfo $ identType v') $
-    bad $ TypeError loc $ "Source '" ++ pretty (baseName $ identName v) ++
-    "' has type " ++ pretty (unInfo $ identType v') ++ ", which is not unique"
-
-  case peelArray (length $ filter isFix idxes') (unInfo $ identType v') of
-    Nothing -> bad $ IndexingError
-                     (arrayRank $ unInfo $ identType v') (length idxes) (srclocOf v)
-    Just elemt ->
-      sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
-        when (identName v `HS.member` aliases (typeOf ve')) $
-          bad $ BadLetWithValue loc
-        return $ Update v' idxes' ve' loc
-  where isFix DimFix{} = True
-        isFix _        = False
-
 checkExp (Index e idxes pos) = do
   e' <- checkExp e
   let vt = typeOf e'

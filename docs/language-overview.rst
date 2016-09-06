@@ -388,8 +388,8 @@ The simplest way to introduce uniqueness types is through examples.
 To that end, let us consider the following function definition::
 
   fun modify(a: *[]int, i: int, x: int): *[]int =
-    let b = a with [i] <- (a[i] + x) in
-    b
+    let a[i] = a[i] + x in
+    a
 
 The function call ``modify(a,i,x)`` returns ``a``, but where the
 element at index ``i`` has been increased by ``x``.  Note the
@@ -460,7 +460,8 @@ rules:
     any execution path following the function call.  An example
     violation::
 
-      let b = a with [i] <- 2 in
+      let b = a
+      let b[i] = 2 in
       f(b,a) -- Error: a used after being source in a let-with
 
 
