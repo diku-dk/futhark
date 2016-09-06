@@ -260,6 +260,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ extLambdaParams lam)
                                (accs++map Var arrs)
+  consumedInOp (Write _ _ _ _ as) =
+    HS.fromList $ map snd as
   consumedInOp _ =
     mempty
 
