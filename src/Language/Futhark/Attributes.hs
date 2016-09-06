@@ -584,7 +584,6 @@ typeOf (Var ident) =
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
-typeOf (Update ident _ _ _) = unInfo (identType ident) `setAliases` mempty
 typeOf (Index ident idx _) =
   stripArray (length $ filter isFix idx) (typeOf ident)
   where isFix DimFix{} = True

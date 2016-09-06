@@ -129,12 +129,10 @@ import Language.Futhark.Core(blankLongname)
       entry           { L $$ ENTRY }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
-      '<-'            { L $$ SETTO }
       '->'            { L $$ TYPE_ARROW }
       ':'             { L $$ COLON }
       for             { L $$ FOR }
       do              { L $$ DO }
-      with            { L $$ WITH }
       iota            { L $$ IOTA }
       shape           { L $$ SHAPE }
       replicate       { L $$ REPLICATE }
@@ -547,9 +545,6 @@ Atom : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
      | '('      ')'               { TupLit [] $1 }
      | Atom Slice %prec indexprec { Index $1 $2 (srclocOf $1) }
      | Atom '.' NaturalInt{ TupleIndex $1 $3 NoInfo $ srclocOf $1 }
-     | QualName with Slice '<-' '(' Exp ')'  {% do
-                                                 v <- identFromQualName $1
-                                                 return $ Update v $3 $6 $ srclocOf (snd $1) }
 
 Atoms :: { (UncheckedExp, [UncheckedExp]) }
       : Atom { ($1, []) }

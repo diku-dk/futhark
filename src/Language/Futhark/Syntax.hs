@@ -391,9 +391,6 @@ data ExpBase f vn =
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
-            | Update (IdentBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
-            -- ^ In-place update.
-
             | Index (ExpBase f vn)
                     [DimIndexBase f vn]
                     SrcLoc
@@ -530,7 +527,6 @@ instance Located (ExpBase f vn) where
   locOf (Apply _ _ _ pos)       = locOf pos
   locOf (LetPat _ _ _ pos)      = locOf pos
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
-  locOf (Update _ _ _ pos)      = locOf pos
   locOf (Index _ _ pos)         = locOf pos
   locOf (TupleIndex _ _ _ pos)  = locOf pos
   locOf (Iota _ pos)            = locOf pos

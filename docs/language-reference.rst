@@ -455,13 +455,11 @@ Evaluate ``e`` and bind the result to the pattern ``pat`` while
 evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
 ``let`` or ``loop`` expression.
 
-``let dest = src with [i] <- v in body``
+``let a[i] = v in body``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Evaluate ``body`` with ``dest`` bound to the value of
-``src``, except that the element(s) at the position given by the
-index take on the value of ``v``.  The given index need not be
-complete, but in that case, the value of ``v`` must be an array
+Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
+not be complete, but in that case, the value of ``v`` must be an array
 of the proper size.
 
 ``if c then a else b``
@@ -562,8 +560,10 @@ code::
     v = vs[index]
     as[i] = v
 
-The ``is`` and ``vs`` arrays must have the same outer size.  ``write`` acts
-in-place and consumes the ``as`` array.
+The ``is`` and ``vs`` arrays must have the same outer size.  ``write``
+acts in-place and consumes the ``as`` array, returning a new array
+that has the same type and elements as ``as``, except for the indices
+in ``is``.
 
 Arrays of Tuples
 ----------------

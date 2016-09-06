@@ -7,6 +7,7 @@ fun main(a: *[n]int, x: int): [n]int =
   loop ((a,z)) = for i < n do
     let tmp = z * z
     let a[i] = tmp
-    let b = a with [i] <- (a[i]-1)
+    let x = [a[i]-1]
+    let b = write ([i]) x a
     in (b, tmp+2)
   in a
