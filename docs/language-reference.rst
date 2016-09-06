@@ -608,6 +608,21 @@ is not a full array.  Hence, when determining whether a program
 generates full arrays, we must hence look at the *transformed*
 values - in a sense, the fullness requirement "transcends" the tuples.
 
+Another, less operational, way of understanding the problem is to look
+at the type of an array of a pair of arrays::
+
+  ``[]([]t1, []t2)``
+
+For this to be a valid type, we must be able to insert shape
+declarations::
+
+  ``[n]([m1]t1, [m2]t2)``
+
+This require that the inner arrays have size ``m1`` and ``m2``
+respectively (without specifying exactly what that is).  An irregular
+array value could not possibly have this type for constant ``m1``,
+``m2``.
+
 Literal Defaults
 ----------------
 
