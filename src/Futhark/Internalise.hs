@@ -548,6 +548,14 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
   let t' = internaliseType t
   letTupExp' desc $ I.If ce' te' fe' t'
 
+internaliseExp desc (E.BinOp E.LogAnd xe ye t loc) =
+  internaliseExp desc $
+  E.If xe ye (E.Literal (E.PrimValue (E.BoolValue False)) loc) t loc
+
+internaliseExp desc (E.BinOp E.LogOr xe ye t loc) =
+  internaliseExp desc $
+  E.If xe (E.Literal (E.PrimValue (E.BoolValue True)) loc) ye t loc
+
 internaliseExp desc (E.BinOp bop xe ye _ _) = do
   xe' <- internaliseExp1 "x" xe
   ye' <- internaliseExp1 "y" ye
@@ -812,11 +820,6 @@ internaliseBinOp desc E.Bor x y (E.Signed t) _ =
   simpleBinOp desc (I.Or t) x y
 internaliseBinOp desc E.Bor x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Or t) x y
-
-internaliseBinOp desc E.LogAnd x y _ _ =
-  simpleBinOp desc I.LogAnd x y
-internaliseBinOp desc E.LogOr x y _ _ =
-  simpleBinOp desc I.LogOr x y
 
 internaliseBinOp desc E.Equal x y t _ =
   simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y

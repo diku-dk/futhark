@@ -266,16 +266,13 @@ Function application binds tightly, but not as tighly as indexing.
 ``x && y``
 ~~~~~~~~~~
 
-Logical conjunction; both operands must be of type ``bool``.  Not
-short-circuiting, as this complicates program transformation.  If
-short-circuiting behaviour is desired, the programmer can use ``if``
-explicitly.
+Short-circuiting logical conjunction; both operands must be of type
+``bool``.
 
 ``x || y``
 ~~~~~~~~~~
 
-Logical disjunction; both operands must be of type ``bool``.  As with
-``&&``, not short-circuiting.
+Short-circuiting logical disjunction; both operands must be of type ``bool``.
 
 ``! x``
 ~~~~~~~~~
