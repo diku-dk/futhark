@@ -861,12 +861,11 @@ checkExp (UnOp (ToUnsigned t) e loc) = do
   e' <- require anyNumberType =<< checkExp e
   return $ UnOp (ToUnsigned t) e' loc
 
-checkExp (If e1 e2 e3 _ pos) = do
-  e1' <- require [Prim Bool] =<< checkExp e1
+checkExp (If e1 e2 e3 _ pos) =
+  sequentially (require [Prim Bool] =<< checkExp e1) $ \e1' _ -> do
   ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
   brancht <- unifyExpTypes e2' e3'
-  let t' = addAliases brancht
-           (`HS.difference` allConsumed dflow)
+  let t' = addAliases brancht (`HS.difference` allConsumed dflow)
   return $ If e1' e2' e3' (Info t') pos
 
 checkExp (Var ident) = do
