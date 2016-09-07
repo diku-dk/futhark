@@ -6,8 +6,11 @@ module Futhark.Analysis.DataDependencies
   )
   where
 
+import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
+
+import Prelude
 
 import Futhark.Representation.AST
 
@@ -28,16 +31,18 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
           let tdeps = dataDependencies' deps tb
               fdeps = dataDependencies' deps fb
               cdeps = depsOf deps c
-              comb (v, tres, fres) =
-                (identName v, HS.unions [cdeps, depsOf tdeps tres, depsOf fdeps fres])
+              comb (pe, tres, fres) =
+                (patElemName pe,
+                 HS.unions $ [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres] ++
+                 map (depsOfVar deps) (HS.toList $ freeIn pe))
               branchdeps =
-                HM.fromList $ map comb $ zip3 (patternIdents pat)
+                HM.fromList $ map comb $ zip3 (patternValueElements pat)
                 (bodyResult tb)
                 (bodyResult fb)
           in HM.unions [branchdeps, deps, tdeps, fdeps]
 
         grow deps (Let pat _ e) =
-          let free = freeInExp e
+          let free = freeIn pat <> freeInExp e
               freeDeps = HS.unions $ map (depsOfVar deps) $ HS.toList free
           in HM.fromList [ (name, freeDeps) | name <- patternNames pat ] `HM.union` deps
 
