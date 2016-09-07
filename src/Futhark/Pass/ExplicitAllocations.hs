@@ -425,7 +425,7 @@ allocInMergeParams :: (Allocable fromlore tolore,
                        -> ([SubExp] -> AllocM fromlore tolore ([SubExp], [SubExp]))
                        -> AllocM fromlore tolore a)
                    -> AllocM fromlore tolore a
-allocInMergeParams variant merge m = do
+allocInMergeParams _variant merge m = do
   ((valparams, handle_loop_subexps), (memsizeparams, memparams)) <-
     runWriterT $ unzip <$> mapM allocInMergeParam merge
   let mergeparams' = memsizeparams <> memparams <> valparams
