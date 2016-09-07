@@ -179,8 +179,8 @@ internaliseExp desc (E.Apply fname args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
   (shapes, value_paramts, rettype_fun) <- internalFun <$> lookupFunction fname'
   argts <- mapM subExpType args'
-  let diets = replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
-      shapeargs = argShapes shapes value_paramts argts
+  let shapeargs = argShapes shapes value_paramts argts
+      diets = replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
       paramts = map (const $ I.Prim int32) shapeargs ++ value_paramts
   args'' <- ensureArgShapes asserting loc shapes paramts $ shapeargs ++ args'
   argts' <- mapM subExpType args''
@@ -885,10 +885,9 @@ internaliseLambda (E.AnonymFun params body _ (Info rettype) _) Nothing =
     (rettype', _) <- internaliseReturnType rettype
     return (map (fmap I.fromDecl) $ shapeparams ++ valparams, body', map I.fromDecl rettype')
 
-internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
+internaliseLambda (E.CurryFun fname curargs _ loc) maybe_rowtypes = do
   fun_entry <- lookupFunction fname'
-  let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
-      diets = map I.diet paramts
+  let (shapes, value_paramts, int_rettype_fun) = internalFun fun_entry
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_types <- mapM subExpType curargs'
   (params, valargs, valargs_types) <-
@@ -908,21 +907,22 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
               valargs = curargs' ++ map (I.Var . I.paramName) value_params
               valargs_types = curarg_types ++ map I.paramType value_params
           return (params, valargs, valargs_types)
-  let shapeargs = argShapes shapes paramts valargs_types
-      allargs = zip shapeargs (repeat I.Observe) ++
-                zip valargs diets
-  case int_rettype_fun $
-       map (,I.Prim int32) shapeargs ++ zip valargs valargs_types of
-    Nothing ->
-      fail $ "Cannot apply " ++ pretty fname' ++ " to arguments\n " ++
-      pretty (shapeargs ++ valargs) ++ "\nof types\n " ++
-      pretty (map (const $ I.Prim int32) shapeargs ++ valargs_types)
-    Just (ExtRetType ts) -> do
-      funbody <- insertBindingsM $ do
+  let shapeargs = argShapes shapes value_paramts valargs_types
+      diets = replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
+      paramts = map (const $ I.Prim int32) shapeargs ++ value_paramts
+  ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectBindings $ do
+    allargs <- ensureArgShapes asserting loc shapes paramts $ shapeargs ++ valargs
+    argts' <- mapM subExpType allargs
+    case int_rettype_fun $ zip allargs argts' of
+      Nothing ->
+        fail $ "Cannot apply " ++ pretty fname' ++ " to arguments\n " ++
+        pretty (shapeargs ++ valargs) ++ "\nof types\n " ++
+        pretty (map (const $ I.Prim int32) shapeargs ++ valargs_types)
+      Just (ExtRetType ts) -> do
         res <- letTupExp "curried_fun_result" $
-               I.Apply fname' allargs $ ExtRetType ts
-        resultBodyM $ map I.Var res
-      return (params, funbody, map I.fromDecl ts)
+               I.Apply fname' (zip allargs diets) $ ExtRetType ts
+        return (map I.Var res, map I.fromDecl ts)
+  return (params, mkBody fun_bnds res, ts)
   where
         fname' = longnameToName fname
 
