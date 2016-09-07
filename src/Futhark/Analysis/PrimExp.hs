@@ -84,7 +84,9 @@ instance Pretty v => Num (PrimExp v) where
         | Just z <- msum [asIntOp Sub x y, asFloatOp FSub x y] = z
         | otherwise = numBad "-" (x,y)
 
-  x * y | oneIshExp x = y
+  x * y | zeroIshExp x = x
+        | zeroIshExp y = y
+        | oneIshExp x = y
         | oneIshExp y = x
         | IntType t <- primExpType x,
           Just z <- constFold (doBinOp $ Mul t) x y = z
