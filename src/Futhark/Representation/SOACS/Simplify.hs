@@ -160,8 +160,7 @@ soacRules = (std_td_rules <> topDownRules,
 topDownRules :: (MonadBinder m,
                  LocalScope (Lore m) m,
                  Op (Lore m) ~ SOAC (Lore m)) => TopDownRules m
-topDownRules = [liftIdentityMapping,
-                removeReplicateMapping,
+topDownRules = [removeReplicateMapping,
                 removeReplicateRedomap,
                 removeReplicateWrite,
                 removeUnusedMapInput,
@@ -173,12 +172,13 @@ topDownRules = [liftIdentityMapping,
 
 bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
-                 removeUnnecessaryCopy
+                 removeUnnecessaryCopy,
+                 liftIdentityMapping
                 ]
 
 liftIdentityMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
-                       TopDownRule m
-liftIdentityMapping _ (Let pat _ (Op (Map cs outersize fun arrs))) =
+                       BottomUpRule m
+liftIdentityMapping (_, usages) (Let pat _ (Op (Map cs outersize fun arrs))) =
   case foldr checkInvariance ([], [], []) $
        zip3 (patternElements pat) ses rettype of
     ([], _, _) -> cannotSimplify
@@ -199,9 +199,11 @@ liftIdentityMapping _ (Let pat _ (Op (Map cs outersize fun arrs))) =
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup v inputMap =
-            ((Pattern [] [outId], BasicOp $ SubExp $ Var inp) : invariant,
-             mapresult,
-             rettype')
+              let e | patElemName outId `UT.isConsumed` usages = Copy inp
+                    | otherwise                                = SubExp $ Var inp
+              in ((Pattern [] [outId], BasicOp e) : invariant,
+                  mapresult,
+                  rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
           | freeOrConst e = ((Pattern [] [outId], BasicOp $ Replicate (Shape [outersize]) e) : invariant,
                              mapresult,
