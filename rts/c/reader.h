@@ -297,10 +297,10 @@ static int read_bool(void* dest) {
   skipspaces();
   if (scanf("%4c", b) == 1) {
     if (strncmp(b, "True", 4) == 0) {
-      *(int*)dest = 1;
+      *(char*)dest = 1;
       return 0;
     } else if (strncmp(b, "Fals", 4) == 0 && getchar() == 'e') {
-      *(int*)dest = 0;
+      *(char*)dest = 0;
       return 0;
     } else {
       return 1;
