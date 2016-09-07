@@ -591,7 +591,7 @@ typeOf (Index ident idx _) =
 typeOf (TupleIndex _ _ (Info t) _) = t
 typeOf (Iota _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
 typeOf (Shape _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
-typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique
+typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique `setAliases` mempty
 typeOf (Reshape shape  e _) =
   Rank n `setArrayShape` typeOf e
   where n = case typeOf shape of Tuple ts -> length ts
