@@ -1081,7 +1081,10 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
                               (Imp.For block_offset w' body'')
                   _ -> Imp.For block_offset w' body''
 
-          ImpGen.emit $ Imp.If (kernelThreadActive constants) loop mempty
+          ImpGen.emit $
+            if kernelThreadActive constants == Imp.ValueExp (BoolValue True)
+            then loop
+            else Imp.If (kernelThreadActive constants) loop mempty
 
         _ -> ImpGen.declaringPrimVar block_offset int32 $ do
           body' <- streaming constants block_size maxchunk $
