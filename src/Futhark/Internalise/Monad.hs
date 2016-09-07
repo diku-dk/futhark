@@ -59,14 +59,13 @@ newtype InternaliseM  a = InternaliseM (BinderT SOACS
             MonadWriter (DL.DList Binding),
             MonadReader InternaliseEnv,
             MonadState VNameSource,
-            MonadError String)
+            MonadError String,
+            HasScope SOACS,
+            LocalScope SOACS)
 
 instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
-
-instance HasScope SOACS InternaliseM where
-  askScope = InternaliseM askScope
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
