@@ -577,8 +577,8 @@ simplifyIndexing vtable seType idd inds consuming =
       adjust ais inds
 
     Just (Replicate (Shape [_]) (Var vv))
-      | [_]   <- inds, not consuming -> Just $ pure $ SubExpResult $ Var vv
-      | _:is' <- inds, not consuming -> Just $ pure $ IndexResult [] vv is'
+      | [DimFix{}]   <- inds, not consuming -> Just $ pure $ SubExpResult $ Var vv
+      | DimFix{}:is' <- inds, not consuming -> Just $ pure $ IndexResult [] vv is'
 
     Just (Replicate (Shape [_]) val@(Constant _))
       | [_] <- inds, not consuming -> Just $ pure $ SubExpResult val
