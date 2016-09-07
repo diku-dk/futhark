@@ -62,7 +62,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
             let shapenames = map I.paramName shapes
             return (fname,
                     FunBinding { internalFun = (shapenames,
-                                                map I.paramDeclType values,
+                                                map declTypeOf values,
                                                 applyRetType
                                                 (ExtRetType rettype')
                                                 (shapes++values)
@@ -175,18 +175,20 @@ internaliseExp desc (E.Apply fname args _ _)
   where tag ses = [ (se, I.Observe) | se <- ses ]
         fname' = longnameToName fname
 
-internaliseExp desc (E.Apply fname args _ _) = do
+internaliseExp desc (E.Apply fname args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
-  (shapes, paramts, rettype_fun) <- internalFun <$> lookupFunction fname'
+  (shapes, value_paramts, rettype_fun) <- internalFun <$> lookupFunction fname'
   argts <- mapM subExpType args'
-  let diets = map I.diet paramts
-      shapeargs = argShapes shapes paramts argts
-      args'' = zip shapeargs (repeat I.Observe) ++
-               zip args' diets
-  case rettype_fun $ map (,I.Prim int32) shapeargs ++ zip args' argts of
-    Nothing -> fail $ "Cannot apply " ++ pretty fname' ++ " to arguments " ++
-               pretty (shapeargs ++ args')
-    Just rettype -> letTupExp' desc $ I.Apply fname' args'' rettype
+  let diets = replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
+      shapeargs = argShapes shapes value_paramts argts
+      paramts = map (const $ I.Prim int32) shapeargs ++ value_paramts
+  args'' <- ensureArgShapes asserting loc shapes paramts $ shapeargs ++ args'
+  argts' <- mapM subExpType args''
+  case rettype_fun $ zip args'' argts' of
+    Nothing -> fail $ "Cannot apply " ++ pretty fname' ++ " to arguments\n " ++
+               pretty args'' ++ "\nof types\n " ++
+               pretty argts'
+    Just rettype -> letTupExp' desc $ I.Apply fname' (zip args'' diets) rettype
   where
     fname' = longnameToName fname
 
@@ -912,8 +914,9 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
   case int_rettype_fun $
        map (,I.Prim int32) shapeargs ++ zip valargs valargs_types of
     Nothing ->
-      fail $ "Cannot apply " ++ pretty fname' ++ " to arguments " ++
-      pretty (shapeargs ++ valargs)
+      fail $ "Cannot apply " ++ pretty fname' ++ " to arguments\n " ++
+      pretty (shapeargs ++ valargs) ++ "\nof types\n " ++
+      pretty (map (const $ I.Prim int32) shapeargs ++ valargs_types)
     Just (ExtRetType ts) -> do
       funbody <- insertBindingsM $ do
         res <- letTupExp "curried_fun_result" $

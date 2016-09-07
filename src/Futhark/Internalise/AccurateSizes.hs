@@ -6,6 +6,7 @@ module Futhark.Internalise.AccurateSizes
   , ensureResultShape
   , ensureResultExtShape
   , ensureShape
+  , ensureArgShapes
   , ensureShapeVar
   )
   where
@@ -78,6 +79,22 @@ ensureShape :: MonadBinder m =>
             -> SrcLoc -> Type -> String -> SubExp
             -> m SubExp
 ensureShape asserting loc = ensureExtShape asserting loc . staticShapes1
+
+-- | Reshape the arguments to a function so that they fit the expected
+-- shape declarations.  Not used to change rank of arguments.  Assumes
+-- everything is otherwise type-correct.
+ensureArgShapes :: MonadBinder m =>
+                   (m Certificates -> m Certificates)
+                -> SrcLoc -> [VName] -> [DeclType] -> [SubExp]
+                -> m [SubExp]
+ensureArgShapes asserting loc shapes paramts args =
+  zipWithM ensureArgShape (expectedTypes shapes paramts args) args
+  where ensureArgShape _ (Constant v) = return $ Constant v
+        ensureArgShape t (Var v)
+          | arrayRank t < 1 = return $ Var v
+          | otherwise =
+              ensureShape asserting loc t (baseString v) $ Var v
+
 
 ensureShapeVar :: MonadBinder m =>
                   (m Certificates -> m Certificates)
