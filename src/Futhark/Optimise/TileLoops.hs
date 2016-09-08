@@ -122,21 +122,30 @@ tileInBindings branch_variant initial_variance initial_kspace kstms = do
                                 BasicOp $ BinOp (Mul Int32) tile_size tile_size
             return (tile_size, tiled_group_size)
 
-          space <- forM gspace $ \(gtid,gdim) -> do
+          let (tiled_gspace,untiled_gspace) = splitAt 2 $ reverse gspace
+          -- Play with reversion to ensure we get increasing IDs for
+          -- ltids.  This affects readability of generated code.
+          untiled_gspace' <- fmap reverse $ forM (reverse untiled_gspace) $ \(gtid,gdim) -> do
             ltid <- newVName "ltid"
             return (gtid,gdim,
-                    ltid,tile_size)
+                    ltid, constant (1::Int32))
+          tiled_gspace' <- fmap reverse $ forM (reverse tiled_gspace) $ \(gtid,gdim) -> do
+            ltid <- newVName "ltid"
+            return (gtid,gdim,
+                    ltid, tile_size)
+          let gspace' = reverse $ tiled_gspace' ++ untiled_gspace'
+
           -- We have to recalculate number of workgroups and
           -- number of threads to fit the new workgroup size.
-          ((num_threads, num_groups), num_bnds) <- flip runBinderT mempty $
-            sufficientGroups gspace tile_size tiled_group_size
+          ((num_threads, num_groups), num_bnds) <-
+            runBinderT (sufficientGroups gspace' tiled_group_size) mempty
 
-          let kspace' = kspace { spaceStructure = NestedSpace space
+          let kspace' = kspace { spaceStructure = NestedSpace gspace'
                                , spaceGroupSize = tiled_group_size
                                , spaceNumThreads = num_threads
                                , spaceNumGroups = num_groups
                                }
-              local_ids = map (\(_, _, ltid, _) -> ltid) space
+              local_ids = map (\(_, _, ltid, _) -> ltid) gspace'
 
           (arr_chunk_params', tile_kstms) <-
             fmap unzip $ forM mk_tilings $ \mk_tiling ->
@@ -282,11 +291,12 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
   pt <- case rowType $ paramType block_param of
           Prim pt -> return pt
           _       -> Nothing
-  (permute, permute_perm, permute_dims) <- invariantToAtLeastOneDimension
+  inner_perm <- invariantToOneOfTwoInnerDims
   Just $ \tile_size local_is -> do
-    let [variant_i, invariant_i] = permute local_is
-        perm = permute_perm [0,1]
-        [(global_i,global_d),_] = rearrangeShape perm $ spaceDimensions kspace
+    let num_outer = length local_is - 2
+        perm = [0..num_outer-1] ++ map (+num_outer) inner_perm
+        invariant_i : variant_i : _ = reverse $ rearrangeShape perm local_is
+        (global_i,global_d):_ = reverse $ rearrangeShape perm $ spaceDimensions kspace
     outer_block_param <- do
       name <- newVName $ baseString (paramName block_param) ++ "_outer"
       return block_param { paramName = name }
@@ -299,8 +309,8 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
                         BasicOp $ Index [] (paramName outer_block_param) $
                         fullSlice (paramType outer_block_param) [DimFix $ Var invariant_i]
 
-    let block_size_2d = Shape $ permute_dims [tile_size, block_size]
-        block_cspace = zip local_is $ permute_dims [tile_size,block_size]
+    let block_size_2d = Shape $ rearrangeShape inner_perm [tile_size, block_size]
+        block_cspace = zip (drop num_outer local_is) $ rearrangeShape inner_perm [tile_size,block_size]
 
     block_name_2d <- newVName $ baseString (paramName block_param) ++ "_2d"
     let block_pe =
@@ -313,24 +323,24 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
 
     block_param_aux_name <- newVName $ baseString $ paramName block_param
     let block_param_aux = Ident block_param_aux_name $
-                          rearrangeType perm $ patElemType block_pe
+                          rearrangeType inner_perm $ patElemType block_pe
     let index_block_kstms =
           [mkLet' [] [block_param_aux] $
-            BasicOp $ Rearrange [] perm block_name_2d,
+            BasicOp $ Rearrange [] inner_perm block_name_2d,
            mkLet' [] [paramIdent block_param] $
             BasicOp $ Index [] (identName block_param_aux) $
             fullSlice (identType block_param_aux) [DimFix $ Var variant_i]]
 
     return (outer_block_param, do_index_bnd : write_block_stm : index_block_kstms)
 
-  where invariantToAtLeastOneDimension :: Maybe ([a] -> [a], [b] -> [b], [c] -> [c])
-        invariantToAtLeastOneDimension = do
-          [(i,_),(j,_)] <- Just $ spaceDimensions kspace
+  where invariantToOneOfTwoInnerDims :: Maybe [Int]
+        invariantToOneOfTwoInnerDims = do
+          (j,_) : (i,_) : _ <- Just $ reverse $ spaceDimensions kspace
           let variant_to = HM.lookupDefault mempty arr variance
           if i `HS.member` variant_to && not (j `HS.member` variant_to) then
-            Just (id, id, id)
+            Just [0,1]
           else if j `HS.member` variant_to && not (i `HS.member` variant_to) then
-            Just (reverse, reverse, reverse)
+            Just [1,0]
           else
             Nothing
 
@@ -352,11 +362,11 @@ varianceInBinding variance bnd =
         binding_variance = mconcat $ map (look variance) $ HS.toList (freeInBinding bnd)
 
 sufficientGroups :: MonadBinder m =>
-                    [(VName,SubExp)] -> SubExp -> SubExp
+                    [(VName, SubExp, VName, SubExp)] -> SubExp
                  -> m (SubExp, SubExp)
-sufficientGroups gspace tile_size group_size = do
-  groups_in_dims <- forM gspace $ \(_, d) ->
-    letSubExp "groups_in_dim" =<< eDivRoundingUp Int32 (eSubExp d) (eSubExp tile_size)
+sufficientGroups gspace group_size = do
+  groups_in_dims <- forM gspace $ \(_, gd, _, ld) ->
+    letSubExp "groups_in_dim" =<< eDivRoundingUp Int32 (eSubExp gd) (eSubExp ld)
   num_groups <- letSubExp "num_groups" =<<
                 foldBinOp (Mul Int32) (constant (1::Int32)) groups_in_dims
   num_threads <- letSubExp "num_threads" $
