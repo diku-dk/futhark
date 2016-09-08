@@ -168,13 +168,14 @@ parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
 
 parseRunCases :: Parser [TestRun]
 parseRunCases = parseRunCases' (0::Int)
-  where parseRunCases' i = (:) <$> parseRunCase i <*> (parseRunCases' (i+1) <|> pure [])
+  where parseRunCases' i = (:) <$> parseRunCase i <*> parseRunCases' (i+1)
+                           <|> pure []
         parseRunCase i = do
           runmode <- parseRunMode
           input <- parseInput
           expr <- parseExpectedResult
           return $ TestRun runmode input expr $ desc i input
-        desc i (InFile path) = path
+        desc _ (InFile path) = path
         desc i Values{}      = "#" ++ show i
 
 
