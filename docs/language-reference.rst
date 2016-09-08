@@ -59,7 +59,7 @@ parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
   fun dotProduct(a: [n]int, b: [n]int): int =
-    reduce(+, 0, zipWith(*, a, b))
+    reduce (+) 0 (zipWith (*) a b)
 
 Or matrix multiplication::
 
