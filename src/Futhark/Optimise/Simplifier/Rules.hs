@@ -86,31 +86,40 @@ standardRules = (topDownRules, bottomUpRules)
 -- generate wrong code.
 removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
 removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
-  | not $ all (explicitlyReturned . fst) val =
+  | not $ all (usedAfterLoop . fst) val,
+    null ctx = -- FIXME: things get tricky if we can remove all vals
+               -- but some ctxs are still used.  We take the easy way
+               -- out for now.
   let (ctx_es, val_es) = splitAt (length ctx) $ bodyResult body
       necessaryForReturned =
-        findNecessaryForReturned explicitlyReturnedOrInForm
+        findNecessaryForReturned usedAfterLoopOrInForm
         (zip (map fst $ ctx++val) $ ctx_es++val_es) (dataDependencies body)
+
       resIsNecessary ((v,_), _) =
-        explicitlyReturned v ||
+        usedAfterLoop v ||
         paramName v `HS.member` necessaryForReturned ||
         referencedInPat v ||
         referencedInForm v
+
       (keep_ctx, discard_ctx) =
         partition resIsNecessary $ zip ctx ctx_es
       (keep_valpart, discard_valpart) =
         partition (resIsNecessary . snd) $
         zip (patternValueElements pat) $ zip val val_es
+
       (keep_valpatelems, keep_val) = unzip keep_valpart
       (_discard_valpatelems, discard_val) = unzip discard_valpart
       (ctx', ctx_es') = unzip keep_ctx
       (val', val_es') = unzip keep_val
+
       body' = body { bodyResult = ctx_es' ++ val_es' }
       free_in_keeps = freeIn keep_valpatelems
+
       stillUsedContext pat_elem =
         patElemName pat_elem `HS.member`
         (free_in_keeps <>
          freeIn (filter (/=pat_elem) $ patternContextElements pat))
+
       pat' = pat { patternValueElements = keep_valpatelems
                  , patternContextElements =
                      filter stillUsedContext $ patternContextElements pat }
@@ -129,9 +138,9 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
        letBind_ pat' $ DoLoop ctx' val' form body''
   where pat_used = map (`UT.used` used) $ patternValueNames pat
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
-        explicitlyReturned = flip elem used_vals . paramName
-        explicitlyReturnedOrInForm p =
-          explicitlyReturned p || paramName p `HS.member` freeIn form
+        usedAfterLoop = flip elem used_vals . paramName
+        usedAfterLoopOrInForm p =
+          usedAfterLoop p || paramName p `HS.member` freeIn form
         patAnnotNames = freeIn $ map fst $ ctx++val
         referencedInPat = (`HS.member` patAnnotNames) . paramName
         referencedInForm = (`HS.member` freeIn form) . paramName
@@ -147,16 +156,16 @@ removeRedundantMergeVariables _ _ =
 findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
                          -> HM.HashMap VName Names
                          -> Names
-findNecessaryForReturned explicitlyReturned merge_and_res allDependencies =
+findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
   iterateNecessary mempty
   where iterateNecessary prev_necessary
           | necessary == prev_necessary = necessary
           | otherwise                   = iterateNecessary necessary
           where necessary = mconcat $ map dependencies returnedResultSubExps
-                explicitlyReturnedOrNecessary param =
-                  explicitlyReturned param || paramName param `HS.member` prev_necessary
+                usedAfterLoopOrNecessary param =
+                  usedAfterLoop param || paramName param `HS.member` prev_necessary
                 returnedResultSubExps =
-                  map snd $ filter (explicitlyReturnedOrNecessary . fst) merge_and_res
+                  map snd $ filter (usedAfterLoopOrNecessary . fst) merge_and_res
                 dependencies (Constant _) =
                   HS.empty
                 dependencies (Var v)      =
