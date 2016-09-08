@@ -132,7 +132,7 @@ runTestCase (TestCase program testcase progs extra_options) = do
       justCompileTestProgram compiler program
 
     RunCases run_cases ->
-      forM_ run_cases $ \run -> do
+      forM_ run_cases $ \run -> context ("dataset " <> T.pack (runDescription run)) $ do
         unless (runMode run `elem` [CompiledOnly, NoTravis]) $
           forM_ (configInterpreters progs) $ \interpreter ->
             context ("Interpreting with " <> T.pack interpreter) $
@@ -169,7 +169,7 @@ getExpectedResult _   (Succeeds Nothing) = return $ Succeeds Nothing
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()
-interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = do
+interpretTestProgram futharki program (TestRun _ inputValues expectedResult _) = do
   input <- T.unlines . map prettyText <$> getValues dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (code, output, err) <- io $ readProcessWithExitCode futharki [program] input
@@ -181,7 +181,7 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = d
   where dir = takeDirectory program
 
 compileTestProgram :: [String] -> String -> FilePath -> TestRun -> TestM ()
-compileTestProgram extra_options futharkc program (TestRun _ inputValues expectedResult) = do
+compileTestProgram extra_options futharkc program (TestRun _ inputValues expectedResult _) = do
   input <- getValuesText dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (futcode, _, futerr) <-

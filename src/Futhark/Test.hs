@@ -112,6 +112,7 @@ data TestRun = TestRun
                { runMode :: RunMode
                , runInput :: Values
                , runExpectedResult :: ExpectedResult Values
+               , runDescription :: String
                }
              deriving (Show)
 
@@ -166,7 +167,16 @@ parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
                pure InterpretedAndCompiled
 
 parseRunCases :: Parser [TestRun]
-parseRunCases = many $ TestRun <$> parseRunMode <*> parseInput <*> parseExpectedResult
+parseRunCases = parseRunCases' (0::Int)
+  where parseRunCases' i = (:) <$> parseRunCase i <*> (parseRunCases' (i+1) <|> pure [])
+        parseRunCase i = do
+          runmode <- parseRunMode
+          input <- parseInput
+          expr <- parseExpectedResult
+          return $ TestRun runmode input expr $ desc i input
+        desc i (InFile path) = path
+        desc i Values{}      = "#" ++ show i
+
 
 parseExpectedResult :: Parser (ExpectedResult Values)
 parseExpectedResult =

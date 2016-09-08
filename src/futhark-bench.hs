@@ -92,7 +92,7 @@ runBenchmark opts program spec = do
         ExitSuccess     -> return ()
 
       BenchResult program . catMaybes <$>
-        zipWithM (runBenchmarkCase opts program) [0..] cases
+        mapM (runBenchmarkCase opts program) cases
     _ ->
       return $ BenchResult program []
   where compiler = optCompiler opts
@@ -118,12 +118,12 @@ runBenchM = runExceptT
 io :: IO a -> BenchM a
 io = liftIO
 
-runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO (Maybe DataResult)
-runBenchmarkCase _ _ _ (TestRun _ _ RunTimeFailure{}) =
+runBenchmarkCase :: BenchOptions -> FilePath -> TestRun -> IO (Maybe DataResult)
+runBenchmarkCase _ _ (TestRun _ _ RunTimeFailure{} _) =
   return Nothing -- Not our concern, we are not a testing tool.
-runBenchmarkCase _ _ _ (TestRun NoBench _ _) =
+runBenchmarkCase _ _ (TestRun NoBench _ _ _) =
   return Nothing -- Too small to bother benchmarking.
-runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) =
+runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dataset_desc) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
@@ -152,9 +152,6 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
     return runtimes
 
   where dir = takeDirectory program
-        dataset_desc = case input_spec of
-                         InFile path -> path
-                         Values{} -> "#" ++ show i
 
 readRuntime :: T.Text -> Maybe Int
 readRuntime s = case reads $ T.unpack s of
