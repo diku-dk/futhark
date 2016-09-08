@@ -401,7 +401,7 @@ FloatType :: { (FloatType, SrcLoc) }
           | f64  { (Float64, $1) }
 
 Params :: { [PatternBase NoInfo Name] }
-       :              { [] }
+       : Param        { [$1] }
        | Param Params { $1 : $2 }
 
 Param :: { PatternBase NoInfo Name }
