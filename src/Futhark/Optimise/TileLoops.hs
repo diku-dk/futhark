@@ -296,7 +296,7 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
     let num_outer = length local_is - 2
         perm = [0..num_outer-1] ++ map (+num_outer) inner_perm
         invariant_i : variant_i : _ = reverse $ rearrangeShape perm local_is
-        (global_i,global_d):_ = reverse $ rearrangeShape perm $ spaceDimensions kspace
+        (global_i,global_d):_ = rearrangeShape inner_perm $ drop num_outer $ spaceDimensions kspace
     outer_block_param <- do
       name <- newVName $ baseString (paramName block_param) ++ "_outer"
       return block_param { paramName = name }
