@@ -33,7 +33,7 @@ modified.
 Function Declarations
 ---------------------
 
-A function declaration must specify the name name, parameters, return
+A function declaration must specify the name, parameters, return
 type, and body of the function::
 
   fun name(params...): rettype = body
