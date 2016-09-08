@@ -237,7 +237,11 @@ man_pages = [
     ('man/futharki', 'futharki', 'Futhark interpreter',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-test', 'futhark-test', 'Futhark testing tool',
-     ['Troels Henriksen (athas@sigkill.dk)'], 1)
+     ['Troels Henriksen (athas@sigkill.dk)'], 1),
+    ('man/futhark-bench', 'futhark-bench', 'Futhark benchmarking tool',
+     ['Troels Henriksen (athas@sigkill.dk)'], 1),
+    ('man/futhark-dataset', 'futhark-dataset', 'Generate random data sets',
+     ['Troels Henriksen (athas@sigkill.dk)'], 1),
 ]
 
 # If true, show URL addresses after external links.
