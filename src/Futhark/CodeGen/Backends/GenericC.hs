@@ -721,14 +721,14 @@ benchmarkOptions =
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
           if (runtime_file == NULL) {
-            panic(1, "Cannot open %s: %s", optarg, strerror(errno));
+            panic(1, "Cannot open %s: %s\n", optarg, strerror(errno));
           }
         }|]
         set_num_runs = [C.cstm|{
           num_runs = atoi(optarg);
           perform_warmup = 1;
           if (num_runs <= 0) {
-            panic(1, "Need a positive number of runs, not %s", optarg);
+            panic(1, "Need a positive number of runs, not %s\n", optarg);
           }
         }|]
 
