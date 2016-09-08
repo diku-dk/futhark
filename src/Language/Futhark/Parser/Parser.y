@@ -360,6 +360,7 @@ UserType :: { UncheckedUserType }
          : PrimType      { let (t,loc) = $1 in UserPrim t loc }
          | '*' UserType  { UserUnique $2 $1 }
          | '[' DimDecl ']' UserType { UserArray $4 $2 $1 }
+         | '(' ')'           { UserTuple [] $1 }
          | '(' UserTypes ')' { UserTuple $2 $1 }
          | QualName { UserTypeAlias (fst $1) (snd $1) }
 ;
