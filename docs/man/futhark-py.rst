@@ -1,28 +1,29 @@
 .. role:: ref(emphasis)
 
-.. _futhark-c(1):
+.. _futhark-py(1):
 
-=========
-futhark-c
-=========
+==========
+futhark-py
+==========
 
 SYNOPSIS
 ========
 
-futhark-c [-V] [-o outfile] infile
+futhark-py [-V] [-o outfile] infile
 
 DESCRIPTION
 ===========
 
-``futhark-c`` translates a Futhark program to sequential C code, and
-then compiles that C code with gcc(1) to an executable binary program.
-The standard Futhark optimisation pipeline is used, and GCC is invoked
-with ``-O3``, ``-lm``, and ``-std=c99``.
+``futhark-py`` translates a Futhark program to sequential Python code.
 
 The resulting program will read the arguments to the ``main`` function
 from standard input and print its return value on standard output.
 The arguments are read and printed in Futhark syntax, just like
 futharki(1).
+
+The generated code is very slow, and likely not very useful.  It might
+be more interesting to use this commands big brother,
+``futhark-pyopencl``.
 
 OPTIONS
 =======
@@ -45,4 +46,4 @@ OPTIONS
 SEE ALSO
 ========
 
-futharki(1), futhark-test(1)
+futhark-pyopencl(1)
