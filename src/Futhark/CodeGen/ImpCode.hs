@@ -253,9 +253,9 @@ instance Pretty op => Pretty (Code op) where
     indent 2 (ppr body) </>
     text "}"
   ppr (DeclareMem name space) =
-    text "declare" <+> ppr name <+> text "as memory block" <> ppr space
+    text "var" <+> ppr name <> text ": mem" <> parens (ppr space)
   ppr (DeclareScalar name t) =
-    text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
+    text "var" <+> ppr name <> text ":" <+> ppr t
   ppr (Allocate name e space) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
   ppr (Write name i bt space vol val) =
