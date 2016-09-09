@@ -645,7 +645,7 @@ simplifyIndexing vtable seType idd inds consuming =
             added <- letSubExp "index_concat_add" $ BasicOp $ BinOp (Add Int32) n m
             return (added, n)
       (_, starts) <- mapAccumLM add x_len xs_lens
-      let xs_and_starts = zip (reverse xs) starts
+      let xs_and_starts = reverse $ zip xs starts
 
       let mkBranch [] =
             letSubExp "index_concat" $ BasicOp $ Index cs x $ ibef ++ DimFix i : iaft
