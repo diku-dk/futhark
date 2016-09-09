@@ -1,0 +1,44 @@
+#!/bin/sh
+":"; exec emacs --quick --script "$0" "$@" # -*-emacs-lisp-*-
+
+;; Suppress certain messages.  From <http://superuser.com/a/1025827>.
+(defun suppress-messages (old-fun &rest args)
+  (cl-flet ((silence (&rest args1) (ignore)))
+    (advice-add 'message :around #'silence)
+    (unwind-protect
+        (apply old-fun args)
+      (advice-remove 'message #'silence))))
+
+;; Having "Indenting region..." messages on stderr are silly.
+(advice-add 'indent-region :around #'suppress-messages)
+
+;; "Wrote" messages (from `save-buffer') are also a bit annoying, but seem to
+;; originate in the `write-region' function from Emacs' C code (and not Emacs
+;; Lisp code), so they cannot easily be suppressed.
+
+(defun futfmt-print-help ()
+  (princ "Usage: futfmt [-i] FILE\n\n")
+  (princ "Indent a Futhark program.\n")
+  (princ "If not -i, output the indented buffer on standard out.\n")
+  (princ "If -i, write the indented buffer to the file.\n"))
+
+;; Load futhark-mode.
+(add-to-list 'load-path ".")
+(require 'futhark-mode)
+
+;; Read file and indent.
+(let ((has-args (elt argv 0)))
+  (if (not has-args)
+      (futfmt-print-help)
+    (let ((is-inline (string= (elt argv 0) "-i")))
+      (let ((futhark-file-path (or (and is-inline (elt argv 1))
+                                   (elt argv 0))))
+        (find-file futhark-file-path)
+        (futhark-mode)
+        (indent-region (point-min) (point-max))
+        (if is-inline
+            (save-buffer)
+          (princ (buffer-string)))))))
+
+;; EXIT
+(kill-emacs 0)
