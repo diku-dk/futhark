@@ -149,7 +149,7 @@ internaliseExp desc (E.ArrayLit [] (Info et) _) =
   where arrayLit et' =
           I.BasicOp $ I.ArrayLit [] $ et' `annotateArrayShape` []
 
-internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
+internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
@@ -160,8 +160,10 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
       letSubExps desc $ map arraylit rowtypes
     e' : _ -> do
       rowtypes <- mapM subExpType e'
-      let arraylit ks rt = I.BasicOp $ I.ArrayLit ks rt
-      letSubExps desc $ zipWith arraylit (transpose es') rowtypes
+      let arraylit ks rt = do
+            ks' <- mapM (ensureShape asserting loc rt "elem_reshaped") ks
+            return $ I.BasicOp $ I.ArrayLit ks' rt
+      letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) loc) =
   internaliseExp desc $ E.ArrayLit [] (Info et') loc
