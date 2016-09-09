@@ -230,6 +230,8 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
+    ('man/futhark', 'futhark', 'Futhark development tool',
+     ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-c', 'futhark-c', 'Compile Futhark to sequential C',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-opencl', 'futhark-opencl', 'Compile Futhark to OpenCL',
