@@ -36,8 +36,6 @@
 
 ;;; Code:
 
-;;;; Basics.
-
 (require 'cl) ; incf, some
 
 ;;;###autoload
@@ -52,8 +50,8 @@
 
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with" "type"
-    "fun" "entry" "fn" "for" "while" "do" "do" "op" "not"
-    "empty" "unsafe" "default" "include")
+    "fun" "entry" "fn" "for" "while" "do" "op" "not"
+    "empty" "unsafe" "default" "include" "struct")
   "All Futhark keywords.")
 
 (defconst futhark-builtin-functions
@@ -80,88 +78,116 @@
   "All Futhark booleans.")
 
 (defconst futhark-var
-  "[_'[:alnum:]]+"
+  (concat "\\(?:" "[_'[:alnum:]]+" "\\)")
   "A regex describing a Futhark variable.")
 
-(defconst futhark-type
-  (concat "\\*?" "\\(?:"
-          "\\(?:"
+(defconst futhark-non-tuple-type
+  (concat "\\(?:"
+          "\\*" "?"
+           "\\(?:"
+             "\\["
+               "\\(?:"
+                 ""
+               "\\|"
+                 futhark-var
+               "\\)"
+             "\\]"
+           "\\)" "*"
+           futhark-var
+           "\\)"
+           )
+  "A regex describing a Futhark type which is not a tuple")
 
-          "\\(?:" "\\[" "\\(?:"
-          ""
-          "\\|"
-          futhark-var
-          "\\)" "\\]" "\\)*" futhark-var
-
-          "\\)" "\\|" "\\(?:"
-
-          "([^)]+)"
-
+(defconst futhark-tuple-type
+  (concat "\\(?:"
+          "("
+          "[^)]" "+"
+          ")"
           "\\)"
-          "\\)")
-;  (concat "\\(?:\\(?:\\[[^]]+\\]\\)\\|\\(?:([^)]+)\\)\\|" futhark-var "\\)")
-  "A regex describing a Futhark type, built-in or user-specified.
-Does not recognise nested tuples or nested arrays.")
+          )
+  "A regex describing a Futhark type which is a tuple")
+
+(defconst futhark-type
+  (concat "\\(?:"
+          futhark-non-tuple-type
+          "\\|"
+          futhark-tuple-type
+          "\\)"
+          )
+  "A regex describing a Futhark type")
 
 
 ;;; Highlighting
 
-(defvar futhark-font-lock
-  `(
+(let (
+      (ws "[[:space:]\n]*")
+      (ws1 "[[:space:]\n]+")
+      )
+  (defvar futhark-font-lock
+    `(
 
-    ;; Function declarations
-    (,(concat "\\(?:fun\\|entry\\)[[:space:]\n]+" futhark-type
-              "[[:space:]\n]+\\(" futhark-var "\\)")
-     . '(1 font-lock-function-name-face))
+      ;; Function declarations.
+      (,(concat "\\(?:" "fun" "\\|" "entry" "\\)"
+                ws1 "\\(" futhark-var "\\)")
+       . '(1 font-lock-function-name-face))
 
-    ;; Variable and tuple declarations
-    ;;; Lets
-    (,(concat "let[[:space:]\n]+\\(" futhark-var "\\)")
-     . '(1 font-lock-variable-name-face))
-    (,(concat "let[[:space:]\n]+(\\([^)]+\\)")
-     . '(1 font-lock-variable-name-face))
-    ;;; Function parameters
-    (,(concat "[(,][[:space:]\n]*" futhark-type "[[:space:]]+\\("
-              futhark-var "\\)")
-     . '(1 font-lock-variable-name-face))
+      ;; Variable and tuple declarations.
+      ;;; Lets.
+      ;;;; Primitive values.
+      (,(concat "let" ws1
+                "\\(" futhark-var "\\)")
+       . '(1 font-lock-variable-name-face))
+      ;;;; Tuples.  TODO: It would be nice to highlight only the variable names
+      ;;;; inside the parantheses, and not also the commas.
+      (,(concat "let" ws1 "("
+                "\\(" "[^)]+" "\\)")
+       . '(1 font-lock-variable-name-face))
+      ;;; Function parameters.
+      (,(concat "\\(" futhark-var "\\)" ws ":")
+       . '(1 font-lock-variable-name-face))
 
-    ;; Keywords
-    (,(regexp-opt futhark-keywords 'words)
-     . font-lock-keyword-face)
+      ;; Keywords.
+      (,(regexp-opt futhark-keywords 'words)
+       . font-lock-keyword-face)
 
-    ;; Types
-    ;;; Type aliases
-    (,(concat "type[[:space:]]+\\(" futhark-type "\\)")
-     . '(1 font-lock-type-face))
-    (,(concat "type[[:space:]]+" futhark-type "[[:space:]]*=[[:space:]]*"
-              "\\(" futhark-type "\\)")
-     . '(1 font-lock-type-face))
-    ;;; Function return type
-    (,(concat "fu?n[[:space:]]+\\(" futhark-type "\\)")
-     . '(1 font-lock-type-face))
-    ;;; Function parameters types
-    (,(concat "[(,][[:space:]\n]*\\(" futhark-type "\\)[[:space:]]+"
-              futhark-var)
-     . '(1 font-lock-type-face))
-    ;;; Builtins
-    (,(regexp-opt futhark-builtin-types 'words)
-     . font-lock-type-face)
+      ;; Types.
+      ;;; Type aliases.  TODO: It would be nice to highlight only the variable
+      ;;; names, and not also the commas and parantheses.
+      (,(concat "type" ws1
+                "\\("
+                "\\(?:" futhark-type ws ",?" ws "\\)" "+"
+                "\\)")
+       . '(1 font-lock-type-face))
+      (,(concat "type" "[[:space:]]+"
+                "\\(?:" futhark-type ws ",?" ws "\\)" "+"
+                ws "=" ws
+                "\\(" ".+" "\\)"
+                )
+       . '(1 font-lock-type-face))
+      ;;; Function parameters types and return type.  This does not work with
+      ;;; nested tuple types.
+      (,(concat ":" ws "\\(" futhark-type "\\)")
+       . '(1 font-lock-type-face))
+      ;;; Builtin types.
+      (,(regexp-opt futhark-builtin-types 'words)
+       . font-lock-type-face)
 
-    ;; Builtins
-    ;;; Functions
-    (,(regexp-opt futhark-builtin-functions 'words)
-     . font-lock-builtin-face)
-    ;;; Operators
-    (,(regexp-opt futhark-builtin-operators)
-     . font-lock-builtin-face)
+      ;; Builtins.
+      ;;; Functions.
+      (,(regexp-opt futhark-builtin-functions 'words)
+       . font-lock-builtin-face)
+      ;;; Operators.
+      (,(regexp-opt futhark-builtin-operators)
+       . font-lock-builtin-face)
 
-    ;; Constants
-    ;;; Booleans
-    (,(regexp-opt futhark-booleans 'words)
-     . font-lock-constant-face)
+      ;; Constants.
+      ;;; Booleans.
+      (,(regexp-opt futhark-booleans 'words)
+       . font-lock-constant-face)
 
-    )
-  "Highlighting expressions for Futhark.")
+      )
+    "Highlighting expressions for Futhark.")
+  )
 
 (defvar futhark-mode-syntax-table
   (let ((st (make-syntax-table)))
