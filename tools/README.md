@@ -1,5 +1,12 @@
-Futhark syntax highlighter
-==========================
+Futhark tools
+=============
+
+Emacs mode
+----------
+
+See the file `futhark-mode.el` (contains install instructions).  This
+Emacs mode provides both syntax highlighting and automatic indentation.
+
 
 GtkSourceView
 -------------
