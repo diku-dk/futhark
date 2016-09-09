@@ -33,6 +33,8 @@ our `publications`_.
 
    man/futhark-c.rst
    man/futhark-opencl.rst
+   man/futhark-py.rst
+   man/futhark-pyopencl.rst
    man/futharki.rst
    man/futhark-test.rst
    man/futhark-bench.rst
