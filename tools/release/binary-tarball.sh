@@ -45,6 +45,7 @@ cp -r $skeletondir $tarballdir
 echo "$commit" > $tarballdir/commit-id
 
 cp -r $binpath $tarballdir
+cp $repodir/LICENSE $tarballdir/LICENSE
 mkdir -p $tarballdir/share/man/man1/
 cp -r $repodir/docs/_build/man/*.1 $tarballdir/share/man/man1/
 
