@@ -465,14 +465,27 @@ binding bnds = check . local (`bindVars` bnds)
                 names = HS.fromList $ map identName bnds
                 divide s = (s `HS.intersection` names, s `HS.difference` names)
 
-bindingPattern :: [Pattern] -> TypeM a -> TypeM a
-bindingPattern ps m = do
-  checkForDuplicateNames ps
-  binding (HS.toList $ HS.unions $ map patIdentSet ps) $ do
+bindingPatterns :: [(PatternBase NoInfo VName, InferredType)]
+               -> ([Pattern] -> TypeM a) -> TypeM a
+bindingPatterns ps m = do
+  ps' <- mapM (uncurry checkPattern) ps
+  checkForDuplicateNames ps'
+  binding (HS.toList $ HS.unions $ map patIdentSet ps') $ do
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
-    mapM_ observe $ concatMap patternDims ps
-    m
+    mapM_ observe $ concatMap patternDims ps'
+    m ps'
+
+bindingPattern :: PatternBase NoInfo VName -> InferredType
+               -> (Pattern -> TypeM a) -> TypeM a
+bindingPattern p t m = do
+  p' <- checkPattern p t
+  checkForDuplicateNames [p']
+  binding (HS.toList $ patIdentSet p') $ do
+    -- Perform an observation of every declared dimension.  This
+    -- prevents unused-name warnings for otherwise unused dimensions.
+    mapM_ observe $ patternDims p'
+    m p'
 
 patternDims :: Pattern -> [Ident]
 patternDims (TuplePattern pats _) = concatMap patternDims pats
@@ -722,10 +735,8 @@ initialFtable = HM.fromList $ map addBuiltin $ HM.toList builtInFunctions
   where addBuiltin (name, (t, ts)) = (name, (([],name), Prim t, map Prim ts))
 
 checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
-checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
-  params' <- mapM (`checkPattern` NoneInferred) params
-
-  bindingPattern params' $ do
+checkFun (FunDef entry fullname@(fname,_) rettype params body loc) =
+  bindingPatterns (zip params $ repeat NoneInferred) $ \params' -> do
     rettype' <- checkTypeDecl rettype
     body' <- checkFunBody fname body (Just rettype') loc
     let rettype_structural = toStructural $ unInfo $ expandedType rettype'
@@ -887,13 +898,12 @@ checkExp (Apply fname args _ loc) = do
       return $ Apply longname (zip args' $ map diet paramtypes) (Info rettype') loc
 
 checkExp (LetPat pat e body pos) =
-  sequentially (checkExp e) $ \e' _ -> do
-    -- Not technically an ascription, but we want the pattern to have
-    -- exactly the type of 'e'.
-    pat' <- checkPattern pat $ Ascribed $ typeOf e'
-    bindingPattern [pat'] $ do
-      body' <- checkExp body
-      return $ LetPat pat' e' body' pos
+  sequentially (checkExp e) $ \e' _ ->
+  -- Not technically an ascription, but we want the pattern to have
+  -- exactly the type of 'e'.
+  bindingPattern pat (Ascribed $ typeOf e') $ \pat' -> do
+    body' <- checkExp body
+    return $ LetPat pat' e' body' pos
 
 checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
   src' <- checkIdent src
@@ -1166,9 +1176,9 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 
   -- Check the loop body.  Play a little with occurences to ensure it
   -- does not look like none of the merge variables are being used.
-  mergepat' <- checkPattern mergepat $ Ascribed $ typeOf mergeexp' `setAliases` mempty
-  (((form', loopbody'), bodyflow), freeflow) <-
-    noUnique $ collectOccurences $ bindingPattern [mergepat'] $
+  (((mergepat', form', loopbody'), bodyflow), freeflow) <-
+    noUnique $ collectOccurences $
+    bindingPattern mergepat (Ascribed $ typeOf mergeexp' `setAliases` mempty) $ \mergepat' ->
     onlySelfAliasing $ binding bindExtra $ tapOccurences $
     case form of
       For dir lboundexp i_ident uboundexp -> do
@@ -1176,7 +1186,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
         uboundexp' <- require [Prim $ Signed Int32] =<< checkExp uboundexp
         loopbody' <- checkExp loopbody
         let i_ident' = i_ident { identType = Info $ Prim $ Signed Int32 }
-        return (For dir lboundexp' i_ident' uboundexp',
+        return (mergepat',
+                For dir lboundexp' i_ident' uboundexp',
                 loopbody')
       While condexp -> do
         (condexp', condflow) <-
@@ -1184,7 +1195,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
         (loopbody', bodyflow) <-
           collectOccurences $ checkExp loopbody
         occur $ condflow `seqOccurences` bodyflow
-        return (While condexp',
+        return (mergepat',
+                While condexp',
                 loopbody')
 
   let consumed_merge = HS.map identName (patIdentSet mergepat') `HS.intersection`
@@ -1469,11 +1481,11 @@ checkLambda :: LambdaBase NoInfo VName -> [Arg]
             -> TypeM Lambda
 checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
   | length params == length args = do
-      params' <- zipWithM checkPattern params $
-                 map (Inferred . (`setAliases` mempty) . argType) args
+      let params_with_ts = zip params $ map (Inferred . (`setAliases` mempty) . argType) args
       maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
-      body' <- bindingPattern params' $
-        checkFunBody (nameFromString "<anonymous>") body maybe_ret' loc
+      (params', body') <- bindingPatterns params_with_ts $ \params' -> do
+        body' <- checkFunBody (nameFromString "<anonymous>") body maybe_ret' loc
+        return (params', body')
       checkFuncall Nothing loc (map patternStructType params') args
       let ret' = case maybe_ret' of
                    Nothing -> flip setAliases NoInfo $ vacuousShapeAnnotations $ typeOf body'
