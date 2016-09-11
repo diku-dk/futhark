@@ -483,13 +483,13 @@ patternDims (PatternAscription p t) =
         dimIdent loc (NamedDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
 patternDims _ = []
 
-lookupVar :: VName -> SrcLoc -> TypeM Type
-lookupVar name pos = do
+checkName :: VName -> SrcLoc -> TypeM (VName, Type)
+checkName name pos = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
     Nothing -> bad $ UnknownVariableError (baseName name) pos
     Just (Bound t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse pos (baseName name)
-                   | otherwise -> return t
+                   | otherwise -> return (name, t)
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
 
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
@@ -724,7 +724,6 @@ initialFtable = HM.fromList $ map addBuiltin $ HM.toList builtInFunctions
 checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
 checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
   params' <- mapM (`checkPattern` NoneInferred) params
-  checkForDuplicateNames params'
 
   bindingPattern params' $ do
     rettype' <- checkTypeDecl rettype
@@ -1311,8 +1310,8 @@ checkLiteral loc (ArrayValue arr rt) = do
 
 checkIdent :: IdentBase NoInfo VName -> TypeM Ident
 checkIdent (Ident name _ pos) = do
-  vt <- lookupVar name pos
-  return $ Ident name (Info vt) pos
+  (name', vt) <- checkName name pos
+  return $ Ident name' (Info vt) pos
 
 data InferredType = NoneInferred
                   | Inferred Type
@@ -1590,8 +1589,8 @@ checkDim _ AnyDim =
 checkDim _ (ConstDim _) =
   return ()
 checkDim loc (NamedDim name) = do
-  t <- lookupVar name loc
-  observe $ Ident name (Info (Prim (Signed Int32))) loc
+  (name', t) <- checkName name loc
+  observe $ Ident name' (Info (Prim (Signed Int32))) loc
   case t of
     Prim (Signed Int32) -> return ()
     _                   -> bad $ DimensionNotInteger loc $ baseName name
