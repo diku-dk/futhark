@@ -213,9 +213,9 @@ instance Eq (shape vn) =>
   _ == _ =
     False
 
--- | An Futhark type is either an array, a prim type, or a tuple.
--- When comparing types for equality with '==', aliases are ignored,
--- but dimensions much match.
+-- | A Futhark type is either an array, a prim type, or a tuple.  When
+-- comparing types for equality with '==', aliases are ignored, but
+-- dimensions much match.
 data TypeBase shape as vn = Prim PrimType
                           | Array (ArrayTypeBase shape as vn)
                           | Tuple [TypeBase shape as vn]
