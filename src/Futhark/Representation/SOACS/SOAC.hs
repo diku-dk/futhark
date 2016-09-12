@@ -411,7 +411,6 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
         _ -> return ()
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
-  -- let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
   let fake_lamarrs' = map asArg lamarrs'
   (_,occurs) <- TC.collectOccurences $
                 TC.checkExtLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
