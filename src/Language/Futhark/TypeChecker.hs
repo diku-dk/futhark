@@ -172,8 +172,8 @@ instance Show TypeError where
     "Duplicate definition of type '" ++ pretty name ++ "' at line " ++ locStr loc
   show (InvalidUniqueness loc t) =
     "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ locStr loc ++ "."
-  show (UndefinedType loc longname) =
-    "Unknown type " ++ pretty longname ++ " referenced at " ++ locStr loc ++ "."
+  show (UndefinedType loc name) =
+    "Unknown type " ++ pretty name ++ " referenced at " ++ locStr loc ++ "."
   show (InvalidField loc t field) =
     "Attempt to access field '" ++ field ++ "' of value of type " ++
     pretty t ++ " at " ++ locStr loc ++ "."
@@ -1599,8 +1599,8 @@ expandType :: (Applicative m, MonadError TypeError m) =>
             -> UserType VName
             -> m (StructTypeBase VName)
 
-expandType look (UserTypeAlias longname loc) =
-  look longname loc
+expandType look (UserTypeAlias name loc) =
+  look name loc
 expandType _ (UserPrim prim _) =
   return $ Prim prim
 expandType look (UserTuple ts _) =
@@ -1617,10 +1617,10 @@ expandType look (UserUnique t loc) = do
 checkTypeDecl :: TypeDeclBase NoInfo VName -> TypeM (TypeDeclBase Info VName)
 checkTypeDecl (TypeDecl t NoInfo) =
   TypeDecl t . Info <$> expandType look t
-  where look longname loc = do
-          types <- asks (typeFromScope longname)
+  where look name loc = do
+          types <- asks (typeFromScope name)
           case types of
-            Nothing    -> throwError $ UndefinedType loc $ untagQualName longname
+            Nothing    -> throwError $ UndefinedType loc $ untagQualName name
             Just namet -> return namet
 
 -- Creating the initial type alias table is done by maintaining a
