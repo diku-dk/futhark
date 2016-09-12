@@ -1,6 +1,8 @@
 -- Simple game of life implementation with a donut world.  Tested with
 -- a glider running for four iterations.
 --
+-- http://rosettacode.org/wiki/Conway's_Game_of_Life
+--
 -- ==
 -- input {
 --   [[0, 0, 0, 0, 0],
