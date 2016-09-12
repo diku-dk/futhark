@@ -507,6 +507,17 @@ checkName name pos = do
                    | otherwise -> return (name, t)
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
 
+lookupFunction :: QualName VName -> SrcLoc -> TypeM FunBinding
+lookupFunction qn@(QualName (_, name)) loc =
+  maybe explode return =<< asks (HM.lookup name . envFtable)
+  where explode = bad $ UnknownFunctionError (untagQualName qn) loc
+
+lookupType :: QualName VName -> SrcLoc -> TypeM TypeBinding
+lookupType qn@(QualName (_, name)) loc =
+  maybe explode return =<< asks (HM.lookup name . envTAtable)
+  where explode = bad $ UndefinedType loc (untagQualName qn)
+
+
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
@@ -871,18 +882,15 @@ checkExp (Var ident) = do
   return $ Var ident'
 
 checkExp (Apply fname args _ loc) = do
-  bnd <- asks (funFromScope fname)
-  case bnd of
-    Nothing -> bad $ UnknownFunctionError (untagQualName fname) loc
-    Just (ftype, paramtypes) -> do
-      (args', argflows) <- unzip <$> mapM (\(arg,_) -> (checkArg arg)) args
+  (ftype, paramtypes) <- lookupFunction fname loc
+  (args', argflows) <- unzip <$> mapM (\(arg,_) -> (checkArg arg)) args
 
-      let rettype' = returnType (removeShapeAnnotations ftype)
-                     (map diet paramtypes) (map typeOf args')
+  let rettype' = returnType (removeShapeAnnotations ftype)
+                 (map diet paramtypes) (map typeOf args')
 
-      checkFuncall (Just fname) loc paramtypes argflows
+  checkFuncall (Just fname) loc paramtypes argflows
 
-      return $ Apply fname (zip args' $ map diet paramtypes) (Info rettype') loc
+  return $ Apply fname (zip args' $ map diet paramtypes) (Info rettype') loc
 
 checkExp (LetPat pat e body pos) =
   sequentially (checkExp e) $ \e' _ ->
@@ -1482,16 +1490,13 @@ checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  bnd <- asks (funFromScope fname)
-  case bnd of
-    Nothing -> bad $ UnknownFunctionError (untagQualName fname) loc
-    Just (rt, paramtypes) -> do
-      let rettype' = fromStruct $ removeShapeAnnotations rt
-      case find (unique . snd) $ zip curryargexps paramtypes of
-        Just (e, _) -> bad $ CurriedConsumption (untagQualName fname) $ srclocOf e
-        _           -> return ()
-      checkFuncall Nothing loc paramtypes $ curryargs ++ args
-      return $ CurryFun fname curryargexps' (Info rettype') loc
+  (rt, paramtypes) <- lookupFunction fname loc
+  let rettype' = fromStruct $ removeShapeAnnotations rt
+  case find (unique . snd) $ zip curryargexps paramtypes of
+    Just (e, _) -> bad $ CurriedConsumption (untagQualName fname) $ srclocOf e
+    _           -> return ()
+  checkFuncall Nothing loc paramtypes $ curryargs ++ args
+  return $ CurryFun fname curryargexps' (Info rettype') loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
   var <- newIdent "x" (argType arg) loc
@@ -1616,12 +1621,7 @@ expandType look (UserUnique t loc) = do
 
 checkTypeDecl :: TypeDeclBase NoInfo VName -> TypeM (TypeDeclBase Info VName)
 checkTypeDecl (TypeDecl t NoInfo) =
-  TypeDecl t . Info <$> expandType look t
-  where look name loc = do
-          types <- asks (typeFromScope name)
-          case types of
-            Nothing    -> throwError $ UndefinedType loc $ untagQualName name
-            Just namet -> return namet
+  TypeDecl t . Info <$> expandType lookupType t
 
 -- Creating the initial type alias table is done by maintaining a
 -- table of the type aliases we have processed (initialised to empty),
@@ -1668,9 +1668,6 @@ typeFromScope (QualName (_, name)) = HM.lookup name . envTAtable
 
 addType :: VName -> StructTypeBase VName -> Scope -> Scope
 addType name tp scope = scope {envTAtable = HM.insert name tp $ envTAtable scope}
-
-funFromScope :: QualName VName -> Scope -> Maybe FunBinding
-funFromScope (QualName (_, name)) = HM.lookup name . envFtable
 
 checkForDuplicateTypes :: [TypeDefBase NoInfo VName] -> TypeM ()
 checkForDuplicateTypes = foldM_ check mempty
