@@ -3,10 +3,11 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE StandaloneDeriving         #-}
--- | This Is an ever-changing abstract syntax for Futhark.  Some types,
--- such as @Exp@, are parametrised by type and name representation.
--- See the @docs/@ subdirectory in the Futhark repository for a language
--- reference, or this module may be a little hard to understand.
+-- | This is an ever-changing abstract syntax for Futhark.  Some
+-- types, such as @Exp@, are parametrised by type and name
+-- representation.  See the @https://futhark.readthedocs.org@ for a
+-- language reference, or this module may be a little hard to
+-- understand.
 module Language.Futhark.Syntax
   (
    module Language.Futhark.Core
@@ -85,7 +86,7 @@ import           Futhark.Representation.Primitive (FloatType (..),
                                                    IntType (..), IntValue (..))
 import           Language.Futhark.Core
 
--- | Convenience class for deriving Show instances for the AST.
+-- | Convenience class for deriving 'Show' instances for the AST.
 class (Show vn,
        Show (f vn),
        Show (f (CompTypeBase vn)),
@@ -352,14 +353,14 @@ newtype QualName vn = QualName ([Name], vn)
 
 -- | The Futhark expression language.
 --
--- In a value of type @Exp tt vn@, all 'Type' values are kept as @tt@
--- values, and all (variable) names are of type @vn@.
+-- In a value of type @Exp f vn@, annotations are wrapped in the
+-- functor @f@, and all names are of type @vn@.
 --
 -- This allows us to encode whether or not the expression has been
 -- type-checked in the Haskell type of the expression.  Specifically,
--- the parser will produce expressions of type @Exp 'NoInfo'@, and the
--- type checker will convert these to @Exp 'Type'@, in which type
--- information is always present.
+-- the parser will produce expressions of type @Exp 'NoInfo' 'Name'@,
+-- and the type checker will convert these to @Exp 'Type' 'VName'@, in
+-- which type information is always present and all names are unique.
 data ExpBase f vn =
               Literal Value SrcLoc
 
@@ -448,24 +449,24 @@ data ExpBase f vn =
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase f vn) [ExpBase f vn] SrcLoc
-             -- ^ @map((+1), [1, 2, ..., n]) = [2, 3, ..., n+1]@.
+             -- ^ @map (+1) ([1, 2, ..., n]) = [2, 3, ..., n+1]@.
              -- OR
-             -- ^ @zipWith((+), [1, 2, ..., n], [1, 2, ..., n]) = [2, 4, ... , 2*n]@.
+             -- ^ @zipWith (+) ([1, 2, ..., n]) ([1, 2, ..., n]) = [2, 4, ... , 2*n]@.
              --
-             -- @map@ with exactly one array argument, otherwise @zipWith@.
+             -- @map@ when exactly one array argument, otherwise @zipWith@.
 
             | Reduce Commutativity (LambdaBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@.
+             -- ^ @reduce (+) 0 ([1,2,...,n]) = (0+1+2+...+n)@.
 
             | Scan (LambdaBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-             -- ^ @scan(plus, 0, [ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
+             -- ^ @scan (+) 0 ([ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
 
             | Filter (LambdaBase f vn) (ExpBase f vn) SrcLoc
             -- ^ Return those elements of the array that satisfy the
             -- predicate.
 
             | Partition [LambdaBase f vn] (ExpBase f vn) SrcLoc
-            -- ^ @partition(f_1, ..., f_n, a)@ returns @n+1@ arrays, with
+            -- ^ @partition (f_1, ..., f_n) a@ returns @n+1@ arrays, with
             -- the @i@th array consisting of those elements for which
             -- function @f_1@ returns 'True', and no previous function
             -- has returned 'True'.  The @n+1@th array contains those
@@ -477,14 +478,13 @@ data ExpBase f vn =
             -- For example, assuming @A : [int], f : int->int, g : real->real@,
             -- the code: @let x = map(f,A) in let y = scan(op+,0,x) in map(g,y)@
             -- can be re-written (streamed) in the source-Futhark language as:
-            -- @let {acc, z} =
-            -- @stream( 0, A,@
-            -- @      , fn {int,[real]} (real chunk, real acc, [int] a) =>@
-            -- @            let x = map (f,         A ) in@
-            -- @            let y0= scan(op +, 0,   x ) in@
-            -- @            let y = map (op +(acc), y0) in@
-            -- @            { acc+y0[chunk-1], map(g, y) }@
-            -- @      )@
+            -- @let (acc, z) =@
+            -- @  stream (fn (int,[real]) (real chunk, real acc, [int] a) =>@
+            -- @            let x = map (f,         A )@
+            -- @            let y0= scan(op +, 0,   x )@
+            -- @            let y = map (op +(acc), y0)@
+            -- @            ( acc+y0[chunk-1], map(g, y) )@
+            -- @         ) 0 A@
             -- where (i)  @chunk@ is a symbolic int denoting the chunk
             -- size, (ii) @0@ is the initial value of the accumulator,
             -- which allows the streaming of @scan@.
@@ -501,8 +501,8 @@ data ExpBase f vn =
             -- ^ @write [0, 2, -1] [9, 7, 0] [3, 4, 5] = [9, 4, 7]@.
 
             | Zip Int (ExpBase f vn) [ExpBase f vn] SrcLoc
-            -- ^ Conventional zip taking multiple arrays as arguments.
-            -- The annotation indicates the tuple element types.
+            -- ^ Conventional zip taking nonzero arrays as arguments.
+            -- All arrays must have the exact same length.
 
             | Unzip (ExpBase f vn) [f (CompTypeBase vn)] SrcLoc
             -- ^ Unzip that can unzip to tuples of arbitrary size.
@@ -570,7 +570,7 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
 
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
-                      -- ^ @fn (x: bool, z: char):int => if(x) then ord(z) else ord(z)+1 *)@
+                      -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
                       | CurryFun (QualName vn) [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
                       | UnOpFun UnOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
