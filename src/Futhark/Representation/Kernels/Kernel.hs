@@ -608,9 +608,7 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     ppCertificates' cs <>
     text "kernel" <>
     PP.align (ppr space) <+>
-    PP.colon <+> ppTuple' ts <+> text "{" </>
-    PP.indent 2 (ppr body) </>
-    text "}"
+    PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
 
 instance Pretty KernelSpace where
   ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =

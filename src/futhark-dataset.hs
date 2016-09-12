@@ -117,7 +117,7 @@ toSimpleType (UserArray t d _) =
   where constantDim (ConstDim k) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
 toSimpleType (UserTypeAlias v _) =
-  Left $ "Unknown type " ++ longnameToString v
+  Left $ "Unknown type " ++ pretty v
 
 data SimpleValue = SimpleArrayValue [SimpleValue]
                  | SimplePrimValue PrimValue

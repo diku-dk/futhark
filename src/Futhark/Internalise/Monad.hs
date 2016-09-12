@@ -33,12 +33,12 @@ import Futhark.Tools
 import Prelude hiding (mapM)
 
 data FunBinding = FunBinding
-                  { internalFun :: ([VName], [DeclType],
+                  { internalFun :: (Name, [VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.StructType, [E.StructType])
                   }
 
-type FunTable = HM.HashMap Name FunBinding
+type FunTable = HM.HashMap VName FunBinding
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
@@ -93,10 +93,10 @@ runInternaliseM ftable (InternaliseM m) =
                  , envDoBoundsChecks = True
                  }
 
-lookupFunction :: Name -> InternaliseM FunBinding
+lookupFunction :: VName -> InternaliseM FunBinding
 lookupFunction fname = do
   fun <- HM.lookup fname <$> asks envFtable
-  case fun of Nothing   -> fail $ "Function '" ++ nameToString fname ++ "' not found"
+  case fun of Nothing   -> fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found"
               Just fun' -> return fun'
 
 bindingIdentTypes :: [Ident] -> InternaliseM a

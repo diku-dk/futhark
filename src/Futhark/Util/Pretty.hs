@@ -10,6 +10,7 @@ module Futhark.Util.Pretty
        , apply
        , oneLine
        , annot
+       , nestedBlock
        )
        where
 
@@ -57,3 +58,10 @@ oneLine s = PP.text $ PP.displayS (PP.renderCompact s) ""
 annot :: [Doc] -> Doc -> Doc
 annot [] s = s
 annot l s = stack l </> s
+
+-- | Surround the given document with enclosers and add linebreaks and
+-- indents.
+nestedBlock :: String -> String -> Doc -> Doc
+nestedBlock pre post body = text pre </>
+                            PP.indent 2 body </>
+                            text post

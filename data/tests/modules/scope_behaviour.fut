@@ -9,8 +9,8 @@ type foo = (int, f32)
 
 struct M0
   {
-    type foo = foo -- the type is defined from l. 1
-    type bar = f32
+    type foo = (f32, int)
+    type bar = foo
   }
 
 struct M1

@@ -2,12 +2,12 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
--- for the AST defined in "Language.Futhark.Syntax" and re-exports
--- "Futhark.Util.Pretty" for convenience.
+-- for the AST defined in "Language.Futhark.Syntax".
 module Language.Futhark.Pretty
-  ( module Futhark.Util.Pretty
+  ( pretty
+  , prettyTuple
   )
-  where
+where
 
 import           Data.Array
 import           Data.Hashable
@@ -138,6 +138,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
 
+instance Pretty vn => Pretty (QualName vn) where
+  ppr (QualName (names, name)) =
+    mconcat $ punctuate (text ".") $ map ppr names ++ [ppr name]
+
 instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
 
@@ -209,7 +213,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
-  pprPrec _ (Apply fname args _ _) = text (longnameToString fname) <>
+  pprPrec _ (Apply fname args _ _) = ppr fname <>
                                      apply (map (align . ppr . fst) args)
   pprPrec p (LetPat pat e body _) =
     aliasComment pat $ mparens $ align $
@@ -317,9 +321,9 @@ ppAscription Nothing  = mempty
 ppAscription (Just t) = text ":" <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBase ty vn) where
-  ppr (CurryFun fname [] _ _) = text $ longnameToString fname
+  ppr (CurryFun fname [] _ _) = text $ pretty fname
   ppr (CurryFun fname curryargs _ _) =
-    text (longnameToString fname) <+> apply (map ppr curryargs)
+    ppr fname <+> apply (map ppr curryargs)
   ppr (AnonymFun params body ascript _ _) =
     text "fn" <+>
     apply (map ppParam params) <> ppAscription ascript <+>
@@ -343,7 +347,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase 
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModDefBase ty vn) where
   ppr (ModDef name moddecls _) =
-    ppr name <+> ppList moddecls
+    text "struct" <+> ppr name <+> nestedBlock "{" "}"
+    (stack $ punctuate line $ map ppr moddecls)
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunOrTypeDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
@@ -351,13 +356,12 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunOrTyp
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeDefBase ty vn) where
   ppr (TypeDef name usertype _) =
-    text "type" <+> text (nameToString name) <+>
-    equals </> ppr usertype
+    text "type" <+> ppr name <+> equals <+> ppr usertype
 
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBase ty vn) where
-  ppr (FunDef entry (name, _) rettype args body _) =
-    text fun <+> text (nameToString name) <+>
+  ppr (FunDef entry name rettype args body _) =
+    text fun <+> ppr name <+>
     spread (map ppParam args) <> text ":" <+> ppr rettype <+> equals </>
     indent 2 (ppr body)
     where fun | entry     = "entry"
@@ -365,13 +369,13 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBa
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDefBase ty vn) where
   ppr (SigDef name sigdecls _) =
-    text "sig" <+> text (nameToString name) <+>
-    equals <+> ppList sigdecls
+    text "sig" <+> ppr name <+> equals <+>
+    stack (punctuate line $ map ppr sigdecls)
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDeclBase ty vn) where
   ppr (TypeSig tpsig) = ppr tpsig
   ppr (FunSig name params rettype) =
-    text (nameToString name) <+> ppList params <+> ppr rettype
+    ppr name <+> ppList params <+> ppr rettype
 
 ppParam :: (Eq vn, Hashable vn, Pretty vn) => PatternBase t vn -> Doc
 ppParam (Id param) = ppr param

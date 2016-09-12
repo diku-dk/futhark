@@ -37,7 +37,6 @@ import Data.Monoid
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Attributes
 import Language.Futhark.Parser.Lexer
-import Language.Futhark.Core(blankLongname)
 
 }
 
@@ -276,10 +275,10 @@ DefaultDec :: { () }
 ;
 
 
-QualName :: { (QualName , SrcLoc) }
-         : sid '.' QualName { let L loc (SID qual) = $1; ((quals, name), _) = $3
-                              in ((qual:quals, name), loc) }
-         | id { let L loc (ID name) = $1 in (([], name), loc) }
+QualName :: { (QualName Name , SrcLoc) }
+         : sid '.' QualName { let L loc (SID qual) = $1; (QualName (quals, name), _) = $3
+                              in (QualName (qual:quals, name), loc) }
+         | id { let L loc (ID name) = $1 in (QualName ([], name), loc) }
 ;
 
 -- Note that this production does not include Minus.
@@ -338,10 +337,10 @@ IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString na
 
 Fun     : fun id Params ':' UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef (name==defaultEntryPoint) (name, blankLongname) $5 $3 $7 pos }
+                          in FunDef (name==defaultEntryPoint) name $5 $3 $7 pos }
         | entry id Params ':'  UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef True (name, blankLongname) $5 $3 $7 pos }
+                          in FunDef True name $5 $3 $7 pos }
 ;
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
@@ -809,8 +808,8 @@ patternExp (Id ident) = return $ Var ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
-identFromQualName :: (QualName, SrcLoc) -> ParserMonad UncheckedIdent
-identFromQualName (([], name), loc) =
+identFromQualName :: (QualName Name, SrcLoc) -> ParserMonad UncheckedIdent
+identFromQualName (QualName ([], name), loc) =
   return $ Ident name NoInfo loc
 identFromQualName (_, loc) =
   throwError $ "Identifier cannot be qualified at " ++ locStr loc

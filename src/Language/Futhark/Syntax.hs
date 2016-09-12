@@ -1,7 +1,8 @@
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE StandaloneDeriving    #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 -- | This Is an ever-changing abstract syntax for Futhark.  Some types,
 -- such as @Exp@, are parametrised by type and name representation.
 -- See the @docs/@ subdirectory in the Futhark repository for a language
@@ -64,6 +65,7 @@ module Language.Futhark.Syntax
   , NoInfo(..)
   , Info(..)
   , Names
+  , QualName(..)
   )
   where
 
@@ -231,10 +233,9 @@ type CompTypeBase = TypeBase Rank Names
 data UserType vn = UserPrim PrimType SrcLoc
                  | UserArray (UserType vn) (DimDecl vn) SrcLoc
                  | UserTuple [UserType vn] SrcLoc
-                 | UserTypeAlias QualName SrcLoc
+                 | UserTypeAlias (QualName vn) SrcLoc
                  | UserUnique (UserType vn) SrcLoc
-
-    deriving (Show)
+                 deriving (Eq, Show)
 
 instance Located (UserType vn) where
   locOf (UserPrim _ loc)      = locOf loc
@@ -345,6 +346,10 @@ data DimIndexBase f vn = DimFix (ExpBase f vn)
                        | DimSlice (ExpBase f vn) (ExpBase f vn)
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
+-- | A name qualified with a breadcrumb of module accesses.
+newtype QualName vn = QualName ([Name], vn)
+  deriving (Eq, Ord, Show, Hashable)
+
 -- | The Futhark expression language.
 --
 -- In a value of type @Exp tt vn@, all 'Type' values are kept as @tt@
@@ -373,7 +378,7 @@ data ExpBase f vn =
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
-            | Apply  QualName [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
+            | Apply  (QualName vn) [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
 
             | DoLoop
               (PatternBase f vn) -- Merge variable pattern
@@ -566,7 +571,7 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if(x) then ord(z) else ord(z)+1 *)@
-                      | CurryFun QualName [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+                      | CurryFun (QualName vn) [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
                       | UnOpFun UnOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @-@; first type is operand, second is result.
@@ -602,7 +607,7 @@ instance Located (PatternBase f vn) where
 -- | Function Declarations
 data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
-                              , funDefName       :: FunName
+                              , funDefName       :: vn
                               , funDefRetType    :: TypeDeclBase f vn
                               , funDefParams     :: [PatternBase f vn]
                               , funDefBody       :: ExpBase f vn
@@ -610,22 +615,20 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                               }
 deriving instance Showable f vn => Show (FunDefBase f vn)
 
-type FunName = (Name, QualName)
-
 -- | Type Declarations
-data TypeDefBase f vn = TypeDef { typeAlias       :: Name -- ^ Name of the declared type.
-                                , userType        :: TypeDeclBase f vn -- ^ Its definition.
+data TypeDefBase f vn = TypeDef { typeAlias       :: vn
+                                , userType        :: TypeDeclBase f vn
                                 , typeDefLocation :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (TypeDefBase f vn)
 
-data SigDefBase f vn = SigDef { sigName        :: Name
+data SigDefBase f vn = SigDef { sigName        :: vn
                               , sigDecls       :: [SigDeclBase f vn]
                               , sigDefLocation :: SrcLoc
                               }
 deriving instance Showable f vn => Show (SigDefBase f vn)
 
-data SigDeclBase f vn = FunSig  { funSigName    :: Name
+data SigDeclBase f vn = FunSig  { funSigName    :: vn
                                 , funSigParams  :: [TypeDeclBase f vn]
                                 , funSigRettype :: TypeDeclBase f vn
                                 }
@@ -635,7 +638,7 @@ deriving instance Showable f vn => Show (SigDeclBase f vn)
 instance Located (TypeDefBase f vn) where
   locOf = locOf . typeDefLocation
 
-data ModDefBase f vn = ModDef { modName        :: Name
+data ModDefBase f vn = ModDef { modName        :: vn
                               , modDecls       :: [DecBase f vn]
                               , modDefLocation :: SrcLoc
                               }

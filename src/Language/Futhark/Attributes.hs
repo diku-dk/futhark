@@ -66,10 +66,6 @@ module Language.Futhark.Attributes
   , isMod
   , isSig
   , funsFromProg
-  , typesFromProg
-  , sigsFromProg
-  , modsFromProg
-  , decLoc
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -734,8 +730,8 @@ patternStructType (TuplePattern ps _) = Tuple $ map patternStructType ps
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
 -- | A map of all built-in functions and their types.
-builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])
-builtInFunctions = HM.fromList $ map namify
+builtInFunctions :: HM.HashMap VName (PrimType,[PrimType])
+builtInFunctions = HM.fromList $ zipWith namify [0..]
                    [("sqrt32", (FloatType Float32, [FloatType Float32]))
                    ,("log32", (FloatType Float32, [FloatType Float32]))
                    ,("exp32", (FloatType Float32, [FloatType Float32]))
@@ -754,19 +750,16 @@ builtInFunctions = HM.fromList $ map namify
                    ,("isinf64", (Bool, [FloatType Float64]))
                    ,("isnan64", (Bool, [FloatType Float64]))
                    ]
-  where namify (k,v) = (nameFromString k, v)
+  where namify i (k,v) = (ID (nameFromString k, i), v)
 
+-- | All functions, including those nested in structures.
 funsFromProg :: ProgBase f vn -> [FunDefBase f vn]
-funsFromProg prog = mapMaybe isFun $ progDecs prog
+funsFromProg prog = concatMap getFuns $ progDecs prog
+  where getFuns (FunOrTypeDec (FunDec a)) = [a]
+        getFuns (FunOrTypeDec TypeDec{}) = []
+        getFuns (ModDec d) = concatMap getFuns $ modDecls d
+        getFuns SigDec{} = []
 
-typesFromProg :: ProgBase f vn -> [TypeDefBase f vn]
-typesFromProg prog = mapMaybe isType $ progDecs prog
-
-sigsFromProg :: ProgBase f vn -> [SigDefBase f vn]
-sigsFromProg prog = mapMaybe isSig $ progDecs prog
-
-modsFromProg :: ProgBase f vn -> [ModDefBase f vn]
-modsFromProg prog = mapMaybe isMod $ progDecs prog
 
 isFun :: DecBase f vn -> Maybe (FunDefBase f vn)
 isFun (FunOrTypeDec (FunDec a)) = Just a
@@ -788,14 +781,8 @@ isMod :: DecBase f vn -> Maybe (ModDefBase f vn)
 isMod (ModDec modd) = Just modd
 isMod _             = Nothing
 
-nameToQualName :: Name -> QualName
-nameToQualName n = ([], n)
-
-decLoc :: DecBase f vn -> SrcLoc
-decLoc (FunOrTypeDec (FunDec (FunDef _ _ _ _ _ loc))) = loc
-decLoc (FunOrTypeDec (TypeDec (TypeDef _ _ loc)))     = loc
-decLoc (SigDec (SigDef _ _ loc))                      = loc
-decLoc (ModDec (ModDef _ _ loc))                      = loc
+nameToQualName :: Name -> QualName Name
+nameToQualName n = QualName ([], n)
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase ShapeDecl NoInfo Name
