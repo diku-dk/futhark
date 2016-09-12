@@ -1,15 +1,8 @@
 -- | This module provides facilities for generating unique names.
---
--- >>> let src = blankNameSource :: NameSource Name
--- >>> let (name, src') = newName src (nameFromString "foo")
--- >>> nameToString name
--- "foo_0"
--- >>> let (name2, src'') = newName src' (nameFromString "bar")
--- >>>> nameToString name2
--- "bar_1"
 module Futhark.FreshNames
   ( VNameSource (..)
   , blankNameSource
+  , newNameSource
   , newVName
   , newVNameFromName
   ) where
@@ -33,7 +26,11 @@ counterGenerator counter (ID (s, _)) =
 
 -- | A blank name source.
 blankNameSource :: VNameSource
-blankNameSource = VNameSource $ counterGenerator 0
+blankNameSource = newNameSource 0
+
+-- | A new name source that starts counting from the given number.
+newNameSource :: Int -> VNameSource
+newNameSource = VNameSource . counterGenerator
 
 -- | Produce a fresh 'VName', using the given base name as a template.
 newVName :: VNameSource -> String -> (VName, VNameSource)

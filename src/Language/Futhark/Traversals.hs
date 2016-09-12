@@ -38,13 +38,14 @@ import           Language.Futhark.Syntax
 -- of this structure expresses the operation to be performed on a
 -- given child.
 data MapperBase vnf vnt m = Mapper {
-    mapOnExp     :: ExpBase NoInfo vnf -> m (ExpBase NoInfo vnt)
-  , mapOnLambda  :: LambdaBase NoInfo vnf -> m (LambdaBase NoInfo vnt)
-  , mapOnType    :: CompTypeBase vnf -> m (CompTypeBase vnt)
-  , mapOnPattern :: PatternBase NoInfo vnf -> m (PatternBase NoInfo vnt)
-  , mapOnIdent   :: IdentBase NoInfo vnf -> m (IdentBase NoInfo vnt)
-  , mapOnName    :: vnf -> m vnt
-  , mapOnValue   :: Value -> m Value
+    mapOnExp      :: ExpBase NoInfo vnf -> m (ExpBase NoInfo vnt)
+  , mapOnLambda   :: LambdaBase NoInfo vnf -> m (LambdaBase NoInfo vnt)
+  , mapOnType     :: CompTypeBase vnf -> m (CompTypeBase vnt)
+  , mapOnPattern  :: PatternBase NoInfo vnf -> m (PatternBase NoInfo vnt)
+  , mapOnIdent    :: IdentBase NoInfo vnf -> m (IdentBase NoInfo vnt)
+  , mapOnName     :: vnf -> m vnt
+  , mapOnQualName :: QualName vnf -> m (QualName vnt)
+  , mapOnValue    :: Value -> m Value
   }
 
 -- | Map a monadic action across the immediate children of an
@@ -72,10 +73,9 @@ mapExpM tv (UnOp unop x loc) =
 mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
        mapTypeM tv t <*> pure loc
-mapExpM tv (Apply fname args t loc) = do
-  args' <- forM args $ \(arg, d) ->
-             (,) <$> mapOnExp tv arg <*> pure d
-  pure (Apply fname) <*> pure args' <*> mapTypeM tv t <*> pure loc
+mapExpM tv (Apply fname args t loc) =
+  Apply <$> mapOnQualName tv fname <*> mapM mapOnArg args <*> mapTypeM tv t <*> pure loc
+  where mapOnArg (arg,d) = (,) <$> mapOnExp tv arg <*> pure d
 mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
@@ -164,14 +164,16 @@ mapUserTypeM :: (Applicative m, Monad m) =>
                 MapperBase vnf vnt m
              -> UserType vnf
              -> m (UserType vnt)
-mapUserTypeM _ (UserPrim bt loc) = pure $ UserPrim bt loc
-mapUserTypeM tv (UserUnique t loc) = UserUnique <$> mapUserTypeM tv t <*> pure loc
+mapUserTypeM _ (UserPrim bt loc) =
+  pure $ UserPrim bt loc
+mapUserTypeM tv (UserUnique t loc) =
+  UserUnique <$> mapUserTypeM tv t <*> pure loc
 mapUserTypeM tv (UserArray t d loc) =
   UserArray <$> mapUserTypeM tv t <*> mapDimDecl tv d <*> pure loc
 mapUserTypeM tv (UserTuple ts loc) =
   UserTuple <$> mapM (mapUserTypeM tv) ts <*> pure loc
-mapUserTypeM _ (UserTypeAlias name loc) =
-  pure $ UserTypeAlias name loc
+mapUserTypeM tv (UserTypeAlias name loc) =
+  UserTypeAlias <$> mapOnQualName tv name <*> pure loc
 
 mapDimDecl :: (Applicative m, Monad m) =>
               MapperBase vnf vnt m
