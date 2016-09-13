@@ -48,9 +48,9 @@ fun mandelbrot(screenX: int, screenY: int, depth: int, view: (f32,f32,f32,f32)):
            map  (fn (y: int): int  =>
                   let c0 = (xmin + (f32(x) * sizex) / f32(screenX),
                             ymin + (f32(y) * sizey) / f32(screenY))
-                  in divergence(depth, c0)
-            ) (iota(screenY))) (
-        iota(screenX))
+                  in divergence(depth, c0))
+                (iota screenY))
+         (iota screenX)
 
 fun main(screenX: int, screenY: int, depth: int, xmin: f32, ymin: f32, xmax: f32, ymax: f32): [screenX][screenY]int =
   mandelbrot(screenX, screenY, depth, (xmin, ymin, xmax, ymax))
