@@ -3,8 +3,10 @@
 -- Easy to get wrong if you forget that MD5 is little-endian.
 --
 -- ==
--- input { empty(i32) }
--- output { 0xd98c1dd4 0x4b2008f 0x980980e9 0x7e42f8ec }
+-- input { empty(i8) }
+-- output { [0xd4u8,0x1du8,0x8cu8,0xd9u8,0x8fu8,0x00u8,0xb2u8,0x04u8,0xe9u8,0x80u8,0x09u8,0x98u8,0xecu8,0xf8u8,0x42u8,0x7eu8] }
+-- input { [0u8] }
+-- output { [0x93u8, 0xb8u8, 0x85u8, 0xadu8, 0xfeu8, 0x0du8, 0xa0u8, 0x89u8, 0xcdu8, 0xf6u8, 0x34u8, 0x90u8, 0x4fu8, 0xd5u8, 0x9fu8, 0x71u8] }
 
 type md5 = (u32, u32, u32, u32)
 
@@ -46,11 +48,26 @@ fun md5(ms: [n][16]u32): md5 =
 
 fun rotate_left(x: u32, c: u32): u32 = (x << c) | (x >> (32u32 - c))
 
-fun main(ms: [n]u32): md5 =
-  let padding = 16 - 1 - (n % 16)
-  let n_padded = n + 1 + padding
-  let ms_padded = concat ms ([0x80u32]) (replicate padding 0x0u32)
-  in md5 (reshape (n_padded / 16, 16) ms_padded)
+fun bytes(x: u32): [4]u8 = [u8(x),
+                            u8(x/0x100u32),
+                            u8(x/0x10000u32),
+                            u8(x/0x1000000u32)]
+
+fun unbytes(bs: [4]u8): u32 =
+  u32(bs[0]) +
+  u32(bs[1]) * 0x100u32 +
+  u32(bs[2]) * 0x10000u32 +
+  u32(bs[3]) * 0x1000000u32
+
+fun unbytes_block(block: [64]u8): [16]u32 =
+  map unbytes (reshape (16,4) block)
+
+fun main(ms: [n]u8): [16]u8 =
+  let padding = 64 - (n % 64)
+  let n_padded = n + padding
+  let ms_padded = concat ms (bytes 0x80u32) (replicate (padding-12) 0x0u8) (bytes (u32(n*8))) ([0u8,0u8,0u8,0u8])
+  let (a,b,c,d) = md5 (map unbytes_block (reshape (n_padded / 64, 64) ms_padded))
+  in reshape 16 (map bytes ([a,b,c,d]))
 
 -- Process 512 bits of the input.
 fun md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
@@ -64,5 +81,5 @@ fun md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
                            i32((3u32*u32(i) + 5u32) % 16u32))
       else                (c ^ (b | (~d)),
                            i32((7u32*u32(i))        % 16u32))
-    in (d, b + rotate_left(a + f + (ks())[i] + unsafe m[g], (rs())[i]), b, c)
+    in (d, b + rotate_left(a + f + (ks())[i] + m[g], (rs())[i]), b, c)
   in (a,b,c,d)
