@@ -4,8 +4,8 @@
 -- requires a giant amount of memory.  Oh well.
 --
 -- ==
--- input { 2000 }
--- output { [[220i32, 284i32], [1184i32, 1210i32]] }
+-- compiled input { 300 }
+-- output { [[220i32, 284i32]] }
 
 fun divisors(n: int): []int =
   filter (fn x => n%x == 0) (map (1+) (iota (n/2)))
