@@ -92,6 +92,8 @@ concatArrays i (ArrayVal arr1 et shape1) (ArrayVal arr2 _ shape2) =
 concatArrays _ x _ = x
 
 concatenate :: Int -> [a] -> Int -> [a] -> [a]
+concatenate _ [] _ ys = ys
+concatenate _ xs _ [] = xs
 concatenate xcs xs ycs ys =
   let xs' = chunk xcs xs
       ys' = chunk ycs ys
