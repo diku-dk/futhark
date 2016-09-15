@@ -206,11 +206,6 @@ instance CanBeWise inner => CanBeWise (MemOp inner) where
   removeOpWisdom (Alloc size space) = Alloc size space
   removeOpWisdom (Inner k) = Inner $ removeOpWisdom k
 
-instance Engine.SimplifiableOp lore inner =>
-         Engine.SimplifiableOp lore (MemOp inner) where
-  simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
-  simplifyOp (Inner k) = Inner <$> Engine.simplifyOp k
-
 instance Annotations ExplicitMemory where
   type LetAttr    ExplicitMemory = MemBound NoUniqueness
   type FParamAttr ExplicitMemory = MemBound Uniqueness

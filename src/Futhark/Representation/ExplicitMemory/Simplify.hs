@@ -23,7 +23,7 @@ import Futhark.Representation.AST.Syntax
           RetType)
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.Kernels.Simplify
-  (simplifyKernelOp)
+  (simplifyKernelOp, simplifyKernelExp)
 import Futhark.Pass.ExplicitAllocations
   (simplifiable, arraySizeInBytesExp)
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -35,12 +35,17 @@ import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Lore
-import Futhark.Optimise.Simplifier.Simple
 import Futhark.MonadFreshNames
+
+simpleExplicitMemory :: Simplifier.SimpleOps ExplicitMemory
+simpleExplicitMemory = simplifiable (simplifyKernelOp simpleInKernel inKernelEnv)
+
+simpleInKernel :: Simplifier.SimpleOps InKernel
+simpleInKernel = simplifiable simplifyKernelExp
 
 simplifyExplicitMemory :: MonadFreshNames m => Prog ExplicitMemory -> m (Prog ExplicitMemory)
 simplifyExplicitMemory =
-  Simplifier.simplifyProgWithRules simplifiable explicitMemoryRules blockers
+  Simplifier.simplifyProgWithRules simpleExplicitMemory explicitMemoryRules blockers
 
 isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isAlloc _ (Let _ _ (Op Alloc{})) = True
@@ -69,14 +74,11 @@ isAlloc0 :: Op lore ~ MemOp op => AST.Binding lore -> Bool
 isAlloc0 (Let _ _ (Op Alloc{})) = True
 isAlloc0 _                      = False
 
-instance Engine.SimplifiableOp ExplicitMemory (Kernel InKernel) where
-  simplifyOp = simplifyKernelOp simplifiable inKernelEnv
-
-inKernelEnv :: Engine.Env (SimpleM InKernel)
+inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
 inKernelEnv = Engine.emptyEnv explicitMemoryRules blockers
 
 blockers ::  (ExplicitMemorish lore, Op lore ~ MemOp op) =>
-             Simplifier.HoistBlockers (SimpleM lore)
+             Simplifier.HoistBlockers (Engine.SimpleM lore)
 blockers = Engine.HoistBlockers {
     Engine.blockHoistPar = isAlloc
   , Engine.blockHoistSeq = isResultAlloc
