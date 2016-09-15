@@ -32,7 +32,7 @@ install:
  - stack --no-terminal test --only-dependencies -j 3
 
 script:
- - stack --no-terminal test --haddock --no-haddock-deps -j 3
+ - stack --no-terminal test -j 3
  - stack install
 
 # Now for integration testing
