@@ -1,0 +1,21 @@
+-- https://rosettacode.org/wiki/Binary_search
+--
+-- This is a straightforward translation of the imperative iterative solution.
+--
+-- ==
+-- input { [1,2,3,4,5,6,8,9] 2 }
+-- output { 1 }
+
+fun main(as: [n]int, value: int): int =
+  let low = 0
+  let high = n-1
+  loop ((low,high)) = while low <= high do
+    -- invariants: value > as[i] for all i < low
+    --             value < as[i] for all i > high
+    let mid = (low+high) / 2
+    in if as[mid] > value
+       then (low, mid - 1)
+       else if as[mid] < value
+       then (mid + 1, high)
+       else (mid, mid-1) -- Force termination.
+  in low
