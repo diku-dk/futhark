@@ -643,7 +643,7 @@ transformSOAC pat (Write cs len lam ivs as) = do
       less_than_zero <- letSubExp "less_than_zero" $
         BasicOp $ CmpOp (CmpSlt Int32) indexCur (constant (0::Int32))
       greater_than_size <- letSubExp "greater_than_size" $
-        BasicOp $ CmpOp (CmpSlt Int32) lenA indexCur
+        BasicOp $ CmpOp (CmpSle Int32) lenA indexCur
       outside_bounds <- letSubExp "outside_bounds" $
         BasicOp $ BinOp LogOr less_than_zero greater_than_size
 
