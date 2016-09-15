@@ -124,7 +124,6 @@ Library
                    Futhark.Optimise.Simplifier.Rule
                    Futhark.Optimise.Simplifier.RuleM
                    Futhark.Optimise.Simplifier.Rules
-                   Futhark.Optimise.Simplifier.Simple
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.TileLoops
                    Futhark.Pass
@@ -214,6 +213,9 @@ Library
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
+
+  if impl(ghc >= 8.0)
+     Ghc-Options: -Wall -Wno-redundant-constraints
 
 Executable futhark
   Main-is: src/futhark.hs
@@ -317,6 +319,9 @@ Executable futhark-test
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+
+  if impl(ghc >= 8.0)
+     Ghc-Options: -Wall -Wno-redundant-constraints -threaded -rtsopts -with-rtsopts=-N
 
 Executable futhark-bench
   Main-is: src/futhark-bench.hs

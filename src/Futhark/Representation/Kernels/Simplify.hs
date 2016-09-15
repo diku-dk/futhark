@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -10,8 +9,11 @@ module Futhark.Representation.Kernels.Simplify
        ( simplifyKernels
        , simplifyFun
 
+       , simpleKernels
+
        -- * Building blocks
        , simplifyKernelOp
+       , simplifyKernelExp
        )
 where
 
@@ -34,41 +36,42 @@ import Futhark.Optimise.Simplifier.Lore
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
-import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Rephrase (castBinding)
 
+simpleKernels :: Simplifier.SimpleOps Kernels
+simpleKernels = Simplifier.bindableSimpleOps (simplifyKernelOp simpleInKernel inKernelEnv)
+
+simpleInKernel :: Simplifier.SimpleOps InKernel
+simpleInKernel = Simplifier.bindableSimpleOps simplifyKernelExp
+
 simplifyKernels :: MonadFreshNames m => Prog Kernels -> m (Prog Kernels)
 simplifyKernels =
-  simplifyProgWithRules bindableSimpleOps kernelRules noExtraHoistBlockers
+  simplifyProgWithRules simpleKernels kernelRules noExtraHoistBlockers
 
 simplifyFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 simplifyFun =
-  Simplifier.simplifyFunWithRules bindableSimpleOps kernelRules Engine.noExtraHoistBlockers
+  Simplifier.simplifyFunWithRules simpleKernels kernelRules noExtraHoistBlockers
 
-instance Engine.SimplifiableOp Kernels (Kernel InKernel) where
-  simplifyOp = simplifyKernelOp bindableSimpleOps inKernelEnv
-
-simplifyKernelOp :: (Engine.MonadEngine (SimpleM lore),
-                     Engine.MonadEngine m,
-                     SameScope (Engine.InnerLore m) lore,
-                     ExpAttr (Engine.InnerLore m) ~ ExpAttr lore,
-                     BodyAttr (Engine.InnerLore m) ~ BodyAttr lore,
-                     RetType (Engine.InnerLore m) ~ RetType lore,
-                     BodyAttr lore ~ ()) =>
-                    SimpleOps (SimpleM lore) -> Engine.Env (SimpleM lore)
-                 -> Kernel lore -> m (Kernel (Wise lore))
+simplifyKernelOp :: (Engine.SimplifiableLore lore,
+                     Engine.SimplifiableLore outerlore,
+                     BodyAttr outerlore ~ (), BodyAttr lore ~ (),
+                     ExpAttr lore ~ ExpAttr outerlore,
+                     SameScope lore outerlore,
+                     RetType lore ~ RetType outerlore) =>
+                    Engine.SimpleOps lore -> Engine.Env (Engine.SimpleM lore)
+                 -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore))
 simplifyKernelOp ops env (ScanKernel cs w kernel_size lam foldlam nes arrs) = do
   arrs' <- mapM Engine.simplify arrs
   outer_vtable <- Engine.getVtable
   (lam', lam_hoisted) <-
-    subSimpleM ops env outer_vtable $
+    Engine.subSimpleM ops env outer_vtable $
     Engine.simplifyLambda lam Nothing (map (const Nothing) arrs')
   (foldlam', foldlam_hoisted) <-
-    subSimpleM ops env outer_vtable $
+    Engine.subSimpleM ops env outer_vtable $
     Engine.simplifyLambda foldlam Nothing (map Just arrs')
   mapM_ processHoistedBinding lam_hoisted
   mapM_ processHoistedBinding foldlam_hoisted
@@ -85,7 +88,7 @@ simplifyKernelOp ops env (Kernel cs space ts kbody) = do
   ts' <- mapM Engine.simplify ts
   outer_vtable <- Engine.getVtable
   ((kbody_res', kbody_bnds'), kbody_hoisted) <-
-    subSimpleM ops env outer_vtable $ do
+    Engine.subSimpleM ops env outer_vtable $ do
       par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
       Engine.localVtable (<>scope_vtable) $
         Engine.blockIf (Engine.hasFree bound_here
@@ -125,68 +128,68 @@ mkWiseKernelBody attr bnds res =
         resValue (WriteReturn _ _ _ se) = se
         resValue (ConcatReturns _ _ _ v) = Var v
 
-inKernelEnv :: Engine.Env (SimpleM InKernel)
+inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
 inKernelEnv = Engine.emptyEnv inKernelRules noExtraHoistBlockers
 
-instance (Attributes lore,
-          Engine.SimplifiableOp lore (Op lore)) =>
-         (Engine.SimplifiableOp lore (KernelExp lore)) where
-  simplifyOp (SplitArray o w i num_is elems_per_thread arrs) =
-    SplitArray
-    <$> pure o
-    <*> Engine.simplify w
-    <*> Engine.simplify i
-    <*> Engine.simplify num_is
-    <*> Engine.simplify elems_per_thread
-    <*> mapM Engine.simplify arrs
+simplifyKernelExp :: (Engine.SimplifiableLore lore,
+                      BodyAttr lore ~ ()) =>
+                     KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore))
+simplifyKernelExp (SplitArray o w i num_is elems_per_thread arrs) =
+  SplitArray
+  <$> pure o
+  <*> Engine.simplify w
+  <*> Engine.simplify i
+  <*> Engine.simplify num_is
+  <*> Engine.simplify elems_per_thread
+  <*> mapM Engine.simplify arrs
 
-  simplifyOp (SplitSpace o w i num_is elems_per_thread) =
-    SplitSpace
-    <$> pure o
-    <*> Engine.simplify w
-    <*> Engine.simplify i
-    <*> Engine.simplify num_is
-    <*> Engine.simplify elems_per_thread
+simplifyKernelExp (SplitSpace o w i num_is elems_per_thread) =
+  SplitSpace
+  <$> pure o
+  <*> Engine.simplify w
+  <*> Engine.simplify i
+  <*> Engine.simplify num_is
+  <*> Engine.simplify elems_per_thread
 
-  simplifyOp (Combine cspace ts active body) = do
-    (body_res', body_bnds') <-
-      Engine.blockIf (Engine.isFalse False) $
-      Engine.simplifyBody (map (const Observe) ts) body
-    body' <- mkBodyM body_bnds' body_res'
-    Combine
-      <$> mapM Engine.simplify cspace
-      <*> mapM Engine.simplify ts
-      <*> Engine.simplify active
-      <*> pure body'
+simplifyKernelExp (Combine cspace ts active body) = do
+  (body_res', body_bnds') <-
+    Engine.blockIf (Engine.isFalse False) $
+    Engine.simplifyBody (map (const Observe) ts) body
+  body' <- mkBodyM body_bnds' body_res'
+  Combine
+    <$> mapM Engine.simplify cspace
+    <*> mapM Engine.simplify ts
+    <*> Engine.simplify active
+    <*> pure body'
 
-  simplifyOp (GroupReduce w lam input) = do
-    w' <- Engine.simplify w
-    nes' <- mapM Engine.simplify nes
-    arrs' <- mapM Engine.simplify arrs
-    lam' <- Engine.simplifyLambdaSeq lam (Just nes') (map (const Nothing) arrs')
-    return $ GroupReduce w' lam' $ zip nes' arrs'
-    where (nes,arrs) = unzip input
+simplifyKernelExp (GroupReduce w lam input) = do
+  w' <- Engine.simplify w
+  nes' <- mapM Engine.simplify nes
+  arrs' <- mapM Engine.simplify arrs
+  lam' <- Engine.simplifyLambdaSeq lam (Just nes') (map (const Nothing) arrs')
+  return $ GroupReduce w' lam' $ zip nes' arrs'
+  where (nes,arrs) = unzip input
 
-  simplifyOp (GroupStream w maxchunk lam accs arrs) = do
-    w' <- Engine.simplify w
-    maxchunk' <- Engine.simplify maxchunk
-    accs' <- mapM Engine.simplify accs
-    arrs' <- mapM Engine.simplify arrs
-    lam' <- simplifyGroupStreamLambda lam w' maxchunk' $
-            map (const Nothing) arrs'
-    return $ GroupStream w' maxchunk' lam' accs' arrs'
+simplifyKernelExp (GroupStream w maxchunk lam accs arrs) = do
+  w' <- Engine.simplify w
+  maxchunk' <- Engine.simplify maxchunk
+  accs' <- mapM Engine.simplify accs
+  arrs' <- mapM Engine.simplify arrs
+  lam' <- simplifyGroupStreamLambda lam w' maxchunk' $
+          map (const Nothing) arrs'
+  return $ GroupStream w' maxchunk' lam' accs' arrs'
 
-simplifyKernelBody :: Engine.MonadEngine m =>
-                      KernelBody (Engine.InnerLore m)
-                   -> m [KernelResult]
+simplifyKernelBody :: Engine.SimplifiableLore lore =>
+                      KernelBody lore
+                   -> Engine.SimpleM lore [KernelResult]
 simplifyKernelBody (KernelBody _ stms res) = do
   mapM_ Engine.simplifyBinding stms
   mapM Engine.simplify res
 
-simplifyGroupStreamLambda :: Engine.MonadEngine m =>
-                             GroupStreamLambda (Engine.InnerLore m)
+simplifyGroupStreamLambda :: Engine.SimplifiableLore lore =>
+                             GroupStreamLambda lore
                           -> SubExp -> SubExp -> [Maybe VName]
-                          -> m (GroupStreamLambda (Lore m))
+                          -> Engine.SimpleM lore (GroupStreamLambda (Wise lore))
 simplifyGroupStreamLambda lam w max_chunk arrs = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
       bound_here = HS.fromList $ block_size : block_offset :
@@ -283,7 +286,7 @@ fuseScanIota :: (MonadBinder m,
                 TopDownRule m
 fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
   | not $ null iota_params = do
-      (fold_body, []) <- subSimpleM bindableSimpleOps inKernelEnv vtable $
+      (fold_body, []) <- Engine.subSimpleM simpleInKernel inKernelEnv vtable $
         (uncurry (flip mkBodyM) =<<) $ collectBindings $ localScope (castScope $ scopeOf foldlam) $ do
           forM_ iota_params $ \(p, x) ->
             letBindNames'_ [paramName p] $

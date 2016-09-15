@@ -32,7 +32,7 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplifier.Simple (SimpleOps (..))
+import Futhark.Optimise.Simplifier.Engine (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Pass
 import Futhark.Util.IntegralExp
@@ -796,15 +796,15 @@ allocInAccParameters :: [LParam InInKernel]
 allocInAccParameters = zipWithM allocInAccParameter
   where allocInAccParameter p attr = return p { paramAttr = attr }
 
-simplifiable :: (Engine.MonadEngine m,
-                 Engine.InnerLore m ~ lore,
+simplifiable :: (Engine.SimplifiableLore lore,
                  ExpAttr lore ~ (),
                  BodyAttr lore ~ (),
                  Op lore ~ MemOp inner,
                  Allocator lore (PatAllocM lore)) =>
-                SimpleOps m
-simplifiable =
-  SimpleOps mkLetS' mkBodyS' mkLetNamesS'
+                (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner))
+             -> SimpleOps lore
+simplifiable simplifyInnerOp =
+  SimpleOps mkLetS' mkBodyS' mkLetNamesS' simplifyOp
   where mkLetS' _ pat e =
           return $ mkWiseLetBinding (removePatternWisdom pat) () e
 
@@ -815,6 +815,9 @@ simplifiable =
                   removeExpWisdom e
           return $ mkWiseLetBinding pat' () e
           where env = removeScopeWisdom $ ST.typeEnv vtable
+
+        simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
+        simplifyOp (Inner k) = Inner <$> simplifyInnerOp k
 
 bindPatternWithAllocations :: (MonadBinder m,
                                ExpAttr lore ~ (),
