@@ -61,7 +61,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
             (rettype', _) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
                 fname' | entry     = nameFromString $ pretty $ baseName fname
-                       | otherwise = nameFromString $ pretty fname
+                       | otherwise = nameFromString $ pretty fname ++ "f"
             return (fname,
                     FunBinding { internalFun = (fname',
                                                 shapenames,
@@ -93,7 +93,7 @@ internaliseFun (E.FunDef entry fname (TypeDecl _ (Info rettype)) params body loc
     return $ I.FunDef entry fname'
       (ExtRetType rettype') (shapeparams ++ params') body'
       where fname' | entry     = nameFromString $ pretty $ baseName fname
-                   | otherwise = nameFromString $ pretty fname
+                   | otherwise = nameFromString $ pretty fname ++ "f"
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) _) =
