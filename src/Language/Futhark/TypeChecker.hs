@@ -49,7 +49,6 @@ data TypeError =
   | InvalidPatternError (PatternBase NoInfo Name)
     (TypeBase Rank NoInfo ()) (Maybe String) SrcLoc
   | UnknownVariableError Name SrcLoc
-  | UnknownFunctionError (QualName Name) SrcLoc
   | ParameterMismatch (Maybe (QualName Name)) SrcLoc
     (Either Int [TypeBase Rank NoInfo ()]) [TypeBase Rank NoInfo ()]
   | UseAfterConsume Name SrcLoc SrcLoc
@@ -75,6 +74,8 @@ data TypeError =
   | InvalidEntryPointReturnType SrcLoc Name
   | InvalidEntryPointParamType SrcLoc Name (PatternBase NoInfo Name)
   | UnderscoreUse SrcLoc Name
+  | ValueIsNotFunction SrcLoc Name Type
+  | FunctionIsNotValue SrcLoc Name
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -108,8 +109,6 @@ instance Show TypeError where
                              Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError name pos) =
     "Unknown variable " ++ pretty name ++ " referenced at " ++ locStr pos ++ "."
-  show (UnknownFunctionError fname pos) =
-    "Unknown function " ++ pretty fname ++ " called at " ++ locStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
     "In call of " ++ fname' ++ " at position " ++ locStr pos ++ ":\n" ++
     "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
@@ -188,11 +187,17 @@ instance Show TypeError where
   show (UnderscoreUse loc name) =
     "Use of " ++ nameToString name ++ " at " ++ locStr loc ++
     ": variables prefixed with underscore must not be accessed."
+  show (ValueIsNotFunction loc name t) =
+    "Attempt to use value " ++ pretty name ++ " of type " ++ pretty t ++
+    "as function at " ++ locStr loc ++ "."
+  show (FunctionIsNotValue loc name) =
+    "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
 
 -- | Return type and a list of argument types.
 type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
 type TypeBinding = TypeBase ShapeDecl NoInfo VName
-data Binding = Bound Type
+data Binding = BoundV Type
+             | BoundF FunBinding
              | WasConsumed SrcLoc
 
 data Usage = Consumed SrcLoc
@@ -270,29 +275,25 @@ altOccurences occurs1 occurs2 =
         cons1 = allConsumed occurs1
         cons2 = allConsumed occurs2
 
--- | A pair of a variable table and a function table.  Type checking
--- happens with access to this environment.  The function table is
--- only initialised at the very beginning, but the variable table will
--- be extended during type-checking when let-expressions are
--- encountered.
+-- | Type checking happens with access to this environment.  The
+-- tables will be extended during type-checking as bindings come into
+-- scope.
 data Scope  = Scope { envVtable :: HM.HashMap VName Binding
-                    , envFtable :: HM.HashMap VName FunBinding
                     , envTAtable :: HM.HashMap VName TypeBinding
                     }
 
 instance Monoid Scope where
-  mempty = Scope mempty mempty mempty
-  Scope vt1 ft1 tt1 `mappend` Scope vt2 ft2 tt2 =
-    Scope (vt1<>vt2) (ft1<>ft2) (tt1<>tt2)
+  mempty = Scope mempty mempty
+  Scope vt1 tt1 `mappend` Scope vt2 tt2 =
+    Scope (vt1<>vt2) (tt1<>tt2)
 
 initialScope :: Scope
-initialScope = Scope  HM.empty
-                      initialFtable
+initialScope = Scope  initialFtable
                       HM.empty
   where initialFtable = HM.fromList $ map addBuiltin $ HM.toList builtInFunctions
 
         addBuiltin (name, (t, ts)) =
-          (name, (Prim t, map Prim ts))
+          (name, BoundF (Prim t, map Prim ts))
 
 newtype Warnings = Warnings [(SrcLoc, String)]
 
@@ -412,14 +413,16 @@ alternative m1 m2 = pass $ do
 
 -- | Make all bindings nonunique.
 noUnique :: TypeM a -> TypeM a
-noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
-  where f (Bound t)         = Bound $ t `setUniqueness` Nonunique
-        f (WasConsumed loc) = WasConsumed loc
+noUnique = local (\env -> env { envVtable = HM.map set $ envVtable env})
+  where set (BoundV t)        = BoundV $ t `setUniqueness` Nonunique
+        set (BoundF f)        = BoundF f
+        set (WasConsumed loc) = WasConsumed loc
 
 onlySelfAliasing :: TypeM a -> TypeM a
-onlySelfAliasing = local (\env -> env { envVtable = HM.mapWithKey f $ envVtable env})
-  where f k (Bound t)       = Bound $ t `addAliases` HS.intersection (HS.singleton k)
-        f _ (WasConsumed loc) = WasConsumed loc
+onlySelfAliasing = local (\env -> env { envVtable = HM.mapWithKey set $ envVtable env})
+  where set k (BoundV t)        = BoundV $ t `addAliases` HS.intersection (HS.singleton k)
+        set _ (BoundF f)        = BoundF f
+        set _ (WasConsumed loc) = WasConsumed loc
 
 binding :: [Ident] -> TypeM a -> TypeM a
 binding bnds = check . local (`bindVars` bnds)
@@ -429,14 +432,14 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar :: Scope -> Ident -> Scope
         bindVar env (Ident name (Info tp) _) =
           let inedges = HS.toList $ aliases tp
-              update (Bound tp')
+              update (BoundV tp')
               -- If 'name' is tuple-typed, don't alias the components
               -- to 'name', because tuples have no identity beyond
               -- their components.
-                | Tuple _ <- tp = Bound tp'
-                | otherwise     = Bound (tp' `addAliases` HS.insert name)
+                | Tuple _ <- tp = BoundV tp'
+                | otherwise     = BoundV (tp' `addAliases` HS.insert name)
               update b = b
-          in env { envVtable = HM.insert name (Bound tp) $
+          in env { envVtable = HM.insert name (BoundV tp) $
                                adjustSeveral update inedges $
                                envVtable env }
 
@@ -498,19 +501,24 @@ patternDims (PatternAscription p t) =
         dimIdent loc (NamedDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
 patternDims _ = []
 
-checkName :: VName -> SrcLoc -> TypeM (VName, Type)
-checkName name pos = do
+checkVar :: VName -> SrcLoc -> TypeM (VName, Type)
+checkVar name loc = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
-    Nothing -> bad $ UnknownVariableError (baseName name) pos
-    Just (Bound t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse pos (baseName name)
-                   | otherwise -> return (name, t)
-    Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
+    Nothing -> bad $ UnknownVariableError (baseName name) loc
+    Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc (baseName name)
+                    | otherwise -> return (name, t)
+    Just (BoundF _) -> bad $ FunctionIsNotValue loc (baseName name)
+    Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
 lookupFunction :: QualName VName -> SrcLoc -> TypeM FunBinding
-lookupFunction qn@(QualName (_, name)) loc =
-  maybe explode return =<< asks (HM.lookup name . envFtable)
-  where explode = bad $ UnknownFunctionError (untagQualName qn) loc
+lookupFunction (QualName (_, name)) loc = do
+  bnd <- asks $ HM.lookup name . envVtable
+  case bnd of
+    Nothing -> bad $ UnknownVariableError (baseName name) loc
+    Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
+    Just (BoundV t) -> bad $ ValueIsNotFunction loc (baseName name) t
+    Just (BoundF f) -> return f
 
 lookupType :: QualName VName -> SrcLoc -> TypeM TypeBinding
 lookupType qn@(QualName (_, name)) loc =
@@ -627,8 +635,8 @@ buildScopeFromDecs decs = do
     -- removed at the end.
 
     buildFtable scope = do
-      ftable' <- foldM (expandFun scope) (envFtable scope) (mapMaybe (isFun . FunOrTypeDec) decs)
-      return $ scope {envFtable = ftable'}
+      vtable' <- foldM (expandFun scope) (envVtable scope) (mapMaybe (isFun . FunOrTypeDec) decs)
+      return $ scope {envVtable = vtable'}
 
     buildTAtable = typeAliasTableFromProg (mapMaybe (isType . FunOrTypeDec) decs)
 
@@ -639,7 +647,7 @@ buildScopeFromDecs decs = do
     paramDeclaredType _ =
       Nothing
 
-    expandFun scope fntable (FunDef _ fname (TypeDecl ret NoInfo) params _ _) = do
+    expandFun scope vtable (FunDef _ fname (TypeDecl ret NoInfo) params _ _) = do
       argtypes <- forM params $ \param ->
         case paramDeclaredType param of
           Just t -> return t
@@ -651,7 +659,7 @@ buildScopeFromDecs decs = do
             typeFromScope tname scope
       ret' <- expandType look ret
       argtypes' <- mapM (expandType look) argtypes
-      return $ HM.insert fname (ret' , argtypes') fntable
+      return $ HM.insert fname (BoundF (ret' , argtypes')) vtable
 
 -- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
@@ -1317,7 +1325,7 @@ checkLiteral loc (ArrayValue arr rt) = do
 
 checkIdent :: IdentBase NoInfo VName -> TypeM Ident
 checkIdent (Ident name _ pos) = do
-  (name', vt) <- checkName name pos
+  (name', vt) <- checkVar name pos
   return $ Ident name' (Info vt) pos
 
 data InferredType = NoneInferred
@@ -1593,7 +1601,7 @@ checkDim _ AnyDim =
 checkDim _ (ConstDim _) =
   return ()
 checkDim loc (NamedDim name) = do
-  (name', t) <- checkName name loc
+  (name', t) <- checkVar name loc
   observe $ Ident name' (Info (Prim (Signed Int32))) loc
   case t of
     Prim (Signed Int32) -> return ()
