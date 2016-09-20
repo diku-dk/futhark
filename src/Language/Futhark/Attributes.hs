@@ -573,10 +573,8 @@ typeOf (UnOp (ToFloat t) _ _) = Prim $ FloatType t
 typeOf (UnOp (ToSigned t) _ _) = Prim $ Signed t
 typeOf (UnOp (ToUnsigned t) _ _) = Prim $ Unsigned t
 typeOf (If _ _ _ (Info t) _) = t
-typeOf (Var ident) =
-  case unInfo $ identType ident of
-    Tuple ets -> Tuple ets
-    t         -> t `addAliases` HS.insert (identName ident)
+typeOf (Var _ (Info (Tuple ets)) _) = Tuple ets
+typeOf (Var (QualName (_, name)) (Info t) _) = t `addAliases` HS.insert name
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body

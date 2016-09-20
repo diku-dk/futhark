@@ -538,7 +538,7 @@ Atom : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
                              return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
-     | QualName %prec letprec     {% fmap Var $ identFromQualName $1 }
+     | QualName %prec letprec     { Var (fst $1) NoInfo (snd $1) }
      | empty '(' UserTypeDecl ')' { Empty $3 $1 }
      | '(' Exp ')'                { $2 }
      | '(' Exp ',' Exps ')'       { TupLit ($2:$4) $1 }
@@ -804,15 +804,9 @@ arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
-patternExp (Id ident) = return $ Var ident
+patternExp (Id ident) = return $ Var (QualName ([],identName ident)) NoInfo $ srclocOf ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
-
-identFromQualName :: (QualName Name, SrcLoc) -> ParserMonad UncheckedIdent
-identFromQualName (QualName ([], name), loc) =
-  return $ Ident name NoInfo loc
-identFromQualName (_, loc) =
-  throwError $ "Identifier cannot be qualified at " ++ locStr loc
 
 zeroExpression :: SrcLoc -> UncheckedExp
 zeroExpression = Literal $ PrimValue $ SignedValue $ Int32Value 0

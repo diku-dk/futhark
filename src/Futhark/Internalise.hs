@@ -123,10 +123,10 @@ extraBodyBindings bnds m = do
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
-internaliseExp _ (E.Var var) = do
-  subst <- asks $ HM.lookup (E.identName var) . envSubsts
+internaliseExp _ (E.Var (QualName (_, name)) t loc) = do
+  subst <- asks $ HM.lookup name . envSubsts
   case subst of
-    Nothing     -> (:[]) . I.Var <$> internaliseIdent var
+    Nothing     -> (:[]) . I.Var <$> internaliseIdent (E.Ident name t loc)
     Just substs -> return substs
 
 internaliseExp desc (E.Index e idxs loc) = do
@@ -310,7 +310,8 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
-  srcs <- internaliseExpToVars "src" $ E.Var src
+  srcs <- internaliseExpToVars "src" $
+          E.Var (QualName ([], E.identName src)) (E.identType src) (srclocOf src)
   ves <- internaliseExp "lw_val" ve
   dims <- case srcs of
             [] -> return [] -- Will this happen?
@@ -955,7 +956,7 @@ unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
   let ident = E.Ident paramname (Info paramtype) noLoc
   return ([E.Id ident],
-          E.UnOp op (E.Var ident) noLoc,
+          E.UnOp op (E.Var (QualName ([],paramname)) (Info paramtype) noLoc) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
@@ -966,7 +967,10 @@ binOpFunToLambda op xtype ytype rettype = do
   let ident_x = E.Ident x_name (Info xtype) noLoc
       ident_y = E.Ident y_name (Info ytype) noLoc
   return ([E.Id ident_x, E.Id ident_y],
-          E.BinOp op (E.Var ident_x) (E.Var ident_y) (Info rettype) noLoc,
+          E.BinOp op
+           (E.Var (QualName ([],x_name)) (Info xtype) noLoc)
+           (E.Var (QualName ([],y_name)) (Info ytype) noLoc)
+           (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
@@ -976,7 +980,7 @@ binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let ident = E.Ident paramname (Info paramtype) noLoc
-      (x', y') = swap (E.Var ident, e)
+      (x', y') = swap (E.Var (QualName ([],paramname)) (Info paramtype) noLoc, e)
   return ([E.Id ident],
           E.BinOp op x' y' (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
