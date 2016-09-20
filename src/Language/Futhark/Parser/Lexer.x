@@ -86,13 +86,12 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
+  "True"                   { tokenC TRUE }
+  "False"                  { tokenC FALSE }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
-  [a-z] [a-zA-Z0-9_']*     { tokenS keyword }
+  [a-zA-Z] [a-zA-Z0-9_']*     { tokenS keyword }
   "_" [a-zA-Z0-9] [a-zA-Z0-9_']* { tokenS keyword }
-  "True"                   { tokenS $ const TRUE }
-  "False"                  { tokenS $ const FALSE }
-  [A-Z] [a-zA-Z0-9_']*     { tokenS $ SID . nameFromText }
 
 {
 
@@ -214,7 +213,6 @@ data Token = IF
            | F32
            | F64
            | ID Name
-           | SID Name
            | STRINGLIT String
            | DEFAULT
            | INTLIT Int64

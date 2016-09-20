@@ -75,7 +75,6 @@ import Language.Futhark.Parser.Lexer
       f64             { L $$ F64 }
 
       id              { L _ (ID _) }
-      sid             { L _ (SID _) }
 
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
@@ -175,6 +174,7 @@ import Language.Futhark.Parser.Lexer
       end             { L $$ END }
       val             { L $$ VAL }
 
+%left bottom
 %left ifprec letprec
 %left ','
 %left '||'
@@ -234,8 +234,8 @@ Signature :: { SigDefBase f vn }
                  in SigDef name $5 pos }
 
 Module :: { ModDefBase f vn }
-       : struct sid '{' ModDecs '}'
-       { let L pos (SID name) = $2
+       : struct id '{' ModDecs '}'
+       { let L pos (ID name) = $2
           in ModDef name $4 pos }
 
 ModDecs : ModDec ModDecs { $1 ++ $2 }
@@ -276,10 +276,24 @@ DefaultDec :: { () }
 
 
 QualName :: { (QualName Name , SrcLoc) }
-         : sid '.' QualName { let L loc (SID qual) = $1; (QualName (quals, name), _) = $3
+         : id '.' QualName { let L loc (ID qual) = $1; (QualName (quals, name), _) = $3
                               in (QualName (qual:quals, name), loc) }
          | id { let L loc (ID name) = $1 in (QualName ([], name), loc) }
 ;
+
+QualExp :: { (QualName (Either Int Name), SrcLoc) }
+QualExp : id
+          { let L loc (ID name) = $1
+            in (QualName ([], Right name), loc)
+          }
+        | id '.' NaturalInt
+          { let L loc (ID name) = $1
+            in (QualName ([name], Left $3), loc) }
+        | id '.' QualExp
+          { let L loc (ID qual) = $1; (QualName (quals,x), _) = $3
+            in (QualName (qual:quals,x), loc)
+          }
+
 
 -- Note that this production does not include Minus.
 BinOp :: { (BinOp, SrcLoc) }
@@ -332,8 +346,6 @@ Header : include IncludeParts { Include $2 }
 IncludeParts :: { [String] }
 IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
              | id { let L pos (ID name) = $1 in [nameToString name] }
-             | sid '.' IncludeParts { let L pos (SID name) = $1 in nameToString name : $3 }
-             | sid { let L pos (SID name) = $1 in [nameToString name] }
 
 Fun     : fun id Params ':' UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
@@ -538,13 +550,20 @@ Atom : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
                              return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
-     | QualName %prec letprec     { Var (fst $1) NoInfo (snd $1) }
      | empty '(' UserTypeDecl ')' { Empty $3 $1 }
      | '(' Exp ')'                { $2 }
+     | '(' Exp ')' '.' NaturalInt { TupleIndex $2 $5 NoInfo $1 }
      | '(' Exp ',' Exps ')'       { TupLit ($2:$4) $1 }
      | '('      ')'               { TupLit [] $1 }
      | Atom Slice %prec indexprec { Index $1 $2 (srclocOf $1) }
-     | Atom '.' NaturalInt{ TupleIndex $1 $3 NoInfo $ srclocOf $1 }
+     | QualExp %prec letprec      { case $1 of
+                                      (QualName (quals, Left i), loc) ->
+                                        TupleIndex
+                                        (Var (QualName (init quals, last quals)) NoInfo loc)
+                                        i NoInfo loc
+                                      (QualName (quals, Right name), loc) ->
+                                        Var (QualName (quals, name)) NoInfo loc
+                                  }
 
 Atoms :: { (UncheckedExp, [UncheckedExp]) }
       : Atom { ($1, []) }
