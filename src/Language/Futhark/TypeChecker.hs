@@ -48,7 +48,7 @@ data TypeError =
   | DupPatternError Name SrcLoc SrcLoc
   | InvalidPatternError (PatternBase NoInfo Name)
     (TypeBase Rank NoInfo ()) (Maybe String) SrcLoc
-  | UnknownVariableError Name SrcLoc
+  | UnknownVariableError (QualName Name) SrcLoc
   | ParameterMismatch (Maybe (QualName Name)) SrcLoc
     (Either Int [TypeBase Rank NoInfo ()]) [TypeBase Rank NoInfo ()]
   | UseAfterConsume Name SrcLoc SrcLoc
@@ -62,7 +62,7 @@ data TypeError =
   | ReturnAliased Name Name SrcLoc
   | UniqueReturnAliased Name SrcLoc
   | NotAnArray SrcLoc (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
-  | PermutationError SrcLoc [Int] Int (Maybe Name)
+  | PermutationError SrcLoc [Int] Int
   | DimensionNotInteger SrcLoc Name
   | CyclicalTypeDefinition SrcLoc (QualName Name)
   | UndefinedAlias SrcLoc (QualName Name)
@@ -74,8 +74,8 @@ data TypeError =
   | InvalidEntryPointReturnType SrcLoc Name
   | InvalidEntryPointParamType SrcLoc Name (PatternBase NoInfo Name)
   | UnderscoreUse SrcLoc Name
-  | ValueIsNotFunction SrcLoc Name Type
-  | FunctionIsNotValue SrcLoc Name
+  | ValueIsNotFunction SrcLoc (QualName Name) Type
+  | FunctionIsNotValue SrcLoc (QualName Name)
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -151,11 +151,10 @@ instance Show TypeError where
   show (NotAnArray loc _ t) =
     "The expression at " ++ locStr loc ++
     " is expected to be an array, but is " ++ pretty t ++ "."
-  show (PermutationError loc perm rank name) =
+  show (PermutationError loc perm rank) =
     "The permutation (" ++ intercalate ", " (map show perm) ++
-    ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ " at " ++
+    ") is not valid for array argument of rank " ++ show rank ++ " at " ++
     locStr loc ++ "."
-    where name' = maybe "" ((++" ") . pretty) name
   show (DimensionNotInteger loc name) =
     "Dimension declaration " ++ pretty name ++ " at " ++ locStr loc ++
     " should be an integer."
@@ -501,23 +500,23 @@ patternDims (PatternAscription p t) =
         dimIdent loc (NamedDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
 patternDims _ = []
 
-checkVar :: VName -> SrcLoc -> TypeM (VName, Type)
-checkVar name loc = do
+checkVar :: QualName VName -> SrcLoc -> TypeM (VName, Type)
+checkVar qn@(QualName (_, name)) loc = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
-    Nothing -> bad $ UnknownVariableError (baseName name) loc
+    Nothing -> bad $ UnknownVariableError (untagQualName qn) loc
     Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc (baseName name)
                     | otherwise -> return (name, t)
-    Just (BoundF _) -> bad $ FunctionIsNotValue loc (baseName name)
+    Just (BoundF _) -> bad $ FunctionIsNotValue loc (untagQualName qn)
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
 lookupFunction :: QualName VName -> SrcLoc -> TypeM FunBinding
-lookupFunction (QualName (_, name)) loc = do
+lookupFunction qn@(QualName (_, name)) loc = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
-    Nothing -> bad $ UnknownVariableError (baseName name) loc
+    Nothing -> bad $ UnknownVariableError (untagQualName qn) loc
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
-    Just (BoundV t) -> bad $ ValueIsNotFunction loc (baseName name) t
+    Just (BoundV t) -> bad $ ValueIsNotFunction loc (untagQualName qn) t
     Just (BoundF f) -> return f
 
 lookupType :: QualName VName -> SrcLoc -> TypeM TypeBinding
@@ -884,10 +883,10 @@ checkExp (If e1 e2 e3 _ pos) =
   let t' = addAliases brancht (`HS.difference` allConsumed dflow)
   return $ If e1' e2' e3' (Info t') pos
 
-checkExp (Var ident) = do
-  ident' <- checkIdent ident
-  observe ident'
-  return $ Var ident'
+checkExp (Var qn@(QualName (quals,_)) NoInfo loc) = do
+  (name', t) <- checkVar qn loc
+  observe $ Ident name' (Info t) loc
+  return $ Var (QualName (quals,name')) (Info t) loc
 
 checkExp (Apply fname args _ loc) = do
   (ftype, paramtypes) <- lookupFunction fname loc
@@ -977,10 +976,8 @@ checkExp (Rearrange perm arrexp pos) = do
   arrexp' <- checkExp arrexp
   let rank = arrayRank $ typeOf arrexp'
   when (length perm /= rank || sort perm /= [0..rank-1]) $
-    bad $ PermutationError pos perm rank name
+    bad $ PermutationError pos perm rank
   return $ Rearrange perm arrexp' pos
-  where name = case arrexp of Var v -> Just $ baseName $ identName v
-                              _     -> Nothing
 
 checkExp (Transpose arrexp pos) = do
   arrexp' <- checkExp arrexp
@@ -1325,7 +1322,7 @@ checkLiteral loc (ArrayValue arr rt) = do
 
 checkIdent :: IdentBase NoInfo VName -> TypeM Ident
 checkIdent (Ident name _ pos) = do
-  (name', vt) <- checkVar name pos
+  (name', vt) <- checkVar (QualName ([],name)) pos
   return $ Ident name' (Info vt) pos
 
 data InferredType = NoneInferred
@@ -1335,10 +1332,10 @@ data InferredType = NoneInferred
 checkPattern :: PatternBase NoInfo VName -> InferredType
              -> TypeM Pattern
 checkPattern (Id (Ident name NoInfo loc)) (Inferred t) =
-  let t' = typeOf $ Var $ Ident name (Info t) loc
+  let t' = typeOf $ Var (QualName ([],name)) (Info t) loc
   in return $ Id (Ident name (Info $ t' `setUniqueness` Nonunique) loc)
 checkPattern (Id (Ident name NoInfo loc)) (Ascribed t) =
-  let t' = typeOf $ Var $ Ident name (Info t) loc
+  let t' = typeOf $ Var (QualName ([],name)) (Info t) loc
   in return $ Id (Ident name (Info t') loc)
 checkPattern (Wildcard _ loc) (Inferred t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
@@ -1507,9 +1504,9 @@ checkLambda (CurryFun fname curryargexps _ loc) args = do
   return $ CurryFun fname curryargexps' (Info rettype') loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
-  var <- newIdent "x" (argType arg) loc
+  var@(Ident x _ _) <- newIdent "x" (argType arg) loc
   binding [var] $ do
-    e <- checkExp (UnOp unop (Var var { identType = NoInfo }) loc)
+    e <- checkExp $ UnOp unop (Var (QualName ([],x)) NoInfo loc) loc
     return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
@@ -1537,13 +1534,14 @@ checkCurryBinOp :: (BinOp -> Exp -> Info Type -> Info (CompTypeBase VName) -> Sr
                 -> BinOp -> ExpBase NoInfo VName -> SrcLoc -> Arg -> TypeM b
 checkCurryBinOp f binop x loc arg = do
   x' <- checkExp x
-  y <- newIdent "y" (argType arg) loc
-  xvar <- newIdent "x" (typeOf x') loc
+  y_ident <- newIdent "y" (argType arg) loc
+  x_ident <- newIdent "x" (typeOf x') loc
   occur $ argOccurences arg
-  binding [y, xvar] $ do
-    e <- checkExp (BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc)
+  binding [y_ident, x_ident] $ do
+    let y_var = Var (QualName ([],identName y_ident)) NoInfo loc
+        x_var = Var (QualName ([],identName x_ident)) NoInfo loc
+    e <- checkExp (BinOp binop y_var x_var NoInfo loc)
     return $ f binop x' (Info $ argType arg) (Info $ typeOf e) loc
-  where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
 checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg]
                   -> SrcLoc -> TypeM Lambda
@@ -1558,11 +1556,11 @@ checkPolyLambdaOp op curryargexps args pos = do
   let xident t = Ident xname t pos
       yident t = Ident yname t pos
   (x,y,params) <- case curryargexps of
-                    [] -> return (Var $ xident NoInfo,
-                                  Var $ yident NoInfo,
+                    [] -> return (Var (QualName ([], xname)) NoInfo pos,
+                                  Var (QualName ([], yname)) NoInfo pos,
                                   [xident $ Info tp, yident $ Info tp])
                     [e] -> return (e,
-                                   Var $ yident NoInfo,
+                                   Var (QualName ([], yname)) NoInfo pos,
                                    [yident $ Info tp])
                     (e1:e2:_) -> return (e1, e2, [])
   rettype <- typeOf <$> binding params (checkBinOp op x y pos)
@@ -1601,7 +1599,7 @@ checkDim _ AnyDim =
 checkDim _ (ConstDim _) =
   return ()
 checkDim loc (NamedDim name) = do
-  (name', t) <- checkVar name loc
+  (name', t) <- checkVar (QualName ([],name)) loc
   observe $ Ident name' (Info (Prim (Signed Int32))) loc
   case t of
     Prim (Signed Int32) -> return ()

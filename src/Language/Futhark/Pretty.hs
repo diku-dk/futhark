@@ -199,7 +199,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndex
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
-  pprPrec _ (Var v) = ppr v
+  pprPrec _ (Var name _ _) = ppr name
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = parens $ commastack $ map ppr es

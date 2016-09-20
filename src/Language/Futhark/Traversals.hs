@@ -54,8 +54,8 @@ data MapperBase vnf vnt m = Mapper {
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM :: (Applicative m, Monad m) =>
            MapperBase vnf vnt m -> ExpBase NoInfo vnf -> m (ExpBase NoInfo vnt)
-mapExpM tv (Var ident) =
-  pure Var <*> mapOnIdent tv ident
+mapExpM tv (Var name NoInfo loc) =
+  Var <$> mapOnQualName tv name <*> pure NoInfo <*> pure loc
 mapExpM tv (Literal val loc) =
   pure Literal <*> mapOnValue tv val <*> pure loc
 mapExpM tv (TupLit els loc) =

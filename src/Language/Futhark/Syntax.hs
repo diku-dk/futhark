@@ -373,7 +373,7 @@ data ExpBase f vn =
 
             | Empty (TypeDeclBase f vn) SrcLoc
 
-            | Var    (IdentBase f vn)
+            | Var    (QualName vn) (f (CompTypeBase vn)) SrcLoc
 
             | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
 
@@ -528,7 +528,7 @@ instance Located (ExpBase f vn) where
   locOf (BinOp _ _ _ _ pos)     = locOf pos
   locOf (UnOp _ _ pos)          = locOf pos
   locOf (If _ _ _ _ pos)        = locOf pos
-  locOf (Var ident)             = locOf ident
+  locOf (Var _ _ loc)           = locOf loc
   locOf (Apply _ _ _ pos)       = locOf pos
   locOf (LetPat _ _ _ pos)      = locOf pos
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
