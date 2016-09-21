@@ -22,7 +22,9 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  gpuPipeline (pyCodeAction filepath config) filepath
+  (gpuPipeline mode) (pyCodeAction filepath config) filepath
+  where mode | compilerModule config = Library
+             | otherwise             = Executable
 
 pyCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 pyCodeAction filepath config =

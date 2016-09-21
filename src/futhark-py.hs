@@ -24,7 +24,7 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  sequentialPipeline (pyCodeAction filepath config) filepath
+  (sequentialPipeline Executable) (pyCodeAction filepath config) filepath
 
 pyCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 pyCodeAction filepath config =

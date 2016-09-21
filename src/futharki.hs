@@ -37,7 +37,7 @@ repl = do
 
 interpret :: FutharkConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram config standardPipeline interpretAction'
+  runCompilerOnProgram config (standardPipeline Executable) interpretAction'
 
 interpreterConfig :: FutharkConfig
 interpreterConfig = newFutharkConfig

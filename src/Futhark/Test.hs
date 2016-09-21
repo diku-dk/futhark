@@ -228,10 +228,10 @@ optimisePipeline :: Parser StructurePipeline
 optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
                    pure defaultPipelineConfig
   where defaultPipelineConfig =
-          SOACSPipeline standardPipeline
+          SOACSPipeline $ standardPipeline Library
         distributePipelineConfig =
           KernelsPipeline $
-          standardPipeline >>>
+          standardPipeline Library >>>
           onePass extractKernels >>>
           onePass simplifyKernels
 

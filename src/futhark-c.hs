@@ -22,7 +22,7 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  sequentialPipeline (cCodeAction filepath config) filepath
+  (sequentialPipeline Executable) (cCodeAction filepath config) filepath
 
 cCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 cCodeAction filepath config =

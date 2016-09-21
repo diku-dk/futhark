@@ -1,12 +1,19 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | Optimisation pipelines.
 module Futhark.Passes
   ( standardPipeline
   , sequentialPipeline
   , gpuPipeline
+
+  , CompilationMode (..)
   )
 where
 
-import Control.Category ((>>>))
+import Control.Category ((>>>), id)
+import Control.Monad.Except
+
+import Prelude hiding (id)
 
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -21,12 +28,25 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
+import Futhark.Pass
 import Futhark.Pipeline
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.SOACS (SOACS)
+import Futhark.Representation.AST.Syntax
 
-standardPipeline :: Pipeline SOACS SOACS
-standardPipeline =
+-- | Are we compiling the Futhark program as an executable or a
+-- library?  This affects which functions are considered as roots for
+-- dead code elimination and ultimately exist in generated code.
+data CompilationMode = Executable
+                     -- ^ Only the top-level function named @main@ is
+                       -- alive.
+                     | Library
+                       -- ^ Only top-level functions marked @entry@
+                       -- are alive.
+
+standardPipeline :: CompilationMode -> Pipeline SOACS SOACS
+standardPipeline mode =
+  markEntryPoints mode >>>
   passes [ simplifySOACS
          , inlineAggressively
          , removeDeadFunctions
@@ -41,10 +61,26 @@ standardPipeline =
          , simplifySOACS
          , removeDeadFunctions
          ]
+  where markEntryPoints :: CompilationMode -> Pipeline SOACS SOACS
+        markEntryPoints Library = id
+        markEntryPoints Executable =
+          onePass Pass { passName = "Mark main function"
+                       , passDescription = "Mark the main function as entry point"
+                       , passFunction = \(Prog ps) -> do checkForMain ps
+                                                         return $ Prog $ map setEntry ps
+                       }
+        setEntry fd = fd { funDefEntryPoint = funDefName fd == defaultEntryPoint }
 
-sequentialPipeline :: Pipeline SOACS ExplicitMemory
-sequentialPipeline =
-  standardPipeline >>>
+        checkForMain ps
+          | not $ any ((==defaultEntryPoint) . funDefName) ps =
+              throwError "No main function defined."
+          | otherwise =
+              return ()
+
+
+sequentialPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
+sequentialPipeline mode =
+  standardPipeline mode >>>
   onePass firstOrderTransform >>>
   passes [ simplifyKernels
          , inPlaceLowering
@@ -57,9 +93,9 @@ sequentialPipeline =
          , simplifyExplicitMemory
          ]
 
-gpuPipeline :: Pipeline SOACS ExplicitMemory
-gpuPipeline =
-  standardPipeline >>>
+gpuPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
+gpuPipeline mode =
+  standardPipeline mode >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
          , babysitKernels
