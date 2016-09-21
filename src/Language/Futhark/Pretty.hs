@@ -352,6 +352,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModDefBa
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunOrTypeDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
+  ppr (ConstDec c) = ppr c
   ppr (TypeDec tp) = ppr tp
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeDefBase ty vn) where
@@ -366,6 +367,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBa
     indent 2 (ppr body)
     where fun | entry     = "entry"
               | otherwise = "fun"
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstDefBase ty vn) where
+  ppr (ConstDef name t e _) =
+    text "val" <+> ppr name <> text ":" <+> ppr t <+> text "+" <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDefBase ty vn) where
   ppr (SigDef name sigdecls _) =

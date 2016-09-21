@@ -62,10 +62,10 @@ module Language.Futhark.Attributes
   -- * Getters for decs
   , isType
   , isFun
+  , isConst
   , isFunOrType
   , isMod
   , isSig
-  , funsFromProg
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -210,7 +210,7 @@ subuniqueOf _ _              = True
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf :: (ArrayShape (shape vn), Monoid (as1 vn), Monoid (as2 vn)) =>
+subtypeOf :: ArrayShape (shape vn) =>
              TypeBase shape as1 vn -> TypeBase shape as2 vn -> Bool
 subtypeOf
   (Array (PrimArray t1 dims1 u1 _))
@@ -234,9 +234,9 @@ subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
 -- ignoring uniqueness.
-similarTo :: (ArrayShape (shape vn), Monoid (as vn)) =>
-             TypeBase shape as vn
-          -> TypeBase shape as vn
+similarTo :: ArrayShape (shape vn) =>
+             TypeBase shape as1 vn
+          -> TypeBase shape as2 vn
           -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 
@@ -310,7 +310,7 @@ toStruct t = t `setAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
 fromStruct :: TypeBase shape as vn
-         -> TypeBase shape Names vn
+           -> TypeBase shape Names vn
 fromStruct t = t `setAliases` HS.empty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
@@ -430,8 +430,7 @@ typeToTupleArrayElem (Prim bt)   u = PrimArrayElem bt mempty u
 typeToTupleArrayElem (Tuple ts') u = TupleArrayElem $ map (`typeToTupleArrayElem` u) ts'
 typeToTupleArrayElem (Array at)  _ = ArrayArrayElem at
 
-tupleArrayElemToType :: Monoid (as vn) =>
-                        TupleArrayElemTypeBase shape as vn
+tupleArrayElemToType :: TupleArrayElemTypeBase shape as vn
                      -> TypeBase shape as vn
 tupleArrayElemToType (PrimArrayElem bt _ _) = Prim bt
 tupleArrayElemToType (TupleArrayElem ts)    = Tuple $ map tupleArrayElemToType ts
@@ -750,18 +749,13 @@ builtInFunctions = HM.fromList $ zipWith namify [0..]
                    ]
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
--- | All functions, including those nested in structures.
-funsFromProg :: ProgBase f vn -> [FunDefBase f vn]
-funsFromProg prog = concatMap getFuns $ progDecs prog
-  where getFuns (FunOrTypeDec (FunDec a)) = [a]
-        getFuns (FunOrTypeDec TypeDec{}) = []
-        getFuns (ModDec d) = concatMap getFuns $ modDecls d
-        getFuns SigDec{} = []
-
-
 isFun :: DecBase f vn -> Maybe (FunDefBase f vn)
 isFun (FunOrTypeDec (FunDec a)) = Just a
 isFun _                         = Nothing
+
+isConst :: DecBase f vn -> Maybe (ConstDefBase f vn)
+isConst (FunOrTypeDec (ConstDec a)) = Just a
+isConst _                           = Nothing
 
 isType :: DecBase f vn -> Maybe (TypeDefBase f vn)
 isType (FunOrTypeDec (TypeDec t)) = Just t
@@ -779,6 +773,7 @@ isMod :: DecBase f vn -> Maybe (ModDefBase f vn)
 isMod (ModDec modd) = Just modd
 isMod _             = Nothing
 
+-- | Create a name with no qualifiers from a name.
 nameToQualName :: Name -> QualName Name
 nameToQualName n = QualName ([], n)
 

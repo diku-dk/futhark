@@ -52,6 +52,7 @@ module Language.Futhark.Syntax
 
   -- * Definitions
   , FunDefBase(..)
+  , ConstDefBase(..)
   , TypeDefBase(..)
   , SigDefBase(..)
   , SigDeclBase(..)
@@ -615,6 +616,20 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                               }
 deriving instance Showable f vn => Show (FunDefBase f vn)
 
+instance Located (FunDefBase f vn) where
+  locOf = locOf . funDefLocation
+
+-- | Constant declaration
+data ConstDefBase f vn = ConstDef { constDefName     :: vn
+                                  , constDefType     :: TypeDeclBase f vn
+                                  , constDefDef      :: ExpBase f vn
+                                  , constDefLocation :: SrcLoc
+                                  }
+deriving instance Showable f vn => Show (ConstDefBase f vn)
+
+instance Located (ConstDefBase f vn) where
+  locOf = locOf . constDefLocation
+
 -- | Type Declarations
 data TypeDefBase f vn = TypeDef { typeAlias       :: vn
                                 , userType        :: TypeDeclBase f vn
@@ -622,11 +637,15 @@ data TypeDefBase f vn = TypeDef { typeAlias       :: vn
                                 }
 deriving instance Showable f vn => Show (TypeDefBase f vn)
 
+
 data SigDefBase f vn = SigDef { sigName        :: vn
                               , sigDecls       :: [SigDeclBase f vn]
                               , sigDefLocation :: SrcLoc
                               }
 deriving instance Showable f vn => Show (SigDefBase f vn)
+
+instance Located (SigDefBase f vn) where
+  locOf = locOf . sigDefLocation
 
 data SigDeclBase f vn = FunSig  { funSigName    :: vn
                                 , funSigParams  :: [TypeDeclBase f vn]
@@ -644,14 +663,28 @@ data ModDefBase f vn = ModDef { modName        :: vn
                               }
 deriving instance Showable f vn => Show (ModDefBase f vn)
 
+instance Located (ModDefBase f vn) where
+  locOf = locOf . modDefLocation
+
 data FunOrTypeDecBase f vn = FunDec (FunDefBase f vn)
+                           | ConstDec (ConstDefBase f vn)
                            | TypeDec (TypeDefBase f vn)
 deriving instance Showable f vn => Show (FunOrTypeDecBase f vn)
+
+instance Located (FunOrTypeDecBase f vn) where
+  locOf (FunDec d) = locOf d
+  locOf (ConstDec d) = locOf d
+  locOf (TypeDec d) = locOf d
 
 data DecBase f vn = FunOrTypeDec (FunOrTypeDecBase f vn)
                   | SigDec (SigDefBase f vn)
                   | ModDec (ModDefBase f vn)
 deriving instance Showable f vn => Show (DecBase f vn)
+
+instance Located (DecBase f vn) where
+  locOf (FunOrTypeDec d) = locOf d
+  locOf (SigDec d) = locOf d
+  locOf (ModDec d) = locOf d
 
 data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)

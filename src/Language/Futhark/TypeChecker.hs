@@ -76,6 +76,8 @@ data TypeError =
   | UnderscoreUse SrcLoc Name
   | ValueIsNotFunction SrcLoc (QualName Name) Type
   | FunctionIsNotValue SrcLoc (QualName Name)
+  | UniqueConstType SrcLoc Name (TypeBase Rank NoInfo ())
+  | EntryPointConstReturnDecl SrcLoc Name (QualName Name)
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -191,6 +193,13 @@ instance Show TypeError where
     "as function at " ++ locStr loc ++ "."
   show (FunctionIsNotValue loc name) =
     "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
+  show (UniqueConstType loc name t) =
+    "Constant " ++ pretty name ++ " defined with unique type " ++ pretty t ++ " at " ++
+    locStr loc ++ ", which is not allowed."
+  show (EntryPointConstReturnDecl loc fname cname) =
+    "Use of constant " ++ pretty cname ++
+    " to annotate return type of entry point " ++ pretty fname ++
+    " at " ++ locStr loc ++ " is not allowed."
 
 -- | Return type and a list of argument types.
 type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
@@ -287,11 +296,11 @@ instance Monoid Scope where
     Scope (vt1<>vt2) (tt1<>tt2)
 
 initialScope :: Scope
-initialScope = Scope  initialFtable
+initialScope = Scope  initialVtable
                       HM.empty
-  where initialFtable = HM.fromList $ map addBuiltin $ HM.toList builtInFunctions
+  where initialVtable = HM.fromList $ map addBuiltinF $ HM.toList builtInFunctions
 
-        addBuiltin (name, (t, ts)) =
+        addBuiltinF (name, (t, ts)) =
           (name, BoundF (Prim t, map Prim ts))
 
 newtype Warnings = Warnings [(SrcLoc, String)]
@@ -584,30 +593,29 @@ unifyExpTypes e1 e2 =
   where t1 = typeOf e1
         t2 = typeOf e2
 
-anySignedType :: [Type]
+anySignedType :: [TypeBase Rank NoInfo ()]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]
 
-anyUnsignedType :: [Type]
+anyUnsignedType :: [TypeBase Rank NoInfo ()]
 anyUnsignedType = map (Prim . Unsigned) [minBound .. maxBound]
 
-anyIntType :: [Type]
+anyIntType :: [TypeBase Rank NoInfo ()]
 anyIntType = anySignedType ++ anyUnsignedType
 
-anyFloatType :: [Type]
+anyFloatType :: [TypeBase Rank NoInfo ()]
 anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 
-anyNumberType :: [Type]
+anyNumberType :: [TypeBase Rank NoInfo ()]
 anyNumberType = anyIntType ++ anyFloatType
 
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
-require :: [Type] -> Exp -> TypeM Exp
+require :: [TypeBase Rank NoInfo ()] -> Exp -> TypeM Exp
 require ts e
-  | any (typeOf e `similarTo`) ts = return e
+  | any (removeNames (typeOf e) `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e)
-                      (toStructural $ typeOf e) $
-                      map toStructural ts
+                      (toStructural $ typeOf e) ts
 
 chompDecs :: [DecBase NoInfo VName]
           -> ([FunOrTypeDecBase NoInfo VName], [DecBase NoInfo VName])
@@ -619,22 +627,16 @@ chompDecs decs = f ([], decs)
 buildScopeFromDecs :: [FunOrTypeDecBase NoInfo VName]
                    -> TypeM Scope
 buildScopeFromDecs [] = ask
-buildScopeFromDecs decs = do
-  scope     <- ask
-  scope'    <- buildTAtable scope
-  buildFtable scope'
-
+buildScopeFromDecs decs =
+  ask >>= buildTAtable >>= buildFtable >>= buildVtable
   where
-
-    -- To build the ftable we loop through the list of function
-    -- definitions.  In addition to the normal ftable information
-    -- (name, return type, argument types), we also keep track of
-    -- position information, in order to report both locations of
-    -- duplicate function definitions.  The position information is
-    -- removed at the end.
 
     buildFtable scope = do
       vtable' <- foldM (expandFun scope) (envVtable scope) (mapMaybe (isFun . FunOrTypeDec) decs)
+      return $ scope {envVtable = vtable'}
+
+    buildVtable scope = do
+      vtable' <- foldM (expandConst scope) (envVtable scope) (mapMaybe (isConst . FunOrTypeDec) decs)
       return $ scope {envVtable = vtable'}
 
     buildTAtable = typeAliasTableFromProg (mapMaybe (isType . FunOrTypeDec) decs)
@@ -659,6 +661,13 @@ buildScopeFromDecs decs = do
       ret' <- expandType look ret
       argtypes' <- mapM (expandType look) argtypes
       return $ HM.insert fname (BoundF (ret' , argtypes')) vtable
+
+    expandConst scope vtable (ConstDef cname (TypeDecl t NoInfo) _ _) = do
+      let look tname tloc =
+            maybe (throwError $ UndefinedType tloc $ untagQualName tname) return $
+            typeFromScope tname scope
+      t' <- expandType look t
+      return $ HM.insert cname (BoundV $ removeShapeAnnotations $ t' `addAliases` mempty) vtable
 
 -- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
@@ -688,6 +697,12 @@ checkForDuplicateDecs =
             Just loc' ->
               bad $ DupDefinitionError (baseName name) loc loc'
             _ -> return $ HM.insert (name, "type") loc known
+
+        f known (FunOrTypeDec (ConstDec (ConstDef name _ _ loc))) =
+          case HM.lookup (name, "const") known of
+            Just loc' ->
+              bad $ DupDefinitionError (baseName name) loc loc'
+            _ -> return $ HM.insert (name, "const") loc known
 
         f known (SigDec (SigDef name _ loc)) =
           case HM.lookup (name, "signature") known of
@@ -737,12 +752,29 @@ checkFunOrTypeDec (FunDec fundef:decs) = do
 
 checkFunOrTypeDec (TypeDec _:decs) = checkFunOrTypeDec decs
 
+checkFunOrTypeDec (ConstDec constdec:decs) = do
+  constdec' <- checkConst constdec
+  decs' <- checkFunOrTypeDec decs
+  return $ FunOrTypeDec (ConstDec constdec') : decs'
+
 checkFunOrTypeDec [] = return []
+
+checkConst :: ConstDefBase NoInfo VName -> TypeM ConstDef
+checkConst (ConstDef name t e loc) = do
+  t' <- checkTypeDecl t
+  let expanded_type = unInfo $ expandedType t'
+  when (anythingUnique expanded_type) $
+    bad $ UniqueConstType loc (baseName name) $ toStructural expanded_type
+  e' <- require [toStructural expanded_type] =<< checkExp e
+  return $ ConstDef name t' e' loc
+  where anythingUnique (Tuple ts) = any anythingUnique ts
+        anythingUnique et         = unique et
 
 checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
 checkFun (FunDef entry fname rettype params body loc) =
   bindingPatterns (zip params $ repeat NoneInferred) $ \params' -> do
     rettype' <- checkTypeDecl rettype
+
     body' <- checkFunBody fname body (Just rettype') loc
     let rettype_structural = toStructural $ unInfo $ expandedType rettype'
 
@@ -751,6 +783,12 @@ checkFun (FunDef entry fname rettype params body loc) =
     when entry $ do
       unless (okEntryPointType (unInfo $ expandedType rettype')) $
         bad $ InvalidEntryPointReturnType loc $ baseName fname
+
+      case find (not . (`HS.member` mconcat (map patNameSet params))) $
+           mapMaybe dimDeclName $ arrayDims' $ declaredType rettype' of
+        Nothing -> return ()
+        Just problem ->
+          bad $ EntryPointConstReturnDecl loc (baseName fname) (QualName ([], baseName problem))
 
       forM_ (zip params' params) $ \(param, orig_param) ->
         unless (okEntryPointType (patternType param)) $
@@ -796,6 +834,9 @@ checkFun (FunDef entry fname rettype params body loc) =
         okEntryPointParamType (Prim _) = True
         okEntryPointParamType (Array TupleArray{}) = False
         okEntryPointParamType (Array _) = True
+
+        dimDeclName (NamedDim name) = Just name
+        dimDeclName _               = Nothing
 
 checkFunBody :: VName
              -> ExpBase NoInfo VName
@@ -921,7 +962,7 @@ checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
     Nothing -> bad $ IndexingError
                      (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
-      sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
+      sequentially (require [toStructural elemt] =<< checkExp ve) $ \ve' _ -> do
         when (identName src `HS.member` aliases (typeOf ve')) $
           bad $ BadLetWithValue pos
         body' <- consuming src' $ binding [dest'] $ checkExp body
@@ -1145,7 +1186,7 @@ checkExp (Split i splitexp arrexp loc) = do
 
 checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp
-  arr2exps' <- mapM (require [typeOf arr1exp'] <=< checkExp) arr2exps
+  arr2exps' <- mapM (require [toStructural $ typeOf arr1exp'] <=< checkExp) arr2exps
   mapM_ ofProperRank arr2exps'
   return $ Concat i arr1exp' arr2exps' loc
   where ofProperRank e
@@ -1405,7 +1446,7 @@ checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
 checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
 checkBinOp Geq e1 e2 pos = checkRelOp Geq anyNumberType e1 e2 pos
 
-checkRelOp :: BinOp -> [Type]
+checkRelOp :: BinOp -> [TypeBase Rank NoInfo ()]
            -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
 checkRelOp op tl e1 e2 pos = do
@@ -1414,7 +1455,7 @@ checkRelOp op tl e1 e2 pos = do
   _ <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info $ Prim Bool) pos
 
-checkPolyBinOp :: BinOp -> [Type]
+checkPolyBinOp :: BinOp -> [TypeBase Rank NoInfo ()]
                -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
                -> TypeM Exp
 checkPolyBinOp op tl e1 e2 pos = do

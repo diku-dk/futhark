@@ -3,10 +3,10 @@
 
 fun mod(x: int, y: int): int = x - (x/y)*y
 
-fun hours_in_dayI   (): int = 24
-fun minutes_in_dayI (): int = hours_in_dayI() * 60
-fun minutes_to_noonI(): int = (hours_in_dayI() / 2) * 60
-fun minutes_in_day  (): f64 = 24.0*60.0
+val hours_in_dayI: int = 24
+val minutes_in_dayI: int = hours_in_dayI * 60
+val minutes_to_noonI: int = (hours_in_dayI / 2) * 60
+val minutes_in_day: f64 = 24.0*60.0
 
 fun date_of_gregorian(date:  (int,int,int,int,int)): int =
   let (year, month, day, hour, mins) = date
@@ -20,10 +20,10 @@ fun date_of_gregorian(date:  (int,int,int,int,int)): int =
                 ( 3 * ( ( year + 4900 ) / 100 ) ) / 4
   let tmp = ym + day - 32075 - 2444238
 
-  in tmp * minutes_in_dayI() + hour * 60 + mins
+  in tmp * minutes_in_dayI + hour * 60 + mins
 
 fun gregorian_of_date (minutes_since_epoch:  int ): (int,int,int,int,int) =
-  let jul = minutes_since_epoch / minutes_in_dayI()
+  let jul = minutes_since_epoch / minutes_in_dayI
   let l = jul + 68569 + 2444238
   let n = ( 4 * l ) / 146097
   let l = l - ( 146097 * n + 3 ) / 4
@@ -36,9 +36,9 @@ fun gregorian_of_date (minutes_since_epoch:  int ): (int,int,int,int,int) =
   let y = 100 * ( n - 49 ) + i + l
 
   --let daytime = minutes_since_epoch mod minutes_in_day in
-  let daytime = mod( minutes_since_epoch, minutes_in_dayI() ) in
+  let daytime = mod( minutes_since_epoch, minutes_in_dayI ) in
 
-  if ( daytime == minutes_to_noonI() )
+  if ( daytime == minutes_to_noonI )
 
   --then [year = y; month = m; day = d; hour = 12; minute = 0]
   then (y, m, d, 12, 0)
