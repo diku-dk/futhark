@@ -97,6 +97,19 @@ library instead of an executable program, any function declared with
 Any function named ``main`` will always be considered an entry point,
 whether it is declared with ``entry`` or not.
 
+Value Declarations
+------------------
+
+A named value/constant can be declared as follows::
+
+  val name: type = definition
+
+The definition can be an arbitrary expression, including function
+calls and other values.  You can even define circular values, although
+these will likely result in an infinite loop at execution.  Values can
+be used in shape declarations, except in the return value of entry
+points.
+
 Type Aliases
 ------------
 

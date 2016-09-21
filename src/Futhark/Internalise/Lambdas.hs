@@ -28,7 +28,7 @@ import Prelude hiding (mapM)
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
-  E.Lambda -> Maybe [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
+  E.Lambda -> [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 
 internaliseMapLambda :: InternaliseLambda
                      -> (InternaliseM Certificates -> InternaliseM Certificates)
@@ -38,7 +38,7 @@ internaliseMapLambda :: InternaliseLambda
 internaliseMapLambda internaliseLambda asserting lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
-  (params, body, rettype) <- internaliseLambda lam $ Just rowtypes
+  (params, body, rettype) <- internaliseLambda lam rowtypes
   (rettype', inner_shapes) <- instantiateShapes' rettype
   let outer_shape = arraysSize 0 argtypes
   shape_body <- bindingParamTypes params $
@@ -101,8 +101,7 @@ internaliseFoldLambda :: InternaliseLambda
                       -> InternaliseM I.Lambda
 internaliseFoldLambda internaliseLambda asserting lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
-  (params, body, rettype) <- internaliseLambda lam $ Just $
-                             acctypes ++ rowtypes
+  (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
   let rettype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip rettype acctypes ]
   -- The result of the body must have the exact same shape as the
@@ -124,8 +123,7 @@ internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
   acctypes <- mapM I.subExpType nes
   let rowtypes = map I.rowType arrtypes
   --
-  (params, body, rettype) <- internaliseLambda lam $ Just $
-                             acctypes ++ rowtypes
+  (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
   let acc_len = length acctypes
       (acc_tps, res_el_tps) = (take acc_len rettype, drop acc_len rettype)
@@ -170,8 +168,7 @@ internaliseStreamLambda :: InternaliseLambda
                         -> InternaliseM I.ExtLambda
 internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
   acctypes <- mapM I.subExpType accs
-  (params, body, rettype) <- internaliseLambda lam $ Just $
-                             acctypes++arrtypes
+  (params, body, rettype) <- internaliseLambda lam $ acctypes++arrtypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
   let acc_len = length acctypes
       lam_acc_tps = take acc_len rettype
@@ -227,7 +224,7 @@ internalisePartitionLambdas internaliseLambda lams args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
   lams' <- forM lams $ \lam -> do
-    (params, body, _) <- internaliseLambda lam $ Just rowtypes
+    (params, body, _) <- internaliseLambda lam rowtypes
     return (params, body)
   params <- newIdents "partition_param" rowtypes
   let params' = [ I.Param name t

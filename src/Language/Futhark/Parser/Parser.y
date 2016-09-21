@@ -214,10 +214,11 @@ Decs :: { [DecBase f vn] }
 ;
 
 Dec :: { [DecBase f vn] }
-    : Fun { map (FunOrTypeDec . FunDec) [$1] }
+    : Fun           { map (FunOrTypeDec . FunDec) [$1] }
     | UserTypeAlias { map (FunOrTypeDec . TypeDec) $1 }
-    | Signature { [ SigDec $1 ] }
-    | Module { [ ModDec $1 ] }
+    | Const         { map (FunOrTypeDec . ConstDec) [$1] }
+    | Signature     { [ SigDec $1 ] }
+    | Module        { [ ModDec $1 ] }
 ;
 
 
@@ -234,18 +235,9 @@ Signature :: { SigDefBase f vn }
                  in SigDef name $5 pos }
 
 Module :: { ModDefBase f vn }
-       : struct id '{' ModDecs '}'
+       : struct id '{' Decs '}'
        { let L pos (ID name) = $2
           in ModDef name $4 pos }
-
-ModDecs : ModDec ModDecs { $1 ++ $2 }
-        | ModDec { $1 }
-;
-
-ModDec : UserTypeAlias { map (FunOrTypeDec . TypeDec) $1 }
-       | Fun { map (FunOrTypeDec . FunDec) [$1] }
-       | Module { [ModDec $1] }
-;
 
 SigDecs : SigDec SigDecs { $1 : $2 }
         | SigDec { [$1] }
@@ -354,6 +346,10 @@ Fun     : fun id Params ':' UserTypeDecl '=' Exp
                         { let L pos (ID name) = $2
                           in FunDef True name $5 $3 $7 pos }
 ;
+
+Const : val id ':' UserTypeDecl '=' Exp
+      { let L loc (ID name) = $2
+        in ConstDef name $4 $6 loc }
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
              : UserType { TypeDecl $1 NoInfo }

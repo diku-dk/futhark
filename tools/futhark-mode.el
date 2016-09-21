@@ -50,7 +50,7 @@
 
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with" "type"
-    "fun" "entry" "fn" "for" "while" "do" "op" "not"
+    "fun" "val" "entry" "fn" "for" "while" "do" "op" "not"
     "empty" "unsafe" "default" "include" "struct")
   "All Futhark keywords.")
 
@@ -127,7 +127,7 @@
     `(
 
       ;; Function declarations.
-      (,(concat "\\(?:" "fun" "\\|" "entry" "\\)"
+      (,(concat "\\(?:" "fun" "val" "\\|" "entry" "\\)"
                 ws1 "\\(" futhark-var "\\)")
        . '(1 font-lock-function-name-face))
 

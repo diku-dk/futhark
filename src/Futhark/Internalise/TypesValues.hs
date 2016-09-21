@@ -24,6 +24,7 @@ import qualified Data.HashMap.Lazy as HM
 import Language.Futhark as E
 import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
+import Futhark.MonadFreshNames
 
 import Prelude hiding (mapM)
 
@@ -35,22 +36,23 @@ internaliseParamTypes :: [E.TypeBase E.ShapeDecl als VName]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        HM.HashMap VName Int)
 internaliseParamTypes ts = do
-  (ts', (_, subst)) <- runStateT (mapM (internaliseDeclType' BindDims) ts) (0, HM.empty)
+  (ts', (_, subst, _)) <- runStateT (mapM (internaliseDeclType' BindDims) ts) (0, HM.empty, mempty)
   return (ts', subst)
 
 internaliseReturnType :: E.TypeBase E.ShapeDecl als VName
                       -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
-                                       HM.HashMap VName Int)
+                                       HM.HashMap VName Int,
+                                       ConstParams)
 internaliseReturnType t = do
-  (t', (_, subst)) <- runStateT (internaliseDeclType' AssertDims t) (0, HM.empty)
-  return (t', subst)
+  (t', (_, subst, cm)) <- runStateT (internaliseDeclType' AssertDims t) (0, HM.empty, mempty)
+  return (t', subst, cm)
 
 data DimDeclInterpretation = AssertDims
                            | BindDims
 
 internaliseDeclType' :: DimDeclInterpretation
                      -> E.TypeBase E.ShapeDecl als VName
-                     -> StateT (Int, HM.HashMap VName Int)
+                     -> StateT (Int, HM.HashMap VName Int, ConstParams)
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' _ (E.Prim bt) =
   return [I.Prim $ internalisePrimType bt]
@@ -79,14 +81,14 @@ internaliseDeclType' ddi (E.Array at) =
         internaliseTupleArrayElem (TupleArrayElem ts) =
           concat <$> mapM internaliseTupleArrayElem ts
 
-        newId = do (i,m) <- get
-                   put (i + 1, m)
+        newId = do (i,m,cm) <- get
+                   put (i + 1, m, cm)
                    return i
 
         knownOrNewId name = do
-          (i,m) <- get
+          (i,m,cm) <- get
           case HM.lookup name m of
-            Nothing -> do put (i + 1, HM.insert name i m)
+            Nothing -> do put (i + 1, HM.insert name i m, cm)
                           return i
             Just j  -> return j
 
@@ -102,7 +104,14 @@ internaliseDeclType' ddi (E.Array at) =
           subst <- asks $ HM.lookup name . envSubsts
           I.Free <$> case subst of
             Just [v] -> return v
-            _        -> fail $ "internaliseDeclType': Shape declaration " ++ pretty name ++ " not found"
+            _ -> do -- Then it must be a constant.
+              let fname = nameFromString $ pretty name ++ "f"
+              (i,m,cm) <- get
+              case find ((==fname) . fst) cm of
+                Just (_, known) -> return $ I.Var known
+                Nothing -> do new <- lift $ newVName $ baseString name
+                              put (i, m, (fname,new):cm)
+                              return $ I.Var new
 
 internaliseType :: Ord vn =>
                    E.TypeBase E.Rank als vn

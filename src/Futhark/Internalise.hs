@@ -46,29 +46,42 @@ internaliseProg prog = do
       Left err -> return $ Left err
       Right ftable -> do
         funs <- runInternaliseM ftable $
-                mapM internaliseFun $ E.funsFromProg prog
+                mapM internaliseFun $ funsFromProg prog
         return $ fmap I.Prog funs
   sequence $ fmap I.renameProg res
+
+-- | All functions, including those nested in structures.  Treats
+-- constants as 0-ary functions.
+funsFromProg :: ProgBase f vn -> [FunDefBase f vn]
+funsFromProg prog = concatMap getFuns $ progDecs prog
+  where getFuns (FunOrTypeDec (FunDec a)) = [a]
+        getFuns (FunOrTypeDec (ConstDec (E.ConstDef name t e loc))) =
+          [E.FunDef False name t [] e loc]
+        getFuns (FunOrTypeDec TypeDec{}) = []
+        getFuns (ModDec d) = concatMap getFuns $ modDecls d
+        getFuns SigDec{} = []
 
 buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)
 buildFtable = fmap (HM.union builtinFtable<$>) .
               runInternaliseM mempty .
-              fmap HM.fromList . mapM inspect . E.funsFromProg
+              fmap HM.fromList . mapM inspect . funsFromProg
 
   where inspect (E.FunDef entry fname (TypeDecl _ (Info rettype)) params _ _) =
           bindingParams params $ \shapes values -> do
-            (rettype', _) <- internaliseReturnType rettype
+            (rettype', _, cm) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
                 fname' | entry     = nameFromString $ pretty $ baseName fname
                        | otherwise = nameFromString $ pretty fname ++ "f"
+                consts = map ((`Param` I.Prim int32) . snd) cm
             return (fname,
                     FunBinding { internalFun = (fname',
+                                                cm,
                                                 shapenames,
                                                 map declTypeOf values,
                                                 applyRetType
                                                 (ExtRetType rettype')
-                                                (shapes++values)
+                                                (consts++shapes++values)
                                                )
                                , externalFun = (rettype,
                                                 map E.patternStructType params)
@@ -79,19 +92,21 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
           (name,
            FunBinding
            (baseName name,
-            [], map (I.Prim . internalisePrimType) paramts,
+            [], [], map (I.Prim . internalisePrimType) paramts,
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
            (E.Prim t, map E.Prim paramts))
 
 internaliseFun :: E.FunDef -> InternaliseM I.FunDef
 internaliseFun (E.FunDef entry fname (TypeDecl _ (Info rettype)) params body loc) =
   bindingParams params $ \shapeparams params' -> do
-    (rettype', _) <- internaliseReturnType rettype
+    (rettype', _, cm) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape asserting loc
              (map I.fromDecl rettype') firstbody
+    let mkConstParam name = Param name $ I.Prim int32
+        constparams = map (mkConstParam . snd) cm
     return $ I.FunDef entry fname'
-      (ExtRetType rettype') (shapeparams ++ params') body'
+      (ExtRetType rettype') (constparams ++ shapeparams ++ params') body'
       where fname' | entry     = nameFromString $ pretty $ baseName fname
                    | otherwise = nameFromString $ pretty fname ++ "f"
 
@@ -99,8 +114,8 @@ internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) _) =
   case internaliseType tp of
     [I.Prim _] -> return name
-    _           -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-                   ++ pretty name ++ "'."
+    _          -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
+                       ++ pretty name ++ "'."
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertBindingsM $ do
@@ -124,10 +139,17 @@ extraBodyBindings bnds m = do
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
 internaliseExp _ (E.Var (QualName (_, name)) t loc) = do
-  subst <- asks $ HM.lookup name . envSubsts
-  case subst of
-    Nothing     -> (:[]) . I.Var <$> internaliseIdent (E.Ident name t loc)
-    Just substs -> return substs
+  -- If this identifier is the name of a constant, we have to turn it
+  -- into a call to the corresponding function.
+  is_const <- lookupConstant name
+  case is_const of
+    Just (fname, rettype) ->
+      fmap (map I.Var) $ letTupExp (baseString name) $ I.Apply fname [] rettype
+    _ -> do
+      subst <- asks $ HM.lookup name . envSubsts
+      case subst of
+        Nothing     -> (:[]) . I.Var <$> internaliseIdent (E.Ident name t loc)
+        Just substs -> return substs
 
 internaliseExp desc (E.Index e idxs loc) = do
   vs <- internaliseExpToVars "indexed" e
@@ -186,12 +208,13 @@ internaliseExp desc (E.Apply (QualName ([], fname)) args _ _)
 
 internaliseExp desc (E.Apply (QualName (_, fname)) args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
-  (fname', shapes, value_paramts, rettype_fun) <- internalFun <$> lookupFunction fname
+  (fname', constparams, shapes, value_paramts, rettype_fun) <- internalFun <$> lookupFunction fname
+  (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
   argts <- mapM subExpType args'
   let shapeargs = argShapes shapes value_paramts argts
-      diets = replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
-      paramts = map (const $ I.Prim int32) shapeargs ++ value_paramts
-  args'' <- ensureArgShapes asserting loc shapes paramts $ shapeargs ++ args'
+      diets = const_ds ++ replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
+      paramts = const_ts ++ map (const $ I.Prim int32) shapeargs ++ value_paramts
+  args'' <- ensureArgShapes asserting loc shapes paramts $ constargs ++ shapeargs ++ args'
   argts' <- mapM subExpType args''
   case rettype_fun $ zip args'' argts' of
     Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
@@ -881,50 +904,32 @@ simpleCmpOp desc op x y =
 
 internaliseLambda :: InternaliseLambda
 
-internaliseLambda (E.AnonymFun params body _ (Info rettype) _) (Just rowtypes) =
+internaliseLambda (E.AnonymFun params body _ (Info rettype) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
     body' <- internaliseBody body
-    (rettype', _) <- internaliseReturnType rettype
+    (rettype', _, cm) <- internaliseReturnType rettype
+    mapM_ (uncurry internaliseDimConstant) cm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.AnonymFun params body _ (Info rettype) _) Nothing =
-  bindingParams params $ \shapeparams valparams -> do
-    body' <- internaliseBody body
-    (rettype', _) <- internaliseReturnType rettype
-    return (map (fmap I.fromDecl) $ shapeparams ++ valparams, body', map I.fromDecl rettype')
-
-internaliseLambda (E.CurryFun (QualName (_, fname)) curargs _ loc) maybe_rowtypes = do
+internaliseLambda (E.CurryFun (QualName (_, fname)) curargs _ loc) rowtypes = do
   fun_entry <- lookupFunction fname
-  let (fname', shapes, value_paramts, int_rettype_fun) = internalFun fun_entry
+  let (fname', constparams, shapes, value_paramts, int_rettype_fun) = internalFun fun_entry
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_types <- mapM subExpType curargs'
-  (params, valargs, valargs_types) <-
-    case maybe_rowtypes of
-      Just rowtypes -> do
-        params <- mapM (newParam "not_curried") rowtypes
-        let valargs = curargs' ++ map (I.Var . I.paramName) params
-            valargs_types = curarg_types ++ rowtypes
-        return (params, valargs, valargs_types)
-      Nothing -> do
-        let (_, ext_param_ts) = externalFun fun_entry
-        ext_params <- forM ext_param_ts $ \param_t -> do
-          name <- newVName "not_curried"
-          return $ E.Id $ E.Ident name (Info $ E.fromStruct $ E.removeShapeAnnotations param_t) noLoc
-        bindingParams ext_params $ \shape_params value_params -> do
-          let params = map (fmap I.fromDecl) $ shape_params ++ value_params
-              valargs = curargs' ++ map (I.Var . I.paramName) value_params
-              valargs_types = curarg_types ++ map I.paramType value_params
-          return (params, valargs, valargs_types)
-  let shapeargs = argShapes shapes value_paramts valargs_types
-      diets = replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
-      paramts = map (const $ I.Prim int32) shapeargs ++ value_paramts
+  params <- mapM (newParam "not_curried") rowtypes
+  (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
+  let valargs = curargs' ++ map (I.Var . I.paramName) params
+      valargs_types = curarg_types ++ rowtypes
+      shapeargs = argShapes shapes value_paramts valargs_types
+      diets = const_ds ++ replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
+      paramts = const_ts ++ map (const $ I.Prim int32) shapeargs ++ value_paramts
   ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectBindings $ do
-    allargs <- ensureArgShapes asserting loc shapes paramts $ shapeargs ++ valargs
+    allargs <- ensureArgShapes asserting loc shapes paramts $ constargs ++ shapeargs ++ valargs
     argts' <- mapM subExpType allargs
     case int_rettype_fun $ zip allargs argts' of
       Nothing ->
         fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
-        pretty (shapeargs ++ valargs) ++ "\nof types\n " ++
+        pretty (constargs ++ shapeargs ++ valargs) ++ "\nof types\n " ++
         pretty (map (const $ I.Prim int32) shapeargs ++ valargs_types)
       Just (ExtRetType ts) -> do
         res <- letTupExp "curried_fun_result" $
@@ -984,6 +989,18 @@ binOpCurriedToLambda op paramtype rettype e swap = do
   return ([E.Id ident],
           E.BinOp op x' y' (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
+
+internaliseDimConstant :: Name -> VName -> InternaliseM ()
+internaliseDimConstant fname name =
+  letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
+  I.Apply fname [] $ primRetType I.int32
+
+constFunctionArgs :: [(Name,VName)] -> InternaliseM [(SubExp, I.Diet, I.DeclType)]
+constFunctionArgs = mapM arg
+  where arg (fname, name) = do
+          se <- letSubExp (baseString name ++ "_arg") $
+                I.Apply fname [] $ primRetType I.int32
+          return (se, I.Observe, I.Prim I.int32)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

@@ -122,6 +122,7 @@ renameFunOrTypeDec :: (Eq t, Ord f, Show t, Show f, Hashable t, Hashable f) =>
                    -> RenameM f t (FunOrTypeDecBase NoInfo t)
 renameFunOrTypeDec (FunDec fun) = FunDec <$> renameFun fun
 renameFunOrTypeDec (TypeDec td) = TypeDec <$> renameTypeAlias td
+renameFunOrTypeDec (ConstDec cd) = ConstDec <$> renameConst cd
 
 renameFun :: (Ord f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
@@ -137,6 +138,13 @@ renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
                    TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
 renameTypeAlias (TypeDef name typedecl loc) =
   TypeDef <$> replName Type name <*> renameUserTypeDecl typedecl <*> pure loc
+
+renameConst :: (Ord f, Hashable f, Eq t, Hashable t, Show f, Show t) =>
+               ConstDefBase NoInfo f -> RenameM f t (ConstDefBase NoInfo t)
+renameConst (ConstDef name (TypeDecl ret NoInfo) e loc) =
+  ConstDef <$> replName Term name <*>
+  (TypeDecl <$> renameUserType ret <*> pure NoInfo) <*>
+  renameExp e <*> pure loc
 
 renameUserTypeDecl :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
                       TypeDeclBase NoInfo f
@@ -182,6 +190,7 @@ renameDecs m ds = do
     return (map FunOrTypeDec t_and_f_decs' ++ ds'', m'')
   where lhs (FunDec dec)  = [(Term, QualName ([], funDefName dec))]
         lhs (TypeDec dec) = [(Type, QualName ([], typeAlias dec))]
+        lhs (ConstDec dec) = [(Term, QualName ([], constDefName dec))]
         unQual (_, QualName (_, v)) = v
 
 renameExp :: (Ord f, Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>

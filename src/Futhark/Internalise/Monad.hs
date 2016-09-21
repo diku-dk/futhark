@@ -6,8 +6,10 @@ module Futhark.Internalise.Monad
   , FunTable
   , VarSubstitutions
   , InternaliseEnv(..)
+  , ConstParams
   , FunBinding (..)
   , lookupFunction
+  , lookupConstant
   , bindingIdentTypes
   , bindingParamTypes
     -- * Convenient reexports
@@ -32,8 +34,10 @@ import Futhark.Tools
 
 import Prelude hiding (mapM)
 
+type ConstParams = [(Name,VName)]
+
 data FunBinding = FunBinding
-                  { internalFun :: (Name, [VName], [DeclType],
+                  { internalFun :: (Name, ConstParams, [VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.StructType, [E.StructType])
                   }
@@ -98,6 +102,15 @@ lookupFunction fname = do
   fun <- HM.lookup fname <$> asks envFtable
   case fun of Nothing   -> fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found"
               Just fun' -> return fun'
+
+-- | Is the name a value constant?  If so, return the corresponding
+-- function name and return type.
+lookupConstant :: VName -> InternaliseM (Maybe (Name, ExtRetType))
+lookupConstant name = do
+  is_const <- asks $ fmap internalFun . HM.lookup name . envFtable
+  return $ do (fname, _, _, _, mk_rettype) <- is_const
+              rettype <- mk_rettype []
+              return (fname, rettype)
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
