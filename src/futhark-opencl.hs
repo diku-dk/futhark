@@ -23,7 +23,7 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  gpuPipeline (openclCodeAction filepath config) filepath
+  (gpuPipeline Executable) (openclCodeAction filepath config) filepath
 
 openclCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 openclCodeAction filepath config =

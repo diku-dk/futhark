@@ -45,7 +45,7 @@ import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.CoalesceMemoryAccesses
 
-import Futhark.Passes (standardPipeline)
+import Futhark.Passes (standardPipeline, CompilationMode(..))
 
 data Config = Config { futharkConfig :: FutharkConfig
                      , futharkPipeline :: [UntypedPass]
@@ -246,7 +246,7 @@ commandLineOptions =
   , simplifyOption "e"
 
   , soacsPipelineOption "Run the default optimised pipeline"
-    standardPipeline "s" ["standard"]
+    (standardPipeline Library) "s" ["standard"]
   ]
 
 -- | Entry point.  Non-interactive, except when reading interpreter
