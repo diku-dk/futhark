@@ -258,6 +258,7 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
       -- that the remaining dimensions will be traversed sequentially.
       | (is, rem_slice) <- splitSlice slice,
         not $ null rem_slice,
+        not $ tooSmallSlice rem_slice,
         is /= map Var (take (length is) thread_gids) ||
          length is == length thread_gids -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
@@ -274,6 +275,12 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
   where replace arr' = do
           modify $ M.insert (arr, slice) arr'
           return $ Just (arr', slice)
+
+-- Heuristic for avoiding rearranging too small arrays.
+tooSmallSlice :: Slice SubExp -> Bool
+tooSmallSlice = fst . foldl comb (False,0) . sliceDims
+  where comb (False, x) (Constant (IntValue (Int32Value d))) = (d*x < 8, x*d)
+        comb (_, x)     _                                    = (True, x)
 
 splitSlice :: Slice SubExp -> ([SubExp], Slice SubExp)
 splitSlice [] = ([], [])
