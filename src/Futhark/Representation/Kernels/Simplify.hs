@@ -382,14 +382,14 @@ removeInvariantKernelResults :: (LocalScope (Lore m) m,
 
 removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
                                       (Op (Kernel cs space ts (KernelBody _ kstms kres)))) = do
-  (kpes', kres') <-
-    unzip <$> filterM checkForInvarianceResult (zip kpes kres)
+  (ts', kpes', kres') <-
+    unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
   -- Check if we did anything at all.
   when (kres == kres')
     cannotSimplify
 
-  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs space ts $
+  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs space ts' $
     mkWiseKernelBody () kstms kres'
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
@@ -397,7 +397,7 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
         num_threads = spaceNumThreads space
         space_dims = map snd $ spaceDimensions space
 
-        checkForInvarianceResult (pe, ThreadsReturn threads se)
+        checkForInvarianceResult (_, pe, ThreadsReturn threads se)
           | isInvariant se =
               case threads of
                 AllThreads -> do
