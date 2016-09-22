@@ -126,9 +126,10 @@ renameFunOrTypeDec (ConstDec cd) = ConstDec <$> renameConst cd
 
 renameFun :: (Ord f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
-renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
- bindNames (concatMap (HS.toList . patNameSet) params) $
-    FunDef entry <$> replName Term fname <*>
+renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) = do
+  fname' <- replName Term fname
+  bindNames (concatMap (HS.toList . patNameSet) params) $
+    FunDef entry fname' <$>
     (TypeDecl <$> renameUserType ret <*> pure NoInfo) <*>
     mapM renamePattern params <*>
     renameExp body <*>
