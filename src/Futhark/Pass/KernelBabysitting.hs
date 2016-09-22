@@ -278,9 +278,9 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
 
 -- Heuristic for avoiding rearranging too small arrays.
 tooSmallSlice :: Slice SubExp -> Bool
-tooSmallSlice = fst . foldl comb (False,0) . sliceDims
-  where comb (False, x) (Constant (IntValue (Int32Value d))) = (d*x < 8, x*d)
-        comb (_, x)     _                                    = (True, x)
+tooSmallSlice = fst . foldl comb (True,0) . sliceDims
+  where comb (True, x) (Constant (IntValue (Int32Value d))) = (d*x < 8, d*x)
+        comb (_, x)     _                                   = (False, x)
 
 splitSlice :: Slice SubExp -> ([SubExp], Slice SubExp)
 splitSlice [] = ([], [])
