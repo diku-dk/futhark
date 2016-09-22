@@ -143,8 +143,8 @@ internaliseExp _ (E.Var (QualName (_, name)) t loc) = do
   -- into a call to the corresponding function.
   is_const <- lookupConstant name
   case is_const of
-    Just (fname, rettype) ->
-      fmap (map I.Var) $ letTupExp (baseString name) $ I.Apply fname [] rettype
+    Just ses ->
+      return ses
     _ -> do
       subst <- asks $ HM.lookup name . envSubsts
       case subst of
@@ -994,6 +994,21 @@ internaliseDimConstant :: Name -> VName -> InternaliseM ()
 internaliseDimConstant fname name =
   letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
   I.Apply fname [] $ primRetType I.int32
+
+-- | Is the name a value constant?  If so, create the necessary
+-- function call and return the corresponding subexpressions.
+lookupConstant :: VName -> InternaliseM (Maybe [SubExp])
+lookupConstant name = do
+  is_const <- asks $ fmap internalFun . HM.lookup name . envFtable
+  case is_const of
+    Just (fname, constparams, _, _, mk_rettype) -> do
+      (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
+      case mk_rettype $ zip constargs $ map I.fromDecl const_ts of
+        Nothing -> fail $ "lookupConstant: " ++ pretty name ++ " failed"
+        Just rettype ->
+          fmap (Just . map I.Var) $
+          letTupExp (baseString name) $ I.Apply fname (zip constargs const_ds) rettype
+    Nothing -> return Nothing
 
 constFunctionArgs :: [(Name,VName)] -> InternaliseM [(SubExp, I.Diet, I.DeclType)]
 constFunctionArgs = mapM arg
