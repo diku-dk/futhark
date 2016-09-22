@@ -20,13 +20,14 @@ import Control.Monad.Reader
 import qualified Data.Array as A
 import Data.List
 import qualified Data.HashMap.Lazy as HM
+import Data.Monoid
+
+import Prelude hiding (mapM)
 
 import Language.Futhark as E
 import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
 import Futhark.MonadFreshNames
-
-import Prelude hiding (mapM)
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
