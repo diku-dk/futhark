@@ -18,8 +18,8 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , cFloatConvOps
 
     -- * Specific builtin functions
-  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32, c_atan2_32, c_isnan32, c_isinf32
-  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64, c_atan2_64, c_isnan64, c_isinf64
+  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32, c_asin32, c_acos32, c_atan2_32, c_isnan32, c_isinf32
+  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64, c_asin64, c_acos64, c_atan2_64, c_isnan64, c_isinf64
   )
   where
 
@@ -268,6 +268,20 @@ c_sin32 = [C.cfun|
     }
   |]
 
+c_acos32 ::C.Func
+c_acos32 = [C.cfun|
+    static inline float $id:(funName' "acos32")(float x) {
+      return acos(x);
+    }
+  |]
+
+c_asin32 ::C.Func
+c_asin32 = [C.cfun|
+    static inline float $id:(funName' "asin32")(float x) {
+      return asin(x);
+    }
+  |]
+
 c_atan2_32 ::C.Func
 c_atan2_32 = [C.cfun|
     static inline float $id:(funName' "atan2_32")(float x, float y) {
@@ -324,6 +338,20 @@ c_sin64 = [C.cfun|
     }
   |]
 
+c_acos64 ::C.Func
+c_acos64 = [C.cfun|
+    static inline double $id:(funName' "acos64")(double x) {
+      return acos(x);
+    }
+  |]
+
+c_asin64 ::C.Func
+c_asin64 = [C.cfun|
+    static inline double $id:(funName' "asin64")(double x) {
+      return asin(x);
+    }
+  |]
+
 c_atan2_64 ::C.Func
 c_atan2_64 = [C.cfun|
     static inline double $id:(funName' "atan2_64")(double x, double y) {
@@ -348,5 +376,5 @@ c_isinf64 = [C.cfun|
 -- | C definitions of the Futhark "standard library".
 builtInFunctionDefs :: [C.Func]
 builtInFunctionDefs =
-  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32, c_atan2_32, c_isnan32, c_isinf32,
-   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64, c_atan2_64, c_isnan64, c_isinf64]
+  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32, c_acos32, c_asin32, c_atan2_32, c_isnan32, c_isinf32,
+   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64, c_acos64, c_asin64, c_atan2_64, c_isnan64, c_isinf64]
