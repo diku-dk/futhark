@@ -656,7 +656,7 @@ internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
     E.Prim (E.Signed int_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
     E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
+      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
     E.Prim (E.FloatType float_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToSigned"
