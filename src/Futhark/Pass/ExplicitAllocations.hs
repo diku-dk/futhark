@@ -845,9 +845,9 @@ kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
 
         -- Heuristic: do not rearrange for returned arrays that are
         -- sufficiently small.
-        coalesceReturnOfShape [] = False
-        coalesceReturnOfShape [Constant (IntValue (Int32Value d))] = d > 8
-        coalesceReturnOfShape _ = True
+        coalesceReturnOfShape _ [] = False
+        coalesceReturnOfShape bs [Constant (IntValue (Int32Value d))] = bs * d > 4
+        coalesceReturnOfShape _ _ = True
 
         innermost space_dims t_dims =
           let r = length t_dims
@@ -861,7 +861,7 @@ kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
           in ixfun_rearranged
 
         hint t (ThreadsReturn threads _)
-          | coalesceReturnOfShape $ arrayDims t,
+          | coalesceReturnOfShape (primByteSize (elemType t)) $ arrayDims t,
             Just space_dims <- spacy threads = do
               t_dims <- mapM dimAllocationSize $ arrayDims t
               return $ Hint (innermost space_dims t_dims) DefaultSpace
