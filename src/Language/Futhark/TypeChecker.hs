@@ -1545,6 +1545,7 @@ checkLambda (CurryFun fname curryargexps _ loc) args = do
   return $ CurryFun fname curryargexps' (Info rettype') loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
+  occur $ argOccurences arg
   var@(Ident x _ _) <- newIdent "x" (argType arg) loc
   binding [var] $ do
     e <- checkExp $ UnOp unop (Var (QualName ([],x)) NoInfo loc) loc
