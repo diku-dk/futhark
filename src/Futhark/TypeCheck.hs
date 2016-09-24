@@ -1014,8 +1014,8 @@ noArgAliases (t, _) = (t, mempty)
 
 checkArg :: Checkable lore =>
             SubExp -> TypeM lore Arg
-checkArg arg = do als <- subExpAliasesM arg
-                  argt <- subExpType arg
+checkArg arg = do argt <- checkSubExp arg
+                  als <- subExpAliasesM arg
                   return (argt, als)
 
 checkFuncall :: Checkable lore =>
