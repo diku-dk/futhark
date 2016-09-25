@@ -537,6 +537,11 @@ bodyContainsParallelism = any (isMap . bindingExp) . bodyBindings
   where isMap Op{} = True
         isMap _ = False
 
+bodyContainsMap :: Body -> Bool
+bodyContainsMap = any (isMap . bindingExp) . bodyBindings
+  where isMap (Op Map{}) = True
+        isMap _ = False
+
 lambdaContainsParallelism :: Lambda -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
@@ -607,7 +612,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Map cs w lam arrs))) acc =
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 
 maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
-  | bodyContainsParallelism body =
+  | bodyContainsMap body =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | length res == patternSize pat,
