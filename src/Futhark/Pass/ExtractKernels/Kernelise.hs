@@ -32,7 +32,9 @@ transformBindings = mapM_ transformBinding
 
 transformBinding :: Transformer m => Binding -> m ()
 
-transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs))) = do
+transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
+  -- No map-out part
+  | patternSize pat == length nes = do
   chunk_size <- newVName "chunk_size"
   chunk_offset <- newVName "chunk_offset"
   let arr_idents = drop (length nes) $ patternIdents pat
