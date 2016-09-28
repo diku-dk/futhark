@@ -515,20 +515,28 @@ evalBasicOp (Index _ ident slice) = do
   slice' <- mapM evalDimIndex slice
   pure <$> indexArrayValue v slice'
 
-evalBasicOp (Iota e x s) = do
+evalBasicOp (Iota e x s et) = do
   v1 <- evalSubExp e
   v2 <- evalSubExp x
   v3 <- evalSubExp s
   case (v1, v2, v3) of
     (PrimVal (IntValue (Int32Value e')),
-     PrimVal (IntValue (Int32Value x')),
-     PrimVal (IntValue (Int32Value s')))
-      | e' >= 0    ->
-        return [ArrayVal (listArray (0,fromIntegral e'-1) $ map value [x',x'+s'..x'+(e'-1)*s'])
-                int32 [fromIntegral e']]
+     PrimVal (IntValue x'),
+     PrimVal (IntValue s'))
+      | e' >= 0 ->
+        let x'' = uniform x'
+            s'' = uniform s'
+        in return [ArrayVal (listArray (0,fromIntegral $ e'-1) $
+                             map (IntValue . intValue et)
+                             [x'',x''+s''..x''+(toInteger e'-1)*s''])
+                   (IntType et) [fromIntegral e']]
       | otherwise ->
-        bad $ NegativeIota $ fromIntegral x'
+        bad $ NegativeIota $ fromIntegral $ uniform x'
     _ -> bad $ TypeError "evalBasicOp Iota"
+  where uniform (Int8Value v) = toInteger v
+        uniform (Int16Value v) = toInteger v
+        uniform (Int32Value v) = toInteger v
+        uniform (Int64Value v) = toInteger v
 
 evalBasicOp (Replicate (Shape ds) e2) = do
   ds' <- mapM (asInt32 "Replicate" <=< evalSubExp) ds

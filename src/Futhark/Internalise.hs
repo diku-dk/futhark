@@ -566,8 +566,12 @@ internaliseExp _ E.Stream{} =
 
 internaliseExp desc (E.Iota e _) = do
   e' <- internaliseExp1 "n" e
-  letTupExp' desc $ I.BasicOp $
-    I.Iota e' (constant (0::Int32)) (constant (1::Int32))
+  case internaliseType $ E.typeOf e of
+    [I.Prim (I.IntType et)] -> do
+      e'' <- letSubExp "n" $ I.BasicOp $ I.ConvOp (I.SExt et I.Int32) e'
+      letTupExp' desc $ I.BasicOp $ I.Iota e'' (intConst et 0) (intConst et 1) et
+    _ ->
+      fail "internaliseExp Iota: argument not an integer type."
 
 internaliseExp _ (E.Literal v _) =
   case internaliseValue v of

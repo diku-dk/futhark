@@ -197,8 +197,12 @@ data BasicOp lore
   -- ^ Copy the given array.  The result will not alias anything.
 
   -- Array construction.
-  | Iota SubExp SubExp SubExp
-  -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@
+  | Iota SubExp SubExp SubExp IntType
+  -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@.
+  --
+  -- The 'IntType' indicates the type of the array returned and the
+  -- offset/stride arguments, but not the length argument.
+
   | Replicate Shape SubExp
   -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
   | Scratch PrimType [SubExp]

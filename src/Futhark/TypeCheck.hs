@@ -698,10 +698,10 @@ checkBasicOp (Index cs ident idxes) = do
     bad $ SlicingError (arrayRank vt) (length idxes)
   mapM_ checkDimIndex idxes
 
-checkBasicOp (Iota e x s) = do
+checkBasicOp (Iota e x s et) = do
   require [Prim int32] e
-  require [Prim int32] x
-  require [Prim int32] s
+  require [Prim $ IntType et] x
+  require [Prim $ IntType et] s
 
 checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int32]) dims

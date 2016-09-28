@@ -120,8 +120,8 @@ mapExpM tv (BasicOp (Index cs arr slice)) =
   BasicOp <$> (pure Index <*> mapOnCertificates tv cs <*>
               mapOnVName tv arr <*>
               mapM (Data.Traversable.traverse (mapOnSubExp tv)) slice)
-mapExpM tv (BasicOp (Iota n x s)) =
-  BasicOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s)
+mapExpM tv (BasicOp (Iota n x s et)) =
+  BasicOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s <*> pure et)
 mapExpM tv (BasicOp (Replicate shape vexp)) =
   BasicOp <$> (Replicate
                <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape))

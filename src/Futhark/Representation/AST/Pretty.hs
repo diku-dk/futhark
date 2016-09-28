@@ -200,7 +200,8 @@ instance Pretty (BasicOp lore) where
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
-  ppr (Iota e x s) = text "iota" <> apply [ppr e, ppr x, ppr s]
+  ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
+    where et' = text $ show $ primBitSize $ IntType et
   ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   ppr (Scratch t shape) =
