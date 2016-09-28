@@ -393,7 +393,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   par_bnds <- fmap (postKernelsBindings . snd) $ runKernelM env $
     distribute =<< distributeMapBodyBindings acc (bodyBindings $ lambdaBody lam)
 
-  if not $ containsNestedParallelism lam
+  if not versionedCode || not (containsNestedParallelism lam)
     then return par_bnds
     else do
     par_body <- renameBody $ mkBody par_bnds res
@@ -579,7 +579,7 @@ lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 -- Enable if you want the cool new versioned code.  Beware: may be
 -- slower in practice.  Caveat emptor (and you are the emptor).
 versionedCode :: Bool
-versionedCode = True
+versionedCode = False
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
