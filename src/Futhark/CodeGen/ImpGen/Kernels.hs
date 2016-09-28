@@ -883,7 +883,7 @@ compileKernelBody :: ImpGen.Destination
                   -> KernelBody InKernel
                   -> InKernelGen ()
 compileKernelBody (ImpGen.Destination dest) constants kbody =
-  compileKernelBindings constants (kernelBodyStms kbody) $
+  compileKernelStms constants (kernelBodyStms kbody) $
   zipWithM_ (compileKernelResult constants) dest $
   kernelBodyResult kbody
 
@@ -892,20 +892,20 @@ compileNestedKernelBody :: KernelConstants
                         -> Body InKernel
                         -> InKernelGen ()
 compileNestedKernelBody constants (ImpGen.Destination dest) kbody =
-  compileKernelBindings constants (bodyBindings kbody) $
+  compileKernelStms constants (bodyStms kbody) $
   zipWithM_ ImpGen.compileSubExpTo dest $ bodyResult kbody
 
-compileKernelBindings :: KernelConstants -> [Binding InKernel]
-                      -> InKernelGen a
-                      -> InKernelGen a
-compileKernelBindings constants ungrouped_bnds m =
-  compileGroupedKernelBindings' $ groupBindingsByGuard constants ungrouped_bnds
-  where compileGroupedKernelBindings' [] = m
-        compileGroupedKernelBindings' ((g, bnds):rest_bnds) =
+compileKernelStms :: KernelConstants -> [Stm InKernel]
+                  -> InKernelGen a
+                  -> InKernelGen a
+compileKernelStms constants ungrouped_bnds m =
+  compileGroupedKernelStms' $ groupStmsByGuard constants ungrouped_bnds
+  where compileGroupedKernelStms' [] = m
+        compileGroupedKernelStms' ((g, bnds):rest_bnds) =
           ImpGen.declaringScopes
           (map ((Just . bindingExp) &&& (castScope . scopeOf)) bnds) $ do
-            protect g $ mapM_ compileKernelBinding bnds
-            compileGroupedKernelBindings' rest_bnds
+            protect g $ mapM_ compileKernelStm bnds
+            compileGroupedKernelStms' rest_bnds
 
         protect Nothing body_m =
           body_m
@@ -915,14 +915,14 @@ compileKernelBindings constants ungrouped_bnds m =
           body <- allThreads constants body_m
           ImpGen.emit $ Imp.If g body mempty
 
-        compileKernelBinding (Let pat _ e) = do
+        compileKernelStm (Let pat _ e) = do
           dest <- ImpGen.destinationFromPattern pat
           ImpGen.compileExp dest e $ return ()
 
-groupBindingsByGuard :: KernelConstants
-                     -> [Binding InKernel]
-                     -> [(Maybe Imp.Exp, [Binding InKernel])]
-groupBindingsByGuard constants bnds =
+groupStmsByGuard :: KernelConstants
+                     -> [Stm InKernel]
+                     -> [(Maybe Imp.Exp, [Stm InKernel])]
+groupStmsByGuard constants bnds =
   map collapse $ groupBy sameGuard $ zip (map bindingGuard bnds) bnds
   where bindingGuard (Let _ _ Op{}) = Nothing
         bindingGuard _ = Just $ kernelThreadActive constants
@@ -1069,9 +1069,9 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
     zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
     ImpGen.declaringPrimVar block_size int32 $
       -- If the GroupStream is morally just a do-loop, generate simpler code.
-      case mapM isSimpleThreadInSpace $ bodyBindings body of
+      case mapM isSimpleThreadInSpace $ bodyStms body of
         Just stms' | ValueExp x <- max_block_size, oneIsh x -> do
-          let body' = body { bodyBindings = stms' }
+          let body' = body { bodyStms = stms' }
           body'' <- ImpGen.withPrimVar block_offset int32 $
                     allThreads constants $ ImpGen.compileBody acc_dest body'
           ImpGen.emit $ Imp.SetScalar block_size 1

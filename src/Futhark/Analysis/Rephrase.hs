@@ -6,14 +6,14 @@ module Futhark.Analysis.Rephrase
        , rephraseFunDef
        , rephraseExp
        , rephraseBody
-       , rephraseBinding
+       , rephraseStm
        , rephraseLambda
        , rephraseExtLambda
        , rephrasePattern
        , rephrasePatElem
        , Rephraser (..)
 
-       , castBinding
+       , castStm
        )
 where
 
@@ -46,8 +46,8 @@ rephraseFunDef rephraser fundec = do
 rephraseExp :: (Applicative m, Monad m) => Rephraser m from to -> Exp from -> m (Exp to)
 rephraseExp = mapExpM . mapper
 
-rephraseBinding :: (Applicative m, Monad m) => Rephraser m from to -> Binding from -> m (Binding to)
-rephraseBinding rephraser (Let pat lore e) =
+rephraseStm :: (Applicative m, Monad m) => Rephraser m from to -> Stm from -> m (Stm to)
+rephraseStm rephraser (Let pat lore e) =
   Let <$>
   rephrasePattern (rephraseLetBoundLore rephraser) pat <*>
   rephraseExpLore rephraser lore <*>
@@ -75,7 +75,7 @@ rephraseBody :: (Applicative m, Monad m) => Rephraser m from to -> Body from -> 
 rephraseBody rephraser (Body lore bnds res) =
   Body <$>
   rephraseBodyLore rephraser lore <*>
-  mapM (rephraseBinding rephraser) bnds <*>
+  mapM (rephraseStm rephraser) bnds <*>
   pure res
 
 rephraseLambda :: (Applicative m, Monad m) => Rephraser m from to -> Lambda from -> m (Lambda to)
@@ -99,12 +99,12 @@ mapper rephraser = identityMapper {
   }
 
 -- | Convert a binding from one lore to another, if possible.
-castBinding :: (SameScope from to,
-                ExpAttr from ~ ExpAttr to,
-                BodyAttr from ~ BodyAttr to,
-                RetType from ~ RetType to) =>
-               Binding from -> Maybe (Binding to)
-castBinding = rephraseBinding caster
+castStm :: (SameScope from to,
+            ExpAttr from ~ ExpAttr to,
+            BodyAttr from ~ BodyAttr to,
+            RetType from ~ RetType to) =>
+           Stm from -> Maybe (Stm to)
+castStm = rephraseStm caster
 
 caster :: (SameScope from to,
            ExpAttr from ~ ExpAttr to,

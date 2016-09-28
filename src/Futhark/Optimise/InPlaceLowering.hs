@@ -71,7 +71,7 @@ import Data.Maybe
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
 import Futhark.Representation.Kernels (Kernels)
-import Futhark.Optimise.InPlaceLowering.LowerIntoBinding
+import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Pass
@@ -97,34 +97,34 @@ optimiseFunDef fundec =
 
 optimiseBody :: Body (Aliases Kernels) -> ForwardingM (Body (Aliases Kernels))
 optimiseBody (Body als bnds res) = do
-  bnds' <- deepen $ optimiseBindings bnds $
+  bnds' <- deepen $ optimiseStms bnds $
     mapM_ seen res
   return $ Body als bnds' res
   where seen Constant{} = return ()
         seen (Var v)    = seenVar v
 
-optimiseBindings :: [Binding (Aliases Kernels)]
-                 -> ForwardingM ()
-                 -> ForwardingM [Binding (Aliases Kernels)]
-optimiseBindings [] m = m >> return []
+optimiseStms :: [Stm (Aliases Kernels)]
+             -> ForwardingM ()
+             -> ForwardingM [Stm (Aliases Kernels)]
+optimiseStms [] m = m >> return []
 
-optimiseBindings (bnd:bnds) m = do
-  (bnds', bup) <- tapBottomUp $ bindingBinding bnd $ optimiseBindings bnds m
-  bnd' <- optimiseInBinding bnd
+optimiseStms (bnd:bnds) m = do
+  (bnds', bup) <- tapBottomUp $ bindingStm bnd $ optimiseStms bnds m
+  bnd' <- optimiseInStm bnd
   case filter ((`elem` boundHere) . updateValue) $
        forwardThese bup of
     [] -> checkIfForwardableUpdate bnd' bnds'
     updates -> do
-      let updateBindings = map updateBinding updates
+      let updateStms = map updateStm updates
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
       case lowerUpdate bnd' updates of
         Just lowering -> do new_bnds <- lowering
-                            new_bnds' <- optimiseBindings new_bnds $
+                            new_bnds' <- optimiseStms new_bnds $
                                          tell bup { forwardThese = [] }
                             return $ new_bnds' ++ bnds'
         Nothing       -> checkIfForwardableUpdate bnd' $
-                         updateBindings ++ bnds'
+                         updateStms ++ bnds'
 
   where boundHere = patternNames $ bindingPattern bnd
 
@@ -138,9 +138,9 @@ optimiseBindings (bnd:bnds) m = do
         checkIfForwardableUpdate bnd' bnds' =
           return $ bnd' : bnds'
 
-optimiseInBinding :: Binding (Aliases Kernels)
-                  -> ForwardingM (Binding (Aliases Kernels))
-optimiseInBinding (Let pat attr e) = do
+optimiseInStm :: Stm (Aliases Kernels)
+              -> ForwardingM (Stm (Aliases Kernels))
+optimiseInStm (Let pat attr e) = do
   e' <- optimiseExp e
   return $ Let pat attr e'
 
@@ -180,8 +180,8 @@ instance Monoid BottomUp where
     BottomUp (seen1 `mappend` seen2) (forward1 `mappend` forward2)
   mempty = BottomUp mempty mempty
 
-updateBinding :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Binding (Aliases Kernels)
-updateBinding fwd =
+updateStm :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Stm (Aliases Kernels)
+updateStm fwd =
   mkLet [] [(Ident (updateName fwd) $ typeOf $ updateType fwd,
              BindInPlace
              (updateCertificates fwd)
@@ -226,10 +226,10 @@ bindingFParams :: [FParam (Aliases Kernels)]
                -> ForwardingM a
 bindingFParams = bindingParams FParamInfo
 
-bindingBinding :: Binding (Aliases Kernels)
-               -> ForwardingM a
-               -> ForwardingM a
-bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
+bindingStm :: Stm (Aliases Kernels)
+           -> ForwardingM a
+           -> ForwardingM a
+bindingStm (Let pat _ _) = local $ \(TopDown n vtable d) ->
   let entries = HM.fromList $ map entry $ patternElements pat
       entry patElem =
         let (aliases, _) = patElemAttr patElem

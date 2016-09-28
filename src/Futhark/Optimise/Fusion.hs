@@ -94,8 +94,8 @@ bindVars = foldl bindVar
 binding :: [Ident] -> FusionGM a -> FusionGM a
 binding vs = local (`bindVars` vs)
 
-gatherBindingPattern :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
-gatherBindingPattern pat m = do
+gatherStmPattern :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
+gatherStmPattern pat m = do
   res <- binding (patternIdents pat) m
   checkForUpdates pat res
 
@@ -322,7 +322,7 @@ inlineSOACInputs soac = do
 --   @orig_soac@ and @out_idds@ the current SOAC and its binding pattern
 --   @consumed@ is the set of names consumed by the SOAC.
 --   Output: a new Fusion Result (after processing the current SOAC binding)
-greedyFuse :: [Binding] -> Names -> FusedRes -> (Pattern, SOAC, Names) -> FusionGM FusedRes
+greedyFuse :: [Stm] -> Names -> FusedRes -> (Pattern, SOAC, Names) -> FusionGM FusedRes
 greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac, consumed) = do
   soac <- inlineSOACInputs orig_soac
   (inp_nms, other_nms) <- soacInputs soac
@@ -423,7 +423,7 @@ prodconsGreedyFuse res (out_idds, soac, consumed) = do
         Just kers' -> return (True, kers')
   return (ok_kers_compat, fused_kers, to_fuse_knms, to_fuse_kers, to_fuse_knms)
 
-horizontGreedyFuse :: [Binding] -> FusedRes -> (Pattern, SOAC, Names)
+horizontGreedyFuse :: [Stm] -> FusedRes -> (Pattern, SOAC, Names)
                    -> FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
 horizontGreedyFuse rem_bnds res (out_idds, soac, consumed) = do
   (inp_nms, _) <- soacInputs soac
@@ -582,7 +582,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
 
     _ -> do
       let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-      bres <- gatherBindingPattern pat $ fusionGatherBody fres body
+      bres <- gatherStmPattern pat $ fusionGatherBody fres body
       foldM fusionGatherExp bres (e:pat_vars)
   where body = mkBody bnds res
         rem_bnds = bnd : bnds
@@ -605,7 +605,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
       bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
   | otherwise = do
       let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-      bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
+      bres <- gatherStmPattern pat $ fusionGatherBody fres $ mkBody bnds res
       foldM fusionGatherExp bres (e:pat_vars)
 
 fusionGatherBody fres (Body _ [] res) =
@@ -667,7 +667,7 @@ fusionGatherExp _ (Op Futhark.Write{}) = errorIllegal "write"
 -----------------------------------
 
 fusionGatherExp fres e = do
-    let foldstct = identityFolder { foldOnBinding = \x -> fusionGatherExp x . bindingExp
+    let foldstct = identityFolder { foldOnStm = \x -> fusionGatherExp x . bindingExp
                                   , foldOnSubExp = fusionGatherSubExp
                                   }
     foldExpM foldstct fres e
@@ -715,9 +715,9 @@ fuseInBody (Body _ (Let pat () e:bnds) res) = do
   body' <- bindingPat pat $ fuseInBody $ mkBody bnds res
   case maybesoac of
     Right soac -> do soac_bnds <- replaceSOAC pat soac
-                     return $ insertBindings soac_bnds body'
+                     return $ insertStms soac_bnds body'
     _ -> do e' <- fuseInExp e
-            return $ insertBindings [Let pat () e'] body'
+            return $ insertStms [Let pat () e'] body'
 
 fuseInBody (Body () [] res) =
   return $ Body () [] res
@@ -756,7 +756,7 @@ fuseInExtLambda (ExtLambda params body rtp) = do
   body' <- binding (map paramIdent params) $ fuseInBody body
   return $ ExtLambda params body' rtp
 
-replaceSOAC :: Pattern -> SOAC -> FusionGM [Binding]
+replaceSOAC :: Pattern -> SOAC -> FusionGM [Stm]
 replaceSOAC (Pattern _ []) _ = return []
 replaceSOAC pat@(Pattern _ (patElem : _)) soac = do
   fres  <- asks fusedRes
@@ -779,7 +779,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac = do
              ++"still in result: "++pretty names)
           insertKerSOAC (outNames ker) ker
 
-insertKerSOAC :: [VName] -> FusedKer -> FusionGM [Binding]
+insertKerSOAC :: [VName] -> FusedKer -> FusionGM [Stm]
 insertKerSOAC names ker = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
@@ -843,7 +843,7 @@ copyNewlyConsumed was_consumed soac =
           return $ if null bnds
                    then lam'
                    else lam' { lambdaBody =
-                                 insertBindings bnds $
+                                 insertStms bnds $
                                  substituteNames subst $ lambdaBody lam'
                              }
 

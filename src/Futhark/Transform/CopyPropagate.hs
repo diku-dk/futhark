@@ -4,17 +4,17 @@
 -- simplifier with no rules, so hoisting and dead-code elimination may
 -- also take place.
 module Futhark.Transform.CopyPropagate
-       (copyPropagateInBindings)
+       (copyPropagateInStms)
        where
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Optimise.Simplifier.Engine
-import Futhark.Optimise.Simplifier (simplifyBindingsWithRules)
+import Futhark.Optimise.Simplifier (simplifyStmsWithRules)
 
-copyPropagateInBindings :: (MonadFreshNames m, SimplifiableLore lore, HasScope lore m) =>
-                           SimpleOps lore
-                        -> [Binding lore]
-                        -> m [Binding lore]
-copyPropagateInBindings simpl =
-  simplifyBindingsWithRules simpl ([], []) noExtraHoistBlockers
+copyPropagateInStms :: (MonadFreshNames m, SimplifiableLore lore, HasScope lore m) =>
+                       SimpleOps lore
+                    -> [Stm lore]
+                    -> m [Stm lore]
+copyPropagateInStms simpl =
+  simplifyStmsWithRules simpl ([], []) noExtraHoistBlockers

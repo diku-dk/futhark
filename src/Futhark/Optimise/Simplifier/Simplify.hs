@@ -8,7 +8,7 @@ module Futhark.Optimise.Simplifier.Simplify
   , simplifyProg
   , simplifyFun
   , simplifyLambda
-  , simplifyBindings
+  , simplifyStms
   )
   where
 
@@ -64,18 +64,18 @@ simplifyLambda simpl rules blockers lam nes args = do
   modifyNameSource $ Engine.runSimpleM m simpl $
     Engine.emptyEnv rules blockers
 
--- | Simplify a list of 'Binding's.
-simplifyBindings :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lore) =>
-                    Engine.SimpleOps lore
-                 -> RuleBook (Engine.SimpleM lore)
-                 -> Engine.HoistBlockers (Engine.SimpleM lore)
-                 -> [Binding lore]
-                 -> m [Binding (Engine.Wise lore)]
-simplifyBindings simpl rules blockers bnds = do
+-- | Simplify a list of 'Stm's.
+simplifyStms :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lore) =>
+                Engine.SimpleOps lore
+             -> RuleBook (Engine.SimpleM lore)
+             -> Engine.HoistBlockers (Engine.SimpleM lore)
+             -> [Stm lore]
+             -> m [Stm (Engine.Wise lore)]
+simplifyStms simpl rules blockers bnds = do
   types <- askScope
   let m = Engine.localVtable
           (<> ST.fromScope (addScopeWisdom types)) $
-          fmap snd $ Engine.collectBindingsEngine $
-          mapM_ Engine.simplifyBinding bnds
+          fmap snd $ Engine.collectStmsEngine $
+          mapM_ Engine.simplifyStm bnds
   modifyNameSource $ Engine.runSimpleM m simpl $
     Engine.emptyEnv rules blockers

@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-module Futhark.Optimise.InPlaceLowering.LowerIntoBinding
+module Futhark.Optimise.InPlaceLowering.LowerIntoStm
        (
          lowerUpdate
        , DesiredUpdate (..)
@@ -40,7 +40,7 @@ updateHasValue name = (name==) . updateValue
 
 lowerUpdate :: (Bindable lore, LetAttr lore ~ (als, Type), Aliased lore,
                 MonadFreshNames m) =>
-               Binding lore -> [DesiredUpdate (LetAttr lore)] -> Maybe (m [Binding lore])
+               Stm lore -> [DesiredUpdate (LetAttr lore)] -> Maybe (m [Stm lore])
 lowerUpdate (Let pat _ (DoLoop ctx val form body)) updates = do
   canDo <- lowerUpdateIntoLoop updates pat ctx val body
   Just $ do
@@ -72,8 +72,8 @@ lowerUpdateIntoLoop :: (Bindable lore, Aliased lore, LetAttr lore ~ (als, Type),
                     -> [(FParam lore, SubExp)]
                     -> [(FParam lore, SubExp)]
                     -> Body lore
-                    -> Maybe (m ([Binding lore],
-                                 [Binding lore],
+                    -> Maybe (m ([Stm lore],
+                                 [Stm lore],
                                  [Ident],
                                  [Ident],
                                  [(FParam lore, SubExp)],
@@ -111,7 +111,7 @@ lowerUpdateIntoLoop updates pat ctx val body = do
     (val',prebnds,postbnds) <- mkMerges in_place_map
     let (ctxpat,valpat) = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
-    (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyBindings body
+    (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyStms body
     (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
     let body' = mkBody (newbnds++res_bnds) body_res
     return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
@@ -120,7 +120,7 @@ lowerUpdateIntoLoop updates pat ctx val body = do
 
         mkMerges :: (MonadFreshNames m, Bindable lore) =>
                     [LoopResultSummary (als, Type)]
-                 -> m ([(Param DeclType, SubExp)], [Binding lore], [Binding lore])
+                 -> m ([(Param DeclType, SubExp)], [Stm lore], [Stm lore])
         mkMerges summaries = do
           ((origmerge, extramerge), (prebnds, postbnds)) <-
             runWriterT $ partitionEithers <$> mapM mkMerge summaries
@@ -211,7 +211,7 @@ indexSubstitutions = mapMaybe getSubstitution
 manipulateResult :: (Bindable lore, MonadFreshNames m) =>
                     [LoopResultSummary (LetAttr lore)]
                  -> IndexSubstitutions (LetAttr lore)
-                 -> m (Result, [Binding lore])
+                 -> m (Result, [Stm lore])
 manipulateResult summaries substs = do
   let (orig_ses,updated_ses) = partitionEithers $ map unchangedRes summaries
   (subst_ses, res_bnds) <- runWriterT $ zipWithM substRes updated_ses substs

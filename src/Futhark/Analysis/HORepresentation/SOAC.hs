@@ -597,7 +597,7 @@ soacToStream soac = do
       addlelbdy <- mkPlusBnds lam $ map Futhark.Var $
                    map paramName inpacc_ids++map identName lastel_ids
       -- Finally, construct the stream
-      let (addlelbnd,addlelres) = (bodyBindings addlelbdy, bodyResult addlelbdy)
+      let (addlelbnd,addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
           strmbdy= mkBody (insbnd:outszm1bnd:lelbnds++mapbnd:addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
@@ -622,7 +622,7 @@ soacToStream soac = do
       addaccbdy <- mkPlusBnds lam $ map Futhark.Var $
                    map paramName inpacc_ids++map identName acc0_ids
       -- Construct the stream
-      let (addaccbnd,addaccres) = (bodyBindings addaccbdy, bodyResult addaccbdy)
+      let (addaccbnd,addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
           strmbdy= mkBody (insbnd : addaccbnd) addaccres
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy accrtps
@@ -650,7 +650,7 @@ soacToStream soac = do
       addaccbdy <- mkPlusBnds lamin $ map Futhark.Var $
                    map paramName inpacc_ids++map identName acc0_ids
       -- Construct the stream
-      let (addaccbnd,addaccres) = (bodyBindings addaccbdy, bodyResult addaccbdy)
+      let (addaccbnd,addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
           strmbdy= mkBody (insbnd : addaccbnd) $
                           addaccres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
@@ -675,7 +675,7 @@ soacToStream soac = do
                                   ) accpars accs
                 plus_bdy = lambdaBody plus
                 newlambdy = Body (bodyLore plus_bdy)
-                                 (parbnds ++ bodyBindings plus_bdy)
+                                 (parbnds ++ bodyStms plus_bdy)
                                  (bodyResult plus_bdy)
             renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
 
@@ -687,4 +687,4 @@ soacToStream soac = do
                                                          (BasicOp $ SubExp se)
                                   ) (lambdaParams plus') accels
                 body = lambdaBody plus'
-            return $ body { bodyBindings = parbnds ++ bodyBindings body }
+            return $ body { bodyStms = parbnds ++ bodyStms body }

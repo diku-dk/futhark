@@ -115,7 +115,7 @@ Library
                    Futhark.Optimise.Fusion.TryFusion
                    Futhark.Optimise.InliningDeadFun
                    Futhark.Optimise.InPlaceLowering
-                   Futhark.Optimise.InPlaceLowering.LowerIntoBinding
+                   Futhark.Optimise.InPlaceLowering.LowerIntoStm
                    Futhark.Optimise.InPlaceLowering.SubstituteIndices
                    Futhark.Optimise.Simplifier
                    Futhark.Optimise.Simplifier.ClosedForm

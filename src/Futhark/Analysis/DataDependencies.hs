@@ -26,7 +26,7 @@ dataDependencies = dataDependencies' HM.empty
 
 dataDependencies' :: Attributes lore =>
                      Dependencies -> Body lore -> Dependencies
-dataDependencies' startdeps = foldl grow startdeps . bodyBindings
+dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where grow deps (Let pat _ (If c tb fb _)) =
           let tdeps = dataDependencies' deps tb
               fdeps = dataDependencies' deps fb

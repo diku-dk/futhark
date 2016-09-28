@@ -27,8 +27,8 @@ module Futhark.Optimise.Simplifier.Engine
        , SimplifyOp
        , bindableSimpleOps
 
-       , addBindingEngine
-       , collectBindingsEngine
+       , addStmEngine
+       , collectStmsEngine
        , Env (envHoistBlockers, envRules)
        , emptyEnv
        , HoistBlockers(..)
@@ -43,18 +43,18 @@ module Futhark.Optimise.Simplifier.Engine
        , isNotSafe
        , State
        , emptyState
-       , Need (needBindings)
+       , Need (needStms)
        , asksEngineEnv
        , getVtable
        , localVtable
-       , insertAllBindings
+       , insertAllStms
        , simplifyBody
-       , inspectBinding
+       , inspectStm
 
          -- * Building blocks
        , SimplifiableLore
        , Simplifiable (..)
-       , simplifyBinding
+       , simplifyStm
        , simplifyResult
        , simplifyExp
        , simplifyPattern
@@ -103,9 +103,9 @@ import Control.Monad.RWS
 import Futhark.Optimise.Simplifier.Lore
 import qualified Futhark.Analysis.ScalExp as SE
 
-type NeedSet lore = [Binding lore]
+type NeedSet lore = [Stm lore]
 
-data Need lore = Need { needBindings :: NeedSet lore
+data Need lore = Need { needStms :: NeedSet lore
                       , usageTable  :: UT.UsageTable
                       }
 
@@ -118,9 +118,9 @@ data HoistBlockers m = HoistBlockers
                          -- ^ Blocker for hoisting out of parallel loops.
                        , blockHoistSeq :: BlockPred (Lore m)
                          -- ^ Blocker for hoisting out of sequential loops.
-                       , getArraySizes :: Binding (Lore m) -> Names
+                       , getArraySizes :: Stm (Lore m) -> Names
                          -- ^ gets the sizes of arrays from a binding.
-                       , isAllocation  :: Binding (Lore m) -> Bool
+                       , isAllocation  :: Stm (Lore m) -> Bool
                        }
 
 noExtraHoistBlockers :: HoistBlockers m
@@ -147,13 +147,13 @@ emptyState = State { stateVtable = ST.empty }
 data SimpleOps lore =
   SimpleOps { mkLetS :: ST.SymbolTable (Wise lore)
                      -> Pattern (Wise lore) -> Exp (Wise lore)
-                     -> SimpleM lore (Binding (Wise lore))
+                     -> SimpleM lore (Stm (Wise lore))
             , mkBodyS :: ST.SymbolTable (Wise lore)
-                      -> [Binding (Wise lore)] -> Result
+                      -> [Stm (Wise lore)] -> Result
                       -> SimpleM lore (Body (Wise lore))
             , mkLetNamesS :: ST.SymbolTable (Wise lore)
                           -> [(VName,Bindage)] -> Exp (Wise lore)
-                          -> SimpleM lore (Binding (Wise lore))
+                          -> SimpleM lore (Stm (Wise lore))
             , simplifyOpS :: SimplifyOp lore
             }
 
@@ -214,8 +214,8 @@ instance SimplifiableLore lore => MonadBinder (SimpleM lore) where
     simpl <- fst <$> ask
     mkLetNamesS simpl vtable names e
 
-  addBinding      = addBindingEngine
-  collectBindings = collectBindingsEngine
+  addStm      = addStmEngine
+  collectStms = collectStmsEngine
 
 runSimpleM :: SimpleM lore a
            -> SimpleOps lore
@@ -236,14 +236,14 @@ subSimpleM :: (SimplifiableLore lore,
            -> Env (SimpleM lore)
            -> ST.SymbolTable (Wise outerlore)
            -> SimpleM lore a
-           -> m (a, [Binding (Wise lore)])
+           -> m (a, [Stm (Wise lore)])
 subSimpleM simpl env outer_vtable m = do
   let inner_vtable = ST.castSymbolTable outer_vtable
   modifyNameSource $ \src ->
     let SimpleM m' = localVtable (<>inner_vtable) m
         (x, (_, src'), need) =
           runRWS m' (simpl, env) (emptyState, src)
-    in ((x, needBindings need), src')
+    in ((x, needStms need), src')
 
 askEngineEnv :: SimpleM lore (Env (SimpleM lore))
 askEngineEnv = snd <$> ask
@@ -258,18 +258,18 @@ putEngineState x = modify $ \(_, y) -> (x,y)
 passNeed :: SimpleM lore (a, Need (Wise lore) -> Need (Wise lore)) -> SimpleM lore a
 passNeed = pass
 
-addBindingEngine :: SimplifiableLore lore => Binding (Wise lore) -> SimpleM lore ()
-addBindingEngine bnd = do
-  modifyVtable $ ST.insertBinding bnd
+addStmEngine :: SimplifiableLore lore => Stm (Wise lore) -> SimpleM lore ()
+addStmEngine bnd = do
+  modifyVtable $ ST.insertStm bnd
   case bindingExp bnd of
     BasicOp (Assert se _) -> asserted se
     _                    -> return ()
-  needBinding bnd
+  needStm bnd
 
-collectBindingsEngine :: SimpleM lore a -> SimpleM lore (a, [Binding (Wise lore)])
-collectBindingsEngine m = passNeed $ do
+collectStmsEngine :: SimpleM lore a -> SimpleM lore (a, [Stm (Wise lore)])
+collectStmsEngine m = passNeed $ do
   (x, need) <- listenNeed m
-  return ((x, needBindings need),
+  return ((x, needStms need),
           const mempty)
 
 asksEngineEnv :: (Env (SimpleM lore) -> a) -> SimpleM lore a
@@ -282,8 +282,8 @@ modifyEngineState :: (State (SimpleM lore) -> State (SimpleM lore)) -> SimpleM l
 modifyEngineState f = do x <- getEngineState
                          putEngineState $ f x
 
-needBinding :: Binding (Wise lore) -> SimpleM lore ()
-needBinding bnd = tellNeed $ Need [bnd] UT.empty
+needStm :: Stm (Wise lore) -> SimpleM lore ()
+needStm bnd = tellNeed $ Need [bnd] UT.empty
 
 boundFree :: Names -> SimpleM lore ()
 boundFree fs = tellNeed $ Need [] $ UT.usages fs
@@ -342,7 +342,7 @@ localVtable f m = do
   vtable <- getVtable
   modifyEngineState $ \env -> env { stateVtable = f vtable }
   (x, need) <- listenNeed m
-  let vtable' = foldl (flip ST.insertBinding) vtable $ needBindings need
+  let vtable' = foldl (flip ST.insertStm) vtable $ needStms need
   modifyEngineState $ \env -> env { stateVtable = vtable' }
   return x
 
@@ -384,34 +384,34 @@ bindLoopVars []                  m =
 bindLoopVars ((var,bound):lvars) m =
   bindLoopVar var bound $ bindLoopVars lvars m
 
-hoistBindings :: SimplifiableLore lore =>
-                 RuleBook (SimpleM lore) -> BlockPred (Wise lore)
-              -> ST.SymbolTable (Wise lore) -> UT.UsageTable
-              -> [Binding (Wise lore)]
-              -> SimpleM lore ([Binding (Wise lore)],
-                               [Binding (Wise lore)],
-                               UT.UsageTable)
-hoistBindings rules block vtable uses needs = do
-  (uses', blocked, hoisted) <- simplifyBindings vtable uses needs
-  mapM_ addBinding blocked
+hoistStms :: SimplifiableLore lore =>
+             RuleBook (SimpleM lore) -> BlockPred (Wise lore)
+          -> ST.SymbolTable (Wise lore) -> UT.UsageTable
+          -> [Stm (Wise lore)]
+          -> SimpleM lore ([Stm (Wise lore)],
+                            [Stm (Wise lore)],
+                            UT.UsageTable)
+hoistStms rules block vtable uses needs = do
+  (uses', blocked, hoisted) <- simplifyStms vtable uses needs
+  mapM_ addStm blocked
   return (blocked, hoisted, uses')
-  where simplifyBindings vtable' uses' bnds = do
-          (uses'', bnds') <- simplifyBindings' vtable' uses' bnds
+  where simplifyStms vtable' uses' bnds = do
+          (uses'', bnds') <- simplifyStms' vtable' uses' bnds
           -- We need to do a final pass to ensure that nothing is
           -- hoisted past something that it depends on.
           let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps bnds'
           return (uses'', blocked, hoisted)
 
-        simplifyBindings' vtable' uses' bnds =
+        simplifyStms' vtable' uses' bnds =
           foldM hoistable (uses',[]) $ reverse $ zip bnds vtables
-            where vtables = scanl (flip ST.insertBinding) vtable' bnds
+            where vtables = scanl (flip ST.insertStm) vtable' bnds
 
         hoistable (uses',bnds) (bnd, vtable')
           | not $ uses' `UT.contains` provides bnd = -- Dead binding.
             return (uses', bnds)
           | otherwise = do
             res <- localVtable (const vtable') $
-                   bottomUpSimplifyBinding rules (vtable', uses') bnd
+                   bottomUpSimplifyStm rules (vtable', uses') bnd
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
                 | block uses' bnd ->
@@ -420,12 +420,12 @@ hoistBindings rules block vtable uses needs = do
                 | otherwise ->
                   return (expandUsage uses' bnd, Right bnd : bnds)
               Just optimbnds -> do
-                (uses'',bnds') <- simplifyBindings' vtable' uses' optimbnds
+                (uses'',bnds') <- simplifyStms' vtable' uses' optimbnds
                 return (uses'', bnds'++bnds)
 
 blockUnhoistedDeps :: Attributes lore =>
-                      [Either (Binding lore) (Binding lore)]
-                   -> [Either (Binding lore) (Binding lore)]
+                      [Either (Stm lore) (Stm lore)]
+                   -> [Either (Stm lore) (Stm lore)]
 blockUnhoistedDeps = snd . mapAccumL block HS.empty
   where block blocked (Left need) =
           (blocked <> HS.fromList (provides need), Left need)
@@ -435,18 +435,18 @@ blockUnhoistedDeps = snd . mapAccumL block HS.empty
           | otherwise =
             (blocked, Right need)
 
-provides :: Attributes lore => Binding lore -> [VName]
+provides :: Attributes lore => Stm lore -> [VName]
 provides = patternNames . bindingPattern
 
-requires :: Attributes lore => Binding lore -> Names
+requires :: Attributes lore => Stm lore -> Names
 requires bnd =
   (mconcat (map freeIn $ patternElements $ bindingPattern bnd)
   `HS.difference` HS.fromList (provides bnd)) <>
   freeInExp (bindingExp bnd)
 
 expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
-               UT.UsageTable -> Binding lore -> UT.UsageTable
-expandUsage utable bnd = utable <> usageInBinding bnd <> usageThroughAliases
+               UT.UsageTable -> Stm lore -> UT.UsageTable
+expandUsage utable bnd = utable <> usageInStm bnd <> usageThroughAliases
   where pat = bindingPattern bnd
         usageThroughAliases =
           mconcat $ mapMaybe usageThroughBindeeAliases $
@@ -458,7 +458,7 @@ expandUsage utable bnd = utable <> usageInBinding bnd <> usageThroughAliases
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-type BlockPred lore = UT.UsageTable -> Binding lore -> Bool
+type BlockPred lore = UT.UsageTable -> Stm lore -> Bool
 
 neverBlocks :: BlockPred lore
 neverBlocks _ _ = False
@@ -478,22 +478,22 @@ isOp _ _ = False
 
 blockIf :: SimplifiableLore lore =>
            BlockPred (Wise lore)
-        -> SimpleM lore a -> SimpleM lore (a, [Binding (Wise lore)])
+        -> SimpleM lore a -> SimpleM lore (a, [Stm (Wise lore)])
 blockIf block m = passNeed $ do
   (x, needs) <- listenNeed m
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (hoisted, hoistable, usages) <-
-    hoistBindings rules block vtable (usageTable needs) (needBindings needs)
-  putVtable $ foldl (flip ST.insertBinding) vtable hoistable
+    hoistStms rules block vtable (usageTable needs) (needStms needs)
+  putVtable $ foldl (flip ST.insertStm) vtable hoistable
   return ((x, hoisted),
-          const Need { needBindings = hoistable
+          const Need { needStms = hoistable
                      , usageTable  = usages
                      })
 
-insertAllBindings :: SimplifiableLore lore =>
-                     SimpleM lore Result -> SimpleM lore (Body (Wise lore))
-insertAllBindings = uncurry (flip mkBodyM) <=< blockIf (isFalse False)
+insertAllStms :: SimplifiableLore lore =>
+                 SimpleM lore Result -> SimpleM lore (Body (Wise lore))
+insertAllStms = uncurry (flip mkBodyM) <=< blockIf (isFalse False)
 
 hasFree :: Attributes lore => Names -> BlockPred lore
 hasFree ks _ need = ks `intersects` requires need
@@ -529,8 +529,8 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   (res2, needs2) <- listenNeed $ localVtable vtablef2 m2
   is_alloc_fun <- asksEngineEnv $ isAllocation  . envHoistBlockers
   getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
-  let needs1_bnds = needBindings needs1
-      needs2_bnds = needBindings needs2
+  let needs1_bnds = needStms needs1
+      needs2_bnds = needStms needs2
       hoistbl_nms = filterBnds is_alloc_fun getArrSz_fun (needs1_bnds++needs2_bnds)
       -- "isNotHoistableBnd hoistbl_nms" ensures that only the (transitive closure)
       -- of the bindings used for allocations and shape computations are if-hoistable.
@@ -541,17 +541,17 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   (body1_bnds', safe1, f1) <-
     enterBody $
     localVtable vtablef1 $
-    hoistBindings rules block vtable (usageTable needs1) needs1_bnds
+    hoistStms rules block vtable (usageTable needs1) needs1_bnds
   (body2_bnds', safe2, f2) <-
     enterBody $
     localVtable vtablef2 $
-    hoistBindings rules block vtable (usageTable needs2) needs2_bnds
+    hoistStms rules block vtable (usageTable needs2) needs2_bnds
   let hoistable = safe1 <> safe2
-  putVtable $ foldl (flip ST.insertBinding) vtable hoistable
+  putVtable $ foldl (flip ST.insertStm) vtable hoistable
   body1' <- mkBodyM body1_bnds' res1
   body2' <- mkBodyM body2_bnds' res2
   return ((body1', body2'),
-          const Need { needBindings = hoistable
+          const Need { needStms = hoistable
                      , usageTable = f1 <> f2
                      })
   where filterBnds is_alloc_fn getArrSz_fn all_bnds =
@@ -578,7 +578,7 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
 simplifyBody :: SimplifiableLore lore =>
                 [Diet] -> Body lore -> SimpleM lore Result
 simplifyBody ds (Body _ bnds res) = do
-  mapM_ simplifyBinding bnds
+  mapM_ simplifyStm bnds
   simplifyResult ds res
 
 -- | Simplify a single 'Result'.
@@ -597,23 +597,23 @@ isDoLoopResult = mapM_ checkForVar
           return ()
 
 -- | Simplify the binding, adding it to the program being constructed.
-simplifyBinding :: SimplifiableLore lore =>
-                   Binding lore -> SimpleM lore ()
+simplifyStm :: SimplifiableLore lore =>
+               Stm lore -> SimpleM lore ()
 
-simplifyBinding (Let pat _ e) = do
+simplifyStm (Let pat _ e) = do
   e' <- simplifyExp e
   pat' <- simplifyPattern pat
-  inspectBinding =<<
+  inspectStm =<<
     mkLetM (addWisdomToPattern pat' e') e'
 
-inspectBinding :: SimplifiableLore lore => Binding (Wise lore) -> SimpleM lore ()
-inspectBinding bnd = do
+inspectStm :: SimplifiableLore lore => Stm (Wise lore) -> SimpleM lore ()
+inspectStm bnd = do
   vtable <- getVtable
   rules <- asksEngineEnv envRules
-  simplified <- topDownSimplifyBinding rules vtable bnd
+  simplified <- topDownSimplifyStm rules vtable bnd
   case simplified of
-    Just newbnds -> mapM_ inspectBinding newbnds
-    Nothing      -> addBinding bnd
+    Just newbnds -> mapM_ inspectStm newbnds
+    Nothing      -> addStm bnd
 
 simplifyOp :: SimplifiableLore lore => Op lore -> SimpleM lore (Op (Wise lore))
 simplifyOp op = do f <- asks $ simplifyOpS . fst
@@ -887,6 +887,6 @@ instance Simplifiable Certificates where
 simplifyFun :: SimplifiableLore lore => FunDef lore -> SimpleM lore (FunDef (Wise lore))
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
-  body' <- bindFParams params $ insertAllBindings $
+  body' <- bindFParams params $ insertAllStms $
            simplifyBody (map diet $ retTypeValues rettype') body
   return $ FunDef entry fname rettype' params body'

@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | This module exports facilities for transforming array accesses in
--- a list of 'Binding's (intended to be the bindings in a body).  The
+-- a list of 'Stm's (intended to be the bindings in a body).  The
 -- idea is that you can state that some variable @x@ is in fact an
 -- array indexing @v[i0,i1,...]@.
 module Futhark.Optimise.InPlaceLowering.SubstituteIndices
@@ -35,28 +35,28 @@ typeEnvFromSubstitutions = HM.fromList . map (fromSubstitution . snd)
           (name, LetInfo t)
 
 substituteIndices :: (MonadFreshNames m, Bindable lore, Aliased lore, LetAttr lore ~ attr) =>
-                     IndexSubstitutions attr -> [Binding lore]
-                  -> m (IndexSubstitutions attr, [Binding lore])
+                     IndexSubstitutions attr -> [Stm lore]
+                  -> m (IndexSubstitutions attr, [Stm lore])
 substituteIndices substs bnds =
-  runBinderT (substituteIndicesInBindings substs bnds) types
+  runBinderT (substituteIndicesInStms substs bnds) types
   where types = typeEnvFromSubstitutions substs
 
-substituteIndicesInBindings :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
-                                LocalScope (Lore m) m) =>
-                               IndexSubstitutions (LetAttr (Lore m))
-                            -> [Binding (Lore m)]
-                            -> m (IndexSubstitutions (LetAttr (Lore m)))
-substituteIndicesInBindings = foldM substituteIndicesInBinding
+substituteIndicesInStms :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
+                             LocalScope (Lore m) m) =>
+                           IndexSubstitutions (LetAttr (Lore m))
+                        -> [Stm (Lore m)]
+                        -> m (IndexSubstitutions (LetAttr (Lore m)))
+substituteIndicesInStms = foldM substituteIndicesInStm
 
-substituteIndicesInBinding :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
-                               LocalScope (Lore m) m) =>
-                              IndexSubstitutions (LetAttr (Lore m))
-                           -> Binding (Lore m)
-                           -> m (IndexSubstitutions (LetAttr (Lore m)))
-substituteIndicesInBinding substs (Let pat lore e) = do
+substituteIndicesInStm :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
+                            LocalScope (Lore m) m) =>
+                          IndexSubstitutions (LetAttr (Lore m))
+                       -> Stm (Lore m)
+                       -> m (IndexSubstitutions (LetAttr (Lore m)))
+substituteIndicesInStm substs (Let pat lore e) = do
   e' <- substituteIndicesInExp substs e
   (substs', pat') <- substituteIndicesInPattern substs pat
-  addBinding $ Let pat' lore e'
+  addStm $ Let pat' lore e'
   return substs'
 
 substituteIndicesInPattern :: (MonadBinder m, SetType attr,
@@ -133,11 +133,11 @@ substituteIndicesInBody :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
                         -> m (Body (Lore m))
 substituteIndicesInBody substs body = do
   (substs', bnds') <- inScopeOf bnds $
-    collectBindings $ substituteIndicesInBindings substs bnds
+    collectStms $ substituteIndicesInStms substs bnds
   (ses, ses_bnds) <- inScopeOf bnds' $
-    collectBindings $ mapM (substituteIndicesInSubExp substs') $ bodyResult body
+    collectStms $ mapM (substituteIndicesInSubExp substs') $ bodyResult body
   mkBodyM (bnds'<>ses_bnds) ses
-  where bnds = bodyBindings body
+  where bnds = bodyStms body
 
 update :: VName -> VName -> IndexSubstitution attr -> IndexSubstitutions attr
        -> IndexSubstitutions attr

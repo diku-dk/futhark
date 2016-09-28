@@ -94,7 +94,7 @@ instance Substitute attr => Substitute (PatternT attr) where
   substituteNames substs (Pattern context values) =
     Pattern (substituteNames substs context) (substituteNames substs values)
 
-instance Substitutable lore => Substitute (Binding lore) where
+instance Substitutable lore => Substitute (Stm lore) where
   substituteNames substs (Let pat annot e) =
     Let
     (substituteNames substs pat)

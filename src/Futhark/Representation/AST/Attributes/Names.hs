@@ -11,13 +11,13 @@ module Futhark.Representation.AST.Attributes.Names
          -- * Specialised Functions
          , freeInBody
          , freeInExp
-         , freeInBinding
+         , freeInStm
          , freeInLambda
          , freeInExtLambda
          -- * Bound Names
          , boundInBody
-         , boundByBinding
-         , boundByBindings
+         , boundByStm
+         , boundByStms
          , boundByLambda
          , boundByExtLambda
        )
@@ -43,7 +43,7 @@ freeWalker :: (FreeIn (ExpAttr lore),
 freeWalker = identityWalker {
                walkOnSubExp = subExpFree
              , walkOnBody = bodyFree
-             , walkOnBinding = bindingFree
+             , walkOnStm = bindingFree
              , walkOnVName = tell . HS.singleton
              , walkOnCertificates = tell . HS.fromList
              , walkOnOp = tell . freeIn
@@ -111,14 +111,14 @@ freeInExp = execWriter . walkExpM freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- binding.
-freeInBinding :: (FreeIn (ExpAttr lore),
+freeInStm :: (FreeIn (ExpAttr lore),
                   FreeIn (BodyAttr lore),
                   FreeIn (FParamAttr lore),
                   FreeIn (LParamAttr lore),
                   FreeIn (LetAttr lore),
                   FreeIn (Op lore)) =>
-                 Binding lore -> Names
-freeInBinding = execWriter . walkOnBinding freeWalker
+                 Stm lore -> Names
+freeInStm = execWriter . walkOnStm freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- lambda, including shape annotations in the parameters.
@@ -237,15 +237,15 @@ instance FreeIn attr => FreeIn (PatternT attr) where
 
 -- | The names bound by the bindings immediately in a 'Body'.
 boundInBody :: Body lore -> Names
-boundInBody = boundByBindings . bodyBindings
+boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
-boundByBinding :: Binding lore -> Names
-boundByBinding = HS.fromList . patternNames . bindingPattern
+boundByStm :: Stm lore -> Names
+boundByStm = HS.fromList . patternNames . bindingPattern
 
 -- | The names bound by the bindings.
-boundByBindings :: [Binding lore] -> Names
-boundByBindings = mconcat . map boundByBinding
+boundByStms :: [Stm lore] -> Names
+boundByStms = mconcat . map boundByStm
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]

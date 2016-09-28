@@ -9,7 +9,7 @@ module Futhark.Analysis.Alias
        ( aliasAnalysis
          -- * Ad-hoc utilities
        , analyseFun
-       , analyseBinding
+       , analyseStm
        , analyseExp
        , analyseBody
        , analyseLambda
@@ -39,13 +39,12 @@ analyseBody :: (Attributes lore,
                 CanBeAliased (Op lore)) =>
                Body lore -> Body (Aliases lore)
 analyseBody (Body lore origbnds result) =
-  let bnds' = map analyseBinding origbnds
+  let bnds' = map analyseStm origbnds
   in mkAliasedBody lore bnds' result
 
-analyseBinding :: (Attributes lore,
-                   CanBeAliased (Op lore)) =>
-                  Binding lore -> Binding (Aliases lore)
-analyseBinding (Let pat lore e) =
+analyseStm :: (Attributes lore, CanBeAliased (Op lore)) =>
+              Stm lore -> Stm (Aliases lore)
+analyseStm (Let pat lore e) =
   let e' = analyseExp e
       pat' = addAliasesToPattern pat e'
       lore' = (Names' $ consumedInPattern pat' <> consumedInExp e',

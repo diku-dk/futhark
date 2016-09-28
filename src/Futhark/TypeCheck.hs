@@ -25,8 +25,8 @@ module Futhark.TypeCheck
   , requireI
   , checkSubExp
   , checkExp
-  , checkBindings
-  , checkBinding
+  , checkStms
+  , checkStm
   , checkType
   , checkExtType
   , matchExtPattern
@@ -157,9 +157,9 @@ instance Checkable lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding lore = (RetType (Aliases lore), [FParam (Aliases lore)])
+type FunStm lore = (RetType (Aliases lore), [FParam (Aliases lore)])
 
-type VarBinding lore = NameInfo (Aliases lore)
+type VarStm lore = NameInfo (Aliases lore)
 
 data Usage = Consumed
            | Observed
@@ -239,8 +239,8 @@ instance Monoid Consumption where
 -- variable table will be extended during type-checking when
 -- let-expressions are encountered.
 data Env lore =
-  Env { envVtable :: HM.HashMap VName (VarBinding lore)
-      , envFtable :: HM.HashMap Name (FunBinding lore)
+  Env { envVtable :: HM.HashMap VName (VarStm lore)
+      , envFtable :: HM.HashMap Name (FunStm lore)
       , envContext :: [String]
       }
 
@@ -489,7 +489,7 @@ checkProg prog = do
 
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Checkable lore =>
-                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunBinding lore))
+                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunStm lore))
 initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts
@@ -605,15 +605,15 @@ checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
   observe ident
   lookupType ident
 
-checkBindings :: Checkable lore =>
-                 [Binding (Aliases lore)] -> TypeM lore a
-              -> TypeM lore a
-checkBindings origbnds m = delve origbnds
+checkStms :: Checkable lore =>
+             [Stm (Aliases lore)] -> TypeM lore a
+          -> TypeM lore a
+checkStms origbnds m = delve origbnds
   where delve (Let pat (_,annot) e:bnds) = do
           context ("In expression\n" ++ message "  " e) $
             checkExp e
           checkExpLore annot
-          checkBinding pat e $
+          checkStm pat e $
             delve bnds
         delve [] =
           m
@@ -628,7 +628,7 @@ checkFunBody :: Checkable lore =>
              -> Body (Aliases lore)
              -> TypeM lore ()
 checkFunBody fname rt (Body (_,lore) bnds res) = do
-  checkBindings bnds $ do
+  checkStms bnds $ do
     checkResult res
     matchReturnType fname rt res
   checkBodyLore lore
@@ -636,7 +636,7 @@ checkFunBody fname rt (Body (_,lore) bnds res) = do
 checkLambdaBody :: Checkable lore =>
                    [Type] -> Body (Aliases lore) -> TypeM lore ()
 checkLambdaBody ret (Body (_,lore) bnds res) = do
-  checkBindings bnds $ checkLambdaResult ret res
+  checkStms bnds $ checkLambdaResult ret res
   checkBodyLore lore
 
 checkLambdaResult :: Checkable lore =>
@@ -657,7 +657,7 @@ checkLambdaResult ts es
 checkBody :: Checkable lore =>
              Body (Aliases lore) -> TypeM lore ()
 checkBody (Body (_,lore) bnds res) = do
-  checkBindings bnds $ checkResult res
+  checkStms bnds $ checkResult res
   checkBodyLore lore
 
 checkBasicOp :: Checkable lore =>
@@ -930,11 +930,11 @@ checkBindage (BindInPlace cs src is) = do
   when (arrayRank srct /= length is) $
     bad $ SlicingError (arrayRank srct) (length is)
 
-checkBinding :: Checkable lore =>
-                Pattern (Aliases lore) -> Exp (Aliases lore)
-             -> TypeM lore a
-             -> TypeM lore a
-checkBinding pat e m = do
+checkStm :: Checkable lore =>
+            Pattern (Aliases lore) -> Exp (Aliases lore)
+         -> TypeM lore a
+         -> TypeM lore a
+checkStm pat e m = do
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e
   binding (scopeOf pat) $ do
@@ -948,8 +948,8 @@ matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts
   unless (length restpat == length ts') $
     bad $ InvalidPatternError (Pattern [] pat) ts Nothing
-  evalStateT (zipWithM_ checkBinding' restpat ts') []
-  where checkBinding' patElem@(PatElem name _ _) t = do
+  evalStateT (zipWithM_ checkStm' restpat ts') []
+  where checkStm' patElem@(PatElem name _ _) t = do
           lift $ checkAnnotation ("binding of variable " ++ textual name)
             (patElemRequires patElem) t
           add name
@@ -1065,7 +1065,7 @@ checkExtLambda (ExtLambda params body rettype) args =
                   LParamInfo $ paramAttr param)
                | param <- params ],
                body) consumable $
-      checkBindings (bodyBindings body) $ do
+      checkStms (bodyStms body) $ do
         checkResult $ bodyResult body
         matchExtReturnType fname rettype $ bodyResult body
     else bad $ TypeError $

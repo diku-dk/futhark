@@ -64,7 +64,7 @@ data CallKernel = Map MapKernel
 
 -- | A generic kernel containing arbitrary kernel code.
 data MapKernel = MapKernel { mapKernelThreadNum :: VName
-                             -- ^ Binding position - also serves as a unique
+                             -- ^ Stm position - also serves as a unique
                              -- name for the kernel.
                            , mapKernelDesc :: String
                            -- ^ Used to name the kernel for readability.

@@ -53,12 +53,12 @@ iswim res_pat cs w scan_fun scan_input
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
-      addBinding $ Let res_pat' () $ Op $ Map map_cs map_w map_fun' map_arrs'
+      addStm $ Let res_pat' () $ Op $ Map map_cs map_w map_fun' map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do
         let perm = [1,0] ++ [2..arrayRank (identType from)-1]
-        addBinding $ Let (basicPattern' [] [to]) () $
+        addStm $ Let (basicPattern' [] [to]) () $
                      BasicOp $ Rearrange [] perm $ identName from
   | otherwise = Nothing
 
@@ -101,12 +101,12 @@ irwim res_pat cs w comm red_fun red_input
             return $ mkBody [Let red_pat () $ Op $ Reduce cs w comm red_fun' red_input'] $
             map Var $ patternNames map_pat
           Just m -> localScope (scopeOfLParams map_params) $ do
-            map_body_bnds <- collectBindings_ m
+            map_body_bnds <- collectStms_ m
             return $ mkBody map_body_bnds $ map Var $ patternNames map_pat
 
       let map_fun' = Lambda map_params map_body map_rettype
 
-      addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
+      addStm $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
   | otherwise = Nothing
 
 rwimPossible :: Lambda

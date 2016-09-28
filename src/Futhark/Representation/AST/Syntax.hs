@@ -33,7 +33,7 @@ module Futhark.Representation.AST.Syntax
   , PatElemT (..)
   , PatternT (..)
   , Pattern
-  , Binding(..)
+  , Stm(..)
   , Result
   , BodyT(..)
   , Body
@@ -93,14 +93,14 @@ instance Monoid (PatternT lore) where
 type Pattern lore = PatternT (LetAttr lore)
 
 -- | A local variable binding.
-data Binding lore = Let { bindingPattern :: Pattern lore
+data Stm lore = Let { bindingPattern :: Pattern lore
                         , bindingLore :: ExpAttr lore
                         , bindingExp :: Exp lore
                         }
 
-deriving instance Annotations lore => Ord (Binding lore)
-deriving instance Annotations lore => Show (Binding lore)
-deriving instance Annotations lore => Eq (Binding lore)
+deriving instance Annotations lore => Ord (Stm lore)
+deriving instance Annotations lore => Show (Stm lore)
+deriving instance Annotations lore => Eq (Stm lore)
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExp]
@@ -108,7 +108,7 @@ type Result = [SubExp]
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
 data BodyT lore = Body { bodyLore :: BodyAttr lore
-                       , bodyBindings :: [Binding lore]
+                       , bodyStms :: [Stm lore]
                        , bodyResult :: Result
                        }
 

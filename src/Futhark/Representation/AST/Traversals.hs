@@ -86,7 +86,7 @@ identityMapper = Mapper {
                  }
 
 -- | Map across the bindings of a 'Body'.
-mapBody :: (Binding lore -> Binding lore) -> Body lore -> Body lore
+mapBody :: (Stm lore -> Stm lore) -> Body lore -> Body lore
 mapBody f (Body attr bnds res) = Body attr (map f bnds) res
 
 -- | Map a monadic action across the immediate children of an
@@ -197,7 +197,7 @@ mapOnType f (Array bt shape u) =
 data Folder a lore m = Folder {
     foldOnSubExp :: a -> SubExp -> m a
   , foldOnBody :: a -> Body lore -> m a
-  , foldOnBinding :: a -> Binding lore -> m a
+  , foldOnStm :: a -> Stm lore -> m a
   , foldOnVName :: a -> VName -> m a
   , foldOnCertificates :: a -> Certificates -> m a
   , foldOnRetType :: a -> RetType lore -> m a
@@ -211,7 +211,7 @@ identityFolder :: Monad m => Folder a lore m
 identityFolder = Folder {
                    foldOnSubExp = const . return
                  , foldOnBody = const . return
-                 , foldOnBinding = const . return
+                 , foldOnStm = const . return
                  , foldOnVName = const . return
                  , foldOnCertificates = const . return
                  , foldOnRetType = const . return
@@ -251,7 +251,7 @@ foldExp m x = runIdentity . foldExpM m x
 data Walker lore m = Walker {
     walkOnSubExp :: SubExp -> m ()
   , walkOnBody :: Body lore -> m ()
-  , walkOnBinding :: Binding lore -> m ()
+  , walkOnStm :: Stm lore -> m ()
   , walkOnVName :: VName -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
@@ -265,7 +265,7 @@ identityWalker :: Monad m => Walker lore m
 identityWalker = Walker {
                    walkOnSubExp = const $ return ()
                  , walkOnBody = const $ return ()
-                 , walkOnBinding = const $ return ()
+                 , walkOnStm = const $ return ()
                  , walkOnVName = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()

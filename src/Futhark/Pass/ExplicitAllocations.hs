@@ -23,7 +23,7 @@ import Prelude hiding (div, mod, quot, rem)
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplifier.Lore
   (mkWiseBody,
-   mkWiseLetBinding,
+   mkWiseLetStm,
    removeExpWisdom,
    removePatternWisdom,
    removeScopeWisdom)
@@ -40,23 +40,23 @@ import Futhark.Util.IntegralExp
 type InInKernel = Futhark.Representation.Kernels.InKernel
 type OutInKernel = Futhark.Representation.ExplicitMemory.InKernel
 
-data AllocBinding = SizeComputation VName (PrimExp VName)
+data AllocStm = SizeComputation VName (PrimExp VName)
                   | Allocation VName SubExp Space
                   | ArrayCopy VName Bindage VName
                     deriving (Eq, Ord, Show)
 
-bindAllocBinding :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
-                    AllocBinding -> m ()
-bindAllocBinding (SizeComputation name pe) =
+bindAllocStm :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
+                    AllocStm -> m ()
+bindAllocStm (SizeComputation name pe) =
   letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 pe)
-bindAllocBinding (Allocation name size space) =
+bindAllocStm (Allocation name size space) =
   letBindNames'_ [name] $ Op $ Alloc size space
-bindAllocBinding (ArrayCopy name bindage src) =
+bindAllocStm (ArrayCopy name bindage src) =
   letBindNames_ [(name,bindage)] $ BasicOp $ Copy src
 
 class (MonadFreshNames m, HasScope lore m, ExplicitMemorish lore) =>
       Allocator lore m where
-  addAllocBinding :: AllocBinding -> m ()
+  addAllocStm :: AllocStm -> m ()
   -- | The subexpression giving the number of elements we should
   -- allocate space for.  See 'ChunkMap' comment.
   dimAllocationSize :: SubExp -> m SubExp
@@ -68,14 +68,14 @@ allocateMemory :: Allocator lore m =>
                   String -> SubExp -> Space -> m VName
 allocateMemory desc size space = do
   v <- newVName desc
-  addAllocBinding $ Allocation v size space
+  addAllocStm $ Allocation v size space
   return v
 
 computeSize :: Allocator lore m =>
                String -> PrimExp VName -> m SubExp
 computeSize desc se = do
   v <- newVName desc
-  addAllocBinding $ SizeComputation v se
+  addAllocStm $ SizeComputation v se
   return $ Var v
 
 type Allocable fromlore tolore =
@@ -127,18 +127,18 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 
   mkBodyM bnds res = return $ Body () bnds res
 
-  addBinding binding =
-    AllocM $ addBinderBinding binding
-  collectBindings (AllocM m) =
-    AllocM $ collectBinderBindings m
+  addStm binding =
+    AllocM $ addBinderStm binding
+  collectStms (AllocM m) =
+    AllocM $ collectBinderStms m
 
 instance Allocable fromlore OutInKernel =>
          Allocator ExplicitMemory (AllocM fromlore ExplicitMemory) where
-  addAllocBinding (SizeComputation name se) =
+  addAllocStm (SizeComputation name se) =
     letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 se)
-  addAllocBinding (Allocation name size space) =
+  addAllocStm (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
-  addAllocBinding (ArrayCopy name bindage src) =
+  addAllocStm (ArrayCopy name bindage src) =
     letBindNames_ [(name, bindage)] $ BasicOp $ Copy src
 
   dimAllocationSize (Var v) =
@@ -150,11 +150,11 @@ instance Allocable fromlore OutInKernel =>
 
 instance Allocable fromlore OutInKernel =>
          Allocator OutInKernel (AllocM fromlore OutInKernel) where
-  addAllocBinding (SizeComputation name se) =
+  addAllocStm (SizeComputation name se) =
     letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 se)
-  addAllocBinding (Allocation name size space) =
+  addAllocStm (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
-  addAllocBinding (ArrayCopy name bindage src) =
+  addAllocStm (ArrayCopy name bindage src) =
     letBindNames_ [(name, bindage)] $ BasicOp $ Copy src
 
   dimAllocationSize (Var v) =
@@ -184,25 +184,25 @@ subAllocM handleOp (AllocM m) = do
 -- | Monad for adding allocations to a single pattern.
 newtype PatAllocM lore a = PatAllocM (RWS
                                       (Scope lore)
-                                      [AllocBinding]
+                                      [AllocStm]
                                       VNameSource
                                       a)
                     deriving (Applicative, Functor, Monad,
                               HasScope lore,
-                              MonadWriter [AllocBinding],
+                              MonadWriter [AllocStm],
                               MonadFreshNames)
 
 instance Allocator ExplicitMemory (PatAllocM ExplicitMemory) where
-  addAllocBinding = tell . pure
+  addAllocStm = tell . pure
   dimAllocationSize = return
 
 instance Allocator OutInKernel (PatAllocM OutInKernel) where
-  addAllocBinding = tell . pure
+  addAllocStm = tell . pure
   dimAllocationSize = return
 
 runPatAllocM :: MonadFreshNames m =>
                 PatAllocM lore a -> Scope lore
-             -> m (a, [AllocBinding])
+             -> m (a, [AllocStm])
 runPatAllocM (PatAllocM m) mems =
   modifyNameSource $ frob . runRWS m mems
   where frob (a,s,w) = ((a,w),s)
@@ -240,10 +240,10 @@ allocForLocalArray workgroup_size t = do
   m <- allocateMemory "local_mem" size $ Space "local"
   return (size, m)
 
-allocsForBinding :: (Allocator lore m, ExpAttr lore ~ ()) =>
+allocsForStm :: (Allocator lore m, ExpAttr lore ~ ()) =>
                     [Ident] -> [(Ident,Bindage)] -> Exp lore
-                 -> m (Binding lore, [AllocBinding])
-allocsForBinding sizeidents validents e = do
+                 -> m (Stm lore, [AllocStm])
+allocsForStm sizeidents validents e = do
   rts <- expReturns e
   hints <- expHints e
   (ctxElems, valElems, postbnds) <- allocsForPattern sizeidents validents rts hints
@@ -263,7 +263,7 @@ patternWithAllocations names e = do
         pure (Ident name t, bindage)
   vals <- sequence [ identForBindage name t bindage  |
                      ((name,bindage), t) <- zip names ts' ]
-  (Let pat _ _, extrabnds) <- allocsForBinding sizes vals e
+  (Let pat _ _, extrabnds) <- allocsForStm sizes vals e
   case extrabnds of
     [] -> return pat
     _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
@@ -272,7 +272,7 @@ allocsForPattern :: Allocator lore m =>
                     [Ident] -> [(Ident,Bindage)] -> [ExpReturns] -> [ExpHint]
                  -> m ([PatElem ExplicitMemory],
                        [PatElem ExplicitMemory],
-                       [AllocBinding])
+                       [AllocStm])
 allocsForPattern sizeidents validents rts hints = do
   let sizes' = [ PatElem size BindVar $ Scalar int32 | size <- map identName sizeidents ]
   (vals,(memsizes, mems, postbnds)) <-
@@ -471,7 +471,7 @@ allocLinearArray s v = do
   let pat = Pattern [] [PatElem (identName v') BindVar $
                         directIndexFunction (elemType t) (arrayShape t)
                         NoUniqueness mem t]
-  addBinding $ Let pat () $ BasicOp $ Copy v
+  addStm $ Let pat () $ BasicOp $ Copy v
   return (size, mem, Var $ identName v')
 
 funcallArgs :: (Allocable fromlore tolore,
@@ -517,7 +517,7 @@ startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
 allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
 allocInFun (FunDef entry fname rettype params fbody) =
   runAllocM handleOp $ allocInFParams params $ \params' -> do
-    fbody' <- insertBindingsM $ allocInBody fbody
+    fbody' <- insertStmsM $ allocInBody fbody
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
     where handleOp GroupSize =
             return $ Inner GroupSize
@@ -558,14 +558,14 @@ allocInFun (FunDef entry fname rettype params fbody) =
 allocInBodyNoDirect :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                        Body fromlore -> AllocM fromlore tolore (Body tolore)
 allocInBodyNoDirect (Body _ bnds res) =
-  allocInBindings bnds $ \bnds' ->
+  allocInStms bnds $ \bnds' ->
     return $ Body () bnds' res
 
 allocInBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                Body fromlore -> AllocM fromlore tolore (Body tolore)
 allocInBody (Body _ bnds res) =
-  allocInBindings bnds $ \bnds' -> do
-    (ses, allocs) <- collectBindings $ mapM ensureDirect res
+  allocInStms bnds $ \bnds' -> do
+    (ses, allocs) <- collectStms $ mapM ensureDirect res
     return $ Body () (bnds'<>allocs) ses
   where ensureDirect se@Constant{} = return se
         ensureDirect (Var v) = do
@@ -575,31 +575,31 @@ allocInBody (Body _ bnds res) =
             else do (_, _, v') <- ensureDirectArray v
                     return v'
 
-allocInBindings :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                   [Binding fromlore] -> ([Binding tolore] -> AllocM fromlore tolore a)
+allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                   [Stm fromlore] -> ([Stm tolore] -> AllocM fromlore tolore a)
                 -> AllocM fromlore tolore a
-allocInBindings origbnds m = allocInBindings' origbnds []
-  where allocInBindings' [] bnds' =
+allocInStms origbnds m = allocInStms' origbnds []
+  where allocInStms' [] bnds' =
           m bnds'
-        allocInBindings' (x:xs) bnds' = do
-          allocbnds <- allocInBinding' x
+        allocInStms' (x:xs) bnds' = do
+          allocbnds <- allocInStm' x
           let summaries = scopeOf allocbnds
           localScope summaries $
             local (boundDims $ mconcat $ map sizeSubst allocbnds) $
-            allocInBindings' xs (bnds'++allocbnds)
-        allocInBinding' bnd = do
-          ((),bnds') <- collectBindings $ allocInBinding bnd
+            allocInStms' xs (bnds'++allocbnds)
+        allocInStm' bnd = do
+          ((),bnds') <- collectStms $ allocInStm bnd
           return bnds'
 
-allocInBinding :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                  Binding fromlore -> AllocM fromlore tolore ()
-allocInBinding (Let (Pattern sizeElems valElems) _ e) = do
+allocInStm :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                  Stm fromlore -> AllocM fromlore tolore ()
+allocInStm (Let (Pattern sizeElems valElems) _ e) = do
   e' <- allocInExp e
   let sizeidents = map patElemIdent sizeElems
       validents = [ (Ident name t, bindage) | PatElem name bindage t <- valElems ]
-  (bnd, bnds) <- allocsForBinding sizeidents validents e'
-  addBinding bnd
-  mapM_ addAllocBinding bnds
+  (bnd, bnds) <- allocsForStm sizeidents validents e'
+  addStm bnd
+  mapM_ addAllocStm bnds
 
 allocInExp :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
               Exp fromlore -> AllocM fromlore tolore (Exp tolore)
@@ -609,8 +609,8 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
   \new_ctx_params valparams' mk_loop_val ->
   formBinds form $ do
     (valinit_ctx, valinit') <- mk_loop_val valinit
-    body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
-      ((val_ses,valres'),val_retbnds) <- collectBindings $ mk_loop_val valres
+    body' <- insertStmsM $ allocInStms bodybnds $ \bodybnds' -> do
+      ((val_ses,valres'),val_retbnds) <- collectStms $ mk_loop_val valres
       return $ Body ()
         (bodybnds'<>val_retbnds)
         (val_ses++ctxres++valres')
@@ -739,14 +739,14 @@ allocInLambda :: [LParam OutInKernel] -> Body InInKernel -> [Type]
               -> AllocM InInKernel OutInKernel (Lambda OutInKernel)
 allocInLambda params body rettype = do
   body' <- localScope (scopeOfLParams params) $
-           allocInBindings (bodyBindings body) $ \bnds' ->
+           allocInStms (bodyStms body) $ \bnds' ->
            return $ Body () bnds' $ bodyResult body
   return $ Lambda params body' rettype
 
 allocInKernelBody :: KernelBody InInKernel
                   -> AllocM InInKernel OutInKernel (KernelBody OutInKernel)
 allocInKernelBody (KernelBody () stms res) =
-  allocInBindings stms $ \stms' ->
+  allocInStms stms $ \stms' ->
     return $ KernelBody () stms' res
 
 class SizeSubst op where
@@ -766,7 +766,7 @@ instance SizeSubst (KernelExp lore) where
     HM.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
 
-sizeSubst :: SizeSubst (Op lore) => Binding lore -> ChunkMap
+sizeSubst :: SizeSubst (Op lore) => Stm lore -> ChunkMap
 sizeSubst (Let pat _ (Op op)) = opSizeSubst pat op
 sizeSubst _ = mempty
 
@@ -808,14 +808,14 @@ simplifiable :: (Engine.SimplifiableLore lore,
 simplifiable simplifyInnerOp =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS' simplifyOp
   where mkLetS' _ pat e =
-          return $ mkWiseLetBinding (removePatternWisdom pat) () e
+          return $ mkWiseLetStm (removePatternWisdom pat) () e
 
         mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
 
         mkLetNamesS' vtable names e = do
           pat' <- bindPatternWithAllocations env names $
                   removeExpWisdom e
-          return $ mkWiseLetBinding pat' () e
+          return $ mkWiseLetStm pat' () e
           where env = removeScopeWisdom $ ST.typeEnv vtable
 
         simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
@@ -829,7 +829,7 @@ bindPatternWithAllocations :: (MonadBinder m,
                            -> m (Pattern lore)
 bindPatternWithAllocations types names e = do
   (pat,prebnds) <- runPatAllocM (patternWithAllocations names e) types
-  mapM_ bindAllocBinding prebnds
+  mapM_ bindAllocStm prebnds
   return pat
 
 data ExpHint = NoHint

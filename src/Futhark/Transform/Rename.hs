@@ -18,7 +18,7 @@ module Futhark.Transform.Rename
   --
   -- These all require execution in a 'MonadFreshNames' environment.
   , renameExp
-  , renameBinding
+  , renameStm
   , renameBody
   , renameLambda
   , renameFun
@@ -74,9 +74,9 @@ renameExp = modifyNameSource . runRenamer . rename
 -- of the binding is unaffected, under the assumption that the
 -- binding was correct to begin with.  Any free variables are left
 -- untouched, as are the names in the pattern of the binding.
-renameBinding :: (Renameable lore, MonadFreshNames m) =>
-                 Binding lore -> m (Binding lore)
-renameBinding binding = do
+renameStm :: (Renameable lore, MonadFreshNames m) =>
+             Stm lore -> m (Stm lore)
+renameStm binding = do
   e <- renameExp $ bindingExp binding
   return binding { bindingExp = e }
 
@@ -220,7 +220,7 @@ instance Renameable lore => Rename (Body lore) where
       Body blore' bnds' res' <- rename $ Body blore bnds res
       return $ Body blore' (bnd':bnds') res'
 
-instance Renameable lore => Rename (Binding lore) where
+instance Renameable lore => Rename (Stm lore) where
   rename (Let pat elore e) = Let <$> rename pat <*> rename elore <*> rename e
 
 instance Renameable lore => Rename (Exp lore) where

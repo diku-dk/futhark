@@ -10,7 +10,7 @@ module Futhark.Transform.FirstOrderTransform
   ( transformProg
 
   , Transformer
-  , transformBindingRecursively
+  , transformStmRecursively
   , transformLambda
   , transformSOAC
 
@@ -62,7 +62,7 @@ transformFunDef (FunDef entry fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
     localScope (scopeOfFParams params) $
-    insertBindingsM $
+    insertStmsM $
     transformBody body
   return $ FunDef entry fname rettype params body'
 
@@ -77,28 +77,28 @@ type Transformer m = (MonadBinder m,
 
 transformBody :: Transformer m =>
                  Body -> m (AST.Body (Lore m))
-transformBody (Body () bnds res) = insertBindingsM $ do
-  mapM_ transformBindingRecursively bnds
+transformBody (Body () bnds res) = insertStmsM $ do
+  mapM_ transformStmRecursively bnds
   return $ resultBody res
 
 -- | First transform any nested 'Body' or 'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
-transformBindingRecursively :: Transformer m =>
-                               Binding -> m ()
+transformStmRecursively :: Transformer m =>
+                               Stm -> m ()
 
-transformBindingRecursively (Let pat () (DoLoop ctx val form body)) = do
+transformStmRecursively (Let pat () (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOfLoopForm form) $
            localScope (scopeOfFParams $ map fst $ ctx ++ val) $
            transformBody body
   letBind_ pat $ DoLoop ctx val form body'
 
-transformBindingRecursively (Let pat () (Op soac)) =
+transformStmRecursively (Let pat () (Op soac)) =
   transformSOAC pat =<< mapSOACM soacTransform soac
   where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda
                                            , mapOnSOACExtLambda = transformExtLambda
                                            }
 
-transformBindingRecursively (Let pat () e) =
+transformStmRecursively (Let pat () e) =
   letBind_ pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = transformBody
                                    , mapOnRetType = return
@@ -150,7 +150,7 @@ transformSOAC pat (Scan cs width fun args) = do
   initarr <- resultArray arrts
   let arr_names = map identName arr
       merge = loopMerge (acc++arr) (initacc++map Var initarr)
-  loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
+  loopbody <- insertStmsM $ localScope (scopeOfFParams $ map fst merge) $ do
     x <- bindLambda fun . (map (BasicOp . SubExp . Var . identName) acc++) =<<
          index cs arrexps (Var i)
     dests <- letwith cs arr_names (pexp (Var i)) $ map (BasicOp . SubExp) x
@@ -177,7 +177,7 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
   let arr_names = map identName arr
       map_names = map identName mapoutarrs
       merge = loopMerge (acc++arr++mapoutarrs) (initacc++map Var initarr ++ map Var initmaparrs)
-  loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
+  loopbody <- insertStmsM $ localScope (scopeOfFParams $ map fst merge) $ do
     -- Bind function parameters to arguments.
     x <- bindLambda fun . (map (BasicOp . SubExp . Var . identName) acc ++) =<<
          index cs arrexps (Var i)
@@ -406,7 +406,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                                  Var $ paramName chunkloc] $
                                      identName id3
                 letBindNames' [identName id4, paramName param] split2
-          mkBodyM (bodyBindings lambody) (bodyResult lambody)
+          mkBodyM (bodyStms lambody) (bodyResult lambody)
       -- make copy-out epilogue for result arrays
       let (acc', xis) = splitAt acc_num accxis
           indszids = zip mexistszs mexistinds
@@ -448,7 +448,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                             mkLet' [] [idd] $ BasicOp $
                             Scratch (elemType tp) (arrayDims tp)
                          ) outarrinit initrtps
-  mapM_ addBinding (outinibds++allbnds)
+  mapM_ addStm (outinibds++allbnds)
   forM_ (zip (patternValueNames respat) $ strmresacc ++ strmresarr) $ \(p, v) ->
     letBindNames'_ [p] $ BasicOp $ SubExp $ Var $ identName v
   let mapping = shapeMapping (patternValueTypes respat) $
@@ -458,7 +458,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
     letBindNames'_ [p] $ BasicOp $ SubExp se
   where myLetBind :: Transformer m =>
                      AST.Exp (Lore m) -> Ident -> m ()
-        myLetBind e idd = addBinding $ mkLet' [] [idd] e
+        myLetBind e idd = addStm $ mkLet' [] [idd] e
 
         exToNormShapeDim :: SubExp -> HM.HashMap VName SubExp -> ExtDimSize -> SubExp
         exToNormShapeDim d _ (Ext   _) = d
@@ -589,7 +589,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                            Array (elemType oldbtp)
                                            (Shape $ Var (identName resallocid):olddims) NoUniqueness
                         let patresbnd = mkLet' [resallocid] [bnew''] allocifexp
-                        addBinding patresbnd
+                        addStm patresbnd
                         return (Var $ identName k, bnew'', Just newszid, Just resallocid)
             glboutLid <- newIdent (textual (identName glboutid)++"_loop") $ identType glboutid'
             glboutBdId<- newIdent (textual (identName glboutid)++"_loopbd") $ identType glboutid'

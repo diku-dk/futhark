@@ -69,9 +69,9 @@ funDefMetrics :: OpMetrics (Op lore) => FunDef lore -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
 bodyMetrics :: OpMetrics (Op lore) => Body lore -> MetricsM ()
-bodyMetrics = mapM_ bindingMetrics . bodyBindings
+bodyMetrics = mapM_ bindingMetrics . bodyStms
 
-bindingMetrics :: OpMetrics (Op lore) => Binding lore -> MetricsM ()
+bindingMetrics :: OpMetrics (Op lore) => Stm lore -> MetricsM ()
 bindingMetrics = expMetrics . bindingExp
 
 expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()

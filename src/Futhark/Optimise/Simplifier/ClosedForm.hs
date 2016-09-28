@@ -55,7 +55,7 @@ foldClosedForm :: MonadBinder m =>
 
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
-  closedBody <- checkResults (patternNames pat) inputsize mempty knownBindings
+  closedBody <- checkResults (patternNames pat) inputsize mempty knownStms
                 (map paramName (lambdaParams lam))
                 (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
@@ -65,7 +65,7 @@ foldClosedForm look pat lam accs arrs = do
     eIf (eSubExp $ Var isEmpty)
     (resultBodyM accs)
     (renameBody closedBody)
-  where knownBindings = determineKnownBindings look lam accs arrs
+  where knownStms = determineKnownStms look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
@@ -75,7 +75,7 @@ loopClosedForm :: MonadBinder m =>
                -> Names -> SubExp -> Body (Lore m)
                -> RuleM m ()
 loopClosedForm pat merge i bound body = do
-  closedBody <- checkResults mergenames bound i knownBindings
+  closedBody <- checkResults mergenames bound i knownStms
                 (map identName mergeidents) body mergeexp
   isEmpty <- newVName "bound_is_zero"
   letBindNames'_ [isEmpty] $
@@ -87,7 +87,7 @@ loopClosedForm pat merge i bound body = do
   where (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
         mergenames = map paramName mergepat
-        knownBindings = HM.fromList $ zip mergenames mergeexp
+        knownStms = HM.fromList $ zip mergenames mergeexp
 
 checkResults :: MonadBinder m =>
                 [VName]
@@ -98,8 +98,8 @@ checkResults :: MonadBinder m =>
              -> Body (Lore m)
              -> [SubExp]
              -> RuleM m (Body (Lore m))
-checkResults pat size untouchable knownBindings params body accs = do
-  ((), bnds) <- collectBindings $
+checkResults pat size untouchable knownStms params body accs = do
+  ((), bnds) <- collectStms $
                 zipWithM_ checkResult (zip pat res) (zip accparams accs)
   mkBodyM bnds $ map Var pat
 
@@ -143,7 +143,7 @@ checkResults pat size untouchable knownBindings params body accs = do
 
         asFreeSubExp :: SubExp -> Maybe SubExp
         asFreeSubExp (Var v)
-          | HS.member v nonFree = HM.lookup v knownBindings
+          | HS.member v nonFree = HM.lookup v knownStms
         asFreeSubExp se = Just se
 
         properIntSize Int32 = Just $ return size
@@ -154,15 +154,15 @@ checkResults pat size untouchable knownBindings params body accs = do
           Just $ letSubExp "converted_size" $
           BasicOp $ ConvOp (SIToFP Int32 t) size
 
-determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [VName]
+determineKnownStms :: VarLookup lore -> Lambda lore -> [SubExp] -> [VName]
                        -> HM.HashMap VName SubExp
-determineKnownBindings look lam accs arrs =
-  accBindings <> arrBindings
+determineKnownStms look lam accs arrs =
+  accStms <> arrStms
   where (accparams, arrparams) =
           splitAt (length accs) $ lambdaParams lam
-        accBindings = HM.fromList $
+        accStms = HM.fromList $
                       zip (map paramName accparams) accs
-        arrBindings = HM.fromList $ mapMaybe isReplicate $
+        arrStms = HM.fromList $ mapMaybe isReplicate $
                       zip (map paramName arrparams) arrs
 
         isReplicate (p, v)
@@ -170,7 +170,7 @@ determineKnownBindings look lam accs arrs =
         isReplicate _ = Nothing
 
 makeBindMap :: Body lore -> HM.HashMap VName (Exp lore)
-makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings
-  where isSingletonBinding (Let pat _ e) = case patternNames pat of
+makeBindMap = HM.fromList . mapMaybe isSingletonStm . bodyStms
+  where isSingletonStm (Let pat _ e) = case patternNames pat of
           [v] -> Just (v,e)
           _   -> Nothing

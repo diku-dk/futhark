@@ -127,7 +127,7 @@ instance PrettyLore lore => Pretty (Body lore) where
   ppr (Body _ [] res) =
     braces (commasep $ map ppr res)
 
-bindingAnnotation :: PrettyLore lore => Binding lore -> Doc -> Doc
+bindingAnnotation :: PrettyLore lore => Stm lore -> Doc -> Doc
 bindingAnnotation bnd =
   case mapMaybe ppAnnot $ patternElements $ bindingPattern bnd of
     []     -> id
@@ -165,7 +165,7 @@ instance Pretty (ParamT Type) where
     ppr t <+>
     ppr name
 
-instance PrettyLore lore => Pretty (Binding lore) where
+instance PrettyLore lore => Pretty (Stm lore) where
   ppr bnd@(Let pat attr e) =
     bindingAnnotation bnd $ align $
     text "let" <+> align (ppr pat) <+>

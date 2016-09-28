@@ -110,7 +110,7 @@ inlineInBody
   inlcallees
   (Body _ (bnd@(Let pat _ (Apply fname args rtp)):bnds) res) =
   let continue callbnds =
-        callbnds `insertBindings` inlineInBody inlcallees (mkBody bnds res)
+        callbnds `insertStms` inlineInBody inlcallees (mkBody bnds res)
       continue' (Body _ callbnds res') =
         continue $ callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
@@ -124,7 +124,7 @@ inlineInBody
 
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
-        reshapeIfNecessary farg aarg `insertBinding` body
+        reshapeIfNecessary farg aarg `insertStm` body
 
       withShapes ses = do
         ts <- mapM subExpType ses
@@ -139,7 +139,7 @@ inlineInBody
         | otherwise =
           mkLet' [] [ident] $ BasicOp $ SubExp se
 inlineInBody inlcallees (Body () (bnd:bnds) res) =
-  let bnd' = inlineInBinding inlcallees bnd
+  let bnd' = inlineInStm inlcallees bnd
       Body () bnds' res' = inlineInBody inlcallees $ Body () bnds res
   in Body () (bnd':bnds') res'
 inlineInBody _ (Body () [] res) =
@@ -156,8 +156,8 @@ inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper
                           , mapOnSOACExtLambda = return . inlineInExtLambda inlcallees
                           }
 
-inlineInBinding :: [FunDef] -> Binding -> Binding
-inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
+inlineInStm :: [FunDef] -> Stm -> Stm
+inlineInStm inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
 
 inlineInLambda :: [FunDef] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret) =

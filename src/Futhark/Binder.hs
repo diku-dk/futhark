@@ -13,8 +13,8 @@ module Futhark.Binder
   , runBodyBinder
   , runBinderEmptyEnv
   -- * Non-class interface
-  , addBinderBinding
-  , collectBinderBindings
+  , addBinderStm
+  , collectBinderStms
   -- * The 'MonadBinder' typeclass
   , module Futhark.Binder.Class
   )
@@ -37,11 +37,11 @@ import Futhark.MonadFreshNames
 newtype BinderT lore m a = BinderT (StateT
                                     (Scope lore)
                                     (WriterT
-                                     (DL.DList (Binding lore))
+                                     (DL.DList (Stm lore))
                                      m)
                                     a)
   deriving (Functor, Monad, Applicative,
-            MonadWriter (DL.DList (Binding lore)))
+            MonadWriter (DL.DList (Stm lore)))
 -- Cannot add MonadState instance, because it would conflict with the
 -- utility instances.
 
@@ -83,20 +83,20 @@ instance (Attributes lore, Bindable lore, MonadFreshNames m) =>
     where asPair patElem = (patElemIdent patElem, patElemBindage patElem)
   mkLetNamesM = mkLetNames
 
-  addBinding      = addBinderBinding
-  collectBindings = collectBinderBindings
+  addStm      = addBinderStm
+  collectStms = collectBinderStms
 
 runBinderT :: Monad m =>
               BinderT lore m a
            -> Scope lore
-           -> m (a, [Binding lore])
+           -> m (a, [Stm lore])
 runBinderT (BinderT m) types = do
   (x, bnds) <- runWriterT $ evalStateT m types
   return (x, DL.toList bnds)
 
 runBinder :: (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
               Binder lore a
-           -> m (a, [Binding lore])
+           -> m (a, [Stm lore])
 runBinder m = do
   types <- askScope
   modifyNameSource $ runState $ runBinderT m $ castScope types
@@ -105,38 +105,38 @@ runBinder m = do
 -- added bindings.
 runBinder_ :: (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
               Binder lore a
-           -> m [Binding lore]
+           -> m [Stm lore]
 runBinder_ = fmap snd . runBinder
 
--- | As 'runBinder', but uses 'addBinding' to add the returned
+-- | As 'runBinder', but uses 'addStm' to add the returned
 -- bindings to the surrounding monad.
 joinBinder :: MonadBinder m =>
               Binder (Lore m) a
            -> m a
 joinBinder m = do (x, bnds) <- runBinder m
-                  mapM_ addBinding bnds
+                  mapM_ addStm bnds
                   return x
 
 runBodyBinder :: (Bindable lore, MonadFreshNames m,
                   HasScope somelore m, SameScope somelore lore) =>
                  Binder lore (Body lore) -> m (Body lore)
-runBodyBinder = fmap (uncurry $ flip insertBindings) . runBinder
+runBodyBinder = fmap (uncurry $ flip insertStms) . runBinder
 
 runBinderEmptyEnv :: MonadFreshNames m =>
-                     Binder lore a -> m (a, [Binding lore])
+                     Binder lore a -> m (a, [Stm lore])
 runBinderEmptyEnv m =
   modifyNameSource $ runState $ runBinderT m mempty
 
-addBinderBinding :: (Annotations lore, Monad m) =>
-                    Binding lore -> BinderT lore m ()
-addBinderBinding binding = do
+addBinderStm :: (Annotations lore, Monad m) =>
+                Stm lore -> BinderT lore m ()
+addBinderStm binding = do
   tell $ DL.singleton binding
   BinderT $ modify (`HM.union` scopeOf binding)
 
-collectBinderBindings :: (Annotations lore, Monad m) =>
-                         BinderT lore m a
-                      -> BinderT lore m (a, [Binding lore])
-collectBinderBindings m = pass $ do
+collectBinderStms :: (Annotations lore, Monad m) =>
+                     BinderT lore m a
+                  -> BinderT lore m (a, [Stm lore])
+collectBinderStms m = pass $ do
   (x, bnds) <- listen m
   let bnds' = DL.toList bnds
   BinderT $ modify (`HM.difference` scopeOf bnds')

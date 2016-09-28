@@ -21,7 +21,7 @@ import Prelude
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.Kernels
-       hiding (Prog, Body, Binding, Pattern, PatElem,
+       hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import Futhark.Tools
 import Futhark.Pass
@@ -44,8 +44,8 @@ transformFunDef fundec = do
 type BabysitM = Binder Kernels
 
 transformBody :: Body Kernels -> BabysitM (Body Kernels)
-transformBody (Body () bnds res) = insertBindingsM $ do
-  foldM_ transformBinding HM.empty bnds
+transformBody (Body () bnds res) = insertStmsM $ do
+  foldM_ transformStm HM.empty bnds
   return $ resultBody res
 
 -- | Map from variable names to defining expression.  We use this to
@@ -53,7 +53,7 @@ transformBody (Body () bnds res) = insertBindingsM $ do
 -- funky in memory (and we'd prefer it not to be).  If we cannot find
 -- it in the map, we just assume it's all good.  HACK and FIXME, I
 -- suppose.  We really should do this at the memory level.
-type ExpMap = HM.HashMap VName (Binding Kernels)
+type ExpMap = HM.HashMap VName (Stm Kernels)
 
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
@@ -70,25 +70,25 @@ nonlinearInMemory name m =
               return $ Just $ [inner_r..inner_r+outer_r-1] ++ [0..inner_r-1]
           | otherwise = Nothing
 
-transformBinding :: ExpMap -> Binding Kernels -> BabysitM ExpMap
+transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformBinding expmap (Let pat () (DoLoop ctx val form body)) = do
+transformStm expmap (Let pat () (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOfFParams $ map fst $ ctx ++ val) $
            localScope (scopeOfLoopForm form) $
            transformBody body
-  addBinding $ Let pat () $ DoLoop ctx val form body'
+  addStm $ Let pat () $ DoLoop ctx val form body'
   return expmap
 
-transformBinding expmap (Let pat ()
+transformStm expmap (Let pat ()
                          (Op (ScanKernel cs w kernel_size lam foldlam nes arrs)))
   | kernelWorkgroups kernel_size /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
 
-  addBinding $ Let pat () $ Op $
+  addStm $ Let pat () $ Op $
     ScanKernel cs w kernel_size lam foldlam nes arrs
   return expmap
 
-transformBinding expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
+transformStm expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
   -- First we do the easy stuff, which deals with SplitArray statements.
   kbody' <- transformKernelBody num_threads cs kbody
 
@@ -105,14 +105,14 @@ transformBinding expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
              mempty
 
   let bnd' = Let pat () $ Op $ Kernel cs space ts kbody''
-  addBinding bnd'
+  addStm bnd'
   return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
   where num_threads = spaceNumThreads space
 
-transformBinding expmap (Let pat () e) = do
+transformStm expmap (Let pat () e) = do
   e' <- mapExpM transform e
   let bnd' = Let pat () e'
-  addBinding bnd'
+  addStm bnd'
   return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
 
 transform :: Mapper Kernels Kernels BabysitM
@@ -195,7 +195,7 @@ traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                -> KernelBody InKernel
                                -> f (KernelBody InKernel)
 traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
-  KernelBody () <$> mapM onBinding kstms <*> pure kres
+  KernelBody () <$> mapM onStm kstms <*> pure kres
   where onLambda lam =
           (\body' -> lam { lambdaBody = body' }) <$>
           onBody (lambdaBody lam)
@@ -205,15 +205,15 @@ traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
           onBody (groupStreamLambdaBody lam)
 
         onBody (Body battr bnds bres) =
-          Body battr <$> mapM onBinding bnds <*> pure bres
+          Body battr <$> mapM onStm bnds <*> pure bres
 
-        onBinding (Let pat attr (BasicOp (Index cs arr is))) =
+        onStm (Let pat attr (BasicOp (Index cs arr is))) =
           Let pat attr . oldOrNew <$> f arr is
           where oldOrNew Nothing =
                   BasicOp $ Index cs arr is
                 oldOrNew (Just (arr', is')) =
                   BasicOp $ Index cs arr' is'
-        onBinding (Let pat attr e) =
+        onStm (Let pat attr e) =
           Let pat attr <$> mapExpM mapper e
 
         mapper = identityMapper { mapOnBody = onBody

@@ -58,7 +58,7 @@ makeShapeFun params body n = do
   -- we create a substitute non-unique parameter, and insert a
   -- copy-binding in the body of the function.
   (params', copybnds) <- nonuniqueParams params
-  return $ I.Lambda params' (insertBindings copybnds body) rettype
+  return $ I.Lambda params' (insertStms copybnds body) rettype
   where rettype = replicate n $ I.Prim int32
 
 bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
@@ -69,7 +69,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
       let size_args = replicate (length $ lambdaParams sizefun) Nothing
       sizefun' <- deadCodeElimLambda <$> simplifyLambda sizefun Nothing size_args
       let sizefun_safe =
-            all (I.safeExp . I.bindingExp) $ I.bodyBindings $ I.lambdaBody sizefun'
+            all (I.safeExp . I.bindingExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
             not $ any (`HS.member` freeInBody (I.lambdaBody sizefun')) $
             map I.paramName $ lambdaParams sizefun'
@@ -82,7 +82,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
 
   where emptybranch =
           pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
-        nonemptybranch = insertBindingsM $
+        nonemptybranch = insertStmsM $
           resultBody <$> (eLambda sizefun =<< mapM index0 args)
 
         isempty = eCmpOp (I.CmpEq I.int32)
@@ -140,7 +140,7 @@ internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
                             mkLet' [] [paramIdent ac_var] (BasicOp $ SubExp ac_val)
                         ) (zip acc_params nes)
 
-      map_bindings= acc_bindings ++ bodyBindings body
+      map_bindings= acc_bindings ++ bodyStms body
       map_lore    = bodyLore body
       map_body = I.Body map_lore map_bindings map_bodyres
   shape_body <- bindingParamTypes params $
@@ -186,7 +186,7 @@ internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
         in  ensureShape asserting (srclocOf lam) t name se
   let acctype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip lam_acc_tps acctypes ]
-  body' <- insertBindingsM $ do
+  body' <- insertStmsM $ do
                 let mkArrType :: (VName, ExtType) -> InternaliseM I.Type
                     mkArrType (x, I.Array btp shp u) = do
                       dsx <- I.shapeDims . I.arrayShape <$> I.lookupType x

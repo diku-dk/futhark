@@ -16,7 +16,7 @@ module Futhark.Representation.Ranges
        , module Futhark.Representation.AST.Syntax
          -- * Adding ranges
        , addRangesToPattern
-       , mkRangedLetBinding
+       , mkRangedLetStm
        , mkRangedBody
        , mkPatternRanges
        , mkBodyRanges
@@ -25,7 +25,7 @@ module Futhark.Representation.Ranges
        , removeFunDefRanges
        , removeExpRanges
        , removeBodyRanges
-       , removeBindingRanges
+       , removeStmRanges
        , removeLambdaRanges
        , removeExtLambdaRanges
        , removePatternRanges
@@ -114,9 +114,9 @@ removeBodyRanges :: CanBeRanged (Op lore) =>
                     Body (Ranges lore) -> Body lore
 removeBodyRanges = runIdentity . rephraseBody removeRanges
 
-removeBindingRanges :: CanBeRanged (Op lore) =>
-                       Binding (Ranges lore) -> Binding lore
-removeBindingRanges = runIdentity . rephraseBinding removeRanges
+removeStmRanges :: CanBeRanged (Op lore) =>
+                       Stm (Ranges lore) -> Stm lore
+removeStmRanges = runIdentity . rephraseStm removeRanges
 
 removeLambdaRanges :: CanBeRanged (Op lore) =>
                       Lambda (Ranges lore) -> Lambda lore
@@ -137,7 +137,7 @@ addRangesToPattern pat e =
   uncurry Pattern $ mkPatternRanges pat e
 
 mkRangedBody :: (Attributes lore, CanBeRanged (Op lore)) =>
-                BodyAttr lore -> [Binding (Ranges lore)] -> Result
+                BodyAttr lore -> [Stm (Ranges lore)] -> Result
              -> Body (Ranges lore)
 mkRangedBody innerlore bnds res =
   Body (mkBodyRanges bnds res, innerlore) bnds res
@@ -156,7 +156,7 @@ mkPatternRanges pat e =
         ranges = expRanges e
 
 mkBodyRanges :: Attributes lore =>
-                [Binding lore]
+                [Stm lore]
              -> Result
              -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
@@ -174,10 +174,10 @@ mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-mkRangedLetBinding :: (Attributes lore, CanBeRanged (Op lore)) =>
-                      Pattern lore
-                   -> ExpAttr lore
-                   -> Exp (Ranges lore)
-                   -> Binding (Ranges lore)
-mkRangedLetBinding pat explore e =
+mkRangedLetStm :: (Attributes lore, CanBeRanged (Op lore)) =>
+                  Pattern lore
+               -> ExpAttr lore
+               -> Exp (Ranges lore)
+               -> Stm (Ranges lore)
+mkRangedLetStm pat explore e =
   Let (addRangesToPattern pat e) explore e

@@ -202,10 +202,10 @@ instance Show TypeError where
     " at " ++ locStr loc ++ " is not allowed."
 
 -- | Return type and a list of argument types.
-type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
-type TypeBinding = TypeBase ShapeDecl NoInfo VName
-data Binding = BoundV Type
-             | BoundF FunBinding
+type FunStm = (StructTypeBase VName, [StructTypeBase VName])
+type TypeStm = TypeBase ShapeDecl NoInfo VName
+data Stm = BoundV Type
+             | BoundF FunStm
              | WasConsumed SrcLoc
 
 data Usage = Consumed SrcLoc
@@ -286,8 +286,8 @@ altOccurences occurs1 occurs2 =
 -- | Type checking happens with access to this environment.  The
 -- tables will be extended during type-checking as bindings come into
 -- scope.
-data Scope  = Scope { envVtable :: HM.HashMap VName Binding
-                    , envTAtable :: HM.HashMap VName TypeBinding
+data Scope  = Scope { envVtable :: HM.HashMap VName Stm
+                    , envTAtable :: HM.HashMap VName TypeStm
                     }
 
 instance Monoid Scope where
@@ -456,7 +456,7 @@ binding bnds = check . local (`bindVars` bnds)
         -- Check whether the bound variables have been used correctly
         -- within their scope.
         check m = do
-          (a, usages) <- collectBindingsOccurences m
+          (a, usages) <- collectStmsOccurences m
           maybeCheckOccurences usages
 
           mapM_ (checkIfUsed usages) bnds
@@ -465,7 +465,7 @@ binding bnds = check . local (`bindVars` bnds)
 
         -- Collect and remove all occurences in @bnds@.  This relies
         -- on the fact that no variables shadow any other.
-        collectBindingsOccurences m = pass $ do
+        collectStmsOccurences m = pass $ do
           (x, usage) <- listen m
           let (relevant, rest) = split usage
           return ((x, relevant), const rest)
@@ -519,7 +519,7 @@ checkVar qn@(QualName (_, name)) loc = do
     Just (BoundF _) -> bad $ FunctionIsNotValue loc (untagQualName qn)
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
-lookupFunction :: QualName VName -> SrcLoc -> TypeM FunBinding
+lookupFunction :: QualName VName -> SrcLoc -> TypeM FunStm
 lookupFunction qn@(QualName (_, name)) loc = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
@@ -528,7 +528,7 @@ lookupFunction qn@(QualName (_, name)) loc = do
     Just (BoundV t) -> bad $ ValueIsNotFunction loc (untagQualName qn) t
     Just (BoundF f) -> return f
 
-lookupType :: QualName VName -> SrcLoc -> TypeM TypeBinding
+lookupType :: QualName VName -> SrcLoc -> TypeM TypeStm
 lookupType qn@(QualName (_, name)) loc =
   maybe explode return =<< asks (HM.lookup name . envTAtable)
   where explode = bad $ UndefinedType loc (untagQualName qn)
@@ -1711,7 +1711,7 @@ typeAliasTableFromProg defs scope = do
               | otherwise ->
                   throwError $ UndefinedAlias loc $ untagQualName name
 
-typeFromScope :: QualName VName -> Scope -> Maybe TypeBinding
+typeFromScope :: QualName VName -> Scope -> Maybe TypeStm
 typeFromScope (QualName (_, name)) = HM.lookup name . envTAtable
 
 addType :: VName -> StructTypeBase VName -> Scope -> Scope

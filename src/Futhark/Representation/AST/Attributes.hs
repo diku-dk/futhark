@@ -119,8 +119,8 @@ safeExp (BasicOp op) = safeBasicOp op
 safeExp DoLoop{} = False
 safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
-  all (safeExp . bindingExp) (bodyBindings tbranch) &&
-  all (safeExp . bindingExp) (bodyBindings fbranch)
+  all (safeExp . bindingExp) (bodyStms tbranch) &&
+  all (safeExp . bindingExp) (bodyStms fbranch)
 safeExp (Op op) = safeOp op
 
 -- | Return the variable names used in 'Var' subexpressions.  May contain

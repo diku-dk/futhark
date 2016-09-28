@@ -348,7 +348,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
                       ys2 = drop len ys
           let (body1, body2) = (lambdaBody lam1, lambdaBody lam2)
           let body' = Body { bodyLore = bodyLore body1 -- body1 and body2 have the same lores
-                           , bodyBindings = bodyBindings body1 ++ bodyBindings body2
+                           , bodyStms = bodyStms body1 ++ bodyStms body2
                            , bodyResult = zipW (bodyResult body1) (bodyResult body2)
                            }
           let lam' = Lambda { lambdaParams = lambdaParams lam1 ++ lambdaParams lam2

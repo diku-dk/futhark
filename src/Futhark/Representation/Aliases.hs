@@ -19,7 +19,7 @@ module Futhark.Representation.Aliases
        , module Futhark.Representation.AST.Syntax
          -- * Adding aliases
        , addAliasesToPattern
-       , mkAliasedLetBinding
+       , mkAliasedLetStm
        , mkAliasedBody
        , mkPatternAliases
        , mkBodyAliases
@@ -28,7 +28,7 @@ module Futhark.Representation.Aliases
        , removeFunDefAliases
        , removeExpAliases
        , removeBodyAliases
-       , removeBindingAliases
+       , removeStmAliases
        , removeLambdaAliases
        , removeExtLambdaAliases
        , removePatternAliases
@@ -36,7 +36,7 @@ module Futhark.Representation.Aliases
        -- * Tracking aliases
        , AliasesAndConsumed
        , trackAliases
-       , consumedInBindings
+       , consumedInStms
        )
 where
 
@@ -209,9 +209,9 @@ removeBodyAliases :: CanBeAliased (Op lore) =>
                      Body (Aliases lore) -> Body lore
 removeBodyAliases = runIdentity . rephraseBody removeAliases
 
-removeBindingAliases :: CanBeAliased (Op lore) =>
-                        Binding (Aliases lore) -> Binding lore
-removeBindingAliases = runIdentity . rephraseBinding removeAliases
+removeStmAliases :: CanBeAliased (Op lore) =>
+                        Stm (Aliases lore) -> Stm lore
+removeStmAliases = runIdentity . rephraseStm removeAliases
 
 removeLambdaAliases :: CanBeAliased (Op lore) =>
                        Lambda (Aliases lore) -> Lambda lore
@@ -232,7 +232,7 @@ addAliasesToPattern pat e =
   uncurry Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: (Attributes lore, CanBeAliased (Op lore)) =>
-                 BodyAttr lore -> [Binding (Aliases lore)] -> Result -> Body (Aliases lore)
+                 BodyAttr lore -> [Stm (Aliases lore)] -> Result -> Body (Aliases lore)
 mkAliasedBody innerlore bnds res =
   Body (mkBodyAliases bnds res, innerlore) bnds res
 
@@ -280,7 +280,7 @@ mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty
 
 mkBodyAliases :: Aliased lore =>
-                 [Binding lore]
+                 [Stm lore]
               -> Result
               -> BodyAliasing
 mkBodyAliases bnds res =
@@ -288,7 +288,7 @@ mkBodyAliases bnds res =
   -- and consumption sets.  We do this by computing the transitive
   -- closure of the alias map (within bnds), then removing anything
   -- bound in bnds.
-  let (aliases, consumed) = mkBindingsAliases bnds res
+  let (aliases, consumed) = mkStmsAliases bnds res
       boundNames =
         mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds
       bound = (`HS.member` boundNames)
@@ -296,10 +296,10 @@ mkBodyAliases bnds res =
       consumed' = HS.filter (not . bound) consumed
   in (map Names' aliases', Names' consumed')
 
-mkBindingsAliases :: Aliased lore =>
-                     [Binding lore] -> [SubExp]
+mkStmsAliases :: Aliased lore =>
+                     [Stm lore] -> [SubExp]
                   -> ([Names], Names)
-mkBindingsAliases bnds res = delve mempty bnds
+mkStmsAliases bnds res = delve mempty bnds
   where delve (aliasmap, consumed) [] =
           (map (aliasClosure aliasmap . subExpAliases) res,
            consumed)
@@ -310,31 +310,31 @@ mkBindingsAliases bnds res = delve mempty bnds
           where look k = HM.lookupDefault mempty k aliasmap
 
 -- | Everything consumed in the given bindings and result (even transitively).
-consumedInBindings :: Aliased lore => [Binding lore] -> [SubExp] -> Names
-consumedInBindings bnds res = snd $ mkBindingsAliases bnds res
+consumedInStms :: Aliased lore => [Stm lore] -> [SubExp] -> Names
+consumedInStms bnds res = snd $ mkStmsAliases bnds res
 
 type AliasesAndConsumed = (HM.HashMap VName Names,
                            Names)
 
 trackAliases :: Aliased lore =>
-                AliasesAndConsumed -> Binding lore
+                AliasesAndConsumed -> Stm lore
              -> AliasesAndConsumed
 trackAliases (aliasmap, consumed) bnd =
   let pat = bindingPattern bnd
       als = HM.fromList $
             zip (patternNames pat) (map addAliasesOfAliases $ patternAliases pat)
       aliasmap' = als <> aliasmap
-      consumed' = consumed <> addAliasesOfAliases (consumedInBinding bnd)
+      consumed' = consumed <> addAliasesOfAliases (consumedInStm bnd)
   in (aliasmap', consumed')
   where addAliasesOfAliases names = names <> aliasesOfAliases names
         aliasesOfAliases =  mconcat . map look . HS.toList
         look k = HM.lookupDefault mempty k aliasmap
 
-mkAliasedLetBinding :: (Attributes lore, CanBeAliased (Op lore)) =>
-                       Pattern lore
-                    -> ExpAttr lore -> Exp (Aliases lore)
-                    -> Binding (Aliases lore)
-mkAliasedLetBinding pat explore e =
+mkAliasedLetStm :: (Attributes lore, CanBeAliased (Op lore)) =>
+                   Pattern lore
+                -> ExpAttr lore -> Exp (Aliases lore)
+                -> Stm (Aliases lore)
+mkAliasedLetStm pat explore e =
   Let (addAliasesToPattern pat e)
   (Names' $ consumedInPattern pat <> consumedInExp e, explore)
   e
@@ -342,14 +342,14 @@ mkAliasedLetBinding pat explore e =
 instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where
   mkLet context values e =
     let Let pat' explore _ = mkLet context values $ removeExpAliases e
-    in mkAliasedLetBinding pat' explore e
+    in mkAliasedLetStm pat' explore e
 
   mkLetNames names e = do
     env <- asksScope removeScopeAliases
     flip runReaderT env $ do
       Let pat explore _ <- mkLetNames names $ removeExpAliases e
-      return $ mkAliasedLetBinding pat explore e
+      return $ mkAliasedLetStm pat explore e
 
   mkBody bnds res =
-    let Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res
+    let Body bodylore _ _ = mkBody (map removeStmAliases bnds) res
     in mkAliasedBody bodylore bnds res

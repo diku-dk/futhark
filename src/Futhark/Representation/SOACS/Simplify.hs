@@ -8,7 +8,7 @@ module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
        , simplifyFun
        , simplifyLambda
-       , simplifyBindings
+       , simplifyStms
 
        , simpleSOACS
        )
@@ -60,7 +60,7 @@ simplifySOACS =
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent shapes/sizes.
 getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) =>
-                 AST.Binding lore -> Names
+                 AST.Stm lore -> Names
 getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ bindingPattern bnd
       tps2 = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
@@ -75,10 +75,10 @@ simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
 simplifyLambda =
   Simplifier.simplifyLambdaWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
-simplifyBindings :: (HasScope SOACS m, MonadFreshNames m) =>
-                    [Binding] -> m [Binding]
-simplifyBindings =
-  Simplifier.simplifyBindingsWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
+simplifyStms :: (HasScope SOACS m, MonadFreshNames m) =>
+                [Stm] -> m [Stm]
+simplifyStms =
+  Simplifier.simplifyStmsWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifySOAC :: Simplifier.SimplifyOp SOACS
 simplifySOAC (Stream cs outerdim form lam arr) = do
@@ -346,23 +346,23 @@ simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr))) = d
         newpats' = newpats ++ [pat']
         (_,newexps'') = unzip newpatexps'
         newpatexps''= zip newpats' newexps''
-    forM_ newpatexps'' $ \(p,e) -> addBinding =<< mkLetM p e
+    forM_ newpatexps'' $ \(p,e) -> addStm =<< mkLetM p e
       where gatherPat acc (_, Prim _, _) = return acc
             gatherPat acc (_, Mem {}, _) = return acc
             gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
               foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
             gatherPat _ _ =
-              fail $ "In simplifyBinding \"let pat = stream()\": "++
+              fail $ "In simplifyStm \"let pat = stream()\": "++
                      " reached unreachable case!"
             gatherShape acc (Ext i, Free se', Var pid) = do
               let patind  = elemIndex pid $
                             map patElemName $ patternElements pat
               case patind of
                 Just k -> return $ (Pattern [] [patternElements pat !! k], se') : acc
-                Nothing-> fail $ "In simplifyBinding \"let pat = stream()\": pat "++
+                Nothing-> fail $ "In simplifyStm \"let pat = stream()\": pat "++
                                  "element of known dim not found: "++pretty pid++" "++show i++" "++pretty se'++"."
             gatherShape _ (Free se, Ext i', _) =
-              fail $ "In simplifyBinding \"let pat = stream()\": "++
+              fail $ "In simplifyStm \"let pat = stream()\": "++
                      " previous known dimension: " ++ pretty se ++
                      " becomes existential: ?" ++ show i' ++ "!"
             gatherShape acc _ = return acc
@@ -384,7 +384,7 @@ frobExtLambda :: (MonadBinder m, LocalScope (Lore m) m) =>
               -> m (AST.ExtLambda (Lore m))
 frobExtLambda vtable (ExtLambda params body rettype) = do
   let bodyres = bodyResult body
-      bodyenv = scopeOf $ bodyBindings body
+      bodyenv = scopeOf $ bodyStms body
       vtable' = foldr ST.insertLParam vtable params
   rettype' <- zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
   return $ ExtLambda params body rettype'

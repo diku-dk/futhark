@@ -48,12 +48,12 @@ type ExpandM = ReaderT (Scope ExplicitMemory) (State VNameSource)
 
 transformBody :: Body ExplicitMemory -> ExpandM (Body ExplicitMemory)
 transformBody (Body () bnds res) = inScopeOf bnds $ do
-  bnds' <- concat <$> mapM transformBinding bnds
+  bnds' <- concat <$> mapM transformStm bnds
   return $ Body () bnds' res
 
-transformBinding :: Binding ExplicitMemory -> ExpandM [Binding ExplicitMemory]
+transformStm :: Stm ExplicitMemory -> ExpandM [Stm ExplicitMemory]
 
-transformBinding (Let pat () e)
+transformStm (Let pat () e)
   | Just (scanred_pat_elems, map_pat_elems, size) <- scanOrReduce pat e,
     not $ null map_pat_elems = do
       (alloc_bnds, map_pat_elems', tr_bnds) <-
@@ -97,7 +97,7 @@ transformBinding (Let pat () e)
               fail $ "Invalid attribute for let-binding of scan or reduce kernel return: " ++ pretty attr
 
 
-transformBinding (Let pat () e) = do
+transformStm (Let pat () e) = do
   e' <- mapExpM transform e
   return [Let pat () e']
   where transform = identityMapper { mapOnBody = transformBody

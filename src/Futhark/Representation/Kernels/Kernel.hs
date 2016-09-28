@@ -53,7 +53,7 @@ import Futhark.Representation.Ranges
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (Aliases, removeLambdaAliases, removeBodyAliases, removeBindingAliases)
+  (Aliases, removeLambdaAliases, removeBodyAliases, removeStmAliases)
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
@@ -109,7 +109,7 @@ spaceDimensions = structureDimensions . spaceStructure
 
 -- | The body of a 'Kernel'.
 data KernelBody lore = KernelBody { kernelBodyLore :: BodyAttr lore
-                                  , kernelBodyStms :: [Binding lore]
+                                  , kernelBodyStms :: [Stm lore]
                                   , kernelBodyResult :: [KernelResult]
                                   }
 
@@ -265,9 +265,9 @@ instance FreeIn WhichThreads where
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn (KernelBody attr stms res) =
     (freeIn attr <> free_in_stms <> free_in_res) `HS.difference` bound_in_stms
-    where free_in_stms = mconcat $ map freeInBinding stms
+    where free_in_stms = mconcat $ map freeInStm stms
           free_in_res = freeIn res
-          bound_in_stms = mconcat $ map boundByBinding stms
+          bound_in_stms = mconcat $ map boundByStm stms
 
 instance Attributes lore => Substitute (KernelBody lore) where
   substituteNames subst (KernelBody attr stms res) =
@@ -338,7 +338,7 @@ instance Attributes lore => Rename (KernelBody lore) where
   rename (KernelBody attr [] res) =
     KernelBody <$> rename attr <*> pure [] <*> rename res
   rename (KernelBody attr (stm:stms) res) =
-    bindingForRename (HS.toList $ boundByBinding stm) $ do
+    bindingForRename (HS.toList $ boundByStm stm) $ do
       stm' <- rename stm
       KernelBody attr' stms' res' <- rename $ KernelBody attr stms res
       return $ KernelBody attr' (stm':stms') res'
@@ -440,7 +440,7 @@ instance (Attributes lore,
           removeKernelBodyAliases :: KernelBody (Aliases lore)
                                   -> KernelBody lore
           removeKernelBodyAliases (KernelBody (_, attr) stms res) =
-            KernelBody attr (map removeBindingAliases stms) res
+            KernelBody attr (map removeStmAliases stms) res
 
 instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = False
@@ -539,7 +539,7 @@ typeCheckKernel (Kernel cs space kts kbody) = do
 
         checkKernelBody ts (KernelBody (_, attr) stms res) = do
           TC.checkBodyLore attr
-          TC.checkBindings stms $ do
+          TC.checkStms stms $ do
             unless (length ts == length res) $
               TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
               ", but body returns " ++ show (length res) ++ " values."

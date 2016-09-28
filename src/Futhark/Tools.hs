@@ -35,10 +35,10 @@ import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert
 
 nonuniqueParams :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
-                   [LParam lore] -> m ([LParam lore], [Binding lore])
+                   [LParam lore] -> m ([LParam lore], [Stm lore])
 nonuniqueParams params =
   modifyNameSource $ runState $ fmap fst $ runBinderEmptyEnv $
-  collectBindings $ forM params $ \param ->
+  collectStms $ forM params $ \param ->
     if not $ primType $ paramType param then do
       param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
       let param' = Param param_name $ paramType param
@@ -63,7 +63,7 @@ redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore)
                          , Commutativity
                          , LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])
-                      -> m (Binding lore, Binding lore)
+                      -> m (Stm lore, Stm lore)
 redomapToMapAndReduce (Pattern [] patelems) lore
                       (certs, outersz, comm, redlam, redmap_lam, accs, arrs) = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
@@ -91,17 +91,17 @@ redomapToMapAndReduce (Pattern [] patelems) lore
           bndaccs = zipWith (\i acc -> mkLet' []  [i] (BasicOp $ SubExp acc))
                             tobnd accs
           body = lambdaBody redmap_lam
-          bnds' = bndaccs ++ bodyBindings body
-          body' = body {bodyBindings = bnds'}
+          bnds' = bndaccs ++ bodyStms body
+          body' = body {bodyStms = bnds'}
       in redmap_lam { lambdaBody = body', lambdaParams = params' }
 redomapToMapAndReduce _ _ _ =
   error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
 
-sequentialStreamWholeArrayBindings :: Bindable lore =>
-                                      SubExp -> [SubExp]
-                                   -> ExtLambdaT lore -> [VName]
-                                   -> ([Binding lore], [SubExp])
-sequentialStreamWholeArrayBindings width accs lam arrs =
+sequentialStreamWholeArrayStms :: Bindable lore =>
+                                  SubExp -> [SubExp]
+                               -> ExtLambdaT lore -> [VName]
+                               -> ([Stm lore], [SubExp])
+sequentialStreamWholeArrayStms width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $ BasicOp $ SubExp width
@@ -114,7 +114,7 @@ sequentialStreamWholeArrayBindings width accs lam arrs =
   in (chunk_bnd :
       acc_bnds ++
       arr_bnds ++
-      bodyBindings (extLambdaBody lam),
+      bodyStms (extLambdaBody lam),
 
       bodyResult $ extLambdaBody lam)
 
@@ -125,7 +125,7 @@ sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
                            -> ExtLambdaT (Lore m) -> [VName]
                            -> m ()
 sequentialStreamWholeArray pat cs width nes fun arrs = do
-  let (body_bnds,res) = sequentialStreamWholeArrayBindings width nes fun arrs
+  let (body_bnds,res) = sequentialStreamWholeArrayStms width nes fun arrs
       reshapeRes t (Var v)
         | null (arrayDims t) = BasicOp $ SubExp $ Var v
         | otherwise          = shapeCoerce cs (arrayDims t) v
@@ -134,12 +134,12 @@ sequentialStreamWholeArray pat cs width nes fun arrs = do
         [ mkLet' [] [ident] $ reshapeRes (identType ident) se
         | (ident,se) <- zip (patternValueIdents pat) res]
 
-  mapM_ addBinding body_bnds
+  mapM_ addStm body_bnds
   shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
   forM_ (HM.toList shapemap) $ \(name,se) ->
     when (name `elem` patternContextNames pat) $
-      addBinding =<< mkLetNames' [name] (BasicOp $ SubExp se)
-  mapM_ addBinding res_bnds
+      addStm =<< mkLetNames' [name] (BasicOp $ SubExp se)
+  mapM_ addStm res_bnds
 
 singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
                                      [Type] -> ExtLambda lore -> m (Lambda lore)
@@ -160,7 +160,7 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
                    Var $ paramName unchunked_arr_param |
                    (arr_param, unchunked_arr_param) <-
                      zip arr_params unchunked_arr_params ]
-      unchunked_body = insertBindings (chunk_bnd:arr_bnds) $ extLambdaBody lam
+      unchunked_body = insertStms (chunk_bnd:arr_bnds) $ extLambdaBody lam
   return Lambda { lambdaBody = unchunked_body
                 , lambdaParams = acc_params <> unchunked_arr_params
                 , lambdaReturnType = acc_ts
