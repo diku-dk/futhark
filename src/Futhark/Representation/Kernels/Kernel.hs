@@ -70,6 +70,7 @@ data Kernel lore =
   | NumGroups
   | GroupSize
   | TileSize
+  | SufficientParallelism SubExp -- ^ True if enough parallelism.
 
   | Kernel Certificates
     KernelSpace
@@ -183,6 +184,8 @@ mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
 mapKernelM _ TileSize = pure TileSize
+mapKernelM tv (SufficientParallelism se) =
+  SufficientParallelism <$> mapOnKernelSubExp tv se
 mapKernelM tv (Kernel cs space ts kernel_body) =
   Kernel <$> mapOnKernelCertificates tv cs <*>
   mapOnKernelSpace space <*>
@@ -389,6 +392,8 @@ kernelType GroupSize =
   [Prim int32]
 kernelType TileSize =
   [Prim int32]
+kernelType SufficientParallelism{} =
+  [Prim Bool]
 
 chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
@@ -479,6 +484,7 @@ instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kern
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
   usageInOp TileSize = mempty
+  usageInOp SufficientParallelism{} = mempty
 
 consumedInKernelBody :: (Attributes lore, Aliased lore) =>
                         KernelBody lore -> Names
@@ -507,11 +513,12 @@ typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
   unless (startt == fold_accret) $
     TC.bad $ TC.TypeError $
     "Neutral value is of type " ++ prettyTuple startt ++
-    ", but scan function returns type " ++ prettyTuple foldret ++ "."
+    ", but scan fold function returns type " ++ prettyTuple foldret ++ "."
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
 typeCheckKernel TileSize = return ()
+typeCheckKernel SufficientParallelism{} = return ()
 
 typeCheckKernel (Kernel cs space kts kbody) = do
   mapM_ (TC.requireI [Prim Cert]) cs
@@ -532,7 +539,10 @@ typeCheckKernel (Kernel cs space kts kbody) = do
 
         checkKernelBody ts (KernelBody (_, attr) stms res) = do
           TC.checkBodyLore attr
-          TC.checkBindings stms $
+          TC.checkBindings stms $ do
+            unless (length ts == length res) $
+              TC.bad $ TC.TypeError $ "Kernel return type is " ++ prettyTuple ts ++
+              ", but body returns " ++ show (length res) ++ " values."
             zipWithM_ checkKernelResult res ts
 
         checkKernelResult (ThreadsReturn which what) t = do
@@ -591,6 +601,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
   opMetrics TileSize = seen "TileSize"
+  opMetrics SufficientParallelism{} = seen "SufficientParallelism"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr (ScanKernel cs w kernel_size fun foldfun nes arrs) =
@@ -603,6 +614,7 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
   ppr TileSize = text "$tile_size()"
+  ppr (SufficientParallelism se) = text "$sufficientParallelism" <> parens (ppr se)
 
   ppr (Kernel cs space ts body) =
     ppCertificates' cs <>

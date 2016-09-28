@@ -15,9 +15,11 @@
 -- ==
 --
 -- structure distributed {
---   Kernel 6
---   ScanKernel 2
---   Concat 1
+--   /If/True/Kernel 1
+--   /If/False/Kernel 1
+--   /If/False/If/True/Kernel 1
+--   /If/False/If/False/Kernel 5
+--   /If/False/If/False/ScanKernel 2
 -- }
 
 fun main(a: [n][an][]int, b: [n][bn]int): ([][]int,[][]int) =

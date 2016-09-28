@@ -20,8 +20,10 @@
 --    [662i32, 1090i32, 1728i32]]
 -- }
 -- structure distributed {
---   DoLoop/Kernel 1
---   ScanKernel 2
+--   /If/True/Kernel 1
+--   /If/False/DoLoop/If/True/Kernel 1
+--   /If/False/DoLoop/If/False/Kernel 4
+--   /If/False/DoLoop/If/False/ScanKernel 2
 -- }
 
 fun main(pss: [n][m]int): ([n][m][m]int, [n][m]int) =

@@ -6,7 +6,7 @@
 --
 -- ==
 --
--- structure distributed { Kernel 1 DoLoop 2 }
+-- structure distributed { Kernel 3 DoLoop 4 }
 
 fun take(n: int, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in first
 
