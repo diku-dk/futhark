@@ -13,11 +13,7 @@
 --     scan
 --
 -- ==
--- structure distributed {
---  /DoLoop/If/True/Kernel 2
---  /DoLoop/If/False/If/True/Kernel 2
---  /DoLoop/If/False/If/False/Kernel 2
--- }
+-- structure distributed { DoLoop/Kernel 2 DoLoop 2 }
 
 fun combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =
     zipWith (+) dr_row (zipWith (*) n_row vol_row)

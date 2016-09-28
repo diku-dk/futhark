@@ -3,7 +3,7 @@
 --
 -- ==
 -- tags { no_opencl }
--- structure distributed { If/True/Kernel 1 If/False/Kernel 2 }
+-- structure distributed { Kernel 2 }
 
 fun main(a: [][n]int): []int =
   map (fn (a_row: []int): int  =>
