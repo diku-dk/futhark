@@ -520,7 +520,7 @@ simplifyAssert _ _ _ =
   Nothing
 
 simplifyIndex :: MonadBinder m => BottomUpRule m
-simplifyIndex (vtable, used) bnd@(Let pat@(Pattern [] [pe]) _ (BasicOp (Index cs idd inds)))
+simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) _ (BasicOp (Index cs idd inds)))
   | Just m <- simplifyIndexing vtable seType cs idd inds consumed = do
       res <- m
       case res of
