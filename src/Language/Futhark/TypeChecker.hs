@@ -985,7 +985,7 @@ checkExp (TupleIndex e i NoInfo loc) = do
     _ -> bad $ InvalidField loc (typeOf e') (show i)
 
 checkExp (Iota e pos) = do
-  e' <- require [Prim $ Signed Int32] =<< checkExp e
+  e' <- require anyIntType =<< checkExp e
   return $ Iota e' pos
 
 checkExp (Shape e loc) = do

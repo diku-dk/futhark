@@ -360,19 +360,19 @@ expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 expCompiler
   (ImpGen.Destination
     [ImpGen.ArrayDestination (ImpGen.CopyIntoMemory destloc) _])
-  (BasicOp (Iota n x s)) = do
+  (BasicOp (Iota n x s et)) = do
   thread_gid <- newVName "thread_gid"
 
   makeAllMemoryGlobal $ do
     (destmem, destspace, destidx) <-
-      ImpGen.fullyIndexArray' destloc [ImpGen.varIndex thread_gid] int32
+      ImpGen.fullyIndexArray' destloc [ImpGen.varIndex thread_gid] (IntType et)
 
     n' <- ImpGen.compileSubExp n
     x' <- ImpGen.compileSubExp x
     s' <- ImpGen.compileSubExp s
 
-    let body = Imp.Write destmem destidx int32 destspace Imp.Nonvolatile $
-               Imp.var thread_gid int32 * s' + x'
+    let body = Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
+               Imp.ConvOpExp (SExt Int32 et) (Imp.var thread_gid int32) * s' + x'
 
     (group_size, num_groups) <- computeMapKernelGroups n'
 

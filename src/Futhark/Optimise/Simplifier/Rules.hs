@@ -29,6 +29,7 @@ import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.AST
 import Futhark.Construct
 import Futhark.Transform.Substitute
@@ -551,16 +552,12 @@ simplifyIndexing vtable seType ocs idd inds consuming =
 
     Just (SubExp (Var v)) -> Just $ pure $ IndexResult ocs v inds
 
-    Just (Iota _ (Constant (IntValue (Int32Value 0))) (Constant (IntValue (Int32Value 1))))
-      | [DimFix ii] <- inds ->
-          Just $ pure $ SubExpResult ii
-
-    Just (Iota _ x s)
+    Just (Iota _ x s et)
       | [DimFix ii] <- inds ->
           Just $
-          fmap SubExpResult $ letSubExp "index_iota" <=< SE.fromScalExp $
-          SE.intSubExpToScalExp ii * SE.intSubExpToScalExp s +
-          SE.intSubExpToScalExp x
+          fmap SubExpResult $ letSubExp "index_iota" <=< toExp $
+          primExpFromSubExp (IntType et) ii * primExpFromSubExp (IntType et) s +
+          primExpFromSubExp (IntType et) x
 
     Just (Rotate cs offsets a) -> Just $ do
       dims <- arrayDims <$> lookupType a

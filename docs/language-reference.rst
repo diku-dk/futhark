@@ -377,7 +377,9 @@ do not want them here.
 ``iota n``
 ~~~~~~~~~~~
 
-An array of the integers from ``0`` to ``n-1``.
+An array of the integers from ``0`` to ``n-1``.  The ``n`` argument
+can be any integral type.  The elements of the array will have the
+same type as ``n``.
 
 ``replicate n x``
 ~~~~~~~~~~~~~~~~~~~

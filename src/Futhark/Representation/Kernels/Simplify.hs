@@ -336,12 +336,12 @@ fuseSplitIota vtable (Let (Pattern [size] chunks) _
           start <- letSubExp "iota_start" $
             BasicOp $ BinOp (Add Int32) start_offset iota_start
           letBindNames'_ [patElemName iota_pe] $
-            BasicOp $ Iota (Var $ patElemName size) start $ constant (1::Int32)
+            BasicOp $ Iota (Var $ patElemName size) start (constant (1::Int32)) Int32
         Disorder -> do
           start <- letSubExp "iota_start" $
             BasicOp $ BinOp (Add Int32) i iota_start
           letBindNames'_ [patElemName iota_pe] $
-            BasicOp $ Iota (Var $ patElemName size) start num_is
+            BasicOp $ Iota (Var $ patElemName size) start num_is Int32
 fuseSplitIota _ _ = cannotSimplify
 
 fuseStreamIota :: (LocalScope (Lore m) m,
@@ -359,7 +359,7 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
         start <- letSubExp "iota_start" $
             BasicOp $ BinOp (Add Int32) (Var offset) iota_start
         letBindNames'_ [paramName iota_param] $
-          BasicOp $ Iota (Var chunk_size) start $ constant (1::Int32)
+          BasicOp $ Iota (Var chunk_size) start (constant (1::Int32)) Int32
         return $ groupStreamLambdaBody lam
       let lam' = lam { groupStreamArrParams = arr_params',
                        groupStreamLambdaBody = body'
@@ -369,7 +369,7 @@ fuseStreamIota _ _ = cannotSimplify
 
 isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp) (a, VName)
 isIota vtable chunk arr
-  | Just (BasicOp (Iota _ x (Constant s))) <- ST.lookupExp arr vtable,
+  | Just (BasicOp (Iota _ x (Constant s) Int32)) <- ST.lookupExp arr vtable,
     oneIsh s =
       Left (chunk, x)
   | otherwise =

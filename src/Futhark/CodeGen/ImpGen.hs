@@ -561,16 +561,17 @@ defCompileBasicOp (Destination [dest]) (Replicate (Shape ds) se) = do
 defCompileBasicOp (Destination [_]) Scratch{} =
   return ()
 
-defCompileBasicOp (Destination [dest]) (Iota n e s) = do
+defCompileBasicOp (Destination [dest]) (Iota n e s et) = do
   i <- newVName "i"
   x <- newVName "x"
   n' <- compileSubExp n
   e' <- compileSubExp e
   s' <- compileSubExp s
-  emit $ Imp.DeclareScalar x int32
-  declaringLoopVar i $ withPrimVar x int32 $
+  emit $ Imp.DeclareScalar x $ IntType et
+  let i' = ConvOpExp (SExt Int32 et) $ Imp.var i int32
+  declaringLoopVar i $ withPrimVar x (IntType et) $
     emit =<< (Imp.For i n' <$>
-              collect (do emit $ Imp.SetScalar x $ e' + Imp.var i int32 * s'
+              collect (do emit $ Imp.SetScalar x $ e' + i' * s'
                           copyDWIMDest dest [varIndex i] (Var x) []))
 
 defCompileBasicOp (Destination [target]) (Copy src) =
