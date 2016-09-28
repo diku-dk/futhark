@@ -3,8 +3,8 @@
 {-# LANGUAGE TypeFamilies #-}
 -- | Sequentialise to kernel statements.
 module Futhark.Pass.ExtractKernels.Kernelise
-       ( transformBinding
-       , transformBindings
+       ( transformStm
+       , transformStms
        , transformBody
        , mapIsh
        )
@@ -27,12 +27,12 @@ type Transformer m = (MonadBinder m,
                       Lore m ~ Out.InKernel,
                       LocalScope (Lore m) m)
 
-transformBindings :: Transformer m => [Binding] -> m ()
-transformBindings = mapM_ transformBinding
+transformStms :: Transformer m => [Stm] -> m ()
+transformStms = mapM_ transformStm
 
-transformBinding :: Transformer m => Binding -> m ()
+transformStm :: Transformer m => Stm -> m ()
 
-transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
+transformStm (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
   -- No map-out part
   | patternSize pat == length nes = do
   chunk_size <- newVName "chunk_size"
@@ -68,13 +68,13 @@ transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
                                          , Out.groupStreamArrParams = arr_chunk_params
                                          , Out.groupStreamLambdaBody = stream_kbody
                                          }
-  addBinding $ Let pat () $ Op $ Out.GroupStream w w stream_lam nes arrs
+  addStm $ Let pat () $ Op $ Out.GroupStream w w stream_lam nes arrs
 
   where mkArrChunkParam chunk_size arr_param =
           newParam (baseString (paramName arr_param) <> "_chunk") $
             arrayOfRow (paramType arr_param) chunk_size
 
-transformBinding (Let pat _ (DoLoop [] val (ForLoop i bound) body)) = do
+transformStm (Let pat _ (DoLoop [] val (ForLoop i bound) body)) = do
   dummy_chunk_size <- newVName "dummy_chunk_size"
   body' <- localScope (scopeOfFParams (map fst val)) $ transformBody body
   let lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size
@@ -82,20 +82,20 @@ transformBinding (Let pat _ (DoLoop [] val (ForLoop i bound) body)) = do
                                   , Out.groupStreamAccParams = map (fmap fromDecl . fst) val
                                   , Out.groupStreamArrParams = []
                                   , Out.groupStreamLambdaBody = body' }
-  addBinding $ Let pat () $ Op $ Out.GroupStream
+  addStm $ Let pat () $ Op $ Out.GroupStream
     bound (constant (1::Int32)) lam (map snd val) []
 
-transformBinding (Let pat _ (If cond tb fb ts)) = do
+transformStm (Let pat _ (If cond tb fb ts)) = do
   tb' <- transformBody tb
   fb' <- transformBody fb
-  addBinding $ Let pat () $ If cond tb' fb' ts
+  addStm $ Let pat () $ If cond tb' fb' ts
 
-transformBinding bnd =
-  FOT.transformBindingRecursively bnd
+transformStm bnd =
+  FOT.transformStmRecursively bnd
 
 transformBody :: Transformer m => Body -> m (Out.Body Out.InKernel)
 transformBody (Body attr bnds res) = do
-  stms <- collectBindings_ $ transformBindings bnds
+  stms <- collectStms_ $ transformStms bnds
   return $ Out.Body attr stms res
 
 groupStreamMapAccumL :: Transformer m =>
@@ -105,7 +105,7 @@ groupStreamMapAccumL :: Transformer m =>
                      -> Lambda
                      -> [SubExp]
                      -> [VName]
-                     -> m [Out.Binding Out.InKernel]
+                     -> m [Out.Stm Out.InKernel]
 groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
   let acc_num     = length accexps
       res_tps     = lambdaReturnType fold_lam
@@ -131,7 +131,7 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
         return $ mkLet' [] [paramIdent p] $
           BasicOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
 
-  redomap_kbody <- transformBody $ index_bnds `insertBindings` redomap_loop
+  redomap_kbody <- transformBody $ index_bnds `insertStms` redomap_loop
 
   let acc_params = map (fmap fromDecl . fst) merge
       stream_lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size
@@ -143,7 +143,7 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
       stream_kstm = Let (Pattern [] pes) () $ Op $
                     Out.GroupStream w (constant (1::Int32)) stream_lam accexps arrexps
 
-  bnds_kstms <- collectBindings_ $ transformBindings bnds
+  bnds_kstms <- collectStms_ $ transformStms bnds
 
   return $ bnds_kstms ++ [stream_kstm]
 
@@ -196,5 +196,5 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
                                          , Out.groupStreamArrParams = params_chunked
                                          , Out.groupStreamLambdaBody = kbody'
                                          }
-  addBinding $ Let pat () $ Op $ Out.GroupStream w (constant (1::Int32))
+  addStm $ Let pat () $ Op $ Out.GroupStream w (constant (1::Int32))
     stream_lam (map Var outarrs) arrs

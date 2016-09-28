@@ -57,7 +57,7 @@ ensureResultExtShape :: MonadBinder m =>
                      -> SrcLoc -> [ExtType] -> Body (Lore m)
                      -> m (Body (Lore m))
 ensureResultExtShape asserting loc rettype body =
-  insertBindingsM $ do
+  insertStmsM $ do
     es <- bodyBind body
     let assertProperShape t se =
           let name = "result_proper_shape"

@@ -29,7 +29,7 @@ module Futhark.Construct
 
   , resultBody
   , resultBodyM
-  , insertBindingsM
+  , insertStmsM
   , mapResultM
   , mapResult
 
@@ -131,8 +131,8 @@ eIf :: MonadBinder m =>
     -> m (Exp (Lore m))
 eIf ce te fe = do
   ce' <- letSubExp "cond" =<< ce
-  te' <- insertBindingsM te
-  fe' <- insertBindingsM fe
+  te' <- insertStmsM te
+  fe' <- insertStmsM fe
   ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
   return $ If ce' te' fe' ts
 
@@ -229,7 +229,7 @@ eValue (ArrayVal a bt shape) = do
 eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]
       -> m (Body (Lore m))
-eBody es = insertBindingsM $ do
+eBody es = insertStmsM $ do
              es' <- sequence es
              xs <- mapM (letTupExp "x") es'
              mkBodyM [] $ map Var $ concat xs
@@ -274,7 +274,7 @@ binOpLambda :: (MonadFreshNames m, Bindable lore) =>
 binOpLambda bop t = do
   x   <- newVName "x"
   y   <- newVName "y"
-  (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
+  (body, _) <- runBinderEmptyEnv $ insertStmsM $ do
     res <- letSubExp "res" $ BasicOp $ BinOp bop (Var x) (Var y)
     return $ resultBody [res]
   return Lambda {
@@ -311,11 +311,11 @@ resultBodyM :: MonadBinder m =>
 resultBodyM = mkBodyM []
 
 -- | Evaluate the action, producing a body, then wrap it in all the
--- bindings it created using 'addBinding'.
-insertBindingsM :: (MonadBinder m) =>
-                   m (Body (Lore m)) -> m (Body (Lore m))
-insertBindingsM m = do
-  (Body _ bnds res, otherbnds) <- collectBindings m
+-- bindings it created using 'addStm'.
+insertStmsM :: (MonadBinder m) =>
+               m (Body (Lore m)) -> m (Body (Lore m))
+insertStmsM m = do
+  (Body _ bnds res, otherbnds) <- collectStms m
   mkBodyM (otherbnds <> bnds) res
 
 -- | Change that subexpression where evaluation of the body would
@@ -404,7 +404,7 @@ instantiateIdents names ts
 -- instance for simple representations.
 simpleMkLetNames :: (ExpAttr lore ~ (), LetAttr lore ~ Type,
                      MonadFreshNames m, TypedOp (Op lore), HasScope lore m) =>
-                    [(VName, Bindage)] -> Exp lore -> m (Binding lore)
+                    [(VName, Bindage)] -> Exp lore -> m (Stm lore)
 simpleMkLetNames names e = do
   et <- expExtType e
   (ts, shapes) <- instantiateShapes' et

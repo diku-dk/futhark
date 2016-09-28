@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Futhark.Analysis.Usage
-       ( usageInBinding
+       ( usageInStm
        , usageInExp
        , usageInLambda
 
@@ -15,9 +15,9 @@ import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.UsageTable as UT
 
-usageInBinding :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
-                  Binding lore -> UT.UsageTable
-usageInBinding (Let pat lore e) =
+usageInStm :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
+                  Stm lore -> UT.UsageTable
+usageInStm (Let pat lore e) =
   mconcat [usageInPat,
            usageInExpLore,
            usageInExp e,

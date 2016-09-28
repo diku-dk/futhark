@@ -21,7 +21,7 @@ import Futhark.Util
 import Futhark.Pass
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
-       hiding (Prog, Body, Binding, Pattern, PatElem,
+       hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 
@@ -41,18 +41,18 @@ type ExpandM = State VNameSource
 
 transformBody :: Body ExplicitMemory -> ExpandM (Body ExplicitMemory)
 transformBody (Body () bnds res) = do
-  bnds' <- concat <$> mapM transformBinding bnds
+  bnds' <- concat <$> mapM transformStm bnds
   return $ Body () bnds' res
 
-transformBinding :: Binding ExplicitMemory -> ExpandM [Binding ExplicitMemory]
+transformStm :: Stm ExplicitMemory -> ExpandM [Stm ExplicitMemory]
 
-transformBinding (Let pat () e) = do
+transformStm (Let pat () e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
   return $ bnds ++ [Let pat () e']
   where transform = identityMapper { mapOnBody = transformBody
                                    }
 
-transformExp :: Exp ExplicitMemory -> ExpandM ([Binding ExplicitMemory], Exp ExplicitMemory)
+transformExp :: Exp ExplicitMemory -> ExpandM ([Stm ExplicitMemory], Exp ExplicitMemory)
 
 transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
   -- Extract allocations from the lambda.
@@ -121,15 +121,15 @@ extractKernelBodyAllocations bound_before_body kbody = do
 extractThreadAllocationsInBody :: Names -> Body InKernel
                                -> Either String (Body InKernel, HM.HashMap VName (SubExp, Space))
 extractThreadAllocationsInBody bound_before_body body = do
-  (bnds, allocs) <- extractThreadAllocations bound_before_body $ bodyBindings body
-  return (body { bodyBindings = bnds }, allocs)
+  (bnds, allocs) <- extractThreadAllocations bound_before_body $ bodyStms body
+  return (body { bodyStms = bnds }, allocs)
 
-extractThreadAllocations :: Names -> [Binding InKernel]
-                         -> Either String ([Binding InKernel], HM.HashMap VName (SubExp, Space))
+extractThreadAllocations :: Names -> [Stm InKernel]
+                         -> Either String ([Stm InKernel], HM.HashMap VName (SubExp, Space))
 extractThreadAllocations bound_before_body bnds = do
   (allocs, bnds') <- mapAccumLM isAlloc HM.empty bnds
   return (catMaybes bnds', allocs)
-  where bound_here = bound_before_body `HS.union` boundByBindings bnds
+  where bound_here = bound_before_body `HS.union` boundByStms bnds
 
         isAlloc _ (Let (Pattern [] [patElem]) () (Op (Alloc (Var v) _)))
           | v `HS.member` bound_here =
@@ -147,7 +147,7 @@ extractThreadAllocations bound_before_body bnds = do
 expandedAllocations :: SubExp
                     -> VName
                     -> HM.HashMap VName (SubExp, Space)
-                    -> ExpandM ([Binding ExplicitMemory], RebaseMap)
+                    -> ExpandM ([Stm ExplicitMemory], RebaseMap)
 expandedAllocations num_threads thread_index thread_allocs = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
@@ -199,15 +199,15 @@ offsetMemoryInKernelBody :: RebaseMap -> KernelBody InKernel
                          -> KernelBody InKernel
 offsetMemoryInKernelBody initial_offsets kbody =
   kbody { kernelBodyStms = stms' }
-  where stms' = snd $ mapAccumL offsetMemoryInBinding initial_offsets $ kernelBodyStms kbody
+  where stms' = snd $ mapAccumL offsetMemoryInStm initial_offsets $ kernelBodyStms kbody
 
 offsetMemoryInBody :: RebaseMap -> Body InKernel -> Body InKernel
 offsetMemoryInBody offsets (Body attr bnds res) =
-  Body attr (snd $ mapAccumL offsetMemoryInBinding offsets bnds) res
+  Body attr (snd $ mapAccumL offsetMemoryInStm offsets bnds) res
 
-offsetMemoryInBinding :: RebaseMap -> Binding InKernel
-                      -> (RebaseMap, Binding InKernel)
-offsetMemoryInBinding offsets (Let pat attr e) =
+offsetMemoryInStm :: RebaseMap -> Stm InKernel
+                      -> (RebaseMap, Stm InKernel)
+offsetMemoryInStm offsets (Let pat attr e) =
   (offsets', Let pat' attr $ offsetMemoryInExp offsets e)
   where (offsets', pat') = offsetMemoryInPattern offsets pat
 

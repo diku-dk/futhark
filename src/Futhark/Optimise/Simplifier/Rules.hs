@@ -131,9 +131,9 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
        -- Hence, we add them inside the loop, fully aware that dead-code
        -- removal will eventually get rid of them.  Some care is
        -- necessary to handle unique bindings.
-       body'' <- insertBindingsM $ do
-         mapM_ (uncurry letBindNames') $ dummyBindings discard_ctx
-         mapM_ (uncurry letBindNames') $ dummyBindings discard_val
+       body'' <- insertStmsM $ do
+         mapM_ (uncurry letBindNames') $ dummyStms discard_ctx
+         mapM_ (uncurry letBindNames') $ dummyStms discard_val
          return body'
        letBind_ pat' $ DoLoop ctx' val' form body''
   where pat_used = map (`UT.used` used) $ patternValueNames pat
@@ -145,8 +145,8 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
         referencedInPat = (`HS.member` patAnnotNames) . paramName
         referencedInForm = (`HS.member` freeIn form) . paramName
 
-        dummyBindings = map dummyBinding
-        dummyBinding ((p,e), _)
+        dummyStms = map dummyStm
+        dummyStm ((p,e), _)
           | unique (paramDeclType p),
             Var v <- e            = ([paramName p], BasicOp $ Copy v)
           | otherwise             = ([paramName p], BasicOp $ SubExp e)
@@ -328,7 +328,7 @@ isDropTake :: VName -> ST.SymbolTable lore
            -> Maybe (SE.ScalExp, SE.ScalExp,
                      Certificates, Int, VName)
 isDropTake v vtable = do
-  Let pat _ (BasicOp (Split cs dim splits v')) <- ST.entryBinding =<< ST.lookup v vtable
+  Let pat _ (BasicOp (Split cs dim splits v')) <- ST.entryStm =<< ST.lookup v vtable
   i <- elemIndex v $ patternValueNames pat
   return (prod $ take i splits,
           prod $ take 1 $ drop i splits,
@@ -651,11 +651,11 @@ simplifyIndexing vtable seType ocs idd inds consuming =
             letSubExp "index_concat" $ BasicOp $ Index (ocs<>cs) x $ ibef ++ DimFix i : iaft
           mkBranch ((x', start):xs_and_starts') = do
             cmp <- letSubExp "index_concat_cmp" $ BasicOp $ CmpOp (CmpSle Int32) start i
-            (thisres, thisbnds) <- collectBindings $ do
+            (thisres, thisbnds) <- collectStms $ do
               i' <- letSubExp "index_concat_i" $ BasicOp $ BinOp (Sub Int32) i start
               letSubExp "index_concat" $ BasicOp $ Index (ocs<>cs) x' $ ibef ++ DimFix i' : iaft
             thisbody <- mkBodyM thisbnds [thisres]
-            (altres, altbnds) <- collectBindings $ mkBranch xs_and_starts'
+            (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
             altbody <- mkBodyM altbnds [altres]
             letSubExp "index_concat_branch" $ If cmp thisbody altbody $ staticShapes [res_t]
       SubExpResult <$> mkBranch xs_and_starts
@@ -668,7 +668,7 @@ simplifyIndexing vtable seType ocs idd inds consuming =
           _ | Var v2 <- se  -> Just $ pure $ IndexResult ocs v2 inds'
           _ -> Nothing
 
-    _ -> case ST.entryBinding =<< ST.lookup idd vtable of
+    _ -> case ST.entryStm =<< ST.lookup idd vtable of
            Just (Let split_pat _ (BasicOp (Split cs2 0 ns idd2)))
              | DimFix first_index : rest_indices <- inds -> Just $ do
                -- Figure out the extra offset that we should add to the first index.
@@ -758,7 +758,7 @@ evaluateBranch :: MonadBinder m => TopDownRule m
 evaluateBranch _ (Let pat _ (If e1 tb fb t))
   | Just branch <- checkBranch = do
   let ses = bodyResult branch
-  mapM_ addBinding $ bodyBindings branch
+  mapM_ addStm $ bodyStms branch
   ctx <- subExpShapeContext t ses
   let ses' = ctx ++ ses
   sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
@@ -999,7 +999,7 @@ simplifyBranchResultComparison vtable (Let pat _ (BasicOp (CmpOp (CmpEq t) se1 s
   | Just m <- simplifyWith se1 se2 = m
   | Just m <- simplifyWith se2 se1 = m
   where simplifyWith (Var v) x
-          | Just bnd <- ST.entryBinding =<< ST.lookup v vtable,
+          | Just bnd <- ST.entryStm =<< ST.lookup v vtable,
             If p tbranch fbranch _ <- bindingExp bnd,
             Just (y, z) <-
               returns v (bindingPattern bnd) tbranch fbranch,

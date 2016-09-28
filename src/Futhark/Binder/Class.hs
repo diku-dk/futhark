@@ -7,16 +7,16 @@ module Futhark.Binder.Class
   , mkLetNames'
   , MonadBinder (..)
   , mkLetNamesM'
-  , bodyBindings
-  , insertBindings
-  , insertBinding
+  , bodyStms
+  , insertStms
+  , insertStm
   , letBind
   , letBind_
   , letBindNames
   , letBindNames'
   , letBindNames_
   , letBindNames'_
-  , collectBindings_
+  , collectStms_
   , bodyBind
   )
 where
@@ -41,10 +41,10 @@ class (Attributes lore,
        RetType lore ~ ExtRetType,
        SetType (LetAttr lore)) =>
       Bindable lore where
-  mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
-  mkBody :: [Binding lore] -> Result -> Body lore
+  mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Stm lore
+  mkBody :: [Stm lore] -> Result -> Body lore
   mkLetNames :: (MonadFreshNames m, HasScope lore m) =>
-                [(VName, Bindage)] -> Exp lore -> m (Binding lore)
+                [(VName, Bindage)] -> Exp lore -> m (Stm lore)
 
 -- | A monad that supports the creation of bindings from expressions
 -- and bodies from bindings, with a specific lore.  This is the main
@@ -60,17 +60,17 @@ class (Attributes (Lore m),
        HasScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: *
-  mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Binding (Lore m))
-  mkBodyM :: [Binding (Lore m)] -> Result -> m (Body (Lore m))
-  mkLetNamesM :: [(VName, Bindage)] -> Exp (Lore m) -> m (Binding (Lore m))
-  addBinding      :: Binding (Lore m) -> m ()
-  collectBindings :: m a -> m (a, [Binding (Lore m)])
+  mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
+  mkBodyM :: [Stm (Lore m)] -> Result -> m (Body (Lore m))
+  mkLetNamesM :: [(VName, Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
+  addStm      :: Stm (Lore m) -> m ()
+  collectStms :: m a -> m (a, [Stm (Lore m)])
 
 letBind :: MonadBinder m =>
            Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
 letBind pat e = do
   bnd <- mkLetM pat e
-  addBinding bnd
+  addStm bnd
   return $ patternValueIdents $ bindingPattern bnd
 
 letBind_ :: MonadBinder m =>
@@ -78,17 +78,17 @@ letBind_ :: MonadBinder m =>
 letBind_ pat e = void $ letBind pat e
 
 mkLet' :: Bindable lore =>
-          [Ident] -> [Ident] -> Exp lore -> Binding lore
+          [Ident] -> [Ident] -> Exp lore -> Stm lore
 mkLet' context values = mkLet (map addBindVar context) (map addBindVar values)
   where addBindVar name = (name, BindVar)
 
 mkLetNamesM' :: MonadBinder m =>
-                [VName] -> Exp (Lore m) -> m (Binding (Lore m))
+                [VName] -> Exp (Lore m) -> m (Stm (Lore m))
 mkLetNamesM' = mkLetNamesM . map addBindVar
   where addBindVar name = (name, BindVar)
 
 mkLetNames' :: (Bindable lore, MonadFreshNames m, HasScope lore m) =>
-               [VName] -> Exp lore -> m (Binding lore)
+               [VName] -> Exp lore -> m (Stm lore)
 mkLetNames' = mkLetNames . map addBindVar
   where addBindVar name = (name, BindVar)
 
@@ -96,7 +96,7 @@ letBindNames :: MonadBinder m =>
                 [(VName,Bindage)] -> Exp (Lore m) -> m [Ident]
 letBindNames names e = do
   bnd <- mkLetNamesM names e
-  addBinding bnd
+  addStm bnd
   return $ patternValueIdents $ bindingPattern bnd
 
 letBindNames' :: MonadBinder m =>
@@ -112,20 +112,19 @@ letBindNames'_ :: MonadBinder m =>
                   [VName] -> Exp (Lore m) -> m ()
 letBindNames'_ names e = void $ letBindNames' names e
 
-collectBindings_ :: MonadBinder m => m a -> m [Binding (Lore m)]
-collectBindings_ = fmap snd . collectBindings
-
+collectStms_ :: MonadBinder m => m a -> m [Stm (Lore m)]
+collectStms_ = fmap snd . collectStms
 
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
 bodyBind (Body _ bnds es) = do
-  mapM_ addBinding bnds
+  mapM_ addStm bnds
   return es
 
 -- | Add several bindings at the outermost level of a 'Body'.
-insertBindings :: Bindable lore => [Binding lore] -> Body lore -> Body lore
-insertBindings bnds1 (Body _ bnds2 res) =
+insertStms :: Bindable lore => [Stm lore] -> Body lore -> Body lore
+insertStms bnds1 (Body _ bnds2 res) =
   mkBody (bnds1++bnds2) res
 
 -- | Add a single binding at the outermost level of a 'Body'.
-insertBinding :: Bindable lore => Binding lore -> Body lore -> Body lore
-insertBinding bnd = insertBindings [bnd]
+insertStm :: Bindable lore => Stm lore -> Body lore -> Body lore
+insertStm bnd = insertStms [bnd]

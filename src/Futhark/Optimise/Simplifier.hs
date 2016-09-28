@@ -10,7 +10,7 @@ module Futhark.Optimise.Simplifier
     simplifyProgWithRules
   , simplifyFunWithRules
   , simplifyLambdaWithRules
-  , simplifyBindingsWithRules
+  , simplifyStmsWithRules
   , standardRules
   , RuleBook
   , noExtraHoistBlockers
@@ -30,7 +30,7 @@ import Futhark.Binder.Class (Bindable)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Lore
-  (removeProgWisdom, removeFunDefWisdom, removeLambdaWisdom, removeBindingWisdom)
+  (removeProgWisdom, removeFunDefWisdom, removeLambdaWisdom, removeStmWisdom)
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
@@ -73,16 +73,16 @@ simplifyLambdaWithRules simpl rules blockers lam nes =
   fmap removeLambdaWisdom .
   simplifyLambda simpl rules blockers lam nes
 
--- | Simplify a list of 'Binding's.
-simplifyBindingsWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
+-- | Simplify a list of 'Stm's.
+simplifyStmsWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
                              SimpleOps lore
                           -> RuleBook (SimpleM lore)
                           -> HoistBlockers (SimpleM lore)
-                          -> [Binding lore]
-                          -> m [Binding lore]
-simplifyBindingsWithRules simpl rules blockers bnds =
-  map removeBindingWisdom <$>
-  simplifyBindings simpl rules blockers bnds
+                          -> [Stm lore]
+                          -> m [Stm lore]
+simplifyStmsWithRules simpl rules blockers bnds =
+  map removeStmWisdom <$>
+  simplifyStms simpl rules blockers bnds
 
 simplifyBasicish :: (MonadFreshNames m, Bindable lore,
                      Simplifiable (LetAttr lore),

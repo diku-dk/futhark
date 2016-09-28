@@ -26,8 +26,8 @@ import Prelude
 -- alongside its result pattern.
 data SeqLoop = SeqLoop Pattern [(FParam, SubExp)] LoopForm Body
 
-seqLoopBinding :: SeqLoop -> Binding
-seqLoopBinding (SeqLoop pat merge form body) =
+seqLoopStm :: SeqLoop -> Stm
+seqLoopStm (SeqLoop pat merge form body) =
   Let pat () $ DoLoop [] merge form body
 
 interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
@@ -94,8 +94,8 @@ interchangeLoop
 
 interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                     KernelNest -> SeqLoop
-                 -> m [Binding]
+                 -> m [Stm]
 interchangeLoops nest loop = do
   (loop', bnds) <-
     runBinder $ foldM interchangeLoop loop $ reverse $ kernelNestLoops nest
-  return $ bnds ++ [seqLoopBinding loop']
+  return $ bnds ++ [seqLoopStm loop']

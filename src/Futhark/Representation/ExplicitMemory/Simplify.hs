@@ -18,7 +18,7 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, BasicOp, Exp, Body, Binding,
+  hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, PatElem, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType)
 import Futhark.Representation.ExplicitMemory
@@ -59,7 +59,7 @@ isResultAlloc _ _ = False
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent array and memory-block sizes.
 getShapeNames :: ExplicitMemorish lore =>
-                 Binding (Wise lore) -> HS.HashSet VName
+                 Stm (Wise lore) -> HS.HashSet VName
 getShapeNames bnd =
   let tps = map patElemType $ patternElements $ bindingPattern bnd
       ats = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
@@ -70,7 +70,7 @@ getShapeNames bnd =
                      ) ats
   in  HS.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
 
-isAlloc0 :: Op lore ~ MemOp op => AST.Binding lore -> Bool
+isAlloc0 :: Op lore ~ MemOp op => AST.Stm lore -> Bool
 isAlloc0 (Let _ _ (Op Alloc{})) = True
 isAlloc0 _                      = False
 
@@ -126,7 +126,7 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
 
       -- Update the branches to contain Copy expressions putting the
       -- arrays where they are expected.
-      let updateBody body = insertBindingsM $ do
+      let updateBody body = insertStmsM $ do
             res <- bodyBind body
             resultBodyM =<<
               zipWithM updateResult (patternValueElements pat) res

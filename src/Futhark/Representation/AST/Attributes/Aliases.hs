@@ -9,7 +9,7 @@ module Futhark.Representation.AST.Attributes.Aliases
        , Aliased (..)
        , AliasesOf (..)
          -- * Consumption
-       , consumedInBinding
+       , consumedInStm
        , consumedInExp
        , consumedInPattern
        , consumedByLambda
@@ -115,8 +115,8 @@ maskAliases :: Names -> Diet -> Names
 maskAliases _   Consume = mempty
 maskAliases als Observe = als
 
-consumedInBinding :: Aliased lore => Binding lore -> Names
-consumedInBinding binding = consumedInPattern (bindingPattern binding) <>
+consumedInStm :: Aliased lore => Stm lore -> Names
+consumedInStm binding = consumedInPattern (bindingPattern binding) <>
                             consumedInExp (bindingExp binding)
 
 consumedInExp :: (Aliased lore) => Exp lore -> Names

@@ -44,7 +44,7 @@ import Futhark.Analysis.Alias
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (removeFunDefAliases, Aliases, consumedInBindings)
+  (removeFunDefAliases, Aliases, consumedInStms)
 import qualified Futhark.Representation.Kernels.Kernel as Kernel
 import qualified Futhark.Representation.Kernels.KernelExp as KernelExp
 import qualified Futhark.Representation.SOACS.SOAC as SOAC
@@ -76,7 +76,7 @@ type CSEM lore = Reader (CSEState lore)
 cseInBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              Body lore -> CSEM lore (Body lore)
 cseInBody (Body bodyattr bnds res) =
-  cseInBindings (consumedInBindings bnds res) bnds $ do
+  cseInStms (consumedInStms bnds res) bnds $ do
     CSEState (_, nsubsts) _ <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
@@ -92,14 +92,14 @@ cseInExtLambda lam = do
   body' <- cseInBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 
-cseInBindings :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
-                 Names -> [Binding lore]
-              -> CSEM lore (Body lore)
-              -> CSEM lore (Body lore)
-cseInBindings _ [] m = m
-cseInBindings consumed (bnd:bnds) m =
-  cseInBinding consumed bnd $ \bnd' -> do
-    Body bodyattr bnds' es <- cseInBindings consumed bnds m
+cseInStms :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+             Names -> [Stm lore]
+          -> CSEM lore (Body lore)
+          -> CSEM lore (Body lore)
+cseInStms _ [] m = m
+cseInStms consumed (bnd:bnds) m =
+  cseInStm consumed bnd $ \bnd' -> do
+    Body bodyattr bnds' es <- cseInStms consumed bnds m
     bnd'' <- mapM nestedCSE bnd'
     return $ Body bodyattr (bnd''++bnds') es
   where nestedCSE bnd' = do
@@ -109,11 +109,11 @@ cseInBindings consumed (bnd:bnds) m =
                              , mapOnOp = cseInOp
                              }
 
-cseInBinding :: Attributes lore =>
-                Names -> Binding lore
-             -> ([Binding lore] -> CSEM lore a)
-             -> CSEM lore a
-cseInBinding consumed (Let pat eattr e) m = do
+cseInStm :: Attributes lore =>
+            Names -> Stm lore
+         -> ([Stm lore] -> CSEM lore a)
+         -> CSEM lore a
+cseInStm consumed (Let pat eattr e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat

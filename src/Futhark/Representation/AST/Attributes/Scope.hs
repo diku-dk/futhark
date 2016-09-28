@@ -139,7 +139,7 @@ instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
   localScope = local . HM.union
 
 -- | The class of things that can provide a scope.  There is no
--- overarching rule for what this means.  For a 'Binding', it is the
+-- overarching rule for what this means.  For a 'Stm', it is the
 -- corresponding pattern.  For a 'Lambda', is is the parameters
 -- (including index).
 class Scoped lore a | a -> lore where
@@ -161,7 +161,7 @@ instance Scoped lore a =>
          Scoped lore [a] where
   scopeOf = mconcat . map scopeOf
 
-instance Scoped lore (Binding lore) where
+instance Scoped lore (Stm lore) where
   scopeOf = scopeOf . bindingPattern
 
 instance Scoped lore (FunDef lore) where

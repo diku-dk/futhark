@@ -52,7 +52,7 @@ regularSegmentedRedomapAsScan segment_size num_segments nest_sizes flat_pat pat 
 
   (mapk_bnds, mapk) <-
     mapKernelFromBody [] num_segments (zip is nest_sizes) [] acc_ts body
-  mapM_ addBinding mapk_bnds
+  mapM_ addStm mapk_bnds
   letBind_ acc_pat $ Op mapk
 
   forM_ (zip map_pes map_arrs) $ \(pe,arr) ->

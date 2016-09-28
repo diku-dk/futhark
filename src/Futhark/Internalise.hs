@@ -75,7 +75,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
                        | otherwise = nameFromString $ pretty fname ++ "f"
                 consts = map ((`Param` I.Prim int32) . snd) cm
             return (fname,
-                    FunBinding { internalFun = (fname',
+                    FunStm { internalFun = (fname',
                                                 cm,
                                                 shapenames,
                                                 map declTypeOf values,
@@ -90,7 +90,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
         builtinFtable = HM.fromList $ map addBuiltin $ HM.toList E.builtInFunctions
         addBuiltin (name, (t, paramts)) =
           (name,
-           FunBinding
+           FunStm
            (baseName name,
             [], [], map (I.Prim . internalisePrimType) paramts,
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
@@ -118,23 +118,23 @@ internaliseIdent (E.Ident name (Info tp) _) =
                        ++ pretty name ++ "'."
 
 internaliseBody :: E.Exp -> InternaliseM Body
-internaliseBody e = insertBindingsM $ do
+internaliseBody e = insertStmsM $ do
   ses <- internaliseExp "res" e
   return $ resultBody ses
 
-internaliseBodyBindings :: E.Exp -> ([SubExp] -> InternaliseM (Body, a))
-                        -> InternaliseM (Body, a)
-internaliseBodyBindings e m = do
+internaliseBodyStms :: E.Exp -> ([SubExp] -> InternaliseM (Body, a))
+                    -> InternaliseM (Body, a)
+internaliseBodyStms e m = do
   ((Body _ bnds res,x), otherbnds) <-
-    collectBindings $ m =<< internaliseExp "res" e
+    collectStms $ m =<< internaliseExp "res" e
   (,x) <$> mkBodyM (otherbnds <> bnds) res
 
-extraBodyBindings :: [Binding]
+extraBodyStms :: [Stm]
                   -> InternaliseM (Body, a)
                   -> InternaliseM (Body, a)
-extraBodyBindings bnds m = do
+extraBodyStms bnds m = do
   (body, x) <- m
-  return (insertBindings bnds body, x)
+  return (insertStms bnds body, x)
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
@@ -254,14 +254,14 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           return [mkLet' [] [i_ident] $
                   I.BasicOp $ I.BinOp (I.Sub I.Int32) upper_bound_less_one (I.Var j)]
       return ( bindingIdentTypes [I.Ident j $ I.Prim I.int32, i_ident] .
-               extraBodyBindings i_bnds
+               extraBodyStms i_bnds
              , Left (j, num_iterations))
     E.While cond ->
       return (id, Right cond)
 
   (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
     wrap $ bindingParams [mergepat] $ \shapepat mergepat' ->
-    internaliseBodyBindings loopbody $ \ses -> do
+    internaliseBodyStms loopbody $ \ses -> do
       sets <- mapM subExpType ses
       let shapeinit = argShapes
                       (map I.paramName shapepat)
@@ -289,7 +289,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           -- consume anything.
           loop_while <- newParam "loop_while" $ I.Prim I.Bool
           (loop_cond, loop_cond_bnds) <-
-            collectBindings $ internaliseExp1 "loop_cond" cond
+            collectStms $ internaliseExp1 "loop_cond" cond
           let initsubst = [ (I.paramName mergeparam, initval)
                             | (mergeparam, initval) <-
                                zip (shapepat++mergepat') (shapeinit++mergeinit)
@@ -299,10 +299,10 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                               zip (shapepat++mergepat') (shapeargs++ses)
                          ]
           (loop_initial_cond, init_loop_cond_bnds) <-
-            collectBindings $
+            collectStms $
             shadowIdentsInExp initsubst loop_cond_bnds loop_cond
           (loop_end_cond, loop_end_cond_bnds) <-
-            collectBindings $
+            collectStms $
             shadowIdentsInExp endsubst loop_cond_bnds loop_cond
           return (mkBody loop_end_cond_bnds $
                   shapeargs++[loop_end_cond]++ses,
@@ -313,7 +313,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                    loop_initial_cond : mergeinit,
                    init_loop_cond_bnds))
 
-  mapM_ addBinding pre_bnds
+  mapM_ addStm pre_bnds
 
   mergeinit_ts' <- mapM subExpType mergeinit'
 
@@ -509,7 +509,7 @@ internaliseExp desc (E.Filter lam arr _) = do
   flags <- letExp "filter_partition_flags" $ I.Op $ I.Map [] w lam' arrs
   filter_size <- newIdent "filter_size" $ I.Prim int32
   filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
-  addBinding $ mkLet' [] (filter_size : filter_perms) $
+  addStm $ mkLet' [] (filter_size : filter_perms) $
     I.BasicOp $ I.Partition [] 1 flags arrs
   forM filter_perms $ \filter_perm ->
     letSubExp desc $
@@ -524,7 +524,7 @@ internaliseExp desc (E.Partition lams arr _) = do
   fmap (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Prim int32
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
-    addBinding $ mkLet' [] (partition_sizes++[partition_perm]) $
+    addStm $ mkLet' [] (partition_sizes++[partition_perm]) $
       I.BasicOp $ I.Partition [] n flags [arr']
     letTupExp desc $
       I.BasicOp $ I.Split [] 0 (map (I.Var . I.identName) partition_sizes) $
@@ -712,7 +712,7 @@ internaliseExp desc (E.Write si v a loc) = do
 
   -- This body is pretty boring right now, as every input is exactly the output.
   -- But it can get funky later on if fused with something else.
-  (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
+  (body, _) <- runBinderEmptyEnv $ insertStmsM $ do
     let outs = replicate (length valueNames) indexName ++ valueNames
     results <- forM outs $ \name ->
       letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
@@ -923,7 +923,7 @@ internaliseLambda (E.CurryFun (QualName (_, fname)) curargs _ loc) rowtypes = do
       shapeargs = argShapes shapes value_paramts valargs_types
       diets = const_ds ++ replicate (length shapeargs) I.Observe ++ map I.diet value_paramts
       paramts = const_ts ++ map (const $ I.Prim int32) shapeargs ++ value_paramts
-  ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectBindings $ do
+  ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectStms $ do
     allargs <- ensureArgShapes asserting loc shapes paramts $ constargs ++ shapeargs ++ valargs
     argts' <- mapM subExpType allargs
     case int_rettype_fun $ zip allargs argts' of
@@ -1042,10 +1042,10 @@ boundsCheck loc w e = do
                    I.CmpOp (I.CmpSlt I.Int32) e w
   letExp "bounds_check" =<< eAssert check loc
 
-shadowIdentsInExp :: [(VName, I.SubExp)] -> [Binding] -> I.SubExp
+shadowIdentsInExp :: [(VName, I.SubExp)] -> [Stm] -> I.SubExp
                   -> InternaliseM I.SubExp
 shadowIdentsInExp substs bnds res = do
-  body <- renameBody <=< insertBindingsM $ do
+  body <- renameBody <=< insertStmsM $ do
     -- XXX: we have to substitute names to fix type annotations in the
     -- bindings.  This goes away once we get rid of these type
     -- annotations.
@@ -1058,7 +1058,7 @@ shadowIdentsInExp substs bnds res = do
           letBindNames'_ [name] $ BasicOp $ SubExp se
           return nameSubsts
     nameSubsts <- foldM handleSubst HM.empty substs
-    mapM_ addBinding $ substituteNames nameSubsts bnds
+    mapM_ addStm $ substituteNames nameSubsts bnds
     return $ resultBody [substituteNames nameSubsts res]
   res' <- bodyBind body
   case res' of

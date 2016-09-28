@@ -7,7 +7,7 @@ module Futhark.Representation.SOACS
          -- * Syntax types
        , Prog
        , Body
-       , Binding
+       , Stm
        , Pattern
        , BasicOp
        , Exp
@@ -40,7 +40,7 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, BasicOp, Exp, Body, Binding,
+  hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType, PatElem)
 import Futhark.Representation.SOACS.SOAC
@@ -67,7 +67,7 @@ type Prog = AST.Prog SOACS
 type BasicOp = AST.BasicOp SOACS
 type Exp = AST.Exp SOACS
 type Body = AST.Body SOACS
-type Binding = AST.Binding SOACS
+type Stm = AST.Stm SOACS
 type Pattern = AST.Pattern SOACS
 type Lambda = AST.Lambda SOACS
 type ExtLambda = AST.ExtLambda SOACS

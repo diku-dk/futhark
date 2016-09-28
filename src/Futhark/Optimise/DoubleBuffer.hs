@@ -39,7 +39,7 @@ import           Futhark.MonadFreshNames
 import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.AST
 import           Futhark.Representation.ExplicitMemory
-                 hiding (Prog, Body, Binding, Pattern, PatElem,
+                 hiding (Prog, Body, Stm, Pattern, PatElem,
                          BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import           Futhark.Pass
 
@@ -110,25 +110,25 @@ type LoreConstraints lore inner m =
 optimiseBody :: LoreConstraints lore inner m =>
                 Body lore -> DoubleBufferM lore m (Body lore)
 optimiseBody body = do
-  bnds' <- optimiseBindings $ bodyBindings body
-  return $ body { bodyBindings = bnds' }
+  bnds' <- optimiseStms $ bodyStms body
+  return $ body { bodyStms = bnds' }
 
-optimiseBindings :: LoreConstraints lore inner m =>
-                    [Binding lore] -> DoubleBufferM lore m [Binding lore]
-optimiseBindings [] = return []
-optimiseBindings (e:es) = do
-  e_es <- optimiseBinding e
-  es' <- localScope (castScope $ scopeOf e_es) $ optimiseBindings es
+optimiseStms :: LoreConstraints lore inner m =>
+                [Stm lore] -> DoubleBufferM lore m [Stm lore]
+optimiseStms [] = return []
+optimiseStms (e:es) = do
+  e_es <- optimiseStm e
+  es' <- localScope (castScope $ scopeOf e_es) $ optimiseStms es
   return $ e_es ++ es'
 
-optimiseBinding :: LoreConstraints lore inner m =>
-                   Binding lore -> DoubleBufferM lore m [Binding lore]
-optimiseBinding (Let pat () (DoLoop ctx val form body)) = do
+optimiseStm :: LoreConstraints lore inner m =>
+               Stm lore -> DoubleBufferM lore m [Stm lore]
+optimiseStm (Let pat () (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst $ ctx++val)) $
            optimiseBody body
   (bnds, ctx', val', body'') <- optimiseLoop ctx val body'
   return $ bnds ++ [Let pat () $ DoLoop ctx' val' form body'']
-optimiseBinding (Let pat () e) = pure . Let pat () <$> mapExpM optimise e
+optimiseStm (Let pat () e) = pure . Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   , mapOnOp = optimiseOp
                                   }
@@ -142,7 +142,7 @@ optimiseKernelBody :: MonadFreshNames m =>
                       KernelBody InKernel
                    -> DoubleBufferM InKernel m (KernelBody InKernel)
 optimiseKernelBody kbody = do
-  stms' <- optimiseBindings $ kernelBodyStms kbody
+  stms' <- optimiseStms $ kernelBodyStms kbody
   return $ kbody { kernelBodyStms = stms' }
 
 optimiseLambda :: MonadFreshNames m =>
@@ -153,7 +153,7 @@ optimiseLambda lam = do
 
 optimiseLoop :: LoreConstraints lore inner m =>
                 [(FParam lore, SubExp)] -> [(FParam lore, SubExp)] -> Body lore
-             -> DoubleBufferM lore m ([Binding lore],
+             -> DoubleBufferM lore m ([Stm lore],
                                  [(FParam lore, SubExp)],
                                  [(FParam lore, SubExp)],
                                  Body lore)
@@ -166,7 +166,7 @@ optimiseLoop ctx val body = do
               (boundInBody body)
   -- Then create the allocations of the buffers and copies of the
   -- initial values.
-  (merge', allocs) <- allocBindings merge buffered
+  (merge', allocs) <- allocStms merge buffered
   -- Modify the loop body to copy buffered result arrays.
   let body' = doubleBufferResult (map fst merge) buffered body
       (ctx', val') = splitAt (length ctx) merge'
@@ -221,11 +221,11 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop = do
                     return NoBuffer
           _ -> return NoBuffer
 
-allocBindings :: LoreConstraints lore inner m =>
-                 [(FParam lore,SubExp)] -> [DoubleBuffer lore]
-              -> DoubleBufferM lore m ([(FParam lore, SubExp)],
-                                       [Binding lore])
-allocBindings merge = runWriterT . zipWithM allocation merge
+allocStms :: LoreConstraints lore inner m =>
+             [(FParam lore,SubExp)] -> [DoubleBuffer lore]
+          -> DoubleBufferM lore m ([(FParam lore, SubExp)],
+                                    [Stm lore])
+allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
                 Op $ Alloc size space]

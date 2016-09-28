@@ -62,7 +62,7 @@ buildCGfun cg fname  = do
                       foldM buildCGfun cg' callees
 
 buildCGbody :: [Name] -> Body -> [Name]
-buildCGbody callees = foldl (\x -> buildCGexp x . bindingExp) callees . bodyBindings
+buildCGbody callees = foldl (\x -> buildCGexp x . bindingExp) callees . bodyStms
 
 buildCGexp :: [Name] -> Exp -> [Name]
 buildCGexp callees (Apply fname _ _)

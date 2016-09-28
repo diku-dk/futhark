@@ -38,41 +38,41 @@ type TileM = State VNameSource
 
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
 optimiseBody (Body () bnds res) =
-  Body () <$> (concat <$> mapM optimiseBinding bnds) <*> pure res
+  Body () <$> (concat <$> mapM optimiseStm bnds) <*> pure res
 
-optimiseBinding :: Binding Kernels -> TileM [Binding Kernels]
-optimiseBinding (Let pat () (Op (Kernel cs space ts body))) = do
+optimiseStm :: Stm Kernels -> TileM [Stm Kernels]
+optimiseStm (Let pat () (Op (Kernel cs space ts body))) = do
   (extra_bnds, space', body') <- tileInKernelBody mempty initial_variance space body
   return $ extra_bnds ++ [Let pat () $ Op $ Kernel cs space' ts body']
   where initial_variance = HM.map mempty $ scopeOfKernelSpace space
-optimiseBinding (Let pat () e) =
+optimiseStm (Let pat () e) =
   pure <$> (Let pat () <$> mapExpM optimise e)
   where optimise = identityMapper { mapOnBody = optimiseBody }
 
 tileInKernelBody :: Names -> VarianceTable
                  -> KernelSpace -> KernelBody InKernel
-                 -> TileM ([Binding Kernels], KernelSpace, KernelBody InKernel)
+                 -> TileM ([Stm Kernels], KernelSpace, KernelBody InKernel)
 tileInKernelBody branch_variant initial_variance initial_kspace (KernelBody () kstms kres) = do
   (extra_bnds, kspace', kstms') <-
-    tileInBindings branch_variant initial_variance initial_kspace kstms
+    tileInStms branch_variant initial_variance initial_kspace kstms
   return (extra_bnds, kspace', KernelBody () kstms' kres)
 
 tileInBody :: Names -> VarianceTable
            -> KernelSpace -> Body InKernel
-           -> TileM ([Binding Kernels], KernelSpace, Body InKernel)
+           -> TileM ([Stm Kernels], KernelSpace, Body InKernel)
 tileInBody branch_variant initial_variance initial_kspace (Body () stms res) = do
   (extra_bnds, kspace', stms') <-
-    tileInBindings branch_variant initial_variance initial_kspace stms
+    tileInStms branch_variant initial_variance initial_kspace stms
   return (extra_bnds, kspace', Body () stms' res)
 
-tileInBindings :: Names -> VarianceTable
-               -> KernelSpace -> [Binding InKernel]
-               -> TileM ([Binding Kernels], KernelSpace, [Binding InKernel])
-tileInBindings branch_variant initial_variance initial_kspace kstms = do
+tileInStms :: Names -> VarianceTable
+           -> KernelSpace -> [Stm InKernel]
+           -> TileM ([Stm Kernels], KernelSpace, [Stm InKernel])
+tileInStms branch_variant initial_variance initial_kspace kstms = do
   ((kspace, extra_bndss), kstms') <-
     mapAccumLM tileInKernelStatement (initial_kspace,[]) kstms
   return (extra_bndss, kspace, kstms')
-  where variance = varianceInBindings initial_variance kstms
+  where variance = varianceInStms initial_variance kstms
 
         tileInKernelStatement (kspace, extra_bnds)
           (Let pat attr (Op (GroupStream w max_chunk lam accs arrs)))
@@ -170,19 +170,19 @@ tileInBindings branch_variant initial_variance initial_kspace kstms = do
           return (acc, stm)
 
 tileInStreamLambda :: Names -> VarianceTable -> KernelSpace -> GroupStreamLambda InKernel
-                   -> TileM ([Binding Kernels], KernelSpace, GroupStreamLambda InKernel)
+                   -> TileM ([Stm Kernels], KernelSpace, GroupStreamLambda InKernel)
 tileInStreamLambda branch_variant variance kspace lam = do
   (bnds, kspace', kbody') <-
     tileInBody branch_variant variance' kspace $ groupStreamLambdaBody lam
   return (bnds, kspace', lam { groupStreamLambdaBody = kbody' })
-  where variance' = varianceInBindings variance $
-                    bodyBindings $ groupStreamLambdaBody lam
+  where variance' = varianceInStms variance $
+                    bodyStms $ groupStreamLambdaBody lam
 
 is1dTileable :: MonadFreshNames m =>
                 Names -> KernelSpace -> VarianceTable -> SubExp -> VName -> LParam InKernel
-             -> Maybe (m ((KernelSpace, [Binding Kernels]),
+             -> Maybe (m ((KernelSpace, [Stm Kernels]),
                            LParam InKernel,
-                           [Binding InKernel]))
+                           [Stm InKernel]))
 is1dTileable branch_variant kspace variance block_size arr block_param = do
   guard $ HS.null $ HM.lookupDefault mempty arr variance
   guard $ HS.null branch_variant
@@ -193,9 +193,9 @@ is1dTileable branch_variant kspace variance block_size arr block_param = do
 is1_5dTileable :: MonadFreshNames m =>
                   Names -> KernelSpace -> VarianceTable
                -> SubExp -> VName -> LParam InKernel
-               -> Maybe (m ((KernelSpace, [Binding Kernels]),
+               -> Maybe (m ((KernelSpace, [Stm Kernels]),
                             LParam InKernel,
-                            [Binding InKernel]))
+                            [Stm InKernel]))
 is1_5dTileable branch_variant kspace variance block_size arr block_param = do
   (inner_gtid, inner_gdim) <- invariantToInnermostDimension
   mk_structure <-
@@ -259,7 +259,7 @@ tile1d :: MonadFreshNames m =>
           KernelSpace
        -> SubExp
        -> LParam InKernel
-       -> m (LParam InKernel, [Binding InKernel])
+       -> m (LParam InKernel, [Stm InKernel])
 tile1d kspace block_size block_param = do
   outer_block_param <- do
     name <- newVName $ baseString (paramName block_param) ++ "_outer"
@@ -285,7 +285,7 @@ tile1d kspace block_size block_param = do
 
 is2dTileable :: MonadFreshNames m =>
                 Names -> KernelSpace -> VarianceTable -> SubExp -> VName -> LParam InKernel
-             -> Maybe (SubExp -> [VName] -> m (LParam InKernel, [Binding InKernel]))
+             -> Maybe (SubExp -> [VName] -> m (LParam InKernel, [Stm InKernel]))
 is2dTileable branch_variant kspace variance block_size arr block_param = do
   guard $ HS.null branch_variant
   pt <- case rowType $ paramType block_param of
@@ -345,21 +345,21 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
             Nothing
 
 -- | The variance table keeps a mapping from a variable name
--- (something produced by a 'Binding') to the kernel thread indices
+-- (something produced by a 'Stm') to the kernel thread indices
 -- that name depends on.  If a variable is not present in this table,
 -- that means it is bound outside the kernel (and so can be considered
 -- invariant to all dimensions).
 type VarianceTable = HM.HashMap VName Names
 
-varianceInBindings :: VarianceTable -> [Binding InKernel] -> VarianceTable
-varianceInBindings = foldl varianceInBinding
+varianceInStms :: VarianceTable -> [Stm InKernel] -> VarianceTable
+varianceInStms = foldl varianceInStm
 
-varianceInBinding :: VarianceTable -> Binding InKernel -> VarianceTable
-varianceInBinding variance bnd =
+varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
+varianceInStm variance bnd =
   foldl' add variance $ patternNames $ bindingPattern bnd
   where add variance' v = HM.insert v binding_variance variance'
         look variance' v = HS.insert v $ HM.lookupDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ HS.toList (freeInBinding bnd)
+        binding_variance = mconcat $ map (look variance) $ HS.toList (freeInStm bnd)
 
 sufficientGroups :: MonadBinder m =>
                     [(VName, SubExp, VName, SubExp)] -> SubExp

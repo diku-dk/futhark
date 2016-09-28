@@ -43,25 +43,24 @@ analyseBody :: (Attributes lore, CanBeRanged (Op lore)) =>
                Body lore
             -> RangeM (Body (Ranges lore))
 analyseBody (Body lore origbnds result) =
-  analyseBindings origbnds $ \bnds' ->
+  analyseStms origbnds $ \bnds' ->
     return $ mkRangedBody lore bnds' result
 
-analyseBindings :: (Attributes lore, CanBeRanged (Op lore)) =>
-                   [Binding lore]
-                -> ([Binding (Ranges lore)] -> RangeM a)
-                -> RangeM a
-analyseBindings = analyseBindings' []
-  where analyseBindings' acc [] m =
+analyseStms :: (Attributes lore, CanBeRanged (Op lore)) =>
+               [Stm lore]
+            -> ([Stm (Ranges lore)] -> RangeM a)
+            -> RangeM a
+analyseStms = analyseStms' []
+  where analyseStms' acc [] m =
           m $ reverse acc
-        analyseBindings' acc (bnd:bnds) m = do
-          bnd' <- analyseBinding bnd
+        analyseStms' acc (bnd:bnds) m = do
+          bnd' <- analyseStm bnd
           bindPattern (bindingPattern bnd') $
-            analyseBindings' (bnd':acc) bnds m
+            analyseStms' (bnd':acc) bnds m
 
-analyseBinding :: (Attributes lore, CanBeRanged (Op lore)) =>
-                  Binding lore
-               -> RangeM (Binding (Ranges lore))
-analyseBinding (Let pat lore e) = do
+analyseStm :: (Attributes lore, CanBeRanged (Op lore)) =>
+              Stm lore -> RangeM (Stm (Ranges lore))
+analyseStm (Let pat lore e) = do
   e' <- analyseExp e
   pat' <- simplifyPatRanges $ addRangesToPattern pat e'
   return $ Let pat' lore e'

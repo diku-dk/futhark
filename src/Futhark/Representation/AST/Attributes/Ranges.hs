@@ -234,7 +234,7 @@ expRanges (DoLoop ctxmerge valmerge (ForLoop i iterations) body) =
   zipWith returnedRange valmerge $ rangesOf body
   where bound_in_loop =
           HS.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
-          concatMap (patternNames . bindingPattern) (bodyBindings body)
+          concatMap (patternNames . bindingPattern) (bodyStms body)
 
         returnedRange mergeparam (lower, upper) =
           (returnedBound mergeparam lower,

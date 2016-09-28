@@ -117,8 +117,8 @@ bindingPattern :: E.Pattern -> [I.ExtType] -> (I.Pattern -> InternaliseM a)
 bindingPattern pat ts m = do
   pat' <- flattenPattern pat
   (ts',shapes) <- instantiateShapes' ts
-  let addShapeBindings = m . I.basicPattern' shapes . map I.paramIdent
-  bindingFlatPattern pat' ts' addShapeBindings
+  let addShapeStms = m . I.basicPattern' shapes . map I.paramIdent
+  bindingFlatPattern pat' ts' addShapeStms
 
 makeShapeIdentsFromContext :: MonadFreshNames m =>
                               HM.HashMap VName Int

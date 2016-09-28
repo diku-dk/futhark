@@ -55,7 +55,7 @@ module Futhark.CodeGen.ImpGen
   , everythingVolatile
   , compileBody
   , defCompileBody
-  , compileBindings
+  , compileStms
   , compileExp
   , sliceArray
   , offsetArray
@@ -115,7 +115,7 @@ type ExpCompiler lore op = Destination -> Exp lore -> ImpM lore op (ExpCompilerR
 
 -- | The result of the substitute expression compiler.
 data ExpCompilerResult lore op =
-      CompileBindings [Binding lore]
+      CompileStms [Stm lore]
     -- ^ New bindings.  Note that the bound expressions will
     -- themselves be compiled using the expression compiler.
     | CompileExp (Exp lore)
@@ -425,7 +425,7 @@ compileBody dest body = do
 
 defCompileBody :: ExplicitMemorish lore => Destination -> Body lore -> ImpM lore op ()
 defCompileBody (Destination dest) (Body _ bnds ses) =
-  compileBindings bnds $ zipWithM_ compileSubExpTo dest ses
+  compileStms bnds $ zipWithM_ compileSubExpTo dest ses
 
 compileLoopBody :: ExplicitMemorish lore =>
                    [VName] -> Body lore -> ImpM lore op (Imp.Code op)
@@ -437,7 +437,7 @@ compileLoopBody mergenames (Body _ bnds ses) = do
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++"_tmp") . baseString) mergenames
-  collect $ compileBindings bnds $ do
+  collect $ compileStms bnds $ do
     copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
       subExpType se >>= \case
         Prim bt  -> do
@@ -452,12 +452,12 @@ compileLoopBody mergenames (Body _ bnds ses) = do
         _ -> return $ return ()
     sequence_ copy_to_merge_params
 
-compileBindings :: ExplicitMemorish lore => [Binding lore] -> ImpM lore op a -> ImpM lore op a
-compileBindings []     m = m
-compileBindings (Let pat _ e:bs) m =
+compileStms :: ExplicitMemorish lore => [Stm lore] -> ImpM lore op a -> ImpM lore op a
+compileStms []     m = m
+compileStms (Let pat _ e:bs) m =
   declaringVars (Just e) (patternElements pat) $ do
     dest <- destinationFromPattern pat
-    compileExp dest e $ compileBindings bs m
+    compileExp dest e $ compileStms bs m
 
 compileExp :: ExplicitMemorish lore =>
               Destination -> Exp lore -> ImpM lore op a -> ImpM lore op a
@@ -465,7 +465,7 @@ compileExp targets e m = do
   ec <- asks envExpCompiler
   res <- ec targets e
   case res of
-    CompileBindings bnds -> compileBindings bnds m
+    CompileStms bnds -> compileStms bnds m
     CompileExp e'        -> do defCompileExp targets e'
                                m
     Done                 -> m

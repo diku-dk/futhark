@@ -1022,7 +1022,7 @@ bodyReturns :: (Monad m, HasScope lore m, ExplicitMemorish lore) =>
                [ExtType] -> Body lore
             -> m [BodyReturns]
 bodyReturns ts (Body _ bnds res) = do
-  let boundHere = boundInBindings bnds
+  let boundHere = boundInStms bnds
       inspect _ (Constant val) =
         return $ ReturnsScalar $ primValueType val
       inspect (Prim bt) (Var _) =
@@ -1060,11 +1060,11 @@ bodyReturns ts (Body _ bnds res) = do
   evalStateT (zipWithM inspect ts res)
     (0, HM.empty)
 
-boundInBindings :: [Binding lore] -> HM.HashMap VName (PatElem lore)
-boundInBindings [] = HM.empty
-boundInBindings (bnd:bnds) =
-  boundInBinding `HM.union` boundInBindings bnds
-  where boundInBinding =
+boundInStms :: [Stm lore] -> HM.HashMap VName (PatElem lore)
+boundInStms [] = HM.empty
+boundInStms (bnd:bnds) =
+  boundInStm `HM.union` boundInStms bnds
+  where boundInStm =
           HM.fromList
           [ (patElemName bindee, bindee)
           | bindee <- patternElements $ bindingPattern bnd

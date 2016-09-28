@@ -40,7 +40,7 @@ import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Analysis.Rephrase (castBinding)
+import Futhark.Analysis.Rephrase (castStm)
 
 simpleKernels :: Simplifier.SimpleOps Kernels
 simpleKernels = Simplifier.bindableSimpleOps (simplifyKernelOp simpleInKernel inKernelEnv)
@@ -73,8 +73,8 @@ simplifyKernelOp ops env (ScanKernel cs w kernel_size lam foldlam nes arrs) = do
   (foldlam', foldlam_hoisted) <-
     Engine.subSimpleM ops env outer_vtable $
     Engine.simplifyLambda foldlam Nothing (map Just arrs')
-  mapM_ processHoistedBinding lam_hoisted
-  mapM_ processHoistedBinding foldlam_hoisted
+  mapM_ processHoistedStm lam_hoisted
+  mapM_ processHoistedStm foldlam_hoisted
   ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
     Engine.simplify kernel_size <*>
     pure lam' <*>
@@ -96,7 +96,7 @@ simplifyKernelOp ops env (Kernel cs space ts kbody) = do
                         `Engine.orIf` par_blocker
                         `Engine.orIf` Engine.isConsumed) $
         simplifyKernelBody kbody
-  mapM_ processHoistedBinding kbody_hoisted
+  mapM_ processHoistedStm kbody_hoisted
   return $ Kernel cs' space' ts' $ mkWiseKernelBody () kbody_bnds' kbody_res'
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
@@ -108,20 +108,20 @@ simplifyKernelOp _ _ TileSize = return TileSize
 simplifyKernelOp _ _ (SufficientParallelism se) =
   SufficientParallelism <$> Engine.simplify se
 
-processHoistedBinding :: (PrettyLore from, MonadBinder m, ExpAttr from ~ ExpAttr (Lore m),
-                          BodyAttr from ~ BodyAttr (Lore m), RetType from ~ RetType (Lore m),
-                          LetAttr from ~ LetAttr (Lore m),
-                          FParamAttr from ~ FParamAttr (Lore m),
-                          LParamAttr from ~ LParamAttr (Lore m)) =>
-                         Binding from -> m ()
-processHoistedBinding bnd
-  | Just bnd' <- castBinding bnd =
-      addBinding bnd'
+processHoistedStm :: (PrettyLore from, MonadBinder m, ExpAttr from ~ ExpAttr (Lore m),
+                      BodyAttr from ~ BodyAttr (Lore m), RetType from ~ RetType (Lore m),
+                      LetAttr from ~ LetAttr (Lore m),
+                      FParamAttr from ~ FParamAttr (Lore m),
+                      LParamAttr from ~ LParamAttr (Lore m)) =>
+                     Stm from -> m ()
+processHoistedStm bnd
+  | Just bnd' <- castStm bnd =
+      addStm bnd'
   | otherwise =
       fail $ "Cannot hoist binding: " ++ pretty bnd
 
 mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
-                    BodyAttr lore -> [Binding (Wise lore)] -> [KernelResult] -> KernelBody (Wise lore)
+                    BodyAttr lore -> [Stm (Wise lore)] -> [KernelResult] -> KernelBody (Wise lore)
 mkWiseKernelBody attr bnds res =
   let Body attr' _ _ = mkWiseBody attr bnds res_vs
   in KernelBody attr' bnds res
@@ -185,7 +185,7 @@ simplifyKernelBody :: Engine.SimplifiableLore lore =>
                       KernelBody lore
                    -> Engine.SimpleM lore [KernelResult]
 simplifyKernelBody (KernelBody _ stms res) = do
-  mapM_ Engine.simplifyBinding stms
+  mapM_ Engine.simplifyStm stms
   mapM Engine.simplify res
 
 simplifyGroupStreamLambda :: Engine.SimplifiableLore lore =>
@@ -289,11 +289,11 @@ fuseScanIota :: (MonadBinder m,
 fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
   | not $ null iota_params = do
       (fold_body, []) <- Engine.subSimpleM simpleInKernel inKernelEnv vtable $
-        (uncurry (flip mkBodyM) =<<) $ collectBindings $ localScope (castScope $ scopeOf foldlam) $ do
+        (uncurry (flip mkBodyM) =<<) $ collectStms $ localScope (castScope $ scopeOf foldlam) $ do
           forM_ iota_params $ \(p, x) ->
             letBindNames'_ [paramName p] $
             BasicOp $ BinOp (Add Int32) (Var thread_index) x
-          mapM_ addBinding $ bodyBindings $ lambdaBody foldlam
+          mapM_ addStm $ bodyStms $ lambdaBody foldlam
           return $ bodyResult $ lambdaBody foldlam
       let (arr_params', arrs') = unzip params_and_arrs
           foldlam' = foldlam { lambdaBody = fold_body
@@ -355,7 +355,7 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
           chunk_size = groupStreamChunkSize lam
           offset = groupStreamChunkOffset lam
 
-      body' <- insertBindingsM $ do
+      body' <- insertStmsM $ do
         start <- letSubExp "iota_start" $
             BasicOp $ BinOp (Add Int32) (Var offset) iota_start
         letBindNames'_ [paramName iota_param] $
@@ -391,7 +391,7 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
   when (kres == kres')
     cannotSimplify
 
-  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs space ts' $
+  addStm $ Let (Pattern [] kpes') attr $ Op $ Kernel cs space ts' $
     mkWiseKernelBody () kstms kres'
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
@@ -433,10 +433,10 @@ distributeKernelResults (vtable, used)
   when (kpes' == kpes)
     cannotSimplify
 
-  addBinding $ Let (Pattern [] kpes') attr $
+  addStm $ Let (Pattern [] kpes') attr $
     Op $ Kernel kcs kspace kts' $ mkWiseKernelBody () (reverse kstms_rev) kres'
   where
-    free_in_kstms = mconcat $ map freeInBinding kstms
+    free_in_kstms = mconcat $ map freeInStm kstms
 
     distribute (kpes', kts', kres', kstms_rev) bnd
       | Let (Pattern [] [pe]) _ (BasicOp (Index cs arr slice)) <- bnd,

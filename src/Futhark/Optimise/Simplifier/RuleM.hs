@@ -40,24 +40,24 @@ instance MonadBinder m => MonadBinder (RuleM m) where
   mkLetNamesM names e = RuleM $ lift $ mkLetNamesM names e
   mkBodyM bnds res = RuleM $ lift $ mkBodyM bnds res
 
-  addBinding                = RuleM . lift . addBinding
-  collectBindings (RuleM m) = RuleM $ MaybeT $ do
-    (x, bnds) <- collectBindings $ runMaybeT m
+  addStm                = RuleM . lift . addStm
+  collectStms (RuleM m) = RuleM $ MaybeT $ do
+    (x, bnds) <- collectStms $ runMaybeT m
     case x of Nothing -> return Nothing
               Just x' -> return $ Just (x', bnds)
 
 instance MonadBinder m => Alternative (RuleM m) where
   empty = RuleM $ MaybeT $ return Nothing
   RuleM m1 <|> RuleM m2 = RuleM $ do
-    (x, bnds) <- lift $ collectBindings $ runMaybeT m1
+    (x, bnds) <- lift $ collectStms $ runMaybeT m1
     case x of Nothing -> m2
-              Just x' -> do lift $ mapM_ addBinding bnds
+              Just x' -> do lift $ mapM_ addStm bnds
                             return x'
 simplify :: MonadBinder m =>
             RuleM m a
-         -> m (Maybe (a, [Binding (Lore m)]))
+         -> m (Maybe (a, [Stm (Lore m)]))
 simplify (RuleM m) = do
-  (x, bnds) <- collectBindings $ runMaybeT m
+  (x, bnds) <- collectStms $ runMaybeT m
   case x of
     Just x' -> return $ Just (x', bnds)
     Nothing -> return Nothing

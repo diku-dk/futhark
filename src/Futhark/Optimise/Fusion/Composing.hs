@@ -27,7 +27,7 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
 import Futhark.Representation.AST
 import Futhark.Binder
-  (Bindable(..), insertBinding, insertBindings, mkLet')
+  (Bindable(..), insertStm, insertStms, mkLet')
 import Futhark.Construct (mapResult)
 
 -- | @fuseMaps lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
@@ -69,7 +69,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
         new_body2 = let bnds res = [ mkLet' [] [p] $ BasicOp $ SubExp e
                                    | (p,e) <- zip pat res]
                         bindLambda res =
-                            bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
+                            bnds res `insertStms` makeCopiesInner (lambdaBody lam2)
                     in makeCopies $ mapResult bindLambda (lambdaBody lam1)
         new_body2_rses = bodyResult new_body2
         new_body2'= new_body2 { bodyResult = new_body2_rses ++
@@ -149,7 +149,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
                           arrmap)
         forward to from b =
           mkLet' [] [to] (BasicOp $ SubExp $ Var from)
-          `insertBinding` b
+          `insertStm` b
 
 fuseRedomap :: Bindable lore =>
                Names  -> [VName]
@@ -194,7 +194,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
 mergeReduceOps :: Bindable lore => Lambda lore -> Lambda lore -> Lambda lore
 mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
   let body' = Body (bodyLore bdy1)
-                   (bodyBindings bdy1 ++ bodyBindings bdy2)
+                   (bodyStms bdy1 ++ bodyStms bdy2)
                    (bodyResult   bdy1 ++ bodyResult   bdy2)
       (len1, len2) = (length rtp1, length rtp2)
       par'  = take len1 par1 ++ take len2 par2 ++ drop len1 par1 ++ drop len2 par2

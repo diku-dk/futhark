@@ -7,7 +7,7 @@ module Futhark.Internalise.Monad
   , VarSubstitutions
   , InternaliseEnv(..)
   , ConstParams
-  , FunBinding (..)
+  , FunStm (..)
   , lookupFunction
   , bindingIdentTypes
   , bindingParamTypes
@@ -35,13 +35,13 @@ import Prelude hiding (mapM)
 
 type ConstParams = [(Name,VName)]
 
-data FunBinding = FunBinding
+data FunStm = FunStm
                   { internalFun :: (Name, ConstParams, [VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.StructType, [E.StructType])
                   }
 
-type FunTable = HM.HashMap VName FunBinding
+type FunTable = HM.HashMap VName FunStm
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
@@ -59,7 +59,7 @@ newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                           (Except String)))
                                         a)
   deriving (Functor, Applicative, Monad,
-            MonadWriter (DL.DList Binding),
+            MonadWriter (DL.DList Stm),
             MonadReader InternaliseEnv,
             MonadState VNameSource,
             MonadError String,
@@ -76,10 +76,10 @@ instance MonadBinder InternaliseM where
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
-  addBinding =
-    InternaliseM . addBinding
-  collectBindings (InternaliseM m) =
-    InternaliseM $ collectBindings m
+  addStm =
+    InternaliseM . addStm
+  collectStms (InternaliseM m) =
+    InternaliseM $ collectStms m
 
 runInternaliseM :: MonadFreshNames m =>
                    FunTable -> InternaliseM a
@@ -96,7 +96,7 @@ runInternaliseM ftable (InternaliseM m) =
                  , envDoBoundsChecks = True
                  }
 
-lookupFunction :: VName -> InternaliseM FunBinding
+lookupFunction :: VName -> InternaliseM FunStm
 lookupFunction fname = do
   fun <- HM.lookup fname <$> asks envFtable
   case fun of Nothing   -> fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found"
