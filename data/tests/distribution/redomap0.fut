@@ -13,7 +13,7 @@
 --   loop
 -- ==
 --
--- structure distributed { If/True/Kernel 1 If/False/Kernel 3 }
+-- structure distributed { Kernel 1 }
 
 fun main(a: [][]int): []int =
   map (fn (a_r: []int): int  =>

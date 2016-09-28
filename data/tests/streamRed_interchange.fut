@@ -111,7 +111,7 @@
 -- -0.000443f32, 0.000283f32, -0.000084f32, 0.000129f32, 0.000419f32,
 -- -0.000178f32, -0.001124f32, -0.001211f32, 0.000297f32, 0.000291f32,
 -- 0.001163f32, 0.001455f32]]}
--- structure distributed { Kernel 6 ScanKernel 2 }
+-- structure distributed { Kernel 4 ScanKernel 2 }
 
 fun main(nfeatures: int, npoints: int, nclusters: int): [nclusters][nfeatures]f32 =
   let membership = map (%nclusters) (iota(npoints))
