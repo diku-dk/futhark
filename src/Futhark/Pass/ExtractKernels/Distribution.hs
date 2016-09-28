@@ -1,7 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Futhark.Pass.ExtractKernels.Distribution
        (
          Target
@@ -12,6 +14,7 @@ module Futhark.Pass.ExtractKernels.Distribution
        , outerTarget
        , pushOuterTarget
        , pushInnerTarget
+       , targetsScope
 
        , LoopNesting (..)
        , ppLoopNesting
@@ -24,11 +27,15 @@ module Futhark.Pass.ExtractKernels.Distribution
        , pushInnerNesting
 
        , KernelNest
+       , ppKernelNest
+       , pushKernelNesting
+       , pushInnerKernelNesting
        , kernelNestLoops
        , kernelNestWidths
        , boundInKernelNest
        , boundInKernelNests
        , flatKernel
+       , constructKernel
 
        , tryDistribute
        , tryDistributeBinding
@@ -85,12 +92,21 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget target (inner_target, targets) =
   (target, targets ++ [inner_target])
 
+targetScope :: Target -> Scope Kernels
+targetScope = scopeOf . fst
+
+targetsScope :: Targets -> Scope Kernels
+targetsScope (t, ts) = mconcat $ map targetScope $ t : ts
+
 data LoopNesting = MapNesting { loopNestingPattern :: Pattern Kernels
                               , loopNestingCertificates :: Certificates
                               , loopNestingWidth :: SubExp
                               , loopNestingParamsAndArrs :: [(Param Type, VName)]
                               }
                  deriving (Show)
+
+instance Scoped Kernels LoopNesting where
+  scopeOf = scopeOfLParams . map fst . loopNestingParamsAndArrs
 
 ppLoopNesting :: LoopNesting -> String
 ppLoopNesting (MapNesting _ _ _ params_and_arrs) =
@@ -150,12 +166,25 @@ letBindInInnerNesting names (nest, nestings) =
 -- from the similar types elsewhere!
 type KernelNest = (LoopNesting, [LoopNesting])
 
+ppKernelNest :: KernelNest -> String
+ppKernelNest (nesting, nestings) =
+  unlines $ map ppLoopNesting $ nesting : nestings
+
 -- | Add new outermost nesting, pushing the current outermost to the
 -- list, also taking care to swap patterns if necessary.
 pushKernelNesting :: Target -> LoopNesting -> KernelNest -> KernelNest
 pushKernelNesting target newnest (nest, nests) =
   (fixNestingPatternOrder newnest target (loopNestingPattern nest),
    nest : nests)
+
+-- | Add new innermost nesting, pushing the current outermost to the
+-- list.
+pushInnerKernelNesting :: Target -> LoopNesting -> KernelNest -> KernelNest
+pushInnerKernelNesting target newnest (nest, nests) =
+  (nest, nests ++ [fixNestingPatternOrder newnest target (loopNestingPattern innermost)])
+  where innermost = case reverse nests of
+          []  -> nest
+          n:_ -> n
 
 fixNestingPatternOrder :: LoopNesting -> Target -> Pattern Kernels -> LoopNesting
 fixNestingPatternOrder nest (_,res) inner_pat =
@@ -186,7 +215,7 @@ kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
 constructKernel :: (MonadFreshNames m, HasScope Kernels m) =>
                    KernelNest -> KernelBody InKernel
-                -> m ([Binding Kernels], Binding Kernels)
+                -> m ([Binding Kernels], SubExp, Binding Kernels)
 constructKernel kernel_nest inner_body = do
   (w_bnds, w, ispace, inps, rts) <- flatKernel kernel_nest
   let used_inps = filter inputIsUsed inps
@@ -196,6 +225,7 @@ constructKernel kernel_nest inner_body = do
 
   let kbnds = w_bnds ++ ksize_bnds
   return (kbnds,
+          w,
           Let (loopNestingPattern first_nest) () $ Op k)
   where
     first_nest = fst kernel_nest
@@ -458,7 +488,7 @@ tryDistribute nest targets stms =
   \case
     Just (targets', distributed) -> do
       let targets_scope = mconcat $ map (scopeOf . fst) $ uncurry (:) targets'
-      (w_bnds, kernel_bnd) <- localScope targets_scope $
+      (w_bnds, _, kernel_bnd) <- localScope targets_scope $
         constructKernel distributed inner_body
       distributed' <- renameBinding kernel_bnd
       logMsg $ "distributing\n" ++

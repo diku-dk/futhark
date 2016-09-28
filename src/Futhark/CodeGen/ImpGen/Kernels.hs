@@ -81,9 +81,15 @@ kernelCompiler dest GroupSize = do
   [v] <- ImpGen.funcallTargets dest
   ImpGen.emit $ Imp.Op $ Imp.GetGroupSize v
 
+
 kernelCompiler dest TileSize = do
   [v] <- ImpGen.funcallTargets dest
   ImpGen.emit $ Imp.Op $ Imp.GetTileSize v
+
+kernelCompiler dest (SufficientParallelism se) = do
+  [v] <- ImpGen.funcallTargets dest
+  se' <- ImpGen.compileSubExp se
+  ImpGen.emit $ Imp.SetScalar v $ Imp.CmpOpExp (CmpSlt Int32) (64*1024) se'
 
 kernelCompiler dest (Kernel _ space _ kernel_body) = do
 

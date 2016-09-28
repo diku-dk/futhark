@@ -4,7 +4,7 @@
 -- group-level stream.
 --
 -- ==
--- structure distributed { Kernel 2 Kernel/DoLoop 1 }
+-- structure distributed { If/True/Kernel 1 If/False/Kernel 4 }
 
 fun indexOfMax8 ((x,i): (u8,int)) ((y,j): (u8,int)): (u8,int) =
   if x < y then (y,j) else (x,i)

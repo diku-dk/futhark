@@ -105,6 +105,8 @@ simplifyKernelOp ops env (Kernel cs space ts kbody) = do
 simplifyKernelOp _ _ NumGroups = return NumGroups
 simplifyKernelOp _ _ GroupSize = return GroupSize
 simplifyKernelOp _ _ TileSize = return TileSize
+simplifyKernelOp _ _ (SufficientParallelism se) =
+  SufficientParallelism <$> Engine.simplify se
 
 processHoistedBinding :: (PrettyLore from, MonadBinder m, ExpAttr from ~ ExpAttr (Lore m),
                           BodyAttr from ~ BodyAttr (Lore m), RetType from ~ RetType (Lore m),
