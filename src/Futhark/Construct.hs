@@ -27,6 +27,8 @@ module Futhark.Construct
   , eDivRoundingUp
   , eRoundToMultipleOf
 
+  , asIntZ, asIntS
+
   , resultBody
   , resultBodyM
   , insertStmsM
@@ -221,7 +223,7 @@ eValue (ArrayVal a bt shape) = do
       rowsize  = product rowshape
       rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
                  | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (intConst Int32 . toInteger) rowshape)
+      rowtype = Array bt (Shape $ map (intConst Int64 . toInteger) rowshape)
                 NoUniqueness
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
   return $ BasicOp $ ArrayLit ses rowtype
@@ -257,6 +259,27 @@ eRoundToMultipleOf t x d =
         eMinus = eBinOp (Sub t)
         ePlus = eBinOp (Add t)
 
+-- | Sign-extend to the given integer type.
+asIntS :: MonadBinder m => IntType -> SubExp -> m SubExp
+asIntS = asInt SExt
+
+-- | Zero-extend to the given integer type.
+asIntZ :: MonadBinder m => IntType -> SubExp -> m SubExp
+asIntZ = asInt ZExt
+
+asInt :: MonadBinder m =>
+         (IntType -> IntType -> ConvOp) -> IntType -> SubExp -> m SubExp
+asInt ext to_it e = do
+  e_t <- subExpType e
+  case e_t of
+    Prim (IntType from_it)
+      | to_it == from_it -> return e
+      | otherwise -> letSubExp s $ BasicOp $ ConvOp (ext from_it to_it) e
+    _ -> fail "asInt: wrong type"
+  where s = case e of Var v -> baseString v
+                      _     -> "to_" ++ pretty to_it
+
+
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
              BinOp -> SubExp -> [SubExp] -> m (Exp (Lore m))
@@ -291,7 +314,7 @@ binOpLambda bop t = do
 fullSlice :: Type -> [DimIndex SubExp] -> Slice SubExp
 fullSlice t slice =
   slice ++
-  map (DimSlice (constant (0::Int32)))
+  map (DimSlice (constant (0::Int64)))
   (drop (length slice) $ arrayDims t)
 
 -- | Like 'fullSlice', but the dimensions are simply numeric.
@@ -361,7 +384,7 @@ instantiateShapes' :: MonadFreshNames m =>
                    -> m ([TypeBase Shape u], [Ident])
 instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
-  where instantiate _ = do v <- lift $ newIdent "size" (Prim $ IntType Int32)
+  where instantiate _ = do v <- lift $ newIdent "size" $ Prim int64
                            tell [v]
                            return $ Var $ identName v
 
@@ -378,7 +401,7 @@ instantiateShapesFromIdentList idents ts =
 instantiateExtTypes :: [VName] -> [ExtType] -> [Ident]
 instantiateExtTypes names rt =
   let (shapenames,valnames) = splitAt (shapeContextSize rt) names
-      shapes = [ Ident name (Prim $ IntType Int32) | name <- shapenames ]
+      shapes = [ Ident name (Prim int64) | name <- shapenames ]
       valts  = instantiateShapesFromIdentList shapes rt
       vals   = [ Ident name t | (name,t) <- zip valnames valts ]
   in shapes ++ vals
@@ -392,7 +415,7 @@ instantiateIdents names ts
         nextShape _ = do
           (context', remaining) <- get
           case remaining of []   -> lift Nothing
-                            x:xs -> do let ident = Ident x (Prim $ IntType Int32)
+                            x:xs -> do let ident = Ident x (Prim int64)
                                        put (context'++[ident], xs)
                                        return $ Var x
     (ts', (context', _)) <-

@@ -568,9 +568,9 @@ defCompileBasicOp (Destination [dest]) (Iota n e s et) = do
   e' <- compileSubExp e
   s' <- compileSubExp s
   emit $ Imp.DeclareScalar x $ IntType et
-  let i' = ConvOpExp (SExt Int32 et) $ Imp.var i $ IntType et
+  let i' = ConvOpExp (SExt Int32 et) $ Imp.var i $ IntType Int32
   declaringLoopVar i Int32 $ withPrimVar x (IntType et) $
-    emit =<< (Imp.For i et n' <$>
+    emit =<< (Imp.For i Int32 n' <$>
               collect (do emit $ Imp.SetScalar x $ e' + i' * s'
                           copyDWIMDest dest [varIndex i] (Var x) []))
 

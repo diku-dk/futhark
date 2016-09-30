@@ -384,7 +384,8 @@ same type as ``n``.
 ``replicate n x``
 ~~~~~~~~~~~~~~~~~~~
 
-An array consisting of ``n`` copies of ``a``.
+An array consisting of ``n`` copies of ``a``.  The ``n`` argument can
+be of any integral type.
 
 ``shape a``
 ~~~~~~~~~~~~~~
