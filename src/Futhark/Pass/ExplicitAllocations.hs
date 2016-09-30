@@ -622,8 +622,8 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
   where (_ctxparams, ctxinit) = unzip ctx
         (_valparams, valinit) = unzip val
         (ctxres, valres) = splitAt (length ctx) bodyres
-        formBinds (ForLoop i _) =
-          localScope $ HM.singleton i IndexInfo
+        formBinds (ForLoop i it _) =
+          localScope $ HM.singleton i $ IndexInfo it
         formBinds (WhileLoop _) =
           id
 allocInExp (Apply fname args rettype) = do
@@ -784,8 +784,8 @@ allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries = do
     allocInChunkedParameters (LeafExp block_offset int32) $
     zip arr_params arr_summaries
 
-  body' <- localScope (HM.insert block_size IndexInfo $
-                       HM.insert block_offset IndexInfo $
+  body' <- localScope (HM.insert block_size (IndexInfo Int32) $
+                       HM.insert block_offset (IndexInfo Int32) $
                        scopeOfLParams $ acc_params' ++ arr_params')  $
            local (boundDim block_size maxchunk) $
            allocInBodyNoDirect body

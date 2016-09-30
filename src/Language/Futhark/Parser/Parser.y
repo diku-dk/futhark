@@ -583,13 +583,13 @@ LetBody :: { UncheckedExp }
     | LetExp %prec letprec { $1 }
 
 LoopForm : for VarId '<' Exp
-           { For FromUpTo (zeroExpression (srclocOf $1)) $2 $4 }
+           { For FromUpTo ZeroBound $2 $4 }
          | for Atom '<=' VarId '<' Exp
-           { For FromUpTo $2 $4 $6 }
+           { For FromUpTo (ExpBound $2) $4 $6 }
          | for Atom '>' VarId '>=' Exp
-           { For FromDownTo $6 $4 $2 }
+           { For FromDownTo (ExpBound $6) $4 $2 }
          | for Atom '>' VarId
-           { For FromDownTo (zeroExpression (srclocOf $1)) $4 $2 }
+           { For FromDownTo ZeroBound $4 $2 }
          | while Exp      { While $2 }
 
 Slice :: { [UncheckedDimIndex] }
@@ -822,9 +822,6 @@ patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var (QualName ([],identName ident)) NoInfo $ srclocOf ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
-
-zeroExpression :: SrcLoc -> UncheckedExp
-zeroExpression = Literal $ PrimValue $ SignedValue $ Int32Value 0
 
 commutativity :: LambdaBase ty vn -> Commutativity
 commutativity (BinOpFun binop _ _ _ _)

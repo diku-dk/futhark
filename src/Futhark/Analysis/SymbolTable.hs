@@ -97,7 +97,7 @@ castSymbolTable :: (SameScope from to,
                     RetType from ~ RetType to) =>
                    SymbolTable from -> SymbolTable to
 castSymbolTable = genCastSymbolTable loopVar letBound fParam lParam freeVar
-  where loopVar (LoopVarEntry r d) = LoopVar $ LoopVarEntry r d
+  where loopVar (LoopVarEntry r d it) = LoopVar $ LoopVarEntry r d it
         letBound e
           | Just e' <- castStm $ letBoundStm e =
               LetBound e { letBoundStm = e'
@@ -139,6 +139,7 @@ data Entry lore = LoopVar (LoopVarEntry lore)
 data LoopVarEntry lore =
   LoopVarEntry { loopVarRange    :: ScalExpRange
                , loopVarStmDepth :: Int
+               , loopVarType     :: IntType
                }
 
 data LetBoundEntry lore =
@@ -239,7 +240,7 @@ entryType :: Annotations lore => Entry lore -> Type
 entryType (LetBound entry) = typeOf $ letBoundAttr entry
 entryType (LParam entry)   = typeOf $ lparamAttr entry
 entryType (FParam entry)   = typeOf $ fparamAttr entry
-entryType (LoopVar _)      = Prim int32
+entryType (LoopVar entry)  = Prim $ IntType $ loopVarType entry
 entryType (FreeVar entry)  = typeOf $ freeVarAttr entry
 
 instance Substitutable lore => Substitute (LetBoundEntry lore) where
@@ -274,6 +275,7 @@ instance Substitutable lore => Substitute (LoopVarEntry lore) where
     LoopVarEntry {
           loopVarRange = substituteNames substs $ loopVarRange entry
         , loopVarStmDepth = loopVarStmDepth entry
+        , loopVarType = loopVarType entry
       }
 
 instance Substitute (NameInfo lore) => Substitute (FreeVarEntry lore) where
@@ -350,7 +352,7 @@ rangesRep = HM.filter knownRange . HM.map toRep . bindings
 typeEnv :: SymbolTable lore -> Scope lore
 typeEnv = HM.map nameType . bindings
   where nameType (LetBound entry) = LetInfo $ letBoundAttr entry
-        nameType (LoopVar _) = IndexInfo
+        nameType (LoopVar entry) = IndexInfo $ loopVarType entry
         nameType (FParam entry) = FParamInfo $ fparamAttr entry
         nameType (LParam entry) = LParamInfo $ lparamAttr entry
         nameType (FreeVar entry) = freeVarAttr entry
@@ -488,12 +490,13 @@ insertArrayLParam param Nothing vtable =
   -- Well, we still know that it's a param...
   insertLParam param vtable
 
-insertLoopVar :: VName -> SubExp -> SymbolTable lore -> SymbolTable lore
-insertLoopVar name bound = insertEntry name bind
+insertLoopVar :: VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
+insertLoopVar name it bound = insertEntry name bind
   where bind = LoopVar LoopVarEntry {
             loopVarRange = (Just 0,
-                            Just $ subExpToScalExp bound int32 - 1)
+                            Just $ subExpToScalExp bound (IntType it) - 1)
           , loopVarStmDepth = 0
+          , loopVarType = it
           }
 
 insertFreeVar :: VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore

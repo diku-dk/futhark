@@ -191,7 +191,7 @@ removeScopeAliases = HM.map unAlias
   where unAlias (LetInfo (_, attr)) = LetInfo attr
         unAlias (FParamInfo attr) = FParamInfo attr
         unAlias (LParamInfo attr) = LParamInfo attr
-        unAlias IndexInfo = IndexInfo
+        unAlias (IndexInfo it) = IndexInfo it
 
 removeProgAliases :: CanBeAliased (Op lore) =>
                      Prog (Aliases lore) -> Prog lore

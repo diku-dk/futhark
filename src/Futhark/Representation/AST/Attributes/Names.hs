@@ -68,7 +68,7 @@ freeWalker = identityWalker {
           binding (HS.fromList $ patternNames pat) $
             tell $ freeIn pat
 
-        expFree (DoLoop ctxmerge valmerge (ForLoop i boundexp) loopbody) = do
+        expFree (DoLoop ctxmerge valmerge (ForLoop i _ boundexp) loopbody) = do
           let (ctxparams, ctxinits) = unzip ctxmerge
               (valparams, valinits) = unzip valmerge
           mapM_ subExpFree $ ctxinits ++ valinits
@@ -222,7 +222,7 @@ instance FreeIn ExtRetType where
   freeIn = mconcat . map freeIn . retTypeValues
 
 instance FreeIn LoopForm where
-  freeIn (ForLoop _ bound) = freeIn bound
+  freeIn (ForLoop _ _ bound) = freeIn bound
   freeIn (WhileLoop cond) = freeIn cond
 
 instance FreeIn d => FreeIn (DimChange d) where

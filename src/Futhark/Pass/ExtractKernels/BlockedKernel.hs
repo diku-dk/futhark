@@ -522,7 +522,7 @@ blockedSegmentedScan segment_size pat cs w lam fold_lam nes arrs = do
 
   unused_flag_array <- newVName "unused_flag_array"
   flags_body <-
-    runBodyBinder $ localScope (HM.singleton flags_i IndexInfo) $ do
+    runBodyBinder $ localScope (HM.singleton flags_i $ IndexInfo Int32) $ do
       segment_index <- letSubExp "segment_index" $
                        BasicOp $ BinOp (SRem Int32) (Var flags_i) segment_size
       start_of_segment <- letSubExp "start_of_segment" $

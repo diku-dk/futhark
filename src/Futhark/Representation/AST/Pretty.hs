@@ -236,8 +236,8 @@ instance PrettyLore lore => Pretty (Exp lore) where
     text "loop" <+> ppPattern ctxparams valparams <+>
     equals <+> ppTuple' (ctxinit++valinit) </>
     (case form of
-      ForLoop i bound ->
-        text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
+      ForLoop i it bound ->
+        text "for" <+> ppr i <> text ":" <> ppr it <+> text "<" <+> align (ppr bound)
       WhileLoop cond ->
         text "while" <+> ppr cond
     ) <+> text "do" </>

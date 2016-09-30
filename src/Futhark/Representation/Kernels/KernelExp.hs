@@ -355,8 +355,8 @@ typeCheckKernelExp (GroupStream w maxchunk lam accs arrs) = do
 instance LParamAttr lore1 ~ LParamAttr lore2 =>
          Scoped lore1 (GroupStreamLambda lore2) where
   scopeOf (GroupStreamLambda chunk_size chunk_offset acc_params arr_params _) =
-    HM.insert chunk_size IndexInfo $
-    HM.insert chunk_offset IndexInfo $
+    HM.insert chunk_size (IndexInfo Int32) $
+    HM.insert chunk_offset (IndexInfo Int32) $
     scopeOfLParams (acc_params ++ arr_params)
 
 instance PrettyLore lore => Pretty (KernelExp lore) where

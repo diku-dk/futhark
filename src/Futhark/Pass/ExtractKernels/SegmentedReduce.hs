@@ -39,7 +39,7 @@ regularSegmentedRedomapAsScan segment_size num_segments nest_sizes flat_pat pat 
 
   is <- replicateM (length nest_sizes) $ newVName "i"
 
-  body <- runBodyBinder $ localScope (HM.fromList $ zip is $ repeat IndexInfo) $ do
+  body <- runBodyBinder $ localScope (HM.fromList $ zip is $ repeat $ IndexInfo Int32) $ do
     let segment_id = flattenIndex
                      (map SE.intSubExpToScalExp nest_sizes)
                      (map (SE.intSubExpToScalExp . Var) is)

@@ -351,7 +351,7 @@ instance Rename WhichThreads where
 
 scopeOfKernelSpace :: KernelSpace -> Scope lore
 scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
-  HM.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat IndexInfo
+  HM.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
   where structure' = case structure of
                        FlatSpace dims -> map fst dims
                        NestedSpace dims ->

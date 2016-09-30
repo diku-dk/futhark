@@ -153,12 +153,16 @@ mapLoopFormM :: (Applicative m, Monad m) =>
                 MapperBase vnf vnt m
              -> LoopFormBase NoInfo vnf
              -> m (LoopFormBase NoInfo vnt)
-mapLoopFormM tv (For FromUpTo lbound i ubound) =
-  For FromUpTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
-mapLoopFormM tv (For FromDownTo lbound i ubound) =
-  For FromDownTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
+mapLoopFormM tv (For dir lbound i ubound) =
+  For dir <$> mapLowerBoundM tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
 mapLoopFormM tv (While e) =
   While <$> mapOnExp tv e
+
+mapLowerBoundM :: (Monad m, Applicative m) =>
+                  MapperBase vnf vnt m
+               -> LowerBoundBase NoInfo vnf -> m (LowerBoundBase NoInfo vnt)
+mapLowerBoundM _ ZeroBound = pure ZeroBound
+mapLowerBoundM tv (ExpBound e) = ExpBound <$> mapExpM tv e
 
 mapUserTypeM :: (Applicative m, Monad m) =>
                 MapperBase vnf vnt m

@@ -43,8 +43,8 @@ setBodySpace space (Write dest dest_offset bt dest_space vol e) =
   vol (setExpSpace space e)
 setBodySpace space (c1 :>>: c2) =
   setBodySpace space c1 :>>: setBodySpace space c2
-setBodySpace space (For i e body) =
-  For i (setExpSpace space e) $ setBodySpace space body
+setBodySpace space (For i it e body) =
+  For i it (setExpSpace space e) $ setBodySpace space body
 setBodySpace space (While e body) =
   While (setExpSpace space e) $ setBodySpace space body
 setBodySpace space (If e c1 c2) =

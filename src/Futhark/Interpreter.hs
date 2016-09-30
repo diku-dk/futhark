@@ -435,12 +435,13 @@ evalExp (Apply fname args rettype) = do
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs
 evalExp (BasicOp op) = evalBasicOp op
 
-evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar boundexp) loopbody) = do
+evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp) loopbody) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
-    PrimVal (IntValue (Int32Value n)) -> do
-      vs <- foldM iteration mergestart [0..n-1]
+    PrimVal (IntValue bound_iv) -> do
+      let n = valueIntegral bound_iv
+      vs <- foldM iteration mergestart [0::Integer .. n-1]
       binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
         mapM (lookupVar . paramName) $
         loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
@@ -448,7 +449,9 @@ evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar boundexp) loopbody) = do
   where merge = ctxmerge ++ valmerge
         (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
-          binding [(Ident loopvar $ Prim int32, BindVar, PrimVal $ value i)] $
+          binding [(Ident loopvar $ Prim $ IntType it,
+                    BindVar,
+                    PrimVal $ IntValue $ intValue it i)] $
             binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
 
@@ -524,19 +527,15 @@ evalBasicOp (Iota e x s et) = do
      PrimVal (IntValue x'),
      PrimVal (IntValue s'))
       | e' >= 0 ->
-        let x'' = uniform x'
-            s'' = uniform s'
+        let x'' = valueIntegral x'
+            s'' = valueIntegral s'
         in return [ArrayVal (listArray (0,fromIntegral $ e'-1) $
                              map (IntValue . intValue et)
                              [x'',x''+s''..x''+(toInteger e'-1)*s''])
                    (IntType et) [fromIntegral e']]
       | otherwise ->
-        bad $ NegativeIota $ fromIntegral $ uniform x'
+        bad $ NegativeIota $ valueIntegral x'
     _ -> bad $ TypeError "evalBasicOp Iota"
-  where uniform (Int8Value v) = toInteger v
-        uniform (Int16Value v) = toInteger v
-        uniform (Int32Value v) = toInteger v
-        uniform (Int64Value v) = toInteger v
 
 evalBasicOp (Replicate (Shape ds) e2) = do
   ds' <- mapM (asInt32 "Replicate" <=< evalSubExp) ds

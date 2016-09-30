@@ -177,8 +177,8 @@ mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 
 mapOnLoopForm :: (Monad m, Applicative m) =>
                  Mapper flore tlore m -> LoopForm -> m LoopForm
-mapOnLoopForm tv (ForLoop i bound) =
-  ForLoop <$> mapOnVName tv i <*> mapOnSubExp tv bound
+mapOnLoopForm tv (ForLoop i it bound) =
+  ForLoop <$> mapOnVName tv i <*> pure it <*> mapOnSubExp tv bound
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
 

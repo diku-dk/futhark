@@ -137,14 +137,14 @@ removeScopeWisdom = HM.map unAlias
   where unAlias (LetInfo (_, attr)) = LetInfo attr
         unAlias (FParamInfo attr) = FParamInfo attr
         unAlias (LParamInfo attr) = LParamInfo attr
-        unAlias IndexInfo = IndexInfo
+        unAlias (IndexInfo it) = IndexInfo it
 
 addScopeWisdom :: Scope lore -> Scope (Wise lore)
 addScopeWisdom = HM.map alias
   where alias (LetInfo attr) = LetInfo (VarWisdom mempty unknownRange, attr)
         alias (FParamInfo attr) = FParamInfo attr
         alias (LParamInfo attr) = LParamInfo attr
-        alias IndexInfo = IndexInfo
+        alias (IndexInfo it) = IndexInfo it
 
 removeProgWisdom :: CanBeWise (Op lore) => Prog (Wise lore) -> Prog lore
 removeProgWisdom = runIdentity . rephraseProg removeWisdom

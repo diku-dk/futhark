@@ -236,24 +236,31 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
 
   (wrap, form_contents) <- case form of
     E.For dir lbound i ubound -> do
-      lbound' <- internaliseExp1 "lower_bound" lbound
       ubound' <- internaliseExp1 "upper_bound" ubound
-      num_iterations <- letSubExp "num_iterations" $
-                        BasicOp $ I.BinOp (I.Sub I.Int32) ubound' lbound'
       i' <- internaliseIdent i
+      ubound_t <- I.subExpType ubound'
+      it <- case ubound_t of
+              I.Prim (IntType it) -> return it
+              _                   -> fail "internaliseExp DoLoop: invalid type"
+      lbound' <- case lbound of
+                   ZeroBound -> return $ I.intConst it 0
+                   ExpBound e -> internaliseExp1 "lower_bound" e
+      num_iterations <- letSubExp "num_iterations" $
+                        BasicOp $ I.BinOp (I.Sub it) ubound' lbound'
+
       j <- newVName $ baseString i'
-      let i_ident = I.Ident i' $ I.Prim I.int32
+      let i_ident = I.Ident i' $ I.Prim $ IntType it
       i_bnds <- case dir of
         E.FromUpTo ->
           return [mkLet' [] [i_ident] $
-                  I.BasicOp $ I.BinOp (I.Add I.Int32) lbound' (I.Var j)]
+                  I.BasicOp $ I.BinOp (I.Add it) lbound' (I.Var j)]
         E.FromDownTo -> do
           upper_bound_less_one <-
             letSubExp "upper_bound_less_one" $
-            BasicOp $ I.BinOp (I.Sub I.Int32) ubound' (constant (1 :: I.Int32))
+            BasicOp $ I.BinOp (I.Sub it) ubound' (intConst it 1)
           return [mkLet' [] [i_ident] $
-                  I.BasicOp $ I.BinOp (I.Sub I.Int32) upper_bound_less_one (I.Var j)]
-      return ( bindingIdentTypes [I.Ident j $ I.Prim I.int32, i_ident] .
+                  I.BasicOp $ I.BinOp (I.Sub it) upper_bound_less_one (I.Var j)]
+      return ( bindingIdentTypes [I.Ident j $ I.Prim $ IntType it, i_ident] .
                extraBodyStms i_bnds
              , Left (j, num_iterations))
     E.While cond ->
@@ -272,14 +279,19 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                       (map I.paramType mergepat')
                       sets
       case form_contents of
-        Left (i', bound) ->
-             return (resultBody $ shapeargs ++ ses,
-                     (I.ForLoop i' bound,
-                      shapepat,
-                      mergepat',
-                      id,
-                      mergeinit,
-                      []))
+        Left (i', bound) -> do
+          bound_t <- I.subExpType bound
+          case bound_t of
+            I.Prim (IntType it) ->
+              return (resultBody $ shapeargs ++ ses,
+                      (I.ForLoop i' it bound,
+                       shapepat,
+                       mergepat',
+                       id,
+                       mergeinit,
+                       []))
+            t ->
+              fail $ "internaliseExp DoLoop: bound has unexpected type: " ++ pretty t
         Right cond -> do
           -- We need to insert 'cond' twice - once for the initial
           -- condition (do we enter the loop at all?), and once with

@@ -230,7 +230,7 @@ instance Renameable lore => Rename (Exp lore) where
     ctxinit' <- mapM rename ctxinit
     valinit' <- mapM rename valinit
     case form of
-      ForLoop loopvar boundexp -> do
+      ForLoop loopvar it boundexp -> do
         boundexp' <- rename boundexp
         bind (map paramName $ ctxparams++valparams) $ do
           ctxparams' <- mapM rename ctxparams
@@ -240,7 +240,7 @@ instance Renameable lore => Rename (Exp lore) where
             loopbody' <- rename loopbody
             return $ DoLoop
               (zip ctxparams' ctxinit') (zip valparams' valinit')
-              (ForLoop loopvar' boundexp') loopbody'
+              (ForLoop loopvar' it boundexp') loopbody'
       WhileLoop cond ->
         bind (map paramName $ ctxparams++valparams) $ do
           ctxparams' <- mapM rename ctxparams
