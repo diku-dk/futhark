@@ -424,7 +424,7 @@ internaliseExp _ (E.Rotate d offset e _) = do
     return $ I.Rotate [] offsets v
 
 internaliseExp _ (E.Reshape shape e loc) = do
-  shape' <- internaliseExp "shape" shape
+  shape' <- internaliseShapeExp "shape" shape
   internaliseOperation "reshape" e $ \v -> do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
@@ -787,6 +787,15 @@ internaliseDimExp s e = do
     E.Prim (Signed it)   -> (,it) <$> asIntS Int32 e'
     E.Prim (Unsigned it) -> (,it) <$> asIntZ Int32 e'
     _                    -> fail "internaliseDimExp: bad type"
+
+internaliseShapeExp :: String -> E.Exp -> InternaliseM [I.SubExp]
+internaliseShapeExp s e =
+  case E.typeOf e of
+    E.Tuple ts -> zipWithM promote ts =<< internaliseExp s e
+    t          -> fmap pure . promote t =<< internaliseExp1 s e
+  where promote (E.Prim Signed{}) se = asIntS Int32 se
+        promote (E.Prim Unsigned{}) se = asIntZ Int32 se
+        promote _ _ = fail "internaliseShapeExp.promote: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
