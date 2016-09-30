@@ -223,7 +223,7 @@ eValue (ArrayVal a bt shape) = do
       rowsize  = product rowshape
       rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
                  | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (intConst Int64 . toInteger) rowshape)
+      rowtype = Array bt (Shape $ map (intConst Int32 . toInteger) rowshape)
                 NoUniqueness
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
   return $ BasicOp $ ArrayLit ses rowtype
@@ -314,7 +314,7 @@ binOpLambda bop t = do
 fullSlice :: Type -> [DimIndex SubExp] -> Slice SubExp
 fullSlice t slice =
   slice ++
-  map (DimSlice (constant (0::Int64)))
+  map (DimSlice (constant (0::Int32)))
   (drop (length slice) $ arrayDims t)
 
 -- | Like 'fullSlice', but the dimensions are simply numeric.
@@ -384,7 +384,7 @@ instantiateShapes' :: MonadFreshNames m =>
                    -> m ([TypeBase Shape u], [Ident])
 instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
-  where instantiate _ = do v <- lift $ newIdent "size" $ Prim int64
+  where instantiate _ = do v <- lift $ newIdent "size" $ Prim int32
                            tell [v]
                            return $ Var $ identName v
 
@@ -401,7 +401,7 @@ instantiateShapesFromIdentList idents ts =
 instantiateExtTypes :: [VName] -> [ExtType] -> [Ident]
 instantiateExtTypes names rt =
   let (shapenames,valnames) = splitAt (shapeContextSize rt) names
-      shapes = [ Ident name (Prim int64) | name <- shapenames ]
+      shapes = [ Ident name (Prim int32) | name <- shapenames ]
       valts  = instantiateShapesFromIdentList shapes rt
       vals   = [ Ident name t | (name,t) <- zip valnames valts ]
   in shapes ++ vals
@@ -415,7 +415,7 @@ instantiateIdents names ts
         nextShape _ = do
           (context', remaining) <- get
           case remaining of []   -> lift Nothing
-                            x:xs -> do let ident = Ident x (Prim int64)
+                            x:xs -> do let ident = Ident x (Prim int32)
                                        put (context'++[ident], xs)
                                        return $ Var x
     (ts', (context', _)) <-
