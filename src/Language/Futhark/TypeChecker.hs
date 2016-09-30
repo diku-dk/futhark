@@ -1006,10 +1006,11 @@ checkExp (Reshape shapeexp arrexp loc) = do
   arrexp' <- checkExp arrexp
 
   case typeOf shapeexp' of
-    Tuple ts | all (==(Prim $ Signed Int32)) ts -> return ()
-    Prim (Signed Int32) -> return ()
+    Tuple ts | all ((`elem` anyIntType) . removeNames) ts -> return ()
+    Prim Signed{} -> return ()
+    Prim Unsigned{} -> return ()
     t -> bad $ TypeError loc $ "Shape argument " ++ pretty shapeexp ++
-      " to reshape must be i32 or tuple of i32s, but is " ++ pretty t
+      " to reshape must be integer or tuple of integers, but is " ++ pretty t
 
   return $ Reshape shapeexp' arrexp' loc
 
