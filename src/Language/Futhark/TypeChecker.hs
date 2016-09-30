@@ -997,7 +997,7 @@ checkExp (Shape e loc) = do
           $ "Argument to shape must be an array, not of type " ++ pretty (typeOf e') ++ "."
 
 checkExp (Replicate countexp valexp pos) = do
-  countexp' <- require [Prim $ Signed Int32] =<< checkExp countexp
+  countexp' <- require anyIntType =<< checkExp countexp
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 

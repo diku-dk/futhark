@@ -366,11 +366,6 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
       letBind (basicPattern' [] [p]) $ I.BasicOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
 
-internaliseExp desc (E.Replicate ne ve _) = do
-  ne' <- internaliseExp1 "n" ne
-  ves <- internaliseExp "replicate_v" ve
-  letSubExps desc $ I.BasicOp . I.Replicate (I.Shape [ne']) <$> ves
-
 internaliseExp desc (E.Shape e _) = do
   ks <- internaliseExp (desc<>"_shape") e
   case ks of
@@ -577,13 +572,13 @@ internaliseExp _ E.Stream{} =
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
 internaliseExp desc (E.Iota e _) = do
-  e' <- internaliseExp1 "n" e
-  case internaliseType $ E.typeOf e of
-    [I.Prim (I.IntType et)] -> do
-      e'' <- letSubExp "n" $ I.BasicOp $ I.ConvOp (I.SExt et I.Int32) e'
-      letTupExp' desc $ I.BasicOp $ I.Iota e'' (intConst et 0) (intConst et 1) et
-    _ ->
-      fail "internaliseExp Iota: argument not an integer type."
+  (e', it) <- internaliseDimExp "n" e
+  letTupExp' desc $ I.BasicOp $ I.Iota e' (intConst it 0) (intConst it 1) it
+
+internaliseExp desc (E.Replicate ne ve _) = do
+  (ne', _) <- internaliseDimExp "n" ne
+  ves <- internaliseExp "replicate_v" ve
+  letSubExps desc $ I.BasicOp . I.Replicate (I.Shape [ne']) <$> ves
 
 internaliseExp _ (E.Literal v _) =
   case internaliseValue v of
@@ -782,6 +777,16 @@ internaliseExp1 desc e = do
   vs <- internaliseExp desc e
   case vs of [se] -> return se
              _ -> fail "Internalise.internaliseExp1: was passed not just a single subexpression"
+
+-- | Promote to dimension type as appropriate for the original type.
+-- Also return original type.
+internaliseDimExp :: String -> E.Exp -> InternaliseM (I.SubExp, IntType)
+internaliseDimExp s e = do
+  e' <- internaliseExp1 s e
+  case E.typeOf e of
+    E.Prim (Signed it)   -> (,it) <$> asIntS Int32 e'
+    E.Prim (Unsigned it) -> (,it) <$> asIntZ Int32 e'
+    _                    -> fail "internaliseDimExp: bad type"
 
 internaliseExpToVars :: String -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
