@@ -214,7 +214,9 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
   mergeexp' <- renameExp mergeexp
   case form of
     For dir lbound loopvar ubound -> do
-      lbound' <- renameExp lbound
+      lbound' <- case lbound of
+                   ZeroBound -> return ZeroBound
+                   ExpBound e -> ExpBound <$> renameExp e
       ubound' <- renameExp ubound
       bindNames (HS.toList $ patNameSet mergepat) $ do
         mergepat' <- renamePattern mergepat

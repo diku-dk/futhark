@@ -13,7 +13,7 @@ module Futhark.Representation.Primitive
 
          -- * Values
        , IntValue(..)
-       , intValue, intValueType
+       , intValue, intValueType, valueIntegral
        , FloatValue(..)
        , floatValue, floatValueType
        , PrimValue(..)
@@ -178,6 +178,13 @@ intValueType Int8Value{}  = Int8
 intValueType Int16Value{} = Int16
 intValueType Int32Value{} = Int32
 intValueType Int64Value{} = Int64
+
+-- | Convert an 'IntValue' to any 'Integral' type.
+valueIntegral ::Integral int => IntValue -> int
+valueIntegral (Int8Value  v) = fromIntegral v
+valueIntegral (Int16Value v) = fromIntegral v
+valueIntegral (Int32Value v) = fromIntegral v
+valueIntegral (Int64Value v) = fromIntegral v
 
 -- | A floating-point value.
 data FloatValue = Float32Value !Float

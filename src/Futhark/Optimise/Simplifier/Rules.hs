@@ -268,17 +268,18 @@ letRule _ _ _ =
   cannotSimplify
 
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
-simplifyClosedFormLoop _ (Let pat _ (DoLoop [] val (ForLoop i bound) body)) =
+simplifyClosedFormLoop _ (Let pat _ (DoLoop [] val (ForLoop i _ bound) body)) =
   loopClosedForm pat val (HS.singleton i) bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
 simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
 simplifKnownIterationLoop _ (Let pat _
                                 (DoLoop ctx val
-                                 (ForLoop i (Constant (IntValue (Int32Value 1)))) body)) = do
+                                 (ForLoop i it (Constant iters)) body))
+  | oneIsh iters = do
   forM_ (ctx++val) $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ BasicOp $ SubExp mergeinit
-  letBindNames'_ [i] $ BasicOp $ SubExp $ constant (0 :: Int32)
+  letBindNames'_ [i] $ BasicOp $ SubExp $ intConst it 0
   (loop_body_ctx, loop_body_val) <- splitAt (length ctx) <$> (mapM asVar =<< bodyBind body)
   let subst = HM.fromList $ zip (map (paramName . fst) ctx) loop_body_ctx
       ctx_params = substituteNames subst $ map fst ctx

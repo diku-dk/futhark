@@ -115,7 +115,7 @@ deadCodeElimExp (DoLoop ctx val form body) = do
   mapM_ deadCodeElimSubExp valinit
   body' <- deadCodeElimBodyM body
   case form of
-    ForLoop _ bound -> void $ deadCodeElimSubExp bound
+    ForLoop _ _ bound -> void $ deadCodeElimSubExp bound
     WhileLoop cond  -> void $ deadCodeElimVName cond
   return $ DoLoop ctx val form body'
 deadCodeElimExp e = mapExpM mapper e

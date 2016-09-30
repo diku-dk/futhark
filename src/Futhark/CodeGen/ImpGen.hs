@@ -499,9 +499,9 @@ defCompileExp (Destination dest) (DoLoop ctx val form body) =
         copyDWIM (paramName p) [] se []
     (bindForm, emitForm) <-
       case form of
-        ForLoop i bound -> do
+        ForLoop i it bound -> do
           bound' <- compileSubExp bound
-          return (declaringLoopVar i, emit . Imp.For i bound')
+          return (declaringLoopVar i it, emit . Imp.For i it bound')
         WhileLoop cond ->
           return (id, emit . Imp.While (Imp.var cond Bool))
 
@@ -554,9 +554,9 @@ defCompileBasicOp _ Index{} =
 defCompileBasicOp (Destination [dest]) (Replicate (Shape ds) se) = do
   is <- replicateM (length ds) (newVName "i")
   ds' <- mapM compileSubExp ds
-  declaringLoopVars is $ do
+  declaringLoopVars Int32 is $ do
     copy_elem <- collect $ copyDWIMDest dest (map varIndex is) se []
-    emit $ foldl (.) id (zipWith Imp.For is ds') copy_elem
+    emit $ foldl (.) id (zipWith (`Imp.For` Int32) is ds') copy_elem
 
 defCompileBasicOp (Destination [_]) Scratch{} =
   return ()
@@ -568,9 +568,9 @@ defCompileBasicOp (Destination [dest]) (Iota n e s et) = do
   e' <- compileSubExp e
   s' <- compileSubExp s
   emit $ Imp.DeclareScalar x $ IntType et
-  let i' = ConvOpExp (SExt Int32 et) $ Imp.var i int32
-  declaringLoopVar i $ withPrimVar x (IntType et) $
-    emit =<< (Imp.For i n' <$>
+  let i' = ConvOpExp (SExt Int32 et) $ Imp.var i $ IntType et
+  declaringLoopVar i Int32 $ withPrimVar x (IntType et) $
+    emit =<< (Imp.For i et n' <$>
               collect (do emit $ Imp.SetScalar x $ e' + i' * s'
                           copyDWIMDest dest [varIndex i] (Var x) []))
 
@@ -622,7 +622,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
     Just sizenames <- mapM fromScalarDestination sizedests,
     Just destlocs <- mapM arrDestLoc arrdest = do
   i <- newVName "i"
-  declaringLoopVar i $ do
+  declaringLoopVar i Int32 $ do
     outer_dim <- compileSubExp =<< (arraySize 0 <$> lookupType flags)
     -- We will use 'i' to index the flag array and the value array.
     -- Note that they have the same outer size ('outer_dim').
@@ -649,7 +649,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
           (Imp.SetScalar sizevar $ Imp.var sizevar int32 + 1)
           code
         sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
-    emit $ Imp.For i outer_dim $
+    emit $ Imp.For i Int32 outer_dim $
       Imp.SetScalar eqclass read_flags_i <>
       sizeLoopBody
 
@@ -691,7 +691,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
              (Imp.var offsetvar int32 + 1))
           code
         writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
-    emit $ Imp.For i outer_dim $
+    emit $ Imp.For i Int32 outer_dim $
       Imp.SetScalar eqclass read_flags_i <>
       writeLoopBody
     return ()
@@ -797,7 +797,7 @@ declaringName e name info m =
   where infoAttr (LetInfo attr) = attr
         infoAttr (FParamInfo attr) = const NoUniqueness <$> attr
         infoAttr (LParamInfo attr) = attr
-        infoAttr IndexInfo = Scalar int32
+        infoAttr (IndexInfo it) = Scalar $ IntType it
 
 declaringScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op a -> ImpM lore op a
 declaringScope e scope m = foldr (uncurry $ declaringName e) m $ HM.toList scope
@@ -809,12 +809,12 @@ withPrimVar :: VName -> PrimType -> ImpM lore op a -> ImpM lore op a
 withPrimVar name bt =
   local (insertInVtable name $ ScalarVar Nothing $ ScalarEntry bt)
 
-declaringLoopVars :: [VName] -> ImpM lore op a -> ImpM lore op a
-declaringLoopVars = flip $ foldr declaringLoopVar
+declaringLoopVars :: IntType -> [VName] -> ImpM lore op a -> ImpM lore op a
+declaringLoopVars it = flip $ foldr (`declaringLoopVar` it)
 
-declaringLoopVar :: VName -> ImpM lore op a -> ImpM lore op a
-declaringLoopVar name =
-  withPrimVar name int32
+declaringLoopVar :: VName -> IntType -> ImpM lore op a -> ImpM lore op a
+declaringLoopVar name it =
+  withPrimVar name $ IntType it
 
 everythingVolatile :: ImpM lore op a -> ImpM lore op a
 everythingVolatile = local $ \env -> env { envVolatility = Imp.Volatile }
@@ -1043,7 +1043,7 @@ defaultCopy bt dest src n
 copyElementWise :: CopyCompiler lore op
 copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
-    declaringLoopVars is $ do
+    declaringLoopVars Int32 is $ do
       let ivars = map varIndex is
           destidx = IxFun.index destIxFun ivars bt_size
           srcidx = IxFun.index srcIxFun ivars bt_size
@@ -1051,7 +1051,7 @@ copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshap
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       vol <- asks envVolatility
-      emit $ foldl (.) id (zipWith Imp.For is bounds) $
+      emit $ foldl (.) id (zipWith (`Imp.For` Int32) is bounds) $
         Imp.Write destmem (bytes $ compilePrimExp destidx) bt destspace vol $
         Imp.index srcmem (bytes $ compilePrimExp srcidx) bt srcspace vol
   where bt_size = primByteSize bt

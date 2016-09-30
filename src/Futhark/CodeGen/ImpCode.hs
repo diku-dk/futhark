@@ -116,7 +116,7 @@ type Function = FunctionT
 
 data Code a = Skip
             | Code a :>>: Code a
-            | For VName Exp (Code a)
+            | For VName IntType Exp (Code a)
             | While Exp (Code a)
             | DeclareMem VName Space
             | DeclareScalar VName PrimType
@@ -162,9 +162,6 @@ type Exp = PrimExp ExpLeaf
 data Arg = ExpArg Exp
          | MemArg VName
          deriving (Show)
-
--- FIXME: At the moment, the Num instances (and family) assume that we
--- only operate on Int32 values.
 
 -- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
 -- type.
@@ -244,8 +241,8 @@ instance Pretty op => Pretty (Code op) where
   ppr (Op op) = ppr op
   ppr Skip   = text "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
-  ppr (For i limit body) =
-    text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{" </>
+  ppr (For i it limit body) =
+    text "for" <+> ppr i <> text ":" <> ppr it <+> langle <+> ppr limit <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
   ppr (While cond body) =
@@ -335,8 +332,8 @@ instance Foldable Code where
 instance Traversable Code where
   traverse f (x :>>: y) =
     (:>>:) <$> traverse f x <*> traverse f y
-  traverse f (For i bound code) =
-    For i bound <$> traverse f code
+  traverse f (For i it bound code) =
+    For i it bound <$> traverse f code
   traverse f (While cond code) =
     While cond <$> traverse f code
   traverse f (If cond x y) =
@@ -371,7 +368,7 @@ declaredIn (DeclareMem name _) = HS.singleton name
 declaredIn (DeclareScalar name _) = HS.singleton name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
-declaredIn (For i _ body) = HS.singleton i <> declaredIn body
+declaredIn (For i _ _ body) = HS.singleton i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
@@ -381,7 +378,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn x <> freeIn y `HS.difference` declaredIn x
   freeIn Skip =
     mempty
-  freeIn (For i bound body) =
+  freeIn (For i _ bound body) =
     i `HS.delete` (freeIn bound <> freeIn body)
   freeIn (While cond body) =
     freeIn cond <> freeIn body
@@ -426,7 +423,7 @@ instance FreeIn Size where
 functionsCalled :: Code a -> HS.HashSet Name
 functionsCalled (If _ t f) = functionsCalled t <> functionsCalled f
 functionsCalled (x :>>: y) = functionsCalled x <> functionsCalled y
-functionsCalled (For _ _ body) = functionsCalled body
+functionsCalled (For _ _ _ body) = functionsCalled body
 functionsCalled (While _ body) = functionsCalled body
 functionsCalled (Call _ fname _) = HS.singleton fname
 functionsCalled _ = mempty

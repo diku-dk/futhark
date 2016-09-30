@@ -720,14 +720,14 @@ compileCode (Imp.While cond body) = do
   body' <- collect $ compileCode body
   stm $ While cond' body'
 
-compileCode (Imp.For i bound body) = do
+compileCode (Imp.For i it bound body) = do
   bound' <- compileExp bound
   let i' = pretty i
   body' <- collect $ compileCode body
   counter <- pretty <$> newVName "counter"
   one <- pretty <$> newVName "one"
-  stm $ Assign (Var i') $ Constant $ value (0::Int32)
-  stm $ Assign (Var one) $ Constant $ value (1::Int32)
+  stm $ Assign (Var i') $ Constant $ IntValue $ intValue it (0::Int)
+  stm $ Assign (Var one) $ Constant $ IntValue $ intValue it (1::Int)
   stm $ For counter (simpleCall "range" [bound']) $
     body' ++ [AssignOp "+" (Var i') (Var one)]
 

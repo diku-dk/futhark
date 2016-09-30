@@ -596,7 +596,7 @@ subCheck m = do
           coerceVar (LetInfo x) = LetInfo x
           coerceVar (FParamInfo x) = FParamInfo x
           coerceVar (LParamInfo x) = LParamInfo x
-          coerceVar IndexInfo = IndexInfo
+          coerceVar (IndexInfo it) = IndexInfo it
 
 checkSubExp :: Checkable lore => SubExp -> TypeM lore Type
 checkSubExp (Constant val) =
@@ -812,8 +812,8 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
   mergeargs <- mapM checkArg mergeexps
 
   funparams <- case form of
-    ForLoop loopvar boundexp -> do
-      iparam <- primFParam loopvar int32
+    ForLoop loopvar it boundexp -> do
+      iparam <- primFParam loopvar $ IntType it
       let funparams = iparam : mergepat
           paramts   = map paramDeclType funparams
 

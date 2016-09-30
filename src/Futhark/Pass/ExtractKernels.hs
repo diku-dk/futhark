@@ -547,7 +547,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedStm _ (Op Write{}) =
           False
-        unbalancedStm bound (DoLoop _ merge (ForLoop i iterations) body) =
+        unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations) body) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
           where bound' = foldr HS.insert bound $

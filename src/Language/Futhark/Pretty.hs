@@ -310,6 +310,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopForm
   ppr (While cond) =
     text "while" <+> ppr cond
 
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LowerBoundBase ty vn) where
+  ppr ZeroBound = text "0"
+  ppr (ExpBound e) = ppr e
+
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
   ppr (Id ident)              = ppr ident

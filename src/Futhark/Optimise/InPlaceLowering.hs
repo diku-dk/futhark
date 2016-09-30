@@ -150,7 +150,7 @@ optimiseExp (DoLoop ctx val form body) =
   bindingFParams (map fst $ ctx ++ val) $ do
     body' <- optimiseBody body
     return $ DoLoop ctx val form body'
-  where boundInForm (ForLoop i _) = [i]
+  where boundInForm (ForLoop i it _) = [(i,it)]
         boundInForm (WhileLoop _) = []
 -- TODO: handle Kernel here.
 optimiseExp e = mapExpM optimise e
@@ -237,14 +237,14 @@ bindingStm (Let pat _ _) = local $ \(TopDown n vtable d) ->
             Entry n (unNames aliases) d True $ LetInfo $ patElemAttr patElem)
   in TopDown (n+1) (HM.union entries vtable) d
 
-bindingIndices :: [VName]
+bindingIndices :: [(VName,IntType)]
                -> ForwardingM a
                -> ForwardingM a
 bindingIndices is = local $ \(TopDown n vtable d) ->
   let entries = HM.fromList $ map entry is
-      entry v =
+      entry (v,it) =
         (v,
-         Entry n mempty d False IndexInfo)
+         Entry n mempty d False $ IndexInfo it)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int

@@ -1208,12 +1208,13 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- expression.
   ((mergeexp', bindExtra), mergeflow) <- collectOccurences $ do
     mergeexp' <- checkExp mergeexp
-    return $ case form of
-               For _ _ (Ident loopvar _ lvloc) _ ->
-                 let iparam = Ident loopvar (Info $ Prim $ Signed Int32) lvloc
-                 in (mergeexp', [iparam])
-               While _ ->
-                 (mergeexp', [])
+    case form of
+      For _ _ (Ident loopvar _ lvloc) bound -> do
+        bound' <- require anySignedType =<< checkExp bound
+        let iparam = Ident loopvar (Info $ typeOf bound') lvloc
+        return (mergeexp', [iparam])
+      While _ ->
+        return (mergeexp', [])
 
   -- Check the loop body.  Play a little with occurences to ensure it
   -- does not look like none of the merge variables are being used.
@@ -1223,10 +1224,16 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
     onlySelfAliasing $ binding bindExtra $ tapOccurences $
     case form of
       For dir lboundexp i_ident uboundexp -> do
-        lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp
-        uboundexp' <- require [Prim $ Signed Int32] =<< checkExp uboundexp
+        uboundexp' <- require anySignedType =<< checkExp uboundexp
+        (lboundexp', t') <-
+          case lboundexp of
+            ZeroBound -> return (ZeroBound, typeOf uboundexp')
+            ExpBound e -> do
+              e' <- require anySignedType =<< checkExp e
+              t' <- unifyExpTypes e' uboundexp'
+              return (ExpBound e', t')
         loopbody' <- checkExp loopbody
-        let i_ident' = i_ident { identType = Info $ Prim $ Signed Int32 }
+        let i_ident' = i_ident { identType = Info t' }
         return (mergepat',
                 For dir lboundexp' i_ident' uboundexp',
                 loopbody')

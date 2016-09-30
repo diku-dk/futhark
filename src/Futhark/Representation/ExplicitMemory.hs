@@ -711,7 +711,7 @@ varMemBound name = do
     LetInfo (_, summary) -> return summary
     FParamInfo summary -> return $ fmap (const NoUniqueness) summary
     LParamInfo summary -> return summary
-    IndexInfo -> return $ Scalar int32
+    IndexInfo it -> return $ Scalar $ IntType it
 
 lookupMemBound :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
                   VName -> m (MemBound NoUniqueness)
@@ -721,7 +721,7 @@ lookupMemBound name = do
     FParamInfo summary -> return $ fmap (const NoUniqueness) summary
     LParamInfo summary -> return summary
     LetInfo summary -> return summary
-    IndexInfo -> return $ Scalar int32
+    IndexInfo it -> return $ Scalar $ IntType it
 
 lookupArraySummary :: (ExplicitMemorish lore, HasScope lore m, Monad m) =>
                       VName -> m (VName, IxFun.IxFun (PrimExp VName))

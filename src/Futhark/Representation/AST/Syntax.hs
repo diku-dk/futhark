@@ -251,7 +251,7 @@ deriving instance Annotations lore => Show (ExpT lore)
 deriving instance Annotations lore => Ord (ExpT lore)
 
 -- | For-loop or while-loop?
-data LoopForm = ForLoop VName SubExp
+data LoopForm = ForLoop VName IntType SubExp
               | WhileLoop VName
               deriving (Eq, Show, Ord)
 

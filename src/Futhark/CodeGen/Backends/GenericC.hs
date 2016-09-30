@@ -1060,11 +1060,12 @@ compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
   allocMem name size space
 
-compileCode (For i bound body) = do
+compileCode (For i it bound body) = do
   let i' = textual i
+      it' = intTypeToCType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
-  stm [C.cstm|for (int $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+  stm [C.cstm|for ($ty:it' $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 

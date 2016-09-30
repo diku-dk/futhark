@@ -322,7 +322,7 @@ kernelCompiler
             ImpGen.emit $ Imp.Op Imp.Barrier
 
 
-        ImpGen.emit $ Imp.For chunk_index (Imp.var chunks_per_group int32) scan_chunk
+        ImpGen.emit $ Imp.For chunk_index Int32 (Imp.var chunks_per_group int32) scan_chunk
 
         write_global_carry_out <- ImpGen.collect $
           zipWithM_ (writeFinalResult [group_id]) partials_dest y_params
@@ -628,7 +628,7 @@ computeMapKernelGroups kernel_size = do
   ImpGen.emit $ Imp.DeclareScalar num_groups int32
   ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
   ImpGen.emit $ Imp.SetScalar num_groups $
-    kernel_size `quotRoundingUp` group_size_var
+    kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
   return (group_size, num_groups)
 
 isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
@@ -1083,9 +1083,9 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
                               w_bound /= Imp.ConstSize 1->
                               -- Candidate for unrolling, so generate two loops.
                               Imp.If (CmpOpExp (CmpEq int32) w' (Imp.sizeToExp w_bound))
-                              (Imp.For block_offset (Imp.sizeToExp w_bound) body'')
-                              (Imp.For block_offset w' body'')
-                  _ -> Imp.For block_offset w' body''
+                              (Imp.For block_offset Int32 (Imp.sizeToExp w_bound) body'')
+                              (Imp.For block_offset Int32 w' body'')
+                  _ -> Imp.For block_offset Int32 w' body''
 
           ImpGen.emit $
             if kernelThreadActive constants == Imp.ValueExp (BoolValue True)

@@ -344,7 +344,7 @@ typesInKernel MapTranspose{} = mempty
 typesInCode :: ImpKernels.KernelCode -> HS.HashSet PrimType
 typesInCode Skip = mempty
 typesInCode (c1 :>>: c2) = typesInCode c1 <> typesInCode c2
-typesInCode (For _ e c) = typesInExp e <> typesInCode c
+typesInCode (For _ it e c) = IntType it `HS.insert` typesInExp e <> typesInCode c
 typesInCode (While e c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem{} = mempty
 typesInCode (DeclareScalar _ t) = HS.singleton t

@@ -122,12 +122,12 @@ transformSOAC pat (Map cs width fun arrs) = do
   let outarrs_names = map identName outarrs
       merge = loopMerge outarrs (map Var resarr)
   loopbody <- runBodyBinder $
-              localScope (HM.insert i IndexInfo $
+              localScope (HM.insert i (IndexInfo Int32) $
                           scopeOfFParams $ map fst merge) $ do
     x <- bindLambda fun =<< index cs arrs (Var i)
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (BasicOp . SubExp) x
     return $ resultBody $ map Var dests
-  letBind_ pat $ DoLoop [] merge (ForLoop i width) loopbody
+  letBind_ pat $ DoLoop [] merge (ForLoop i Int32 width) loopbody
 
 transformSOAC pat (Reduce cs width _ fun args) = do
   i <- newVName "i"
@@ -139,7 +139,7 @@ transformSOAC pat (Reduce cs width _ fun args) = do
             index cs (map identName inarrs) (Var i)
     return $ resultBody (map (Var . identName) inarrs ++ acc')
   pat' <- discardPattern (map identType inarrs) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width) loopbody
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
@@ -158,7 +158,7 @@ transformSOAC pat (Scan cs width fun args) = do
     rowcopies <- mapM copyIfArray irows
     return $ resultBody $ rowcopies ++ map Var dests
   pat' <- discardPattern (map identType acc) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width) loopbody
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
@@ -188,7 +188,7 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
     rowcopies <- mapM copyIfArray irows
     return $ resultBody $ rowcopies ++ map Var dests ++ map Var mapdests
   pat' <- discardPattern (map identType acc) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width) loopbody
   where accts = map paramType $ take (length accexps) $  lambdaParams fun
         scan_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                      | t <- take (length accexps) (lambdaReturnType fun)]
@@ -334,7 +334,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
   loopcnt  <- newIdent "stream_N" $ Prim int32
   -- 3.) Transform the stream's lambda to a loop body
   loopbody <- runBodyBinder $
-              localScope (HM.singleton loopind IndexInfo) $
+              localScope (HM.singleton loopind $ IndexInfo Int32) $
               localScope (scopeOfFParams $ map fst $ ctxmerge++valmerge) $ do
       let argsacc = map (BasicOp . SubExp . Var . identName) acc0
           accpars = take acc_num $ drop 1 lampars
@@ -420,7 +420,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                     map (Var . identName) dests)
   -- 4.) Build the loop
   let loopres = DoLoop ctxmerge valmerge
-                       (ForLoop loopind (Var $ identName loopcnt)) loopbody
+                       (ForLoop loopind Int32 (Var $ identName loopcnt)) loopbody
       loopbnd = mkLet' exszarres (indvarres++strmresacc++strmresarrl) loopres
   -- 5.) A stream needs prologue-loop-epilogue bindings, so we make a dummy
   --     IF exp to return one expression
@@ -571,7 +571,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                 let alloc_merge = loopMerge [bnew] [Var bnew0]
                                 allocloopbody <-
                                   runBodyBinder $
-                                  localScope (HM.singleton alloclid IndexInfo) $
+                                  localScope (HM.singleton alloclid $ IndexInfo Int32) $
                                   localScope (scopeOfFParams $ map fst alloc_merge) $ do
                                     (aldest:_) <- letwith css [identName bnew] (pexp $ Var alloclid)
                                                   [BasicOp $ Index css (identName glboutid)
@@ -579,7 +579,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                     return $ resultBody [Var aldest]
                                 let alloopres = DoLoop []
                                                   (loopMerge [bnew] [Var bnew0])
-                                                  (ForLoop alloclid (Var $ identName k)) allocloopbody
+                                                  (ForLoop alloclid Int32 (Var $ identName k)) allocloopbody
                                 bnew' <- newIdent (textual (identName glboutid)++"_new0") =<<
                                          lookupType bnew0
                                 myLetBind alloopres bnew'
@@ -597,7 +597,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             let outmerge = loopMerge [glboutLid] [Var $ identName glboutid']
             -- make copy-out what was written in the current iteration
             loopbody <- runBodyBinder $
-                        localScope (HM.singleton loopid IndexInfo) $
+                        localScope (HM.singleton loopid $ IndexInfo Int32) $
                         localScope (scopeOfFParams $ map fst outmerge) $ do
                 ivvplid <- newIdent "jj" $ Prim int32
                 ivvplidexp <- eBinOp (Add Int32)
@@ -611,7 +611,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                 return $ resultBody [Var dest]
             -- make loop
             let loopres = DoLoop [] outmerge
-                          (ForLoop loopid locoutid_size) loopbody
+                          (ForLoop loopid Int32 locoutid_size) loopbody
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
@@ -628,7 +628,7 @@ transformSOAC pat (Write cs len lam ivs as) = do
   -- Write is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map (Var . snd) as
   loopBody <- runBodyBinder $
-    localScope (HM.insert iter IndexInfo $
+    localScope (HM.insert iter (IndexInfo Int32) $
                 scopeOfFParams $ map fst merge) $ do
     ivs' <- forM ivs $ \iv -> do
       iv_t <- lookupType iv
@@ -661,7 +661,7 @@ transformSOAC pat (Write cs len lam ivs as) = do
         $ If outside_bounds outside_bounds_branch in_bounds_branch
         $ staticShapes [t]
     return $ resultBody (map Var ress)
-  letBind_ pat $ DoLoop [] merge (ForLoop iter len) loopBody
+  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
@@ -785,7 +785,7 @@ doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
 doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
   (merge, i, loopbody) <-
     doLoopMapAccumL' cs width innerfun accexps arrexps maparrs
-  return $ DoLoop [] merge (ForLoop i width) loopbody
+  return $ DoLoop [] merge (ForLoop i Int32 width) loopbody
 
 doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
                     LetAttr (Lore m) ~ Type,

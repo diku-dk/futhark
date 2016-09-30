@@ -67,7 +67,6 @@ module Futhark.Optimise.Simplifier.Engine
        , bindLParams
        , bindArrayLParams
        , bindLoopVar
-       , bindLoopVars
        , enterLoop
        , consumedName
 
@@ -370,19 +369,13 @@ bindArrayLParams params =
     foldr (uncurry ST.insertArrayLParam) vtable params
 
 bindLoopVar :: SimplifiableLore lore =>
-               VName -> SubExp -> SimpleM lore a -> SimpleM lore a
-bindLoopVar var bound =
+               VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
+bindLoopVar var it bound =
   localVtable $ clampUpper . clampVar
-  where clampVar = ST.insertLoopVar var bound
+  where clampVar = ST.insertLoopVar var it bound
         -- If we enter the loop, then 'bound' is at least one.
         clampUpper = case bound of Var v -> ST.isAtLeast v 1
                                    _     -> id
-
-bindLoopVars :: SimplifiableLore lore => [(VName,SubExp)] -> SimpleM lore a -> SimpleM lore a
-bindLoopVars []                  m =
-  m
-bindLoopVars ((var,bound):lvars) m =
-  bindLoopVar var bound $ bindLoopVars lvars m
 
 hoistStms :: SimplifiableLore lore =>
              RuleBook (SimpleM lore) -> BlockPred (Wise lore)
@@ -644,11 +637,11 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       val' = zip valparams' valinit'
       diets = map (diet . paramDeclType) $ ctxparams' ++ valparams'
   (form', boundnames, wrapbody) <- case form of
-    ForLoop loopvar boundexp -> do
+    ForLoop loopvar it boundexp -> do
       boundexp' <- simplify boundexp
-      return (ForLoop loopvar boundexp',
+      return (ForLoop loopvar it boundexp',
               loopvar `HS.insert` fparamnames,
-              bindLoopVar loopvar boundexp')
+              bindLoopVar loopvar it boundexp')
     WhileLoop cond -> do
       cond' <- simplify cond
       return (WhileLoop cond',

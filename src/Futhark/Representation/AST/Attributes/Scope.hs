@@ -52,7 +52,7 @@ import Futhark.Transform.Substitute
 data NameInfo lore = LetInfo (LetAttr lore)
                    | FParamInfo (FParamAttr lore)
                    | LParamInfo (LParamAttr lore)
-                   | IndexInfo
+                   | IndexInfo IntType
 
 deriving instance Annotations lore => Show (NameInfo lore)
 
@@ -60,7 +60,7 @@ instance Annotations lore => Typed (NameInfo lore) where
   typeOf (LetInfo attr) = typeOf attr
   typeOf (FParamInfo attr) = typeOf attr
   typeOf (LParamInfo attr) = typeOf attr
-  typeOf IndexInfo = Prim $ IntType Int32
+  typeOf (IndexInfo it) = Prim $ IntType it
 
 instance Substitutable lore => Substitute (NameInfo lore) where
   substituteNames subst (LetInfo attr) =
@@ -69,8 +69,8 @@ instance Substitutable lore => Substitute (NameInfo lore) where
     FParamInfo $ substituteNames subst attr
   substituteNames subst (LParamInfo attr) =
     LParamInfo $ substituteNames subst attr
-  substituteNames _ IndexInfo =
-    IndexInfo
+  substituteNames _ (IndexInfo it) =
+    IndexInfo it
 
 -- | A scope is a mapping from variable names to information about
 -- that name.
@@ -172,7 +172,7 @@ instance Scoped lore (VName, NameInfo lore) where
 
 scopeOfLoopForm :: LoopForm -> Scope lore
 scopeOfLoopForm (WhileLoop _) = mempty
-scopeOfLoopForm (ForLoop i _) = HM.singleton i IndexInfo
+scopeOfLoopForm (ForLoop i it _) = HM.singleton i (IndexInfo it)
 
 scopeOfLParams :: LParamAttr lore ~ attr =>
                   [ParamT attr] -> Scope lore
@@ -205,7 +205,7 @@ castNameInfo :: SameScope fromlore tolore =>
 castNameInfo (LetInfo attr) = LetInfo attr
 castNameInfo (FParamInfo attr) = FParamInfo attr
 castNameInfo (LParamInfo attr) = LParamInfo attr
-castNameInfo IndexInfo = IndexInfo
+castNameInfo (IndexInfo it) = IndexInfo it
 
 -- | A monad transformer that carries around an extended 'Scope'.
 -- Its 'lookupType' method will first look in the extended 'Scope',
