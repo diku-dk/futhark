@@ -317,8 +317,8 @@ simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs1 perm1 v1)))
     Just (Rearrange cs3 perm3 v3) <- asBasicOp =<< ST.lookupExp v2 vtable,
     dim1:_ <- perm1,
     perm1 == rearrangeInverse perm3 = do
-      to_drop' <- letSubExp "drop" =<< SE.fromScalExp to_drop
-      to_take' <- letSubExp "take" =<< SE.fromScalExp to_take
+      to_drop' <- letSubExp "drop" =<< toExp to_drop
+      to_take' <- letSubExp "take" =<< toExp to_take
       [_, v] <- letTupExp' "simplify_rearrange" $
         BasicOp $ Split (cs1<>cs2<>cs3) dim1 [to_drop', to_take'] v3
       letBind_ pat $ BasicOp $ SubExp v
@@ -326,7 +326,7 @@ simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs1 perm1 v1)))
 simplifyRearrange _ _ = cannotSimplify
 
 isDropTake :: VName -> ST.SymbolTable lore
-           -> Maybe (SE.ScalExp, SE.ScalExp,
+           -> Maybe (PrimExp VName, PrimExp VName,
                      Certificates, Int, VName)
 isDropTake v vtable = do
   Let pat _ (BasicOp (Split cs dim splits v')) <- ST.entryStm =<< ST.lookup v vtable
@@ -334,13 +334,12 @@ isDropTake v vtable = do
   return (prod $ take i splits,
           prod $ take 1 $ drop i splits,
           cs, dim, v')
-  where prod = product . map SE.intSubExpToScalExp
+  where prod = product . map (primExpFromSubExp int32)
 
 simplifyRotate :: MonadBinder m => TopDownRule m
 -- A zero-rotation is identity.
 simplifyRotate _ (Let pat _ (BasicOp (Rotate _ offsets v)))
-  | all (==constant (0::Int32)) offsets =
-      letBind_ pat $ BasicOp $ SubExp $ Var v
+  | all isCt0 offsets = letBind_ pat $ BasicOp $ SubExp $ Var v
 
 simplifyRotate vtable (Let pat _ (BasicOp (Rotate cs offsets v)))
   | Just (Rearrange cs2 perm v2) <- asBasicOp =<< ST.lookupExp v vtable,
@@ -552,12 +551,14 @@ simplifyIndexing vtable seType ocs idd inds consuming =
 
     Just (SubExp (Var v)) -> Just $ pure $ IndexResult ocs v inds
 
-    Just (Iota _ x s et)
-      | [DimFix ii] <- inds ->
+    Just (Iota _ x s to_it)
+      | [DimFix ii] <- inds,
+        Just (Prim (IntType from_it)) <- seType ii ->
           Just $
           fmap SubExpResult $ letSubExp "index_iota" <=< toExp $
-          primExpFromSubExp (IntType et) ii * primExpFromSubExp (IntType et) s +
-          primExpFromSubExp (IntType et) x
+          ConvOpExp (SExt from_it to_it) (primExpFromSubExp (IntType from_it) ii)
+          * primExpFromSubExp (IntType to_it) s
+          + primExpFromSubExp (IntType to_it) x
 
     Just (Rotate cs offsets a) -> Just $ do
       dims <- arrayDims <$> lookupType a
@@ -700,11 +701,11 @@ simplifyIndexIntoReshape vtable (Let pat _ (BasicOp (Index cs idd slice)))
           -- Linearise indices and map to old index space.
           oldshape <- arrayDims <$> lookupType idd2
           let new_inds =
-                reshapeIndex (map SE.intSubExpToScalExp oldshape)
-                             (map SE.intSubExpToScalExp $ newDims newshape)
-                             (map SE.intSubExpToScalExp inds)
+                reshapeIndex (map (primExpFromSubExp int32) oldshape)
+                             (map (primExpFromSubExp int32) $ newDims newshape)
+                             (map (primExpFromSubExp int32) inds)
           new_inds' <-
-            mapM (letSubExp "new_index" <=< SE.fromScalExp) new_inds
+            mapM (letSubExp "new_index" <=< toExp) new_inds
           letBind_ pat $ BasicOp $ Index (cs++cs2) idd2 $ map DimFix new_inds'
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
