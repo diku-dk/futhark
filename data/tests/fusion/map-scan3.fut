@@ -9,11 +9,11 @@
 -- output { 488i32 }
 -- input { 10 1000 }
 -- output { 1986778316i32 }
--- input { 10 10000 }
+-- compiled input { 10 10000 }
 -- output { -1772567048i32 }
--- input { 10000 10 }
+-- compiled input { 10000 10 }
 -- output { 1666665i32 }
--- input { 100000 10 }
+-- compiled input { 100000 10 }
 -- output { 16511385i32 }
 --
 -- structure {
