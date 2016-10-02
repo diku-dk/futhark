@@ -5,7 +5,6 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , blockedReductionStream
        , blockedMap
        , blockedScan
-       , blockedSegmentedScan
        , blockedKernelSize
 
        , chunkLambda
@@ -23,10 +22,9 @@ import Control.Applicative
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import Prelude
+import Prelude hiding (quot)
 
 import Futhark.Representation.AST
 import Futhark.Representation.Kernels
@@ -39,6 +37,7 @@ import Futhark.Transform.FirstOrderTransform (doLoopMapAccumL)
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util
+import Futhark.Util.IntegralExp
 
 blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                           Pattern Kernels
@@ -380,9 +379,10 @@ blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern Kernels
             -> Certificates -> SubExp
             -> Lambda InKernel -> Lambda InKernel
+            -> SubExp -> [(VName, SubExp)] -> [KernelInput]
             -> [SubExp] -> [VName]
             -> m ()
-blockedScan pat cs w lam foldlam nes arrs = do
+blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
   first_scan_size <- blockedKernelSize w
   my_index <- newVName "my_index"
   other_index <- newVName "other_index"
@@ -392,10 +392,21 @@ blockedScan pat cs w lam foldlam nes arrs = do
       my_index_param = Param my_index (Prim int32)
       other_index_param = Param other_index (Prim int32)
 
+  let foldlam_scope = scopeOfLParams $
+                      my_index_param : other_index_param : lambdaParams foldlam
+      bindIndex i v = letBindNames'_ [i] =<< toExp v
+  compute_segments <- runBinder_ $ localScope foldlam_scope $
+                      zipWithM_ bindIndex (map fst ispace) $
+                      unflattenIndex (map (primExpFromSubExp int32 . snd) ispace)
+                      (LeafExp (paramName my_index_param) int32 `quot`
+                       primExpFromSubExp int32 segment_size)
+  read_inps <- mapM readKernelInput inps
   first_scan_foldlam <- renameLambda
     foldlam { lambdaParams = my_index_param :
                              other_index_param :
                              lambdaParams foldlam
+            , lambdaBody = insertStms (compute_segments++read_inps) $
+                           lambdaBody foldlam
             }
   first_scan_lam <- renameLambda
     lam { lambdaParams = my_index_param :
@@ -478,74 +489,6 @@ blockedScan pat cs w lam foldlam nes arrs = do
                                                   , kernelInputIndices = indices
                                                   }
 
-addFlagToLambda :: (MonadBinder m, Lore m ~ Kernels) =>
-                   [SubExp] -> Lambda InKernel -> m (Lambda InKernel)
-addFlagToLambda nes lam = do
-  let num_accs = length nes
-  x_flag <- newVName "x_flag"
-  y_flag <- newVName "y_flag"
-  let x_flag_param = Param x_flag $ Prim Bool
-      y_flag_param = Param y_flag $ Prim Bool
-      (x_params, y_params) = splitAt num_accs $ lambdaParams lam
-      params = [x_flag_param] ++ x_params ++ [y_flag_param] ++ y_params
-
-  body <- runBodyBinder $ localScope (scopeOfLParams params) $ do
-    new_flag <- letSubExp "new_flag" $
-                BasicOp $ BinOp LogOr (Var x_flag) (Var y_flag)
-    lhs <- fmap (map Var) $ letTupExp "seg_lhs" $ If (Var y_flag)
-      (resultBody nes)
-      (resultBody $ map (Var . paramName) x_params)
-      (staticShapes $ map paramType x_params)
-    let rhs = map (Var . paramName) y_params
-
-    lam' <- renameLambda lam -- avoid shadowing
-    res <- eLambda lam' $ lhs ++ rhs
-
-    return $ resultBody $ new_flag : res
-
-  return Lambda { lambdaParams = params
-                , lambdaBody = body
-                , lambdaReturnType = Prim Bool : lambdaReturnType lam
-                }
-
-blockedSegmentedScan :: (MonadBinder m, Lore m ~ Kernels) =>
-                        SubExp
-                     -> Pattern Kernels
-                     -> Certificates
-                     -> SubExp
-                     -> Lambda InKernel
-                     -> Lambda InKernel
-                     -> [SubExp] -> [VName]
-                     -> m ()
-blockedSegmentedScan segment_size pat cs w lam fold_lam nes arrs = do
-  flags_i <- newVName "flags_i"
-
-  unused_flag_array <- newVName "unused_flag_array"
-  flags_body <-
-    runBodyBinder $ localScope (HM.singleton flags_i $ IndexInfo Int32) $ do
-      segment_index <- letSubExp "segment_index" $
-                       BasicOp $ BinOp (SRem Int32) (Var flags_i) segment_size
-      start_of_segment <- letSubExp "start_of_segment" $
-                          BasicOp $ CmpOp (CmpEq int32) segment_index zero
-      flag <- letSubExp "flag" $
-              If start_of_segment (resultBody [true]) (resultBody [false]) [Prim Bool]
-      return $ resultBody [flag]
-  (mapk_bnds, mapk) <- mapKernelFromBody [] w [(flags_i, w)] [] [Prim Bool] flags_body
-  mapM_ addStm mapk_bnds
-  flags <- letExp "flags" $ Op mapk
-
-  lam' <- addFlagToLambda nes lam
-  fold_lam' <- addFlagToLambda nes fold_lam
-
-  let pat' = pat { patternValueElements = PatElem unused_flag_array BindVar
-                                          (arrayOf (Prim Bool) (Shape [w]) NoUniqueness) :
-                                          patternValueElements pat
-                 }
-  blockedScan pat' cs w lam' fold_lam' (false:nes) (flags:arrs)
-  where zero = constant (0 :: Int32)
-        true = constant True
-        false = constant False
-
 mapKernelSkeleton :: (HasScope Kernels m, MonadFreshNames m) =>
                      SubExp -> [KernelInput]
                   -> m ([Stm Kernels], (SubExp,SubExp,SubExp), [Stm InKernel])
@@ -556,12 +499,7 @@ mapKernelSkeleton w inputs = do
     letBindNames'_ [group_size_v] $ Op GroupSize
     numThreadsAndGroups w $ Var group_size_v
 
-  read_input_bnds <- forM inputs $ \inp -> do
-    let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
-    arr_t <- lookupType $ kernelInputArray inp
-    return $ Let (Pattern [] [pe]) () $
-      BasicOp $ Index [] (kernelInputArray inp) $
-      fullSlice arr_t $ map DimFix $ kernelInputIndices inp
+  read_input_bnds <- mapM readKernelInput inputs
 
   let ksize = (num_groups, Var group_size_v, num_threads)
   return (ksize_bnds, ksize, read_input_bnds)
@@ -603,9 +541,19 @@ data KernelInput = KernelInput { kernelInputName :: VName
                                , kernelInputArray :: VName
                                , kernelInputIndices :: [SubExp]
                                }
+                 deriving (Show)
 
 kernelInputParam :: KernelInput -> Param Type
 kernelInputParam p = Param (kernelInputName p) (kernelInputType p)
+
+readKernelInput :: (HasScope Kernels m, Monad m) =>
+                   KernelInput -> m (Stm InKernel)
+readKernelInput inp = do
+  let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
+  arr_t <- lookupType $ kernelInputArray inp
+  return $ Let (Pattern [] [pe]) () $
+    BasicOp $ Index [] (kernelInputArray inp) $
+    fullSlice arr_t $ map DimFix $ kernelInputIndices inp
 
 newKernelSpace :: MonadFreshNames m =>
                   (SubExp,SubExp,SubExp) -> [(VName, SubExp)] -> m KernelSpace

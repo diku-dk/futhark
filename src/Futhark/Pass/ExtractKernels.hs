@@ -179,7 +179,7 @@ import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
-import Futhark.Pass.ExtractKernels.SegmentedReduce
+import Futhark.Pass.ExtractKernels.Segmented
 import Futhark.Pass.ExtractKernels.Interchange
 import Futhark.Util.Log
 
@@ -270,7 +270,7 @@ transformStm (Let pat () (Op (Map cs w lam arrs))) =
 transformStm (Let pat () (Op (Scanomap cs w lam1 lam2 nes arrs))) = do
   lam1_sequential <- FOT.transformLambda lam1
   lam2_sequential <- FOT.transformLambda lam2
-  runBinder_ $ blockedScan pat cs w lam1_sequential lam2_sequential nes arrs
+  runBinder_ $ blockedScan pat cs w lam1_sequential lam2_sequential (intConst Int32 1) [] [] nes arrs
 
 transformStm (Let pat () (Op (Redomap cs w comm lam1 lam2 nes arrs))) =
   if sequentialiseRedomapBody then do
@@ -303,7 +303,7 @@ transformStm (Let pat () (Op (Scan cs w fun input))) = do
   fun_sequential <- FOT.transformLambda fun
   fun_sequential_renamed <- renameLambda fun_sequential
   runBinder_ $
-    blockedScan pat cs w fun_sequential fun_sequential_renamed nes arrs
+    blockedScan pat cs w fun_sequential fun_sequential_renamed (intConst Int32 1) [] [] nes arrs
   where (nes, arrs) = unzip input
 
 -- Streams can be handled in two different ways - either we
@@ -859,10 +859,10 @@ segmentedScanomapKernel :: KernelNest
                         -> KernelM (Maybe [KernelsStm])
 segmentedScanomapKernel nest perm cs segment_size lam fold_lam nes arrs =
   isSegmentedOp nest perm segment_size
-  (lambdaReturnType lam) (freeInLambda lam <> freeInLambda fold_lam) nes arrs $
-  \pat flat_pat _num_segments total_num_elements nes' arrs' -> do
-    blockedSegmentedScan segment_size flat_pat cs total_num_elements
-      lam fold_lam nes' arrs'
+  (lambdaReturnType lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
+  \pat flat_pat _num_segments total_num_elements ispace inps nes' arrs' -> do
+    regularSegmentedScan segment_size flat_pat cs total_num_elements
+      lam fold_lam ispace inps nes' arrs'
 
     forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
       \(dst_pat_elem, flat) -> do
@@ -879,37 +879,42 @@ regularSegmentedRedomapKernel :: KernelNest
                               -> KernelM (Maybe [KernelsStm])
 regularSegmentedRedomapKernel nest perm cs segment_size _comm lam fold_lam nes arrs =
   isSegmentedOp nest perm segment_size
-  (lambdaReturnType fold_lam) (freeInLambda lam <> freeInLambda fold_lam) nes arrs $
-  \pat flat_pat num_segments total_num_elements nes' arrs' ->
+  (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
+  \pat flat_pat num_segments total_num_elements ispace inps nes' arrs' ->
     regularSegmentedRedomapAsScan
     segment_size num_segments (kernelNestWidths nest)
-    flat_pat pat cs total_num_elements lam fold_lam nes' arrs'
+    flat_pat pat cs total_num_elements lam fold_lam ispace inps nes' arrs'
 
 isSegmentedOp :: KernelNest
               -> [Int]
               -> SubExp
               -> [Type]
-              -> Names
+              -> Names -> Names
               -> [SubExp] -> [VName]
               -> (Pattern
                   -> Pattern
                   -> SubExp
                   -> SubExp
+                  -> [(VName, SubExp)]
+                  -> [KernelInput]
                   -> [SubExp] -> [VName]
                   -> Binder Out.Kernels ())
               -> KernelM (Maybe [KernelsStm])
-isSegmentedOp nest perm segment_size ret free_in_op nes arrs m = runMaybeT $ do
+isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m = runMaybeT $ do
   -- We must verify that array inputs to the operation are inputs to
-  -- the outermost loop nesting or free in the loop nest, and that
-  -- none of the names bound by the loop nest are used in the lambda.
-  -- Furthermore, the neutral elements must be free in the loop nest.
+  -- the outermost loop nesting or free in the loop nest.  Nothing
+  -- free in the op may be bound by the nest.  Furthermore, the
+  -- neutral elements must be free in the loop nest.
+  --
+  -- We must summarise any names from free_in_op that are bound in the
+  -- nest, and describe how to obtain them given segment indices.
 
   let bound_by_nest = boundInKernelNest nest
 
   (pre_bnds, nesting_size, ispace, kernel_inps, _rets) <- flatKernel nest
 
   unless (HS.null $ free_in_op `HS.intersection` bound_by_nest) $
-    fail "Lambda uses nest-bound parameters."
+    fail "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace
 
@@ -922,7 +927,7 @@ isSegmentedOp nest perm segment_size ret free_in_op nes arrs m = runMaybeT $ do
           Just inp | kernelInputIndices inp == map Var indices ->
             return $ return $ kernelInputArray inp
           Nothing | not (arr `HS.member` bound_by_nest) ->
-                      -- This input is something that is free outside
+                      -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
                       -- it.
                       return $ letExp (baseString arr ++ "_repd") $
@@ -965,7 +970,7 @@ isSegmentedOp nest perm segment_size ret free_in_op nes arrs m = runMaybeT $ do
                 zipWithM flatPatElem
                 (patternValueElements pat) ret
 
-    m pat flat_pat nesting_size total_num_elements nes' arrs'
+    m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
 
 containsNestedParallelism :: Lambda -> Bool
 containsNestedParallelism lam =
