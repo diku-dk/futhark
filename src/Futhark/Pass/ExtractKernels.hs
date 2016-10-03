@@ -931,7 +931,7 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
                       -- the loop nesting. We will have to replicate
                       -- it.
                       return $ letExp (baseString arr ++ "_repd") $
-                      BasicOp $ Replicate (Shape [segment_size]) $ Var arr
+                      BasicOp $ Replicate (Shape [nesting_size]) $ Var arr
           _ ->
             fail "Input not free or outermost."
 
