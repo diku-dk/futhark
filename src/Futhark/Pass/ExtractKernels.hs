@@ -722,7 +722,7 @@ maybeDistributeStm (Let pat _ (Op (Reduce cs w comm lam input))) acc
 maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just perm <- res `isPermutationOf` map Var (patternNames pat) -> do
+      | Just perm <- map Var (patternNames pat) `isPermutationOf` res -> do
           lam' <- FOT.transformLambda lam
           fold_lam' <- FOT.transformLambda fold_lam
           localScope (typeEnvFromKernelAcc acc') $
