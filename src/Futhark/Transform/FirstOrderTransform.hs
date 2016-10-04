@@ -310,7 +310,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
   let (exszvar,    exszarres,  exszses  ) = unzip3 $ catMaybes mexistszs
       (exindvars,  indvarres,  exindses ) = unzip3 $ catMaybes mexistinds
       (lftedrtps1, lftedrtps2, exactrtps) = unzip3   botharrtps
-      patarrnms = map (textual . identName) (fst $ unzip assocs)
+      patarrnms = map (baseString . identName) (fst $ unzip assocs)
   -- various result array identifiers
   outarrinit <- forM (zip initrtps  patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_init") t
@@ -384,7 +384,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
           forM_ (zip arrpars arrexps) $
             \(param, inarr) -> do
                 atp <- lookupType inarr
-                let anm = textual inarr
+                let anm = baseString inarr
                 (dt1,t2,dt4) <- case atp of
                     Array bt (Shape (_:dims)) _ ->
                         return ( Array bt (Shape $ Var (identName diff1id):dims) NoUniqueness
@@ -500,18 +500,18 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
         mkAllExistIdAndTypes _ ((_, ExactBd _), initrtp) =
             return ( Nothing, Nothing, (initrtp,initrtp,initrtp) )
         mkAllExistIdAndTypes _ ((p,UpperBd _), Array bt (Shape (d:dims)) u) = do
-            idd1<- newIdent (textual (identName p)++"_outiv1") $ Prim int32
-            idd2<- newIdent (textual (identName p)++"_outiv2") $ Prim int32
+            idd1<- newIdent (baseString (identName p)++"_outiv1") $ Prim int32
+            idd2<- newIdent (baseString (identName p)++"_outiv2") $ Prim int32
             let initrtp   = Array bt (Shape $ d:dims) u
                 exacttype = Array bt (Shape $ Var (identName idd2):dims) u
             return ( Nothing
                    , Just (idd1,idd2,constant (0 :: Int32))
                    , (initrtp,initrtp,exacttype) )
         mkAllExistIdAndTypes strmsz ((p,UnknownBd), Array bt (Shape (_:dims)) u) = do
-            idd1 <- newIdent (textual (identName p)++"_outiv1") $ Prim int32
-            idd2 <- newIdent (textual (identName p)++"_outiv2") $ Prim int32
-            idal1<- newIdent (textual (identName p)++"_outsz1") $ Prim int32
-            idal2<- newIdent (textual (identName p)++"_outsz2") $ Prim int32
+            idd1 <- newIdent (baseString (identName p)++"_outiv1") $ Prim int32
+            idd2 <- newIdent (baseString (identName p)++"_outiv2") $ Prim int32
+            idal1<- newIdent (baseString (identName p)++"_outsz1") $ Prim int32
+            idal2<- newIdent (baseString (identName p)++"_outsz2") $ Prim int32
             let lftedtype1= Array bt (Shape $ Var (identName idal1): dims) u
                 lftedtype2= Array bt (Shape $ Var (identName idal2): dims) u
                 exacttype = Array bt (Shape $ Var (identName idd2) : dims) u
@@ -539,7 +539,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                   Nothing ->               -- exact-size case
                     return (iv, glboutid, Nothing, Nothing)
                   Just (k,_,_) -> do
-                    newszid <- newIdent (textual (identName k)++"_new") $ Prim int32
+                    newszid <- newIdent (baseString (identName k)++"_new") $ Prim int32
                     plexp <- eBinOp (Add Int32) (pure $ BasicOp $ SubExp $ Var $ identName k)
                                                 (pure $ BasicOp $ SubExp locoutid_size)
                     myLetBind plexp newszid
@@ -564,9 +564,9 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                             (pure $ BasicOp $ SubExp $ Var $ identName newszid)
                                             (pure $ BasicOp $ SubExp $ constant (2 :: Int32))
                                 myLetBind alszt2exp newallocid
-                                bnew0<- letExp (textual (identName glboutid)++"_loop0") $
+                                bnew0<- letExp (baseString (identName glboutid)++"_loop0") $
                                                BasicOp $ Scratch (elemType oldbtp) (Var (identName newallocid):olddims)
-                                bnew <- newIdent (textual (identName glboutid)++"_loop") =<<
+                                bnew <- newIdent (baseString (identName glboutid)++"_loop") =<<
                                         lookupType bnew0
                                 let alloc_merge = loopMerge [bnew] [Var bnew0]
                                 allocloopbody <-
@@ -580,19 +580,19 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                 let alloopres = DoLoop []
                                                   (loopMerge [bnew] [Var bnew0])
                                                   (ForLoop alloclid Int32 (Var $ identName k)) allocloopbody
-                                bnew' <- newIdent (textual (identName glboutid)++"_new0") =<<
+                                bnew' <- newIdent (baseString (identName glboutid)++"_new0") =<<
                                          lookupType bnew0
                                 myLetBind alloopres bnew'
                                 return $ resultBody [Var $ identName bnew']
                         allocifexp <- eIf isempty emptybranch otherbranch
-                        bnew'' <- newIdent (textual (identName glboutid)++"_res") $
+                        bnew'' <- newIdent (baseString (identName glboutid)++"_res") $
                                            Array (elemType oldbtp)
                                            (Shape $ Var (identName resallocid):olddims) NoUniqueness
                         let patresbnd = mkLet' [resallocid] [bnew''] allocifexp
                         addStm patresbnd
                         return (Var $ identName k, bnew'', Just newszid, Just resallocid)
-            glboutLid <- newIdent (textual (identName glboutid)++"_loop") $ identType glboutid'
-            glboutBdId<- newIdent (textual (identName glboutid)++"_loopbd") $ identType glboutid'
+            glboutLid <- newIdent (baseString (identName glboutid)++"_loop") $ identType glboutid'
+            glboutBdId<- newIdent (baseString (identName glboutid)++"_loopbd") $ identType glboutid'
             loopid <- newVName "j"
             let outmerge = loopMerge [glboutLid] [Var $ identName glboutid']
             -- make copy-out what was written in the current iteration
