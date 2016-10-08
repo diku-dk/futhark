@@ -945,8 +945,36 @@ checkExp (LetPat pat e body pos) =
   -- Not technically an ascription, but we want the pattern to have
   -- exactly the type of 'e'.
   bindingPattern pat (Ascribed $ typeOf e') $ \pat' -> do
+    when (hasShapeDecl pat') $
+      bad $ TypeError (srclocOf pat')
+      "Type ascription for let-binding may not have shape declarations."
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
+  where -- HACK: Until we figure out what they should mean, shape
+        -- declarations are banned in let binding type ascriptions.
+    hasShapeDecl (TuplePattern ps _) = any hasShapeDecl ps
+    hasShapeDecl Id{} = False
+    hasShapeDecl Wildcard{} = False
+    hasShapeDecl (PatternAscription p td) =
+      hasShapeDecl p ||
+      hasShapeDecl' (unInfo $ expandedType td)
+
+    hasShapeDecl' Prim{} = False
+    hasShapeDecl' (Tuple ts) = any hasShapeDecl' ts
+    hasShapeDecl' (Array at) = arrayElemHasShapeDecl at
+
+    arrayElemHasShapeDecl (PrimArray _ shape _ _) =
+      any (/=AnyDim) (shapeDims shape)
+    arrayElemHasShapeDecl (TupleArray ts shape _) =
+      any (/=AnyDim) (shapeDims shape) ||
+      any tupleArrayElemHasShapeDecl ts
+
+    tupleArrayElemHasShapeDecl (ArrayArrayElem at) =
+      arrayElemHasShapeDecl at
+    tupleArrayElemHasShapeDecl (TupleArrayElem ts) =
+      any tupleArrayElemHasShapeDecl ts
+    tupleArrayElemHasShapeDecl PrimArrayElem{} =
+      False
 
 checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
   src' <- checkIdent src
