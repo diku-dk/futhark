@@ -7,7 +7,6 @@ module Futhark.Internalise.Bindings
 
   , flattenPattern
   , bindingPattern
-  , bindingFlatPattern
   )
   where
 
