@@ -16,7 +16,6 @@ import qualified Futhark.Representation.Kernels.Simplify as R
 import qualified Futhark.Representation.ExplicitMemory as R
 import qualified Futhark.Representation.ExplicitMemory.Simplify as R
 
-import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax
@@ -24,11 +23,8 @@ import Futhark.Representation.AST.Syntax
 simplify :: R.Attributes lore =>
             (Prog lore -> State VNameSource (Prog lore))
          -> Pass lore lore
-simplify f =
-  simplePass
-  "simplify"
-  "Perform simple enabling optimisations." $
-  fmap deadCodeElim . f
+simplify = simplePass "simplify" "Perform simple enabling optimisations."
+
 
 simplifySOACS :: Pass R.SOACS R.SOACS
 simplifySOACS = simplify R.simplifySOACS

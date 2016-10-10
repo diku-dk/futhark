@@ -14,6 +14,7 @@ module Futhark.Optimise.Simplifier.Simplify
 
 import Data.Monoid
 
+import Futhark.Optimise.DeadVarElim
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
@@ -46,7 +47,8 @@ simplifyFun :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
              -> FunDef lore
              -> m (FunDef (Engine.Wise lore))
 simplifyFun simpl rules blockers =
-  loopUntilConvergence env simpl Engine.simplifyFun removeFunDefWisdom
+  loopUntilConvergence env simpl
+  (Engine.simplifyFun . deadCodeElimFun) removeFunDefWisdom
   where env = Engine.emptyEnv rules blockers
 
 -- | Simplify just a single 'Lambda'.

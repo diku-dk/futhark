@@ -396,6 +396,7 @@ hoistStms :: SimplifiableLore lore =>
                             UT.UsageTable)
 hoistStms rules block vtable uses needs = do
   (uses', blocked, hoisted) <- simplifyStms vtable uses needs
+  unless (null hoisted) changed
   mapM_ addStm blocked
   return (blocked, hoisted, uses')
   where simplifyStms vtable' uses' bnds = do
