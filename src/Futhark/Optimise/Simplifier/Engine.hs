@@ -45,6 +45,7 @@ module Futhark.Optimise.Simplifier.Engine
        , emptyState
        , Need (needStms)
        , asksEngineEnv
+       , changed
        , getVtable
        , localVtable
        , insertAllStms
@@ -238,14 +239,14 @@ subSimpleM :: (SimplifiableLore lore,
            -> Env (SimpleM lore)
            -> ST.SymbolTable (Wise outerlore)
            -> SimpleM lore a
-           -> m (a, [Stm (Wise lore)])
+           -> m (a, Bool, [Stm (Wise lore)])
 subSimpleM simpl env outer_vtable m = do
   let inner_vtable = ST.castSymbolTable outer_vtable
-  modifyNameSource $ \src ->
-    let SimpleM m' = localVtable (<>inner_vtable) m
-        (x, (_, src'), need) =
-          runRWS m' (simpl, env) (emptyState, src)
-    in ((x, needStms need), src')
+  src <- getNameSource
+  let SimpleM m' = localVtable (<>inner_vtable) m
+      (x, (s, src'), need) = runRWS m' (simpl, env) (emptyState, src)
+  putNameSource src'
+  return (x, stateChanged s, needStms need)
 
 askEngineEnv :: SimpleM lore (Env (SimpleM lore))
 askEngineEnv = snd <$> ask
@@ -284,6 +285,8 @@ modifyEngineState :: (State (SimpleM lore) -> State (SimpleM lore)) -> SimpleM l
 modifyEngineState f = do x <- getEngineState
                          putEngineState $ f x
 
+-- | Mark that we have changed something and it would be a good idea
+-- to re-run the simplifier.
 changed :: SimpleM lore ()
 changed = modifyEngineState $ \s -> s { stateChanged = True }
 
