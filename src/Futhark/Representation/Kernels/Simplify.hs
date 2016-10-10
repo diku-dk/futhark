@@ -67,12 +67,13 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
 simplifyKernelOp ops env (ScanKernel cs w kernel_size lam foldlam nes arrs) = do
   arrs' <- mapM Engine.simplify arrs
   outer_vtable <- Engine.getVtable
-  (lam', lam_hoisted) <-
+  (lam', again1, lam_hoisted) <-
     Engine.subSimpleM ops env outer_vtable $
     Engine.simplifyLambda lam Nothing (map (const Nothing) arrs')
-  (foldlam', foldlam_hoisted) <-
+  (foldlam', again2, foldlam_hoisted) <-
     Engine.subSimpleM ops env outer_vtable $
     Engine.simplifyLambda foldlam Nothing (map Just arrs')
+  when (again1 || again2) Engine.changed
   mapM_ processHoistedStm lam_hoisted
   mapM_ processHoistedStm foldlam_hoisted
   ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
@@ -87,7 +88,7 @@ simplifyKernelOp ops env (Kernel cs space ts kbody) = do
   space' <- Engine.simplify space
   ts' <- mapM Engine.simplify ts
   outer_vtable <- Engine.getVtable
-  ((kbody_res', kbody_bnds'), kbody_hoisted) <-
+  ((kbody_res', kbody_bnds'), again, kbody_hoisted) <-
     Engine.subSimpleM ops env outer_vtable $ do
       par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
       Engine.localVtable (<>scope_vtable) $
@@ -96,6 +97,7 @@ simplifyKernelOp ops env (Kernel cs space ts kbody) = do
                         `Engine.orIf` par_blocker
                         `Engine.orIf` Engine.isConsumed) $
         simplifyKernelBody kbody
+  when again Engine.changed
   mapM_ processHoistedStm kbody_hoisted
   return $ Kernel cs' space' ts' $ mkWiseKernelBody () kbody_bnds' kbody_res'
   where scope_vtable = ST.fromScope scope
@@ -288,7 +290,7 @@ fuseScanIota :: (MonadBinder m,
                 TopDownRule m
 fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
   | not $ null iota_params = do
-      (fold_body, []) <- Engine.subSimpleM simpleInKernel inKernelEnv vtable $
+      (fold_body, _, []) <- Engine.subSimpleM simpleInKernel inKernelEnv vtable $
         (uncurry (flip mkBodyM) =<<) $ collectStms $ localScope (castScope $ scopeOf foldlam) $ do
           forM_ iota_params $ \(p, x) ->
             letBindNames'_ [paramName p] $
