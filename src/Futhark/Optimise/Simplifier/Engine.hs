@@ -715,8 +715,10 @@ instance Simplifiable SubExp where
   simplify (Var name) = do
     bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
     case bnd of
-      Just (Constant v) -> return $ Constant v
-      Just (Var id') -> do usedName id'
+      Just (Constant v) -> do changed
+                              return $ Constant v
+      Just (Var id') -> do changed
+                           usedName id'
                            return $ Var id'
       _              -> do usedName name
                            return $ Var name
@@ -756,7 +758,8 @@ instance Simplifiable VName where
   simplify v = do
     se <- ST.lookupSubExp v <$> getVtable
     case se of
-      Just (Var v') -> do usedName v'
+      Just (Var v') -> do changed
+                          usedName v'
                           return v'
       _             -> do usedName v
                           return v
