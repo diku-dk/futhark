@@ -138,10 +138,13 @@ emptyEnv rules blockers =
       }
 
 data State m = State { stateVtable :: ST.SymbolTable (Lore m)
+                     , stateChanged :: Bool -- Should we run again?
                      }
 
 emptyState :: State m
-emptyState = State { stateVtable = ST.empty }
+emptyState = State { stateVtable = ST.empty
+                   , stateChanged = False
+                   }
 
 data SimpleOps lore =
   SimpleOps { mkLetS :: ST.SymbolTable (Wise lore)
@@ -220,10 +223,10 @@ runSimpleM :: SimpleM lore a
            -> SimpleOps lore
            -> Env (SimpleM lore)
            -> VNameSource
-           -> (a, VNameSource)
+           -> ((a, Bool), VNameSource)
 runSimpleM (SimpleM m) simpl env src =
-  let (x, (_, src'), _) = runRWS m (simpl, env) (emptyState, src)
-  in (x, src')
+  let (x, (s, src'), _) = runRWS m (simpl, env) (emptyState, src)
+  in ((x, stateChanged s), src')
 
 subSimpleM :: (SimplifiableLore lore,
                MonadFreshNames m,
@@ -280,6 +283,10 @@ getsEngineState f = f <$> getEngineState
 modifyEngineState :: (State (SimpleM lore) -> State (SimpleM lore)) -> SimpleM lore ()
 modifyEngineState f = do x <- getEngineState
                          putEngineState $ f x
+
+changed :: SimpleM lore ()
+changed = modifyEngineState $ \s -> s { stateChanged = True }
+
 
 needStm :: Stm (Wise lore) -> SimpleM lore ()
 needStm bnd = tellNeed $ Need [bnd] UT.empty
@@ -413,6 +420,7 @@ hoistStms rules block vtable uses needs = do
                 | otherwise ->
                   return (expandUsage uses' bnd, Right bnd : bnds)
               Just optimbnds -> do
+                changed
                 (uses'',bnds') <- simplifyStms' vtable' uses' optimbnds
                 return (uses'', bnds'++bnds)
 
@@ -605,7 +613,7 @@ inspectStm bnd = do
   rules <- asksEngineEnv envRules
   simplified <- topDownSimplifyStm rules vtable bnd
   case simplified of
-    Just newbnds -> mapM_ inspectStm newbnds
+    Just newbnds -> changed >> mapM_ inspectStm newbnds
     Nothing      -> addStm bnd
 
 simplifyOp :: SimplifiableLore lore => Op lore -> SimpleM lore (Op (Wise lore))
