@@ -32,7 +32,7 @@ OPTIONS
 -h
   Print help text to standard output and exit.
 
--v
+-V
   Print version information on standard output and exit.
 
 SEE ALSO

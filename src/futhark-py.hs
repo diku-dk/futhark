@@ -54,7 +54,7 @@ commandLineOptions =
     (ReqArg (\filename -> Right $ \config -> config { compilerOutput = Just filename })
      "FILE")
     "Name of the compiled binary."
-  , Option "V" ["verbose"]
+  , Option "v" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["library"]

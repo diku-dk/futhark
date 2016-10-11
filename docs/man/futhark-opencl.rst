@@ -30,7 +30,7 @@ OPTIONS
   Where to write the resulting binary.  By default, if the source
   program is named 'foo.fut', the binary will be named 'foo'.
 
--V verbose
+-v verbose
   Enable debugging output.  If compilation fails due to a compiler
   error, the result of the last successful compiler step will be
   printed to standard error.
@@ -38,7 +38,7 @@ OPTIONS
 -h
   Print help text to standard output and exit.
 
--v
+-V
   Print version information on standard output and exit.
 
 SEE ALSO

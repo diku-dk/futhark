@@ -64,7 +64,7 @@ errput = liftIO . hPutStrLn stderr
 -- options.
 commonOptions :: [FunOptDescr cfg] -> [FunOptDescr cfg]
 commonOptions options =
-  [ Option "v" ["version"]
+  [ Option "V" ["version"]
     (NoArg $ Left $ do header
                        exitSuccess)
     "Print version information and exit."
