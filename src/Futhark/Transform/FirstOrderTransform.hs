@@ -86,12 +86,6 @@ transformBody (Body () bnds res) = insertStmsM $ do
 transformStmRecursively :: Transformer m =>
                                Stm -> m ()
 
-transformStmRecursively (Let pat () (DoLoop ctx val form body)) = do
-  body' <- localScope (scopeOfLoopForm form) $
-           localScope (scopeOfFParams $ map fst $ ctx ++ val) $
-           transformBody body
-  letBind_ pat $ DoLoop ctx val form body'
-
 transformStmRecursively (Let pat () (Op soac)) =
   transformSOAC pat =<< mapSOACM soacTransform soac
   where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda
@@ -100,7 +94,7 @@ transformStmRecursively (Let pat () (Op soac)) =
 
 transformStmRecursively (Let pat () e) =
   letBind_ pat =<< mapExpM transform e
-  where transform = identityMapper { mapOnBody = transformBody
+  where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
                                    , mapOnFParam = return
                                    , mapOnOp = fail "Unhandled Op in first order transform"

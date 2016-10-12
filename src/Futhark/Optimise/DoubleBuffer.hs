@@ -129,7 +129,7 @@ optimiseStm (Let pat () (DoLoop ctx val form body)) = do
   (bnds, ctx', val', body'') <- optimiseLoop ctx val body'
   return $ bnds ++ [Let pat () $ DoLoop ctx' val' form body'']
 optimiseStm (Let pat () e) = pure . Let pat () <$> mapExpM optimise e
-  where optimise = identityMapper { mapOnBody = optimiseBody
+  where optimise = identityMapper { mapOnBody = const optimiseBody
                                   , mapOnOp = optimiseOp
                                   }
 

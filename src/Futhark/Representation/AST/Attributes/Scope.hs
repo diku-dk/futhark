@@ -46,7 +46,6 @@ import Futhark.Representation.AST.Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
-import Futhark.Transform.Substitute
 
 -- | How some name in scope was bound.
 data NameInfo lore = LetInfo (LetAttr lore)
@@ -61,16 +60,6 @@ instance Annotations lore => Typed (NameInfo lore) where
   typeOf (FParamInfo attr) = typeOf attr
   typeOf (LParamInfo attr) = typeOf attr
   typeOf (IndexInfo it) = Prim $ IntType it
-
-instance Substitutable lore => Substitute (NameInfo lore) where
-  substituteNames subst (LetInfo attr) =
-    LetInfo $ substituteNames subst attr
-  substituteNames subst (FParamInfo attr) =
-    FParamInfo $ substituteNames subst attr
-  substituteNames subst (LParamInfo attr) =
-    LParamInfo $ substituteNames subst attr
-  substituteNames _ (IndexInfo it) =
-    IndexInfo it
 
 -- | A scope is a mapping from variable names to information about
 -- that name.

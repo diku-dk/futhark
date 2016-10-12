@@ -49,7 +49,7 @@ transformStm :: Stm ExplicitMemory -> ExpandM [Stm ExplicitMemory]
 transformStm (Let pat () e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
   return $ bnds ++ [Let pat () e']
-  where transform = identityMapper { mapOnBody = transformBody
+  where transform = identityMapper { mapOnBody = const transformBody
                                    }
 
 transformExp :: Exp ExplicitMemory -> ExpandM ([Stm ExplicitMemory], Exp ExplicitMemory)
@@ -261,5 +261,5 @@ offsetMemoryInExp offsets (Op (Inner (GroupReduce w lam input))) =
   Op (Inner (GroupReduce w lam' input))
   where lam' = lam { lambdaBody = offsetMemoryInBody offsets $ lambdaBody lam }
 offsetMemoryInExp offsets e = mapExp recurse e
-  where recurse = identityMapper { mapOnBody = return . offsetMemoryInBody offsets
+  where recurse = identityMapper { mapOnBody = const $ return . offsetMemoryInBody offsets
                                  }

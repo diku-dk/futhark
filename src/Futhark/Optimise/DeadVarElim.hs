@@ -106,21 +106,9 @@ deadCodeElimBodyM (Body bodylore [] es) = do
   Body bodylore [] <$> mapM deadCodeElimSubExp es
 
 deadCodeElimExp :: Attributes lore => Exp lore -> DCElimM (Exp lore)
-deadCodeElimExp (DoLoop ctx val form body) = do
-  let (ctxparams, ctxinit) = unzip ctx
-      (valparams, valinit) = unzip val
-  mapM_ deadCodeElimParam ctxparams
-  mapM_ deadCodeElimSubExp ctxinit
-  mapM_ deadCodeElimParam valparams
-  mapM_ deadCodeElimSubExp valinit
-  body' <- deadCodeElimBodyM body
-  case form of
-    ForLoop _ _ bound -> void $ deadCodeElimSubExp bound
-    WhileLoop cond  -> void $ deadCodeElimVName cond
-  return $ DoLoop ctx val form body'
-deadCodeElimExp e = mapExpM mapper e
+deadCodeElimExp = mapExpM mapper
   where mapper = Mapper {
-                   mapOnBody = deadCodeElimBodyM
+                   mapOnBody = const deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnVName = deadCodeElimVName
                  , mapOnCertificates = mapM deadCodeElimVName

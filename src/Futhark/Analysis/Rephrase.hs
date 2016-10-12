@@ -92,7 +92,7 @@ rephraseExtLambda rephraser lam = do
 
 mapper :: (Applicative m, Monad m) => Rephraser m from to -> Mapper from to m
 mapper rephraser = identityMapper {
-    mapOnBody = rephraseBody rephraser
+    mapOnBody = const $ rephraseBody rephraser
   , mapOnRetType = rephraseRetType rephraser
   , mapOnFParam = rephraseParam (rephraseFParamLore rephraser)
   , mapOnOp = rephraseOp rephraser

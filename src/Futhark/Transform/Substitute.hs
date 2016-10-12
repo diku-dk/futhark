@@ -18,6 +18,7 @@ import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
+import Futhark.Representation.AST.Attributes.Scope
 import Futhark.Analysis.PrimExp
 
 -- | The substitutions to be made are given by a mapping from names to
@@ -112,7 +113,7 @@ replace :: (Substitutable lore) => HM.HashMap VName VName -> Mapper lore lore Id
 replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
-                 , mapOnBody = return . substituteNames substs
+                 , mapOnBody = const $ return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
@@ -179,6 +180,16 @@ instance Substitute d => Substitute (DimIndex d) where
 
 instance Substitute v => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
+
+instance Substitutable lore => Substitute (NameInfo lore) where
+  substituteNames subst (LetInfo attr) =
+    LetInfo $ substituteNames subst attr
+  substituteNames subst (FParamInfo attr) =
+    FParamInfo $ substituteNames subst attr
+  substituteNames subst (LParamInfo attr) =
+    LParamInfo $ substituteNames subst attr
+  substituteNames _ (IndexInfo it) =
+    IndexInfo it
 
 -- | Lores in which all annotations support name
 -- substitution.

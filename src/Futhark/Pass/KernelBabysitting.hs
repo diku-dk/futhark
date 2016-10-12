@@ -72,13 +72,6 @@ nonlinearInMemory name m =
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformStm expmap (Let pat () (DoLoop ctx val form body)) = do
-  body' <- localScope (scopeOfFParams $ map fst $ ctx ++ val) $
-           localScope (scopeOfLoopForm form) $
-           transformBody body
-  addStm $ Let pat () $ DoLoop ctx val form body'
-  return expmap
-
 transformStm expmap (Let pat ()
                          (Op (ScanKernel cs w kernel_size lam foldlam nes arrs)))
   | kernelWorkgroups kernel_size /= constant (1::Int32) = do
@@ -116,7 +109,7 @@ transformStm expmap (Let pat () e) = do
   return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
 
 transform :: Mapper Kernels Kernels BabysitM
-transform = identityMapper { mapOnBody = transformBody }
+transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody }
 
 paddedScanReduceInput :: SubExp -> SubExp
                       -> BabysitM (SubExp, SubExp)
@@ -216,7 +209,7 @@ traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
         onStm (Let pat attr e) =
           Let pat attr <$> mapExpM mapper e
 
-        mapper = identityMapper { mapOnBody = onBody
+        mapper = identityMapper { mapOnBody = const onBody
                                 , mapOnOp = onOp
                                 }
 
