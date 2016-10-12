@@ -56,13 +56,13 @@ analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
 analyseExp = mapExp analyse
   where analyse =
           Mapper { mapOnSubExp = return
-                     , mapOnCertificates = return
-                     , mapOnVName = return
-                     , mapOnBody = return . analyseBody
-                     , mapOnRetType = return
-                     , mapOnFParam = return
-                     , mapOnOp = return . addOpAliases
-                     }
+                 , mapOnCertificates = return
+                 , mapOnVName = return
+                 , mapOnBody = const $ return . analyseBody
+                 , mapOnRetType = return
+                 , mapOnFParam = return
+                 , mapOnOp = return . addOpAliases
+                 }
 
 analyseLambda :: (Attributes lore, CanBeAliased (Op lore)) =>
                  Lambda lore -> Lambda (Aliases lore)

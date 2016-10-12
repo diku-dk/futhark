@@ -100,7 +100,7 @@ transformStm (Let pat () e)
 transformStm (Let pat () e) = do
   e' <- mapExpM transform e
   return [Let pat () e']
-  where transform = identityMapper { mapOnBody = transformBody
+  where transform = identityMapper { mapOnBody = const transformBody
                                    }
 
 scanOrReduce :: Pattern ExplicitMemory -> Exp ExplicitMemory

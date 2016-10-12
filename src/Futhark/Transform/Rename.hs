@@ -252,7 +252,7 @@ instance Renameable lore => Rename (Exp lore) where
             (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where mapper = Mapper {
-                      mapOnBody = rename
+                      mapOnBody = const rename
                     , mapOnSubExp = rename
                     , mapOnVName = rename
                     , mapOnCertificates = mapM rename

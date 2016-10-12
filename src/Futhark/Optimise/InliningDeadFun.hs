@@ -146,7 +146,7 @@ inlineInBody _ (Body () [] res) =
   Body () [] res
 
 inliner :: Monad m => [FunDef] -> Mapper SOACS SOACS m
-inliner funs = identityMapper { mapOnBody = return . inlineInBody funs
+inliner funs = identityMapper { mapOnBody = const $ return . inlineInBody funs
                               , mapOnOp = return . inlineInSOAC funs
                               }
 

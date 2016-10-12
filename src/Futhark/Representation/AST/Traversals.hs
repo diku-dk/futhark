@@ -33,6 +33,7 @@ module Futhark.Representation.AST.Traversals
   , mapExpM
   , mapExp
   , mapOnType
+  , mapOnLoopForm
 
   -- * Folding
   , Folder(..)
@@ -59,13 +60,16 @@ import qualified Data.Traversable
 import Prelude
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes.Scope
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
 -- given child.
 data Mapper flore tlore m = Mapper {
     mapOnSubExp :: SubExp -> m SubExp
-  , mapOnBody :: Body flore -> m (Body tlore)
+  , mapOnBody :: Scope tlore -> Body flore -> m (Body tlore)
+    -- ^ Most bodies are enclosed in a scope, which is passed along
+    -- for convenience.
   , mapOnVName :: VName -> m VName
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
@@ -77,7 +81,7 @@ data Mapper flore tlore m = Mapper {
 identityMapper :: Monad m => Mapper lore lore m
 identityMapper = Mapper {
                    mapOnSubExp = return
-                 , mapOnBody = return
+                 , mapOnBody = const return
                  , mapOnVName = return
                  , mapOnCertificates = return
                  , mapOnRetType = return
@@ -109,7 +113,7 @@ mapExpM tv (BasicOp (ConvOp conv x)) =
 mapExpM tv (BasicOp (UnOp op x)) =
   BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
 mapExpM tv (If c texp fexp ts) =
-  pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
+  pure If <*> mapOnSubExp tv c <*> mapOnBody tv mempty texp <*> mapOnBody tv mempty fexp <*>
        mapM (mapOnExtType tv) ts
 mapExpM tv (Apply fname args ret) = do
   args' <- forM args $ \(arg, d) ->
@@ -154,12 +158,15 @@ mapExpM tv (BasicOp (Partition cs n flags arr)) =
               pure n <*>
               mapOnVName tv flags <*>
               mapM (mapOnVName tv) arr)
-mapExpM tv (DoLoop ctxmerge valmerge form loopbody) =
+mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
+  ctxparams' <- mapM (mapOnFParam tv) ctxparams
+  valparams' <- mapM (mapOnFParam tv) valparams
+  form' <- mapOnLoopForm tv form
+  let scope = scopeOfLoopForm form' <> scopeOfFParams (ctxparams'++valparams')
   DoLoop <$>
-  (zip <$> mapM (mapOnFParam tv) ctxparams <*> mapM (mapOnSubExp tv) ctxinits) <*>
-  (zip <$> mapM (mapOnFParam tv) valparams <*> mapM (mapOnSubExp tv) valinits) <*>
-  mapOnLoopForm tv form <*>
-  mapOnBody tv loopbody
+    (zip ctxparams' <$> mapM (mapOnSubExp tv) ctxinits) <*>
+    (zip valparams' <$> mapM (mapOnSubExp tv) valinits) <*>
+    pure form' <*> mapOnBody tv scope loopbody
   where (ctxparams,ctxinits) = unzip ctxmerge
         (valparams,valinits) = unzip valmerge
 mapExpM tv (Op op) =
@@ -223,7 +230,7 @@ identityFolder = Folder {
 foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
 foldMapper f = Mapper {
                  mapOnSubExp = wrap foldOnSubExp
-               , mapOnBody = wrap foldOnBody
+               , mapOnBody = const $ wrap foldOnBody
                , mapOnVName = wrap foldOnVName
                , mapOnCertificates = wrap foldOnCertificates
                , mapOnRetType = wrap foldOnRetType
@@ -277,7 +284,7 @@ identityWalker = Walker {
 walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
 walkMapper f = Mapper {
                  mapOnSubExp = wrap walkOnSubExp
-               , mapOnBody = wrap walkOnBody
+               , mapOnBody = const $ wrap walkOnBody
                , mapOnVName = wrap walkOnVName
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType

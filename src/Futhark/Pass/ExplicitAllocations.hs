@@ -631,7 +631,7 @@ allocInExp (Apply fname args rettype) = do
   return $ Apply fname args' (memoryInRetType rettype)
 allocInExp e = mapExpM alloc e
   where alloc =
-          identityMapper { mapOnBody = allocInBody
+          identityMapper { mapOnBody = const allocInBody
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
                          , mapOnOp = \op -> do handle <- asks allocInOp

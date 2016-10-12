@@ -87,7 +87,7 @@ substituteIndicesInExp substs e = do
   substs' <- copyAnyConsumed e
   let substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs'
                                   , mapOnVName  = substituteIndicesInVar substs'
-                                  , mapOnBody   = substituteIndicesInBody substs'
+                                  , mapOnBody   = const $ substituteIndicesInBody substs'
                                   }
 
   mapExpM substitute e

@@ -154,7 +154,7 @@ optimiseExp (DoLoop ctx val form body) =
         boundInForm (WhileLoop _) = []
 -- TODO: handle Kernel here.
 optimiseExp e = mapExpM optimise e
-  where optimise = identityMapper { mapOnBody = optimiseBody
+  where optimise = identityMapper { mapOnBody = const optimiseBody
                                   }
 
 data Entry = Entry { entryNumber :: Int

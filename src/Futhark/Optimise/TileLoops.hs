@@ -47,7 +47,7 @@ optimiseStm (Let pat () (Op (Kernel cs space ts body))) = do
   where initial_variance = HM.map mempty $ scopeOfKernelSpace space
 optimiseStm (Let pat () e) =
   pure <$> (Let pat () <$> mapExpM optimise e)
-  where optimise = identityMapper { mapOnBody = optimiseBody }
+  where optimise = identityMapper { mapOnBody = const optimiseBody }
 
 tileInKernelBody :: Names -> VarianceTable
                  -> KernelSpace -> KernelBody InKernel
