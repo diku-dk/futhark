@@ -2,7 +2,7 @@
 -- to a flat byte offset.
 module Futhark.Representation.ExplicitMemory.IndexFunction
        (
-         IxFun(..)
+         IxFun
        , index
        , iota
        , offsetIndex
