@@ -45,7 +45,6 @@ type Indices num = [num]
 type Permutation = [Int]
 
 data IxFun num = Direct (Shape num)
-               | Offset (IxFun num) num
                | Permute (IxFun num) Permutation
                | Rotate (IxFun num) (Indices num)
                | Index (IxFun num) (Slice num)
@@ -57,8 +56,6 @@ data IxFun num = Direct (Shape num)
 instance (IntegralExp num, Eq num) => Eq (IxFun num) where
   Direct _ == Direct _ =
     True
-  Offset ixfun1 offset1 == Offset ixfun2 offset2 =
-    ixfun1 == ixfun2 && offset1 == offset2
   Permute ixfun1 perm1 == Permute ixfun2 perm2 =
     ixfun1 == ixfun2 && perm1 == perm2
   Rotate ixfun1 offsets1 == Rotate ixfun2 offsets2 =
@@ -76,7 +73,6 @@ instance (IntegralExp num, Eq num) => Eq (IxFun num) where
 
 instance Show num => Show (IxFun num) where
   show (Direct n) = "Direct (" ++ show n ++ ")"
-  show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
   show (Rotate fun offsets) = "Rotate (" ++ show fun ++ ", " ++ show offsets ++ ")"
   show (Index fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
@@ -86,7 +82,6 @@ instance Show num => Show (IxFun num) where
 instance Pretty num => Pretty (IxFun num) where
   ppr (Direct dims) =
     text "Direct" <> parens (commasep $ map ppr dims)
-  ppr (Offset fun k) = ppr fun <+> text "+" <+> ppr k
   ppr (Permute fun perm) = ppr fun <> ppr perm
   ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
   ppr (Index fun is) = ppr fun <> brackets (commasep $ map ppr is)
@@ -99,8 +94,6 @@ instance Pretty num => Pretty (IxFun num) where
 instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) where
   substituteNames _ (Direct n) =
     Direct n
-  substituteNames subst (Offset fun k) =
-    Offset (substituteNames subst fun) (substituteNames subst k)
   substituteNames subst (Permute fun perm) =
     Permute (substituteNames subst fun) perm
   substituteNames subst (Rotate fun offsets) =
@@ -120,7 +113,6 @@ instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) whe
 
 instance FreeIn num => FreeIn (IxFun num) where
   freeIn (Direct dims) = freeIn dims
-  freeIn (Offset ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Stride ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Permute ixfun _) = freeIn ixfun
   freeIn (Rotate ixfun offsets) = freeIn ixfun <> freeIn offsets
@@ -138,9 +130,6 @@ index :: (Pretty num, IntegralExp num) =>
 index (Direct dims) is element_size =
   sum (zipWith (*) is slicesizes) * element_size
   where slicesizes = drop 1 $ sliceSizes dims
-
-index (Offset fun offset) (i:is) element_size =
-  index fun ((i + offset) : is) element_size
 
 index (Permute fun perm) is_new element_size =
   index fun is_old element_size
@@ -173,7 +162,11 @@ iota = Direct
 offsetIndex :: (Eq num, IntegralExp num) =>
                IxFun num -> num -> IxFun num
 offsetIndex ixfun i | i == 0 = ixfun
-offsetIndex ixfun i = Offset ixfun i
+offsetIndex ixfun i =
+  case dims of
+    d:ds -> slice ixfun (DimSlice i (d-i) : map (DimSlice 0) ds)
+    []   -> error "offsetIndex: underlying index function has rank zero"
+  where dims = shape ixfun
 
 strideIndex :: IntegralExp num =>
                IxFun num -> num -> IxFun num
@@ -240,8 +233,6 @@ shape (Permute ixfun perm) =
   rearrangeShape perm $ shape ixfun
 shape (Rotate ixfun _) =
   shape ixfun
-shape (Offset ixfun _) =
-  shape ixfun
 shape (Index _ how) =
   sliceDims how
 shape (Reshape _ dims) =
@@ -252,8 +243,6 @@ shape (Stride ixfun _) =
 base :: IxFun num -> Shape num
 base (Direct dims) =
   dims
-base (Offset ixfun _) =
-  base ixfun
 base (Permute ixfun _) =
   base ixfun
 base (Rotate ixfun _) =
@@ -271,8 +260,6 @@ rebase :: (Eq num, IntegralExp num) =>
        -> IxFun num
 rebase new_base (Direct _) =
   new_base
-rebase new_base (Offset ixfun o) =
-  offsetIndex (rebase new_base ixfun) o
 rebase new_base (Stride ixfun stride) =
   strideIndex (rebase new_base ixfun) stride
 rebase new_base (Permute ixfun perm) =
@@ -290,12 +277,6 @@ linearWithOffset :: (Eq num, IntegralExp num) =>
                     IxFun num -> num -> Maybe num
 linearWithOffset (Direct _) _ =
   Just 0
-linearWithOffset (Offset ixfun n) element_size = do
-  inner_offset <- linearWithOffset ixfun element_size
-  case drop 1 $ sliceSizes $ shape ixfun of
-    [] -> Nothing
-    rowslice : _ ->
-      return $ inner_offset + (n * rowslice * element_size)
 linearWithOffset (Reshape ixfun _) element_size =
  linearWithOffset ixfun element_size
 linearWithOffset (Index ixfun is) element_size = do
@@ -306,7 +287,10 @@ linearWithOffset (Index ixfun is) element_size = do
   where m = length is
         inner_shape = shape ixfun
         fixingOuter (DimFix i:is') (_:ds) = (i:) <$> fixingOuter is' ds
-        fixingOuter is' ds | is' == map (DimSlice 0) ds = Just []
+        fixingOuter (DimSlice off _:is') ds
+          | is' == map (DimSlice 0) ds = Just [off]
+        fixingOuter is' ds
+          | is' == map (DimSlice 0) ds = Just []
         fixingOuter _ _ = Nothing
 linearWithOffset _ _ = Nothing
 
