@@ -153,7 +153,6 @@ module Futhark.Pass.ExtractKernels
        (extractKernels)
        where
 
-import Control.Arrow (second)
 import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
@@ -640,11 +639,11 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
 
 leavingNesting :: MapLoop -> KernelAcc -> KernelM KernelAcc
 leavingNesting (MapLoop cs w lam arrs) acc =
-  case second reverse $ kernelTargets acc of
-   (_, []) ->
+  case popInnerTarget $ kernelTargets acc of
+   Nothing ->
      fail "The kernel targets list is unexpectedly small"
-   ((pat,res), x:xs) -> do
-     let acc' = acc { kernelTargets = (x, reverse xs) }
+   Just ((pat,res), newtargets) -> do
+     let acc' = acc { kernelTargets = newtargets }
      case kernelStms acc' of
        []      -> return acc'
        remnant -> do
