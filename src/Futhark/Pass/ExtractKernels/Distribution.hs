@@ -10,10 +10,9 @@ module Futhark.Pass.ExtractKernels.Distribution
        , Targets
        , ppTargets
        , singleTarget
-       , innerTarget
        , outerTarget
-       , pushOuterTarget
        , pushInnerTarget
+       , popInnerTarget
        , targetsScope
 
        , LoopNesting (..)
@@ -65,38 +64,50 @@ import Prelude
 type Target = (Pattern Kernels, Result)
 
 -- | First pair element is the very innermost ("current") target.  In
--- the list, the outermost target comes first.
-type Targets = (Target, [Target])
+-- the list, the outermost target comes first.  Invariant: Every
+-- element of a pattern must be present as the result of the
+-- immediately enclosing target.  This is ensured by 'pushInnerTarget'
+-- by removing unused pattern elements.
+data Targets = Targets { innerTarget :: Target
+                       , _outerTargets :: [Target]
+                       }
 
 ppTargets :: Targets -> String
-ppTargets (target, targets) =
+ppTargets (Targets target targets) =
   unlines $ map ppTarget $ targets ++ [target]
   where ppTarget (pat, res) =
           pretty pat ++ " <- " ++ pretty res
 
 singleTarget :: Target -> Targets
-singleTarget = (,[])
-
-innerTarget :: Targets -> Target
-innerTarget = fst
+singleTarget = flip Targets []
 
 outerTarget :: Targets -> Target
-outerTarget (inner_target, []) = inner_target
-outerTarget (_, outer_target : _) = outer_target
+outerTarget (Targets inner_target []) = inner_target
+outerTarget (Targets _ (outer_target : _)) = outer_target
 
 pushOuterTarget :: Target -> Targets -> Targets
-pushOuterTarget target (inner_target, targets) =
-  (inner_target, target : targets)
+pushOuterTarget target (Targets inner_target targets) =
+  Targets inner_target (target : targets)
 
 pushInnerTarget :: Target -> Targets -> Targets
-pushInnerTarget target (inner_target, targets) =
-  (target, targets ++ [inner_target])
+pushInnerTarget (pat, res) (Targets inner_target targets) =
+  Targets (pat', res') (targets ++ [inner_target])
+  where (pes', res') = unzip $ filter (used . fst) $ zip (patternElements pat) res
+        pat' = Pattern [] pes'
+        inner_used = freeIn $ snd inner_target
+        used pe = patElemName pe `HS.member` inner_used
+
+popInnerTarget :: Targets -> Maybe (Target, Targets)
+popInnerTarget (Targets t ts) =
+  case reverse ts of
+    x:xs -> Just (t, Targets x $ reverse xs)
+    []   -> Nothing
 
 targetScope :: Target -> Scope Kernels
 targetScope = scopeOf . fst
 
 targetsScope :: Targets -> Scope Kernels
-targetsScope (t, ts) = mconcat $ map targetScope $ t : ts
+targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting { loopNestingPattern :: Pattern Kernels
                               , loopNestingCertificates :: Certificates
@@ -295,12 +306,12 @@ distributionInnerPattern = fst . innerTarget . distributionTarget
 
 distributionBodyFromStms :: (Attributes lore, CanBeAliased (Op lore)) =>
                             Targets -> [Stm lore] -> (DistributionBody, Result)
-distributionBodyFromStms ((inner_pat, inner_res), targets) stms =
+distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
   let bound_by_stms = HS.fromList $ HM.keys $ scopeOf stms
       (inner_pat', inner_res', inner_identity_map, inner_expand_target) =
         removeIdentityMappingGeneral bound_by_stms inner_pat inner_res
   in (DistributionBody
-      { distributionTarget = ((inner_pat', inner_res'), targets)
+      { distributionTarget = Targets (inner_pat', inner_res') targets
       , distributionFreeInBody = mconcat (map freeInStm stms)
                                  `HS.difference` bound_by_stms
       , distributionIdentityMap = inner_identity_map
@@ -318,11 +329,11 @@ createKernelNest :: (MonadFreshNames m, HasScope t m) =>
                  -> DistributionBody
                  -> m (Maybe (Targets, KernelNest))
 createKernelNest (inner_nest, nests) distrib_body = do
-  let (target, targets) = distributionTarget distrib_body
+  let Targets target targets = distributionTarget distrib_body
   unless (length nests == length targets) $
     fail $ "Nests and targets do not match!\n" ++
     "nests: " ++ ppNestings (inner_nest, nests) ++
-    "\ntargets:" ++ ppTargets (target, targets)
+    "\ntargets:" ++ ppTargets (Targets target targets)
   runMaybeT $ fmap prepare $ recurse $ zip nests targets
 
   where prepare (x, _, z) = (z, x)
@@ -487,8 +498,7 @@ tryDistribute nest targets stms =
   createKernelNest nest dist_body >>=
   \case
     Just (targets', distributed) -> do
-      let targets_scope = mconcat $ map (scopeOf . fst) $ uncurry (:) targets'
-      (w_bnds, _, kernel_bnd) <- localScope targets_scope $
+      (w_bnds, _, kernel_bnd) <- localScope (targetsScope targets') $
         constructKernel distributed inner_body
       distributed' <- renameStm kernel_bnd
       logMsg $ "distributing\n" ++
