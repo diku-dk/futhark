@@ -200,7 +200,7 @@ soacsPipelineOption desc pipeline =
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
-  [ Option "V" ["verbose"]
+  [ Option "v" ["verbose"]
     (OptArg (\file -> Right $ changeFutharkConfig $
                       \opts -> opts { futharkVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
