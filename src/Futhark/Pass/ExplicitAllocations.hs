@@ -425,7 +425,7 @@ allocInMergeParams :: (Allocable fromlore tolore,
                        -> ([SubExp] -> AllocM fromlore tolore ([SubExp], [SubExp]))
                        -> AllocM fromlore tolore a)
                    -> AllocM fromlore tolore a
-allocInMergeParams _variant merge m = do
+allocInMergeParams variant merge m = do
   ((valparams, handle_loop_subexps), (memsizeparams, memparams)) <-
     runWriterT $ unzip <$> mapM allocInMergeParam merge
   let mergeparams' = memsizeparams <> memparams <> valparams
@@ -437,9 +437,39 @@ allocInMergeParams _variant merge m = do
         return (memsizeargs <> memargs, valargs)
 
   localScope summary $ m (memsizeparams<>memparams) valparams mk_loop_res
-  where allocInMergeParam (mergeparam, _) = do
+  where allocInMergeParam (mergeparam, Var v)
+          | Array bt shape Unique <- paramDeclType mergeparam,
+            loopInvariantShape mergeparam = do
+              (mem, ixfun) <- lift $ lookupArraySummary v
+              if IxFun.isDirect ixfun
+                then return (mergeparam { paramAttr = ArrayMem bt shape Unique mem ixfun },
+                             lift . ensureArrayIn (paramType mergeparam) mem ixfun)
+                else doDefault mergeparam
+        allocInMergeParam (mergeparam, _) = doDefault mergeparam
+
+        doDefault mergeparam = do
           mergeparam' <- allocInFParam mergeparam
           return (mergeparam', linearFuncallArg $ paramType mergeparam)
+
+        variant_names = variant ++ map (paramName . fst) merge
+        loopInvariantShape =
+          not . any (`elem` variant_names) . subExpVars . arrayDims . paramType
+
+ensureArrayIn :: (Allocable fromlore tolore,
+                  Allocator tolore (AllocM fromlore tolore)) =>
+                 Type -> VName -> IxFun -> SubExp
+              -> AllocM fromlore tolore SubExp
+ensureArrayIn _ _ _ (Constant v) =
+  fail $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
+ensureArrayIn t mem ixfun (Var v) = do
+  (src_mem, src_ixfun) <- lookupArraySummary v
+  if src_mem == mem && src_ixfun == ixfun
+    then return $ Var v
+    else do copy <- newIdent (baseString v ++ "_copy") t
+            let summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness mem ixfun
+                pat = Pattern [] [PatElem (identName copy) BindVar summary]
+            letBind_ pat $ BasicOp $ Copy v
+            return $ Var $ identName copy
 
 ensureDirectArray :: (Allocable fromlore tolore,
                       Allocator tolore (AllocM fromlore tolore)) =>
