@@ -41,12 +41,12 @@ type InInKernel = Futhark.Representation.Kernels.InKernel
 type OutInKernel = Futhark.Representation.ExplicitMemory.InKernel
 
 data AllocStm = SizeComputation VName (PrimExp VName)
-                  | Allocation VName SubExp Space
-                  | ArrayCopy VName Bindage VName
+              | Allocation VName SubExp Space
+              | ArrayCopy VName Bindage VName
                     deriving (Eq, Ord, Show)
 
 bindAllocStm :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
-                    AllocStm -> m ()
+                AllocStm -> m ()
 bindAllocStm (SizeComputation name pe) =
   letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 pe)
 bindAllocStm (Allocation name size space) =
@@ -241,8 +241,8 @@ allocForLocalArray workgroup_size t = do
   return (size, m)
 
 allocsForStm :: (Allocator lore m, ExpAttr lore ~ ()) =>
-                    [Ident] -> [(Ident,Bindage)] -> Exp lore
-                 -> m (Stm lore, [AllocStm])
+                [Ident] -> [(Ident,Bindage)] -> Exp lore
+             -> m (Stm lore, [AllocStm])
 allocsForStm sizeidents validents e = do
   rts <- expReturns e
   hints <- expHints e
@@ -576,8 +576,8 @@ allocInBody (Body _ bnds res) =
                     return v'
 
 allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                   [Stm fromlore] -> ([Stm tolore] -> AllocM fromlore tolore a)
-                -> AllocM fromlore tolore a
+               [Stm fromlore] -> ([Stm tolore] -> AllocM fromlore tolore a)
+            -> AllocM fromlore tolore a
 allocInStms origbnds m = allocInStms' origbnds []
   where allocInStms' [] bnds' =
           m bnds'
@@ -592,7 +592,7 @@ allocInStms origbnds m = allocInStms' origbnds []
           return bnds'
 
 allocInStm :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                  Stm fromlore -> AllocM fromlore tolore ()
+              Stm fromlore -> AllocM fromlore tolore ()
 allocInStm (Let (Pattern sizeElems valElems) _ e) = do
   e' <- allocInExp e
   let sizeidents = map patElemIdent sizeElems
