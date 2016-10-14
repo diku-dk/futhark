@@ -133,9 +133,5 @@ deadCodeElimPatElem :: FreeIn attr => PatElemT attr -> DCElimM ()
 deadCodeElimPatElem patelem =
   seen $ patElemName patelem `HS.delete` freeIn patelem
 
-deadCodeElimParam :: FreeIn attr => ParamT attr -> DCElimM ()
-deadCodeElimParam fparam =
-  seen $ paramName fparam `HS.delete` freeIn fparam
-
 seen :: Names -> DCElimM ()
 seen = tell . DCElimRes False
