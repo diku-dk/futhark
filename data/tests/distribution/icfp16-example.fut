@@ -20,8 +20,8 @@
 --    [662i32, 1090i32, 1728i32]]
 -- }
 -- structure distributed {
---   DoLoop/Kernel 1
---   ScanKernel 2
+--   DoLoop/Kernel 5
+--   Kernel 7
 -- }
 
 fun main(pss: [n][m]int): ([n][m][m]int, [n][m]int) =

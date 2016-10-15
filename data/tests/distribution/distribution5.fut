@@ -15,8 +15,7 @@
 -- ==
 --
 -- structure distributed {
---   Kernel 6
---   ScanKernel 2
+--   Kernel 8
 --   Concat 1
 -- }
 
