@@ -26,6 +26,7 @@ import qualified Data.HashSet as HS
 
 import Prelude hiding (quot)
 
+import Futhark.Analysis.PrimExp
 import Futhark.Representation.AST
 import Futhark.Representation.Kernels
        hiding (Prog, Body, Stm, Pattern, PatElem,
@@ -375,6 +376,180 @@ blockedKernelSize w = do
 
   return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
 
+scanKernel :: (MonadBinder m, Lore m ~ Kernels) =>
+              Certificates -> SubExp -> KernelSize
+           -> Lambda InKernel -> Lambda InKernel
+           -> [SubExp] -> [VName]
+           -> m (Kernel InKernel)
+scanKernel cs w scan_sizes lam foldlam nes arrs = do
+  let (scan_ts, map_ts) =
+        splitAt (length nes) $ lambdaReturnType foldlam
+      (_, foldlam_acc_params, _) =
+        partitionChunkedFoldParameters (length nes) $ lambdaParams foldlam
+
+  -- Scratch arrays for scanout and mapout parts.
+  (scanout_arrs, scanout_arr_params, scanout_arr_ts) <-
+    unzip3 <$> mapM (mkOutArray "scanout") scan_ts
+  (mapout_arrs, mapout_arr_params, mapout_arr_ts) <-
+    unzip3 <$> mapM (mkOutArray "scanout") map_ts
+
+  last_thread <- letSubExp "last_thread" $ BasicOp $
+                 BinOp (Sub Int32) group_size (constant (1::Int32))
+  kspace <- newKernelSpace (num_groups, group_size, num_threads) []
+  let lid = spaceLocalId kspace
+
+  (res, stms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
+    -- We create a loop that moves in group_size chunks over the input.
+    num_iterations <-
+      letSubExp "num_iterations" =<<
+      eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
+
+    -- The merge parameters are the scanout arrays, the mapout arrays,
+    -- and the (renamed) accumulator parameters of foldlam.
+    (acc_params, nes') <- unzip <$> zipWithM mkAccMergeParam foldlam_acc_params nes
+    let merge = zip scanout_arr_params (map Var scanout_arrs) ++
+                zip mapout_arr_params (map Var mapout_arrs) ++
+                zip acc_params nes'
+    i <- newVName "i"
+    let form = ForLoop i Int32 num_iterations
+
+    loop_body <- runBodyBinder $ localScope (scopeOfFParams (map fst merge) <>
+                                             scopeOfLoopForm form) $ do
+      -- Compute the offset into the input and output.  To this a
+      -- thread can add its local ID to figure out which element it is
+      -- responsible for.
+      offset <- letSubExp "offset" =<<
+                eBinOp (Add Int32)
+                (eBinOp (Mul Int32)
+                 (eSubExp $ Var $ spaceGroupId kspace)
+                 (pure $ BasicOp $ BinOp (Mul Int32) num_iterations group_size))
+                (pure $ BasicOp $ BinOp (Mul Int32) (Var i) group_size)
+
+      -- Now we apply the fold function if j=offset+lid is less than
+      -- num_elements.  This also involves writing to the mapout
+      -- arrays.
+      j <- letSubExp "j" $ BasicOp $ BinOp (Add Int32) offset (Var lid)
+      let in_bounds = pure $ BasicOp $ CmpOp (CmpSlt Int32) j num_elements
+
+          in_bounds_fold_branch = do
+            -- Read array input.
+            arr_elems <- forM arrs $ \arr -> do
+              arr_t <- lookupType arr
+              let slice = fullSlice arr_t [DimFix j]
+              letSubExp (baseString arr ++ "_elem") $ BasicOp $ Index [] arr slice
+
+            -- Apply the body of the fold function.
+            fold_res <- eLambda foldlam $ j : map (Var . paramName) acc_params ++ arr_elems
+
+            -- Write the to_map parts to the mapout arrays using
+            -- in-place updates, and return the to_scan parts.
+            let (to_scan, to_map) = splitAt (length nes) fold_res
+            mapout_arrs' <- forM (zip to_map mapout_arr_params) $ \(se,arr) -> do
+              let slice = fullSlice (paramType arr) [DimFix j]
+              letInPlace "mapout" [] (paramName arr) slice $ BasicOp $ SubExp se
+            return $ resultBody $ to_scan ++ map Var mapout_arrs'
+
+          not_in_bounds_fold_branch = return $ resultBody $ map (Var . paramName) $
+                                      acc_params ++ mapout_arr_params
+
+      (fold_accs, mapout_arrs') <-
+        fmap (splitAt (length nes)) . letTupExp "foldres" =<<
+        eIf in_bounds in_bounds_fold_branch not_in_bounds_fold_branch
+
+      -- Create an array of per-thread fold results and scan it.
+      to_scan_arrs <- letTupExp "combined" $
+                      Op $ Combine [(spaceLocalId kspace, group_size)] scan_ts (constant True) $
+                      Body () [] $ map Var fold_accs
+      scanned_arrs <- letTupExp "scanned" $
+                      Op $ GroupScan group_size lam $ zip nes to_scan_arrs
+
+      -- If we are in bounds, we write scanned_arrs[lid] to scanout[j].
+      let in_bounds_scan_branch = do
+            -- Read scanned_arrs[j].
+            arr_elems <- forM scanned_arrs $ \arr -> do
+              arr_t <- lookupType arr
+              let slice = fullSlice arr_t [DimFix $ Var lid]
+              letSubExp (baseString arr ++ "_elem") $ BasicOp $ Index [] arr slice
+
+            -- Write the to_map parts to the scanout arrays using
+            -- in-place updates.
+            scanout_arrs' <- forM (zip arr_elems scanout_arr_params) $ \(se,p) -> do
+              let slice = fullSlice (paramType p) [DimFix j]
+              letInPlace "mapout" [] (paramName p) slice $ BasicOp $ SubExp se
+            return $ resultBody $ map Var scanout_arrs'
+
+          not_in_bounds_scan_branch =
+            return $ resultBody $ map (Var . paramName) scanout_arr_params
+
+      scanout_arrs' <- letTupExp "scanres" =<<
+                       eIf in_bounds in_bounds_scan_branch not_in_bounds_scan_branch
+
+
+      -- All threads but the first in the group reset the accumulator
+      -- to the neutral element.  The first resets it to the carry-out
+      -- of the scan.
+      is_first_thread <- letSubExp "is_first_thread" $ BasicOp $
+                         CmpOp (CmpEq int32) (Var lid) (constant (0::Int32))
+
+      read_carry_outs <- runBodyBinder $ do
+        carries <- forM scanned_arrs $ \arr -> do
+          arr_t <- lookupType arr
+          let slice = fullSlice arr_t [DimFix last_thread]
+          letSubExp "carry" $ BasicOp $ Index [] arr slice
+        return $ resultBody carries
+
+      reset_carry_outs <- runBodyBinder $ do
+        carries <- forM (zip acc_params nes) $ \(p, se) ->
+          case se of
+            Var v | unique $ declTypeOf p ->
+                      letSubExp "reset_acc_copy" $ BasicOp $ Copy v
+            _ -> return se
+        return $ resultBody carries
+
+      new_carries <- letTupExp "new_carry" $ If is_first_thread
+        read_carry_outs
+        reset_carry_outs
+        (staticShapes $ map paramType acc_params)
+
+
+      return $ resultBody $ map Var $ scanout_arrs' ++ mapout_arrs' ++ new_carries
+
+    result <- letTupExp "result" $ DoLoop [] merge form loop_body
+    let (scanout_result, mapout_result, carry_result) =
+          splitAt3 (length scanout_arrs) (length mapout_arrs) result
+    return (map KernelInPlaceReturn scanout_result ++
+            map (ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) . Var) carry_result ++
+            map KernelInPlaceReturn mapout_result)
+
+  let kts = scanout_arr_ts ++ scan_ts ++ mapout_arr_ts
+      kbody = KernelBody () stms res
+
+  return $ Kernel cs kspace kts kbody
+  where num_groups = kernelWorkgroups scan_sizes
+        group_size = kernelWorkgroupSize scan_sizes
+        num_threads = kernelNumThreads scan_sizes
+        num_elements = kernelTotalElements scan_sizes
+
+        mkOutArray desc t = do
+          let arr_t = t `arrayOfRow` w
+          arr <- letExp desc $ BasicOp $ Scratch (elemType arr_t) (arrayDims arr_t)
+          pname <- newVName $ desc++"param"
+          return (arr, Param pname $ toDecl arr_t Unique, arr_t)
+
+        mkAccMergeParam (Param pname ptype) se = do
+          pname' <- newVName $ baseString pname ++ "_merge"
+          -- We have to copy the initial merge parameter (the neutral
+          -- element) if it is consumed inside the lambda.
+          case se of
+            Var v | pname `HS.member` consumed_in_foldlam -> do
+                      se' <- letSubExp "scan_ne_copy" $ BasicOp $ Copy v
+                      return (Param pname' $ toDecl ptype Unique,
+                              se')
+            _ -> return (Param pname' $ toDecl ptype Unique,
+                         se)
+
+        consumed_in_foldlam = consumedInBody $ lambdaBody $ Alias.analyseLambda foldlam
+
 blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern Kernels
             -> Certificates -> SubExp
@@ -392,8 +567,7 @@ blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
       my_index_param = Param my_index (Prim int32)
       other_index_param = Param other_index (Prim int32)
 
-  let foldlam_scope = scopeOfLParams $
-                      my_index_param : other_index_param : lambdaParams foldlam
+  let foldlam_scope = scopeOfLParams $ my_index_param : lambdaParams foldlam
       bindIndex i v = letBindNames'_ [i] =<< toExp v
   compute_segments <- runBinder_ $ localScope foldlam_scope $
                       zipWithM_ bindIndex (map fst ispace) $
@@ -403,7 +577,6 @@ blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
   read_inps <- mapM readKernelInput inps
   first_scan_foldlam <- renameLambda
     foldlam { lambdaParams = my_index_param :
-                             other_index_param :
                              lambdaParams foldlam
             , lambdaBody = insertStms (compute_segments++read_inps) $
                            lambdaBody foldlam
@@ -422,21 +595,21 @@ blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
      mapM (mkIntermediateIdent "group_sums" [num_groups]) scan_idents <*>
      pure arr_idents)
 
-  addStm $ Let first_scan_pat () $
-    Op $ ScanKernel cs w first_scan_size
+  addStm . Let first_scan_pat () . Op =<< scanKernel cs w first_scan_size
     first_scan_lam first_scan_foldlam nes arrs
 
   let (sequentially_scanned, group_carry_out, _) =
         splitAt3 (length nes) (length nes) $ patternNames first_scan_pat
 
   let second_scan_size = KernelSize one num_groups one num_groups one num_groups
-  second_scan_lam <- renameLambda first_scan_lam
-  second_scan_lam_renamed <- renameLambda first_scan_lam
+  second_scan_foldlam <- renameLambda lam
+                         { lambdaParams = my_index_param : lambdaParams lam }
+  second_scan_scanlam <- renameLambda first_scan_lam
 
   group_carry_out_scanned <-
-    letTupExp "group_carry_out_scanned" $
-    Op $ ScanKernel cs num_groups second_scan_size
-    second_scan_lam second_scan_lam_renamed
+    letTupExp "group_carry_out_scanned" . Op =<<
+    scanKernel cs num_groups second_scan_size
+    second_scan_scanlam second_scan_foldlam
     nes group_carry_out
 
   lam''' <- renameLambda lam

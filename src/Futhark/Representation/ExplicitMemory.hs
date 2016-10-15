@@ -971,6 +971,9 @@ instance OpReturns ExplicitMemory where
   opReturns (Inner k@(Kernel _ _ _ body)) =
     zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
     where correct (WriteReturn _ arr _ _) _ = varReturns arr
+          correct (KernelInPlaceReturn arr) _ =
+            extendedScope (varReturns arr)
+            (castScope $ scopeOf $ kernelBodyStms body)
           correct _ ret = return ret
   opReturns k =
     extReturns <$> opType k
@@ -1013,6 +1016,11 @@ instance OpReturns InKernel where
           Just $ ReturnsInBlock mem ixfun
         MemMem size space ->
           return $ ReturnsMemory size space
+
+  opReturns (Inner (GroupScan _ _ input)) =
+    mapM varReturns arrs
+    where arrs = map snd input
+
   opReturns k =
     extReturns <$> opType k
 

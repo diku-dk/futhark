@@ -35,7 +35,6 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplifier.Engine (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Pass
-import Futhark.Util.IntegralExp
 
 type InInKernel = Futhark.Representation.Kernels.InKernel
 type OutInKernel = Futhark.Representation.ExplicitMemory.InKernel
@@ -228,16 +227,6 @@ allocForArray :: Allocator lore m =>
 allocForArray t space = do
   size <- arraySizeInBytes t
   m <- allocateMemory "mem" size space
-  return (size, m)
-
--- | Allocate local-memory array.
-allocForLocalArray :: Allocator lore m =>
-                      SubExp -> Type -> m (SubExp, VName)
-allocForLocalArray workgroup_size t = do
-  size <- computeSize "local_bytes" =<<
-          (primExpFromSubExp int32 workgroup_size*) <$>
-          arraySizeInBytesExpM t
-  m <- allocateMemory "local_mem" size $ Space "local"
   return (size, m)
 
 allocsForStm :: (Allocator lore m, ExpAttr lore ~ ()) =>
@@ -557,10 +546,6 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner TileSize
           handleOp (SufficientParallelism se) =
             return $ Inner $ SufficientParallelism se
-          handleOp (ScanKernel cs w size lam foldlam nes arrs) = do
-            lam' <- allocInScanLambda lam (length nes) $ kernelWorkgroupSize size
-            foldlam' <- allocInScanLambda foldlam (length nes) $ kernelWorkgroupSize size
-            return $ Inner $ ScanKernel cs w size lam' foldlam' nes arrs
           handleOp (Kernel cs space ts kbody) = subAllocM handleKernelExp $
             Inner . Kernel cs space ts <$>
             localScope (scopeOfKernelSpace space)
@@ -576,6 +561,11 @@ allocInFun (FunDef entry fname rettype params fbody) =
             summaries <- mapM lookupArraySummary arrs
             lam' <- allocInReduceLambda lam summaries
             return $ Inner $ GroupReduce w lam' input
+            where arrs = map snd input
+          handleKernelExp (GroupScan w lam input) = do
+            summaries <- mapM lookupArraySummary arrs
+            lam' <- allocInReduceLambda lam summaries
+            return $ Inner $ GroupScan w lam' input
             where arrs = map snd input
           handleKernelExp (GroupStream w maxchunk lam accs arrs) = do
             acc_summaries <- mapM accSummary accs
@@ -667,51 +657,6 @@ allocInExp e = mapExpM alloc e
                          , mapOnOp = \op -> do handle <- asks allocInOp
                                                handle op
                          }
-
-allocInScanLambda :: Lambda InInKernel
-                  -> Int
-                  -> SubExp
-                  -> AllocM Kernels ExplicitMemory (Lambda OutInKernel)
-allocInScanLambda lam num_accs workgroup_size = do
-  let (i, other_index_param, actual_params) =
-        partitionChunkedKernelLambdaParameters $ lambdaParams lam
-      (acc_params, arr_params) =
-        splitAt num_accs actual_params
-      this_index = LeafExp i int32 `rem`
-                   primExpFromSubExp int32 workgroup_size
-      other_index = LeafExp (paramName other_index_param) int32
-  acc_params' <-
-    allocInScanParameters workgroup_size this_index 0 acc_params
-  arr_params' <-
-    allocInScanParameters workgroup_size this_index other_index arr_params
-
-  subAllocM noOp $
-    allocInLambda (Param i (Scalar int32) :
-                   other_index_param { paramAttr = Scalar int32 } :
-                   acc_params' ++ arr_params')
-    (lambdaBody lam) (lambdaReturnType lam)
-
-  where noOp = fail "Cannot handle kernel expressions inside scan kernels."
-
-allocInScanParameters :: SubExp
-                      -> PrimExp VName
-                      -> PrimExp VName
-                      -> [LParam InInKernel]
-                      -> AllocM Kernels ExplicitMemory [LParam OutInKernel]
-allocInScanParameters workgroup_size my_id offset = mapM allocInScanParameter
-  where allocInScanParameter p =
-          case paramType p of
-            t@(Array bt shape u) -> do
-              (_, shared_mem) <- allocForLocalArray workgroup_size t
-              let ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) $
-                               workgroup_size : arrayDims t
-                  ixfun = IxFun.slice ixfun_base $
-                          fullSliceNum (IxFun.shape ixfun_base) [DimFix $ my_id + offset]
-              return p { paramAttr = ArrayMem bt shape u shared_mem ixfun }
-            Prim bt ->
-              return p { paramAttr = Scalar bt }
-            Mem size space ->
-              return p { paramAttr = MemMem size space }
 
 allocInReduceLambda :: Lambda InInKernel
                     -> [(VName, IxFun)]

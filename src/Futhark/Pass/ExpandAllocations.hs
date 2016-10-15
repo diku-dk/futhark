@@ -54,33 +54,6 @@ transformStm (Let pat () e) = do
 
 transformExp :: Exp ExplicitMemory -> ExpandM ([Stm ExplicitMemory], Exp ExplicitMemory)
 
-transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
-  -- Extract allocations from the lambda.
-  | Right (lam_body', lam_thread_allocs) <-
-      extractThreadAllocationsInBody bound_in_lam $ lambdaBody lam,
-   Right (foldlam_body', foldlam_thread_allocs) <-
-      extractThreadAllocationsInBody bound_in_foldlam $ lambdaBody foldlam = do
-
-  (alloc_bnds, alloc_offsets) <-
-    expandedAllocations num_threads thread_id lam_thread_allocs
-  (fold_alloc_bnds, fold_alloc_offsets) <-
-    expandedAllocations num_threads fold_thread_id foldlam_thread_allocs
-
-  let lam_body'' = offsetMemoryInBody alloc_offsets lam_body'
-      lam' = lam { lambdaBody = lam_body'' }
-      foldlam_body'' = offsetMemoryInBody fold_alloc_offsets foldlam_body'
-      foldlam' = foldlam { lambdaBody = foldlam_body'' }
-  return (alloc_bnds <> fold_alloc_bnds,
-          Op $ Inner $ ScanKernel cs w kernel_size lam' foldlam' nes arrs)
-  where num_threads = kernelNumThreads kernel_size
-        (thread_id, _, _) =
-          partitionChunkedKernelLambdaParameters $ lambdaParams lam
-        (fold_thread_id, _, _) =
-          partitionChunkedKernelLambdaParameters $ lambdaParams foldlam
-
-        bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
-        bound_in_foldlam = HS.fromList $ HM.keys $ scopeOf foldlam
-
 transformExp (Op (Inner (Kernel cs space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
@@ -111,18 +84,6 @@ extractKernelBodyAllocations bound_before_body kbody = do
   where extract allocs bnd = do
           (bnds, body_allocs) <- extractThreadAllocations bound_before_body [bnd]
           return (allocs <> body_allocs, bnds)
-
--- | Returns a map from memory block names to their size in bytes,
--- as well as the lambda body where all the allocations have been removed.
--- Only looks at allocations in the immediate body - if there are any
--- further down, we will fail later.  If the size of one of the
--- allocations is not free in the body, we return 'Left' and an
--- error message.
-extractThreadAllocationsInBody :: Names -> Body InKernel
-                               -> Either String (Body InKernel, HM.HashMap VName (SubExp, Space))
-extractThreadAllocationsInBody bound_before_body body = do
-  (bnds, allocs) <- extractThreadAllocations bound_before_body $ bodyStms body
-  return (body { bodyStms = bnds }, allocs)
 
 extractThreadAllocations :: Names -> [Stm InKernel]
                          -> Either String ([Stm InKernel], HM.HashMap VName (SubExp, Space))

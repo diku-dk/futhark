@@ -64,25 +64,6 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      RetType lore ~ RetType outerlore) =>
                     Engine.SimpleOps lore -> Engine.Env (Engine.SimpleM lore)
                  -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore))
-simplifyKernelOp ops env (ScanKernel cs w kernel_size lam foldlam nes arrs) = do
-  arrs' <- mapM Engine.simplify arrs
-  outer_vtable <- Engine.getVtable
-  (lam', again1, lam_hoisted) <-
-    Engine.subSimpleM ops env outer_vtable $
-    Engine.simplifyLambda lam Nothing (map (const Nothing) arrs')
-  (foldlam', again2, foldlam_hoisted) <-
-    Engine.subSimpleM ops env outer_vtable $
-    Engine.simplifyLambda foldlam Nothing (map Just arrs')
-  when (again1 || again2) Engine.changed
-  mapM_ processHoistedStm lam_hoisted
-  mapM_ processHoistedStm foldlam_hoisted
-  ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
-    Engine.simplify kernel_size <*>
-    pure lam' <*>
-    pure foldlam' <*>
-    mapM Engine.simplify nes <*>
-    pure arrs'
-
 simplifyKernelOp ops env (Kernel cs space ts kbody) = do
   cs' <- Engine.simplify cs
   space' <- Engine.simplify space
@@ -131,6 +112,7 @@ mkWiseKernelBody attr bnds res =
         resValue (ThreadsReturn _ se) = se
         resValue (WriteReturn _ _ _ se) = se
         resValue (ConcatReturns _ _ _ v) = Var v
+        resValue (KernelInPlaceReturn v) = Var v
 
 inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
 inKernelEnv = Engine.emptyEnv inKernelRules noExtraHoistBlockers
@@ -167,11 +149,19 @@ simplifyKernelExp (Combine cspace ts active body) = do
     <*> pure body'
 
 simplifyKernelExp (GroupReduce w lam input) = do
+  arrs' <- mapM Engine.simplify arrs
+  nes' <- mapM Engine.simplify nes
+  w' <- Engine.simplify w
+  lam' <- Engine.simplifyLambdaSeq lam (Just nes') (map (const Nothing) arrs')
+  return $ GroupReduce w' lam' $ zip nes' arrs'
+  where (nes,arrs) = unzip input
+
+simplifyKernelExp (GroupScan w lam input) = do
   w' <- Engine.simplify w
   nes' <- mapM Engine.simplify nes
   arrs' <- mapM Engine.simplify arrs
   lam' <- Engine.simplifyLambdaSeq lam (Just nes') (map (const Nothing) arrs')
-  return $ GroupReduce w' lam' $ zip nes' arrs'
+  return $ GroupScan w' lam' $ zip nes' arrs'
   where (nes,arrs) = unzip input
 
 simplifyKernelExp (GroupStream w maxchunk lam accs arrs) = do
@@ -245,6 +235,8 @@ instance Engine.Simplifiable KernelResult where
     <$> Engine.simplify w
     <*> Engine.simplify pte
     <*> Engine.simplify what
+  simplify (KernelInPlaceReturn what) =
+    KernelInPlaceReturn <$> Engine.simplify what
 
 instance Engine.Simplifiable WhichThreads where
   simplify AllThreads =
@@ -271,45 +263,9 @@ kernelRules :: (MonadBinder m,
                 LocalScope (Lore m) m,
                 Lore m ~ Wise Kernels) => RuleBook m
 kernelRules = (std_td_rules <>
-               [fuseScanIota
-               , removeInvariantKernelResults
-               ],
+               [ removeInvariantKernelResults ],
                std_bu_rules <> [distributeKernelResults])
   where (std_td_rules, std_bu_rules) = standardRules
-
-iotaParams :: ST.SymbolTable lore
-           -> [ParamT attr]
-           -> [VName]
-           -> ([(ParamT attr, SubExp)], [(ParamT attr, VName)])
-iotaParams vtable arr_params arrs = partitionEithers $ zipWith (isIota vtable) arr_params arrs
-
-fuseScanIota :: (MonadBinder m,
-                 Lore m ~ Wise Kernels,
-                 LocalScope (Lore m) m,
-                 Op (Lore m) ~ Kernel (Wise InKernel)) =>
-                TopDownRule m
-fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
-  | not $ null iota_params = do
-      (fold_body, _, []) <- Engine.subSimpleM simpleInKernel inKernelEnv vtable $
-        (uncurry (flip mkBodyM) =<<) $ collectStms $ localScope (castScope $ scopeOf foldlam) $ do
-          forM_ iota_params $ \(p, x) ->
-            letBindNames'_ [paramName p] $
-            BasicOp $ BinOp (Add Int32) (Var thread_index) x
-          mapM_ addStm $ bodyStms $ lambdaBody foldlam
-          return $ bodyResult $ lambdaBody foldlam
-      let (arr_params', arrs') = unzip params_and_arrs
-          foldlam' = foldlam { lambdaBody = fold_body
-                             , lambdaParams =
-                                 Param thread_index (paramAttr other_index_param) :
-                                 other_index_param :
-                                 acc_params ++ arr_params'
-                             }
-      letBind_ pat $ Op $ ScanKernel cs w size lam foldlam' nes arrs'
-   where (thread_index, other_index_param, acc_params, arr_params) =
-           partitionChunkedKernelFoldParameters (length nes) $ lambdaParams foldlam
-         (iota_params, params_and_arrs) =
-           iotaParams vtable arr_params arrs
-fuseScanIota _ _ = cannotSimplify
 
 -- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
 -- instead.
