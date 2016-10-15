@@ -275,8 +275,8 @@ bad e = do
 -- type errors, as the strings are added to type errors signalled via
 -- 'bad'.
 context :: String
-          -> TypeM lore a
-          -> TypeM lore a
+        -> TypeM lore a
+        -> TypeM lore a
 context s = local $ \env -> env { envContext = s : envContext env}
 
 message :: Pretty a =>
@@ -610,7 +610,7 @@ checkStms :: Checkable lore =>
           -> TypeM lore a
 checkStms origbnds m = delve origbnds
   where delve (Let pat (_,annot) e:bnds) = do
-          context ("In expression\n" ++ message "  " e) $
+          context ("In expression of statement " ++ pretty pat) $
             checkExp e
           checkExpLore annot
           checkStm pat e $
