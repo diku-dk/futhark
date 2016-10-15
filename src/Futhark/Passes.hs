@@ -20,7 +20,6 @@ import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.TileLoops
-import Futhark.Pass.CoalesceMemoryAccesses
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
@@ -112,6 +111,5 @@ gpuPipeline mode =
          , doubleBuffer
          , simplifyExplicitMemory
          , expandAllocations
-         , coalesceMemoryAccesses
          , simplifyExplicitMemory
          ]

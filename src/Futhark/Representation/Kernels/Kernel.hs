@@ -44,7 +44,7 @@ import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), (<+>), ppr, comma, commasep, Pretty, parens, text)
+  ((</>), (<+>), ppr, commasep, Pretty, parens, text)
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplifier.Lore
@@ -61,13 +61,7 @@ import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import qualified Futhark.Analysis.Range as Range
 
 data Kernel lore =
-    ScanKernel Certificates SubExp
-    KernelSize
-    (LambdaT lore)
-    (LambdaT lore)
-    [SubExp]
-    [VName]
-  | NumGroups
+    NumGroups
   | GroupSize
   | TileSize
   | SufficientParallelism SubExp -- ^ True if enough parallelism.
@@ -128,6 +122,7 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     SubExp -- The final size.
                     SubExp -- Per-thread (max) chunk size.
                     VName -- Chunk by this thread.
+                  | KernelInPlaceReturn VName -- HACK!
                   deriving (Eq, Show, Ord)
 
 data WhichThreads = AllThreads
@@ -172,15 +167,6 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
 -- and is done left-to-right.
 mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
-mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
-  ScanKernel <$>
-  mapOnKernelCertificates tv cs <*>
-  mapOnKernelSubExp tv w <*>
-  mapOnKernelSize tv kernel_size <*>
-  mapOnKernelLambda tv fun <*>
-  mapOnKernelLambda tv fold_fun <*>
-  mapM (mapOnKernelSubExp tv) nes <*>
-  mapM (mapOnKernelVName tv) arrs
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
 mapKernelM _ TileSize = pure TileSize
@@ -214,19 +200,6 @@ mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
 mapOnKernelType _tv (Mem se s) = pure $ Mem se s
 
-
-mapOnKernelSize :: (Monad m, Applicative m) =>
-                   KernelMapper flore tlore m -> KernelSize -> m KernelSize
-mapOnKernelSize tv (KernelSize num_workgroups workgroup_size
-                    per_thread_elements num_elements offset_multiple num_threads) =
-  KernelSize <$>
-  mapOnKernelSubExp tv num_workgroups <*>
-  mapOnKernelSubExp tv workgroup_size <*>
-  mapOnKernelSubExp tv per_thread_elements <*>
-  mapOnKernelSubExp tv num_elements <*>
-  mapOnKernelSubExp tv offset_multiple <*>
-  mapOnKernelSubExp tv num_threads
-
 instance FreeIn KernelSize where
   freeIn (KernelSize num_workgroups workgroup_size elems_per_thread
           num_elems thread_offset num_threads) =
@@ -255,6 +228,7 @@ instance FreeIn KernelResult where
   freeIn (WriteReturn rw arr i e) = freeIn rw <> freeIn arr <> freeIn i <> freeIn e
   freeIn (ConcatReturns _ w per_thread_elems v) =
     freeIn w <> freeIn per_thread_elems <> freeIn v
+  freeIn (KernelInPlaceReturn what) = freeIn what
 
 instance FreeIn WhichThreads where
   freeIn AllThreads = mempty
@@ -289,6 +263,8 @@ instance Substitute KernelResult where
     (substituteNames subst w)
     (substituteNames subst per_thread_elems)
     (substituteNames subst v)
+  substituteNames subst (KernelInPlaceReturn what) =
+    KernelInPlaceReturn (substituteNames subst what)
 
 instance Substitute WhichThreads where
   substituteNames _ AllThreads =
@@ -363,11 +339,6 @@ instance Attributes lore => Rename (Kernel lore) where
     where renamer = KernelMapper rename rename rename rename rename rename rename
 
 kernelType :: Kernel lore -> [Type]
-kernelType (ScanKernel _ w size lam foldlam nes _) =
-  let arr_row_tp = drop (length nes) $ lambdaReturnType foldlam
-  in map (`arrayOfRow` w) (lambdaReturnType lam) ++
-     map (`arrayOfRow` kernelWorkgroups size) (lambdaReturnType lam) ++
-     map (`arrayOfRow` kernelTotalElements size) arr_row_tp
 kernelType (Kernel _ space ts body) =
   zipWith resultShape ts $ kernelBodyResult body
   where dims = map snd $ spaceDimensions space
@@ -385,6 +356,8 @@ kernelType (Kernel _ space ts body) =
           foldr (flip arrayOfRow) t dims
         resultShape t (ConcatReturns _ w _ _) =
           t `arrayOfRow` w
+        resultShape t KernelInPlaceReturn{} =
+          t
 
 kernelType NumGroups =
   [Prim int32]
@@ -477,8 +450,6 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             in KernelBody attr' stms' res
 
 instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
-  usageInOp (ScanKernel _ _ _ _ foldfun _ arrs) =
-    usageInLambda foldfun arrs
   usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
@@ -492,28 +463,6 @@ consumedInKernelBody (KernelBody attr stms _) =
   consumedInBody $ Body attr stms []
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
-
-typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
-  checkKernelCrud cs w kernel_size
-
-  let index_arg = (Prim int32, mempty)
-  arrargs <- TC.checkSOACArrayArgs w arrs
-  accargs <- mapM (fmap TC.noArgAliases . TC.checkArg) nes
-  TC.checkLambda foldfun $ index_arg : index_arg : accargs ++ arrargs
-
-  TC.checkLambda fun $ index_arg : index_arg : accargs ++ accargs
-  let startt      = map TC.argType accargs
-      funret      = lambdaReturnType fun
-      foldret     = lambdaReturnType foldfun
-      (fold_accret, _fold_arrret) = splitAt (length nes) foldret
-  unless (startt == funret) $
-    TC.bad $ TC.TypeError $
-    "Neutral value is of type " ++ prettyTuple startt ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-  unless (startt == fold_accret) $
-    TC.bad $ TC.TypeError $
-    "Neutral value is of type " ++ prettyTuple startt ++
-    ", but scan fold function returns type " ++ prettyTuple foldret ++ "."
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
@@ -562,6 +511,8 @@ typeCheckKernel (Kernel cs space kts kbody) = do
           vt <- lookupType v
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
+        checkKernelResult (KernelInPlaceReturn what) t =
+          TC.requireI [t] what
 
         checkWhich AllThreads =
           return ()
@@ -573,27 +524,7 @@ typeCheckKernel (Kernel cs space kts kbody) = do
         checkWhich ThreadsInSpace =
           return ()
 
-checkKernelCrud :: TC.Checkable lore =>
-                   [VName] -> SubExp -> KernelSize -> TC.TypeM lore ()
-checkKernelCrud cs w kernel_size = do
-  mapM_ (TC.requireI [Prim Cert]) cs
-  TC.require [Prim int32] w
-  typeCheckKernelSize kernel_size
-
-typeCheckKernelSize :: TC.Checkable lore =>
-                       KernelSize -> TC.TypeM lore ()
-typeCheckKernelSize (KernelSize num_groups workgroup_size per_thread_elements
-                     num_elements offset_multiple num_threads) = do
-  TC.require [Prim int32] num_groups
-  TC.require [Prim int32] workgroup_size
-  TC.require [Prim int32] per_thread_elements
-  TC.require [Prim int32] num_elements
-  TC.require [Prim int32] offset_multiple
-  TC.require [Prim int32] num_threads
-
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
-  opMetrics (ScanKernel _ _ _ lam foldfun _ _) =
-    inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
     where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
@@ -604,13 +535,6 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics SufficientParallelism{} = seen "SufficientParallelism"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
-  ppr (ScanKernel cs w kernel_size fun foldfun nes arrs) =
-    ppCertificates' cs <> text "scanKernel" <>
-    parens (ppr w <> comma </>
-            ppr kernel_size <> comma </>
-            PP.braces (commasep $ map ppr nes) <> comma </>
-            commasep (map ppr arrs) <> comma </>
-            ppr fun <> comma </> ppr foldfun)
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
   ppr TileSize = text "$tile_size()"
@@ -664,6 +588,8 @@ instance Pretty KernelResult where
     ppr v
     where suff = case o of InOrder -> ""
                            Disorder -> "Permuted"
+  ppr (KernelInPlaceReturn what) =
+    text "kernel returns" <+> ppr what
 
 instance Pretty KernelSize where
   ppr (KernelSize

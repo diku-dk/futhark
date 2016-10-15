@@ -128,7 +128,6 @@ Library
                    Futhark.Optimise.TileLoops
                    Futhark.Pass
                    Futhark.Passes
-                   Futhark.Pass.CoalesceMemoryAccesses
                    Futhark.Pass.ExpandAllocations
                    Futhark.Pass.ExplicitAllocations
                    Futhark.Pass.ExtractKernels

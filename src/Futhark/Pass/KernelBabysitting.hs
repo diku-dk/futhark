@@ -72,15 +72,6 @@ nonlinearInMemory name m =
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformStm expmap (Let pat ()
-                         (Op (ScanKernel cs w kernel_size lam foldlam nes arrs)))
-  | kernelWorkgroups kernel_size /= constant (1::Int32) = do
-  -- We want to pad and transpose the input arrays.
-
-  addStm $ Let pat () $ Op $
-    ScanKernel cs w kernel_size lam foldlam nes arrs
-  return expmap
-
 transformStm expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
   -- First we do the easy stuff, which deals with SplitArray statements.
   kbody' <- transformKernelBody num_threads cs kbody

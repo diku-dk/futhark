@@ -43,6 +43,8 @@ data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                     | Combine [(VName,SubExp)] [Type] SubExp (Body lore)
                     | GroupReduce SubExp
                       (Lambda lore) [(SubExp,VName)]
+                    | GroupScan SubExp
+                      (Lambda lore) [(SubExp,VName)]
                     | GroupStream SubExp SubExp
                       (GroupStreamLambda lore) [SubExp] [VName]
                     deriving (Eq, Ord, Show)
@@ -75,6 +77,8 @@ instance Attributes lore => TypedOp (KernelExp lore) where
     where shape = Shape $ map snd ispace
   opType (GroupReduce _ lam _) =
     pure $ staticShapes $ lambdaReturnType lam
+  opType (GroupScan w lam _) =
+    pure $ staticShapes $ map (`arrayOfRow` w) (lambdaReturnType lam)
   opType (GroupStream _ _ lam _ _) =
     pure $ staticShapes $ map paramType $ groupStreamAccParams lam
 
@@ -86,6 +90,8 @@ instance Attributes lore => FreeIn (KernelExp lore) where
   freeIn (Combine cspace ts active body) =
     freeIn cspace <> freeIn ts <> freeIn active <> freeInBody body
   freeIn (GroupReduce w lam input) =
+    freeIn w <> freeInLambda lam <> freeIn input
+  freeIn (GroupScan w lam input) =
     freeIn w <> freeInLambda lam <> freeIn input
   freeIn (GroupStream w maxchunk lam accs arrs) =
     freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
@@ -109,10 +115,14 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
     [mempty]
   opAliases (GroupReduce _ lam _) =
     replicate (length (lambdaReturnType lam)) mempty
+  opAliases (GroupScan _ lam _) =
+    replicate (length (lambdaReturnType lam)) mempty
   opAliases (GroupStream _ _ lam _ _) =
     map (const mempty) $ groupStreamAccParams lam
 
   consumedInOp (GroupReduce _ _ input) =
+    HS.fromList $ map snd input
+  consumedInOp (GroupScan _ _ input) =
     HS.fromList $ map snd input
   consumedInOp (GroupStream _ _ lam nes arrs) =
     HS.map consumedArray $ consumedInBody body
@@ -144,6 +154,9 @@ instance Attributes lore => Substitute (KernelExp lore) where
     (substituteNames subst active) (substituteNames subst v)
   substituteNames subst (GroupReduce w lam input) =
     GroupReduce (substituteNames subst w)
+    (substituteNames subst lam) (substituteNames subst input)
+  substituteNames subst (GroupScan w lam input) =
+    GroupScan (substituteNames subst w)
     (substituteNames subst lam) (substituteNames subst input)
   substituteNames subst (GroupStream w maxchunk lam accs arrs) =
     GroupStream
@@ -181,6 +194,8 @@ instance (Attributes lore, Renameable lore) => Rename (KernelExp lore) where
     Combine <$> rename cspace <*> rename ts <*> rename active <*> rename v
   rename (GroupReduce w lam input) =
     GroupReduce <$> rename w <*> rename lam <*> rename input
+  rename (GroupScan w lam input) =
+    GroupScan <$> rename w <*> rename lam <*> rename input
   rename (GroupStream w maxchunk lam accs arrs) =
     GroupStream <$> rename w <*> rename maxchunk <*>
     rename lam <*> rename accs <*> rename arrs
@@ -207,6 +222,8 @@ instance (Attributes lore,
     SplitSpace o w i num_is elems_per_thread
   addOpAliases (GroupReduce w lam input) =
     GroupReduce w (Alias.analyseLambda lam) input
+  addOpAliases (GroupScan w lam input) =
+    GroupScan w (Alias.analyseLambda lam) input
   addOpAliases (GroupStream w maxchunk lam accs arrs) =
     GroupStream w maxchunk lam' accs arrs
     where lam' = analyseGroupStreamLambda lam
@@ -218,6 +235,8 @@ instance (Attributes lore,
 
   removeOpAliases (GroupReduce w lam input) =
     GroupReduce w (removeLambdaAliases lam) input
+  removeOpAliases (GroupScan w lam input) =
+    GroupScan w (removeLambdaAliases lam) input
   removeOpAliases (GroupStream w maxchunk lam accs arrs) =
     GroupStream w maxchunk (removeGroupStreamLambdaAliases lam) accs arrs
     where removeGroupStreamLambdaAliases (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
@@ -242,6 +261,8 @@ instance (Attributes lore,
     SplitSpace o w i num_is elems_per_thread
   addOpRanges (GroupReduce w lam input) =
     GroupReduce w (Range.runRangeM $ Range.analyseLambda lam) input
+  addOpRanges (GroupScan w lam input) =
+    GroupScan w (Range.runRangeM $ Range.analyseLambda lam) input
   addOpRanges (Combine ispace ts active body) =
     Combine ispace ts active $ Range.runRangeM $ Range.analyseBody body
   addOpRanges (GroupStream w maxchunk lam accs arrs) =
@@ -253,6 +274,8 @@ instance (Attributes lore,
 
   removeOpRanges (GroupReduce w lam input) =
     GroupReduce w (removeLambdaRanges lam) input
+  removeOpRanges (GroupScan w lam input) =
+    GroupScan w (removeLambdaRanges lam) input
   removeOpRanges (GroupStream w maxchunk lam accs arrs) =
     GroupStream w maxchunk (removeGroupStreamLambdaRanges lam) accs arrs
     where removeGroupStreamLambdaRanges (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
@@ -270,6 +293,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
 
   removeOpWisdom (GroupReduce w lam input) =
     GroupReduce w (removeLambdaWisdom lam) input
+  removeOpWisdom (GroupScan w lam input) =
+    GroupScan w (removeLambdaWisdom lam) input
   removeOpWisdom (GroupStream w maxchunk lam accs arrs) =
     GroupStream w maxchunk (removeGroupStreamLambdaWisdom lam) accs arrs
     where removeGroupStreamLambdaWisdom
@@ -291,6 +316,7 @@ instance OpMetrics (Op lore) => OpMetrics (KernelExp lore) where
   opMetrics SplitSpace{} = seen "SplitSpace"
   opMetrics Combine{} = seen "Combine"
   opMetrics (GroupReduce _ lam _) = inside "GroupReduce" $ lambdaMetrics lam
+  opMetrics (GroupScan _ lam _) = inside "GroupScan" $ lambdaMetrics lam
   opMetrics (GroupStream _ _ lam _ _) =
     inside "GroupStream" $ groupStreamLambdaMetrics lam
     where groupStreamLambdaMetrics =
@@ -312,15 +338,11 @@ typeCheckKernelExp (Combine cspace ts active body) = do
   TC.checkLambdaBody ts body
   where (is, ws) = unzip cspace
 
-typeCheckKernelExp (GroupReduce w lam input) = do
-  TC.require [Prim int32] w
-  let (nes, arrs) = unzip input
-      asArg t = (t, mempty)
-  neargs <- mapM TC.checkArg nes
-  arrargs <- TC.checkSOACArrayArgs w arrs
-  TC.checkLambda lam $
-    map asArg [Prim int32, Prim int32] ++
-    map TC.noArgAliases (neargs ++ arrargs)
+typeCheckKernelExp (GroupReduce w lam input) =
+  checkScanOrReduce w lam input
+
+typeCheckKernelExp (GroupScan w lam input) =
+  checkScanOrReduce w lam input
 
 typeCheckKernelExp (GroupStream w maxchunk lam accs arrs) = do
   TC.require [Prim int32] w
@@ -351,6 +373,20 @@ typeCheckKernelExp (GroupStream w maxchunk lam accs arrs) = do
             TC.checkLambdaParams acc_params
             TC.checkLambdaParams arr_params
             TC.checkLambdaBody (map TC.argType acc_args) body
+
+
+checkScanOrReduce :: TC.Checkable lore =>
+                     SubExp -> Lambda (Aliases lore) -> [(SubExp, VName)]
+                  -> TC.TypeM lore ()
+checkScanOrReduce w lam input = do
+  TC.require [Prim int32] w
+  let (nes, arrs) = unzip input
+      asArg t = (t, mempty)
+  neargs <- mapM TC.checkArg nes
+  arrargs <- TC.checkSOACArrayArgs w arrs
+  TC.checkLambda lam $
+    map asArg [Prim int32, Prim int32] ++
+    map TC.noArgAliases (neargs ++ arrargs)
 
 instance LParamAttr lore1 ~ LParamAttr lore2 =>
          Scoped lore1 (GroupStreamLambda lore2) where
@@ -384,6 +420,12 @@ instance PrettyLore lore => Pretty (KernelExp lore) where
                                        ppr lam,
                                        braces (commasep $ map ppr nes),
                                        commasep $ map ppr els])
+    where (nes,els) = unzip input
+  ppr (GroupScan w lam input) =
+    text "scan" <> parens (commasep [ppr w,
+                                     ppr lam,
+                                     braces (commasep $ map ppr nes),
+                                     commasep $ map ppr els])
     where (nes,els) = unzip input
   ppr (GroupStream w maxchunk lam accs arrs) =
     text "stream" <>
