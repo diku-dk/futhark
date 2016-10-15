@@ -18,7 +18,6 @@ module Futhark.Representation.Kernels.Kernel
        , WhichThreads(..)
        , KernelResult(..)
 
-       , KernelSize(..)
        , chunkedKernelNonconcatOutputs
 
        , typeCheckKernel
@@ -131,15 +130,6 @@ data WhichThreads = AllThreads
                   | ThreadsInSpace
                   deriving (Eq, Show, Ord)
 
-data KernelSize = KernelSize { kernelWorkgroups :: SubExp
-                             , kernelWorkgroupSize :: SubExp
-                             , kernelElementsPerThread :: SubExp
-                             , kernelTotalElements :: SubExp
-                             , kernelThreadOffsetMultiple :: SubExp
-                             , kernelNumThreads :: SubExp
-                             }
-                deriving (Eq, Ord, Show)
-
 -- | Like 'Mapper', but just for 'Kernel's.
 data KernelMapper flore tlore m = KernelMapper {
     mapOnKernelSubExp :: SubExp -> m SubExp
@@ -199,16 +189,6 @@ mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
 mapOnKernelType _tv (Mem se s) = pure $ Mem se s
-
-instance FreeIn KernelSize where
-  freeIn (KernelSize num_workgroups workgroup_size elems_per_thread
-          num_elems thread_offset num_threads) =
-    mconcat $ map freeIn [num_workgroups,
-                          workgroup_size,
-                          elems_per_thread,
-                          num_elems,
-                          thread_offset,
-                          num_threads]
 
 instance (Attributes lore, FreeIn (LParamAttr lore)) =>
          FreeIn (Kernel lore) where
@@ -590,15 +570,3 @@ instance Pretty KernelResult where
                            Disorder -> "Permuted"
   ppr (KernelInPlaceReturn what) =
     text "kernel returns" <+> ppr what
-
-instance Pretty KernelSize where
-  ppr (KernelSize
-       num_chunks workgroup_size per_thread_elements
-       num_elements offset_multiple num_threads) =
-    PP.braces $ commasep [ppr num_chunks,
-                          ppr workgroup_size,
-                          ppr per_thread_elements,
-                          ppr num_elements,
-                          ppr offset_multiple,
-                          ppr num_threads
-                         ]

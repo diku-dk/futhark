@@ -89,7 +89,7 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
   step_two_pat <- basicPattern' [] <$>
                   mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
 
-  let step_two_size = KernelSize one num_chunks one num_chunks one num_chunks
+  let step_two_size = KernelSize one num_chunks one num_chunks num_chunks
 
   step_two <- reduceKernel [] step_two_size reduce_lam' nes $ take (length nes) $ patternNames step_one_pat
 
@@ -361,6 +361,14 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
 
   return (chunk_red_pes, chunk_map_pes, chunk_stm ++ fold_chunk)
 
+data KernelSize = KernelSize { kernelWorkgroups :: SubExp
+                             , kernelWorkgroupSize :: SubExp
+                             , kernelElementsPerThread :: SubExp
+                             , kernelTotalElements :: SubExp
+                             , kernelNumThreads :: SubExp
+                             }
+                deriving (Eq, Ord, Show)
+
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
                      SubExp -> m KernelSize
 blockedKernelSize w = do
@@ -374,7 +382,7 @@ blockedKernelSize w = do
     letSubExp "per_thread_elements" =<<
     eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
 
-  return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
+  return $ KernelSize num_groups group_size per_thread_elements w num_threads
 
 -- First stage scan kernel.
 scanKernel1 :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -560,7 +568,9 @@ scanKernel2 cs scan_sizes lam input = do
   let (nes, arrs) = unzip input
       scan_ts = lambdaReturnType lam
 
-  kspace <- newKernelSpace (num_groups, group_size, num_threads) []
+  kspace <- newKernelSpace (kernelWorkgroups scan_sizes,
+                            group_size,
+                            kernelNumThreads scan_sizes) []
   let lid = spaceLocalId kspace
 
   (res, stms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
@@ -581,9 +591,7 @@ scanKernel2 cs scan_sizes lam input = do
     return $ map (ThreadsReturn AllThreads) res_elems
 
   return $ Kernel cs kspace (lambdaReturnType lam) $ KernelBody () stms res
-  where num_groups = kernelWorkgroups scan_sizes
-        group_size = kernelWorkgroupSize scan_sizes
-        num_threads = kernelNumThreads scan_sizes
+  where group_size = kernelWorkgroupSize scan_sizes
 
 blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern Kernels
@@ -636,7 +644,7 @@ blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
   let (sequentially_scanned, group_carry_out, _) =
         splitAt3 (length nes) (length nes) $ patternNames first_scan_pat
 
-  let second_scan_size = KernelSize one num_groups one num_groups one num_groups
+  let second_scan_size = KernelSize one num_groups one num_groups num_groups
   second_scan_lam <- renameLambda first_scan_lam
 
   group_carry_out_scanned <-
