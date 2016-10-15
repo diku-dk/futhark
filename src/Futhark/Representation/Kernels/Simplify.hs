@@ -248,17 +248,6 @@ instance Engine.Simplifiable WhichThreads where
   simplify ThreadsInSpace =
     pure ThreadsInSpace
 
-instance Engine.Simplifiable KernelSize where
-  simplify (KernelSize num_groups group_size thread_chunk
-            num_elements offset_multiple num_threads) = do
-    num_groups' <- Engine.simplify num_groups
-    group_size' <- Engine.simplify group_size
-    thread_chunk' <- Engine.simplify thread_chunk
-    num_elements' <- Engine.simplify num_elements
-    offset_multiple' <- Engine.simplify offset_multiple
-    num_threads' <- Engine.simplify num_threads
-    return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
-
 kernelRules :: (MonadBinder m,
                 LocalScope (Lore m) m,
                 Lore m ~ Wise Kernels) => RuleBook m
