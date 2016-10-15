@@ -376,12 +376,13 @@ blockedKernelSize w = do
 
   return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
 
-scanKernel :: (MonadBinder m, Lore m ~ Kernels) =>
-              Certificates -> SubExp -> KernelSize
-           -> Lambda InKernel -> Lambda InKernel
-           -> [SubExp] -> [VName]
-           -> m (Kernel InKernel)
-scanKernel cs w scan_sizes lam foldlam nes arrs = do
+-- First stage scan kernel.
+scanKernel1 :: (MonadBinder m, Lore m ~ Kernels) =>
+               Certificates -> SubExp -> KernelSize
+            -> Lambda InKernel -> Lambda InKernel
+            -> [SubExp] -> [VName]
+            -> m (Kernel InKernel)
+scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
   let (scan_ts, map_ts) =
         splitAt (length nes) $ lambdaReturnType foldlam
       (_, foldlam_acc_params, _) =
@@ -400,9 +401,8 @@ scanKernel cs w scan_sizes lam foldlam nes arrs = do
 
   (res, stms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
     -- We create a loop that moves in group_size chunks over the input.
-    num_iterations <-
-      letSubExp "num_iterations" =<<
-      eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
+    num_iterations <- letSubExp "num_iterations" =<<
+                      eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
 
     -- The merge parameters are the scanout arrays, the mapout arrays,
     -- and the (renamed) accumulator parameters of foldlam.
@@ -550,6 +550,41 @@ scanKernel cs w scan_sizes lam foldlam nes arrs = do
 
         consumed_in_foldlam = consumedInBody $ lambdaBody $ Alias.analyseLambda foldlam
 
+-- Second stage scan kernel with no fold part.
+scanKernel2 :: (MonadBinder m, Lore m ~ Kernels) =>
+               Certificates -> KernelSize
+            -> Lambda InKernel
+            -> [(SubExp,VName)]
+            -> m (Kernel InKernel)
+scanKernel2 cs scan_sizes lam input = do
+  let (nes, arrs) = unzip input
+      scan_ts = lambdaReturnType lam
+
+  kspace <- newKernelSpace (num_groups, group_size, num_threads) []
+  let lid = spaceLocalId kspace
+
+  (res, stms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
+    -- Create an array of the elements we are to scan.
+    let indexMine arr = do
+          arr_t <- lookupType arr
+          let slice = fullSlice arr_t [DimFix $ Var lid]
+          letSubExp (baseString arr <> "_elem") $ BasicOp $ Index [] arr slice
+    read_elements <- runBodyBinder $ resultBody <$> mapM indexMine arrs
+    to_scan_arrs <- letTupExp "combined" $
+                    Op $ Combine [(lid, group_size)] scan_ts (constant True)
+                    read_elements
+    scanned_arrs <- letTupExp "scanned" $
+                    Op $ GroupScan group_size lam $ zip nes to_scan_arrs
+
+    -- Each thread returns scanned_arrs[i].
+    res_elems <- mapM indexMine scanned_arrs
+    return $ map (ThreadsReturn AllThreads) res_elems
+
+  return $ Kernel cs kspace (lambdaReturnType lam) $ KernelBody () stms res
+  where num_groups = kernelWorkgroups scan_sizes
+        group_size = kernelWorkgroupSize scan_sizes
+        num_threads = kernelNumThreads scan_sizes
+
 blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern Kernels
             -> Certificates -> SubExp
@@ -595,22 +630,19 @@ blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
      mapM (mkIntermediateIdent "group_sums" [num_groups]) scan_idents <*>
      pure arr_idents)
 
-  addStm . Let first_scan_pat () . Op =<< scanKernel cs w first_scan_size
+  addStm . Let first_scan_pat () . Op =<< scanKernel1 cs w first_scan_size
     first_scan_lam first_scan_foldlam nes arrs
 
   let (sequentially_scanned, group_carry_out, _) =
         splitAt3 (length nes) (length nes) $ patternNames first_scan_pat
 
   let second_scan_size = KernelSize one num_groups one num_groups one num_groups
-  second_scan_foldlam <- renameLambda lam
-                         { lambdaParams = my_index_param : lambdaParams lam }
-  second_scan_scanlam <- renameLambda first_scan_lam
+  second_scan_lam <- renameLambda first_scan_lam
 
   group_carry_out_scanned <-
     letTupExp "group_carry_out_scanned" . Op =<<
-    scanKernel cs num_groups second_scan_size
-    second_scan_scanlam second_scan_foldlam
-    nes group_carry_out
+    scanKernel2 cs second_scan_size
+    second_scan_lam (zip nes group_carry_out)
 
   lam''' <- renameLambda lam
   j <- newVName "j"
