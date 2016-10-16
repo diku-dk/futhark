@@ -236,6 +236,10 @@ genOpenClPrelude :: OpenClRequirements -> [C.Definition]
 genOpenClPrelude (OpenClRequirements used_funs ts consts) =
   [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
+/* Some OpenCL programs dislike empty progams, or programs with no kernels.
+ * Declare a dummy kernel to ensure they remain our friends. */
+__kernel void dummy_kernel() { return; }
+
 typedef char int8_t;
 typedef short int16_t;
 typedef int int32_t;
