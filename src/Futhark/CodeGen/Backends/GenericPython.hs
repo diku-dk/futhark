@@ -295,8 +295,10 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
                 Nothing   -> fail "No main function"
                 Just func -> return func
               let classinst = Assign (Var "self") $ simpleCall "internal" []
-              maincall <- callEntryFun pre_timing options (defaultEntryPoint, mainfunc)
-              return $ ClassDef (Class "internal" $ map FunDef $
+              (parse_options, maincall) <-
+                callEntryFun pre_timing options (defaultEntryPoint, mainfunc)
+              return $ parse_options ++
+                       ClassDef (Class "internal" $ map FunDef $
                                  constructor' : definitions) :
                        classinst :
                        maincall
@@ -530,7 +532,7 @@ compileEntryFun entry = do
     prepareIn ++ body ++ prepareOut ++ [ret]
 
 callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
-             -> CompilerM op s [PyStmt]
+             -> CompilerM op s ([PyStmt], [PyStmt])
 callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ _ decl_args) = do
   (_, _, prepareIn, body, _, res) <- prepareEntry entry
 
@@ -550,10 +552,11 @@ callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ _ decl_args) = do
 
   str_output <- printValue res
 
-  return $ parse_options ++ str_input ++ prepareIn ++
-    [Try [do_warmup_run, do_num_runs] [except']] ++
-    [close_runtime_file] ++
-    str_output
+  return (parse_options,
+          str_input ++ prepareIn ++
+          [Try [do_warmup_run, do_num_runs] [except']] ++
+          [close_runtime_file] ++
+          str_output)
   where parse_options =
           Assign (Var "runtime_file") None :
           Assign (Var "do_warmup_run") (Constant $ value False) :
