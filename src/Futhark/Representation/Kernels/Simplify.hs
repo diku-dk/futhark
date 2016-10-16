@@ -64,7 +64,7 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      RetType lore ~ RetType outerlore) =>
                     Engine.SimpleOps lore -> Engine.Env (Engine.SimpleM lore)
                  -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore))
-simplifyKernelOp ops env (Kernel cs space ts kbody) = do
+simplifyKernelOp ops env (Kernel desc cs space ts kbody) = do
   cs' <- Engine.simplify cs
   space' <- Engine.simplify space
   ts' <- mapM Engine.simplify ts
@@ -80,7 +80,7 @@ simplifyKernelOp ops env (Kernel cs space ts kbody) = do
         simplifyKernelBody kbody
   when again Engine.changed
   mapM_ processHoistedStm kbody_hoisted
-  return $ Kernel cs' space' ts' $ mkWiseKernelBody () kbody_bnds' kbody_res'
+  return $ Kernel desc cs' space' ts' $ mkWiseKernelBody () kbody_bnds' kbody_res'
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
         bound_here = HS.fromList $ HM.keys scope
@@ -330,7 +330,7 @@ removeInvariantKernelResults :: (LocalScope (Lore m) m,
                                 TopDownRule m
 
 removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
-                                      (Op (Kernel cs space ts (KernelBody _ kstms kres)))) = do
+                                      (Op (Kernel desc cs space ts (KernelBody _ kstms kres)))) = do
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
@@ -338,7 +338,7 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
   when (kres == kres')
     cannotSimplify
 
-  addStm $ Let (Pattern [] kpes') attr $ Op $ Kernel cs space ts' $
+  addStm $ Let (Pattern [] kpes') attr $ Op $ Kernel desc cs space ts' $
     mkWiseKernelBody () kstms kres'
   where isInvariant Constant{} = True
         isInvariant (Var v) = isJust $ ST.lookup v vtable
@@ -370,7 +370,7 @@ distributeKernelResults :: (LocalScope (Lore m) m, MonadBinder m,
                            BottomUpRule m
 distributeKernelResults (vtable, used)
   (Let (Pattern [] kpes) attr
-    (Op (Kernel kcs kspace kts (KernelBody _ kstms kres)))) = do
+    (Op (Kernel desc kcs kspace kts (KernelBody _ kstms kres)))) = do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.
@@ -381,7 +381,7 @@ distributeKernelResults (vtable, used)
     cannotSimplify
 
   addStm $ Let (Pattern [] kpes') attr $
-    Op $ Kernel kcs kspace kts' $ mkWiseKernelBody () (reverse kstms_rev) kres'
+    Op $ Kernel desc kcs kspace kts' $ mkWiseKernelBody () (reverse kstms_rev) kres'
   where
     free_in_kstms = mconcat $ map freeInStm kstms
 

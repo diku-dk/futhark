@@ -54,7 +54,7 @@ transformStm (Let pat () e) = do
 
 transformExp :: Exp ExplicitMemory -> ExpandM ([Stm ExplicitMemory], Exp ExplicitMemory)
 
-transformExp (Op (Inner (Kernel cs space ts kbody)))
+transformExp (Op (Inner (Kernel desc cs space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
       (alloc_bnds, alloc_offsets) <-
@@ -62,7 +62,7 @@ transformExp (Op (Inner (Kernel cs space ts kbody)))
       let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
 
       return (alloc_bnds,
-              Op $ Inner $ Kernel cs space ts kbody'')
+              Op $ Inner $ Kernel desc cs space ts kbody'')
 
   where global_tid = spaceGlobalId space
         num_threads = spaceNumThreads space

@@ -60,7 +60,7 @@ nonlinearInMemory name m =
   case HM.lookup name m of
     Just (Let _ _ (BasicOp (Rearrange _ perm _))) -> Just $ Just perm
     Just (Let _ _ (BasicOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
-    Just (Let pat _ (Op (Kernel _ _ ts _))) ->
+    Just (Let pat _ (Op (Kernel _ _ _ ts _))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
     _ -> Nothing
@@ -72,7 +72,7 @@ nonlinearInMemory name m =
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformStm expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
+transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
   -- First we do the easy stuff, which deals with SplitArray statements.
   kbody' <- transformKernelBody num_threads cs kbody
 
@@ -88,7 +88,7 @@ transformStm expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
                          kbody')
              mempty
 
-  let bnd' = Let pat () $ Op $ Kernel cs space ts kbody''
+  let bnd' = Let pat () $ Op $ Kernel desc cs space ts kbody''
   addStm bnd'
   return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
   where num_threads = spaceNumThreads space
