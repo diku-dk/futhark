@@ -968,7 +968,7 @@ class TypedOp (Op lore) => OpReturns lore where
 instance OpReturns ExplicitMemory where
   opReturns (Alloc size space) =
     return [ReturnsMemory size space]
-  opReturns (Inner k@(Kernel _ _ _ body)) =
+  opReturns (Inner k@(Kernel _ _ _ _ body)) =
     zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
     where correct (WriteReturn _ arr _ _) _ = varReturns arr
           correct (KernelInPlaceReturn arr) _ =

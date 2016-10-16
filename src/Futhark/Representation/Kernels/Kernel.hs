@@ -65,7 +65,8 @@ data Kernel lore =
   | TileSize
   | SufficientParallelism SubExp -- ^ True if enough parallelism.
 
-  | Kernel Certificates
+  | Kernel String -- ^ Hint about what the kernel is.
+    Certificates
     KernelSpace
     [Type]
     (KernelBody lore)
@@ -162,8 +163,8 @@ mapKernelM _ GroupSize = pure GroupSize
 mapKernelM _ TileSize = pure TileSize
 mapKernelM tv (SufficientParallelism se) =
   SufficientParallelism <$> mapOnKernelSubExp tv se
-mapKernelM tv (Kernel cs space ts kernel_body) =
-  Kernel <$> mapOnKernelCertificates tv cs <*>
+mapKernelM tv (Kernel desc cs space ts kernel_body) =
+  Kernel desc <$> mapOnKernelCertificates tv cs <*>
   mapOnKernelSpace space <*>
   mapM (mapOnKernelType tv) ts <*>
   mapOnKernelKernelBody tv kernel_body
@@ -273,8 +274,8 @@ instance Substitute SpaceStructure where
     NestedSpace (map (substituteNames subst) dims)
 
 instance Attributes lore => Substitute (Kernel lore) where
-  substituteNames subst (Kernel cs space ts kbody) =
-    Kernel
+  substituteNames subst (Kernel desc cs space ts kbody) =
+    Kernel desc
     (substituteNames subst cs)
     (substituteNames subst space)
     (substituteNames subst ts)
@@ -319,7 +320,7 @@ instance Attributes lore => Rename (Kernel lore) where
     where renamer = KernelMapper rename rename rename rename rename rename rename
 
 kernelType :: Kernel lore -> [Type]
-kernelType (Kernel _ space ts body) =
+kernelType (Kernel _ _ space ts body) =
   zipWith resultShape ts $ kernelBodyResult body
   where dims = map snd $ spaceDimensions space
         num_groups = spaceNumGroups space
@@ -360,7 +361,7 @@ instance TypedOp (Kernel lore) where
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases = map (const mempty) . kernelType
 
-  consumedInOp (Kernel _ _ _ kbody) =
+  consumedInOp (Kernel _ _ _ _ kbody) =
     consumedInKernelBody kbody <>
     mconcat (map consumedByReturn (kernelBodyResult kbody))
     where consumedByReturn (WriteReturn _ a _ _) = HS.singleton a
@@ -430,7 +431,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             in KernelBody attr' stms' res
 
 instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
-  usageInOp (Kernel _ _ _ kbody) =
+  usageInOp (Kernel _ _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
@@ -449,7 +450,7 @@ typeCheckKernel GroupSize = return ()
 typeCheckKernel TileSize = return ()
 typeCheckKernel SufficientParallelism{} = return ()
 
-typeCheckKernel (Kernel cs space kts kbody) = do
+typeCheckKernel (Kernel _ cs space kts kbody) = do
   mapM_ (TC.requireI [Prim Cert]) cs
   checkSpace space
   mapM_ TC.checkType kts
@@ -505,7 +506,7 @@ typeCheckKernel (Kernel cs space kts kbody) = do
           return ()
 
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
-  opMetrics (Kernel _ _ _ kbody) =
+  opMetrics (Kernel _ _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
     where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
@@ -520,9 +521,9 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr TileSize = text "$tile_size()"
   ppr (SufficientParallelism se) = text "$sufficientParallelism" <> parens (ppr se)
 
-  ppr (Kernel cs space ts body) =
+  ppr (Kernel desc cs space ts body) =
     ppCertificates' cs <>
-    text "kernel" <>
+    text "kernel" <+> text desc <>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
 

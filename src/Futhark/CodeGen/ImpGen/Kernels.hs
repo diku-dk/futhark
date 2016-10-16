@@ -90,7 +90,7 @@ kernelCompiler dest (SufficientParallelism se) = do
   se' <- ImpGen.compileSubExp se
   ImpGen.emit $ Imp.SetScalar v $ Imp.CmpOpExp (CmpSlt Int32) (64*1024) se'
 
-kernelCompiler dest (Kernel _ space _ kernel_body) = do
+kernelCompiler dest (Kernel desc _ space _ kernel_body) = do
 
   num_groups' <- ImpGen.subExpToDimSize $ spaceNumGroups space
   group_size' <- ImpGen.subExpToDimSize $ spaceGroupSize space
@@ -145,7 +145,7 @@ kernelCompiler dest (Kernel _ space _ kernel_body) = do
             , Imp.kernelNumGroups = num_groups'
             , Imp.kernelGroupSize = group_size'
             , Imp.kernelName = global_tid
-            , Imp.kernelDesc = Nothing
+            , Imp.kernelDesc = desc
             }
 
 expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp

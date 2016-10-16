@@ -41,9 +41,9 @@ optimiseBody (Body () bnds res) =
   Body () <$> (concat <$> mapM optimiseStm bnds) <*> pure res
 
 optimiseStm :: Stm Kernels -> TileM [Stm Kernels]
-optimiseStm (Let pat () (Op (Kernel cs space ts body))) = do
+optimiseStm (Let pat () (Op (Kernel desc cs space ts body))) = do
   (extra_bnds, space', body') <- tileInKernelBody mempty initial_variance space body
-  return $ extra_bnds ++ [Let pat () $ Op $ Kernel cs space' ts body']
+  return $ extra_bnds ++ [Let pat () $ Op $ Kernel desc cs space' ts body']
   where initial_variance = HM.map mempty $ scopeOfKernelSpace space
 optimiseStm (Let pat () e) =
   pure <$> (Let pat () <$> mapExpM optimise e)

@@ -271,7 +271,7 @@ calledKernelName :: CallKernel -> String
 calledKernelName (Map k) =
   mapKernelName k
 calledKernelName (AnyKernel k) =
-  maybe "" (++"_") (kernelDesc k) ++ "kernel_" ++ show (baseTag $ kernelName k)
+  kernelDesc k ++ "_kernel_" ++ show (baseTag $ kernelName k)
 calledKernelName (MapTranspose bt _ _ _ _ _ _ _ _ _) =
   "fut_kernel_map_transpose_" ++ pretty bt
 

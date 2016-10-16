@@ -89,8 +89,8 @@ data Kernel = Kernel
               , kernelGroupSize :: DimSize
               , kernelName :: VName
                 -- ^ Unique name for the kernel.
-              , kernelDesc :: Maybe String
-               -- ^ An optional short descriptive name - should be
+              , kernelDesc :: String
+               -- ^ A short descriptive name - should be
                -- alphanumeric and without spaces.
               }
             deriving (Show)

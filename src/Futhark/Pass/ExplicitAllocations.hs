@@ -546,8 +546,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner TileSize
           handleOp (SufficientParallelism se) =
             return $ Inner $ SufficientParallelism se
-          handleOp (Kernel cs space ts kbody) = subAllocM handleKernelExp $
-            Inner . Kernel cs space ts <$>
+          handleOp (Kernel desc cs space ts kbody) = subAllocM handleKernelExp $
+            Inner . Kernel desc cs space ts <$>
             localScope (scopeOfKernelSpace space)
             (allocInKernelBody kbody)
 
@@ -812,7 +812,7 @@ data ExpHint = NoHint
 
 kernelExpHints :: (Allocator lore m, Op lore ~ MemOp (Kernel somelore)) =>
                   Exp lore -> m [ExpHint]
-kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
+kernelExpHints (Op (Inner (Kernel _ _ space rets kbody))) =
   zipWithM hint rets $ kernelBodyResult kbody
   where num_threads = spaceNumThreads space
 
