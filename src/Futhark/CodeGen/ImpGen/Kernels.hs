@@ -22,7 +22,7 @@ import Prelude hiding (quot)
 
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
-import Futhark.Representation.ExplicitMemory hiding (kernelNumThreads)
+import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
