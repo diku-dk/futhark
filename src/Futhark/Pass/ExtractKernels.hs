@@ -578,7 +578,7 @@ lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 -- Enable if you want the cool new versioned code.  Beware: may be
 -- slower in practice.  Caveat emptor (and you are the emptor).
 versionedCode :: Bool
-versionedCode = True
+versionedCode = False
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
