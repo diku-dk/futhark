@@ -209,6 +209,7 @@ requiredFunctions kernel_funs =
                 ("cos32", c_cos32),
                 ("asin32", c_asin32),
                 ("acos32", c_acos32),
+                ("atan2", c_atan32),
                 ("atan2_32", c_atan2_32),
                 ("isnan32", c_isnan32),
                 ("isinf32", c_isinf32)]
@@ -220,6 +221,7 @@ requiredFunctions kernel_funs =
                 ("cos64", c_cos64),
                 ("asin64", c_asin64),
                 ("acos64", c_acos64),
+                ("atan64", c_atan64),
                 ("atan2_64", c_atan2_64),
                 ("isnan64", c_isnan64),
                 ("isinf64", c_isinf64)]
