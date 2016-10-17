@@ -238,7 +238,11 @@ genOpenClPrelude (OpenClRequirements used_funs ts consts) =
   [C.cunit|
 /* Some OpenCL programs dislike empty progams, or programs with no kernels.
  * Declare a dummy kernel to ensure they remain our friends. */
-__kernel void dummy_kernel() { return; }
+__kernel void dummy_kernel(__global unsigned char *dummy, int n)
+{
+    const int thread_gid = get_global_id(0);
+    if (thread_gid >= n) return;
+}
 
 typedef char int8_t;
 typedef short int16_t;
