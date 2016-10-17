@@ -329,6 +329,7 @@ builtins = HM.fromList $ map namify
            ,("sin32", builtin "sin32")
            ,("acos32", builtin "acos32")
            ,("asin32", builtin "asin32")
+           ,("atan32", builtin "atan32")
            ,("atan2_32", builtin "atan2_32")
            ,("isinf32", builtin "isinf32")
            ,("isnan32", builtin "isnan32")
@@ -340,6 +341,7 @@ builtins = HM.fromList $ map namify
            ,("sin64", builtin "sin64")
            ,("acos64", builtin "acos64")
            ,("asin64", builtin "asin64")
+           ,("atan64", builtin "atan64")
            ,("atan2_64", builtin "atan2_64")
            ,("isinf64", builtin "isinf64")
            ,("isnan64", builtin "isnan64")
@@ -361,6 +363,8 @@ builtin "acos32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ acos x]
 builtin "asin32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ asin x]
+builtin "atan32" [PrimVal (FloatValue (Float32Value x))] =
+  return [PrimVal $ FloatValue $ Float32Value $ atan x]
 builtin "atan2_32" [PrimVal (FloatValue (Float32Value x)),
                     PrimVal (FloatValue (Float32Value y))] =
   return [PrimVal $ FloatValue $ Float32Value $ atan2 x y]
@@ -382,6 +386,8 @@ builtin "acos64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ acos x]
 builtin "asin64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ asin x]
+builtin "atan64" [PrimVal (FloatValue (Float64Value x))] =
+  return [PrimVal $ FloatValue $ Float64Value $ atan x]
 builtin "atan2_64" [PrimVal (FloatValue (Float64Value x)),
                     PrimVal (FloatValue (Float64Value y))] =
   return [PrimVal $ FloatValue $ Float64Value $ atan2 x y]
