@@ -525,15 +525,17 @@ computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_ele
           (Imp.innerExp num_elements)
           ((thread_index + 1) * Imp.innerExp elements_per_thread)
 
-inWaveScan :: Imp.Exp
+inBlockScan :: Imp.Exp
+           -> Imp.Exp
+           -> Imp.Exp
            -> VName
            -> [(VName, t)]
            -> Lambda InKernel
            -> InKernelGen ()
-inWaveScan wave_size local_id acc_local_mem scan_lam = ImpGen.everythingVolatile $ do
+inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = ImpGen.everythingVolatile $ do
   skip_threads <- newVName "skip_threads"
-  let in_wave_thread_active =
-        Imp.CmpOpExp (CmpSle Int32) (Imp.var skip_threads int32) in_wave_id
+  let in_block_thread_active =
+        Imp.CmpOpExp (CmpSle Int32) (Imp.var skip_threads int32) in_block_id
       (scan_lam_i, other_index_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams scan_lam
       (x_params, y_params) =
@@ -554,19 +556,24 @@ inWaveScan wave_size local_id acc_local_mem scan_lam = ImpGen.everythingVolatile
     ImpGen.collect $
     zipWithM_ (writeParamToLocalMemory $ Imp.var local_id int32)
     acc_local_mem y_params
+  let andBlockActive = Imp.BinOpExp LogAnd active
   ImpGen.emit $
-    Imp.Comment "in-wave scan (no barriers needed)" $
+    Imp.Comment "in-block scan (hopefully no barriers needed)" $
     Imp.DeclareScalar skip_threads int32 <>
     Imp.SetScalar skip_threads 1 <>
-    Imp.While (Imp.CmpOpExp (CmpSlt Int32) (Imp.var skip_threads int32) wave_size)
-    (Imp.If in_wave_thread_active
-     (Imp.Comment "read operands" read_operands <>
-      Imp.Comment "perform operation" op_to_y <>
-      Imp.Comment "write result" write_operation_result)
-     mempty <>
+    Imp.While (Imp.CmpOpExp (CmpSlt Int32) (Imp.var skip_threads int32) block_size)
+    (Imp.If (andBlockActive in_block_thread_active)
+      (Imp.Comment "read operands" read_operands <>
+       Imp.Comment "perform operation" op_to_y) mempty <>
+
+     Imp.If (Imp.CmpOpExp (CmpSlt Int32) lockstep_width (Imp.var skip_threads int32))
+      (Imp.Op Imp.Barrier) mempty <>
+
+     Imp.If (andBlockActive in_block_thread_active)
+      (Imp.Comment "write result" write_operation_result) mempty <>
      Imp.SetScalar skip_threads (Imp.var skip_threads int32 * 2))
-  where wave_id = Imp.BinOpExp (SQuot Int32) (Imp.var local_id int32) wave_size
-        in_wave_id = Imp.var local_id int32 - wave_id * wave_size
+  where block_id = Imp.BinOpExp (SQuot Int32) (Imp.var local_id int32) block_size
+        in_block_id = Imp.var local_id int32 - block_id * block_size
 
 data KernelConstants = KernelConstants
                        { kernelGlobalThreadId :: VName
@@ -793,38 +800,48 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
                      mapM (fmap (ImpGen.memLocationName . ImpGen.entryArrayLocation) .
                            ImpGen.lookupArray) arrs
 
-    let wave_size = Imp.sizeToExp $ kernelWaveSize constants
-        wave_id = Imp.var local_tid int32 `quot` wave_size
-        in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
-        doInWaveScan = inWaveScan wave_size local_tid acc_local_mem
+    -- The scan works by splitting the group into blocks, which are
+    -- scanned separately.  Typically, these blocks are smaller than
+    -- the lockstep width, which enables barrier-free execution inside
+    -- them.
+    --
+    -- We hardcode the block size here.  The only requirement is that
+    -- it should not be less than the square root of the group size.
+    -- With 32, we will work on groups of size 1024 or smaller, which
+    -- fits every device Troels has seen.  Still, it would be nicer if
+    -- it were a runtime parameter.  Some day.
+    let block_size = Imp.ValueExp $ IntValue $ Int32Value 32
+        simd_width = Imp.sizeToExp $ kernelWaveSize constants
+        block_id = Imp.var local_tid int32 `quot` block_size
+        in_block_id = Imp.var local_tid int32 - block_id * block_size
+        doInBlockScan active = inBlockScan simd_width block_size active local_tid acc_local_mem
 
-    doInWaveScan lam
+    doInBlockScan (ValueExp (BoolValue True)) lam
     ImpGen.emit $ Imp.Op Imp.Barrier
 
-    pack_wave_results <-
+    pack_block_results <-
       ImpGen.collect $
-      zipWithM_ (writeParamToLocalMemory wave_id) acc_local_mem y_params
+      zipWithM_ (writeParamToLocalMemory block_id) acc_local_mem y_params
 
-    let last_in_wave =
-          Imp.CmpOpExp (CmpEq int32) in_wave_id $ wave_size - 1
+    let last_in_block =
+          Imp.CmpOpExp (CmpEq int32) in_block_id $ block_size - 1
     ImpGen.comment
-      "last thread of wave 'i' writes its result to offset 'i'" $
-      ImpGen.emit $ Imp.If last_in_wave pack_wave_results mempty
+      "last thread of block 'i' writes its result to offset 'i'" $
+      ImpGen.emit $ Imp.If last_in_block pack_block_results mempty
 
     ImpGen.emit $ Imp.Op Imp.Barrier
 
-    let is_first_wave = Imp.CmpOpExp (CmpEq int32) wave_id 0
-    scan_first_wave <- ImpGen.collect $ doInWaveScan renamed_lam
+    let is_first_block = Imp.CmpOpExp (CmpEq int32) block_id 0
     ImpGen.comment
-      "scan the first wave, after which offset 'i' contains carry-in for warp 'i+1'" $
-      ImpGen.emit $ Imp.If is_first_wave scan_first_wave mempty
+      "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
+      doInBlockScan is_first_block renamed_lam
 
     ImpGen.emit $ Imp.Op Imp.Barrier
 
     read_carry_in <-
       ImpGen.collect $
       zipWithM_ (readParamFromLocalMemory
-                 (paramName other_index_param) (wave_id - 1))
+                 (paramName other_index_param) (block_id - 1))
       x_params acc_local_mem
 
     y_dest <- ImpGen.destinationFromParams y_params
@@ -832,16 +849,16 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
     write_final_result <- ImpGen.collect $
       zipWithM_ (writeParamToLocalMemory $ Imp.var local_tid int32) acc_local_mem y_params
 
-    ImpGen.comment "carry-in for every wave except the first" $
-      ImpGen.emit $ Imp.If is_first_wave mempty $
+    ImpGen.comment "carry-in for every block except the first" $
+      ImpGen.emit $ Imp.If is_first_block mempty $
       Imp.Comment "read operands" read_carry_in <>
       Imp.Comment "perform operation" op_to_y <>
       Imp.Comment "write final result" write_final_result
 
     ImpGen.emit $ Imp.Op Imp.Barrier
 
-    ImpGen.comment "restore correct values for first wave" $
-      ImpGen.emit $ Imp.If is_first_wave write_final_result mempty
+    ImpGen.comment "restore correct values for first block" $
+      ImpGen.emit $ Imp.If is_first_block write_final_result mempty
 
 
 compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w maxchunk lam accs _arrs) = do
