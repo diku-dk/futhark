@@ -318,11 +318,15 @@ simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs1 perm1 v1)))
     Just (Rearrange cs3 perm3 v3) <- asBasicOp =<< ST.lookupExp v2 vtable,
     dim1:_ <- perm1,
     perm1 == rearrangeInverse perm3 = do
-      to_drop' <- letSubExp "drop" =<< toExp to_drop
-      to_take' <- letSubExp "take" =<< toExp to_take
+      to_drop' <- letSubExp "drop" =<< toExp (asDim to_drop)
+      to_take' <- letSubExp "take" =<< toExp (asDim to_take)
       [_, v] <- letTupExp' "simplify_rearrange" $
         BasicOp $ Split (cs1<>cs2<>cs3) dim1 [to_drop', to_take'] v3
       letBind_ pat $ BasicOp $ SubExp v
+    where asDim pe | IntType it <- primExpType pe, it /= Int32 =
+                       ConvOpExp (SExt it Int32) pe
+                   | otherwise =
+                       pe
 
 simplifyRearrange _ _ = cannotSimplify
 
