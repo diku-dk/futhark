@@ -364,7 +364,7 @@ newtype QualName vn = QualName ([Name], vn)
 -- and the type checker will convert these to @Exp 'Type' 'VName'@, in
 -- which type information is always present and all names are unique.
 data ExpBase f vn =
-              Literal Value SrcLoc
+              Literal PrimValue SrcLoc
 
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.

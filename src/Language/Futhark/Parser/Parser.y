@@ -541,11 +541,11 @@ Apply : Apply Atom %prec juxtprec
         { (fst $1, [$2], snd $1) }
 
 Atom :: { UncheckedExp }
-Atom : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
+Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | stringlit      {% let L pos (STRINGLIT s) = $1 in do
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
-                             return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
+                             return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
      | empty '(' UserTypeDecl ')' { Empty $3 $1 }
      | '(' Exp ')'                { $2 }
      | '(' Exp ')' '.' NaturalInt { TupleIndex $2 $5 NoInfo $1 }

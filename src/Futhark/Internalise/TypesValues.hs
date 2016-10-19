@@ -10,6 +10,7 @@ module Futhark.Internalise.TypesValues
   , internalisePrimType
 
   -- * Internalising values
+  , internalisePrimValue
   , internaliseValue
   )
   where

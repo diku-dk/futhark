@@ -184,14 +184,7 @@ instance Pretty BinOp where
 hasArrayLit :: ExpBase ty vn -> Bool
 hasArrayLit ArrayLit{}      = True
 hasArrayLit (TupLit es2 _)  = any hasArrayLit es2
-hasArrayLit (Literal val _) = hasArrayVal val
 hasArrayLit _               = False
-
-hasArrayVal :: Value -> Bool
-hasArrayVal ArrayValue{}  = True
-hasArrayVal (TupValue vs) = any hasArrayVal vs
-hasArrayVal _             = False
-
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndexBase ty vn) where
   ppr (DimFix e)     = ppr e
@@ -231,7 +224,6 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
                         DoLoop{}               -> True
                         LetPat{}               -> True
                         LetWith{}              -> True
-                        Literal ArrayValue{} _ -> False
                         If{}                   -> True
                         ArrayLit{}             -> False
                         _                      -> hasArrayLit e
