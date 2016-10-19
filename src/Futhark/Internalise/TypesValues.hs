@@ -137,10 +137,9 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
                   internaliseUniqueness u]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
-          outerdim <- Ext <$> newId
-          innerdims <- map Ext <$> replicateM (E.shapeRank shape - 1) newId
+          dims <- map Ext <$> replicateM (E.shapeRank shape) newId
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
-          return [ I.arrayOf t (ExtShape $ outerdim : innerdims) $
+          return [ I.arrayOf t (ExtShape dims) $
                     if I.unique t then Unique
                     else if I.primType t then u
                          else I.uniqueness t
