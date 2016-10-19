@@ -336,10 +336,10 @@ isDropTake :: VName -> ST.SymbolTable lore
 isDropTake v vtable = do
   Let pat _ (BasicOp (Split cs dim splits v')) <- ST.entryStm =<< ST.lookup v vtable
   i <- elemIndex v $ patternValueNames pat
-  return (prod $ take i splits,
-          prod $ take 1 $ drop i splits,
+  return (offs $ take i splits,
+          offs $ take 1 $ drop i splits,
           cs, dim, v')
-  where prod = product . map (primExpFromSubExp int32)
+  where offs = sum . map (primExpFromSubExp int32)
 
 simplifyRotate :: MonadBinder m => TopDownRule m
 -- A zero-rotation is identity.
@@ -729,8 +729,8 @@ removeEmptySplits _ _ =
   cannotSimplify
 
 removeSingletonSplits :: MonadBinder m => TopDownRule m
-removeSingletonSplits _ (Let pat _ (BasicOp (Split _ _ [n] arr))) = do
-  size <- arraySize 0 <$> lookupType arr
+removeSingletonSplits _ (Let pat _ (BasicOp (Split _ i [n] arr))) = do
+  size <- arraySize i <$> lookupType arr
   if size == n then
     letBind_ pat $ BasicOp $ SubExp $ Var arr
     else cannotSimplify
