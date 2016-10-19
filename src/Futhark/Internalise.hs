@@ -189,9 +189,13 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
             return $ I.BasicOp $ I.ArrayLit ks' rt
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
 
-internaliseExp desc (E.Empty (TypeDecl _(Info et)) loc) =
-  internaliseExp desc $ E.ArrayLit [] (Info et') loc
-  where et' = E.removeShapeAnnotations $ E.fromStruct et
+internaliseExp desc (E.Empty (TypeDecl _(Info et)) loc) = do
+  (ts, _, _) <- internaliseReturnType et
+  let ts' = map (fromDecl . modifyArrayShape extToZero) ts
+  letSubExps desc $ map (I.BasicOp . I.ArrayLit []) ts'
+  where extToZero (I.ExtShape dims) = I.Shape $ map extDimToZero dims
+        extDimToZero I.Ext{} = constant (0::Int32)
+        extDimToZero (I.Free d) = d
 
 internaliseExp desc (E.Apply (QualName ([], fname)) args _ _)
   | Just (rettype, _) <- HM.lookup fname' I.builtInFunctions = do
@@ -1033,7 +1037,7 @@ lookupConstant name = do
           letTupExp (baseString name) $ I.Apply fname (zip constargs const_ds) rettype
     Nothing -> return Nothing
 
-constFunctionArgs :: [(Name,VName)] -> InternaliseM [(SubExp, I.Diet, I.DeclType)]
+constFunctionArgs :: ConstParams -> InternaliseM [(SubExp, I.Diet, I.DeclType)]
 constFunctionArgs = mapM arg
   where arg (fname, name) = do
           se <- letSubExp (baseString name ++ "_arg") $

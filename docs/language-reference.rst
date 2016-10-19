@@ -315,6 +315,23 @@ Absolute value of ``x``, which must be of integral type.
 Sign of ``x``, which must be of an integral type.  Returns 1, 0, or
 -1.
 
+``[x, y, z]``
+~~~~~~~~~~~~~
+
+Create an array containing the indicated elements.  Each element must
+have the same type and shape.  At least one element must be provided -
+empty arrays must be constructed with the ``empty`` construct.
+
+``empty(t)``
+~~~~~~~~~~~~
+
+Create an empty array whose row type is ``t``.  For example,
+``empty(int)`` creates a value of type ``[]int``.  The row type can
+contain shape declarations, e.g., ``empty([2]int)``.  Any dimension
+without an annotation will be of size 0, as will the outermost
+dimension.
+
+
 ``a[i]``
 ~~~~~~~~
 
