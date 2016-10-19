@@ -18,7 +18,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS
-import Data.Array
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -859,8 +858,8 @@ checkFunBody fname body maybe_rettype loc = do
 checkExp :: ExpBase NoInfo VName
          -> TypeM Exp
 
-checkExp (Literal val pos) =
-  Literal <$> checkLiteral pos val <*> pure pos
+checkExp (Literal val loc) =
+  return $ Literal val loc
 
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
@@ -880,8 +879,10 @@ checkExp (ArrayLit es _ loc) = do
 
   return $ ArrayLit es' (Info et) loc
 
-checkExp (Empty decl loc) =
-  Empty <$> checkTypeDecl decl <*> pure loc
+checkExp (Empty decl loc) = do
+  decl' <- checkTypeDecl decl
+  checkRetType loc $ unInfo $ expandedType decl'
+  return $ Empty decl' loc
 
 checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
 
@@ -1148,7 +1149,7 @@ checkExp (Stream form lam arr pos) = do
         case arrtp of
           Array _ -> True
           _       -> False
-  let lit_int0 = Literal (PrimValue $ SignedValue $ Int32Value 0) pos
+  let lit_int0 = Literal (SignedValue $ Int32Value 0) pos
   [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
   -- arr must have an array type
   unless (isArrayType $ typeOf arr') $
@@ -1384,18 +1385,6 @@ checkSOACArrayArg e = do
   case peelArray 1 t of
     Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
     Just rt -> return (e', (rt, dflow, argloc))
-
-checkLiteral :: SrcLoc -> Value -> TypeM Value
-checkLiteral _ (PrimValue bv) = return $ PrimValue bv
-checkLiteral loc (TupValue vals) = do
-  vals' <- mapM (checkLiteral loc) vals
-  return $ TupValue vals'
-checkLiteral loc (ArrayValue arr rt) = do
-  vals <- mapM (checkLiteral loc) (elems arr)
-  case find ((/=rt) . removeNames . valueType) vals of
-    Just wrong -> bad $ TypeError loc $ pretty wrong ++ " is not of expected type " ++ pretty rt ++ "."
-    _          -> return ()
-  return $ ArrayValue (listArray (bounds arr) vals) rt
 
 checkIdent :: IdentBase NoInfo VName -> TypeM Ident
 checkIdent (Ident name _ pos) = do

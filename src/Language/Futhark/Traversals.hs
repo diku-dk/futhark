@@ -45,7 +45,6 @@ data MapperBase vnf vnt m = Mapper {
   , mapOnIdent    :: IdentBase NoInfo vnf -> m (IdentBase NoInfo vnt)
   , mapOnName     :: vnf -> m vnt
   , mapOnQualName :: QualName vnf -> m (QualName vnt)
-  , mapOnValue    :: Value -> m Value
   }
 
 -- | Map a monadic action across the immediate children of an
@@ -57,7 +56,7 @@ mapExpM :: (Applicative m, Monad m) =>
 mapExpM tv (Var name NoInfo loc) =
   Var <$> mapOnQualName tv name <*> pure NoInfo <*> pure loc
 mapExpM tv (Literal val loc) =
-  pure Literal <*> mapOnValue tv val <*> pure loc
+  pure $ Literal val loc
 mapExpM tv (TupLit els loc) =
   pure TupLit <*> mapM (mapOnExp tv) els <*> pure loc
 mapExpM tv (ArrayLit els elt loc) =

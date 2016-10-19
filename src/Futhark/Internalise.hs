@@ -112,9 +112,9 @@ internaliseFun (E.FunDef entry fname (TypeDecl _ (Info rettype)) params body loc
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) _) =
-  case internaliseType tp of
-    [I.Prim _] -> return name
-    _          -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
+  case tp of
+    E.Prim{} -> return name
+    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
                        ++ pretty name ++ "'."
 
 internaliseBody :: E.Exp -> InternaliseM Body
@@ -172,11 +172,6 @@ internaliseExp desc (E.TupleIndex e i (Info rt) _) =
 
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
-
-internaliseExp desc (E.ArrayLit [] (Info et) _) =
-  letSubExps desc $ map arrayLit $ internaliseType et
-  where arrayLit et' =
-          I.BasicOp $ I.ArrayLit [] $ et' `annotateArrayShape` []
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -581,9 +576,7 @@ internaliseExp desc (E.Replicate ne ve _) = do
   letSubExps desc $ I.BasicOp . I.Replicate (I.Shape [ne']) <$> ves
 
 internaliseExp _ (E.Literal v _) =
-  case internaliseValue v of
-    Nothing -> throwError $ "Invalid value: " ++ pretty v
-    Just v' -> mapM (letSubExp "literal" <=< eValue) v'
+  return [I.Constant $ internalisePrimValue v]
 
 internaliseExp desc (E.If ce te fe (Info t) _) = do
   ce' <- internaliseExp1 "cond" ce
@@ -594,11 +587,11 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
 
 internaliseExp desc (E.BinOp E.LogAnd xe ye t loc) =
   internaliseExp desc $
-  E.If xe ye (E.Literal (E.PrimValue (E.BoolValue False)) loc) t loc
+  E.If xe ye (E.Literal (E.BoolValue False) loc) t loc
 
 internaliseExp desc (E.BinOp E.LogOr xe ye t loc) =
   internaliseExp desc $
-  E.If xe (E.Literal (E.PrimValue (E.BoolValue True)) loc) ye t loc
+  E.If xe (E.Literal (E.BoolValue True) loc) ye t loc
 
 internaliseExp desc (E.BinOp bop xe ye _ _) = do
   xe' <- internaliseExp1 "x" xe

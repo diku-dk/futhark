@@ -313,7 +313,6 @@ rename = Mapper {
          , mapOnQualName = replQual Term
          , mapOnLambda = renameLambda
          , mapOnType = renameCompType
-         , mapOnValue = return
          }
 
 renameLambda :: (Ord f, Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>

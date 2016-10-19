@@ -54,6 +54,7 @@ module Language.Futhark.Attributes
   --
   -- $names
   , removeNames
+  , addNames
   , nameToQualName
 
   -- * Queries on values
@@ -556,7 +557,7 @@ valueType (ArrayValue _ (Array (TupleArray et shape _))) =
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
-typeOf (Literal val _) = fromStruct $ valueType val
+typeOf (Literal val _) = Prim $ primValueType val
 typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
