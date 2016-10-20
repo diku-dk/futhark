@@ -7,7 +7,7 @@ def addressOffset(x, offset, bt):
   return ct.cast(ct.addressof(x.contents)+offset, ct.POINTER(bt))
 
 def allocateMem(size):
-  return ct.cast((ct.c_byte * size)(), ct.POINTER(ct.c_byte))
+  return ct.cast((ct.c_byte * max(0,size))(), ct.POINTER(ct.c_byte))
 
 def unwrapArray(x):
   return x.ctypes.data_as(ct.POINTER(ct.c_byte))
