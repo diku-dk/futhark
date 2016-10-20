@@ -43,8 +43,7 @@ import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
-
-import Futhark.Passes (standardPipeline, CompilationMode(..))
+import Futhark.Passes
 
 data Config = Config { futharkConfig :: FutharkConfig
                      , futharkPipeline :: [UntypedPass]
@@ -54,6 +53,10 @@ data Config = Config { futharkConfig :: FutharkConfig
 data UntypedPassState = SOACS (Prog SOACS.SOACS)
                       | Kernels (Prog Kernels.Kernels)
                       | ExplicitMemory (Prog ExplicitMemory.ExplicitMemory)
+
+getSOACSProg :: UntypedPassState -> Maybe (Prog SOACS.SOACS)
+getSOACSProg (SOACS prog) = Just prog
+getSOACSProg _            = Nothing
 
 class Representation s where
   -- | A human-readable description of the representation expected or
@@ -186,16 +189,31 @@ cseOption short =
         long = [passLongOption pass]
         pass = performCSE True :: Pass SOACS SOACS
 
+pipelineOption :: (UntypedPassState -> Maybe (Prog fromlore))
+               -> String
+               -> (Prog tolore -> UntypedPassState)
+               -> String
+               -> Pipeline fromlore tolore
+               -> String
+               -> [String]
+               -> FutharkOption
+pipelineOption getprog repdesc repf desc pipeline =
+  passOption desc $ UntypedPass pipelinePass
+  where pipelinePass rep config =
+          case getprog rep of
+            Just prog ->
+              repf <$> runPasses pipeline config prog
+            Nothing   ->
+              compileErrorS (T.pack $ "Expected " ++ repdesc ++ " representation, but got " ++
+                             representation rep) $ pretty rep
+
 soacsPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
                     -> FutharkOption
-soacsPipelineOption desc pipeline =
-  passOption desc $ UntypedPass pipelinePass
-  where pipelinePass (SOACS prog) config =
-          SOACS <$> runPasses pipeline config prog
-        pipelinePass rep _ =
-          compileErrorS (T.pack $ "Expected SOACS representation, but got " ++
-                         representation rep) $
-          pretty rep
+soacsPipelineOption = pipelineOption getSOACSProg "SOACS" SOACS
+
+explicitMemoryPipelineOption :: String -> Pipeline SOACS ExplicitMemory -> String -> [String]
+                             -> FutharkOption
+explicitMemoryPipelineOption = pipelineOption getSOACSProg "ExplicitMemory" ExplicitMemory
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -245,6 +263,10 @@ commandLineOptions =
 
   , soacsPipelineOption "Run the default optimised pipeline"
     (standardPipeline Library) "s" ["standard"]
+  , explicitMemoryPipelineOption "Run the full GPU compilation pipeline"
+    (gpuPipeline Library) [] ["gpu"]
+  , explicitMemoryPipelineOption "Run the sequential CPU compilation pipeline"
+    (sequentialPipeline Library) [] ["cpu"]
   ]
 
 -- | Entry point.  Non-interactive, except when reading interpreter

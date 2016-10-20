@@ -76,7 +76,6 @@ standardPipeline mode =
           | otherwise =
               return ()
 
-
 sequentialPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
 sequentialPipeline mode =
   standardPipeline mode >>>
