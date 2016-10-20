@@ -128,8 +128,15 @@ instance PrettyAnnot (PatElemT attr) =>
   PrettyAnnot (PatElemT (VarAliases, attr)) where
 
   ppAnnot (PatElem name bindage (Names' als, attr)) =
-    (PP.oneLine <$> aliasComment name als) <>
-    ppAnnot (PatElem name bindage attr)
+    let alias_comment = PP.oneLine <$> aliasComment name als
+    in case (alias_comment, ppAnnot (PatElem name bindage attr)) of
+         (_, Nothing) ->
+           alias_comment
+         (Just alias_comment', Just inner_comment) ->
+           Just $ alias_comment' PP.</> inner_comment
+         (Nothing, Just inner_comment) ->
+           Just inner_comment
+
 
 instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) where
   ppExpLore (consumed, inner) e =
