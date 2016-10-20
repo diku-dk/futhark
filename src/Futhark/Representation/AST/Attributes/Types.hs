@@ -22,6 +22,7 @@ module Futhark.Representation.AST.Attributes.Types
        , setOuterSize
        , setDimSize
        , setOuterDim
+       , setDim
        , setArrayDims
        , peelArray
        , stripArray
