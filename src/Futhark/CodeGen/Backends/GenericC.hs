@@ -338,7 +338,9 @@ rawMem' False e = [C.cexp|$exp:e|]
 defineMemorySpace :: Space -> CompilerM op s [C.Definition]
 defineMemorySpace space = do
   rm <- rawMemCType space
-  let structdef = [C.cedecl|struct $id:sname { int *references; $ty:rm mem; };|]
+  let structdef = [C.cedecl|struct $id:sname { int *references; $ty:rm mem; typename int64_t size; };|]
+      peakdef = [C.cedecl|typename int64_t $id:peakname = 0;|]
+      usagedef = [C.cedecl|typename int64_t $id:usagename = 0;|]
 
   -- Unreferencing a memory block consists of decreasing its reference
   -- count and freeing the corresponding memory if the count reaches
@@ -350,10 +352,19 @@ defineMemorySpace space = do
   let unrefdef = [C.cedecl|static void $id:(fatMemUnRef space) ($ty:mty *block) {
   if (block->references != NULL) {
     *(block->references) -= 1;
+    if (detail_memory) {
+      fprintf(stderr, $string:("Unreferencing block in " ++ spacedesc ++ ": %d references remaining.\n"),
+              *(block->references));
+    }
     if (*(block->references) == 0) {
+      $id:usagename -= block->size;
       $items:free
       free(block->references);
       block->references = NULL;
+      if (detail_memory) {
+        fprintf(stderr, "%ld bytes freed (now allocated: %ld bytes)\n",
+                block->size, $id:usagename);
+      }
     }
   }
 }|]
@@ -371,6 +382,19 @@ defineMemorySpace space = do
   $items:alloc
   block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
+  block->size = size;
+  $id:usagename += size;
+  if (detail_memory) {
+    fprintf(stderr, $string:("Allocated %d bytes in " ++ spacedesc ++ " (now allocated: %ld bytes)"), size, $id:usagename);
+  }
+  if ($id:usagename > $id:peakname) {
+    $id:peakname = $id:usagename;
+    if (detail_memory) {
+      fprintf(stderr, " (new peak).\n", $id:peakname);
+    }
+  } else if (detail_memory) {
+    fprintf(stderr, ".\n");
+  }
   }|]
 
   -- Memory setting - unreference the destination and increase the
@@ -382,12 +406,17 @@ defineMemorySpace space = do
 }
 |]
 
-  return [structdef, unrefdef, allocdef, setdef]
+  return [peakdef, usagedef, structdef, unrefdef, allocdef, setdef]
   where mty = fatMemType space
-        sname = case space of
-          DefaultSpace -> "memblock"
-          Space sid    -> "memblock_" ++ sid
-
+        (peakname, usagename, sname, spacedesc) = case space of
+          DefaultSpace -> ("peak_mem_usage_default",
+                           "cur_mem_usage_default",
+                            "memblock",
+                            "default space")
+          Space sid    -> ("peak_mem_usage_" ++ sid,
+                           "cur_mem_usage_" ++ sid,
+                           "memblock_" ++ sid,
+                           "space '" ++ sid ++ "'")
 declMem :: VName -> Space -> CompilerM op s ()
 declMem name space = do
   ty <- memToCType space
@@ -717,6 +746,11 @@ benchmarkOptions =
             , optionArgument = RequiredArgument
             , optionAction = set_num_runs
             }
+   , Option { optionLongName = "memory-reporting"
+            , optionShortName = Just 'm'
+            , optionArgument = NoArgument
+            , optionAction = [C.cstm|detail_memory = 1;|]
+            }
    ]
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
@@ -763,6 +797,8 @@ $esc:panic_h
 $esc:timing_h
 
 $edecls:decls
+
+static int detail_memory = 0;
 
 $edecls:memtypes
 
