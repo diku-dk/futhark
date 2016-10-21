@@ -1549,7 +1549,7 @@ checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
   | length params == length args = do
       let params_with_ts = zip params $ map (Inferred . (`setAliases` mempty) . argType) args
       maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
-      (params', body') <- bindingPatterns params_with_ts $ \params' -> do
+      (params', body') <- noUnique $ bindingPatterns params_with_ts $ \params' -> do
         body' <- checkFunBody (ID (nameFromString "<anonymous>", 0)) body maybe_ret' loc
         return (params', body')
       checkFuncall Nothing loc (map patternStructType params') args
