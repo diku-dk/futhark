@@ -450,6 +450,8 @@ typeOf (Write _cs _w lam _ivs as) =
         n = length lam_ts
         aws = map fst as
 
+-- | The "width" of a SOAC is the expected outer size of its array
+-- inputs.
 width :: SOAC lore -> SubExp
 width (Map _ w _ _) = w
 width (Reduce _ w _ _ _) = w

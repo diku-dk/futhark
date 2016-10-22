@@ -18,6 +18,7 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
 
+-- | The monad in which simplification rules are evaluated.
 newtype RuleM m a = RuleM (MaybeT m a)
   deriving (Functor, Applicative, Monad)
 
@@ -53,6 +54,11 @@ instance MonadBinder m => Alternative (RuleM m) where
     case x of Nothing -> m2
               Just x' -> do lift $ mapM_ addStm bnds
                             return x'
+
+-- | Execute a 'RuleM' action.  If succesful, returns the result and a
+-- list of new bindings.  Even if the action fail, there may still be
+-- a monadic effect - particularly, the name source may have been
+-- modified.
 simplify :: MonadBinder m =>
             RuleM m a
          -> m (Maybe (a, [Stm (Lore m)]))

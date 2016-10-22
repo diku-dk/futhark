@@ -65,7 +65,7 @@ data Kernel lore =
   | TileSize
   | SufficientParallelism SubExp -- ^ True if enough parallelism.
 
-  | Kernel String -- ^ Hint about what the kernel is.
+  | Kernel String -- Hint about what the kernel is.
     Certificates
     KernelSpace
     [Type]

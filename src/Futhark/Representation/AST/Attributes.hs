@@ -130,6 +130,7 @@ safeExp (Op op) = safeOp op
 subExpVars :: [SubExp] -> [VName]
 subExpVars = mapMaybe subExpVar
 
+-- | If the 'SubExp' is a 'Var' return the variable name.
 subExpVar :: SubExp -> Maybe VName
 subExpVar (Var v)    = Just v
 subExpVar Constant{} = Nothing
@@ -139,6 +140,7 @@ subExpVar Constant{} = Nothing
 shapeVars :: Shape -> [VName]
 shapeVars = subExpVars . shapeDims
 
+-- | A type class for operations.
 class (Eq op, Ord op, Show op,
        TypedOp op,
        Rename op,

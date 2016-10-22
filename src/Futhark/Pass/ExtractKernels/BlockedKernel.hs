@@ -5,16 +5,11 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , blockedReductionStream
        , blockedMap
        , blockedScan
-       , blockedKernelSize
-
-       , chunkLambda
 
        , mapKernel
        , mapKernelFromBody
        , KernelInput(..)
        , mapKernelSkeleton
-
-       , newKernelSpace
        )
        where
 
