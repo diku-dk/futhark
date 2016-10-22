@@ -335,7 +335,7 @@ rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True  e = [C.cexp|$exp:e.mem|]
 rawMem' False e = [C.cexp|$exp:e|]
 
-defineMemorySpace :: Space -> CompilerM op s ([C.Definition], C.Stm)
+defineMemorySpace :: Space -> CompilerM op s ([C.Definition], C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
   let structdef = [C.cedecl|struct $id:sname { int *references; $ty:rm mem; typename int64_t size; };|]
@@ -407,8 +407,8 @@ defineMemorySpace space = do
 |]
 
   return ([peakdef, usagedef, structdef, unrefdef, allocdef, setdef],
-          [C.cstm|fprintf(stderr, $string:("Peak memory usage for " ++ spacedesc ++ ": %ld bytes.\n"),
-                          $id:peakname);|])
+          [C.citem|fprintf(stderr, $string:("Peak memory usage for " ++ spacedesc ++ ": %ld bytes.\n"),
+                           $id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
           DefaultSpace -> ("peak_mem_usage_default",
@@ -862,7 +862,7 @@ int main(int argc, char** argv) {
   }
   $items:post_main_items
   if (detail_memory) {
-    $stms:memreport
+    $items:memreport
   }
   return 0;
 }
