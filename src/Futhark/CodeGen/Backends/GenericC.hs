@@ -335,7 +335,7 @@ rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True  e = [C.cexp|$exp:e.mem|]
 rawMem' False e = [C.cexp|$exp:e|]
 
-defineMemorySpace :: Space -> CompilerM op s [C.Definition]
+defineMemorySpace :: Space -> CompilerM op s ([C.Definition], C.Stm)
 defineMemorySpace space = do
   rm <- rawMemCType space
   let structdef = [C.cedecl|struct $id:sname { int *references; $ty:rm mem; typename int64_t size; };|]
@@ -406,7 +406,9 @@ defineMemorySpace space = do
 }
 |]
 
-  return [peakdef, usagedef, structdef, unrefdef, allocdef, setdef]
+  return ([peakdef, usagedef, structdef, unrefdef, allocdef, setdef],
+          [C.cstm|fprintf(stderr, $string:("Peak memory usage for " ++ spacedesc ++ ": %ld bytes.\n"),
+                          $id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
           DefaultSpace -> ("peak_mem_usage_default",
@@ -778,7 +780,7 @@ compileProg :: MonadFreshNames m =>
             -> m String
 compileProg ops userstate spaces decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
-  let ((memtypes, prototypes, definitions,
+  let ((memtypes, memreport, prototypes, definitions,
         (main_pre, main, main_post, free_out)), endstate) =
         runCompilerM prog ops src userstate compileProg'
   return $ pretty [C.cunit|
@@ -854,10 +856,13 @@ int main(int argc, char** argv) {
     }
   }
   $items:main_post
-  $items:post_main_items
   $items:free_out
   if (runtime_file != NULL) {
     fclose(runtime_file);
+  }
+  $items:post_main_items
+  if (detail_memory) {
+    $stms:memreport
   }
   return 0;
 }
@@ -869,8 +874,8 @@ int main(int argc, char** argv) {
           main <- case lookup mainname funs of
                     Nothing   -> fail "GenericC.compileProg: No main function"
                     Just func -> mainCall pre_timing mainname func
-          memtypes <- concat <$> mapM defineMemorySpace spaces
-          return (memtypes,  prototypes, definitions, main)
+          (memtypes, memreport) <- unzip <$> mapM defineMemorySpace spaces
+          return (concat memtypes, memreport, prototypes, definitions, main)
         funcToDef func = C.FuncDef func loc
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l
