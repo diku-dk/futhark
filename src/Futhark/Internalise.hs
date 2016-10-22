@@ -189,7 +189,7 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
             return $ I.BasicOp $ I.ArrayLit ks' rt
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
 
-internaliseExp desc (E.Empty (TypeDecl _(Info et)) loc) = do
+internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et
   let ts' = map (fromDecl . modifyArrayShape extToZero) ts
   letSubExps desc $ map (I.BasicOp . I.ArrayLit []) ts'
