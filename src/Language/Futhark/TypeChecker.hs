@@ -302,6 +302,8 @@ initialScope = Scope  initialVtable
         addBuiltinF (name, (t, ts)) =
           (name, BoundF (Prim t, map Prim ts))
 
+-- | The warnings produced by the type checker.  The 'Show' instance
+-- produces a human-readable description.
 newtype Warnings = Warnings [(SrcLoc, String)]
 
 instance Monoid Warnings where

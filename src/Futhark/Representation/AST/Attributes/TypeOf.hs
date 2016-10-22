@@ -197,6 +197,8 @@ loopExtType ctx val =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType val
   where inaccessible = HS.fromList $ map identName ctx
 
+-- | Any operation must define an instance of this class, which
+-- describes the type of the operation (at the value level).
 class TypedOp op where
   opType :: HasScope t m => op -> m [ExtType]
 
