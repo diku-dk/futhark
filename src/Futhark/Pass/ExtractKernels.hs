@@ -5,9 +5,10 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
--- | Extract kernels.
+-- | Kernel extraction.
+--
 -- In the following, I will use the term "width" to denote the amount
--- of immediate parallelism in a map - that is, the row size of the
+-- of immediate parallelism in a map - that is, the outer size of the
 -- array(s) being used as input.
 --
 -- = Basic Idea
@@ -97,8 +98,8 @@
 --
 -- == Balancing by Loop Interchange
 --
--- This is not ideal, as we cannot flatten the @map-loop@ nest, and we
--- are thus limited in the amount of parallelism available.
+-- The above is not ideal, as we cannot flatten the @map-loop@ nest,
+-- and we are thus limited in the amount of parallelism available.
 --
 -- But assume now that the width of @map(g)@ is invariant to the outer
 -- loop.  Then if possible, we can interchange @map(f)@ and @map(g)@,
@@ -123,7 +124,7 @@
 --
 -- = Redomap
 --
--- Redomap is handled much like map.  Distributed loops are
+-- Redomap can be handled much like map.  Distributed loops are
 -- distributed as maps, with the parameters corresponding to the
 -- neutral elements added to their bodies.  The remaining loop will
 -- remain a redomap.  Example:
@@ -148,6 +149,12 @@
 --           map(g),
 --         e,a,b)
 -- @
+--
+-- Note that there may be further kernel extraction opportunities
+-- inside the @map(f)@.  The downside of this approach is that the
+-- intermediate array (@b@ above) must be written to main memory.  An
+-- often better approach is to just turn the entire @redomap@ into a
+-- single kernel.
 --
 module Futhark.Pass.ExtractKernels
        (extractKernels)
