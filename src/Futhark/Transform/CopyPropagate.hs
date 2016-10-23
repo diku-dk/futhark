@@ -7,6 +7,10 @@ module Futhark.Transform.CopyPropagate
        (copyPropagateInStms)
        where
 
+import Data.Monoid
+
+import Prelude
+
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Optimise.Simplifier.Engine
