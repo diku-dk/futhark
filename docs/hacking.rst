@@ -14,7 +14,7 @@ bugs are bugs too.
 .. _`Github page`: https://github.com/HIPERFIT/futhark
 
 Debugging Internal Type Errors
-==============================
+------------------------------
 
 The Futhark compiler uses a typed core language, and the type checker
 is run after every pass.  If a given pass produces a program with
@@ -27,7 +27,7 @@ pass fails.  The ``-v`` option is also useful when the compiler itself
 crashes, as you can at least tell where in the pipeline it got to.
 
 Checking Generated Code
-=======================
+-----------------------
 
 Hacking on the compiler will often involve inspecting the quality of
 the generated code.  The recommended way to do this is to use
@@ -57,7 +57,7 @@ generated executable.
     runtime.
 
 Using the ``futhark`` Tool
-==========================
+--------------------------
 
 For debugging specific compiler passes, there is a tool simply called
 :ref:`futhark(1)`, which allows you to tailor your own compilation
