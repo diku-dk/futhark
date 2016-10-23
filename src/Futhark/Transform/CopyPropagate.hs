@@ -17,4 +17,4 @@ copyPropagateInStms :: (MonadFreshNames m, SimplifiableLore lore, HasScope lore 
                     -> [Stm lore]
                     -> m [Stm lore]
 copyPropagateInStms simpl =
-  simplifyStmsWithRules simpl ([], []) noExtraHoistBlockers
+  simplifyStmsWithRules simpl mempty noExtraHoistBlockers

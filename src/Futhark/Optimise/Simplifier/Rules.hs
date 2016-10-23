@@ -5,8 +5,6 @@
 -- simplifier.
 module Futhark.Optimise.Simplifier.Rules
   ( standardRules
-
-  , IndexResult (..)
   )
 where
 
@@ -75,8 +73,11 @@ bottomUpRules = [ removeRedundantMergeVariables
                 , simplifyIndex
                 ]
 
+-- | A set of standard simplification rules.  These assume pure
+-- functional semantics, and so probably should not be applied after
+-- memory block merging.
 standardRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
-standardRules = (topDownRules, bottomUpRules)
+standardRules = RuleBook topDownRules bottomUpRules
 
 -- This next one is tricky - it's easy enough to determine that some
 -- loop result is not used after the loop, but here, we must also make

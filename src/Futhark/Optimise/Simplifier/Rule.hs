@@ -13,11 +13,13 @@ module Futhark.Optimise.Simplifier.Rule
        , TopDownRules
        , BottomUpRule
        , BottomUpRules
-       , RuleBook
+       , RuleBook (..)
          -- * Applying rules
        , topDownSimplifyStm
        , bottomUpSimplifyStm
        ) where
+
+import Data.Monoid
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -25,6 +27,8 @@ import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Representation.AST
 import Futhark.Binder
 
+-- | A simplification rule takes some argument and a statement, and
+-- tries to simplify the statement.
 type SimplificationRule m a = a -> Stm (Lore m) -> RuleM m ()
 
 -- | A rule applied during top-down traversal of the program.  Takes a
@@ -42,7 +46,13 @@ type BottomUpRule m = SimplificationRule m (ST.SymbolTable (Lore m), UT.UsageTab
 type BottomUpRules m = [BottomUpRule m]
 
 -- | A collection of both top-down and bottom-up rules.
-type RuleBook m = (TopDownRules m, BottomUpRules m)
+data RuleBook m = RuleBook { bookTopDownRules :: TopDownRules m
+                           , bookBottomUpRules :: BottomUpRules m
+                           }
+
+instance Monoid (RuleBook m) where
+  mempty = RuleBook mempty mempty
+  RuleBook ts1 bs1 `mappend` RuleBook ts2 bs2 = RuleBook (ts1<>ts2) (bs1<>bs2)
 
 -- | @simplifyStm lookup bnd@ performs simplification of the
 -- binding @bnd@.  If simplification is possible, a replacement list
@@ -53,7 +63,7 @@ topDownSimplifyStm :: MonadBinder m =>
                    -> ST.SymbolTable (Lore m)
                    -> Stm (Lore m)
                    -> m (Maybe [Stm (Lore m)])
-topDownSimplifyStm = applyRules . fst
+topDownSimplifyStm = applyRules . bookTopDownRules
 
 -- | @simplifyStm uses bnd@ performs simplification of the binding
 -- @bnd@.  If simplification is possible, a replacement list of
@@ -65,7 +75,7 @@ bottomUpSimplifyStm :: MonadBinder m =>
                     -> (ST.SymbolTable (Lore m), UT.UsageTable)
                     -> Stm (Lore m)
                     -> m (Maybe [Stm (Lore m)])
-bottomUpSimplifyStm = applyRules . snd
+bottomUpSimplifyStm = applyRules . bookBottomUpRules
 
 applyRules :: MonadBinder m =>
               [SimplificationRule m a] -> a -> Stm (Lore m)

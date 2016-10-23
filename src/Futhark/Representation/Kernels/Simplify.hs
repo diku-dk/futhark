@@ -251,10 +251,8 @@ instance Engine.Simplifiable WhichThreads where
 kernelRules :: (MonadBinder m,
                 LocalScope (Lore m) m,
                 Lore m ~ Wise Kernels) => RuleBook m
-kernelRules = (std_td_rules <>
-               [ removeInvariantKernelResults ],
-               std_bu_rules <> [distributeKernelResults])
-  where (std_td_rules, std_bu_rules) = standardRules
+kernelRules = standardRules <>
+              RuleBook [ removeInvariantKernelResults ] [distributeKernelResults]
 
 -- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
 -- instead.
@@ -421,8 +419,5 @@ distributeKernelResults _ _ = cannotSimplify
 inKernelRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Lore m ~ Wise InKernel) => RuleBook m
-inKernelRules = (std_td_rules <>
-                 [fuseSplitIota,
-                  fuseStreamIota],
-                 std_bu_rules)
-  where (std_td_rules, std_bu_rules) = standardRules
+inKernelRules = standardRules <>
+                RuleBook [fuseSplitIota, fuseStreamIota] []

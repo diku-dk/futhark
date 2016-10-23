@@ -93,10 +93,8 @@ callKernelRules :: (MonadBinder m,
                         Lore m ~ Wise lore,
                         LocalScope (Wise lore) m,
                         ExplicitMemorish lore) => RuleBook m
-callKernelRules = (std_td_rules <> [ copyCopyToCopy
-                                   ],
-                   std_bu_rules <> [])
-  where (std_td_rules, std_bu_rules) = standardRules
+callKernelRules = standardRules <>
+                  RuleBook [copyCopyToCopy] []
 
 inKernelRules :: (MonadBinder m,
                         Op (Lore m) ~ MemOp inner,
@@ -104,11 +102,8 @@ inKernelRules :: (MonadBinder m,
                         Lore m ~ Wise lore,
                         LocalScope (Wise lore) m,
                         ExplicitMemorish lore) => RuleBook m
-inKernelRules = (std_td_rules <> [ copyCopyToCopy,
-                                   unExistentialiseMemory
-                                 ],
-                 std_bu_rules <> [])
-  where (std_td_rules, std_bu_rules) = standardRules
+inKernelRules = standardRules <>
+                RuleBook [copyCopyToCopy, unExistentialiseMemory] []
 
 -- | If a branch is returning some existential memory, but we know the
 -- size of the corresponding array non-existentially, then we can

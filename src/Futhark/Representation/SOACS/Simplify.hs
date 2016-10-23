@@ -157,9 +157,7 @@ simplifySOAC (Write cs len lam ivs as) = do
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,
               Op (Lore m) ~ SOAC (Lore m)) => RuleBook m
-soacRules = (std_td_rules <> topDownRules,
-             std_bu_rules <> bottomUpRules)
-  where (std_td_rules, std_bu_rules) = standardRules
+soacRules = standardRules <> RuleBook topDownRules bottomUpRules
 
 topDownRules :: (MonadBinder m,
                  LocalScope (Lore m) m,
