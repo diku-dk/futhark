@@ -45,7 +45,7 @@ simpleInKernel = simplifiable simplifyKernelExp
 
 simplifyExplicitMemory :: MonadFreshNames m => Prog ExplicitMemory -> m (Prog ExplicitMemory)
 simplifyExplicitMemory =
-  Simplifier.simplifyProgWithRules simpleExplicitMemory explicitMemoryRules blockers
+  Simplifier.simplifyProgWithRules simpleExplicitMemory callKernelRules blockers
 
 isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isAlloc _ (Let _ _ (Op Alloc{})) = True
@@ -75,7 +75,7 @@ isAlloc0 (Let _ _ (Op Alloc{})) = True
 isAlloc0 _                      = False
 
 inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
-inKernelEnv = Engine.emptyEnv explicitMemoryRules blockers
+inKernelEnv = Engine.emptyEnv inKernelRules blockers
 
 blockers ::  (ExplicitMemorish lore, Op lore ~ MemOp op) =>
              Simplifier.HoistBlockers (Engine.SimpleM lore)
@@ -87,16 +87,27 @@ blockers = Engine.HoistBlockers {
   }
 
 
-explicitMemoryRules :: (MonadBinder m,
+callKernelRules :: (MonadBinder m,
                         Op (Lore m) ~ MemOp inner,
                         LetAttr (Lore m) ~ (VarWisdom, MemBound u),
                         Lore m ~ Wise lore,
                         LocalScope (Wise lore) m,
                         ExplicitMemorish lore) => RuleBook m
-explicitMemoryRules = (std_td_rules <> [ unExistentialiseMemory
-                                       , copyCopyToCopy
-                                       ],
-                       std_bu_rules <> [])
+callKernelRules = (std_td_rules <> [ copyCopyToCopy
+                                   ],
+                   std_bu_rules <> [])
+  where (std_td_rules, std_bu_rules) = standardRules
+
+inKernelRules :: (MonadBinder m,
+                        Op (Lore m) ~ MemOp inner,
+                        LetAttr (Lore m) ~ (VarWisdom, MemBound u),
+                        Lore m ~ Wise lore,
+                        LocalScope (Wise lore) m,
+                        ExplicitMemorish lore) => RuleBook m
+inKernelRules = (std_td_rules <> [ copyCopyToCopy,
+                                   unExistentialiseMemory
+                                 ],
+                 std_bu_rules <> [])
   where (std_td_rules, std_bu_rules) = standardRules
 
 -- | If a branch is returning some existential memory, but we know the
