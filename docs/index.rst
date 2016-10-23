@@ -26,11 +26,13 @@ our `publications`_.
    language-overview.rst
    language-reference.rst
    c-porting-guide.rst
+   hacking.rst
 
 .. toctree::
    :caption: Manual Pages
    :maxdepth: 1
 
+   man/futhark.rst
    man/futhark-c.rst
    man/futhark-opencl.rst
    man/futhark-py.rst
