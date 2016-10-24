@@ -13,6 +13,33 @@ bugs are bugs too.
 .. _`documentation of the compiler internals`: https://futhark-lang.org/haddock/
 .. _`Github page`: https://github.com/HIPERFIT/futhark
 
+The Futhark compiler is built using `Stack`_.  It's a good idea to
+familiarise yourself with how it works.  As a starting point, here are
+a few hints:
+
+  * To test with different GHC versions, point the ``STACK_YAML``
+    environment variable at another file.  For example, to build using
+    the Stack LTS 1.15 snapshot (GHC 7.8), we would run::
+
+      $ STACK_YAML=stack-lts-1.15.yaml stack build
+
+  * When testing, pass ``--fast`` to ``stack`` to disable the GHC
+    optimiser.  This speeds up builds considerably (although it still
+    takes a while).  The resulting Futhark compiler will run slower,
+    but it is not something you will notice for small test programs.
+
+  * When debugging, pass ``--profile`` to ``stack``.  This will build
+    the Futhark compiler with debugging information (not just
+    profiling).  In particular, hard crashes will print a stack trace.
+    You can also get actual profiling information by passing
+    ``+RTS -pprof-all -RTS`` to the Futhark compiler.  This asks the
+    Haskell runtime to print profiling information to a file.  For
+    more information, see the `Profiling`_ chapter in the GHC User
+    Guide.
+
+.. _`stack`: https://docs.haskellstack.org/en/stable/README/
+.. _`Profiling`: https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/profiling.html
+
 Debugging Internal Type Errors
 ------------------------------
 
