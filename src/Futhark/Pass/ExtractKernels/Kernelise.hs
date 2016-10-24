@@ -6,6 +6,7 @@ module Futhark.Pass.ExtractKernels.Kernelise
        ( transformStm
        , transformStms
        , transformBody
+       , transformLambda
        , mapIsh
        )
        where
@@ -97,6 +98,16 @@ transformBody :: Transformer m => Body -> m (Out.Body Out.InKernel)
 transformBody (Body attr bnds res) = do
   stms <- collectStms_ $ transformStms bnds
   return $ Out.Body attr stms res
+
+transformLambda :: (MonadFreshNames m,
+                    HasScope lore m,
+                    SameScope lore Out.InKernel) =>
+                   Lambda -> m (Out.Lambda Out.InKernel)
+transformLambda (Lambda params body rettype) = do
+  body' <- runBodyBinder $
+           localScope (scopeOfLParams params) $
+           transformBody body
+  return $ Lambda params body' rettype
 
 groupStreamMapAccumL :: Transformer m =>
                         [Out.PatElem Out.InKernel]

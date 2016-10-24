@@ -274,14 +274,14 @@ transformStm (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
 transformStm (Let pat () (Op (Scanomap cs w lam1 lam2 nes arrs))) = do
-  lam1_sequential <- FOT.transformLambda lam1
-  lam2_sequential <- FOT.transformLambda lam2
+  lam1_sequential <- Kernelise.transformLambda lam1
+  lam2_sequential <- Kernelise.transformLambda lam2
   runBinder_ $ blockedScan pat cs w lam1_sequential lam2_sequential (intConst Int32 1) [] [] nes arrs
 
 transformStm (Let pat () (Op (Redomap cs w comm lam1 lam2 nes arrs))) =
   if sequentialiseRedomapBody then do
-    lam1_sequential <- FOT.transformLambda lam1
-    lam2_sequential <- FOT.transformLambda lam2
+    lam1_sequential <- Kernelise.transformLambda lam1
+    lam2_sequential <- Kernelise.transformLambda lam2
     blockedReduction pat cs w comm lam1_sequential lam2_sequential nes arrs
   else do
     (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, comm, lam1, lam2, nes, arrs)
@@ -295,7 +295,7 @@ transformStm (Let res_pat () (Op (Reduce cs w comm red_fun red_input)))
       transformStms bnds
 
 transformStm (Let pat () (Op (Reduce cs w comm red_fun red_input))) = do
-  red_fun_sequential <- FOT.transformLambda red_fun
+  red_fun_sequential <- Kernelise.transformLambda red_fun
   red_fun_sequential' <- renameLambda red_fun_sequential
   blockedReduction pat cs w comm red_fun_sequential' red_fun_sequential nes arrs
   where (nes, arrs) = unzip red_input
@@ -306,7 +306,7 @@ transformStm (Let res_pat () (Op (Scan cs w scan_fun scan_input)))
       transformStms =<< (snd <$> runBinderT do_iswim types)
 
 transformStm (Let pat () (Op (Scan cs w fun input))) = do
-  fun_sequential <- FOT.transformLambda fun
+  fun_sequential <- Kernelise.transformLambda fun
   fun_sequential_renamed <- renameLambda fun_sequential
   runBinder_ $
     blockedScan pat cs w fun_sequential fun_sequential_renamed (intConst Int32 1) [] [] nes arrs
@@ -322,7 +322,7 @@ transformStm (Let pat () (Op (Stream cs w
   -- Split into a chunked map and a reduction, with the latter
   -- distributed.
 
-  fold_fun_sequential <- FOT.transformLambda fold_fun'
+  fold_fun_sequential <- Kernelise.transformLambda fold_fun'
 
   let (red_pat_elems, concat_pat_elems) =
         splitAt (length nes) $ patternValueElements pat
@@ -342,8 +342,8 @@ transformStm (Let pat () (Op (Stream cs w
                                   (RedLike _ comm red_fun nes) fold_fun arrs)))
   | Just fold_fun' <- extLambdaToLambda fold_fun = do
   -- Generate a kernel immediately.
-  red_fun_sequential <- FOT.transformLambda red_fun
-  fold_fun_sequential <- FOT.transformLambda fold_fun'
+  red_fun_sequential <- Kernelise.transformLambda red_fun
+  fold_fun_sequential <- Kernelise.transformLambda fold_fun'
   blockedReductionStream pat cs w comm red_fun_sequential fold_fun_sequential nes arrs
 
 transformStm (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs))) = do
@@ -361,7 +361,7 @@ transformStm (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
 transformStm (Let pat () (Op (Write cs w lam ivs as))) = runBinder_ $ do
-  lam' <- FOT.transformLambda lam
+  lam' <- Kernelise.transformLambda lam
   write_i <- newVName "write_i"
   let (i_res, v_res) = splitAt (length as) $ bodyResult $ lambdaBody lam'
       kstms = bodyStms $ lambdaBody lam'
@@ -406,9 +406,9 @@ distributeMap pat (MapLoop cs w lam arrs) = do
 
     seq_bnds <- do
       soactypes <- asksScope scopeForSOACs
-      (seq_lam, _) <- runBinderT (FOT.transformLambda lam) soactypes
+      (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
       fmap (postKernelsStms . snd) $ runKernelM env $
-        distribute =<< distributeMapBodyStms acc (bodyStms $ lambdaBody seq_lam)
+        distribute =<< addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
     seq_body <- renameBody $ mkBody seq_bnds res
     kernelAlternatives w pat seq_body par_body
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
@@ -618,7 +618,7 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
         (par_bnds, par, sequentialised_kernel) <- localScope extra_scope $ do
           sequentialised_map_body <-
             localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
-            mapM_ FOT.transformStmRecursively $ bodyStms $ lambdaBody lam
+            Kernelise.transformStms $ bodyStms $ lambdaBody lam
           let kbody = KernelBody () sequentialised_map_body $
                       map (ThreadsReturn ThreadsInSpace) lam_res
           constructKernel nest' kbody
@@ -729,8 +729,8 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res -> do
-          lam' <- FOT.transformLambda lam
-          fold_lam' <- FOT.transformLambda fold_lam
+          lam' <- Kernelise.transformLambda lam
+          fold_lam' <- Kernelise.transformLambda fold_lam
           localScope (typeEnvFromKernelAcc acc') $
             segmentedScanomapKernel nest perm cs w lam' fold_lam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
@@ -747,8 +747,8 @@ maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs)))
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
           localScope (typeEnvFromKernelAcc acc') $ do
-          lam' <- FOT.transformLambda lam
-          foldlam' <- FOT.transformLambda foldlam
+          lam' <- Kernelise.transformLambda lam
+          foldlam' <- Kernelise.transformLambda foldlam
           regularSegmentedRedomapKernel nest perm cs w comm lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
@@ -763,7 +763,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
           localScope (typeEnvFromKernelAcc acc') $ do
           let (nes, arrs) = unzip input
-          lam' <- FOT.transformLambda lam
+          lam' <- Kernelise.transformLambda lam
           foldlam' <- renameLambda lam'
           regularSegmentedRedomapKernel nest perm cs w comm lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
