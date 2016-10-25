@@ -319,7 +319,15 @@ lookupSubExp name vtable = do
     _                  -> Nothing
 
 lookupScalExp :: VName -> SymbolTable lore -> Maybe ScalExp
-lookupScalExp name vtable = asScalExp =<< lookup name vtable
+lookupScalExp name vtable =
+  case (asScalExp =<< lookup name vtable, lookupRange name vtable) of
+    -- If we know the lower and upper bound, and these are the
+    -- same, then we morally know the ScalExp.
+    (_, (Just lower, Just upper))
+      | lower == upper, scalExpType lower == int32 ->
+          Just $ expandScalExp (`lookupScalExp` vtable) lower
+    (Just se, _) -> Just se
+    _ -> Nothing
 
 lookupValue :: VName -> SymbolTable lore -> Maybe Value
 lookupValue name vtable = case lookupSubExp name vtable of
@@ -404,9 +412,9 @@ defBndEntry vtable patElem range bnd =
           (simplifyBound lower,
            simplifyBound upper)
 
-        simplifyBound (Just se) =
+        simplifyBound (Just se) | scalExpType se == int32 =
           Just $ AS.simplify se ranges
-        simplifyBound Nothing =
+        simplifyBound _ =
           Nothing
 
 bindingEntries :: Ranged lore =>
