@@ -32,11 +32,13 @@ type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 -- | Prettyprint a 'RangesRep'.  Do not rely on the format of this
 -- string.  Does not include the loop nesting depth information.
 ppRangesRep :: RangesRep -> String
-ppRangesRep = unlines . map ppRange . HM.toList
+ppRangesRep = unlines . sort . map ppRange . HM.toList
   where ppRange (name, (_, lower, upper)) =
           pretty name ++ ": " ++
-          "[" ++ ppBound lower ++ ", " ++
-          ppBound upper ++ "]"
+          if lower == upper
+          then "== " ++ ppBound lower
+          else "[" ++ ppBound lower ++ ", " ++
+               ppBound upper ++ "]"
         ppBound Nothing = "?"
         ppBound (Just se) = pretty se
 
