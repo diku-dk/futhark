@@ -777,14 +777,14 @@ evaluateBranch _ _ = cannotSimplify
 -- especially when the branches have bindings, or return more than one
 -- value.
 simplifyBoolBranch :: MonadBinder m => TopDownRule m
--- if c then True else False == c
+-- if c then True else v == c || v
 simplifyBoolBranch _
   (Let pat _
    (If cond
     (Body _ [] [Constant (BoolValue True)])
-    (Body _ [] [Constant (BoolValue False)])
-    _)) =
-  letBind_ pat $ BasicOp $ SubExp cond
+    (Body _ [] [se])
+    [Prim Bool])) =
+  letBind_ pat $ BasicOp $ BinOp LogOr cond se
 -- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
   | Body _ [] [tres] <- tb,
