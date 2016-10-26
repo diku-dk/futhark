@@ -883,7 +883,7 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
           let loop =
                 case w of
                   Var w_var | Just w_bound <- lookup w_var $ kernelStreamed constants,
-                              w_bound /= Imp.ConstSize 1->
+                              w_bound /= Imp.ConstSize 1 ->
                               -- Candidate for unrolling, so generate two loops.
                               Imp.If (CmpOpExp (CmpEq int32) w' (Imp.sizeToExp w_bound))
                               (Imp.For block_offset Int32 (Imp.sizeToExp w_bound) body'')
@@ -914,8 +914,10 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
                 block_offset' + max_block_size
 
           ImpGen.emit $
-            Imp.While not_at_end $
-            set_block_size <> body' <> increase_offset
+            if w' == max_block_size
+            then Imp.SetScalar block_size w' <> body'
+            else Imp.While not_at_end $
+                 set_block_size <> body' <> increase_offset
 
     zipWithM_ ImpGen.compileSubExpTo final_targets $
       map (Var . paramName) acc_params
