@@ -62,7 +62,7 @@ command::
   futhark-pyopencl --library futlib.fut
 
 This will create a file ``futlib.py``, which contains Python code that
-definites a class named ``futlib``.  This class defines one method for
+defines a class named ``futlib``.  This class defines one method for
 each entry point function (see :ref:`entry-points`) in the Futhark
 program.  After the class has been instantiated, these methods can be
 invoked to run the corresponding Futhark function.  The reason for why
