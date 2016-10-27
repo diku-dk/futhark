@@ -913,11 +913,19 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
                 Imp.SetScalar block_offset $
                 block_offset' + max_block_size
 
+          -- Three cases to consider for simpler generated code based
+          -- on max block size: (0) if full input size, do not
+          -- generate a loop; (1) if one, generate for-loop (2)
+          -- otherwise, generate chunked while-loop.
           ImpGen.emit $
-            if w' == max_block_size
-            then Imp.SetScalar block_size w' <> body'
-            else Imp.While not_at_end $
-                 set_block_size <> body' <> increase_offset
+            if max_block_size == w' then
+              Imp.SetScalar block_size w' <> body'
+            else if max_block_size == Imp.ValueExp (value (1::Int32)) then
+                   Imp.SetScalar block_size w' <>
+                   Imp.For block_offset Int32 w' body'
+                 else
+                   Imp.While not_at_end $
+                   set_block_size <> body' <> increase_offset
 
     zipWithM_ ImpGen.compileSubExpTo final_targets $
       map (Var . paramName) acc_params
