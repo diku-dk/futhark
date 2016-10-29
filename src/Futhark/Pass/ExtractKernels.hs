@@ -581,6 +581,16 @@ bodyContainsMap = any (isMap . bindingExp) . bodyStms
 lambdaContainsParallelism :: Lambda -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
+containsNestedParallelism :: Lambda -> Bool
+containsNestedParallelism lam =
+  any (parallel . bindingExp) lam_bnds &&
+  not (perfectMapNest lam_bnds)
+  where lam_bnds = bodyStms $ lambdaBody lam
+        parallel Op{} = True
+        parallel _    = False
+        perfectMapNest [Let _ _ (Op Map{})] = True
+        perfectMapNest _                    = False
+
 -- Enable if you want the cool new versioned code.  Beware: may be
 -- slower in practice.  Caveat emptor (and you are the emptor).
 versionedCode :: Bool
@@ -592,11 +602,11 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
   | unbalancedLambda lam, lambdaContainsParallelism lam =
       addStmToKernel (Let pat () $ mapLoopExp maploop) acc
   | not versionedCode || not (containsNestedParallelism lam) =
-      distributeNormally def_acc
+      distributeNormally
   | otherwise =
-      distributeSingleStm acc bnd >>= \case
+      distributeSingleStm acc (Let pat () $ mapLoopExp maploop) >>= \case
       Nothing ->
-        distributeNormally def_acc
+        distributeNormally
       Just (post_kernels, _, nest, acc') -> do
         addKernels post_kernels
         -- The kernel can be distributed by itself, so now we can
@@ -614,10 +624,10 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
           distribute =<< leavingNesting maploop =<< distribute =<<
           distributeMapBodyStms par_acc lam_bnds
 
-        (par_bnds, par, sequentialised_kernel) <- localScope extra_scope $ do
+        (parw_bnds, parw, sequentialised_kernel) <- localScope extra_scope $ do
           sequentialised_map_body <-
             localScope (scopeOfLParams (lambdaParams lam)) $ runBinder_ $
-            Kernelise.transformStms $ bodyStms $ lambdaBody lam
+            Kernelise.transformStms lam_bnds
           let kbody = KernelBody () sequentialised_map_body $
                       map (ThreadsReturn ThreadsInSpace) lam_res
           constructKernel nest' kbody
@@ -626,22 +636,23 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
             res' = map Var $ patternNames outer_pat
         seq_body <- renameBody $ mkBody [sequentialised_kernel] res'
         par_body <- renameBody $ mkBody (postKernelsStms distributed_kernels) res'
-        addKernel =<< kernelAlternatives par outer_pat seq_body par_body
-        addKernel par_bnds
+        addKernel =<< kernelAlternatives parw outer_pat seq_body par_body
+        addKernel parw_bnds
         return acc'
-      where bnd = Let pat () $ mapLoopExp maploop
-            lam_bnds = bodyStms $ lambdaBody lam
+      where lam_bnds = bodyStms $ lambdaBody lam
             lam_res = bodyResult $ lambdaBody lam
+
             def_acc = KernelAcc { kernelTargets = pushInnerTarget
                                   (pat, bodyResult $ lambdaBody lam) $
                                   kernelTargets acc
                                 , kernelStms = mempty
                                 }
-            distributeNormally acc' =
+
+            distributeNormally =
               distribute =<<
               leavingNesting maploop =<<
               mapNesting pat cs w lam arrs
-              (distribute =<< distributeMapBodyStms acc' lam_bnds)
+              (distribute =<< distributeMapBodyStms def_acc lam_bnds)
 
 leavingNesting :: MapLoop -> KernelAcc -> KernelM KernelAcc
 leavingNesting (MapLoop cs w lam arrs) acc =
@@ -976,16 +987,6 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
                 (patternValueElements pat) ret
 
     m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
-
-containsNestedParallelism :: Lambda -> Bool
-containsNestedParallelism lam =
-  any (parallel . bindingExp) lam_bnds &&
-  not (perfectMapNest lam_bnds)
-  where lam_bnds = bodyStms $ lambdaBody lam
-        parallel Op{} = True
-        parallel _    = False
-        perfectMapNest [Let _ _ (Op Map{})] = True
-        perfectMapNest _                    = False
 
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                       SubExp -> Out.Pattern Out.Kernels
