@@ -407,8 +407,8 @@ distributeMap pat (MapLoop cs w lam arrs) = do
     seq_bnds <- do
       soactypes <- asksScope scopeForSOACs
       (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
-      fmap (postKernelsStms . snd) $ runKernelM env $
-        distribute =<< addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
+      fmap (postKernelsStms . snd) $ runKernelM env $ distribute $
+        addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
     seq_body <- renameBody $ mkBody seq_bnds res
     kernelAlternatives w pat seq_body par_body
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
@@ -446,13 +446,12 @@ postKernelsStms (PostKernels kernels) = concatMap unPostKernel kernels
 typeEnvFromKernelAcc :: KernelAcc -> Scope Out.Kernels
 typeEnvFromKernelAcc = scopeOf . fst . outerTarget . kernelTargets
 
-addStmsToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-                   [InKernelStm] -> KernelAcc -> m KernelAcc
+addStmsToKernel :: [InKernelStm] -> KernelAcc -> KernelAcc
 addStmsToKernel stms acc =
-  return acc { kernelStms = stms <> kernelStms acc }
+  acc { kernelStms = stms <> kernelStms acc }
 
 addStmToKernel :: (LocalScope Out.Kernels m, MonadFreshNames m) =>
-                      Stm -> KernelAcc -> m KernelAcc
+                  Stm -> KernelAcc -> m KernelAcc
 addStmToKernel bnd acc = do
   stms <- runBinder_ $ Kernelise.transformStm bnd
   return acc { kernelStms = stms <> kernelStms acc }
@@ -661,7 +660,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
                filter ((`HS.member` used_in_body) . paramName . fst) $
                zip (lambdaParams lam) arrs
          stms <- runBinder_ $ Kernelise.mapIsh pat cs w used_params kbody used_arrs
-         addStmsToKernel stms acc' { kernelStms = [] }
+         return $ addStmsToKernel stms acc' { kernelStms = [] }
 
 distributeMapBodyStms :: KernelAcc -> [Stm] -> KernelM KernelAcc
 
