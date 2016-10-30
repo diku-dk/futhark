@@ -29,7 +29,7 @@ easy execution.  In general, when compiling file ``foo.fut``, the
 result will be written to a file ``foo`` (i.e. the extension will be
 stripped off).  This can be overridden using the ``-o`` option.
 
-When a Futhark program is run, execution starts at a the function
+When a Futhark program is run, execution starts at the function
 named ``main``.  If the program has no ``main`` function, the compiler
 will fail with an error.  If ``main`` takes any parameters, these will
 be read from standard input in Futhark syntax.  **Note:** Tuple value
