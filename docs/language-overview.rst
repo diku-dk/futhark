@@ -47,11 +47,9 @@ of the following form::
 
 A function must declare both its return type and the types of all its
 parameters.  All functions (except for inline anonymous functions; see
-below) are defined globally.  Futhark does not use type inference.
-Symbolic constants are not supported, although you can define a
-function that accepts an empty tuple as argument.  As a concrete
-example, here is the recursive definition of the factorial function in
-Futhark::
+below) are defined globally.  Futhark does not use type inference.  As
+a concrete example, here is the recursive definition of the factorial
+function in Futhark::
 
   fun fact(n: int): int =
     if n == 0 then 1
