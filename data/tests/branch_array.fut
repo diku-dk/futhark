@@ -3,9 +3,9 @@
 --
 -- ==
 --
--- input { True 3 }
+-- input { true 3 }
 -- output { [0,1,2] }
--- input { False 3 }
+-- input { false 3 }
 -- output { [1337,1337,1337] }
 
 fun f(a: [n]int): []int = a

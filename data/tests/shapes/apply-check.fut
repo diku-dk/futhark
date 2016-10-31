@@ -1,9 +1,9 @@
 -- Check that shape annotations are checked when calling a function.
 --
 -- ==
--- input { True [1,2] [3,4] }
+-- input { true [1,2] [3,4] }
 -- output { 4 }
--- input { True [1,2] [3] }
+-- input { true [1,2] [3] }
 -- error:
 
 -- Recursive to prevent inlining.

@@ -294,5 +294,5 @@ fun main (years: int): []f64 =
   let days = years*365
   let a = map (+1) (iota(days))
   let a = map f64 a
-  let a = map (fn (x: f64): (bool,f64,f64,f64)  => (True, 58.0 + 4.0 * x / f64(days), 65.0, x / 365.0)) a in
+  let a = map (fn (x: f64): (bool,f64,f64,f64)  => (true, 58.0 + 4.0 * x / f64(days), 65.0, x / 365.0)) a in
   blackscholes(a)

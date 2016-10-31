@@ -132,8 +132,8 @@
 
     <context id="boolean" style-ref="boolean">
       <prefix>(?&lt;![\w\.])</prefix>
-      <keyword>False</keyword>
-      <keyword>True</keyword>
+      <keyword>false</keyword>
+      <keyword>true</keyword>
     </context>
 
     <context id="float" style-ref="floating-point">

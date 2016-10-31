@@ -1,10 +1,10 @@
 -- ==
 -- input {
 --   [0, 1, -2, 5, 42]
---   [False, True, True, False, True]
+--   [false, true, true, false, true]
 -- }
 -- output {
---   [True, True, True]
+--   [true, true, true]
 --   [1, -2, 42]
 -- }
 fun main(xs1: []int, xs2: []bool): ([]bool,[]int) =

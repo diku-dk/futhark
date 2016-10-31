@@ -170,11 +170,11 @@ def read_float_trailer(f):
 
 def read_bool(f):
     skip_spaces(f)
-    if peek_char(f) == 'T':
-        parse_specific_string(f, 'True')
+    if peek_char(f) == 't':
+        parse_specific_string(f, 'true')
         return True
-    elif peek_char(f) == 'F':
-        parse_specific_string(f, 'False')
+    elif peek_char(f) == 'f':
+        parse_specific_string(f, 'false')
         return False
     else:
         raise ValueError

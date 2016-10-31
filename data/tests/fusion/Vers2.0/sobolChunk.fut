@@ -48,14 +48,14 @@ fun sobolIndR(dir_vs:  [][num_bits]int, n: int ): []f64 =
 --------------------------------/
 
 fun index_of_least_significant_0(num_bits: int, n: int): int =
-  let (goon,k) = (True,0) in
+  let (goon,k) = (true,0) in
   loop ((goon,k,n)) =
         for i < num_bits do
           if(goon)
           then if (n & 1) == 1
-               then (True, k+1, n>>1)
-               else (False,k,   n   )
-          else      (False,k,   n   )
+               then (true, k+1, n>>1)
+               else (false,k,   n   )
+          else      (false,k,   n   )
   in k
 
 fun recM(sob_dirs:  [len][num_bits]int, i: int ): [len]int =

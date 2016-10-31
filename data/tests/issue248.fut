@@ -2,7 +2,7 @@
 --
 -- ==
 -- input { [67,67,67,65,65,67,66,65,65,68,65,66,67,65,65,67,68,67,65,67,68,68,66,67,68,68,67,67,67,66,65,68,67,66,67,67,67,65,67,67,67,66,67,67,66,65,67,67] }
--- output { True }
+-- output { true }
 
 fun eqb (x: bool) (y: bool): bool =
   (! ((x || y)) || (x && y))
@@ -24,14 +24,14 @@ entry main (nucleotides: []int): bool =
                                 zipWith (==) (x) (y)) (x) (y)) (x) (y) in
   let t_v15 = map (fn (x: [][]bool): []bool =>
                    map (fn (x: []bool): bool =>
-                        reduce (||) (False) (x)) (x)) (t_v12) in
+                        reduce (||) (false) (x)) (x)) (t_v12) in
   let t_v18 = map (fn (x: [][]bool): []bool =>
                    map (fn (x: []bool): bool =>
-                        reduce (||) (False) (x)) (x)) (t_v12) in
+                        reduce (||) (false) (x)) (x)) (t_v12) in
   let t_v21 = rearrange (0) (map (fn (x: []bool): bool =>
-                                  reduce (&&) (True) (x)) (rearrange (1, 0) (t_v18))) in
-  let t_v26 = reduce (&&) (True) (let x = t_v21 in
-                                  let y = [False, False, False, True, False,
-                                           True, False, False] in
+                                  reduce (&&) (true) (x)) (rearrange (1, 0) (t_v18))) in
+  let t_v26 = reduce (&&) (true) (let x = t_v21 in
+                                  let y = [false, false, false, true, false,
+                                           true, false, false] in
                                   zipWith eqb (x) (y)) in
   t_v26

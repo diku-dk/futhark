@@ -86,6 +86,9 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
+  "true"                   { tokenC TRUE }
+  "false"                  { tokenC FALSE }
+  -- True And False only for backwards compatibility - will be removed soon.
   "True"                   { tokenC TRUE }
   "False"                  { tokenC FALSE }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }

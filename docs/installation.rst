@@ -187,8 +187,8 @@ but some examples make use of it).
 
    Edit ``siteconf.py`` to following::
 
-     CL_TRACE = False
-     CL_ENABLE_GL = False
+     CL_TRACE = false
+     CL_ENABLE_GL = false
      CL_INC_DIR = ['c:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v7.5\\include']
      CL_LIB_DIR = ['C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v7.5\\lib\\x64']
      CL_LIBNAME = ['OpenCL']

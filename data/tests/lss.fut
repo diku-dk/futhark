@@ -13,7 +13,7 @@
 -- These two functions define the satisfaction property.  pred2 must
 -- be transitive.
 fun pred1(x: int): bool =
-  True
+  true
 
 fun pred2(x: int, y: int): bool =
   x <= y

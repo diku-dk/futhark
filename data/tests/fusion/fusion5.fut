@@ -2,15 +2,15 @@
 -- ==
 -- input { [1, 2, -4, 1] [[1, 2], [-4, 1]] }
 -- output {
---          [[True, False, False, False, False, False, False, False, False, False, False,
---            False, False, False, False, False, False, False, False, False, False, False,
---            False, False, False, False, False, False, False, False],
---           [False, False, False, False, False, False, False, False, False, False, False,
---            False, False, False, False, False, False, False, False, False, False, False,
---            False, False, False, False, False, False, False, False],
---           [True, False, False, False, False, False, False, False, False, False, False,
---            False, False, False, False, False, False, False, False, False, False, False,
---            False, False, False, False, False, False, False, False]]
+--          [[true, false, false, false, false, false, false, false, false, false, false,
+--            false, false, false, false, false, false, false, false, false, false, false,
+--            false, false, false, false, false, false, false, false],
+--           [false, false, false, false, false, false, false, false, false, false, false,
+--            false, false, false, false, false, false, false, false, false, false, false,
+--            false, false, false, false, false, false, false, false],
+--           [true, false, false, false, false, false, false, false, false, false, false,
+--            false, false, false, false, false, false, false, false, false, false, false,
+--            false, false, false, false, false, false, false, false]]
 -- }
 -- structure { Map 3 Map/Map 1 }
 fun main(t_v1: []int, t_v3: [][]int): [][]bool =
