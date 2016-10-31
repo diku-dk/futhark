@@ -3,8 +3,8 @@
 -- }
 -- output {
 --   [1, 2, 3]
---   True
+--   true
 -- }
 fun main (): ([]int,bool) =
-    let arr = [ ([1,2,3],True) , ([4,5,6],False) ] in
+    let arr = [ ([1,2,3],true) , ([4,5,6],false) ] in
     arr[0]

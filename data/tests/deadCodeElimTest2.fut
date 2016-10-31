@@ -15,6 +15,6 @@ fun main(a: int): int =
   --let y = map(op ~, x) in
   let y = map neg x
   let d = c + 300      in
-    if(False)
+    if(false)
     then d + y[1]
     else y[1]

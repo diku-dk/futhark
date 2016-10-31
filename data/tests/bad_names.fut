@@ -2,7 +2,7 @@
 -- are not valid in C.
 --
 -- ==
--- input { False 2 }
+-- input { false 2 }
 -- output { 12 }
 
 fun f(r: bool, x: int): int = x+1 + if r then f(r,x) else 0

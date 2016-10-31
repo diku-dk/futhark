@@ -7,16 +7,16 @@
 --
 -- ==
 -- input { 10 }
--- output { [False, True, False, False, True, False, False, False, False, True] }
+-- output { [false, true, false, false, true, false, false, false, false, true] }
 
 fun main(n: int): [n]bool =
-  let is_open = replicate n False
+  let is_open = replicate n false
   loop (is_open) = for i < n do
     let js = map (*i+1) (iota n)
     let flips = map (fn j =>
                        if j < n
                        then unsafe !is_open[j]
-                       else True -- Doesn't matter.
+                       else true -- Doesn't matter.
                     ) js
     in write js flips is_open
   in is_open

@@ -7,10 +7,10 @@
 --           [4i32, 5i32],
 --           [6i32, 7i32],
 --           [8i32, 9i32]]
---          False
+--          false
 -- }
 -- input { 0 0 }
--- output { empty([]i32) True }
+-- output { empty([]i32) true }
 
 fun main(n: int, m: int): ([][]int, bool) =
   let ass = map  (fn (l: int): [m]int  =>
@@ -18,4 +18,4 @@ fun main(n: int, m: int): ([][]int, bool) =
                  iota(n))
   let ps = zipWith (fn (as: []int) (i: int): bool  =>
                      unsafe as[i] % 2 == 0) ass (map (%m) (iota(n)))
-  in (ass, reduce (&&) True ps)
+  in (ass, reduce (&&) true ps)

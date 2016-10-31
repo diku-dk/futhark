@@ -86,7 +86,7 @@ exclude_patterns = ['_build']
 
 # If true, sectionauthor and moduleauthor directives will be shown in the
 # output. They are ignored by default.
-#show_authors = False
+#show_authors = false
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
@@ -95,7 +95,7 @@ pygments_style = 'sphinx'
 #modindex_common_prefix = []
 
 # If true, keep warnings as "system message" paragraphs in the built documents.
-#keep_warnings = False
+#keep_warnings = false
 
 
 # -- Options for HTML output ----------------------------------------------
@@ -160,7 +160,7 @@ html_static_path = ['_static']
 #html_use_index = True
 
 # If true, the index is split into individual pages for each letter.
-#html_split_index = False
+#html_split_index = false
 
 # If true, links to the reST sources are added to the pages.
 #html_show_sourcelink = True
@@ -210,13 +210,13 @@ latex_documents = [
 
 # For "manual" documents, if this is true, then toplevel headings are parts,
 # not chapters.
-#latex_use_parts = False
+#latex_use_parts = false
 
 # If true, show page references after internal links.
-#latex_show_pagerefs = False
+#latex_show_pagerefs = false
 
 # If true, show URL addresses after external links.
-#latex_show_urls = False
+#latex_show_urls = false
 
 # Documents to append as an appendix to all manuals.
 #latex_appendices = []
@@ -251,7 +251,7 @@ man_pages = [
 ]
 
 # If true, show URL addresses after external links.
-#man_show_urls = False
+#man_show_urls = false
 
 
 # -- Options for Texinfo output -------------------------------------------
@@ -275,4 +275,4 @@ texinfo_documents = [
 #texinfo_show_urls = 'footnote'
 
 # If true, do not generate a @detailmenu in the "Top" node's menu.
-#texinfo_no_detailmenu = False
+#texinfo_no_detailmenu = false

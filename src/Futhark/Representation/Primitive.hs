@@ -213,10 +213,11 @@ data PrimValue = IntValue !IntValue
                deriving (Eq, Ord, Show)
 
 instance Pretty PrimValue where
-  ppr (IntValue v)   = ppr v
-  ppr (BoolValue b)  = text $ show b
-  ppr (FloatValue v) = ppr v
-  ppr Checked        = text "Checked"
+  ppr (IntValue v)      = ppr v
+  ppr (BoolValue True)  = text "true"
+  ppr (BoolValue False) = text "false"
+  ppr (FloatValue v)    = ppr v
+  ppr Checked           = text "checked"
 
 -- | The type of a basic value.
 primValueType :: PrimValue -> PrimType

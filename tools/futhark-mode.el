@@ -74,7 +74,7 @@
   "A list of Futhark types.")
 
 (defconst futhark-booleans
-  '("True" "False")
+  '("true" "false")
   "All Futhark booleans.")
 
 (defconst futhark-var

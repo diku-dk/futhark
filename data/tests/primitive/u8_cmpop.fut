@@ -1,10 +1,10 @@
 -- Test comparison of u8 values.
 --
 -- ==
--- input {  0u8  0u8 } output { False True True }
--- input {  1u8  2u8 } output { True False True }
--- input { 255u8 1u8 } output { False False False }
--- input {  1u8 255u8 } output { True False True }
+-- input {  0u8  0u8 } output { false true true }
+-- input {  1u8  2u8 } output { true false true }
+-- input { 255u8 1u8 } output { false false false }
+-- input {  1u8 255u8 } output { true false true }
 
 fun main(x: u8, y: u8): (bool, bool, bool) =
   (x < y, x == y, x <= y)

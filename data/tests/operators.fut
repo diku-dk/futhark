@@ -5,8 +5,8 @@
 --   2
 -- }
 -- output {
---   False
---   True
+--   false
+--   true
 -- }
 
 fun main(x: int, y: int): (bool,bool) =

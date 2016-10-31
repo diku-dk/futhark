@@ -1,9 +1,9 @@
 -- && must be short-circuiting.
 --
 -- ==
--- input { 0 [False, False] } output { False }
--- input { 1 [False, False] } output { False }
--- input { 2 [False, False] } output { True }
+-- input { 0 [false, false] } output { false }
+-- input { 1 [false, false] } output { false }
+-- input { 2 [false, false] } output { true }
 
 fun main(i: int, bs: [n]bool): bool =
   i >= n || bs[i]

@@ -21,7 +21,7 @@
 --   }
 
 fun bint(b: bool): int = if b then 1 else 0
-fun intb(x: int): bool = if x == 0 then False else True
+fun intb(x: int): bool = if x == 0 then false else true
 
 fun to_bool_board(board: [][]int): [][]bool =
   map (fn (r: []int): []bool  => map intb r) board
@@ -49,10 +49,10 @@ fun iteration(board: [n][m]bool): [n][m]bool =
   zipWith (fn (lives_r: []int) (board_r: []bool): []bool  =>
             zipWith (fn (neighbors: int) (alive: bool): bool  =>
                       if neighbors < 2
-                      then False
-                      else if neighbors == 3 then True
-                      else if alive && neighbors < 4 then True
-                      else False)
+                      then false
+                      else if neighbors == 3 then true
+                      else if alive && neighbors < 4 then true
+                      else false)
                     lives_r board_r)
            lives board
 
