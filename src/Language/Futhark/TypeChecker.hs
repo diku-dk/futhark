@@ -189,7 +189,7 @@ instance Show TypeError where
     ": variables prefixed with underscore must not be accessed."
   show (ValueIsNotFunction loc name t) =
     "Attempt to use value " ++ pretty name ++ " of type " ++ pretty t ++
-    "as function at " ++ locStr loc ++ "."
+    " as function at " ++ locStr loc ++ "."
   show (FunctionIsNotValue loc name) =
     "Attempt to use function " ++ pretty name ++ " as value at " ++ locStr loc ++ "."
   show (UniqueConstType loc name t) =
