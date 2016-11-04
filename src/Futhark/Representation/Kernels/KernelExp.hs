@@ -41,6 +41,14 @@ import qualified Futhark.TypeCheck as TC
 data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                     | SplitSpace StreamOrd SubExp SubExp SubExp SubExp
                     | Combine [(VName,SubExp)] [Type] SubExp (Body lore)
+                      -- ^ @Combine cspace ts active body@ will combine values
+                      -- from threads to a single (multidimensional) array.
+                      -- If we define @(is, ws) = unzip cspace@, then @ws@
+                      -- is defined the same accross all threads.
+                      -- Only threads for which
+                      -- @active && all (\(i,w) -> i < w) cspace@ is true will
+                      -- provide a value (of type @ts@), which is generated
+                      -- by @body@.
                     | GroupReduce SubExp
                       (Lambda lore) [(SubExp,VName)]
                     | GroupScan SubExp
