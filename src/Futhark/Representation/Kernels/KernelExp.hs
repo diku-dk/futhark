@@ -49,6 +49,9 @@ data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                       -- @active && all (\(i,w) -> i < w) cspace@ is true will
                       -- provide a value (of type @ts@), which is generated
                       -- by @body@.
+                      --
+                      -- The result of a combine is always stored in local
+                      -- memory (OpenCL terminology)
                     | GroupReduce SubExp
                       (Lambda lore) [(SubExp,VName)]
                     | GroupScan SubExp
