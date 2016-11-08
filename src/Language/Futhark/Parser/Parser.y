@@ -339,12 +339,12 @@ IncludeParts :: { [String] }
 IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
              | id { let L pos (ID name) = $1 in [nameToString name] }
 
-Fun     : fun id Params ':' UserTypeDecl '=' Exp
+Fun     : fun id Params MaybeAscription '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef (name==defaultEntryPoint) name $5 $3 $7 pos }
-        | entry id Params ':'  UserTypeDecl '=' Exp
+                          in FunDef (name==defaultEntryPoint) name (fmap declaredType $4) NoInfo $3 $6 pos }
+        | entry id Params MaybeAscription '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef True name $5 $3 $7 pos }
+                          in FunDef True name (fmap declaredType $4) NoInfo $3 $6 pos }
 ;
 
 Const : val id ':' UserTypeDecl '=' Exp

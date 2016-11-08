@@ -357,12 +357,15 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeDefB
 
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBase ty vn) where
-  ppr (FunDef entry name rettype args body _) =
+  ppr (FunDef entry name retdecl _ args body _) =
     text fun <+> ppr name <+>
-    spread (map ppParam args) <> text ":" <+> ppr rettype <+> equals </>
+    spread (map ppParam args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
     where fun | entry     = "entry"
               | otherwise = "fun"
+          retdecl' = case retdecl of
+                       Just rettype -> text ":" <+> ppr rettype
+                       Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstDefBase ty vn) where
   ppr (ConstDef name t e _) =
