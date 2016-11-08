@@ -128,14 +128,14 @@ renameFun :: (Ord f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
 renameFun (FunDef entry fname tdecl NoInfo params body pos) = do
   fname' <- replName Term fname
-  tdecl' <- case tdecl of
-    Just ret -> Just <$> renameUserType ret
-    Nothing -> return Nothing
-  bindNames (concatMap (HS.toList . patNameSet) params) $
+  bindNames (concatMap (HS.toList . patNameSet) params) $ do
+    tdecl' <- case tdecl of
+      Just ret -> Just <$> renameUserType ret
+      Nothing -> return Nothing
     FunDef entry fname' tdecl' NoInfo <$>
-    mapM renamePattern params <*>
-    renameExp body <*>
-    pure pos
+      mapM renamePattern params <*>
+      renameExp body <*>
+      pure pos
 
 renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
                    TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
