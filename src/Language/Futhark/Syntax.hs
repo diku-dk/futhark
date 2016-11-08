@@ -615,7 +615,8 @@ instance Located (PatternBase f vn) where
 data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
                               , funDefName       :: vn
-                              , funDefRetType    :: TypeDeclBase f vn
+                              , funDefRetDecl    :: Maybe (UserType vn)
+                              , funDefRetType    :: f (StructTypeBase vn)
                               , funDefParams     :: [PatternBase f vn]
                               , funDefBody       :: ExpBase f vn
                               , funDefLocation   :: SrcLoc
