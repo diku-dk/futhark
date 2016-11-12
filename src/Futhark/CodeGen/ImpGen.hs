@@ -8,7 +8,6 @@ module Futhark.CodeGen.ImpGen
     -- * Pluggable Compiler
   , OpCompiler
   , ExpCompiler
-  , ExpCompilerResult (..)
   , CopyCompiler
   , BodyCompiler
   , Operations (..)
@@ -57,6 +56,7 @@ module Futhark.CodeGen.ImpGen
   , defCompileBody
   , compileStms
   , compileExp
+  , defCompileExp
   , sliceArray
   , offsetArray
   , strideArray
@@ -109,18 +109,8 @@ type OpCompiler lore op = Destination -> Op lore -> ImpM lore op ()
 -- | How to compile a 'Body'.
 type BodyCompiler lore op = Destination -> Body lore -> ImpM lore op ()
 
--- | A substitute expression compiler, tried before the main
--- expression compilation function.
-type ExpCompiler lore op = Destination -> Exp lore -> ImpM lore op (ExpCompilerResult lore op)
-
--- | The result of the substitute expression compiler.
-data ExpCompilerResult lore op =
-     CompileExp (Exp lore)
-    -- ^ A new expression (or possibly the same as the input) - this
-    -- will not be passed back to the expression compiler, but instead
-    -- processed with the default action.
-    | Done
-    -- ^ Some code was added via the monadic interface.
+-- | How to compile an 'Exp'.
+type ExpCompiler lore op = Destination -> Exp lore -> ImpM lore op ()
 
 type CopyCompiler lore op = PrimType
                            -> MemLocation
@@ -137,7 +127,7 @@ data Operations lore op = Operations { opsExpCompiler :: ExpCompiler lore op
 -- | An operations set for which the expression compiler always
 -- returns 'CompileExp'.
 defaultOperations :: ExplicitMemorish lore => OpCompiler lore op -> Operations lore op
-defaultOperations opc = Operations { opsExpCompiler = const $ return . CompileExp
+defaultOperations opc = Operations { opsExpCompiler = defCompileExp
                                    , opsOpCompiler = opc
                                    , opsBodyCompiler = defCompileBody
                                    , opsCopyCompiler = defaultCopy
@@ -460,11 +450,8 @@ compileExp :: ExplicitMemorish lore =>
               Destination -> Exp lore -> ImpM lore op a -> ImpM lore op a
 compileExp targets e m = do
   ec <- asks envExpCompiler
-  res <- ec targets e
-  case res of
-    CompileExp e'        -> do defCompileExp targets e'
-                               m
-    Done                 -> m
+  ec targets e
+  m
 
 defCompileExp :: ExplicitMemorish lore => Destination -> Exp lore -> ImpM lore op ()
 
