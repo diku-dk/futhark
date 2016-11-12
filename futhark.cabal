@@ -290,6 +290,7 @@ Executable futharki
                  array >= 0.4,
                  mtl >= 2.2.1,
                  srcloc >= 0.4,
+                 transformers,
                  neat-interpolation >= 0.3,
                  text,
                  futhark
