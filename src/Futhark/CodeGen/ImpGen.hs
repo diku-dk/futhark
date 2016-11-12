@@ -115,10 +115,7 @@ type ExpCompiler lore op = Destination -> Exp lore -> ImpM lore op (ExpCompilerR
 
 -- | The result of the substitute expression compiler.
 data ExpCompilerResult lore op =
-      CompileStms [Stm lore]
-    -- ^ New bindings.  Note that the bound expressions will
-    -- themselves be compiled using the expression compiler.
-    | CompileExp (Exp lore)
+     CompileExp (Exp lore)
     -- ^ A new expression (or possibly the same as the input) - this
     -- will not be passed back to the expression compiler, but instead
     -- processed with the default action.
@@ -465,7 +462,6 @@ compileExp targets e m = do
   ec <- asks envExpCompiler
   res <- ec targets e
   case res of
-    CompileStms bnds -> compileStms bnds m
     CompileExp e'        -> do defCompileExp targets e'
                                m
     Done                 -> m
