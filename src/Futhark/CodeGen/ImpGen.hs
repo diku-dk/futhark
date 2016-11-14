@@ -560,6 +560,9 @@ defCompileBasicOp (Destination [dest]) (Iota n e s et) = do
 defCompileBasicOp (Destination [target]) (Copy src) =
   compileSubExpTo target $ Var src
 
+defCompileBasicOp (Destination [target]) (Manifest _ src) =
+  compileSubExpTo target $ Var src
+
 defCompileBasicOp _ Split{} =
   return () -- Yes, really.
 

@@ -119,6 +119,8 @@ primOpType (Concat _ i x _ ressize) =
   where result xt = [setDimSize i xt ressize]
 primOpType (Copy v) =
   pure <$> lookupType v
+primOpType (Manifest _ v) =
+  pure <$> lookupType v
 primOpType (Assert _ _) =
   pure [Prim Cert]
 primOpType (Partition _ n _ arrays) =

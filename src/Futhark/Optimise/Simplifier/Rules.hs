@@ -614,13 +614,6 @@ simplifyIndexing vtable seType ocs idd inds consuming =
             isIndex _          = False
 
     Just (Copy src)
-      -- We cannot just remove a copy of a rearrange or something
-      -- unknown (might be a kernel), because it might be important
-      -- for coalescing.  FIXME: This is a big HACK.
-      | Just (BasicOp Rearrange{}) <- defOf src ->
-          Nothing
-      | Nothing <- defOf src ->
-          Nothing
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
         not consuming ->
