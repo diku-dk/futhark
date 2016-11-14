@@ -233,8 +233,7 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
       | Just is <- sliceIndices slice,
         length is == arrayRank t,
         is' <- coalescedIndexes (map Var thread_gids) is,
-        Just perm <- is' `isPermutationOf` is,
-        perm /= [0..length perm-1] ->
+        Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
       -- We are not fully indexing the array, and the indices are not
@@ -315,7 +314,14 @@ coalescingPermutation num_is rank =
 rearrangeInput :: MonadBinder m =>
                   Maybe (Maybe [Int]) -> [Int] -> VName -> m VName
 rearrangeInput (Just (Just current_perm)) perm arr
-  | current_perm == perm = return arr
+  | current_perm == perm = return arr -- Already has desired representation.
+rearrangeInput Nothing perm arr
+  | sort perm == perm = return arr -- We don't know the current
+                                   -- representation, but the indexing
+                                   -- is linear, so let's hope the
+                                   -- array is too.
+rearrangeInput (Just Just{}) perm arr
+  | sort perm == perm = flatInput arr -- We just want a row-major array, no tricks.
 rearrangeInput manifest perm arr = do
   let inv_perm = rearrangeInverse perm
   -- We may first manifest the array to ensure that it is flat in
