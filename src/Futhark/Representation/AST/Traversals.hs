@@ -151,6 +151,8 @@ mapExpM tv (BasicOp (Concat cs i x ys size)) =
               mapOnSubExp tv size)
 mapExpM tv (BasicOp (Copy e)) =
   BasicOp <$> (pure Copy <*> mapOnVName tv e)
+mapExpM tv (BasicOp (Manifest perm e)) =
+  BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e loc)) =
   BasicOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (BasicOp (Partition cs n flags arr)) =

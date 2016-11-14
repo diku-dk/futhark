@@ -217,6 +217,7 @@ instance Pretty (BasicOp lore) where
   ppr (Concat cs i x ys _) =
     ppCertificates cs <> text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
+  ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>

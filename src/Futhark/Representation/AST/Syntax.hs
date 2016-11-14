@@ -196,6 +196,10 @@ data BasicOp lore
   | Copy VName
   -- ^ Copy the given array.  The result will not alias anything.
 
+  | Manifest [Int] VName
+  -- ^ Manifest an array with dimensions represented in the given
+  -- order.  The result will not alias anything.
+
   -- Array construction.
   | Iota SubExp SubExp SubExp IntType
   -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@.

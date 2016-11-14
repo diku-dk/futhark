@@ -60,6 +60,7 @@ nonlinearInMemory name m =
   case HM.lookup name m of
     Just (Let _ _ (BasicOp (Rearrange _ perm _))) -> Just $ Just perm
     Just (Let _ _ (BasicOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
+    Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
     Just (Let pat _ (Op (Kernel _ _ _ ts _))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
@@ -232,7 +233,7 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
       -- indices are in a permuted order.
       | Just is <- sliceIndices slice,
         length is == arrayRank t,
-        is' <- coalescedIndexes (map Var thread_gids) is,
+        Just is' <- coalescedIndexes (map Var thread_gids) is,
         Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
@@ -250,8 +251,12 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
       -- Everything is fine... assuming that the array is in row-major
       -- order!  Make sure that is the case.
       | Just{} <- nonlinearInMemory arr expmap ->
-          replace =<< lift (flatInput arr)
-
+          case sliceIndices slice of
+            Just is | Just _ <- coalescedIndexes (map Var thread_gids) is ->
+                        replace =<< lift (rowMajorArray arr)
+                    | otherwise ->
+                        return Nothing
+            _ -> replace =<< lift (rowMajorArray arr)
 
     _ -> return Nothing
 
@@ -271,17 +276,20 @@ splitSlice (DimFix i:is) = first (i:) $ splitSlice is
 splitSlice is = ([], is)
 
 -- Try to move thread indexes into their proper position.
-coalescedIndexes :: [SubExp] -> [SubExp] -> [SubExp]
-coalescedIndexes tgids is =
-  if num_is > 0 && not (null tgids) && (last is == last tgids || any isCt is)
+coalescedIndexes :: [SubExp] -> [SubExp] -> Maybe [SubExp]
+coalescedIndexes tgids is
   -- Do Nothing if:
   -- 1. the innermost index is the innermost thread id
   --    (because access is already coalesced)
   -- 2. any of the indices is a constant, i.e., kernel free variable
   --    (because it would transpose a bigger array then needed -- big overhead).
-  then is
+  | any isCt is =
+      Nothing
+  | num_is > 0 && not (null tgids) && last is == last tgids =
+      Just is
   -- Otherwise try fix coalescing
-  else reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
+  | otherwise =
+      Just $ reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
   where num_is = length is
 
         move is_rev (i, tgid)
@@ -321,21 +329,17 @@ rearrangeInput Nothing perm arr
                                    -- is linear, so let's hope the
                                    -- array is too.
 rearrangeInput (Just Just{}) perm arr
-  | sort perm == perm = flatInput arr -- We just want a row-major array, no tricks.
+  | sort perm == perm = rowMajorArray arr -- We just want a row-major array, no tricks.
 rearrangeInput manifest perm arr = do
-  let inv_perm = rearrangeInverse perm
   -- We may first manifest the array to ensure that it is flat in
   -- memory.  This is sometimes unnecessary, in which case the copy
   -- will hopefully be removed by the simplifier.
-  manifested <- if isJust manifest then flatInput arr else return arr
-  transposed <- letExp (baseString arr ++ "_tr") $
-                BasicOp $ Rearrange [] perm manifested
-  tr_manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                   BasicOp $ Copy transposed
-  letExp (baseString arr ++ "_inv_tr") $
-    BasicOp $ Rearrange [] inv_perm tr_manifested
+  manifested <- if isJust manifest then rowMajorArray arr else return arr
+  letExp (baseString arr ++ "_coalesced") $
+    BasicOp $ Manifest perm manifested
 
-flatInput :: MonadBinder m =>
-             VName -> m VName
-flatInput arr =
-  letExp (baseString arr ++ "_manifested") $ BasicOp $ Copy arr
+rowMajorArray :: MonadBinder m =>
+                 VName -> m VName
+rowMajorArray arr = do
+  rank <- arrayRank <$> lookupType arr
+  letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0..rank-1] arr
