@@ -765,11 +765,8 @@ checkBasicOp (Concat cs i arr1exp arr2exps ressize) = do
 checkBasicOp (Copy e) =
   void $ checkArrIdent e
 
-checkBasicOp (Manifest perm arr) = do
-  arrt <- lookupType arr
-  let rank = arrayRank arrt
-  when (length perm /= rank || sort perm /= [0..rank-1]) $
-    bad $ PermutationError perm rank $ Just arr
+checkBasicOp (Manifest perm arr) =
+  checkBasicOp $ Rearrange [] perm arr -- Basically same thing!
 
 checkBasicOp (Assert e _) =
   require [Prim Bool] e
