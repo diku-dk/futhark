@@ -21,8 +21,6 @@ the like directly, but you can load Futhark source files using the
 ``:load`` command.  Use the ``:help`` command to see a list of
 commands.  All commands are prefixed with a colon.
 
-expression, which will be parsed and the resulting AST shown.
-
 When ``futharki`` is run with a Futhark program as the command line
 option, the program is executed by evaluating the ``main`` function,
 and the result printed on standard output.  The parameters to ``main``
