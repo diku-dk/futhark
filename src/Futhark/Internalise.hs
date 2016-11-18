@@ -508,19 +508,10 @@ internaliseExp desc (E.Reduce comm lam ne arr loc) =
 internaliseExp desc (E.Scan lam ne arr loc) =
   internaliseScanOrReduce desc "scan" I.Scan (lam, ne, arr, loc)
 
-internaliseExp desc (E.Filter lam arr _) = do
-  arrs <- internaliseExpToVars "filter_input" arr
-  lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "filter_partition_flags" $ I.Op $ I.Map [] w lam' arrs
-  filter_size <- newIdent "filter_size" $ I.Prim int32
-  filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
-  addStm $ mkLet' [] (filter_size : filter_perms) $
-    I.BasicOp $ I.Partition [] 1 flags arrs
-  forM filter_perms $ \filter_perm ->
-    letSubExp desc $
-      I.BasicOp $ I.Split [] 0 [I.Var $ I.identName filter_size] $
-      I.identName filter_perm
+internaliseExp desc (E.Filter lam arr loc) = do
+  res <- internaliseExp desc $ E.Partition [lam] arr loc
+  -- Partition also gives us the noninteresting elements, but we don't want them.
+  return $ take (length res `div` 2) res
 
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
