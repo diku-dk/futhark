@@ -3,7 +3,7 @@
 --
 -- ==
 -- tags { no_opencl }
--- structure distributed { Kernel 2 }
+-- structure distributed { Kernel 5 }
 
 fun main(a: [][n]int): []int =
   map (fn (a_row: []int): int  =>
