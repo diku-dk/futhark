@@ -5,4 +5,10 @@
 -- output {
 --   [1, 2, 3]
 -- }
+-- input {
+--   empty(i32)
+-- }
+-- output {
+--   empty(i32)
+-- }
 fun main(a: []int): []int = filter (0<) a
