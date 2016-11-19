@@ -214,8 +214,10 @@ internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
   return $ I.ExtLambda params body' $
             staticShapes acctypes ++ lam_arr_tps
 
--- Given @n@ lambdas, this will return a lambda that returns an
--- integer in the range @[0,n]@.
+-- Given @k@ lambdas, this will return a lambda that returns an
+-- (k+2)-element tuple of integers.  The first element is the
+-- equivalence class ID in the range [0,k].  The remaining are all zero
+-- except for possibly one element.
 internalisePartitionLambdas :: InternaliseLambda
                             -> [E.Lambda]
                             -> [I.SubExp]
@@ -230,28 +232,33 @@ internalisePartitionLambdas internaliseLambda lams args = do
   let params' = [ I.Param name t
                 | I.Ident name t <- params]
   body <- mkCombinedLambdaBody params 0 lams'
-  return $ I.Lambda params' body [I.Prim int32]
-  where mkCombinedLambdaBody :: [I.Ident]
-                             -> Int32
+  return $ I.Lambda params' body rettype
+  where k = length lams
+        rettype = replicate (k+2) $ I.Prim int32
+        result i = resultBody $
+                   map constant $ (fromIntegral i :: Int32) :
+                   (replicate i 0 ++ [1::Int32] ++ replicate (k-i) 0)
+        mkCombinedLambdaBody :: [I.Ident]
+                             -> Int
                              -> [([I.LParam], I.Body)]
                              -> InternaliseM I.Body
         mkCombinedLambdaBody _      i [] =
-          return $ resultBody [constant i]
+          return $ result i
         mkCombinedLambdaBody params i ((lam_params,lam_body):lams') =
           case lam_body of
             Body () bodybnds [boolres] -> do
-              intres <- newIdent "partition_equivalence_class" $ I.Prim int32
+              intres <- (:) <$> newIdent "eq_class" (I.Prim int32) <*>
+                        replicateM (k+1) (newIdent "partition_incr" $ I.Prim int32)
               next_lam_body <-
                 mkCombinedLambdaBody (map paramIdent lam_params) (i+1) lams'
               let parambnds =
                     [ mkLet' [] [paramIdent top] $ I.BasicOp $ I.SubExp $ I.Var $ I.identName fromp
                     | (top,fromp) <- zip lam_params params ]
-                  branchbnd = mkLet' [] [intres] $ I.If boolres
-                              (resultBody [constant i])
+                  branchbnd = mkLet' [] intres $ I.If boolres
+                              (result i)
                               next_lam_body
-                              [I.Prim int32]
-              return $ mkBody
-                (parambnds++bodybnds++[branchbnd])
-                [I.Var $ I.identName intres]
+                              rettype
+              return $ mkBody (parambnds++bodybnds++[branchbnd]) $
+                map (I.Var . I.identName) intres
             _ ->
               fail "Partition lambda returns too many values."

@@ -508,25 +508,20 @@ internaliseExp desc (E.Reduce comm lam ne arr loc) =
 internaliseExp desc (E.Scan lam ne arr loc) =
   internaliseScanOrReduce desc "scan" I.Scan (lam, ne, arr, loc)
 
-internaliseExp desc (E.Filter lam arr loc) = do
-  res <- internaliseExp desc $ E.Partition [lam] arr loc
-  -- Partition also gives us the noninteresting elements, but we don't want them.
-  return $ take (length res `div` 2) res
+internaliseExp desc (E.Filter lam arr _) = do
+  arrs <- internaliseExpToVars "filter_input" arr
+  lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
+  (partition_sizes, partitioned) <- partitionWithSOACS 1 lam' arrs
+  fmap (map I.Var . concat . transpose) $ forM partitioned $
+    letTupExp desc . I.BasicOp . I.Split [] 0 partition_sizes
 
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "partition_partition_flags" $ I.Op $ I.Map [] w lam' arrs
-  fmap (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
-    partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Prim int32
-    partition_perm <- newIdent "partition_perm" =<< lookupType arr'
-    addStm $ mkLet' [] (partition_sizes++[partition_perm]) $
-      I.BasicOp $ I.Partition [] n flags [arr']
-    letTupExp desc $
-      I.BasicOp $ I.Split [] 0 (map (I.Var . I.identName) partition_sizes) $
-      I.identName partition_perm
-  where n = length lams + 1
+  (partition_sizes, partitioned) <- partitionWithSOACS (k+1) lam' arrs
+  fmap (map I.Var . concat . transpose) $ forM partitioned $
+    letTupExp desc . I.BasicOp . I.Split [] 0 partition_sizes
+  where k = length lams
 
 internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body maybe_ret lamrtp pos) arr _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
@@ -1082,3 +1077,85 @@ shadowIdentsInExp substs bnds res = do
   case res' of
     [se] -> return se
     _    -> fail "Internalise.shadowIdentsInExp: something went very wrong"
+
+-- Implement partitioning using maps, scans and writes.
+partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.VName])
+partitionWithSOACS k lam arrs = do
+  arr_ts <- mapM lookupType arrs
+  let w = arraysSize 0 arr_ts
+  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Map [] w lam arrs
+  (classes, increments) <- case classes_and_increments of
+                             classes : increments -> return (classes, take k increments)
+                             _                    -> fail "partitionWithSOACS"
+
+  add_lam_x_params <-
+    replicateM k $ I.Param <$> newVName "x" <*> pure (I.Prim int32)
+  add_lam_y_params <-
+    replicateM k $ I.Param <$> newVName "y" <*> pure (I.Prim int32)
+  add_lam_body <- runBodyBinder $
+                  localScope (scopeOfLParams $ add_lam_x_params++add_lam_y_params) $
+    fmap resultBody $ forM (zip add_lam_x_params add_lam_y_params) $ \(x,y) ->
+      letSubExp "z" $ I.BasicOp $ I.BinOp (I.Add Int32)
+      (I.Var $ paramName x) (I.Var $ paramName y)
+  let add_lam = I.Lambda { I.lambdaBody = add_lam_body
+                         , I.lambdaParams = add_lam_x_params ++ add_lam_y_params
+                         , I.lambdaReturnType = replicate k $ I.Prim int32
+                         }
+      scan_input = zip (repeat $ constant (0::Int32)) increments
+
+  all_offsets <- letTupExp "offsets" $ I.Op $ I.Scan [] w add_lam scan_input
+
+  -- We have the offsets for each of the partitions, but we also need
+  -- the total sizes, which are the last elements in the offests.  We
+  -- just have to be careful in case the array is empty.
+  last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int32) w $ constant (1::Int32)
+  nonempty_body <- runBodyBinder $ fmap resultBody $ forM all_offsets $ \offset_array ->
+    letSubExp "last_offset" $ I.BasicOp $ I.Index [] offset_array [I.DimFix last_index]
+  let empty_body = resultBody $ replicate k $ constant (0::Int32)
+  is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int32) w $ constant (0::Int32)
+  sizes <- letTupExp "partition_size" $
+           I.If is_empty empty_body nonempty_body $ replicate k $ I.Prim int32
+
+  -- Compute total size of all partitions.
+  sum_of_partition_sizes <- letSubExp "sum_of_partition_sizes" =<<
+                            foldBinOp (Add Int32) (constant (0::Int32)) (map I.Var sizes)
+
+  -- Create scratch arrays for the result.
+  blanks <- forM arr_ts $ \arr_t ->
+    letExp "partition_dest" $ I.BasicOp $
+    Scratch (elemType arr_t) (sum_of_partition_sizes : drop 1 (I.arrayDims arr_t))
+
+  -- Now write into the result.
+  write_lam <- do
+    c_param <- I.Param <$> newVName "c" <*> pure (I.Prim int32)
+    offset_params <- replicateM k $ I.Param <$> newVName "offset" <*> pure (I.Prim int32)
+    value_params <- forM arr_ts $ \arr_t ->
+      I.Param <$> newVName "v" <*> pure (I.rowType arr_t)
+    (offset, offset_stms) <- collectStms $ mkOffsetLambdaBody (map I.Var sizes)
+                             (I.Var $ paramName c_param) 0 offset_params
+    return I.Lambda { I.lambdaParams = c_param : offset_params ++ value_params
+                    , I.lambdaReturnType = replicate (length arr_ts) (I.Prim int32) ++
+                                           map I.rowType arr_ts
+                    , I.lambdaBody = mkBody offset_stms $
+                                     replicate (length arr_ts) offset ++
+                                     map (I.Var . paramName) value_params
+                    }
+  results <- letTupExp "partition_res" $ I.Op $ I.Write [] w
+             write_lam (classes : all_offsets ++ arrs) $ zip (repeat sum_of_partition_sizes) blanks
+  return (map I.Var sizes, results)
+  where
+    mkOffsetLambdaBody :: [SubExp]
+                       -> SubExp
+                       -> Int
+                       -> [I.LParam]
+                       -> InternaliseM SubExp
+    mkOffsetLambdaBody _ _ _ [] =
+      return $ constant (-1::Int32)
+    mkOffsetLambdaBody sizes c i (p:ps) = do
+      is_this_one <- letSubExp "is_this_one" $ I.BasicOp $ I.CmpOp (CmpEq int32) c (constant i)
+      next_one <- mkOffsetLambdaBody sizes c (i+1) ps
+      this_one <- letSubExp "this_offset" =<<
+                  foldBinOp (Add Int32) (constant (-1::Int32))
+                  (I.Var (paramName p) : take i sizes)
+      letSubExp "total_res" $ I.If is_this_one
+        (resultBody [this_one]) (resultBody [next_one]) [I.Prim int32]
