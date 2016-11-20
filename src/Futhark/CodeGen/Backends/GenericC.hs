@@ -838,6 +838,7 @@ int main(int argc, char** argv) {
 
   $stms:pre_main_stms
   $items:main_pre
+  $stms:pre_timing
   /* Warmup run */
   if (perform_warmup) {
     time_runs = 0;
