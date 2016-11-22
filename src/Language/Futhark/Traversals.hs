@@ -191,7 +191,9 @@ mapDimIndexM :: (Applicative m, Monad m) =>
              -> DimIndexBase NoInfo vnf
              -> m (DimIndexBase NoInfo vnt)
 mapDimIndexM tv (DimFix j)     = DimFix <$> mapExpM tv j
-mapDimIndexM tv (DimSlice i j) = DimSlice <$> mapExpM tv i <*> mapExpM tv j
+mapDimIndexM tv (DimSlice i j) = DimSlice <$>
+                                 maybe (return Nothing) (fmap Just . mapExpM tv) i <*>
+                                 maybe (return Nothing) (fmap Just . mapExpM tv) j
 
 mapTypeM :: (Applicative m, Monad m, Traversable f) =>
             MapperBase vnf vnt m

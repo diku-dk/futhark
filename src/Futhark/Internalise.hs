@@ -727,8 +727,8 @@ internaliseDimIndex loc w (E.DimFix i) = do
   cs <- assertingOne $ boundsCheck loc w i'
   return (I.DimFix i', cs)
 internaliseDimIndex loc w (E.DimSlice i j) = do
-  i' <- internaliseExp1 "i" i
-  j' <- internaliseExp1 "j" j
+  i' <- maybe (return (constant (0::Int32))) (internaliseExp1 "i") i
+  j' <- maybe (return w) (internaliseExp1 "j") j
   cs_i <- assertingOne $ boundsCheck loc w i'
   cs_j <- assertingOne $ do
     wp1 <- letSubExp "wp1" $ BasicOp $ I.BinOp (Add Int32) j' (constant (1::Int32))

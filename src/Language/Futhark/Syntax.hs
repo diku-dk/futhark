@@ -346,7 +346,7 @@ data BinOp = Plus -- Binary Ops for Numbers
 
 -- | An indexing of a single dimension.
 data DimIndexBase f vn = DimFix (ExpBase f vn)
-                       | DimSlice (ExpBase f vn) (ExpBase f vn)
+                       | DimSlice (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn))
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.

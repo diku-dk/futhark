@@ -351,7 +351,9 @@ the latter is desired, enclose the literal array with parentheses.
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
 latter inclusive and the latter exclusive.  Slicing of multiple
 dimensions can be done by separating with commas, and may be
-intermixed freely with indexing.  It is an error if ``j < n``.
+intermixed freely with indexing.  It is an error if ``j < n``.  If
+``i`` is elided, it defaults to ``0``.  If ``j`` is elided, if
+defaults to the size of the array.
 
 ``e.i``
 ~~~~~~~
