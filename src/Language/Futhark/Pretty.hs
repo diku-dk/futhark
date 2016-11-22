@@ -188,7 +188,7 @@ hasArrayLit _               = False
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndexBase ty vn) where
   ppr (DimFix e)     = ppr e
-  ppr (DimSlice i j) = ppr i <> text ":" <> ppr j
+  ppr (DimSlice i j) = maybe mempty ppr i <> text ":" <> maybe mempty ppr j
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)

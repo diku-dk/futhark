@@ -1517,8 +1517,8 @@ checkDimIndex (DimFix i) =
   DimFix <$> (require [Prim $ Signed Int32] =<< checkExp i)
 checkDimIndex (DimSlice i j) =
   DimSlice
-  <$> (require [Prim $ Signed Int32] =<< checkExp i)
-  <*> (require [Prim $ Signed Int32] =<< checkExp j)
+  <$> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) i
+  <*> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) j
 
 sequentially :: TypeM a -> (a -> Occurences -> TypeM b) -> TypeM b
 sequentially m1 m2 = do

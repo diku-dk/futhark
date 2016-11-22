@@ -603,8 +603,11 @@ SomeDimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
                | DimIndex                    { [$1] }
 
 DimIndex :: { UncheckedDimIndex }
-         : Exp { DimFix $1 }
-         | Exp ':' Exp { DimSlice $1 $3 }
+         : Exp         { DimFix $1 }
+         | Exp ':' Exp { DimSlice (Just $1) (Just $3) }
+         | Exp ':'     { DimSlice (Just $1) Nothing }
+         |     ':' Exp { DimSlice Nothing (Just $2) }
+         |     ':'     { DimSlice Nothing Nothing }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }

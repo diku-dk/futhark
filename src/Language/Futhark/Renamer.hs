@@ -357,7 +357,9 @@ renameDimIndex :: (Ord f, Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
                   DimIndexBase NoInfo f
                -> RenameM f t (DimIndexBase NoInfo t)
 renameDimIndex (DimFix i)     = DimFix <$> renameExp i
-renameDimIndex (DimSlice i j) = DimSlice <$> renameExp i <*> renameExp j
+renameDimIndex (DimSlice i j) = DimSlice <$>
+                                maybe (return Nothing) (fmap Just . renameExp) i <*>
+                                maybe (return Nothing) (fmap Just . renameExp) j
 
 -- Take leading function and type declarations.
 chompDecs :: [DecBase NoInfo Name]
