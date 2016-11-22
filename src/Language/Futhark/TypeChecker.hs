@@ -618,6 +618,9 @@ anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 anyNumberType :: [TypeBase Rank NoInfo ()]
 anyNumberType = anyIntType ++ anyFloatType
 
+anyPrimType :: [TypeBase Rank NoInfo ()]
+anyPrimType = anyNumberType ++ [Prim Bool]
+
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
@@ -1484,8 +1487,8 @@ checkBinOp Xor e1 e2 pos = checkPolyBinOp Xor anyIntType e1 e2 pos
 checkBinOp Bor e1 e2 pos = checkPolyBinOp Bor anyIntType e1 e2 pos
 checkBinOp LogAnd e1 e2 pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 pos
 checkBinOp LogOr e1 e2 pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 pos
-checkBinOp Equal e1 e2 pos = checkRelOp Equal anyNumberType e1 e2 pos
-checkBinOp NotEqual e1 e2 pos = checkRelOp NotEqual anyNumberType e1 e2 pos
+checkBinOp Equal e1 e2 pos = checkRelOp Equal anyPrimType e1 e2 pos
+checkBinOp NotEqual e1 e2 pos = checkRelOp NotEqual anyPrimType e1 e2 pos
 checkBinOp Less e1 e2 pos = checkRelOp Less anyNumberType e1 e2 pos
 checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
 checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
