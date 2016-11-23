@@ -449,10 +449,10 @@ Exp  :: { UncheckedExp }
      | split '@' NaturalInt Atom Atom
                       { Split $3 $4 $5 $1 }
 
-     | concat Atoms
+     | concat SOACArgs
                       { Concat 0 (fst $2) (snd $2) $1 }
 
-     | concat '@' NaturalInt Atoms
+     | concat '@' NaturalInt SOACArgs
                       { Concat $3 (fst $4) (snd $4) $1 }
 
 
@@ -463,19 +463,19 @@ Exp  :: { UncheckedExp }
                       { Reduce Commutative $2 $3 $4 $1 }
 
 
-     | map FunAbstr Atoms
+     | map FunAbstr SOACArgs
                       { Map $2 (fst $3:snd $3) $1 }
 
-     | zipWith FunAbstr Atoms
+     | zipWith FunAbstr SOACArgs
                       { Map $2 (fst $3:snd $3) $1 }
 
      | scan FunAbstr Atom Atom
                       { Scan $2 $3 $4 $1 }
 
-     | zip Atoms
+     | zip SOACArgs
                       { Zip 0 (fst $2) (snd $2) $1 }
 
-     | zip '@' NaturalInt Atoms
+     | zip '@' NaturalInt SOACArgs
                       { Zip $3 (fst $4) (snd $4) $1 }
 
      | unzip Atom      { Unzip $2 [] $1 }
@@ -561,9 +561,14 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                                         Var (QualName (quals, name)) NoInfo loc
                                   }
 
-Atoms :: { (UncheckedExp, [UncheckedExp]) }
-      : Atom { ($1, []) }
-      | Atom Atoms { ($1, fst $2 : snd $2) }
+SOACArg :: { UncheckedExp }
+SOACArg : '[' Exps ']'      { ArrayLit $2 NoInfo $1 }
+        | Atom %prec bottom { $1 }
+
+SOACArgs :: { (UncheckedExp, [UncheckedExp]) }
+SOACArgs : SOACArg          { ($1, []) }
+         | SOACArg SOACArgs { ($1, fst $2 : snd $2) }
+
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
