@@ -1,4 +1,6 @@
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -27,6 +29,7 @@ import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
+import Futhark.Construct
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -583,14 +586,62 @@ internaliseExp desc (E.BinOp E.LogOr xe ye t loc) =
   internaliseExp desc $
   E.If xe (E.Literal (E.BoolValue True) loc) ye t loc
 
+-- Handle equality and inequality specially, to treat the case of
+-- arrays.
+internaliseExp desc (E.BinOp cmp xe ye _ _)
+  | Just cmp_f <- isEqlOp cmp = do
+      xe' <- internaliseExp "x" xe
+      ye' <- internaliseExp "y" ye
+      rs <- zipWithM (doComparison cmp_f) xe' ye'
+      letTupExp' desc =<< foldBinOp I.LogAnd (constant True) rs
+  where isEqlOp E.NotEqual = Just $ \t x y -> do
+          eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+          letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
+        isEqlOp E.Equal = Just $ \t x y ->
+          letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+        isEqlOp _ = Nothing
+
+        doComparison cmp_f x y = do
+          x_t <- I.subExpType x
+          y_t <- I.subExpType y
+          case x_t of
+            I.Prim t -> cmp_f t x y
+            _ -> do
+              let x_dims = I.arrayDims x_t
+                  y_dims = I.arrayDims y_t
+              dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
+                letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) x_dim y_dim
+              shapes_match <- letSubExp "shapes_match" =<<
+                              foldBinOp I.LogAnd (constant True) dims_match
+              compare_elems_body <- runBodyBinder $ do
+                -- Flatten both x and y.
+                x_num_elems <- letSubExp "x_num_elems" =<<
+                               foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
+                x' <- letExp "x" $ I.BasicOp $ I.SubExp x
+                y' <- letExp "x" $ I.BasicOp $ I.SubExp y
+                x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] x'
+                y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] y'
+
+                -- Compare the elements.
+                cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
+                cmps <- letExp "cmps" $ I.Op $ I.Map [] x_num_elems cmp_lam [x_flat, y_flat]
+
+                -- Check that all were equal.
+                and_lam <- binOpLambda I.LogAnd I.Bool
+                all_equal <- letSubExp "all_equal" $ I.Op $
+                             I.Reduce [] x_num_elems Commutative and_lam [(constant True,cmps)]
+                return $ resultBody [all_equal]
+
+              letSubExp "arrays_equal" $
+                I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
+
 internaliseExp desc (E.BinOp bop xe ye _ _) = do
   xe' <- internaliseExp1 "x" xe
   ye' <- internaliseExp1 "y" ye
   case (E.typeOf xe, E.typeOf ye) of
     (E.Prim t1, E.Prim t2) ->
       internaliseBinOp desc bop xe' ye' t1 t2
-    _            ->
-      fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
+    _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
 internaliseExp desc (E.UnOp E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e

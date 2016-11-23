@@ -618,9 +618,6 @@ anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 anyNumberType :: [TypeBase Rank NoInfo ()]
 anyNumberType = anyIntType ++ anyFloatType
 
-anyPrimType :: [TypeBase Rank NoInfo ()]
-anyPrimType = anyNumberType ++ [Prim Bool]
-
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
@@ -1487,8 +1484,8 @@ checkBinOp Xor e1 e2 pos = checkPolyBinOp Xor anyIntType e1 e2 pos
 checkBinOp Bor e1 e2 pos = checkPolyBinOp Bor anyIntType e1 e2 pos
 checkBinOp LogAnd e1 e2 pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 pos
 checkBinOp LogOr e1 e2 pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 pos
-checkBinOp Equal e1 e2 pos = checkRelOp Equal anyPrimType e1 e2 pos
-checkBinOp NotEqual e1 e2 pos = checkRelOp NotEqual anyPrimType e1 e2 pos
+checkBinOp Equal e1 e2 pos = checkEqualOp Equal e1 e2 pos
+checkBinOp NotEqual e1 e2 pos = checkEqualOp NotEqual e1 e2 pos
 checkBinOp Less e1 e2 pos = checkRelOp Less anyNumberType e1 e2 pos
 checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
 checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
@@ -1500,6 +1497,15 @@ checkRelOp :: BinOp -> [TypeBase Rank NoInfo ()]
 checkRelOp op tl e1 e2 pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
+  _ <- unifyExpTypes e1' e2'
+  return $ BinOp op e1' e2' (Info $ Prim Bool) pos
+
+checkEqualOp :: BinOp
+             -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
+             -> TypeM Exp
+checkEqualOp op e1 e2 pos = do
+  e1' <- checkExp e1
+  e2' <- checkExp e2
   _ <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info $ Prim Bool) pos
 
