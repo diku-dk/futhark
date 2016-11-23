@@ -429,78 +429,80 @@ Exp  :: { UncheckedExp }
 
      | shape Atom { Shape $2 $1 }
 
-     | replicate Atom Atom { Replicate $2 $3 $1 }
+     | replicate Atom ArrayArg { Replicate $2 $3 $1 }
 
-     | reshape Atom Atom
+     | reshape Atom ArrayArg
                       { Reshape $2 $3 $1 }
 
-     | rearrange '(' NaturalInts ')' Atom
+     | rearrange '(' NaturalInts ')' ArrayArg
                       { Rearrange $3 $5 $1 }
 
-     | transpose Atom { Transpose $2 $1 }
+     | transpose ArrayArg
+                      { Transpose $2 $1 }
 
-     | rotate '@' NaturalInt Atom Atom { Rotate $3 $4 $5 $1 }
+     | rotate '@' NaturalInt Atom ArrayArg { Rotate $3 $4 $5 $1 }
 
-     | rotate Atom Atom { Rotate 0 $2 $3 $1 }
+     | rotate Atom ArrayArg
+                      { Rotate 0 $2 $3 $1 }
 
-     | split Atom Atom
+     | split Atom ArrayArg
                       { Split 0 $2 $3 $1 }
 
      | split '@' NaturalInt Atom Atom
                       { Split $3 $4 $5 $1 }
 
-     | concat SOACArgs
+     | concat ArrayArgs
                       { Concat 0 (fst $2) (snd $2) $1 }
 
-     | concat '@' NaturalInt SOACArgs
+     | concat '@' NaturalInt ArrayArgs
                       { Concat $3 (fst $4) (snd $4) $1 }
 
 
-     | reduce FunAbstr Atom Atom
+     | reduce FunAbstr Atom ArrayArg
                       { Reduce (commutativity $2) $2 $3 $4 $1 }
 
-     | reduceComm FunAbstr Atom Atom
+     | reduceComm FunAbstr Atom ArrayArg
                       { Reduce Commutative $2 $3 $4 $1 }
 
 
-     | map FunAbstr SOACArgs
+     | map FunAbstr ArrayArgs
                       { Map $2 (fst $3:snd $3) $1 }
 
-     | zipWith FunAbstr SOACArgs
+     | zipWith FunAbstr ArrayArgs
                       { Map $2 (fst $3:snd $3) $1 }
 
-     | scan FunAbstr Atom Atom
+     | scan FunAbstr Atom ArrayArg
                       { Scan $2 $3 $4 $1 }
 
-     | zip SOACArgs
+     | zip ArrayArgs
                       { Zip 0 (fst $2) (snd $2) $1 }
 
-     | zip '@' NaturalInt SOACArgs
+     | zip '@' NaturalInt ArrayArgs
                       { Zip $3 (fst $4) (snd $4) $1 }
 
-     | unzip Atom      { Unzip $2 [] $1 }
+     | unzip ArrayArg  { Unzip $2 [] $1 }
 
      | unsafe Exp     { Unsafe $2 $1 }
 
-     | filter FunAbstr Atom
+     | filter FunAbstr ArrayArg
                       { Filter $2 $3 $1 }
 
-     | partition '(' FunAbstrs ')' Atom
+     | partition '(' FunAbstrs ')' ArrayArg
                       { Partition $3 $5 $1 }
 
-     | copy Atom      { Copy $2 $1 }
+     | copy ArrayArg   { Copy $2 $1 }
 
-     | streamMap       FunAbstr Atom
+     | streamMap       FunAbstr ArrayArg
                          { Stream (MapLike InOrder)  $2 $3 $1 }
-     | streamMapPer    FunAbstr Atom
+     | streamMapPer    FunAbstr ArrayArg
                          { Stream (MapLike Disorder) $2 $3 $1 }
-     | streamRed       FunAbstr FunAbstr Atom Atom
+     | streamRed       FunAbstr FunAbstr Atom ArrayArg
                          { Stream (RedLike InOrder (commutativity $2) $2 $4) $3 $5 $1 }
-     | streamRedPer    FunAbstr FunAbstr Atom Atom
+     | streamRedPer    FunAbstr FunAbstr Atom ArrayArg
                          { Stream (RedLike Disorder Commutative $2 $4) $3 $5 $1 }
-     | streamSeq       FunAbstr Atom Atom
+     | streamSeq       FunAbstr Atom ArrayArg
                          { Stream (Sequential $3) $2 $4 $1 }
-     | write Atom Atom Atom
+     | write ArrayArg ArrayArg ArrayArg
                          { Write $2 $3 $4 $1 }
 
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
@@ -561,13 +563,13 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                                         Var (QualName (quals, name)) NoInfo loc
                                   }
 
-SOACArg :: { UncheckedExp }
-SOACArg : '[' Exps ']'      { ArrayLit $2 NoInfo $1 }
-        | Atom %prec bottom { $1 }
+ArrayArg :: { UncheckedExp }
+ArrayArg : '[' Exps ']'      { ArrayLit $2 NoInfo $1 }
+         | Atom %prec bottom { $1 }
 
-SOACArgs :: { (UncheckedExp, [UncheckedExp]) }
-SOACArgs : SOACArg          { ($1, []) }
-         | SOACArg SOACArgs { ($1, fst $2 : snd $2) }
+ArrayArgs :: { (UncheckedExp, [UncheckedExp]) }
+ArrayArgs : ArrayArg          { ($1, []) }
+          | ArrayArg ArrayArgs { ($1, fst $2 : snd $2) }
 
 
 LetExp :: { UncheckedExp }
