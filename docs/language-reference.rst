@@ -539,18 +539,19 @@ ways.  Their purpose is to give the compiler as much freedom and
 information is possible, in order to enable it to maximise the
 parallelism of the generated code.
 
-``map f a``
+``map f a_1 ... a_n``
 ~~~~~~~~~~~~~
 
-Apply ``f`` to every element of ``a`` and return the resulting array.
+Apply ``f`` to every element of ``a_1 ... a_n`` and return the
+resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
+``f`` is called with ``n`` arguments, where in the latter case it is
+called with a single ``n``-tuple argument.  In other languages, this
+form of ``map`` is often called ``zipWith``.
 
 ``zipWith f a_1 ... a_n``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Apply ``f`` to every element of ``a_1 ... a_n`` and return the
-resulting array.  Differs from ``map(f, zip a_1 ... a_n)`` in that
-``f`` is called with ``n`` arguments, where in the latter case it is
-called with a single ``n``-tuple argument.
+Alias for ``map`` for backwards compatibility.
 
 ``reduce f x a``
 ~~~~~~~~~~~~~~~~~~~

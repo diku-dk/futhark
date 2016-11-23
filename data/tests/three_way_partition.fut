@@ -15,7 +15,7 @@ fun main (vs: [n]f32, classes: [n]int): (int, int, int, []f32) =
   let is0 = scan (fn (a0,b0,c0) (a1,b1,c1) => (a0+a1,b0+b1,c0+c1)) (0,0,0) flags
   let (size_0, size_1, size_2) = is0[n-1]
   let filter_size = size_0 + size_1 + size_2
-  let is1 = zipWith (fn (ai,bi,ci) c =>
+  let is1 = map (fn (ai,bi,ci) c =>
                        if      c == 0 then ai - 1
                        else if c == 1 then size_0 + bi - 1
                        else if c == 2 then size_0 + size_1 + ci - 1

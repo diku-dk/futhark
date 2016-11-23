@@ -37,18 +37,18 @@ fun binom(expiry: int): f64 =
 
   let uPow = map (u**) (map f64 (iota(n+1)))
   let dPow = map (d**) (map f64 (map (n-) (iota(n+1))))
-  let st = map (f64(s0())*) (zipWith (*) uPow dPow)
+  let st = map (f64(s0())*) (map (*) uPow dPow)
   let finalPut = map (maxF64(f64(0.0))) (map (f64(strike())-) st) in
   loop (put = finalPut) = for (n+1) > i >= 1 do
     let (uPow_start, _) = split (i) uPow
     let (_, dPow_end) = split (n+1-i) dPow
-    let st = map (f64(s0())*) (zipWith (*) uPow_start dPow_end)
+    let st = map (f64(s0())*) (map (*) uPow_start dPow_end)
     let (_, put_tail) = split (1) put
     let (put_init, _) = split ((shape put)[0]-1) put in
     map (fn (x,y) => maxF64 x y)
     (zip
      (map (f64(strike())-) st)
-     (zipWith (+)
+     (map (+)
       (map (qUR*) (put_tail))
       (map (qDR*) (put_init)))) in
   put[0]

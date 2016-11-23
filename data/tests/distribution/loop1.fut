@@ -19,7 +19,7 @@ fun main(a: [n][m][k]int): ([n][k]int,[n]int) =
   let accnum = 1 in
   unzip(map (fn (a_r: [m][k]int): ([k]int,int)  =>
         loop((acc,accnum)) = for i < m do
-          (zipWith (+) acc (a_r[i]),
+          (map (+) acc (a_r[i]),
            accnum + accnum) in
         (acc, accnum)
      ) a)
@@ -29,8 +29,8 @@ fun main_distributed(a: [n][m][k]int): ([n][k]int,[n]int) =
   let acc_expanded = replicate n (replicate k 0)
   let accnum_expanded = replicate n 1 in
   loop((acc_expanded,accnum_expanded)) = for i < m do
-    unzip(zipWith (fn (acc: [k]int) (accnum: int) (a_r: [m][k]int): ([k]int,int)  =>
-                    (zipWith (+) acc (a_r[i]),
+    unzip(map (fn (acc: [k]int) (accnum: int) (a_r: [m][k]int): ([k]int,int)  =>
+                    (map (+) acc (a_r[i]),
                      accnum * accnum)
                  ) (acc_expanded) (accnum_expanded) a)
   in (acc_expanded,accnum_expanded)
