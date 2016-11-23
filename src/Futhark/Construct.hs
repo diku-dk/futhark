@@ -37,6 +37,7 @@ module Futhark.Construct
 
   , foldBinOp
   , binOpLambda
+  , cmpOpLambda
   , fullSlice
   , fullSliceNum
 
@@ -294,16 +295,26 @@ foldBinOp bop ne (e:es) =
 -- some point.)
 binOpLambda :: (MonadFreshNames m, Bindable lore) =>
                BinOp -> PrimType -> m (Lambda lore)
-binOpLambda bop t = do
+binOpLambda bop t = binLambda (BinOp bop) t t
+
+-- | As 'binOpLambda', but for 'CmpOp's.
+cmpOpLambda :: (MonadFreshNames m, Bindable lore) =>
+               CmpOp -> PrimType -> m (Lambda lore)
+cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
+
+binLambda :: (MonadFreshNames m, Bindable lore) =>
+             (SubExp -> SubExp -> BasicOp lore) -> PrimType -> PrimType
+          -> m (Lambda lore)
+binLambda bop arg_t ret_t = do
   x   <- newVName "x"
   y   <- newVName "y"
   (body, _) <- runBinderEmptyEnv $ insertStmsM $ do
-    res <- letSubExp "res" $ BasicOp $ BinOp bop (Var x) (Var y)
+    res <- letSubExp "res" $ BasicOp $ bop (Var x) (Var y)
     return $ resultBody [res]
   return Lambda {
-             lambdaParams     = [Param x (Prim t),
-                                 Param y (Prim t)]
-           , lambdaReturnType = [Prim t]
+             lambdaParams     = [Param x (Prim arg_t),
+                                 Param y (Prim arg_t)]
+           , lambdaReturnType = [Prim ret_t]
            , lambdaBody       = body
            }
 
