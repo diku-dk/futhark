@@ -25,10 +25,10 @@ fun main(m: int, as: *[n]int): (int,[]int,[][]int,[]f64,[]f64,[]int) =
                                  map (+c) (iota(m))
                              ) c
                  let y0= scan (fn (acc: []int) (x: []int): []int  =>
-                                 zipWith (+) acc x
+                                 map (+) acc x
                              ) (replicate m 0) x
                  let y = map  (fn (y0: []int): []int  =>
-                                 zipWith (+) acc y0
+                                 map (+) acc y0
                              ) y0
                  let z = map  (fn (y: []int): f64  =>
                                  let rs = map (fn (u: int): f64  =>

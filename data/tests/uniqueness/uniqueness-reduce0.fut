@@ -14,7 +14,7 @@ fun main(a: *[]int,b: []int): []int =
     reduce (fn (acc: (*[]int, []int)) (arr: ([]int, []int)): (*[]int, []int)  =>
              let (a1,b1) = acc
              let (a2,b2) = arr
-             in (zipWith (+) a1 a2,
-                 zipWith (*) b1 b2))
+             in (map (+) a1 a2,
+                 map (*) b1 b2))
            (a,b) (zip (copy(replicate 10 (iota 10))) (replicate 10 (iota 10)))
-  in zipWith (+) b x -- Should be OK, because only a has been consumed.
+  in map (+) b x -- Should be OK, because only a has been consumed.

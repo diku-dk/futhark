@@ -16,7 +16,7 @@
 -- structure distributed { DoLoop/Kernel 2 DoLoop 2 }
 
 fun combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =
-    zipWith (+) dr_row (zipWith (*) n_row vol_row)
+    map (+) dr_row (map (*) n_row vol_row)
 
 fun mkPrices(md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
 	   md_drifts: [num_dates][num_und]f64, noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
@@ -24,7 +24,7 @@ fun mkPrices(md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
                       map exp64 x
                   ) (map combineVs (zip noises (md_vols) (md_drifts)))
   in  scan (fn (x: []f64) (y: []f64): []f64  =>
-              zipWith (*) x y)
+              map (*) x y)
               md_starts e_rows
 
 fun main(n: int,

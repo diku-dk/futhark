@@ -146,8 +146,8 @@ fun tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
 fun main(myD:  [inner][3]f32, myDD: [inner][3]f32,
          myMu: [outer][inner]f32,  myVar: [outer][inner]f32,
          u:   *[outer][inner]f32,  dtInv: f32  ): *[][]f32 =
-  zipWith (fn mu_row var_row (u_row: *[]f32): *[inner]f32  =>
-             let abc = zipWith (fn mu var d dd: (f32,f32,f32)  =>
+  map (fn mu_row var_row (u_row: *[]f32): *[inner]f32  =>
+             let abc = map (fn mu var d dd: (f32,f32,f32)  =>
                                   ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                                   , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
                                   , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])

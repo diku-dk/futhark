@@ -463,8 +463,8 @@ Exp  :: { UncheckedExp }
                       { Reduce Commutative $2 $3 $4 $1 }
 
 
-     | map FunAbstr Atom
-                      { Map $2 [$3] $1 }
+     | map FunAbstr Atoms
+                      { Map $2 (fst $3:snd $3) $1 }
 
      | zipWith FunAbstr Atoms
                       { Map $2 (fst $3:snd $3) $1 }

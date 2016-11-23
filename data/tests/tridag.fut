@@ -38,7 +38,7 @@ fun tridag(nn:   int,
                             b: *[]f64, d: *[]f64,
                             a: []f64, c: []f64 ): ([]f64,[]f64) =
     if (nn == 1)
-    --then ( b, zipWith(fn f64 (f64 x, f64 y) => x / y, d, b) )
+    --then ( b, map(fn f64 (f64 x, f64 y) => x / y, d, b) )
     then (b, [d[0]/b[0]])
     else
         loop((b, d)) = for i < (nn-1) do

@@ -15,7 +15,7 @@
 
 fun main(n: int, m: int, k: int): [n][k]int =
   let a = replicate n (iota m) in
-  zipWith (fn (i: int) (r: [m]int): [k]int  =>
+  map (fn (i: int) (r: [m]int): [k]int  =>
             let x = reduce (+) 0 r
             in map (+i) (map (+x) (iota(k)))) (
           iota(n)) a

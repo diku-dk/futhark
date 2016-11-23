@@ -26,7 +26,7 @@ fun main(arr: []int): ([]int,[][][]int) =
                   map (fn (x: int): int  => 2*x*a
                      ) (iota(3) )
               ) arr
-  in (reduce (fn a b => zipWith (+) a b) (
+  in (reduce (fn a b => map (+) a b) (
              replicate 3 0) vs,
       map (fn (r: []int): [][]int  =>
              transpose(replicate 5 r)) vs)

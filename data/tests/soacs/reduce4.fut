@@ -4,6 +4,6 @@
 -- output { [9, 12] }
 fun main(as: [][m]int): []int =
   reduceComm(fn (acc: []int) (r: []int): []int  =>
-               zipWith (+) acc r)
+               map (+) acc r)
              (replicate m 0)
              as
