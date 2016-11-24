@@ -14,7 +14,9 @@ tuples and arrays.
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
 ``f64``.  If no suffix is given, integer literals are of type ``i32``,
-and decimal literals are of type ``f64``.
+and decimal literals are of type ``f64``.  Hexadecimal literals are
+supported by prefixing with ``0x``, and binary literals by prefixing
+with ``0b``.
 
 Numeric values can be converted between different types by using the
 desired type name as a function.  E.g., ``i32(1.0f32)`` would convert

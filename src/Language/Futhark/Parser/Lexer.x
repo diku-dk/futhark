@@ -11,12 +11,13 @@ module Language.Futhark.Parser.Lexer
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Data.Char (ord)
+import Data.Char (ord, toLower)
 import Data.Loc hiding (L)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Bits
 import Data.Function (fix)
+import Data.List
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
 
@@ -28,7 +29,8 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
 @stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+)|\n)
 @hexlit = 0[xX][0-9a-fA-F]+
 @declit = [0-9]+
-@intlit = @hexlit|@declit
+@binlit = 0[bB][01]+
+@intlit = @hexlit|@binlit|@declit
 @reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
 
 tokens :-
@@ -74,15 +76,15 @@ tokens :-
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
 
-  @intlit i8               { tokenM $ fmap I8LIT . tryRead "i8" . T.takeWhile (/='i') }
-  @intlit i16              { tokenM $ fmap I16LIT . tryRead "i16" . T.takeWhile (/='i') }
-  @intlit i32              { tokenM $ fmap I32LIT . tryRead "i32" . T.takeWhile (/='i') }
-  @intlit i64              { tokenM $ fmap I64LIT . tryRead "i64" . T.takeWhile (/='i') }
-  @intlit u8               { tokenM $ fmap U8LIT . tryRead "u8" . T.takeWhile (/='u') }
-  @intlit u16              { tokenM $ fmap U16LIT . tryRead "u16" . T.takeWhile (/='u') }
-  @intlit u32              { tokenM $ fmap U32LIT . tryRead "u32" . T.takeWhile (/='u') }
-  @intlit u64              { tokenM $ fmap U64LIT . tryRead "u64" . T.takeWhile (/='u') }
-  @intlit                  { tokenM $ fmap INTLIT . tryRead "int" }
+  @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.takeWhile (/='i') }
+  @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.takeWhile (/='i') }
+  @intlit i32              { tokenM $ return . I32LIT . readIntegral . T.takeWhile (/='i') }
+  @intlit i64              { tokenM $ return . I64LIT . readIntegral . T.takeWhile (/='i') }
+  @intlit u8               { tokenM $ return . U8LIT . readIntegral . T.takeWhile (/='u') }
+  @intlit u16              { tokenM $ return . U16LIT . readIntegral . T.takeWhile (/='u') }
+  @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.takeWhile (/='u') }
+  @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.takeWhile (/='u') }
+  @intlit                  { tokenM $ return . INTLIT . readIntegral }
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
@@ -171,6 +173,21 @@ tryRead desc s = case reads s' of
   [(x, "")] -> return x
   _         -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
   where s' = T.unpack s
+
+readIntegral :: Integral a => T.Text -> a
+readIntegral s
+  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s =
+      T.foldl (another hex_digits) 0 (T.drop 2 s)
+  | "0b" `T.isPrefixOf` s || "0b" `T.isPrefixOf` s =
+      T.foldl (another binary_digits) 0 (T.drop 2 s)
+  | otherwise =
+      T.foldl (another decimal_digits) 0 s
+      where another digits acc c = acc * base + maybe 0 fromIntegral (elemIndex (toLower c) digits)
+              where base = genericLength digits
+
+            binary_digits = ['0', '1']
+            decimal_digits = ['0'..'9']
+            hex_digits = decimal_digits ++ ['a'..'f']
 
 tokenC v  = tokenS $ const v
 
