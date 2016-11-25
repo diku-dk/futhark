@@ -687,6 +687,10 @@ internaliseExp desc (E.UnOp E.Signum e _) = do
 internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
   e' <- internaliseExp1 "tofloat_arg" e
   case E.typeOf e of
+    E.Prim E.Bool ->
+      letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
+                                (resultBody [floatConst float_to 0])
+                                [I.Prim $ I.FloatType float_to]
     E.Prim (E.Signed int_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
     E.Prim (E.Unsigned int_from) ->
@@ -698,6 +702,10 @@ internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
 internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
+    E.Prim E.Bool ->
+      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                (resultBody [intConst int_to 0])
+                                [I.Prim $ I.IntType int_to]
     E.Prim (E.Signed int_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
     E.Prim (E.Unsigned int_from) ->
@@ -709,6 +717,10 @@ internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
 internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
+    E.Prim E.Bool ->
+      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                (resultBody [intConst int_to 0])
+                                [I.Prim $ I.IntType int_to]
     E.Prim (E.Signed int_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
     E.Prim (E.Unsigned int_from) ->
