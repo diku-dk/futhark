@@ -22,7 +22,9 @@ Numeric values can be converted between different types by using the
 desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
 the floating-point number ``1.0`` to a 32-bit signed integer.
 
-Boolean literals are written ``true`` and ``false``.
+Boolean literals are written ``true`` and ``false``.  These can also
+be converted to numbers (1 for true, 0 for false) by using the desired
+numeric type as a function.
 
 Character and string literals are supported, but only as an alias for
 integers and arrays of integers, respectively.  There is no character

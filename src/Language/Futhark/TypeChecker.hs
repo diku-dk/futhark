@@ -927,15 +927,15 @@ checkExp (UnOp Signum e loc) = do
   return $ UnOp Signum e' loc
 
 checkExp (UnOp (ToFloat t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
   return $ UnOp (ToFloat t) e' loc
 
 checkExp (UnOp (ToSigned t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
   return $ UnOp (ToSigned t) e' loc
 
 checkExp (UnOp (ToUnsigned t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
   return $ UnOp (ToUnsigned t) e' loc
 
 checkExp (If e1 e2 e3 _ pos) =
