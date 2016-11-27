@@ -1098,7 +1098,7 @@ copyDWIMDest dest dest_is (Constant v) [] =
   ArrayDestination{} ->
     throwError $
     unwords ["copyDWIMDest: constant source", pretty v,
-             "cannot be written to array destination that is not CopyIntoMEmory"]
+             "cannot be written to array destination that is not CopyIntoMemory"]
   where bt = primValueType v
 
 copyDWIMDest dest dest_is (Var src) src_is = do
