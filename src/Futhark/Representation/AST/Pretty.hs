@@ -241,8 +241,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
         text "for" <+> ppr i <> text ":" <> ppr it <+> text "<" <+> align (ppr bound)
       WhileLoop cond ->
         text "while" <+> ppr cond
-    ) <+> text "do" </>
-    indent 2 (ppr loopbody)
+    ) <+> text "do" <+> nestedBlock "{" "}" (ppr loopbody)
     where (ctxparams, ctxinit) = unzip ctx
           (valparams, valinit) = unzip val
 
