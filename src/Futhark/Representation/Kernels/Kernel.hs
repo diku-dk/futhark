@@ -48,7 +48,7 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplifier.Lore
 import Futhark.Representation.Ranges
-  (Ranges, removeLambdaRanges, removeBodyRanges)
+  (Ranges, removeLambdaRanges, removeBodyRanges, mkBodyRanges)
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
@@ -124,6 +124,12 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     VName -- Chunk by this thread.
                   | KernelInPlaceReturn VName -- HACK!
                   deriving (Eq, Show, Ord)
+
+kernelResultSubExp :: KernelResult -> SubExp
+kernelResultSubExp (ThreadsReturn _ se) = se
+kernelResultSubExp (WriteReturn _ _ _ se) = se
+kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
+kernelResultSubExp (KernelInPlaceReturn v) = Var v
 
 data WhichThreads = AllThreads
                   | OneThreadPerGroup SubExp -- Which one.
@@ -413,7 +419,10 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
   addOpRanges = Range.runRangeM . mapKernelM add
     where add = KernelMapper return Range.analyseLambda
                 Range.analyseBody return return return addKernelBodyRanges
-          addKernelBodyRanges = error "addKernelBodyRanges"
+          addKernelBodyRanges (KernelBody attr stms res) =
+            Range.analyseStms stms $ \stms' ->
+            let attr' = (mkBodyRanges stms $ map kernelResultSubExp res, attr)
+            in return $ KernelBody attr' stms' res
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
   type OpWithWisdom (Kernel lore) = Kernel (Wise lore)
