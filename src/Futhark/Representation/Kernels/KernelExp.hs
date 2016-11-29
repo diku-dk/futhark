@@ -115,6 +115,7 @@ instance Attributes lore => FreeIn (GroupStreamLambda lore) where
                        map paramName (acc_params ++ arr_params)
 
 instance Ranged inner => RangedOp (KernelExp inner) where
+  opRanges SplitSpace{} = [(Just (ScalarBound 1), Nothing)]
   opRanges _ = repeat unknownRange
 
 instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
