@@ -16,7 +16,6 @@
 ;;
 ;;   + syntax highlighting
 ;;   + automatic indentation
-;;   + experimental flycheck support (currently disabled)
 ;;
 ;; To load futhark-mode automatically on Emacs startup, put this file in
 ;; your load path and require the mode, e.g. something like this:
@@ -157,12 +156,6 @@
                 "\\("
                 "\\(?:" futhark-type ws ",?" ws "\\)" "+"
                 "\\)")
-       . '(1 font-lock-type-face))
-      (,(concat "type" "[[:space:]]+"
-                "\\(?:" futhark-type ws ",?" ws "\\)" "+"
-                ws "=" ws
-                "\\(" ".+" "\\)"
-                )
        . '(1 font-lock-type-face))
       ;;; Function parameters types and return type.  This does not work with
       ;;; nested tuple types.
