@@ -166,9 +166,13 @@ internaliseStreamLambda :: InternaliseLambda
                         -> [I.SubExp]
                         -> [I.Type]
                         -> InternaliseM I.ExtLambda
-internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
+internaliseStreamLambda internaliseLambda asserting lam accs rowts = do
+  chunk_size <- newVName "chunk_size"
+  let chunk_param = I.Param chunk_size $ I.Prim int32
+      chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
   acctypes <- mapM I.subExpType accs
-  (params, body, rettype) <- internaliseLambda lam $ acctypes++arrtypes
+  (params, body, rettype) <- localScope (scopeOfLParams [chunk_param]) $
+                             internaliseLambda lam $ acctypes++chunktypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
   let acc_len = length acctypes
       lam_acc_tps = take acc_len rettype
@@ -211,7 +215,7 @@ internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
                 reses1 <- zipWithM assertProperShape acctype' lamacc_res
                 reses2 <- zipWithM assertProperShape arrtype' lamarr_res
                 return $ resultBody $ reses1 ++ reses2
-  return $ I.ExtLambda params body' $
+  return $ I.ExtLambda (chunk_param:params) body' $
             staticShapes acctypes ++ lam_arr_tps
 
 -- Given @k@ lambdas, this will return a lambda that returns an

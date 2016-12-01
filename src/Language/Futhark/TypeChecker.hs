@@ -1165,14 +1165,9 @@ checkExp (Partition funs arrexp pos) = do
   return $ Partition funs' arrexp' pos
 
 checkExp (Stream form lam arr pos) = do
-  let isArrayType arrtp =
-        case arrtp of
-          Array _ -> True
-          _       -> False
-  let lit_int0 = Literal (SignedValue $ Int32Value 0) pos
-  [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
+  (arr',arrarg) <- checkArg arr
   -- arr must have an array type
-  unless (isArrayType $ typeOf arr') $
+  unless (arrayRank (typeOf arr') > 0) $
     bad $ TypeError pos $ "Stream with input array of non-array type " ++ pretty (typeOf arr') ++ "."
   -- typecheck stream's lambdas
   (form', macctup) <-
@@ -1194,8 +1189,8 @@ checkExp (Stream form lam arr pos) = do
   --     check that aliases of `arr' are not used inside lam.
   let fakearg = (typeOf arr' `setAliases` HS.empty, mempty, srclocOf pos)
       (aas,faas) = case macctup of
-                    Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
-                    Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
+                    Nothing        -> ([arrarg],        [fakearg])
+                    Just(_,accarg) -> ([accarg, arrarg],[accarg, fakearg])
 
   lam' <- checkLambda lam aas
   (_, dflow)<- collectOccurences $ checkLambda lam faas
