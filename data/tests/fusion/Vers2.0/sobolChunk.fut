@@ -84,7 +84,7 @@ fun main(num_dates:  int, num_und: int, num_mc_it: int,
   let sobvctsz  = num_dates*num_und
   let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = streamMap (fn (chunk: int) (ns: []int): [][sobvctsz]f64  =>
+  let sobol_mat = streamMap (fn (ns: [chunk]int): [][sobvctsz]f64  =>
                                 sobolChunk(dir_vs, ns[0], chunk, sobvctsz)
                            ) (iota(num_mc_it) ) in
   reduce  (+) (0.0) (map  (fn (row: []f64): f64  => reduce (+) (0.0) row) (sobol_mat ) )

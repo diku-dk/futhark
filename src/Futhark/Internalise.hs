@@ -526,36 +526,27 @@ internaliseExp desc (E.Partition lams arr _) = do
     letTupExp desc . I.BasicOp . I.Split [] 0 partition_sizes
   where k = length lams
 
-internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body maybe_ret lamrtp pos) arr _) = do
-  arrs' <- internaliseExpToVars "stream_arr" arr
-  accs' <- case form of
-             E.MapLike _         -> return []
-             E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
-             E.Sequential  acc   -> internaliseExp "stream_acc" acc
-  lam'  <- bindingParams [chunk] $ \_ [chunk'] -> do
-             rowts <- mapM (fmap (I.stripArray 1) . lookupType) arrs'
-             let lam_arrs' = [ I.arrayOf t
-                              (I.Shape [I.Var $ I.paramName chunk'])
-                              NoUniqueness
-                              | t <- rowts
-                             ]
-                 lamf = AnonymFun remparams body maybe_ret lamrtp pos
-             lam'' <- internaliseStreamLambda internaliseLambda asserting lamf accs' lam_arrs'
-             return $ lam'' { extLambdaParams = fmap I.fromDecl chunk' : extLambdaParams lam'' }
+internaliseExp desc (E.Stream form lam arr _) = do
+  arrs <- internaliseExpToVars "stream_input" arr
+  accs <- case form of
+            E.MapLike _         -> return []
+            E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
+            E.Sequential  acc   -> internaliseExp "stream_acc" acc
+
+  rowts <- mapM (fmap I.rowType . lookupType) arrs
+  lam' <- internaliseStreamLambda internaliseLambda asserting lam accs rowts
+
   form' <- case form of
              E.MapLike o -> return $ I.MapLike o
              E.RedLike o comm lam0 _ -> do
-                 acctps <- mapM I.subExpType accs'
-                 outsz  <- arraysSize 0 <$> mapM lookupType arrs'
+                 acctps <- mapM I.subExpType accs
+                 outsz  <- arraysSize 0 <$> mapM lookupType arrs
                  let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
                  lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
-                 return $ I.RedLike o comm lam0' accs'
-             E.Sequential _ -> return $ I.Sequential accs'
-  w <- arraysSize 0 <$> mapM lookupType arrs'
-  letTupExp' desc $
-    I.Op $ I.Stream [] w form' lam' arrs'
-internaliseExp _ E.Stream{} =
-  fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
+                 return $ I.RedLike o comm lam0' accs
+             E.Sequential _ -> return $ I.Sequential accs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.Op $ I.Stream [] w form' lam' arrs
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
