@@ -179,8 +179,8 @@ import Language.Futhark.Parser.Lexer
 %left ','
 %left '||'
 %left '&&'
-%left '&' '^' '|'
 %left '<=' '>=' '>' '<' '==' '!='
+%left '&' '^' '|'
 
 %left '<<' '>>' '>>>'
 %left '+' '-'
@@ -616,8 +616,8 @@ DimIndex :: { UncheckedDimIndex }
          |     ':' Exp { DimSlice Nothing (Just $2) }
          |     ':'     { DimSlice Nothing Nothing }
 
-Exps : Exp ',' Exps { $1 : $3 }
-     | Exp          { [$1] }
+Exps : Exp ',' Exps %prec bottom { $1 : $3 }
+     | Exp          %prec bottom { [$1] }
 
 VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
 
