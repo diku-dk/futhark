@@ -126,14 +126,16 @@ renameFunOrTypeDec (ConstDec cd) = ConstDec <$> renameConst cd
 
 renameFun :: (Ord f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
-renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) = do
+renameFun (FunDef entry fname tdecl NoInfo params body pos) = do
   fname' <- replName Term fname
-  bindNames (concatMap (HS.toList . patNameSet) params) $
-    FunDef entry fname' <$>
-    (TypeDecl <$> renameUserType ret <*> pure NoInfo) <*>
-    mapM renamePattern params <*>
-    renameExp body <*>
-    pure pos
+  bindNames (concatMap (HS.toList . patNameSet) params) $ do
+    tdecl' <- case tdecl of
+      Just ret -> Just <$> renameUserType ret
+      Nothing -> return Nothing
+    FunDef entry fname' tdecl' NoInfo <$>
+      mapM renamePattern params <*>
+      renameExp body <*>
+      pure pos
 
 renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
                    TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
@@ -355,7 +357,9 @@ renameDimIndex :: (Ord f, Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
                   DimIndexBase NoInfo f
                -> RenameM f t (DimIndexBase NoInfo t)
 renameDimIndex (DimFix i)     = DimFix <$> renameExp i
-renameDimIndex (DimSlice i j) = DimSlice <$> renameExp i <*> renameExp j
+renameDimIndex (DimSlice i j) = DimSlice <$>
+                                maybe (return Nothing) (fmap Just . renameExp) i <*>
+                                maybe (return Nothing) (fmap Just . renameExp) j
 
 -- Take leading function and type declarations.
 chompDecs :: [DecBase NoInfo Name]

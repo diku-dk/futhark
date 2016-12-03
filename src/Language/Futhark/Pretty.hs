@@ -188,7 +188,7 @@ hasArrayLit _               = False
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndexBase ty vn) where
   ppr (DimFix e)     = ppr e
-  ppr (DimSlice i j) = ppr i <> text ":" <> ppr j
+  ppr (DimSlice i j) = maybe mempty ppr i <> text ":" <> maybe mempty ppr j
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
@@ -357,12 +357,15 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeDefB
 
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBase ty vn) where
-  ppr (FunDef entry name rettype args body _) =
+  ppr (FunDef entry name retdecl _ args body _) =
     text fun <+> ppr name <+>
-    spread (map ppParam args) <> text ":" <+> ppr rettype <+> equals </>
+    spread (map ppParam args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
     where fun | entry     = "entry"
               | otherwise = "fun"
+          retdecl' = case retdecl of
+                       Just rettype -> text ":" <+> ppr rettype
+                       Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstDefBase ty vn) where
   ppr (ConstDef name t e _) =

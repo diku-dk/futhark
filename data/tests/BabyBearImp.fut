@@ -48,10 +48,10 @@
 fun min(a: int) (b: int): int = if(a<b) then a else b
 
 fun floydSbsImp(n: int, d: *[][]int): [][]int =
-    let dT = copy(transpose(d)) in
-    loop (d) = for i < n do
+    let dT = transpose(d) in
+    loop (d = copy d) = for i < n do
         loop (d) = for j < n do
-            let sumrow = zipWith (+) d[i] dT[j]
+            let sumrow = map (+) d[i] dT[j]
             let minrow = reduce min 1200 sumrow
             let minrow = min d[i,j] minrow
             let d[i,j] = minrow

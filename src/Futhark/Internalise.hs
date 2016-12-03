@@ -1,4 +1,6 @@
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- |
 --
 -- This module implements a transformation from source to core
@@ -27,6 +29,7 @@ import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
+import Futhark.Construct
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -56,7 +59,7 @@ funsFromProg :: ProgBase f vn -> [FunDefBase f vn]
 funsFromProg prog = concatMap getFuns $ progDecs prog
   where getFuns (FunOrTypeDec (FunDec a)) = [a]
         getFuns (FunOrTypeDec (ConstDec (E.ConstDef name t e loc))) =
-          [E.FunDef False name t [] e loc]
+          [E.FunDef False name Nothing (expandedType t) [] e loc]
         getFuns (FunOrTypeDec TypeDec{}) = []
         getFuns (ModDec d) = concatMap getFuns $ modDecls d
         getFuns SigDec{} = []
@@ -67,7 +70,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
               runInternaliseM mempty .
               fmap HM.fromList . mapM inspect . funsFromProg
 
-  where inspect (E.FunDef entry fname (TypeDecl _ (Info rettype)) params _ _) =
+  where inspect (E.FunDef entry fname _ (Info rettype) params _ _) =
           bindingParams params $ \shapes values -> do
             (rettype', _, cm) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
@@ -97,7 +100,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
            (E.Prim t, map E.Prim paramts))
 
 internaliseFun :: E.FunDef -> InternaliseM I.FunDef
-internaliseFun (E.FunDef entry fname (TypeDecl _ (Info rettype)) params body loc) =
+internaliseFun (E.FunDef entry fname _ (Info rettype) params body loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _, cm) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
@@ -511,62 +514,39 @@ internaliseExp desc (E.Scan lam ne arr loc) =
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "filter_partition_flags" $ I.Op $ I.Map [] w lam' arrs
-  filter_size <- newIdent "filter_size" $ I.Prim int32
-  filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
-  addStm $ mkLet' [] (filter_size : filter_perms) $
-    I.BasicOp $ I.Partition [] 1 flags arrs
-  forM filter_perms $ \filter_perm ->
-    letSubExp desc $
-      I.BasicOp $ I.Split [] 0 [I.Var $ I.identName filter_size] $
-      I.identName filter_perm
+  (partition_sizes, partitioned) <- partitionWithSOACS 1 lam' arrs
+  fmap (map I.Var . concat . transpose) $ forM partitioned $
+    letTupExp desc . I.BasicOp . I.Split [] 0 partition_sizes
 
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "partition_partition_flags" $ I.Op $ I.Map [] w lam' arrs
-  fmap (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
-    partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Prim int32
-    partition_perm <- newIdent "partition_perm" =<< lookupType arr'
-    addStm $ mkLet' [] (partition_sizes++[partition_perm]) $
-      I.BasicOp $ I.Partition [] n flags [arr']
-    letTupExp desc $
-      I.BasicOp $ I.Split [] 0 (map (I.Var . I.identName) partition_sizes) $
-      I.identName partition_perm
-  where n = length lams + 1
+  (partition_sizes, partitioned) <- partitionWithSOACS (k+1) lam' arrs
+  fmap (map I.Var . concat . transpose) $ forM partitioned $
+    letTupExp desc . I.BasicOp . I.Split [] 0 partition_sizes
+  where k = length lams
 
-internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body maybe_ret lamrtp pos) arr _) = do
-  arrs' <- internaliseExpToVars "stream_arr" arr
-  accs' <- case form of
-             E.MapLike _         -> return []
-             E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
-             E.Sequential  acc   -> internaliseExp "stream_acc" acc
-  lam'  <- bindingParams [chunk] $ \_ [chunk'] -> do
-             rowts <- mapM (fmap (I.stripArray 1) . lookupType) arrs'
-             let lam_arrs' = [ I.arrayOf t
-                              (I.Shape [I.Var $ I.paramName chunk'])
-                              NoUniqueness
-                              | t <- rowts
-                             ]
-                 lamf = AnonymFun remparams body maybe_ret lamrtp pos
-             lam'' <- internaliseStreamLambda internaliseLambda asserting lamf accs' lam_arrs'
-             return $ lam'' { extLambdaParams = fmap I.fromDecl chunk' : extLambdaParams lam'' }
+internaliseExp desc (E.Stream form lam arr _) = do
+  arrs <- internaliseExpToVars "stream_input" arr
+  accs <- case form of
+            E.MapLike _         -> return []
+            E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
+            E.Sequential  acc   -> internaliseExp "stream_acc" acc
+
+  rowts <- mapM (fmap I.rowType . lookupType) arrs
+  lam' <- internaliseStreamLambda internaliseLambda asserting lam accs rowts
+
   form' <- case form of
              E.MapLike o -> return $ I.MapLike o
              E.RedLike o comm lam0 _ -> do
-                 acctps <- mapM I.subExpType accs'
-                 outsz  <- arraysSize 0 <$> mapM lookupType arrs'
+                 acctps <- mapM I.subExpType accs
+                 outsz  <- arraysSize 0 <$> mapM lookupType arrs
                  let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
                  lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
-                 return $ I.RedLike o comm lam0' accs'
-             E.Sequential _ -> return $ I.Sequential accs'
-  w <- arraysSize 0 <$> mapM lookupType arrs'
-  letTupExp' desc $
-    I.Op $ I.Stream [] w form' lam' arrs'
-internaliseExp _ E.Stream{} =
-  fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
+                 return $ I.RedLike o comm lam0' accs
+             E.Sequential _ -> return $ I.Sequential accs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.Op $ I.Stream [] w form' lam' arrs
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
@@ -597,14 +577,62 @@ internaliseExp desc (E.BinOp E.LogOr xe ye t loc) =
   internaliseExp desc $
   E.If xe (E.Literal (E.BoolValue True) loc) ye t loc
 
+-- Handle equality and inequality specially, to treat the case of
+-- arrays.
+internaliseExp desc (E.BinOp cmp xe ye _ _)
+  | Just cmp_f <- isEqlOp cmp = do
+      xe' <- internaliseExp "x" xe
+      ye' <- internaliseExp "y" ye
+      rs <- zipWithM (doComparison cmp_f) xe' ye'
+      letTupExp' desc =<< foldBinOp I.LogAnd (constant True) rs
+  where isEqlOp E.NotEqual = Just $ \t x y -> do
+          eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+          letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
+        isEqlOp E.Equal = Just $ \t x y ->
+          letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+        isEqlOp _ = Nothing
+
+        doComparison cmp_f x y = do
+          x_t <- I.subExpType x
+          y_t <- I.subExpType y
+          case x_t of
+            I.Prim t -> cmp_f t x y
+            _ -> do
+              let x_dims = I.arrayDims x_t
+                  y_dims = I.arrayDims y_t
+              dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
+                letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) x_dim y_dim
+              shapes_match <- letSubExp "shapes_match" =<<
+                              foldBinOp I.LogAnd (constant True) dims_match
+              compare_elems_body <- runBodyBinder $ do
+                -- Flatten both x and y.
+                x_num_elems <- letSubExp "x_num_elems" =<<
+                               foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
+                x' <- letExp "x" $ I.BasicOp $ I.SubExp x
+                y' <- letExp "x" $ I.BasicOp $ I.SubExp y
+                x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] x'
+                y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] y'
+
+                -- Compare the elements.
+                cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
+                cmps <- letExp "cmps" $ I.Op $ I.Map [] x_num_elems cmp_lam [x_flat, y_flat]
+
+                -- Check that all were equal.
+                and_lam <- binOpLambda I.LogAnd I.Bool
+                all_equal <- letSubExp "all_equal" $ I.Op $
+                             I.Reduce [] x_num_elems Commutative and_lam [(constant True,cmps)]
+                return $ resultBody [all_equal]
+
+              letSubExp "arrays_equal" $
+                I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
+
 internaliseExp desc (E.BinOp bop xe ye _ _) = do
   xe' <- internaliseExp1 "x" xe
   ye' <- internaliseExp1 "y" ye
   case (E.typeOf xe, E.typeOf ye) of
     (E.Prim t1, E.Prim t2) ->
       internaliseBinOp desc bop xe' ye' t1 t2
-    _            ->
-      fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
+    _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
 internaliseExp desc (E.UnOp E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e
@@ -650,6 +678,10 @@ internaliseExp desc (E.UnOp E.Signum e _) = do
 internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
   e' <- internaliseExp1 "tofloat_arg" e
   case E.typeOf e of
+    E.Prim E.Bool ->
+      letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
+                                (resultBody [floatConst float_to 0])
+                                [I.Prim $ I.FloatType float_to]
     E.Prim (E.Signed int_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
     E.Prim (E.Unsigned int_from) ->
@@ -661,6 +693,10 @@ internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
 internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
+    E.Prim E.Bool ->
+      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                (resultBody [intConst int_to 0])
+                                [I.Prim $ I.IntType int_to]
     E.Prim (E.Signed int_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
     E.Prim (E.Unsigned int_from) ->
@@ -672,6 +708,10 @@ internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
 internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
+    E.Prim E.Bool ->
+      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                (resultBody [intConst int_to 0])
+                                [I.Prim $ I.IntType int_to]
     E.Prim (E.Signed int_from) ->
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
     E.Prim (E.Unsigned int_from) ->
@@ -741,8 +781,8 @@ internaliseDimIndex loc w (E.DimFix i) = do
   cs <- assertingOne $ boundsCheck loc w i'
   return (I.DimFix i', cs)
 internaliseDimIndex loc w (E.DimSlice i j) = do
-  i' <- internaliseExp1 "i" i
-  j' <- internaliseExp1 "j" j
+  i' <- maybe (return (constant (0::Int32))) (internaliseExp1 "i") i
+  j' <- maybe (return w) (internaliseExp1 "j") j
   cs_i <- assertingOne $ boundsCheck loc w i'
   cs_j <- assertingOne $ do
     wp1 <- letSubExp "wp1" $ BasicOp $ I.BinOp (Add Int32) j' (constant (1::Int32))
@@ -1091,3 +1131,85 @@ shadowIdentsInExp substs bnds res = do
   case res' of
     [se] -> return se
     _    -> fail "Internalise.shadowIdentsInExp: something went very wrong"
+
+-- Implement partitioning using maps, scans and writes.
+partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], [I.VName])
+partitionWithSOACS k lam arrs = do
+  arr_ts <- mapM lookupType arrs
+  let w = arraysSize 0 arr_ts
+  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Map [] w lam arrs
+  (classes, increments) <- case classes_and_increments of
+                             classes : increments -> return (classes, take k increments)
+                             _                    -> fail "partitionWithSOACS"
+
+  add_lam_x_params <-
+    replicateM k $ I.Param <$> newVName "x" <*> pure (I.Prim int32)
+  add_lam_y_params <-
+    replicateM k $ I.Param <$> newVName "y" <*> pure (I.Prim int32)
+  add_lam_body <- runBodyBinder $
+                  localScope (scopeOfLParams $ add_lam_x_params++add_lam_y_params) $
+    fmap resultBody $ forM (zip add_lam_x_params add_lam_y_params) $ \(x,y) ->
+      letSubExp "z" $ I.BasicOp $ I.BinOp (I.Add Int32)
+      (I.Var $ paramName x) (I.Var $ paramName y)
+  let add_lam = I.Lambda { I.lambdaBody = add_lam_body
+                         , I.lambdaParams = add_lam_x_params ++ add_lam_y_params
+                         , I.lambdaReturnType = replicate k $ I.Prim int32
+                         }
+      scan_input = zip (repeat $ constant (0::Int32)) increments
+
+  all_offsets <- letTupExp "offsets" $ I.Op $ I.Scan [] w add_lam scan_input
+
+  -- We have the offsets for each of the partitions, but we also need
+  -- the total sizes, which are the last elements in the offests.  We
+  -- just have to be careful in case the array is empty.
+  last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int32) w $ constant (1::Int32)
+  nonempty_body <- runBodyBinder $ fmap resultBody $ forM all_offsets $ \offset_array ->
+    letSubExp "last_offset" $ I.BasicOp $ I.Index [] offset_array [I.DimFix last_index]
+  let empty_body = resultBody $ replicate k $ constant (0::Int32)
+  is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int32) w $ constant (0::Int32)
+  sizes <- letTupExp "partition_size" $
+           I.If is_empty empty_body nonempty_body $ replicate k $ I.Prim int32
+
+  -- Compute total size of all partitions.
+  sum_of_partition_sizes <- letSubExp "sum_of_partition_sizes" =<<
+                            foldBinOp (Add Int32) (constant (0::Int32)) (map I.Var sizes)
+
+  -- Create scratch arrays for the result.
+  blanks <- forM arr_ts $ \arr_t ->
+    letExp "partition_dest" $ I.BasicOp $
+    Scratch (elemType arr_t) (sum_of_partition_sizes : drop 1 (I.arrayDims arr_t))
+
+  -- Now write into the result.
+  write_lam <- do
+    c_param <- I.Param <$> newVName "c" <*> pure (I.Prim int32)
+    offset_params <- replicateM k $ I.Param <$> newVName "offset" <*> pure (I.Prim int32)
+    value_params <- forM arr_ts $ \arr_t ->
+      I.Param <$> newVName "v" <*> pure (I.rowType arr_t)
+    (offset, offset_stms) <- collectStms $ mkOffsetLambdaBody (map I.Var sizes)
+                             (I.Var $ paramName c_param) 0 offset_params
+    return I.Lambda { I.lambdaParams = c_param : offset_params ++ value_params
+                    , I.lambdaReturnType = replicate (length arr_ts) (I.Prim int32) ++
+                                           map I.rowType arr_ts
+                    , I.lambdaBody = mkBody offset_stms $
+                                     replicate (length arr_ts) offset ++
+                                     map (I.Var . paramName) value_params
+                    }
+  results <- letTupExp "partition_res" $ I.Op $ I.Write [] w
+             write_lam (classes : all_offsets ++ arrs) $ zip (repeat sum_of_partition_sizes) blanks
+  return (map I.Var sizes, results)
+  where
+    mkOffsetLambdaBody :: [SubExp]
+                       -> SubExp
+                       -> Int
+                       -> [I.LParam]
+                       -> InternaliseM SubExp
+    mkOffsetLambdaBody _ _ _ [] =
+      return $ constant (-1::Int32)
+    mkOffsetLambdaBody sizes c i (p:ps) = do
+      is_this_one <- letSubExp "is_this_one" $ I.BasicOp $ I.CmpOp (CmpEq int32) c (constant i)
+      next_one <- mkOffsetLambdaBody sizes c (i+1) ps
+      this_one <- letSubExp "this_offset" =<<
+                  foldBinOp (Add Int32) (constant (-1::Int32))
+                  (I.Var (paramName p) : take i sizes)
+      letSubExp "total_res" $ I.If is_this_one
+        (resultBody [this_one]) (resultBody [next_one]) [I.Prim int32]

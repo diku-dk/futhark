@@ -9,6 +9,6 @@
 fun main(a1: [][]int, a2: [][]int): [][]int =
   let b = map (fn (row: ([]int,[]int)): []int  =>
                 let (x,y) = row in
-                zipWith (+) x y) (
+                map (+) x y) (
               zip a1 a2) in
   b

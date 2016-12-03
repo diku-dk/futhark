@@ -11,7 +11,7 @@ fun take(n: int, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in fi
 
 fun fftmp(num_paths: int, md_c: [][]f64) (zi: []f64): []f64 =
     map (fn (j: int): f64  =>
-            let x = zipWith (*) (take(j+1,zi)) (take(j+1,unsafe md_c[j]))
+            let x = map (*) (take(j+1,zi)) (take(j+1,unsafe md_c[j]))
             in  reduce (+) (0.0) x
          ) (iota(num_paths)
        )
@@ -20,14 +20,14 @@ fun correlateDeltas(num_paths: int, md_c: [][]f64, zds: [][]f64): [][]f64 =
     map (fftmp(num_paths, md_c)) zds
 
 fun combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =
-    zipWith (+) dr_row (zipWith (*) n_row vol_row)
+    map (+) dr_row (map (*) n_row vol_row)
 
 fun mkPrices(md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
 	   md_drifts: [num_dates][num_und]f64, noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
     let e_rows = map (fn (x: []f64): []f64  => map exp64 x) (
                       map combineVs (zip noises (md_vols) (md_drifts))
                     )
-    in  scan (fn (x: []f64) (y: []f64): []f64  => zipWith (*) x y) (
+    in  scan (fn (x: []f64) (y: []f64): []f64  => map (*) x y) (
               md_starts) (e_rows )
 
 --[num_dates, num_paths]

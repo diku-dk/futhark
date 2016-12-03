@@ -250,6 +250,7 @@ expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations) body) =
               SE.STimes se_diff $ SE.MaxMin False
               [SE.subExpToScalExp iterations $ IntType Int32, 0]
         returnedBound _ _ = Nothing
+expRanges (Op ranges) = opRanges ranges
 expRanges e =
   replicate (expExtTypeSize e) unknownRange
 

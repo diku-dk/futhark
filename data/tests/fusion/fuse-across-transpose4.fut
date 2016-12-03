@@ -7,6 +7,6 @@ fun main(a: [n][m]int, b: [n][m]int): [][]int =
   let b2 = map (fn (r: []int): [n]int  => map (+1) r) (transpose(b))
   let c  = map (fn (rp: ([]int,[]int)): [n]int  =>
                  let (rx,ry) = rp in
-                 zipWith (+) rx ry)
+                 map (+) rx ry)
                  (zip a2 b2) in
   c

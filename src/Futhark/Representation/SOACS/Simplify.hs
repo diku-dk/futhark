@@ -174,6 +174,7 @@ topDownRules = [removeReplicateMapping,
 
 bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
+                 removeDeadWrite,
                  removeUnnecessaryCopy,
                  liftIdentityMapping
                 ]
@@ -294,6 +295,23 @@ removeDeadMapping (_, used) (Let pat _ (Op (Map cs width fun arrs))) =
      then letBind_ (Pattern [] pat') $ Op $ Map cs width fun' arrs
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
+
+-- | If we are writing to an array that is never used, get rid of it.
+removeDeadWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
+removeDeadWrite (_, used) (Let pat _ (Op (Write cs w fun arrs dests))) =
+  let (i_ses, v_ses) = splitAt (length dests) $ bodyResult $ lambdaBody fun
+      (i_ts, v_ts) = splitAt (length dests) $ lambdaReturnType fun
+      isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
+      (pat', i_ses', v_ses', i_ts', v_ts', dests') =
+        unzip6 $ filter isUsed $
+        zip6 (patternElements pat) i_ses v_ses i_ts v_ts dests
+      fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = i_ses' ++ v_ses' }
+                 , lambdaReturnType = i_ts' ++ v_ts'
+                 }
+  in if pat /= Pattern [] pat'
+     then letBind_ (Pattern [] pat') $ Op $ Write cs w fun' arrs dests'
+     else cannotSimplify
+removeDeadWrite _ _ = cannotSimplify
 
 simplifyClosedFormRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
 simplifyClosedFormRedomap vtable (Let pat _ (Op (Redomap _ _ _ _ innerfun acc arr))) =

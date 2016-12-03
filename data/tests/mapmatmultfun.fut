@@ -16,10 +16,10 @@
 
 fun matmult(x: [n][m]int) (y: [m][p]int): [n][p]int =
   map (fn xr =>
-         map (fn yc => reduce (+) 0 (zipWith (*) xr yc))
+         map (fn yc => reduce (+) 0 (map (*) xr yc))
        (transpose y))
   x
 
 
 fun main(xs: [k][n][m]int, ys: [k][m][p]int): [k][n][p]int =
-  zipWith matmult xs ys
+  map matmult xs ys

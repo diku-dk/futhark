@@ -54,7 +54,7 @@ fun min1(a: []int, b: []int): []int = map (fn (x,y) => min x y) (zip a b)
 fun redmin1(a:  []int): int = reduce min 1200 a
 fun redmin2(a: [][]int): []int = map    redmin1 a
 
-fun plus1(a:  []int,  b: []int): []int = zipWith (+) a b
+fun plus1(a:  []int,  b: []int): []int = map (+) a b
 fun plus2(a: [][]int, b: [][]int): [][]int = map plus1 (zip a b)
 
 fun replin(len: int) (a: []int): [][]int = replicate len a

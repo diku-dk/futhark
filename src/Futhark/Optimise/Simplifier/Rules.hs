@@ -614,10 +614,6 @@ simplifyIndexing vtable seType ocs idd inds consuming =
             isIndex _          = False
 
     Just (Copy src)
-      -- We cannot just remove a copy of a rearrange, because it might
-      -- be important for coalescing.
-      | Just (BasicOp Rearrange{}) <- defOf src ->
-          Nothing
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
         not consuming ->
@@ -880,19 +876,27 @@ simplifyScalExp vtable (Let pat _ e) = do
   res <- SE.toScalExp (`ST.lookupScalExp` vtable) e
   case res of
     -- If the sufficient condition is 'True', then it statically succeeds.
-    Just se@(SE.RelExp SE.LTH0 _)
-      | Right (SE.Val (BoolValue True)) <- mkDisj <$> AS.mkSuffConds se ranges ->
+    Just se
+      | not $ isConstant se,
+        Just ses <- lth0s se,
+        Right True <- and <$> mapM truish ses ->
         letBind_ pat $ BasicOp $ SubExp $ Constant $ BoolValue True
-      | SE.Val val <- AS.simplify se ranges ->
-        letBind_ pat $ BasicOp $ SubExp $ Constant val
-    Just se@(SE.RelExp SE.LEQ0 x)
-      | let se' = SE.RelExp SE.LTH0 $ x - 1,
-        Right (SE.Val (BoolValue True)) <- mkDisj <$> AS.mkSuffConds se' ranges ->
-        letBind_ pat $ BasicOp $ SubExp $ Constant $ BoolValue True
-      | SE.Val val <- AS.simplify se ranges ->
+      | not $ isConstant se,
+        SE.Val val <- AS.simplify se ranges ->
         letBind_ pat $ BasicOp $ SubExp $ Constant val
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
+        lth0s se@(SE.RelExp SE.LTH0 _) = Just [se]
+        lth0s (SE.RelExp SE.LEQ0 x) = Just [SE.RelExp SE.LTH0 $ x - 1]
+        lth0s (SE.SLogAnd x y) = (++) <$> lth0s x <*> lth0s y
+        lth0s _ = Nothing
+
+        isConstant SE.Val{} = True
+        isConstant _        = False
+
+        truish se =
+          (SE.Val (BoolValue True)==) . mkDisj <$> AS.mkSuffConds se ranges
+
         mkDisj []     = SE.Val $ BoolValue False
         mkDisj (x:xs) = foldl SE.SLogOr (mkConj x) $ map mkConj xs
         mkConj []     = SE.Val $ BoolValue True
