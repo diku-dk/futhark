@@ -1,5 +1,4 @@
--- Nasty program that tries to leak memory.  If we can run this
--- without leaking, then we're doing well.
+-- Test1 Memory-Block Merging
 -- ==
 -- input { [0, 3, 5, 7, 9] }
 -- output { [6291264i32, 6291456i32, 6291584i32, 6291712i32, 6291840i32, 0i32, 6i32, 10i32, 14i32, 18i32]}
