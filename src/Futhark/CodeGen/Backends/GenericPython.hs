@@ -445,8 +445,8 @@ printPrimStm val t =
     IntType Int32 -> p "%di32"
     IntType Int64 -> p "%di64"
     Bool -> If val
-      [Exp $ simpleCall "sys.stdout.write" [StringLiteral "True"]]
-      [Exp $ simpleCall "sys.stdout.write" [StringLiteral "False"]]
+      [Exp $ simpleCall "sys.stdout.write" [StringLiteral "true"]]
+      [Exp $ simpleCall "sys.stdout.write" [StringLiteral "false"]]
     Cert -> Exp $ simpleCall "sys.stdout.write" [StringLiteral "Checked"]
     FloatType Float32 -> p "%.6ff32"
     FloatType Float64 -> p "%.6ff64"
