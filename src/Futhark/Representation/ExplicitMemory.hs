@@ -229,6 +229,7 @@ data MemBound u = Scalar PrimType
                  -- ^ The corresponding identifier is a
                  -- scalar.  It must not be of array type.
                | MemMem SubExp Space
+                 -- ^ for an allocation + existential memory blook.
                | ArrayMem PrimType Shape u VName IxFun
                  -- ^ The array is stored in the named memory block,
                  -- and with the given index function.  The index

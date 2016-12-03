@@ -47,6 +47,10 @@ data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                       (Lambda lore) [(SubExp,VName)]
                     | GroupStream SubExp SubExp
                       (GroupStreamLambda lore) [SubExp] [VName]
+                      -- Morally a StreamSeq
+                      -- First  SubExp is the outersize of the array
+                      -- Second SubExp is the maximal chunk size
+                      -- [SubExp] is the accumulator, [VName] are the input arrays
                     deriving (Eq, Ord, Show)
 
 data GroupStreamLambda lore = GroupStreamLambda

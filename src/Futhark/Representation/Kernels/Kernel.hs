@@ -82,6 +82,7 @@ data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceStructure :: SpaceStructure
                                }
                  deriving (Eq, Show, Ord)
+-- ^ first three bound in the kernel, the rest are params to kernel
 
 data SpaceStructure = FlatSpace
                       [(VName, SubExp)] -- gtids and dim sizes

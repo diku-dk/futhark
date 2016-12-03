@@ -81,7 +81,9 @@ type PatElem lore = PatElemT (LetAttr lore)
 -- | A pattern is conceptually just a list of names and their types.
 data PatternT attr =
   Pattern { patternContextElements :: [PatElemT attr]
+            -- ^ existential context (sizes and memory blocks)
           , patternValueElements   :: [PatElemT attr]
+            -- ^ "real" values
           }
   deriving (Ord, Show, Eq)
 
