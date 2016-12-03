@@ -41,6 +41,17 @@ import qualified Futhark.TypeCheck as TC
 data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                     | SplitSpace StreamOrd SubExp SubExp SubExp SubExp
                     | Combine [(VName,SubExp)] [Type] SubExp (Body lore)
+                      -- ^ @Combine cspace ts active body@ will combine values
+                      -- from threads to a single (multidimensional) array.
+                      -- If we define @(is, ws) = unzip cspace@, then @ws@
+                      -- is defined the same accross all threads.
+                      -- Only threads for which
+                      -- @active && all (\(i,w) -> i < w) cspace@ is true will
+                      -- provide a value (of type @ts@), which is generated
+                      -- by @body@.
+                      --
+                      -- The result of a combine is always stored in local
+                      -- memory (OpenCL terminology)
                     | GroupReduce SubExp
                       (Lambda lore) [(SubExp,VName)]
                     | GroupScan SubExp
@@ -108,6 +119,7 @@ instance Attributes lore => FreeIn (GroupStreamLambda lore) where
                        map paramName (acc_params ++ arr_params)
 
 instance Ranged inner => RangedOp (KernelExp inner) where
+  opRanges SplitSpace{} = [(Just (ScalarBound 1), Nothing)]
   opRanges _ = repeat unknownRange
 
 instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where

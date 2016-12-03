@@ -7,4 +7,4 @@
 --   285
 -- }
 fun main(a: []int, b: []int): int =
-    reduce (+) 0 (zipWith (*) a b)
+    reduce (+) 0 (map (*) a b)

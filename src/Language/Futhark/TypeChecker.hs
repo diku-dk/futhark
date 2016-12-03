@@ -77,6 +77,7 @@ data TypeError =
   | FunctionIsNotValue SrcLoc (QualName Name)
   | UniqueConstType SrcLoc Name (TypeBase Rank NoInfo ())
   | EntryPointConstReturnDecl SrcLoc Name (QualName Name)
+  | UndeclaredFunctionReturnType SrcLoc (QualName Name)
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -199,13 +200,17 @@ instance Show TypeError where
     "Use of constant " ++ pretty cname ++
     " to annotate return type of entry point " ++ pretty fname ++
     " at " ++ locStr loc ++ " is not allowed."
+  show (UndeclaredFunctionReturnType loc fname) =
+    "Function '" ++ pretty fname ++ "' with no return type declaration called at " ++
+    locStr loc
 
 -- | Return type and a list of argument types.
 type FunStm = (StructTypeBase VName, [StructTypeBase VName])
 type TypeStm = TypeBase ShapeDecl NoInfo VName
 data Stm = BoundV Type
-             | BoundF FunStm
-             | WasConsumed SrcLoc
+         | BoundF FunStm
+         | UnknownF
+         | WasConsumed SrcLoc
 
 data Usage = Consumed SrcLoc
            | Observed SrcLoc
@@ -425,12 +430,14 @@ noUnique :: TypeM a -> TypeM a
 noUnique = local (\env -> env { envVtable = HM.map set $ envVtable env})
   where set (BoundV t)        = BoundV $ t `setUniqueness` Nonunique
         set (BoundF f)        = BoundF f
+        set UnknownF          = UnknownF
         set (WasConsumed loc) = WasConsumed loc
 
 onlySelfAliasing :: TypeM a -> TypeM a
 onlySelfAliasing = local (\env -> env { envVtable = HM.mapWithKey set $ envVtable env})
   where set k (BoundV t)        = BoundV $ t `addAliases` HS.intersection (HS.singleton k)
         set _ (BoundF f)        = BoundF f
+        set _ UnknownF          = UnknownF
         set _ (WasConsumed loc) = WasConsumed loc
 
 binding :: [Ident] -> TypeM a -> TypeM a
@@ -518,6 +525,7 @@ checkVar qn@(QualName (_, name)) loc = do
     Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc (baseName name)
                     | otherwise -> return (name, t)
     Just (BoundF _) -> bad $ FunctionIsNotValue loc (untagQualName qn)
+    Just UnknownF -> bad $ FunctionIsNotValue loc (untagQualName qn)
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
 lookupFunction :: QualName VName -> SrcLoc -> TypeM FunStm
@@ -528,6 +536,7 @@ lookupFunction qn@(QualName (_, name)) loc = do
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
     Just (BoundV t) -> bad $ ValueIsNotFunction loc (untagQualName qn) t
     Just (BoundF f) -> return f
+    Just UnknownF -> bad $ UndeclaredFunctionReturnType loc (untagQualName qn)
 
 lookupType :: QualName VName -> SrcLoc -> TypeM TypeStm
 lookupType qn@(QualName (_, name)) loc =
@@ -649,7 +658,7 @@ buildScopeFromDecs decs =
     paramDeclaredType _ =
       Nothing
 
-    expandFun scope vtable (FunDef _ fname (TypeDecl ret NoInfo) params _ _) = do
+    expandFun scope vtable (FunDef _ fname (Just ret) _ params _ _) = do
       argtypes <- forM params $ \param ->
         case paramDeclaredType param of
           Just t -> return t
@@ -662,6 +671,8 @@ buildScopeFromDecs decs =
       ret' <- expandType look ret
       argtypes' <- mapM (expandType look) argtypes
       return $ HM.insert fname (BoundF (ret' , argtypes')) vtable
+    expandFun _ vtable (FunDef _ fname Nothing _ _ _ _) =
+      return $ HM.insert fname UnknownF vtable
 
     expandConst scope vtable (ConstDef cname (TypeDecl t NoInfo) _ _) = do
       let look tname tloc =
@@ -687,7 +698,7 @@ checkProg' decs = do
 checkForDuplicateDecs :: [DecBase NoInfo VName] -> TypeM ()
 checkForDuplicateDecs =
   foldM_ f mempty
-  where f known (FunOrTypeDec (FunDec (FunDef _ name _ _ _ loc))) =
+  where f known (FunOrTypeDec (FunDec (FunDef _ name _ _ _ _ loc))) =
           case HM.lookup (name, "function") known of
             Just loc' ->
               bad $ DupDefinitionError (baseName name) loc loc'
@@ -772,30 +783,37 @@ checkConst (ConstDef name t e loc) = do
         anythingUnique et         = unique et
 
 checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
-checkFun (FunDef entry fname rettype params body loc) =
+checkFun (FunDef entry fname maybe_retdecl NoInfo params body loc) =
   bindingPatterns (zip params $ repeat NoneInferred) $ \params' -> do
-    rettype' <- checkTypeDecl rettype
+    maybe_retdecl' <- case maybe_retdecl of
+                        Just rettype -> Just <$> checkUserType rettype
+                        Nothing      -> return Nothing
 
-    body' <- checkFunBody fname body (Just rettype') loc
-    let rettype_structural = toStructural $ unInfo $ expandedType rettype'
-
-    checkReturnAlias rettype_structural params' $ typeOf body'
+    body' <- checkFunBody fname body maybe_retdecl' loc
+    rettype <- case maybe_retdecl' of
+      Just retdecl' -> do
+        let rettype_structural = toStructural retdecl'
+        checkReturnAlias rettype_structural params' $ typeOf body'
+        return retdecl'
+      Nothing -> return $ vacuousShapeAnnotations $ toStruct $ typeOf body'
 
     when entry $ do
-      unless (okEntryPointType (unInfo $ expandedType rettype')) $
+      unless (okEntryPointType rettype) $
         bad $ InvalidEntryPointReturnType loc $ baseName fname
 
-      case find (not . (`HS.member` mconcat (map patNameSet params))) $
-           mapMaybe dimDeclName $ arrayDims' $ declaredType rettype' of
-        Nothing -> return ()
-        Just problem ->
-          bad $ EntryPointConstReturnDecl loc (baseName fname) (QualName ([], baseName problem))
+      case maybe_retdecl of
+        Just retdecl
+          | Just problem <-
+              find (not . (`HS.member` mconcat (map patNameSet params))) $
+              mapMaybe dimDeclName $ arrayDims' retdecl ->
+                bad $ EntryPointConstReturnDecl loc (baseName fname) (QualName ([], baseName problem))
+        _ -> return ()
 
       forM_ (zip params' params) $ \(param, orig_param) ->
         unless (okEntryPointType (patternType param)) $
           bad $ InvalidEntryPointParamType (srclocOf param) (baseName fname) $ untagPattern orig_param
 
-    return $ FunDef entry fname rettype' params' body' loc
+    return $ FunDef entry fname maybe_retdecl (Info rettype) params' body' loc
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -841,7 +859,7 @@ checkFun (FunDef entry fname rettype params body loc) =
 
 checkFunBody :: VName
              -> ExpBase NoInfo VName
-             -> Maybe (TypeDeclBase Info VName)
+             -> Maybe StructType
              -> SrcLoc
              -> TypeM Exp
 checkFunBody fname body maybe_rettype loc = do
@@ -849,8 +867,8 @@ checkFunBody fname body maybe_rettype loc = do
 
   case maybe_rettype of
     Just rettype -> do
-      checkRetType loc $ unInfo $ expandedType rettype
-      let rettype_structural = toStructural $ unInfo $ expandedType rettype
+      checkRetType loc rettype
+      let rettype_structural = toStructural rettype
       unless (toStructural (typeOf body') `subtypeOf` rettype_structural) $
         bad $ ReturnTypeError loc (baseName fname) rettype_structural $ toStructural $ typeOf body'
     Nothing -> return ()
@@ -909,15 +927,15 @@ checkExp (UnOp Signum e loc) = do
   return $ UnOp Signum e' loc
 
 checkExp (UnOp (ToFloat t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
   return $ UnOp (ToFloat t) e' loc
 
 checkExp (UnOp (ToSigned t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
   return $ UnOp (ToSigned t) e' loc
 
 checkExp (UnOp (ToUnsigned t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
   return $ UnOp (ToUnsigned t) e' loc
 
 checkExp (If e1 e2 e3 _ pos) =
@@ -1147,14 +1165,9 @@ checkExp (Partition funs arrexp pos) = do
   return $ Partition funs' arrexp' pos
 
 checkExp (Stream form lam arr pos) = do
-  let isArrayType arrtp =
-        case arrtp of
-          Array _ -> True
-          _       -> False
-  let lit_int0 = Literal (SignedValue $ Int32Value 0) pos
-  [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
+  (arr',arrarg) <- checkArg arr
   -- arr must have an array type
-  unless (isArrayType $ typeOf arr') $
+  unless (arrayRank (typeOf arr') > 0) $
     bad $ TypeError pos $ "Stream with input array of non-array type " ++ pretty (typeOf arr') ++ "."
   -- typecheck stream's lambdas
   (form', macctup) <-
@@ -1176,8 +1189,8 @@ checkExp (Stream form lam arr pos) = do
   --     check that aliases of `arr' are not used inside lam.
   let fakearg = (typeOf arr' `setAliases` HS.empty, mempty, srclocOf pos)
       (aas,faas) = case macctup of
-                    Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
-                    Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
+                    Nothing        -> ([arrarg],        [fakearg])
+                    Just(_,accarg) -> ([accarg, arrarg],[accarg, fakearg])
 
   lam' <- checkLambda lam aas
   (_, dflow)<- collectOccurences $ checkLambda lam faas
@@ -1466,8 +1479,8 @@ checkBinOp Xor e1 e2 pos = checkPolyBinOp Xor anyIntType e1 e2 pos
 checkBinOp Bor e1 e2 pos = checkPolyBinOp Bor anyIntType e1 e2 pos
 checkBinOp LogAnd e1 e2 pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 pos
 checkBinOp LogOr e1 e2 pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 pos
-checkBinOp Equal e1 e2 pos = checkRelOp Equal anyNumberType e1 e2 pos
-checkBinOp NotEqual e1 e2 pos = checkRelOp NotEqual anyNumberType e1 e2 pos
+checkBinOp Equal e1 e2 pos = checkEqualOp Equal e1 e2 pos
+checkBinOp NotEqual e1 e2 pos = checkEqualOp NotEqual e1 e2 pos
 checkBinOp Less e1 e2 pos = checkRelOp Less anyNumberType e1 e2 pos
 checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
 checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
@@ -1479,6 +1492,15 @@ checkRelOp :: BinOp -> [TypeBase Rank NoInfo ()]
 checkRelOp op tl e1 e2 pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
+  _ <- unifyExpTypes e1' e2'
+  return $ BinOp op e1' e2' (Info $ Prim Bool) pos
+
+checkEqualOp :: BinOp
+             -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
+             -> TypeM Exp
+checkEqualOp op e1 e2 pos = do
+  e1' <- checkExp e1
+  e2' <- checkExp e2
   _ <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info $ Prim Bool) pos
 
@@ -1496,8 +1518,8 @@ checkDimIndex (DimFix i) =
   DimFix <$> (require [Prim $ Signed Int32] =<< checkExp i)
 checkDimIndex (DimSlice i j) =
   DimSlice
-  <$> (require [Prim $ Signed Int32] =<< checkExp i)
-  <*> (require [Prim $ Signed Int32] =<< checkExp j)
+  <$> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) i
+  <*> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) j
 
 sequentially :: TypeM a -> (a -> Occurences -> TypeM b) -> TypeM b
 sequentially m1 m2 = do
@@ -1552,7 +1574,8 @@ checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
       let params_with_ts = zip params $ map (Inferred . (`setAliases` mempty) . argType) args
       maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
       (params', body') <- noUnique $ bindingPatterns params_with_ts $ \params' -> do
-        body' <- checkFunBody (ID (nameFromString "<anonymous>", 0)) body maybe_ret' loc
+        body' <- checkFunBody (ID (nameFromString "<anonymous>", 0)) body
+                 (unInfo . expandedType <$> maybe_ret') loc
         return (params', body')
       checkFuncall Nothing loc (map patternStructType params') args
       let ret' = case maybe_ret' of
@@ -1693,6 +1716,9 @@ expandType look (UserUnique t loc) = do
   case t' of
     Array{} -> return $ t' `setUniqueness` Unique
     _       -> throwError $ InvalidUniqueness loc $ toStructural t'
+
+checkUserType :: UserType VName -> TypeM StructType
+checkUserType = expandType lookupType
 
 checkTypeDecl :: TypeDeclBase NoInfo VName -> TypeM (TypeDeclBase Info VName)
 checkTypeDecl (TypeDecl t NoInfo) =

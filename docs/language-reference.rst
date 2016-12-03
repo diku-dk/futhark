@@ -14,13 +14,18 @@ tuples and arrays.
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
 ``f64``.  If no suffix is given, integer literals are of type ``i32``,
-and decimal literals are of type ``f64``.
+and decimal literals are of type ``f64``.  Hexadecimal literals are
+supported by prefixing with ``0x``, and binary literals by prefixing
+with ``0b``.
 
 Numeric values can be converted between different types by using the
 desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
 the floating-point number ``1.0`` to a 32-bit signed integer.
+Conversion from floating-point to integers is done by truncation.
 
-Boolean literals are written ``True`` and ``false``.
+Boolean literals are written ``true`` and ``false``.  These can also
+be converted to numbers (1 for true, 0 for false) by using the desired
+numeric type as a function.
 
 Character and string literals are supported, but only as an alias for
 integers and arrays of integers, respectively.  There is no character
@@ -270,7 +275,11 @@ Evaluate the binary bitwise operator on its operands, which must both
 be of integer type.  The following operators are supported: ``^``,
 ``&``, ``|``, ``>>``, ``<<``, ``>>>``, i.e., bitwise xor, and, or,
 arithmetic shift right and left, and logical shift right.  Shift
-amounts must be non-negative.
+amounts must be non-negative.  Note that, unlike in C, bitwise
+operators have *higher* priority than arithmetic operators.  This
+means that ``x & y == z`` is understood as ``(x & y) == z``, rather
+than ``x & (y == z)`` as it would in C.  Note that the latter is a
+type error in Futhark anyhow.
 
 ``f x y z``
 ~~~~~~~~~~~
@@ -351,7 +360,9 @@ the latter is desired, enclose the literal array with parentheses.
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
 latter inclusive and the latter exclusive.  Slicing of multiple
 dimensions can be done by separating with commas, and may be
-intermixed freely with indexing.  It is an error if ``j < n``.
+intermixed freely with indexing.  It is an error if ``j < n``.  If
+``i`` is elided, it defaults to ``0``.  If ``j`` is elided, if
+defaults to the size of the array.
 
 ``e.i``
 ~~~~~~~
@@ -537,18 +548,19 @@ ways.  Their purpose is to give the compiler as much freedom and
 information is possible, in order to enable it to maximise the
 parallelism of the generated code.
 
-``map f a``
+``map f a_1 ... a_n``
 ~~~~~~~~~~~~~
 
-Apply ``f`` to every element of ``a`` and return the resulting array.
+Apply ``f`` to every element of ``a_1 ... a_n`` and return the
+resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
+``f`` is called with ``n`` arguments, where in the latter case it is
+called with a single ``n``-tuple argument.  In other languages, this
+form of ``map`` is often called ``zipWith``.
 
 ``zipWith f a_1 ... a_n``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Apply ``f`` to every element of ``a_1 ... a_n`` and return the
-resulting array.  Differs from ``map(f, zip a_1 ... a_n)`` in that
-``f`` is called with ``n`` arguments, where in the latter case it is
-called with a single ``n``-tuple argument.
+Alias for ``map`` for backwards compatibility.
 
 ``reduce f x a``
 ~~~~~~~~~~~~~~~~~~~

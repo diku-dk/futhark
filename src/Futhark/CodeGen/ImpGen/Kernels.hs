@@ -182,7 +182,6 @@ expCompiler
       , Imp.mapKernelUses = body_uses
       , Imp.mapKernelBody = body
       }
-  return ImpGen.Done
 
 expCompiler
   (ImpGen.Destination [dest]) (BasicOp (Replicate (Shape ds) se)) = do
@@ -216,14 +215,13 @@ expCompiler
       , Imp.mapKernelUses = body_uses
       , Imp.mapKernelBody = body
       }
-  return ImpGen.Done
 
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
-  return ImpGen.Done
+  return ()
 
-expCompiler _ e =
-  return $ ImpGen.CompileExp e
+expCompiler dest e =
+  ImpGen.defCompileExp dest e
 
 callKernelCopy :: ImpGen.CopyCompiler ExplicitMemory Imp.HostOp
 callKernelCopy bt
@@ -307,8 +305,8 @@ inKernelCopy = ImpGen.copyElementWise
 inKernelExpCompiler :: ImpGen.ExpCompiler InKernel Imp.KernelOp
 inKernelExpCompiler _ (BasicOp (Assert _ loc)) =
   fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
-inKernelExpCompiler _ e =
-  return $ ImpGen.CompileExp e
+inKernelExpCompiler dest e =
+  ImpGen.defCompileExp dest e
 
 computeKernelUses :: FreeIn a =>
                      a -> [VName]

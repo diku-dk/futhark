@@ -23,7 +23,6 @@ fun hash(x: int): int =
   x
 
 fun rand_array(n: int, lower: int, upper: int): [n]int =
-  let max_rounds = 5 in
   map (fn (i: int): int  =>
         -- We hash i+n to ensure that a random length-n array is not a
         -- prefix of a random length-(n+m) array.

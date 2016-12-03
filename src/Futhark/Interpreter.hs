@@ -599,6 +599,8 @@ evalBasicOp (Concat _ i arr1exp arr2exps _) = do
 
 evalBasicOp (Copy v) = single <$> lookupVar v
 
+evalBasicOp (Manifest _ v) = single <$> lookupVar v
+
 evalBasicOp (Assert e loc) = do
   v <- evalSubExp e
   case v of PrimVal (BoolValue True) ->

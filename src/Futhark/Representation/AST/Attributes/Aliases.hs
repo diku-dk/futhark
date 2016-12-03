@@ -69,6 +69,8 @@ primOpAliases Concat{} =
   [mempty]
 primOpAliases Copy{} =
   [mempty]
+primOpAliases Manifest{} =
+  [mempty]
 primOpAliases Assert{} =
   [mempty]
 primOpAliases (Partition _ n _ arr) =

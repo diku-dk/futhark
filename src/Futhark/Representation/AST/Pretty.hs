@@ -217,6 +217,7 @@ instance Pretty (BasicOp lore) where
   ppr (Concat cs i x ys _) =
     ppCertificates cs <> text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
+  ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
@@ -240,8 +241,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
         text "for" <+> ppr i <> text ":" <> ppr it <+> text "<" <+> align (ppr bound)
       WhileLoop cond ->
         text "while" <+> ppr cond
-    ) <+> text "do" </>
-    indent 2 (ppr loopbody)
+    ) <+> text "do" <+> nestedBlock "{" "}" (ppr loopbody)
     where (ctxparams, ctxinit) = unzip ctx
           (valparams, valinit) = unzip val
 

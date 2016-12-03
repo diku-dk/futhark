@@ -875,7 +875,7 @@ segmentedScanomapKernel :: KernelNest
                         -> KernelM (Maybe [KernelsStm])
 segmentedScanomapKernel nest perm cs segment_size lam fold_lam nes arrs =
   isSegmentedOp nest perm segment_size
-  (lambdaReturnType lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
+  (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
   \pat flat_pat _num_segments total_num_elements ispace inps nes' arrs' -> do
     regularSegmentedScan segment_size flat_pat cs total_num_elements
       lam fold_lam ispace inps nes' arrs'

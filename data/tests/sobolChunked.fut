@@ -75,7 +75,7 @@ fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
                         else recM(dir_vs, k+n)
                    ) (iota(chunk) )
   let vct_ints= scan (fn (x: []int) (y: []int): []int  =>
-                        zipWith (^) x y
+                        map (^) x y
                     ) (replicate len 0) contrbs in
   map (fn (xs: []int): []f64  =>
              map  (fn (x: int): f64  =>
@@ -93,7 +93,7 @@ fun main(num_mc_it: int,
                   num_und: int): [][]f64 =
   let sobvctsz  = num_dates*num_und
   let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz
-  let sobol_mat = streamMap (fn (chunk: int) (ns: []int): [][sobvctsz]f64  =>
+  let sobol_mat = streamMap (fn (ns: [chunk]int): [][sobvctsz]f64  =>
                                 sobolChunk(dir_vs, ns[0], chunk)
                            ) (iota(num_mc_it) ) in
 

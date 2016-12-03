@@ -765,6 +765,9 @@ checkBasicOp (Concat cs i arr1exp arr2exps ressize) = do
 checkBasicOp (Copy e) =
   void $ checkArrIdent e
 
+checkBasicOp (Manifest perm arr) =
+  checkBasicOp $ Rearrange [] perm arr -- Basically same thing!
+
 checkBasicOp (Assert e _) =
   require [Prim Bool] e
 

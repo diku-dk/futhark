@@ -812,6 +812,13 @@ data ExpHint = NoHint
 
 kernelExpHints :: (Allocator lore m, Op lore ~ MemOp (Kernel somelore)) =>
                   Exp lore -> m [ExpHint]
+kernelExpHints (BasicOp (Manifest perm v)) = do
+  dims <- arrayDims <$> lookupType v
+  let perm_inv = rearrangeInverse perm
+      dims' = rearrangeShape perm dims
+      ixfun = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) dims')
+              perm_inv
+  return [Hint ixfun DefaultSpace]
 kernelExpHints (Op (Inner (Kernel _ _ space rets kbody))) =
   zipWithM hint rets $ kernelBodyResult kbody
   where num_threads = spaceNumThreads space

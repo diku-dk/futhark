@@ -190,13 +190,15 @@ doubleBufferMergeParams :: (ExplicitMemorish lore, MonadFreshNames m) =>
 doubleBufferMergeParams ctx_and_res val_params bound_in_loop = do
   copy_init <- asks envCopyInit
   evalStateT (mapM (buffer copy_init) val_params) HM.empty
-  where loopInvariantSize copy_init (Constant v) =
+  where loopVariant v = v `HS.member` bound_in_loop || v `elem` map (paramName . fst) ctx_and_res
+
+        loopInvariantSize copy_init (Constant v) =
           Just (Constant v, copy_init)
         loopInvariantSize copy_init (Var v) =
           case find ((==v) . paramName . fst) ctx_and_res of
             Just (_, Constant val) ->
               Just (Constant val, False)
-            Just (_, Var v') | not $ v' `HS.member` bound_in_loop ->
+            Just (_, Var v') | not $ loopVariant v' ->
               Just (Var v', False)
             Just _ ->
               Nothing

@@ -55,7 +55,7 @@ fun f(a: [n]f32) (j: int): complex =
                        (complexMult (0.0, 1.0)
                         (toComplex (1.0/f32 n)))))
   in reduce complexAdd (0.0, 0.0)
-  (zipWith complexMult
+  (map complexMult
    (map toComplex a)
    (map (complexPow x) (map (j*) (iota n))))
 

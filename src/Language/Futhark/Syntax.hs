@@ -346,7 +346,7 @@ data BinOp = Plus -- Binary Ops for Numbers
 
 -- | An indexing of a single dimension.
 data DimIndexBase f vn = DimFix (ExpBase f vn)
-                       | DimSlice (ExpBase f vn) (ExpBase f vn)
+                       | DimSlice (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn))
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.
@@ -615,7 +615,8 @@ instance Located (PatternBase f vn) where
 data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
                               , funDefName       :: vn
-                              , funDefRetType    :: TypeDeclBase f vn
+                              , funDefRetDecl    :: Maybe (UserType vn)
+                              , funDefRetType    :: f (StructTypeBase vn)
                               , funDefParams     :: [PatternBase f vn]
                               , funDefBody       :: ExpBase f vn
                               , funDefLocation   :: SrcLoc
