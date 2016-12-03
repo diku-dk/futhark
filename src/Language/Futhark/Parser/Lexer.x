@@ -90,9 +90,6 @@ tokens :-
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
   "true"                   { tokenC TRUE }
   "false"                  { tokenC FALSE }
-  -- True And False only for backwards compatibility - will be removed soon.
-  "True"                   { tokenC TRUE }
-  "False"                  { tokenC FALSE }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
   [a-zA-Z] [a-zA-Z0-9_']*     { tokenS keyword }
