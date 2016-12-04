@@ -75,6 +75,7 @@ import Language.Futhark.Parser.Lexer
       f64             { L $$ F64 }
 
       id              { L _ (ID _) }
+      indexing        { L _ (INDEXING _) }
 
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
@@ -114,6 +115,7 @@ import Language.Futhark.Parser.Lexer
       '^'             { L $$ XOR }
       '('             { L $$ LPAR }
       ')'             { L $$ RPAR }
+      ')['            { L $$ RPAR_THEN_LBRACKET }
       '{'             { L $$ LCURLY }
       '}'             { L $$ RCURLY }
       '['             { L $$ LBRACKET }
@@ -429,80 +431,80 @@ Exp  :: { UncheckedExp }
 
      | shape Atom { Shape $2 $1 }
 
-     | replicate Atom ArrayArg { Replicate $2 $3 $1 }
+     | replicate Atom Atom { Replicate $2 $3 $1 }
 
-     | reshape Atom ArrayArg
+     | reshape Atom Atom
                       { Reshape $2 $3 $1 }
 
-     | rearrange '(' NaturalInts ')' ArrayArg
+     | rearrange '(' NaturalInts ')' Atom
                       { Rearrange $3 $5 $1 }
 
-     | transpose ArrayArg
+     | transpose Atom
                       { Transpose $2 $1 }
 
-     | rotate '@' NaturalInt Atom ArrayArg { Rotate $3 $4 $5 $1 }
+     | rotate '@' NaturalInt Atom Atom { Rotate $3 $4 $5 $1 }
 
-     | rotate Atom ArrayArg
+     | rotate Atom Atom
                       { Rotate 0 $2 $3 $1 }
 
-     | split Atom ArrayArg
+     | split Atom Atom
                       { Split 0 $2 $3 $1 }
 
      | split '@' NaturalInt Atom Atom
                       { Split $3 $4 $5 $1 }
 
-     | concat ArrayArgs
+     | concat Atoms
                       { Concat 0 (fst $2) (snd $2) $1 }
 
-     | concat '@' NaturalInt ArrayArgs
+     | concat '@' NaturalInt Atoms
                       { Concat $3 (fst $4) (snd $4) $1 }
 
 
-     | reduce FunAbstr Atom ArrayArg
+     | reduce FunAbstr Atom Atom
                       { Reduce (commutativity $2) $2 $3 $4 $1 }
 
-     | reduceComm FunAbstr Atom ArrayArg
+     | reduceComm FunAbstr Atom Atom
                       { Reduce Commutative $2 $3 $4 $1 }
 
 
-     | map FunAbstr ArrayArgs
+     | map FunAbstr Atoms
                       { Map $2 (fst $3:snd $3) $1 }
 
-     | zipWith FunAbstr ArrayArgs
+     | zipWith FunAbstr Atoms
                       { Map $2 (fst $3:snd $3) $1 }
 
-     | scan FunAbstr Atom ArrayArg
+     | scan FunAbstr Atom Atom
                       { Scan $2 $3 $4 $1 }
 
-     | zip ArrayArgs
+     | zip Atoms
                       { Zip 0 (fst $2) (snd $2) $1 }
 
-     | zip '@' NaturalInt ArrayArgs
+     | zip '@' NaturalInt Atoms
                       { Zip $3 (fst $4) (snd $4) $1 }
 
-     | unzip ArrayArg  { Unzip $2 [] $1 }
+     | unzip Atom  { Unzip $2 [] $1 }
 
      | unsafe Exp     { Unsafe $2 $1 }
 
-     | filter FunAbstr ArrayArg
+     | filter FunAbstr Atom
                       { Filter $2 $3 $1 }
 
-     | partition '(' FunAbstrs ')' ArrayArg
+     | partition '(' FunAbstrs ')' Atom
                       { Partition $3 $5 $1 }
 
-     | copy ArrayArg   { Copy $2 $1 }
+     | copy Atom   { Copy $2 $1 }
 
-     | streamMap       FunAbstr ArrayArg
+     | streamMap       FunAbstr Atom
                          { Stream (MapLike InOrder)  $2 $3 $1 }
-     | streamMapPer    FunAbstr ArrayArg
+     | streamMapPer    FunAbstr Atom
                          { Stream (MapLike Disorder) $2 $3 $1 }
-     | streamRed       FunAbstr FunAbstr Atom ArrayArg
+     | streamRed       FunAbstr FunAbstr Atom Atom
                          { Stream (RedLike InOrder (commutativity $2) $2 $4) $3 $5 $1 }
-     | streamRedPer    FunAbstr FunAbstr Atom ArrayArg
+     | streamRedPer    FunAbstr FunAbstr Atom Atom
                          { Stream (RedLike Disorder Commutative $2 $4) $3 $5 $1 }
-     | streamSeq       FunAbstr Atom ArrayArg
+     | streamSeq       FunAbstr Atom Atom
                          { Stream (Sequential $3) $2 $4 $1 }
-     | write ArrayArg ArrayArg ArrayArg
+     | write Atom Atom Atom
                          { Write $2 $3 $4 $1 }
 
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
@@ -532,7 +534,6 @@ Exp  :: { UncheckedExp }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
      | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }
      | Exp '>=' Exp   { BinOp Geq  $1 $3 NoInfo $2 }
-     | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
      | Apply
        { let (fname, args, loc) = $1 in Apply fname [ (arg, Observe) | arg <- args ] NoInfo loc }
      | Atom %prec juxtprec { $1 }
@@ -542,6 +543,10 @@ Apply : Apply Atom %prec juxtprec
       | QualName Atom %prec juxtprec
         { (fst $1, [$2], snd $1) }
 
+Atoms :: { (UncheckedExp, [UncheckedExp]) }
+Atoms : Atom       { ($1, []) }
+      | Atom Atoms { ($1, fst $2 : snd $2) }
+
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | stringlit      {% let L pos (STRINGLIT s) = $1 in do
@@ -550,34 +555,31 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                              return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
      | empty '(' UserTypeDecl ')' { Empty $3 $1 }
      | '(' Exp ')'                { $2 }
+     | '(' Exp ')[' DimIndices ']' { Index $2 $4 $1 }
      | '(' Exp ')' '.' NaturalInt { TupleIndex $2 $5 NoInfo $1 }
      | '(' Exp ',' Exps ')'       { TupLit ($2:$4) $1 }
      | '('      ')'               { TupLit [] $1 }
-     | Atom Slice %prec indexprec { Index $1 $2 (srclocOf $1) }
-     | QualExp %prec letprec      { case $1 of
-                                      (QualName (quals, Left i), loc) ->
-                                        TupleIndex
-                                        (Var (QualName (init quals, last quals)) NoInfo loc)
-                                        i NoInfo loc
-                                      (QualName (quals, Right name), loc) ->
-                                        Var (QualName (quals, name)) NoInfo loc
-                                  }
-
-ArrayArg :: { UncheckedExp }
-ArrayArg : '[' Exps ']'      { ArrayLit $2 NoInfo $1 }
-         | Atom %prec bottom { $1 }
-
-ArrayArgs :: { (UncheckedExp, [UncheckedExp]) }
-ArrayArgs : ArrayArg          { ($1, []) }
-          | ArrayArg ArrayArgs { ($1, fst $2 : snd $2) }
-
+     | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
+     | VarSlice                   { let (v,slice,loc) = $1
+                                    in Index (Var (QualName ([], v)) NoInfo loc)
+                                       slice loc }
+     | QualExp %prec letprec
+         { case $1 of
+             (QualName (quals, Left i), loc) ->
+               TupleIndex
+               (Var (QualName (init quals, last quals)) NoInfo loc)
+               i NoInfo loc
+             (QualName (quals, Right name), loc) ->
+               Var (QualName (quals, name)) NoInfo loc
+         }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
                       { LetPat $2 $4 $5 $1 }
 
-     | let VarId Slice '=' Exp LetBody
-                      { LetWith $2 $2 $3 $5 $6 $1 }
+     | let VarSlice '=' Exp LetBody
+                      { let (v,slice,loc) = $2; ident = Ident v NoInfo loc
+                        in LetWith ident ident slice $4 $5 loc }
 
      | loop '(' Pattern ')' '=' LoopForm do Exp LetBody
                       {% liftM (\t -> DoLoop $3 t $6 $8 $9 $1)
@@ -599,8 +601,10 @@ LoopForm : for VarId '<' Exp
            { For FromDownTo ZeroBound $4 $2 }
          | while Exp      { While $2 }
 
-Slice :: { [UncheckedDimIndex] }
-      : '[' DimIndices ']'               { $2 }
+VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
+          : indexing DimIndices ']'
+              { let L loc (INDEXING v) = $1
+                in (v, $2, loc) }
 
 DimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
            | DimIndex                    { [$1] }

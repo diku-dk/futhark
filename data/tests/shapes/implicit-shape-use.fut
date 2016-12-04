@@ -48,8 +48,8 @@ fun brownianBridgeDates (bb_inds: [3][num_dates]int)
             let k  = ri[i+1] - 1
             let l  = bi[i+1] - 1
 
-            let wk = unsafe bbrow [k  ]
-            let zi = gauss [i+1]
+            let wk = unsafe bbrow[k]
+            let zi = gauss[i+1]
             let tmp= rw[i+1] * wk + sd[i+1] * zi
 
             let bbrow[ l ] = if( j == -1)

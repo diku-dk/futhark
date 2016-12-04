@@ -32,6 +32,7 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
 @binlit = 0[bB][01]+
 @intlit = @hexlit|@binlit|@declit
 @reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
+@identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 
 tokens :-
 
@@ -64,6 +65,7 @@ tokens :-
   "^"                      { tokenC XOR }
   "("                      { tokenC LPAR }
   ")"                      { tokenC RPAR }
+  ")["                     { tokenC RPAR_THEN_LBRACKET }
   "["                      { tokenC LBRACKET }
   "]"                      { tokenC RBRACKET }
   "{"                      { tokenC LCURLY }
@@ -88,18 +90,18 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
-  "true"                   { tokenC TRUE }
-  "false"                  { tokenC FALSE }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
-  [a-zA-Z] [a-zA-Z0-9_']*     { tokenS keyword }
-  "_" [a-zA-Z0-9] [a-zA-Z0-9_']* { tokenS keyword }
+  @identifier              { tokenS keyword }
+  @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
 
 {
 
 keyword :: T.Text -> Token
 keyword s =
   case s of
+    "true"         -> TRUE
+    "false"        -> FALSE
     "if"           -> IF
     "then"         -> THEN
     "else"         -> ELSE
@@ -164,6 +166,11 @@ keyword s =
     "end"          -> END
     "val"          -> VAL
     _              -> ID $ nameFromText s
+
+indexing :: T.Text -> Alex Name
+indexing s = case keyword s of
+  ID v -> return v
+  _    -> fail $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
@@ -230,6 +237,7 @@ data Token = IF
            | F32
            | F64
            | ID Name
+           | INDEXING Name
            | STRINGLIT String
            | DEFAULT
            | INTLIT Int64
@@ -268,6 +276,7 @@ data Token = IF
            | XOR
            | LPAR
            | RPAR
+           | RPAR_THEN_LBRACKET
            | LBRACKET
            | RBRACKET
            | LCURLY
