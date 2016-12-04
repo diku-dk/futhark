@@ -285,7 +285,6 @@ type error in Futhark anyhow.
 ~~~~~~~~~~~
 
 Apply the function ``f`` to the arguments ``x``, ``y`` and ``z``.
-Function application binds tightly, but not as tighly as indexing.
 
 ``x && y``
 ~~~~~~~~~~
@@ -349,10 +348,10 @@ be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
 array is returned.
 
-Indexing binds very tightly.  For example, the expression ``a b [i]``
-means "apply the function ``a`` to the expression ``b[i]``", *not*
-"apply the function ``a`` to the expressions ``b`` and ``[i]``".  When
-the latter is desired, enclose the literal array with parentheses.
+The array ``a`` must be a variable name or a parenthesized expression.
+Futhermore, there *may not* be a space between ``a`` and the opening
+bracket.  This disambiguates the array indexing ``a[i]``, from ``a
+[i]``, which is a function call with a literal array.
 
 ``a[i:j]``
 ~~~~~~~~~~
