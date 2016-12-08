@@ -30,13 +30,14 @@ module Futhark.Representation.Kernels.Kernel
        where
 
 import Control.Applicative
-import Control.Monad.Writer
-import Control.Monad.Identity
+import Control.Monad.Writer hiding (mapM_)
+import Control.Monad.Identity hiding (mapM_)
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.List
+import Data.Foldable (mapM_) -- for stack LTS 1.15
 
-import Prelude
+import Prelude hiding (mapM_)
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
@@ -129,6 +130,7 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     SplitOrdering -- Permuted?
                     SubExp -- The final size.
                     SubExp -- Per-thread (max) chunk size.
+                    (Maybe SubExp) -- Optional precalculated offset.
                     VName -- Chunk by this thread.
                   | KernelInPlaceReturn VName -- HACK!
                   deriving (Eq, Show, Ord)
@@ -136,7 +138,7 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (ThreadsReturn _ se) = se
 kernelResultSubExp (WriteReturn _ _ _ se) = se
-kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
+kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 kernelResultSubExp (KernelInPlaceReturn v) = Var v
 
 data WhichThreads = AllThreads
@@ -224,8 +226,8 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
 instance FreeIn KernelResult where
   freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
   freeIn (WriteReturn rw arr i e) = freeIn rw <> freeIn arr <> freeIn i <> freeIn e
-  freeIn (ConcatReturns o w per_thread_elems v) =
-    freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn v
+  freeIn (ConcatReturns o w per_thread_elems moffset v) =
+    freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn moffset <> freeIn v
   freeIn (KernelInPlaceReturn what) = freeIn what
 
 instance FreeIn WhichThreads where
@@ -255,11 +257,12 @@ instance Substitute KernelResult where
     WriteReturn
     (substituteNames subst rw) (substituteNames subst arr)
     (substituteNames subst i) (substituteNames subst e)
-  substituteNames subst (ConcatReturns o w per_thread_elems v) =
+  substituteNames subst (ConcatReturns o w per_thread_elems moffset v) =
     ConcatReturns
     (substituteNames subst o)
     (substituteNames subst w)
     (substituteNames subst per_thread_elems)
+    (substituteNames subst moffset)
     (substituteNames subst v)
   substituteNames subst (KernelInPlaceReturn what) =
     KernelInPlaceReturn (substituteNames subst what)
@@ -355,7 +358,7 @@ kernelType (Kernel _ _ space ts body) =
           t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
         resultShape t (ThreadsReturn ThreadsInSpace _) =
           foldr (flip arrayOfRow) t dims
-        resultShape t (ConcatReturns _ w _ _) =
+        resultShape t (ConcatReturns _ w _ _ _) =
           t `arrayOfRow` w
         resultShape t KernelInPlaceReturn{} =
           t
@@ -511,12 +514,13 @@ typeCheckKernel (Kernel _ cs space kts kbody) = do
           unless (arr_t == t `arrayOfRow` rw) $
             TC.bad $ TC.TypeError "Invalid type of array destination for WriteReturn."
           TC.consume =<< TC.lookupAliases arr
-        checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
+        checkKernelResult (ConcatReturns o w per_thread_elems moffset v) t = do
           case o of
             SplitContiguous     -> return ()
             SplitStrided stride -> TC.require [Prim int32] stride
           TC.require [Prim int32] w
           TC.require [Prim int32] per_thread_elems
+          mapM_ (TC.require [Prim int32]) moffset
           vt <- lookupType v
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
@@ -592,11 +596,13 @@ instance Pretty KernelResult where
   ppr (WriteReturn rw arr i e) =
     ppr arr <+> text "with" <+>
     PP.brackets (ppr i <+> text "<" <+> ppr rw) <+> text "<-" <+> ppr e
-  ppr (ConcatReturns o w per_thread_elems v) =
+  ppr (ConcatReturns o w per_thread_elems offset v) =
     text "concat" <> suff <>
-    parens (commasep [ppr w, ppr per_thread_elems]) <+>
+    parens (commasep [ppr w, ppr per_thread_elems] <> offset_text) <+>
     ppr v
     where suff = case o of SplitContiguous     -> mempty
                            SplitStrided stride -> text "Strided" <> parens (ppr stride)
+          offset_text = case offset of Nothing -> ""
+                                       Just se -> "," <+> "offset=" <> ppr se
   ppr (KernelInPlaceReturn what) =
     text "kernel returns" <+> ppr what
