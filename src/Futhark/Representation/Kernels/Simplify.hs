@@ -111,7 +111,7 @@ mkWiseKernelBody attr bnds res =
   where res_vs = map resValue res
         resValue (ThreadsReturn _ se) = se
         resValue (WriteReturn _ _ _ se) = se
-        resValue (ConcatReturns _ _ _ v) = Var v
+        resValue (ConcatReturns _ _ _ _ v) = Var v
         resValue (KernelInPlaceReturn v) = Var v
 
 inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
@@ -237,11 +237,12 @@ instance Engine.Simplifiable KernelResult where
     Engine.simplify a <*>
     Engine.simplify i <*>
     Engine.simplify v
-  simplify (ConcatReturns o w pte what) =
+  simplify (ConcatReturns o w pte moffset what) =
     ConcatReturns
     <$> Engine.simplify o
     <*> Engine.simplify w
     <*> Engine.simplify pte
+    <*> Engine.simplify moffset
     <*> Engine.simplify what
   simplify (KernelInPlaceReturn what) =
     KernelInPlaceReturn <$> Engine.simplify what
