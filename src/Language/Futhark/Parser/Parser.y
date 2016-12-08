@@ -75,7 +75,7 @@ import Language.Futhark.Parser.Lexer
       f64             { L $$ F64 }
 
       id              { L _ (ID _) }
-      indexing        { L _ (INDEXING _) }
+      'id['           { L _ (INDEXING _) }
 
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
@@ -602,7 +602,7 @@ LoopForm : for VarId '<' Exp
          | while Exp      { While $2 }
 
 VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
-          : indexing DimIndices ']'
+          : 'id[' DimIndices ']'
               { let L loc (INDEXING v) = $1
                 in (v, $2, loc) }
 
