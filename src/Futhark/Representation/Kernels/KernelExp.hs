@@ -42,7 +42,7 @@ data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                       -- ^ @SplitArray o w i num_is elems_per_thread arrs@.
                       --
                       -- Distributes array elements to threads in a kernel.
-                      -- @w@ is the total number of elements in each of the
+                      -- @w@ is the length of the outer dimension in each of the
                       -- input arrays @arrs@.
                       --
                       -- A thread only takes elements if @i < num_is@
