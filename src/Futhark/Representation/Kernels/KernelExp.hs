@@ -73,6 +73,24 @@ data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                       -- memory (OpenCL terminology)
                     | GroupReduce SubExp
                       (Lambda lore) [(SubExp,VName)]
+                      -- ^ @GroupReduce w lam input@ (with @(nes, arrs) = unzip input@),
+                      -- will perform a reduction of the arrays @arrs@ using the
+                      -- associative reduction operator @lam@ and the neutral
+                      -- elements @nes@.
+                      --
+                      -- The arrays @arrs@ must all have outer dimension @w@.
+                      --
+                      -- Currently a GroupReduce consumes the input arrays, as
+                      -- it uses them for scratch space to store temporary
+                      -- results
+                      --
+                      -- All threads in a group must participate in a
+                      -- GroupReduce (due to barriers)
+                      --
+                      -- The length of the arrays @w@ can be smaller than the
+                      -- number of elements in a group (neutral element will be
+                      -- filled in), but @w@ can never be larger than the group
+                      -- size.
                     | GroupScan SubExp
                       (Lambda lore) [(SubExp,VName)]
                     | GroupStream SubExp SubExp
