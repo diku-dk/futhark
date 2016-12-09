@@ -39,6 +39,25 @@ import Futhark.Util.Pretty
 import qualified Futhark.TypeCheck as TC
 
 data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
+                      -- ^ @SplitArray o w i num_is elems_per_thread arrs@.
+                      --
+                      -- Distributes array elements to threads in a kernel.
+                      -- @w@ is the total number of elements in each of the
+                      -- input arrays @arrs@.
+                      --
+                      -- A thread only takes elements if @i < num_is@
+                      --
+                      -- Each thread takes at most @elems_per_thread@ elements.
+                      --
+                      -- If the order @o@ is @InOrder@, thread with index @i@
+                      -- will receive elements
+                      -- @i*elems_per_tread, i*elems_per_thread + 1,
+                      -- ..., i*elems_per_thread + (elems_per_thread-1)@.
+                      -- This access pattern can give rise to a transpose being
+                      -- generated in a later stage of the compiler.
+                      --
+                      -- If the order @o@ is @Disorder@, threads will get up to
+                      -- @elems_per_thread@ elements in _some_ order.
                     | SplitSpace StreamOrd SubExp SubExp SubExp SubExp
                     | Combine [(VName,SubExp)] [Type] SubExp (Body lore)
                       -- ^ @Combine cspace ts active body@ will combine values
