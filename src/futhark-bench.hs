@@ -78,11 +78,12 @@ runBenchmarks opts paths = do
     Just file -> writeFile file $ JSON.encode $ resultsToJSON results
 
 runBenchmark :: BenchOptions -> FilePath -> ProgramTest -> IO BenchResult
-runBenchmark opts program spec = do
-  putStrLn $ program ++ ":"
+runBenchmark opts program spec =
   case testAction spec of
     RunCases cases | "nobench" `notElem` testTags spec,
-                     "disable" `notElem` testTags spec -> do
+                     "disable" `notElem` testTags spec,
+                     not $ null cases -> do
+      putStrLn $ program ++ ":"
       (futcode, _, futerr) <-
         liftIO $ readProcessWithExitCode compiler
         [program, "-o", binaryName program] ""
