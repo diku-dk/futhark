@@ -1447,19 +1447,32 @@ checkPattern fullp@(PatternAscription p td) maybe_outer_t = do
 checkPattern p NoneInferred =
   bad $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty (untagPattern p)
 
+-- | Check for duplication of names inside a binding group.
+-- Duplication of shape names are permitted, but only if they are not
+-- also bound as values.
 checkForDuplicateNames :: [Pattern] -> TypeM ()
 checkForDuplicateNames = flip evalStateT mempty . mapM_ check
-  where check (Id v) = seeing v
+  where check (Id v) = seeing BoundAsVar (baseName $ identName v) (srclocOf v)
         check Wildcard{} = return ()
         check (TuplePattern ps _) = mapM_ check ps
-        check (PatternAscription p _) = check p
+        check (PatternAscription p t) = do
+          check p
+          mapM_ (checkDimDecl $ srclocOf p) $ nestedDims' $ declaredType t
 
-        seeing v = do
-          let name = baseName $ identName v
+        seeing b name vloc = do
           seen <- get
-          case HM.lookup name seen of
-            Just loc -> lift $ bad $ DupPatternError name (srclocOf v) loc
-            Nothing -> modify $ HM.insert name $ srclocOf v
+          case (b, HM.lookup name seen) of
+            (_, Just (BoundAsVar, loc)) ->
+              lift $ bad $ DupPatternError name vloc loc
+            (BoundAsVar, Just (BoundAsDim, loc)) ->
+              lift $ bad $ DupPatternError name vloc loc
+            _ -> modify $ HM.insert name (b, vloc)
+
+        checkDimDecl _ AnyDim = return ()
+        checkDimDecl _ ConstDim{} = return ()
+        checkDimDecl loc (NamedDim v) = seeing BoundAsDim (baseName v) loc
+
+data Bindage = BoundAsDim | BoundAsVar
 
 checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
