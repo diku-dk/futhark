@@ -22,7 +22,8 @@ benchmarking.
 
 Programs are compiled using the specified compiler (``futhark-c`` by
 default), then run a number of times for each data set, and the
-average runtime printed on standard output.
+average runtime printed on standard output.  A program will be ignored
+if it contains no data sets - it will not even be compiled.
 
 OPTIONS
 =======
