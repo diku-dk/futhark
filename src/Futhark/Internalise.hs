@@ -30,7 +30,7 @@ import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import Futhark.Construct
+import Futhark.Tools
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 
@@ -553,11 +553,14 @@ internaliseExp desc (E.Stream form lam arr _) = do
         -- Synthesize neutral elements by applying the fold function
         -- to an empty chunk.
         accs <- do
-          empties <- mapM (letSubExp "empty" . I.BasicOp . I.ArrayLit []) rowts
-          let params = [ [(param, BindVar)] |
-                         param <- map I.paramName $ I.extLambdaParams lam' ]
-          zipWithM_ letBindNames params $
-            map (I.BasicOp . I.SubExp) $ constant (0::Int32) : empties
+          let (chunk_param, _, lam_params) =
+                partitionChunkedFoldParameters 0 $ I.extLambdaParams lam'
+          letBindNames'_ [I.paramName chunk_param] $
+            I.BasicOp $ I.SubExp $ constant (0::Int32)
+          forM_ lam_params $ \p ->
+            letBindNames'_ [I.paramName p] $
+            I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
+            I.arrayDims $ I.paramType p
           bodyBind =<< renameBody (I.extLambdaBody lam')
 
         acctps <- mapM I.subExpType accs
