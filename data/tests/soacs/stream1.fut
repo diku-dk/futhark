@@ -10,10 +10,10 @@ fun vecadd(xs: *[m]int) (ys: [m]int): *[m]int =
     in xs
   in xs
 
-fun process_chunk (acc: *[m]int) (chunk: [chunk_sz][m]int): *[m]int =
-  loop (acc) = for i < chunk_sz do
+fun process_chunk (chunk: [chunk_sz][m]int): *[m]int =
+  loop (acc = replicate m 0) = for i < chunk_sz do
                    vecadd acc chunk[i]
   in acc
 
 fun main(xss: [n][m]int): [m]int =
-  streamRedPer vecadd process_chunk (replicate m 0) xss
+  streamRedPer vecadd process_chunk xss

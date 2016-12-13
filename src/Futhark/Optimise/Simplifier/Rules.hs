@@ -277,6 +277,11 @@ simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
 simplifKnownIterationLoop _ (Let pat _
                                 (DoLoop ctx val
                                  (ForLoop i it (Constant iters)) body))
+  | zeroIsh iters = do
+      let bindResult p r = letBindNames' [patElemName p] $ BasicOp $ SubExp r
+      zipWithM_ bindResult (patternContextElements pat) (map snd ctx)
+      zipWithM_ bindResult (patternValueElements pat) (map snd val)
+
   | oneIsh iters = do
   forM_ (ctx++val) $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ BasicOp $ SubExp mergeinit

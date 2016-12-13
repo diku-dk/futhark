@@ -498,10 +498,10 @@ Exp  :: { UncheckedExp }
                          { Stream (MapLike InOrder)  $2 $3 $1 }
      | streamMapPer    FunAbstr Atom
                          { Stream (MapLike Disorder) $2 $3 $1 }
-     | streamRed       FunAbstr FunAbstr Atom Atom
-                         { Stream (RedLike InOrder (commutativity $2) $2 $4) $3 $5 $1 }
-     | streamRedPer    FunAbstr FunAbstr Atom Atom
-                         { Stream (RedLike Disorder Commutative $2 $4) $3 $5 $1 }
+     | streamRed       FunAbstr FunAbstr Atom
+                         { Stream (RedLike InOrder (commutativity $2) $2) $3 $4 $1 }
+     | streamRedPer    FunAbstr FunAbstr Atom
+                         { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
      | streamSeq       FunAbstr Atom Atom
                          { Stream (Sequential $3) $2 $4 $1 }
      | write Atom Atom Atom

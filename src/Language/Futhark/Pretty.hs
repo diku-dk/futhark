@@ -264,12 +264,12 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
         let ord_str = if o == Disorder then "Per" else ""
         in  text ("streamMap"++ord_str) <>
             parens ( ppList [lam] </> commasep [ppr arr] )
-      RedLike o comm lam0 acc ->
+      RedLike o comm lam0 ->
         let ord_str = if o == Disorder then "Per" else ""
             comm_str = case comm of Commutative    -> "Comm"
                                     Noncommutative -> ""
         in  text ("streamRed"++ord_str++comm_str) <>
-            parens ( ppList [lam0, lam] </> commasep [ppr acc, ppr arr] )
+            parens ( ppList [lam0, lam] </> ppr arr )
       Sequential acc ->
             text "streamSeq" <>
             parens ( ppList [lam] </> commasep [ppr acc, ppr arr] )
