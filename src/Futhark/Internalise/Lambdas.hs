@@ -163,14 +163,13 @@ internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
 internaliseStreamLambda :: InternaliseLambda
                         -> (InternaliseM Certificates -> InternaliseM Certificates)
                         -> E.Lambda
-                        -> [I.SubExp]
+                        -> [I.Type]
                         -> [I.Type]
                         -> InternaliseM I.ExtLambda
-internaliseStreamLambda internaliseLambda asserting lam accs rowts = do
+internaliseStreamLambda internaliseLambda asserting lam acctypes rowts = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param chunk_size $ I.Prim int32
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
-  acctypes <- mapM I.subExpType accs
   (params, body, rettype) <- localScope (scopeOfLParams [chunk_param]) $
                              internaliseLambda lam $ acctypes++chunktypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types

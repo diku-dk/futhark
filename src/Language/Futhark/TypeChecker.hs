@@ -1169,24 +1169,14 @@ checkExp (Stream form lam arr pos) = do
   -- arr must have an array type
   unless (arrayRank (typeOf arr') > 0) $
     bad $ TypeError pos $ "Stream with input array of non-array type " ++ pretty (typeOf arr') ++ "."
-  -- typecheck stream's lambdas
-  (form', macctup) <-
-    case form of
-      MapLike o -> return (MapLike o, Nothing)
-      RedLike o comm lam0 acc -> do
-        (acc',accarg) <- checkArg acc
-        lam0' <- checkLambda lam0 [accarg, accarg]
-        let redtype = lambdaReturnType lam0'
-        unless (typeOf acc' `subtypeOf` redtype) $
-            bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
-                  pretty (typeOf acc') ++ ", but reduce fun returns type "++pretty redtype++"."
-        return (RedLike o comm lam0' acc', Just(acc',accarg))
-      Sequential acc -> do
-        (acc',accarg) <- checkArg acc
-        return (Sequential acc', Just(acc',accarg))
-  -- (i) properly check the lambda on its parameter and
-  --(ii) make some fake arguments, which do not alias `arr', and
-  --     check that aliases of `arr' are not used inside lam.
+
+  macctup <- case form of
+               MapLike{} -> return Nothing
+               RedLike{} -> return Nothing
+               Sequential acc -> do
+                 (acc',accarg) <- checkArg acc
+                 return $ Just (acc',accarg)
+
   let fakearg = (typeOf arr' `setAliases` HS.empty, mempty, srclocOf pos)
       (aas,faas) = case macctup of
                     Nothing        -> ([arrarg],        [fakearg])
@@ -1198,6 +1188,10 @@ checkExp (Stream form lam arr pos) = do
   let usages = usageMap dflow
   when (any (`HM.member` usages) arr_aliasses) $
      bad $ TypeError pos "Stream with input array used inside lambda."
+
+  -- (i) properly check the lambda on its parameter and
+  --(ii) make some fake arguments, which do not alias `arr', and
+  --     check that aliases of `arr' are not used inside lam.
   -- check that the result type of lambda matches the accumulator part
   case macctup of
     Just (acc',_) ->
@@ -1209,6 +1203,24 @@ checkExp (Stream form lam arr pos) = do
         rtp' -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
           bad $ TypeError pos "Stream with accumulator-type missmatch."
     Nothing -> return ()
+
+  -- typecheck stream form lambdas
+  form' <-
+    case form of
+      MapLike o -> return $ MapLike o
+      RedLike o comm lam0 -> do
+        let accarg :: Arg
+            accarg = (lambdaReturnType lam' `setAliases` mempty, mempty, srclocOf lam')
+
+        lam0' <- checkLambda lam0 [accarg, accarg]
+        let redtype = lambdaReturnType lam0'
+        unless (argType accarg `subtypeOf` redtype) $
+            bad $ TypeError pos $ "Stream's fold fun: Fold function returns type type " ++
+                  pretty (argType accarg) ++ ", but reduce fun returns type "++pretty redtype++"."
+        return $ RedLike o comm lam0'
+      Sequential acc -> do
+        (acc',_) <- checkArg acc
+        return $ Sequential acc'
 
   return $ Stream form' lam' arr' pos
 

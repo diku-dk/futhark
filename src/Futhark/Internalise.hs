@@ -16,6 +16,7 @@ import Control.Applicative
 import Control.Monad.State  hiding (mapM, sequence)
 import Control.Monad.Reader hiding (mapM, sequence)
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -30,6 +31,8 @@ import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
 import Futhark.Construct
+import Futhark.Representation.AST.Attributes.Aliases
+import qualified Futhark.Analysis.Alias as Alias
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -528,25 +531,67 @@ internaliseExp desc (E.Partition lams arr _) = do
 
 internaliseExp desc (E.Stream form lam arr _) = do
   arrs <- internaliseExpToVars "stream_input" arr
-  accs <- case form of
-            E.MapLike _         -> return []
-            E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
-            E.Sequential  acc   -> internaliseExp "stream_acc" acc
+  (lam_accs, lam_acc_param_ts) <-
+    case form of E.MapLike{} -> return ([], [])
+                 E.RedLike{} -> return ([], [])
+                 E.Sequential acc -> do
+                   accs <- internaliseExp "stream_acc" acc
+                   acc_ts <- mapM I.subExpType accs
+                   return (accs, acc_ts)
 
   rowts <- mapM (fmap I.rowType . lookupType) arrs
-  lam' <- internaliseStreamLambda internaliseLambda asserting lam accs rowts
+  lam' <- internaliseStreamLambda internaliseLambda asserting lam lam_acc_param_ts rowts
 
-  form' <- case form of
-             E.MapLike o -> return $ I.MapLike o
-             E.RedLike o comm lam0 _ -> do
-                 acctps <- mapM I.subExpType accs
-                 outsz  <- arraysSize 0 <$> mapM lookupType arrs
-                 let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
-                 lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
-                 return $ I.RedLike o comm lam0' accs
-             E.Sequential _ -> return $ I.Sequential accs
+  -- If the stream form is a reduce, we also have to fiddle with the
+  -- lambda to incorporate the reduce function.  FIXME: can't we just
+  -- modify the internal representation of reduction streams?
+  (form', lam'') <-
+    case form of
+      E.MapLike o -> return (I.MapLike o, lam')
+      E.Sequential _ -> return (I.Sequential lam_accs, lam')
+      E.RedLike o comm lam0 -> do
+        -- Synthesize neutral elements by applying the fold function
+        -- to an empty chunk.
+        accs <- do
+          empties <- mapM (letSubExp "empty" . I.BasicOp . I.ArrayLit []) rowts
+          let params = [ [(param, BindVar)] |
+                         param <- map I.paramName $ I.extLambdaParams lam' ]
+          zipWithM_ letBindNames params $
+            map (I.BasicOp . I.SubExp) $ constant (0::Int32) : empties
+          bodyBind =<< renameBody (I.extLambdaBody lam')
+
+        acctps <- mapM I.subExpType accs
+        outsz  <- arraysSize 0 <$> mapM lookupType arrs
+        let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
+        lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
+        let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
+        acc_params <- forM lam0_acc_params $ \p -> do
+          name <- newVName $ baseString $ paramName p
+          return p { I.paramName = name }
+
+        body_with_lam0 <-
+          ensureResultShape asserting (srclocOf lam) acctps <=< runBodyBinder $ do
+            lam_res <- bodyBind $ extLambdaBody lam'
+
+            let consumed = consumedByLambda $ Alias.analyseLambda lam0'
+                copyIfConsumed p (I.Var v)
+                  | paramName p `HS.member` consumed =
+                      letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
+                copyIfConsumed _ x = return x
+
+            accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
+            new_lam_res <- eLambda lam0' $ accs' ++ lam_res
+            return $ resultBody new_lam_res
+
+        -- Make sure the chunk size parameter comes first.
+        return (I.RedLike o comm lam0' accs,
+                lam' { extLambdaParams = take 1 (extLambdaParams lam') <>
+                                         acc_params <>
+                                         drop 1 (extLambdaParams lam')
+                     , extLambdaBody = body_with_lam0
+                     , extLambdaReturnType = staticShapes acctps })
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream [] w form' lam' arrs
+  letTupExp' desc $ I.Op $ I.Stream [] w form' lam'' arrs
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
