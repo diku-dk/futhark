@@ -260,8 +260,9 @@ rebase :: (Eq num, IntegralExp num) =>
           IxFun num
        -> IxFun num
        -> IxFun num
-rebase new_base (Direct _) =
-  new_base
+rebase new_base (Direct old_shape)
+  | length old_shape == rank new_base = new_base
+  | otherwise = error "IndexFunction.rebase: bad rank for new base."
 rebase new_base (Stride ixfun stride) =
   strideIndex (rebase new_base ixfun) stride
 rebase new_base (Permute ixfun perm) =
