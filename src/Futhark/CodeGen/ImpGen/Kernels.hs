@@ -732,8 +732,12 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
         in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
         num_waves = (group_size + wave_size - 1) `quot` wave_size
 
+        -- Some short-circuiting here to handle the (rare) case where
+        -- the wave size is greater than the group size.
         doing_in_wave_reductions =
-                  Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size
+          Imp.BinOpExp (And Int32)
+          (Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size)
+          (Imp.CmpOpExp (CmpSlt Int32) wave_size group_size)
         apply_in_in_wave_iteration =
           Imp.CmpOpExp (CmpEq int32)
           (Imp.BinOpExp (And Int32) in_wave_id (2 * Imp.var offset int32 - 1)) 0
