@@ -61,6 +61,7 @@ tokens :-
   "<"                      { tokenC LTH }
   ">"                      { tokenC GTH }
   "&"                      { tokenC BAND }
+  "#"                      { tokenC HASH }
   "|"                      { tokenC BOR }
   "^"                      { tokenC XOR }
   "("                      { tokenC LPAR }
@@ -337,6 +338,7 @@ data Token = IF
            | COLON
            | AT
            | TYPE_ARROW
+           | HASH
 
              deriving (Show, Eq)
 

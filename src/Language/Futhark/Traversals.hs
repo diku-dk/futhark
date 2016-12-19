@@ -67,8 +67,8 @@ mapExpM tv (BinOp bop x y t loc) =
   pure (BinOp bop) <*>
          mapOnExp tv x <*> mapOnExp tv y <*>
          mapTypeM tv t <*> pure loc
-mapExpM tv (UnOp unop x loc) =
-  pure (UnOp unop) <*> mapOnExp tv x <*> pure loc
+mapExpM tv (UnOp unop x NoInfo loc) =
+  pure (UnOp unop) <*> mapOnExp tv x <*> pure NoInfo <*> pure loc
 mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
        mapTypeM tv t <*> pure loc
@@ -88,8 +88,6 @@ mapExpM tv (Index arr idxexps loc) =
        mapOnExp tv arr <*>
        mapM (mapDimIndexM tv) idxexps <*>
        pure loc
-mapExpM tv (TupleIndex e i NoInfo loc) =
-  TupleIndex <$> mapOnExp tv e <*> pure i <*> pure NoInfo <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
 mapExpM tv (Shape e loc) =

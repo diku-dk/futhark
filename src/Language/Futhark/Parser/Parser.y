@@ -125,6 +125,7 @@ import Language.Futhark.Parser.Lexer
       '!'             { L $$ BANG }
       '.'             { L $$ DOT }
       '@'             { L $$ AT }
+      '#'             { L $$ HASH }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
       fn              { L $$ FN }
@@ -275,14 +276,11 @@ QualName :: { (QualName Name , SrcLoc) }
          | id { let L loc (ID name) = $1 in (QualName ([], name), loc) }
 ;
 
-QualExp :: { (QualName (Either Int Name), SrcLoc) }
+QualExp :: { (QualName Name, SrcLoc) }
 QualExp : id
           { let L loc (ID name) = $1
-            in (QualName ([], Right name), loc)
+            in (QualName ([], name), loc)
           }
-        | id '.' NaturalInt
-          { let L loc (ID name) = $1
-            in (QualName ([name], Left $3), loc) }
         | id '.' QualExp
           { let L loc (ID qual) = $1; (QualName (quals,x), _) = $3
             in (QualName (qual:quals,x), loc)
@@ -327,6 +325,7 @@ FuncLikeUnOp :: { (UnOp, SrcLoc) }
      | SignedType { (ToSigned (fst $1), snd $1) }
      | UnsignedType { (ToUnsigned (fst $1), snd $1) }
      | FloatType { (ToFloat (fst $1), snd $1) }
+     | '#' NaturalInt { (TupleProject $2, $1) }
 
 Headers :: { [ProgHeader] }
         : Header Headers { $1 : $2 }
@@ -515,10 +514,10 @@ Exp  :: { UncheckedExp }
      | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
      | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
      | '-' Exp %prec juxtprec
-       { UnOp Negate $2 $1 }
+       { UnOp Negate $2 NoInfo $1 }
      | UnOp Exp %prec juxtprec
-       { UnOp (fst $1) $2 (snd $1) }
-     | Exp '**' Exp    { BinOp Pow $1 $3 NoInfo $2 }
+       { UnOp (fst $1) $2 NoInfo (snd $1) }
+     | Exp '**' Exp   { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
@@ -556,7 +555,6 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | empty '(' UserTypeDecl ')' { Empty $3 $1 }
      | '(' Exp ')'                { $2 }
      | '(' Exp ')[' DimIndices ']' { Index $2 $4 $1 }
-     | '(' Exp ')' '.' NaturalInt { TupleIndex $2 $5 NoInfo $1 }
      | '(' Exp ',' Exps ')'       { TupLit ($2:$4) $1 }
      | '('      ')'               { TupLit [] $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -565,11 +563,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                                        slice loc }
      | QualExp %prec letprec
          { case $1 of
-             (QualName (quals, Left i), loc) ->
-               TupleIndex
-               (Var (QualName (init quals, last quals)) NoInfo loc)
-               i NoInfo loc
-             (QualName (quals, Right name), loc) ->
+             (QualName (quals, name), loc) ->
                Var (QualName (quals, name)) NoInfo loc
          }
 

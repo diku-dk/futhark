@@ -146,14 +146,15 @@ instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
 
 instance Pretty UnOp where
-  ppr Not            = text "!"
-  ppr Negate         = text "-"
-  ppr Complement     = text "~"
-  ppr Abs            = text "abs "
-  ppr Signum         = text "signum "
-  ppr (ToFloat t)    = ppr t
-  ppr (ToSigned t)   = ppr (Signed t)
-  ppr (ToUnsigned t) = ppr (Unsigned t)
+  ppr Not              = text "!"
+  ppr Negate           = text "-"
+  ppr Complement       = text "~"
+  ppr Abs              = text "abs "
+  ppr Signum           = text "signum "
+  ppr (ToFloat t)      = ppr t
+  ppr (ToSigned t)     = ppr (Signed t)
+  ppr (ToUnsigned t)   = ppr (Unsigned t)
+  ppr (TupleProject i) = text "#" <> ppr i
 
 instance Pretty BinOp where
   ppr Plus     = text "+"
@@ -202,7 +203,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
-  pprPrec _ (UnOp op e _) = ppr op <+> pprPrec 9 e
+  pprPrec _ (UnOp op e _ _) = ppr op <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
@@ -239,8 +240,6 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
       text "in" </> ppr body
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (TupleIndex e i _ _) =
-    pprPrec 9 e <> text "." <> ppr i
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
   pprPrec _ (Shape e _) =
     text "shape" <> apply [ppr e]

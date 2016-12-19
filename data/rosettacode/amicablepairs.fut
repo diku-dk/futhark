@@ -22,4 +22,4 @@ fun main(upper: int): [][2]int =
   let range = map (1+) (iota upper)
   let divs = zip range (map (fn n => reduce (+) 0 (divisors n)) range)
   let amicable = filter amicable (map (getPair divs) (iota (upper*upper)))
-  in map (fn (np,mp) => [np.0, mp.0]) amicable
+  in map (fn (np,mp) => [#0 np, #0 mp]) amicable

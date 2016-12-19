@@ -43,7 +43,7 @@ fun hailstone_seq(x: int): []int =
     let x = hailstone_step x
     let steps[i] = x
     in (capacity, i+1, steps, x)
-  in (split i steps).0
+  in #0 (split i steps)
 
 fun hailstone_len(x: int): int =
   let i = 1

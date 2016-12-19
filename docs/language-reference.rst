@@ -323,6 +323,13 @@ Absolute value of ``x``, which must be of integral type.
 Sign of ``x``, which must be of an integral type.  Returns 1, 0, or
 -1.
 
+``#i e``
+~~~~~~~
+
+Access field ``i`` of the expression ``e``, which must be of
+tuple-type.  The fields are indexed from zero.  ``i`` must be a
+literal integer, not an arbitrary expression.
+
 ``[x, y, z]``
 ~~~~~~~~~~~~~
 
@@ -362,13 +369,6 @@ dimensions can be done by separating with commas, and may be
 intermixed freely with indexing.  It is an error if ``j < n``.  If
 ``i`` is elided, it defaults to ``0``.  If ``j`` is elided, if
 defaults to the size of the array.
-
-``e.i``
-~~~~~~~
-
-Access field ``i`` of the expression ``e``, which must be of
-tuple-type.  The fields are indexed from zero.  ``i`` must be a
-literal integer, not an arbitrary expression.
 
 ``zip x y z``
 ~~~~~~~~~~~~~~~~~~
