@@ -336,7 +336,6 @@ data Token = IF
            | VAL
            | COLON
            | AT
-           | IS
            | TYPE_ARROW
 
              deriving (Show, Eq)
