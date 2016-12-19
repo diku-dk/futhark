@@ -906,37 +906,43 @@ checkExp (Empty decl loc) = do
 
 checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
 
-checkExp (UnOp Not e pos) = do
+checkExp (UnOp Not e NoInfo pos) = do
   e' <- require [Prim Bool] =<< checkExp e
-  return $ UnOp Not e' pos
+  return $ UnOp Not e' (Info $ Prim Bool) pos
 
-checkExp (UnOp Complement e loc) = do
+checkExp (UnOp Complement e NoInfo loc) = do
   e' <- require anyIntType =<< checkExp e
-  return $ UnOp Complement e' loc
+  return $ UnOp Complement e' (Info $ typeOf e') loc
 
-checkExp (UnOp Negate e loc) = do
+checkExp (UnOp Negate e NoInfo loc) = do
   e' <- require anyNumberType =<< checkExp e
-  return $ UnOp Negate e' loc
+  return $ UnOp Negate e' (Info $ typeOf e') loc
 
-checkExp (UnOp Abs e loc) = do
+checkExp (UnOp Abs e NoInfo loc) = do
   e' <- require anyNumberType =<< checkExp e
-  return $ UnOp Abs e' loc
+  return $ UnOp Abs e' (Info $ typeOf e') loc
 
-checkExp (UnOp Signum e loc) = do
+checkExp (UnOp Signum e NoInfo loc) = do
   e' <- require anyIntType =<< checkExp e
-  return $ UnOp Signum e' loc
+  return $ UnOp Signum e' (Info $ typeOf e') loc
 
-checkExp (UnOp (ToFloat t) e loc) = do
+checkExp (UnOp (ToFloat t) e NoInfo loc) = do
   e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
-  return $ UnOp (ToFloat t) e' loc
+  return $ UnOp (ToFloat t) e' (Info (Prim (FloatType t))) loc
 
-checkExp (UnOp (ToSigned t) e loc) = do
+checkExp (UnOp (ToSigned t) e NoInfo loc) = do
   e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
-  return $ UnOp (ToSigned t) e' loc
+  return $ UnOp (ToSigned t) e' (Info (Prim (Signed t))) loc
 
-checkExp (UnOp (ToUnsigned t) e loc) = do
+checkExp (UnOp (ToUnsigned t) e NoInfo loc) = do
   e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
-  return $ UnOp (ToUnsigned t) e' loc
+  return $ UnOp (ToUnsigned t) e' (Info (Prim (Unsigned t))) loc
+
+checkExp (UnOp (TupleProject i) e NoInfo loc) = do
+  e' <- checkExp e
+  case typeOf e' of
+    Tuple ts | t:_ <- drop i ts -> return $ UnOp (TupleProject i) e' (Info t) loc
+    _ -> bad $ InvalidField loc (typeOf e') (show i)
 
 checkExp (If e1 e2 e3 _ pos) =
   sequentially (require [Prim Bool] =<< checkExp e1) $ \e1' _ -> do
@@ -1026,12 +1032,6 @@ checkExp (Index e idxes pos) = do
     bad $ IndexingError (arrayRank vt) (length idxes) pos
   idxes' <- mapM checkDimIndex idxes
   return $ Index e' idxes' pos
-
-checkExp (TupleIndex e i NoInfo loc) = do
-  e' <- checkExp e
-  case typeOf e' of
-    Tuple ts | t:_ <- drop i ts -> return $ TupleIndex e' i (Info t) loc
-    _ -> bad $ InvalidField loc (typeOf e') (show i)
 
 checkExp (Iota e pos) = do
   e' <- require anyIntType =<< checkExp e
@@ -1623,7 +1623,7 @@ checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
   occur $ argOccurences arg
   var@(Ident x _ _) <- newIdent "x" (argType arg) loc
   binding [var] $ do
-    e <- checkExp $ UnOp unop (Var (QualName ([],x)) NoInfo loc) loc
+    e <- checkExp $ UnOp unop (Var (QualName ([],x)) NoInfo loc) NoInfo loc
     return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) args =

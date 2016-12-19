@@ -316,6 +316,7 @@ data UnOp = Not
           | ToFloat FloatType
           | ToSigned IntType
           | ToUnsigned IntType
+          | TupleProject Int
           deriving (Eq, Ord, Show)
 
 -- | Binary operators.
@@ -392,7 +393,7 @@ data ExpBase f vn =
               SrcLoc
 
             | BinOp BinOp (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
-            | UnOp UnOp (ExpBase f vn) SrcLoc
+            | UnOp UnOp (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
@@ -402,9 +403,6 @@ data ExpBase f vn =
             | Index (ExpBase f vn)
                     [DimIndexBase f vn]
                     SrcLoc
-
-            | TupleIndex (ExpBase f vn) Int (f (CompTypeBase vn)) SrcLoc
-            -- ^ Extract the specified component from a tuple.
 
             | Shape (ExpBase f vn) SrcLoc
             -- ^ The shape of the argument.
@@ -528,14 +526,13 @@ instance Located (ExpBase f vn) where
   locOf (ArrayLit _ _ pos)      = locOf pos
   locOf (Empty _ pos)           = locOf pos
   locOf (BinOp _ _ _ _ pos)     = locOf pos
-  locOf (UnOp _ _ pos)          = locOf pos
+  locOf (UnOp _ _ _ pos)        = locOf pos
   locOf (If _ _ _ _ pos)        = locOf pos
   locOf (Var _ _ loc)           = locOf loc
   locOf (Apply _ _ _ pos)       = locOf pos
   locOf (LetPat _ _ _ pos)      = locOf pos
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
   locOf (Index _ _ pos)         = locOf pos
-  locOf (TupleIndex _ _ _ pos)  = locOf pos
   locOf (Iota _ pos)            = locOf pos
   locOf (Shape _ pos)           = locOf pos
   locOf (Replicate _ _ pos)     = locOf pos

@@ -168,14 +168,6 @@ internaliseExp desc (E.Index e idxs loc) = do
         return $ I.BasicOp $ I.Index (concat idx_cs) v $ fullSlice v_t idxs'
   letSubExps desc =<< mapM index vs
 
-internaliseExp desc (E.TupleIndex e i (Info rt) _) =
-  take n . drop i' <$> internaliseExp desc e
-  where n = length $ internaliseType rt
-        i' = sum $ map (length . internaliseType) $ take i $
-             case E.typeOf e of
-               Tuple ts -> ts
-               t        -> [t]
-
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
 
@@ -682,11 +674,19 @@ internaliseExp desc (E.BinOp bop xe ye _ _) = do
       internaliseBinOp desc bop xe' ye' t1 t2
     _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
-internaliseExp desc (E.UnOp E.Not e _) = do
+internaliseExp desc (E.UnOp (E.TupleProject i) e (Info rt) _) =
+  take n . drop i' <$> internaliseExp desc e
+  where n = length $ internaliseType rt
+        i' = sum $ map (length . internaliseType) $ take i $
+             case E.typeOf e of
+               Tuple ts -> ts
+               t        -> [t]
+
+internaliseExp desc (E.UnOp E.Not e _ _) = do
   e' <- internaliseExp1 "not_arg" e
   letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
 
-internaliseExp desc (E.UnOp E.Complement e _) = do
+internaliseExp desc (E.UnOp E.Complement e _ _) = do
   e' <- internaliseExp1 "complement_arg" e
   et <- subExpType e'
   case et of I.Prim (I.IntType t) ->
@@ -694,7 +694,7 @@ internaliseExp desc (E.UnOp E.Complement e _) = do
              _ ->
                fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
 
-internaliseExp desc (E.UnOp E.Negate e _) = do
+internaliseExp desc (E.UnOp E.Negate e _ _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
   case et of I.Prim (I.IntType t) ->
@@ -703,7 +703,7 @@ internaliseExp desc (E.UnOp E.Negate e _) = do
                letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
              _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
-internaliseExp desc (E.UnOp E.Abs e _) = do
+internaliseExp desc (E.UnOp E.Abs e _ _) = do
   e' <- internaliseExp1 "abs_arg" e
   case E.typeOf e of
     E.Prim (E.Signed t) ->
@@ -714,7 +714,7 @@ internaliseExp desc (E.UnOp E.Abs e _) = do
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
 
-internaliseExp desc (E.UnOp E.Signum e _) = do
+internaliseExp desc (E.UnOp E.Signum e _ _) = do
   e' <- internaliseExp1 "signum_arg" e
   case E.typeOf e of
     E.Prim (E.Signed t) ->
@@ -723,7 +723,7 @@ internaliseExp desc (E.UnOp E.Signum e _) = do
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
 
-internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
+internaliseExp desc (E.UnOp (E.ToFloat float_to) e _ _) = do
   e' <- internaliseExp1 "tofloat_arg" e
   case E.typeOf e of
     E.Prim E.Bool ->
@@ -738,7 +738,7 @@ internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
       letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
 
-internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
+internaliseExp desc (E.UnOp (E.ToSigned int_to) e _ _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
     E.Prim E.Bool ->
@@ -753,7 +753,7 @@ internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
       letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToSigned"
 
-internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _) = do
+internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _ _) = do
   e' <- internaliseExp1 "trunc_arg" e
   case E.typeOf e of
     E.Prim E.Bool ->
@@ -1076,7 +1076,7 @@ unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
   let ident = E.Ident paramname (Info paramtype) noLoc
   return ([E.Id ident],
-          E.UnOp op (E.Var (QualName ([],paramname)) (Info paramtype) noLoc) noLoc,
+          E.UnOp op (E.Var (QualName ([],paramname)) (Info paramtype) noLoc) (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type

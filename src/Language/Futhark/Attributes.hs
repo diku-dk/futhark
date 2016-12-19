@@ -564,14 +564,7 @@ typeOf (ArrayLit es (Info t) _) =
 typeOf (Empty (TypeDecl _ (Info t)) _) =
   arrayType 1 (fromStruct t) Unique
 typeOf (BinOp _ _ _ (Info t) _) = t
-typeOf (UnOp Not _ _) = Prim Bool
-typeOf (UnOp Negate e _) = typeOf e
-typeOf (UnOp Complement e _) = typeOf e
-typeOf (UnOp Abs e _) = typeOf e
-typeOf (UnOp Signum e _) = typeOf e
-typeOf (UnOp (ToFloat t) _ _) = Prim $ FloatType t
-typeOf (UnOp (ToSigned t) _ _) = Prim $ Signed t
-typeOf (UnOp (ToUnsigned t) _ _) = Prim $ Unsigned t
+typeOf (UnOp _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info (Tuple ets)) _) = Tuple ets
 typeOf (Var (QualName (_, name)) (Info t) _) = t `addAliases` HS.insert name
@@ -582,7 +575,6 @@ typeOf (Index ident idx _) =
   stripArray (length $ filter isFix idx) (typeOf ident)
   where isFix DimFix{} = True
         isFix _        = False
-typeOf (TupleIndex _ _ (Info t) _) = t
 typeOf (Iota e _) = arrayType 1 (typeOf e) Unique
 typeOf (Shape _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique `setAliases` mempty

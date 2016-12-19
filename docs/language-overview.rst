@@ -118,13 +118,12 @@ We can also add the type ascription on the tuple components::
   fun sumpair(x: int, y: int): int = x + y
 
 Apart from pattern-matching, the components of a tuple can also be
-accessed by using the field access operator (``.``)::
+accessed by using the tuple projection syntax: ``#i``, where ``i``
+indicates the component to extract (0-indexed)::
 
-  fun sumpair(p: (int, int)): int = p.0 + p.1
+  fun sumpair(p: (int, int)): int = #0 p + #1 p
 
-Only some expressions can be on the left-hand side of the dot,
-although you can enclose any expression in parentheses to make it
-acceptable.  The right-hand-side must be a literal integer.
+In most cases, pattern matching is better style.
 
 Function calls are written as the function name with the arguments
 juxtaposed.  All function calls must be fully saturated - currying is
