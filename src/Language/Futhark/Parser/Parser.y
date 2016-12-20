@@ -174,7 +174,6 @@ import Language.Futhark.Parser.Lexer
       include         { L $$ INCLUDE }
       write           { L $$ WRITE }
       type            { L $$ TYPE }
-      signature       { L $$ SIGNATURE }
       sig             { L $$ SIG }
       struct          { L $$ STRUCT }
       end             { L $$ END }
@@ -235,9 +234,9 @@ Aliases : id ',' Aliases
 ;
 
 Signature :: { SigDefBase f vn }
-          : signature id '=' sig SigDecs end
+          : sig id '{' SigDecs '}'
               { let L pos (ID name) = $2
-                 in SigDef name $5 pos }
+                in SigDef name $4 pos }
 
 Module :: { ModDefBase f vn }
        : struct id '{' Decs '}'
@@ -318,7 +317,7 @@ Headers :: { [ProgHeader] }
 ;
 
 Header :: { ProgHeader }
-Header : include qid { let (L _ (QUALID qs v)) = $2 in Include (map nameToString (qs++[v])) }
+Header : include QualName { let (QualName (qs, v), _) = $2 in Include (map nameToString (qs++[v])) }
 ;
 
 Fun     : fun id Params MaybeAscription '=' Exp
