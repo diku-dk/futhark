@@ -77,6 +77,10 @@ import Language.Futhark.Parser.Lexer
       id              { L _ (ID _) }
       'id['           { L _ (INDEXING _) }
 
+      qid             { L _ (QUALID _ _) }
+      'qid['          { L _ (QUALINDEXING _ _) }
+
+
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
@@ -123,7 +127,6 @@ import Language.Futhark.Parser.Lexer
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
-      '.'             { L $$ DOT }
       '@'             { L $$ AT }
       '#'             { L $$ HASH }
       fun             { L $$ FUN }
@@ -192,7 +195,6 @@ import Language.Futhark.Parser.Lexer
 %left '**'
 %left ':'
 %nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
-%nonassoc '.'
 %nonassoc '['
 %nonassoc Id
 %left juxtprec
@@ -270,23 +272,6 @@ DefaultDec :: { () }
 ;
 
 
-QualName :: { (QualName Name , SrcLoc) }
-         : id '.' QualName { let L loc (ID qual) = $1; (QualName (quals, name), _) = $3
-                              in (QualName (qual:quals, name), loc) }
-         | id { let L loc (ID name) = $1 in (QualName ([], name), loc) }
-;
-
-QualExp :: { (QualName Name, SrcLoc) }
-QualExp : id
-          { let L loc (ID name) = $1
-            in (QualName ([], name), loc)
-          }
-        | id '.' QualExp
-          { let L loc (ID qual) = $1; (QualName (quals,x), _) = $3
-            in (QualName (qual:quals,x), loc)
-          }
-
-
 -- Note that this production does not include Minus.
 BinOp :: { (BinOp, SrcLoc) }
       : '+'     { (Plus, $1) }
@@ -333,12 +318,8 @@ Headers :: { [ProgHeader] }
 ;
 
 Header :: { ProgHeader }
-Header : include IncludeParts { Include $2 }
+Header : include qid { let (L _ (QUALID qs v)) = $2 in Include (map nameToString (qs++[v])) }
 ;
-
-IncludeParts :: { [String] }
-IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
-             | id { let L pos (ID name) = $1 in [nameToString name] }
 
 Fun     : fun id Params MaybeAscription '=' Exp
                         { let L pos (ID name) = $2
@@ -419,6 +400,10 @@ Param : VarId                        { Id $1 }
       | '(' ')'                      { TuplePattern [] $1 }
       | '(' Pattern ')'              { $2 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
+
+QualName :: { (QualName Name, SrcLoc) }
+          : qid { let L loc (QUALID qs v) = $1 in (QualName (qs, v), loc) }
+          | id  { let L loc (ID v) = $1 in (QualName ([], v), loc) }
 
 Exp  :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
@@ -558,14 +543,9 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' Exp ',' Exps ')'       { TupLit ($2:$4) $1 }
      | '('      ')'               { TupLit [] $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
-     | VarSlice                   { let (v,slice,loc) = $1
-                                    in Index (Var (QualName ([], v)) NoInfo loc)
-                                       slice loc }
-     | QualExp %prec letprec
-         { case $1 of
-             (QualName (quals, name), loc) ->
-               Var (QualName (quals, name)) NoInfo loc
-         }
+     | QualVarSlice  { let (v,slice,loc) = $1
+                       in Index (Var v NoInfo loc) slice loc }
+     | QualName { Var (fst $1) NoInfo (snd $1) }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
@@ -599,6 +579,12 @@ VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
           : 'id[' DimIndices ']'
               { let L loc (INDEXING v) = $1
                 in (v, $2, loc) }
+
+QualVarSlice :: { (QualName Name, [UncheckedDimIndex], SrcLoc) }
+              : VarSlice
+                { let (x, y, z) = $1 in (QualName ([], x), y, z) }
+              | 'qid[' DimIndices ']'
+                { let L loc (QUALINDEXING qs v) = $1 in (QualName (qs, v), $2, loc) }
 
 DimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
            | DimIndex                    { [$1] }

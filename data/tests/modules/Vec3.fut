@@ -1,5 +1,4 @@
 -- ==
--- tags { disable }
 struct Vec3
   {
     struct F32
@@ -48,3 +47,5 @@ struct Vec3
           a1*b1 + a2*b2 + a3*b3
       }
   }
+
+fun main(k: f32): Vec3.F32.t = Vec3.F32.scale (k, (0.0f32, 1.0f32, 2.0f32))
