@@ -164,7 +164,6 @@ keyword s =
     "include"      -> INCLUDE
     "type"         -> TYPE
     "entry"        -> ENTRY
-    "signature"    -> SIGNATURE
     "sig"          -> SIG
     "struct"       -> STRUCT
     "end"          -> END
@@ -339,7 +338,6 @@ data Token = IF
            | ENTRY
            | TYPE
            | EOF
-           | SIGNATURE
            | SIG
            | STRUCT
            | END
