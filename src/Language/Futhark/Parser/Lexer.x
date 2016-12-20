@@ -33,6 +33,7 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
 @intlit = @hexlit|@binlit|@declit
 @reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
+@qualidentifier = (@identifier ".")+ @identifier
 
 tokens :-
 
@@ -74,7 +75,6 @@ tokens :-
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
   "!"                      { tokenC BANG }
-  "."                      { tokenC DOT }
   "->"                     { tokenC TYPE_ARROW }
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
@@ -95,6 +95,9 @@ tokens :-
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
   @identifier              { tokenS keyword }
   @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
+
+  @qualidentifier          { tokenM $ fmap (uncurry QUALID) . mkQualId }
+  @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
 
 {
 
@@ -173,6 +176,11 @@ indexing s = case keyword s of
   ID v -> return v
   _    -> fail $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
+mkQualId :: T.Text -> Alex ([Name], Name)
+mkQualId s = case reverse $ T.splitOn "." s of
+  []   -> fail "mkQualId: no components"
+  k:qs -> return (map nameFromText (reverse qs), nameFromText k)
+
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
   [(x, "")] -> return x
@@ -239,6 +247,8 @@ data Token = IF
            | F64
            | ID Name
            | INDEXING Name
+           | QUALID [Name] Name
+           | QUALINDEXING [Name] Name
            | STRINGLIT String
            | DEFAULT
            | INTLIT Int64
@@ -322,7 +332,6 @@ data Token = IF
            | STREAM_REDPER
            | STREAM_SEQ
            | BANG
-           | DOT
            | ABS
            | SIGNUM
            | WRITE
