@@ -1434,16 +1434,16 @@ checkPattern (Wildcard _ loc) (Inferred t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
 checkPattern (Wildcard _ loc) (Ascribed t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
-checkPattern (TuplePattern ps loc) (Inferred (Tuple ts)) =
+checkPattern (TuplePattern ps loc) (Inferred (Tuple ts)) | length ts == length ps =
   TuplePattern <$> zipWithM checkPattern ps (map Inferred ts) <*> pure loc
-checkPattern (TuplePattern ps loc) (Ascribed (Tuple ts)) =
+checkPattern (TuplePattern ps loc) (Ascribed (Tuple ts)) | length ts == length ps =
   TuplePattern <$> zipWithM checkPattern ps (map Ascribed ts) <*> pure loc
 checkPattern p@TuplePattern{} (Inferred t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty (untagPattern p) ++ " cannot match " ++ pretty t
 checkPattern p@TuplePattern{} (Ascribed t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty (untagPattern p) ++ " cannot match " ++ pretty t
 checkPattern (TuplePattern ps loc) NoneInferred =
-  TuplePattern <$> zipWithM checkPattern ps (repeat NoneInferred) <*> pure loc
+  TuplePattern <$> mapM (`checkPattern` NoneInferred) ps <*> pure loc
 checkPattern fullp@(PatternAscription p td) maybe_outer_t = do
   td' <- checkTypeDecl td
   let maybe_outer_t' = case maybe_outer_t of Inferred t -> Just t
