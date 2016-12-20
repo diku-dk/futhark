@@ -628,13 +628,13 @@ require ts e
                       (toStructural $ typeOf e) ts
 
 chompDecs :: [DecBase NoInfo VName]
-          -> ([FunOrTypeDecBase NoInfo VName], [DecBase NoInfo VName])
+          -> ([FunOrTypeBindBase NoInfo VName], [DecBase NoInfo VName])
 chompDecs decs = f ([], decs)
   where f (foo , FunOrTypeDec dec : xs ) = f (dec:foo , xs)
         f (foo , bar) = (foo, bar)
 
 
-buildScopeFromDecs :: [FunOrTypeDecBase NoInfo VName]
+buildScopeFromDecs :: [FunOrTypeBindBase NoInfo VName]
                    -> TypeM Scope
 buildScopeFromDecs [] = ask
 buildScopeFromDecs decs =
@@ -658,7 +658,7 @@ buildScopeFromDecs decs =
     paramDeclaredType _ =
       Nothing
 
-    expandFun scope vtable (FunDef _ fname (Just ret) _ params _ _) = do
+    expandFun scope vtable (FunBind _ fname (Just ret) _ params _ _) = do
       argtypes <- forM params $ \param ->
         case paramDeclaredType param of
           Just t -> return t
@@ -671,10 +671,10 @@ buildScopeFromDecs decs =
       ret' <- expandType look ret
       argtypes' <- mapM (expandType look) argtypes
       return $ HM.insert fname (BoundF (ret' , argtypes')) vtable
-    expandFun _ vtable (FunDef _ fname Nothing _ _ _ _) =
+    expandFun _ vtable (FunBind _ fname Nothing _ _ _ _) =
       return $ HM.insert fname UnknownF vtable
 
-    expandConst scope vtable (ConstDef cname (TypeDecl t NoInfo) _ _) = do
+    expandConst scope vtable (ConstBind cname (TypeDecl t NoInfo) _ _) = do
       let look tname tloc =
             maybe (throwError $ UndefinedType tloc $ untagQualName tname) return $
             typeFromScope tname scope
@@ -698,49 +698,49 @@ checkProg' decs = do
 checkForDuplicateDecs :: [DecBase NoInfo VName] -> TypeM ()
 checkForDuplicateDecs =
   foldM_ f mempty
-  where f known (FunOrTypeDec (FunDec (FunDef _ name _ _ _ _ loc))) =
+  where f known (FunOrTypeDec (FunDec (FunBind _ name _ _ _ _ loc))) =
           case HM.lookup (name, "function") known of
             Just loc' ->
               bad $ DupDefinitionError (baseName name) loc loc'
             _ -> return $ HM.insert (name, "function") loc known
 
-        f known (FunOrTypeDec (TypeDec (TypeDef name _ loc))) =
+        f known (FunOrTypeDec (TypeDec (TypeBind name _ loc))) =
           case HM.lookup (name, "type") known of
             Just loc' ->
               bad $ DupDefinitionError (baseName name) loc loc'
             _ -> return $ HM.insert (name, "type") loc known
 
-        f known (FunOrTypeDec (ConstDec (ConstDef name _ _ loc))) =
+        f known (FunOrTypeDec (ConstDec (ConstBind name _ _ loc))) =
           case HM.lookup (name, "const") known of
             Just loc' ->
               bad $ DupDefinitionError (baseName name) loc loc'
             _ -> return $ HM.insert (name, "const") loc known
 
-        f known (SigDec (SigDef name _ loc)) =
+        f known (SigDec (SigBind name _ loc)) =
           case HM.lookup (name, "signature") known of
             Just loc' ->
               bad $ DupDefinitionError (baseName name) loc loc'
             _ -> return $ HM.insert (name, "signature") loc known
 
-        f known (ModDec (ModDef name _ loc)) =
+        f known (StructDec (StructBind name _ _ loc)) =
           case HM.lookup (name, "module") known of
             Just loc' ->
               bad $ DupDefinitionError (baseName name) loc loc'
             _ -> return $ HM.insert (name, "module") loc known
 
 
-checkMod :: ModDefBase NoInfo VName -> TypeM (Scope , ModDefBase Info VName)
-checkMod (ModDef name decs loc) = do
+checkMod :: StructBindBase NoInfo VName -> TypeM (Scope , StructBindBase Info VName)
+checkMod (StructBind name _sig decs loc) = do
   checkForDuplicateDecs decs
   (scope, decs') <- checkDecs decs
-  return (scope, ModDef name decs' loc)
+  return (scope, StructBind name _sig decs' loc)
 
 checkDecs :: [DecBase NoInfo VName] -> TypeM (Scope, [DecBase Info VName])
-checkDecs (ModDec modd:rest) = do
+checkDecs (StructDec modd:rest) = do
   (modscope, modd') <- checkMod modd
   local (<>modscope) $ do
     (scope, rest') <- checkDecs rest
-    return (scope, ModDec modd' : rest' )
+    return (scope, StructDec modd' : rest' )
 
 checkDecs (SigDec _:rest) = checkDecs rest
 
@@ -756,7 +756,7 @@ checkDecs decs = do
       (scope, rest') <- checkDecs rest
       return (scope , checkedeDecs ++ rest')
 
-checkFunOrTypeDec :: [FunOrTypeDecBase NoInfo VName] -> TypeM [DecBase Info VName]
+checkFunOrTypeDec :: [FunOrTypeBindBase NoInfo VName] -> TypeM [DecBase Info VName]
 checkFunOrTypeDec (FunDec fundef:decs) = do
     fundef' <- checkFun fundef
     decs' <- checkFunOrTypeDec decs
@@ -771,19 +771,19 @@ checkFunOrTypeDec (ConstDec constdec:decs) = do
 
 checkFunOrTypeDec [] = return []
 
-checkConst :: ConstDefBase NoInfo VName -> TypeM ConstDef
-checkConst (ConstDef name t e loc) = do
+checkConst :: ConstBindBase NoInfo VName -> TypeM ConstBind
+checkConst (ConstBind name t e loc) = do
   t' <- checkTypeDecl t
   let expanded_type = unInfo $ expandedType t'
   when (anythingUnique expanded_type) $
     bad $ UniqueConstType loc (baseName name) $ toStructural expanded_type
   e' <- require [toStructural expanded_type] =<< checkExp e
-  return $ ConstDef name t' e' loc
+  return $ ConstBind name t' e' loc
   where anythingUnique (Tuple ts) = any anythingUnique ts
         anythingUnique et         = unique et
 
-checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
-checkFun (FunDef entry fname maybe_retdecl NoInfo params body loc) =
+checkFun :: FunBindBase NoInfo VName -> TypeM FunBind
+checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) =
   bindingPatterns (zip params $ repeat NoneInferred) $ \params' -> do
     maybe_retdecl' <- case maybe_retdecl of
                         Just rettype -> Just <$> checkUserType rettype
@@ -813,7 +813,7 @@ checkFun (FunDef entry fname maybe_retdecl NoInfo params body loc) =
         unless (okEntryPointType (patternType param)) $
           bad $ InvalidEntryPointParamType (srclocOf param) (baseName fname) $ untagPattern orig_param
 
-    return $ FunDef entry fname maybe_retdecl (Info rettype) params' body' loc
+    return $ FunBind entry fname maybe_retdecl (Info rettype) params' body' loc
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1758,18 +1758,18 @@ checkTypeDecl (TypeDecl t NoInfo) =
 type TypeAliasTableM =
   ReaderT (HS.HashSet (QualName VName)) (StateT Scope TypeM)
 
-typeAliasTableFromProg :: [TypeDefBase NoInfo VName]
+typeAliasTableFromProg :: [TypeBindBase NoInfo VName]
                        -> Scope
                        -> TypeM Scope
 typeAliasTableFromProg defs scope = do
   checkForDuplicateTypes defs
   execStateT (runReaderT (mapM_ process defs) mempty) scope
   where
-        findDefByName name = find ((==name) . typeAlias) defs
+        findBindByName name = find ((==name) . typeAlias) defs
 
-        process :: TypeDefBase NoInfo VName
+        process :: TypeBindBase NoInfo VName
                 -> TypeAliasTableM (StructTypeBase VName)
-        process (TypeDef name (TypeDecl ut NoInfo) _) = do
+        process (TypeBind name (TypeDecl ut NoInfo) _) = do
           t <- expandType typeOfName ut
           modify $ addType name t
           return t
@@ -1784,7 +1784,7 @@ typeAliasTableFromProg defs scope = do
             Nothing
               | name `HS.member` inside ->
                   throwError $ CyclicalTypeDefinition loc $ untagQualName name
-              | Just def <- findDefByName un ->
+              | Just def <- findBindByName un ->
                   local (HS.insert name) $ process def
               | otherwise ->
                   throwError $ UndefinedAlias loc $ untagQualName name
@@ -1795,7 +1795,7 @@ typeFromScope (QualName (_, name)) = HM.lookup name . envTAtable
 addType :: VName -> StructTypeBase VName -> Scope -> Scope
 addType name tp scope = scope {envTAtable = HM.insert name tp $ envTAtable scope}
 
-checkForDuplicateTypes :: [TypeDefBase NoInfo VName] -> TypeM ()
+checkForDuplicateTypes :: [TypeBindBase NoInfo VName] -> TypeM ()
 checkForDuplicateTypes = foldM_ check mempty
   where check seen def
           | name `HS.member` seen =

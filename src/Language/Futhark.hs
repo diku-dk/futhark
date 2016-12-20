@@ -6,7 +6,7 @@ module Language.Futhark
   , module Language.Futhark.Traversals
 
   , Ident, DimIndex, Exp, Lambda
-  , Pattern, FunDef, ConstDef, Prog
+  , Pattern, FunBind, ConstBind, Prog
   , Type, StructType, ArrayType
   )
   where
@@ -32,10 +32,10 @@ type Lambda = LambdaBase Info VName
 type Pattern = PatternBase Info VName
 
 -- | An function declaration with type information.
-type FunDef = FunDefBase Info VName
+type FunBind = FunBindBase Info VName
 
 -- | An constant declaration with type information.
-type ConstDef = ConstDefBase Info VName
+type ConstBind = ConstBindBase Info VName
 
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName

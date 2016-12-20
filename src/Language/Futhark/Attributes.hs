@@ -65,7 +65,7 @@ module Language.Futhark.Attributes
   , isFun
   , isConst
   , isFunOrType
-  , isMod
+  , isStruct
   , isSig
 
   -- | Values of these types are produces by the parser.  They use
@@ -82,7 +82,7 @@ module Language.Futhark.Attributes
   , UncheckedExp
   , UncheckedLambda
   , UncheckedPattern
-  , UncheckedFunDef
+  , UncheckedFunBind
   , UncheckedProg
   , UncheckedProgWithHeaders
   )
@@ -748,29 +748,29 @@ builtInFunctions = HM.fromList $ zipWith namify [0..]
                    ]
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
-isFun :: DecBase f vn -> Maybe (FunDefBase f vn)
+isFun :: DecBase f vn -> Maybe (FunBindBase f vn)
 isFun (FunOrTypeDec (FunDec a)) = Just a
 isFun _                         = Nothing
 
-isConst :: DecBase f vn -> Maybe (ConstDefBase f vn)
+isConst :: DecBase f vn -> Maybe (ConstBindBase f vn)
 isConst (FunOrTypeDec (ConstDec a)) = Just a
 isConst _                           = Nothing
 
-isType :: DecBase f vn -> Maybe (TypeDefBase f vn)
+isType :: DecBase f vn -> Maybe (TypeBindBase f vn)
 isType (FunOrTypeDec (TypeDec t)) = Just t
 isType _                          = Nothing
 
-isFunOrType :: DecBase f vn -> Maybe (FunOrTypeDecBase f vn)
+isFunOrType :: DecBase f vn -> Maybe (FunOrTypeBindBase f vn)
 isFunOrType (FunOrTypeDec ft) = Just ft
 isFunOrType _                 = Nothing
 
-isSig :: DecBase f vn -> Maybe (SigDefBase f vn)
+isSig :: DecBase f vn -> Maybe (SigBindBase f vn)
 isSig (SigDec sig) = Just sig
 isSig _            = Nothing
 
-isMod :: DecBase f vn -> Maybe (ModDefBase f vn)
-isMod (ModDec modd) = Just modd
-isMod _             = Nothing
+isStruct :: DecBase f vn -> Maybe (StructBindBase f vn)
+isStruct (StructDec sd) = Just sd
+isStruct _              = Nothing
 
 -- | Create a name with no qualifiers from a name.
 nameToQualName :: Name -> QualName Name
@@ -806,7 +806,7 @@ type UncheckedLambda = LambdaBase NoInfo Name
 type UncheckedPattern = PatternBase NoInfo Name
 
 -- | A function declaration with no type annotations.
-type UncheckedFunDef = FunDefBase NoInfo Name
+type UncheckedFunBind = FunBindBase NoInfo Name
 
 -- | An Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name

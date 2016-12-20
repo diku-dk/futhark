@@ -52,17 +52,17 @@ module Language.Futhark.Syntax
   , StreamForm(..)
 
   -- * Definitions
-  , FunDefBase(..)
-  , ConstDefBase(..)
-  , TypeDefBase(..)
-  , SigDefBase(..)
-  , SigDeclBase(..)
-  , ModDefBase(..)
+  , FunBindBase(..)
+  , ConstBindBase(..)
+  , TypeBindBase(..)
+  , SigBindBase(..)
+  , SpecBase(..)
+  , StructBindBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
   , DecBase(..)
-  , FunOrTypeDecBase(..)
+  , FunOrTypeBindBase(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -609,86 +609,87 @@ instance Located (PatternBase f vn) where
   locOf (PatternAscription p _) = locOf p
 
 -- | Function Declarations
-data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
+data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
-                              , funDefName       :: vn
-                              , funDefRetDecl    :: Maybe (UserType vn)
-                              , funDefRetType    :: f (StructTypeBase vn)
-                              , funDefParams     :: [PatternBase f vn]
-                              , funDefBody       :: ExpBase f vn
-                              , funDefLocation   :: SrcLoc
-                              }
-deriving instance Showable f vn => Show (FunDefBase f vn)
+                                , funBindName       :: vn
+                                , funBindRetDecl    :: Maybe (UserType vn)
+                                , funBindRetType    :: f (StructTypeBase vn)
+                                , funBindParams     :: [PatternBase f vn]
+                                , funBindBody       :: ExpBase f vn
+                                , funBindLocation   :: SrcLoc
+                                }
+deriving instance Showable f vn => Show (FunBindBase f vn)
 
-instance Located (FunDefBase f vn) where
-  locOf = locOf . funDefLocation
+instance Located (FunBindBase f vn) where
+  locOf = locOf . funBindLocation
 
 -- | Constant declaration
-data ConstDefBase f vn = ConstDef { constDefName     :: vn
-                                  , constDefType     :: TypeDeclBase f vn
-                                  , constDefDef      :: ExpBase f vn
-                                  , constDefLocation :: SrcLoc
-                                  }
-deriving instance Showable f vn => Show (ConstDefBase f vn)
+data ConstBindBase f vn = ConstBind { constBindName     :: vn
+                                    , constBindType     :: TypeDeclBase f vn
+                                    , constBindDef      :: ExpBase f vn
+                                    , constBindLocation :: SrcLoc
+                                    }
+deriving instance Showable f vn => Show (ConstBindBase f vn)
 
-instance Located (ConstDefBase f vn) where
-  locOf = locOf . constDefLocation
+instance Located (ConstBindBase f vn) where
+  locOf = locOf . constBindLocation
 
 -- | Type Declarations
-data TypeDefBase f vn = TypeDef { typeAlias       :: vn
-                                , userType        :: TypeDeclBase f vn
-                                , typeDefLocation :: SrcLoc
+data TypeBindBase f vn = TypeBind { typeAlias       :: vn
+                                  , userType        :: TypeDeclBase f vn
+                                  , typeBindLocation :: SrcLoc
+                                  }
+deriving instance Showable f vn => Show (TypeBindBase f vn)
+
+
+data SigBindBase f vn = SigBind { sigName        :: vn
+                                , sigDecls       :: [SpecBase f vn]
+                                , sigLocation :: SrcLoc
                                 }
-deriving instance Showable f vn => Show (TypeDefBase f vn)
+deriving instance Showable f vn => Show (SigBindBase f vn)
 
+instance Located (SigBindBase f vn) where
+  locOf = locOf . sigLocation
 
-data SigDefBase f vn = SigDef { sigName        :: vn
-                              , sigDecls       :: [SigDeclBase f vn]
-                              , sigDefLocation :: SrcLoc
+data SpecBase f vn = ValSpec  { specName    :: vn
+                              , specParams  :: [TypeDeclBase f vn]
+                              , specRettype :: TypeDeclBase f vn
                               }
-deriving instance Showable f vn => Show (SigDefBase f vn)
+                   | TypeSpec (TypeBindBase f vn)
+deriving instance Showable f vn => Show (SpecBase f vn)
 
-instance Located (SigDefBase f vn) where
-  locOf = locOf . sigDefLocation
+instance Located (TypeBindBase f vn) where
+  locOf = locOf . typeBindLocation
 
-data SigDeclBase f vn = FunSig  { funSigName    :: vn
-                                , funSigParams  :: [TypeDeclBase f vn]
-                                , funSigRettype :: TypeDeclBase f vn
-                                }
-                      | TypeSig (TypeDefBase f vn)
-deriving instance Showable f vn => Show (SigDeclBase f vn)
+data StructBindBase f vn = StructBind { structName        :: vn
+                                      , structSignature   :: Maybe vn
+                                      , structDecls       :: [DecBase f vn]
+                                      , structLocation :: SrcLoc
+                                      }
+deriving instance Showable f vn => Show (StructBindBase f vn)
 
-instance Located (TypeDefBase f vn) where
-  locOf = locOf . typeDefLocation
+instance Located (StructBindBase f vn) where
+  locOf = locOf . structLocation
 
-data ModDefBase f vn = ModDef { modName        :: vn
-                              , modDecls       :: [DecBase f vn]
-                              , modDefLocation :: SrcLoc
-                              }
-deriving instance Showable f vn => Show (ModDefBase f vn)
+data FunOrTypeBindBase f vn = FunDec (FunBindBase f vn)
+                            | ConstDec (ConstBindBase f vn)
+                            | TypeDec (TypeBindBase f vn)
+deriving instance Showable f vn => Show (FunOrTypeBindBase f vn)
 
-instance Located (ModDefBase f vn) where
-  locOf = locOf . modDefLocation
-
-data FunOrTypeDecBase f vn = FunDec (FunDefBase f vn)
-                           | ConstDec (ConstDefBase f vn)
-                           | TypeDec (TypeDefBase f vn)
-deriving instance Showable f vn => Show (FunOrTypeDecBase f vn)
-
-instance Located (FunOrTypeDecBase f vn) where
+instance Located (FunOrTypeBindBase f vn) where
   locOf (FunDec d) = locOf d
   locOf (ConstDec d) = locOf d
   locOf (TypeDec d) = locOf d
 
-data DecBase f vn = FunOrTypeDec (FunOrTypeDecBase f vn)
-                  | SigDec (SigDefBase f vn)
-                  | ModDec (ModDefBase f vn)
+data DecBase f vn = FunOrTypeDec (FunOrTypeBindBase f vn)
+                  | SigDec (SigBindBase f vn)
+                  | StructDec (StructBindBase f vn)
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
   locOf (FunOrTypeDec d) = locOf d
   locOf (SigDec d) = locOf d
-  locOf (ModDec d) = locOf d
+  locOf (StructDec d) = locOf d
 
 data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)

@@ -176,7 +176,6 @@ import Language.Futhark.Parser.Lexer
       type            { L $$ TYPE }
       sig             { L $$ SIG }
       struct          { L $$ STRUCT }
-      end             { L $$ END }
       val             { L $$ VAL }
 
 %left bottom
@@ -222,7 +221,7 @@ Dec :: { [DecBase f vn] }
     | UserTypeAlias { map (FunOrTypeDec . TypeDec) $1 }
     | Const         { map (FunOrTypeDec . ConstDec) [$1] }
     | Signature     { [ SigDec $1 ] }
-    | Module        { [ ModDec $1 ] }
+    | Module        { [ StructDec $1 ] }
 ;
 
 
@@ -233,34 +232,26 @@ Aliases : id ',' Aliases
                in [(name,loc)] }
 ;
 
-Signature :: { SigDefBase f vn }
+Signature :: { SigBindBase f vn }
           : sig id '{' SigDecs '}'
               { let L pos (ID name) = $2
-                in SigDef name $4 pos }
+                in SigBind name $4 pos }
 
-Module :: { ModDefBase f vn }
+Module :: { StructBindBase f vn }
        : struct id '{' Decs '}'
        { let L pos (ID name) = $2
-          in ModDef name $4 pos }
+          in StructBind name Nothing $4 pos }
 
 SigDecs : SigDec SigDecs { $1 : $2 }
         | SigDec { [$1] }
 
-SigDec : FunSig { $1 }
-       | TypeSig { $1 }
-
-FunSig : fun id ':' UserTypeDecls '->' UserTypeDecl
-           { let L _ (ID name) = $2
-              in FunSig name $4 $6  }
-       | fun id ':' UserTypeDecl
-           { let L _ (ID name) = $2
-              in FunSig name [] $4 }
-;
-
-
-TypeSig : type id ':' UserTypeDecl
-            { let L loc (ID name) = $2
-                in TypeSig (TypeDef name $4 loc) }
+SigDec :: { SpecBase NoInfo Name }
+        : val id ':' SigTypeDecl
+          { let L _ (ID name) = $2; (ps, r) = $4
+            in ValSpec name ps r  }
+        | type id ':' UserTypeDecl
+          { let L loc (ID name) = $2
+            in TypeSpec (TypeBind name $4 loc) }
 ;
 
 DefaultDec :: { () }
@@ -322,26 +313,29 @@ Header : include QualName { let (QualName (qs, v), _) = $2 in Include (map nameT
 
 Fun     : fun id Params MaybeAscription '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef (name==defaultEntryPoint) name (fmap declaredType $4) NoInfo $3 $6 pos }
+                          in FunBind (name==defaultEntryPoint) name (fmap declaredType $4) NoInfo $3 $6 pos }
         | entry id Params MaybeAscription '=' Exp
                         { let L pos (ID name) = $2
-                          in FunDef True name (fmap declaredType $4) NoInfo $3 $6 pos }
+                          in FunBind True name (fmap declaredType $4) NoInfo $3 $6 pos }
 ;
 
 Const : val id ':' UserTypeDecl '=' Exp
       { let L loc (ID name) = $2
-        in ConstDef name $4 $6 loc }
+        in ConstBind name $4 $6 loc }
+
+SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
+             : UserTypeDecl
+               { ([], $1) }
+             | UserTypeDecl '->' SigTypeDecl
+               { let (ts, t) = $3 in ($1 : ts, t) }
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
              : UserType { TypeDecl $1 NoInfo }
 
-UserTypeDecls : UserTypeDecl ',' UserTypeDecls { $1 : $3 }
-              | UserTypeDecl { [$1] }
-
-UserTypeAlias :: { [TypeDefBase f vn] }
+UserTypeAlias :: { [TypeBindBase f vn] }
 UserTypeAlias : type Aliases '=' UserTypeDecl
                   { let aliases = $2
-                      in map (\(name, loc) -> TypeDef name $4 loc) aliases }
+                      in map (\(name, loc) -> TypeBind name $4 loc) aliases }
 ;
 
 UserType :: { UncheckedUserType }
