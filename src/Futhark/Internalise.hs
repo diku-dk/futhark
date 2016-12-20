@@ -58,13 +58,13 @@ internaliseProg prog = do
 
 -- | All functions, including those nested in structures.  Treats
 -- constants as 0-ary functions.
-funsFromProg :: ProgBase f vn -> [FunDefBase f vn]
+funsFromProg :: ProgBase f vn -> [FunBindBase f vn]
 funsFromProg prog = concatMap getFuns $ progDecs prog
   where getFuns (FunOrTypeDec (FunDec a)) = [a]
-        getFuns (FunOrTypeDec (ConstDec (E.ConstDef name t e loc))) =
-          [E.FunDef False name Nothing (expandedType t) [] e loc]
+        getFuns (FunOrTypeDec (ConstDec (E.ConstBind name t e loc))) =
+          [E.FunBind False name Nothing (expandedType t) [] e loc]
         getFuns (FunOrTypeDec TypeDec{}) = []
-        getFuns (ModDec d) = concatMap getFuns $ modDecls d
+        getFuns (StructDec d) = concatMap getFuns $ structDecls d
         getFuns SigDec{} = []
 
 buildFtable :: MonadFreshNames m => E.Prog
@@ -73,7 +73,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
               runInternaliseM mempty .
               fmap HM.fromList . mapM inspect . funsFromProg
 
-  where inspect (E.FunDef entry fname _ (Info rettype) params _ _) =
+  where inspect (E.FunBind entry fname _ (Info rettype) params _ _) =
           bindingParams params $ \shapes values -> do
             (rettype', _, cm) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
@@ -102,8 +102,8 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
            (E.Prim t, map E.Prim paramts))
 
-internaliseFun :: E.FunDef -> InternaliseM I.FunDef
-internaliseFun (E.FunDef entry fname _ (Info rettype) params body loc) =
+internaliseFun :: E.FunBind -> InternaliseM I.FunDef
+internaliseFun (E.FunBind entry fname _ (Info rettype) params body loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _, cm) <- internaliseReturnType rettype
     firstbody <- internaliseBody body

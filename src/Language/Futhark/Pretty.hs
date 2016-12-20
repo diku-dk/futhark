@@ -338,25 +338,27 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase ty vn) where
   ppr (FunOrTypeDec dec) = ppr dec
   ppr (SigDec sig)       = ppr sig
-  ppr (ModDec modd)      = ppr modd
+  ppr (StructDec sd)     = ppr sd
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModDefBase ty vn) where
-  ppr (ModDef name moddecls _) =
-    text "struct" <+> ppr name <+> nestedBlock "{" "}"
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
+  ppr (StructBind name sig moddecls _) =
+    text "struct" <+> ppr name <> sig' <+> nestedBlock "{" "}"
     (stack $ punctuate line $ map ppr moddecls)
+    where sig' = case sig of Nothing -> mempty
+                             Just s -> colon <+> ppr s
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunOrTypeDecBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunOrTypeBindBase ty vn) where
   ppr (FunDec fun) = ppr fun
   ppr (ConstDec c) = ppr c
   ppr (TypeDec tp) = ppr tp
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeDefBase ty vn) where
-  ppr (TypeDef name usertype _) =
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeBindBase ty vn) where
+  ppr (TypeBind name usertype _) =
     text "type" <+> ppr name <+> equals <+> ppr usertype
 
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBase ty vn) where
-  ppr (FunDef entry name retdecl _ args body _) =
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunBindBase ty vn) where
+  ppr (FunBind entry name retdecl _ args body _) =
     text fun <+> ppr name <+>
     spread (map ppParam args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
@@ -366,19 +368,20 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBa
                        Just rettype -> text ":" <+> ppr rettype
                        Nothing      -> mempty
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstDefBase ty vn) where
-  ppr (ConstDef name t e _) =
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstBindBase ty vn) where
+  ppr (ConstBind name t e _) =
     text "val" <+> ppr name <> text ":" <+> ppr t <+> text "+" <+> ppr e
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDefBase ty vn) where
-  ppr (SigDef name sigdecls _) =
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigBindBase ty vn) where
+  ppr (SigBind name sigdecls _) =
     text "sig" <+> ppr name <+> equals <+>
     stack (punctuate line $ map ppr sigdecls)
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDeclBase ty vn) where
-  ppr (TypeSig tpsig) = ppr tpsig
-  ppr (FunSig name params rettype) =
-    ppr name <+> ppList params <+> ppr rettype
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SpecBase ty vn) where
+  ppr (TypeSpec tpsig) = ppr tpsig
+  ppr (ValSpec name params rettype) =
+    ppr name <+> colon <+>
+    mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
 
 ppParam :: (Eq vn, Hashable vn, Pretty vn) => PatternBase t vn -> Doc
 ppParam (Id param) = ppr param

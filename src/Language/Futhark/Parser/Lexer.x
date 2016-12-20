@@ -166,7 +166,6 @@ keyword s =
     "entry"        -> ENTRY
     "sig"          -> SIG
     "struct"       -> STRUCT
-    "end"          -> END
     "val"          -> VAL
     _              -> ID $ nameFromText s
 
@@ -340,7 +339,6 @@ data Token = IF
            | EOF
            | SIG
            | STRUCT
-           | END
            | VAL
            | COLON
            | AT

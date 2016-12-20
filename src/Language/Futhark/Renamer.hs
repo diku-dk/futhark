@@ -118,34 +118,34 @@ bind :: (Eq f, Hashable f) => [IdentBase x f] -> RenameM f t a -> RenameM f t a
 bind = bindNames . map identName
 
 renameFunOrTypeDec :: (Eq t, Ord f, Show t, Show f, Hashable t, Hashable f) =>
-                      FunOrTypeDecBase NoInfo f
-                   -> RenameM f t (FunOrTypeDecBase NoInfo t)
+                      FunOrTypeBindBase NoInfo f
+                   -> RenameM f t (FunOrTypeBindBase NoInfo t)
 renameFunOrTypeDec (FunDec fun) = FunDec <$> renameFun fun
 renameFunOrTypeDec (TypeDec td) = TypeDec <$> renameTypeAlias td
 renameFunOrTypeDec (ConstDec cd) = ConstDec <$> renameConst cd
 
 renameFun :: (Ord f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
-             FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
-renameFun (FunDef entry fname tdecl NoInfo params body pos) = do
+             FunBindBase NoInfo f -> RenameM f t (FunBindBase NoInfo t)
+renameFun (FunBind entry fname tdecl NoInfo params body pos) = do
   fname' <- replName Term fname
   bindNames (concatMap (HS.toList . patNameSet) params) $ do
     tdecl' <- case tdecl of
       Just ret -> Just <$> renameUserType ret
       Nothing -> return Nothing
-    FunDef entry fname' tdecl' NoInfo <$>
+    FunBind entry fname' tdecl' NoInfo <$>
       mapM renamePattern params <*>
       renameExp body <*>
       pure pos
 
 renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
-                   TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
-renameTypeAlias (TypeDef name typedecl loc) =
-  TypeDef <$> replName Type name <*> renameUserTypeDecl typedecl <*> pure loc
+                   TypeBindBase NoInfo f -> RenameM f t (TypeBindBase NoInfo t)
+renameTypeAlias (TypeBind name typedecl loc) =
+  TypeBind <$> replName Type name <*> renameUserTypeDecl typedecl <*> pure loc
 
 renameConst :: (Ord f, Hashable f, Eq t, Hashable t, Show f, Show t) =>
-               ConstDefBase NoInfo f -> RenameM f t (ConstDefBase NoInfo t)
-renameConst (ConstDef name (TypeDecl ret NoInfo) e loc) =
-  ConstDef <$> replName Term name <*>
+               ConstBindBase NoInfo f -> RenameM f t (ConstBindBase NoInfo t)
+renameConst (ConstBind name (TypeDecl ret NoInfo) e loc) =
+  ConstBind <$> replName Term name <*>
   (TypeDecl <$> renameUserType ret <*> pure NoInfo) <*>
   renameExp e <*> pure loc
 
@@ -156,16 +156,17 @@ renameUserTypeDecl (TypeDecl usertype NoInfo) =
   TypeDecl <$> renameUserType usertype <*> pure NoInfo
 
 renameSignature :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
-                   SigDefBase NoInfo f -> RenameM f t (SigDefBase NoInfo t)
-renameSignature (SigDef name sigdecs loc) =
-  SigDef <$> replName Module name <*> mapM renameSigDec sigdecs <*> pure loc
+                   SigBindBase NoInfo f -> RenameM f t (SigBindBase NoInfo t)
+renameSignature (SigBind name sigdecs loc) =
+  SigBind <$> replName Module name <*> mapM renameSigDec sigdecs <*> pure loc
 
-renameModule :: ModDefBase NoInfo Name
-             -> RenameM Name VName (ModDefBase NoInfo VName, NameMap Name VName)
-renameModule (ModDef name moddecs loc) = do
+renameModule :: StructBindBase NoInfo Name
+             -> RenameM Name VName (StructBindBase NoInfo VName, NameMap Name VName)
+renameModule (StructBind name sname moddecs loc) = do
   name' <- replName Module name
+  sname' <- maybe (return Nothing) (fmap Just . replName Module) sname
   (moddecs', m) <- renameDecs mempty moddecs
-  return (ModDef name' moddecs' loc,
+  return (StructBind name' sname' moddecs' loc,
           HM.fromList $ map prepend $ HM.toList m)
   where prepend ((space, QualName (quals, v)), r) =
           ((space, QualName (name : quals, v)), r)
@@ -177,10 +178,10 @@ renameDecs m (SigDec sig:ds) = do
   sig' <- renameSignature sig
   (ds', m') <- renameDecs m ds
   return (SigDec sig':ds', m')
-renameDecs m (ModDec modd:ds) = do
+renameDecs m (StructDec modd:ds) = do
   (modd', bound) <- renameModule modd
   (ds', m') <- bindNameMap bound $ renameDecs (m<>bound) ds
-  return (ModDec modd' : ds', m')
+  return (StructDec modd' : ds', m')
 renameDecs m ds = do
   let (t_and_f_decs, ds') = chompDecs ds
       bound = concatMap lhs t_and_f_decs
@@ -191,9 +192,9 @@ renameDecs m ds = do
              m
     (ds'', m'') <- renameDecs m' ds'
     return (map FunOrTypeDec t_and_f_decs' ++ ds'', m'')
-  where lhs (FunDec dec)  = [(Term, QualName ([], funDefName dec))]
+  where lhs (FunDec dec)  = [(Term, QualName ([], funBindName dec))]
         lhs (TypeDec dec) = [(Type, QualName ([], typeAlias dec))]
-        lhs (ConstDec dec) = [(Term, QualName ([], constDefName dec))]
+        lhs (ConstDec dec) = [(Term, QualName ([], constBindName dec))]
         unQual (_, QualName (_, v)) = v
 
 renameExp :: (Ord f, Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
@@ -250,16 +251,16 @@ renameExp (Stream form lam arr pos) = do
 renameExp e = mapExpM rename e
 
 renameSigDec :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
-                SigDeclBase NoInfo f
-             -> RenameM f t (SigDeclBase NoInfo t)
-renameSigDec (FunSig name params rettype) =
-  FunSig
+                SpecBase NoInfo f
+             -> RenameM f t (SpecBase NoInfo t)
+renameSigDec (ValSpec name params rettype) =
+  ValSpec
   <$> replName Term name
   <*> mapM renameUserTypeDecl params
   <*> renameUserTypeDecl rettype
 
-renameSigDec (TypeSig usertype) =
-  TypeSig <$> renameTypeAlias usertype
+renameSigDec (TypeSpec usertype) =
+  TypeSpec <$> renameTypeAlias usertype
 
 renameUserType :: (Eq f, Hashable f, Eq t, Hashable t, Show t, Show f) =>
                    UserType f
@@ -362,7 +363,7 @@ renameDimIndex (DimSlice i j) = DimSlice <$>
 
 -- Take leading function and type declarations.
 chompDecs :: [DecBase NoInfo Name]
-          -> ([FunOrTypeDecBase NoInfo Name], [DecBase NoInfo Name])
+          -> ([FunOrTypeBindBase NoInfo Name], [DecBase NoInfo Name])
 chompDecs decs = f ([], decs)
   where f (foo , FunOrTypeDec dec : xs) = f (dec:foo , xs)
         f (foo , bar)                   = (foo, bar)

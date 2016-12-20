@@ -93,14 +93,14 @@ readEvalPrint = do
           -- Generate a 0-ary function with empty name with the
           -- expression as its body, append it to the stored program,
           -- then run it.
-          let mainfun = FunDef { funDefEntryPoint = True
-                               , funDefName = nameFromString ""
-                               , funDefRetType = NoInfo
-                               , funDefRetDecl = Nothing
-                               , funDefParams = []
-                               , funDefBody = e
-                               , funDefLocation = noLoc
-                               }
+          let mainfun = FunBind { funBindEntryPoint = True
+                                , funBindName = nameFromString ""
+                                , funBindRetType = NoInfo
+                                , funBindRetDecl = Nothing
+                                , funBindParams = []
+                                , funBindBody = e
+                                , funBindLocation = noLoc
+                                }
               prog' = Prog $ progDecs prog ++ [FunOrTypeDec $ FunDec mainfun]
           runProgram prog'
 
