@@ -303,7 +303,6 @@ advantage of.
 
 .. productionlist::
    e: "map" `lambda` `e`
-    : "zipWith" `lambda` `e`  ... `e`
     : "filter" `lambda` `e`
     : "partition" "(" `lambda` "," ... `lambda` ")" `e`
     : "reduce" `lambda` `e` `e`
