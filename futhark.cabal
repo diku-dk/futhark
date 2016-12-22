@@ -110,9 +110,10 @@ Library
                    Futhark.Interpreter
                    Futhark.MemoryBlockMerging
                    Futhark.MonadFreshNames
+                   Futhark.Optimise.CoalesceKernels
+                   Futhark.Optimise.CoalesceKernels.Strategy
                    Futhark.Optimise.CSE
-                   Futhark.Optimise.DeadVarElim
-                   Futhark.Optimise.DoubleBuffer
+                   Futhark.Optimise.DeadVarElim Futhark.Optimise.DoubleBuffer
                    Futhark.Optimise.Fusion
                    Futhark.Optimise.Fusion.Composing
                    Futhark.Optimise.Fusion.LoopKernel

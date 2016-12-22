@@ -16,6 +16,7 @@ import Data.Maybe
 
 import Prelude hiding (id)
 
+import Futhark.Optimise.CoalesceKernels
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering

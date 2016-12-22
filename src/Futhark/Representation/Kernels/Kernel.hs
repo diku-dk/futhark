@@ -78,7 +78,6 @@ data Kernel lore =
   | GroupSize
   | TileSize
   | SufficientParallelism SubExp -- ^ True if enough parallelism.
-
   | Kernel KernelDebugHints
     Certificates
     KernelSpace
