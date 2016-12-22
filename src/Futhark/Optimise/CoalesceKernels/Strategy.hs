@@ -1,5 +1,6 @@
 module Futhark.Optimise.CoalesceKernels.Strategy where
 
+-- Imports-- {{{
 import Control.Monad
 import qualified Data.Map.Lazy as Map
 import Data.List (nub, sort, minimumBy)
@@ -11,8 +12,9 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.ExplicitMemory
+-- }}}
 
--- Types
+-- Types-- {{{
 type Var = VName
 
 type In a = Maybe a
@@ -27,11 +29,11 @@ data Strategy = Strategy { interchange :: (In Var, Out Var)
                          } deriving (Show, Eq)
 
 type VarianceTable = HM.HashMap VName Names
+-- }}}
 
--- Scope is mapping from var to which vars it is variant to
 type StratM = Reader VarianceTable
 
--- The real meat. 
+-- The real meat. -- {{{
 chooseStrategy :: VarianceTable -> [VName] -> [Stm InKernel] -> Strategy
 chooseStrategy vtable lvs stms = case makeStrategy (length lvs) initStrats of
                                   [] -> unit -- Nil transformation
@@ -68,9 +70,9 @@ generate lvs a@(Access _ is) = do
                 -- Strategy is variant in one index.
         _   -> return Nothing
                 -- Strategy is variant in more indexes to lv. No use in pushing in.
+-- }}}
 
-
--- Monoid structure for (Maybe Strategy)
+-- Monoid structure for (Maybe Strategy)-- {{{
 unit :: Strategy
 unit = Strategy (Nothing, []) Map.empty
 
@@ -104,10 +106,9 @@ joinTr m1 m2 = foldM help m1 pairs
 
 joinTransposes :: Tr -> Tr -> Maybe Tr
 joinTransposes i1 i2 = if i1 == i2 then Just i1 else Nothing
+-- }}}
 
-----
-
--- Variance functions
+-- Variance functions-- {{{
 
 -- Is a given variable variant in the index?
 isVariantTo :: Slice SubExp -> VName -> StratM Bool
@@ -130,11 +131,12 @@ varInE (Var      v) var = do
   case HM.lookup var vtable of
     Nothing -> return False
     Just vs -> return $ v `elem` vs
+-- }}}
 
-
---- Extra functions
+--- Extra functions-- {{{
 
 -- Order strategies on the number of transpositions made
 accessCmp :: Strategy -> Strategy -> Ordering
 accessCmp a b = a' `compare` b'
   where [a',b'] = map (Map.size . transposes) [a,b]
+  -- }}}

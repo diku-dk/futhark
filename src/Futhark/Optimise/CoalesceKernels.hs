@@ -72,14 +72,14 @@ transformExp :: Exp ExplicitMemory -> CoalesceM ([Stm ExplicitMemory], Exp Expli
 transformExp (Op (Inner (Kernel desc lvs space ts kbody))) = do
   -- Need environment to see IxFuns
   -- input lvs + result array, map over body applying ixfuns, generate strategy, apply it
-  (transposebnds, body') <- applyTransposes kbody transposes
+  (transposebnds, body') <- applyTransposes kbody transpose'
   return (transposebnds, Op (Inner (Kernel desc lvs' space ts body')))
   where 
-    initial_variance                   = HM.map HS.empty $ scopeOfKernelSpace space
-    summary                            = filterIndexes kbody
-    vtable                             = generateVarianceTable initial_variance kbody
+    initial_variance = HM.map (const HS.empty) $ scopeOfKernelSpace space
+    summary          = filterIndexes kbody
+    vtable           = generateVarianceTable kbody initial_variance
     (Strategy interchange' transpose') = chooseStrategy vtable lvs summary
-    lvs'                               = fromMaybe (error "Illegal rotate") $ rotate lvs interchange
+    lvs'                               = fromMaybe (error "Illegal rotate") $ rotate lvs interchange'
 
 transformExp e =
   return ([], e)
@@ -87,9 +87,8 @@ transformExp e =
 -- }}}
 
 -- Analyse variances -- {{{
-generateVarianceTable :: KernelBody InKernel -> VarianceTable
-generateVarianceTable = varianceInStms init_variance . kernelBodyStms
-  where init_variance = undefined
+generateVarianceTable :: KernelBody InKernel -> VarianceTable -> VarianceTable
+generateVarianceTable kbody init_variance = varianceInStms init_variance $ kernelBodyStms kbody
 
 varianceInStms :: VarianceTable -> [Stm InKernel] -> VarianceTable
 varianceInStms = foldl varianceInStm
@@ -107,7 +106,7 @@ varianceInStm variance bnd =
     binding_variance :: HS.HashSet VName
     binding_variance = mconcat $ map (look variance) $ HS.toList (freeInStm bnd)
 
--- Find all array accesses in a kernelbody
+-- Find all array accesses in a kernelbody and make the variancetable in the same go
 filterIndexes :: KernelBody InKernel -> [Stm InKernel]
 filterIndexes kbody = concat <$> map checkStm $ kernelBodyStms kbody
   where 
