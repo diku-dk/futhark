@@ -6,12 +6,9 @@ import qualified Data.Map.Lazy as Map
 import Data.List (nub, sort, minimumBy)
 import Data.Maybe
 
-import Control.Monad.Reader
-
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.ExplicitMemory
 -- }}}
 
 -- Types-- {{{
@@ -22,28 +19,21 @@ type Out a = [a]
 type Tr = Int
 type ArrMap = Map.Map Var Tr
 
-data Access = Access VName (Slice SubExp)
+data Access = Access VName [Names]
 
 data Strategy = Strategy { interchange :: (In Var, Out Var)
                          , transposes :: ArrMap
                          } deriving (Show, Eq)
 
-type VarianceTable = HM.HashMap VName Names
 -- }}}
 
-type StratM = Reader VarianceTable
-
 -- The real meat. -- {{{
-chooseStrategy :: VarianceTable -> [VName] -> [Stm InKernel] -> Strategy
-chooseStrategy vtable lvs stms = case makeStrategy (length lvs) initStrats of
-                                  [] -> unit -- Nil transformation
-                                  ss -> minimumBy accessCmp ss
-  where initStrats = runReader (mapM (generate lvs) as) vtable
-        as = map makeAccess stms
+chooseStrategy :: [VName] -> [Access] -> Strategy
+chooseStrategy lvs stms = case makeStrategy (length lvs) init_strats of
+                            [] -> unit -- Nil transformation
+                            ss -> minimumBy accessCmp ss
+  where init_strats = map (generate lvs) stms
 
-        makeAccess :: Stm InKernel -> Access
-        makeAccess (Let _ () (BasicOp (Index _ var idxs))) = Access var idxs
-        makeAccess _ = error "CoalesceKernels.Strategy: non-Index in stms."
 
 -- Fold over all array accesses generated
 makeStrategy :: Int -> [[Strategy]] -> [Strategy]
@@ -53,22 +43,21 @@ makeStrategy allout = filter notAllOut . foldr combine [unit]
 
 -- Generate all the possible startegy choices for a single array lookup
 -- [LoopVars] ArrStrategy -> [Initial As]
-generate :: [Var] -> Access -> StratM [Strategy]
-generate lvs a@(Access _ is) = do
-  variants <- filterM (isVariantTo is) lvs                  -- Find all lvs variant in the Index
-  ins <- mapM (pushIn a) variants                           -- Coalesced access
-  let out = Just $ Strategy (Nothing, variants) Map.empty   -- Invariant access
-  return $ catMaybes (out : ins)                            -- Just put them together
+generate :: [Var] -> Access -> [Strategy]
+generate lvs a@(Access _ is) = catMaybes (out : ins) -- Just put them together
   where 
-    pushIn :: Access -> VName -> StratM (Maybe Strategy)
-    pushIn (Access arr idxs) lv = do
-      vis <- variantIndices idxs lv
-      case vis of
-        []  -> return . Just $ Strategy (Just lv, []) Map.empty
+    variants = filter (isVariantTo is) lvs                  -- Find all lvs variant in the Index
+    ins = map (pushIn a) variants                           -- Coalesced access
+    out = Just $ Strategy (Nothing, variants) Map.empty     -- Invariant access
+
+    pushIn :: Access -> VName -> Maybe Strategy
+    pushIn (Access arr idxs) lv =
+      case variantIndices idxs lv of
+        []  -> Just $ Strategy (Just lv, []) Map.empty
                 -- Strategy is invariant to lv
-        [x] -> return . Just $ Strategy (Just lv, []) (Map.singleton arr x)
+        [x] -> Just $ Strategy (Just lv, []) (Map.singleton arr x)
                 -- Strategy is variant in one index.
-        _   -> return Nothing
+        _   -> Nothing
                 -- Strategy is variant in more indexes to lv. No use in pushing in.
 -- }}}
 
@@ -111,26 +100,17 @@ joinTransposes i1 i2 = if i1 == i2 then Just i1 else Nothing
 -- Variance functions-- {{{
 
 -- Is a given variable variant in the index?
-isVariantTo :: Slice SubExp -> VName -> StratM Bool
-isVariantTo idxs var = and <$> mapM (`variantIn` var) idxs
+isVariantTo :: [Names] -> VName -> Bool
+isVariantTo idxs var = all (`variantIn` var) idxs
 
 -- Which indices are variant to a given variable?
-variantIndices :: Slice SubExp -> VName -> StratM [Int]
-variantIndices idxs var = filterM (\i -> variantIn (idxs !! i) var) [0..length idxs - 1]
+variantIndices :: [Names] -> VName -> [Int]
+variantIndices idxs var = filter (\i -> variantIn (idxs !! i) var) [0..length idxs - 1]
 
--- Is a given variable variant in a specifix DimIndex?
-variantIn :: DimIndex SubExp -> VName -> StratM Bool
-variantIn (DimFix e)        var = varInE e var
-variantIn (DimSlice e1 e2)  var = (&&) <$> varInE e1 var <*> varInE e2 var --How does this work?!
+-- Is a given variable variant in a specifix Index?
+variantIn :: Names -> VName -> Bool
+variantIn names var = HS.member var names
 
--- Helper for variance functions
-varInE :: SubExp -> VName -> StratM Bool
-varInE (Constant _) _   = return False
-varInE (Var      v) var = do
-  vtable <- ask
-  case HM.lookup var vtable of
-    Nothing -> return False
-    Just vs -> return $ v `elem` vs
 -- }}}
 
 --- Extra functions-- {{{

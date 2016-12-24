@@ -69,16 +69,15 @@ type TransposeMap = M.Map VName Int -- Which index whould be new innermost
 -- Transform kernels-- {{{
 -- Returns a list of new bindings and the new expression
 transformExp :: Exp ExplicitMemory -> CoalesceM ([Stm ExplicitMemory], Exp ExplicitMemory)
-transformExp (Op (Inner (Kernel desc lvs space ts kbody))) = do
+transformExp (Op (Inner k@(Kernel desc lvs space ts kbody))) = do
   -- Need environment to see IxFuns
   -- input lvs + result array, map over body applying ixfuns, generate strategy, apply it
   (transposebnds, body') <- applyTransposes kbody transpose'
   return (transposebnds, Op (Inner (Kernel desc lvs' space ts body')))
   where 
     initial_variance = HM.map (const HS.empty) $ scopeOfKernelSpace space
-    summary          = filterIndexes kbody
-    vtable           = generateVarianceTable kbody initial_variance
-    (Strategy interchange' transpose') = chooseStrategy vtable lvs summary
+    summary          = filterIndexes k
+    (Strategy interchange' transpose') = chooseStrategy lvs summary
     lvs'                               = fromMaybe (error "Illegal rotate") $ rotate lvs interchange'
 
 transformExp e =
@@ -87,37 +86,61 @@ transformExp e =
 -- }}}
 
 -- Analyse variances -- {{{
-generateVarianceTable :: KernelBody InKernel -> VarianceTable -> VarianceTable
-generateVarianceTable kbody init_variance = varianceInStms init_variance $ kernelBodyStms kbody
 
-varianceInStms :: VarianceTable -> [Stm InKernel] -> VarianceTable
-varianceInStms = foldl varianceInStm
+type VarianceTable = HM.HashMap VName Names
+type VarianceM = State VarianceTable
 
-varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
-varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ bindingPattern bnd
+-- Find all array accesses in a kernelbody and turn them into accesses.
+-- Accesses carry information about which kernel variables each index is variant in.
+-- The access representation might have to be updated in order to carry more sophisticated
+-- information, e.g. stride sizes and more complex variance dependencies.
+filterIndexes :: Kernel InKernel -> [Access]
+filterIndexes (Kernel _ lvs _ _ kbody) = evalState m init_variance
   where
-    add :: VarianceTable -> VName -> VarianceTable
-    add variance' v = HM.insert v binding_variance variance'
+    m = fmap concat . mapM checkStm $ kernelBodyStms kbody
+    init_variance = HM.fromList $ map (\v -> (v, HS.singleton v)) lvs
 
-    look :: VarianceTable -> VName -> HS.HashSet VName
-    look variance' v = HS.insert v $ HM.lookupDefault mempty v variance'
+    checkBody :: Body InKernel -> VarianceM [Access]
+    checkBody body = fmap concat . mapM checkStm $ bodyStms body
 
-    binding_variance :: HS.HashSet VName
-    binding_variance = mconcat $ map (look variance) $ HS.toList (freeInStm bnd)
+    checkStm :: Stm InKernel -> VarianceM [Access]
+    checkStm (Let pat () (BasicOp b@BinOp{})) = processBinOp (patternNames pat) b >> return []
+    checkStm (Let _ () (BasicOp i@Index{})) = processIndex i
+    checkStm (Let _ () e) = foldExpM folder [] e
 
--- Find all array accesses in a kernelbody and make the variancetable in the same go
-filterIndexes :: KernelBody InKernel -> [Stm InKernel]
-filterIndexes kbody = concat <$> map checkStm $ kernelBodyStms kbody
-  where 
-    checkBody :: [Stm InKernel] -> Body InKernel -> [Stm InKernel]
-    checkBody as body = (as ++) . concat <$> map checkStm $ bodyStms body
+    folder = identityFolder { foldOnBody = \a body -> (a ++) <$> checkBody body }
 
-    checkStm :: Stm InKernel -> [Stm InKernel]
-    checkStm i@(Let _ () (BasicOp Index{})) = [i]
-    checkStm (Let _ () e) = foldExp folder [] e
+    processIndex :: BasicOp InKernel -> VarianceM [Access]
+    processIndex (Index cs name slice) = do
+      variances <- mapM checkDim slice
+      return [ Access name variances ]
+    processIndex _ = error "CoalesceKernels: Index not passed to processIndex"
 
-    folder = identityFolder { foldOnBody = \xs body -> Identity $ checkBody xs body }
+    processBinOp :: [VName] -> BasicOp InKernel -> VarianceM ()
+    processBinOp [var] (BinOp (Add _) s1 s2) = processSubExps var s1 s2
+    processBinOp [var] (BinOp (Mul _) s1 s2) = processSubExps var s1 s2
+
+    processSubExps :: VName -> SubExp -> SubExp -> VarianceM ()
+    processSubExps var (Constant _) (Var variant) = modify $ add var (HS.singleton variant)
+    processSubExps var (Var variant) (Constant _) = modify $ add var (HS.singleton variant)
+    processSubExps var (Var v1) (Var v2) = modify $ add var (HS.fromList [v1,v2])
+    processSubExps _ _ _ = return ()
+
+    add :: VName -> Names -> VarianceTable -> VarianceTable
+    add var vs vtab = --Grab all the variances of vs and insert them into the vtab.
+      let names = foldr (\v acc -> HS.union acc $ HM.lookupDefault HS.empty v vtab) HS.empty vs
+      in HM.insert var names vtab
+
+    checkDim :: DimIndex SubExp -> VarianceM Names
+    checkDim (DimFix e) = checkSubExp e
+    checkDim (DimSlice e1 e2) = HS.union <$> checkSubExp e1 <*> checkSubExp e2
+
+    checkSubExp :: SubExp -> VarianceM Names
+    checkSubExp (Constant _) = return HS.empty
+    checkSubExp (Var name) = do
+      vtab <- get
+      return $ HM.lookupDefault HS.empty name vtab
+
 -- }}}
 
 -- Applying a strategy, generating bindings and transforming indexings-- {{{
@@ -129,7 +152,7 @@ applyTransposes :: KernelBody InKernel
 applyTransposes kbody tmap = do
   arrmap <- sequence $ M.mapWithKey (\k _ -> newName k) tmap -- Map VName VName
   bnds   <- mapM makeBnd $ M.toList arrmap
-  kbody' <- transformIndexes arrmap tmap kbody
+  let kbody' = transformIndexes arrmap tmap kbody
   return (bnds, kbody')
 
   where
@@ -158,8 +181,25 @@ applyTransposes kbody tmap = do
 transformIndexes :: M.Map VName VName
                  -> M.Map VName Int
                  -> KernelBody InKernel 
-                 -> CoalesceM (KernelBody InKernel)
-transformIndexes = undefined
+                 -> KernelBody InKernel 
+transformIndexes arrmap tmap kbody = kbody { kernelBodyStms = map transformStm $ kernelBodyStms kbody }
+  where
+    transformBody :: Body InKernel -> Body InKernel
+    transformBody body = body { bodyStms = map transformStm $ bodyStms body }
+    
+    transformStm :: Stm InKernel -> Stm InKernel
+    transformStm s@(Let pat () (BasicOp (Index cs name slice))) =
+      case M.lookup name arrmap of
+        Just name' -> Let pat () (BasicOp (Index cs name' slice'))
+        Nothing    -> s
+      where slice' = case M.lookup name tmap of
+                       Just i -> shiftIn slice i
+                       Nothing -> error $ "CoalesceKernels: " ++ pretty name ++ " is in arrmap but not in tmap"
+    transformStm (Let pat () e) = Let pat () $ mapExp transform_mapper e
+
+    transform_mapper :: Mapper InKernel InKernel Identity
+    transform_mapper = identityMapper { mapOnBody = const $ return . transformBody }
+
 
 -- Shifts an element at index i to the last spot in a list
 shiftIn :: [a] -> Int -> [a]

@@ -115,4 +115,6 @@ gpuPipeline mode =
          , simplifyExplicitMemory
          , expandAllocations
          , simplifyExplicitMemory
+         , coalesceKernels
+         , simplifyExplicitMemory
          ]
