@@ -101,7 +101,7 @@ readEvalPrint = do
                                 , funBindBody = e
                                 , funBindLocation = noLoc
                                 }
-              prog' = Prog $ progDecs prog ++ [FunOrTypeDec $ FunDec mainfun]
+              prog' = Prog $ progDecs prog ++ [ValDec $ FunDec mainfun]
           runProgram prog'
 
 runProgram :: UncheckedProg -> FutharkiM ()

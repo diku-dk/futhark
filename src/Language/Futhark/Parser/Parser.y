@@ -217,11 +217,11 @@ Decs :: { [DecBase f vn] }
 ;
 
 Dec :: { [DecBase f vn] }
-    : Fun           { map (FunOrTypeDec . FunDec) [$1] }
-    | UserTypeAlias { map (FunOrTypeDec . TypeDec) $1 }
-    | Const         { map (FunOrTypeDec . ConstDec) [$1] }
-    | Signature     { [ SigDec $1 ] }
-    | Module        { [ StructDec $1 ] }
+    : Fun           { [ValDec $ FunDec $1] }
+    | Const         { [ValDec $ ConstDec $1] }
+    | UserTypeAlias { map TypeDec $1 }
+    | Signature     { [SigDec $1 ] }
+    | Module        { [StructDec $1 ] }
 ;
 
 

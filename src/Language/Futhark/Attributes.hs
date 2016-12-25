@@ -61,12 +61,9 @@ module Language.Futhark.Attributes
   , valueType
 
   -- * Getters for decs
-  , isType
-  , isFun
-  , isConst
-  , isFunOrType
-  , isStruct
-  , isSig
+  , isValDec
+  , isStructDec
+  , isSigDec
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -748,29 +745,17 @@ builtInFunctions = HM.fromList $ zipWith namify [0..]
                    ]
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
-isFun :: DecBase f vn -> Maybe (FunBindBase f vn)
-isFun (FunOrTypeDec (FunDec a)) = Just a
-isFun _                         = Nothing
+isValDec :: DecBase f vn -> Maybe (ValDecBase f vn)
+isValDec (ValDec d) = Just d
+isValDec _          = Nothing
 
-isConst :: DecBase f vn -> Maybe (ConstBindBase f vn)
-isConst (FunOrTypeDec (ConstDec a)) = Just a
-isConst _                           = Nothing
+isSigDec :: DecBase f vn -> Maybe (SigBindBase f vn)
+isSigDec (SigDec sig) = Just sig
+isSigDec _            = Nothing
 
-isType :: DecBase f vn -> Maybe (TypeBindBase f vn)
-isType (FunOrTypeDec (TypeDec t)) = Just t
-isType _                          = Nothing
-
-isFunOrType :: DecBase f vn -> Maybe (FunOrTypeBindBase f vn)
-isFunOrType (FunOrTypeDec ft) = Just ft
-isFunOrType _                 = Nothing
-
-isSig :: DecBase f vn -> Maybe (SigBindBase f vn)
-isSig (SigDec sig) = Just sig
-isSig _            = Nothing
-
-isStruct :: DecBase f vn -> Maybe (StructBindBase f vn)
-isStruct (StructDec sd) = Just sd
-isStruct _              = Nothing
+isStructDec :: DecBase f vn -> Maybe (StructBindBase f vn)
+isStructDec (StructDec sd) = Just sd
+isStructDec _              = Nothing
 
 -- | Create a name with no qualifiers from a name.
 nameToQualName :: Name -> QualName Name
