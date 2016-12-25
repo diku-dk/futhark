@@ -1,7 +1,7 @@
 -- No undefined types!
 --
 -- ==
--- error: .*not defined.*
+-- error: Unknown type
 
 type foo = bar
 

@@ -336,9 +336,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase
   ppr = stack . punctuate line . map ppr . progDecs
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase ty vn) where
-  ppr (FunOrTypeDec dec) = ppr dec
-  ppr (SigDec sig)       = ppr sig
-  ppr (StructDec sd)     = ppr sd
+  ppr (ValDec dec)   = ppr dec
+  ppr (TypeDec dec)  = ppr dec
+  ppr (SigDec sig)   = ppr sig
+  ppr (StructDec sd) = ppr sd
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
   ppr (StructBind name sig moddecls _) =
@@ -347,10 +348,9 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBi
     where sig' = case sig of Nothing -> mempty
                              Just s -> colon <+> ppr s
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunOrTypeBindBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ValDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
   ppr (ConstDec c) = ppr c
-  ppr (TypeDec tp) = ppr tp
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeBindBase ty vn) where
   ppr (TypeBind name usertype _) =

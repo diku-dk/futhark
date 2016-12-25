@@ -62,7 +62,7 @@ module Language.Futhark.Syntax
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
   , DecBase(..)
-  , FunOrTypeBindBase(..)
+  , ValDecBase(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -671,23 +671,26 @@ deriving instance Showable f vn => Show (StructBindBase f vn)
 instance Located (StructBindBase f vn) where
   locOf = locOf . structLocation
 
-data FunOrTypeBindBase f vn = FunDec (FunBindBase f vn)
-                            | ConstDec (ConstBindBase f vn)
-                            | TypeDec (TypeBindBase f vn)
-deriving instance Showable f vn => Show (FunOrTypeBindBase f vn)
+-- | A top-level binding of a term variable to either a function or a
+-- constant.
+data ValDecBase f vn = FunDec (FunBindBase f vn)
+                     | ConstDec (ConstBindBase f vn)
+deriving instance Showable f vn => Show (ValDecBase f vn)
 
-instance Located (FunOrTypeBindBase f vn) where
+instance Located (ValDecBase f vn) where
   locOf (FunDec d) = locOf d
   locOf (ConstDec d) = locOf d
-  locOf (TypeDec d) = locOf d
 
-data DecBase f vn = FunOrTypeDec (FunOrTypeBindBase f vn)
+-- | A top-level binding.
+data DecBase f vn = ValDec (ValDecBase f vn)
+                  | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | StructDec (StructBindBase f vn)
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
-  locOf (FunOrTypeDec d) = locOf d
+  locOf (ValDec d) = locOf d
+  locOf (TypeDec d) = locOf d
   locOf (SigDec d) = locOf d
   locOf (StructDec d) = locOf d
 

@@ -16,18 +16,18 @@ struct M0
 struct M1
   {
     type foo = f32
-    type bar = M0.bar -- type is defined from l.6
+    type bar = M0.bar -- type is defined at line 13
 
     struct M0
       {
-        type foo = M0.foo -- is defined at l. 5
+        type foo = M0.foo -- is defined at line 12
         type bar = (int, int, int)
       }
 
-    type baz = M0.bar -- defined at line 17
+    type baz = M0.bar -- defined at line 24
   }
 
-type baz = M1.baz -- is defined at l. 13
+type baz = M1.baz -- is defined at line 27
 
 fun main(a: int, b: float): baz = (1,2,3)
 

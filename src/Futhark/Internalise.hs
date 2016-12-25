@@ -60,11 +60,11 @@ internaliseProg prog = do
 -- constants as 0-ary functions.
 funsFromProg :: ProgBase f vn -> [FunBindBase f vn]
 funsFromProg prog = concatMap getFuns $ progDecs prog
-  where getFuns (FunOrTypeDec (FunDec a)) = [a]
-        getFuns (FunOrTypeDec (ConstDec (E.ConstBind name t e loc))) =
+  where getFuns (ValDec (FunDec a)) = [a]
+        getFuns (ValDec (ConstDec (E.ConstBind name t e loc))) =
           [E.FunBind False name Nothing (expandedType t) [] e loc]
-        getFuns (FunOrTypeDec TypeDec{}) = []
         getFuns (StructDec d) = concatMap getFuns $ structDecls d
+        getFuns TypeDec{} = []
         getFuns SigDec{} = []
 
 buildFtable :: MonadFreshNames m => E.Prog
@@ -117,11 +117,11 @@ internaliseFun (E.FunBind entry fname _ (Info rettype) params body loc) =
                    | otherwise = nameFromString $ pretty fname ++ "f"
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) _) =
+internaliseIdent (E.Ident name (Info tp) loc) =
   case tp of
     E.Prim{} -> return name
     _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-                       ++ pretty name ++ "'."
+                       ++ pretty name ++ "' at " ++ locStr loc ++ "."
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertStmsM $ do

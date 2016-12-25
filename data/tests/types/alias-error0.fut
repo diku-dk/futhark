@@ -1,7 +1,7 @@
 -- No circular types!
 --
 -- ==
--- error: .*cycl.*
+-- error: Unknown type
 
 type t = t
 
