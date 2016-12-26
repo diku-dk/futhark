@@ -91,6 +91,8 @@ sequentialPipeline mode =
          , simplifyExplicitMemory
          , doubleBuffer
          , simplifyExplicitMemory
+         , coalesceKernels
+         , simplifyExplicitMemory
          ]
 
 gpuPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
