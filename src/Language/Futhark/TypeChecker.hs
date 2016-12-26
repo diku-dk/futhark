@@ -296,21 +296,33 @@ altOccurences occurs1 occurs2 =
 
 type NameMap = HM.HashMap (Namespace, QualName Name) VName
 
+-- | A signature is a mapping from unique names to a specification of
+-- what the names must be bound to.
+type Sig = HM.HashMap VName SigSpec
+
+-- | A specification of something that must be in a signature.
+data SigSpec = SpecTypeAbbr StructType
+             | SpecType
+             | SpecVal [StructType] StructType
+             | SpecConst StructType
+             deriving (Show)
+
 -- | Type checking happens with access to this environment.  The
 -- tables will be extended during type-checking as bindings come into
 -- scope.
 data Scope  = Scope { envVtable :: HM.HashMap VName Binding
                     , envTAtable :: HM.HashMap VName TypeBinding
+                    , envSigTable :: HM.HashMap VName Sig
                     , envNameMap :: NameMap
                     } deriving (Show)
 
 instance Monoid Scope where
-  mempty = Scope mempty mempty mempty
-  Scope vt1 tt1 nt1 `mappend` Scope vt2 tt2 nt2 =
-    Scope (vt1<>vt2) (tt1<>tt2) (nt1<>nt2)
+  mempty = Scope mempty mempty mempty mempty
+  Scope vt1 tt1 st1 nt1 `mappend` Scope vt2 tt2 st2 nt2 =
+    Scope (vt1<>vt2) (tt1<>tt2) (st1<>st2) (nt1<>nt2)
 
 initialScope :: Scope
-initialScope = Scope initialVtable mempty builtInMap
+initialScope = Scope initialVtable mempty mempty builtInMap
   where initialVtable = HM.fromList $ map addBuiltinF $ HM.toList builtInFunctions
 
         addBuiltinF (name, (t, ts)) =
@@ -615,6 +627,12 @@ lookupType loc qn = do
   (qn',) <$> (maybe explode return =<< asks (HM.lookup name . envTAtable))
   where explode = bad $ UndefinedType loc qn
 
+lookupSig :: SrcLoc -> QualName Name -> TypeM (QualName VName, Sig)
+lookupSig loc qn = do
+  qn'@(QualName (_, name)) <- checkQualName Signature qn loc
+  (qn',) <$> (maybe explode return =<< asks (HM.lookup name . envSigTable))
+  where explode = bad $ UnknownVariableError Signature qn loc
+
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
@@ -767,45 +785,41 @@ checkProg' decs = do
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
-  foldM_ f mempty
-  where f known (ValDec (FunDec (FunBind _ name _ _ _ _ loc))) =
-          case HM.lookup (name, Term) known of
+  foldM_ (flip f) mempty
+  where check namespace name loc known =
+          case HM.lookup (namespace, name) known of
             Just loc' ->
               bad $ DupDefinitionError name loc loc'
-            _ -> return $ HM.insert (name, Term) loc known
+            _ -> return $ HM.insert (namespace, name) loc known
 
-        f known (TypeDec (TypeBind name _ loc)) =
-          case HM.lookup (name, Type) known of
-            Just loc' ->
-              bad $ DupDefinitionError name loc loc'
-            _ -> return $ HM.insert (name, Type) loc known
+        f (ValDec (FunDec (FunBind _ name _ _ _ _ loc))) =
+          check Term name loc
 
-        f known (ValDec (ConstDec (ConstBind name _ _ loc))) =
-          case HM.lookup (name, Term) known of
-            Just loc' ->
-              bad $ DupDefinitionError name loc loc'
-            _ -> return $ HM.insert (name, Term) loc known
+        f (ValDec (ConstDec (ConstBind name _ _ loc))) =
+          check Term name loc
 
-        f known (SigDec (SigBind name _ loc)) =
-          case HM.lookup (name, Signature) known of
-            Just loc' ->
-              bad $ DupDefinitionError name loc loc'
-            _ -> return $ HM.insert (name, Signature) loc known
+        f (TypeDec (TypeBind name _ loc)) =
+          check Type name loc
 
-        f known (StructDec (StructBind name _ _ loc)) =
-          case HM.lookup (name, Structure) known of
-            Just loc' ->
-              bad $ DupDefinitionError name loc loc'
-            _ -> return $ HM.insert (name, Structure) loc known
+        f (SigDec (SigBind name _ loc)) =
+          check Signature name loc
 
+        f (StructDec (StructBind name _ _ loc)) =
+          check Structure name loc
 
-checkMod :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
-checkMod (StructBind name sig decs loc) = do
+checkStruct :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
+checkStruct (StructBind name sigmatch decs loc) = do
   name' <- checkName Structure name loc
-  sig' <- maybe (return Nothing) (\v -> Just <$> checkName Signature v loc) sig
   checkForDuplicateDecs decs
   (scope, decs') <- checkDecs decs
-  return (qualScope scope, StructBind name' sig' decs' loc)
+  (sigmatch', scope') <-
+    case sigmatch of
+      Nothing -> return (Nothing, scope)
+      Just signame -> do
+        (signame', sig) <- lookupSig loc signame
+        scope' <- liftEither $ matchScopeToSig sig Transparent scope loc
+        return (Just signame', scope')
+  return (qualScope scope', StructBind name' sigmatch' decs' loc)
   where
     -- | Prefix the structure name to all names in the scope.
     qualScope scope = scope { envNameMap = qualNameMap $ envNameMap scope }
@@ -813,6 +827,31 @@ checkMod (StructBind name sig decs loc) = do
     qual ((space, QualName (qs, v)), x) =
       ((space, QualName (name : qs, v)), x)
 
+checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
+checkForDuplicateSpecs =
+  foldM_ (flip f) mempty
+  where check namespace name loc known =
+          case HM.lookup (namespace, name) known of
+            Just loc' ->
+              bad $ DupDefinitionError name loc loc'
+            _ -> return $ HM.insert (namespace, name) loc known
+
+        f (ValSpec name _ _ loc) =
+          check Term name loc
+
+        f (TypeAbbrSpec (TypeBind name _ loc)) =
+          check Type name loc
+
+        f (TypeSpec name loc) =
+          check Type name loc
+
+checkSig :: SigBindBase NoInfo Name -> TypeM (Scope, SigBindBase Info VName)
+checkSig (SigBind name specs loc) = do
+  name' <- checkName Signature name loc
+  checkForDuplicateSpecs specs
+  (sig, specs') <- checkSpecs specs
+  return (mempty { envSigTable = HM.singleton name' sig },
+          SigBind name' specs' loc)
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Scope, TypeBindBase Info VName)
@@ -826,14 +865,43 @@ checkTypeBind (TypeBind name td loc) = do
                  },
           TypeBind name' td' loc)
 
+checkSpecs :: [SpecBase NoInfo Name] -> TypeM (Sig, [SpecBase Info VName])
+checkSpecs (ValSpec name paramtypes rettype loc : specs) =
+  bindSpaced [(Term, QualName ([], name))] $ do
+    name' <- checkName Term name loc
+    paramtypes' <- mapM checkTypeDecl paramtypes
+    rettype' <- checkTypeDecl rettype
+    let paramtypes'' = map (unInfo . expandedType) paramtypes'
+    let rettype'' = unInfo $ expandedType rettype'
+        valsig = HM.singleton name' $ SpecVal paramtypes'' rettype''
+        valscope =
+          mempty { envVtable = HM.singleton name' $
+                               if null paramtypes''
+                               then BoundV $ removeShapeAnnotations $
+                                    rettype'' `addAliases` mempty
+                               else BoundF (rettype'', paramtypes'')
+                 }
+    (sig, specs') <- local (valscope<>) $ checkSpecs specs
+    return (valsig <> sig,
+            ValSpec name' paramtypes' rettype' loc : specs')
+checkSpecs (spec : _) =
+  bad $ TypeError (srclocOf spec) $ "Cannot yet handle spec " ++ pretty spec
+checkSpecs [] = return (mempty, [])
+
 checkDecs :: [DecBase NoInfo Name] -> TypeM (Scope, [DecBase Info VName])
-checkDecs (StructDec modd:rest) =
-  bindSpaced [(Structure, QualName ([],structName modd))] $ do
-    (modscope, modd') <- checkMod modd
+checkDecs (StructDec struct:rest) =
+  bindSpaced [(Structure, QualName ([],structName struct))] $ do
+    (modscope, struct') <- checkStruct struct
     local (modscope<>) $ do
       (scope, rest') <- checkDecs rest
-      return (modscope <> scope, StructDec modd' : rest' )
-checkDecs (SigDec _:rest) = checkDecs rest
+      return (modscope <> scope, StructDec struct' : rest')
+
+checkDecs (SigDec sig:rest) =
+  bindSpaced [(Signature, QualName ([], sigName sig))] $ do
+    (sigscope, sig') <- checkSig sig
+    local (sigscope<>) $ do
+      (scope, rest') <- checkDecs rest
+      return (sigscope <> scope, SigDec sig' : rest')
 
 checkDecs (TypeDec tdec:rest) =
   bindSpaced [(Type, QualName ([],typeAlias tdec))] $ do
@@ -1829,3 +1897,12 @@ checkBindingTypeDecl :: TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VNa
 checkBindingTypeDecl (TypeDecl t NoInfo) = do
   (t', st) <- checkUserTypeBindingDims t
   return $ TypeDecl t' $ Info st
+
+--- Signature matching
+
+data SigMatching = Transparent
+
+matchScopeToSig :: Sig -> SigMatching -> Scope -> SrcLoc -> Either TypeError Scope
+matchScopeToSig _sig _m _scope loc =
+  -- First we check that the types in 'sig' have a match in 'scope'.
+  Left $ TypeError loc "Cannot do signature matching yet."
