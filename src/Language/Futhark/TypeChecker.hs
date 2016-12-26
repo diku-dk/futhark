@@ -51,10 +51,6 @@ data TypeError =
     (Either Int [TypeBase Rank NoInfo ()]) [TypeBase Rank NoInfo ()]
   | UseAfterConsume Name SrcLoc SrcLoc
   | IndexingError Int Int SrcLoc
-  | BadAnnotation SrcLoc String
-    (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
-  | BadTupleAnnotation SrcLoc String
-    [Maybe (TypeBase Rank NoInfo ())] [TypeBase Rank NoInfo ()]
   | CurriedConsumption (QualName Name) SrcLoc
   | BadLetWithValue SrcLoc
   | ReturnAliased Name Name SrcLoc
@@ -62,10 +58,6 @@ data TypeError =
   | NotAnArray SrcLoc (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
   | PermutationError SrcLoc [Int] Int
   | DimensionNotInteger SrcLoc Name
-  | CyclicalTypeDefinition SrcLoc (QualName Name)
-  | UndefinedAlias SrcLoc (QualName Name)
-  | DupTypeAlias SrcLoc Name
-  | DupSigError SrcLoc (QualName Name)
   | InvalidUniqueness SrcLoc (TypeBase Rank NoInfo ())
   | UndefinedType SrcLoc (QualName Name)
   | InvalidField SrcLoc Type String
@@ -131,15 +123,6 @@ instance Show TypeError where
   show (IndexingError dims got pos) =
     show got ++ " indices given at " ++ locStr pos ++
     ", but type of indexee  has " ++ show dims ++ " dimension(s)."
-  show (BadAnnotation loc desc expected got) =
-    "Annotation of \"" ++ desc ++ "\" type of expression at " ++
-    locStr loc ++ " is " ++ pretty expected ++
-    ", but derived to be " ++ pretty got ++ "."
-  show (BadTupleAnnotation loc desc expected got) =
-    "Annotation of \"" ++ desc ++ "\" type of expression at " ++
-    locStr loc ++ " is a tuple {" ++
-    intercalate ", " (map (maybe "(unspecified)" pretty) expected) ++
-    "}, but derived to be " ++ prettyTuple got ++ "."
   show (CurriedConsumption fname loc) =
     "Function " ++ pretty fname ++
     " curried over a consuming parameter at " ++ locStr loc ++ "."
@@ -163,16 +146,6 @@ instance Show TypeError where
   show (DimensionNotInteger loc name) =
     "Dimension declaration " ++ pretty name ++ " at " ++ locStr loc ++
     " should be an integer."
-  show (CyclicalTypeDefinition loc name) =
-    "Type alias " ++ pretty name ++ " at " ++ locStr loc ++
-    " is cyclically defined."
-  show (UndefinedAlias loc name) =
-    "Type alias '" ++ pretty name ++ "' referenced at line " ++ locStr loc
-    ++ ", but not defined."
-  show (DupTypeAlias loc name) =
-    "Type alias '" ++ pretty name ++ "' defined twice at line " ++ show loc
-  show (DupSigError loc name) =
-    "Duplicate definition of type '" ++ pretty name ++ "' at line " ++ locStr loc
   show (InvalidUniqueness loc t) =
     "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ locStr loc ++ "."
   show (UndefinedType loc name) =
