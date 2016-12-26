@@ -194,7 +194,6 @@ Library
                    Language.Futhark.Parser
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
-                   Language.Futhark.Traversals
                    Language.Futhark.TypeChecker
 
   Other-modules: Language.Futhark.Parser.Parser

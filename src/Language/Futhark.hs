@@ -3,7 +3,6 @@ module Language.Futhark
   ( module Language.Futhark.Syntax
   , module Language.Futhark.Attributes
   , module Language.Futhark.Pretty
-  , module Language.Futhark.Traversals
 
   , Ident, DimIndex, Exp, Lambda
   , Pattern, FunBind, ConstBind, Prog
@@ -14,7 +13,6 @@ module Language.Futhark
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Pretty
-import Language.Futhark.Traversals
 
 -- | An identifier with type- and aliasing information information.
 type Ident = IdentBase Info VName
