@@ -635,15 +635,17 @@ instance Located (ConstBindBase f vn) where
   locOf = locOf . constBindLocation
 
 -- | Type Declarations
-data TypeBindBase f vn = TypeBind { typeAlias       :: vn
-                                  , userType        :: TypeDeclBase f vn
+data TypeBindBase f vn = TypeBind { typeAlias        :: vn
+                                  , userType         :: TypeDeclBase f vn
                                   , typeBindLocation :: SrcLoc
                                   }
 deriving instance Showable f vn => Show (TypeBindBase f vn)
 
+instance Located (TypeBindBase f vn) where
+  locOf = locOf . typeBindLocation
 
-data SigBindBase f vn = SigBind { sigName        :: vn
-                                , sigDecls       :: [SpecBase f vn]
+data SigBindBase f vn = SigBind { sigName     :: vn
+                                , sigDecls    :: [SpecBase f vn]
                                 , sigLocation :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (SigBindBase f vn)
@@ -651,20 +653,24 @@ deriving instance Showable f vn => Show (SigBindBase f vn)
 instance Located (SigBindBase f vn) where
   locOf = locOf . sigLocation
 
-data SpecBase f vn = ValSpec  { specName    :: vn
-                              , specParams  :: [TypeDeclBase f vn]
-                              , specRettype :: TypeDeclBase f vn
+data SpecBase f vn = ValSpec  { specName     :: vn
+                              , specParams   :: [TypeDeclBase f vn]
+                              , specRettype  :: TypeDeclBase f vn
+                              , specLocation :: SrcLoc
                               }
-                   | TypeSpec (TypeBindBase f vn)
+                   | TypeAbbrSpec (TypeBindBase f vn)
+                   | TypeSpec vn SrcLoc -- ^ Abstract type.
 deriving instance Showable f vn => Show (SpecBase f vn)
 
-instance Located (TypeBindBase f vn) where
-  locOf = locOf . typeBindLocation
+instance Located (SpecBase f vn) where
+  locOf (ValSpec _ _ _ loc) = locOf loc
+  locOf (TypeAbbrSpec tbind) = locOf tbind
+  locOf (TypeSpec _ loc) = locOf loc
 
-data StructBindBase f vn = StructBind { structName        :: vn
-                                      , structSignature   :: Maybe vn
-                                      , structDecls       :: [DecBase f vn]
-                                      , structLocation :: SrcLoc
+data StructBindBase f vn = StructBind { structName      :: vn
+                                      , structSignature :: Maybe (QualName vn)
+                                      , structDecls     :: [DecBase f vn]
+                                      , structLocation  :: SrcLoc
                                       }
 deriving instance Showable f vn => Show (StructBindBase f vn)
 

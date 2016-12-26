@@ -220,8 +220,8 @@ Dec :: { [DecBase f vn] }
     : Fun           { [ValDec $ FunDec $1] }
     | Const         { [ValDec $ ConstDec $1] }
     | UserTypeAlias { map TypeDec $1 }
-    | Signature     { [SigDec $1 ] }
-    | Module        { [StructDec $1 ] }
+    | SigBind       { [SigDec $1 ] }
+    | StructBind    { [StructDec $1 ] }
 ;
 
 
@@ -232,26 +232,30 @@ Aliases : id ',' Aliases
                in [(name,loc)] }
 ;
 
-Signature :: { SigBindBase f vn }
-          : sig id '{' SigDecs '}'
-              { let L pos (ID name) = $2
-                in SigBind name $4 pos }
+SigBind :: { SigBindBase f vn }
+        : sig id '{' Specs '}'
+          { let L pos (ID name) = $2
+            in SigBind name $4 pos }
 
-Module :: { StructBindBase f vn }
-       : struct id '{' Decs '}'
-       { let L pos (ID name) = $2
-          in StructBind name Nothing $4 pos }
+StructBind :: { StructBindBase f vn }
+           : struct id '{' Decs '}' SigAscript
+             { let L pos (ID name) = $2
+               in StructBind name $6 $4 pos }
 
-SigDecs : SigDec SigDecs { $1 : $2 }
-        | SigDec { [$1] }
+SigAscript :: { Maybe (QualName Name) }
+            :              { Nothing }
+            | ':' QualName { Just (fst $2) }
 
-SigDec :: { SpecBase NoInfo Name }
-        : val id ':' SigTypeDecl
-          { let L _ (ID name) = $2; (ps, r) = $4
-            in ValSpec name ps r  }
-        | type id ':' UserTypeDecl
-          { let L loc (ID name) = $2
-            in TypeSpec (TypeBind name $4 loc) }
+Specs : Spec Specs { $1 : $2 }
+      | Spec { [$1] }
+
+Spec :: { SpecBase NoInfo Name }
+      : val id ':' SigTypeDecl
+        { let L loc (ID name) = $2; (ps, r) = $4
+          in ValSpec name ps r loc  }
+      | type id ':' UserTypeDecl
+        { let L loc (ID name) = $2
+          in TypeAbbrSpec (TypeBind name $4 loc) }
 ;
 
 DefaultDec :: { () }

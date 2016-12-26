@@ -378,8 +378,9 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigBindB
     stack (punctuate line $ map ppr sigdecls)
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SpecBase ty vn) where
-  ppr (TypeSpec tpsig) = ppr tpsig
-  ppr (ValSpec name params rettype) =
+  ppr (TypeAbbrSpec tpsig) = ppr tpsig
+  ppr (TypeSpec name _) = text "type" <+> ppr name
+  ppr (ValSpec name params rettype _) =
     ppr name <+> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
 
