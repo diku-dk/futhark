@@ -546,8 +546,10 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
   scan_y_dest <- ImpGen.destinationFromParams y_params
 
   -- Set initial y values
-  zipWithM_ (readParamFromLocalMemory scan_lam_i $ Imp.var local_id int32)
-    y_params acc_local_mem
+  read_my_initial <- ImpGen.collect $
+                     zipWithM_ (readParamFromLocalMemory scan_lam_i $ Imp.var local_id int32)
+                     y_params acc_local_mem
+  ImpGen.emit $ Imp.If active read_my_initial mempty
 
   op_to_y <- ImpGen.collect $ ImpGen.compileBody scan_y_dest $ lambdaBody scan_lam
   write_operation_result <-
@@ -785,8 +787,9 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
           | otherwise =
               return ()
 
-compileKernelExp constants _ (GroupScan _ lam input) = do
+compileKernelExp constants _ (GroupScan w lam input) = do
   renamed_lam <- renameLambda lam
+  w' <- ImpGen.compileSubExp w
 
   let local_tid = kernelLocalThreadId constants
       (_nes, arrs) = unzip input
@@ -817,8 +820,9 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
         block_id = Imp.var local_tid int32 `quot` block_size
         in_block_id = Imp.var local_tid int32 - block_id * block_size
         doInBlockScan active = inBlockScan simd_width block_size active local_tid acc_local_mem
+        lid_in_bounds = Imp.CmpOpExp (CmpSlt Int32) (Imp.var local_tid int32) w'
 
-    doInBlockScan (ValueExp (BoolValue True)) lam
+    doInBlockScan lid_in_bounds lam
     ImpGen.emit $ Imp.Op Imp.Barrier
 
     pack_block_results <-
@@ -829,14 +833,14 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
           Imp.CmpOpExp (CmpEq int32) in_block_id $ block_size - 1
     ImpGen.comment
       "last thread of block 'i' writes its result to offset 'i'" $
-      ImpGen.emit $ Imp.If last_in_block pack_block_results mempty
+      ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd last_in_block lid_in_bounds) pack_block_results mempty
 
     ImpGen.emit $ Imp.Op Imp.Barrier
 
     let is_first_block = Imp.CmpOpExp (CmpEq int32) block_id 0
     ImpGen.comment
       "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
-      doInBlockScan is_first_block renamed_lam
+      doInBlockScan (Imp.BinOpExp LogAnd is_first_block lid_in_bounds) renamed_lam
 
     ImpGen.emit $ Imp.Op Imp.Barrier
 
@@ -852,7 +856,9 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
       zipWithM_ (writeParamToLocalMemory $ Imp.var local_tid int32) acc_local_mem y_params
 
     ImpGen.comment "carry-in for every block except the first" $
-      ImpGen.emit $ Imp.If is_first_block mempty $
+      ImpGen.emit $ Imp.If (Imp.BinOpExp LogOr
+                             is_first_block
+                             (Imp.UnOpExp Not lid_in_bounds)) mempty $
       Imp.Comment "read operands" read_carry_in <>
       Imp.Comment "perform operation" op_to_y <>
       Imp.Comment "write final result" write_final_result
