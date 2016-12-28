@@ -34,6 +34,7 @@ import Futhark.Transform.Rename
 import Futhark.Optimise.Simplifier.Lore
 import Futhark.Analysis.Usage
 import Futhark.Analysis.Metrics
+import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Util.Pretty
   ((<+>), (</>), ppr, commasep, Pretty, parens, text, apply, braces, annot, indent)
 import qualified Futhark.TypeCheck as TC
@@ -159,7 +160,9 @@ instance Attributes lore => FreeIn (GroupStreamLambda lore) where
                        map paramName (acc_params ++ arr_params)
 
 instance Ranged inner => RangedOp (KernelExp inner) where
-  opRanges SplitSpace{} = [(Just (ScalarBound 1), Nothing)]
+  opRanges (SplitSpace _ _ _ _ elems_per_thread) =
+    [(Just (ScalarBound 0),
+      Just (ScalarBound (SE.subExpToScalExp elems_per_thread int32)))]
   opRanges _ = repeat unknownRange
 
 instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
