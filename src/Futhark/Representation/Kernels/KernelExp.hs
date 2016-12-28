@@ -78,7 +78,9 @@ data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                       -- associative reduction operator @lam@ and the neutral
                       -- elements @nes@.
                       --
-                      -- The arrays @arrs@ must all have outer dimension @w@.
+                      -- The arrays @arrs@ must all have outer
+                      -- dimension @w@, which must not be larger than
+                      -- the group size.
                       --
                       -- Currently a GroupReduce consumes the input arrays, as
                       -- it uses them for scratch space to store temporary
@@ -93,6 +95,7 @@ data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
                       -- size.
                     | GroupScan SubExp
                       (Lambda lore) [(SubExp,VName)]
+                      -- ^ Same restrictions as with 'GroupReduce'.
                     | GroupStream SubExp SubExp
                       (GroupStreamLambda lore) [SubExp] [VName]
                       -- Morally a StreamSeq

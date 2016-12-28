@@ -84,9 +84,14 @@ data KernelSpace = KernelSpace { spaceGlobalId :: VName
                  deriving (Eq, Show, Ord)
 -- ^ first three bound in the kernel, the rest are params to kernel
 
-data SpaceStructure = FlatSpace
+-- | Indices computed for each thread (or group) inside the kernel.
+-- This is an arbitrary-dimensional space that is generated from the
+-- flat GPU thread space.
+data SpaceStructure = FlatThreadSpace
                       [(VName, SubExp)] -- gtids and dim sizes
-                    | NestedSpace
+                    | FlatGroupSpace
+                      [(VName, SubExp)] -- gtids and dim sizes
+                    | NestedThreadSpace
                       [(VName, -- gtid
                         SubExp, -- global dim size
                         VName, -- ltid
@@ -97,8 +102,9 @@ data SpaceStructure = FlatSpace
 -- | Global thread IDs and their upper bound.
 spaceDimensions :: KernelSpace -> [(VName, SubExp)]
 spaceDimensions = structureDimensions . spaceStructure
-  where structureDimensions (FlatSpace dims) = dims
-        structureDimensions (NestedSpace dims) =
+  where structureDimensions (FlatThreadSpace dims) = dims
+        structureDimensions (FlatGroupSpace dims) = dims
+        structureDimensions (NestedThreadSpace dims) =
           let (gtids, gdim_sizes, _, _) = unzip4 dims
           in zip gtids gdim_sizes
 
@@ -181,11 +187,14 @@ mapKernelM tv (Kernel desc cs space ts kernel_body) =
           <*> mapOnKernelSubExp tv num_groups
           <*> mapOnKernelSubExp tv group_size
           <*> mapOnKernelStructure structure
-        mapOnKernelStructure (FlatSpace dims) =
-          FlatSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
+        mapOnKernelStructure (FlatThreadSpace dims) =
+          FlatThreadSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
           where (gtids, gdim_sizes) = unzip dims
-        mapOnKernelStructure (NestedSpace dims) =
-            NestedSpace <$> (zip4 gtids
+        mapOnKernelStructure (FlatGroupSpace dims) =
+          FlatGroupSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
+          where (gtids, gdim_sizes) = unzip dims
+        mapOnKernelStructure (NestedThreadSpace dims) =
+            NestedThreadSpace <$> (zip4 gtids
                              <$> mapM (mapOnKernelSubExp tv) gdim_sizes
                              <*> pure ltids
                              <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
@@ -275,10 +284,12 @@ instance Substitute KernelSpace where
     (substituteNames subst structure)
 
 instance Substitute SpaceStructure where
-  substituteNames subst (FlatSpace dims) =
-    FlatSpace (map (substituteNames subst) dims)
-  substituteNames subst (NestedSpace dims) =
-    NestedSpace (map (substituteNames subst) dims)
+  substituteNames subst (FlatThreadSpace dims) =
+    FlatThreadSpace (map (substituteNames subst) dims)
+  substituteNames subst (FlatGroupSpace dims) =
+    FlatGroupSpace (map (substituteNames subst) dims)
+  substituteNames subst (NestedThreadSpace dims) =
+    NestedThreadSpace (map (substituteNames subst) dims)
 
 instance Attributes lore => Substitute (Kernel lore) where
   substituteNames subst (Kernel desc cs space ts kbody) =
@@ -317,8 +328,9 @@ scopeOfKernelSpace :: KernelSpace -> Scope lore
 scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
   HM.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
   where structure' = case structure of
-                       FlatSpace dims -> map fst dims
-                       NestedSpace dims ->
+                       FlatThreadSpace dims -> map fst dims
+                       FlatGroupSpace dims -> map fst dims
+                       NestedThreadSpace dims ->
                          let (gtids, _, ltids, _) = unzip4 dims
                          in gtids ++ ltids
 
@@ -471,9 +483,11 @@ typeCheckKernel (Kernel _ cs space kts kbody) = do
   where checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
           mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
           case structure of
-            FlatSpace dims ->
+            FlatThreadSpace dims ->
               mapM_ (TC.require [Prim int32] . snd) dims
-            NestedSpace dims ->
+            FlatGroupSpace dims ->
+              mapM_ (TC.require [Prim int32] . snd) dims
+            NestedThreadSpace dims ->
               let (_, gdim_sizes, _, ldim_sizes) = unzip4 dims
               in mapM_ (TC.require [Prim int32]) $ gdim_sizes ++ ldim_sizes
 
@@ -547,11 +561,15 @@ instance Pretty KernelSpace where
                       text "group ID ->" <+> ppr gid]) </> structure'
     where structure' =
             case structure of
-              FlatSpace space ->
+              FlatThreadSpace space ->
                 parens (commasep $ do
                            (i,d) <- space
                            return $ ppr i <+> "<" <+> ppr d)
-              NestedSpace space ->
+              FlatGroupSpace space ->
+                parens (commasep $ do
+                           (i,d) <- space
+                           return $ ppr i <+> "<" <+> ppr d)
+              NestedThreadSpace space ->
                 parens (commasep $ do
                            (gtid,gd,ltid,ld) <- space
                            return $ ppr (gtid,ltid) <+> "<" <+> ppr (gd,ld))

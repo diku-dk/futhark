@@ -1035,23 +1035,28 @@ isActive limit = case actives of
 setSpaceIndices :: KernelSpace -> InKernelGen ()
 setSpaceIndices space =
   case spaceStructure space of
-    FlatSpace is_and_dims -> do
-      let (is, dims) = unzip is_and_dims
-      dims' <- mapM ImpGen.compileSubExp dims
-      let index_expressions = unflattenIndex dims' $ Imp.var global_tid int32
-      forM_ (zip is index_expressions) $ \(i, x) ->
-        ImpGen.emit $ Imp.SetScalar i x
-    NestedSpace is_and_dims -> do
+    FlatThreadSpace is_and_dims ->
+      flatSpaceWith gtid is_and_dims
+    FlatGroupSpace is_and_dims ->
+      flatSpaceWith gid is_and_dims
+    NestedThreadSpace is_and_dims -> do
       let (gtids, gdims, ltids, ldims) = unzip4 is_and_dims
       gdims' <- mapM ImpGen.compileSubExp gdims
       ldims' <- mapM ImpGen.compileSubExp ldims
-      let (gtid_es, ltid_es) = unzip $ unflattenNestedIndex gdims' ldims' $
-                               Imp.var global_tid int32
+      let (gtid_es, ltid_es) = unzip $ unflattenNestedIndex gdims' ldims' gtid
       forM_ (zip gtids gtid_es) $ \(i,e) ->
         ImpGen.emit $ Imp.SetScalar i e
       forM_ (zip ltids ltid_es) $ \(i,e) ->
         ImpGen.emit $ Imp.SetScalar i e
-  where global_tid = spaceGlobalId space
+  where gtid = Imp.var (spaceGlobalId space) int32
+        gid = Imp.var (spaceGroupId space) int32
+
+        flatSpaceWith base is_and_dims = do
+          let (is, dims) = unzip is_and_dims
+          dims' <- mapM ImpGen.compileSubExp dims
+          let index_expressions = unflattenIndex dims' base
+          forM_ (zip is index_expressions) $ \(i, x) ->
+            ImpGen.emit $ Imp.SetScalar i x
 
 unflattenNestedIndex :: IntegralExp num => [num] -> [num] -> num -> [(num,num)]
 unflattenNestedIndex global_dims group_dims global_id =

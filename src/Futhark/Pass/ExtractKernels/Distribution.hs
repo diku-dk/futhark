@@ -27,6 +27,7 @@ module Futhark.Pass.ExtractKernels.Distribution
 
        , KernelNest
        , ppKernelNest
+       , newKernel
        , pushKernelNesting
        , pushInnerKernelNesting
        , kernelNestLoops
@@ -232,7 +233,7 @@ constructKernel kernel_nest inner_body = do
   let used_inps = filter inputIsUsed inps
       cs = loopNestingCertificates first_nest
 
-  (ksize_bnds, k) <- mapKernel cs w ispace used_inps rts inner_body
+  (ksize_bnds, k) <- mapKernel cs w (FlatThreadSpace ispace) used_inps rts inner_body
 
   let kbnds = w_bnds ++ ksize_bnds
   return (kbnds,
