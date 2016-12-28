@@ -56,7 +56,7 @@ regularSegmentedRedomapAsScan segment_size num_segments nest_sizes flat_pat
     return $ resultBody vals
 
   (mapk_bnds, mapk) <-
-    mapKernelFromBody [] num_segments (zip is nest_sizes) [] acc_ts body
+    mapKernelFromBody [] num_segments (FlatThreadSpace $ zip is nest_sizes) [] acc_ts body
   mapM_ addStm mapk_bnds
   letBind_ acc_pat $ Op mapk
 
@@ -117,7 +117,7 @@ regularSegmentedScan segment_size pat cs w lam fold_lam ispace inps nes arrs = d
       flag <- letSubExp "flag" $
               If start_of_segment (resultBody [true]) (resultBody [false]) [Prim Bool]
       return $ resultBody [flag]
-  (mapk_bnds, mapk) <- mapKernelFromBody [] w [(flags_i, w)] [] [Prim Bool] flags_body
+  (mapk_bnds, mapk) <- mapKernelFromBody [] w (FlatThreadSpace [(flags_i, w)]) [] [Prim Bool] flags_body
   mapM_ addStm mapk_bnds
   flags <- letExp "flags" $ Op mapk
 

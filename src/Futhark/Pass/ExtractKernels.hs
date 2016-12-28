@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | Kernel extraction.
 --
 -- In the following, I will use the term "width" to denote the amount
@@ -371,7 +372,7 @@ transformStm (Let pat () (Op (Write cs w lam ivs as))) = runBinder_ $ do
       inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
                   return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
   (bnds, kernel) <-
-    mapKernel cs w [(write_i,w)] inputs (map rowType $ patternTypes pat) body
+    mapKernel cs w (FlatThreadSpace [(write_i,w)]) inputs (map rowType $ patternTypes pat) body
   mapM_ addStm bnds
   letBind_ pat $ Op kernel
 
@@ -388,29 +389,43 @@ distributeMap :: (HasScope Out.Kernels m,
                  Pattern -> MapLoop -> m [KernelsStm]
 distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askScope
-  let env = KernelEnv { kernelNest =
-                        singleNesting (Nesting mempty $
-                                       MapNesting pat cs w $
-                                       zip (lambdaParams lam) arrs)
+  let loopnest = MapNesting pat cs w $ zip (lambdaParams lam) arrs
+      env = KernelEnv { kernelNest =
+                        singleNesting (Nesting mempty loopnest)
                       , kernelScope =
                         types <> scopeForKernels (scopeOf lam)
                       }
   let res = map Var $ patternNames pat
-  par_bnds <- fmap (postKernelsStms . snd) $ runKernelM env $
+  par_stms <- fmap (postKernelsStms . snd) $ runKernelM env $
     distribute =<< distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
 
   if not versionedCode || not (containsNestedParallelism lam)
-    then return par_bnds
+    then return par_stms
     else do
-    par_body <- renameBody $ mkBody par_bnds res
+    par_body <- renameBody $ mkBody par_stms res
 
-    seq_bnds <- do
+    seq_stms <- do
       soactypes <- asksScope scopeForSOACs
       (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
       fmap (postKernelsStms . snd) $ runKernelM env $ distribute $
         addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
-    seq_body <- renameBody $ mkBody seq_bnds res
-    kernelAlternatives w pat seq_body par_body
+    seq_body <- renameBody $ mkBody seq_stms res
+    (outer_suff, outer_suff_stms) <- runBinder $
+      letSubExp "outer_suff_par" $ Op $ SufficientParallelism w
+
+    intra_stms <- flip runReaderT types $ localScope (scopeOfLParams (lambdaParams lam)) $
+                  intraGroupParallelise (newKernel loopnest) $ lambdaBody lam
+    group_par_body <- renameBody $ mkBody intra_stms res
+
+    (intra_suff, intra_suff_stms) <- runBinder $ do
+      group_size <- letSubExp "group_size" $ Op GroupSize
+      group_available_par <-
+        letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
+      letSubExp "group_suff_par" $ Op $ SufficientParallelism group_available_par
+
+    ((outer_suff_stms++intra_suff_stms)++) <$>
+      kernelAlternatives pat par_body [(outer_suff, seq_body),
+                                       (intra_suff, group_par_body)]
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelStms = mempty
                           }
@@ -581,14 +596,26 @@ bodyContainsMap = any (isMap . bindingExp) . bodyStms
 lambdaContainsParallelism :: Lambda -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
+-- | Returns the sizes of immediate nested parallelism.
+nestedParallelism :: Body -> [SubExp]
+nestedParallelism = concatMap (parallelism . bindingExp) . bodyStms
+  where parallelism (Op (Reduce _ w _ _ _)) = [w]
+        parallelism (Op (Scan _ w _ _)) = [w]
+        parallelism (Op (Scanomap _ w _ _ _ _)) = [w]
+        parallelism (Op (Redomap _ w _ _ _ _ _)) = [w]
+        parallelism (Op (Map _ w _ _)) = [w]
+        parallelism (Op (Stream _ w Sequential{} lam _))
+          | chunk_size_param : _ <- extLambdaParams lam =
+              let update (Var v) | v == paramName chunk_size_param = w
+                  update se = se
+              in map update $ nestedParallelism $ extLambdaBody lam
+        parallelism _ = []
+
 containsNestedParallelism :: Lambda -> Bool
 containsNestedParallelism lam =
-  any (parallel . bindingExp) lam_bnds &&
-  not (perfectMapNest lam_bnds)
-  where lam_bnds = bodyStms $ lambdaBody lam
-        parallel Op{} = True
-        parallel _    = False
-        perfectMapNest [Let _ _ (Op Map{})] = True
+  not (null $ nestedParallelism $ lambdaBody lam) &&
+  not (perfectMapNest $ bodyStms $ lambdaBody lam)
+  where perfectMapNest [Let _ _ (Op Map{})] = True
         perfectMapNest _                    = False
 
 -- Enable if you want the cool new versioned code.  Beware: may be
@@ -636,8 +663,11 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
             res' = map Var $ patternNames outer_pat
         seq_body <- renameBody $ mkBody [sequentialised_kernel] res'
         par_body <- renameBody $ mkBody (postKernelsStms distributed_kernels) res'
-        addKernel =<< kernelAlternatives parw outer_pat seq_body par_body
-        addKernel parw_bnds
+        (sufficient_parallelism, sufficient_stms) <- runBinder $
+          letSubExp "sufficient_parallelism" $ Op $ SufficientParallelism parw
+        addKernel =<< kernelAlternatives outer_pat
+          par_body [(sufficient_parallelism,seq_body)]
+        addKernel $ parw_bnds ++ sufficient_stms
         return acc'
       where lam_bnds = bodyStms $ lambdaBody lam
             lam_res = bodyResult $ lambdaBody lam
@@ -988,13 +1018,128 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
     m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
 
+-- | Convert the statements inside a map nest to kernel statements,
+-- attempting to parallelise any remaining (top-level) parallel
+-- statements.  Anything that is not a map, scan or reduction will
+-- simply be sequentialised.  This includes sequential loops that
+-- contain maps, scans or reduction.  In the future, we could probably
+-- do something more clever.  Make sure that the amount of parallelism
+-- to be exploited does not exceed the group size.
+intraGroupParallelise :: (MonadFreshNames m,
+                          HasScope Out.Kernels m) =>
+                         KernelNest -> Body
+                      -> m [Out.Stm Out.Kernels]
+intraGroupParallelise knest body = do
+  (w_stms, w, ispace, inps, rts) <- flatKernel knest
+
+  ((kspace, read_input_stms), prelude_stms) <- runBinder $ do
+    let inputIsUsed input = kernelInputName input `HS.member` freeInBody body
+        used_inps = filter inputIsUsed inps
+
+    (kspace, kspace_stms, read_input_stms) <-
+      mapKernelSkeleton w (FlatGroupSpace ispace) used_inps
+
+    mapM_ addStm w_stms
+    mapM_ addStm kspace_stms
+
+    return (kspace, read_input_stms)
+
+  kbody <- intraGroupParalleliseBody kspace body
+
+  let kbody' = kbody { kernelBodyStms = read_input_stms ++ kernelBodyStms kbody }
+      kstm = Let (loopNestingPattern first_nest) () $ Op $
+             Kernel "map" cs kspace rts kbody'
+
+  return $ prelude_stms ++ [kstm]
+  where first_nest = fst knest
+        cs = loopNestingCertificates first_nest
+
+intraGroupParalleliseBody :: (MonadFreshNames m,
+                              HasScope Out.Kernels m) =>
+                             KernelSpace -> Body -> m (Out.KernelBody Out.InKernel)
+intraGroupParalleliseBody kspace body = do
+  let ltid = spaceLocalId kspace
+  kstms <- runBinder_ $ do
+    let processStms = mapM_ processStm
+
+        -- Without this type signature, the GHC 8.0.1 type checker
+        -- enters an infinite loop.
+        processStm :: Stm -> Binder Out.InKernel ()
+        processStm stm@(Let pat _ e) =
+          case e of
+            Op (Map cs w fun arrs) -> do
+              body_stms <- collectStms_ $ do
+                forM_ (zip (lambdaParams fun) arrs) $ \(p, arr) -> do
+                  arr_t <- lookupType arr
+                  letBindNames' [paramName p] $ BasicOp $ Index cs arr $
+                    fullSlice arr_t [DimFix $ Var ltid]
+                Kernelise.transformStms $ bodyStms $ lambdaBody fun
+              let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
+              letBind_ pat $ Op $
+                Out.Combine [(ltid,w)] (lambdaReturnType fun) (constant True) comb_body
+
+            Op (Scanomap cs w scanfun foldfun nes arrs) -> do
+              fold_stms <- collectStms_ $ do
+                let (fold_acc_params, fold_arr_params) =
+                      splitAt (length nes) $ lambdaParams foldfun
+
+                forM_ (zip fold_acc_params nes) $ \(p, ne) ->
+                  letBindNames'_ [paramName p] $ BasicOp $ SubExp ne
+
+                forM_ (zip fold_arr_params arrs) $ \(p, arr) -> do
+                  arr_t <- lookupType arr
+                  letBindNames' [paramName p] $ BasicOp $ Index cs arr $
+                    fullSlice arr_t [DimFix $ Var ltid]
+
+                Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
+              let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
+              scan_input <- letTupExp "scan_input" $ Op $
+                Out.Combine [(ltid,w)] (lambdaReturnType foldfun) (constant True) fold_body
+
+              scanfun' <- Kernelise.transformLambda scanfun
+
+              -- A GroupScan lambda needs two more parameters.
+              my_index <- newVName "my_index"
+              other_index <- newVName "other_index"
+              let my_index_param = Param my_index (Prim int32)
+                  other_index_param = Param other_index (Prim int32)
+                  scanfun'' = scanfun' { lambdaParams = my_index_param :
+                                                        other_index_param :
+                                                        lambdaParams scanfun'
+                                       }
+              letBind_ pat $ Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
+
+            Op (Stream cs w (Sequential accs) lam arrs) -> do
+
+              types <- asksScope castScope
+              ((), stream_bnds) <-
+                runBinderT (sequentialStreamWholeArray pat cs w accs lam arrs) types
+              processStms stream_bnds
+            _ ->
+              Kernelise.transformStm stm
+
+    processStms $ bodyStms body
+
+  return $ KernelBody () kstms $ map (ThreadsReturn ThreadsInSpace) $ bodyResult body
+
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                      SubExp -> Out.Pattern Out.Kernels
-                   -> Out.Body Out.Kernels -> Out.Body Out.Kernels
+                      Out.Pattern Out.Kernels
+                   -> Out.Body Out.Kernels
+                   -> [(SubExp, Out.Body Out.Kernels)]
                    -> m [Out.Stm Out.Kernels]
-kernelAlternatives parallelism pat seq_body par_body = runBinder_ $ do
-  suff <- letSubExp "sufficient_parallelism" $ Op $ SufficientParallelism parallelism
-  letBind_ pat $ If suff seq_body par_body rettype
+kernelAlternatives pat default_body [] = runBinder_ $ do
+  ses <- bodyBind default_body
+  forM_ (zip (patternNames pat) ses) $ \(name, se) ->
+    letBindNames'_ [name] $ BasicOp $ SubExp se
+kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
+  alts_pat <- fmap (Pattern []) $ forM (patternElements pat) $ \pe -> do
+    name <- newVName $ baseString $ patElemName pe
+    return pe { patElemName = name }
+
+  alt_stms <- kernelAlternatives alts_pat default_body alts
+  let alt_body = mkBody alt_stms $ map Var $ patternValueNames alts_pat
+
+  letBind_ pat $ If cond alt alt_body rettype
   where rettype = staticShapes $ patternTypes pat
 
 kernelOrNot :: Stm -> KernelAcc

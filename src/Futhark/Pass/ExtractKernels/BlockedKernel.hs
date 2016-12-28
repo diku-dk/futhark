@@ -113,7 +113,8 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
       group_size = kernelWorkgroupSize step_one_size
       num_nonconcat = length nes
 
-  space <- newKernelSpace (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size) []
+  space <- newKernelSpace (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size) $
+           FlatThreadSpace []
   (chunk_red_pes, chunk_map_pes, chunk_and_fold) <-
     blockedPerThread (spaceGlobalId space)
     w step_one_size ordering fold_lam' num_nonconcat arrs
@@ -156,7 +157,8 @@ reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
 reduceKernel cs step_two_size reduce_lam' nes arrs = do
   let group_size = kernelWorkgroupSize step_two_size
       red_ts = lambdaReturnType reduce_lam'
-  space <- newKernelSpace (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size) []
+  space <- newKernelSpace (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size) $
+           FlatThreadSpace []
   let thread_id = spaceGlobalId space
 
   (copy_input, arrs_index) <-
@@ -291,7 +293,7 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
       group_size = kernelWorkgroupSize kernel_size
       num_threads = kernelNumThreads kernel_size
 
-  space <- newKernelSpace (num_groups, group_size, num_threads) []
+  space <- newKernelSpace (num_groups, group_size, num_threads) (FlatThreadSpace [])
   lam' <- kerneliseLambda nes lam
   (chunk_red_pes, chunk_map_pes, chunk_and_fold) <-
     blockedPerThread (spaceGlobalId space) w kernel_size ordering lam' num_nonconcat arrs
@@ -399,7 +401,7 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
 
   last_thread <- letSubExp "last_thread" $ BasicOp $
                  BinOp (Sub Int32) group_size (constant (1::Int32))
-  kspace <- newKernelSpace (num_groups, group_size, num_threads) []
+  kspace <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
   let lid = spaceLocalId kspace
 
   (res, stms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
@@ -565,7 +567,7 @@ scanKernel2 cs scan_sizes lam input = do
 
   kspace <- newKernelSpace (kernelWorkgroups scan_sizes,
                             group_size,
-                            kernelNumThreads scan_sizes) []
+                            kernelNumThreads scan_sizes) (FlatThreadSpace [])
   let lid = spaceLocalId kspace
 
   (res, stms) <- runBinder $ localScope (scopeOfKernelSpace kspace) $ do
@@ -680,7 +682,7 @@ blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
         do_nothing
         add_carry_in
     return $ resultBody $ map Var group_lasts
-  (mapk_bnds, mapk) <- mapKernelFromBody [] w [(j, w)] result_map_input
+  (mapk_bnds, mapk) <- mapKernelFromBody [] w (FlatThreadSpace [(j, w)]) result_map_input
                        (lambdaReturnType lam) result_map_body
   mapM_ addStm mapk_bnds
   letBind_ final_res_pat $ Op mapk
@@ -698,9 +700,11 @@ blockedScan pat cs w lam foldlam segment_size ispace inps nes arrs = do
                                                   }
 
 mapKernelSkeleton :: (HasScope Kernels m, MonadFreshNames m) =>
-                     SubExp -> [KernelInput]
-                  -> m ([Stm Kernels], (SubExp,SubExp,SubExp), [Stm InKernel])
-mapKernelSkeleton w inputs = do
+                     SubExp -> SpaceStructure -> [KernelInput]
+                  -> m (KernelSpace,
+                        [Stm Kernels],
+                        [Stm InKernel])
+mapKernelSkeleton w ispace inputs = do
   group_size_v <- newVName "group_size"
 
   ((num_threads, num_groups), ksize_bnds) <- runBinder $ do
@@ -710,7 +714,10 @@ mapKernelSkeleton w inputs = do
   read_input_bnds <- mapM readKernelInput inputs
 
   let ksize = (num_groups, Var group_size_v, num_threads)
-  return (ksize_bnds, ksize, read_input_bnds)
+
+  space <- newKernelSpace ksize ispace
+  return (space, ksize_bnds, read_input_bnds)
+
 
 -- Given the desired minium number of threads and the number of
 -- threads per group, compute the number of groups and total number of
@@ -724,19 +731,22 @@ numThreadsAndGroups w group_size = do
   return (num_threads, num_groups)
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
-             Certificates -> SubExp -> [(VName, SubExp)] -> [KernelInput]
+             Certificates -> SubExp -> SpaceStructure -> [KernelInput]
           -> [Type] -> KernelBody InKernel
           -> m ([Stm Kernels], Kernel InKernel)
 mapKernel cs w ispace inputs rts (KernelBody () kstms krets) = do
-  (ksize_bnds, ksize, read_input_bnds) <- mapKernelSkeleton w inputs
+  group_size_v <- newVName "group_size"
 
-  space <- newKernelSpace ksize ispace
+  group_size_bnds <- runBinder_ $
+    letBindNames'_ [group_size_v] $ Op GroupSize
+
+  (space, ksize_bnds, read_input_bnds) <- mapKernelSkeleton w ispace inputs
 
   let kbody' = KernelBody () (read_input_bnds ++ kstms) krets
-  return (ksize_bnds, Kernel "map" cs space rts kbody')
+  return (group_size_bnds ++ ksize_bnds, Kernel "map" cs space rts kbody')
 
 mapKernelFromBody :: (HasScope Kernels m, MonadFreshNames m) =>
-                     Certificates -> SubExp -> [(VName, SubExp)] -> [KernelInput]
+                     Certificates -> SubExp -> SpaceStructure -> [KernelInput]
                   -> [Type] -> Body InKernel
                   -> m ([Stm Kernels], Kernel InKernel)
 mapKernelFromBody cs w ispace inputs rts body =
@@ -764,8 +774,8 @@ readKernelInput inp = do
     fullSlice arr_t $ map DimFix $ kernelInputIndices inp
 
 newKernelSpace :: MonadFreshNames m =>
-                  (SubExp,SubExp,SubExp) -> [(VName, SubExp)] -> m KernelSpace
-newKernelSpace (num_groups, group_size, num_threads) dims =
+                  (SubExp,SubExp,SubExp) -> SpaceStructure -> m KernelSpace
+newKernelSpace (num_groups, group_size, num_threads) ispace =
   KernelSpace
   <$> newVName "global_tid"
   <*> newVName "local_tid"
@@ -773,4 +783,4 @@ newKernelSpace (num_groups, group_size, num_threads) dims =
   <*> pure num_threads
   <*> pure num_groups
   <*> pure group_size
-  <*> pure (FlatSpace dims)
+  <*> pure ispace

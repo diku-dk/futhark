@@ -107,7 +107,7 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
           (Let pat attr (Op (GroupStream w max_chunk lam accs arrs)))
           | w == max_chunk,
             not $ null arrs,
-            FlatSpace gspace <- spaceStructure kspace,
+            FlatThreadSpace gspace <- spaceStructure kspace,
             chunk_size <- Var $ groupStreamChunkSize lam,
             arr_chunk_params <- groupStreamArrParams lam,
 
@@ -140,7 +140,7 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
           ((num_threads, num_groups), num_bnds) <-
             runBinderT (sufficientGroups gspace' tiled_group_size) mempty
 
-          let kspace' = kspace { spaceStructure = NestedSpace gspace'
+          let kspace' = kspace { spaceStructure = NestedThreadSpace gspace'
                                , spaceGroupSize = tiled_group_size
                                , spaceNumThreads = num_threads
                                , spaceNumGroups = num_groups
@@ -200,8 +200,8 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
   (inner_gtid, inner_gdim) <- invariantToInnermostDimension
   mk_structure <-
     case spaceStructure kspace of
-      NestedSpace{} -> Nothing
-      FlatSpace gtids_and_gdims ->
+      NestedThreadSpace{} -> Nothing
+      FlatThreadSpace gtids_and_gdims ->
         return $ do
           -- Force a functioning group size. XXX: not pretty.
           let n_dims = length gtids_and_gdims
@@ -221,8 +221,8 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
                 mkLet' [] [Ident inner_ldim $ Prim int32] $
                 If (Var smaller) smaller_body not_smaller_body [Prim int32]
 
-              structure = NestedSpace $ outer ++ [(inner_gtid, inner_gdim,
-                                                   inner_ltid, Var inner_ldim)]
+              structure = NestedThreadSpace $ outer ++ [(inner_gtid, inner_gdim,
+                                                         inner_ltid, Var inner_ldim)]
           ((num_threads, num_groups), num_bnds) <- flip runBinderT mempty $ do
             threads_necessary <-
               letSubExp "threads_necessary" =<<

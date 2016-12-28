@@ -210,11 +210,14 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify structure
 
 instance Engine.Simplifiable SpaceStructure where
-  simplify (FlatSpace dims) =
-    FlatSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
+  simplify (FlatThreadSpace dims) =
+    FlatThreadSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
     where (gtids, gdims) = unzip dims
-  simplify (NestedSpace dims) =
-    NestedSpace
+  simplify (FlatGroupSpace dims) =
+    FlatGroupSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
+    where (gtids, gdims) = unzip dims
+  simplify (NestedThreadSpace dims) =
+    NestedThreadSpace
     <$> (zip4 gtids
          <$> mapM Engine.simplify gdims
          <*> pure ltids
