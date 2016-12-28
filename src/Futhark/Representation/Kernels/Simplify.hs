@@ -139,7 +139,7 @@ simplifyKernelExp (SplitSpace o w i num_is elems_per_thread) =
 
 simplifyKernelExp (Combine cspace ts active body) = do
   (body_res', body_bnds') <-
-    Engine.blockIf (Engine.isFalse False) $
+    Engine.blockIf Engine.isNotSafe $
     Engine.simplifyBody (map (const Observe) ts) body
   body' <- mkBodyM body_bnds' body_res'
   Combine
