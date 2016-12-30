@@ -561,18 +561,15 @@ instance Pretty KernelSpace where
                       text "group ID ->" <+> ppr gid]) </> structure'
     where structure' =
             case structure of
-              FlatThreadSpace space ->
-                parens (commasep $ do
-                           (i,d) <- space
-                           return $ ppr i <+> "<" <+> ppr d)
-              FlatGroupSpace space ->
-                parens (commasep $ do
-                           (i,d) <- space
-                           return $ ppr i <+> "<" <+> ppr d)
+              FlatThreadSpace dims -> flat dims
+              FlatGroupSpace dims -> text "group" <+> PP.align (flat dims)
               NestedThreadSpace space ->
                 parens (commasep $ do
                            (gtid,gd,ltid,ld) <- space
                            return $ ppr (gtid,ltid) <+> "<" <+> ppr (gd,ld))
+          flat dims = parens $ commasep $ do
+            (i,d) <- dims
+            return $ ppr i <+> "<" <+> ppr d
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody _ stms res) =
