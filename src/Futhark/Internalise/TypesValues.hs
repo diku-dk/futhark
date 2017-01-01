@@ -34,14 +34,14 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-internaliseParamTypes :: [E.TypeBase E.ShapeDecl als VName]
+internaliseParamTypes :: [E.TypeBase (E.ShapeDecl VName) als VName]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        HM.HashMap VName Int)
 internaliseParamTypes ts = do
   (ts', (_, subst, _)) <- runStateT (mapM (internaliseDeclType' BindDims) ts) (0, HM.empty, mempty)
   return (ts', subst)
 
-internaliseReturnType :: E.TypeBase E.ShapeDecl als VName
+internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als VName
                       -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
                                        HM.HashMap VName Int,
                                        ConstParams)
@@ -53,7 +53,7 @@ data DimDeclInterpretation = AssertDims
                            | BindDims
 
 internaliseDeclType' :: DimDeclInterpretation
-                     -> E.TypeBase E.ShapeDecl als VName
+                     -> E.TypeBase (E.ShapeDecl VName) als VName
                      -> StateT (Int, HM.HashMap VName Int, ConstParams)
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' _ (E.Prim bt) =

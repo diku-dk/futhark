@@ -82,7 +82,7 @@ instance Pretty PrimValue where
   ppr (FloatValue v) = ppr v
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
+         Pretty (TupleArrayElemTypeBase (ShapeDecl vn) as vn) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
@@ -94,7 +94,7 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (ArrayTypeBase ShapeDecl as vn) where
+         Pretty (ArrayTypeBase (ShapeDecl vn) as vn) where
   ppr (PrimArray et (ShapeDecl ds) u _) =
     ppr u <> mconcat (map (brackets . f) ds) <> ppr et
     where f AnyDim       = mempty
@@ -114,7 +114,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) wh
     ppr u <> mconcat (replicate n (brackets mempty)) <>
     parens (commasep $ map ppr ts)
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as vn) where
   ppr (Prim et)  = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = parens $ commasep $ map ppr ts

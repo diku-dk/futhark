@@ -798,9 +798,9 @@ getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
 getNoLines (GetLine _) = Left "Unexpected end of input"
 
-combArrayTypes :: TypeBase Rank NoInfo Name
-               -> [TypeBase Rank NoInfo Name]
-               -> Maybe (TypeBase Rank NoInfo Name)
+combArrayTypes :: TypeBase Rank () Name
+               -> [TypeBase Rank () Name]
+               -> Maybe (TypeBase Rank () Name)
 combArrayTypes t ts = foldM comb t ts
   where comb x y
           | x == y    = Just x
