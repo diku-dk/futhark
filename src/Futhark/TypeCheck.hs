@@ -157,9 +157,9 @@ instance Checkable lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunStm lore = (RetType (Aliases lore), [FParam (Aliases lore)])
+type FunBinding lore = (RetType (Aliases lore), [FParam (Aliases lore)])
 
-type VarStm lore = NameInfo (Aliases lore)
+type VarBinding lore = NameInfo (Aliases lore)
 
 data Usage = Consumed
            | Observed
@@ -239,8 +239,8 @@ instance Monoid Consumption where
 -- variable table will be extended during type-checking when
 -- let-expressions are encountered.
 data Env lore =
-  Env { envVtable :: HM.HashMap VName (VarStm lore)
-      , envFtable :: HM.HashMap Name (FunStm lore)
+  Env { envVtable :: HM.HashMap VName (VarBinding lore)
+      , envFtable :: HM.HashMap Name (FunBinding lore)
       , envContext :: [String]
       }
 
@@ -489,7 +489,7 @@ checkProg prog = do
 
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Checkable lore =>
-                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunStm lore))
+                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunBinding lore))
 initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts

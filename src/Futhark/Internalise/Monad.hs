@@ -7,7 +7,7 @@ module Futhark.Internalise.Monad
   , VarSubstitutions
   , InternaliseEnv(..)
   , ConstParams
-  , FunStm (..)
+  , FunBinding (..)
   , lookupFunction
   , bindingIdentTypes
   , bindingParamTypes
@@ -35,13 +35,13 @@ import Prelude hiding (mapM)
 
 type ConstParams = [(Name,VName)]
 
-data FunStm = FunStm
+data FunBinding = FunBinding
                   { internalFun :: (Name, ConstParams, [VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.StructType, [E.StructType])
                   }
 
-type FunTable = HM.HashMap VName FunStm
+type FunTable = HM.HashMap VName FunBinding
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
@@ -96,7 +96,7 @@ runInternaliseM ftable (InternaliseM m) =
                  , envDoBoundsChecks = True
                  }
 
-lookupFunction :: VName -> InternaliseM FunStm
+lookupFunction :: VName -> InternaliseM FunBinding
 lookupFunction fname = do
   fun <- HM.lookup fname <$> asks envFtable
   case fun of Nothing   -> fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found"
