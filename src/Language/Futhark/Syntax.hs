@@ -94,8 +94,8 @@ class (Show vn,
        Show (f (CompTypeBase vn)),
        Show (f (StructTypeBase vn))) => Showable f vn where
 
--- | No information.  Usually used for placeholder type- or aliasing
--- information.
+-- | No information functor.  Usually used for placeholder type- or
+-- aliasing information.
 data NoInfo a = NoInfo
               deriving (Eq, Ord, Show)
 
@@ -165,14 +165,14 @@ newtype ShapeDecl vn = ShapeDecl { shapeDims :: [DimDecl vn] }
                      deriving (Eq, Ord, Show)
 
 -- | The rank of an array as a positive natural number.
-newtype Rank vn = Rank Int
-                deriving (Eq, Ord, Show)
+newtype Rank = Rank Int
+             deriving (Eq, Ord, Show)
 
-instance Monoid (Rank vn) where
+instance Monoid Rank where
   mempty = Rank 0
   Rank n `mappend` Rank m = Rank $ n + m
 
-instance ArrayShape (Rank vn) where
+instance ArrayShape Rank where
   shapeRank (Rank n) = n
   stripDims i (Rank n) | i < n     = Just $ Rank $ n - i
                        | otherwise = Nothing
@@ -189,12 +189,12 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
 
 -- | Types that can be elements of tuple-arrays.
 data TupleArrayElemTypeBase shape as vn =
-    PrimArrayElem PrimType (as vn) Uniqueness
+    PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as vn)
   | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
   deriving (Show)
 
-instance Eq (shape vn) =>
+instance Eq shape =>
          Eq (TupleArrayElemTypeBase shape as vn) where
   PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
   ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
@@ -203,13 +203,13 @@ instance Eq (shape vn) =>
 
 -- | An array type.
 data ArrayTypeBase shape as vn =
-    PrimArray PrimType (shape vn) Uniqueness (as vn)
+    PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
-  | TupleArray [TupleArrayElemTypeBase shape as vn] (shape vn) Uniqueness
+  | TupleArray [TupleArrayElemTypeBase shape as vn] shape Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
 
-instance Eq (shape vn) =>
+instance Eq shape =>
          Eq (ArrayTypeBase shape as vn) where
   PrimArray et1 dims1 u1 _ == PrimArray et2 dims2 u2 _ =
     et1 == et2 && dims1 == dims2 && u1 == u2
@@ -229,7 +229,7 @@ data TypeBase shape as vn = Prim PrimType
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
-type CompTypeBase = TypeBase Rank Names
+type CompTypeBase vn = TypeBase Rank (Names vn) vn
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -251,16 +251,16 @@ instance Located (UserType vn) where
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
 
-type StructTypeBase = TypeBase ShapeDecl NoInfo
+type StructTypeBase vn = TypeBase (ShapeDecl vn) () vn
 
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
-type DeclArrayTypeBase = ArrayTypeBase ShapeDecl NoInfo
+type DeclArrayTypeBase vn = ArrayTypeBase (ShapeDecl vn) () vn
 
 -- | A tuple array element type with shape annotations and no aliasing
 -- information, used for declarations.
-type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
+type DeclTupleArrayElemTypeBase vn = TupleArrayElemTypeBase (ShapeDecl vn) () vn
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
@@ -285,7 +285,7 @@ data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
 -- type is always unambiguous.
 data Value = PrimValue !PrimValue
            | TupValue ![Value]
-           | ArrayValue !(Array Int Value) (TypeBase Rank NoInfo ())
+           | ArrayValue !(Array Int Value) (TypeBase Rank () ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
              deriving (Eq, Show)
@@ -362,7 +362,7 @@ newtype QualName vn = QualName ([Name], vn)
 -- This allows us to encode whether or not the expression has been
 -- type-checked in the Haskell type of the expression.  Specifically,
 -- the parser will produce expressions of type @Exp 'NoInfo' 'Name'@,
--- and the type checker will convert these to @Exp 'Type' 'VName'@, in
+-- and the type checker will convert these to @Exp 'Info' 'VName'@, in
 -- which type information is always present and all names are unique.
 data ExpBase f vn =
               Literal PrimValue SrcLoc

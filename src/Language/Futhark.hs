@@ -39,11 +39,11 @@ type ConstBind = ConstBindBase Info VName
 type Prog = ProgBase Info VName
 
 -- | A known type with no shape annotations, but aliasing information.
-type Type = TypeBase Rank Names VName
+type Type = TypeBase Rank (Names VName) VName
 
 -- | A known type with shape annotations but no aliasing information.
-type StructType = TypeBase ShapeDecl NoInfo VName
+type StructType = TypeBase (ShapeDecl VName) () VName
 
 -- | A known array type with no shape annotations, but aliasing
 -- information.
-type ArrayType = ArrayTypeBase Rank Names VName
+type ArrayType = ArrayTypeBase Rank (Names VName) VName

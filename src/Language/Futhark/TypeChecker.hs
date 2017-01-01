@@ -38,27 +38,26 @@ import qualified Futhark.FreshNames
 -- instance for this type produces a human-readable description.
 data TypeError =
     TypeError SrcLoc String
-  | UnifyError SrcLoc (TypeBase Rank NoInfo ()) SrcLoc (TypeBase Rank NoInfo ())
+  | UnifyError SrcLoc (TypeBase Rank () ()) SrcLoc (TypeBase Rank () ())
   | UnexpectedType SrcLoc
-    (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
-  | ReturnTypeError SrcLoc Name (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
+    (TypeBase Rank () ()) [TypeBase Rank () ()]
+  | ReturnTypeError SrcLoc Name (TypeBase Rank () ()) (TypeBase Rank () ())
   | DupDefinitionError Name SrcLoc SrcLoc
   | DupPatternError Name SrcLoc SrcLoc
   | InvalidPatternError (PatternBase NoInfo Name)
-    (TypeBase Rank NoInfo ()) (Maybe String) SrcLoc
+    (TypeBase Rank () ()) (Maybe String) SrcLoc
   | UnknownVariableError Namespace (QualName Name) SrcLoc
   | ParameterMismatch (Maybe (QualName Name)) SrcLoc
-    (Either Int [TypeBase Rank NoInfo ()]) [TypeBase Rank NoInfo ()]
+    (Either Int [TypeBase Rank () ()]) [TypeBase Rank () ()]
   | UseAfterConsume Name SrcLoc SrcLoc
   | IndexingError Int Int SrcLoc
   | CurriedConsumption (QualName Name) SrcLoc
   | BadLetWithValue SrcLoc
   | ReturnAliased Name Name SrcLoc
   | UniqueReturnAliased Name SrcLoc
-  | NotAnArray SrcLoc (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
   | PermutationError SrcLoc [Int] Int
   | DimensionNotInteger SrcLoc Name
-  | InvalidUniqueness SrcLoc (TypeBase Rank NoInfo ())
+  | InvalidUniqueness SrcLoc (TypeBase Rank () ())
   | UndefinedType SrcLoc (QualName Name)
   | InvalidField SrcLoc Type String
   | InvalidEntryPointReturnType SrcLoc Name
@@ -66,7 +65,7 @@ data TypeError =
   | UnderscoreUse SrcLoc (QualName Name)
   | ValueIsNotFunction SrcLoc (QualName Name) Type
   | FunctionIsNotValue SrcLoc (QualName Name)
-  | UniqueConstType SrcLoc Name (TypeBase Rank NoInfo ())
+  | UniqueConstType SrcLoc Name (TypeBase Rank () ())
   | EntryPointConstReturnDecl SrcLoc Name (QualName Name)
   | UndeclaredFunctionReturnType SrcLoc (QualName Name)
 
@@ -136,9 +135,6 @@ instance Show TypeError where
     "A unique tuple element of return value of function " ++
     nameToString fname ++ " at " ++ locStr loc ++
     " is aliased to some other tuple component."
-  show (NotAnArray loc _ t) =
-    "The expression at " ++ locStr loc ++
-    " is expected to be an array, but is " ++ pretty t ++ "."
   show (PermutationError loc perm rank) =
     "The permutation (" ++ intercalate ", " (map show perm) ++
     ") is not valid for array argument of rank " ++ show rank ++ " at " ++
@@ -612,9 +608,9 @@ lookupSig loc qn = do
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
 unifyTypes :: Monoid (as vn) =>
-              TypeBase Rank as vn
-           -> TypeBase Rank as vn
-           -> Maybe (TypeBase Rank as vn)
+              TypeBase Rank (as vn) vn
+           -> TypeBase Rank (as vn) vn
+           -> Maybe (TypeBase Rank (as vn) vn)
 unifyTypes (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
@@ -626,9 +622,9 @@ unifyTypes (Tuple ts1) (Tuple ts2)
 unifyTypes _ _ = Nothing
 
 unifyArrayTypes :: Monoid (as vn) =>
-                   ArrayTypeBase Rank as vn
-                -> ArrayTypeBase Rank as vn
-                -> Maybe (ArrayTypeBase Rank as vn)
+                   ArrayTypeBase Rank (as vn) vn
+                -> ArrayTypeBase Rank (as vn) vn
+                -> Maybe (ArrayTypeBase Rank (as vn) vn)
 unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
   | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
     Just $ PrimArray bt1 shape1 (u1 <> u2) (als1 <> als2)
@@ -640,9 +636,9 @@ unifyArrayTypes _ _ =
   Nothing
 
 unifyTupleArrayElemTypes :: Monoid (as vn) =>
-                            TupleArrayElemTypeBase Rank as vn
-                         -> TupleArrayElemTypeBase Rank as vn
-                         -> Maybe (TupleArrayElemTypeBase Rank as vn)
+                            TupleArrayElemTypeBase Rank (as vn) vn
+                         -> TupleArrayElemTypeBase Rank (as vn) vn
+                         -> Maybe (TupleArrayElemTypeBase Rank (as vn) vn)
 unifyTupleArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
   | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
@@ -665,25 +661,25 @@ unifyExpTypes e1 e2 =
   where t1 = typeOf e1
         t2 = typeOf e2
 
-anySignedType :: [TypeBase Rank NoInfo ()]
+anySignedType :: [TypeBase Rank () ()]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]
 
-anyUnsignedType :: [TypeBase Rank NoInfo ()]
+anyUnsignedType :: [TypeBase Rank () ()]
 anyUnsignedType = map (Prim . Unsigned) [minBound .. maxBound]
 
-anyIntType :: [TypeBase Rank NoInfo ()]
+anyIntType :: [TypeBase Rank () ()]
 anyIntType = anySignedType ++ anyUnsignedType
 
-anyFloatType :: [TypeBase Rank NoInfo ()]
+anyFloatType :: [TypeBase Rank () ()]
 anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 
-anyNumberType :: [TypeBase Rank NoInfo ()]
+anyNumberType :: [TypeBase Rank () ()]
 anyNumberType = anyIntType ++ anyFloatType
 
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
-require :: [TypeBase Rank NoInfo ()] -> Exp -> TypeM Exp
+require :: [TypeBase Rank () ()] -> Exp -> TypeM Exp
 require ts e
   | any (removeNames (typeOf e) `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e)
@@ -1644,7 +1640,7 @@ checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
 checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
 checkBinOp Geq e1 e2 pos = checkRelOp Geq anyNumberType e1 e2 pos
 
-checkRelOp :: BinOp -> [TypeBase Rank NoInfo ()]
+checkRelOp :: BinOp -> [TypeBase Rank () ()]
            -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
            -> TypeM Exp
 checkRelOp op tl e1 e2 pos = do
@@ -1662,7 +1658,7 @@ checkEqualOp op e1 e2 pos = do
   _ <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info $ Prim Bool) pos
 
-checkPolyBinOp :: BinOp -> [TypeBase Rank NoInfo ()]
+checkPolyBinOp :: BinOp -> [TypeBase Rank () ()]
                -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
                -> TypeM Exp
 checkPolyBinOp op tl e1 e2 pos = do
@@ -1737,7 +1733,7 @@ checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
         return (maybe_ret', params', body')
       checkFuncall Nothing loc (map patternStructType params') args
       let ret' = case maybe_ret' of
-                   Nothing -> flip setAliases NoInfo $ vacuousShapeAnnotations $ typeOf body'
+                   Nothing -> flip setAliases () $ vacuousShapeAnnotations $ typeOf body'
                    Just (TypeDecl _ (Info ret)) -> ret
       return $ AnonymFun params' body' maybe_ret' (Info ret') loc
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
