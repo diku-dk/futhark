@@ -188,29 +188,29 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
     | otherwise    = Nothing
 
 -- | Types that can be elements of tuple-arrays.
-data TupleArrayElemTypeBase shape as vn =
+data TupleArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
-  | ArrayArrayElem (ArrayTypeBase shape as vn)
-  | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
+  | ArrayArrayElem (ArrayTypeBase shape as)
+  | TupleArrayElem [TupleArrayElemTypeBase shape as]
   deriving (Show)
 
 instance Eq shape =>
-         Eq (TupleArrayElemTypeBase shape as vn) where
+         Eq (TupleArrayElemTypeBase shape as) where
   PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
   ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
   TupleArrayElem ts1     == TupleArrayElem ts2     = ts1 == ts2
   _                      == _                      = False
 
 -- | An array type.
-data ArrayTypeBase shape as vn =
+data ArrayTypeBase shape as =
     PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
-  | TupleArray [TupleArrayElemTypeBase shape as vn] shape Uniqueness
+  | TupleArray [TupleArrayElemTypeBase shape as] shape Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
 
 instance Eq shape =>
-         Eq (ArrayTypeBase shape as vn) where
+         Eq (ArrayTypeBase shape as) where
   PrimArray et1 dims1 u1 _ == PrimArray et2 dims2 u2 _ =
     et1 == et2 && dims1 == dims2 && u1 == u2
   TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
@@ -218,18 +218,18 @@ instance Eq shape =>
   _ == _ =
     False
 
--- | A Futhark type is either an array, a prim type, or a tuple.  When
--- comparing types for equality with '==', aliases are ignored, but
--- dimensions much match.
-data TypeBase shape as vn = Prim PrimType
-                          | Array (ArrayTypeBase shape as vn)
-                          | Tuple [TypeBase shape as vn]
+-- | An expanded Futhark type is either an array, a prim type, or a
+-- tuple.  When comparing types for equality with '==', aliases are
+-- ignored, but dimensions much match.
+data TypeBase shape as = Prim PrimType
+                       | Array (ArrayTypeBase shape as)
+                       | Tuple [TypeBase shape as]
                           deriving (Eq, Show)
 
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
-type CompTypeBase vn = TypeBase Rank (Names vn) vn
+type CompTypeBase vn = TypeBase Rank (Names vn)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -251,16 +251,16 @@ instance Located (UserType vn) where
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
 
-type StructTypeBase vn = TypeBase (ShapeDecl vn) () vn
+type StructTypeBase vn = TypeBase (ShapeDecl vn) ()
 
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
-type DeclArrayTypeBase vn = ArrayTypeBase (ShapeDecl vn) () vn
+type DeclArrayTypeBase vn = ArrayTypeBase (ShapeDecl vn) ()
 
 -- | A tuple array element type with shape annotations and no aliasing
 -- information, used for declarations.
-type DeclTupleArrayElemTypeBase vn = TupleArrayElemTypeBase (ShapeDecl vn) () vn
+type DeclTupleArrayElemTypeBase vn = TupleArrayElemTypeBase (ShapeDecl vn) ()
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
@@ -285,7 +285,7 @@ data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
 -- type is always unambiguous.
 data Value = PrimValue !PrimValue
            | TupValue ![Value]
-           | ArrayValue !(Array Int Value) (TypeBase Rank () ())
+           | ArrayValue !(Array Int Value) (TypeBase Rank ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
              deriving (Eq, Show)

@@ -38,17 +38,17 @@ import qualified Futhark.FreshNames
 -- instance for this type produces a human-readable description.
 data TypeError =
     TypeError SrcLoc String
-  | UnifyError SrcLoc (TypeBase Rank () ()) SrcLoc (TypeBase Rank () ())
+  | UnifyError SrcLoc (TypeBase Rank ()) SrcLoc (TypeBase Rank ())
   | UnexpectedType SrcLoc
-    (TypeBase Rank () ()) [TypeBase Rank () ()]
-  | ReturnTypeError SrcLoc Name (TypeBase Rank () ()) (TypeBase Rank () ())
+    (TypeBase Rank ()) [TypeBase Rank ()]
+  | ReturnTypeError SrcLoc Name (TypeBase Rank ()) (TypeBase Rank ())
   | DupDefinitionError Name SrcLoc SrcLoc
   | DupPatternError Name SrcLoc SrcLoc
   | InvalidPatternError (PatternBase NoInfo Name)
-    (TypeBase Rank () ()) (Maybe String) SrcLoc
+    (TypeBase Rank ()) (Maybe String) SrcLoc
   | UnknownVariableError Namespace (QualName Name) SrcLoc
   | ParameterMismatch (Maybe (QualName Name)) SrcLoc
-    (Either Int [TypeBase Rank () ()]) [TypeBase Rank () ()]
+    (Either Int [TypeBase Rank ()]) [TypeBase Rank ()]
   | UseAfterConsume Name SrcLoc SrcLoc
   | IndexingError Int Int SrcLoc
   | CurriedConsumption (QualName Name) SrcLoc
@@ -57,7 +57,7 @@ data TypeError =
   | UniqueReturnAliased Name SrcLoc
   | PermutationError SrcLoc [Int] Int
   | DimensionNotInteger SrcLoc Name
-  | InvalidUniqueness SrcLoc (TypeBase Rank () ())
+  | InvalidUniqueness SrcLoc (TypeBase Rank ())
   | UndefinedType SrcLoc (QualName Name)
   | InvalidField SrcLoc Type String
   | InvalidEntryPointReturnType SrcLoc Name
@@ -65,7 +65,7 @@ data TypeError =
   | UnderscoreUse SrcLoc (QualName Name)
   | ValueIsNotFunction SrcLoc (QualName Name) Type
   | FunctionIsNotValue SrcLoc (QualName Name)
-  | UniqueConstType SrcLoc Name (TypeBase Rank () ())
+  | UniqueConstType SrcLoc Name (TypeBase Rank ())
   | EntryPointConstReturnDecl SrcLoc Name (QualName Name)
   | UndeclaredFunctionReturnType SrcLoc (QualName Name)
 
@@ -608,9 +608,9 @@ lookupSig loc qn = do
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
 unifyTypes :: Monoid (as vn) =>
-              TypeBase Rank (as vn) vn
-           -> TypeBase Rank (as vn) vn
-           -> Maybe (TypeBase Rank (as vn) vn)
+              TypeBase Rank (as vn)
+           -> TypeBase Rank (as vn)
+           -> Maybe (TypeBase Rank (as vn))
 unifyTypes (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
@@ -622,9 +622,9 @@ unifyTypes (Tuple ts1) (Tuple ts2)
 unifyTypes _ _ = Nothing
 
 unifyArrayTypes :: Monoid (as vn) =>
-                   ArrayTypeBase Rank (as vn) vn
-                -> ArrayTypeBase Rank (as vn) vn
-                -> Maybe (ArrayTypeBase Rank (as vn) vn)
+                   ArrayTypeBase Rank (as vn)
+                -> ArrayTypeBase Rank (as vn)
+                -> Maybe (ArrayTypeBase Rank (as vn))
 unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
   | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
     Just $ PrimArray bt1 shape1 (u1 <> u2) (als1 <> als2)
@@ -636,9 +636,9 @@ unifyArrayTypes _ _ =
   Nothing
 
 unifyTupleArrayElemTypes :: Monoid (as vn) =>
-                            TupleArrayElemTypeBase Rank (as vn) vn
-                         -> TupleArrayElemTypeBase Rank (as vn) vn
-                         -> Maybe (TupleArrayElemTypeBase Rank (as vn) vn)
+                            TupleArrayElemTypeBase Rank (as vn)
+                         -> TupleArrayElemTypeBase Rank (as vn)
+                         -> Maybe (TupleArrayElemTypeBase Rank (as vn))
 unifyTupleArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
   | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
@@ -661,27 +661,27 @@ unifyExpTypes e1 e2 =
   where t1 = typeOf e1
         t2 = typeOf e2
 
-anySignedType :: [TypeBase Rank () ()]
+anySignedType :: [TypeBase Rank ()]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]
 
-anyUnsignedType :: [TypeBase Rank () ()]
+anyUnsignedType :: [TypeBase Rank ()]
 anyUnsignedType = map (Prim . Unsigned) [minBound .. maxBound]
 
-anyIntType :: [TypeBase Rank () ()]
+anyIntType :: [TypeBase Rank ()]
 anyIntType = anySignedType ++ anyUnsignedType
 
-anyFloatType :: [TypeBase Rank () ()]
+anyFloatType :: [TypeBase Rank ()]
 anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 
-anyNumberType :: [TypeBase Rank () ()]
+anyNumberType :: [TypeBase Rank ()]
 anyNumberType = anyIntType ++ anyFloatType
 
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
-require :: [TypeBase Rank () ()] -> Exp -> TypeM Exp
+require :: [TypeBase Rank ()] -> Exp -> TypeM Exp
 require ts e
-  | any (removeNames (typeOf e) `similarTo`) ts = return e
+  | any (toStruct (typeOf e) `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e)
                       (toStructural $ typeOf e) ts
 
@@ -1185,7 +1185,7 @@ checkExp (Reshape shapeexp arrexp loc) = do
   arrexp' <- checkExp arrexp
 
   case typeOf shapeexp' of
-    Tuple ts | all ((`elem` anyIntType) . removeNames) ts -> return ()
+    Tuple ts | all ((`elem` anyIntType) . toStruct) ts -> return ()
     Prim Signed{} -> return ()
     Prim Unsigned{} -> return ()
     t -> bad $ TypeError loc $ "Shape argument " ++ pretty shapeexp ++
@@ -1307,7 +1307,7 @@ checkExp (Stream form lam arr pos) = do
                  (acc',accarg) <- checkArg acc
                  return $ Just (acc',accarg)
 
-  let fakearg = (typeOf arr' `setAliases` HS.empty, mempty, srclocOf pos)
+  let fakearg = (fromStruct $ typeOf arr', mempty, srclocOf pos)
       (aas,faas) = case macctup of
                     Nothing        -> ([arrarg],        [fakearg])
                     Just(_,accarg) -> ([accarg, arrarg],[accarg, fakearg])
@@ -1340,7 +1340,7 @@ checkExp (Stream form lam arr pos) = do
       MapLike o -> return $ MapLike o
       RedLike o comm lam0 -> do
         let accarg :: Arg
-            accarg = (lambdaReturnType lam' `setAliases` mempty, mempty, srclocOf lam')
+            accarg = (fromStruct $ lambdaReturnType lam', mempty, srclocOf lam')
 
         lam0' <- checkLambda lam0 [accarg, accarg]
         let redtype = lambdaReturnType lam0'
@@ -1640,7 +1640,7 @@ checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
 checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
 checkBinOp Geq e1 e2 pos = checkRelOp Geq anyNumberType e1 e2 pos
 
-checkRelOp :: BinOp -> [TypeBase Rank () ()]
+checkRelOp :: BinOp -> [TypeBase Rank ()]
            -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
            -> TypeM Exp
 checkRelOp op tl e1 e2 pos = do
@@ -1658,7 +1658,7 @@ checkEqualOp op e1 e2 pos = do
   _ <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info $ Prim Bool) pos
 
-checkPolyBinOp :: BinOp -> [TypeBase Rank () ()]
+checkPolyBinOp :: BinOp -> [TypeBase Rank ()]
                -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
                -> TypeM Exp
 checkPolyBinOp op tl e1 e2 pos = do
@@ -1725,7 +1725,7 @@ checkLambda :: LambdaBase NoInfo Name -> [Arg]
             -> TypeM Lambda
 checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
   | length params == length args = do
-      let params_with_ts = zip params $ map (Inferred . (`setAliases` mempty) . argType) args
+      let params_with_ts = zip params $ map (Inferred . fromStruct . argType) args
       (maybe_ret', params', body') <- noUnique $ bindingPatterns params_with_ts $ \params' -> do
         maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
         body' <- checkFunBody (nameFromString "<anonymous>") body
@@ -1733,7 +1733,7 @@ checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
         return (maybe_ret', params', body')
       checkFuncall Nothing loc (map patternStructType params') args
       let ret' = case maybe_ret' of
-                   Nothing -> flip setAliases () $ vacuousShapeAnnotations $ typeOf body'
+                   Nothing -> toStruct $ vacuousShapeAnnotations $ typeOf body'
                    Just (TypeDecl _ (Info ret)) -> ret
       return $ AnonymFun params' body' maybe_ret' (Info ret') loc
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
