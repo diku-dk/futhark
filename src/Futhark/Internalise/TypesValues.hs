@@ -34,14 +34,14 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-internaliseParamTypes :: [E.TypeBase (E.ShapeDecl VName) als VName]
+internaliseParamTypes :: [E.TypeBase (E.ShapeDecl VName) als]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        HM.HashMap VName Int)
 internaliseParamTypes ts = do
   (ts', (_, subst, _)) <- runStateT (mapM (internaliseDeclType' BindDims) ts) (0, HM.empty, mempty)
   return (ts', subst)
 
-internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als VName
+internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als
                       -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
                                        HM.HashMap VName Int,
                                        ConstParams)
@@ -53,7 +53,7 @@ data DimDeclInterpretation = AssertDims
                            | BindDims
 
 internaliseDeclType' :: DimDeclInterpretation
-                     -> E.TypeBase (E.ShapeDecl VName) als VName
+                     -> E.TypeBase (E.ShapeDecl VName) als
                      -> StateT (Int, HM.HashMap VName Int, ConstParams)
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' _ (E.Prim bt) =
@@ -115,13 +115,11 @@ internaliseDeclType' ddi (E.Array at) =
                               put (i, m, (fname,new):cm)
                               return $ I.Var new
 
-internaliseType :: Ord vn =>
-                   E.TypeBase E.Rank als vn
+internaliseType :: E.TypeBase E.Rank als
                 -> [I.TypeBase ExtShape NoUniqueness]
 internaliseType = map I.fromDecl . internaliseTypeWithUniqueness
 
-internaliseTypeWithUniqueness :: Ord vn =>
-                                 E.TypeBase E.Rank als vn
+internaliseTypeWithUniqueness :: E.TypeBase E.Rank als
                               -> [I.TypeBase ExtShape Uniqueness]
 internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
   where internaliseType' (E.Prim bt) =

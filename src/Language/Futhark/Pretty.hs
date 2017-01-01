@@ -82,19 +82,17 @@ instance Pretty PrimValue where
   ppr (FloatValue v) = ppr v
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (TupleArrayElemTypeBase (ShapeDecl vn) as vn) where
+         Pretty (TupleArrayElemTypeBase (ShapeDecl vn) as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (TupleArrayElemTypeBase Rank as vn) where
+instance Pretty (TupleArrayElemTypeBase Rank as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (ArrayTypeBase (ShapeDecl vn) as vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn) as) where
   ppr (PrimArray et (ShapeDecl ds) u _) =
     ppr u <> mconcat (map (brackets . f) ds) <> ppr et
     where f AnyDim       = mempty
@@ -107,14 +105,14 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) where
+instance Pretty (ArrayTypeBase Rank as) where
   ppr (PrimArray et (Rank n) u _) =
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
   ppr (TupleArray ts (Rank n) u) =
     ppr u <> mconcat (replicate n (brackets mempty)) <>
     parens (commasep $ map ppr ts)
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) where
   ppr (Prim et)  = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = parens $ commasep $ map ppr ts
@@ -130,7 +128,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
   ppr (UserTuple ts _) = parens $ commasep $ map ppr ts
   ppr (UserTypeAlias name _) = ppr name
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
+instance Pretty (TypeBase Rank as) where
   ppr (Prim et)  = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = parens $ commasep $ map ppr ts

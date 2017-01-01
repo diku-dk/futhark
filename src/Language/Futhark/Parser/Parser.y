@@ -713,12 +713,12 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | false  { (BoolValue False, $1) }
 
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toStruct $ valueType $2
+             {% return $ ArrayValue (arrayFromList [$2]) $ toStruct $ valueType $2
              }
            |  '[' Value ',' Values ']'
              {% case combArrayTypes (valueType $2) $ map valueType $4 of
                   Nothing -> throwError "Invalid array value"
-                  Just ts -> return $ ArrayValue (arrayFromList $ $2:$4) $ removeNames ts
+                  Just ts -> return $ ArrayValue (arrayFromList $ $2:$4) ts
              }
            | empty '(' PrimType ')'
              { ArrayValue (listArray (0,-1) []) (Prim (fst $3)) }
@@ -798,9 +798,9 @@ getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
 getNoLines (GetLine _) = Left "Unexpected end of input"
 
-combArrayTypes :: TypeBase Rank () Name
-               -> [TypeBase Rank () Name]
-               -> Maybe (TypeBase Rank () Name)
+combArrayTypes :: TypeBase Rank ()
+               -> [TypeBase Rank ()]
+               -> Maybe (TypeBase Rank ())
 combArrayTypes t ts = foldM comb t ts
   where comb x y
           | x == y    = Just x
