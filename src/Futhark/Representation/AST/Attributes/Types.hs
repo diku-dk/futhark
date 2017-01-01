@@ -131,8 +131,7 @@ uniqueness _ = Nonunique
 unique :: TypeBase shape Uniqueness -> Bool
 unique = (==Unique) . uniqueness
 
--- | Set the uniqueness attribute of a type.  If the type is a tuple,
--- the uniqueness of its components will be modified.
+-- | Set the uniqueness attribute of a type.
 setUniqueness :: TypeBase shape Uniqueness
               -> Uniqueness
               -> TypeBase shape Uniqueness
