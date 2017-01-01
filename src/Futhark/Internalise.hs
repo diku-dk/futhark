@@ -81,7 +81,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
                        | otherwise = nameFromString $ pretty fname ++ "f"
                 consts = map ((`Param` I.Prim int32) . snd) cm
             return (fname,
-                    FunStm { internalFun = (fname',
+                    FunBinding { internalFun = (fname',
                                                 cm,
                                                 shapenames,
                                                 map declTypeOf values,
@@ -96,7 +96,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
         builtinFtable = HM.fromList $ map addBuiltin $ HM.toList E.builtInFunctions
         addBuiltin (name, (t, paramts)) =
           (name,
-           FunStm
+           FunBinding
            (baseName name,
             [], [], map (I.Prim . internalisePrimType) paramts,
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
