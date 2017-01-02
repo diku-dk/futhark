@@ -50,7 +50,7 @@
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with" "type"
     "fun" "val" "entry" "fn" "for" "while" "do" "op" "not"
-    "empty" "unsafe" "default" "include" "struct")
+    "empty" "unsafe" "default" "include" "struct" "sig" "functor")
   "All Futhark keywords.")
 
 (defconst futhark-builtin-functions

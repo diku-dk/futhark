@@ -9,6 +9,7 @@ module Futhark.Internalise.Monad
   , ConstParams
   , FunBinding (..)
   , lookupFunction
+  , lookupTypeVar
   , bindingIdentTypes
   , bindingParamTypes
     -- * Convenient reexports
@@ -43,6 +44,8 @@ data FunBinding = FunBinding
 
 type FunTable = HM.HashMap VName FunBinding
 
+type TypeTable = HM.HashMap VName Type
+
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
 type VarSubstitutions = HM.HashMap VName [SubExp]
@@ -50,6 +53,7 @@ type VarSubstitutions = HM.HashMap VName [SubExp]
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envFtable :: FunTable
+  , envTtable :: TypeTable
   , envDoBoundsChecks :: Bool
   }
 
@@ -91,8 +95,9 @@ runInternaliseM ftable (InternaliseM m) =
   in either onError onSuccess $ runExcept $
      runStateT (runReaderT (runBinderT m mempty) newEnv) src
   where newEnv = InternaliseEnv {
-                   envSubsts = HM.empty
+                   envSubsts = mempty
                  , envFtable = ftable
+                 , envTtable = mempty
                  , envDoBoundsChecks = True
                  }
 
@@ -101,6 +106,12 @@ lookupFunction fname = do
   fun <- HM.lookup fname <$> asks envFtable
   case fun of Nothing   -> fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found"
               Just fun' -> return fun'
+
+lookupTypeVar :: VName -> InternaliseM Type
+lookupTypeVar tname = do
+  t <- HM.lookup tname <$> asks envTtable
+  case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
+            Just t' -> return t'
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a

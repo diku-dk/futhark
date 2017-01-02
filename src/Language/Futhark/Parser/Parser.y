@@ -247,13 +247,13 @@ SigAscript :: { Maybe (QualName Name) }
             | ':' QualName { Just (fst $2) }
 
 Specs : Spec Specs { $1 : $2 }
-      | Spec { [$1] }
+      |            { [] }
 
 Spec :: { SpecBase NoInfo Name }
       : val id ':' SigTypeDecl
         { let L loc (ID name) = $2; (ps, r) = $4
           in ValSpec name ps r loc  }
-      | type id ':' UserTypeDecl
+      | type id '=' UserTypeDecl
         { let L loc (ID name) = $2
           in TypeAbbrSpec (TypeBind name $4 loc) }
 ;

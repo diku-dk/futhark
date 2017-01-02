@@ -50,10 +50,12 @@ instance AliasAnnotation Info where
 instance Pretty Value where
   ppr (PrimValue bv) = ppr bv
   ppr (TupValue vs)
-    | any (not . primType . valueType) vs =
+    | any (not . primValue) vs =
       parens $ commastack $ map ppr vs
     | otherwise =
       parens $ commasep $ map ppr vs
+    where primValue PrimValue{} = True
+          primValue _           = False
   ppr (ArrayValue a t)
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array{} <- t = brackets $ commastack $ map ppr $ elems a
@@ -84,16 +86,24 @@ instance Pretty PrimValue where
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase (ShapeDecl vn) as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (PolyArrayElem bt _ u) = ppr u <> ppr bt
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
 instance Pretty (TupleArrayElemTypeBase Rank as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (PolyArrayElem bt _ u) = ppr u <> ppr bt
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn) as) where
   ppr (PrimArray et (ShapeDecl ds) u _) =
+    ppr u <> mconcat (map (brackets . f) ds) <> ppr et
+    where f AnyDim       = mempty
+          f (NamedDim v) = ppr v
+          f (ConstDim n) = ppr n
+
+  ppr (PolyArray et (ShapeDecl ds) u _) =
     ppr u <> mconcat (map (brackets . f) ds) <> ppr et
     where f AnyDim       = mempty
           f (NamedDim v) = ppr v
@@ -108,15 +118,17 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn)
 instance Pretty (ArrayTypeBase Rank as) where
   ppr (PrimArray et (Rank n) u _) =
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
+  ppr (PolyArray et (Rank n) u _) =
+    ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
   ppr (TupleArray ts (Rank n) u) =
     ppr u <> mconcat (replicate n (brackets mempty)) <>
     parens (commasep $ map ppr ts)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) where
-  ppr (Prim et)  = ppr et
-  ppr (Array at) = ppr at
-  ppr (Tuple ts) = parens $ commasep $ map ppr ts
-
+  ppr (Prim et)    = ppr et
+  ppr (TypeVar et) = ppr et
+  ppr (Array at)   = ppr at
+  ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
   ppr (UserPrim et _) = ppr et
@@ -129,9 +141,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
   ppr (UserTypeAlias name _) = ppr name
 
 instance Pretty (TypeBase Rank as) where
-  ppr (Prim et)  = ppr et
-  ppr (Array at) = ppr at
-  ppr (Tuple ts) = parens $ commasep $ map ppr ts
+  ppr (Prim et)    = ppr et
+  ppr (TypeVar et) = ppr et
+  ppr (Array at)   = ppr at
+  ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
@@ -181,9 +194,9 @@ instance Pretty BinOp where
 
 
 hasArrayLit :: ExpBase ty vn -> Bool
-hasArrayLit ArrayLit{}      = True
-hasArrayLit (TupLit es2 _)  = any hasArrayLit es2
-hasArrayLit _               = False
+hasArrayLit ArrayLit{}     = True
+hasArrayLit (TupLit es2 _) = any hasArrayLit es2
+hasArrayLit _              = False
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndexBase ty vn) where
   ppr (DimFix e)     = ppr e
@@ -216,16 +229,16 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
     ppr body
     where mparens = if p == -1 then id else parens
           linebreak = case e of
-                        Map{}                  -> True
-                        Reduce{}               -> True
-                        Filter{}               -> True
-                        Scan{}                 -> True
-                        DoLoop{}               -> True
-                        LetPat{}               -> True
-                        LetWith{}              -> True
-                        If{}                   -> True
-                        ArrayLit{}             -> False
-                        _                      -> hasArrayLit e
+                        Map{}      -> True
+                        Reduce{}   -> True
+                        Filter{}   -> True
+                        Scan{}     -> True
+                        DoLoop{}   -> True
+                        LetPat{}   -> True
+                        LetWith{}  -> True
+                        If{}       -> True
+                        ArrayLit{} -> False
+                        _          -> hasArrayLit e
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppr dest <+> list (map ppr idxs) <+>
@@ -300,7 +313,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopForm
     text "while" <+> ppr cond
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LowerBoundBase ty vn) where
-  ppr ZeroBound = text "0"
+  ppr ZeroBound    = text "0"
   ppr (ExpBound e) = ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
@@ -344,7 +357,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBi
     text "struct" <+> ppr name <> sig' <+> nestedBlock "{" "}"
     (stack $ punctuate line $ map ppr moddecls)
     where sig' = case sig of Nothing -> mempty
-                             Just s -> colon <+> ppr s
+                             Just s  -> colon <+> ppr s
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ValDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
