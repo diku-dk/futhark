@@ -175,10 +175,8 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
-      let rowtypes = map zeroDim $ internaliseType rowtype
-          zeroDim t = t `I.setArrayShape`
-                      I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
-          arraylit rt = I.BasicOp $ I.ArrayLit [] rt
+      rowtypes <- map (zeroDim . fromDecl) <$> internaliseType rowtype
+      let arraylit rt = I.BasicOp $ I.ArrayLit [] rt
       letSubExps desc $ map arraylit rowtypes
     e' : _ -> do
       rowtypes <- mapM subExpType e'
@@ -186,6 +184,8 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
             ks' <- mapM (ensureShape asserting loc rt "elem_reshaped") ks
             return $ I.BasicOp $ I.ArrayLit ks' rt
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
+  where zeroDim t = t `I.setArrayShape`
+                    I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et
@@ -606,8 +606,8 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
   ce' <- internaliseExp1 "cond" ce
   te' <- internaliseBody te
   fe' <- internaliseBody fe
-  let t' = internaliseType t
-  letTupExp' desc $ I.If ce' te' fe' t'
+  (t', _, _) <- internaliseReturnType $ E.vacuousShapeAnnotations t
+  letTupExp' desc $ I.If ce' te' fe' $ map I.fromDecl t'
 
 internaliseExp desc (E.BinOp E.LogAnd xe ye t loc) =
   internaliseExp desc $
@@ -674,13 +674,14 @@ internaliseExp desc (E.BinOp bop xe ye _ _) = do
       internaliseBinOp desc bop xe' ye' t1 t2
     _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
-internaliseExp desc (E.UnOp (E.TupleProject i) e (Info rt) _) =
-  take n . drop i' <$> internaliseExp desc e
-  where n = length $ internaliseType rt
-        i' = sum $ map (length . internaliseType) $ take i $
-             case E.typeOf e of
+internaliseExp desc (E.UnOp (E.TupleProject i) e (Info rt) _) = do
+  n <- typeLength rt
+  i' <- fmap sum $ mapM typeLength $ take i $
+        case E.typeOf e of
                Tuple ts -> ts
                t        -> [t]
+  take n . drop i' <$> internaliseExp desc e
+  where typeLength = fmap length . internaliseType
 
 internaliseExp desc (E.UnOp E.Not e _ _) = do
   e' <- internaliseExp1 "not_arg" e

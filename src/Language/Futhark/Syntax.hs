@@ -191,6 +191,7 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
 data TupleArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
+  | PolyArrayElem VName as Uniqueness
   | TupleArrayElem [TupleArrayElemTypeBase shape as]
   deriving (Show)
 
@@ -205,6 +206,8 @@ instance Eq shape =>
 data ArrayTypeBase shape as =
     PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
+  | PolyArray VName shape Uniqueness as
+    -- ^ An array whose elements are some polymorphic type.
   | TupleArray [TupleArrayElemTypeBase shape as] shape Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
@@ -218,12 +221,13 @@ instance Eq shape =>
   _ == _ =
     False
 
--- | An expanded Futhark type is either an array, a prim type, or a
--- tuple.  When comparing types for equality with '==', aliases are
--- ignored, but dimensions much match.
+-- | An expanded Futhark type is either an array, a prim type, a
+-- tuple, or a type variable.  When comparing types for equality with
+-- '==', aliases are ignored, but dimensions much match.
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
                        | Tuple [TypeBase shape as]
+                       | TypeVar VName
                           deriving (Eq, Show)
 
 

@@ -4,7 +4,6 @@ module Futhark.Internalise.Bindings
   -- * Internalising bindings
     bindingParams
   , bindingLambdaParams
-
   , bindingPattern
   )
   where
@@ -26,15 +25,6 @@ import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
 
 import Prelude hiding (mapM)
-
-internaliseBindee :: MonadFreshNames m =>
-                     E.Ident
-                  -> m [(VName, I.DeclExtType)]
-internaliseBindee bindee =
-  forM (internaliseTypeWithUniqueness $ E.unInfo $ E.identType bindee) $ \t -> do
-    name <- newVName base
-    return (name, t)
-  where base = nameToString $ baseName $ E.identName bindee
 
 bindingParams :: [E.Pattern]
               -> ([I.FParam] -> [I.FParam] -> InternaliseM a)
@@ -123,6 +113,16 @@ processFlatPattern = processFlatPattern' []
       in ([v'], v', ts)
     handleMapping' [] _ =
       error "processFlatPattern: insufficient identifiers in pattern."
+
+    internaliseBindee :: E.Ident -> InternaliseM [(VName, I.DeclExtType)]
+    internaliseBindee bindee = do
+      -- XXX: we gotta be screwing up somehow by ignoring the second
+      -- return value.  If not, why not?
+      (tss, _) <- internaliseParamTypes [E.vacuousShapeAnnotations $ E.unInfo $ E.identType bindee]
+      forM (concat tss) $ \t -> do
+        name <- newVName base
+        return (name, t)
+          where base = nameToString $ baseName $ E.identName bindee
 
 bindingFlatPattern :: [E.Ident] -> [t]
                    -> ([I.Param t] -> InternaliseM a)

@@ -5,7 +5,6 @@ module Futhark.Internalise.TypesValues
     internaliseReturnType
   , internaliseParamTypes
   , internaliseType
-  , internaliseTypeWithUniqueness
   , internaliseUniqueness
   , internalisePrimType
 
@@ -49,6 +48,15 @@ internaliseReturnType t = do
   (t', (_, subst, cm)) <- runStateT (internaliseDeclType' AssertDims t) (0, HM.empty, mempty)
   return (t', subst, cm)
 
+internaliseType :: E.ArrayShape shape =>
+                   E.TypeBase shape als
+                -> InternaliseM [I.TypeBase I.Rank Uniqueness]
+internaliseType t = do
+  (t', _) <- runStateT
+             (internaliseDeclType' BindDims $ vacuousShapeAnnotations t)
+             (0, HM.empty, mempty)
+  return $ map I.rankShaped t'
+
 data DimDeclInterpretation = AssertDims
                            | BindDims
 
@@ -58,6 +66,8 @@ internaliseDeclType' :: DimDeclInterpretation
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' _ (E.Prim bt) =
   return [I.Prim $ internalisePrimType bt]
+internaliseDeclType' _ (E.TypeVar v) =
+  lift $ staticShapes . pure . (`toDecl` Nonunique) <$> lookupTypeVar v
 internaliseDeclType' ddi (E.Tuple ets) =
   concat <$> mapM (internaliseDeclType' ddi) ets
 internaliseDeclType' ddi (E.Array at) =
@@ -66,6 +76,11 @@ internaliseDeclType' ddi (E.Array at) =
           dims <- internaliseShape shape
           return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
                   internaliseUniqueness u]
+
+        internaliseArrayType (E.PolyArray v shape u _) = do
+          dims <- internaliseShape shape
+          t <- lift $ staticShapes1 <$> lookupTypeVar v
+          return [I.arrayOf t (ExtShape dims) $ internaliseUniqueness u]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
           innerdims <- ExtShape <$> internaliseShape shape
@@ -78,6 +93,8 @@ internaliseDeclType' ddi (E.Array at) =
 
         internaliseTupleArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
+        internaliseTupleArrayElem (PolyArrayElem v _ _) =
+          lift $ staticShapes . pure . (`toDecl` Nonunique) <$> lookupTypeVar v
         internaliseTupleArrayElem (ArrayArrayElem aet) =
           internaliseArrayType aet
         internaliseTupleArrayElem (TupleArrayElem ts) =
@@ -115,25 +132,28 @@ internaliseDeclType' ddi (E.Array at) =
                               put (i, m, (fname,new):cm)
                               return $ I.Var new
 
-internaliseType :: E.TypeBase E.Rank als
-                -> [I.TypeBase ExtShape NoUniqueness]
-internaliseType = map I.fromDecl . internaliseTypeWithUniqueness
+internaliseSimpleType :: E.TypeBase E.Rank als
+                      -> Maybe [I.TypeBase ExtShape NoUniqueness]
+internaliseSimpleType = fmap (map I.fromDecl) . internaliseTypeWithUniqueness
 
 internaliseTypeWithUniqueness :: E.TypeBase E.Rank als
-                              -> [I.TypeBase ExtShape Uniqueness]
-internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
-  where internaliseType' (E.Prim bt) =
+                              -> Maybe [I.TypeBase ExtShape Uniqueness]
+internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
+  where internaliseType' E.TypeVar{} =
+          lift Nothing
+        internaliseType' (E.Prim bt) =
           return [I.Prim $ internalisePrimType bt]
         internaliseType' (E.Tuple ets) =
           concat <$> mapM internaliseType' ets
         internaliseType' (E.Array at) =
           internaliseArrayType at
 
+        internaliseArrayType E.PolyArray{} =
+          lift Nothing
         internaliseArrayType (E.PrimArray bt shape u _) = do
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId
           return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
                   internaliseUniqueness u]
-
         internaliseArrayType (E.TupleArray elemts shape u) = do
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
@@ -143,6 +163,8 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
                          else I.uniqueness t
                  | t <- ts ]
 
+        internaliseTupleArrayElem PolyArrayElem{} =
+          lift Nothing
         internaliseTupleArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseTupleArrayElem (ArrayArrayElem at) =
@@ -175,8 +197,8 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
 internaliseValue :: E.Value -> Maybe [I.Value]
 internaliseValue (E.ArrayValue arr rt) = do
   arrayvalues <- mapM internaliseValue $ A.elems arr
-  let ts          = internaliseType rt
-      arrayvalues' =
+  ts <- internaliseSimpleType rt
+  let arrayvalues' =
         case arrayvalues of
           [] -> replicate (length ts) []
           _  -> transpose arrayvalues

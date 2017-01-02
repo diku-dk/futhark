@@ -776,6 +776,13 @@ checkForDuplicateDecs =
         f (StructDec (StructBind name _ _ loc)) =
           check Structure name loc
 
+-- | Prefix the name to all names in the scope.
+qualScope :: Name -> Scope -> Scope
+qualScope name scope = scope { envNameMap = qualNameMap $ envNameMap scope }
+  where qualNameMap = HM.fromList . map qual . HM.toList
+        qual ((space, QualName (qs, v)), x) =
+          ((space, QualName (name : qs, v)), x)
+
 checkStruct :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
 checkStruct (StructBind name sigmatch decs loc) = do
   name' <- checkName Structure name loc
@@ -788,13 +795,7 @@ checkStruct (StructBind name sigmatch decs loc) = do
         (signame', sig) <- lookupSig loc signame
         scope' <- liftEither $ matchScopeToSig sig Transparent scope loc
         return (Just signame', scope')
-  return (qualScope scope', StructBind name' sigmatch' decs' loc)
-  where
-    -- | Prefix the structure name to all names in the scope.
-    qualScope scope = scope { envNameMap = qualNameMap $ envNameMap scope }
-    qualNameMap = HM.fromList . map qual . HM.toList
-    qual ((space, QualName (qs, v)), x) =
-      ((space, QualName (name : qs, v)), x)
+  return (qualScope name scope', StructBind name' sigmatch' decs' loc)
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
 checkForDuplicateSpecs =
@@ -818,8 +819,8 @@ checkSig :: SigBindBase NoInfo Name -> TypeM (Scope, SigBindBase Info VName)
 checkSig (SigBind name specs loc) = do
   name' <- checkName Signature name loc
   checkForDuplicateSpecs specs
-  (sig, specs') <- checkSpecs specs
-  return (mempty { envSigTable = HM.singleton name' sig },
+  (sigscope, sig, specs') <- checkSpecs specs
+  return ((qualScope name sigscope) { envSigTable = HM.singleton name' sig },
           SigBind name' specs' loc)
 
 checkTypeBind :: TypeBindBase NoInfo Name
@@ -834,14 +835,17 @@ checkTypeBind (TypeBind name td loc) = do
                  },
           TypeBind name' td' loc)
 
-checkSpecs :: [SpecBase NoInfo Name] -> TypeM (Sig, [SpecBase Info VName])
+checkSpecs :: [SpecBase NoInfo Name] -> TypeM (Scope, Sig, [SpecBase Info VName])
+
+checkSpecs [] = return (mempty, mempty, [])
+
 checkSpecs (ValSpec name paramtypes rettype loc : specs) =
   bindSpaced [(Term, QualName ([], name))] $ do
     name' <- checkName Term name loc
     paramtypes' <- mapM checkTypeDecl paramtypes
     rettype' <- checkTypeDecl rettype
     let paramtypes'' = map (unInfo . expandedType) paramtypes'
-    let rettype'' = unInfo $ expandedType rettype'
+        rettype'' = unInfo $ expandedType rettype'
         valsig = HM.singleton name' $ SpecVal paramtypes'' rettype''
         valscope =
           mempty { envVtable = HM.singleton name' $
@@ -850,12 +854,23 @@ checkSpecs (ValSpec name paramtypes rettype loc : specs) =
                                     rettype'' `addAliases` mempty
                                else BoundF (rettype'', paramtypes'')
                  }
-    (sig, specs') <- local (valscope<>) $ checkSpecs specs
-    return (valsig <> sig,
+    (scope, sig, specs') <- local (valscope<>) $ checkSpecs specs
+    return (scope <> valscope,
+            valsig <> sig,
             ValSpec name' paramtypes' rettype' loc : specs')
+
+checkSpecs (TypeAbbrSpec tdec : specs) =
+  bindSpaced [(Type, QualName ([],typeAlias tdec))] $ do
+    (tscope, tdec') <- checkTypeBind tdec
+    let tsig = HM.singleton (typeAlias tdec') $
+               SpecTypeAbbr $ unInfo $ expandedType $ userType tdec'
+    (scope, sig, specs') <- local (tscope<>) $ checkSpecs specs
+    return (tscope <> scope,
+            tsig <> sig,
+            TypeAbbrSpec tdec' : specs')
+
 checkSpecs (spec : _) =
   bad $ TypeError (srclocOf spec) $ "Cannot yet handle spec " ++ pretty spec
-checkSpecs [] = return (mempty, [])
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (Scope, [DecBase Info VName])
 checkDecs (StructDec struct:rest) =
@@ -983,6 +998,7 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
 
         okEntryPointParamType Tuple{} = False
         okEntryPointParamType (Prim _) = True
+        okEntryPointParamType (TypeVar _) = False
         okEntryPointParamType (Array TupleArray{}) = False
         okEntryPointParamType (Array _) = True
 
@@ -1117,10 +1133,13 @@ checkExp (LetPat pat e body pos) =
       hasShapeDecl' (unInfo $ expandedType td)
 
     hasShapeDecl' Prim{} = False
+    hasShapeDecl' TypeVar{} = False
     hasShapeDecl' (Tuple ts) = any hasShapeDecl' ts
     hasShapeDecl' (Array at) = arrayElemHasShapeDecl at
 
     arrayElemHasShapeDecl (PrimArray _ shape _ _) =
+      any (/=AnyDim) (shapeDims shape)
+    arrayElemHasShapeDecl (PolyArray _ shape _ _) =
       any (/=AnyDim) (shapeDims shape)
     arrayElemHasShapeDecl (TupleArray ts shape _) =
       any (/=AnyDim) (shapeDims shape) ||
@@ -1131,6 +1150,8 @@ checkExp (LetPat pat e body pos) =
     tupleArrayElemHasShapeDecl (TupleArrayElem ts) =
       any tupleArrayElemHasShapeDecl ts
     tupleArrayElemHasShapeDecl PrimArrayElem{} =
+      False
+    tupleArrayElemHasShapeDecl PolyArrayElem{} =
       False
 
 checkExp (LetWith dest src idxes ve body pos) = do
