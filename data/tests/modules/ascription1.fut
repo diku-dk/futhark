@@ -3,7 +3,7 @@
 -- input { [1,2,3] [4,5,6] }
 -- output { 6 15 }
 
-sig SIG {
+module type SIG {
 type t
 
 val inject: int -> int -> t
@@ -11,7 +11,7 @@ val extract: t -> (int,int)
 val f: []t -> t
 }
 
-struct Struct: SIG {
+module Struct: SIG {
 type t = (int,int)
 
 val x: (int, int) = (2,2)

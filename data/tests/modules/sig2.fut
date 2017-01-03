@@ -2,7 +2,7 @@
 
 type two_ints = (int, int)
 
-sig S {
+module type S {
 type t = two_ints
 
 val x: t

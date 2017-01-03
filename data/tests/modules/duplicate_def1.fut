@@ -1,14 +1,14 @@
--- The struct opens a new environment, which lets us use names again, which were used
+-- The module opens a new environment, which lets us use names again, which were used
 -- in a previous scope.
 -- ==
 -- input { }
 -- output { 1 2.0 }
 
 type foo = int
-struct Foo
+module Foo
   {
     fun foo(): int = 1
-    struct Foo
+    module Foo
       {
         type foo = float
         fun foo(): foo = 2.0

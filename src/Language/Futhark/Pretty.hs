@@ -354,7 +354,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase 
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
   ppr (StructBind name sig moddecls _) =
-    text "struct" <+> ppr name <> sig' <+> nestedBlock "{" "}"
+    text "module" <+> ppr name <> sig' <+> nestedBlock "{" "}"
     (stack $ punctuate line $ map ppr moddecls)
     where sig' = case sig of Nothing -> mempty
                              Just s  -> colon <+> ppr s
@@ -385,8 +385,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstBin
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigBindBase ty vn) where
   ppr (SigBind name sigdecls _) =
-    text "sig" <+> ppr name <+> equals <+>
-    stack (punctuate line $ map ppr sigdecls)
+    text "module type" <+> ppr name <+> equals <+> nestedBlock "{" "}"
+    (stack $ punctuate line $ map ppr sigdecls)
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig

@@ -8,13 +8,13 @@
 fun min(a: int) (b: int): int = if(a<b) then a else b
 fun plus1(a:  []int,  b: []int): []int = [1]
 
-struct M0
+module M0
   {
     fun min1(a: []int, b: []int): []int = map min a b
     fun redmin1(a:  []int): int = reduce min 1200 a
     fun redmin2(a: [][]int): []int = map redmin1 a
 
-    struct M1
+    module M1
       {
         fun plus1(a:  []int,  b: []int): []int = map (+) a b
         fun plus2(a: [][]int, b: [][]int): [][]int = map plus1 (zip a b)

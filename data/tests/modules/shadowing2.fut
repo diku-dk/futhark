@@ -8,15 +8,15 @@
 --  12
 -- }
 
-struct M0
+module M0
   {
     fun foo(): int = 1
   }
 
-struct M1
+module M1
   {
     fun bar(): int = M0.foo()
-    struct M0
+    module M0
       {
         fun foo(): int = 10
       }

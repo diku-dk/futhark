@@ -2,7 +2,7 @@
 -- ==
 -- error: .*Dup.*
 
-struct Foo
+module Foo
   {
     fun foo(): foo = 1
   }

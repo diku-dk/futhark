@@ -1,7 +1,7 @@
 -- ==
 -- input { 4 } output { 5 }
 
-struct M {
+module M {
   val a: []int = [1,2,3]
 }
 

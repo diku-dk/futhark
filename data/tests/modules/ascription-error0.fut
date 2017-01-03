@@ -2,14 +2,14 @@
 -- ==
 -- error: type i32.*type t
 
-sig SIG {
+module type SIG {
 type t
 
 val inject: int -> t
 val extract: t -> int
 }
 
-struct Struct: SIG {
+module Struct: SIG {
 type t = int
 
 fun inject (x: int): int = x

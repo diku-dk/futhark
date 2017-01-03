@@ -6,7 +6,7 @@
 
 type foo = int
 fun foo(a: int): foo = a + a
-struct Foo
+module Foo
   {
     fun one(): int = 1
   }

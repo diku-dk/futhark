@@ -1,6 +1,6 @@
 -- Basic signature.
 
-sig S {
+module type S {
 type t = (int, int)
 
 val x: t
