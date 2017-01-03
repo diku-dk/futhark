@@ -238,13 +238,12 @@ SigBind :: { SigBindBase f vn }
             in SigBind name $4 pos }
 
 StructBind :: { StructBindBase f vn }
-           : struct id '{' Decs '}' SigAscript
+           : struct id '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name $6 $4 pos }
-
-SigAscript :: { Maybe (QualName Name) }
-            :              { Nothing }
-            | ':' QualName { Just (fst $2) }
+               in StructBind name Nothing $4 pos }
+           | struct id ':' QualName '{' Decs '}'
+             { let L pos (ID name) = $2
+               in StructBind name (Just (fst $4)) $6 pos }
 
 Specs : Spec Specs { $1 : $2 }
       |            { [] }
@@ -256,6 +255,9 @@ Spec :: { SpecBase NoInfo Name }
       | type id '=' UserTypeDecl
         { let L loc (ID name) = $2
           in TypeAbbrSpec (TypeBind name $4 loc) }
+      | type id
+        { let L loc (ID name) = $2
+          in TypeSpec name loc }
 ;
 
 DefaultDec :: { () }

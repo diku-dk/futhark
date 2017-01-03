@@ -94,7 +94,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
                                })
 
         builtinFtable = HM.fromList $ map addBuiltin $ HM.toList E.builtInFunctions
-        addBuiltin (name, (t, paramts)) =
+        addBuiltin (name, (paramts, t)) =
           (name,
            FunBinding
            (baseName name,
