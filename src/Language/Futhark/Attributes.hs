@@ -8,7 +8,7 @@ module Language.Futhark.Attributes
   (
   -- * Various
     builtInFunctions
-  , nameToQualName
+  , qualName
   , valueType
 
   -- * Queries on expressions
@@ -51,6 +51,7 @@ module Language.Futhark.Attributes
   , setAliases
   , addAliases
   , setUniqueness
+  , typeToTupleArrayElem
   , tupleArrayElemToType
 
   -- * Getters for decs
@@ -218,21 +219,28 @@ subtypeOf :: ArrayShape shape =>
 subtypeOf
   (Array (PrimArray t1 dims1 u1 _))
   (Array (PrimArray t2 dims2 u2 _)) =
-  u1 `subuniqueOf` u2
-       && t1 == t2
-       && dims1 == dims2
+  u1 `subuniqueOf` u2 &&
+  t1 == t2 &&
+  dims1 == dims2
+subtypeOf
+  (Array (PolyArray t1 dims1 u1 _))
+  (Array (PolyArray t2 dims2 u2 _)) =
+  u1 `subuniqueOf` u2 &&
+  t1 == t2 &&
+  dims1 == dims2
 subtypeOf
   (Array (TupleArray et1 dims1 u1))
   (Array (TupleArray et2 dims2 u2)) =
-  u1 `subuniqueOf` u2
-       && length et1 == length et2
-       && and (zipWith subtypeOf
-               (map tupleArrayElemToType et1)
-               (map tupleArrayElemToType et2))
-       && dims1 == dims2
+  and [u1 `subuniqueOf` u2,
+       length et1 == length et2,
+       and (zipWith subtypeOf
+             (map tupleArrayElemToType et1)
+             (map tupleArrayElemToType et2)),
+       dims1 == dims2]
 subtypeOf (Tuple ts1) (Tuple ts2) =
   length ts1 == length ts2 && and (zipWith subtypeOf ts1 ts2)
 subtypeOf (Prim bt1) (Prim bt2) = bt1 == bt2
+subtypeOf (TypeVar v1) (TypeVar v2) = v1 == v2
 subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
@@ -409,7 +417,7 @@ tupleArrayElemToType (PolyArrayElem bt _ _) = TypeVar bt
 tupleArrayElemToType (TupleArrayElem ts)    = Tuple $ map tupleArrayElemToType ts
 tupleArrayElemToType (ArrayArrayElem at)    = Array at
 
--- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
+-- | @arrayType n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.  If @t@ is itself an m-dimensional array, the result
 -- is an @n+m@-dimensional array with the same base type as @t@.  If
 -- you need to specify size information for the array, use 'arrayOf'
@@ -714,31 +722,31 @@ patternStructType (TuplePattern ps _) = Tuple $ map patternStructType ps
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
 -- | A map of all built-in functions and their types.
-builtInFunctions :: HM.HashMap VName (PrimType,[PrimType])
+builtInFunctions :: HM.HashMap VName ([PrimType], PrimType)
 builtInFunctions = HM.fromList $ zipWith namify [0..]
-                   [("sqrt32", (FloatType Float32, [FloatType Float32]))
-                   ,("log32", (FloatType Float32, [FloatType Float32]))
-                   ,("exp32", (FloatType Float32, [FloatType Float32]))
-                   ,("cos32", (FloatType Float32, [FloatType Float32]))
-                   ,("sin32", (FloatType Float32, [FloatType Float32]))
-                   ,("acos32", (FloatType Float32, [FloatType Float32]))
-                   ,("asin32", (FloatType Float32, [FloatType Float32]))
-                   ,("atan32", (FloatType Float32, [FloatType Float32]))
-                   ,("atan2_32", (FloatType Float32, [FloatType Float32, FloatType Float32]))
-                   ,("isinf32", (Bool, [FloatType Float32]))
-                   ,("isnan32", (Bool, [FloatType Float32]))
+                   [("sqrt32", ([FloatType Float32], FloatType Float32))
+                   ,("log32", ([FloatType Float32], FloatType Float32))
+                   ,("exp32", ([FloatType Float32], FloatType Float32))
+                   ,("cos32", ([FloatType Float32], FloatType Float32))
+                   ,("sin32", ([FloatType Float32], FloatType Float32))
+                   ,("acos32", ([FloatType Float32], FloatType Float32))
+                   ,("asin32", ([FloatType Float32], FloatType Float32))
+                   ,("atan32", ([FloatType Float32], FloatType Float32))
+                   ,("atan2_32", ([FloatType Float32, FloatType Float32], FloatType Float32))
+                   ,("isinf32", ([FloatType Float32], Bool))
+                   ,("isnan32", ([FloatType Float32], Bool))
 
-                   ,("sqrt64", (FloatType Float64, [FloatType Float64]))
-                   ,("log64", (FloatType Float64, [FloatType Float64]))
-                   ,("exp64", (FloatType Float64, [FloatType Float64]))
-                   ,("cos64", (FloatType Float64, [FloatType Float64]))
-                   ,("sin64", (FloatType Float64, [FloatType Float64]))
-                   ,("acos64", (FloatType Float64, [FloatType Float64]))
-                   ,("asin64", (FloatType Float64, [FloatType Float64]))
-                   ,("atan64", (FloatType Float64, [FloatType Float64]))
-                   ,("atan2_64", (FloatType Float64, [FloatType Float64, FloatType Float64]))
-                   ,("isinf64", (Bool, [FloatType Float64]))
-                   ,("isnan64", (Bool, [FloatType Float64]))
+                   ,("sqrt64", ([FloatType Float64], FloatType Float64))
+                   ,("log64", ([FloatType Float64], FloatType Float64))
+                   ,("exp64", ([FloatType Float64], FloatType Float64))
+                   ,("cos64", ([FloatType Float64], FloatType Float64))
+                   ,("sin64", ([FloatType Float64], FloatType Float64))
+                   ,("acos64", ([FloatType Float64], FloatType Float64))
+                   ,("asin64", ([FloatType Float64], FloatType Float64))
+                   ,("atan64", ([FloatType Float64], FloatType Float64))
+                   ,("atan2_64", ([FloatType Float64, FloatType Float64], FloatType Float64))
+                   ,("isinf64", ([FloatType Float64], Bool))
+                   ,("isnan64", ([FloatType Float64], Bool))
                    ]
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
@@ -755,8 +763,8 @@ isStructDec (StructDec sd) = Just sd
 isStructDec _              = Nothing
 
 -- | Create a name with no qualifiers from a name.
-nameToQualName :: Name -> QualName Name
-nameToQualName n = QualName ([], n)
+qualName :: v -> QualName v
+qualName n = QualName ([], n)
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
