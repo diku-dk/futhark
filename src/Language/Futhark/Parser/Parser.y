@@ -231,31 +231,39 @@ Aliases : id ',' Aliases
                in [(name,loc)] }
 ;
 
+SigExp :: { SigExpBase f vn }
+        : QualName      { let (v, loc) = $1 in SigVar v loc }
+        | '{' Specs '}' { SigSpecs $2 $1 }
+
 SigBind :: { SigBindBase f vn }
-         : module type id '=' '{' Specs '}'
+         : module type id '=' SigExp
           { let L pos (ID name) = $3
-            in SigBind name $6 pos }
+            in SigBind name $5 pos }
 
         -- Shortcut form
         | module type id '{' Specs '}'
           { let L pos (ID name) = $3
-            in SigBind name $5 pos }
+            in SigBind name (SigSpecs $5 pos) pos }
+
+ModExp :: { ModExpBase f vn }
+        : QualName     { let (v, loc) = $1 in ModVar v loc }
+        | '{' Decs '}' { ModDecs $2 $1 }
 
 StructBind :: { StructBindBase f vn }
-           : module id '=' '{' Decs '}'
+           : module id '=' ModExp
              { let L pos (ID name) = $2
-               in StructBind name Nothing $5 pos }
-           | module id ':' QualName '=' '{' Decs '}'
+               in StructBind name Nothing $4 pos }
+           | module id ':' SigExp '=' ModExp
              { let L pos (ID name) = $2
-               in StructBind name (Just (fst $4)) $7 pos }
+               in StructBind name (Just $4) $6 pos }
 
            -- Shortcut forms
            | module id '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name Nothing $4 pos }
-           | module id ':' QualName '{' Decs '}'
+               in StructBind name Nothing (ModDecs $4 pos) pos }
+           | module id ':' SigExp '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name (Just (fst $4)) $6 pos }
+               in StructBind name (Just $4) (ModDecs $6 pos) pos }
 
 Specs : Spec Specs { $1 : $2 }
       |            { [] }

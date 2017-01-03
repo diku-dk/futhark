@@ -55,8 +55,10 @@ module Language.Futhark.Syntax
   , FunBindBase(..)
   , ConstBindBase(..)
   , TypeBindBase(..)
-  , SigBindBase(..)
   , SpecBase(..)
+  , SigExpBase(..)
+  , SigBindBase(..)
+  , ModExpBase(..)
   , StructBindBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
@@ -649,15 +651,6 @@ deriving instance Showable f vn => Show (TypeBindBase f vn)
 instance Located (TypeBindBase f vn) where
   locOf = locOf . typeBindLocation
 
-data SigBindBase f vn = SigBind { sigName     :: vn
-                                , sigDecls    :: [SpecBase f vn]
-                                , sigLocation :: SrcLoc
-                                }
-deriving instance Showable f vn => Show (SigBindBase f vn)
-
-instance Located (SigBindBase f vn) where
-  locOf = locOf . sigLocation
-
 data SpecBase f vn = ValSpec  { specName     :: vn
                               , specParams   :: [TypeDeclBase f vn]
                               , specRettype  :: TypeDeclBase f vn
@@ -672,9 +665,34 @@ instance Located (SpecBase f vn) where
   locOf (TypeAbbrSpec tbind) = locOf tbind
   locOf (TypeSpec _ loc) = locOf loc
 
+data SigExpBase f vn = SigVar (QualName vn) SrcLoc
+                     | SigSpecs [SpecBase f vn] SrcLoc
+deriving instance Showable f vn => Show (SigExpBase f vn)
+
+instance Located (SigExpBase f vn) where
+  locOf (SigVar _ loc)   = locOf loc
+  locOf (SigSpecs _ loc) = locOf loc
+
+data SigBindBase f vn = SigBind { sigName :: vn
+                                , sigExp  :: SigExpBase f vn
+                                , sigLoc  :: SrcLoc
+                                }
+deriving instance Showable f vn => Show (SigBindBase f vn)
+
+instance Located (SigBindBase f vn) where
+  locOf = locOf . sigLoc
+
+data ModExpBase f vn = ModVar (QualName vn) SrcLoc
+                     | ModDecs [DecBase f vn] SrcLoc
+deriving instance Showable f vn => Show (ModExpBase f vn)
+
+instance Located (ModExpBase f vn) where
+  locOf (ModVar _ loc)  = locOf loc
+  locOf (ModDecs _ loc) = locOf loc
+
 data StructBindBase f vn = StructBind { structName      :: vn
-                                      , structSignature :: Maybe (QualName vn)
-                                      , structDecls     :: [DecBase f vn]
+                                      , structSignature :: Maybe (SigExpBase f vn)
+                                      , structExp       :: ModExpBase f vn
                                       , structLocation  :: SrcLoc
                                       }
 deriving instance Showable f vn => Show (StructBindBase f vn)
