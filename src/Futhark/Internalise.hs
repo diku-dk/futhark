@@ -63,9 +63,12 @@ funsFromProg prog = concatMap getFuns $ progDecs prog
   where getFuns (ValDec (FunDec a)) = [a]
         getFuns (ValDec (ConstDec (E.ConstBind name t e loc))) =
           [E.FunBind False name Nothing (expandedType t) [] e loc]
-        getFuns (StructDec d) = concatMap getFuns $ structDecls d
+        getFuns (StructDec d) = structDecls $ structExp d
         getFuns TypeDec{} = []
         getFuns SigDec{} = []
+
+        structDecls (ModDecs ds _) = concatMap getFuns ds
+        structDecls ModVar{} = []
 
 buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)

@@ -296,16 +296,17 @@ sigVals = mapMaybe select . HM.toList
 data Scope  = Scope { envVtable :: HM.HashMap VName Binding
                     , envTypeTable :: HM.HashMap VName TypeBinding
                     , envSigTable :: HM.HashMap VName Sig
+                    , envModTable :: HM.HashMap VName Scope
                     , envNameMap :: NameMap
                     } deriving (Show)
 
 instance Monoid Scope where
-  mempty = Scope mempty mempty mempty mempty
-  Scope vt1 tt1 st1 nt1 `mappend` Scope vt2 tt2 st2 nt2 =
-    Scope (vt1<>vt2) (tt1<>tt2) (st1<>st2) (nt1<>nt2)
+  mempty = Scope mempty mempty mempty mempty mempty
+  Scope vt1 tt1 st1 mt1 nt1 `mappend` Scope vt2 tt2 st2 mt2 nt2 =
+    Scope (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
 
 initialScope :: Scope
-initialScope = Scope initialVtable mempty mempty builtInMap
+initialScope = Scope initialVtable mempty mempty mempty builtInMap
   where initialVtable = HM.fromList $ map addBuiltinF $ HM.toList builtInFunctions
 
         addBuiltinF (name, (ts, t)) =
@@ -615,6 +616,12 @@ lookupSig loc qn = do
   (qn',) <$> (maybe explode return =<< asks (HM.lookup name . envSigTable))
   where explode = bad $ UnknownVariableError Signature qn loc
 
+lookupMod :: SrcLoc -> QualName Name -> TypeM (QualName VName, Scope)
+lookupMod loc qn = do
+  qn'@(QualName (_, name)) <- checkQualName Structure qn loc
+  (qn',) <$> (maybe explode return =<< asks (HM.lookup name . envModTable))
+  where explode = bad $ UnknownVariableError Structure qn loc
+
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
@@ -796,19 +803,30 @@ qualScope name scope = scope { envNameMap = qualNameMap $ envNameMap scope }
         qual ((space, QualName (qs, v)), x) =
           ((space, QualName (name : qs, v)), x)
 
-checkStruct :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
-checkStruct (StructBind name sigmatch decs loc) = do
-  name' <- checkName Structure name loc
+checkModExp :: ModExpBase NoInfo Name -> TypeM (Scope, ModExpBase Info VName)
+checkModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
   (scope, decs') <- checkDecs decs
+  return (scope, ModDecs decs' loc)
+checkModExp (ModVar v loc) = do
+  (v', scope) <- lookupMod loc v
+  return (scope, ModVar v' loc)
+
+checkStructBind :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
+checkStructBind (StructBind name sigmatch e loc) = do
+  name' <- checkName Structure name loc
+  (scope, e') <- checkModExp e
   (sigmatch', scope') <-
     case sigmatch of
       Nothing -> return (Nothing, scope)
-      Just signame -> do
-        (signame', sig) <- lookupSig loc signame
+      Just se -> do
+        (sig, se') <- checkSigExp se
         scope' <- liftEither $ matchScopeToSig sig scope loc
-        return (Just signame', scope')
-  return (qualScope name scope', StructBind name' sigmatch' decs' loc)
+        return (Just se', scope')
+  let qual_scope = qualScope name scope'
+  return (qual_scope { envModTable = HM.insert name' scope' $
+                                     envModTable qual_scope },
+          StructBind name' sigmatch' e' loc)
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
 checkForDuplicateSpecs =
@@ -828,13 +846,34 @@ checkForDuplicateSpecs =
         f (TypeSpec name loc) =
           check Type name loc
 
-checkSig :: SigBindBase NoInfo Name -> TypeM (Scope, SigBindBase Info VName)
-checkSig (SigBind name specs loc) = do
-  name' <- checkName Signature name loc
+checkSigExp :: SigExpBase NoInfo Name -> TypeM (Sig, SigExpBase Info VName)
+checkSigExp (SigVar name loc) = do
+  (name', sig) <- lookupSig loc name
+  return (sig, SigVar name' loc)
+checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
-  (sigscope, sig, specs') <- checkSpecs specs
-  return ((qualScope name sigscope) { envSigTable = HM.singleton name' sig },
-          SigBind name' specs' loc)
+  (_, sig, specs') <- checkSpecs specs
+  return (sig,
+          SigSpecs specs' loc)
+
+checkSigBind :: SigBindBase NoInfo Name -> TypeM (Scope, SigBindBase Info VName)
+checkSigBind (SigBind name e loc) = do
+  name' <- checkName Signature name loc
+  (sig, e') <- checkSigExp e
+  let sigscope = typeAbbrScopeFromSig sig
+      sigscope_qual = qualScope name sigscope
+  return (sigscope_qual { envSigTable = HM.insert name' sig $
+                                        envSigTable sigscope_qual },
+          SigBind name' e' loc)
+  where typeAbbrScopeFromSig :: Sig -> Scope
+        typeAbbrScopeFromSig sig =
+          let types = HM.mapMaybe isTypeAbbr sig
+              names = HM.fromList $ map nameMapping $ HM.toList types
+          in mempty { envNameMap = names
+                    , envTypeTable = types }
+        isTypeAbbr (SpecTypeAbbr t) = Just t
+        isTypeAbbr _                = Nothing
+        nameMapping (v, _) = ((Type, qualName (baseName v)), v)
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Scope, TypeBindBase Info VName)
@@ -897,14 +936,14 @@ checkSpecs (TypeSpec name loc : specs) =
 checkDecs :: [DecBase NoInfo Name] -> TypeM (Scope, [DecBase Info VName])
 checkDecs (StructDec struct:rest) =
   bindSpaced [(Structure, qualName $ structName struct)] $ do
-    (modscope, struct') <- checkStruct struct
+    (modscope, struct') <- checkStructBind struct
     local (modscope<>) $ do
       (scope, rest') <- checkDecs rest
       return (modscope <> scope, StructDec struct' : rest')
 
 checkDecs (SigDec sig:rest) =
   bindSpaced [(Signature, qualName $ sigName sig)] $ do
-    (sigscope, sig') <- checkSig sig
+    (sigscope, sig') <- checkSigBind sig
     local (sigscope<>) $ do
       (scope, rest') <- checkDecs rest
       return (sigscope <> scope, SigDec sig' : rest')
@@ -1963,6 +2002,7 @@ matchScopeToSig sig scope loc = do
       scope' = Scope { envVtable = vals
                      , envTypeTable = types
                      , envSigTable = mempty
+                     , envModTable = mempty
                      , envNameMap = names
                      }
   return scope'

@@ -352,10 +352,13 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase 
   ppr (SigDec sig)   = ppr sig
   ppr (StructDec sd) = ppr sd
 
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModExpBase ty vn) where
+  ppr (ModVar v _) = ppr v
+  ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
+
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
-  ppr (StructBind name sig moddecls _) =
-    text "module" <+> ppr name <> sig' <+> nestedBlock "{" "}"
-    (stack $ punctuate line $ map ppr moddecls)
+  ppr (StructBind name sig e _) =
+    text "module" <+> ppr name <> sig' <+> equals <+> ppr e
     where sig' = case sig of Nothing -> mempty
                              Just s  -> colon <+> ppr s
 
@@ -383,17 +386,20 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstBin
   ppr (ConstBind name t e _) =
     text "val" <+> ppr name <> text ":" <+> ppr t <+> text "+" <+> ppr e
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigBindBase ty vn) where
-  ppr (SigBind name sigdecls _) =
-    text "module type" <+> ppr name <+> equals <+> nestedBlock "{" "}"
-    (stack $ punctuate line $ map ppr sigdecls)
-
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec name _) = text "type" <+> ppr name
   ppr (ValSpec name params rettype _) =
     ppr name <+> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigExpBase ty vn) where
+  ppr (SigVar v _) = ppr v
+  ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigBindBase ty vn) where
+  ppr (SigBind name e _) =
+    text "module type" <+> ppr name <+> equals <+> ppr e
 
 ppParam :: (Eq vn, Hashable vn, Pretty vn) => PatternBase t vn -> Doc
 ppParam (Id param) = ppr param
