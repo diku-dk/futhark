@@ -623,6 +623,11 @@ containsNestedParallelism lam =
 versionedCode :: Bool
 versionedCode = False
 
+-- Enable if you want to try the new segmented-redomap code. Here be dragons
+-- (and possibly worse performance).
+newSegmentedRedomap :: Bool
+newSegmentedRedomap = False
+
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
@@ -782,7 +787,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
+maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode || newSegmentedRedomap =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
@@ -931,9 +936,9 @@ regularSegmentedRedomapKernel nest perm cs segment_size comm lam fold_lam nes ar
         segment_size num_segments (kernelNestWidths nest)
         flat_pat pat cs total_num_elements comm lam fold_lam ispace inps nes' arrs'
    where kernel_generation =
-           if False
-           then regularSegmentedRedomapAsScan
-           else regularSegmentedRedomap
+           if newSegmentedRedomap
+           then regularSegmentedRedomap
+           else regularSegmentedRedomapAsScan
 
 
 isSegmentedOp :: KernelNest
