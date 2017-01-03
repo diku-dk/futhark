@@ -599,7 +599,8 @@ instance Located (LambdaBase f vn) where
   locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
 
--- | Tuple IdentBaseifier, i.e., pattern matching
+-- | A pattern as used most places where variables are bound (function
+-- parameters, @let@ expressions, etc).
 data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
                       | Id (IdentBase f vn)
                       | Wildcard (f (CompTypeBase vn)) SrcLoc -- Nothing, i.e. underscore.
