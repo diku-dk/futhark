@@ -10,6 +10,11 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , mapKernelFromBody
        , KernelInput(..)
        , mapKernelSkeleton
+
+       -- Helper functions shared with at least Segmented.hs
+       , kerneliseLambda
+       , newKernelSpace
+       , chunkLambda
        )
        where
 

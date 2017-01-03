@@ -82,6 +82,8 @@ data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceNumGroups :: SubExp
                                , spaceGroupSize :: SubExp -- flat group size
                                , spaceStructure :: SpaceStructure
+                               -- TODO: document what this spaceStructure is
+                               -- used for
                                }
                  deriving (Eq, Show, Ord)
 -- ^ first three bound in the kernel, the rest are params to kernel
