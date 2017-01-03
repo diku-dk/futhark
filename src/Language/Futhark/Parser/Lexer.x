@@ -164,8 +164,7 @@ keyword s =
     "include"      -> INCLUDE
     "type"         -> TYPE
     "entry"        -> ENTRY
-    "sig"          -> SIG
-    "struct"       -> STRUCT
+    "module"       -> MODULE
     "val"          -> VAL
     _              -> ID $ nameFromText s
 
@@ -337,8 +336,7 @@ data Token = IF
            | ENTRY
            | TYPE
            | EOF
-           | SIG
-           | STRUCT
+           | MODULE
            | VAL
            | COLON
            | AT

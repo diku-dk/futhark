@@ -1,8 +1,8 @@
 -- ==
 -- tags { disable }
-struct Vec3
+module Vec3
   {
-    struct F32
+    module F32
       {
         type t = ( f32 , f32 , f32 )
         fun add(a: t , b: t): t =
@@ -25,7 +25,7 @@ struct Vec3
           a1*b1 + a2*b2 + a3*b3
       }
 
-    struct Int
+    module Int
       {
         type t = ( int , int , int )
         fun add(a: t , b: t): t =

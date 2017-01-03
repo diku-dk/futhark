@@ -10,11 +10,11 @@
 
 type best_type = float
 fun best_number(): best_type = 6.0
-struct M0
+module M0
   {
     type best_type = int
     fun best_number(): best_type = 6
-    struct M1
+    module M1
       {
         fun best_number(): best_type = 6
       }

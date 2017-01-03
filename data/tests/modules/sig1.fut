@@ -1,6 +1,6 @@
 -- Signature with abstract type.
 
-sig MONOID {
+module type MONOID {
 type t
 
 val neutral: t

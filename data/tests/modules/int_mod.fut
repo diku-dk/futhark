@@ -6,7 +6,7 @@
 --   31
 -- }
 
-struct IntLib  {
+module IntLib  {
     fun plus(a: int, b: int): int = a + b
     fun numberFour(): int = 4
   }

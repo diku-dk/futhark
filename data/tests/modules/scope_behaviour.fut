@@ -7,18 +7,18 @@
 -- }
 type foo = (int, f32)
 
-struct M0
+module M0
   {
     type foo = (f32, int)
     type bar = foo
   }
 
-struct M1
+module M1
   {
     type foo = f32
     type bar = M0.bar -- type is defined at line 13
 
-    struct M0
+    module M0
       {
         type foo = M0.foo -- is defined at line 12
         type bar = (int, int, int)

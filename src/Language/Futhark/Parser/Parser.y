@@ -174,8 +174,7 @@ import Language.Futhark.Parser.Lexer
       include         { L $$ INCLUDE }
       write           { L $$ WRITE }
       type            { L $$ TYPE }
-      sig             { L $$ SIG }
-      struct          { L $$ STRUCT }
+      module          { L $$ MODULE }
       val             { L $$ VAL }
 
 %left bottom
@@ -233,15 +232,28 @@ Aliases : id ',' Aliases
 ;
 
 SigBind :: { SigBindBase f vn }
-        : sig id '{' Specs '}'
-          { let L pos (ID name) = $2
-            in SigBind name $4 pos }
+         : module type id '=' '{' Specs '}'
+          { let L pos (ID name) = $3
+            in SigBind name $6 pos }
+
+        -- Shortcut form
+        | module type id '{' Specs '}'
+          { let L pos (ID name) = $3
+            in SigBind name $5 pos }
 
 StructBind :: { StructBindBase f vn }
-           : struct id '{' Decs '}'
+           : module id '=' '{' Decs '}'
+             { let L pos (ID name) = $2
+               in StructBind name Nothing $5 pos }
+           | module id ':' QualName '=' '{' Decs '}'
+             { let L pos (ID name) = $2
+               in StructBind name (Just (fst $4)) $7 pos }
+
+           -- Shortcut forms
+           | module id '{' Decs '}'
              { let L pos (ID name) = $2
                in StructBind name Nothing $4 pos }
-           | struct id ':' QualName '{' Decs '}'
+           | module id ':' QualName '{' Decs '}'
              { let L pos (ID name) = $2
                in StructBind name (Just (fst $4)) $6 pos }
 

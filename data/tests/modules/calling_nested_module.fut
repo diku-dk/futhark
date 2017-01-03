@@ -7,9 +7,9 @@
 -- }
 
 type t = int
-struct NumLib  {
+module NumLib  {
   fun plus(a: t, b: t): t = a + b
-  struct BestNumbers {
+  module BestNumbers {
     fun four(): t = 4
     fun seven(): t = 42
     fun six(): t = 41

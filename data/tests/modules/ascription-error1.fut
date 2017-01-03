@@ -2,11 +2,11 @@
 -- ==
 -- error: Struct.g
 
-sig SIG {
+module type SIG {
 val f: int -> int
 }
 
-struct Struct: SIG {
+module Struct: SIG {
 fun f (x: int): int = x + 2
 fun g (x: int): int = x + 3
 }
