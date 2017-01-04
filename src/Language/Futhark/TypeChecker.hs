@@ -866,15 +866,15 @@ checkSigBind (SigBind name e loc) = do
           SigBind name' e' loc)
   where typeAbbrScopeFromSig :: Sig -> Scope
         typeAbbrScopeFromSig sig =
-          let types = HM.mapMaybe isTypeAbbr sig
+          let types = HM.fromList $ mapMaybe isTypeAbbr $ HM.toList sig
               names = HM.fromList $ map nameMapping $ HM.toList types
           in mempty { envNameMap = names
                     , envTypeTable = types
                     , envModTable = HM.singleton name
                                     mempty { envNameMap = names
                                            , envTypeTable = types }}
-        isTypeAbbr (SpecTypeAbbr t) = Just t
-        isTypeAbbr _                = Nothing
+        isTypeAbbr (v, SpecTypeAbbr t) = Just (v, t)
+        isTypeAbbr _                   = Nothing
         nameMapping (v, _) = ((Type, baseName v), v)
 
 checkTypeBind :: TypeBindBase NoInfo Name
