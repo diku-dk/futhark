@@ -5,7 +5,7 @@
 -- input {
 -- }
 -- output {
---  12
+--  1 1 10
 -- }
 
 module M0
@@ -23,4 +23,4 @@ module M1
     fun baz(): int = M0.foo()
   }
 
-fun main(): int = M0.foo() + M1.bar() + M1.baz()
+fun main(): (int, int, int) = (M0.foo(), M1.bar(), M1.baz())
