@@ -704,11 +704,13 @@ instance Located (ModExpBase f vn) where
   locOf (ModDecs _ loc)      = locOf loc
   locOf (ModApply _ _ _ loc) = locOf loc
 
-data StructBindBase f vn = StructBind { structName      :: vn
-                                      , structSignature :: Maybe (SigExpBase f vn)
-                                      , structExp       :: ModExpBase f vn
-                                      , structLocation  :: SrcLoc
-                                      }
+data StructBindBase f vn =
+  StructBind { structName      :: vn
+             , structSignature :: Maybe (SigExpBase f vn,
+                                         f (HM.HashMap VName VName))
+             , structExp       :: ModExpBase f vn
+             , structLocation  :: SrcLoc
+             }
 deriving instance Showable f vn => Show (StructBindBase f vn)
 
 instance Located (StructBindBase f vn) where

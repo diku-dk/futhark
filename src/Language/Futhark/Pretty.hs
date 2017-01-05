@@ -361,8 +361,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModExpBa
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
   ppr (StructBind name sig e _) =
     text "module" <+> ppr name <> sig' <+> equals <+> ppr e
-    where sig' = case sig of Nothing -> mempty
-                             Just s  -> colon <+> ppr s <> text " "
+    where sig' = case sig of Nothing     -> mempty
+                             Just (s, _) -> colon <+> ppr s <> text " "
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ValDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
