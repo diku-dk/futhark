@@ -11,7 +11,7 @@ module Futhark.Internalise
   , internaliseValue
   )
   where
-import Debug.Trace
+
 import Control.Applicative
 import Control.Monad.State  hiding (mapM, sequence)
 import Control.Monad.Reader hiding (mapM, sequence)
@@ -45,7 +45,7 @@ import Futhark.Util (dropAt)
 -- core language.
 internaliseProg :: MonadFreshNames m =>
                    E.Prog -> m (Either String I.Prog)
-internaliseProg prog = trace (pretty prog) $ do
+internaliseProg prog = do
   prog' <- fmap I.Prog <$> runInternaliseM builtinFtable
            (snd <$> internaliseDecs (progDecs prog))
   sequence $ fmap I.renameProg prog'
@@ -140,6 +140,7 @@ internaliseModExp :: E.StructBind
                   -> ([I.FunDef] -> InternaliseM a)
                   -> InternaliseM a
 internaliseModExp sb m =
+  withDecSubsts subst_from_sb $
   case structExp sb of
     E.ModDecs ds _ -> do
       ((ftable_expansion, ttable_expansion), funs) <- internaliseDecs ds
@@ -157,6 +158,9 @@ internaliseModExp sb m =
       me <- lookupFunctor v'
       let sb' = sb { structExp = me }
       withDecSubsts subst $ internaliseModExp sb' m
+  where subst_from_sb = case structSignature sb of
+                          Just (_, Info substs) -> substs
+                          Nothing               -> mempty
 
 internaliseFun :: E.FunBind -> InternaliseM I.FunDef
 internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =

@@ -258,7 +258,7 @@ StructBind :: { StructBindBase f vn }
                in StructBind name Nothing $4 pos }
            | module id ':' SigExp '=' ModExp
              { let L pos (ID name) = $2
-               in StructBind name (Just $4) $6 pos }
+               in StructBind name (Just ($4, NoInfo)) $6 pos }
 
            -- Shortcut forms
            | module id '{' Decs '}'
@@ -266,7 +266,7 @@ StructBind :: { StructBindBase f vn }
                in StructBind name Nothing (ModDecs $4 pos) pos }
            | module id ':' SigExp '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name (Just $4) (ModDecs $6 pos) pos }
+               in StructBind name (Just ($4, NoInfo)) (ModDecs $6 pos) pos }
 
 FunctorBind :: { FunctorBindBase f vn }
              : module id '(' id ':' SigExp ')' '=' ModExp

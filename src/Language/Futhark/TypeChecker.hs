@@ -938,10 +938,12 @@ checkStructBind (StructBind name sigmatch e loc) = do
   (sigmatch', scope') <-
     case sigmatch of
       Nothing -> return (Nothing, scope)
-      Just se -> do
+      Just (se, NoInfo) -> do
         (_, sig, se') <- checkSigExp se
         (scope', _) <- liftEither $ matchScopeToSig sig scope loc
-        return (Just se', scope')
+        -- See issue #262 for martinsubst justification.
+        (scope'', martinsubst) <- newNamesForScope scope'
+        return (Just (se', Info martinsubst), scope'')
   return (mempty { envModTable = HM.singleton name $ ModMod scope' },
           StructBind name' sigmatch' e' loc)
 
