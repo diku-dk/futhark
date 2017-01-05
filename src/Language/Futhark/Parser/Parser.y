@@ -221,6 +221,7 @@ Dec :: { [DecBase f vn] }
     | UserTypeAlias { map TypeDec $1 }
     | SigBind       { [SigDec $1 ] }
     | StructBind    { [StructDec $1 ] }
+    | FunctorBind   { [FunctorDec $1] }
 ;
 
 
@@ -248,6 +249,8 @@ SigBind :: { SigBindBase f vn }
 ModExp :: { ModExpBase f vn }
         : QualName     { let (v, loc) = $1 in ModVar v loc }
         | '{' Decs '}' { ModDecs $2 $1 }
+        | QualName '(' ModExp ')'
+          { ModApply (fst $1) $3 NoInfo (snd $1) }
 
 StructBind :: { StructBindBase f vn }
            : module id '=' ModExp
@@ -264,6 +267,26 @@ StructBind :: { StructBindBase f vn }
            | module id ':' SigExp '{' Decs '}'
              { let L pos (ID name) = $2
                in StructBind name (Just $4) (ModDecs $6 pos) pos }
+
+FunctorBind :: { FunctorBindBase f vn }
+             : module id '(' id ':' SigExp ')' '=' ModExp
+               { let L floc (ID fname) = $2; L ploc (ID pname) = $4
+                 in FunctorBind fname (pname, $6) Nothing $9 $1
+               }
+             | module id '(' id ':' SigExp ')' ':' SigExp '=' ModExp
+               { let L floc (ID fname) = $2; L ploc (ID pname) = $4
+                 in FunctorBind fname (pname, $6) (Just $9) $11 $1
+               }
+
+             -- Shortcut forms
+             | module id '(' id ':' SigExp ')' '{' Decs '}'
+               { let L floc (ID fname) = $2; L ploc (ID pname) = $4
+                 in FunctorBind fname (pname, $6) Nothing (ModDecs $9 $8) $1
+               }
+             | module id '(' id ':' SigExp ')' ':' SigExp '{' Decs '}'
+               { let L floc (ID fname) = $2; L ploc (ID pname) = $4
+                 in FunctorBind fname (pname, $6) (Just $9) (ModDecs $11 $10) $1
+               }
 
 Specs : Spec Specs { $1 : $2 }
       |            { [] }
@@ -334,7 +357,7 @@ Headers :: { [ProgHeader] }
 ;
 
 Header :: { ProgHeader }
-Header : include QualName { let (QualName (qs, v), _) = $2 in Include (map nameToString (qs++[v])) }
+Header : include QualName { let (QualName qs v, _) = $2 in Include (map nameToString (qs++[v])) }
 ;
 
 Fun     : fun id Params MaybeAscription '=' Exp
@@ -421,8 +444,8 @@ Param : VarId                        { Id $1 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
 
 QualName :: { (QualName Name, SrcLoc) }
-          : qid { let L loc (QUALID qs v) = $1 in (QualName (qs, v), loc) }
-          | id  { let L loc (ID v) = $1 in (QualName ([], v), loc) }
+          : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
+          | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
 
 Exp  :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
@@ -601,9 +624,9 @@ VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
 
 QualVarSlice :: { (QualName Name, [UncheckedDimIndex], SrcLoc) }
               : VarSlice
-                { let (x, y, z) = $1 in (QualName ([], x), y, z) }
+                { let (x, y, z) = $1 in (QualName [] x, y, z) }
               | 'qid[' DimIndices ']'
-                { let L loc (QUALINDEXING qs v) = $1 in (QualName (qs, v), $2, loc) }
+                { let L loc (QUALINDEXING qs v) = $1 in (QualName qs v, $2, loc) }
 
 DimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
            | DimIndex                    { [$1] }
@@ -832,7 +855,7 @@ arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
-patternExp (Id ident) = return $ Var (QualName ([],identName ident)) NoInfo $ srclocOf ident
+patternExp (Id ident) = return $ Var (QualName [] (identName ident)) NoInfo $ srclocOf ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 

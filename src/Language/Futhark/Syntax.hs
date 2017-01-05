@@ -51,20 +51,23 @@ module Language.Futhark.Syntax
   , PatternBase(..)
   , StreamForm(..)
 
-  -- * Definitions
-  , FunBindBase(..)
-  , ConstBindBase(..)
-  , TypeBindBase(..)
+  -- * Module language
   , SpecBase(..)
   , SigExpBase(..)
   , SigBindBase(..)
   , ModExpBase(..)
   , StructBindBase(..)
+  , FunctorBindBase(..)
+
+  -- * Definitions
+  , FunBindBase(..)
+  , ConstBindBase(..)
+  , ValDecBase(..)
+  , TypeBindBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
   , DecBase(..)
-  , ValDecBase(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -80,6 +83,7 @@ import           Data.Foldable
 import           Data.Functor
 import           Data.Hashable
 import qualified Data.HashSet                     as HS
+import qualified Data.HashMap.Lazy                as HM
 import           Data.Loc
 import           Data.Monoid
 import           Data.Traversable
@@ -94,7 +98,8 @@ import           Language.Futhark.Core
 class (Show vn,
        Show (f vn),
        Show (f (CompTypeBase vn)),
-       Show (f (StructTypeBase vn))) => Showable f vn where
+       Show (f (StructTypeBase vn)),
+       Show (f (HM.HashMap VName VName))) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
 -- aliasing information.
@@ -357,8 +362,14 @@ data DimIndexBase f vn = DimFix (ExpBase f vn)
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.
-newtype QualName vn = QualName ([Name], vn)
-  deriving (Eq, Ord, Show, Hashable)
+data QualName vn = QualName { qualQuals :: ![Name]
+                            , qualLeaf :: !vn
+                            }
+  deriving (Eq, Ord, Show)
+
+instance Hashable vn => Hashable (QualName vn) where
+  hashWithSalt salt (QualName quals leaf) =
+    hashWithSalt salt (quals, leaf)
 
 -- | The Futhark expression language.
 --
@@ -684,11 +695,14 @@ instance Located (SigBindBase f vn) where
 
 data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                      | ModDecs [DecBase f vn] SrcLoc
+                     | ModApply (QualName vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
+                       -- ^ Functor application.
 deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
-  locOf (ModVar _ loc)  = locOf loc
-  locOf (ModDecs _ loc) = locOf loc
+  locOf (ModVar _ loc)       = locOf loc
+  locOf (ModDecs _ loc)      = locOf loc
+  locOf (ModApply _ _ _ loc) = locOf loc
 
 data StructBindBase f vn = StructBind { structName      :: vn
                                       , structSignature :: Maybe (SigExpBase f vn)
@@ -699,6 +713,17 @@ deriving instance Showable f vn => Show (StructBindBase f vn)
 
 instance Located (StructBindBase f vn) where
   locOf = locOf . structLocation
+
+data FunctorBindBase f vn = FunctorBind { functorName      :: vn
+                                        , functorParam     :: (vn, SigExpBase f vn)
+                                        , functorSignature :: Maybe (SigExpBase f vn)
+                                        , functorBody      :: ModExpBase f vn
+                                        , functorLocation  :: SrcLoc
+                                        }
+deriving instance Showable f vn => Show (FunctorBindBase f vn)
+
+instance Located (FunctorBindBase f vn) where
+  locOf = locOf . functorLocation
 
 -- | A top-level binding of a term variable to either a function or a
 -- constant.
@@ -715,6 +740,7 @@ data DecBase f vn = ValDec (ValDecBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | StructDec (StructBindBase f vn)
+                  | FunctorDec (FunctorBindBase f vn)
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
@@ -722,6 +748,7 @@ instance Located (DecBase f vn) where
   locOf (TypeDec d) = locOf d
   locOf (SigDec d) = locOf d
   locOf (StructDec d) = locOf d
+  locOf (FunctorDec d) = locOf d
 
 data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)

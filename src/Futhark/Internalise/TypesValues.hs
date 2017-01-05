@@ -66,8 +66,9 @@ internaliseDeclType' :: DimDeclInterpretation
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' _ (E.Prim bt) =
   return [I.Prim $ internalisePrimType bt]
-internaliseDeclType' _ (E.TypeVar v) =
-  lift $ staticShapes . pure . (`toDecl` Nonunique) <$> lookupTypeVar v
+internaliseDeclType' _ (E.TypeVar v) = lift $ do
+  v' <- lookupSubst $ E.qualName v
+  map (extShaped . (`toDecl` Nonunique)) <$> lookupTypeVar v'
 internaliseDeclType' ddi (E.Tuple ets) =
   concat <$> mapM (internaliseDeclType' ddi) ets
 internaliseDeclType' ddi (E.Array at) =
@@ -78,9 +79,10 @@ internaliseDeclType' ddi (E.Array at) =
                   internaliseUniqueness u]
 
         internaliseArrayType (E.PolyArray v shape u _) = do
+          ts <- lift $ lookupTypeVar =<< lookupSubst (E.qualName v)
           dims <- internaliseShape shape
-          t <- lift $ staticShapes1 <$> lookupTypeVar v
-          return [I.arrayOf t (ExtShape dims) $ internaliseUniqueness u]
+          return [I.arrayOf (extShaped t) (ExtShape dims) $ internaliseUniqueness u
+                 | t <- ts]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
           innerdims <- ExtShape <$> internaliseShape shape
@@ -93,8 +95,9 @@ internaliseDeclType' ddi (E.Array at) =
 
         internaliseTupleArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
-        internaliseTupleArrayElem (PolyArrayElem v _ _) =
-          lift $ staticShapes . pure . (`toDecl` Nonunique) <$> lookupTypeVar v
+        internaliseTupleArrayElem (PolyArrayElem v _ _) = lift $ do
+          v' <- lookupSubst $ E.qualName v
+          map (extShaped . (`toDecl` Nonunique)) <$> lookupTypeVar v'
         internaliseTupleArrayElem (ArrayArrayElem aet) =
           internaliseArrayType aet
         internaliseTupleArrayElem (TupleArrayElem ts) =
