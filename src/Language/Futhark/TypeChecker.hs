@@ -12,11 +12,11 @@ module Language.Futhark.TypeChecker
   where
 
 import Control.Applicative
-import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Monad.Writer
-import Control.Monad.State
-import Control.Monad.RWS
+import Control.Monad.Except hiding (mapM)
+import Control.Monad.Reader hiding (mapM)
+import Control.Monad.Writer hiding (mapM)
+import Control.Monad.State hiding (mapM)
+import Control.Monad.RWS hiding (mapM)
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -28,7 +28,7 @@ import Data.Traversable (mapM)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
-import Prelude
+import Prelude hiding (mapM)
 
 import Language.Futhark
 import Futhark.FreshNames hiding (newName)
