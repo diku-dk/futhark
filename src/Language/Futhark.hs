@@ -4,8 +4,9 @@ module Language.Futhark
   , module Language.Futhark.Attributes
   , module Language.Futhark.Pretty
 
-  , Ident, DimIndex, Exp, Lambda
-  , Pattern, FunBind, ConstBind, Prog
+  , Ident, DimIndex, Exp, Lambda, Pattern
+  , ModExp, StructBind
+  , FunBind, ConstBind, Dec, ValDec, Prog
   , Type, StructType, ArrayType
   )
   where
@@ -34,6 +35,18 @@ type FunBind = FunBindBase Info VName
 
 -- | An constant declaration with type information.
 type ConstBind = ConstBindBase Info VName
+
+-- | A type-checked module binding.
+type StructBind = StructBindBase Info VName
+
+-- | A type-checked module expression.
+type ModExp = ModExpBase Info VName
+
+-- | A type-checked declaration.
+type Dec = DecBase Info VName
+
+-- | A type-checked declaration.
+type ValDec = ValDecBase Info VName
 
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName

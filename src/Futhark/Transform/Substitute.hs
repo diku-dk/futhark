@@ -108,7 +108,15 @@ instance Substitutable lore => Substitute (Body lore) where
     (substituteNames substs attr)
     (substituteNames substs bnds)
     (substituteNames substs res)
-
+{-
+instance Substitutable lore => Substitute (FunDef lore) where
+  substituteNames substs (FunDef entry name ret ps body) =
+    FunDef entry
+      (substituteNames substs name)
+      (substituteNames substs ret)
+      (substituteNames substs ps)
+      (substituteNames substs body)
+-}
 replace :: (Substitutable lore) => HM.HashMap VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnVName = return . substituteNames substs

@@ -560,7 +560,7 @@ typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (UnOp _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info (Tuple ets)) _) = Tuple ets
-typeOf (Var (QualName (_, name)) (Info t) _) = t `addAliases` HS.insert name
+typeOf (Var qn (Info t) _) = t `addAliases` HS.insert (qualLeaf qn)
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
@@ -764,7 +764,7 @@ isStructDec _              = Nothing
 
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v
-qualName n = QualName ([], n)
+qualName = QualName []
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()

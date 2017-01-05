@@ -150,7 +150,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
 
 instance Pretty vn => Pretty (QualName vn) where
-  ppr (QualName (names, name)) =
+  ppr (QualName names name) =
     mconcat $ punctuate (text ".") $ map ppr names ++ [ppr name]
 
 instance Pretty vn => Pretty (IdentBase f vn) where
@@ -347,29 +347,30 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase
   ppr = stack . punctuate line . map ppr . progDecs
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase ty vn) where
-  ppr (ValDec dec)   = ppr dec
-  ppr (TypeDec dec)  = ppr dec
-  ppr (SigDec sig)   = ppr sig
-  ppr (StructDec sd) = ppr sd
+  ppr (ValDec dec)    = ppr dec
+  ppr (TypeDec dec)   = ppr dec
+  ppr (SigDec sig)    = ppr sig
+  ppr (StructDec sd)  = ppr sd
+  ppr (FunctorDec fd) = ppr fd
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModExpBase ty vn) where
   ppr (ModVar v _) = ppr v
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
+  ppr (ModApply f a _ _) = ppr f <> parens (ppr a)
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
   ppr (StructBind name sig e _) =
     text "module" <+> ppr name <> sig' <+> equals <+> ppr e
     where sig' = case sig of Nothing -> mempty
-                             Just s  -> colon <+> ppr s
+                             Just s  -> colon <+> ppr s <> text " "
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ValDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
   ppr (ConstDec c) = ppr c
 
-instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeBindBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
   ppr (TypeBind name usertype _) =
     text "type" <+> ppr name <+> equals <+> ppr usertype
-
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunBindBase ty vn) where
   ppr (FunBind entry name retdecl _ args body _) =
@@ -400,6 +401,13 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigExpBa
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigBindBase ty vn) where
   ppr (SigBind name e _) =
     text "module type" <+> ppr name <+> equals <+> ppr e
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunctorBindBase ty vn) where
+  ppr (FunctorBind name (pname,psig) sig e _) =
+    text "module" <+> ppr name <>
+    parens (ppr pname <> colon <+> ppr psig) <> sig' <+> equals <+> ppr e
+    where sig' = case sig of Nothing -> mempty
+                             Just s  -> colon <+> ppr s <> text " "
 
 ppParam :: (Eq vn, Hashable vn, Pretty vn) => PatternBase t vn -> Doc
 ppParam (Id param) = ppr param
