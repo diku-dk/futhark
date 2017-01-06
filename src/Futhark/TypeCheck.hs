@@ -246,14 +246,15 @@ data Env lore =
 
 -- | The type checker runs in this monad.
 newtype TypeM lore a = TypeM (RWST
-                              (Env lore)     -- Reader
-                              Consumption        -- Writer
-                              ()                 -- State
+                              (Env lore)  -- Reader
+                              Consumption -- Writer
+                              Names       -- State
                               (Either (TypeError lore)) -- Inner monad
                               a)
   deriving (Monad, Functor, Applicative,
             MonadReader (Env lore),
-            MonadWriter Consumption)
+            MonadWriter Consumption,
+            MonadState Names)
 
 instance Checkable lore =>
          HasScope (Aliases lore) (TypeM lore) where
@@ -263,7 +264,7 @@ instance Checkable lore =>
 
 runTypeM :: Env lore -> TypeM lore a
          -> Either (TypeError lore) (a, Consumption)
-runTypeM env (TypeM m) = evalRWST m env ()
+runTypeM env (TypeM m) = evalRWST m env mempty
 
 bad :: ErrorCase lore -> TypeM lore a
 bad e = do
@@ -286,6 +287,14 @@ message s x = prettyDoc 80 $
 
 liftEitherS :: Either String a -> TypeM lore a
 liftEitherS = either (bad . TypeError) return
+
+-- | Mark a name as bound.  If the name has been bound previously in
+-- the program, report a type error.
+bound :: VName -> TypeM lore ()
+bound name = do already_seen <- gets $ HS.member name
+                when already_seen $
+                  bad $ TypeError $ "Name " ++ pretty name ++ " bound twice"
+                modify $ HS.insert name
 
 occur :: Occurences -> TypeM lore ()
 occur = tell . Consumption
@@ -383,11 +392,7 @@ binding bnds = check . local (`bindVars` bnds)
         -- Check whether the bound variables have been used correctly
         -- within their scope.
         check m = do
-          already_bound <- asks envVtable
-          case filter (`HM.member` already_bound) $ HM.keys bnds of
-            []  -> return ()
-            v:_ -> bad $ TypeError $
-                   "Variable " ++ pretty v ++ " being redefined."
+          mapM_ bound $ HM.keys bnds
           (a, os) <- collectOccurences m
           tell $ Consumption $ unOccur boundnameset os
           return a
