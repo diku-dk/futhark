@@ -971,21 +971,21 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
   (p_scope, p_sig, psig_e') <- checkSigExp psig_e
   bindSpaced [(Structure, p)] $ do
     p' <- checkName Structure p loc
-    (body_scope, body_e') <- do
-      let in_body_scope = mempty { envModTable = HM.singleton p $ ModMod p_scope }
-      local (in_body_scope<>) $ checkModExp body_e
-    (maybe_fsig_e', scope') <-
-      case maybe_fsig_e of
-        Nothing ->
-          return (Nothing, body_scope)
-        Just fsig_e -> do
-          (_, fsig, fsig_e') <- checkSigExp fsig_e
-          (scope', _) <- liftEither $ matchScopeToSig fsig body_scope loc
-          return (Just fsig_e', scope')
-    return (mempty { envModTable =
+    let in_body_scope = mempty { envModTable = HM.singleton p $ ModMod p_scope }
+    local (in_body_scope<>) $ do
+      (body_scope, body_e') <- checkModExp body_e
+      (maybe_fsig_e', scope') <-
+        case maybe_fsig_e of
+          Nothing ->
+            return (Nothing, body_scope)
+          Just fsig_e -> do
+            (_, fsig, fsig_e') <- checkSigExp fsig_e
+            (scope', _) <- liftEither $ matchScopeToSig fsig body_scope loc
+            return (Just fsig_e', scope')
+      return (mempty { envModTable =
                        HM.singleton name $
                        ModFunctor $ FunctorF $ apply scope' p_sig },
-            FunctorBind name' (p', psig_e') maybe_fsig_e' body_e' loc)
+              FunctorBind name' (p', psig_e') maybe_fsig_e' body_e' loc)
 
   where apply body_scope p_sig applyloc a_scope = do
           (_, sig_subst) <- liftEither $ matchScopeToSig p_sig a_scope applyloc
@@ -2140,7 +2140,8 @@ matchScopeToSig sig scope loc = do
 
 substituteTypesInScope :: HM.HashMap VName StructType -> Scope -> Scope
 substituteTypesInScope substs scope =
-  scope { envVtable = HM.map subV $ envVtable scope }
+  scope { envVtable    = HM.map subV $ envVtable scope
+        , envTypeTable = HM.map subT $ envTypeTable scope }
   where subV (BoundV t) =
           BoundV $ fromStruct $ toStructural $
           substituteTypes substs $
@@ -2149,6 +2150,8 @@ substituteTypesInScope substs scope =
           BoundF (map (substituteTypes substs) ts,
                   substituteTypes substs t)
         subV b = b
+
+        subT (TypeAbbr t) = TypeAbbr $ substituteTypes substs t
 
 substituteTypes :: HM.HashMap VName StructType -> StructType -> StructType
 substituteTypes substs (TypeVar v)
