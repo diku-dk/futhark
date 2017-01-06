@@ -674,6 +674,9 @@ unifyTypes :: Monoid (as vn) =>
 unifyTypes (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
+unifyTypes (TypeVar t1) (TypeVar t2)
+  | t1 == t2  = Just $ TypeVar t1
+  | otherwise = Nothing
 unifyTypes (Array at1) (Array at2) =
   Array <$> unifyArrayTypes at1 at2
 unifyTypes (Tuple ts1) (Tuple ts2)
@@ -688,6 +691,9 @@ unifyArrayTypes :: Monoid (as vn) =>
 unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
   | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
     Just $ PrimArray bt1 shape1 (u1 <> u2) (als1 <> als2)
+unifyArrayTypes (PolyArray bt1 shape1 u1 als1) (PolyArray bt2 shape2 u2 als2)
+  | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
+    Just $ PolyArray bt1 shape1 (u1 <> u2) (als1 <> als2)
 unifyArrayTypes (TupleArray et1 shape1 u1) (TupleArray et2 shape2 u2)
   | shapeRank shape1 == shapeRank shape2 =
     TupleArray <$> zipWithM unifyTupleArrayElemTypes et1 et2 <*>
@@ -701,6 +707,9 @@ unifyTupleArrayElemTypes :: Monoid (as vn) =>
                          -> Maybe (TupleArrayElemTypeBase Rank (as vn))
 unifyTupleArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
   | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
+  | otherwise  = Nothing
+unifyTupleArrayElemTypes (PolyArrayElem bt1 als1 u1) (PolyArrayElem bt2 als2 u2)
+  | bt1 == bt2 = Just $ PolyArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
 unifyTupleArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
   ArrayArrayElem <$> unifyArrayTypes at1 at2
