@@ -393,7 +393,6 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
   let asArg t = (t, mempty)
       inttp   = Prim int32
       lamarrs'= map (`setOuterSize` Var (paramName chunk)) arrargs
-  TC.checkExtLambda lam $ asArg inttp : accargs ++ map asArg lamarrs'
   let acc_len= length accexps
   let lamrtp = take acc_len $ extLambdaReturnType lam
   unless (staticShapes (map TC.argType accargs) == lamrtp) $
