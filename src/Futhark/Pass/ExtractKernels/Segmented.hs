@@ -162,15 +162,19 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
     letExp (baseString arr <> "_indexed") $
            BasicOp $ Index cs arr slice
 
-  -- FIXME: seems like the 'arrs' part (from the main function) could be empty,
-  -- and this should be handled in a special way for the split. See
-  -- blockedPerThread for more details
-
+  -- a SplitArray on no arrays is invalid, so we need a special case if all_arrs
+  -- is empty. Rasmus does not beleive this will happen, but better be safe
   let split_stm =
-        Let (Pattern [PatElem (paramName chunk_size) BindVar $ paramType chunk_size]
-                               patelems_res_of_split)
-                      () $
-                      Op $ SplitArray ordering segment_size (Var index_within_segment)
+        if null all_arrs
+        then Let (Pattern []
+                  [PatElem (paramName chunk_size) BindVar $ paramType chunk_size])
+                 () $
+                 Op $ SplitSpace ordering segment_size (Var index_within_segment)
+                                 threads_within_segment elements_per_thread
+        else Let (Pattern [PatElem (paramName chunk_size) BindVar $ paramType chunk_size]
+                          patelems_res_of_split)
+                 () $
+                 Op $ SplitArray ordering segment_size (Var index_within_segment)
                                  threads_within_segment elements_per_thread
                                  all_arrs_indexed
 
