@@ -22,7 +22,6 @@ module Language.Futhark.Attributes
   , patternStructType
 
   -- * Queries on types
-  , primType
   , uniqueness
   , unique
   , tupleArrayElemUniqueness
@@ -101,6 +100,7 @@ arrayRank = shapeRank . arrayShape
 arrayShape :: ArrayShape shape =>
               TypeBase shape as -> shape
 arrayShape (Array (PrimArray _ ds _ _)) = ds
+arrayShape (Array (PolyArray _ ds _ _)) = ds
 arrayShape (Array (TupleArray _ ds _))  = ds
 arrayShape _                            = mempty
 
@@ -357,18 +357,13 @@ peelArray n (Array (TupleArray ts shape _))
 peelArray n (Array (PrimArray et shape u als)) = do
   shape' <- stripDims n shape
   return $ Array $ PrimArray et shape' u als
+peelArray n (Array (PolyArray et shape u als)) = do
+  shape' <- stripDims n shape
+  return $ Array $ PolyArray et shape' u als
 peelArray n (Array (TupleArray et shape u)) = do
   shape' <- stripDims n shape
   return $ Array $ TupleArray et shape' u
 peelArray _ _ = Nothing
-
--- | A type is a primitive type if it is not an array and any component
--- types are prim types.
-primType :: TypeBase shape as -> Bool
-primType (Tuple ts) = all primType ts
-primType (Prim _)   = True
-primType (TypeVar _) = True
-primType (Array _)  = False
 
 -- | Remove names from a type - this involves removing all size
 -- annotations from arrays, as well as all aliasing.
@@ -439,6 +434,10 @@ stripArray n (Array (PrimArray et shape u als))
   | Just shape' <- stripDims n shape =
     Array $ PrimArray et shape' u als
   | otherwise = Prim et
+stripArray n (Array (PolyArray et shape u als))
+  | Just shape' <- stripDims n shape =
+    Array $ PolyArray et shape' u als
+  | otherwise = TypeVar et
 stripArray n (Array (TupleArray et shape u))
   | Just shape' <- stripDims n shape =
     Array $ TupleArray et shape' u
