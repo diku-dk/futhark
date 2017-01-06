@@ -59,7 +59,7 @@ instance Applicative (ErrorIO e) where
   (<*>) = ap
   pure = return
 
--- | Parse an entire Futhark program from the given 'String', using
+-- | Parse an entire Futhark program from the given 'T.Text', using
 -- the 'FilePath' as the source name for error messages and the
 -- relative path to use for includes, and parsing and reacting to all
 -- headers.
