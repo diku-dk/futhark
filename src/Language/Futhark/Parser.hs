@@ -16,19 +16,21 @@ module Language.Futhark.Parser
   where
 
 import Control.Applicative
+import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Data.Maybe (mapMaybe)
 import Data.List (intersect, (\\))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import System.FilePath (takeDirectory, (</>), (<.>))
+import System.FilePath (takeDirectory, (</>), (<.>), splitPath, joinPath, dropExtension)
 
 import Prelude
 
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Parser.Parser
+import Language.Futhark.Futlib
 
 -- Needed by @parseFuthark@, since that function might read files.  Kept as
 -- simple as possible and without external dependencies.
@@ -97,9 +99,14 @@ parseFuthark fp0 s0 =
             (alreadyIncluded, baseProg) $ reverse newIncludes
 
         includeInclude :: [FilePath] -> [FilePath] -> FilePath
-                          -> ErrorIO ParseError ([FilePath], UncheckedProg)
+                       -> ErrorIO ParseError ([FilePath], UncheckedProg)
         includeInclude alreadyIncluded includeSources newInclude = do
-          t <- liftIO $ T.readFile newInclude
+          let ifFileNotFound e =
+                -- One more chance - maybe it's a builtin.
+                case lookup (dropExtension $ dropSearchDir newInclude) futlib of
+                  Just s  -> return s
+                  Nothing -> throw (e::IOError)
+          t <- liftIO $ T.readFile newInclude `catch` ifFileNotFound
           parseWithIncludes alreadyIncluded includeSources (newInclude, t)
 
         mergePrograms :: UncheckedProg -> UncheckedProg -> UncheckedProg
@@ -109,6 +116,10 @@ parseFuthark fp0 s0 =
         headerInclude (Include strings) =
           Just $ foldl (</>) search_dir strings <.> "fut"
 
+        -- | Remove the search directory.
+        dropSearchDir = joinPath .
+                        drop (length $ splitPath search_dir) .
+                        splitPath
         search_dir = takeDirectory fp0
 
 -- | Parse an Futhark expression from the given 'String', using the

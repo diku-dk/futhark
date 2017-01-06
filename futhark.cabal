@@ -191,6 +191,7 @@ Library
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
+                   Language.Futhark.Futlib
                    Language.Futhark.Parser
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
