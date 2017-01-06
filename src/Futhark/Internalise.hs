@@ -90,8 +90,8 @@ mkFtableExpansion = fmap HM.fromList . mapM funFrom
                                , externalFun = (rettype,
                                                 map E.patternStructType params)
                                })
-        funFrom (E.ConstDec (E.ConstBind name t e loc)) =
-          funFrom $ E.FunDec $ E.FunBind False name Nothing (expandedType t) [] e loc
+        funFrom (E.ConstDec (E.ConstBind name _ t e loc)) =
+          funFrom $ E.FunDec $ E.FunBind False name Nothing t [] e loc
 
 
 nextDec :: [E.Dec] -> (Either [E.ValDec] E.Dec, [E.Dec])
@@ -133,8 +133,8 @@ internaliseDecs ds =
 internaliseValDec :: E.ValDec -> InternaliseM I.FunDef
 internaliseValDec (E.FunDec fb) =
   internaliseFun fb
-internaliseValDec (E.ConstDec (E.ConstBind name t e loc)) =
-  internaliseFun $ E.FunBind False name Nothing (expandedType t) [] e loc
+internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
+  internaliseFun $ E.FunBind False name Nothing t [] e loc
 
 internaliseModExp :: E.StructBind
                   -> ([I.FunDef] -> InternaliseM a)

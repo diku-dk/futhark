@@ -374,8 +374,11 @@ Fun     : fun id Params MaybeAscription '=' Exp
 ;
 
 Const : val id ':' UserTypeDecl '=' Exp
-      { let L loc (ID name) = $2
-        in ConstBind name $4 $6 loc }
+        { let L loc (ID name) = $2
+          in ConstBind name (Just $ declaredType $4) NoInfo $6 loc }
+      | val id '=' Exp
+        { let L loc (ID name) = $2
+          in ConstBind name Nothing NoInfo $4 loc }
 
 SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
              : UserTypeDecl

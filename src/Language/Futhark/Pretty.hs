@@ -384,8 +384,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunBindB
                        Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstBindBase ty vn) where
-  ppr (ConstBind name t e _) =
-    text "val" <+> ppr name <> text ":" <+> ppr t <+> text "+" <+> ppr e
+  ppr (ConstBind name maybe_t _ e _) =
+    text "val" <+> ppr name <> t' <+> text "=" <+> ppr e
+    where t' = case maybe_t of Just t -> text ":" <+> ppr t
+                               Nothing -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig

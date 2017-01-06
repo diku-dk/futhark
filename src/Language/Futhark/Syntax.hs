@@ -643,7 +643,8 @@ instance Located (FunBindBase f vn) where
 
 -- | Constant declaration
 data ConstBindBase f vn = ConstBind { constBindName     :: vn
-                                    , constBindType     :: TypeDeclBase f vn
+                                    , constBindTypeDecl :: Maybe (UserType vn)
+                                    , constBindType     :: f (StructTypeBase vn)
                                     , constBindDef      :: ExpBase f vn
                                     , constBindLocation :: SrcLoc
                                     }

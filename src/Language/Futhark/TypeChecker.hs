@@ -193,7 +193,8 @@ data ModBinding = ModMod Scope
 
 data Binding = BoundV Type
              | BoundF FunBinding
-             | UnknownF
+             | UnknownF [StructType]
+             | UnknownV
              | WasConsumed SrcLoc
              deriving (Show)
 
@@ -473,14 +474,16 @@ noUnique :: TypeM a -> TypeM a
 noUnique = local (\env -> env { envVtable = HM.map set $ envVtable env})
   where set (BoundV t)        = BoundV $ t `setUniqueness` Nonunique
         set (BoundF f)        = BoundF f
-        set UnknownF          = UnknownF
+        set (UnknownF ts)     = UnknownF ts
+        set UnknownV          = UnknownV
         set (WasConsumed loc) = WasConsumed loc
 
 onlySelfAliasing :: TypeM a -> TypeM a
 onlySelfAliasing = local (\env -> env { envVtable = HM.mapWithKey set $ envVtable env})
   where set k (BoundV t)        = BoundV $ t `addAliases` HS.intersection (HS.singleton k)
         set _ (BoundF f)        = BoundF f
-        set _ UnknownF          = UnknownF
+        set _ (UnknownF ts)     = UnknownF ts
+        set _ UnknownV          = UnknownV
         set _ (WasConsumed loc) = WasConsumed loc
 
 --- General binding.
@@ -620,7 +623,8 @@ checkVar qn loc = do
     Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                     | otherwise -> return (qn', t)
     Just (BoundF _) -> bad $ FunctionIsNotValue loc qn
-    Just UnknownF -> bad $ FunctionIsNotValue loc qn
+    Just UnknownF{} -> bad $ FunctionIsNotValue loc qn
+    Just UnknownV -> bad $ TypeError loc $ pretty qn ++ " has unknown type"
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
 lookupFunction :: QualName Name -> SrcLoc -> TypeM (QualName VName, FunBinding)
@@ -630,7 +634,8 @@ lookupFunction qn loc = do
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
     Just (BoundV t) -> bad $ ValueIsNotFunction loc qn t
-    Just UnknownF -> bad $ UndeclaredFunctionReturnType loc qn
+    Just UnknownF{} -> bad $ UndeclaredFunctionReturnType loc qn
+    Just UnknownV -> bad $ TypeError loc $ pretty qn ++ " has unknown type"
     Just (BoundF f) -> return (qn', f)
 
 lookupType :: SrcLoc -> QualName Name -> TypeM (QualName VName, StructType)
@@ -762,8 +767,7 @@ chompDecs xs                = ([], xs)
 
 buildScopeFromDecs :: [ValDecBase NoInfo Name]
                    -> TypeM Scope
-buildScopeFromDecs [] = ask
-buildScopeFromDecs decs = foldM expandV mempty decs
+buildScopeFromDecs = foldM expandV mempty
   where
     paramDeclaredType (PatternAscription _ t) =
       Just $ declaredType t
@@ -772,7 +776,7 @@ buildScopeFromDecs decs = foldM expandV mempty decs
     paramDeclaredType _ =
       Nothing
 
-    expandV scope (FunDec (FunBind _ fname (Just ret) _ params _ loc)) = do
+    expandV scope (FunDec (FunBind _ fname maybe_ret _ params _ loc)) = do
       fname' <- checkName Term fname loc
       argtypes <- forM params $ \param ->
         case paramDeclaredType param of
@@ -780,31 +784,43 @@ buildScopeFromDecs decs = foldM expandV mempty decs
           Nothing -> bad $ TypeError (srclocOf param) $
                      "Missing type information for parameter " ++
                      pretty param
-      (_, ret') <- checkUserTypeNoDims ret
       argtypes' <- mapM (fmap snd . checkUserTypeNoDims) argtypes
-      return scope { envVtable = HM.insert fname' (BoundF (argtypes', ret')) $
+      boundf <- case maybe_ret of
+        Just ret -> do (_, ret') <- checkUserTypeNoDims ret
+                       return $ BoundF (argtypes', ret')
+        Nothing -> return $ UnknownF argtypes'
+      return scope { envVtable = HM.insert fname' boundf $
                                  envVtable scope
                    , envNameMap = HM.insert (Term, fname) fname' $
                                   envNameMap scope
                    }
 
-    expandV scope (FunDec (FunBind _ fname Nothing _ _ _ loc)) = do
-      fname' <- checkName Term fname loc
-      return scope { envVtable = HM.insert fname' UnknownF $
-                                 envVtable scope
-                   , envNameMap = HM.insert (Term, fname) fname' $
-                                  envNameMap scope
-                   }
-
-    expandV scope (ConstDec (ConstBind cname (TypeDecl t NoInfo) _ loc)) = do
+    expandV scope (ConstDec (ConstBind cname maybe_t NoInfo _ loc)) = do
       cname' <- checkName Term cname loc
-      (_, t') <- checkUserTypeNoDims t
-      let entry = BoundV $ removeShapeAnnotations $ t' `addAliases` mempty
+      entry <- case maybe_t of
+        Just t -> do (_, st') <- checkUserTypeNoDims t
+                     return $ BoundV $ removeShapeAnnotations $ fromStruct st'
+        Nothing -> return UnknownV
       return scope { envVtable = HM.insert cname' entry $
                                  envVtable scope
                    , envNameMap = HM.insert (Term, cname) cname' $
                                   envNameMap scope
                    }
+
+valDecScope :: ValDecBase Info VName -> Scope
+valDecScope (FunDec fb) =
+  mempty { envVtable =
+             HM.singleton (funBindName fb)
+             (BoundF (map paramType (funBindParams fb),
+                      unInfo $ funBindRetType fb))
+         }
+  where paramType :: Pattern -> StructType
+        paramType = vacuousShapeAnnotations . toStruct . patternType
+valDecScope (ConstDec cb) =
+  mempty { envVtable =
+             HM.singleton (constBindName cb)
+             (BoundV $ removeShapeAnnotations $ fromStruct $ unInfo $ constBindType cb)
+         }
 
 -- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
@@ -833,7 +849,7 @@ checkForDuplicateDecs =
         f (ValDec (FunDec (FunBind _ name _ _ _ _ loc))) =
           check Term name loc
 
-        f (ValDec (ConstDec (ConstBind name _ _ loc))) =
+        f (ValDec (ConstDec (ConstBind name _ _ _ loc))) =
           check Term name loc
 
         f (TypeDec (TypeBind name _ loc)) =
@@ -1066,28 +1082,47 @@ checkDecs decs = do
 
   bindSpaced bound $ do
     t_and_f_scope <- buildScopeFromDecs t_and_f_decs
-    local (t_and_f_scope<>) $ do
-      t_and_f_decs' <- checkValDecs t_and_f_decs
+    local (t_and_f_scope<>) $ checkValDecs t_and_f_decs $ do
       (scope, rest') <- checkDecs rest
-      return (scope<>t_and_f_scope , map ValDec t_and_f_decs' ++ rest')
+      return (scope <> mempty { envNameMap = envNameMap t_and_f_scope },
+              rest')
 
   where lhs (FunDec dec)  = [(Term, funBindName dec)]
         lhs (ConstDec dec) = [(Term, constBindName dec)]
 
-checkValDecs :: [ValDecBase NoInfo Name] -> TypeM [ValDecBase Info VName]
-checkValDecs = mapM checkValDec
-  where checkValDec (FunDec fundef) = FunDec <$> checkFun fundef
-        checkValDec (ConstDec constdec) = ConstDec <$> checkConst constdec
+checkValDecs :: [ValDecBase NoInfo Name]
+             -> TypeM (Scope, [DecBase Info VName])
+             -> TypeM (Scope, [DecBase Info VName])
+checkValDecs [] m = m
+checkValDecs (FunDec fundec:vds) m = do
+  fundec' <- checkFun fundec
+  let ext = valDecScope $ FunDec fundec'
+  local (ext<>) $ do
+    (scope, vds') <- checkValDecs vds m
+    return (scope <> ext, ValDec (FunDec fundec') : vds')
+checkValDecs (ConstDec constdec:vds) m = do
+  constdec' <- checkConst constdec
+  let ext = valDecScope $ ConstDec constdec'
+  local (ext<>) $ do
+    (scope, vds') <- checkValDecs vds m
+    return (scope <> ext, ValDec (ConstDec constdec') : vds')
 
 checkConst :: ConstBindBase NoInfo Name -> TypeM ConstBind
-checkConst (ConstBind name t e loc) = do
+checkConst (ConstBind name maybe_t NoInfo e loc) = do
   name' <- checkName Term name loc
-  t' <- checkTypeDecl t
-  let expanded_type = unInfo $ expandedType t'
-  when (anythingUnique expanded_type) $
-    bad $ UniqueConstType loc name $ toStructural expanded_type
-  e' <- require [toStructural expanded_type] =<< checkExp e
-  return $ ConstBind name' t' e' loc
+  (maybe_t', e') <- case maybe_t of
+    Just t  -> do
+      (tdecl, tdecl_type) <- checkUserType t
+      let t_structural = toStructural tdecl_type
+      when (anythingUnique t_structural) $
+        bad $ UniqueConstType loc name t_structural
+      e' <- require [t_structural] =<< checkExp e
+      return (Just tdecl, e')
+    Nothing -> do
+      e' <- checkExp e
+      return (Nothing, e')
+  let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
+  return $ ConstBind name' maybe_t' (Info e_t) e' loc
   where anythingUnique (Tuple ts) = any anythingUnique ts
         anythingUnique et         = unique et
 
@@ -2216,8 +2251,10 @@ newNamesForScope orig_scope = do
                  (map (f substs) vs)
 
         substituteInBinding :: HM.HashMap VName VName -> Binding -> Binding
-        substituteInBinding _ UnknownF =
-          UnknownF
+        substituteInBinding substs (UnknownF ts) =
+          UnknownF $ map (substituteInType substs) ts
+        substituteInBinding _ UnknownV =
+          UnknownV
         substituteInBinding substs (BoundV t) =
           BoundV $ fromStruct $ toStructural $
           substituteInType substs $
