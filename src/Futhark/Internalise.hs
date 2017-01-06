@@ -153,14 +153,28 @@ internaliseModExp sb m =
       ds <- lookupModule v'
       bindingModule (E.structName sb) ds $
         m []
-    E.ModApply v _ (Info subst) _ -> do
+    E.ModApply v arg (Info subst) _ -> internaliseModExp' arg $ \arg_funs -> do
       v' <- lookupSubst v
       me <- lookupFunctor v'
       let sb' = sb { structExp = me }
-      withDecSubsts subst $ internaliseModExp sb' m
+      withDecSubsts subst $ internaliseModExp sb' $ m . (arg_funs++)
   where subst_from_sb = case structSignature sb of
                           Just (_, Info substs) -> substs
                           Nothing               -> mempty
+
+internaliseModExp' :: E.ModExp
+                   -> ([I.FunDef] -> InternaliseM a)
+                   -> InternaliseM a
+internaliseModExp' E.ModVar{} m = m []
+internaliseModExp' (E.ModDecs ds _) m = do
+  ((ftable_expansion, ttable_expansion), funs) <- internaliseDecs ds
+  bindingFunctions ftable_expansion $
+    bindingTypes ttable_expansion $
+    m funs
+internaliseModExp' (E.ModApply v arg (Info subst) _) m = internaliseModExp' arg $ \arg_funs -> do
+  v' <- lookupSubst v
+  me <- lookupFunctor v'
+  withDecSubsts subst $ internaliseModExp' me $ m . (arg_funs++)
 
 internaliseFun :: E.FunBind -> InternaliseM I.FunDef
 internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
