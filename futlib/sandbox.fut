@@ -1,45 +1,80 @@
+module type EQ {
+type t
+val eq: t -> t -> bool
+}
+
+module type ORD {
+type t
+val eq: t -> t -> bool
+val lt: t -> t -> bool
+val gt: t -> t -> bool
+}
+
 module type NUMERIC {
-type num
-val plus: num -> num -> num
-val sub: num -> num -> num
-val mult: num -> num -> num
-val one: num
-val zero: num
-val eq: num -> num -> bool
-val lt: num -> num -> bool
-val gt: num -> num -> bool
+type t
+val plus: t -> t -> t
+val sub: t -> t -> t
+val mult: t -> t -> t
+val one: t
+val zero: t
+val eq: t -> t -> bool
+val lt: t -> t -> bool
+val gt: t -> t -> bool
 }
 
 module I32 {
-type num = int
-fun plus (x: int) (y: int): int = x + y
-fun sub (x: int) (y: int): int = x - y
-fun mult (x: int) (y: int): int = x * y
-val one: int = 1
-val zero: int = 0
-fun eq (x: int) (y: int): bool = x == y
-fun lt (x: int) (y: int): bool = x < y
-fun gt (x: int) (y: int): bool = x > y
+type t = int
+
+fun plus (x: int) (y: int) = x + y
+fun sub  (x: int) (y: int) = x - y
+fun mult (x: int) (y: int) = x * y
+
+val one = 1
+val zero = 0
+
+fun eq (x: int) (y: int) = x == y
+fun lt (x: int) (y: int) = x < y
+fun gt (x: int) (y: int) = x > y
 }
 
 module F32 {
-type num = f32
-fun plus (x: f32) (y: f32): f32 = x + y
-fun sub (x: f32) (y: f32): f32 = x - y
-fun mult (x: f32) (y: f32): f32 = x * y
-val one: f32 = 1f32
-val zero: f32 = 0f32
-fun eq (x: f32) (y: f32): bool = x == y
-fun lt (x: f32) (y: f32): bool = x < y
-fun gt (x: f32) (y: f32): bool = x > y
+type t = f32
+
+fun plus (x: f32) (y: f32) = x + y
+fun sub  (x: f32) (y: f32) = x - y
+fun mult (x: f32) (y: f32) = x * y
+
+val one = 1f32
+val zero = 0f32
+
+fun eq (x: f32) (y: f32) = x == y
+fun lt (x: f32) (y: f32) = x < y
+fun gt (x: f32) (y: f32) = x > y
+}
+
+module Ordering(T: ORD) {
+fun max (x: T.t) (y: T.t) =
+  if T.gt x y then x else y
+
+fun min (x: T.t) (y: T.t) =
+  if T.gt x y then y else x
+
+fun max_elem (x: T.t) (xs: [n]T.t) =
+  reduce max x xs
+
+fun min_elem (x: T.t) (xs: [n]T.t) =
+  reduce min x xs
 }
 
 module Numerics(T: NUMERIC) {
-fun fact (n: T.num): T.num =
+fun fact (n: T.t): T.t =
   if T.eq n T.zero
   then T.one
   else T.mult n (fact (T.sub n T.one))
 
-fun dotprod (xs: [n]T.num) (ys: [n]T.num): T.num =
+fun dotprod (xs: [n]T.t) (ys: [n]T.t): T.t =
   reduce T.mult T.one (map T.plus xs ys)
+
+fun matmult (xss: [n][p]T.t) (yss: [p][m]T.t): [n][m]T.t =
+  map (fn xs => map (dotprod xs) (transpose yss)) xss
 }
