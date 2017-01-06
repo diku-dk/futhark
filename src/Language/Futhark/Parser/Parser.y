@@ -14,6 +14,11 @@ module Language.Futhark.Parser.Parser
   , getLinesFromTexts
   , getNoLines
   , newParserEnv
+
+  , parse
+  , ParseError(..)
+  , parseExpIncr
+  , parseExpIncrIO
   )
   where
 
@@ -938,4 +943,52 @@ lexer cont = do
 parseError :: L Token -> ParserMonad a
 parseError (L _ EOF) = throwError "Parse error: End of file"
 parseError tok       = throwError $ "Parse error at " ++ locStr (srclocOf tok)
+
+--- Now for the parser interface.
+
+-- | A parse error.  Use 'show' to get a human-readable description.
+data ParseError = ParseError String
+
+instance Show ParseError where
+  show (ParseError s) = s
+
+parseInMonad :: ParserMonad a -> FilePath -> T.Text
+             -> ReadLineMonad (Either ParseError a)
+parseInMonad p file program =
+  either (Left . ParseError) Right <$> either (return . Left)
+  (evalStateT (evalStateT (runExceptT p) env))
+  (scanTokens file program)
+  where env = newParserEnv file Int32 Float64
+
+parseIncrementalIO :: ParserMonad a -> FilePath -> T.Text
+                   -> IO (Either ParseError a)
+parseIncrementalIO p file program =
+  getLinesFromIO $ parseInMonad p file program
+
+parseIncremental :: ParserMonad a -> FilePath -> T.Text
+                 -> Either ParseError a
+parseIncremental p file program =
+  either (Left . ParseError) id
+  $ getLinesFromTexts (T.lines program)
+  $ parseInMonad p file mempty
+
+parse :: ParserMonad a -> FilePath -> T.Text
+      -> Either ParseError a
+parse p file program =
+  either (Left . ParseError) id
+  $ getNoLines $ parseInMonad p file program
+
+-- | Parse an Futhark expression greedily from the given 'String', only parsing
+-- enough lines to get a correct expression, using the 'FilePath' as the source
+-- name for error messages.
+parseExpIncr :: FilePath -> T.Text
+             -> Either ParseError UncheckedExp
+parseExpIncr = parseIncremental expression
+
+-- | Parse an Futhark expression incrementally from IO 'getLine' calls, using the
+-- 'FilePath' as the source name for error messages.
+parseExpIncrIO :: FilePath -> T.Text
+               -> IO (Either ParseError UncheckedExp)
+parseExpIncrIO = parseIncrementalIO expression
+
 }
