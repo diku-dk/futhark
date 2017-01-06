@@ -17,11 +17,9 @@ module Language.Futhark.Parser
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Trans.State
 import Control.Monad.Except
 import Data.Maybe (mapMaybe)
 import Data.List (intersect, (\\))
-import Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.FilePath (takeDirectory, (</>), (<.>))
@@ -31,52 +29,6 @@ import Prelude
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Parser.Parser
-import Language.Futhark.Parser.Lexer
-
--- | A parse error.  Use 'show' to get a human-readable description.
-data ParseError = ParseError String
-
-instance Show ParseError where
-  show (ParseError s) = s
-
-parseInMonad :: ParserMonad a -> FilePath -> T.Text
-             -> ReadLineMonad (Either ParseError a)
-parseInMonad p file program =
-  either (Left . ParseError) Right <$> either (return . Left)
-  (evalStateT (evalStateT (runExceptT p) env))
-  (scanTokens file program)
-  where env = newParserEnv file Int32 Float64
-
-parseIncrementalIO :: ParserMonad a -> FilePath -> T.Text
-                   -> IO (Either ParseError a)
-parseIncrementalIO p file program =
-  getLinesFromIO $ parseInMonad p file program
-
-parseIncremental :: ParserMonad a -> FilePath -> T.Text
-                 -> Either ParseError a
-parseIncremental p file program =
-  either (Left . ParseError) id
-  $ getLinesFromTexts (T.lines program)
-  $ parseInMonad p file mempty
-
-parse :: ParserMonad a -> FilePath -> T.Text
-      -> Either ParseError a
-parse p file program =
-  either (Left . ParseError) id
-  $ getNoLines $ parseInMonad p file program
-
--- | Parse an Futhark expression greedily from the given 'String', only parsing
--- enough lines to get a correct expression, using the 'FilePath' as the source
--- name for error messages.
-parseExpIncr :: FilePath -> T.Text
-             -> Either ParseError UncheckedExp
-parseExpIncr = parseIncremental expression
-
--- | Parse an Futhark expression incrementally from IO 'getLine' calls, using the
--- 'FilePath' as the source name for error messages.
-parseExpIncrIO :: FilePath -> T.Text
-               -> IO (Either ParseError UncheckedExp)
-parseExpIncrIO = parseIncrementalIO expression
 
 -- Needed by @parseFuthark@, since that function might read files.  Kept as
 -- simple as possible and without external dependencies.
@@ -114,7 +66,7 @@ instance Applicative (ErrorIO e) where
 --
 -- Fails on cyclical includes.  Ignores repeat non-cyclical includes.
 parseFuthark :: FilePath -> T.Text
-                -> IO (Either ParseError UncheckedProg)
+             -> IO (Either ParseError UncheckedProg)
 parseFuthark fp0 s0 =
   (snd <$>) <$> evalErrorIO (parseWithIncludes [fp0] [fp0] (fp0, s0))
   where parseWithIncludes :: [FilePath] -> [FilePath] -> (FilePath, T.Text)
