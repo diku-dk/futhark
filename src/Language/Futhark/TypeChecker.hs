@@ -2130,12 +2130,13 @@ matchScopeToSig sig scope loc = do
         impl_t'   = substituteTypes abs_subst_to_name spec_t
     case findBinding envVtable Term $ baseName name of
       Just (name', BoundV t)
-        | null spec_pts', toStructural t == toStructural spec_t' ->
+        | null spec_pts', toStructural t `subtypeOf` toStructural spec_t' ->
             return (name, (name', BoundV $ removeShapeAnnotations $ fromStruct impl_t'))
         | otherwise ->
             mismatchedVal name (spec_pts', spec_t') t
       Just (name', BoundF (pts, ret))
-        | pts == spec_pts', spec_t' == ret ->
+        | and (zipWith subtypeOf (map toStructural pts) (map toStructural spec_pts')),
+          toStructural ret `subtypeOf` toStructural spec_t' ->
             return (name, (name', BoundF (impl_pts', impl_t')))
         | otherwise -> mismatchedVal (baseName name) (spec_pts', spec_t') (pts, ret)
       Just (_, UnknownF{}) ->
