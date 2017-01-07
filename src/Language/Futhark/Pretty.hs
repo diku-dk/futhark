@@ -86,13 +86,13 @@ instance Pretty PrimValue where
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase (ShapeDecl vn) as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
-  ppr (PolyArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (PolyArrayElem bt _ u) = ppr u <> ppr (fmap baseName bt)
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
 instance Pretty (TupleArrayElemTypeBase Rank as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
-  ppr (PolyArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (PolyArrayElem bt _ u) = ppr u <> ppr (fmap baseName bt)
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
@@ -104,7 +104,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn)
           f (ConstDim n) = ppr n
 
   ppr (PolyArray et (ShapeDecl ds) u _) =
-    ppr u <> mconcat (map (brackets . f) ds) <> ppr et
+    ppr u <> mconcat (map (brackets . f) ds) <> ppr (fmap baseName et)
     where f AnyDim       = mempty
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
@@ -119,14 +119,14 @@ instance Pretty (ArrayTypeBase Rank as) where
   ppr (PrimArray et (Rank n) u _) =
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
   ppr (PolyArray et (Rank n) u _) =
-    ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
+    ppr u <> mconcat (replicate n (brackets mempty)) <> ppr (fmap baseName et)
   ppr (TupleArray ts (Rank n) u) =
     ppr u <> mconcat (replicate n (brackets mempty)) <>
     parens (commasep $ map ppr ts)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) where
   ppr (Prim et)    = ppr et
-  ppr (TypeVar et) = ppr et
+  ppr (TypeVar et) = ppr $ fmap baseName et
   ppr (Array at)   = ppr at
   ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 
@@ -142,7 +142,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
 
 instance Pretty (TypeBase Rank as) where
   ppr (Prim et)    = ppr et
-  ppr (TypeVar et) = ppr et
+  ppr (TypeVar et) = ppr $ fmap baseName et
   ppr (Array at)   = ppr at
   ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 

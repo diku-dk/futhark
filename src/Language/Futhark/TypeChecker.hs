@@ -905,7 +905,7 @@ checkSpecs (TypeSpec name loc : specs) =
     let tsig = HM.singleton name' SpecType
         tscope = mempty { envNameMap = HM.singleton (Type, name) name'
                         , envTypeTable = HM.singleton name' $
-                                         TypeAbbr $ TypeVar name'
+                                         TypeAbbr $ TypeVar $ qualName name'
                         }
     (scope, sig, specs') <- local (tscope<>) $ checkSpecs specs
     return (tscope <> scope,
@@ -2103,7 +2103,7 @@ matchScopeToSig sig scope loc = do
       Nothing                  -> missingType $ baseName name
 
   let abs_names = map fst $ HM.elems abs_substs
-      abs_subst_to_name = HM.map (TypeVar . fst) abs_substs
+      abs_subst_to_name = HM.map (TypeVar . qualName . fst) abs_substs
       abs_subst_to_type = HM.map snd abs_substs
       abs_name_substs   = HM.map fst abs_substs
 
@@ -2147,7 +2147,7 @@ matchScopeToSig sig scope loc = do
 
       names = HM.filter isInSig $ envNameMap scope
       types = abbrs <> HM.fromList (zip abs_names $
-                                    map (TypeAbbr . TypeVar) abs_names)
+                                    map (TypeAbbr . TypeVar . qualName) abs_names)
       scope' = Scope { envVtable = vals
                      , envTypeTable = types
                      , envSigTable = mempty
@@ -2199,14 +2199,14 @@ substituteTypesInScope substs scope =
 
 substituteTypes :: HM.HashMap VName StructType -> StructType -> StructType
 substituteTypes substs (TypeVar v)
-  | Just t <- HM.lookup v substs = t
-  | otherwise                    = TypeVar v
+  | Just t <- HM.lookup (qualLeaf v) substs = t
+  | otherwise                               = TypeVar v
 substituteTypes _ (Prim t) = Prim t
 substituteTypes substs (Array at) = substituteTypesInArray at
   where substituteTypesInArray (PrimArray t shape u ()) =
           Array $ PrimArray t shape u ()
         substituteTypesInArray (PolyArray v shape u ())
-          | Just t <- HM.lookup v substs =
+          | Just t <- HM.lookup (qualLeaf v) substs =
               arrayOf t shape u
           | otherwise =
               Array $ PolyArray v shape u ()
@@ -2279,4 +2279,5 @@ newNamesForScope orig_scope = do
           TypeAbbr $ substituteInType substs t
 
         substituteInType :: HM.HashMap VName VName -> StructType -> StructType
-        substituteInType substs = substituteTypes $ HM.map TypeVar substs
+        substituteInType substs = substituteTypes $
+                                  HM.map (TypeVar . qualName) substs
