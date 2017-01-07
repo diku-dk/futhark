@@ -386,7 +386,7 @@ Executable futhark-opencl
 Test-suite unit
   Type:              exitcode-stdio-1.0
 
-  hs-source-dirs:    tests
+  hs-source-dirs:    unittests
   Main-is:           futhark_tests.hs
   Default-language:  Haskell2010
   GHC-options:       -Wall
