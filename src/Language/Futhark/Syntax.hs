@@ -198,7 +198,7 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
 data TupleArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
-  | PolyArrayElem VName as Uniqueness
+  | PolyArrayElem (QualName VName) as Uniqueness
   | TupleArrayElem [TupleArrayElemTypeBase shape as]
   deriving (Show)
 
@@ -213,7 +213,7 @@ instance Eq shape =>
 data ArrayTypeBase shape as =
     PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
-  | PolyArray VName shape Uniqueness as
+  | PolyArray (QualName VName) shape Uniqueness as
     -- ^ An array whose elements are some polymorphic type.
   | TupleArray [TupleArrayElemTypeBase shape as] shape Uniqueness
     -- ^ An array whose elements are tuples.
@@ -234,7 +234,7 @@ instance Eq shape =>
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
                        | Tuple [TypeBase shape as]
-                       | TypeVar VName
+                       | TypeVar (QualName VName)
                           deriving (Eq, Show)
 
 
@@ -366,6 +366,9 @@ data QualName vn = QualName { qualQuals :: ![Name]
                             , qualLeaf :: !vn
                             }
   deriving (Eq, Ord, Show)
+
+instance Functor QualName where
+  fmap f (QualName qs leaf) = QualName qs $ f leaf
 
 instance Hashable vn => Hashable (QualName vn) where
   hashWithSalt salt (QualName quals leaf) =
