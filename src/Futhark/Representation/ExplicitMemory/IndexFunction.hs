@@ -69,6 +69,8 @@ instance (IntegralExp num, Eq num) => Eq (IxFun num) where
           eqIndex _ _ = False
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
     ixfun1 == ixfun2 && length shape1 == length shape2
+  Stride ixfun1 s1 == Stride ixfun2 s2 =
+    ixfun1 == ixfun2 && s1 == s2
   _ == _ = False
 
 instance Show num => Show (IxFun num) where

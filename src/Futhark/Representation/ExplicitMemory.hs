@@ -990,6 +990,7 @@ instance OpReturns InKernel where
           num_threads' = primExpFromSubExp int32 num_threads
           elems_per_thread' = primExpFromSubExp int32 elems_per_thread
           ext_shape = ExtShape $ Ext 0 : map Free row_dims
+          thread_id' = primExpFromSubExp int32 thread_id
       return $ ReturnsArray bt ext_shape NoUniqueness $ Just $ ReturnsInBlock mem $
         case o of
           InOrder ->
@@ -998,13 +999,7 @@ instance OpReturns InKernel where
             in IxFun.slice (IxFun.reshape ixfun newshape) $
                fullSliceNum (newDims newshape) [DimFix $ primExpFromSubExp int32 thread_id]
           Disorder ->
-            let newshape = [DimNew elems_per_thread', DimNew num_threads'] ++
-                           map (DimNew . primExpFromSubExp int32) row_dims
-                perm = [1,0] ++ [2..IxFun.rank ixfun]
-            in IxFun.slice
-               (IxFun.permute (IxFun.reshape ixfun newshape) perm) $
-               fullSliceNum (rearrangeShape perm $ newDims newshape)
-               [DimFix $ primExpFromSubExp int32 thread_id]
+            IxFun.strideIndex (IxFun.offsetIndex ixfun thread_id') num_threads'
 
   opReturns (Inner (GroupStream _ _ lam _ _)) =
     forM (groupStreamAccParams lam) $ \param ->
