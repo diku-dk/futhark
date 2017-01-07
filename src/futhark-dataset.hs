@@ -18,7 +18,7 @@ import System.Console.GetOpt
 import System.Random
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes (UncheckedUserType)
+import Language.Futhark.Attributes (UncheckedTypeExp)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 
@@ -108,15 +108,15 @@ data SimpleType = SimpleArray SimpleType Int
                 | SimplePrim PrimType
                   deriving (Show)
 
-toSimpleType :: UncheckedUserType -> Either String SimpleType
-toSimpleType (UserPrim t _) = Right $ SimplePrim t
-toSimpleType UserTuple{} = Left "Cannot handle tuples yet."
-toSimpleType (UserUnique t _) = toSimpleType t
-toSimpleType (UserArray t d _) =
+toSimpleType :: UncheckedTypeExp -> Either String SimpleType
+toSimpleType (TEPrim t _) = Right $ SimplePrim t
+toSimpleType TETuple{} = Left "Cannot handle tuples yet."
+toSimpleType (TEUnique t _) = toSimpleType t
+toSimpleType (TEArray t d _) =
   SimpleArray <$> toSimpleType t <*> constantDim d
   where constantDim (ConstDim k) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
-toSimpleType (UserTypeAlias v _) =
+toSimpleType (TEVar v _) =
   Left $ "Unknown type " ++ pretty v
 
 data SimpleValue = SimpleArrayValue [SimpleValue]

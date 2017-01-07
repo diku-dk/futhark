@@ -131,7 +131,7 @@ parseExp = parse expression
 -- | Parse an Futhark type from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseType :: FilePath -> T.Text
-          -> Either ParseError UncheckedUserType
+          -> Either ParseError UncheckedTypeExp
 parseType = parse futharkType
 
 -- | Parse an Futhark anonymous function from the given 'String', using the

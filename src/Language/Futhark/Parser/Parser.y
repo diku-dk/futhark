@@ -46,7 +46,7 @@ import Language.Futhark.Parser.Lexer
 }
 
 %name prog Prog
-%name futharkType UserType
+%name futharkType TypeExp
 %name expression Exp
 %name lambda FunAbstr
 %name anyValue Value
@@ -223,7 +223,7 @@ Decs :: { [DecBase f vn] }
 Dec :: { [DecBase f vn] }
     : Fun           { [ValDec $ FunDec $1] }
     | Const         { [ValDec $ ConstDec $1] }
-    | UserTypeAlias { map TypeDec $1 }
+    | TypeAbbr      { map TypeDec $1 }
     | SigBind       { [SigDec $1 ] }
     | StructBind    { [StructDec $1 ] }
     | FunctorBind   { [FunctorDec $1] }
@@ -300,7 +300,7 @@ Spec :: { SpecBase NoInfo Name }
       : val id ':' SigTypeDecl
         { let L loc (ID name) = $2; (ps, r) = $4
           in ValSpec name ps r loc  }
-      | type id '=' UserTypeDecl
+      | type id '=' TypeExpDecl
         { let L loc (ID name) = $2
           in TypeAbbrSpec (TypeBind name $4 loc) }
       | type id
@@ -373,7 +373,7 @@ Fun     : fun id Params MaybeAscription '=' Exp
                           in FunBind True name (fmap declaredType $4) NoInfo $3 $6 pos }
 ;
 
-Const : val id ':' UserTypeDecl '=' Exp
+Const : val id ':' TypeExpDecl '=' Exp
         { let L loc (ID name) = $2
           in ConstBind name (Just $ declaredType $4) NoInfo $6 loc }
       | val id '=' Exp
@@ -381,32 +381,32 @@ Const : val id ':' UserTypeDecl '=' Exp
           in ConstBind name Nothing NoInfo $4 loc }
 
 SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
-             : UserTypeDecl
+             : TypeExpDecl
                { ([], $1) }
-             | UserTypeDecl '->' SigTypeDecl
+             | TypeExpDecl '->' SigTypeDecl
                { let (ts, t) = $3 in ($1 : ts, t) }
 
-UserTypeDecl :: { TypeDeclBase NoInfo Name }
-             : UserType { TypeDecl $1 NoInfo }
+TypeExpDecl :: { TypeDeclBase NoInfo Name }
+             : TypeExp { TypeDecl $1 NoInfo }
 
-UserTypeAlias :: { [TypeBindBase f vn] }
-UserTypeAlias : type Aliases '=' UserTypeDecl
+TypeAbbr :: { [TypeBindBase f vn] }
+TypeAbbr : type Aliases '=' TypeExpDecl
                   { let aliases = $2
-                      in map (\(name, loc) -> TypeBind name $4 loc) aliases }
+                    in map (\(name, loc) -> TypeBind name $4 loc) aliases }
 ;
 
-UserType :: { UncheckedUserType }
-         : PrimType      { let (t,loc) = $1 in UserPrim t loc }
-         | '*' UserType  { UserUnique $2 $1 }
-         | '[' DimDecl ']' UserType { UserArray $4 $2 $1 }
-         | '(' ')'           { UserTuple [] $1 }
-         | '(' UserTypes ')' { UserTuple $2 $1 }
-         | QualName { UserTypeAlias (fst $1) (snd $1) }
+TypeExp :: { UncheckedTypeExp }
+         : PrimType                { let (t,loc) = $1 in TEPrim t loc }
+         | '*' TypeExp             { TEUnique $2 $1 }
+         | '[' DimDecl ']' TypeExp { TEArray $4 $2 $1 }
+         | '(' ')'                 { TETuple [] $1 }
+         | '(' TypeExps ')'        { TETuple $2 $1 }
+         | QualName                { TEVar (fst $1) (snd $1) }
 ;
 
-UserTypes :: { [UncheckedUserType] }
-UserTypes : UserType ',' UserTypes { $1 : $3 }
-          | UserType               { [$1] }
+TypeExps :: { [UncheckedTypeExp] }
+TypeExps : TypeExp ',' TypeExps { $1 : $3 }
+         | TypeExp              { [$1] }
 DimDecl :: { DimDecl Name }
         : id
           { let L _ (ID name) = $1
@@ -587,12 +587,12 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
                              return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
-     | empty '(' UserTypeDecl ')' { Empty $3 $1 }
-     | '(' Exp ')'                { $2 }
+     | empty '(' TypeExpDecl ')'   { Empty $3 $1 }
+     | '(' Exp ')'                 { $2 }
      | '(' Exp ')[' DimIndices ']' { Index $2 $4 $1 }
-     | '(' Exp ',' Exps ')'       { TupLit ($2:$4) $1 }
-     | '('      ')'               { TupLit [] $1 }
-     | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
+     | '(' Exp ',' Exps ')'        { TupLit ($2:$4) $1 }
+     | '('      ')'                { TupLit [] $1 }
+     | '[' Exps ']'                { ArrayLit $2 NoInfo $1 }
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
      | QualName { Var (fst $1) NoInfo (snd $1) }
@@ -663,10 +663,10 @@ Pattern : VarId { Id $1 }
       | '(' ')' { TuplePattern [] $1 }
       | '(' Pattern ')' { $2 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
-      | Pattern ':' UserTypeDecl { PatternAscription $1 $3 }
+      | Pattern ':' TypeExpDecl { PatternAscription $1 $3 }
 
 MaybeAscription :: { Maybe (TypeDeclBase NoInfo Name) }
-MaybeAscription : ':' UserTypeDecl { Just $2 }
+MaybeAscription : ':' TypeExpDecl  { Just $2 }
                 |                  { Nothing }
 
 Curry : Curry Atom

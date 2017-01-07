@@ -22,7 +22,7 @@ module Language.Futhark.Syntax
   , ShapeDecl (..)
   , Rank (..)
   , TypeBase(..)
-  , UserType(..)
+  , TypeExp(..)
   , TupleArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
@@ -82,8 +82,8 @@ import           Data.Array
 import           Data.Foldable
 import           Data.Functor
 import           Data.Hashable
-import qualified Data.HashSet                     as HS
 import qualified Data.HashMap.Lazy                as HM
+import qualified Data.HashSet                     as HS
 import           Data.Loc
 import           Data.Monoid
 import           Data.Traversable
@@ -244,19 +244,19 @@ type CompTypeBase vn = TypeBase Rank (Names vn)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
-data UserType vn = UserPrim PrimType SrcLoc
-                 | UserArray (UserType vn) (DimDecl vn) SrcLoc
-                 | UserTuple [UserType vn] SrcLoc
-                 | UserTypeAlias (QualName vn) SrcLoc
-                 | UserUnique (UserType vn) SrcLoc
+data TypeExp vn = TEPrim PrimType SrcLoc
+                 | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
+                 | TETuple [TypeExp vn] SrcLoc
+                 | TEVar (QualName vn) SrcLoc
+                 | TEUnique (TypeExp vn) SrcLoc
                  deriving (Eq, Show)
 
-instance Located (UserType vn) where
-  locOf (UserPrim _ loc)      = locOf loc
-  locOf (UserArray _ _ loc)   = locOf loc
-  locOf (UserTuple _ loc)     = locOf loc
-  locOf (UserTypeAlias _ loc) = locOf loc
-  locOf (UserUnique _ loc)    = locOf loc
+instance Located (TypeExp vn) where
+  locOf (TEPrim _ loc)    = locOf loc
+  locOf (TEArray _ _ loc) = locOf loc
+  locOf (TETuple _ loc)   = locOf loc
+  locOf (TEVar _ loc)     = locOf loc
+  locOf (TEUnique _ loc)  = locOf loc
 
 --
 -- | A "structural" type with shape annotations and no aliasing
@@ -275,7 +275,7 @@ type DeclTupleArrayElemTypeBase vn = TupleArrayElemTypeBase (ShapeDecl vn) ()
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
-  TypeDecl { declaredType :: UserType vn
+  TypeDecl { declaredType :: TypeExp vn
                              -- ^ The type declared by the user.
            , expandedType :: f (StructTypeBase vn)
                              -- ^ The type deduced by the type checker.
@@ -363,7 +363,7 @@ deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.
 data QualName vn = QualName { qualQuals :: ![Name]
-                            , qualLeaf :: !vn
+                            , qualLeaf  :: !vn
                             }
   deriving (Eq, Ord, Show)
 
@@ -633,7 +633,7 @@ instance Located (PatternBase f vn) where
 data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
                                 , funBindName       :: vn
-                                , funBindRetDecl    :: Maybe (UserType vn)
+                                , funBindRetDecl    :: Maybe (TypeExp vn)
                                 , funBindRetType    :: f (StructTypeBase vn)
                                 , funBindParams     :: [PatternBase f vn]
                                 , funBindBody       :: ExpBase f vn
@@ -646,7 +646,7 @@ instance Located (FunBindBase f vn) where
 
 -- | Constant declaration
 data ConstBindBase f vn = ConstBind { constBindName     :: vn
-                                    , constBindTypeDecl :: Maybe (UserType vn)
+                                    , constBindTypeDecl :: Maybe (TypeExp vn)
                                     , constBindType     :: f (StructTypeBase vn)
                                     , constBindDef      :: ExpBase f vn
                                     , constBindLocation :: SrcLoc
@@ -658,7 +658,7 @@ instance Located (ConstBindBase f vn) where
 
 -- | Type Declarations
 data TypeBindBase f vn = TypeBind { typeAlias        :: vn
-                                  , userType         :: TypeDeclBase f vn
+                                  , typeExp          :: TypeDeclBase f vn
                                   , typeBindLocation :: SrcLoc
                                   }
 deriving instance Showable f vn => Show (TypeBindBase f vn)
@@ -676,9 +676,9 @@ data SpecBase f vn = ValSpec  { specName     :: vn
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ loc) = locOf loc
+  locOf (ValSpec _ _ _ loc)  = locOf loc
   locOf (TypeAbbrSpec tbind) = locOf tbind
-  locOf (TypeSpec _ loc) = locOf loc
+  locOf (TypeSpec _ loc)     = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigSpecs [SpecBase f vn] SrcLoc
@@ -738,7 +738,7 @@ data ValDecBase f vn = FunDec (FunBindBase f vn)
 deriving instance Showable f vn => Show (ValDecBase f vn)
 
 instance Located (ValDecBase f vn) where
-  locOf (FunDec d) = locOf d
+  locOf (FunDec d)   = locOf d
   locOf (ConstDec d) = locOf d
 
 -- | A top-level binding.
@@ -750,10 +750,10 @@ data DecBase f vn = ValDec (ValDecBase f vn)
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
-  locOf (ValDec d) = locOf d
-  locOf (TypeDec d) = locOf d
-  locOf (SigDec d) = locOf d
-  locOf (StructDec d) = locOf d
+  locOf (ValDec d)     = locOf d
+  locOf (TypeDec d)    = locOf d
+  locOf (SigDec d)     = locOf d
+  locOf (StructDec d)  = locOf d
   locOf (FunctorDec d) = locOf d
 
 data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }

@@ -130,15 +130,15 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) 
   ppr (Array at)   = ppr at
   ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
-  ppr (UserPrim et _) = ppr et
-  ppr (UserUnique t _) = text "*" <> ppr t
-  ppr (UserArray at d _) = brackets (f d) <> ppr at
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
+  ppr (TEPrim et _) = ppr et
+  ppr (TEUnique t _) = text "*" <> ppr t
+  ppr (TEArray at d _) = brackets (f d) <> ppr at
     where f AnyDim       = mempty
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
-  ppr (UserTuple ts _) = parens $ commasep $ map ppr ts
-  ppr (UserTypeAlias name _) = ppr name
+  ppr (TETuple ts _) = parens $ commasep $ map ppr ts
+  ppr (TEVar name _) = ppr name
 
 instance Pretty (TypeBase Rank as) where
   ppr (Prim et)    = ppr et

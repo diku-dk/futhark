@@ -772,7 +772,7 @@ buildScopeFromDecs = foldM expandV mempty
     paramDeclaredType (PatternAscription _ t) =
       Just $ declaredType t
     paramDeclaredType (TuplePattern ps loc) =
-      UserTuple <$> mapM paramDeclaredType ps <*> pure loc
+      TETuple <$> mapM paramDeclaredType ps <*> pure loc
     paramDeclaredType _ =
       Nothing
 
@@ -784,9 +784,9 @@ buildScopeFromDecs = foldM expandV mempty
           Nothing -> bad $ TypeError (srclocOf param) $
                      "Missing type information for parameter " ++
                      pretty param
-      argtypes' <- mapM (fmap snd . checkUserTypeNoDims) argtypes
+      argtypes' <- mapM (fmap snd . checkTypeExpNoDims) argtypes
       boundf <- case maybe_ret of
-        Just ret -> do (_, ret') <- checkUserTypeNoDims ret
+        Just ret -> do (_, ret') <- checkTypeExpNoDims ret
                        return $ BoundF (argtypes', ret')
         Nothing -> return $ UnknownF argtypes'
       return scope { envVtable = HM.insert fname' boundf $
@@ -798,7 +798,7 @@ buildScopeFromDecs = foldM expandV mempty
     expandV scope (ConstDec (ConstBind cname maybe_t NoInfo _ loc)) = do
       cname' <- checkName Term cname loc
       entry <- case maybe_t of
-        Just t -> do (_, st') <- checkUserTypeNoDims t
+        Just t -> do (_, st') <- checkTypeExpNoDims t
                      return $ BoundV $ removeShapeAnnotations $ fromStruct st'
         Nothing -> return UnknownV
       return scope { envVtable = HM.insert cname' entry $
@@ -893,7 +893,7 @@ checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
     (tscope, tdec') <- checkTypeBind tdec
     let tsig = HM.singleton (typeAlias tdec') $
-               SpecTypeAbbr $ unInfo $ expandedType $ userType tdec'
+               SpecTypeAbbr $ unInfo $ expandedType $ typeExp tdec'
     (scope, sig, specs') <- local (tscope<>) $ checkSpecs specs
     return (tscope <> scope,
             tsig <> sig,
@@ -1112,7 +1112,7 @@ checkConst (ConstBind name maybe_t NoInfo e loc) = do
   name' <- checkName Term name loc
   (maybe_t', e') <- case maybe_t of
     Just t  -> do
-      (tdecl, tdecl_type) <- checkUserType t
+      (tdecl, tdecl_type) <- checkTypeExp t
       let t_structural = toStructural tdecl_type
       when (anythingUnique t_structural) $
         bad $ UniqueConstType loc name t_structural
@@ -1131,7 +1131,7 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
   fname' <- checkName Term fname loc
   bindingPatterns (zip params $ repeat NoneInferred) $ \params' -> do
     maybe_retdecl' <- case maybe_retdecl of
-                        Just rettype -> Just <$> checkUserType rettype
+                        Just rettype -> Just <$> checkTypeExp rettype
                         Nothing      -> return Nothing
 
     body' <- checkFunBody fname body (snd <$> maybe_retdecl') loc
@@ -2044,46 +2044,46 @@ checkDim loc (NamedDim name) = do
     _                   -> bad $ DimensionNotInteger loc name
 
 expandType :: (SrcLoc -> DimDecl Name -> TypeM (DimDecl VName))
-           -> UserType Name
-           -> TypeM (UserType VName, StructType)
-expandType _ (UserTypeAlias name loc) = do
+           -> TypeExp Name
+           -> TypeM (TypeExp VName, StructType)
+expandType _ (TEVar name loc) = do
   (name', t) <- lookupType loc name
-  return (UserTypeAlias name' loc, t)
-expandType _ (UserPrim prim loc) =
-  return (UserPrim prim loc, Prim prim)
-expandType look (UserTuple ts loc) = do
+  return (TEVar name' loc, t)
+expandType _ (TEPrim prim loc) =
+  return (TEPrim prim loc, Prim prim)
+expandType look (TETuple ts loc) = do
   (ts', ts_s) <- unzip <$> mapM (expandType look) ts
-  return (UserTuple ts' loc, Tuple ts_s)
-expandType look (UserArray t d loc) = do
+  return (TETuple ts' loc, Tuple ts_s)
+expandType look (TEArray t d loc) = do
   (t', st) <- expandType look t
   d' <- look loc d
-  return (UserArray t' d' loc, arrayOf st (ShapeDecl [d']) Nonunique)
-expandType look (UserUnique t loc) = do
+  return (TEArray t' d' loc, arrayOf st (ShapeDecl [d']) Nonunique)
+expandType look (TEUnique t loc) = do
   (t', st) <- expandType look t
   case st of
     Array{} -> return (t', st `setUniqueness` Unique)
     _       -> throwError $ InvalidUniqueness loc $ toStructural st
 
-checkUserType :: UserType Name -> TypeM (UserType VName, StructType)
-checkUserType = expandType checkDim
+checkTypeExp :: TypeExp Name -> TypeM (TypeExp VName, StructType)
+checkTypeExp = expandType checkDim
 
-checkUserTypeNoDims :: UserType Name -> TypeM (UserType VName, StructType)
-checkUserTypeNoDims = expandType $ \_ _ -> return AnyDim
+checkTypeExpNoDims :: TypeExp Name -> TypeM (TypeExp VName, StructType)
+checkTypeExpNoDims = expandType $ \_ _ -> return AnyDim
 
-checkUserTypeBindingDims :: UserType Name -> TypeM (UserType VName, StructType)
-checkUserTypeBindingDims = expandType checkBindingDim
+checkTypeExpBindingDims :: TypeExp Name -> TypeM (TypeExp VName, StructType)
+checkTypeExpBindingDims = expandType checkBindingDim
   where checkBindingDim _ AnyDim = return AnyDim
         checkBindingDim _ (ConstDim k) = return $ ConstDim k
         checkBindingDim loc (NamedDim name) = NamedDim <$> checkName Term name loc
 
 checkTypeDecl :: TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VName)
 checkTypeDecl (TypeDecl t NoInfo) = do
-  (t', st) <- checkUserType t
+  (t', st) <- checkTypeExp t
   return $ TypeDecl t' $ Info st
 
 checkBindingTypeDecl :: TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VName)
 checkBindingTypeDecl (TypeDecl t NoInfo) = do
-  (t', st) <- checkUserTypeBindingDims t
+  (t', st) <- checkTypeExpBindingDims t
   return $ TypeDecl t' $ Info st
 
 --- Signature matching
