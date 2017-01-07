@@ -57,6 +57,6 @@ do not require deep knowledge of the code base.
 Testing
 =======
 
-Run the `futhark-test data` to check how well we're doing.  Use
+Run the `futhark-test tests` to check how well we're doing.  Use
 `futhark-test -t` if you're in a hurry and only want to check that all
 the tests compile.
