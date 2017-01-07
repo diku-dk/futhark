@@ -2108,10 +2108,11 @@ matchScopeToSig sig scope loc = do
       abs_name_substs   = HM.map fst abs_substs
 
   -- Check that all type abbreviations are correctly defined.
-  abbr_substs <- fmap HM.fromList $ forM (sigTypeAbbrs sig) $ \(name,spec_t) ->
+  abbr_substs <- fmap HM.fromList $ forM (sigTypeAbbrs sig) $ \(name,spec_t) -> do
+    let spec_t' = substituteTypes abs_subst_to_type spec_t
     case findBinding envTypeTable Type (baseName name) of
       Just (name', TypeAbbr t)
-        | spec_t == t ->
+        | spec_t' == t ->
             return (name, (name', substituteTypes abs_subst_to_name spec_t))
         | otherwise ->
             mismatchedType (baseName name) spec_t t
