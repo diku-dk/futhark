@@ -1082,29 +1082,29 @@ checkDecs decs = do
 
   bindSpaced bound $ do
     t_and_f_scope <- buildScopeFromDecs t_and_f_decs
-    local (t_and_f_scope<>) $ checkValDecs t_and_f_decs $ do
-      (scope, rest') <- checkDecs rest
-      return (scope <> mempty { envNameMap = envNameMap t_and_f_scope },
-              rest')
+    local (t_and_f_scope<>) $ do
+      (scope, decs') <- checkValDecs t_and_f_decs rest
+      return (scope <> t_and_f_scope,
+              decs')
 
   where lhs (FunDec dec)  = [(Term, funBindName dec)]
         lhs (ConstDec dec) = [(Term, constBindName dec)]
 
 checkValDecs :: [ValDecBase NoInfo Name]
+             -> [DecBase NoInfo Name]
              -> TypeM (Scope, [DecBase Info VName])
-             -> TypeM (Scope, [DecBase Info VName])
-checkValDecs [] m = m
-checkValDecs (FunDec fundec:vds) m = do
+checkValDecs [] ds = checkDecs ds
+checkValDecs (FunDec fundec:vds) ds = do
   fundec' <- checkFun fundec
   let ext = valDecScope $ FunDec fundec'
   local (ext<>) $ do
-    (scope, vds') <- checkValDecs vds m
+    (scope, vds') <- checkValDecs vds ds
     return (scope <> ext, ValDec (FunDec fundec') : vds')
-checkValDecs (ConstDec constdec:vds) m = do
+checkValDecs (ConstDec constdec:vds) ds = do
   constdec' <- checkConst constdec
   let ext = valDecScope $ ConstDec constdec'
   local (ext<>) $ do
-    (scope, vds') <- checkValDecs vds m
+    (scope, vds') <- checkValDecs vds ds
     return (scope <> ext, ValDec (ConstDec constdec') : vds')
 
 checkConst :: ConstBindBase NoInfo Name -> TypeM ConstBind
