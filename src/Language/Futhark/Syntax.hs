@@ -205,6 +205,7 @@ data TupleArrayElemTypeBase shape as =
 instance Eq shape =>
          Eq (TupleArrayElemTypeBase shape as) where
   PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
+  PolyArrayElem bt1 _ u1 == PolyArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
   ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
   TupleArrayElem ts1     == TupleArrayElem ts2     = ts1 == ts2
   _                      == _                      = False
@@ -222,6 +223,8 @@ data ArrayTypeBase shape as =
 instance Eq shape =>
          Eq (ArrayTypeBase shape as) where
   PrimArray et1 dims1 u1 _ == PrimArray et2 dims2 u2 _ =
+    et1 == et2 && dims1 == dims2 && u1 == u2
+  PolyArray et1 dims1 u1 _ == PolyArray et2 dims2 u2 _ =
     et1 == et2 && dims1 == dims2 && u1 == u2
   TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
     ts1 == ts2 && dims1 == dims2 && u1 == u2
