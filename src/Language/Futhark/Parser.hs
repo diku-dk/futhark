@@ -22,7 +22,7 @@ import Data.Maybe (mapMaybe)
 import Data.List (intersect, (\\))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import System.FilePath (takeDirectory, (</>), (<.>), splitPath, joinPath, dropExtension)
+import System.FilePath (takeDirectory, (</>), (<.>), splitPath, joinPath)
 
 import Prelude
 
@@ -102,7 +102,7 @@ parseFuthark fp0 s0 =
         includeInclude alreadyIncluded includeSources newInclude = do
           let ifFileNotFound e =
                 -- One more chance - maybe it's a builtin.
-                case lookup (dropExtension $ dropSearchDir newInclude) futlib of
+                case lookup (dropSearchDir newInclude) futlib of
                   Just s  -> return s
                   Nothing -> throw (e::IOError)
           t <- liftIO $ T.readFile newInclude `catch` ifFileNotFound
