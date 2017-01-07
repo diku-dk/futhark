@@ -125,7 +125,7 @@ internaliseDecs ds =
         internaliseDecs ds'
     (Right (E.TypeDec tb), ds') -> do
       t <- map fromDecl <$> internaliseType
-           (E.unInfo $ E.expandedType $ E.userType tb)
+           (E.unInfo $ E.expandedType $ E.typeExp tb)
       bindingType (E.typeAlias tb) t $ internaliseDecs ds'
     (Right _, ds') ->
       internaliseDecs ds'

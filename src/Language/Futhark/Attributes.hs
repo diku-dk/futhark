@@ -63,7 +63,7 @@ module Language.Futhark.Attributes
   -- which is syntactically required.
   , NoInfo(..)
   , UncheckedType
-  , UncheckedUserType
+  , UncheckedTypeExp
   , UncheckedArrayType
   , UncheckedIdent
   , UncheckedTypeDecl
@@ -105,17 +105,17 @@ arrayShape (Array (TupleArray _ ds _))  = ds
 arrayShape _                            = mempty
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
-arrayShape' :: UserType vn -> ShapeDecl vn
-arrayShape' (UserArray t d _) = ShapeDecl [d] <> arrayShape' t
-arrayShape' (UserUnique t _)  = arrayShape' t
-arrayShape' _                 = mempty
+arrayShape' :: TypeExp vn -> ShapeDecl vn
+arrayShape' (TEArray t d _) = ShapeDecl [d] <> arrayShape' t
+arrayShape' (TEUnique t _)  = arrayShape' t
+arrayShape' _               = mempty
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
 arrayDims :: Ord vn => TypeBase (ShapeDecl vn) as -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims' :: UserType vn -> [DimDecl vn]
+arrayDims' :: TypeExp vn -> [DimDecl vn]
 arrayDims' = shapeDims . arrayShape'
 
 -- | Return any shape declaration in the type, with duplicates removed.
@@ -141,11 +141,11 @@ nestedDims t =
           mempty
 
 -- | Return any shape declaration in the type, with duplicates removed.
-nestedDims' :: Ord vn => UserType vn -> [DimDecl vn]
-nestedDims' (UserArray t d _) = nub $ d : nestedDims' t
-nestedDims' (UserTuple ts _)  = nub $ mconcat $ map nestedDims' ts
-nestedDims' (UserUnique t _)  = nestedDims' t
-nestedDims' _                 = mempty
+nestedDims' :: Ord vn => TypeExp vn -> [DimDecl vn]
+nestedDims' (TEArray t d _) = nub $ d : nestedDims' t
+nestedDims' (TETuple ts _)  = nub $ mconcat $ map nestedDims' ts
+nestedDims' (TEUnique t _)  = nestedDims' t
+nestedDims' _               = mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -768,7 +768,7 @@ qualName = QualName []
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
 
-type UncheckedUserType = UserType Name
+type UncheckedTypeExp = TypeExp Name
 
 -- | An array type with no aliasing information.
 type UncheckedArrayType = ArrayTypeBase (ShapeDecl Name) ()
