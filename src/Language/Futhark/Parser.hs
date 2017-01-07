@@ -3,7 +3,6 @@ module Language.Futhark.Parser
   ( parseFuthark
   , parseExp
   , parseType
-  , parseLambda
 
   , parseValue
   , parseValues
@@ -133,12 +132,6 @@ parseExp = parse expression
 parseType :: FilePath -> T.Text
           -> Either ParseError UncheckedTypeExp
 parseType = parse futharkType
-
--- | Parse an Futhark anonymous function from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parseLambda :: FilePath -> T.Text
-            -> Either ParseError UncheckedLambda
-parseLambda = parse lambda
 
 -- | Parse any Futhark value from the given 'String', using the 'FilePath'
 -- as the source name for error messages.

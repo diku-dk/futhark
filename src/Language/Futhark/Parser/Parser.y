@@ -3,7 +3,6 @@
 module Language.Futhark.Parser.Parser
   ( prog
   , expression
-  , lambda
   , futharkType
   , anyValue
   , anyValues
