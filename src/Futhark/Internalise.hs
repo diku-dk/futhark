@@ -124,9 +124,10 @@ internaliseDecs ds =
       bindingFunctor (E.functorName fb) (E.functorBody fb) $
         internaliseDecs ds'
     (Right (E.TypeDec tb), ds') -> do
+      v <- lookupSubst $ E.qualName $ E.typeAlias tb
       t <- map fromDecl <$> internaliseType
            (E.unInfo $ E.expandedType $ E.typeExp tb)
-      bindingType (E.typeAlias tb) t $ internaliseDecs ds'
+      bindingType v t $ internaliseDecs ds'
     (Right _, ds') ->
       internaliseDecs ds'
 
