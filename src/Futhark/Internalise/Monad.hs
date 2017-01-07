@@ -155,7 +155,7 @@ lookupSubst :: E.QualName VName -> InternaliseM VName
 lookupSubst (E.QualName _ name) = do
   r <- asks $ HM.lookup name . envDecSubsts
   case r of
-    Just v -> return v
+    Just v -> lookupSubst $ E.qualName v
     _      -> return name
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
