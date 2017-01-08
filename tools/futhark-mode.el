@@ -242,7 +242,12 @@ In general, prefer as little indentation as possible."
              (save-excursion
                (and
                 (ignore-errors (backward-up-list 1) t)
-                (futhark-keyword-backward "module")
+                (looking-at "{")
+                (or
+                 (futhark-keyword-backward "module")
+                 (and
+                  (ignore-errors (backward-up-list 1) t)
+                  (futhark-keyword-backward "module")))
                 (+ futhark-indent-level (current-column))))
              0))
 
