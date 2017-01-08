@@ -159,9 +159,9 @@ transformKernelBody num_threads cs (KernelBody () stms res) =
   KernelBody () <$> mapM transformKernelStm stms <*> pure res
   where boundInKernel = (`elem` HM.keys (scopeOf stms))
 
-        transformKernelStm (Let pat () (Op (SplitArray InOrder w i num_is elems_per_thread arrs))) = do
+        transformKernelStm (Let pat () (Op (SplitArray SplitContiguous w i elems_per_thread arrs))) = do
           (w_padded, padding) <- paddedScanReduceInput w num_threads
-          Let pat () . Op . SplitArray InOrder w i num_is elems_per_thread <$>
+          Let pat () . Op . SplitArray SplitContiguous w i elems_per_thread <$>
             mapM (maybeRearrange w w_padded padding elems_per_thread) arrs
 
         transformKernelStm stm =

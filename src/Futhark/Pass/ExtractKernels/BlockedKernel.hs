@@ -121,6 +121,9 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   let red_ts = map patElemType chunk_red_pes
       map_ts = map (rowType . patElemType) chunk_map_pes
       ts = red_ts ++ map_ts
+      ordering' =
+        case ordering of InOrder -> SplitContiguous
+                         Disorder -> SplitStrided $ kernelNumThreads step_one_size
 
   chunk_red_pes' <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
@@ -141,7 +144,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   red_rets <- forM final_red_pes $ \pe ->
     return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
   map_rets <- forM chunk_map_pes $ \pe ->
-    return $ ConcatReturns ordering w (kernelElementsPerThread step_one_size) $ patElemName pe
+    return $ ConcatReturns ordering' w (kernelElementsPerThread step_one_size) $ patElemName pe
   let rets = red_rets ++ map_rets
 
   return $ Kernel "chunked_reduce" cs space ts $
@@ -292,6 +295,9 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
       num_groups = kernelWorkgroups kernel_size
       group_size = kernelWorkgroupSize kernel_size
       num_threads = kernelNumThreads kernel_size
+      ordering' =
+        case ordering of InOrder -> SplitContiguous
+                         Disorder -> SplitStrided $ kernelNumThreads kernel_size
 
   space <- newKernelSpace (num_groups, group_size, num_threads) (FlatThreadSpace [])
   lam' <- kerneliseLambda nes lam
@@ -310,7 +316,7 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
     return $ ThreadsReturn AllThreads $ Var $ patElemName pe
   concat_rets <- forM chunk_map_pes $ \pe ->
-    return $ ConcatReturns ordering w (kernelElementsPerThread kernel_size) $ patElemName pe
+    return $ ConcatReturns ordering' w (kernelElementsPerThread kernel_size) $ patElemName pe
 
   return $ Let pat () $ Op $ Kernel "chunked_map" cs space ts $
     KernelBody () chunk_and_fold $ nonconcat_rets ++ concat_rets
@@ -326,19 +332,20 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   split_bound <- forM arr_params $ \arr_param -> do
     let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunk_size)
     return $ PatElem (paramName arr_param) BindVar chunk_t
-  let chunk_stm =
+  let ordering' =
+        case ordering of InOrder -> SplitContiguous
+                         Disorder -> SplitStrided $ kernelNumThreads kernel_size
+      chunk_stm =
         -- Zero-array SplitArrays are invalid, so make sure we don't create one.
         if null arrs
         then [Let (Pattern []
                    [PatElem (paramName chunk_size) BindVar $ paramType chunk_size]) () $ Op $
-              SplitSpace ordering w (Var thread_gtid)
-              (kernelNumThreads kernel_size) (kernelElementsPerThread kernel_size)]
+              SplitSpace ordering' w (Var thread_gtid) (kernelElementsPerThread kernel_size)]
         else [Let
                (Pattern
                  [PatElem (paramName chunk_size) BindVar $ paramType chunk_size]
                  split_bound) () $ Op $
-               SplitArray ordering w (Var thread_gtid)
-               (kernelNumThreads kernel_size) (kernelElementsPerThread kernel_size) arrs]
+               SplitArray ordering' w (Var thread_gtid) (kernelElementsPerThread kernel_size) arrs]
       red_ts = take num_nonconcat $ lambdaReturnType lam
       map_ts = map rowType $ drop num_nonconcat $ lambdaReturnType lam
 
