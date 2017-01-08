@@ -551,10 +551,10 @@ allocInFun (FunDef entry fname rettype params fbody) =
             localScope (scopeOfKernelSpace space)
             (allocInKernelBody kbody)
 
-          handleKernelExp (SplitArray o w i num_is elems_per_thread arrs) =
-            return $ Inner $ SplitArray o w i num_is elems_per_thread arrs
-          handleKernelExp (SplitSpace o w i num_is elems_per_thread) =
-            return $ Inner $ SplitSpace o w i num_is elems_per_thread
+          handleKernelExp (SplitArray o w i elems_per_thread arrs) =
+            return $ Inner $ SplitArray o w i elems_per_thread arrs
+          handleKernelExp (SplitSpace o w i elems_per_thread) =
+            return $ Inner $ SplitSpace o w i elems_per_thread
           handleKernelExp (Combine cspace ts active body) =
             Inner . Combine cspace ts active <$> allocInBodyNoDirect body
           handleKernelExp (GroupReduce w lam input) = do
@@ -735,9 +735,9 @@ instance SizeSubst op => SizeSubst (MemOp op) where
   opSizeSubst _ _ = mempty
 
 instance SizeSubst (KernelExp lore) where
-  opSizeSubst (Pattern [size] _) (SplitArray _ _ _ _ elems_per_thread _) =
+  opSizeSubst (Pattern [size] _) (SplitArray _ _ _ elems_per_thread _) =
     HM.singleton (patElemName size) elems_per_thread
-  opSizeSubst (Pattern _ [size]) (SplitSpace _ _ _ _ elems_per_thread) =
+  opSizeSubst (Pattern _ [size]) (SplitSpace _ _ _ elems_per_thread) =
     HM.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
 
@@ -850,11 +850,11 @@ kernelExpHints (Op (Inner (Kernel _ _ space rets kbody))) =
               t_dims <- mapM dimAllocationSize $ arrayDims t
               return $ Hint (innermost space_dims t_dims) DefaultSpace
 
-        hint t (ConcatReturns Disorder w _ _) = do
+        hint t (ConcatReturns SplitStrided{} w _ _) = do
           t_dims <- mapM dimAllocationSize $ arrayDims t
           return $ Hint (innermost [w] t_dims) DefaultSpace
 
-        hint Prim{} (ConcatReturns InOrder w elems_per_thread _) = do
+        hint Prim{} (ConcatReturns SplitContiguous w elems_per_thread _) = do
           let ixfun_base = IxFun.iota $ map (primExpFromSubExp int32) [num_threads,elems_per_thread]
               ixfun_tr = IxFun.permute ixfun_base [1,0]
               ixfun = IxFun.reshape ixfun_tr $ map (DimNew . primExpFromSubExp int32) [w]

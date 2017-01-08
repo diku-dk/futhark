@@ -117,24 +117,28 @@ mkWiseKernelBody attr bnds res =
 inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
 inKernelEnv = Engine.emptyEnv inKernelRules noExtraHoistBlockers
 
+instance Engine.Simplifiable SplitOrdering where
+  simplify SplitContiguous =
+    return SplitContiguous
+  simplify (SplitStrided stride) =
+    SplitStrided <$> Engine.simplify stride
+
 simplifyKernelExp :: (Engine.SimplifiableLore lore,
                       BodyAttr lore ~ ()) =>
                      KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore))
-simplifyKernelExp (SplitArray o w i num_is elems_per_thread arrs) =
+simplifyKernelExp (SplitArray o w i elems_per_thread arrs) =
   SplitArray
-  <$> pure o
+  <$> Engine.simplify o
   <*> Engine.simplify w
   <*> Engine.simplify i
-  <*> Engine.simplify num_is
   <*> Engine.simplify elems_per_thread
   <*> mapM Engine.simplify arrs
 
-simplifyKernelExp (SplitSpace o w i num_is elems_per_thread) =
+simplifyKernelExp (SplitSpace o w i elems_per_thread) =
   SplitSpace
-  <$> pure o
+  <$> Engine.simplify o
   <*> Engine.simplify w
   <*> Engine.simplify i
-  <*> Engine.simplify num_is
   <*> Engine.simplify elems_per_thread
 
 simplifyKernelExp (Combine cspace ts active body) = do
@@ -234,8 +238,9 @@ instance Engine.Simplifiable KernelResult where
     Engine.simplify i <*>
     Engine.simplify v
   simplify (ConcatReturns o w pte what) =
-    ConcatReturns o
-    <$> Engine.simplify w
+    ConcatReturns
+    <$> Engine.simplify o
+    <*> Engine.simplify w
     <*> Engine.simplify pte
     <*> Engine.simplify what
   simplify (KernelInPlaceReturn what) =
@@ -263,7 +268,7 @@ fuseSplitIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Lore m ~ Wise InKernel) =>
                  TopDownRule m
 fuseSplitIota vtable (Let (Pattern [size] chunks) _
-                       (Op (SplitArray o w i num_is elems_per_thread arrs)))
+                       (Op (SplitArray o w i elems_per_thread arrs)))
   | ([(iota_pe, iota_start)], chunks_and_arrs) <-
       partitionEithers $ zipWith (isIota vtable) chunks arrs = do
 
@@ -272,24 +277,24 @@ fuseSplitIota vtable (Let (Pattern [size] chunks) _
       case chunks' of
         [] -> -- Can't create a binding that doesn't produce any values.
           letBind_ (Pattern [] [size]) $
-          Op $ SplitSpace o w i num_is elems_per_thread
+          Op $ SplitSpace o w i elems_per_thread
         _ ->
           letBind_ (Pattern [size] chunks') $
-          Op $ SplitArray o w i num_is elems_per_thread arrs'
+          Op $ SplitArray o w i elems_per_thread arrs'
 
       case o of
-        InOrder -> do
+        SplitContiguous -> do
           start_offset <- letSubExp "iota_start_offset" $
             BasicOp $ BinOp (Mul Int32) i elems_per_thread
           start <- letSubExp "iota_start" $
             BasicOp $ BinOp (Add Int32) start_offset iota_start
           letBindNames'_ [patElemName iota_pe] $
             BasicOp $ Iota (Var $ patElemName size) start (constant (1::Int32)) Int32
-        Disorder -> do
+        SplitStrided stride -> do
           start <- letSubExp "iota_start" $
             BasicOp $ BinOp (Add Int32) i iota_start
           letBindNames'_ [patElemName iota_pe] $
-            BasicOp $ Iota (Var $ patElemName size) start num_is Int32
+            BasicOp $ Iota (Var $ patElemName size) start stride Int32
 fuseSplitIota _ _ = cannotSimplify
 
 fuseStreamIota :: (LocalScope (Lore m) m,

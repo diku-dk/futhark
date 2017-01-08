@@ -53,6 +53,7 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeBodyAliases, removeStmAliases)
+import Futhark.Representation.Kernels.KernelExp (SplitOrdering(..))
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
@@ -125,7 +126,7 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     SubExp -- The index
                     SubExp -- The value
                   | ConcatReturns
-                    StreamOrd -- Permuted?
+                    SplitOrdering -- Permuted?
                     SubExp -- The final size.
                     SubExp -- Per-thread (max) chunk size.
                     VName -- Chunk by this thread.
@@ -223,8 +224,8 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
 instance FreeIn KernelResult where
   freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
   freeIn (WriteReturn rw arr i e) = freeIn rw <> freeIn arr <> freeIn i <> freeIn e
-  freeIn (ConcatReturns _ w per_thread_elems v) =
-    freeIn w <> freeIn per_thread_elems <> freeIn v
+  freeIn (ConcatReturns o w per_thread_elems v) =
+    freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn v
   freeIn (KernelInPlaceReturn what) = freeIn what
 
 instance FreeIn WhichThreads where
@@ -254,9 +255,9 @@ instance Substitute KernelResult where
     WriteReturn
     (substituteNames subst rw) (substituteNames subst arr)
     (substituteNames subst i) (substituteNames subst e)
-  substituteNames subst (ConcatReturns ord w per_thread_elems v) =
+  substituteNames subst (ConcatReturns o w per_thread_elems v) =
     ConcatReturns
-    ord
+    (substituteNames subst o)
     (substituteNames subst w)
     (substituteNames subst per_thread_elems)
     (substituteNames subst v)
@@ -510,7 +511,10 @@ typeCheckKernel (Kernel _ cs space kts kbody) = do
           unless (arr_t == t `arrayOfRow` rw) $
             TC.bad $ TC.TypeError "Invalid type of array destination for WriteReturn."
           TC.consume =<< TC.lookupAliases arr
-        checkKernelResult (ConcatReturns _ w per_thread_elems v) t = do
+        checkKernelResult (ConcatReturns o w per_thread_elems v) t = do
+          case o of
+            SplitContiguous     -> return ()
+            SplitStrided stride -> TC.require [Prim int32] stride
           TC.require [Prim int32] w
           TC.require [Prim int32] per_thread_elems
           vt <- lookupType v
@@ -592,7 +596,7 @@ instance Pretty KernelResult where
     text "concat" <> suff <>
     parens (commasep [ppr w, ppr per_thread_elems]) <+>
     ppr v
-    where suff = case o of InOrder -> ""
-                           Disorder -> "Permuted"
+    where suff = case o of SplitContiguous     -> mempty
+                           SplitStrided stride -> text "Strided" <> parens (ppr stride)
   ppr (KernelInPlaceReturn what) =
     text "kernel returns" <+> ppr what

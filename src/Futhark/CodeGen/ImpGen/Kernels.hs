@@ -465,14 +465,14 @@ readParamFromLocalMemory index i param (l_mem, _)
   where i' = i * Imp.LeafExp (Imp.SizeOf bt) int32
         bt = elemType $ paramType param
 
-computeThreadChunkSize :: Commutativity
-                       -> Imp.Exp
+computeThreadChunkSize :: SplitOrdering
                        -> Imp.Exp
                        -> Imp.Count Imp.Elements
                        -> Imp.Count Imp.Elements
                        -> VName
                        -> ImpGen.ImpM lore op ()
-computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var = do
+  stride' <- ImpGen.compileSubExp stride
   remaining_elements <- newVName "remaining_elements"
   ImpGen.emit $
     Imp.DeclareScalar remaining_elements int32
@@ -480,7 +480,7 @@ computeThreadChunkSize Commutative thread_index num_threads elements_per_thread 
     Imp.SetScalar remaining_elements $
     (Imp.innerExp num_elements - thread_index)
     `quotRoundingUp`
-    num_threads
+    stride'
   ImpGen.emit $
     Imp.If (Imp.CmpOpExp (CmpSlt Int32)
             (Imp.innerExp elements_per_thread)
@@ -488,7 +488,7 @@ computeThreadChunkSize Commutative thread_index num_threads elements_per_thread 
     (Imp.SetScalar chunk_var (Imp.innerExp elements_per_thread))
     (Imp.SetScalar chunk_var (Imp.var remaining_elements int32))
 
-computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
   starting_point <- newVName "starting_point"
   remaining_elements <- newVName "remaining_elements"
 
@@ -580,7 +580,7 @@ data KernelConstants = KernelConstants
                        , kernelLocalThreadId :: VName
                        , kernelGroupId :: VName
                        , kernelGroupSize :: Imp.DimSize
-                       , kernelNumThreads :: Imp.DimSize
+                       , _kernelNumThreads :: Imp.DimSize
                        , kernelWaveSize :: Imp.DimSize
                        , kernelDimensions :: [(VName, Imp.Exp)]
                        , kernelThreadActive :: Imp.Exp
@@ -662,20 +662,17 @@ groupStmsByGuard constants bnds =
 compileKernelExp :: KernelConstants -> ImpGen.Destination -> KernelExp InKernel
                  -> InKernelGen ()
 
-compileKernelExp constants dest (SplitArray o w i max_is elems_per_thread _arrs)
+compileKernelExp constants dest (SplitArray o w i elems_per_thread _arrs)
   | ImpGen.Destination (ImpGen.ArrayDestination _ (Just size:_):_) <- dest =
       compileKernelExp constants (ImpGen.Destination [ImpGen.ScalarDestination size]) $
-      SplitSpace o w i max_is elems_per_thread
+      SplitSpace o w i elems_per_thread
 
-compileKernelExp _ dest (SplitSpace o w i max_is elems_per_thread)
+compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
   | ImpGen.Destination [ImpGen.ScalarDestination size] <- dest = do
       num_elements <- Imp.elements <$> ImpGen.compileSubExp w
       i' <- ImpGen.compileSubExp i
-      max_is' <- ImpGen.compileSubExp max_is
       elems_per_thread' <- Imp.elements <$> ImpGen.compileSubExp elems_per_thread
-      computeThreadChunkSize comm i' max_is' elems_per_thread' num_elements size
-        where comm = case o of Disorder -> Commutative
-                               InOrder -> Noncommutative
+      computeThreadChunkSize o i' elems_per_thread' num_elements size
 
 compileKernelExp constants dest (Combine cspace ts active body)
   | Just dest' <- ImpGen.Destination <$> zipWithM index ts (ImpGen.valueDestinations dest) = do
@@ -988,7 +985,7 @@ compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   ImpGen.emit $ Imp.If (kernelThreadActive constants)
     write_result mempty
 
-compileKernelResult constants dest (ConcatReturns InOrder _ per_thread_elems what) = do
+compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_elems what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
   let dest_loc_offset = ImpGen.offsetArray dest_loc $
                         primExpFromSubExp int32 per_thread_elems *
@@ -996,12 +993,12 @@ compileKernelResult constants dest (ConcatReturns InOrder _ per_thread_elems wha
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
   ImpGen.copyDWIMDest dest' [] (Var what) []
 
-compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
+compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
   let dest_loc' = ImpGen.strideArray
                   (ImpGen.offsetArray dest_loc $
                    ImpGen.varIndex (kernelGlobalThreadId constants)) $
-                  ImpGen.dimSizeToPrimExp (kernelNumThreads constants)
+                  primExpFromSubExp int32 stride
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
   ImpGen.copyDWIMDest dest' [] (Var what) []
 

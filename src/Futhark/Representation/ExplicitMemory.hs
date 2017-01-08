@@ -981,25 +981,24 @@ instance OpReturns ExplicitMemory where
 instance OpReturns InKernel where
   opReturns (Alloc size space) =
     return [ReturnsMemory size space]
-  opReturns (Inner (SplitArray o _ thread_id num_threads elems_per_thread arrs)) =
+  opReturns (Inner (SplitArray o _ thread_id elems_per_thread arrs)) =
     forM arrs $ \arr -> do
       arr_t <- lookupType arr
       (mem, ixfun) <- lookupArraySummary arr
       let row_dims = drop 1 $ arrayDims arr_t
           bt = elemType arr_t
-          num_threads' = primExpFromSubExp int32 num_threads
           elems_per_thread' = primExpFromSubExp int32 elems_per_thread
           ext_shape = ExtShape $ Ext 0 : map Free row_dims
           thread_id' = primExpFromSubExp int32 thread_id
       return $ ReturnsArray bt ext_shape NoUniqueness $ Just $ ReturnsInBlock mem $
         case o of
-          InOrder ->
-            let newshape = [DimNew num_threads', DimNew elems_per_thread'] ++
-                           map (DimNew . primExpFromSubExp int32) row_dims
-            in IxFun.slice (IxFun.reshape ixfun newshape) $
-               fullSliceNum (newDims newshape) [DimFix $ primExpFromSubExp int32 thread_id]
-          Disorder ->
-            IxFun.strideIndex (IxFun.offsetIndex ixfun thread_id') num_threads'
+          SplitContiguous ->
+            IxFun.slice ixfun $
+            fullSliceNum (map (primExpFromSubExp int32) $ arrayDims arr_t)
+            [DimSlice (thread_id' * elems_per_thread') elems_per_thread']
+          SplitStrided stride ->
+            IxFun.strideIndex (IxFun.offsetIndex ixfun thread_id') $
+            primExpFromSubExp int32 stride
 
   opReturns (Inner (GroupStream _ _ lam _ _)) =
     forM (groupStreamAccParams lam) $ \param ->

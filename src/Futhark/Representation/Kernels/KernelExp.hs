@@ -9,8 +9,9 @@
 -- | A representation of nested-parallel in-kernel per-workgroup
 -- expressions.
 module Futhark.Representation.Kernels.KernelExp
-  ( KernelExp (..)
+  ( KernelExp(..)
   , GroupStreamLambda(..)
+  , SplitOrdering(..)
   , typeCheckKernelExp
   )
   where
@@ -39,27 +40,32 @@ import Futhark.Util.Pretty
   ((<+>), (</>), ppr, commasep, Pretty, parens, text, apply, braces, annot, indent)
 import qualified Futhark.TypeCheck as TC
 
-data KernelExp lore = SplitArray StreamOrd SubExp SubExp SubExp SubExp [VName]
-                      -- ^ @SplitArray o w i num_is elems_per_thread arrs@.
+-- | How an array is split into chunks.
+data SplitOrdering = SplitContiguous
+                   | SplitStrided SubExp
+                   deriving (Eq, Ord, Show)
+
+data KernelExp lore = SplitArray SplitOrdering SubExp SubExp SubExp [VName]
+                      -- ^ @SplitArray o w i elems_per_thread arrs@.
                       --
                       -- Distributes array elements to threads in a kernel.
                       -- @w@ is the length of the outer dimension in each of the
-                      -- input arrays @arrs@.
-                      --
-                      -- A thread only takes elements if @i < num_is@
+                      -- input arrays @arrs@.  @i@ is the thread index.
                       --
                       -- Each thread takes at most @elems_per_thread@ elements.
                       --
-                      -- If the order @o@ is @InOrder@, thread with index @i@
+                      -- If the order @o@ is 'SplitContiguous', thread with index @i@
                       -- will receive elements
                       -- @i*elems_per_tread, i*elems_per_thread + 1,
                       -- ..., i*elems_per_thread + (elems_per_thread-1)@.
                       -- This access pattern can give rise to a transpose being
                       -- generated in a later stage of the compiler.
                       --
-                      -- If the order @o@ is @Disorder@, threads will get up to
-                      -- @elems_per_thread@ elements in _some_ order.
-                    | SplitSpace StreamOrd SubExp SubExp SubExp SubExp
+                      -- If the order @o@ is @'SplitStrided' stride@,
+                      -- the thread will receive elements @i,
+                      -- i+stride, i+2*stride, ...,
+                      -- i+(elems_per_thread-1)*stride@.
+                    | SplitSpace SplitOrdering SubExp SubExp SubExp
                     | Combine [(VName,SubExp)] [Type] SubExp (Body lore)
                       -- ^ @Combine cspace ts active body@ will combine values
                       -- from threads to a single (multidimensional) array.
@@ -121,7 +127,7 @@ instance Attributes lore => IsOp (KernelExp lore) where
   safeOp _ = False
 
 instance Attributes lore => TypedOp (KernelExp lore) where
-  opType (SplitArray _ _ _ _ _ arrs) =
+  opType (SplitArray _ _ _ _ arrs) =
     traverse (fmap setRetType . lookupType) arrs
     where setRetType arr_t =
             let chunk_shape = Ext 0 : map Free (drop 1 $ arrayDims arr_t)
@@ -138,11 +144,15 @@ instance Attributes lore => TypedOp (KernelExp lore) where
   opType (GroupStream _ _ lam _ _) =
     pure $ staticShapes $ map paramType $ groupStreamAccParams lam
 
+instance FreeIn SplitOrdering where
+  freeIn SplitContiguous = mempty
+  freeIn (SplitStrided stride) = freeIn stride
+
 instance Attributes lore => FreeIn (KernelExp lore) where
-  freeIn (SplitArray _ w i num_is elems_per_thread vs) =
-    freeIn [w, i, num_is, elems_per_thread] <> freeIn vs
-  freeIn (SplitSpace _ w i num_is elems_per_thread) =
-    freeIn [w, i, num_is, elems_per_thread]
+  freeIn (SplitArray o w i elems_per_thread vs) =
+    freeIn o <> freeIn [w, i, elems_per_thread] <> freeIn vs
+  freeIn (SplitSpace o w i elems_per_thread) =
+    freeIn o <> freeIn [w, i, elems_per_thread]
   freeIn (Combine cspace ts active body) =
     freeIn cspace <> freeIn ts <> freeIn active <> freeInBody body
   freeIn (GroupReduce w lam input) =
@@ -160,13 +170,13 @@ instance Attributes lore => FreeIn (GroupStreamLambda lore) where
                        map paramName (acc_params ++ arr_params)
 
 instance Ranged inner => RangedOp (KernelExp inner) where
-  opRanges (SplitSpace _ _ _ _ elems_per_thread) =
+  opRanges (SplitSpace _ _ _ elems_per_thread) =
     [(Just (ScalarBound 0),
       Just (ScalarBound (SE.subExpToScalExp elems_per_thread int32)))]
   opRanges _ = repeat unknownRange
 
 instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
-  opAliases (SplitArray _ _ _ _ _ arrs) =
+  opAliases (SplitArray _ _ _ _ arrs) =
     map HS.singleton arrs
   opAliases SplitSpace{} =
     [mempty]
@@ -194,19 +204,25 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
   consumedInOp SplitSpace{} = mempty
   consumedInOp Combine{} = mempty
 
+instance Substitute SplitOrdering where
+  substituteNames _ SplitContiguous =
+    SplitContiguous
+  substituteNames subst (SplitStrided stride) =
+    SplitStrided $ substituteNames subst stride
+
 instance Attributes lore => Substitute (KernelExp lore) where
-  substituteNames subst (SplitArray o w i max_is elems_per_thread vs) =
-    SplitArray o
+  substituteNames subst (SplitArray o w i elems_per_thread vs) =
+    SplitArray
+    (substituteNames subst o)
     (substituteNames subst w)
     (substituteNames subst i)
-    (substituteNames subst max_is)
     (substituteNames subst elems_per_thread)
     (substituteNames subst vs)
-  substituteNames subst (SplitSpace o w i max_is elems_per_thread) =
-    SplitSpace o
+  substituteNames subst (SplitSpace o w i elems_per_thread) =
+    SplitSpace
+    (substituteNames subst o)
     (substituteNames subst w)
     (substituteNames subst i)
-    (substituteNames subst max_is)
     (substituteNames subst elems_per_thread)
   substituteNames subst (Combine cspace ts active v) =
     Combine (substituteNames subst cspace) ts
@@ -233,21 +249,25 @@ instance Attributes lore => Substitute (GroupStreamLambda lore) where
     (substituteNames subst arr_params)
     (substituteNames subst body)
 
+instance Rename SplitOrdering where
+  rename SplitContiguous =
+    pure SplitContiguous
+  rename (SplitStrided stride) =
+    SplitStrided <$> rename stride
+
 instance (Attributes lore, Renameable lore) => Rename (KernelExp lore) where
-  rename (SplitArray o w i num_is elems_per_thread vs) =
+  rename (SplitArray o w i elems_per_thread vs) =
     SplitArray
-    <$> pure o
+    <$> rename o
     <*> rename w
     <*> rename i
-    <*> rename num_is
     <*> rename elems_per_thread
     <*> rename vs
-  rename (SplitSpace o w i num_is elems_per_thread) =
+  rename (SplitSpace o w i elems_per_thread) =
     SplitSpace
-    <$> pure o
+    <$> rename o
     <*> rename w
     <*> rename i
-    <*> rename num_is
     <*> rename elems_per_thread
   rename (Combine cspace ts active v) =
     Combine <$> rename cspace <*> rename ts <*> rename active <*> rename v
@@ -275,10 +295,10 @@ instance (Attributes lore,
           CanBeAliased (Op lore)) => CanBeAliased (KernelExp lore) where
   type OpWithAliases (KernelExp lore) = KernelExp (Aliases lore)
 
-  addOpAliases (SplitArray o w i num_is elems_per_thread arrs) =
-    SplitArray o w i num_is elems_per_thread arrs
-  addOpAliases (SplitSpace o w i num_is elems_per_thread) =
-    SplitSpace o w i num_is elems_per_thread
+  addOpAliases (SplitArray o w i elems_per_thread arrs) =
+    SplitArray o w i elems_per_thread arrs
+  addOpAliases (SplitSpace o w i elems_per_thread) =
+    SplitSpace o w i elems_per_thread
   addOpAliases (GroupReduce w lam input) =
     GroupReduce w (Alias.analyseLambda lam) input
   addOpAliases (GroupScan w lam input) =
@@ -304,20 +324,20 @@ instance (Attributes lore,
 
   removeOpAliases (Combine ispace ts active body) =
     Combine ispace ts active $ removeBodyAliases body
-  removeOpAliases (SplitArray o w i num_is elems_per_thread arrs) =
-    SplitArray o w i num_is elems_per_thread arrs
-  removeOpAliases (SplitSpace o w i num_is elems_per_thread) =
-    SplitSpace o w i num_is elems_per_thread
+  removeOpAliases (SplitArray o w i elems_per_thread arrs) =
+    SplitArray o w i elems_per_thread arrs
+  removeOpAliases (SplitSpace o w i elems_per_thread) =
+    SplitSpace o w i elems_per_thread
 
 instance (Attributes lore,
           Attributes (Ranges lore),
           CanBeRanged (Op lore)) => CanBeRanged (KernelExp lore) where
   type OpWithRanges (KernelExp lore) = KernelExp (Ranges lore)
 
-  addOpRanges (SplitArray o w i num_is elems_per_thread arrs) =
-    SplitArray o w i num_is elems_per_thread arrs
-  addOpRanges (SplitSpace o w i num_is elems_per_thread) =
-    SplitSpace o w i num_is elems_per_thread
+  addOpRanges (SplitArray o w i elems_per_thread arrs) =
+    SplitArray o w i elems_per_thread arrs
+  addOpRanges (SplitSpace o w i elems_per_thread) =
+    SplitSpace o w i elems_per_thread
   addOpRanges (GroupReduce w lam input) =
     GroupReduce w (Range.runRangeM $ Range.analyseLambda lam) input
   addOpRanges (GroupScan w lam input) =
@@ -342,10 +362,10 @@ instance (Attributes lore,
             removeBodyRanges body
   removeOpRanges (Combine ispace ts active body) =
     Combine ispace ts active $ removeBodyRanges body
-  removeOpRanges (SplitArray o w i num_is elems_per_thread arrs) =
-    SplitArray o w i num_is elems_per_thread arrs
-  removeOpRanges (SplitSpace o w i num_is elems_per_thread) =
-    SplitSpace o w i num_is elems_per_thread
+  removeOpRanges (SplitArray o w i elems_per_thread arrs) =
+    SplitArray o w i elems_per_thread arrs
+  removeOpRanges (SplitSpace o w i elems_per_thread) =
+    SplitSpace o w i elems_per_thread
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) where
   type OpWithWisdom (KernelExp lore) = KernelExp (Wise lore)
@@ -362,10 +382,10 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
             removeBodyWisdom body
   removeOpWisdom (Combine ispace ts active body) =
     Combine ispace ts active $ removeBodyWisdom body
-  removeOpWisdom (SplitArray o w i num_is elems_per_thread arrs) =
-    SplitArray o w i num_is elems_per_thread arrs
-  removeOpWisdom (SplitSpace o w i num_is elems_per_thread) =
-    SplitSpace o w i num_is elems_per_thread
+  removeOpWisdom (SplitArray o w i elems_per_thread arrs) =
+    SplitArray o w i elems_per_thread arrs
+  removeOpWisdom (SplitSpace o w i elems_per_thread) =
+    SplitSpace o w i elems_per_thread
 
 instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (KernelExp lore) where
   usageInOp _ = mempty
@@ -382,12 +402,18 @@ instance OpMetrics (Op lore) => OpMetrics (KernelExp lore) where
             bodyMetrics . groupStreamLambdaBody
 
 typeCheckKernelExp :: TC.Checkable lore => KernelExp (Aliases lore) -> TC.TypeM lore ()
-typeCheckKernelExp (SplitArray _ w i num_is elems_per_thread arrs) = do
-  mapM_ (TC.require [Prim int32]) [w, i, num_is, elems_per_thread]
+typeCheckKernelExp (SplitArray o w i elems_per_thread arrs) = do
+  case o of
+    SplitContiguous     -> return ()
+    SplitStrided stride -> TC.require [Prim int32] stride
+  mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
   void $ TC.checkSOACArrayArgs w arrs
 
-typeCheckKernelExp (SplitSpace _ w i num_is elems_per_thread) =
-  mapM_ (TC.require [Prim int32]) [w, i, num_is, elems_per_thread]
+typeCheckKernelExp (SplitSpace o w i elems_per_thread) = do
+  case o of
+    SplitContiguous     -> return ()
+    SplitStrided stride -> TC.require [Prim int32] stride
+  mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
 
 typeCheckKernelExp (Combine cspace ts active body) = do
   mapM_ (TC.requireI [Prim int32]) is
@@ -455,19 +481,16 @@ instance LParamAttr lore1 ~ LParamAttr lore2 =>
     scopeOfLParams (acc_params ++ arr_params)
 
 instance PrettyLore lore => Pretty (KernelExp lore) where
-  ppr (SplitArray o w i num_is elems_per_thread arrs) =
-    text ("splitArray" <> suff) <>
-    parens (commasep $ ppr w : ppr elems_per_thread :
-            (ppr i <+> text "<" <+> ppr num_is) :
-            map ppr arrs)
-    where suff = case o of InOrder -> ""
-                           Disorder -> "Unordered"
-  ppr (SplitSpace o w i num_is elems_per_thread) =
-    text ("splitSpace" <> suff) <>
-    parens (commasep [ppr w, ppr elems_per_thread,
-                      ppr i <+> text "<" <+> ppr num_is])
-    where suff = case o of InOrder -> ""
-                           Disorder -> "Unordered"
+  ppr (SplitArray o w i elems_per_thread arrs) =
+    text "splitArray" <> suff <>
+    parens (commasep $ ppr w : ppr elems_per_thread : ppr i : map ppr arrs)
+    where suff = case o of SplitContiguous     -> mempty
+                           SplitStrided stride -> text "Strided" <> parens (ppr stride)
+  ppr (SplitSpace o w i elems_per_thread) =
+    text "splitSpace" <> suff <>
+    parens (commasep [ppr w, ppr elems_per_thread, ppr i])
+    where suff = case o of SplitContiguous     -> mempty
+                           SplitStrided stride -> text "Strided" <> parens (ppr stride)
   ppr (Combine cspace ts active body) =
     text "combine" <>
     apply (map f cspace ++ [apply (map ppr ts), ppr active]) <+> text "{" </>
