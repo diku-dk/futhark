@@ -1,5 +1,5 @@
-struct B {
-  struct A {
+module B {
+  module A {
     default (f32)
 
     include dog
@@ -13,7 +13,7 @@ struct B {
     entry cat () : int = 0
   }
 
-  struct C {
+  module C {
     type c = f32
   }
 }

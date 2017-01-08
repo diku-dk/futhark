@@ -1,4 +1,4 @@
-struct A {
+module A {
   default (f32)
 
   include dog
