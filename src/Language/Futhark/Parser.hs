@@ -91,11 +91,13 @@ parseFuthark fp0 s0 =
 
         includeIncludes :: [FilePath] -> [FilePath] -> [FilePath] -> UncheckedProg
                           -> ErrorIO ParseError ([FilePath], UncheckedProg)
-        includeIncludes alreadyIncluded includeSources newIncludes baseProg =
-          foldM (\(already, p) new -> do
-                    (already', p1) <- includeInclude already includeSources new
-                    return (already', mergePrograms p1 p))
-            (alreadyIncluded, baseProg) $ reverse newIncludes
+        includeIncludes alreadyIncluded includeSources newIncludes baseProg = do
+          (alreadyIncluded', p) <-
+            foldM (\(already, p) new -> do
+                      (already', p1) <- includeInclude already includeSources new
+                      return (already', mergePrograms p p1))
+            (alreadyIncluded, Prog []) newIncludes
+          return (alreadyIncluded', mergePrograms p baseProg)
 
         includeInclude :: [FilePath] -> [FilePath] -> FilePath
                        -> ErrorIO ParseError ([FilePath], UncheckedProg)
