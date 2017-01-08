@@ -136,7 +136,7 @@
       (,(concat "let" ws1
                 "\\(" futhark-var "\\)")
        . '(1 font-lock-variable-name-face))
-      ;;;; Tuples.  TODO: It would be nice to highlight only the variable names
+      ;;;; Tuples.  FIXME: It would be nice to highlight only the variable names
       ;;;; inside the parantheses, and not also the commas.
       (,(concat "let" ws1 "("
                 "\\(" "[^)]+" "\\)")
@@ -229,20 +229,20 @@ In general, prefer as little indentation as possible."
             (forward-comment (count-lines (point-min) (point)))
             (current-column))
 
-       ;; Align global definitions and headers to nearest struct definition or
+       ;; Align global definitions and headers to nearest module definition or
        ;; column 0.
        (and (or (futhark-looking-at-word "fun")
                 (futhark-looking-at-word "entry")
                 (futhark-looking-at-word "type")
                 (futhark-looking-at-word "val")
-                (futhark-looking-at-word "struct")
+                (futhark-looking-at-word "module")
                 (futhark-looking-at-word "include")
                 (futhark-looking-at-word "default"))
             (or
              (save-excursion
                (and
                 (ignore-errors (backward-up-list 1) t)
-                (futhark-keyword-backward "struct")
+                (futhark-keyword-backward "module")
                 (+ futhark-indent-level (current-column))))
              0))
 
@@ -254,7 +254,8 @@ In general, prefer as little indentation as possible."
                 (backward-up-list 1)
                 (current-column))))
 
-       ;; Align closing curly brackets to the matching opening 'struct' keyword.
+       ;; Align closing curly brackets to the matching opening 'module'
+       ;; keyword.
        (save-excursion
          (and (looking-at "}")
               (ignore-errors
