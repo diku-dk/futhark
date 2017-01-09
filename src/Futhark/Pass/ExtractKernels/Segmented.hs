@@ -82,7 +82,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
     eDivRoundingUp Int32 (eSubExp segment_size) (eSubExp group_size)
 
   -- the array passed here is the structure for how to layout the kernel space
-  space <- newKernelSpace (num_groups, group_size, num_threads) []
+  space <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
 
   -- The pattern passed to chunkLambda must have exactly *one* array dimension,
   -- to get the correct size of [chunk_size]type.
@@ -153,9 +153,8 @@ groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
 groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
                       reduce_lam' kern_chunk_fold_lam
                       nes w elements_per_thread = do
-  let ordering = case comm of Commutative -> InOrder -- TODO: should be Disorder
-                                                     -- see below
-                              Noncommutative -> InOrder
+  let ordering = case comm of Commutative -> SplitContiguous -- TODO: should be SplitStrided, see below
+                              Noncommutative -> SplitContiguous
   let num_redres = length nes -- number of reduction results
 
   let group_size = spaceGroupSize space
@@ -184,13 +183,12 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
                   [PatElem (paramName chunk_size) BindVar $ paramType chunk_size])
                  () $
                  Op $ SplitSpace ordering segment_size (Var index_within_segment)
-                                 threads_within_segment elements_per_thread
+                                 elements_per_thread
         else Let (Pattern [PatElem (paramName chunk_size) BindVar $ paramType chunk_size]
                           patelems_res_of_split)
                  () $
                  Op $ SplitArray ordering segment_size (Var index_within_segment)
-                                 threads_within_segment elements_per_thread
-                                 all_arrs_indexed
+                                 elements_per_thread all_arrs_indexed
 
   let red_ts = take num_redres $ lambdaReturnType kern_chunk_fold_lam
   let map_ts = map rowType $ drop num_redres $ lambdaReturnType kern_chunk_fold_lam
@@ -245,11 +243,11 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
                                  offset_stms)
                   kernel_returns
   where
-    makeOffsetExp InOrder index_within_segment segment_index = do
+    makeOffsetExp SplitContiguous index_within_segment segment_index = do
       e <- eBinOp (Add Int32) (eSubExp $ Var index_within_segment) $
              eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp $ Var segment_index)
       letSubExp "offset" e
-    makeOffsetExp Disorder _ _ =
+    makeOffsetExp (SplitStrided _stride) _ _ =
       fail "TODO: disorder not implemented, must change stride in CodeGen/ImpGen/Kernels.hs"
 
 regularSegmentedRedomapAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
