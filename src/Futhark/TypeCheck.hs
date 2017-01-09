@@ -923,7 +923,7 @@ checkPatElem (PatElem name bindage attr) = do
 checkDimIndex :: Checkable lore =>
                  DimIndex SubExp -> TypeM lore ()
 checkDimIndex (DimFix i) = require [Prim int32] i
-checkDimIndex (DimSlice i n) = mapM_ (require [Prim int32]) [i,n]
+checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int32]) [i,n,s]
 
 checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()

@@ -917,7 +917,7 @@ internaliseDimIndex loc w (E.DimSlice i j) = do
   cs_pos <- assertingOne $
     letExp "pos" =<< eAssert (pure $ BasicOp $ I.CmpOp (CmpSle Int32) i' j') loc
   n <- letSubExp "n" $ BasicOp $ I.BinOp (Sub Int32) j' i'
-  return (I.DimSlice i' n, cs_i <> cs_j <> cs_pos)
+  return (I.DimSlice i' n (constant (1::Int32)), cs_i <> cs_j <> cs_pos)
 
 internaliseScanOrReduce :: String -> String
                         -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)

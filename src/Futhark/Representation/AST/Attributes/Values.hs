@@ -129,14 +129,17 @@ split _ _ ds xs = [(xs, ds)]
 flatSlice :: Slice Int -> [Int] -> [Int]
 flatSlice slice shape = indices slice shape [0..product shape-1]
 
+stride :: Int -> [b] -> [b]
+stride s = map snd . filter ((==) 0 . flip mod s . fst) . zip [0 ..]
+
 indices :: Slice Int -> [Int] -> [a] -> [a]
 indices (DimFix i:is) (_:ds) xs =
   let rows = chunk (product ds) xs
   in case drop i rows of
        [] -> error "Values indices: out of bounds"
        xs':_ -> indices is ds xs'
-indices (DimSlice i n:is) (_:ds) xs =
+indices (DimSlice i n s:is) (_:ds) xs =
   let rows = chunk (product ds) xs
-      sliced_rows = take n $ drop i rows
+      sliced_rows = take n $ stride s $ drop i rows
   in concatMap (indices is ds) sliced_rows
 indices _ _ xs = xs

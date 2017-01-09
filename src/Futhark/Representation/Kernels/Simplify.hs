@@ -398,7 +398,10 @@ distributeKernelResults (vtable, used)
         remaining_slice <- drop (length kspace_slice) slice,
         all (isJust . flip ST.lookup vtable) $ HS.toList $ freeIn remaining_slice,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
-          let outer_slice = map (DimSlice (constant (0::Int32)) . snd) $
+          let outer_slice = map (\(_, d) -> DimSlice
+                                            (constant (0::Int32))
+                                            d
+                                            (constant (1::Int32))) $
                             spaceDimensions kspace
               index kpe' = letBind_ (Pattern [] [kpe']) $ BasicOp $ Index (kcs<>cs) arr $
                            outer_slice <> remaining_slice

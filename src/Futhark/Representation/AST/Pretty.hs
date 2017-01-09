@@ -279,8 +279,8 @@ instance Pretty d => Pretty (DimChange d) where
   ppr (DimNew      se) = ppr se
 
 instance Pretty d => Pretty (DimIndex d) where
-  ppr (DimFix i)     = ppr i
-  ppr (DimSlice i n) = ppr i <> text ":+" <> ppr n
+  ppr (DimFix i)       = ppr i
+  ppr (DimSlice i n s) = ppr i <> text ":+" <> ppr n <> text "*" <> ppr s
 
 ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
 ppPattern [] bs = braces $ commasep $ map ppr bs
