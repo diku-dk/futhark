@@ -40,7 +40,8 @@ regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels)
                         -> m ()
 regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
                         pat cs w comm reduce_lam fold_lam _ispace _inps nes arrs_flat = do
-  let num_redres = length nes -- number of reduction results
+  let num_redres = length nes -- number of reduction results (tuple size for
+                              -- reduction operator)
 
   unless (null $ patternContextElements pat) $ fail "regularSegmentedRedomap result pattern contains context elements, and Rasmus did not think this would ever happen."
 
@@ -49,10 +50,17 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   -- scratch space initially, and each thread will get a part of this by
   -- splitting it. Finally it is returned as a result of the kernel (to not
   -- break functional semantics).
-  let arr_idents = drop num_redres $ patternIdents pat
-  map_out_arrs <- forM arr_idents $ \(Ident name t) ->
-    letExp (baseString name <> "_out_in") $
+  map_out_arrs <- forM (drop num_redres $ patternIdents pat) $ \(Ident name t) -> do
+    tmp <- letExp (baseString name <> "_out_in") $
            BasicOp $ Scratch (elemType t) (arrayDims t)
+    -- I reshape here so the indexing within a kernel becomes easier... not
+    -- really sure if this will always work, or if this is actually the best way
+    -- to do it.
+    --
+    -- For example if the "map" part takes an input a 1D array and produces a 2D
+    -- array, this is clearly wrong. See ex3.fut
+    letExp (baseString name ++ "_out_in") $
+            BasicOp $ Reshape cs [DimNew num_segments, DimNew segment_size] tmp
 
   arrs_non_flat <- forM arrs_flat $ \arr -> do
     tp <- lookupType arr
@@ -73,21 +81,23 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
     letSubExp "elements_per_thread" =<<
     eDivRoundingUp Int32 (eSubExp segment_size) (eSubExp group_size)
 
-  -- TODO: what does the last array do? ==> see FIXME in Representation/Kernels/Kernel.hs
+  -- the array passed here is the structure for how to layout the kernel space
   space <- newKernelSpace (num_groups, group_size, num_threads) []
 
-  -- The result we want for each segment (or group?) -- right now it is the same
-  pat' <- fmap (Pattern []) $ forM (patternValueElements pat) $ \pat_e ->
+  -- The pattern passed to chunkLambda must have exactly *one* array dimension,
+  -- to get the correct size of [chunk_size]type.
+  --
+  -- FIXME: not sure if this will work when result of map is multidimensional,
+  -- or if reduction operator uses lists... must check
+  chunk_pat <- fmap (Pattern []) $ forM (patternValueElements pat) $ \pat_e ->
     case patElemType pat_e of
-      (Array ty (Shape (dim0:dims)) u) ->
-        if dim0 /= num_segments
-        then fail "outer size of result pattern is not == num_segments"
-        else do
+      (Array ty (Shape (dim0:_)) u) -> do
           vn' <- newName $ patElemName pat_e
-          return $ PatElem vn' BindVar (Array ty (Shape dims) u)
-      _ -> fail "result pattern is not just arrays"
+          return $ PatElem vn' BindVar $ Array ty (Shape [dim0]) u
+      _ -> fail $ "segmentedRedomap: result pattern is not array " ++ pretty pat_e
 
-  chunk_fold_lam <- chunkLambda pat' nes fold_lam
+  chunk_fold_lam <- chunkLambda chunk_pat nes fold_lam
+
   -- kernliseLambda intializes the value of the merge pattern for the reduction
   -- to the neutral element.
   kern_chunk_fold_lam <- kerneliseLambda nes chunk_fold_lam
@@ -110,15 +120,19 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
                   comm reduce_lam' kern_chunk_fold_lam nes
                   w elements_per_thread
 
-  let kernel_pat = Pattern [] $ take num_redres (patternValueElements pat) ++
+  kernel_redres_pat <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
+    vn' <- newName $ patElemName pe
+    return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments]
+
+  let kernel_pat = Pattern [] $ kernel_redres_pat ++
                                 drop num_redres (patternValueElements flat_pat)
 
   -- TODO: BlockeKernel renames of one of these. I'm not sure if I should do it
   -- too
   addStm $ Let kernel_pat () $ Op the_kernel
 
-  forM_ (zip (drop num_redres $ patternValueElements kernel_pat)
-             (drop num_redres $ patternValueElements pat)) $ \(kpe, pe) ->
+  forM_ (zip (patternValueElements kernel_pat)
+             (patternValueElements pat)) $ \(kpe, pe) ->
     addStm $ Let (Pattern [] [pe]) () $
              BasicOp $ Reshape cs [DimNew se | se <- arrayDims $ patElemAttr pe]
                                (patElemName kpe)
