@@ -899,9 +899,9 @@ expReturns (BasicOp (Split _ i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let offsets =  0 : scanl1 (+) (map (primExpFromSubExp int32) sizeexps)
       dims = map (primExpFromSubExp int32) $ shapeDims shape
-      mkSlice offset n = map (DimSlice 0) (take i dims) ++
-                         [DimSlice offset n] ++
-                         map (DimSlice 0) (drop (i+1) dims)
+      mkSlice offset n = map (unitSlice 0) (take i dims) ++
+                         [unitSlice offset n] ++
+                         map (unitSlice 0) (drop (i+1) dims)
   return $ zipWith (\offset dim ->
                       let new_shape = setDim i shape dim
                       in ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
@@ -995,7 +995,7 @@ instance OpReturns InKernel where
           SplitContiguous ->
             IxFun.slice ixfun $
             fullSliceNum (map (primExpFromSubExp int32) $ arrayDims arr_t)
-            [DimSlice (thread_id' * elems_per_thread') elems_per_thread']
+            [unitSlice (thread_id' * elems_per_thread') elems_per_thread']
           SplitStrided stride ->
             IxFun.strideIndex (IxFun.offsetIndex ixfun thread_id') $
             primExpFromSubExp int32 stride
