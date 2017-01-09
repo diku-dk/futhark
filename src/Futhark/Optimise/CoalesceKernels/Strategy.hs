@@ -11,6 +11,8 @@ import qualified Data.HashSet as HS
 import Futhark.Representation.AST.Syntax
 -- }}}
 
+import Futhark.Util.Pretty
+
 -- Types-- {{{
 type Var = VName
 
@@ -20,6 +22,11 @@ type Tr = Int
 type ArrMap = Map.Map Var Tr
 
 data Access = Access VName [Names]
+  deriving (Show)
+
+instance Pretty (Access) where
+  ppr = text . show
+
 
 data Strategy = Strategy { interchange :: (In Var, Out Var)
                          , transposes :: ArrMap

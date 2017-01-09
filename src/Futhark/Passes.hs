@@ -91,8 +91,6 @@ sequentialPipeline mode =
          , simplifyExplicitMemory
          , doubleBuffer
          , simplifyExplicitMemory
-         , coalesceKernels
-         , simplifyExplicitMemory
          ]
 
 gpuPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
@@ -100,8 +98,8 @@ gpuPipeline mode =
   standardPipeline mode >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
-         , babysitKernels
-         , simplifyKernels
+         {- , babysitKernels -}
+         {- , simplifyKernels -}
          , tileLoops
          , unstream
          , simplifyKernels
@@ -113,10 +111,10 @@ gpuPipeline mode =
   passes [ simplifyExplicitMemory
          , performCSE False
          , simplifyExplicitMemory
-         , doubleBuffer
-         , simplifyExplicitMemory
-         , expandAllocations
-         , simplifyExplicitMemory
-         , coalesceKernels
-         , simplifyExplicitMemory
+         {- , coalesceKernels -}
+         {- , simplifyExplicitMemory -}
+         {- , doubleBuffer -}
+         {- , simplifyExplicitMemory -}
+         {- , expandAllocations -}
+         {- , simplifyExplicitMemory -}
          ]

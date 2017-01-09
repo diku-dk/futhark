@@ -32,6 +32,9 @@ import qualified Futhark.Util.Pretty as PP
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
+
+import Futhark.Optimise.CoalesceKernels
+
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.Simplify
 import Futhark.Optimise.InPlaceLowering
@@ -270,6 +273,8 @@ commandLineOptions =
   , typedPassOption soacsProg Kernels extractKernels []
 
   , typedPassOption kernelsProg ExplicitMemory explicitAllocations "a"
+
+  , explicitMemoryPassOption coalesceKernels []
 
   , explicitMemoryPassOption doubleBuffer []
   , explicitMemoryPassOption expandAllocations []
