@@ -153,14 +153,15 @@ groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
 groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
                       reduce_lam' kern_chunk_fold_lam
                       nes w elements_per_thread = do
-  let ordering = case comm of Commutative -> SplitContiguous -- TODO: should be SplitStrided, see below
-                              Noncommutative -> SplitContiguous
   let num_redres = length nes -- number of reduction results
 
   let group_size = spaceGroupSize space
   let segment_index = spaceGroupId space
   let index_within_segment = spaceLocalId space
   let threads_within_segment = spaceGroupSize space
+
+  let ordering = case comm of Commutative -> SplitStrided threads_within_segment
+                              Noncommutative -> SplitContiguous
 
   let (_, chunk_size, [], arr_params) =
         partitionChunkedKernelFoldParameters 0 $ lambdaParams kern_chunk_fold_lam
@@ -248,8 +249,10 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
              (eBinOp (Mul Int32) (eSubExp elements_per_thread) (eSubExp $ Var index_within_segment)) $
              eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp $ Var segment_index)
       letSubExp "offset" e
-    makeOffsetExp (SplitStrided _stride) _ _ =
-      fail "TODO: disorder not implemented, must change stride in CodeGen/ImpGen/Kernels.hs"
+    makeOffsetExp (SplitStrided _stride) index_within_segment segment_index = do
+      e <- eBinOp (Add Int32) (eSubExp $ Var index_within_segment) $
+             eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp $ Var segment_index)
+      letSubExp "offset" e
 
 regularSegmentedRedomapAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
                                 SubExp
