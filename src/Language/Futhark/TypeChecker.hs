@@ -1889,10 +1889,11 @@ checkPolyBinOp op tl e1 e2 pos = do
 checkDimIndex :: DimIndexBase NoInfo Name -> TypeM DimIndex
 checkDimIndex (DimFix i) =
   DimFix <$> (require [Prim $ Signed Int32] =<< checkExp i)
-checkDimIndex (DimSlice i j) =
+checkDimIndex (DimSlice i j s) =
   DimSlice
   <$> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) i
   <*> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) j
+  <*> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) s
 
 sequentially :: TypeM a -> (a -> Occurences -> TypeM b) -> TypeM b
 sequentially m1 m2 = do
