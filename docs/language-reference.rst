@@ -360,15 +360,27 @@ Futhermore, there *may not* be a space between ``a`` and the opening
 bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 [i]``, which is a function call with a literal array.
 
-``a[i:j]``
+``a[i:j:s]``
 ~~~~~~~~~~
 
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
-latter inclusive and the latter exclusive.  Slicing of multiple
-dimensions can be done by separating with commas, and may be
-intermixed freely with indexing.  It is an error if ``j < n``.  If
-``i`` is elided, it defaults to ``0``.  If ``j`` is elided, if
-defaults to the size of the array.
+latter inclusive and the latter exclusive, taking every ``s``th
+element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
+it means to start at ``i`` and descend by steps of size ``s`` to ``j``
+(not inclusive).  If ``s`` is positive, then ``0<=i<=j<=w`` must hold, and
+otherwise ``-1<=j<=i<w`` must hold.
+
+It is generally a bad idea for ``s`` to be non-constant.
+Slicing of multiple dimensions can be done by separating with commas,
+and may be intermixed freely with indexing.
+
+If ``s`` is elided it defaults to ``1``.  If ``i`` or ``j`` is elided,
+their value depends on the sign of ``s``.  If ``s`` is positive, ``i``
+and ``j`` become ``0`` and the length of the array respectively.  Is
+``s`` is negative, ``i`` becomes the length of the array minus one,
+and ``j`` becomes minus one.  This means that ``a[::-1]`` is the
+reverse of the array ``a``.
+
 
 ``zip x y z``
 ~~~~~~~~~~~~~~~~~~

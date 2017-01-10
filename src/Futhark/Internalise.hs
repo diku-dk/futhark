@@ -907,17 +907,47 @@ internaliseDimIndex loc w (E.DimFix i) = do
   i' <- internaliseExp1 "i" i
   cs <- assertingOne $ boundsCheck loc w i'
   return (I.DimFix i', cs)
-internaliseDimIndex loc w (E.DimSlice i j) = do
-  i' <- maybe (return (constant (0::Int32))) (internaliseExp1 "i") i
-  j' <- maybe (return w) (internaliseExp1 "j") j
-  cs_i <- assertingOne $ boundsCheck loc w i'
-  cs_j <- assertingOne $ do
-    wp1 <- letSubExp "wp1" $ BasicOp $ I.BinOp (Add Int32) j' (constant (1::Int32))
-    boundsCheck loc wp1 j'
-  cs_pos <- assertingOne $
-    letExp "pos" =<< eAssert (pure $ BasicOp $ I.CmpOp (CmpSle Int32) i' j') loc
-  n <- letSubExp "n" $ BasicOp $ I.BinOp (Sub Int32) j' i'
-  return (I.DimSlice i' n (constant (1::Int32)), cs_i <> cs_j <> cs_pos)
+internaliseDimIndex loc w (E.DimSlice i j s) = do
+  s' <- maybe (return (constant (1::Int32))) (internaliseExp1 "s") s
+  s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
+  backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) s_sign
+              (I.constant (negate 1::Int32))
+  w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int32) w (constant (1::Int32))
+  let i_def = letSubExp "i_def" $ I.If backwards
+              (resultBody [w_minus_1])
+              (resultBody [zero]) [I.Prim int32]
+      j_def = letSubExp "j_def" $ I.If backwards
+              (resultBody [negone])
+              (resultBody [w]) [I.Prim int32]
+  i' <- maybe i_def (internaliseExp1 "i") i
+  j' <- maybe j_def (internaliseExp1 "j") j
+  j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32) j' i'
+  n <- letSubExp "n" =<< eDivRoundingUp Int32
+       (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
+       (pure $ I.BasicOp $ I.UnOp (I.Abs Int32) s')
+
+  -- Bounds checks depend on whether we are slicing forwards or
+  -- backwards.  If forwards, we must check '0 <= i && i <= j && j <= w'.  If
+  -- backwards, '-1 <= j && j <= i && i < w'.
+  zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
+  i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
+  j_lte_w <- letSubExp "j_lte_w" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' w
+  forwards_ok <- letSubExp "forwards_ok" =<< foldBinOp I.LogAnd zero_lte_i [i_lte_j, j_lte_w]
+
+  negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
+  j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
+  i_lt_w <- letSubExp "i_lt_w" $ I.BasicOp $ I.CmpOp (I.CmpSlt Int32) i' w
+  backwards_ok <- letSubExp "backwards_ok" =<< foldBinOp I.LogAnd negone_lte_j [j_lte_i, i_lt_w]
+
+  ok <- letSubExp "slice_ok" $ I.If backwards
+        (resultBody [backwards_ok])
+        (resultBody [forwards_ok])
+        [I.Prim I.Bool]
+  checked <- letExp "slice_cert" $ I.BasicOp $ I.Assert ok loc
+
+  return (I.DimSlice i' n s', [checked])
+  where zero = constant (0::Int32)
+        negone = constant (-1::Int32)
 
 internaliseScanOrReduce :: String -> String
                         -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)

@@ -199,8 +199,10 @@ hasArrayLit (TupLit es2 _) = any hasArrayLit es2
 hasArrayLit _              = False
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndexBase ty vn) where
-  ppr (DimFix e)     = ppr e
-  ppr (DimSlice i j) = maybe mempty ppr i <> text ":" <> maybe mempty ppr j
+  ppr (DimFix e)       = ppr e
+  ppr (DimSlice i j s) = maybe mempty ppr i <> text ":" <>
+                         maybe mempty ppr j <> text ":" <>
+                         maybe mempty ppr s
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
