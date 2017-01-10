@@ -244,7 +244,8 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
                   kernel_returns
   where
     makeOffsetExp SplitContiguous index_within_segment segment_index = do
-      e <- eBinOp (Add Int32) (eSubExp $ Var index_within_segment) $
+      e <- eBinOp (Add Int32)
+             (eBinOp (Mul Int32) (eSubExp elements_per_thread) (eSubExp $ Var index_within_segment)) $
              eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp $ Var segment_index)
       letSubExp "offset" e
     makeOffsetExp (SplitStrided _stride) _ _ =
