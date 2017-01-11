@@ -11,6 +11,7 @@ import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import qualified Data.Map as M
 import Data.List
 import Data.Maybe
@@ -81,11 +82,13 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
   -- outside the kernel body and where the indices are kernel thread
   -- indices.
   scope <- askScope
-  let boundOutside = fmap typeOf . (`HM.lookup` scope)
-      thread_gids = map fst $ spaceDimensions space
+  let thread_gids = map fst $ spaceDimensions space
+      thread_local = HS.fromList $ spaceGlobalId space : thread_gids
 
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
-                         (ensureCoalescedAccess expmap thread_gids boundOutside)
+                         thread_local
+                         (castScope scope <> scopeOfKernelSpace space)
+                         (ensureCoalescedAccess expmap thread_gids)
                          kbody')
              mempty
 
@@ -173,43 +176,55 @@ transformKernelBody num_threads cs (KernelBody () stms res) =
           | otherwise =
               rearrangeScanReduceInput cs num_threads padding w w_padded elems_per_thread arr
 
-type ArrayIndexTransform m = VName -> Slice SubExp -> m (Maybe (VName, Slice SubExp))
+type ArrayIndexTransform m = (VName -> Bool) -> -- thread local?
+                             Scope InKernel -> -- type environment
+                             VName -> Slice SubExp -> m (Maybe (VName, Slice SubExp))
 
 traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
-                                  ArrayIndexTransform f
+                                  Names
+                               -> Scope InKernel
+                               -> ArrayIndexTransform f
                                -> KernelBody InKernel
                                -> f (KernelBody InKernel)
-traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
-  KernelBody () <$> mapM onStm kstms <*> pure kres
-  where onLambda lam =
+traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms kres) =
+  KernelBody () <$> mapM (onStm (mempty, outer_scope)) kstms <*> pure kres
+  where onLambda (variance, scope) lam =
           (\body' -> lam { lambdaBody = body' }) <$>
-          onBody (lambdaBody lam)
+          onBody (variance, scope') (lambdaBody lam)
+          where scope' = scope <> scopeOfLParams (lambdaParams lam)
 
-        onStreamLambda lam =
+        onStreamLambda (variance, scope) lam =
           (\body' -> lam { groupStreamLambdaBody = body' }) <$>
-          onBody (groupStreamLambdaBody lam)
+          onBody (variance, scope') (groupStreamLambdaBody lam)
+          where scope' = scope <> scopeOf lam
 
-        onBody (Body battr bnds bres) =
-          Body battr <$> mapM onStm bnds <*> pure bres
+        onBody (variance, scope) (Body battr stms bres) =
+          Body battr <$> mapM (onStm (variance', scope')) stms <*> pure bres
+          where variance' = varianceInStms variance stms
+                scope' = scope <> scopeOf stms
 
-        onStm (Let pat attr (BasicOp (Index cs arr is))) =
-          Let pat attr . oldOrNew <$> f arr is
+        onStm (variance, scope) (Let pat attr (BasicOp (Index cs arr is))) =
+          Let pat attr . oldOrNew <$> f isThreadLocal scope arr is
           where oldOrNew Nothing =
                   BasicOp $ Index cs arr is
                 oldOrNew (Just (arr', is')) =
                   BasicOp $ Index cs arr' is'
-        onStm (Let pat attr e) =
-          Let pat attr <$> mapExpM mapper e
 
-        mapper = identityMapper { mapOnBody = const onBody
-                                , mapOnOp = onOp
-                                }
+                isThreadLocal v = not $ HS.null $
+                                  thread_variant `HS.intersection`
+                                  HM.lookupDefault mempty v variance
+        onStm (variance, scope) (Let pat attr e) =
+          Let pat attr <$> mapExpM (mapper (variance, scope)) e
 
-        onOp (GroupReduce w lam input) =
-          GroupReduce w <$> onLambda lam <*> pure input
-        onOp (GroupStream w maxchunk lam accs arrs) =
-           GroupStream w maxchunk <$> onStreamLambda lam <*> pure accs <*> pure arrs
-        onOp stm = pure stm
+        mapper ctx = identityMapper { mapOnBody = const (onBody ctx)
+                                    , mapOnOp = onOp ctx
+                                    }
+
+        onOp ctx (GroupReduce w lam input) =
+          GroupReduce w <$> onLambda ctx lam <*> pure input
+        onOp ctx (GroupStream w maxchunk lam accs arrs) =
+           GroupStream w maxchunk <$> onStreamLambda ctx lam <*> pure accs <*> pure arrs
+        onOp _ stm = pure stm
 
 
 -- Not a hashmap, as SubExp is not hashable.
@@ -218,17 +233,16 @@ type Replacements = M.Map (VName, Slice SubExp) VName
 ensureCoalescedAccess :: MonadBinder m =>
                          ExpMap
                       -> [VName]
-                      -> (VName -> Maybe Type)
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
+ensureCoalescedAccess expmap thread_gids isThreadLocal scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
-  case (seen, boundOutside arr) of
+  case (seen, isThreadLocal arr, typeOf <$> HM.lookup arr scope) of
     -- Already took care of this case elsewhere.
-    (Just arr', _) ->
+    (Just arr', _, _) ->
       pure $ Just (arr', slice)
 
-    (Nothing, Just t)
+    (Nothing, False, Just t)
       -- We are fully indexing the array with thread IDs, but the
       -- indices are in a permuted order.
       | Just is <- sliceIndices slice,
@@ -238,13 +252,15 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr slice = do
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
       -- We are not fully indexing the array, and the indices are not
-      -- a proper prefix of the thread indices, so we assume (HEURISTIC!)
-      -- that the remaining dimensions will be traversed sequentially.
+      -- a proper prefix of the thread indices, and some indices are
+      -- thread local, so we assume (HEURISTIC!)  that the remaining
+      -- dimensions will be traversed sequentially.
       | (is, rem_slice) <- splitSlice slice,
         not $ null rem_slice,
         not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
-        is /= map Var (take (length is) thread_gids) ||
-         length is == length thread_gids -> do
+        is /= map Var (take (length is) thread_gids)
+        || length is == length thread_gids,
+        any isThreadLocal (HS.toList $ freeIn rem_slice) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
@@ -343,3 +359,17 @@ rowMajorArray :: MonadBinder m =>
 rowMajorArray arr = do
   rank <- arrayRank <$> lookupType arr
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0..rank-1] arr
+
+--- Computing variance.
+
+type VarianceTable = HM.HashMap VName Names
+
+varianceInStms :: VarianceTable -> [Stm InKernel] -> VarianceTable
+varianceInStms = foldl varianceInStm
+
+varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
+varianceInStm variance bnd =
+  foldl' add variance $ patternNames $ bindingPattern bnd
+  where add variance' v = HM.insert v binding_variance variance'
+        look variance' v = HS.insert v $ HM.lookupDefault mempty v variance'
+        binding_variance = mconcat $ map (look variance) $ HS.toList (freeInStm bnd)
