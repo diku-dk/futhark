@@ -20,6 +20,8 @@ Extra-source-files:  rts/python/memory.py,
                      rts/c/reader.h,
                      rts/c/opencl.h
 
+                     futlib/*.fut
+
 
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
