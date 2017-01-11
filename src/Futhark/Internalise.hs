@@ -64,32 +64,34 @@ internaliseFunctionName :: Bool -> VName -> InternaliseM (VName, Name)
 internaliseFunctionName entry fname = do
   -- Note that we may have another name for this function if we are
   -- inside of a functor application.
-  fname' <- lookupSubst $ E.qualName fname
+  fname' <- newOrExistingSubst fname
   return (fname',
           if entry
           then nameFromString $ pretty $ baseName fname'
           else nameFromString $ pretty fname' ++ "f")
 
-mkFtableExpansion :: [E.ValDec] -> InternaliseM FunTable
-mkFtableExpansion = fmap HM.fromList . mapM funFrom
+mkFtableExpansion :: [E.ValDec] -> InternaliseM (FunTable, DecSubstitutions)
+mkFtableExpansion vds = do (fbs, ds) <- unzip <$> mapM funFrom vds
+                           return (HM.fromList fbs, HM.fromList ds)
   where funFrom (E.FunDec (E.FunBind entry ofname _ (Info rettype) params _ _)) =
           bindingParams params $ \shapes values -> do
             (fname, fname') <- internaliseFunctionName entry ofname
             (rettype', _, cm) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
                 consts = map ((`Param` I.Prim int32) . snd) cm
-            return (fname,
-                    FunBinding { internalFun = (fname',
-                                                cm,
-                                                shapenames,
-                                                map declTypeOf values,
-                                                applyRetType
-                                                (ExtRetType rettype')
-                                                (consts++shapes++values)
-                                               )
-                               , externalFun = (rettype,
-                                                map E.patternStructType params)
-                               })
+            return ((fname,
+                     FunBinding { internalFun = (fname',
+                                                 cm,
+                                                 shapenames,
+                                                 map declTypeOf values,
+                                                 applyRetType
+                                                 (ExtRetType rettype')
+                                                 (consts++shapes++values)
+                                                )
+                                , externalFun = (rettype,
+                                                 map E.patternStructType params)
+                                }),
+                     (ofname, fname))
         funFrom (E.ConstDec (E.ConstBind name _ t e loc)) =
           funFrom $ E.FunDec $ E.FunBind False name Nothing t [] e loc
 
@@ -111,13 +113,13 @@ internaliseDecs ds =
       ttable <- asks envTtable
       return ((ftable, ttable), [])
     (Left vdecs, ds') -> do
-      ftable_expansion <- mkFtableExpansion vdecs
-      bindingFunctions ftable_expansion $ do
+      (ftable_expansion, substs) <- mkFtableExpansion vdecs
+      bindingFunctions ftable_expansion $ withDecSubsts substs $ do
         vdec_funs <- mapM internaliseValDec vdecs
         (tables, ds_funs) <- internaliseDecs ds'
         return (tables, vdec_funs ++ ds_funs)
     (Right (E.StructDec sb), ds') ->
-      internaliseModExp sb $ \funs -> do
+      internaliseStructBind False sb $ \funs -> do
         (tables, ds_funs) <- internaliseDecs ds'
         return (tables, funs ++ ds_funs)
     (Right (E.FunctorDec fb), ds') ->
@@ -137,14 +139,16 @@ internaliseValDec (E.FunDec fb) =
 internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
   internaliseFun $ E.FunBind False name Nothing t [] e loc
 
-internaliseModExp :: E.StructBind
-                  -> ([I.FunDef] -> InternaliseM a)
-                  -> InternaliseM a
-internaliseModExp sb m =
+internaliseStructBind :: Bool -> E.StructBind
+                      -> ([I.FunDef] -> InternaliseM a)
+                      -> InternaliseM a
+internaliseStructBind generating sb m =
   withDecSubsts subst_from_sb $
   case structExp sb of
     E.ModDecs ds _ -> do
-      ((ftable_expansion, ttable_expansion), funs) <- internaliseDecs ds
+      ((ftable_expansion, ttable_expansion), funs) <-
+        (if generating then generatingFunctor else id) $
+        internaliseDecs ds
       bindingFunctions ftable_expansion $
         bindingTypes ttable_expansion $
         bindingModule (E.structName sb) ds $
@@ -154,28 +158,30 @@ internaliseModExp sb m =
       ds <- lookupModule v'
       bindingModule (E.structName sb) ds $
         m []
-    E.ModApply v arg (Info subst) _ -> internaliseModExp' arg $ \arg_funs -> do
+    E.ModApply v arg (Info subst) _ -> internaliseModExp' False arg $ \arg_funs -> do
       v' <- lookupSubst v
       me <- lookupFunctor v'
       let sb' = sb { structExp = me }
-      withDecSubsts subst $ internaliseModExp sb' $ m . (arg_funs++)
+      withDecSubsts subst $ internaliseStructBind True sb' $ m . (arg_funs++)
   where subst_from_sb = case structSignature sb of
                           Just (_, Info substs) -> substs
                           Nothing               -> mempty
 
-internaliseModExp' :: E.ModExp
+internaliseModExp' :: Bool -> E.ModExp
                    -> ([I.FunDef] -> InternaliseM a)
                    -> InternaliseM a
-internaliseModExp' E.ModVar{} m = m []
-internaliseModExp' (E.ModDecs ds _) m = do
-  ((ftable_expansion, ttable_expansion), funs) <- internaliseDecs ds
+internaliseModExp' _ E.ModVar{} m = m []
+internaliseModExp' generating (E.ModDecs ds _) m = do
+  ((ftable_expansion, ttable_expansion), funs) <-
+    (if generating then generatingFunctor else id) $
+    internaliseDecs ds
   bindingFunctions ftable_expansion $
     bindingTypes ttable_expansion $
     m funs
-internaliseModExp' (E.ModApply v arg (Info subst) _) m = internaliseModExp' arg $ \arg_funs -> do
+internaliseModExp' _ (E.ModApply v arg (Info subst) _) m = internaliseModExp' False arg $ \arg_funs -> do
   v' <- lookupSubst v
   me <- lookupFunctor v'
-  withDecSubsts subst $ internaliseModExp' me $ m . (arg_funs++)
+  withDecSubsts subst $ internaliseModExp' True me $ m . (arg_funs++)
 
 internaliseFun :: E.FunBind -> InternaliseM I.FunDef
 internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
