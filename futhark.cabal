@@ -53,7 +53,8 @@ Library
                  neat-interpolation >= 0.3,
                  file-embed >= 0.0.9,
                  directory,
-                 directory-tree
+                 directory-tree,
+                 gitrev >= 1.2.0
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
