@@ -313,7 +313,7 @@ optional curried arguments), or an operator (possibly with one operand
 curried):
 
 .. productionlist::
-   lambda: "(" "fn" `param`... : `rettype` "=>" `e` ")"
+   lambda: "(" \ `param`... : `rettype` "->" `e` ")"
          : `fname`
          : "(" `fname` `e` ... `e` ")"
          : "(" `op` `e` ")"
