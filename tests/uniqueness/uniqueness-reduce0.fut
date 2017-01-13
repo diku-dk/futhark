@@ -11,7 +11,7 @@
 
 fun main(a: *[]int,b: []int): []int =
   let (x,y) =
-    reduce (fn (acc: (*[]int, []int)) (arr: ([]int, []int)): (*[]int, []int)  =>
+    reduce (\(acc: (*[]int, []int)) (arr: ([]int, []int)): (*[]int, []int)  ->
              let (a1,b1) = acc
              let (a2,b2) = arr
              in (map (+) a1 a2,

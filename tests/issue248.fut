@@ -18,17 +18,17 @@ entry main (nucleotides: []int): bool =
   let t_v12 = let x = t_v8 in
               let y = t_v9 in
               let n = (shape (x))[1] in
-              map (fn (x: [][]int) (y: [][]int): [n][]bool =>
+              map (\(x: [][]int) (y: [][]int): [n][]bool ->
                        let n = (shape (x))[1] in
-                       map (fn (x: []int) (y: []int): [n]bool =>
+                       map (\(x: []int) (y: []int): [n]bool ->
                                 map (==) (x) (y)) (x) (y)) (x) (y) in
-  let t_v15 = map (fn (x: [][]bool): []bool =>
-                   map (fn (x: []bool): bool =>
+  let t_v15 = map (\(x: [][]bool): []bool ->
+                   map (\(x: []bool): bool ->
                         reduce (||) (false) (x)) (x)) (t_v12) in
-  let t_v18 = map (fn (x: [][]bool): []bool =>
-                   map (fn (x: []bool): bool =>
+  let t_v18 = map (\(x: [][]bool): []bool ->
+                   map (\(x: []bool): bool ->
                         reduce (||) (false) (x)) (x)) (t_v12) in
-  let t_v21 = rearrange (0) (map (fn (x: []bool): bool =>
+  let t_v21 = rearrange (0) (map (\(x: []bool): bool ->
                                   reduce (&&) (true) (x)) (rearrange (1, 0) (t_v18))) in
   let t_v26 = reduce (&&) (true) (let x = t_v21 in
                                   let y = [false, false, false, true, false,

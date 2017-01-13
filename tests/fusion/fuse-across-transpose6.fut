@@ -44,8 +44,8 @@ fun take(n: int, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
 fun correlateDeltas(md_c: [num_und][num_und]f64,
                     zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =
-  map (fn (zi: [num_und]f64): [num_und]f64  =>
-         map (fn (j: int): f64  =>
+  map (\(zi: [num_und]f64): [num_und]f64  ->
+         map (\(j: int): f64  ->
                 let x = map (*) (take(j+1,zi)) (take(j+1,md_c[j]) )
                 in  reduce (+) (0.0) x
             ) (iota(num_und) )
@@ -61,10 +61,10 @@ fun mkPrices(md_starts: [num_und]f64,
            md_drifts: [num_dates][num_und]f64,
            noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let c_rows = map combineVs (zip noises (md_vols) (md_drifts) )
-  let e_rows = map (fn (x: []f64): [num_und]f64  => map exp64 x
+  let e_rows = map (\(x: []f64): [num_und]f64  -> map exp64 x
                   ) (c_rows
                   )
-  in  scan (fn (x: []f64) (y: []f64): []f64  => map (*) x y
+  in  scan (\(x: []f64) (y: []f64): []f64  -> map (*) x y
           ) (md_starts) (e_rows )
 
   -- Formerly blackScholes.

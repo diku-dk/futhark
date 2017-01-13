@@ -14,7 +14,7 @@ fun reduceBins(acc: *[numBins]i32) (elm: *[numBins]i32): *[numBins]i32 =
 
 fun main(): []i32 =
     let
-    (rrs, drs) = unzip(map (fn (i: i32): (*[]i32, *[]i32) =>
+    (rrs, drs) = unzip(map (\(i: i32): (*[]i32, *[]i32) ->
                              (replicate 2 0,
                               replicate 2 0)) (
                            iota 1))

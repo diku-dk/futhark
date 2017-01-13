@@ -48,7 +48,7 @@
 
 fun min(a: int) (b: int): int = if(a<b) then a else b
 
-fun min1(a: []int, b: []int): []int = map (fn (x,y) => min x y) (zip a b)
+fun min1(a: []int, b: []int): []int = map (\(x,y) -> min x y) (zip a b)
 
 
 fun redmin1(a:  []int): int = reduce min 1200 a

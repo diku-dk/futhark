@@ -7,5 +7,5 @@
 default (f32)
 
 fun main(a: [rows][cols]f32): [rows]f32 =
-  let means: [rows]f32 = map (fn a => (reduce (+) 0.0 a) / f32(cols)) a in
+  let means: [rows]f32 = map (\a -> (reduce (+) 0.0 a) / f32(cols)) a in
   means

@@ -13,6 +13,6 @@
 -- structure { Map 2 Map/Map/Redomap 1 }
 
 fun main(x: [n][m]int, y: [m][p]int): [n][p]int =
-  map (fn xr => map (fn yc => reduce (+) 0 (zipWith (*) xr yc))
+  map (\xr -> map (\yc -> reduce (+) 0 (zipWith (*) xr yc))
                     (transpose y))
        x

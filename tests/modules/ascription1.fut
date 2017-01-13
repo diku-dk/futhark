@@ -18,7 +18,7 @@ val x: (int, int) = (2,2)
 
 fun inject (x: int) (y: int): t = (x, y)
 fun extract (v:t): t = v
-fun f (as: []t): t = reduce (fn (a,b) (c,d) => (a+c,b+d)) (0,0) as
+fun f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }
 
 fun main(xs: []int, ys: []int): (int,int) =

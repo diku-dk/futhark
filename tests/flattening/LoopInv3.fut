@@ -25,9 +25,9 @@ fun addRows (xs: []int, ys: []int): []int =
   map (+) xs ys
 
 fun main (xssss: [][][][]int, ys: []int): [][][][]int =
-  map  (fn (xsss: [][][]int): [][][]int  =>
-         map  (fn (xss: [][]int): [][]int  =>
-                map (fn (xs: []int): []int  =>
+  map  (\(xsss: [][][]int): [][][]int  ->
+         map  (\(xss: [][]int): [][]int  ->
+                map (\(xs: []int): []int  ->
                       addRows(xs,ys)
                    ) xss
             ) xsss

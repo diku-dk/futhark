@@ -75,9 +75,10 @@ tokens :-
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
   "!"                      { tokenC BANG }
-  "->"                     { tokenC TYPE_ARROW }
+  "->"                     { tokenC ARROW }
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
+  "\"                      { tokenC BACKSLASH }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.takeWhile (/='i') }
@@ -127,7 +128,7 @@ keyword s =
     "f64"          -> F64
     "bool"         -> BOOL
     "fun"          -> FUN
-    "fn"           -> FN
+    "fn"           -> BACKSLASH -- FIXME: delete
     "for"          -> FOR
     "do"           -> DO
     "abs"          -> ABS
@@ -292,7 +293,6 @@ data Token = IF
            | COMMA
            | UNDERSCORE
            | FUN
-           | FN
            | ARROW
            | FOR
            | DO
@@ -340,7 +340,7 @@ data Token = IF
            | VAL
            | COLON
            | AT
-           | TYPE_ARROW
+           | BACKSLASH
            | HASH
 
              deriving (Show, Eq)

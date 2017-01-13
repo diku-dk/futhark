@@ -21,7 +21,7 @@
 -- }
 fun main(n: int, m: int): int =
   let factors = map (^123) (iota n)
-  let res = map (fn factor =>
+  let res = map (\factor ->
                    reduce (+) 0 (scan (+) 0 (map (*factor) (iota m))))
                  factors
   in res[n-2]
