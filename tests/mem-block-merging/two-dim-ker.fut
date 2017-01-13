@@ -5,8 +5,8 @@
 
 fun main(xsss: [n][n][n]int): [][n][n]int =
   let (_,asss) = split (1) xsss
-  in  map (fn ass => 
-                map (fn as =>
+  in  map (\ass -> 
+                map (\as ->
                         loop (r=0) = for i < n do
                             let r = r + as[i]
                             in  r

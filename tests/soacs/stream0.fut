@@ -9,7 +9,7 @@ fun main(num_mc_it: int,
          num_dates: int,
          num_und: int): [][]int =
   let sobvctsz  = num_dates*num_und in
-  streamMap (fn (ns: [chunk]int): [chunk][1]int =>
-               map (fn (k: int): [1]int => if k==0 then [0] else [1])
+  streamMap (\(ns: [chunk]int): [chunk][1]int ->
+               map (\(k: int): [1]int -> if k==0 then [0] else [1])
                    (iota chunk))
             (iota num_mc_it)

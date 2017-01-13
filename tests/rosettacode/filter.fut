@@ -11,4 +11,4 @@
 -- output { empty(int) }
 
 fun main(as: []int): []int =
-  filter (fn x => x%2 == 0) as
+  filter (\x -> x%2 == 0) as

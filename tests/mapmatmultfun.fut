@@ -15,8 +15,8 @@
 -- structure { Map 3 Map/Map/Map/Redomap 1 }
 
 fun matmult(x: [n][m]int) (y: [m][p]int): [n][p]int =
-  map (fn xr =>
-         map (fn yc => reduce (+) 0 (map (*) xr yc))
+  map (\xr ->
+         map (\yc -> reduce (+) 0 (map (*) xr yc))
        (transpose y))
   x
 

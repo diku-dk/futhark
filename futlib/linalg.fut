@@ -20,7 +20,7 @@ fun dotprod (xs: [n]t) (ys: [n]t): t =
   reduce T.add (T.fromInt 0) (map T.mul xs ys)
 
 fun matmul (xss: [n][p]t) (yss: [p][m]t): [n][m]t =
-  map (fn xs => map (dotprod xs) (transpose yss)) xss
+  map (\xs -> map (dotprod xs) (transpose yss)) xss
 
 -- Matrix inversion is implemented with Gauss-Jordan.
 fun gauss_jordan (A: [n][m]t) (i: int): [n][m]t =
@@ -28,16 +28,16 @@ fun gauss_jordan (A: [n][m]t) (i: int): [n][m]t =
     let irow = A[0]
     let Ap = A[1:n]
     let v1 = irow[i]
-    let irow = map (fn x => T.div x v1) irow
-    let Ap = map (fn jrow =>
+    let irow = map (\x -> T.div x v1) irow
+    let Ap = map (\jrow ->
                     let scale = jrow[i]
-                    in map (fn x y => T.sub y (T.mul scale x)) irow jrow)
+                    in map (\x y -> T.sub y (T.mul scale x)) irow jrow)
                  Ap
     in gauss_jordan (concat Ap ([irow])) (i+1)
 
 fun inv (A: [n][n]t): [n][n]t =
   -- Pad the matrix with the identity matrix.
-  let Ap = map (fn row i =>
+  let Ap = map (\row i ->
                       let padding = replicate n (T.fromInt 0)
                       let padding[i] = (T.fromInt 1)
                       in concat row padding)

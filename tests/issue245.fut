@@ -15,8 +15,8 @@ fun reshape_int (l: int) (x: []int): []int =
   v1
 entry main (x: int) (y: int): [][]int =
   let t_v1 = reshape ((x,
-                       y)) (reshape_int ((x * (y * 1))) (reshape (((shape (map (fn (x: int): int =>
-                                                                                (x + 1)) (iota (6))))[0] * 1)) (map (fn (x: int): int =>
+                       y)) (reshape_int ((x * (y * 1))) (reshape (((shape (map (\(x: int): int ->
+                                                                                (x + 1)) (iota (6))))[0] * 1)) (map (\(x: int): int ->
                                                                                                                      (x + 1)) (iota (6))))) in
   let t_v2 = rearrange (1, 0) (t_v1) in
   let t_v3 = take_arrint (x) (t_v2) in

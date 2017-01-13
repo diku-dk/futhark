@@ -8,4 +8,4 @@
 
 fun main(n: int, m: int): [n]int =
   let a = reshape (n,m) (iota (n*m))
-  in map (fn a_r => reduce (+) 0 a_r) a
+  in map (\a_r -> reduce (+) 0 a_r) a

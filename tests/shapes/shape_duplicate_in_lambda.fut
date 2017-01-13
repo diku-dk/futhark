@@ -6,4 +6,4 @@
 -- output { [4, 4] }
 
 fun main (xss: [][]int): []int =
-  map (fn ((_xs: [m]int): [n]int): int => n + m) xss
+  map (\((_xs: [m]int): [n]int): int -> n + m) xss

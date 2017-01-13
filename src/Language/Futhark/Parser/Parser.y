@@ -132,12 +132,11 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
       '@'             { L $$ AT }
+      '\\'            { L $$ BACKSLASH }
       '#'             { L $$ HASH }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
-      fn              { L $$ FN }
-      '=>'            { L $$ ARROW }
-      '->'            { L $$ TYPE_ARROW }
+      '->'            { L $$ ARROW }
       ':'             { L $$ COLON }
       for             { L $$ FOR }
       do              { L $$ DO }
@@ -678,7 +677,7 @@ Curry : Curry Atom
         { (fst $1, [$2], snd $1) }
 
 FunAbstr :: { UncheckedLambda }
-         : '(' fn Params MaybeAscription '=>' Exp ')'
+         : '(' '\\' Params MaybeAscription '->' Exp ')'
            { AnonymFun $3 $6 $4 NoInfo $1 }
          | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }

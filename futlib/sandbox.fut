@@ -76,5 +76,5 @@ fun dotprod (xs: [n]T.t) (ys: [n]T.t): T.t =
   reduce T.mult T.one (map T.plus xs ys)
 
 fun matmult (xss: [n][p]T.t) (yss: [p][m]T.t): [n][m]T.t =
-  map (fn xs => map (dotprod xs) (transpose yss)) xss
+  map (\xs -> map (dotprod xs) (transpose yss)) xss
 }

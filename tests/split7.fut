@@ -22,7 +22,7 @@ fun take(n: int, a: []f64): []f64 =
   first
 
 fun fftmp(md_c: [n][]f64): []f64 =
-  map (fn (j: int): f64  =>
+  map (\(j: int): f64  ->
          let x = take(j,md_c[j])
          in  reduce (+) (0.0) x) (
        iota(n)

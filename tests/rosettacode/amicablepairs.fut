@@ -8,7 +8,7 @@
 -- output { [[220i32, 284i32]] }
 
 fun divisors(n: int): []int =
-  filter (fn x => n%x == 0) (map (1+) (iota (n/2)))
+  filter (\x -> n%x == 0) (map (1+) (iota (n/2)))
 
 fun amicable((n: int, nd: int), (m: int, md: int)): bool =
   n < m && nd == m && md == n
@@ -20,6 +20,6 @@ fun getPair (divs: [upper](int, int)) (flat_i: int): ((int,int), (int,int)) =
 
 fun main(upper: int): [][2]int =
   let range = map (1+) (iota upper)
-  let divs = zip range (map (fn n => reduce (+) 0 (divisors n)) range)
+  let divs = zip range (map (\n -> reduce (+) 0 (divisors n)) range)
   let amicable = filter amicable (map (getPair divs) (iota (upper*upper)))
-  in map (fn (np,mp) => [#0 np, #0 mp]) amicable
+  in map (\(np,mp) -> [#0 np, #0 mp]) amicable

@@ -6,7 +6,7 @@
 -- }
 -- structure { Replicate 0 }
 fun getInt (): int = if((1-1)*3 + (3/3 - 1) == 0) then (15 / 3)*2 else 10000000
-fun plus1(x: []int): []int = map (fn (y: int): int=>y+1) x
+fun plus1(x: []int): []int = map (\(y: int): int->y+1) x
 
 fun main(): int =
     let n  = getInt()            -- Int

@@ -7,5 +7,5 @@
 -- structure { Map 0 Replicate 1 }
 
 fun main(x: int, a: []int): []int =
-  map (fn (y: int): int  =>
+  map (\(y: int): int  ->
         x + 2) a

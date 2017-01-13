@@ -9,4 +9,4 @@
 -- }
 fun main(a: []int, b: []int): ([]int,[]int) =
     let arr = zip a b
-    in unzip(map (fn (x: (int,int)): (int,int)  => x) arr)
+    in unzip(map (\(x: (int,int)): (int,int)  -> x) arr)

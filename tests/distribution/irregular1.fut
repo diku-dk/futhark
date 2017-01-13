@@ -31,10 +31,10 @@ fun addRows (xs: []int, ys: []int): []int =
   map (+) xs ys
 
 fun main (xssss: [][][][]int, cs: []int): [][][][]int =
-  map (fn (xsss: [][][]int) (c: int): [][][]int  =>
+  map (\(xsss: [][][]int) (c: int): [][][]int  ->
             let yss = unsafe reshape (2,c) xsss in
-            map  (fn (xss: [][]int): [][]int  =>
-                   map (fn (xs: []int) (ys: []int): []int  =>
+            map  (\(xss: [][]int): [][]int  ->
+                   map (\(xs: []int) (ys: []int): []int  ->
                              -- An implicit reshape will go here that
                              -- cannot be distributed - this messed up
                              -- the compiler.

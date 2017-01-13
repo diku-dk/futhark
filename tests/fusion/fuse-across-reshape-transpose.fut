@@ -10,5 +10,5 @@ fun main(): [][]int =
   let a = map (+1) (iota(n))
   let b = reshape (3,3) a
   let c = transpose b in
-  map  (fn (row: []int): []int  =>
+  map  (\(row: []int): []int  ->
          map  (*2) row) c

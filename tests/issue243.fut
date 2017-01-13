@@ -22,15 +22,15 @@ entry main (n: int): []int =
   let (_, t_v1) = split 1 (iota (n+1)) in
   let t_v7 = rearrange (1, 0) (replicate n t_v1) in
   let t_v8 = reshape ((n, n)) (iota (n*n)) in
-  let t_v12 = let array = map (fn (x: []int) (y: []int): [n]int =>
+  let t_v12 = let array = map (\(x: []int) (y: []int): [n]int ->
                                    map resi (x) (y)) t_v7 t_v8 in
               let n = (shape (array))[1] in
-              map (fn (x: []int): [n]bool =>
+              map (\(x: []int): [n]bool ->
                    map (0==) x) (array) in
   let array =
-    (map (fn (x: []int): int => reduce (+) (0) (x))
+    (map (\(x: []int): int -> reduce (+) (0) (x))
      (let array = rearrange (1, 0) (t_v12) in
       let n = (shape (array))[1] in
-      map (fn (x: []bool): [n]int =>
+      map (\(x: []bool): [n]int ->
              map boolToInt (x)) (array)))
   in array

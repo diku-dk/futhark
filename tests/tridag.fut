@@ -38,7 +38,7 @@ fun tridag(nn:   int,
                             b: *[]f64, d: *[]f64,
                             a: []f64, c: []f64 ): ([]f64,[]f64) =
     if (nn == 1)
-    --then ( b, map(fn f64 (f64 x, f64 y) => x / y, d, b) )
+    --then ( b, map(\f64 (f64 x, f64 y) -> x / y, d, b) )
     then (b, [d[0]/b[0]])
     else
         loop((b, d)) = for i < (nn-1) do
@@ -60,7 +60,7 @@ fun tridag(nn:   int,
 fun main(): ([]f64,[]f64) =
     let nn = reduce (+) 0 ([1,2,3,4])
     let a = replicate nn 3.33
-    let b = map (fn (x: int): f64  => f64(x) + 1.0) (iota(nn))
-    let c = map (fn (x: int): f64  => 1.11*f64(x) + 0.5) (iota(nn))
-    let d = map (fn (x: int): f64  => 1.01*f64(x) + 0.25) (iota(nn)) in
+    let b = map (\(x: int): f64  -> f64(x) + 1.0) (iota(nn))
+    let c = map (\(x: int): f64  -> 1.11*f64(x) + 0.5) (iota(nn))
+    let d = map (\(x: int): f64  -> 1.01*f64(x) + 0.25) (iota(nn)) in
         tridag(nn, b, d, a, c)

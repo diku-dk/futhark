@@ -34,7 +34,7 @@ fun testBit(n: int, ind: int): bool =
     let t = (1 << ind) in (n & t) == t
 
 fun xorInds(n: int) (dir_vs: [num_bits]int): int =
-    let reldv_vals = zipWith (fn  dv i  =>
+    let reldv_vals = zipWith (\ dv i  ->
                                 if testBit(grayCode n,i)
                                 then dv else 0)
                              dir_vs (iota num_bits)
@@ -46,15 +46,15 @@ fun sobolIndI (dir_vs: [m][num_bits]int, n: int): [m]int =
 fun sobolIndR(dir_vs:  [m][num_bits]int) (n: int ): [m]f32 =
     let divisor = 2.0 ** f32(num_bits)
     let arri    = sobolIndI( dir_vs, n )
-    in map (fn  (x: int): f32  => f32(x) / divisor) arri
+    in map (\ (x: int): f32  -> f32(x) / divisor) arri
 
 fun main(n: int): f32 =
     let rand_nums = map (sobolIndR (dirvcts())) (iota n)
-    let dists     = map (fn xy =>
+    let dists     = map (\xy ->
                            let (x,y) = (xy[0],xy[1]) in sqrt32(x*x + y*y))
                         rand_nums
 
-    let bs        = map (fn d => if d <= 1.0f32 then 1 else 0) dists
+    let bs        = map (\d -> if d <= 1.0f32 then 1 else 0) dists
 
     let inside    = reduce (+) 0 bs
     in 4.0f32*f32(inside)/f32(n)
