@@ -9,6 +9,7 @@ module Language.Futhark.Attributes
   -- * Various
     builtInFunctions
   , qualName
+  , typeName
   , valueType
 
   -- * Queries on expressions
@@ -764,6 +765,10 @@ isStructDec _              = Nothing
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v
 qualName = QualName []
+
+-- | Create a type name name with no qualifiers from a 'VName'.
+typeName :: VName -> TypeName
+typeName = typeNameFromQualName . qualName
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
