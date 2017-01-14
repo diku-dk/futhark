@@ -12,7 +12,6 @@ module Futhark.Internalise.Monad
   , FunBinding (..)
   , lookupFunction
   , lookupTypeVar
-  , lookupModule
   , lookupFunctor
   , lookupSubst
   , newOrExistingSubst
@@ -21,7 +20,6 @@ module Futhark.Internalise.Monad
   , bindingParamTypes
   , bindingFunctions
   , bindingTypes
-  , bindingModule
   , bindingFunctor
   , bindingType
   , withDecSubsts
@@ -139,14 +137,6 @@ lookupTypeVar tname = do
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just t' -> return t'
 
-lookupModule :: VName -> InternaliseM [E.Dec]
-lookupModule mname = do
-  maybe_decs <- asks $ HM.lookup mname . envModTable
-  case maybe_decs of
-    Nothing -> fail $ "Internalise.lookupModule: Module '" ++
-               pretty mname ++ "' not found"
-    Just decs -> return decs
-
 lookupFunctor :: VName -> InternaliseM E.ModExp
 lookupFunctor mname = do
   maybe_me <- asks $ HM.lookup mname . envFunctorTable
@@ -197,10 +187,6 @@ bindingFunctions ftable_expansion =
 bindingTypes :: TypeTable -> InternaliseM a -> InternaliseM a
 bindingTypes ttable_expansion =
   local $ \env -> env { envTtable = ttable_expansion <> envTtable env }
-
-bindingModule :: VName -> [E.Dec] -> InternaliseM a -> InternaliseM a
-bindingModule name decs =
-  local $ \env -> env { envModTable = HM.insert name decs $ envModTable env }
 
 bindingFunctor :: VName -> E.ModExp -> InternaliseM a -> InternaliseM a
 bindingFunctor name me =
