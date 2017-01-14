@@ -1,10 +1,6 @@
 ;;; futhark-mode.el --- major mode for editing Futhark source files
 
-;; Copyright (C) DIKU 2013-2016, University of Copenhagen
-;;   Written by Troels Henriksen (athas@sigkill.dk) in 2013.
-;;   Improved by Niels G. W. Serup (ngws@metanohi.name) in 2014.
-;;   Improved by Rasmus Wriedt Larsen in 2015.
-;;   Improved by Niels G. W. Serup again in 2016.
+;; Copyright (C) DIKU 2013-2017, University of Copenhagen
 
 ;;; Commentary:
 ;; This mode provides syntax highlighting and automatic indentation for
@@ -35,7 +31,7 @@
 
 ;;; Code:
 
-(require 'cl) ; incf, some
+(require 'cl) ; `some'
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
@@ -49,7 +45,7 @@
 
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with" "type"
-    "fun" "val" "entry" "for" "while" "do" "op"
+    "fun" "val" "entry" "for" "while" "do"
     "empty" "unsafe" "default" "include" "module")
   "All Futhark keywords.")
 
