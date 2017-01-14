@@ -359,12 +359,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModExpBa
   ppr (ModVar v _) = ppr v
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
   ppr (ModApply f a _ _) = ppr f <> parens (ppr a)
+  ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
-  ppr (StructBind name sig e _) =
-    text "module" <+> ppr name <> sig' <+> equals <+> ppr e
-    where sig' = case sig of Nothing     -> mempty
-                             Just (s, _) -> colon <+> ppr s <> text " "
+  ppr (StructBind name e _) = text "module" <+> ppr name <+> equals <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ValDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
@@ -388,7 +386,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunBindB
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstBindBase ty vn) where
   ppr (ConstBind name maybe_t _ e _) =
     text "val" <+> ppr name <> t' <+> text "=" <+> ppr e
-    where t' = case maybe_t of Just t -> text ":" <+> ppr t
+    where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SpecBase ty vn) where

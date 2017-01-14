@@ -254,22 +254,24 @@ ModExp :: { ModExpBase f vn }
         | '{' Decs '}' { ModDecs $2 $1 }
         | QualName '(' ModExp ')'
           { ModApply (fst $1) $3 NoInfo (snd $1) }
+        | ModExp ':' SigExp
+          { ModAscript $1 $3 NoInfo (srclocOf $1) }
 
 StructBind :: { StructBindBase f vn }
            : module id '=' ModExp
              { let L pos (ID name) = $2
-               in StructBind name Nothing $4 pos }
+               in StructBind name $4 pos }
            | module id ':' SigExp '=' ModExp
              { let L pos (ID name) = $2
-               in StructBind name (Just ($4, NoInfo)) $6 pos }
+               in StructBind name (ModAscript $6 $4 NoInfo pos) pos }
 
            -- Shortcut forms
            | module id '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name Nothing (ModDecs $4 pos) pos }
+               in StructBind name (ModDecs $4 pos) pos }
            | module id ':' SigExp '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name (Just ($4, NoInfo)) (ModDecs $6 pos) pos }
+               in StructBind name (ModAscript (ModDecs $6 pos) $4 NoInfo pos) pos }
 
 FunctorBind :: { FunctorBindBase f vn }
              : module id '(' id ':' SigExp ')' '=' ModExp

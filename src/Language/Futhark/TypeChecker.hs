@@ -858,7 +858,7 @@ checkForDuplicateDecs =
         f (SigDec (SigBind name _ loc)) =
           check Signature name loc
 
-        f (StructDec (StructBind name _ _ loc)) =
+        f (StructDec (StructBind name _ loc)) =
           check Structure name loc
 
         f (FunctorDec (FunctorBind name _ _ _ loc)) =
@@ -955,22 +955,20 @@ checkModExp (ModApply f e NoInfo loc) = do
   (e_scope, e') <- checkModExp e
   (f_scope, substs) <- applyFunctor functor loc e_scope
   return (f_scope, ModApply f' e' (Info substs) loc)
+checkModExp (ModAscript me se NoInfo loc) = do
+  (scope, me') <- checkModExp me
+  (_, sig, se') <- checkSigExp se
+  (scope', _) <- liftEither $ matchScopeToSig sig scope loc
+  -- See issue #262 for martinsubst justification.
+  (scope'', martinsubst) <- newNamesForScope scope'
+  return (scope'', ModAscript me' se' (Info martinsubst) loc)
 
 checkStructBind :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
-checkStructBind (StructBind name sigmatch e loc) = do
+checkStructBind (StructBind name e loc) = do
   name' <- checkName Structure name loc
   (scope, e') <- checkModExp e
-  (sigmatch', scope') <-
-    case sigmatch of
-      Nothing -> return (Nothing, scope)
-      Just (se, NoInfo) -> do
-        (_, sig, se') <- checkSigExp se
-        (scope', _) <- liftEither $ matchScopeToSig sig scope loc
-        -- See issue #262 for martinsubst justification.
-        (scope'', martinsubst) <- newNamesForScope scope'
-        return (Just (se', Info martinsubst), scope'')
-  return (mempty { envModTable = HM.singleton name $ ModMod scope' },
-          StructBind name' sigmatch' e' loc)
+  return (mempty { envModTable = HM.singleton name $ ModMod scope },
+          StructBind name' e' loc)
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
 checkForDuplicateSpecs =

@@ -143,7 +143,6 @@ internaliseStructBind :: Bool -> E.StructBind
                       -> ([I.FunDef] -> InternaliseM a)
                       -> InternaliseM a
 internaliseStructBind generating sb m =
-  withDecSubsts subst_from_sb $
   case structExp sb of
     E.ModDecs ds _ -> do
       ((ftable_expansion, ttable_expansion), funs) <-
@@ -158,14 +157,14 @@ internaliseStructBind generating sb m =
       ds <- lookupModule v'
       bindingModule (E.structName sb) ds $
         m []
+    E.ModAscript me _ (Info subst) _ -> withDecSubsts subst $ do
+      let sb' = sb { structExp = me }
+      internaliseStructBind False sb' m
     E.ModApply v arg (Info subst) _ -> internaliseModExp' False arg $ \arg_funs -> do
       v' <- lookupSubst v
       me <- lookupFunctor v'
       let sb' = sb { structExp = me }
       withDecSubsts subst $ internaliseStructBind True sb' $ m . (arg_funs++)
-  where subst_from_sb = case structSignature sb of
-                          Just (_, Info substs) -> substs
-                          Nothing               -> mempty
 
 internaliseModExp' :: Bool -> E.ModExp
                    -> ([I.FunDef] -> InternaliseM a)
@@ -178,10 +177,13 @@ internaliseModExp' generating (E.ModDecs ds _) m = do
   bindingFunctions ftable_expansion $
     bindingTypes ttable_expansion $
     m funs
-internaliseModExp' _ (E.ModApply v arg (Info subst) _) m = internaliseModExp' False arg $ \arg_funs -> do
-  v' <- lookupSubst v
-  me <- lookupFunctor v'
-  withDecSubsts subst $ internaliseModExp' True me $ m . (arg_funs++)
+internaliseModExp' generating (E.ModAscript me _ (Info subst) _) m =
+  withDecSubsts subst $ internaliseModExp' generating me m
+internaliseModExp' _ (E.ModApply v arg (Info subst) _) m =
+  internaliseModExp' False arg $ \arg_funs -> do
+    v' <- lookupSubst v
+    me <- lookupFunctor v'
+    withDecSubsts subst $ internaliseModExp' True me $ m . (arg_funs++)
 
 internaliseFun :: E.FunBind -> InternaliseM I.FunDef
 internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
