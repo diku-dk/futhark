@@ -703,18 +703,18 @@ instance Located (SigBindBase f vn) where
 data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                      | ModDecs [DecBase f vn] SrcLoc
                      | ModApply (QualName vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
+                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
                        -- ^ Functor application.
 deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
-  locOf (ModVar _ loc)       = locOf loc
-  locOf (ModDecs _ loc)      = locOf loc
-  locOf (ModApply _ _ _ loc) = locOf loc
+  locOf (ModVar _ loc)         = locOf loc
+  locOf (ModDecs _ loc)        = locOf loc
+  locOf (ModApply _ _ _ loc)   = locOf loc
+  locOf (ModAscript _ _ _ loc) = locOf loc
 
 data StructBindBase f vn =
   StructBind { structName      :: vn
-             , structSignature :: Maybe (SigExpBase f vn,
-                                         f (HM.HashMap VName VName))
              , structExp       :: ModExpBase f vn
              , structLocation  :: SrcLoc
              }
