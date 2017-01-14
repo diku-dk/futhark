@@ -119,7 +119,7 @@ internaliseDecs ds =
         (tables, ds_funs) <- internaliseDecs ds'
         return (tables, vdec_funs ++ ds_funs)
     (Right (E.StructDec sb), ds') ->
-      internaliseStructBind False sb $ \funs -> do
+      internaliseModExp False (structExp sb) $ \funs -> do
         (tables, ds_funs) <- internaliseDecs ds'
         return (tables, funs ++ ds_funs)
     (Right (E.FunctorDec fb), ds') ->
@@ -139,51 +139,24 @@ internaliseValDec (E.FunDec fb) =
 internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
   internaliseFun $ E.FunBind False name Nothing t [] e loc
 
-internaliseStructBind :: Bool -> E.StructBind
-                      -> ([I.FunDef] -> InternaliseM a)
-                      -> InternaliseM a
-internaliseStructBind generating sb m =
-  case structExp sb of
-    E.ModDecs ds _ -> do
-      ((ftable_expansion, ttable_expansion), funs) <-
-        (if generating then generatingFunctor else id) $
-        internaliseDecs ds
-      bindingFunctions ftable_expansion $
-        bindingTypes ttable_expansion $
-        bindingModule (E.structName sb) ds $
-        m funs
-    E.ModVar v _ -> do
-      v' <- lookupSubst v
-      ds <- lookupModule v'
-      bindingModule (E.structName sb) ds $
-        m []
-    E.ModAscript me _ (Info subst) _ -> withDecSubsts subst $ do
-      let sb' = sb { structExp = me }
-      internaliseStructBind False sb' m
-    E.ModApply v arg (Info subst) _ -> internaliseModExp' False arg $ \arg_funs -> do
-      v' <- lookupSubst v
-      me <- lookupFunctor v'
-      let sb' = sb { structExp = me }
-      withDecSubsts subst $ internaliseStructBind True sb' $ m . (arg_funs++)
-
-internaliseModExp' :: Bool -> E.ModExp
+internaliseModExp :: Bool -> E.ModExp
                    -> ([I.FunDef] -> InternaliseM a)
                    -> InternaliseM a
-internaliseModExp' _ E.ModVar{} m = m []
-internaliseModExp' generating (E.ModDecs ds _) m = do
+internaliseModExp _ E.ModVar{} m = m []
+internaliseModExp generating (E.ModDecs ds _) m = do
   ((ftable_expansion, ttable_expansion), funs) <-
     (if generating then generatingFunctor else id) $
     internaliseDecs ds
   bindingFunctions ftable_expansion $
     bindingTypes ttable_expansion $
     m funs
-internaliseModExp' generating (E.ModAscript me _ (Info subst) _) m =
-  withDecSubsts subst $ internaliseModExp' generating me m
-internaliseModExp' _ (E.ModApply v arg (Info subst) _) m =
-  internaliseModExp' False arg $ \arg_funs -> do
+internaliseModExp generating (E.ModAscript me _ (Info subst) _) m =
+  withDecSubsts subst $ internaliseModExp generating me m
+internaliseModExp _ (E.ModApply v arg (Info subst) _) m =
+  internaliseModExp False arg $ \arg_funs -> do
     v' <- lookupSubst v
     me <- lookupFunctor v'
-    withDecSubsts subst $ internaliseModExp' True me $ m . (arg_funs++)
+    withDecSubsts subst $ internaliseModExp True me $ m . (arg_funs++)
 
 internaliseFun :: E.FunBind -> InternaliseM I.FunDef
 internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
