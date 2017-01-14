@@ -10,6 +10,7 @@ module Language.Futhark.Pretty
 where
 
 import           Data.Array
+import           Data.Functor
 import           Data.Hashable
 import qualified Data.HashSet                as HS
 import           Data.Monoid
