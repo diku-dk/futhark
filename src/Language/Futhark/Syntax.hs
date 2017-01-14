@@ -21,6 +21,9 @@ module Language.Futhark.Syntax
   , DimDecl (..)
   , ShapeDecl (..)
   , Rank (..)
+  , TypeName
+  , typeNameFromQualName
+  , qualNameFromTypeName
   , TypeBase(..)
   , TypeExp(..)
   , TupleArrayElemTypeBase(..)
@@ -194,11 +197,28 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
     | i < length l = Just $ ShapeDecl $ drop i l
     | otherwise    = Nothing
 
+-- | A type name consists of qualifiers (for error messages) and a
+-- 'VName' (for equality checking).
+data TypeName = TypeName [Name] VName
+              deriving (Show)
+
+instance Eq TypeName where
+  TypeName _ x == TypeName _ y = x == y
+
+instance Ord TypeName where
+  TypeName _ x `compare` TypeName _ y = x `compare` y
+
+typeNameFromQualName :: QualName VName -> TypeName
+typeNameFromQualName (QualName qs x) = TypeName qs x
+
+qualNameFromTypeName :: TypeName -> QualName VName
+qualNameFromTypeName (TypeName qs x) = QualName qs x
+
 -- | Types that can be elements of tuple-arrays.
 data TupleArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
-  | PolyArrayElem (QualName VName) as Uniqueness
+  | PolyArrayElem TypeName as Uniqueness
   | TupleArrayElem [TupleArrayElemTypeBase shape as]
   deriving (Show)
 
@@ -214,7 +234,7 @@ instance Eq shape =>
 data ArrayTypeBase shape as =
     PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
-  | PolyArray (QualName VName) shape Uniqueness as
+  | PolyArray TypeName shape Uniqueness as
     -- ^ An array whose elements are some polymorphic type.
   | TupleArray [TupleArrayElemTypeBase shape as] shape Uniqueness
     -- ^ An array whose elements are tuples.
@@ -237,9 +257,8 @@ instance Eq shape =>
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
                        | Tuple [TypeBase shape as]
-                       | TypeVar (QualName VName)
+                       | TypeVar TypeName
                           deriving (Eq, Show)
-
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
