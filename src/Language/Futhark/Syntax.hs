@@ -42,7 +42,6 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
-  , UnOp (..)
   , BinOp (..)
   , IdentBase (..)
   , DimIndexBase(..)
@@ -102,7 +101,8 @@ class (Show vn,
        Show (f vn),
        Show (f (CompTypeBase vn)),
        Show (f (StructTypeBase vn)),
-       Show (f (HM.HashMap VName VName))) => Showable f vn where
+       Show (f (HM.HashMap VName VName)),
+       Show (f ([CompTypeBase vn], CompTypeBase vn))) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
 -- aliasing information.
@@ -266,15 +266,13 @@ type CompTypeBase vn = TypeBase Rank (Names vn)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
-data TypeExp vn = TEPrim PrimType SrcLoc
-                 | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
-                 | TETuple [TypeExp vn] SrcLoc
-                 | TEVar (QualName vn) SrcLoc
-                 | TEUnique (TypeExp vn) SrcLoc
+data TypeExp vn = TEVar (QualName vn) SrcLoc
+                | TETuple [TypeExp vn] SrcLoc
+                | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
+                | TEUnique (TypeExp vn) SrcLoc
                  deriving (Eq, Show)
 
 instance Located (TypeExp vn) where
-  locOf (TEPrim _ loc)    = locOf loc
   locOf (TEArray _ _ loc) = locOf loc
   locOf (TETuple _ loc)   = locOf loc
   locOf (TEVar _ loc)     = locOf loc
@@ -339,18 +337,6 @@ instance Located (IdentBase ty vn) where
 
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
-
--- | Unary operators.
-data UnOp = Not
-          | Negate
-          | Complement
-          | Abs
-          | Signum
-          | ToFloat FloatType
-          | ToSigned IntType
-          | ToUnsigned IntType
-          | TupleProject Int
-          deriving (Eq, Ord, Show)
 
 -- | Binary operators.
 data BinOp = Plus -- Binary Ops for Numbers
@@ -426,6 +412,9 @@ data ExpBase f vn =
 
             | Apply  (QualName vn) [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
 
+            | Negate (ExpBase f vn) SrcLoc
+              -- ^ Numeric negation (ugly special case; Haskell did it first).
+
             | DoLoop
               (PatternBase f vn) -- Merge variable pattern
               (ExpBase f vn) -- Initial values of merge variables.
@@ -435,7 +424,8 @@ data ExpBase f vn =
               SrcLoc
 
             | BinOp BinOp (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
-            | UnOp UnOp (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
+
+            | TupleProject Int (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
@@ -563,39 +553,40 @@ data StreamForm f vn = MapLike    StreamOrd
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
-  locOf (Literal _ loc)         = locOf loc
-  locOf (TupLit _ pos)          = locOf pos
-  locOf (ArrayLit _ _ pos)      = locOf pos
-  locOf (Empty _ pos)           = locOf pos
-  locOf (BinOp _ _ _ _ pos)     = locOf pos
-  locOf (UnOp _ _ _ pos)        = locOf pos
-  locOf (If _ _ _ _ pos)        = locOf pos
-  locOf (Var _ _ loc)           = locOf loc
-  locOf (Apply _ _ _ pos)       = locOf pos
-  locOf (LetPat _ _ _ pos)      = locOf pos
-  locOf (LetWith _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ pos)         = locOf pos
-  locOf (Iota _ pos)            = locOf pos
-  locOf (Shape _ pos)           = locOf pos
-  locOf (Replicate _ _ pos)     = locOf pos
-  locOf (Reshape _ _ pos)       = locOf pos
-  locOf (Transpose _ pos)       = locOf pos
-  locOf (Rearrange _ _ pos)     = locOf pos
-  locOf (Rotate _ _ _ pos)      = locOf pos
-  locOf (Map _ _ pos)           = locOf pos
-  locOf (Reduce _ _ _ _ pos)    = locOf pos
-  locOf (Zip _ _ _ pos)         = locOf pos
-  locOf (Unzip _ _ pos)         = locOf pos
-  locOf (Scan _ _ _ pos)        = locOf pos
-  locOf (Filter _ _ pos)        = locOf pos
-  locOf (Partition _ _ pos)     = locOf pos
-  locOf (Split _ _ _ pos)       = locOf pos
-  locOf (Concat _ _ _ pos)      = locOf pos
-  locOf (Copy _ pos)            = locOf pos
-  locOf (DoLoop _ _ _ _ _ pos)  = locOf pos
-  locOf (Stream _ _ _  pos)     = locOf pos
-  locOf (Unsafe _ loc)          = locOf loc
-  locOf (Write _ _ _ loc)       = locOf loc
+  locOf (Literal _ loc)          = locOf loc
+  locOf (TupLit _ pos)           = locOf pos
+  locOf (TupleProject _ _ _ pos) = locOf pos
+  locOf (ArrayLit _ _ pos)       = locOf pos
+  locOf (Empty _ pos)            = locOf pos
+  locOf (BinOp _ _ _ _ pos)      = locOf pos
+  locOf (If _ _ _ _ pos)         = locOf pos
+  locOf (Var _ _ loc)            = locOf loc
+  locOf (Negate _ pos)           = locOf pos
+  locOf (Apply _ _ _ pos)        = locOf pos
+  locOf (LetPat _ _ _ pos)       = locOf pos
+  locOf (LetWith _ _ _ _ _ pos)  = locOf pos
+  locOf (Index _ _ pos)          = locOf pos
+  locOf (Iota _ pos)             = locOf pos
+  locOf (Shape _ pos)            = locOf pos
+  locOf (Replicate _ _ pos)      = locOf pos
+  locOf (Reshape _ _ pos)        = locOf pos
+  locOf (Transpose _ pos)        = locOf pos
+  locOf (Rearrange _ _ pos)      = locOf pos
+  locOf (Rotate _ _ _ pos)       = locOf pos
+  locOf (Map _ _ pos)            = locOf pos
+  locOf (Reduce _ _ _ _ pos)     = locOf pos
+  locOf (Zip _ _ _ pos)          = locOf pos
+  locOf (Unzip _ _ pos)          = locOf pos
+  locOf (Scan _ _ _ pos)         = locOf pos
+  locOf (Filter _ _ pos)         = locOf pos
+  locOf (Partition _ _ pos)      = locOf pos
+  locOf (Split _ _ _ pos)        = locOf pos
+  locOf (Concat _ _ _ pos)       = locOf pos
+  locOf (Copy _ pos)             = locOf pos
+  locOf (DoLoop _ _ _ _ _ pos)   = locOf pos
+  locOf (Stream _ _ _  pos)      = locOf pos
+  locOf (Unsafe _ loc)           = locOf loc
+  locOf (Write _ _ _ loc)        = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (LowerBoundBase f vn) (IdentBase f vn) (ExpBase f vn)
@@ -617,10 +608,8 @@ deriving instance Showable f vn => Show (LowerBoundBase f vn)
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
-                      | CurryFun (QualName vn) [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+                      | CurryFun (QualName vn) [ExpBase f vn] (f ([CompTypeBase vn], CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
-                      | UnOpFun UnOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
-                        -- ^ @-@; first type is operand, second is result.
                       | BinOpFun BinOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+@; first two types are operands, third is result.
                       | CurryBinOpLeft BinOp (ExpBase f vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
@@ -632,7 +621,6 @@ deriving instance Showable f vn => Show (LambdaBase f vn)
 instance Located (LambdaBase f vn) where
   locOf (AnonymFun _ _ _ _ loc)       = locOf loc
   locOf (CurryFun  _ _ _ loc)         = locOf loc
-  locOf (UnOpFun _ _ _ loc)           = locOf loc
   locOf (BinOpFun _ _ _ _ loc)        = locOf loc
   locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
@@ -733,9 +721,9 @@ instance Located (ModExpBase f vn) where
   locOf (ModAscript _ _ _ loc) = locOf loc
 
 data StructBindBase f vn =
-  StructBind { structName      :: vn
-             , structExp       :: ModExpBase f vn
-             , structLocation  :: SrcLoc
+  StructBind { structName     :: vn
+             , structExp      :: ModExpBase f vn
+             , structLocation :: SrcLoc
              }
 deriving instance Showable f vn => Show (StructBindBase f vn)
 

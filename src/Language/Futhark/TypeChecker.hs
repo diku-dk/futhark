@@ -194,6 +194,7 @@ data ModBinding = ModMod Scope
 
 data Binding = BoundV Type
              | BoundF FunBinding
+             | OverloadedF [([TypeBase Rank ()],FunBinding)]
              | UnknownF [StructType]
              | UnknownV
              | WasConsumed SrcLoc
@@ -300,15 +301,27 @@ instance Monoid Scope where
     Scope (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
 
 initialScope :: Scope
-initialScope = Scope initialVtable mempty mempty mempty builtInMap
-  where initialVtable = HM.fromList $ map addBuiltinF $ HM.toList builtInFunctions
+initialScope = Scope initialVtable initialTypeTable mempty mempty builtInMap
+  where initialVtable = HM.fromList $ mapMaybe addBuiltInF $ HM.toList builtIns
+        initialTypeTable = HM.fromList $ mapMaybe addBuiltInT $ HM.toList builtIns
 
-        addBuiltinF (name, (ts, t)) =
-          (name, BoundF (map Prim ts, Prim t))
+        addBuiltInF (name, BuiltInMonoFun ts t) =
+          Just (name, BoundF (map Prim ts, Prim t))
+        addBuiltInF (name, BuiltInPolyFun variants) =
+          Just (name, OverloadedF $ map frob variants)
+          where frob :: ([PrimType], PrimType) -> ([TypeBase Rank ()],FunBinding)
+                frob (pts, rt) = (map Prim pts, (map Prim pts, Prim rt))
+        addBuiltInF _ = Nothing
+
+        addBuiltInT (name, BuiltInType t) =
+          Just (name, TypeAbbr $ Prim t)
+        addBuiltInT _ =
+          Nothing
 
         builtInMap :: NameMap
-        builtInMap = HM.fromList $ map mapping $ HM.keys builtInFunctions
-          where mapping v = ((Term, baseName v), v)
+        builtInMap = HM.fromList $ map mapping $ HM.toList builtIns
+          where mapping (v, BuiltInType{}) = ((Type, baseName v), v)
+                mapping (v, _) =             ((Term, baseName v), v)
 
 scopeTypeAbbrs :: Scope -> [(VName,StructType)]
 scopeTypeAbbrs = mapMaybe unTypeAbbr . HM.toList . envTypeTable
@@ -462,6 +475,7 @@ noUnique :: TypeM a -> TypeM a
 noUnique = local (\env -> env { envVtable = HM.map set $ envVtable env})
   where set (BoundV t)        = BoundV $ t `setUniqueness` Nonunique
         set (BoundF f)        = BoundF f
+        set (OverloadedF f)   = OverloadedF f
         set (UnknownF ts)     = UnknownF ts
         set UnknownV          = UnknownV
         set (WasConsumed loc) = WasConsumed loc
@@ -470,6 +484,7 @@ onlySelfAliasing :: TypeM a -> TypeM a
 onlySelfAliasing = local (\env -> env { envVtable = HM.mapWithKey set $ envVtable env})
   where set k (BoundV t)        = BoundV $ t `addAliases` HS.intersection (HS.singleton k)
         set _ (BoundF f)        = BoundF f
+        set _ (OverloadedF f)   = OverloadedF f
         set _ (UnknownF ts)     = UnknownF ts
         set _ UnknownV          = UnknownV
         set _ (WasConsumed loc) = WasConsumed loc
@@ -610,13 +625,16 @@ checkVar qn loc = do
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                     | otherwise -> return (qn', t)
-    Just (BoundF _) -> bad $ FunctionIsNotValue loc qn
+    Just BoundF{} -> bad $ FunctionIsNotValue loc qn
+    Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
     Just UnknownF{} -> bad $ FunctionIsNotValue loc qn
     Just UnknownV -> bad $ TypeError loc $ pretty qn ++ " has unknown type"
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
-lookupFunction :: QualName Name -> SrcLoc -> TypeM (QualName VName, FunBinding)
-lookupFunction qn loc = do
+-- | In a few rare cases (overloaded builtin functions), the type of
+-- the parameters actually matters.
+lookupFunction :: QualName Name -> [Type] -> SrcLoc -> TypeM (QualName VName, FunBinding)
+lookupFunction qn argtypes loc = do
   (scope, qn'@(QualName _ name)) <- checkQualName Term qn loc
   case HM.lookup name $ envVtable scope of
     Nothing -> bad $ UnknownVariableError Term qn loc
@@ -625,6 +643,12 @@ lookupFunction qn loc = do
     Just UnknownF{} -> bad $ UndeclaredFunctionReturnType loc qn
     Just UnknownV -> bad $ TypeError loc $ pretty qn ++ " has unknown type"
     Just (BoundF f) -> return (qn', f)
+    Just (OverloadedF overloads) ->
+      case lookup (map toStructural argtypes) overloads of
+        Nothing -> bad $ TypeError loc $ "Overloaded function " ++ pretty qn ++
+                   " not defined for arguments of types " ++
+                   intercalate "," (map pretty argtypes)
+        Just f -> return (qn', f)
 
 lookupType :: SrcLoc -> QualName Name -> TypeM (QualName VName, StructType)
 lookupType loc qn = do
@@ -1227,42 +1251,10 @@ checkExp (Empty decl loc) = do
 
 checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
 
-checkExp (UnOp Not e NoInfo pos) = do
-  e' <- require [Prim Bool] =<< checkExp e
-  return $ UnOp Not e' (Info $ Prim Bool) pos
-
-checkExp (UnOp Complement e NoInfo loc) = do
-  e' <- require anyIntType =<< checkExp e
-  return $ UnOp Complement e' (Info $ typeOf e') loc
-
-checkExp (UnOp Negate e NoInfo loc) = do
-  e' <- require anyNumberType =<< checkExp e
-  return $ UnOp Negate e' (Info $ typeOf e') loc
-
-checkExp (UnOp Abs e NoInfo loc) = do
-  e' <- require anyNumberType =<< checkExp e
-  return $ UnOp Abs e' (Info $ typeOf e') loc
-
-checkExp (UnOp Signum e NoInfo loc) = do
-  e' <- require anyIntType =<< checkExp e
-  return $ UnOp Signum e' (Info $ typeOf e') loc
-
-checkExp (UnOp (ToFloat t) e NoInfo loc) = do
-  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
-  return $ UnOp (ToFloat t) e' (Info (Prim (FloatType t))) loc
-
-checkExp (UnOp (ToSigned t) e NoInfo loc) = do
-  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
-  return $ UnOp (ToSigned t) e' (Info (Prim (Signed t))) loc
-
-checkExp (UnOp (ToUnsigned t) e NoInfo loc) = do
-  e' <- require (anyNumberType <> [Prim Bool]) =<< checkExp e
-  return $ UnOp (ToUnsigned t) e' (Info (Prim (Unsigned t))) loc
-
-checkExp (UnOp (TupleProject i) e NoInfo loc) = do
+checkExp (TupleProject i e NoInfo loc) = do
   e' <- checkExp e
   case typeOf e' of
-    Tuple ts | t:_ <- drop i ts -> return $ UnOp (TupleProject i) e' (Info t) loc
+    Tuple ts | t:_ <- drop i ts -> return $ TupleProject i e' (Info t) loc
     _ -> bad $ InvalidField loc (typeOf e') (show i)
 
 checkExp (If e1 e2 e3 _ pos) =
@@ -1277,9 +1269,13 @@ checkExp (Var qn NoInfo loc) = do
   observe $ Ident name' (Info t) loc
   return $ Var qn' (Info t) loc
 
+checkExp (Negate arg loc) = do
+  arg' <- require anyNumberType =<< checkExp arg
+  return $ Negate arg' loc
+
 checkExp (Apply fname args _ loc) = do
-  (fname', (paramtypes, ftype)) <- lookupFunction fname loc
-  (args', argflows) <- unzip <$> mapM (\(arg,_) -> (checkArg arg)) args
+  (args', argflows) <- unzip <$> mapM (\(arg,_) -> checkArg arg) args
+  (fname', (paramtypes, ftype)) <- lookupFunction fname (map argType argflows) loc
 
   let rettype' = returnType (removeShapeAnnotations ftype)
                  (map diet paramtypes) (map typeOf args')
@@ -1937,24 +1933,14 @@ checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  (fname', (paramtypes, rt)) <- lookupFunction fname loc
+  (fname', (paramtypes, rt)) <- lookupFunction fname (map argType $ curryargs++args) loc
   let rettype' = fromStruct $ removeShapeAnnotations rt
+      paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
   case find (unique . snd) $ zip curryargexps paramtypes of
     Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
     _           -> return ()
   checkFuncall Nothing loc paramtypes $ curryargs ++ args
-  return $ CurryFun fname' curryargexps' (Info rettype') loc
-
-checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
-  occur $ argOccurences arg
-  let xident = Ident (nameFromString "x") NoInfo loc
-  bindingIdents [(xident, argType arg)] $ \_ -> do
-    e <- checkExp $ UnOp unop (Var (qualName $ identName xident) NoInfo loc) NoInfo loc
-    return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
-
-checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
-  bad $ ParameterMismatch (Just $ qualName $ nameFromString $ pretty unop) loc (Left 1) $
-  map (toStructural . argType) args
+  return $ CurryFun fname' curryargexps' (Info (paramtypes', rettype')) loc
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
   checkPolyLambdaOp op [] args loc
@@ -2027,8 +2013,6 @@ expandType :: (SrcLoc -> DimDecl Name -> TypeM (DimDecl VName))
 expandType _ (TEVar name loc) = do
   (name', t) <- lookupType loc name
   return (TEVar name' loc, t)
-expandType _ (TEPrim prim loc) =
-  return (TEPrim prim loc, Prim prim)
 expandType look (TETuple ts loc) = do
   (ts', ts_s) <- unzip <$> mapM (expandType look) ts
   return (TETuple ts' loc, Tuple ts_s)
@@ -2248,6 +2232,8 @@ newNamesForScope orig_scope = do
         substituteInBinding substs (BoundF (pts,t)) =
           BoundF (map (substituteInType substs) pts,
                   substituteInType substs t)
+        substituteInBinding _ (OverloadedF f) =
+          OverloadedF f
         substituteInBinding _ (WasConsumed wloc) =
           WasConsumed wloc
 

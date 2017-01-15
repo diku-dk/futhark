@@ -40,6 +40,7 @@ import Data.Monoid
 
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Attributes
+import Language.Futhark.Pretty
 import Language.Futhark.Parser.Lexer
 
 }
@@ -64,19 +65,6 @@ import Language.Futhark.Parser.Lexer
       loop            { L $$ LOOP }
       in              { L $$ IN }
       default         { L $$ DEFAULT }
-      int             { L $$ INT }
-      float           { L $$ FLOAT }
-      i8              { L $$ I8 }
-      i16             { L $$ I16 }
-      i32             { L $$ I32 }
-      i64             { L $$ I64 }
-      u8              { L $$ U8 }
-      u16             { L $$ U16 }
-      u32             { L $$ U32 }
-      u64             { L $$ U64 }
-      bool            { L $$ BOOL }
-      f32             { L $$ F32 }
-      f64             { L $$ F64 }
 
       id              { L _ (ID _) }
       'id['           { L _ (INDEXING _) }
@@ -84,6 +72,8 @@ import Language.Futhark.Parser.Lexer
       qid             { L _ (QUALID _ _) }
       'qid['          { L _ (QUALINDEXING _ _) }
 
+      unop            { L _ (UNOP _) }
+      qunop           { L _ (QUALUNOP _ _) }
 
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
@@ -130,7 +120,6 @@ import Language.Futhark.Parser.Lexer
       ']'             { L $$ RBRACKET }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
-      '!'             { L $$ BANG }
       '@'             { L $$ AT }
       '\\'            { L $$ BACKSLASH }
       '#'             { L $$ HASH }
@@ -161,9 +150,6 @@ import Language.Futhark.Parser.Lexer
       partition       { L $$ PARTITION }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
-      '~'             { L $$ TILDE }
-      abs             { L $$ ABS }
-      signum          { L $$ SIGNUM }
       '&&'            { L $$ AND }
       '||'            { L $$ OR }
       empty           { L $$ EMPTY }
@@ -194,7 +180,7 @@ import Language.Futhark.Parser.Lexer
 %left '*' '/' '%' '//' '%%'
 %left '**'
 %left ':'
-%nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
+%nonassoc '~' '!' f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
 %nonassoc Id
 %left juxtprec
@@ -309,10 +295,9 @@ Spec :: { SpecBase NoInfo Name }
 ;
 
 DefaultDec :: { () }
-           :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
-           |  default '(' FloatType ')' {% defaultRealType (fst $3) }
-           |  default '(' SignedType ',' FloatType ')'
-                {% defaultIntType (fst $3) >> defaultRealType (fst $5) }
+           :  default '(' id ')' {% let L _ (ID s) = $3 in defaultType s  }
+           |  default '(' id ',' id ')'
+                {% let L _ (ID s1) = $3; L _ (ID s2) = $5 in defaultType s1 >> defaultType s2 }
 ;
 
 
@@ -339,22 +324,6 @@ BinOp :: { (BinOp, SrcLoc) }
       | '>>'    { (ShiftR, $1) }
       | '>>>'   { (ZShiftR, $1) }
       | '<<'    { (ShiftL, $1) }
-
-UnOp :: { (UnOp, SrcLoc) }
-     : OpLikeUnOp { $1 }
-     | FuncLikeUnOp { $1 }
-
-OpLikeUnOp :: { (UnOp, SrcLoc) }
-     : '~' { (Complement, $1) }
-     | '!' { (Not, $1) }
-
-FuncLikeUnOp :: { (UnOp, SrcLoc) }
-     : signum { (Signum, $1) }
-     | abs { (Abs, $1) }
-     | SignedType { (ToSigned (fst $1), snd $1) }
-     | UnsignedType { (ToUnsigned (fst $1), snd $1) }
-     | FloatType { (ToFloat (fst $1), snd $1) }
-     | '#' NaturalInt { (TupleProject $2, $1) }
 
 Headers :: { [ProgHeader] }
         : Header Headers { $1 : $2 }
@@ -396,8 +365,7 @@ TypeAbbr : type Aliases '=' TypeExpDecl
 ;
 
 TypeExp :: { UncheckedTypeExp }
-         : PrimType                { let (t,loc) = $1 in TEPrim t loc }
-         | '*' TypeExp             { TEUnique $2 $1 }
+         : '*' TypeExp             { TEUnique $2 $1 }
          | '[' DimDecl ']' TypeExp { TEArray $4 $2 $1 }
          | '(' ')'                 { TETuple [] $1 }
          | '(' TypeExps ')'        { TETuple $2 $1 }
@@ -416,30 +384,6 @@ DimDecl :: { DimDecl Name }
             in ConstDim (fromIntegral n) }
         | { AnyDim }
 
-PrimType :: { (PrimType, SrcLoc) }
-         : UnsignedType { first Unsigned $1 }
-         | SignedType   { first Signed $1 }
-         | FloatType    { first FloatType $1 }
-         | bool         { (Bool, $1) }
-
-SignedType :: { (IntType, SrcLoc) }
-           : int { (Int32, $1) }
-           | i8  { (Int8, $1) }
-           | i16 { (Int16, $1) }
-           | i32 { (Int32, $1) }
-           | i64 { (Int64, $1) }
-
-UnsignedType :: { (IntType, SrcLoc) }
-             : u8  { (Int8, $1) }
-             | u16 { (Int16, $1) }
-             | u32 { (Int32, $1) }
-             | u64 { (Int64, $1) }
-
-FloatType :: { (FloatType, SrcLoc) }
-          : float { (Float64, $1) }
-          | f32  { (Float32, $1) }
-          | f64  { (Float64, $1) }
-
 Params :: { [PatternBase NoInfo Name] }
        : Param        { [$1] }
        | Param Params { $1 : $2 }
@@ -454,6 +398,11 @@ Param : VarId                        { Id $1 }
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
           | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
+
+QualUnOpName :: { (QualName Name, SrcLoc) }
+          : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
+          | unop  { let L loc (UNOP v) = $1 in (QualName [] v, loc) }
+
 
 Exp  :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
@@ -548,10 +497,6 @@ Exp  :: { UncheckedExp }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
      | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
      | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
-     | '-' Exp %prec juxtprec
-       { UnOp Negate $2 NoInfo $1 }
-     | UnOp Exp %prec juxtprec
-       { UnOp (fst $1) $2 NoInfo (snd $1) }
      | Exp '**' Exp   { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
@@ -572,9 +517,16 @@ Exp  :: { UncheckedExp }
        { let (fname, args, loc) = $1 in Apply fname [ (arg, Observe) | arg <- args ] NoInfo loc }
      | Atom %prec juxtprec { $1 }
 
-Apply : Apply Atom %prec juxtprec
+     | '-' Exp
+       { Negate $2 $1 }
+
+
+Apply :: { (QualName Name, [UncheckedExp], SrcLoc) }
+      : Apply Atom %prec juxtprec
         { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
       | QualName Atom %prec juxtprec
+        { (fst $1, [$2], snd $1) }
+      | QualUnOpName Atom %prec juxtprec
         { (fst $1, [$2], snd $1) }
 
 Atoms :: { (UncheckedExp, [UncheckedExp]) }
@@ -596,6 +548,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
      | QualName { Var (fst $1) NoInfo (snd $1) }
+     | '#' NaturalInt Atom { TupleProject $2 $3 NoInfo $1 }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
@@ -683,6 +636,8 @@ FunAbstr :: { UncheckedLambda }
            { AnonymFun $3 $6 $4 NoInfo $1 }
          | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }
+         | '(' QualUnOpName ')'
+           { CurryFun (fst $2) [] NoInfo (snd $2) }
          | '(' Curry ')'
            { let (fname, args, loc) = $2 in CurryFun fname args NoInfo loc }
            -- Minus is handed explicitly here because I could not
@@ -699,10 +654,6 @@ FunAbstr :: { UncheckedLambda }
            { CurryBinOpLeft (fst $3) $2 NoInfo NoInfo $1 }
          | '(' BinOp ')'
            { BinOpFun (fst $2) NoInfo NoInfo NoInfo $1 }
-         | '(' OpLikeUnOp ')'
-           { UnOpFun (fst $2) NoInfo NoInfo $1 }
-         | FuncLikeUnOp
-           { UnOpFun (fst $1) NoInfo NoInfo (snd $1) }
 
 FunAbstrs : FunAbstr ',' FunAbstrs { $1 : $3 }
           | FunAbstr               { [$1] }
@@ -723,6 +674,9 @@ NaturalInt :: { Int }
 NaturalInts :: { [Int] }
            : intlit                 { let L _ (INTLIT num) = $1 in [fromIntegral num] }
            | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in fromIntegral num : $3  }
+
+PrimType :: { PrimType }
+         : id {% let L _ (ID s) = $1 in primTypeFromName s }
 
 IntValue :: { Value }
          : SignedLit { PrimValue (SignedValue (fst $1)) }
@@ -778,7 +732,7 @@ ArrayValue :  '[' Value ']'
                   Just ts -> return $ ArrayValue (arrayFromList $ $2:$4) ts
              }
            | empty '(' PrimType ')'
-             { ArrayValue (listArray (0,-1) []) (Prim (fst $3)) }
+             { ArrayValue (listArray (0,-1) []) (Prim $3) }
 TupleValue : '(' Values ')' { TupValue $2 }
 
 Values : Value ',' Values { $1 : $3 }
@@ -885,15 +839,19 @@ getTokens = lift $ lift get
 putTokens :: [L Token] -> ParserMonad ()
 putTokens ts = lift $ lift $ put ts
 
-defaultIntType :: IntType -> ParserMonad ()
-defaultIntType intType = do
-  s <- lift $ get
-  lift $ put $ s { parserIntType = intType }
+primTypeFromName :: Name -> ParserMonad PrimType
+primTypeFromName s = maybe boom return $ HM.lookup s namesToPrimTypes
+  where boom = fail $ "No type named " ++ nameToString s
 
-defaultRealType :: FloatType -> ParserMonad ()
-defaultRealType realType = do
-  s <- lift $ get
-  lift $ put $ modParserEnv s realType
+defaultType :: Name -> ParserMonad ()
+defaultType name = do
+  t <- primTypeFromName name
+  s <- lift get
+  case t of
+    Signed t'    -> lift $ put s { parserIntType = t' }
+    Unsigned t'  -> lift $ put s { parserIntType = t' }
+    FloatType t' -> lift $ put $ modParserEnv s t'
+    _            -> fail $ "Cannot default literals to type " ++ pretty name
 
 getFilename :: ParserMonad FilePath
 getFilename = lift $ gets parserFile

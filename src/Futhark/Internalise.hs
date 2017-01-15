@@ -25,7 +25,7 @@ import Data.Loc
 
 import Prelude hiding (mapM, sequence)
 
-import Language.Futhark as E hiding (QualName(QualName))
+import Language.Futhark as E
 import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
@@ -51,14 +51,17 @@ internaliseProg prog = do
   sequence $ fmap I.renameProg prog'
 
 builtinFtable :: FunTable
-builtinFtable = HM.fromList $ map addBuiltin $ HM.toList E.builtInFunctions
-  where addBuiltin (name, (paramts, t)) =
+builtinFtable = HM.fromList $ mapMaybe addBuiltin $ HM.toList E.builtIns
+  where addBuiltin (name, E.BuiltInMonoFun paramts t) =
+          Just
           (name,
            FunBinding
            (baseName name,
             [], [], map (I.Prim . internalisePrimType) paramts,
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
            (E.Prim t, map E.Prim paramts))
+        addBuiltin _ =
+          Nothing
 
 internaliseFunctionName :: Bool -> VName -> InternaliseM (VName, Name)
 internaliseFunctionName entry fname = do
@@ -250,6 +253,20 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   where extToZero (I.ExtShape dims) = I.Shape $ map extDimToZero dims
         extDimToZero I.Ext{} = constant (0::Int32)
         extDimToZero (I.Free d) = d
+
+internaliseExp desc (E.Negate e _) = do
+  e' <- internaliseExp1 "negate_arg" e
+  et <- subExpType e'
+  case et of I.Prim (I.IntType t) ->
+               letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
+             I.Prim (I.FloatType t) ->
+               letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
+             _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
+
+-- Some functions are special (polymorphic) and we handle that here.
+internaliseExp desc (E.Apply fname args _ _)
+  | Just internalise <- isOverloadedFunction fname =
+      internalise desc $ map fst args
 
 internaliseExp desc (E.Apply fname args _ _)
   | Just (rettype, _) <- HM.lookup fname' I.builtInFunctions = do
@@ -733,7 +750,7 @@ internaliseExp desc (E.BinOp bop xe ye _ _) = do
       internaliseBinOp desc bop xe' ye' t1 t2
     _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
-internaliseExp desc (E.UnOp (E.TupleProject i) e (Info rt) _) = do
+internaliseExp desc (E.TupleProject i e (Info rt) _) = do
   n <- typeLength rt
   i' <- fmap sum $ mapM typeLength $ take i $
         case E.typeOf e of
@@ -742,18 +759,7 @@ internaliseExp desc (E.UnOp (E.TupleProject i) e (Info rt) _) = do
   take n . drop i' <$> internaliseExp desc e
   where typeLength = fmap length . internaliseType
 
-internaliseExp desc (E.UnOp E.Not e _ _) = do
-  e' <- internaliseExp1 "not_arg" e
-  letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
-
-internaliseExp desc (E.UnOp E.Complement e _ _) = do
-  e' <- internaliseExp1 "complement_arg" e
-  et <- subExpType e'
-  case et of I.Prim (I.IntType t) ->
-               letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
-             _ ->
-               fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
-
+{-
 internaliseExp desc (E.UnOp E.Negate e _ _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
@@ -763,71 +769,7 @@ internaliseExp desc (E.UnOp E.Negate e _ _) = do
                letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
              _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
-internaliseExp desc (E.UnOp E.Abs e _ _) = do
-  e' <- internaliseExp1 "abs_arg" e
-  case E.typeOf e of
-    E.Prim (E.Signed t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Abs t) e'
-    E.Prim (E.Unsigned _) ->
-      return [e']
-    E.Prim (E.FloatType t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
-
-internaliseExp desc (E.UnOp E.Signum e _ _) = do
-  e' <- internaliseExp1 "signum_arg" e
-  case E.typeOf e of
-    E.Prim (E.Signed t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.SSignum t) e'
-    E.Prim (E.Unsigned t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
-
-internaliseExp desc (E.UnOp (E.ToFloat float_to) e _ _) = do
-  e' <- internaliseExp1 "tofloat_arg" e
-  case E.typeOf e of
-    E.Prim E.Bool ->
-      letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
-                                (resultBody [floatConst float_to 0])
-                                [I.Prim $ I.FloatType float_to]
-    E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
-    E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.UIToFP int_from float_to) e'
-    E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
-
-internaliseExp desc (E.UnOp (E.ToSigned int_to) e _ _) = do
-  e' <- internaliseExp1 "trunc_arg" e
-  case E.typeOf e of
-    E.Prim E.Bool ->
-      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
-                                (resultBody [intConst int_to 0])
-                                [I.Prim $ I.IntType int_to]
-    E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
-    E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-    E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToSigned"
-
-internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _ _) = do
-  e' <- internaliseExp1 "trunc_arg" e
-  case E.typeOf e of
-    E.Prim E.Bool ->
-      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
-                                (resultBody [intConst int_to 0])
-                                [I.Prim $ I.IntType int_to]
-    E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-    E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-    E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
-
+-}
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.BasicOp $ I.Copy se | se <- ses]
@@ -1116,6 +1058,18 @@ internaliseLambda (E.AnonymFun params body _ (Info rettype) _) rowtypes =
     mapM_ (uncurry internaliseDimConstant) cm
     return (params', body', map I.fromDecl rettype')
 
+-- All overloaded functions are unary, so if they're here, they have
+-- no curried arguments and only one real argument.
+internaliseLambda (E.CurryFun qfname [] (Info ([et], _)) loc) [it]
+  | Just special <- isOverloadedFunction qfname = do
+      param <- newParam "not_curried" it
+      let arg = E.Var (E.qualName (paramName param)) (Info et) loc
+      (res, stms) <- localScope (scopeOfLParams [param]) $
+                     collectStms $ special "curried_result" [arg]
+      let body = mkBody stms res
+      body_t <- bodyExtType body
+      return ([param], body, body_t)
+
 internaliseLambda (E.CurryFun qfname curargs _ loc) rowtypes = do
   fname <- lookupSubst qfname
   fun_entry <- lookupFunction fname
@@ -1143,10 +1097,6 @@ internaliseLambda (E.CurryFun qfname curargs _ loc) rowtypes = do
         return (map I.Var res, map I.fromDecl ts)
   return (params, mkBody fun_bnds res, ts)
 
-internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
-  internaliseLambda (E.AnonymFun params body Nothing (Info rettype') loc) rowts
-
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
   internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
@@ -1160,15 +1110,6 @@ internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
   internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
-
-unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
-                -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
-unOpFunToLambda op paramtype rettype = do
-  paramname <- newNameFromString "unop_param"
-  let ident = E.Ident paramname (Info paramtype) noLoc
-  return ([E.Id ident],
-          E.UnOp op (E.Var (qualName paramname) (Info paramtype) noLoc) (Info rettype) noLoc,
-          E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
                  -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
@@ -1200,6 +1141,121 @@ internaliseDimConstant :: Name -> VName -> InternaliseM ()
 internaliseDimConstant fname name =
   letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
   I.Apply fname [] $ primRetType I.int32
+
+-- | Some operators and functions are overloaded - we detect and treat
+-- them here.
+isOverloadedFunction :: E.QualName VName
+                     -> Maybe (String -> [E.Exp] -> InternaliseM [SubExp])
+isOverloadedFunction qname = do
+  guard $ baseTag (qualLeaf qname) <= max_builtin
+  handle $ baseString $ qualLeaf qname
+  where
+    max_builtin = maximum $ map baseTag $ HM.keys E.builtIns
+    handle "i8"  = Just $ toSigned I.Int8
+    handle "i16" = Just $ toSigned I.Int16
+    handle "i32" = Just $ toSigned I.Int32
+    handle "i64" = Just $ toSigned I.Int64
+
+    handle "u8"  = Just $ toUnsigned I.Int8
+    handle "u16" = Just $ toUnsigned I.Int16
+    handle "u32" = Just $ toUnsigned I.Int32
+    handle "u64" = Just $ toUnsigned I.Int64
+
+    handle "int" = Just $ toSigned I.Int32
+
+    handle "f32" = Just $ toFloat I.Float32
+    handle "f64" = Just $ toFloat I.Float64
+
+    handle "signum" = Just signumF
+    handle "abs" = Just absF
+    handle "!" = Just notF
+    handle "~" = Just complementF
+
+    handle _ = Nothing
+
+    toSigned int_to desc [e] = do
+      e' <- internaliseExp1 "trunc_arg" e
+      case E.typeOf e of
+        E.Prim E.Bool ->
+          letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                    (resultBody [intConst int_to 0])
+                                    [I.Prim $ I.IntType int_to]
+        E.Prim (E.Signed int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
+        E.Prim (E.Unsigned int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
+        E.Prim (E.FloatType float_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
+        _ -> fail "Futhark.Internalise.handle: non-numeric type in ToSigned"
+    toSigned _ _ _ = fail "toSigned: bad number of arguments"
+
+    toUnsigned int_to desc [e] = do
+      e' <- internaliseExp1 "trunc_arg" e
+      case E.typeOf e of
+        E.Prim E.Bool ->
+          letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                    (resultBody [intConst int_to 0])
+                                    [I.Prim $ I.IntType int_to]
+        E.Prim (E.Signed int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
+        E.Prim (E.Unsigned int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
+        E.Prim (E.FloatType float_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
+    toUnsigned _ _ _ = fail "toUnsigned: bad number of arguments"
+
+    toFloat float_to desc [e] = do
+      e' <- internaliseExp1 "tofloat_arg" e
+      case E.typeOf e of
+        E.Prim E.Bool ->
+          letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
+                                    (resultBody [floatConst float_to 0])
+                                    [I.Prim $ I.FloatType float_to]
+        E.Prim (E.Signed int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
+        E.Prim (E.Unsigned int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.UIToFP int_from float_to) e'
+        E.Prim (E.FloatType float_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
+    toFloat _ _ _ = fail "toFloat: bad number of arguments"
+
+    signumF desc [e] = do
+      e' <- internaliseExp1 "signum_arg" e
+      case E.typeOf e of
+        E.Prim (E.Signed t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.SSignum t) e'
+        E.Prim (E.Unsigned t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
+    signumF _ _ = fail "signumF: bad number of arguments"
+
+    absF desc [e] = do
+      e' <- internaliseExp1 "abs_arg" e
+      case E.typeOf e of
+        E.Prim (E.Signed t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.Abs t) e'
+        E.Prim (E.Unsigned _) ->
+          return [e']
+        E.Prim (E.FloatType t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
+    absF _ _ = fail "absF: bad number of arguments"
+
+    notF desc [e] = do
+      e' <- internaliseExp1 "not_arg" e
+      letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
+    notF _ _ = fail "notF: bad number of arguments"
+
+    complementF desc [e] = do
+      e' <- internaliseExp1 "complement_arg" e
+      et <- subExpType e'
+      case et of I.Prim (I.IntType t) ->
+                   letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
+                 _ ->
+                   fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
+    complementF _ _ = fail "complementF: bad number of arguments"
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.

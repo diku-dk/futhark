@@ -10,7 +10,7 @@ module Foo
     fun foo(): int = 1
     module Foo
       {
-        type foo = float
+        type foo = f64
         fun foo(): foo = 2.0
       }
   }

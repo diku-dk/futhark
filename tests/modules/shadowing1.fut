@@ -8,7 +8,7 @@
 --  6.0 6 6
 -- }
 
-type best_type = float
+type best_type = f64
 fun best_number(): best_type = 6.0
 module M0
   {
@@ -20,4 +20,4 @@ module M0
       }
   }
 
-fun main(): (float, int, int) = (best_number() , M0.best_number() , M0.M1.best_number())
+fun main(): (f64, int, int) = (best_number() , M0.best_number() , M0.M1.best_number())

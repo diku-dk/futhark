@@ -7,7 +7,9 @@
 module Language.Futhark.Attributes
   (
   -- * Various
-    builtInFunctions
+    BuiltIn(..)
+  , builtIns
+  , namesToPrimTypes
   , qualName
   , typeName
   , valueType
@@ -78,6 +80,7 @@ module Language.Futhark.Attributes
   )
   where
 
+import           Control.Arrow           (second)
 import           Control.Monad.Writer
 import           Data.Hashable
 import qualified Data.HashMap.Lazy       as HM
@@ -88,6 +91,7 @@ import           Data.Maybe
 
 import           Prelude
 
+import           Language.Futhark.Pretty
 import           Language.Futhark.Syntax
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
@@ -557,11 +561,12 @@ typeOf (ArrayLit es (Info t) _) =
 typeOf (Empty (TypeDecl _ (Info t)) _) =
   arrayType 1 (fromStruct t) Unique
 typeOf (BinOp _ _ _ (Info t) _) = t
-typeOf (UnOp _ _ (Info t) _) = t
+typeOf (TupleProject _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info (Tuple ets)) _) = Tuple ets
 typeOf (Var qn (Info t) _) = t `addAliases` HS.insert (qualLeaf qn)
 typeOf (Apply _ _ (Info t) _) = t
+typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
@@ -675,8 +680,7 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
 lambdaReturnType :: Ord vn =>
                     LambdaBase Info vn -> TypeBase Rank ()
 lambdaReturnType (AnonymFun _ _ _ (Info t) _)       = removeShapeAnnotations t
-lambdaReturnType (CurryFun _ _ (Info t) _)          = toStruct t
-lambdaReturnType (UnOpFun _ _ (Info t) _)           = toStruct t
+lambdaReturnType (CurryFun _ _ (Info (_, t)) _)     = toStruct t
 lambdaReturnType (BinOpFun _ _ _ (Info t) _)        = toStruct t
 lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _)  = toStruct t
 lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
@@ -721,34 +725,96 @@ patternStructType (Id v) = vacuousShapeAnnotations $ toStruct $ unInfo $ identTy
 patternStructType (TuplePattern ps _) = Tuple $ map patternStructType ps
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
--- | A map of all built-in functions and their types.
-builtInFunctions :: HM.HashMap VName ([PrimType], PrimType)
-builtInFunctions = HM.fromList $ zipWith namify [0..]
-                   [("sqrt32", ([FloatType Float32], FloatType Float32))
-                   ,("log32", ([FloatType Float32], FloatType Float32))
-                   ,("exp32", ([FloatType Float32], FloatType Float32))
-                   ,("cos32", ([FloatType Float32], FloatType Float32))
-                   ,("sin32", ([FloatType Float32], FloatType Float32))
-                   ,("acos32", ([FloatType Float32], FloatType Float32))
-                   ,("asin32", ([FloatType Float32], FloatType Float32))
-                   ,("atan32", ([FloatType Float32], FloatType Float32))
-                   ,("atan2_32", ([FloatType Float32, FloatType Float32], FloatType Float32))
-                   ,("isinf32", ([FloatType Float32], Bool))
-                   ,("isnan32", ([FloatType Float32], Bool))
+-- | Names of primitive types to types.  This is only valid if no
+-- shadowing is going on, but useful for tools.
+namesToPrimTypes :: HM.HashMap Name PrimType
+namesToPrimTypes = HM.fromList
+                   [ (nameFromString $ pretty t, t) |
+                     t <- Bool :
+                          map Signed [minBound..maxBound] ++
+                          map Unsigned [minBound..maxBound] ++
+                          map FloatType [minBound..maxBound] ]
 
-                   ,("sqrt64", ([FloatType Float64], FloatType Float64))
-                   ,("log64", ([FloatType Float64], FloatType Float64))
-                   ,("exp64", ([FloatType Float64], FloatType Float64))
-                   ,("cos64", ([FloatType Float64], FloatType Float64))
-                   ,("sin64", ([FloatType Float64], FloatType Float64))
-                   ,("acos64", ([FloatType Float64], FloatType Float64))
-                   ,("asin64", ([FloatType Float64], FloatType Float64))
-                   ,("atan64", ([FloatType Float64], FloatType Float64))
-                   ,("atan2_64", ([FloatType Float64, FloatType Float64], FloatType Float64))
-                   ,("isinf64", ([FloatType Float64], Bool))
-                   ,("isnan64", ([FloatType Float64], Bool))
-                   ]
+-- | The nature of something predefined.  These can either be monomorphic
+-- or polymorphic.  A polymorphic builtin is a mapping from valid
+-- parameter types to the result type.
+data BuiltIn = BuiltInMonoFun [PrimType] PrimType
+             | BuiltInPolyFun [([PrimType], PrimType)]
+             | BuiltInType PrimType
+
+-- | A map of all built-ins.
+builtIns :: HM.HashMap VName BuiltIn
+builtIns = HM.fromList $ zipWith namify [0..] $
+           map (second $ uncurry BuiltInMonoFun)
+             [("sqrt32", ([FloatType Float32], FloatType Float32))
+             ,("log32", ([FloatType Float32], FloatType Float32))
+             ,("exp32", ([FloatType Float32], FloatType Float32))
+             ,("cos32", ([FloatType Float32], FloatType Float32))
+             ,("sin32", ([FloatType Float32], FloatType Float32))
+             ,("acos32", ([FloatType Float32], FloatType Float32))
+             ,("asin32", ([FloatType Float32], FloatType Float32))
+             ,("atan32", ([FloatType Float32], FloatType Float32))
+             ,("atan2_32", ([FloatType Float32, FloatType Float32], FloatType Float32))
+             ,("isinf32", ([FloatType Float32], Bool))
+             ,("isnan32", ([FloatType Float32], Bool))
+
+             ,("sqrt64", ([FloatType Float64], FloatType Float64))
+             ,("log64", ([FloatType Float64], FloatType Float64))
+             ,("exp64", ([FloatType Float64], FloatType Float64))
+             ,("cos64", ([FloatType Float64], FloatType Float64))
+             ,("sin64", ([FloatType Float64], FloatType Float64))
+             ,("acos64", ([FloatType Float64], FloatType Float64))
+             ,("asin64", ([FloatType Float64], FloatType Float64))
+             ,("atan64", ([FloatType Float64], FloatType Float64))
+             ,("atan2_64", ([FloatType Float64, FloatType Float64], FloatType Float64))
+             ,("isinf64", ([FloatType Float64], Bool))
+             ,("isnan64", ([FloatType Float64], Bool))
+             ] ++
+
+           [ ("signum", anyNumberFun)
+           , ("abs", anyNumberFun)
+           , ("~", BuiltInPolyFun $
+                   [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
+                   [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
+           , ("!", BuiltInPolyFun [([Bool], Bool)])] ++
+
+           map (convertFun $ Bool : anyNumberType) anyNumberType ++
+
+           [("int", BuiltInPolyFun $ zip (map (pure . FloatType) [minBound..maxBound])
+                    (repeat (Signed Int32)))] ++
+
+           map builtInType (map Signed [minBound..maxBound] ++
+                            map Unsigned [minBound..maxBound] ++
+                            map FloatType [minBound..maxBound] ++
+                            [Bool]) ++
+
+           [("int", BuiltInType $ Signed Int32)]
+
   where namify i (k,v) = (ID (nameFromString k, i), v)
+
+        convertFun :: [PrimType] -> PrimType -> (String,BuiltIn)
+        convertFun from to = (pretty to, BuiltInPolyFun $ zip (map pure from) (repeat to))
+
+        builtInType t = (pretty t, BuiltInType t)
+
+        anyNumberType = map Signed [minBound..maxBound] ++
+                        map Unsigned [minBound..maxBound] ++
+                        map FloatType [minBound..maxBound]
+
+        anyNumberFun :: BuiltIn
+        anyNumberFun = BuiltInPolyFun
+                       [([Signed Int8], Signed Int8),
+                        ([Signed Int16], Signed Int16),
+                        ([Signed Int32], Signed Int32),
+                        ([Signed Int64], Signed Int64),
+
+                        ([Unsigned Int8], Unsigned Int8),
+                        ([Unsigned Int16], Unsigned Int16),
+                        ([Unsigned Int32], Unsigned Int32),
+                        ([Unsigned Int64], Unsigned Int64),
+
+                        ([FloatType Float32], FloatType Float32),
+                        ([FloatType Float64], FloatType Float64)]
 
 isValDec :: DecBase f vn -> Maybe (ValDecBase f vn)
 isValDec (ValDec d) = Just d
