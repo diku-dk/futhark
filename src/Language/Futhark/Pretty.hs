@@ -10,6 +10,7 @@ module Language.Futhark.Pretty
 where
 
 import           Data.Array
+import           Data.Functor
 import           Data.Hashable
 import qualified Data.HashSet                as HS
 import           Data.Monoid
@@ -86,13 +87,13 @@ instance Pretty PrimValue where
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase (ShapeDecl vn) as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
-  ppr (PolyArrayElem bt _ u) = ppr u <> ppr (fmap baseName bt)
+  ppr (PolyArrayElem bt _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt)
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
 instance Pretty (TupleArrayElemTypeBase Rank as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
-  ppr (PolyArrayElem bt _ u) = ppr u <> ppr (fmap baseName bt)
+  ppr (PolyArrayElem bt _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt)
   ppr (ArrayArrayElem at)    = ppr at
   ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
@@ -104,7 +105,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn)
           f (ConstDim n) = ppr n
 
   ppr (PolyArray et (ShapeDecl ds) u _) =
-    ppr u <> mconcat (map (brackets . f) ds) <> ppr (fmap baseName et)
+    ppr u <> mconcat (map (brackets . f) ds) <> ppr (baseName <$> qualNameFromTypeName et)
     where f AnyDim       = mempty
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
@@ -119,14 +120,14 @@ instance Pretty (ArrayTypeBase Rank as) where
   ppr (PrimArray et (Rank n) u _) =
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
   ppr (PolyArray et (Rank n) u _) =
-    ppr u <> mconcat (replicate n (brackets mempty)) <> ppr (fmap baseName et)
+    ppr u <> mconcat (replicate n (brackets mempty)) <> ppr (baseName <$> qualNameFromTypeName et)
   ppr (TupleArray ts (Rank n) u) =
     ppr u <> mconcat (replicate n (brackets mempty)) <>
     parens (commasep $ map ppr ts)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) where
   ppr (Prim et)    = ppr et
-  ppr (TypeVar et) = ppr $ fmap baseName et
+  ppr (TypeVar et) = ppr $ baseName <$> qualNameFromTypeName et
   ppr (Array at)   = ppr at
   ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 
@@ -142,7 +143,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
 
 instance Pretty (TypeBase Rank as) where
   ppr (Prim et)    = ppr et
-  ppr (TypeVar et) = ppr $ fmap baseName et
+  ppr (TypeVar et) = ppr $ baseName <$> qualNameFromTypeName et
   ppr (Array at)   = ppr at
   ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 
@@ -199,8 +200,10 @@ hasArrayLit (TupLit es2 _) = any hasArrayLit es2
 hasArrayLit _              = False
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DimIndexBase ty vn) where
-  ppr (DimFix e)     = ppr e
-  ppr (DimSlice i j) = maybe mempty ppr i <> text ":" <> maybe mempty ppr j
+  ppr (DimFix e)       = ppr e
+  ppr (DimSlice i j s) = maybe mempty ppr i <> text ":" <>
+                         maybe mempty ppr j <> text ":" <>
+                         maybe mempty ppr s
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
@@ -357,12 +360,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModExpBa
   ppr (ModVar v _) = ppr v
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
   ppr (ModApply f a _ _) = ppr f <> parens (ppr a)
+  ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (StructBindBase ty vn) where
-  ppr (StructBind name sig e _) =
-    text "module" <+> ppr name <> sig' <+> equals <+> ppr e
-    where sig' = case sig of Nothing     -> mempty
-                             Just (s, _) -> colon <+> ppr s <> text " "
+  ppr (StructBind name e _) = text "module" <+> ppr name <+> equals <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ValDecBase ty vn) where
   ppr (FunDec fun) = ppr fun
@@ -386,7 +387,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunBindB
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ConstBindBase ty vn) where
   ppr (ConstBind name maybe_t _ e _) =
     text "val" <+> ppr name <> t' <+> text "=" <+> ppr e
-    where t' = case maybe_t of Just t -> text ":" <+> ppr t
+    where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SpecBase ty vn) where

@@ -4,5 +4,5 @@
 -- error: .*consumed.*
 
 fun main(a: *[]int): []int =
-  let b = reduce (fn (acc: *[]int) (i: []int): *[]int  => acc) a (replicate 10 (iota(10))) in
+  let b = reduce (\(acc: *[]int) (i: []int): *[]int  -> acc) a (replicate 10 (iota(10))) in
   map (+) a b -- Should fail, because a has been consumed!

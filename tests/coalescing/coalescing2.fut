@@ -25,8 +25,8 @@
 --           [25i32, 23i32, 33i32, 41i32, 63i32, 43i32, 32i32]] }
 
 fun main(rss: [k][n][m]int): [][]int =
-  map (fn (rs: [][]int): [n]int  =>
-        map (fn (r: []int): int  =>
+  map (\(rs: [][]int): [n]int  ->
+        map (\(r: []int): int  ->
               loop (x = 0) = for i < m do
                 x * 2 + r[i]
               in x) rs) rss

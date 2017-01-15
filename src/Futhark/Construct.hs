@@ -325,13 +325,13 @@ binLambda bop arg_t ret_t = do
 fullSlice :: Type -> [DimIndex SubExp] -> Slice SubExp
 fullSlice t slice =
   slice ++
-  map (DimSlice (constant (0::Int32)))
+  map (\d -> DimSlice (constant (0::Int32)) d (constant (1::Int32)))
   (drop (length slice) $ arrayDims t)
 
 -- | Like 'fullSlice', but the dimensions are simply numeric.
 fullSliceNum :: Num d => [d] -> [DimIndex d] -> Slice d
 fullSliceNum dims slice =
-  slice ++ map (DimSlice 0) (drop (length slice) dims)
+  slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore

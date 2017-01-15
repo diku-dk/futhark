@@ -7,5 +7,5 @@
 -- structure distributed { Kernel 1 }
 
 fun main(xs: [n]int, m: int): [n][m]int =
-  map (fn (x: int): [m]int  =>
+  map (\(x: int): [m]int  ->
         replicate m x) xs

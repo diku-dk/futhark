@@ -28,10 +28,10 @@ fun testBit(n: int, ind: int): bool =
 ---- INDEPENDENT FORMULA:
 ----    filter is redundantly computed inside map.
 ----    Currently Futhark hoists it outside, but this will
-----    not allow fusing the filter with reduce => redomap,
+----    not allow fusing the filter with reduce -> redomap,
 -----------------------------------------------------------------
 fun xorInds(n: int) (dir_vs: [num_bits]int): int =
-    let reldv_vals = map (fn (dv: int, i: int): int  =>
+    let reldv_vals = map (\(dv: int, i: int): int  ->
                             if testBit(grayCode(n),i)
                             then dv else 0
                         ) (zip (dir_vs) (iota(num_bits)) ) in
@@ -56,29 +56,29 @@ fun index_of_least_significant_0(num_bits: int, n: int): int =
 
 fun sobolRecI(sob_dir_vs: [][num_bits]int, prev: []int, n: int): []int =
   let bit = index_of_least_significant_0(num_bits,n) in
-  map  (fn (vct_prev: ([]int,int)): int  =>
+  map  (\(vct_prev: ([]int,int)): int  ->
          let (vct_row, prev) = vct_prev in
          vct_row[bit] ^ prev
       ) (zip (sob_dir_vs) prev)
 
 fun recM(sob_dirs:  [][num_bits]int, i: int ): []int =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map (fn (row: []int): int => unsafe row[bit]) (sob_dirs )
+  map (\(row: []int): int -> unsafe row[bit]) (sob_dirs )
 
 -- computes sobol numbers: n,..,n+chunk-1
 fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
   let sob_fact= 1.0 / f64(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
-  let contrbs = map (fn (k: int): []int  =>
+  let contrbs = map (\(k: int): []int  ->
                         let sob = k + n in
                         if(k==0) then sob_beg
                         else recM(dir_vs, k+n)
                    ) (iota(chunk) )
-  let vct_ints= scan (fn (x: []int) (y: []int): []int  =>
+  let vct_ints= scan (\(x: []int) (y: []int): []int  ->
                         map (^) x y
                     ) (replicate len 0) contrbs in
-  map (fn (xs: []int): []f64  =>
-             map  (fn (x: int): f64  =>
+  map (\(xs: []int): []f64  ->
+             map  (\(x: int): f64  ->
                      f64(x) * sob_fact
                  ) xs
          ) (vct_ints)
@@ -93,7 +93,7 @@ fun main(num_mc_it: int,
                   num_und: int): [][]f64 =
   let sobvctsz  = num_dates*num_und
   let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz
-  let sobol_mat = streamMap (fn (ns: [chunk]int): [][sobvctsz]f64  =>
+  let sobol_mat = streamMap (\(ns: [chunk]int): [][sobvctsz]f64  ->
                                 sobolChunk(dir_vs, ns[0], chunk)
                            ) (iota(num_mc_it) ) in
 

@@ -13,6 +13,14 @@ cannot indent properly, please fix it, and put small examples into the
 `futhark-mode.el-corpus` directory to ensure that it doesn't break in
 the future.
 
+### Authors
+
+Initiated by Troels Henriksen in 2013.  Subsequently improved by:
+
+  + Niels G. W. Serup
+  + Troels Henriksen
+  + Rasmus Wriedt Larsen
+
 
 GtkSourceView
 -------------

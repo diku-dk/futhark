@@ -15,7 +15,7 @@ fun max(x: int) (y: int): int =
   if x < y then y else x
 
 fun reverse(a: [n]int): [n]int =
-  map (fn (i: int): int  => a[n-i-1]) (iota(n))
+  map (\(i: int): int  -> a[n-i-1]) (iota(n))
 
 fun main(a: []int): int =
   let highestToTheLeft = scan max 0 a

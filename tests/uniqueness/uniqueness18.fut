@@ -5,4 +5,4 @@
 -- structure { Map 0 Copy 1 }
 
 fun main(as: []int): *[]int =
-  map (fn x => x) as
+  map (\x -> x) as

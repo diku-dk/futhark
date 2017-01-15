@@ -6,23 +6,24 @@ module Futhark.Internalise.Monad
   , FunTable
   , TypeTable
   , VarSubstitutions
+  , DecSubstitutions
   , InternaliseEnv(..)
   , ConstParams
   , FunBinding (..)
   , lookupFunction
   , lookupTypeVar
-  , lookupModule
   , lookupFunctor
   , lookupSubst
+  , newOrExistingSubst
 
   , bindingIdentTypes
   , bindingParamTypes
   , bindingFunctions
   , bindingTypes
-  , bindingModule
   , bindingFunctor
   , bindingType
   , withDecSubsts
+  , generatingFunctor
 
     -- * Convenient reexports
   , module Futhark.Tools
@@ -62,14 +63,18 @@ type TypeTable = HM.HashMap VName [TypeBase Rank NoUniqueness]
 -- internalised subexpressions.
 type VarSubstitutions = HM.HashMap VName [SubExp]
 
+-- | Mapping from original top-level names to new top-level names.
+type DecSubstitutions = HM.HashMap VName VName
+
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
-  , envDecSubsts :: HM.HashMap VName VName
+  , envDecSubsts :: DecSubstitutions
   , envFtable :: FunTable
   , envTtable :: TypeTable
   , envModTable :: HM.HashMap VName [E.Dec]
   , envFunctorTable :: HM.HashMap VName E.ModExp
   , envDoBoundsChecks :: Bool
+  , envGeneratingFunctor :: Bool
   }
 
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
@@ -117,6 +122,7 @@ runInternaliseM ftable (InternaliseM m) =
                  , envFunctorTable = mempty
                  , envDecSubsts = mempty
                  , envDoBoundsChecks = True
+                 , envGeneratingFunctor = False
                  }
 
 lookupFunction :: VName -> InternaliseM FunBinding
@@ -130,14 +136,6 @@ lookupTypeVar tname = do
   t <- HM.lookup tname <$> asks envTtable
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just t' -> return t'
-
-lookupModule :: VName -> InternaliseM [E.Dec]
-lookupModule mname = do
-  maybe_decs <- asks $ HM.lookup mname . envModTable
-  case maybe_decs of
-    Nothing -> fail $ "Internalise.lookupModule: Module '" ++
-               pretty mname ++ "' not found"
-    Just decs -> return decs
 
 lookupFunctor :: VName -> InternaliseM E.ModExp
 lookupFunctor mname = do
@@ -155,8 +153,19 @@ lookupSubst :: E.QualName VName -> InternaliseM VName
 lookupSubst (E.QualName _ name) = do
   r <- asks $ HM.lookup name . envDecSubsts
   case r of
-    Just v -> lookupSubst $ E.qualName v
+    Just v -> return v
     _      -> return name
+
+-- | Like lookupSubst, but creates a fresh name if inside a functor
+-- and a substitution does not already exist.
+newOrExistingSubst :: VName -> InternaliseM VName
+newOrExistingSubst name = do
+  in_functor <- asks envGeneratingFunctor
+  r <- asks $ HM.lookup name . envDecSubsts
+  case r of
+    Just v               -> return v
+    Nothing | in_functor -> newName name
+            | otherwise  -> return name
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
@@ -179,10 +188,6 @@ bindingTypes :: TypeTable -> InternaliseM a -> InternaliseM a
 bindingTypes ttable_expansion =
   local $ \env -> env { envTtable = ttable_expansion <> envTtable env }
 
-bindingModule :: VName -> [E.Dec] -> InternaliseM a -> InternaliseM a
-bindingModule name decs =
-  local $ \env -> env { envModTable = HM.insert name decs $ envModTable env }
-
 bindingFunctor :: VName -> E.ModExp -> InternaliseM a -> InternaliseM a
 bindingFunctor name me =
   local $ \env -> env { envFunctorTable = HM.insert name me $ envFunctorTable env }
@@ -194,3 +199,7 @@ bindingType name t =
 withDecSubsts :: HM.HashMap VName VName -> InternaliseM a -> InternaliseM a
 withDecSubsts substs =
   local $ \env -> env { envDecSubsts = substs <> envDecSubsts env }
+
+generatingFunctor :: InternaliseM a -> InternaliseM a
+generatingFunctor =
+  local $ \env -> env { envGeneratingFunctor = True }

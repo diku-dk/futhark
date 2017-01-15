@@ -64,32 +64,34 @@ internaliseFunctionName :: Bool -> VName -> InternaliseM (VName, Name)
 internaliseFunctionName entry fname = do
   -- Note that we may have another name for this function if we are
   -- inside of a functor application.
-  fname' <- lookupSubst $ E.qualName fname
+  fname' <- newOrExistingSubst fname
   return (fname',
           if entry
           then nameFromString $ pretty $ baseName fname'
           else nameFromString $ pretty fname' ++ "f")
 
-mkFtableExpansion :: [E.ValDec] -> InternaliseM FunTable
-mkFtableExpansion = fmap HM.fromList . mapM funFrom
+mkFtableExpansion :: [E.ValDec] -> InternaliseM (FunTable, DecSubstitutions)
+mkFtableExpansion vds = do (fbs, ds) <- unzip <$> mapM funFrom vds
+                           return (HM.fromList fbs, HM.fromList ds)
   where funFrom (E.FunDec (E.FunBind entry ofname _ (Info rettype) params _ _)) =
           bindingParams params $ \shapes values -> do
             (fname, fname') <- internaliseFunctionName entry ofname
             (rettype', _, cm) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
                 consts = map ((`Param` I.Prim int32) . snd) cm
-            return (fname,
-                    FunBinding { internalFun = (fname',
-                                                cm,
-                                                shapenames,
-                                                map declTypeOf values,
-                                                applyRetType
-                                                (ExtRetType rettype')
-                                                (consts++shapes++values)
-                                               )
-                               , externalFun = (rettype,
-                                                map E.patternStructType params)
-                               })
+            return ((fname,
+                     FunBinding { internalFun = (fname',
+                                                 cm,
+                                                 shapenames,
+                                                 map declTypeOf values,
+                                                 applyRetType
+                                                 (ExtRetType rettype')
+                                                 (consts++shapes++values)
+                                                )
+                                , externalFun = (rettype,
+                                                 map E.patternStructType params)
+                                }),
+                     (ofname, fname))
         funFrom (E.ConstDec (E.ConstBind name _ t e loc)) =
           funFrom $ E.FunDec $ E.FunBind False name Nothing t [] e loc
 
@@ -111,13 +113,13 @@ internaliseDecs ds =
       ttable <- asks envTtable
       return ((ftable, ttable), [])
     (Left vdecs, ds') -> do
-      ftable_expansion <- mkFtableExpansion vdecs
-      bindingFunctions ftable_expansion $ do
+      (ftable_expansion, substs) <- mkFtableExpansion vdecs
+      bindingFunctions ftable_expansion $ withDecSubsts substs $ do
         vdec_funs <- mapM internaliseValDec vdecs
         (tables, ds_funs) <- internaliseDecs ds'
         return (tables, vdec_funs ++ ds_funs)
     (Right (E.StructDec sb), ds') ->
-      internaliseModExp sb $ \funs -> do
+      internaliseModExp False (structExp sb) $ \funs -> do
         (tables, ds_funs) <- internaliseDecs ds'
         return (tables, funs ++ ds_funs)
     (Right (E.FunctorDec fb), ds') ->
@@ -137,45 +139,24 @@ internaliseValDec (E.FunDec fb) =
 internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
   internaliseFun $ E.FunBind False name Nothing t [] e loc
 
-internaliseModExp :: E.StructBind
-                  -> ([I.FunDef] -> InternaliseM a)
-                  -> InternaliseM a
-internaliseModExp sb m =
-  withDecSubsts subst_from_sb $
-  case structExp sb of
-    E.ModDecs ds _ -> do
-      ((ftable_expansion, ttable_expansion), funs) <- internaliseDecs ds
-      bindingFunctions ftable_expansion $
-        bindingTypes ttable_expansion $
-        bindingModule (E.structName sb) ds $
-        m funs
-    E.ModVar v _ -> do
-      v' <- lookupSubst v
-      ds <- lookupModule v'
-      bindingModule (E.structName sb) ds $
-        m []
-    E.ModApply v arg (Info subst) _ -> internaliseModExp' arg $ \arg_funs -> do
-      v' <- lookupSubst v
-      me <- lookupFunctor v'
-      let sb' = sb { structExp = me }
-      withDecSubsts subst $ internaliseModExp sb' $ m . (arg_funs++)
-  where subst_from_sb = case structSignature sb of
-                          Just (_, Info substs) -> substs
-                          Nothing               -> mempty
-
-internaliseModExp' :: E.ModExp
+internaliseModExp :: Bool -> E.ModExp
                    -> ([I.FunDef] -> InternaliseM a)
                    -> InternaliseM a
-internaliseModExp' E.ModVar{} m = m []
-internaliseModExp' (E.ModDecs ds _) m = do
-  ((ftable_expansion, ttable_expansion), funs) <- internaliseDecs ds
+internaliseModExp _ E.ModVar{} m = m []
+internaliseModExp generating (E.ModDecs ds _) m = do
+  ((ftable_expansion, ttable_expansion), funs) <-
+    (if generating then generatingFunctor else id) $
+    internaliseDecs ds
   bindingFunctions ftable_expansion $
     bindingTypes ttable_expansion $
     m funs
-internaliseModExp' (E.ModApply v arg (Info subst) _) m = internaliseModExp' arg $ \arg_funs -> do
-  v' <- lookupSubst v
-  me <- lookupFunctor v'
-  withDecSubsts subst $ internaliseModExp' me $ m . (arg_funs++)
+internaliseModExp generating (E.ModAscript me _ (Info subst) _) m =
+  withDecSubsts subst $ internaliseModExp generating me m
+internaliseModExp _ (E.ModApply v arg (Info subst) _) m =
+  internaliseModExp False arg $ \arg_funs -> do
+    v' <- lookupSubst v
+    me <- lookupFunctor v'
+    withDecSubsts subst $ internaliseModExp True me $ m . (arg_funs++)
 
 internaliseFun :: E.FunBind -> InternaliseM I.FunDef
 internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
@@ -907,17 +888,47 @@ internaliseDimIndex loc w (E.DimFix i) = do
   i' <- internaliseExp1 "i" i
   cs <- assertingOne $ boundsCheck loc w i'
   return (I.DimFix i', cs)
-internaliseDimIndex loc w (E.DimSlice i j) = do
-  i' <- maybe (return (constant (0::Int32))) (internaliseExp1 "i") i
-  j' <- maybe (return w) (internaliseExp1 "j") j
-  cs_i <- assertingOne $ boundsCheck loc w i'
-  cs_j <- assertingOne $ do
-    wp1 <- letSubExp "wp1" $ BasicOp $ I.BinOp (Add Int32) j' (constant (1::Int32))
-    boundsCheck loc wp1 j'
-  cs_pos <- assertingOne $
-    letExp "pos" =<< eAssert (pure $ BasicOp $ I.CmpOp (CmpSle Int32) i' j') loc
-  n <- letSubExp "n" $ BasicOp $ I.BinOp (Sub Int32) j' i'
-  return (I.DimSlice i' n, cs_i <> cs_j <> cs_pos)
+internaliseDimIndex loc w (E.DimSlice i j s) = do
+  s' <- maybe (return (constant (1::Int32))) (internaliseExp1 "s") s
+  s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
+  backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) s_sign
+              (I.constant (negate 1::Int32))
+  w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int32) w (constant (1::Int32))
+  let i_def = letSubExp "i_def" $ I.If backwards
+              (resultBody [w_minus_1])
+              (resultBody [zero]) [I.Prim int32]
+      j_def = letSubExp "j_def" $ I.If backwards
+              (resultBody [negone])
+              (resultBody [w]) [I.Prim int32]
+  i' <- maybe i_def (internaliseExp1 "i") i
+  j' <- maybe j_def (internaliseExp1 "j") j
+  j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32) j' i'
+  n <- letSubExp "n" =<< eDivRoundingUp Int32
+       (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
+       (pure $ I.BasicOp $ I.UnOp (I.Abs Int32) s')
+
+  -- Bounds checks depend on whether we are slicing forwards or
+  -- backwards.  If forwards, we must check '0 <= i && i <= j && j <= w'.  If
+  -- backwards, '-1 <= j && j <= i && i < w'.
+  zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
+  i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
+  j_lte_w <- letSubExp "j_lte_w" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' w
+  forwards_ok <- letSubExp "forwards_ok" =<< foldBinOp I.LogAnd zero_lte_i [i_lte_j, j_lte_w]
+
+  negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
+  j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
+  i_lt_w <- letSubExp "i_lt_w" $ I.BasicOp $ I.CmpOp (I.CmpSlt Int32) i' w
+  backwards_ok <- letSubExp "backwards_ok" =<< foldBinOp I.LogAnd negone_lte_j [j_lte_i, i_lt_w]
+
+  ok <- letSubExp "slice_ok" $ I.If backwards
+        (resultBody [backwards_ok])
+        (resultBody [forwards_ok])
+        [I.Prim I.Bool]
+  checked <- letExp "slice_cert" $ I.BasicOp $ I.Assert ok loc
+
+  return (I.DimSlice i' n s', [checked])
+  where zero = constant (0::Int32)
+        negone = constant (-1::Int32)
 
 internaliseScanOrReduce :: String -> String
                         -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)

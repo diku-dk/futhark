@@ -21,8 +21,8 @@ fun doCompute(data1:
     numBins2: i32,
     bin: [numBBins]f32
 ): *[numBins2]i64 =
-    let value = map (fn (x: f32): *[numBins2]i64  =>
-            let vals = map (fn (y: f32): *[numBins2]i64  =>
+    let value = map (\(x: f32): *[numBins2]i64  ->
+            let vals = map (\(y: f32): *[numBins2]i64  ->
                     let dot = x*y
                     let dBins = replicate numBins2 0i64
                     let dBins[0] = 1i64 in dBins
@@ -34,10 +34,10 @@ fun doCompute(data1:
     reduce reduceBins (replicate numBins2 0i64) value
 
 fun main(numBins: int): *[]i64 =
-    let binb = map (fn (k: f32): f32  => k) (iota32(numBins + 1))
+    let binb = map (\(k: f32): f32  -> k) (iota32(numBins + 1))
     let datapoints = iota32(10)
     let randompoints = replicate 1 datapoints
-    let (rrs, drs) = unzip(map (fn (random: [numR]f32): (*[]i64, *[]i64)  =>
+    let (rrs, drs) = unzip(map (\(random: [numR]f32): (*[]i64, *[]i64)  ->
                                  (replicate (numBins+2) 0i64,
                                   doCompute(datapoints, random, numBins, numBins+2, binb))) randompoints)
     in

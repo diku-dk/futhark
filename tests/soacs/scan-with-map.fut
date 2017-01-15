@@ -11,6 +11,6 @@
 
 fun main(a: [n]int, m: int): int =
   let contribs = replicate m a
-  let res = scan (fn (x: []int) (y: []int): []int => map (+) x y
+  let res = scan (\(x: []int) (y: []int): []int -> map (+) x y
                 ) a contribs in
   reduce (^) 0 (reshape (n*m) res)

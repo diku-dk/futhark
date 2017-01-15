@@ -2,5 +2,5 @@
 -- ==
 -- error:
 fun main(a: *[][]int): [][]int =
-  let _ = filter (fn (r: *[]int): bool  => true) a
+  let _ = filter (\(r: *[]int): bool  -> true) a
   in empty([]int)

@@ -16,7 +16,7 @@ fun computefibs(arr: *[n]int): *[]int =
     in arr
 
 fun fibs(arr: []int, n: int): *[][]int =
-    map (fn (i: int): *[]int  => computefibs(copy(arr))) (iota(n))
+    map (\(i: int): *[]int  -> computefibs(copy(arr))) (iota(n))
 
 -- Read an integer from the user, then compute that number of fibonacci numbers.
 fun main(n: int): []int =

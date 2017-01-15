@@ -10,7 +10,7 @@
 -- input { [1,2,3,4,5] empty(int) 1 }
 -- output { [1,2,3,4,5] }
 -- input { [1,2,3,4,5] empty(int) 5 }
--- error: Assertion.*failed
+-- output { [1,2,3,4,5] }
 -- input { [1,2,3,4,5] [1,2,3] -1 }
 -- error: Assertion.*failed
 

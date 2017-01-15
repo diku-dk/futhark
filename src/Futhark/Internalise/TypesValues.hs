@@ -67,7 +67,7 @@ internaliseDeclType' :: DimDeclInterpretation
 internaliseDeclType' _ (E.Prim bt) =
   return [I.Prim $ internalisePrimType bt]
 internaliseDeclType' _ (E.TypeVar v) = lift $ do
-  v' <- lookupSubst v
+  v' <- lookupSubst $ qualNameFromTypeName v
   map (extShaped . (`toDecl` Nonunique)) <$> lookupTypeVar v'
 internaliseDeclType' ddi (E.Tuple ets) =
   concat <$> mapM (internaliseDeclType' ddi) ets
@@ -79,7 +79,7 @@ internaliseDeclType' ddi (E.Array at) =
                   internaliseUniqueness u]
 
         internaliseArrayType (E.PolyArray v shape u _) = do
-          ts <- lift $ lookupTypeVar =<< lookupSubst v
+          ts <- lift $ lookupTypeVar =<< lookupSubst (qualNameFromTypeName v)
           dims <- internaliseShape shape
           return [I.arrayOf (extShaped t) (ExtShape dims) $ internaliseUniqueness u
                  | t <- ts]
@@ -96,7 +96,7 @@ internaliseDeclType' ddi (E.Array at) =
         internaliseTupleArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseTupleArrayElem (PolyArrayElem v _ _) = lift $ do
-          v' <- lookupSubst v
+          v' <- lookupSubst $ qualNameFromTypeName v
           map (extShaped . (`toDecl` Nonunique)) <$> lookupTypeVar v'
         internaliseTupleArrayElem (ArrayArrayElem aet) =
           internaliseArrayType aet

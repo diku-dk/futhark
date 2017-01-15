@@ -7,7 +7,7 @@
 --           [4i32, 3i32, 6i32, 11i32, 1i32, 6i32, 1i32]] }
 
 fun main(rss: *[n][m]int): [][]int =
-  map (fn (rs: *[]int): [m]int  =>
+  map (\(rs: *[]int): [m]int  ->
         loop (rs) = for i < m do
           let rs[i] = rs[i] + 1
           in rs

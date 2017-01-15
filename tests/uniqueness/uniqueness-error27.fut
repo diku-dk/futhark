@@ -6,4 +6,4 @@
 fun consume(a: *[]int): []int = a
 
 fun main(a: *[]int): [][]int =
-  map (fn i => consume a) (iota 10)
+  map (\i -> consume a) (iota 10)

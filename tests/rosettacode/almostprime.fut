@@ -15,7 +15,7 @@ fun kprime(n: int, k: int): bool =
   in f + (if n > 1 then 1 else 0) == k
 
 fun main(m: int): [][]int =
-  map (fn k: [10]int =>
+  map (\k: [10]int ->
          let ps = replicate 10 0
          loop ((i,c,ps) = (2,0,ps)) = while c < 10 do
            if kprime(i,k) then

@@ -225,7 +225,7 @@ boundInKernelNests = map (HS.fromList .
 kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
-constructKernel :: (MonadFreshNames m, HasScope Kernels m) =>
+constructKernel :: (MonadFreshNames m, LocalScope Kernels m) =>
                    KernelNest -> KernelBody InKernel
                 -> m ([Stm Kernels], SubExp, Stm Kernels)
 constructKernel kernel_nest inner_body = do
@@ -233,7 +233,8 @@ constructKernel kernel_nest inner_body = do
   let used_inps = filter inputIsUsed inps
       cs = loopNestingCertificates first_nest
 
-  (ksize_bnds, k) <- mapKernel cs w (FlatThreadSpace ispace) used_inps rts inner_body
+  (ksize_bnds, k) <- inScopeOf w_bnds $
+    mapKernel cs w (FlatThreadSpace ispace) used_inps rts inner_body
 
   let kbnds = w_bnds ++ ksize_bnds
   return (kbnds,

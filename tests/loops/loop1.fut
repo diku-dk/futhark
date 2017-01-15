@@ -11,4 +11,4 @@ fun main(): []int =
   loop (outarr = outarr) = for i < n do
     let outarr[i] = arr[i]
     in  outarr
-  in map (fn (x,y) => x + y) outarr
+  in map (\(x,y) -> x + y) outarr
