@@ -789,8 +789,8 @@ instance Simplifiable (TypeBase Shape u) where
     return $ Prim bt
 
 instance Simplifiable d => Simplifiable (DimIndex d) where
-  simplify (DimFix i) = DimFix <$> simplify i
-  simplify (DimSlice i n) = DimSlice <$> simplify i <*> simplify n
+  simplify (DimFix i)       = DimFix <$> simplify i
+  simplify (DimSlice i n s) = DimSlice <$> simplify i <*> simplify n <*> simplify s
 
 simplifyLambda :: SimplifiableLore lore =>
                   Lambda lore

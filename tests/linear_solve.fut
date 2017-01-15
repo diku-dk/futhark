@@ -13,9 +13,9 @@ fun Gauss_Jordan (A: [n][m]f32) (i: int): [n][m]f32 =
     let Ap = A[1:n]
     let v1 = irow[i]
     let irow = map (/v1) irow
-    let Ap = map (fn jrow =>
+    let Ap = map (\jrow ->
                     let scale = jrow[i]
-                    in map (fn x y => y - scale * x) irow jrow)
+                    in map (\x y -> y - scale * x) irow jrow)
                  Ap
     in Gauss_Jordan (concat Ap ([irow])) (i+1)
 

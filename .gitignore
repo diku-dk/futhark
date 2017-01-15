@@ -14,32 +14,14 @@ dist
 .stack-work
 
 # Ignore result of test suite.
-data/*actual-*
-data/**/*actual-*
-data/*expected-*
-data/**/*expected-*
-data/*bin
-data/**/*bin
-data/*c
-data/**/*c
-data/benchmarks/*.compilerout
-data/benchmarks/*.interpreterout
-data/tests/*.compilerout
-data/tests/*.interpreterout
-data/tests/flattening/*.compilerout
-data/tests/flattening/*.interpreterout
-data/tests/fusion/*.compilerout
-data/tests/fusion/*.interpreterout
-data/tests/fusion/Vers2.0/*.compilerout
-data/tests/fusion/Vers2.0/*.interpreterout
-data/tests/loops/*.compilerout
-data/tests/loops/*.interpreterout
-data/tests/shapes/*.compilerout
-data/tests/shapes/*.interpreterout
-data/tests/soacs/*.compilerout
-data/tests/soacs/*.interpreterout
-data/tests/uniqueness/*.compilerout
-data/tests/uniqueness/*.interpreterout
+tests/*actual-*
+tests/**/*actual-*
+tests/*expected-*
+tests/**/*expected-*
+tests/*bin
+tests/**/*bin
+tests/*c
+tests/**/*c
 *~
 
 # Ignore side-effects of compilation.
@@ -56,7 +38,7 @@ data/tests/uniqueness/*.interpreterout
 *.vrb
 *.nav
 
-!data/**/*.out
+!tests/**/*.out
 
 # Ignore core dumps.
 core

@@ -5,4 +5,4 @@
 -- error: declaration.*integer
 
 fun main(as: []int, b: bool): [][]int =
-  map (fn i: [b]int => replicate 3 i) as
+  map (\i: [b]int -> replicate 3 i) as

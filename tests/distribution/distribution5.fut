@@ -20,9 +20,9 @@
 -- }
 
 fun main(a: [n][an][]int, b: [n][bn]int): ([][]int,[][]int) =
-  unzip(map (fn (a_row: [][]int) (b_row: []int): ([bn]int,[an]int)  =>
+  unzip(map (\(a_row: [][]int) (b_row: []int): ([bn]int,[an]int)  ->
                   (map (-1) (b_row),
-                   map (fn (a_row_row: []int): int  =>
+                   map (\(a_row_row: []int): int  ->
                          let x = map (+1) (a_row_row) in
                          reduce (+) 0 (concat x x)
                       ) a_row)) a b)

@@ -13,7 +13,7 @@ fun main(n: int): [n]bool =
   let is_open = replicate n false
   loop (is_open) = for i < n do
     let js = map (*i+1) (iota n)
-    let flips = map (fn j =>
+    let flips = map (\j ->
                        if j < n
                        then unsafe !is_open[j]
                        else true -- Doesn't matter.

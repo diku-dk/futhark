@@ -692,8 +692,9 @@ compileKernelExp constants dest (Combine cspace ts active body)
                    shape
               index _ _ = Nothing
 
-compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) = do
+compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) = do
   skip_waves <- newVName "skip_waves"
+  w' <- ImpGen.compileSubExp w
 
   let local_tid = kernelLocalThreadId constants
       (_nes, arrs) = unzip input
@@ -730,20 +731,21 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
         wave_id = Imp.var local_tid int32 `quot` wave_size
         in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
         num_waves = (group_size + wave_size - 1) `quot` wave_size
+        arg_in_bounds = Imp.CmpOpExp (CmpSlt Int32)
+                        (Imp.BinOpExp (Add Int32)
+                          (Imp.var local_tid int32)
+                          (Imp.var (paramName other_index_param) int32))
+                        w'
 
-        -- Some short-circuiting here to handle the (rare) case where
-        -- the wave size is greater than the group size.
         doing_in_wave_reductions =
-          Imp.BinOpExp (And Int32)
-          (Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size)
-          (Imp.CmpOpExp (CmpSlt Int32) wave_size group_size)
+          Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size
         apply_in_in_wave_iteration =
           Imp.CmpOpExp (CmpEq int32)
           (Imp.BinOpExp (And Int32) in_wave_id (2 * Imp.var offset int32 - 1)) 0
         in_wave_reductions =
           Imp.SetScalar offset 1 <>
           Imp.While doing_in_wave_reductions
-            (Imp.If apply_in_in_wave_iteration
+            (Imp.If (Imp.BinOpExp LogAnd arg_in_bounds apply_in_in_wave_iteration)
              in_wave_reduce mempty <>
              Imp.SetScalar offset (Imp.var offset int32 * 2))
 

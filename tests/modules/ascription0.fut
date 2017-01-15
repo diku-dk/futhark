@@ -15,7 +15,7 @@ type t = (int,int)
 
 val x: (int, int) = (2,2)
 
-fun f (as: []t): t = reduce (fn (a,b) (c,d) => (a+c,b+d)) (0,0) as
+fun f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }
 
 fun main(xs: []int, ys: []int): Struct.t = Struct.f (zip xs ys)

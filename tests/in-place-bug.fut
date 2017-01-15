@@ -7,9 +7,9 @@ fun tridagSeq(a:  []f64, b: []f64, c: []f64, y: []f64 ): []f64 =
 
 fun explicitMethod(myD:  [][m]f64,  myDD: [][]f64,
                               myMu: [][]f64, myVar: [][]f64, result: [][]f64 ): [][]f64 =
-  copy( map (fn (tup:  ([]f64,[]f64,[]f64) ): []f64  =>
+  copy( map (\(tup:  ([]f64,[]f64,[]f64) ): []f64  ->
                let (mu_row, var_row, result_row) = tup in
-               map (fn (tup: ([]f64, []f64, f64, f64, int)): f64  =>
+               map (\(tup: ([]f64, []f64, f64, f64, int)): f64  ->
                       let ( dx, dxx, mu, var, j ) = tup in
                       ( mu*dx[1] + 0.5*var*dxx[1] ) * result_row[j]
                   ) (zip myD myDD (mu_row) (var_row) (iota(m) )
@@ -19,9 +19,9 @@ fun explicitMethod(myD:  [][m]f64,  myDD: [][]f64,
 fun implicitMethod(myD:  [][]f64,  myDD: [][]f64,
                               myMu: [][]f64, myVar: [][]f64,
                              u: [][]f64,    dtInv: f64  ): [][]f64 =
-  map (fn (tup:  ([]f64,[]f64,[]f64) ): []f64   =>
+  map (\(tup:  ([]f64,[]f64,[]f64) ): []f64   ->
          let (mu_row,var_row,u_row) = tup
-         let abc = map (fn (tup: (f64,f64,[]f64,[]f64)): (f64,f64,f64)  =>
+         let abc = map (\(tup: (f64,f64,[]f64,[]f64)): (f64,f64,f64)  ->
                           let (mu, var, d, dd) = tup in
                           ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                           , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
@@ -41,14 +41,14 @@ fun main(numX: int, numY: int, numT: int, s0: f64, strike: f64, t: f64, alpha: f
     let (myDy, myDyy) = (empty([]f64), empty([]f64))
     let myResult = copy(empty([]f64))
     let myMuX  = replicate numY (replicate numX 0.0)
-    let myVarX = map (fn (yj: f64): []f64  => map exp64 myX) myY
+    let myVarX = map (\(yj: f64): []f64  -> map exp64 myX) myY
 
     -- explicitX
     let u = explicitMethod( myDx, myDxx, myMuX, myVarX, myResult )
     -- implicitX
     let u = implicitMethod( myDx, myDxx, myMuX, myVarX, u, 1.0 )
     -- implicitY
-    let y = map (fn (u_row: []f64): []f64  =>
+    let y = map (\(u_row: []f64): []f64  ->
                    map (+1.0) (u_row)) (
                    transpose(u)) in
     y[0,0]

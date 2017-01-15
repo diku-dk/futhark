@@ -7,7 +7,7 @@
 --   [[3, 3, 6], [8, 11, 11]]
 -- }
 fun main(a1: [][]int, a2: [][]int): [][]int =
-  let b = map (fn (row: ([]int,[]int)): []int  =>
+  let b = map (\(row: ([]int,[]int)): []int  ->
                 let (x,y) = row in
                 map (+) x y) (
               zip a1 a2) in

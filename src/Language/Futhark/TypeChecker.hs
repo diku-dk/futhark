@@ -185,6 +185,7 @@ type FunBinding = ([StructType], StructType)
 
 -- | A binding from a name to its definition as a type.
 data TypeBinding = TypeAbbr StructType
+                 | TypeAbs
                  deriving (Show)
 
 data ModBinding = ModMod Scope
@@ -275,16 +276,6 @@ altOccurences occurs1 occurs2 =
 
 type NameMap = HM.HashMap (Namespace, Name) VName
 
--- | A signature is a mapping from unique names to a specification of
--- what the names must be bound to.
-type Sig = HM.HashMap VName SigSpec
-
--- | A specification of something that must be in a signature.
-data SigSpec = SpecTypeAbbr StructType
-             | SpecType
-             | SpecVal [StructType] StructType
-             deriving (Show)
-
 -- | A function for applying a functor to a module.
 data FunctorF = FunctorF { applyFunctor :: SrcLoc -> Scope
                                         -> TypeM (Scope, HM.HashMap VName VName)
@@ -293,27 +284,12 @@ data FunctorF = FunctorF { applyFunctor :: SrcLoc -> Scope
 instance Show FunctorF where
   show _ = "#<FunctorF>"
 
-sigAbsTypes :: Sig -> [VName]
-sigAbsTypes = mapMaybe select . HM.toList
-  where select (name, SpecType) = Just name
-        select _                = Nothing
-
-sigTypeAbbrs :: Sig -> [(VName,StructType)]
-sigTypeAbbrs = mapMaybe select . HM.toList
-  where select (name, SpecTypeAbbr t) = Just (name, t)
-        select _                      = Nothing
-
-sigVals :: Sig -> [(VName, ([StructType], StructType))]
-sigVals = mapMaybe select . HM.toList
-  where select (name, SpecVal pts t) = Just (name, (pts, t))
-        select _                     = Nothing
-
 -- | Type checking happens with access to this environment.  The
 -- tables will be extended during type-checking as bindings come into
 -- scope.
 data Scope  = Scope { envVtable :: HM.HashMap VName Binding
                     , envTypeTable :: HM.HashMap VName TypeBinding
-                    , envSigTable :: HM.HashMap VName (Scope, Sig)
+                    , envSigTable :: HM.HashMap VName Scope
                     , envModTable :: HM.HashMap Name ModBinding
                     , envNameMap :: NameMap
                     } deriving (Show)
@@ -334,9 +310,21 @@ initialScope = Scope initialVtable mempty mempty mempty builtInMap
         builtInMap = HM.fromList $ map mapping $ HM.keys builtInFunctions
           where mapping v = ((Term, baseName v), v)
 
-scopeTypeAbbrs :: Scope -> HM.HashMap VName StructType
-scopeTypeAbbrs = HM.map unTypeAbbr . envTypeTable
-  where unTypeAbbr (TypeAbbr t) = t
+scopeTypeAbbrs :: Scope -> [(VName,StructType)]
+scopeTypeAbbrs = mapMaybe unTypeAbbr . HM.toList . envTypeTable
+  where unTypeAbbr (v, TypeAbbr t) = Just (v, t)
+        unTypeAbbr (_, TypeAbs)    = Nothing
+
+scopeAbsTypes :: Scope -> [VName]
+scopeAbsTypes = mapMaybe select . HM.toList . envTypeTable
+  where select (name, TypeAbs) = Just name
+        select _               = Nothing
+
+scopeVals :: Scope -> [(VName, ([StructType], StructType))]
+scopeVals = mapMaybe select . HM.toList . envVtable
+  where select (name, BoundF (pts, t)) = Just (name, (pts, t))
+        select (name, BoundV t)        = Just (name, ([], vacuousShapeAnnotations $ toStruct t))
+        select _                       = Nothing
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
@@ -644,8 +632,9 @@ lookupType loc qn = do
   case HM.lookup name $ envTypeTable scope of
     Nothing             -> bad $ UndefinedType loc qn
     Just (TypeAbbr def) -> return (qn', def)
+    Just TypeAbs        -> return (qn', TypeVar $ typeNameFromQualName qn')
 
-lookupSig :: SrcLoc -> QualName Name -> TypeM (QualName VName, (Scope, Sig))
+lookupSig :: SrcLoc -> QualName Name -> TypeM (QualName VName, Scope)
 lookupSig loc qn = do
   (scope, qn'@(QualName _ name)) <- checkQualName Signature qn loc
   (qn',) <$> maybe explode return (HM.lookup name $ envSigTable scope)
@@ -858,15 +847,15 @@ checkForDuplicateDecs =
         f (SigDec (SigBind name _ loc)) =
           check Signature name loc
 
-        f (StructDec (StructBind name _ _ loc)) =
+        f (StructDec (StructBind name _ loc)) =
           check Structure name loc
 
         f (FunctorDec (FunctorBind name _ _ _ loc)) =
           check Structure name loc
 
-checkSpecs :: [SpecBase NoInfo Name] -> TypeM (Scope, Sig, [SpecBase Info VName])
+checkSpecs :: [SpecBase NoInfo Name] -> TypeM (Scope, [SpecBase Info VName])
 
-checkSpecs [] = return (mempty, mempty, [])
+checkSpecs [] = return (mempty, [])
 
 checkSpecs (ValSpec name paramtypes rettype loc : specs) =
   bindSpaced [(Term, name)] $ do
@@ -875,7 +864,6 @@ checkSpecs (ValSpec name paramtypes rettype loc : specs) =
     rettype' <- checkTypeDecl rettype
     let paramtypes'' = map (unInfo . expandedType) paramtypes'
         rettype'' = unInfo $ expandedType rettype'
-        valsig = HM.singleton name' $ SpecVal paramtypes'' rettype''
         valscope =
           mempty { envVtable = HM.singleton name' $
                                if null paramtypes''
@@ -884,62 +872,53 @@ checkSpecs (ValSpec name paramtypes rettype loc : specs) =
                                else BoundF (paramtypes'', rettype'')
                  , envNameMap = HM.singleton (Term, name) name'
                  }
-    (scope, sig, specs') <- local (valscope<>) $ checkSpecs specs
+    (scope, specs') <- local (valscope<>) $ checkSpecs specs
     return (scope <> valscope,
-            valsig <> sig,
             ValSpec name' paramtypes' rettype' loc : specs')
 
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
     (tscope, tdec') <- checkTypeBind tdec
-    let tsig = HM.singleton (typeAlias tdec') $
-               SpecTypeAbbr $ unInfo $ expandedType $ typeExp tdec'
-    (scope, sig, specs') <- local (tscope<>) $ checkSpecs specs
+    (scope, specs') <- local (tscope<>) $ checkSpecs specs
     return (tscope <> scope,
-            tsig <> sig,
             TypeAbbrSpec tdec' : specs')
 
 checkSpecs (TypeSpec name loc : specs) =
   bindSpaced [(Type, name)] $ do
     name' <- checkName Type name loc
-    let tsig = HM.singleton name' SpecType
-        tscope = mempty { envNameMap = HM.singleton (Type, name) name'
-                        , envTypeTable = HM.singleton name' $
-                                         TypeAbbr $ TypeVar $ qualName name'
+    let tscope = mempty { envNameMap = HM.singleton (Type, name) name'
+                        , envTypeTable = HM.singleton name' TypeAbs
                         }
-    (scope, sig, specs') <- local (tscope<>) $ checkSpecs specs
+    (scope, specs') <- local (tscope<>) $ checkSpecs specs
     return (tscope <> scope,
-            tsig <> sig,
             TypeSpec name' loc : specs')
 
-checkSigExp :: SigExpBase NoInfo Name -> TypeM (Scope, Sig, SigExpBase Info VName)
+checkSigExp :: SigExpBase NoInfo Name -> TypeM (Scope, SigExpBase Info VName)
 checkSigExp (SigVar name loc) = do
-  (name', (scope, sig)) <- lookupSig loc name
-  return (scope, sig, SigVar name' loc)
+  (name', scope) <- lookupSig loc name
+  return (scope, SigVar name' loc)
 checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
-  (scope, sig, specs') <- checkSpecs specs
-  return (scope, sig, SigSpecs specs' loc)
+  (scope, specs') <- checkSpecs specs
+  return (scope, SigSpecs specs' loc)
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (Scope, SigBindBase Info VName)
 checkSigBind (SigBind name e loc) = do
   name' <- checkName Signature name loc
-  (scope, sig, e') <- checkSigExp e
+  (scope, e') <- checkSigExp e
   -- As a small convenience(?), binding a signature also implicitly
   -- binds a structure of the same name, which contains the type
   -- abbreviations in the signature.
-  let sigmod = typeAbbrScopeFromSig sig
-  return (mempty { envSigTable = HM.singleton name' (scope, sig)
+  let sigmod = typeAbbrScopeFromSig scope
+  return (mempty { envSigTable = HM.singleton name' scope
                  , envModTable = HM.singleton name $ ModMod sigmod },
           SigBind name' e' loc)
-  where typeAbbrScopeFromSig :: Sig -> Scope
-        typeAbbrScopeFromSig sig =
-          let types = HM.fromList $ mapMaybe isTypeAbbr $ HM.toList sig
+  where typeAbbrScopeFromSig :: Scope -> Scope
+        typeAbbrScopeFromSig scope =
+          let types = HM.map TypeAbbr $ HM.fromList $ scopeTypeAbbrs scope
               names = HM.fromList $ map nameMapping $ HM.toList types
           in mempty { envNameMap = names
                     , envTypeTable = types }
-        isTypeAbbr (v, SpecTypeAbbr t) = Just (v, TypeAbbr t)
-        isTypeAbbr _                   = Nothing
         nameMapping (v, _) = ((Type, baseName v), v)
 
 checkModExp :: ModExpBase NoInfo Name -> TypeM (Scope, ModExpBase Info VName)
@@ -955,22 +934,20 @@ checkModExp (ModApply f e NoInfo loc) = do
   (e_scope, e') <- checkModExp e
   (f_scope, substs) <- applyFunctor functor loc e_scope
   return (f_scope, ModApply f' e' (Info substs) loc)
+checkModExp (ModAscript me se NoInfo loc) = do
+  (scope, me') <- checkModExp me
+  (sigscope, se') <- checkSigExp se
+  (scope', _) <- liftEither $ matchScopes scope sigscope loc
+  -- See issue #262 for martinsubst justification.
+  (scope'', martinsubst) <- newNamesForScope scope'
+  return (scope'', ModAscript me' se' (Info martinsubst) loc)
 
 checkStructBind :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
-checkStructBind (StructBind name sigmatch e loc) = do
+checkStructBind (StructBind name e loc) = do
   name' <- checkName Structure name loc
   (scope, e') <- checkModExp e
-  (sigmatch', scope') <-
-    case sigmatch of
-      Nothing -> return (Nothing, scope)
-      Just (se, NoInfo) -> do
-        (_, sig, se') <- checkSigExp se
-        (scope', _) <- liftEither $ matchScopeToSig sig scope loc
-        -- See issue #262 for martinsubst justification.
-        (scope'', martinsubst) <- newNamesForScope scope'
-        return (Just (se', Info martinsubst), scope'')
-  return (mempty { envModTable = HM.singleton name $ ModMod scope' },
-          StructBind name' sigmatch' e' loc)
+  return (mempty { envModTable = HM.singleton name $ ModMod scope },
+          StructBind name' e' loc)
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
 checkForDuplicateSpecs =
@@ -993,7 +970,7 @@ checkForDuplicateSpecs =
 checkFunctorBind :: FunctorBindBase NoInfo Name -> TypeM (Scope, FunctorBindBase Info VName)
 checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
   name' <- checkName Structure name loc
-  (p_scope, p_sig, psig_e') <- checkSigExp psig_e
+  (p_scope, psig_e') <- checkSigExp psig_e
   bindSpaced [(Structure, p)] $ do
     p' <- checkName Structure p loc
     let in_body_scope = mempty { envModTable = HM.singleton p $ ModMod p_scope }
@@ -1004,16 +981,16 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
           Nothing ->
             return (Nothing, body_scope)
           Just fsig_e -> do
-            (_, fsig, fsig_e') <- checkSigExp fsig_e
-            (scope', _) <- liftEither $ matchScopeToSig fsig body_scope loc
+            (fsig_scope, fsig_e') <- checkSigExp fsig_e
+            (scope', _) <- liftEither $ matchScopes body_scope fsig_scope loc
             return (Just fsig_e', scope')
       return (mempty { envModTable =
                        HM.singleton name $
-                       ModFunctor $ FunctorF $ apply scope' p_sig },
+                       ModFunctor $ FunctorF $ apply scope' p_scope },
               FunctorBind name' (p', psig_e') maybe_fsig_e' body_e' loc)
 
   where apply body_scope p_sig applyloc a_scope = do
-          (_, sig_subst) <- liftEither $ matchScopeToSig p_sig a_scope applyloc
+          (_, sig_subst) <- liftEither $ matchScopes a_scope p_sig applyloc
 
           -- Type abbreviation substitutions from the argument scope.
           -- Importantly, we use the scope before it is restricted by
@@ -1026,7 +1003,7 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
               -- Thing?
               sig_subst_rev = HM.fromList $ map (uncurry (flip (,))) $ HM.toList sig_subst
               substSigName (v, t) = (fromMaybe v $ HM.lookup v sig_subst_rev, t)
-              type_substs' = HM.fromList $ map substSigName $ HM.toList type_substs
+              type_substs' = HM.fromList $ map substSigName type_substs
           (body_scope', body_subst) <-
             newNamesForScope $
             substituteTypesInScope type_substs' body_scope
@@ -1889,10 +1866,11 @@ checkPolyBinOp op tl e1 e2 pos = do
 checkDimIndex :: DimIndexBase NoInfo Name -> TypeM DimIndex
 checkDimIndex (DimFix i) =
   DimFix <$> (require [Prim $ Signed Int32] =<< checkExp i)
-checkDimIndex (DimSlice i j) =
+checkDimIndex (DimSlice i j s) =
   DimSlice
   <$> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) i
   <*> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) j
+  <*> maybe (return Nothing) (fmap Just . require [Prim $ Signed Int32] <=< checkExp) s
 
 sequentially :: TypeM a -> (a -> Occurences -> TypeM b) -> TypeM b
 sequentially m1 m2 = do
@@ -2090,25 +2068,27 @@ checkBindingTypeDecl (TypeDecl t NoInfo) = do
 
 -- Return new renamed/abstracted scope, as well as a mapping from
 -- names in the signature to names in the new scope.  This is used for
--- functor application.
-matchScopeToSig :: Sig -> Scope -> SrcLoc
-                -> Either TypeError (Scope, HM.HashMap VName VName)
-matchScopeToSig sig scope loc = do
+-- functor application.  The first scope is the module scope, and the
+-- second the scope it must match.
+matchScopes :: Scope -> Scope -> SrcLoc
+            -> Either TypeError (Scope, HM.HashMap VName VName)
+matchScopes scope sig loc = do
   -- Check that abstract types in 'sig' have an implementation in
   -- 'scope'.  This also gives us a substitution that we use to check
   -- the types of values.
-  abs_substs <- fmap HM.fromList $ forM (sigAbsTypes sig) $ \name ->
+  abs_substs <- fmap HM.fromList $ forM (scopeAbsTypes sig) $ \name ->
     case findBinding envTypeTable Type (baseName name) of
       Just (name', TypeAbbr t) -> return (name, (name', t))
+      Just (name', TypeAbs)    -> return (name, (name', TypeVar $ typeName name'))
       Nothing                  -> missingType $ baseName name
 
   let abs_names = map fst $ HM.elems abs_substs
-      abs_subst_to_name = HM.map (TypeVar . qualName . fst) abs_substs
+      abs_subst_to_name = HM.map (TypeVar . typeName . fst) abs_substs
       abs_subst_to_type = HM.map snd abs_substs
       abs_name_substs   = HM.map fst abs_substs
 
   -- Check that all type abbreviations are correctly defined.
-  abbr_substs <- fmap HM.fromList $ forM (sigTypeAbbrs sig) $ \(name,spec_t) -> do
+  abbr_substs <- fmap HM.fromList $ forM (scopeTypeAbbrs sig) $ \(name,spec_t) -> do
     let spec_t' = substituteTypes abs_subst_to_type spec_t
     case findBinding envTypeTable Type (baseName name) of
       Just (name', TypeAbbr t)
@@ -2116,6 +2096,10 @@ matchScopeToSig sig scope loc = do
             return (name, (name', substituteTypes abs_subst_to_name spec_t))
         | otherwise ->
             mismatchedType (baseName name) spec_t t
+      Just (_, TypeAbs) ->
+        Left $ TypeError loc $
+        "Type abbreviation " ++ pretty (baseName name) ++ " = " ++ pretty spec_t ++
+        " defined as abstract in module."
       Nothing -> missingType $ baseName name
 
   let abbrs = HM.map TypeAbbr $ HM.fromList $ HM.elems abbr_substs
@@ -2123,7 +2107,7 @@ matchScopeToSig sig scope loc = do
 
   -- Check that all values are defined correctly, substituting the
   -- types first.
-  vals_and_substs <- fmap HM.fromList $ forM (sigVals sig) $ \(name, (spec_pts, spec_t)) -> do
+  vals_and_substs <- fmap HM.fromList $ forM (scopeVals sig) $ \(name, (spec_pts, spec_t)) -> do
     let spec_pts' = map (substituteTypes abs_subst_to_type) spec_pts
         spec_t'   = substituteTypes abs_subst_to_type spec_t
         impl_pts' = map (substituteTypes abs_subst_to_name) spec_pts
@@ -2148,8 +2132,7 @@ matchScopeToSig sig scope loc = do
       val_substs = HM.map fst vals_and_substs
 
       names = HM.filter isInSig $ envNameMap scope
-      types = abbrs <> HM.fromList (zip abs_names $
-                                    map (TypeAbbr . TypeVar . qualName) abs_names)
+      types = abbrs <> HM.fromList (zip abs_names $ repeat TypeAbs)
       scope' = Scope { envVtable = vals
                      , envTypeTable = types
                      , envSigTable = mempty
@@ -2182,7 +2165,7 @@ matchScopeToSig sig scope loc = do
           (name',) <$> HM.lookup name' (table scope)
 
         isInSig x = baseName x `elem` sig_names
-          where sig_names = map baseName $ HM.keys sig
+          where sig_names = map baseName $ HM.elems $ envNameMap sig
 
 substituteTypesInScope :: HM.HashMap VName StructType -> Scope -> Scope
 substituteTypesInScope substs scope =
@@ -2198,17 +2181,18 @@ substituteTypesInScope substs scope =
         subV b = b
 
         subT (TypeAbbr t) = TypeAbbr $ substituteTypes substs t
+        subT TypeAbs      = TypeAbs
 
 substituteTypes :: HM.HashMap VName StructType -> StructType -> StructType
 substituteTypes substs (TypeVar v)
-  | Just t <- HM.lookup (qualLeaf v) substs = t
-  | otherwise                               = TypeVar v
+  | Just t <- HM.lookup (qualLeaf (qualNameFromTypeName v)) substs = t
+  | otherwise                                                      = TypeVar v
 substituteTypes _ (Prim t) = Prim t
 substituteTypes substs (Array at) = substituteTypesInArray at
   where substituteTypesInArray (PrimArray t shape u ()) =
           Array $ PrimArray t shape u ()
         substituteTypesInArray (PolyArray v shape u ())
-          | Just t <- HM.lookup (qualLeaf v) substs =
+          | Just t <- HM.lookup (qualLeaf (qualNameFromTypeName v)) substs =
               arrayOf t shape u
           | otherwise =
               Array $ PolyArray v shape u ()
@@ -2279,7 +2263,9 @@ newNamesForScope orig_scope = do
 
         substituteInTypeBinding substs (TypeAbbr t) =
           TypeAbbr $ substituteInType substs t
+        substituteInTypeBinding _ TypeAbs =
+          TypeAbs
 
         substituteInType :: HM.HashMap VName VName -> StructType -> StructType
         substituteInType substs = substituteTypes $
-                                  HM.map (TypeVar . qualName) substs
+                                  HM.map (TypeVar . typeNameFromQualName . qualName) substs

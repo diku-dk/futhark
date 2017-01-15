@@ -32,10 +32,10 @@
 -- structure distributed { Kernel 1 }
 
 fun main(mat: [m][m][b][b]f32): [m][b][b]f32 =
-  let mat_rows = map (fn (mat_row: [m][b][b]f32): [b][b]f32  =>
+  let mat_rows = map (\(mat_row: [m][b][b]f32): [b][b]f32  ->
                        mat_row[0]) mat
-  in map  (fn (blk: *[b][b]f32): [b][b]f32  =>
-            map (fn (row0: *[b]f32): [b]f32  =>
+  in map  (\(blk: *[b][b]f32): [b][b]f32  ->
+            map (\(row0: *[b]f32): [b]f32  ->
                   loop(row=row0) = for j < b do
                     let row[j] = (row[j] - 1.0f32) / 2.0f32
                     in  row

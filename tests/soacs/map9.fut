@@ -13,6 +13,6 @@ fun combineVs(n_row: []int): []int =
   map (*) n_row n_row
 
 fun main(md_starts: []int, md_vols: [][]int, md_drifts: [][]int): [][]int =
-  let e_rows = map (fn (x: []int): []int  => map (+2) x) (
+  let e_rows = map (\(x: []int): []int  -> map (+2) x) (
                    map combineVs (md_vols))
-  in  scan (fn (x: []int) (y: []int): []int => map (*) x y) (md_starts) (e_rows )
+  in  scan (\(x: []int) (y: []int): []int -> map (*) x y) (md_starts) (e_rows )

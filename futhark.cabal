@@ -20,6 +20,8 @@ Extra-source-files:  rts/python/memory.py,
                      rts/c/reader.h,
                      rts/c/opencl.h
 
+                     futlib/*.fut
+
 
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
@@ -51,7 +53,8 @@ Library
                  neat-interpolation >= 0.3,
                  file-embed >= 0.0.9,
                  directory,
-                 directory-tree
+                 directory-tree,
+                 gitrev >= 1.2.0
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify

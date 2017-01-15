@@ -16,7 +16,7 @@
 
 fun main(num_iterations: int, a: [n]f64): []f64 =
   loop (a) = for i < num_iterations do
-    map (fn (i: int): f64  =>
+    map (\(i: int): f64  ->
           let x = if i == 0 then a[i] else unsafe a[i-1]
           let y = a[i]
           let z = if i == n-1 then a[i] else unsafe a[i+1]

@@ -11,8 +11,8 @@
 -- }
 
 fun main(ass: [n][m]int, bss: [n][m]f32): ([][]f32, [][]int) =
-  unzip(map (fn (as: []int) (bs: []f32): ([m]f32, [m]int)  =>
+  unzip(map (\(as: []int) (bs: []f32): ([m]f32, [m]int)  ->
                   let (asum, bsum) =
-                    unzip(scan (fn (x_a,x_b) (y_a,y_b)  =>
+                    unzip(scan (\(x_a,x_b) (y_a,y_b)  ->
                                  (x_a + y_a, x_b + y_b)) (0, 0f32) (zip as bs))
                   in (bsum, asum)) ass bss)

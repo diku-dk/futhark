@@ -132,12 +132,11 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
       '@'             { L $$ AT }
+      '\\'            { L $$ BACKSLASH }
       '#'             { L $$ HASH }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
-      fn              { L $$ FN }
-      '=>'            { L $$ ARROW }
-      '->'            { L $$ TYPE_ARROW }
+      '->'            { L $$ ARROW }
       ':'             { L $$ COLON }
       for             { L $$ FOR }
       do              { L $$ DO }
@@ -255,22 +254,24 @@ ModExp :: { ModExpBase f vn }
         | '{' Decs '}' { ModDecs $2 $1 }
         | QualName '(' ModExp ')'
           { ModApply (fst $1) $3 NoInfo (snd $1) }
+        | ModExp ':' SigExp
+          { ModAscript $1 $3 NoInfo (srclocOf $1) }
 
 StructBind :: { StructBindBase f vn }
            : module id '=' ModExp
              { let L pos (ID name) = $2
-               in StructBind name Nothing $4 pos }
+               in StructBind name $4 pos }
            | module id ':' SigExp '=' ModExp
              { let L pos (ID name) = $2
-               in StructBind name (Just ($4, NoInfo)) $6 pos }
+               in StructBind name (ModAscript $6 $4 NoInfo pos) pos }
 
            -- Shortcut forms
            | module id '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name Nothing (ModDecs $4 pos) pos }
+               in StructBind name (ModDecs $4 pos) pos }
            | module id ':' SigExp '{' Decs '}'
              { let L pos (ID name) = $2
-               in StructBind name (Just ($4, NoInfo)) (ModDecs $6 pos) pos }
+               in StructBind name (ModAscript (ModDecs $6 pos) $4 NoInfo pos) pos }
 
 FunctorBind :: { FunctorBindBase f vn }
              : module id '(' id ':' SigExp ')' '=' ModExp
@@ -643,11 +644,15 @@ SomeDimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
                | DimIndex                    { [$1] }
 
 DimIndex :: { UncheckedDimIndex }
-         : Exp         { DimFix $1 }
-         | Exp ':' Exp { DimSlice (Just $1) (Just $3) }
-         | Exp ':'     { DimSlice (Just $1) Nothing }
-         |     ':' Exp { DimSlice Nothing (Just $2) }
-         |     ':'     { DimSlice Nothing Nothing }
+         : Exp                 { DimFix $1 }
+         | Exp ':' Exp         { DimSlice (Just $1) (Just $3) Nothing }
+         | Exp ':'             { DimSlice (Just $1) Nothing Nothing }
+         |     ':' Exp         { DimSlice Nothing (Just $2) Nothing }
+         |     ':'             { DimSlice Nothing Nothing Nothing }
+         | Exp ':' Exp ':' Exp { DimSlice (Just $1) (Just $3) (Just $5) }
+         |     ':' Exp ':' Exp { DimSlice Nothing (Just $2) (Just $4) }
+         | Exp ':'     ':' Exp { DimSlice (Just $1) Nothing (Just $4) }
+         |     ':'     ':' Exp { DimSlice Nothing Nothing (Just $3) }
 
 Exps : Exp ',' Exps %prec bottom { $1 : $3 }
      | Exp          %prec bottom { [$1] }
@@ -674,7 +679,7 @@ Curry : Curry Atom
         { (fst $1, [$2], snd $1) }
 
 FunAbstr :: { UncheckedLambda }
-         : '(' fn Params MaybeAscription '=>' Exp ')'
+         : '(' '\\' Params MaybeAscription '->' Exp ')'
            { AnonymFun $3 $6 $4 NoInfo $1 }
          | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }

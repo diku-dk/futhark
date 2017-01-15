@@ -409,10 +409,11 @@ evalSubExp (Constant v) = return $ PrimVal v
 evalDimIndex :: DimIndex SubExp -> FutharkM (DimIndex Int)
 evalDimIndex (DimFix d) =
   DimFix <$> (asInt "evalDimIndex" =<< evalSubExp d)
-evalDimIndex (DimSlice d n) =
+evalDimIndex (DimSlice d n s) =
   DimSlice
   <$> (asInt "evalDimIndex" =<< evalSubExp d)
   <*> (asInt "evalDimIndex" =<< evalSubExp n)
+  <*> (asInt "evalDimIndex" =<< evalSubExp s)
 
 evalBody :: Body -> FutharkM [Value]
 
@@ -684,7 +685,7 @@ evalSOAC (Redomap cs w _ redfun foldfun accexp arrexps) = do
           then mapM evalSubExp accexp
           else forM acc_arrs $ \acc_arr ->
                  indexArrayValue acc_arr $ DimFix (w' - 1) :
-                 map (DimSlice 0) (drop 1 $ valueShape acc_arr)
+                 map (unitSlice 0) (drop 1 $ valueShape acc_arr)
   return $ accs++arrs
 
 evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do

@@ -27,11 +27,11 @@ fun addRows (xs: []int, ys: []int): []int =
   map (+) xs ys
 
 fun main (xssss: [][][][]int, cs: []int, y: int): [][][][]int =
-  map  (fn (xsss: [][][]int, c: int): [][][]int  =>
+  map  (\(xsss: [][][]int, c: int): [][][]int  ->
          unsafe
          let yss = reshape (2,c) xsss in
-         map  (fn (xss: [][]int): [][]int  =>
-                map (fn (xs: []int, ys: []int): []int  =>
+         map  (\(xss: [][]int): [][]int  ->
+                map (\(xs: []int, ys: []int): []int  ->
                       addRows(xs,ys)
                    ) (zip  xss yss)
             ) xsss

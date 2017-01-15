@@ -9,7 +9,7 @@ fun main(a: [n]int): int =
     (let m = a[i]
      in if m < (shape b)[0]
         then b
-        else map (fn (j: int): int  =>
+        else map (\(j: int): int  ->
                    j + unsafe b[j % (shape b)[0]]) (
                  iota(m)))
   in reduce (+) 0 b

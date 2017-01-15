@@ -8,7 +8,7 @@ fun testBit(n: int, ind: int): bool =
   let t = (1 << ind) in (n & t) == t
 
 fun main(n: int, dir_vs: [num_bits]int): int =
-  let reldv_vals = map (fn (dv,i): int  =>
+  let reldv_vals = map (\(dv,i): int  ->
                           if testBit(grayCode(n),i)
                           then dv else 0
                       ) (zip (dir_vs) (iota(num_bits)) ) in

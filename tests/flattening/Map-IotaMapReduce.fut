@@ -7,7 +7,7 @@
 --   [8,9,12]
 -- }
 fun main (xs: [n]int, ys: [n]int): []int =
-  map (fn (x: int, y: int): int  =>
+  map (\(x: int, y: int): int  ->
          let tmp1 = iota(x)
          let tmp2 = map (*y) tmp1 in
          reduce (+) 0 tmp2
