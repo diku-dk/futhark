@@ -29,5 +29,5 @@ module M1
 
 type baz = M1.baz -- is defined at line 27
 
-fun main(a: int, b: float): baz = (1,2,3)
+fun main(a: int, b: f32): baz = (1,2,3)
 

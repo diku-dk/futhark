@@ -253,15 +253,16 @@ readBool t = do v <- case scanTokens "" a of
 readPrimType :: ReadValue PrimType
 readPrimType t = do
   pt <- case scanTokens "" a of
-          Right [L _ INT]  -> Just $ IntType Int32
-          Right [L _ I8]  -> Just $ IntType Int8
-          Right [L _ I16]  -> Just $ IntType Int16
-          Right [L _ I32]  -> Just $ IntType Int32
-          Right [L _ I64]  -> Just $ IntType Int64
-          Right [L _ F32]  -> Just $ FloatType Float32
-          Right [L _ F64]  -> Just $ FloatType Float64
-          Right [L _ BOOL]  -> Just Bool
-          _                 -> Nothing
+          Right [L _ (ID s)]
+            | F.nameToString s == "int"  -> Just $ IntType Int32
+            | F.nameToString s == "i8"   -> Just $ IntType Int8
+            | F.nameToString s == "i16"  -> Just $ IntType Int16
+            | F.nameToString s == "i32"  -> Just $ IntType Int32
+            | F.nameToString s == "i64"  -> Just $ IntType Int64
+            | F.nameToString s == "f32"  -> Just $ FloatType Float32
+            | F.nameToString s == "f64"  -> Just $ FloatType Float64
+            | F.nameToString s == "bool" -> Just Bool
+          _                            -> Nothing
   return (pt, dropSpaces b)
   where (a,b) = T.span constituent t
 

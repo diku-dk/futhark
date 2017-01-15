@@ -32,8 +32,12 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
 @binlit = 0[bB][01]+
 @intlit = @hexlit|@binlit|@declit
 @reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
+
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 @qualidentifier = (@identifier ".")+ @identifier
+
+@unop = ("!"+|"~"+)
+@qualunop = (@identifier ".")+ @unop
 
 tokens :-
 
@@ -49,7 +53,6 @@ tokens :-
   ">="                     { tokenC GEQ }
   "+"                      { tokenC PLUS }
   "-"                      { tokenC MINUS }
-  "~"                      { tokenC TILDE }
   "*"                      { tokenC TIMES }
   "**"                     { tokenC POW }
   "/"                      { tokenC DIVIDE }
@@ -74,7 +77,6 @@ tokens :-
   "}"                      { tokenC RCURLY }
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
-  "!"                      { tokenC BANG }
   "->"                     { tokenC ARROW }
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
@@ -94,12 +96,14 @@ tokens :-
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
+
   @identifier              { tokenS keyword }
   @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
-
   @qualidentifier          { tokenM $ fmap (uncurry QUALID) . mkQualId }
   @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
 
+  @unop                    { tokenS $ UNOP . nameFromText }
+  @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
 {
 
 keyword :: T.Text -> Token
@@ -114,25 +118,10 @@ keyword s =
     "loop"         -> LOOP
     "in"           -> IN
     "default"      -> DEFAULT
-    "int"          -> INT
-    "float"        -> FLOAT
-    "i8"           -> I8
-    "i16"          -> I16
-    "i32"          -> I32
-    "i64"          -> I64
-    "u8"           -> U8
-    "u16"          -> U16
-    "u32"          -> U32
-    "u64"          -> U64
-    "f32"          -> F32
-    "f64"          -> F64
-    "bool"         -> BOOL
     "fun"          -> FUN
     "fn"           -> BACKSLASH -- FIXME: delete
     "for"          -> FOR
     "do"           -> DO
-    "abs"          -> ABS
-    "signum"       -> SIGNUM
 
     "iota"         -> IOTA
     "shape"        -> SHAPE
@@ -229,24 +218,12 @@ data Token = IF
            | LET
            | LOOP
            | IN
-           | INT
-           | I8
-           | I16
-           | I32
-           | I64
-           | U8
-           | U16
-           | U32
-           | U64
-           | BOOL
-           | CHAR
-           | FLOAT
-           | F32
-           | F64
            | ID Name
            | INDEXING Name
            | QUALID [Name] Name
            | QUALINDEXING [Name] Name
+           | UNOP Name
+           | QUALUNOP [Name] Name
            | STRINGLIT String
            | DEFAULT
            | INTLIT Int64
@@ -317,7 +294,6 @@ data Token = IF
            | PARTITION
            | TRUE
            | FALSE
-           | TILDE
            | AND
            | OR
            | EMPTY
@@ -328,9 +304,6 @@ data Token = IF
            | STREAM_RED
            | STREAM_REDPER
            | STREAM_SEQ
-           | BANG
-           | ABS
-           | SIGNUM
            | WRITE
            | INCLUDE
            | ENTRY

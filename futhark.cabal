@@ -360,6 +360,7 @@ Executable futhark-dataset
                  array >= 0.4,
                  mtl >= 2.2.1,
                  containers >= 0.5,
+                 unordered-containers,
                  transformers,
                  random,
                  text,
