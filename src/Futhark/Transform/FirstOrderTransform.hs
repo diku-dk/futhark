@@ -663,7 +663,6 @@ transformLambda :: (MonadFreshNames m,
                     LocalScope somelore m,
                     SameScope somelore lore,
                     LetAttr SOACS ~ LetAttr lore,
-                    LParamAttr SOACS ~ LParamAttr lore,
                     CanBeAliased (Op lore)) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda params body rettype) = do
@@ -677,7 +676,6 @@ transformExtLambda :: (MonadFreshNames m,
                        Bindable lore,
                        LocalScope lore m,
                        LetAttr SOACS ~ LetAttr lore,
-                       LParamAttr SOACS ~ LParamAttr lore,
                        CanBeAliased (Op lore)) =>
                       ExtLambda -> m (AST.ExtLambda lore)
 transformExtLambda (ExtLambda params body rettype) = do

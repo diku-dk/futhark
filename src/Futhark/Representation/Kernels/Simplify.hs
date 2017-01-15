@@ -123,8 +123,7 @@ instance Engine.Simplifiable SplitOrdering where
   simplify (SplitStrided stride) =
     SplitStrided <$> Engine.simplify stride
 
-simplifyKernelExp :: (Engine.SimplifiableLore lore,
-                      BodyAttr lore ~ ()) =>
+simplifyKernelExp :: Engine.SimplifiableLore lore =>
                      KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore))
 simplifyKernelExp (SplitArray o w i elems_per_thread arrs) =
   SplitArray

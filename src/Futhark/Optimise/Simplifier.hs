@@ -35,7 +35,7 @@ import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
 import Futhark.Optimise.Simplifier.Engine
-  (SimplifiableLore, HoistBlockers(..), noExtraHoistBlockers, Simplifiable)
+  (SimplifiableLore, HoistBlockers(..), noExtraHoistBlockers)
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
@@ -85,10 +85,6 @@ simplifyStmsWithRules simpl rules blockers bnds =
   simplifyStms simpl rules blockers bnds
 
 simplifyBasicish :: (MonadFreshNames m, Bindable lore,
-                     Simplifiable (LetAttr lore),
-                     Simplifiable (FParamAttr lore),
-                     Simplifiable (LParamAttr lore),
-                     Simplifiable (RetType lore),
                      SimplifiableLore lore) =>
                     SimplifyOp lore ->
                     Prog lore -> m (Prog lore)

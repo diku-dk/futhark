@@ -205,7 +205,7 @@ mapKernelM tv (Kernel desc cs space ts kernel_body) =
                              <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
           where (gtids, gdim_sizes, ltids, ldim_sizes) = unzip4 dims
 
-mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
+mapOnKernelType :: Monad m =>
                    KernelMapper flore tlore m -> Type -> m Type
 mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
@@ -394,7 +394,6 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   consumedInOp _ = mempty
 
 aliasAnalyseKernelBody :: (Attributes lore,
-                           Attributes (Aliases lore),
                            CanBeAliased (Op lore)) =>
                           KernelBody lore
                        -> KernelBody (Aliases lore)
@@ -458,7 +457,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             let Body attr' stms' _ = removeBodyWisdom $ Body attr stms []
             in KernelBody attr' stms' res
 
-instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
+instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
@@ -466,7 +465,7 @@ instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kern
   usageInOp TileSize = mempty
   usageInOp SufficientParallelism{} = mempty
 
-consumedInKernelBody :: (Attributes lore, Aliased lore) =>
+consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
 consumedInKernelBody (KernelBody attr stms _) =
   consumedInBody $ Body attr stms []

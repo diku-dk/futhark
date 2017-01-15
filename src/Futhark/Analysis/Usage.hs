@@ -53,7 +53,7 @@ class UsageInOp op where
 instance UsageInOp () where
   usageInOp () = mempty
 
-usageInLambda :: (Aliased lore, UsageInOp (Op lore)) =>
+usageInLambda :: Aliased lore =>
                  Lambda lore -> [VName] -> UT.UsageTable
 usageInLambda lam arrs =
   mconcat $

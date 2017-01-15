@@ -433,7 +433,7 @@ arrayType n t u = arrayOf (removeShapeAnnotations t) (Rank n) u
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: (ArrayShape shape, Monoid as) =>
+stripArray :: ArrayShape shape =>
               Int -> TypeBase shape as -> TypeBase shape as
 stripArray n (Array (PrimArray et shape u als))
   | Just shape' <- stripDims n shape =
@@ -690,16 +690,16 @@ commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
 -- | The set of names bound in a pattern, including dimension declarations.
-patNameSet :: (Ord vn, Eq vn, Hashable vn) => PatternBase NoInfo vn -> HS.HashSet vn
+patNameSet :: (Ord vn, Hashable vn) => PatternBase NoInfo vn -> HS.HashSet vn
 patNameSet =  HS.fromList . map identName . patIdentsGen sizeIdent
   where sizeIdent name = Ident name NoInfo
 
 -- | The set of identifiers bound in a pattern, including dimension declarations.
-patIdentSet :: (Ord vn, Eq vn, Hashable vn) => PatternBase Info vn -> HS.HashSet (IdentBase Info vn)
+patIdentSet :: (Ord vn, Hashable vn) => PatternBase Info vn -> HS.HashSet (IdentBase Info vn)
 patIdentSet = HS.fromList . patIdentsGen sizeIdent
   where sizeIdent name = Ident name (Info $ Prim $ Signed Int32)
 
-patIdentsGen :: (Ord vn, Eq vn, Hashable vn) =>
+patIdentsGen :: (Ord vn, Hashable vn) =>
                 (vn -> SrcLoc -> IdentBase f vn) -> PatternBase f vn
              -> [IdentBase f vn]
 patIdentsGen _ (Id ident)              = [ident]

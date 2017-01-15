@@ -155,7 +155,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   return $ Kernel "chunked_reduce" cs space ts $
     KernelBody () (chunk_and_fold++combine_reds++[reduce_chunk]) rets
 
-reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
+reduceKernel :: MonadBinder m =>
                 Certificates
              -> KernelSize
              -> Lambda InKernel

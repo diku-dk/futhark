@@ -467,7 +467,7 @@ toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
 toExp soac = Op <$> toSOAC soac
 
 -- | Convert a SOAC to a Futhark-level SOAC.
-toSOAC :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
+toSOAC :: MonadBinder m =>
           SOAC (Lore m) -> m (Futhark.SOAC (Lore m))
 toSOAC (Map cs w l as) =
   Futhark.Map cs w l <$> inputsToSubExps as
@@ -498,8 +498,7 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasScope t f,
-            Monad f) =>
+fromExp :: (Op lore ~ Futhark.SOAC lore, HasScope t f, Monad f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
 
 fromExp (Op (Futhark.Map cs w l as)) =

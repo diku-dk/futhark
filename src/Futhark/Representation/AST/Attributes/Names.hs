@@ -200,7 +200,7 @@ instance FreeIn ExtShape where
     where freeInExtDimSize (Free se) = freeIn se
           freeInExtDimSize (Ext _)   = mempty
 
-instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape u) where
+instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Array _ shape _) = freeIn shape
   freeIn (Mem size _)      = freeIn size
   freeIn (Prim _)          = mempty
