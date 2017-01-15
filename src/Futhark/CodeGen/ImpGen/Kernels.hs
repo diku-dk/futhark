@@ -987,22 +987,26 @@ compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   ImpGen.emit $ Imp.If (kernelThreadActive constants)
     write_result mempty
 
-compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_elems what) = do
+compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
-  let dest_loc_offset = ImpGen.offsetArray dest_loc $
-                        primExpFromSubExp int32 per_thread_elems *
-                        ImpGen.varIndex (kernelGlobalThreadId constants)
+  let dest_loc_offset = ImpGen.offsetArray dest_loc offset
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
   ImpGen.copyDWIMDest dest' [] (Var what) []
+  where offset = case moffset of
+                   Nothing -> primExpFromSubExp int32 per_thread_elems *
+                              ImpGen.varIndex (kernelGlobalThreadId constants)
+                   Just se -> primExpFromSubExp int32 se
 
-compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ what) = do
+compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
   let dest_loc' = ImpGen.strideArray
-                  (ImpGen.offsetArray dest_loc $
-                   ImpGen.varIndex (kernelGlobalThreadId constants)) $
+                  (ImpGen.offsetArray dest_loc offset) $
                   primExpFromSubExp int32 stride
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
   ImpGen.copyDWIMDest dest' [] (Var what) []
+  where offset = case moffset of
+                   Nothing -> ImpGen.varIndex (kernelGlobalThreadId constants)
+                   Just se -> primExpFromSubExp int32 se
 
 compileKernelResult constants dest (WriteReturn rw _arr i e) = do
   i' <- ImpGen.compileSubExp i

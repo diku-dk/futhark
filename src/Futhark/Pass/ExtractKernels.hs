@@ -623,6 +623,11 @@ containsNestedParallelism lam =
 versionedCode :: Bool
 versionedCode = False
 
+-- Enable if you want to try the new segmented-redomap code. Here be dragons
+-- (and possibly worse performance).
+newSegmentedRedomap :: Bool
+newSegmentedRedomap = False
+
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
@@ -782,7 +787,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
+maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode || newSegmentedRedomap =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
@@ -923,13 +928,18 @@ regularSegmentedRedomapKernel :: KernelNest
                               -> Certificates -> SubExp -> Commutativity
                               -> InKernelLambda -> InKernelLambda -> [SubExp] -> [VName]
                               -> KernelM (Maybe [KernelsStm])
-regularSegmentedRedomapKernel nest perm cs segment_size _comm lam fold_lam nes arrs =
+regularSegmentedRedomapKernel nest perm cs segment_size comm lam fold_lam nes arrs =
   isSegmentedOp nest perm segment_size
-  (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
-  \pat flat_pat num_segments total_num_elements ispace inps nes' arrs' ->
-    regularSegmentedRedomapAsScan
-    segment_size num_segments (kernelNestWidths nest)
-    flat_pat pat cs total_num_elements lam fold_lam ispace inps nes' arrs'
+    (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
+    \pat flat_pat num_segments total_num_elements ispace inps nes' arrs' ->
+      kernel_generation
+        segment_size num_segments (kernelNestWidths nest)
+        flat_pat pat cs total_num_elements comm lam fold_lam ispace inps nes' arrs'
+   where kernel_generation =
+           if newSegmentedRedomap
+           then regularSegmentedRedomap
+           else regularSegmentedRedomapAsScan
+
 
 isSegmentedOp :: KernelNest
               -> [Int]
