@@ -1161,8 +1161,6 @@ isOverloadedFunction qname = do
     handle "u32" = Just $ toUnsigned I.Int32
     handle "u64" = Just $ toUnsigned I.Int64
 
-    handle "int" = Just $ toSigned I.Int32
-
     handle "f32" = Just $ toFloat I.Float32
     handle "f64" = Just $ toFloat I.Float64
 

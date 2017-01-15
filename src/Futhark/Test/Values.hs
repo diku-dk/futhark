@@ -254,7 +254,6 @@ readPrimType :: ReadValue PrimType
 readPrimType t = do
   pt <- case scanTokens "" a of
           Right [L _ (ID s)]
-            | F.nameToString s == "int"  -> Just $ IntType Int32
             | F.nameToString s == "i8"   -> Just $ IntType Int8
             | F.nameToString s == "i16"  -> Just $ IntType Int16
             | F.nameToString s == "i32"  -> Just $ IntType Int32
