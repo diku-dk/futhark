@@ -12,11 +12,11 @@ val zero : num
 }
 
 module Int {
-type num = int
-fun plus (x: int) (y: int): int = x + y
-fun mult (x: int) (y: int): int = x * y
-val one: int = 1
-val zero: int = 0
+type num = i32
+fun plus (x: i32) (y: i32): i32 = x + y
+fun mult (x: i32) (y: i32): i32 = x * y
+val one: i32 = 1
+val zero: i32 = 0
 }
 
 module Float32 {
@@ -35,7 +35,7 @@ fun dotprod (xs: [n]T.num) (ys: [n]T.num): T.num =
 module IntDotProd = DotProd(Int)
 module Float32DotProd = DotProd(Float32)
 
-fun main(xs: [n]int, ys: [n]int,
-         as: [m]f32, bs: [n]f32): (int, f32) =
+fun main(xs: [n]i32, ys: [n]i32,
+         as: [m]f32, bs: [n]f32): (i32, f32) =
   (IntDotProd.dotprod xs ys,
    Float32DotProd.dotprod as bs)

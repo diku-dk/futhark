@@ -4,6 +4,6 @@
 -- ==
 -- structure { Index 0 Assert 0 }
 
-fun main(xs: []int): []int =
+fun main(xs: []i32): []i32 =
   let xss = [xs]
   in xss[0]

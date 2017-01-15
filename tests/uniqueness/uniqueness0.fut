@@ -8,6 +8,6 @@
 -- output {
 --   [1,2,10,4]
 -- }
-fun main(a: *[]int, i: int, x: int): []int =
+fun main(a: *[]i32, i: i32, x: i32): []i32 =
   let a[i] = x in
   a

@@ -11,4 +11,4 @@
 -- output {
 --   empty(i32)
 -- }
-fun main(a: []int): []int = filter (0<) a
+fun main(a: []i32): []i32 = filter (0<) a

@@ -1,6 +1,6 @@
 -- Nest array type aliases
 
-type t = int
+type t = i32
 type ts = []t
 type tss = []ts
 

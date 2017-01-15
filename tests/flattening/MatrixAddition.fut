@@ -6,11 +6,11 @@
 -- output {
 --   [[4,4,4],[7,9,11]]
 -- }
-fun addRows (xs: []int, ys: []int): []int =
+fun addRows (xs: []i32, ys: []i32): []i32 =
   map (+) xs ys
 
-fun addMatricies (a: [][]int, b: [][]int): [][]int =
+fun addMatricies (a: [][]i32, b: [][]i32): [][]i32 =
   map  addRows (zip  a b)
 
-fun main(a: [][]int, b: [][]int): [][]int =
+fun main(a: [][]i32, b: [][]i32): [][]i32 =
   addMatricies(a,b)

@@ -3,6 +3,6 @@
 -- ==
 -- error: .*cannot match.*
 
-fun main(x: int, y:int): int =
-  let (((a): int), b: int) : (bool,bool) = (x,y)
+fun main(x: i32, y:i32): i32 =
+  let (((a): i32), b: i32) : (bool,bool) = (x,y)
   in (a,b)

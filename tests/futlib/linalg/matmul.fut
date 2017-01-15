@@ -11,5 +11,5 @@ include futlib.linalg
 
 module I32LinAlg = LinAlg(I32)
 
-fun main(x: [][]int, y: [][]int): [][]int =
+fun main(x: [][]i32, y: [][]i32): [][]i32 =
   I32LinAlg.matmul x y

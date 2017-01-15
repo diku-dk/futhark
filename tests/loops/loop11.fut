@@ -9,7 +9,7 @@ fun p(c: f64): bool =
 fun f(x: f64, y: f64): f64 =
   x * y
 
-fun main(depth: int, a: f64): int =
+fun main(depth: i32, a: f64): i32 =
   loop ((c, i) = (a, 0)) = while i < depth && p(c) do
     (f(a, c),
      i + 1) in

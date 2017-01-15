@@ -42,6 +42,6 @@ fun gt (x:t) (y:t) =
   let (a', c') = comparable x y
   in T.gt a' c'
 
-fun fromInt (x: int) = (T.fromInt x, T.fromInt 1)
+fun fromInt (x: i32) = (T.fromInt x, T.fromInt 1)
 
 }

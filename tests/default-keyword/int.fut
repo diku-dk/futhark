@@ -1,4 +1,4 @@
--- Default default int literal test.
+-- Default default i32 literal test.
 -- Should not use the default keyword.
 -- ==
 -- input {
@@ -7,4 +7,4 @@
 --   0i32
 -- }
 
-fun main(): int = 0
+fun main(): i32 = 0

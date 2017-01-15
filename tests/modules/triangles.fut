@@ -10,7 +10,7 @@
 include Vec3
 
 type vec3 = Vec3.Int.t
-fun f(a: vec3, b: vec3): int = Vec3.Int.dot(a , b)
-fun main(a1: int, a2: int, a3: int, b1: int, b2: int, b3: int): int =
+fun f(a: vec3, b: vec3): i32 = Vec3.Int.dot(a , b)
+fun main(a1: i32, a2: i32, a3: i32, b1: i32, b2: i32, b3: i32): i32 =
   Vec3.Int.dot((a1,a2,a2) , (b1,b2,b3))
 

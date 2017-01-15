@@ -35,10 +35,10 @@
 --  [6.280000000000001, 6.920000000000001, 7.56]]
 -- }
 
-fun main(num_iterations: int, a: [n][m]f64): [][]f64 =
+fun main(num_iterations: i32, a: [n][m]f64): [][]f64 =
   loop (a) = for i < num_iterations do
-    map (\(i: int): []f64  ->
-          map (\(j: int): f64  ->
+    map (\(i: i32): []f64  ->
+          map (\(j: i32): f64  ->
                 let center = unsafe a[i,j]
                 let north = if i == 0 then center else unsafe a[i-1,j]
                 let east = if j == m-1 then center else unsafe a[i,j+1]

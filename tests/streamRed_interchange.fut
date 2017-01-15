@@ -113,18 +113,18 @@
 -- 0.001163f32, 0.001455f32]]}
 -- structure distributed { Kernel 6 }
 
-fun main(nfeatures: int, npoints: int, nclusters: int): [nclusters][nfeatures]f32 =
+fun main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f32 =
   let membership = map (%nclusters) (iota(npoints))
   let features_in_cluster = replicate nclusters (npoints / nclusters)
   -- Just generate some random-seeming points.
-  let points = map (\(i: int): [nfeatures]f32  ->
+  let points = map (\(i: i32): [nfeatures]f32  ->
                      map (*100f32) (map sin32 (map f32 (map (^i) (iota(nfeatures)))))
                   ) (iota(npoints)) in
   streamRedPer (\(acc: *[nclusters][nfeatures]f32)
                   (elem: *[nclusters][nfeatures]f32): *[nclusters][nfeatures]f32  ->
                  map (\(x: []f32) (y: []f32): [nfeatures]f32  ->
                            map (+) x y) acc elem) (
-                 \(inp: [chunk]([nfeatures]f32,int)): *[nclusters][nfeatures]f32  ->
+                 \(inp: [chunk]([nfeatures]f32,i32)): *[nclusters][nfeatures]f32  ->
                    loop (acc = replicate nclusters (replicate nfeatures 0.0f32)) = for i < chunk do
                      let (point, c) = inp[i] in
                      unsafe let acc[c] = map (+) (acc[c]) (map (/f32(features_in_cluster[c])) point) in

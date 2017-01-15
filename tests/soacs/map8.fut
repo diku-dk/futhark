@@ -2,7 +2,7 @@
 -- return types.
 -- ==
 
-fun main(a1: []int, a2: []int): int =
-  let b = map (\(x: int) (y: int): ([](int,int),[](int,int))  ->
+fun main(a1: []i32, a2: []i32): i32 =
+  let b = map (\(x: i32) (y: i32): ([](i32,i32),[](i32,i32))  ->
                     (zip (iota(x)) (iota(y)),zip (iota(x)) (iota(y)))) a1 a2 in
   0

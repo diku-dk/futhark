@@ -4,5 +4,5 @@
 -- ==
 -- error: declaration.*integer
 
-fun main(as: []int, b: bool): [][]int =
-  map (\i: [b]int -> replicate 3 i) as
+fun main(as: []i32, b: bool): [][]i32 =
+  map (\i: [b]i32 -> replicate 3 i) as

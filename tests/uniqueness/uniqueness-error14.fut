@@ -3,7 +3,7 @@
 -- ==
 -- error:
 
-fun main(): int =
+fun main(): i32 =
   let arr = copy(iota(10))
   let barr = copy(iota(10)) in
   loop (arr) = for i < 10 do

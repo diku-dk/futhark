@@ -9,6 +9,6 @@
 --   [[1],[2],[42],[4],[5]]
 -- }
 
-fun main(a: *[][n]int, i: int, v: int): [][]int =
+fun main(a: *[][n]i32, i: i32, v: i32): [][]i32 =
   let a[i] = replicate n v
   in a

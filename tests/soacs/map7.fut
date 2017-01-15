@@ -6,8 +6,8 @@
 -- output {
 --   [[3, 3, 6], [8, 11, 11]]
 -- }
-fun main(a1: [][]int, a2: [][]int): [][]int =
-  let b = map (\(row: ([]int,[]int)): []int  ->
+fun main(a1: [][]i32, a2: [][]i32): [][]i32 =
+  let b = map (\(row: ([]i32,[]i32)): []i32  ->
                 let (x,y) = row in
                 map (+) x y) (
               zip a1 a2) in

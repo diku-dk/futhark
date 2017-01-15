@@ -6,9 +6,9 @@
 -- input { [1,2,3,4,5] 0 5 }
 -- output { [1,2,3,4,5] }
 -- input { [1,2,3,4,5] 1 1 }
--- output { empty(int) }
+-- output { empty(i32) }
 -- input { [1,2,3,4,5] 1 0 }
 -- error: Assertion.*failed
 
-fun main(as: [n]int, i: int, j: int): []int =
+fun main(as: [n]i32, i: i32, j: i32): []i32 =
   as[i:j]

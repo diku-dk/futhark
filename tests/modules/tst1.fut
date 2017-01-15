@@ -1,3 +1,3 @@
-module type T1 = { type t type s = t val a : s val f : s -> int }
-module X : T1 = { type t = int type s = int val a : s = 3 fun f (x:s) : int = x }    -- ok
-fun main () : int = X.f X.a
+module type T1 = { type t type s = t val a : s val f : s -> i32 }
+module X : T1 = { type t = i32 type s = i32 val a : s = 3 fun f (x:s) : i32 = x }    -- ok
+fun main () : i32 = X.f X.a

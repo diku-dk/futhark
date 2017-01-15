@@ -2,10 +2,10 @@
 -- ==
 -- error: .*Unknown.*
 
-fun try_me(): int = M0.number()
+fun try_me(): i32 = M0.number()
 module M0
   {
-    fun number(): int = 42
+    fun number(): i32 = 42
   }
 
-fun main(): int = try_me()
+fun main(): i32 = try_me()

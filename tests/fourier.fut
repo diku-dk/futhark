@@ -43,13 +43,13 @@ fun fromPolar (r: f32, angle: f32): complex =
   (r * cos32 angle,
    r * sin32 angle)
 
-fun complexPow (c: complex) (n: int): complex =
+fun complexPow (c: complex) (n: i32): complex =
   let (r, angle) = toPolar c
   let (r', angle') = (r ** f32 n,
                       f32 n * angle)
   in fromPolar (r', angle')
 
-fun f(a: [n]f32) (j: int): complex =
+fun f(a: [n]f32) (j: i32): complex =
   let x = complexExp (complexMult (-2.0,0.0)
                       (complexMult (toComplex pi)
                        (complexMult (0.0, 1.0)

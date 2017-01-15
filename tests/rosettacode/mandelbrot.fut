@@ -34,23 +34,23 @@ fun addComplex(x: complex, y: complex): complex =
   in (a + c,
       b + d)
 
-fun divergence(depth: int, c0: complex): int =
+fun divergence(depth: i32, c0: complex): i32 =
   loop ((c, i) = (c0, 0)) = while i < depth && dot(c) < 4.0 do
     (addComplex(c0, multComplex(c, c)),
      i + 1)
   in i
 
-fun mandelbrot(screenX: int, screenY: int, depth: int, view: (f32,f32,f32,f32)): [screenX][screenY]int =
+fun mandelbrot(screenX: i32, screenY: i32, depth: i32, view: (f32,f32,f32,f32)): [screenX][screenY]i32 =
   let (xmin, ymin, xmax, ymax) = view
   let sizex = xmax - xmin
   let sizey = ymax - ymin
-  in map (\(x: int): [screenY]int  ->
-           map  (\(y: int): int  ->
+  in map (\(x: i32): [screenY]i32  ->
+           map  (\(y: i32): i32  ->
                   let c0 = (xmin + (f32(x) * sizex) / f32(screenX),
                             ymin + (f32(y) * sizey) / f32(screenY))
                   in divergence(depth, c0))
                 (iota screenY))
          (iota screenX)
 
-fun main(screenX: int, screenY: int, depth: int, xmin: f32, ymin: f32, xmax: f32, ymax: f32): [screenX][screenY]int =
+fun main(screenX: i32, screenY: i32, depth: i32, xmin: f32, ymin: f32, xmax: f32, ymax: f32): [screenX][screenY]i32 =
   mandelbrot(screenX, screenY, depth, (xmin, ymin, xmax, ymax))

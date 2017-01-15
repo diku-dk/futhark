@@ -9,24 +9,24 @@
 include futlib.lss
 
 module Ascending = {
-  type t = int
+  type t = i32
 
   val blank = 0
-  fun pred1 (x: int) = true
-  fun pred2 (x: int) (y: int) = x <= y
+  fun pred1 (x: i32) = true
+  fun pred2 (x: i32) (y: i32) = x <= y
 }
 
 module Descending = {
-  type t = int
+  type t = i32
 
   val blank = 0
-  fun pred1 (x: int) = true
-  fun pred2 (x: int) (y: int) = x >= y
+  fun pred1 (x: i32) = true
+  fun pred2 (x: i32) (y: i32) = x >= y
 }
 
 module LSS_ascending = LSS(Ascending)
 module LSS_descending = LSS(Descending)
 
-fun main(xs: []int): (int,int) =
+fun main(xs: []i32): (i32,i32) =
   (LSS_ascending.lss xs,
    LSS_descending.lss xs)

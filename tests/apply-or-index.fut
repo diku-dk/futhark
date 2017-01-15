@@ -1,9 +1,9 @@
 -- Test that we can distinguish function application with literal
 -- array argument from array indexing.  == input { 1 } output { 3 }
 
-fun f(xs: []int): int = xs[0]
+fun f(xs: []i32): i32 = xs[0]
 
-val a: []int = [1,2,3]
+val a: []i32 = [1,2,3]
 
-fun main(x: int): int =
+fun main(x: i32): i32 =
   f [x] + a[x]

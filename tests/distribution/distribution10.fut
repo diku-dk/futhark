@@ -6,13 +6,13 @@
 -- ==
 -- structure distributed { Kernel 2 Kernel/DoLoop 1 }
 
-fun indexOfMax8 ((x,i): (u8,int)) ((y,j): (u8,int)): (u8,int) =
+fun indexOfMax8 ((x,i): (u8,i32)) ((y,j): (u8,i32)): (u8,i32) =
   if x < y then (y,j) else (x,i)
 
 fun max8 (max_v: u8) (v: u8): u8 =
   if max_v < v then v else max_v
 
-fun main(frame : [h][w]int) : [h][w]u8 =
+fun main(frame : [h][w]i32) : [h][w]u8 =
   map (\row: [w]u8 ->
          let rs = map u8 row
          let m = reduce max8 0u8 rs

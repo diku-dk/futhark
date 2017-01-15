@@ -6,7 +6,7 @@ module Foo
   {
     fun foo(): foo = 1
   }
-type foo = int
+type foo = i32
 type foo = float
 
-fun main(): int = 0
+fun main(): i32 = 0

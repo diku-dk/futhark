@@ -17,12 +17,12 @@
 --   [0.000000, 0.600000, 0.950000]
 -- }
 
-fun take(n: int, a: []f64): []f64 =
+fun take(n: i32, a: []f64): []f64 =
   let (first, rest) = unsafe split (n) a in
   first
 
 fun fftmp(md_c: [n][]f64): []f64 =
-  map (\(j: int): f64  ->
+  map (\(j: i32): f64  ->
          let x = take(j,md_c[j])
          in  reduce (+) (0.0) x) (
        iota(n)

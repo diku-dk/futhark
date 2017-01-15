@@ -20,5 +20,5 @@
 --           42i32, 42i32, 42i32, 42i32, 42i32, 42i32, 42i32, 42i32] }
 
 
-fun main(n: u8): []int =
+fun main(n: u8): []i32 =
   replicate n 42

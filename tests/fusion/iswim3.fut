@@ -7,13 +7,13 @@
 --
 -- structure { Map 1 Redomap 1 Scanomap 1 }
 
-fun take(n: int, a: []f64): []f64 = let (first, rest) = split (n) a in first
+fun take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
 fun correlateDeltas(md_c:  [num_und][num_und]f64,
                  zds: [num_dates][num_und]f64
 ): [num_dates][num_und]f64 =
     map (\(zi: [num_und]f64): [num_und]f64  ->
-            map (\(j: int): f64  ->
+            map (\(j: i32): f64  ->
                     let x = map (*) zi (md_c[j] )
                     in  reduce (+) (0.0) x
                ) (iota(num_und) )

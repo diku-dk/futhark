@@ -24,12 +24,12 @@
 --    351i32
 -- }
 
-fun hailstone_step(x: int): int =
+fun hailstone_step(x: i32): i32 =
   if (x % 2) == 0
   then x/2
   else (3*x) + 1
 
-fun hailstone_seq(x: int): []int =
+fun hailstone_seq(x: i32): []i32 =
   let capacity = 100
   let i = 1
   let steps = replicate capacity (-1)
@@ -45,14 +45,14 @@ fun hailstone_seq(x: int): []int =
     in (capacity, i+1, steps, x)
   in #0 (split i steps)
 
-fun hailstone_len(x: int): int =
+fun hailstone_len(x: i32): i32 =
   let i = 1
   loop ((i,x)) = while x != 1 do
     (i+1, hailstone_step x)
   in i
 
-fun max (x: int) (y: int): int = if x < y then y else x
+fun max (x: i32) (y: i32): i32 = if x < y then y else x
 
-fun main (x: int) (n: int): ([]int, int) =
+fun main (x: i32) (n: i32): ([]i32, i32) =
   (hailstone_seq x,
    reduce max 0 (map hailstone_len (map (1+) (iota (n-1)))))

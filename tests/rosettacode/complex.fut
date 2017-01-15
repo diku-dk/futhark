@@ -36,7 +36,7 @@ fun complexNeg((r,i): complex): complex =
 fun complexConj((r,i): complex): complex =
   (r, -i)
 
-fun main (o: int) (a: complex) (b: complex): complex =
+fun main (o: i32) (a: complex) (b: complex): complex =
   if      o == 0 then complexAdd a b
   else if o == 1 then complexMult a b
   else if o == 2 then complexInv a

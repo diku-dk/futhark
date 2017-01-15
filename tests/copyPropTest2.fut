@@ -6,10 +6,10 @@
 --   126
 -- }
 -- structure { Replicate 0 }
-fun getInt (): int = 10
-fun plus1(x: []int): []int = map (\(y: int): int->y+1) x
+fun getInt (): i32 = 10
+fun plus1(x: []i32): []i32 = map (\(y: i32): i32->y+1) x
 
-fun main(): (int,int) =
+fun main(): (i32,i32) =
     let n  = getInt()            -- Int
     let x  = iota(n)       -- [n]Int
     let m  = (n * (5-4))

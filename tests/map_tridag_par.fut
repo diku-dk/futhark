@@ -81,7 +81,7 @@ fun tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
   --   solved by scan with 2x2 matrix mult operator --
   ----------------------------------------------------
   let b0   = b[0]
-  let mats = map  (\(i: int): (f32,f32,f32,f32)  ->
+  let mats = map  (\(i: i32): (f32,f32,f32,f32)  ->
                      if 0 < i
                      then (b[i], 0.0-a[i]*c[i-1], 1.0, 0.0)
                      else (1.0,  0.0,             0.0, 1.0)
@@ -106,7 +106,7 @@ fun tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
   --   solved by scan with linear func comp operator  --
   ------------------------------------------------------
   let y0   = y[0]
-  let lfuns= map  (\(i: int): (f32,f32)  ->
+  let lfuns= map  (\(i: i32): (f32,f32)  ->
                      if 0 < i
                      then (y[i], 0.0-a[i]/b[i-1])
                      else (0.0,  1.0            )
@@ -125,7 +125,7 @@ fun tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
   --             scan with linear func comp operator  --
   ------------------------------------------------------
   let yn   = y[n-1]/b[n-1]
-  let lfuns= map  (\(k: int): (f32,f32)  ->
+  let lfuns= map  (\(k: i32): (f32,f32)  ->
                      let i = n-k-1
                      in  if   0 < k
                          then (y[i]/b[i], 0.0-c[i]/b[i])
@@ -140,7 +140,7 @@ fun tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
                      let (a,b) = tup
                      in a + b*yn
                   ) cfuns
-  let y    = map  (\(i: int): f32  -> y[n-i-1]) (iota n)
+  let y    = map  (\(i: i32): f32  -> y[n-i-1]) (iota n)
   in y
 
 fun main(myD:  [inner][3]f32, myDD: [inner][3]f32,

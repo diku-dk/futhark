@@ -51,7 +51,7 @@
 -- input { 4 2.00 0.0 }
 -- output { 1.0 }
 
-fun main(f: int, x: f64, y: f64): f64 =
+fun main(f: i32, x: f64, y: f64): f64 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

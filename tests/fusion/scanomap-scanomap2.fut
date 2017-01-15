@@ -11,7 +11,7 @@
 -- structure {
 --   Scanomap 1
 -- }
-fun main(inp: []int): ([]int, []int, []int, []int) =
+fun main(inp: []i32): ([]i32, []i32, []i32, []i32) =
   let a = map (+1) inp
   let b = scan (+) 0 a
   let c = map (+1) a

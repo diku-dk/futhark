@@ -14,12 +14,12 @@
 -- }
 
 
-fun grayCode(x: int): int = (x >> 1) ^ x
+fun grayCode(x: i32): i32 = (x >> 1) ^ x
 
 ----------------------------------------
 --/ Sobol Generator
 ----------------------------------------
-fun testBit(n: int, ind: int): bool =
+fun testBit(n: i32, ind: i32): bool =
     let t = (1 << ind) in (n & t) == t
 
 ----------------------------------------------------------------/
@@ -28,26 +28,26 @@ fun testBit(n: int, ind: int): bool =
 ----    Currently Futhark hoists it outside, but this will
 ----    not allow fusing the filter with reduce -> redomap,
 ----------------------------------------------------------------/
-fun xorInds(n: int) (dir_vs: [num_bits]int): int =
-    let reldv_vals = map (\(dv: int, i: int): int  ->
+fun xorInds(n: i32) (dir_vs: [num_bits]i32): i32 =
+    let reldv_vals = map (\(dv: i32, i: i32): i32  ->
                             if testBit(grayCode(n),i)
                             then dv else 0
                         ) (zip (dir_vs) (iota(num_bits)) ) in
     reduce (^) 0 (reldv_vals )
 
-fun sobolIndI (dir_vs:  [][]int, n: int ): []int =
+fun sobolIndI (dir_vs:  [][]i32, n: i32 ): []i32 =
     map (xorInds(n)) (dir_vs )
 
-fun sobolIndR(dir_vs:  [][num_bits]int, n: int ): []f64 =
+fun sobolIndR(dir_vs:  [][num_bits]i32, n: i32 ): []f64 =
     let divisor = 2.0 ** f64(num_bits)
     let arri    = sobolIndI( dir_vs, n )     in
-        map (\(x: int): f64  -> f64(x) / divisor) arri
+        map (\(x: i32): f64  -> f64(x) / divisor) arri
 
 --------------------------------/
 ---- STRENGTH-REDUCED FORMULA
 --------------------------------/
 
-fun index_of_least_significant_0(num_bits: int, n: int): int =
+fun index_of_least_significant_0(num_bits: i32, n: i32): i32 =
   let (goon,k) = (true,0) in
   loop ((goon,k,n)) =
         for i < num_bits do
@@ -58,33 +58,33 @@ fun index_of_least_significant_0(num_bits: int, n: int): int =
           else      (false,k,   n   )
   in k
 
-fun recM(sob_dirs:  [len][num_bits]int, i: int ): [len]int =
+fun recM(sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map (\(row: []int): int -> unsafe row[bit]) (sob_dirs )
+  map (\(row: []i32): i32 -> unsafe row[bit]) (sob_dirs )
 
-fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int, sobvctsz: int): [chunk][sobvctsz]f64 =
+fun sobolChunk(dir_vs: [len][num_bits]i32, n: i32, chunk: i32, sobvctsz: i32): [chunk][sobvctsz]f64 =
   let sob_fact= 1.0 / f64(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
-  let contrbs = map (\(k: int): [len]int  ->
+  let contrbs = map (\(k: i32): [len]i32  ->
                         let sob = k + n in
                         if(k==0) then sobolIndI(dir_vs, n+1)
                         else recM(dir_vs, k+n)
                    ) (iota(chunk) )
-  let vct_ints= scan (\(x: []int) (y: []int): []int  ->
+  let vct_ints= scan (\(x: []i32) (y: []i32): []i32  ->
                         map (^) x y
                     ) (replicate len 0) contrbs in
-  map (\(xs: []int): [len]f64  ->
-             map  (\(x: int): f64  ->
+  map (\(xs: []i32): [len]f64  ->
+             map  (\(x: i32): f64  ->
                      f64(x) * sob_fact
                  ) xs
          ) (vct_ints)
 
-fun main(num_dates:  int, num_und: int, num_mc_it: int,
-               dir_vs_nosz: [][num_bits]int ): f64 =
+fun main(num_dates:  i32, num_und: i32, num_mc_it: i32,
+               dir_vs_nosz: [][num_bits]i32 ): f64 =
   let sobvctsz  = num_dates*num_und
   let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = streamMap (\(ns: [chunk]int): [][sobvctsz]f64  ->
+  let sobol_mat = streamMap (\(ns: [chunk]i32): [][sobvctsz]f64  ->
                                 sobolChunk(dir_vs, ns[0], chunk, sobvctsz)
                            ) (iota(num_mc_it) ) in
   reduce  (+) (0.0) (map  (\(row: []f64): f64  -> reduce (+) (0.0) row) (sobol_mat ) )

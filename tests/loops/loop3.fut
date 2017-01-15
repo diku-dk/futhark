@@ -5,7 +5,7 @@
 -- output {
 --   820
 -- }
-fun main(n: int): int =
+fun main(n: i32): i32 =
   let a = iota(1) in
   loop (a) = for i < n do
                let b = replicate n 0 in -- Error if hoisted outside loop.

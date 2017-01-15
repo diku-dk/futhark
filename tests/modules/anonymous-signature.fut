@@ -2,9 +2,9 @@
 -- ==
 -- input { 5 } output { 7 }
 
-module M: {val x: int} = {
-  val x: int = 2
-  val y: int = 3
+module M: {val x: i32} = {
+  val x: i32 = 2
+  val y: i32 = 3
 }
 
-fun main(x: int) = M.x + x
+fun main(x: i32) = M.x + x

@@ -7,7 +7,7 @@
 -- error:
 
 -- Recursive to prevent inlining.
-fun f(b: bool, as: [n]int, bs: [n]int): int =
+fun f(b: bool, as: [n]i32, bs: [n]i32): i32 =
   as[0] + bs[0] + if b
                   then 0
                   else f(b, as, bs)
@@ -16,5 +16,5 @@ fun f(b: bool, as: [n]int, bs: [n]int): int =
 -- main is concerned.  It is only in the call to f that the checking
 -- happens (so we can't realy on the input parser to do the check for
 -- us).
-fun main(b: bool, as: [n]int, bs: [m]int): int =
+fun main(b: bool, as: [n]i32, bs: [m]i32): i32 =
   f(b, as, bs)

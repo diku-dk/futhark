@@ -13,9 +13,9 @@
 --    [10, 11, 12, 13, 14, 15, 16, 17]]
 -- }
 
-fun main(n: int, m: int, k: int): [n][k]int =
+fun main(n: i32, m: i32, k: i32): [n][k]i32 =
   let a = replicate n (iota m) in
-  map (\(i: int) (r: [m]int): [k]int  ->
+  map (\(i: i32) (r: [m]i32): [k]i32  ->
             let x = reduce (+) 0 r
             in map (+i) (map (+x) (iota(k)))) (
           iota(n)) a

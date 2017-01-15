@@ -1,6 +1,6 @@
 -- Can we put type aliases in lambdas too?
 
-type t = int
+type t = i32
 type ts = []t
 
 fun main(xs: ts): []ts =

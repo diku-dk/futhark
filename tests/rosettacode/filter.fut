@@ -5,10 +5,10 @@
 -- ==
 -- input { [1, 2, 3, 4, 5, 6, 7, 8, 9] }
 -- output { [2, 4, 6, 8] }
--- input { empty(int) }
--- output { empty(int) }
+-- input { empty(i32) }
+-- output { empty(i32) }
 -- input { [1,3] }
--- output { empty(int) }
+-- output { empty(i32) }
 
-fun main(as: []int): []int =
+fun main(as: []i32): []i32 =
   filter (\x -> x%2 == 0) as

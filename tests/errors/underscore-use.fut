@@ -3,5 +3,5 @@
 -- ==
 -- error: underscore
 
-fun main (_x: int): int =
+fun main (_x: i32): i32 =
   _x

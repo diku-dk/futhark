@@ -3,7 +3,7 @@
 -- ==
 -- error:
 
-fun consume(a: *[]int): []int = a
+fun consume(a: *[]i32): []i32 = a
 
-fun main(a: *[]int): [][]int =
+fun main(a: *[]i32): [][]i32 =
   map (\i -> consume a) (iota 10)

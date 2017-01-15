@@ -8,14 +8,14 @@
 --  2
 -- }
 
-fun number(): int = 1
+fun number(): i32 = 1
 module M0
   {
-    fun number(): int = 2
+    fun number(): i32 = 2
     module M1
       {
-        fun foo(): int = number()
+        fun foo(): i32 = number()
       }
   }
 
-fun main(): int = M0.M1.foo()
+fun main(): i32 = M0.M1.foo()

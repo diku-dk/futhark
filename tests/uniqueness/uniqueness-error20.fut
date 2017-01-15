@@ -2,7 +2,7 @@
 -- ==
 -- error:
 
-fun main(n: int): int =
+fun main(n: i32): i32 =
   let a = iota(n)
-  let b = map (\(x: int): int  -> let a[x] = 4 in a[x]) (iota(n)) in
+  let b = map (\(x: i32): i32  -> let a[x] = 4 in a[x]) (iota(n)) in
   0

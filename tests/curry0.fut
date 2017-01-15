@@ -8,5 +8,5 @@
 --   [5, 4, 3, 2, 1, 0, -1]
 -- }
 
-fun main(a: []int): ([]int,[]int) =
+fun main(a: []i32): ([]i32,[]i32) =
   (map (- 2) a, map (2 -) a)

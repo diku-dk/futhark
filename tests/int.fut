@@ -15,5 +15,5 @@
 --   -1073741824
 -- }
 
-fun main(a: int, b: int): (int, int, int, int) =
+fun main(a: i32, b: i32): (i32, i32, i32, i32) =
   (a, a+1, b-1, b>>1)

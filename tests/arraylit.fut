@@ -5,5 +5,5 @@
 -- input { 2 2 } output { [[0,1], [3, 3]] }
 -- input { 2 3 } error: failed
 
-fun main (n: int, m: int): [][]int =
+fun main (n: i32, m: i32): [][]i32 =
   [iota n, replicate m 3]

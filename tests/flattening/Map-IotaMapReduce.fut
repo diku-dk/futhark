@@ -6,8 +6,8 @@
 -- output {
 --   [8,9,12]
 -- }
-fun main (xs: [n]int, ys: [n]int): []int =
-  map (\(x: int, y: int): int  ->
+fun main (xs: [n]i32, ys: [n]i32): []i32 =
+  map (\(x: i32, y: i32): i32  ->
          let tmp1 = iota(x)
          let tmp2 = map (*y) tmp1 in
          reduce (+) 0 tmp2

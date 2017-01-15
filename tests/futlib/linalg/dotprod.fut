@@ -8,5 +8,5 @@ include futlib.linalg
 
 module I32LinAlg = LinAlg(I32)
 
-fun main(as: [n]int, bs: [n]int): int =
+fun main(as: [n]i32, bs: [n]i32): i32 =
   I32LinAlg.dotprod as bs

@@ -2,7 +2,7 @@
 -- doesn't allow for duplicate definitions
 -- ==
 -- error:
-type foo = (int, f32)
+type foo = (i32, f32)
 
 module M0
   {
@@ -18,7 +18,7 @@ module M1
     module M0
       {
         type foo = M0.foo -- is defined at l. 5
-        type bar = (int, int, int)
+        type bar = (i32, i32, i32)
       }
 
     type foo = f32 -- REDEFINITION OF foo IN Struct M1
@@ -27,5 +27,5 @@ module M1
 
 type baz = M1.baz -- is defined at l. 13
 
-fun main(a: int, b: float): baz = (1,2,3)
+fun main(a: i32, b: float): baz = (1,2,3)
 

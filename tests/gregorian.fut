@@ -1,14 +1,14 @@
 -- Date computations.  Some complex scalar expressions and a branch.
 -- Once messed up the simplifier.
 
-fun mod(x: int, y: int): int = x - (x/y)*y
+fun mod(x: i32, y: i32): i32 = x - (x/y)*y
 
-val hours_in_dayI: int = 24
-val minutes_in_dayI: int = hours_in_dayI * 60
-val minutes_to_noonI: int = (hours_in_dayI / 2) * 60
+val hours_in_dayI: i32 = 24
+val minutes_in_dayI: i32 = hours_in_dayI * 60
+val minutes_to_noonI: i32 = (hours_in_dayI / 2) * 60
 val minutes_in_day: f64 = 24.0*60.0
 
-fun date_of_gregorian(date:  (int,int,int,int,int)): int =
+fun date_of_gregorian(date:  (i32,i32,i32,i32,i32)): i32 =
   let (year, month, day, hour, mins) = date
   let ym =
       if(month == 1 || month == 2)
@@ -22,7 +22,7 @@ fun date_of_gregorian(date:  (int,int,int,int,int)): int =
 
   in tmp * minutes_in_dayI + hour * 60 + mins
 
-fun gregorian_of_date (minutes_since_epoch:  int ): (int,int,int,int,int) =
+fun gregorian_of_date (minutes_since_epoch:  i32 ): (i32,i32,i32,i32,i32) =
   let jul = minutes_since_epoch / minutes_in_dayI
   let l = jul + 68569 + 2444238
   let n = ( 4 * l ) / 146097
@@ -46,5 +46,5 @@ fun gregorian_of_date (minutes_since_epoch:  int ): (int,int,int,int,int) =
   --else [year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
   else (y, m, d, daytime / 60, mod(daytime, 60) )
 
-fun main(x: int): int =
+fun main(x: i32): i32 =
   date_of_gregorian(gregorian_of_date(x))

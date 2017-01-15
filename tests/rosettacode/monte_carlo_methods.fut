@@ -14,7 +14,7 @@
 
 default(f32)
 
-fun dirvcts(): [2][30]int =
+fun dirvcts(): [2][30]i32 =
     [
             [
                 536870912, 268435456, 134217728, 67108864, 33554432, 16777216, 8388608, 4194304, 2097152, 1048576, 524288, 262144, 131072, 65536, 32768, 16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1
@@ -25,30 +25,30 @@ fun dirvcts(): [2][30]int =
     ]
 
 
-fun grayCode(x: int): int = (x >> 1) ^ x
+fun grayCode(x: i32): i32 = (x >> 1) ^ x
 
 ----------------------------------------
 --- Sobol Generator
 ----------------------------------------
-fun testBit(n: int, ind: int): bool =
+fun testBit(n: i32, ind: i32): bool =
     let t = (1 << ind) in (n & t) == t
 
-fun xorInds(n: int) (dir_vs: [num_bits]int): int =
+fun xorInds(n: i32) (dir_vs: [num_bits]i32): i32 =
     let reldv_vals = zipWith (\ dv i  ->
                                 if testBit(grayCode n,i)
                                 then dv else 0)
                              dir_vs (iota num_bits)
     in reduce (^) 0 reldv_vals
 
-fun sobolIndI (dir_vs: [m][num_bits]int, n: int): [m]int =
+fun sobolIndI (dir_vs: [m][num_bits]i32, n: i32): [m]i32 =
     map (xorInds n) dir_vs
 
-fun sobolIndR(dir_vs:  [m][num_bits]int) (n: int ): [m]f32 =
+fun sobolIndR(dir_vs:  [m][num_bits]i32) (n: i32 ): [m]f32 =
     let divisor = 2.0 ** f32(num_bits)
     let arri    = sobolIndI( dir_vs, n )
-    in map (\ (x: int): f32  -> f32(x) / divisor) arri
+    in map (\ (x: i32): f32  -> f32(x) / divisor) arri
 
-fun main(n: int): f32 =
+fun main(n: i32): f32 =
     let rand_nums = map (sobolIndR (dirvcts())) (iota n)
     let dists     = map (\xy ->
                            let (x,y) = (xy[0],xy[1]) in sqrt32(x*x + y*y))

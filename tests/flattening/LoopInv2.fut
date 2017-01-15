@@ -17,10 +17,10 @@
 --    [[9, 9, 9],
 --     [12, 12, 12]]]
 -- }
-fun addRows (xs: []int, ys: []int): []int =
+fun addRows (xs: []i32, ys: []i32): []i32 =
   map (+) xs ys
 
-fun main (xsss: [][][]int, ys: []int): [][][]int =
-  map  (\(xss: [][]int): [][]int  ->
-         map (\(xs: []int): []int  -> addRows(xs,ys)) xss
+fun main (xsss: [][][]i32, ys: []i32): [][][]i32 =
+  map  (\(xss: [][]i32): [][]i32  ->
+         map (\(xs: []i32): []i32  -> addRows(xs,ys)) xss
       ) xsss

@@ -6,7 +6,7 @@
 -- input { 3 } output { 2 }
 -- input { 40 } output { 102334155 }
 
-fun main(n: int): int =
+fun main(n: i32): i32 =
   loop((a,b) = (0,1)) = for _i < n do
     (b, a + b)
   in a

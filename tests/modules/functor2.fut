@@ -7,6 +7,6 @@ type t = P.t
 fun f2(x: t): t = P.f (P.f x)
 }
 
-module F' = F({type t = int fun f (x: int): int = x+1})
+module F' = F({type t = i32 fun f (x: i32): i32 = x+1})
 
-fun main(x: int): F'.t = F'.f2 x
+fun main(x: i32): F'.t = F'.f2 x

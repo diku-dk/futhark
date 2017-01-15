@@ -3,6 +3,6 @@
 -- ==
 -- error: match
 
-fun main(): int =
+fun main(): i32 =
   let (x,y) = (1,2,3)
   in x+y

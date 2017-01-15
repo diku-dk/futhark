@@ -10,17 +10,17 @@
 
 module M0
   {
-    fun foo(): int = 1
+    fun foo(): i32 = 1
   }
 
 module M1
   {
-    fun bar(): int = M0.foo()
+    fun bar(): i32 = M0.foo()
     module M0
       {
-        fun foo(): int = 10
+        fun foo(): i32 = 10
       }
-    fun baz(): int = M0.foo()
+    fun baz(): i32 = M0.foo()
   }
 
-fun main(): (int, int, int) = (M0.foo(), M1.bar(), M1.baz())
+fun main(): (i32, i32, i32) = (M0.foo(), M1.bar(), M1.baz())

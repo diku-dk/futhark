@@ -8,5 +8,5 @@
 --   [1, 2, 3]
 --   [4, 5, 6]
 -- }
-fun main(a: []int, b: []int): ([]int,[]int) =
+fun main(a: []i32, b: []i32): ([]i32,[]i32) =
   unzip(zip a b)

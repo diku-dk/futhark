@@ -7,7 +7,7 @@
 --   252.000000
 -- }
 
-fun f(x: (int, f64)) (y: f64): f64 =
+fun f(x: (i32, f64)) (y: f64): f64 =
     let (a,b) = x in y*f64(a)+b
 
 fun g(x: [](f64,f64)) (y: f64): f64 =

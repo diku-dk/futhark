@@ -8,5 +8,5 @@
 --   3i8
 -- }
 
-fun main(a: []i8, i: int): i8 =
+fun main(a: []i8, i: i32): i8 =
   a[i]

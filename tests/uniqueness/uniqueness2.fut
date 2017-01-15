@@ -4,7 +4,7 @@
 -- output {
 --   3
 -- }
-fun main(): int =
+fun main(): i32 =
     let n = 10
     let (a, b) = (copy(replicate n 0), copy(replicate n 0))
     let a[0] = 1

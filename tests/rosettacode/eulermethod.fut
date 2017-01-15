@@ -52,7 +52,7 @@ fun cooling(_time: f64) (temperature: f64): f64 =
   -0.07 * (temperature-20.0)
 
 fun main(t0: f64) (a: f64) (b: f64) (h: f64): []f64 =
-  let steps = int((b-a)/h)
+  let steps = i32((b-a)/h)
   let temps = replicate steps 0.0
   loop ((t,temps)=(t0,temps)) = for i < steps do
     let x = a + f64(i) * h

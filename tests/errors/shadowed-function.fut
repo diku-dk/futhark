@@ -2,8 +2,8 @@
 --
 -- ==
 -- error: f
-fun f (x: int): int = x + 2
+fun f (x: i32): i32 = x + 2
 
-fun main(x: int): int =
+fun main(x: i32): i32 =
   let f = 3
   in f x

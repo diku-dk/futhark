@@ -3,7 +3,7 @@
 -- ==
 -- input { } output { 3 }
 
-val x: int = 2
-val y: int = x + 1
+val x: i32 = 2
+val y: i32 = x + 1
 
-fun main(): int = y
+fun main(): i32 = y

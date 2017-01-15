@@ -3,13 +3,13 @@
 -- input {}
 -- output { 26 }
 
-module A = { type t = int val x : t = 3 }
-module F (X : { val b : int }) : { type t = int val c : t } =
-   { type t = int val c = A.x + X.b }
+module A = { type t = i32 val x : t = 3 }
+module F (X : { val b : i32 }) : { type t = i32 val c : t } =
+   { type t = i32 val c = A.x + X.b }
 
 module C = {
   module A = { type t = f32 }
   module B = F( { val b = 23 } )
 }
 
-fun main() : int = C.B.c
+fun main() : i32 = C.B.c

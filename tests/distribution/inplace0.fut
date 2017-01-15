@@ -1,7 +1,7 @@
 -- Distribution should not choke on a map that consumes its input.
 
-fun main(a: *[][n]int, is: [n]int, js: [n]int): [][]int =
-  map (\(a_r: *[]int): []int  ->
+fun main(a: *[][n]i32, is: [n]i32, js: [n]i32): [][]i32 =
+  map (\(a_r: *[]i32): []i32  ->
         let double = map (*2) (a_r)
         let triple = map (*3) (a_r) in
         loop (a_r) = for i < n do

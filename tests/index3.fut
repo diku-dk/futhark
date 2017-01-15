@@ -6,7 +6,7 @@
 --   Assert 0
 -- }
 
-fun main(b: bool): int =
+fun main(b: bool): i32 =
   let a = [1,2,3]
   let i = if b then 0 else 1 in
   a[i]

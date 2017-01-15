@@ -8,7 +8,7 @@
 
 default (f32)
 
-fun Gauss_Jordan (A: [n][m]f32) (i: int): [n][m]f32 =
+fun Gauss_Jordan (A: [n][m]f32) (i: i32): [n][m]f32 =
   if i == n then A else
     let irow = A[0]
     let Ap = A[1:n]

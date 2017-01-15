@@ -2,8 +2,8 @@
 -- ==
 -- error:
 
-fun main(): int =
+fun main(): i32 =
   let a = iota(10)
-  let b:*[]int = a
+  let b:*[]i32 = a
   let b[0] = 1
   in a[0]

@@ -27,14 +27,14 @@
 -- }
 -- structure distributed { }
 
-fun addRows (xs: []int, ys: []int): []int =
+fun addRows (xs: []i32, ys: []i32): []i32 =
   map (+) xs ys
 
-fun main (xssss: [][][][]int, cs: []int): [][][][]int =
-  map (\(xsss: [][][]int) (c: int): [][][]int  ->
+fun main (xssss: [][][][]i32, cs: []i32): [][][][]i32 =
+  map (\(xsss: [][][]i32) (c: i32): [][][]i32  ->
             let yss = unsafe reshape (2,c) xsss in
-            map  (\(xss: [][]int): [][]int  ->
-                   map (\(xs: []int) (ys: []int): []int  ->
+            map  (\(xss: [][]i32): [][]i32  ->
+                   map (\(xs: []i32) (ys: []i32): []i32  ->
                              -- An implicit reshape will go here that
                              -- cannot be distributed - this messed up
                              -- the compiler.
