@@ -23,18 +23,18 @@ val gt: t -> t -> bool
 }
 
 module I32 {
-type t = int
+type t = i32
 
-fun plus (x: int) (y: int) = x + y
-fun sub  (x: int) (y: int) = x - y
-fun mult (x: int) (y: int) = x * y
+fun plus (x: i32) (y: i32) = x + y
+fun sub  (x: i32) (y: i32) = x - y
+fun mult (x: i32) (y: i32) = x * y
 
 val one = 1
 val zero = 0
 
-fun eq (x: int) (y: int) = x == y
-fun lt (x: int) (y: int) = x < y
-fun gt (x: int) (y: int) = x > y
+fun eq (x: i32) (y: i32) = x == y
+fun lt (x: i32) (y: i32) = x < y
+fun gt (x: i32) (y: i32) = x > y
 }
 
 module F32 {

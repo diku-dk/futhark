@@ -9,8 +9,8 @@
 -- tags { no_python }
 -- compiled input { [1,2,3] 100001 } output { 366240i32 }
 
-fun main(a: [n]int, m: int): int =
+fun main(a: [n]i32, m: i32): i32 =
   let contribs = replicate m a
-  let res = scan (\(x: []int) (y: []int): []int -> map (+) x y
+  let res = scan (\(x: []i32) (y: []i32): []i32 -> map (+) x y
                 ) a contribs in
   reduce (^) 0 (reshape (n*m) res)

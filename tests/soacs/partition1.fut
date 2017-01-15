@@ -9,9 +9,9 @@
 --   [1, 5, 7]
 -- }
 
-fun divisible_by_two(x: int): bool = x % 2 == 0
+fun divisible_by_two(x: i32): bool = x % 2 == 0
 
-fun divisible_by_three(x: int): bool = x % 3 == 0
+fun divisible_by_three(x: i32): bool = x % 3 == 0
 
-fun main(a: []int): ([]int, []int, []int) =
+fun main(a: []i32): ([]i32, []i32, []i32) =
   partition (divisible_by_two, divisible_by_three) a

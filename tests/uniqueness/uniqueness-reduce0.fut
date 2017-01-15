@@ -9,9 +9,9 @@
 --   [1i32, 11i32, 21i32, 31i32, 41i32, 51i32, 61i32, 71i32, 81i32, 91i32]
 -- }
 
-fun main(a: *[]int,b: []int): []int =
+fun main(a: *[]i32,b: []i32): []i32 =
   let (x,y) =
-    reduce (\(acc: (*[]int, []int)) (arr: ([]int, []int)): (*[]int, []int)  ->
+    reduce (\(acc: (*[]i32, []i32)) (arr: ([]i32, []i32)): (*[]i32, []i32)  ->
              let (a1,b1) = acc
              let (a2,b2) = arr
              in (map (+) a1 a2,

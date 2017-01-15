@@ -2,7 +2,7 @@
 -- ==
 -- structure { DoLoop 0 }
 
-fun main(x: int, y: int): int =
+fun main(x: i32, y: i32): i32 =
   loop (x) = for i < 1 do
     x + y
   in x

@@ -19,7 +19,7 @@
 -- input { 2  8i32 } output {  1i32 }
 -- input { 2 -8i32 } output { -1i32 }
 
-fun main(f: int, x: i32): i32 =
+fun main(f: i32, x: i32): i32 =
   if      f == 0 then -x
   else if f == 1 then abs(x)
   else                signum(x)

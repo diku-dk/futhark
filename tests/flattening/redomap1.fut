@@ -6,11 +6,11 @@
 -- output {
 --   [12, 27]
 -- }
-fun main (xss: [m][n]int, yss: [m][n]int): [m]int =
+fun main (xss: [m][n]i32, yss: [m][n]i32): [m]i32 =
     let final_res =
-      map (\(xs: [n]int, ys: [n]int): int  ->
+      map (\(xs: [n]i32, ys: [n]i32): i32  ->
             let tmp =
-              map  (\(x: int, y: int): int  -> x+y
+              map  (\(x: i32, y: i32): i32  -> x+y
                   ) (zip  xs ys) in
             reduce (+) 0 tmp
          ) (zip xss yss)

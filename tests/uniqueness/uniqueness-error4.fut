@@ -1,8 +1,8 @@
 -- ==
 -- error:
-fun f(a: *[]int, i: int, v: int): int = let a[i]=v in a[i]
+fun f(a: *[]i32, i: i32, v: i32): i32 = let a[i]=v in a[i]
 
-fun main(): int =
+fun main(): i32 =
     let n = 10
     let a = iota(n)
     let b = a -- a and b are aliases.

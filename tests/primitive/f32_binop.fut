@@ -51,7 +51,7 @@
 -- input { 4 2.0f32 0f32 }
 -- output { 1f32 }
 
-fun main(f: int, x: f32, y: f32): f32 =
+fun main(f: i32, x: f32, y: f32): f32 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

@@ -19,7 +19,7 @@
 -- input { 2  8u8 } output { 1u8 }
 -- input { 2 248u8 } output { 1u8 }
 
-fun main(f: int, x: u8): u8 =
+fun main(f: i32, x: u8): u8 =
   if      f == 0 then -x
   else if f == 1 then abs(x)
   else                signum(x)

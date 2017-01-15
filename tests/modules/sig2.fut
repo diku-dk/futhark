@@ -1,6 +1,6 @@
 -- Signature referring to externally defined type.
 
-type two_ints = (int, int)
+type two_ints = (i32, i32)
 
 module type S {
 type t = two_ints

@@ -16,12 +16,12 @@
 -- }
 -- output { [[0.500000], [0.750000], [0.250000], [0.375000], [0.875000], [0.625000], [0.125000], [0.187500], [0.687500], [0.937500]] }
 
-fun grayCode(x: int): int = (x >> 1) ^ x
+fun grayCode(x: i32): i32 = (x >> 1) ^ x
 
 ----------------------------------------
 --- Sobol Generator
 ----------------------------------------
-fun testBit(n: int, ind: int): bool =
+fun testBit(n: i32, ind: i32): bool =
     let t = (1 << ind) in (n & t) == t
 
 -----------------------------------------------------------------
@@ -30,20 +30,20 @@ fun testBit(n: int, ind: int): bool =
 ----    Currently Futhark hoists it outside, but this will
 ----    not allow fusing the filter with reduce -> redomap,
 -----------------------------------------------------------------
-fun xorInds(n: int) (dir_vs: [num_bits]int): int =
-    let reldv_vals = map (\(dv: int, i: int): int  ->
+fun xorInds(n: i32) (dir_vs: [num_bits]i32): i32 =
+    let reldv_vals = map (\(dv: i32, i: i32): i32  ->
                             if testBit(grayCode(n),i)
                             then dv else 0
                         ) (zip (dir_vs) (iota(num_bits)) ) in
     reduce (^) 0 (reldv_vals )
 
-fun sobolIndI (dir_vs:  [][]int, n: int ): []int =
+fun sobolIndI (dir_vs:  [][]i32, n: i32 ): []i32 =
     map (xorInds(n)) (dir_vs )
 
 --------------------------------
 ---- STRENGTH-REDUCED FORMULA
 --------------------------------
-fun index_of_least_significant_0(num_bits: int, n: int): int =
+fun index_of_least_significant_0(num_bits: i32, n: i32): i32 =
   let (goon,k) = (true,0) in
   loop ((goon,k,n)) =
         for i < num_bits do
@@ -54,31 +54,31 @@ fun index_of_least_significant_0(num_bits: int, n: int): int =
           else      (false,k,   n   )
   in k
 
-fun sobolRecI(sob_dir_vs: [][num_bits]int, prev: []int, n: int): []int =
+fun sobolRecI(sob_dir_vs: [][num_bits]i32, prev: []i32, n: i32): []i32 =
   let bit = index_of_least_significant_0(num_bits,n) in
-  map  (\(vct_prev: ([]int,int)): int  ->
+  map  (\(vct_prev: ([]i32,i32)): i32  ->
          let (vct_row, prev) = vct_prev in
          vct_row[bit] ^ prev
       ) (zip (sob_dir_vs) prev)
 
-fun recM(sob_dirs:  [][num_bits]int, i: int ): []int =
+fun recM(sob_dirs:  [][num_bits]i32, i: i32 ): []i32 =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map (\(row: []int): int -> unsafe row[bit]) (sob_dirs )
+  map (\(row: []i32): i32 -> unsafe row[bit]) (sob_dirs )
 
 -- computes sobol numbers: n,..,n+chunk-1
-fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
+fun sobolChunk(dir_vs: [len][num_bits]i32, n: i32, chunk: i32): [chunk][]f64 =
   let sob_fact= 1.0 / f64(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
-  let contrbs = map (\(k: int): []int  ->
+  let contrbs = map (\(k: i32): []i32  ->
                         let sob = k + n in
                         if(k==0) then sob_beg
                         else recM(dir_vs, k+n)
                    ) (iota(chunk) )
-  let vct_ints= scan (\(x: []int) (y: []int): []int  ->
+  let vct_ints= scan (\(x: []i32) (y: []i32): []i32  ->
                         map (^) x y
                     ) (replicate len 0) contrbs in
-  map (\(xs: []int): []f64  ->
-             map  (\(x: int): f64  ->
+  map (\(xs: []i32): []f64  ->
+             map  (\(x: i32): f64  ->
                      f64(x) * sob_fact
                  ) xs
          ) (vct_ints)
@@ -87,13 +87,13 @@ fun sobolChunk(dir_vs: [len][num_bits]int, n: int, chunk: int): [chunk][]f64 =
 -- MAIN
 ----------------------------------------
 
-fun main(num_mc_it: int,
-                  dir_vs_nosz: [][num_bits]int,
-                  num_dates: int,
-                  num_und: int): [][]f64 =
+fun main(num_mc_it: i32,
+                  dir_vs_nosz: [][num_bits]i32,
+                  num_dates: i32,
+                  num_und: i32): [][]f64 =
   let sobvctsz  = num_dates*num_und
   let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz
-  let sobol_mat = streamMap (\(ns: [chunk]int): [][sobvctsz]f64  ->
+  let sobol_mat = streamMap (\(ns: [chunk]i32): [][sobvctsz]f64  ->
                                 sobolChunk(dir_vs, ns[0], chunk)
                            ) (iota(num_mc_it) ) in
 

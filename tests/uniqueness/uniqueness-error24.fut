@@ -3,8 +3,8 @@
 -- ==
 -- error:
 
-fun consume(a: *[]int): int = 0 -- OK.
+fun consume(a: *[]i32): i32 = 0 -- OK.
 
-fun main(a: *[]int): []int =
+fun main(a: *[]i32): []i32 =
   let _ = consume(a) in
   a -- Should fail, because a has been consumed!

@@ -1,6 +1,6 @@
 -- ==
 -- error:
-fun main(): int =
+fun main(): i32 =
     let n = 10
     let a = iota(n)
     let b = iota(n)

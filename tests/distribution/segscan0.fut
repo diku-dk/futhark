@@ -10,8 +10,8 @@
 --   [3i32, 7i32]]
 -- }
 
-fun main(ass: [n][m]int, bss: [n][m]f32): ([][]f32, [][]int) =
-  unzip(map (\(as: []int) (bs: []f32): ([m]f32, [m]int)  ->
+fun main(ass: [n][m]i32, bss: [n][m]f32): ([][]f32, [][]i32) =
+  unzip(map (\(as: []i32) (bs: []f32): ([m]f32, [m]i32)  ->
                   let (asum, bsum) =
                     unzip(scan (\(x_a,x_b) (y_a,y_b)  ->
                                  (x_a + y_a, x_b + y_b)) (0, 0f32) (zip as bs))

@@ -7,4 +7,4 @@ val neutral: t
 val op: t -> t -> t
 }
 
-fun main(): int = 0
+fun main(): i32 = 0

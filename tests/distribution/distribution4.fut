@@ -8,7 +8,7 @@
 -- ==
 -- structure distributed { Kernel 2 }
 
-fun main(a: [n][an]int, b: [n][bn]int): ([][]int,[][]int) =
-  unzip(map (\(a_row: []int) (b_row: []int): ([an]int,[bn]int)  ->
+fun main(a: [n][an]i32, b: [n][bn]i32): ([][]i32,[][]i32) =
+  unzip(map (\(a_row: []i32) (b_row: []i32): ([an]i32,[bn]i32)  ->
                   (map (+1) a_row,
                    map (-1) b_row)) a b)

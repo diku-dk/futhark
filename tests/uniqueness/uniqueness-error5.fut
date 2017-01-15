@@ -1,8 +1,8 @@
 -- ==
 -- error: .*consumed.*
-fun f(a: *[][]int): int = a[0,0]
+fun f(a: *[][]i32): i32 = a[0,0]
 
-fun main(): int =
+fun main(): i32 =
     let n = 10
     let a = copy(replicate n (iota n))
     let c = transpose(a) in -- Transpose creates an alias.

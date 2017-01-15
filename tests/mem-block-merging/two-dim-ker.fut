@@ -3,7 +3,7 @@
 -- input { [ [ [0, 1], [2, 3] ], [ [4, 5], [6, 7] ] ]  }
 -- output { [[[0i32, 9i32], [0i32, 13i32]]]}
 
-fun main(xsss: [n][n][n]int): [][n][n]int =
+fun main(xsss: [n][n][n]i32): [][n][n]i32 =
   let (_,asss) = split (1) xsss
   in  map (\ass -> 
                 map (\as ->

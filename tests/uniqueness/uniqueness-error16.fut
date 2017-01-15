@@ -2,7 +2,7 @@
 -- ==
 -- error:
 
-fun main(): *[]int =
+fun main(): *[]i32 =
   let n = 10
   let a = iota(n)
   let c = let (a, b) = (2, a) let b[0] = 42 in b

@@ -5,5 +5,5 @@
 --          [[2], [4], [6]]
 -- }
 
-fun main(xs: [][]int): ([][]int, [][]int) =
+fun main(xs: [][]i32): ([][]i32, [][]i32) =
   split@1 (1) xs

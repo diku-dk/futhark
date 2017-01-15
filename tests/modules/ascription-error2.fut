@@ -2,7 +2,7 @@
 -- ==
 -- error: type
 
-module type S = { type t val a : t val f : t -> int }
-module B : S = { type t = int val a:t = 3 fun f (a:t):t = a }
+module type S = { type t val a : t val f : t -> i32 }
+module B : S = { type t = i32 val a:t = 3 fun f (a:t):t = a }
 module C : S = B
-fun main() : int = C.f B.a
+fun main() : i32 = C.f B.a

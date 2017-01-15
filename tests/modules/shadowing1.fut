@@ -12,7 +12,7 @@ type best_type = f64
 fun best_number(): best_type = 6.0
 module M0
   {
-    type best_type = int
+    type best_type = i32
     fun best_number(): best_type = 6
     module M1
       {
@@ -20,4 +20,4 @@ module M0
       }
   }
 
-fun main(): (f64, int, int) = (best_number() , M0.best_number() , M0.M1.best_number())
+fun main(): (f64, i32, i32) = (best_number() , M0.best_number() , M0.M1.best_number())

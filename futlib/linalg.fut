@@ -23,7 +23,7 @@ fun matmul (xss: [n][p]t) (yss: [p][m]t): [n][m]t =
   map (\xs -> map (dotprod xs) (transpose yss)) xss
 
 -- Matrix inversion is implemented with Gauss-Jordan.
-fun gauss_jordan (A: [n][m]t) (i: int): [n][m]t =
+fun gauss_jordan (A: [n][m]t) (i: i32): [n][m]t =
   if i == n then A else
     let irow = A[0]
     let Ap = A[1:n]

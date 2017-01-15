@@ -7,4 +7,4 @@
 -- output {
 --   [2, 3, 4]
 -- }
-fun main(a: []int, y: int): []int = map (\(x: int): int  -> (x+y)) a
+fun main(a: []i32, y: i32): []i32 = map (\(x: i32): i32  -> (x+y)) a

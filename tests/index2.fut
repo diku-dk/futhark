@@ -10,6 +10,6 @@
 --   2.000000
 -- }
 
-fun main(a: []int, b: []f64, i: int): (int,f64) =
+fun main(a: []i32, b: []f64, i: i32): (i32,f64) =
   let c = zip a b
   in c[i]

@@ -4,11 +4,11 @@
 -- input { 4 }
 -- output { 4 }
 
-type foo = int
-fun foo(a: int): foo = a + a
+type foo = i32
+fun foo(a: i32): foo = a + a
 module Foo
   {
-    fun one(): int = 1
+    fun one(): i32 = 1
   }
 
-fun main(x: int): int = x
+fun main(x: i32): i32 = x

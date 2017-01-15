@@ -13,5 +13,5 @@
 -- }
 
 
-fun main(i: int, arr: [][][]int): [][][]int =
+fun main(i: i32, arr: [][][]i32): [][][]i32 =
   rotate@2 i (rearrange (2,1,0) (rotate i arr))

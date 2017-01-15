@@ -7,11 +7,11 @@
 --   0
 -- }
 
-fun f (x: int): int = x
+fun f (x: i32): i32 = x
 
-fun g (x: int): int = x
+fun g (x: i32): i32 = x
 
-fun main(): int =
+fun main(): i32 =
   let a      = copy(iota(10))
   let x      = map f a
   let a[1]   = 3

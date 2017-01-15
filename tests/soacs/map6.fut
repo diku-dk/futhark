@@ -7,16 +7,16 @@
 --   [[7, 7, 7], [7, 7, 7]]
 --   [[-5, -3, -1], [1, 3, 5]]
 -- }
-fun inner(a: [][](int,int)): [][](int,int) =
-  map (\(row: [](int,int)): [](int,int)  ->
-        map (\(x: int, y: int): (int,int)  ->
+fun inner(a: [][](i32,i32)): [][](i32,i32) =
+  map (\(row: [](i32,i32)): [](i32,i32)  ->
+        map (\(x: i32, y: i32): (i32,i32)  ->
               (x+y,x-y)) row) a
 
-fun main(a1: [][]int, a2: [][]int): ([][]int, [][]int) =
-  let a = map (\(p: ([]int,[]int)): [](int,int)  ->
+fun main(a1: [][]i32, a2: [][]i32): ([][]i32, [][]i32) =
+  let a = map (\(p: ([]i32,[]i32)): [](i32,i32)  ->
                 let (p1,p2) = p in
                 zip p1 p2) (
               zip a1 a2) in
-  unzip(map (\(r: [](int,int)): ([]int, []int)  ->
+  unzip(map (\(r: [](i32,i32)): ([]i32, []i32)  ->
               unzip(r)) (
             inner(a)))

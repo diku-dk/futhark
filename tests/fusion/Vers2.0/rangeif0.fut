@@ -7,7 +7,7 @@
 -- }
 -- structure { DoLoop 0 }
 
-fun main(chunk: int, m: int): int =
+fun main(chunk: i32, m: i32): i32 =
   loop (m) = for j < chunk do
       let chunk_in = chunk+1 in
       -- setting chunk_in to chunk will enable a simplification, WHY not in this case also?

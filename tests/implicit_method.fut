@@ -83,6 +83,6 @@ fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
 fun main(myD:  [m][3]f32,  myDD: [m][3]f32,
         myMu: [n][m]f32, myVar: [n][m]f32,
         u: *[n][m]f32,    dtInv: f32,
-        num_samples: int): *[num_samples][n][m]f32 =
+        num_samples: i32): *[num_samples][n][m]f32 =
   map (implicitMethod(myD,myDD,myMu,myVar,u)) (
       map (*dtInv) (map  (/f32(num_samples)) (map f32 (map (+1) (iota(num_samples))))))

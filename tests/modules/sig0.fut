@@ -1,7 +1,7 @@
 -- Basic signature.
 
 module type S {
-type t = (int, int)
+type t = (i32, i32)
 
 val x: t
 val f: []t -> t

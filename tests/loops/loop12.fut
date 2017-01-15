@@ -8,7 +8,7 @@
 -- input { 2 [1] } output { 4 }
 -- input { 3 [1] } output { 8 }
 
-fun main (n: int) (as: []int): int =
+fun main (n: i32) (as: []i32): i32 =
   loop (as) = for _i < n do
     concat as as
   in (shape as)[0]

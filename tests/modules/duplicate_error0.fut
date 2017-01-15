@@ -4,9 +4,9 @@
 
 module Foo
   {
-    fun foo(): int = 1
+    fun foo(): i32 = 1
   }
-fun bar(): int = 1
-fun bar(): int = 2
+fun bar(): i32 = 1
+fun bar(): i32 = 2
 
-fun main(): int = 0
+fun main(): i32 = 0

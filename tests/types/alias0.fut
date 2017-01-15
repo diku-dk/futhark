@@ -1,3 +1,3 @@
-type best_type = int
+type best_type = i32
 
-fun main(x: int): best_type = x
+fun main(x: i32): best_type = x

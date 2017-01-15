@@ -2,10 +2,10 @@
 -- ==
 -- input { 2 } output { [0,0] }
 
-module type S { val f: int -> []int }
+module type S { val f: i32 -> []i32 }
 
 module M: S {
-  fun f(x: int): *[]int = replicate x 0
+  fun f(x: i32): *[]i32 = replicate x 0
 }
 
-fun main(n: int): []int = M.f n
+fun main(n: i32): []i32 = M.f n

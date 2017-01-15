@@ -27,7 +27,7 @@ fun mkPrices(md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
               map (*) x y)
               md_starts e_rows
 
-fun main(n: int,
+fun main(n: i32,
                     md_vols: [][]f64,
                     md_drifts: [][]f64,
                     md_starts: []f64,

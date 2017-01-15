@@ -12,10 +12,10 @@
 -- input { 0 0 }
 -- output { empty([]i32) true }
 
-fun main(n: int, m: int): ([][]int, bool) =
-  let ass = map  (\(l: int): [m]int  ->
+fun main(n: i32, m: i32): ([][]i32, bool) =
+  let ass = map  (\(l: i32): [m]i32  ->
                    map (+l*m) (iota(m))) (
                  iota(n))
-  let ps = map (\(as: []int) (i: int): bool  ->
+  let ps = map (\(as: []i32) (i: i32): bool  ->
                      unsafe as[i] % 2 == 0) ass (map (%m) (iota(n)))
   in (ass, reduce (&&) true ps)

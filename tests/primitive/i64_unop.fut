@@ -19,7 +19,7 @@
 -- input { 2  8i64 } output {  1i64 }
 -- input { 2 -8i64 } output { -1i64 }
 
-fun main(f: int, x: i64): i64 =
+fun main(f: i32, x: i64): i64 =
   if      f == 0 then -x
   else if f == 1 then abs(x)
   else                signum(x)

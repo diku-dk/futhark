@@ -3,7 +3,7 @@
 -- ==
 -- input {} output { 3 }
 
-val v: [](int,int) = [(1,2)]
+val v: [](i32,i32) = [(1,2)]
 
-fun main(): int = let (x,y) = v[0]
+fun main(): i32 = let (x,y) = v[0]
                   in x + y

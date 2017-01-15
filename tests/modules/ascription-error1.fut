@@ -3,12 +3,12 @@
 -- error: Struct.g
 
 module type SIG {
-val f: int -> int
+val f: i32 -> i32
 }
 
 module Struct: SIG {
-fun f (x: int): int = x + 2
-fun g (x: int): int = x + 3
+fun f (x: i32): i32 = x + 2
+fun g (x: i32): i32 = x + 3
 }
 
-fun main(x: int): int = Struct.g x
+fun main(x: i32): i32 = Struct.g x

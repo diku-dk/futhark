@@ -25,17 +25,17 @@
 --     [[19, 17, 15],
 --      [19, 17, 15]]]]
 -- }
-fun add1 (xs: []int, ys: []int): []int =
+fun add1 (xs: []i32, ys: []i32): []i32 =
   map (+) xs ys
 
-fun add2 (xs: [][]int, ys: [][]int): [][]int =
+fun add2 (xs: [][]i32, ys: [][]i32): [][]i32 =
   map  add1 (zip  xs ys)
 
-fun add3 (xs: [][][]int, ys: [][][]int): [][][]int =
+fun add3 (xs: [][][]i32, ys: [][][]i32): [][][]i32 =
   map  add2 (zip  xs ys)
 
-fun add4 (xs: [][][][]int, ys: [][][][]int): [][][][]int =
+fun add4 (xs: [][][][]i32, ys: [][][][]i32): [][][][]i32 =
   map  add3 (zip  xs ys)
 
-fun main(a: [][][][]int, b: [][][][]int): [][][][]int =
+fun main(a: [][][][]i32, b: [][][][]i32): [][][][]i32 =
   add4(a,b)

@@ -2,4 +2,4 @@
 -- ==
 -- error:
 
-fun main(a: []int): ([]int) = map (\(x: int): int  -> x + 2) a
+fun main(a: []i32): ([]i32) = map (\(x: i32): i32  -> x + 2) a

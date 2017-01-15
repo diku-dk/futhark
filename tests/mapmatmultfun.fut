@@ -14,12 +14,12 @@
 -- }
 -- structure { Map 3 Map/Map/Map/Redomap 1 }
 
-fun matmult(x: [n][m]int) (y: [m][p]int): [n][p]int =
+fun matmult(x: [n][m]i32) (y: [m][p]i32): [n][p]i32 =
   map (\xr ->
          map (\yc -> reduce (+) 0 (map (*) xr yc))
        (transpose y))
   x
 
 
-fun main(xs: [k][n][m]int, ys: [k][m][p]int): [k][n][p]int =
+fun main(xs: [k][n][m]i32, ys: [k][m][p]i32): [k][n][p]i32 =
   map matmult xs ys

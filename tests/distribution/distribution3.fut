@@ -11,12 +11,12 @@
 --
 -- structure distributed { Kernel 2 }
 
-fun main(a: [][n][m]int): [][][]int =
-  map (\(a_row: [][]int): [m][n]int  ->
-        let b = map (\(a_row_row: []int): []int  ->
+fun main(a: [][n][m]i32): [][][]i32 =
+  map (\(a_row: [][]i32): [m][n]i32  ->
+        let b = map (\(a_row_row: []i32): []i32  ->
                       scan (+) 0 (a_row_row)
                    ) (a_row) in
-        map (\(b_col: []int): []int  ->
+        map (\(b_col: []i32): []i32  ->
               scan (+) 0 (b_col)
            ) (transpose(b))
      ) a

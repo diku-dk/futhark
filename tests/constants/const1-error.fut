@@ -4,6 +4,6 @@
 -- ==
 -- error:
 
-val n: int = 3
+val n: i32 = 3
 
-fun main(): [n]int = replicate n 0
+fun main(): [n]i32 = replicate n 0

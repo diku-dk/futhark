@@ -12,7 +12,7 @@
 -- }
 -- structure { Map 2 Map/Map/Redomap 1 }
 
-fun main(x: [n][m]int, y: [m][p]int): [n][p]int =
+fun main(x: [n][m]i32, y: [m][p]i32): [n][p]i32 =
   map (\xr -> map (\yc -> reduce (+) 0 (zipWith (*) xr yc))
                     (transpose y))
        x

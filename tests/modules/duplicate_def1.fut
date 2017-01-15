@@ -4,10 +4,10 @@
 -- input { }
 -- output { 1 2.0 }
 
-type foo = int
+type foo = i32
 module Foo
   {
-    fun foo(): int = 1
+    fun foo(): i32 = 1
     module Foo
       {
         type foo = f64

@@ -56,7 +56,7 @@
 -- input { 5 -1i32  0i32 } output { -1i32 }
 -- input { 5 -1i32  1i32 } output { 2147483647i32 }
 
-fun main(f: int, x: i32, y: i32): i32 =
+fun main(f: i32, x: i32, y: i32): i32 =
   if      f == 0 then x & y
   else if f == 1 then x | y
   else if f == 2 then x ^ y

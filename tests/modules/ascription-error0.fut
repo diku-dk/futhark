@@ -5,16 +5,16 @@
 module type SIG {
 type t
 
-val inject: int -> t
-val extract: t -> int
+val inject: i32 -> t
+val extract: t -> i32
 }
 
 module Struct: SIG {
-type t = int
+type t = i32
 
-fun inject (x: int): int = x
-fun extract (x: int): int = x
+fun inject (x: i32): i32 = x
+fun extract (x: i32): i32 = x
 }
 
-fun main(x: int): int =
+fun main(x: i32): i32 =
   Struct.inject x

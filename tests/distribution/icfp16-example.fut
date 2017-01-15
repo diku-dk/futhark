@@ -24,16 +24,16 @@
 --   Kernel 7
 -- }
 
-fun main(pss: [n][m]int): ([n][m][m]int, [n][m]int) =
+fun main(pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
   let (asss, bss) =
-    unzip(map (\(ps: []int): ([m][m]int, [m]int)  ->
-                let ass = map (\(p: int): [m]int  ->
+    unzip(map (\(ps: []i32): ([m][m]i32, [m]i32)  ->
+                let ass = map (\(p: i32): [m]i32  ->
                                 let cs = scan (+) 0 (iota(p))
                                 let f = reduce (+) 0 cs
                                 let as = map (+f) ps
                                 in as) ps
                 loop (bs=ps) = for i < n do
-                  let bs' = map (\(as: []int, b: int): int  ->
+                  let bs' = map (\(as: []i32, b: i32): i32  ->
                                   let d = reduce (+) 0 as
                                   let e = d + b
                                   let b' = 2 * e

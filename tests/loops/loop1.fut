@@ -4,7 +4,7 @@
 -- output {
 --   [1, 5, 9]
 -- }
-fun main(): []int =
+fun main(): []i32 =
   let arr = [(0,1), (2,3), (4,5)]
   let n = (shape arr)[0]
   let outarr = replicate n (0,0) in

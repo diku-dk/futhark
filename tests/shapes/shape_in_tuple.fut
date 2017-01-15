@@ -5,5 +5,5 @@
 -- input { 2 [1,2,3] }
 -- output { 4 }
 
-fun main ((_, elems: [n]int): (int,[]int)): int =
+fun main ((_, elems: [n]i32): (i32,[]i32)): i32 =
   n + elems[0]

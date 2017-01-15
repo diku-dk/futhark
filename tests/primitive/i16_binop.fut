@@ -26,7 +26,7 @@
 -- input { 3 11i16 6i16 } output { 2089i16 }
 -- input { 3 11i16 7i16 } output { 22979i16 }
 
-fun main(f: int, x: i16, y: i16): i16 =
+fun main(f: i32, x: i16, y: i16): i16 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

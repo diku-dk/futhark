@@ -3,7 +3,7 @@
 -- ==
 -- error: Duplicate.*mydup
 
-type mydup = int
+type mydup = i32
 type mydup = f32
 
-fun main(x: int): int = x
+fun main(x: i32): i32 = x

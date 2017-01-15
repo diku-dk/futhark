@@ -12,17 +12,17 @@
 
 -- These two functions define the satisfaction property.  pred2 must
 -- be transitive.
-fun pred1(x: int): bool =
+fun pred1(x: i32): bool =
   true
 
-fun pred2(x: int, y: int): bool =
+fun pred2(x: i32, y: i32): bool =
   x <= y
 
-fun max(x: int, y: int): int =
+fun max(x: i32, y: i32): i32 =
   if x > y then x else y
 
-fun redOp(x: (int,int,int,int,int,int)) (y: (int,int,int,int,int,int)):
-  (int,int,int,int,int,int) =
+fun redOp(x: (i32,i32,i32,i32,i32,i32)) (y: (i32,i32,i32,i32,i32,i32)):
+  (i32,i32,i32,i32,i32,i32) =
   let (lssx, lisx, lcsx, tlx, firstx, lastx) = x
   let (lssy, lisy, lcsy, tly, firsty, lasty) = y
 
@@ -37,11 +37,11 @@ fun redOp(x: (int,int,int,int,int,int)) (y: (int,int,int,int,int,int)):
 
   (newlss, newlis, newlcs, tlx+tly, first, last)
 
-fun mapOp (x: int): (int,int,int,int,int,int) =
+fun mapOp (x: i32): (i32,i32,i32,i32,i32,i32) =
   let xmatch = if pred1(x) then 1 else 0 in
   (xmatch, xmatch, xmatch, 1, x, x)
 
-fun main(xs: []int): int =
+fun main(xs: []i32): i32 =
   let (x,_,_,_,_,_) =
     reduce redOp (0,0,0,0,0,0) (map mapOp xs) in
   x

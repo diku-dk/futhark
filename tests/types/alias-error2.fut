@@ -3,6 +3,6 @@
 -- ==
 -- error: .*non-array.*
 
-type t = int
+type t = i32
 
 fun main(x: *t): t = x

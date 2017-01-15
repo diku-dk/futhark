@@ -5,5 +5,5 @@
 -- input { [0,1,2,3,4,5,6,7,8,9] 9 4 -2 } output { [9,7,5] }
 -- input { [0,1,2,3,4,5,6,7,8,9] 9 -10 -2 } error: Assertion.*failed
 
-fun main(as: []int, i: int, j: int, s: int): []int =
+fun main(as: []i32, i: i32, j: i32, s: i32): []i32 =
   as[i:j:s]

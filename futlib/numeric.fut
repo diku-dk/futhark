@@ -6,13 +6,13 @@ module type NUMERIC {
   val mul: t -> t -> t
   val div: t -> t -> t
 
-  val fromInt: int -> t
+  val fromInt: i32 -> t
 
   val eq: t -> t -> bool
   val lt: t -> t -> bool
   val gt: t -> t -> bool
 
-  val sgn: t -> int
+  val sgn: t -> i32
 }
 
 module type INTEGRAL {
@@ -24,13 +24,13 @@ module type INTEGRAL {
   val div: t -> t -> t
   val mod: t -> t -> t
 
-  val fromInt: int -> t
+  val fromInt: i32 -> t
 
   val eq: t -> t -> bool
   val lt: t -> t -> bool
   val gt: t -> t -> bool
 
-  val sgn: t -> int
+  val sgn: t -> i32
 }
 
 module type REAL {
@@ -41,35 +41,35 @@ module type REAL {
   val mul: t -> t -> t
   val div: t -> t -> t
 
-  val fromInt: int -> t
-  val fromFraction: int -> int -> t
-  val toInt: t -> int
+  val fromInt: i32 -> t
+  val fromFraction: i32 -> i32 -> t
+  val toInt: t -> i32
 
   val eq: t -> t -> bool
   val lt: t -> t -> bool
   val gt: t -> t -> bool
 
-  val sgn: t -> int
+  val sgn: t -> i32
 
   val sqrt: t -> t
 }
 
 module I32 {
-  type t = int
+  type t = i32
 
-  fun add (x: int) (y: int) = x + y
-  fun sub  (x: int) (y: int) = x - y
-  fun mul (x: int) (y: int) = x * y
-  fun div (x: int) (y: int) = x / y
-  fun mod (x: int) (y: int) = x % y
+  fun add (x: i32) (y: i32) = x + y
+  fun sub  (x: i32) (y: i32) = x - y
+  fun mul (x: i32) (y: i32) = x * y
+  fun div (x: i32) (y: i32) = x / y
+  fun mod (x: i32) (y: i32) = x % y
 
-  fun fromInt(x: int) = x
+  fun fromInt(x: i32) = x
 
-  fun eq (x: int) (y: int) = x == y
-  fun lt (x: int) (y: int) = x < y
-  fun gt (x: int) (y: int) = x > y
+  fun eq (x: i32) (y: i32) = x == y
+  fun lt (x: i32) (y: i32) = x < y
+  fun gt (x: i32) (y: i32) = x > y
 
-  fun sgn (x: int) = signum x
+  fun sgn (x: i32) = signum x
 }
 
 module F32 {
@@ -80,9 +80,9 @@ module F32 {
   fun mul (x: f32) (y: f32) = x * y
   fun div (x: f32) (y: f32) = x / y
 
-  fun fromInt (x: int) = f32 x
-  fun fromInts (x: int) (y: int) = f32 x / f32 y
-  fun toInt (x: f32) = int x
+  fun fromInt (x: i32) = f32 x
+  fun fromInts (x: i32) (y: i32) = f32 x / f32 y
+  fun toInt (x: f32) = i32 x
 
   fun eq (x: f32) (y: f32) = x == y
   fun lt (x: f32) (y: f32) = x < y

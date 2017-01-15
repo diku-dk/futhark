@@ -3,13 +3,13 @@
 --
 -- we could turn it into:
 --
--- fun []int bettermain ([]int xs, [n]int ys, [n]int zs, [n]int is, [n]int js) =
---   map (\int (int y, int z, int i, int j) ->
+-- fun []i32 bettermain ([]i32 xs, [n]i32 ys, [n]i32 zs, [n]i32 is, [n]i32 js) =
+--   map (\i32 (i32 y, i32 z, i32 i, i32 j) ->
 --          xs[i*z + j]
 --       , zip(ys,zs,is,js))
 
-fun main (xs: []int, ys: [n]int, zs: [n]int, is: [n]int, js: [n]int): []int =
-  map  (\(y: int, z: int, i: int, j: int): int  ->
+fun main (xs: []i32, ys: [n]i32, zs: [n]i32, is: [n]i32, js: [n]i32): []i32 =
+  map  (\(y: i32, z: i32, i: i32, j: i32): i32  ->
          unsafe
          let tmp = reshape (y,z) xs
          in tmp[i,j]

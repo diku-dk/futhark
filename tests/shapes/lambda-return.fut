@@ -15,10 +15,10 @@
 --    [7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9]]
 -- }
 
-fun multiply(a: []int, n: int): []int =
+fun multiply(a: []i32, n: i32): []i32 =
   if n == 1 then a else multiply(concat a a, n-1)
 
-fun main(a: [m][]int, x: int): [][]int =
+fun main(a: [m][]i32, x: i32): [][]i32 =
   let n = m * (2 ** (x-1))
-  in map (\(r: []int): [n]int  ->
+  in map (\(r: []i32): [n]i32  ->
            multiply(r,x)) a

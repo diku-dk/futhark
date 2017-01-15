@@ -33,7 +33,7 @@ fun doCompute(data1:
     in
     reduce reduceBins (replicate numBins2 0i64) value
 
-fun main(numBins: int): *[]i64 =
+fun main(numBins: i32): *[]i64 =
     let binb = map (\(k: f32): f32  -> k) (iota32(numBins + 1))
     let datapoints = iota32(10)
     let randompoints = replicate 1 datapoints

@@ -17,6 +17,6 @@
 --   42
 --   1338
 -- }
-fun main(n: int, i: int, a: [][]int): (int,int) =
+fun main(n: i32, i: i32, a: [][]i32): (i32,i32) =
   let (a,b) = split (n) a[i] in
   (reduce (+) 0 a, reduce (+) 0 b)

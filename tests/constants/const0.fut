@@ -3,6 +3,6 @@
 -- ==
 -- input {} output { 2 }
 
-val v: int = 2
+val v: i32 = 2
 
-fun main(): int = v
+fun main(): i32 = v

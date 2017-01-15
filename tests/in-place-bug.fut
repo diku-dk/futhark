@@ -9,7 +9,7 @@ fun explicitMethod(myD:  [][m]f64,  myDD: [][]f64,
                               myMu: [][]f64, myVar: [][]f64, result: [][]f64 ): [][]f64 =
   copy( map (\(tup:  ([]f64,[]f64,[]f64) ): []f64  ->
                let (mu_row, var_row, result_row) = tup in
-               map (\(tup: ([]f64, []f64, f64, f64, int)): f64  ->
+               map (\(tup: ([]f64, []f64, f64, f64, i32)): f64  ->
                       let ( dx, dxx, mu, var, j ) = tup in
                       ( mu*dx[1] + 0.5*var*dxx[1] ) * result_row[j]
                   ) (zip myD myDD (mu_row) (var_row) (iota(m) )
@@ -34,7 +34,7 @@ fun implicitMethod(myD:  [][]f64,  myDD: [][]f64,
      ) (zip myMu myVar u
      )
 
-fun main(numX: int, numY: int, numT: int, s0: f64, strike: f64, t: f64, alpha: f64, nu: f64, beta: f64): f64 =
+fun main(numX: i32, numY: i32, numT: i32, s0: f64, strike: f64, t: f64, alpha: f64, nu: f64, beta: f64): f64 =
     let myX = map f64 (iota(numX))
     let myY = map f64 (iota(numY))
     let (myDx, myDxx) = (empty([]f64), empty([]f64))

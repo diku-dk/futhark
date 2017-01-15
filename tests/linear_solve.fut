@@ -7,7 +7,7 @@
 --         [1.0f32, 2.0f32, 3.0f32] }
 -- output { [0.5f32, -0.5f32, 1.5f32] }
 
-fun Gauss_Jordan (A: [n][m]f32) (i: int): [n][m]f32 =
+fun Gauss_Jordan (A: [n][m]f32) (i: i32): [n][m]f32 =
   if i == n then A else
     let irow = A[0]
     let Ap = A[1:n]

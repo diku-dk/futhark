@@ -290,7 +290,7 @@ fun go (x: (bool,f64,f64,f64)): f64 =
 fun blackscholes (xs: [](bool,f64,f64,f64)): []f64 =
    map  go xs
 
-fun main (years: int): []f64 =
+fun main (years: i32): []f64 =
   let days = years*365
   let a = map (+1) (iota(days))
   let a = map f64 a
