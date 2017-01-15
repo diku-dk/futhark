@@ -10,6 +10,11 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , mapKernelFromBody
        , KernelInput(..)
        , mapKernelSkeleton
+
+       -- Helper functions shared with at least Segmented.hs
+       , kerneliseLambda
+       , newKernelSpace
+       , chunkLambda
        )
        where
 
@@ -144,7 +149,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   red_rets <- forM final_red_pes $ \pe ->
     return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
   map_rets <- forM chunk_map_pes $ \pe ->
-    return $ ConcatReturns ordering' w (kernelElementsPerThread step_one_size) $ patElemName pe
+    return $ ConcatReturns ordering' w (kernelElementsPerThread step_one_size) Nothing $ patElemName pe
   let rets = red_rets ++ map_rets
 
   return $ Kernel "chunked_reduce" cs space ts $
@@ -316,7 +321,7 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
     return $ ThreadsReturn AllThreads $ Var $ patElemName pe
   concat_rets <- forM chunk_map_pes $ \pe ->
-    return $ ConcatReturns ordering' w (kernelElementsPerThread kernel_size) $ patElemName pe
+    return $ ConcatReturns ordering' w (kernelElementsPerThread kernel_size) Nothing $ patElemName pe
 
   return $ Let pat () $ Op $ Kernel "chunked_map" cs space ts $
     KernelBody () chunk_and_fold $ nonconcat_rets ++ concat_rets
