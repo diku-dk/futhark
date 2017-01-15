@@ -780,15 +780,10 @@ builtIns = HM.fromList $ zipWith namify [0..] $
 
            map (convertFun $ Bool : anyNumberType) anyNumberType ++
 
-           [("int", BuiltInPolyFun $ zip (map (pure . FloatType) [minBound..maxBound])
-                    (repeat (Signed Int32)))] ++
-
            map builtInType (map Signed [minBound..maxBound] ++
                             map Unsigned [minBound..maxBound] ++
                             map FloatType [minBound..maxBound] ++
-                            [Bool]) ++
-
-           [("int", BuiltInType $ Signed Int32)]
+                            [Bool])
 
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
