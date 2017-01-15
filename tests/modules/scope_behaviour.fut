@@ -5,17 +5,17 @@
 -- output {
 -- 1 2 3
 -- }
-type foo = (int, f32)
+type foo = (int, f64)
 
 module M0
   {
-    type foo = (f32, int)
+    type foo = (f64, int)
     type bar = foo
   }
 
 module M1
   {
-    type foo = f32
+    type foo = f64
     type bar = M0.bar -- type is defined at line 13
 
     module M0
@@ -29,5 +29,5 @@ module M1
 
 type baz = M1.baz -- is defined at line 27
 
-fun main(a: int, b: f32): baz = (1,2,3)
+fun main(a: int, b: f64): baz = (1,2,3)
 
