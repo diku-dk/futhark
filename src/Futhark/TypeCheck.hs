@@ -364,8 +364,7 @@ expandAliases names env = names `HS.union` aliasesOfAliases
           Just (LetInfo (als, _)) -> unNames als
           _                       -> mempty
 
-binding :: Checkable lore =>
-           Scope (Aliases lore)
+binding :: Scope (Aliases lore)
         -> TypeM lore a
         -> TypeM lore a
 binding bnds = check . local (`bindVars` bnds)
@@ -517,8 +516,7 @@ checkFun (FunDef _ fname rettype params body) =
                            , unique $ paramDeclType param
                            ]
 
-funParamsToNameInfos :: Checkable lore =>
-                        [FParam lore]
+funParamsToNameInfos :: [FParam lore]
                      -> [(VName, NameInfo (Aliases lore))]
 funParamsToNameInfos = map nameTypeAndLore
   where nameTypeAndLore fparam = (paramName fparam,
@@ -1026,8 +1024,7 @@ checkArg arg = do argt <- checkSubExp arg
                   als <- subExpAliasesM arg
                   return (argt, als)
 
-checkFuncall :: Checkable lore =>
-                Maybe Name
+checkFuncall :: Maybe Name
              -> [DeclType] -> [Arg]
              -> TypeM lore ()
 checkFuncall fname paramts args = do

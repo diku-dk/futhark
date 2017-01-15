@@ -255,7 +255,7 @@ instance Rename SplitOrdering where
   rename (SplitStrided stride) =
     SplitStrided <$> rename stride
 
-instance (Attributes lore, Renameable lore) => Rename (KernelExp lore) where
+instance Renameable lore => Rename (KernelExp lore) where
   rename (SplitArray o w i elems_per_thread vs) =
     SplitArray
     <$> rename o
@@ -279,7 +279,7 @@ instance (Attributes lore, Renameable lore) => Rename (KernelExp lore) where
     GroupStream <$> rename w <*> rename maxchunk <*>
     rename lam <*> rename accs <*> rename arrs
 
-instance (Attributes lore, Renameable lore) => Rename (GroupStreamLambda lore) where
+instance Renameable lore => Rename (GroupStreamLambda lore) where
   rename (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
     bindingForRename (chunk_size : chunk_offset :
                        map paramName (acc_params++arr_params)) $
@@ -387,7 +387,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
   removeOpWisdom (SplitSpace o w i elems_per_thread) =
     SplitSpace o w i elems_per_thread
 
-instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (KernelExp lore) where
+instance UsageInOp (KernelExp lore) where
   usageInOp _ = mempty
 
 instance OpMetrics (Op lore) => OpMetrics (KernelExp lore) where

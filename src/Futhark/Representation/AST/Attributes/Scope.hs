@@ -211,8 +211,7 @@ instance (HasScope lore m, Monad m) =>
   askScope = HM.union <$> ask <*> ExtendedScope (lift askScope)
 
 -- | Run a computation in the extended type environment.
-extendedScope :: Annotations lore =>
-                 ExtendedScope lore m a
+extendedScope :: ExtendedScope lore m a
               -> Scope lore
               -> m a
 extendedScope (ExtendedScope m) = runReaderT m

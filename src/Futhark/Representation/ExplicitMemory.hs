@@ -852,7 +852,7 @@ arrayVarReturns v = do
     _ ->
       fail $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
-varReturns :: (HasScope lore m, Monad m, ExplicitMemorish lore, Attributes lore) =>
+varReturns :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
               VName -> m ExpReturns
 varReturns v = do
   summary <- lookupMemBound v

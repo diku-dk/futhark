@@ -129,10 +129,7 @@ primOpType (Partition _ n _ arrays) =
 
 
 -- | The type of an expression.
-expExtType :: (HasScope lore m,
-               IsRetType (RetType lore),
-               Typed (FParamAttr lore),
-               TypedOp (Op lore)) =>
+expExtType :: (HasScope lore m, TypedOp (Op lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
@@ -161,7 +158,7 @@ instance Annotations lore => HasScope lore (FeelBad lore) where
   askScope = pure mempty
 
 -- | The type of a body.
-bodyExtType :: (Annotations lore, HasScope lore m, Monad m) =>
+bodyExtType :: (HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
   existentialiseExtTypes bound . staticShapes <$>

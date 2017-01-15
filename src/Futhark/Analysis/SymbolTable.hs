@@ -83,7 +83,7 @@ instance Monoid (SymbolTable lore) where
 empty :: SymbolTable lore
 empty = SymbolTable 0 HM.empty
 
-fromScope :: Annotations lore => Scope lore -> SymbolTable lore
+fromScope :: Scope lore -> SymbolTable lore
 fromScope = HM.foldlWithKey' insertFreeVar' empty
   where insertFreeVar' m k attr = insertFreeVar k attr m
 
@@ -270,7 +270,7 @@ instance Substitutable lore => Substitute (LParamEntry lore) where
         , lparamAttr = substituteNames substs $ lparamAttr entry
       }
 
-instance Substitutable lore => Substitute (LoopVarEntry lore) where
+instance Substitute (LoopVarEntry lore) where
   substituteNames substs entry =
     LoopVarEntry {
           loopVarRange = substituteNames substs $ loopVarRange entry
@@ -447,8 +447,7 @@ insertStm bnd vtable =
   insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
   where names = patternNames $ bindingPattern bnd
 
-insertFParam :: Annotations lore =>
-                AST.FParam lore
+insertFParam :: AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
 insertFParam fparam = insertEntry name entry
@@ -458,8 +457,8 @@ insertFParam fparam = insertEntry name entry
                                    , fparamStmDepth = 0
                                    }
 
-insertFParams :: Annotations lore =>
-                 [AST.FParam lore] -> SymbolTable lore
+insertFParams :: [AST.FParam lore]
+              -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 

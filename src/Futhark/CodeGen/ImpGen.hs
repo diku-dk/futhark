@@ -405,7 +405,7 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
             compileBody dests body
           return (outparams, inparams, results, args)
 
-compileBody :: ExplicitMemorish lore => Destination -> Body lore -> ImpM lore op ()
+compileBody :: Destination -> Body lore -> ImpM lore op ()
 compileBody dest body = do
   cb <- asks envBodyCompiler
   cb dest body
@@ -446,8 +446,7 @@ compileStms (Let pat _ e:bs) m =
     dest <- destinationFromPattern pat
     compileExp dest e $ compileStms bs m
 
-compileExp :: ExplicitMemorish lore =>
-              Destination -> Exp lore -> ImpM lore op a -> ImpM lore op a
+compileExp :: Destination -> Exp lore -> ImpM lore op a -> ImpM lore op a
 compileExp targets e m = do
   ec <- asks envExpCompiler
   ec targets e

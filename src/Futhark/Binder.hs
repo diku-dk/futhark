@@ -54,7 +54,7 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (Attributes lore, Applicative m, Monad m) =>
+instance (Attributes lore, Monad m) =>
          HasScope lore (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ HM.lookup name
@@ -63,7 +63,7 @@ instance (Attributes lore, Applicative m, Monad m) =>
       Just t' -> return $ typeOf t'
   askScope = BinderT get
 
-instance (Attributes lore, Applicative m, Monad m) =>
+instance (Attributes lore, Monad m) =>
          LocalScope lore (BinderT lore m) where
   localScope types (BinderT m) = BinderT $ do
     modify (`HM.union` types)
@@ -127,13 +127,13 @@ runBinderEmptyEnv :: MonadFreshNames m =>
 runBinderEmptyEnv m =
   modifyNameSource $ runState $ runBinderT m mempty
 
-addBinderStm :: (Annotations lore, Monad m) =>
+addBinderStm :: Monad m =>
                 Stm lore -> BinderT lore m ()
 addBinderStm binding = do
   tell $ DL.singleton binding
   BinderT $ modify (`HM.union` scopeOf binding)
 
-collectBinderStms :: (Annotations lore, Monad m) =>
+collectBinderStms :: Monad m =>
                      BinderT lore m a
                   -> BinderT lore m (a, [Stm lore])
 collectBinderStms m = pass $ do

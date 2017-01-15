@@ -220,7 +220,7 @@ primOpRanges _ =
   [unknownRange]
 
 -- | Ranges of the value parts of the expression.
-expRanges :: (Ranged lore, TypedOp (Op lore)) =>
+expRanges :: Ranged lore =>
              Exp lore -> [Range]
 expRanges (BasicOp op) =
   primOpRanges op

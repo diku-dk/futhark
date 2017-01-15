@@ -112,7 +112,7 @@ instance FreeIn num => FreeIn (IxFun num) where
   freeIn (Reshape ixfun dims) =
     freeIn ixfun <> freeIn dims
 
-instance (Eq num, IntegralExp num, Substitute num, Rename num) => Rename (IxFun num) where
+instance (Eq num, IntegralExp num, Substitute num) => Rename (IxFun num) where
   rename = substituteRename
 
 index :: (Pretty num, IntegralExp num) =>
@@ -140,8 +140,7 @@ index (Reshape fun newshape) is element_size =
   let new_indices = reshapeIndex (shape fun) (newDims newshape) is
   in index fun new_indices element_size
 
-iota :: IntegralExp num =>
-        Shape num -> IxFun num
+iota :: Shape num -> IxFun num
 iota = Direct
 
 offsetIndex :: (Eq num, IntegralExp num) =>

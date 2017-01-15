@@ -34,7 +34,7 @@ import Futhark.MonadFreshNames
 import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert
 
-nonuniqueParams :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
+nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
                    [LParam lore] -> m ([LParam lore], [Stm lore])
 nonuniqueParams params =
   modifyNameSource $ runState $ fmap fst $ runBinderEmptyEnv $

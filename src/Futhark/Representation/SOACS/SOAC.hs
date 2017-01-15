@@ -214,7 +214,7 @@ soacType (Write _cs _w lam _ivs as) =
         n = length lam_ts
         ws = map fst as
 
-instance Attributes lore => TypedOp (SOAC lore) where
+instance TypedOp (SOAC lore) where
   opType = pure . soacType
 
 instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
@@ -317,7 +317,7 @@ substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 
-instance (Attributes inner, Ranged inner) => RangedOp (SOAC inner) where
+instance (Ranged inner) => RangedOp (SOAC inner) where
   opRanges op = replicate (length $ soacType op) unknownRange
 
 instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) where
@@ -366,7 +366,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
                    (return . removeExtLambdaWisdom)
                    return return
 
-instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (SOAC lore) where
+instance Aliased lore => UsageInOp (SOAC lore) where
   usageInOp (Map _ _ f arrs) = usageInLambda f arrs
   usageInOp (Redomap _ _ _ _ f _ arrs) = usageInLambda f arrs
   usageInOp _ = mempty
