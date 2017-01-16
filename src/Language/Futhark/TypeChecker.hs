@@ -302,29 +302,38 @@ instance Monoid Scope where
     Scope (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
 
 initialScope :: Scope
-initialScope = Scope initialVtable initialTypeTable mempty mempty builtInMap
-  where initialVtable = HM.fromList $ mapMaybe addBuiltInF $ HM.toList builtIns
-        initialTypeTable = HM.fromList $ mapMaybe addBuiltInT $ HM.toList builtIns
+initialScope = intrinsicsModule
+               { envModTable = initialModTable
+               , envNameMap = HM.insert
+                              (Structure, nameFromString "Intrinsics")
+                              (ID (nameFromString "Intrinsics", 0))
+                              intrinsicsNameMap
+               }
+  where initialVtable = HM.fromList $ mapMaybe addIntrinsicF $ HM.toList intrinsics
+        initialTypeTable = HM.fromList $ mapMaybe addIntrinsicT $ HM.toList intrinsics
+        initialModTable = HM.singleton (nameFromString "Intrinsics") (ModMod intrinsicsModule)
 
-        addBuiltInF (name, BuiltInMonoFun ts t) =
+        intrinsicsModule = Scope initialVtable initialTypeTable mempty mempty intrinsicsNameMap
+
+        addIntrinsicF (name, IntrinsicMonoFun ts t) =
           Just (name, BoundF (map Prim ts, Prim t))
-        addBuiltInF (name, BuiltInPolyFun variants) =
+        addIntrinsicF (name, IntrinsicPolyFun variants) =
           Just (name, OverloadedF $ map frob variants)
           where frob :: ([PrimType], PrimType) -> ([TypeBase Rank ()],FunBinding)
                 frob (pts, rt) = (map Prim pts, (map Prim pts, Prim rt))
-        addBuiltInF (name, BuiltInEquality) =
+        addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
-        addBuiltInF _ = Nothing
+        addIntrinsicF _ = Nothing
 
-        addBuiltInT (name, BuiltInType t) =
+        addIntrinsicT (name, IntrinsicType t) =
           Just (name, TypeAbbr $ Prim t)
-        addBuiltInT _ =
+        addIntrinsicT _ =
           Nothing
 
-        builtInMap :: NameMap
-        builtInMap = HM.fromList $ map mapping $ HM.toList builtIns
-          where mapping (v, BuiltInType{}) = ((Type, baseName v), v)
-                mapping (v, _) =             ((Term, baseName v), v)
+        intrinsicsNameMap :: NameMap
+        intrinsicsNameMap = HM.fromList $ map mapping $ HM.toList intrinsics
+          where mapping (v, IntrinsicType{}) = ((Type, baseName v), v)
+                mapping (v, _)               = ((Term, baseName v), v)
 
 scopeTypeAbbrs :: Scope -> [(VName,StructType)]
 scopeTypeAbbrs = mapMaybe unTypeAbbr . HM.toList . envTypeTable
@@ -963,6 +972,9 @@ checkModExp (ModDecs decs loc) = do
   return (scope, ModDecs decs' loc)
 checkModExp (ModVar v loc) = do
   (v', scope) <- lookupMod loc v
+  when (baseName (qualLeaf v') == nameFromString "Intrinsics" &&
+        baseTag (qualLeaf v') <= maxIntrinsicTag) $
+    bad $ TypeError loc "The Intrinsics module may not be used in module expressions."
   return (scope, ModVar v' loc)
 checkModExp (ModApply f e NoInfo loc) = do
   (f', functor) <- lookupFunctor loc f

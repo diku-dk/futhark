@@ -7,8 +7,9 @@
 module Language.Futhark.Attributes
   (
   -- * Various
-    BuiltIn(..)
-  , builtIns
+    Intrinsic(..)
+  , intrinsics
+  , maxIntrinsicTag
   , namesToPrimTypes
   , qualName
   , typeName
@@ -756,15 +757,15 @@ namesToPrimTypes = HM.fromList
 -- | The nature of something predefined.  These can either be monomorphic
 -- or polymorphic.  A polymorphic builtin is a mapping from valid
 -- parameter types to the result type.
-data BuiltIn = BuiltInMonoFun [PrimType] PrimType
-             | BuiltInPolyFun [([PrimType], PrimType)]
-             | BuiltInType PrimType
-             | BuiltInEquality -- Special cased.
+data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
+             | IntrinsicPolyFun [([PrimType], PrimType)]
+             | IntrinsicType PrimType
+             | IntrinsicEquality -- Special cased.
 
 -- | A map of all built-ins.
-builtIns :: HM.HashMap VName BuiltIn
-builtIns = HM.fromList $ zipWith namify [0..] $
-           map (second $ uncurry BuiltInMonoFun)
+intrinsics :: HM.HashMap VName Intrinsic
+intrinsics = HM.fromList $ zipWith namify [0..] $
+             map (second $ uncurry IntrinsicMonoFun)
              [("sqrt32", ([FloatType Float32], FloatType Float32))
              ,("log32", ([FloatType Float32], FloatType Float32))
              ,("exp32", ([FloatType Float32], FloatType Float32))
@@ -792,28 +793,28 @@ builtIns = HM.fromList $ zipWith namify [0..] $
 
            [ ("signum", anyNumberFun)
            , ("abs", anyNumberFun)
-           , ("~", BuiltInPolyFun $
+           , ("~", IntrinsicPolyFun $
                    [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
                    [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
-           , ("!", BuiltInPolyFun [([Bool], Bool)])] ++
+           , ("!", IntrinsicPolyFun [([Bool], Bool)])] ++
 
            map (convertFun anyPrimType) anyPrimType ++
 
-           map builtInType (map Signed [minBound..maxBound] ++
-                            map Unsigned [minBound..maxBound] ++
-                            map FloatType [minBound..maxBound] ++
-                            [Bool]) ++
+           map intrinsicType (map Signed [minBound..maxBound] ++
+                              map Unsigned [minBound..maxBound] ++
+                              map FloatType [minBound..maxBound] ++
+                              [Bool]) ++
 
            -- The reason for the loop formulation is to ensure that we
            -- get a missing case warning if we forget a case.
-           map mkBuiltInBinOp [minBound..maxBound]
+           map mkIntrinsicBinOp [minBound..maxBound]
 
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
-        convertFun :: [PrimType] -> PrimType -> (String,BuiltIn)
-        convertFun from to = (pretty to, BuiltInPolyFun $ zip (map pure from) (repeat to))
+        convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
+        convertFun from to = (pretty to, IntrinsicPolyFun $ zip (map pure from) (repeat to))
 
-        builtInType t = (pretty t, BuiltInType t)
+        intrinsicType t = (pretty t, IntrinsicType t)
 
         anyIntType = map Signed [minBound..maxBound] ++
                      map Unsigned [minBound..maxBound]
@@ -821,8 +822,8 @@ builtIns = HM.fromList $ zipWith namify [0..] $
                         map FloatType [minBound..maxBound]
         anyPrimType = Bool : anyNumberType
 
-        anyNumberFun :: BuiltIn
-        anyNumberFun = BuiltInPolyFun
+        anyNumberFun :: Intrinsic
+        anyNumberFun = IntrinsicPolyFun
                        [([Signed Int8], Signed Int8),
                         ([Signed Int16], Signed Int16),
                         ([Signed Int32], Signed Int32),
@@ -836,36 +837,41 @@ builtIns = HM.fromList $ zipWith namify [0..] $
                         ([FloatType Float32], FloatType Float32),
                         ([FloatType Float64], FloatType Float64)]
 
-        mkBuiltInBinOp :: BinOp -> (String, BuiltIn)
-        mkBuiltInBinOp op = (pretty op, builtInBinOp op)
+        mkIntrinsicBinOp :: BinOp -> (String, Intrinsic)
+        mkIntrinsicBinOp op = (pretty op, intrinsicBinOp op)
 
-        binOp :: [PrimType] -> BuiltIn
-        binOp ts = BuiltInPolyFun [ ([t,t], t) | t <- ts ]
+        binOp :: [PrimType] -> Intrinsic
+        binOp ts = IntrinsicPolyFun [ ([t,t], t) | t <- ts ]
 
-        builtInBinOp Plus = binOp anyNumberType
-        builtInBinOp Minus = binOp anyNumberType
-        builtInBinOp Pow = binOp anyNumberType
-        builtInBinOp Times = binOp anyNumberType
-        builtInBinOp Divide = binOp anyNumberType
-        builtInBinOp Mod = binOp anyNumberType
-        builtInBinOp Quot = binOp anyIntType
-        builtInBinOp Rem = binOp anyIntType
-        builtInBinOp ShiftR = binOp anyIntType
-        builtInBinOp ZShiftR = binOp anyIntType
-        builtInBinOp ShiftL = binOp anyIntType
-        builtInBinOp Band = binOp anyIntType
-        builtInBinOp Xor = binOp anyIntType
-        builtInBinOp Bor = binOp anyIntType
-        builtInBinOp LogAnd = BuiltInMonoFun [Bool,Bool] Bool
-        builtInBinOp LogOr = BuiltInMonoFun [Bool,Bool] Bool
-        builtInBinOp Equal = BuiltInEquality
-        builtInBinOp NotEqual = BuiltInEquality
-        builtInBinOp Less = ordering
-        builtInBinOp Leq = ordering
-        builtInBinOp Greater = ordering
-        builtInBinOp Geq = ordering
+        intrinsicBinOp Plus = binOp anyNumberType
+        intrinsicBinOp Minus = binOp anyNumberType
+        intrinsicBinOp Pow = binOp anyNumberType
+        intrinsicBinOp Times = binOp anyNumberType
+        intrinsicBinOp Divide = binOp anyNumberType
+        intrinsicBinOp Mod = binOp anyNumberType
+        intrinsicBinOp Quot = binOp anyIntType
+        intrinsicBinOp Rem = binOp anyIntType
+        intrinsicBinOp ShiftR = binOp anyIntType
+        intrinsicBinOp ZShiftR = binOp anyIntType
+        intrinsicBinOp ShiftL = binOp anyIntType
+        intrinsicBinOp Band = binOp anyIntType
+        intrinsicBinOp Xor = binOp anyIntType
+        intrinsicBinOp Bor = binOp anyIntType
+        intrinsicBinOp LogAnd = IntrinsicMonoFun [Bool,Bool] Bool
+        intrinsicBinOp LogOr = IntrinsicMonoFun [Bool,Bool] Bool
+        intrinsicBinOp Equal = IntrinsicEquality
+        intrinsicBinOp NotEqual = IntrinsicEquality
+        intrinsicBinOp Less = ordering
+        intrinsicBinOp Leq = ordering
+        intrinsicBinOp Greater = ordering
+        intrinsicBinOp Geq = ordering
 
-        ordering = BuiltInPolyFun [ ([t,t], Bool) | t <- anyPrimType ]
+        ordering = IntrinsicPolyFun [ ([t,t], Bool) | t <- anyPrimType ]
+
+-- | The largest tag used by an intrinsic - this can be used to
+-- determine whether a 'VName' refers to an intrinsic or a user-defined name.
+maxIntrinsicTag :: Int
+maxIntrinsicTag = maximum $ map baseTag $ HM.keys intrinsics
 
 isValDec :: DecBase f vn -> Maybe (ValDecBase f vn)
 isValDec (ValDec d) = Just d

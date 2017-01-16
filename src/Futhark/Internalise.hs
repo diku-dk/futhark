@@ -51,8 +51,8 @@ internaliseProg prog = do
   sequence $ fmap I.renameProg prog'
 
 builtinFtable :: FunTable
-builtinFtable = HM.fromList $ mapMaybe addBuiltin $ HM.toList E.builtIns
-  where addBuiltin (name, E.BuiltInMonoFun paramts t) =
+builtinFtable = HM.fromList $ mapMaybe addBuiltin $ HM.toList E.intrinsics
+  where addBuiltin (name, E.IntrinsicMonoFun paramts t) =
           Just
           (name,
            FunBinding
@@ -1094,10 +1094,9 @@ internaliseDimConstant fname name =
 isOverloadedFunction :: E.QualName VName -> [E.Exp]
                      -> Maybe (String -> InternaliseM [SubExp])
 isOverloadedFunction qname args = do
-  guard $ baseTag (qualLeaf qname) <= max_builtin
+  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
   handle args $ baseString $ qualLeaf qname
   where
-    max_builtin = maximum $ map baseTag $ HM.keys E.builtIns
     handle [x] "i8"  = Just $ toSigned I.Int8 x
     handle [x] "i16" = Just $ toSigned I.Int16 x
     handle [x] "i32" = Just $ toSigned I.Int32 x
@@ -1172,7 +1171,6 @@ isOverloadedFunction qname args = do
 
                     letSubExp "arrays_equal" $
                       I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
-
 
     handle [x,y] name = do
       bop <- find ((name==) . pretty) [minBound..maxBound::E.BinOp]
