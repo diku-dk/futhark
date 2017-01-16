@@ -12,4 +12,4 @@
 fun add (x : f32) (y : f32): f32 = x + y
 
 fun main (xss : [m][n]f32): [m]f32 =
-  map (fn xs => reduce add 0.0f32 xs) xss
+  map (\xs -> reduce add 0.0f32 xs) xss

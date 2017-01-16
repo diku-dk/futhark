@@ -1,4 +1,5 @@
 {
+{-# LANGUAGE OverloadedStrings  #-}
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
@@ -90,27 +91,38 @@ import Language.Futhark.Parser.Lexer
       stringlit       { L _ (STRINGLIT _) }
       charlit         { L _ (CHARLIT _) }
 
-      '+'             { L $$ PLUS }
-      '-'             { L $$ MINUS }
-      '*'             { L $$ TIMES }
-      '/'             { L $$ DIVIDE }
-      '%'             { L $$ MOD }
-      '//'            { L $$ QUOT }
-      '%%'            { L $$ REM }
       '='             { L $$ EQU }
-      '=='            { L $$ EQU2 }
-      '!='            { L $$ NEQU }
+
+      '*'             { L $$ ASTERISK }
+      '-'             { L $$ NEGATE }
       '<'             { L $$ LTH }
       '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
       '>='            { L $$ GEQ }
-      '**'            { L $$ POW }
-      '<<'            { L $$ SHIFTL }
-      '>>'            { L $$ SHIFTR }
-      '>>>'           { L $$ ZSHIFTR }
-      '|'             { L $$ BOR }
-      '&'             { L $$ BAND }
-      '^'             { L $$ XOR }
+
+      '+...'          { L _ (SYMBOL Plus _ _) }
+      '-...'          { L _ (SYMBOL Minus _ _) }
+      '*...'          { L _ (SYMBOL Times _ _) }
+      '/...'          { L _ (SYMBOL Divide _ _) }
+      '%...'          { L _ (SYMBOL Mod _ _) }
+      '//...'         { L _ (SYMBOL Quot _ _) }
+      '%%...'         { L _ (SYMBOL Rem _ _) }
+      '==...'         { L _ (SYMBOL Equal _ _) }
+      '!=...'         { L _ (SYMBOL NotEqual _ _) }
+      '<...'          { L _ (SYMBOL Less _ _) }
+      '>...'          { L _ (SYMBOL Greater _ _) }
+      '<=...'         { L _ (SYMBOL Less _ _) }
+      '>=...'         { L _ (SYMBOL Greater _ _) }
+      '**...'         { L _ (SYMBOL Pow _ _) }
+      '<<...'         { L _ (SYMBOL ShiftL _ _) }
+      '>>...'         { L _ (SYMBOL ShiftR _ _) }
+      '>>>...'        { L _ (SYMBOL ZShiftR _ _) }
+      '|...'          { L _ (SYMBOL Bor _ _) }
+      '&...'          { L _ (SYMBOL Band _ _) }
+      '^...'          { L _ (SYMBOL Xor _ _) }
+      '||...'         { L _ (SYMBOL LogOr _ _) }
+      '&&...'         { L _ (SYMBOL LogAnd _ _) }
+
       '('             { L $$ LPAR }
       ')'             { L $$ RPAR }
       ')['            { L $$ RPAR_THEN_LBRACKET }
@@ -150,8 +162,6 @@ import Language.Futhark.Parser.Lexer
       partition       { L $$ PARTITION }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
-      '&&'            { L $$ AND }
-      '||'            { L $$ OR }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
       while           { L $$ WHILE }
@@ -169,16 +179,16 @@ import Language.Futhark.Parser.Lexer
 %left bottom
 %left ifprec letprec
 %left ','
-%left '||'
-%left '&&'
-%left '<=' '>=' '>' '<' '==' '!='
-%left '&' '^' '|'
+%left '||...'
+%left '&&...'
+%left '<=' '<=...' '>=' '>=...' '>' '>...' '<' '<...' '==...' '!=...'
+%left '&...' '^...' '|...'
 
-%left '<<' '>>' '>>>'
-%left '+' '-'
+%left '<<...' '>>...' '>>>...'
+%left '+...' '-...' '-'
 
-%left '*' '/' '%' '//' '%%'
-%left '**'
+%left '*...' '*' '/...' '%...' '//...' '%%...'
+%left '**...'
 %left ':'
 %nonassoc '~' '!' f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
@@ -302,28 +312,36 @@ DefaultDec :: { () }
 
 
 -- Note that this production does not include Minus.
-BinOp :: { (BinOp, SrcLoc) }
-      : '+'     { (Plus, $1) }
-      | '*'     { (Times, $1) }
-      | '/'     { (Divide, $1) }
-      | '%'     { (Mod, $1) }
-      | '//'    { (Quot, $1) }
-      | '%%'    { (Rem, $1) }
-      | '=='    { (Equal, $1) }
-      | '!='    { (NotEqual, $1) }
-      | '<'     { (Less, $1) }
-      | '<='    { (Leq, $1) }
-      | '>'     { (Greater, $1) }
-      | '>='    { (Geq, $1) }
-      | '&&'    { (LogAnd, $1) }
-      | '||'    { (LogOr, $1) }
-      | '**'    { (Pow, $1) }
-      | '^'     { (Xor, $1) }
-      | '&'     { (Band, $1) }
-      | '|'     { (Bor, $1) }
-      | '>>'    { (ShiftR, $1) }
-      | '>>>'   { (ZShiftR, $1) }
-      | '<<'    { (ShiftL, $1) }
+BinOp :: { QualName Name }
+      : '+...'     { binOpName $1 }
+      | '-...'     { binOpName $1 }
+      | '*...'     { binOpName $1 }
+      | '*'        { qualName (nameFromString "*") }
+      | '/...'     { binOpName $1 }
+      | '%...'     { binOpName $1 }
+      | '//...'    { binOpName $1 }
+      | '%%...'    { binOpName $1 }
+      | '==...'    { binOpName $1 }
+      | '!=...'    { binOpName $1 }
+      | '<...'     { binOpName $1 }
+      | '<=...'    { binOpName $1 }
+      | '>...'     { binOpName $1 }
+      | '>=...'    { binOpName $1 }
+      | '&&...'    { binOpName $1 }
+      | '||...'    { binOpName $1 }
+      | '**...'    { binOpName $1 }
+      | '^...'     { binOpName $1 }
+      | '&...'     { binOpName $1 }
+      | '|...'     { binOpName $1 }
+      | '>>...'    { binOpName $1 }
+      | '>>>...'   { binOpName $1 }
+      | '<<...'    { binOpName $1 }
+
+      | '<'     { QualName [] (nameFromString "<") }
+      | '<='    { QualName [] (nameFromString "<=") }
+      | '>'     { QualName [] (nameFromString ">") }
+      | '>='    { QualName [] (nameFromString ">=") }
+
 
 Headers :: { [ProgHeader] }
         : Header Headers { $1 : $2 }
@@ -490,29 +508,35 @@ Exp  :: { UncheckedExp }
      | write Atom Atom Atom
                          { Write $2 $3 $4 $1 }
 
-     | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
-     | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }
-     | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
-     | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
-     | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
-     | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
-     | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
-     | Exp '**' Exp   { BinOp Pow $1 $3 NoInfo $2 }
-     | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
-     | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
-     | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
-     | Exp '&&' Exp   { BinOp LogAnd $1 $3 NoInfo $2 }
-     | Exp '||' Exp   { BinOp LogOr $1 $3 NoInfo $2 }
-     | Exp '&' Exp    { BinOp Band $1 $3 NoInfo $2 }
-     | Exp '|' Exp    { BinOp Bor $1 $3 NoInfo $2 }
-     | Exp '^' Exp    { BinOp Xor $1 $3 NoInfo $2 }
+     | Exp '+...' Exp    { binOp $1 $2 $3 }
+     | Exp '-...' Exp    { binOp $1 $2 $3 }
+     | Exp '-' Exp       { binOp $1 (L $2 (SYMBOL Minus [] (nameFromString "-"))) $3 }
+     | Exp '*...' Exp    { binOp $1 $2 $3 }
+     | Exp '*' Exp       { binOp $1 (L $2 (SYMBOL Times [] (nameFromString "*"))) $3 }
+     | Exp '/...' Exp    { binOp $1 $2 $3 }
+     | Exp '%...' Exp    { binOp $1 $2 $3 }
+     | Exp '//...' Exp   { binOp $1 $2 $3 }
+     | Exp '%%...' Exp   { binOp $1 $2 $3 }
+     | Exp '**...' Exp   { binOp $1 $2 $3 }
+     | Exp '>>...' Exp   { binOp $1 $2 $3 }
+     | Exp '>>>...' Exp  { binOp $1 $2 $3 }
+     | Exp '<<...' Exp   { binOp $1 $2 $3 }
+     | Exp '&...' Exp    { binOp $1 $2 $3 }
+     | Exp '|...' Exp    { binOp $1 $2 $3 }
+     | Exp '&&...' Exp   { binOp $1 $2 $3 }
+     | Exp '||...' Exp   { binOp $1 $2 $3 }
+     | Exp '^...' Exp    { binOp $1 $2 $3 }
+     | Exp '==...' Exp   { binOp $1 $2 $3 }
+     | Exp '!=...' Exp   { binOp $1 $2 $3 }
+     | Exp '<...' Exp    { binOp $1 $2 $3 }
+     | Exp '<=...' Exp   { binOp $1 $2 $3 }
+     | Exp '>...' Exp    { binOp $1 $2 $3 }
 
-     | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
-     | Exp '!=' Exp   { BinOp NotEqual $1 $3 NoInfo $2 }
-     | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
-     | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
-     | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }
-     | Exp '>=' Exp   { BinOp Geq  $1 $3 NoInfo $2 }
+     | Exp '>=' Exp      { binOp $1 (L $2 (SYMBOL Geq [] (nameFromString ">="))) $3 }
+     | Exp '>' Exp       { binOp $1 (L $2 (SYMBOL Greater [] (nameFromString ">"))) $3 }
+     | Exp '<=' Exp      { binOp $1 (L $2 (SYMBOL Leq [] (nameFromString "<="))) $3 }
+     | Exp '<' Exp       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
+
      | Apply
        { let (fname, args, loc) = $1 in Apply fname [ (arg, Observe) | arg <- args ] NoInfo loc }
      | Atom %prec juxtprec { $1 }
@@ -643,17 +667,17 @@ FunAbstr :: { UncheckedLambda }
            -- Minus is handed explicitly here because I could not
            -- figure out how to resolve the ambiguity with negation.
          | '(' '-' Exp ')'
-           { CurryBinOpRight Minus $3 NoInfo NoInfo $1 }
+           { CurryBinOpRight (QualName [] (nameFromString "-")) $3 (NoInfo, NoInfo) NoInfo $1 }
          | '(' '-' ')'
-           { BinOpFun Minus NoInfo NoInfo NoInfo $1 }
+           { BinOpFun (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo $1 }
          | '(' Exp '-' ')'
-           { CurryBinOpLeft Minus $2 NoInfo NoInfo (srclocOf $1) }
+           { CurryBinOpLeft (QualName [] (nameFromString "-")) $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
          | '(' BinOp Exp ')'
-           { CurryBinOpRight (fst $2) $3 NoInfo NoInfo $1 }
+           { CurryBinOpRight $2 $3 (NoInfo, NoInfo) NoInfo $1 }
          | '(' Exp BinOp ')'
-           { CurryBinOpLeft (fst $3) $2 NoInfo NoInfo $1 }
+           { CurryBinOpLeft $3 $2 (NoInfo, NoInfo) NoInfo $1 }
          | '(' BinOp ')'
-           { BinOpFun (fst $2) NoInfo NoInfo NoInfo $1 }
+           { BinOpFun $2 NoInfo NoInfo NoInfo $1 }
 
 FunAbstrs : FunAbstr ',' FunAbstrs { $1 : $3 }
           | FunAbstr               { [$1] }
@@ -825,13 +849,18 @@ patternExp (Id ident) = return $ Var (QualName [] (identName ident)) NoInfo $ sr
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
-commutativity :: LambdaBase ty vn -> Commutativity
+commutativity :: LambdaBase ty Name -> Commutativity
 commutativity (BinOpFun binop _ _ _ _)
-  | commutative binop = Commutative
+  | commutative (leadingOperator (qualLeaf binop)) = Commutative -- FIXME
 commutativity _ = Noncommutative
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF
+
+binOpName (L _ (SYMBOL _ qs op)) = QualName qs op
+
+binOp x (L loc (SYMBOL _ qs op)) y =
+  BinOp (QualName qs op) (x, Observe) (y, Observe) NoInfo loc
 
 getTokens :: ParserMonad [L Token]
 getTokens = lift $ lift get

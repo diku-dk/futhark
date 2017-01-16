@@ -13,6 +13,7 @@ module Language.Futhark.Attributes
   , qualName
   , typeName
   , valueType
+  , leadingOperator
 
   -- * Queries on expressions
   , typeOf
@@ -42,6 +43,7 @@ module Language.Futhark.Attributes
   , vacuousShapeAnnotations
   , returnType
   , lambdaReturnType
+  , concreteType
 
   -- * Operations on types
   , peelArray
@@ -88,6 +90,7 @@ import qualified Data.HashSet            as HS
 import           Data.List
 import           Data.Loc
 import           Data.Maybe
+import           Data.Ord
 
 import           Prelude
 
@@ -685,6 +688,21 @@ lambdaReturnType (BinOpFun _ _ _ (Info t) _)        = toStruct t
 lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _)  = toStruct t
 lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
 
+-- | Is the type concrete, i.e, without any type variables?
+concreteType :: TypeBase f vn -> Bool
+concreteType Prim{} = True
+concreteType TypeVar{} = False
+concreteType (Tuple ts) = all concreteType ts
+concreteType (Array at) = concreteArrayType at
+  where concreteArrayType PrimArray{} = True
+        concreteArrayType PolyArray{} = False
+        concreteArrayType (TupleArray ts _ _) = all concreteTupleArrayElem ts
+
+        concreteTupleArrayElem PrimArrayElem{} = True
+        concreteTupleArrayElem (ArrayArrayElem at') = concreteArrayType at'
+        concreteTupleArrayElem PolyArrayElem{} = False
+        concreteTupleArrayElem (TupleArrayElem ts) = all concreteTupleArrayElem ts
+
 -- | Is the given binary operator commutative?
 commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
@@ -741,6 +759,7 @@ namesToPrimTypes = HM.fromList
 data BuiltIn = BuiltInMonoFun [PrimType] PrimType
              | BuiltInPolyFun [([PrimType], PrimType)]
              | BuiltInType PrimType
+             | BuiltInEquality -- Special cased.
 
 -- | A map of all built-ins.
 builtIns :: HM.HashMap VName BuiltIn
@@ -778,12 +797,16 @@ builtIns = HM.fromList $ zipWith namify [0..] $
                    [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
            , ("!", BuiltInPolyFun [([Bool], Bool)])] ++
 
-           map (convertFun $ Bool : anyNumberType) anyNumberType ++
+           map (convertFun anyPrimType) anyPrimType ++
 
            map builtInType (map Signed [minBound..maxBound] ++
                             map Unsigned [minBound..maxBound] ++
                             map FloatType [minBound..maxBound] ++
-                            [Bool])
+                            [Bool]) ++
+
+           -- The reason for the loop formulation is to ensure that we
+           -- get a missing case warning if we forget a case.
+           map mkBuiltInBinOp [minBound..maxBound]
 
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
@@ -792,9 +815,11 @@ builtIns = HM.fromList $ zipWith namify [0..] $
 
         builtInType t = (pretty t, BuiltInType t)
 
-        anyNumberType = map Signed [minBound..maxBound] ++
-                        map Unsigned [minBound..maxBound] ++
+        anyIntType = map Signed [minBound..maxBound] ++
+                     map Unsigned [minBound..maxBound]
+        anyNumberType = anyIntType ++
                         map FloatType [minBound..maxBound]
+        anyPrimType = Bool : anyNumberType
 
         anyNumberFun :: BuiltIn
         anyNumberFun = BuiltInPolyFun
@@ -810,6 +835,37 @@ builtIns = HM.fromList $ zipWith namify [0..] $
 
                         ([FloatType Float32], FloatType Float32),
                         ([FloatType Float64], FloatType Float64)]
+
+        mkBuiltInBinOp :: BinOp -> (String, BuiltIn)
+        mkBuiltInBinOp op = (pretty op, builtInBinOp op)
+
+        binOp :: [PrimType] -> BuiltIn
+        binOp ts = BuiltInPolyFun [ ([t,t], t) | t <- ts ]
+
+        builtInBinOp Plus = binOp anyNumberType
+        builtInBinOp Minus = binOp anyNumberType
+        builtInBinOp Pow = binOp anyNumberType
+        builtInBinOp Times = binOp anyNumberType
+        builtInBinOp Divide = binOp anyNumberType
+        builtInBinOp Mod = binOp anyNumberType
+        builtInBinOp Quot = binOp anyIntType
+        builtInBinOp Rem = binOp anyIntType
+        builtInBinOp ShiftR = binOp anyIntType
+        builtInBinOp ZShiftR = binOp anyIntType
+        builtInBinOp ShiftL = binOp anyIntType
+        builtInBinOp Band = binOp anyIntType
+        builtInBinOp Xor = binOp anyIntType
+        builtInBinOp Bor = binOp anyIntType
+        builtInBinOp LogAnd = BuiltInMonoFun [Bool,Bool] Bool
+        builtInBinOp LogOr = BuiltInMonoFun [Bool,Bool] Bool
+        builtInBinOp Equal = BuiltInEquality
+        builtInBinOp NotEqual = BuiltInEquality
+        builtInBinOp Less = ordering
+        builtInBinOp Leq = ordering
+        builtInBinOp Greater = ordering
+        builtInBinOp Geq = ordering
+
+        ordering = BuiltInPolyFun [ ([t,t], Bool) | t <- anyPrimType ]
 
 isValDec :: DecBase f vn -> Maybe (ValDecBase f vn)
 isValDec (ValDec d) = Just d

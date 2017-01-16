@@ -188,10 +188,10 @@ constituent c = not $ isSpace c
 readIntegral :: Integral int => (Token -> Maybe int) -> ReadValue int
 readIntegral f t = do
   v <- case scanTokens "" a of
-         Right [L _ MINUS, L _ (INTLIT x)] -> Just $ negate $ fromIntegral x
+         Right [L _ NEGATE, L _ (INTLIT x)] -> Just $ negate $ fromIntegral x
          Right [L _ (INTLIT x)] -> Just $ fromIntegral x
          Right [L _ tok] -> f tok
-         Right [L _ MINUS, L _ tok] -> negate <$> f tok
+         Right [L _ NEGATE, L _ tok] -> negate <$> f tok
          _ -> Nothing
   return (v, dropSpaces b)
   where (a,b) = T.span constituent t
@@ -223,10 +223,10 @@ readInt64 = readIntegral f
 readFloat :: RealFloat float => (Token -> Maybe float) -> ReadValue float
 readFloat f t = do
   v <- case scanTokens "" a of
-         Right [L _ MINUS, L _ (REALLIT x)] -> Just $ negate $ fromDouble x
+         Right [L _ NEGATE, L _ (REALLIT x)] -> Just $ negate $ fromDouble x
          Right [L _ (REALLIT x)] -> Just $ fromDouble x
          Right [L _ tok] -> f tok
-         Right [L _ MINUS, L _ tok] -> negate <$> f tok
+         Right [L _ NEGATE, L _ tok] -> negate <$> f tok
          _ -> Nothing
   return (v, dropSpaces b)
   where (a,b) = T.span constituent t

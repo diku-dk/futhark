@@ -338,7 +338,7 @@ instance Located (IdentBase ty vn) where
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
--- | Binary operators.
+-- | Default binary operators.
 data BinOp = Plus -- Binary Ops for Numbers
            | Minus
            | Pow
@@ -423,7 +423,7 @@ data ExpBase f vn =
               (ExpBase f vn) -- Let-body.
               SrcLoc
 
-            | BinOp BinOp (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
+            | BinOp (QualName vn) (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f (CompTypeBase vn)) SrcLoc
 
             | TupleProject Int (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
@@ -610,11 +610,11 @@ data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeD
                       -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
                       | CurryFun (QualName vn) [ExpBase f vn] (f ([CompTypeBase vn], CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
-                      | BinOpFun BinOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | BinOpFun (QualName vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+@; first two types are operands, third is result.
-                      | CurryBinOpLeft BinOp (ExpBase f vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | CurryBinOpLeft (QualName vn) (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @2+@; first type is operand, second is result.
-                      | CurryBinOpRight BinOp (ExpBase f vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | CurryBinOpRight (QualName vn) (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+2@; first type is operand, second is result.
 deriving instance Showable f vn => Show (LambdaBase f vn)
 

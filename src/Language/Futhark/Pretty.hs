@@ -6,13 +6,17 @@
 module Language.Futhark.Pretty
   ( pretty
   , prettyTuple
+  , leadingOperator
   )
 where
 
 import           Data.Array
 import           Data.Functor
 import           Data.Hashable
+import           Data.List
+import           Data.Maybe
 import           Data.Monoid
+import           Data.Ord
 import           Data.Word
 
 import           Prelude
@@ -20,6 +24,16 @@ import           Prelude
 import           Futhark.Util.Pretty
 
 import           Language.Futhark.Syntax
+
+-- | Given an operator name, return the operator that determines its
+-- syntactical properties.
+leadingOperator :: Name -> BinOp
+leadingOperator s = maybe LogAnd snd $ find ((`isPrefixOf` s') . fst) $
+                    sortBy (flip $ comparing $ length . fst) $
+                    zip (map pretty operators) operators
+  where s' = nameToString s
+        operators :: [BinOp]
+        operators = [minBound..maxBound::BinOp]
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
@@ -154,7 +168,7 @@ instance Pretty BinOp where
   ppr NotEqual = text "!="
   ppr Less     = text "<"
   ppr Leq      = text "<="
-  ppr Greater  = text ">="
+  ppr Greater  = text ">"
   ppr Geq      = text ">="
 
 hasArrayLit :: ExpBase ty vn -> Bool
@@ -179,7 +193,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
-  pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
+  pprPrec p (BinOp bop (x,_) (y,_) _ _) = prettyBinOp p bop x y
   pprPrec _ (TupleProject k e _ _) = text "#" <> ppr k <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
@@ -378,12 +392,14 @@ ppParam (Id param) = ppr param
 ppParam p          = parens $ ppr p
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn) =>
-               Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
-prettyBinOp p bop x y = parensIf (p > precedence bop) $
-                        pprPrec (precedence bop) x <+/>
+               Int -> QualName vn -> ExpBase ty vn -> ExpBase ty vn -> Doc
+prettyBinOp p bop x y = parensIf (p > symPrecedence bop) $
+                        pprPrec (symPrecedence bop) x <+/>
                         ppr bop <+>
-                        pprPrec (rprecedence bop) y
-  where precedence LogAnd   = 0
+                        pprPrec (symRPrecedence bop) y
+  where symPrecedence = precedence . leadingOperator . nameFromString . pretty
+        symRPrecedence = rprecedence . leadingOperator . nameFromString . pretty
+        precedence LogAnd   = 0
         precedence LogOr    = 0
         precedence Band     = 1
         precedence Bor      = 1

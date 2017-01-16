@@ -13,7 +13,7 @@
 
 --
 fun main (xss : [m][n]i32, ys : [l]i32): ([m]i32, [m][n][l]i32) =
-  unzip (map( fn (xs : [n]i32) : (i32, [n][l]i32) =>
-         let zs = map (fn x => map (fn y => x+y) ys) xs
+  unzip (map( \(xs : [n]i32) : (i32, [n][l]i32) ->
+         let zs = map (\x -> map (\y -> x+y) ys) xs
          in (reduce (+) 0 xs, zs)
      ) xss)
