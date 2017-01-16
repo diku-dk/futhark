@@ -195,6 +195,7 @@ data ModBinding = ModMod Scope
 data Binding = BoundV Type
              | BoundF FunBinding
              | OverloadedF [([TypeBase Rank ()],FunBinding)]
+             | EqualityF
              | UnknownF [StructType]
              | UnknownV
              | WasConsumed SrcLoc
@@ -311,6 +312,8 @@ initialScope = Scope initialVtable initialTypeTable mempty mempty builtInMap
           Just (name, OverloadedF $ map frob variants)
           where frob :: ([PrimType], PrimType) -> ([TypeBase Rank ()],FunBinding)
                 frob (pts, rt) = (map Prim pts, (map Prim pts, Prim rt))
+        addBuiltInF (name, BuiltInEquality) =
+          Just (name, EqualityF)
         addBuiltInF _ = Nothing
 
         addBuiltInT (name, BuiltInType t) =
@@ -476,6 +479,7 @@ noUnique = local (\env -> env { envVtable = HM.map set $ envVtable env})
   where set (BoundV t)        = BoundV $ t `setUniqueness` Nonunique
         set (BoundF f)        = BoundF f
         set (OverloadedF f)   = OverloadedF f
+        set EqualityF         = EqualityF
         set (UnknownF ts)     = UnknownF ts
         set UnknownV          = UnknownV
         set (WasConsumed loc) = WasConsumed loc
@@ -485,6 +489,7 @@ onlySelfAliasing = local (\env -> env { envVtable = HM.mapWithKey set $ envVtabl
   where set k (BoundV t)        = BoundV $ t `addAliases` HS.intersection (HS.singleton k)
         set _ (BoundF f)        = BoundF f
         set _ (OverloadedF f)   = OverloadedF f
+        set _ EqualityF         = EqualityF
         set _ (UnknownF ts)     = UnknownF ts
         set _ UnknownV          = UnknownV
         set _ (WasConsumed loc) = WasConsumed loc
@@ -546,11 +551,6 @@ bindingAlsoNames idents body = do
       substs   = map identName idents
   bindNameMap (HM.fromList (zip varnames substs)) $
     binding idents body
-
-bindingIdents :: [(IdentBase NoInfo Name, Type)] -> ([Ident] -> TypeM a) -> TypeM a
-bindingIdents vs m = descend [] vs
-  where descend vs' [] = m $ reverse vs'
-        descend vs' ((v,t):rest) = bindingIdent v t $ \v' -> descend (v':vs') rest
 
 bindingIdent :: IdentBase NoInfo Name -> Type -> (Ident -> TypeM a)
              -> TypeM a
@@ -626,6 +626,7 @@ checkVar qn loc = do
     Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                     | otherwise -> return (qn', t)
     Just BoundF{} -> bad $ FunctionIsNotValue loc qn
+    Just EqualityF -> bad $ FunctionIsNotValue loc qn
     Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
     Just UnknownF{} -> bad $ FunctionIsNotValue loc qn
     Just UnknownV -> bad $ TypeError loc $ pretty qn ++ " has unknown type"
@@ -647,8 +648,18 @@ lookupFunction qn argtypes loc = do
       case lookup (map toStructural argtypes) overloads of
         Nothing -> bad $ TypeError loc $ "Overloaded function " ++ pretty qn ++
                    " not defined for arguments of types " ++
-                   intercalate "," (map pretty argtypes)
+                   intercalate ", " (map pretty argtypes)
         Just f -> return (qn', f)
+    Just EqualityF
+      | [t1,t2] <- argtypes,
+        concreteType t1,
+        concreteType t2,
+        t1 == t2 ->
+          return (qn', (map (vacuousShapeAnnotations . toStruct) [t1, t2],
+                        Prim Bool))
+      | otherwise ->
+          bad $ TypeError loc $ "Equality not defined for arguments of types " ++
+          intercalate ", " (map pretty argtypes)
 
 lookupType :: SrcLoc -> QualName Name -> TypeM (QualName VName, StructType)
 lookupType loc qn = do
@@ -1249,7 +1260,20 @@ checkExp (Empty decl loc) = do
   decl' <- checkTypeDecl decl
   return $ Empty decl' loc
 
-checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
+checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
+  (e1', e1_arg) <- checkArg e1
+  (e2', e2_arg) <- checkArg e2
+
+  (op', (paramtypes, ftype)) <- lookupFunction op (map argType [e1_arg,e2_arg]) loc
+  case paramtypes of
+    [e1_pt, e2_pt] -> do
+      let rettype' = returnType (removeShapeAnnotations ftype)
+                     (map diet paramtypes) (map typeOf [e1', e2'])
+      checkFuncall (Just op) loc paramtypes [e1_arg, e2_arg]
+
+      return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt) (Info rettype') loc
+    _ ->
+      fail $ "Internal typechecker error: got invalid parameter types back from type checking binary operator " ++ pretty op
 
 checkExp (TupleProject i e NoInfo loc) = do
   e' <- checkExp e
@@ -1807,58 +1831,6 @@ checkForDuplicateNames = fmap toNames . flip execStateT mempty . mapM_ check
 
 data Bindage = BoundAsDim | BoundAsVar
 
-checkBinOp :: BinOp -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
-           -> TypeM Exp
-checkBinOp Plus e1 e2 pos = checkPolyBinOp Plus anyNumberType e1 e2 pos
-checkBinOp Minus e1 e2 pos = checkPolyBinOp Minus anyNumberType e1 e2 pos
-checkBinOp Pow e1 e2 pos = checkPolyBinOp Pow anyNumberType e1 e2 pos
-checkBinOp Times e1 e2 pos = checkPolyBinOp Times anyNumberType e1 e2 pos
-checkBinOp Divide e1 e2 pos = checkPolyBinOp Divide anyNumberType e1 e2 pos
-checkBinOp Mod e1 e2 pos = checkPolyBinOp Mod anyIntType e1 e2 pos
-checkBinOp Quot e1 e2 pos = checkPolyBinOp Quot anyIntType e1 e2 pos
-checkBinOp Rem e1 e2 pos = checkPolyBinOp Rem anyIntType e1 e2 pos
-checkBinOp ShiftR e1 e2 pos = checkPolyBinOp ShiftR anyIntType e1 e2 pos
-checkBinOp ZShiftR e1 e2 pos = checkPolyBinOp ZShiftR anyIntType e1 e2 pos
-checkBinOp ShiftL e1 e2 pos = checkPolyBinOp ShiftL anyIntType e1 e2 pos
-checkBinOp Band e1 e2 pos = checkPolyBinOp Band anyIntType e1 e2 pos
-checkBinOp Xor e1 e2 pos = checkPolyBinOp Xor anyIntType e1 e2 pos
-checkBinOp Bor e1 e2 pos = checkPolyBinOp Bor anyIntType e1 e2 pos
-checkBinOp LogAnd e1 e2 pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 pos
-checkBinOp LogOr e1 e2 pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 pos
-checkBinOp Equal e1 e2 pos = checkEqualOp Equal e1 e2 pos
-checkBinOp NotEqual e1 e2 pos = checkEqualOp NotEqual e1 e2 pos
-checkBinOp Less e1 e2 pos = checkRelOp Less anyNumberType e1 e2 pos
-checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
-checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
-checkBinOp Geq e1 e2 pos = checkRelOp Geq anyNumberType e1 e2 pos
-
-checkRelOp :: BinOp -> [TypeBase Rank ()]
-           -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
-           -> TypeM Exp
-checkRelOp op tl e1 e2 pos = do
-  e1' <- require tl =<< checkExp e1
-  e2' <- require tl =<< checkExp e2
-  _ <- unifyExpTypes e1' e2'
-  return $ BinOp op e1' e2' (Info $ Prim Bool) pos
-
-checkEqualOp :: BinOp
-             -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
-             -> TypeM Exp
-checkEqualOp op e1 e2 pos = do
-  e1' <- checkExp e1
-  e2' <- checkExp e2
-  _ <- unifyExpTypes e1' e2'
-  return $ BinOp op e1' e2' (Info $ Prim Bool) pos
-
-checkPolyBinOp :: BinOp -> [TypeBase Rank ()]
-               -> ExpBase NoInfo Name -> ExpBase NoInfo Name -> SrcLoc
-               -> TypeM Exp
-checkPolyBinOp op tl e1 e2 pos = do
-  e1' <- require tl =<< checkExp e1
-  e2' <- require tl =<< checkExp e2
-  t' <- unifyExpTypes e1' e2'
-  return $ BinOp op e1' e2' (Info t') pos
-
 checkDimIndex :: DimIndexBase NoInfo Name -> TypeM DimIndex
 checkDimIndex (DimFix i) =
   DimFix <$> (require [Prim $ Signed Int32] =<< checkExp i)
@@ -1884,9 +1856,6 @@ type Arg = (Type, Occurences, SrcLoc)
 
 argType :: Arg -> Type
 argType (t, _, _) = t
-
-argOccurences :: Arg -> Occurences
-argOccurences (_, occs, _) = occs
 
 checkArg :: ExpBase NoInfo Name -> TypeM (Exp, Arg)
 checkArg arg = do
@@ -1942,58 +1911,45 @@ checkLambda (CurryFun fname curryargexps _ loc) args = do
   checkFuncall Nothing loc paramtypes $ curryargs ++ args
   return $ CurryFun fname' curryargexps' (Info (paramtypes', rettype')) loc
 
-checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
-  checkPolyLambdaOp op [] args loc
+checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) [x_arg,y_arg] = do
+  (op', (paramtypes, rt)) <- lookupFunction op (map argType [x_arg,y_arg]) loc
+  let rettype' = fromStruct $ removeShapeAnnotations rt
+      paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
+  checkFuncall Nothing loc paramtypes [x_arg,y_arg]
+  case paramtypes' of
+    [x_t, y_t] ->
+      return $ BinOpFun op' (Info x_t) (Info y_t) (Info rettype') loc
+    _ ->
+      fail "Internal type checker error: BinOpFun got bad parameter type."
 
-checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] =
-  checkCurryBinOp CurryBinOpLeft binop x loc arg
+checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
+  bad $ ParameterMismatch (Just op) loc (Left 2) $
+  map (toStructural . argType) args
+
+checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] = do
+  (x', binop', ret) <- checkCurryBinOp id binop x loc arg
+  return $ CurryBinOpLeft binop' x' (Info (typeOf x'), Info (argType arg)) (Info ret) loc
 
 checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just $ qualName $ nameFromString $ pretty binop) loc (Left 1) $
+  bad $ ParameterMismatch (Just binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (CurryBinOpRight binop x _ _ loc) [arg] =
-  checkCurryBinOp CurryBinOpRight binop x loc arg
+checkLambda (CurryBinOpRight binop x _ _ loc) [arg] = do
+  (x', binop', ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
+  return $ CurryBinOpRight binop' x' (Info (argType arg), Info (typeOf x')) (Info ret) loc
 
 checkLambda (CurryBinOpRight binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just $ qualName $ nameFromString $ pretty binop) loc (Left 1) $
+  bad $ ParameterMismatch (Just binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkCurryBinOp :: (BinOp -> Exp -> Info Type -> Info (CompTypeBase VName) -> SrcLoc -> b)
-                -> BinOp -> ExpBase NoInfo Name -> SrcLoc -> Arg -> TypeM b
-checkCurryBinOp f binop x loc arg = do
-  x' <- checkExp x
-  let y_ident = Ident (nameFromString "y") NoInfo loc
-      x_ident = Ident (nameFromString "x") NoInfo loc
-  occur $ argOccurences arg
-  bindingIdents [(y_ident, argType arg), (x_ident, typeOf x')] $ \_ -> do
-    let y_var = Var (qualName $ identName y_ident) NoInfo loc
-        x_var = Var (qualName $ identName x_ident) NoInfo loc
-    e <- checkExp (BinOp binop y_var x_var NoInfo loc)
-    return $ f binop x' (Info $ argType arg) (Info $ typeOf e) loc
-
-checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo Name] -> [Arg]
-                  -> SrcLoc -> TypeM Lambda
-checkPolyLambdaOp op curryargexps args pos = do
-  curryargexpts <- map typeOf <$> mapM checkExp curryargexps
-  let argts = [ argt | (argt, _, _) <- args ]
-  tp <- case curryargexpts ++ argts of
-          [t1, t2] | t1 == t2 -> return t1
-          l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map toStructural l
-  let xident = Ident (nameFromString "x") NoInfo pos
-      yident = Ident (nameFromString "y") NoInfo pos
-  (x,y,params) <- case curryargexps of
-                    [] -> return (Var (qualName $ identName xident) NoInfo pos,
-                                  Var (qualName $ identName yident) NoInfo pos,
-                                  [(xident, tp), (yident, tp)])
-                    [e] -> return (e,
-                                   Var (qualName $ identName yident) NoInfo pos,
-                                   [(yident, tp)])
-                    (e1:e2:_) -> return (e1, e2, [])
-  rettype <- typeOf <$> bindingIdents params (\_ -> checkBinOp op x y pos)
-  mapM_ (occur . argOccurences) args
-  return $ BinOpFun op (Info tp) (Info tp) (Info rettype) pos
-  where fname = qualName $ nameFromString $ pretty op
+checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
+                -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg
+                -> TypeM (Exp, QualName VName, Type)
+checkCurryBinOp arg_ordering binop x loc y_arg = do
+  (x', x_arg) <- checkArg x
+  let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
+  (binop', (_, ret)) <- lookupFunction binop [argType first_arg, argType second_arg] loc
+  return (x', binop', fromStruct $ removeShapeAnnotations ret)
 
 checkDim :: SrcLoc -> DimDecl Name -> TypeM (DimDecl VName)
 checkDim _ AnyDim =
@@ -2234,6 +2190,8 @@ newNamesForScope orig_scope = do
                   substituteInType substs t)
         substituteInBinding _ (OverloadedF f) =
           OverloadedF f
+        substituteInBinding _ EqualityF =
+          EqualityF
         substituteInBinding _ (WasConsumed wloc) =
           WasConsumed wloc
 

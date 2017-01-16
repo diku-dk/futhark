@@ -22,5 +22,5 @@ fun main(): i32 =
     let w  = x[m-n/2]            -- n-n/2 :: Int
     let s  = v[3]              in   -- u[m+n/2,3] :: Int
         x[m*n/n - 1] + y[o-1,if(o*(3-3) == 0) then o-1 else m*n*o] + u[0, m-n] +
-        z[(1+3)/m, if(false || o*(3+-9/3)==0) then 3/5 else (4+2)/3, (m*1)/2 ] +
+        z[(1+3)/m, if(false || o*(3+(-9)/3)==0) then 3/5 else (4+2)/3, (m*1)/2 ] +
         s + t + q[0,n*1-1] + o + v[2] + (m - n + 0)

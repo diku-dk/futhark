@@ -685,70 +685,15 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
   (t', _, _) <- internaliseReturnType $ E.vacuousShapeAnnotations t
   letTupExp' desc $ I.If ce' te' fe' $ map I.fromDecl t'
 
-internaliseExp desc (E.BinOp E.LogAnd xe ye t loc) =
-  internaliseExp desc $
-  E.If xe ye (E.Literal (E.BoolValue False) loc) t loc
+-- Builtin operators are handled specially because they are
+-- overloaded.
+internaliseExp desc (E.BinOp op (xe,_) (ye,_) _ _)
+  | Just internalise <- isOverloadedFunction op [xe, ye] =
+      internalise desc
 
-internaliseExp desc (E.BinOp E.LogOr xe ye t loc) =
-  internaliseExp desc $
-  E.If xe (E.Literal (E.BoolValue True) loc) ye t loc
-
--- Handle equality and inequality specially, to treat the case of
--- arrays.
-internaliseExp desc (E.BinOp cmp xe ye _ _)
-  | Just cmp_f <- isEqlOp cmp = do
-      xe' <- internaliseExp "x" xe
-      ye' <- internaliseExp "y" ye
-      rs <- zipWithM (doComparison cmp_f) xe' ye'
-      letTupExp' desc =<< foldBinOp I.LogAnd (constant True) rs
-  where isEqlOp E.NotEqual = Just $ \t x y -> do
-          eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
-          letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
-        isEqlOp E.Equal = Just $ \t x y ->
-          letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
-        isEqlOp _ = Nothing
-
-        doComparison cmp_f x y = do
-          x_t <- I.subExpType x
-          y_t <- I.subExpType y
-          case x_t of
-            I.Prim t -> cmp_f t x y
-            _ -> do
-              let x_dims = I.arrayDims x_t
-                  y_dims = I.arrayDims y_t
-              dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
-                letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) x_dim y_dim
-              shapes_match <- letSubExp "shapes_match" =<<
-                              foldBinOp I.LogAnd (constant True) dims_match
-              compare_elems_body <- runBodyBinder $ do
-                -- Flatten both x and y.
-                x_num_elems <- letSubExp "x_num_elems" =<<
-                               foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
-                x' <- letExp "x" $ I.BasicOp $ I.SubExp x
-                y' <- letExp "x" $ I.BasicOp $ I.SubExp y
-                x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] x'
-                y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] y'
-
-                -- Compare the elements.
-                cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
-                cmps <- letExp "cmps" $ I.Op $ I.Map [] x_num_elems cmp_lam [x_flat, y_flat]
-
-                -- Check that all were equal.
-                and_lam <- binOpLambda I.LogAnd I.Bool
-                all_equal <- letSubExp "all_equal" $ I.Op $
-                             I.Reduce [] x_num_elems Commutative and_lam [(constant True,cmps)]
-                return $ resultBody [all_equal]
-
-              letSubExp "arrays_equal" $
-                I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
-
-internaliseExp desc (E.BinOp bop xe ye _ _) = do
-  xe' <- internaliseExp1 "x" xe
-  ye' <- internaliseExp1 "y" ye
-  case (E.typeOf xe, E.typeOf ye) of
-    (E.Prim t1, E.Prim t2) ->
-      internaliseBinOp desc bop xe' ye' t1 t2
-    _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
+-- User-defined operators are just the same as a function call.
+internaliseExp desc (E.BinOp op xarg yarg ret loc) =
+  internaliseExp desc $ E.Apply op [xarg,yarg] ret loc
 
 internaliseExp desc (E.TupleProject i e (Info rt) _) = do
   n <- typeLength rt
@@ -1069,12 +1014,12 @@ internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc)
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
   internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
 
-internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
+internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype, Info _) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
   internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
 
-internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc) rowts = do
+internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
   internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
@@ -1113,7 +1058,7 @@ internaliseCurrying qfname curargs loc rowtypes = do
   return (params, mkBody fun_bnds res, ts)
 
 
-binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
+binOpFunToLambda :: E.QualName VName -> E.Type -> E.Type -> E.Type
                  -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
@@ -1122,12 +1067,12 @@ binOpFunToLambda op xtype ytype rettype = do
       ident_y = E.Ident y_name (Info ytype) noLoc
   return ([E.Id ident_x, E.Id ident_y],
           E.BinOp op
-           (E.Var (qualName x_name) (Info xtype) noLoc)
-           (E.Var (qualName y_name) (Info ytype) noLoc)
+           (E.Var (qualName x_name) (Info xtype) noLoc, E.Observe)
+           (E.Var (qualName y_name) (Info ytype) noLoc, E.Observe)
            (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
-binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
+binOpCurriedToLambda :: E.QualName VName -> E.Type -> E.Type
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
                      -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
@@ -1136,7 +1081,7 @@ binOpCurriedToLambda op paramtype rettype e swap = do
   let ident = E.Ident paramname (Info paramtype) noLoc
       (x', y') = swap (E.Var (qualName paramname) (Info paramtype) noLoc, e)
   return ([E.Id ident],
-          E.BinOp op x' y' (Info rettype) noLoc,
+          E.BinOp op (x',E.Observe) (y',E.Observe) (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 internaliseDimConstant :: Name -> VName -> InternaliseM ()
@@ -1170,6 +1115,74 @@ isOverloadedFunction qname args = do
     handle [x] "abs" = Just $ absF x
     handle [x] "!" = Just $ notF x
     handle [x] "~" = Just $ complementF x
+
+    -- Short-circuiting operators are magical.
+    handle [x,y] "&&" = Just $ \desc ->
+      internaliseExp desc $
+      E.If x y (E.Literal (E.BoolValue False) noLoc) (Info (E.Prim E.Bool)) noLoc
+    handle [x,y] "||" = Just $ \desc ->
+        internaliseExp desc $
+        E.If x (E.Literal (E.BoolValue True) noLoc) y (Info (E.Prim E.Bool)) noLoc
+
+    -- Handle equality and inequality specially, to treat the case of
+    -- arrays.
+    handle [xe,ye] op
+      | Just cmp_f <- isEqlOp op = Just $ \desc -> do
+          xe' <- internaliseExp "x" xe
+          ye' <- internaliseExp "y" ye
+          rs <- zipWithM (doComparison (cmp_f desc)) xe' ye'
+          letTupExp' desc =<< foldBinOp I.LogAnd (constant True) rs
+        where isEqlOp "!=" = Just $ \desc t x y -> do
+                eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+                letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
+              isEqlOp "==" = Just $ \desc t x y ->
+                letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+              isEqlOp _ = Nothing
+
+              doComparison cmp_f x y = do
+                x_t <- I.subExpType x
+                y_t <- I.subExpType y
+                case x_t of
+                  I.Prim t -> cmp_f t x y
+                  _ -> do
+                    let x_dims = I.arrayDims x_t
+                        y_dims = I.arrayDims y_t
+                    dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
+                      letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) x_dim y_dim
+                    shapes_match <- letSubExp "shapes_match" =<<
+                                    foldBinOp I.LogAnd (constant True) dims_match
+                    compare_elems_body <- runBodyBinder $ do
+                      -- Flatten both x and y.
+                      x_num_elems <- letSubExp "x_num_elems" =<<
+                                     foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
+                      x' <- letExp "x" $ I.BasicOp $ I.SubExp x
+                      y' <- letExp "x" $ I.BasicOp $ I.SubExp y
+                      x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] x'
+                      y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] y'
+
+                      -- Compare the elements.
+                      cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
+                      cmps <- letExp "cmps" $ I.Op $ I.Map [] x_num_elems cmp_lam [x_flat, y_flat]
+
+                      -- Check that all were equal.
+                      and_lam <- binOpLambda I.LogAnd I.Bool
+                      all_equal <- letSubExp "all_equal" $ I.Op $
+                                   I.Reduce [] x_num_elems Commutative and_lam [(constant True,cmps)]
+                      return $ resultBody [all_equal]
+
+                    letSubExp "arrays_equal" $
+                      I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
+
+
+    handle [x,y] name = do
+      bop <- find ((name==) . pretty) [minBound..maxBound::E.BinOp]
+      Just $ \desc -> do
+        x' <- internaliseExp1 "x" x
+        y' <- internaliseExp1 "y" y
+        case (E.typeOf x, E.typeOf y) of
+          (E.Prim t1, E.Prim t2) ->
+            internaliseBinOp desc bop x' y' t1 t2
+          _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
     handle _ _ = Nothing
 

@@ -19,7 +19,9 @@ import Data.Bits
 import Data.Function (fix)
 import Data.List
 
-import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
+import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText, nameToText)
+import Language.Futhark.Attributes (leadingOperator)
+import Language.Futhark.Syntax (BinOp(..))
 
 }
 
@@ -36,38 +38,19 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 @qualidentifier = (@identifier ".")+ @identifier
 
-@unop = ("!"+|"~"+)
+@unop = ("!"|"~")
 @qualunop = (@identifier ".")+ @unop
+
+@symbols = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^")
+@binop = @symbols+
+@qualbinop = (@identifier ".")+ @binop
 
 tokens :-
 
   $white+                               ;
   "--"[^\n]*                            ;
-  "&&"                     { tokenC AND }
-  "||"                     { tokenC OR }
-  ">>"                     { tokenC SHIFTR }
-  ">>>"                    { tokenC ZSHIFTR }
-  "<<"                     { tokenC SHIFTL }
-  "=>"                     { tokenC ARROW }
-  "<="                     { tokenC LEQ }
-  ">="                     { tokenC GEQ }
-  "+"                      { tokenC PLUS }
-  "-"                      { tokenC MINUS }
-  "*"                      { tokenC TIMES }
-  "**"                     { tokenC POW }
-  "/"                      { tokenC DIVIDE }
-  "%"                      { tokenC MOD }
-  "//"                     { tokenC QUOT }
-  "%%"                     { tokenC REM }
   "="                      { tokenC EQU }
-  "=="                     { tokenC EQU2 }
-  "!="                     { tokenC NEQU }
-  "<"                      { tokenC LTH }
-  ">"                      { tokenC GTH }
-  "&"                      { tokenC BAND }
   "#"                      { tokenC HASH }
-  "|"                      { tokenC BOR }
-  "^"                      { tokenC XOR }
   "("                      { tokenC LPAR }
   ")"                      { tokenC RPAR }
   ")["                     { tokenC RPAR_THEN_LBRACKET }
@@ -104,6 +87,9 @@ tokens :-
 
   @unop                    { tokenS $ UNOP . nameFromText }
   @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
+
+  @binop                   { tokenM $ return . symbol [] . nameFromText }
+  @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
 {
 
 keyword :: T.Text -> Token
@@ -119,7 +105,6 @@ keyword s =
     "in"           -> IN
     "default"      -> DEFAULT
     "fun"          -> FUN
-    "fn"           -> BACKSLASH -- FIXME: delete
     "for"          -> FOR
     "do"           -> DO
 
@@ -193,10 +178,25 @@ tokenC v  = tokenS $ const v
 
 tokenS f = tokenM $ return . f
 
+tokenM :: (T.Text -> Alex a)
+       -> (AlexPosn, b, ByteString.ByteString, c)
+       -> Int64
+       -> Alex ((Int, Int, Int), (Int, Int, Int), a)
 tokenM f (AlexPn addr line col, _, s, _) len = do
   x <- f $ T.decodeUtf8 $ BS.toStrict $ BS.take len s
   return (pos, pos, x)
   where pos = (line, col, addr)
+
+symbol :: [Name] -> Name -> Token
+symbol [] q
+  | nameToText q == "*" = ASTERISK
+  | nameToText q == "-" = NEGATE
+  | nameToText q == "<" = LTH
+  | nameToText q == ">" = GTH
+  | nameToText q == "<=" = LEQ
+  | nameToText q == ">=" = GEQ
+  | otherwise = SYMBOL (leadingOperator q) [] q
+symbol qs q = SYMBOL (leadingOperator q) qs q
 
 alexEOF = return ((0,0,0), (0,0,0), EOF)
 
@@ -212,20 +212,15 @@ instance Located (L a) where
 -- | A lexical token.  It does not itself contain position
 -- information, so in practice the parser will consume tokens tagged
 -- with a source position.
-data Token = IF
-           | THEN
-           | ELSE
-           | LET
-           | LOOP
-           | IN
-           | ID Name
+data Token = ID Name
            | INDEXING Name
            | QUALID [Name] Name
            | QUALINDEXING [Name] Name
            | UNOP Name
            | QUALUNOP [Name] Name
+           | SYMBOL BinOp [Name] Name
+
            | STRINGLIT String
-           | DEFAULT
            | INTLIT Int64
            | I8LIT Int8
            | I16LIT Int16
@@ -239,27 +234,11 @@ data Token = IF
            | F32LIT Float
            | F64LIT Double
            | CHARLIT Char
-           | PLUS
-           | MINUS
-           | TIMES
-           | DIVIDE
-           | MOD
-           | QUOT
-           | REM
-           | EQU
-           | EQU2
-           | NEQU
-           | LTH
-           | GTH
-           | LEQ
-           | GEQ
-           | POW
-           | SHIFTL
-           | SHIFTR
-           | ZSHIFTR
-           | BOR
-           | BAND
-           | XOR
+
+           | COLON
+           | AT
+           | BACKSLASH
+           | HASH
            | LPAR
            | RPAR
            | RPAR_THEN_LBRACKET
@@ -269,8 +248,24 @@ data Token = IF
            | RCURLY
            | COMMA
            | UNDERSCORE
-           | FUN
            | ARROW
+
+           | EQU
+           | ASTERISK
+           | NEGATE
+           | LTH
+           | GTH
+           | LEQ
+           | GEQ
+
+           | DEFAULT
+           | IF
+           | THEN
+           | ELSE
+           | LET
+           | LOOP
+           | IN
+           | FUN
            | FOR
            | DO
            | SHAPE
@@ -294,8 +289,6 @@ data Token = IF
            | PARTITION
            | TRUE
            | FALSE
-           | AND
-           | OR
            | EMPTY
            | COPY
            | WHILE
@@ -308,13 +301,10 @@ data Token = IF
            | INCLUDE
            | ENTRY
            | TYPE
-           | EOF
            | MODULE
            | VAL
-           | COLON
-           | AT
-           | BACKSLASH
-           | HASH
+
+           | EOF
 
              deriving (Show, Eq)
 
