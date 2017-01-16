@@ -21,10 +21,14 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass.ExtractKernels.BlockedKernel
 
+data SegmentedVersion = OneGroupOneSegment
+                      | ManyGroupsOneSegment
+                      deriving (Eq, Ord, Show)
+
 regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
                            SubExp            -- segment_size
                         -> SubExp            -- num_segments
-                        -> [SubExp]          -- nest_sizes -- FIXME: what is this?
+                        -> [SubExp]          -- nest_sizes = the sizes of the maps on "top" of this redomap
                         -> Pattern Kernels   -- flat_pat
                         -> Pattern Kernels   -- pat
                         -> Certificates      -- cs
@@ -33,8 +37,8 @@ regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels)
                         -> Lambda InKernel   -- reduce_lam
                         -> Lambda InKernel   -- fold_lam = this lambda performs both the map-part and
                                              -- reduce-part of a redomap (described in redomap paper)
-                        -> [(VName, SubExp)] -- ispace -- FIXME: what is this?
-                        -> [KernelInput]     -- inps -- FIXME: what is this?
+                        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
+                        -> [KernelInput]     -- inps = more detailed information about the arguments for the maps on "top" of this redomap
                         -> [SubExp]          -- nes
                         -> [VName]           -- arrs_flat
                         -> m ()
@@ -74,16 +78,6 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
             BasicOp $ Reshape cs [DimNew num_segments, DimNew segment_size] arr
       _ -> fail $ "regularSegmentedRedomap: non-flat array encountered " ++ pretty arr
 
-  let num_groups = num_segments
-  group_size <- letSubExp "group_size" $ Op GroupSize
-  num_threads <- letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32) num_groups group_size
-  elements_per_thread <-
-    letSubExp "elements_per_thread" =<<
-    eDivRoundingUp Int32 (eSubExp segment_size) (eSubExp group_size)
-
-  -- the array passed here is the structure for how to layout the kernel space
-  space <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
-
   -- The pattern passed to chunkLambda must have exactly *one* array dimension,
   -- to get the correct size of [chunk_size]type.
   --
@@ -115,10 +109,9 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   -- FIXME: do we need to copy arrays? :S
   -- see 'blockedReductionStream' in BlockedKernel.hs
 
-  the_kernel <- groupPerSegmentKernel segment_size num_segments cs
-                  (arrs_non_flat ++ map_out_arrs) space
-                  comm reduce_lam' kern_chunk_fold_lam nes
-                  w elements_per_thread
+  (the_kernel, _, _) <- groupPerSegmentKernel segment_size num_segments cs
+    (arrs_non_flat ++ map_out_arrs) comm reduce_lam' kern_chunk_fold_lam
+    nes w OneGroupOneSegment
 
   kernel_redres_pat <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
     vn' <- newName $ patElemName pe
@@ -131,6 +124,8 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   -- too
   addStm $ Let kernel_pat () $ Op the_kernel
 
+  -- TODO: For some cases like @map (redomap)@, we could use DimCoercion instead
+  -- of DimNew for the reduction result part
   forM_ (zip (patternValueElements kernel_pat)
              (patternValueElements pat)) $ \(kpe, pe) ->
     addStm $ Let (Pattern [] [pe]) () $
@@ -142,23 +137,61 @@ groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> SubExp            -- num_segments
        -> Certificates      -- cs
        -> [VName]           -- all_arrs: non_flat arrays (also the "map_out" ones)
-       -> KernelSpace       -- space
        -> Commutativity     -- comm
        -> Lambda InKernel   -- reduce_lam
        -> Lambda InKernel   -- kern_chunk_fold_lam
        -> [SubExp]          -- nes
        -> SubExp            -- w = total_num_elements
-       -> SubExp            -- elements_per_thread
-       -> m (Kernel InKernel)
-groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
+       -> SegmentedVersion  -- segver
+       -> m (Kernel InKernel, SubExp, SubExp)
+groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                       reduce_lam' kern_chunk_fold_lam
-                      nes w elements_per_thread = do
-  let num_redres = length nes -- number of reduction results
+                      nes w segver = do
+  let num_redres = length nes -- number of reduction results (tuple size for
+                              -- reduction operator)
 
-  let group_size = spaceGroupSize space
-  let segment_index = spaceGroupId space
-  let index_within_segment = spaceLocalId space
-  let threads_within_segment = spaceGroupSize space
+  group_size <- letSubExp "group_size" $ Op GroupSize
+  num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
+
+  num_groups_per_segment <-
+    letSubExp "num_groups_per_segment" =<<
+    case segver of
+      OneGroupOneSegment -> eSubExp one
+      ManyGroupsOneSegment -> eDivRoundingUp Int32 (eSubExp num_groups_hint)
+                                                   (eSubExp num_segments)
+  num_groups <- letSubExp "num_groups" $
+    case segver of
+      OneGroupOneSegment -> BasicOp $ SubExp num_segments
+      ManyGroupsOneSegment -> BasicOp $ BinOp (Mul Int32) num_segments num_groups_per_segment
+
+  num_threads <- letSubExp "num_threads" $
+    BasicOp $ BinOp (Mul Int32) num_groups group_size
+
+  elements_per_thread <-
+    letSubExp "elements_per_thread" =<<
+    eDivRoundingUp Int32 (eSubExp segment_size)
+                         (eBinOp (Mul Int32) (eSubExp group_size)
+                                             (eSubExp num_groups_per_segment))
+
+  threads_within_segment <- letSubExp "threads_within_segment" $
+    BasicOp $ BinOp (Mul Int32) group_size num_groups_per_segment
+
+  -- the array passed here is the structure for how to layout the kernel space
+  space <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
+
+  ((segment_index, index_within_segment), calc_segindex_stms) <- runBinder $ do
+    segment_index <- letSubExp "segment_index" $
+      BasicOp $ BinOp (SDiv Int32) (Var $ spaceGroupId space) num_groups_per_segment
+
+    -- localId + (group_size * (groupId % num_groups_per_segment))
+    index_within_segment <- letSubExp "index_within_segment" =<<
+      eBinOp (Add Int32)
+          (eSubExp $ Var $ spaceLocalId space)
+          (eBinOp (Mul Int32)
+             (eSubExp group_size)
+             (eBinOp (SMod Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
+          )
+    return (segment_index, index_within_segment)
 
   let ordering = case comm of Commutative -> SplitStrided threads_within_segment
                               Noncommutative -> SplitContiguous
@@ -172,7 +205,7 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
 
   (all_arrs_indexed, index_stms) <- runBinder $ forM all_arrs $ \arr -> do
     tp <- lookupType arr
-    let slice = fullSlice tp [DimFix $ Var segment_index]
+    let slice = fullSlice tp [DimFix segment_index]
     letExp (baseString arr <> "_indexed") $
            BasicOp $ Index cs arr slice
 
@@ -183,12 +216,12 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
         then Let (Pattern []
                   [PatElem (paramName chunk_size) BindVar $ paramType chunk_size])
                  () $
-                 Op $ SplitSpace ordering segment_size (Var index_within_segment)
+                 Op $ SplitSpace ordering segment_size index_within_segment
                                  elements_per_thread
         else Let (Pattern [PatElem (paramName chunk_size) BindVar $ paramType chunk_size]
                           patelems_res_of_split)
                  () $
-                 Op $ SplitArray ordering segment_size (Var index_within_segment)
+                 Op $ SplitArray ordering segment_size index_within_segment
                                  elements_per_thread all_arrs_indexed
 
   let red_ts = take num_redres $ lambdaReturnType kern_chunk_fold_lam
@@ -228,7 +261,7 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
 
 
   (offset_for_first_value, offset_stms) <- runBinder $
-    makeOffsetExp ordering index_within_segment segment_index
+    makeOffsetExp ordering index_within_segment elements_per_thread segment_index
   red_returns <- forM final_red_pes $ \pe ->
     return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $
                            Var $ patElemName pe
@@ -238,20 +271,29 @@ groupPerSegmentKernel segment_size _num_segments cs all_arrs space comm
                            patElemName pe
   let kernel_returns = red_returns ++ map_returns
 
-  return $ Kernel "segmented_redomap__one_group_per_segment" cs space kernel_return_types $
-                  KernelBody () (index_stms ++ [split_stm] ++ fold_chunk_stms ++
+  let kernel = Kernel kernelname cs space kernel_return_types $
+                  KernelBody () (calc_segindex_stms ++ index_stms ++ [split_stm] ++ fold_chunk_stms ++
                                  combine_stms ++ [group_reduce_stm] ++
                                  offset_stms)
                   kernel_returns
+
+  return (kernel, num_groups, num_groups_per_segment)
+
   where
-    makeOffsetExp SplitContiguous index_within_segment segment_index = do
+    one = constant (1 :: Int32)
+
+    kernelname = case segver of
+      OneGroupOneSegment -> "segmented_redomap__one_group_one_segment"
+      ManyGroupsOneSegment -> "segmented_redomap__many_groups_one_segment"
+
+    makeOffsetExp SplitContiguous index_within_segment elements_per_thread segment_index = do
       e <- eBinOp (Add Int32)
-             (eBinOp (Mul Int32) (eSubExp elements_per_thread) (eSubExp $ Var index_within_segment)) $
-             eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp $ Var segment_index)
+             (eBinOp (Mul Int32) (eSubExp elements_per_thread) (eSubExp index_within_segment))
+             (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
       letSubExp "offset" e
-    makeOffsetExp (SplitStrided _stride) index_within_segment segment_index = do
-      e <- eBinOp (Add Int32) (eSubExp $ Var index_within_segment) $
-             eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp $ Var segment_index)
+    makeOffsetExp (SplitStrided _stride) index_within_segment _elements_per_thread segment_index = do
+      e <- eBinOp (Add Int32) (eSubExp index_within_segment)
+             (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
       letSubExp "offset" e
 
 regularSegmentedRedomapAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
