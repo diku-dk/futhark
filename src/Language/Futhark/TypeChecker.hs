@@ -897,6 +897,8 @@ checkForDuplicateDecs =
         f (FunctorDec (FunctorBind name _ _ _ loc)) =
           check Structure name loc
 
+        f OpenDec{} = return
+
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (Scope, [SpecBase Info VName])
 
 checkSpecs [] = return (mempty, [])
@@ -1097,10 +1099,27 @@ checkDecs (TypeDec tdec:rest) =
       (scope, rest') <- checkDecs rest
       return (scope <> tscope, TypeDec tdec' : rest')
 
+checkDecs (OpenDec x xs loc:rest) = do
+  checkForDuplicate $ sort $ x:xs
+  (x', x_mod) <- lookupMod loc x
+  (xs', xs_mods) <- unzip <$> mapM (lookupMod loc) xs
+   -- We cannot use mconcat, as mconcat is a right-fold.
+  let scope_ext = foldl (flip mappend) x_mod xs_mods
+  local (scope_ext<>) $ do
+    (scope, rest') <- checkDecs rest
+    return (scope <> scope_ext,
+            OpenDec x' xs' loc: rest')
+  where checkForDuplicate (v1:v2:vs)
+          | v1 == v2 =
+              bad $ TypeError loc $ "Module " ++ pretty v1 ++ " opened twice."
+          | otherwise =
+              checkForDuplicate $ v2:vs
+        checkForDuplicate _ = return ()
+
 checkDecs [] =
   return (mempty, [])
 
-checkDecs decs = do
+checkDecs decs@(ValDec{}:_) = do
   let (t_and_f_decs, rest) = chompDecs decs
       bound = concatMap lhs t_and_f_decs
 
