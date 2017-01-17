@@ -428,6 +428,9 @@ distributeKernelResults (vtable, used)
       where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
 distributeKernelResults _ _ = cannotSimplify
 
+doInlineSplitSpace :: Bool
+doInlineSplitSpace = False
+
 -- | Turn SplitSpace into direct code.  SplitSpace is slated for
 -- destruction in the future.
 inlineSplitSpace :: (LocalScope (Lore m) m,
@@ -435,7 +438,7 @@ inlineSplitSpace :: (LocalScope (Lore m) m,
                     TopDownRule m
 
 inlineSplitSpace _ (Let pat _
-                    (Op (SplitSpace (SplitStrided stride) w i elems_per_i))) = do
+                    (Op (SplitSpace (SplitStrided stride) w i elems_per_i))) | doInlineSplitSpace = do
   remaining_elements <- letSubExp "remaining_elements" <=< toExp $
     (primExpFromSubExp int32 w - primExpFromSubExp int32 i)
     `quotRoundingUp`
@@ -447,7 +450,7 @@ inlineSplitSpace _ (Let pat _
   letBind_ pat $ If cond t_branch f_branch [Prim int32]
 
 inlineSplitSpace _ (Let pat _
-                    (Op (SplitSpace SplitContiguous w i elems_per_i))) = do
+                    (Op (SplitSpace SplitContiguous w i elems_per_i))) | doInlineSplitSpace = do
   let w' = primExpFromSubExp int32 w
       i' = primExpFromSubExp int32 i
       elems_per_i' = primExpFromSubExp int32 elems_per_i
