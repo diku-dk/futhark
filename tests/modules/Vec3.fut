@@ -1,9 +1,7 @@
 -- ==
 -- tags { disable }
-module Vec3
-  {
-    module F32
-      {
+module Vec3 = {
+    module F32 = {
         type t = ( f32 , f32 , f32 )
         fun add(a: t , b: t): t =
           let (a1, a2, a3) = a
@@ -25,8 +23,7 @@ module Vec3
           a1*b1 + a2*b2 + a3*b3
       }
 
-    module Int
-      {
+    module Int = {
         type t = ( i32 , i32 , i32 )
         fun add(a: t , b: t): t =
           let (a1, a2, a3) = a

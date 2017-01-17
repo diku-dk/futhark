@@ -2,7 +2,7 @@
 -- ==
 -- error: x.*i32.*f32
 
-module F (P: { val x: i32 }) {
+module F (P: { val x: i32 }) = {
   val x: i32 = P.x + 1
 }
 

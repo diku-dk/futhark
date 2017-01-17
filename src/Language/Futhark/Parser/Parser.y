@@ -242,11 +242,6 @@ SigBind :: { SigBindBase f vn }
           { let L pos (ID name) = $3
             in SigBind name $5 pos }
 
-        -- Shortcut form
-        | module type id '{' Specs '}'
-          { let L pos (ID name) = $3
-            in SigBind name (SigSpecs $5 pos) pos }
-
 ModExp :: { ModExpBase f vn }
         : QualName     { let (v, loc) = $1 in ModVar v loc }
         | '{' Decs '}' { ModDecs $2 $1 }
@@ -263,14 +258,6 @@ StructBind :: { StructBindBase f vn }
              { let L pos (ID name) = $2
                in StructBind name (ModAscript $6 $4 NoInfo pos) pos }
 
-           -- Shortcut forms
-           | module id '{' Decs '}'
-             { let L pos (ID name) = $2
-               in StructBind name (ModDecs $4 pos) pos }
-           | module id ':' SigExp '{' Decs '}'
-             { let L pos (ID name) = $2
-               in StructBind name (ModAscript (ModDecs $6 pos) $4 NoInfo pos) pos }
-
 FunctorBind :: { FunctorBindBase f vn }
              : module id '(' id ':' SigExp ')' '=' ModExp
                { let L floc (ID fname) = $2; L ploc (ID pname) = $4
@@ -279,16 +266,6 @@ FunctorBind :: { FunctorBindBase f vn }
              | module id '(' id ':' SigExp ')' ':' SigExp '=' ModExp
                { let L floc (ID fname) = $2; L ploc (ID pname) = $4
                  in FunctorBind fname (pname, $6) (Just $9) $11 $1
-               }
-
-             -- Shortcut forms
-             | module id '(' id ':' SigExp ')' '{' Decs '}'
-               { let L floc (ID fname) = $2; L ploc (ID pname) = $4
-                 in FunctorBind fname (pname, $6) Nothing (ModDecs $9 $8) $1
-               }
-             | module id '(' id ':' SigExp ')' ':' SigExp '{' Decs '}'
-               { let L floc (ID fname) = $2; L ploc (ID pname) = $4
-                 in FunctorBind fname (pname, $6) (Just $9) (ModDecs $11 $10) $1
                }
 
 Specs : Spec Specs { $1 : $2 }
