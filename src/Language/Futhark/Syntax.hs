@@ -757,14 +757,16 @@ data DecBase f vn = ValDec (ValDecBase f vn)
                   | SigDec (SigBindBase f vn)
                   | StructDec (StructBindBase f vn)
                   | FunctorDec (FunctorBindBase f vn)
+                  | OpenDec (QualName vn) [QualName vn] SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
-  locOf (ValDec d)     = locOf d
-  locOf (TypeDec d)    = locOf d
-  locOf (SigDec d)     = locOf d
-  locOf (StructDec d)  = locOf d
-  locOf (FunctorDec d) = locOf d
+  locOf (ValDec d)        = locOf d
+  locOf (TypeDec d)       = locOf d
+  locOf (SigDec d)        = locOf d
+  locOf (StructDec d)     = locOf d
+  locOf (FunctorDec d)    = locOf d
+  locOf (OpenDec _ _ loc) = locOf loc
 
 data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)

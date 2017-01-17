@@ -141,6 +141,7 @@ keyword s =
     "entry"        -> ENTRY
     "module"       -> MODULE
     "val"          -> VAL
+    "open"         -> OPEN
     _              -> ID $ nameFromText s
 
 indexing :: T.Text -> Alex Name
@@ -303,6 +304,7 @@ data Token = ID Name
            | TYPE
            | MODULE
            | VAL
+           | OPEN
 
            | EOF
 

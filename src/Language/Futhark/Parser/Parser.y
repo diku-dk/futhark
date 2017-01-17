@@ -175,6 +175,7 @@ import Language.Futhark.Parser.Lexer
       type            { L $$ TYPE }
       module          { L $$ MODULE }
       val             { L $$ VAL }
+      open            { L $$ OPEN }
 
 %left bottom
 %left ifprec letprec
@@ -215,12 +216,13 @@ Decs :: { [DecBase f vn] }
 ;
 
 Dec :: { [DecBase f vn] }
-    : Fun           { [ValDec $ FunDec $1] }
-    | Const         { [ValDec $ ConstDec $1] }
-    | TypeAbbr      { map TypeDec $1 }
-    | SigBind       { [SigDec $1 ] }
-    | StructBind    { [StructDec $1 ] }
-    | FunctorBind   { [FunctorDec $1] }
+    : Fun            { [ValDec $ FunDec $1] }
+    | Const          { [ValDec $ ConstDec $1] }
+    | TypeAbbr       { map TypeDec $1 }
+    | SigBind        { [SigDec $1 ] }
+    | StructBind     { [StructDec $1 ] }
+    | FunctorBind    { [FunctorDec $1] }
+    | open QualNames { [OpenDec (fst $ fst $2) (map fst $ snd $2) $1] }
 ;
 
 
@@ -429,6 +431,11 @@ Param : VarId                        { Id $1 }
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
           | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
+
+QualNames :: { ((QualName Name, SrcLoc), [(QualName Name, SrcLoc)]) }
+          : QualName            { ($1, []) }
+          | QualName QualNames  { ($1, fst $2 : snd $2) }
+
 
 QualUnOpName :: { (QualName Name, SrcLoc) }
           : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
