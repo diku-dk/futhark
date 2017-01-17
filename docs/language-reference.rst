@@ -147,10 +147,10 @@ annotation can be elided if the value is defined before it is used.
 Values can be used in shape declarations, except in the return value
 of entry points.
 
-Type Aliases
-------------
+Type Abbreviations
+------------------
 
-Futhark supports simple type aliases to improve code readability.
+Futhark supports simple type abbreviations to improve code readability.
 Examples::
 
   type person_id                = i32
@@ -163,10 +163,10 @@ Examples::
 
   type airplane = (pilot, passengers, position, velocity, mass)
 
-The aliases are merely a syntactic convenience.  With respect to type
+The abbreviations are merely a syntactic convenience.  With respect to type
 checking the ``position`` and ``velocity`` types are identical.  It is
-currently not possible to put shape declarations in type aliases.
-When using uniqueness attributes with type aliases, inner uniqueness
+currently not possible to put shape declarations in type abbreviations.
+When using uniqueness attributes with type abbreviations, inner uniqueness
 attributes are overrided by outer ones::
 
   type uniqueInts = *[]i32
@@ -180,66 +180,89 @@ attributes are overrided by outer ones::
 Module System
 -------------
 
-Futhark supports an ML-style module system.  Modules can types,
-functions, and other modules.  The syntax is as in the following example::
+Futhark supports an ML-style higher-order module system.  *Modules*
+can contain types, functions, and other modules.  *Module types* can
+be used to classify the contents of modules, and *parameterised
+modules* can be used to abstract over modules.  In Standard ML,
+modules, module types and parameterised modules are called structs,
+signatures, and functors, respectively.
 
-    module Vec3
-      {
-        module F32
-          {
-            type t = ( f32 , f32 , f32 )
-            fun add(a: t , b: t): t =
-              let (a1, a2, a3) = a in
-              let (b1, b2, b3) = b in
-              (a1 + b1, a2 + b2 , a3 + b3)
-        
-            fun subtract(a: t , b: t): t =
-              let (a1, a2, a3) = a in
-              let (b1, b2, b3) = b in
-              (a1 - b1, a2 - b2 , a3 - b3)
-        
-            fun scale(k: f32 , a: t):t =
-              let (a1, a2, a3) = a in
-              (a1 * k, a2 * k , a3 * k)
-        
-            fun dot(a: t , b: t): f32 =
-              let (a1, a2, a3) = a in
-              let (b1, b2, b3) = b in
-              a1*b1 + a2*b2 + a3*b3
-          }
-        
-        module Int
-          {
-            type t = ( i32 , i32 , i32 )
-            fun t add(t a , t b) =
-              let (a1, a2, a3) = a in
-              let (b1, b2, b3) = b in
-              (a1 + b1, a2 + b2 , a3 + b3)
-        
-            fun subtract(a: t, b: t): t =
-              let (a1, a2, a3) = a in
-              let (b1, b2, b3) = b in
-              (a1 - b1, a2 - b2 , a3 - b3)
-        
-            fun scale(k: i32, a: t): t =
-              let (a1, a2, a3) = a in
-              (a1 * k, a2 * k , a3 * k)
-        
-            fun dot(a: t, b: t): i32 =
-              let (a1, a2, a3) = a in
-              let (b1, b2, b3) = b in
-              a1*b1 + a2*b2 + a3*b3
-          }
-      }
+Named module are defined as::
+
+  module ModuleName = module expression
+
+Where a module expression can be the name of another module, an
+application of a parameterised module, or a sequence of declarations
+enclosed in curly braces::
+
+  module Vec3 = {
+    type t = ( f32 , f32 , f32 )
+    fun add(a: t) (b: t): t =
+      let (a1, a2, a3) = a in
+      let (b1, b2, b3) = b in
+      (a1 + b1, a2 + b2 , a3 + b3)
+  }
+
+  module AlsoVec3 = Vec3
 
 Functions and types within modules can be accessed using dot
 notation::
 
-    type vector = Vec3.Int.t
-    fun double(v: vector): vector = Vec3.Int.plus(v,v)
+    type vector = Vec3.t
+    fun double(v: vector): vector = Vec3.add v v
 
-Structures names must begin with a capital letter.
+We can also use ``open Vec3`` to bring the names defined by ``Vec3``
+into the current scope.  Multiple modules can be opened simultaneously
+by separating their names with spaces.  In case several modules define
+the same names, the ones mentioned last take precedence.
 
+Named module types are defined as::
+
+  module type ModuleTypeName = module type expression
+
+A module type expression can be the name of another module type, or a
+sequence of *specifications*, or *specs*, enclosed in curly braces.  A
+spec can be a *value spec*, indicating the presence of a function or
+value, an *abstract type spec*, or a *type abbreviation spec*.  For
+example::
+
+  module type Addable = {
+    type t                 -- abstract type spec
+    type two_ts = (t,t)    -- type abbreviation spec
+    val add: t -> t -> t   -- value spec
+  }
+
+This module type specifies the presence of an *abstract type* ``t``,
+as well as a function operating on values of type ``t``.  We can use
+*module type ascription* to restrict a module to what is exposed by
+some module type::
+
+  module AbstractVec = Vec3 : Addable
+
+The definition of ``AbstractVec.t`` is now hidden.  In fact, with this
+module type, we can neither construct values of type ``AbstractVec.T``
+or convert them to anything else, making this a rather useless use of
+abstraction.  As a derived form, we can write ``module M: S = e`` to
+mean ``module M = e : S``.
+
+Parameterised modules allow us to write definitions that abstract over
+modules.  For example::
+
+  module Times(M: Addable) = {
+    fun times (x: M.t) (k: int): M.t =
+      loop (x' = x) = for i < k do
+        T.add x' x
+      in x'
+  }
+
+We can instantiate ``Times`` with any module that fulfills the module
+type ``Addable`` and get back a module that defines a function
+``times``::
+
+  module Vec3Times = Times(Vec3)
+
+Now ``Vec3Times.times`` is a function of type ``Vec3.t -> int ->
+Vec3.t``.
 
 File Inclusions
 ---------------
