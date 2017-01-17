@@ -1,4 +1,4 @@
-include numeric
+include futlib.numeric
 
 module type COMPLEX {
   type real
@@ -9,39 +9,47 @@ module type COMPLEX {
   val re: complex -> real
   val im: complex -> real
 
-  val add: complex -> complex -> complex
-  val sub: complex -> complex -> complex
-  val mul: complex -> complex -> complex
-  val div: complex -> complex -> complex
+  val +: complex -> complex -> complex
+  val -: complex -> complex -> complex
+  val *: complex -> complex -> complex
+  val /: complex -> complex -> complex
 
   val sqrt: complex -> complex
+
+  val fromInt: i32 -> complex
+  val fromFraction: i32 -> i32 -> complex
+  val toInt: complex -> i32
 }
 
-module Complex(T: REAL): COMPLEX {
+module Complex(T: REAL) {
   type real = T.t
   type complex = (T.t, T.t)
 
   fun mk (a: real) (b: real) = (a,b)
-  fun conj ((a,b): complex) = (a, T.sub (T.fromInt 0) b)
+  fun conj ((a,b): complex) = (a, T.fromInt 0 T.- b)
   fun re ((a,_b): complex) = a
   fun im ((_a,b): complex) = b
 
-  fun add ((a,b): complex) ((c,d): complex) = (T.add a c, T.add b d)
-  fun sub ((a,b): complex) ((c,d): complex) = (T.sub a c, T.sub b d)
-  fun mul ((a,b): complex) ((c,d): complex) = (T.sub (T.mul a c) (T.mul b d),
-                                               T.add (T.mul b c) (T.mul a d))
-  fun div ((a,b): complex) ((c,d): complex) =
-    let (x,y) = mul (a,b) (c,d)
-    in (T.div x (T.add (T.mul c c) (T.mul d d)),
-        T.div y (T.add (T.mul c c) (T.mul d d)))
+  fun ((a,b): complex) + ((c,d): complex) = (a T.+ c, b T.+ d)
+  fun ((a,b): complex) - ((c,d): complex) = (a T.- c, b T.- d)
+  fun ((a,b): complex) * ((c,d): complex) = (a T.* c T.- b T.* d,
+                                             b T.* c T.+ a T.* d)
+  fun ((a,b): complex) / ((c,d): complex) =
+    let (x,y) = (a,b) * (c,d)
+    in (x T./ (c T.* c T.+ d T./ d),
+        y T./ (c T.* c T.+ d T./ d))
 
   fun sqrt ((a,b): complex) =
-    let gamma = T.sqrt (T.div
-                        (T.add a (T.sqrt (T.add (T.mul a a) (T.mul b b))))
-                        (T.fromInt 2))
-    let delta = T.mul (T.fromInt (T.sgn b))
-                      (T.sqrt (T.div (T.add (T.sub (T.fromInt 0) a)
-                                      (T.sqrt (T.add (T.mul a a) (T.mul b b))))
-                               (T.fromInt 2)))
+    let gamma = T.sqrt ((a T.+ T.sqrt (a T.* a T.+ b T.* b)) T./
+                        T.fromInt 2)
+    let delta = T.fromInt (T.sgn b) T.*
+                T.sqrt (((T.fromInt 0 T.- a) T.+
+                         T.sqrt (a T.* a T.+ b T.* b)) T./
+                        T.fromInt 2)
     in (gamma, delta)
+
+  fun fromFraction (a: i32) (b: i32): complex =
+    mk (T.fromFraction a b) (T.fromInt 0)
+  fun fromInt (a: i32) = fromFraction a 1
+  fun toInt ((a,_): complex) = T.toInt a
 }
