@@ -1,4 +1,4 @@
-module type NUMERIC {
+module type NUMERIC = {
   type t
 
   val +: t -> t -> t
@@ -15,7 +15,7 @@ module type NUMERIC {
   val sgn: t -> i32
 }
 
-module type INTEGRAL {
+module type INTEGRAL = {
   type t
 
   val +: t -> t -> t
@@ -33,7 +33,7 @@ module type INTEGRAL {
   val sgn: t -> i32
 }
 
-module type REAL {
+module type REAL = {
   type t
 
   val +: t -> t -> t
@@ -54,7 +54,7 @@ module type REAL {
   val sqrt: t -> t
 }
 
-module I32 {
+module I32 = {
   type t = i32
 
   fun (x: i32) + (y: i32) = x Intrinsics.+ y
@@ -72,7 +72,7 @@ module I32 {
   fun sgn (x: i32) = signum x
 }
 
-module F32 {
+module F32 = {
   type t = f32
 
   fun (x: f32) + (y: f32) = x Intrinsics.+ y

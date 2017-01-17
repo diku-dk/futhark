@@ -1,16 +1,16 @@
-module type EQ {
+module type EQ = {
 type t
 val eq: t -> t -> bool
 }
 
-module type ORD {
+module type ORD = {
 type t
 val eq: t -> t -> bool
 val lt: t -> t -> bool
 val gt: t -> t -> bool
 }
 
-module type NUMERIC {
+module type NUMERIC = {
 type t
 val plus: t -> t -> t
 val sub: t -> t -> t
@@ -22,7 +22,7 @@ val lt: t -> t -> bool
 val gt: t -> t -> bool
 }
 
-module I32 {
+module I32 = {
 type t = i32
 
 fun plus (x: i32) (y: i32) = x + y
@@ -37,7 +37,7 @@ fun lt (x: i32) (y: i32) = x < y
 fun gt (x: i32) (y: i32) = x > y
 }
 
-module F32 {
+module F32 = {
 type t = f32
 
 fun plus (x: f32) (y: f32) = x + y
@@ -52,7 +52,7 @@ fun lt (x: f32) (y: f32) = x < y
 fun gt (x: f32) (y: f32) = x > y
 }
 
-module Ordering(T: ORD) {
+module Ordering(T: ORD) = {
 fun max (x: T.t) (y: T.t) =
   if T.gt x y then x else y
 
@@ -66,7 +66,7 @@ fun min_elem (x: T.t) (xs: [n]T.t) =
   reduce min x xs
 }
 
-module Numerics(T: NUMERIC) {
+module Numerics(T: NUMERIC) = {
 fun fact (n: T.t): T.t =
   if T.eq n T.zero
   then T.one

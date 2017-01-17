@@ -2,10 +2,9 @@
 -- ==
 -- error: .*Dup.*
 
-module Foo
-  {
-    fun foo(): foo = 1
-  }
+module Foo = {
+  fun foo(): foo = 1
+}
 type foo = i32
 type foo = float
 

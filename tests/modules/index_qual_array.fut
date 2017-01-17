@@ -1,7 +1,7 @@
 -- ==
 -- input { 4 } output { 5 }
 
-module M {
+module M = {
   val a: []i32 = [1,2,3]
 }
 

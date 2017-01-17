@@ -8,8 +8,8 @@
 --  55
 -- }
 
-module F {
-    fun plus(a: i32) (b: i32): i32 = a+b
-  }
+module F = {
+  fun plus(a: i32) (b: i32): i32 = a+b
+}
 
 fun main(a: []i32): i32 = reduce F.plus 0 a

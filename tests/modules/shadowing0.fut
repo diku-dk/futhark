@@ -9,13 +9,11 @@
 -- }
 
 fun number(): i32 = 1
-module M0
-  {
-    fun number(): i32 = 2
-    module M1
-      {
-        fun foo(): i32 = number()
-      }
+module M0 = {
+  fun number(): i32 = 2
+  module M1 = {
+    fun foo(): i32 = number()
   }
+}
 
 fun main(): i32 = M0.M1.foo()

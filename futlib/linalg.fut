@@ -2,7 +2,7 @@
 
 include futlib.numeric
 
-module type LINALG {
+module type LINALG = {
   type t
 
   val dotprod: []t -> []t -> t

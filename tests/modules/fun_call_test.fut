@@ -8,14 +8,12 @@
 fun min(a: i32) (b: i32): i32 = if(a<b) then a else b
 fun plus1(a:  []i32,  b: []i32): []i32 = [1]
 
-module M0
-  {
+module M0 = {
     fun min1(a: []i32, b: []i32): []i32 = map min a b
     fun redmin1(a:  []i32): i32 = reduce min 1200 a
     fun redmin2(a: [][]i32): []i32 = map redmin1 a
 
-    module M1
-      {
+    module M1 = {
         fun plus1(a:  []i32,  b: []i32): []i32 = map (+) a b
         fun plus2(a: [][]i32, b: [][]i32): [][]i32 = map plus1 (zip a b)
       }

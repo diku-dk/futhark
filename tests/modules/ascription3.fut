@@ -2,9 +2,9 @@
 -- ==
 -- input { 2 } output { [0,0] }
 
-module type S { val f: i32 -> []i32 }
+module type S = { val f: i32 -> []i32 }
 
-module M: S {
+module M: S = {
   fun f(x: i32): *[]i32 = replicate x 0
 }
 

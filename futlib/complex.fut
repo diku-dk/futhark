@@ -1,6 +1,6 @@
 include futlib.numeric
 
-module type COMPLEX {
+module type COMPLEX = {
   type real
   type complex
 
@@ -21,7 +21,7 @@ module type COMPLEX {
   val toInt: complex -> i32
 }
 
-module Complex(T: REAL) {
+module Complex(T: REAL) = {
   type real = T.t
   type complex = (T.t, T.t)
 
