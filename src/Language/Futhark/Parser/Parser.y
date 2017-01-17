@@ -296,6 +296,9 @@ Spec :: { SpecBase NoInfo Name }
       : val id ':' SigTypeDecl
         { let L loc (ID name) = $2; (ps, r) = $4
           in ValSpec name ps r loc  }
+      | val BindingBinOp ':' SigTypeDecl
+        { let (ps, r) = $4
+          in ValSpec $2 ps r $1  }
       | type id '=' TypeExpDecl
         { let L loc (ID name) = $2
           in TypeAbbrSpec (TypeBind name $4 loc) }
@@ -342,6 +345,11 @@ BinOp :: { QualName Name }
       | '>'     { QualName [] (nameFromString ">") }
       | '>='    { QualName [] (nameFromString ">=") }
 
+BindingBinOp :: { Name }
+      : BinOp {% let QualName qs name = $1 in do
+                   unless (null qs) $ fail "Cannot use a qualified name in binding position."
+                   return name }
+      | '-'   { nameFromString "-" }
 
 Headers :: { [ProgHeader] }
         : Header Headers { $1 : $2 }
@@ -353,11 +361,16 @@ Header : include QualName { let (QualName qs v, _) = $2 in Include (map nameToSt
 ;
 
 Fun     : fun id Params MaybeAscription '=' Exp
-                        { let L pos (ID name) = $2
-                          in FunBind (name==defaultEntryPoint) name (fmap declaredType $4) NoInfo $3 $6 pos }
+          { let L pos (ID name) = $2
+            in FunBind (name==defaultEntryPoint) name (fmap declaredType $4) NoInfo $3 $6 pos }
+
         | entry id Params MaybeAscription '=' Exp
-                        { let L pos (ID name) = $2
-                          in FunBind True name (fmap declaredType $4) NoInfo $3 $6 pos }
+          { let L pos (ID name) = $2
+            in FunBind True name (fmap declaredType $4) NoInfo $3 $6 pos }
+
+        | fun Param BindingBinOp Param MaybeAscription '=' Exp
+          { FunBind False $3 (fmap declaredType $5) NoInfo [$2,$4] $7 $1
+          }
 ;
 
 Const : val id ':' TypeExpDecl '=' Exp
