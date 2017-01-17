@@ -3,6 +3,17 @@
 Language Reference
 ==================
 
+This Futhark language reference manual seeks to describe every
+language construct.  It is not presented in a tutorial fashion, but
+rather intended for quick lookup and documentation of subtleties.  For
+this reason, it is not written in a bottom-up manner, and some
+concepts may be used before they are fully defined.  It is a good idea
+to have a basic grasp of Futhark (or some other functional programming
+language) before reading this reference.
+
+Primitive Types and Values
+--------------------------
+
 The primitive types in Futhark are the signed integer types ``i8``,
 ``i16``, ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``,
 ``u32``, ``u64``, the floating-point types ``f32``, ``f64``, as well
@@ -30,12 +41,6 @@ Character and string literals are supported, but only as an alias for
 integers and arrays of integers, respectively.  There is no character
 data type.
 
-The following list describes every syntactical language construct in
-the language.  For convenience, we will sometimes talk of expressions
-"modifying" the input.  As Futhark is a pure language, what happens is
-of course that a new array is returned instead of the original being
-modified.
-
 Function Declarations
 ---------------------
 
@@ -51,7 +56,7 @@ may put *shape declarations* in the return type and parameter types.
 These can be used to express invariants about the shapes of arrays
 that are accepted or produced by the function, e.g::
 
-  fun f(a: [n]int): [n]int =
+  fun f(a: [n]i32): [n]i32 =
     map(+1, a)
 
 The above declaration specifies a function that takes an array
@@ -65,12 +70,12 @@ The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  fun dotProduct(a: [n]int, b: [n]int): int =
+  fun dotProduct(a: [n]i32, b: [n]i32): i32 =
     reduce (+) 0 (zipWith (*) a b)
 
 Or matrix multiplication::
 
-  fun matMult(x: [n][m]int, y: [m][n]int): [n][n]int =
+  fun matMult(x: [n][m]i32, y: [m][n]i32): [n][n]i32 =
     ...
 
 The dimension names bound in a parameter shape declaration can be used
@@ -136,9 +141,11 @@ A named value/constant can be declared as follows::
 
 The definition can be an arbitrary expression, including function
 calls and other values.  You can even define circular values, although
-these will likely result in an infinite loop at execution.  Values can
-be used in shape declarations, except in the return value of entry
-points.
+these will likely result in an infinite loop at execution.  The type
+annotation can be elided if the value is defined before it is used.
+
+Values can be used in shape declarations, except in the return value
+of entry points.
 
 Type Aliases
 ------------
@@ -146,13 +153,13 @@ Type Aliases
 Futhark supports simple type aliases to improve code readability.
 Examples::
 
-  type person_id = int
-  type int_pair  = (int, int)
+  type person_id                = i32
+  type int_pair                 = (i32, i32)
   type position, velocity, vec3 = (f32, f32, f32)
 
-  type pilot = person_id
-  type passengers = [person_id]
-  type mass     = f32
+  type pilot      = person_id
+  type passengers = []person_id
+  type mass       = f32
 
   type airplane = (pilot, passengers, position, velocity, mass)
 
@@ -162,7 +169,7 @@ currently not possible to put shape declarations in type aliases.
 When using uniqueness attributes with type aliases, inner uniqueness
 attributes are overrided by outer ones::
 
-  type uniqueInts = *[]int
+  type uniqueInts = *[]i32
   type nonuniqueIntLists = []intlist
   type uniqueIntLists = *nonuniqueIntLists
 
@@ -170,22 +177,15 @@ attributes are overrided by outer ones::
   fun uniqueIntLists (nonuniqueIntLists p) = p
 
 
-*Dimension declarations*
+Module System
+-------------
 
-To declare dimensions on an array data type using type aliases, the type alias must
-define either a primitive type, or a tuple.
+Futhark supports an ML-style module system.  Modules can types,
+functions, and other modules.  The syntax is as in the following example::
 
-Structures
-----------
-
-Futhark supports structures which can contain type declarations, functions and structures.
-These structures can be included into any other Futhark file.
-The syntax is as in the following example::
-
-  Vec3.fut:
-    struct Vec3
+    module Vec3
       {
-        struct F32
+        module F32
           {
             type t = ( f32 , f32 , f32 )
             fun add(a: t , b: t): t =
@@ -208,9 +208,9 @@ The syntax is as in the following example::
               a1*b1 + a2*b2 + a3*b3
           }
         
-        struct Int
+        module Int
           {
-            type t = ( int , int , int )
+            type t = ( i32 , i32 , i32 )
             fun t add(t a , t b) =
               let (a1, a2, a3) = a in
               let (b1, b2, b3) = b in
@@ -221,21 +221,19 @@ The syntax is as in the following example::
               let (b1, b2, b3) = b in
               (a1 - b1, a2 - b2 , a3 - b3)
         
-            fun scale(k: int, a: t): t =
+            fun scale(k: i32, a: t): t =
               let (a1, a2, a3) = a in
               (a1 * k, a2 * k , a3 * k)
         
-            fun dot(a: t, b: t): int =
+            fun dot(a: t, b: t): i32 =
               let (a1, a2, a3) = a in
               let (b1, b2, b3) = b in
               a1*b1 + a2*b2 + a3*b3
           }
       }
 
-Functions and types within these structures can be accessed using common dot notation::
-  
-  some_example.fut
-    include Vec3
+Functions and types within modules can be accessed using dot
+notation::
 
     type vector = Vec3.Int.t
     fun double(v: vector): vector = Vec3.Int.plus(v,v)
@@ -347,7 +345,7 @@ Sign of ``x``, which must be of an integral type.  Returns 1, 0, or
 -1.
 
 ``#i e``
-~~~~~~~
+~~~~~~~~
 
 Access field ``i`` of the expression ``e``, which must be of
 tuple-type.  The fields are indexed from zero.  ``i`` must be a
@@ -364,8 +362,8 @@ empty arrays must be constructed with the ``empty`` construct.
 ~~~~~~~~~~~~
 
 Create an empty array whose row type is ``t``.  For example,
-``empty(int)`` creates a value of type ``[]int``.  The row type can
-contain shape declarations, e.g., ``empty([2]int)``.  Any dimension
+``empty(i32)`` creates a value of type ``[]i32``.  The row type can
+contain shape declarations, e.g., ``empty([2]i32)``.  Any dimension
 without an annotation will be of size 0, as will the outermost
 dimension.
 
@@ -384,7 +382,7 @@ bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 [i]``, which is a function call with a literal array.
 
 ``a[i:j:s]``
-~~~~~~~~~~
+~~~~~~~~~~~~
 
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
 latter inclusive and the latter exclusive, taking every ``s``th
@@ -583,7 +581,7 @@ information is possible, in order to enable it to maximise the
 parallelism of the generated code.
 
 ``map f a_1 ... a_n``
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 Apply ``f`` to every element of ``a_1 ... a_n`` and return the
 resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
@@ -604,7 +602,7 @@ the neutral element for ``f``.  The function ``f`` must be
 associative.  If it is not, the return value is unspecified.
 
 ``reduceComm f x a``
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 Like ``reduce``, but with the added guarantee that the function ``f``
 is *commutative*.  This lets the compiler generate more efficient
@@ -661,14 +659,14 @@ Arrays of Tuples
 
 For reasons related to code generation and efficient representation,
 arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[](int,f32)`` is transformed to ``([]int,
+arrays.  The type ``[](i32,f32)`` is transformed to ``([]i32,
 []f32)`` during the compilation process, and all code interacting
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent to the programmer, but there are edge cases where
 the transformation is not trivially an isomorphism.
 
-Consider the type ``[]([]int,[]f32)``, which is transformed
-into ``([][]int, [][]f32)``.  These two types are not
+Consider the type ``[]([]i32,[]f32)``, which is transformed
+into ``([][]i32, [][]f32)``.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
 fullness of arrays.  For example::
 

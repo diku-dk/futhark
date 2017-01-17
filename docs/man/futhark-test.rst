@@ -142,7 +142,7 @@ The following program tests simple indexing and bounds checking::
   -- }
   -- error: Assertion.*failed
 
-  fun main([]int: a:, int: i:): : int =
+  fun main([]i32: a:, i32: i:): : i32 =
     a[i]
 
 SEE ALSO
