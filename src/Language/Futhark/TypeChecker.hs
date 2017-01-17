@@ -1153,6 +1153,13 @@ checkConst (ConstBind name maybe_t NoInfo e loc) = do
 checkFun :: FunBindBase NoInfo Name -> TypeM FunBind
 checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
   fname' <- checkName Term fname loc
+
+  when (baseString fname' == "&&") $
+    bad $ TypeError loc "The && operator may not be redefined."
+
+  when (baseString fname' == "||") $
+    bad $ TypeError loc "The || operator may not be redefined."
+
   bindingPatterns (zip params $ repeat NoneInferred) $ \params' -> do
     maybe_retdecl' <- case maybe_retdecl of
                         Just rettype -> Just <$> checkTypeExp rettype

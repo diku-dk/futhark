@@ -91,6 +91,25 @@ collides with reality.  Shape declarations matter most when used for
 the input parameters of the ``main`` function and for the return type
 of functions used to ``map``.
 
+User-Defined Operators
+~~~~~~~~~~~~~~~~~~~~~~
+
+Infix operators are defined much like functions::
+
+  fun (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
+
+The fixity of an operator is determined by its first characters, which
+must correspond to a built-in operator.  Thus, ``+^`` binds like
+``+``, whilst ``*^`` binds like ``*``.  It is not permitted to define
+operators with the names ``&&`` or ``||`` (although these as prefixes
+are accepted).  This is because a user-defined version of these
+operators would not be short-circuiting.  User-defined operators
+behave exactly like functions, except for syntactically.
+
+A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
+This will result in the built-in polymorphic operator becoming
+inaccessible, except through the ``Intrinsics`` module.
+
 .. _entry-points:
 
 Entry Points
