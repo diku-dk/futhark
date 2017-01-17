@@ -411,8 +411,7 @@ Return a slice of the array ``a`` from index ``i`` to ``j``, the
 latter inclusive and the latter exclusive, taking every ``s``th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
-(not inclusive).  If ``s`` is positive, then ``0<=i<=j<=w`` must hold, and
-otherwise ``-1<=j<=i<w`` must hold.
+(not inclusive).
 
 It is generally a bad idea for ``s`` to be non-constant.
 Slicing of multiple dimensions can be done by separating with commas,
