@@ -783,26 +783,27 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
        (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
        (pure $ I.BasicOp $ I.UnOp (I.Abs Int32) s')
 
-  -- Bounds checks depend on whether we are slicing forwards or
-  -- backwards.  If forwards, we must check '0 <= i && i <= j && j <= w'.  If
-  -- backwards, '-1 <= j && j <= i && i < w'.
-  zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
-  i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
-  j_lte_w <- letSubExp "j_lte_w" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' w
-  forwards_ok <- letSubExp "forwards_ok" =<< foldBinOp I.LogAnd zero_lte_i [i_lte_j, j_lte_w]
+  checked <- asserting $ do
+    -- Bounds checks depend on whether we are slicing forwards or
+    -- backwards.  If forwards, we must check '0 <= i && i <= j && j <= w'.  If
+    -- backwards, '-1 <= j && j <= i && i < w'.
+    zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
+    i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
+    j_lte_w <- letSubExp "j_lte_w" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' w
+    forwards_ok <- letSubExp "forwards_ok" =<< foldBinOp I.LogAnd zero_lte_i [i_lte_j, j_lte_w]
 
-  negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
-  j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
-  i_lt_w <- letSubExp "i_lt_w" $ I.BasicOp $ I.CmpOp (I.CmpSlt Int32) i' w
-  backwards_ok <- letSubExp "backwards_ok" =<< foldBinOp I.LogAnd negone_lte_j [j_lte_i, i_lt_w]
+    negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
+    j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
+    i_lt_w <- letSubExp "i_lt_w" $ I.BasicOp $ I.CmpOp (I.CmpSlt Int32) i' w
+    backwards_ok <- letSubExp "backwards_ok" =<< foldBinOp I.LogAnd negone_lte_j [j_lte_i, i_lt_w]
 
-  ok <- letSubExp "slice_ok" $ I.If backwards
+    ok <- letSubExp "slice_ok" $ I.If backwards
         (resultBody [backwards_ok])
         (resultBody [forwards_ok])
         [I.Prim I.Bool]
-  checked <- letExp "slice_cert" $ I.BasicOp $ I.Assert ok loc
+    letTupExp "slice_cert" $ I.BasicOp $ I.Assert ok loc
 
-  return (I.DimSlice i' n s', [checked])
+  return (I.DimSlice i' n s', checked)
   where zero = constant (0::Int32)
         negone = constant (-1::Int32)
 
