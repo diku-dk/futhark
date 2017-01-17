@@ -2104,7 +2104,7 @@ matchScopes scope sig loc = do
       Just (_, UnknownF{}) ->
         Left $ TypeError loc $ "Function " ++ pretty (baseName name) ++
         " missing a return type declaration."
-      _ -> missingVal name
+      _ -> missingVal (baseName name)
 
   let vals = HM.fromList $ HM.elems vals_and_substs
       val_substs = HM.map fst vals_and_substs
