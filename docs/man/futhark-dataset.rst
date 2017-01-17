@@ -35,14 +35,14 @@ OPTIONS
   Set inclusive lower and upper bounds on generated values of type
   ``T``.  ``T`` is any primitive type, e.g. ``i32`` or ``f32``.  The
   bounds apply to any following uses of the ``-g`` option.  Note that
-  ``int`` does not work; use ``i32`` instead.
+  ``i32`` does not work; use ``i32`` instead.
 
 EXAMPLES
 ========
 
 Generate an array of floating-point numbers and an array of indices into that array::
 
-  futhark-dataset -g [10]f32 --i32-bounds=0:9 -g [100]int
+  futhark-dataset -g [10]f32 --i32-bounds=0:9 -g [100]i32
 
 SEE ALSO
 ========

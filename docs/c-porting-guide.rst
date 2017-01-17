@@ -162,7 +162,7 @@ figure out what the size of the outer dimension must be:
   a = malloc(N * M * sizeof(int));
 
 We see clearly that ``a`` is a two-dimensional integer array of size
-``N`` times ``M`` - or of type ``[N][M]int`` in Futhark.  Thus, the update
+``N`` times ``M`` - or of type ``[N][M]i32`` in Futhark.  Thus, the update
 expression above would be translated as::
 
   let a[i,j] = foo in
