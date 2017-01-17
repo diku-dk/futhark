@@ -44,11 +44,12 @@ type, and body of the function::
 
   fun name(params...): rettype = body
 
-Type inference is not supported, and functions are fully
-monomorphic.  Optionally, the programmer may put *shape declarations*
-in the return type and parameter types.  These can be used to express
-invariants about the shapes of arrays that are accepted or produced by
-the function, e.g::
+Type inference is not supported, and functions are fully monomorphic.
+If the function is neither recursive or referenced before it is
+defined, the return type may be elided.  Optionally, the programmer
+may put *shape declarations* in the return type and parameter types.
+These can be used to express invariants about the shapes of arrays
+that are accepted or produced by the function, e.g::
 
   fun f(a: [n]int): [n]int =
     map(+1, a)
