@@ -6,10 +6,9 @@ Language Reference
 The primitive types in Futhark are the signed integer types ``i8``,
 ``i16``, ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``,
 ``u32``, ``u64``, the floating-point types ``f32``, ``f64``, as well
-as ``bool``.  Furthermore, ``int`` is an alias for
-``i32``.  An ``f32`` is always a single-precision float and a ``f64``
-is a double-precision float.  All primitive types can be combined in
-tuples and arrays.
+as ``bool``.  An ``f32`` is always a single-precision float and a
+``f64`` is a double-precision float.  All primitive types can be
+combined in tuples and arrays.
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
