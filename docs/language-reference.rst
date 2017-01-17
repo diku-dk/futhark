@@ -100,11 +100,15 @@ Infix operators are defined much like functions::
 
 The fixity of an operator is determined by its first characters, which
 must correspond to a built-in operator.  Thus, ``+^`` binds like
-``+``, whilst ``*^`` binds like ``*``.  It is not permitted to define
-operators with the names ``&&`` or ``||`` (although these as prefixes
-are accepted).  This is because a user-defined version of these
-operators would not be short-circuiting.  User-defined operators
-behave exactly like functions, except for syntactically.
+``+``, whilst ``*^`` binds like ``*``.  The longest such prefix is
+used to determine fixity, so ``>>=`` binds like ``>>``, not like
+``>``.
+
+It is not permitted to define operators with the names ``&&`` or
+``||`` (although these as prefixes are accepted).  This is because a
+user-defined version of these operators would not be short-circuiting.
+User-defined operators behave exactly like functions, except for
+syntactically.
 
 A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
 This will result in the built-in polymorphic operator becoming
