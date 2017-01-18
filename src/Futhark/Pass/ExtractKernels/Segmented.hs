@@ -349,7 +349,7 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
              (eBinOp (Mul Int32) (eSubExp elements_per_thread) (eSubExp index_within_segment))
              (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
       letSubExp "offset" e
-    makeOffsetExp (SplitStrided _stride) index_within_segment _elements_per_thread segment_index = do
+    makeOffsetExp (SplitStrided _) index_within_segment _elements_per_thread segment_index = do
       e <- eBinOp (Add Int32) (eSubExp index_within_segment)
              (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
       letSubExp "offset" e
