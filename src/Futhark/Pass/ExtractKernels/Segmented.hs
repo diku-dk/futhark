@@ -29,7 +29,7 @@ regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels)
                            SubExp            -- segment_size
                         -> SubExp            -- num_segments
                         -> [SubExp]          -- nest_sizes = the sizes of the maps on "top" of this redomap
-                        -> Pattern Kernels   -- flat_pat
+                        -> Pattern Kernels   -- flat_pat ... pat where each type is array with dim [w]
                         -> Pattern Kernels   -- pat
                         -> Certificates      -- cs
                         -> SubExp            -- w = total_num_elements
@@ -44,9 +44,6 @@ regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels)
                         -> m ()
 regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
                         pat cs w comm reduce_lam fold_lam _ispace _inps nes arrs_flat = do
-  let num_redres = length nes -- number of reduction results (tuple size for
-                              -- reduction operator)
-
   unless (null $ patternContextElements pat) $ fail "regularSegmentedRedomap result pattern contains context elements, and Rasmus did not think this would ever happen."
 
   -- the result of the "map" part of a redomap has to be stored somewhere within
@@ -96,6 +93,9 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   -- to the neutral element.
   kern_chunk_fold_lam <- kerneliseLambda nes chunk_fold_lam
 
+  let chunk_red_pat = Pattern [] $ take num_redres $ patternValueElements chunk_pat
+  kern_chunk_reduce_lam <- kerneliseLambda nes =<< chunkLambda chunk_red_pat nes reduce_lam
+
   -- the lambda for a GroupReduce needs these two extra parameters
   my_index <- newVName "my_index"
   other_offset <- newVName "other_offset"
@@ -106,31 +106,109 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
                                                 lambdaParams reduce_lam
                                }
 
-  -- FIXME: do we need to copy arrays? :S
+  -- FIXME: do we need to copy arrays here? :S
   -- see 'blockedReductionStream' in BlockedKernel.hs
 
-  (the_kernel, _, _) <- groupPerSegmentKernel segment_size num_segments cs
-    (arrs_non_flat ++ map_out_arrs) comm reduce_lam' kern_chunk_fold_lam
-    nes w OneGroupOneSegment
+  let all_arrs = arrs_non_flat ++ map_out_arrs
+  (ogps_ses, ogps_stms) <- runBinder $ oneGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam
+  (mgps_ses, mgps_stms) <- runBinder $ manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam
 
-  kernel_redres_pat <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
+  -- TODO: should unify this calculation somewhere, with the one taking place in
+  -- 'groupPerSegmentKernel'
+  num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
+  num_groups_per_segment <- letSubExp "num_groups_per_segment" =<<
+    eDivRoundingUp Int32 (eSubExp num_groups_hint) (eSubExp num_segments)
+
+  e <- eIf (eCmpOp (CmpEq $ IntType Int32) (eSubExp num_groups_per_segment)
+                                           (eSubExp one))
+           (mkBodyM ogps_stms ogps_ses)
+           (mkBodyM mgps_stms mgps_ses)
+
+  redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
     vn' <- newName $ patElemName pe
     return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments]
+  let mapres_pes = drop num_redres $ patternValueElements flat_pat
+  let unreshaped_pat = Pattern [] $ redres_pes ++ mapres_pes
 
-  let kernel_pat = Pattern [] $ kernel_redres_pat ++
-                                drop num_redres (patternValueElements flat_pat)
+  addStm $ Let unreshaped_pat () e
 
-  -- TODO: BlockeKernel renames of one of these. I'm not sure if I should do it
-  -- too
-  addStm $ Let kernel_pat () $ Op the_kernel
-
-  -- TODO: For some cases like @map (redomap)@, we could use DimCoercion instead
-  -- of DimNew for the reduction result part
-  forM_ (zip (patternValueElements kernel_pat)
+  forM_ (zip (patternValueElements unreshaped_pat)
              (patternValueElements pat)) $ \(kpe, pe) ->
     addStm $ Let (Pattern [] [pe]) () $
              BasicOp $ Reshape cs [DimNew se | se <- arrayDims $ patElemAttr pe]
                                (patElemName kpe)
+
+  where
+    one = constant (1 :: Int32)
+
+    -- number of reduction results (tuple size for reduction operator)
+    num_redres = length nes
+
+    ----------------------------------------------------------------------------
+    -- The functions below generate all the needed code for the two different
+    -- version of segmented-redomap.
+    --
+    -- We rename statements before adding them because the same lambdas
+    -- (reduce/fold) are used multiple times, and we do not want to bind the
+    -- same VName twice (as this is a type error)
+    ----------------------------------------------------------------------------
+    oneGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam = do
+      mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
+        vn' <- newName $ patElemName pe
+        return $ PatElem vn' BindVar $ patElemType pe
+
+      (kernel, _, _) <- groupPerSegmentKernel segment_size num_segments cs
+        all_arrs comm reduce_lam' kern_chunk_fold_lam
+        nes w OneGroupOneSegment
+
+      kernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
+        vn' <- newName $ patElemName pe
+        return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments]
+
+      let kernel_pat = Pattern [] $ kernel_redres_pes ++ mapres_pes
+
+      addStm =<< renameStm (Let kernel_pat () $ Op kernel)
+      return $ map (Var . patElemName) $ patternValueElements kernel_pat
+
+    ----------------------------------------------------------------------------
+    manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam= do
+      mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
+        vn' <- newName $ patElemName pe
+        return $ PatElem vn' BindVar $ patElemType pe
+
+      (firstkenel, num_groups_used, num_groups_per_segment) <- groupPerSegmentKernel segment_size num_segments cs
+        all_arrs comm reduce_lam' kern_chunk_fold_lam
+        nes w ManyGroupsOneSegment
+
+      firstkernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
+        vn' <- newName $ patElemName pe
+        return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_groups_used]
+
+      let first_pat = Pattern [] $ firstkernel_redres_pes ++ mapres_pes
+      addStm =<< renameStm (Let first_pat () $ Op firstkenel)
+
+      -- need to reshape so indexing inside next kernel works
+      intermediate_redres <- forM firstkernel_redres_pes $ \pe -> do
+        vn' <- newName $ patElemName pe
+        let pe' = PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments, num_groups_per_segment]
+        addStm $ Let (Pattern [] [pe']) () $
+                 BasicOp $ Reshape cs [DimNew num_segments, DimNew num_groups_per_segment]
+                                   (patElemName pe)
+        return vn'
+
+      (secondkernel, _, _) <- groupPerSegmentKernel num_groups_per_segment num_segments cs
+        intermediate_redres comm reduce_lam' kern_chunk_reduce_lam
+        nes num_groups_used OneGroupOneSegment
+
+      second_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
+        vn' <- newName $ patElemName pe
+        return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments]
+
+      let second_pat = Pattern [] second_redres_pes
+      addStm =<< renameStm (Let second_pat () $ Op secondkernel)
+
+      let result_pes = second_redres_pes ++ mapres_pes
+      return $ map (Var . patElemName) result_pes
 
 groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
