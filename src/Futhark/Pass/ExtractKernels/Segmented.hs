@@ -54,25 +54,22 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   map_out_arrs <- forM (drop num_redres $ patternIdents pat) $ \(Ident name t) -> do
     tmp <- letExp (baseString name <> "_out_in") $
            BasicOp $ Scratch (elemType t) (arrayDims t)
-    -- I reshape here so the indexing within a kernel becomes easier... not
-    -- really sure if this will always work, or if this is actually the best way
-    -- to do it.
-    --
+    -- This reshape will not always work.
     -- For example if the "map" part takes an input a 1D array and produces a 2D
     -- array, this is clearly wrong. See ex3.fut
     letExp (baseString name ++ "_out_in") $
-            BasicOp $ Reshape cs [DimNew num_segments, DimNew segment_size] tmp
+            BasicOp $ Reshape cs [DimNew w] tmp
 
-  arrs_non_flat <- forM arrs_flat $ \arr -> do
+  -- Check that we're only dealing with arrays with dimension [w]
+  forM_ arrs_flat $ \arr -> do
     tp <- lookupType arr
     case tp of
-      -- FIXME: this won't work if the reduction operator works on lists
+      -- FIXME: this won't work if the reduction operator works on lists... but
+      -- they seem to be handled in some other way (which makes sense). Talk
+      -- with troels if I should worry about this.
       Array _primtp (Shape [flatsize]) _uniqness ->
-        if flatsize /= w
-        then fail $ "regularSegmentedRedomap: flat array, with incorrect size encountered " ++ pretty arr
-        else
-          letExp (baseString arr ++ "_non_flat") $
-            BasicOp $ Reshape cs [DimNew num_segments, DimNew segment_size] arr
+        when (flatsize /= w) $
+          fail$ "regularSegmentedRedomap: flat array, with incorrect size encountered " ++ pretty arr
       _ -> fail $ "regularSegmentedRedomap: non-flat array encountered " ++ pretty arr
 
   -- The pattern passed to chunkLambda must have exactly *one* array dimension,
@@ -109,7 +106,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   -- FIXME: do we need to copy arrays here? :S
   -- see 'blockedReductionStream' in BlockedKernel.hs
 
-  let all_arrs = arrs_non_flat ++ map_out_arrs
+  let all_arrs = arrs_flat ++ map_out_arrs
   (ogps_ses, ogps_stms) <- runBinder $ oneGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam
   (mgps_ses, mgps_stms) <- runBinder $ manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam
 
@@ -187,17 +184,8 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       let first_pat = Pattern [] $ firstkernel_redres_pes ++ mapres_pes
       addStm =<< renameStm (Let first_pat () $ Op firstkenel)
 
-      -- need to reshape so indexing inside next kernel works
-      intermediate_redres <- forM firstkernel_redres_pes $ \pe -> do
-        vn' <- newName $ patElemName pe
-        let pe' = PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments, num_groups_per_segment]
-        addStm $ Let (Pattern [] [pe']) () $
-                 BasicOp $ Reshape cs [DimNew num_segments, DimNew num_groups_per_segment]
-                                   (patElemName pe)
-        return vn'
-
       (secondkernel, _, _) <- groupPerSegmentKernel num_groups_per_segment num_segments cs
-        intermediate_redres comm reduce_lam' kern_chunk_reduce_lam
+        (map patElemName firstkernel_redres_pes) comm reduce_lam' kern_chunk_reduce_lam
         nes num_groups_used OneGroupOneSegment
 
       second_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
@@ -214,7 +202,7 @@ groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
        -> SubExp            -- num_segments
        -> Certificates      -- cs
-       -> [VName]           -- all_arrs: non_flat arrays (also the "map_out" ones)
+       -> [VName]           -- all_arrs: flat arrays (also the "map_out" ones)
        -> Commutativity     -- comm
        -> Lambda InKernel   -- reduce_lam
        -> Lambda InKernel   -- kern_chunk_fold_lam
@@ -274,33 +262,29 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
   let ordering = case comm of Commutative -> SplitStrided threads_within_segment
                               Noncommutative -> SplitContiguous
 
-  let (_, chunk_size, [], arr_params) =
+  let (_, chunksize, [], arr_params) =
         partitionChunkedKernelFoldParameters 0 $ lambdaParams kern_chunk_fold_lam
+  let chunksize_se = Var $ paramName chunksize
 
   patelems_res_of_split <- forM arr_params $ \arr_param -> do
-    let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunk_size)
+    let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunksize)
     return $ PatElem (paramName arr_param) BindVar chunk_t
 
-  (all_arrs_indexed, index_stms) <- runBinder $ forM all_arrs $ \arr -> do
-    tp <- lookupType arr
-    let slice = fullSlice tp [DimFix segment_index]
-    letExp (baseString arr <> "_indexed") $
-           BasicOp $ Index cs arr slice
+  let chunksize_stm =
+        Let (Pattern [] [PatElem (paramName chunksize) BindVar $ paramType chunksize])
+            () $
+            Op $ SplitSpace ordering segment_size index_within_segment elements_per_thread
 
-  -- a SplitArray on no arrays is invalid, so we need a special case if all_arrs
-  -- is empty. Rasmus does not beleive this will happen, but better be safe
-  let split_stm =
-        if null all_arrs
-        then Let (Pattern []
-                  [PatElem (paramName chunk_size) BindVar $ paramType chunk_size])
-                 () $
-                 Op $ SplitSpace ordering segment_size index_within_segment
-                                 elements_per_thread
-        else Let (Pattern [PatElem (paramName chunk_size) BindVar $ paramType chunk_size]
-                          patelems_res_of_split)
-                 () $
-                 Op $ SplitArray ordering segment_size index_within_segment
-                                 elements_per_thread all_arrs_indexed
+  let stride = case ordering of SplitStrided s -> s
+                                SplitContiguous -> one
+
+  (offset, offset_stms) <- runBinder $
+    makeOffsetExp ordering index_within_segment elements_per_thread segment_index
+
+  index_stms <- forM (zip all_arrs patelems_res_of_split) $ \(arr, pe) -> do
+    tp <- lookupType arr
+    let slice = fullSlice tp [DimSlice offset chunksize_se stride]
+    return $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
 
   let red_ts = take num_redres $ lambdaReturnType kern_chunk_fold_lam
   let map_ts = map rowType $ drop num_redres $ lambdaReturnType kern_chunk_fold_lam
@@ -311,7 +295,7 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
     return $ PatElem pe_name BindVar red_t
   map_pes <- forM map_ts $ \map_t -> do
     pe_name <- newVName "chunk_fold_map"
-    return $ PatElem pe_name BindVar $ map_t `arrayOfRow` Var (paramName chunk_size)
+    return $ PatElem pe_name BindVar $ map_t `arrayOfRow` chunksize_se
 
   -- we add the lets here, as we practially don't know if the resulting subexp
   -- is a Constant or a Var, so better be safe (?)
@@ -337,22 +321,18 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                          GroupReduce group_size reduce_lam' $
                          zip nes $ map patElemName combine_red_pes
 
-
-  (offset_for_first_value, offset_stms) <- runBinder $
-    makeOffsetExp ordering index_within_segment elements_per_thread segment_index
   red_returns <- forM final_red_pes $ \pe ->
     return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $
                            Var $ patElemName pe
   map_returns <- forM map_pes $ \pe ->
     return $ ConcatReturns ordering w elements_per_thread
-                           (Just offset_for_first_value) $
+                           (Just offset) $
                            patElemName pe
   let kernel_returns = red_returns ++ map_returns
 
   let kernel = Kernel kernelname cs space kernel_return_types $
-                  KernelBody () (calc_segindex_stms ++ index_stms ++ [split_stm] ++ fold_chunk_stms ++
-                                 combine_stms ++ [group_reduce_stm] ++
-                                 offset_stms)
+                  KernelBody () (calc_segindex_stms ++ [chunksize_stm] ++ offset_stms ++ index_stms ++
+                                 fold_chunk_stms ++ combine_stms ++ [group_reduce_stm])
                   kernel_returns
 
   return (kernel, num_groups, num_groups_per_segment)
