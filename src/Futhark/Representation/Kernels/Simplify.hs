@@ -270,7 +270,7 @@ fuseSplitIota :: (LocalScope (Lore m) m,
                  TopDownRule m
 fuseSplitIota vtable (Let (Pattern [size] chunks) _
                        (Op (SplitArray o w i elems_per_thread arrs)))
-  | ([(iota_pe, iota_start)], chunks_and_arrs) <-
+  | ([(iota_pe, iota_start, Constant (IntValue (Int32Value 1)))], chunks_and_arrs) <-
       partitionEithers $ zipWith (isIota vtable) chunks arrs = do
 
       let (chunks', arrs') = unzip chunks_and_arrs
@@ -302,7 +302,7 @@ fuseStreamIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Lore m ~ Wise InKernel) =>
                  TopDownRule m
 fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
-  | ([(iota_param, iota_start)], params_and_arrs) <-
+  | ([(iota_param, iota_start, iota_stride)], params_and_arrs) <-
       partitionEithers $ zipWith (isIota vtable) (groupStreamArrParams lam) arrs = do
 
       let (arr_params', arrs') = unzip params_and_arrs
@@ -310,10 +310,12 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
           offset = groupStreamChunkOffset lam
 
       body' <- insertStmsM $ do
+        offset' <- letSubExp "offset_by_stride" $
+          BasicOp $ BinOp (Mul Int32) (Var offset) iota_stride
         start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) (Var offset) iota_start
+            BasicOp $ BinOp (Add Int32) offset' iota_start
         letBindNames'_ [paramName iota_param] $
-          BasicOp $ Iota (Var chunk_size) start (constant (1::Int32)) Int32
+          BasicOp $ Iota (Var chunk_size) start iota_stride Int32
         return $ groupStreamLambdaBody lam
       let lam' = lam { groupStreamArrParams = arr_params',
                        groupStreamLambdaBody = body'
@@ -321,11 +323,10 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
       letBind_ pat $ Op $ GroupStream w max_chunk lam' accs arrs'
 fuseStreamIota _ _ = cannotSimplify
 
-isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp) (a, VName)
+isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp, SubExp) (a, VName)
 isIota vtable chunk arr
-  | Just (BasicOp (Iota _ x (Constant s) Int32)) <- ST.lookupExp arr vtable,
-    oneIsh s =
-      Left (chunk, x)
+  | Just (BasicOp (Iota _ x s Int32)) <- ST.lookupExp arr vtable =
+      Left (chunk, x, s)
   | otherwise =
       Right (chunk, arr)
 
