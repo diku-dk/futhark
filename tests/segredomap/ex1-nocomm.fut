@@ -11,5 +11,9 @@
 fun main (xss : [m][n]f32): ([m]i32, [m][n]f64) =
   unzip (map( \(xs : [n]f32) : (i32, [n]f64) ->
          let (xs_int, xs_neg) = unzip (map( \(x : f32) : (i32, f64) -> (i32 x, f64(-x))) xs)
-         in (reduce (+) 0 xs_int, xs_neg)
+         in (reduce add 0 xs_int, xs_neg)
      ) xss)
+
+-- Having this a seperate function currently makes the compiler not realize that
+-- adition is actually a commutative operator. This trick might not last forever.
+fun add (x : i32) (y : i32): i32 = x + y
