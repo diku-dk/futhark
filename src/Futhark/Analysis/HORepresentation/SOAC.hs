@@ -559,11 +559,13 @@ soacToStream soac = do
       -- map(f,a) creates a stream with NO accumulators
       return (Stream cs w (MapLike Disorder) strmlam inps, [])
     -- Scan(+,nes,a) => is translated in strem's body to:
-    -- 1. let scan0_ids   = scan(+, nes, a_ch)           in
-    -- 2. let strm_resids = map (acc `+`,nes, scan0_ids) in
-    -- 3. let outerszm1id = sizeof(0,strm_resids) - 1    in
-    -- 4. let lasteel_ids = strm_resids[outerszm1id]     in
-    -- 5. let acc'        = acc + lasteel_ids            in
+    -- 1. let scan0_ids   = scan(+, nes, a_ch)
+    -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
+    -- 3. let outerszm1id = sizeof(0,strm_resids) - 1
+    -- 4. let lasteel_ids = if outerszm1id < 0
+    --                      then nes
+    --                      else strm_resids[outerszm1id]
+    -- 5. let acc'        = acc + lasteel_ids
     --    {acc', strm_resids}
     Scan _ _ _ nesinps -> do
       -- the array and accumulator result types
@@ -572,9 +574,11 @@ soacToStream soac = do
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
 
-      scan0_ids  <- mapM (newIdent "resarr0") loutps
-      lastel_ids <- mapM (newIdent "lstel")   accrtps
-      inpacc_ids <- mapM (newParam "inpacc")  accrtps
+      scan0_ids <- mapM (newIdent "resarr0") loutps
+      lastel_ids <- mapM (newIdent "lstel") accrtps
+      lastel_tmp_ids <- mapM (newIdent "lstel_tmp") accrtps
+      empty_arr <- newIdent "empty_arr" $ Prim Bool
+      inpacc_ids <- mapM (newParam "inpacc")accrtps
       outszm1id  <- newIdent "szm1" $ Prim int32
       -- 1. let scan0_ids   = scan(+,nes,a_ch)
       let insoac = Futhark.Scan cs chvar lam' $ zip nes (map paramName strm_inpids)
@@ -584,12 +588,21 @@ soacToStream soac = do
                        BinOp (Sub Int32)
                        (Futhark.Var $ paramName chunk_param)
                        (constant (1::Int32))
-      -- 3. let lasteel_ids = scan0_ids[outerszm1id]
-          lelbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ BasicOp $
-                                           Index cs (identName arrid) $
-                                           fullSlice (identType arrid)
-                                           [DimFix $ Futhark.Var $ identName outszm1id]
-                           ) lastel_ids scan0_ids
+      -- 3. let lasteel_ids = ...
+          empty_arr_bnd = mkLet' [] [empty_arr] $ BasicOp $ CmpOp (CmpSlt Int32)
+                          (Futhark.Var $ identName outszm1id)
+                          (constant (0::Int32))
+          leltmpbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ BasicOp $
+                                              Index cs (identName arrid) $
+                                              fullSlice (identType arrid)
+                                              [DimFix $ Futhark.Var $ identName outszm1id]
+                              ) lastel_tmp_ids scan0_ids
+          lelbnd = mkLet' [] lastel_ids $
+                   If (Futhark.Var $ identName empty_arr)
+                   (mkBody [] nes)
+                   (mkBody leltmpbnds $
+                    map (Futhark.Var . identName) lastel_tmp_ids) $
+                   staticShapes $ map identType lastel_tmp_ids
       -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
       maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) lam
       let mapbnd = mkLet' [] strm_resids $ Op $
@@ -599,7 +612,7 @@ soacToStream soac = do
                    map paramName inpacc_ids++map identName lastel_ids
       -- Finally, construct the stream
       let (addlelbnd,addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
-          strmbdy= mkBody (insbnd:outszm1bnd:lelbnds++mapbnd:addlelbnd) $
+          strmbdy= mkBody (insbnd:outszm1bnd:empty_arr_bnd:lelbnd:mapbnd:addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps)

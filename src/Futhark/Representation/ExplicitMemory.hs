@@ -112,7 +112,6 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
-import Futhark.Construct (fullSliceNum)
 import Futhark.Optimise.Simplifier.Lore
 import Futhark.Representation.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
@@ -981,24 +980,6 @@ instance OpReturns ExplicitMemory where
 instance OpReturns InKernel where
   opReturns (Alloc size space) =
     return [ReturnsMemory size space]
-  opReturns (Inner (SplitArray o _ thread_id elems_per_thread arrs)) =
-    forM arrs $ \arr -> do
-      arr_t <- lookupType arr
-      (mem, ixfun) <- lookupArraySummary arr
-      let row_dims = drop 1 $ arrayDims arr_t
-          bt = elemType arr_t
-          elems_per_thread' = primExpFromSubExp int32 elems_per_thread
-          ext_shape = ExtShape $ Ext 0 : map Free row_dims
-          thread_id' = primExpFromSubExp int32 thread_id
-      return $ ReturnsArray bt ext_shape NoUniqueness $ Just $ ReturnsInBlock mem $
-        case o of
-          SplitContiguous ->
-            IxFun.slice ixfun $
-            fullSliceNum (map (primExpFromSubExp int32) $ arrayDims arr_t)
-            [unitSlice (thread_id' * elems_per_thread') elems_per_thread']
-          SplitStrided stride ->
-            IxFun.strideIndex (IxFun.offsetIndex ixfun thread_id') $
-            primExpFromSubExp int32 stride
 
   opReturns (Inner (GroupStream _ _ lam _ _)) =
     forM (groupStreamAccParams lam) $ \param ->

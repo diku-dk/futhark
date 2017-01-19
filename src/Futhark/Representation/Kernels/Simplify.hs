@@ -41,7 +41,6 @@ import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Rephrase (castStm)
-import Futhark.Util.IntegralExp (quotRoundingUp)
 
 simpleKernels :: Simplifier.SimpleOps Kernels
 simpleKernels = Simplifier.bindableSimpleOps (simplifyKernelOp simpleInKernel inKernelEnv)
@@ -126,13 +125,6 @@ instance Engine.Simplifiable SplitOrdering where
 
 simplifyKernelExp :: Engine.SimplifiableLore lore =>
                      KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore))
-simplifyKernelExp (SplitArray o w i elems_per_thread arrs) =
-  SplitArray
-  <$> Engine.simplify o
-  <*> Engine.simplify w
-  <*> Engine.simplify i
-  <*> Engine.simplify elems_per_thread
-  <*> mapM Engine.simplify arrs
 
 simplifyKernelExp (SplitSpace o w i elems_per_thread) =
   SplitSpace
@@ -262,41 +254,6 @@ kernelRules :: (MonadBinder m,
                 Lore m ~ Wise Kernels) => RuleBook m
 kernelRules = standardRules <>
               RuleBook [ removeInvariantKernelResults ] [distributeKernelResults]
-
--- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
--- instead.
-fuseSplitIota :: (LocalScope (Lore m) m,
-                  MonadBinder m, Lore m ~ Wise InKernel) =>
-                 TopDownRule m
-fuseSplitIota vtable (Let (Pattern [size] chunks) _
-                       (Op (SplitArray o w i elems_per_thread arrs)))
-  | ([(iota_pe, iota_start, Constant (IntValue (Int32Value 1)))], chunks_and_arrs) <-
-      partitionEithers $ zipWith (isIota vtable) chunks arrs = do
-
-      let (chunks', arrs') = unzip chunks_and_arrs
-
-      case chunks' of
-        [] -> -- Can't create a binding that doesn't produce any values.
-          letBind_ (Pattern [] [size]) $
-          Op $ SplitSpace o w i elems_per_thread
-        _ ->
-          letBind_ (Pattern [size] chunks') $
-          Op $ SplitArray o w i elems_per_thread arrs'
-
-      case o of
-        SplitContiguous -> do
-          start_offset <- letSubExp "iota_start_offset" $
-            BasicOp $ BinOp (Mul Int32) i elems_per_thread
-          start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) start_offset iota_start
-          letBindNames'_ [patElemName iota_pe] $
-            BasicOp $ Iota (Var $ patElemName size) start (constant (1::Int32)) Int32
-        SplitStrided stride -> do
-          start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) i iota_start
-          letBindNames'_ [patElemName iota_pe] $
-            BasicOp $ Iota (Var $ patElemName size) start stride Int32
-fuseSplitIota _ _ = cannotSimplify
 
 fuseStreamIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Lore m ~ Wise InKernel) =>
@@ -429,67 +386,8 @@ distributeKernelResults (vtable, used)
       where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
 distributeKernelResults _ _ = cannotSimplify
 
-doInlineSplitSpace :: Bool
-doInlineSplitSpace = False
-
--- | Turn SplitSpace into direct code.  SplitSpace is slated for
--- destruction in the future.
-inlineSplitSpace :: (LocalScope (Lore m) m,
-                     MonadBinder m, Lore m ~ Wise InKernel) =>
-                    TopDownRule m
-
-inlineSplitSpace _ (Let pat _
-                    (Op (SplitSpace (SplitStrided stride) w i elems_per_i))) | doInlineSplitSpace = do
-  remaining_elements <- letSubExp "remaining_elements" <=< toExp $
-    (primExpFromSubExp int32 w - primExpFromSubExp int32 i)
-    `quotRoundingUp`
-    primExpFromSubExp int32 stride
-  cond <- letSubExp "full" $ BasicOp $ CmpOp (CmpSlt Int32)
-          elems_per_i remaining_elements
-  t_branch <- mkBodyM [] [elems_per_i]
-  f_branch <- mkBodyM [] [remaining_elements]
-  letBind_ pat $ If cond t_branch f_branch [Prim int32]
-
-inlineSplitSpace _ (Let pat _
-                    (Op (SplitSpace SplitContiguous w i elems_per_i))) | doInlineSplitSpace = do
-  let w' = primExpFromSubExp int32 w
-      i' = primExpFromSubExp int32 i
-      elems_per_i' = primExpFromSubExp int32 elems_per_i
-
-  starting_point <- letSubExp "starting_point" <=< toExp $
-    i' * elems_per_i'
-  let starting_point' = primExpFromSubExp int32 starting_point
-
-  remaining_elements <- letSubExp "remaining_elements" <=< toExp $
-    w' - primExpFromSubExp int32 starting_point
-  let remaining_elements' = primExpFromSubExp int32 remaining_elements
-
-  let no_remaining_elements = CmpOpExp (CmpSle Int32) remaining_elements' $
-                              primExpFromSubExp int32 $ intConst Int32 0
-      beyond_bounds = CmpOpExp (CmpSle Int32) w' starting_point'
-
-  is_empty <- letSubExp "is_empty" <=< toExp $
-    BinOpExp LogOr no_remaining_elements beyond_bounds
-
-  empty_body <- mkBodyM [] [intConst Int32 0]
-  nonempty_body <- insertStmsM $ do
-    is_last_thread <- letSubExp "is_last_thread" <=< toExp $
-      CmpOpExp (CmpSlt Int32) w' ((i' + 1) * elems_per_i')
-    last_thread_body <- insertStmsM $ do
-      last_thread_elements <- letSubExp "last_thread_elements" <=< toExp $
-        w' - i' * elems_per_i'
-      resultBodyM [last_thread_elements]
-    not_last_thread_body <- mkBodyM [] [elems_per_i]
-    res <- letSubExp "nonempty_res" $
-           If is_last_thread last_thread_body not_last_thread_body [Prim int32]
-    resultBodyM [res]
-
-  letBind_ pat $ If is_empty empty_body nonempty_body [Prim int32]
-
-inlineSplitSpace _ _ = cannotSimplify
-
 inKernelRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Lore m ~ Wise InKernel) => RuleBook m
 inKernelRules = standardRules <>
-                RuleBook [fuseSplitIota, fuseStreamIota, inlineSplitSpace] []
+                RuleBook [fuseStreamIota] []

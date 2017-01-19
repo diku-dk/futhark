@@ -202,7 +202,7 @@ slice (Index ixfun mis) is =
         reslice (DimFix j:mis') is' =
           DimFix j : reslice mis' is'
         reslice (DimSlice orig_k _ orig_s:mis') (DimSlice new_k n new_s:is') =
-          DimSlice (orig_k + new_k) n (orig_s*new_s) : reslice mis' is'
+          DimSlice (orig_k + new_k * orig_s) n (orig_s*new_s) : reslice mis' is'
         reslice (DimSlice orig_k _ orig_s:mis') (DimFix i:is') =
           DimFix (orig_k+i*orig_s) : reslice mis' is'
         reslice _ _ = error "IndexFunction slice: invalid arguments"

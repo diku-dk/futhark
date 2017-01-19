@@ -662,11 +662,6 @@ groupStmsByGuard constants bnds =
 compileKernelExp :: KernelConstants -> ImpGen.Destination -> KernelExp InKernel
                  -> InKernelGen ()
 
-compileKernelExp constants dest (SplitArray o w i elems_per_thread _arrs)
-  | ImpGen.Destination (ImpGen.ArrayDestination _ (Just size:_):_) <- dest =
-      compileKernelExp constants (ImpGen.Destination [ImpGen.ScalarDestination size]) $
-      SplitSpace o w i elems_per_thread
-
 compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
   | ImpGen.Destination [ImpGen.ScalarDestination size] <- dest = do
       num_elements <- Imp.elements <$> ImpGen.compileSubExp w
