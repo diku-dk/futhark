@@ -129,10 +129,12 @@ transformStm (Let pat _ (Op (Stream [] w (Sequential accs) fold_lam arrs)))
                    , Out.groupStreamLambdaBody = lam_body
                    }
 
-  -- TODO: only copy the accs that were not consumed in the original stream.
-  accs' <- forM accs $ \acc ->
+  -- Only copy the accs that were not consumed in the original stream.
+  let consumed = consumedByExtLambda $ Alias.analyseExtLambda fold_lam
+  accs' <- forM (zip fold_acc_params accs) $ \(p, acc) ->
     case acc of
-      Var v -> letSubExp "streamseq_acc_copy" $ BasicOp $ Copy v
+      Var v | not $ paramName p `HS.member` consumed ->
+                letSubExp "streamseq_acc_copy" $ BasicOp $ Copy v
       _     -> return acc
 
   addStm $ Let pat () $ Op $
