@@ -38,12 +38,12 @@ regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels)
                         -> Lambda InKernel   -- fold_lam = this lambda performs both the map-part and
                                              -- reduce-part of a redomap (described in redomap paper)
                         -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
-                        -> [KernelInput]     -- inps = more detailed information about the arguments for the maps on "top" of this redomap
+                        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
                         -> [SubExp]          -- nes
                         -> [VName]           -- arrs_flat
                         -> m ()
 regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
-                        pat cs w comm reduce_lam fold_lam _ispace _inps nes arrs_flat = do
+                        pat cs w comm reduce_lam fold_lam ispace inps nes arrs_flat = do
   unless (null $ patternContextElements pat) $ fail "regularSegmentedRedomap result pattern contains context elements, and Rasmus did not think this would ever happen."
 
   -- the result of the "map" part of a redomap has to be stored somewhere within
@@ -157,6 +157,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       (kernel, _, _) <- groupPerSegmentKernel segment_size num_segments cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w OneGroupOneSegment
+        ispace inps
 
       kernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
@@ -168,7 +169,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       return $ map (Var . patElemName) $ patternValueElements kernel_pat
 
     ----------------------------------------------------------------------------
-    manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam= do
+    manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam = do
       mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
@@ -176,6 +177,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       (firstkenel, num_groups_used, num_groups_per_segment) <- groupPerSegmentKernel segment_size num_segments cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w ManyGroupsOneSegment
+        ispace inps
 
       firstkernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
@@ -187,6 +189,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       (secondkernel, _, _) <- groupPerSegmentKernel num_groups_per_segment num_segments cs
         (map patElemName firstkernel_redres_pes) comm reduce_lam' kern_chunk_reduce_lam
         nes num_groups_used OneGroupOneSegment
+        ispace inps
 
       second_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
@@ -209,12 +212,20 @@ groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> [SubExp]          -- nes
        -> SubExp            -- w = total_num_elements
        -> SegmentedVersion  -- segver
+       -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
+       -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Kernel InKernel, SubExp, SubExp)
 groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                       reduce_lam' kern_chunk_fold_lam
-                      nes w segver = do
+                      nes w segver ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
                               -- reduction operator)
+  kernel_input_stms <- forM inps $ \kin -> do
+    let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
+    let arr = kernelInputArray kin
+    arrtp <- lookupType arr
+    let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
+    return $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
 
   group_size <- letSubExp "group_size" $ Op GroupSize
   num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
@@ -242,8 +253,11 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
   threads_within_segment <- letSubExp "threads_within_segment" $
     BasicOp $ BinOp (Mul Int32) group_size num_groups_per_segment
 
+  gtid_vn <- newVName "gtid"
+
   -- the array passed here is the structure for how to layout the kernel space
-  space <- newKernelSpace (num_groups, group_size, num_threads) $ FlatThreadSpace []
+  space <- newKernelSpace (num_groups, group_size, num_threads) $
+    FlatGroupSpace $ ispace ++ [(gtid_vn, num_groups_per_segment)]
 
   ((segment_index, index_within_segment), calc_segindex_stms) <- runBinder $ do
     segment_index <- letSubExp "segment_index" $
@@ -331,7 +345,8 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
   let kernel_returns = red_returns ++ map_returns
 
   let kernel = Kernel kernelname cs space kernel_return_types $
-                  KernelBody () (calc_segindex_stms ++ [chunksize_stm] ++ offset_stms ++ index_stms ++
+                  KernelBody () (kernel_input_stms ++ calc_segindex_stms ++
+                                 [chunksize_stm] ++ offset_stms ++ index_stms ++
                                  fold_chunk_stms ++ combine_stms ++ [group_reduce_stm])
                   kernel_returns
 
