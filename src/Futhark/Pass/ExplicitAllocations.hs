@@ -141,7 +141,9 @@ instance Allocable fromlore OutInKernel =>
     letBindNames_ [(name, bindage)] $ BasicOp $ Copy src
 
   dimAllocationSize (Var v) =
-    fromMaybe (Var v) <$> asks (HM.lookup v . chunkMap)
+    -- It is important to recurse here, as the substitution may itself
+    -- be a chunk size.
+    maybe (return $ Var v) dimAllocationSize =<< asks (HM.lookup v . chunkMap)
   dimAllocationSize size =
     return size
 
@@ -157,7 +159,9 @@ instance Allocable fromlore OutInKernel =>
     letBindNames_ [(name, bindage)] $ BasicOp $ Copy src
 
   dimAllocationSize (Var v) =
-    fromMaybe (Var v) <$> asks (HM.lookup v . chunkMap)
+    -- It is important to recurse here, as the substitution may itself
+    -- be a chunk size.
+    maybe (return $ Var v) dimAllocationSize =<< asks (HM.lookup v . chunkMap)
   dimAllocationSize size =
     return size
 
@@ -454,7 +458,7 @@ ensureArrayIn t mem ixfun (Var v) = do
   (src_mem, src_ixfun) <- lookupArraySummary v
   if src_mem == mem && src_ixfun == ixfun
     then return $ Var v
-    else do copy <- newIdent (baseString v ++ "_copy") t
+    else do copy <- newIdent (baseString v ++ "_ensure_copy") t
             let summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness mem ixfun
                 pat = Pattern [] [PatElem (identName copy) BindVar summary]
             letBind_ pat $ BasicOp $ Copy v
@@ -551,8 +555,6 @@ allocInFun (FunDef entry fname rettype params fbody) =
             localScope (scopeOfKernelSpace space)
             (allocInKernelBody kbody)
 
-          handleKernelExp (SplitArray o w i elems_per_thread arrs) =
-            return $ Inner $ SplitArray o w i elems_per_thread arrs
           handleKernelExp (SplitSpace o w i elems_per_thread) =
             return $ Inner $ SplitSpace o w i elems_per_thread
           handleKernelExp (Combine cspace ts active body) =
@@ -735,8 +737,6 @@ instance SizeSubst op => SizeSubst (MemOp op) where
   opSizeSubst _ _ = mempty
 
 instance SizeSubst (KernelExp lore) where
-  opSizeSubst (Pattern [size] _) (SplitArray _ _ _ elems_per_thread _) =
-    HM.singleton (patElemName size) elems_per_thread
   opSizeSubst (Pattern _ [size]) (SplitSpace _ _ _ elems_per_thread) =
     HM.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
@@ -762,8 +762,19 @@ allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries = do
   body' <- localScope (HM.insert block_size (IndexInfo Int32) $
                        HM.insert block_offset (IndexInfo Int32) $
                        scopeOfLParams $ acc_params' ++ arr_params')  $
-           local (boundDim block_size maxchunk) $
-           allocInBodyNoDirect body
+           local (boundDim block_size maxchunk) $ do
+           body' <- allocInBodyNoDirect body
+           insertStmsM $ do
+             -- We copy the result of the body to whereever the accumulators are stored.
+             mapM_ addStm (bodyStms body')
+             let maybeCopyResult r p =
+                   case paramAttr p of
+                     ArrayMem _ _ _ mem ixfun ->
+                       ensureArrayIn (paramType p) mem ixfun r
+                     _ ->
+                       return r
+             resultBodyM =<<
+               zipWithM maybeCopyResult (bodyResult body') acc_params'
   return $
     GroupStreamLambda block_size block_offset acc_params' arr_params' body'
 

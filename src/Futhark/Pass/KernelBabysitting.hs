@@ -75,12 +75,8 @@ nonlinearInMemory name m =
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
 transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
-  -- First we do the easy stuff, which deals with SplitArray statements.
-  kbody' <- transformKernelBody num_threads cs kbody
-
-  -- Then we go spelunking for accesses to arrays that are defined
-  -- outside the kernel body and where the indices are kernel thread
-  -- indices.
+  -- Go spelunking for accesses to arrays that are defined outside the
+  -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
   let thread_gids = map fst $ spaceDimensions space
       thread_local = HS.fromList $ spaceGlobalId space : thread_gids
@@ -89,13 +85,12 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
                          thread_local
                          (castScope scope <> scopeOfKernelSpace space)
                          (ensureCoalescedAccess expmap thread_gids)
-                         kbody')
+                         kbody)
              mempty
 
   let bnd' = Let pat () $ Op $ Kernel desc cs space ts kbody''
   addStm bnd'
   return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
-  where num_threads = spaceNumThreads space
 
 transformStm expmap (Let pat () e) = do
   e' <- mapExpM transform e
@@ -106,79 +101,11 @@ transformStm expmap (Let pat () e) = do
 transform :: Mapper Kernels Kernels BabysitM
 transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody }
 
-paddedScanReduceInput :: SubExp -> SubExp
-                      -> BabysitM (SubExp, SubExp)
-paddedScanReduceInput w num_threads = do
-  w_padded <- letSubExp "padded_size" =<<
-              eRoundToMultipleOf Int32 (eSubExp w) (eSubExp num_threads)
-  padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int32) w_padded w
-  return (w_padded, padding)
-
-rearrangeScanReduceInput :: MonadBinder m =>
-                            Certificates
-                         -> SubExp -> SubExp -> SubExp -> SubExp -> SubExp -> VName
-                         -> m VName
-rearrangeScanReduceInput cs num_threads padding w w_padded elements_per_thread arr = do
-  arr_t <- lookupType arr
-  arr_padded <- padArray arr_t
-  rearrange (baseString arr) arr_padded (rowType arr_t)
-
-  where padArray arr_t = do
-          let arr_shape = arrayShape arr_t
-              padding_shape = arr_shape `setOuterDim` padding
-          arr_padding <-
-            letExp (baseString arr <> "_padding") $
-            BasicOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
-          letExp (baseString arr <> "_padded") $
-            BasicOp $ Concat [] 0 arr [arr_padding] w_padded
-
-        rearrange arr_name arr_padded row_type = do
-          let row_dims = arrayDims row_type
-              extradim_shape = Shape $ [num_threads, elements_per_thread] ++ row_dims
-              tr_perm = [1] ++ [2..shapeRank extradim_shape-1] ++ [0]
-              tr_perm_inv = rearrangeInverse tr_perm
-          arr_extradim <-
-            letExp (arr_name <> "_extradim") $
-            BasicOp $ Reshape cs (map DimNew $ shapeDims extradim_shape) arr_padded
-          arr_extradim_tr <-
-            letExp (arr_name <> "_extradim_tr") $
-            BasicOp $ Rearrange [] tr_perm arr_extradim
-          arr_extradim_manifested <-
-            letExp (arr_name <> "_extradim_manifested") $
-            BasicOp $ Copy arr_extradim_tr
-          arr_extradim_inv_tr <-
-            letExp (arr_name <> "_extradim_inv_tr") $
-            BasicOp $ Rearrange [] tr_perm_inv arr_extradim_manifested
-          arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
-            BasicOp $ Reshape [] (reshapeOuter [DimNew w_padded] 2 extradim_shape)
-            arr_extradim_inv_tr
-          letExp (arr_name <> "_inv_tr_init") $
-            BasicOp $ Split [] 0 [w] arr_inv_tr
-
-transformKernelBody :: SubExp -> Certificates
-                    -> KernelBody InKernel
-                    -> BabysitM (KernelBody InKernel)
-transformKernelBody num_threads cs (KernelBody () stms res) =
-  KernelBody () <$> mapM transformKernelStm stms <*> pure res
-  where boundInKernel = (`elem` HM.keys (scopeOf stms))
-
-        transformKernelStm (Let pat () (Op (SplitArray SplitContiguous w i elems_per_thread arrs))) = do
-          (w_padded, padding) <- paddedScanReduceInput w num_threads
-          Let pat () . Op . SplitArray SplitContiguous w i elems_per_thread <$>
-            mapM (maybeRearrange w w_padded padding elems_per_thread) arrs
-
-        transformKernelStm stm =
-          return stm
-
-        maybeRearrange w w_padded padding elems_per_thread arr
-          | boundInKernel arr =
-              return arr
-          | otherwise =
-              rearrangeScanReduceInput cs num_threads padding w w_padded elems_per_thread arr
-
-type ArrayIndexTransform m = (VName -> Bool) -> -- thread local?
-                             Scope InKernel -> -- type environment
-                             VName -> Slice SubExp -> m (Maybe (VName, Slice SubExp))
+type ArrayIndexTransform m =
+  (VName -> Bool) ->           -- thread local?
+  (SubExp -> Maybe SubExp) ->  -- split substitution?
+  Scope InKernel ->            -- type environment
+  VName -> Slice SubExp -> m (Maybe (VName, Slice SubExp))
 
 traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                   Names
@@ -187,34 +114,47 @@ traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                -> KernelBody InKernel
                                -> f (KernelBody InKernel)
 traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms kres) =
-  KernelBody () <$> mapM (onStm (mempty, outer_scope)) kstms <*> pure kres
-  where onLambda (variance, scope) lam =
+  KernelBody () <$>
+  mapM (onStm (varianceInStms mempty kstms,
+               mkSizeSubsts kstms,
+               outer_scope)) kstms <*>
+  pure kres
+  where onLambda (variance, szsubst, scope) lam =
           (\body' -> lam { lambdaBody = body' }) <$>
-          onBody (variance, scope') (lambdaBody lam)
+          onBody (variance, szsubst, scope') (lambdaBody lam)
           where scope' = scope <> scopeOfLParams (lambdaParams lam)
 
-        onStreamLambda (variance, scope) lam =
+        onStreamLambda (variance, szsubst, scope) lam =
           (\body' -> lam { groupStreamLambdaBody = body' }) <$>
-          onBody (variance, scope') (groupStreamLambdaBody lam)
+          onBody (variance, szsubst, scope') (groupStreamLambdaBody lam)
           where scope' = scope <> scopeOf lam
 
-        onBody (variance, scope) (Body battr stms bres) =
-          Body battr <$> mapM (onStm (variance', scope')) stms <*> pure bres
+        onBody (variance, szsubst, scope) (Body battr stms bres) =
+          Body battr <$> mapM (onStm (variance', szsubst', scope')) stms <*> pure bres
           where variance' = varianceInStms variance stms
+                szsubst' = mkSizeSubsts stms <> szsubst
                 scope' = scope <> scopeOf stms
 
-        onStm (variance, scope) (Let pat attr (BasicOp (Index cs arr is))) =
-          Let pat attr . oldOrNew <$> f isThreadLocal scope arr is
+        onStm (variance, szsubst, scope) (Let pat attr (BasicOp (Index cs arr is))) =
+          Let pat attr . oldOrNew <$> f isThreadLocal sizeSubst scope arr is
           where oldOrNew Nothing =
                   BasicOp $ Index cs arr is
                 oldOrNew (Just (arr', is')) =
                   BasicOp $ Index cs arr' is'
 
-                isThreadLocal v = not $ HS.null $
-                                  thread_variant `HS.intersection`
-                                  HM.lookupDefault mempty v variance
-        onStm (variance, scope) (Let pat attr e) =
-          Let pat attr <$> mapExpM (mapper (variance, scope)) e
+                isThreadLocal v =
+                  not $ HS.null $
+                  thread_variant `HS.intersection`
+                  HM.lookupDefault mempty v variance
+
+                sizeSubst (Constant v) = Just $ Constant v
+                sizeSubst (Var v)
+                  | v `HM.member` outer_scope      = Just $ Var v
+                  | Just v' <- HM.lookup v szsubst = sizeSubst v'
+                  | otherwise                      = Nothing
+
+        onStm (variance, szsubst, scope) (Let pat attr e) =
+          Let pat attr <$> mapExpM (mapper (variance, szsubst, scope)) e
 
         mapper ctx = identityMapper { mapOnBody = const (onBody ctx)
                                     , mapOnOp = onOp ctx
@@ -226,6 +166,10 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
            GroupStream w maxchunk <$> onStreamLambda ctx lam <*> pure accs <*> pure arrs
         onOp _ stm = pure stm
 
+        mkSizeSubsts = mconcat . map mkStmSizeSubst
+          where mkStmSizeSubst (Let (Pattern [] [pe]) _ (Op (SplitSpace _ _ _ elems_per_i))) =
+                  HM.singleton (patElemName pe) elems_per_i
+                mkStmSizeSubst _ = mempty
 
 -- Not a hashmap, as SubExp is not hashable.
 type Replacements = M.Map (VName, Slice SubExp) VName
@@ -234,7 +178,7 @@ ensureCoalescedAccess :: MonadBinder m =>
                          ExpMap
                       -> [VName]
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_gids isThreadLocal scope arr slice = do
+ensureCoalescedAccess expmap thread_gids isThreadLocal sizeSubst scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
   case (seen, isThreadLocal arr, typeOf <$> HM.lookup arr scope) of
@@ -250,6 +194,19 @@ ensureCoalescedAccess expmap thread_gids isThreadLocal scope arr slice = do
         Just is' <- coalescedIndexes (map Var thread_gids) is,
         Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
+
+      -- We are taking a slice of the array with a unit stride.  We
+      -- assume that the array will be traversed sequentially.
+      --
+      -- We will really want to treat the outer dimension like two
+      -- dimensions so we can transpose them.  This may require
+      -- padding, but it will also require us to know an upper bound
+      -- on 'len'.
+      | DimSlice offset len (Constant stride) : _rem_slice <- slice,
+        all isThreadLocal $ HS.toList $ freeIn offset,
+        Just len' <- sizeSubst len,
+        oneIsh stride ->
+          replace =<< lift (rearrangeSlice (arraySize 0 t) len' arr)
 
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, and some indices are
@@ -359,6 +316,59 @@ rowMajorArray :: MonadBinder m =>
 rowMajorArray arr = do
   rank <- arrayRank <$> lookupType arr
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0..rank-1] arr
+
+rearrangeSlice :: MonadBinder m =>
+                  SubExp -> SubExp -> VName
+               -> m VName
+rearrangeSlice w elements_per_thread arr = do
+  num_threads <- letSubExp "num_threadS" =<<
+                 eRoundToMultipleOf Int32 (eSubExp w) (eSubExp elements_per_thread)
+  (w_padded, padding) <- paddedScanReduceInput w num_threads
+
+  arr_t <- lookupType arr
+  arr_padded <- padArray w_padded padding arr_t
+  rearrange num_threads w_padded (baseString arr) arr_padded (rowType arr_t)
+
+  where padArray w_padded padding arr_t = do
+          let arr_shape = arrayShape arr_t
+              padding_shape = arr_shape `setOuterDim` padding
+          arr_padding <-
+            letExp (baseString arr <> "_padding") $
+            BasicOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
+          letExp (baseString arr <> "_padded") $
+            BasicOp $ Concat [] 0 arr [arr_padding] w_padded
+
+        rearrange num_threads w_padded arr_name arr_padded row_type = do
+          let row_dims = arrayDims row_type
+              extradim_shape = Shape $ [num_threads, elements_per_thread] ++ row_dims
+              tr_perm = [1] ++ [2..shapeRank extradim_shape-1] ++ [0]
+              tr_perm_inv = rearrangeInverse tr_perm
+          arr_extradim <-
+            letExp (arr_name <> "_extradim") $
+            BasicOp $ Reshape [] (map DimNew $ shapeDims extradim_shape) arr_padded
+          arr_extradim_tr <-
+            letExp (arr_name <> "_extradim_tr") $
+            BasicOp $ Rearrange [] tr_perm arr_extradim
+          arr_extradim_manifested <-
+            letExp (arr_name <> "_extradim_manifested") $
+            BasicOp $ Copy arr_extradim_tr
+          arr_extradim_inv_tr <-
+            letExp (arr_name <> "_extradim_inv_tr") $
+            BasicOp $ Rearrange [] tr_perm_inv arr_extradim_manifested
+          arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
+            BasicOp $ Reshape [] (reshapeOuter [DimNew w_padded] 2 extradim_shape)
+            arr_extradim_inv_tr
+          letExp (arr_name <> "_inv_tr_init") $
+            BasicOp $ Split [] 0 [w] arr_inv_tr
+
+paddedScanReduceInput :: MonadBinder m =>
+                         SubExp -> SubExp
+                      -> m (SubExp, SubExp)
+paddedScanReduceInput w num_threads = do
+  w_padded <- letSubExp "padded_size" =<<
+              eRoundToMultipleOf Int32 (eSubExp w) (eSubExp num_threads)
+  padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int32) w_padded w
+  return (w_padded, padding)
 
 --- Computing variance.
 

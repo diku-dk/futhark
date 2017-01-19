@@ -77,7 +77,10 @@ optimiseFunDef fundec = do
                   }
         optimiseKernelOp op = return op
 
-        optimiseInKernelOp = return
+        optimiseInKernelOp (Inner (GroupStream w maxchunk lam accs arrs)) = do
+          lam' <- optimiseGroupStreamLambda lam
+          return $ Inner $ GroupStream w maxchunk lam' accs arrs
+        optimiseInKernelOp op = return op
 
 data Env lore m = Env { envScope :: Scope lore
                       , envOptimiseOp :: Op lore -> DoubleBufferM lore m (Op lore)
@@ -150,6 +153,14 @@ optimiseLambda :: MonadFreshNames m =>
 optimiseLambda lam = do
   body <- localScope (castScope $ scopeOf lam) $ optimiseBody $ lambdaBody lam
   return lam { lambdaBody = body }
+
+optimiseGroupStreamLambda :: MonadFreshNames m =>
+                             GroupStreamLambda InKernel
+                          -> DoubleBufferM InKernel m (GroupStreamLambda InKernel)
+optimiseGroupStreamLambda lam = do
+  body <- localScope (scopeOf lam) $
+          optimiseBody $ groupStreamLambdaBody lam
+  return lam { groupStreamLambdaBody = body }
 
 optimiseLoop :: LoreConstraints lore inner m =>
                 [(FParam lore, SubExp)] -> [(FParam lore, SubExp)] -> Body lore

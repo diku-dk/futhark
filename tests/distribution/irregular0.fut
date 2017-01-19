@@ -6,9 +6,7 @@
 -- output { [1, 3, 6, 10, 15, 21, 28, 36, 45] }
 -- structure distributed {
 --   Kernel/GroupReduce 2
---   Map 0
---   Kernel/Reduce 0
---   Kernel/DoLoop 1
+--   Kernel/GroupStream 1
 -- }
 
 fun main(a: []i32): []i32 =

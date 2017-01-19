@@ -13,6 +13,7 @@ module Futhark.Transform.FirstOrderTransform
   , transformStmRecursively
   , transformLambda
   , transformSOAC
+  , transformBody
 
   -- * Utility
   , doLoopMapAccumL
@@ -774,9 +775,9 @@ doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
                 -> [VName]
                 -> [VName]
                 -> m (AST.Exp (Lore m))
-doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
+doLoopMapAccumL cs width innerfun accexps arrexps mapout_arrs = do
   (merge, i, loopbody) <-
-    doLoopMapAccumL' cs width innerfun accexps arrexps maparrs
+    doLoopMapAccumL' cs width innerfun accexps arrexps mapout_arrs
   return $ DoLoop [] merge (ForLoop i Int32 width) loopbody
 
 doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
@@ -789,7 +790,7 @@ doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
                 -> [VName]
                 -> [VName]
                 -> m ([(AST.FParam (Lore m), SubExp)], VName, AST.Body (Lore m))
-doLoopMapAccumL' cs width innerfun accexps arrexps maparrs = do
+doLoopMapAccumL' cs width innerfun accexps arrexps mapout_arrs = do
   i <- newVName "i"
   -- for the MAP    part
   let acc_num     = length accexps
@@ -806,7 +807,7 @@ doLoopMapAccumL' cs width innerfun accexps arrexps maparrs = do
                        | p `elem` outarrs = (p, Unique)
                        | otherwise = (p, Nonunique)
       merge = loopMerge' (map withUniqueness $ inarrs++acc++outarrs)
-              (map Var arrexps++initacc++map Var maparrs)
+              (map Var arrexps++initacc++map Var mapout_arrs)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
     accxis<- bindLambda (removeLambdaAliases innerfun) .
              (map (BasicOp . SubExp . Var . identName) acc ++) =<<

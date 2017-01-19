@@ -848,7 +848,8 @@ maybeDistributeStm bnd@(Let _ _ (BasicOp (Rearrange cs perm _))) acc =
 
 maybeDistributeStm bnd@(Let _ _ (BasicOp (Reshape cs reshape _))) acc =
   distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
-    let reshape' = map DimCoercion (kernelNestWidths nest) ++ reshape
+    let reshape' = map DimNew (kernelNestWidths nest) ++
+                   map DimNew (newDims reshape)
     addKernel [Let outerpat () $ BasicOp $ Reshape cs reshape' arr]
 
 maybeDistributeStm bnd acc =

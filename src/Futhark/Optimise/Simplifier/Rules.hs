@@ -609,7 +609,7 @@ simplifyIndexing vtable seType ocs idd inds consuming =
       | DimFix{}:is' <- inds, not consuming -> Just $ pure $ IndexResult ocs vv is'
 
     Just (Replicate (Shape [_]) val@(Constant _))
-      | [_] <- inds, not consuming -> Just $ pure $ SubExpResult val
+      | [DimFix{}] <- inds, not consuming -> Just $ pure $ SubExpResult val
 
     Just (Replicate (Shape ds) v)
       | (ds_inds, rest_inds) <- splitAt (length ds) inds,
