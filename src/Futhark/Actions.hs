@@ -12,6 +12,8 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List
+import Data.Maybe
+import Data.Word
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.Exit (exitWith, ExitCode(..))
@@ -31,6 +33,7 @@ import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
+import Futhark.Util.Pretty (text, ppr, prettyDoc)
 
 printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
@@ -86,7 +89,7 @@ interpret parseValues prog =
   case funDefByName defaultEntryPoint prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
-    Just _ -> do
+    Just fundef -> do
       parseres <- fmap (parseValues "<stdin>") T.getContents
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
@@ -94,5 +97,17 @@ interpret parseValues prog =
       case runFunWithShapes defaultEntryPoint args prog of
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
-        Right val  -> putStrLn $ ppOutput val
-  where ppOutput vs = intercalate "\n" $ map pretty vs
+        Right val  -> putStrLn $ ppOutput val $
+                      fromMaybe (repeat TypeDirect) $ snd <$> funDefEntryPoint fundef
+  where ppOutput vs epts = intercalate "\n" $ zipWith prettyRetVal epts vs
+        prettyRetVal ept v = prettyDoc 80 $ ppArray (prettyPrim ept) v
+        prettyPrim TypeUnsigned (IntValue (Int8Value v))  =
+          text $ show (fromIntegral v :: Word8) ++ "u8"
+        prettyPrim TypeUnsigned (IntValue (Int16Value v)) =
+          text $ show (fromIntegral v :: Word16) ++ "u16"
+        prettyPrim TypeUnsigned (IntValue (Int32Value v)) =
+          text $ show (fromIntegral v :: Word32) ++ "u32"
+        prettyPrim TypeUnsigned (IntValue (Int64Value v)) =
+          text $ show (fromIntegral v :: Word64) ++ "u64"
+        prettyPrim _ v =
+          ppr v

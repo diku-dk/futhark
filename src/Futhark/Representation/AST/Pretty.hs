@@ -15,12 +15,13 @@ module Futhark.Representation.AST.Pretty
   , ppCertificates'
   , ppTuple'
   , bindingAnnotation
+  , ppArray
   )
   where
 
 import           Data.Array                                     (elems,
                                                                  listArray)
-import           Data.Maybe                                     (mapMaybe)
+import           Data.Maybe
 import           Data.Monoid
 
 import           Futhark.Util.Pretty
@@ -65,18 +66,23 @@ instance Pretty Commutativity where
   ppr Commutative    = text "commutative"
   ppr Noncommutative = text "noncommutative"
 
+-- | Print an array value, using the given function for printing
+-- elements.
+ppArray :: (PrimValue -> Doc) -> Value -> Doc
+ppArray pprim (PrimVal v) = pprim v
+ppArray _ (ArrayVal _ t shape)
+  | product shape == 0 = text "empty" <> parens (ppr row_t)
+  where row_t = Array t (Rank $ length shape - 1) NoUniqueness
+ppArray pprim (ArrayVal a t (_:rowshape@(_:_))) =
+  brackets $ commastack
+  [ ppArray pprim $ ArrayVal (listArray (0, rowsize-1) a') t rowshape
+  | a' <- chunk rowsize $ elems a ]
+  where rowsize = product rowshape
+ppArray pprim (ArrayVal a _ _) =
+  brackets $ commasep $ map pprim $ elems a
+
 instance Pretty Value where
-  ppr (PrimVal bv) = ppr bv
-  ppr (ArrayVal _ t shape)
-    | product shape == 0 = text "empty" <> parens (ppr row_t)
-    where row_t = Array t (Rank $ length shape - 1) NoUniqueness
-  ppr (ArrayVal a t (_:rowshape@(_:_))) =
-    brackets $ commastack
-    [ ppr $ ArrayVal (listArray (0, rowsize-1) a') t rowshape
-      | a' <- chunk rowsize $ elems a ]
-    where rowsize = product rowshape
-  ppr (ArrayVal a _ _) =
-    brackets $ commasep $ map ppr $ elems a
+  ppr = ppArray ppr
 
 instance Pretty Shape where
   ppr = brackets . commasep . map ppr . shapeDims
@@ -268,8 +274,8 @@ instance PrettyLore lore => Pretty (FunDef lore) where
     text (nameToString name) <//>
     apply (map ppr fparams) <+>
     equals </> indent 2 (ppr body)
-    where fun | entry = "entry"
-              | otherwise = "fun"
+    where fun | isJust entry = "entry"
+              | otherwise    = "fun"
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions

@@ -86,10 +86,10 @@ mkFtableExpansion vds = do (fbs, ds) <- unzip <$> mapM funFrom vds
                      FunBinding { internalFun = (fname',
                                                  cm,
                                                  shapenames,
-                                                 map declTypeOf values,
+                                                 map declTypeOf $ concat values,
                                                  applyRetType
                                                  (ExtRetType rettype')
-                                                 (consts++shapes++values)
+                                                 (consts++shapes++concat values)
                                                 )
                                 , externalFun = (rettype,
                                                  map E.patternStructType params)
@@ -171,8 +171,22 @@ internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
              (map I.fromDecl rettype') firstbody
     let mkConstParam name = Param name $ I.Prim int32
         constparams = map (mkConstParam . snd) cm
-    return $ I.FunDef entry fname'
-      (ExtRetType rettype') (constparams ++ shapeparams ++ params') body'
+        entry' | entry     = Just $ entryPoint params rettype
+               | otherwise = Nothing
+    return $ I.FunDef entry' fname'
+      (ExtRetType rettype') (constparams ++ shapeparams ++ concat params') body'
+
+entryPoint :: [E.Pattern] -> StructType -> EntryPoint
+entryPoint params ret = (concatMap (entryPointType . E.patternStructType) params,
+                         entryPointType ret)
+  where entryPointType :: StructType -> [EntryPointType]
+        entryPointType (E.Prim E.Unsigned{}) =
+          [I.TypeUnsigned]
+        entryPointType (E.Array (PrimArray Unsigned{} _ _ _)) =
+          [I.TypeUnsigned]
+        entryPointType (Tuple ts) =
+          concatMap entryPointType ts
+        entryPointType _ = [I.TypeDirect]
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) =
@@ -340,10 +354,11 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       return (id, Right cond)
 
   (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
-    wrap $ bindingParams [mergepat] $ \shapepat mergepat' ->
-    internaliseBodyStms loopbody $ \ses -> do
+    wrap $ bindingParams [mergepat] $ \shapepat nested_mergepat ->
+        internaliseBodyStms loopbody $ \ses -> do
       sets <- mapM subExpType ses
-      let shapeinit = argShapes
+      let mergepat' = concat nested_mergepat
+          shapeinit = argShapes
                       (map I.paramName shapepat)
                       (map I.paramType mergepat')
                       mergeinit_ts
