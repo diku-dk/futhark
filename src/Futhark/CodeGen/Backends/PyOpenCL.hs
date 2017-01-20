@@ -203,17 +203,17 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
-packArrayOutput mem "device" bt dims =
+packArrayOutput mem "device" bt ept dims =
   return $ Call "cl.array.Array"
   [Arg $ Var "self.queue",
    Arg $ Tuple $ map Py.compileDim dims,
-   Arg $ Var $ Py.compilePrimType bt,
+   Arg $ Var $ Py.compilePrimTypeExt bt ept,
    ArgKeyword "data" $ Var $ pretty mem]
-packArrayOutput _ sid _ _ =
+packArrayOutput _ sid _ _ _ =
   fail $ "Cannot return array from " ++ sid ++ " space."
 
 unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
-unpackArrayInput mem memsize "device" _ dims e = do
+unpackArrayInput mem memsize "device" _ _ dims e = do
   zipWithM_ (Py.unpackDim e) dims [0..]
 
   case memsize of
@@ -239,7 +239,7 @@ unpackArrayInput mem memsize "device" _ dims e = do
     pyOpenCLArrayCase
     numpyArrayCase
   where mem_dest = Var $ pretty mem
-unpackArrayInput _ _ sid _ _ _ =
+unpackArrayInput _ _ sid _ _ _ _ =
   fail $ "Cannot accept array from " ++ sid ++ " space."
 
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt

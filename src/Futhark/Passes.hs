@@ -69,7 +69,8 @@ standardPipeline mode =
                        , passFunction = \(Prog ps) -> do checkForMain ps
                                                          return $ Prog $ map setEntry ps
                        }
-        setEntry fd = fd { funDefEntryPoint = funDefName fd == defaultEntryPoint }
+        setEntry fd = fd { funDefEntryPoint = if funDefName fd == defaultEntryPoint
+                                              then funDefEntryPoint fd else Nothing }
 
         checkForMain ps
           | not $ any ((==defaultEntryPoint) . funDefName) ps =

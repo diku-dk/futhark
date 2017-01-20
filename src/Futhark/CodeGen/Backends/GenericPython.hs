@@ -8,7 +8,9 @@ module Futhark.CodeGen.Backends.GenericPython
   , compileExp
   , compileCode
   , compilePrimType
+  , compilePrimTypeExt
   , compilePrimToNp
+  , compilePrimToExtNp
 
   , Operations (..)
   , defaultOperations
@@ -85,12 +87,14 @@ type Copy op s = VName -> PyExp -> Imp.Space ->
 
 -- | Construct the Python array being returned from an entry point.
 type EntryOutput op s = VName -> Imp.SpaceId ->
-                        PrimType -> [Imp.DimSize] ->
+                        PrimType -> Imp.EntryPointType ->
+                        [Imp.DimSize] ->
                         CompilerM op s PyExp
 
 -- | Unpack the array being passed to an entry point.
 type EntryInput op s = VName -> Imp.MemSize -> Imp.SpaceId ->
-                       PrimType -> [Imp.DimSize] ->
+                       PrimType -> Imp.EntryPointType ->
+                       [Imp.DimSize] ->
                        PyExp ->
                        CompilerM op s ()
 
@@ -354,40 +358,41 @@ hashSpace = mconcat . map hashSpace'
 -- | A description of a value returned by an entry point.
 data EntryPointValue =
   -- | Return a scalar of the given type stored in the given variable.
-    ScalarValue PrimType VName
+    ScalarValue PrimType Imp.EntryPointType VName
   -- | Return an array, given memory block, size, space, and
   -- dimensions of the array.
-  | ArrayValue VName Imp.MemSize Space PrimType [Imp.DimSize]
+  | ArrayValue VName Imp.MemSize Space PrimType Imp.EntryPointType [Imp.DimSize]
 
 createValue :: HM.HashMap VName VName
              -> HM.HashMap VName Imp.Space -> Imp.ValueDecl
              -> CompilerM op s EntryPointValue
-createValue _ _ (Imp.ScalarValue t name) =
-  return $ ScalarValue t name
-createValue sizes spaces (Imp.ArrayValue mem bt dims) = do
+createValue _ _ (Imp.ScalarValue t ept name) =
+  return $ ScalarValue t ept name
+createValue sizes spaces (Imp.ArrayValue mem bt ept dims) = do
   size <- maybe noMemSize return $ HM.lookup mem sizes
   space <- maybe noMemSpace return $ HM.lookup mem spaces
-  return $ ArrayValue mem (Imp.VarSize size) space bt dims
+  return $ ArrayValue mem (Imp.VarSize size) space bt ept dims
   where noMemSpace = fail $ "createValue: could not find space of memory block " ++ pretty mem
         noMemSize = fail $ "createValue: could not find size of memory block " ++ pretty mem
 
 entryPointOutput :: EntryPointValue -> CompilerM op s PyExp
-entryPointOutput (ScalarValue _ name) =
-  return $ Var $ pretty name
-entryPointOutput (ArrayValue mem _ Imp.DefaultSpace bt dims) = do
-  let cast = Cast (Var $ pretty mem) (compilePrimType bt)
+entryPointOutput (ScalarValue bt ept name) =
+  return $ simpleCall tf [Var $ pretty name]
+  where tf = compilePrimToExtNp bt ept
+entryPointOutput (ArrayValue mem _ Imp.DefaultSpace bt ept dims) = do
+  let cast = Cast (Var $ pretty mem) (compilePrimTypeExt bt ept)
   return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
-entryPointOutput (ArrayValue mem _ (Imp.Space sid) bt dims) = do
+entryPointOutput (ArrayValue mem _ (Imp.Space sid) bt ept dims) = do
   pack_output <- asks envEntryOutput
-  pack_output mem sid bt dims
+  pack_output mem sid bt ept dims
 
 entryPointInput :: EntryPointValue -> PyExp -> CompilerM op s ()
-entryPointInput (ScalarValue bt name) e = do
+entryPointInput (ScalarValue bt ept name) e = do
   let vname' = Var $ pretty name
-      npobject = compilePrimToNp bt
+      npobject = compilePrimToExtNp bt ept
       call = simpleCall npobject [e]
   stm $ Assign vname' call
-entryPointInput (ArrayValue mem memsize Imp.DefaultSpace _ dims) e = do
+entryPointInput (ArrayValue mem memsize Imp.DefaultSpace _ _ dims) e = do
   zipWithM_ (unpackDim e) dims [0..]
   let dest = Var $ pretty mem
       unwrap_call = simpleCall "unwrapArray" [e]
@@ -401,9 +406,9 @@ entryPointInput (ArrayValue mem memsize Imp.DefaultSpace _ dims) e = do
 
   stm $ Assign dest unwrap_call
 
-entryPointInput (ArrayValue mem memsize (Imp.Space sid) bt dims) e = do
+entryPointInput (ArrayValue mem memsize (Imp.Space sid) bt ept dims) e = do
   unpack_input <- asks envEntryInput
-  unpack_input mem memsize sid bt dims e
+  unpack_input mem memsize sid bt ept dims e
 
 extValueDeclName :: Imp.ValueDecl -> String
 extValueDeclName = extName . valueDeclName
@@ -412,59 +417,62 @@ extName :: String -> String
 extName = (++"_ext")
 
 valueDeclName :: Imp.ValueDecl -> String
-valueDeclName (Imp.ScalarValue _ vname) = pretty vname
-valueDeclName (Imp.ArrayValue vname _ _) = pretty vname
+valueDeclName (Imp.ScalarValue _ _ vname) = pretty vname
+valueDeclName (Imp.ArrayValue vname _ _ _) = pretty vname
 
-readerElem :: PrimType -> String
-readerElem bt = case bt of
-  FloatType Float32 -> "read_float"
-  FloatType Float64 -> "read_double_signed"
-  IntType{}         -> "read_int"
-  Bool              -> "read_bool"
-  Cert              -> error "Cert is never used. ReaderElem doesn't handle this"
+readerElem :: PrimType -> Imp.EntryPointType -> String
+readerElem (FloatType Float32) _ = "read_float"
+readerElem (FloatType Float64) _ = "read_double_signed"
+readerElem IntType{} _           = "read_int"
+readerElem Bool _                = "read_bool"
+readerElem Cert _                = error "Cert is never used. ReaderElem doesn't handle this"
 
 readInput :: Imp.ValueDecl -> PyStmt
-readInput decl@(Imp.ScalarValue bt _) =
-  let reader' = readerElem bt
+readInput decl@(Imp.ScalarValue bt ept _) =
+  let reader' = readerElem bt ept
       stdin = Var "sys.stdin"
   in Assign (Var $ extValueDeclName decl) $ simpleCall reader' [stdin]
 
-readInput decl@(Imp.ArrayValue _ bt dims) =
+readInput decl@(Imp.ArrayValue _ bt ept dims) =
   let rank' = Var $ show $ length dims
-      reader' = Var $ readerElem bt
+      reader' = Var $ readerElem bt ept
       bt' = Var $ compilePrimType bt
       stdin = Var "sys.stdin"
   in Assign (Var $ extValueDeclName decl) $ simpleCall "read_array"
      [stdin, reader', StringLiteral $ pretty bt, rank', bt']
 
-printPrimStm :: PyExp -> PrimType -> PyStmt
-printPrimStm val t =
-  case t of
-    IntType Int8 -> p "%di8"
-    IntType Int16 -> p "%di16"
-    IntType Int32 -> p "%di32"
-    IntType Int64 -> p "%di64"
-    Bool -> If val
+printPrimStm :: PyExp -> PrimType -> Imp.EntryPointType -> PyStmt
+printPrimStm val t ept =
+  case (t, ept) of
+    (IntType Int8, Imp.TypeUnsigned) -> p "%uu8"
+    (IntType Int16, Imp.TypeUnsigned) -> p "%uu16"
+    (IntType Int32, Imp.TypeUnsigned) -> p "%uu32"
+    (IntType Int64, Imp.TypeUnsigned) -> p "%uu64"
+    (IntType Int8, _) -> p "%di8"
+    (IntType Int16, _) -> p "%di16"
+    (IntType Int32, _) -> p "%di32"
+    (IntType Int64, _) -> p "%di64"
+    (Bool, _) -> If val
       [Exp $ simpleCall "sys.stdout.write" [StringLiteral "true"]]
       [Exp $ simpleCall "sys.stdout.write" [StringLiteral "false"]]
-    Cert -> Exp $ simpleCall "sys.stdout.write" [StringLiteral "Checked"]
-    FloatType Float32 -> p "%.6ff32"
-    FloatType Float64 -> p "%.6ff64"
+    (Cert, _) -> Exp $ simpleCall "sys.stdout.write" [StringLiteral "Checked"]
+    (FloatType Float32, _) -> p "%.6ff32"
+    (FloatType Float64, _) -> p "%.6ff64"
   where p s =
           Exp $ simpleCall "sys.stdout.write"
           [BinOp "%" (StringLiteral s) val]
 
 printStm :: EntryPointValue -> PyExp -> CompilerM op s PyStmt
-printStm (ScalarValue bt _) e =
-  return $ printPrimStm e bt
-printStm (ArrayValue _ _ _ bt []) e =
-  return $ printPrimStm e bt
-printStm (ArrayValue mem memsize space bt (outer:shape)) e = do
+printStm (ScalarValue bt ept _) e =
+  return $ printPrimStm e bt ept
+printStm (ArrayValue _ _ _ bt ept []) e =
+  return $ printPrimStm e bt ept
+printStm (ArrayValue mem memsize space bt ept (outer:shape)) e = do
   v <- newVName "print_elem"
   first <- newVName "print_first"
   let size = simpleCall "np.product" [List $ map compileDim $ outer:shape]
       emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
-  printelem <- printStm (ArrayValue mem memsize space bt shape) $ Var $ pretty v
+  printelem <- printStm (ArrayValue mem memsize space bt ept shape) $ Var $ pretty v
   return $ If (BinOp "==" size (Constant (value (0::Int32))))
     [puts emptystr]
     [Assign (Var $ pretty first) $ Var "True",
@@ -489,8 +497,8 @@ printValue = fmap concat . mapM (uncurry printValue')
   -- that returns an equivalent Numpy array.  This works for PyOpenCL,
   -- but we will probably need yet another plugin mechanism here in
   -- the future.
-  where printValue' (ArrayValue mem memsize (Space _) bt shape) e =
-          printValue' (ArrayValue mem memsize DefaultSpace bt shape) $
+  where printValue' (ArrayValue mem memsize (Space _) bt ept shape) e =
+          printValue' (ArrayValue mem memsize DefaultSpace bt ept shape) $
           simpleCall (pretty e ++ ".get") []
         printValue' r e = do
           p <- printStm r e
@@ -624,6 +632,22 @@ compilePrimType t =
     Bool -> "ct.c_bool"
     Cert -> "ct.c_bool"
 
+compilePrimTypeExt :: PrimType -> Imp.EntryPointType -> String
+compilePrimTypeExt t ept =
+  case (t, ept) of
+    (IntType Int8, Imp.TypeUnsigned) -> "ct.c_uint8"
+    (IntType Int16, Imp.TypeUnsigned) -> "ct.c_uint16"
+    (IntType Int32, Imp.TypeUnsigned) -> "ct.c_uint32"
+    (IntType Int64, Imp.TypeUnsigned) -> "ct.c_uint64"
+    (IntType Int8, _) -> "ct.c_int8"
+    (IntType Int16, _) -> "ct.c_int16"
+    (IntType Int32, _) -> "ct.c_int32"
+    (IntType Int64, _) -> "ct.c_int64"
+    (FloatType Float32, _) -> "ct.c_float"
+    (FloatType Float64, _) -> "ct.c_double"
+    (Bool, _) -> "ct.c_bool"
+    (Cert, _) -> "ct.c_bool"
+
 compilePrimToNp :: Imp.PrimType -> String
 compilePrimToNp bt =
   case bt of
@@ -635,6 +659,22 @@ compilePrimToNp bt =
     FloatType Float64 -> "np.float64"
     Bool -> "np.byte"
     Cert -> "np.byte"
+
+compilePrimToExtNp :: Imp.PrimType -> Imp.EntryPointType -> String
+compilePrimToExtNp bt ept =
+  case (bt,ept) of
+    (IntType Int8, Imp.TypeUnsigned) -> "np.uint8"
+    (IntType Int16, Imp.TypeUnsigned) -> "np.uint16"
+    (IntType Int32, Imp.TypeUnsigned) -> "np.uint32"
+    (IntType Int64, Imp.TypeUnsigned) -> "np.uint64"
+    (IntType Int8, _) -> "np.int8"
+    (IntType Int16, _) -> "np.int16"
+    (IntType Int32, _) -> "np.int32"
+    (IntType Int64, _) -> "np.int64"
+    (FloatType Float32, _) -> "np.float32"
+    (FloatType Float64, _) -> "np.float64"
+    (Bool, _) -> "np.byte"
+    (Cert, _) -> "np.byte"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
 compilePrimValue (IntValue (Int8Value v)) = Constant $ value v

@@ -58,6 +58,8 @@ module Futhark.Representation.AST.Syntax
   , LParam
   , FunDefT (..)
   , FunDef
+  , EntryPoint
+  , EntryPointType(..)
   , ProgT(..)
   , Prog
   )
@@ -297,8 +299,9 @@ type FParam lore = ParamT (FParamAttr lore)
 type LParam lore = ParamT (LParamAttr lore)
 
 -- | Function Declarations
-data FunDefT lore = FunDef { funDefEntryPoint :: Bool
-                             -- ^ True if this function is an entry point.
+data FunDefT lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
+                             -- ^ Contains a value if this function is
+                             -- an entry point.
                            , funDefName :: Name
                            , funDefRetType :: RetType lore
                            , funDefParams :: [FParam lore]
@@ -308,6 +311,18 @@ data FunDefT lore = FunDef { funDefEntryPoint :: Bool
 deriving instance Annotations lore => Eq (FunDefT lore)
 deriving instance Annotations lore => Show (FunDefT lore)
 deriving instance Annotations lore => Ord (FunDefT lore)
+
+-- | Information about the parameters and return value of an entry
+-- point.  The first element is for parameters, the second for return
+-- value.
+type EntryPoint = ([EntryPointType], [EntryPointType])
+
+-- | Every entry point argument and return value has an annotation
+-- indicating how it maps to the original source program type.
+data EntryPointType = TypeUnsigned -- ^ Is an unsigned integer or array
+                                   -- of unsigned integers.
+                    | TypeDirect -- ^ Maps directly.
+                    deriving (Eq, Show, Ord)
 
 -- | Type alias for namespace reasons.
 type FunDef = FunDefT

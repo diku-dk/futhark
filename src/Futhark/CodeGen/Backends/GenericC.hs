@@ -475,35 +475,39 @@ typeToCType t = do
                 ct <- typeToCType [et]
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
-printPrimStm :: C.ToExp a => a -> PrimType -> C.Stm
-printPrimStm val (IntType Int8) = [C.cstm|printf("%hhdi8", $exp:val);|]
-printPrimStm val (IntType Int16) = [C.cstm|printf("%hdi16", $exp:val);|]
-printPrimStm val (IntType Int32) = [C.cstm|printf("%di32", $exp:val);|]
-printPrimStm val (IntType Int64) = [C.cstm|printf("%lldi64", $exp:val);|]
-printPrimStm val Bool = [C.cstm|printf($exp:val ? "true" : "false");|]
-printPrimStm val (FloatType Float32) = [C.cstm|printf("%.6ff32", $exp:val);|]
-printPrimStm val (FloatType Float64) = [C.cstm|printf("%.6ff64", $exp:val);|]
-printPrimStm _ Cert = [C.cstm|printf("Checked");|]
+printPrimStm :: C.ToExp a => a -> PrimType -> EntryPointType -> C.Stm
+printPrimStm val (IntType Int8) TypeUnsigned = [C.cstm|printf("%hhuu8", $exp:val);|]
+printPrimStm val (IntType Int16) TypeUnsigned = [C.cstm|printf("%huu16", $exp:val);|]
+printPrimStm val (IntType Int32) TypeUnsigned = [C.cstm|printf("%uu32", $exp:val);|]
+printPrimStm val (IntType Int64) TypeUnsigned = [C.cstm|printf("%lluu64", $exp:val);|]
+printPrimStm val (IntType Int8) _ = [C.cstm|printf("%hhdi8", $exp:val);|]
+printPrimStm val (IntType Int16) _ = [C.cstm|printf("%hdi16", $exp:val);|]
+printPrimStm val (IntType Int32) _ = [C.cstm|printf("%di32", $exp:val);|]
+printPrimStm val (IntType Int64) _ = [C.cstm|printf("%lldi64", $exp:val);|]
+printPrimStm val Bool _ = [C.cstm|printf($exp:val ? "true" : "false");|]
+printPrimStm val (FloatType Float32) _ = [C.cstm|printf("%.6ff32", $exp:val);|]
+printPrimStm val (FloatType Float64) _ = [C.cstm|printf("%.6ff64", $exp:val);|]
+printPrimStm _ Cert _ = [C.cstm|printf("Checked");|]
 
 -- | Return a statement printing the given value.
 printStm :: ValueDecl -> CompilerM op s C.Stm
-printStm (ScalarValue bt name) =
-  return $ printPrimStm name bt
-printStm (ArrayValue mem bt shape) = do
+printStm (ScalarValue bt ept name) =
+  return $ printPrimStm name bt ept
+printStm (ArrayValue mem bt ept shape) = do
   mem' <- rawMem mem
-  printArrayStm mem' bt shape
+  printArrayStm mem' bt ept shape
 
-printArrayStm :: C.ToExp a => a -> PrimType -> [DimSize] -> CompilerM op s C.Stm
-printArrayStm mem bt [] =
-  return $ printPrimStm val bt
+printArrayStm :: C.ToExp a => a -> PrimType -> EntryPointType -> [DimSize] -> CompilerM op s C.Stm
+printArrayStm mem bt ept [] =
+  return $ printPrimStm val bt ept
   where val = [C.cexp|*$exp:mem|]
-printArrayStm mem bt (dim:shape) = do
+printArrayStm mem bt ept (dim:shape) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
   let dim' = dimSizeToExp dim
       shape' = cproduct $ map dimSizeToExp shape
       bt'  = primTypeToCType bt
-  printelem <- printArrayStm v bt shape
+  printelem <- printArrayStm v bt ept shape
   return [C.cstm|{
                if ($exp:dim' * $exp:shape' == 0) {
                    printf("empty(%s)", $exp:(ppArrayType bt (length shape)));
@@ -522,30 +526,32 @@ printArrayStm mem bt (dim:shape) = do
              }|]
 
 
-readFun :: PrimType -> Maybe String
-readFun (IntType Int8) = Just "read_int8"
-readFun (IntType Int16) = Just "read_int16"
-readFun (IntType Int32) = Just "read_int32"
-readFun (IntType Int64) = Just "read_int64"
-readFun Bool = Just "read_bool"
-readFun (FloatType Float32) = Just "read_float"
-readFun (FloatType Float64) = Just "read_double"
-readFun _    = Nothing
+-- We read unsigned integers using the signed functions, and hope it
+-- all works out in the end.
+readFun :: PrimType -> EntryPointType -> Maybe String
+readFun (IntType Int8) _ = Just "read_int8"
+readFun (IntType Int16) _ = Just "read_int16"
+readFun (IntType Int32) _ = Just "read_int32"
+readFun (IntType Int64) _ = Just "read_int64"
+readFun Bool _ = Just "read_bool"
+readFun (FloatType Float32) _ = Just "read_float"
+readFun (FloatType Float64) _ = Just "read_double"
+readFun _ _ = Nothing
 
 paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
   where paramType (MemParam _ size space) = Mem size space
         paramType (ScalarParam _ t) = Scalar t
 
-readPrimStm :: C.ToExp a => a -> PrimType -> C.Stm
-readPrimStm place t
-  | Just f <- readFun t =
+readPrimStm :: C.ToExp a => a -> PrimType -> EntryPointType -> C.Stm
+readPrimStm place t ept
+  | Just f <- readFun t ept =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
           panic(1, "Syntax error when reading %s.\n", $string:(pretty t));
         }|]
-readPrimStm _ Cert =
+readPrimStm _ Cert _ =
   [C.cstm|;|]
-readPrimStm _ t =
+readPrimStm _ t _ =
   [C.cstm|{
         panic(1, "Cannot read %s.\n", $string:(pretty t));
       }|]
@@ -641,10 +647,10 @@ readInputs refcount inputparams = snd . mapAccumL (readInput refcount memsizes) 
 
 readInput :: Bool -> HM.HashMap VName VName -> [VName] -> ValueDecl
           -> ([VName], C.Stm)
-readInput _ _ known_sizes (ScalarValue t name) =
-  (known_sizes, readPrimStm name t)
-readInput refcount memsizes known_sizes (ArrayValue name t shape)
-  | Just f <- readFun t =
+readInput _ _ known_sizes (ScalarValue t ept name) =
+  (known_sizes, readPrimStm name t ept)
+readInput refcount memsizes known_sizes (ArrayValue name t ept shape)
+  | Just f <- readFun t ept =
   -- We need to create an array for the array parser to put
   -- the shapes.
   let t' = primTypeToCType t

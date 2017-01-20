@@ -27,7 +27,7 @@ import Futhark.Internalise.TypesValues
 import Prelude hiding (mapM)
 
 bindingParams :: [E.Pattern]
-              -> ([I.FParam] -> [I.FParam] -> InternaliseM a)
+              -> ([I.FParam] -> [[I.FParam]] -> InternaliseM a)
               -> InternaliseM a
 bindingParams params m = do
   (params_idents, params_ascripts, params_types) <-
@@ -51,7 +51,7 @@ bindingParams params m = do
   let named_shape_params = map nonuniqueParamFromIdent (HM.elems shape_ctx')
       shape_params = named_shape_params ++ concat unnamed_shape_params
   bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
-    bindingIdentTypes (map I.paramIdent $ shape_params++valueparams) $
+    bindingIdentTypes (map I.paramIdent $ shape_params++concat valueparams) $
     local (\env -> env { envSubsts = mconcat ascriptsubsts
                                      `HM.union` shapesubst
                                      `HM.union` envSubsts env}) $
@@ -81,20 +81,20 @@ bindingLambdaParams params ts m = do
 
   bindingFlatPattern params_idents ts $ \params' ->
     local (\env -> env { envSubsts = ascript_substs `HM.union` envSubsts env }) $
-    bindingIdentTypes (map I.paramIdent params') $ m params'
+    bindingIdentTypes (map I.paramIdent $ concat params') $ m $ concat params'
 
   where typesForParams (p:ps) ts' = let (p_ts, ts'') = splitAt (length p) ts'
                                     in p_ts : typesForParams ps ts''
         typesForParams []     _  = []
 
 processFlatPattern :: [E.Ident] -> [t]
-                   -> InternaliseM ([I.Param t], VarSubstitutions)
+                   -> InternaliseM ([[I.Param t]], VarSubstitutions)
 processFlatPattern = processFlatPattern' []
   where
     processFlatPattern' pat []       _  = do
       let (vs, substs) = unzip pat
           substs' = HM.fromList substs
-          idents = concat $ reverse vs
+          idents = reverse vs
       return (idents, substs')
 
     processFlatPattern' pat (p:rest) ts = do
@@ -125,7 +125,7 @@ processFlatPattern = processFlatPattern' []
           where base = nameToString $ baseName $ E.identName bindee
 
 bindingFlatPattern :: [E.Ident] -> [t]
-                   -> ([I.Param t] -> InternaliseM a)
+                   -> ([[I.Param t]] -> InternaliseM a)
                    -> InternaliseM a
 bindingFlatPattern idents ts m = do
   (ps, substs) <- processFlatPattern idents ts
@@ -162,7 +162,7 @@ bindingPattern :: E.Pattern -> [I.ExtType] -> (I.Pattern -> InternaliseM a)
 bindingPattern pat ts m = do
   (pat', _, _) <- unzip3 <$> flattenPattern pat
   (ts',shapes) <- instantiateShapes' ts
-  let addShapeStms = m . I.basicPattern' shapes . map I.paramIdent
+  let addShapeStms = m . I.basicPattern' shapes . map I.paramIdent . concat
   bindingFlatPattern pat' ts' addShapeStms
 
 makeShapeIdentsFromContext :: MonadFreshNames m =>
