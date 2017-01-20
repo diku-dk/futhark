@@ -21,6 +21,7 @@ import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.Unstream
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExtractKernels
@@ -99,6 +100,8 @@ gpuPipeline mode =
          , babysitKernels
          , simplifyKernels
          , tileLoops
+         , unstream
+         , simplifyKernels
          , performCSE True
          , simplifyKernels
          , inPlaceLowering

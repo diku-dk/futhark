@@ -386,8 +386,36 @@ distributeKernelResults (vtable, used)
       where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
 distributeKernelResults _ _ = cannotSimplify
 
+simplifyKnownIterationStream :: (LocalScope (Lore m) m,
+                                 MonadBinder m, Lore m ~ Wise InKernel) =>
+                                TopDownRule m
+-- Remove GroupStreams over single-element arrays.  Not much to stream
+-- here, and no information to exploit.
+simplifyKnownIterationStream _ (Let pat _
+                                (Op (GroupStream (Constant v) _ lam accs arrs)))
+  | oneIsh v = do
+      let GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
+
+      letBindNames'_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
+
+      letBindNames'_ [chunk_offset] $ BasicOp $ SubExp $ constant (0::Int32)
+
+      forM_ (zip acc_params accs) $ \(p,a) ->
+        letBindNames'_ [paramName p] $ BasicOp $ SubExp a
+
+      forM_ (zip arr_params arrs) $ \(p,a) ->
+        letBindNames'_ [paramName p] $ BasicOp $ Index [] a $
+        fullSlice (paramType p)
+        [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
+
+      res <- bodyBind body
+      forM_ (zip (patternElements pat) res) $ \(pe,r) ->
+        letBindNames'_ [patElemName pe] $ BasicOp $ SubExp r
+simplifyKnownIterationStream _ _ = cannotSimplify
+
 inKernelRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Lore m ~ Wise InKernel) => RuleBook m
 inKernelRules = standardRules <>
-                RuleBook [fuseStreamIota] []
+                RuleBook [fuseStreamIota,
+                          simplifyKnownIterationStream] []

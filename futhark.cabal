@@ -129,6 +129,7 @@ Library
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.TileLoops
+                   Futhark.Optimise.Unstream
                    Futhark.Pass
                    Futhark.Passes
                    Futhark.Pass.ExpandAllocations

@@ -342,22 +342,15 @@ rearrangeSlice w elements_per_thread arr = do
           let row_dims = arrayDims row_type
               extradim_shape = Shape $ [num_threads, elements_per_thread] ++ row_dims
               tr_perm = [1] ++ [2..shapeRank extradim_shape-1] ++ [0]
-              tr_perm_inv = rearrangeInverse tr_perm
           arr_extradim <-
             letExp (arr_name <> "_extradim") $
             BasicOp $ Reshape [] (map DimNew $ shapeDims extradim_shape) arr_padded
           arr_extradim_tr <-
             letExp (arr_name <> "_extradim_tr") $
-            BasicOp $ Rearrange [] tr_perm arr_extradim
-          arr_extradim_manifested <-
-            letExp (arr_name <> "_extradim_manifested") $
-            BasicOp $ Copy arr_extradim_tr
-          arr_extradim_inv_tr <-
-            letExp (arr_name <> "_extradim_inv_tr") $
-            BasicOp $ Rearrange [] tr_perm_inv arr_extradim_manifested
+            BasicOp $ Manifest tr_perm arr_extradim
           arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
             BasicOp $ Reshape [] (reshapeOuter [DimNew w_padded] 2 extradim_shape)
-            arr_extradim_inv_tr
+            arr_extradim_tr
           letExp (arr_name <> "_inv_tr_init") $
             BasicOp $ Split [] 0 [w] arr_inv_tr
 
