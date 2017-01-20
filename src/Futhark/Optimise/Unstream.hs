@@ -38,16 +38,18 @@ optimiseFunDef fundec = do
 type UnstreamM = ReaderT (Scope Kernels) (State VNameSource)
 
 optimiseBody :: Body Kernels -> UnstreamM (Body Kernels)
-optimiseBody (Body () bnds res) =
-  Body () <$> (concat <$> mapM optimiseStm bnds) <*> pure res
+optimiseBody (Body () stms res) =
+  localScope (scopeOf stms) $
+  Body () <$> (concat <$> mapM optimiseStm stms) <*> pure res
 
 optimiseStm :: Stm Kernels -> UnstreamM [Stm Kernels]
 optimiseStm (Let pat () (Op (Kernel desc cs space ts body))) = do
-  stms' <- runBinder_ $ optimiseInKernelStms $ kernelBodyStms body
+  stms' <- localScope (scopeOfKernelSpace space) $
+           runBinder_ $ optimiseInKernelStms $ kernelBodyStms body
   return [Let pat () $ Op $ Kernel desc cs space ts $ body { kernelBodyStms = stms' }]
 optimiseStm (Let pat () e) =
   pure <$> (Let pat () <$> mapExpM optimise e)
-  where optimise = identityMapper { mapOnBody = const optimiseBody }
+  where optimise = identityMapper { mapOnBody = \scope -> localScope scope . optimiseBody }
 
 type InKernelM = Binder InKernel
 
