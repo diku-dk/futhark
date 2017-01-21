@@ -114,9 +114,8 @@ OPTIONS
 
 --compiler=program
   The program used to compile Futhark programs.  This option can be
-  passed multiple times, resulting in multiple compilers being used
-  for each test case.  The specified program must support the same
-  interface as ``futhark-c``.
+  passed multiple times, with the last taking effect.  The specified
+  program must support the same interface as ``futhark-c``.
 
 --interpreter=program
 
