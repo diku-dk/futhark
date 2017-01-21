@@ -566,7 +566,7 @@ readPrimStm _ t _ =
 -- The idea here is to keep the nastyness in main(), whilst not
 -- messing up anything else.
 mainCall :: [C.Stm] -> Name -> Function op
-         -> CompilerM op s ([C.BlockItem],[C.BlockItem],[C.BlockItem],[C.BlockItem])
+         -> CompilerM op s (C.Definition, C.Initializer)
 mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
@@ -575,38 +575,67 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   (argexps, prepare) <- collect' $ mapM prepareArg inputs
   -- unpackResults may copy back to DefaultSpace.
   unpackstms <- unpackResults ret outputs
-  freestms <- freeResults ret outputs
+  free_out <- freeResults ret outputs
   -- makeParam will always create DefaultSpace memory.
   inputdecls <- collect $ mapM_ makeParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
   free_in <- collect $ mapM_ freeParam inputs
   printstms <- printResult results
-  return ([C.citems|
-               /* Declare and read input. */
-               $items:inputdecls
-               $ty:crettype $id:ret;
-               $stms:readstms
-               $items:prepare
-               $items:outputdecls
-             |],
-          [C.citems|
-               /* Run the program once. */
-               t_start = get_wall_time();
-               $id:ret = $id:(funName fname)($args:argexps);
-               $stms:pre_timing
-               t_end = get_wall_time();
-               long int elapsed_usec = t_end - t_start;
-               if (time_runs && runtime_file != NULL) {
-                 fprintf(runtime_file, "%ld\n", elapsed_usec);
-               }
-             |],
-          [C.citems|
-               $items:free_in
-               /* Print the final result. */
-               $items:unpackstms
-               $stms:printstms
-             |],
-          freestms)
+
+  let run_it = [C.citems|
+                  /* Run the program once. */
+                  t_start = get_wall_time();
+                  $id:ret = $id:(funName fname)($args:argexps);
+                  $stms:pre_timing
+                  t_end = get_wall_time();
+                  long int elapsed_usec = t_end - t_start;
+                  if (time_runs && runtime_file != NULL) {
+                    fprintf(runtime_file, "%ld\n", elapsed_usec);
+                  }
+                |]
+
+      entry_point_name = nameToString fname
+      entry_point_function_name = "entry_" ++ entry_point_name
+
+  return ([C.cedecl|void $id:entry_point_function_name() {
+    typename int64_t t_start, t_end;
+    int time_runs;
+
+    /* Declare and read input. */
+    $items:inputdecls
+    $ty:crettype $id:ret;
+    $stms:readstms
+    $items:prepare
+    $items:outputdecls
+
+    /* Warmup run */
+    if (perform_warmup) {
+      time_runs = 0;
+      $items:run_it
+      $items:free_out
+    }
+    time_runs = 1;
+    /* Proper run. */
+    for (int run = 0; run < num_runs; run++) {
+      if (run == num_runs-1) {
+        detail_timing = 1;
+      }
+      $items:run_it
+      if (run < num_runs-1) {
+        $items:free_out
+      }
+    }
+
+    $items:free_in
+    /* Print the final result. */
+    $items:unpackstms
+    $stms:printstms
+
+    $items:free_out
+  }
+                |],
+          [C.cinit|{ .name = $string:entry_point_name,
+                     .fun = $id:entry_point_function_name }|])
   where makeParam (MemParam name _ _) = do
           declMem name DefaultSpace
           allocMem name [C.cexp|0|] DefaultSpace
@@ -759,6 +788,11 @@ benchmarkOptions =
             , optionArgument = NoArgument
             , optionAction = [C.cstm|detail_memory = 1;|]
             }
+   , Option { optionLongName = "entry-point"
+            , optionShortName = Just 'e'
+            , optionArgument = RequiredArgument
+            , optionAction = [C.cstm|entry_point = optarg;|]
+            }
    ]
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
@@ -787,8 +821,9 @@ compileProg :: MonadFreshNames m =>
 compileProg ops userstate spaces decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
   let ((memtypes, memreport, prototypes, definitions,
-        (main_pre, main, main_post, free_out)), endstate) =
+        entry_points), endstate) =
         runCompilerM prog ops src userstate compileProg'
+      (entry_point_decls, entry_point_inits) = unzip entry_points
   return $ pretty [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
@@ -827,14 +862,25 @@ $esc:reader_h
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;
+static const char *entry_point = "main";
 
 $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
 
-int main(int argc, char** argv) {
-  typename int64_t t_start, t_end;
-  int time_runs;
+$edecls:entry_point_decls
 
+typedef void entry_point_fun();
+
+struct entry_point_entry {
+  const char *name;
+  entry_point_fun *fun;
+};
+
+int main(int argc, char** argv) {
   fut_progname = argv[0];
+
+  struct entry_point_entry entry_points[] = {
+    $inits:entry_point_inits
+  };
 
   $stms:(compInit endstate)
 
@@ -843,27 +889,27 @@ int main(int argc, char** argv) {
   argv += parsed_options;
 
   $stms:pre_main_stms
-  $items:main_pre
-  $stms:pre_timing
-  /* Warmup run */
-  if (perform_warmup) {
-    time_runs = 0;
-    $items:main
-    $items:free_out
-  }
-  time_runs = 1;
-  /* Proper run. */
-  for (int run = 0; run < num_runs; run++) {
-    if (run == num_runs-1) {
-      detail_timing = 1;
-    }
-    $items:main
-    if (run < num_runs-1) {
-      $items:free_out
+
+  int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
+  entry_point_fun *entry_point_fun = NULL;
+  for (int i = 0; i < num_entry_points; i++) {
+    if (strcmp(entry_points[i].name, entry_point) == 0) {
+      entry_point_fun = entry_points[i].fun;
+      break;
     }
   }
-  $items:main_post
-  $items:free_out
+
+  if (entry_point_fun == NULL) {
+    fprintf(stderr, "No entry point '%s'.  Select another with --entry-point.  Options are:\n",
+                    entry_point);
+    for (int i = 0; i < num_entry_points; i++) {
+      fprintf(stderr, "%s\n", entry_points[i].name);
+    }
+    return 1;
+  }
+
+  entry_point_fun();
+
   if (runtime_file != NULL) {
     fclose(runtime_file);
   }
@@ -877,12 +923,10 @@ int main(int argc, char** argv) {
 |]
   where compileProg' = do
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
-          let mainname = nameFromString "main"
-          main <- case lookup mainname funs of
-                    Nothing   -> fail "GenericC.compileProg: No main function"
-                    Just func -> mainCall pre_timing mainname func
+          entry_points <- mapM (uncurry $ mainCall pre_timing) $
+                          filter (functionEntry . snd) funs
           (memtypes, memreport) <- unzip <$> mapM defineMemorySpace spaces
-          return (concat memtypes, memreport, prototypes, definitions, main)
+          return (concat memtypes, memreport, prototypes, definitions, entry_points)
         funcToDef func = C.FuncDef func loc
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l

@@ -247,6 +247,12 @@ standardOptions = [
            [ Assign (Var "num_runs") $ Var "optarg"
            , Assign (Var "do_warmup_run") $ Constant $ value True
            ]
+         },
+  Option { optionLongName = "entry-point"
+         , optionShortName = Just 'e'
+         , optionArgument = RequiredArgument
+         , optionAction =
+           [ Assign (Var "entry_point") $ Var "optarg" ]
          }
   ]
 
@@ -295,17 +301,40 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
               return [ClassDef $ Class name $ map FunDef $
                       constructor' : definitions ++ entry_points]
             Nothing -> do
-              mainfunc <- case lookup defaultEntryPoint funs of
-                Nothing   -> fail "No main function"
-                Just func -> return func
               let classinst = Assign (Var "self") $ simpleCall "internal" []
-              (parse_options, maincall) <-
-                callEntryFun pre_timing options (defaultEntryPoint, mainfunc)
-              return $ parse_options ++
-                       ClassDef (Class "internal" $ map FunDef $
-                                 constructor' : definitions) :
-                       classinst :
-                       maincall
+              (entry_point_defs, entry_point_names, entry_points) <-
+                unzip3 <$> mapM (callEntryFun pre_timing)
+                (filter (Imp.functionEntry . snd) funs)
+              return (parse_options ++
+                      ClassDef (Class "internal" $ map FunDef $
+                                constructor' : definitions) :
+                      classinst :
+                      map FunDef entry_point_defs ++
+                      selectEntryPoint entry_point_names entry_points)
+
+        parse_options =
+          Assign (Var "runtime_file") None :
+          Assign (Var "do_warmup_run") (Constant $ value False) :
+          Assign (Var "num_runs") (Constant $ value (1::Int32)) :
+          Assign (Var "entry_point") (StringLiteral "main") :
+          generateOptionParser (standardOptions ++ options)
+
+        selectEntryPoint entry_point_names entry_points =
+          [ Assign (Var "entry_points") $
+              Dict $ zip (map StringLiteral entry_point_names) entry_points,
+            Assign (Var "entry_point_fun") $
+              simpleCall "entry_points.get" [Var "entry_point"],
+            If (BinOp "==" (Var "entry_point_fun") None)
+              [Exp $ simpleCall "sys.exit"
+                  [Call (Field
+                          (StringLiteral "No entry point '{}'.  Select another with --entry point.  Options are:\n{}")
+                          "format")
+                    [Arg $ Var "entry_point",
+
+                     Arg $ Call (Field (StringLiteral "\n") "join")
+                     [Arg $ simpleCall "entry_points.keys" []]]]]
+              [Exp $ simpleCall "entry_point_fun" []]
+          ]
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
 compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
@@ -318,9 +347,10 @@ tupleOrSingle :: [PyExp] -> PyExp
 tupleOrSingle [e] = e
 tupleOrSingle es = Tuple es
 
--- | A 'Call' where every argument is a simple 'Arg'.
+-- | A 'Call' where the function is a variable and every argument is a
+-- simple 'Arg'.
 simpleCall :: String -> [PyExp] -> PyExp
-simpleCall fname = Call fname . map Arg
+simpleCall fname = Call (Var fname) . map Arg
 
 compileDim :: Imp.DimSize -> PyExp
 compileDim (Imp.ConstSize i) = Constant $ value i
@@ -546,9 +576,9 @@ compileEntryFun entry = do
   return $ Def fname' ("self" : params) $
     prepareIn ++ body ++ prepareOut ++ [ret]
 
-callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
-             -> CompilerM op s ([PyStmt], [PyStmt])
-callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ _ decl_args) = do
+callEntryFun :: [PyStmt] -> (Name, Imp.Function op)
+             -> CompilerM op s (PyFunDef, String, PyExp)
+callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
   (_, _, prepareIn, body, _, res) <- prepareEntry entry
 
   let str_input = map readInput decl_args
@@ -567,22 +597,23 @@ callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ _ decl_args) = do
 
   str_output <- printValue res
 
-  return (parse_options,
-          str_input ++ prepareIn ++
-          [Try [do_warmup_run, do_num_runs] [except']] ++
-          [close_runtime_file] ++
-          str_output)
-  where parse_options =
-          Assign (Var "runtime_file") None :
-          Assign (Var "do_warmup_run") (Constant $ value False) :
-          Assign (Var "num_runs") (Constant $ value (1::Int32)) :
-          generateOptionParser (standardOptions ++ options)
+  let fname' = "entry_" ++ nameToString fname
+
+  return (Def fname' [] $
+           str_input ++ prepareIn ++
+           [Try [do_warmup_run, do_num_runs] [except']] ++
+           [close_runtime_file] ++
+           str_output,
+
+          nameToString fname,
+
+          Var fname')
 
 addTiming :: [PyStmt] -> ([PyStmt], PyStmt)
 addTiming statements =
-  ([ Assign (Var "time_start") $ Call "time.time" [] ] ++
+  ([ Assign (Var "time_start") $ simpleCall "time.time" [] ] ++
    statements ++
-   [ Assign (Var "time_end") $ Call "time.time" []
+   [ Assign (Var "time_end") $ simpleCall "time.time" []
    , If (Var "runtime_file") print_runtime [] ],
 
    If (Var "runtime_file") [Exp $ simpleCall "runtime_file.close" []] [])
