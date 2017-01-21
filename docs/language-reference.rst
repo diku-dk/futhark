@@ -125,9 +125,12 @@ Entry Points
 ~~~~~~~~~~~~
 
 Apart from declaring a function with the keyword ``fun``, it can also
-be declared with ``entry``.  When the Futhark program is compiled as a
-library instead of an executable program, any function declared with
-``entry`` will be exposed as an entry point.
+be declared with ``entry``.  When the Futhark program is compiled any
+function declared with ``entry`` will be exposed as an entry point.
+If the Futhark program has been compiled as a library, these are the
+functions that will be exposed.  If compiled as an executable, you can
+use the ``--entry-point`` command line option of the generated
+executable to select the entry point you wish to run.
 
 Any function named ``main`` will always be considered an entry point,
 whether it is declared with ``entry`` or not.

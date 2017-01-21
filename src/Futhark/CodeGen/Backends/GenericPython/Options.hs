@@ -34,15 +34,15 @@ data OptionArgument = NoArgument
 generateOptionParser :: [Option] -> [PyStmt]
 generateOptionParser options =
   [Assign (Var "parser")
-   (Call "argparse.ArgumentParser"
+   (Call (Var "argparse.ArgumentParser")
     [ArgKeyword "description" $
      StringLiteral "A compiled Futhark program."])] ++
   map parseOption options ++
   [Assign (Var "parser_result") $
-   Call "vars" [Arg $ Call "parser.parse_args" [Arg $ Var "sys.argv[1:]"]]] ++
+   Call (Var "vars") [Arg $ Call (Var "parser.parse_args") [Arg $ Var "sys.argv[1:]"]]] ++
   map executeOption options
   where parseOption option =
-          Exp $ Call "parser.add_argument" $
+          Exp $ Call (Var "parser.add_argument") $
           map (Arg . StringLiteral) name_args ++ argument_args
           where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option)
                             ["--" ++ optionLongName option]
