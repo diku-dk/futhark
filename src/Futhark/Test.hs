@@ -106,8 +106,6 @@ instance Show StructureTest where
 -- | The conditions under which a test case is to be run.
 data RunMode
   = CompiledOnly -- ^ Cannot run with interpreter.
-  | InterpretedOnly -- ^ Only run with interpreter.
-  | NoTravis -- ^ Requires a lot of memory, do not run in Travis.
   | NoBench -- ^ When benchmarking, don't run this.
   | InterpretedAndCompiled -- ^ Can be interpreted or compiled.
   deriving (Eq, Show)
@@ -176,7 +174,6 @@ parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constitu
 parseRunMode :: Parser RunMode
 parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
                (lexstr "nobench" *> pure NoBench) <|>
-               (lexstr "notravis" *> pure NoTravis) <|>
                pure InterpretedAndCompiled
 
 parseRunCases :: Parser [TestRun]
