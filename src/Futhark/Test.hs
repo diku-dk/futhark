@@ -15,6 +15,7 @@ module Futhark.Test
        , StructurePipeline (..)
        , TestAction (..)
        , ExpectedError (..)
+       , InputOutputs (..)
        , TestRun (..)
        , RunMode (..)
        , ExpectedResult (..)
@@ -75,7 +76,11 @@ data ProgramTest =
 -- | How to test a program.
 data TestAction
   = CompileTimeFailure ExpectedError
-  | RunCases [TestRun]
+  | RunCases [InputOutputs]
+  deriving (Show)
+
+-- | Input and output pairs for some entry point.
+data InputOutputs = InputOutputs T.Text [TestRun]
   deriving (Show)
 
 -- | The error expected for a negative test.
@@ -158,7 +163,15 @@ parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
-              RunCases <$> parseRunCases
+              (RunCases . pure <$> parseInputOutputs)
+
+parseInputOutputs :: Parser InputOutputs
+parseInputOutputs = InputOutputs <$> parseEntryPoint <*> parseRunCases
+
+parseEntryPoint :: Parser T.Text
+parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constituent))) <|>
+                  pure (T.pack "main")
+  where constituent c = not (isSpace c) && c /= '}'
 
 parseRunMode :: Parser RunMode
 parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
@@ -247,26 +260,59 @@ testSpec =
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
 
+readInputOutputs :: SourceName -> T.Text -> Either ParseError InputOutputs
+readInputOutputs = parse $ parseDescription *> spaces *> parseInputOutputs <* eof
+
 commentPrefix :: T.Text
 commentPrefix = T.pack "--"
 
-fixPosition :: ParseError -> ParseError
-fixPosition err =
-  let newpos = incSourceColumn (errorPos err) $ T.length commentPrefix
+fixPosition :: Int -> ParseError -> ParseError
+fixPosition lineno err =
+  let newpos = incSourceLine
+               (incSourceColumn (errorPos err) $ T.length commentPrefix)
+               lineno
   in setErrorPos newpos err
 
 -- | Read the test specification from the given Futhark program.
 -- Note: will call 'error' on parse errors.
 testSpecFromFile :: FilePath -> IO ProgramTest
 testSpecFromFile path = do
-  s <- T.unlines .
-       map (T.drop 2) .
-       takeWhile (commentPrefix `T.isPrefixOf`) .
-       T.lines <$>
-       T.readFile path
-  case readTestSpec path s of
-    Left err -> error $ show $ fixPosition err
-    Right v  -> return v
+  blocks <- testBlocks <$> T.readFile path
+  let (first_spec_line, first_spec, rest_specs) =
+        case blocks of []       -> (0, mempty, [])
+                       (n,s):ss -> (n, s, ss)
+  case readTestSpec path first_spec of
+    Left err -> error $ show $ fixPosition first_spec_line err
+    Right v  -> foldM moreCases v rest_specs
+
+  where moreCases test (lineno, cases) =
+          case readInputOutputs path cases of
+            Left err     -> error $ show $ fixPosition lineno err
+            Right cases' ->
+              case testAction test of
+                RunCases old_cases ->
+                  return test { testAction = RunCases $ old_cases ++ [cases'] }
+                _ -> fail "Secondary test block provided, but primary test block specifies compilation error."
+
+testBlocks :: T.Text -> [(Int, T.Text)]
+testBlocks = mapMaybe isTestBlock . commentBlocks
+  where isTestBlock (n,block)
+          | any (T.pack (" " ++ descriptionSeparator) `T.isPrefixOf`) block =
+              Just (n, T.unlines block)
+          | otherwise =
+              Nothing
+
+commentBlocks :: T.Text -> [(Int, [T.Text])]
+commentBlocks = commentBlocks' . zip [0..] . T.lines
+  where isComment = (commentPrefix `T.isPrefixOf`)
+        commentBlocks' ls =
+          let ls' = dropWhile (not . isComment . snd) ls
+          in case ls' of
+            [] -> []
+            (n,_) : _ ->
+              let (block, ls'') = span (isComment . snd) ls'
+                  block' = map (T.drop 2 . snd) block
+              in (n, block') : commentBlocks' ls''
 
 -- | Read test specifications from the given path, which can be a file
 -- or directory containing @.fut@ files and further directories.

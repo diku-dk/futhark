@@ -126,7 +126,7 @@ typeCheckInternalProgram prog =
     Left err -> compileError (T.pack $ "After internalisation:\n" ++ show err) prog
     Right () -> return ()
 
-interpretAction' :: Action I.SOACS
+interpretAction' :: Name -> Action I.SOACS
 interpretAction' =
   interpretAction parseValues'
   where parseValues' :: FilePath -> T.Text -> Either ParseError [I.Value]

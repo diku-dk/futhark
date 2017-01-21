@@ -32,6 +32,9 @@ execution, but the interpreter is still very slow.
 OPTIONS
 =======
 
+-e NAME
+  Run the given entry point instead of ``main``.
+
 -h
   Print help text to standard output and exit.
 

@@ -8,9 +8,6 @@
 -- updates like the native code generator, and bugs related to
 -- uniqueness will therefore not be detected.  Of course, the type
 -- checker should catch such error.
---
--- To run an Futhark program, you would normally run the interpreter as
--- @'runFun' 'defaultEntryPoint' args prog@.
 module Futhark.Interpreter
   ( runFun
   , runFunWithShapes

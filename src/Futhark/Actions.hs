@@ -42,12 +42,14 @@ printAction =
          , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
          }
 
-interpretAction :: Show error => (FilePath -> T.Text -> Either error [Value])
+interpretAction :: Show error =>
+                   (FilePath -> T.Text -> Either error [Value])
+                -> Name
                 -> Action SOACS
-interpretAction parser =
+interpretAction parser entry =
   Action { actionName = "Interpret"
          , actionDescription = "Run the program via an interpreter."
-         , actionProcedure = liftIO . interpret parser
+         , actionProcedure = liftIO . interpret parser entry
          }
 
 rangeAction :: (Attributes lore, CanBeRanged (Op lore)) => Action lore
@@ -84,9 +86,9 @@ kernelImpCodeGenAction =
 
 interpret :: Show error =>
              (FilePath -> T.Text -> Either error [Value])
-          -> Prog SOACS -> IO ()
-interpret parseValues prog =
-  case funDefByName defaultEntryPoint prog of
+          -> Name -> Prog SOACS -> IO ()
+interpret parseValues entry prog =
+  case funDefByName entry prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just fundef -> do
@@ -94,7 +96,7 @@ interpret parseValues prog =
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs
-      case runFunWithShapes defaultEntryPoint args prog of
+      case runFunWithShapes entry args prog of
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val $
