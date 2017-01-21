@@ -387,11 +387,18 @@ entryPointOutput (ArrayValue mem _ (Imp.Space sid) bt ept dims) = do
   pack_output mem sid bt ept dims
 
 entryPointInput :: EntryPointValue -> PyExp -> CompilerM op s ()
-entryPointInput (ScalarValue bt ept name) e = do
+entryPointInput (ScalarValue bt _ name) e = do
   let vname' = Var $ pretty name
-      npobject = compilePrimToExtNp bt ept
-      call = simpleCall npobject [e]
-  stm $ Assign vname' call
+      -- HACK: A Numpy int64 will signal an OverflowError if we pass
+      -- it a number bigger than 2**63.  This does not happen if we
+      -- pass e.g. int8 a number bigger than 2**7.  As a workaround,
+      -- we first go through the corresponding ctypes type, which does
+      -- not have this problem.
+      ctobject = compilePrimType bt
+      ctcall = simpleCall ctobject [e]
+      npobject = compilePrimToNp bt
+      npcall = simpleCall npobject [ctcall]
+  stm $ Assign vname' npcall
 entryPointInput (ArrayValue mem memsize Imp.DefaultSpace _ _ dims) e = do
   zipWithM_ (unpackDim e) dims [0..]
   let dest = Var $ pretty mem
