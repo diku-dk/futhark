@@ -148,7 +148,8 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
 
   where
     runInputOutputs (InputOutputs entry run_cases) =
-      forM_ run_cases $ \run -> context ("dataset " <> T.pack (runDescription run)) $ do
+      forM_ run_cases $ \run -> context ("Entry point: " <> entry <> "; dataset: " <>
+                                         T.pack (runDescription run)) $ do
         let interpreter = configInterpreter progs
         unless (mode == OnlyCompile) $
           context ("Interpreting with " <> T.pack interpreter) $
