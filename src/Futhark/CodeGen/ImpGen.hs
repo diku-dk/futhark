@@ -312,18 +312,18 @@ compileInParams params epts = do
   (inparams, arraydecls) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes params
-      mkArg (fparam, ept) =
+      mkArg fparam =
         case (findArray $ paramName fparam, paramType fparam) of
           (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) ->
-            Just $ Imp.ArrayValue mem bt ept shape
+            Just $ \ept -> Imp.ArrayValue mem bt ept shape
           (_, Prim bt)
             | paramName fparam `HS.member` sizes ->
               Nothing
             | otherwise ->
-              Just $ Imp.ScalarValue bt ept $ paramName fparam
+              Just $ \ept -> Imp.ScalarValue bt ept (paramName fparam)
           _ ->
             Nothing
-      args = mapMaybe mkArg $ zip params epts
+      args = zipWith ($) (mapMaybe mkArg params) epts
   return (inparams, arraydecls, args)
   where isArrayDecl x (ArrayDecl y _ _) = x == y
 
