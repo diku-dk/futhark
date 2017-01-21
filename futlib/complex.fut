@@ -35,9 +35,8 @@ module Complex(T: REAL) = {
   fun ((a,b): complex) * ((c,d): complex) = (a T.* c T.- b T.* d,
                                              b T.* c T.+ a T.* d)
   fun ((a,b): complex) / ((c,d): complex) =
-    let (x,y) = (a,b) * (c,d)
-    in (x T./ (c T.* c T.+ d T./ d),
-        y T./ (c T.* c T.+ d T./ d))
+    ((a T.* c T.+ b T.* d) T./ (c T.* c T.+ d T.* d),
+     (b T.* c T.- a T.* d) T./ (c T.* c T.+ d T.* d))
 
   fun sqrt ((a,b): complex) =
     let gamma = T.sqrt ((a T.+ T.sqrt (a T.* a T.+ b T.* b)) T./
