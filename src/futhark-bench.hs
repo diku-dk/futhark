@@ -94,7 +94,7 @@ compileBenchmark opts (program, spec) =
   case testAction spec of
     RunCases cases | "nobench" `notElem` testTags spec,
                      "disable" `notElem` testTags spec,
-                     not $ null cases -> do
+                     any hasRuns cases -> do
 
       putStr $ "Compiling " ++ program ++ "...\n"
       (futcode, _, futerr) <-
@@ -110,6 +110,8 @@ compileBenchmark opts (program, spec) =
     _ ->
       return Nothing
   where compiler = optCompiler opts
+
+        hasRuns (InputOutputs _ runs) = not $ null runs
 
 runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO BenchResult
 runBenchmark opts (program, cases) =
