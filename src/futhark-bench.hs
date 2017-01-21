@@ -89,7 +89,7 @@ anythingFailed = any failedBenchResult
         failedResult _                     = False
 
 compileBenchmark :: BenchOptions -> (FilePath, ProgramTest)
-                 -> IO (Maybe (FilePath, [TestRun]))
+                 -> IO (Maybe (FilePath, [InputOutputs]))
 compileBenchmark opts (program, spec) =
   case testAction spec of
     RunCases cases | "nobench" `notElem` testTags spec,
@@ -111,10 +111,13 @@ compileBenchmark opts (program, spec) =
       return Nothing
   where compiler = optCompiler opts
 
-runBenchmark :: BenchOptions -> (FilePath, [TestRun]) -> IO BenchResult
+runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO BenchResult
 runBenchmark opts (program, cases) =
-  BenchResult program . catMaybes <$>
-  mapM (runBenchmarkCase opts program) cases
+  BenchResult program . catMaybes . concat <$> mapM forInputOutputs cases
+  where forInputOutputs (InputOutputs "main" runs) =
+          mapM (runBenchmarkCase opts program) runs
+        forInputOutputs InputOutputs{} =
+          return []
 
 reportResult :: [RunResult] -> IO ()
 reportResult [] =

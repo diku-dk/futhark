@@ -17,6 +17,7 @@ import qualified Data.Text.IO as T
 import NeatInterpolation (text)
 import System.IO
 import System.Exit
+import System.Console.GetOpt
 
 import Prelude
 
@@ -39,7 +40,7 @@ banner = unlines [
   ]
 
 main :: IO ()
-main = mainWithOptions interpreterConfig [] run
+main = mainWithOptions interpreterConfig options run
   where run [prog] config = Just $ interpret config prog
         run []     _      = Just repl
         run _      _      = Nothing
@@ -55,12 +56,23 @@ repl = do
   putStrLn ""
   evalStateT (forever readEvalPrint) newInterpreterState
 
-interpret :: FutharkConfig -> FilePath -> IO ()
+interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram config (standardPipeline Executable) interpretAction'
+  runCompilerOnProgram newFutharkConfig (standardPipeline Executable) $
+  interpretAction' $ interpreterEntryPoint config
 
-interpreterConfig :: FutharkConfig
-interpreterConfig = newFutharkConfig
+data InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
+
+interpreterConfig :: InterpreterConfig
+interpreterConfig = InterpreterConfig defaultEntryPoint
+
+options :: [FunOptDescr InterpreterConfig]
+options = [ Option "e" ["entry-point"]
+          (ReqArg (\entry -> Right $ \config ->
+                      config { interpreterEntryPoint = nameFromString entry })
+           "NAME")
+            "The entry point to execute."
+          ]
 
 data InterpreterState =
   InterpreterState { interpProg :: UncheckedProg

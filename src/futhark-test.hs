@@ -131,17 +131,21 @@ runTestCase (TestCase program testcase progs extra_options) = do
       context ("Compiling with " <> T.pack compiler) $
       justCompileTestProgram compiler program
 
-    RunCases run_cases ->
+    RunCases ios ->
+      mapM_ runInputOutputs ios
+
+  where
+    runInputOutputs (InputOutputs entry run_cases) =
       forM_ run_cases $ \run -> context ("dataset " <> T.pack (runDescription run)) $ do
         unless (runMode run `elem` [CompiledOnly, NoTravis]) $
           forM_ (configInterpreters progs) $ \interpreter ->
             context ("Interpreting with " <> T.pack interpreter) $
-              interpretTestProgram interpreter program run
+              interpretTestProgram interpreter program entry run
 
         unless (runMode run == InterpretedOnly) $
           forM_ (configCompilers progs) $ \compiler ->
             context ("Compiling with " <> T.pack compiler) $
-              compileTestProgram extra_options compiler program run
+              compileTestProgram extra_options compiler program entry run
 
 checkError :: ExpectedError -> T.Text -> TestM ()
 checkError (ThisError regex_s regex) err
@@ -168,11 +172,12 @@ getExpectedResult dir (Succeeds (Just vals)) = Succeeds . Just <$> getValues dir
 getExpectedResult _   (Succeeds Nothing) = return $ Succeeds Nothing
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
-interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()
-interpretTestProgram futharki program (TestRun _ inputValues expectedResult _) = do
+interpretTestProgram :: String -> FilePath -> T.Text -> TestRun -> TestM ()
+interpretTestProgram futharki program entry (TestRun _ inputValues expectedResult _) = do
   input <- T.unlines . map prettyText <$> getValues dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
-  (code, output, err) <- io $ readProcessWithExitCode futharki [program] input
+  (code, output, err) <-
+    io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] input
   case code of
     ExitFailure 127 ->
       throwError $ progNotFound $ T.pack futharki
@@ -180,8 +185,8 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult _) =
       compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
-compileTestProgram :: [String] -> String -> FilePath -> TestRun -> TestM ()
-compileTestProgram extra_options futharkc program (TestRun _ inputValues expectedResult _) = do
+compileTestProgram :: [String] -> String -> FilePath -> T.Text -> TestRun -> TestM ()
+compileTestProgram extra_options futharkc program entry (TestRun _ inputValues expectedResult _) = do
   input <- getValuesText dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (futcode, _, futerr) <-
@@ -195,9 +200,10 @@ compileTestProgram extra_options futharkc program (TestRun _ inputValues expecte
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no path component.
   let binpath = "." </> binOutputf
-  context ("Running " <> T.pack (unwords $ binpath : extra_options)) $ do
+      entry_options = ["-e", T.unpack entry]
+  context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $ do
     (progCode, output, progerr) <-
-      io $ readProcessWithExitCode binpath extra_options input
+      io $ readProcessWithExitCode binpath (entry_options ++ extra_options) input
     withExceptT validating $
       compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
@@ -281,7 +287,11 @@ applyModeToAction _ a@CompileTimeFailure{} =
 applyModeToAction OnlyTypeCheck (RunCases _) =
   RunCases []
 applyModeToAction mode (RunCases cases) =
-  RunCases $ mapMaybe (applyModeToCase mode) cases
+  RunCases $ map (applyModeToInputOutputs mode) cases
+
+applyModeToInputOutputs :: TestMode -> InputOutputs -> InputOutputs
+applyModeToInputOutputs mode (InputOutputs entry cases) =
+  InputOutputs entry $ mapMaybe (applyModeToCase mode) cases
 
 applyModeToCase :: TestMode -> TestRun -> Maybe TestRun
 applyModeToCase OnlyInterpret run

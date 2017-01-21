@@ -27,7 +27,7 @@ import qualified Futhark.Representation.Kernels as Kernels
 import Futhark.Representation.Kernels (Kernels)
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
-import Futhark.Representation.AST (Prog, pretty)
+import Futhark.Representation.AST (Prog, pretty, nameFromString)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 
@@ -236,8 +236,8 @@ commandLineOptions =
        opts { futharkAction = ExplicitMemoryAction kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
   , Option "i" ["interpret"]
-    (NoArg $ Right $ \opts -> opts { futharkAction = SOACSAction
-                                                     interpretAction' })
+    (NoArg $ Right $ \opts -> opts { futharkAction =
+                                       SOACSAction $ interpretAction' $ nameFromString "main" })
     "Run the program via an interpreter."
      , Option [] ["range-analysis"]
        (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction rangeAction rangeAction rangeAction })
