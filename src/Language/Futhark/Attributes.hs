@@ -791,23 +791,23 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
              ,("isnan64", ([FloatType Float64], Bool))
              ] ++
 
-           [ ("signum", anyNumberFun)
-           , ("abs", anyNumberFun)
-           , ("~", IntrinsicPolyFun $
-                   [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
-                   [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
-           , ("!", IntrinsicPolyFun [([Bool], Bool)])] ++
+             [ ("sgn", anyIntFun)
+             , ("abs", anyNumberFun)
+             , ("~", IntrinsicPolyFun $
+                     [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
+                     [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
+             , ("!", IntrinsicPolyFun [([Bool], Bool)])] ++
 
-           map (convertFun anyPrimType) anyPrimType ++
+             map (convertFun anyPrimType) anyPrimType ++
 
-           map intrinsicType (map Signed [minBound..maxBound] ++
-                              map Unsigned [minBound..maxBound] ++
-                              map FloatType [minBound..maxBound] ++
-                              [Bool]) ++
+             map intrinsicType (map Signed [minBound..maxBound] ++
+                                map Unsigned [minBound..maxBound] ++
+                                map FloatType [minBound..maxBound] ++
+                                [Bool]) ++
 
-           -- The reason for the loop formulation is to ensure that we
-           -- get a missing case warning if we forget a case.
-           map mkIntrinsicBinOp [minBound..maxBound]
+             -- The reason for the loop formulation is to ensure that we
+             -- get a missing case warning if we forget a case.
+             map mkIntrinsicBinOp [minBound..maxBound]
 
   where namify i (k,v) = (ID (nameFromString k, i), v)
 
@@ -821,6 +821,18 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
         anyNumberType = anyIntType ++
                         map FloatType [minBound..maxBound]
         anyPrimType = Bool : anyNumberType
+
+        anyIntFun :: Intrinsic
+        anyIntFun = IntrinsicPolyFun
+                    [([Signed Int8], Signed Int8),
+                     ([Signed Int16], Signed Int16),
+                     ([Signed Int32], Signed Int32),
+                     ([Signed Int64], Signed Int64),
+
+                     ([Unsigned Int8], Unsigned Int8),
+                     ([Unsigned Int16], Unsigned Int16),
+                     ([Unsigned Int32], Unsigned Int32),
+                     ([Unsigned Int64], Unsigned Int64)]
 
         anyNumberFun :: Intrinsic
         anyNumberFun = IntrinsicPolyFun

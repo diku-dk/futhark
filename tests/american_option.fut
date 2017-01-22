@@ -15,6 +15,8 @@
 
 -- constants
 
+include futlib.numeric
+
 fun strike(): i32 = 100
 fun bankDays(): i32 = 252
 fun s0(): i32 = 100
@@ -28,9 +30,9 @@ fun maxF64(x: f64) (y: f64): f64 =
 fun binom(expiry: i32): f64 =
   let n = expiry * bankDays()
   let dt = f64(expiry) / f64(n)
-  let u = exp64(alpha()*dt+sigma()*sqrt64(dt))
-  let d = exp64(alpha()*dt-sigma()*sqrt64(dt))
-  let stepR = exp64(r()*dt)
+  let u = F64.exp(alpha()*dt+sigma()*F64.sqrt(dt))
+  let d = F64.exp(alpha()*dt-sigma()*F64.sqrt(dt))
+  let stepR = F64.exp(r()*dt)
   let q = (stepR-d)/(u-d)
   let qUR = q/stepR
   let qDR = (f64(1.0)-q)/stepR

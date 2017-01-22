@@ -307,7 +307,7 @@ initialScope = intrinsicsModule
                , envNameMap = HM.insert
                               (Structure, nameFromString "Intrinsics")
                               (ID (nameFromString "Intrinsics", 0))
-                              intrinsicsNameMap
+                              topLevelNameMap
                }
   where initialVtable = HM.fromList $ mapMaybe addIntrinsicF $ HM.toList intrinsics
         initialTypeTable = HM.fromList $ mapMaybe addIntrinsicT $ HM.toList intrinsics
@@ -334,6 +334,18 @@ initialScope = intrinsicsModule
         intrinsicsNameMap = HM.fromList $ map mapping $ HM.toList intrinsics
           where mapping (v, IntrinsicType{}) = ((Type, baseName v), v)
                 mapping (v, _)               = ((Term, baseName v), v)
+
+        topLevelNameMap :: NameMap
+        topLevelNameMap = HM.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
+
+        atTopLevel :: (Namespace, Name) -> Bool
+        atTopLevel (Type, _) = True
+        atTopLevel (Term, v) = v `HS.member` (type_names <> binop_names <> unop_names)
+          where type_names = HS.fromList $ map (nameFromString . pretty) anyPrimType
+                binop_names = HS.fromList $ map (nameFromString . pretty)
+                              [minBound..(maxBound::BinOp)]
+                unop_names = HS.fromList $ map nameFromString ["~", "!"]
+        atTopLevel _         = False
 
 scopeTypeAbbrs :: Scope -> [(VName,StructType)]
 scopeTypeAbbrs = mapMaybe unTypeAbbr . HM.toList . envTypeTable
@@ -782,6 +794,9 @@ anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 
 anyNumberType :: [TypeBase Rank ()]
 anyNumberType = anyIntType ++ anyFloatType
+
+anyPrimType :: [TypeBase Rank ()]
+anyPrimType = Prim Bool : anyIntType ++ anyFloatType
 
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.

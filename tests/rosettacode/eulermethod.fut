@@ -45,8 +45,10 @@
 -- 0.5782306456739441f64, 0.290580297318634f64, 0.14532974216231054f64]
 -- }
 
+include futlib.numeric
+
 fun analytic(t0: f64) (time: f64): f64 =
-  20.0 + (t0 - 20.0) * exp64(-0.07*time)
+  20.0 + (t0 - 20.0) * F64.exp(-0.07*time)
 
 fun cooling(_time: f64) (temperature: f64): f64 =
   -0.07 * (temperature-20.0)
@@ -56,7 +58,7 @@ fun main(t0: f64) (a: f64) (b: f64) (h: f64): []f64 =
   let temps = replicate steps 0.0
   loop ((t,temps)=(t0,temps)) = for i < steps do
     let x = a + f64(i) * h
-    let temps[i] = abs(t-analytic t0 x)
+    let temps[i] = F64.abs(t-analytic t0 x)
     in (t + h * cooling x t,
         temps)
  in temps

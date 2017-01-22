@@ -1141,7 +1141,7 @@ isOverloadedFunction qname args = do
     handle [x] "f32" = Just $ toFloat I.Float32 x
     handle [x] "f64" = Just $ toFloat I.Float64 x
 
-    handle [x] "signum" = Just $ signumF x
+    handle [x] "sgn" = Just $ signumF x
     handle [x] "abs" = Just $ absF x
     handle [x] "!" = Just $ notF x
     handle [x] "~" = Just $ complementF x
