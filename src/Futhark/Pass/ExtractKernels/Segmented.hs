@@ -116,6 +116,12 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   num_groups_per_segment <- letSubExp "num_groups_per_segment" =<<
     eDivRoundingUp Int32 (eSubExp num_groups_hint) (eSubExp num_segments)
 
+  -- Instead of making this @if@ here, we could run "multiple groups per
+  -- segment" first, and if the number of groups per segment was 1, we could
+  -- simply return the result immediately without running the second kernel. I
+  -- chose not to do this, as the oneGroupPerSegment kernel will contain
+  -- slightly fewer instructions -- and hopefully be a bit faster (at the cost
+  -- of large code size). TODO: test how much we win by doing this.
   e <- eIf (eCmpOp (CmpEq $ IntType Int32) (eSubExp num_groups_per_segment)
                                            (eSubExp one))
            (mkBodyM ogps_stms ogps_ses)
@@ -143,7 +149,8 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
     ----------------------------------------------------------------------------
     -- The functions below generate all the needed code for the two different
-    -- version of segmented-redomap.
+    -- version of segmented-redomap (one group per segment, and many groups per
+    -- segment).
     --
     -- We rename statements before adding them because the same lambdas
     -- (reduce/fold) are used multiple times, and we do not want to bind the
