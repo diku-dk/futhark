@@ -174,7 +174,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
 
-      (firstkenel, num_groups_used, num_groups_per_segment) <- groupPerSegmentKernel segment_size num_segments cs
+      (firstkernel, num_groups_used, num_groups_per_segment) <- groupPerSegmentKernel segment_size num_segments cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w ManyGroupsOneSegment
         ispace inps
@@ -184,7 +184,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
         return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_groups_used]
 
       let first_pat = Pattern [] $ firstkernel_redres_pes ++ mapres_pes
-      addStm =<< renameStm (Let first_pat () $ Op firstkenel)
+      addStm =<< renameStm (Let first_pat () $ Op firstkernel)
 
       (secondkernel, _, _) <- groupPerSegmentKernel num_groups_per_segment num_segments cs
         (map patElemName firstkernel_redres_pes) comm reduce_lam' kern_chunk_reduce_lam
