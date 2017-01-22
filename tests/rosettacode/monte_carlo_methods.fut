@@ -12,6 +12,8 @@
 -- compiled input { 1000000 } output { 3.141696f32 }
 -- compiled input { 10000000 } output { 3.141595f32 }
 
+include futlib.numeric
+
 default(f32)
 
 fun dirvcts(): [2][30]i32 =
@@ -51,7 +53,7 @@ fun sobolIndR(dir_vs:  [m][num_bits]i32) (n: i32 ): [m]f32 =
 fun main(n: i32): f32 =
     let rand_nums = map (sobolIndR (dirvcts())) (iota n)
     let dists     = map (\xy ->
-                           let (x,y) = (xy[0],xy[1]) in sqrt32(x*x + y*y))
+                           let (x,y) = (xy[0],xy[1]) in F32.sqrt(x*x + y*y))
                         rand_nums
 
     let bs        = map (\d -> if d <= 1.0f32 then 1 else 0) dists

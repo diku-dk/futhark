@@ -19,7 +19,9 @@
 -- input { 2  8u64 } output { 1u64 }
 -- input { 2 18446744073709551608u64 } output { 1u64 }
 
+include futlib.numeric
+
 fun main(f: i32, x: u64): u64 =
   if      f == 0 then -x
-  else if f == 1 then abs(x)
-  else                signum(x)
+  else if f == 1 then U64.abs(x)
+  else                U64.sgn(x)

@@ -359,17 +359,6 @@ Numerical negation of ``x``, which must be of numeric type.
 
 Bitwise negation of ``x``, which must be of integral type.
 
-``abs x``
-~~~~~~~~~
-
-Absolute value of ``x``, which must be of integral type.
-
-``signum x``
-~~~~~~~~~~~~
-
-Sign of ``x``, which must be of an integral type.  Returns 1, 0, or
--1.
-
 ``#i e``
 ~~~~~~~~
 

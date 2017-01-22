@@ -5,4 +5,6 @@
 -- input { -8.742278e-8f32 } output { -8.742278e-8f32 }
 -- input { 8.742278e-8f32 } output { 8.742278e-8f32 }
 
-fun main(x: f32): f32 = asin32(x)
+include futlib.numeric
+
+fun main(x: f32): f32 = F32.asin(x)

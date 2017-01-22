@@ -4,4 +4,6 @@
 -- input { 0.5403023f32 } output { 1f32 }
 -- input { -1f32 } output { 3.1415927f32 }
 
-fun main(x: f32): f32 = acos32(x)
+include futlib.numeric
+
+fun main(x: f32): f32 = F32.acos(x)

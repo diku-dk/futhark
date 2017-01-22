@@ -19,7 +19,9 @@
 -- input { 2  8u16 } output { 1u16 }
 -- input { 2 65528u16 } output { 1u16 }
 
+include futlib.numeric
+
 fun main(f: i32, x: u16): u16 =
   if      f == 0 then -x
-  else if f == 1 then abs(x)
-  else                signum(x)
+  else if f == 1 then U16.abs(x)
+  else                U16.sgn(x)
