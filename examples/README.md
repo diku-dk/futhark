@@ -1,4 +1,5 @@
-== Futhark Examples
+Futhark Examples
+==
 
 This directory contains Futhark implementations of various simple
 algorithms.  Each program is self-contained and written with clarity
