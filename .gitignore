@@ -22,6 +22,14 @@ tests/*bin
 tests/**/*bin
 tests/*c
 tests/**/*c
+examples/*actual-*
+examples/**/*actual-*
+examples/*expected-*
+examples/**/*expected-*
+examples/*bin
+examples/**/*bin
+examples/*c
+examples/**/*c
 *~
 
 # Ignore side-effects of compilation.
