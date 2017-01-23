@@ -42,7 +42,7 @@ data TypeError =
   | UnexpectedType SrcLoc
     (TypeBase Rank ()) [TypeBase Rank ()]
   | ReturnTypeError SrcLoc Name (TypeBase Rank ()) (TypeBase Rank ())
-  | DupDefinitionError Name SrcLoc SrcLoc
+  | DupDefinitionError Namespace Name SrcLoc SrcLoc
   | DupPatternError Name SrcLoc SrcLoc
   | InvalidPatternError (PatternBase NoInfo Name)
     (TypeBase Rank ()) (Maybe String) SrcLoc
@@ -89,8 +89,8 @@ instance Show TypeError where
     "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
     " declares return type " ++ pretty rettype ++ ", but body has type " ++
     pretty bodytype
-  show (DupDefinitionError name pos1 pos2) =
-    "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
+  show (DupDefinitionError space name pos1 pos2) =
+    "Duplicate definition of " ++ ppSpace space ++ " " ++ nameToString name ++ ".  Defined at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (DupPatternError name pos1 pos2) =
     "Duplicate binding of '" ++ pretty name ++ "'; at " ++
@@ -101,11 +101,7 @@ instance Show TypeError where
     where end = case desc of Nothing -> "."
                              Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError space name pos) =
-    "Unknown " ++ space' ++ " " ++ pretty name ++ " referenced at " ++ locStr pos ++ "."
-    where space' = case space of Term -> "variable"
-                                 Type -> "type"
-                                 Structure -> "structure"
-                                 Signature -> "signature"
+    "Unknown " ++ ppSpace space ++ " " ++ pretty name ++ " referenced at " ++ locStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
     "In call of " ++ fname' ++ " at position " ++ locStr pos ++ ":\n" ++
     "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
@@ -428,6 +424,12 @@ data Namespace = Term -- ^ Functions and values.
                | Structure
                | Signature
                deriving (Eq, Ord, Show, Enum)
+
+ppSpace :: Namespace -> String
+ppSpace Term = "value"
+ppSpace Type = "type"
+ppSpace Structure = "module"
+ppSpace Signature = "module type"
 
 instance Hashable Namespace where
   hashWithSalt salt = hashWithSalt salt . fromEnum
@@ -891,7 +893,7 @@ checkForDuplicateDecs =
   where check namespace name loc known =
           case HM.lookup (namespace, name) known of
             Just loc' ->
-              bad $ DupDefinitionError name loc loc'
+              bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ HM.insert (namespace, name) loc known
 
         f (ValDec (FunDec (FunBind _ name _ _ _ _ loc))) =
@@ -1019,7 +1021,7 @@ checkForDuplicateSpecs =
   where check namespace name loc known =
           case HM.lookup (namespace, name) known of
             Just loc' ->
-              bad $ DupDefinitionError name loc loc'
+              bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ HM.insert (namespace, name) loc known
 
         f (ValSpec name _ _ loc) =
