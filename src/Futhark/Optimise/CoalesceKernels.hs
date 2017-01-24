@@ -8,11 +8,9 @@ module Futhark.Optimise.CoalesceKernels
 import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.State
-import Control.Monad.Identity
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import qualified Data.Map as M
-import Data.Monoid()
+{- import Data.Monoid() -}
 import Data.Maybe
 import Data.List
 
@@ -21,6 +19,7 @@ import Prelude hiding (div, quot)
 import Futhark.Binder
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import Futhark.Transform.Substitute
 --import Futhark.Util
 import Futhark.Pass
 import Futhark.Representation.AST
@@ -28,6 +27,8 @@ import Futhark.Representation.ExplicitMemory
        hiding (Prog, Body, Stm, Pattern, PatElem,
                BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+
+{- import Futhark.Representation.AST.Attributes.Patterns -}
 
 import Futhark.Optimise.CoalesceKernels.Strategy
 -- }}}
@@ -64,27 +65,22 @@ transformStm (Let pat () e) = do
 -- }}}
 
 type Interchange = (Maybe VName, [VName]) -- (In, Out)
-type TransposeMap = M.Map VName Int -- Which index whould be new innermost
+type TransposeMap = HM.HashMap VName Int -- Which index whould be new innermost
 
 -- Transform kernels-- {{{
 -- Returns a list of new bindings and the new expression
-  -- Need environment to see IxFuns
-  -- input lvs + result array, map over body applying ixfuns, generate strategy, apply it
+-- input lvs + result array, map over body applying ixfuns, generate strategy, apply it
 transformExp :: Exp ExplicitMemory -> CoalesceM ([Stm ExplicitMemory], Exp ExplicitMemory)
 transformExp (Op (Inner k@(Kernel desc lvs space ts kbody))) = do
-  {- error $ show interchange' ++ " " ++ show transpose' -}
   (transposebnds, body') <- applyTransposes kbody transpose'
+  {- if summary /= [] then return . error $ "summary: " ++ pretty summary ++ "\ninterchange: " ++ pretty interchange' ++ "\ntransposes: " ++ pretty transpose' -}
+                   {- else  -}
   return (transposebnds, Op (Inner (Kernel desc lvs space' ts body')))
   where
-    initial_variance = HM.map (const HS.empty) $ scopeOfKernelSpace space
-    summary          = filterIndexes k
-    thread_gids = map fst $ spaceDimensions space
-    (Strategy interchange' transpose')   = chooseStrategy thread_gids summary
-    space'                               = space { spaceStructure = fromMaybe (error "Illegal rotate") $ rotateSpace interchange' (spaceStructure space) }
-
-{- transformExp (Op (Inner k@NumGroups)) = error $ "NumGroups" -}
-{- transformExp (Op (Inner k@TileSize)) = error $ "TileSize" -}
-{- transformExp (Op (Inner k@(SufficientParallelism e))) = error $ "Suff " ++ pretty e -}
+    summary                            = filterIndexes k
+    thread_gids                        = map fst $ spaceDimensions space
+    (Strategy interchange' transpose') = chooseStrategy $ allStrategies thread_gids summary
+    space'                             = space { spaceStructure = fromMaybe (error "Illegal rotate") $ rotateSpace interchange' (spaceStructure space) }
 
 transformExp e =
   return ([], e)
@@ -98,8 +94,6 @@ type VarianceM = State VarianceTable
 
 -- Find all array accesses in a kernelbody and turn them into accesses.
 -- Accesses carry information about which kernel variables each index is variant in.
--- The access representation might have to be updated in order to carry more sophisticated
--- information, e.g. stride sizes and more complex variance dependencies.
 filterIndexes :: Kernel InKernel -> [Access]
 filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
   where
@@ -107,37 +101,36 @@ filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
     init_variance = HM.fromList $ map (\v -> (v, HS.singleton v)) . map fst $ spaceDimensions space
 
     checkBody :: Body InKernel -> VarianceM [Access]
-    checkBody body = fmap concat . mapM checkStm $ bodyStms body
+    checkBody = fmap concat . mapM checkStm . bodyStms
 
     checkStm :: Stm InKernel -> VarianceM [Access]
-    checkStm (Let pat () (BasicOp b@BinOp{})) = processBinOp (patternNames pat) b >> return []
-    checkStm (Let _ () (BasicOp i@Index{})) = processIndex i
+    checkStm (Let pat () (BasicOp b@BinOp{}))   = processBinOp (patternNames pat) b >> return []
+    checkStm (Let pat () (BasicOp i@Index{}))
+      | not (Prim Cert `elem` patternTypes pat) = processIndex i -- We filter the bound checks out. Only real indexes in our analysis!
     checkStm (Let _ () e) = foldExpM folder [] e
 
     folder = identityFolder { foldOnBody = \a body -> (a ++) <$> checkBody body }
 
     processIndex :: BasicOp InKernel -> VarianceM [Access]
-    processIndex i@(Index cs name slice) = do
+    processIndex (Index _ name slice) = do
       variances <- mapM checkDim slice
       return [ Access name variances ]
       where 
         checkDim :: DimIndex SubExp -> VarianceM Names
-        checkDim (DimFix e) = checkSubExp e
-        checkDim (DimSlice e1 e2) = error "Hi" {- HS.union <$> checkSubExp e1 <*> checkSubExp e2 -}
+        checkDim (DimFix e)       = checkSubExp e
+        checkDim (DimSlice e1 e2) = HS.union <$> checkSubExp e1 <*> checkSubExp e2
 
-    processIndex _ = error "CoalesceKernels: Index not passed to processIndex"
 
     processBinOp :: [VName] -> BasicOp InKernel -> VarianceM ()
     processBinOp [var] (BinOp (Add _) s1 s2) = processSubExps var s1 s2
     processBinOp [var] (BinOp (Mul _) s1 s2) = processSubExps var s1 s2
-    processBinOp _ b = return ()
-
+    processBinOp _ _                         = return ()
 
     processSubExps :: VName -> SubExp -> SubExp -> VarianceM ()
     processSubExps var (Constant _) (Var variant) = modify $ add var (HS.singleton variant)
     processSubExps var (Var variant) (Constant _) = modify $ add var (HS.singleton variant)
-    processSubExps var (Var v1) (Var v2) = modify $ add var (HS.fromList [v1,v2])
-    processSubExps _ _ _ = return ()
+    processSubExps var (Var v1) (Var v2)          = modify $ add var (HS.fromList [v1,v2])
+    processSubExps _ _ _                          = return ()
 
     add :: VName -> Names -> VarianceTable -> VarianceTable
     add var vs vtab = --Grab all the variances of vs and insert them into the vtab.
@@ -160,59 +153,60 @@ applyTransposes :: KernelBody InKernel
                 -> TransposeMap      -- arr name to index to be pushed in
                 -> CoalesceM ([Stm ExplicitMemory], KernelBody InKernel)
 applyTransposes kbody tmap = do
-  arrmap <- sequence $ M.mapWithKey (\k _ -> newName k) tmap -- Map VName VName
-  bnds   <- mapM makeBnd $ M.toList arrmap
-  let kbody' = transformIndexes arrmap tmap kbody
+  arrmap <- sequence $ HM.mapWithKey (\k _ -> makeNames k) tmap
+  bnds   <- fmap concat $ mapM makeBnds $ HM.toList arrmap
+
+  substs <- fmap (HM.fromList . concat) . sequence $ HM.mapWithKey oneSubst arrmap
+
+  let kbody' = kbody { kernelBodyStms = map (substituteNames substs) $ kernelBodyStms kbody }
   return (bnds, kbody')
-
   where
-    makeBnd (arr, new_name) = do
-      old_type         <- lookupType arr
-      let i            = fromMaybe 
-                          (error $ "CoalesceKernels: Somehow " ++ pretty arr ++ " is not in tmap") 
-                          $ M.lookup arr tmap
+    makeNames k = do
+      arr_name <- newNameFromString $ baseString k ++ "_transpose"
+      mem_name <- newNameFromString $ baseString k ++ "_mem"
+      return (arr_name, mem_name)
+  
+    makeBnds :: (VName, (VName, VName)) -> CoalesceM [Stm ExplicitMemory]
+    makeBnds (arr, (arrname, memname)) = do
+      old_type <- lookupType arr
+      let i  = fromMaybe (error $ "CoalesceKernels: Somehow " ++ pretty arr ++ " is not in tmap") $ HM.lookup arr tmap
           t@(Array ptype shape _) = rotateType i old_type
-            --Is this correct?
-          ixfun        = IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t 
-          arr_attr     = ArrayMem ptype shape NoUniqueness new_name ixfun 
-          pat          = Pattern [] [PatElem new_name BindVar arr_attr]
-          permutation  = makePerm (length $ arrayDims t) i
 
-      return $ Let pat () (BasicOp (Rearrange [] permutation arr))
+          permutation  = makePerm (length $ arrayDims t) i
+          ixfun = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t) permutation
+          attr = ArrayMem ptype shape NoUniqueness memname ixfun
+
+          copy = Let (Pattern [] [PatElem arrname BindVar attr]) () $ BasicOp $ Copy arr
+      alloc <- makeAlloc arr memname
+      return [alloc, copy]
+
+    makeAlloc arr memname = do
+      (_, ixfun) <- lookupArraySummary arr
+      {- sizeName <- newNameFromString $ baseString arr ++ "_size" -}
+      {- sizeBnd <- makeSizeBnd sizeName (foldr (*) 1 $ IxFun.shape ixfun) -}
+      let size = foldr (*) 1 $ IxFun.shape ixfun
+      {- let size = Constant $ IntValue $ Int32Value 1000 -}
+          attr = MemMem (size) DefaultSpace
+          pat = Pattern [] [PatElem memname BindVar attr]
+      return $ Let pat () (Op (Alloc (size) DefaultSpace))
+
+    {- makeSizeBnd name p_exp = do -}
+      {- value <- toExp p_exp -}
+      {- let attr = Scalar int32 -}
+      {- return $ Let (Pattern [] [PatElem name BindVar attr]) () exp -}
 
     rotateType i (Array ptype (Shape dims) u) = Array ptype (Shape (shiftIn dims i)) u
-    rotateType _  notarr                      = error $ "CoalesceKernels: " ++ 
-                                                pretty notarr ++ 
-                                                "is not an array."
+    rotateType _  _                      = error $ "CoalesceKernels: rotateType"
 
-
-transformIndexes :: M.Map VName VName
-                 -> M.Map VName Int
-                 -> KernelBody InKernel 
-                 -> KernelBody InKernel 
-transformIndexes arrmap tmap kbody = kbody { kernelBodyStms = map transformStm $ kernelBodyStms kbody }
-  where
-    transformBody :: Body InKernel -> Body InKernel
-    transformBody body = body { bodyStms = map transformStm $ bodyStms body }
-    
-    transformStm :: Stm InKernel -> Stm InKernel
-    transformStm s@(Let pat () (BasicOp (Index cs name slice))) =
-      case M.lookup name arrmap of
-        Just name' -> Let pat () (BasicOp (Index cs name' slice'))
-        Nothing    -> s
-      where slice' = case M.lookup name tmap of
-                       Just i -> shiftIn slice i
-                       Nothing -> error $ "CoalesceKernels: " ++ pretty name ++ " is in arrmap but not in tmap"
-    transformStm (Let pat () e) = Let pat () $ mapExp transform_mapper e
-
-    transform_mapper :: Mapper InKernel InKernel Identity
-    transform_mapper = identityMapper { mapOnBody = const $ return . transformBody }
+    oneSubst arr (newname, memname) = do
+      (mem, _) <- lookupArraySummary arr
+      return [(arr, newname), (mem, memname)]
 
 
 -- Shifts an element at index i to the last spot in a list
 shiftIn :: [a] -> Int -> [a]
 shiftIn xs i
-  | i >= length xs = error $ "CoalesceKernels: ille gal permutation, length " 
+  | i >= length xs = error $ "CoalesceKernels: ille gal permutation, length "
                              ++ pretty (length xs)
                              ++ " and index " ++ pretty i
   | otherwise      = take i xs ++ drop (i+1) xs ++ [xs !! i]
@@ -225,22 +219,22 @@ shiftIn xs i
 rotateSpace :: Interchange -> SpaceStructure -> Maybe SpaceStructure 
 rotateSpace (Just v, _) (FlatSpace dims) = 
   case lookup v dims of
-    Just t  -> Just . FlatSpace . nub $ (v,t) : dims
+    Just t  -> Just . FlatSpace . reverse . nub $ (v,t) : dims
     Nothing -> Nothing
 
 rotateSpace (_, vs) (FlatSpace dims) =
-  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatSpace $ ins ++ outs
+  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatSpace . reverse $ ins ++ outs
 
 rotateSpace _ struct = Just struct -- I dunno yet.
 
-rotate :: [VName] -> Interchange -> Maybe [VName]
-rotate vs (Just v, _) = do
-  i <- elemIndex v vs
-  return $ shiftIn vs i
-rotate vs (Nothing, os) = Just $ os ++ rest
-  where rest = deleteFirstsBy (==) vs os
+{- rotate :: [VName] -> Interchange -> Maybe [VName] -}
+{- rotate vs (Just v, _) = do -}
+  {- i <- elemIndex v vs -}
+  {- return $ shiftIn vs i -}
+{- rotate vs (Nothing, os) = Just $ os ++ rest -}
+  {- where rest = deleteFirstsBy (==) vs os -}
 
 makePerm :: Int -> Int -> [Int]
-makePerm len = shiftIn [0.. len - 1]
+makePerm len = reverse . shiftIn [0.. len - 1]
 
--- }}}
+-- }  

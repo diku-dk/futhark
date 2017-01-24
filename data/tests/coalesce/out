@@ -1,0 +1,35 @@
+-- xs_147 : [n_146][n_146]i32@xs_mem_193->Direct(n_146, n_146)
+entry [[?0][?1][?2]i32@3] main(i32 xs_mem_size_192,
+                               mem(xs_mem_size_192) xs_mem_193, i32 n_146,
+                               [n_146][n_146]i32 xs_147) =
+  let {i32 nesting_size_171} = mul32(n_146, n_146)
+  let {i32 nesting_size_172} = mul32(nesting_size_171, n_146)
+  let {i32 group_size_173} =
+    $group_size()
+  let {i32 y_174} = sub32(group_size_173, 1i32)
+  let {i32 x_175} = add32(nesting_size_172, y_174)
+  let {i32 num_groups_176} = squot32(x_175, group_size_173)
+  let {i32 num_threads_177} = mul32(num_groups_176, group_size_173)
+  let {i32 binop_x_195} = mul32(4i32, n_146)
+  let {i32 binop_x_196} = mul32(binop_x_195, n_146)
+  let {i32 bytes_194} = mul32(binop_x_196, n_146)
+  let {mem(bytes_194) mem_197} =
+    alloc(bytes_194)
+  let {mem(1000i32) xs_mem_199} =
+    alloc(1000i32)
+  -- xs_transpose_198 : [n_146][n_146]i32@xs_mem_199->Direct(n_146, n_146)[1, 0]
+  let {[n_146][n_146]i32 xs_transpose_198} = copy(xs_147)
+  -- res_151 : [n_146][n_146][n_146]i32@mem_197->Direct(n_146, n_146, n_146)
+  let {[n_146][n_146][n_146]i32 res_151} =
+    kernel map(num groups: num_groups_176, group size: group_size_173,
+               num threads: num_threads_177, global TID -> global_tid_178,
+               local TID -> local_tid_179, group ID -> group_id_180)
+              (gtid_170 < n_146, gtid_169 < n_146, gtid_168 < n_146) : {i32} {
+      let {i32 x_184} = xs_transpose_198[gtid_168, gtid_170]
+      let {i32 y_185} = xs_transpose_198[gtid_169, gtid_170]
+      let {i32 x_186} = add32(x_184, y_185)
+      let {i32 y_187} = xs_transpose_198[gtid_170, gtid_169]
+      let {i32 res_188} = add32(x_186, y_187)
+      return {thread in space returns res_188}
+    }
+  in {res_151}

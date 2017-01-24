@@ -98,8 +98,6 @@ gpuPipeline mode =
   standardPipeline mode >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
-         {- , babysitKernels -}
-         {- , simplifyKernels -}
          , tileLoops
          , unstream
          , simplifyKernels
