@@ -41,6 +41,41 @@ Character and string literals are supported, but only as an alias for
 integers and arrays of integers, respectively.  There is no character
 data type.
 
+Compound Types and Values
+-------------------------
+
+All primitive values can be combined in tuples and arrays.  A tuple
+value or type is written as a sequence of comma-separated values or
+types enclosed in parentheses.  For example, ``(0, 1)`` is a tuple
+value of type ``(i32,i32)``.  The elements of a tuple need not have
+the same type -- the value ``(false, 1, 2.0)`` is of type ``(bool,
+i32, f64)``.  A tuple element can also be another tuple, as in
+``((1,2),(3,4))``, which is of type ``((i32,i32),(i32,i32))``.  A
+tuple cannot have just one element, but empty tuples are permitted,
+although they are not very useful-these are written ``()`` and are of
+type ``()``.
+
+An array value is written as a nonempty sequence of comma-separated
+values enclosed in square brackets: ``[1,2,3]``.  An array type is
+written as ``[d]t``, where ``t`` is the element type of the array, and
+``d`` is an integer indicating the size.  We typically elide ``d``, in
+which case the size will be inferred.  As an example, an array of
+three integers could be written as ``[1,2,3]``, and has type
+``[3]i32``.  An empty array is written as ``empty(t)``, where ``t`` is
+the element type.
+
+Multi-dimensional arrays are supported in Futhark, but they must be
+*regular*, meaning that all inner arrays must have the same shape.
+For example, ``[[1,2], [3,4], [5,6]]`` is a valid array of type
+``[3][2]i32``, but ``[[1,2], [3,4,5], [6,7]]`` is not, because there
+we cannot come up with integers ``m`` and ``n`` such that
+``[m][n]i32`` describes the array.  The restriction to regular arrays
+is rooted in low-level concerns about efficient compilation.  However,
+we can understand it in language terms by the inability to write a
+type with consistent dimension sizes for an irregular array value.  In
+a Futhark program, all array values, including intermediate (unnamed)
+arrays, must be typeable.
+
 Function Declarations
 ---------------------
 
@@ -185,9 +220,9 @@ Module System
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules.  *Module types* can
-be used to classify the contents of modules, and *parameterised
+be used to classify the contents of modules, and *parametric
 modules* can be used to abstract over modules.  In Standard ML,
-modules, module types and parameterised modules are called structs,
+modules, module types and parametric modules are called structs,
 signatures, and functors, respectively.
 
 Named module are defined as::
@@ -195,7 +230,7 @@ Named module are defined as::
   module ModuleName = module expression
 
 Where a module expression can be the name of another module, an
-application of a parameterised module, or a sequence of declarations
+application of a parametric module, or a sequence of declarations
 enclosed in curly braces::
 
   module Vec3 = {
@@ -248,7 +283,7 @@ or convert them to anything else, making this a rather useless use of
 abstraction.  As a derived form, we can write ``module M: S = e`` to
 mean ``module M = e : S``.
 
-Parameterised modules allow us to write definitions that abstract over
+Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
   module Times(M: Addable) = {
