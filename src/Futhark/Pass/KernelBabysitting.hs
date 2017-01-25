@@ -79,7 +79,7 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
   -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
   let thread_gids = map fst $ spaceDimensions space
-      thread_local = HS.fromList $ spaceGlobalId space : thread_gids
+      thread_local = HS.fromList $ spaceGlobalId space : spaceLocalId space : thread_gids
 
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
                          thread_local
