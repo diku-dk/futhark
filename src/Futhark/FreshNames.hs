@@ -13,7 +13,7 @@ import Language.Futhark.Core
 -- no repeating entries.  In practice, when asked for a name, the name
 -- source will return the name along with a new name source, which
 -- should then be used in place of the original.
-data VNameSource = VNameSource {
+newtype VNameSource = VNameSource {
     newName :: VName -> (VName, VNameSource)
   -- ^ Produce a fresh name, using the given name as a template.
 }

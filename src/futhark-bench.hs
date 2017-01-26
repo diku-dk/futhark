@@ -43,8 +43,7 @@ initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing
 binaryName :: FilePath -> FilePath
 binaryName = (`replaceExtension` "bin")
 
-data RunResult = RunResult { runMicroseconds :: Int }
-
+newtype RunResult = RunResult { runMicroseconds :: Int }
 data DataResult = DataResult String (Either T.Text [RunResult])
 data BenchResult = BenchResult FilePath [DataResult]
 

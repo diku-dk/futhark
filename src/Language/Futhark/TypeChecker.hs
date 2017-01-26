@@ -275,9 +275,9 @@ altOccurences occurs1 occurs2 =
 type NameMap = HM.HashMap (Namespace, Name) VName
 
 -- | A function for applying a functor to a module.
-data FunctorF = FunctorF { applyFunctor :: SrcLoc -> Scope
-                                        -> TypeM (Scope, HM.HashMap VName VName)
-                         }
+newtype FunctorF = FunctorF { applyFunctor :: SrcLoc -> Scope
+                                           -> TypeM (Scope, HM.HashMap VName VName)
+                            }
 
 instance Show FunctorF where
   show _ = "#<FunctorF>"

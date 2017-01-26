@@ -768,7 +768,7 @@ instance Located (DecBase f vn) where
   locOf (FunctorDec d)    = locOf d
   locOf (OpenDec _ _ loc) = locOf loc
 
-data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
+newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 data ProgBaseWithHeaders f vn =
@@ -777,7 +777,7 @@ data ProgBaseWithHeaders f vn =
                   }
 deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 
-data ProgHeader = Include [String]
+newtype ProgHeader = Include [String]
                 deriving (Show)
 
 -- | A set of names.

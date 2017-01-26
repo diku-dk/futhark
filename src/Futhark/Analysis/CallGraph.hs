@@ -23,7 +23,7 @@ buildFunctionTable =
           HM.insert (funDefName f) f ftab
 
 -- | The symbol table for functions
-data CGEnv = CGEnv { envFtable  :: FunctionTable }
+newtype CGEnv = CGEnv { envFtable  :: FunctionTable }
 
 type CGM = Reader CGEnv
 

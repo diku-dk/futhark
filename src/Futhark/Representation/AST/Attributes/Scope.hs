@@ -74,7 +74,7 @@ class (Applicative m, Annotations lore) => HasScope lore m | m -> lore where
   -- | Return the type of the given variable, or fail if it is not in
   -- the type environment.
   lookupType :: VName -> m Type
-  lookupType = liftA typeOf . lookupInfo
+  lookupType = fmap typeOf . lookupInfo
 
   -- | Return the info of the given variable, or fail if it is not in
   -- the type environment.

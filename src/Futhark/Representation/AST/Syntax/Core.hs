@@ -82,8 +82,8 @@ newtype ExtShape = ExtShape { extShapeDims :: [ExtDimSize] }
 
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
-data Rank = Rank Int
-            deriving (Show, Eq, Ord)
+newtype Rank = Rank Int
+             deriving (Show, Eq, Ord)
 
 -- | A class encompassing types containing array shape information.
 class (Monoid a, Eq a, Ord a) => ArrayShape a where
