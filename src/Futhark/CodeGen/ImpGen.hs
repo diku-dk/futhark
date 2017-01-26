@@ -153,7 +153,7 @@ data MemEntry = MemEntry {
     , entryMemSpace :: Imp.Space
   }
 
-data ScalarEntry = ScalarEntry {
+newtype ScalarEntry = ScalarEntry {
     entryScalarType    :: PrimType
   }
 

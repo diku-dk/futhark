@@ -61,7 +61,7 @@ interpret config =
   runCompilerOnProgram newFutharkConfig (standardPipeline Executable) $
   interpretAction' $ interpreterEntryPoint config
 
-data InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
+newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
 
 interpreterConfig :: InterpreterConfig
 interpreterConfig = InterpreterConfig defaultEntryPoint
@@ -74,7 +74,7 @@ options = [ Option "e" ["entry-point"]
             "The entry point to execute."
           ]
 
-data InterpreterState =
+newtype InterpreterState =
   InterpreterState { interpProg :: UncheckedProg
                    }
 

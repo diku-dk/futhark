@@ -56,7 +56,7 @@ arrsInScope = HM.fromList . mapMaybe asArray . HM.toList . varsInScope
         asArray (_, IsNotArray{}) =
           Nothing
 
-data Error = Error String
+newtype Error = Error String
 
 instance Show Error where
   show (Error msg) =

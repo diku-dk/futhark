@@ -78,7 +78,7 @@ data PyFunDef = Def String [String] [PyStmt]
 data PyClassDef = Class String [PyStmt]
                 deriving (Eq, Show)
 
-data PyProg = PyProg [PyStmt]
+newtype PyProg = PyProg [PyStmt]
             deriving (Eq, Show)
 
 instance Pretty PyIdx where

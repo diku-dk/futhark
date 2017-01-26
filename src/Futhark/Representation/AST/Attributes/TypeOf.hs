@@ -178,7 +178,7 @@ valueShapeContext rettype values =
 subExpShapeContext :: HasScope t m =>
                       [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
-  extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
+  extractShapeContext rettype <$> traverse (fmap arrayDims . subExpType) ses
 
 -- | A loop returns not only its value merge parameters, but may also
 -- have an existential context.  Thus, @loopResult ctxmergeparams

@@ -23,7 +23,7 @@ import Futhark.Binder
 import Futhark.Pass
 
 -- | The symbol table for functions
-data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDef }
+newtype CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDef }
 
 type CGM = Reader CGEnv
 

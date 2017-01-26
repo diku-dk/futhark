@@ -74,9 +74,9 @@ instance PP.Pretty UntypedPassState where
   ppr (Kernels prog) = PP.ppr prog
   ppr (ExplicitMemory prog) = PP.ppr prog
 
-data UntypedPass = UntypedPass (UntypedPassState
-                                -> PipelineConfig
-                                -> FutharkM UntypedPassState)
+newtype UntypedPass = UntypedPass (UntypedPassState
+                                  -> PipelineConfig
+                                  -> FutharkM UntypedPassState)
 
 data UntypedAction = SOACSAction (Action SOACS)
                    | KernelsAction (Action Kernels)
