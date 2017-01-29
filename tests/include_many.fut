@@ -7,8 +7,8 @@
 --   -5
 -- }
 
-include include_many_includee0
-include include_many_includee1
+import "include_many_includee0"
+import "include_many_includee1"
 
 fun main(s: i32): i32 =
   includee0_function(s)

@@ -8,6 +8,8 @@ module Language.Futhark.TypeChecker
   ( checkProg
   , TypeError
   , Warnings
+  , FileModule
+  , Imports
   )
   where
 
@@ -289,13 +291,14 @@ data Scope  = Scope { envVtable :: HM.HashMap VName Binding
                     , envTypeTable :: HM.HashMap VName TypeBinding
                     , envSigTable :: HM.HashMap VName Scope
                     , envModTable :: HM.HashMap Name ModBinding
+                    , envImportTable :: HM.HashMap FilePath Scope
                     , envNameMap :: NameMap
                     } deriving (Show)
 
 instance Monoid Scope where
-  mempty = Scope mempty mempty mempty mempty mempty
-  Scope vt1 tt1 st1 mt1 nt1 `mappend` Scope vt2 tt2 st2 mt2 nt2 =
-    Scope (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
+  mempty = Scope mempty mempty mempty mempty mempty mempty
+  Scope vt1 tt1 st1 mt1 it1 nt1 `mappend` Scope vt2 tt2 st2 mt2 it2 nt2 =
+    Scope (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (it1<>it2) (nt1<>nt2)
 
 initialScope :: Scope
 initialScope = intrinsicsModule
@@ -309,7 +312,7 @@ initialScope = intrinsicsModule
         initialTypeTable = HM.fromList $ mapMaybe addIntrinsicT $ HM.toList intrinsics
         initialModTable = HM.singleton (nameFromString "Intrinsics") (ModMod intrinsicsModule)
 
-        intrinsicsModule = Scope initialVtable initialTypeTable mempty mempty intrinsicsNameMap
+        intrinsicsModule = Scope initialVtable initialTypeTable mempty mempty mempty intrinsicsNameMap
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
           Just (name, BoundF (map Prim ts, Prim t))
@@ -379,6 +382,13 @@ instance Show Warnings where
 
 singleWarning :: SrcLoc -> String -> Warnings
 singleWarning loc problem = Warnings [(loc, problem)]
+
+-- | The (abstract) result of type checking some file.  Can be passed
+-- to further invocations of the type checker.
+newtype FileModule = FileModule { fileScope :: Scope }
+
+-- | A mapping from import names to imports.
+type Imports = HM.HashMap FilePath FileModule
 
 -- | The type checker runs in this monad.
 newtype TypeM a = TypeM (RWST
@@ -706,6 +716,13 @@ lookupMod loc qn = do
     Just (ModMod modscope) -> return (qn', modscope)
     Just ModFunctor{}      -> bad $ UnappliedFunctor qn loc
 
+lookupImport :: SrcLoc -> FilePath -> TypeM Scope
+lookupImport loc file = do
+  imports <- asks envImportTable
+  case HM.lookup file imports of
+    Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\""
+    Just scope -> return scope
+
 lookupFunctor :: SrcLoc -> QualName Name -> TypeM (QualName VName, FunctorF)
 lookupFunctor loc qn = do
   (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
@@ -872,20 +889,22 @@ valDecScope (ConstDec cb) =
              (BoundV $ removeShapeAnnotations $ fromStruct $ unInfo $ constBindType cb)
          }
 
--- | Type check a program containing arbitrary no information,
--- yielding either a type error or a program with complete type
--- information.
-checkProg :: UncheckedProg -> Either TypeError (Prog, Warnings, VNameSource)
-checkProg prog =
-  runTypeM initialScope src $ Prog <$> checkProg' (progDecs prog)
-  where src = newNameSource $ succ $ maximum $ map baseTag $
-              HM.elems $ envNameMap initialScope
+-- | Type check a program containing no type information, yielding
+-- either a type error or a program with complete type information.
+-- Accepts a mapping from file names (excluding extension) to
+-- previously type checker results.
+checkProg :: Imports
+          -> VNameSource
+          -> UncheckedProg
+          -> Either TypeError ((FileModule, Prog), Warnings, VNameSource)
+checkProg files src prog = runTypeM scope' src $ checkProg' prog
+  where scope' = initialScope { envImportTable = HM.map fileScope files }
 
-checkProg' :: [DecBase NoInfo Name] -> TypeM [DecBase Info VName]
-checkProg' decs = do
+checkProg' :: UncheckedProg -> TypeM (FileModule, Prog)
+checkProg' (Prog decs) = do
   checkForDuplicateDecs decs
-  (_, decs') <- checkDecs decs
-  return decs'
+  (scope, decs') <- checkDecs decs
+  return (FileModule scope, Prog decs')
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -974,7 +993,9 @@ checkSigBind (SigBind name e loc) = do
   -- abbreviations in the signature.
   let sigmod = typeAbbrScopeFromSig scope
   return (mempty { envSigTable = HM.singleton name' scope
-                 , envModTable = HM.singleton name $ ModMod sigmod },
+                 , envModTable = HM.singleton name $ ModMod sigmod
+                 , envNameMap = HM.singleton (Signature, name) name'
+                 },
           SigBind name' e' loc)
   where typeAbbrScopeFromSig :: Scope -> Scope
         typeAbbrScopeFromSig scope =
@@ -995,6 +1016,9 @@ checkModExp (ModVar v loc) = do
         baseTag (qualLeaf v') <= maxIntrinsicTag) $
     bad $ TypeError loc "The Intrinsics module may not be used in module expressions."
   return (scope, ModVar v' loc)
+checkModExp (ModImport name loc) = do
+  scope <- lookupImport loc name
+  return (scope, ModImport name loc)
 checkModExp (ModApply f e NoInfo loc) = do
   (f', functor) <- lookupFunctor loc f
   (e_scope, e') <- checkModExp e
@@ -1012,7 +1036,9 @@ checkStructBind :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase In
 checkStructBind (StructBind name e loc) = do
   name' <- checkName Structure name loc
   (scope, e') <- checkModExp e
-  return (mempty { envModTable = HM.singleton name $ ModMod scope },
+  return (mempty { envModTable = HM.singleton name $ ModMod scope
+                 , envNameMap = HM.singleton (Structure, name) name'
+                 },
           StructBind name' e' loc)
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
@@ -1051,8 +1077,11 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
             (scope', _) <- liftEither $ matchScopes body_scope fsig_scope loc
             return (Just fsig_e', scope')
       return (mempty { envModTable =
-                       HM.singleton name $
-                       ModFunctor $ FunctorF $ apply scope' p_scope },
+                         HM.singleton name $
+                         ModFunctor $ FunctorF $ apply scope' p_scope
+                     , envNameMap =
+                         HM.singleton (Structure, name) name'
+                     },
               FunctorBind name' (p', psig_e') maybe_fsig_e' body_e' loc)
 
   where apply body_scope p_sig applyloc a_scope = do
@@ -1117,21 +1146,14 @@ checkDecs (TypeDec tdec:rest) =
       return (scope <> tscope, TypeDec tdec' : rest')
 
 checkDecs (OpenDec x xs loc:rest) = do
-  checkForDuplicate $ sort $ x:xs
-  (x', x_mod) <- lookupMod loc x
-  (xs', xs_mods) <- unzip <$> mapM (lookupMod loc) xs
+  (x_mod, x') <- checkModExp x
+  (xs_mods, xs') <- unzip <$> mapM checkModExp xs
    -- We cannot use mconcat, as mconcat is a right-fold.
   let scope_ext = foldl (flip mappend) x_mod xs_mods
   local (scope_ext<>) $ do
     (scope, rest') <- checkDecs rest
     return (scope <> scope_ext,
             OpenDec x' xs' loc: rest')
-  where checkForDuplicate (v1:v2:vs)
-          | v1 == v2 =
-              bad $ TypeError loc $ "Module " ++ pretty v1 ++ " opened twice."
-          | otherwise =
-              checkForDuplicate $ v2:vs
-        checkForDuplicate _ = return ()
 
 checkDecs [] =
   return (mempty, [])
@@ -2133,6 +2155,7 @@ matchScopes scope sig loc = do
                      , envSigTable = mempty
                      , envModTable = mempty
                      , envNameMap = names
+                     , envImportTable = mempty
                      }
   return (scope',
           abs_name_substs <> abbr_name_substs <> val_substs)
@@ -2223,6 +2246,7 @@ newNamesForScope orig_scope = do
                 , envModTable = HM.map (substituteInModBinding substs) $
                                 envModTable scope
                 , envNameMap = mempty
+                , envImportTable = mempty
                 }
 
         substituteInMap substs f m =

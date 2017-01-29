@@ -5,6 +5,6 @@
 -- input { 3.1415927 } output { -8.742278e-8 }
 -- input { -3.1415927 } output { 8.742278e-8 }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun main(x: f64): f64 = F64.sin(x)

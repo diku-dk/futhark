@@ -1,9 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Compiler
        (
          runPipelineOnProgram
        , runCompilerOnProgram
-       , runPipelineOnSource
+       , readProgram
        , interpretAction'
        , FutharkConfig (..)
        , newFutharkConfig
@@ -13,8 +14,12 @@ where
 
 import Data.Monoid
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.State
+import Control.Monad.Except
+import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
+import Data.List
+import System.FilePath
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 import qualified Data.Text as T
@@ -26,14 +31,14 @@ import Language.Futhark.Parser
 import Futhark.Internalise
 import Futhark.Pipeline
 import Futhark.Actions
-
-import qualified Language.Futhark as E
-import qualified Language.Futhark.TypeChecker as E
-
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
+
+import qualified Language.Futhark as E
+import qualified Language.Futhark.TypeChecker as E
+import Language.Futhark.Futlib
 
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: Maybe (Maybe FilePath)
@@ -67,8 +72,7 @@ runCompilerOnProgram config pipeline action file = do
     Right () ->
       return ()
   where compile = do
-          source <- liftIO $ T.readFile file
-          prog <- runPipelineOnSource config pipeline file source
+          prog <- runPipelineOnProgram config pipeline file
           when (isJust $ futharkVerbose config) $
             liftIO $ hPutStrLn stderr $ "Running action " ++ actionName action
           actionProcedure action prog
@@ -78,20 +82,10 @@ runPipelineOnProgram :: FutharkConfig
                      -> FilePath
                      -> FutharkM (Prog tolore)
 runPipelineOnProgram config pipeline file = do
-  source <- liftIO $ T.readFile file
-  runPipelineOnSource config pipeline file source
+  (tagged_ext_prog, ws, _, namesrc) <- readProgram file
 
-runPipelineOnSource :: FutharkConfig
-                    -> Pipeline I.SOACS tolore
-                    -> FilePath
-                    -> T.Text
-                    -> FutharkM (Prog tolore)
-runPipelineOnSource config pipeline filename srccode = do
-  parsed_prog <- parseSourceProgram filename srccode
-
-  (tagged_ext_prog, warnings, namesrc) <- typeCheckSourceProgram parsed_prog
   when (futharkWarn config) $
-    liftIO $ hPutStr stderr $ show warnings
+    liftIO $ hPutStr stderr $ show ws
   putNameSource namesrc
   res <- internaliseProg tagged_ext_prog
   case res of
@@ -105,20 +99,80 @@ runPipelineOnSource config pipeline filename srccode = do
                          , pipelineValidate = True
                          }
 
-parseSourceProgram :: FilePath -> T.Text
-                   -> FutharkM E.UncheckedProg
-parseSourceProgram filename file_contents = do
-  parsed <- liftIO $ parseFuthark filename file_contents
-  case parsed of
-    Left err   -> compileError (T.pack $ show err) ()
-    Right prog -> return prog
+-- | A little monad for reading and type-checking a Futhark program.
+type CompilerM m = StateT ReaderState m
 
-typeCheckSourceProgram :: E.UncheckedProg
-                       -> FutharkM (E.Prog, E.Warnings, VNameSource)
-typeCheckSourceProgram prog =
-  case E.checkProg prog of
-    Left err    -> compileError (T.pack $ show err) ()
-    Right success -> return success
+data ReaderState = ReaderState { alreadyImported :: E.Imports
+                               , resultProgs :: [E.Prog]
+                               , nameSource :: VNameSource
+                               , warnings :: E.Warnings
+                               }
+
+newtype SearchPath = SearchPath FilePath -- Make this a list, eventually.
+
+readImport :: (MonadError CompileError m, MonadIO m) =>
+              SearchPath -> [FilePath] -> FilePath -> CompilerM m ()
+readImport search_path steps name
+  | name `elem` steps =
+      throwError $ CompileError
+      (T.pack $ "Import cycle: " ++ intercalate " -> " (reverse $ name:steps)) mempty
+  | otherwise = do
+      already_done <- gets $ HM.member name . alreadyImported
+
+      unless already_done $ do
+        let name_with_ext = name <.> "fut"
+        (file_contents, file_name) <- readImportFile search_path name_with_ext
+        prog <- case parseFuthark file_name file_contents of
+          Left err -> throwError $ CompileError (T.pack $ show err) mempty
+          Right prog -> return prog
+
+        mapM_ (readImport search_path $ name:steps) $ E.progImports prog
+
+        -- It is important to not read these before the above calls to
+        -- readImport.
+        imports <- gets alreadyImported
+        src <- gets nameSource
+
+        case E.checkProg imports src prog of
+          Left err ->
+            throwError $ CompileError (T.pack $ show err) mempty
+          Right ((progmod, prog'), ws, src') ->
+            modify $ \s ->
+              s { alreadyImported = HM.insert name progmod imports
+                , nameSource      = src'
+                , warnings        = warnings s <> ws
+                , resultProgs     = prog' : resultProgs s
+                }
+
+readImportFile :: MonadIO m => SearchPath -> FilePath -> m (T.Text, FilePath)
+readImportFile (SearchPath dir) fp =
+  case lookup fp futlib of
+    Nothing -> do s <- liftIO $ T.readFile $ dir </> fp
+                  return (s, dir </> fp)
+    Just t  -> return (t, "[builtin]" </> fp)
+
+-- | Read and type-check a Futhark program, including all imports.
+readProgram :: (MonadError CompileError m, MonadIO m) =>
+               FilePath -> m (E.Prog,
+                              E.Warnings,
+                              E.Imports,
+                              VNameSource)
+readProgram fp = do
+  unless (ext == ".fut") $
+    throwError $ CompileError
+    ("File does not have a .fut extension: " <> T.pack fp) mempty
+  s' <- execStateT (readImport (SearchPath dir) [] file_root) s
+  return (E.Prog $ concatMap E.progDecs $ reverse $ resultProgs s',
+          warnings s',
+          alreadyImported s',
+          nameSource s')
+  where s = ReaderState mempty mempty newNameSourceForCompiler mempty
+        (dir, file) = splitFileName fp
+        (file_root, ext) = splitExtension file
+
+newNameSourceForCompiler :: VNameSource
+newNameSourceForCompiler = newNameSource $ succ $ maximum $ map baseTag $
+                           HM.keys E.intrinsics
 
 typeCheckInternalProgram :: I.Prog -> FutharkM ()
 typeCheckInternalProgram prog =

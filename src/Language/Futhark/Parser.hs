@@ -14,114 +14,17 @@ module Language.Futhark.Parser
   )
   where
 
-import Control.Applicative
-import Control.Exception
-import Control.Monad
-import Control.Monad.Except
-import Data.Maybe (mapMaybe)
-import Data.List (intersect, (\\))
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import System.FilePath (takeDirectory, (</>), (<.>), splitPath, joinPath)
-
-import Prelude
 
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Parser.Parser
-import Language.Futhark.Futlib
-
--- Needed by @parseFuthark@, since that function might read files.  Kept as
--- simple as possible and without external dependencies.
-newtype ErrorIO e t = ErrorIO { evalErrorIO :: IO (Either e t) }
-
-instance Monad (ErrorIO e) where
-  m >>= g = ErrorIO $ do
-    eith <- evalErrorIO m
-    case eith of
-      Left e -> return $ Left e
-      Right t -> evalErrorIO $ g t
-
-  return x = ErrorIO $ return $ Right x
-
-bad :: e -> ErrorIO e t
-bad e = ErrorIO $ return $ Left e
-
-liftEither :: Either e t -> ErrorIO e t
-liftEither eith = ErrorIO $ return eith
-
-instance MonadIO (ErrorIO e) where
-  liftIO io = ErrorIO (Right <$> io)
-
-instance Functor (ErrorIO e) where
-  fmap = liftM
-
-instance Applicative (ErrorIO e) where
-  (<*>) = ap
-  pure = return
 
 -- | Parse an entire Futhark program from the given 'T.Text', using
--- the 'FilePath' as the source name for error messages and the
--- relative path to use for includes, and parsing and reacting to all
--- headers.
---
--- Fails on cyclical includes.  Ignores repeat non-cyclical includes.
+-- the 'FilePath' as the source name for error messages.
 parseFuthark :: FilePath -> T.Text
-             -> IO (Either ParseError UncheckedProg)
-parseFuthark fp0 s0 =
-  (snd <$>) <$> evalErrorIO (parseWithIncludes [fp0] [fp0] (fp0, s0))
-  where parseWithIncludes :: [FilePath] -> [FilePath] -> (FilePath, T.Text)
-                          -> ErrorIO ParseError ([FilePath], UncheckedProg)
-        parseWithIncludes alreadyIncluded includeSources (fp, s) = do
-          p <- liftEither $ parse prog fp s
-          let newIncludes = mapMaybe headerInclude $ progWHHeaders p
-              intersectionSources = includeSources `intersect` newIncludes
-
-          unless (null intersectionSources) $ bad
-            $ ParseError ("Include cycle with " ++ show intersectionSources ++ ".")
-
-          let newIncludes' = newIncludes \\ alreadyIncluded
-              alreadyIncluded' = fp : newIncludes' ++ alreadyIncluded
-              includeSources' = fp : includeSources
-              p' = Prog $ progWHDecs p
-
-          if null newIncludes'
-            then return (alreadyIncluded', p')
-            else includeIncludes alreadyIncluded' includeSources' newIncludes' p'
-
-        includeIncludes :: [FilePath] -> [FilePath] -> [FilePath] -> UncheckedProg
-                          -> ErrorIO ParseError ([FilePath], UncheckedProg)
-        includeIncludes alreadyIncluded includeSources newIncludes baseProg = do
-          (alreadyIncluded', p) <-
-            foldM (\(already, p) new -> do
-                      (already', p1) <- includeInclude already includeSources new
-                      return (already', mergePrograms p p1))
-            (alreadyIncluded, Prog []) newIncludes
-          return (alreadyIncluded', mergePrograms p baseProg)
-
-        includeInclude :: [FilePath] -> [FilePath] -> FilePath
-                       -> ErrorIO ParseError ([FilePath], UncheckedProg)
-        includeInclude alreadyIncluded includeSources newInclude = do
-          let ifFileNotFound e =
-                -- One more chance - maybe it's a builtin.
-                case lookup (dropSearchDir newInclude) futlib of
-                  Just s  -> return s
-                  Nothing -> throw (e::IOError)
-          t <- liftIO $ T.readFile newInclude `catch` ifFileNotFound
-          parseWithIncludes alreadyIncluded includeSources (newInclude, t)
-
-        mergePrograms :: UncheckedProg -> UncheckedProg -> UncheckedProg
-        mergePrograms (Prog defs) (Prog defs') = Prog (defs ++ defs')
-
-        headerInclude :: ProgHeader -> Maybe String
-        headerInclude (Include strings) =
-          Just $ foldl (</>) search_dir strings <.> "fut"
-
-        -- | Remove the search directory.
-        dropSearchDir = joinPath .
-                        drop (length $ splitPath search_dir) .
-                        splitPath
-        search_dir = takeDirectory fp0
+             -> Either ParseError UncheckedProg
+parseFuthark = parse prog
 
 -- | Parse an Futhark expression from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

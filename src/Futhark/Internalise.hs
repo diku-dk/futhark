@@ -146,6 +146,7 @@ internaliseModExp :: Bool -> E.ModExp
                    -> ([I.FunDef] -> InternaliseM a)
                    -> InternaliseM a
 internaliseModExp _ E.ModVar{} m = m []
+internaliseModExp _ E.ModImport{} m = m []
 internaliseModExp generating (E.ModDecs ds _) m = do
   ((ftable_expansion, ttable_expansion), funs) <-
     (if generating then generatingFunctor else id) $

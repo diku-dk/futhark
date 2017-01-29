@@ -40,7 +40,7 @@
 -- }
 -- structure { Map/Scanomap 1 Map 1 }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
@@ -75,7 +75,7 @@ fun main(md_c: [num_und][num_und]f64,
          md_drifts: [num_dates][num_und]f64,
          md_starts: [num_und]f64,
          bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
-  -- I don't want to include the entire Brownian bridge, so we just
+  -- I don't want to import the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose(bb_arr)
   let noises = correlateDeltas(md_c, bb_row) in

@@ -137,6 +137,7 @@ keyword s =
     "streamSeq"    -> STREAM_SEQ
     "write"        -> WRITE
     "include"      -> INCLUDE
+    "import"       -> IMPORT
     "type"         -> TYPE
     "entry"        -> ENTRY
     "module"       -> MODULE
@@ -300,6 +301,7 @@ data Token = ID Name
            | STREAM_SEQ
            | WRITE
            | INCLUDE
+           | IMPORT
            | ENTRY
            | TYPE
            | MODULE

@@ -7,7 +7,7 @@
 --   DoLoop 3
 -- }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun take(n: i32, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in first
 

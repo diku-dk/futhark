@@ -2,7 +2,7 @@
 -- in-place-lowering (after the maps had been turned into do-loops).
 -- ==
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun tridagSeq(a:  []f64, b: []f64, c: []f64, y: []f64 ): []f64 =
   copy(concat a b c y)

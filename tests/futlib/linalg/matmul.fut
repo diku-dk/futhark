@@ -7,7 +7,7 @@
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
 
-include futlib.linalg
+import "futlib/linalg"
 
 module I32LinAlg = LinAlg(I32)
 

@@ -171,6 +171,7 @@ import Language.Futhark.Parser.Lexer
       streamRedPer    { L $$ STREAM_REDPER }
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
+      import          { L $$ IMPORT }
       write           { L $$ WRITE }
       type            { L $$ TYPE }
       module          { L $$ MODULE }
@@ -199,16 +200,10 @@ import Language.Futhark.Parser.Lexer
 %%
 
 
-Prog :: { UncheckedProgWithHeaders }
-     :   Headers DecStart { ProgWithHeaders $1 $2 }
-     |   DecStart { ProgWithHeaders [] $1 }
+Prog :: { UncheckedProg }
+      : Decs { Prog $1 }
 ;
 
-
-DecStart :: { [DecBase f vn] }
-         :  DefaultDec Decs { $2 }
-         |  Decs { $1 }
-;
 
 Decs :: { [DecBase f vn] }
      : Dec Decs { $1 ++ $2 }
@@ -216,13 +211,15 @@ Decs :: { [DecBase f vn] }
 ;
 
 Dec :: { [DecBase f vn] }
-    : Fun            { [ValDec $ FunDec $1] }
-    | Const          { [ValDec $ ConstDec $1] }
-    | TypeAbbr       { map TypeDec $1 }
-    | SigBind        { [SigDec $1 ] }
-    | StructBind     { [StructDec $1 ] }
-    | FunctorBind    { [FunctorDec $1] }
-    | open QualNames { [OpenDec (fst $ fst $2) (map fst $ snd $2) $1] }
+    : Fun               { [ValDec $ FunDec $1] }
+    | Const             { [ValDec $ ConstDec $1] }
+    | TypeAbbr          { map TypeDec $1 }
+    | SigBind           { [SigDec $1 ] }
+    | StructBind        { [StructDec $1 ] }
+    | FunctorBind       { [FunctorDec $1] }
+    | open QualNames    { [OpenDec (uncurry ModVar $ fst $2) (map (uncurry ModVar) $ snd $2) $1] }
+    | DefaultDec        { [] }
+    | import stringlit  { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] $1] }
 ;
 
 
@@ -244,6 +241,7 @@ SigBind :: { SigBindBase f vn }
 
 ModExp :: { ModExpBase f vn }
         : QualName     { let (v, loc) = $1 in ModVar v loc }
+        | import stringlit { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
         | '{' Decs '}' { ModDecs $2 $1 }
         | QualName '(' ModExp ')'
           { ModApply (fst $1) $3 NoInfo (snd $1) }
@@ -329,15 +327,6 @@ BindingBinOp :: { Name }
                    unless (null qs) $ fail "Cannot use a qualified name in binding position."
                    return name }
       | '-'   { nameFromString "-" }
-
-Headers :: { [ProgHeader] }
-        : Header Headers { $1 : $2 }
-        | Header { [$1] }
-;
-
-Header :: { ProgHeader }
-Header : include QualName { let (QualName qs v, _) = $2 in Include (map nameToString (qs++[v])) }
-;
 
 Fun     : fun id Params MaybeAscription '=' Exp
           { let L pos (ID name) = $2

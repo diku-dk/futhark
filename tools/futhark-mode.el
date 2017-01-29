@@ -46,7 +46,7 @@
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with" "type"
     "fun" "val" "entry" "for" "while" "do"
-    "empty" "unsafe" "default" "include" "module" "open")
+    "empty" "unsafe" "default" "include" "import" "module" "open")
   "All Futhark keywords.")
 
 (defconst futhark-builtin-functions
@@ -234,6 +234,7 @@ In general, prefer as little indentation as possible."
                 (futhark-looking-at-word "val")
                 (futhark-looking-at-word "module")
                 (futhark-looking-at-word "include")
+                (futhark-looking-at-word "import")
                 (futhark-looking-at-word "default"))
             (or
              (save-excursion

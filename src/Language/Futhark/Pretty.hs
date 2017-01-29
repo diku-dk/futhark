@@ -334,6 +334,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModVar v _) = ppr v
+  ppr (ModImport v _) = ppr $ show v
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
   ppr (ModApply f a _ _) = ppr f <> parens (ppr a)
   ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se

@@ -292,6 +292,7 @@ Executable futharki
                  srcloc >= 0.4,
                  transformers,
                  neat-interpolation >= 0.3,
+                 unordered-containers,
                  text,
                  futhark
 

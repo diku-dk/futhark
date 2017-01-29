@@ -113,7 +113,7 @@
 -- 0.001163f32, 0.001455f32]]}
 -- structure distributed { Kernel 6 }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f32 =
   let membership = map (%nclusters) (iota(npoints))

@@ -1,4 +1,4 @@
--- This test shows how to include a file and use its function.
+-- This test shows how to import a file and use its function.
 -- ==
 -- input {
 --   7
@@ -7,6 +7,6 @@
 --   29
 -- }
 
-include include_basic_includee
+import "include_basic_includee"
 
-fun main(s: i32): i32 = includee_function(s) + 1
+fun main(s: i32): i32 = importe_function(s) + 1
