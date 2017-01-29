@@ -453,7 +453,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs w lam _ivs as) = do
+typeCheckSOAC (Write cs w lam ivs as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -470,6 +470,9 @@ typeCheckSOAC (Write cs w lam _ivs as) = do
   --   4. Each array in @as@ is consumed.  This is not really a check, but more
   --      of a requirement, so that e.g. the source is not hoisted out of a
   --      loop, which will mean it cannot be consumed.
+  --
+  --   5. Each of ivs must be an array matching a corresponding lambda
+  --      parameters.
   --
   -- Code:
 
@@ -508,6 +511,11 @@ typeCheckSOAC (Write cs w lam _ivs as) = do
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
+
+  -- 5.
+  arrargs <- TC.checkSOACArrayArgs w ivs
+  TC.checkLambda lam arrargs
+
 
 typeCheckSOAC (Reduce ass size _ fun inputs) =
   typeCheckScanReduce ass size fun inputs
