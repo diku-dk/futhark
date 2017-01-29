@@ -750,12 +750,13 @@ internaliseExp desc (E.Write si v a loc) = do
 
   let indexType = I.Prim (IntType Int32)
       bodyTypes = replicate (length tvs) indexType ++ tvs
+      paramTypes = indexType : tvs
 
   indexName <- newVName "write_index"
   valueNames <- replicateM (length tvs) $ newVName "write_value"
 
   let bodyNames = indexName : valueNames
-  let bodyParams = zipWith I.Param bodyNames bodyTypes
+  let bodyParams = zipWith I.Param bodyNames paramTypes
 
   -- This body is pretty boring right now, as every input is exactly the output.
   -- But it can get funky later on if fused with something else.
