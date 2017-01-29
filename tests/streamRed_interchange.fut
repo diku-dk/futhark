@@ -120,7 +120,7 @@ fun main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f3
   let features_in_cluster = replicate nclusters (npoints / nclusters)
   -- Just generate some random-seeming points.
   let points = map (\(i: i32): [nfeatures]f32  ->
-                     map (*100f32) (map F32.sin (map f32 (map (^i) (iota(nfeatures)))))
+                     map (*100f32) (map f32.sin (map f32 (map (^i) (iota(nfeatures)))))
                   ) (iota(npoints)) in
   streamRedPer (\(acc: *[nclusters][nfeatures]f32)
                   (elem: *[nclusters][nfeatures]f32): *[nclusters][nfeatures]f32  ->

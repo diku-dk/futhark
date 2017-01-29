@@ -7,4 +7,4 @@
 
 import "futlib/numeric"
 
-fun main(x: f64): f64 = F64.sin(x)
+fun main(x: f64): f64 = f64.sin(x)

@@ -63,7 +63,7 @@ fun mkPrices(md_starts: [num_und]f64,
            md_drifts: [num_dates][num_und]f64,
            noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let c_rows = map combineVs (zip noises (md_vols) (md_drifts) )
-  let e_rows = map (\(x: []f64): [num_und]f64  -> map F64.exp x
+  let e_rows = map (\(x: []f64): [num_und]f64  -> map f64.exp x
                   ) (c_rows
                   )
   in  scan (\(x: []f64) (y: []f64): []f64  -> map (*) x y

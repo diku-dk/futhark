@@ -6,4 +6,4 @@
 
 import "futlib/numeric"
 
-fun main(x: f32): f32 = F32.acos(x)
+fun main(x: f32): f32 = f32.acos(x)

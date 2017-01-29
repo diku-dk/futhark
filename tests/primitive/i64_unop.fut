@@ -23,5 +23,5 @@ import "futlib/numeric"
 
 fun main(f: i32, x: i64): i64 =
   if      f == 0 then -x
-  else if f == 1 then I64.abs(x)
-  else                I64.sgn(x)
+  else if f == 1 then i64.abs(x)
+  else                i64.sgn(x)

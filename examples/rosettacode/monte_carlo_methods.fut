@@ -53,7 +53,7 @@ fun sobolIndR(dir_vs:  [m][num_bits]i32) (n: i32 ): [m]f32 =
 fun main(n: i32): f32 =
     let rand_nums = map (sobolIndR (dirvcts())) (iota n)
     let dists     = map (\xy ->
-                           let (x,y) = (xy[0],xy[1]) in F32.sqrt(x*x + y*y))
+                           let (x,y) = (xy[0],xy[1]) in f32.sqrt(x*x + y*y))
                         rand_nums
 
     let bs        = map (\d -> if d <= 1.0f32 then 1 else 0) dists

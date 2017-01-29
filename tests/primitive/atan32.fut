@@ -6,4 +6,4 @@
 
 import "futlib/numeric"
 
-fun main(x: f32): f32 = F32.atan x
+fun main(x: f32): f32 = f32.atan x

@@ -8,4 +8,4 @@
 import "futlib/numeric"
 
 fun main(x: f32, y: f32): (bool, bool) =
-  (F32.isinf(x / y), F32.isnan(F32.sqrt(x)))
+  (f32.isinf(x / y), f32.isnan(f32.sqrt(x)))

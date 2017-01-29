@@ -7,4 +7,4 @@
 
 import "futlib/numeric"
 
-fun main(x: f32): f32 = F32.sin(x)
+fun main(x: f32): f32 = f32.sin(x)

@@ -21,7 +21,7 @@ import "futlib/numeric"
 
 default (f32)
 
-val pi: f32 = F32.acos 0.0 * 2.0
+val pi: f32 = f32.acos 0.0 * 2.0
 
 type complex = (f32, f32)
 
@@ -35,15 +35,15 @@ fun complexMult ((a,b): complex) ((c,d): complex): complex =
 fun toComplex (a: f32): complex = (a, 0f32)
 
 fun complexExp ((a,b): complex): complex =
-  complexMult (toComplex (F32.exp a)) (F32.cos b, F32.sin b)
+  complexMult (toComplex (f32.exp a)) (f32.cos b, f32.sin b)
 
 fun toPolar ((a,b): complex): (f32, f32) =
-  (F32.sqrt (a*a + b*b),
-   F32.atan (b/a))
+  (f32.sqrt (a*a + b*b),
+   f32.atan (b/a))
 
 fun fromPolar (r: f32, angle: f32): complex =
-  (r * F32.cos angle,
-   r * F32.sin angle)
+  (r * f32.cos angle,
+   r * f32.sin angle)
 
 fun complexPow (c: complex) (n: i32): complex =
   let (r, angle) = toPolar c

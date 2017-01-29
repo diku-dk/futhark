@@ -22,7 +22,7 @@ val lt: t -> t -> bool
 val gt: t -> t -> bool
 }
 
-module I32 = {
+module i32 = {
 type t = i32
 
 fun plus (x: i32) (y: i32) = x + y
@@ -37,7 +37,7 @@ fun lt (x: i32) (y: i32) = x < y
 fun gt (x: i32) (y: i32) = x > y
 }
 
-module F32 = {
+module f32 = {
 type t = f32
 
 fun plus (x: f32) (y: f32) = x + y
