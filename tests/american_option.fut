@@ -15,7 +15,7 @@
 
 -- constants
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun strike(): i32 = 100
 fun bankDays(): i32 = 252

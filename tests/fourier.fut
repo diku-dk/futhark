@@ -17,7 +17,7 @@
 --    -3.632712f32, -6.881909f32, -15.388417f32]
 -- }
 
-include futlib.numeric
+import "futlib/numeric"
 
 default (f32)
 

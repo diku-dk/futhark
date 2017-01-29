@@ -5,6 +5,6 @@
 -- input { 3.1415927 } output { -1.0 }
 -- input { -3.1415927 } output { -1.0 }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun main(x: f64): f64 = F64.cos(x)

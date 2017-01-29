@@ -6,7 +6,7 @@
 --   [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 -- }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun intsqrt(x: i32): i32 =
     i32(F32.sqrt(f32(x)))

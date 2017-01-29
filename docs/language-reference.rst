@@ -302,32 +302,29 @@ type ``Addable`` and get back a module that defines a function
 Now ``Vec3Times.times`` is a function of type ``Vec3.t -> int ->
 Vec3.t``.
 
-File Inclusions
----------------
+Referring to Other Files
+------------------------
 
-You can include external Futhark code into a Futhark file like this::
+You can refer to external files in a Futhark file like this::
 
-  include module
+  import "module"
 
-The above will include all functions from whatever ``module`` is and make them
-available in the current Futhark program.
-
-All include headers must be at the top of the Futhark file, before any function
-declarations.
-
-Currently, Futhark can only include files.  You can include a file into your
-main Futhark program like this::
-
-  include other_file
-
-The ``.fut`` extension is implied, so the above will include the file
-``other_file.fut``.
+The above will include all top-level definitions from ``module.fut``
+is and make them available in the current Futhark program.  The
+``.fut`` extension is implied.
 
 You can also include files from subdirectories::
 
-  include path.to.a.file
+  include "path/to/a/file"
 
 The above will include the file ``path/to/a/file.fut``.
+
+Qualified imports are also possible, where a module is created for the
+file::
+
+  module M = import "module"
+
+
 
 Simple Expressions
 ------------------

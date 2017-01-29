@@ -67,8 +67,6 @@ module Language.Futhark.Syntax
   , ValDecBase(..)
   , TypeBindBase(..)
   , ProgBase(..)
-  , ProgBaseWithHeaders(..)
-  , ProgHeader(..)
   , DecBase(..)
 
   -- * Miscellaneous
@@ -708,6 +706,8 @@ instance Located (SigBindBase f vn) where
   locOf = locOf . sigLoc
 
 data ModExpBase f vn = ModVar (QualName vn) SrcLoc
+                     | ModImport FilePath SrcLoc
+                       -- ^ The contents of another file as a module.
                      | ModDecs [DecBase f vn] SrcLoc
                      | ModApply (QualName vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
                      | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
@@ -716,6 +716,7 @@ deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
   locOf (ModVar _ loc)         = locOf loc
+  locOf (ModImport _ loc)      = locOf loc
   locOf (ModDecs _ loc)        = locOf loc
   locOf (ModApply _ _ _ loc)   = locOf loc
   locOf (ModAscript _ _ _ loc) = locOf loc
@@ -757,7 +758,7 @@ data DecBase f vn = ValDec (ValDecBase f vn)
                   | SigDec (SigBindBase f vn)
                   | StructDec (StructBindBase f vn)
                   | FunctorDec (FunctorBindBase f vn)
-                  | OpenDec (QualName vn) [QualName vn] SrcLoc
+                  | OpenDec (ModExpBase f vn) [ModExpBase f vn] SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
@@ -770,15 +771,6 @@ instance Located (DecBase f vn) where
 
 newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)
-
-data ProgBaseWithHeaders f vn =
-  ProgWithHeaders { progWHHeaders :: [ProgHeader]
-                  , progWHDecs    :: [DecBase f vn]
-                  }
-deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
-
-newtype ProgHeader = Include [String]
-                deriving (Show)
 
 -- | A set of names.
 type Names = HS.HashSet

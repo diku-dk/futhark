@@ -4,7 +4,7 @@
 -- input { 3 4 }
 -- output { [1i32, 2i32, 5i32, 6i32, 9i32, 10i32] }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun take_arrint (l: i32) (x: [][]i32): [][]i32 =
   if (0 <= l)

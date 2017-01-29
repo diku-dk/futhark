@@ -7,7 +7,7 @@
 --   547
 -- }
 
-include Vec3
+import "Vec3"
 
 type vec3 = Vec3.Int.t
 fun f(a: vec3, b: vec3): i32 = Vec3.Int.dot(a , b)

@@ -1,4 +1,4 @@
-include futlib.complex
+import "futlib/complex"
 
 module C = Complex(F32)
 

@@ -1,4 +1,4 @@
-include futlib.numeric
+import "futlib/numeric"
 
 module type COMPLEX = {
   type real

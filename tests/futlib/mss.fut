@@ -2,7 +2,7 @@
 -- input { [1, -2, 3, 4, -1, 5, -6, 1] }
 -- output { 11 10 }
 
-include futlib.mss
+import "futlib/mss"
 
 module Int_measure = {
   type t = i32

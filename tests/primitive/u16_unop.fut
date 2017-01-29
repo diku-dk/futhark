@@ -19,7 +19,7 @@
 -- input { 2  8u16 } output { 1u16 }
 -- input { 2 65528u16 } output { 1u16 }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun main(f: i32, x: u16): u16 =
   if      f == 0 then -x

@@ -15,6 +15,7 @@ module Language.Futhark.Attributes
   , typeName
   , valueType
   , leadingOperator
+  , progImports
 
   -- * Queries on expressions
   , typeOf
@@ -79,7 +80,6 @@ module Language.Futhark.Attributes
   , UncheckedPattern
   , UncheckedFunBind
   , UncheckedProg
-  , UncheckedProgWithHeaders
   )
   where
 
@@ -695,8 +695,8 @@ concreteType Prim{} = True
 concreteType TypeVar{} = False
 concreteType (Tuple ts) = all concreteType ts
 concreteType (Array at) = concreteArrayType at
-  where concreteArrayType PrimArray{} = True
-        concreteArrayType PolyArray{} = False
+  where concreteArrayType PrimArray{}         = True
+        concreteArrayType PolyArray{}         = False
         concreteArrayType (TupleArray ts _ _) = all concreteTupleArrayElem ts
 
         concreteTupleArrayElem PrimArrayElem{} = True
@@ -855,28 +855,28 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
         binOp :: [PrimType] -> Intrinsic
         binOp ts = IntrinsicPolyFun [ ([t,t], t) | t <- ts ]
 
-        intrinsicBinOp Plus = binOp anyNumberType
-        intrinsicBinOp Minus = binOp anyNumberType
-        intrinsicBinOp Pow = binOp anyNumberType
-        intrinsicBinOp Times = binOp anyNumberType
-        intrinsicBinOp Divide = binOp anyNumberType
-        intrinsicBinOp Mod = binOp anyNumberType
-        intrinsicBinOp Quot = binOp anyIntType
-        intrinsicBinOp Rem = binOp anyIntType
-        intrinsicBinOp ShiftR = binOp anyIntType
-        intrinsicBinOp ZShiftR = binOp anyIntType
-        intrinsicBinOp ShiftL = binOp anyIntType
-        intrinsicBinOp Band = binOp anyIntType
-        intrinsicBinOp Xor = binOp anyIntType
-        intrinsicBinOp Bor = binOp anyIntType
-        intrinsicBinOp LogAnd = IntrinsicMonoFun [Bool,Bool] Bool
-        intrinsicBinOp LogOr = IntrinsicMonoFun [Bool,Bool] Bool
-        intrinsicBinOp Equal = IntrinsicEquality
+        intrinsicBinOp Plus     = binOp anyNumberType
+        intrinsicBinOp Minus    = binOp anyNumberType
+        intrinsicBinOp Pow      = binOp anyNumberType
+        intrinsicBinOp Times    = binOp anyNumberType
+        intrinsicBinOp Divide   = binOp anyNumberType
+        intrinsicBinOp Mod      = binOp anyNumberType
+        intrinsicBinOp Quot     = binOp anyIntType
+        intrinsicBinOp Rem      = binOp anyIntType
+        intrinsicBinOp ShiftR   = binOp anyIntType
+        intrinsicBinOp ZShiftR  = binOp anyIntType
+        intrinsicBinOp ShiftL   = binOp anyIntType
+        intrinsicBinOp Band     = binOp anyIntType
+        intrinsicBinOp Xor      = binOp anyIntType
+        intrinsicBinOp Bor      = binOp anyIntType
+        intrinsicBinOp LogAnd   = IntrinsicMonoFun [Bool,Bool] Bool
+        intrinsicBinOp LogOr    = IntrinsicMonoFun [Bool,Bool] Bool
+        intrinsicBinOp Equal    = IntrinsicEquality
         intrinsicBinOp NotEqual = IntrinsicEquality
-        intrinsicBinOp Less = ordering
-        intrinsicBinOp Leq = ordering
-        intrinsicBinOp Greater = ordering
-        intrinsicBinOp Geq = ordering
+        intrinsicBinOp Less     = ordering
+        intrinsicBinOp Leq      = ordering
+        intrinsicBinOp Greater  = ordering
+        intrinsicBinOp Geq      = ordering
 
         ordering = IntrinsicPolyFun [ ([t,t], Bool) | t <- anyPrimType ]
 
@@ -904,6 +904,24 @@ qualName = QualName []
 -- | Create a type name name with no qualifiers from a 'VName'.
 typeName :: VName -> TypeName
 typeName = typeNameFromQualName . qualName
+
+progImports :: ProgBase f vn -> [FilePath]
+progImports (Prog decs) = concatMap decImports decs
+  where decImports (OpenDec x xs _) =
+          concatMap modExpImports $ x:xs
+        decImports (FunctorDec fb) =
+          modExpImports $ functorBody fb
+        decImports (StructDec sb) =
+          modExpImports $ structExp sb
+        decImports SigDec{} = []
+        decImports TypeDec{} = []
+        decImports ValDec{} = []
+
+        modExpImports ModVar{}              = []
+        modExpImports (ModImport f _)       = [f]
+        modExpImports (ModDecs ds _)        = concatMap decImports ds
+        modExpImports (ModApply _ me _ _)   = modExpImports me
+        modExpImports (ModAscript me _ _ _) = modExpImports me
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
@@ -936,6 +954,3 @@ type UncheckedFunBind = FunBindBase NoInfo Name
 
 -- | An Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name
-
--- | An Futhark program with no type annotations, but with headers.
-type UncheckedProgWithHeaders = ProgBaseWithHeaders NoInfo Name

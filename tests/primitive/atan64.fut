@@ -4,6 +4,6 @@
 -- input { 1f64 } output { 0.78539819f64 }
 -- input { -1f64 } output { -0.78539819f64 }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun main(x: f64): f64 = F64.atan x

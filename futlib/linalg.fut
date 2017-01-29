@@ -1,6 +1,6 @@
 -- Small library of linear algebra-ish operations.
 
-include futlib.numeric
+import "futlib/numeric"
 
 module type LINALG = {
   type t
