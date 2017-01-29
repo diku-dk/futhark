@@ -45,7 +45,7 @@
 -- 0.5782306456739441f64, 0.290580297318634f64, 0.14532974216231054f64]
 -- }
 
-include futlib.numeric
+import "futlib/numeric"
 
 fun analytic(t0: f64) (time: f64): f64 =
   20.0 + (t0 - 20.0) * F64.exp(-0.07*time)
