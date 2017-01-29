@@ -1,7 +1,7 @@
 -- ==
 -- tags { disable }
 module Vec3 = {
-    module F32 = {
+    module f32 = {
         type t = ( f32 , f32 , f32 )
         fun add(a: t , b: t): t =
           let (a1, a2, a3) = a

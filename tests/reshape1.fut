@@ -9,7 +9,7 @@
 import "futlib/numeric"
 
 fun intsqrt(x: i32): i32 =
-    i32(F32.sqrt(f32(x)))
+    i32(f32.sqrt(f32(x)))
 
 fun main (a: [n]i32): [][]i32 =
     reshape (intsqrt(n), intsqrt(n)) a

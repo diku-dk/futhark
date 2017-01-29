@@ -11,11 +11,11 @@ fun take_arrint (l: i32) (x: [][]i32): [][]i32 =
   then if (l <= (shape (x))[0])
   then let (v1, _) = split (l) (x) in
   v1
-  else concat (x) (replicate ((I32.abs (l) - (shape (x))[0])) (replicate ((shape (x))[1]) (0)))
+  else concat (x) (replicate ((i32.abs (l) - (shape (x))[0])) (replicate ((shape (x))[1]) (0)))
   else if (0 <= (l + (shape (x))[0]))
   then let (_, v2) = split ((l + (shape (x))[0])) (x) in
   v2
-  else concat (replicate ((I32.abs (l) - (shape (x))[0])) (replicate ((shape (x))[1]) (0))) (x)
+  else concat (replicate ((i32.abs (l) - (shape (x))[0])) (replicate ((shape (x))[1]) (0))) (x)
 fun reshape_int (l: i32) (x: []i32): []i32 =
   let roundUp = ((l + ((shape (x))[0] - 1)) / (shape (x))[0]) in
   let extend = reshape ((((shape (x))[0] * roundUp))) (replicate (roundUp) (x)) in

@@ -23,7 +23,7 @@ fun combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =
 fun mkPrices(md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
 	   md_drifts: [num_dates][num_und]f64, noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let e_rows = map (\(x: []f64): []f64  ->
-                      map F64.exp x
+                      map f64.exp x
                   ) (map combineVs (zip noises (md_vols) (md_drifts)))
   in  scan (\(x: []f64) (y: []f64): []f64  ->
               map (*) x y)

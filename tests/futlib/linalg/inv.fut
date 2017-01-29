@@ -4,7 +4,7 @@
 
 import "futlib/linalg"
 
-module F32LinAlg = LinAlg(F32)
+module f32linalg = linalg(f32)
 
 fun main(A: [n][n]f32): [n][n]f32 =
-  F32LinAlg.inv A
+  f32linalg.inv A

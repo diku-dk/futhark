@@ -1,6 +1,6 @@
 import "futlib/complex"
 
-module C = Complex(F32)
+module C = complex(f32)
 
 -- ==
 -- entry: test_add

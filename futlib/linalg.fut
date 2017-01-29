@@ -2,13 +2,13 @@
 
 import "futlib/numeric"
 
-module type LINALG = {
+module type linalg = {
   type t
 
   val dotprod: []t -> []t -> t
 }
 
-module LinAlg(T: NUMERIC): {
+module linalg(T: numeric): {
   type t = T.t
   val dotprod: []t -> []t -> t
   val matmul: [][]t -> [][]t -> [][]t

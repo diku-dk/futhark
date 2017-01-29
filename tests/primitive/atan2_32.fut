@@ -10,4 +10,4 @@
 
 import "futlib/numeric"
 
-fun main(x: f32, y: f32): f32 = F32.atan2 x y
+fun main(x: f32, y: f32): f32 = f32.atan2 x y

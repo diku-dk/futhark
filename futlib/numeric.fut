@@ -1,4 +1,4 @@
-module type NUMERIC = {
+module type numeric = {
   type t
 
   val +: t -> t -> t
@@ -15,7 +15,7 @@ module type NUMERIC = {
   val sgn: t -> i32
 }
 
-module type INTEGRAL = {
+module type integral = {
   type t
 
   val +: t -> t -> t
@@ -33,7 +33,7 @@ module type INTEGRAL = {
   val sgn: t -> i32
 }
 
-module type REAL = {
+module type real = {
   type t
 
   val +: t -> t -> t
@@ -54,7 +54,7 @@ module type REAL = {
   val sqrt: t -> t
 }
 
-module I8 = {
+module i8 = {
   type t = i8
 
   fun (x: i8) + (y: i8) = x Intrinsics.+ y
@@ -73,7 +73,7 @@ module I8 = {
   fun abs (x: i8) = Intrinsics.abs x
 }
 
-module I16 = {
+module i16 = {
   type t = i16
 
   fun (x: i16) + (y: i16) = x Intrinsics.+ y
@@ -92,7 +92,7 @@ module I16 = {
   fun abs (x: i16) = Intrinsics.abs x
 }
 
-module I32 = {
+module i32 = {
   type t = i32
 
   fun (x: i32) + (y: i32) = x Intrinsics.+ y
@@ -111,7 +111,7 @@ module I32 = {
   fun abs (x: i32) = Intrinsics.abs x
 }
 
-module I64 = {
+module i64 = {
   type t = i64
 
   fun (x: i64) + (y: i64) = x Intrinsics.+ y
@@ -206,7 +206,7 @@ module U64 = {
   fun abs (x: u64) = Intrinsics.abs x
 }
 
-module F32 = {
+module f32 = {
   type t = f32
 
   fun (x: f32) + (y: f32) = x Intrinsics.+ y
@@ -242,7 +242,7 @@ module F32 = {
   fun isnan (x: f32) = Intrinsics.isnan32 x
 }
 
-module F64 = {
+module f64 = {
   type t = f64
 
   fun (x: f64) + (y: f64) = x Intrinsics.+ y

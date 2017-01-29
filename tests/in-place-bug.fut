@@ -43,7 +43,7 @@ fun main(numX: i32, numY: i32, numT: i32, s0: f64, strike: f64, t: f64, alpha: f
     let (myDy, myDyy) = (empty([]f64), empty([]f64))
     let myResult = copy(empty([]f64))
     let myMuX  = replicate numY (replicate numX 0.0)
-    let myVarX = map (\(yj: f64): []f64  -> map F64.exp myX) myY
+    let myVarX = map (\(yj: f64): []f64  -> map f64.exp myX) myY
 
     -- explicitX
     let u = explicitMethod( myDx, myDxx, myMuX, myVarX, myResult )

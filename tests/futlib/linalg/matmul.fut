@@ -9,7 +9,7 @@
 
 import "futlib/linalg"
 
-module I32LinAlg = LinAlg(I32)
+module i32linalg = linalg(i32)
 
 fun main(x: [][]i32, y: [][]i32): [][]i32 =
-  I32LinAlg.matmul x y
+  i32linalg.matmul x y
