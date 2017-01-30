@@ -130,7 +130,7 @@ module i64 = {
   fun abs (x: i64) = Intrinsics.abs x
 }
 
-module U8 = {
+module u8 = {
   type t = u8
 
   fun (x: u8) + (y: u8) = x Intrinsics.+ y
@@ -149,7 +149,7 @@ module U8 = {
   fun abs (x: u8) = Intrinsics.abs x
 }
 
-module U16 = {
+module u16 = {
   type t = u16
 
   fun (x: u16) + (y: u16) = x Intrinsics.+ y
@@ -168,7 +168,7 @@ module U16 = {
   fun abs (x: u16) = Intrinsics.abs x
 }
 
-module U32 = {
+module u32 = {
   type t = u32
 
   fun (x: u32) + (y: u32) = x Intrinsics.+ y
@@ -187,7 +187,7 @@ module U32 = {
   fun abs (x: u32) = Intrinsics.abs x
 }
 
-module U64 = {
+module u64 = {
   type t = u64
 
   fun (x: u64) + (y: u64) = x Intrinsics.+ y
