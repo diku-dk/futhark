@@ -373,10 +373,14 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (ValSpec name params rettype _) =
     ppr name <+> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
+  ppr (IncludeSpec e _) =
+    text "include" <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigExpBase ty vn) where
   ppr (SigVar v _) = ppr v
   ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
+  ppr (SigWith s (TypeRef v td) _) =
+    ppr s <+> text "with" <+> ppr v <+> equals <+> ppr td
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
   ppr (SigBind name e _) =

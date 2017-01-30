@@ -975,6 +975,12 @@ checkSpecs (TypeSpec name loc : specs) =
     return (tscope <> scope,
             TypeSpec name' loc : specs')
 
+checkSpecs (IncludeSpec e loc : specs) = do
+  (e_scope, e') <- checkSigExp e
+  (scope, specs') <- local (e_scope<>) $ checkSpecs specs
+  return (e_scope <> scope,
+          IncludeSpec e' loc : specs')
+
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (Scope, SigExpBase Info VName)
 checkSigExp (SigVar name loc) = do
   (name', scope) <- lookupSig loc name
@@ -983,6 +989,12 @@ checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (scope, specs') <- checkSpecs specs
   return (scope, SigSpecs specs' loc)
+checkSigExp (SigWith s (TypeRef tname td) loc) = do
+  (s_scope, s') <- checkSigExp s
+  td' <- checkTypeDecl td
+  tname' <- local (s_scope<>) $ snd <$> checkQualName Type tname loc
+  s_scope' <- refineScope loc s_scope tname' $ unInfo $ expandedType td'
+  return (s_scope', SigWith s' (TypeRef tname' td') loc)
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (Scope, SigBindBase Info VName)
 checkSigBind (SigBind name e loc) = do
@@ -1058,6 +1070,10 @@ checkForDuplicateSpecs =
 
         f (TypeSpec name loc) =
           check Type name loc
+
+        f IncludeSpec{} =
+          return
+
 
 checkFunctorBind :: FunctorBindBase NoInfo Name -> TypeM (Scope, FunctorBindBase Info VName)
 checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
@@ -2112,7 +2128,7 @@ matchScopes scope sig loc = do
         | spec_t' == t ->
             return (name, (name', substituteTypes abs_subst_to_name spec_t))
         | otherwise ->
-            mismatchedType (baseName name) spec_t t
+            mismatchedType (baseName name) ([], spec_t) ([], t)
       Just (_, TypeAbs) ->
         Left $ TypeError loc $
         "Type abbreviation " ++ pretty (baseName name) ++ " = " ++ pretty spec_t ++
@@ -2134,12 +2150,13 @@ matchScopes scope sig loc = do
         | null spec_pts', toStructural t `subtypeOf` toStructural spec_t' ->
             return (name, (name', BoundV $ removeShapeAnnotations $ fromStruct impl_t'))
         | otherwise ->
-            mismatchedVal name (spec_pts', spec_t') t
+            mismatchedVal name (spec_pts', spec_t') ([], t)
       Just (name', BoundF (pts, ret))
         | and (zipWith subtypeOf (map toStructural pts) (map toStructural spec_pts')),
           toStructural ret `subtypeOf` toStructural spec_t' ->
             return (name, (name', BoundF (impl_pts', impl_t')))
-        | otherwise -> mismatchedVal (baseName name) (spec_pts', spec_t') (pts, ret)
+        | otherwise ->
+          mismatchedVal (baseName name) (spec_pts', spec_t') (pts, ret)
       Just (_, UnknownF{}) ->
         Left $ TypeError loc $ "Function " ++ pretty (baseName name) ++
         " missing a return type declaration."
@@ -2150,14 +2167,14 @@ matchScopes scope sig loc = do
 
       names = HM.filter isInSig $ envNameMap scope
       types = abbrs <> HM.fromList (zip abs_names $ repeat TypeAbs)
-      scope' = Scope { envVtable = vals
-                     , envTypeTable = types
-                     , envSigTable = mempty
-                     , envModTable = mempty
-                     , envNameMap = names
-                     , envImportTable = mempty
-                     }
-  return (scope',
+      res_scope = Scope { envVtable = vals
+                        , envTypeTable = types
+                        , envSigTable = mempty
+                        , envModTable = mempty
+                        , envNameMap = names
+                        , envImportTable = mempty
+                        }
+  return (res_scope,
           abs_name_substs <> abbr_name_substs <> val_substs)
   where missingType name =
           Left $ TypeError loc $
@@ -2169,11 +2186,11 @@ matchScopes scope sig loc = do
 
         mismatchedType name spec_t scope_t =
           Left $ TypeError loc $ "Type " ++ pretty name ++ " specified as " ++
-          pretty spec_t ++ " in signature, but " ++ pretty scope_t ++ " in structure."
+          ppFunType spec_t ++ " in signature, but " ++ ppFunType scope_t ++ " in structure."
 
         mismatchedVal name spec_t scope_t =
           Left $ TypeError loc $ "Value " ++ pretty name ++ " specified as type " ++
-          pretty spec_t ++ " in signature, but has " ++ pretty scope_t ++ " in structure."
+          ppFunType spec_t ++ " in signature, but has " ++ ppFunType scope_t ++ " in structure."
 
         findBinding :: (Scope -> HM.HashMap VName v)
                     -> Namespace -> Name
@@ -2185,10 +2202,13 @@ matchScopes scope sig loc = do
         isInSig x = baseName x `elem` sig_names
           where sig_names = map baseName $ HM.elems $ envNameMap sig
 
+        ppFunType (paramts, ret) =
+          intercalate " -> " $ map pretty $ paramts ++ [ret]
+
 substituteTypesInScope :: HM.HashMap VName StructType -> Scope -> Scope
 substituteTypesInScope substs scope =
   scope { envVtable    = HM.map subV $ envVtable scope
-        , envTypeTable = HM.map subT $ envTypeTable scope }
+        , envTypeTable = HM.mapWithKey subT $ envTypeTable scope }
   where subV (BoundV t) =
           BoundV $ fromStruct $ toStructural $
           substituteTypes substs $
@@ -2198,8 +2218,10 @@ substituteTypesInScope substs scope =
                   substituteTypes substs t)
         subV b = b
 
-        subT (TypeAbbr t) = TypeAbbr $ substituteTypes substs t
-        subT TypeAbs      = TypeAbs
+        subT name _
+          | Just t <- HM.lookup name substs = TypeAbbr t
+        subT _ (TypeAbbr t) = TypeAbbr $ substituteTypes substs t
+        subT _ TypeAbs      = TypeAbs
 
 substituteTypes :: HM.HashMap VName StructType -> StructType -> StructType
 substituteTypes substs (TypeVar v)
@@ -2292,3 +2314,18 @@ newNamesForScope orig_scope = do
         substituteInType :: HM.HashMap VName VName -> StructType -> StructType
         substituteInType substs = substituteTypes $
                                   HM.map (TypeVar . typeNameFromQualName . qualName) substs
+
+-- | Refine the given type name in the given scope.
+refineScope :: SrcLoc -> Scope -> QualName VName -> StructType -> TypeM Scope
+refineScope loc scope tname t =
+  -- tname must be an abstract type in scope.
+  case HM.lookup (qualLeaf tname) $ envTypeTable scope of
+    Nothing ->
+      bad $ TypeError loc $
+      pretty tname ++ " is not a known type in the module type."
+    Just TypeAbbr{} ->
+      bad $ TypeError loc $
+      pretty tname ++ " is not an abstract type in the module type."
+    Just TypeAbs ->
+      let subst = HM.singleton (qualLeaf tname) t
+      in return $ substituteTypesInScope subst scope

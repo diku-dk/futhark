@@ -107,6 +107,7 @@ keyword s =
     "fun"          -> FUN
     "for"          -> FOR
     "do"           -> DO
+    "with"         -> WITH
 
     "iota"         -> IOTA
     "shape"        -> SHAPE
@@ -270,6 +271,7 @@ data Token = ID Name
            | FUN
            | FOR
            | DO
+           | WITH
            | SHAPE
            | IOTA
            | REPLICATE

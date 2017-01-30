@@ -141,6 +141,7 @@ import Language.Futhark.Parser.Lexer
       ':'             { L $$ COLON }
       for             { L $$ FOR }
       do              { L $$ DO }
+      with            { L $$ WITH }
       iota            { L $$ IOTA }
       shape           { L $$ SHAPE }
       replicate       { L $$ REPLICATE }
@@ -231,8 +232,13 @@ Aliases : id ',' Aliases
 ;
 
 SigExp :: { SigExpBase f vn }
-        : QualName      { let (v, loc) = $1 in SigVar v loc }
-        | '{' Specs '}' { SigSpecs $2 $1 }
+        : QualName            { let (v, loc) = $1 in SigVar v loc }
+        | '{' Specs '}'       { SigSpecs $2 $1 }
+        | SigExp with TypeRef { SigWith $1 $3 $2 }
+        | '(' SigExp ')'      { $2 }
+
+TypeRef :: { TypeRefBase NoInfo Name }
+         : QualName '=' TypeExpDecl { TypeRef (fst $1) $3 }
 
 SigBind :: { SigBindBase f vn }
          : module type id '=' SigExp
@@ -247,6 +253,7 @@ ModExp :: { ModExpBase f vn }
           { ModApply (fst $1) $3 NoInfo (snd $1) }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
+        | '(' ModExp ')' { $2 }
 
 StructBind :: { StructBindBase f vn }
            : module id '=' ModExp
@@ -282,6 +289,8 @@ Spec :: { SpecBase NoInfo Name }
       | type id
         { let L loc (ID name) = $2
           in TypeSpec name loc }
+      | include SigExp
+        { IncludeSpec $2 $1 }
 ;
 
 DefaultDec :: { () }
@@ -367,13 +376,15 @@ TypeExp :: { UncheckedTypeExp }
          : '*' TypeExp             { TEUnique $2 $1 }
          | '[' DimDecl ']' TypeExp { TEArray $4 $2 $1 }
          | '(' ')'                 { TETuple [] $1 }
+         | '(' TypeExp ')'         { $2 }
          | '(' TypeExps ')'        { TETuple $2 $1 }
          | QualName                { TEVar (fst $1) (snd $1) }
 ;
 
 TypeExps :: { [UncheckedTypeExp] }
-TypeExps : TypeExp ',' TypeExps { $1 : $3 }
-         | TypeExp              { [$1] }
+TypeExps : TypeExp ',' TypeExp  { [$1, $3] }
+         | TypeExp ',' TypeExps { $1 : $3 }
+
 DimDecl :: { DimDecl Name }
         : id
           { let L _ (ID name) = $1
