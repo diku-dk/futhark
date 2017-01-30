@@ -310,11 +310,11 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                               alias_var = case bnd of
                                             BindInPlace _ b_al _ -> Just b_al
                                             BindVar -> createsAliasedArrOK e
-                              -- ^ For Sanity Purposes we treat cases such as:
-                              --   in-place: @let b2 <- b1 with [i] = e@ defers verification of b
-                              --             until the creation of @b1@ or recursively
-                              --   aliases:  @let b = rotate a@ defers versification of b
-                              --             until the creation of @a@ or recursively
+                              -- For Sanity Purposes we treat cases such as:
+                              -- in-place: @let b2 <- b1 with [i] = e@ defers verification of b
+                              --           until the creation of @b1@ or recursively
+                              -- aliases:  @let b = rotate a@ defers versification of b
+                              --           until the creation of @a@ or recursively
                           in  case (safe_2, safe_4, safe_5, alias_var) of
                                 (True, True, True, Nothing) ->
                                   -- great, new array creation point AND safety conditions
@@ -328,7 +328,7 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                                   -- postpone decision until b_al is verified
                                   let mem_info = Coalesced k mblk fv_subst
                                       info' = info { vartab = HM.insert b mem_info vtab }
-                                      -- ^ update the b forward substitution info as before
+                                      -- update the b forward substitution info as before
                                   in  case HM.lookup b_al (v2mem td_env) of
                                         Nothing -> (HM.delete mb a_acc, s_acc) -- remove from active
                                         Just (MemBlock b_al_tp b_al_shp m_b_al indfun_b_al) ->
@@ -382,15 +382,15 @@ mkCoalsHelper1FilterActive pat e v2mem_tab activeCoals_tab =
   let e_mems  = mapMaybe (`HM.lookup` v2mem_tab) $ HS.toList $ freeInExp e
       stm_mems= HS.fromList $ map (\(MemBlock _ _ mnm _) -> mnm) $
                 e_mems ++ map (\(_,mb,_)->mb) (getArrMemAssoc pat)
-      -- ^ get memory-block names that are used in the current stmt.
+      -- get memory-block names that are used in the current stmt.
       all_mems = stm_mems
       --trace ("COALESCING: for pattern "++pretty pat++", cond3 disables "++pretty (HS.toList stm_mems)) $ stm_mems
-      -- ^ BUG: take the aliasing transitive closure of @all_mems@
+      -- BUG: take the aliasing transitive closure of @all_mems@
 
   in  HM.filter (\etry -> null $ HS.intersection (alsmem etry) all_mems)
                 activeCoals_tab
-      -- ^ keep only the entries that do not overlap with the memory
-      --   blocks defined in @pat@ or used in expression @e@.
+      -- keep only the entries that do not overlap with the memory
+      -- blocks defined in @pat@ or used in expression @e@.
 
 
 -- |   Pattern matches a potentially coalesced statement and
