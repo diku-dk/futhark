@@ -13,6 +13,7 @@ module Futhark.Compiler
 where
 
 import Data.Monoid
+import Control.Exception
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Except
@@ -22,6 +23,7 @@ import Data.List
 import System.FilePath
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
+import System.IO.Error
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
@@ -120,8 +122,7 @@ readImport search_path steps name
       already_done <- gets $ HM.member name . alreadyImported
 
       unless already_done $ do
-        let name_with_ext = name <.> "fut"
-        (file_contents, file_name) <- readImportFile search_path name_with_ext
+        (file_contents, file_name) <- readImportFile search_path name
         prog <- case parseFuthark file_name file_contents of
           Left err -> throwError $ CompileError (T.pack $ show err) mempty
           Right prog -> return prog
@@ -144,12 +145,29 @@ readImport search_path steps name
                 , resultProgs     = prog' : resultProgs s
                 }
 
-readImportFile :: MonadIO m => SearchPath -> FilePath -> m (T.Text, FilePath)
-readImportFile (SearchPath dir) fp =
-  case lookup fp futlib of
-    Nothing -> do s <- liftIO $ T.readFile $ dir </> fp
-                  return (s, dir </> fp)
-    Just t  -> return (t, "[builtin]" </> fp)
+readImportFile :: (MonadError CompileError m, MonadIO m) =>
+                  SearchPath -> FilePath -> m (T.Text, FilePath)
+readImportFile (SearchPath dir) name = do
+  -- First we try to find a file of the given name in the search path,
+  -- then we look at the builtin library if we have to.
+  r <- liftIO $ (Right <$> T.readFile (dir </> name_with_ext)) `catch` couldNotRead
+  case (r, lookup name_with_ext futlib) of
+    (Right s, _)            -> return (s, dir </> name_with_ext)
+    (Left Nothing, Just t)  -> return (t, "[builtin]" </> name_with_ext)
+    (Left Nothing, Nothing) -> throwError $ CompileError not_found mempty
+    (Left (Just e), _)      -> throwError e
+  where name_with_ext = name <.> "fut"
+
+        couldNotRead e
+          | isDoesNotExistError e =
+              return $ Left Nothing
+          | otherwise             =
+              return $ Left $ Just $
+              CompileError (T.pack $ "Could not import " ++ show name ++ ": "
+                            ++ show e) mempty
+
+        not_found =
+          T.pack $ "Could not find import " ++ show name ++ " in path " ++ show dir ++ "."
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompileError m, MonadIO m) =>
