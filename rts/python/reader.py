@@ -115,7 +115,10 @@ def parse_int_signed(f):
     return s
 
 def read_int_trailer(f):
-  parse_specific_char(f, 'i')
+  if peek_char(f) == 'i':
+      parse_specific_char(f, 'i')
+  elif peek_char(f) == 'u':
+      parse_specific_char(f, 'u')
   while peek_char(f).isdigit():
     get_char(f)
 

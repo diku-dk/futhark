@@ -153,7 +153,7 @@ data MemEntry = MemEntry {
     , entryMemSpace :: Imp.Space
   }
 
-data ScalarEntry = ScalarEntry {
+newtype ScalarEntry = ScalarEntry {
     entryScalarType    :: PrimType
   }
 
@@ -306,43 +306,43 @@ fparamSizes fparam
   | otherwise = HS.fromList $ subExpVars $ arrayDims $ paramType fparam
 
 compileInParams :: ExplicitMemorish lore =>
-                   [FParam lore]
+                   [FParam lore] -> [EntryPointType]
                 -> ImpM lore op ([Imp.Param], [ArrayDecl], [Imp.ValueDecl])
-compileInParams params = do
+compileInParams params epts = do
   (inparams, arraydecls) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes params
       mkArg fparam =
         case (findArray $ paramName fparam, paramType fparam) of
           (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) ->
-            Just $ Imp.ArrayValue mem bt shape
+            Just $ \ept -> Imp.ArrayValue mem bt ept shape
           (_, Prim bt)
             | paramName fparam `HS.member` sizes ->
               Nothing
             | otherwise ->
-              Just $ Imp.ScalarValue bt $ paramName fparam
+              Just $ \ept -> Imp.ScalarValue bt ept (paramName fparam)
           _ ->
             Nothing
-      args = mapMaybe mkArg params
+      args = zipWith ($) (mapMaybe mkArg params) epts
   return (inparams, arraydecls, args)
   where isArrayDecl x (ArrayDecl y _ _) = x == y
 
 compileOutParams :: ExplicitMemorish lore =>
-                    RetType lore
+                    RetType lore -> [EntryPointType]
                  -> ImpM lore op ([Imp.ValueDecl], [Imp.Param], Destination)
-compileOutParams rts = do
+compileOutParams rts epts = do
   ((valdecls, dests), outparams) <-
-    runWriterT $ evalStateT (mapAndUnzipM mkParam rts) (HM.empty, HM.empty)
+    runWriterT $ evalStateT (mapAndUnzipM (uncurry mkParam) $ zip rts epts) (HM.empty, HM.empty)
   return (valdecls, outparams, Destination dests)
   where imp = lift . lift
 
-        mkParam ReturnsMemory{} =
+        mkParam ReturnsMemory{} _ =
           throwError "Functions may not explicitly return memory blocks."
-        mkParam (ReturnsScalar t) = do
+        mkParam (ReturnsScalar t) ept = do
           out <- imp $ newVName "scalar_out"
           tell [Imp.ScalarParam out t]
-          return (Imp.ScalarValue t out, ScalarDestination out)
-        mkParam (ReturnsArray t shape _ lore) = do
+          return (Imp.ScalarValue t ept out, ScalarDestination out)
+        mkParam (ReturnsArray t shape _ lore) ept = do
           space <- asks envDefaultSpace
           (memout, memdestf) <- case lore of
             ReturnsNewBlock x _ -> do
@@ -358,7 +358,7 @@ compileOutParams rts = do
           (resultshape, destresultshape) <-
             mapAndUnzipM inspectExtDimSize $ extShapeDims shape
           let memdest = memdestf resultshape
-          return (Imp.ArrayValue memout t resultshape,
+          return (Imp.ArrayValue memout t ept resultshape,
                   ArrayDestination memdest destresultshape)
 
         inspectExtDimSize (Ext x) = do
@@ -396,16 +396,18 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
     runImpM compile ops ds src
   return (src',
           (fname,
-           Imp.Function entry outparams inparams body' results args))
-  where compile = do
-          (inparams, arraydecls, args) <- compileInParams params
-          (results, outparams, dests) <- compileOutParams rettype
+           Imp.Function (isJust entry) outparams inparams body' results args))
+  where params_entry = fromMaybe (repeat TypeDirect) $ fst <$> entry
+        ret_entry = fromMaybe (repeat TypeDirect) $ snd <$> entry
+        compile = do
+          (inparams, arraydecls, args) <- compileInParams params params_entry
+          (results, outparams, dests) <- compileOutParams rettype ret_entry
           withParams inparams $
             withArrays arraydecls $
             compileBody dests body
           return (outparams, inparams, results, args)
 
-compileBody :: ExplicitMemorish lore => Destination -> Body lore -> ImpM lore op ()
+compileBody :: Destination -> Body lore -> ImpM lore op ()
 compileBody dest body = do
   cb <- asks envBodyCompiler
   cb dest body
@@ -446,8 +448,7 @@ compileStms (Let pat _ e:bs) m =
     dest <- destinationFromPattern pat
     compileExp dest e $ compileStms bs m
 
-compileExp :: ExplicitMemorish lore =>
-              Destination -> Exp lore -> ImpM lore op a -> ImpM lore op a
+compileExp :: Destination -> Exp lore -> ImpM lore op a -> ImpM lore op a
 compileExp targets e m = do
   ec <- asks envExpCompiler
   ec targets e

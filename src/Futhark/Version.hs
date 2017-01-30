@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 -- | This module exports version information about the Futhark
 -- compiler.
 module Futhark.Version
@@ -8,6 +9,7 @@ module Futhark.Version
        where
 
 import Data.Version
+import Development.GitRev
 
 import qualified Paths_futhark
 
@@ -18,4 +20,15 @@ version = Paths_futhark.version
 
 -- | The version of Futhark that we are using, as a 'String'
 versionString :: String
-versionString = showVersion version
+versionString = showVersion version ++ "\n" ++ gitversion
+  where
+    gitversion = concat ["git: "
+                        , branch
+                        , take 7 $(gitHash)
+                        , " (", $(gitCommitDate), ")"
+                        , dirty
+                        ]
+    branch | $(gitBranch) == "master" = ""
+           | otherwise = $(gitBranch) ++ " @ "
+    dirty | $(gitDirty) = " [modified]"
+          | otherwise   = ""

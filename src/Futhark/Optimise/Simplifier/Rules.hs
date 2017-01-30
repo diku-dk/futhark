@@ -35,7 +35,7 @@ import Futhark.Util
 
 import Prelude hiding (all)
 
-topDownRules :: (MonadBinder m, LocalScope (Lore m) m) => TopDownRules m
+topDownRules :: MonadBinder m => TopDownRules m
 topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyClosedFormLoop
                , simplifKnownIterationLoop
@@ -76,7 +76,7 @@ bottomUpRules = [ removeRedundantMergeVariables
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
+standardRules :: MonadBinder m => RuleBook m
 standardRules = RuleBook topDownRules bottomUpRules
 
 -- This next one is tricky - it's easy enough to determine that some
@@ -277,6 +277,11 @@ simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
 simplifKnownIterationLoop _ (Let pat _
                                 (DoLoop ctx val
                                  (ForLoop i it (Constant iters)) body))
+  | zeroIsh iters = do
+      let bindResult p r = letBindNames' [patElemName p] $ BasicOp $ SubExp r
+      zipWithM_ bindResult (patternContextElements pat) (map snd ctx)
+      zipWithM_ bindResult (patternValueElements pat) (map snd val)
+
   | oneIsh iters = do
   forM_ (ctx++val) $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ BasicOp $ SubExp mergeinit
@@ -550,7 +555,7 @@ simplifyIndexing :: MonadBinder m =>
 simplifyIndexing vtable seType ocs idd inds consuming =
   case asBasicOp =<< defOf idd of
     _ | Just t <- seType (Var idd),
-        inds == map (DimSlice (constant (0::Int))) (arrayDims t) ->
+        inds == fullSlice t [] ->
           Just $ pure $ SubExpResult $ Var idd
 
     Nothing -> Nothing
@@ -565,6 +570,14 @@ simplifyIndexing vtable seType ocs idd inds consuming =
           ConvOpExp (SExt from_it to_it) (primExpFromSubExp (IntType from_it) ii)
           * primExpFromSubExp (IntType to_it) s
           + primExpFromSubExp (IntType to_it) x
+      | [DimSlice i_offset i_n i_stride] <- inds ->
+          Just $ do
+            i_offset' <- letSubExp "iota_offset" $
+                         BasicOp $ BinOp (Add Int32) x i_offset
+            i_stride' <- letSubExp "iota_offset" $
+                         BasicOp $ BinOp (Mul Int32) s i_stride
+            fmap SubExpResult $ letSubExp "slice_iota" $
+              BasicOp $ Iota i_n i_offset' i_stride' to_it
 
     Just (Rotate cs offsets a) -> Just $ do
       dims <- arrayDims <$> lookupType a
@@ -573,19 +586,21 @@ simplifyIndexing vtable seType ocs idd inds consuming =
             letSubExp "rot_i" (BasicOp $ BinOp (SMod Int32) i_m_o d)
           adjust (DimFix i, o, d) =
             DimFix <$> adjustI i o d
-          adjust (DimSlice i n, o, d) =
-            DimSlice <$> adjustI i o d <*> pure n
+          adjust (DimSlice i n s, o, d) =
+            DimSlice <$> adjustI i o d <*> pure n <*> pure s
       IndexResult (ocs<>cs) a <$> mapM adjust (zip3 inds offsets dims)
 
     Just (Index cs aa ais) ->
       Just $ fmap (IndexResult (ocs<>cs) aa) $ do
       let adjust (DimFix j:js') is' = (DimFix j:) <$> adjust js' is'
-          adjust (DimSlice j _:js') (DimFix i:is') = do
-            j_p_i <- letSubExp "j_p_i" $ BasicOp $ BinOp (Add Int32) j i
-            (DimFix j_p_i:) <$> adjust js' is'
-          adjust (DimSlice j _:js') (DimSlice i n:is') = do
-            j_p_i <- letSubExp "j_p_i" $ BasicOp $ BinOp (Add Int32) j i
-            (DimSlice j_p_i n:) <$> adjust js' is'
+          adjust (DimSlice j _ s:js') (DimFix i:is') = do
+            i_t_s <- letSubExp "j_t_s" $ BasicOp $ BinOp (Mul Int32) i s
+            j_p_i_t_s <- letSubExp "j_p_i_t_s" $ BasicOp $ BinOp (Add Int32) j i_t_s
+            (DimFix j_p_i_t_s:) <$> adjust js' is'
+          adjust (DimSlice j _ s0:js') (DimSlice i n s1:is') = do
+            s0_t_i <- letSubExp "s0_t_i" $ BasicOp $ BinOp (Mul Int32) s0 i
+            j_p_s0_t_i <- letSubExp "j_p_s0_t_i" $ BasicOp $ BinOp (Add Int32) j s0_t_i
+            (DimSlice j_p_s0_t_i n s1:) <$> adjust js' is'
           adjust _ _ = return []
       adjust ais inds
 
@@ -594,7 +609,7 @@ simplifyIndexing vtable seType ocs idd inds consuming =
       | DimFix{}:is' <- inds, not consuming -> Just $ pure $ IndexResult ocs vv is'
 
     Just (Replicate (Shape [_]) val@(Constant _))
-      | [_] <- inds, not consuming -> Just $ pure $ SubExpResult val
+      | [DimFix{}] <- inds, not consuming -> Just $ pure $ SubExpResult val
 
     Just (Replicate (Shape ds) v)
       | (ds_inds, rest_inds) <- splitAt (length ds) inds,
@@ -604,7 +619,7 @@ simplifyIndexing vtable seType ocs idd inds consuming =
           arr <- letExp "smaller_replicate" $ BasicOp $ Replicate (Shape ds') v
           return $ IndexResult ocs arr $ ds_inds' ++ rest_inds
       where index DimFix{} = Nothing
-            index (DimSlice _ n) = Just (n, DimSlice (constant (0::Int32)) n)
+            index (DimSlice _ n s) = Just (n, DimSlice (constant (0::Int32)) n s)
 
     Just (Rearrange cs perm src)
        | rearrangeReach perm <= length (takeWhile isIndex inds) ->

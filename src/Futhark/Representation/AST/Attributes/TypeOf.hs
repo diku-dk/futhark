@@ -90,8 +90,8 @@ primOpType (Index _ ident slice) =
   result <$> lookupType ident
   where result t = [Prim (elemType t) `arrayOfShape` shape]
         shape = Shape $ mapMaybe dimSize slice
-        dimSize (DimSlice _ d) = Just d
-        dimSize DimFix{} = Nothing
+        dimSize (DimSlice _ d _) = Just d
+        dimSize DimFix{}         = Nothing
 primOpType (Iota n _ _ et) =
   pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
 primOpType (Replicate (Shape []) e) =
@@ -129,10 +129,7 @@ primOpType (Partition _ n _ arrays) =
 
 
 -- | The type of an expression.
-expExtType :: (HasScope lore m,
-               IsRetType (RetType lore),
-               Typed (FParamAttr lore),
-               TypedOp (Op lore)) =>
+expExtType :: (HasScope lore m, TypedOp (Op lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
@@ -161,7 +158,7 @@ instance Annotations lore => HasScope lore (FeelBad lore) where
   askScope = pure mempty
 
 -- | The type of a body.
-bodyExtType :: (Annotations lore, HasScope lore m, Monad m) =>
+bodyExtType :: (HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
   existentialiseExtTypes bound . staticShapes <$>
@@ -181,7 +178,7 @@ valueShapeContext rettype values =
 subExpShapeContext :: HasScope t m =>
                       [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
-  extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
+  extractShapeContext rettype <$> traverse (fmap arrayDims . subExpType) ses
 
 -- | A loop returns not only its value merge parameters, but may also
 -- have an existential context.  Thus, @loopResult ctxmergeparams

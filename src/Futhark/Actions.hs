@@ -13,6 +13,8 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List
+import Data.Maybe
+import Data.Word
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.Exit (exitWith, ExitCode(..))
@@ -33,6 +35,7 @@ import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
+import Futhark.Util.Pretty (text, ppr, prettyDoc)
 
 printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
@@ -41,12 +44,14 @@ printAction =
          , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
          }
 
-interpretAction :: Show error => (FilePath -> T.Text -> Either error [Value])
+interpretAction :: Show error =>
+                   (FilePath -> T.Text -> Either error [Value])
+                -> Name
                 -> Action SOACS
-interpretAction parser =
+interpretAction parser entry =
   Action { actionName = "Interpret"
          , actionDescription = "Run the program via an interpreter."
-         , actionProcedure = liftIO . interpret parser
+         , actionProcedure = liftIO . interpret parser entry
          }
 
 rangeAction :: (Attributes lore, CanBeRanged (Op lore)) => Action lore
@@ -83,21 +88,33 @@ kernelImpCodeGenAction =
 
 interpret :: Show error =>
              (FilePath -> T.Text -> Either error [Value])
-          -> Prog SOACS -> IO ()
-interpret parseValues prog =
-  case funDefByName defaultEntryPoint prog of
+          -> Name -> Prog SOACS -> IO ()
+interpret parseValues entry prog =
+  case funDefByName entry prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
-    Just _ -> do
+    Just fundef -> do
       parseres <- fmap (parseValues "<stdin>") T.getContents
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs
-      case runFunWithShapes defaultEntryPoint args prog of
-        Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
-                       exitWith $ ExitFailure 2
-        Right val  -> putStrLn $ ppOutput val
-  where ppOutput vs = intercalate "\n" $ map pretty vs
+      case runFunWithShapes entry args prog of
+        Left err  -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
+                        exitWith $ ExitFailure 2
+        Right val -> putStrLn $ ppOutput val $
+                     fromMaybe (repeat TypeDirect) $ snd <$> funDefEntryPoint fundef
+  where ppOutput vs epts = intercalate "\n" $ zipWith prettyRetVal epts vs
+        prettyRetVal ept v = prettyDoc 80 $ ppArray (prettyPrim ept) v
+        prettyPrim TypeUnsigned (IntValue (Int8Value v))  =
+          text $ show (fromIntegral v :: Word8) ++ "u8"
+        prettyPrim TypeUnsigned (IntValue (Int16Value v)) =
+          text $ show (fromIntegral v :: Word16) ++ "u16"
+        prettyPrim TypeUnsigned (IntValue (Int32Value v)) =
+          text $ show (fromIntegral v :: Word32) ++ "u32"
+        prettyPrim TypeUnsigned (IntValue (Int64Value v)) =
+          text $ show (fromIntegral v :: Word64) ++ "u64"
+        prettyPrim _ v =
+          ppr v
 
 memoryAction :: Action ExplicitMemory --C.O.
 memoryAction =

@@ -358,7 +358,7 @@ localVtable f m = do
 enterLoop :: SimplifiableLore lore => SimpleM lore a -> SimpleM lore a
 enterLoop = enterBody . localVtable ST.deepen
 
-enterBody :: SimplifiableLore lore => SimpleM lore a -> SimpleM lore a
+enterBody :: SimpleM lore a -> SimpleM lore a
 enterBody = censorUsage UT.leftScope
 
 bindFParams :: SimplifiableLore lore =>
@@ -440,7 +440,7 @@ blockUnhoistedDeps = snd . mapAccumL block HS.empty
           | otherwise =
             (blocked, Right need)
 
-provides :: Attributes lore => Stm lore -> [VName]
+provides :: Stm lore -> [VName]
 provides = patternNames . bindingPattern
 
 requires :: Attributes lore => Stm lore -> Names
@@ -620,7 +620,7 @@ inspectStm bnd = do
     Just newbnds -> changed >> mapM_ inspectStm newbnds
     Nothing      -> addStm bnd
 
-simplifyOp :: SimplifiableLore lore => Op lore -> SimpleM lore (Op (Wise lore))
+simplifyOp :: Op lore -> SimpleM lore (Op (Wise lore))
 simplifyOp op = do f <- asks $ simplifyOpS . fst
                    f op
 
@@ -789,8 +789,8 @@ instance Simplifiable (TypeBase Shape u) where
     return $ Prim bt
 
 instance Simplifiable d => Simplifiable (DimIndex d) where
-  simplify (DimFix i) = DimFix <$> simplify i
-  simplify (DimSlice i n) = DimSlice <$> simplify i <*> simplify n
+  simplify (DimFix i)       = DimFix <$> simplify i
+  simplify (DimSlice i n s) = DimSlice <$> simplify i <*> simplify n <*> simplify s
 
 simplifyLambda :: SimplifiableLore lore =>
                   Lambda lore

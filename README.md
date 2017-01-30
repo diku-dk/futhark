@@ -57,6 +57,6 @@ do not require deep knowledge of the code base.
 Testing
 =======
 
-Run the `data/runtests.sh` script to check how well we're doing.  Use
-`data/runtests.sh -t` if you're in a hurry and only want the test
-suite to do type checking.
+Run the `futhark-test tests` to check how well we're doing.  Use
+`futhark-test -t` if you're in a hurry and only want to check that all
+the tests compile.

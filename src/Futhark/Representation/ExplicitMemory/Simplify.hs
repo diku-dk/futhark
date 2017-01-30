@@ -88,20 +88,17 @@ blockers = Engine.HoistBlockers {
 
 
 callKernelRules :: (MonadBinder m,
-                        Op (Lore m) ~ MemOp inner,
-                        LetAttr (Lore m) ~ (VarWisdom, MemBound u),
-                        Lore m ~ Wise lore,
-                        LocalScope (Wise lore) m,
-                        ExplicitMemorish lore) => RuleBook m
+                    LetAttr (Lore m) ~ (VarWisdom, MemBound u),
+                    Lore m ~ Wise lore,
+                    ExplicitMemorish lore) => RuleBook m
 callKernelRules = standardRules <>
                   RuleBook [copyCopyToCopy] []
 
 inKernelRules :: (MonadBinder m,
-                        Op (Lore m) ~ MemOp inner,
-                        LetAttr (Lore m) ~ (VarWisdom, MemBound u),
-                        Lore m ~ Wise lore,
-                        LocalScope (Wise lore) m,
-                        ExplicitMemorish lore) => RuleBook m
+                  LetAttr (Lore m) ~ (VarWisdom, MemBound u),
+                  OpWithWisdom (Op lore) ~ MemOp inner,
+                  Lore m ~ Wise lore,
+                  ExplicitMemorish lore) => RuleBook m
 inKernelRules = standardRules <>
                 RuleBook [copyCopyToCopy, unExistentialiseMemory] []
 

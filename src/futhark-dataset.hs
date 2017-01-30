@@ -8,6 +8,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State
 import Data.Maybe
+import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Data.Word
 import qualified Data.Text as T
@@ -18,7 +19,7 @@ import System.Console.GetOpt
 import System.Random
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes (UncheckedUserType)
+import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 
@@ -108,15 +109,16 @@ data SimpleType = SimpleArray SimpleType Int
                 | SimplePrim PrimType
                   deriving (Show)
 
-toSimpleType :: UncheckedUserType -> Either String SimpleType
-toSimpleType (UserPrim t _) = Right $ SimplePrim t
-toSimpleType UserTuple{} = Left "Cannot handle tuples yet."
-toSimpleType (UserUnique t _) = toSimpleType t
-toSimpleType (UserArray t d _) =
+toSimpleType :: UncheckedTypeExp -> Either String SimpleType
+toSimpleType TETuple{} = Left "Cannot handle tuples yet."
+toSimpleType (TEUnique t _) = toSimpleType t
+toSimpleType (TEArray t d _) =
   SimpleArray <$> toSimpleType t <*> constantDim d
   where constantDim (ConstDim k) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
-toSimpleType (UserTypeAlias v _) =
+toSimpleType (TEVar (QualName [] v) _)
+  | Just t <- HM.lookup v namesToPrimTypes = Right $ SimplePrim t
+toSimpleType (TEVar v _) =
   Left $ "Unknown type " ++ pretty v
 
 data SimpleValue = SimpleArrayValue [SimpleValue]

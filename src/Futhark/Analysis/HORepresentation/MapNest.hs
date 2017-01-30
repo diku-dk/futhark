@@ -48,7 +48,7 @@ typeOf (MapNest _ w lam [] _) =
 typeOf (MapNest _ w _ (nest:_) _) =
   map (`arrayOfRow` w) $ nestingReturnType nest
 
-params :: Annotations lore => MapNest lore -> [VName]
+params :: MapNest lore -> [VName]
 params (MapNest _ _ lam [] _)       =
   map paramName $ lambdaParams lam
 params (MapNest _ _ _ (nest:_) _) =

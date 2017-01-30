@@ -465,14 +465,14 @@ readParamFromLocalMemory index i param (l_mem, _)
   where i' = i * Imp.LeafExp (Imp.SizeOf bt) int32
         bt = elemType $ paramType param
 
-computeThreadChunkSize :: Commutativity
-                       -> Imp.Exp
+computeThreadChunkSize :: SplitOrdering
                        -> Imp.Exp
                        -> Imp.Count Imp.Elements
                        -> Imp.Count Imp.Elements
                        -> VName
                        -> ImpGen.ImpM lore op ()
-computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var = do
+  stride' <- ImpGen.compileSubExp stride
   remaining_elements <- newVName "remaining_elements"
   ImpGen.emit $
     Imp.DeclareScalar remaining_elements int32
@@ -480,7 +480,7 @@ computeThreadChunkSize Commutative thread_index num_threads elements_per_thread 
     Imp.SetScalar remaining_elements $
     (Imp.innerExp num_elements - thread_index)
     `quotRoundingUp`
-    num_threads
+    stride'
   ImpGen.emit $
     Imp.If (Imp.CmpOpExp (CmpSlt Int32)
             (Imp.innerExp elements_per_thread)
@@ -488,7 +488,7 @@ computeThreadChunkSize Commutative thread_index num_threads elements_per_thread 
     (Imp.SetScalar chunk_var (Imp.innerExp elements_per_thread))
     (Imp.SetScalar chunk_var (Imp.var remaining_elements int32))
 
-computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
   starting_point <- newVName "starting_point"
   remaining_elements <- newVName "remaining_elements"
 
@@ -546,8 +546,10 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
   scan_y_dest <- ImpGen.destinationFromParams y_params
 
   -- Set initial y values
-  zipWithM_ (readParamFromLocalMemory scan_lam_i $ Imp.var local_id int32)
-    y_params acc_local_mem
+  read_my_initial <- ImpGen.collect $
+                     zipWithM_ (readParamFromLocalMemory scan_lam_i $ Imp.var local_id int32)
+                     y_params acc_local_mem
+  ImpGen.emit $ Imp.If active read_my_initial mempty
 
   op_to_y <- ImpGen.collect $ ImpGen.compileBody scan_y_dest $ lambdaBody scan_lam
   write_operation_result <-
@@ -578,7 +580,7 @@ data KernelConstants = KernelConstants
                        , kernelLocalThreadId :: VName
                        , kernelGroupId :: VName
                        , kernelGroupSize :: Imp.DimSize
-                       , kernelNumThreads :: Imp.DimSize
+                       , _kernelNumThreads :: Imp.DimSize
                        , kernelWaveSize :: Imp.DimSize
                        , kernelDimensions :: [(VName, Imp.Exp)]
                        , kernelThreadActive :: Imp.Exp
@@ -660,20 +662,12 @@ groupStmsByGuard constants bnds =
 compileKernelExp :: KernelConstants -> ImpGen.Destination -> KernelExp InKernel
                  -> InKernelGen ()
 
-compileKernelExp constants dest (SplitArray o w i max_is elems_per_thread _arrs)
-  | ImpGen.Destination (ImpGen.ArrayDestination _ (Just size:_):_) <- dest =
-      compileKernelExp constants (ImpGen.Destination [ImpGen.ScalarDestination size]) $
-      SplitSpace o w i max_is elems_per_thread
-
-compileKernelExp _ dest (SplitSpace o w i max_is elems_per_thread)
+compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
   | ImpGen.Destination [ImpGen.ScalarDestination size] <- dest = do
       num_elements <- Imp.elements <$> ImpGen.compileSubExp w
       i' <- ImpGen.compileSubExp i
-      max_is' <- ImpGen.compileSubExp max_is
       elems_per_thread' <- Imp.elements <$> ImpGen.compileSubExp elems_per_thread
-      computeThreadChunkSize comm i' max_is' elems_per_thread' num_elements size
-        where comm = case o of Disorder -> Commutative
-                               InOrder -> Noncommutative
+      computeThreadChunkSize o i' elems_per_thread' num_elements size
 
 compileKernelExp constants dest (Combine cspace ts active body)
   | Just dest' <- ImpGen.Destination <$> zipWithM index ts (ImpGen.valueDestinations dest) = do
@@ -693,8 +687,9 @@ compileKernelExp constants dest (Combine cspace ts active body)
                    shape
               index _ _ = Nothing
 
-compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) = do
+compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) = do
   skip_waves <- newVName "skip_waves"
+  w' <- ImpGen.compileSubExp w
 
   let local_tid = kernelLocalThreadId constants
       (_nes, arrs) = unzip input
@@ -731,16 +726,21 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
         wave_id = Imp.var local_tid int32 `quot` wave_size
         in_wave_id = Imp.var local_tid int32 - wave_id * wave_size
         num_waves = (group_size + wave_size - 1) `quot` wave_size
+        arg_in_bounds = Imp.CmpOpExp (CmpSlt Int32)
+                        (Imp.BinOpExp (Add Int32)
+                          (Imp.var local_tid int32)
+                          (Imp.var (paramName other_index_param) int32))
+                        w'
 
         doing_in_wave_reductions =
-                  Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size
+          Imp.CmpOpExp (CmpSlt Int32) (Imp.var offset int32) wave_size
         apply_in_in_wave_iteration =
           Imp.CmpOpExp (CmpEq int32)
           (Imp.BinOpExp (And Int32) in_wave_id (2 * Imp.var offset int32 - 1)) 0
         in_wave_reductions =
           Imp.SetScalar offset 1 <>
           Imp.While doing_in_wave_reductions
-            (Imp.If apply_in_in_wave_iteration
+            (Imp.If (Imp.BinOpExp LogAnd arg_in_bounds apply_in_in_wave_iteration)
              in_wave_reduce mempty <>
              Imp.SetScalar offset (Imp.var offset int32 * 2))
 
@@ -781,8 +781,9 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) 
           | otherwise =
               return ()
 
-compileKernelExp constants _ (GroupScan _ lam input) = do
+compileKernelExp constants _ (GroupScan w lam input) = do
   renamed_lam <- renameLambda lam
+  w' <- ImpGen.compileSubExp w
 
   let local_tid = kernelLocalThreadId constants
       (_nes, arrs) = unzip input
@@ -813,8 +814,9 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
         block_id = Imp.var local_tid int32 `quot` block_size
         in_block_id = Imp.var local_tid int32 - block_id * block_size
         doInBlockScan active = inBlockScan simd_width block_size active local_tid acc_local_mem
+        lid_in_bounds = Imp.CmpOpExp (CmpSlt Int32) (Imp.var local_tid int32) w'
 
-    doInBlockScan (ValueExp (BoolValue True)) lam
+    doInBlockScan lid_in_bounds lam
     ImpGen.emit $ Imp.Op Imp.Barrier
 
     pack_block_results <-
@@ -825,14 +827,14 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
           Imp.CmpOpExp (CmpEq int32) in_block_id $ block_size - 1
     ImpGen.comment
       "last thread of block 'i' writes its result to offset 'i'" $
-      ImpGen.emit $ Imp.If last_in_block pack_block_results mempty
+      ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd last_in_block lid_in_bounds) pack_block_results mempty
 
     ImpGen.emit $ Imp.Op Imp.Barrier
 
     let is_first_block = Imp.CmpOpExp (CmpEq int32) block_id 0
     ImpGen.comment
       "scan the first block, after which offset 'i' contains carry-in for warp 'i+1'" $
-      doInBlockScan is_first_block renamed_lam
+      doInBlockScan (Imp.BinOpExp LogAnd is_first_block lid_in_bounds) renamed_lam
 
     ImpGen.emit $ Imp.Op Imp.Barrier
 
@@ -848,7 +850,9 @@ compileKernelExp constants _ (GroupScan _ lam input) = do
       zipWithM_ (writeParamToLocalMemory $ Imp.var local_tid int32) acc_local_mem y_params
 
     ImpGen.comment "carry-in for every block except the first" $
-      ImpGen.emit $ Imp.If is_first_block mempty $
+      ImpGen.emit $ Imp.If (Imp.BinOpExp LogOr
+                             is_first_block
+                             (Imp.UnOpExp Not lid_in_bounds)) mempty $
       Imp.Comment "read operands" read_carry_in <>
       Imp.Comment "perform operation" op_to_y <>
       Imp.Comment "write final result" write_final_result
@@ -978,22 +982,26 @@ compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   ImpGen.emit $ Imp.If (kernelThreadActive constants)
     write_result mempty
 
-compileKernelResult constants dest (ConcatReturns InOrder _ per_thread_elems what) = do
+compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
-  let dest_loc_offset = ImpGen.offsetArray dest_loc $
-                        primExpFromSubExp int32 per_thread_elems *
-                        ImpGen.varIndex (kernelGlobalThreadId constants)
+  let dest_loc_offset = ImpGen.offsetArray dest_loc offset
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
   ImpGen.copyDWIMDest dest' [] (Var what) []
+  where offset = case moffset of
+                   Nothing -> primExpFromSubExp int32 per_thread_elems *
+                              ImpGen.varIndex (kernelGlobalThreadId constants)
+                   Just se -> primExpFromSubExp int32 se
 
-compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
+compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
   let dest_loc' = ImpGen.strideArray
-                  (ImpGen.offsetArray dest_loc $
-                   ImpGen.varIndex (kernelGlobalThreadId constants)) $
-                  ImpGen.dimSizeToPrimExp (kernelNumThreads constants)
+                  (ImpGen.offsetArray dest_loc offset) $
+                  primExpFromSubExp int32 stride
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
   ImpGen.copyDWIMDest dest' [] (Var what) []
+  where offset = case moffset of
+                   Nothing -> ImpGen.varIndex (kernelGlobalThreadId constants)
+                   Just se -> primExpFromSubExp int32 se
 
 compileKernelResult constants dest (WriteReturn rw _arr i e) = do
   i' <- ImpGen.compileSubExp i
@@ -1025,23 +1033,28 @@ isActive limit = case actives of
 setSpaceIndices :: KernelSpace -> InKernelGen ()
 setSpaceIndices space =
   case spaceStructure space of
-    FlatSpace is_and_dims -> do
-      let (is, dims) = unzip is_and_dims
-      dims' <- mapM ImpGen.compileSubExp dims
-      let index_expressions = unflattenIndex dims' $ Imp.var global_tid int32
-      forM_ (zip is index_expressions) $ \(i, x) ->
-        ImpGen.emit $ Imp.SetScalar i x
-    NestedSpace is_and_dims -> do
+    FlatThreadSpace is_and_dims ->
+      flatSpaceWith gtid is_and_dims
+    FlatGroupSpace is_and_dims ->
+      flatSpaceWith gid is_and_dims
+    NestedThreadSpace is_and_dims -> do
       let (gtids, gdims, ltids, ldims) = unzip4 is_and_dims
       gdims' <- mapM ImpGen.compileSubExp gdims
       ldims' <- mapM ImpGen.compileSubExp ldims
-      let (gtid_es, ltid_es) = unzip $ unflattenNestedIndex gdims' ldims' $
-                               Imp.var global_tid int32
+      let (gtid_es, ltid_es) = unzip $ unflattenNestedIndex gdims' ldims' gtid
       forM_ (zip gtids gtid_es) $ \(i,e) ->
         ImpGen.emit $ Imp.SetScalar i e
       forM_ (zip ltids ltid_es) $ \(i,e) ->
         ImpGen.emit $ Imp.SetScalar i e
-  where global_tid = spaceGlobalId space
+  where gtid = Imp.var (spaceGlobalId space) int32
+        gid = Imp.var (spaceGroupId space) int32
+
+        flatSpaceWith base is_and_dims = do
+          let (is, dims) = unzip is_and_dims
+          dims' <- mapM ImpGen.compileSubExp dims
+          let index_expressions = unflattenIndex dims' base
+          forM_ (zip is index_expressions) $ \(i, x) ->
+            ImpGen.emit $ Imp.SetScalar i x
 
 unflattenNestedIndex :: IntegralExp num => [num] -> [num] -> num -> [(num,num)]
 unflattenNestedIndex global_dims group_dims global_id =

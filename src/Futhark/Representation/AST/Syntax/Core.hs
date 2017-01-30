@@ -42,6 +42,7 @@ module Futhark.Representation.AST.Syntax.Core
          , dimFix
          , sliceIndices
          , sliceDims
+         , unitSlice
          , PatElemT (..)
 
          -- * Miscellaneous
@@ -81,8 +82,8 @@ newtype ExtShape = ExtShape { extShapeDims :: [ExtDimSize] }
 
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
-data Rank = Rank Int
-            deriving (Show, Eq, Ord)
+newtype Rank = Rank Int
+             deriving (Show, Eq, Ord)
 
 -- | A class encompassing types containing array shape information.
 class (Monoid a, Eq a, Ord a) => ArrayShape a where
@@ -237,22 +238,21 @@ instance Functor ParamT where
 -- | How to index a single dimension of an array.
 data DimIndex d = DimFix
                   d -- ^ Fix index in this dimension.
-                | DimSlice d d
-                  -- ^ A slice starting from there and continuing for
-                  -- this many elements.
+                | DimSlice d d d
+                  -- ^ @DimSlice start_offset num_elems stride@.
                   deriving (Eq, Ord, Show)
 
 instance Functor DimIndex where
   fmap f (DimFix i) = DimFix $ f i
-  fmap f (DimSlice i j) = DimSlice (f i) (f j)
+  fmap f (DimSlice i j s) = DimSlice (f i) (f j) (f s)
 
 instance Foldable DimIndex where
   foldMap f (DimFix d) = f d
-  foldMap f (DimSlice i j) = f i <> f j
+  foldMap f (DimSlice i j s) = f i <> f j <> f s
 
 instance Traversable DimIndex where
   traverse f (DimFix d) = DimFix <$> f d
-  traverse f (DimSlice i j) = DimSlice <$> f i <*> f j
+  traverse f (DimSlice i j s) = DimSlice <$> f i <*> f j <*> f s
 
 -- | A list of 'DimFix's, indicating how an array should be sliced.
 -- Whenever a function accepts a 'Slice', that slice should be total,
@@ -272,8 +272,12 @@ sliceIndices = mapM dimFix
 -- | The dimensions of the array produced by this slice.
 sliceDims :: Slice d -> [d]
 sliceDims = mapMaybe dimSlice
-  where dimSlice (DimSlice _ d) = Just d
-        dimSlice DimFix{}       = Nothing
+  where dimSlice (DimSlice _ d _) = Just d
+        dimSlice DimFix{}         = Nothing
+
+-- | A slice with a stride of one.
+unitSlice :: Num d => d -> d -> DimIndex d
+unitSlice offset n = DimSlice offset n 1
 
 -- | How a name in a let-binding is bound - either as a plain
 -- variable, or in the form of an in-place update.

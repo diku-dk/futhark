@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | Simple tool for benchmarking Futhark programs.  Use the @--json@
 -- flag for machine-readable output.
 module Main (main) where
@@ -42,8 +43,7 @@ initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing
 binaryName :: FilePath -> FilePath
 binaryName = (`replaceExtension` "bin")
 
-data RunResult = RunResult { runMicroseconds :: Int }
-
+newtype RunResult = RunResult { runMicroseconds :: Int }
 data DataResult = DataResult String (Either T.Text [RunResult])
 data BenchResult = BenchResult FilePath [DataResult]
 
@@ -72,30 +72,53 @@ runBenchmarks opts paths = do
   -- us.
   hSetBuffering stdout LineBuffering
   benchmarks <- testSpecsFromPaths paths
-  results <- mapM (uncurry $ runBenchmark opts) benchmarks
+  compiled_benchmarks <- catMaybes <$> mapM (compileBenchmark opts) benchmarks
+  results <- mapM (runBenchmark opts) compiled_benchmarks
   case optJSON opts of
     Nothing -> return ()
     Just file -> writeFile file $ JSON.encode $ resultsToJSON results
 
-runBenchmark :: BenchOptions -> FilePath -> ProgramTest -> IO BenchResult
-runBenchmark opts program spec = do
-  putStrLn $ program ++ ":"
+  when (anythingFailed results) $ exitWith $ ExitFailure 1
+
+anythingFailed :: [BenchResult] -> Bool
+anythingFailed = any failedBenchResult
+  where failedBenchResult (BenchResult _ xs) =
+          any failedResult xs
+        failedResult (DataResult _ Left{}) = True
+        failedResult _                     = False
+
+compileBenchmark :: BenchOptions -> (FilePath, ProgramTest)
+                 -> IO (Maybe (FilePath, [InputOutputs]))
+compileBenchmark opts (program, spec) =
   case testAction spec of
     RunCases cases | "nobench" `notElem` testTags spec,
-                     "disable" `notElem` testTags spec -> do
+                     "disable" `notElem` testTags spec,
+                     any hasRuns cases -> do
+
+      putStr $ "Compiling " ++ program ++ "...\n"
       (futcode, _, futerr) <-
         liftIO $ readProcessWithExitCode compiler
         [program, "-o", binaryName program] ""
-      case futcode of
-        ExitFailure 127 -> fail $ progNotFound compiler
-        ExitFailure _   -> fail $ T.unpack futerr
-        ExitSuccess     -> return ()
 
-      BenchResult program . catMaybes <$>
-        mapM (runBenchmarkCase opts program) cases
+      case futcode of
+        ExitSuccess     -> return $ Just (program, cases)
+        ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
+                              return Nothing
+        ExitFailure _   -> do putStrLn $ "Failed:\n" ++ T.unpack futerr
+                              return Nothing
     _ ->
-      return $ BenchResult program []
+      return Nothing
   where compiler = optCompiler opts
+
+        hasRuns (InputOutputs _ runs) = not $ null runs
+
+runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO BenchResult
+runBenchmark opts (program, cases) =
+  BenchResult program . catMaybes . concat <$> mapM forInputOutputs cases
+  where forInputOutputs (InputOutputs "main" runs) =
+          mapM (runBenchmarkCase opts program) runs
+        forInputOutputs InputOutputs{} =
+          return []
 
 reportResult :: [RunResult] -> IO ()
 reportResult [] =
@@ -136,6 +159,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   -- no program component.
   (progCode, output, progerr) <-
     readProcessWithExitCode ("." </> binaryName program) options input
+
   fmap (Just .  DataResult dataset_desc) $ runBenchM $ do
     case maybe_expected of
       Nothing ->
@@ -145,7 +169,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
     runtime_result <- io $ T.readFile tmpfile
     runtimes <- case mapM readRuntime $ T.lines runtime_result of
       Just runtimes -> return $ map RunResult runtimes
-      Nothing -> throwError $ "Runtime file has invalid contents:\n" <> runtime_result
+      Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
 
     io $ putStr $ "dataset " ++ dataset_desc ++ ": "
     io $ reportResult runtimes
@@ -162,10 +186,16 @@ didNotFail :: FilePath -> ExitCode -> T.Text -> BenchM ()
 didNotFail _ ExitSuccess _ =
   return ()
 didNotFail program (ExitFailure code) stderr_s =
-  fail $ program ++ " failed with error code " ++ show code ++
+  itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
   " and output:\n" ++ T.unpack stderr_s
 
-runResult :: MonadIO m =>
+itWentWrong :: (MonadError T.Text m, MonadIO m) =>
+               T.Text -> m a
+itWentWrong t = do
+  liftIO $ putStrLn $ T.unpack t
+  throwError t
+
+runResult :: (MonadError T.Text m, MonadIO m) =>
              FilePath
           -> ExitCode
           -> T.Text
@@ -175,10 +205,10 @@ runResult program ExitSuccess stdout_s _ =
   case valuesFromText "stdout" stdout_s of
     Left e   -> do
       actual <- liftIO $ writeOutFile program "actual" stdout_s
-      fail $ show e <> "\n(See " <> actual <> ")"
+      itWentWrong $ T.pack $ show e <> "\n(See " <> actual <> ")"
     Right vs -> return vs
 runResult program (ExitFailure code) _ stderr_s =
-  fail $ program ++ " failed with error code " ++ show code ++
+  itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
   " and output:\n" ++ T.unpack stderr_s
 
 writeOutFile :: FilePath -> String -> T.Text -> IO FilePath
@@ -193,7 +223,8 @@ writeOutFile base ext content =
             else do T.writeFile filename content
                     return filename
 
-compareResult :: MonadIO m => FilePath -> [Value] -> [Value]
+compareResult :: (MonadError T.Text m, MonadIO m) =>
+                 FilePath -> [Value] -> [Value]
               -> m ()
 compareResult program expectedResult actualResult =
   case compareValues actualResult expectedResult of
@@ -204,7 +235,8 @@ compareResult program expectedResult actualResult =
       expectedf <-
         liftIO $ writeOutFile program "expected" $
         T.unlines $ map prettyText expectedResult
-      fail $ actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
+      itWentWrong $ T.pack $
+        actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
     Nothing ->
       return ()
 

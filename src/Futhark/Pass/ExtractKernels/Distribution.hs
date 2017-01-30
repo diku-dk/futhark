@@ -27,6 +27,7 @@ module Futhark.Pass.ExtractKernels.Distribution
 
        , KernelNest
        , ppKernelNest
+       , newKernel
        , pushKernelNesting
        , pushInnerKernelNesting
        , kernelNestLoops
@@ -50,7 +51,6 @@ import Data.Maybe
 import Data.List
 import Data.Ord
 
-import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -224,7 +224,7 @@ boundInKernelNests = map (HS.fromList .
 kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
-constructKernel :: (MonadFreshNames m, HasScope Kernels m) =>
+constructKernel :: (MonadFreshNames m, LocalScope Kernels m) =>
                    KernelNest -> KernelBody InKernel
                 -> m ([Stm Kernels], SubExp, Stm Kernels)
 constructKernel kernel_nest inner_body = do
@@ -232,7 +232,8 @@ constructKernel kernel_nest inner_body = do
   let used_inps = filter inputIsUsed inps
       cs = loopNestingCertificates first_nest
 
-  (ksize_bnds, k) <- mapKernel cs w ispace used_inps rts inner_body
+  (ksize_bnds, k) <- inScopeOf w_bnds $
+    mapKernel cs w (FlatThreadSpace ispace) used_inps rts inner_body
 
   let kbnds = w_bnds ++ ksize_bnds
   return (kbnds,
@@ -304,7 +305,7 @@ data DistributionBody = DistributionBody {
 distributionInnerPattern :: DistributionBody -> Pattern Kernels
 distributionInnerPattern = fst . innerTarget . distributionTarget
 
-distributionBodyFromStms :: (Attributes lore, CanBeAliased (Op lore)) =>
+distributionBodyFromStms :: Attributes lore =>
                             Targets -> [Stm lore] -> (DistributionBody, Result)
 distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
   let bound_by_stms = HS.fromList $ HM.keys $ scopeOf stms
@@ -319,8 +320,8 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
       },
       inner_res')
 
-distributionBodyFromStm :: (Attributes lore, CanBeAliased (Op lore)) =>
-                               Targets -> Stm lore -> (DistributionBody, Result)
+distributionBodyFromStm :: Attributes lore =>
+                           Targets -> Stm lore -> (DistributionBody, Result)
 distributionBodyFromStm targets bnd =
   distributionBodyFromStms targets [bnd]
 
@@ -514,10 +515,9 @@ tryDistribute nest targets stms =
         inner_body = KernelBody () stms $
                      map (ThreadsReturn ThreadsInSpace) inner_body_res
 
-tryDistributeStm :: (MonadFreshNames m, HasScope t m,
-                         Attributes lore, CanBeAliased (Op lore)) =>
-                        Nestings -> Targets -> Stm lore
-                     -> m (Maybe (Result, Targets, KernelNest))
+tryDistributeStm :: (MonadFreshNames m, HasScope t m, Attributes lore) =>
+                    Nestings -> Targets -> Stm lore
+                 -> m (Maybe (Result, Targets, KernelNest))
 tryDistributeStm nest targets bnd =
   fmap addRes <$> createKernelNest nest dist_body
   where (dist_body, res) = distributionBodyFromStm targets bnd

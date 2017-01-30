@@ -9,8 +9,8 @@ module Futhark.Analysis.CallGraph
   where
 
 import Control.Monad.Reader
-
 import qualified Data.HashMap.Lazy as HM
+import Data.Maybe (isJust)
 
 import Futhark.Representation.SOACS
 
@@ -23,7 +23,7 @@ buildFunctionTable =
           HM.insert (funDefName f) f ftab
 
 -- | The symbol table for functions
-data CGEnv = CGEnv { envFtable  :: FunctionTable }
+newtype CGEnv = CGEnv { envFtable  :: FunctionTable }
 
 type CGM = Reader CGEnv
 
@@ -43,7 +43,7 @@ buildCallGraph :: Prog -> CallGraph
 buildCallGraph prog = do
   let ftable = buildFunctionTable prog
   runCGM (foldM buildCGfun HM.empty entry_points) $ CGEnv ftable
-  where entry_points = map funDefName $ filter funDefEntryPoint $ progFunctions prog
+  where entry_points = map funDefName $ filter (isJust . funDefEntryPoint) $ progFunctions prog
 
 -- | @buildCallGraph cg f@ updates Call Graph @cg@ with the contributions of function
 -- @fname@, and recursively, with the contributions of the callees of @fname@.

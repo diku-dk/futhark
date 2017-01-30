@@ -1,8 +1,0 @@
--- Slicing a replicate should work.
---
--- ==
--- input { 3 [1,2] } output { [[1,2],[1,2]] }
-
-fun main(m: int, diag: [b]int): [][]int =
-  let top_per = replicate m diag
-  in top_per[1:m]

@@ -214,7 +214,7 @@ soacType (Write _cs _w lam _ivs as) =
         n = length lam_ts
         ws = map fst as
 
-instance Attributes lore => TypedOp (SOAC lore) where
+instance TypedOp (SOAC lore) where
   opType = pure . soacType
 
 instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
@@ -317,7 +317,7 @@ substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 
-instance (Attributes inner, Ranged inner) => RangedOp (SOAC inner) where
+instance (Ranged inner) => RangedOp (SOAC inner) where
   opRanges op = replicate (length $ soacType op) unknownRange
 
 instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) where
@@ -366,7 +366,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
                    (return . removeExtLambdaWisdom)
                    return return
 
-instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (SOAC lore) where
+instance Aliased lore => UsageInOp (SOAC lore) where
   usageInOp (Map _ _ f arrs) = usageInLambda f arrs
   usageInOp (Redomap _ _ _ _ f _ arrs) = usageInLambda f arrs
   usageInOp _ = mempty
@@ -393,7 +393,6 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
   let asArg t = (t, mempty)
       inttp   = Prim int32
       lamarrs'= map (`setOuterSize` Var (paramName chunk)) arrargs
-  TC.checkExtLambda lam $ asArg inttp : accargs ++ map asArg lamarrs'
   let acc_len= length accexps
   let lamrtp = take acc_len $ extLambdaReturnType lam
   unless (staticShapes (map TC.argType accargs) == lamrtp) $
@@ -454,7 +453,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs w lam _ivs as) = do
+typeCheckSOAC (Write cs w lam ivs as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -471,6 +470,9 @@ typeCheckSOAC (Write cs w lam _ivs as) = do
   --   4. Each array in @as@ is consumed.  This is not really a check, but more
   --      of a requirement, so that e.g. the source is not hoisted out of a
   --      loop, which will mean it cannot be consumed.
+  --
+  --   5. Each of ivs must be an array matching a corresponding lambda
+  --      parameters.
   --
   -- Code:
 
@@ -509,6 +511,11 @@ typeCheckSOAC (Write cs w lam _ivs as) = do
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
+
+  -- 5.
+  arrargs <- TC.checkSOACArrayArgs w ivs
+  TC.checkLambda lam arrargs
+
 
 typeCheckSOAC (Reduce ass size _ fun inputs) =
   typeCheckScanReduce ass size fun inputs

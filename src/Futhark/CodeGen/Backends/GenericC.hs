@@ -475,35 +475,39 @@ typeToCType t = do
                 ct <- typeToCType [et]
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
-printPrimStm :: C.ToExp a => a -> PrimType -> C.Stm
-printPrimStm val (IntType Int8) = [C.cstm|printf("%hhdi8", $exp:val);|]
-printPrimStm val (IntType Int16) = [C.cstm|printf("%hdi16", $exp:val);|]
-printPrimStm val (IntType Int32) = [C.cstm|printf("%di32", $exp:val);|]
-printPrimStm val (IntType Int64) = [C.cstm|printf("%lldi64", $exp:val);|]
-printPrimStm val Bool = [C.cstm|printf($exp:val ? "true" : "false");|]
-printPrimStm val (FloatType Float32) = [C.cstm|printf("%.6ff32", $exp:val);|]
-printPrimStm val (FloatType Float64) = [C.cstm|printf("%.6ff64", $exp:val);|]
-printPrimStm _ Cert = [C.cstm|printf("Checked");|]
+printPrimStm :: C.ToExp a => a -> PrimType -> EntryPointType -> C.Stm
+printPrimStm val (IntType Int8) TypeUnsigned = [C.cstm|printf("%hhuu8", $exp:val);|]
+printPrimStm val (IntType Int16) TypeUnsigned = [C.cstm|printf("%huu16", $exp:val);|]
+printPrimStm val (IntType Int32) TypeUnsigned = [C.cstm|printf("%uu32", $exp:val);|]
+printPrimStm val (IntType Int64) TypeUnsigned = [C.cstm|printf("%lluu64", $exp:val);|]
+printPrimStm val (IntType Int8) _ = [C.cstm|printf("%hhdi8", $exp:val);|]
+printPrimStm val (IntType Int16) _ = [C.cstm|printf("%hdi16", $exp:val);|]
+printPrimStm val (IntType Int32) _ = [C.cstm|printf("%di32", $exp:val);|]
+printPrimStm val (IntType Int64) _ = [C.cstm|printf("%lldi64", $exp:val);|]
+printPrimStm val Bool _ = [C.cstm|printf($exp:val ? "true" : "false");|]
+printPrimStm val (FloatType Float32) _ = [C.cstm|printf("%.6ff32", $exp:val);|]
+printPrimStm val (FloatType Float64) _ = [C.cstm|printf("%.6ff64", $exp:val);|]
+printPrimStm _ Cert _ = [C.cstm|printf("Checked");|]
 
 -- | Return a statement printing the given value.
 printStm :: ValueDecl -> CompilerM op s C.Stm
-printStm (ScalarValue bt name) =
-  return $ printPrimStm name bt
-printStm (ArrayValue mem bt shape) = do
+printStm (ScalarValue bt ept name) =
+  return $ printPrimStm name bt ept
+printStm (ArrayValue mem bt ept shape) = do
   mem' <- rawMem mem
-  printArrayStm mem' bt shape
+  printArrayStm mem' bt ept shape
 
-printArrayStm :: C.ToExp a => a -> PrimType -> [DimSize] -> CompilerM op s C.Stm
-printArrayStm mem bt [] =
-  return $ printPrimStm val bt
+printArrayStm :: C.ToExp a => a -> PrimType -> EntryPointType -> [DimSize] -> CompilerM op s C.Stm
+printArrayStm mem bt ept [] =
+  return $ printPrimStm val bt ept
   where val = [C.cexp|*$exp:mem|]
-printArrayStm mem bt (dim:shape) = do
+printArrayStm mem bt ept (dim:shape) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
   let dim' = dimSizeToExp dim
       shape' = cproduct $ map dimSizeToExp shape
       bt'  = primTypeToCType bt
-  printelem <- printArrayStm v bt shape
+  printelem <- printArrayStm v bt ept shape
   return [C.cstm|{
                if ($exp:dim' * $exp:shape' == 0) {
                    printf("empty(%s)", $exp:(ppArrayType bt (length shape)));
@@ -522,30 +526,32 @@ printArrayStm mem bt (dim:shape) = do
              }|]
 
 
-readFun :: PrimType -> Maybe String
-readFun (IntType Int8) = Just "read_int8"
-readFun (IntType Int16) = Just "read_int16"
-readFun (IntType Int32) = Just "read_int32"
-readFun (IntType Int64) = Just "read_int64"
-readFun Bool = Just "read_bool"
-readFun (FloatType Float32) = Just "read_float"
-readFun (FloatType Float64) = Just "read_double"
-readFun _    = Nothing
+-- We read unsigned integers using the signed functions, and hope it
+-- all works out in the end.
+readFun :: PrimType -> EntryPointType -> Maybe String
+readFun (IntType Int8) _ = Just "read_int8"
+readFun (IntType Int16) _ = Just "read_int16"
+readFun (IntType Int32) _ = Just "read_int32"
+readFun (IntType Int64) _ = Just "read_int64"
+readFun Bool _ = Just "read_bool"
+readFun (FloatType Float32) _ = Just "read_float"
+readFun (FloatType Float64) _ = Just "read_double"
+readFun _ _ = Nothing
 
 paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
   where paramType (MemParam _ size space) = Mem size space
         paramType (ScalarParam _ t) = Scalar t
 
-readPrimStm :: C.ToExp a => a -> PrimType -> C.Stm
-readPrimStm place t
-  | Just f <- readFun t =
+readPrimStm :: C.ToExp a => a -> PrimType -> EntryPointType -> C.Stm
+readPrimStm place t ept
+  | Just f <- readFun t ept =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
           panic(1, "Syntax error when reading %s.\n", $string:(pretty t));
         }|]
-readPrimStm _ Cert =
+readPrimStm _ Cert _ =
   [C.cstm|;|]
-readPrimStm _ t =
+readPrimStm _ t _ =
   [C.cstm|{
         panic(1, "Cannot read %s.\n", $string:(pretty t));
       }|]
@@ -560,7 +566,7 @@ readPrimStm _ t =
 -- The idea here is to keep the nastyness in main(), whilst not
 -- messing up anything else.
 mainCall :: [C.Stm] -> Name -> Function op
-         -> CompilerM op s ([C.BlockItem],[C.BlockItem],[C.BlockItem],[C.BlockItem])
+         -> CompilerM op s (C.Definition, C.Initializer)
 mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
@@ -569,38 +575,67 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   (argexps, prepare) <- collect' $ mapM prepareArg inputs
   -- unpackResults may copy back to DefaultSpace.
   unpackstms <- unpackResults ret outputs
-  freestms <- freeResults ret outputs
+  free_out <- freeResults ret outputs
   -- makeParam will always create DefaultSpace memory.
   inputdecls <- collect $ mapM_ makeParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
   free_in <- collect $ mapM_ freeParam inputs
   printstms <- printResult results
-  return ([C.citems|
-               /* Declare and read input. */
-               $items:inputdecls
-               $ty:crettype $id:ret;
-               $stms:readstms
-               $items:prepare
-               $items:outputdecls
-             |],
-          [C.citems|
-               /* Run the program once. */
-               t_start = get_wall_time();
-               $id:ret = $id:(funName fname)($args:argexps);
-               $stms:pre_timing
-               t_end = get_wall_time();
-               long int elapsed_usec = t_end - t_start;
-               if (time_runs && runtime_file != NULL) {
-                 fprintf(runtime_file, "%ld\n", elapsed_usec);
-               }
-             |],
-          [C.citems|
-               $items:free_in
-               /* Print the final result. */
-               $items:unpackstms
-               $stms:printstms
-             |],
-          freestms)
+
+  let run_it = [C.citems|
+                  /* Run the program once. */
+                  t_start = get_wall_time();
+                  $id:ret = $id:(funName fname)($args:argexps);
+                  $stms:pre_timing
+                  t_end = get_wall_time();
+                  long int elapsed_usec = t_end - t_start;
+                  if (time_runs && runtime_file != NULL) {
+                    fprintf(runtime_file, "%ld\n", elapsed_usec);
+                  }
+                |]
+
+      entry_point_name = nameToString fname
+      entry_point_function_name = "entry_" ++ entry_point_name
+
+  return ([C.cedecl|void $id:entry_point_function_name() {
+    typename int64_t t_start, t_end;
+    int time_runs;
+
+    /* Declare and read input. */
+    $items:inputdecls
+    $ty:crettype $id:ret;
+    $stms:readstms
+    $items:prepare
+    $items:outputdecls
+
+    /* Warmup run */
+    if (perform_warmup) {
+      time_runs = 0;
+      $items:run_it
+      $items:free_out
+    }
+    time_runs = 1;
+    /* Proper run. */
+    for (int run = 0; run < num_runs; run++) {
+      if (run == num_runs-1) {
+        detail_timing = 1;
+      }
+      $items:run_it
+      if (run < num_runs-1) {
+        $items:free_out
+      }
+    }
+
+    $items:free_in
+    /* Print the final result. */
+    $items:unpackstms
+    $stms:printstms
+
+    $items:free_out
+  }
+                |],
+          [C.cinit|{ .name = $string:entry_point_name,
+                     .fun = $id:entry_point_function_name }|])
   where makeParam (MemParam name _ _) = do
           declMem name DefaultSpace
           allocMem name [C.cexp|0|] DefaultSpace
@@ -641,10 +676,10 @@ readInputs refcount inputparams = snd . mapAccumL (readInput refcount memsizes) 
 
 readInput :: Bool -> HM.HashMap VName VName -> [VName] -> ValueDecl
           -> ([VName], C.Stm)
-readInput _ _ known_sizes (ScalarValue t name) =
-  (known_sizes, readPrimStm name t)
-readInput refcount memsizes known_sizes (ArrayValue name t shape)
-  | Just f <- readFun t =
+readInput _ _ known_sizes (ScalarValue t ept name) =
+  (known_sizes, readPrimStm name t ept)
+readInput refcount memsizes known_sizes (ArrayValue name t ept shape)
+  | Just f <- readFun t ept =
   -- We need to create an array for the array parser to put
   -- the shapes.
   let t' = primTypeToCType t
@@ -753,6 +788,11 @@ benchmarkOptions =
             , optionArgument = NoArgument
             , optionAction = [C.cstm|detail_memory = 1;|]
             }
+   , Option { optionLongName = "entry-point"
+            , optionShortName = Just 'e'
+            , optionArgument = RequiredArgument
+            , optionAction = [C.cstm|entry_point = optarg;|]
+            }
    ]
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
@@ -781,8 +821,9 @@ compileProg :: MonadFreshNames m =>
 compileProg ops userstate spaces decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
   let ((memtypes, memreport, prototypes, definitions,
-        (main_pre, main, main_post, free_out)), endstate) =
+        entry_points), endstate) =
         runCompilerM prog ops src userstate compileProg'
+      (entry_point_decls, entry_point_inits) = unzip entry_points
   return $ pretty [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
@@ -821,14 +862,25 @@ $esc:reader_h
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;
+static const char *entry_point = "main";
 
 $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
 
-int main(int argc, char** argv) {
-  typename int64_t t_start, t_end;
-  int time_runs;
+$edecls:entry_point_decls
 
+typedef void entry_point_fun();
+
+struct entry_point_entry {
+  const char *name;
+  entry_point_fun *fun;
+};
+
+int main(int argc, char** argv) {
   fut_progname = argv[0];
+
+  struct entry_point_entry entry_points[] = {
+    $inits:entry_point_inits
+  };
 
   $stms:(compInit endstate)
 
@@ -837,27 +889,27 @@ int main(int argc, char** argv) {
   argv += parsed_options;
 
   $stms:pre_main_stms
-  $items:main_pre
-  $stms:pre_timing
-  /* Warmup run */
-  if (perform_warmup) {
-    time_runs = 0;
-    $items:main
-    $items:free_out
-  }
-  time_runs = 1;
-  /* Proper run. */
-  for (int run = 0; run < num_runs; run++) {
-    if (run == num_runs-1) {
-      detail_timing = 1;
-    }
-    $items:main
-    if (run < num_runs-1) {
-      $items:free_out
+
+  int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
+  entry_point_fun *entry_point_fun = NULL;
+  for (int i = 0; i < num_entry_points; i++) {
+    if (strcmp(entry_points[i].name, entry_point) == 0) {
+      entry_point_fun = entry_points[i].fun;
+      break;
     }
   }
-  $items:main_post
-  $items:free_out
+
+  if (entry_point_fun == NULL) {
+    fprintf(stderr, "No entry point '%s'.  Select another with --entry-point.  Options are:\n",
+                    entry_point);
+    for (int i = 0; i < num_entry_points; i++) {
+      fprintf(stderr, "%s\n", entry_points[i].name);
+    }
+    return 1;
+  }
+
+  entry_point_fun();
+
   if (runtime_file != NULL) {
     fclose(runtime_file);
   }
@@ -871,12 +923,10 @@ int main(int argc, char** argv) {
 |]
   where compileProg' = do
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
-          let mainname = nameFromString "main"
-          main <- case lookup mainname funs of
-                    Nothing   -> fail "GenericC.compileProg: No main function"
-                    Just func -> mainCall pre_timing mainname func
+          entry_points <- mapM (uncurry $ mainCall pre_timing) $
+                          filter (functionEntry . snd) funs
           (memtypes, memreport) <- unzip <$> mapM defineMemorySpace spaces
-          return (concat memtypes, memreport, prototypes, definitions, main)
+          return (concat memtypes, memreport, prototypes, definitions, entry_points)
         funcToDef func = C.FuncDef func loc
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l

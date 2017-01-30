@@ -93,7 +93,7 @@ simplifySOAC (Stream cs outerdim form lam arr) = do
                     Constant c -> SE.Val c
       -- extension: one may similarly treat iota stream-array case,
       -- by setting the bounds to [0, se_outer-1]
-      parbnds  = [ (chunk, 1, se_outer) ]
+      parbnds  = [ (chunk, 0, se_outer) ]
   lam' <- Engine.simplifyExtLambda lam (getStreamAccums form) parbnds
   return $ Stream cs' outerdim' form' lam' arr'
   where simplifyStreamForm (MapLike o) =

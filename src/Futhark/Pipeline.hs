@@ -43,9 +43,10 @@ data CompileError = CompileError {
   , errorData :: T.Text
   }
 
-data FutharkEnv = FutharkEnv { futharkVerbose :: Bool
-                             -- ^ If true, print log messages to standard error.
-                             }
+newtype FutharkEnv = FutharkEnv {
+  futharkVerbose :: Bool
+  -- ^ If true, print log messages to standard error.
+  }
 
 newtype FutharkM a = FutharkM (ExceptT CompileError (StateT VNameSource (ReaderT FutharkEnv IO)) a)
                      deriving (Applicative, Functor, Monad,

@@ -51,7 +51,7 @@ below) are defined globally.  Futhark does not use type inference.  As
 a concrete example, here is the recursive definition of the factorial
 function in Futhark::
 
-  fun fact(n: int): int =
+  fun fact(n: i32): i32 =
     if n == 0 then 1
               else n * fact(n-1)
 
@@ -59,16 +59,16 @@ Indentation has no syntactical significance in Futhark, but recommended for
 readability.
 
 The syntax for tuple types is a comma-separated list of types or
-values enclosed in parentheses, so ``(int, real)`` is a pair of an
+values enclosed in parentheses, so ``(i32, real)`` is a pair of an
 integer and a floating-point number.  Single-element and empty tuples
 are not permitted.  Array types are written as the element type
-preceded by brackets, meaning that ``[]int`` is a one-dimensional
-array of integers, and ``[][][](int, real)`` is a three-dimensional
+preceded by brackets, meaning that ``[]i32`` is a one-dimensional
+array of integers, and ``[][][](i32, real)`` is a three-dimensional
 array of tuples of integers and floats.  An array value is written as
 a sequence of elements enclosed by brackets::
 
-  [1, 2, 3]       -- Array of type []int.
-  [[1], [2], [3]] -- Array of type [][]int.
+  [1, 2, 3]       -- Array of type []i32.
+  [[1], [2], [3]] -- Array of type [][]i32.
 
 All arrays must be *regular* (often termed *full*).  This means that,
 for example, all rows of a two-dimensional array must have the same
@@ -111,20 +111,19 @@ Two-way ``if-then-else`` is the only branching construct in Futhark.
 Pattern matching is supported in a limited way for taking apart
 tuples, for example::
 
-  fun sumpair((x, y): (int, int)): int = x + y
+  fun sumpair((x, y): (i32, i32)): i32 = x + y
 
 We can also add the type ascription on the tuple components::
 
-  fun sumpair(x: int, y: int): int = x + y
+  fun sumpair(x: i32, y: i32): i32 = x + y
 
 Apart from pattern-matching, the components of a tuple can also be
-accessed by using the field access operator (``.``)::
+accessed by using the tuple projection syntax: ``#i``, where ``i``
+indicates the component to extract (0-indexed)::
 
-  fun sumpair(p: (int, int)): int = p.0 + p.1
+  fun sumpair(p: (i32, i32)): i32 = #0 p + #1 p
 
-Only some expressions can be on the left-hand side of the dot,
-although you can enclose any expression in parentheses to make it
-acceptable.  The right-hand-side must be a literal integer.
+In most cases, pattern matching is better style.
 
 Function calls are written as the function name with the arguments
 juxtaposed.  All function calls must be fully saturated - currying is
@@ -137,14 +136,14 @@ Futhark has a built-in syntax for expressing certain tail-recursive
 functions.  Consider the following tail-recursive formulation of a
 function for computing the Fibonacci numbers::
 
-  fun fib(n: int): int = fibhelper(1,1,n)
+  fun fib(n: i32): i32 = fibhelper(1,1,n)
 
-  fun fibhelper(x: int, y: int, n: int): int =
+  fun fibhelper(x: i32, y: i32, n: i32): i32 =
     if n == 1 then x else fibhelper(y, x+y, n-1)
 
 We can rewrite this using the ``loop`` construct::
 
-  fun fib(n: int): int =
+  fun fib(n: i32): i32 =
     loop ((x, y) = (1,1)) = for i < n do
                               (y, x+y)
     in x
@@ -177,7 +176,7 @@ For example, denoting by ``t`` the type of ``x``, this loop::
 
 has the semantics of a call to this tail-recursive function::
 
-  fun f(i: int, n: int, x: t): t =
+  fun f(i: i32, n: i32, x: t): t =
     if i >= n then x
        else f(i+1, n, g(x))
 
@@ -203,7 +202,7 @@ used for convergence loops, where the number of iterations cannot be
 predicted in advance.  For example, the following program doubles a
 given number until it exceeds a given threshold value::
 
-  fun main(x: int, bound: int): int =
+  fun main(x: i32, bound: i32): i32 =
     loop (x) = while x < bound do x * 2
     in x
 
@@ -214,7 +213,7 @@ For brevity, the initial value expression can be elided, in which case
 an expression equivalent to the pattern is implied.  This is easier to
 understand with an example.  The loop::
 
-  fun fib(n: int): int =
+  fun fib(n: i32): i32 =
     let x = 1
     let y = 1
     loop ((x, y) = (x, y)) = for i < n do (y, x+y)
@@ -222,7 +221,7 @@ understand with an example.  The loop::
 
 can also be written::
 
-  fun fib(n: int): int =
+  fun fib(n: i32): i32 =
     let x = 1
     let y = 1
     loop ((x, y)) = for i < n do (y, x+y)
@@ -304,7 +303,6 @@ advantage of.
 
 .. productionlist::
    e: "map" `lambda` `e`
-    : "zipWith" `lambda` `e`  ... `e`
     : "filter" `lambda` `e`
     : "partition" "(" `lambda` "," ... `lambda` ")" `e`
     : "reduce" `lambda` `e` `e`
@@ -315,7 +313,7 @@ optional curried arguments), or an operator (possibly with one operand
 curried):
 
 .. productionlist::
-   lambda: "(" "fn" `param`... : `rettype` "=>" `e` ")"
+   lambda: "(" \ `param`... : `rettype` "->" `e` ")"
          : `fname`
          : "(" `fname` `e` ... `e` ")"
          : "(" `op` `e` ")"
@@ -345,7 +343,7 @@ occasionally prove useful to express certain algorithms in an
 imperative style.  Consider a function for computing the *n* first
 Fibonacci numbers::
 
-  fun fib(n: int): []int =
+  fun fib(n: i32): []i32 =
     -- Create "empty" array.
     let arr = iota(n) in
     -- Fill array with Fibonacci numbers.
@@ -385,13 +383,13 @@ guaranteed.
 The simplest way to introduce uniqueness types is through examples.
 To that end, let us consider the following function definition::
 
-  fun modify(a: *[]int, i: int, x: int): *[]int =
+  fun modify(a: *[]i32, i: i32, x: i32): *[]i32 =
     let a[i] = a[i] + x in
     a
 
 The function call ``modify(a,i,x)`` returns ``a``, but where the
 element at index ``i`` has been increased by ``x``.  Note the
-asterisks in the parameter declaration ``*[]int a``.  This means that
+asterisks in the parameter declaration ``*[]i32 a``.  This means that
 the function ``modify`` has been given "ownership" of the array ``a``,
 meaning that the caller of ``modify`` will never reference array ``a`` after
 the call.  As a consequence, ``modify`` can change the element at index
@@ -408,7 +406,7 @@ follows::
 
 Under which circumstances is this call valid?  Two things must hold:
 
-1. The type of ``a`` must be ``*[]int``, of course.
+1. The type of ``a`` must be ``*[]i32``, of course.
 
 2. Neither ``a`` or any variable that *aliases* ``a`` may be used on any
    execution path following the call to ``modify``.
@@ -436,7 +434,7 @@ analysis in greater detail.
 
 Let us consider the definition of a function returning a unique array::
 
-  fun f(a: []int): *[]int = body
+  fun f(a: []i32): *[]i32 = body
 
 Note that the argument, ``a``, is non-unique, and hence we cannot
 modify it.  There is another restriction as well: ``a`` must not be
@@ -472,7 +470,7 @@ rules:
     of a call to the function is the only reference to that value.  An
     example violation::
 
-      fun broken(a: [][]int, i: int): *[]int =
+      fun broken(a: [][]i32, i: i32): *[]i32 =
         a[i] -- Return value aliased with 'a'.
 
   **Uniqueness Rule 3**

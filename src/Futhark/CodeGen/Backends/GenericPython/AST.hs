@@ -31,11 +31,12 @@ data PyExp = Constant PrimValue
            | UnOp String PyExp
            | Cond PyExp PyExp PyExp
            | Index PyExp PyIdx
-           | Call String [PyArg]
+           | Call PyExp [PyArg]
            | Cast PyExp String
            | Tuple [PyExp]
            | List [PyExp]
            | Field PyExp String
+           | Dict [(PyExp, PyExp)]
            | None
              deriving (Eq, Show)
 
@@ -77,7 +78,7 @@ data PyFunDef = Def String [String] [PyStmt]
 data PyClassDef = Class String [PyStmt]
                 deriving (Eq, Show)
 
-data PyProg = PyProg [PyStmt]
+newtype PyProg = PyProg [PyStmt]
             deriving (Eq, Show)
 
 instance Pretty PyIdx where
@@ -112,10 +113,13 @@ instance Pretty PyExp where
                         parens (ppr src <> text "," <+>
                                 text "ct.POINTER" <> parens(text bt))
     ppr (Index src idx) = ppr src <> brackets(ppr idx)
-    ppr (Call fname exps) = text fname <> parens(commasep $ map ppr exps)
+    ppr (Call fun exps) = ppr fun <> parens(commasep $ map ppr exps)
     ppr (Tuple [dim]) = parens(ppr dim <> text ",")
     ppr (Tuple dims) = parens(commasep $ map ppr dims)
     ppr (List es) = brackets $ commasep $ map ppr es
+    ppr (Dict kvs) = braces $ commasep $ map ppElem kvs
+      where ppElem (k, v) = ppr k <> colon <+> ppr v
+
     ppr None = text "None"
 
 instance Pretty PyStmt where

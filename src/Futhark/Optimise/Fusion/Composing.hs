@@ -191,7 +191,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   in  (res_lam', new_inp)
 
 
-mergeReduceOps :: Bindable lore => Lambda lore -> Lambda lore -> Lambda lore
+mergeReduceOps :: Lambda lore -> Lambda lore -> Lambda lore
 mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
   let body' = Body (bodyLore bdy1)
                    (bodyStms bdy1 ++ bodyStms bdy2)

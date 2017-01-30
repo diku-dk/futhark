@@ -3,6 +3,7 @@
 module Futhark.Representation.AST.Attributes.Types
        (
          rankShaped
+       , extShaped
        , arrayRank
        , arrayShape
        , modifyArrayShape
@@ -84,6 +85,13 @@ rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
 rankShaped (Prim et) = Prim et
 rankShaped (Mem size space) = Mem size space
 
+-- | Add vacuous existential type information to a type.  Every
+-- dimension will be its own 'Ext'.
+extShaped :: ArrayShape shape => TypeBase shape u -> TypeBase ExtShape u
+extShaped (Array et sz u) = Array et (ExtShape $ map Ext [0..shapeRank sz-1]) u
+extShaped (Prim et) = Prim et
+extShaped (Mem size space) = Mem size space
+
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
@@ -131,8 +139,7 @@ uniqueness _ = Nonunique
 unique :: TypeBase shape Uniqueness -> Bool
 unique = (==Unique) . uniqueness
 
--- | Set the uniqueness attribute of a type.  If the type is a tuple,
--- the uniqueness of its components will be modified.
+-- | Set the uniqueness attribute of a type.
 setUniqueness :: TypeBase shape Uniqueness
               -> Uniqueness
               -> TypeBase shape Uniqueness

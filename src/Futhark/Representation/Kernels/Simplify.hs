@@ -111,35 +111,31 @@ mkWiseKernelBody attr bnds res =
   where res_vs = map resValue res
         resValue (ThreadsReturn _ se) = se
         resValue (WriteReturn _ _ _ se) = se
-        resValue (ConcatReturns _ _ _ v) = Var v
+        resValue (ConcatReturns _ _ _ _ v) = Var v
         resValue (KernelInPlaceReturn v) = Var v
 
 inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
 inKernelEnv = Engine.emptyEnv inKernelRules noExtraHoistBlockers
 
-simplifyKernelExp :: (Engine.SimplifiableLore lore,
-                      BodyAttr lore ~ ()) =>
-                     KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore))
-simplifyKernelExp (SplitArray o w i num_is elems_per_thread arrs) =
-  SplitArray
-  <$> pure o
-  <*> Engine.simplify w
-  <*> Engine.simplify i
-  <*> Engine.simplify num_is
-  <*> Engine.simplify elems_per_thread
-  <*> mapM Engine.simplify arrs
+instance Engine.Simplifiable SplitOrdering where
+  simplify SplitContiguous =
+    return SplitContiguous
+  simplify (SplitStrided stride) =
+    SplitStrided <$> Engine.simplify stride
 
-simplifyKernelExp (SplitSpace o w i num_is elems_per_thread) =
+simplifyKernelExp :: Engine.SimplifiableLore lore =>
+                     KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore))
+
+simplifyKernelExp (SplitSpace o w i elems_per_thread) =
   SplitSpace
-  <$> pure o
+  <$> Engine.simplify o
   <*> Engine.simplify w
   <*> Engine.simplify i
-  <*> Engine.simplify num_is
   <*> Engine.simplify elems_per_thread
 
 simplifyKernelExp (Combine cspace ts active body) = do
   (body_res', body_bnds') <-
-    Engine.blockIf (Engine.isFalse False) $
+    Engine.blockIf Engine.isNotSafe $
     Engine.simplifyBody (map (const Observe) ts) body
   body' <- mkBodyM body_bnds' body_res'
   Combine
@@ -210,11 +206,14 @@ instance Engine.Simplifiable KernelSpace where
     <*> Engine.simplify structure
 
 instance Engine.Simplifiable SpaceStructure where
-  simplify (FlatSpace dims) =
-    FlatSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
+  simplify (FlatThreadSpace dims) =
+    FlatThreadSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
     where (gtids, gdims) = unzip dims
-  simplify (NestedSpace dims) =
-    NestedSpace
+  simplify (FlatGroupSpace dims) =
+    FlatGroupSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
+    where (gtids, gdims) = unzip dims
+  simplify (NestedThreadSpace dims) =
+    NestedThreadSpace
     <$> (zip4 gtids
          <$> mapM Engine.simplify gdims
          <*> pure ltids
@@ -230,10 +229,12 @@ instance Engine.Simplifiable KernelResult where
     Engine.simplify a <*>
     Engine.simplify i <*>
     Engine.simplify v
-  simplify (ConcatReturns o w pte what) =
-    ConcatReturns o
-    <$> Engine.simplify w
+  simplify (ConcatReturns o w pte moffset what) =
+    ConcatReturns
+    <$> Engine.simplify o
+    <*> Engine.simplify w
     <*> Engine.simplify pte
+    <*> Engine.simplify moffset
     <*> Engine.simplify what
   simplify (KernelInPlaceReturn what) =
     KernelInPlaceReturn <$> Engine.simplify what
@@ -254,46 +255,11 @@ kernelRules :: (MonadBinder m,
 kernelRules = standardRules <>
               RuleBook [ removeInvariantKernelResults ] [distributeKernelResults]
 
--- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
--- instead.
-fuseSplitIota :: (LocalScope (Lore m) m,
-                  MonadBinder m, Lore m ~ Wise InKernel) =>
-                 TopDownRule m
-fuseSplitIota vtable (Let (Pattern [size] chunks) _
-                       (Op (SplitArray o w i num_is elems_per_thread arrs)))
-  | ([(iota_pe, iota_start)], chunks_and_arrs) <-
-      partitionEithers $ zipWith (isIota vtable) chunks arrs = do
-
-      let (chunks', arrs') = unzip chunks_and_arrs
-
-      case chunks' of
-        [] -> -- Can't create a binding that doesn't produce any values.
-          letBind_ (Pattern [] [size]) $
-          Op $ SplitSpace o w i num_is elems_per_thread
-        _ ->
-          letBind_ (Pattern [size] chunks') $
-          Op $ SplitArray o w i num_is elems_per_thread arrs'
-
-      case o of
-        InOrder -> do
-          start_offset <- letSubExp "iota_start_offset" $
-            BasicOp $ BinOp (Mul Int32) i elems_per_thread
-          start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) start_offset iota_start
-          letBindNames'_ [patElemName iota_pe] $
-            BasicOp $ Iota (Var $ patElemName size) start (constant (1::Int32)) Int32
-        Disorder -> do
-          start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) i iota_start
-          letBindNames'_ [patElemName iota_pe] $
-            BasicOp $ Iota (Var $ patElemName size) start num_is Int32
-fuseSplitIota _ _ = cannotSimplify
-
 fuseStreamIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Lore m ~ Wise InKernel) =>
                  TopDownRule m
 fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
-  | ([(iota_param, iota_start)], params_and_arrs) <-
+  | ([(iota_param, iota_start, iota_stride)], params_and_arrs) <-
       partitionEithers $ zipWith (isIota vtable) (groupStreamArrParams lam) arrs = do
 
       let (arr_params', arrs') = unzip params_and_arrs
@@ -301,10 +267,12 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
           offset = groupStreamChunkOffset lam
 
       body' <- insertStmsM $ do
+        offset' <- letSubExp "offset_by_stride" $
+          BasicOp $ BinOp (Mul Int32) (Var offset) iota_stride
         start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) (Var offset) iota_start
+            BasicOp $ BinOp (Add Int32) offset' iota_start
         letBindNames'_ [paramName iota_param] $
-          BasicOp $ Iota (Var chunk_size) start (constant (1::Int32)) Int32
+          BasicOp $ Iota (Var chunk_size) start iota_stride Int32
         return $ groupStreamLambdaBody lam
       let lam' = lam { groupStreamArrParams = arr_params',
                        groupStreamLambdaBody = body'
@@ -312,11 +280,10 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
       letBind_ pat $ Op $ GroupStream w max_chunk lam' accs arrs'
 fuseStreamIota _ _ = cannotSimplify
 
-isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp) (a, VName)
+isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp, SubExp) (a, VName)
 isIota vtable chunk arr
-  | Just (BasicOp (Iota _ x (Constant s) Int32)) <- ST.lookupExp arr vtable,
-    oneIsh s =
-      Left (chunk, x)
+  | Just (BasicOp (Iota _ x s Int32)) <- ST.lookupExp arr vtable =
+      Left (chunk, x, s)
   | otherwise =
       Right (chunk, arr)
 
@@ -390,7 +357,10 @@ distributeKernelResults (vtable, used)
         remaining_slice <- drop (length kspace_slice) slice,
         all (isJust . flip ST.lookup vtable) $ HS.toList $ freeIn remaining_slice,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
-          let outer_slice = map (DimSlice (constant (0::Int32)) . snd) $
+          let outer_slice = map (\(_, d) -> DimSlice
+                                            (constant (0::Int32))
+                                            d
+                                            (constant (1::Int32))) $
                             spaceDimensions kspace
               index kpe' = letBind_ (Pattern [] [kpe']) $ BasicOp $ Index (kcs<>cs) arr $
                            outer_slice <> remaining_slice
@@ -416,8 +386,36 @@ distributeKernelResults (vtable, used)
       where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
 distributeKernelResults _ _ = cannotSimplify
 
+simplifyKnownIterationStream :: (LocalScope (Lore m) m,
+                                 MonadBinder m, Lore m ~ Wise InKernel) =>
+                                TopDownRule m
+-- Remove GroupStreams over single-element arrays.  Not much to stream
+-- here, and no information to exploit.
+simplifyKnownIterationStream _ (Let pat _
+                                (Op (GroupStream (Constant v) _ lam accs arrs)))
+  | oneIsh v = do
+      let GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
+
+      letBindNames'_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
+
+      letBindNames'_ [chunk_offset] $ BasicOp $ SubExp $ constant (0::Int32)
+
+      forM_ (zip acc_params accs) $ \(p,a) ->
+        letBindNames'_ [paramName p] $ BasicOp $ SubExp a
+
+      forM_ (zip arr_params arrs) $ \(p,a) ->
+        letBindNames'_ [paramName p] $ BasicOp $ Index [] a $
+        fullSlice (paramType p)
+        [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
+
+      res <- bodyBind body
+      forM_ (zip (patternElements pat) res) $ \(pe,r) ->
+        letBindNames'_ [patElemName pe] $ BasicOp $ SubExp r
+simplifyKnownIterationStream _ _ = cannotSimplify
+
 inKernelRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Lore m ~ Wise InKernel) => RuleBook m
 inKernelRules = standardRules <>
-                RuleBook [fuseSplitIota, fuseStreamIota] []
+                RuleBook [fuseStreamIota,
+                          simplifyKnownIterationStream] []

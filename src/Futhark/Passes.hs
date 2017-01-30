@@ -12,6 +12,7 @@ where
 
 import Control.Category ((>>>), id)
 import Control.Monad.Except
+import Data.Maybe
 
 import Prelude hiding (id)
 
@@ -21,6 +22,7 @@ import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.Unstream
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExtractKernels
@@ -45,7 +47,7 @@ data CompilationMode = Executable
 
 standardPipeline :: CompilationMode -> Pipeline SOACS SOACS
 standardPipeline mode =
-  markEntryPoints mode >>>
+  checkForEntryPoints mode >>>
   passes [ simplifySOACS
          , inlineAggressively
          , removeDeadFunctions
@@ -60,19 +62,18 @@ standardPipeline mode =
          , simplifySOACS
          , removeDeadFunctions
          ]
-  where markEntryPoints :: CompilationMode -> Pipeline SOACS SOACS
-        markEntryPoints Library = id
-        markEntryPoints Executable =
-          onePass Pass { passName = "Mark main function"
-                       , passDescription = "Mark the main function as entry point"
-                       , passFunction = \(Prog ps) -> do checkForMain ps
-                                                         return $ Prog $ map setEntry ps
+  where checkForEntryPoints :: CompilationMode -> Pipeline SOACS SOACS
+        checkForEntryPoints Library = id
+        checkForEntryPoints Executable =
+          onePass Pass { passName = "Check for main function"
+                       , passDescription = "Check if an entry point exists"
+                       , passFunction = \prog -> do checkForMain $ progFunctions prog
+                                                    return prog
                        }
-        setEntry fd = fd { funDefEntryPoint = funDefName fd == defaultEntryPoint }
 
         checkForMain ps
-          | not $ any ((==defaultEntryPoint) . funDefName) ps =
-              throwError "No main function defined."
+          | not $ any (isJust . funDefEntryPoint) ps =
+              throwError "No entry points defined."
           | otherwise =
               return ()
 
@@ -99,6 +100,8 @@ gpuPipeline mode =
          , babysitKernels
          , simplifyKernels
          , tileLoops
+         , unstream
+         , simplifyKernels
          , performCSE True
          , simplifyKernels
          , inPlaceLowering

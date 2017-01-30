@@ -6,10 +6,8 @@ import Data.Maybe
 import Control.Category (id)
 import Control.Applicative
 import Control.Monad
-import Control.Monad.IO.Class
 import Data.Monoid
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import System.IO
 import System.Exit
 import System.Console.GetOpt
@@ -27,7 +25,7 @@ import qualified Futhark.Representation.Kernels as Kernels
 import Futhark.Representation.Kernels (Kernels)
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
-import Futhark.Representation.AST (Prog, pretty)
+import Futhark.Representation.AST (Prog, pretty, nameFromString)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 
@@ -39,6 +37,7 @@ import Futhark.Pass.Simplify
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.TileLoops
+import Futhark.Optimise.Unstream
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExpandAllocations
@@ -73,9 +72,9 @@ instance PP.Pretty UntypedPassState where
   ppr (Kernels prog) = PP.ppr prog
   ppr (ExplicitMemory prog) = PP.ppr prog
 
-data UntypedPass = UntypedPass (UntypedPassState
-                                -> PipelineConfig
-                                -> FutharkM UntypedPassState)
+newtype UntypedPass = UntypedPass (UntypedPassState
+                                  -> PipelineConfig
+                                  -> FutharkM UntypedPassState)
 
 data UntypedAction = SOACSAction (Action SOACS)
                    | KernelsAction (Action Kernels)
@@ -235,8 +234,8 @@ commandLineOptions =
        opts { futharkAction = ExplicitMemoryAction kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
   , Option "i" ["interpret"]
-    (NoArg $ Right $ \opts -> opts { futharkAction = SOACSAction
-                                                     interpretAction' })
+    (NoArg $ Right $ \opts -> opts { futharkAction =
+                                       SOACSAction $ interpretAction' $ nameFromString "main" })
     "Run the program via an interpreter."
      , Option [] ["range-analysis"]
        (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction rangeAction rangeAction rangeAction })
@@ -254,6 +253,7 @@ commandLineOptions =
   , kernelsPassOption inPlaceLowering []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
+  , kernelsPassOption unstream []
   , typedPassOption soacsProg Kernels extractKernels []
 
   , typedPassOption kernelsProg ExplicitMemory explicitAllocations "a"
@@ -288,8 +288,7 @@ main = mainWithOptions newConfig commandLineOptions compile
         compile _      _      =
           Nothing
         m file config = do
-          source <- liftIO $ T.readFile file
-          prog <- runPipelineOnSource (futharkConfig config) id file source
+          prog <- runPipelineOnProgram (futharkConfig config) id file
           runPolyPasses config prog
 
 runPolyPasses :: Config -> SOACS.Prog -> FutharkM ()

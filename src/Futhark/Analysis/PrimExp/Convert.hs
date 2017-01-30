@@ -50,7 +50,7 @@ primExpToSubExp s f e = letSubExp s =<< primExpToExp f e
 -- used to convert expressions that are not trivially 'PrimExp's.
 -- This includes constants and variable names, which are passed as
 -- 'SubExp's.
-primExpFromExp :: (Applicative m, Monad m) =>
+primExpFromExp :: Monad m =>
                   (Exp lore -> m (PrimExp v)) -> Exp lore -> m (PrimExp v)
 primExpFromExp f (BasicOp (BinOp op x y)) =
   BinOpExp op <$> primExpFromSubExpM f x <*> primExpFromSubExpM f y
@@ -64,7 +64,7 @@ primExpFromExp _ (BasicOp (SubExp (Constant v))) =
   return $ ValueExp v
 primExpFromExp f e = f e
 
-primExpFromSubExpM :: (Applicative m, Monad m) =>
+primExpFromSubExpM :: Monad m =>
                      (Exp lore -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
 primExpFromSubExpM f = primExpFromExp f . BasicOp . SubExp
 

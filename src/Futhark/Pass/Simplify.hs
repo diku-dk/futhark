@@ -20,8 +20,7 @@ import Futhark.Pass
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax
 
-simplify :: R.Attributes lore =>
-            (Prog lore -> State VNameSource (Prog lore))
+simplify :: (Prog lore -> State VNameSource (Prog lore))
          -> Pass lore lore
 simplify = simplePass "simplify" "Perform simple enabling optimisations."
 

@@ -11,18 +11,23 @@ import Data.Version
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State
+import Control.Monad.Except
 import Data.Monoid
+import qualified Data.HashMap.Lazy as HM
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
 import System.IO
 import System.Exit
+import System.Console.GetOpt
 
 import Prelude
 
 import Language.Futhark
 import Language.Futhark.Parser
 import Language.Futhark.TypeChecker
+import Futhark.MonadFreshNames
+import Futhark.Pipeline
 import Futhark.Interpreter
 import Futhark.Version
 import Futhark.Passes
@@ -39,7 +44,7 @@ banner = unlines [
   ]
 
 main :: IO ()
-main = mainWithOptions interpreterConfig [] run
+main = mainWithOptions interpreterConfig options run
   where run [prog] config = Just $ interpret config prog
         run []     _      = Just repl
         run _      _      = Nothing
@@ -55,19 +60,35 @@ repl = do
   putStrLn ""
   evalStateT (forever readEvalPrint) newInterpreterState
 
-interpret :: FutharkConfig -> FilePath -> IO ()
+interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram config (standardPipeline Executable) interpretAction'
+  runCompilerOnProgram newFutharkConfig (standardPipeline Executable) $
+  interpretAction' $ interpreterEntryPoint config
 
-interpreterConfig :: FutharkConfig
-interpreterConfig = newFutharkConfig
+newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
+
+interpreterConfig :: InterpreterConfig
+interpreterConfig = InterpreterConfig defaultEntryPoint
+
+options :: [FunOptDescr InterpreterConfig]
+options = [ Option "e" ["entry-point"]
+          (ReqArg (\entry -> Right $ \config ->
+                      config { interpreterEntryPoint = nameFromString entry })
+           "NAME")
+            "The entry point to execute."
+          ]
 
 data InterpreterState =
-  InterpreterState { interpProg :: UncheckedProg
+  InterpreterState { interpProg :: Prog
+                   , interpImports :: Imports
+                   , interpNameSource :: VNameSource
                    }
 
 newInterpreterState :: InterpreterState
-newInterpreterState = InterpreterState { interpProg = Prog [] }
+newInterpreterState = InterpreterState { interpProg = Prog []
+                                       , interpImports = mempty
+                                       , interpNameSource = blankNameSource
+                                       }
 
 type FutharkiM = StateT InterpreterState IO
 
@@ -85,6 +106,8 @@ readEvalPrint = do
         Just (cmdf, _) -> cmdf arg
     _ -> do
       prog <- gets interpProg
+      imports <- gets interpImports
+      src <- gets interpNameSource
       -- Read an expression.
       maybe_e <- liftIO $ parseExpIncrIO "input" line
       case maybe_e of
@@ -93,30 +116,31 @@ readEvalPrint = do
           -- Generate a 0-ary function with empty name with the
           -- expression as its body, append it to the stored program,
           -- then run it.
-          let mainfun = FunDef { funDefEntryPoint = True
-                               , funDefName = nameFromString ""
-                               , funDefRetType = NoInfo
-                               , funDefRetDecl = Nothing
-                               , funDefParams = []
-                               , funDefBody = e
-                               , funDefLocation = noLoc
-                               }
-              prog' = Prog $ progDecs prog ++ [FunOrTypeDec $ FunDec mainfun]
-          runProgram prog'
+          let mkOpen f = OpenDec (ModImport f noLoc) [] noLoc
+              opens = map mkOpen $ HM.keys imports
+              mainfun = FunBind { funBindEntryPoint = True
+                                , funBindName = nameFromString ""
+                                , funBindRetType = NoInfo
+                                , funBindRetDecl = Nothing
+                                , funBindParams = []
+                                , funBindBody = e
+                                , funBindLocation = noLoc
+                                }
+              prog' = Prog $ opens ++ [ValDec $ FunDec mainfun]
+          runProgram prog imports src prog'
 
-runProgram :: UncheckedProg -> FutharkiM ()
-runProgram prog = liftIO $
-  -- We type-check and internalise the program anew for every expression.
-  -- Inefficient, but oh well.
-  case checkProg prog of
+runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
+runProgram proglib imports src prog = liftIO $
+  case checkProg imports src prog of
     Left err -> print err
-    Right (prog', _, src) ->
-      case evalState (internaliseProg prog') src of
-        Left err -> print err
-        Right prog'' ->
-          case runFun (nameFromString "") [] prog'' of
-            Left err -> print err
-            Right vs -> mapM_ (putStrLn . pretty) vs
+    Right ((_, prog'), _, src') ->
+      let full_prog = Prog $ progDecs proglib ++ progDecs prog'
+      in case evalState (internaliseProg full_prog) src' of
+           Left err -> print err
+           Right prog'' ->
+             case runFun (nameFromString "") [] prog'' of
+               Left err -> print err
+               Right vs -> mapM_ (putStrLn . pretty) vs
 
 type Command = T.Text -> FutharkiM ()
 
@@ -142,17 +166,17 @@ Quit futharki.
 |]))]
   where loadCommand :: Command
         loadCommand file = do
-          parsed <- liftIO $ do
-            T.putStrLn $ "Reading " <> file
-            fmap (either (Left . show) Right) $
-              parseFuthark (T.unpack file) =<< T.readFile (T.unpack file)
-            `catch` \(err::IOException) -> return (Left $ show err)
-          case parsed of
-            Left err -> liftIO $ print err
-            Right prog ->
-              case checkProg prog of
-                Left err -> liftIO $ print err
-                Right _ -> modify $ \env -> env { interpProg = prog }
+          liftIO $ T.putStrLn $ "Reading " <> file
+          res <- liftIO $ runExceptT (readProgram $ T.unpack file)
+                 `catch` \(err::IOException) ->
+                 return (Left (CompileError (T.pack $ show err) mempty))
+          case res of
+            Left err -> liftIO $ dumpError newFutharkConfig err
+            Right (prog, _, imports, src) ->
+              modify $ \env -> env { interpProg = prog
+                                   , interpImports = imports
+                                   , interpNameSource = src
+                                   }
 
         helpCommand :: Command
         helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do

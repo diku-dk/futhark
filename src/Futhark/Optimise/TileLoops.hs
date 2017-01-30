@@ -7,6 +7,7 @@ module Futhark.Optimise.TileLoops
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Reader
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
@@ -30,11 +31,12 @@ tileLoops =
 
 optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 optimiseFunDef fundec = do
-  body' <- modifyNameSource $ runState m
+  body' <- modifyNameSource $ runState $
+           runReaderT m (scopeOfFParams (funDefParams fundec))
   return fundec { funDefBody = body' }
   where m = optimiseBody $ funDefBody fundec
 
-type TileM = State VNameSource
+type TileM = ReaderT (Scope Kernels) (State VNameSource)
 
 optimiseBody :: Body Kernels -> TileM (Body Kernels)
 optimiseBody (Body () bnds res) =
@@ -107,7 +109,7 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
           (Let pat attr (Op (GroupStream w max_chunk lam accs arrs)))
           | w == max_chunk,
             not $ null arrs,
-            FlatSpace gspace <- spaceStructure kspace,
+            FlatThreadSpace gspace <- spaceStructure kspace,
             chunk_size <- Var $ groupStreamChunkSize lam,
             arr_chunk_params <- groupStreamArrParams lam,
 
@@ -115,8 +117,7 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
               zipWithM (is2dTileable branch_variant kspace variance chunk_size)
               arrs arr_chunk_params = do
 
-          -- XXX: empty scope here.  Hopefully OK.
-          ((tile_size, tiled_group_size), tile_size_bnds) <- flip runBinderT mempty $ do
+          ((tile_size, tiled_group_size), tile_size_bnds) <- runBinder $ do
             tile_size <- letSubExp "tile_size" $ Op TileSize
             tiled_group_size <- letSubExp "tiled_group_size" $
                                 BasicOp $ BinOp (Mul Int32) tile_size tile_size
@@ -138,9 +139,9 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
           -- We have to recalculate number of workgroups and
           -- number of threads to fit the new workgroup size.
           ((num_threads, num_groups), num_bnds) <-
-            runBinderT (sufficientGroups gspace' tiled_group_size) mempty
+            runBinder $ sufficientGroups gspace' tiled_group_size
 
-          let kspace' = kspace { spaceStructure = NestedSpace gspace'
+          let kspace' = kspace { spaceStructure = NestedThreadSpace gspace'
                                , spaceGroupSize = tiled_group_size
                                , spaceNumThreads = num_threads
                                , spaceNumGroups = num_groups
@@ -190,7 +191,7 @@ is1dTileable branch_variant kspace variance block_size arr block_param = do
     (outer_block_param, kstms) <- tile1d kspace block_size block_param
     return ((kspace, []), outer_block_param, kstms)
 
-is1_5dTileable :: MonadFreshNames m =>
+is1_5dTileable :: (MonadFreshNames m, HasScope Kernels m) =>
                   Names -> KernelSpace -> VarianceTable
                -> SubExp -> VName -> LParam InKernel
                -> Maybe (m ((KernelSpace, [Stm Kernels]),
@@ -200,8 +201,9 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
   (inner_gtid, inner_gdim) <- invariantToInnermostDimension
   mk_structure <-
     case spaceStructure kspace of
-      NestedSpace{} -> Nothing
-      FlatSpace gtids_and_gdims ->
+      NestedThreadSpace{} -> Nothing
+      FlatGroupSpace{} -> Nothing
+      FlatThreadSpace gtids_and_gdims ->
         return $ do
           -- Force a functioning group size. XXX: not pretty.
           let n_dims = length gtids_and_gdims
@@ -221,9 +223,9 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
                 mkLet' [] [Ident inner_ldim $ Prim int32] $
                 If (Var smaller) smaller_body not_smaller_body [Prim int32]
 
-              structure = NestedSpace $ outer ++ [(inner_gtid, inner_gdim,
-                                                   inner_ltid, Var inner_ldim)]
-          ((num_threads, num_groups), num_bnds) <- flip runBinderT mempty $ do
+              structure = NestedThreadSpace $ outer ++ [(inner_gtid, inner_gdim,
+                                                         inner_ltid, Var inner_ldim)]
+          ((num_threads, num_groups), num_bnds) <- runBinder $ do
             threads_necessary <-
               letSubExp "threads_necessary" =<<
               foldBinOp (Mul Int32)

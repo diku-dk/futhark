@@ -54,7 +54,8 @@ data TestResult = Success
                 | Failure T.Text
                 deriving (Eq, Show)
 
-data TestCase = TestCase { testCaseProgram :: FilePath
+data TestCase = TestCase { _testCaseMode :: TestMode
+                         , testCaseProgram :: FilePath
                          , testCaseTest :: ProgramTest
                          , _testCasePrograms :: ProgConfig
                          , _testCaseOptions :: [String]
@@ -110,38 +111,52 @@ testMetrics program (StructureTest pipeline expected) = context "Checking metric
             _ -> return ()
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase program testcase progs extra_options) = do
+runTestCase (TestCase mode program testcase progs extra_options) = do
   forM_ (testExpectedStructure testcase) $ testMetrics program
 
   case testAction testcase of
 
-    CompileTimeFailure expected_error ->
-      forM_ (configTypeCheckers progs) $ \typeChecker ->
-        context ("Type-checking with " <> T.pack typeChecker) $ do
-          (code, _, err) <-
-            io $ readProcessWithExitCode typeChecker [program] ""
-          case code of
-           ExitSuccess -> throwError "Expected failure\n"
-           ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
-           ExitFailure 1 -> throwError err
-           ExitFailure _ -> checkError expected_error err
+    CompileTimeFailure expected_error -> do
+      let typeChecker = configTypeChecker progs
+      context ("Type-checking with " <> T.pack typeChecker) $ do
+        (code, _, err) <-
+          io $ readProcessWithExitCode typeChecker [program] ""
+        case code of
+         ExitSuccess -> throwError "Expected failure\n"
+         ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
+         ExitFailure 1 -> throwError err
+         ExitFailure _ -> checkError expected_error err
 
-    RunCases [] ->
-      forM_ (configCompilers progs) $ \compiler ->
-      context ("Compiling with " <> T.pack compiler) $
-      justCompileTestProgram compiler program
+    RunCases _ | mode == OnlyTypeCheck -> do
+      let typeChecker = configTypeChecker progs
+      context ("Type-checking with " <> T.pack typeChecker) $ do
+        (code, _, err) <-
+          io $ readProcessWithExitCode typeChecker [program] ""
+        case code of
+         ExitSuccess -> return ()
+         ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
+         ExitFailure _ -> throwError err
 
-    RunCases run_cases ->
-      forM_ run_cases $ \run -> context ("dataset " <> T.pack (runDescription run)) $ do
-        unless (runMode run `elem` [CompiledOnly, NoTravis]) $
-          forM_ (configInterpreters progs) $ \interpreter ->
-            context ("Interpreting with " <> T.pack interpreter) $
-              interpretTestProgram interpreter program run
+    RunCases ios -> do
+      -- Compile up-front and reuse same executable for several entry points.
+      let compiler = configCompiler progs
+      unless (mode == OnlyInterpret) $
+        context ("Compiling with " <> T.pack compiler) $
+        compileTestProgram compiler program
 
-        unless (runMode run == InterpretedOnly) $
-          forM_ (configCompilers progs) $ \compiler ->
-            context ("Compiling with " <> T.pack compiler) $
-              compileTestProgram extra_options compiler program run
+      mapM_ runInputOutputs ios
+
+  where
+    runInputOutputs (InputOutputs entry run_cases) =
+      forM_ run_cases $ \run -> context ("Entry point: " <> entry <> "; dataset: " <>
+                                         T.pack (runDescription run)) $ do
+        let interpreter = configInterpreter progs
+        unless (mode == OnlyCompile) $
+          context ("Interpreting with " <> T.pack interpreter) $
+            interpretTestProgram interpreter program entry run
+
+        context "Running compiled program" $
+          runCompiledTestProgram extra_options program entry run
 
 checkError :: ExpectedError -> T.Text -> TestM ()
 checkError (ThisError regex_s regex) err
@@ -161,18 +176,19 @@ runResult program ExitSuccess stdout_s _ =
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
-getExpectedResult :: (Functor m, MonadIO m) =>
+getExpectedResult :: MonadIO m =>
                      FilePath -> ExpectedResult Values
                   -> m (ExpectedResult [Value])
 getExpectedResult dir (Succeeds (Just vals)) = Succeeds . Just <$> getValues dir vals
 getExpectedResult _   (Succeeds Nothing) = return $ Succeeds Nothing
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
-interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()
-interpretTestProgram futharki program (TestRun _ inputValues expectedResult _) = do
+interpretTestProgram :: String -> FilePath -> T.Text -> TestRun -> TestM ()
+interpretTestProgram futharki program entry (TestRun _ inputValues expectedResult _) = do
   input <- T.unlines . map prettyText <$> getValues dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
-  (code, output, err) <- io $ readProcessWithExitCode futharki [program] input
+  (code, output, err) <-
+    io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] input
   case code of
     ExitFailure 127 ->
       throwError $ progNotFound $ T.pack futharki
@@ -180,10 +196,8 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult _) =
       compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
-compileTestProgram :: [String] -> String -> FilePath -> TestRun -> TestM ()
-compileTestProgram extra_options futharkc program (TestRun _ inputValues expectedResult _) = do
-  input <- getValuesText dir inputValues
-  expectedResult' <- getExpectedResult dir expectedResult
+compileTestProgram :: String -> FilePath -> TestM ()
+compileTestProgram futharkc program = do
   (futcode, _, futerr) <-
     io $ readProcessWithExitCode futharkc
     [program, "-o", binOutputf] ""
@@ -191,32 +205,25 @@ compileTestProgram extra_options futharkc program (TestRun _ inputValues expecte
     ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
     ExitFailure _   -> throwError futerr
     ExitSuccess     -> return ()
+  where binOutputf = program `replaceExtension` "bin"
+
+runCompiledTestProgram :: [String] -> String -> T.Text -> TestRun -> TestM ()
+runCompiledTestProgram extra_options program entry (TestRun _ inputValues expectedResult _) = do
+  input <- getValuesText dir inputValues
+  expectedResult' <- getExpectedResult dir expectedResult
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no path component.
   let binpath = "." </> binOutputf
-  context ("Running " <> T.pack (unwords $ binpath : extra_options)) $ do
+      entry_options = ["-e", T.unpack entry]
+  context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $ do
     (progCode, output, progerr) <-
-      io $ readProcessWithExitCode binpath extra_options input
+      io $ readProcessWithExitCode binpath (entry_options ++ extra_options) input
     withExceptT validating $
       compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
         validating = ("validating test result:\n"<>)
-
-justCompileTestProgram :: String -> FilePath -> TestM ()
-justCompileTestProgram futharkc program =
-  withExceptT compiling $ do
-    (futcode, _, futerr) <-
-      io $ readProcessWithExitCode futharkc
-      [program, "-o", binOutputf] mempty
-    case futcode of
-      ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
-      ExitFailure _   -> throwError futerr
-      ExitSuccess     -> return ()
-  where binOutputf = program `replaceExtension` "bin"
-
-        compiling = ("compiling:\n"<>)
 
 compareResult :: FilePath -> ExpectedResult [Value] -> RunResult
               -> TestM ()
@@ -269,30 +276,7 @@ doTest = catching . runTestM . runTestCase
 
 makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
-  TestCase file (applyMode mode spec) (configPrograms config) (configExtraOptions config)
-
-applyMode :: TestMode -> ProgramTest -> ProgramTest
-applyMode mode test =
-  test { testAction = applyModeToAction mode $ testAction test }
-
-applyModeToAction :: TestMode -> TestAction -> TestAction
-applyModeToAction _ a@CompileTimeFailure{} =
-  a
-applyModeToAction OnlyTypeCheck (RunCases _) =
-  RunCases []
-applyModeToAction mode (RunCases cases) =
-  RunCases $ mapMaybe (applyModeToCase mode) cases
-
-applyModeToCase :: TestMode -> TestRun -> Maybe TestRun
-applyModeToCase OnlyInterpret run
-  | CompiledOnly <- runMode run = Nothing
-  | otherwise = Just run { runMode = InterpretedOnly }
-applyModeToCase OnlyCompile run =
-  Just run { runMode = CompiledOnly }
-applyModeToCase OnTravis run | runMode run == NoTravis =
-  Nothing
-applyModeToCase _ run =
-  Just run
+  TestCase mode file spec (configPrograms config) (configExtraOptions config)
 
 runTest :: MVar TestCase -> MVar (TestCase, TestResult) -> IO ()
 runTest testmvar resmvar = forever $ do
@@ -341,7 +325,7 @@ runTests config paths = do
 
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar) included
-  isTTY <- (&& mode /= OnTravis) <$> hIsTerminalDevice stdout
+  isTTY <- (|| configUnbufferOutput config) <$> hIsTerminalDevice stdout
 
   let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
@@ -376,6 +360,7 @@ data TestConfig = TestConfig
                   , configExclude :: [T.Text]
                   , configExtraOptions :: [String]
                   -- ^ Extra options passed to the programs being run.
+                  , configUnbufferOutput :: Bool
                   }
 
 defaultConfig :: TestConfig
@@ -383,53 +368,41 @@ defaultConfig = TestConfig { configTestMode = Everything
                            , configExclude = [ "disable" ]
                            , configPrograms =
                              ProgConfig
-                             { configCompiler = Left "futhark-c"
-                             , configInterpreter = Left "futharki"
-                             , configTypeChecker = Left "futhark"
+                             { configCompiler = "futhark-c"
+                             , configInterpreter = "futharki"
+                             , configTypeChecker = "futhark"
                              }
                            , configExtraOptions = []
+                           , configUnbufferOutput = False
                            }
 
 data ProgConfig = ProgConfig
-                  { configCompiler :: Either FilePath [FilePath]
-                  , configInterpreter :: Either FilePath [FilePath]
-                  , configTypeChecker :: Either FilePath [FilePath]
+                  { configCompiler :: FilePath
+                  , configInterpreter :: FilePath
+                  , configTypeChecker :: FilePath
                   }
                   deriving (Show)
 
 changeProgConfig :: (ProgConfig -> ProgConfig) -> TestConfig -> TestConfig
 changeProgConfig f config = config { configPrograms = f $ configPrograms config }
 
-configCompilers :: ProgConfig -> [FilePath]
-configCompilers = either pure id . configCompiler
+setCompiler :: FilePath -> ProgConfig -> ProgConfig
+setCompiler compiler config =
+  config { configCompiler = compiler }
 
-configInterpreters :: ProgConfig -> [FilePath]
-configInterpreters = either pure id . configInterpreter
+setInterpreter :: FilePath -> ProgConfig -> ProgConfig
+setInterpreter interpreter config =
+  config { configInterpreter = interpreter }
 
-configTypeCheckers :: ProgConfig -> [FilePath]
-configTypeCheckers = either pure id . configTypeChecker
-
-addCompiler :: FilePath -> ProgConfig -> ProgConfig
-addCompiler compiler config = case configCompiler config of
-  Left _ -> config { configCompiler = Right [compiler] }
-  Right existing -> config { configCompiler = Right $ compiler : existing }
-
-addInterpreter :: FilePath -> ProgConfig -> ProgConfig
-addInterpreter interpreter config = case configInterpreter config of
-  Left _ -> config { configInterpreter = Right [interpreter] }
-  Right existing -> config { configInterpreter = Right $ interpreter : existing }
-
-addTypeChecker :: FilePath -> ProgConfig -> ProgConfig
-addTypeChecker typeChecker config = case configTypeChecker config of
-  Left _ -> config { configTypeChecker = Right [typeChecker] }
-  Right existing -> config { configTypeChecker = Right $ typeChecker : existing }
+setTypeChecker :: FilePath -> ProgConfig -> ProgConfig
+setTypeChecker typeChecker config =
+  config { configTypeChecker = typeChecker }
 
 data TestMode = OnlyTypeCheck
               | OnlyCompile
               | OnlyInterpret
-              | OnTravis
               | Everything
-              deriving (Eq)
+              deriving (Eq, Show)
 
 commandLineOptions :: [FunOptDescr TestConfig]
 commandLineOptions = [
@@ -443,21 +416,22 @@ commandLineOptions = [
     (NoArg $ Right $ \config -> config { configTestMode = OnlyCompile })
     "Only run compiled code"
   , Option [] ["travis"]
-    (NoArg $ Right $ \config -> config { configTestMode = OnTravis
-                                       , configExclude = T.pack "notravis" :
-                                                         configExclude config })
+    (NoArg $ Right $ \config -> config { configExclude = T.pack "notravis" :
+                                                         configExclude config
+                                       , configUnbufferOutput = True
+                                       })
     "Only run compiled code not marked notravis"
 
   , Option [] ["typechecker"]
-    (ReqArg (Right . changeProgConfig . addTypeChecker)
+    (ReqArg (Right . changeProgConfig . setTypeChecker)
      "PROGRAM")
     "What to run for type-checking (defaults to 'futhark')."
   , Option [] ["compiler"]
-    (ReqArg (Right . changeProgConfig . addCompiler)
+    (ReqArg (Right . changeProgConfig . setCompiler)
      "PROGRAM")
     "What to run for code generation (defaults to 'futhark-c')."
   , Option [] ["interpreter"]
-    (ReqArg (Right . changeProgConfig . addInterpreter)
+    (ReqArg (Right . changeProgConfig . setInterpreter)
      "PROGRAM")
     "What to run for interpretation (defaults to 'futharki')."
   , Option [] ["exclude"]
