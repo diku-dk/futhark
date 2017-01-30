@@ -105,6 +105,7 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
+                   Futhark.MemoryBlockMerging
                    Futhark.MonadFreshNames
                    Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
@@ -126,6 +127,9 @@ Library
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.TileLoops
+                   Futhark.Optimise.MemBlkMerging.DataStructs
+                   Futhark.Optimise.MemBlkMerging.LastUse
+                   Futhark.Optimise.MemBlkMerging.ArrayCoalescing
                    Futhark.Pass
                    Futhark.Passes
                    Futhark.Pass.ExpandAllocations

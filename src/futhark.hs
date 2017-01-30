@@ -244,6 +244,9 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
+  , Option [] ["memory-playground"]
+    (NoArg $ Right $ \opts -> opts { futharkAction = ExplicitMemoryAction memoryAction })
+    "Memory block playground."
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAggressively []

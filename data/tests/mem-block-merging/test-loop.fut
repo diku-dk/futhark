@@ -1,17 +1,18 @@
 -- Test1 Memory-Block Merging
 -- ==
--- input { [0, 3, 5, 7, 9] }
--- output { [6291264i32, 6291456i32, 6291584i32, 6291712i32, 6291840i32, 0i32, 6i32, 10i32, 14i32, 18i32]}
+-- input { [0, 3, 5, 7, 9, 11] }
+-- output { [0i32, 384i32, 640i32, 896i32, 1152i32, 1408i32, 14i32, 18i32, 22i32] }
 
 fun main(x: [n]int): []int =
   let y = map (*2) x in
+  let y'= reshape (2,n/2) y
   loop(a=y) = for i < n do
       let b = map (*2) a
-      let c = map (+ (b[1])) b
-      let d = map (+ (c[1])) c
-      let e = map (+ (d[1])) d
+      let c = map (+ (b[0])) b
+      let d = map (+ (c[0])) c
+      let e = map (+ (d[0])) d
       in  e
   in
-  let w = concat a y
+  let w = concat a (y'[1])
   in w
 
