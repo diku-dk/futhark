@@ -1,10 +1,6 @@
 ;;; futhark-mode.el --- major mode for editing Futhark source files
 
-;; Copyright (C) DIKU 2013-2016, University of Copenhagen
-;;   Written by Troels Henriksen (athas@sigkill.dk) in 2013.
-;;   Improved by Niels G. W. Serup (ngws@metanohi.name) in 2014.
-;;   Improved by Rasmus Wriedt Larsen in 2015.
-;;   Improved by Niels G. W. Serup again in 2016.
+;; Copyright (C) DIKU 2013-2017, University of Copenhagen
 
 ;;; Commentary:
 ;; This mode provides syntax highlighting and automatic indentation for
@@ -35,7 +31,7 @@
 
 ;;; Code:
 
-(require 'cl) ; incf, some
+(require 'cl) ; `some'
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
@@ -49,8 +45,8 @@
 
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with" "type"
-    "fun" "val" "entry" "fn" "for" "while" "do" "op" "not"
-    "empty" "unsafe" "default" "include" "struct")
+    "fun" "val" "entry" "for" "while" "do"
+    "empty" "unsafe" "default" "include" "import" "module" "open")
   "All Futhark keywords.")
 
 (defconst futhark-builtin-functions
@@ -136,7 +132,7 @@
       (,(concat "let" ws1
                 "\\(" futhark-var "\\)")
        . '(1 font-lock-variable-name-face))
-      ;;;; Tuples.  TODO: It would be nice to highlight only the variable names
+      ;;;; Tuples.  FIXME: It would be nice to highlight only the variable names
       ;;;; inside the parantheses, and not also the commas.
       (,(concat "let" ws1 "("
                 "\\(" "[^)]+" "\\)")
@@ -193,6 +189,7 @@
     ;; of the word class.
     (modify-syntax-entry ?' "w" st)
     (modify-syntax-entry ?_ "w" st)
+    (modify-syntax-entry ?\\ "_" st)
     st)
   "Syntax table used in `futhark-mode'.")
 
@@ -229,20 +226,26 @@ In general, prefer as little indentation as possible."
             (forward-comment (count-lines (point-min) (point)))
             (current-column))
 
-       ;; Align global definitions and headers to nearest struct definition or
+       ;; Align global definitions and headers to nearest module definition or
        ;; column 0.
        (and (or (futhark-looking-at-word "fun")
                 (futhark-looking-at-word "entry")
                 (futhark-looking-at-word "type")
                 (futhark-looking-at-word "val")
-                (futhark-looking-at-word "struct")
+                (futhark-looking-at-word "module")
                 (futhark-looking-at-word "include")
+                (futhark-looking-at-word "import")
                 (futhark-looking-at-word "default"))
             (or
              (save-excursion
                (and
                 (ignore-errors (backward-up-list 1) t)
-                (futhark-keyword-backward "struct")
+                (looking-at "{")
+                (or
+                 (futhark-keyword-backward "module")
+                 (and
+                  (ignore-errors (backward-up-list 1) t)
+                  (futhark-keyword-backward "module")))
                 (+ futhark-indent-level (current-column))))
              0))
 
@@ -254,7 +257,8 @@ In general, prefer as little indentation as possible."
                 (backward-up-list 1)
                 (current-column))))
 
-       ;; Align closing curly brackets to the matching opening 'struct' keyword.
+       ;; Align closing curly brackets to the matching opening 'module'
+       ;; keyword.
        (save-excursion
          (and (looking-at "}")
               (ignore-errors

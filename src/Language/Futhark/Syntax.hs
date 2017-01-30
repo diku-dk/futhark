@@ -21,8 +21,11 @@ module Language.Futhark.Syntax
   , DimDecl (..)
   , ShapeDecl (..)
   , Rank (..)
+  , TypeName
+  , typeNameFromQualName
+  , qualNameFromTypeName
   , TypeBase(..)
-  , UserType(..)
+  , TypeExp(..)
   , TupleArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
@@ -39,7 +42,6 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
-  , UnOp (..)
   , BinOp (..)
   , IdentBase (..)
   , DimIndexBase(..)
@@ -51,18 +53,22 @@ module Language.Futhark.Syntax
   , PatternBase(..)
   , StreamForm(..)
 
+  -- * Module language
+  , SpecBase(..)
+  , SigExpBase(..)
+  , TypeRefBase(..)
+  , SigBindBase(..)
+  , ModExpBase(..)
+  , StructBindBase(..)
+  , FunctorBindBase(..)
+
   -- * Definitions
-  , FunDefBase(..)
-  , ConstDefBase(..)
-  , TypeDefBase(..)
-  , SigDefBase(..)
-  , SigDeclBase(..)
-  , ModDefBase(..)
+  , FunBindBase(..)
+  , ConstBindBase(..)
+  , ValDecBase(..)
+  , TypeBindBase(..)
   , ProgBase(..)
-  , ProgBaseWithHeaders(..)
-  , ProgHeader(..)
   , DecBase(..)
-  , FunOrTypeDecBase(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -77,6 +83,7 @@ import           Data.Array
 import           Data.Foldable
 import           Data.Functor
 import           Data.Hashable
+import qualified Data.HashMap.Lazy                as HM
 import qualified Data.HashSet                     as HS
 import           Data.Loc
 import           Data.Monoid
@@ -92,10 +99,12 @@ import           Language.Futhark.Core
 class (Show vn,
        Show (f vn),
        Show (f (CompTypeBase vn)),
-       Show (f (StructTypeBase vn))) => Showable f vn where
+       Show (f (StructTypeBase vn)),
+       Show (f (HM.HashMap VName VName)),
+       Show (f ([CompTypeBase vn], CompTypeBase vn))) => Showable f vn where
 
--- | No information.  Usually used for placeholder type- or aliasing
--- information.
+-- | No information functor.  Usually used for placeholder type- or
+-- aliasing information.
 data NoInfo a = NoInfo
               deriving (Eq, Ord, Show)
 
@@ -165,14 +174,14 @@ newtype ShapeDecl vn = ShapeDecl { shapeDims :: [DimDecl vn] }
                      deriving (Eq, Ord, Show)
 
 -- | The rank of an array as a positive natural number.
-newtype Rank vn = Rank Int
-                deriving (Eq, Ord, Show)
+newtype Rank = Rank Int
+             deriving (Eq, Ord, Show)
 
-instance Monoid (Rank vn) where
+instance Monoid Rank where
   mempty = Rank 0
   Rank n `mappend` Rank m = Rank $ n + m
 
-instance ArrayShape (Rank vn) where
+instance ArrayShape Rank where
   shapeRank (Rank n) = n
   stripDims i (Rank n) | i < n     = Just $ Rank $ n - i
                        | otherwise = Nothing
@@ -187,84 +196,105 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
     | i < length l = Just $ ShapeDecl $ drop i l
     | otherwise    = Nothing
 
+-- | A type name consists of qualifiers (for error messages) and a
+-- 'VName' (for equality checking).
+data TypeName = TypeName [Name] VName
+              deriving (Show)
+
+instance Eq TypeName where
+  TypeName _ x == TypeName _ y = x == y
+
+instance Ord TypeName where
+  TypeName _ x `compare` TypeName _ y = x `compare` y
+
+typeNameFromQualName :: QualName VName -> TypeName
+typeNameFromQualName (QualName qs x) = TypeName qs x
+
+qualNameFromTypeName :: TypeName -> QualName VName
+qualNameFromTypeName (TypeName qs x) = QualName qs x
+
 -- | Types that can be elements of tuple-arrays.
-data TupleArrayElemTypeBase shape as vn =
-    PrimArrayElem PrimType (as vn) Uniqueness
-  | ArrayArrayElem (ArrayTypeBase shape as vn)
-  | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
+data TupleArrayElemTypeBase shape as =
+    PrimArrayElem PrimType as Uniqueness
+  | ArrayArrayElem (ArrayTypeBase shape as)
+  | PolyArrayElem TypeName as Uniqueness
+  | TupleArrayElem [TupleArrayElemTypeBase shape as]
   deriving (Show)
 
-instance Eq (shape vn) =>
-         Eq (TupleArrayElemTypeBase shape as vn) where
+instance Eq shape =>
+         Eq (TupleArrayElemTypeBase shape as) where
   PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
+  PolyArrayElem bt1 _ u1 == PolyArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
   ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
   TupleArrayElem ts1     == TupleArrayElem ts2     = ts1 == ts2
   _                      == _                      = False
 
 -- | An array type.
-data ArrayTypeBase shape as vn =
-    PrimArray PrimType (shape vn) Uniqueness (as vn)
+data ArrayTypeBase shape as =
+    PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
-  | TupleArray [TupleArrayElemTypeBase shape as vn] (shape vn) Uniqueness
+  | PolyArray TypeName shape Uniqueness as
+    -- ^ An array whose elements are some polymorphic type.
+  | TupleArray [TupleArrayElemTypeBase shape as] shape Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
 
-instance Eq (shape vn) =>
-         Eq (ArrayTypeBase shape as vn) where
+instance Eq shape =>
+         Eq (ArrayTypeBase shape as) where
   PrimArray et1 dims1 u1 _ == PrimArray et2 dims2 u2 _ =
+    et1 == et2 && dims1 == dims2 && u1 == u2
+  PolyArray et1 dims1 u1 _ == PolyArray et2 dims2 u2 _ =
     et1 == et2 && dims1 == dims2 && u1 == u2
   TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
     ts1 == ts2 && dims1 == dims2 && u1 == u2
   _ == _ =
     False
 
--- | A Futhark type is either an array, a prim type, or a tuple.  When
--- comparing types for equality with '==', aliases are ignored, but
--- dimensions much match.
-data TypeBase shape as vn = Prim PrimType
-                          | Array (ArrayTypeBase shape as vn)
-                          | Tuple [TypeBase shape as vn]
+-- | An expanded Futhark type is either an array, a prim type, a
+-- tuple, or a type variable.  When comparing types for equality with
+-- '==', aliases are ignored, but dimensions much match.
+data TypeBase shape as = Prim PrimType
+                       | Array (ArrayTypeBase shape as)
+                       | Tuple [TypeBase shape as]
+                       | TypeVar TypeName
                           deriving (Eq, Show)
-
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
-type CompTypeBase = TypeBase Rank Names
+type CompTypeBase vn = TypeBase Rank (Names vn)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
-data UserType vn = UserPrim PrimType SrcLoc
-                 | UserArray (UserType vn) (DimDecl vn) SrcLoc
-                 | UserTuple [UserType vn] SrcLoc
-                 | UserTypeAlias (QualName vn) SrcLoc
-                 | UserUnique (UserType vn) SrcLoc
+data TypeExp vn = TEVar (QualName vn) SrcLoc
+                | TETuple [TypeExp vn] SrcLoc
+                | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
+                | TEUnique (TypeExp vn) SrcLoc
                  deriving (Eq, Show)
 
-instance Located (UserType vn) where
-  locOf (UserPrim _ loc)      = locOf loc
-  locOf (UserArray _ _ loc)   = locOf loc
-  locOf (UserTuple _ loc)     = locOf loc
-  locOf (UserTypeAlias _ loc) = locOf loc
-  locOf (UserUnique _ loc)    = locOf loc
+instance Located (TypeExp vn) where
+  locOf (TEArray _ _ loc) = locOf loc
+  locOf (TETuple _ loc)   = locOf loc
+  locOf (TEVar _ loc)     = locOf loc
+  locOf (TEUnique _ loc)  = locOf loc
 
 --
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
 
-type StructTypeBase = TypeBase ShapeDecl NoInfo
+type StructTypeBase vn = TypeBase (ShapeDecl vn) ()
 
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
-type DeclArrayTypeBase = ArrayTypeBase ShapeDecl NoInfo
+type DeclArrayTypeBase vn = ArrayTypeBase (ShapeDecl vn) ()
 
 -- | A tuple array element type with shape annotations and no aliasing
 -- information, used for declarations.
-type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
+type DeclTupleArrayElemTypeBase vn = TupleArrayElemTypeBase (ShapeDecl vn) ()
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
-  TypeDecl { declaredType :: UserType vn
+  TypeDecl { declaredType :: TypeExp vn
                              -- ^ The type declared by the user.
            , expandedType :: f (StructTypeBase vn)
                              -- ^ The type deduced by the type checker.
@@ -285,7 +315,7 @@ data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
 -- type is always unambiguous.
 data Value = PrimValue !PrimValue
            | TupValue ![Value]
-           | ArrayValue !(Array Int Value) (TypeBase Rank NoInfo ())
+           | ArrayValue !(Array Int Value) (TypeBase Rank ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
              deriving (Eq, Show)
@@ -307,18 +337,7 @@ instance Located (IdentBase ty vn) where
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
--- | Unary operators.
-data UnOp = Not
-          | Negate
-          | Complement
-          | Abs
-          | Signum
-          | ToFloat FloatType
-          | ToSigned IntType
-          | ToUnsigned IntType
-          deriving (Eq, Ord, Show)
-
--- | Binary operators.
+-- | Default binary operators.
 data BinOp = Plus -- Binary Ops for Numbers
            | Minus
            | Pow
@@ -346,12 +365,21 @@ data BinOp = Plus -- Binary Ops for Numbers
 
 -- | An indexing of a single dimension.
 data DimIndexBase f vn = DimFix (ExpBase f vn)
-                       | DimSlice (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn))
+                       | DimSlice (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn))
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.
-newtype QualName vn = QualName ([Name], vn)
-  deriving (Eq, Ord, Show, Hashable)
+data QualName vn = QualName { qualQuals :: ![Name]
+                            , qualLeaf  :: !vn
+                            }
+  deriving (Eq, Ord, Show)
+
+instance Functor QualName where
+  fmap f (QualName qs leaf) = QualName qs $ f leaf
+
+instance Hashable vn => Hashable (QualName vn) where
+  hashWithSalt salt (QualName quals leaf) =
+    hashWithSalt salt (quals, leaf)
 
 -- | The Futhark expression language.
 --
@@ -361,7 +389,7 @@ newtype QualName vn = QualName ([Name], vn)
 -- This allows us to encode whether or not the expression has been
 -- type-checked in the Haskell type of the expression.  Specifically,
 -- the parser will produce expressions of type @Exp 'NoInfo' 'Name'@,
--- and the type checker will convert these to @Exp 'Type' 'VName'@, in
+-- and the type checker will convert these to @Exp 'Info' 'VName'@, in
 -- which type information is always present and all names are unique.
 data ExpBase f vn =
               Literal PrimValue SrcLoc
@@ -383,6 +411,9 @@ data ExpBase f vn =
 
             | Apply  (QualName vn) [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
 
+            | Negate (ExpBase f vn) SrcLoc
+              -- ^ Numeric negation (ugly special case; Haskell did it first).
+
             | DoLoop
               (PatternBase f vn) -- Merge variable pattern
               (ExpBase f vn) -- Initial values of merge variables.
@@ -391,8 +422,9 @@ data ExpBase f vn =
               (ExpBase f vn) -- Let-body.
               SrcLoc
 
-            | BinOp BinOp (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
-            | UnOp UnOp (ExpBase f vn) SrcLoc
+            | BinOp (QualName vn) (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f (CompTypeBase vn)) SrcLoc
+
+            | TupleProject Int (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
@@ -402,9 +434,6 @@ data ExpBase f vn =
             | Index (ExpBase f vn)
                     [DimIndexBase f vn]
                     SrcLoc
-
-            | TupleIndex (ExpBase f vn) Int (f (CompTypeBase vn)) SrcLoc
-            -- ^ Extract the specified component from a tuple.
 
             | Shape (ExpBase f vn) SrcLoc
             -- ^ The shape of the argument.
@@ -518,45 +547,45 @@ data ExpBase f vn =
 deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
-                     | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
+                     | RedLike    StreamOrd Commutativity (LambdaBase f vn)
                      | Sequential (ExpBase f vn)
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
-  locOf (Literal _ loc)         = locOf loc
-  locOf (TupLit _ pos)          = locOf pos
-  locOf (ArrayLit _ _ pos)      = locOf pos
-  locOf (Empty _ pos)           = locOf pos
-  locOf (BinOp _ _ _ _ pos)     = locOf pos
-  locOf (UnOp _ _ pos)          = locOf pos
-  locOf (If _ _ _ _ pos)        = locOf pos
-  locOf (Var _ _ loc)           = locOf loc
-  locOf (Apply _ _ _ pos)       = locOf pos
-  locOf (LetPat _ _ _ pos)      = locOf pos
-  locOf (LetWith _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ pos)         = locOf pos
-  locOf (TupleIndex _ _ _ pos)  = locOf pos
-  locOf (Iota _ pos)            = locOf pos
-  locOf (Shape _ pos)           = locOf pos
-  locOf (Replicate _ _ pos)     = locOf pos
-  locOf (Reshape _ _ pos)       = locOf pos
-  locOf (Transpose _ pos)       = locOf pos
-  locOf (Rearrange _ _ pos)     = locOf pos
-  locOf (Rotate _ _ _ pos)      = locOf pos
-  locOf (Map _ _ pos)           = locOf pos
-  locOf (Reduce _ _ _ _ pos)    = locOf pos
-  locOf (Zip _ _ _ pos)         = locOf pos
-  locOf (Unzip _ _ pos)         = locOf pos
-  locOf (Scan _ _ _ pos)        = locOf pos
-  locOf (Filter _ _ pos)        = locOf pos
-  locOf (Partition _ _ pos)     = locOf pos
-  locOf (Split _ _ _ pos)       = locOf pos
-  locOf (Concat _ _ _ pos)      = locOf pos
-  locOf (Copy _ pos)            = locOf pos
-  locOf (DoLoop _ _ _ _ _ pos)  = locOf pos
-  locOf (Stream _ _ _  pos)     = locOf pos
-  locOf (Unsafe _ loc)          = locOf loc
-  locOf (Write _ _ _ loc)       = locOf loc
+  locOf (Literal _ loc)          = locOf loc
+  locOf (TupLit _ pos)           = locOf pos
+  locOf (TupleProject _ _ _ pos) = locOf pos
+  locOf (ArrayLit _ _ pos)       = locOf pos
+  locOf (Empty _ pos)            = locOf pos
+  locOf (BinOp _ _ _ _ pos)      = locOf pos
+  locOf (If _ _ _ _ pos)         = locOf pos
+  locOf (Var _ _ loc)            = locOf loc
+  locOf (Negate _ pos)           = locOf pos
+  locOf (Apply _ _ _ pos)        = locOf pos
+  locOf (LetPat _ _ _ pos)       = locOf pos
+  locOf (LetWith _ _ _ _ _ pos)  = locOf pos
+  locOf (Index _ _ pos)          = locOf pos
+  locOf (Iota _ pos)             = locOf pos
+  locOf (Shape _ pos)            = locOf pos
+  locOf (Replicate _ _ pos)      = locOf pos
+  locOf (Reshape _ _ pos)        = locOf pos
+  locOf (Transpose _ pos)        = locOf pos
+  locOf (Rearrange _ _ pos)      = locOf pos
+  locOf (Rotate _ _ _ pos)       = locOf pos
+  locOf (Map _ _ pos)            = locOf pos
+  locOf (Reduce _ _ _ _ pos)     = locOf pos
+  locOf (Zip _ _ _ pos)          = locOf pos
+  locOf (Unzip _ _ pos)          = locOf pos
+  locOf (Scan _ _ _ pos)         = locOf pos
+  locOf (Filter _ _ pos)         = locOf pos
+  locOf (Partition _ _ pos)      = locOf pos
+  locOf (Split _ _ _ pos)        = locOf pos
+  locOf (Concat _ _ _ pos)       = locOf pos
+  locOf (Copy _ pos)             = locOf pos
+  locOf (DoLoop _ _ _ _ _ pos)   = locOf pos
+  locOf (Stream _ _ _  pos)      = locOf pos
+  locOf (Unsafe _ loc)           = locOf loc
+  locOf (Write _ _ _ loc)        = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (LowerBoundBase f vn) (IdentBase f vn) (ExpBase f vn)
@@ -578,27 +607,25 @@ deriving instance Showable f vn => Show (LowerBoundBase f vn)
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
-                      | CurryFun (QualName vn) [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+                      | CurryFun (QualName vn) [ExpBase f vn] (f ([CompTypeBase vn], CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
-                      | UnOpFun UnOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
-                        -- ^ @-@; first type is operand, second is result.
-                      | BinOpFun BinOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | BinOpFun (QualName vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+@; first two types are operands, third is result.
-                      | CurryBinOpLeft BinOp (ExpBase f vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | CurryBinOpLeft (QualName vn) (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @2+@; first type is operand, second is result.
-                      | CurryBinOpRight BinOp (ExpBase f vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | CurryBinOpRight (QualName vn) (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+2@; first type is operand, second is result.
 deriving instance Showable f vn => Show (LambdaBase f vn)
 
 instance Located (LambdaBase f vn) where
   locOf (AnonymFun _ _ _ _ loc)       = locOf loc
   locOf (CurryFun  _ _ _ loc)         = locOf loc
-  locOf (UnOpFun _ _ _ loc)           = locOf loc
   locOf (BinOpFun _ _ _ _ loc)        = locOf loc
   locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
 
--- | Tuple IdentBaseifier, i.e., pattern matching
+-- | A pattern as used most places where variables are bound (function
+-- parameters, @let@ expressions, etc).
 data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
                       | Id (IdentBase f vn)
                       | Wildcard (f (CompTypeBase vn)) SrcLoc -- Nothing, i.e. underscore.
@@ -612,98 +639,147 @@ instance Located (PatternBase f vn) where
   locOf (PatternAscription p _) = locOf p
 
 -- | Function Declarations
-data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
+data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
-                              , funDefName       :: vn
-                              , funDefRetDecl    :: Maybe (UserType vn)
-                              , funDefRetType    :: f (StructTypeBase vn)
-                              , funDefParams     :: [PatternBase f vn]
-                              , funDefBody       :: ExpBase f vn
-                              , funDefLocation   :: SrcLoc
-                              }
-deriving instance Showable f vn => Show (FunDefBase f vn)
+                                , funBindName       :: vn
+                                , funBindRetDecl    :: Maybe (TypeExp vn)
+                                , funBindRetType    :: f (StructTypeBase vn)
+                                , funBindParams     :: [PatternBase f vn]
+                                , funBindBody       :: ExpBase f vn
+                                , funBindLocation   :: SrcLoc
+                                }
+deriving instance Showable f vn => Show (FunBindBase f vn)
 
-instance Located (FunDefBase f vn) where
-  locOf = locOf . funDefLocation
+instance Located (FunBindBase f vn) where
+  locOf = locOf . funBindLocation
 
 -- | Constant declaration
-data ConstDefBase f vn = ConstDef { constDefName     :: vn
-                                  , constDefType     :: TypeDeclBase f vn
-                                  , constDefDef      :: ExpBase f vn
-                                  , constDefLocation :: SrcLoc
-                                  }
-deriving instance Showable f vn => Show (ConstDefBase f vn)
+data ConstBindBase f vn = ConstBind { constBindName     :: vn
+                                    , constBindTypeDecl :: Maybe (TypeExp vn)
+                                    , constBindType     :: f (StructTypeBase vn)
+                                    , constBindDef      :: ExpBase f vn
+                                    , constBindLocation :: SrcLoc
+                                    }
+deriving instance Showable f vn => Show (ConstBindBase f vn)
 
-instance Located (ConstDefBase f vn) where
-  locOf = locOf . constDefLocation
+instance Located (ConstBindBase f vn) where
+  locOf = locOf . constBindLocation
 
 -- | Type Declarations
-data TypeDefBase f vn = TypeDef { typeAlias       :: vn
-                                , userType        :: TypeDeclBase f vn
-                                , typeDefLocation :: SrcLoc
-                                }
-deriving instance Showable f vn => Show (TypeDefBase f vn)
+data TypeBindBase f vn = TypeBind { typeAlias        :: vn
+                                  , typeExp          :: TypeDeclBase f vn
+                                  , typeBindLocation :: SrcLoc
+                                  }
+deriving instance Showable f vn => Show (TypeBindBase f vn)
 
+instance Located (TypeBindBase f vn) where
+  locOf = locOf . typeBindLocation
 
-data SigDefBase f vn = SigDef { sigName        :: vn
-                              , sigDecls       :: [SigDeclBase f vn]
-                              , sigDefLocation :: SrcLoc
+data SpecBase f vn = ValSpec  { specName     :: vn
+                              , specParams   :: [TypeDeclBase f vn]
+                              , specRettype  :: TypeDeclBase f vn
+                              , specLocation :: SrcLoc
                               }
-deriving instance Showable f vn => Show (SigDefBase f vn)
+                   | TypeAbbrSpec (TypeBindBase f vn)
+                   | TypeSpec vn SrcLoc -- ^ Abstract type.
+                   | IncludeSpec (SigExpBase f vn) SrcLoc
+deriving instance Showable f vn => Show (SpecBase f vn)
 
-instance Located (SigDefBase f vn) where
-  locOf = locOf . sigDefLocation
+instance Located (SpecBase f vn) where
+  locOf (ValSpec _ _ _ loc)  = locOf loc
+  locOf (TypeAbbrSpec tbind) = locOf tbind
+  locOf (TypeSpec _ loc)     = locOf loc
+  locOf (IncludeSpec _ loc)  = locOf loc
 
-data SigDeclBase f vn = FunSig  { funSigName    :: vn
-                                , funSigParams  :: [TypeDeclBase f vn]
-                                , funSigRettype :: TypeDeclBase f vn
+data SigExpBase f vn = SigVar (QualName vn) SrcLoc
+                     | SigSpecs [SpecBase f vn] SrcLoc
+                     | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
+deriving instance Showable f vn => Show (SigExpBase f vn)
+
+-- | A type refinement.
+data TypeRefBase f vn = TypeRef (QualName vn) (TypeDeclBase f vn)
+deriving instance Showable f vn => Show (TypeRefBase f vn)
+
+instance Located (SigExpBase f vn) where
+  locOf (SigVar _ loc)    = locOf loc
+  locOf (SigSpecs _ loc)  = locOf loc
+  locOf (SigWith _ _ loc) = locOf loc
+
+data SigBindBase f vn = SigBind { sigName :: vn
+                                , sigExp  :: SigExpBase f vn
+                                , sigLoc  :: SrcLoc
                                 }
-                      | TypeSig (TypeDefBase f vn)
-deriving instance Showable f vn => Show (SigDeclBase f vn)
+deriving instance Showable f vn => Show (SigBindBase f vn)
 
-instance Located (TypeDefBase f vn) where
-  locOf = locOf . typeDefLocation
+instance Located (SigBindBase f vn) where
+  locOf = locOf . sigLoc
 
-data ModDefBase f vn = ModDef { modName        :: vn
-                              , modDecls       :: [DecBase f vn]
-                              , modDefLocation :: SrcLoc
-                              }
-deriving instance Showable f vn => Show (ModDefBase f vn)
+data ModExpBase f vn = ModVar (QualName vn) SrcLoc
+                     | ModImport FilePath SrcLoc
+                       -- ^ The contents of another file as a module.
+                     | ModDecs [DecBase f vn] SrcLoc
+                     | ModApply (QualName vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
+                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
+                       -- ^ Functor application.
+deriving instance Showable f vn => Show (ModExpBase f vn)
 
-instance Located (ModDefBase f vn) where
-  locOf = locOf . modDefLocation
+instance Located (ModExpBase f vn) where
+  locOf (ModVar _ loc)         = locOf loc
+  locOf (ModImport _ loc)      = locOf loc
+  locOf (ModDecs _ loc)        = locOf loc
+  locOf (ModApply _ _ _ loc)   = locOf loc
+  locOf (ModAscript _ _ _ loc) = locOf loc
 
-data FunOrTypeDecBase f vn = FunDec (FunDefBase f vn)
-                           | ConstDec (ConstDefBase f vn)
-                           | TypeDec (TypeDefBase f vn)
-deriving instance Showable f vn => Show (FunOrTypeDecBase f vn)
+data StructBindBase f vn =
+  StructBind { structName     :: vn
+             , structExp      :: ModExpBase f vn
+             , structLocation :: SrcLoc
+             }
+deriving instance Showable f vn => Show (StructBindBase f vn)
 
-instance Located (FunOrTypeDecBase f vn) where
-  locOf (FunDec d) = locOf d
+instance Located (StructBindBase f vn) where
+  locOf = locOf . structLocation
+
+data FunctorBindBase f vn = FunctorBind { functorName      :: vn
+                                        , functorParam     :: (vn, SigExpBase f vn)
+                                        , functorSignature :: Maybe (SigExpBase f vn)
+                                        , functorBody      :: ModExpBase f vn
+                                        , functorLocation  :: SrcLoc
+                                        }
+deriving instance Showable f vn => Show (FunctorBindBase f vn)
+
+instance Located (FunctorBindBase f vn) where
+  locOf = locOf . functorLocation
+
+-- | A top-level binding of a term variable to either a function or a
+-- constant.
+data ValDecBase f vn = FunDec (FunBindBase f vn)
+                     | ConstDec (ConstBindBase f vn)
+deriving instance Showable f vn => Show (ValDecBase f vn)
+
+instance Located (ValDecBase f vn) where
+  locOf (FunDec d)   = locOf d
   locOf (ConstDec d) = locOf d
-  locOf (TypeDec d) = locOf d
 
-data DecBase f vn = FunOrTypeDec (FunOrTypeDecBase f vn)
-                  | SigDec (SigDefBase f vn)
-                  | ModDec (ModDefBase f vn)
+-- | A top-level binding.
+data DecBase f vn = ValDec (ValDecBase f vn)
+                  | TypeDec (TypeBindBase f vn)
+                  | SigDec (SigBindBase f vn)
+                  | StructDec (StructBindBase f vn)
+                  | FunctorDec (FunctorBindBase f vn)
+                  | OpenDec (ModExpBase f vn) [ModExpBase f vn] SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
-  locOf (FunOrTypeDec d) = locOf d
-  locOf (SigDec d) = locOf d
-  locOf (ModDec d) = locOf d
+  locOf (ValDec d)        = locOf d
+  locOf (TypeDec d)       = locOf d
+  locOf (SigDec d)        = locOf d
+  locOf (StructDec d)     = locOf d
+  locOf (FunctorDec d)    = locOf d
+  locOf (OpenDec _ _ loc) = locOf loc
 
-data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
+newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)
-
-data ProgBaseWithHeaders f vn =
-  ProgWithHeaders { progWHHeaders :: [ProgHeader]
-                  , progWHDecs    :: [DecBase f vn]
-                  }
-deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
-
-data ProgHeader = Include [String]
-                deriving (Show)
 
 -- | A set of names.
 type Names = HS.HashSet

@@ -60,7 +60,6 @@ substituteIndicesInStm substs (Let pat lore e) = do
   return substs'
 
 substituteIndicesInPattern :: (MonadBinder m, SetType attr,
-                               Aliased (Lore m),
                                LetAttr (Lore m) ~ attr) =>
                               IndexSubstitutions (LetAttr (Lore m))
                            -> PatternT attr

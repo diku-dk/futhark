@@ -19,7 +19,9 @@ import Data.Bits
 import Data.Function (fix)
 import Data.List
 
-import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
+import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText, nameToText)
+import Language.Futhark.Attributes (leadingOperator)
+import Language.Futhark.Syntax (BinOp(..))
 
 }
 
@@ -33,48 +35,35 @@ import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText)
 @intlit = @hexlit|@binlit|@declit
 @reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
 
+@identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
+@qualidentifier = (@identifier ".")+ @identifier
+
+@unop = ("!"|"~")
+@qualunop = (@identifier ".")+ @unop
+
+@symbols = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^")
+@binop = @symbols+
+@qualbinop = (@identifier ".")+ @binop
+
 tokens :-
 
   $white+                               ;
   "--"[^\n]*                            ;
-  "&&"                     { tokenC AND }
-  "||"                     { tokenC OR }
-  ">>"                     { tokenC SHIFTR }
-  ">>>"                    { tokenC ZSHIFTR }
-  "<<"                     { tokenC SHIFTL }
-  "=>"                     { tokenC ARROW }
-  "<="                     { tokenC LEQ }
-  ">="                     { tokenC GEQ }
-  "+"                      { tokenC PLUS }
-  "-"                      { tokenC MINUS }
-  "~"                      { tokenC TILDE }
-  "*"                      { tokenC TIMES }
-  "**"                     { tokenC POW }
-  "/"                      { tokenC DIVIDE }
-  "%"                      { tokenC MOD }
-  "//"                     { tokenC QUOT }
-  "%%"                     { tokenC REM }
   "="                      { tokenC EQU }
-  "=="                     { tokenC EQU2 }
-  "!="                     { tokenC NEQU }
-  "<"                      { tokenC LTH }
-  ">"                      { tokenC GTH }
-  "&"                      { tokenC BAND }
-  "|"                      { tokenC BOR }
-  "^"                      { tokenC XOR }
+  "#"                      { tokenC HASH }
   "("                      { tokenC LPAR }
   ")"                      { tokenC RPAR }
+  ")["                     { tokenC RPAR_THEN_LBRACKET }
   "["                      { tokenC LBRACKET }
   "]"                      { tokenC RBRACKET }
   "{"                      { tokenC LCURLY }
   "}"                      { tokenC RCURLY }
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
-  "!"                      { tokenC BANG }
-  "."                      { tokenC DOT }
-  "->"                     { tokenC TYPE_ARROW }
+  "->"                     { tokenC ARROW }
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
+  "\"                      { tokenC BACKSLASH }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.takeWhile (/='i') }
@@ -88,21 +77,26 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
-  "true"                   { tokenC TRUE }
-  "false"                  { tokenC FALSE }
-  -- True And False only for backwards compatibility - will be removed soon.
-  "True"                   { tokenC TRUE }
-  "False"                  { tokenC FALSE }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
-  [a-zA-Z] [a-zA-Z0-9_']*     { tokenS keyword }
-  "_" [a-zA-Z0-9] [a-zA-Z0-9_']* { tokenS keyword }
 
+  @identifier              { tokenS keyword }
+  @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
+  @qualidentifier          { tokenM $ fmap (uncurry QUALID) . mkQualId }
+  @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
+
+  @unop                    { tokenS $ UNOP . nameFromText }
+  @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
+
+  @binop                   { tokenM $ return . symbol [] . nameFromText }
+  @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
 {
 
 keyword :: T.Text -> Token
 keyword s =
   case s of
+    "true"         -> TRUE
+    "false"        -> FALSE
     "if"           -> IF
     "then"         -> THEN
     "else"         -> ELSE
@@ -110,25 +104,10 @@ keyword s =
     "loop"         -> LOOP
     "in"           -> IN
     "default"      -> DEFAULT
-    "int"          -> INT
-    "float"        -> FLOAT
-    "i8"           -> I8
-    "i16"          -> I16
-    "i32"          -> I32
-    "i64"          -> I64
-    "u8"           -> U8
-    "u16"          -> U16
-    "u32"          -> U32
-    "u64"          -> U64
-    "f32"          -> F32
-    "f64"          -> F64
-    "bool"         -> BOOL
     "fun"          -> FUN
-    "fn"           -> FN
     "for"          -> FOR
     "do"           -> DO
-    "abs"          -> ABS
-    "signum"       -> SIGNUM
+    "with"         -> WITH
 
     "iota"         -> IOTA
     "shape"        -> SHAPE
@@ -159,14 +138,23 @@ keyword s =
     "streamSeq"    -> STREAM_SEQ
     "write"        -> WRITE
     "include"      -> INCLUDE
+    "import"       -> IMPORT
     "type"         -> TYPE
     "entry"        -> ENTRY
-    "signature"    -> SIGNATURE
-    "sig"          -> SIG
-    "struct"       -> STRUCT
-    "end"          -> END
+    "module"       -> MODULE
     "val"          -> VAL
+    "open"         -> OPEN
     _              -> ID $ nameFromText s
+
+indexing :: T.Text -> Alex Name
+indexing s = case keyword s of
+  ID v -> return v
+  _    -> fail $ "Cannot index keyword '" ++ T.unpack s ++ "'."
+
+mkQualId :: T.Text -> Alex ([Name], Name)
+mkQualId s = case reverse $ T.splitOn "." s of
+  []   -> fail "mkQualId: no components"
+  k:qs -> return (map nameFromText (reverse qs), nameFromText k)
 
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
@@ -193,10 +181,25 @@ tokenC v  = tokenS $ const v
 
 tokenS f = tokenM $ return . f
 
+tokenM :: (T.Text -> Alex a)
+       -> (AlexPosn, b, ByteString.ByteString, c)
+       -> Int64
+       -> Alex ((Int, Int, Int), (Int, Int, Int), a)
 tokenM f (AlexPn addr line col, _, s, _) len = do
   x <- f $ T.decodeUtf8 $ BS.toStrict $ BS.take len s
   return (pos, pos, x)
   where pos = (line, col, addr)
+
+symbol :: [Name] -> Name -> Token
+symbol [] q
+  | nameToText q == "*" = ASTERISK
+  | nameToText q == "-" = NEGATE
+  | nameToText q == "<" = LTH
+  | nameToText q == ">" = GTH
+  | nameToText q == "<=" = LEQ
+  | nameToText q == ">=" = GEQ
+  | otherwise = SYMBOL (leadingOperator q) [] q
+symbol qs q = SYMBOL (leadingOperator q) qs q
 
 alexEOF = return ((0,0,0), (0,0,0), EOF)
 
@@ -212,29 +215,15 @@ instance Located (L a) where
 -- | A lexical token.  It does not itself contain position
 -- information, so in practice the parser will consume tokens tagged
 -- with a source position.
-data Token = IF
-           | THEN
-           | ELSE
-           | LET
-           | LOOP
-           | IN
-           | INT
-           | I8
-           | I16
-           | I32
-           | I64
-           | U8
-           | U16
-           | U32
-           | U64
-           | BOOL
-           | CHAR
-           | FLOAT
-           | F32
-           | F64
-           | ID Name
+data Token = ID Name
+           | INDEXING Name
+           | QUALID [Name] Name
+           | QUALINDEXING [Name] Name
+           | UNOP Name
+           | QUALUNOP [Name] Name
+           | SYMBOL BinOp [Name] Name
+
            | STRINGLIT String
-           | DEFAULT
            | INTLIT Int64
            | I8LIT Int8
            | I16LIT Int16
@@ -248,40 +237,41 @@ data Token = IF
            | F32LIT Float
            | F64LIT Double
            | CHARLIT Char
-           | PLUS
-           | MINUS
-           | TIMES
-           | DIVIDE
-           | MOD
-           | QUOT
-           | REM
-           | EQU
-           | EQU2
-           | NEQU
-           | LTH
-           | GTH
-           | LEQ
-           | GEQ
-           | POW
-           | SHIFTL
-           | SHIFTR
-           | ZSHIFTR
-           | BOR
-           | BAND
-           | XOR
+
+           | COLON
+           | AT
+           | BACKSLASH
+           | HASH
            | LPAR
            | RPAR
+           | RPAR_THEN_LBRACKET
            | LBRACKET
            | RBRACKET
            | LCURLY
            | RCURLY
            | COMMA
            | UNDERSCORE
-           | FUN
-           | FN
            | ARROW
+
+           | EQU
+           | ASTERISK
+           | NEGATE
+           | LTH
+           | GTH
+           | LEQ
+           | GEQ
+
+           | DEFAULT
+           | IF
+           | THEN
+           | ELSE
+           | LET
+           | LOOP
+           | IN
+           | FUN
            | FOR
            | DO
+           | WITH
            | SHAPE
            | IOTA
            | REPLICATE
@@ -303,9 +293,6 @@ data Token = IF
            | PARTITION
            | TRUE
            | FALSE
-           | TILDE
-           | AND
-           | OR
            | EMPTY
            | COPY
            | WHILE
@@ -314,24 +301,16 @@ data Token = IF
            | STREAM_RED
            | STREAM_REDPER
            | STREAM_SEQ
-           | BANG
-           | DOT
-           | ABS
-           | SIGNUM
            | WRITE
            | INCLUDE
+           | IMPORT
            | ENTRY
            | TYPE
-           | EOF
-           | SIGNATURE
-           | SIG
-           | STRUCT
-           | END
+           | MODULE
            | VAL
-           | COLON
-           | AT
-           | IS
-           | TYPE_ARROW
+           | OPEN
+
+           | EOF
 
              deriving (Show, Eq)
 

@@ -13,6 +13,8 @@ module Futhark.CodeGen.ImpCode
   ( Functions (..)
   , Function
   , FunctionT (..)
+  , EntryPoint
+  , EntryPointType (..)
   , ValueDecl (..)
   , Param (..)
   , paramName
@@ -66,7 +68,7 @@ import Prelude hiding (foldr)
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
-import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
+import Futhark.Representation.AST.Syntax (Space(..), SpaceId, EntryPoint, EntryPointType(..))
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
@@ -94,12 +96,12 @@ paramName (ScalarParam name _) = name
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
 
-data ValueDecl = ArrayValue VName PrimType [DimSize]
-               | ScalarValue PrimType VName
+data ValueDecl = ArrayValue VName PrimType EntryPointType [DimSize]
+               | ScalarValue PrimType EntryPointType VName
                deriving (Show)
 
 -- | A imperative function, containing the body as well as its
--- low-level inputs and outouts, as well as its high-level arguments
+-- low-level inputs and outputs, as well as its high-level arguments
 -- and results.  The latter are only used if the function is an entry
 -- point.
 data FunctionT a = Function { functionEntry :: Bool
@@ -227,11 +229,16 @@ instance Pretty Param where
                                  DefaultSpace -> mempty
 
 instance Pretty ValueDecl where
-  ppr (ScalarValue t name) =
-    ppr t <+> ppr name
-  ppr (ArrayValue mem et shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem
+  ppr (ScalarValue t ept name) =
+    ppr t <+> ppr name <> ept'
+    where ept' = case ept of TypeUnsigned -> text " (unsigned)"
+                             TypeDirect   -> mempty
+  ppr (ArrayValue mem et ept shape) =
+    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> ept'
     where f e s = brackets $ s <> comma <> ppr e
+          ept' = case ept of TypeUnsigned -> text " (unsigned)"
+                             TypeDirect   -> mempty
+
 
 instance Pretty Size where
   ppr (ConstSize x) = ppr x

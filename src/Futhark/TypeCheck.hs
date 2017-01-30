@@ -157,9 +157,9 @@ instance Checkable lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunStm lore = (RetType (Aliases lore), [FParam (Aliases lore)])
+type FunBinding lore = (RetType (Aliases lore), [FParam (Aliases lore)])
 
-type VarStm lore = NameInfo (Aliases lore)
+type VarBinding lore = NameInfo (Aliases lore)
 
 data Usage = Consumed
            | Observed
@@ -239,21 +239,22 @@ instance Monoid Consumption where
 -- variable table will be extended during type-checking when
 -- let-expressions are encountered.
 data Env lore =
-  Env { envVtable :: HM.HashMap VName (VarStm lore)
-      , envFtable :: HM.HashMap Name (FunStm lore)
+  Env { envVtable :: HM.HashMap VName (VarBinding lore)
+      , envFtable :: HM.HashMap Name (FunBinding lore)
       , envContext :: [String]
       }
 
 -- | The type checker runs in this monad.
 newtype TypeM lore a = TypeM (RWST
-                              (Env lore)     -- Reader
-                              Consumption        -- Writer
-                              ()                 -- State
+                              (Env lore)  -- Reader
+                              Consumption -- Writer
+                              Names       -- State
                               (Either (TypeError lore)) -- Inner monad
                               a)
   deriving (Monad, Functor, Applicative,
             MonadReader (Env lore),
-            MonadWriter Consumption)
+            MonadWriter Consumption,
+            MonadState Names)
 
 instance Checkable lore =>
          HasScope (Aliases lore) (TypeM lore) where
@@ -263,7 +264,7 @@ instance Checkable lore =>
 
 runTypeM :: Env lore -> TypeM lore a
          -> Either (TypeError lore) (a, Consumption)
-runTypeM env (TypeM m) = evalRWST m env ()
+runTypeM env (TypeM m) = evalRWST m env mempty
 
 bad :: ErrorCase lore -> TypeM lore a
 bad e = do
@@ -286,6 +287,14 @@ message s x = prettyDoc 80 $
 
 liftEitherS :: Either String a -> TypeM lore a
 liftEitherS = either (bad . TypeError) return
+
+-- | Mark a name as bound.  If the name has been bound previously in
+-- the program, report a type error.
+bound :: VName -> TypeM lore ()
+bound name = do already_seen <- gets $ HS.member name
+                when already_seen $
+                  bad $ TypeError $ "Name " ++ pretty name ++ " bound twice"
+                modify $ HS.insert name
 
 occur :: Occurences -> TypeM lore ()
 occur = tell . Consumption
@@ -355,8 +364,7 @@ expandAliases names env = names `HS.union` aliasesOfAliases
           Just (LetInfo (als, _)) -> unNames als
           _                       -> mempty
 
-binding :: Checkable lore =>
-           Scope (Aliases lore)
+binding :: Scope (Aliases lore)
         -> TypeM lore a
         -> TypeM lore a
 binding bnds = check . local (`bindVars` bnds)
@@ -383,11 +391,7 @@ binding bnds = check . local (`bindVars` bnds)
         -- Check whether the bound variables have been used correctly
         -- within their scope.
         check m = do
-          already_bound <- asks envVtable
-          case filter (`HM.member` already_bound) $ HM.keys bnds of
-            []  -> return ()
-            v:_ -> bad $ TypeError $
-                   "Variable " ++ pretty v ++ " being redefined."
+          mapM_ bound $ HM.keys bnds
           (a, os) <- collectOccurences m
           tell $ Consumption $ unOccur boundnameset os
           return a
@@ -489,7 +493,7 @@ checkProg prog = do
 
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Checkable lore =>
-                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunStm lore))
+                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunBinding lore))
 initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts
@@ -512,8 +516,7 @@ checkFun (FunDef _ fname rettype params body) =
                            , unique $ paramDeclType param
                            ]
 
-funParamsToNameInfos :: Checkable lore =>
-                        [FParam lore]
+funParamsToNameInfos :: [FParam lore]
                      -> [(VName, NameInfo (Aliases lore))]
 funParamsToNameInfos = map nameTypeAndLore
   where nameTypeAndLore fparam = (paramName fparam,
@@ -918,7 +921,7 @@ checkPatElem (PatElem name bindage attr) = do
 checkDimIndex :: Checkable lore =>
                  DimIndex SubExp -> TypeM lore ()
 checkDimIndex (DimFix i) = require [Prim int32] i
-checkDimIndex (DimSlice i n) = mapM_ (require [Prim int32]) [i,n]
+checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int32]) [i,n,s]
 
 checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()
@@ -1021,8 +1024,7 @@ checkArg arg = do argt <- checkSubExp arg
                   als <- subExpAliasesM arg
                   return (argt, als)
 
-checkFuncall :: Checkable lore =>
-                Maybe Name
+checkFuncall :: Maybe Name
              -> [DeclType] -> [Arg]
              -> TypeM lore ()
 checkFuncall fname paramts args = do

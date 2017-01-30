@@ -174,7 +174,7 @@ mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
 
-mapOnExtType :: (Monad m, Applicative m) =>
+mapOnExtType :: Monad m =>
                 Mapper flore tlore m -> TypeBase ExtShape u -> m (TypeBase ExtShape u)
 mapOnExtType tv (Array bt (ExtShape shape) u) =
   Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
@@ -184,7 +184,7 @@ mapOnExtType tv (Array bt (ExtShape shape) u) =
 mapOnExtType _ (Prim bt) = return $ Prim bt
 mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 
-mapOnLoopForm :: (Monad m, Applicative m) =>
+mapOnLoopForm :: Monad m =>
                  Mapper flore tlore m -> LoopForm -> m LoopForm
 mapOnLoopForm tv (ForLoop i it bound) =
   ForLoop <$> mapOnVName tv i <*> pure it <*> mapOnSubExp tv bound
@@ -195,7 +195,7 @@ mapOnLoopForm tv (WhileLoop cond) =
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
 
-mapOnType :: (Applicative m, Monad m) =>
+mapOnType :: Monad m =>
              (SubExp -> m SubExp) -> Type -> m Type
 mapOnType _ (Prim bt) = return $ Prim bt
 mapOnType f (Mem size space) = Mem <$> f size <*> pure space
@@ -247,7 +247,7 @@ foldMapper f = Mapper {
 -- | Perform a left-reduction across the immediate children of a body.
 -- The reduction does not descend recursively into subterms and is
 -- done left-to-right.
-foldExpM :: (Monad m, Functor m) => Folder a lore m -> a -> Exp lore -> m a
+foldExpM :: Monad m => Folder a lore m -> a -> Exp lore -> m a
 foldExpM f x e = execStateT (mapExpM (foldMapper f) e) x
 
 -- | As 'foldExpM', but in the 'Identity' monad.
@@ -296,7 +296,7 @@ walkMapper f = Mapper {
   where wrap op k = op f k >> return k
 
 -- | As 'walkBodyM', but for expressions.
-walkExpM :: (Monad m, Applicative m) => Walker lore m -> Exp lore -> m ()
+walkExpM :: Monad m => Walker lore m -> Exp lore -> m ()
 walkExpM f = void . mapExpM m
   where m = walkMapper f
 

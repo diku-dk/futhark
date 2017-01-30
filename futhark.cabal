@@ -20,6 +20,8 @@ Extra-source-files:  rts/python/memory.py,
                      rts/c/reader.h,
                      rts/c/opencl.h
 
+                     futlib/*.fut
+
 
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
@@ -51,7 +53,8 @@ Library
                  neat-interpolation >= 0.3,
                  file-embed >= 0.0.9,
                  directory,
-                 directory-tree
+                 directory-tree,
+                 gitrev >= 1.2.0
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
@@ -127,6 +130,7 @@ Library
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.TileLoops
+                   Futhark.Optimise.Unstream
                    Futhark.Optimise.MemBlkMerging.DataStructs
                    Futhark.Optimise.MemBlkMerging.LastUse
                    Futhark.Optimise.MemBlkMerging.ArrayCoalescing
@@ -195,11 +199,10 @@ Library
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
-                   Language.Futhark.Renamer
+                   Language.Futhark.Futlib
                    Language.Futhark.Parser
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
-                   Language.Futhark.Traversals
                    Language.Futhark.TypeChecker
 
   Other-modules: Language.Futhark.Parser.Parser
@@ -216,9 +219,6 @@ Library
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
-
-  if impl(ghc >= 8.0)
-     Ghc-Options: -Wall -Wno-redundant-constraints
 
 Executable futhark
   Main-is: src/futhark.hs
@@ -296,6 +296,7 @@ Executable futharki
                  srcloc >= 0.4,
                  transformers,
                  neat-interpolation >= 0.3,
+                 unordered-containers,
                  text,
                  futhark
 
@@ -325,9 +326,6 @@ Executable futhark-test
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
-
-  if impl(ghc >= 8.0)
-     Ghc-Options: -Wall -Wno-redundant-constraints -threaded -rtsopts -with-rtsopts=-N
 
 Executable futhark-bench
   Main-is: src/futhark-bench.hs
@@ -362,6 +360,7 @@ Executable futhark-dataset
                  array >= 0.4,
                  mtl >= 2.2.1,
                  containers >= 0.5,
+                 unordered-containers,
                  transformers,
                  random,
                  text,
@@ -391,7 +390,7 @@ Executable futhark-opencl
 Test-suite unit
   Type:              exitcode-stdio-1.0
 
-  hs-source-dirs:    tests
+  hs-source-dirs:    unittests
   Main-is:           futhark_tests.hs
   Default-language:  Haskell2010
   GHC-options:       -Wall

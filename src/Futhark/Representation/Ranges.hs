@@ -136,8 +136,7 @@ addRangesToPattern :: (Attributes lore, CanBeRanged (Op lore)) =>
 addRangesToPattern pat e =
   uncurry Pattern $ mkPatternRanges pat e
 
-mkRangedBody :: (Attributes lore, CanBeRanged (Op lore)) =>
-                BodyAttr lore -> [Stm (Ranges lore)] -> Result
+mkRangedBody :: BodyAttr lore -> [Stm (Ranges lore)] -> Result
              -> Body (Ranges lore)
 mkRangedBody innerlore bnds res =
   Body (mkBodyRanges bnds res, innerlore) bnds res
@@ -155,10 +154,7 @@ mkPatternRanges pat e =
           in patElem `setPatElemLore` (range, innerlore)
         ranges = expRanges e
 
-mkBodyRanges :: Attributes lore =>
-                [Stm lore]
-             -> Result
-             -> [Range]
+mkBodyRanges :: [Stm lore] -> Result -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
   where boundInBnds =
           mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds

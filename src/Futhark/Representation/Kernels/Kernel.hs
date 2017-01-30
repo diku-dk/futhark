@@ -30,13 +30,14 @@ module Futhark.Representation.Kernels.Kernel
        where
 
 import Control.Applicative
-import Control.Monad.Writer
-import Control.Monad.Identity
+import Control.Monad.Writer hiding (mapM_)
+import Control.Monad.Identity hiding (mapM_)
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.List
+import Data.Foldable (mapM_) -- for stack LTS 1.15
 
-import Prelude
+import Prelude hiding (mapM_)
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
@@ -53,6 +54,7 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeBodyAliases, removeStmAliases)
+import Futhark.Representation.Kernels.KernelExp (SplitOrdering(..))
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
@@ -80,13 +82,20 @@ data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceNumGroups :: SubExp
                                , spaceGroupSize :: SubExp -- flat group size
                                , spaceStructure :: SpaceStructure
+                               -- TODO: document what this spaceStructure is
+                               -- used for
                                }
                  deriving (Eq, Show, Ord)
 -- ^ first three bound in the kernel, the rest are params to kernel
 
-data SpaceStructure = FlatSpace
+-- | Indices computed for each thread (or group) inside the kernel.
+-- This is an arbitrary-dimensional space that is generated from the
+-- flat GPU thread space.
+data SpaceStructure = FlatThreadSpace
                       [(VName, SubExp)] -- gtids and dim sizes
-                    | NestedSpace
+                    | FlatGroupSpace
+                      [(VName, SubExp)] -- gtids and dim sizes
+                    | NestedThreadSpace
                       [(VName, -- gtid
                         SubExp, -- global dim size
                         VName, -- ltid
@@ -97,8 +106,9 @@ data SpaceStructure = FlatSpace
 -- | Global thread IDs and their upper bound.
 spaceDimensions :: KernelSpace -> [(VName, SubExp)]
 spaceDimensions = structureDimensions . spaceStructure
-  where structureDimensions (FlatSpace dims) = dims
-        structureDimensions (NestedSpace dims) =
+  where structureDimensions (FlatThreadSpace dims) = dims
+        structureDimensions (FlatGroupSpace dims) = dims
+        structureDimensions (NestedThreadSpace dims) =
           let (gtids, gdim_sizes, _, _) = unzip4 dims
           in zip gtids gdim_sizes
 
@@ -119,9 +129,10 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     SubExp -- The index
                     SubExp -- The value
                   | ConcatReturns
-                    StreamOrd -- Permuted?
+                    SplitOrdering -- Permuted?
                     SubExp -- The final size.
                     SubExp -- Per-thread (max) chunk size.
+                    (Maybe SubExp) -- Optional precalculated offset.
                     VName -- Chunk by this thread.
                   | KernelInPlaceReturn VName -- HACK!
                   deriving (Eq, Show, Ord)
@@ -129,7 +140,7 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (ThreadsReturn _ se) = se
 kernelResultSubExp (WriteReturn _ _ _ se) = se
-kernelResultSubExp (ConcatReturns _ _ _ v) = Var v
+kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 kernelResultSubExp (KernelInPlaceReturn v) = Var v
 
 data WhichThreads = AllThreads
@@ -181,17 +192,20 @@ mapKernelM tv (Kernel desc cs space ts kernel_body) =
           <*> mapOnKernelSubExp tv num_groups
           <*> mapOnKernelSubExp tv group_size
           <*> mapOnKernelStructure structure
-        mapOnKernelStructure (FlatSpace dims) =
-          FlatSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
+        mapOnKernelStructure (FlatThreadSpace dims) =
+          FlatThreadSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
           where (gtids, gdim_sizes) = unzip dims
-        mapOnKernelStructure (NestedSpace dims) =
-            NestedSpace <$> (zip4 gtids
+        mapOnKernelStructure (FlatGroupSpace dims) =
+          FlatGroupSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
+          where (gtids, gdim_sizes) = unzip dims
+        mapOnKernelStructure (NestedThreadSpace dims) =
+            NestedThreadSpace <$> (zip4 gtids
                              <$> mapM (mapOnKernelSubExp tv) gdim_sizes
                              <*> pure ltids
                              <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
           where (gtids, gdim_sizes, ltids, ldim_sizes) = unzip4 dims
 
-mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
+mapOnKernelType :: Monad m =>
                    KernelMapper flore tlore m -> Type -> m Type
 mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
@@ -214,8 +228,8 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
 instance FreeIn KernelResult where
   freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
   freeIn (WriteReturn rw arr i e) = freeIn rw <> freeIn arr <> freeIn i <> freeIn e
-  freeIn (ConcatReturns _ w per_thread_elems v) =
-    freeIn w <> freeIn per_thread_elems <> freeIn v
+  freeIn (ConcatReturns o w per_thread_elems moffset v) =
+    freeIn o <> freeIn w <> freeIn per_thread_elems <> freeIn moffset <> freeIn v
   freeIn (KernelInPlaceReturn what) = freeIn what
 
 instance FreeIn WhichThreads where
@@ -245,11 +259,12 @@ instance Substitute KernelResult where
     WriteReturn
     (substituteNames subst rw) (substituteNames subst arr)
     (substituteNames subst i) (substituteNames subst e)
-  substituteNames subst (ConcatReturns ord w per_thread_elems v) =
+  substituteNames subst (ConcatReturns o w per_thread_elems moffset v) =
     ConcatReturns
-    ord
+    (substituteNames subst o)
     (substituteNames subst w)
     (substituteNames subst per_thread_elems)
+    (substituteNames subst moffset)
     (substituteNames subst v)
   substituteNames subst (KernelInPlaceReturn what) =
     KernelInPlaceReturn (substituteNames subst what)
@@ -275,10 +290,12 @@ instance Substitute KernelSpace where
     (substituteNames subst structure)
 
 instance Substitute SpaceStructure where
-  substituteNames subst (FlatSpace dims) =
-    FlatSpace (map (substituteNames subst) dims)
-  substituteNames subst (NestedSpace dims) =
-    NestedSpace (map (substituteNames subst) dims)
+  substituteNames subst (FlatThreadSpace dims) =
+    FlatThreadSpace (map (substituteNames subst) dims)
+  substituteNames subst (FlatGroupSpace dims) =
+    FlatGroupSpace (map (substituteNames subst) dims)
+  substituteNames subst (NestedThreadSpace dims) =
+    NestedThreadSpace (map (substituteNames subst) dims)
 
 instance Attributes lore => Substitute (Kernel lore) where
   substituteNames subst (Kernel desc cs space ts kbody) =
@@ -317,8 +334,9 @@ scopeOfKernelSpace :: KernelSpace -> Scope lore
 scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
   HM.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
   where structure' = case structure of
-                       FlatSpace dims -> map fst dims
-                       NestedSpace dims ->
+                       FlatThreadSpace dims -> map fst dims
+                       FlatGroupSpace dims -> map fst dims
+                       NestedThreadSpace dims ->
                          let (gtids, _, ltids, _) = unzip4 dims
                          in gtids ++ ltids
 
@@ -342,7 +360,7 @@ kernelType (Kernel _ _ space ts body) =
           t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
         resultShape t (ThreadsReturn ThreadsInSpace _) =
           foldr (flip arrayOfRow) t dims
-        resultShape t (ConcatReturns _ w _ _) =
+        resultShape t (ConcatReturns _ w _ _ _) =
           t `arrayOfRow` w
         resultShape t KernelInPlaceReturn{} =
           t
@@ -376,7 +394,6 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   consumedInOp _ = mempty
 
 aliasAnalyseKernelBody :: (Attributes lore,
-                           Attributes (Aliases lore),
                            CanBeAliased (Op lore)) =>
                           KernelBody lore
                        -> KernelBody (Aliases lore)
@@ -440,7 +457,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             let Body attr' stms' _ = removeBodyWisdom $ Body attr stms []
             in KernelBody attr' stms' res
 
-instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
+instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
@@ -448,7 +465,7 @@ instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kern
   usageInOp TileSize = mempty
   usageInOp SufficientParallelism{} = mempty
 
-consumedInKernelBody :: (Attributes lore, Aliased lore) =>
+consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
 consumedInKernelBody (KernelBody attr stms _) =
   consumedInBody $ Body attr stms []
@@ -471,9 +488,11 @@ typeCheckKernel (Kernel _ cs space kts kbody) = do
   where checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
           mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
           case structure of
-            FlatSpace dims ->
+            FlatThreadSpace dims ->
               mapM_ (TC.require [Prim int32] . snd) dims
-            NestedSpace dims ->
+            FlatGroupSpace dims ->
+              mapM_ (TC.require [Prim int32] . snd) dims
+            NestedThreadSpace dims ->
               let (_, gdim_sizes, _, ldim_sizes) = unzip4 dims
               in mapM_ (TC.require [Prim int32]) $ gdim_sizes ++ ldim_sizes
 
@@ -496,9 +515,13 @@ typeCheckKernel (Kernel _ cs space kts kbody) = do
           unless (arr_t == t `arrayOfRow` rw) $
             TC.bad $ TC.TypeError "Invalid type of array destination for WriteReturn."
           TC.consume =<< TC.lookupAliases arr
-        checkKernelResult (ConcatReturns _ w per_thread_elems v) t = do
+        checkKernelResult (ConcatReturns o w per_thread_elems moffset v) t = do
+          case o of
+            SplitContiguous     -> return ()
+            SplitStrided stride -> TC.require [Prim int32] stride
           TC.require [Prim int32] w
           TC.require [Prim int32] per_thread_elems
+          mapM_ (TC.require [Prim int32]) moffset
           vt <- lookupType v
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
@@ -547,14 +570,15 @@ instance Pretty KernelSpace where
                       text "group ID ->" <+> ppr gid]) </> structure'
     where structure' =
             case structure of
-              FlatSpace space ->
-                parens (commasep $ do
-                           (i,d) <- space
-                           return $ ppr i <+> "<" <+> ppr d)
-              NestedSpace space ->
+              FlatThreadSpace dims -> flat dims
+              FlatGroupSpace dims -> text "group" <+> PP.align (flat dims)
+              NestedThreadSpace space ->
                 parens (commasep $ do
                            (gtid,gd,ltid,ld) <- space
                            return $ ppr (gtid,ltid) <+> "<" <+> ppr (gd,ld))
+          flat dims = parens $ commasep $ do
+            (i,d) <- dims
+            return $ ppr i <+> "<" <+> ppr d
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody _ stms res) =
@@ -573,11 +597,13 @@ instance Pretty KernelResult where
   ppr (WriteReturn rw arr i e) =
     ppr arr <+> text "with" <+>
     PP.brackets (ppr i <+> text "<" <+> ppr rw) <+> text "<-" <+> ppr e
-  ppr (ConcatReturns o w per_thread_elems v) =
+  ppr (ConcatReturns o w per_thread_elems offset v) =
     text "concat" <> suff <>
-    parens (commasep [ppr w, ppr per_thread_elems]) <+>
+    parens (commasep [ppr w, ppr per_thread_elems] <> offset_text) <+>
     ppr v
-    where suff = case o of InOrder -> ""
-                           Disorder -> "Permuted"
+    where suff = case o of SplitContiguous     -> mempty
+                           SplitStrided stride -> text "Strided" <> parens (ppr stride)
+          offset_text = case offset of Nothing -> ""
+                                       Just se -> "," <+> "offset=" <> ppr se
   ppr (KernelInPlaceReturn what) =
     text "kernel returns" <+> ppr what

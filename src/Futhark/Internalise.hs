@@ -16,6 +16,7 @@ import Control.Applicative
 import Control.Monad.State  hiding (mapM, sequence)
 import Control.Monad.Reader hiding (mapM, sequence)
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -29,7 +30,9 @@ import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import Futhark.Construct
+import Futhark.Tools
+import Futhark.Representation.AST.Attributes.Aliases
+import qualified Futhark.Analysis.Alias as Alias
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -43,82 +46,155 @@ import Futhark.Util (dropAt)
 internaliseProg :: MonadFreshNames m =>
                    E.Prog -> m (Either String I.Prog)
 internaliseProg prog = do
-  res <- do
-    ftable_attempt <- buildFtable prog
-    case ftable_attempt of
-      Left err -> return $ Left err
-      Right ftable -> do
-        funs <- runInternaliseM ftable $
-                mapM internaliseFun $ funsFromProg prog
-        return $ fmap I.Prog funs
-  sequence $ fmap I.renameProg res
+  prog' <- fmap I.Prog <$> runInternaliseM builtinFtable
+           (snd <$> internaliseDecs (progDecs prog))
+  sequence $ fmap I.renameProg prog'
 
--- | All functions, including those nested in structures.  Treats
--- constants as 0-ary functions.
-funsFromProg :: ProgBase f vn -> [FunDefBase f vn]
-funsFromProg prog = concatMap getFuns $ progDecs prog
-  where getFuns (FunOrTypeDec (FunDec a)) = [a]
-        getFuns (FunOrTypeDec (ConstDec (E.ConstDef name t e loc))) =
-          [E.FunDef False name Nothing (expandedType t) [] e loc]
-        getFuns (FunOrTypeDec TypeDec{}) = []
-        getFuns (ModDec d) = concatMap getFuns $ modDecls d
-        getFuns SigDec{} = []
-
-buildFtable :: MonadFreshNames m => E.Prog
-            -> m (Either String FunTable)
-buildFtable = fmap (HM.union builtinFtable<$>) .
-              runInternaliseM mempty .
-              fmap HM.fromList . mapM inspect . funsFromProg
-
-  where inspect (E.FunDef entry fname _ (Info rettype) params _ _) =
-          bindingParams params $ \shapes values -> do
-            (rettype', _, cm) <- internaliseReturnType rettype
-            let shapenames = map I.paramName shapes
-                fname' | entry     = nameFromString $ pretty $ baseName fname
-                       | otherwise = nameFromString $ pretty fname ++ "f"
-                consts = map ((`Param` I.Prim int32) . snd) cm
-            return (fname,
-                    FunStm { internalFun = (fname',
-                                                cm,
-                                                shapenames,
-                                                map declTypeOf values,
-                                                applyRetType
-                                                (ExtRetType rettype')
-                                                (consts++shapes++values)
-                                               )
-                               , externalFun = (rettype,
-                                                map E.patternStructType params)
-                               })
-
-        builtinFtable = HM.fromList $ map addBuiltin $ HM.toList E.builtInFunctions
-        addBuiltin (name, (t, paramts)) =
+builtinFtable :: FunTable
+builtinFtable = HM.fromList $ mapMaybe addBuiltin $ HM.toList E.intrinsics
+  where addBuiltin (name, E.IntrinsicMonoFun paramts t) =
+          Just
           (name,
-           FunStm
+           FunBinding
            (baseName name,
             [], [], map (I.Prim . internalisePrimType) paramts,
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
            (E.Prim t, map E.Prim paramts))
+        addBuiltin _ =
+          Nothing
 
-internaliseFun :: E.FunDef -> InternaliseM I.FunDef
-internaliseFun (E.FunDef entry fname _ (Info rettype) params body loc) =
+internaliseFunctionName :: Bool -> VName -> InternaliseM (VName, Name)
+internaliseFunctionName entry fname = do
+  -- Note that we may have another name for this function if we are
+  -- inside of a functor application.
+  fname' <- newOrExistingSubst fname
+  return (fname',
+          if entry
+          then nameFromString $ pretty $ baseName fname'
+          else nameFromString $ pretty fname' ++ "f")
+
+mkFtableExpansion :: [E.ValDec] -> InternaliseM (FunTable, DecSubstitutions)
+mkFtableExpansion vds = do (fbs, ds) <- unzip <$> mapM funFrom vds
+                           return (HM.fromList fbs, HM.fromList ds)
+  where funFrom (E.FunDec (E.FunBind entry ofname _ (Info rettype) params _ _)) =
+          bindingParams params $ \shapes values -> do
+            (fname, fname') <- internaliseFunctionName entry ofname
+            (rettype', _, cm) <- internaliseReturnType rettype
+            let shapenames = map I.paramName shapes
+                consts = map ((`Param` I.Prim int32) . snd) cm
+            return ((fname,
+                     FunBinding { internalFun = (fname',
+                                                 cm,
+                                                 shapenames,
+                                                 map declTypeOf $ concat values,
+                                                 applyRetType
+                                                 (ExtRetType rettype')
+                                                 (consts++shapes++concat values)
+                                                )
+                                , externalFun = (rettype,
+                                                 map E.patternStructType params)
+                                }),
+                     (ofname, fname))
+        funFrom (E.ConstDec (E.ConstBind name _ t e loc)) =
+          funFrom $ E.FunDec $ E.FunBind False name Nothing t [] e loc
+
+
+nextDec :: [E.Dec] -> (Either [E.ValDec] E.Dec, [E.Dec])
+nextDec [] = (Left [], [])
+nextDec ds | (vds, ds') <- chompDecs ds, not $ null vds = (Left vds, ds')
+  where chompDecs :: [E.Dec] -> ([E.ValDec], [E.Dec])
+        chompDecs (ValDec dec : xs) = let (valdecs, xs') = chompDecs xs
+                                      in (dec : valdecs, xs')
+        chompDecs xs                = ([], xs)
+nextDec (d:ds) = (Right d, ds)
+
+internaliseDecs :: [E.Dec] -> InternaliseM ((FunTable, TypeTable), [I.FunDef])
+internaliseDecs ds =
+  case nextDec ds of
+    (Left [], _) -> do
+      ftable <- asks envFtable
+      ttable <- asks envTtable
+      return ((ftable, ttable), [])
+    (Left vdecs, ds') -> do
+      (ftable_expansion, substs) <- mkFtableExpansion vdecs
+      bindingFunctions ftable_expansion $ withDecSubsts substs $ do
+        vdec_funs <- mapM internaliseValDec vdecs
+        (tables, ds_funs) <- internaliseDecs ds'
+        return (tables, vdec_funs ++ ds_funs)
+    (Right (E.StructDec sb), ds') ->
+      internaliseModExp False (structExp sb) $ \funs -> do
+        (tables, ds_funs) <- internaliseDecs ds'
+        return (tables, funs ++ ds_funs)
+    (Right (E.FunctorDec fb), ds') ->
+      bindingFunctor (E.functorName fb) (E.functorBody fb) $
+        internaliseDecs ds'
+    (Right (E.TypeDec tb), ds') -> do
+      v <- lookupSubst $ E.qualName $ E.typeAlias tb
+      t <- map fromDecl <$> internaliseType
+           (E.unInfo $ E.expandedType $ E.typeExp tb)
+      bindingType v t $ internaliseDecs ds'
+    (Right _, ds') ->
+      internaliseDecs ds'
+
+internaliseValDec :: E.ValDec -> InternaliseM I.FunDef
+internaliseValDec (E.FunDec fb) =
+  internaliseFun fb
+internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
+  internaliseFun $ E.FunBind False name Nothing t [] e loc
+
+internaliseModExp :: Bool -> E.ModExp
+                   -> ([I.FunDef] -> InternaliseM a)
+                   -> InternaliseM a
+internaliseModExp _ E.ModVar{} m = m []
+internaliseModExp _ E.ModImport{} m = m []
+internaliseModExp generating (E.ModDecs ds _) m = do
+  ((ftable_expansion, ttable_expansion), funs) <-
+    (if generating then generatingFunctor else id) $
+    internaliseDecs ds
+  bindingFunctions ftable_expansion $
+    bindingTypes ttable_expansion $
+    m funs
+internaliseModExp generating (E.ModAscript me _ (Info subst) _) m =
+  withDecSubsts subst $ internaliseModExp generating me m
+internaliseModExp _ (E.ModApply v arg (Info subst) _) m =
+  internaliseModExp False arg $ \arg_funs -> do
+    v' <- lookupSubst v
+    me <- lookupFunctor v'
+    withDecSubsts subst $ internaliseModExp True me $ m . (arg_funs++)
+
+internaliseFun :: E.FunBind -> InternaliseM I.FunDef
+internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
   bindingParams params $ \shapeparams params' -> do
+    (_, fname') <- internaliseFunctionName entry ofname
     (rettype', _, cm) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape asserting loc
              (map I.fromDecl rettype') firstbody
     let mkConstParam name = Param name $ I.Prim int32
         constparams = map (mkConstParam . snd) cm
-    return $ I.FunDef entry fname'
-      (ExtRetType rettype') (constparams ++ shapeparams ++ params') body'
-      where fname' | entry     = nameFromString $ pretty $ baseName fname
-                   | otherwise = nameFromString $ pretty fname ++ "f"
+        entry' | entry     = Just $ entryPoint params rettype
+               | otherwise = Nothing
+    return $ I.FunDef entry' fname'
+      (ExtRetType rettype') (constparams ++ shapeparams ++ concat params') body'
+
+entryPoint :: [E.Pattern] -> StructType -> EntryPoint
+entryPoint params ret = (concatMap (entryPointType . E.patternStructType) params,
+                         entryPointType ret)
+  where entryPointType :: StructType -> [EntryPointType]
+        entryPointType (E.Prim E.Unsigned{}) =
+          [I.TypeUnsigned]
+        entryPointType (E.Array (PrimArray Unsigned{} _ _ _)) =
+          [I.TypeUnsigned]
+        entryPointType (Tuple ts) =
+          concatMap entryPointType ts
+        entryPointType _ = [I.TypeDirect]
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) _) =
+internaliseIdent (E.Ident name (Info tp) loc) =
   case tp of
     E.Prim{} -> return name
     _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-                       ++ pretty name ++ "'."
+                       ++ pretty name ++ "' at " ++ locStr loc ++ "."
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertStmsM $ do
@@ -141,7 +217,8 @@ extraBodyStms bnds m = do
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
-internaliseExp _ (E.Var (QualName (_, name)) t loc) = do
+internaliseExp _ (E.Var v t loc) = do
+  name <- lookupSubst v
   -- If this identifier is the name of a constant, we have to turn it
   -- into a call to the corresponding function.
   is_const <- lookupConstant name
@@ -165,14 +242,6 @@ internaliseExp desc (E.Index e idxs loc) = do
         return $ I.BasicOp $ I.Index (concat idx_cs) v $ fullSlice v_t idxs'
   letSubExps desc =<< mapM index vs
 
-internaliseExp desc (E.TupleIndex e i (Info rt) _) =
-  take n . drop i' <$> internaliseExp desc e
-  where n = length $ internaliseType rt
-        i' = sum $ map (length . internaliseType) $ take i $
-             case E.typeOf e of
-               Tuple ts -> ts
-               t        -> [t]
-
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
 
@@ -180,10 +249,8 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
-      let rowtypes = map zeroDim $ internaliseType rowtype
-          zeroDim t = t `I.setArrayShape`
-                      I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
-          arraylit rt = I.BasicOp $ I.ArrayLit [] rt
+      rowtypes <- map (zeroDim . fromDecl) <$> internaliseType rowtype
+      let arraylit rt = I.BasicOp $ I.ArrayLit [] rt
       letSubExps desc $ map arraylit rowtypes
     e' : _ -> do
       rowtypes <- mapM subExpType e'
@@ -191,6 +258,8 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
             ks' <- mapM (ensureShape asserting loc rt "elem_reshaped") ks
             return $ I.BasicOp $ I.ArrayLit ks' rt
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
+  where zeroDim t = t `I.setArrayShape`
+                    I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et
@@ -200,15 +269,32 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
         extDimToZero I.Ext{} = constant (0::Int32)
         extDimToZero (I.Free d) = d
 
-internaliseExp desc (E.Apply (QualName ([], fname)) args _ _)
+internaliseExp desc (E.Negate e _) = do
+  e' <- internaliseExp1 "negate_arg" e
+  et <- subExpType e'
+  case et of I.Prim (I.IntType t) ->
+               letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
+             I.Prim (I.FloatType t) ->
+               letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
+             _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
+
+-- Some functions are special (polymorphic) and we handle that here.
+internaliseExp desc (E.Apply fname args _ _)
+  | Just internalise <- isOverloadedFunction fname $ map fst args =
+      internalise desc
+
+internaliseExp desc (E.Apply fname args _ _)
   | Just (rettype, _) <- HM.lookup fname' I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
   letTupExp' desc $ I.Apply fname' args'' (ExtRetType [I.Prim rettype])
   where tag ses = [ (se, I.Observe) | se <- ses ]
-        fname' = nameFromString $ pretty $ baseName fname
+        -- Builtin functions are special anyway, so it is OK to not
+        -- use lookupSubst here.
+        fname' = nameFromString $ pretty $ baseName $ qualLeaf fname
 
-internaliseExp desc (E.Apply (QualName (_, fname)) args _ loc) = do
+internaliseExp desc (E.Apply qfname args _ loc) = do
+  fname <- lookupSubst qfname
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
   (fname', constparams, shapes, value_paramts, rettype_fun) <- internalFun <$> lookupFunction fname
   (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
@@ -269,10 +355,11 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       return (id, Right cond)
 
   (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
-    wrap $ bindingParams [mergepat] $ \shapepat mergepat' ->
-    internaliseBodyStms loopbody $ \ses -> do
+    wrap $ bindingParams [mergepat] $ \shapepat nested_mergepat ->
+        internaliseBodyStms loopbody $ \ses -> do
       sets <- mapM subExpType ses
-      let shapeinit = argShapes
+      let mergepat' = concat nested_mergepat
+          shapeinit = argShapes
                       (map I.paramName shapepat)
                       (map I.paramType mergepat')
                       mergeinit_ts
@@ -348,7 +435,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $
-          E.Var (QualName ([], E.identName src)) (E.identType src) (srclocOf src)
+          E.Var (qualName (E.identName src)) (E.identType src) (srclocOf src)
   ves <- internaliseExp "lw_val" ve
   dims <- case srcs of
             [] -> return [] -- Will this happen?
@@ -528,25 +615,70 @@ internaliseExp desc (E.Partition lams arr _) = do
 
 internaliseExp desc (E.Stream form lam arr _) = do
   arrs <- internaliseExpToVars "stream_input" arr
-  accs <- case form of
-            E.MapLike _         -> return []
-            E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
-            E.Sequential  acc   -> internaliseExp "stream_acc" acc
+  (lam_accs, lam_acc_param_ts) <-
+    case form of E.MapLike{} -> return ([], [])
+                 E.RedLike{} -> return ([], [])
+                 E.Sequential acc -> do
+                   accs <- internaliseExp "stream_acc" acc
+                   acc_ts <- mapM I.subExpType accs
+                   return (accs, acc_ts)
 
   rowts <- mapM (fmap I.rowType . lookupType) arrs
-  lam' <- internaliseStreamLambda internaliseLambda asserting lam accs rowts
+  lam' <- internaliseStreamLambda internaliseLambda asserting lam lam_acc_param_ts rowts
 
-  form' <- case form of
-             E.MapLike o -> return $ I.MapLike o
-             E.RedLike o comm lam0 _ -> do
-                 acctps <- mapM I.subExpType accs
-                 outsz  <- arraysSize 0 <$> mapM lookupType arrs
-                 let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
-                 lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
-                 return $ I.RedLike o comm lam0' accs
-             E.Sequential _ -> return $ I.Sequential accs
+  -- If the stream form is a reduce, we also have to fiddle with the
+  -- lambda to incorporate the reduce function.  FIXME: can't we just
+  -- modify the internal representation of reduction streams?
+  (form', lam'') <-
+    case form of
+      E.MapLike o -> return (I.MapLike o, lam')
+      E.Sequential _ -> return (I.Sequential lam_accs, lam')
+      E.RedLike o comm lam0 -> do
+        -- Synthesize neutral elements by applying the fold function
+        -- to an empty chunk.
+        accs <- do
+          let (chunk_param, _, lam_params) =
+                partitionChunkedFoldParameters 0 $ I.extLambdaParams lam'
+          letBindNames'_ [I.paramName chunk_param] $
+            I.BasicOp $ I.SubExp $ constant (0::Int32)
+          forM_ lam_params $ \p ->
+            letBindNames'_ [I.paramName p] $
+            I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
+            I.arrayDims $ I.paramType p
+          bodyBind =<< renameBody (I.extLambdaBody lam')
+
+        acctps <- mapM I.subExpType accs
+        outsz  <- arraysSize 0 <$> mapM lookupType arrs
+        let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
+        lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
+        let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
+        acc_params <- forM lam0_acc_params $ \p -> do
+          name <- newVName $ baseString $ paramName p
+          return p { I.paramName = name }
+
+        body_with_lam0 <-
+          ensureResultShape asserting (srclocOf lam) acctps <=< runBodyBinder $ do
+            lam_res <- bodyBind $ extLambdaBody lam'
+
+            let consumed = consumedByLambda $ Alias.analyseLambda lam0'
+                copyIfConsumed p (I.Var v)
+                  | paramName p `HS.member` consumed =
+                      letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
+                copyIfConsumed _ x = return x
+
+            accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
+            new_lam_res <- eLambda lam0' $ accs' ++ lam_res
+            return $ resultBody new_lam_res
+
+        -- Make sure the chunk size parameter comes first.
+        return (I.RedLike o comm lam0' accs,
+                lam' { extLambdaParams = take 1 (extLambdaParams lam') <>
+                                         acc_params <>
+                                         drop 1 (extLambdaParams lam')
+                     , extLambdaBody = body_with_lam0
+                     , extLambdaReturnType = staticShapes acctps })
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream [] w form' lam' arrs
+  letTupExp' desc $ I.Op $ I.Stream [] w form' lam'' arrs
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
@@ -566,159 +698,27 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
   ce' <- internaliseExp1 "cond" ce
   te' <- internaliseBody te
   fe' <- internaliseBody fe
-  let t' = internaliseType t
-  letTupExp' desc $ I.If ce' te' fe' t'
+  (t', _, _) <- internaliseReturnType $ E.vacuousShapeAnnotations t
+  letTupExp' desc $ I.If ce' te' fe' $ map I.fromDecl t'
 
-internaliseExp desc (E.BinOp E.LogAnd xe ye t loc) =
-  internaliseExp desc $
-  E.If xe ye (E.Literal (E.BoolValue False) loc) t loc
+-- Builtin operators are handled specially because they are
+-- overloaded.
+internaliseExp desc (E.BinOp op (xe,_) (ye,_) _ _)
+  | Just internalise <- isOverloadedFunction op [xe, ye] =
+      internalise desc
 
-internaliseExp desc (E.BinOp E.LogOr xe ye t loc) =
-  internaliseExp desc $
-  E.If xe (E.Literal (E.BoolValue True) loc) ye t loc
+-- User-defined operators are just the same as a function call.
+internaliseExp desc (E.BinOp op xarg yarg ret loc) =
+  internaliseExp desc $ E.Apply op [xarg,yarg] ret loc
 
--- Handle equality and inequality specially, to treat the case of
--- arrays.
-internaliseExp desc (E.BinOp cmp xe ye _ _)
-  | Just cmp_f <- isEqlOp cmp = do
-      xe' <- internaliseExp "x" xe
-      ye' <- internaliseExp "y" ye
-      rs <- zipWithM (doComparison cmp_f) xe' ye'
-      letTupExp' desc =<< foldBinOp I.LogAnd (constant True) rs
-  where isEqlOp E.NotEqual = Just $ \t x y -> do
-          eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
-          letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
-        isEqlOp E.Equal = Just $ \t x y ->
-          letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
-        isEqlOp _ = Nothing
-
-        doComparison cmp_f x y = do
-          x_t <- I.subExpType x
-          y_t <- I.subExpType y
-          case x_t of
-            I.Prim t -> cmp_f t x y
-            _ -> do
-              let x_dims = I.arrayDims x_t
-                  y_dims = I.arrayDims y_t
-              dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
-                letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) x_dim y_dim
-              shapes_match <- letSubExp "shapes_match" =<<
-                              foldBinOp I.LogAnd (constant True) dims_match
-              compare_elems_body <- runBodyBinder $ do
-                -- Flatten both x and y.
-                x_num_elems <- letSubExp "x_num_elems" =<<
-                               foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
-                x' <- letExp "x" $ I.BasicOp $ I.SubExp x
-                y' <- letExp "x" $ I.BasicOp $ I.SubExp y
-                x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] x'
-                y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] y'
-
-                -- Compare the elements.
-                cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
-                cmps <- letExp "cmps" $ I.Op $ I.Map [] x_num_elems cmp_lam [x_flat, y_flat]
-
-                -- Check that all were equal.
-                and_lam <- binOpLambda I.LogAnd I.Bool
-                all_equal <- letSubExp "all_equal" $ I.Op $
-                             I.Reduce [] x_num_elems Commutative and_lam [(constant True,cmps)]
-                return $ resultBody [all_equal]
-
-              letSubExp "arrays_equal" $
-                I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
-
-internaliseExp desc (E.BinOp bop xe ye _ _) = do
-  xe' <- internaliseExp1 "x" xe
-  ye' <- internaliseExp1 "y" ye
-  case (E.typeOf xe, E.typeOf ye) of
-    (E.Prim t1, E.Prim t2) ->
-      internaliseBinOp desc bop xe' ye' t1 t2
-    _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
-
-internaliseExp desc (E.UnOp E.Not e _) = do
-  e' <- internaliseExp1 "not_arg" e
-  letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
-
-internaliseExp desc (E.UnOp E.Complement e _) = do
-  e' <- internaliseExp1 "complement_arg" e
-  et <- subExpType e'
-  case et of I.Prim (I.IntType t) ->
-               letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
-             _ ->
-               fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
-
-internaliseExp desc (E.UnOp E.Negate e _) = do
-  e' <- internaliseExp1 "negate_arg" e
-  et <- subExpType e'
-  case et of I.Prim (I.IntType t) ->
-               letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
-             I.Prim (I.FloatType t) ->
-               letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
-             _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
-
-internaliseExp desc (E.UnOp E.Abs e _) = do
-  e' <- internaliseExp1 "abs_arg" e
-  case E.typeOf e of
-    E.Prim (E.Signed t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Abs t) e'
-    E.Prim (E.Unsigned _) ->
-      return [e']
-    E.Prim (E.FloatType t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
-
-internaliseExp desc (E.UnOp E.Signum e _) = do
-  e' <- internaliseExp1 "signum_arg" e
-  case E.typeOf e of
-    E.Prim (E.Signed t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.SSignum t) e'
-    E.Prim (E.Unsigned t) ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
-
-internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
-  e' <- internaliseExp1 "tofloat_arg" e
-  case E.typeOf e of
-    E.Prim E.Bool ->
-      letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
-                                (resultBody [floatConst float_to 0])
-                                [I.Prim $ I.FloatType float_to]
-    E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
-    E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.UIToFP int_from float_to) e'
-    E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
-
-internaliseExp desc (E.UnOp (E.ToSigned int_to) e _) = do
-  e' <- internaliseExp1 "trunc_arg" e
-  case E.typeOf e of
-    E.Prim E.Bool ->
-      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
-                                (resultBody [intConst int_to 0])
-                                [I.Prim $ I.IntType int_to]
-    E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
-    E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-    E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToSigned"
-
-internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _) = do
-  e' <- internaliseExp1 "trunc_arg" e
-  case E.typeOf e of
-    E.Prim E.Bool ->
-      letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
-                                (resultBody [intConst int_to 0])
-                                [I.Prim $ I.IntType int_to]
-    E.Prim (E.Signed int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-    E.Prim (E.Unsigned int_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
-    E.Prim (E.FloatType float_from) ->
-      letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
-    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
+internaliseExp desc (E.TupleProject i e (Info rt) _) = do
+  n <- typeLength rt
+  i' <- fmap sum $ mapM typeLength $ take i $
+        case E.typeOf e of
+               Tuple ts -> ts
+               t        -> [t]
+  take n . drop i' <$> internaliseExp desc e
+  where typeLength = fmap length . internaliseType
 
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
@@ -751,12 +751,13 @@ internaliseExp desc (E.Write si v a loc) = do
 
   let indexType = I.Prim (IntType Int32)
       bodyTypes = replicate (length tvs) indexType ++ tvs
+      paramTypes = indexType : tvs
 
   indexName <- newVName "write_index"
   valueNames <- replicateM (length tvs) $ newVName "write_value"
 
   let bodyNames = indexName : valueNames
-  let bodyParams = zipWith I.Param bodyNames bodyTypes
+  let bodyParams = zipWith I.Param bodyNames paramTypes
 
   -- This body is pretty boring right now, as every input is exactly the output.
   -- But it can get funky later on if fused with something else.
@@ -780,17 +781,63 @@ internaliseDimIndex loc w (E.DimFix i) = do
   i' <- internaliseExp1 "i" i
   cs <- assertingOne $ boundsCheck loc w i'
   return (I.DimFix i', cs)
-internaliseDimIndex loc w (E.DimSlice i j) = do
-  i' <- maybe (return (constant (0::Int32))) (internaliseExp1 "i") i
-  j' <- maybe (return w) (internaliseExp1 "j") j
-  cs_i <- assertingOne $ boundsCheck loc w i'
-  cs_j <- assertingOne $ do
-    wp1 <- letSubExp "wp1" $ BasicOp $ I.BinOp (Add Int32) j' (constant (1::Int32))
-    boundsCheck loc wp1 j'
-  cs_pos <- assertingOne $
-    letExp "pos" =<< eAssert (pure $ BasicOp $ I.CmpOp (CmpSle Int32) i' j') loc
-  n <- letSubExp "n" $ BasicOp $ I.BinOp (Sub Int32) j' i'
-  return (I.DimSlice i' n, cs_i <> cs_j <> cs_pos)
+internaliseDimIndex loc w (E.DimSlice i j s) = do
+  s' <- maybe (return one) (internaliseExp1 "s") s
+  s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
+  backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) s_sign negone
+  w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int32) w one
+  let i_def = letSubExp "i_def" $ I.If backwards
+              (resultBody [w_minus_1])
+              (resultBody [zero]) [I.Prim int32]
+      j_def = letSubExp "j_def" $ I.If backwards
+              (resultBody [negone])
+              (resultBody [w]) [I.Prim int32]
+  i' <- maybe i_def (internaliseExp1 "i") i
+  j' <- maybe j_def (internaliseExp1 "j") j
+  j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32) j' i'
+  n <- letSubExp "n" =<< eDivRoundingUp Int32
+       (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
+       (pure $ I.BasicOp $ I.UnOp (I.Abs Int32) s')
+
+  checked <- asserting $ do
+    -- Bounds checks depend on whether we are slicing forwards or
+    -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
+    -- backwards, '-1 <= j && j <= i'.  In both cases, we check '0 <=
+    -- i+n*s && i+n*s <= w'.  We only check if the slice is nonempty.
+    empty_slice <- letSubExp "empty_slice" $ I.BasicOp $ I.CmpOp (CmpEq int32) n zero
+
+    m <- letSubExp "m" $ I.BasicOp $ I.BinOp (Sub Int32) n one
+    m_t_s <- letSubExp "m_t_s" $ I.BasicOp $ I.BinOp (Mul Int32) m s'
+    i_p_m_t_s <- letSubExp "i_p_m_t_s" $ I.BasicOp $ I.BinOp (Add Int32) i' m_t_s
+    zero_leq_i_p_m_t_s <- letSubExp "zero_leq_i_p_m_t_s" $
+                          I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i_p_m_t_s
+    i_p_m_t_s_leq_w <- letSubExp "i_p_m_t_s_leq_w" $
+                       I.BasicOp $ I.CmpOp (I.CmpSle Int32) i_p_m_t_s w
+
+    zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
+    i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
+    forwards_ok <- letSubExp "forwards_ok" =<<
+                   foldBinOp I.LogAnd zero_lte_i
+                   [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
+
+    negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
+    j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
+    backwards_ok <- letSubExp "backwards_ok" =<<
+                    foldBinOp I.LogAnd negone_lte_j
+                    [negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
+
+    slice_ok <- letSubExp "slice_ok" $ I.If backwards
+                (resultBody [backwards_ok])
+                (resultBody [forwards_ok])
+                [I.Prim I.Bool]
+    ok_or_empty <- letSubExp "ok_or_empty" $
+                   I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
+    letTupExp "slice_cert" $ I.BasicOp $ I.Assert ok_or_empty loc
+
+  return (I.DimSlice i' n s', checked)
+  where zero = constant (0::Int32)
+        negone = constant (-1::Int32)
+        one = constant (1::Int32)
 
 internaliseScanOrReduce :: String -> String
                         -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
@@ -978,7 +1025,46 @@ internaliseLambda (E.AnonymFun params body _ (Info rettype) _) rowtypes =
     mapM_ (uncurry internaliseDimConstant) cm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.CurryFun (QualName (_, fname)) curargs _ loc) rowtypes = do
+-- All overloaded functions are unary, so if they're here, they have
+-- no curried arguments and only one real argument.
+internaliseLambda (E.CurryFun qfname [] (Info ([et], _)) loc) [it] = do
+  param <- newParam "not_curried" it
+  let arg = E.Var (E.qualName (paramName param)) (Info et) loc
+  case isOverloadedFunction qfname [arg] of
+    Just special -> do
+      (res, stms) <- localScope (scopeOfLParams [param]) $
+                     collectStms $ special "curried_result"
+      let body = mkBody stms res
+      body_t <- bodyExtType body
+      return ([param], body, body_t)
+    Nothing ->
+      internaliseCurrying qfname [] loc [it]
+
+internaliseLambda (E.CurryFun qfname curargs _ loc) rowtypes =
+  internaliseCurrying qfname curargs loc rowtypes
+
+internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
+  (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
+  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
+
+internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype, Info _) (Info rettype) loc) rowts = do
+  (params, body, rettype') <-
+    binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
+  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
+
+internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rettype) loc) rowts = do
+  (params, body, rettype') <-
+    binOpCurriedToLambda binop paramtype rettype e id
+  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
+
+internaliseCurrying :: QualName VName
+                    -> [E.Exp]
+                    -> SrcLoc
+                    -> [I.Type]
+                    -> InternaliseM
+                    ([I.LParam], I.Body, [I.ExtType])
+internaliseCurrying qfname curargs loc rowtypes = do
+  fname <- lookupSubst qfname
   fun_entry <- lookupFunction fname
   let (fname', constparams, shapes, value_paramts, int_rettype_fun) = internalFun fun_entry
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
@@ -1004,34 +1090,8 @@ internaliseLambda (E.CurryFun (QualName (_, fname)) curargs _ loc) rowtypes = do
         return (map I.Var res, map I.fromDecl ts)
   return (params, mkBody fun_bnds res, ts)
 
-internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
-  internaliseLambda (E.AnonymFun params body Nothing (Info rettype') loc) rowts
 
-internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
-  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
-
-internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <-
-    binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
-
-internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <-
-    binOpCurriedToLambda binop paramtype rettype e id
-  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
-
-unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
-                -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
-unOpFunToLambda op paramtype rettype = do
-  paramname <- newNameFromString "unop_param"
-  let ident = E.Ident paramname (Info paramtype) noLoc
-  return ([E.Id ident],
-          E.UnOp op (E.Var (QualName ([],paramname)) (Info paramtype) noLoc) noLoc,
-          E.vacuousShapeAnnotations $ E.toStruct rettype)
-
-binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
+binOpFunToLambda :: E.QualName VName -> E.Type -> E.Type -> E.Type
                  -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
@@ -1040,27 +1100,199 @@ binOpFunToLambda op xtype ytype rettype = do
       ident_y = E.Ident y_name (Info ytype) noLoc
   return ([E.Id ident_x, E.Id ident_y],
           E.BinOp op
-           (E.Var (QualName ([],x_name)) (Info xtype) noLoc)
-           (E.Var (QualName ([],y_name)) (Info ytype) noLoc)
+           (E.Var (qualName x_name) (Info xtype) noLoc, E.Observe)
+           (E.Var (qualName y_name) (Info ytype) noLoc, E.Observe)
            (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
-binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
+binOpCurriedToLambda :: E.QualName VName -> E.Type -> E.Type
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
                      -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let ident = E.Ident paramname (Info paramtype) noLoc
-      (x', y') = swap (E.Var (QualName ([],paramname)) (Info paramtype) noLoc, e)
+      (x', y') = swap (E.Var (qualName paramname) (Info paramtype) noLoc, e)
   return ([E.Id ident],
-          E.BinOp op x' y' (Info rettype) noLoc,
+          E.BinOp op (x',E.Observe) (y',E.Observe) (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 internaliseDimConstant :: Name -> VName -> InternaliseM ()
 internaliseDimConstant fname name =
   letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
   I.Apply fname [] $ primRetType I.int32
+
+-- | Some operators and functions are overloaded - we detect and treat
+-- them here.
+isOverloadedFunction :: E.QualName VName -> [E.Exp]
+                     -> Maybe (String -> InternaliseM [SubExp])
+isOverloadedFunction qname args = do
+  guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
+  handle args $ baseString $ qualLeaf qname
+  where
+    handle [x] "i8"  = Just $ toSigned I.Int8 x
+    handle [x] "i16" = Just $ toSigned I.Int16 x
+    handle [x] "i32" = Just $ toSigned I.Int32 x
+    handle [x] "i64" = Just $ toSigned I.Int64 x
+
+    handle [x] "u8"  = Just $ toUnsigned I.Int8 x
+    handle [x] "u16" = Just $ toUnsigned I.Int16 x
+    handle [x] "u32" = Just $ toUnsigned I.Int32 x
+    handle [x] "u64" = Just $ toUnsigned I.Int64 x
+
+    handle [x] "f32" = Just $ toFloat I.Float32 x
+    handle [x] "f64" = Just $ toFloat I.Float64 x
+
+    handle [x] "sgn" = Just $ signumF x
+    handle [x] "abs" = Just $ absF x
+    handle [x] "!" = Just $ notF x
+    handle [x] "~" = Just $ complementF x
+
+    -- Short-circuiting operators are magical.
+    handle [x,y] "&&" = Just $ \desc ->
+      internaliseExp desc $
+      E.If x y (E.Literal (E.BoolValue False) noLoc) (Info (E.Prim E.Bool)) noLoc
+    handle [x,y] "||" = Just $ \desc ->
+        internaliseExp desc $
+        E.If x (E.Literal (E.BoolValue True) noLoc) y (Info (E.Prim E.Bool)) noLoc
+
+    -- Handle equality and inequality specially, to treat the case of
+    -- arrays.
+    handle [xe,ye] op
+      | Just cmp_f <- isEqlOp op = Just $ \desc -> do
+          xe' <- internaliseExp "x" xe
+          ye' <- internaliseExp "y" ye
+          rs <- zipWithM (doComparison (cmp_f desc)) xe' ye'
+          letTupExp' desc =<< foldBinOp I.LogAnd (constant True) rs
+        where isEqlOp "!=" = Just $ \desc t x y -> do
+                eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+                letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
+              isEqlOp "==" = Just $ \desc t x y ->
+                letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+              isEqlOp _ = Nothing
+
+              doComparison cmp_f x y = do
+                x_t <- I.subExpType x
+                y_t <- I.subExpType y
+                case x_t of
+                  I.Prim t -> cmp_f t x y
+                  _ -> do
+                    let x_dims = I.arrayDims x_t
+                        y_dims = I.arrayDims y_t
+                    dims_match <- forM (zip x_dims y_dims) $ \(x_dim, y_dim) ->
+                      letSubExp "dim_eq" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) x_dim y_dim
+                    shapes_match <- letSubExp "shapes_match" =<<
+                                    foldBinOp I.LogAnd (constant True) dims_match
+                    compare_elems_body <- runBodyBinder $ do
+                      -- Flatten both x and y.
+                      x_num_elems <- letSubExp "x_num_elems" =<<
+                                     foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
+                      x' <- letExp "x" $ I.BasicOp $ I.SubExp x
+                      y' <- letExp "x" $ I.BasicOp $ I.SubExp y
+                      x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] x'
+                      y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] y'
+
+                      -- Compare the elements.
+                      cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
+                      cmps <- letExp "cmps" $ I.Op $ I.Map [] x_num_elems cmp_lam [x_flat, y_flat]
+
+                      -- Check that all were equal.
+                      and_lam <- binOpLambda I.LogAnd I.Bool
+                      all_equal <- letSubExp "all_equal" $ I.Op $
+                                   I.Reduce [] x_num_elems Commutative and_lam [(constant True,cmps)]
+                      return $ resultBody [all_equal]
+
+                    letSubExp "arrays_equal" $
+                      I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
+
+    handle [x,y] name = do
+      bop <- find ((name==) . pretty) [minBound..maxBound::E.BinOp]
+      Just $ \desc -> do
+        x' <- internaliseExp1 "x" x
+        y' <- internaliseExp1 "y" y
+        case (E.typeOf x, E.typeOf y) of
+          (E.Prim t1, E.Prim t2) ->
+            internaliseBinOp desc bop x' y' t1 t2
+          _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
+
+    handle _ _ = Nothing
+
+    toSigned int_to e desc = do
+      e' <- internaliseExp1 "trunc_arg" e
+      case E.typeOf e of
+        E.Prim E.Bool ->
+          letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                    (resultBody [intConst int_to 0])
+                                    [I.Prim $ I.IntType int_to]
+        E.Prim (E.Signed int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
+        E.Prim (E.Unsigned int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
+        E.Prim (E.FloatType float_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToSI float_from int_to) e'
+        _ -> fail "Futhark.Internalise.handle: non-numeric type in ToSigned"
+
+    toUnsigned int_to e desc = do
+      e' <- internaliseExp1 "trunc_arg" e
+      case E.typeOf e of
+        E.Prim E.Bool ->
+          letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
+                                    (resultBody [intConst int_to 0])
+                                    [I.Prim $ I.IntType int_to]
+        E.Prim (E.Signed int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
+        E.Prim (E.Unsigned int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
+        E.Prim (E.FloatType float_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
+
+    toFloat float_to e desc = do
+      e' <- internaliseExp1 "tofloat_arg" e
+      case E.typeOf e of
+        E.Prim E.Bool ->
+          letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
+                                    (resultBody [floatConst float_to 0])
+                                    [I.Prim $ I.FloatType float_to]
+        E.Prim (E.Signed int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
+        E.Prim (E.Unsigned int_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.UIToFP int_from float_to) e'
+        E.Prim (E.FloatType float_from) ->
+          letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
+
+    signumF e desc = do
+      e' <- internaliseExp1 "signum_arg" e
+      case E.typeOf e of
+        E.Prim (E.Signed t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.SSignum t) e'
+        E.Prim (E.Unsigned t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.USignum t) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
+
+    absF e desc = do
+      e' <- internaliseExp1 "abs_arg" e
+      case E.typeOf e of
+        E.Prim (E.Signed t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.Abs t) e'
+        E.Prim (E.Unsigned _) ->
+          return [e']
+        E.Prim (E.FloatType t) ->
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.FAbs t) e'
+        _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
+
+    notF e desc = do
+      e' <- internaliseExp1 "not_arg" e
+      letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
+
+    complementF e desc = do
+      e' <- internaliseExp1 "complement_arg" e
+      et <- subExpType e'
+      case et of I.Prim (I.IntType t) ->
+                   letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
+                 _ ->
+                   fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.

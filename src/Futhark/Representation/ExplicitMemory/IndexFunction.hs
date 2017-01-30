@@ -32,7 +32,7 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax
-  (ShapeChange, DimIndex(..), Slice, sliceDims)
+  (ShapeChange, DimIndex(..), Slice, sliceDims, unitSlice)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -49,7 +49,6 @@ data IxFun num = Direct (Shape num)
                | Rotate (IxFun num) (Indices num)
                | Index (IxFun num) (Slice num)
                | Reshape (IxFun num) (ShapeChange num)
-               | Stride (IxFun num) num
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
@@ -65,7 +64,7 @@ instance (IntegralExp num, Eq num) => Eq (IxFun num) where
     -- Two DimSlices are considered equal even if their slice lengths
     -- are not equal, as this allows us to get rid of reshapes.
     where eqIndex (DimFix i) (DimFix j) = i == j
-          eqIndex (DimSlice i _) (DimSlice j _) = i == j
+          eqIndex (DimSlice i _ s0) (DimSlice j _ s1) = i == j && s0 == s1
           eqIndex _ _ = False
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
     ixfun1 == ixfun2 && length shape1 == length shape2
@@ -77,7 +76,6 @@ instance Show num => Show (IxFun num) where
   show (Rotate fun offsets) = "Rotate (" ++ show fun ++ ", " ++ show offsets ++ ")"
   show (Index fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
   show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
-  show (Stride fun stride) = "Stride (" ++ show fun ++ ", " ++ show stride ++ ")"
 
 instance Pretty num => Pretty (IxFun num) where
   ppr (Direct dims) =
@@ -88,8 +86,6 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Reshape fun oldshape) =
     ppr fun <> text "->" <>
     parens (commasep (map ppr oldshape))
-  ppr (Stride fun stride) =
-    ppr fun <> text "*" <> ppr stride
 
 instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) where
   substituteNames _ (Direct n) =
@@ -106,14 +102,9 @@ instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) whe
     reshape
     (substituteNames subst fun)
     (map (substituteNames subst) newshape)
-  substituteNames subst (Stride fun stride) =
-    Stride
-    (substituteNames subst fun)
-    (substituteNames subst stride)
 
 instance FreeIn num => FreeIn (IxFun num) where
   freeIn (Direct dims) = freeIn dims
-  freeIn (Stride ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Permute ixfun _) = freeIn ixfun
   freeIn (Rotate ixfun offsets) = freeIn ixfun <> freeIn offsets
   freeIn (Index ixfun is) =
@@ -121,7 +112,7 @@ instance FreeIn num => FreeIn (IxFun num) where
   freeIn (Reshape ixfun dims) =
     freeIn ixfun <> freeIn dims
 
-instance (Eq num, IntegralExp num, Substitute num, Rename num) => Rename (IxFun num) where
+instance (Eq num, IntegralExp num, Substitute num) => Rename (IxFun num) where
   rename = substituteRename
 
 index :: (Pretty num, IntegralExp num) =>
@@ -142,35 +133,30 @@ index (Rotate fun offsets) is element_size =
 index (Index fun js) is element_size =
   index fun (adjust js is) element_size
   where adjust (DimFix j:js') is' = j : adjust js' is'
-        adjust (DimSlice j _:js') (i:is') = j + i : adjust js' is'
+        adjust (DimSlice j _ s:js') (i:is') = j + i * s : adjust js' is'
         adjust _ _ = []
 
 index (Reshape fun newshape) is element_size =
   let new_indices = reshapeIndex (shape fun) (newDims newshape) is
   in index fun new_indices element_size
 
-index (Stride fun stride) (i:is) element_size =
-  index fun (i * stride:is) element_size
-
-index ixfun [] _ =
-  error $ "Empty index list provided to " ++ pretty ixfun
-
-iota :: IntegralExp num =>
-        Shape num -> IxFun num
+iota :: Shape num -> IxFun num
 iota = Direct
 
 offsetIndex :: (Eq num, IntegralExp num) =>
                IxFun num -> num -> IxFun num
 offsetIndex ixfun i | i == 0 = ixfun
 offsetIndex ixfun i =
-  case dims of
-    d:ds -> slice ixfun (DimSlice i (d-i) : map (DimSlice 0) ds)
+  case shape ixfun of
+    d:ds -> slice ixfun (DimSlice i (d-i) 1 : map (unitSlice 0) ds)
     []   -> error "offsetIndex: underlying index function has rank zero"
-  where dims = shape ixfun
 
-strideIndex :: IntegralExp num =>
+strideIndex :: (Eq num, IntegralExp num) =>
                IxFun num -> num -> IxFun num
-strideIndex = Stride
+strideIndex ixfun s =
+  case shape ixfun of
+    d:ds -> slice ixfun (DimSlice 0 d s : map (unitSlice 0) ds)
+    []   -> error "offsetIndex: underlying index function has rank zero"
 
 permute :: IntegralExp num =>
            IxFun num -> Permutation -> IxFun num
@@ -209,16 +195,16 @@ slice :: (Eq num, IntegralExp num) =>
          IxFun num -> Slice num -> IxFun num
 slice ixfun is
   -- Avoid identity slicing.
-  | is == map (DimSlice 0) (shape ixfun) = ixfun
+  | is == map (unitSlice 0) (shape ixfun) = ixfun
 slice (Index ixfun mis) is =
   Index ixfun $ reslice mis is
   where reslice mis' [] = mis'
         reslice (DimFix j:mis') is' =
           DimFix j : reslice mis' is'
-        reslice (DimSlice orig_k _:mis') (DimSlice new_k n:is') =
-          DimSlice (orig_k + new_k) n : reslice mis' is'
-        reslice (DimSlice orig_k _:mis') (DimFix i:is') =
-          DimFix (orig_k+i) : reslice mis' is'
+        reslice (DimSlice orig_k _ orig_s:mis') (DimSlice new_k n new_s:is') =
+          DimSlice (orig_k + new_k * orig_s) n (orig_s*new_s) : reslice mis' is'
+        reslice (DimSlice orig_k _ orig_s:mis') (DimFix i:is') =
+          DimFix (orig_k+i*orig_s) : reslice mis' is'
         reslice _ _ = error "IndexFunction slice: invalid arguments"
 slice ixfun [] = ixfun
 slice ixfun is = Index ixfun is
@@ -239,8 +225,6 @@ shape (Index _ how) =
   sliceDims how
 shape (Reshape _ dims) =
   map newDim dims
-shape (Stride ixfun _) =
-  shape ixfun
 
 base :: IxFun num -> Shape num
 base (Direct dims) =
@@ -253,17 +237,14 @@ base (Index ixfun _) =
   base ixfun
 base (Reshape ixfun _) =
   base ixfun
-base (Stride ixfun _) =
-  base ixfun
 
 rebase :: (Eq num, IntegralExp num) =>
           IxFun num
        -> IxFun num
        -> IxFun num
-rebase new_base (Direct _) =
-  new_base
-rebase new_base (Stride ixfun stride) =
-  strideIndex (rebase new_base ixfun) stride
+rebase new_base (Direct old_shape)
+  | length old_shape == rank new_base = new_base
+  | otherwise = error "IndexFunction.rebase: bad rank for new base."
 rebase new_base (Permute ixfun perm) =
   permute (rebase new_base ixfun) perm
 rebase new_base (Rotate ixfun offsets) =
@@ -289,10 +270,10 @@ linearWithOffset (Index ixfun is) element_size = do
   where m = length is
         inner_shape = shape ixfun
         fixingOuter (DimFix i:is') (_:ds) = (i:) <$> fixingOuter is' ds
-        fixingOuter (DimSlice off _:is') ds
-          | is' == map (DimSlice 0) ds = Just [off]
+        fixingOuter (DimSlice off _ 1:is') ds
+          | is' == map (unitSlice 0) ds = Just [off]
         fixingOuter is' ds
-          | is' == map (DimSlice 0) ds = Just []
+          | is' == map (unitSlice 0) ds = Just []
         fixingOuter _ _ = Nothing
 linearWithOffset _ _ = Nothing
 

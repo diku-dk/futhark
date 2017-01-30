@@ -112,7 +112,6 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
-import Futhark.Construct (fullSliceNum)
 import Futhark.Optimise.Simplifier.Lore
 import Futhark.Representation.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
@@ -852,7 +851,7 @@ arrayVarReturns v = do
     _ ->
       fail $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
-varReturns :: (HasScope lore m, Monad m, ExplicitMemorish lore, Attributes lore) =>
+varReturns :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
               VName -> m ExpReturns
 varReturns v = do
   summary <- lookupMemBound v
@@ -899,9 +898,9 @@ expReturns (BasicOp (Split _ i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let offsets =  0 : scanl1 (+) (map (primExpFromSubExp int32) sizeexps)
       dims = map (primExpFromSubExp int32) $ shapeDims shape
-      mkSlice offset n = map (DimSlice 0) (take i dims) ++
-                         [DimSlice offset n] ++
-                         map (DimSlice 0) (drop (i+1) dims)
+      mkSlice offset n = map (unitSlice 0) (take i dims) ++
+                         [unitSlice offset n] ++
+                         map (unitSlice 0) (drop (i+1) dims)
   return $ zipWith (\offset dim ->
                       let new_shape = setDim i shape dim
                       in ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
@@ -981,30 +980,6 @@ instance OpReturns ExplicitMemory where
 instance OpReturns InKernel where
   opReturns (Alloc size space) =
     return [ReturnsMemory size space]
-  opReturns (Inner (SplitArray o _ thread_id num_threads elems_per_thread arrs)) =
-    forM arrs $ \arr -> do
-      arr_t <- lookupType arr
-      (mem, ixfun) <- lookupArraySummary arr
-      let row_dims = drop 1 $ arrayDims arr_t
-          bt = elemType arr_t
-          num_threads' = primExpFromSubExp int32 num_threads
-          elems_per_thread' = primExpFromSubExp int32 elems_per_thread
-          ext_shape = ExtShape $ Ext 0 : map Free row_dims
-      return $ ReturnsArray bt ext_shape NoUniqueness $ Just $ ReturnsInBlock mem $
-        case o of
-          InOrder ->
-            let newshape = [DimNew num_threads', DimNew elems_per_thread'] ++
-                           map (DimNew . primExpFromSubExp int32) row_dims
-            in IxFun.slice (IxFun.reshape ixfun newshape) $
-               fullSliceNum (newDims newshape) [DimFix $ primExpFromSubExp int32 thread_id]
-          Disorder ->
-            let newshape = [DimNew elems_per_thread', DimNew num_threads'] ++
-                           map (DimNew . primExpFromSubExp int32) row_dims
-                perm = [1,0] ++ [2..IxFun.rank ixfun]
-            in IxFun.slice
-               (IxFun.permute (IxFun.reshape ixfun newshape) perm) $
-               fullSliceNum (rearrangeShape perm $ newDims newshape)
-               [DimFix $ primExpFromSubExp int32 thread_id]
 
   opReturns (Inner (GroupStream _ _ lam _ _)) =
     forM (groupStreamAccParams lam) $ \param ->
