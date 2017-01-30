@@ -41,7 +41,7 @@ module complex(T: real) = {
   fun sqrt ((a,b): complex) =
     let gamma = T.sqrt ((a T.+ T.sqrt (a T.* a T.+ b T.* b)) T./
                         T.fromInt 2)
-    let delta = T.fromInt (T.sgn b) T.*
+    let delta = T.fromInt (T.toInt (T.sgn b)) T.*
                 T.sqrt (((T.fromInt 0 T.- a) T.+
                          T.sqrt (a T.* a T.+ b T.* b)) T./
                         T.fromInt 2)

@@ -56,6 +56,7 @@ module Language.Futhark.Syntax
   -- * Module language
   , SpecBase(..)
   , SigExpBase(..)
+  , TypeRefBase(..)
   , SigBindBase(..)
   , ModExpBase(..)
   , StructBindBase(..)
@@ -681,20 +682,28 @@ data SpecBase f vn = ValSpec  { specName     :: vn
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
                    | TypeSpec vn SrcLoc -- ^ Abstract type.
+                   | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
   locOf (ValSpec _ _ _ loc)  = locOf loc
   locOf (TypeAbbrSpec tbind) = locOf tbind
   locOf (TypeSpec _ loc)     = locOf loc
+  locOf (IncludeSpec _ loc)  = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigSpecs [SpecBase f vn] SrcLoc
+                     | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SigExpBase f vn)
 
+-- | A type refinement.
+data TypeRefBase f vn = TypeRef (QualName vn) (TypeDeclBase f vn)
+deriving instance Showable f vn => Show (TypeRefBase f vn)
+
 instance Located (SigExpBase f vn) where
-  locOf (SigVar _ loc)   = locOf loc
-  locOf (SigSpecs _ loc) = locOf loc
+  locOf (SigVar _ loc)    = locOf loc
+  locOf (SigSpecs _ loc)  = locOf loc
+  locOf (SigWith _ _ loc) = locOf loc
 
 data SigBindBase f vn = SigBind { sigName :: vn
                                 , sigExp  :: SigExpBase f vn

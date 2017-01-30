@@ -12,49 +12,39 @@ module type numeric = {
   val <: t -> t -> bool
   val >: t -> t -> bool
 
-  val sgn: t -> i32
+  val abs: t -> t
+
+  val sgn: t -> t
 }
 
 module type integral = {
-  type t
+  include numeric
 
-  val +: t -> t -> t
-  val -: t -> t -> t
-  val *: t -> t -> t
-  val /: t -> t -> t
   val %: t -> t -> t
-
-  val fromInt: i32 -> t
-
-  val ==: t -> t -> bool
-  val <: t -> t -> bool
-  val >: t -> t -> bool
-
-  val sgn: t -> i32
 }
 
 module type real = {
-  type t
+  include numeric
 
-  val +: t -> t -> t
-  val -: t -> t -> t
-  val *: t -> t -> t
-  val /: t -> t -> t
-
-  val fromInt: i32 -> t
   val fromFraction: i32 -> i32 -> t
   val toInt: t -> i32
 
-  val ==: t -> t -> bool
-  val <: t -> t -> bool
-  val >: t -> t -> bool
-
-  val sgn: t -> i32
-
   val sqrt: t -> t
+  val exp: t -> t
+  val cos: t -> t
+  val sin: t -> t
+  val asin: t -> t
+  val acos: t -> t
+  val atan: t -> t
+  val atan2: t -> t -> t
+
+  val log: t -> t
+
+  val isinf: t -> bool
+  val isnan: t -> bool
 }
 
-module i8 = {
+module i8: (integral with t = i8) = {
   type t = i8
 
   fun (x: i8) + (y: i8) = x Intrinsics.+ y
@@ -73,7 +63,7 @@ module i8 = {
   fun abs (x: i8) = Intrinsics.abs x
 }
 
-module i16 = {
+module i16: (integral with t = i16) = {
   type t = i16
 
   fun (x: i16) + (y: i16) = x Intrinsics.+ y
@@ -92,7 +82,7 @@ module i16 = {
   fun abs (x: i16) = Intrinsics.abs x
 }
 
-module i32 = {
+module i32: (integral with t = i32) = {
   type t = i32
 
   fun (x: i32) + (y: i32) = x Intrinsics.+ y
@@ -111,7 +101,7 @@ module i32 = {
   fun abs (x: i32) = Intrinsics.abs x
 }
 
-module i64 = {
+module i64: (integral with t = i64) = {
   type t = i64
 
   fun (x: i64) + (y: i64) = x Intrinsics.+ y
@@ -130,7 +120,7 @@ module i64 = {
   fun abs (x: i64) = Intrinsics.abs x
 }
 
-module u8 = {
+module u8: (integral with t = u8) = {
   type t = u8
 
   fun (x: u8) + (y: u8) = x Intrinsics.+ y
@@ -149,7 +139,7 @@ module u8 = {
   fun abs (x: u8) = Intrinsics.abs x
 }
 
-module u16 = {
+module u16: (integral with t = u16) = {
   type t = u16
 
   fun (x: u16) + (y: u16) = x Intrinsics.+ y
@@ -168,7 +158,7 @@ module u16 = {
   fun abs (x: u16) = Intrinsics.abs x
 }
 
-module u32 = {
+module u32: (integral with t = u32) = {
   type t = u32
 
   fun (x: u32) + (y: u32) = x Intrinsics.+ y
@@ -187,7 +177,7 @@ module u32 = {
   fun abs (x: u32) = Intrinsics.abs x
 }
 
-module u64 = {
+module u64: (integral with t = u64) = {
   type t = u64
 
   fun (x: u64) + (y: u64) = x Intrinsics.+ y
@@ -206,7 +196,7 @@ module u64 = {
   fun abs (x: u64) = Intrinsics.abs x
 }
 
-module f32 = {
+module f32: (real with t = f32) = {
   type t = f32
 
   fun (x: f32) + (y: f32) = x Intrinsics.+ y
@@ -222,9 +212,9 @@ module f32 = {
   fun (x: f32) <  (y: f32) = x Intrinsics.< y
   fun (x: f32) >  (y: f32) = x Intrinsics.> y
 
-  fun sgn (x: f32) = if      x Intrinsics.< 0f32  then -1
-                     else if x Intrinsics.== 0f32 then  0
-                     else                               1
+  fun sgn (x: f32) = if      x Intrinsics.< 0f32  then -1f32
+                     else if x Intrinsics.== 0f32 then  0f32
+                     else                               1f32
   fun abs (x: f32) = Intrinsics.abs x
 
   fun sqrt (x: f32) = Intrinsics.sqrt32 x
@@ -242,7 +232,7 @@ module f32 = {
   fun isnan (x: f32) = Intrinsics.isnan32 x
 }
 
-module f64 = {
+module f64: (real with t = f64) = {
   type t = f64
 
   fun (x: f64) + (y: f64) = x Intrinsics.+ y
@@ -250,17 +240,17 @@ module f64 = {
   fun (x: f64) * (y: f64) = x Intrinsics.* y
   fun (x: f64) / (y: f64) = x Intrinsics./ y
 
-  fun fromInt (x: i64) = f64 x
-  fun fromFraction (x: i64) (y: i64) = f64 x Intrinsics./ f64 y
-  fun toInt (x: f64) = i64 x
+  fun fromInt (x: i32) = f64 x
+  fun fromFraction (x: i32) (y: i32) = f64 x Intrinsics./ f64 y
+  fun toInt (x: f64) = i32 x
 
   fun (x: f64) == (y: f64) = x Intrinsics.== y
   fun (x: f64) <  (y: f64) = x Intrinsics.< y
   fun (x: f64) >  (y: f64) = x Intrinsics.> y
 
-  fun sgn (x: f64) = if      x Intrinsics.< 0f64  then -1
-                     else if x Intrinsics.== 0f64 then  0
-                     else                               1
+  fun sgn (x: f64) = if      x Intrinsics.< 0f64  then -1f64
+                     else if x Intrinsics.== 0f64 then  0f64
+                     else                               1f64
   fun abs (x: f64) = Intrinsics.abs x
 
   fun sqrt (x: f64) = Intrinsics.sqrt64 x
