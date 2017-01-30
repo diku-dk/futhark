@@ -28,7 +28,9 @@ with *2 spaces*.
 
 ### Capitalisation
 
-All names are lowercase, with `snake_case` used for compound names.
+Almost all names are lowercase, with `snake_case` used for long
+compound names.  Parametric module parameters may be single capital
+letters.
 
 ### Comments
 
