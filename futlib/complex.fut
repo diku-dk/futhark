@@ -21,7 +21,7 @@ module type complex = {
   val toInt: complex -> i32
 }
 
-module complex(T: real) = {
+module complex(T: real): (complex with real = T.t) = {
   type real = T.t
   type complex = (T.t, T.t)
 
