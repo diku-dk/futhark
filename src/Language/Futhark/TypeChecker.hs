@@ -1041,7 +1041,7 @@ checkModExp (ModAscript me se NoInfo loc) = do
   (sigscope, se') <- checkSigExp se
   (scope', _) <- liftEither $ matchScopes scope sigscope loc
   -- See issue #262 for martinsubst justification.
-  (scope'', martinsubst) <- newNamesForScope scope'
+  (scope'', martinsubst) <- newNamesForScope mempty scope'
   return (scope'', ModAscript me' se' (Info martinsubst) loc)
 
 checkStructBind :: StructBindBase NoInfo Name -> TypeM (Scope, StructBindBase Info VName)
@@ -1116,8 +1116,10 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
               substSigName (v, t) = (fromMaybe v $ HM.lookup v sig_subst_rev, t)
               type_substs' = HM.fromList $ map substSigName type_substs
 
+              names_in_sig = HS.fromList $ HM.elems $ envNameMap p_sig
+
           (body_scope', body_subst) <-
-            newNamesForScope $
+            newNamesForScope names_in_sig $
             substituteTypesInScope (HM.map TypeAbbr type_substs') body_scope
           return (body_scope', sig_subst <> body_subst)
 
@@ -2248,13 +2250,16 @@ substituteTypes substs (Array at) = substituteTypesInArray at
                             tupleArrayElemToType) ts
 substituteTypes substs (Tuple ts) = Tuple $ map (substituteTypes substs) ts
 
--- New names for everything defined in the scope.  Removes signatures.
-newNamesForScope :: Scope -> TypeM (Scope, HM.HashMap VName VName)
-newNamesForScope orig_scope = do
+-- New names for everything defined in the scope, with passed-in
+-- exceptions.  Removes signatures.
+newNamesForScope :: HS.HashSet VName -> Scope -> TypeM (Scope, HM.HashMap VName VName)
+newNamesForScope except orig_scope = do
   -- Create unique renames for the scope.
-  let rename (k, v) = do
-        v' <- newName v
-        return ((k, v'), (v, v'))
+  let rename (k, v) =
+        if v `HS.member` except
+          then return ((k,v), (v,v))
+          else do v' <- newName v
+                  return ((k, v'), (v, v'))
   (names_list, substs_list) <-
     mapAndUnzipM rename $ HM.toList $ envNameMap orig_scope
   let names = HM.fromList names_list
