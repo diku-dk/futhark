@@ -1115,10 +1115,11 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
               sig_subst_rev = HM.fromList $ map (uncurry (flip (,))) $ HM.toList sig_subst
               substSigName (v, t) = (fromMaybe v $ HM.lookup v sig_subst_rev, t)
               type_substs' = HM.fromList $ map substSigName type_substs
+
           (body_scope', body_subst) <-
             newNamesForScope $
-            substituteTypesInScope type_substs' body_scope
-          return (body_scope', body_subst <> sig_subst)
+            substituteTypesInScope (HM.map TypeAbbr type_substs') body_scope
+          return (body_scope', sig_subst <> body_subst)
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Scope, TypeBindBase Info VName)
@@ -2111,13 +2112,16 @@ matchScopes scope sig loc = do
   -- the types of values.
   abs_substs <- fmap HM.fromList $ forM (scopeAbsTypes sig) $ \name ->
     case findBinding envTypeTable Type (baseName name) of
-      Just (name', TypeAbbr t) -> return (name, (name', t))
-      Just (name', TypeAbs)    -> return (name, (name', TypeVar $ typeName name'))
-      Nothing                  -> missingType $ baseName name
+      Just (name', TypeAbs) ->
+        return (name, (name', TypeAbbr $ TypeVar $ typeName name'))
+      Just (name', TypeAbbr t) ->
+        return (name, (name', TypeAbbr t))
+      Nothing ->
+        missingType $ baseName name
 
   let abs_names = map fst $ HM.elems abs_substs
-      abs_subst_to_name = HM.map (TypeVar . typeName . fst) abs_substs
       abs_subst_to_type = HM.map snd abs_substs
+      abs_subst_to_name = HM.map (TypeAbbr . TypeVar . typeName . fst) abs_substs
       abs_name_substs   = HM.map fst abs_substs
 
   -- Check that all type abbreviations are correctly defined.
@@ -2126,7 +2130,7 @@ matchScopes scope sig loc = do
     case findBinding envTypeTable Type (baseName name) of
       Just (name', TypeAbbr t)
         | spec_t' == t ->
-            return (name, (name', substituteTypes abs_subst_to_name spec_t))
+            return (name, (name', substituteTypes abs_subst_to_type spec_t))
         | otherwise ->
             mismatchedType (baseName name) ([], spec_t) ([], t)
       Just (_, TypeAbs) ->
@@ -2156,7 +2160,7 @@ matchScopes scope sig loc = do
           toStructural ret `subtypeOf` toStructural spec_t' ->
             return (name, (name', BoundF (impl_pts', impl_t')))
         | otherwise ->
-          mismatchedVal (baseName name) (spec_pts', spec_t') (pts, ret)
+            mismatchedVal (baseName name) (spec_pts', spec_t') (pts, ret)
       Just (_, UnknownF{}) ->
         Left $ TypeError loc $ "Function " ++ pretty (baseName name) ++
         " missing a return type declaration."
@@ -2205,7 +2209,7 @@ matchScopes scope sig loc = do
         ppFunType (paramts, ret) =
           intercalate " -> " $ map pretty $ paramts ++ [ret]
 
-substituteTypesInScope :: HM.HashMap VName StructType -> Scope -> Scope
+substituteTypesInScope :: HM.HashMap VName TypeBinding -> Scope -> Scope
 substituteTypesInScope substs scope =
   scope { envVtable    = HM.map subV $ envVtable scope
         , envTypeTable = HM.mapWithKey subT $ envTypeTable scope }
@@ -2219,20 +2223,21 @@ substituteTypesInScope substs scope =
         subV b = b
 
         subT name _
-          | Just t <- HM.lookup name substs = TypeAbbr t
+          | Just t <- HM.lookup name substs = t
         subT _ (TypeAbbr t) = TypeAbbr $ substituteTypes substs t
         subT _ TypeAbs      = TypeAbs
 
-substituteTypes :: HM.HashMap VName StructType -> StructType -> StructType
+substituteTypes :: HM.HashMap VName TypeBinding -> StructType -> StructType
 substituteTypes substs (TypeVar v)
-  | Just t <- HM.lookup (qualLeaf (qualNameFromTypeName v)) substs = t
-  | otherwise                                                      = TypeVar v
+  | Just (TypeAbbr t) <-
+      HM.lookup (qualLeaf (qualNameFromTypeName v)) substs = t
+  | otherwise                                              = TypeVar v
 substituteTypes _ (Prim t) = Prim t
 substituteTypes substs (Array at) = substituteTypesInArray at
   where substituteTypesInArray (PrimArray t shape u ()) =
           Array $ PrimArray t shape u ()
         substituteTypesInArray (PolyArray v shape u ())
-          | Just t <- HM.lookup (qualLeaf (qualNameFromTypeName v)) substs =
+          | Just (TypeAbbr t) <- HM.lookup (qualLeaf (qualNameFromTypeName v)) substs =
               arrayOf t shape u
           | otherwise =
               Array $ PolyArray v shape u ()
@@ -2313,7 +2318,7 @@ newNamesForScope orig_scope = do
 
         substituteInType :: HM.HashMap VName VName -> StructType -> StructType
         substituteInType substs = substituteTypes $
-                                  HM.map (TypeVar . typeNameFromQualName . qualName) substs
+                                  HM.map (TypeAbbr . TypeVar . typeNameFromQualName . qualName) substs
 
 -- | Refine the given type name in the given scope.
 refineScope :: SrcLoc -> Scope -> QualName VName -> StructType -> TypeM Scope
@@ -2327,5 +2332,5 @@ refineScope loc scope tname t =
       bad $ TypeError loc $
       pretty tname ++ " is not an abstract type in the module type."
     Just TypeAbs ->
-      let subst = HM.singleton (qualLeaf tname) t
+      let subst = HM.singleton (qualLeaf tname) $ TypeAbbr t
       in return $ substituteTypesInScope subst scope
