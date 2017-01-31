@@ -71,7 +71,6 @@ data InternaliseEnv = InternaliseEnv {
   , envDecSubsts :: DecSubstitutions
   , envFtable :: FunTable
   , envTtable :: TypeTable
-  , envModTable :: HM.HashMap VName [E.Dec]
   , envFunctorTable :: HM.HashMap VName E.ModExp
   , envDoBoundsChecks :: Bool
   , envGeneratingFunctor :: Bool
@@ -118,7 +117,6 @@ runInternaliseM ftable (InternaliseM m) =
                    envSubsts = mempty
                  , envFtable = ftable
                  , envTtable = mempty
-                 , envModTable = mempty
                  , envFunctorTable = mempty
                  , envDecSubsts = mempty
                  , envDoBoundsChecks = True
