@@ -121,6 +121,8 @@ data PrimType = IntType IntType
               | Cert
               deriving (Eq, Ord, Show)
 
+-- If you add a value here or change the meaning, you will inflict great damage
+-- on the parsing of binary input files. You have been warned!
 instance Enum PrimType where
   toEnum 0 = IntType Int8
   toEnum 1 = IntType Int16
