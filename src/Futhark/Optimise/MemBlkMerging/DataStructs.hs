@@ -4,7 +4,7 @@ module Futhark.Optimise.MemBlkMerging.DataStructs
        , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
        , CoalsEntry(..), FreeVarSubsts
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
-       , getArrMemAssocFParam, createsAliasedArrOK
+       , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo
        , createsNewArrIK, createsNewArrOK, getArrMemAssoc, getUniqueMemFParam )
        where
 
@@ -148,6 +148,15 @@ getUniqueMemFParam params =
                                 _ -> Nothing
                       ) params
   in HM.fromList $ filter (\ (k,_) -> HS.member k upms) mems
+
+getScopeMemInfo :: VName -> Scope (Aliases ExpMem.ExplicitMemory)
+                -> Maybe ArrayMemBound
+getScopeMemInfo r scope_env0 =
+  case HM.lookup r scope_env0 of
+    Just (LetInfo  (_,ExpMem.ArrayMem tp shp _ m idx)) -> Just (MemBlock tp shp m idx)
+    Just (FParamInfo (ExpMem.ArrayMem tp shp _ m idx)) -> Just (MemBlock tp shp m idx)
+    Just (LParamInfo (ExpMem.ArrayMem tp shp _ m idx)) -> Just (MemBlock tp shp m idx)
+    _ -> Nothing
 
 createsNewArrOK :: Exp (Aliases ExpMem.ExplicitMemory) -> Bool
 createsNewArrOK (BasicOp (Partition{})) = True
