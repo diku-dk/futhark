@@ -2135,10 +2135,13 @@ matchScopes scope sig loc = do
             return (name, (name', substituteTypes abs_subst_to_type spec_t))
         | otherwise ->
             mismatchedType (baseName name) ([], spec_t) ([], t)
-      Just (_, TypeAbs) ->
-        Left $ TypeError loc $
-        "Type abbreviation " ++ pretty (baseName name) ++ " = " ++ pretty spec_t ++
-        " defined as abstract in module."
+      Just (name', TypeAbs)
+        | TypeVar (typeName name') == spec_t ->
+            return (name, (name', substituteTypes abs_subst_to_type spec_t))
+        | otherwise ->
+          Left $ TypeError loc $
+          "Type abbreviation " ++ pretty (baseName name) ++ " = " ++ pretty spec_t ++
+          " defined as abstract in module."
       Nothing -> missingType $ baseName name
 
   let abbrs = HM.map TypeAbbr $ HM.fromList $ HM.elems abbr_substs
