@@ -150,28 +150,28 @@ getUniqueMemFParam params =
   in HM.fromList $ filter (\ (k,_) -> HS.member k upms) mems
 
 createsNewArrOK :: Exp (Aliases ExpMem.ExplicitMemory) -> Bool
-createsNewArrOK (BasicOp (Partition{})) = True
-createsNewArrOK (BasicOp (Replicate{})) = True
-createsNewArrOK (BasicOp (Iota{})) = True
-createsNewArrOK (BasicOp (Manifest{})) = True
-createsNewArrOK (BasicOp (ExpMem.Copy{})) = True
-createsNewArrOK (BasicOp (Concat{})) = True
-createsNewArrOK (BasicOp (ArrayLit{})) = True
-createsNewArrOK (Op (ExpMem.Inner (ExpMem.Kernel{}))) = True
+createsNewArrOK (BasicOp Partition{}) = True
+createsNewArrOK (BasicOp Replicate{}) = True
+createsNewArrOK (BasicOp Iota{}) = True
+createsNewArrOK (BasicOp Manifest{}) = True
+createsNewArrOK (BasicOp ExpMem.Copy{}) = True
+createsNewArrOK (BasicOp Concat{}) = True
+createsNewArrOK (BasicOp ArrayLit{}) = True
+createsNewArrOK (Op (ExpMem.Inner ExpMem.Kernel{})) = True
 createsNewArrOK _ = False
 
 createsNewArrIK :: Exp (Aliases ExpMem.InKernel) -> Bool
-createsNewArrIK (Op (ExpMem.Inner (ExpMem.GroupReduce{}))) = True
-createsNewArrIK (Op (ExpMem.Inner (ExpMem.GroupScan{}))) = True
-createsNewArrIK (Op (ExpMem.Inner (ExpMem.GroupStream{}))) = True
-createsNewArrIK (Op (ExpMem.Inner (ExpMem.Combine{}))) = True
-createsNewArrIK (BasicOp (Partition{})) = True
-createsNewArrIK (BasicOp (Replicate{})) = True
-createsNewArrIK (BasicOp (Iota{})) = True
-createsNewArrIK (BasicOp (Manifest{})) = True
-createsNewArrIK (BasicOp (ExpMem.Copy{})) = True
-createsNewArrIK (BasicOp (Concat{})) = True
-createsNewArrIK (BasicOp (ArrayLit{})) = True
+createsNewArrIK (Op (ExpMem.Inner ExpMem.GroupReduce{})) = True
+createsNewArrIK (Op (ExpMem.Inner ExpMem.GroupScan{})) = True
+createsNewArrIK (Op (ExpMem.Inner ExpMem.GroupStream{})) = True
+createsNewArrIK (Op (ExpMem.Inner ExpMem.Combine{})) = True
+createsNewArrIK (BasicOp Partition{}) = True
+createsNewArrIK (BasicOp Replicate{}) = True
+createsNewArrIK (BasicOp Iota{}) = True
+createsNewArrIK (BasicOp Manifest{}) = True
+createsNewArrIK (BasicOp ExpMem.Copy{}) = True
+createsNewArrIK (BasicOp Concat{}) = True
+createsNewArrIK (BasicOp ArrayLit{}) = True
 createsNewArrIK _ = False
 
 createsAliasedArrOK :: Exp (Aliases ExpMem.ExplicitMemory) -> Maybe VName --ExpMem.IxFun
