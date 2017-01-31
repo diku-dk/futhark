@@ -295,51 +295,9 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
       (activeCoals'', successCoals') =
         foldl (\(a_acc,s_acc) (b,MemBlock tp shp mb b_indfun, bnd) ->
                   case HM.lookup mb a_acc of
+                    Nothing -> (a_acc,s_acc)
                     Just info@(CoalsEntry x_mem x_indfun _ vtab _) ->
                       case HM.lookup b vtab of
-                        Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
-                          -- we are at the definition of the coalesced variable @b@
-                          -- if 2,4,5 hold promote it to successful coalesced table,
-                          -- or if e = reshape/transpose/rotate then postpone decision
-                          --    for later on
-                          let safe_2 = HS.member x_mem (alloc td_env)
-                              (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) (scals bu_env) new_indfun
-                              alias_var = case bnd of
-                                            BindInPlace _ b_al _ -> Just b_al
-                                            BindVar -> createsAliasedArrOK e
-                              -- For Sanity Purposes we treat cases such as:
-                              -- in-place: @let b2 <- b1 with [i] = e@ defers verification of b
-                              --           until the creation of @b1@ or recursively
-                              -- aliases:  @let b = rotate a@ defers versification of b
-                              --           until the creation of @a@ or recursively
-                          in  case (safe_2, safe_4, safe_5, alias_var) of
-                                (True, True, True, Nothing) ->
-                                  -- great, new array creation point AND safety conditions
-                                  --  2,4,5 hold => promote and append
-                                  let mem_info = Coalesced k mblk fv_subst
-                                      info' = info { vartab = HM.insert b mem_info vtab }
-                                  in  (HM.delete mb a_acc, appendCoalsInfo mb info' s_acc)
-                                (True, _, True, Just b_al) ->
-                                  -- We are in case b = transpose/reshape/rotate b_al
-                                  --        or case b <- b_al with [i] = e
-                                  -- postpone decision until b_al is verified
-                                  let mem_info = Coalesced k mblk fv_subst
-                                      info' = info { vartab = HM.insert b mem_info vtab }
-                                      -- update the b forward substitution info as before
-                                  in  case HM.lookup b_al (v2mem td_env) of
-                                        Nothing -> (HM.delete mb a_acc, s_acc) -- remove from active
-                                        Just (MemBlock b_al_tp b_al_shp m_b_al indfun_b_al) ->
-                                          case Exc.assert (m_b_al == mb) $ tryRebase x_indfun indfun_b_al of
-                                            Nothing -> (HM.delete mb a_acc, s_acc)
-                                            Just new_indfun_b_al ->
-                                              let mem_info_al = Coalesced k (MemBlock b_al_tp b_al_shp x_mem new_indfun_b_al) HM.empty
-                                                  info'' = info' { vartab = HM.insert b_al mem_info_al vtab }
-                                                  -- create a new entry for the aliased of b (@b_al@)
-                                                  -- promoted when @b_al@ definition is validated or recursively.
-                                              in  trace ("COALESCING: postponed promotion: "++pretty b)
-                                                        (HM.insert mb info'' a_acc, s_acc)
-                                _ -> (HM.delete mb a_acc, s_acc) -- remove from active
-
                         Nothing ->
                           -- we are at the definition of some variable aliased with
                           -- the coalesced variable @b@, hence extend @activeCoals@,
@@ -357,7 +315,54 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                                    let mem_info = Coalesced Trans (MemBlock tp shp x_mem new_indfun) fv_subst
                                        info' = info { vartab = HM.insert b mem_info vtab }
                                    in  (HM.insert mb info' a_acc, s_acc)
-                    Nothing -> (a_acc,s_acc)
+                        Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
+                          -- we are at the definition of the coalesced variable @b@
+                          -- if 2,4,5 hold promote it to successful coalesced table,
+                          -- or if e = reshape/transpose/rotate then postpone decision
+                          --    for later on
+                          let safe_2 = HS.member x_mem (alloc td_env)
+                              (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) (scals bu_env) new_indfun
+                              alias_var = case bnd of
+                                            BindInPlace{} -> Exc.assert safe_4 Nothing
+                                            BindVar -> createsAliasedArrOK e
+                          in  case (safe_2, safe_4, safe_5, alias_var) of
+                                (True, True, True, Nothing) ->
+                                  -- great, new array creation point AND safety conditions
+                                  --  2,4,5 hold => promote and append
+                                  let mem_info = Coalesced k mblk fv_subst
+                                      info' = info { vartab = HM.insert b mem_info vtab }
+                                  in  (HM.delete mb a_acc, appendCoalsInfo mb info' s_acc)
+                                (True, _, True, Just b_al) ->
+                                  -- We treat aliased cases such as:
+                                  --   @let b    = rotate a@
+                                  --   @let x[i] = b@
+                                  --   by deferring versification of b
+                                  --   until the creation of @a@ or recursively.
+                                  -- Note that it cannot be @b[i] = rotate a@, see assert abve.
+                                  -- in-place: has been treated in mkCoalsHelper1FilterActive
+                                  let mem_info = Coalesced k mblk fv_subst
+                                      info' = info { vartab = HM.insert b mem_info vtab }
+                                      -- update the b forward substitution info as before
+                                  in  -- need to loop in @scope@ not in @v2mem@ because,
+                                      -- for example a case like below should succeed
+                                      -- @let a = if cond then e1 else e2@
+                                      -- @let b = transpose a@
+                                      -- @let x[i] = b@
+                                      -- try to delete v2mem for good
+                                      case getScopeMemInfo b_al (scope td_env) of
+                                        Nothing -> Exc.assert False (HM.delete mb a_acc, s_acc)
+                                        Just (MemBlock b_al_tp b_al_shp m_b_al indfun_b_al) ->
+                                          case Exc.assert (m_b_al == mb && bnd == BindVar) (tryRebase x_indfun indfun_b_al) of
+                                            Nothing -> (HM.delete mb a_acc, s_acc)
+                                            Just new_indfun_b_al ->
+                                              -- create a new entry for the aliased of b (@b_al@)
+                                              -- promoted when @b_al@ definition is validated or recursively.
+                                              let mem_info_al = Coalesced k (MemBlock b_al_tp b_al_shp x_mem new_indfun_b_al) HM.empty
+                                                  info'' = info' { vartab = HM.insert b_al mem_info_al vtab }
+                                              in  trace ("COALESCING: postponed promotion: "++pretty b)
+                                                        (HM.insert mb info'' a_acc, s_acc)
+                                _ -> (HM.delete mb a_acc, s_acc) -- conservatively remove from active
+
               ) (activeCoals', successCoals bu_env) (getArrMemAssoc pat)
 
   -- iii) record a potentially coalesced statement in @activeCoals@
@@ -428,12 +433,11 @@ mkCoalsHelper1FilterActive pat e td_env bu_env =
                                                updateIndFunSlice b_indfun slice_b
                                 indfuns'     = b_ind_slice : indfuns
                                 (ok,fv_subs) = translateIndFunFreeVar (scope td_env) (scals bu_env) b_indfun
-                                coal_etry_b  = Coalesced k mblk fv_subs
-                                coal_etry_b' = Coalesced k mblk HM.empty
-                                info' = info { vartab = HM.insert b' coal_etry_b' $
-                                                        HM.insert b  coal_etry_b vtab }
                             in  if not ok then (HM.delete mem_nm act_tab, indfuns')
-                                else (HM.insert mem_nm info' act_tab, indfuns')
+                                else let coal_etry_b  = Coalesced k mblk fv_subs
+                                         info' = info { vartab = HM.insert b' coal_etry_b $
+                                                        HM.insert b  coal_etry_b vtab }
+                                     in  (HM.insert mem_nm info' act_tab, indfuns')
               ) (active_tab1,[]) memasoc
 
   in  (active_tab2, reverse rev_lst_indfuns)
