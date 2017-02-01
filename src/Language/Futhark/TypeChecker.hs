@@ -1803,7 +1803,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
     collectOccurences $ consumeMerge mergepat'' $ typeOf mergeexp'
 
   let loopOccur = do
-        occur $ mergeflow `seqOccurences` freeflow `seqOccurences` merge_consume
+        occur $ mergeflow `seqOccurences` merge_consume `seqOccurences` freeflow
         mapM_ observe $ HS.toList $ patIdentSet mergepat''
 
   bindingAlsoNames (HS.toList $ patIdentSet mergepat'') $ do
