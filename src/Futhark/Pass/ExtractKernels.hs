@@ -1010,10 +1010,8 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
           -- reproduce the parameter type.
           let reshape = reshapeOuter [DimNew total_num_elements]
                         (2+length (snd nest)) arr_shape
-          arr_manifest <- letExp (baseString arr ++ "_manifest") $
-                          BasicOp $ Copy arr
           letExp (baseString arr ++ "_flat") $
-            BasicOp $ Reshape [] reshape arr_manifest
+            BasicOp $ Reshape [] reshape arr
 
     arrs' <- mapM flatten =<< sequence mk_arrs
 
