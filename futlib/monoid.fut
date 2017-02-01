@@ -1,6 +1,9 @@
-module type MONOID = {
+module type monoid = {
   type t
 
-  val neutral: t
-  val combine: t -> t -> t
+  -- Neutral element.
+  val ne: t
+
+  -- Associative operation.
+  val op: t -> t -> t
 }
