@@ -120,7 +120,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
       let typeChecker = configTypeChecker progs
       context ("Type-checking with " <> T.pack typeChecker) $ do
         (code, _, err) <-
-          io $ readProcessWithExitCode typeChecker [program] ""
+          io $ readProcessWithExitCode typeChecker ["-t", program] ""
         case code of
          ExitSuccess -> throwError "Expected failure\n"
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
@@ -131,7 +131,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
       let typeChecker = configTypeChecker progs
       context ("Type-checking with " <> T.pack typeChecker) $ do
         (code, _, err) <-
-          io $ readProcessWithExitCode typeChecker [program] ""
+          io $ readProcessWithExitCode typeChecker ["-t", program] ""
         case code of
          ExitSuccess -> return ()
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
