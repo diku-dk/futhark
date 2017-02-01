@@ -11,13 +11,18 @@ module type linalg = {
 module linalg(T: numeric): {
   type t = T.t
   val dotprod: []t -> []t -> t
+  val matvecmul: [][]t -> []t -> []t
   val matmul: [][]t -> [][]t -> [][]t
   val inv: [][]t -> [][]t
+  val ols: [][]t -> []t -> []t
 } = {
   open T
   type t = T.t
   fun dotprod (xs: [n]t) (ys: [n]t): t =
     reduce (+) (fromInt 0) (map (*) xs ys)
+
+  fun matvecmul (xss: [n][m]t) (ys: [m]t) =
+    map (dotprod ys) xss
 
   fun matmul (xss: [n][p]t) (yss: [p][m]t): [n][m]t =
     map (\xs -> map (dotprod xs) (transpose yss)) xss
@@ -45,4 +50,8 @@ module linalg(T: numeric): {
     let Ap' = gauss_jordan Ap 0
     -- Drop the identity matrix at the front.
     in Ap'[0:n,n:n Intrinsics.* 2]
+
+  -- Solves Ax=b.
+  fun ols (X: [n][m]t) (b: [n]t): [m]t =
+    matvecmul (matmul (inv (matmul (transpose X) X)) (transpose X)) b
 }
