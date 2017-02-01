@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | Perform a restricted form of loop tiling within kernel streams.
+-- We only tile primitive types, to avoid excessive local memory use.
 module Futhark.Optimise.TileLoops
        ( tileLoops )
        where
@@ -187,6 +188,8 @@ is1dTileable :: MonadFreshNames m =>
 is1dTileable branch_variant kspace variance block_size arr block_param = do
   guard $ HS.null $ HM.lookupDefault mempty arr variance
   guard $ HS.null branch_variant
+  guard $ primType $ rowType $ paramType block_param
+
   return $ do
     (outer_block_param, kstms) <- tile1d kspace block_size block_param
     return ((kspace, []), outer_block_param, kstms)
@@ -198,6 +201,8 @@ is1_5dTileable :: (MonadFreshNames m, HasScope Kernels m) =>
                             LParam InKernel,
                             [Stm InKernel]))
 is1_5dTileable branch_variant kspace variance block_size arr block_param = do
+  guard $ primType $ rowType $ paramType block_param
+
   (inner_gtid, inner_gdim) <- invariantToInnermostDimension
   mk_structure <-
     case spaceStructure kspace of
@@ -290,6 +295,8 @@ is2dTileable :: MonadFreshNames m =>
              -> Maybe (SubExp -> [VName] -> m (LParam InKernel, [Stm InKernel]))
 is2dTileable branch_variant kspace variance block_size arr block_param = do
   guard $ HS.null branch_variant
+  guard $ primType $ rowType $ paramType block_param
+
   pt <- case rowType $ paramType block_param of
           Prim pt -> return pt
           _       -> Nothing
