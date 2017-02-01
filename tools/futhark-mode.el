@@ -66,11 +66,6 @@
       "write")
     "All Futhark builtin SOACs, functions, and non-symbolic operators.")
 
-  (defconst futhark-builtin-operators
-    '("+" "*" "-" "/" "%" "//" "%%" "==" "!=" "<" "<=" ">" ">=" "**" "^" "&"
-      "|" ">>" "<<" ">>>")
-    "All Futhark builtin symbolic operators.")
-
   (defconst futhark-builtin-types
     '("i8" "i16" "i32" "i64"
       "u8" "u16" "u32" "u64"
@@ -85,6 +80,11 @@
   (defconst futhark-var
     (concat "\\(?:" "[_'[:alnum:]]+" "\\)")
     "A regex describing a Futhark variable.")
+
+  (defconst futhark-operator
+    (concat "["
+            "+*\\-/%!<>=&|@"
+            "]" "+"))
 
   (defconst futhark-non-tuple-type
     (concat "\\(?:"
@@ -165,10 +165,14 @@
 
       ;; Builtins.
       ;;; Functions.
+      ;;;; Builtin functions.
       (,(regexp-opt futhark-builtin-functions 'words)
        . font-lock-builtin-face)
+      ;;;; Tuple accessors.
+      (,(concat "#" "[[:digit:]]+")
+       . font-lock-builtin-face)
       ;;; Operators.
-      (,(regexp-opt futhark-builtin-operators)
+      (,futhark-operator
        . font-lock-builtin-face)
 
       ;; Constants.
