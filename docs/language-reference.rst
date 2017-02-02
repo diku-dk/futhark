@@ -76,6 +76,55 @@ type with consistent dimension sizes for an irregular array value.  In
 a Futhark program, all array values, including intermediate (unnamed)
 arrays, must be typeable.
 
+
+Arrays of Tuples
+----------------
+
+For reasons related to code generation and efficient representation,
+arrays of tuples are in a sense merely syntactic sugar for tuples of
+arrays.  The type ``[](i32,f32)`` is transformed to ``([]i32,
+[]f32)`` during the compilation process, and all code interacting
+with arrays of tuples is likewise transformed.  In most cases, this is
+fully transparent to the programmer, but there are edge cases where
+the transformation is not trivially an isomorphism.
+
+Consider the type ``[]([]i32,[]f32)``, which is transformed
+into ``([][]i32, [][]f32)``.  These two types are not
+isomorphic, as the latter has more stringent demands as to the
+fullness of arrays.  For example::
+
+  [
+    ([1],   [1.0]),
+    ([2,3], [2.0])
+  ]
+
+is a value of the former, but the first element of the
+corresponding transformed tuple::
+
+  (
+    [[1],   [2, 3]],
+    [[1.0], [2.0]]
+  )
+
+is not a full array.  Hence, when determining whether a program
+generates full arrays, we must hence look at the *transformed*
+values - in a sense, the fullness requirement "transcends" the tuples.
+
+Another, less operational, way of understanding the problem is to look
+at the type of an array of a pair of arrays::
+
+  ``[]([]t1, []t2)``
+
+For this to be a valid type, we must be able to insert shape
+declarations::
+
+  ``[n]([m1]t1, [m2]t2)``
+
+This require that the inner arrays have size ``m1`` and ``m2``
+respectively (without specifying exactly what that is).  An irregular
+array value could not possibly have this type for constant ``m1``,
+``m2``.
+
 Function Declarations
 ---------------------
 
@@ -698,54 +747,6 @@ in ``is``.  If ``is`` contains duplicates (i.e. several writes are
 performed to the same location), the result is unspecified.  It is not
 guaranteed that one of the duplicate writes will complete atomically -
 they may be interleaved.
-
-Arrays of Tuples
-----------------
-
-For reasons related to code generation and efficient representation,
-arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[](i32,f32)`` is transformed to ``([]i32,
-[]f32)`` during the compilation process, and all code interacting
-with arrays of tuples is likewise transformed.  In most cases, this is
-fully transparent to the programmer, but there are edge cases where
-the transformation is not trivially an isomorphism.
-
-Consider the type ``[]([]i32,[]f32)``, which is transformed
-into ``([][]i32, [][]f32)``.  These two types are not
-isomorphic, as the latter has more stringent demands as to the
-fullness of arrays.  For example::
-
-  [
-    ([1],   [1.0]),
-    ([2,3], [2.0])
-  ]
-
-is a value of the former, but the first element of the
-corresponding transformed tuple::
-
-  (
-    [[1],   [2, 3]],
-    [[1.0], [2.0]]
-  )
-
-is not a full array.  Hence, when determining whether a program
-generates full arrays, we must hence look at the *transformed*
-values - in a sense, the fullness requirement "transcends" the tuples.
-
-Another, less operational, way of understanding the problem is to look
-at the type of an array of a pair of arrays::
-
-  ``[]([]t1, []t2)``
-
-For this to be a valid type, we must be able to insert shape
-declarations::
-
-  ``[n]([m1]t1, [m2]t2)``
-
-This require that the inner arrays have size ``m1`` and ``m2``
-respectively (without specifying exactly what that is).  An irregular
-array value could not possibly have this type for constant ``m1``,
-``m2``.
 
 Literal Defaults
 ----------------
