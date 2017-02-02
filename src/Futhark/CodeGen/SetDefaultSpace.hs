@@ -65,6 +65,8 @@ setBodySpace space (Call dests fname args) =
         setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
 setBodySpace space (Assert e loc) =
   Assert (setExpSpace space e) loc
+setBodySpace space (DebugPrint s t e) =
+  DebugPrint s t (setExpSpace space e)
 setBodySpace _ (Op op) =
   Op op
 

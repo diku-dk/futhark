@@ -475,31 +475,38 @@ typeToCType t = do
                 ct <- typeToCType [et]
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
-printPrimStm :: C.ToExp a => a -> PrimType -> EntryPointType -> C.Stm
-printPrimStm val (IntType Int8) TypeUnsigned = [C.cstm|printf("%hhuu8", $exp:val);|]
-printPrimStm val (IntType Int16) TypeUnsigned = [C.cstm|printf("%huu16", $exp:val);|]
-printPrimStm val (IntType Int32) TypeUnsigned = [C.cstm|printf("%uu32", $exp:val);|]
-printPrimStm val (IntType Int64) TypeUnsigned = [C.cstm|printf("%lluu64", $exp:val);|]
-printPrimStm val (IntType Int8) _ = [C.cstm|printf("%hhdi8", $exp:val);|]
-printPrimStm val (IntType Int16) _ = [C.cstm|printf("%hdi16", $exp:val);|]
-printPrimStm val (IntType Int32) _ = [C.cstm|printf("%di32", $exp:val);|]
-printPrimStm val (IntType Int64) _ = [C.cstm|printf("%lldi64", $exp:val);|]
-printPrimStm val Bool _ = [C.cstm|printf($exp:val ? "true" : "false");|]
-printPrimStm val (FloatType Float32) _ = [C.cstm|printf("%.6ff32", $exp:val);|]
-printPrimStm val (FloatType Float64) _ = [C.cstm|printf("%.6ff64", $exp:val);|]
-printPrimStm _ Cert _ = [C.cstm|printf("Checked");|]
+printPrimStm :: (C.ToExp a, C.ToExp b) => a -> b -> PrimType -> EntryPointType -> C.Stm
+printPrimStm dest val (IntType it) t =
+  [C.cstm|fprintf($exp:dest, $string:format, $exp:val);|]
+  where format = case (it, t) of
+                   (Int8, TypeUnsigned) -> "%hhuu8"
+                   (Int16, TypeUnsigned) -> "%huu16"
+                   (Int32, TypeUnsigned) -> "%uu32"
+                   (Int64, TypeUnsigned) -> "%lluu64"
+                   (Int8, _) -> "%hhdi8"
+                   (Int16, _) -> "%hdi16"
+                   (Int32, _) -> "%di32"
+                   (Int64, _) -> "%lldi64"
+printPrimStm dest val Bool _ =
+  [C.cstm|fprintf($exp:dest, $exp:val ? "true" : "false");|]
+printPrimStm dest val (FloatType Float32) _ =
+  [C.cstm|fprintf($exp:dest, "%.6ff32", $exp:val);|]
+printPrimStm dest val (FloatType Float64) _ =
+  [C.cstm|fprintf($exp:dest, "%.6ff64", $exp:val);|]
+printPrimStm dest _ Cert _ =
+  [C.cstm|fprintf($exp:dest,"Checked");|]
 
 -- | Return a statement printing the given value.
 printStm :: ValueDecl -> CompilerM op s C.Stm
 printStm (ScalarValue bt ept name) =
-  return $ printPrimStm name bt ept
+  return $ printPrimStm "stdout" name bt ept
 printStm (ArrayValue mem bt ept shape) = do
   mem' <- rawMem mem
   printArrayStm mem' bt ept shape
 
 printArrayStm :: C.ToExp a => a -> PrimType -> EntryPointType -> [DimSize] -> CompilerM op s C.Stm
 printArrayStm mem bt ept [] =
-  return $ printPrimStm val bt ept
+  return $ printPrimStm "stdout" val bt ept
   where val = [C.cexp|*$exp:mem|]
 printArrayStm mem bt ept (dim:shape) = do
   i <- newVName "print_i"
@@ -835,13 +842,14 @@ $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
 $esc:("#include <getopt.h>")
 
+static int detail_memory = 0;
+static int debugging = 0;
+
 $esc:panic_h
 
 $esc:timing_h
 
 $edecls:decls
-
-static int detail_memory = 0;
 
 $edecls:memtypes
 
@@ -1130,6 +1138,15 @@ compileCode (Comment s code) = do
   stm [C.cstm|$comment:("// " ++ s)
               { $items:items }
              |]
+
+compileCode (DebugPrint s t e) = do
+  e' <- compileExp e
+  let printstm = printPrimStm [C.cexp|stderr|] e' t TypeDirect
+  stm [C.cstm|if (debugging) {
+          fprintf(stderr, "%s: ", $exp:s);
+          $stm:printstm
+          fprintf(stderr, "\n");
+       }|]
 
 compileCode c
   | Just (name, t, e, c') <- declareAndSet c = do

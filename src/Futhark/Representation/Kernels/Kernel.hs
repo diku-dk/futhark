@@ -10,6 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
+       , KernelDebugHints(..)
        , KernelBody(..)
        , KernelSpace(..)
        , spaceDimensions
@@ -61,13 +62,24 @@ import Futhark.Analysis.Metrics
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import qualified Futhark.Analysis.Range as Range
 
+-- | Some information about what goes into a kernel, and where it came
+-- from.  Has no semantic meaning; only used for debugging generated
+-- code.
+data KernelDebugHints =
+  KernelDebugHints { kernelName :: String
+                   , kernelHints :: [(String, SubExp)]
+                     -- ^ A mapping from a description to some
+                     -- i32-typed value.
+                   }
+  deriving (Eq, Show, Ord)
+
 data Kernel lore =
     NumGroups
   | GroupSize
   | TileSize
   | SufficientParallelism SubExp -- ^ True if enough parallelism.
 
-  | Kernel String -- Hint about what the kernel is.
+  | Kernel KernelDebugHints
     Certificates
     KernelSpace
     [Type]
@@ -556,7 +568,7 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
 
   ppr (Kernel desc cs space ts body) =
     ppCertificates' cs <>
-    text "kernel" <+> text desc <>
+    text "kernel" <+> text (kernelName desc) <>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)
 
