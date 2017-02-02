@@ -231,7 +231,7 @@ memoryBlockMerging prg = do
   let coaltab = mkCoalsTab $ AnlAls.aliasAnalysis prg
   putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab)
   let coal_info = map (\env ->
-                            ( dstmem env, dstind env, HS.toList $ alsmem env, HS.toList $ optdeps env
+                            ( dstmem env, dstind env, HS.toList $ alsmem env, HM.toList $ optdeps env
                             , map (\ (k,Coalesced _ (MemBlock _ _ b indfun) sbst) ->
                                     (k,(b,indfun,HM.toList sbst))
                                   ) $ HM.toList $ vartab env
