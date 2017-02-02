@@ -52,7 +52,7 @@ loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
   $id:name = clCreateKernel(prog, $string:name, &error);
   assert(error == 0);
-  if (cl_debug) {
+  if (debugging) {
     fprintf(stderr, "Created kernel %s.\n", $string:name);
   }
   }|]
@@ -70,7 +70,7 @@ kernelRuns = (++"runs")
 openClReport :: [String] -> [C.BlockItem]
 openClReport names =
   declares ++
-  [[C.citem|if (cl_debug) { $items:report_kernels }|],
+  [[C.citem|if (debugging) { $items:report_kernels }|],
    report_total]
   where longest_name = foldl max 0 $ map length names
         report_kernels = concatMap reportKernel names
@@ -95,7 +95,7 @@ openClReport names =
         declares = [[C.citem|int total_runtime = 0;|],
                     [C.citem|int total_runs = 0;|]]
         report_total = [C.citem|
-                          if (cl_debug) {
+                          if (debugging) {
                             fprintf(stderr, "Ran %d kernels with cumulative runtime: %6ldus\n",
                                     total_runs, total_runtime);
                           }
@@ -108,7 +108,7 @@ lockstepWidthHeuristicsCode
    if (strcmp(option->platform_name, $string:platform_name) == 0 &&
       option->device_type == $exp:(clDeviceType device_type)) {
      cl_lockstep_width = $int:width;
-     if (cl_debug) {
+     if (debugging) {
        fprintf(stderr, "Setting lockstep width to: %d\n", cl_lockstep_width);
      }
    }

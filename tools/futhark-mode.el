@@ -43,74 +43,6 @@
   (make-keymap)
   "Keymap for futhark-mode.")
 
-(defconst futhark-keywords
-  '("if" "then" "else" "let" "loop" "in" "with" "type"
-    "fun" "val" "entry" "for" "while" "do"
-    "empty" "unsafe" "default" "include" "import" "module" "open")
-  "All Futhark keywords.")
-
-(defconst futhark-builtin-functions
-  '("pow" "iota" "shape" "replicate" "reshape" "rotate" "transpose" "map"
-    "reduce" "reduceComm" "zip" "unzip" "zipWith" "scan" "split"
-    "concat" "filter" "partition" "redomap" "empty" "copy" "size"
-    "write")
-  "All Futhark builtin SOACs, functions, and non-symbolic operators.")
-
-(defconst futhark-builtin-operators
-  '("+" "*" "-" "/" "%" "//" "%%" "==" "!=" "<" "<=" ">" ">=" "**" "^" "&"
-    "|" ">>" "<<" ">>>")
-  "All Futhark builtin symbolic operators.")
-
-(defconst futhark-builtin-types
-  '("i8" "i16" "i32" "i64"
-    "u8" "u16" "u32" "u64"
-    "f32" "f64"
-    "int" "real" "bool")
-  "A list of Futhark types.")
-
-(defconst futhark-booleans
-  '("true" "false")
-  "All Futhark booleans.")
-
-(defconst futhark-var
-  (concat "\\(?:" "[_'[:alnum:]]+" "\\)")
-  "A regex describing a Futhark variable.")
-
-(defconst futhark-non-tuple-type
-  (concat "\\(?:"
-          "\\*" "?"
-           "\\(?:"
-             "\\["
-               "\\(?:"
-                 ""
-               "\\|"
-                 futhark-var
-               "\\)"
-             "\\]"
-           "\\)" "*"
-           futhark-var
-           "\\)"
-           )
-  "A regex describing a Futhark type which is not a tuple")
-
-(defconst futhark-tuple-type
-  (concat "\\(?:"
-          "("
-          "[^)]" "+"
-          ")"
-          "\\)"
-          )
-  "A regex describing a Futhark type which is a tuple")
-
-(defconst futhark-type
-  (concat "\\(?:"
-          futhark-non-tuple-type
-          "\\|"
-          futhark-tuple-type
-          "\\)"
-          )
-  "A regex describing a Futhark type")
-
 
 ;;; Highlighting
 
@@ -118,11 +50,85 @@
       (ws "[[:space:]\n]*")
       (ws1 "[[:space:]\n]+")
       )
+
+  ;; FIXME: Backslash should also be a keyword (for anonymous functions), but
+  ;; Emacs Lisp is stupid.
+  (defconst futhark-keywords
+    '("if" "then" "else" "let" "loop" "in" "with" "type"
+      "fun" "val" "entry" "for" "while" "do"
+      "empty" "unsafe" "default" "include" "import" "module" "open")
+    "All Futhark keywords.")
+
+  (defconst futhark-builtin-functions
+    '("pow" "iota" "shape" "replicate" "reshape" "rotate" "transpose" "map"
+      "reduce" "reduceComm" "zip" "unzip" "zipWith" "scan" "split"
+      "concat" "filter" "partition" "redomap" "empty" "copy" "size"
+      "write")
+    "All Futhark builtin SOACs, functions, and non-symbolic operators.")
+
+  (defconst futhark-builtin-types
+    '("i8" "i16" "i32" "i64"
+      "u8" "u16" "u32" "u64"
+      "f32" "f64"
+      "int" "real" "bool")
+    "A list of Futhark types.")
+
+  (defconst futhark-booleans
+    '("true" "false")
+    "All Futhark booleans.")
+
+  (defconst futhark-var
+    (concat "\\(?:" "[_'[:alnum:]]+" "\\)")
+    "A regex describing a Futhark variable.")
+
+  (defconst futhark-operator
+    (concat "["
+            "+*\\-/%!<>=&|@"
+            "]" "+"))
+
+  (defconst futhark-non-tuple-type
+    (concat "\\(?:"
+            "\\*" "?"
+            "\\(?:"
+            "\\["
+            "\\(?:"
+            ""
+            "\\|"
+            futhark-var
+            "\\)"
+            "\\]"
+            "\\)" "*"
+            futhark-var
+            "\\)"
+            )
+    "A regex describing a Futhark type which is not a tuple")
+
+  ;; This does not work with nested tuple types.
+  (defconst futhark-tuple-type
+    (concat "\\(?:"
+            "("
+            "\\(?:" ws futhark-non-tuple-type ws "," "\\)" "*"
+            ws futhark-non-tuple-type ws
+            ")"
+            "\\)"
+            )
+    "A regex describing a Futhark type which is a tuple")
+
+  (defconst futhark-type
+    (concat "\\(?:"
+            futhark-non-tuple-type
+            "\\|"
+            futhark-tuple-type
+            "\\)"
+            )
+    "A regex describing a Futhark type")
+
+
   (defvar futhark-font-lock
     `(
 
       ;; Function declarations.
-      (,(concat "\\(?:" "fun" "val" "\\|" "entry" "\\)"
+      (,(concat "\\(?:" "fun" "\\|" "val" "\\|" "entry" "\\)"
                 ws1 "\\(" futhark-var "\\)")
        . '(1 font-lock-function-name-face))
 
@@ -146,16 +152,12 @@
        . font-lock-keyword-face)
 
       ;; Types.
-      ;;; Type aliases.  FIXME: It would be nice to highlight only the variable
-      ;;; names, and not also the commas and parantheses.
-      (,(concat "type" ws1
-                "\\("
-                "\\(?:" futhark-type ws ",?" ws "\\)" "+"
-                "\\)")
+      ;;; Type aliases.  FIXME: It would be nice to highlight also the right
+      ;;; hand side.
+      (,(concat "type" ws1 "\\(" futhark-type "\\)")
        . '(1 font-lock-type-face))
-      ;;; Function parameters types and return type.  This does not work with
-      ;;; nested tuple types.
-      (,(concat ":" ws "\\(" futhark-type "\\)")
+      ;;; Function parameters types and return type.
+      (,(concat ":" ws "\\(" "[^=,)]+" "\\)")
        . '(1 font-lock-type-face))
       ;;; Builtin types.
       (,(regexp-opt futhark-builtin-types 'words)
@@ -163,10 +165,14 @@
 
       ;; Builtins.
       ;;; Functions.
+      ;;;; Builtin functions.
       (,(regexp-opt futhark-builtin-functions 'words)
        . font-lock-builtin-face)
+      ;;;; Tuple accessors.
+      (,(concat "#" "[[:digit:]]+")
+       . font-lock-builtin-face)
       ;;; Operators.
-      (,(regexp-opt futhark-builtin-operators)
+      (,futhark-operator
        . font-lock-builtin-face)
 
       ;; Constants.

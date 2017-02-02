@@ -45,9 +45,17 @@ import Futhark.Pass.ExplicitAllocations
 import Futhark.Passes
 
 data Config = Config { futharkConfig :: FutharkConfig
-                     , futharkPipeline :: [UntypedPass]
+                     , futharkPipeline :: Maybe [UntypedPass]
+                     -- ^ Nothing is distinct from a empty pipeline -
+                     -- it means we don't even run the internaliser.
                      , futharkAction :: UntypedAction
                      }
+
+
+-- | Get a Futhark pipeline from the configuration - an empty one if
+-- none exists.
+getFutharkPipeline :: Config -> [UntypedPass]
+getFutharkPipeline = fromMaybe [] . futharkPipeline
 
 data UntypedPassState = SOACS (Prog SOACS.SOACS)
                       | Kernels (Prog Kernels.Kernels)
@@ -94,7 +102,7 @@ instance Representation UntypedAction where
   representation PolyAction{} = "<any>"
 
 newConfig :: Config
-newConfig = Config newFutharkConfig [] $ PolyAction printAction printAction printAction
+newConfig = Config newFutharkConfig (Just []) $ PolyAction printAction printAction printAction
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
@@ -106,7 +114,7 @@ passOption :: String -> UntypedPass -> String -> [String] -> FutharkOption
 passOption desc pass short long =
   Option short long
   (NoArg $ Right $ \cfg ->
-   cfg { futharkPipeline = futharkPipeline cfg ++ [pass] })
+   cfg { futharkPipeline = Just $ getFutharkPipeline cfg ++ [pass] })
   desc
 
 explicitMemoryProg :: String -> UntypedPassState -> FutharkM (Prog ExplicitMemory.ExplicitMemory)
@@ -221,6 +229,11 @@ commandLineOptions =
                       \opts -> opts { futharkVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
 
+  , Option "t" ["type-check"]
+    (NoArg $ Right $ \opts ->
+        opts { futharkPipeline = Nothing })
+    "Type-check the program and print errors on standard error."
+
   , Option [] ["compile-sequential"]
     (NoArg $ Right $ \opts ->
        opts { futharkAction = ExplicitMemoryAction seqCodeGenAction })
@@ -287,13 +300,18 @@ main = mainWithOptions newConfig commandLineOptions compile
               Right () -> return ()
         compile _      _      =
           Nothing
-        m file config = do
-          prog <- runPipelineOnProgram (futharkConfig config) id file
-          runPolyPasses config prog
+        m file config =
+          case futharkPipeline config of
+            Nothing ->
+              -- No pipeline; just read the program and type check.
+              void $ readProgram file
+            Just{} -> do
+              prog <- runPipelineOnProgram (futharkConfig config) id file
+              runPolyPasses config prog
 
 runPolyPasses :: Config -> SOACS.Prog -> FutharkM ()
 runPolyPasses config prog = do
-    prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (futharkPipeline config)
+    prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (getFutharkPipeline config)
     case (prog', futharkAction config) of
       (SOACS soacs_prog, SOACSAction action) ->
         actionProcedure action soacs_prog

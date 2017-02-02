@@ -1462,7 +1462,7 @@ checkExp (LetWith dest src idxes ve body pos) = do
           bad $ BadLetWithValue pos
 
         bindingIdent dest (unInfo (identType src') `setAliases` HS.empty) $ \dest' -> do
-          body' <- consuming src' $ binding [dest'] $ checkExp body
+          body' <- consuming src' $ checkExp body
           return $ LetWith dest' src' idxes' ve' body' pos
   where isFix DimFix{} = True
         isFix _        = False
@@ -1803,7 +1803,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
     collectOccurences $ consumeMerge mergepat'' $ typeOf mergeexp'
 
   let loopOccur = do
-        occur $ mergeflow `seqOccurences` freeflow `seqOccurences` merge_consume
+        occur $ mergeflow `seqOccurences` merge_consume `seqOccurences` freeflow
         mapM_ observe $ HS.toList $ patIdentSet mergepat''
 
   bindingAlsoNames (HS.toList $ patIdentSet mergepat'') $ do
