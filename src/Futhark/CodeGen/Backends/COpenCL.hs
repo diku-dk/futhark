@@ -59,7 +59,7 @@ compileProg prog = do
                   , Option { optionLongName = "synchronous"
                            , optionShortName = Just 's'
                            , optionArgument = NoArgument
-                           , optionAction = [C.cstm|cl_debug = 1;|]
+                           , optionAction = [C.cstm|debugging = 1;|]
                            }
                   , Option { optionLongName = "group-size"
                            , optionShortName = Nothing
@@ -168,7 +168,7 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
                             $exp:srcidx, $exp:destidx,
                             $exp:nbytes,
                             0, NULL, NULL));
-      if (cl_debug) {
+      if (debugging) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
       }
     }
@@ -228,7 +228,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       typename int64_t $id:time_start, $id:time_end;
-      if (cl_debug) {
+      if (debugging) {
         fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
         $stms:(printKernelSize global_work_size)
         fprintf(stderr, "].\n");
@@ -238,7 +238,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
                                0, NULL, NULL));
-      if (cl_debug) {
+      if (debugging) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
         $id:time_end = get_wall_time();
         long int $id:time_diff = $id:time_end - $id:time_start;

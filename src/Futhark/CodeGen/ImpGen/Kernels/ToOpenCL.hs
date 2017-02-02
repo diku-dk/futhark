@@ -372,6 +372,7 @@ typesInCode (If e c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _) = typesInExp e
 typesInCode (Comment _ c) = typesInCode c
+typesInCode (DebugPrint _ _ e) = typesInExp e
 typesInCode Op{} = mempty
 
 typesInExp :: Exp -> HS.HashSet PrimType
