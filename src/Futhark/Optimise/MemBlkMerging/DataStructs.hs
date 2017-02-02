@@ -41,8 +41,13 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             --   due to repeated (optimistical) coalescing.
                             , vartab :: HM.HashMap VName Coalesced
                             -- ^ per variable-name coalesced entries
-                            , optdeps:: Names
-                            -- ^ records optimistically added coalesced nodes
+                            , optdeps:: HM.HashMap VName VName
+                            -- ^ keys are variable names, values are memblock names;
+                            --   it records optimistically added coalesced nodes,
+                            --   e.g., in the case of if-then-else expressions
+                            --   The case below cannot happen because an in-place
+                            --   assigned expression must create a new array,
+                            --   but it is good for the purpose of exposition.
                             --       @x    = map f a@
                             --       @.. use of y ..@
                             --       @b    = map g a@
@@ -55,7 +60,8 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             --   of @x = map f@. Hence @optdeps@ of the @m_b@ entry
                             --   records @m_x@ and at the end of analysis it is removed
                             --   from the successfully coalesced table if @m_x@ is
-                            --   unsuccessful.
+                            --   unsuccessful. Ok, this case cannot happen because
+                            --   you need a copying.
                             }
 
 type AllocTab = Names--HM.HashMap VName SubExp
@@ -75,10 +81,12 @@ type CoalsTab = HM.HashMap VName CoalsEntry
 --   associated to that memory block is bound to its @Coalesced@ info.
 
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
-unionCoalsEntry etry1 (CoalsEntry _ _ _ vartab2 optdeps2) =
-  etry1 { vartab = vartab  etry1 `HM.union` vartab2
-        , optdeps= optdeps etry1 `HS.union` optdeps2 }
-
+unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2  alsmem2 vartab2 optdeps2) =
+  if   dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
+  then etry1
+  else etry1 { alsmem = alsmem  etry1 `HS.union` alsmem2
+             , optdeps= optdeps etry1 `HM.union` optdeps2
+             , vartab = vartab  etry1 `HM.union` vartab2 }
 
 getNamesFromSubExps :: [SubExp] -> [VName]
 getNamesFromSubExps =
@@ -187,6 +195,6 @@ createsAliasedArrOK :: Exp (Aliases ExpMem.ExplicitMemory) -> Maybe VName --ExpM
 createsAliasedArrOK (BasicOp (Rearrange _ _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (Reshape   _ _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (Rotate    _ _ arr_nm)) = Just arr_nm
---createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
+createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
 -- funny, with the above uncommented it becomes very complicated.
 createsAliasedArrOK _ = Nothing
