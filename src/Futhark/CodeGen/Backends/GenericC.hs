@@ -499,14 +499,14 @@ printPrimStm dest _ Cert _ =
 -- | Return a statement printing the given value.
 printStm :: ValueDecl -> CompilerM op s C.Stm
 printStm (ScalarValue bt ept name) =
-  return $ printPrimStm "stdout" name bt ept
+  return $ printPrimStm [C.cexp|stdout|] name bt ept
 printStm (ArrayValue mem bt ept shape) = do
   mem' <- rawMem mem
   printArrayStm mem' bt ept shape
 
 printArrayStm :: C.ToExp a => a -> PrimType -> EntryPointType -> [DimSize] -> CompilerM op s C.Stm
 printArrayStm mem bt ept [] =
-  return $ printPrimStm "stdout" val bt ept
+  return $ printPrimStm [C.cexp|stdout|] val bt ept
   where val = [C.cexp|*$exp:mem|]
 printArrayStm mem bt ept (dim:shape) = do
   i <- newVName "print_i"
