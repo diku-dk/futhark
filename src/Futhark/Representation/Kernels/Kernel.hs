@@ -194,11 +194,15 @@ mapKernelM _ TileSize = pure TileSize
 mapKernelM tv (SufficientParallelism se) =
   SufficientParallelism <$> mapOnKernelSubExp tv se
 mapKernelM tv (Kernel desc cs space ts kernel_body) =
-  Kernel desc <$> mapOnKernelCertificates tv cs <*>
+  Kernel <$> mapOnKernelDebugHints desc <*>
+  mapOnKernelCertificates tv cs <*>
   mapOnKernelSpace space <*>
   mapM (mapOnKernelType tv) ts <*>
   mapOnKernelKernelBody tv kernel_body
-  where mapOnKernelSpace (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+  where mapOnKernelDebugHints (KernelDebugHints name kvs) =
+          KernelDebugHints name <$>
+          (zip (map fst kvs) <$> mapM (mapOnKernelSubExp tv . snd) kvs)
+        mapOnKernelSpace (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
           KernelSpace gtid ltid gid -- all in binding position
           <$> mapOnKernelSubExp tv num_threads
           <*> mapOnKernelSubExp tv num_groups
