@@ -183,8 +183,7 @@ data BasicOp lore
   -- Primitive array operations
 
   | Index Certificates VName (Slice SubExp)
-
-  -- ^ 3rd arg are (optional) certificates for bounds
+  -- ^ 1st arg are (optional) certificates for bounds
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
@@ -213,6 +212,7 @@ data BasicOp lore
 
   | Replicate Shape SubExp
   -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
+
   | Scratch PrimType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 
