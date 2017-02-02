@@ -783,6 +783,9 @@ compileExp (Imp.UnOpExp op exp1) = do
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 
+compileCode Imp.DebugPrint{} =
+  return ()
+
 compileCode (Imp.Op op) =
   join $ asks envOpCompiler <*> pure op
 
