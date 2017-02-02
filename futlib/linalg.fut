@@ -29,16 +29,17 @@ module linalg(T: numeric): {
 
   -- Matrix inversion is implemented with Gauss-Jordan.
   fun gauss_jordan (A: [n][m]t) (i: i32): [n][m]t =
-    if i Intrinsics.== n then A else
-    let irow = A[0]
-    let Ap = A[1:n]
-    let v1 = irow[i]
-    let irow = map (\x -> x / v1) irow
-    let Ap = map (\jrow ->
-                  let scale = jrow[i]
-                  in map (\x y -> y - (scale * x)) irow jrow)
+    loop (A) = for i < n do
+      (let irow = A[0]
+       let Ap = A[1:n]
+       let v1 = irow[i]
+       let irow = map (/v1) irow
+       let Ap = map (\jrow ->
+                     let scale = jrow[i]
+                     in map (\x y -> y - scale * x) irow jrow)
                  Ap
-    in gauss_jordan (concat Ap ([irow])) (i Intrinsics.+ 1)
+       in concat Ap [irow])
+    in A
 
   fun inv (A: [n][n]t): [n][n]t =
     -- Pad the matrix with the identity matrix.
