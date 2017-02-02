@@ -351,7 +351,7 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                            patElemName pe
   let kernel_returns = red_returns ++ map_returns
 
-  let kernel = Kernel kernelname cs space kernel_return_types $
+  let kernel = Kernel (KernelDebugHints kernelname []) cs space kernel_return_types $
                   KernelBody () (kernel_input_stms ++ calc_segindex_stms ++
                                  [chunksize_stm] ++ offset_stms ++ index_stms ++
                                  fold_chunk_stms ++ combine_stms ++ [group_reduce_stm])

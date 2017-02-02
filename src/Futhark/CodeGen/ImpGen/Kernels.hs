@@ -138,6 +138,10 @@ kernelCompiler dest (Kernel desc _ space _ kernel_body) = do
 
   (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
 
+  forM_ (kernelHints desc) $ \(s,v) ->
+    ImpGen.compileSubExp v >>=
+    ImpGen.emit . Imp.DebugPrint s int32
+
   ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = kernel_body'
             , Imp.kernelLocalMemory = local_memory
@@ -145,7 +149,7 @@ kernelCompiler dest (Kernel desc _ space _ kernel_body) = do
             , Imp.kernelNumGroups = num_groups'
             , Imp.kernelGroupSize = group_size'
             , Imp.kernelName = global_tid
-            , Imp.kernelDesc = desc
+            , Imp.kernelDesc = kernelName desc
             }
 
 expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp

@@ -153,7 +153,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
     return $ ConcatReturns ordering' w (kernelElementsPerThread step_one_size) Nothing $ patElemName pe
   let rets = red_rets ++ map_rets
 
-  return $ Kernel "chunked_reduce" cs space ts $
+  return $ Kernel (KernelDebugHints "chunked_reduce" [("input size", w)]) cs space ts $
     KernelBody () (chunk_and_fold++combine_reds++[reduce_chunk]) rets
 
 reduceKernel :: MonadBinder m =>
@@ -196,7 +196,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
   rets <- forM final_res_pes $ \pe ->
     return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
 
-  return $ Kernel "reduce" cs space (lambdaReturnType reduce_lam')  $
+  return $ Kernel (KernelDebugHints "reduce" []) cs space (lambdaReturnType reduce_lam')  $
     KernelBody () (copy_input++combine_arrs++[reduce]) rets
 
 chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
@@ -323,7 +323,7 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
   concat_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering' w (kernelElementsPerThread kernel_size) Nothing $ patElemName pe
 
-  return $ Let pat () $ Op $ Kernel "chunked_map" cs space ts $
+  return $ Let pat () $ Op $ Kernel (KernelDebugHints "chunked_map" []) cs space ts $
     KernelBody () chunk_and_fold $ nonconcat_rets ++ concat_rets
 
 blockedPerThread :: (MonadBinder m, Lore m ~ InKernel) =>
@@ -554,7 +554,7 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
   let kts = scanout_arr_ts ++ scan_ts ++ mapout_arr_ts
       kbody = KernelBody () stms res
 
-  return $ Kernel "scan1" cs kspace kts kbody
+  return $ Kernel (KernelDebugHints "scan1" []) cs kspace kts kbody
   where num_groups = kernelWorkgroups scan_sizes
         group_size = kernelWorkgroupSize scan_sizes
         num_threads = kernelNumThreads scan_sizes
@@ -612,7 +612,7 @@ scanKernel2 cs scan_sizes lam input = do
     res_elems <- mapM indexMine scanned_arrs
     return $ map (ThreadsReturn AllThreads) res_elems
 
-  return $ Kernel "scan2" cs kspace (lambdaReturnType lam) $ KernelBody () stms res
+  return $ Kernel (KernelDebugHints "scan2" []) cs kspace (lambdaReturnType lam) $ KernelBody () stms res
   where group_size = kernelWorkgroupSize scan_sizes
 
 blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -768,7 +768,7 @@ mapKernel cs w ispace inputs rts (KernelBody () kstms krets) = do
   (space, ksize_bnds, read_input_bnds) <- mapKernelSkeleton w ispace inputs
 
   let kbody' = KernelBody () (read_input_bnds ++ kstms) krets
-  return (group_size_bnds ++ ksize_bnds, Kernel "map" cs space rts kbody')
+  return (group_size_bnds ++ ksize_bnds, Kernel (KernelDebugHints "map" []) cs space rts kbody')
 
 mapKernelFromBody :: (HasScope Kernels m, MonadFreshNames m) =>
                      Certificates -> SubExp -> SpaceStructure -> [KernelInput]

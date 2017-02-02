@@ -1057,7 +1057,7 @@ intraGroupParallelise knest body = do
 
   let kbody' = kbody { kernelBodyStms = read_input_stms ++ kernelBodyStms kbody }
       kstm = Let (loopNestingPattern first_nest) () $ Op $
-             Kernel "map" cs kspace rts kbody'
+             Kernel (KernelDebugHints "map" []) cs kspace rts kbody'
 
   return $ prelude_stms ++ [kstm]
   where first_nest = fst knest
