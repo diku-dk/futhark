@@ -138,9 +138,15 @@ kernelCompiler dest (Kernel desc _ space _ kernel_body) = do
 
   (uses, local_memory) <- computeKernelUses kernel_body' bound_in_kernel
 
-  forM_ (kernelHints desc) $ \(s,v) ->
-    ImpGen.compileSubExp v >>=
-    ImpGen.emit . Imp.DebugPrint s int32
+  forM_ (kernelHints desc) $ \(s,v) -> do
+    ty <- case v of
+      Constant pv -> return $ Prim $ primValueType pv
+      Var vn -> lookupType vn
+    unless (primType ty) $ fail $ concat [ "debugKernelHint '", s, "'"
+                                         , " in kernel '", kernelName desc, "'"
+                                         , " did not have primType value." ]
+
+    ImpGen.compileSubExp v >>= ImpGen.emit . Imp.DebugPrint s (elemType ty)
 
   ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = kernel_body'
