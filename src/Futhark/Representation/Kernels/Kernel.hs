@@ -69,7 +69,7 @@ data KernelDebugHints =
   KernelDebugHints { kernelName :: String
                    , kernelHints :: [(String, SubExp)]
                      -- ^ A mapping from a description to some
-                     -- i32-typed value.
+                     -- PrimType value.
                    }
   deriving (Eq, Show, Ord)
 
