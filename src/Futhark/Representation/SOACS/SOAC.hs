@@ -55,6 +55,14 @@ data SOAC lore =
     Map Certificates SubExp (LambdaT lore) [VName]
   | Reduce Certificates SubExp Commutativity (LambdaT lore) [(SubExp, VName)]
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
+  -- ^ @Scan cs w lam input@ where @(nes, arrs) = unzip input@.
+  --
+  -- Performs an inclusive scan on the input arrays @arrs@ (that must all have
+  -- outer length @w@), using the binary operator defined in @lam@ and the
+  -- neutral elements @nes@.
+  --
+  -- Inclusive scan means the result from scanning array @xs@ with operator @op@
+  -- will be @[xs[0], xs[0] op xs[1], ..., x0 op x1 op ... op x[w-1] ]@
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Scanomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
