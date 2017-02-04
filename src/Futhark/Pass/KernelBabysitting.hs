@@ -84,13 +84,14 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
                          thread_local
                          (castScope scope <> scopeOfKernelSpace space)
-                         (ensureCoalescedAccess expmap thread_gids)
+                         (ensureCoalescedAccess expmap thread_gids num_threads)
                          kbody)
              mempty
 
   let bnd' = Let pat () $ Op $ Kernel desc cs space ts kbody''
   addStm bnd'
   return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
+  where num_threads = spaceNumThreads space
 
 transformStm expmap (Let pat () e) = do
   e' <- mapExpM transform e
@@ -177,8 +178,9 @@ type Replacements = M.Map (VName, Slice SubExp) VName
 ensureCoalescedAccess :: MonadBinder m =>
                          ExpMap
                       -> [VName]
+                      -> SubExp
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_gids isThreadLocal sizeSubst scope arr slice = do
+ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
   case (seen, isThreadLocal arr, typeOf <$> HM.lookup arr scope) of
@@ -206,7 +208,7 @@ ensureCoalescedAccess expmap thread_gids isThreadLocal sizeSubst scope arr slice
         all isThreadLocal $ HS.toList $ freeIn offset,
         Just len' <- sizeSubst len,
         oneIsh stride ->
-          replace =<< lift (rearrangeSlice (arraySize 0 t) len' arr)
+          replace =<< lift (rearrangeSlice (arraySize 0 t) num_threads len' arr)
 
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, and some indices are
@@ -318,16 +320,14 @@ rowMajorArray arr = do
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0..rank-1] arr
 
 rearrangeSlice :: MonadBinder m =>
-                  SubExp -> SubExp -> VName
+                  SubExp -> SubExp -> SubExp -> VName
                -> m VName
-rearrangeSlice w elements_per_thread arr = do
-  num_threads <- letSubExp "num_threadS" =<<
-                 eRoundToMultipleOf Int32 (eSubExp w) (eSubExp elements_per_thread)
+rearrangeSlice w num_threads elements_per_thread arr = do
   (w_padded, padding) <- paddedScanReduceInput w num_threads
 
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
-  rearrange num_threads w_padded (baseString arr) arr_padded (rowType arr_t)
+  rearrange w_padded (baseString arr) arr_padded (rowType arr_t)
 
   where padArray w_padded padding arr_t = do
           let arr_shape = arrayShape arr_t
@@ -338,7 +338,7 @@ rearrangeSlice w elements_per_thread arr = do
           letExp (baseString arr <> "_padded") $
             BasicOp $ Concat [] 0 arr [arr_padding] w_padded
 
-        rearrange num_threads w_padded arr_name arr_padded row_type = do
+        rearrange w_padded arr_name arr_padded row_type = do
           let row_dims = arrayDims row_type
               extradim_shape = Shape $ [num_threads, elements_per_thread] ++ row_dims
               tr_perm = [1] ++ [2..shapeRank extradim_shape-1] ++ [0]
