@@ -4,7 +4,7 @@ module Futhark.Optimise.MemBlkMerging.DataStructs
        , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
        , CoalsEntry(..), FreeVarSubsts
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
-       , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo
+       , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo, prettyCoalTab
        , createsNewArrIK, createsNewArrOK, getArrMemAssoc, getUniqueMemFParam )
        where
 
@@ -198,3 +198,10 @@ createsAliasedArrOK (BasicOp (Rotate    _ _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
 -- funny, with the above uncommented it becomes very complicated.
 createsAliasedArrOK _ = Nothing
+
+prettyCoalTab :: CoalsTab -> String
+prettyCoalTab tab =
+  let list_tups = map (\(m_b, CoalsEntry md _ als vtab deps) ->
+                          (m_b, md, HS.toList als, HM.keys vtab, HM.toList deps)
+                      ) $ HM.toList tab
+  in  pretty list_tups
