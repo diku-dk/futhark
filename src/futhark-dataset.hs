@@ -39,10 +39,13 @@ main = mainWithOptions initialDataOptions commandLineOptions f
         f _ _ =
           Nothing
 
+data BinaryOutputFormat = AllData
+                        | NoHeader
+                        | OnlyHeader
+                        deriving (Eq, Ord, Show)
+
 data OutputFormat = Text
-                  | Binary
-                  | BinaryNoHeader
-                  | BinaryOnlyHeader
+                  | Binary BinaryOutputFormat
                   deriving (Eq, Ord, Show)
 
 data DataOptions = DataOptions
@@ -85,15 +88,15 @@ commandLineOptions = [
     "Output data in text format (must precede --generate)."
   , Option "b" ["binary"]
     (NoArg $ Right $ \opts ->
-        opts { format = Binary })
+        opts { format = Binary AllData })
     "Output data in binary Futhark format (must precede --generate)."
   , Option [] ["binary-no-header"]
     (NoArg $ Right $ \opts ->
-        opts { format = BinaryNoHeader })
+        opts { format = Binary NoHeader })
     "Output data in binary Futhark format without header (must precede --generate)."
   , Option [] ["binary-only-header"]
     (NoArg $ Right $ \opts ->
-        opts { format = BinaryOnlyHeader })
+        opts { format = Binary OnlyHeader })
     "Only output binary Futhark format header for data (must precede --generate)."
   , setRangeOption "i8" seti8Range
   , setRangeOption "i16" seti16Range
@@ -133,7 +136,7 @@ tryMakeGenerator t = do
     let (v, _) = randomValue conf t' stdgen
     case fmt of
       Text -> printSimpleValueT v
-      _ -> printSimpleValueB fmt t' v
+      Binary binfmt -> printSimpleValueB binfmt t' v
   where name = "option " ++ t
 
 data SimpleType = SimpleArray SimpleType Int
@@ -188,12 +191,12 @@ printSimpleValueT = (>>putStrLn "") . flip evalStateT 0 . p
 binaryFormatVersion :: Int
 binaryFormatVersion = 1
 
-printSimpleValueB :: OutputFormat -> SimpleType -> SimpleValue -> IO ()
+printSimpleValueB :: BinaryOutputFormat -> SimpleType -> SimpleValue -> IO ()
 printSimpleValueB fmt st sv =
   BL.putStr $ runPut $ printHeader () >> printData ()
 
   where
-    printHeader _ | fmt == BinaryNoHeader = return ()
+    printHeader _ | fmt == NoHeader = return ()
     printHeader _ = do
       Bin.put 'b'
       putWord8 $ fromIntegral binaryFormatVersion
@@ -206,7 +209,7 @@ printSimpleValueB fmt st sv =
           putWord8 $ fromIntegral $ length dims
           mapM_ (putWord64le . fromIntegral) dims
 
-    printData _ | fmt == BinaryOnlyHeader = return ()
+    printData _ | fmt == OnlyHeader = return ()
     printData _ = pSimpleValue sv
 
     -- There is a bit of magic going on here. The source language
