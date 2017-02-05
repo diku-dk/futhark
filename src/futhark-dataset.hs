@@ -27,7 +27,7 @@ import Language.Futhark.Syntax
 import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
-import qualified Futhark.Representation.Primitive as RP (PrimType (Bool))
+import qualified Futhark.Representation.Primitive as RP (PrimType (..))
 
 import Futhark.Util.Options
 import Futhark.Util.Pretty
@@ -39,8 +39,10 @@ main = mainWithOptions initialDataOptions commandLineOptions f
         f _ _ =
           Nothing
 
-data OutputFormat = Binary
-                  | Text
+data OutputFormat = Text
+                  | Binary
+                  | BinaryNoHeader
+                  | BinaryOnlyHeader
                   deriving (Eq, Ord, Show)
 
 data DataOptions = DataOptions
@@ -77,14 +79,22 @@ commandLineOptions = [
                   Left $ error err)
      "TYPE")
     "Generate a random value of this type."
-  , Option "b" ["binary"]
-    (NoArg $ Right $ \opts ->
-        opts { format = Binary })
-    "Output data in binary format"
   , Option "t" ["text"]
     (NoArg $ Right $ \opts ->
         opts { format = Text })
-    "Output data in text format"
+    "Output data in text format (must precede --generate)."
+  , Option "b" ["binary"]
+    (NoArg $ Right $ \opts ->
+        opts { format = Binary })
+    "Output data in binary Futhark format (must precede --generate)."
+  , Option [] ["binary-no-header"]
+    (NoArg $ Right $ \opts ->
+        opts { format = BinaryNoHeader })
+    "Output data in binary Futhark format without header (must precede --generate)."
+  , Option [] ["binary-only-header"]
+    (NoArg $ Right $ \opts ->
+        opts { format = BinaryOnlyHeader })
+    "Only output binary Futhark format header for data (must precede --generate)."
   , setRangeOption "i8" seti8Range
   , setRangeOption "i16" seti16Range
   , setRangeOption "i32" seti32Range
@@ -119,11 +129,11 @@ setRangeOption tname set =
 tryMakeGenerator :: String -> Either String (RandomConfiguration -> OutputFormat -> StdGen  -> IO ())
 tryMakeGenerator t = do
   t' <- toSimpleType =<< either (Left . show) Right (parseType name (T.pack t))
-  return $ \conf format stdgen -> do
+  return $ \conf fmt stdgen -> do
     let (v, _) = randomValue conf t' stdgen
-    case format of
+    case fmt of
       Text -> printSimpleValueT v
-      Binary -> printSimpleValueB t' v
+      _ -> printSimpleValueB fmt t' v
   where name = "option " ++ t
 
 data SimpleType = SimpleArray SimpleType Int
@@ -175,32 +185,53 @@ printSimpleValueT = (>>putStrLn "") . flip evalStateT 0 . p
                     put 0
             else put $ i + 1
 
-printSimpleValueB :: SimpleType -> SimpleValue -> IO ()
-printSimpleValueB ist sv =
-  BL.putStr $ runPut $ do
-    Bin.put 'b'
-    case sv of
-      SimplePrimValue pv -> do
-        putWord8 0 -- is_array
-        putWord8 $ fromIntegral $ fromEnum $ elemType ist
-        p pv
-      _ -> do
-        let dims = getDims ist
-        putWord8 1 -- is_array
-        putWord8 $ fromIntegral $ fromEnum $ elemType ist
-        putWord8 $ fromIntegral $ length dims
-        mapM_ (putWord64le . fromIntegral) dims
-        pSimpleValue sv
+binaryFormatVersion :: Int
+binaryFormatVersion = 1
+
+printSimpleValueB :: OutputFormat -> SimpleType -> SimpleValue -> IO ()
+printSimpleValueB fmt st sv =
+  BL.putStr $ runPut $ printHeader () >> printData ()
 
   where
-    elemType (SimplePrim (Signed t)) = fromEnum t
-    elemType (SimplePrim (Unsigned t)) = fromEnum t
-    elemType (SimplePrim (FloatType t)) = fromEnum t
-    elemType (SimplePrim (Bool)) = fromEnum RP.Bool
-    elemType (SimpleArray st _) = elemType st
+    printHeader _ | fmt == BinaryNoHeader = return ()
+    printHeader _ = do
+      Bin.put 'b'
+      putWord8 $ fromIntegral binaryFormatVersion
+      putWord8 $ if isArray st then 1 else 0
+      putWord8 $ fromIntegral $ fromEnum $ elemType st
+      case sv of
+        SimplePrimValue _ -> return ()
+        SimpleArrayValue _ -> do
+          let dims = getDims st
+          putWord8 $ fromIntegral $ length dims
+          mapM_ (putWord64le . fromIntegral) dims
+
+    printData _ | fmt == BinaryOnlyHeader = return ()
+    printData _ = pSimpleValue sv
+
+    -- There is a bit of magic going on here. The source language
+    -- (Language.Syntax.Futhark) has its own definition of @PrimType@, which is
+    -- different from the definition of @PrimType@ in the core language
+    -- (Futhark.Representation.Primitive).
+    --
+    -- We want to use the Enum values defined for the core language's @PrimTyp@.
+    --
+    -- The source language internally uses the datatypes @FloatType@
+    -- (Float32/Float64) and @IntType@ (Int8/Int16/Int32/Int64) as arguments to
+    -- constructors of the source languages @PrimType@. We take these out, and
+    -- wrap them in their appropriate constructors to become members of the core
+    -- language's @PrimType@.
+    elemType (SimplePrim (Signed t)) = fromEnum $ RP.IntType t
+    elemType (SimplePrim (Unsigned t)) = fromEnum $ RP.IntType t
+    elemType (SimplePrim (FloatType t)) = fromEnum $ RP.FloatType t
+    elemType (SimplePrim Bool) = fromEnum RP.Bool
+    elemType (SimpleArray ty _) = elemType ty
+
+    isArray (SimpleArray _ _) = True
+    isArray _ = False
 
     getDims (SimplePrim _) = []
-    getDims (SimpleArray st dim) = dim : getDims st
+    getDims (SimpleArray ty dim) = dim : getDims ty
 
     pSimpleValue :: SimpleValue -> Put
     pSimpleValue (SimplePrimValue pv) = p pv
