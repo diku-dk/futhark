@@ -82,7 +82,7 @@ commandLineOptions = [
                   Left $ error err)
      "TYPE")
     "Generate a random value of this type."
-  , Option "t" ["text"]
+  , Option [] ["text"]
     (NoArg $ Right $ \opts ->
         opts { format = Text })
     "Output data in text format (must precede --generate)."
