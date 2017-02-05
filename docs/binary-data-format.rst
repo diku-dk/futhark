@@ -29,11 +29,11 @@ for others.
 
 The general format has 4 bytes as the header::
 
-  b <version> <is_array> <type_enum>
+  b <version> <num_dims> <type_enum>
 
 Where ``version`` is the version of the binary format used for encoding
-(currently 1), ``is_array`` is a boolean value indicating if the following value
-is an array, and ``type_enum`` is the enum value for the following primitive
+(currently 1), ``num_dims`` is the number of dimensions in the array (0 for
+scalar), and ``type_enum`` is the enum value for the following primitive
 value(s).
 
 Encoding a scalar value is done by appending the binary little endian
@@ -45,7 +45,7 @@ To encode an array we must encode the number of dimensions ``n`` as a single
 byte, each dimension ``dim_i`` as an ``int64``, and finally all the values in
 their binary little endian representation::
 
-  b <version> 1 <type_enum> <n> <dim_1> <dim_2> ... <dim_n> <values>
+  b <version> <n> <type_enum> <dim_1> <dim_2> ... <dim_n> <values>
 
 
 Enum Values

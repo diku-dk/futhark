@@ -108,10 +108,10 @@ static int read_is_binary() {
 }
 
 static void read_bin_ensure_scalar(int elem_enum) {
-    int8_t bin_is_array;
-    int ret = read_byte(&bin_is_array);
-    if (ret != 0) { panic(1, "binary-input: Couldn't get is_array.\n"); }
-    if (bin_is_array) {
+    int8_t bin_dims;
+    int ret = read_byte(&bin_dims);
+    if (ret != 0) { panic(1, "binary-input: Couldn't get dims.\n"); }
+    if (bin_dims) {
         panic(1, "binary-input: Expected scalar value, but got array.\n");
     }
 
@@ -216,11 +216,13 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
     // now we know it is binary :)
     int ret;
 
-    int8_t bin_is_array;
-    ret = read_byte(&bin_is_array);
-    if (ret != 0) { panic(1, "binary-input: Couldn't get is_array.\n"); }
-    if (!bin_is_array) {
-        panic(1, "binary-input: Expected array, but got scalar value.\n");
+    int8_t bin_dims;
+    ret = read_byte(&bin_dims);
+    if (ret != 0) { panic(1, "binary-input: Couldn't get dims.\n"); }
+
+    if (bin_dims != dims) {
+        panic(1, "binary-input: Expected %i dimensions, but got array with %i dimensions.\n",
+              dims, bin_dims);
     }
 
     uint8_t bin_elem_enum;
@@ -239,15 +241,6 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
         panic(1, "binary-input: Expected type %s used %i bytes per element, but call to `read_array` tell me that type %s uses %i bytes per element. Enum used is %i\n",
               FUTHARK_PRIMTYPE_NAMES[elem_enum], FUTHARK_PRIMTYPE_SIZES[elem_enum],
               type_name, elem_size, elem_enum);
-    }
-
-    int8_t bin_dims;
-    ret = read_byte(&bin_dims);
-    if (ret != 0) { panic(1, "binary-input: Couldn't get dims.\n"); }
-
-    if (bin_dims != dims) {
-        panic(1, "binary-input: Expected %i dimensions, but got array with %i dimensions.\n",
-              dims, bin_dims);
     }
 
     int64_t elem_count = 1;

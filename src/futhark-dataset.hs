@@ -200,14 +200,12 @@ printSimpleValueB fmt st sv =
     printHeader _ = do
       Bin.put 'b'
       putWord8 $ fromIntegral binaryFormatVersion
-      putWord8 $ if isArray st then 1 else 0
+      let dims = getDims st
+      putWord8 $ fromIntegral $ length dims
       putWord8 $ fromIntegral $ fromEnum $ elemType st
       case sv of
         SimplePrimValue _ -> return ()
-        SimpleArrayValue _ -> do
-          let dims = getDims st
-          putWord8 $ fromIntegral $ length dims
-          mapM_ (putWord64le . fromIntegral) dims
+        SimpleArrayValue _ -> mapM_ (putWord64le . fromIntegral) dims
 
     printData _ | fmt == OnlyHeader = return ()
     printData _ = pSimpleValue sv
@@ -229,9 +227,6 @@ printSimpleValueB fmt st sv =
     elemType (SimplePrim (FloatType t)) = fromEnum $ RP.FloatType t
     elemType (SimplePrim Bool) = fromEnum RP.Bool
     elemType (SimpleArray ty _) = elemType ty
-
-    isArray (SimpleArray _ _) = True
-    isArray _ = False
 
     getDims (SimplePrim _) = []
     getDims (SimpleArray ty dim) = dim : getDims ty
