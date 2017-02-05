@@ -283,23 +283,31 @@ transformStm (Let pat () (Op (Redomap cs w comm lam1 lam2 nes arrs))) =
   if sequentialiseRedomapBody then do
     lam1_sequential <- Kernelise.transformLambda lam1
     lam2_sequential <- Kernelise.transformLambda lam2
-    blockedReduction pat cs w comm lam1_sequential lam2_sequential nes arrs
+    blockedReduction pat cs w comm' lam1_sequential lam2_sequential nes arrs
   else do
-    (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, comm, lam1, lam2, nes, arrs)
+    (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, comm', lam1, lam2, nes, arrs)
     transformStms [mapbnd, redbnd]
       where sequentialiseRedomapBody = True
+            comm' | commutativeLambda lam1 = Commutative
+                  | otherwise              = comm
 
 transformStm (Let res_pat () (Op (Reduce cs w comm red_fun red_input)))
-  | Just do_irwim <- irwim res_pat cs w comm red_fun red_input = do
+  | Just do_irwim <- irwim res_pat cs w comm' red_fun red_input = do
       types <- asksScope scopeForSOACs
       bnds <- fst <$> runBinderT (simplifyStms =<< collectStms_ do_irwim) types
       transformStms bnds
+        where comm' | commutativeLambda red_fun = Commutative
+                    | otherwise                 = comm
+
 
 transformStm (Let pat () (Op (Reduce cs w comm red_fun red_input))) = do
   red_fun_sequential <- Kernelise.transformLambda red_fun
   red_fun_sequential' <- renameLambda red_fun_sequential
-  blockedReduction pat cs w comm red_fun_sequential' red_fun_sequential nes arrs
+  blockedReduction pat cs w comm' red_fun_sequential' red_fun_sequential nes arrs
   where (nes, arrs) = unzip red_input
+        comm' | commutativeLambda red_fun = Commutative
+              | otherwise                 = comm
+
 
 transformStm (Let res_pat () (Op (Scan cs w scan_fun scan_input)))
   | Just do_iswim <- iswim res_pat cs w scan_fun scan_input = do
@@ -337,7 +345,10 @@ transformStm (Let pat () (Op (Stream cs w
   ((map_misc_bnds++[map_bnd])++) <$>
     inScopeOf (map_misc_bnds++[map_bnd])
     (transformStm $ Let red_pat () $
-     Op (Reduce cs num_threads comm red_fun red_input))
+     Op (Reduce cs num_threads comm' red_fun red_input))
+    where comm' | commutativeLambda red_fun = Commutative
+                | otherwise                 = comm
+
 
 transformStm (Let pat () (Op (Stream cs w
                                   (RedLike _ comm red_fun nes) fold_fun arrs)))
@@ -345,7 +356,9 @@ transformStm (Let pat () (Op (Stream cs w
   -- Generate a kernel immediately.
   red_fun_sequential <- Kernelise.transformLambda red_fun
   fold_fun_sequential <- Kernelise.transformLambda fold_fun'
-  blockedReductionStream pat cs w comm red_fun_sequential fold_fun_sequential nes arrs
+  blockedReductionStream pat cs w comm' red_fun_sequential fold_fun_sequential nes arrs
+  where comm' | commutativeLambda red_fun = Commutative
+              | otherwise                 = comm
 
 transformStm (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
@@ -794,10 +807,13 @@ maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs)))
           localScope (typeEnvFromKernelAcc acc') $ do
           lam' <- Kernelise.transformLambda lam
           foldlam' <- Kernelise.transformLambda foldlam
-          regularSegmentedRedomapKernel nest perm cs w comm lam' foldlam' nes arrs >>=
+          regularSegmentedRedomapKernel nest perm cs w comm' lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
+    where comm' | commutativeLambda lam = Commutative
+                | otherwise             = comm
+
 
 -- Redomap and Scanomap are general cases, so pretend nested
 -- reductions and scans are Redomap and Scanomap.  Well, not for
@@ -810,10 +826,12 @@ maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
           let (nes, arrs) = unzip input
           lam' <- Kernelise.transformLambda lam
           foldlam' <- renameLambda lam'
-          regularSegmentedRedomapKernel nest perm cs w comm lam' foldlam' nes arrs >>=
+          regularSegmentedRedomapKernel nest perm cs w comm' lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
+    where comm' | commutativeLambda lam = Commutative
+                | otherwise             = comm
 maybeDistributeStm (Let pat attr (Op (Scan cs w lam input))) acc | versionedCode = do
   let (nes, arrs) = unzip input
   lam_renamed <- renameLambda lam

@@ -68,6 +68,7 @@ module Futhark.Representation.Primitive
        , oneIsh
        , primBitSize
        , primByteSize
+       , commutativeBinOp
 
        -- * Prettyprinting
        , convOpFun
@@ -727,6 +728,19 @@ intByteSize Int64 = 8
 floatByteSize :: Num a => FloatType -> a
 floatByteSize Float32 = 4
 floatByteSize Float64 = 8
+
+-- | True if the given binary operator is commutative.
+commutativeBinOp :: BinOp -> Bool
+commutativeBinOp Add{} = True
+commutativeBinOp FAdd{} = True
+commutativeBinOp Mul{} = True
+commutativeBinOp FMul{} = True
+commutativeBinOp And{} = True
+commutativeBinOp Or{} = True
+commutativeBinOp Xor{} = True
+commutativeBinOp LogOr{} = True
+commutativeBinOp LogAnd{} = True
+commutativeBinOp _ = False
 
 -- Prettyprinting instances
 
