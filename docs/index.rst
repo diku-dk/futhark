@@ -27,6 +27,7 @@ our `publications`_.
    language-reference.rst
    c-porting-guide.rst
    hacking.rst
+   binary-data-format.rst
 
 .. toctree::
    :caption: Manual Pages
