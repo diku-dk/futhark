@@ -1,11 +1,3 @@
-#include <inttypes.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-
-//#include "reader.h"
-//#include "panic.h"
-
 // taken from http://esr.ibiblio.org/?p=5095
 #define IS_BIG_ENDIAN (*(uint16_t *)"\0\xff" < 0x100)
 
@@ -47,23 +39,23 @@ const int FUTHARK_PRIMTYPE_SIZES[] = {
 ////////////////////////////////////////////////////////////////////////////////
 
 static int read_byte(void* dest) {
-    int num_bytes_read = read(STDIN_FILENO, dest, 1);
-    return num_bytes_read == 1 ? 0 : 1;
+    int num_elems_read = fread(dest, 1, 1, stdin);
+    return num_elems_read == 1 ? 0 : 1;
 }
 
 static int read_le_2byte(void* dest) {
-    int num_bytes_read = read(STDIN_FILENO, dest, 2);
-    return num_bytes_read == 2 ? 0 : 1;
+    int num_elems_read = fread(dest, 2, 1, stdin);
+    return num_elems_read == 1 ? 0 : 1;
 }
 
 static int read_le_4byte(void* dest) {
-    int num_bytes_read = read(STDIN_FILENO, dest, 4);
-    return num_bytes_read == 4 ? 0 : 1;
+    int num_elems_read = fread(dest, 4, 1, stdin);
+    return num_elems_read == 1 ? 0 : 1;
 }
 
 static int read_le_8byte(void* dest) {
-    int num_bytes_read = read(STDIN_FILENO, dest, 8);
-    return num_bytes_read == 8 ? 0 : 1;
+    int num_elems_read = fread(dest, 8, 1, stdin);
+    return num_elems_read == 1 ? 0 : 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,9 +86,10 @@ static int read_be_8byte(void* dest) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static int read_is_binary() {
+    skipspaces();
     int c = getchar();
     if (c == 'b') {
-        int bin_version;
+        int8_t bin_version;
         int ret = read_byte(&bin_version);
 
         if (ret != 0) { panic(1, "binary-input: could not read version.\n"); }
@@ -112,9 +105,26 @@ static int read_is_binary() {
     return 0;
 }
 
+static void read_bin_ensure_scalar(int elem_enum) {
+    int8_t bin_is_array;
+    int ret = read_byte(&bin_is_array);
+    if (ret != 0) { panic(1, "binary-input: Couldn't get is_array.\n"); }
+    if (bin_is_array) {
+        panic(1, "binary-input: Expected scalar value, but got array.\n");
+    }
+
+    int8_t bin_elem_enum;
+    ret = read_byte(&bin_elem_enum);
+    if (ret != 0) { panic(1, "binary-input: Couldn't get elem_enum.\n"); }
+    if (bin_elem_enum != elem_enum) {
+        panic(1, "binary-input: Expected scalar of type %s but got scalar of type %s.\n",
+              FUTHARK_PRIMTYPE_NAMES[elem_enum], FUTHARK_PRIMTYPE_NAMES[bin_elem_enum]);
+    }
+}
 
 static int read_int8(void* dest) {
     if (read_is_binary()) {
+        read_bin_ensure_scalar(FUTHARK_INT8);
         return read_byte(dest);
     }
     return read_str_int8(dest);
@@ -122,6 +132,7 @@ static int read_int8(void* dest) {
 
 static int read_int16(void* dest) {
     if (read_is_binary()) {
+        read_bin_ensure_scalar(FUTHARK_INT16);
         if (IS_BIG_ENDIAN) {
             return read_be_2byte(dest);
         } else {
@@ -133,6 +144,7 @@ static int read_int16(void* dest) {
 
 static int read_int32(void* dest) {
     if (read_is_binary()) {
+        read_bin_ensure_scalar(FUTHARK_INT32);
         if (IS_BIG_ENDIAN) {
             return read_be_4byte(dest);
         } else {
@@ -144,6 +156,7 @@ static int read_int32(void* dest) {
 
 static int read_int64(void* dest) {
     if (read_is_binary()) {
+                read_bin_ensure_scalar(FUTHARK_INT64);
         if (IS_BIG_ENDIAN) {
             return read_be_8byte(dest);
         } else {
@@ -155,6 +168,7 @@ static int read_int64(void* dest) {
 
 static int read_float(void* dest) {
     if (read_is_binary()) {
+        read_bin_ensure_scalar(FUTHARK_FLOAT32);
         if (IS_BIG_ENDIAN) {
             return read_be_4byte(dest);
         } else {
@@ -165,6 +179,7 @@ static int read_float(void* dest) {
 }
 
 static int read_double(void* dest) {
+    read_bin_ensure_scalar(FUTHARK_FLOAT64);
     if (read_is_binary()) {
         if (IS_BIG_ENDIAN) {
             return read_be_8byte(dest);
@@ -177,6 +192,7 @@ static int read_double(void* dest) {
 
 static int read_bool(void* dest) {
     if (read_is_binary()) {
+        read_bin_ensure_scalar(FUTHARK_BOOL);
         return read_byte(dest);
     }
     return read_str_bool(dest);
@@ -195,11 +211,16 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
     // now we know it is binary :)
     int ret;
 
-    int bin_elem_enum;
+    int8_t bin_is_array;
+    ret = read_byte(&bin_is_array);
+    if (ret != 0) { panic(1, "binary-input: Couldn't get is_array.\n"); }
+    if (!bin_is_array) {
+        panic(1, "binary-input: Expected array, but got scalar value.\n");
+    }
+
+    int8_t bin_elem_enum;
     ret = read_byte(&bin_elem_enum);
-
     if (ret != 0) { panic(1, "binary-input: Couldn't get elem_enum.\n"); }
-
     if (bin_elem_enum != elem_enum) {
         panic(1, "binary-input: Expected array with type %s but got array with type %s.\n",
               type_name, FUTHARK_PRIMTYPE_NAMES[bin_elem_enum]);
@@ -212,7 +233,7 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
               type_name, elem_size, elem_enum);
     }
 
-    int bin_dims;
+    int8_t bin_dims;
     ret = read_byte(&bin_dims);
     if (ret != 0) { panic(1, "binary-input: Couldn't get dims.\n"); }
 
@@ -227,6 +248,7 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
         ret = IS_BIG_ENDIAN ? read_be_8byte(&bin_shape) : read_le_8byte(&bin_shape);
         if (ret != 0) { panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i); }
         elem_count *= bin_shape;
+        shape[i] = bin_shape;
     }
 
     void* tmp = realloc(*data, elem_count * elem_size);
