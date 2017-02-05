@@ -231,5 +231,5 @@ Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_
 
 .. _`PyOpenCL repository`: https://github.com/pyopencl/pyopencl
 .. _`Mandelbrot Explorer`: https://github.com/HIPERFIT/futhark-benchmarks/tree/master/misc/mandelbrot-explorer
-.. _`Game of Life`: (https://github.com/HIPERFIT/futhark-benchmarks/tree/master/misc/life)
+.. _`Game of Life`: https://github.com/HIPERFIT/futhark-benchmarks/tree/master/misc/life
 .. _`issues page`: https://github.com/HIPERFIT/futhark/issues
