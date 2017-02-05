@@ -19,7 +19,6 @@ module Language.Futhark.Attributes
 
   -- * Queries on expressions
   , typeOf
-  , commutative
 
   -- * Queries on patterns
   , patNameSet
@@ -703,10 +702,6 @@ concreteType (Array at) = concreteArrayType at
         concreteTupleArrayElem (ArrayArrayElem at') = concreteArrayType at'
         concreteTupleArrayElem PolyArrayElem{} = False
         concreteTupleArrayElem (TupleArrayElem ts) = all concreteTupleArrayElem ts
-
--- | Is the given binary operator commutative?
-commutative :: BinOp -> Bool
-commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
 -- | The set of names bound in a pattern, including dimension declarations.
 patNameSet :: (Ord vn, Hashable vn) => PatternBase NoInfo vn -> HS.HashSet vn

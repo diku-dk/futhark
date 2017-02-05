@@ -459,7 +459,7 @@ Exp  :: { UncheckedExp }
 
 
      | reduce FunAbstr Atom Atom
-                      { Reduce (commutativity $2) $2 $3 $4 $1 }
+                      { Reduce Noncommutative $2 $3 $4 $1 }
 
      | reduceComm FunAbstr Atom Atom
                       { Reduce Commutative $2 $3 $4 $1 }
@@ -497,7 +497,7 @@ Exp  :: { UncheckedExp }
      | streamMapPer    FunAbstr Atom
                          { Stream (MapLike Disorder) $2 $3 $1 }
      | streamRed       FunAbstr FunAbstr Atom
-                         { Stream (RedLike InOrder (commutativity $2) $2) $3 $4 $1 }
+                         { Stream (RedLike InOrder Noncommutative $2) $3 $4 $1 }
      | streamRedPer    FunAbstr FunAbstr Atom
                          { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
      | streamSeq       FunAbstr Atom Atom
@@ -845,11 +845,6 @@ patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var (QualName [] (identName ident)) NoInfo $ srclocOf ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
-
-commutativity :: LambdaBase ty Name -> Commutativity
-commutativity (BinOpFun binop _ _ _ _)
-  | commutative (leadingOperator (qualLeaf binop)) = Commutative -- FIXME
-commutativity _ = Noncommutative
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF

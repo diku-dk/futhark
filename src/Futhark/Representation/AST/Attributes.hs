@@ -27,14 +27,16 @@ module Futhark.Representation.AST.Attributes
   , subExpVars
   , subExpVar
   , shapeVars
+  , commutativeLambda
 
   , IsOp (..)
   , Attributes (..)
   )
   where
 
+import Control.Monad
 import Data.List
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust)
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Attributes.Reshape
@@ -139,6 +141,20 @@ subExpVar Constant{} = Nothing
 -- duplicates.
 shapeVars :: Shape -> [VName]
 shapeVars = subExpVars . shapeDims
+
+-- | Does the given lambda represent a known commutative function?
+-- Based on pattern matching and checking whether the lambda
+-- represents a known arithmetic operator; don't expect anything
+-- clever here.
+commutativeLambda :: Lambda lore -> Bool
+commutativeLambda lam = isJust $ do
+  [xp,yp] <- Just $ lambdaParams lam
+  Body _ [Let (Pattern [] [v]) _ (BasicOp (BinOp op (Var x) (Var y)))] [res] <-
+    Just $ lambdaBody lam
+  guard $ Var (patElemName v) == res
+  guard $ x == paramName xp && y == paramName yp ||
+          y == paramName xp && x == paramName yp
+  guard $ commutativeBinOp op
 
 -- | A type class for operations.
 class (Eq op, Ord op, Show op,
