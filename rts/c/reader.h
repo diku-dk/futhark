@@ -262,10 +262,11 @@ static int read_str_int64(void* dest) {
   }
 }
 
-static int read_str_char(void* dest) {
+static int read_str_float(void* dest) {
   skipspaces();
-  if (scanf("%c", (char*)dest) == 1) {
-    return 0;
+  if (scanf("%f", (float*)dest) == 1) {
+    scanf("f32");
+    return next_is_not_constituent() ? 0 : 1;
   } else {
     return 1;
   }
@@ -275,16 +276,6 @@ static int read_str_double(void* dest) {
   skipspaces();
   if (scanf("%lf", (double*)dest) == 1) {
     scanf("f64");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    return 1;
-  }
-}
-
-static int read_str_float(void* dest) {
-  skipspaces();
-  if (scanf("%f", (float*)dest) == 1) {
-    scanf("f32");
     return next_is_not_constituent() ? 0 : 1;
   } else {
     return 1;
