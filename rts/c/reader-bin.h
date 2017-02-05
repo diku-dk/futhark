@@ -14,6 +14,8 @@ typedef enum {
     FUTHARK_BOOL = 6
 } futhark_primtype;
 
+#define MAX_ELEM_ENUM 6
+
 const char *FUTHARK_PRIMTYPE_NAMES[] = {
     "i8",
     "i16",
@@ -113,9 +115,12 @@ static void read_bin_ensure_scalar(int elem_enum) {
         panic(1, "binary-input: Expected scalar value, but got array.\n");
     }
 
-    int8_t bin_elem_enum;
+    uint8_t bin_elem_enum;
     ret = read_byte(&bin_elem_enum);
     if (ret != 0) { panic(1, "binary-input: Couldn't get elem_enum.\n"); }
+    if (bin_elem_enum > MAX_ELEM_ENUM) {
+        panic(1, "binary-input: Unkown elem_enum %i.\n", bin_elem_enum);
+    }
     if (bin_elem_enum != elem_enum) {
         panic(1, "binary-input: Expected scalar of type %s but got scalar of type %s.\n",
               FUTHARK_PRIMTYPE_NAMES[elem_enum], FUTHARK_PRIMTYPE_NAMES[bin_elem_enum]);
@@ -218,9 +223,12 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
         panic(1, "binary-input: Expected array, but got scalar value.\n");
     }
 
-    int8_t bin_elem_enum;
+    uint8_t bin_elem_enum;
     ret = read_byte(&bin_elem_enum);
     if (ret != 0) { panic(1, "binary-input: Couldn't get elem_enum.\n"); }
+    if (bin_elem_enum > MAX_ELEM_ENUM) {
+        panic(1, "binary-input: Unkown elem_enum %i.\n", bin_elem_enum);
+    }
     if (bin_elem_enum != elem_enum) {
         panic(1, "binary-input: Expected array with type %s but got array with type %s.\n",
               type_name, FUTHARK_PRIMTYPE_NAMES[bin_elem_enum]);
