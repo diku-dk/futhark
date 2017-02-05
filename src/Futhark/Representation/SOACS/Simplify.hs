@@ -149,7 +149,7 @@ simplifySOAC (Scanomap cs w outerfun innerfun acc arrs) =
 simplifySOAC (Write cs len lam ivs as) = do
   cs' <- Engine.simplify cs
   len' <- Engine.simplify len
-  lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
+  lam' <- Engine.simplifyLambda lam Nothing $ map Just ivs
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
   return $ Write cs' len' lam' ivs' as'
