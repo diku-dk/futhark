@@ -153,11 +153,15 @@ static int read_int64(void* dest) {
     return read_str_int64(dest);
 }
 
-static int read_char(void* dest) {
+static int read_float(void* dest) {
     if (read_is_binary()) {
-        return read_byte(dest);
+        if (IS_BIG_ENDIAN) {
+            return read_be_4byte(dest);
+        } else {
+            return read_le_4byte(dest);
+        }
     }
-    return read_str_char(dest);
+    return read_str_float(dest);
 }
 
 static int read_double(void* dest) {
@@ -169,17 +173,6 @@ static int read_double(void* dest) {
         }
     }
     return read_str_double(dest);
-}
-
-static int read_float(void* dest) {
-    if (read_is_binary()) {
-        if (IS_BIG_ENDIAN) {
-            return read_be_4byte(dest);
-        } else {
-            return read_le_4byte(dest);
-        }
-    }
-    return read_str_float(dest);
 }
 
 static int read_bool(void* dest) {
