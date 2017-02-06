@@ -253,13 +253,13 @@ static int read_array(primtype_t expected_type, int64_t elem_size, int (*elem_re
               bin_primtype.type_name, bin_primtype.size, elem_size);
     }
 
-    int64_t elem_count = 1;
+    uint64_t elem_count = 1;
     for (int i=0; i<dims; i++) {
-        int64_t bin_shape;
+        uint64_t bin_shape;
         ret = IS_BIG_ENDIAN ? read_be_8byte(&bin_shape) : read_le_8byte(&bin_shape);
         if (ret != 0) { panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i); }
         elem_count *= bin_shape;
-        shape[i] = bin_shape;
+        shape[i] = (int64_t) bin_shape;
     }
 
     void* tmp = realloc(*data, elem_count * elem_size);
@@ -281,13 +281,13 @@ static int read_array(primtype_t expected_type, int64_t elem_size, int (*elem_re
         }
 
         char* datac = (char*) *data;
-        for(int64_t i=0; i<elem_count; i++){
+        for(uint64_t i=0; i<elem_count; i++){
             ret = elem_reader(datac);
             if (ret != 0) { panic(1, "binary-input: error reading element %i.\n", i); }
             datac += elem_size;
         }
     } else {
-        int64_t num_elems_read = fread(*data, elem_size, elem_count, stdin);
+        size_t num_elems_read = fread(*data, elem_size, elem_count, stdin);
         if (num_elems_read != elem_count) {
             panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
                   elem_count, num_elems_read);
