@@ -42,8 +42,8 @@ representation of it::
   b <version> 0 <type> <value>
 
 To encode an array we must encode the number of dimensions ``n`` as a single
-byte, each dimension ``dim_i`` as an ``int64``, and finally all the values in
-their binary little endian representation::
+byte, each dimension ``dim_i`` as an unsigned 64-bit little endian integer, and
+finally all the values in their binary little endian representation::
 
   b <version> <n> <type> <dim_1> <dim_2> ... <dim_n> <values>
 
