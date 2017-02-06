@@ -364,6 +364,9 @@ Executable futhark-dataset
                  transformers,
                  random,
                  text,
+                 binary,
+                 data-binary-ieee754,
+                 bytestring,
                  futhark
 
   Default-Language:   Haskell2010
