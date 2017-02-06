@@ -59,8 +59,8 @@ finally all the values in their binary little endian representation::
 Type Values
 ~~~~~~~~~~~
 
-The description of a type is a 4 character string. As of today (Feb 2017), the
-values used are::
+A type is identified by a 4 character ASCII string (four bytes). Valid
+types are::
 
   "  i8"
   " i16"
