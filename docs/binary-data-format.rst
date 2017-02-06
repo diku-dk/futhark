@@ -31,10 +31,10 @@ The general format has this header::
 
   b <version> <num_dims> <type>
 
-Where ``version`` is the version of the binary format used for encoding
-(currently 1), ``num_dims`` is the number of dimensions in the array (0 for
-scalar), and ``type`` is a 4 characters describing the type of the values(s) --
-see below for more details.
+Where ``version`` is a byte containing the version of the binary format used for
+encoding (currently 1), ``num_dims`` is the number of dimensions in the array as
+a single byte (0 for scalar), and ``type`` is a 4 character string describing
+the type of the values(s) -- see below for more details.
 
 Encoding a scalar value is done by appending the binary little endian
 representation of it::
