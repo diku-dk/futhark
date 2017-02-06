@@ -7,16 +7,15 @@ import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State
-import Data.Maybe
+import qualified Data.Binary as Bin (put)
+import Data.Binary.IEEE754
+import Data.Binary.Put
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.HashMap.Lazy as HM
 import Data.List
-import Data.Word
+import Data.Maybe
 import qualified Data.Text as T
-
-import qualified Data.Binary as Bin (put)
-import Data.Binary.Put
-import Data.Binary.IEEE754
-import qualified Data.ByteString.Lazy as BL
+import Data.Word
 
 import Prelude
 
@@ -27,7 +26,6 @@ import Language.Futhark.Syntax
 import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
-import qualified Futhark.Representation.Primitive as RP (PrimType (..))
 
 import Futhark.Util.Options
 import Futhark.Util.Pretty
@@ -202,7 +200,7 @@ printSimpleValueB fmt st sv =
       putWord8 $ fromIntegral binaryFormatVersion
       let dims = getDims st
       putWord8 $ fromIntegral $ length dims
-      putWord8 $ fromIntegral $ fromEnum $ elemType st
+      putElemType st
       case sv of
         SimplePrimValue _ -> return ()
         SimpleArrayValue _ -> mapM_ (putWord64le . fromIntegral) dims
@@ -210,23 +208,17 @@ printSimpleValueB fmt st sv =
     printData _ | fmt == OnlyHeader = return ()
     printData _ = pSimpleValue sv
 
-    -- There is a bit of magic going on here. The source language
-    -- (Language.Syntax.Futhark) has its own definition of @PrimType@, which is
-    -- different from the definition of @PrimType@ in the core language
-    -- (Futhark.Representation.Primitive).
-    --
-    -- We want to use the Enum values defined for the core language's @PrimTyp@.
-    --
-    -- The source language internally uses the datatypes @FloatType@
-    -- (Float32/Float64) and @IntType@ (Int8/Int16/Int32/Int64) as arguments to
-    -- constructors of the source languages @PrimType@. We take these out, and
-    -- wrap them in their appropriate constructors to become members of the core
-    -- language's @PrimType@.
-    elemType (SimplePrim (Signed t)) = fromEnum $ RP.IntType t
-    elemType (SimplePrim (Unsigned t)) = fromEnum $ RP.IntType t
-    elemType (SimplePrim (FloatType t)) = fromEnum $ RP.FloatType t
-    elemType (SimplePrim Bool) = fromEnum RP.Bool
-    elemType (SimpleArray ty _) = elemType ty
+    -- Simply calling @Bin.put (" i8" :: String)@ would cause a lot of bytes to
+    -- be written. Doing it this way will only write 4 bytes.
+    putElemType (SimplePrim (Signed Int8))  = mapM_ Bin.put ("  i8" :: String)
+    putElemType (SimplePrim (Signed Int16)) = mapM_ Bin.put (" i16" :: String)
+    putElemType (SimplePrim (Signed Int32)) = mapM_ Bin.put (" i32" :: String)
+    putElemType (SimplePrim (Signed Int64)) = mapM_ Bin.put (" i64" :: String)
+    putElemType (SimplePrim (FloatType Float32)) = mapM_ Bin.put (" f32" :: String)
+    putElemType (SimplePrim (FloatType Float64)) = mapM_ Bin.put (" f64" :: String)
+    putElemType (SimplePrim Bool) = mapM_ Bin.put ("bool" :: String)
+    putElemType (SimplePrim (Unsigned t)) = putElemType $ SimplePrim $ Signed t
+    putElemType (SimpleArray ty _) = putElemType ty
 
     getDims (SimplePrim _) = []
     getDims (SimpleArray ty dim) = dim : getDims ty

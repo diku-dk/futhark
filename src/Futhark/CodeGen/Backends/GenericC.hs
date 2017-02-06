@@ -525,11 +525,10 @@ printArrayStm mem bt ept (dim:shape) = do
                }
              }|]
 
--- TODO for binary reading: should we only read arrays as binary? I think that
--- is ok.
-
 -- We read unsigned integers using the signed functions, and hope it
 -- all works out in the end.
+
+-- The C-function returned will handle both binary and text input
 readFun :: PrimType -> EntryPointType -> Maybe String
 readFun (IntType Int8) _ = Just "read_int8"
 readFun (IntType Int16) _ = Just "read_int16"
@@ -540,6 +539,8 @@ readFun (FloatType Float32) _ = Just "read_float"
 readFun (FloatType Float64) _ = Just "read_double"
 readFun _ _ = Nothing
 
+-- The C-function returned will only be used to read elements of a text-based
+-- array
 readStrFun :: PrimType -> EntryPointType -> Maybe String
 readStrFun (IntType Int8) _ = Just "read_str_int8"
 readStrFun (IntType Int16) _ = Just "read_str_int16"
@@ -549,6 +550,18 @@ readStrFun Bool _ = Just "read_str_bool"
 readStrFun (FloatType Float32) _ = Just "read_str_float"
 readStrFun (FloatType Float64) _ = Just "read_str_double"
 readStrFun _ _ = Nothing
+
+-- The C-value returned will be used when reading binary arrays, to indicate
+-- what the expected type is
+readTypeEnum :: PrimType -> EntryPointType -> Maybe String
+readTypeEnum (IntType Int8) _ = Just "FUTHARK_INT8"
+readTypeEnum (IntType Int16) _ = Just "FUTHARK_INT16"
+readTypeEnum (IntType Int32) _ = Just "FUTHARK_INT32"
+readTypeEnum (IntType Int64) _ = Just "FUTHARK_INT64"
+readTypeEnum (FloatType Float32) _ = Just "FUTHARK_FLOAT32"
+readTypeEnum (FloatType Float64) _ = Just "FUTHARK_FLOAT64"
+readTypeEnum Bool _ = Just "FUTHARK_BOOL"
+readTypeEnum _ _ = Nothing
 
 paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
@@ -691,7 +704,7 @@ readInput :: Bool -> HM.HashMap VName VName -> [VName] -> ValueDecl
 readInput _ _ known_sizes (ScalarValue t ept name) =
   (known_sizes, readPrimStm name t ept)
 readInput refcount memsizes known_sizes (ArrayValue name t ept shape)
-  | Just str_reader <- readStrFun t ept =
+  | (Just str_reader, Just type_val) <- (readStrFun t ept , readTypeEnum t ept) =
   -- We need to create an array for the array parser to put
   -- the shapes.
   let t' = primTypeToCType t
@@ -714,7 +727,7 @@ readInput refcount memsizes known_sizes (ArrayValue name t ept shape)
   in (known_sizes ++ wrote_sizes,
       [C.cstm|{
         typename int64_t shape[$int:rank];
-        if (read_array($int:(fromEnum t),
+        if (read_array($id:type_val,
                        sizeof($ty:t'),
                        $id:str_reader, $string:(pretty t),
                        (void**)& $exp:dest,

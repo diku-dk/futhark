@@ -3,7 +3,23 @@
 
 #define READ_BINARY_VERSION 1
 
-// As defined in src/Futhark/Representation/Primitive.hs
+typedef struct {
+    const char binname[4]; // used for parsing binary date
+    const char* type_name; // used for printing
+    const int size;
+} primtype_info_t;
+
+const primtype_info_t FUTHARK_PRIMTYPES[] = {
+    {.binname = "  i8", .type_name = "i8",   .size = 1},
+    {.binname = " i16", .type_name = "i16",  .size = 2},
+    {.binname = " i32", .type_name = "i32",  .size = 4},
+    {.binname = " i64", .type_name = "i64",  .size = 8},
+    {.binname = " f32", .type_name = "f32",  .size = 4},
+    {.binname = " f64", .type_name = "f64",  .size = 8},
+    {.binname = "bool", .type_name = "bool", .size = 1},
+};
+
+// These indices should match up with the information above
 typedef enum {
     FUTHARK_INT8 = 0,
     FUTHARK_INT16 = 1,
@@ -11,30 +27,13 @@ typedef enum {
     FUTHARK_INT64 = 3,
     FUTHARK_FLOAT32 = 4,
     FUTHARK_FLOAT64 = 5,
-    FUTHARK_BOOL = 6
-} futhark_primtype;
+    FUTHARK_BOOL = 6,
 
-#define MAX_ELEM_ENUM 6
+    // Please add new types above this line -- we exploit that enums are just
+    // ints, and use this value to loop through all types we know.
+    FUTHARK_NUM_PRIMTYPES
+} primtype_t;
 
-const char *FUTHARK_PRIMTYPE_NAMES[] = {
-    "i8",
-    "i16",
-    "i32",
-    "i64",
-    "f32",
-    "f64",
-    "bool"
-};
-
-const int FUTHARK_PRIMTYPE_SIZES[] = {
-    1,
-    2,
-    4,
-    8,
-    4,
-    8,
-    1
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Little endian
@@ -107,23 +106,40 @@ static int read_is_binary() {
     return 0;
 }
 
-static void read_bin_ensure_scalar(int elem_enum) {
+static primtype_t read_bin_read_type_enum() {
+    char read_binname[4];
+
+    int num_matched = scanf("%4c", read_binname);
+    if (num_matched != 1) { panic(1, "binary-input: Couldn't read element type.\n"); }
+
+    for (int i=0; i<FUTHARK_NUM_PRIMTYPES; i++) {
+        // I compare the 4 characters manually instead of using strncmp because
+        // this allows any value to be used, also NULL bytes
+        if ( (read_binname[0] == FUTHARK_PRIMTYPES[i].binname[0]) &&
+             (read_binname[1] == FUTHARK_PRIMTYPES[i].binname[1]) &&
+             (read_binname[2] == FUTHARK_PRIMTYPES[i].binname[2]) &&
+             (read_binname[3] == FUTHARK_PRIMTYPES[i].binname[3]) ) {
+            return i;
+        }
+    }
+    panic(1, "binary-input: Did not recognize the type '%s'.\n", read_binname);
+}
+
+static void read_bin_ensure_scalar(primtype_t expected_type) {
     int8_t bin_dims;
     int ret = read_byte(&bin_dims);
     if (ret != 0) { panic(1, "binary-input: Couldn't get dims.\n"); }
-    if (bin_dims) {
-        panic(1, "binary-input: Expected scalar value, but got array.\n");
+
+    if (bin_dims != 0) {
+        panic(1, "binary-input: Expected scalar (0 dimensions), but got array with %i dimensions.\n",
+              bin_dims);
     }
 
-    uint8_t bin_elem_enum;
-    ret = read_byte(&bin_elem_enum);
-    if (ret != 0) { panic(1, "binary-input: Couldn't get elem_enum.\n"); }
-    if (bin_elem_enum > MAX_ELEM_ENUM) {
-        panic(1, "binary-input: Unkown elem_enum %i.\n", bin_elem_enum);
-    }
-    if (bin_elem_enum != elem_enum) {
+    primtype_t bin_type_enum = read_bin_read_type_enum();
+    if (bin_type_enum != expected_type) {
         panic(1, "binary-input: Expected scalar of type %s but got scalar of type %s.\n",
-              FUTHARK_PRIMTYPE_NAMES[elem_enum], FUTHARK_PRIMTYPE_NAMES[bin_elem_enum]);
+              FUTHARK_PRIMTYPES[expected_type].type_name,
+              FUTHARK_PRIMTYPES[bin_type_enum].type_name);
     }
 }
 
@@ -207,7 +223,7 @@ static int read_bool(void* dest) {
 // General array interface
 ////////////////////////////////////////////////////////////////////////////////
 
-static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(void*),
+static int read_array(primtype_t expected_type, int64_t elem_size, int (*elem_reader)(void*),
                       const char *type_name, void **data, int64_t *shape, int64_t dims) {
     if (!read_is_binary()) {
         return read_str_array(elem_size, elem_reader, type_name, data, shape, dims);
@@ -225,22 +241,16 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
               dims, bin_dims);
     }
 
-    uint8_t bin_elem_enum;
-    ret = read_byte(&bin_elem_enum);
-    if (ret != 0) { panic(1, "binary-input: Couldn't get elem_enum.\n"); }
-    if (bin_elem_enum > MAX_ELEM_ENUM) {
-        panic(1, "binary-input: Unkown elem_enum %i.\n", bin_elem_enum);
-    }
-    if (bin_elem_enum != elem_enum) {
-        panic(1, "binary-input: Expected array with type %s but got array with type %s.\n",
-              type_name, FUTHARK_PRIMTYPE_NAMES[bin_elem_enum]);
+    primtype_t bin_type_enum = read_bin_read_type_enum();
+    const primtype_info_t bin_primtype = FUTHARK_PRIMTYPES[bin_type_enum];
+    if (expected_type != bin_type_enum) {
+        panic(1, "binary-input: Expected %iD-array with element type '%s' but got %iD-array with element type '%s'.\n",
+              dims, FUTHARK_PRIMTYPES[expected_type].type_name, dims, bin_primtype.type_name);
     }
 
-    int expected_size = FUTHARK_PRIMTYPE_SIZES[elem_enum];
-    if (expected_size != elem_size) {
-        panic(1, "binary-input: Expected type %s used %i bytes per element, but call to `read_array` tell me that type %s uses %i bytes per element. Enum used is %i\n",
-              FUTHARK_PRIMTYPE_NAMES[elem_enum], FUTHARK_PRIMTYPE_SIZES[elem_enum],
-              type_name, elem_size, elem_enum);
+    if (elem_size != bin_primtype.size) {
+        panic(1, "binary-input: The RTS expected type %s to use %i bytes per element, but the call to `read_array` tells me to use %i bytes per element.\n",
+              bin_primtype.type_name, bin_primtype.size, elem_size);
     }
 
     int64_t elem_count = 1;
@@ -285,10 +295,4 @@ static int read_array(int64_t elem_enum, int64_t elem_size, int (*elem_reader)(v
     }
 
     return 0;
-
-    // TODO: Should consider adding a null byte to the end of all binary
-    // inputs. as a small way to make sure the binary input was actually
-    // supposed to end here
-
-    // Should document file format. And make a small test to see if it works ;)
 }

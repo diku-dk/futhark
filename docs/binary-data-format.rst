@@ -23,44 +23,41 @@ we mostly run our code on x86 hardware so this seemed like a reasonable choice.
 When reading input for an argument to the entry function, we need to be able to
 differentiate between text and binary input. If the first non-whitespace
 character of the input is a ``b`` we will parse this argument as binary,
-otherwise we will parse it in text format. Allowing precending whitespace
+otherwise we will parse it in text format. Allowing preceding whitespace
 characters makes it easy to use binary input for some arguments, and text input
 for others.
 
-The general format has 4 bytes as the header::
+The general format has this header::
 
-  b <version> <num_dims> <type_enum>
+  b <version> <num_dims> <type>
 
 Where ``version`` is the version of the binary format used for encoding
 (currently 1), ``num_dims`` is the number of dimensions in the array (0 for
-scalar), and ``type_enum`` is the enum value for the following primitive
-value(s).
+scalar), and ``type`` is a 4 characters describing the type of the values(s) --
+see below for more details.
 
 Encoding a scalar value is done by appending the binary little endian
 representation of it::
 
-  b <version> 0 <type_enum> <value>
+  b <version> 0 <type> <value>
 
 To encode an array we must encode the number of dimensions ``n`` as a single
 byte, each dimension ``dim_i`` as an ``int64``, and finally all the values in
 their binary little endian representation::
 
-  b <version> <n> <type_enum> <dim_1> <dim_2> ... <dim_n> <values>
+  b <version> <n> <type> <dim_1> <dim_2> ... <dim_n> <values>
 
 
-Enum Values
+Type Values
 ~~~~~~~~~~~
 
-Enum values are taken from ``src/Futhark/Representation/Primitive.hs``. As of
-today (Feb 2017), this is::
+The description of a type is a 4 character string. As of today (Feb 2017), the
+values used are::
 
-  fromEnum (IntType Int8)      = 0
-  fromEnum (IntType Int16)     = 1
-  fromEnum (IntType Int32)     = 2
-  fromEnum (IntType Int64)     = 3
-  fromEnum (FloatType Float32) = 4
-  fromEnum (FloatType Float64) = 5
-  fromEnum Bool                = 6
-  fromEnum Cert                = 7
-
-Certificates are not supported as input data.
+  "  i8"
+  " i16"
+  " i32"
+  " i64"
+  " f32"
+  " f64"
+  "bool"
