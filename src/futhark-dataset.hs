@@ -7,11 +7,15 @@ import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State
-import Data.Maybe
+import qualified Data.Binary as Bin (put)
+import Data.Binary.IEEE754
+import Data.Binary.Put
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.HashMap.Lazy as HM
 import Data.List
-import Data.Word
+import Data.Maybe
 import qualified Data.Text as T
+import Data.Word
 
 import Prelude
 
@@ -33,14 +37,24 @@ main = mainWithOptions initialDataOptions commandLineOptions f
         f _ _ =
           Nothing
 
+data BinaryOutputFormat = AllData
+                        | NoHeader
+                        | OnlyHeader
+                        deriving (Eq, Ord, Show)
+
+data OutputFormat = Text
+                  | Binary BinaryOutputFormat
+                  deriving (Eq, Ord, Show)
+
 data DataOptions = DataOptions
                    { optSeed :: Int
                    , optRange :: RandomConfiguration
                    , optOrders :: [StdGen -> IO ()]
+                   , format :: OutputFormat
                    }
 
 initialDataOptions :: DataOptions
-initialDataOptions = DataOptions 0 initialRandomConfiguration []
+initialDataOptions = DataOptions 0 initialRandomConfiguration [] Text
 
 commandLineOptions :: [FunOptDescr DataOptions]
 commandLineOptions = [
@@ -60,12 +74,28 @@ commandLineOptions = [
                   Right $ \config ->
                   config { optOrders =
                              optOrders config ++
-                             [g (optRange config)]
+                             [g (optRange config) (format config)]
                          }
                 Left err ->
                   Left $ error err)
      "TYPE")
     "Generate a random value of this type."
+  , Option [] ["text"]
+    (NoArg $ Right $ \opts ->
+        opts { format = Text })
+    "Output data in text format (must precede --generate)."
+  , Option "b" ["binary"]
+    (NoArg $ Right $ \opts ->
+        opts { format = Binary AllData })
+    "Output data in binary Futhark format (must precede --generate)."
+  , Option [] ["binary-no-header"]
+    (NoArg $ Right $ \opts ->
+        opts { format = Binary NoHeader })
+    "Output data in binary Futhark format without header (must precede --generate)."
+  , Option [] ["binary-only-header"]
+    (NoArg $ Right $ \opts ->
+        opts { format = Binary OnlyHeader })
+    "Only output binary Futhark format header for data (must precede --generate)."
   , setRangeOption "i8" seti8Range
   , setRangeOption "i16" seti16Range
   , setRangeOption "i32" seti32Range
@@ -97,12 +127,14 @@ setRangeOption tname set =
   "Range of " ++ tname ++ " values."
   where name = tname ++ "-bounds"
 
-tryMakeGenerator :: String -> Either String (RandomConfiguration -> StdGen -> IO ())
+tryMakeGenerator :: String -> Either String (RandomConfiguration -> OutputFormat -> StdGen  -> IO ())
 tryMakeGenerator t = do
   t' <- toSimpleType =<< either (Left . show) Right (parseType name (T.pack t))
-  return $ \conf stdgen -> do
+  return $ \conf fmt stdgen -> do
     let (v, _) = randomValue conf t' stdgen
-    printSimpleValue v
+    case fmt of
+      Text -> printSimpleValueT v
+      Binary binfmt -> printSimpleValueB binfmt t' v
   where name = "option " ++ t
 
 data SimpleType = SimpleArray SimpleType Int
@@ -130,8 +162,8 @@ data SimpleValue = SimpleArrayValue [SimpleValue]
 -- a bad idea for giant values.  This is likely because it tries to do
 -- a good job with respect to line wrapping and the like.  We opt to
 -- do a bad job instead, but one that we can do much faster.
-printSimpleValue :: SimpleValue -> IO ()
-printSimpleValue = (>>putStrLn "") . flip evalStateT 0 . p
+printSimpleValueT :: SimpleValue -> IO ()
+printSimpleValueT = (>>putStrLn "") . flip evalStateT 0 . p
   where elements_per_line = 20 :: Int
 
         p (SimplePrimValue v) = do
@@ -153,6 +185,60 @@ printSimpleValue = (>>putStrLn "") . flip evalStateT 0 . p
             then do lift $ putStrLn ""
                     put 0
             else put $ i + 1
+
+binaryFormatVersion :: Int
+binaryFormatVersion = 1
+
+printSimpleValueB :: BinaryOutputFormat -> SimpleType -> SimpleValue -> IO ()
+printSimpleValueB fmt st sv =
+  BL.putStr $ runPut $ printHeader () >> printData ()
+
+  where
+    printHeader _ | fmt == NoHeader = return ()
+    printHeader _ = do
+      Bin.put 'b'
+      putWord8 $ fromIntegral binaryFormatVersion
+      let dims = getDims st
+      putWord8 $ fromIntegral $ length dims
+      putElemType st
+      case sv of
+        SimplePrimValue _ -> return ()
+        SimpleArrayValue _ -> mapM_ (putWord64le . fromIntegral) dims
+
+    printData _ | fmt == OnlyHeader = return ()
+    printData _ = pSimpleValue sv
+
+    -- Simply calling @Bin.put (" i8" :: String)@ would cause a lot of bytes to
+    -- be written. Doing it this way will only write 4 bytes.
+    putElemType (SimplePrim (Signed Int8))  = mapM_ Bin.put ("  i8" :: String)
+    putElemType (SimplePrim (Signed Int16)) = mapM_ Bin.put (" i16" :: String)
+    putElemType (SimplePrim (Signed Int32)) = mapM_ Bin.put (" i32" :: String)
+    putElemType (SimplePrim (Signed Int64)) = mapM_ Bin.put (" i64" :: String)
+    putElemType (SimplePrim (FloatType Float32)) = mapM_ Bin.put (" f32" :: String)
+    putElemType (SimplePrim (FloatType Float64)) = mapM_ Bin.put (" f64" :: String)
+    putElemType (SimplePrim Bool) = mapM_ Bin.put ("bool" :: String)
+    putElemType (SimplePrim (Unsigned t)) = putElemType $ SimplePrim $ Signed t
+    putElemType (SimpleArray ty _) = putElemType ty
+
+    getDims (SimplePrim _) = []
+    getDims (SimpleArray ty dim) = dim : getDims ty
+
+    pSimpleValue :: SimpleValue -> Put
+    pSimpleValue (SimplePrimValue pv) = p pv
+    pSimpleValue (SimpleArrayValue svs) = mapM_ pSimpleValue svs
+
+    p :: PrimValue -> Put
+    p (SignedValue (Int8Value v))    = putWord8    $ fromIntegral $ fromEnum v
+    p (SignedValue (Int16Value v))   = putWord16le $ fromIntegral $ fromEnum v
+    p (SignedValue (Int32Value v))   = putWord32le $ fromIntegral $ fromEnum v
+    p (SignedValue (Int64Value v))   = putWord64le $ fromIntegral $ fromEnum v
+    p (UnsignedValue (Int8Value v))  = putWord8    $ fromIntegral $ fromEnum v
+    p (UnsignedValue (Int16Value v)) = putWord16le $ fromIntegral $ fromEnum v
+    p (UnsignedValue (Int32Value v)) = putWord32le $ fromIntegral $ fromEnum v
+    p (UnsignedValue (Int64Value v)) = putWord64le $ fromIntegral $ fromEnum v
+    p (FloatValue (Float32Value v))  = putFloat32le v
+    p (FloatValue (Float64Value v))  = putFloat64le v
+    p (BoolValue v)                  = putWord8 $ if v then 1 else 0
 
 -- | Closed interval, as in @System.Random@.
 type Range a = (a, a)

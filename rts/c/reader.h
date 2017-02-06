@@ -34,7 +34,7 @@ static void skipspaces() {
   }
 }
 
-static int read_elem(struct array_reader *reader) {
+static int read_str_elem(struct array_reader *reader) {
   int ret;
   if (reader->n_elems_used == reader->n_elems_space) {
     reader->n_elems_space *= 2;
@@ -51,7 +51,7 @@ static int read_elem(struct array_reader *reader) {
   return ret;
 }
 
-static int read_array_elems(struct array_reader *reader, int dims) {
+static int read_str_array_elems(struct array_reader *reader, int dims) {
   int c;
   int ret;
   int first = 1;
@@ -92,7 +92,7 @@ static int read_array_elems(struct array_reader *reader, int dims) {
         elems_read_in_dim[cur_dim] = 0;
       } else if (cur_dim == dims - 1) {
         ungetc(c, stdin);
-        ret = read_elem(reader);
+        ret = read_str_elem(reader);
         if (ret != 0) {
           break;
         }
@@ -114,7 +114,7 @@ static int read_array_elems(struct array_reader *reader, int dims) {
         elems_read_in_dim[cur_dim] = 0;
       } else {
         ungetc(c, stdin);
-        ret = read_elem(reader);
+        ret = read_str_elem(reader);
         if (ret != 0) {
           break;
         }
@@ -132,7 +132,7 @@ static int read_array_elems(struct array_reader *reader, int dims) {
   return ret;
 }
 
-static int read_empty_array(const char *type_name, int64_t *shape, int64_t dims) {
+static int read_str_empty_array(const char *type_name, int64_t *shape, int64_t dims) {
   char c;
   if (scanf("empty") == EOF) {
     return 1;
@@ -173,7 +173,7 @@ static int read_empty_array(const char *type_name, int64_t *shape, int64_t dims)
   return 0;
 }
 
-static int read_array(int64_t elem_size, int (*elem_reader)(void*),
+static int read_str_array(int64_t elem_size, int (*elem_reader)(void*),
                       const char *type_name,
                       void **data, int64_t *shape, int64_t dims) {
   int ret;
@@ -194,7 +194,7 @@ static int read_array(int64_t elem_size, int (*elem_reader)(void*),
   }
 
   if (read_dims == 0) {
-    return read_empty_array(type_name, shape, dims);
+    return read_str_empty_array(type_name, shape, dims);
   }
 
   if (read_dims != dims) {
@@ -208,14 +208,14 @@ static int read_array(int64_t elem_size, int (*elem_reader)(void*),
   reader.elems = (char*) realloc(*data, elem_size*reader.n_elems_space);
   reader.elem_reader = elem_reader;
 
-  ret = read_array_elems(&reader, dims);
+  ret = read_str_array_elems(&reader, dims);
 
   *data = reader.elems;
 
   return ret;
 }
 
-static int read_int8(void* dest) {
+static int read_str_int8(void* dest) {
   skipspaces();
   /* Some platforms (WINDOWS) does not support scanf %hhd or its
      cousin, %SCNi8.  Read into int first to avoid corrupting
@@ -232,7 +232,7 @@ static int read_int8(void* dest) {
   }
 }
 
-static int read_int16(void* dest) {
+static int read_str_int16(void* dest) {
   skipspaces();
   if (scanf("%"SCNi16, (int16_t*)dest) == 1) {
     scanf("i16");
@@ -242,7 +242,7 @@ static int read_int16(void* dest) {
   }
 }
 
-static int read_int32(void* dest) {
+static int read_str_int32(void* dest) {
   skipspaces();
   if (scanf("%"SCNi32, (int32_t*)dest) == 1) {
     scanf("i32");
@@ -252,7 +252,7 @@ static int read_int32(void* dest) {
   }
 }
 
-static int read_int64(void* dest) {
+static int read_str_int64(void* dest) {
   skipspaces();
   if (scanf("%"SCNi64, (int64_t*)dest) == 1) {
     scanf("i64");
@@ -262,26 +262,7 @@ static int read_int64(void* dest) {
   }
 }
 
-static int read_char(void* dest) {
-  skipspaces();
-  if (scanf("%c", (char*)dest) == 1) {
-    return 0;
-  } else {
-    return 1;
-  }
-}
-
-static int read_double(void* dest) {
-  skipspaces();
-  if (scanf("%lf", (double*)dest) == 1) {
-    scanf("f64");
-    return next_is_not_constituent() ? 0 : 1;
-  } else {
-    return 1;
-  }
-}
-
-static int read_float(void* dest) {
+static int read_str_float(void* dest) {
   skipspaces();
   if (scanf("%f", (float*)dest) == 1) {
     scanf("f32");
@@ -291,7 +272,17 @@ static int read_float(void* dest) {
   }
 }
 
-static int read_bool(void* dest) {
+static int read_str_double(void* dest) {
+  skipspaces();
+  if (scanf("%lf", (double*)dest) == 1) {
+    scanf("f64");
+    return next_is_not_constituent() ? 0 : 1;
+  } else {
+    return 1;
+  }
+}
+
+static int read_str_bool(void* dest) {
   /* This is a monstrous hack.  Maybe we should get a proper lexer in here. */
   char b[4];
   skipspaces();
