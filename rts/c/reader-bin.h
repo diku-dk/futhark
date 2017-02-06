@@ -269,28 +269,24 @@ static int read_array(primtype_t expected_type, int64_t elem_size, int (*elem_re
     }
     *data = tmp;
 
-    if (IS_BIG_ENDIAN && elem_size != 1) {
-        switch (elem_size) {
-        case 2: { elem_reader = &read_be_2byte; break; }
-        case 4: { elem_reader = &read_be_4byte; break; }
-        case 8: { elem_reader = &read_be_8byte; break; }
-        default:
-            panic(1, "binary-input: Currently can't read element of size %i bytes on big endian platform.\n",
-                  elem_size);
-            break;
-        }
+    size_t num_elems_read = fread(*data, elem_size, elem_count, stdin);
+    if (num_elems_read != elem_count) {
+        panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
+              elem_count, num_elems_read);
+    }
 
-        char* datac = (char*) *data;
-        for(uint64_t i=0; i<elem_count; i++){
-            ret = elem_reader(datac);
-            if (ret != 0) { panic(1, "binary-input: error reading element %i.\n", i); }
-            datac += elem_size;
-        }
-    } else {
-        size_t num_elems_read = fread(*data, elem_size, elem_count, stdin);
-        if (num_elems_read != elem_count) {
-            panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
-                  elem_count, num_elems_read);
+    // If we're on big endian platform we must change all multibyte elements
+    // from using little endian to big endian
+    if (IS_BIG_ENDIAN && elem_size != 1) {
+        char* elems = (char*) *data;
+        for (uint64_t i=0; i<elem_count; i++) {
+            char* elem = elems+(i*elem_size);
+            for (int j=0; j<elem_size/2; j++) {
+                char head = elem[j];
+                int tail_index = elem_size-1-j;
+                elem[j] = elem[tail_index];
+                elem[tail_index] = head;
+            }
         }
     }
 
