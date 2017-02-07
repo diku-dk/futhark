@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, TypeSynonymInstances #-}
 -- | Expand allocations inside of maps when possible.
 module Futhark.Optimise.CoalesceKernels
        ( coalesceKernels )
@@ -17,6 +17,7 @@ import Data.List
 import Prelude hiding (div, quot)
 
 import Futhark.Binder
+import Futhark.Construct
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Substitute
@@ -39,7 +40,29 @@ coalesceKernels = simplePass
                     "Coalesce Memory Access in Kernels" $
                     intraproceduralTransformation transformFunDef
 
-type CoalesceM = Binder ExplicitMemory
+type CoalesceM = StateT (Scope ExplicitMemory) (State VNameSource)
+
+instance MonadFreshNames (CoalesceM) where
+  getNameSource = get
+  putNameSource = put
+
+{- instance HasScope (CoalesceM a) where -}
+  {- askScope = lift . get -}
+{-  -}
+{- instance LocalScope (CoalesceM a) where -}
+  {- localScope more_scope m = do -}
+    {- old_scope <- get -}
+    {- modify (`HM.union` more_scope) -}
+    {- x <- m -}
+    {- put old_scope -}
+    {- return x -}
+{-  -}
+{- instance MonadBinder (CoalesceM) where -}
+  {- mkLetM pat exp = return $ Let pat () exp -}
+  {- mkBodyM stms result = return $ Body () stms result -}
+  {- mkLetNamesM = undefined  -}
+  {- addStm undefined = undefined -}
+  {- collectStms m = undefined -}
 
 -- AST plumbing-- {{{
 transformFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
@@ -146,7 +169,7 @@ filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
 
 -- }}}
 
--- Applying a strategy, generating bindings and transforming indexings-- {{{
+-- Applying a strategy, generating bindings and transforming indexings
 -- Applies a strategy to a kernel body. Returns new bindings for transposed arrays and a new 
 -- body with all indexes modified to fit the new array shapes.
 applyTransposes :: KernelBody InKernel 
@@ -177,23 +200,27 @@ applyTransposes kbody tmap = do
           attr = ArrayMem ptype shape NoUniqueness memname ixfun
 
           copy = Let (Pattern [] [PatElem arrname BindVar attr]) () $ BasicOp $ Copy arr
-      alloc <- makeAlloc arr memname
-      return [alloc, copy]
+      allocs <- makeAlloc arr memname
+      return $ allocs ++ [copy]
 
+    makeAlloc :: VName -> VName -> CoalesceM [Stm ExplicitMemory]
     makeAlloc arr memname = do
       (_, ixfun) <- lookupArraySummary arr
-      {- sizeName <- newNameFromString $ baseString arr ++ "_size" -}
-      {- sizeBnd <- makeSizeBnd sizeName (foldr (*) 1 $ IxFun.shape ixfun) -}
+      sizeName <- newNameFromString $ baseString arr ++ "_size"
+      sizeBnd <- makeSizeBnd sizeName (foldr (*) 1 $ IxFun.shape ixfun)
       let size = foldr (*) 1 $ IxFun.shape ixfun
-      {- let size = Constant $ IntValue $ Int32Value 1000 -}
-          attr = MemMem (size) DefaultSpace
+          attr = MemMem (Var sizeName) DefaultSpace
           pat = Pattern [] [PatElem memname BindVar attr]
-      return $ Let pat () (Op (Alloc (size) DefaultSpace))
+          allocBind = Let pat () $ Op (Alloc (Var sizeName) DefaultSpace)
+      return [sizeBnd, allocBind] 
 
-    {- makeSizeBnd name p_exp = do -}
-      {- value <- toExp p_exp -}
-      {- let attr = Scalar int32 -}
-      {- return $ Let (Pattern [] [PatElem name BindVar attr]) () exp -}
+    makeSizeBnd :: VName -> PrimExp VName -> CoalesceM (Stm ExplicitMemory)
+    makeSizeBnd name p_exp = do
+      value <- primExpToExp mkExp p_exp
+      let attr = Scalar int32
+      exp <- toExp p_exp
+      return $ Let (Pattern [] [PatElem name BindVar attr]) () exp
+      where mkExp = Inner . BasicOp . SubExp . Var
 
     rotateType i (Array ptype (Shape dims) u) = Array ptype (Shape (shiftIn dims i)) u
     rotateType _  _                      = error $ "CoalesceKernels: rotateType"
@@ -202,6 +229,8 @@ applyTransposes kbody tmap = do
       (mem, _) <- lookupArraySummary arr
       return [(arr, newname), (mem, memname)]
 
+-- Permutation functions-- {{{
+-- Applies the strategy of interchanging on the kernels parallel variables.
 
 -- Shifts an element at index i to the last spot in a list
 shiftIn :: [a] -> Int -> [a]
@@ -210,11 +239,6 @@ shiftIn xs i
                              ++ pretty (length xs)
                              ++ " and index " ++ pretty i
   | otherwise      = take i xs ++ drop (i+1) xs ++ [xs !! i]
-  
--- }}}
-
--- Permutation functions-- {{{
--- Applies the strategy of interchanging on the kernels parallel variables.
 
 rotateSpace :: Interchange -> SpaceStructure -> Maybe SpaceStructure 
 rotateSpace (Just v, _) (FlatSpace dims) = 
