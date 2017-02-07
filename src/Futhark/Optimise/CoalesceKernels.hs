@@ -1,4 +1,5 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, TypeSynonymInstances #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- | Expand allocations inside of maps when possible.
 module Futhark.Optimise.CoalesceKernels
        ( coalesceKernels )
@@ -42,32 +43,35 @@ coalesceKernels = simplePass
 
 type CoalesceM = StateT (Scope ExplicitMemory) (State VNameSource)
 
-instance MonadFreshNames (CoalesceM) where
-  getNameSource = get
-  putNameSource = put
+runCoalesceM m scope = modifyNameSource $ runState $ runStateT m scope 
 
-{- instance HasScope (CoalesceM a) where -}
-  {- askScope = lift . get -}
-{-  -}
-{- instance LocalScope (CoalesceM a) where -}
-  {- localScope more_scope m = do -}
-    {- old_scope <- get -}
-    {- modify (`HM.union` more_scope) -}
-    {- x <- m -}
-    {- put old_scope -}
-    {- return x -}
-{-  -}
-{- instance MonadBinder (CoalesceM) where -}
-  {- mkLetM pat exp = return $ Let pat () exp -}
-  {- mkBodyM stms result = return $ Body () stms result -}
-  {- mkLetNamesM = undefined  -}
-  {- addStm undefined = undefined -}
-  {- collectStms m = undefined -}
+instance MonadFreshNames CoalesceM where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance HasScope ExplicitMemory CoalesceM where
+  askScope = get
+
+instance LocalScope ExplicitMemory CoalesceM where
+  localScope more_scope m = do
+    old_scope <- get
+    modify (`HM.union` more_scope)
+    x <- m
+    put old_scope
+    return x
+
+instance MonadBinder CoalesceM where
+  type Lore CoalesceM = ExplicitMemory
+  mkLetM pat exp = return $ Let pat () exp
+  mkBodyM stms result = return $ Body () stms result
+  mkLetNamesM = undefined
+  addStm _ = undefined
+  collectStms m = undefined
 
 -- AST plumbing-- {{{
 transformFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
 transformFunDef fundec = do
-  (body', _) <- modifyNameSource $ runState (runBinderT m HM.empty)
+  (body', _) <- runCoalesceM m HM.empty
   return fundec { funDefBody = body' }
   where m = inScopeOf fundec $ 
             transformBody $ funDefBody fundec
@@ -121,7 +125,7 @@ filterIndexes :: Kernel InKernel -> [Access]
 filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
   where
     m = fmap concat . mapM checkStm $ kernelBodyStms kbody
-    init_variance = HM.fromList $ map (\v -> (v, HS.singleton v)) . map fst $ spaceDimensions space
+    init_variance = HM.fromList $ map ((\v -> (v, HS.singleton v)) . fst) $ spaceDimensions space
 
     checkBody :: Body InKernel -> VarianceM [Access]
     checkBody = fmap concat . mapM checkStm . bodyStms
@@ -129,7 +133,7 @@ filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
     checkStm :: Stm InKernel -> VarianceM [Access]
     checkStm (Let pat () (BasicOp b@BinOp{}))   = processBinOp (patternNames pat) b >> return []
     checkStm (Let pat () (BasicOp i@Index{}))
-      | not (Prim Cert `elem` patternTypes pat) = processIndex i -- We filter the bound checks out. Only real indexes in our analysis!
+      | Prim Cert `notElem` patternTypes pat = processIndex i -- We filter the bound checks out.
     checkStm (Let _ () e) = foldExpM folder [] e
 
     folder = identityFolder { foldOnBody = \a body -> (a ++) <$> checkBody body }
@@ -142,7 +146,6 @@ filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
         checkDim :: DimIndex SubExp -> VarianceM Names
         checkDim (DimFix e)       = checkSubExp e
         checkDim (DimSlice e1 e2) = HS.union <$> checkSubExp e1 <*> checkSubExp e2
-
 
     processBinOp :: [VName] -> BasicOp InKernel -> VarianceM ()
     processBinOp [var] (BinOp (Add _) s1 s2) = processSubExps var s1 s2
@@ -175,59 +178,63 @@ filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
 applyTransposes :: KernelBody InKernel 
                 -> TransposeMap      -- arr name to index to be pushed in
                 -> CoalesceM ([Stm ExplicitMemory], KernelBody InKernel)
-applyTransposes kbody tmap = do
-  arrmap <- sequence $ HM.mapWithKey (\k _ -> makeNames k) tmap
-  bnds   <- fmap concat $ mapM makeBnds $ HM.toList arrmap
-
-  substs <- fmap (HM.fromList . concat) . sequence $ HM.mapWithKey oneSubst arrmap
-
-  let kbody' = kbody { kernelBodyStms = map (substituteNames substs) $ kernelBodyStms kbody }
-  return (bnds, kbody')
-  where
-    makeNames k = do
-      arr_name <- newNameFromString $ baseString k ++ "_transpose"
-      mem_name <- newNameFromString $ baseString k ++ "_mem"
-      return (arr_name, mem_name)
-  
-    makeBnds :: (VName, (VName, VName)) -> CoalesceM [Stm ExplicitMemory]
-    makeBnds (arr, (arrname, memname)) = do
-      old_type <- lookupType arr
-      let i  = fromMaybe (error $ "CoalesceKernels: Somehow " ++ pretty arr ++ " is not in tmap") $ HM.lookup arr tmap
-          t@(Array ptype shape _) = rotateType i old_type
-
-          permutation  = makePerm (length $ arrayDims t) i
-          ixfun = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t) permutation
-          attr = ArrayMem ptype shape NoUniqueness memname ixfun
-
-          copy = Let (Pattern [] [PatElem arrname BindVar attr]) () $ BasicOp $ Copy arr
-      allocs <- makeAlloc arr memname
-      return $ allocs ++ [copy]
-
-    makeAlloc :: VName -> VName -> CoalesceM [Stm ExplicitMemory]
-    makeAlloc arr memname = do
-      (_, ixfun) <- lookupArraySummary arr
-      sizeName <- newNameFromString $ baseString arr ++ "_size"
-      sizeBnd <- makeSizeBnd sizeName (foldr (*) 1 $ IxFun.shape ixfun)
-      let size = foldr (*) 1 $ IxFun.shape ixfun
-          attr = MemMem (Var sizeName) DefaultSpace
-          pat = Pattern [] [PatElem memname BindVar attr]
-          allocBind = Let pat () $ Op (Alloc (Var sizeName) DefaultSpace)
-      return [sizeBnd, allocBind] 
-
-    makeSizeBnd :: VName -> PrimExp VName -> CoalesceM (Stm ExplicitMemory)
-    makeSizeBnd name p_exp = do
-      value <- primExpToExp mkExp p_exp
-      let attr = Scalar int32
-      exp <- toExp p_exp
-      return $ Let (Pattern [] [PatElem name BindVar attr]) () exp
-      where mkExp = Inner . BasicOp . SubExp . Var
-
-    rotateType i (Array ptype (Shape dims) u) = Array ptype (Shape (shiftIn dims i)) u
-    rotateType _  _                      = error $ "CoalesceKernels: rotateType"
-
-    oneSubst arr (newname, memname) = do
-      (mem, _) <- lookupArraySummary arr
-      return [(arr, newname), (mem, memname)]
+applyTransposes kbody tmap = error "HI" {- do -}
+  {- arrmap <- sequence $ HM.mapWithKey (\k _ -> makeNames k) tmap -}
+  {- bnds   <- fmap concat $ mapM makeBnds $ HM.toList arrmap -}
+{-  -}
+  {- substs <- fmap (HM.fromList . concat) . sequence $ HM.mapWithKey oneSubst arrmap -}
+{-  -}
+  {- let kbody' = kbody { kernelBodyStms = map (substituteNames substs) $ kernelBodyStms kbody } -}
+  {- return (bnds, kbody') -}
+  {- where -}
+    {- makeNames k = do -}
+      {- arr_name <- newNameFromString $ baseString k ++ "_transpose" -}
+      {- mem_name <- newNameFromString $ baseString k ++ "_mem" -}
+      {- return (arr_name, mem_name) -}
+  {-  -}
+    {- makeBnds :: (VName, (VName, VName)) -> CoalesceM [Stm ExplicitMemory] -}
+    {- makeBnds (arr, (arrname, memname)) = do -}
+      {- old_type <- lookupType arr -}
+      {- let i  = fromMaybe (error $ "CoalesceKernels: Somehow " ++ pretty arr ++ " is not in tmap") $ HM.lookup arr tmap -}
+          {- t@(Array ptype shape _) = rotateType i old_type -}
+{-  -}
+          {- permutation  = makePerm (length $ arrayDims t) i -}
+          {- ixfun = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t) permutation -}
+          {- attr = ArrayMem ptype shape NoUniqueness memname ixfun -}
+{-  -}
+          {- copy = Let (Pattern [] [PatElem arrname BindVar attr]) () $ BasicOp $ Copy arr -}
+      {- allocs <- makeAlloc arr memname -}
+      {- return $ allocs ++ [copy] -}
+{-  -}
+    {- makeAlloc :: VName -> VName -> CoalesceM [Stm ExplicitMemory] -}
+    {- makeAlloc arr memname = do -}
+      {- (_, ixfun) <- lookupArraySummary arr -}
+      {- sizeName <- newNameFromString $ baseString arr ++ "_size" -}
+      {- sizeBnd <- makeSizeBnd sizeName (product $ IxFun.shape ixfun) -}
+      {- let size = product $ IxFun.shape ixfun -}
+          {- attr = MemMem (Var sizeName) DefaultSpace -}
+          {- pat = Pattern [] [PatElem memname BindVar attr] -}
+          {- allocBind = Let pat () $ Op (Alloc (Var sizeName) DefaultSpace) -}
+      {- return [sizeBnd, allocBind]  -}
+{-  -}
+    {- makeSizeBnd :: VName -> PrimExp VName -> CoalesceM (Stm ExplicitMemory) -}
+    {- makeSizeBnd name p_exp = do -}
+      {- {- value <- primExpToExp mkExp p_exp -} -}
+      {- let value = BasicOp . SubExp . Constant . IntValue . Int32Value $ 1000 -}
+      {- {- exp <- toExp p_exp -} -}
+      {- return $ Let (Pattern [] [PatElem name BindVar attr]) () value -}
+      {- where  -}
+        {- attr = Scalar int32 -}
+{-  -}
+        {- mkExp :: VName -> CoalesceM (Exp ExplicitMemory) -}
+        {- mkExp var = return . BasicOp . SubExp . Var $ var -}
+{-  -}
+    {- rotateType i (Array ptype (Shape dims) u) = Array ptype (Shape (shiftIn dims i)) u -}
+    {- rotateType _  _                      = error "CoalesceKernels: rotateType" -}
+{-  -}
+    {- oneSubst arr (newname, memname) = do -}
+      {- (mem, _) <- lookupArraySummary arr -}
+      {- return [(arr, newname), (mem, memname)] -}
 
 -- Permutation functions-- {{{
 -- Applies the strategy of interchanging on the kernels parallel variables.
