@@ -63,9 +63,22 @@ instance MonadBinder CoalesceM where
   type Lore CoalesceM = ExplicitMemory
   mkLetM pat exp = return $ Let pat () exp
   mkBodyM stms result = return $ Body () stms result
-  mkLetNamesM = undefined
+
+  mkLetNamesM xs expr = do
+    let p_elems = map onePat xs
+        pat = Pattern [] p_elems
+    return $ Let pat () expr
+
   addStm _ = undefined
   collectStms _ = undefined
+
+-- HACK HACK HACK
+-- Just assume that we are binding a variable
+makePat xs = undefined
+
+onePat :: (VName, Bindage) -> PatElem ExplicitMemory
+onePat (name, BindVar) = PatElem name BindVar (Scalar $ IntType Int32)
+onePat _ = error "hi"
 
 -- AST plumbing-- {{{
 transformFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
@@ -207,7 +220,7 @@ applyTransposes kbody tmap = do
     makeAlloc arr memname = do
       (_, ixfun) <- lookupArraySummary arr
       sizeName   <- newNameFromString $ baseString arr ++ "_size"
-      let size   =  product (IxFun.shape ixfun) * 8
+      let size   =  product (IxFun.shape ixfun)
       sizeBnd    <- makeSizeBnd sizeName size
       let attr      = MemMem (Var sizeName) DefaultSpace
           pat       = Pattern [] [PatElem memname BindVar attr]
