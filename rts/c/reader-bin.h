@@ -177,7 +177,7 @@ static int read_int32(void* dest) {
 
 static int read_int64(void* dest) {
     if (read_is_binary()) {
-                read_bin_ensure_scalar(FUTHARK_INT64);
+        read_bin_ensure_scalar(FUTHARK_INT64);
         if (IS_BIG_ENDIAN) {
             return read_be_8byte(dest);
         } else {
@@ -200,8 +200,8 @@ static int read_float(void* dest) {
 }
 
 static int read_double(void* dest) {
-    read_bin_ensure_scalar(FUTHARK_FLOAT64);
     if (read_is_binary()) {
+        read_bin_ensure_scalar(FUTHARK_FLOAT64);
         if (IS_BIG_ENDIAN) {
             return read_be_8byte(dest);
         } else {
