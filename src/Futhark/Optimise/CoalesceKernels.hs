@@ -18,7 +18,6 @@ import Data.List
 import Prelude hiding (div, quot)
 
 import Futhark.Binder
-import Futhark.Construct
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Substitute
@@ -66,7 +65,7 @@ instance MonadBinder CoalesceM where
   mkBodyM stms result = return $ Body () stms result
   mkLetNamesM = undefined
   addStm _ = undefined
-  collectStms m = undefined
+  collectStms _ = undefined
 
 -- AST plumbing-- {{{
 transformFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
@@ -178,68 +177,60 @@ filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
 applyTransposes :: KernelBody InKernel 
                 -> TransposeMap      -- arr name to index to be pushed in
                 -> CoalesceM ([Stm ExplicitMemory], KernelBody InKernel)
-applyTransposes kbody tmap = error "HI" {- do -}
-  {- arrmap <- sequence $ HM.mapWithKey (\k _ -> makeNames k) tmap -}
-  {- bnds   <- fmap concat $ mapM makeBnds $ HM.toList arrmap -}
-{-  -}
-  {- substs <- fmap (HM.fromList . concat) . sequence $ HM.mapWithKey oneSubst arrmap -}
-{-  -}
-  {- let kbody' = kbody { kernelBodyStms = map (substituteNames substs) $ kernelBodyStms kbody } -}
-  {- return (bnds, kbody') -}
-  {- where -}
-    {- makeNames k = do -}
-      {- arr_name <- newNameFromString $ baseString k ++ "_transpose" -}
-      {- mem_name <- newNameFromString $ baseString k ++ "_mem" -}
-      {- return (arr_name, mem_name) -}
-  {-  -}
-    {- makeBnds :: (VName, (VName, VName)) -> CoalesceM [Stm ExplicitMemory] -}
-    {- makeBnds (arr, (arrname, memname)) = do -}
-      {- old_type <- lookupType arr -}
-      {- let i  = fromMaybe (error $ "CoalesceKernels: Somehow " ++ pretty arr ++ " is not in tmap") $ HM.lookup arr tmap -}
-          {- t@(Array ptype shape _) = rotateType i old_type -}
-{-  -}
-          {- permutation  = makePerm (length $ arrayDims t) i -}
-          {- ixfun = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t) permutation -}
-          {- attr = ArrayMem ptype shape NoUniqueness memname ixfun -}
-{-  -}
-          {- copy = Let (Pattern [] [PatElem arrname BindVar attr]) () $ BasicOp $ Copy arr -}
-      {- allocs <- makeAlloc arr memname -}
-      {- return $ allocs ++ [copy] -}
-{-  -}
-    {- makeAlloc :: VName -> VName -> CoalesceM [Stm ExplicitMemory] -}
-    {- makeAlloc arr memname = do -}
-      {- (_, ixfun) <- lookupArraySummary arr -}
-      {- sizeName <- newNameFromString $ baseString arr ++ "_size" -}
-      {- sizeBnd <- makeSizeBnd sizeName (product $ IxFun.shape ixfun) -}
-      {- let size = product $ IxFun.shape ixfun -}
-          {- attr = MemMem (Var sizeName) DefaultSpace -}
-          {- pat = Pattern [] [PatElem memname BindVar attr] -}
-          {- allocBind = Let pat () $ Op (Alloc (Var sizeName) DefaultSpace) -}
-      {- return [sizeBnd, allocBind]  -}
-{-  -}
-    {- makeSizeBnd :: VName -> PrimExp VName -> CoalesceM (Stm ExplicitMemory) -}
-    {- makeSizeBnd name p_exp = do -}
-      {- {- value <- primExpToExp mkExp p_exp -} -}
-      {- let value = BasicOp . SubExp . Constant . IntValue . Int32Value $ 1000 -}
-      {- {- exp <- toExp p_exp -} -}
-      {- return $ Let (Pattern [] [PatElem name BindVar attr]) () value -}
-      {- where  -}
-        {- attr = Scalar int32 -}
-{-  -}
-        {- mkExp :: VName -> CoalesceM (Exp ExplicitMemory) -}
-        {- mkExp var = return . BasicOp . SubExp . Var $ var -}
-{-  -}
-    {- rotateType i (Array ptype (Shape dims) u) = Array ptype (Shape (shiftIn dims i)) u -}
-    {- rotateType _  _                      = error "CoalesceKernels: rotateType" -}
-{-  -}
-    {- oneSubst arr (newname, memname) = do -}
-      {- (mem, _) <- lookupArraySummary arr -}
-      {- return [(arr, newname), (mem, memname)] -}
+applyTransposes kbody tmap = do
+  arrmap <- sequence $ HM.mapWithKey (\k _ -> makeNames k) tmap
+  bnds   <- fmap concat $ mapM makeBnds $ HM.toList arrmap
+  substs <- fmap (HM.fromList . concat) . sequence $ HM.mapWithKey oneSubst arrmap
+  let kbody' = kbody { kernelBodyStms = map (substituteNames substs) $ kernelBodyStms kbody }
+  return (bnds, kbody')
+  where
+    makeNames k = do
+      arr_name <- newNameFromString $ baseString k ++ "_transpose"
+      mem_name <- newNameFromString $ baseString k ++ "_mem"
+      return (arr_name, mem_name)
+
+    makeBnds :: (VName, (VName, VName)) -> CoalesceM [Stm ExplicitMemory]
+    makeBnds (arr, (arrname, memname)) = do
+      old_type <- lookupType arr
+      let i                       = fromMaybe (error $ "CoalesceKernels: Somehow " ++ pretty arr ++ " is not in tmap") $ HM.lookup arr tmap
+          t@(Array ptype shape _) = rotateType i old_type
+
+          permutation             = makePerm (length $ arrayDims t) i
+          ixfun                   = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t) permutation
+          attr                    = ArrayMem ptype shape NoUniqueness memname ixfun
+
+          copy                    = Let (Pattern [] [PatElem arrname BindVar attr]) () $ BasicOp $ Copy arr
+      allocs <- makeAlloc arr memname
+      return $ allocs ++ [copy]
+
+    makeAlloc :: VName -> VName -> CoalesceM [Stm ExplicitMemory]
+    makeAlloc arr memname = do
+      (_, ixfun) <- lookupArraySummary arr
+      sizeName   <- newNameFromString $ baseString arr ++ "_size"
+      sizeBnd    <- makeSizeBnd sizeName (product $ IxFun.shape ixfun)
+      let attr      = MemMem (Var sizeName) DefaultSpace
+          pat       = Pattern [] [PatElem memname BindVar attr]
+          allocBind = Let pat () $ Op (Alloc (Var sizeName) DefaultSpace)
+      return [sizeBnd, allocBind]
+
+    makeSizeBnd :: VName -> PrimExp VName -> CoalesceM (Stm ExplicitMemory)
+    makeSizeBnd name p_exp = do
+      let mkExp = return . BasicOp . SubExp . Var
+      expr <- primExpToExp mkExp p_exp
+      return $ Let (Pattern [] [PatElem name BindVar (Scalar int32)]) () expr
+
+    rotateType i (Array ptype (Shape dims) u) = Array ptype (Shape (shiftIn dims i)) u
+    rotateType _  _                           = error "CoalesceKernels: rotateType"
+
+    oneSubst arr (newname, memname) = do
+      (mem, _) <- lookupArraySummary arr
+      return [(arr, newname), (mem, memname)]
 
 -- Permutation functions-- {{{
 -- Applies the strategy of interchanging on the kernels parallel variables.
 
 -- Shifts an element at index i to the last spot in a list
+
 shiftIn :: [a] -> Int -> [a]
 shiftIn xs i
   | i >= length xs = error $ "CoalesceKernels: ille gal permutation, length "
