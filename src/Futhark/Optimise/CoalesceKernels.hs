@@ -144,7 +144,7 @@ filterIndexes (Kernel _ _ space _ kbody) = evalState m init_variance
       where 
         checkDim :: DimIndex SubExp -> VarianceM Names
         checkDim (DimFix e)       = checkSubExp e
-        checkDim (DimSlice e1 e2) = HS.union <$> checkSubExp e1 <*> checkSubExp e2
+        checkDim (DimSlice _ e1 e2) = HS.union <$> checkSubExp e1 <*> checkSubExp e2
 
     processBinOp :: [VName] -> BasicOp InKernel -> VarianceM ()
     processBinOp [var] (BinOp (Add _) s1 s2) = processSubExps var s1 s2
@@ -238,13 +238,19 @@ shiftIn xs i
   | otherwise      = take i xs ++ drop (i+1) xs ++ [xs !! i]
 
 rotateSpace :: Interchange -> SpaceStructure -> Maybe SpaceStructure 
-rotateSpace (Just v, _) (FlatSpace dims) = 
+rotateSpace (Just v, _) (FlatThreadSpace dims) = 
   case lookup v dims of
-    Just t  -> Just . FlatSpace . reverse . nub $ (v,t) : dims
+    Just t  -> Just . FlatThreadSpace . reverse . nub $ (v,t) : dims
+    Nothing -> Nothing
+rotateSpace (Just v, _) (FlatGroupSpace dims) = 
+  case lookup v dims of
+    Just t  -> Just . FlatGroupSpace . reverse . nub $ (v,t) : dims
     Nothing -> Nothing
 
-rotateSpace (_, vs) (FlatSpace dims) =
-  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatSpace . reverse $ ins ++ outs
+rotateSpace (_, vs) (FlatThreadSpace dims) =
+  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatThreadSpace . reverse $ ins ++ outs
+rotateSpace (_, vs) (FlatGroupSpace dims) =
+  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatGroupSpace . reverse $ ins ++ outs
 
 rotateSpace _ struct = Just struct -- I dunno yet.
 

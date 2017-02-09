@@ -109,7 +109,7 @@ gpuPipeline mode =
   passes [ simplifyExplicitMemory
          , performCSE False
          , simplifyExplicitMemory
-         {- , coalesceKernels -}
+         , coalesceKernels
          {- , simplifyExplicitMemory -}
          {- , doubleBuffer -}
          {- , simplifyExplicitMemory -}
