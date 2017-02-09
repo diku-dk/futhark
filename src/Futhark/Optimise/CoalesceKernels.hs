@@ -226,11 +226,10 @@ applyTransposes kbody tmap = do
       (mem, _) <- lookupArraySummary arr
       return [(arr, newname), (mem, memname)]
 
--- Permutation functions-- {{{
--- Applies the strategy of interchanging on the kernels parallel variables.
+--Permutation functions-- {{{
+--Applies the strategy of interchanging on the kernels parallel variables.
 
--- Shifts an element at index i to the last spot in a list
-
+--Shifts an element at index i to the last spot in a list
 shiftIn :: [a] -> Int -> [a]
 shiftIn xs i
   | i >= length xs = error $ "CoalesceKernels: ille gal permutation, length "
