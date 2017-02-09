@@ -207,7 +207,8 @@ applyTransposes kbody tmap = do
     makeAlloc arr memname = do
       (_, ixfun) <- lookupArraySummary arr
       sizeName   <- newNameFromString $ baseString arr ++ "_size"
-      sizeBnd    <- makeSizeBnd sizeName (product $ IxFun.shape ixfun)
+      let size   =  product (IxFun.shape ixfun) * 8
+      sizeBnd    <- makeSizeBnd sizeName size
       let attr      = MemMem (Var sizeName) DefaultSpace
           pat       = Pattern [] [PatElem memname BindVar attr]
           allocBind = Let pat () $ Op (Alloc (Var sizeName) DefaultSpace)
@@ -240,17 +241,17 @@ shiftIn xs i
 rotateSpace :: Interchange -> SpaceStructure -> Maybe SpaceStructure 
 rotateSpace (Just v, _) (FlatThreadSpace dims) = 
   case lookup v dims of
-    Just t  -> Just . FlatThreadSpace . reverse . nub $ (v,t) : dims
+    Just t  -> Just . FlatThreadSpace . nub $ (v,t) : dims
     Nothing -> Nothing
 rotateSpace (Just v, _) (FlatGroupSpace dims) = 
   case lookup v dims of
-    Just t  -> Just . FlatGroupSpace . reverse . nub $ (v,t) : dims
+    Just t  -> Just . FlatGroupSpace . nub $ (v,t) : dims
     Nothing -> Nothing
 
 rotateSpace (_, vs) (FlatThreadSpace dims) =
-  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatThreadSpace . reverse $ ins ++ outs
+  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatThreadSpace  $ ins ++ outs
 rotateSpace (_, vs) (FlatGroupSpace dims) =
-  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatGroupSpace . reverse $ ins ++ outs
+  let (ins, outs) = partition ((`elem` vs) . fst) dims in Just . FlatGroupSpace  $ ins ++ outs
 
 rotateSpace _ struct = Just struct -- I dunno yet.
 
@@ -262,6 +263,6 @@ rotateSpace _ struct = Just struct -- I dunno yet.
   {- where rest = deleteFirstsBy (==) vs os -}
 
 makePerm :: Int -> Int -> [Int]
-makePerm len = reverse . shiftIn [0.. len - 1]
+makePerm len = shiftIn [0.. len - 1]
 
 -- }  
