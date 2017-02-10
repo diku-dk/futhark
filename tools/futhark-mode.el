@@ -269,8 +269,17 @@ In general, prefer as little indentation as possible."
          (and (looking-at "}")
               (ignore-errors
                 (backward-up-list 1)
-                (futhark-beginning-of-line-text)
-                (current-column))))
+                (or
+                 (save-excursion
+                   (ignore-errors
+                     (and
+                      (backward-up-list 1)
+                      (looking-at "(")
+                      (futhark-keyword-backward "module")
+                      (current-column))))
+                 (and
+                  (futhark-keyword-backward "module")
+                  (current-column))))))
 
        ;; Align "in", "let", or "loop" to the closest previous "let" or "loop".
        (save-excursion
