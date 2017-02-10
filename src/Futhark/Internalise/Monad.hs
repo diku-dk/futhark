@@ -163,7 +163,7 @@ newOrExistingSubst name = do
   r <- asks $ HM.lookup name . envDecSubsts
   case r of
     Just v | v /= name -> lookupSubst $ E.qualName v
-           | otherwise -> return name
+           | otherwise -> return v
     Nothing | in_functor -> newName name
             | otherwise  -> return name
 
@@ -198,7 +198,7 @@ bindingType name t =
 
 withDecSubsts :: HM.HashMap VName VName -> InternaliseM a -> InternaliseM a
 withDecSubsts substs =
-  local $ \env -> env { envDecSubsts = envDecSubsts env <> substs  }
+  local $ \env -> env { envDecSubsts = substs `HM.union` envDecSubsts env }
 
 generatingFunctor :: InternaliseM a -> InternaliseM a
 generatingFunctor =
