@@ -8,12 +8,8 @@
 
 cd "$(dirname "$0")/futhark-mode.el-corpus"
 
-remove_leading_whitespace() {
-    sed 's/^ *//' "$1"
-}
-
 futhark_indent() {
-    remove_leading_whitespace "$file" | ../futfmt -
+    ../futfmt "$file"
 }
 
 for file in *.fut; do
