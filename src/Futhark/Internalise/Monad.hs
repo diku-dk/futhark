@@ -198,7 +198,7 @@ bindingType name t =
 
 withDecSubsts :: HM.HashMap VName VName -> InternaliseM a -> InternaliseM a
 withDecSubsts substs =
-  local $ \env -> env { envDecSubsts = substs <> envDecSubsts env }
+  local $ \env -> env { envDecSubsts = envDecSubsts env <> substs  }
 
 generatingFunctor :: InternaliseM a -> InternaliseM a
 generatingFunctor =
