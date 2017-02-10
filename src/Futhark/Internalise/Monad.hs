@@ -151,7 +151,8 @@ lookupSubst :: E.QualName VName -> InternaliseM VName
 lookupSubst (E.QualName _ name) = do
   r <- asks $ HM.lookup name . envDecSubsts
   case r of
-    Just v -> return v
+    Just v | v /= name -> lookupSubst $ E.qualName v
+           | otherwise -> return v
     _      -> return name
 
 -- | Like lookupSubst, but creates a fresh name if inside a functor
@@ -161,7 +162,8 @@ newOrExistingSubst name = do
   in_functor <- asks envGeneratingFunctor
   r <- asks $ HM.lookup name . envDecSubsts
   case r of
-    Just v               -> return v
+    Just v | v /= name -> lookupSubst $ E.qualName v
+           | otherwise -> return name
     Nothing | in_functor -> newName name
             | otherwise  -> return name
 
