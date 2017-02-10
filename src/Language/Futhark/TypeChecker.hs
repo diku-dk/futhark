@@ -1103,24 +1103,26 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
   where apply body_scope p_sig applyloc a_scope = do
           (_, sig_subst) <- liftEither $ matchScopes a_scope p_sig applyloc
 
-          -- Type abbreviation substitutions from the argument scope.
-          -- Importantly, we use the scope before it is restricted by
-          -- the parameter signature ascription.
+          -- Type substitutions from the argument scope.  Importantly,
+          -- we use the scope before it is restricted by the parameter
+          -- signature ascription.  There are two important things we
+          -- must do: turn abstract types into type abbreviations (if
+          -- applicable), and fix references to abstract types.  The
+          -- body_scope will refer to names in p_sig, and we'll have
+          -- to refer to those in a_scope instead.  sig_subst gives us
+          -- exactly the type name mappings, but we'll need some care
+          -- for the abbreviations.
           let type_substs = scopeTypeAbbrs a_scope
-              -- The type substitutions are given in terms of the
-              -- structure names, but body_scope is using names from
-              -- the signature.  So, we have to perform a kind of
-              -- reverse substitution.  Ugh, how can this be The Right
-              -- Thing?
-              sig_subst_rev = HM.fromList $ map (uncurry (flip (,))) $ HM.toList sig_subst
-              substSigName (v, t) = (fromMaybe v $ HM.lookup v sig_subst_rev, t)
-              type_substs' = HM.fromList $ map substSigName type_substs
+              typeSubst v
+                | Just t <- lookup v type_substs = TypeAbbr t
+                | otherwise                      = TypeAbbr $ TypeVar $ typeName v
+              type_substs'' = HM.map typeSubst sig_subst
 
               names_in_sig = HS.fromList $ HM.elems $ envNameMap p_sig
 
           (body_scope', body_subst) <-
             newNamesForScope names_in_sig $
-            substituteTypesInScope (HM.map TypeAbbr type_substs') body_scope
+            substituteTypesInScope type_substs'' body_scope
           return (body_scope', sig_subst <> body_subst)
 
 checkTypeBind :: TypeBindBase NoInfo Name
