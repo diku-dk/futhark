@@ -477,8 +477,7 @@ regularSegmentedScan segment_size pat cs w lam fold_lam ispace inps nes arrs = d
                        BasicOp $ BinOp (SRem Int32) (Var flags_i) segment_size
       start_of_segment <- letSubExp "start_of_segment" $
                           BasicOp $ CmpOp (CmpEq int32) segment_index zero
-      flag <- letSubExp "flag" $
-              If start_of_segment (resultBody [true]) (resultBody [false]) [Prim Bool]
+      let flag = start_of_segment
       return $ resultBody [flag]
   (mapk_bnds, mapk) <- mapKernelFromBody [] w (FlatThreadSpace [(flags_i, w)]) [] [Prim Bool] flags_body
   mapM_ addStm mapk_bnds
@@ -493,5 +492,4 @@ regularSegmentedScan segment_size pat cs w lam fold_lam ispace inps nes arrs = d
                  }
   blockedScan pat' cs w lam' fold_lam' segment_size ispace inps (false:nes) (flags:arrs)
   where zero = constant (0 :: Int32)
-        true = constant True
         false = constant False
