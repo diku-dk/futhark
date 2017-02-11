@@ -16,8 +16,7 @@ module f2(R: mt) = {
 }
 
 module f3(R: mt) = {
-  module L = f2(R)
-  open L
+  open f2(R)
 }
 
 

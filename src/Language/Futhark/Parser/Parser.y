@@ -218,7 +218,8 @@ Dec :: { [DecBase f vn] }
     | SigBind           { [SigDec $1 ] }
     | StructBind        { [StructDec $1 ] }
     | FunctorBind       { [FunctorDec $1] }
-    | open QualNames    { [OpenDec (uncurry ModVar $ fst $2) (map (uncurry ModVar) $ snd $2) $1] }
+    | open ModExp QualNames
+                        { [OpenDec $2 (map (uncurry ModVar) $3) $1] }
     | DefaultDec        { [] }
     | import stringlit  { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] $1] }
 ;
@@ -409,9 +410,9 @@ QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
           | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
 
-QualNames :: { ((QualName Name, SrcLoc), [(QualName Name, SrcLoc)]) }
-          : QualName            { ($1, []) }
-          | QualName QualNames  { ($1, fst $2 : snd $2) }
+QualNames :: { [(QualName Name, SrcLoc)] }
+          :                     { [] }
+          | QualName QualNames  { $1 : $2 }
 
 
 QualUnOpName :: { (QualName Name, SrcLoc) }
