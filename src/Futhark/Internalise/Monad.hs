@@ -39,6 +39,7 @@ import Control.Monad.Writer hiding (mapM)
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.DList as DL
 import Data.List
+import Data.Maybe
 
 import qualified Language.Futhark as E
 import Futhark.Representation.SOACS
@@ -151,8 +152,7 @@ lookupSubst :: E.QualName VName -> InternaliseM VName
 lookupSubst (E.QualName _ name) = do
   r <- asks $ HM.lookup name . envDecSubsts
   case r of
-    Just v | v /= name -> lookupSubst $ E.qualName v
-           | otherwise -> return v
+    Just v -> lookupSubst $ E.qualName v
     _      -> return name
 
 -- | Like lookupSubst, but creates a fresh name if inside a functor
@@ -162,8 +162,7 @@ newOrExistingSubst name = do
   in_functor <- asks envGeneratingFunctor
   r <- asks $ HM.lookup name . envDecSubsts
   case r of
-    Just v | v /= name -> lookupSubst $ E.qualName v
-           | otherwise -> return v
+    Just v -> lookupSubst $ E.qualName v
     Nothing | in_functor -> newName name
             | otherwise  -> return name
 
@@ -198,7 +197,10 @@ bindingType name t =
 
 withDecSubsts :: HM.HashMap VName VName -> InternaliseM a -> InternaliseM a
 withDecSubsts substs =
-  local $ \env -> env { envDecSubsts = substs `HM.union` envDecSubsts env }
+  local $ \env -> env { envDecSubsts = HM.map (forward $ envDecSubsts env) substs `HM.union`
+                                       envDecSubsts env }
+  -- Some substitutions of these names may already exist.
+  where forward old_substs v = fromMaybe v $ HM.lookup v old_substs
 
 generatingFunctor :: InternaliseM a -> InternaliseM a
 generatingFunctor =
