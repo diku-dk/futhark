@@ -301,7 +301,8 @@ notation::
 We can also use ``open Vec3`` to bring the names defined by ``Vec3``
 into the current scope.  Multiple modules can be opened simultaneously
 by separating their names with spaces.  In case several modules define
-the same names, the ones mentioned last take precedence.
+the same names, the ones mentioned last take precedence.  The first
+argument to ``open`` may be a full module expression.
 
 Named module types are defined as::
 
