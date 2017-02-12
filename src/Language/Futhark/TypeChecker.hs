@@ -151,11 +151,11 @@ instance Show TypeError where
   show (InvalidEntryPointReturnType loc fname) =
     "Entry point '" ++ nameToString fname ++ "' at " ++ locStr loc ++
      " has invalid return type.\n" ++
-    "Entry points may not return nested tuples.  Sorry."
+    "Entry points may not return nested tuples or abstract types.  Sorry."
   show (InvalidEntryPointParamType loc fname p) =
     "Entry point '" ++ nameToString fname ++ "' parameter '" ++ pretty p ++
     "' at " ++ locStr loc ++ " has has invalid type.\n" ++
-    "Entry point parameters may not be tuples.  Sorry."
+    "Entry point parameters may not be tuples or abstract types.  Sorry."
   show (UnderscoreUse loc name) =
     "Use of " ++ pretty name ++ " at " ++ locStr loc ++
     ": variables prefixed with underscore must not be accessed."
@@ -1308,6 +1308,7 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
         okEntryPointParamType (Prim _) = True
         okEntryPointParamType (TypeVar _) = False
         okEntryPointParamType (Array TupleArray{}) = False
+        okEntryPointParamType (Array PolyArray{}) = False
         okEntryPointParamType (Array _) = True
 
         dimDeclName (NamedDim name) = Just name
