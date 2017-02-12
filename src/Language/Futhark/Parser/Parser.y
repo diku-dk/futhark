@@ -251,7 +251,7 @@ ModExp :: { ModExpBase f vn }
         | import stringlit { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
         | '{' Decs '}' { ModDecs $2 $1 }
         | QualName '(' ModExp ')'
-          { ModApply (fst $1) $3 NoInfo (snd $1) }
+          { ModApply (fst $1) $3 NoInfo NoInfo (snd $1) }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
         | '(' ModExp ')' { $2 }

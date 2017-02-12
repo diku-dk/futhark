@@ -11,6 +11,7 @@ module Futhark.Internalise.Monad
   , ConstParams
   , FunBinding (..)
   , lookupFunction
+  , lookupFunction'
   , lookupTypeVar
   , lookupFunctor
   , lookupSubst
@@ -18,11 +19,10 @@ module Futhark.Internalise.Monad
 
   , bindingIdentTypes
   , bindingParamTypes
-  , bindingFunctions
-  , bindingTypes
-  , bindingFunctor
-  , bindingType
-  , withDecSubsts
+  , noteFunctions
+  , noteFunctor
+  , noteType
+  , noteDecSubsts
   , generatingFunctor
 
     -- * Convenient reexports
@@ -31,10 +31,10 @@ module Futhark.Internalise.Monad
   where
 
 import Control.Applicative
-import Control.Monad.Except hiding (mapM)
-import Control.Monad.State  hiding (mapM)
-import Control.Monad.Reader hiding (mapM)
-import Control.Monad.Writer hiding (mapM)
+import Control.Monad.Except
+import Control.Monad.State
+import Control.Monad.Reader
+import Control.Monad.Writer
 
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.DList as DL
@@ -69,30 +69,36 @@ type DecSubstitutions = HM.HashMap VName VName
 
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
-  , envDecSubsts :: DecSubstitutions
-  , envFtable :: FunTable
-  , envTtable :: TypeTable
-  , envFunctorTable :: HM.HashMap VName E.ModExp
   , envDoBoundsChecks :: Bool
   , envGeneratingFunctor :: Bool
+  , envFunctorSubsts :: DecSubstitutions
   }
+
+data InternaliseState =
+  InternaliseState { stateDecSubsts :: DecSubstitutions
+                   , stateFtable :: FunTable
+                   , stateTtable :: TypeTable
+                   , stateFunctorTable :: HM.HashMap VName E.ModExp
+                   , stateNameSource :: VNameSource
+                   }
 
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                         (ReaderT InternaliseEnv
-                                         (StateT VNameSource
+                                         (StateT InternaliseState
                                           (Except String)))
                                         a)
   deriving (Functor, Applicative, Monad,
             MonadWriter (DL.DList Stm),
             MonadReader InternaliseEnv,
-            MonadState VNameSource,
+            MonadState InternaliseState,
+            MonadFreshNames,
             MonadError String,
             HasScope SOACS,
             LocalScope SOACS)
 
-instance MonadFreshNames InternaliseM where
-  getNameSource = get
-  putNameSource = put
+instance Monad m => MonadFreshNames (StateT InternaliseState m) where
+  getNameSource = gets stateNameSource
+  putNameSource src = modify $ \s -> s { stateNameSource = src }
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
@@ -109,40 +115,55 @@ runInternaliseM :: MonadFreshNames m =>
                    FunTable -> InternaliseM a
                 -> m (Either String a)
 runInternaliseM ftable (InternaliseM m) =
-  modifyNameSource $ \src ->
+  modifyNameSource $ \src -> do
   let onError e                 = (Left e, src)
       onSuccess ((prog,_),src') = (Right prog, src')
-  in either onError onSuccess $ runExcept $
-     runStateT (runReaderT (runBinderT m mempty) newEnv) src
+  either onError onSuccess $ runExcept $ do
+    (v, s) <- runStateT (runReaderT (runBinderT m mempty) newEnv) (newState src)
+    return (v, stateNameSource s)
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
-                 , envFtable = ftable
-                 , envTtable = mempty
-                 , envFunctorTable = mempty
-                 , envDecSubsts = mempty
                  , envDoBoundsChecks = True
                  , envGeneratingFunctor = False
+                 , envFunctorSubsts = mempty
                  }
+        newState src =
+          InternaliseState { stateFtable = ftable
+                           , stateTtable = mempty
+                           , stateFunctorTable = mempty
+                           , stateDecSubsts = mempty
+                           , stateNameSource = src
+                           }
+
+lookupFunction' :: VName -> InternaliseM (Maybe FunBinding)
+lookupFunction' fname = do
+  ftable <- gets stateFtable
+  case HM.lookup fname ftable of
+    Nothing   -> return Nothing
+    Just fun' -> return $ Just fun'
 
 lookupFunction :: VName -> InternaliseM FunBinding
-lookupFunction fname = do
-  fun <- HM.lookup fname <$> asks envFtable
-  case fun of Nothing   -> fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found"
-              Just fun' -> return fun'
+lookupFunction fname =
+  maybe bad return =<< lookupFunction' fname
+  where bad = fail $
+              "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
 lookupTypeVar :: VName -> InternaliseM [TypeBase Rank NoUniqueness]
 lookupTypeVar tname = do
-  t <- HM.lookup tname <$> asks envTtable
+  t <- gets $ HM.lookup tname. stateTtable
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just t' -> return t'
 
 lookupFunctor :: VName -> InternaliseM E.ModExp
 lookupFunctor mname = do
-  maybe_me <- asks $ HM.lookup mname . envFunctorTable
+  maybe_me <- gets $ HM.lookup mname . stateFunctorTable
   case maybe_me of
     Nothing -> fail $ "Internalise.lookupFunctor: Functor '" ++
                pretty mname ++ "' not found"
     Just me -> return me
+
+allSubsts :: InternaliseM DecSubstitutions
+allSubsts = HM.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
 
 -- | Substitution for any variable or defined name.  Used for functor
 -- application.  Never pick apart QualNames directly in the
@@ -150,7 +171,7 @@ lookupFunctor mname = do
 -- substitution, the name is just returned.
 lookupSubst :: E.QualName VName -> InternaliseM VName
 lookupSubst (E.QualName _ name) = do
-  r <- asks $ HM.lookup name . envDecSubsts
+  r <- HM.lookup name <$> allSubsts
   case r of
     Just v | v /= name -> lookupSubst $ E.qualName v
            | otherwise -> return v
@@ -161,11 +182,13 @@ lookupSubst (E.QualName _ name) = do
 newOrExistingSubst :: VName -> InternaliseM VName
 newOrExistingSubst name = do
   in_functor <- asks envGeneratingFunctor
-  r <- asks $ HM.lookup name . envDecSubsts
+  r <- HM.lookup name <$> allSubsts
   case r of
     Just v | v /= name -> lookupSubst $ E.qualName v
            | otherwise -> return v
-    Nothing | in_functor -> newName name
+    Nothing | in_functor -> do x <- newName name
+                               noteDecSubsts $ HM.singleton name x
+                               return x
             | otherwise  -> return name
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
@@ -181,29 +204,58 @@ bindingParamTypes :: [LParam] -> InternaliseM a
                   -> InternaliseM a
 bindingParamTypes = bindingIdentTypes . map paramIdent
 
-bindingFunctions :: FunTable -> InternaliseM a -> InternaliseM a
-bindingFunctions ftable_expansion =
-  local $ \env -> env { envFtable = ftable_expansion <> envFtable env }
+noteFunctions :: FunTable -> InternaliseM ()
+noteFunctions ftable_expansion =
+  modify $ \s -> s { stateFtable = ftable_expansion <> stateFtable s }
 
-bindingTypes :: TypeTable -> InternaliseM a -> InternaliseM a
-bindingTypes ttable_expansion =
-  local $ \env -> env { envTtable = ttable_expansion <> envTtable env }
+noteFunctor :: VName -> E.ModExp -> InternaliseM ()
+noteFunctor name me =
+  modify $ \s -> s { stateFunctorTable = HM.insert name me $ stateFunctorTable s }
 
-bindingFunctor :: VName -> E.ModExp -> InternaliseM a -> InternaliseM a
-bindingFunctor name me =
-  local $ \env -> env { envFunctorTable = HM.insert name me $ envFunctorTable env }
+noteType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM ()
+noteType name t =
+  modify $ \s -> s { stateTtable = HM.insert name t $ stateTtable s }
 
-bindingType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM a -> InternaliseM a
-bindingType name t =
-  local $ \env -> env { envTtable = HM.insert name t $ envTtable env }
+setDecSubsts :: HM.HashMap VName VName -> InternaliseM ()
+setDecSubsts substs = modify $ \s -> s { stateDecSubsts = substs }
 
-withDecSubsts :: HM.HashMap VName VName -> InternaliseM a -> InternaliseM a
-withDecSubsts substs =
-  local $ \env -> env { envDecSubsts = HM.map (forward $ envDecSubsts env) substs `HM.union`
-                                       envDecSubsts env }
+noteDecSubsts :: HM.HashMap VName VName -> InternaliseM ()
+noteDecSubsts substs = do
+  cur_substs <- allSubsts
   -- Some substitutions of these names may already exist.
+  let substs' = HM.map (forward cur_substs) substs
+  modify $ \s ->
+    s { stateDecSubsts = substs' `HM.union` stateDecSubsts s
+      }
   where forward old_substs v = fromMaybe v $ HM.lookup v old_substs
 
-generatingFunctor :: InternaliseM a -> InternaliseM a
-generatingFunctor =
-  local $ \env -> env { envGeneratingFunctor = True }
+generatingFunctor :: HM.HashMap VName VName
+                  -> HM.HashMap VName VName
+                  -> InternaliseM a -> InternaliseM a
+generatingFunctor p_substs b_substs m = do
+  -- Some substitutions of these names may already exist.  Also, we
+  -- ensure we have fresh names for everything in the functor, except
+  -- for those names that are already unique from the applications.
+  in_functor <- asks envGeneratingFunctor
+  func_substs <- asks envFunctorSubsts
+  cur_substs <- allSubsts
+
+  let newIfNotKnown v
+        | Just v' <- HM.lookup v func_substs = return v'
+        | otherwise                          = newName v
+  extra_substs <- if in_functor
+                  then HM.fromList . zip (HM.elems b_substs) <$>
+                       mapM newIfNotKnown (HM.elems b_substs)
+                  else return mempty
+  let recs = [extra_substs,
+              b_substs,
+              HM.map forward p_substs]
+      nexts = extra_substs `HM.union` b_substs
+      update env =
+        env { envGeneratingFunctor = True
+            , envFunctorSubsts = HM.unions recs `HM.union`
+                                 envFunctorSubsts env
+            }
+      forward v = fromMaybe v $ HM.lookup v cur_substs
+  old_dec_substs <- gets stateDecSubsts
+  local update m <* setDecSubsts (nexts `HM.union` old_dec_substs)

@@ -278,7 +278,9 @@ type NameMap = HM.HashMap (Namespace, Name) VName
 
 -- | A function for applying a functor to a module.
 newtype FunctorF = FunctorF { applyFunctor :: SrcLoc -> Scope
-                                           -> TypeM (Scope, HM.HashMap VName VName)
+                                           -> TypeM (Scope,
+                                                     HM.HashMap VName VName,
+                                                     HM.HashMap VName VName)
                             }
 
 instance Show FunctorF where
@@ -1031,11 +1033,11 @@ checkModExp (ModVar v loc) = do
 checkModExp (ModImport name loc) = do
   scope <- lookupImport loc name
   return (scope, ModImport name loc)
-checkModExp (ModApply f e NoInfo loc) = do
+checkModExp (ModApply f e NoInfo NoInfo loc) = do
   (f', functor) <- lookupFunctor loc f
   (e_scope, e') <- checkModExp e
-  (f_scope, substs) <- applyFunctor functor loc e_scope
-  return (f_scope, ModApply f' e' (Info substs) loc)
+  (f_scope, psubsts, rsubsts) <- applyFunctor functor loc e_scope
+  return (f_scope, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
 checkModExp (ModAscript me se NoInfo loc) = do
   (scope, me') <- checkModExp me
   (sigscope, se') <- checkSigExp se
@@ -1118,12 +1120,10 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
                 | otherwise                      = TypeAbbr $ TypeVar $ typeName v
               type_substs'' = HM.map typeSubst sig_subst
 
-              names_in_sig = HS.fromList $ HM.elems $ envNameMap p_sig
-
           (body_scope', body_subst) <-
-            newNamesForScope names_in_sig $
+            newNamesForScope sig_subst $
             substituteTypesInScope type_substs'' body_scope
-          return (body_scope', sig_subst <> body_subst)
+          return (body_scope', sig_subst, body_subst)
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Scope, TypeBindBase Info VName)
@@ -2257,14 +2257,14 @@ substituteTypes substs (Tuple ts) = Tuple $ map (substituteTypes substs) ts
 
 -- New names for everything defined in the scope, with passed-in
 -- exceptions.  Removes signatures.
-newNamesForScope :: HS.HashSet VName -> Scope -> TypeM (Scope, HM.HashMap VName VName)
+newNamesForScope :: HM.HashMap VName VName -> Scope -> TypeM (Scope, HM.HashMap VName VName)
 newNamesForScope except orig_scope = do
   -- Create unique renames for the scope.
-  let rename (k, v) =
-        if v `HS.member` except
-          then return ((k,v), (v,v))
-          else do v' <- newName v
-                  return ((k, v'), (v, v'))
+  let rename (k, v)
+        | Just v' <- HM.lookup v except =
+            return ((k,v'), (v,v'))
+        | otherwise = do v' <- newName v
+                         return ((k,v'), (v,v'))
   (names_list, substs_list) <-
     mapAndUnzipM rename $ HM.toList $ envNameMap orig_scope
   let names = HM.fromList names_list
@@ -2317,9 +2317,9 @@ newNamesForScope except orig_scope = do
         substituteInModBinding substs (ModFunctor f) =
           ModFunctor $ FunctorF $ \loc scope -> do
           -- Nested functor or something?  This should never happen!
-          (f_scope, f_substs) <- applyFunctor f loc scope
+          (f_scope, f_sig_subst, f_body_subst) <- applyFunctor f loc scope
           return (substituteInScope substs f_scope,
-                  substs <> f_substs)
+                  substs <> f_sig_subst, substs <> f_body_subst)
 
         substituteInTypeBinding substs (TypeAbbr t) =
           TypeAbbr $ substituteInType substs t
