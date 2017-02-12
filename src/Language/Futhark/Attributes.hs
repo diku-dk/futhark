@@ -915,7 +915,7 @@ progImports (Prog decs) = concatMap decImports decs
         modExpImports ModVar{}              = []
         modExpImports (ModImport f _)       = [f]
         modExpImports (ModDecs ds _)        = concatMap decImports ds
-        modExpImports (ModApply _ me _ _)   = modExpImports me
+        modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me
 
 -- | A type with no aliasing information but shape annotations.
