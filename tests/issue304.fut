@@ -3,6 +3,7 @@
 -- ==
 -- tags { no_opencl }
 -- input { [[1,2],[3,4]] } output { [[1,2],[3,4]] }
+-- structure distributed { Kernel 2 }
 
 entry main (xss : [m][n]i32): [n][m]i32 =
   map (\j -> map (\i -> xss[j,i]) (iota m)) (iota n)
