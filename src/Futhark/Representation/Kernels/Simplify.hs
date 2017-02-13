@@ -355,7 +355,8 @@ distributeKernelResults (vtable, used)
         kspace_slice <- map (DimFix . Var . fst) $ spaceDimensions kspace,
         kspace_slice `isPrefixOf` slice,
         remaining_slice <- drop (length kspace_slice) slice,
-        all (isJust . flip ST.lookup vtable) $ HS.toList $ freeIn remaining_slice,
+        all (isJust . flip ST.lookup vtable) $ HS.toList $
+          freeIn cs <> freeIn arr <> freeIn remaining_slice,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (\(_, d) -> DimSlice
                                             (constant (0::Int32))
