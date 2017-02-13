@@ -1,6 +1,7 @@
 -- Too aggressive hoisting/distribution can lead to a compile error
 -- here.
 -- ==
+-- tags { no_opencl }
 -- input { [[1,2],[3,4]] } output { [[1,2],[3,4]] }
 
 entry main (xss : [m][n]i32): [n][m]i32 =
