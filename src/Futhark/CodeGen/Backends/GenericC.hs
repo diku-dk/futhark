@@ -475,7 +475,7 @@ typeToCType t = do
                 ct <- typeToCType [et]
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
-printPrimStm :: (C.ToExp a, C.ToExp b) => a -> b -> PrimType -> EntryPointType -> C.Stm
+printPrimStm :: (C.ToExp a, C.ToExp b) => a -> b -> PrimType -> Signedness -> C.Stm
 printPrimStm dest val (IntType it) t =
   [C.cstm|fprintf($exp:dest, $string:format, $exp:val);|]
   where format = case (it, t) of
@@ -496,15 +496,17 @@ printPrimStm dest val (FloatType Float64) _ =
 printPrimStm dest _ Cert _ =
   [C.cstm|fprintf($exp:dest,"Checked");|]
 
--- | Return a statement printing the given value.
-printStm :: ValueDecl -> CompilerM op s C.Stm
-printStm (ScalarValue bt ept name) =
+-- | Return a statement printing the given external value.
+printStm :: ExternalValue -> CompilerM op s C.Stm
+printStm (OpaqueValue desc _) =
+  return [C.cstm|printf("#<opaque %s>", $string:desc);|]
+printStm (TransparentValue (ScalarValue bt ept name)) =
   return $ printPrimStm [C.cexp|stdout|] name bt ept
-printStm (ArrayValue mem bt ept shape) = do
+printStm (TransparentValue (ArrayValue mem bt ept shape)) = do
   mem' <- rawMem mem
   printArrayStm mem' bt ept shape
 
-printArrayStm :: C.ToExp a => a -> PrimType -> EntryPointType -> [DimSize] -> CompilerM op s C.Stm
+printArrayStm :: C.ToExp a => a -> PrimType -> Signedness -> [DimSize] -> CompilerM op s C.Stm
 printArrayStm mem bt ept [] =
   return $ printPrimStm [C.cexp|stdout|] val bt ept
   where val = [C.cexp|*$exp:mem|]
@@ -536,7 +538,7 @@ printArrayStm mem bt ept (dim:shape) = do
 -- all works out in the end.
 
 -- The C-function returned will handle both binary and text input
-readFun :: PrimType -> EntryPointType -> Maybe String
+readFun :: PrimType -> Signedness -> Maybe String
 readFun (IntType Int8) _ = Just "read_int8"
 readFun (IntType Int16) _ = Just "read_int16"
 readFun (IntType Int32) _ = Just "read_int32"
@@ -548,7 +550,7 @@ readFun _ _ = Nothing
 
 -- The C-function returned will only be used to read elements of a text-based
 -- array
-readStrFun :: PrimType -> EntryPointType -> Maybe String
+readStrFun :: PrimType -> Signedness -> Maybe String
 readStrFun (IntType Int8) _ = Just "read_str_int8"
 readStrFun (IntType Int16) _ = Just "read_str_int16"
 readStrFun (IntType Int32) _ = Just "read_str_int32"
@@ -560,7 +562,7 @@ readStrFun _ _ = Nothing
 
 -- The C-value returned will be used when reading binary arrays, to indicate
 -- what the expected type is
-readTypeEnum :: PrimType -> EntryPointType -> Maybe String
+readTypeEnum :: PrimType -> Signedness -> Maybe String
 readTypeEnum (IntType Int8) _ = Just "FUTHARK_INT8"
 readTypeEnum (IntType Int16) _ = Just "FUTHARK_INT16"
 readTypeEnum (IntType Int32) _ = Just "FUTHARK_INT32"
@@ -575,7 +577,7 @@ paramsTypes = map paramType
   where paramType (MemParam _ size space) = Mem size space
         paramType (ScalarParam _ t) = Scalar t
 
-readPrimStm :: C.ToExp a => a -> PrimType -> EntryPointType -> C.Stm
+readPrimStm :: C.ToExp a => a -> PrimType -> Signedness -> C.Stm
 readPrimStm place t ept
   | Just f <- readFun t ept =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
@@ -702,15 +704,17 @@ prepareArg (MemParam name size (Space sid)) = do
 
 prepareArg p = return [C.cexp|$exp:(paramName p)|]
 
-readInputs :: Bool -> [Param] -> [ValueDecl] -> [C.Stm]
+readInputs :: Bool -> [Param] -> [ExternalValue] -> [C.Stm]
 readInputs refcount inputparams = snd . mapAccumL (readInput refcount memsizes) mempty
   where memsizes = sizeVars inputparams
 
-readInput :: Bool -> HM.HashMap VName VName -> [VName] -> ValueDecl
+readInput :: Bool -> HM.HashMap VName VName -> [VName] -> ExternalValue
           -> ([VName], C.Stm)
-readInput _ _ known_sizes (ScalarValue t ept name) =
+readInput _ _ known_sizes (OpaqueValue desc _) =
+  (known_sizes, [C.cstm|panic(1, "Cannot read value of type %s\n", $string:desc);|])
+readInput _ _ known_sizes (TransparentValue (ScalarValue t ept name)) =
   (known_sizes, readPrimStm name t ept)
-readInput refcount memsizes known_sizes (ArrayValue name t ept shape)
+readInput refcount memsizes known_sizes (TransparentValue (ArrayValue name t ept shape))
   | (Just str_reader, Just type_val) <- (readStrFun t ept , readTypeEnum t ept) =
   -- We need to create an array for the array parser to put
   -- the shapes.
@@ -766,7 +770,7 @@ sizeVars = mconcat . map sizeVars'
         sizeVars' _ =
           HM.empty
 
-printResult :: [ValueDecl] -> CompilerM op s [C.Stm]
+printResult :: [ExternalValue] -> CompilerM op s [C.Stm]
 printResult vs = fmap concat $ forM vs $ \v -> do
   p <- printStm v
   return [p, [C.cstm|printf("\n");|]]

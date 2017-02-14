@@ -12,6 +12,7 @@ module Futhark.Internalise
   )
   where
 
+import Control.Arrow ((***))
 import Control.Applicative
 import Control.Monad.State  hiding (mapM, sequence)
 import Control.Monad.Reader hiding (mapM, sequence)
@@ -154,31 +155,50 @@ internaliseModExp (E.ModApply v arg (Info p_substs) (Info b_substs) _) = do
   (++arg_funs) <$> generatingFunctor p_substs b_substs (internaliseModExp me)
 
 internaliseFun :: E.FunBind -> InternaliseM I.FunDef
-internaliseFun (E.FunBind entry ofname _ (Info rettype) params body loc) =
+internaliseFun (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =
   bindingParams params $ \shapeparams params' -> do
     (_, fname') <- internaliseFunctionName entry ofname
-    (rettype', _, cm) <- internaliseReturnType rettype
+    (rettype', _, cm) <- internaliseEntryReturnType rettype
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape asserting loc
-             (map I.fromDecl rettype') firstbody
+             (map I.fromDecl $ concat rettype') firstbody
     let mkConstParam name = Param name $ I.Prim int32
         constparams = map (mkConstParam . snd) cm
-        entry' | entry     = Just $ entryPoint params rettype
+        entry' | entry     = Just $ entryPoint (zip params params') (rettype, rettype')
                | otherwise = Nothing
     return $ I.FunDef entry' fname'
-      (ExtRetType rettype') (constparams ++ shapeparams ++ concat params') body'
+      (ExtRetType $ concat rettype') (constparams ++ shapeparams ++ concat params') body'
+  -- XXX: We massage the parameters a little bit to handle the case
+  -- where there is just a single parameter that is a tuple.  This is
+  -- wide-spread in existing Futhark code, although I'd like to get
+  -- rid of it.
+  where params = case orig_params of
+          [TuplePattern ps _] -> ps
+          _                   -> orig_params
 
-entryPoint :: [E.Pattern] -> StructType -> EntryPoint
-entryPoint params ret = (concatMap (entryPointType . E.patternStructType) params,
-                         entryPointType ret)
-  where entryPointType :: StructType -> [EntryPointType]
-        entryPointType (E.Prim E.Unsigned{}) =
+entryPoint :: [(E.Pattern,[I.FParam])]
+           -> (E.StructType,[[I.TypeBase ExtShape Uniqueness]])
+           -> EntryPoint
+entryPoint params (eret,crets) =
+  (concatMap (uncurry entryPointType . preParam) params,
+   case eret of
+     E.Tuple ts -> concat $ zipWith entryPointType ts crets
+     _          -> entryPointType eret $ concat crets)
+  where preParam = E.patternStructType *** staticShapes . map I.paramDeclType
+
+        entryPointType :: E.StructType
+                       -> [I.TypeBase ExtShape Uniqueness]
+                       -> [EntryPointType]
+        entryPointType (E.Prim E.Unsigned{}) _ =
           [I.TypeUnsigned]
-        entryPointType (E.Array (PrimArray Unsigned{} _ _ _)) =
+        entryPointType (E.Array (PrimArray Unsigned{} _ _ _)) _ =
           [I.TypeUnsigned]
-        entryPointType (Tuple ts) =
-          concatMap entryPointType ts
-        entryPointType _ = [I.TypeDirect]
+        entryPointType E.Prim{} _ =
+          [I.TypeDirect]
+        entryPointType (E.Array PrimArray{}) _ =
+          [I.TypeDirect]
+        entryPointType t ts =
+          [I.TypeOpaque (pretty t) $ length ts]
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) =

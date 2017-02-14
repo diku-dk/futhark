@@ -307,34 +307,68 @@ fparamSizes fparam
 
 compileInParams :: ExplicitMemorish lore =>
                    [FParam lore] -> [EntryPointType]
-                -> ImpM lore op ([Imp.Param], [ArrayDecl], [Imp.ValueDecl])
-compileInParams params epts = do
-  (inparams, arraydecls) <- partitionEithers <$> mapM compileInParam params
+                -> ImpM lore op ([Imp.Param], [ArrayDecl], [Imp.ExternalValue])
+compileInParams params orig_epts = do
+  let (ctx_params, val_params) =
+        splitAt (length params - sum (map entryPointSize orig_epts)) params
+  (inparams, arraydecls) <- partitionEithers <$> mapM compileInParam (ctx_params++val_params)
   let findArray x = find (isArrayDecl x) arraydecls
-      sizes = mconcat $ map fparamSizes params
-      mkArg fparam =
+      sizes = mconcat $ map fparamSizes $ ctx_params++val_params
+
+      mkValueDesc fparam signedness =
         case (findArray $ paramName fparam, paramType fparam) of
           (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) ->
-            Just $ \ept -> Imp.ArrayValue mem bt ept shape
+            Just $ Imp.ArrayValue mem bt signedness shape
           (_, Prim bt)
             | paramName fparam `HS.member` sizes ->
               Nothing
             | otherwise ->
-              Just $ \ept -> Imp.ScalarValue bt ept (paramName fparam)
+              Just $ Imp.ScalarValue bt signedness $ paramName fparam
           _ ->
             Nothing
-      args = zipWith ($) (mapMaybe mkArg params) epts
-  return (inparams, arraydecls, args)
+
+      mkExts (TypeOpaque desc n:epts) fparams =
+        let (fparams',rest) = splitAt n fparams
+        in Imp.OpaqueValue desc
+           (mapMaybe (`mkValueDesc` Imp.TypeDirect) fparams') :
+           mkExts epts rest
+      mkExts (TypeUnsigned:epts) (fparam:fparams) =
+        maybeToList (Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeUnsigned) ++
+        mkExts epts fparams
+      mkExts (TypeDirect:epts) (fparam:fparams) =
+        maybeToList (Imp.TransparentValue <$> mkValueDesc fparam Imp.TypeDirect) ++
+        mkExts epts fparams
+      mkExts _ _ = []
+
+  return (inparams, arraydecls, mkExts orig_epts val_params)
   where isArrayDecl x (ArrayDecl y _ _) = x == y
 
 compileOutParams :: ExplicitMemorish lore =>
                     RetType lore -> [EntryPointType]
-                 -> ImpM lore op ([Imp.ValueDecl], [Imp.Param], Destination)
-compileOutParams rts epts = do
-  ((valdecls, dests), outparams) <-
-    runWriterT $ evalStateT (mapAndUnzipM (uncurry mkParam) $ zip rts epts) (HM.empty, HM.empty)
-  return (valdecls, outparams, Destination dests)
+                 -> ImpM lore op ([Imp.ExternalValue], [Imp.Param], Destination)
+compileOutParams orig_rts orig_epts = do
+  ((extvs, dests), outparams) <-
+    runWriterT $ evalStateT (mkExts orig_epts orig_rts) (HM.empty, HM.empty)
+  return (extvs, outparams, Destination dests)
   where imp = lift . lift
+
+        mkExts (TypeOpaque desc n:epts) rts = do
+          let (rts',rest) = splitAt n rts
+          (evs, dests) <- unzip <$> zipWithM mkParam rts' (repeat Imp.TypeDirect)
+          (more_values, more_dests) <- mkExts epts rest
+          return (Imp.OpaqueValue desc evs : more_values,
+                  dests ++ more_dests)
+        mkExts (TypeUnsigned:epts) (rt:rts) = do
+          (ev,dest) <- mkParam rt Imp.TypeUnsigned
+          (more_values, more_dests) <- mkExts epts rts
+          return (Imp.TransparentValue ev : more_values,
+                  dest : more_dests)
+        mkExts (TypeDirect:epts) (rt:rts) = do
+          (ev,dest) <- mkParam rt Imp.TypeDirect
+          (more_values, more_dests) <- mkExts epts rts
+          return (Imp.TransparentValue ev : more_values,
+                  dest : more_dests)
+        mkExts _ _ = return ([], [])
 
         mkParam ReturnsMemory{} _ =
           throwError "Functions may not explicitly return memory blocks."
@@ -397,8 +431,8 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
   return (src',
           (fname,
            Imp.Function (isJust entry) outparams inparams body' results args))
-  where params_entry = fromMaybe (repeat TypeDirect) $ fst <$> entry
-        ret_entry = fromMaybe (repeat TypeDirect) $ snd <$> entry
+  where params_entry = fromMaybe (replicate (length params) TypeDirect) $ fst <$> entry
+        ret_entry = fromMaybe (replicate (length rettype) TypeDirect) $ snd <$> entry
         compile = do
           (inparams, arraydecls, args) <- compileInParams params params_entry
           (results, outparams, dests) <- compileOutParams rettype ret_entry

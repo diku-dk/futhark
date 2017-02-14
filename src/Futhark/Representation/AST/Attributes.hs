@@ -28,6 +28,7 @@ module Futhark.Representation.AST.Attributes
   , subExpVar
   , shapeVars
   , commutativeLambda
+  , entryPointSize
 
   , IsOp (..)
   , Attributes (..)
@@ -155,6 +156,15 @@ commutativeLambda lam = isJust $ do
   guard $ x == paramName xp && y == paramName yp ||
           y == paramName xp && x == paramName yp
   guard $ commutativeBinOp op
+
+-- | How many value parameters are accepted by this entry point?  This
+-- is used to determine which of the function parameters correspond to
+-- the parameters of the original function (they must all come at the
+-- end).
+entryPointSize :: EntryPointType -> Int
+entryPointSize (TypeOpaque _ x) = x
+entryPointSize TypeUnsigned = 1
+entryPointSize TypeDirect = 1
 
 -- | A type class for operations.
 class (Eq op, Ord op, Show op,

@@ -62,8 +62,6 @@ data TypeError =
   | InvalidUniqueness SrcLoc (TypeBase Rank ())
   | UndefinedType SrcLoc (QualName Name)
   | InvalidField SrcLoc Type String
-  | InvalidEntryPointReturnType SrcLoc Name
-  | InvalidEntryPointParamType SrcLoc Name (PatternBase NoInfo Name)
   | UnderscoreUse SrcLoc (QualName Name)
   | ValueIsNotFunction SrcLoc (QualName Name) Type
   | FunctionIsNotValue SrcLoc (QualName Name)
@@ -148,14 +146,6 @@ instance Show TypeError where
   show (InvalidField loc t field) =
     "Attempt to access field '" ++ field ++ "' of value of type " ++
     pretty t ++ " at " ++ locStr loc ++ "."
-  show (InvalidEntryPointReturnType loc fname) =
-    "Entry point '" ++ nameToString fname ++ "' at " ++ locStr loc ++
-     " has invalid return type.\n" ++
-    "Entry points may not return nested tuples or abstract types.  Sorry."
-  show (InvalidEntryPointParamType loc fname p) =
-    "Entry point '" ++ nameToString fname ++ "' parameter '" ++ pretty p ++
-    "' at " ++ locStr loc ++ " has has invalid type.\n" ++
-    "Entry point parameters may not be tuples or abstract types.  Sorry."
   show (UnderscoreUse loc name) =
     "Use of " ++ pretty name ++ " at " ++ locStr loc ++
     ": variables prefixed with underscore must not be accessed."
@@ -1252,10 +1242,7 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct $ typeOf body')
 
-    when entry $ do
-      unless (okEntryPointType rettype) $
-        bad $ InvalidEntryPointReturnType loc fname
-
+    when entry $
       case maybe_retdecl of
         Just retdecl
           | Just problem <-
@@ -1263,10 +1250,6 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
               mapMaybe dimDeclName $ arrayDims' retdecl ->
                 bad $ EntryPointConstReturnDecl loc fname $ qualName problem
         _ -> return ()
-
-      forM_ (zip params' params) $ \(param, orig_param) ->
-        unless (okEntryPointType (patternType param)) $
-          bad $ InvalidEntryPointParamType (srclocOf param) fname orig_param
 
     return $ FunBind entry fname' maybe_retdecl'' (Info rettype) params' body' loc
 
@@ -1300,16 +1283,6 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
         returnAliasing (Tuple ets1) (Tuple ets2) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
-
-        okEntryPointType (Tuple ts) = all okEntryPointParamType ts
-        okEntryPointType t = okEntryPointParamType t
-
-        okEntryPointParamType Tuple{} = False
-        okEntryPointParamType (Prim _) = True
-        okEntryPointParamType (TypeVar _) = False
-        okEntryPointParamType (Array TupleArray{}) = False
-        okEntryPointParamType (Array PolyArray{}) = False
-        okEntryPointParamType (Array _) = True
 
         dimDeclName (NamedDim name) = Just name
         dimDeclName _               = Nothing
