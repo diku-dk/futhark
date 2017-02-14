@@ -87,13 +87,13 @@ type Copy op s = VName -> PyExp -> Imp.Space ->
 
 -- | Construct the Python array being returned from an entry point.
 type EntryOutput op s = VName -> Imp.SpaceId ->
-                        PrimType -> Imp.EntryPointType ->
+                        PrimType -> Imp.Signedness ->
                         [Imp.DimSize] ->
                         CompilerM op s PyExp
 
 -- | Unpack the array being passed to an entry point.
 type EntryInput op s = VName -> Imp.MemSize -> Imp.SpaceId ->
-                       PrimType -> Imp.EntryPointType ->
+                       PrimType -> Imp.Signedness ->
                        [Imp.DimSize] ->
                        PyExp ->
                        CompilerM op s ()
@@ -385,39 +385,58 @@ hashSpace = mconcat . map hashSpace'
         hashSpace' _ =
           HM.empty
 
--- | A description of a value returned by an entry point.
 data EntryPointValue =
   -- | Return a scalar of the given type stored in the given variable.
-    ScalarValue PrimType Imp.EntryPointType VName
+    ScalarValue PrimType Imp.Signedness VName
   -- | Return an array, given memory block, size, space, and
   -- dimensions of the array.
-  | ArrayValue VName Imp.MemSize Space PrimType Imp.EntryPointType [Imp.DimSize]
+  | ArrayValue VName Imp.MemSize Space PrimType Imp.Signedness [Imp.DimSize]
+
+-- | A description of a value returned or accepted by an entry point.
+data EntryPointExternal =
+    ExternalTransparent EntryPointValue
+  | ExternalOpaque String [EntryPointValue]
 
 createValue :: HM.HashMap VName VName
-             -> HM.HashMap VName Imp.Space -> Imp.ValueDecl
-             -> CompilerM op s EntryPointValue
-createValue _ _ (Imp.ScalarValue t ept name) =
-  return $ ScalarValue t ept name
-createValue sizes spaces (Imp.ArrayValue mem bt ept dims) = do
-  size <- maybe noMemSize return $ HM.lookup mem sizes
-  space <- maybe noMemSpace return $ HM.lookup mem spaces
-  return $ ArrayValue mem (Imp.VarSize size) space bt ept dims
-  where noMemSpace = fail $ "createValue: could not find space of memory block " ++ pretty mem
-        noMemSize = fail $ "createValue: could not find size of memory block " ++ pretty mem
+            -> HM.HashMap VName Imp.Space -> Imp.ExternalValue
+            -> CompilerM op s EntryPointExternal
+createValue sizes spaces ev =
+  case ev of
+    Imp.OpaqueValue desc ds ->
+      ExternalOpaque desc <$> mapM createValue' ds
+    Imp.TransparentValue v ->
+      ExternalTransparent <$> createValue' v
+  where createValue' (Imp.ScalarValue t ept name) =
+          return $ ScalarValue t ept name
+        createValue' (Imp.ArrayValue mem bt ept dims) = do
+          size <- maybe noMemSize return $ HM.lookup mem sizes
+          space <- maybe noMemSpace return $ HM.lookup mem spaces
+          return $ ArrayValue mem (Imp.VarSize size) space bt ept dims
+            where noMemSpace =
+                    fail $ "createValue: could not find space of memory block " ++ pretty mem
+                  noMemSize =
+                    fail $ "createValue: could not find size of memory block " ++ pretty mem
 
-entryPointOutput :: EntryPointValue -> CompilerM op s PyExp
-entryPointOutput (ScalarValue bt ept name) =
+entryPointOutput :: EntryPointExternal -> CompilerM op s PyExp
+entryPointOutput (ExternalOpaque desc vs) =
+  simpleCall "opaque" . (StringLiteral (pretty desc):) <$>
+  mapM (entryPointOutput . ExternalTransparent) vs
+entryPointOutput (ExternalTransparent (ScalarValue bt ept name)) =
   return $ simpleCall tf [Var $ pretty name]
   where tf = compilePrimToExtNp bt ept
-entryPointOutput (ArrayValue mem _ Imp.DefaultSpace bt ept dims) = do
+entryPointOutput (ExternalTransparent (ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
   let cast = Cast (Var $ pretty mem) (compilePrimTypeExt bt ept)
   return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
-entryPointOutput (ArrayValue mem _ (Imp.Space sid) bt ept dims) = do
+entryPointOutput (ExternalTransparent (ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
 
-entryPointInput :: EntryPointValue -> PyExp -> CompilerM op s ()
-entryPointInput (ScalarValue bt _ name) e = do
+entryPointInput :: EntryPointExternal -> PyExp -> CompilerM op s ()
+entryPointInput (ExternalOpaque _ vs) e =
+  zipWithM_ entryPointInput (map ExternalTransparent vs)
+  (map (Index (Field e "data") . IdxExp . Constant . value) [(0::Int32)..])
+
+entryPointInput (ExternalTransparent (ScalarValue bt _ name)) e = do
   let vname' = Var $ pretty name
       -- HACK: A Numpy int64 will signal an OverflowError if we pass
       -- it a number bigger than 2**63.  This does not happen if we
@@ -429,7 +448,8 @@ entryPointInput (ScalarValue bt _ name) e = do
       npobject = compilePrimToNp bt
       npcall = simpleCall npobject [ctcall]
   stm $ Assign vname' npcall
-entryPointInput (ArrayValue mem memsize Imp.DefaultSpace _ _ dims) e = do
+
+entryPointInput (ExternalTransparent (ArrayValue mem memsize Imp.DefaultSpace _ _ dims)) e = do
   zipWithM_ (unpackDim e) dims [0..]
   let dest = Var $ pretty mem
       unwrap_call = simpleCall "unwrapArray" [e]
@@ -443,42 +463,47 @@ entryPointInput (ArrayValue mem memsize Imp.DefaultSpace _ _ dims) e = do
 
   stm $ Assign dest unwrap_call
 
-entryPointInput (ArrayValue mem memsize (Imp.Space sid) bt ept dims) e = do
+entryPointInput (ExternalTransparent (ArrayValue mem memsize (Imp.Space sid) bt ept dims)) e = do
   unpack_input <- asks envEntryInput
   unpack_input mem memsize sid bt ept dims e
 
-extValueDeclName :: Imp.ValueDecl -> String
-extValueDeclName = extName . valueDeclName
+extValueDescName :: Imp.ExternalValue -> String
+extValueDescName (Imp.TransparentValue v) = extName $ valueDescName v
+extValueDescName (Imp.OpaqueValue desc _) = extName $ zEncodeString desc
 
 extName :: String -> String
 extName = (++"_ext")
 
-valueDeclName :: Imp.ValueDecl -> String
-valueDeclName (Imp.ScalarValue _ _ vname) = pretty vname
-valueDeclName (Imp.ArrayValue vname _ _ _) = pretty vname
+valueDescName :: Imp.ValueDesc -> String
+valueDescName (Imp.ScalarValue _ _ vname) = pretty vname
+valueDescName (Imp.ArrayValue vname _ _ _) = pretty vname
 
-readerElem :: PrimType -> Imp.EntryPointType -> String
+readerElem :: PrimType -> Imp.Signedness -> String
 readerElem (FloatType Float32) _ = "read_float"
 readerElem (FloatType Float64) _ = "read_double_signed"
 readerElem IntType{} _           = "read_int"
 readerElem Bool _                = "read_bool"
 readerElem Cert _                = error "Cert is never used. ReaderElem doesn't handle this"
 
-readInput :: Imp.ValueDecl -> PyStmt
-readInput decl@(Imp.ScalarValue bt ept _) =
+readInput :: Imp.ExternalValue -> PyStmt
+readInput (Imp.OpaqueValue desc _) =
+  Raise $ simpleCall "Exception"
+  [StringLiteral $ "Cannot read argument of type " ++ desc ++ "."]
+
+readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
   let reader' = readerElem bt ept
       stdin = Var "sys.stdin"
-  in Assign (Var $ extValueDeclName decl) $ simpleCall reader' [stdin]
+  in Assign (Var $ extValueDescName decl) $ simpleCall reader' [stdin]
 
-readInput decl@(Imp.ArrayValue _ bt ept dims) =
+readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ bt ept dims)) =
   let rank' = Var $ show $ length dims
       reader' = Var $ readerElem bt ept
       bt' = Var $ compilePrimType bt
       stdin = Var "sys.stdin"
-  in Assign (Var $ extValueDeclName decl) $ simpleCall "read_array"
+  in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
      [stdin, reader', StringLiteral $ pretty bt, rank', bt']
 
-printPrimStm :: PyExp -> PrimType -> Imp.EntryPointType -> PyStmt
+printPrimStm :: PyExp -> PrimType -> Imp.Signedness -> PyStmt
 printPrimStm val t ept =
   case (t, ept) of
     (IntType Int8, Imp.TypeUnsigned) -> p "%uu8"
@@ -527,24 +552,27 @@ printStm (ArrayValue mem memsize space bt ept (outer:shape)) e = do
 
           puts s = Exp $ simpleCall "sys.stdout.write" [StringLiteral s]
 
-printValue :: [(EntryPointValue, PyExp)] -> CompilerM op s [PyStmt]
+printValue :: [(EntryPointExternal, PyExp)] -> CompilerM op s [PyStmt]
 printValue = fmap concat . mapM (uncurry printValue')
   -- We copy non-host arrays to the host before printing.  This is
   -- done in a hacky way - we assume the value has a .get()-method
   -- that returns an equivalent Numpy array.  This works for PyOpenCL,
   -- but we will probably need yet another plugin mechanism here in
   -- the future.
-  where printValue' (ArrayValue mem memsize (Space _) bt ept shape) e =
-          printValue' (ArrayValue mem memsize DefaultSpace bt ept shape) $
+  where printValue' (ExternalOpaque desc _) _ =
+          return [Exp $ simpleCall "sys.stdout.write"
+                  [StringLiteral $ "#<opaque " ++ desc ++ ">"]]
+        printValue' (ExternalTransparent (ArrayValue mem memsize (Space _) bt ept shape)) e =
+          printValue' (ExternalTransparent (ArrayValue mem memsize DefaultSpace bt ept shape)) $
           simpleCall (pretty e ++ ".get") []
-        printValue' r e = do
+        printValue' (ExternalTransparent r) e = do
           p <- printStm r e
           return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
 prepareEntry :: (Name, Imp.Function op)
              -> CompilerM op s
                 (String, [String], [PyStmt], [PyStmt], [PyStmt],
-                 [(EntryPointValue, PyExp)])
+                 [(EntryPointExternal, PyExp)])
 prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
@@ -555,7 +583,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = d
 
   args <- mapM (createValue hashSizeInput hashSpaceInput) decl_args
   prepareIn <- collect $ zipWithM_ entryPointInput args $
-               map (Var . extValueDeclName) decl_args
+               map (Var . extValueDescName) decl_args
   results <- mapM (createValue hashSizeOutput hashSpaceOutput) decl_outputs
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
@@ -564,7 +592,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = d
       funCall = simpleCall fname' (fmap Var inputArgs)
       call = [Assign funTuple funCall]
 
-  return (nameToString fname, map extValueDeclName decl_args,
+  return (nameToString fname, map extValueDescName decl_args,
           prepareIn, call, prepareOut,
           zip results res)
 
@@ -670,7 +698,7 @@ compilePrimType t =
     Bool -> "ct.c_bool"
     Cert -> "ct.c_bool"
 
-compilePrimTypeExt :: PrimType -> Imp.EntryPointType -> String
+compilePrimTypeExt :: PrimType -> Imp.Signedness -> String
 compilePrimTypeExt t ept =
   case (t, ept) of
     (IntType Int8, Imp.TypeUnsigned) -> "ct.c_uint8"
@@ -698,7 +726,7 @@ compilePrimToNp bt =
     Bool -> "np.byte"
     Cert -> "np.byte"
 
-compilePrimToExtNp :: Imp.PrimType -> Imp.EntryPointType -> String
+compilePrimToExtNp :: Imp.PrimType -> Imp.Signedness -> String
 compilePrimToExtNp bt ept =
   case (bt,ept) of
     (IntType Int8, Imp.TypeUnsigned) -> "np.uint8"

@@ -39,7 +39,8 @@ compileProg module_name prog = do
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
              Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
-             Escape pyTestMain]
+             Escape pyTestMain,
+             Escape pyFunctions]
       let imports = [Import "sys" Nothing,
                      Import "numpy" $ Just "np",
                      Import "ctypes" $ Just "ct",

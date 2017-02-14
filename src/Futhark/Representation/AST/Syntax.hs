@@ -319,9 +319,15 @@ type EntryPoint = ([EntryPointType], [EntryPointType])
 
 -- | Every entry point argument and return value has an annotation
 -- indicating how it maps to the original source program type.
-data EntryPointType = TypeUnsigned -- ^ Is an unsigned integer or array
-                                   -- of unsigned integers.
-                    | TypeDirect -- ^ Maps directly.
+data EntryPointType = TypeUnsigned
+                      -- ^ Is an unsigned integer or array of unsigned
+                      -- integers.
+                    | TypeOpaque String Int
+                      -- ^ A black box type comprising this many core
+                      -- values.  The string is a human-readable
+                      -- description with no other semantics.
+                    | TypeDirect
+                      -- ^ Maps directly.
                     deriving (Eq, Show, Ord)
 
 -- | Type alias for namespace reasons.

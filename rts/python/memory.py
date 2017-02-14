@@ -21,3 +21,12 @@ def indexArray(x, offset, bt, nptype):
 def writeScalarArray(x, offset, v):
   offset = np.asscalar(offset)
   ct.memmove(ct.addressof(x.contents)+offset, ct.addressof(v), ct.sizeof(v))
+
+# An opaque Futhark value.
+class opaque(object):
+  def __init__(self, desc, *payload):
+    self.data = payload
+    self.desc = desc
+
+  def __repr__(self):
+    return "<opaque Futhark value of type {}>".format(self.desc)

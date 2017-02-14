@@ -13,9 +13,9 @@ module Futhark.CodeGen.ImpCode
   ( Functions (..)
   , Function
   , FunctionT (..)
-  , EntryPoint
-  , EntryPointType (..)
-  , ValueDecl (..)
+  , ValueDesc (..)
+  , Signedness (..)
+  , ExternalValue (..)
   , Param (..)
   , paramName
   , Size (..)
@@ -68,7 +68,7 @@ import Prelude hiding (foldr)
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
-import Futhark.Representation.AST.Syntax (Space(..), SpaceId, EntryPoint, EntryPointType(..))
+import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
@@ -96,9 +96,26 @@ paramName (ScalarParam name _) = name
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
 
-data ValueDecl = ArrayValue VName PrimType EntryPointType [DimSize]
-               | ScalarValue PrimType EntryPointType VName
+data Signedness = TypeUnsigned
+                | TypeDirect
+                deriving (Show)
+
+-- | A description of an externally meaningful value.
+data ValueDesc = ArrayValue VName PrimType Signedness [DimSize]
+               -- ^ An array with memory block, element type, signedness of element
+               -- type (if applicable), and shape.
+               | ScalarValue PrimType Signedness VName
+               -- ^ A scalar value with signedness if applicable.
                deriving (Show)
+
+-- | ^ An externally visible value.  This can be an opaque value
+-- (covering several physical internal values), or a single value that
+-- can be used externally.
+data ExternalValue = OpaqueValue String [ValueDesc]
+                     -- ^ The string is a human-readable description
+                     -- with no other semantics.
+                   | TransparentValue ValueDesc
+                 deriving (Show)
 
 -- | A imperative function, containing the body as well as its
 -- low-level inputs and outputs, as well as its high-level arguments
@@ -108,8 +125,8 @@ data FunctionT a = Function { functionEntry :: Bool
                             , functionOutput :: [Param]
                             , functionInput :: [Param]
                             , functionbBody :: Code a
-                            , functionResult :: [ValueDecl]
-                            , functionArgs :: [ValueDecl]
+                            , functionResult :: [ExternalValue]
+                            , functionArgs :: [ExternalValue]
                             }
                  deriving (Show)
 
@@ -234,7 +251,7 @@ instance Pretty Param where
     where space' = case space of Space s      -> text "@" <> text s
                                  DefaultSpace -> mempty
 
-instance Pretty ValueDecl where
+instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
     ppr t <+> ppr name <> ept'
     where ept' = case ept of TypeUnsigned -> text " (unsigned)"
@@ -245,6 +262,11 @@ instance Pretty ValueDecl where
           ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
 
+instance Pretty ExternalValue where
+  ppr (TransparentValue v) = ppr v
+  ppr (OpaqueValue desc vs) =
+    text "opaque" <+> text desc <+>
+    nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty Size where
   ppr (ConstSize x) = ppr x

@@ -3,6 +3,7 @@ module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
     internaliseReturnType
+  , internaliseEntryReturnType
   , internaliseParamTypes
   , internaliseType
   , internaliseUniqueness
@@ -45,8 +46,21 @@ internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als
                                        HM.HashMap VName Int,
                                        ConstParams)
 internaliseReturnType t = do
-  (t', (_, subst, cm)) <- runStateT (internaliseDeclType' AssertDims t) (0, HM.empty, mempty)
-  return (t', subst, cm)
+  (ts', subst, cm) <- internaliseEntryReturnType t
+  return (concat ts', subst, cm)
+
+-- | As 'internaliseReturnType', but returns components of a top-level
+-- tuple type piecemeal.
+internaliseEntryReturnType :: E.TypeBase (E.ShapeDecl VName) als
+                           -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
+                                            HM.HashMap VName Int,
+                                            ConstParams)
+internaliseEntryReturnType t = do
+  let ts = case t of E.Tuple tts -> tts
+                     _           -> [t]
+  (ts', (_, subst, cm)) <-
+    runStateT (mapM (internaliseDeclType' AssertDims) ts) (0, HM.empty, mempty)
+  return (ts', subst, cm)
 
 internaliseType :: E.ArrayShape shape =>
                    E.TypeBase shape als
