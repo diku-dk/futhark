@@ -48,7 +48,7 @@ script:
  # Check the automatic indentation feature of the futhark-mode.el Emacs
  # editing mode.
  - if [ "$STACK_YAML" = stack.yaml ]; then
-     cd tools && ./futhark-mode.el-corpus-test.sh
+     cd tools && ./futhark-mode.el-corpus-test.sh;
    fi
 
 # EOF
