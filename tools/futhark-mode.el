@@ -249,9 +249,12 @@ In general, prefer as little indentation as possible."
                 (looking-at "{")
                 (or
                  (futhark-keyword-backward "module")
+                 (futhark-keyword-backward "open")
                  (and
                   (ignore-errors (backward-up-list 1) t)
-                  (futhark-keyword-backward "module")))
+                  (or
+                   (futhark-keyword-backward "module")
+                   (futhark-keyword-backward "open"))))
                 (+ futhark-indent-level (current-column))))
              0))
 
