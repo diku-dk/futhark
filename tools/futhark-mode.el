@@ -1,20 +1,27 @@
 ;;; futhark-mode.el --- major mode for editing Futhark source files
 
 ;; Copyright (C) DIKU 2013-2017, University of Copenhagen
+;;
+;; URL: https://github.com/HIPERFIT/futhark
+;; Keywords: languages
+;; Version: 0.1
+
+;; This file is not part of GNU Emacs.
+
+;;; License:
+;; ICS <https://github.com/HIPERFIT/futhark/blob/master/LICENSE>
 
 ;;; Commentary:
-;; This mode provides syntax highlighting and automatic indentation for
-;; Futhark source files.  There is sadly yet no automatic recompilation
-;; or interactive environment, mostly because there is no good futharki
-;; yet.
+;; Futhark is a small programming language designed to be compiled to
+;; efficient GPU code.  This Emacs mode provides syntax highlighting and
+;; conservative automatic indentation for Futhark source code.
 ;;
-;; This mode provides the following features for Futhark source files:
+;; Define your local keybindings in `futhark-mode-map'.  Add startup
+;; functions to `futhark-mode-hook'.
 ;;
-;;   + syntax highlighting
-;;   + automatic indentation
-;;
-;; To load futhark-mode automatically on Emacs startup, put this file in
-;; your load path and require the mode, e.g. something like this:
+;; Manual installation: To load futhark-mode automatically on Emacs
+;; startup, put this file in your load path and require the mode,
+;; e.g. something like this:
 ;;
 ;;   (add-to-list 'load-path "~/.emacs.d/futhark-mode")
 ;;   (require 'futhark-mode)
@@ -24,10 +31,6 @@
 ;;
 ;; This will also tell your Emacs that ".fut" files are to be handled by
 ;; futhark-mode.
-;;
-;; Define your local keybindings in `futhark-mode-map', and add startup
-;; functions to `futhark-mode-hook'.
-
 
 ;;; Code:
 
