@@ -142,7 +142,7 @@ module colourspace(C: colour): colourspace with colour = C.colour = {
   val magenta: colour = add red blue
   val violet: colour = add magenta blue
 
-  fun gray (d: f32): colour = from_rgba d d d d
+  fun gray (d: f32): colour = from_rgba d d d 1f32
 }
 
 module argb = colourspace(argb_colour)
