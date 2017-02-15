@@ -747,8 +747,18 @@ compilePrimValue (IntValue (Int8Value v)) = Constant $ value v
 compilePrimValue (IntValue (Int16Value v)) = Constant $ value v
 compilePrimValue (IntValue (Int32Value v)) = Constant $ value v
 compilePrimValue (IntValue (Int64Value v)) = Constant $ value v
-compilePrimValue (FloatValue (Float32Value v)) = Constant $ value v
-compilePrimValue (FloatValue (Float64Value v)) = Constant $ value v
+compilePrimValue (FloatValue (Float32Value v))
+  | isInfinite v =
+      if v > 0 then Var "np.inf" else Var "-np.inf"
+  | isNaN v =
+      Var "np.nan"
+  | otherwise = Constant $ value v
+compilePrimValue (FloatValue (Float64Value v))
+  | isInfinite v =
+      if v > 0 then Var "np.inf" else Var "-np.inf"
+  | isNaN v =
+      Var "np.nan"
+  | otherwise = Constant $ value v
 compilePrimValue (BoolValue v) = simpleCall "bool" [Constant $ BoolValue v]
 compilePrimValue Checked = Var "Cert"
 
