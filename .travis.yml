@@ -22,7 +22,7 @@ addons:
     - python
     - python-numpy
     - libgmp-dev
-    - emacs
+    - emacs24
 
 before_install:
  - export PATH=$HOME/.local/bin:$PATH
