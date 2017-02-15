@@ -34,15 +34,6 @@ module Futhark.Representation.Primitive
 
          -- ** Binary Operations
        , doBinOp
-       , doAdd, doFAdd
-       , doSub, doFSub
-       , doMul, doFMul
-       , doUDiv, doSDiv, doFDiv
-       , doUMod, doSMod
-       , doSQuot, doSRem
-       , doShl, doLShr, doAShr
-       , doAnd, doOr, doXor
-       , doPow, doFPow
 
          -- ** Conversion Operations
        , doConvOp
@@ -372,14 +363,14 @@ doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
 
 doBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
 doBinOp Add{}    = doIntBinOp doAdd
-doBinOp FAdd{}   = doFloatBinOp doFAdd
+doBinOp FAdd{}   = doFloatBinOp (+) (+)
 doBinOp Sub{}    = doIntBinOp doSub
-doBinOp FSub{}   = doFloatBinOp doFSub
+doBinOp FSub{}   = doFloatBinOp (-) (-)
 doBinOp Mul{}    = doIntBinOp doMul
-doBinOp FMul{}   = doFloatBinOp doFMul
+doBinOp FMul{}   = doFloatBinOp (*) (*)
 doBinOp UDiv{}   = doRiskyIntBinOp doUDiv
 doBinOp SDiv{}   = doRiskyIntBinOp doSDiv
-doBinOp FDiv{}   = doFloatBinOp doFDiv
+doBinOp FDiv{}   = doFloatBinOp (/) (/)
 doBinOp UMod{}   = doRiskyIntBinOp doUMod
 doBinOp SMod{}   = doRiskyIntBinOp doSMod
 doBinOp SQuot{}  = doRiskyIntBinOp doSQuot
@@ -391,7 +382,7 @@ doBinOp And{}    = doIntBinOp doAnd
 doBinOp Or{}     = doIntBinOp doOr
 doBinOp Xor{}    = doIntBinOp doXor
 doBinOp Pow{}    = doIntBinOp doPow
-doBinOp FPow{}   = doFloatBinOp doFPow
+doBinOp FPow{}   = doFloatBinOp (**) (**)
 doBinOp LogAnd{} = doBoolBinOp (&&)
 doBinOp LogOr{}  = doBoolBinOp (||)
 
@@ -407,11 +398,15 @@ doRiskyIntBinOp f (IntValue v1) (IntValue v2) =
   IntValue <$> f v1 v2
 doRiskyIntBinOp _ _ _ = Nothing
 
-doFloatBinOp :: (FloatValue -> FloatValue -> FloatValue) -> PrimValue -> PrimValue
+doFloatBinOp :: (Float -> Float -> Float)
+             -> (Double -> Double -> Double)
+             -> PrimValue -> PrimValue
              -> Maybe PrimValue
-doFloatBinOp f (FloatValue v1) (FloatValue v2) =
-  Just $ FloatValue $ f v1 v2
-doFloatBinOp _ _ _ = Nothing
+doFloatBinOp f32 _ (FloatValue (Float32Value v1)) (FloatValue (Float32Value v2)) =
+  Just $ FloatValue $ Float32Value $ f32 v1 v2
+doFloatBinOp _ f64 (FloatValue (Float64Value v1)) (FloatValue (Float64Value v2)) =
+  Just $ FloatValue $ Float64Value $ f64 v1 v2
+doFloatBinOp _ _ _ _ = Nothing
 
 doBoolBinOp :: (Bool -> Bool -> Bool) -> PrimValue -> PrimValue
             -> Maybe PrimValue
@@ -423,25 +418,13 @@ doBoolBinOp _ _ _ = Nothing
 doAdd :: IntValue -> IntValue -> IntValue
 doAdd v1 v2 = intValue (intValueType v1) $ intToInt64 v1 + intToInt64 v2
 
--- | Floating-point addition.
-doFAdd :: FloatValue -> FloatValue -> FloatValue
-doFAdd v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 + floatToDouble v2
-
 -- | Integer subtraction.
 doSub :: IntValue -> IntValue -> IntValue
 doSub v1 v2 = intValue (intValueType v1) $ intToInt64 v1 - intToInt64 v2
 
--- | Floating-point subtraction.
-doFSub :: FloatValue -> FloatValue -> FloatValue
-doFSub v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 - floatToDouble v2
-
 -- | Integer multiplication.
 doMul :: IntValue -> IntValue -> IntValue
 doMul v1 v2 = intValue (intValueType v1) $ intToInt64 v1 * intToInt64 v2
-
--- | Floating-point multiplication.
-doFMul :: FloatValue -> FloatValue -> FloatValue
-doFMul v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 * floatToDouble v2
 
 -- | Unsigned integer division.  Rounds towards
 -- negativity infinity.  Note: this is different
@@ -458,10 +441,6 @@ doSDiv :: IntValue -> IntValue -> Maybe IntValue
 doSDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `div` intToInt64 v2
-
--- | Floating-point division.
-doFDiv :: FloatValue -> FloatValue -> FloatValue
-doFDiv v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 / floatToDouble v2
 
 -- | Unsigned integer modulus; the countepart to 'UDiv'.
 doUMod :: IntValue -> IntValue -> Maybe IntValue
@@ -516,10 +495,6 @@ doXor v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `xor` intToWord64 v2
 -- | Signed integer exponentatation.
 doPow :: IntValue -> IntValue -> IntValue
 doPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
-
--- | Floating-point exponentatation.
-doFPow :: FloatValue -> FloatValue -> FloatValue
-doFPow v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 ** floatToDouble v2
 
 doConvOp :: ConvOp -> PrimValue -> Maybe PrimValue
 doConvOp (ZExt _ to) (IntValue v)     = Just $ IntValue $ doZExt v to

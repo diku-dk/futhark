@@ -42,6 +42,9 @@ module type real = {
 
   val isinf: t -> bool
   val isnan: t -> bool
+
+  val inf: t
+  val nan: t
 }
 
 module i8: (integral with t = i8) = {
@@ -230,6 +233,9 @@ module f32: (real with t = f32) = {
 
   fun isinf (x: f32) = Intrinsics.isinf32 x
   fun isnan (x: f32) = Intrinsics.isnan32 x
+
+  val inf = 1f32 / 0f32
+  val nan = 0f32 / 0f32
 }
 
 module f64: (real with t = f64) = {
@@ -266,4 +272,7 @@ module f64: (real with t = f64) = {
 
   fun isinf (x: f64) = Intrinsics.isinf64 x
   fun isnan (x: f64) = Intrinsics.isnan64 x
+
+  val inf = 1f64 / 0f64
+  val nan = 0f64 / 0f64
 }
