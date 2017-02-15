@@ -37,11 +37,11 @@
 (add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
 
 (defvar futhark-mode-hook nil
-  "Hook for futhark-mode.  Is run whenever the mode is entered.")
+  "Hook for `futhark-mode'.  Is run whenever the mode is entered.")
 
 (defvar futhark-mode-map
   (make-keymap)
-  "Keymap for futhark-mode.")
+  "Keymap for `futhark-mode'.")
 
 
 ;;; Highlighting
@@ -203,7 +203,7 @@
 ;;; Indentation
 
 (defvar futhark-indent-level 2
-  "The basic indent level for futhark-mode.")
+  "The basic indent level for `futhark-mode'.")
 
 (defun futhark-indent-line ()
   "Indent current line as Futhark code."
@@ -382,7 +382,7 @@ In general, prefer as little indentation as possible."
        ))))
 
 (defun futhark-min (a b)
-  "Like `min', but more accepting."
+  "Like `min', but also accepts nil values in A and B."
   (or (and (eq nil a) b)
       (and (eq nil b) a)
       (and (not (eq nil a))
@@ -390,7 +390,7 @@ In general, prefer as little indentation as possible."
            (min a b))))
 
 (defun futhark-max (a b)
-  "Like `max', but more accepting."
+  "Like `max', but also accepts nil values in A and B."
   (or (and (eq nil a) b)
       (and (eq nil b) a)
       (and (not (eq nil a))
