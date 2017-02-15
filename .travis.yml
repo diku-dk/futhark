@@ -22,7 +22,7 @@ addons:
     - python
     - python-numpy
     - libgmp-dev
-    - emacs-nox
+    - emacs
 
 before_install:
  - export PATH=$HOME/.local/bin:$PATH
@@ -47,6 +47,8 @@ script:
 
  # Check the automatic indentation feature of the futhark-mode.el Emacs
  # editing mode.
- - cd tools && ./futhark-mode.el-corpus-test.sh
+ - if [ "$STACK_YAML" = stack.yaml ]; then
+     cd tools && ./futhark-mode.el-corpus-test.sh
+   fi
 
 # EOF
