@@ -514,6 +514,7 @@ Ignore BEGIN, END, and LENGTH (present to satisfy Emacs)."
 
 ;;; Actual mode declaration
 
+;;;###autoload
 (define-derived-mode futhark-mode fundamental-mode "Futhark"
   "Major mode for editing Futhark source files."
   :syntax-table futhark-mode-syntax-table
