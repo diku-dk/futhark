@@ -22,7 +22,6 @@ addons:
     - python
     - python-numpy
     - libgmp-dev
-    - emacs24
 
 before_install:
  - export PATH=$HOME/.local/bin:$PATH
@@ -43,12 +42,6 @@ script:
  # Check for style issues.
  - if [ "$STACK_YAML" = stack.yaml ]; then
      stack install hlint --fast && tools/style-check.sh src;
-   fi
-
- # Check the automatic indentation feature of the futhark-mode.el Emacs
- # editing mode.
- - if [ "$STACK_YAML" = stack.yaml ]; then
-     cd tools && ./futhark-mode.el-corpus-test.sh;
    fi
 
 # EOF
