@@ -434,8 +434,8 @@ simplifyBinOp look _ (BinOp (SMod t) e1 e2)
   | isCt1 e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
   | Var v1 <- e1,
-    Just (BasicOp (BinOp SMod{} e3 e4)) <- look v1,
-    e4 == e2 = Just $ SubExp e3
+    Just (BasicOp (BinOp SMod{} _ e4)) <- look v1,
+    e4 == e2 = Just $ SubExp e1
 
 simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt0 e1 = Just $ SubExp e1
@@ -582,8 +582,8 @@ simplifyIndexing vtable seType ocs idd inds consuming =
     Just (Rotate cs offsets a) -> Just $ do
       dims <- arrayDims <$> lookupType a
       let adjustI i o d = do
-            i_m_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int32) i o
-            letSubExp "rot_i" (BasicOp $ BinOp (SMod Int32) i_m_o d)
+            i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int32) i o
+            letSubExp "rot_i" (BasicOp $ BinOp (SMod Int32) i_p_o d)
           adjust (DimFix i, o, d) =
             DimFix <$> adjustI i o d
           adjust (DimSlice i n s, o, d) =
