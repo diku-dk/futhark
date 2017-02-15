@@ -1015,11 +1015,15 @@ compilePrimValue (IntValue (Int64Value k)) = [C.cexp|$int:k|]
 compilePrimValue (FloatValue (Float64Value x))
   | isInfinite x =
       if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+  | isNaN x =
+      [C.cexp|NAN|]
   | otherwise =
       [C.cexp|$double:(toRational x)|]
 compilePrimValue (FloatValue (Float32Value x))
   | isInfinite x =
       if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+  | isNaN x =
+      [C.cexp|NAN|]
   | otherwise =
       [C.cexp|$float:(toRational x)|]
 
