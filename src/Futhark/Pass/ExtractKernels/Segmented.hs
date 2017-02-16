@@ -388,6 +388,9 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
   let kerneldebughints = KernelDebugHints kernelname
                          [ ("num_segment", num_segments)
                          , ("segment_size", segment_size)
+                         , ("num_groups", num_groups)
+                         , ("group_size", group_size)
+                         , ("elements_per_thread", elements_per_thread)
                          ]
 
   let kernel = Kernel kerneldebughints cs space kernel_return_types $
@@ -647,8 +650,6 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
                          , ("group_size", group_size)
                          , ("num_segments_per_group", num_segments_per_group)
                          , ("active_threads_per_group", active_threads_per_group)
-                         , ("segments_in_last_group", segments_in_last_group)
-                         , ("active_threads_in_last_group", active_threads_in_last_group)
                          ]
 
   let kernel = Kernel kerneldebughints cs space kernel_return_types $
