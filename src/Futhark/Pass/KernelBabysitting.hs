@@ -146,7 +146,7 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
                 isThreadLocal v =
                   not $ HS.null $
                   thread_variant `HS.intersection`
-                  HM.lookupDefault mempty v variance
+                  HM.lookupDefault (HS.singleton v) v variance
 
                 sizeSubst (Constant v) = Just $ Constant v
                 sizeSubst (Var v)
@@ -217,9 +217,8 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
       | (is, rem_slice) <- splitSlice slice,
         not $ null rem_slice,
         not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
-        is /= map Var (take (length is) thread_gids)
-        || length is == length thread_gids,
-        any isThreadLocal (HS.toList $ freeIn rem_slice) -> do
+        is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
+        any isThreadLocal (HS.toList $ freeIn is) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
