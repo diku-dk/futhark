@@ -126,7 +126,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
   group_size <- letSubExp "group_size" $ Op GroupSize
   num_segments_per_group <- letSubExp "num_segments_per_group" $
-    BasicOp $ BinOp (UDiv Int32) group_size segment_size
+    BasicOp $ BinOp (SQuot Int32) group_size segment_size
 
   -- Instead of making this @if@ here, we could run "multiple groups per
   -- segment" first, and if the number of groups per segment was 1, we could
@@ -302,7 +302,7 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
 
   ((segment_index, index_within_segment), calc_segindex_stms) <- runBinder $ do
     segment_index <- letSubExp "segment_index" $
-      BasicOp $ BinOp (SDiv Int32) (Var $ spaceGroupId space) num_groups_per_segment
+      BasicOp $ BinOp (SQuot Int32) (Var $ spaceGroupId space) num_groups_per_segment
 
     -- localId + (group_size * (groupId % num_groups_per_segment))
     index_within_segment <- letSubExp "index_within_segment" =<<
@@ -310,7 +310,7 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
           (eSubExp $ Var $ spaceLocalId space)
           (eBinOp (Mul Int32)
              (eSubExp group_size)
-             (eBinOp (SMod Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
+             (eBinOp (SRem Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
           )
     return (segment_index, index_within_segment)
 
@@ -443,7 +443,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
   group_size <- letSubExp "group_size" $ Op GroupSize
 
   num_segments_per_group <- letSubExp "num_segments_per_group" $
-    BasicOp $ BinOp (UDiv Int32) group_size segment_size
+    BasicOp $ BinOp (SQuot Int32) group_size segment_size
 
   num_groups <- letSubExp "num_groups" =<<
     eDivRoundingUp Int32 (eSubExp num_segments) (eSubExp num_segments_per_group)
@@ -454,7 +454,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
   active_threads_per_group <- letSubExp "active_threads_per_group" $
     BasicOp $ BinOp (Mul Int32) segment_size num_segments_per_group
 
-  let remainder_last_group = eBinOp (UMod Int32) (eSubExp num_segments) (eSubExp num_segments_per_group)
+  let remainder_last_group = eBinOp (SRem Int32) (eSubExp num_segments) (eSubExp num_segments_per_group)
 
   segments_in_last_group <- letSubExp "seg_in_last_group" =<<
     eIf (eCmpOp (CmpEq $ IntType Int32) remainder_last_group
@@ -478,11 +478,11 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
   ((segment_index, index_within_segment), calc_segindex_stms) <- runBinder $ do
     segment_index <- letSubExp "segment_index" =<<
       eBinOp (Add Int32)
-        (eBinOp (UDiv Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size))
+        (eBinOp (SQuot Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size))
         (eBinOp (Mul Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_segments_per_group))
 
     index_within_segment <- letSubExp "index_within_segment" =<<
-      eBinOp (UMod Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size)
+      eBinOp (SRem Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size)
 
     return (segment_index, index_within_segment)
 
@@ -546,7 +546,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
 
         isfirstinsegment <- letExp "isfirstinsegment" =<<
           eCmpOp (CmpEq $ IntType Int32)
-            (eBinOp (UMod Int32) (eSubExp lid) (eSubExp segment_size))
+            (eBinOp (SRem Int32) (eSubExp lid) (eSubExp segment_size))
             (eSubExp zero)
 
         -- We will perform a segmented-scan, so all the prime variables here
@@ -573,7 +573,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
           zip (false:nes) (map patElemName combine_red_pes')
 
         islastinsegment <- letExp "islastinseg" =<< eCmpOp (CmpEq $ IntType Int32)
-            (eBinOp (UMod Int32) (eSubExp lid) (eSubExp segment_size))
+            (eBinOp (SRem Int32) (eSubExp lid) (eSubExp segment_size))
             (eBinOp (Sub Int32) (eSubExp segment_size) (eSubExp one))
 
         redoffset <- letSubExp "redoffset" =<<
