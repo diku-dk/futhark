@@ -434,14 +434,15 @@ The net effect seems to be that it works ok."
 
 (defun futhark-back-actual-line ()
   "Go back to the first non-empty line, or return nil trying."
-  (while (and (not (bobp))
-              (forward-line -1)
-              (progn (beginning-of-line)
-                     (setq bound (point))
-                     (end-of-line)
-                     t)
-              (ignore-errors
-                (re-search-backward "^[[:space:]]*$" bound)))))
+  (let (bound)
+    (while (and (not (bobp))
+                (forward-line -1)
+                (progn (beginning-of-line)
+                       (setq bound (point))
+                       (end-of-line)
+                       t)
+                (ignore-errors
+                  (re-search-backward "^[[:space:]]*$" bound))))))
 
 (defun futhark-keyword-backward (word)
   "Go to a keyword WORD before the current position.
