@@ -465,17 +465,6 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
   active_threads_in_last_group <- letSubExp "active_threads_last_group" $
     BasicOp $ BinOp (Mul Int32) segment_size segments_in_last_group
 
-  -- FIXME: Can't handle map-invariant variables of more than one dimension
-  -- right now. Don't even think I have an example of this right now
-
-  case (inps, ispace) of
-    ([], _) -> return ()
-    (_, []) -> return ()
-    (_, [(_, se)]) -> when (se /= num_segments) $ fail $
-      "segredomap: the ispace given had a single entry, which uses a different size=" ++ pretty se ++
-      "than num_segments=" ++ pretty num_segments
-    _ -> fail "segredomap: FIXME: computing segredoamp using a segmented scan currently cannot handle more than one map nested on top, when there are map-invariant variables used."
-
   -- the array passed here is the structure for how to layout the kernel space
   space <- newKernelSpace (num_groups, group_size, num_threads) $
     FlatThreadSpace []
@@ -518,11 +507,20 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
           pe_name <- newVName "fold_map"
           return $ PatElem pe_name BindVar map_t
 
+        -- TODO: The ispace index is calculated in a bit different way than it
+        -- would have been done if the ThreadSpace was used. However, this
+        -- works. Maybe ask Troels if doing it the other way has some benefit?
+        let calc_ispace_index prev_val (vn,size) = do
+              let pe = PatElem vn BindVar i32
+              addStm $ Let (Pattern [] [pe]) () $ BasicOp $ BinOp (SRem Int32) prev_val size
+              letSubExp "tmp_val" $ BasicOp $ BinOp (SQuot Int32) prev_val size
+        foldM_ calc_ispace_index segment_index (reverse ispace)
+
         forM_ inps $ \kin -> do
           let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
           let arr = kernelInputArray kin
           arrtp <- lookupType arr
-          let slice = fullSlice arrtp [DimFix segment_index]
+          let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
           addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
 
         -- Index input array to get arguments to fold_lam
