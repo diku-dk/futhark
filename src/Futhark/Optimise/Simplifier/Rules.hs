@@ -896,9 +896,9 @@ simplifyScalExp vtable (Let pat _ e) = do
         Just ses <- lth0s se,
         Right True <- and <$> mapM truish ses ->
         letBind_ pat $ BasicOp $ SubExp $ Constant $ BoolValue True
-      | not $ isConstant se,
-        SE.Val val <- AS.simplify se ranges ->
-        letBind_ pat $ BasicOp $ SubExp $ Constant val
+      | isNothing $ valOrVar se,
+        Just se' <- valOrVar $ AS.simplify se ranges ->
+        letBind_ pat $ BasicOp $ SubExp se'
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
         lth0s se@(SE.RelExp SE.LTH0 _) = Just [se]
@@ -908,6 +908,10 @@ simplifyScalExp vtable (Let pat _ e) = do
 
         isConstant SE.Val{} = True
         isConstant _        = False
+
+        valOrVar (SE.Val v)  = Just $ Constant v
+        valOrVar (SE.Id v _) = Just $ Var v
+        valOrVar _           = Nothing
 
         truish se =
           (SE.Val (BoolValue True)==) . mkDisj <$> AS.mkSuffConds se ranges
