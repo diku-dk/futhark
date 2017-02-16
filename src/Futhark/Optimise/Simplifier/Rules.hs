@@ -334,6 +334,17 @@ simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs1 perm1 v1)))
                    | otherwise =
                        pe
 
+-- Rearranging a replicate where the outer dimension is left untouched.
+simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs perm v1)))
+  | Just (Replicate dims (Var v2)) <- asBasicOp =<< ST.lookupExp v1 vtable,
+    num_dims <- shapeRank dims,
+    (rep_perm, rest_perm) <- splitAt num_dims perm,
+    not $ null rest_perm,
+    rep_perm == [0..length rep_perm-1] = do
+      v <- letSubExp "rearrange_replicate" $
+           BasicOp $ Rearrange cs (map (subtract num_dims) rest_perm) v2
+      letBind_ pat $ BasicOp $ Replicate dims v
+
 simplifyRearrange _ _ = cannotSimplify
 
 isDropTake :: VName -> ST.SymbolTable lore
