@@ -2020,7 +2020,8 @@ checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
-  (binop', (_, ret)) <- lookupFunction binop [argType first_arg, argType second_arg] loc
+  (binop', (paramtypes, ret)) <- lookupFunction binop [argType first_arg, argType second_arg] loc
+  checkFuncall Nothing loc paramtypes [first_arg,second_arg]
   return (x', binop', fromStruct $ removeShapeAnnotations ret)
 
 checkDim :: SrcLoc -> DimDecl Name -> TypeM (DimDecl VName)
