@@ -5,6 +5,7 @@
 ;; URL: https://github.com/HIPERFIT/futhark
 ;; Keywords: languages
 ;; Version: 0.1
+;; Package-Requires: ((cl-lib "0.5"))
 
 ;; This file is not part of GNU Emacs.
 
@@ -34,7 +35,7 @@
 
 ;;; Code:
 
-(require 'cl) ; `some'
+(require 'cl-lib)
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
@@ -420,7 +421,7 @@ In general, prefer as little indentation as possible."
 
 (defun futhark-is-looking-at-keyword ()
   "Check if we are currently looking at a keyword."
-  (some 'futhark-looking-at-word futhark-keywords))
+  (cl-some 'futhark-looking-at-word futhark-keywords))
 
 (defun futhark-backward-part ()
   "Try to jump back one sexp.
