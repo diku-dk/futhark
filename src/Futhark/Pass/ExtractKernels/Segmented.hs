@@ -465,16 +465,16 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
   active_threads_in_last_group <- letSubExp "active_threads_last_group" $
     BasicOp $ BinOp (Mul Int32) segment_size segments_in_last_group
 
-  total_wanted_threads <- letSubExp "totalwantedthreads" =<<
-    eBinOp (Add Int32)
-        (eBinOp (Mul Int32)
-            (eBinOp (Sub Int32) (eSubExp num_groups) (eSubExp one))
-            (eSubExp group_size))
-        (eSubExp active_threads_in_last_group)
+  -- FIXME: Can't handle map-invariant variables of more than one dimension
+  -- right now. Don't even think I have an example of this right now
 
-  gtid_vn <- newVName "gtid"
-
-  -- FIXME: Can't handle map-invariant variables right now, eg. ex4.fut
+  case (inps, ispace) of
+    ([], _) -> return ()
+    (_, []) -> return ()
+    (_, [(_, se)]) -> when (se /= num_segments) $ fail $
+      "segredomap: the ispace given had a single entry, which uses a different size=" ++ pretty se ++
+      "than num_segments=" ++ pretty num_segments
+    _ -> fail "segredomap: FIXME: computing segredoamp using a segmented scan currently cannot handle more than one map nested on top, when there are map-invariant variables used."
 
   -- the array passed here is the structure for how to layout the kernel space
   space <- newKernelSpace (num_groups, group_size, num_threads) $
@@ -518,12 +518,12 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
           pe_name <- newVName "fold_map"
           return $ PatElem pe_name BindVar map_t
 
-        -- kernel_input_stms <- forM inps $ \kin -> do
-        --   let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
-        --   let arr = kernelInputArray kin
-        --   arrtp <- lookupType arr
-        --   let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
-        --   return $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
+        forM_ inps $ \kin -> do
+          let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
+          let arr = kernelInputArray kin
+          arrtp <- lookupType arr
+          let slice = fullSlice arrtp [DimFix segment_index]
+          addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
 
         -- Index input array to get arguments to fold_lam
         let arr_params = drop num_redres $ lambdaParams fold_lam
