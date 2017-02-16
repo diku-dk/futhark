@@ -24,19 +24,17 @@
 --      [ -0.0144179417871814 , 0.0157411263968213 , 0.0125315353728014  ],
 --      [ -0.0121497422218761 , 0.0182904634062437 , 0.0151125070556484  ]
 -- ]
--- -- md_starts[3]
--- [ 3758.0500000000001819, 11840.0000000000000000, 1200.0000000000000000 ]
 -- [	[ 2.2372928847280580, 1.0960951589853829, 0.7075902730592357, 0.8166828043492210, 0.7075902730592357 ],	--bb_sd[5] (standard deviation)
 --      [ 0.0000000000000000, 0.5998905309250137, 0.4993160054719562, 0.6669708029197080, 0.5006839945280438 ],	--bb_lw[5]
 --      [ 0.0000000000000000, 0.4001094690749863, 0.5006839945280438, 0.3330291970802919, 0.4993160054719562 ]	--bb_rw[5]
 -- ]
 -- }
 -- output {
---   [[5588.085155446795, 15555.466596921435, 1576.3410712135153],
---    [6756.537935152432, 19222.803287709357, 1891.6096055103294],
---    [7596.473396915333, 22764.958002561074, 2196.0263023695247],
---    [8744.595950505505, 28090.879539209436, 2563.082633667557],
---    [9882.132352013321, 33465.152508625804, 2992.2059021836353]]
+--   [[1.4869640253447387f64, 1.3138063004156617f64, 1.313617559344596f64],
+--    [1.7978839917383833f64, 1.6235475749754527f64, 1.5763413379252744f64],
+--    [2.021386995094619f64, 1.9227160475136045f64, 1.8300219186412707f64],
+--    [2.326897180853236f64, 2.372540501622419f64, 2.135902194722964f64],
+--    [2.6295904397262726f64, 2.8264486916069096f64, 2.4935049184863627f64]]
 -- }
 -- structure { Map/Scanomap 1 Map 1 }
 
@@ -58,25 +56,23 @@ fun combineVs(n_row:   [num_und]f64,
               dr_row: [num_und]f64 ): [num_und]f64 =
   map (+) dr_row (map (*) n_row vol_row)
 
-fun mkPrices(md_starts: [num_und]f64,
-           md_vols: [num_dates][num_und]f64,
-           md_drifts: [num_dates][num_und]f64,
-           noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
+fun mkPrices(md_vols: [num_dates][num_und]f64,
+             md_drifts: [num_dates][num_und]f64,
+             noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let c_rows = map combineVs (zip noises (md_vols) (md_drifts) )
   let e_rows = map (\(x: []f64): [num_und]f64  -> map f64.exp x
                   ) (c_rows
                   )
   in  scan (\(x: []f64) (y: []f64): []f64  -> map (*) x y
-          ) (md_starts) (e_rows )
+          ) (replicate num_und 1.0) (e_rows )
 
   -- Formerly blackScholes.
 fun main(md_c: [num_und][num_und]f64,
          md_vols: [num_dates][num_und]f64,
          md_drifts: [num_dates][num_und]f64,
-         md_starts: [num_und]f64,
          bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
   -- I don't want to import the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose(bb_arr)
   let noises = correlateDeltas(md_c, bb_row) in
-  mkPrices(md_starts, md_vols, md_drifts, noises)
+  mkPrices(md_vols, md_drifts, noises)
