@@ -45,15 +45,15 @@
 --      enddo
 --    enddo
 
-fun min(a: i32) (b: i32): i32 = if(a<b) then a else b
+import "futlib/numeric"
 
 fun floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
     let dT = transpose(d) in
     loop (d = copy d) = for i < n do
         loop (d) = for j < n do
             let sumrow = map (+) d[i] dT[j]
-            let minrow = reduce min 1200 sumrow
-            let minrow = min d[i,j] minrow
+            let minrow = reduce i32.min 1200 sumrow
+            let minrow = i32.min d[i,j] minrow
             let d[i,j] = minrow
             in d
         in d

@@ -24,9 +24,6 @@ fun r(): f64 = f64(0.03)
 fun alpha(): f64 = f64(0.07)
 fun sigma(): f64 = f64(0.20)
 
-fun maxf64(x: f64) (y: f64): f64 =
-  if x < y then y else x
-
 fun binom(expiry: i32): f64 =
   let n = expiry * bankDays()
   let dt = f64(expiry) / f64(n)
@@ -40,14 +37,14 @@ fun binom(expiry: i32): f64 =
   let uPow = map (u**) (map f64 (iota(n+1)))
   let dPow = map (d**) (map f64 (map (n-) (iota(n+1))))
   let st = map (f64(s0())*) (map (*) uPow dPow)
-  let finalPut = map (maxf64(f64(0.0))) (map (f64(strike())-) st) in
+  let finalPut = map (f64.max(f64(0.0))) (map (f64(strike())-) st) in
   loop (put = finalPut) = for (n+1) > i >= 1 do
     let (uPow_start, _) = split (i) uPow
     let (_, dPow_end) = split (n+1-i) dPow
     let st = map (f64(s0())*) (map (*) uPow_start dPow_end)
     let (_, put_tail) = split (1) put
     let (put_init, _) = split ((shape put)[0]-1) put in
-    map (\(x,y) -> maxf64 x y)
+    map (\(x,y) -> f64.max x y)
     (zip
      (map (f64(strike())-) st)
      (map (+)

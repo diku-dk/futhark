@@ -9,7 +9,7 @@ module Int_measure = {
   type m = i32
 
   val zero = 0
-  fun max (x: i32) (y: i32) = if x < y then y else x
+  fun max (x: i32) (y: i32) = i32.max
   fun combine (x: i32) (y: i32) = x + y
   fun single (x: i32) = x
 }
