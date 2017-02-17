@@ -2,6 +2,7 @@
 -- input { [1, -2, 3, 4, -1, 5, -6, 1] }
 -- output { 11 10 }
 
+import "futlib/numeric"
 import "futlib/mss"
 
 module Int_measure = {
@@ -9,7 +10,7 @@ module Int_measure = {
   type m = i32
 
   val zero = 0
-  fun max (x: i32) (y: i32) = i32.max
+  fun max (x: i32) (y: i32) = i32.max x y
   fun combine (x: i32) (y: i32) = x + y
   fun single (x: i32) = x
 }
