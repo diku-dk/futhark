@@ -4,8 +4,13 @@ Futhark tools
 Emacs mode
 ----------
 
-See the file `futhark-mode.el` (contains install instructions).  This
-Emacs mode provides both syntax highlighting and automatic indentation.
+See the file `futhark-mode.el`.  This Emacs mode provides both syntax
+highlighting and automatic indentation.
+
+*Installation:* You can install this mode with Emacs' package manager.
+Enable the https://melpa.org/ archive, and install the `futhark-mode`
+package.  Alternatively, follow the manual install instructions in
+`futhark-mode.el`.
 
 Run `futhark-mode.el-corpus-test.sh` to test if the mode's
 auto-indentation works.  If you find pieces of code that futhark-mode
