@@ -182,7 +182,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       (kernel, _, _) <- groupPerSegmentKernel segment_size num_segments cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w OneGroupOneSegment
-        (Just (ispace, inps))
+        ispace inps
 
       kernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
@@ -202,7 +202,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       (firstkernel, num_groups_used, num_groups_per_segment) <- groupPerSegmentKernel segment_size num_segments cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w ManyGroupsOneSegment
-        (Just (ispace, inps))
+        ispace inps
 
       firstkernel_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
@@ -211,13 +211,10 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       let first_pat = Pattern [] $ firstkernel_redres_pes ++ mapres_pes
       addStm =<< renameStm (Let first_pat () $ Op firstkernel)
 
-      -- TODO: We don't really handle map-invariant variables used only in the
-      -- reduction. I'm not sure if we should, but to make to highlight this, I
-      -- pass in empty arrays for kernel input and ispace
       (secondkernel, _, _) <- groupPerSegmentKernel num_groups_per_segment num_segments cs
         (map patElemName firstkernel_redres_pes) comm reduce_lam' kern_chunk_reduce_lam
         nes num_groups_used OneGroupOneSegment
-        Nothing
+        ispace inps
 
       second_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
         vn' <- newName $ patElemName pe
@@ -256,24 +253,20 @@ groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> [SubExp]          -- nes
        -> SubExp            -- w = total_num_elements
        -> SegmentedVersion  -- segver
-       -> Maybe ([(VName, SubExp)], [KernelInput]) -- Just (ispace, inps)
-                                                   -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
-                                                   -- inps = inputs that can be looked up by using the gtids from ispace
+       -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
+       -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Kernel InKernel, SubExp, SubExp)
 groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                       reduce_lam' kern_chunk_fold_lam
-                      nes w segver m_ispace_inps = do
+                      nes w segver ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
                               -- reduction operator)
-  kernel_input_stms <- case m_ispace_inps of
-    Nothing -> return []
-    Just (_, inps) ->
-      forM inps $ \kin -> do
-        let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
-        let arr = kernelInputArray kin
-        arrtp <- lookupType arr
-        let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
-        return $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
+  kernel_input_stms <- forM inps $ \kin -> do
+    let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
+    let arr = kernelInputArray kin
+    arrtp <- lookupType arr
+    let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
+    return $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
 
   group_size <- letSubExp "group_size" $ Op GroupSize
   num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
@@ -303,12 +296,9 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
 
   gtid_vn <- newVName "gtid"
 
-  let spacestructure = case m_ispace_inps of
-        Nothing -> FlatThreadSpace []
-        Just (ispace, _) -> FlatGroupSpace $ ispace ++ [(gtid_vn, num_groups_per_segment)]
-
   -- the array passed here is the structure for how to layout the kernel space
-  space <- newKernelSpace (num_groups, group_size, num_threads) spacestructure
+  space <- newKernelSpace (num_groups, group_size, num_threads) $
+    FlatGroupSpace $ ispace ++ [(gtid_vn, num_groups_per_segment)]
 
   ((segment_index, index_within_segment), calc_segindex_stms) <- runBinder $ do
     segment_index <- letSubExp "segment_index" $
