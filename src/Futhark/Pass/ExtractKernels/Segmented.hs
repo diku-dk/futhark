@@ -261,12 +261,6 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                       nes w segver ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
                               -- reduction operator)
-  kernel_input_stms <- forM inps $ \kin -> do
-    let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
-    let arr = kernelInputArray kin
-    arrtp <- lookupType arr
-    let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
-    return $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
 
   group_size <- letSubExp "group_size" $ Op GroupSize
   num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
@@ -300,81 +294,85 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
   space <- newKernelSpace (num_groups, group_size, num_threads) $
     FlatGroupSpace $ ispace ++ [(gtid_vn, num_groups_per_segment)]
 
-  ((segment_index, index_within_segment), calc_segindex_stms) <- runBinder $ do
-    segment_index <- letSubExp "segment_index" $
-      BasicOp $ BinOp (SQuot Int32) (Var $ spaceGroupId space) num_groups_per_segment
-
-    -- localId + (group_size * (groupId % num_groups_per_segment))
-    index_within_segment <- letSubExp "index_within_segment" =<<
-      eBinOp (Add Int32)
-          (eSubExp $ Var $ spaceLocalId space)
-          (eBinOp (Mul Int32)
-             (eSubExp group_size)
-             (eBinOp (SRem Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
-          )
-    return (segment_index, index_within_segment)
-
-  let ordering = case comm of Commutative -> SplitStrided threads_within_segment
-                              Noncommutative -> SplitContiguous
-
-  let (_, chunksize, [], arr_params) =
-        partitionChunkedKernelFoldParameters 0 $ lambdaParams kern_chunk_fold_lam
-  let chunksize_se = Var $ paramName chunksize
-
-  patelems_res_of_split <- forM arr_params $ \arr_param -> do
-    let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunksize)
-    return $ PatElem (paramName arr_param) BindVar chunk_t
-
-  let chunksize_stm =
-        Let (Pattern [] [PatElem (paramName chunksize) BindVar $ paramType chunksize])
-            () $
-            Op $ SplitSpace ordering segment_size index_within_segment elements_per_thread
-
-  let stride = case ordering of SplitStrided s -> s
-                                SplitContiguous -> one
-
-  (offset, offset_stms) <- runBinder $
-    makeOffsetExp ordering index_within_segment elements_per_thread segment_index
-
-  index_stms <- forM (zip all_arrs patelems_res_of_split) $ \(arr, pe) -> do
-    tp <- lookupType arr
-    let slice = fullSlice tp [DimSlice offset chunksize_se stride]
-    return $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
-
   let red_ts = take num_redres $ lambdaReturnType kern_chunk_fold_lam
   let map_ts = map rowType $ drop num_redres $ lambdaReturnType kern_chunk_fold_lam
   let kernel_return_types = red_ts ++ map_ts
 
-  red_pes <- forM red_ts $ \red_t -> do
-    pe_name <- newVName "chunk_fold_red"
-    return $ PatElem pe_name BindVar red_t
-  map_pes <- forM map_ts $ \map_t -> do
-    pe_name <- newVName "chunk_fold_map"
-    return $ PatElem pe_name BindVar $ map_t `arrayOfRow` chunksize_se
+  let ordering = case comm of Commutative -> SplitStrided threads_within_segment
+                              Noncommutative -> SplitContiguous
 
-  -- we add the lets here, as we practially don't know if the resulting subexp
-  -- is a Constant or a Var, so better be safe (?)
-  let fold_chunk_stms = bodyStms (lambdaBody kern_chunk_fold_lam) ++
-        [ Let (Pattern [] [pe]) () $ BasicOp $ SubExp se
-          | (pe,se) <- zip (red_pes ++ map_pes) (bodyResult $ lambdaBody kern_chunk_fold_lam) ]
+  let stride = case ordering of SplitStrided s -> s
+                                SplitContiguous -> one
 
-  -- Combine the reduction results from each thread. This will put results in
-  -- local memory, so a GroupReduce can be performed on them
-  combine_red_pes <- forM red_ts $ \red_t -> do
-    pe_name <- newVName "chunk_fold_red"
-    return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
-  let combine_stms = [ Let (Pattern [] [pe']) () $ Op $
-                       Combine [(spaceLocalId space, group_size)] [patElemType pe]
-                       (constant True) $
-                       Body () [] [Var $ patElemName pe]
-                     | (pe', pe) <- zip combine_red_pes red_pes ]
+  let each_thread = do
+        segment_index <- letSubExp "segment_index" $
+          BasicOp $ BinOp (SQuot Int32) (Var $ spaceGroupId space) num_groups_per_segment
 
-  final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
-    pe_name <- newVName "final_result"
-    return $ PatElem pe_name BindVar t
-  let group_reduce_stm = Let (Pattern [] final_red_pes) () $ Op $
-                         GroupReduce group_size reduce_lam' $
-                         zip nes $ map patElemName combine_red_pes
+        -- localId + (group_size * (groupId % num_groups_per_segment))
+        index_within_segment <- letSubExp "index_within_segment" =<<
+          eBinOp (Add Int32)
+              (eSubExp $ Var $ spaceLocalId space)
+              (eBinOp (Mul Int32)
+                 (eSubExp group_size)
+                 (eBinOp (SRem Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
+              )
+
+        offset <- makeOffsetExp ordering index_within_segment elements_per_thread segment_index
+
+        let (_, chunksize, [], arr_params) =
+              partitionChunkedKernelFoldParameters 0 $ lambdaParams kern_chunk_fold_lam
+        let chunksize_se = Var $ paramName chunksize
+
+        patelems_res_of_split <- forM arr_params $ \arr_param -> do
+          let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunksize)
+          return $ PatElem (paramName arr_param) BindVar chunk_t
+
+        addStm $ Let (Pattern [] [PatElem (paramName chunksize) BindVar $ paramType chunksize])
+                     () $
+                     Op $ SplitSpace ordering segment_size index_within_segment elements_per_thread
+
+        addKernelInputStms inps
+
+        forM_ (zip all_arrs patelems_res_of_split) $ \(arr, pe) -> do
+          tp <- lookupType arr
+          let slice = fullSlice tp [DimSlice offset chunksize_se stride]
+          addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
+
+        red_pes <- forM red_ts $ \red_t -> do
+          pe_name <- newVName "chunk_fold_red"
+          return $ PatElem pe_name BindVar red_t
+        map_pes <- forM map_ts $ \map_t -> do
+          pe_name <- newVName "chunk_fold_map"
+          return $ PatElem pe_name BindVar $ map_t `arrayOfRow` chunksize_se
+
+        -- we add the lets here, as we practially don't know if the resulting subexp
+        -- is a Constant or a Var, so better be safe (?)
+        mapM_ addStm $ bodyStms (lambdaBody kern_chunk_fold_lam) ++
+              [ Let (Pattern [] [pe]) () $ BasicOp $ SubExp se
+                | (pe,se) <- zip (red_pes ++ map_pes) (bodyResult $ lambdaBody kern_chunk_fold_lam) ]
+
+        -- Combine the reduction results from each thread. This will put results in
+        -- local memory, so a GroupReduce can be performed on them
+        combine_red_pes <- forM red_ts $ \red_t -> do
+          pe_name <- newVName "chunk_fold_red"
+          return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
+        mapM_ addStm [ Let (Pattern [] [pe']) () $
+                        Op $ Combine [(spaceLocalId space, group_size)] [patElemType pe]
+                                     (constant True) $
+                                     Body () [] [Var $ patElemName pe]
+                           | (pe', pe) <- zip combine_red_pes red_pes ]
+
+        final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
+          pe_name <- newVName "final_result"
+          return $ PatElem pe_name BindVar t
+        addStm $ Let (Pattern [] final_red_pes) () $
+                 Op $ GroupReduce group_size reduce_lam' $
+                                  zip nes (map patElemName combine_red_pes)
+
+        return (final_red_pes, map_pes, offset)
+
+
+  ((final_red_pes, map_pes, offset), stms) <- runBinder each_thread
 
   red_returns <- forM final_red_pes $ \pe ->
     return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $
@@ -394,10 +392,7 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                          ]
 
   let kernel = Kernel kerneldebughints cs space kernel_return_types $
-                  KernelBody () (kernel_input_stms ++ calc_segindex_stms ++
-                                 [chunksize_stm] ++ offset_stms ++ index_stms ++
-                                 fold_chunk_stms ++ combine_stms ++ [group_reduce_stm])
-                  kernel_returns
+                  KernelBody () stms kernel_returns
 
   return (kernel, num_groups, num_groups_per_segment)
 
@@ -475,20 +470,6 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
 
   let lid = Var $ spaceLocalId space
 
-  ((segment_index, index_within_segment), calc_segindex_stms) <- runBinder $ do
-    segment_index <- letSubExp "segment_index" =<<
-      eBinOp (Add Int32)
-        (eBinOp (SQuot Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size))
-        (eBinOp (Mul Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_segments_per_group))
-
-    index_within_segment <- letSubExp "index_within_segment" =<<
-      eBinOp (SRem Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size)
-
-    return (segment_index, index_within_segment)
-
-  (offset, offset_stms) <- runBinder $ makeOffsetExp index_within_segment segment_index
-
-
   let (red_ts, map_ts) = splitAt num_redres $ lambdaReturnType fold_lam
   let kernel_return_types = red_ts ++ map_ts
 
@@ -498,6 +479,16 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
         return (negone : negone : dummy_vals)
 
   let normal_thread = do
+        segment_index <- letSubExp "segment_index" =<<
+          eBinOp (Add Int32)
+            (eBinOp (SQuot Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size))
+            (eBinOp (Mul Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_segments_per_group))
+
+        index_within_segment <- letSubExp "index_within_segment" =<<
+          eBinOp (SRem Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size)
+
+        offset <- makeOffsetExp index_within_segment segment_index
+
         let red_ts' = Prim Bool : red_ts
 
         red_pes <- forM red_ts $ \red_t -> do
@@ -516,12 +507,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
               letSubExp "tmp_val" $ BasicOp $ BinOp (SQuot Int32) prev_val size
         foldM_ calc_ispace_index segment_index (reverse ispace)
 
-        forM_ inps $ \kin -> do
-          let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
-          let arr = kernelInputArray kin
-          arrtp <- lookupType arr
-          let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
-          addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
+        addKernelInputStms inps
 
         -- Index input array to get arguments to fold_lam
         let arr_params = drop num_redres $ lambdaParams fold_lam
@@ -629,8 +615,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
 
         return $ map (Var . patElemName) all_res_pes
 
-  (redoffset:mapoffset:redmapres, stms) <- runBinder $
-    localScope (scopeOf $ offset_stms ++ calc_segindex_stms) picknchoose
+  (redoffset:mapoffset:redmapres, stms) <- runBinder picknchoose
   let (finalredvals, finalmapvals) = splitAt num_redres redmapres
 
   -- To be able to only return elements from some threads, we exploit the fact
@@ -651,11 +636,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
                          ]
 
   let kernel = Kernel kerneldebughints cs space kernel_return_types $
-                  KernelBody () (--FIXME: add these back: kernel_input_stms ++
-                                 calc_segindex_stms ++
-                                 offset_stms ++
-                                 stms)
-                  kernel_returns
+                  KernelBody () stms kernel_returns
 
   return kernel
 
@@ -673,6 +654,16 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
              (eSubExp index_within_segment)
              (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
       letSubExp "offset" e
+
+addKernelInputStms :: (HasScope InKernel m, MonadBinder m, Lore m ~ InKernel) =>
+                     [KernelInput]
+                     -> m ()
+addKernelInputStms = mapM_ $ \kin -> do
+        let pe = PatElem (kernelInputName kin) BindVar (kernelInputType kin)
+        let arr = kernelInputArray kin
+        arrtp <- lookupType arr
+        let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
+        addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index [] arr slice
 
 regularSegmentedRedomapAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
                                 SubExp
