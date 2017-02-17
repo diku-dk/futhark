@@ -234,7 +234,7 @@ static struct opencl_device_option get_preferred_device() {
     }
   }
 
-  panic(1, "Could not find acceptable OpenCL device.");
+  panic(1, "Could not find acceptable OpenCL device.\n");
 }
 
 static void describe_device_option(struct opencl_device_option device) {
