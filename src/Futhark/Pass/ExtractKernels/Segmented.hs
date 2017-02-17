@@ -498,14 +498,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
           pe_name <- newVName "fold_map"
           return $ PatElem pe_name BindVar map_t
 
-        -- TODO: The ispace index is calculated in a bit different way than it
-        -- would have been done if the ThreadSpace was used. However, this
-        -- works. Maybe ask Troels if doing it the other way has some benefit?
-        let calc_ispace_index prev_val (vn,size) = do
-              let pe = PatElem vn BindVar i32
-              addStm $ Let (Pattern [] [pe]) () $ BasicOp $ BinOp (SRem Int32) prev_val size
-              letSubExp "tmp_val" $ BasicOp $ BinOp (SQuot Int32) prev_val size
-        foldM_ calc_ispace_index segment_index (reverse ispace)
+        addManualIspaceCalcStms segment_index ispace
 
         addKernelInputStms inps
 
@@ -664,6 +657,30 @@ addKernelInputStms = mapM_ $ \kin -> do
         arrtp <- lookupType arr
         let slice = fullSlice arrtp [DimFix se | se <- kernelInputIndices kin]
         addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index [] arr slice
+
+-- | Manually calculate the values for the ispace identifiers, when the
+-- 'SpaceStructure' won't do. ispace is the dimensions of the overlaying maps.
+--
+-- If the input is @i [(a_vn, a), (b_vn, b), (c_vn, c)]@ then @i@ should hit all
+-- the values [0,a*b*c). We can calculate the indexes for the other dimensions:
+--
+-- >  c_vn = i % c
+-- >  b_vn = (i/c) % b
+-- >  a_vn = ((i/c)/b) % a
+addManualIspaceCalcStms :: (HasScope InKernel m, MonadBinder m, Lore m ~ InKernel) =>
+                           SubExp
+                        -> [(VName, SubExp)]
+                        -> m ()
+addManualIspaceCalcStms outer_index ispace = do
+        -- TODO: The ispace index is calculated in a bit different way than it
+        -- would have been done if the ThreadSpace was used. However, this
+        -- works. Maybe ask Troels if doing it the other way has some benefit?
+        let calc_ispace_index prev_val (vn,size) = do
+              let pe = PatElem vn BindVar (Prim $ IntType Int32)
+              addStm $ Let (Pattern [] [pe]) () $ BasicOp $ BinOp (SRem Int32) prev_val size
+              letSubExp "tmp_val" $ BasicOp $ BinOp (SQuot Int32) prev_val size
+        foldM_ calc_ispace_index outer_index (reverse ispace)
+
 
 regularSegmentedRedomapAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
                                 SubExp
