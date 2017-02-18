@@ -4,6 +4,8 @@ Futhark tools
 Emacs mode
 ----------
 
+[![MELPA](https://melpa.org/packages/futhark-mode-badge.svg)](https://melpa.org/#/futhark-mode)
+
 See the file `futhark-mode.el`.  This Emacs mode provides both syntax
 highlighting and automatic indentation.
 
