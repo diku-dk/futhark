@@ -5,6 +5,6 @@
 -- input { -8.742278e-8 } output { -8.742278e-8 }
 -- input { 8.742278e-8 } output { 8.742278e-8 }
 
-import "futlib/numeric"
+import "futlib/math"
 
 fun main(x: f64): f64 = f64.asin(x)

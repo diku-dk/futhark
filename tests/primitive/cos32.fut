@@ -5,6 +5,6 @@
 -- input { 3.1415927f32 } output { -1f32 }
 -- input { -3.1415927f32 } output { -1f32 }
 
-import "futlib/numeric"
+import "futlib/math"
 
 fun main(x: f32): f32 = f32.cos(x)

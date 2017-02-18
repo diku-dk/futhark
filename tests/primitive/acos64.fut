@@ -4,6 +4,6 @@
 -- input { 0.5403023f64 } output { 1f64 }
 -- input { -1f64 } output { 3.1415927f64 }
 
-import "futlib/numeric"
+import "futlib/math"
 
 fun main(x: f64): f64 = f64.acos(x)

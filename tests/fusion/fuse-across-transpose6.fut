@@ -38,7 +38,7 @@
 -- }
 -- structure { Map/Scanomap 1 Map 1 }
 
-import "futlib/numeric"
+import "futlib/math"
 
 fun take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
