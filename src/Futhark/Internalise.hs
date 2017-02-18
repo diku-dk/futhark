@@ -107,16 +107,18 @@ nextDec ds | (vds, ds') <- chompDecs ds, not $ null vds = (Left vds, ds')
         chompDecs xs                = ([], xs)
 nextDec (d:ds) = (Right d, ds)
 
-internaliseDecs :: [E.Dec] -> InternaliseM [I.FunDef]
+internaliseDecs :: [E.Dec] -> InternaliseM ()
 internaliseDecs ds =
   case nextDec ds of
     (Left [], _) ->
-      return []
+      return ()
     (Left vdecs, ds') -> do
       preprocessValDecs vdecs
-      (++) <$> mapM internaliseValDec vdecs <*> internaliseDecs ds'
-    (Right (E.StructDec sb), ds') ->
-      (++) <$> internaliseModExp (structExp sb) <*> internaliseDecs ds'
+      mapM_ internaliseValDec vdecs
+      internaliseDecs ds'
+    (Right (E.StructDec sb), ds') -> do
+      internaliseModExp (structExp sb)
+      internaliseDecs ds'
     (Right (E.FunctorDec fb), ds') -> do
       noteFunctor (E.functorName fb) (E.functorBody fb)
       internaliseDecs ds'
@@ -126,35 +128,34 @@ internaliseDecs ds =
            (E.unInfo $ E.expandedType $ E.typeExp tb)
       noteType v t
       internaliseDecs ds'
-    (Right (E.OpenDec e es _), ds') ->
-      (++)
-        <$> (concat <$> mapM internaliseModExp (e:es))
-        <*> internaliseDecs ds'
+    (Right (E.OpenDec e es _), ds') -> do
+      mapM_ internaliseModExp (e:es)
+      internaliseDecs ds'
     (Right _, ds') ->
       internaliseDecs ds'
 
-internaliseValDec :: E.ValDec -> InternaliseM I.FunDef
+internaliseValDec :: E.ValDec -> InternaliseM ()
 internaliseValDec (E.FunDec fb) =
   internaliseFun fb
 internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
   internaliseFun $ E.FunBind False name Nothing t [] e loc
 
 internaliseModExp :: E.ModExp
-                  -> InternaliseM [I.FunDef]
-internaliseModExp E.ModVar{} = return []
-internaliseModExp E.ModImport{} = return []
+                  -> InternaliseM ()
+internaliseModExp E.ModVar{} = return ()
+internaliseModExp E.ModImport{} = return ()
 internaliseModExp (E.ModDecs ds _) =
   internaliseDecs ds
 internaliseModExp (E.ModAscript me _ (Info subst) _) = do
   noteDecSubsts subst
   internaliseModExp me
 internaliseModExp (E.ModApply v arg (Info p_substs) (Info b_substs) _) = do
-  arg_funs <- internaliseModExp arg
+  internaliseModExp arg
   v' <- lookupSubst v
   me <- lookupFunctor v'
-  (++arg_funs) <$> generatingFunctor p_substs b_substs (internaliseModExp me)
+  generatingFunctor p_substs b_substs $ internaliseModExp me
 
-internaliseFun :: E.FunBind -> InternaliseM I.FunDef
+internaliseFun :: E.FunBind -> InternaliseM ()
 internaliseFun (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =
   bindingParams params $ \shapeparams params' -> do
     (_, fname') <- internaliseFunctionName entry ofname
@@ -166,7 +167,7 @@ internaliseFun (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =
         constparams = map (mkConstParam . snd) cm
         entry' | entry     = Just $ entryPoint (zip params params') (rettype, rettype')
                | otherwise = Nothing
-    return $ I.FunDef entry' fname'
+    addFunction $ I.FunDef entry' fname'
       (ExtRetType $ concat rettype') (constparams ++ shapeparams ++ concat params') body'
   -- XXX: We massage the parameters a little bit to handle the case
   -- where there is just a single parameter that is a tuple.  This is
