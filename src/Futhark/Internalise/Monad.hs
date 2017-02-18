@@ -7,9 +7,12 @@ module Futhark.Internalise.Monad
   , TypeTable
   , VarSubstitutions
   , DecSubstitutions
-  , InternaliseEnv(..)
+  , InternaliseEnv (..)
   , ConstParams
   , FunBinding (..)
+
+  , addFunction
+
   , lookupFunction
   , lookupFunction'
   , lookupTypeVar
@@ -35,9 +38,9 @@ import Control.Monad.Except
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
+import Control.Monad.RWS hiding (mapM)
 
 import qualified Data.HashMap.Lazy as HM
-import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
 
@@ -82,13 +85,17 @@ data InternaliseState =
                    , stateNameSource :: VNameSource
                    }
 
+newtype InternaliseResult = InternaliseResult [FunDef]
+  deriving (Monoid)
+
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
-                                        (ReaderT InternaliseEnv
-                                         (StateT InternaliseState
-                                          (Except String)))
+                                        (RWST
+                                         InternaliseEnv
+                                         InternaliseResult
+                                         InternaliseState
+                                         (Except String))
                                         a)
   deriving (Functor, Applicative, Monad,
-            MonadWriter (DL.DList Stm),
             MonadReader InternaliseEnv,
             MonadState InternaliseState,
             MonadFreshNames,
@@ -96,7 +103,7 @@ newtype InternaliseM  a = InternaliseM (BinderT SOACS
             HasScope SOACS,
             LocalScope SOACS)
 
-instance Monad m => MonadFreshNames (StateT InternaliseState m) where
+instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
 
@@ -112,15 +119,15 @@ instance MonadBinder InternaliseM where
     InternaliseM $ collectStms m
 
 runInternaliseM :: MonadFreshNames m =>
-                   FunTable -> InternaliseM a
-                -> m (Either String a)
+                   FunTable -> InternaliseM ()
+                -> m (Either String [FunDef])
 runInternaliseM ftable (InternaliseM m) =
   modifyNameSource $ \src -> do
-  let onError e                 = (Left e, src)
-      onSuccess ((prog,_),src') = (Right prog, src')
+  let onError e             = (Left e, src)
+      onSuccess (funs,src') = (Right funs, src')
   either onError onSuccess $ runExcept $ do
-    (v, s) <- runStateT (runReaderT (runBinderT m mempty) newEnv) (newState src)
-    return (v, stateNameSource s)
+    (_, s, InternaliseResult funs) <- runRWST (runBinderT m mempty) newEnv (newState src)
+    return (funs, stateNameSource s)
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
                  , envDoBoundsChecks = True
@@ -134,6 +141,10 @@ runInternaliseM ftable (InternaliseM m) =
                            , stateDecSubsts = mempty
                            , stateNameSource = src
                            }
+
+-- | Add a function definition to the program being constructed.
+addFunction :: FunDef -> InternaliseM ()
+addFunction = InternaliseM . lift . tell . InternaliseResult . pure
 
 lookupFunction' :: VName -> InternaliseM (Maybe FunBinding)
 lookupFunction' fname = do
