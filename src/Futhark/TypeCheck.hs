@@ -306,7 +306,7 @@ observe :: Checkable lore =>
 observe name = do
   attr <- lookupVar name
   unless (primType $ typeOf attr) $
-    occur [observation $ aliases attr]
+    occur [observation $ HS.insert name $ aliases attr]
 
 -- | Proclaim that we have written to the given variable.
 consume :: Names -> TypeM lore ()
