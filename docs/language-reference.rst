@@ -632,6 +632,14 @@ Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
 of ``v`` must be an array of the proper size.
 
+``let f params... = e in body``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Bind ``f`` to a function with the given parameters and definition
+(``e``) and evaluate ``body``.  The function will be treated as
+aliasing any free variables in ``e``.  The function is not in scope of
+itself, and hence cannot be recursive.
+
 ``if c then a else b``
 ~~~~~~~~~~~~~~~~~~~~~~
 

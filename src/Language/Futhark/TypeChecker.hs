@@ -168,8 +168,10 @@ instance Show TypeError where
     "Parametrised module " ++ pretty name ++ " used at " ++ locStr loc ++
     " without an argument."
 
--- | Return type and a list of argument types.
-type FunBinding = ([StructType], StructType)
+-- | Return type and a list of argument types, and names that are used
+-- free inside the function.  The latter is non-empty only for local
+-- functions.
+type FunBinding = ([StructType], StructType, Occurences)
 
 -- | A binding from a name to its definition as a type.
 data TypeBinding = TypeAbbr StructType
@@ -307,11 +309,11 @@ initialScope = intrinsicsModule
         intrinsicsModule = Scope initialVtable initialTypeTable mempty mempty mempty intrinsicsNameMap
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
-          Just (name, BoundF (map Prim ts, Prim t))
+          Just (name, BoundF (map Prim ts, Prim t, mempty))
         addIntrinsicF (name, IntrinsicPolyFun variants) =
           Just (name, OverloadedF $ map frob variants)
           where frob :: ([PrimType], PrimType) -> ([TypeBase Rank ()],FunBinding)
-                frob (pts, rt) = (map Prim pts, (map Prim pts, Prim rt))
+                frob (pts, rt) = (map Prim pts, (map Prim pts, Prim rt, mempty))
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
         addIntrinsicF _ = Nothing
@@ -348,11 +350,14 @@ scopeAbsTypes = mapMaybe select . HM.toList . envTypeTable
   where select (name, TypeAbs) = Just name
         select _               = Nothing
 
-scopeVals :: Scope -> [(VName, ([StructType], StructType))]
+scopeVals :: Scope -> [(VName, ([StructType], StructType, Occurences))]
 scopeVals = mapMaybe select . HM.toList . envVtable
-  where select (name, BoundF (pts, t)) = Just (name, (pts, t))
-        select (name, BoundV t)        = Just (name, ([], vacuousShapeAnnotations $ toStruct t))
-        select _                       = Nothing
+  where select (name, BoundF fun) =
+          Just (name, fun)
+        select (name, BoundV t) =
+          Just (name, ([], vacuousShapeAnnotations $ toStruct t, mempty))
+        select _ =
+          Nothing
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
@@ -681,7 +686,8 @@ lookupFunction qn argtypes loc = do
         concreteType t2,
         t1 == t2 ->
           return (qn', (map (vacuousShapeAnnotations . toStruct) [t1, t2],
-                        Prim Bool))
+                        Prim Bool,
+                        mempty))
       | otherwise ->
           bad $ TypeError loc $ "Equality not defined for arguments of types " ++
           intercalate ", " (map pretty argtypes)
@@ -846,7 +852,7 @@ buildScopeFromDecs = foldM expandV mempty
       argtypes' <- mapM (fmap snd . checkTypeExpNoDims) argtypes
       boundf <- case maybe_ret of
         Just ret -> do (_, ret') <- checkTypeExpNoDims ret
-                       return $ BoundF (argtypes', ret')
+                       return $ BoundF (argtypes', ret', mempty)
         Nothing -> return $ UnknownF argtypes'
       return scope { envVtable = HM.insert fname' boundf $
                                  envVtable scope
@@ -871,7 +877,8 @@ valDecScope (FunDec fb) =
   mempty { envVtable =
              HM.singleton (funBindName fb)
              (BoundF (map paramType (funBindParams fb),
-                      unInfo $ funBindRetType fb))
+                      unInfo $ funBindRetType fb,
+                      mempty))
          }
   where paramType :: Pattern -> StructType
         paramType = vacuousShapeAnnotations . toStruct . patternType
@@ -943,7 +950,7 @@ checkSpecs (ValSpec name paramtypes rettype loc : specs) =
                                if null paramtypes''
                                then BoundV $ removeShapeAnnotations $
                                     rettype'' `addAliases` mempty
-                               else BoundF (paramtypes'', rettype'')
+                               else BoundF (paramtypes'', rettype'', mempty)
                  , envNameMap = HM.singleton (Term, name) name'
                  }
     (scope, specs') <- local (valscope<>) $ checkSpecs specs
@@ -1221,6 +1228,26 @@ checkConst (ConstBind name maybe_t NoInfo e loc) = do
 
 checkFun :: FunBindBase NoInfo Name -> TypeM FunBind
 checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
+  (fname', params', maybe_retdecl', rettype, body') <-
+    checkFunDef (fname, maybe_retdecl, params, body, loc)
+
+  when entry $
+    case maybe_retdecl of
+      Just retdecl
+        | Just problem <-
+            find (not . (`HS.member` mconcat (map patNameSet params))) $
+            mapMaybe dimDeclName $ arrayDims' retdecl ->
+              bad $ EntryPointConstReturnDecl loc fname $ qualName problem
+      _ -> return ()
+
+  return $ FunBind entry fname' maybe_retdecl' (Info rettype) params' body' loc
+
+  where dimDeclName (NamedDim name) = Just name
+        dimDeclName _               = Nothing
+
+checkFunDef :: (Name, Maybe UncheckedTypeExp, [UncheckedPattern], UncheckedExp, SrcLoc)
+            -> TypeM (VName, [Pattern], Maybe (TypeExp VName), StructType, Exp)
+checkFunDef (fname, maybe_retdecl, params, body, loc) = do
   fname' <- checkName Term fname loc
 
   when (baseString fname' == "&&") $
@@ -1242,16 +1269,7 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct $ typeOf body')
 
-    when entry $
-      case maybe_retdecl of
-        Just retdecl
-          | Just problem <-
-              find (not . (`HS.member` mconcat (map patNameSet params))) $
-              mapMaybe dimDeclName $ arrayDims' retdecl ->
-                bad $ EntryPointConstReturnDecl loc fname $ qualName problem
-        _ -> return ()
-
-    return $ FunBind entry fname' maybe_retdecl'' (Info rettype) params' body' loc
+    return (fname', params', maybe_retdecl'', rettype, body')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1283,9 +1301,6 @@ checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
         returnAliasing (Tuple ets1) (Tuple ets2) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
-
-        dimDeclName (NamedDim name) = Just name
-        dimDeclName _               = Nothing
 
 checkFunBody :: Name
              -> ExpBase NoInfo Name
@@ -1336,11 +1351,15 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', (paramtypes, ftype)) <- lookupFunction op (map argType [e1_arg,e2_arg]) loc
+  (op', (paramtypes, ftype, closure)) <-
+    lookupFunction op (map argType [e1_arg,e2_arg]) loc
+
   case paramtypes of
     [e1_pt, e2_pt] -> do
       let rettype' = returnType (removeShapeAnnotations ftype)
                      (map diet paramtypes) (map typeOf [e1', e2'])
+
+      occur closure
       checkFuncall (Just op) loc paramtypes [e1_arg, e2_arg]
 
       return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt) (Info rettype') loc
@@ -1371,11 +1390,13 @@ checkExp (Negate arg loc) = do
 
 checkExp (Apply fname args _ loc) = do
   (args', argflows) <- unzip <$> mapM (\(arg,_) -> checkArg arg) args
-  (fname', (paramtypes, ftype)) <- lookupFunction fname (map argType argflows) loc
+  (fname', (paramtypes, ftype, closure)) <-
+    lookupFunction fname (map argType argflows) loc
 
   let rettype' = returnType (removeShapeAnnotations ftype)
                  (map diet paramtypes) (map typeOf args')
 
+  occur closure
   checkFuncall (Just fname) loc paramtypes argflows
 
   return $ Apply fname' (zip args' $ map diet paramtypes) (Info rettype') loc
@@ -1420,6 +1441,18 @@ checkExp (LetPat pat e body pos) =
       False
     tupleArrayElemHasShapeDecl PolyArrayElem{} =
       False
+
+checkExp (LetFun name (params, maybe_retdecl, NoInfo, e) body loc) =
+  bindSpaced [(Term, name)] $
+  sequentially (checkFunDef (name, maybe_retdecl, params, e, loc)) $
+    \(name', params', maybe_retdecl', rettype, e') closure -> do
+
+    let paramType = toStruct . vacuousShapeAnnotations . patternType
+        entry = BoundF (map paramType params', rettype, closure)
+        bindF env = env { envVtable = HM.insert name' entry $ envVtable env }
+    body' <- local bindF $ checkExp body
+
+    return $ LetFun name' (params', maybe_retdecl', Info rettype, e') body' loc
 
 checkExp (LetWith dest src idxes ve body pos) = do
   src' <- checkIdent src
@@ -1974,20 +2007,26 @@ checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  (fname', (paramtypes, rt)) <- lookupFunction fname (map argType $ curryargs++args) loc
+  (fname', (paramtypes, rt, closure)) <- lookupFunction fname (map argType $ curryargs++args) loc
   let rettype' = fromStruct $ removeShapeAnnotations rt
       paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
   case find (unique . snd) $ zip curryargexps paramtypes of
     Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
     _           -> return ()
+
+  occur closure
   checkFuncall Nothing loc paramtypes $ curryargs ++ args
+
   return $ CurryFun fname' curryargexps' (Info (paramtypes', rettype')) loc
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) [x_arg,y_arg] = do
-  (op', (paramtypes, rt)) <- lookupFunction op (map argType [x_arg,y_arg]) loc
+  (op', (paramtypes, rt, closure)) <- lookupFunction op (map argType [x_arg,y_arg]) loc
   let rettype' = fromStruct $ removeShapeAnnotations rt
       paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
+
+  occur closure
   checkFuncall Nothing loc paramtypes [x_arg,y_arg]
+
   case paramtypes' of
     [x_t, y_t] ->
       return $ BinOpFun op' (Info x_t) (Info y_t) (Info rettype') loc
@@ -2020,8 +2059,12 @@ checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
-  (binop', (paramtypes, ret)) <- lookupFunction binop [argType first_arg, argType second_arg] loc
+  (binop', (paramtypes, ret, closure)) <-
+    lookupFunction binop [argType first_arg, argType second_arg] loc
+
+  occur closure
   checkFuncall Nothing loc paramtypes [first_arg,second_arg]
+
   return (x', binop', fromStruct $ removeShapeAnnotations ret)
 
 checkDim :: SrcLoc -> DimDecl Name -> TypeM (DimDecl VName)
@@ -2126,7 +2169,7 @@ matchScopes scope sig loc = do
 
   -- Check that all values are defined correctly, substituting the
   -- types first.
-  vals_and_substs <- fmap HM.fromList $ forM (scopeVals sig) $ \(name, (spec_pts, spec_t)) -> do
+  vals_and_substs <- fmap HM.fromList $ forM (scopeVals sig) $ \(name, (spec_pts, spec_t, _)) -> do
     let spec_pts' = map (substituteTypes abs_subst_to_type) spec_pts
         spec_t'   = substituteTypes abs_subst_to_type spec_t
         impl_pts' = map (substituteTypes abs_subst_to_name) spec_pts
@@ -2137,10 +2180,10 @@ matchScopes scope sig loc = do
             return (name, (name', BoundV $ removeShapeAnnotations $ fromStruct impl_t'))
         | otherwise ->
             mismatchedVal name (spec_pts', spec_t') ([], t)
-      Just (name', BoundF (pts, ret))
+      Just (name', BoundF (pts, ret, _))
         | and (zipWith subtypeOf (map toStructural pts) (map toStructural spec_pts')),
           toStructural ret `subtypeOf` toStructural spec_t' ->
-            return (name, (name', BoundF (impl_pts', impl_t')))
+            return (name, (name', BoundF (impl_pts', impl_t', mempty)))
         | otherwise ->
             mismatchedVal (baseName name) (spec_pts', spec_t') (pts, ret)
       Just (_, UnknownF{}) ->
@@ -2199,9 +2242,10 @@ substituteTypesInScope substs scope =
           BoundV $ fromStruct $ toStructural $
           substituteTypes substs $
           vacuousShapeAnnotations $ toStruct t
-        subV (BoundF (ts, t)) =
+        subV (BoundF (ts, t, _)) =
           BoundF (map (substituteTypes substs) ts,
-                  substituteTypes substs t)
+                  substituteTypes substs t,
+                  mempty)
         subV b = b
 
         subT name _
@@ -2276,9 +2320,10 @@ newNamesForScope except orig_scope = do
           BoundV $ fromStruct $ toStructural $
           substituteInType substs $
           vacuousShapeAnnotations $ toStruct t
-        substituteInBinding substs (BoundF (pts,t)) =
+        substituteInBinding substs (BoundF (pts,t, _)) =
           BoundF (map (substituteInType substs) pts,
-                  substituteInType substs t)
+                  substituteInType substs t,
+                  mempty)
         substituteInBinding _ (OverloadedF f) =
           OverloadedF f
         substituteInBinding _ EqualityF =

@@ -576,6 +576,10 @@ LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
                       { LetPat $2 $4 $5 $1 }
 
+     | let id Params MaybeAscription '=' Exp LetBody
+                      { let L _ (ID name) = $2
+                        in LetFun name ($3, (fmap declaredType $4), NoInfo, $6) $7 $1 }
+
      | let VarSlice '=' Exp LetBody
                       { let (v,slice,loc) = $2; ident = Ident v NoInfo loc
                         in LetWith ident ident slice $4 $5 loc }

@@ -9,6 +9,7 @@ module Futhark.Internalise.Monad
   , DecSubstitutions
   , InternaliseEnv (..)
   , ConstParams
+  , Closure
   , FunBinding (..)
 
   , addFunction
@@ -53,8 +54,13 @@ import Prelude hiding (mapM)
 
 type ConstParams = [(Name,VName)]
 
+-- | Extra parameters to pass when calling this function.  This
+-- corresponds to the closure of a locally defined function.
+type Closure = [VName]
+
 data FunBinding = FunBinding
-                  { internalFun :: (Name, ConstParams, [VName], [DeclType],
+                  { internalFun :: (Name, ConstParams, Closure,
+                                    [VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.StructType, [E.StructType])
                   }

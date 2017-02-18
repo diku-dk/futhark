@@ -407,6 +407,9 @@ data ExpBase f vn =
 
             | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
 
+            | LetFun vn ([PatternBase f vn], Maybe (TypeExp vn), f (StructTypeBase vn), ExpBase f vn)
+              (ExpBase f vn) SrcLoc
+
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
             | Apply  (QualName vn) [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
@@ -563,6 +566,7 @@ instance Located (ExpBase f vn) where
   locOf (Negate _ pos)           = locOf pos
   locOf (Apply _ _ _ pos)        = locOf pos
   locOf (LetPat _ _ _ pos)       = locOf pos
+  locOf (LetFun _ _ _ loc)       = locOf loc
   locOf (LetWith _ _ _ _ _ pos)  = locOf pos
   locOf (Index _ _ pos)          = locOf pos
   locOf (Iota _ pos)             = locOf pos

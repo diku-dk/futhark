@@ -571,6 +571,7 @@ typeOf (Var qn (Info t) _) = t `addAliases` HS.insert (qualLeaf qn)
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ body _) = typeOf body
+typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
   stripArray (length $ filter isFix idx) (typeOf ident)
