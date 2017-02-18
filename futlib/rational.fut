@@ -1,6 +1,6 @@
 -- An implementation of the NUMERIC signature using pairs of numbers.
 
-include "futlib/numeric"
+include "futlib/math"
 
 module Rational(T: INTEGRAL): NUMERIC = {
   type t = (T.t, T.t)

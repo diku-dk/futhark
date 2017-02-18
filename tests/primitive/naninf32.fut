@@ -3,7 +3,7 @@
 -- input { 2f32 }
 -- output { false true true true true }
 
-import "futlib/numeric"
+import "futlib/math"
 
 fun main(x: f32) =
   (x < f32.nan,

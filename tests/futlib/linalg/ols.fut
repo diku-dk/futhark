@@ -7,7 +7,7 @@
 --   [1.9734432f32, 1.8890195f32]
 -- }
 
-import "futlib/numeric"
+import "futlib/math"
 import "futlib/linalg"
 
 module f32linalg = linalg(f32)

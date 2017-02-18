@@ -1,4 +1,4 @@
-import "futlib/numeric"
+import "futlib/math"
 
 module type complex = {
   type real

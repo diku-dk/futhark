@@ -15,7 +15,7 @@
 -- ==
 -- structure distributed { DoLoop/Kernel 2 DoLoop 2 }
 
-import "futlib/numeric"
+import "futlib/math"
 
 fun combineVs(n_row: []f64, vol_row: []f64, dr_row: []f64): []f64 =
     map (+) dr_row (map (*) n_row vol_row)
