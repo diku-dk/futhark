@@ -469,14 +469,19 @@ entryPointInput (ExternalTransparent (ArrayValue mem memsize (Imp.Space sid) bt 
 
 extValueDescName :: Imp.ExternalValue -> String
 extValueDescName (Imp.TransparentValue v) = extName $ valueDescName v
-extValueDescName (Imp.OpaqueValue desc _) = extName $ zEncodeString desc
+extValueDescName (Imp.OpaqueValue desc []) = extName $ zEncodeString desc
+extValueDescName (Imp.OpaqueValue desc (v:_)) =
+  extName $ zEncodeString desc ++ "_" ++ pretty (baseTag (valueDescVName v))
 
 extName :: String -> String
 extName = (++"_ext")
 
 valueDescName :: Imp.ValueDesc -> String
-valueDescName (Imp.ScalarValue _ _ vname) = pretty vname
-valueDescName (Imp.ArrayValue vname _ _ _) = pretty vname
+valueDescName = pretty . valueDescVName
+
+valueDescVName :: Imp.ValueDesc -> VName
+valueDescVName (Imp.ScalarValue _ _ vname) = vname
+valueDescVName (Imp.ArrayValue vname _ _ _) = vname
 
 readerElem :: PrimType -> Imp.Signedness -> String
 readerElem (FloatType Float32) _ = "read_float"
