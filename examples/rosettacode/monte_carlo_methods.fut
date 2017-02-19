@@ -12,7 +12,7 @@
 -- compiled input { 1000000 } output { 3.141696f32 }
 -- compiled input { 10000000 } output { 3.141595f32 }
 
-import "futlib/numeric"
+import "futlib/math"
 
 default(f32)
 
