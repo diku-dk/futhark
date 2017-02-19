@@ -1,7 +1,7 @@
--- You are not allowed to use the Intrinsics module in module expressions.
+-- You are not allowed to use the intrinsics module in module expressions.
 -- ==
--- error: The Intrinsics module may not be used in module expressions.
+-- error: The 'intrinsics' module may not be used in module expressions.
 
-module M = Intrinsics
+module M = intrinsics
 
 fun main() = 0

@@ -50,7 +50,7 @@ module linalg(T: numeric): {
                  A (iota n)
     let Ap' = gauss_jordan Ap 0
     -- Drop the identity matrix at the front.
-    in Ap'[0:n,n:n Intrinsics.* 2]
+    in Ap'[0:n,n:n intrinsics.* 2]
 
   -- Solves Ax=b.
   fun ols (X: [n][m]t) (b: [n]t): [m]t =

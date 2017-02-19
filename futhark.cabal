@@ -204,6 +204,8 @@ Library
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
                    Language.Futhark.TypeChecker
+                   Language.Futhark.TypeChecker.Monad
+                   Language.Futhark.TypeChecker.Terms
 
   Other-modules: Language.Futhark.Parser.Parser
                  Language.Futhark.Parser.Lexer
