@@ -94,6 +94,8 @@ callKernel (Imp.GetGroupSize v) =
   Py.stm $ Assign (Var (textual v)) $ Var "self.group_size"
 callKernel (Imp.GetTileSize v) =
   Py.stm $ Assign (Var (textual v)) $ Var "self.tile_size"
+callKernel (Imp.HostCode c) =
+  Py.compileCode c
 
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size

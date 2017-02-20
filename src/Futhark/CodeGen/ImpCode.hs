@@ -96,6 +96,10 @@ paramName (ScalarParam name _) = name
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
 
+instance Monoid (Functions a) where
+  mempty = Functions []
+  Functions x `mappend` Functions y = Functions $ x ++ y
+
 data Signedness = TypeUnsigned
                 | TypeDirect
                 deriving (Show)

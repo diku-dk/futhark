@@ -829,7 +829,11 @@ compileCode (Imp.Call dests fname args) = do
         | isBuiltInFunction fname = futharkFun (pretty  fname)
         | otherwise               = "self." ++ futharkFun (pretty  fname)
       call' = simpleCall fname' args'
-  stm $ Assign dests' call'
+  -- If the function returns nothing (is called only for side
+  -- effects), take care not to assign to an empty tuple.
+  stm $ if null dests
+        then Exp call'
+        else Assign dests' call'
   where compileArg (Imp.MemArg m) = return $ Var $ pretty m
         compileArg (Imp.ExpArg e) = compileExp e
 
