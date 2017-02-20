@@ -213,7 +213,7 @@ futharkFun s = "futhark_" ++ zEncodeString s
 
 paramsTypes :: [Imp.Param] -> [Imp.Type]
 paramsTypes = map paramType
-  where paramType (Imp.MemParam _ size space) = Imp.Mem size space
+  where paramType (Imp.MemParam _ space) = Imp.Mem (Imp.ConstSize 0) space
         paramType (Imp.ScalarParam _ t) = Imp.Scalar t
 
 compileOutput :: [Imp.Param] -> [PyExp]
@@ -371,72 +371,26 @@ unpackDim arr_name (Imp.VarSize var) i = do
   stm $ Try [Assert (BinOp "==" dest makeNumpy) "variant dimension wrong"]
         [Catch (Var "NameError") [Assign dest makeNumpy]]
 
-hashSizeVars :: [Imp.Param] -> HM.HashMap VName VName
-hashSizeVars = mconcat . map hashSizeVars'
-  where hashSizeVars' (Imp.MemParam parname (Imp.VarSize memsizename) _) =
-          HM.singleton parname memsizename
-        hashSizeVars' _ =
-          HM.empty
-
-hashSpace :: [Imp.Param] -> HM.HashMap VName Space
-hashSpace = mconcat . map hashSpace'
-  where hashSpace' (Imp.MemParam parname _ space) =
-          HM.singleton parname space
-        hashSpace' _ =
-          HM.empty
-
-data EntryPointValue =
-  -- | Return a scalar of the given type stored in the given variable.
-    ScalarValue PrimType Imp.Signedness VName
-  -- | Return an array, given memory block, size, space, and
-  -- dimensions of the array.
-  | ArrayValue VName Imp.MemSize Space PrimType Imp.Signedness [Imp.DimSize]
-
--- | A description of a value returned or accepted by an entry point.
-data EntryPointExternal =
-    ExternalTransparent EntryPointValue
-  | ExternalOpaque String [EntryPointValue]
-
-createValue :: HM.HashMap VName VName
-            -> HM.HashMap VName Imp.Space -> Imp.ExternalValue
-            -> CompilerM op s EntryPointExternal
-createValue sizes spaces ev =
-  case ev of
-    Imp.OpaqueValue desc ds ->
-      ExternalOpaque desc <$> mapM createValue' ds
-    Imp.TransparentValue v ->
-      ExternalTransparent <$> createValue' v
-  where createValue' (Imp.ScalarValue t ept name) =
-          return $ ScalarValue t ept name
-        createValue' (Imp.ArrayValue mem bt ept dims) = do
-          size <- maybe noMemSize return $ HM.lookup mem sizes
-          space <- maybe noMemSpace return $ HM.lookup mem spaces
-          return $ ArrayValue mem (Imp.VarSize size) space bt ept dims
-            where noMemSpace =
-                    fail $ "createValue: could not find space of memory block " ++ pretty mem
-                  noMemSize =
-                    fail $ "createValue: could not find size of memory block " ++ pretty mem
-
-entryPointOutput :: EntryPointExternal -> CompilerM op s PyExp
-entryPointOutput (ExternalOpaque desc vs) =
+entryPointOutput :: Imp.ExternalValue -> CompilerM op s PyExp
+entryPointOutput (Imp.OpaqueValue desc vs) =
   simpleCall "opaque" . (StringLiteral (pretty desc):) <$>
-  mapM (entryPointOutput . ExternalTransparent) vs
-entryPointOutput (ExternalTransparent (ScalarValue bt ept name)) =
+  mapM (entryPointOutput . Imp.TransparentValue) vs
+entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
   return $ simpleCall tf [Var $ pretty name]
   where tf = compilePrimToExtNp bt ept
-entryPointOutput (ExternalTransparent (ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
   let cast = Cast (Var $ pretty mem) (compilePrimTypeExt bt ept)
   return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
-entryPointOutput (ExternalTransparent (ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
+entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
 
-entryPointInput :: EntryPointExternal -> PyExp -> CompilerM op s ()
-entryPointInput (ExternalOpaque _ vs) e =
-  zipWithM_ entryPointInput (map ExternalTransparent vs)
+entryPointInput :: Imp.ExternalValue -> PyExp -> CompilerM op s ()
+entryPointInput (Imp.OpaqueValue _ vs) e =
+  zipWithM_ entryPointInput (map Imp.TransparentValue vs)
   (map (Index (Field e "data") . IdxExp . Constant . value) [(0::Int32)..])
 
-entryPointInput (ExternalTransparent (ScalarValue bt _ name)) e = do
+entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
   let vname' = Var $ pretty name
       -- HACK: A Numpy int64 will signal an OverflowError if we pass
       -- it a number bigger than 2**63.  This does not happen if we
@@ -449,7 +403,7 @@ entryPointInput (ExternalTransparent (ScalarValue bt _ name)) e = do
       npcall = simpleCall npobject [ctcall]
   stm $ Assign vname' npcall
 
-entryPointInput (ExternalTransparent (ArrayValue mem memsize Imp.DefaultSpace _ _ dims)) e = do
+entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace _ _ dims)) e = do
   zipWithM_ (unpackDim e) dims [0..]
   let dest = Var $ pretty mem
       unwrap_call = simpleCall "unwrapArray" [e]
@@ -463,7 +417,7 @@ entryPointInput (ExternalTransparent (ArrayValue mem memsize Imp.DefaultSpace _ 
 
   stm $ Assign dest unwrap_call
 
-entryPointInput (ExternalTransparent (ArrayValue mem memsize (Imp.Space sid) bt ept dims)) e = do
+entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize (Imp.Space sid) bt ept dims)) e = do
   unpack_input <- asks envEntryInput
   unpack_input mem memsize sid bt ept dims e
 
@@ -481,7 +435,7 @@ valueDescName = pretty . valueDescVName
 
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
-valueDescVName (Imp.ArrayValue vname _ _ _) = vname
+valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
 
 readerElem :: PrimType -> Imp.Signedness -> String
 readerElem (FloatType Float32) _ = "read_float"
@@ -500,7 +454,7 @@ readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
       stdin = Var "sys.stdin"
   in Assign (Var $ extValueDescName decl) $ simpleCall reader' [stdin]
 
-readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ bt ept dims)) =
+readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
   let rank' = Var $ show $ length dims
       reader' = Var $ readerElem bt ept
       bt' = Var $ compilePrimType bt
@@ -529,17 +483,17 @@ printPrimStm val t ept =
           Exp $ simpleCall "sys.stdout.write"
           [BinOp "%" (StringLiteral s) val]
 
-printStm :: EntryPointValue -> PyExp -> CompilerM op s PyStmt
-printStm (ScalarValue bt ept _) e =
+printStm :: Imp.ValueDesc -> PyExp -> CompilerM op s PyStmt
+printStm (Imp.ScalarValue bt ept _) e =
   return $ printPrimStm e bt ept
-printStm (ArrayValue _ _ _ bt ept []) e =
+printStm (Imp.ArrayValue _ _ _ bt ept []) e =
   return $ printPrimStm e bt ept
-printStm (ArrayValue mem memsize space bt ept (outer:shape)) e = do
+printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) e = do
   v <- newVName "print_elem"
   first <- newVName "print_first"
   let size = simpleCall "np.product" [List $ map compileDim $ outer:shape]
       emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
-  printelem <- printStm (ArrayValue mem memsize space bt ept shape) $ Var $ pretty v
+  printelem <- printStm (Imp.ArrayValue mem memsize space bt ept shape) $ Var $ pretty v
   return $ If (BinOp "==" size (Constant (value (0::Int32))))
     [puts emptystr]
     [Assign (Var $ pretty first) $ Var "True",
@@ -557,39 +511,33 @@ printStm (ArrayValue mem memsize space bt ept (outer:shape)) e = do
 
           puts s = Exp $ simpleCall "sys.stdout.write" [StringLiteral s]
 
-printValue :: [(EntryPointExternal, PyExp)] -> CompilerM op s [PyStmt]
+printValue :: [(Imp.ExternalValue, PyExp)] -> CompilerM op s [PyStmt]
 printValue = fmap concat . mapM (uncurry printValue')
   -- We copy non-host arrays to the host before printing.  This is
   -- done in a hacky way - we assume the value has a .get()-method
   -- that returns an equivalent Numpy array.  This works for PyOpenCL,
   -- but we will probably need yet another plugin mechanism here in
   -- the future.
-  where printValue' (ExternalOpaque desc _) _ =
+  where printValue' (Imp.OpaqueValue desc _) _ =
           return [Exp $ simpleCall "sys.stdout.write"
                   [StringLiteral $ "#<opaque " ++ desc ++ ">"]]
-        printValue' (ExternalTransparent (ArrayValue mem memsize (Space _) bt ept shape)) e =
-          printValue' (ExternalTransparent (ArrayValue mem memsize DefaultSpace bt ept shape)) $
+        printValue' (Imp.TransparentValue (Imp.ArrayValue mem memsize (Space _) bt ept shape)) e =
+          printValue' (Imp.TransparentValue (Imp.ArrayValue mem memsize DefaultSpace bt ept shape)) $
           simpleCall (pretty e ++ ".get") []
-        printValue' (ExternalTransparent r) e = do
+        printValue' (Imp.TransparentValue r) e = do
           p <- printStm r e
           return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
 prepareEntry :: (Name, Imp.Function op)
              -> CompilerM op s
                 (String, [String], [PyStmt], [PyStmt], [PyStmt],
-                 [(EntryPointExternal, PyExp)])
-prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
+                 [(Imp.ExternalValue, PyExp)])
+prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
-      hashSizeInput = hashSizeVars inputs
-      hashSizeOutput = hashSizeVars outputs
-      hashSpaceInput = hashSpace inputs
-      hashSpaceOutput = hashSpace outputs
 
-  args <- mapM (createValue hashSizeInput hashSpaceInput) decl_args
   prepareIn <- collect $ zipWithM_ entryPointInput args $
-               map (Var . extValueDescName) decl_args
-  results <- mapM (createValue hashSizeOutput hashSpaceOutput) decl_outputs
+               map (Var . extValueDescName) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
   let inputArgs = map (pretty . Imp.paramName) inputs
@@ -597,7 +545,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = d
       funCall = simpleCall fname' (fmap Var inputArgs)
       call = [Assign funTuple funCall]
 
-  return (nameToString fname, map extValueDescName decl_args,
+  return (nameToString fname, map extValueDescName args,
           prepareIn, call, prepareOut,
           zip results res)
 

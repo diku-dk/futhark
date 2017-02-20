@@ -85,12 +85,12 @@ type DimSize = Size
 
 data Type = Scalar PrimType | Mem MemSize Space
 
-data Param = MemParam VName DimSize Space
+data Param = MemParam VName Space
            | ScalarParam VName PrimType
              deriving (Show)
 
 paramName :: Param -> VName
-paramName (MemParam name _ _) = name
+paramName (MemParam name _) = name
 paramName (ScalarParam name _) = name
 
 -- | A collection of imperative functions.
@@ -101,8 +101,9 @@ data Signedness = TypeUnsigned
                 deriving (Show)
 
 -- | A description of an externally meaningful value.
-data ValueDesc = ArrayValue VName PrimType Signedness [DimSize]
-               -- ^ An array with memory block, element type, signedness of element
+data ValueDesc = ArrayValue VName MemSize Space PrimType Signedness [DimSize]
+               -- ^ An array with memory block, memory block size,
+               -- memory space, element type, signedness of element
                -- type (if applicable), and shape.
                | ScalarValue PrimType Signedness VName
                -- ^ A scalar value with signedness if applicable.
@@ -246,8 +247,8 @@ instance Pretty op => Pretty (FunctionT op) where
 instance Pretty Param where
   ppr (ScalarParam name ptype) =
     ppr ptype <+> ppr name
-  ppr (MemParam name size space) =
-    text "mem" <> parens (ppr size) <> space' <+> ppr name
+  ppr (MemParam name space) =
+    text "mem" <> space' <+> ppr name
     where space' = case space of Space s      -> text "@" <> text s
                                  DefaultSpace -> mempty
 
@@ -256,11 +257,14 @@ instance Pretty ValueDesc where
     ppr t <+> ppr name <> ept'
     where ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
-  ppr (ArrayValue mem et ept shape) =
-    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> ept'
+  ppr (ArrayValue mem memsize space et ept shape) =
+    foldr f (ppr et) shape <+> text "at" <+> ppr mem <> parens (ppr memsize) <> space' <+> ept'
     where f e s = brackets $ s <> comma <> ppr e
           ept' = case ept of TypeUnsigned -> text " (unsigned)"
                              TypeDirect   -> mempty
+          space' = case space of Space s      -> text "@" <> text s
+                                 DefaultSpace -> mempty
+
 
 instance Pretty ExternalValue where
   ppr (TransparentValue v) = ppr v

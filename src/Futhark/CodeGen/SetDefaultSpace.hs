@@ -17,14 +17,26 @@ setFunctionSpace space (Function entry outputs inputs body results args) =
   (map (setParamSpace space) outputs)
   (map (setParamSpace space) inputs)
   (setBodySpace space body)
-  results
-  args
+  (map (setExtValueSpace space) results)
+  (map (setExtValueSpace space) args)
 
 setParamSpace :: Space -> Param -> Param
-setParamSpace space (MemParam name size DefaultSpace) =
-  MemParam name size space
+setParamSpace space (MemParam name DefaultSpace) =
+  MemParam name space
 setParamSpace _ param =
   param
+
+setExtValueSpace :: Space -> ExternalValue -> ExternalValue
+setExtValueSpace space (OpaqueValue desc vs) =
+  OpaqueValue desc $ map (setValueSpace space) vs
+setExtValueSpace space (TransparentValue v) =
+  TransparentValue $ setValueSpace space v
+
+setValueSpace :: Space -> ValueDesc -> ValueDesc
+setValueSpace space (ArrayValue mem memsize _ bt ept shape) =
+  ArrayValue mem memsize space bt ept shape
+setValueSpace _ (ScalarValue bt ept v) =
+  ScalarValue bt ept v
 
 setBodySpace :: Space -> Code op -> Code op
 setBodySpace space (Allocate v e old_space) =
