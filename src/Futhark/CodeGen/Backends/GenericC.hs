@@ -735,7 +735,8 @@ readInput refcount known_sizes
                               i <- [0..rank-1] ]
       copymemsize = case maybe_memsize of
         ConstSize{} -> []
-        VarSize sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
+        VarSize sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|],
+                            [C.cstm|$id:name.size = $id:sizevar;|]]
       dest = rawMem' refcount name
   in (known_sizes ++ wrote_sizes,
       [C.cstm|{
@@ -785,7 +786,7 @@ unpackResult ret (MemParam name DefaultSpace) =
   stm [C.cstm|$id:name = $exp:ret;|]
 unpackResult ret (MemParam name (Space srcspace)) = do
   copy <- asks envCopy
-  let size' = [C.cexp|$id:name.size|]
+  let size' = [C.cexp|$exp:ret.size|]
   allocMem name size' DefaultSpace
   copy (rawMem' True name) [C.cexp|0|] DefaultSpace
     (rawMem' True ret) [C.cexp|0|] (Space srcspace) size'
