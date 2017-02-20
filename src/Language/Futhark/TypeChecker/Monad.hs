@@ -66,7 +66,7 @@ import Language.Futhark
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 
-  -- | Information about an error during type checking.  The 'Show'
+-- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
 data TypeError =
     TypeError SrcLoc String
