@@ -380,6 +380,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (ValSpec name params rettype _) =
     ppr name <+> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
+  ppr (ModSpec name sig _) =
+    text "module" <+> ppr name <> colon <+> ppr sig
   ppr (IncludeSpec e _) =
     text "include" <+> ppr e
 

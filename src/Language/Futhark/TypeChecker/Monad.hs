@@ -29,6 +29,7 @@ module Language.Futhark.TypeChecker.Monad
   , envTypeAbbrs
   , envAbsTypes
   , envVals
+  , envMods
 
   , anySignedType
   , anyUnsignedType
@@ -233,7 +234,7 @@ instance Show FunctorF where
 data Env = Env { envVtable :: HM.HashMap VName ValBinding
                , envTypeTable :: HM.HashMap VName TypeBinding
                , envSigTable :: HM.HashMap VName Env
-               , envModTable :: HM.HashMap Name ModBinding
+               , envModTable :: HM.HashMap VName ModBinding
                , envNameMap :: NameMap
                } deriving (Show)
 
@@ -258,6 +259,9 @@ envVals = map select . HM.toList . envVtable
           (name, fun)
         select (name, BoundV t) =
           (name, ([], vacuousShapeAnnotations $ toStruct t))
+
+envMods :: Env -> [(VName,ModBinding)]
+envMods = HM.toList . envModTable
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
@@ -373,7 +377,7 @@ instance MonadTypeChecker TypeM where
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
-    case HM.lookup (baseName name) $ envModTable scope of
+    case HM.lookup name $ envModTable scope of
       Nothing                -> bad $ UnknownVariableError Structure qn loc
       Just (ModMod modscope) -> return (qn', modscope)
       Just ModFunctor{}      -> bad $ UnappliedFunctor qn loc
@@ -391,7 +395,7 @@ instance MonadTypeChecker TypeM where
 
   lookupFunctor loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
-    case HM.lookup (baseName name) $ envModTable scope of
+    case HM.lookup name $ envModTable scope of
       Nothing -> bad $ UnknownVariableError Structure qn loc
       Just ModMod{}            -> bad $ TypeError loc "Non-parametrised module given an argument."
       Just (ModFunctor fscope) -> return (qn', fscope)
@@ -407,7 +411,8 @@ checkQualName space qn@(QualName quals name) loc = do
               bad $ UnknownVariableError space qn loc
 
         descend scope (q:qs)
-          | Just res <- HM.lookup q $ envModTable scope =
+          | Just q' <- HM.lookup (Structure, q) $ envNameMap scope,
+            Just res <- HM.lookup q' $ envModTable scope =
               case res of
                 ModMod q_scope -> descend q_scope qs
                 ModFunctor{} -> bad $ UnappliedFunctor qn loc

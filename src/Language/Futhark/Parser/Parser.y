@@ -290,6 +290,9 @@ Spec :: { SpecBase NoInfo Name }
       | type id
         { let L loc (ID name) = $2
           in TypeSpec name loc }
+      | module id ':' SigExp
+        { let L _ (ID name) = $2
+          in ModSpec name $4 $1 }
       | include SigExp
         { IncludeSpec $2 $1 }
 ;
