@@ -393,10 +393,10 @@ compileOutParams orig_rts orig_epts = do
           (memout, memsize, memdestf) <- case lore of
             ReturnsNewBlock x _ -> do
               memout <- imp $ newVName "out_mem"
-              destmemsize <- ensureMemSizeOut x
+              (destmemsize, sizeout) <- ensureMemSizeOut x
               tell [Imp.MemParam memout space]
               return (memout,
-                      Imp.VarSize memout,
+                      Imp.VarSize sizeout,
                       const $ SetMemory memout destmemsize)
             ReturnsInBlock memout ixfun -> do
               memsize <- lift $ lift $ entryMemSize <$> lookupMemory memout
@@ -433,8 +433,8 @@ compileOutParams orig_rts orig_epts = do
             Nothing -> do sizeout <- imp $ newVName "out_memsize"
                           tell [Imp.ScalarParam sizeout int32]
                           put (HM.insert x sizeout memseen, arrseen)
-                          return $ Just sizeout
-            Just _   -> return Nothing
+                          return (Just sizeout, sizeout)
+            Just sizeout -> return (Nothing, sizeout)
 
 compileFunDef :: ExplicitMemorish lore =>
                  Operations lore op -> Imp.Space
