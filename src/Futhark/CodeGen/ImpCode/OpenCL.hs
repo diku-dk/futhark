@@ -52,6 +52,7 @@ data KernelArg = ValueKArg Exp PrimType
 
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
+            | HostCode Code
             | GetNumGroups VName
             | GetGroupSize VName
             | GetTileSize VName
