@@ -502,7 +502,7 @@ printStm (OpaqueValue desc _) =
   return [C.cstm|printf("#<opaque %s>", $string:desc);|]
 printStm (TransparentValue (ScalarValue bt ept name)) =
   return $ printPrimStm [C.cexp|stdout|] name bt ept
-printStm (TransparentValue (ArrayValue mem bt ept shape)) = do
+printStm (TransparentValue (ArrayValue mem _ _ bt ept shape)) = do
   mem' <- rawMem mem
   printArrayStm mem' bt ept shape
 
@@ -574,7 +574,9 @@ readTypeEnum _ _ = Nothing
 
 paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
-  where paramType (MemParam _ size space) = Mem size space
+  -- Let's hope we don't need the size for anything, because we are
+  -- just making something up.
+  where paramType (MemParam _ space) = Mem (ConstSize 0) space
         paramType (ScalarParam _ t) = Scalar t
 
 readPrimStm :: C.ToExp a => a -> PrimType -> Signedness -> C.Stm
@@ -605,7 +607,7 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
   refcount <- asks envFatMemory
-  let readstms = readInputs refcount inputs args
+  let readstms = readInputs refcount args
   (argexps, prepare) <- collect' $ mapM prepareArg inputs
   -- unpackResults may copy back to DefaultSpace.
   unpackstms <- unpackResults ret outputs
@@ -670,51 +672,51 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
                 |],
           [C.cinit|{ .name = $string:entry_point_name,
                      .fun = $id:entry_point_function_name }|])
-  where makeParam (MemParam name _ _) = do
+  where makeParam (MemParam name _) = do
           declMem name DefaultSpace
           allocMem name [C.cexp|0|] DefaultSpace
         makeParam (ScalarParam name ty) = do
           let ty' = primTypeToCType ty
           decl [C.cdecl|$ty:ty' $id:name;|]
 
-        stubParam (MemParam name _ _) =
+        stubParam (MemParam name _) =
           declMem name DefaultSpace
         stubParam (ScalarParam name ty) = do
           let ty' = primTypeToCType ty
           decl [C.cdecl|$ty:ty' $id:name;|]
 
-        freeParam (MemParam name _ _) =
+        freeParam (MemParam name _) =
           unRefMem name DefaultSpace
         freeParam ScalarParam{} =
           return ()
 
 prepareArg :: Param -> CompilerM op s C.Exp
-prepareArg (MemParam name size (Space sid)) = do
+prepareArg (MemParam name (Space sid)) = do
   -- Futhark main expects some other memory space than default, so
   -- create a new memory block and copy it there.
   name' <- newVName $ baseString name <> "_" <> sid
   copy <- asks envCopy
-  let size' = dimSizeToExp size
+  let size = [C.cexp|$id:name.size|]
       dest = rawMem' True name'
       src = rawMem' True name
   declMem name' $ Space sid
-  allocMem name' size' $ Space sid
-  copy dest [C.cexp|0|] (Space sid) src [C.cexp|0|] DefaultSpace size'
+  allocMem name' size $ Space sid
+  copy dest [C.cexp|0|] (Space sid) src [C.cexp|0|] DefaultSpace size
   return [C.cexp|$id:name'|]
 
 prepareArg p = return [C.cexp|$exp:(paramName p)|]
 
-readInputs :: Bool -> [Param] -> [ExternalValue] -> [C.Stm]
-readInputs refcount inputparams = snd . mapAccumL (readInput refcount memsizes) mempty
-  where memsizes = sizeVars inputparams
+readInputs :: Bool -> [ExternalValue] -> [C.Stm]
+readInputs refcount = snd . mapAccumL (readInput refcount) mempty
 
-readInput :: Bool -> HM.HashMap VName VName -> [VName] -> ExternalValue
+readInput :: Bool -> [VName] -> ExternalValue
           -> ([VName], C.Stm)
-readInput _ _ known_sizes (OpaqueValue desc _) =
+readInput _ known_sizes (OpaqueValue desc _) =
   (known_sizes, [C.cstm|panic(1, "Cannot read value of type %s\n", $string:desc);|])
-readInput _ _ known_sizes (TransparentValue (ScalarValue t ept name)) =
+readInput _ known_sizes (TransparentValue (ScalarValue t ept name)) =
   (known_sizes, readPrimStm name t ept)
-readInput refcount memsizes known_sizes (TransparentValue (ArrayValue name t ept shape))
+readInput refcount known_sizes
+          (TransparentValue (ArrayValue name maybe_memsize _ t ept shape))
   | (Just str_reader, Just type_val) <- (readStrFun t ept , readTypeEnum t ept) =
   -- We need to create an array for the array parser to put
   -- the shapes.
@@ -731,9 +733,9 @@ readInput refcount memsizes known_sizes (TransparentValue (ArrayValue name t ept
       memsize = cproduct $ [C.cexp|sizeof($ty:t')|] :
                              [ [C.cexp|shape[$int:i]|] |
                               i <- [0..rank-1] ]
-      copymemsize = case HM.lookup name memsizes of
-        Nothing -> []
-        Just sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
+      copymemsize = case maybe_memsize of
+        ConstSize{} -> []
+        VarSize sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
       dest = rawMem' refcount name
   in (known_sizes ++ wrote_sizes,
       [C.cstm|{
@@ -763,13 +765,6 @@ readInput refcount memsizes known_sizes (TransparentValue (ArrayValue name t ept
                     abort();
                   }|]
 
-sizeVars :: [Param] -> HM.HashMap VName VName
-sizeVars = mconcat . map sizeVars'
-  where sizeVars' (MemParam parname (VarSize memsizename) _) =
-          HM.singleton parname memsizename
-        sizeVars' _ =
-          HM.empty
-
 printResult :: [ExternalValue] -> CompilerM op s [C.Stm]
 printResult vs = fmap concat $ forM vs $ \v -> do
   p <- printStm v
@@ -786,11 +781,11 @@ unpackResults ret outparams =
 unpackResult :: C.ToExp a => a -> Param -> CompilerM op s ()
 unpackResult ret (ScalarParam name _) =
   stm [C.cstm|$id:name = $exp:ret;|]
-unpackResult ret (MemParam name _ DefaultSpace) =
+unpackResult ret (MemParam name DefaultSpace) =
   stm [C.cstm|$id:name = $exp:ret;|]
-unpackResult ret (MemParam name size (Space srcspace)) = do
+unpackResult ret (MemParam name (Space srcspace)) = do
   copy <- asks envCopy
-  let size' = dimSizeToExp size
+  let size' = [C.cexp|$id:name.size|]
   allocMem name size' DefaultSpace
   copy (rawMem' True name) [C.cexp|0|] DefaultSpace
     (rawMem' True ret) [C.cexp|0|] (Space srcspace) size'
@@ -805,7 +800,7 @@ freeResults ret outparams =
 freeResult :: C.ToExp a => a -> Param -> CompilerM op s ()
 freeResult _ ScalarParam{} =
   return ()
-freeResult e (MemParam _ _ space) =
+freeResult e (MemParam _ space) =
   unRefMem e space
 
 benchmarkOptions :: [Option]
@@ -995,14 +990,14 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
   where compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
-        compileInput (MemParam name _ space) = do
+        compileInput (MemParam name space) = do
           ty <- memToCType space
           return [C.cparam|$ty:ty $id:name|]
 
         compileOutput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           decl [C.cdecl|$ty:ctp $id:name;|]
-        compileOutput (MemParam name _ space) =
+        compileOutput (MemParam name space) =
           declMem name space
 
 compilePrimValue :: PrimValue -> C.Exp
@@ -1324,7 +1319,7 @@ compileFunBody outputs code = do
   bodytype <- typeToCType $ paramsTypes outputs
   compileCode code
   decl [C.cdecl|$ty:bodytype $id:retval;|]
-  let setRetVal' i (MemParam name _ space) = do
+  let setRetVal' i (MemParam name space) = do
         let field = tupleFieldExp retval i
         resetMem field
         setMem field name space

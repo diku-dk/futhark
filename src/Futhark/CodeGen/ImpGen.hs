@@ -47,7 +47,6 @@ module Futhark.CodeGen.ImpGen
   , declaringVarEntry
   , declaringScope
   , declaringScopes
-  , withParams
   , declaringPrimVar
   , declaringPrimVars
   , withPrimVar
@@ -290,8 +289,8 @@ compileInParam :: ExplicitMemorish lore =>
 compileInParam fparam = case paramAttr fparam of
   Scalar bt ->
     return $ Left $ Imp.ScalarParam name bt
-  MemMem size space ->
-    Left <$> (Imp.MemParam name <$> subExpToDimSize size <*> pure space)
+  MemMem _ space ->
+    return $ Left $ Imp.MemParam name space
   ArrayMem bt shape _ mem ixfun -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt $
@@ -315,10 +314,23 @@ compileInParams params orig_epts = do
   let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes $ ctx_params++val_params
 
+      summaries = HM.fromList $ mapMaybe memSummary params
+        where memSummary param
+                | MemMem (Constant (IntValue (Int32Value size))) space <- paramAttr param =
+                    Just (paramName param, (Imp.ConstSize size, space))
+                | MemMem (Var size) space <- paramAttr param =
+                    Just (paramName param, (Imp.VarSize size, space))
+                | otherwise =
+                    Nothing
+
+      findMemInfo :: VName -> Maybe (Imp.MemSize, Space)
+      findMemInfo = flip HM.lookup summaries
+
       mkValueDesc fparam signedness =
         case (findArray $ paramName fparam, paramType fparam) of
-          (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) ->
-            Just $ Imp.ArrayValue mem bt signedness shape
+          (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) -> do
+            (memsize, memspace) <- findMemInfo mem
+            Just $ Imp.ArrayValue mem memsize memspace bt signedness shape
           (_, Prim bt)
             | paramName fparam `HS.member` sizes ->
               Nothing
@@ -378,21 +390,25 @@ compileOutParams orig_rts orig_epts = do
           return (Imp.ScalarValue t ept out, ScalarDestination out)
         mkParam (ReturnsArray t shape _ lore) ept = do
           space <- asks envDefaultSpace
-          (memout, memdestf) <- case lore of
+          (memout, memsize, memdestf) <- case lore of
             ReturnsNewBlock x _ -> do
               memout <- imp $ newVName "out_mem"
-              (sizeout, destmemsize) <- ensureMemSizeOut x
-              tell [Imp.MemParam memout (Imp.VarSize sizeout) space]
-              return (memout, const $ SetMemory memout destmemsize)
-            ReturnsInBlock memout ixfun ->
+              destmemsize <- ensureMemSizeOut x
+              tell [Imp.MemParam memout space]
               return (memout,
+                      Imp.VarSize memout,
+                      const $ SetMemory memout destmemsize)
+            ReturnsInBlock memout ixfun -> do
+              memsize <- lift $ lift $ entryMemSize <$> lookupMemory memout
+              return (memout,
+                      memsize,
                       \resultshape ->
                       CopyIntoMemory $
                       MemLocation memout resultshape ixfun)
           (resultshape, destresultshape) <-
             mapAndUnzipM inspectExtDimSize $ extShapeDims shape
           let memdest = memdestf resultshape
-          return (Imp.ArrayValue memout t ept resultshape,
+          return (Imp.ArrayValue memout memsize space t ept resultshape,
                   ArrayDestination memdest destresultshape)
 
         inspectExtDimSize (Ext x) = do
@@ -414,11 +430,11 @@ compileOutParams orig_rts orig_epts = do
         ensureMemSizeOut x = do
           (memseen, arrseen) <- get
           case HM.lookup x memseen of
-            Nothing      -> do sizeout <- imp $ newVName "out_memsize"
-                               tell [Imp.ScalarParam sizeout int32]
-                               put (HM.insert x sizeout memseen, arrseen)
-                               return (sizeout, Just sizeout)
-            Just sizeout -> return (sizeout, Nothing)
+            Nothing -> do sizeout <- imp $ newVName "out_memsize"
+                          tell [Imp.ScalarParam sizeout int32]
+                          put (HM.insert x sizeout memseen, arrseen)
+                          return $ Just sizeout
+            Just _   -> return Nothing
 
 compileFunDef :: ExplicitMemorish lore =>
                  Operations lore op -> Imp.Space
@@ -436,7 +452,7 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
         compile = do
           (inparams, arraydecls, args) <- compileInParams params params_entry
           (results, outparams, dests) <- compileOutParams rettype ret_entry
-          withParams inparams $
+          withFParams params $
             withArrays arraydecls $
             compileBody dests body
           return (outparams, inparams, results, args)
@@ -751,18 +767,12 @@ withArray (ArrayDecl name bt location) m = do
 withArrays :: [ArrayDecl] -> ImpM lore op a -> ImpM lore op a
 withArrays = flip $ foldr withArray
 
-withParams :: [Imp.Param] -> ImpM lore op a -> ImpM lore op a
-withParams = flip $ foldr withParam
-
-withParam :: Imp.Param -> ImpM lore op a -> ImpM lore op a
-withParam (Imp.MemParam name memsize space) =
-  let entry = MemVar Nothing MemEntry { entryMemSize = memsize
-                                      , entryMemSpace = space
-                                      }
-  in local $ insertInVtable name entry
-withParam (Imp.ScalarParam name bt) =
-  let entry = ScalarVar Nothing ScalarEntry { entryScalarType = bt }
-  in local $ insertInVtable name entry
+-- | Like 'declaringFParams', but does not create new declarations.
+withFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore op a -> ImpM lore op a
+withFParams = flip $ foldr withFParam
+  where withFParam fparam m = do
+          entry <- memBoundToVarEntry Nothing (const NoUniqueness <$> paramAttr fparam)
+          local (insertInVtable (paramName fparam) entry) m
 
 declaringVars :: ExplicitMemorish lore =>
                  Maybe (Exp lore) -> [PatElem lore] -> ImpM lore op a -> ImpM lore op a
@@ -793,28 +803,27 @@ declaringPrimVar name bt =
 declaringPrimVars :: [(VName,PrimType)] -> ImpM lore op a -> ImpM lore op a
 declaringPrimVars = flip $ foldr (uncurry declaringPrimVar)
 
+memBoundToVarEntry :: Maybe (Exp lore) -> MemBound NoUniqueness
+                   -> ImpM lore op (VarEntry lore)
+memBoundToVarEntry e (Scalar bt) =
+  return $ ScalarVar e ScalarEntry { entryScalarType = bt }
+memBoundToVarEntry e (MemMem size space) = do
+  size' <- subExpToDimSize size
+  return $ MemVar e MemEntry { entryMemSize = size'
+                             , entryMemSpace = space
+                             }
+memBoundToVarEntry e (ArrayMem bt shape _ mem ixfun) = do
+  shape' <- mapM subExpToDimSize $ shapeDims shape
+  let location = MemLocation mem shape' ixfun
+  return $ ArrayVar e ArrayEntry { entryArrayLocation = location
+                                 , entryArrayElemType = bt
+                                 }
+
 declaringName :: Maybe (Exp lore) -> VName -> NameInfo ExplicitMemory
               -> ImpM lore op a -> ImpM lore op a
-declaringName e name info m =
-  case infoAttr info of
-    Scalar bt -> do
-      let entry = ScalarVar e ScalarEntry { entryScalarType = bt }
-      declaringVarEntry name entry m
-    MemMem size space -> do
-      size' <- subExpToDimSize size
-      let entry = MemVar e MemEntry {
-              entryMemSize = size'
-            , entryMemSpace = space
-            }
-      declaringVarEntry name entry m
-    ArrayMem bt shape _ mem ixfun -> do
-      shape' <- mapM subExpToDimSize $ shapeDims shape
-      let location = MemLocation mem shape' ixfun
-          entry = ArrayVar e ArrayEntry {
-              entryArrayLocation = location
-            , entryArrayElemType = bt
-            }
-      declaringVarEntry name entry m
+declaringName e name info m = do
+  entry <- memBoundToVarEntry e $ infoAttr info
+  declaringVarEntry name entry m
   where infoAttr (LetInfo attr) = attr
         infoAttr (FParamInfo attr) = const NoUniqueness <$> attr
         infoAttr (LParamInfo attr) = attr
