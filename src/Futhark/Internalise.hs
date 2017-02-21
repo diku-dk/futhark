@@ -144,6 +144,7 @@ internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
 internaliseModExp :: E.ModExp
                   -> InternaliseM ()
 internaliseModExp E.ModVar{} = return ()
+internaliseModExp (E.ModParens e _) = internaliseModExp e
 internaliseModExp E.ModImport{} = return ()
 internaliseModExp (E.ModDecs ds _) =
   internaliseDecs ds
@@ -229,6 +230,9 @@ extraBodyStms bnds m = do
   return (insertStms bnds body, x)
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
+
+internaliseExp desc (E.Parens e _) =
+  internaliseExp desc e
 
 internaliseExp _ (E.Var v t loc) = do
   name <- lookupSubst v

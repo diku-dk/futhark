@@ -236,7 +236,7 @@ SigExp :: { SigExpBase f vn }
         : QualName            { let (v, loc) = $1 in SigVar v loc }
         | '{' Specs '}'       { SigSpecs $2 $1 }
         | SigExp with TypeRef { SigWith $1 $3 $2 }
-        | '(' SigExp ')'      { $2 }
+        | '(' SigExp ')'      { SigParens $2 $1 }
 
 TypeRef :: { TypeRefBase NoInfo Name }
          : QualName '=' TypeExpDecl { TypeRef (fst $1) $3 }
@@ -254,7 +254,7 @@ ModExp :: { ModExpBase f vn }
           { ModApply (fst $1) $3 NoInfo NoInfo (snd $1) }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
-        | '(' ModExp ')' { $2 }
+        | '(' ModExp ')' { ModParens $2 $1 }
 
 StructBind :: { StructBindBase f vn }
            : module id '=' ModExp
@@ -406,7 +406,7 @@ Param :: { PatternBase NoInfo Name }
 Param : VarId                        { Id $1 }
       | '_'                          { Wildcard NoInfo $1 }
       | '(' ')'                      { TuplePattern [] $1 }
-      | '(' Pattern ')'              { $2 }
+      | '(' Pattern ')'              { PatternParens $2 $1 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
 
 QualName :: { (QualName Name, SrcLoc) }
@@ -565,8 +565,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                              t <- lift $ gets parserIntType
                              return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
      | empty '(' TypeExpDecl ')'   { Empty $3 $1 }
-     | '(' Exp ')'                 { $2 }
-     | '(' Exp ')[' DimIndices ']' { Index $2 $4 $1 }
+     | '(' Exp ')'                 { Parens $2 $1 }
+     | '(' Exp ')[' DimIndices ']' { Index (Parens $2 $1) $4 $1 }
      | '(' Exp ',' Exps ')'        { TupLit ($2:$4) $1 }
      | '('      ')'                { TupLit [] $1 }
      | '[' Exps ']'                { ArrayLit $2 NoInfo $1 }
@@ -647,7 +647,7 @@ Patterns : Pattern ',' Patterns  { $1 : $3 }
 Pattern : VarId { Id $1 }
       | '_' { Wildcard NoInfo $1 }
       | '(' ')' { TuplePattern [] $1 }
-      | '(' Pattern ')' { $2 }
+      | '(' Pattern ')' { PatternParens $2 $1 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
       | Pattern ':' TypeExpDecl { PatternAscription $1 $3 }
 

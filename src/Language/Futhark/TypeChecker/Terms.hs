@@ -495,6 +495,9 @@ checkExp (If e1 e2 e3 _ pos) =
   let t' = addAliases brancht (`HS.difference` allConsumed dflow)
   return $ If e1' e2' e3' (Info t') pos
 
+checkExp (Parens e loc) =
+  Parens <$> checkExp e <*> pure loc
+
 checkExp (Var qn NoInfo loc) = do
   (qn'@(QualName _ name'), t) <- lookupVar qn loc
   observe $ Ident name' (Info t) loc
@@ -530,6 +533,7 @@ checkExp (LetPat pat e body pos) =
   where -- HACK: Until we figure out what they should mean, shape
         -- declarations are banned in let binding type ascriptions.
     hasShapeDecl (TuplePattern ps _) = any hasShapeDecl ps
+    hasShapeDecl (PatternParens p _) = hasShapeDecl p
     hasShapeDecl Id{} = False
     hasShapeDecl Wildcard{} = False
     hasShapeDecl (PatternAscription p td) =
@@ -868,6 +872,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                        allConsumed bodyflow
       uniquePat (Wildcard (Info t) wloc) =
         Wildcard (Info $ t `setUniqueness` Nonunique) wloc
+      uniquePat (PatternParens p ploc) =
+        PatternParens (uniquePat p) ploc
       uniquePat (Id (Ident name (Info t) iloc))
         | name `HS.member` consumed_merge =
             let t' = t `setUniqueness` Unique `setAliases` mempty
@@ -984,6 +990,8 @@ data InferredType = NoneInferred
 
 checkPattern :: PatternBase NoInfo Name -> InferredType
              -> TermTypeM Pattern
+checkPattern (PatternParens p loc) t =
+  PatternParens <$> checkPattern p t <*> pure loc
 checkPattern (Id (Ident name NoInfo loc)) (Inferred t) = do
   name' <- checkName Term name loc
   let t' = typeOf $ Var (qualName name') (Info t) loc
@@ -1027,6 +1035,7 @@ checkPattern p NoneInferred =
 checkForDuplicateNames :: [PatternBase NoInfo Name] -> TermTypeM [(Namespace, Name)]
 checkForDuplicateNames = fmap toNames . flip execStateT mempty . mapM_ check
   where check (Id v) = seeing BoundAsVar (identName v) (srclocOf v)
+        check (PatternParens p _) = check p
         check Wildcard{} = return ()
         check (TuplePattern ps _) = mapM_ check ps
         check (PatternAscription p t) = do

@@ -55,6 +55,8 @@ buildEnvFromDecs :: [ValDecBase NoInfo Name]
                  -> TypeM Env
 buildEnvFromDecs = foldM expandV mempty
   where
+    paramDeclaredType (PatternParens p _) =
+      paramDeclaredType p
     paramDeclaredType (PatternAscription _ t) =
       Just $ declaredType t
     paramDeclaredType (TuplePattern ps loc) =
@@ -257,6 +259,9 @@ checkSpecs (IncludeSpec e loc : specs) = do
           IncludeSpec e' loc : specs')
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (Env, SigExpBase Info VName)
+checkSigExp (SigParens e loc) = do
+  (env, e') <- checkSigExp e
+  return (env, SigParens e' loc)
 checkSigExp (SigVar name loc) = do
   (name', env) <- lookupSig loc name
   return (env, SigVar name' loc)
@@ -295,6 +300,9 @@ checkSigBind (SigBind name e loc) = do
         nameMapping (v, _) = ((Type, baseName v), v)
 
 checkModExp :: ModExpBase NoInfo Name -> TypeM (Env, ModExpBase Info VName)
+checkModExp (ModParens e loc) = do
+  (env, e') <- checkModExp e
+  return (env, ModParens e' loc)
 checkModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
   (env, decs') <- checkDecs decs
