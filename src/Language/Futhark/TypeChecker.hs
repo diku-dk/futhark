@@ -771,7 +771,6 @@ newNamesForEnv except orig_env = do
           ModMod <$> substituteInEnv substs env
         substituteInModBinding substs (ModFunctor f) =
           return $ ModFunctor $ FunctorF $ \loc env -> do
-          -- Nested functor or something?  This should never happen!
           (f_env, f_sig_subst, f_body_subst) <- applyFunctor f loc env
           return (f_env,
                   substs <> f_sig_subst, substs <> f_body_subst)
