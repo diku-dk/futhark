@@ -1,6 +1,6 @@
 -- Can we nest a parametric module inside another parametric module?
 -- ==
--- input { 3 } output { 6 }
+-- input { 3 } output { 27 }
 
 module type MT1 = {
   val f: i32 -> i32 -> i32
