@@ -426,6 +426,7 @@ bindingPattern p t m = do
       m p'
 
 patternDims :: Pattern -> [Ident]
+patternDims (PatternParens p _) = patternDims p
 patternDims (TuplePattern pats _) = concatMap patternDims pats
 patternDims (PatternAscription p t) =
   patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
