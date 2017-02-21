@@ -6,6 +6,7 @@ import Data.Maybe
 import Control.Category (id)
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Class
 import Data.Monoid
 import qualified Data.Text as T
 import System.IO
@@ -302,9 +303,11 @@ main = mainWithOptions newConfig commandLineOptions compile
           Nothing
         m file config =
           case futharkPipeline config of
-            Nothing ->
-              -- No pipeline; just read the program and type check.
-              void $ readProgram file
+            Nothing -> do
+              -- No pipeline; just read the program, type check, and prettyprint it.
+              (prog, warnings, _, _) <- readProgram file
+              liftIO $ hPrint stderr warnings
+              liftIO $ putStrLn $ pretty prog
             Just{} -> do
               prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config prog

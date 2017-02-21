@@ -139,7 +139,9 @@ bindingFlatPattern idents ts m = do
 -- returned separately.
 flattenPattern :: MonadFreshNames m => E.Pattern -> m [(E.Ident, [E.StructType], E.StructType)]
 flattenPattern = flattenPattern' []
-  where flattenPattern' ts (E.Wildcard t loc) = do
+  where flattenPattern' ts (E.PatternParens p _) =
+          flattenPattern' ts p
+        flattenPattern' ts (E.Wildcard t loc) = do
           name <- newVName "nameless"
           return [(E.Ident name t loc, ts,
                    case ts of [] -> E.vacuousShapeAnnotations $ toStruct $ unInfo t

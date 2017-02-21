@@ -185,6 +185,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DimIndexBase ty vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
   pprPrec _ (Var name _ _) = ppr name
+  pprPrec _ (Parens e _) = align $ parens $ ppr e
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = parens $ commastack $ map ppr es
@@ -198,8 +199,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
-  pprPrec _ (Apply fname args _ _) = ppr fname <>
-                                     apply (map (align . ppr . fst) args)
+  pprPrec _ (Apply fname args _ _) = ppr fname <+>
+                                     spread (map (ppr . fst) args)
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat pat e body _) =
     mparens $ align $
@@ -221,7 +222,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
                         ArrayLit{} -> False
                         _          -> hasArrayLit e
   pprPrec _ (LetFun fname (params, retdecl, _, e) body _) =
-    text "let" <+> ppr fname <+> spread (map ppParam params) <> retdecl' <+> equals </>
+    text "let" <+> ppr fname <+> spread (map ppr params) <> retdecl' <+> equals </>
     indent 2 (ppr e) <+> text "in" </>
     ppr body
     where retdecl' = case retdecl of
@@ -239,11 +240,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
       text "in" </> ppr body
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
+  pprPrec _ (Iota e _) = text "iota" <+> pprPrec 10 e
   pprPrec _ (Shape e _) =
-    text "shape" <> apply [ppr e]
+    text "shape" <+> pprPrec 10 e
   pprPrec _ (Replicate ne ve _) =
-    text "replicate" <> apply [ppr ne, align (ppr ve)]
+    text "replicate" <+> spread [pprPrec 10 ne, pprPrec 10 ve]
   pprPrec _ (Reshape shape e _) =
     text "reshape" <+> ppr shape <+> ppr e
   pprPrec _ (Rearrange perm e _) =
@@ -261,35 +262,35 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
       MapLike o ->
         let ord_str = if o == Disorder then "Per" else ""
         in  text ("streamMap"++ord_str) <>
-            parens ( ppList [lam] </> commasep [ppr arr] )
+            ppr lam </> pprPrec 10 arr
       RedLike o comm lam0 ->
         let ord_str = if o == Disorder then "Per" else ""
             comm_str = case comm of Commutative    -> "Comm"
                                     Noncommutative -> ""
         in  text ("streamRed"++ord_str++comm_str) <>
-            parens ( ppList [lam0, lam] </> ppr arr )
+            ppr lam0 </> ppr lam </> pprPrec 10 arr
       Sequential acc ->
-            text "streamSeq" <>
-            parens ( ppList [lam] </> commasep [ppr acc, ppr arr] )
+            text "streamSeq" <+>
+            ppr lam </> spread [pprPrec 10 acc, pprPrec 10 arr]
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
-  pprPrec _ (Zip 0 e es _) = text "zip" <+> spread (map ppr (e:es))
-  pprPrec _ (Zip i e es _) = text "zip@" <> ppr i <+> spread (map ppr (e:es))
-  pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
-  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 9 e
+  pprPrec _ (Zip 0 e es _) = text "zip" <+> spread (map (pprPrec 10) (e:es))
+  pprPrec _ (Zip i e es _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
+  pprPrec _ (Unzip e _ _) = text "unzip" <> pprPrec 10 e
+  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 10 e
   pprPrec _ (Split i e a _) =
-    text "split@" <> ppr i <+> ppr e <+> ppr a
+    text "split@" <> ppr i <+> pprPrec 10 e <+> pprPrec 10 a
   pprPrec _ (Concat i x y _) =
-    text "concat" <> text "@" <> ppr i <> apply [ppr x, ppr y]
-  pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
+    text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
+  pprPrec _ (Copy e _) = text "copy" <> pprPrec 10 e
   pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+> equals <+>
     ppr form <+>
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (Write i v a _) = text "write" <> parens (commasep [ppr i, ppr v, ppr a])
+  pprPrec _ (Write i v a _) = text "write" <> spread [pprPrec 10 i, pprPrec 10 v, pprPrec 10 a]
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LoopFormBase ty vn) where
   ppr (For FromUpTo lbound i ubound) =
@@ -305,6 +306,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LowerBoundBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
+  ppr (PatternParens p _)     = parens $ ppr p
   ppr (Id ident)              = ppr ident
   ppr (TuplePattern pats _)   = parens $ commasep $ map ppr pats
   ppr (Wildcard _ _)          = text "_"
@@ -319,7 +321,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LambdaBase ty vn) where
     ppr fname <+> apply (map ppr curryargs)
   ppr (AnonymFun params body ascript _ _) =
     text "fn" <+>
-    apply (map ppParam params) <> ppAscription ascript <+>
+    apply (map ppr params) <> ppAscription ascript <+>
     text "=>" </> indent 2 (ppr body)
   ppr (BinOpFun binop _ _ _ _) =
     ppr binop
@@ -341,6 +343,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModVar v _) = ppr v
+  ppr (ModParens e _) = parens $ ppr e
   ppr (ModImport v _) = ppr $ show v
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
   ppr (ModApply f a _ _ _) = ppr f <> parens (ppr a)
@@ -360,7 +363,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
   ppr (FunBind entry name retdecl _ args body _) =
     text fun <+> ppr name <+>
-    spread (map ppParam args) <> retdecl' <+> equals </>
+    spread (map ppr args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
     where fun | entry     = "entry"
               | otherwise = "fun"
@@ -387,6 +390,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigExpBase ty vn) where
   ppr (SigVar v _) = ppr v
+  ppr (SigParens e _) = parens $ ppr e
   ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
   ppr (SigWith s (TypeRef v td) _) =
     ppr s <+> text "with" <+> ppr v <+> equals <+> ppr td
@@ -401,10 +405,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunctorBindBase ty vn) where
     parens (ppr pname <> colon <+> ppr psig) <> sig' <+> equals <+> ppr e
     where sig' = case sig of Nothing -> mempty
                              Just s  -> colon <+> ppr s <> text " "
-
-ppParam :: (Eq vn, Hashable vn, Pretty vn) => PatternBase t vn -> Doc
-ppParam (Id param) = ppr param
-ppParam p          = parens $ ppr p
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn) =>
                Int -> QualName vn -> ExpBase ty vn -> ExpBase ty vn -> Doc
@@ -443,10 +443,4 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence bop) $
 ppSOAC :: (Eq vn, Hashable vn, Pretty vn, Pretty fn) =>
           String -> [fn] -> [ExpBase ty vn] -> Doc
 ppSOAC name funs es =
-  text name <> parens (ppList funs </>
-                       commasep (map ppr es))
-
-ppList :: (Pretty a) => [a] -> Doc
-ppList as = case map ppr as of
-              []     -> empty
-              a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
+  text name <+> spread (map ppr funs) </> spread (map (pprPrec 10) es)

@@ -3,7 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE StandaloneDeriving         #-}
--- | This is an ever-changing abstract syntax for Futhark.  Some
+-- | This is an ever-changing syntax representation for Futhark.  Some
 -- types, such as @Exp@, are parametrised by type and name
 -- representation.  See the @https://futhark.readthedocs.org@ for a
 -- language reference, or this module may be a little hard to
@@ -394,6 +394,9 @@ instance Hashable vn => Hashable (QualName vn) where
 data ExpBase f vn =
               Literal PrimValue SrcLoc
 
+            | Parens (ExpBase f vn) SrcLoc
+            -- ^ A parenthesized expression.
+
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
@@ -556,6 +559,7 @@ deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc)          = locOf loc
+  locOf (Parens _ loc)           = locOf loc
   locOf (TupLit _ pos)           = locOf pos
   locOf (TupleProject _ _ _ pos) = locOf pos
   locOf (ArrayLit _ _ pos)       = locOf pos
@@ -631,6 +635,7 @@ instance Located (LambdaBase f vn) where
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).
 data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
+                      | PatternParens (PatternBase f vn) SrcLoc
                       | Id (IdentBase f vn)
                       | Wildcard (f (CompTypeBase vn)) SrcLoc -- Nothing, i.e. underscore.
                       | PatternAscription (PatternBase f vn) (TypeDeclBase f vn)
@@ -638,6 +643,7 @@ deriving instance Showable f vn => Show (PatternBase f vn)
 
 instance Located (PatternBase f vn) where
   locOf (TuplePattern _ loc)    = locOf loc
+  locOf (PatternParens _ loc)   = locOf loc
   locOf (Id ident)              = locOf ident
   locOf (Wildcard _ loc)        = locOf loc
   locOf (PatternAscription p _) = locOf p
@@ -698,6 +704,7 @@ instance Located (SpecBase f vn) where
   locOf (IncludeSpec _ loc)  = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
+                     | SigParens (SigExpBase f vn) SrcLoc
                      | SigSpecs [SpecBase f vn] SrcLoc
                      | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SigExpBase f vn)
@@ -708,6 +715,7 @@ deriving instance Showable f vn => Show (TypeRefBase f vn)
 
 instance Located (SigExpBase f vn) where
   locOf (SigVar _ loc)    = locOf loc
+  locOf (SigParens _ loc) = locOf loc
   locOf (SigSpecs _ loc)  = locOf loc
   locOf (SigWith _ _ loc) = locOf loc
 
@@ -721,6 +729,7 @@ instance Located (SigBindBase f vn) where
   locOf = locOf . sigLoc
 
 data ModExpBase f vn = ModVar (QualName vn) SrcLoc
+                     | ModParens (ModExpBase f vn) SrcLoc
                      | ModImport FilePath SrcLoc
                        -- ^ The contents of another file as a module.
                      | ModDecs [DecBase f vn] SrcLoc
@@ -731,6 +740,7 @@ deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
   locOf (ModVar _ loc)         = locOf loc
+  locOf (ModParens _ loc)      = locOf loc
   locOf (ModImport _ loc)      = locOf loc
   locOf (ModDecs _ loc)        = locOf loc
   locOf (ModApply _ _ _ _ loc) = locOf loc

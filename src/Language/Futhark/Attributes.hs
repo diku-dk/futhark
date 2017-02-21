@@ -558,6 +558,7 @@ valueType (ArrayValue _ (Array (TupleArray et shape _))) =
 -- the term is a non-tuple-typed variable.
 typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
 typeOf (Literal val _) = Prim $ primValueType val
+typeOf (Parens e _) = typeOf e
 typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
@@ -718,6 +719,7 @@ patIdentsGen :: (Ord vn, Hashable vn) =>
                 (vn -> SrcLoc -> IdentBase f vn) -> PatternBase f vn
              -> [IdentBase f vn]
 patIdentsGen _ (Id ident)              = [ident]
+patIdentsGen f (PatternParens p _)     = patIdentsGen f p
 patIdentsGen f (TuplePattern pats _)   = mconcat $ map (patIdentsGen f) pats
 patIdentsGen _ Wildcard{}              = []
 patIdentsGen f (PatternAscription p t) =
@@ -729,6 +731,7 @@ patIdentsGen f (PatternAscription p t) =
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> CompTypeBase VName
 patternType (Wildcard (Info t) _)   = t
+patternType (PatternParens p _)     = patternType p
 patternType (Id ident)              = unInfo $ identType ident
 patternType (TuplePattern pats _)   = Tuple $ map patternType pats
 patternType (PatternAscription p _) = patternType p
@@ -736,6 +739,7 @@ patternType (PatternAscription p _) = patternType p
 -- | The type matched by the pattern, including shape declarations if present.
 patternStructType :: PatternBase Info VName -> StructTypeBase VName
 patternStructType (PatternAscription _ td) = unInfo $ expandedType td
+patternStructType (PatternParens p _) = patternStructType p
 patternStructType (Id v) = vacuousShapeAnnotations $ toStruct $ unInfo $ identType v
 patternStructType (TuplePattern ps _) = Tuple $ map patternStructType ps
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
@@ -914,6 +918,7 @@ progImports (Prog decs) = concatMap decImports decs
         decImports ValDec{} = []
 
         modExpImports ModVar{}              = []
+        modExpImports (ModParens p _)       = modExpImports p
         modExpImports (ModImport f _)       = [f]
         modExpImports (ModDecs ds _)        = concatMap decImports ds
         modExpImports (ModApply _ me _ _ _) = modExpImports me
