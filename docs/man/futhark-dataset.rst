@@ -63,9 +63,10 @@ To generate binary data, the ``--binary`` must come before the ``--generate``::
 
   futhark-dataset --binary --generate=[42]i32
 
-It is possible to generate a single file containing a payload of values, and use
-custom headers to make different interpretations as e.g. a 2D array. For example
-we can generate a file only containing 256 ``i32``s by::
+It is possible to generate a single file containing a payload of
+values, and use custom headers to make different interpretations as
+e.g. a 2D array. For example we can generate a file only containing
+256 ``i32`` values by::
 
   futhark-dataset --binary-no-header --generate=[256]i32 > 256.dat
 
