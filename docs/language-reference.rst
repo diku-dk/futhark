@@ -76,308 +76,19 @@ type with consistent dimension sizes for an irregular array value.  In
 a Futhark program, all array values, including intermediate (unnamed)
 arrays, must be typeable.
 
-
-Arrays of Tuples
-----------------
-
-For reasons related to code generation and efficient representation,
-arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[](i32,f32)`` is transformed to ``([]i32,
-[]f32)`` during the compilation process, and all code interacting
-with arrays of tuples is likewise transformed.  In most cases, this is
-fully transparent to the programmer, but there are edge cases where
-the transformation is not trivially an isomorphism.
-
-Consider the type ``[]([]i32,[]f32)``, which is transformed
-into ``([][]i32, [][]f32)``.  These two types are not
-isomorphic, as the latter has more stringent demands as to the
-fullness of arrays.  For example::
-
-  [
-    ([1],   [1.0]),
-    ([2,3], [2.0])
-  ]
-
-is a value of the former, but the first element of the
-corresponding transformed tuple::
-
-  (
-    [[1],   [2, 3]],
-    [[1.0], [2.0]]
-  )
-
-is not a full array.  Hence, when determining whether a program
-generates full arrays, we must hence look at the *transformed*
-values - in a sense, the fullness requirement "transcends" the tuples.
-
-Another, less operational, way of understanding the problem is to look
-at the type of an array of a pair of arrays::
-
-  ``[]([]t1, []t2)``
-
-For this to be a valid type, we must be able to insert shape
-declarations::
-
-  ``[n]([m1]t1, [m2]t2)``
-
-This require that the inner arrays have size ``m1`` and ``m2``
-respectively (without specifying exactly what that is).  An irregular
-array value could not possibly have this type for constant ``m1``,
-``m2``.
-
-Function Declarations
----------------------
-
-A function declaration must specify the name, parameters, return
-type, and body of the function::
-
-  fun name(params...): rettype = body
-
-Type inference is not supported, and functions are fully monomorphic.
-If the function is neither recursive or referenced before it is
-defined, the return type may be elided.  Optionally, the programmer
-may put *shape declarations* in the return type and parameter types.
-These can be used to express invariants about the shapes of arrays
-that are accepted or produced by the function, e.g::
-
-  fun f(a: [n]i32): [n]i32 =
-    map(+1, a)
-
-The above declaration specifies a function that takes an array
-containing ``n`` elements and returns an array likewise containing
-``n`` elements.  In general, shape declarations in parameters are
-fresh names, whilst shape declarations in return types must refer to a
-name of type ``i32`` in scope.  A shape declaration can also be an
-integer constant (with no suffix).
-
-The same name can be used in several dimensions, or even in several
-parameters.  This can be used to give a natural type to a function for
-computing dot products::
-
-  fun dotProduct(a: [n]i32, b: [n]i32): i32 =
-    reduce (+) 0 (zipWith (*) a b)
-
-Or matrix multiplication::
-
-  fun matMult(x: [n][m]i32, y: [m][n]i32): [n][n]i32 =
-    ...
-
-The dimension names bound in a parameter shape declaration can be used
-as ordinary variables inside the scope of the parameter.
-
-Shape declarations serve two main purposes:
-
-1. They document the shape assumptions of the function in an easily
-   understandable form.
-
-2. More importantly, they help the compiler understand the invariants
-   of the program, which it may otherwise have trouble figuring out.
-
-Note that adding shape declarations is never unsafe - the compiler
-still inserts dynamic checks, so if an incorrect declaration is made,
-the result will merely be an abrubt but controlled termination as it
-collides with reality.  Shape declarations matter most when used for
-the input parameters of the ``main`` function and for the return type
-of functions used to ``map``.
-
-User-Defined Operators
-~~~~~~~~~~~~~~~~~~~~~~
-
-Infix operators are defined much like functions::
-
-  fun (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
-
-The fixity of an operator is determined by its first characters, which
-must correspond to a built-in operator.  Thus, ``+^`` binds like
-``+``, whilst ``*^`` binds like ``*``.  The longest such prefix is
-used to determine fixity, so ``>>=`` binds like ``>>``, not like
-``>``.
-
-It is not permitted to define operators with the names ``&&`` or
-``||`` (although these as prefixes are accepted).  This is because a
-user-defined version of these operators would not be short-circuiting.
-User-defined operators behave exactly like functions, except for
-syntactically.
-
-A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
-This will result in the built-in polymorphic operator becoming
-inaccessible, except through the ``Intrinsics`` module.
-
-.. _entry-points:
-
-Entry Points
-~~~~~~~~~~~~
-
-Apart from declaring a function with the keyword ``fun``, it can also
-be declared with ``entry``.  When the Futhark program is compiled any
-function declared with ``entry`` will be exposed as an entry point.
-If the Futhark program has been compiled as a library, these are the
-functions that will be exposed.  If compiled as an executable, you can
-use the ``--entry-point`` command line option of the generated
-executable to select the entry point you wish to run.
-
-Any function named ``main`` will always be considered an entry point,
-whether it is declared with ``entry`` or not.
-
-Value Declarations
-------------------
-
-A named value/constant can be declared as follows::
-
-  val name: type = definition
-
-The definition can be an arbitrary expression, including function
-calls and other values.  You can even define circular values, although
-these will likely result in an infinite loop at execution.  The type
-annotation can be elided if the value is defined before it is used.
-
-Values can be used in shape declarations, except in the return value
-of entry points.
-
-Type Abbreviations
-------------------
-
-Futhark supports simple type abbreviations to improve code readability.
-Examples::
-
-  type person_id                = i32
-  type int_pair                 = (i32, i32)
-  type position, velocity, vec3 = (f32, f32, f32)
-
-  type pilot      = person_id
-  type passengers = []person_id
-  type mass       = f32
-
-  type airplane = (pilot, passengers, position, velocity, mass)
-
-The abbreviations are merely a syntactic convenience.  With respect to type
-checking the ``position`` and ``velocity`` types are identical.  It is
-currently not possible to put shape declarations in type abbreviations.
-When using uniqueness attributes with type abbreviations, inner uniqueness
-attributes are overrided by outer ones::
-
-  type uniqueInts = *[]i32
-  type nonuniqueIntLists = []intlist
-  type uniqueIntLists = *nonuniqueIntLists
-
-  -- Error: using non-unique value for a unique return value.
-  fun uniqueIntLists (nonuniqueIntLists p) = p
-
-
-Module System
--------------
-
-Futhark supports an ML-style higher-order module system.  *Modules*
-can contain types, functions, and other modules.  *Module types* can
-be used to classify the contents of modules, and *parametric
-modules* can be used to abstract over modules.  In Standard ML,
-modules, module types and parametric modules are called structs,
-signatures, and functors, respectively.
-
-Named module are defined as::
-
-  module ModuleName = module expression
-
-Where a module expression can be the name of another module, an
-application of a parametric module, or a sequence of declarations
-enclosed in curly braces::
-
-  module Vec3 = {
-    type t = ( f32 , f32 , f32 )
-    fun add(a: t) (b: t): t =
-      let (a1, a2, a3) = a in
-      let (b1, b2, b3) = b in
-      (a1 + b1, a2 + b2 , a3 + b3)
-  }
-
-  module AlsoVec3 = Vec3
-
-Functions and types within modules can be accessed using dot
-notation::
-
-    type vector = Vec3.t
-    fun double(v: vector): vector = Vec3.add v v
-
-We can also use ``open Vec3`` to bring the names defined by ``Vec3``
-into the current scope.  Multiple modules can be opened simultaneously
-by separating their names with spaces.  In case several modules define
-the same names, the ones mentioned last take precedence.  The first
-argument to ``open`` may be a full module expression.
-
-Named module types are defined as::
-
-  module type ModuleTypeName = module type expression
-
-A module type expression can be the name of another module type, or a
-sequence of *specifications*, or *specs*, enclosed in curly braces.  A
-spec can be a *value spec*, indicating the presence of a function or
-value, an *abstract type spec*, or a *type abbreviation spec*.  For
-example::
-
-  module type Addable = {
-    type t                 -- abstract type spec
-    type two_ts = (t,t)    -- type abbreviation spec
-    val add: t -> t -> t   -- value spec
-  }
-
-This module type specifies the presence of an *abstract type* ``t``,
-as well as a function operating on values of type ``t``.  We can use
-*module type ascription* to restrict a module to what is exposed by
-some module type::
-
-  module AbstractVec = Vec3 : Addable
-
-The definition of ``AbstractVec.t`` is now hidden.  In fact, with this
-module type, we can neither construct values of type ``AbstractVec.T``
-or convert them to anything else, making this a rather useless use of
-abstraction.  As a derived form, we can write ``module M: S = e`` to
-mean ``module M = e : S``.
-
-Parametric modules allow us to write definitions that abstract over
-modules.  For example::
-
-  module Times(M: Addable) = {
-    fun times (x: M.t) (k: int): M.t =
-      loop (x' = x) = for i < k do
-        T.add x' x
-      in x'
-  }
-
-We can instantiate ``Times`` with any module that fulfills the module
-type ``Addable`` and get back a module that defines a function
-``times``::
-
-  module Vec3Times = Times(Vec3)
-
-Now ``Vec3Times.times`` is a function of type ``Vec3.t -> int ->
-Vec3.t``.
-
-Referring to Other Files
-------------------------
-
-You can refer to external files in a Futhark file like this::
-
-  import "module"
-
-The above will include all top-level definitions from ``module.fut``
-is and make them available in the current Futhark program.  The
-``.fut`` extension is implied.
-
-You can also include files from subdirectories::
-
-  include "path/to/a/file"
-
-The above will include the file ``path/to/a/file.fut``.
-
-Qualified imports are also possible, where a module is created for the
-file::
-
-  module M = import "module"
-
-
-
-Simple Expressions
-------------------
+Expressions
+-----------
+
+Expressions are the basic construct of any Futhark program.  An
+expression has a statically determined *type*, and produces a *value*
+at runtime.  Futhark is an eager/strict language ("call by value").
+
+Some of the built-in expression forms have parallel semantics, but it
+is not guaranteed that the the parallel constructs in Futhark are
+evaluated in parallel, especially if they are nested in complicated
+ways.  Their purpose is to give the compiler as much freedom and
+information is possible, in order to enable it to maximise the
+efficiency of the generated code.
 
 *constant*
 ~~~~~~~~~~
@@ -389,26 +100,48 @@ Evaluates to itself.
 
 Evaluates to its value in the environment.
 
-``x`` *arithop* ``y``
-~~~~~~~~~~~~~~~~~~~~~
-
-Evaluate the binary arithmetic operator on its operands, which must
-both be of the same numeric type.  The following operators are
-supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``, ``==``,
-``!=`` ``<``, ``<=``, ``**``.
-
-``x`` *bitop* ``y``
+``x`` *binop* ``y``
 ~~~~~~~~~~~~~~~~~~~
 
-Evaluate the binary bitwise operator on its operands, which must both
-be of integer type.  The following operators are supported: ``^``,
-``&``, ``|``, ``>>``, ``<<``, ``>>>``, i.e., bitwise xor, and, or,
-arithmetic shift right and left, and logical shift right.  Shift
-amounts must be non-negative.  Note that, unlike in C, bitwise
-operators have *higher* priority than arithmetic operators.  This
-means that ``x & y == z`` is understood as ``(x & y) == z``, rather
-than ``x & (y == z)`` as it would in C.  Note that the latter is a
-type error in Futhark anyhow.
+Apply an operator to ``x`` and ``y``.  Operators are functions like
+any other, and can be user-defined.  Futhark pre-defines certain
+"magical" *overloaded* operators that work on many different types.
+Overloaded functions cannot be defined by the user.  Both operands
+must have the same type.  The predefined operators and their semantics
+are:
+
+  ``**``
+
+    Power operator, defined for all numeric types.
+
+  ``//``, ``%%``
+
+    Division and remainder on integers, with rounding towards zero.
+
+  ``*``, ``/``, ``%``, ``+``, ``-``, ``/``, ``%``
+
+    The usual arithmetic operators, defined for all numeric types.
+    Note that ``/`` and ``%`` rounds towards negative infinity when
+    used on integers - this is different from in C.
+
+  ``^``, ``&``, ``|``, ``>>``, ``<<``, ``>>>``
+
+    Bitwise operators, respectively bitwise xor, and, or, arithmetic
+    shift right and left, and logical shift right.  Shift amounts
+    must be non-negative and the operands must be integers.  Note
+    that, unlike in C, bitwise operators have *higher* priority than
+    arithmetic operators.  This means that ``x & y == z`` is
+    understood as ``(x & y) == z``, rather than ``x & (y == z)`` as
+    it would in C.  Note that the latter is a type error in Futhark
+    anyhow.
+
+  ``==``, ``!=``
+
+      Compare any two values of builtin or compound type for equality.
+
+  ``<``, ``<=``.  ``>``, ``>``
+
+      Company any two values of numeric type for equality.
 
 ``f x y z``
 ~~~~~~~~~~~
@@ -674,15 +407,6 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 
 3. Evaluate ``body`` with ``pat`` bound to its final value.
 
-Parallel Expressions
---------------------
-
-It is not guaranteed that the the parallel constructs in Futhark are
-evaluated in parallel, especially if they are nested in complicated
-ways.  Their purpose is to give the compiler as much freedom and
-information is possible, in order to enable it to maximise the
-parallelism of the generated code.
-
 ``map f a_1 ... a_n``
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -691,11 +415,6 @@ resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
 ``f`` is called with ``n`` arguments, where in the latter case it is
 called with a single ``n``-tuple argument.  In other languages, this
 form of ``map`` is often called ``zipWith``.
-
-``zipWith f a_1 ... a_n``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Alias for ``map`` for backwards compatibility.
 
 ``reduce f x a``
 ~~~~~~~~~~~~~~~~~~~
@@ -756,6 +475,232 @@ in ``is``.  If ``is`` contains duplicates (i.e. several writes are
 performed to the same location), the result is unspecified.  It is not
 guaranteed that one of the duplicate writes will complete atomically -
 they may be interleaved.
+
+Function Declarations
+---------------------
+
+A function declaration must specify the name, parameters, return
+type, and body of the function::
+
+  fun name params...: rettype = body
+
+Type inference is not supported, and functions are fully monomorphic.
+A parameter is written as ``(name: type)``.  If the function is
+neither recursive or referenced before it is defined, the return type
+may be elided.  Optionally, the programmer may put *shape
+declarations* in the return type and parameter types.  These can be
+used to express invariants about the shapes of arrays that are
+accepted or produced by the function, e.g::
+
+  fun f (a: [n]i32) (b: [n]i32): [n]i32 =
+    map (+) a b
+
+In general, shape declarations in parameters are fresh names, whilst
+shape declarations in return types must refer to a name of type
+``i32`` in scope.  A shape declaration can also be an integer constant
+(with no suffix).  The dimension names bound in a parameter shape
+declaration can be used as ordinary variables within the scope of the
+parameter.  If a function is called with arguments that do not fulfill
+the shape constraints, the program will fail with a runtime error.
+
+User-Defined Operators
+~~~~~~~~~~~~~~~~~~~~~~
+
+Infix operators are defined much like functions::
+
+  fun (p1: t1) op (p2: t2): rt = ...
+
+For example::
+
+  fun (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
+
+A valid operator name is a non-empty sequence of characters chosen
+from the string ``"+-*/%=!><&^"``.  The fixity of an operator is
+determined by its first characters, which must correspond to a
+built-in operator.  Thus, ``+^`` binds like ``+``, whilst ``*^`` binds
+like ``*``.  The longest such prefix is used to determine fixity, so
+``>>=`` binds like ``>>``, not like ``>``.
+
+It is not permitted to define operators with the names ``&&`` or
+``||`` (although these as prefixes are accepted).  This is because a
+user-defined version of these operators would not be short-circuiting.
+User-defined operators behave exactly like functions, except for
+syntactically.
+
+A built-in operator can be shadowed (i.e. a new ``+`` can be defined).
+This will result in the built-in polymorphic operator becoming
+inaccessible, except through the ``Intrinsics`` module.
+
+.. _entry-points:
+
+Entry Points
+~~~~~~~~~~~~
+
+Apart from declaring a function with the keyword ``fun``, it can also
+be declared with ``entry``.  When the Futhark program is compiled any
+function declared with ``entry`` will be exposed as an entry point.
+If the Futhark program has been compiled as a library, these are the
+functions that will be exposed.  If compiled as an executable, you can
+use the ``--entry-point`` command line option of the generated
+executable to select the entry point you wish to run.
+
+Any function named ``main`` will always be considered an entry point,
+whether it is declared with ``entry`` or not.
+
+Value Declarations
+------------------
+
+A named value/constant can be declared as follows::
+
+  val name: type = definition
+
+The definition can be an arbitrary expression, including function
+calls and other values.  You can even define circular values, although
+these will likely result in an infinite loop at execution.  The type
+annotation can be elided if the value is defined before it is used.
+
+Values can be used in shape declarations, except in the return value
+of entry points.
+
+Type Abbreviations
+------------------
+
+Futhark supports simple type abbreviations to improve code readability.
+Examples::
+
+  type person_id                = i32
+  type int_pair                 = (i32, i32)
+  type position, velocity, vec3 = (f32, f32, f32)
+
+  type pilot      = person_id
+  type passengers = []person_id
+  type mass       = f32
+
+  type airplane = (pilot, passengers, position, velocity, mass)
+
+The abbreviations are merely a syntactic convenience.  With respect to type
+checking the ``position`` and ``velocity`` types are identical.  It is
+currently not possible to put shape declarations in type abbreviations.
+When using uniqueness attributes with type abbreviations, inner uniqueness
+attributes are overrided by outer ones::
+
+  type uniqueInts = *[]i32
+  type nonuniqueIntLists = []intlist
+  type uniqueIntLists = *nonuniqueIntLists
+
+  -- Error: using non-unique value for a unique return value.
+  fun uniqueIntLists (nonuniqueIntLists p) = p
+
+
+Module System
+-------------
+
+Futhark supports an ML-style higher-order module system.  *Modules*
+can contain types, functions, and other modules.  *Module types* can
+be used to classify the contents of modules, and *parametric
+modules* can be used to abstract over modules.  In Standard ML,
+modules, module types and parametric modules are called structs,
+signatures, and functors, respectively.
+
+Named module are defined as::
+
+  module ModuleName = module expression
+
+Where a module expression can be the name of another module, an
+application of a parametric module, or a sequence of declarations
+enclosed in curly braces::
+
+  module Vec3 = {
+    type t = ( f32 , f32 , f32 )
+    fun add(a: t) (b: t): t =
+      let (a1, a2, a3) = a in
+      let (b1, b2, b3) = b in
+      (a1 + b1, a2 + b2 , a3 + b3)
+  }
+
+  module AlsoVec3 = Vec3
+
+Functions and types within modules can be accessed using dot
+notation::
+
+    type vector = Vec3.t
+    fun double(v: vector): vector = Vec3.add v v
+
+We can also use ``open Vec3`` to bring the names defined by ``Vec3``
+into the current scope.  Multiple modules can be opened simultaneously
+by separating their names with spaces.  In case several modules define
+the same names, the ones mentioned last take precedence.  The first
+argument to ``open`` may be a full module expression.
+
+Named module types are defined as::
+
+  module type ModuleTypeName = module type expression
+
+A module type expression can be the name of another module type, or a
+sequence of *specifications*, or *specs*, enclosed in curly braces.  A
+spec can be a *value spec*, indicating the presence of a function or
+value, an *abstract type spec*, or a *type abbreviation spec*.  For
+example::
+
+  module type Addable = {
+    type t                 -- abstract type spec
+    type two_ts = (t,t)    -- type abbreviation spec
+    val add: t -> t -> t   -- value spec
+  }
+
+This module type specifies the presence of an *abstract type* ``t``,
+as well as a function operating on values of type ``t``.  We can use
+*module type ascription* to restrict a module to what is exposed by
+some module type::
+
+  module AbstractVec = Vec3 : Addable
+
+The definition of ``AbstractVec.t`` is now hidden.  In fact, with this
+module type, we can neither construct values of type ``AbstractVec.T``
+or convert them to anything else, making this a rather useless use of
+abstraction.  As a derived form, we can write ``module M: S = e`` to
+mean ``module M = e : S``.
+
+Parametric modules allow us to write definitions that abstract over
+modules.  For example::
+
+  module Times(M: Addable) = {
+    fun times (x: M.t) (k: int): M.t =
+      loop (x' = x) = for i < k do
+        T.add x' x
+      in x'
+  }
+
+We can instantiate ``Times`` with any module that fulfills the module
+type ``Addable`` and get back a module that defines a function
+``times``::
+
+  module Vec3Times = Times(Vec3)
+
+Now ``Vec3Times.times`` is a function of type ``Vec3.t -> int ->
+Vec3.t``.
+
+Referring to Other Files
+------------------------
+
+You can refer to external files in a Futhark file like this::
+
+  import "module"
+
+The above will include all top-level definitions from ``module.fut``
+is and make them available in the current Futhark program.  The
+``.fut`` extension is implied.
+
+You can also include files from subdirectories::
+
+  include "path/to/a/file"
+
+The above will include the file ``path/to/a/file.fut``.
+
+Qualified imports are also possible, where a module is created for the
+file::
+
+  module M = import "module"
 
 Literal Defaults
 ----------------

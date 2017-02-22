@@ -37,8 +37,8 @@ is very similar to C), including all escape characters.  Comments are
 indicated with ``--`` and span to end of line.  Block comments are not
 presently supported.
 
-First-order Futhark
--------------------
+Simple Futhark
+--------------
 
 An Futhark program consists of a sequence of *function definitions*,
 of the following form::
@@ -228,6 +228,54 @@ can also be written::
     in x
 
 This can sometimes make imperative code look more natural.
+
+Shape Declarations
+~~~~~~~~~~~~~~~~~~
+
+Optionally, the programmer may put *shape declarations* in the return
+type and parameter types of a function declaration.  These can be used
+to express invariants about the shapes of arrays that are accepted or
+produced by the function, e.g::
+
+  fun f (a: [n]i32): [n]i32 =
+    map (+1) a
+
+The above declaration specifies a function that accepts an array
+containing ``n`` elements and returns an array likewise containing
+``n`` elements.  In general, shape declarations in parameters are
+fresh names, whilst shape declarations in return types must refer to a
+name of type ``i32`` in scope.  A shape declaration can also be an
+integer constant (with no suffix).
+
+The same name can be used in several dimensions, or even in several
+parameters.  This can be used to give a natural type to a function for
+computing dot products::
+
+  fun dotProduct(a: [n]i32, b: [n]i32): i32 =
+    reduce (+) 0 (zipWith (*) a b)
+
+Or matrix multiplication::
+
+  fun matMult(x: [n][m]i32, y: [m][n]i32): [n][n]i32 =
+    ...
+
+The dimension names bound in a parameter shape declaration can be used
+as ordinary variables inside the scope of the parameter.
+
+Shape declarations serve two main purposes:
+
+1. They document the shape assumptions of the function in an easily
+   understandable form.
+
+2. More importantly, they help the compiler understand the invariants
+   of the program, which it may otherwise have trouble figuring out.
+
+Note that adding shape declarations is never unsafe - the compiler
+still inserts dynamic checks, so if an incorrect declaration is made,
+the result will merely be an abrubt but controlled termination as it
+collides with reality.  Shape declarations matter most when used for
+the input parameters of the ``main`` function and for the return type
+of functions used to ``map``.
 
 In-Place Updates
 ~~~~~~~~~~~~~~~~
