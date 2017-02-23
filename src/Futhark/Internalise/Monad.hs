@@ -257,12 +257,11 @@ generatingFunctor p_substs b_substs m = do
   func_substs <- asks envFunctorSubsts
   cur_substs <- allSubsts
 
-  let newIfNotKnown v
-        | Just v' <- HM.lookup v func_substs = return v'
-        | otherwise                          = newName v
+  let frob (k, v)
+        | Just v' <- HM.lookup k func_substs = Just (v', v)
+        | otherwise                          = Nothing
   extra_substs <- if in_functor
-                  then HM.fromList . zip (HM.elems b_substs) <$>
-                       mapM newIfNotKnown (HM.elems b_substs)
+                  then return $ HM.fromList $ mapMaybe frob $ HM.toList b_substs
                   else return mempty
   let recs = [extra_substs,
               b_substs,
