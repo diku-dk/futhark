@@ -24,7 +24,8 @@ module Language.Futhark.TypeChecker.Monad
   , ModBinding(..)
   , FunBinding
   , TypeBinding(..)
-  , FunctorF(..)
+
+  , modTypeAbbrs
 
   , envTypeAbbrs
   , envAbsTypes
@@ -99,7 +100,7 @@ data TypeError =
   | UniqueConstType SrcLoc Name (TypeBase Rank ())
   | EntryPointConstReturnDecl SrcLoc Name (QualName Name)
   | UndeclaredFunctionReturnType SrcLoc (QualName Name)
-  | UnappliedFunctor (QualName Name) SrcLoc
+  | UnappliedFunctor SrcLoc
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -195,9 +196,8 @@ instance Show TypeError where
   show (UndeclaredFunctionReturnType loc fname) =
     "Function '" ++ pretty fname ++ "' with no return type declaration called at " ++
     locStr loc
-  show (UnappliedFunctor name loc) =
-    "Parametrised module " ++ pretty name ++ " used at " ++ locStr loc ++
-    " without an argument."
+  show (UnappliedFunctor loc) =
+    "Cannot have parametric module at " ++ locStr loc ++ "."
 
 type ImportTable = HM.HashMap FilePath Env
 
@@ -210,8 +210,8 @@ data TypeBinding = TypeAbbr StructType
                  | TypeAbs
                  deriving (Show)
 
-data ModBinding = ModMod Env
-                | ModFunctor FunctorF
+data ModBinding = ModEnv Env
+                | ModFun ModBinding ModBinding
                 deriving (Show)
 
 data ValBinding = BoundV Type
@@ -220,20 +220,10 @@ data ValBinding = BoundV Type
 
 type NameMap = HM.HashMap (Namespace, Name) VName
 
--- | A function for applying a functor to a module.
-newtype FunctorF = FunctorF { applyFunctor :: SrcLoc -> Env
-                                           -> TypeM (Env,
-                                                     HM.HashMap VName VName,
-                                                     HM.HashMap VName VName)
-                            }
-
-instance Show FunctorF where
-  show _ = "#<FunctorF>"
-
 -- | Modules produces environment with this representation.
 data Env = Env { envVtable :: HM.HashMap VName ValBinding
                , envTypeTable :: HM.HashMap VName TypeBinding
-               , envSigTable :: HM.HashMap VName Env
+               , envSigTable :: HM.HashMap VName ModBinding
                , envModTable :: HM.HashMap VName ModBinding
                , envNameMap :: NameMap
                } deriving (Show)
@@ -242,6 +232,10 @@ instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
   Env vt1 tt1 st1 mt1 nt1 `mappend` Env vt2 tt2 st2 mt2 nt2 =
     Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
+
+modTypeAbbrs :: ModBinding -> [(VName,StructType)]
+modTypeAbbrs (ModEnv e) = envTypeAbbrs e
+modTypeAbbrs (ModFun _ e) = modTypeAbbrs e
 
 envTypeAbbrs :: Env -> [(VName,StructType)]
 envTypeAbbrs = mapMaybe unTypeAbbr . HM.toList . envTypeTable
@@ -319,9 +313,9 @@ class MonadError TypeError m => MonadTypeChecker m where
   checkName :: Namespace -> Name -> SrcLoc -> m VName
 
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, StructType)
-  lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Env)
-  lookupSig :: SrcLoc -> QualName Name -> m (QualName VName, Env)
-  lookupFunctor :: SrcLoc -> QualName Name -> m (QualName VName, FunctorF)
+  lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, ModBinding)
+  lookupSig :: SrcLoc -> QualName Name -> m (QualName VName, ModBinding)
+  lookupFunctor :: SrcLoc -> QualName Name -> m (QualName VName, (ModBinding, ModBinding))
   lookupImport :: SrcLoc -> FilePath -> m Env
 
 expandType :: MonadTypeChecker m =>
@@ -378,9 +372,8 @@ instance MonadTypeChecker TypeM where
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
     case HM.lookup name $ envModTable scope of
-      Nothing                -> bad $ UnknownVariableError Structure qn loc
-      Just (ModMod modscope) -> return (qn', modscope)
-      Just ModFunctor{}      -> bad $ UnappliedFunctor qn loc
+      Nothing -> bad $ UnknownVariableError Structure qn loc
+      Just m  -> return (qn', m)
 
   lookupSig loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Signature qn loc
@@ -397,8 +390,8 @@ instance MonadTypeChecker TypeM where
     (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
     case HM.lookup name $ envModTable scope of
       Nothing -> bad $ UnknownVariableError Structure qn loc
-      Just ModMod{}            -> bad $ TypeError loc "Non-parametrised module given an argument."
-      Just (ModFunctor fscope) -> return (qn', fscope)
+      Just ModEnv{}          -> bad $ TypeError loc "Non-parametrised module given an argument."
+      Just (ModFun penv env) -> return (qn', (penv, env))
 
 checkQualName :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualName space qn@(QualName quals name) loc = do
@@ -414,8 +407,8 @@ checkQualName space qn@(QualName quals name) loc = do
           | Just q' <- HM.lookup (Structure, q) $ envNameMap scope,
             Just res <- HM.lookup q' $ envModTable scope =
               case res of
-                ModMod q_scope -> descend q_scope qs
-                ModFunctor{} -> bad $ UnappliedFunctor qn loc
+                ModEnv q_scope -> descend q_scope qs
+                ModFun{} -> bad $ UnappliedFunctor loc
           | otherwise =
               bad $ UnknownVariableError space qn loc
 

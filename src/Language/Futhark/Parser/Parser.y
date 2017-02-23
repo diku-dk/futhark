@@ -192,7 +192,9 @@ import Language.Futhark.Parser.Lexer
 
 %left '*...' '*' '/...' '%...' '//...' '%%...'
 %left '**...'
-%left ':'
+%right '->'
+%nonassoc ':'
+nonassoc with
 %nonassoc '~' '!' f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
 %nonassoc Id
@@ -237,6 +239,10 @@ SigExp :: { SigExpBase f vn }
         | '{' Specs '}'       { SigSpecs $2 $1 }
         | SigExp with TypeRef { SigWith $1 $3 $2 }
         | '(' SigExp ')'      { SigParens $2 $1 }
+        | '(' id ':' SigExp ')' '->' SigExp
+                              { let L _ (ID name) = $2
+                                in SigArrow (Just name) $4 $7 $1 }
+        | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srclocOf $1) }
 
 TypeRef :: { TypeRefBase NoInfo Name }
          : QualName '=' TypeExpDecl { TypeRef (fst $1) $3 }

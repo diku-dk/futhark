@@ -11,7 +11,7 @@ module Futhark.Internalise
   , internaliseValue
   )
   where
-
+import Debug.Trace
 import Control.Arrow ((***))
 import Control.Applicative
 import Control.Monad.State  hiding (mapM, sequence)
@@ -46,7 +46,7 @@ import Futhark.Util (dropAt)
 -- core language.
 internaliseProg :: MonadFreshNames m =>
                    E.Prog -> m (Either String I.Prog)
-internaliseProg prog = do
+internaliseProg prog = trace (unlines [pretty prog, show prog]) $ do
   prog' <- fmap I.Prog <$> runInternaliseM builtinFtable
            (internaliseDecs (progDecs prog))
   sequence $ fmap I.renameProg prog'

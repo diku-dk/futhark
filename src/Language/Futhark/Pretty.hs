@@ -394,6 +394,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigExpBase ty vn) where
   ppr (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ss)
   ppr (SigWith s (TypeRef v td) _) =
     ppr s <+> text "with" <+> ppr v <+> equals <+> ppr td
+  ppr (SigArrow (Just v) e1 e2 _) =
+    parens (ppr v <> colon <+> ppr e1) <+> text "->" <+> ppr e2
+  ppr (SigArrow Nothing e1 e2 _) =
+    ppr e1 <+> text "->" <+> ppr e2
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
   ppr (SigBind name e _) =
@@ -402,7 +406,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunctorBindBase ty vn) where
   ppr (FunctorBind name (pname,psig) sig e _) =
     text "module" <+> ppr name <>
-    parens (ppr pname <> colon <+> ppr psig) <> sig' <+> equals <+> ppr e
+    parens (ppr pname <> colon <+> ppr psig) <+> sig' <+> equals <+> ppr e
     where sig' = case sig of Nothing -> mempty
                              Just s  -> colon <+> ppr s <> text " "
 
