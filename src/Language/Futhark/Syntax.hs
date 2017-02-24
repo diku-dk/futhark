@@ -21,7 +21,7 @@ module Language.Futhark.Syntax
   , DimDecl (..)
   , ShapeDecl (..)
   , Rank (..)
-  , TypeName
+  , TypeName(..)
   , typeNameFromQualName
   , qualNameFromTypeName
   , TypeBase(..)
