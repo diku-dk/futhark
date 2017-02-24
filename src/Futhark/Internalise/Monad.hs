@@ -17,14 +17,14 @@ module Futhark.Internalise.Monad
   , lookupFunction
   , lookupFunction'
   , lookupTypeVar
-  , lookupFunctor
+  , lookupModuleDef
   , lookupSubst
   , newOrExistingSubst
 
   , bindingIdentTypes
   , bindingParamTypes
   , noteFunctions
-  , noteFunctor
+  , noteModule
   , noteType
   , noteDecSubsts
   , generatingFunctor
@@ -171,11 +171,11 @@ lookupTypeVar tname = do
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just t' -> return t'
 
-lookupFunctor :: VName -> InternaliseM E.ModExp
-lookupFunctor mname = do
+lookupModuleDef :: VName -> InternaliseM E.ModExp
+lookupModuleDef mname = do
   maybe_me <- gets $ HM.lookup mname . stateFunctorTable
   case maybe_me of
-    Nothing -> fail $ "Internalise.lookupFunctor: Functor '" ++
+    Nothing -> fail $ "Internalise.lookupModuleDef: Functor '" ++
                pretty mname ++ "' not found"
     Just me -> return me
 
@@ -225,8 +225,8 @@ noteFunctions :: FunTable -> InternaliseM ()
 noteFunctions ftable_expansion =
   modify $ \s -> s { stateFtable = ftable_expansion <> stateFtable s }
 
-noteFunctor :: VName -> E.ModExp -> InternaliseM ()
-noteFunctor name me =
+noteModule :: VName -> E.ModExp -> InternaliseM ()
+noteModule name me =
   modify $ \s -> s { stateFunctorTable = HM.insert name me $ stateFunctorTable s }
 
 noteType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM ()

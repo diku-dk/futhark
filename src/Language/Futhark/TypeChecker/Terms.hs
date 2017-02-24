@@ -179,7 +179,7 @@ instance MonadTypeChecker TermTypeM where
 
   lookupType loc name = liftTypeM $ TypeM.lookupType loc name
   lookupMod loc name = liftTypeM $ TypeM.lookupMod loc name
-  lookupSig loc name = liftTypeM $ TypeM.lookupSig loc name
+  lookupMTy loc name = liftTypeM $ TypeM.lookupMTy loc name
   lookupFunctor loc name = liftTypeM $ TypeM.lookupFunctor loc name
   lookupImport loc name = liftTypeM $ TypeM.lookupImport loc name
 

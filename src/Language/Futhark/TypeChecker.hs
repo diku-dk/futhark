@@ -28,7 +28,7 @@ import Data.Traversable (mapM)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
-import Prelude hiding (mod, mapM)
+import Prelude hiding (abs, mod, mapM)
 
 import Language.Futhark
 import Futhark.FreshNames hiding (newName)
@@ -201,9 +201,9 @@ checkForDuplicateDecs =
 
         f OpenDec{} = return
 
-checkSpecs :: [SpecBase NoInfo Name] -> TypeM (Env, [SpecBase Info VName])
+checkSpecs :: [SpecBase NoInfo Name] -> TypeM (HS.HashSet VName, Env, [SpecBase Info VName])
 
-checkSpecs [] = return (mempty, [])
+checkSpecs [] = return (mempty, mempty, [])
 
 checkSpecs (ValSpec name paramtypes rettype loc : specs) =
   bindSpaced [(Term, name)] $ do
@@ -220,81 +220,91 @@ checkSpecs (ValSpec name paramtypes rettype loc : specs) =
                                else BoundF (paramtypes'', rettype'')
                  , envNameMap = HM.singleton (Term, name) name'
                  }
-    (env, specs') <- localEnv (valenv<>) $ checkSpecs specs
-    return (env <> valenv,
+    (abstypes, env, specs') <- localEnv (valenv<>) $ checkSpecs specs
+    return (abstypes,
+            env <> valenv,
             ValSpec name' paramtypes' rettype' loc : specs')
 
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
     (tenv, tdec') <- checkTypeBind tdec
-    (env, specs') <- localEnv (tenv<>) $ checkSpecs specs
-    return (tenv <> env,
+    (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
+    return (abstypes,
+            tenv <> env,
             TypeAbbrSpec tdec' : specs')
 
 checkSpecs (TypeSpec name loc : specs) =
   bindSpaced [(Type, name)] $ do
+    abs_name <- newID name
     name' <- checkName Type name loc
-    let tenv = mempty { envNameMap = HM.singleton (Type, name) name'
-                        , envTypeTable = HM.singleton name' TypeAbs
-                        }
-    (env, specs') <- localEnv (tenv<>) $ checkSpecs specs
-    return (tenv <> env,
+    let tenv = mempty
+               { envNameMap =
+                   HM.singleton (Type, name) name'
+               , envTypeTable =
+                   HM.singleton name' $ TypeAbbr $ TypeVar $ typeName abs_name
+               }
+    (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
+    return (HS.insert abs_name abstypes,
+            tenv <> env,
             TypeSpec name' loc : specs')
 
 checkSpecs (ModSpec name sig loc : specs) =
   bindSpaced [(Structure, name)] $ do
     name' <- checkName Structure name loc
-    (sig_mod, sig') <- checkSigExp sig
+    (mty, sig') <- checkSigExp sig
     let senv = mempty { envNameMap = HM.singleton (Structure, name) name'
-                      , envModTable = HM.singleton name' sig_mod
+                      , envModTable = HM.singleton name' $ mtyMod mty
                       }
-    (env, specs') <- localEnv (senv<>) $ checkSpecs specs
-    return (senv <> env,
+    (abstypes, env, specs') <- localEnv (senv<>) $ checkSpecs specs
+    return (mtyAbs mty <> abstypes,
+            senv <> env,
             ModSpec name' sig' loc : specs')
 
 checkSpecs (IncludeSpec e loc : specs) = do
-  (e_env, e') <- checkSigExpToEnv e
-  (env, specs') <- localEnv (e_env<>) $ checkSpecs specs
-  return (e_env <> env,
+  (e_abs, e_env, e') <- checkSigExpToEnv e
+  (abstypes, env, specs') <- localEnv (e_env<>) $ checkSpecs specs
+  return (e_abs <> abstypes,
+          e_env <> env,
           IncludeSpec e' loc : specs')
 
-checkSigExp :: SigExpBase NoInfo Name -> TypeM (ModBinding, SigExpBase Info VName)
+checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
   (env, e') <- checkSigExp e
   return (env, SigParens e' loc)
 checkSigExp (SigVar name loc) = do
-  (name', env) <- lookupSig loc name
+  (name', env) <- lookupMTy loc name
   return (env, SigVar name' loc)
 checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
-  (env, specs') <- checkSpecs specs
-  return (ModEnv env, SigSpecs specs' loc)
+  (abstypes, env, specs') <- checkSpecs specs
+  return (MTy abstypes $ ModEnv env, SigSpecs specs' loc)
 checkSigExp (SigWith s (TypeRef tname td) loc) = do
-  (s_env, s') <- checkSigExpToEnv s
+  (s_abs, s_env, s') <- checkSigExpToEnv s
   td' <- checkTypeDecl td
   tname' <- localEnv (s_env<>) $ snd <$> checkQualName Type tname loc
-  s_env' <- refineEnv loc s_env tname' $ unInfo $ expandedType td'
-  return (ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
+  (s_abs', s_env') <- refineEnv loc s_abs s_env tname' $ unInfo $ expandedType td'
+  return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
-  (e1_mod, e1') <- checkSigExp e1
+  (s_abs, e1_env, e1') <- checkSigExpToEnv e1
   (env_for_e2, maybe_pname') <-
     case maybe_pname of
       Just pname -> bindSpaced [(Structure, pname)] $ do
         pname' <- checkName Structure pname loc
         return (mempty { envNameMap = HM.singleton (Structure, pname) pname'
-                       , envModTable = HM.singleton pname' e1_mod
+                       , envModTable = HM.singleton pname' $ ModEnv e1_env
                        },
                 Just pname')
       Nothing ->
         return (mempty, Nothing)
   (e2_mod, e2') <- localEnv (env_for_e2<>) $ checkSigExp e2
-  return (ModFun e1_mod e2_mod, SigArrow maybe_pname' e1' e2' loc)
+  return (MTy mempty $ ModFun $ FunSig s_abs e1_env e2_mod,
+          SigArrow maybe_pname' e1' e2' loc)
 
-checkSigExpToEnv :: SigExpBase NoInfo Name -> TypeM (Env, SigExpBase Info VName)
+checkSigExpToEnv :: SigExpBase NoInfo Name -> TypeM (TySet, Env, SigExpBase Info VName)
 checkSigExpToEnv e = do
   (mod, e') <- checkSigExp e
-  case mod of
-    ModEnv env -> return (env, e')
+  case mtyMod mod of
+    ModEnv env -> return (mtyAbs mod, env, e')
     ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (Env, SigBindBase Info VName)
@@ -312,85 +322,75 @@ checkSigBind (SigBind name e loc) = do
                                                ((Structure, name), name')]
                    },
             SigBind name' e' loc)
-  where typeAbbrEnvFromSig (ModEnv env) =
-          let types = HM.map TypeAbbr $ HM.fromList $ envTypeAbbrs env
+  where typeAbbrEnvFromSig (MTy _ (ModEnv env)) =
+          let types = HM.map TypeAbbr $ envTypeAbbrs env
               names = HM.fromList $ map nameMapping $ HM.toList types
           in mempty { envNameMap = names
                     , envTypeTable = types }
         typeAbbrEnvFromSig _ = mempty
         nameMapping (v, _) = ((Type, baseName v), v)
 
-checkModExp :: ModExpBase NoInfo Name -> TypeM (ModBinding, ModExpBase Info VName)
+checkModExp :: ModExpBase NoInfo Name -> TypeM (MTy, ModExpBase Info VName)
 checkModExp (ModParens e loc) = do
-  (env, e') <- checkModExp e
-  return (env, ModParens e' loc)
+  (mty, e') <- checkModExp e
+  return (mty, ModParens e' loc)
 checkModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
   (env, decs') <- checkDecs decs
-  return (ModEnv env, ModDecs decs' loc)
+  return (MTy mempty $ ModEnv env,
+          ModDecs decs' loc)
 checkModExp (ModVar v loc) = do
   (v', env) <- lookupMod loc v
   when (baseName (qualLeaf v') == nameFromString "intrinsics" &&
         baseTag (qualLeaf v') <= maxIntrinsicTag) $
     bad $ TypeError loc "The 'intrinsics' module may not be used in module expressions."
-  return (env, ModVar v' loc)
+  return (MTy mempty env, ModVar v' loc)
 checkModExp (ModImport name loc) = do
   env <- lookupImport loc name
-  return (ModEnv env, ModImport name loc)
+  return (MTy mempty $ ModEnv env, ModImport name loc)
 checkModExp (ModApply f e NoInfo NoInfo loc) = do
   (f', functor) <- lookupFunctor loc f
-  (e_env, e') <- checkModExp e
-  (f_env, psubsts, rsubsts) <- applyFunctor loc functor e_env
-  return (f_env, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
+  (e_mty, e') <- checkModExp e
+  (f_mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
+  return (f_mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
 checkModExp (ModAscript me se NoInfo loc) = do
-  (env, me') <- checkModExp me
-  (sigenv, se') <- checkSigExp se
-  (env', _) <- badOnLeft $ matchEnvs env sigenv loc
+  (me_mod, me') <- checkModExp me
+  (se_mty, se') <- checkSigExp se
+  (mty, _) <- badOnLeft $ matchMTys me_mod se_mty loc
   -- See issue #262 for martinsubst justification.
-  (env'', martinsubst) <- newNamesForMod mempty env'
-  return (env'', ModAscript me' se' (Info martinsubst) loc)
+  (mty', martinsubst) <- newNamesForMTy mempty mty
+  return (mty', ModAscript me' se' (Info martinsubst) loc)
 
-checkModExpToEnv :: ModExpBase NoInfo Name -> TypeM (Env, ModExpBase Info VName)
+checkModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
 checkModExpToEnv e = do
-  (mod, e') <- checkModExp e
+  (MTy abs mod, e') <- checkModExp e
   case mod of
-    ModEnv env -> return (env, e')
+    ModEnv env -> return (abs, env, e')
     ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
 
 applyFunctor :: SrcLoc
-             -> (ModBinding, ModBinding)
-             -> ModBinding
-             -> TypeM (ModBinding,
-                       HM.HashMap VName VName, HM.HashMap VName VName)
-applyFunctor applyloc (p_sig, body_env) a_env = do
-  (_, sig_subst) <- badOnLeft $ matchEnvs a_env p_sig applyloc
+             -> FunSig
+             -> MTy
+             -> TypeM (MTy,
+                       HM.HashMap VName VName,
+                       HM.HashMap VName VName)
+applyFunctor applyloc (FunSig p_abs p_env body_mty) a_mty = do
+  (_, sig_subst) <- badOnLeft $ matchMTys a_mty (MTy p_abs $ ModEnv p_env) applyloc
 
-  -- Type substitutions from the argument env.  Importantly,
-  -- we use the env before it is restricted by the parameter
-  -- signature ascription.  There are two important things we
-  -- must do: turn abstract types into type abbreviations (if
-  -- applicable), and fix references to abstract types.  The
-  -- body_env will refer to names in p_sig, and we'll have
-  -- to refer to those in a_env instead.  sig_subst gives us
-  -- exactly the type name mappings, but we'll need some care
-  -- for the abbreviations.
-  let type_substs = modTypeAbbrs a_env
-      typeSubst v
-        | Just t <- lookup v type_substs = TypeAbbr t
-        | otherwise                      = TypeAbbr $ TypeVar $ typeName v
-      type_substs'' = HM.map typeSubst sig_subst
+  -- Apply type abbreviations from a_mty to body_mty.
+  let a_abbrs = HM.map TypeAbbr $ mtyTypeAbbrs a_mty
+  let type_subst = HM.mapMaybe (`HM.lookup` a_abbrs) sig_subst
+  let body_mty' = substituteTypesInMTy type_subst body_mty
+  (body_mty'', body_subst) <- newNamesForMTy sig_subst body_mty'
 
-  (body_env', body_subst) <-
-    newNamesForMod sig_subst $
-    substituteTypesInMod type_substs'' body_env
-  return (body_env', sig_subst, body_subst)
+  return (body_mty'', sig_subst, body_subst)
 
 checkStructBind :: StructBindBase NoInfo Name -> TypeM (Env, StructBindBase Info VName)
 checkStructBind (StructBind name e loc) = do
-  (env, e') <- checkModExp e
+  (mty, e') <- checkModExp e
   bindSpaced [(Structure, name)] $ do
     name' <- checkName Structure name loc
-    return (mempty { envModTable = HM.singleton name' env
+    return (mempty { envModTable = HM.singleton name' $ mtyMod mty
                    , envNameMap = HM.singleton (Structure, name) name'
                    },
             StructBind name' e' loc)
@@ -422,10 +422,10 @@ checkForDuplicateSpecs =
 
 checkFunctorBind :: FunctorBindBase NoInfo Name -> TypeM (Env, FunctorBindBase Info VName)
 checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
-  (p_env, psig_e') <- checkSigExp psig_e
+  (p_abs, p_env, psig_e') <- checkSigExpToEnv psig_e
   bindSpaced [(Structure, p)] $ do
     p' <- checkName Structure p loc
-    let in_body_env = mempty { envModTable = HM.singleton p' p_env }
+    let in_body_env = mempty { envModTable = HM.singleton p' $ ModEnv p_env }
     (maybe_fsig_e', body_e', env') <- localEnv (in_body_env<>) $ do
       (body_env, body_e') <- checkModExp body_e
       case maybe_fsig_e of
@@ -433,12 +433,12 @@ checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
           return (Nothing, body_e', body_env)
         Just fsig_e -> do
           (fsig_env, fsig_e') <- checkSigExp fsig_e
-          (env', _) <- badOnLeft $ matchEnvs body_env fsig_env loc
+          (env', _) <- badOnLeft $ matchMTys body_env fsig_env loc
           return (Just fsig_e', body_e', env')
     bindSpaced [(Structure, name)] $ do
       name' <- checkName Structure name loc
       return (mempty { envModTable =
-                         HM.singleton name' $ ModFun p_env env'
+                         HM.singleton name' $ ModFun $ FunSig p_abs p_env env'
                      , envNameMap =
                          HM.singleton (Structure, name) name'
                      },
@@ -483,8 +483,8 @@ checkDecs (TypeDec tdec:rest) = do
     return (env <> tenv, TypeDec tdec' : rest')
 
 checkDecs (OpenDec x xs loc:rest) = do
-  (x_env, x') <- checkModExpToEnv x
-  (xs_envs, xs') <- unzip <$> mapM checkModExpToEnv xs
+  (_x_abs, x_env, x') <- checkModExpToEnv x
+  (_xs_abs, xs_envs, xs') <- unzip3 <$> mapM checkModExpToEnv xs
    -- We cannot use mconcat, as mconcat is a right-fold.
   let env_ext = foldl (flip mappend) x_env xs_envs
   localEnv (env_ext<>) $ do
@@ -573,151 +573,209 @@ checkTypeDecl (TypeDecl t NoInfo) = do
 
 --- Signature matching
 
+type AbsToTypes = HM.HashMap VName TypeBinding
+type AbsToNames = HM.HashMap VName TypeBinding
+
 -- Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for
 -- functor application.  The first env is the module env, and the
 -- second the env it must match.
-matchEnvs :: ModBinding -> ModBinding -> SrcLoc
-          -> Either TypeError (ModBinding, HM.HashMap VName VName)
+matchMTys :: MTy -> MTy -> SrcLoc
+          -> Either TypeError (MTy, HM.HashMap VName VName)
+matchMTys = matchMTys' mempty mempty
+  where
+    matchMTys' :: AbsToTypes -> AbsToNames -> MTy -> MTy -> SrcLoc
+               -> Either TypeError (MTy, HM.HashMap VName VName)
 
-matchEnvs (ModEnv env) (ModEnv sig) loc = do
-  -- Check that abstract types in 'sig' have an implementation in
-  -- 'env'.  This also gives us a substitution that we use to check
-  -- the types of values.
-  abs_substs <- fmap HM.fromList $ forM (envAbsTypes sig) $ \name ->
-    case findBinding envTypeTable Type (baseName name) of
-      Just (name', TypeAbs) ->
-        return (name, (name', TypeAbbr $ TypeVar $ typeName name'))
-      Just (name', TypeAbbr t) ->
-        return (name, (name', TypeAbbr t))
-      Nothing ->
-        missingType $ baseName name
+    matchMTys' _ _(MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
+      Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
 
-  let abs_names = map fst $ HM.elems abs_substs
-      abs_subst_to_type = HM.map snd abs_substs
-      abs_subst_to_name = HM.map (TypeAbbr . TypeVar . typeName . fst) abs_substs
-      abs_name_substs   = HM.map fst abs_substs
+    matchMTys' _ _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
+      Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
 
-  -- Check that all type abbreviations are correctly defined.
-  abbr_substs <- fmap HM.fromList $ forM (envTypeAbbrs sig) $ \(name,spec_t) -> do
-    let spec_t' = substituteTypes abs_subst_to_type spec_t
-    case findBinding envTypeTable Type (baseName name) of
-      Just (name', TypeAbbr t)
-        | spec_t' == t ->
-            return (name, (name', substituteTypes abs_subst_to_type spec_t))
-        | otherwise ->
-            mismatchedType (baseName name) ([], spec_t) ([], t)
-      Just (name', TypeAbs)
-        | TypeVar (typeName name') == spec_t ->
-            return (name, (name', substituteTypes abs_subst_to_type spec_t))
-        | otherwise ->
-          Left $ TypeError loc $
-          "Type abbreviation " ++ pretty (baseName name) ++ " = " ++ pretty spec_t ++
-          " defined as abstract in module."
-      Nothing -> missingType $ baseName name
+    matchMTys' old_abs_subst_to_type old_abs_subst_to_name
+              (MTy mod_abs mod) (MTy sig_abs sig)
+              loc = do
+      -- Check that abstract types in 'sig' have an implementation in
+      -- 'env'.  This also gives us a substitution that we use to check
+      -- the types of values.
+      let abs_mapping = HM.fromList $ zip
+                        (map baseName $ HS.toList mod_abs) (HS.toList mod_abs)
+      abs_substs <- fmap HM.fromList $ forM (HS.toList sig_abs) $ \name ->
+        case findTypeDef (baseName name) mod of
+          Just (name', TypeAbbr t) ->
+            return (name, (name', TypeAbbr t))
+          Nothing
+            | Just name' <- HM.lookup (baseName name) abs_mapping ->
+                return (name, (name', TypeAbbr $ TypeVar $ typeName name'))
+            | otherwise ->
+                missingType loc $ baseName name
 
-  let abbrs = HM.map TypeAbbr $ HM.fromList $ HM.elems abbr_substs
-      abbr_name_substs = HM.map fst abbr_substs
+      let abs_names = map fst $ HM.elems abs_substs
+          abs_subst_to_type = old_abs_subst_to_type <> HM.map snd abs_substs
+          abs_subst_to_name = old_abs_subst_to_name <>
+                              HM.map (TypeAbbr . TypeVar . typeName . fst) abs_substs
+          abs_name_substs   = HM.map fst abs_substs
+          abs_types = mod_abs <> HS.fromList abs_names
+      (res_env, substs) <- matchMods abs_subst_to_type abs_subst_to_name mod sig loc
+      return (MTy abs_types res_env,
+              substs <> abs_name_substs)
 
-  -- Check that all values are defined correctly, substituting the
-  -- types first.
-  vals_and_substs <- fmap HM.fromList $ forM (envVals sig) $ \(name, (spec_pts, spec_t)) -> do
-    let spec_pts' = map (substituteTypes abs_subst_to_type) spec_pts
-        spec_t'   = substituteTypes abs_subst_to_type spec_t
-        impl_pts' = map (substituteTypes abs_subst_to_name) spec_pts
-        impl_t'   = substituteTypes abs_subst_to_name spec_t
-    case findBinding envVtable Term $ baseName name of
-      Just (name', BoundV t)
-        | null spec_pts', toStructural t `subtypeOf` toStructural spec_t' ->
-            return (name, (name', BoundV $ removeShapeAnnotations $ fromStruct impl_t'))
-        | otherwise ->
-            mismatchedVal name (spec_pts', spec_t') ([], t)
-      Just (name', BoundF (pts, ret))
-        | and (zipWith subtypeOf (map toStructural pts) (map toStructural spec_pts')),
-          toStructural ret `subtypeOf` toStructural spec_t' ->
-            return (name, (name', BoundF (impl_pts', impl_t')))
-        | otherwise ->
-            mismatchedVal (baseName name) (spec_pts', spec_t') (pts, ret)
-      _ -> missingVal (baseName name)
+    matchMods :: AbsToTypes -> AbsToNames -> Mod -> Mod -> SrcLoc
+              -> Either TypeError (Mod, HM.HashMap VName VName)
+    matchMods _ _ ModEnv{} ModFun{} loc =
+      Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
+    matchMods _ _ ModFun{} ModEnv{} loc =
+      Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
 
-  -- Check for correct modules.
-  mods_and_substs <- forM (envMods sig) $ \(name, modspec) ->
-    case findBinding envModTable Structure $ baseName name of
-      Just (name', mod) -> do
-        let modspec' = substituteTypesInMod abs_subst_to_type modspec
-        (mod', mod_substs) <- matchEnvs mod modspec' loc
-        return (HM.insert name name' mod_substs,
-                (name', mod'))
-      Nothing ->
-        missingMod $ baseName name
+    matchMods abs_subst_to_type abs_subst_to_name (ModEnv mod) (ModEnv sig) loc = do
+      (mod', substs) <- matchEnvs abs_subst_to_type abs_subst_to_name mod sig loc
+      return (ModEnv mod', substs)
 
-  let vals = HM.fromList $ HM.elems vals_and_substs
-      val_substs = HM.map fst vals_and_substs
+    matchMods old_abs_subst_to_type old_abs_subst_to_name
+              (ModFun (FunSig mod_abs mod_pmod mod_mod))
+              (ModFun (FunSig sig_abs sig_pmod sig_mod))
+              loc = do
+      let abs_mapping = HM.fromList $ zip
+                        (map baseName $ HS.toList mod_abs) (HS.toList mod_abs)
+      abs_substs <- fmap HM.fromList $ forM (HS.toList sig_abs) $ \name ->
+        case findTypeDef (baseName name) (ModEnv mod_pmod) of
+          _ | Just name' <- HM.lookup (baseName name) abs_mapping ->
+                return (name, (name', TypeAbbr $ TypeVar $ typeName name'))
+          Just (name', TypeAbbr t) ->
+            return (name, (name', TypeAbbr t))
+          Nothing ->
+            missingType loc $ baseName name
 
-      mods = HM.fromList $ map snd mods_and_substs
-      mod_substs = HM.unions $ map fst mods_and_substs
+      let abs_subst_to_type = old_abs_subst_to_type <> HM.map snd abs_substs
+          abs_subst_to_name = old_abs_subst_to_name <>
+                              HM.map (TypeAbbr . TypeVar . typeName . fst) abs_substs
 
+      (mod_pmod', pmod_substs) <- matchEnvs abs_subst_to_type abs_subst_to_name mod_pmod sig_pmod loc
+      (mod_mod', mod_substs) <- matchMTys' abs_subst_to_type abs_subst_to_name mod_mod sig_mod loc
+      return (ModFun (FunSig mod_abs mod_pmod' mod_mod'),
+              pmod_substs <> mod_substs)
 
-      names = HM.filter isInSig $ envNameMap env
-      types = abbrs <> HM.fromList (zip abs_names $ repeat TypeAbs)
-      res_env = Env { envVtable = vals
-                    , envTypeTable = types
-                    , envSigTable = mempty
-                    , envModTable = mods
-                    , envNameMap = names
-                    }
-      all_substs = abs_name_substs <> abbr_name_substs <> val_substs <> mod_substs
-  return (ModEnv res_env, all_substs)
-  where missingType name =
-          Left $ TypeError loc $
-          "Module does not define a type named " ++ pretty name ++ "."
+    matchEnvs :: AbsToTypes -> AbsToNames
+              -> Env -> Env -> SrcLoc
+              -> Either TypeError (Env, HM.HashMap VName VName)
+    matchEnvs abs_subst_to_type abs_subst_to_name env sig loc = do
+      -- Check that all type abbreviations are correctly defined.
+      abbr_substs <- fmap HM.fromList $ forM (HM.toList $ envTypeAbbrs sig) $ \(name,spec_t) -> do
+        let spec_t' = substituteTypes abs_subst_to_type spec_t
+        case findBinding envTypeTable Type (baseName name) env of
+          Just (name', TypeAbbr t)
+            | spec_t' == t ->
+                return (name, (name', substituteTypes abs_subst_to_name spec_t))
+            | otherwise ->
+                mismatchedType loc (baseName name) ([], spec_t) ([], t)
+            | otherwise ->
+              Left $ TypeError loc $
+              "Type abbreviation " ++ pretty (baseName name) ++ " = " ++ pretty spec_t ++
+              " defined as abstract in module."
+          Nothing -> missingType loc $ baseName name
 
-        missingVal name =
-          Left $ TypeError loc $
-          "Module does not define a value named " ++ pretty name ++ "."
+      let abbrs = HM.map TypeAbbr $ HM.fromList $ HM.elems abbr_substs
+          abbr_name_substs = HM.map fst abbr_substs
 
-        missingMod name =
-          Left $ TypeError loc $
-          "Module does not define a module named " ++ pretty name ++ "."
+      -- Check that all values are defined correctly, substituting the
+      -- types first.
+      vals_and_substs <- fmap HM.fromList $ forM (envVals sig) $ \(name, (spec_pts, spec_t)) -> do
+        let spec_pts' = map (substituteTypes abs_subst_to_type) spec_pts
+            spec_t'   = substituteTypes abs_subst_to_type spec_t
+            impl_pts' = map (substituteTypes abs_subst_to_name) spec_pts
+            impl_t'   = substituteTypes abs_subst_to_name spec_t
+        case findBinding envVtable Term (baseName name) env of
+          Just (name', BoundV t)
+            | null spec_pts', toStructural t `subtypeOf` toStructural spec_t' ->
+                return (name, (name', BoundV $ removeShapeAnnotations $ fromStruct impl_t'))
+            | otherwise ->
+                mismatchedVal loc name (spec_pts', spec_t') ([], t)
+          Just (name', BoundF (pts, ret))
+            | and (zipWith subtypeOf (map toStructural pts) (map toStructural spec_pts')),
+              toStructural ret `subtypeOf` toStructural spec_t' ->
+                return (name, (name', BoundF (impl_pts', impl_t')))
+            | otherwise ->
+                mismatchedVal loc (baseName name) (spec_pts', spec_t') (pts, ret)
+          _ -> missingVal loc (baseName name)
 
-        mismatchedType name spec_t env_t =
-          Left $ TypeError loc $ "Type " ++ pretty name ++ " specified as " ++
-          ppFunType spec_t ++ " in signature, but " ++ ppFunType env_t ++ " in structure."
+      -- Check for correct modules.
+      mods_and_substs <- forM (envMods sig) $ \(name, modspec) ->
+        case findBinding envModTable Structure (baseName name) env of
+          Just (name', mod) -> do
+            (mod', mod_substs) <-
+              matchMods abs_subst_to_type abs_subst_to_name mod modspec loc
+            return (HM.insert name name' mod_substs,
+                    (name', mod'))
+          Nothing ->
+            missingMod loc $ baseName name
 
-        mismatchedVal name spec_t env_t =
-          Left $ TypeError loc $ "Value " ++ pretty name ++ " specified as type " ++
-          ppFunType spec_t ++ " in signature, but has " ++ ppFunType env_t ++ " in structure."
+      let vals = HM.fromList $ HM.elems vals_and_substs
+          val_substs = HM.map fst vals_and_substs
 
-        findBinding :: (Env -> HM.HashMap VName v)
-                    -> Namespace -> Name
-                    -> Maybe (VName, v)
-        findBinding table namespace name = do
-          name' <- HM.lookup (namespace, name) $ envNameMap env
-          (name',) <$> HM.lookup name' (table env)
+          mods = HM.fromList $ map snd mods_and_substs
+          mod_substs = HM.unions $ map fst mods_and_substs
 
-        isInSig x = baseName x `elem` sig_names
-          where sig_names = map baseName $ HM.elems $ envNameMap sig
+          names = HM.filter (isInSig sig) $ envNameMap env
 
-        ppFunType (paramts, ret) =
-          intercalate " -> " $ map pretty $ paramts ++ [ret]
+          res_env = Env { envVtable = vals
+                        , envTypeTable = abbrs
+                        , envSigTable = mempty
+                        , envModTable = mods
+                        , envNameMap = names
+                        }
+          all_substs = val_substs <> mod_substs <> abbr_name_substs
+      return (res_env, all_substs)
 
-matchEnvs (ModFun mod_pmod mod_mod) (ModFun sig_pmod sig_mod) loc = do
-  (mod_pmod', pmod_substs) <- matchEnvs mod_pmod sig_pmod loc
-  (mod_mod', mod_substs) <- matchEnvs mod_mod sig_mod loc
-  return (ModFun mod_pmod' mod_mod',
-          pmod_substs <> mod_substs)
+    missingType loc name =
+      Left $ TypeError loc $
+      "Module does not define a type named " ++ pretty name ++ "."
 
-matchEnvs ModFun{} ModEnv{} loc =
-  Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
+    missingVal loc name =
+      Left $ TypeError loc $
+      "Module does not define a value named " ++ pretty name ++ "."
 
-matchEnvs ModEnv{} ModFun{} loc =
-  Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
+    missingMod loc name =
+      Left $ TypeError loc $
+      "Module does not define a module named " ++ pretty name ++ "."
 
-substituteTypesInMod :: HM.HashMap VName TypeBinding -> ModBinding -> ModBinding
+    mismatchedType loc name spec_t env_t =
+      Left $ TypeError loc $ "Type " ++ pretty name ++ " specified as " ++
+      ppFunType spec_t ++ " in signature, but " ++ ppFunType env_t ++ " in structure."
+
+    mismatchedVal loc name spec_t env_t =
+      Left $ TypeError loc $ "Value " ++ pretty name ++ " specified as type " ++
+      ppFunType spec_t ++ " in signature, but has " ++ ppFunType env_t ++ " in structure."
+
+    findBinding :: (Env -> HM.HashMap VName v)
+                  -> Namespace -> Name
+                  -> Env
+                  -> Maybe (VName, v)
+    findBinding table namespace name the_env = do
+      name' <- HM.lookup (namespace, name) $ envNameMap the_env
+      (name',) <$> HM.lookup name' (table the_env)
+
+    findTypeDef :: Name -> Mod -> Maybe (VName, TypeBinding)
+    findTypeDef _ ModFun{} = Nothing
+    findTypeDef name (ModEnv the_env) =
+      findBinding envTypeTable Type name the_env `mplus`
+      msum (map (findTypeDef name) $
+            HM.elems $ envModTable the_env)
+
+    isInSig sig x = baseName x `elem` sig_names
+      where sig_names = map baseName $ HM.elems $ envNameMap sig
+
+    ppFunType (paramts, ret) =
+      intercalate " -> " $ map pretty $ paramts ++ [ret]
+
+substituteTypesInMod :: HM.HashMap VName TypeBinding -> Mod -> Mod
 substituteTypesInMod substs (ModEnv e) =
   ModEnv $ substituteTypesInEnv substs e
-substituteTypesInMod substs (ModFun e1 e2) =
-  ModFun (substituteTypesInMod substs e1) (substituteTypesInMod substs e2)
+substituteTypesInMod substs (ModFun (FunSig abs env mty)) =
+  ModFun $ FunSig abs (substituteTypesInEnv substs env) (substituteTypesInMTy substs mty)
+
+substituteTypesInMTy :: HM.HashMap VName TypeBinding -> MTy -> MTy
+substituteTypesInMTy substs (MTy abs mod) = MTy abs $ substituteTypesInMod substs mod
 
 substituteTypesInEnv :: HM.HashMap VName TypeBinding -> Env -> Env
 substituteTypesInEnv substs env =
@@ -736,7 +794,6 @@ substituteTypesInEnv substs env =
         subT name _
           | Just t <- HM.lookup name substs = t
         subT _ (TypeAbbr t) = TypeAbbr $ substituteTypes substs t
-        subT _ TypeAbs      = TypeAbs
 
 substituteTypes :: HM.HashMap VName TypeBinding -> StructType -> StructType
 substituteTypes substs (TypeVar v)
@@ -759,84 +816,81 @@ substituteTypes substs (Array at) = substituteTypesInArray at
                             tupleArrayElemToType) ts
 substituteTypes substs (Tuple ts) = Tuple $ map (substituteTypes substs) ts
 
+allNamesInMTy :: MTy -> HS.HashSet VName
+allNamesInMTy (MTy abs mod) =
+  abs <> allNamesInMod mod
+
+allNamesInMod :: Mod -> HS.HashSet VName
+allNamesInMod (ModEnv env) = allNamesInEnv env
+allNamesInMod (ModFun (FunSig abs env mty)) =
+  abs <> allNamesInEnv env <> allNamesInMTy mty
+
 -- All names defined anywhere in the env.
 allNamesInEnv :: Env -> HS.HashSet VName
 allNamesInEnv (Env vtable ttable stable modtable _names) =
   HS.fromList (HM.keys vtable ++ HM.keys ttable ++
                HM.keys stable ++ HM.keys modtable) <>
-  mconcat (map allNamesInEnv $ concatMap modEnvs $
-           HM.elems stable ++ HM.elems modtable)
-  where modEnvs :: ModBinding -> [Env]
-        modEnvs (ModEnv e)     = [e]
-        modEnvs (ModFun e1 e2) = modEnvs e1 ++ modEnvs e2
+  mconcat (map allNamesInMTy (HM.elems stable) ++
+           map allNamesInMod (HM.elems modtable))
 
--- New names for everything defined in the env, with passed-in
--- exceptions.  Removes signatures.
-newNamesForMod :: HM.HashMap VName VName -> ModBinding -> TypeM (ModBinding, HM.HashMap VName VName)
-newNamesForMod except (ModEnv env) = do
-  (env', env_substs) <- newNamesForEnv except env
-  return (ModEnv env', env_substs)
-newNamesForMod except (ModFun penv env) = do
-  (penv', penv_substs) <- newNamesForMod except penv
-  (env', env_substs) <- newNamesForMod except env
-  return (ModFun penv' env', penv_substs <> env_substs)
-
-newNamesForEnv :: HM.HashMap VName VName -> Env -> TypeM (Env, HM.HashMap VName VName)
-newNamesForEnv except orig_env = do
-  -- Create unique renames for the env.
-  substs <- fmap HM.fromList $ forM (HS.toList $ allNamesInEnv orig_env) $ \v ->
+newNamesForMTy :: HM.HashMap VName VName -> MTy -> TypeM (MTy, HM.HashMap VName VName)
+newNamesForMTy except orig_mty = do
+  -- Create unique renames for the module type.
+  substs <- fmap HM.fromList $ forM (HS.toList $ allNamesInMTy orig_mty) $ \v ->
     case HM.lookup v except of
       Just v' -> return (v, v')
       Nothing -> do v' <- newName v
+
                     return (v, v')
 
-  new_env <- substituteInEnv substs orig_env
+  return (substituteInMTy substs orig_mty, substs)
 
-  return (new_env, substs)
-  where substituteInEnv :: HM.HashMap VName VName -> Env -> TypeM Env
-        substituteInEnv substs (Env vtable ttable _stable modtable names) = do
-          vtable' <- substituteInMap substs substituteInBinding vtable
-          ttable' <- substituteInMap substs substituteInTypeBinding ttable
-          mtable' <- substituteInMap substs substituteInModBinding modtable
-          return Env { envVtable = vtable'
-                     , envTypeTable = ttable'
-                     , envSigTable = mempty
-                     , envModTable = mtable'
-                     , envNameMap = HM.map (substitute substs) names
-                     }
+  where substituteInMTy substs (MTy abs mod) =
+          MTy (HS.map (substitute substs) abs) (substituteInMod substs mod)
+
+        substituteInEnv :: HM.HashMap VName VName -> Env -> Env
+        substituteInEnv substs (Env vtable ttable _stable modtable names) =
+          let vtable' = substituteInMap substs substituteInBinding vtable
+              ttable' = substituteInMap substs substituteInTypeBinding ttable
+              mtable' = substituteInMap substs substituteInMod modtable
+          in Env { envVtable = vtable'
+                 , envTypeTable = ttable'
+                 , envSigTable = mempty
+                 , envModTable = mtable'
+                 , envNameMap = HM.map (substitute substs) names
+                 }
 
         substitute substs v =
           fromMaybe v $ HM.lookup v substs
 
         substituteInMap substs f m =
           let (ks, vs) = unzip $ HM.toList m
-          in HM.fromList .
-             zip (map (\k -> fromMaybe k $ HM.lookup k substs) ks) <$>
-                 mapM (f substs) vs
+          in HM.fromList $
+             zip (map (\k -> fromMaybe k $ HM.lookup k substs) ks)
+                 (map (f substs) vs)
 
         substituteInBinding :: HM.HashMap VName VName -> ValBinding
-                            -> TypeM ValBinding
+                            -> ValBinding
         substituteInBinding substs (BoundV t) =
-          return $ BoundV $ fromStruct $ toStructural $
+          BoundV $ fromStruct $ toStructural $
           substituteInType substs $
           vacuousShapeAnnotations $ toStruct t
         substituteInBinding substs (BoundF (pts,t)) =
-          return $ BoundF (map (substituteInType substs) pts,
-                           substituteInType substs t)
+          BoundF (map (substituteInType substs) pts, substituteInType substs t)
 
-        substituteInModBinding :: HM.HashMap VName VName -> ModBinding
-                               -> TypeM ModBinding
-        substituteInModBinding substs (ModEnv env) =
-          ModEnv <$> substituteInEnv substs env
-        substituteInModBinding substs (ModFun penv env) =
-          ModFun
-          <$> substituteInModBinding substs penv
-          <*> substituteInModBinding substs env
+        substituteInMod :: HM.HashMap VName VName -> Mod
+                        -> Mod
+        substituteInMod substs (ModEnv env) =
+          ModEnv $ substituteInEnv substs env
+        substituteInMod substs (ModFun funsig) =
+          ModFun $ substituteInFunSig substs funsig
+
+        substituteInFunSig substs (FunSig abs env mty) =
+          FunSig (HS.map (substitute substs) abs)
+          (substituteInEnv substs env) (substituteInMTy substs mty)
 
         substituteInTypeBinding substs (TypeAbbr t) =
-          return $ TypeAbbr $ substituteInType substs t
-        substituteInTypeBinding _ TypeAbs =
-          return TypeAbs
+          TypeAbbr $ substituteInType substs t
 
         substituteInType :: HM.HashMap VName VName -> StructType
                          -> StructType
@@ -844,17 +898,21 @@ newNamesForEnv except orig_env = do
           substituteTypes $
           HM.map (TypeAbbr . TypeVar . typeNameFromQualName . qualName) substs
 
+mtyTypeAbbrs :: MTy -> HM.HashMap VName StructType
+mtyTypeAbbrs (MTy _ (ModEnv env)) = envTypeAbbrs env
+mtyTypeAbbrs (MTy _ (ModFun (FunSig _ env mty))) =
+  envTypeAbbrs env <> mtyTypeAbbrs mty
+
 -- | Refine the given type name in the given env.
-refineEnv :: SrcLoc -> Env -> QualName VName -> StructType -> TypeM Env
-refineEnv loc env tname t =
-  -- tname must be an abstract type in env.
-  case HM.lookup (qualLeaf tname) $ envTypeTable env of
-    Nothing ->
-      bad $ TypeError loc $
-      pretty tname ++ " is not a known type in the module type."
-    Just TypeAbbr{} ->
+refineEnv :: SrcLoc -> TySet -> Env -> QualName VName -> StructType
+          -> TypeM (TySet, Env)
+refineEnv loc tset env tname t
+  | Just (TypeAbbr (TypeVar (TypeName _ v))) <- HM.lookup (qualLeaf tname) $ envTypeTable env,
+    v `HS.member` tset =
+      return (v `HS.delete` tset,
+              substituteTypesInEnv (HM.fromList [(qualLeaf tname, TypeAbbr t),
+                                                 (v, TypeAbbr t)])
+              env)
+  | otherwise =
       bad $ TypeError loc $
       pretty tname ++ " is not an abstract type in the module type."
-    Just TypeAbs ->
-      let subst = HM.singleton (qualLeaf tname) $ TypeAbbr t
-      in return $ substituteTypesInEnv subst env

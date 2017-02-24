@@ -119,10 +119,12 @@ internaliseDecs ds =
       internaliseDecs ds'
     (Right (E.StructDec sb), ds') -> do
       internaliseModExp (structExp sb)
+      v <- lookupSubst $ E.qualName $ E.structName sb
+      noteModule v $ E.structExp sb
       internaliseDecs ds'
     (Right (E.FunctorDec fb), ds') -> do
       v <- lookupSubst $ E.qualName $ E.functorName fb
-      noteFunctor v $ E.functorBody fb
+      noteModule v $ E.functorBody fb
       internaliseDecs ds'
     (Right (E.TypeDec tb), ds') -> do
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
@@ -144,8 +146,10 @@ internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
 
 internaliseModExp :: E.ModExp
                   -> InternaliseM ()
-internaliseModExp E.ModVar{} =
-  return ()
+internaliseModExp (E.ModVar v _) = do
+  in_functor <- asks envGeneratingFunctor
+  when in_functor $
+    internaliseModExp =<< lookupModuleDef =<< lookupSubst v
 internaliseModExp (E.ModParens e _) =
   internaliseModExp e
 internaliseModExp E.ModImport{} = return ()
@@ -157,7 +161,7 @@ internaliseModExp (E.ModAscript me _ (Info subst) _) = do
 internaliseModExp (E.ModApply v arg (Info p_substs) (Info b_substs) _) = do
   internaliseModExp arg
   v' <- lookupSubst v
-  me <- lookupFunctor v'
+  me <- lookupModuleDef v'
   generatingFunctor p_substs b_substs $ internaliseModExp me
 
 internaliseFun :: E.FunBind -> InternaliseM ()
