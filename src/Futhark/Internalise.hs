@@ -24,7 +24,7 @@ import Data.List
 import Data.Traversable (mapM, sequence)
 import Data.Loc
 
-import Prelude hiding (mapM, sequence)
+import Prelude hiding (mapM, sequence, mod)
 
 import Language.Futhark as E
 import Futhark.Representation.SOACS as I hiding (bindingPattern)
@@ -120,11 +120,11 @@ internaliseDecs ds =
     (Right (E.StructDec sb), ds') -> do
       internaliseModExp (structExp sb)
       v <- lookupSubst $ E.qualName $ E.structName sb
-      noteModule v $ E.structExp sb
+      noteMod v $ E.structExp sb
       internaliseDecs ds'
     (Right (E.FunctorDec fb), ds') -> do
       v <- lookupSubst $ E.qualName $ E.functorName fb
-      noteModule v $ E.functorBody fb
+      noteModFun v (fst $ E.functorParam fb) (E.functorBody fb)
       internaliseDecs ds'
     (Right (E.TypeDec tb), ds') -> do
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
@@ -146,10 +146,8 @@ internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
 
 internaliseModExp :: E.ModExp
                   -> InternaliseM ()
-internaliseModExp (E.ModVar v _) = do
-  in_functor <- asks envGeneratingFunctor
-  when in_functor $
-    internaliseModExp =<< lookupModuleDef =<< lookupSubst v
+internaliseModExp E.ModVar{} =
+  return ()
 internaliseModExp (E.ModParens e _) =
   internaliseModExp e
 internaliseModExp E.ModImport{} = return ()
@@ -158,11 +156,18 @@ internaliseModExp (E.ModDecs ds _) =
 internaliseModExp (E.ModAscript me _ (Info subst) _) = do
   noteDecSubsts subst
   internaliseModExp me
-internaliseModExp (E.ModApply v arg (Info p_substs) (Info b_substs) _) = do
+internaliseModExp (E.ModApply orig_v arg (Info p_substs) (Info b_substs) _) = do
   internaliseModExp arg
-  v' <- lookupSubst v
-  me <- lookupModuleDef v'
-  generatingFunctor p_substs b_substs $ internaliseModExp me
+  apply =<< lookupMod =<< lookupSubst orig_v
+  where apply (ModExp (E.ModVar v _)) =
+          apply =<< lookupMod =<< lookupSubst v
+        apply (ModExp (E.ModAscript me _ _ _)) =
+          apply $ ModExp me
+        apply (ModExp me) =
+          fail $ "Cannot module-apply " ++ pretty me
+        apply (ModFun p me) = do
+          noteMod p arg
+          generatingFunctor p_substs b_substs $ internaliseModExp me
 
 internaliseFun :: E.FunBind -> InternaliseM ()
 internaliseFun (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =

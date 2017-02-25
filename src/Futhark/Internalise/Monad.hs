@@ -11,20 +11,22 @@ module Futhark.Internalise.Monad
   , ConstParams
   , Closure
   , FunBinding (..)
+  , ModBinding (..)
 
   , addFunction
 
   , lookupFunction
   , lookupFunction'
   , lookupTypeVar
-  , lookupModuleDef
+  , lookupMod
   , lookupSubst
   , newOrExistingSubst
 
   , bindingIdentTypes
   , bindingParamTypes
   , noteFunctions
-  , noteModule
+  , noteMod
+  , noteModFun
   , noteType
   , noteDecSubsts
   , generatingFunctor
@@ -67,6 +69,10 @@ data FunBinding = FunBinding
 
 type FunTable = HM.HashMap VName FunBinding
 
+data ModBinding = ModExp E.ModExp
+                | ModFun VName E.ModExp
+                deriving (Show)
+
 type TypeTable = HM.HashMap VName [TypeBase Rank NoUniqueness]
 
 -- | A mapping from external variable names to the corresponding
@@ -87,7 +93,7 @@ data InternaliseState =
   InternaliseState { stateDecSubsts :: DecSubstitutions
                    , stateFtable :: FunTable
                    , stateTtable :: TypeTable
-                   , stateFunctorTable :: HM.HashMap VName E.ModExp
+                   , stateModTable :: HM.HashMap VName ModBinding
                    , stateNameSource :: VNameSource
                    }
 
@@ -143,7 +149,7 @@ runInternaliseM ftable (InternaliseM m) =
         newState src =
           InternaliseState { stateFtable = ftable
                            , stateTtable = mempty
-                           , stateFunctorTable = mempty
+                           , stateModTable = mempty
                            , stateDecSubsts = mempty
                            , stateNameSource = src
                            }
@@ -171,11 +177,11 @@ lookupTypeVar tname = do
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just t' -> return t'
 
-lookupModuleDef :: VName -> InternaliseM E.ModExp
-lookupModuleDef mname = do
-  maybe_me <- gets $ HM.lookup mname . stateFunctorTable
+lookupMod :: VName -> InternaliseM ModBinding
+lookupMod mname = do
+  maybe_me <- gets $ HM.lookup mname . stateModTable
   case maybe_me of
-    Nothing -> fail $ "Internalise.lookupModuleDef: Functor '" ++
+    Nothing -> fail $ "Internalise.lookupModuleDef: Module '" ++
                pretty mname ++ "' not found"
     Just me -> return me
 
@@ -225,9 +231,13 @@ noteFunctions :: FunTable -> InternaliseM ()
 noteFunctions ftable_expansion =
   modify $ \s -> s { stateFtable = ftable_expansion <> stateFtable s }
 
-noteModule :: VName -> E.ModExp -> InternaliseM ()
-noteModule name me =
-  modify $ \s -> s { stateFunctorTable = HM.insert name me $ stateFunctorTable s }
+noteMod :: VName -> E.ModExp -> InternaliseM ()
+noteMod name me =
+  modify $ \s -> s { stateModTable = HM.insert name (ModExp me) $ stateModTable s }
+
+noteModFun :: VName -> VName -> E.ModExp -> InternaliseM ()
+noteModFun name p me =
+  modify $ \s -> s { stateModTable = HM.insert name (ModFun p me) $ stateModTable s }
 
 noteType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM ()
 noteType name t =
