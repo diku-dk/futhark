@@ -360,6 +360,11 @@ checkModExp (ModAscript me se NoInfo loc) = do
   -- See issue #262 for martinsubst justification.
   (mty', martinsubst) <- newNamesForMTy mempty mty
   return (mty', ModAscript me' se' (Info martinsubst) loc)
+checkModExp (ModLambda (p, psig_e) maybe_fsig_e body_e loc) = do
+  (p', p_abs, p_env, psig_e', maybe_fsig_e', body_e', mty) <-
+    checkModFun p psig_e maybe_fsig_e body_e loc
+  return (MTy mempty $ ModFun $ FunSig p_abs p_env mty,
+          ModLambda (p', psig_e') maybe_fsig_e' body_e' loc)
 
 checkModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
 checkModExpToEnv e = do
@@ -367,6 +372,27 @@ checkModExpToEnv e = do
   case mod of
     ModEnv env -> return (abs, env, e')
     ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
+
+checkModFun :: Name
+            -> SigExpBase NoInfo Name
+            -> Maybe (SigExpBase NoInfo Name)
+            -> ModExpBase NoInfo Name
+            -> SrcLoc
+            -> TypeM (VName, TySet, Env, SigExp, Maybe SigExp, ModExp, MTy)
+checkModFun p psig_e maybe_fsig_e body_e loc = do
+  (p_abs, p_env, psig_e') <- checkSigExpToEnv psig_e
+  bindSpaced [(Structure, p)] $ do
+    p' <- checkName Structure p loc
+    let in_body_env = mempty { envModTable = HM.singleton p' $ ModEnv p_env }
+    localEnv (in_body_env<>) $ do
+      (body_env, body_e') <- checkModExp body_e
+      case maybe_fsig_e of
+        Nothing ->
+          return (p', p_abs, p_env, psig_e', Nothing, body_e', body_env)
+        Just fsig_e -> do
+          (fsig_env, fsig_e') <- checkSigExp fsig_e
+          (env', _) <- badOnLeft $ matchMTys body_env fsig_env loc
+          return (p', p_abs, p_env, psig_e', Just fsig_e', body_e', env')
 
 applyFunctor :: SrcLoc
              -> FunSig
@@ -419,30 +445,18 @@ checkForDuplicateSpecs =
         f IncludeSpec{} =
           return
 
-
 checkFunctorBind :: FunctorBindBase NoInfo Name -> TypeM (Env, FunctorBindBase Info VName)
 checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
-  (p_abs, p_env, psig_e') <- checkSigExpToEnv psig_e
-  bindSpaced [(Structure, p)] $ do
-    p' <- checkName Structure p loc
-    let in_body_env = mempty { envModTable = HM.singleton p' $ ModEnv p_env }
-    (maybe_fsig_e', body_e', env') <- localEnv (in_body_env<>) $ do
-      (body_env, body_e') <- checkModExp body_e
-      case maybe_fsig_e of
-        Nothing ->
-          return (Nothing, body_e', body_env)
-        Just fsig_e -> do
-          (fsig_env, fsig_e') <- checkSigExp fsig_e
-          (env', _) <- badOnLeft $ matchMTys body_env fsig_env loc
-          return (Just fsig_e', body_e', env')
-    bindSpaced [(Structure, name)] $ do
-      name' <- checkName Structure name loc
-      return (mempty { envModTable =
-                         HM.singleton name' $ ModFun $ FunSig p_abs p_env env'
-                     , envNameMap =
-                         HM.singleton (Structure, name) name'
-                     },
-              FunctorBind name' (p', psig_e') maybe_fsig_e' body_e' loc)
+  (p', p_abs, p_env, psig_e', maybe_fsig_e', body_e', mty) <-
+    checkModFun p psig_e maybe_fsig_e body_e loc
+  bindSpaced [(Structure, name)] $ do
+    name' <- checkName Structure name loc
+    return (mempty { envModTable =
+                       HM.singleton name' $ ModFun $ FunSig p_abs p_env mty
+                   , envNameMap =
+                       HM.singleton (Structure, name) name'
+                   },
+            FunctorBind name' (p', psig_e') maybe_fsig_e' body_e' loc)
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)

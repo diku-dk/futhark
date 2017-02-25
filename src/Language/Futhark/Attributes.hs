@@ -75,9 +75,12 @@ module Language.Futhark.Attributes
   , UncheckedTypeDecl
   , UncheckedDimIndex
   , UncheckedExp
+  , UncheckedModExp
+  , UncheckedSigExp
   , UncheckedLambda
   , UncheckedPattern
   , UncheckedFunBind
+  , UncheckedDec
   , UncheckedProg
   )
   where
@@ -923,6 +926,7 @@ progImports (Prog decs) = concatMap decImports decs
         modExpImports (ModDecs ds _)        = concatMap decImports ds
         modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me
+        modExpImports ModLambda{}           = []
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
@@ -944,6 +948,12 @@ type UncheckedDimIndex = DimIndexBase NoInfo Name
 -- | An expression with no type annotations.
 type UncheckedExp = ExpBase NoInfo Name
 
+-- | A module expression with no type annotations.
+type UncheckedModExp = ModExpBase NoInfo Name
+
+-- | A module type expression with no type annotations.
+type UncheckedSigExp = SigExpBase NoInfo Name
+
 -- | A lambda with no type annotations.
 type UncheckedLambda = LambdaBase NoInfo Name
 
@@ -953,5 +963,8 @@ type UncheckedPattern = PatternBase NoInfo Name
 -- | A function declaration with no type annotations.
 type UncheckedFunBind = FunBindBase NoInfo Name
 
--- | An Futhark program with no type annotations.
+-- | A declaration with no type annotations.
+type UncheckedDec = DecBase NoInfo Name
+
+-- | A Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name

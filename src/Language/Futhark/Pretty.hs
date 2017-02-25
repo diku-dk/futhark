@@ -348,6 +348,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
   ppr (ModApply f a _ _ _) = ppr f <> parens (ppr a)
   ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
+  ppr (ModLambda (p, psig) maybe_sig body _) =
+    text "\\" <> parens (ppr p <> colon <+> ppr psig) <> maybe_sig' <+>
+    text "->" <> indent 2 (ppr body)
+    where maybe_sig' = case maybe_sig of Nothing -> mempty
+                                         Just sig -> colon <+> ppr sig
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (StructBindBase ty vn) where
   ppr (StructBind name e _) = text "module" <+> ppr name <+> equals <+> ppr e

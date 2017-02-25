@@ -5,7 +5,7 @@ module Language.Futhark
   , module Language.Futhark.Pretty
 
   , Ident, DimIndex, Exp, Lambda, Pattern
-  , ModExp, StructBind
+  , ModExp, SigExp, StructBind
   , FunBind, ConstBind, Dec, ValDec, Prog
   , Type, StructType, ArrayType
   )
@@ -41,6 +41,9 @@ type StructBind = StructBindBase Info VName
 
 -- | A type-checked module expression.
 type ModExp = ModExpBase Info VName
+
+-- | A type-checked module type expression.
+type SigExp = SigExpBase Info VName
 
 -- | A type-checked declaration.
 type Dec = DecBase Info VName

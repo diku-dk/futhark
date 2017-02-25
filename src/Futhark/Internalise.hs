@@ -148,6 +148,8 @@ internaliseModExp :: E.ModExp
                   -> InternaliseM ()
 internaliseModExp E.ModVar{} =
   return ()
+internaliseModExp E.ModLambda{} =
+  return ()
 internaliseModExp (E.ModParens e _) =
   internaliseModExp e
 internaliseModExp E.ModImport{} = return ()
@@ -161,6 +163,8 @@ internaliseModExp (E.ModApply orig_v arg (Info p_substs) (Info b_substs) _) = do
   apply =<< lookupMod =<< lookupSubst orig_v
   where apply (ModExp (E.ModVar v _)) =
           apply =<< lookupMod =<< lookupSubst v
+        apply (ModExp (E.ModLambda (p, _) _ me _)) =
+          apply $ ModFun p me
         apply (ModExp (E.ModAscript me _ _ _)) =
           apply $ ModExp me
         apply (ModExp me) =

@@ -208,12 +208,12 @@ Prog :: { UncheckedProg }
 ;
 
 
-Decs :: { [DecBase f vn] }
+Decs :: { [UncheckedDec] }
      : Dec Decs { $1 ++ $2 }
      | Dec { $1 }
 ;
 
-Dec :: { [DecBase f vn] }
+Dec :: { [UncheckedDec] }
     : Fun               { [ValDec $ FunDec $1] }
     | Const             { [ValDec $ ConstDec $1] }
     | TypeAbbr          { map TypeDec $1 }
@@ -234,7 +234,7 @@ Aliases : id ',' Aliases
                in [(name,loc)] }
 ;
 
-SigExp :: { SigExpBase f vn }
+SigExp :: { UncheckedSigExp }
         : QualName            { let (v, loc) = $1 in SigVar v loc }
         | '{' Specs '}'       { SigSpecs $2 $1 }
         | SigExp with TypeRef { SigWith $1 $3 $2 }
@@ -247,12 +247,12 @@ SigExp :: { SigExpBase f vn }
 TypeRef :: { TypeRefBase NoInfo Name }
          : QualName '=' TypeExpDecl { TypeRef (fst $1) $3 }
 
-SigBind :: { SigBindBase f vn }
+SigBind :: { SigBindBase NoInfo Name }
          : module type id '=' SigExp
           { let L pos (ID name) = $3
             in SigBind name $5 pos }
 
-ModExp :: { ModExpBase f vn }
+ModExp :: { ModExpBase NoInfo Name }
         : QualName     { let (v, loc) = $1 in ModVar v loc }
         | import stringlit { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
         | '{' Decs '}' { ModDecs $2 $1 }
@@ -261,8 +261,18 @@ ModExp :: { ModExpBase f vn }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
         | '(' ModExp ')' { ModParens $2 $1 }
+        | '\\' '(' id ':' SigExp ')' '->' ModExp
+          { let L _ (ID pname) = $3
+            in ModLambda (pname, $5) Nothing $8 $1 }
+        | '\\' '(' id ':' SigExp ')' ':' SimpleSigExp '->' ModExp
+          { let L _ (ID pname) = $3
+            in ModLambda (pname, $5) (Just $8) $10 $1 }
 
-StructBind :: { StructBindBase f vn }
+SimpleSigExp :: { UncheckedSigExp }
+             : QualName            { let (v, loc) = $1 in SigVar v loc }
+             | '(' SigExp ')'      { $2 }
+
+StructBind :: { StructBindBase NoInfo Name }
            : module id '=' ModExp
              { let L pos (ID name) = $2
                in StructBind name $4 pos }
@@ -270,7 +280,7 @@ StructBind :: { StructBindBase f vn }
              { let L pos (ID name) = $2
                in StructBind name (ModAscript $6 $4 NoInfo pos) pos }
 
-FunctorBind :: { FunctorBindBase f vn }
+FunctorBind :: { FunctorBindBase NoInfo Name }
              : module id '(' id ':' SigExp ')' '=' ModExp
                { let L floc (ID fname) = $2; L ploc (ID pname) = $4
                  in FunctorBind fname (pname, $6) Nothing $9 $1
@@ -376,7 +386,7 @@ SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
 TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp { TypeDecl $1 NoInfo }
 
-TypeAbbr :: { [TypeBindBase f vn] }
+TypeAbbr :: { [TypeBindBase NoInfo Name] }
 TypeAbbr : type Aliases '=' TypeExpDecl
                   { let aliases = $2
                     in map (\(name, loc) -> TypeBind name $4 loc) aliases }
