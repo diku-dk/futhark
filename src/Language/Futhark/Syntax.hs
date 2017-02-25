@@ -736,8 +736,9 @@ data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                        -- ^ The contents of another file as a module.
                      | ModDecs [DecBase f vn] SrcLoc
                      | ModApply (QualName vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) (f (HM.HashMap VName VName)) SrcLoc
-                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
                        -- ^ Functor application.
+                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
+                     | ModLambda (vn, SigExpBase f vn) (Maybe (SigExpBase f vn)) (ModExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
@@ -747,6 +748,7 @@ instance Located (ModExpBase f vn) where
   locOf (ModDecs _ loc)        = locOf loc
   locOf (ModApply _ _ _ _ loc) = locOf loc
   locOf (ModAscript _ _ _ loc) = locOf loc
+  locOf (ModLambda _ _ _ loc)  = locOf loc
 
 data StructBindBase f vn =
   StructBind { structName     :: vn
