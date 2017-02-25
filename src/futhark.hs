@@ -9,6 +9,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Monoid
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.IO
 import System.Exit
 import System.Console.GetOpt
@@ -18,6 +19,7 @@ import Prelude hiding (id)
 import Futhark.Pass
 import Futhark.Actions
 import Futhark.Compiler
+import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
 import Futhark.Pipeline
 import qualified Futhark.Representation.SOACS as SOACS
@@ -45,8 +47,16 @@ import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Passes
 
+-- | What to do with the program after it has been read.
+data FutharkPipeline = PrettyPrint
+                     -- ^ Just print it.
+                     | TypeCheck
+                     -- ^ Run the type checker; print type errors.
+                     | Pipeline [UntypedPass]
+                     -- ^ Run this pipeline.
+
 data Config = Config { futharkConfig :: FutharkConfig
-                     , futharkPipeline :: Maybe [UntypedPass]
+                     , futharkPipeline :: FutharkPipeline
                      -- ^ Nothing is distinct from a empty pipeline -
                      -- it means we don't even run the internaliser.
                      , futharkAction :: UntypedAction
@@ -56,7 +66,9 @@ data Config = Config { futharkConfig :: FutharkConfig
 -- | Get a Futhark pipeline from the configuration - an empty one if
 -- none exists.
 getFutharkPipeline :: Config -> [UntypedPass]
-getFutharkPipeline = fromMaybe [] . futharkPipeline
+getFutharkPipeline = toPipeline . futharkPipeline
+  where toPipeline (Pipeline p) = p
+        toPipeline _            = []
 
 data UntypedPassState = SOACS (Prog SOACS.SOACS)
                       | Kernels (Prog Kernels.Kernels)
@@ -103,7 +115,7 @@ instance Representation UntypedAction where
   representation PolyAction{} = "<any>"
 
 newConfig :: Config
-newConfig = Config newFutharkConfig (Just []) $ PolyAction printAction printAction printAction
+newConfig = Config newFutharkConfig (Pipeline []) $ PolyAction printAction printAction printAction
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
@@ -115,7 +127,7 @@ passOption :: String -> UntypedPass -> String -> [String] -> FutharkOption
 passOption desc pass short long =
   Option short long
   (NoArg $ Right $ \cfg ->
-   cfg { futharkPipeline = Just $ getFutharkPipeline cfg ++ [pass] })
+   cfg { futharkPipeline = Pipeline $ getFutharkPipeline cfg ++ [pass] })
   desc
 
 explicitMemoryProg :: String -> UntypedPassState -> FutharkM (Prog ExplicitMemory.ExplicitMemory)
@@ -232,8 +244,13 @@ commandLineOptions =
 
   , Option "t" ["type-check"]
     (NoArg $ Right $ \opts ->
-        opts { futharkPipeline = Nothing })
+        opts { futharkPipeline = TypeCheck })
     "Type-check the program and print errors on standard error."
+
+  , Option [] ["pretty-print"]
+    (NoArg $ Right $ \opts ->
+        opts { futharkPipeline = PrettyPrint })
+    "Parse and pretty-print the AST of the given program."
 
   , Option [] ["compile-sequential"]
     (NoArg $ Right $ \opts ->
@@ -303,12 +320,16 @@ main = mainWithOptions newConfig commandLineOptions compile
           Nothing
         m file config =
           case futharkPipeline config of
-            Nothing -> do
-              -- No pipeline; just read the program, type check, and prettyprint it.
-              (prog, warnings, _, _) <- readProgram file
+            TypeCheck -> do
+              -- No pipeline; just read the program and type check
+              (_, warnings, _, _) <- readProgram file
               liftIO $ hPrint stderr warnings
-              liftIO $ putStrLn $ pretty prog
-            Just{} -> do
+            PrettyPrint -> liftIO $ do
+              maybe_prog <- parseFuthark file <$> T.readFile file
+              case maybe_prog of
+                Left err  -> fail $ show err
+                Right prog-> putStrLn $ pretty prog
+            Pipeline{} -> do
               prog <- runPipelineOnProgram (futharkConfig config) id file
               runPolyPasses config prog
 
