@@ -371,9 +371,8 @@ instance MonadTypeChecker TypeM where
   lookupType loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Type qn loc
     case HM.lookup name $ envTypeTable scope of
---      Nothing             -> bad $ UndefinedType loc qn
+      Nothing             -> bad $ UndefinedType loc qn
       Just (TypeAbbr def) -> return (qn', def)
-      _                   -> return (qn', TypeVar $ typeNameFromQualName qn')
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
