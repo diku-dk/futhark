@@ -473,12 +473,12 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
   let (red_ts, map_ts) = splitAt num_redres $ lambdaReturnType fold_lam
   let kernel_return_types = red_ts ++ map_ts
 
-  let wasted_thread = do
+  let wasted_thread_part1 = do
         unless (all primType kernel_return_types) $ fail "TODO: segreodmap, when using GroupScan, cannot handle non-PrimType return types for fold_lam"
         let dummy_vals = map (Constant . blankPrimValue . elemType) kernel_return_types
-        return (negone : negone : dummy_vals)
+        return (negone : dummy_vals)
 
-  let normal_thread = do
+  let normal_thread_part1 = do
         segment_index <- letSubExp "segment_index" =<<
           eBinOp (Add Int32)
             (eBinOp (SQuot Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size))
@@ -488,8 +488,6 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
           eBinOp (SRem Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size)
 
         offset <- makeOffsetExp index_within_segment segment_index
-
-        let red_ts' = Prim Bool : red_ts
 
         red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "fold_red"
@@ -523,6 +521,12 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
         mapM_ addStm [ Let (Pattern [] [pe]) () $ BasicOp $ SubExp se
                     | (pe,se) <- zip (red_pes ++ map_pes) (bodyResult $ lambdaBody fold_lam) ]
 
+        let mapoffset = offset
+        let mapret_elems = map (Var . patElemName) map_pes
+        let redres_elems = map (Var . patElemName) red_pes
+        return (mapoffset : redres_elems ++ mapret_elems)
+
+  let all_threads red_pes = do
         isfirstinsegment <- letExp "isfirstinsegment" =<<
           eCmpOp (CmpEq $ IntType Int32)
             (eBinOp (SRem Int32) (eSubExp lid) (eSubExp segment_size))
@@ -530,26 +534,35 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
 
         -- We will perform a segmented-scan, so all the prime variables here
         -- include the flag, which is the first argument to flag_reduce_lam
-        let red_pes' = PatElem isfirstinsegment BindVar (Prim Bool) : red_pes
+        let red_pes_wflag = PatElem isfirstinsegment BindVar (Prim Bool) : red_pes
+        let red_ts_wflag = Prim Bool : red_ts
 
         -- Combine the reduction results from each thread. This will put results in
         -- local memory, so a GroupReduce/GroupScan can be performed on them
-        combine_red_pes' <- forM red_ts' $ \red_t -> do
+        combine_red_pes' <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
         mapM_ addStm [ Let (Pattern [] [pe']) () $ Op $
                              Combine [(spaceLocalId space, group_size)] [patElemType pe]
                              (constant True) $
                              Body () [] [Var $ patElemName pe]
-                           | (pe', pe) <- zip combine_red_pes' red_pes' ]
+                           | (pe', pe) <- zip combine_red_pes' red_pes_wflag ]
 
-        scan_red_pes' <- forM red_ts' $ \red_t -> do
+        scan_red_pes_wflag <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "scanned"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
-        let scan_red_pes = drop 1 scan_red_pes'
-        addStm $ Let (Pattern [] scan_red_pes') () $ Op $
+        let scan_red_pes = drop 1 scan_red_pes_wflag
+        addStm $ Let (Pattern [] scan_red_pes_wflag) () $ Op $
           GroupScan group_size flag_reduce_lam' $
           zip (false:nes) (map patElemName combine_red_pes')
+
+        return scan_red_pes
+
+  let normal_thread_part2 scan_red_pes = do
+        segment_index <- letSubExp "segment_index" =<<
+          eBinOp (Add Int32)
+            (eBinOp (SQuot Int32) (eSubExp $ Var $ spaceLocalId space) (eSubExp segment_size))
+            (eBinOp (Mul Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_segments_per_group))
 
         islastinsegment <- letExp "islastinseg" =<< eCmpOp (CmpEq $ IntType Int32)
             (eBinOp (SRem Int32) (eSubExp lid) (eSubExp segment_size))
@@ -559,7 +572,6 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
             eIf (eSubExp $ Var islastinsegment)
               (eBody [eSubExp segment_index])
               (mkBodyM [] [negone])
-        let mapoffset = offset
 
         redret_elems <- fmap (map Var) $ letTupExp "red_return_elem" =<<
           eIf (eSubExp $ Var islastinsegment)
@@ -567,9 +579,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
                    | pe <- scan_red_pes])
             (mkBodyM [] nes)
 
-        let mapret_elems = map (Var . patElemName) map_pes
-
-        return (redoffset : mapoffset : redret_elems++mapret_elems)
+        return (redoffset : redret_elems)
 
 
   let picknchoose = do
@@ -586,27 +596,44 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
         isactive <- letSubExp "isactive" =<<
           eCmpOp (CmpSlt Int32) (eSubExp lid) (eSubExp active_threads_this_group)
 
-        (normal_res, normal_stms) <- runBinder normal_thread
-        (wasted_res, wasted_stms) <- runBinder wasted_thread
+        -- Part 1: All active threads reads element from input array and applies
+        -- folding function. "wasted" threads will just create dummy values
+        (normal_res1, normal_stms1) <- runBinder normal_thread_part1
+        (wasted_res1, wasted_stms1) <- runBinder wasted_thread_part1
 
         -- we could just have used letTupExp, but this would not give as nice
         -- names in the generated code
-        redoffset_pe <- (\vn -> PatElem vn BindVar i32) <$> newVName "redoffset"
         mapoffset_pe <- (\vn -> PatElem vn BindVar i32) <$> newVName "mapoffset"
-        red_pes <- forM red_ts $ \red_t -> do
-          pe_name <- newVName "red_res"
+        redtmp_pes <- forM red_ts $ \red_t -> do
+          pe_name <- newVName "redtmp_res"
           return $ PatElem pe_name BindVar red_t
         map_pes <- forM map_ts $ \map_t -> do
           pe_name <- newVName "map_res"
           return $ PatElem pe_name BindVar map_t
-        let all_res_pes = redoffset_pe:mapoffset_pe:red_pes++map_pes
 
-        e <- eIf (eSubExp isactive)
-            (mkBodyM normal_stms normal_res)
-            (mkBodyM wasted_stms wasted_res)
-        addStm $ Let (Pattern [] all_res_pes) () e
+        e1 <- eIf (eSubExp isactive)
+            (mkBodyM normal_stms1 normal_res1)
+            (mkBodyM wasted_stms1 wasted_res1)
+        addStm $ Let (Pattern [] (mapoffset_pe:redtmp_pes++map_pes)) () e1
 
-        return $ map (Var . patElemName) all_res_pes
+        -- Part 2: All threads participate in Comine & GroupScan
+        scan_red_pes <- all_threads redtmp_pes
+
+        -- Part 3: Active thread that are the last element in segment, should
+        -- write the element from local memory to the output array
+        (normal_res2, normal_stms2) <- runBinder $ normal_thread_part2 scan_red_pes
+
+        redoffset_pe <- (\vn -> PatElem vn BindVar i32) <$> newVName "redoffset"
+        red_pes <- forM red_ts $ \red_t -> do
+          pe_name <- newVName "red_res"
+          return $ PatElem pe_name BindVar red_t
+
+        e2 <- eIf (eSubExp isactive)
+            (mkBodyM normal_stms2 normal_res2)
+            (mkBodyM [] (negone : nes))
+        addStm $ Let (Pattern [] (redoffset_pe:red_pes)) () e2
+
+        return $ map (Var . patElemName) $ redoffset_pe:mapoffset_pe:red_pes++map_pes
 
   (redoffset:mapoffset:redmapres, stms) <- runBinder picknchoose
   let (finalredvals, finalmapvals) = splitAt num_redres redmapres
