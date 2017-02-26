@@ -13,27 +13,27 @@ module pm1(R: mt): {val g1:i32->i32} = {
 }
 
 module pm2(R: mt) = {
-  open pm1(R)
+  open (pm1 R)
   fun g2(x: i32): i32 = g1 (g1 x)
 }
 
 module pm3(R: mt) = {
-  open pm2(R)
+  open (pm2 R)
   fun g3(x: i32): i32 = g2 (g2 x)
 }
 
 module pm4(R: {val f:i32->i32}) = {
-  open pm3(R)
+  open (pm3 R)
   fun g4(x: i32): i32 = g3 (g3 x)
 }
 
 module pm5(R: mt) = {
-  open pm4(R)
+  open (pm4 R)
   fun g5(x: i32): i32 = g4 (g4 x)
 }
 
 module pm6(R: mt) = {
-  open pm5(R)
+  open (pm5 R)
   fun g6(x: i32): i32 = g5 (g5 x)
 }
 

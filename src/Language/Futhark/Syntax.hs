@@ -735,7 +735,7 @@ data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                      | ModImport FilePath SrcLoc
                        -- ^ The contents of another file as a module.
                      | ModDecs [DecBase f vn] SrcLoc
-                     | ModApply (QualName vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) (f (HM.HashMap VName VName)) SrcLoc
+                     | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) (f (HM.HashMap VName VName)) SrcLoc
                        -- ^ Functor application.
                      | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
                      | ModLambda (vn, SigExpBase f vn) (Maybe (SigExpBase f vn)) (ModExpBase f vn) SrcLoc

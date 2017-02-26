@@ -18,7 +18,7 @@ module f1(R: mt) = {
 }
 
 module f2(R: mt) = {
-  open f1({
+  open (f1 {
     type cell = (R.cell, i32)
     fun init (b: bool) = (R.init b, 0)
   })
