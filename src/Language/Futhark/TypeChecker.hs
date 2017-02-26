@@ -680,7 +680,7 @@ matchMTys = matchMTys' mempty mempty
               -> Either TypeError (Env, HM.HashMap VName VName)
     matchEnvs abs_subst_to_type abs_subst_to_name env sig loc = do
       -- Check that all type abbreviations are correctly defined.
-      abbr_substs <- fmap HM.fromList $ forM (HM.toList $ envTypeAbbrs sig) $ \(name,spec_t) -> do
+      abbr_substs <- fmap HM.fromList $ forM (HM.toList $ sigEnvTypeAbbrs sig) $ \(name,spec_t) -> do
         let spec_t' = substituteTypes abs_subst_to_type spec_t
         case findBinding envTypeTable Type (baseName name) env of
           Just (name', TypeAbbr t)
@@ -918,9 +918,24 @@ newNamesForMTy except orig_mty = do
           HM.map (TypeAbbr . TypeVar . typeNameFromQualName . qualName) substs
 
 mtyTypeAbbrs :: MTy -> HM.HashMap VName StructType
-mtyTypeAbbrs (MTy _ (ModEnv env)) = envTypeAbbrs env
-mtyTypeAbbrs (MTy _ (ModFun (FunSig _ env mty))) =
+mtyTypeAbbrs (MTy _ mod) = modTypeAbbrs mod
+
+modTypeAbbrs :: Mod -> HM.HashMap VName StructType
+modTypeAbbrs (ModEnv env) =
+  envTypeAbbrs env
+modTypeAbbrs (ModFun (FunSig _ env mty)) =
   envTypeAbbrs env <> mtyTypeAbbrs mty
+
+envTypeAbbrs :: Env -> HM.HashMap VName StructType
+envTypeAbbrs env =
+  sigEnvTypeAbbrs env <>
+  (mconcat . map modTypeAbbrs . HM.elems . envModTable) env
+
+-- | Only top-level type abbrs
+sigEnvTypeAbbrs :: Env -> HM.HashMap VName StructType
+sigEnvTypeAbbrs = HM.fromList . mapMaybe unTypeAbbr . HM.toList . envTypeTable
+  where unTypeAbbr (v, TypeAbbr t) = Just (v, t)
+
 
 -- | Refine the given type name in the given env.
 refineEnv :: SrcLoc -> TySet -> Env -> QualName VName -> StructType

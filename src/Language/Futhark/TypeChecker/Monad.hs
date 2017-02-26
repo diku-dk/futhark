@@ -28,7 +28,6 @@ module Language.Futhark.TypeChecker.Monad
   , TypeBinding(..)
   , MTy(..)
 
-  , envTypeAbbrs
   , envVals
   , envMods
 
@@ -246,10 +245,6 @@ instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
   Env vt1 tt1 st1 mt1 nt1 `mappend` Env vt2 tt2 st2 mt2 nt2 =
     Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
-
-envTypeAbbrs :: Env -> HM.HashMap VName StructType
-envTypeAbbrs = HM.fromList . mapMaybe unTypeAbbr . HM.toList . envTypeTable
-  where unTypeAbbr (v, TypeAbbr t) = Just (v, t)
 
 envVals :: Env -> [(VName, ([StructType], StructType))]
 envVals = map select . HM.toList . envVtable
