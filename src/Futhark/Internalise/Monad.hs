@@ -30,6 +30,7 @@ module Futhark.Internalise.Monad
   , noteType
   , noteDecSubsts
   , generatingFunctor
+  , withDecSubstitutions
 
     -- * Convenient reexports
   , module Futhark.Tools
@@ -70,7 +71,7 @@ data FunBinding = FunBinding
 type FunTable = HM.HashMap VName FunBinding
 
 data ModBinding = ModExp E.ModExp
-                | ModFun VName E.ModExp
+                | ModFun VName DecSubstitutions E.ModExp
                 deriving (Show)
 
 type TypeTable = HM.HashMap VName [TypeBase Rank NoUniqueness]
@@ -181,7 +182,7 @@ lookupMod :: VName -> InternaliseM ModBinding
 lookupMod mname = do
   maybe_me <- gets $ HM.lookup mname . stateModTable
   case maybe_me of
-    Nothing -> fail $ "Internalise.lookupModuleDef: Module '" ++
+    Nothing -> fail $ "Internalise.lookupMod: Module '" ++
                pretty mname ++ "' not found"
     Just me -> return me
 
@@ -235,9 +236,9 @@ noteMod :: VName -> E.ModExp -> InternaliseM ()
 noteMod name me =
   modify $ \s -> s { stateModTable = HM.insert name (ModExp me) $ stateModTable s }
 
-noteModFun :: VName -> VName -> E.ModExp -> InternaliseM ()
-noteModFun name p me =
-  modify $ \s -> s { stateModTable = HM.insert name (ModFun p me) $ stateModTable s }
+noteModFun :: VName -> VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
+noteModFun name p substs me =
+  modify $ \s -> s { stateModTable = HM.insert name (ModFun p substs me) $ stateModTable s }
 
 noteType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM ()
 noteType name t =
@@ -264,24 +265,31 @@ generatingFunctor p_substs b_substs m = do
   -- ensure we have fresh names for everything in the functor, except
   -- for those names that are already unique from the applications.
   in_functor <- asks envGeneratingFunctor
-  func_substs <- asks envFunctorSubsts
   cur_substs <- allSubsts
 
   let frob (k, v)
-        | Just v' <- HM.lookup k func_substs = Just (v', v)
-        | otherwise                          = Nothing
-  extra_substs <- if in_functor
-                  then return $ HM.fromList $ mapMaybe frob $ HM.toList b_substs
-                  else return mempty
+        | Just v' <- HM.lookup k cur_substs, v' /= v = Just (v', v)
+        | otherwise                                   = Nothing
+  let extra_substs = if in_functor
+                     then HM.fromList $ mapMaybe frob $ HM.toList b_substs
+                     else mempty
+      forwards = HM.fromList $ mapMaybe frob $ HM.toList p_substs
   let recs = [extra_substs,
-              b_substs,
-              HM.map forward p_substs]
+              forwards,
+              p_substs,
+              b_substs]
       nexts = extra_substs `HM.union` b_substs
       update env =
         env { envGeneratingFunctor = True
             , envFunctorSubsts = HM.unions recs `HM.union`
                                  envFunctorSubsts env
             }
-      forward v = fromMaybe v $ HM.lookup v cur_substs
   old_dec_substs <- gets stateDecSubsts
   local update m <* setDecSubsts (nexts `HM.union` old_dec_substs)
+
+withDecSubstitutions :: DecSubstitutions
+                     -> InternaliseM a -> InternaliseM a
+withDecSubstitutions p_substs m = do
+  let update env =
+        env { envFunctorSubsts = p_substs `HM.union` envFunctorSubsts env }
+  local update m

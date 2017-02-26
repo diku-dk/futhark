@@ -346,11 +346,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModParens e _) = parens $ ppr e
   ppr (ModImport v _) = ppr $ show v
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
-  ppr (ModApply f a _ _ _) = ppr f <> parens (ppr a)
+  ppr (ModApply f a _ _ _) = parens $ ppr f <+> parens (ppr a)
   ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
   ppr (ModLambda (p, psig) maybe_sig body _) =
     text "\\" <> parens (ppr p <> colon <+> ppr psig) <> maybe_sig' <+>
-    text "->" <> indent 2 (ppr body)
+    text "->" </> indent 2 (ppr body)
     where maybe_sig' = case maybe_sig of Nothing -> mempty
                                          Just sig -> colon <+> ppr sig
 
@@ -386,7 +386,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec name _) = text "type" <+> ppr name
   ppr (ValSpec name params rettype _) =
-    ppr name <+> colon <+>
+    text "val" <+> ppr name <> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
   ppr (ModSpec name sig _) =
     text "module" <+> ppr name <> colon <+> ppr sig

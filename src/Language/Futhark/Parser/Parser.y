@@ -220,8 +220,7 @@ Dec :: { [UncheckedDec] }
     | SigBind           { [SigDec $1 ] }
     | StructBind        { [StructDec $1 ] }
     | FunctorBind       { [FunctorDec $1] }
-    | open ModExp QualNames
-                        { [OpenDec $2 (map (uncurry ModVar) $3) $1] }
+    | open ModExps      { [OpenDec (fst $2) (snd $2) $1] }
     | DefaultDec        { [] }
     | import stringlit  { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] $1] }
 ;
@@ -252,21 +251,37 @@ SigBind :: { SigBindBase NoInfo Name }
           { let L pos (ID name) = $3
             in SigBind name $5 pos }
 
-ModExp :: { ModExpBase NoInfo Name }
-        : QualName     { let (v, loc) = $1 in ModVar v loc }
-        | import stringlit { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
-        | '{' Decs '}' { ModDecs $2 $1 }
-        | QualName '(' ModExp ')'
-          { ModApply (fst $1) $3 NoInfo NoInfo (snd $1) }
+ModExp :: { UncheckedModExp }
+        : import stringlit { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
-        | '(' ModExp ')' { ModParens $2 $1 }
         | '\\' '(' id ':' SigExp ')' '->' ModExp
           { let L _ (ID pname) = $3
             in ModLambda (pname, $5) Nothing $8 $1 }
         | '\\' '(' id ':' SigExp ')' ':' SimpleSigExp '->' ModExp
           { let L _ (ID pname) = $3
             in ModLambda (pname, $5) (Just $8) $10 $1 }
+        | ModExpApply
+          { $1 }
+        | ModExpAtom
+          { $1 }
+
+ModExps :: { (UncheckedModExp, [UncheckedModExp]) }
+         : ModExpAtom ModExps { ($1, fst $2 : snd $2) }
+         | ModExpAtom         { ($1, []) }
+
+ModExpApply :: { UncheckedModExp }
+             : ModExpAtom ModExpAtom %prec juxtprec
+               { ModApply $1 $2 NoInfo NoInfo (srclocOf $1) }
+             | ModExpApply ModExpAtom %prec juxtprec
+               { ModApply $1 $2 NoInfo NoInfo (srclocOf $1) }
+
+ModExpAtom :: { UncheckedModExp }
+            : '(' ModExp ')'
+              { ModParens $2 $1 }
+            | QualName
+              { let (v, loc) = $1 in ModVar v loc }
+            | '{' Decs '}' { ModDecs $2 $1 }
 
 SimpleSigExp :: { UncheckedSigExp }
              : QualName            { let (v, loc) = $1 in SigVar v loc }
@@ -428,11 +443,6 @@ Param : VarId                        { Id $1 }
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
           | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
-
-QualNames :: { [(QualName Name, SrcLoc)] }
-          :                     { [] }
-          | QualName QualNames  { $1 : $2 }
-
 
 QualUnOpName :: { (QualName Name, SrcLoc) }
           : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }

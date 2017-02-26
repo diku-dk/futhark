@@ -269,11 +269,12 @@ checkSpecs (IncludeSpec e loc : specs) = do
 
 checkSigExp :: SigExpBase NoInfo Name -> TypeM (MTy, SigExpBase Info VName)
 checkSigExp (SigParens e loc) = do
-  (env, e') <- checkSigExp e
-  return (env, SigParens e' loc)
+  (mty, e') <- checkSigExp e
+  return (mty, SigParens e' loc)
 checkSigExp (SigVar name loc) = do
-  (name', env) <- lookupMTy loc name
-  return (env, SigVar name' loc)
+  (name', mty) <- lookupMTy loc name
+  (mty', _) <- newNamesForMTy mempty mty
+  return (mty', SigVar name' loc)
 checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
   (abstypes, env, specs') <- checkSpecs specs
@@ -349,10 +350,14 @@ checkModExp (ModImport name loc) = do
   env <- lookupImport loc name
   return (MTy mempty $ ModEnv env, ModImport name loc)
 checkModExp (ModApply f e NoInfo NoInfo loc) = do
-  (f', functor) <- lookupFunctor loc f
-  (e_mty, e') <- checkModExp e
-  (f_mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
-  return (f_mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
+  (maybe_functor, f') <- checkModExp f
+  case mtyMod maybe_functor of
+    ModFun functor -> do
+      (e_mty, e') <- checkModExp e
+      (f_mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
+      return (f_mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
+    _ ->
+      bad $ TypeError loc "Cannot apply non-parametric module."
 checkModExp (ModAscript me se NoInfo loc) = do
   (me_mod, me') <- checkModExp me
   (se_mty, se') <- checkSigExp se
@@ -401,15 +406,15 @@ applyFunctor :: SrcLoc
                        HM.HashMap VName VName,
                        HM.HashMap VName VName)
 applyFunctor applyloc (FunSig p_abs p_env body_mty) a_mty = do
-  (_, sig_subst) <- badOnLeft $ matchMTys a_mty (MTy p_abs $ ModEnv p_env) applyloc
+  (_, p_subst) <- badOnLeft $ matchMTys a_mty (MTy p_abs $ ModEnv p_env) applyloc
 
   -- Apply type abbreviations from a_mty to body_mty.
   let a_abbrs = HM.map TypeAbbr $ mtyTypeAbbrs a_mty
-  let type_subst = HM.mapMaybe (`HM.lookup` a_abbrs) sig_subst
+  let type_subst = HM.mapMaybe (`HM.lookup` a_abbrs) p_subst
   let body_mty' = substituteTypesInMTy type_subst body_mty
-  (body_mty'', body_subst) <- newNamesForMTy sig_subst body_mty'
+  (body_mty'', body_subst) <- newNamesForMTy p_subst body_mty'
 
-  return (body_mty'', sig_subst, body_subst)
+  return (body_mty'', p_subst, body_subst)
 
 checkStructBind :: StructBindBase NoInfo Name -> TypeM (Env, StructBindBase Info VName)
 checkStructBind (StructBind name e loc) = do

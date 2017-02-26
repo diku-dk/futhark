@@ -124,7 +124,8 @@ internaliseDecs ds =
       internaliseDecs ds'
     (Right (E.FunctorDec fb), ds') -> do
       v <- lookupSubst $ E.qualName $ E.functorName fb
-      noteModFun v (fst $ E.functorParam fb) (E.functorBody fb)
+      substs <- asks envFunctorSubsts
+      noteModFun v (fst $ E.functorParam fb) substs (E.functorBody fb)
       internaliseDecs ds'
     (Right (E.TypeDec tb), ds') -> do
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
@@ -158,20 +159,48 @@ internaliseModExp (E.ModDecs ds _) =
 internaliseModExp (E.ModAscript me _ (Info subst) _) = do
   noteDecSubsts subst
   internaliseModExp me
-internaliseModExp (E.ModApply orig_v arg (Info p_substs) (Info b_substs) _) = do
-  internaliseModExp arg
-  apply =<< lookupMod =<< lookupSubst orig_v
-  where apply (ModExp (E.ModVar v _)) =
-          apply =<< lookupMod =<< lookupSubst v
-        apply (ModExp (E.ModLambda (p, _) _ me _)) =
-          apply $ ModFun p me
-        apply (ModExp (E.ModAscript me _ _ _)) =
-          apply $ ModExp me
-        apply (ModExp me) =
-          fail $ "Cannot module-apply " ++ pretty me
-        apply (ModFun p me) = do
-          noteMod p arg
-          generatingFunctor p_substs b_substs $ internaliseModExp me
+internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_substs) _) = do
+  internaliseModExp orig_arg
+  generatingFunctor orig_p_substs orig_b_substs $ do
+    f_e <- evalModExp orig_f
+    case f_e of
+      Just (p, substs, body) -> do
+        noteMod p orig_arg
+        withDecSubstitutions substs $
+          internaliseModExp body
+      Nothing ->
+        fail $ "Cannot apply " ++ pretty orig_f ++ " to " ++ pretty orig_arg
+  where evalModExp (E.ModVar v _) = do
+            v' <- lookupMod =<< lookupSubst v
+            case v' of
+              ModExp e -> evalModExp e
+              ModFun p e_substs e -> do
+                substs <- asks envFunctorSubsts
+                return $ Just (p, substs `HM.union` e_substs, e)
+        evalModExp (E.ModLambda (p, _) _ me _) = do
+          substs <- asks envFunctorSubsts
+          return $ Just (p, substs, me)
+        evalModExp (E.ModParens e _) =
+          evalModExp e
+        evalModExp (E.ModAscript me _ (Info subst) _) = do
+          noteDecSubsts subst
+          evalModExp me
+        evalModExp (E.ModApply f arg (Info p_substs) (Info b_substs) _) = do
+          f_e <- evalModExp f
+          internaliseModExp arg
+          case f_e of
+            Just (p, substs, body) -> do
+              noteMod p arg
+              withDecSubstitutions (p_substs<>b_substs) $
+                withDecSubstitutions substs $
+                evalModExp body
+            Nothing ->
+              fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg
+        evalModExp (E.ModDecs ds _) = do
+          internaliseDecs ds
+          return Nothing
+        evalModExp E.ModImport{} =
+          return Nothing
 
 internaliseFun :: E.FunBind -> InternaliseM ()
 internaliseFun (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =

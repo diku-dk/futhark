@@ -321,7 +321,6 @@ class MonadError TypeError m => MonadTypeChecker m where
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, StructType)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
-  lookupFunctor :: SrcLoc -> QualName Name -> m (QualName VName, FunSig)
   lookupImport :: SrcLoc -> FilePath -> m Env
 
 expandType :: MonadTypeChecker m =>
@@ -390,13 +389,6 @@ instance MonadTypeChecker TypeM where
     case HM.lookup file imports of
       Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\""
       Just scope -> return scope
-
-  lookupFunctor loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
-    case HM.lookup name $ envModTable scope of
-      Nothing -> bad $ UnknownVariableError Structure qn loc
-      Just ModEnv{}        -> bad $ TypeError loc "Non-parametrised module given an argument."
-      Just (ModFun funsig) -> return (qn', funsig)
 
 checkQualName :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualName space qn@(QualName quals name) loc = do
