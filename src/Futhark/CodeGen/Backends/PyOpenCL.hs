@@ -236,7 +236,7 @@ unpackArrayInput mem memsize "device" _ _ dims e = do
       Exp $ Call (Var "cl.enqueue_copy")
       [Arg $ Var "self.queue",
        Arg $ Var $ pretty mem,
-       Arg e,
+       Arg $ Call (Var "normaliseArray") [Arg e],
        ArgKeyword "is_blocking" $ Var "synchronous"]
 
   Py.stm $ If (BinOp "==" (Py.simpleCall "type" [e]) (Var "cl.array.Array"))

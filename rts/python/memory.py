@@ -9,8 +9,16 @@ def addressOffset(x, offset, bt):
 def allocateMem(size):
   return ct.cast((ct.c_byte * max(0,size))(), ct.POINTER(ct.c_byte))
 
+# Copy an array if its is not-None.  This is important for treating
+# Numpy arrays as flat memory, but has some overhead.
+def normaliseArray(x):
+  if (x.base is x) or (x.base is None):
+    return x
+  else:
+    return x.copy()
+
 def unwrapArray(x):
-  return x.ctypes.data_as(ct.POINTER(ct.c_byte))
+  return normaliseArray(x).ctypes.data_as(ct.POINTER(ct.c_byte))
 
 def createArray(x, dim):
   return np.ctypeslib.as_array(x, shape=dim)
