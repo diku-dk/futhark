@@ -5,6 +5,7 @@ module Futhark.Internalise.AccurateSizes
   , argShapes
   , ensureResultShape
   , ensureResultExtShape
+  , ensureExtShape
   , ensureShape
   , ensureArgShapes
   , ensureShapeVar

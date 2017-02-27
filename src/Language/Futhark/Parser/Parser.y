@@ -182,6 +182,7 @@ import Language.Futhark.Parser.Lexer
 %left bottom
 %left ifprec letprec
 %left ','
+%left ':'
 %left '||...'
 %left '&&...'
 %left '<=' '<=...' '>=' '>=...' '>' '>...' '<' '<...' '==...' '!=...'
@@ -193,7 +194,6 @@ import Language.Futhark.Parser.Lexer
 %left '*...' '*' '/...' '%...' '//...' '%%...'
 %left '**...'
 %right '->'
-%nonassoc ':'
 nonassoc with
 %nonassoc '~' '!' f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
@@ -448,8 +448,15 @@ QualUnOpName :: { (QualName Name, SrcLoc) }
           : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
           | unop  { let L loc (UNOP v) = $1 in (QualName [] v, loc) }
 
+-- Expressions are divided into several layers.  The first distinction
+-- (between Exp and Exp2) is to factor out ascription, which we do not
+-- permit inside array indices operations (there is an ambiguity with
+-- array slices).
+Exp :: { UncheckedExp }
+     : Exp ':' TypeExpDecl { Ascript $1 $3 $2 }
+     | Exp2 %prec ':'          { $1 }
 
-Exp  :: { UncheckedExp }
+Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
 
@@ -512,7 +519,7 @@ Exp  :: { UncheckedExp }
 
      | unzip Atom  { Unzip $2 [] $1 }
 
-     | unsafe Exp     { Unsafe $2 $1 }
+     | unsafe Exp2     { Unsafe $2 $1 }
 
      | filter FunAbstr Atom
                       { Filter $2 $3 $1 }
@@ -535,34 +542,34 @@ Exp  :: { UncheckedExp }
      | write Atom Atom Atom
                          { Write $2 $3 $4 $1 }
 
-     | Exp '+...' Exp    { binOp $1 $2 $3 }
-     | Exp '-...' Exp    { binOp $1 $2 $3 }
-     | Exp '-' Exp       { binOp $1 (L $2 (SYMBOL Minus [] (nameFromString "-"))) $3 }
-     | Exp '*...' Exp    { binOp $1 $2 $3 }
-     | Exp '*' Exp       { binOp $1 (L $2 (SYMBOL Times [] (nameFromString "*"))) $3 }
-     | Exp '/...' Exp    { binOp $1 $2 $3 }
-     | Exp '%...' Exp    { binOp $1 $2 $3 }
-     | Exp '//...' Exp   { binOp $1 $2 $3 }
-     | Exp '%%...' Exp   { binOp $1 $2 $3 }
-     | Exp '**...' Exp   { binOp $1 $2 $3 }
-     | Exp '>>...' Exp   { binOp $1 $2 $3 }
-     | Exp '>>>...' Exp  { binOp $1 $2 $3 }
-     | Exp '<<...' Exp   { binOp $1 $2 $3 }
-     | Exp '&...' Exp    { binOp $1 $2 $3 }
-     | Exp '|...' Exp    { binOp $1 $2 $3 }
-     | Exp '&&...' Exp   { binOp $1 $2 $3 }
-     | Exp '||...' Exp   { binOp $1 $2 $3 }
-     | Exp '^...' Exp    { binOp $1 $2 $3 }
-     | Exp '==...' Exp   { binOp $1 $2 $3 }
-     | Exp '!=...' Exp   { binOp $1 $2 $3 }
-     | Exp '<...' Exp    { binOp $1 $2 $3 }
-     | Exp '<=...' Exp   { binOp $1 $2 $3 }
-     | Exp '>...' Exp    { binOp $1 $2 $3 }
+     | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '-...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '-' Exp2       { binOp $1 (L $2 (SYMBOL Minus [] (nameFromString "-"))) $3 }
+     | Exp2 '*...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '*' Exp2       { binOp $1 (L $2 (SYMBOL Times [] (nameFromString "*"))) $3 }
+     | Exp2 '/...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '%...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '//...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '%%...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '**...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '>>...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '>>>...' Exp2  { binOp $1 $2 $3 }
+     | Exp2 '<<...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '&...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '|...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '&&...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '||...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '^...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '==...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '!=...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '<...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '<=...' Exp2   { binOp $1 $2 $3 }
+     | Exp2 '>...' Exp2    { binOp $1 $2 $3 }
 
-     | Exp '>=' Exp      { binOp $1 (L $2 (SYMBOL Geq [] (nameFromString ">="))) $3 }
-     | Exp '>' Exp       { binOp $1 (L $2 (SYMBOL Greater [] (nameFromString ">"))) $3 }
-     | Exp '<=' Exp      { binOp $1 (L $2 (SYMBOL Leq [] (nameFromString "<="))) $3 }
-     | Exp '<' Exp       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
+     | Exp2 '>=' Exp2      { binOp $1 (L $2 (SYMBOL Geq [] (nameFromString ">="))) $3 }
+     | Exp2 '>' Exp2       { binOp $1 (L $2 (SYMBOL Greater [] (nameFromString ">"))) $3 }
+     | Exp2 '<=' Exp2      { binOp $1 (L $2 (SYMBOL Leq [] (nameFromString "<="))) $3 }
+     | Exp2 '<' Exp2       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
 
      | Apply
        { let (fname, args, loc) = $1 in Apply fname [ (arg, Observe) | arg <- args ] NoInfo loc }
@@ -652,15 +659,15 @@ SomeDimIndices : DimIndex ',' SomeDimIndices { $1 : $3 }
                | DimIndex                    { [$1] }
 
 DimIndex :: { UncheckedDimIndex }
-         : Exp                 { DimFix $1 }
-         | Exp ':' Exp         { DimSlice (Just $1) (Just $3) Nothing }
-         | Exp ':'             { DimSlice (Just $1) Nothing Nothing }
-         |     ':' Exp         { DimSlice Nothing (Just $2) Nothing }
-         |     ':'             { DimSlice Nothing Nothing Nothing }
-         | Exp ':' Exp ':' Exp { DimSlice (Just $1) (Just $3) (Just $5) }
-         |     ':' Exp ':' Exp { DimSlice Nothing (Just $2) (Just $4) }
-         | Exp ':'     ':' Exp { DimSlice (Just $1) Nothing (Just $4) }
-         |     ':'     ':' Exp { DimSlice Nothing Nothing (Just $3) }
+         : Exp2                   { DimFix $1 }
+         | Exp2 ':' Exp2          { DimSlice (Just $1) (Just $3) Nothing }
+         | Exp2 ':'               { DimSlice (Just $1) Nothing Nothing }
+         |      ':' Exp2          { DimSlice Nothing (Just $2) Nothing }
+         |      ':'               { DimSlice Nothing Nothing Nothing }
+         | Exp2 ':' Exp2 ':' Exp2 { DimSlice (Just $1) (Just $3) (Just $5) }
+         |      ':' Exp2 ':' Exp2 { DimSlice Nothing (Just $2) (Just $4) }
+         | Exp2 ':'      ':' Exp2 { DimSlice (Just $1) Nothing (Just $4) }
+         |      ':'      ':' Exp2 {  DimSlice Nothing Nothing (Just $3) }
 
 Exps : Exp ',' Exps %prec bottom { $1 : $3 }
      | Exp          %prec bottom { [$1] }
@@ -697,15 +704,15 @@ FunAbstr :: { UncheckedLambda }
            { let (fname, args, loc) = $2 in CurryFun fname args NoInfo loc }
            -- Minus is handed explicitly here because I could not
            -- figure out how to resolve the ambiguity with negation.
-         | '(' '-' Exp ')'
+         | '(' '-' Exp2 ')'
            { CurryBinOpRight (QualName [] (nameFromString "-")) $3 (NoInfo, NoInfo) NoInfo $1 }
          | '(' '-' ')'
            { BinOpFun (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo $1 }
-         | '(' Exp '-' ')'
+         | '(' Exp2 '-' ')'
            { CurryBinOpLeft (QualName [] (nameFromString "-")) $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
-         | '(' BinOp Exp ')'
+         | '(' BinOp Exp2 ')'
            { CurryBinOpRight $2 $3 (NoInfo, NoInfo) NoInfo $1 }
-         | '(' Exp BinOp ')'
+         | '(' Exp2 BinOp ')'
            { CurryBinOpLeft $3 $2 (NoInfo, NoInfo) NoInfo $1 }
          | '(' BinOp ')'
            { BinOpFun $2 NoInfo NoInfo NoInfo $1 }

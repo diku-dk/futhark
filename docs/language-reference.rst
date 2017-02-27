@@ -174,6 +174,17 @@ Numerical negation of ``x``, which must be of numeric type.
 
 Bitwise negation of ``x``, which must be of integral type.
 
+``e : t``
+~~~~~~~~~
+
+Annotate that ``e`` is expected to be of type ``t``, failing with a
+type error if it is not.  If ``t`` is an array with shape
+declarations, the correctness of the shape declarations is checked at
+run-time.
+
+Due to ambiguities, this syntactic form cannot appear as an array
+index expression unless it is first enclosed in parentheses.
+
 ``#i e``
 ~~~~~~~~
 

@@ -572,6 +572,7 @@ typeOf (TupleProject _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info (Tuple ets)) _) = Tuple ets
 typeOf (Var qn (Info t) _) = t `addAliases` HS.insert (qualLeaf qn)
+typeOf (Ascript e _ _) = typeOf e
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ body _) = typeOf body

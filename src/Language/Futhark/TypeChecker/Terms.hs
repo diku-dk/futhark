@@ -463,6 +463,12 @@ checkExp (Empty decl loc) = do
   decl' <- checkTypeDecl decl
   return $ Empty decl' loc
 
+checkExp (Ascript e decl loc) = do
+  decl' <- checkTypeDecl decl
+  e' <- require [removeShapeAnnotations $ unInfo $ expandedType decl']
+        =<< checkExp e
+  return $ Ascript e' decl' loc
+
 checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
