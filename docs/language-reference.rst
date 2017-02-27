@@ -139,7 +139,7 @@ are:
 
       Compare any two values of builtin or compound type for equality.
 
-  ``<``, ``<=``.  ``>``, ``>``
+  ``<``, ``<=``.  ``>``, ``>=``
 
       Company any two values of numeric type for equality.
 
