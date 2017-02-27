@@ -209,7 +209,11 @@ toScalExp look (BasicOp (CmpOp (CmpEq t) x y))
   | typeIsOK t = do
   x' <- subExpToScalExp' look x
   y' <- subExpToScalExp' look y
-  return $ Just $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
+  return $ Just $ case t of
+    Bool ->
+      SLogAnd x' y' `SLogOr` SLogAnd (SNot x') (SNot y')
+    _ ->
+      RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
 toScalExp look (BasicOp (BinOp (Sub t) (Constant x) y))
   | typeIsOK $ IntType t, zeroIsh x =
   Just . SNeg <$> subExpToScalExp' look y
