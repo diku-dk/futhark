@@ -118,7 +118,7 @@ are:
 
     Division and remainder on integers, with rounding towards zero.
 
-  ``*``, ``/``, ``%``, ``+``, ``-``, ``/``, ``%``
+  ``*``, ``/``, ``%``, ``+``, ``-``
 
     The usual arithmetic operators, defined for all numeric types.
     Note that ``/`` and ``%`` rounds towards negative infinity when
