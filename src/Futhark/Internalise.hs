@@ -191,7 +191,7 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
           case f_e of
             Just (p, substs, body) -> do
               noteMod p arg
-              withDecSubstitutions (p_substs<>b_substs) $
+              generatingFunctor p_substs b_substs $
                 withDecSubstitutions substs $
                 evalModExp body
             Nothing ->
