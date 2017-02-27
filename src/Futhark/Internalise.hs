@@ -331,6 +331,12 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
         extDimToZero I.Ext{} = constant (0::Int32)
         extDimToZero (I.Free d) = d
 
+internaliseExp desc (E.Ascript e (TypeDecl _ (Info et)) loc) = do
+  es <- internaliseExp desc e
+  (ts, _, _) <- internaliseReturnType et
+  forM (zip es ts) $ \(e',t') ->
+    ensureExtShape asserting loc (I.fromDecl t') desc e'
+
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
