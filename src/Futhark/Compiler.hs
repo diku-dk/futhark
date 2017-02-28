@@ -113,14 +113,8 @@ data ReaderState = ReaderState { alreadyImported :: E.Imports
 
 newtype SearchPath = SearchPath FilePath -- Make this a list, eventually.
 
--- | Some bad operating systems do not use forward slash as directory
--- separator - this is where we convert Futhark includes (which always
--- use forward slash) to native paths.
-includeToPath :: String -> FilePath
-includeToPath = joinPath . Posix.splitDirectories
-
 readImport :: (MonadError CompileError m, MonadIO m) =>
-              SearchPath -> [FilePath] -> FilePath -> CompilerM m ()
+              SearchPath -> [FilePath] -> String -> CompilerM m ()
 readImport search_path steps name
   | name `elem` steps =
       throwError $ CompileError
@@ -134,7 +128,7 @@ readImport search_path steps name
           Left err -> throwError $ CompileError (T.pack $ show err) mempty
           Right prog -> return prog
 
-        mapM_ (readImport search_path (name:steps) . includeToPath) $ E.progImports prog
+        mapM_ (readImport search_path (name:steps)) $ E.progImports prog
 
         -- It is important to not read these before the above calls to
         -- readImport.
@@ -153,7 +147,7 @@ readImport search_path steps name
                 }
 
 readImportFile :: (MonadError CompileError m, MonadIO m) =>
-                  SearchPath -> FilePath -> m (T.Text, FilePath)
+                  SearchPath -> String -> m (T.Text, FilePath)
 readImportFile (SearchPath dir) name = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.
@@ -163,7 +157,7 @@ readImportFile (SearchPath dir) name = do
     (Left Nothing, Just t)  -> return (t, "[builtin]" </> name_with_ext)
     (Left Nothing, Nothing) -> throwError $ CompileError not_found mempty
     (Left (Just e), _)      -> throwError e
-  where name_with_ext = name <.> "fut"
+  where name_with_ext = includeToPath name <.> "fut"
 
         couldNotRead e
           | isDoesNotExistError e =
@@ -175,6 +169,12 @@ readImportFile (SearchPath dir) name = do
 
         not_found =
           T.pack $ "Could not find import '" ++ name ++ "' in path '" ++ dir ++ "'."
+
+        -- | Some bad operating systems do not use forward slash as directory
+        -- separator - this is where we convert Futhark includes (which always
+        -- use forward slash) to native paths.
+        includeToPath :: String -> FilePath
+        includeToPath = joinPath . Posix.splitDirectories
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompileError m, MonadIO m) =>
