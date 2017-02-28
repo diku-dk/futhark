@@ -21,6 +21,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
 import Data.List
 import System.FilePath
+import qualified System.FilePath.Posix as Posix
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 import System.IO.Error
@@ -112,6 +113,12 @@ data ReaderState = ReaderState { alreadyImported :: E.Imports
 
 newtype SearchPath = SearchPath FilePath -- Make this a list, eventually.
 
+-- | Some bad operating systems do not use forward slash as directory
+-- separator - this is where we convert Futhark includes (which always
+-- use forward slash) to native paths.
+includeToPath :: String -> FilePath
+includeToPath = joinPath . Posix.splitPath
+
 readImport :: (MonadError CompileError m, MonadIO m) =>
               SearchPath -> [FilePath] -> FilePath -> CompilerM m ()
 readImport search_path steps name
@@ -127,7 +134,7 @@ readImport search_path steps name
           Left err -> throwError $ CompileError (T.pack $ show err) mempty
           Right prog -> return prog
 
-        mapM_ (readImport search_path $ name:steps) $ E.progImports prog
+        mapM_ (readImport search_path (name:steps) . includeToPath) $ E.progImports prog
 
         -- It is important to not read these before the above calls to
         -- readImport.

@@ -909,7 +909,7 @@ qualName = QualName []
 typeName :: VName -> TypeName
 typeName = typeNameFromQualName . qualName
 
-progImports :: ProgBase f vn -> [FilePath]
+progImports :: ProgBase f vn -> [String]
 progImports (Prog decs) = concatMap decImports decs
   where decImports (OpenDec x xs _) =
           concatMap modExpImports $ x:xs
