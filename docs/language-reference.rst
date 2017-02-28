@@ -3,23 +3,47 @@
 Language Reference
 ==================
 
-This Futhark language reference manual seeks to describe every
-language construct.  It is not presented in a tutorial fashion, but
-rather intended for quick lookup and documentation of subtleties.  For
-this reason, it is not written in a bottom-up manner, and some
-concepts may be used before they are fully defined.  It is a good idea
-to have a basic grasp of Futhark (or some other functional programming
-language) before reading this reference.
+This reference seeks to describe every construct in the Futhark
+language.  It is not presented in a tutorial fashion, but rather
+intended for quick lookup and documentation of subtleties.  For this
+reason, it is not written in a bottom-up manner, and some concepts may
+be used before they are fully defined.  It is a good idea to have a
+basic grasp of Futhark (or some other functional programming language)
+before reading this reference.  An ambiguous grammar is given for the
+full language.  The text describes how ambiguities are resolved in
+practice (things like operator precedence).
+
+Identifiers and Keywords
+------------------------
+
+.. productionlist::
+   id: `letter` (`letter` | "_" | "'")* | "_" `id`
+   quals: (`id` ".")+
+   qualid: `id` | `quals` `id`
+   binop: `symbol`+
+   qualbinop: `binop` | `quals` `binop`
+   symbol: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
+
+Many things in Futhark are named. When we are defining something, we
+give it an unqualified name (`id`).  When referencing something inside
+a module, we use a qualified name (`qualid`).
 
 Primitive Types and Values
 --------------------------
 
-The primitive types in Futhark are the signed integer types ``i8``,
-``i16``, ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``,
-``u32``, ``u64``, the floating-point types ``f32``, ``f64``, as well
-as ``bool``.  An ``f32`` is always a single-precision float and a
-``f64`` is a double-precision float.  All primitive types can be
-combined in tuples and arrays.
+.. productionlist::
+   literal: `intnumber` | `floatnumber` | "true" | "false"
+
+Boolean literals are written ``true`` and ``false``.  The primitive
+types in Futhark are the signed integer types ``i8``, ``i16``,
+``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``, ``u32``,
+``u64``, the floating-point types ``f32``, ``f64``, as well as
+``bool``.  An ``f32`` is always a single-precision float and a ``f64``
+is a double-precision float.
+
+.. productionlist::
+   int_type: "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
+   float_type: "f8" | "f16" | "f32" | "f64"
 
 Numeric literals can be suffixed with their intended type.  For
 example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
@@ -28,21 +52,35 @@ and decimal literals are of type ``f64``.  Hexadecimal literals are
 supported by prefixing with ``0x``, and binary literals by prefixing
 with ``0b``.
 
+.. productionlist::
+   intnumber: (`decimal` | `hexadecimal` | `binary`) [`int_type`]
+   decimal: `dec_digit`+
+   hexadecimal: 0 ("x" | "X") `hex_digit`+
+   binary: 0 ("b" | "B") `bin_digit`+
+
+.. productionlist::
+   floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
+   pointfloat: [`intpart`] `fraction` | `intpart` "."
+   exponentfloat: (`intpart` | `pointfloat`) `exponent`
+   intpart: `dec_digit`+
+   fraction: "." `dec_digit`+
+   exponent: ("e" | "E") ["+" | "-"] `dec_digit`+
+
+.. productionlist::
+   dec_digit: "0"..."9"
+   hex_digit: dec_digit | "a"..."f" | "A"..."F"
+   bin_digit: "0" | "1"
+
 Numeric values can be converted between different types by using the
 desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
 the floating-point number ``1.0`` to a 32-bit signed integer.
 Conversion from floating-point to integers is done by truncation.
 
-Boolean literals are written ``true`` and ``false``.  These can also
-be converted to numbers (1 for true, 0 for false) by using the desired
-numeric type as a function.
-
-Character and string literals are supported, but only as an alias for
-integers and arrays of integers, respectively.  There is no character
-data type.
+These can also be converted to numbers (1 for true, 0 for false) by
+using the desired numeric type as a function.
 
 Compound Types and Values
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 All primitive values can be combined in tuples and arrays.  A tuple
 value or type is written as a sequence of comma-separated values or
@@ -54,6 +92,12 @@ i32, f64)``.  A tuple element can also be another tuple, as in
 tuple cannot have just one element, but empty tuples are permitted,
 although they are not very useful-these are written ``()`` and are of
 type ``()``.
+
+.. productionlist::
+   type: `array_type` | `tuple_type` | `qualid`
+   array_type: "[" [`dim`] "]" `type`
+   tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
+   dim: `qualid` | `decimal`
 
 An array value is written as a nonempty sequence of comma-separated
 values enclosed in square brackets: ``[1,2,3]``.  An array type is
@@ -76,12 +120,76 @@ type with consistent dimension sizes for an irregular array value.  In
 a Futhark program, all array values, including intermediate (unnamed)
 arrays, must be typeable.
 
+String literals are supported, but only as syntactic sugar for arrays
+of ``i32`` values.  There is no ``char`` type in Futhark.
+
+.. productionlist::
+   stringlit: '"' `stringchar` '"'
+   stringchar: <any source character except "\" or newline or quotes>
+
 Expressions
 -----------
 
 Expressions are the basic construct of any Futhark program.  An
 expression has a statically determined *type*, and produces a *value*
 at runtime.  Futhark is an eager/strict language ("call by value").
+
+The basic elements of expressions are called *atoms*, for example
+literals and variables, but also more complicated forms.
+
+.. productionlist::
+   atom:   `literal`
+       : | `qualid`
+       : | `stringlit`
+       : | "empty" "(" `type` ")"
+       : | "(" ")"
+       : | "(" `exp` ")"
+       : | "(" `exp` ("," `exp`)* ")"
+       : | `qualid` "[" `index` ("," `index`)* "]"
+       : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
+       : | "[" `exp` ("," `exp`)* "]"
+       : | "#" `nat_int` `exp`
+   exp:   `atom`
+      : | `exp` `qualbinop` `exp`
+      : | `exp` `exp`
+      : | `exp` ":" `type`
+      : | "if" `exp` "then" `exp` "else" `exp`
+      : | "let" `pat` "=" `exp` "in" `exp`
+      : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
+      : | "let" `id` `pat`+ [":" `ty_exp`] "=" `exp` "in" `exp`
+      : | "loop" "(" `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
+      : | "iota" `exp`
+      : | "shape" `exp`
+      : | "replicate" `exp` `exp`
+      : | "reshape" `exp` `exp`
+      : | "rearrange" "(" `nat_int`+ ")" `exp`
+      : | "transpose" `exp`
+      : | "rotate" ["@" `nat_int`] `exp` `exp`
+      : | "split" ["@" `nat_int`] `exp` `exp`
+      : | "concat" ["@" `nat_int`] `exp`+
+      : | "zip" ["@" `nat_int`] `exp`+
+      : | "unzip" `exp`
+      : | "unsafe" `exp`
+      : | "copy" `exp`
+      : | "map" `fun` `exp`+
+      : | "reduce" `fun` `exp` `exp`
+      : | "reduceComm" `fun` `exp` `exp`
+      : | "reduce" `fun` `exp` `exp`
+      : | "scan" `fun` `exp` `exp`
+      : | "filter" `fun` `exp`
+      : | "partition" "(" `fun`+ ")" `exp`
+      : | "write" `exp` `exp` `exp`
+      : | "streamMap" `fun` `exp`
+      : | "streamMapPer" `fun` `exp`
+      : | "streamRed" `fun` `exp` `exp`
+      : | "streamMapPer" `fun` `exp` `exp`
+      : | "streamSeq" `fun` `exp` `exp`
+   pat: `id` | "_" | "(" ")" | "(" `pat` ")" | "(" `pat` ("," `pat`)+ ")" | `pat` ":" `type`
+   loopform: "for" `id` "<" `exp`
+           : | "for" `atom` "<=" `id` "<" `exp`
+           : | "for" `atom` ">" `id` ">=" `exp`
+           : | "for" `atom` ">" `id`
+           : | "while" `exp`
 
 Some of the built-in expression forms have parallel semantics, but it
 is not guaranteed that the the parallel constructs in Futhark are
@@ -90,18 +198,140 @@ ways.  Their purpose is to give the compiler as much freedom and
 information is possible, in order to enable it to maximise the
 efficiency of the generated code.
 
-*constant*
-~~~~~~~~~~
+Resolving Ambiguities
+~~~~~~~~~~~~~~~~~~~~~
+
+The above grammar contains some ambiguities, which in the concrete
+implementation is resolved via a combination of lexer and grammar
+transformations.  For ease of understanding, they are presented here
+in natural text.
+
+* A type ascription (`exp` ``:`` `type`) cannot appear as an array
+  index, as it collides with the syntax for slicing.
+
+* In ``f [x]``, there is am ambiguity between indexing the array ``f``
+  at position ``x``, or calling the function ``f`` with the singleton
+  array ``x``.  We resolve this the following way:
+
+    * If there is a space between ``f`` and the opening bracket, it is
+      treated as a function application.
+
+    * Otherwise, it is an array index operation.
+
+* The following table describes the precedence and associativity of
+  infix operators.  All operators in the same row have the same
+  precedence.  The rows are listed in increasing order of precedence.
+  Note that not all operators listed here are used in expressions;
+  nevertheless, they are still used for resolving ambiguities.
+
+  =================  =============
+  **Associativity**  **Operators**
+  =================  =============
+  left               ``,``
+  left               ``:``
+  left               ``||``
+  left               ``&&``
+  left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=``
+  left               ``&`` ``^`` ``|``
+  left               ``<<`` ``>>`` ``>>>``
+  left               ``+`` ``-``
+  left               ``*`` ``/`` ``%`` ``//`` ``%%``
+  right              ``->``
+  =================  =============
+
+Semantics
+~~~~~~~~~
+
+`literal`
+.........
 
 Evaluates to itself.
 
-*variable*
-~~~~~~~~~~
+`qualid`
+........
 
-Evaluates to its value in the environment.
+A variable name; evaluates to its value in the current environment.
+
+`stringlit`
+...........
+
+Evaluates to an array of type ``[]i32`` that contains the string
+characters as integers.
+
+``empty(t)``
+............
+
+Create an empty array whose row type is ``t``.  For example,
+``empty(i32)`` creates a value of type ``[]i32``.  The row type can
+contain shape declarations, e.g., ``empty([2]i32)``.  Any dimension
+without an annotation will be of size 0, as will the outermost
+dimension.
+
+``()``
+......
+
+Evaluates to an empty tuple.
+
+``( e )``
+.........
+
+Evaluates to the result of ``e``.
+
+``(e1, e2, ..., eN)``
+.....................
+
+Evaluates to a tuple containing ``N`` values.
+
+``a[i]``
+........
+
+Return the element at the given position in the array.  The index may
+be a comma-separated list of indexes instead of just a single index.
+If the number of indices given is less than the rank of the array, an
+array is returned.
+
+The array ``a`` must be a variable name or a parenthesized expression.
+Futhermore, there *may not* be a space between ``a`` and the opening
+bracket.  This disambiguates the array indexing ``a[i]``, from ``a
+[i]``, which is a function call with a literal array.
+
+``a[i:j:s]``
+............
+
+Return a slice of the array ``a`` from index ``i`` to ``j``, the
+latter inclusive and the latter exclusive, taking every ``s``th
+element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
+it means to start at ``i`` and descend by steps of size ``s`` to ``j``
+(not inclusive).
+
+It is generally a bad idea for ``s`` to be non-constant.
+Slicing of multiple dimensions can be done by separating with commas,
+and may be intermixed freely with indexing.
+
+If ``s`` is elided it defaults to ``1``.  If ``i`` or ``j`` is elided, their
+value depends on the sign of ``s``.  If ``s`` is positive, ``i`` become ``0``
+and ``j`` become the length of the array.  If ``s`` is negative, ``i`` becomes
+the length of the array minus one, and ``j`` becomes minus one.  This means that
+``a[::-1]`` is the reverse of the array ``a``.
+
+``[x, y, z]``
+.............
+
+Create an array containing the indicated elements.  Each element must
+have the same type and shape.  At least one element must be provided -
+empty arrays must be constructed with the ``empty`` construct.  This
+restriction is due to limited type inference in the Futhark compiler,
+and will hopefully be fixed in the future.
+
+``#i e``
+........
+
+Access field ``i`` of the expression ``e``, which must be of
+tuple-type.  The fields are indexed from zero.  ``i`` must be a
+literal integer, not an arbitrary expression.
 
 ``x`` *binop* ``y``
-~~~~~~~~~~~~~~~~~~~
+...................
 
 Apply an operator to ``x`` and ``y``.  Operators are functions like
 any other, and can be user-defined.  Futhark pre-defines certain
@@ -143,39 +373,26 @@ are:
 
       Company any two values of numeric type for equality.
 
-``f x y z``
-~~~~~~~~~~~
-
-Apply the function ``f`` to the arguments ``x``, ``y`` and ``z``.
-
 ``x && y``
-~~~~~~~~~~
+..........
 
 Short-circuiting logical conjunction; both operands must be of type
 ``bool``.
 
 ``x || y``
-~~~~~~~~~~
+..........
 
-Short-circuiting logical disjunction; both operands must be of type ``bool``.
+Short-circuiting logical disjunction; both operands must be of type
+``bool``.
 
-``! x``
-~~~~~~~~~
+``f x y z``
+...........
 
-Logical negation of ``x``, which must be of type ``bool``.
-
-``- x``
-~~~~~~~
-
-Numerical negation of ``x``, which must be of numeric type.
-
-``~ x``
-~~~~~~~
-
-Bitwise negation of ``x``, which must be of integral type.
+Apply the function ``f`` to the arguments ``x``, ``y`` and ``z``.  Any
+number of arguments can be passed.
 
 ``e : t``
-~~~~~~~~~
+.........
 
 Annotate that ``e`` is expected to be of type ``t``, failing with a
 type error if it is not.  If ``t`` is an array with shape
@@ -185,212 +402,50 @@ run-time.
 Due to ambiguities, this syntactic form cannot appear as an array
 index expression unless it is first enclosed in parentheses.
 
-``#i e``
-~~~~~~~~
+``! x``
+.........
 
-Access field ``i`` of the expression ``e``, which must be of
-tuple-type.  The fields are indexed from zero.  ``i`` must be a
-literal integer, not an arbitrary expression.
+Logical negation of ``x``, which must be of type ``bool``.
 
-``[x, y, z]``
-~~~~~~~~~~~~~
+``- x``
+.......
 
-Create an array containing the indicated elements.  Each element must
-have the same type and shape.  At least one element must be provided -
-empty arrays must be constructed with the ``empty`` construct.
+Numerical negation of ``x``, which must be of numeric type.
 
-``empty(t)``
-~~~~~~~~~~~~
+``. x``
+.......
 
-Create an empty array whose row type is ``t``.  For example,
-``empty(i32)`` creates a value of type ``[]i32``.  The row type can
-contain shape declarations, e.g., ``empty([2]i32)``.  Any dimension
-without an annotation will be of size 0, as will the outermost
-dimension.
+Bitwise negation of ``x``, which must be of integral type.
 
+``if c then a else b``
+......................
 
-``a[i]``
-~~~~~~~~
-
-Return the element at the given position in the array.  The index may
-be a comma-separated list of indexes instead of just a single index.
-If the number of indices given is less than the rank of the array, an
-array is returned.
-
-The array ``a`` must be a variable name or a parenthesized expression.
-Futhermore, there *may not* be a space between ``a`` and the opening
-bracket.  This disambiguates the array indexing ``a[i]``, from ``a
-[i]``, which is a function call with a literal array.
-
-``a[i:j:s]``
-~~~~~~~~~~~~
-
-Return a slice of the array ``a`` from index ``i`` to ``j``, the
-latter inclusive and the latter exclusive, taking every ``s``th
-element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
-it means to start at ``i`` and descend by steps of size ``s`` to ``j``
-(not inclusive).
-
-It is generally a bad idea for ``s`` to be non-constant.
-Slicing of multiple dimensions can be done by separating with commas,
-and may be intermixed freely with indexing.
-
-If ``s`` is elided it defaults to ``1``.  If ``i`` or ``j`` is elided, their
-value depends on the sign of ``s``.  If ``s`` is positive, ``i`` become ``0``
-and ``j`` become the length of the array.  If ``s`` is negative, ``i`` becomes
-the length of the array minus one, and ``j`` becomes minus one.  This means that
-``a[::-1]`` is the reverse of the array ``a``.
-
-
-``zip x y z``
-~~~~~~~~~~~~~~~~~~
-
-Zips together the elements of the outer dimensions of arrays ``x``,
-``y``, and ``z``.  Static or runtime check is performed to check that
-the sizes of the outermost dimension of the arrays are the same.  If
-this property is not true, program execution stops with an error.  Any
-number of arrays may be passed to ``unzip``.  If *n* arrays are given,
-the result will be a single-dimensional array of *n*-tuples (where the
-the tuple components may themselves be arrays).
-
-``zip@i x y z``
-~~~~~~~~~~~~~~~~~~
-
-Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``
-is equivalent to unadorned ``zip``.  This form is useful when zipping
-multidimensional arrays along the innermost dimensions.
-
-``unzip a``
-~~~~~~~~~~~~
-
-If the type of ``a`` is ``[(t_1, ..., t_n)]``, the result is a tuple
-of *n* arrays, i.e., ``([t_1], ..., [t_n])``, and otherwise a type
-error.
-
-``unsafe e``
-~~~~~~~~~~~~
-
-Elide safety checks (such as bounds checking) for operations lexically
-with ``e``.  This is useful if the compiler is otherwise unable to
-avoid bounds checks (e.g. when using indirect indexes), but you really
-do not want them here.
-
-``iota n``
-~~~~~~~~~~~
-
-An array of the integers from ``0`` to ``n-1``.  The ``n`` argument
-can be any integral type.  The elements of the array will have the
-same type as ``n``.
-
-``replicate n x``
-~~~~~~~~~~~~~~~~~~~
-
-An array consisting of ``n`` copies of ``a``.  The ``n`` argument can
-be of any integral type.
-
-``shape a``
-~~~~~~~~~~~~~~
-
-The shape of array ``a`` as an integer array.  It is often more
-readable to use shape declaration names instead of ``shape``.
-
-``split (i_1, ..., i_n) a``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Partitions the given array ``a`` into ``n+1`` disjoint arrays
-``(a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...])``, returned as a tuple.
-The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
-
-Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
-
-``split@i (i_1, ..., i_n) a``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Splits an array across dimension ``i``, with the outermost dimension
-being ``0``.  The ``i`` must be a compile-time integer constant,
-i.e. ``i`` cannot be a variable.
-
-``concat a_1 ..., a_n``
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Concatenate the rows/elements of several arrays.  The shape of the
-arrays must be identical in all but the first dimension.  This is
-equivalent to ``concat@0`` (see below).
-
-``concat@i a_1 ... a_n``
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Concatenate arrays across dimension ``i``, with the outermost
-dimension being ``0``.  The ``i`` must be a compile-time integer
-constant, i.e. ``i`` cannot be a variable.
-
-``copy a``
-~~~~~~~~~~~
-Return a deep copy of the argument.  Semantically, this is just
-the identity function, but it has special semantics related to
-uniqueness types as described in :ref:`uniqueness-types`.
-
-``reshape (d_1, ..., d_n) a``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Reshape the elements of ``a`` into an ``n``-dimensional array of the
-specified shape.  The number of elements in ``a`` must be equal to the
-product of the new dimensions.
-
-``rearrange (d_1, ..., d_n) a``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Permute the dimensions in the array, returning a new array.  The
-``d_i`` must be *static* integers, and constitute a proper
-length-``n`` permutation.
-
-For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
-a[y,z,x]``.
-
-
-``transpose a``
-~~~~~~~~~~~~~~~~
-
-Return the transpose of ``a``, which must be a two-dimensional array.
-
-``rotate@d i a``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.
-Intuitively, you can think of it as subtracting ``i`` from every index
-(modulo the size of the array).
-
-For example, if ``b=rotate(1, i, a)``, then ``b[x,y+1] = a[x,y]``.
+If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
 
 ``let pat = e in body``
-~~~~~~~~~~~~~~~~~~~~~~~
+.......................
 
 Evaluate ``e`` and bind the result to the pattern ``pat`` while
 evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
 ``let`` or ``loop`` expression.
 
 ``let a[i] = v in body``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+........................................
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
 of ``v`` must be an array of the proper size.
 
 ``let f params... = e in body``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+...............................
 
 Bind ``f`` to a function with the given parameters and definition
 (``e``) and evaluate ``body``.  The function will be treated as
 aliasing any free variables in ``e``.  The function is not in scope of
 itself, and hence cannot be recursive.
 
-``if c then a else b``
-~~~~~~~~~~~~~~~~~~~~~~
-
-If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
-
 ``loop (pat = initial) = for i < bound do loopbody in body``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+............................................................
 
 The name ``i`` is bound here and initialised to zero.
 
@@ -409,7 +464,7 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 = ...``.
 
 ``loop (pat = initial) = while cond do loopbody in body``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+............................................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
@@ -418,8 +473,127 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 
 3. Evaluate ``body`` with ``pat`` bound to its final value.
 
+``iota n``
+...........
+
+An array of the integers from ``0`` to ``n-1``.  The ``n`` argument
+can be any integral type.  The elements of the array will have the
+same type as ``n``.
+
+``shape a``
+..............
+
+The shape of array ``a`` as an integer array.  It is often more
+readable to use shape declaration names instead of ``shape``.
+
+``replicate n x``
+...................
+
+An array consisting of ``n`` copies of ``a``.  The ``n`` argument can
+be of any integral type.
+
+``reshape (d_1, ..., d_n) a``
+...............................
+
+Reshape the elements of ``a`` into an ``n``-dimensional array of the
+specified shape.  The number of elements in ``a`` must be equal to the
+product of the new dimensions.
+
+``rearrange (d_1, ..., d_n) a``
+..................................
+
+Permute the dimensions in the array, returning a new array.  The
+``d_i`` must be *static* integers, and constitute a proper
+length-``n`` permutation.
+
+For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
+a[y,z,x]``.
+
+``transpose a``
+................
+
+Return the transpose of ``a``, which must be a two-dimensional array.
+
+``rotate@d i a``
+................
+
+Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.
+Intuitively, you can think of it as subtracting ``i`` from every index
+(modulo the size of the array).
+
+For example, if ``b=rotate(1, i, a)``, then ``b[x,y+1] = a[x,y]``.
+
+``split (i_1, ..., i_n) a``
+.............................
+
+Partitions the given array ``a`` into ``n+1`` disjoint arrays
+``(a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...])``, returned as a tuple.
+The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
+
+Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
+
+``split@i (i_1, ..., i_n) a``
+.............................
+
+Splits an array across dimension ``i``, with the outermost dimension
+being ``0``.  The ``i`` must be a compile-time integer constant,
+i.e. ``i`` cannot be a variable.
+
+``concat a_1 ..., a_n``
+.........................
+
+Concatenate the rows/elements of several arrays.  The shape of the
+arrays must be identical in all but the first dimension.  This is
+equivalent to ``concat@0`` (see below).
+
+``concat@i a_1 ... a_n``
+.........................
+
+Concatenate arrays across dimension ``i``, with the outermost
+dimension being ``0``.  The ``i`` must be a compile-time integer
+constant, i.e. ``i`` cannot be a variable.
+
+``zip x y z``
+..................
+
+Zips together the elements of the outer dimensions of arrays ``x``,
+``y``, and ``z``.  Static or runtime check is performed to check that
+the sizes of the outermost dimension of the arrays are the same.  If
+this property is not true, program execution stops with an error.  Any
+number of arrays may be passed to ``unzip``.  If *n* arrays are given,
+the result will be a single-dimensional array of *n*-tuples (where the
+the tuple components may themselves be arrays).
+
+``zip@i x y z``
+..................
+
+Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``
+is equivalent to unadorned ``zip``.  This form is useful when zipping
+multidimensional arrays along the innermost dimensions.
+
+``unzip a``
+............
+
+If the type of ``a`` is ``[(t_1, ..., t_n)]``, the result is a tuple
+of *n* arrays, i.e., ``([t_1], ..., [t_n])``, and otherwise a type
+error.
+
+``unsafe e``
+............
+
+Elide safety checks (such as bounds checking) for operations lexically
+with ``e``.  This is useful if the compiler is otherwise unable to
+avoid bounds checks (e.g. when using indirect indexes), but you really
+do not want them here.
+
+``copy a``
+...........
+Return a deep copy of the argument.  Semantically, this is just
+the identity function, but it has special semantics related to
+uniqueness types as described in :ref:`uniqueness-types`.
+
 ``map f a_1 ... a_n``
-~~~~~~~~~~~~~~~~~~~~~
+.....................
 
 Apply ``f`` to every element of ``a_1 ... a_n`` and return the
 resulting array.  Differs from ``map f (zip a_1 ... a_n)`` in that
@@ -428,14 +602,14 @@ called with a single ``n``-tuple argument.  In other languages, this
 form of ``map`` is often called ``zipWith``.
 
 ``reduce f x a``
-~~~~~~~~~~~~~~~~~~~
+...................
 
 Left-reduction with ``f`` across the elements of ``a``, with ``x`` as
 the neutral element for ``f``.  The function ``f`` must be
 associative.  If it is not, the return value is unspecified.
 
 ``reduceComm f x a``
-~~~~~~~~~~~~~~~~~~~~
+....................
 
 Like ``reduce``, but with the added guarantee that the function ``f``
 is *commutative*.  This lets the compiler generate more efficient
@@ -445,19 +619,19 @@ operators like ``+`` - the compiler already knows that these are
 commutative.
 
 ``scan f x a``
-~~~~~~~~~~~~~~~~~~~
+...................
 
 Inclusive prefix scan.  Has the same caveats with respect to
 associativity as ``reduce``.
 
 ``filter f a``
-~~~~~~~~~~~~~~~~
+................
 
 Remove all those elements of ``a`` that do not satisfy the predicate
 ``f``.
 
 ``partition (f_1, ..., f_n) a``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+...............................
 
 Divide the array ``a`` into disjoint partitions based on the given
 predicates.  Each element of ``a`` is called with the predicates
@@ -469,7 +643,7 @@ with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
 ``write is vs as``
-~~~~~~~~~~~~~~~~~~
+..................
 
 The ``write`` expression calculates the equivalent of this imperative
 code::
@@ -487,8 +661,24 @@ performed to the same location), the result is unspecified.  It is not
 guaranteed that one of the duplicate writes will complete atomically -
 they may be interleaved.
 
-Function Declarations
----------------------
+Declarations
+------------
+
+.. productionlist::
+   dec:   `fun_bind` | `val_bind` | `ty_bind` | `mod_bind` | `mod_ty_bind`
+      : | "open" `mod_exp`+
+      : | `default_dec`
+      : | "import" `stringlit`
+
+Declaring Functions and Values
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. productionlist::
+   fun_bind:   ("fun" | "entry") `id` `pat`+ [":" `ty_exp`] "=" `exp`
+           : | ("fun" | "entry") `pat` `binop` `pat` [":" `ty_exp`] "=" `exp`
+
+.. productionlist::
+   val_bind: "val" `id` [":" `ty_exp`] "=" `exp`
 
 A function declaration must specify the name, parameters, return
 type, and body of the function::
@@ -545,7 +735,7 @@ inaccessible, except through the ``Intrinsics`` module.
 .. _entry-points:
 
 Entry Points
-~~~~~~~~~~~~
+............
 
 Apart from declaring a function with the keyword ``fun``, it can also
 be declared with ``entry``.  When the Futhark program is compiled any
@@ -559,7 +749,7 @@ Any function named ``main`` will always be considered an entry point,
 whether it is declared with ``entry`` or not.
 
 Value Declarations
-------------------
+..................
 
 A named value/constant can be declared as follows::
 
@@ -574,7 +764,10 @@ Values can be used in shape declarations, except in the return value
 of entry points.
 
 Type Abbreviations
-------------------
+~~~~~~~~~~~~~~~~~~
+
+.. productionlist::
+   ty_bind: "type" `id` "=" `type`
 
 Futhark supports simple type abbreviations to improve code readability.
 Examples::
@@ -606,16 +799,24 @@ attributes are overrided by outer ones::
 Module System
 -------------
 
+.. productionlist::
+   mod_bind: "module" `id` "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_ty_bind: "module" "type" `id` "=" `mod_type_exp`
+
 Futhark supports an ML-style higher-order module system.  *Modules*
-can contain types, functions, and other modules.  *Module types* can
-be used to classify the contents of modules, and *parametric
-modules* can be used to abstract over modules.  In Standard ML,
-modules, module types and parametric modules are called structs,
-signatures, and functors, respectively.
+can contain types, functions, and other modules.  *Module types* are
+used to classify the contents of modules, and *parametric modules* are
+used to abstract over modules (essentially module-level functions).
+In Standard ML, modules, module types and parametric modules are
+called structs, signatures, and functors, respectively.
 
-Named module are defined as::
+Named modules are declared as::
 
-  module ModuleName = module expression
+  module name = module expression
+
+A named module type is defined as::
+
+  module type name = module type expression
 
 Where a module expression can be the name of another module, an
 application of a parametric module, or a sequence of declarations
@@ -691,6 +892,39 @@ type ``Addable`` and get back a module that defines a function
 Now ``Vec3Times.times`` is a function of type ``Vec3.t -> int ->
 Vec3.t``.
 
+Module Expressions
+~~~~~~~~~~~~~~~~~~
+
+.. productionlist::
+   mod_exp:   `qualid`
+          : | `mod_exp` ":" `mod_type_exp`
+          : | "\" "(" `id` ":" `mod_type_exp` ")" [":" `mod_type_exp`] "=" `mod_exp`
+          : | `mod_exp` `mod_exp`
+          : | "(" `mod_exp` ")"
+          : | "{" `dec`* "}"
+          : | "import" `stringlit`
+
+Module Type Expressions
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. productionlist::
+   mod_type_exp:   `qualid`
+             : | "{" `spec`* "}"
+             : | `mod_type_exp` "with" `qualid` "=" `ty_exp`
+             : | "(" `mod_type_exp` ")"
+             : | "(" `id` ":" `mod_type_exp` ")" "->" `mod_type_exp`
+             : | `mod_type_exp` "->" `mod_type_exp`
+
+
+.. productionlist::
+   spec:   "val" `id` ":" `spec_type`
+       : | "val" `binop` ":" `spec_type`
+       : | "type" `id` "=" `type`
+       : | "type `id`
+       : | "module" `id` ":" `mod_type_exp`
+       : | "include" `mod_type_exp`
+   spec_type: `type` | `type` "->" `spec_type`
+
 Referring to Other Files
 ------------------------
 
@@ -715,6 +949,11 @@ file::
 
 Literal Defaults
 ----------------
+
+.. productionlist::
+   default_dec:   "default" (`int_type`)
+              : | "default" (`float_type`)
+              : | "default" (`int_type`, `float_type`)
 
 By default, Futhark interprets integer literals as ``i32`` values, and decimal
 literals (integer literals containing a decimal point) as ``f64`` values. These
