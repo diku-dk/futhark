@@ -125,9 +125,6 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   (num_groups_per_segment, _) <-
     calcGroupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size ManyGroupsOneSegment
 
-  num_segments_per_group <- letSubExp "num_segments_per_group" $
-    BasicOp $ BinOp (SQuot Int32) group_size segment_size
-
   -- Instead of making this @if@ here, we could run "multiple groups per
   -- segment" first, and if the number of groups per segment was 1, we could
   -- simply return the result immediately without running the second kernel. I
@@ -135,15 +132,18 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   -- slightly fewer instructions -- and hopefully be a bit faster (at the cost
   -- of large code size). TODO: test how much we win by doing this.
 
-
-  let e_no_small_seg = eIf (eCmpOp (CmpEq $ IntType Int32) (eSubExp num_groups_per_segment)
-                                                           (eSubExp one))
+  let e_large_seg = eIf (eCmpOp (CmpEq $ IntType Int32) (eSubExp num_groups_per_segment)
+                                                        (eSubExp one))
                         (mkBodyM ogps_stms ogps_ses)
                         (mkBodyM mgps_stms mgps_ses)
 
-  e <- eIf (eCmpOp (CmpSlt Int32) (eSubExp one) (eSubExp num_segments_per_group))
+  -- if (group_size/2) < segment_size, means that we will not be able to fit two
+  -- segments into one group, and therefore we should not use the kernel that
+  -- relies on this.
+  e <- eIf (eCmpOp (CmpSlt Int32) (eBinOp (SQuot Int32) (eSubExp group_size) (eSubExp two))
+                                  (eSubExp segment_size))
+         (eBody [e_large_seg])
          (mkBodyM ogms_stms ogms_ses)
-         (eBody [e_no_small_seg])
 
   redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
     vn' <- newName $ patElemName pe
@@ -161,6 +161,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
   where
     one = constant (1 :: Int32)
+    two = constant (1 :: Int32)
 
     -- number of reduction results (tuple size for reduction operator)
     num_redres = length nes
