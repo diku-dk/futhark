@@ -22,14 +22,14 @@ Identifiers and Keywords
    qualid: `id` | `quals` `id`
    binop: `symbol`+
    qualbinop: `binop` | `quals` `binop`
-   fieldid: (`letter` | `decdigit`) (`letter` | `decdigit` | "_")+
+   fieldid: `decimal` | `id`
    symbol: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
 
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
 a module, we use a qualified name (`qualid`).  The fields of a record
-are named with `fieldid`s.  Note that a `fieldid` can be entirely
-numeric.
+are named with `fieldid`s.  Note that a `fieldid` can be decimal
+numbers.
 
 Primitive Types and Values
 --------------------------
@@ -195,7 +195,14 @@ literals and variables, but also more complicated forms.
       : | "streamRed" `fun` `exp` `exp`
       : | "streamMapPer" `fun` `exp` `exp`
       : | "streamSeq" `fun` `exp` `exp`
-   pat: `id` | "_" | "(" ")" | "(" `pat` ")" | "(" `pat` ("," `pat`)+ ")" | `pat` ":" `type`
+   pat:   `id`
+      : |  "_"
+      : | "(" ")"
+      : | "(" `pat` ")"
+      : | "(" `pat` ("," `pat`)+ ")"
+      : | "{" "}"
+      : | "{" `fieldid` "=" `pat` ["," `fieldid` "=" `pat`] "}"
+      : | `pat` ":" `type`
    loopform: "for" `id` "<" `exp`
            : | "for" `atom` "<=" `id` "<" `exp`
            : | "for" `atom` ">" `id` ">=" `exp`
@@ -345,7 +352,7 @@ and will hopefully be fixed in the future.
 ........
 
 Access field ``f`` of the expression ``e``, which must be a record or
-tuple.  There may not be a space between ``#`` and the field name.
+tuple.
 
 ``x`` *binop* ``y``
 ...................

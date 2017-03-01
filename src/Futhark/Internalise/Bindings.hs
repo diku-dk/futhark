@@ -153,6 +153,8 @@ flattenPattern = flattenPattern' []
                               st:_ -> st)]
         flattenPattern' ts (E.TuplePattern pats _) =
           concat <$> zipWithM flattenPattern' (tupleComponents ts ++ repeat []) pats
+        flattenPattern' ts (E.RecordPattern fs loc) =
+          flattenPattern' ts $ E.TuplePattern (map snd $ sortBy (comparing fst) fs) loc
         flattenPattern' ts (E.PatternAscription p td) =
           flattenPattern' (unInfo (expandedType td):ts) p
 

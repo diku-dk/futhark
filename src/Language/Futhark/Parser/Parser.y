@@ -76,8 +76,7 @@ import Language.Futhark.Parser.Lexer
       unop            { L _ (UNOP _) }
       qunop           { L _ (QUALUNOP _ _) }
 
-      '#field'        { L _ (FIELD _) }
-
+      declit       { L _ (DECLIT _) }
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
@@ -93,6 +92,7 @@ import Language.Futhark.Parser.Lexer
       stringlit       { L _ (STRINGLIT _) }
       charlit         { L _ (CHARLIT _) }
 
+      '#'             { L $$ HASH }
       '='             { L $$ EQU }
 
       '*'             { L $$ ASTERISK }
@@ -425,7 +425,7 @@ FieldTypes :: { [(Name,UncheckedTypeExp)] }
 SomeFieldTypes : FieldType                    { [$1] }
                | FieldType ',' SomeFieldTypes { $1 : $3 }
 
-FieldType : id ':' TypeExp { let L _ (ID name) = $1 in (name, $3) }
+FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
 ;
 
@@ -437,6 +437,9 @@ DimDecl :: { DimDecl Name }
         : id
           { let L _ (ID name) = $1
             in NamedDim name }
+        | declit
+          { let L _ (DECLIT n) = $1
+            in ConstDim (fromIntegral n) }
         | intlit
           { let L _ (INTLIT n) = $1
             in ConstDim (fromIntegral n) }
@@ -452,6 +455,7 @@ Param : VarId                        { Id $1 }
       | '(' ')'                      { TuplePattern [] $1 }
       | '(' Pattern ')'              { PatternParens $2 $1 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
+      | '{' FieldPatterns '}'        { RecordPattern $2 $1 }
 
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
@@ -619,7 +623,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
      | QualName { Var (fst $1) NoInfo (snd $1) }
-     | '#field' Atom { let L loc (FIELD name) = $1 in Project name $2 NoInfo loc }
+     | '#' FieldId Atom { Project (fst $2) $3 NoInfo $1 }
      | '{' FieldExps '}' { RecordLit $2 $1 }
 
 FieldExps : FieldExp ',' SomeFieldExps { $1 : $3 }
@@ -630,7 +634,7 @@ SomeFieldExps : FieldExp                   { [$1] }
               | FieldExp ',' SomeFieldExps { $1 : $3 }
 
 FieldExp :: { (Name, UncheckedExp) }
-          : id '=' Exp { let L _ (ID name) = $1 in (name, $3) }
+          : FieldId '=' Exp { (fst $1, $3) }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
@@ -698,15 +702,35 @@ Exps : Exp ',' Exps %prec bottom { $1 : $3 }
 
 VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
 
+FieldId :: { (Name, SrcLoc) }
+         : id     { let L loc (ID name) = $1 in (name, loc) }
+         | declit { let L loc (DECLIT n) = $1 in (nameFromString (show n), loc) }
+
 Patterns : Pattern ',' Patterns  { $1 : $3 }
          | Pattern               { [$1] }
 
 Pattern : VarId { Id $1 }
-      | '_' { Wildcard NoInfo $1 }
-      | '(' ')' { TuplePattern [] $1 }
-      | '(' Pattern ')' { PatternParens $2 $1 }
+      | '_'                          { Wildcard NoInfo $1 }
+      | '(' ')'                      { TuplePattern [] $1 }
+      | '(' Pattern ')'              { PatternParens $2 $1 }
       | '(' Pattern ',' Patterns ')' { TuplePattern ($2:$4) $1 }
-      | Pattern ':' TypeExpDecl { PatternAscription $1 $3 }
+      | Pattern ':' TypeExpDecl      { PatternAscription $1 $3 }
+      | '{' FieldPatterns '}'        { RecordPattern $2 $1 }
+
+FieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
+              :                                { [] }
+              | FieldPattern MoreFieldPatterns { $1 : $2 }
+
+MoreFieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
+                  :                                    { [] }
+                  | ',' FieldPattern MoreFieldPatterns { $2 : $3 }
+
+FieldPattern :: { (Name, PatternBase NoInfo Name) }
+              : FieldId '=' Pattern     { (fst $1, $3) }
+              | FieldId ':' TypeExpDecl { (fst $1,
+                                           PatternAscription (Id $ Ident (fst $1) NoInfo (snd $1))
+                                                             $3) }
+              | FieldId                 { (fst $1, Id $ Ident (fst $1) NoInfo (snd $1)) }
 
 MaybeAscription :: { Maybe (TypeDeclBase NoInfo Name) }
 MaybeAscription : ':' TypeExpDecl  { Just $2 }
@@ -754,11 +778,12 @@ CatValues : Value CatValues { $1 : $2 }
           |                 { [] }
 
 NaturalInt :: { Int }
-           :  intlit { let L _ (INTLIT num) = $1 in fromIntegral num  }
+           : declit { let L _ (DECLIT num) = $1 in fromIntegral num  }
+           | intlit { let L _ (INTLIT num) = $1 in fromIntegral num  }
 
 NaturalInts :: { [Int] }
-           : intlit                 { let L _ (INTLIT num) = $1 in [fromIntegral num] }
-           | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in fromIntegral num : $3  }
+           : NaturalInt                 { [$1] }
+           | NaturalInt ',' NaturalInts { $1 : $3  }
 
 PrimType :: { PrimType }
          : id {% let L _ (ID s) = $1 in primTypeFromName s }
@@ -784,7 +809,8 @@ SignedLit :: { (IntValue, SrcLoc) }
           | i16lit  { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
           | i32lit  { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
           | i64lit  { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-          | intlit  {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
+          | declit  {% let L pos (DECLIT num) = $1 in do num' <- getIntValue (toInteger num); return (num', pos) }
+          | intlit  {% let L pos (INTLIT num) = $1 in do num' <- getIntValue (toInteger num); return (num', pos) }
           | charlit {% let L pos (CHARLIT char) = $1 in do
                        num <- getIntValue $ fromIntegral $ ord char
                        return (num, pos) }
@@ -940,10 +966,10 @@ defaultType name = do
 getFilename :: ParserMonad FilePath
 getFilename = lift $ gets parserFile
 
-getIntValue :: Int64 -> ParserMonad IntValue
+getIntValue :: Integer -> ParserMonad IntValue
 getIntValue x = do
   t <- lift $ gets parserIntType
-  return $ (getIntFun t) (toInteger x)
+  return $ getIntFun t x
 
 getIntFun :: IntType -> (Integer -> IntValue)
 getIntFun Int8  = Int8Value . fromInteger

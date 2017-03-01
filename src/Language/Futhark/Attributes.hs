@@ -752,6 +752,7 @@ patIdentsGen :: (Ord vn, Hashable vn) =>
 patIdentsGen _ (Id ident)              = [ident]
 patIdentsGen f (PatternParens p _)     = patIdentsGen f p
 patIdentsGen f (TuplePattern pats _)   = mconcat $ map (patIdentsGen f) pats
+patIdentsGen f (RecordPattern fs _)    = mconcat $ map (patIdentsGen f . snd) fs
 patIdentsGen _ Wildcard{}              = []
 patIdentsGen f (PatternAscription p t) =
   patIdentsGen f p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
@@ -765,6 +766,7 @@ patternType (Wildcard (Info t) _)   = t
 patternType (PatternParens p _)     = patternType p
 patternType (Id ident)              = unInfo $ identType ident
 patternType (TuplePattern pats _)   = tupleRecord $ map patternType pats
+patternType (RecordPattern fs _)    = Record $ patternType <$> HM.fromList fs
 patternType (PatternAscription p _) = patternType p
 
 -- | The type matched by the pattern, including shape declarations if present.
@@ -773,6 +775,7 @@ patternStructType (PatternAscription _ td) = unInfo $ expandedType td
 patternStructType (PatternParens p _) = patternStructType p
 patternStructType (Id v) = vacuousShapeAnnotations $ toStruct $ unInfo $ identType v
 patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
+patternStructType (RecordPattern fs _) = Record $ patternStructType <$> HM.fromList fs
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
 -- | Names of primitive types to types.  This is only valid if no
