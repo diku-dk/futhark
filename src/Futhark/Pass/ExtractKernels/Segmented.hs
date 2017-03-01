@@ -245,8 +245,8 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
           letExp (baseString name ++ "_redres_scratch") $
                   BasicOp $ Reshape cs [DimNew num_segments] tmp
         kernel <- oneGroupManySegmentKernel new_segment_size num_segments cs
-                            arrs_flat red_scratch_arrs
-                            comm flag_reduce_lam' fold_lam
+                            tmp_redres red_scratch_arrs
+                            comm flag_reduce_lam' reduce_lam
                             nes new_total_elems ispace inps
         letTupExp' "kernel_result" $ Op kernel
 
