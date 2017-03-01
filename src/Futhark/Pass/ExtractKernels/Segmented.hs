@@ -451,7 +451,7 @@ oneGroupManySegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
        -> SubExp            -- num_segments
        -> Certificates      -- cs
-       -> [VName]           -- redin_arrs: flat arrays (containing input to fold_lam)
+       -> [VName]           -- in_arrs: flat arrays (containing input to fold_lam)
        -> [VName]           -- scratch_arrs: Preallocated space that we can write into
        -> Commutativity     -- comm
        -> Lambda InKernel   -- flag_reduce_lam'
@@ -461,7 +461,7 @@ oneGroupManySegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Kernel InKernel)
-oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
+oneGroupManySegmentKernel segment_size num_segments cs in_arrs scratch_arrs
                       _comm flag_reduce_lam' fold_lam_unrenamed
                       nes w ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
@@ -538,7 +538,7 @@ oneGroupManySegmentKernel segment_size num_segments cs redin_arrs scratch_arrs
         let arr_params = drop num_redres $ lambdaParams fold_lam
         let nonred_lamparam_pes = map
               (\p -> PatElem (paramName p) BindVar (paramType p)) arr_params
-        forM_ (zip redin_arrs nonred_lamparam_pes) $ \(arr, pe) -> do
+        forM_ (zip in_arrs nonred_lamparam_pes) $ \(arr, pe) -> do
           tp <- lookupType arr
           let slice = fullSlice tp [DimFix offset]
           addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
@@ -741,7 +741,6 @@ addManualIspaceCalcStms outer_index ispace = do
               addStm $ Let (Pattern [] [pe]) () $ BasicOp $ BinOp (SRem Int32) prev_val size
               letSubExp "tmp_val" $ BasicOp $ BinOp (SQuot Int32) prev_val size
         foldM_ calc_ispace_index outer_index (reverse ispace)
-
 
 regularSegmentedRedomapAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
                                 SubExp
