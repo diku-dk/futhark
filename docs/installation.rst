@@ -197,7 +197,7 @@ but some examples make use of it).
 
    Run the following commands::
 
-     > python setup.py build_ext --compiler = mingw32
+     > python setup.py build_ext --compiler=mingw32
      > python setup.py install
 
 If everything went in order, pyOpenCL should be installed on your machine now.
