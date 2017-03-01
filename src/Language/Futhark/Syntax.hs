@@ -90,6 +90,7 @@ import           Data.Monoid
 import           Data.Traversable
 import           Prelude
 
+import           Futhark.Util.Pretty
 import           Futhark.Representation.Primitive (FloatType (..),
                                                    FloatValue (..),
                                                    IntType (..), IntValue (..))
@@ -815,3 +816,39 @@ deriving instance Showable f vn => Show (ProgBase f vn)
 
 -- | A set of names.
 type Names = HS.HashSet
+
+--- Some prettyprinting definitions are here because we need them in
+--- the Attributes module.
+
+instance Pretty PrimType where
+  ppr (Unsigned Int8)  = text "u8"
+  ppr (Unsigned Int16) = text "u16"
+  ppr (Unsigned Int32) = text "u32"
+  ppr (Unsigned Int64) = text "u64"
+  ppr (Signed t)       = ppr t
+  ppr (FloatType t)    = ppr t
+  ppr Bool             = text "bool"
+
+instance Pretty BinOp where
+  ppr Plus     = text "+"
+  ppr Minus    = text "-"
+  ppr Pow      = text "**"
+  ppr Times    = text "*"
+  ppr Divide   = text "/"
+  ppr Mod      = text "%"
+  ppr Quot     = text "//"
+  ppr Rem      = text "%%"
+  ppr ShiftR   = text ">>"
+  ppr ZShiftR  = text ">>>"
+  ppr ShiftL   = text "<<"
+  ppr Band     = text "&"
+  ppr Xor      = text "^"
+  ppr Bor      = text "|"
+  ppr LogAnd   = text "&&"
+  ppr LogOr    = text "||"
+  ppr Equal    = text "=="
+  ppr NotEqual = text "!="
+  ppr Less     = text "<"
+  ppr Leq      = text "<="
+  ppr Greater  = text ">"
+  ppr Geq      = text ">="
