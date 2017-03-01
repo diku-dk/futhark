@@ -380,6 +380,7 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
                          , ("num_groups", num_groups)
                          , ("group_size", group_size)
                          , ("elements_per_thread", elements_per_thread)
+                         , ("num_groups_per_segment", num_groups_per_segment)
                          ]
 
   let kernel = Kernel kerneldebughints cs space kernel_return_types $
