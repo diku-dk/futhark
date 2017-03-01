@@ -267,11 +267,11 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
       let scratch_arrays = red_scratch_arrs ++ map_out_arrs
 
-      e <- oneGroupManySegmentKernel segment_size num_segments cs
+      kernel <- oneGroupManySegmentKernel segment_size num_segments cs
                           arrs_flat scratch_arrays
                           comm flag_reduce_lam' fold_lam
                           nes w ispace inps
-      letTupExp' "kernel_result" $ Op e
+      letTupExp' "kernel_result" $ Op kernel
 
 groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
