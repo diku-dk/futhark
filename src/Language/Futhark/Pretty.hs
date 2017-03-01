@@ -25,16 +25,7 @@ import           Prelude
 import           Futhark.Util.Pretty
 
 import           Language.Futhark.Syntax
-
--- | Given an operator name, return the operator that determines its
--- syntactical properties.
-leadingOperator :: Name -> BinOp
-leadingOperator s = maybe LogAnd snd $ find ((`isPrefixOf` s') . fst) $
-                    sortBy (flip $ comparing $ length . fst) $
-                    zip (map pretty operators) operators
-  where s' = nameToString s
-        operators :: [BinOp]
-        operators = [minBound..maxBound::BinOp]
+import           Language.Futhark.Attributes
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
@@ -45,15 +36,6 @@ instance Pretty Value where
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array{} <- t  = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
-
-instance Pretty PrimType where
-  ppr (Unsigned Int8)  = text "u8"
-  ppr (Unsigned Int16) = text "u16"
-  ppr (Unsigned Int32) = text "u32"
-  ppr (Unsigned Int64) = text "u64"
-  ppr (Signed t)       = ppr t
-  ppr (FloatType t)    = ppr t
-  ppr Bool             = text "bool"
 
 instance Pretty PrimValue where
   ppr (UnsignedValue (Int8Value v)) =
@@ -74,14 +56,22 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (PolyArrayElem bt _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt)
   ppr (ArrayArrayElem at)    = ppr at
-  ppr (RecordArrayElem ts)   = braces $ commasep $ map ppField $ HM.toList ts
+  ppr (RecordArrayElem fs)
+    | Just ts <- areTupleFields fs =
+        parens $ commasep $ map ppr ts
+    | otherwise =
+        braces $ commasep $ map ppField $ HM.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (RecordArrayElemTypeBase Rank as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (PolyArrayElem bt _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt)
   ppr (ArrayArrayElem at)    = ppr at
-  ppr (RecordArrayElem ts)   = braces $ commasep $ map ppField $ HM.toList ts
+  ppr (RecordArrayElem fs)
+    | Just ts <- areTupleFields fs =
+        parens $ commasep $ map ppr ts
+    | otherwise =
+        braces $ commasep $ map ppField $ HM.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn) as) where
@@ -97,10 +87,13 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn)
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
 
-  ppr (RecordArray et (ShapeDecl ds) u) =
-    ppr u <> mconcat (map (brackets . f) ds) <>
-    braces (commasep $ map ppField $ HM.toList et)
-    where f AnyDim       = mempty
+  ppr (RecordArray fs (ShapeDecl ds) u)
+    | Just ts <- areTupleFields fs =
+        prefix <> parens (commasep $ map ppr ts)
+    | otherwise =
+        prefix <> braces (commasep $ map ppField $ HM.toList fs)
+    where prefix =       ppr u <> mconcat (map (brackets . f) ds)
+          f AnyDim       = mempty
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
           ppField (name, t) = text (nameToString name) <> colon <> ppr t
@@ -110,23 +103,34 @@ instance Pretty (ArrayTypeBase Rank as) where
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
   ppr (PolyArray et (Rank n) u _) =
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr (baseName <$> qualNameFromTypeName et)
-  ppr (RecordArray ts (Rank n) u) =
-    ppr u <> mconcat (replicate n (brackets mempty)) <>
-    braces (commasep $ map ppField $ HM.toList ts)
-    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
+  ppr (RecordArray fs (Rank n) u)
+    | Just ts <- areTupleFields fs =
+        prefix <> parens (commasep $ map ppr ts)
+    | otherwise =
+        prefix <> braces (commasep $ map ppField $ HM.toList fs)
+    where prefix = ppr u <> mconcat (replicate n (brackets mempty))
+          ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) where
   ppr (Prim et)    = ppr et
   ppr (TypeVar et) = ppr $ baseName <$> qualNameFromTypeName et
   ppr (Array at)   = ppr at
-  ppr (Record fs)  = braces $ commasep $ map ppField $ HM.toList fs
+  ppr (Record fs)
+    | Just ts <- areTupleFields fs =
+        parens $ commasep $ map ppr ts
+    | otherwise =
+        braces $ commasep $ map ppField $ HM.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (TypeBase Rank as) where
   ppr (Prim et)    = ppr et
   ppr (TypeVar et) = ppr $ baseName <$> qualNameFromTypeName et
   ppr (Array at)   = ppr at
-  ppr (Record fs)  = braces $ commasep $ map ppField $ HM.toList fs
+  ppr (Record fs)
+    | Just ts <- areTupleFields fs =
+        parens $ commasep $ map ppr ts
+    | otherwise =
+      braces $ commasep $ map ppField $ HM.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
@@ -149,30 +153,6 @@ instance Pretty vn => Pretty (QualName vn) where
 
 instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
-
-instance Pretty BinOp where
-  ppr Plus     = text "+"
-  ppr Minus    = text "-"
-  ppr Pow      = text "**"
-  ppr Times    = text "*"
-  ppr Divide   = text "/"
-  ppr Mod      = text "%"
-  ppr Quot     = text "//"
-  ppr Rem      = text "%%"
-  ppr ShiftR   = text ">>"
-  ppr ZShiftR  = text ">>>"
-  ppr ShiftL   = text "<<"
-  ppr Band     = text "&"
-  ppr Xor      = text "^"
-  ppr Bor      = text "|"
-  ppr LogAnd   = text "&&"
-  ppr LogOr    = text "||"
-  ppr Equal    = text "=="
-  ppr NotEqual = text "!="
-  ppr Less     = text "<"
-  ppr Leq      = text "<="
-  ppr Greater  = text ">"
-  ppr Geq      = text ">="
 
 hasArrayLit :: ExpBase ty vn -> Bool
 hasArrayLit ArrayLit{}     = True

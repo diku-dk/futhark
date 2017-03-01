@@ -101,7 +101,8 @@ import           Data.Ord
 
 import           Prelude
 
-import           Language.Futhark.Pretty
+import           Futhark.Util.Pretty
+
 import           Language.Futhark.Syntax
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
@@ -958,6 +959,16 @@ progImports (Prog decs) = concatMap decImports decs
         modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me
         modExpImports ModLambda{}           = []
+
+-- | Given an operator name, return the operator that determines its
+-- syntactical properties.
+leadingOperator :: Name -> BinOp
+leadingOperator s = maybe LogAnd snd $ find ((`isPrefixOf` s') . fst) $
+                    sortBy (flip $ comparing $ length . fst) $
+                    zip (map pretty operators) operators
+  where s' = nameToString s
+        operators :: [BinOp]
+        operators = [minBound..maxBound::BinOp]
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (ShapeDecl Name) ()
