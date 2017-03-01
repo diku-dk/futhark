@@ -114,7 +114,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
   let all_arrs = arrs_flat ++ map_out_arrs
   (ogps_ses, ogps_stms) <- runBinder $ oneGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam
-  (mgps_ses, mgps_stms) <- runBinder $ manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam
+  (mgps_ses, mgps_stms) <- runBinder $ manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam flag_reduce_lam'
 
   (ogms_ses, ogms_stms) <- runBinder $ oneGroupManySeg map_out_arrs flag_reduce_lam'
 
@@ -195,7 +195,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       return $ map (Var . patElemName) $ patternValueElements kernel_pat
 
     ----------------------------------------------------------------------------
-    manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam = do
+    manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam flag_reduce_lam' = do
       mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
@@ -212,20 +212,50 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       let first_pat = Pattern [] $ firstkernel_redres_pes ++ mapres_pes
       addStm =<< renameStm (Let first_pat () $ Op firstkernel)
 
-      (secondkernel, _, _) <- groupPerSegmentKernel num_groups_per_segment num_segments cs
-        (map patElemName firstkernel_redres_pes) comm reduce_lam' kern_chunk_reduce_lam
-        nes num_groups_used OneGroupOneSegment
-        ispace inps
+      let new_segment_size = num_groups_per_segment
+      let new_total_elems = num_groups_used
+      let tmp_redres = map patElemName firstkernel_redres_pes
 
-      second_redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
-        vn' <- newName $ patElemName pe
-        return $ PatElem vn' BindVar $ patElemType pe `setArrayDims` [num_segments]
+      (finalredres, part_two_stms) <- runBinder $ performFinalReduction
+        new_segment_size new_total_elems tmp_redres
+        reduce_lam' kern_chunk_reduce_lam flag_reduce_lam'
 
-      let second_pat = Pattern [] second_redres_pes
-      addStm =<< renameStm (Let second_pat () $ Op secondkernel)
+      mapM_ (addStm <=< renameStm) part_two_stms
 
-      let result_pes = second_redres_pes ++ mapres_pes
-      return $ map (Var . patElemName) result_pes
+      return $ finalredres ++ map (Var . patElemName) mapres_pes
+
+    ----------------------------------------------------------------------------
+    performFinalReduction new_segment_size new_total_elems tmp_redres
+                          reduce_lam' kern_chunk_reduce_lam flag_reduce_lam' = do
+      group_size <- letSubExp "group_size" $ Op GroupSize
+
+      -- Large kernel, using one group per segment (ogps)
+      (large_ses, large_stms) <- runBinder $ do
+        (large_kernel, _, _) <- groupPerSegmentKernel new_segment_size num_segments cs
+          tmp_redres comm reduce_lam' kern_chunk_reduce_lam
+          nes new_total_elems OneGroupOneSegment
+          ispace inps
+        letTupExp' "kernel_result" $ Op large_kernel
+
+      -- Small kernel, using one group many segments (ogms)
+      (small_ses, small_stms) <- runBinder $ do
+        red_scratch_arrs <- forM (take num_redres $ patternIdents pat) $ \(Ident name t) -> do
+          tmp <- letExp (baseString name <> "_redres_scratch") $
+                 BasicOp $ Scratch (elemType t) (arrayDims t)
+          letExp (baseString name ++ "_redres_scratch") $
+                  BasicOp $ Reshape cs [DimNew num_segments] tmp
+        kernel <- oneGroupManySegmentKernel new_segment_size num_segments cs
+                            arrs_flat red_scratch_arrs
+                            comm flag_reduce_lam' fold_lam
+                            nes new_total_elems ispace inps
+        letTupExp' "kernel_result" $ Op kernel
+
+      e <- eIf (eCmpOp (CmpSlt Int32) (eBinOp (SQuot Int32) (eSubExp group_size) (eSubExp two))
+                                  (eSubExp new_segment_size))
+         (mkBodyM large_stms large_ses)
+         (mkBodyM small_stms small_ses)
+
+      letTupExp' "step_two_kernel_result" e
 
     ----------------------------------------------------------------------------
     oneGroupManySeg map_out_arrs flag_reduce_lam' = do
