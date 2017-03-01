@@ -33,4 +33,4 @@ module MSS_Weird = MSS(Weird_measure)
 
 fun main(xs: []i32): (i32, i32) =
   (MSS_Int.mss xs,
-   #0 (MSS_Weird.mss xs))
+   #1 (MSS_Weird.mss xs))

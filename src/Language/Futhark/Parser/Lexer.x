@@ -35,6 +35,8 @@ import Language.Futhark.Syntax (BinOp(..))
 @intlit = @hexlit|@binlit|@declit
 @reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
 
+@field = [a-zA-Z0-9] [a-zA-Z0-9_]*
+
 @identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
 @qualidentifier = (@identifier ".")+ @identifier
 
@@ -50,7 +52,6 @@ tokens :-
   $white+                               ;
   "--"[^\n]*                            ;
   "="                      { tokenC EQU }
-  "#"                      { tokenC HASH }
   "("                      { tokenC LPAR }
   ")"                      { tokenC RPAR }
   ")["                     { tokenC RPAR_THEN_LBRACKET }
@@ -64,6 +65,8 @@ tokens :-
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
   "\"                      { tokenC BACKSLASH }
+
+  "#" @field               { tokenM $ return . FIELD . nameFromText . T.drop 1 }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.takeWhile (/='i') }
@@ -241,7 +244,7 @@ data Token = ID Name
            | COLON
            | AT
            | BACKSLASH
-           | HASH
+           | FIELD Name
            | LPAR
            | RPAR
            | RPAR_THEN_LBRACKET

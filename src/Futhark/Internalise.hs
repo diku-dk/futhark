@@ -21,6 +21,7 @@ import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.Monoid
 import Data.List
+import Data.Ord
 import Data.Traversable (mapM, sequence)
 import Data.Loc
 
@@ -229,9 +230,9 @@ entryPoint :: [(E.Pattern,[I.FParam])]
            -> EntryPoint
 entryPoint params (eret,crets) =
   (concatMap (uncurry entryPointType . preParam) params,
-   case eret of
-     E.Tuple ts -> concat $ zipWith entryPointType ts crets
-     _          -> entryPointType eret $ concat crets)
+   case isTupleRecord eret of
+     Just ts -> concat $ zipWith entryPointType ts crets
+     _       -> entryPointType eret $ concat crets)
   where preParam = E.patternStructType *** staticShapes . map I.paramDeclType
 
         entryPointType :: E.StructType
@@ -306,6 +307,9 @@ internaliseExp desc (E.Index e idxs loc) = do
 
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
+
+internaliseExp desc (E.RecordLit es _) =
+  concat <$> mapM (internaliseExp desc . snd) (sortBy (comparing fst) es)
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -817,12 +821,13 @@ internaliseExp desc (E.BinOp op (xe,_) (ye,_) _ _)
 internaliseExp desc (E.BinOp op xarg yarg ret loc) =
   internaliseExp desc $ E.Apply op [xarg,yarg] ret loc
 
-internaliseExp desc (E.TupleProject i e (Info rt) _) = do
+internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- typeLength rt
-  i' <- fmap sum $ mapM typeLength $ take i $
+  i' <- fmap sum $ mapM typeLength $
         case E.typeOf e of
-               Tuple ts -> ts
-               t        -> [t]
+               Record fs -> map snd $ filter ((<k) . fst) $
+                            sortBy (comparing fst) $ HM.toList fs
+               t         -> [t]
   take n . drop i' <$> internaliseExp desc e
   where typeLength = fmap length . internaliseType
 
@@ -981,8 +986,10 @@ internaliseDimExp s e = do
 internaliseShapeExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseShapeExp s e =
   case E.typeOf e of
-    E.Tuple ts -> zipWithM promote ts =<< internaliseExp s e
-    t          -> fmap pure . promote t =<< internaliseExp1 s e
+    t | Just ts <- isTupleRecord t ->
+          zipWithM promote ts =<< internaliseExp s e
+      | otherwise ->
+          fmap pure . promote t =<< internaliseExp1 s e
   where promote (E.Prim Signed{}) se = asIntS Int32 se
         promote (E.Prim Unsigned{}) se = asIntZ Int32 se
         promote _ _ = fail "internaliseShapeExp.promote: bad type"

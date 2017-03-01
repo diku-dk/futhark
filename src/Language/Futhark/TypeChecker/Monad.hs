@@ -327,7 +327,17 @@ expandType _ (TEVar name loc) = do
   return (TEVar name' loc, t)
 expandType look (TETuple ts loc) = do
   (ts', ts_s) <- unzip <$> mapM (expandType look) ts
-  return (TETuple ts' loc, Tuple ts_s)
+  return (TETuple ts' loc, tupleRecord ts_s)
+expandType look t@(TERecord fs loc) = do
+  -- Check for duplicate field names.
+  let field_names = map fst fs
+  unless (sort field_names == sort (nub field_names)) $
+    bad $ TypeError loc $ "Duplicate record fields in " ++ pretty t
+
+  fs_and_ts <- traverse (expandType look) $ HM.fromList fs
+  let fs' = fmap fst fs_and_ts
+      ts_s = fmap snd fs_and_ts
+  return (TERecord (HM.toList fs') loc, Record ts_s)
 expandType look (TEArray t d loc) = do
   (t', st) <- expandType look t
   d' <- look loc d

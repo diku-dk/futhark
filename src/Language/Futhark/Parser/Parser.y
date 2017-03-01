@@ -76,6 +76,8 @@ import Language.Futhark.Parser.Lexer
       unop            { L _ (UNOP _) }
       qunop           { L _ (QUALUNOP _ _) }
 
+      '#field'        { L _ (FIELD _) }
+
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
@@ -134,7 +136,6 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '@'             { L $$ AT }
       '\\'            { L $$ BACKSLASH }
-      '#'             { L $$ HASH }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
       '->'            { L $$ ARROW }
@@ -414,6 +415,18 @@ TypeExp :: { UncheckedTypeExp }
          | '(' TypeExp ')'         { $2 }
          | '(' TypeExps ')'        { TETuple $2 $1 }
          | QualName                { TEVar (fst $1) (snd $1) }
+         | '{' FieldTypes '}'      { TERecord $2 $1 }
+
+FieldTypes :: { [(Name,UncheckedTypeExp)] }
+           : FieldType ',' SomeFieldTypes { $1 : $3 }
+           | FieldType                    { [$1] }
+           |                              { [] }
+
+SomeFieldTypes : FieldType                    { [$1] }
+               | FieldType ',' SomeFieldTypes { $1 : $3 }
+
+FieldType : id ':' TypeExp { let L _ (ID name) = $1 in (name, $3) }
+
 ;
 
 TypeExps :: { [UncheckedTypeExp] }
@@ -606,7 +619,18 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
      | QualName { Var (fst $1) NoInfo (snd $1) }
-     | '#' NaturalInt Atom { TupleProject $2 $3 NoInfo $1 }
+     | '#field' Atom { let L loc (FIELD name) = $1 in Project name $2 NoInfo loc }
+     | '{' FieldExps '}' { RecordLit $2 $1 }
+
+FieldExps : FieldExp ',' SomeFieldExps { $1 : $3 }
+          | FieldExp                   { [$1] }
+          |                            { [] }
+
+SomeFieldExps : FieldExp                   { [$1] }
+              | FieldExp ',' SomeFieldExps { $1 : $3 }
+
+FieldExp :: { (Name, UncheckedExp) }
+          : id '=' Exp { let L _ (ID name) = $1 in (name, $3) }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
@@ -725,7 +749,6 @@ Value : IntValue { $1 }
       | StringValue { $1 }
       | BoolValue { $1 }
       | ArrayValue { $1 }
-      | TupleValue { $1 }
 
 CatValues : Value CatValues { $1 : $2 }
           |                 { [] }
@@ -795,7 +818,6 @@ ArrayValue :  '[' Value ']'
              }
            | empty '(' PrimType ')'
              { ArrayValue (listArray (0,-1) []) (Prim $3) }
-TupleValue : '(' Values ')' { TupValue $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }

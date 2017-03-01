@@ -22,6 +22,7 @@ import qualified Data.Array as A
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
+import Data.Ord
 
 import Prelude hiding (mapM)
 
@@ -56,8 +57,8 @@ internaliseEntryReturnType :: E.TypeBase (E.ShapeDecl VName) als
                                             HM.HashMap VName Int,
                                             ConstParams)
 internaliseEntryReturnType t = do
-  let ts = case t of E.Tuple tts -> tts
-                     _           -> [t]
+  let ts = case isTupleRecord t of Just tts -> tts
+                                   _        -> [t]
   (ts', (_, subst, cm)) <-
     runStateT (mapM (internaliseDeclType' AssertDims) ts) (0, HM.empty, mempty)
   return (ts', subst, cm)
@@ -83,8 +84,9 @@ internaliseDeclType' _ (E.Prim bt) =
 internaliseDeclType' _ (E.TypeVar v) = lift $ do
   v' <- lookupSubst $ qualNameFromTypeName v
   map (extShaped . (`toDecl` Nonunique)) <$> lookupTypeVar v'
-internaliseDeclType' ddi (E.Tuple ets) =
-  concat <$> mapM (internaliseDeclType' ddi) ets
+internaliseDeclType' ddi (E.Record ets) =
+  concat <$> mapM (internaliseDeclType' ddi . snd)
+  (sortBy (comparing fst) $ HM.toList ets)
 internaliseDeclType' ddi (E.Array at) =
   internaliseArrayType at
   where internaliseArrayType (E.PrimArray bt shape u _) = do
@@ -98,24 +100,24 @@ internaliseDeclType' ddi (E.Array at) =
           return [I.arrayOf (extShaped t) (ExtShape dims) $ internaliseUniqueness u
                  | t <- ts]
 
-        internaliseArrayType (E.TupleArray elemts shape u) = do
+        internaliseArrayType (E.RecordArray elemts shape u) = do
           innerdims <- ExtShape <$> internaliseShape shape
-          ts <- concat <$> mapM internaliseTupleArrayElem elemts
+          ts <- concat <$> mapM internaliseRecordArrayElem elemts
           return [ I.arrayOf ct innerdims $
                    if I.unique ct then Unique
                    else if I.primType ct then u
                         else I.uniqueness ct
                  | ct <- ts ]
 
-        internaliseTupleArrayElem (PrimArrayElem bt _ _) =
+        internaliseRecordArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
-        internaliseTupleArrayElem (PolyArrayElem v _ _) = lift $ do
+        internaliseRecordArrayElem (PolyArrayElem v _ _) = lift $ do
           v' <- lookupSubst $ qualNameFromTypeName v
           map (extShaped . (`toDecl` Nonunique)) <$> lookupTypeVar v'
-        internaliseTupleArrayElem (ArrayArrayElem aet) =
+        internaliseRecordArrayElem (ArrayArrayElem aet) =
           internaliseArrayType aet
-        internaliseTupleArrayElem (TupleArrayElem ts) =
-          concat <$> mapM internaliseTupleArrayElem ts
+        internaliseRecordArrayElem (RecordArrayElem ts) =
+          concat <$> mapM internaliseRecordArrayElem ts
 
         newId = do (i,m,cm) <- get
                    put (i + 1, m, cm)
@@ -160,8 +162,9 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
           lift Nothing
         internaliseType' (E.Prim bt) =
           return [I.Prim $ internalisePrimType bt]
-        internaliseType' (E.Tuple ets) =
-          concat <$> mapM internaliseType' ets
+        internaliseType' (E.Record ets) =
+          concat <$> mapM (internaliseType' . snd)
+          (sortBy (comparing fst) $ HM.toList ets)
         internaliseType' (E.Array at) =
           internaliseArrayType at
 
@@ -171,23 +174,23 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId
           return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
                   internaliseUniqueness u]
-        internaliseArrayType (E.TupleArray elemts shape u) = do
+        internaliseArrayType (E.RecordArray elemts shape u) = do
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId
-          ts <- concat <$> mapM internaliseTupleArrayElem elemts
+          ts <- concat <$> mapM internaliseRecordArrayElem elemts
           return [ I.arrayOf t (ExtShape dims) $
                     if I.unique t then Unique
                     else if I.primType t then u
                          else I.uniqueness t
                  | t <- ts ]
 
-        internaliseTupleArrayElem PolyArrayElem{} =
+        internaliseRecordArrayElem PolyArrayElem{} =
           lift Nothing
-        internaliseTupleArrayElem (PrimArrayElem bt _ _) =
+        internaliseRecordArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
-        internaliseTupleArrayElem (ArrayArrayElem at) =
+        internaliseRecordArrayElem (ArrayArrayElem at) =
           internaliseArrayType at
-        internaliseTupleArrayElem (TupleArrayElem ts) =
-          concat <$> mapM internaliseTupleArrayElem ts
+        internaliseRecordArrayElem (RecordArrayElem ts) =
+          concat <$> mapM internaliseRecordArrayElem ts
 
         newId = do i <- get
                    put $ i + 1
@@ -230,9 +233,6 @@ internaliseValue (E.ArrayValue arr rt) = do
              else Nothing
         flat (I.PrimVal bv)      = [bv]
         flat (I.ArrayVal bvs _ _) = A.elems bvs
-
-internaliseValue (E.TupValue vs) =
-  concat <$> mapM internaliseValue vs
 internaliseValue (E.PrimValue bv) =
   return [I.PrimVal $ internalisePrimValue bv]
 

@@ -560,8 +560,8 @@ checkConst (ConstBind name maybe_t NoInfo e loc) = do
       return (Nothing, e')
   let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
   return $ ConstBind name' maybe_t' (Info e_t) e' loc
-  where anythingUnique (Tuple ts) = any anythingUnique ts
-        anythingUnique et         = unique et
+  where anythingUnique (Record fs) = any anythingUnique fs
+        anythingUnique et          = unique et
 
 checkFun :: FunBindBase NoInfo Name -> TypeM FunBind
 checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
@@ -828,12 +828,12 @@ substituteTypes substs (Array at) = substituteTypesInArray at
               arrayOf t shape u
           | otherwise =
               Array $ PolyArray v shape u ()
-        substituteTypesInArray (TupleArray ts shape u) =
-          Array $ TupleArray ts' shape u
-          where ts' = map (flip typeToTupleArrayElem u .
+        substituteTypesInArray (RecordArray ts shape u) =
+          Array $ RecordArray ts' shape u
+          where ts' = fmap (flip typeToRecordArrayElem u .
                             substituteTypes substs .
-                            tupleArrayElemToType) ts
-substituteTypes substs (Tuple ts) = Tuple $ map (substituteTypes substs) ts
+                            recordArrayElemToType) ts
+substituteTypes substs (Record ts) = Record $ fmap (substituteTypes substs) ts
 
 allNamesInMTy :: MTy -> HS.HashSet VName
 allNamesInMTy (MTy abs mod) =

@@ -22,11 +22,14 @@ Identifiers and Keywords
    qualid: `id` | `quals` `id`
    binop: `symbol`+
    qualbinop: `binop` | `quals` `binop`
+   fieldid: (`letter` | `decdigit`) (`letter` | `decdigit` | "_")+
    symbol: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
 
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
-a module, we use a qualified name (`qualid`).
+a module, we use a qualified name (`qualid`).  The fields of a record
+are named with `fieldid`s.  Note that a `fieldid` can be entirely
+numeric.
 
 Primitive Types and Values
 --------------------------
@@ -94,9 +97,10 @@ although they are not very useful-these are written ``()`` and are of
 type ``()``.
 
 .. productionlist::
-   type: `array_type` | `tuple_type` | `qualid`
+   type: `qualid` | `array_type` | `tuple_type` | `record_type`
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
+   record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
    dim: `qualid` | `decimal`
 
 An array value is written as a nonempty sequence of comma-separated
@@ -119,6 +123,11 @@ we can understand it in language terms by the inability to write a
 type with consistent dimension sizes for an irregular array value.  In
 a Futhark program, all array values, including intermediate (unnamed)
 arrays, must be typeable.
+
+Records are mappings from field names to values, with the field names
+known statically.  A tuple behaves in all respects like a record with
+numeric field names, and vice versa.  It is an error for a record type
+to name the same field twice.
 
 String literals are supported, but only as syntactic sugar for arrays
 of ``i32`` values.  There is no ``char`` type in Futhark.
@@ -145,10 +154,12 @@ literals and variables, but also more complicated forms.
        : | "(" ")"
        : | "(" `exp` ")"
        : | "(" `exp` ("," `exp`)* ")"
+       : | "{" "}"
+       : | "{" `fieldid` "=" `exp` ("," `fieldid` "=" `exp`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | "[" `exp` ("," `exp`)* "]"
-       : | "#" `nat_int` `exp`
+       : | "#" `fieldid` `exp`
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -280,7 +291,14 @@ Evaluates to the result of ``e``.
 ``(e1, e2, ..., eN)``
 .....................
 
-Evaluates to a tuple containing ``N`` values.
+Evaluates to a tuple containing ``N`` values.  Equivalent to ``(1=e1,
+2=e2, ..., N=eN)``.
+
+``{f1=e1, f2=e2, ..., f3=eN}``
+..............................
+
+Evaluates to a record containing ``N`` fields.  It is an error to have
+duplicate field names.
 
 ``a[i]``
 ........
@@ -323,12 +341,11 @@ empty arrays must be constructed with the ``empty`` construct.  This
 restriction is due to limited type inference in the Futhark compiler,
 and will hopefully be fixed in the future.
 
-``#i e``
+``#f e``
 ........
 
-Access field ``i`` of the expression ``e``, which must be of
-tuple-type.  The fields are indexed from zero.  ``i`` must be a
-literal integer, not an arbitrary expression.
+Access field ``f`` of the expression ``e``, which must be a record or
+tuple.  There may not be a space between ``#`` and the field name.
 
 ``x`` *binop* ``y``
 ...................
