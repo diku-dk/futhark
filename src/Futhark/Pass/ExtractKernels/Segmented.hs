@@ -119,7 +119,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   (ogms_ses, ogms_stms) <- runBinder $ oneGroupManySeg map_out_arrs flag_reduce_lam'
 
 
-  group_size <- letSubExp "num_groups_hint" $ Op GroupSize
+  group_size <- letSubExp "group_size" $ Op GroupSize
   num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
 
   (num_groups_per_segment, _) <-
