@@ -118,13 +118,13 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
   (ogms_ses, ogms_stms) <- runBinder $ oneGroupManySeg map_out_arrs flag_reduce_lam'
 
-  -- TODO: should unify this calculation somewhere, with the one taking place in
-  -- 'groupPerSegmentKernel'
-  num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
-  num_groups_per_segment <- letSubExp "num_groups_per_segment" =<<
-    eDivRoundingUp Int32 (eSubExp num_groups_hint) (eSubExp num_segments)
 
-  group_size <- letSubExp "group_size" $ Op GroupSize
+  group_size <- letSubExp "num_groups_hint" $ Op GroupSize
+  num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
+
+  (num_groups_per_segment, _) <-
+    calcGroupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size ManyGroupsOneSegment
+
   num_segments_per_group <- letSubExp "num_segments_per_group" $
     BasicOp $ BinOp (SQuot Int32) group_size segment_size
 
@@ -265,12 +265,9 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
   group_size <- letSubExp "group_size" $ Op GroupSize
   num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
 
-  num_groups_per_segment <-
-    letSubExp "num_groups_per_segment" =<<
-    case segver of
-      OneGroupOneSegment -> eSubExp one
-      ManyGroupsOneSegment -> eDivRoundingUp Int32 (eSubExp num_groups_hint)
-                                                   (eSubExp num_segments)
+  (num_groups_per_segment, elements_per_thread) <-
+    calcGroupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size segver
+
   num_groups <- letSubExp "num_groups" $
     case segver of
       OneGroupOneSegment -> BasicOp $ SubExp num_segments
@@ -278,12 +275,6 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
 
   num_threads <- letSubExp "num_threads" $
     BasicOp $ BinOp (Mul Int32) num_groups group_size
-
-  elements_per_thread <-
-    letSubExp "elements_per_thread" =<<
-    eDivRoundingUp Int32 (eSubExp segment_size)
-                         (eBinOp (Mul Int32) (eSubExp group_size)
-                                             (eSubExp num_groups_per_segment))
 
   threads_within_segment <- letSubExp "threads_within_segment" $
     BasicOp $ BinOp (Mul Int32) group_size num_groups_per_segment
@@ -412,6 +403,48 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
       e <- eBinOp (Add Int32) (eSubExp index_within_segment)
              (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
       letSubExp "offset" e
+
+calcGroupsPerSegmentAndElementsPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
+                        SubExp
+                     -> SubExp
+                     -> SubExp
+                     -> SubExp
+                     -> SegmentedVersion
+                     -> m (SubExp, SubExp)
+calcGroupsPerSegmentAndElementsPerThread segment_size num_segments
+                                         num_groups_hint group_size segver = do
+  num_groups_per_segment_hint <-
+    letSubExp "num_groups_per_segment_hint" =<<
+    case segver of
+      OneGroupOneSegment -> eSubExp one
+      ManyGroupsOneSegment -> eDivRoundingUp Int32 (eSubExp num_groups_hint)
+                                                   (eSubExp num_segments)
+  elements_per_thread <-
+    letSubExp "elements_per_thread" =<<
+    eDivRoundingUp Int32 (eSubExp segment_size)
+                         (eBinOp (Mul Int32) (eSubExp group_size)
+                                             (eSubExp num_groups_per_segment_hint))
+
+  -- if we are using 1 element per thread, we might be launching too many
+  -- groups. This expression will remedy this.
+  --
+  -- For example, if there are 3 segments of size 512, we are using group size
+  -- 128, and @num_groups_hint@ is 256; then we would use 1 element per thread,
+  -- and launch 256 groups. However, we only need 4 groups per segment to
+  -- process all elements.
+  num_groups_per_segment <-
+    letSubExp "num_groups_per_segment" =<<
+    case segver of
+      OneGroupOneSegment -> eSubExp one
+      ManyGroupsOneSegment ->
+        eIf (eCmpOp (CmpEq $ IntType Int32) (eSubExp elements_per_thread) (eSubExp one))
+          (eBody [eDivRoundingUp Int32 (eSubExp segment_size) (eSubExp group_size)])
+          (mkBodyM [] [num_groups_per_segment_hint])
+
+  return (num_groups_per_segment, elements_per_thread)
+
+  where
+    one = constant (1 :: Int32)
 
 oneGroupManySegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
