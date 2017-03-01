@@ -54,22 +54,22 @@ with ``0b``.
 
 .. productionlist::
    intnumber: (`decimal` | `hexadecimal` | `binary`) [`int_type`]
-   decimal: `dec_digit`+
-   hexadecimal: 0 ("x" | "X") `hex_digit`+
-   binary: 0 ("b" | "B") `bin_digit`+
+   decimal: `decdigit`+
+   hexadecimal: 0 ("x" | "X") `hexdigit`+
+   binary: 0 ("b" | "B") `bindigit`+
 
 .. productionlist::
    floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
    pointfloat: [`intpart`] `fraction` | `intpart` "."
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
-   intpart: `dec_digit`+
-   fraction: "." `dec_digit`+
-   exponent: ("e" | "E") ["+" | "-"] `dec_digit`+
+   intpart: `decdigit`+
+   fraction: "." `decdigit`+
+   exponent: ("e" | "E") ["+" | "-"] `decdigit`+
 
 .. productionlist::
-   dec_digit: "0"..."9"
-   hex_digit: dec_digit | "a"..."f" | "A"..."F"
-   bin_digit: "0" | "1"
+   decdigit: "0"..."9"
+   hexdigit: `decdigit` | "a"..."f" | "A"..."F"
+   bindigit: "0" | "1"
 
 Numeric values can be converted between different types by using the
 desired type name as a function.  E.g., ``i32(1.0f32)`` would convert

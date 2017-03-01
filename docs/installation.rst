@@ -129,7 +129,7 @@ Setting up Futhark and OpenCL
    only it.
 
    To finish the installation, add the
-   ``C:\UserName\Marko\Anaconda2\share\mingwpy\include`` to the ``CPATH``
+   ``C:\Users\UserName\Anaconda2\share\mingwpy\include`` to the ``CPATH``
    environment variable (note: *not* ``PATH``). Create the variable if
    necessary.
 
