@@ -645,6 +645,7 @@ instance Located (LambdaBase f vn) where
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).
 data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
+                      | RecordPattern [(Name, PatternBase f vn)] SrcLoc
                       | PatternParens (PatternBase f vn) SrcLoc
                       | Id (IdentBase f vn)
                       | Wildcard (f (CompTypeBase vn)) SrcLoc -- Nothing, i.e. underscore.
@@ -653,6 +654,7 @@ deriving instance Showable f vn => Show (PatternBase f vn)
 
 instance Located (PatternBase f vn) where
   locOf (TuplePattern _ loc)    = locOf loc
+  locOf (RecordPattern _ loc)   = locOf loc
   locOf (PatternParens _ loc)   = locOf loc
   locOf (Id ident)              = locOf ident
   locOf (Wildcard _ loc)        = locOf loc

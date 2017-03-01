@@ -65,8 +65,9 @@ tokens :-
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
   "\"                      { tokenC BACKSLASH }
+  "#"                      { tokenC HASH }
 
-  "#" @field               { tokenM $ return . FIELD . nameFromText . T.drop 1 }
+  @declit                  { tokenM $ return . DECLIT . readIntegral }
 
   @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.takeWhile (/='i') }
@@ -226,6 +227,7 @@ data Token = ID Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
 
+           | DECLIT Integer
            | STRINGLIT String
            | INTLIT Int64
            | I8LIT Int8
@@ -244,7 +246,7 @@ data Token = ID Name
            | COLON
            | AT
            | BACKSLASH
-           | FIELD Name
+           | HASH
            | LPAR
            | RPAR
            | RPAR_THEN_LBRACKET

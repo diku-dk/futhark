@@ -317,6 +317,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (PatternParens p _)     = parens $ ppr p
   ppr (Id ident)              = ppr ident
   ppr (TuplePattern pats _)   = parens $ commasep $ map ppr pats
+  ppr (RecordPattern fs _)    = braces $ commasep $ map ppField fs
+    where ppField (name, t) = text (nameToString name) <> equals <> ppr t
   ppr (Wildcard _ _)          = text "_"
 
 ppAscription :: (Eq vn, Hashable vn, Pretty vn) => Maybe (TypeDeclBase ty vn) -> Doc

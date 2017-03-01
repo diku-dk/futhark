@@ -554,6 +554,7 @@ checkExp (LetPat pat e body pos) =
   where -- HACK: Until we figure out what they should mean, shape
         -- declarations are banned in let binding type ascriptions.
     hasShapeDecl (TuplePattern ps _) = any hasShapeDecl ps
+    hasShapeDecl (RecordPattern fs _) = any (hasShapeDecl . snd) fs
     hasShapeDecl (PatternParens p _) = hasShapeDecl p
     hasShapeDecl Id{} = False
     hasShapeDecl Wildcard{} = False
@@ -906,6 +907,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
             in Id (Ident name (Info t') iloc)
       uniquePat (TuplePattern pats ploc) =
         TuplePattern (map uniquePat pats) ploc
+      uniquePat (RecordPattern fs ploc) =
+        RecordPattern (map (fmap uniquePat) fs) ploc
       uniquePat (PatternAscription p t) =
         PatternAscription (uniquePat p) t
 
@@ -1012,8 +1015,10 @@ data InferredType = NoneInferred
 
 checkPattern :: PatternBase NoInfo Name -> InferredType
              -> TermTypeM Pattern
+
 checkPattern (PatternParens p loc) t =
   PatternParens <$> checkPattern p t <*> pure loc
+
 checkPattern (Id (Ident name NoInfo loc)) (Inferred t) = do
   name' <- checkName Term name loc
   let t' = typeOf $ Var (qualName name') (Info t) loc
@@ -1022,10 +1027,12 @@ checkPattern (Id (Ident name NoInfo loc)) (Ascribed t) = do
   name' <- checkName Term name loc
   let t' = typeOf $ Var (qualName name') (Info t) loc
   return $ Id $ Ident name' (Info t') loc
+
 checkPattern (Wildcard _ loc) (Inferred t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
 checkPattern (Wildcard _ loc) (Ascribed t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
+
 checkPattern (TuplePattern ps loc) (Inferred t)
   | Just ts <- isTupleRecord t, length ts == length ps =
   TuplePattern <$> zipWithM checkPattern ps (map Inferred ts) <*> pure loc
@@ -1038,6 +1045,24 @@ checkPattern p@TuplePattern{} (Ascribed t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern (TuplePattern ps loc) NoneInferred =
   TuplePattern <$> mapM (`checkPattern` NoneInferred) ps <*> pure loc
+
+checkPattern (RecordPattern p_fs loc) (Inferred (Record t_fs))
+  | sort (map fst p_fs) == sort (HM.keys t_fs) =
+    RecordPattern . HM.toList <$> check <*> pure loc
+    where check = traverse (uncurry checkPattern) $ HM.intersectionWith (,)
+                  (HM.fromList p_fs) (fmap Inferred t_fs)
+checkPattern (RecordPattern p_fs loc) (Ascribed (Record t_fs))
+  | sort (map fst p_fs) == sort (HM.keys t_fs) =
+    RecordPattern . HM.toList <$> check <*> pure loc
+    where check = traverse (uncurry checkPattern) $ HM.intersectionWith (,)
+                  (HM.fromList p_fs) (fmap Ascribed t_fs)
+checkPattern p@RecordPattern{} (Inferred t) =
+  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
+checkPattern p@RecordPattern{} (Ascribed t) =
+  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
+checkPattern (RecordPattern fs loc) NoneInferred =
+  RecordPattern . HM.toList <$> traverse (`checkPattern` NoneInferred) (HM.fromList fs) <*> pure loc
+
 checkPattern fullp@(PatternAscription p td) maybe_outer_t = do
   td' <- checkBindingTypeDecl td
   let maybe_outer_t' = case maybe_outer_t of Inferred t -> Just t
@@ -1050,6 +1075,7 @@ checkPattern fullp@(PatternAscription p td) maybe_outer_t = do
       | not (outer_t `subtypeOf` t') ->
           bad $ InvalidPatternError fullp (toStructural outer_t) Nothing $ srclocOf p
     _ -> PatternAscription <$> checkPattern p (Ascribed t') <*> pure td'
+
 checkPattern p NoneInferred =
   bad $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty p
 
@@ -1062,6 +1088,7 @@ checkForDuplicateNames = fmap toNames . flip execStateT mempty . mapM_ check
         check (PatternParens p _) = check p
         check Wildcard{} = return ()
         check (TuplePattern ps _) = mapM_ check ps
+        check (RecordPattern fs _) = mapM_ (check . snd) fs
         check (PatternAscription p t) = do
           check p
           mapM_ (checkDimDecl $ srclocOf p) $ nestedDims' $ declaredType t

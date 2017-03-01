@@ -189,7 +189,9 @@ readIntegral :: Integral int => (Token -> Maybe int) -> ReadValue int
 readIntegral f t = do
   v <- case scanTokens "" a of
          Right [L _ NEGATE, L _ (INTLIT x)] -> Just $ negate $ fromIntegral x
+         Right [L _ NEGATE, L _ (DECLIT x)] -> Just $ negate $ fromIntegral x
          Right [L _ (INTLIT x)] -> Just $ fromIntegral x
+         Right [L _ (DECLIT x)] -> Just $ fromIntegral x
          Right [L _ tok] -> f tok
          Right [L _ NEGATE, L _ tok] -> negate <$> f tok
          _ -> Nothing
