@@ -856,10 +856,9 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                 e' <- require anySignedType =<< checkExp e
                 void $ unifyExpTypes e' uboundexp'
                 return $ ExpBound e'
-        bindingIdent i (typeOf uboundexp') $ \i' ->
-          binding [i'] $ noUnique $ collectOccurences $
-            bindingPattern mergepat (Ascribed $ typeOf mergeexp' `setAliases` mempty) $ \mergepat' ->
-            onlySelfAliasing $ tapOccurences $ do
+        collectOccurences $ bindingIdent i (typeOf uboundexp') $ \i' ->
+          noUnique $ bindingPattern mergepat (Ascribed $ typeOf mergeexp' `setAliases` mempty) $
+          \mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
             return (mergepat',
                     For dir lboundexp' i' uboundexp',
