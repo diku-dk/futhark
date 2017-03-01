@@ -22,4 +22,4 @@ fun main(upper: i32): [][2]i32 =
   let range = map (1+) (iota upper)
   let divs = zip range (map (\n -> reduce (+) 0 (divisors n)) range)
   let amicable = filter amicable (map (getPair divs) (iota (upper*upper)))
-  in map (\(np,mp) -> [#0 np, #0 mp]) amicable
+  in map (\(np,mp) -> [#1 np, #1 mp]) amicable
