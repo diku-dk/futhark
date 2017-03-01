@@ -592,7 +592,7 @@ Exp2 :: { UncheckedExp }
        { let (fname, args, loc) = $1 in Apply fname [ (arg, Observe) | arg <- args ] NoInfo loc }
      | Atom %prec juxtprec { $1 }
 
-     | '-' Exp
+     | '-' Exp2
        { Negate $2 $1 }
 
 
