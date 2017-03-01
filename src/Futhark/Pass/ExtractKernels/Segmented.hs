@@ -161,7 +161,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
   where
     one = constant (1 :: Int32)
-    two = constant (1 :: Int32)
+    two = constant (2 :: Int32)
 
     -- number of reduction results (tuple size for reduction operator)
     num_redres = length nes
