@@ -26,12 +26,12 @@ module Language.Futhark.Syntax
   , qualNameFromTypeName
   , TypeBase(..)
   , TypeExp(..)
-  , TupleArrayElemTypeBase(..)
+  , RecordArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
   , StructTypeBase
   , DeclArrayTypeBase
-  , DeclTupleArrayElemTypeBase
+  , DeclRecordArrayElemTypeBase
   , Diet(..)
   , TypeDeclBase (..)
 
@@ -214,19 +214,19 @@ qualNameFromTypeName :: TypeName -> QualName VName
 qualNameFromTypeName (TypeName qs x) = QualName qs x
 
 -- | Types that can be elements of tuple-arrays.
-data TupleArrayElemTypeBase shape as =
+data RecordArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
   | PolyArrayElem TypeName as Uniqueness
-  | TupleArrayElem [TupleArrayElemTypeBase shape as]
+  | RecordArrayElem (HM.HashMap Name (RecordArrayElemTypeBase shape as))
   deriving (Show)
 
 instance Eq shape =>
-         Eq (TupleArrayElemTypeBase shape as) where
+         Eq (RecordArrayElemTypeBase shape as) where
   PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
   PolyArrayElem bt1 _ u1 == PolyArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
   ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
-  TupleArrayElem ts1     == TupleArrayElem ts2     = ts1 == ts2
+  RecordArrayElem ts1     == RecordArrayElem ts2     = ts1 == ts2
   _                      == _                      = False
 
 -- | An array type.
@@ -235,8 +235,9 @@ data ArrayTypeBase shape as =
     -- ^ An array whose elements are primitive types.
   | PolyArray TypeName shape Uniqueness as
     -- ^ An array whose elements are some polymorphic type.
-  | TupleArray [TupleArrayElemTypeBase shape as] shape Uniqueness
-    -- ^ An array whose elements are tuples.
+  | RecordArray (HM.HashMap Name (RecordArrayElemTypeBase shape as)) shape Uniqueness
+    -- ^ An array whose elements are records.  Note that tuples are
+    -- also just records.
     deriving (Show)
 
 instance Eq shape =>
@@ -245,7 +246,7 @@ instance Eq shape =>
     et1 == et2 && dims1 == dims2 && u1 == u2
   PolyArray et1 dims1 u1 _ == PolyArray et2 dims2 u2 _ =
     et1 == et2 && dims1 == dims2 && u1 == u2
-  TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
+  RecordArray ts1 dims1 u1 == RecordArray ts2 dims2 u2 =
     ts1 == ts2 && dims1 == dims2 && u1 == u2
   _ == _ =
     False
@@ -255,7 +256,7 @@ instance Eq shape =>
 -- '==', aliases are ignored, but dimensions much match.
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
-                       | Tuple [TypeBase shape as]
+                       | Record (HM.HashMap Name (TypeBase shape as))
                        | TypeVar TypeName
                           deriving (Eq, Show)
 
@@ -267,6 +268,7 @@ type CompTypeBase vn = TypeBase Rank (Names vn)
 -- declarations - this is what the user types in the source program.
 data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TETuple [TypeExp vn] SrcLoc
+                | TERecord [(Name, TypeExp vn)] SrcLoc
                 | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
                  deriving (Eq, Show)
@@ -274,6 +276,7 @@ data TypeExp vn = TEVar (QualName vn) SrcLoc
 instance Located (TypeExp vn) where
   locOf (TEArray _ _ loc) = locOf loc
   locOf (TETuple _ loc)   = locOf loc
+  locOf (TERecord _ loc)  = locOf loc
   locOf (TEVar _ loc)     = locOf loc
   locOf (TEUnique _ loc)  = locOf loc
 
@@ -290,7 +293,7 @@ type DeclArrayTypeBase vn = ArrayTypeBase (ShapeDecl vn) ()
 
 -- | A tuple array element type with shape annotations and no aliasing
 -- information, used for declarations.
-type DeclTupleArrayElemTypeBase vn = TupleArrayElemTypeBase (ShapeDecl vn) ()
+type DeclRecordArrayElemTypeBase vn = RecordArrayElemTypeBase (ShapeDecl vn) ()
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
@@ -305,16 +308,15 @@ deriving instance Showable f vn => Show (TypeDeclBase f vn)
 -- example, we might say that a function taking an argument of type
 -- @([int], *[int], [int])@ has diet @ConsumeTuple [Observe, Consume,
 -- Observe]@.
-data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
+data Diet = RecordDiet (HM.HashMap Name Diet) -- ^ Consumes these fields in the record.
           | Consume -- ^ Consumes this value.
           | Observe -- ^ Only observes value in this position, does
                     -- not consume.
-            deriving (Eq, Ord, Show)
+            deriving (Eq, Show)
 
 -- | Every possible value in Futhark.  Values are fully evaluated and their
 -- type is always unambiguous.
 data Value = PrimValue !PrimValue
-           | TupValue ![Value]
            | ArrayValue !(Array Int Value) (TypeBase Rank ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
@@ -400,6 +402,9 @@ data ExpBase f vn =
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
+            | RecordLit [(Name,ExpBase f vn)] SrcLoc
+            -- ^ Record literals, e.g. @{x=2,y=3}@.
+
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
@@ -433,7 +438,7 @@ data ExpBase f vn =
 
             | BinOp (QualName vn) (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f (CompTypeBase vn)) SrcLoc
 
-            | TupleProject Int (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
+            | Project Name (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
@@ -564,7 +569,8 @@ instance Located (ExpBase f vn) where
   locOf (Literal _ loc)          = locOf loc
   locOf (Parens _ loc)           = locOf loc
   locOf (TupLit _ pos)           = locOf pos
-  locOf (TupleProject _ _ _ pos) = locOf pos
+  locOf (RecordLit _ pos)        = locOf pos
+  locOf (Project _ _ _ pos)      = locOf pos
   locOf (ArrayLit _ _ pos)       = locOf pos
   locOf (Empty _ pos)            = locOf pos
   locOf (BinOp _ _ _ _ pos)      = locOf pos

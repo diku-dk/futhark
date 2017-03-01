@@ -282,9 +282,11 @@ unifyTypes (TypeVar t1) (TypeVar t2)
   | otherwise = Nothing
 unifyTypes (Array at1) (Array at2) =
   Array <$> unifyArrayTypes at1 at2
-unifyTypes (Tuple ts1) (Tuple ts2)
-  | length ts1 == length ts2 =
-    Tuple <$> zipWithM unifyTypes ts1 ts2
+unifyTypes (Record ts1) (Record ts2)
+  | length ts1 == length ts2,
+    sort (HM.keys ts1) == sort (HM.keys ts2) =
+      Record <$> traverse (uncurry unifyTypes)
+      (HM.intersectionWith (,) ts1 ts2)
 unifyTypes _ _ = Nothing
 
 unifyArrayTypes :: Monoid (as vn) =>
@@ -297,28 +299,32 @@ unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
 unifyArrayTypes (PolyArray bt1 shape1 u1 als1) (PolyArray bt2 shape2 u2 als2)
   | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
     Just $ PolyArray bt1 shape1 (u1 <> u2) (als1 <> als2)
-unifyArrayTypes (TupleArray et1 shape1 u1) (TupleArray et2 shape2 u2)
-  | shapeRank shape1 == shapeRank shape2 =
-    TupleArray <$> zipWithM unifyTupleArrayElemTypes et1 et2 <*>
+unifyArrayTypes (RecordArray et1 shape1 u1) (RecordArray et2 shape2 u2)
+  | shapeRank shape1 == shapeRank shape2,
+    sort (HM.keys et1) == sort (HM.keys et2) =
+    RecordArray <$>
+    traverse (uncurry unifyRecordArrayElemTypes) (HM.intersectionWith (,) et1 et2) <*>
     pure shape1 <*> pure (u1 <> u2)
 unifyArrayTypes _ _ =
   Nothing
 
-unifyTupleArrayElemTypes :: Monoid (as vn) =>
-                            TupleArrayElemTypeBase Rank (as vn)
-                         -> TupleArrayElemTypeBase Rank (as vn)
-                         -> Maybe (TupleArrayElemTypeBase Rank (as vn))
-unifyTupleArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
+unifyRecordArrayElemTypes :: Monoid (as vn) =>
+                            RecordArrayElemTypeBase Rank (as vn)
+                         -> RecordArrayElemTypeBase Rank (as vn)
+                         -> Maybe (RecordArrayElemTypeBase Rank (as vn))
+unifyRecordArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
   | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
-unifyTupleArrayElemTypes (PolyArrayElem bt1 als1 u1) (PolyArrayElem bt2 als2 u2)
+unifyRecordArrayElemTypes (PolyArrayElem bt1 als1 u1) (PolyArrayElem bt2 als2 u2)
   | bt1 == bt2 = Just $ PolyArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
-unifyTupleArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
+unifyRecordArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
   ArrayArrayElem <$> unifyArrayTypes at1 at2
-unifyTupleArrayElemTypes (TupleArrayElem ts1) (TupleArrayElem ts2) =
-  TupleArrayElem <$> zipWithM unifyTupleArrayElemTypes ts1 ts2
-unifyTupleArrayElemTypes _ _ =
+unifyRecordArrayElemTypes (RecordArrayElem ts1) (RecordArrayElem ts2)
+  | sort (HM.keys ts1) == sort (HM.keys ts2) =
+    RecordArrayElem <$>
+    traverse (uncurry unifyRecordArrayElemTypes) (HM.intersectionWith (,) ts1 ts2)
+unifyRecordArrayElemTypes _ _ =
   Nothing
 
 -- | Determine if two types are identical, ignoring uniqueness.
@@ -344,11 +350,11 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar scope (Ident name (Info tp) _) =
           let inedges = HS.toList $ aliases tp
               update (BoundV tp')
-              -- If 'name' is tuple-typed, don't alias the components
-              -- to 'name', because tuples have no identity beyond
+              -- If 'name' is record-typed, don't alias the components
+              -- to 'name', because records have no identity beyond
               -- their components.
-                | Tuple _ <- tp = BoundV tp'
-                | otherwise     = BoundV (tp' `addAliases` HS.insert name)
+                | Record _ <- tp = BoundV tp'
+                | otherwise      = BoundV (tp' `addAliases` HS.insert name)
               update b = b
           in scope { scopeVtable = HM.insert name (BoundV tp) $
                                    adjustSeveral update inedges $
@@ -444,6 +450,14 @@ checkExp (Literal val loc) =
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
 
+checkExp e@(RecordLit fs loc) = do
+  -- Check for duplicate field names.
+  let (field_names, field_exps) = unzip fs
+  unless (sort field_names == sort (nub field_names)) $
+    bad $ TypeError loc $ "Duplicate record fields in " ++ pretty e
+
+  RecordLit <$> (zip field_names <$> mapM checkExp field_exps) <*> pure loc
+
 checkExp (ArrayLit es _ loc) = do
   es' <- mapM checkExp es
   -- Find the universal type of the array arguments.
@@ -488,11 +502,12 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
     _ ->
       fail $ "Internal typechecker error: got invalid parameter types back from type checking binary operator " ++ pretty op
 
-checkExp (TupleProject i e NoInfo loc) = do
+checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   case typeOf e' of
-    Tuple ts | t:_ <- drop i ts -> return $ TupleProject i e' (Info t) loc
-    _ -> bad $ InvalidField loc (typeOf e') (show i)
+    Record fs | Just t <- HM.lookup k fs ->
+                return $ Project k e' (Info t) loc
+    _ -> bad $ InvalidField loc (typeOf e') (pretty k)
 
 checkExp (If e1 e2 e3 _ pos) =
   sequentially (require [Prim Bool] =<< checkExp e1) $ \e1' _ -> do
@@ -548,24 +563,24 @@ checkExp (LetPat pat e body pos) =
 
     hasShapeDecl' Prim{} = False
     hasShapeDecl' TypeVar{} = False
-    hasShapeDecl' (Tuple ts) = any hasShapeDecl' ts
+    hasShapeDecl' (Record ts) = any hasShapeDecl' ts
     hasShapeDecl' (Array at) = arrayElemHasShapeDecl at
 
     arrayElemHasShapeDecl (PrimArray _ shape _ _) =
       any (/=AnyDim) (shapeDims shape)
     arrayElemHasShapeDecl (PolyArray _ shape _ _) =
       any (/=AnyDim) (shapeDims shape)
-    arrayElemHasShapeDecl (TupleArray ts shape _) =
+    arrayElemHasShapeDecl (RecordArray ts shape _) =
       any (/=AnyDim) (shapeDims shape) ||
-      any tupleArrayElemHasShapeDecl ts
+      any recordArrayElemHasShapeDecl ts
 
-    tupleArrayElemHasShapeDecl (ArrayArrayElem at) =
+    recordArrayElemHasShapeDecl (ArrayArrayElem at) =
       arrayElemHasShapeDecl at
-    tupleArrayElemHasShapeDecl (TupleArrayElem ts) =
-      any tupleArrayElemHasShapeDecl ts
-    tupleArrayElemHasShapeDecl PrimArrayElem{} =
+    recordArrayElemHasShapeDecl (RecordArrayElem ts) =
+      any recordArrayElemHasShapeDecl ts
+    recordArrayElemHasShapeDecl PrimArrayElem{} =
       False
-    tupleArrayElemHasShapeDecl PolyArrayElem{} =
+    recordArrayElemHasShapeDecl PolyArrayElem{} =
       False
 
 checkExp (LetFun name (params, maybe_retdecl, NoInfo, e) body loc) =
@@ -632,7 +647,8 @@ checkExp (Reshape shapeexp arrexp loc) = do
   arrexp' <- checkExp arrexp
 
   case typeOf shapeexp' of
-    Tuple ts | all ((`elem` anyIntType) . toStruct) ts -> return ()
+    t | Just ts <- isTupleRecord t,
+        all ((`elem` anyIntType) . toStruct) ts -> return ()
     Prim Signed{} -> return ()
     Prim Unsigned{} -> return ()
     t -> bad $ TypeError loc $ "Shape argument " ++ pretty shapeexp ++
@@ -678,10 +694,10 @@ checkExp (Zip i e es loc) = do
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
   case typeOf e' of
-    Array (TupleArray ets shape u) ->
+    Array (RecordArray fs shape u) | Just ets <- areTupleFields fs ->
       let componentType et =
-            let et' = tupleArrayElemToType et
-                u' = max u $ tupleArrayElemUniqueness et
+            let et' = recordArrayElemToType et
+                u' = max u $ recordArrayElemUniqueness et
             in arrayOf et' shape u'
       in return $ Unzip e' (map (Info . componentType) ets) pos
     t ->
@@ -773,7 +789,7 @@ checkExp (Stream form lam arr pos) = do
   case macctup of
     Just (acc',_) ->
       case lambdaReturnType lam' of
-        Tuple (acctp:_) ->
+        t | Just (acctp:_) <- isTupleRecord t ->
           unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
           bad $ TypeError pos ("Stream with accumulator-type missmatch"++
                                 "or result arrays of non-array type.")
@@ -806,7 +822,8 @@ checkExp (Split i splitexp arrexp loc) = do
   arrexp' <- checkExp arrexp
 
   case typeOf splitexp' of
-    Tuple ts | all (==(Prim $ Signed Int32)) ts -> return ()
+    t | Just ts <- isTupleRecord t,
+        all (==(Prim $ Signed Int32)) ts -> return ()
     Prim (Signed Int32) -> return ()
     _ -> bad $ TypeError loc $ "Argument " ++ pretty splitexp ++
          " to split must be integer or tuple of integers."
@@ -884,8 +901,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
             let t' = t `setUniqueness` Unique `setAliases` mempty
             in Id (Ident name (Info t') iloc)
         | otherwise =
-            let t' = case t of Tuple{} -> t
-                               _       -> t `setUniqueness` Nonunique
+            let t' = case t of Record{} -> t
+                               _        -> t `setUniqueness` Nonunique
             in Id (Ident name (Info t') iloc)
       uniquePat (TuplePattern pats ploc) =
         TuplePattern (map uniquePat pats) ploc
@@ -923,7 +940,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
             if unique (unInfo $ identType ident)
               then put (cons<>aliases t, obs)
               else put (cons, obs<>aliases t)
-      checkMergeReturn (TuplePattern pats _) (Tuple ts) =
+      checkMergeReturn (TuplePattern pats _) t | Just ts <- isTupleRecord t =
         zipWithM_ checkMergeReturn pats ts
       checkMergeReturn _ _ =
         return ()
@@ -931,7 +948,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 
   let consumeMerge (Id (Ident _ (Info pt) ploc)) mt
         | unique pt = consume ploc $ aliases mt
-      consumeMerge (TuplePattern pats _) (Tuple ts) =
+      consumeMerge (TuplePattern pats _) t | Just ts <- isTupleRecord t =
         zipWithM_ consumeMerge pats ts
       consumeMerge _ _ =
         return ()
@@ -1009,10 +1026,12 @@ checkPattern (Wildcard _ loc) (Inferred t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
 checkPattern (Wildcard _ loc) (Ascribed t) =
   return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
-checkPattern (TuplePattern ps loc) (Inferred (Tuple ts)) | length ts == length ps =
+checkPattern (TuplePattern ps loc) (Inferred t)
+  | Just ts <- isTupleRecord t, length ts == length ps =
   TuplePattern <$> zipWithM checkPattern ps (map Inferred ts) <*> pure loc
-checkPattern (TuplePattern ps loc) (Ascribed (Tuple ts)) | length ts == length ps =
-  TuplePattern <$> zipWithM checkPattern ps (map Ascribed ts) <*> pure loc
+checkPattern (TuplePattern ps loc) (Ascribed t)
+  | Just ts <- isTupleRecord t, length ts == length ps =
+      TuplePattern <$> zipWithM checkPattern ps (map Ascribed ts) <*> pure loc
 checkPattern p@TuplePattern{} (Inferred t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern p@TuplePattern{} (Ascribed t) =
@@ -1113,8 +1132,8 @@ checkFuncall fname loc paramtypes args = do
     occur $ dflow `seqOccurences` occurs
 
 consumeArg :: SrcLoc -> Type -> Diet -> [Occurence]
-consumeArg loc (Tuple ets) (TupleDiet ds) =
-  concat $ zipWith (consumeArg loc) ets ds
+consumeArg loc (Record ets) (RecordDiet ds) =
+  concat $ HM.elems $ HM.intersectionWith (consumeArg loc) ets ds
 consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
@@ -1171,8 +1190,8 @@ checkFunDef (fname, maybe_retdecl, params, body, loc) = do
 
         tag u = HS.map $ \name -> (u, name)
 
-        returnAliasing (Tuple ets1) (Tuple ets2) =
-          concat $ zipWith returnAliasing ets1 ets2
+        returnAliasing (Record ets1) (Record ets2) =
+          concat $ HM.elems $ HM.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
 checkFunBody :: Name

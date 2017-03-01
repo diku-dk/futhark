@@ -13,6 +13,7 @@ where
 import           Data.Array
 import           Data.Functor
 import           Data.Hashable
+import qualified Data.HashMap.Lazy       as HM
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
@@ -40,16 +41,9 @@ commastack = align . stack . punctuate comma
 
 instance Pretty Value where
   ppr (PrimValue bv) = ppr bv
-  ppr (TupValue vs)
-    | any (not . primValue) vs =
-      parens $ commastack $ map ppr vs
-    | otherwise =
-      parens $ commasep $ map ppr vs
-    where primValue PrimValue{} = True
-          primValue _           = False
   ppr (ArrayValue a t)
     | [] <- elems a = text "empty" <> parens (ppr t)
-    | Array{} <- t = brackets $ commastack $ map ppr $ elems a
+    | Array{} <- t  = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
 instance Pretty PrimType where
@@ -76,17 +70,19 @@ instance Pretty PrimValue where
   ppr (FloatValue v) = ppr v
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (TupleArrayElemTypeBase (ShapeDecl vn) as) where
+         Pretty (RecordArrayElemTypeBase (ShapeDecl vn) as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (PolyArrayElem bt _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt)
   ppr (ArrayArrayElem at)    = ppr at
-  ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
+  ppr (RecordArrayElem ts)   = braces $ commasep $ map ppField $ HM.toList ts
+    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
-instance Pretty (TupleArrayElemTypeBase Rank as) where
+instance Pretty (RecordArrayElemTypeBase Rank as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (PolyArrayElem bt _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt)
   ppr (ArrayArrayElem at)    = ppr at
-  ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
+  ppr (RecordArrayElem ts)   = braces $ commasep $ map ppField $ HM.toList ts
+    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn) as) where
   ppr (PrimArray et (ShapeDecl ds) u _) =
@@ -101,26 +97,37 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn)
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
 
-  ppr (TupleArray et (ShapeDecl ds) u) =
-    ppr u <> mconcat (map (brackets . f) ds) <> parens (commasep $ map ppr et)
+  ppr (RecordArray et (ShapeDecl ds) u) =
+    ppr u <> mconcat (map (brackets . f) ds) <>
+    braces (commasep $ map ppField $ HM.toList et)
     where f AnyDim       = mempty
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
+          ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (ArrayTypeBase Rank as) where
   ppr (PrimArray et (Rank n) u _) =
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr et
   ppr (PolyArray et (Rank n) u _) =
     ppr u <> mconcat (replicate n (brackets mempty)) <> ppr (baseName <$> qualNameFromTypeName et)
-  ppr (TupleArray ts (Rank n) u) =
+  ppr (RecordArray ts (Rank n) u) =
     ppr u <> mconcat (replicate n (brackets mempty)) <>
-    parens (commasep $ map ppr ts)
+    braces (commasep $ map ppField $ HM.toList ts)
+    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) where
   ppr (Prim et)    = ppr et
   ppr (TypeVar et) = ppr $ baseName <$> qualNameFromTypeName et
   ppr (Array at)   = ppr at
-  ppr (Tuple ts)   = parens $ commasep $ map ppr ts
+  ppr (Record fs)  = braces $ commasep $ map ppField $ HM.toList fs
+    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
+
+instance Pretty (TypeBase Rank as) where
+  ppr (Prim et)    = ppr et
+  ppr (TypeVar et) = ppr $ baseName <$> qualNameFromTypeName et
+  ppr (Array at)   = ppr at
+  ppr (Record fs)  = braces $ commasep $ map ppField $ HM.toList fs
+    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
@@ -129,13 +136,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
           f (NamedDim v) = ppr v
           f (ConstDim n) = ppr n
   ppr (TETuple ts _) = parens $ commasep $ map ppr ts
+  ppr (TERecord fs _) = braces $ commasep $ map ppField fs
+    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
   ppr (TEVar name _) = ppr name
-
-instance Pretty (TypeBase Rank as) where
-  ppr (Prim et)    = ppr et
-  ppr (TypeVar et) = ppr $ baseName <$> qualNameFromTypeName et
-  ppr (Array at)   = ppr at
-  ppr (Tuple ts)   = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
@@ -191,12 +194,16 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = parens $ commastack $ map ppr es
     | otherwise          = parens $ commasep $ map ppr es
+  pprPrec _ (RecordLit fs _)
+    | any (hasArrayLit . snd) fs = braces $ commastack $ map ppField fs
+    | otherwise                  = braces $ commasep $ map ppField fs
+    where ppField (name, t) = text (nameToString name) <> equals <> ppr t
   pprPrec _ (Empty (TypeDecl t _) _) =
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop (x,_) (y,_) _ _) = prettyBinOp p bop x y
-  pprPrec _ (TupleProject k e _ _) = text "#" <> ppr k <+> pprPrec 9 e
+  pprPrec _ (Project k e _ _) = text "#" <> ppr k <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
@@ -352,7 +359,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModLambda (p, psig) maybe_sig body _) =
     text "\\" <> parens (ppr p <> colon <+> ppr psig) <> maybe_sig' <+>
     text "->" </> indent 2 (ppr body)
-    where maybe_sig' = case maybe_sig of Nothing -> mempty
+    where maybe_sig' = case maybe_sig of Nothing  -> mempty
                                          Just sig -> colon <+> ppr sig
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (StructBindBase ty vn) where
