@@ -138,7 +138,8 @@ import Language.Futhark.Parser.Lexer
       '\\'            { L $$ BACKSLASH }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
-      '->'            { L $$ ARROW }
+      '->'            { L $$ RIGHT_ARROW }
+      '<-'            { L $$ LEFT_ARROW }
       ':'             { L $$ COLON }
       for             { L $$ FOR }
       do              { L $$ DO }
@@ -184,6 +185,7 @@ import Language.Futhark.Parser.Lexer
 %left ifprec letprec
 %left ','
 %left ':'
+%left '<-'
 %left '||...'
 %left '&&...'
 %left '<=' '<=...' '>=' '>=...' '>' '>...' '<' '<...' '==...' '!=...'
@@ -594,6 +596,9 @@ Exp2 :: { UncheckedExp }
 
      | '-' Exp2
        { Negate $2 $1 }
+
+     | Exp2 with '[' DimIndices ']' '<-' Exp2
+       { Update $1 $4 $7 (srclocOf $1) }
 
 
 Apply :: { (QualName Name, [UncheckedExp], SrcLoc) }

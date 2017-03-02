@@ -609,6 +609,7 @@ typeOf (Index ident idx _) =
   stripArray (length $ filter isFix idx) (typeOf ident)
   where isFix DimFix{} = True
         isFix _        = False
+typeOf (Update e _ _ _) = typeOf e
 typeOf (Iota e _) = arrayType 1 (typeOf e) Unique
 typeOf (Shape _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique `setAliases` mempty
