@@ -49,6 +49,7 @@ module Futhark.Construct
   , instantiateShapesFromIdentList
   , instantiateExtTypes
   , instantiateIdents
+  , removeExistentials
 
   -- * Convenience
   , simpleMkLetNames
@@ -433,6 +434,15 @@ instantiateIdents names ts
       runStateT (instantiateShapes nextShape ts) ([],context)
     return (context', zipWith Ident vals ts')
   | otherwise = Nothing
+
+removeExistentials :: ExtType -> Type -> Type
+removeExistentials t1 t2 =
+  t1 `setArrayDims`
+  zipWith nonExistential
+  (extShapeDims $ arrayShape t1)
+  (arrayDims t2)
+  where nonExistential (Ext _)    dim = dim
+        nonExistential (Free dim) _   = dim
 
 -- | Can be used as the definition of 'mkLetNames' for a 'Bindable'
 -- instance for simple representations.
