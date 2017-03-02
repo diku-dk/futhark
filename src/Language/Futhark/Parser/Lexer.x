@@ -208,7 +208,7 @@ symbol qs q = SYMBOL (leadingOperator q) qs q
 alexEOF = return ((0,0,0), (0,0,0), EOF)
 
 -- | A value tagged with a source location.
-data L a = L SrcLoc a
+data L a = L SrcLoc a deriving (Show)
 
 instance Eq a => Eq (L a) where
   L _ x == L _ y = x == y
