@@ -113,8 +113,8 @@ import Language.Futhark.Parser.Lexer
       '!=...'         { L _ (SYMBOL NotEqual _ _) }
       '<...'          { L _ (SYMBOL Less _ _) }
       '>...'          { L _ (SYMBOL Greater _ _) }
-      '<=...'         { L _ (SYMBOL Less _ _) }
-      '>=...'         { L _ (SYMBOL Greater _ _) }
+      '<=...'         { L _ (SYMBOL Leq _ _) }
+      '>=...'         { L _ (SYMBOL Geq _ _) }
       '**...'         { L _ (SYMBOL Pow _ _) }
       '<<...'         { L _ (SYMBOL ShiftL _ _) }
       '>>...'         { L _ (SYMBOL ShiftR _ _) }
