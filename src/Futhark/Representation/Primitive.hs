@@ -381,7 +381,7 @@ doBinOp AShr{}   = doIntBinOp doAShr
 doBinOp And{}    = doIntBinOp doAnd
 doBinOp Or{}     = doIntBinOp doOr
 doBinOp Xor{}    = doIntBinOp doXor
-doBinOp Pow{}    = doIntBinOp doPow
+doBinOp Pow{}    = doRiskyIntBinOp doPow
 doBinOp FPow{}   = doFloatBinOp (**) (**)
 doBinOp LogAnd{} = doBoolBinOp (&&)
 doBinOp LogOr{}  = doBoolBinOp (||)
@@ -493,8 +493,10 @@ doXor :: IntValue -> IntValue -> IntValue
 doXor v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `xor` intToWord64 v2
 
 -- | Signed integer exponentatation.
-doPow :: IntValue -> IntValue -> IntValue
-doPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
+doPow :: IntValue -> IntValue -> Maybe IntValue
+doPow v1 v2
+  | negativeIshInt v2 = Nothing
+  | otherwise         = Just $ intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
 
 doConvOp :: ConvOp -> PrimValue -> Maybe PrimValue
 doConvOp (ZExt _ to) (IntValue v)     = Just $ IntValue $ doZExt v to
@@ -680,6 +682,13 @@ zeroIshInt (Int8Value k)  = k == 0
 zeroIshInt (Int16Value k) = k == 0
 zeroIshInt (Int32Value k) = k == 0
 zeroIshInt (Int64Value k) = k == 0
+
+-- | Is the given integer value kind of negative?
+negativeIshInt :: IntValue -> Bool
+negativeIshInt (Int8Value k)  = k < 0
+negativeIshInt (Int16Value k) = k < 0
+negativeIshInt (Int32Value k) = k < 0
+negativeIshInt (Int64Value k) = k < 0
 
 -- | The size of a value of a given primitive type in bites.
 primBitSize :: PrimType -> Int
