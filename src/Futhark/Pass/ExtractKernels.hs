@@ -800,7 +800,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode || newSegmentedRedomap =
+maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
