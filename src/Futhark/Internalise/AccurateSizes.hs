@@ -19,8 +19,8 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import Futhark.Representation.AST
 import Futhark.Construct
+import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 
 shapeBody :: (HasScope lore m, MonadFreshNames m, Bindable lore) =>
@@ -111,12 +111,3 @@ ensureShapeVar asserting loc t name v
     certs <- asserting $ zipWithM checkDim newshape oldshape
     letExp name $ shapeCoerce certs newshape v
   | otherwise = return v
-
-removeExistentials :: ExtType -> Type -> Type
-removeExistentials t1 t2 =
-  t1 `setArrayDims`
-  zipWith nonExistential
-  (extShapeDims $ arrayShape t1)
-  (arrayDims t2)
-  where nonExistential (Ext _)    dim = dim
-        nonExistential (Free dim) _   = dim

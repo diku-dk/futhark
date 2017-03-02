@@ -58,6 +58,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyIdentityReshape
                , letRule simplifyReshapeReshape
                , letRule simplifyReshapeScratch
+               , letRule simplifyReshapeReplicate
                , letRule improveReshape
                , removeScratchValue
                , hackilySimplifyBranch
@@ -867,33 +868,50 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
             return (v:pat', (tse,fse):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
 
--- | Non-existentialise the parts of the context that are the same in
--- both branches.
+-- | Non-existentialise the parts of the context that are the same or
+-- branch-invariant in both branches.
 simplifyBranchContext :: MonadBinder m => TopDownRule m
-simplifyBranchContext _ (Let pat _ e@(If cond tbranch fbranch _))
+simplifyBranchContext _ (Let pat _ (If cond tbranch fbranch _))
   | not $ null $ patternContextElements pat = do
-      ctx_res <- expContext pat e
+      ctx_res <- ifExtContext pat tbranch fbranch
       let old_ctx =
             patternContextElements pat
           (free_ctx, new_ctx) =
             partitionEithers $
             zipWith ctxPatElemIsKnown old_ctx ctx_res
-      if null free_ctx then
-        cannotSimplify
-        else do let subst =
-                      HM.fromList [ (patElemName pe, v) | (pe, Var v) <- free_ctx ]
-                    ret' = existentialiseExtTypes
-                           (HS.fromList $ map patElemName new_ctx) $
-                           substituteNames subst $
-                           staticShapes $ patternValueTypes pat
-                    pat' = (substituteNames subst pat) { patternContextElements = new_ctx }
-                forM_ free_ctx $ \(name, se) ->
-                  letBind_ (Pattern [] [name]) $ BasicOp $ SubExp se
-                letBind_ pat' $ If cond tbranch fbranch ret'
-  where ctxPatElemIsKnown patElem (Just se) =
-          Left (patElem, se)
-        ctxPatElemIsKnown patElem _ =
-          Right patElem
+      if null free_ctx then cannotSimplify else do
+        free_ctx' <- forM free_ctx $ \(pe, t_se, f_se, p_t) -> do
+          tbody <- mkBodyM [] [t_se]
+          fbody <- mkBodyM [] [f_se]
+          branch_ctx <- letSubExp "branch_ctx" $ If cond tbody fbody [Prim p_t]
+          return (pe, branch_ctx)
+        let subst =
+              HM.fromList [ (patElemName pe, v) | (pe, Var v) <- free_ctx' ]
+            ret' = existentialiseExtTypes
+                   (HS.fromList $ map patElemName new_ctx) $
+                   substituteNames subst $
+                   staticShapes $ patternValueTypes pat
+            pat' = (substituteNames subst pat) { patternContextElements = new_ctx }
+        forM_ free_ctx' $ \(name, se) ->
+          letBind_ (Pattern [] [name]) $ BasicOp $ SubExp se
+        tbranch' <- reshapeBodyResults tbranch ret'
+        fbranch' <- reshapeBodyResults fbranch ret'
+        letBind_ pat' $ If cond tbranch' fbranch' ret'
+  where ctxPatElemIsKnown pe (Just (se_t,se_f))
+          | Prim p_t <- patElemType pe = Left (pe, se_t, se_f, p_t)
+        ctxPatElemIsKnown pe _ =
+          Right pe
+
+        reshapeBodyResults body rets = insertStmsM $ do
+          ses <- bodyBind body
+          resultBodyM =<< zipWithM reshapeResult ses rets
+        reshapeResult (Var v) (t@Array{}) = do
+          v_t <- lookupType v
+          let newshape = arrayDims $ removeExistentials t v_t
+          letSubExp "branch_ctx_reshaped" $ shapeCoerce [] newshape v
+        reshapeResult se _ =
+          return se
+
 simplifyBranchContext _ _ =
   cannotSimplify
 
@@ -950,6 +968,15 @@ simplifyReshapeScratch defOf _ (Reshape _ newshape v)
   | Just (Scratch bt _) <- asBasicOp =<< defOf v =
     Just $ Scratch bt $ newDims newshape
 simplifyReshapeScratch _ _ _ = Nothing
+
+simplifyReshapeReplicate :: LetTopDownRule lore u
+simplifyReshapeReplicate defOf seType (Reshape [] newshape v)
+  | Just oldrank <- arrayRank <$> seType (Var v),
+    Just (Replicate _ se) <- asBasicOp =<< defOf v,
+    oldrank == shapeRank (newShape newshape) =
+      Just $ Replicate (newShape newshape) se
+simplifyReshapeReplicate _ _ _ = Nothing
+
 
 improveReshape :: LetTopDownRule lore u
 improveReshape _ seType (Reshape cs newshape v)
