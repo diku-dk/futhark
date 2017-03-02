@@ -565,6 +565,20 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
       letBind (basicPattern' [] [p]) $ I.BasicOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
 
+internaliseExp desc (E.Update src slice ve loc) = do
+  src_name <- newVName "update_src"
+  dest_name <- newVName "update_dest"
+  let src_t = E.typeOf src
+      src_ident = E.Ident src_name (E.Info src_t) loc
+      dest_ident = E.Ident dest_name (E.Info src_t) loc
+
+  internaliseExp desc $
+    E.LetPat (E.Id src_ident) src
+    (E.LetWith dest_ident src_ident slice ve
+      (E.Var (E.qualName dest_name) (E.Info src_t) loc)
+      loc)
+    loc
+
 internaliseExp desc (E.Shape e _) = do
   ks <- internaliseExp (desc<>"_shape") e
   case ks of

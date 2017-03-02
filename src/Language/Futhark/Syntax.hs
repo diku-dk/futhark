@@ -446,9 +446,9 @@ data ExpBase f vn =
                       [DimIndexBase f vn] (ExpBase f vn)
                       (ExpBase f vn) SrcLoc
 
-            | Index (ExpBase f vn)
-                    [DimIndexBase f vn]
-                    SrcLoc
+            | Index (ExpBase f vn) [DimIndexBase f vn] SrcLoc
+
+            | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
             | Shape (ExpBase f vn) SrcLoc
             -- ^ The shape of the argument.
@@ -584,6 +584,7 @@ instance Located (ExpBase f vn) where
   locOf (LetFun _ _ _ loc)       = locOf loc
   locOf (LetWith _ _ _ _ _ pos)  = locOf pos
   locOf (Index _ _ pos)          = locOf pos
+  locOf (Update _ _ _ pos)       = locOf pos
   locOf (Iota _ pos)             = locOf pos
   locOf (Shape _ pos)            = locOf pos
   locOf (Replicate _ _ pos)      = locOf pos

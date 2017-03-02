@@ -61,7 +61,8 @@ tokens :-
   "}"                      { tokenC RCURLY }
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
-  "->"                     { tokenC ARROW }
+  "->"                     { tokenC RIGHT_ARROW }
+  "<-"                     { tokenC LEFT_ARROW }
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
   "\"                      { tokenC BACKSLASH }
@@ -256,7 +257,8 @@ data Token = ID Name
            | RCURLY
            | COMMA
            | UNDERSCORE
-           | ARROW
+           | RIGHT_ARROW
+           | LEFT_ARROW
 
            | EQU
            | ASTERISK

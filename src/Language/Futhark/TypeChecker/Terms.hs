@@ -618,6 +618,29 @@ checkExp (LetWith dest src idxes ve body pos) = do
   where isFix DimFix{} = True
         isFix _        = False
 
+checkExp (Update src idxes ve loc) =
+  sequentially (checkExp src) $ \src' _ -> do
+    let src_t = typeOf src'
+        src_als = aliases src_t
+
+    unless (unique src_t) $
+      bad $ TypeError loc $ "Source '" ++ pretty src ++
+      "' has type " ++ pretty src_t ++ ", which is not unique"
+
+    idxes' <- mapM checkDimIndex idxes
+    case peelArray (length $ filter isFix idxes') src_t of
+      Nothing -> bad $ IndexingError (arrayRank src_t) (length idxes) (srclocOf src)
+      Just elemt -> do
+        ve' <- require [toStructural elemt] =<< checkExp ve
+
+        unless (HS.null $ aliases (typeOf src') `HS.intersection` aliases (typeOf ve')) $
+          bad $ BadLetWithValue loc
+
+        consume loc src_als
+        return $ Update src' idxes' ve' loc
+  where isFix DimFix{} = True
+        isFix _        = False
+
 checkExp (Index e idxes pos) = do
   e' <- checkExp e
   let vt = typeOf e'

@@ -182,6 +182,7 @@ literals and variables, but also more complicated forms.
       : | "unzip" `exp`
       : | "unsafe" `exp`
       : | "copy" `exp`
+      : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
       : | "map" `fun` `exp`+
       : | "reduce" `fun` `exp` `exp`
       : | "reduceComm" `fun` `exp` `exp`
@@ -458,7 +459,8 @@ evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
 
 Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
 not be complete and can also be a slice, but in these cases, the value
-of ``v`` must be an array of the proper size.
+of ``v`` must be an array of the proper size.  Syntactic sugar for
+``let a = a with [i] <- v in a``.
 
 ``let f params... = e in body``
 ...............................
@@ -615,6 +617,12 @@ do not want them here.
 Return a deep copy of the argument.  Semantically, this is just
 the identity function, but it has special semantics related to
 uniqueness types as described in :ref:`uniqueness-types`.
+
+``a with [i] <- e``
+...................
+
+Return ``a``, but with the element at position ``i`` changed to
+contain the result of evaluating ``e``.  Consumes ``a``.
 
 ``map f a_1 ... a_n``
 .....................
