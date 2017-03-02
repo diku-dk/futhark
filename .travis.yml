@@ -41,7 +41,7 @@ script:
 # Now for integration testing
  - futhark-test tests examples # Run integration test suite.
 # Numpy is broken on Travis in a weird way I can't reproduce anywhere else.
- - futhark-test tests examples --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
+# - futhark-test tests examples --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
 
  # Check for style issues.
  - if [ "$STACK_YAML" = stack.yaml ]; then
