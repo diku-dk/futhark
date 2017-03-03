@@ -49,12 +49,12 @@ compileProg prog = do
         options = [ Option { optionLongName = "platform"
                            , optionShortName = Just 'p'
                            , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|cl_preferred_platform = optarg;|]
+                           , optionAction = [C.cstm|set_preferred_platform(optarg);|]
                            }
                   , Option { optionLongName = "device"
                            , optionShortName = Just 'd'
                            , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|cl_preferred_device = optarg;|]
+                           , optionAction = [C.cstm|set_preferred_device(optarg);|]
                            }
                   , Option { optionLongName = "synchronous"
                            , optionShortName = Just 's'
