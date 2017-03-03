@@ -800,20 +800,29 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
+maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode || newSegmentedRedomap =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
+      | Just (perm, pat_unused) <- permutationAndMissing res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
+          nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
           foldlam' <- Kernelise.transformLambda foldlam
-          regularSegmentedRedomapKernel nest perm cs w comm' lam' foldlam' nes arrs >>=
+          regularSegmentedRedomapKernel nest' perm cs w comm' lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
     where comm' | commutativeLambda lam = Commutative
                 | otherwise             = comm
-
+          permutationAndMissing res = do
+            let pes = patternValueElements pat
+                (_used,unused) =
+                  partition ((`HS.member` freeIn res) . patElemName) pes
+                res_expanded = res ++ map (Var . patElemName) unused
+            perm <- map (Var . patElemName) pes `isPermutationOf` res_expanded
+            return (perm, unused)
 
 -- Redomap and Scanomap are general cases, so pretend nested
 -- reductions and scans are Redomap and Scanomap.  Well, not for
@@ -822,6 +831,8 @@ maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
           let (nes, arrs) = unzip input
           lam' <- Kernelise.transformLambda lam
@@ -832,6 +843,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
       addStmToKernel bnd acc
     where comm' | commutativeLambda lam = Commutative
                 | otherwise             = comm
+
 maybeDistributeStm (Let pat attr (Op (Scan cs w lam input))) acc | versionedCode = do
   let (nes, arrs) = unzip input
   lam_renamed <- renameLambda lam
@@ -1044,6 +1056,29 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
                 (patternValueElements pat) ret
 
     m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
+
+-- Add extra pattern elements to every kernel nesting level.
+expandKernelNest :: MonadFreshNames m =>
+                    [PatElem] -> KernelNest -> m KernelNest
+expandKernelNest pes (outer_nest, inner_nests) = do
+  let outer_size = loopNestingWidth outer_nest :
+                   map loopNestingWidth inner_nests
+      inner_sizes = tails $ map loopNestingWidth inner_nests
+  outer_nest' <- expandWith outer_nest outer_size
+  inner_nests' <- zipWithM expandWith inner_nests inner_sizes
+  return (outer_nest', inner_nests')
+  where expandWith nest dims = do
+           pes' <- mapM (expandPatElemWith dims) pes
+           return nest { loopNestingPattern =
+                           Pattern [] $
+                           patternElements (loopNestingPattern nest) <> pes'
+                       }
+
+        expandPatElemWith dims pe = do
+          name <- newVName $ baseString $ patElemName pe
+          return pe { patElemName = name
+                    , patElemAttr = patElemType pe `arrayOfShape` Shape dims
+                    }
 
 -- | Convert the statements inside a map nest to kernel statements,
 -- attempting to parallelise any remaining (top-level) parallel
