@@ -152,7 +152,9 @@ flattenPattern = flattenPattern' []
                    case ts of [] -> E.vacuousShapeAnnotations $ toStruct $ unInfo $ identType v
                               st:_ -> st)]
         flattenPattern' ts (E.TuplePattern pats _) =
-          concat <$> zipWithM flattenPattern' (tupleComponents ts ++ repeat []) pats
+          concat <$> zipWithM flattenPattern' (tupleComponents ts ++ repeat []) pats'
+          -- We have to fix the ordering.
+          where pats' = map snd $ sortBy (comparing (show . fst)) $ zip [(1::Int)..] pats
         flattenPattern' ts (E.RecordPattern fs loc) =
           flattenPattern' ts $ E.TuplePattern (map snd $ sortBy (comparing fst) fs) loc
         flattenPattern' ts (E.PatternAscription p td) =
