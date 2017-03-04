@@ -474,8 +474,7 @@ isTupleRecord _ = Nothing
 areTupleFields :: HM.HashMap Name a -> Maybe [a]
 areTupleFields fs =
   let fs' = sortBy (comparing fst) $ HM.toList fs
-  in if and $ zipWith (==) (map fst fs')
-        (sort $ take (length fs) tupleFieldNames)
+  in if and $ zipWith (==) (map fst fs') tupleFieldNames
      then Just $ map snd fs'
      else Nothing
 
