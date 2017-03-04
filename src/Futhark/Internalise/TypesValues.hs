@@ -8,6 +8,7 @@ module Futhark.Internalise.TypesValues
   , internaliseType
   , internaliseUniqueness
   , internalisePrimType
+  , internalisedTypeSize
 
   -- * Internalising values
   , internalisePrimValue
@@ -195,6 +196,12 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
         newId = do i <- get
                    put $ i + 1
                    return i
+
+-- | How many core language values are needed to represent one source
+-- language value of the given type?
+internalisedTypeSize :: E.ArrayShape shape =>
+                        E.TypeBase shape als -> InternaliseM Int
+internalisedTypeSize = fmap length . internaliseType
 
 -- | Transform an external value to a number of internal values.
 -- Roughly:

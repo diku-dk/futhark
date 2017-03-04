@@ -9,6 +9,7 @@
 module Futhark.Util
        (mapAccumLM,
         chunk,
+        chunks,
         dropAt,
         mapEither,
         maybeNth,
@@ -40,6 +41,15 @@ chunk _ [] = []
 chunk n xs =
   let (bef,aft) = splitAt n xs
   in bef : chunk n aft
+
+-- | @chunks ns a@ splits @a@ into chunks determined by the elements
+-- of @ns@.  It must hold that @sum ns == length a@, or the resulting
+-- list may contain too few chunks, or not all elements of @a@.
+chunks :: [Int] -> [a] -> [[a]]
+chunks [] _ = []
+chunks (n:ns) xs =
+  let (bef,aft) = splitAt n xs
+  in bef : chunks ns aft
 
 -- | @dropAt i n@ drops @n@ elements starting at element @i@.
 dropAt :: Int -> Int -> [a] -> [a]

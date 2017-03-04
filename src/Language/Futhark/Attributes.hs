@@ -589,7 +589,13 @@ typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
 typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es
-typeOf (RecordLit fs _) = Record $ HM.fromList $ map (fmap typeOf) fs
+typeOf (RecordLit fs _) =
+  -- Reverse, because HM.unions is biased to the left.
+  Record $ HM.unions $ reverse $ map record fs
+  where record (RecordField name e _) = HM.singleton name $ typeOf e
+        record (RecordRecord e) = case typeOf e of
+          Record rfs -> rfs
+          _          -> error "typeOf: RecordLit: the impossible happened."
 typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
 typeOf (Empty (TypeDecl _ (Info t)) _) =

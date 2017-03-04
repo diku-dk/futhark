@@ -629,17 +629,18 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                        in Index (Var v NoInfo loc) slice loc }
      | QualName { Var (fst $1) NoInfo (snd $1) }
      | '#' FieldId Atom { Project (fst $2) $3 NoInfo $1 }
-     | '{' FieldExps '}' { RecordLit $2 $1 }
+     | '{' Fields '}' { RecordLit $2 $1 }
 
-FieldExps : FieldExp ',' SomeFieldExps { $1 : $3 }
-          | FieldExp                   { [$1] }
-          |                            { [] }
+Fields : Field ',' SomeFields { $1 : $3 }
+       | Field                { [$1] }
+       |                      { [] }
 
-SomeFieldExps : FieldExp                   { [$1] }
-              | FieldExp ',' SomeFieldExps { $1 : $3 }
+SomeFields : Field                { [$1] }
+           | Field ',' SomeFields { $1 : $3 }
 
-FieldExp :: { (Name, UncheckedExp) }
-          : FieldId '=' Exp { (fst $1, $3) }
+Field :: { FieldBase NoInfo Name }
+       : FieldId '=' Exp { RecordField (fst $1) $3 (snd $1) }
+       | Exp             { RecordRecord $1 }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody

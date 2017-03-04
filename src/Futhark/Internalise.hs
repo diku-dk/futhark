@@ -41,7 +41,7 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-import Futhark.Util (dropAt)
+import Futhark.Util (chunks, dropAt)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
@@ -308,8 +308,19 @@ internaliseExp desc (E.Index e idxs loc) = do
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
 
-internaliseExp desc (E.RecordLit es _) =
-  concat <$> mapM (internaliseExp desc . snd) (sortBy (comparing fst) es)
+internaliseExp desc (E.RecordLit orig_fields _) =
+  concatMap snd . sortBy (comparing fst) . HM.toList . HM.unions . reverse <$> mapM internaliseField orig_fields
+  where internaliseField (E.RecordField name e _) = do
+          e' <- internaliseExp desc e
+          return $ HM.singleton name e'
+        internaliseField (E.RecordRecord e) = do
+          (field_names, field_types) <-
+            case E.typeOf e of
+              Record fs -> return $ unzip $ sortBy (comparing fst) $ HM.toList fs
+              _         -> fail $ "Type of " ++ pretty e ++ " is not record."
+          e' <- internaliseExp desc e
+          lens <- mapM internalisedTypeSize field_types
+          return $ HM.fromList $ zip field_names $ chunks lens e'
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -836,14 +847,13 @@ internaliseExp desc (E.BinOp op xarg yarg ret loc) =
   internaliseExp desc $ E.Apply op [xarg,yarg] ret loc
 
 internaliseExp desc (E.Project k e (Info rt) _) = do
-  n <- typeLength rt
-  i' <- fmap sum $ mapM typeLength $
+  n <- internalisedTypeSize rt
+  i' <- fmap sum $ mapM internalisedTypeSize $
         case E.typeOf e of
                Record fs -> map snd $ filter ((<k) . fst) $
                             sortBy (comparing fst) $ HM.toList fs
                t         -> [t]
   take n . drop i' <$> internaliseExp desc e
-  where typeLength = fmap length . internaliseType
 
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
