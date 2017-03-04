@@ -155,7 +155,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ")"
        : | "(" `exp` ("," `exp`)* ")"
        : | "{" "}"
-       : | "{" `fieldid` "=" `exp` ("," `fieldid` "=" `exp`)* "}"
+       : | "{" field ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | "[" `exp` ("," `exp`)* "]"
@@ -196,6 +196,8 @@ literals and variables, but also more complicated forms.
       : | "streamRed" `fun` `exp` `exp`
       : | "streamMapPer" `fun` `exp` `exp`
       : | "streamSeq" `fun` `exp` `exp`
+   field:   `fieldid` "=" `exp`
+        : | `exp`
    pat:   `id`
       : |  "_"
       : | "(" ")"
@@ -302,11 +304,24 @@ Evaluates to the result of ``e``.
 Evaluates to a tuple containing ``N`` values.  Equivalent to ``(1=e1,
 2=e2, ..., N=eN)``.
 
-``{f1=e1, f2=e2, ..., f3=eN}``
-..............................
+``{f1, f2, ..., fN}``
+.....................
 
-Evaluates to a record containing ``N`` fields.  It is an error to have
-duplicate field names.
+A record expression consists of a comma-separated sequence of *field
+expressions*.  A record expression is evaluated by creating an empty
+record, then processing the field expressions from left to right.
+Each field expression adds fields to the record being constructed.  A
+field expression can take one of two forms:
+
+  ``f = e``: adds a field with the name ``f`` and the value resulting
+  from evaluating ``e``.
+
+  ``e``: the expression ``e`` must evaluate to a record, whose fields
+  are added to the record being constructed.
+
+If a field expression attempts to add a field that already exists in
+the record being constructed, the new value for the field supercedes
+the old one.
 
 ``a[i]``
 ........

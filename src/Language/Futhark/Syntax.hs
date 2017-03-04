@@ -46,6 +46,7 @@ module Language.Futhark.Syntax
   , IdentBase (..)
   , DimIndexBase(..)
   , ExpBase(..)
+  , FieldBase(..)
   , LoopFormBase (..)
   , ForLoopDirection (..)
   , LowerBoundBase(..)
@@ -403,8 +404,8 @@ data ExpBase f vn =
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
-            | RecordLit [(Name,ExpBase f vn)] SrcLoc
-            -- ^ Record literals, e.g. @{x=2,y=3}@.
+            | RecordLit [FieldBase f vn] SrcLoc
+            -- ^ Record literals, e.g. @{x=2,y=3,z}@.
 
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
@@ -606,6 +607,16 @@ instance Located (ExpBase f vn) where
   locOf (Stream _ _ _  pos)      = locOf pos
   locOf (Unsafe _ loc)           = locOf loc
   locOf (Write _ _ _ loc)        = locOf loc
+
+-- | An entry in a record literal.
+data FieldBase f vn = RecordField Name (ExpBase f vn) SrcLoc
+                    | RecordRecord (ExpBase f vn)
+
+deriving instance Showable f vn => Show (FieldBase f vn)
+
+instance Located (FieldBase f vn) where
+  locOf (RecordField _ _ loc) = locOf loc
+  locOf (RecordRecord e) = locOf e
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (LowerBoundBase f vn) (IdentBase f vn) (ExpBase f vn)

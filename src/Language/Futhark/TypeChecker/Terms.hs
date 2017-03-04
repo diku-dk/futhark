@@ -450,13 +450,36 @@ checkExp (Literal val loc) =
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
 
-checkExp e@(RecordLit fs loc) = do
-  -- Check for duplicate field names.
-  let (field_names, field_exps) = unzip fs
-  unless (sort field_names == sort (nub field_names)) $
-    bad $ TypeError loc $ "Duplicate record fields in " ++ pretty e
+checkExp (RecordLit fs loc) = do
+  -- It is easy for programmers to forget that record literals are
+  -- right-biased.  Hence, emit a warning if we encounter literal
+  -- fields whose values would never be used.
 
-  RecordLit <$> (zip field_names <$> mapM checkExp field_exps) <*> pure loc
+  fs' <- evalStateT (mapM checkField fs) mempty
+
+  return $ RecordLit fs' loc
+  where checkField (RecordField f e rloc) = do
+          warnIfAlreadySet f rloc
+          modify $ HM.insert f rloc
+          RecordField f <$> lift (checkExp e) <*> pure rloc
+        checkField (RecordRecord e) = do
+          e' <- lift $ checkExp e
+          case typeOf e' of
+            Record rfs -> do
+              mapM_ (`warnIfAlreadySet` srclocOf e) $ HM.keys rfs
+              return $ RecordRecord e'
+            t ->
+              lift $ bad $ TypeError loc $
+              "Expression in record literal must be of record type, but is " ++ pretty t
+
+        warnIfAlreadySet f rloc = do
+          maybe_sloc <- gets $ HM.lookup f
+          case maybe_sloc of
+            Just sloc ->
+              lift $ warn sloc $ "This value for field " ++ pretty f ++
+              " is redundant, due to an overriding definition of the same field at " ++
+              locStr rloc ++ "."
+            Nothing -> return ()
 
 checkExp (ArrayLit es _ loc) = do
   es' <- mapM checkExp es

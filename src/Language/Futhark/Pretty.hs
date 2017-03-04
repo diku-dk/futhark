@@ -175,9 +175,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     | any hasArrayLit es = parens $ commastack $ map ppr es
     | otherwise          = parens $ commasep $ map ppr es
   pprPrec _ (RecordLit fs _)
-    | any (hasArrayLit . snd) fs = braces $ commastack $ map ppField fs
-    | otherwise                  = braces $ commasep $ map ppField fs
-    where ppField (name, t) = text (nameToString name) <> equals <> ppr t
+    | any (hasArrayLit . recExp) fs = braces $ commastack $ map ppr fs
+    | otherwise                     = braces $ commasep $ map ppr fs
+    where recExp (RecordField _ e _) = e
+          recExp (RecordRecord e) = e
   pprPrec _ (Empty (TypeDecl t _) _) =
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
@@ -279,6 +280,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
   pprPrec _ (Write i v a _) = text "write" <> spread [pprPrec 10 i, pprPrec 10 v, pprPrec 10 a]
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
+  ppr (RecordField name e _) = ppr name <> equals <> ppr e
+  ppr (RecordRecord e) = ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LoopFormBase ty vn) where
   ppr (For FromUpTo lbound i ubound) =
