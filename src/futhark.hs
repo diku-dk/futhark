@@ -323,7 +323,7 @@ main = mainWithOptions newConfig commandLineOptions compile
             TypeCheck -> do
               -- No pipeline; just read the program and type check
               (_, warnings, _, _) <- readProgram file
-              liftIO $ hPrint stderr warnings
+              liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
               case maybe_prog of
