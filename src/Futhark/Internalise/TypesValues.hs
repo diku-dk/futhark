@@ -23,7 +23,6 @@ import qualified Data.Array as A
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
-import Data.Ord
 
 import Prelude hiding (mapM)
 
@@ -87,7 +86,7 @@ internaliseDeclType' _ (E.TypeVar v) = lift $ do
   map (extShaped . (`toDecl` Nonunique)) <$> lookupTypeVar v'
 internaliseDeclType' ddi (E.Record ets) =
   concat <$> mapM (internaliseDeclType' ddi . snd)
-  (sortBy (comparing fst) $ HM.toList ets)
+  (sortFields $ HM.toList ets)
 internaliseDeclType' ddi (E.Array at) =
   internaliseArrayType at
   where internaliseArrayType (E.PrimArray bt shape u _) = do
@@ -165,7 +164,7 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
           return [I.Prim $ internalisePrimType bt]
         internaliseType' (E.Record ets) =
           concat <$> mapM (internaliseType' . snd)
-          (sortBy (comparing fst) $ HM.toList ets)
+          (sortFields $ HM.toList ets)
         internaliseType' (E.Array at) =
           internaliseArrayType at
 
