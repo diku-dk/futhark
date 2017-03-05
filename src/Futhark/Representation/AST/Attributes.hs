@@ -35,7 +35,6 @@ module Futhark.Representation.AST.Attributes
   )
   where
 
-import Control.Monad
 import Data.List
 import Data.Maybe (mapMaybe, isJust)
 import qualified Data.HashMap.Lazy as HM
@@ -151,14 +150,22 @@ shapeVars = subExpVars . shapeDims
 -- represents a known arithmetic operator; don't expect anything
 -- clever here.
 commutativeLambda :: Lambda lore -> Bool
-commutativeLambda lam = isJust $ do
-  [xp,yp] <- Just $ lambdaParams lam
-  Body _ [Let (Pattern [] [v]) _ (BasicOp (BinOp op (Var x) (Var y)))] [res] <-
-    Just $ lambdaBody lam
-  guard $ Var (patElemName v) == res
-  guard $ x == paramName xp && y == paramName yp ||
-          y == paramName xp && x == paramName yp
-  guard $ commutativeBinOp op
+commutativeLambda lam =
+  let body = lambdaBody lam
+      n2 = length (lambdaParams lam) `div` 2
+      (xps,yps) = splitAt n2 (lambdaParams lam)
+
+      okComponent c = isJust $ find (okBinOp c) $ bodyStms body
+      okBinOp (xp,yp,Var r) (Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
+        patElemName pe == r &&
+        commutativeBinOp op &&
+        ((x == paramName xp && y == paramName yp) ||
+         (y == paramName xp && x == paramName yp))
+      okBinOp _ _ = False
+
+  in n2 * 2 == length (lambdaParams lam) &&
+     n2 == length (bodyResult body) &&
+     all okComponent (zip3 xps yps $ bodyResult body)
 
 -- | How many value parameters are accepted by this entry point?  This
 -- is used to determine which of the function parameters correspond to
