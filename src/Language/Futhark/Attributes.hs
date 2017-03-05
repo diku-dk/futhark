@@ -61,6 +61,7 @@ module Language.Futhark.Attributes
   , tupleRecord
   , isTupleRecord
   , areTupleFields
+  , sortFields
 
   -- * Getters for decs
   , isValDec
@@ -473,7 +474,7 @@ isTupleRecord _ = Nothing
 
 areTupleFields :: HM.HashMap Name a -> Maybe [a]
 areTupleFields fs =
-  let fs' = sortBy (comparing fst) $ HM.toList fs
+  let fs' = sortFields $ HM.toList fs
   in if and $ zipWith (==) (map fst fs') tupleFieldNames
      then Just $ map snd fs'
      else Nothing
@@ -481,6 +482,16 @@ areTupleFields fs =
 -- | Increasing field names for a tuple (starts at 1).
 tupleFieldNames :: [Name]
 tupleFieldNames = map (nameFromString . show) [(1::Int)..]
+
+-- | Sort fields by their name; taking care to sort numeric fields by
+-- their numeric value.  This ensures that tuples and tuple-like
+-- records match.
+sortFields :: [(Name,a)] -> [(Name,a)]
+sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l) l
+  where fieldish s = case reads $ nameToString s of
+          [(x, "")] -> Left (x::Int)
+          _         -> Right s
+
 
 -- | Set the uniqueness attribute of a type.  If the type is a tuple,
 -- the uniqueness of its components will be modified.

@@ -16,7 +16,6 @@ import Control.Monad.Writer hiding (mapM)
 import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Data.Traversable (mapM)
-import Data.Ord
 
 import Language.Futhark as E
 import qualified Futhark.Representation.SOACS as I
@@ -154,12 +153,12 @@ flattenPattern = flattenPattern' []
         flattenPattern' ts (E.TuplePattern pats _) =
           concat <$> zipWithM flattenPattern' (tupleComponents ts ++ repeat []) pats
         flattenPattern' ts (E.RecordPattern fs loc) =
-          flattenPattern' ts $ E.TuplePattern (map snd $ sortBy (comparing fst) fs) loc
+          flattenPattern' ts $ E.TuplePattern (map snd $ sortFields fs) loc
         flattenPattern' ts (E.PatternAscription p td) =
           flattenPattern' (unInfo (expandedType td):ts) p
 
         tupleComponents = transpose . map tupleComponents'
-        tupleComponents' (E.Record ts) = map snd $ sortBy (comparing fst) $ HM.toList ts
+        tupleComponents' (E.Record ts) = map snd $ sortFields $ HM.toList ts
         tupleComponents' t             = [t]
 
 bindingPattern :: E.Pattern -> [I.ExtType] -> (I.Pattern -> InternaliseM a)
