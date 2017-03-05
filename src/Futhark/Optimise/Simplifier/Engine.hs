@@ -664,7 +664,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
     enterLoop $
     bindFParams (ctxparams'++valparams') $ wrapbody $
     blockIf
-    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $ do
+    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker `orIf` isNotSafe) $ do
       res <- simplifyBody diets loopbody
       isDoLoopResult res
       return res
