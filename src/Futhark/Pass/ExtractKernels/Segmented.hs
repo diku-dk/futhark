@@ -64,18 +64,18 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   forM_ arrs_flat $ \arr -> do
     tp <- lookupType arr
     case tp of
-      -- FIXME: this won't work if the reduction operator works on lists... but
-      -- they seem to be handled in some other way (which makes sense). Talk
-      -- with troels if I should worry about this.
-      Array _primtp (Shape [flatsize]) _uniqness ->
+      -- TODO: this won't work if the reduction operator works on lists... but
+      -- they seem to be handled in some other way (which makes sense)
+      Array _primtp (Shape (flatsize:_)) _uniqness ->
         when (flatsize /= w) $
-          fail$ "regularSegmentedRedomap: flat array, with incorrect size encountered " ++ pretty arr
-      _ -> fail $ "regularSegmentedRedomap: non-flat array encountered " ++ pretty arr
+          fail$ "regularSegmentedRedomap: first dimension of array has incorrect size " ++ pretty arr ++ ":" ++ pretty tp
+      _ ->
+        fail $ "regularSegmentedRedomap: non array encountered " ++ pretty arr ++ ":" ++ pretty tp
 
   -- The pattern passed to chunkLambda must have exactly *one* array dimension,
   -- to get the correct size of [chunk_size]type.
   --
-  -- FIXME: not sure if this will work when result of map is multidimensional,
+  -- TODO: not sure if this will work when result of map is multidimensional,
   -- or if reduction operator uses lists... must check
   chunk_pat <- fmap (Pattern []) $ forM (patternValueElements pat) $ \pat_e ->
     case patElemType pat_e of
@@ -109,8 +109,8 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
                                          }
 
 
-  -- FIXME: do we need to copy arrays here? :S
-  -- see 'blockedReductionStream' in BlockedKernel.hs
+  -- TODO: 'blockedReductionStream' in BlockedKernel.hs which is very similar
+  -- performs a copy here... however, I have not seen a need for it yet.
 
   let all_arrs = arrs_flat ++ map_out_arrs
   (ogps_ses, ogps_stms) <- runBinder $ oneGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam
