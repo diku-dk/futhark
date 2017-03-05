@@ -437,7 +437,7 @@ instance (Attributes lore,
             KernelBody attr (map removeStmAliases stms) res
 
 instance Attributes lore => IsOp (Kernel lore) where
-  safeOp _ = False
+  safeOp _ = True
 
 instance Ranged inner => RangedOp (Kernel inner) where
   opRanges op = replicate (length $ kernelType op) unknownRange

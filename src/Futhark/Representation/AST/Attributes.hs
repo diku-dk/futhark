@@ -121,12 +121,15 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp ConvOp{} = True
         safeBasicOp _ = False
 
-safeExp DoLoop{} = False
+safeExp (DoLoop _ _ _ body) = safeBody body
 safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyStms tbranch) &&
   all (safeExp . bindingExp) (bodyStms fbranch)
 safeExp (Op op) = safeOp op
+
+safeBody :: IsOp (Op lore) => Body lore -> Bool
+safeBody = all (safeExp . bindingExp) . bodyStms
 
 -- | Return the variable names used in 'Var' subexpressions.  May contain
 -- duplicates.
