@@ -418,11 +418,14 @@ internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
         normal_params = shapenames ++ map paramName (concat params')
         free_in_fun = freeInBody e'' `HS.difference` HS.fromList normal_params
 
-    free_params <- forM (HS.toList free_in_fun) $ \v -> do
+    used_free_params <- forM (HS.toList free_in_fun) $ \v -> do
       v_t <- lookupType v
       return $ Param v $ toDecl v_t Nonunique
 
-    let all_params = constparams ++ free_params ++ shapeparams ++ concat params'
+    let free_shape_params = map (`Param` I.Prim int32) $
+                            concatMap (I.shapeVars . I.arrayShape . paramType) used_free_params
+        free_params = nub $ free_shape_params ++ used_free_params
+        all_params = constparams ++ free_params ++ shapeparams ++ concat params'
 
     noteFunctions $ HM.singleton fname
       FunBinding { internalFun =
