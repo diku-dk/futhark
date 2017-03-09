@@ -227,6 +227,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
       text "with" <+> brackets (commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
+  pprPrec _ (Update src idxs ve _) =
+    ppr src <+> text "with" <+>
+    brackets (commasep (map ppr idxs)) <+>
+    text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Iota e _) = text "iota" <+> pprPrec 10 e
