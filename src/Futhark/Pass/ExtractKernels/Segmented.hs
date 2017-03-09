@@ -25,6 +25,31 @@ data SegmentedVersion = OneGroupOneSegment
                       | ManyGroupsOneSegment
                       deriving (Eq, Ord, Show)
 
+-- | @regularSegmentedRedomap@ will generate code for a segmented redomap using
+-- two different strategies, and dynamically deciding which one to use based on
+-- the number of segments and segment size. We use the (static) @group_size@ to
+-- decide which of the following two strategies to choose:
+--
+-- * Large: uses one or more groups to process a single segment. If multiple
+--   groups are used per segment, the intermediate reduction results must be
+--   recursively reduced, until there is only a single value per segment.
+--
+--       Each thread /can/ read multiple elements, which will greatly increase
+--   performance; however, if the reduction is non-commutative the input array
+--   will be transposed (by the KernelBabysitter) to enable memory coalesced
+--   accesses. Currently we will always make each thread read as many elements
+--   as it can, but this /could/ be unfavorable because of the transpose: in
+--   the case where each thread can only read 2 elements, the cost of the
+--   transpose might not be worth the performance gained by letting each thread
+--   read multiple elements. This could be investigated more in depth in the
+--   future (TODO)
+--
+-- * Small: is used to let each group process *multiple* segments within a
+--   group. We will only use this approach when we can process at least two
+--   segments within a single group. In those cases, we would normally allocate
+--   a /whole/ group per segment with the large strategy, but at most 50% of the
+--   threads in the group would have any element to read, which becomes highly
+--   inefficient.
 regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
                            SubExp            -- segment_size
                         -> SubExp            -- num_segments
@@ -112,30 +137,32 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   -- TODO: 'blockedReductionStream' in BlockedKernel.hs which is very similar
   -- performs a copy here... however, I have not seen a need for it yet.
 
-  let all_arrs = arrs_flat ++ map_out_arrs
-  (ogps_ses, ogps_stms) <- runBinder $ oneGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam
-  (mgps_ses, mgps_stms) <- runBinder $ manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam flag_reduce_lam'
-
-  (ogms_ses, ogms_stms) <- runBinder $ oneGroupManySeg map_out_arrs flag_reduce_lam'
-
-
   group_size <- letSubExp "group_size" $ Op GroupSize
   num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
+
+  -- Here we make a small optimization: if we will use the large kernel, and
+  -- only one group per segment, we can simplify the calcualtions within the
+  -- kernel for the indexes of which segment is it working on; therefore we
+  -- create two different kernels (this will increase the final code size a bit
+  -- though). TODO: test how much we win by doing this.
 
   (num_groups_per_segment, _) <-
     calcGroupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size ManyGroupsOneSegment
 
-  -- Instead of making this @if@ here, we could run "multiple groups per
-  -- segment" first, and if the number of groups per segment was 1, we could
-  -- simply return the result immediately without running the second kernel. I
-  -- chose not to do this, as the oneGroupPerSegment kernel will contain
-  -- slightly fewer instructions -- and hopefully be a bit faster (at the cost
-  -- of large code size). TODO: test how much we win by doing this.
+  let all_arrs = arrs_flat ++ map_out_arrs
+  (large_1_ses, large_1_stms) <- runBinder $
+    useLargeOnePerSeg all_arrs reduce_lam' kern_chunk_fold_lam
+  (large_m_ses, large_m_stms) <- runBinder $
+    useLargeMultiRecursiveReduce all_arrs reduce_lam' kern_chunk_fold_lam
+                                 kern_chunk_reduce_lam flag_reduce_lam'
 
   let e_large_seg = eIf (eCmpOp (CmpEq $ IntType Int32) (eSubExp num_groups_per_segment)
                                                         (eSubExp one))
-                        (mkBodyM ogps_stms ogps_ses)
-                        (mkBodyM mgps_stms mgps_ses)
+                        (mkBodyM large_1_stms large_1_ses)
+                        (mkBodyM large_m_stms large_m_ses)
+
+
+  (small_ses, small_stms) <- runBinder $ useSmallKernel map_out_arrs flag_reduce_lam'
 
   -- if (group_size/2) < segment_size, means that we will not be able to fit two
   -- segments into one group, and therefore we should not use the kernel that
@@ -143,7 +170,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   e <- eIf (eCmpOp (CmpSlt Int32) (eBinOp (SQuot Int32) (eSubExp group_size) (eSubExp two))
                                   (eSubExp segment_size))
          (eBody [e_large_seg])
-         (mkBodyM ogms_stms ogms_ses)
+         (mkBodyM small_stms small_ses)
 
   redres_pes <- forM (take num_redres (patternValueElements pat)) $ \pe -> do
     vn' <- newName $ patElemName pe
@@ -175,12 +202,12 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
     -- (reduce/fold) are used multiple times, and we do not want to bind the
     -- same VName twice (as this is a type error)
     ----------------------------------------------------------------------------
-    oneGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam = do
+    useLargeOnePerSeg all_arrs reduce_lam' kern_chunk_fold_lam = do
       mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
 
-      (kernel, _, _) <- groupPerSegmentKernel segment_size num_segments cs
+      (kernel, _, _) <- largeKernel segment_size num_segments cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w OneGroupOneSegment
         ispace inps
@@ -195,12 +222,12 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       return $ map (Var . patElemName) $ patternValueElements kernel_pat
 
     ----------------------------------------------------------------------------
-    manyGroupPerSeg all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam flag_reduce_lam' = do
+    useLargeMultiRecursiveReduce all_arrs reduce_lam' kern_chunk_fold_lam kern_chunk_reduce_lam flag_reduce_lam' = do
       mapres_pes <- forM (drop num_redres $ patternValueElements flat_pat) $ \pe -> do
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
 
-      (firstkernel, num_groups_used, num_groups_per_segment) <- groupPerSegmentKernel segment_size num_segments cs
+      (firstkernel, num_groups_used, num_groups_per_segment) <- largeKernel segment_size num_segments cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w ManyGroupsOneSegment
         ispace inps
@@ -225,13 +252,16 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       return $ finalredres ++ map (Var . patElemName) mapres_pes
 
     ----------------------------------------------------------------------------
+    -- The "recursive" reduction step. However, will always do this using
+    -- exactly one extra step. Either by using the small kernel, or by using the
+    -- large kernel with one group per segment.
     performFinalReduction new_segment_size new_total_elems tmp_redres
                           reduce_lam' kern_chunk_reduce_lam flag_reduce_lam' = do
       group_size <- letSubExp "group_size" $ Op GroupSize
 
       -- Large kernel, using one group per segment (ogps)
       (large_ses, large_stms) <- runBinder $ do
-        (large_kernel, _, _) <- groupPerSegmentKernel new_segment_size num_segments cs
+        (large_kernel, _, _) <- largeKernel new_segment_size num_segments cs
           tmp_redres comm reduce_lam' kern_chunk_reduce_lam
           nes new_total_elems OneGroupOneSegment
           ispace inps
@@ -244,7 +274,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
                  BasicOp $ Scratch (elemType t) (arrayDims t)
           letExp (baseString name ++ "_redres_scratch") $
                   BasicOp $ Reshape cs [DimNew num_segments] tmp
-        kernel <- oneGroupManySegmentKernel new_segment_size num_segments cs
+        kernel <- smallKernel new_segment_size num_segments cs
                             tmp_redres red_scratch_arrs
                             comm flag_reduce_lam' reduce_lam
                             nes new_total_elems ispace inps
@@ -258,7 +288,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
       letTupExp' "step_two_kernel_result" e
 
     ----------------------------------------------------------------------------
-    oneGroupManySeg map_out_arrs flag_reduce_lam' = do
+    useSmallKernel map_out_arrs flag_reduce_lam' = do
       red_scratch_arrs <- forM (take num_redres $ patternIdents pat) $ \(Ident name t) -> do
         tmp <- letExp (baseString name <> "_redres_scratch") $
                BasicOp $ Scratch (elemType t) (arrayDims t)
@@ -267,13 +297,13 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
       let scratch_arrays = red_scratch_arrs ++ map_out_arrs
 
-      kernel <- oneGroupManySegmentKernel segment_size num_segments cs
+      kernel <- smallKernel segment_size num_segments cs
                           arrs_flat scratch_arrays
                           comm flag_reduce_lam' fold_lam
                           nes w ispace inps
       letTupExp' "kernel_result" $ Op kernel
 
-groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
+largeKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
        -> SubExp            -- num_segments
        -> Certificates      -- cs
@@ -287,7 +317,7 @@ groupPerSegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Kernel InKernel, SubExp, SubExp)
-groupPerSegmentKernel segment_size num_segments cs all_arrs comm
+largeKernel segment_size num_segments cs all_arrs comm
                       reduce_lam' kern_chunk_fold_lam
                       nes w segver ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
@@ -422,9 +452,12 @@ groupPerSegmentKernel segment_size num_segments cs all_arrs comm
   where
     one = constant (1 :: Int32)
 
+    commname = case comm of Commutative -> "comm"
+                            Noncommutative -> "nocomm"
+
     kernelname = case segver of
-      OneGroupOneSegment -> "segmented_redomap__one_group_one_segment"
-      ManyGroupsOneSegment -> "segmented_redomap__many_groups_one_segment"
+      OneGroupOneSegment -> "segmented_redomap__large_" ++ commname ++ "_one"
+      ManyGroupsOneSegment -> "segmented_redomap__large_"  ++ commname ++ "_many"
 
     makeOffsetExp SplitContiguous index_within_segment elements_per_thread segment_index = do
       e <- eBinOp (Add Int32)
@@ -478,7 +511,7 @@ calcGroupsPerSegmentAndElementsPerThread segment_size num_segments
   where
     one = constant (1 :: Int32)
 
-oneGroupManySegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
+smallKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
        -> SubExp            -- num_segments
        -> Certificates      -- cs
@@ -492,8 +525,8 @@ oneGroupManySegmentKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Kernel InKernel)
-oneGroupManySegmentKernel segment_size num_segments cs in_arrs scratch_arrs
-                      _comm flag_reduce_lam' fold_lam_unrenamed
+smallKernel segment_size num_segments cs in_arrs scratch_arrs
+                      comm flag_reduce_lam' fold_lam_unrenamed
                       nes w ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
                               -- reduction operator)
@@ -732,7 +765,10 @@ oneGroupManySegmentKernel segment_size num_segments cs in_arrs scratch_arrs
     negone = constant (-1 :: Int32)
     false = constant False
 
-    kernelname = "segmented_redomap__one_group_many_segment"
+
+    commname = case comm of Commutative -> "comm"
+                            Noncommutative -> "nocomm"
+    kernelname = "segmented_redomap__small_" ++ commname
 
     makeOffsetExp index_within_segment segment_index = do
       e <- eBinOp (Add Int32)
