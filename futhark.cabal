@@ -54,7 +54,8 @@ Library
                  file-embed >= 0.0.9,
                  directory,
                  directory-tree,
-                 gitrev >= 1.2.0
+                 gitrev >= 1.2.0,
+                 parallel >= 3.2.1.0
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
@@ -235,7 +236,7 @@ Executable futhark
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
 Executable futhark-c
   Main-is: src/futhark-c.hs
@@ -252,7 +253,7 @@ Executable futhark-c
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
 Executable futhark-py
   Main-is: src/futhark-py.hs
@@ -269,7 +270,7 @@ Executable futhark-py
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
 Executable futhark-pyopencl
   Main-is: src/futhark-pyopencl.hs
@@ -286,7 +287,7 @@ Executable futhark-pyopencl
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
 Executable futharki
   Main-is: src/futharki.hs
@@ -390,7 +391,7 @@ Executable futhark-opencl
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
 Test-suite unit
   Type:              exitcode-stdio-1.0

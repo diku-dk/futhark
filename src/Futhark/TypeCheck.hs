@@ -49,6 +49,7 @@ module Futhark.TypeCheck
   where
 
 import Control.Applicative
+import Control.Parallel.Strategies
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
@@ -318,9 +319,6 @@ collectOccurences m = pass $ do
   o <- checkConsumption c
   return ((x, o), const mempty)
 
-noDataflow :: TypeM lore a -> TypeM lore a
-noDataflow = censor $ const mempty
-
 checkConsumption :: Consumption -> TypeM lore Occurences
 checkConsumption (ConsumptionError e) = bad $ TypeError e
 checkConsumption (Consumption os)     = return os
@@ -470,11 +468,12 @@ checkProg prog = do
                     , envFtable = mempty
                     , envContext = []
                     }
-
-  fmap fst $ runTypeM typeenv $ do
-    ftable <- buildFtable
-    local (\env -> env { envFtable = ftable }) $
-      mapM_ (noDataflow . checkFun) $ progFunctions prog'
+  let onFunction fun =
+        fmap fst $ runTypeM typeenv $ do
+          ftable <- buildFtable
+          local (\env -> env { envFtable = ftable }) $
+            checkFun fun
+  sequence_ $ parMap rseq onFunction $ progFunctions prog'
   where
     prog' = aliasAnalysis prog
     -- To build the ftable we loop through the list of function

@@ -23,6 +23,7 @@ where
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
+import Control.Parallel.Strategies
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 
@@ -203,4 +204,7 @@ intraproceduralTransformation :: MonadFreshNames m =>
                                  (FunDef fromlore -> State VNameSource (FunDef tolore))
                               -> Prog fromlore -> m (Prog tolore)
 intraproceduralTransformation ft prog =
-  modifyNameSource $ runState $ Prog <$> mapM ft (progFunctions prog)
+  modifyNameSource $ \src ->
+  let (funs, srcs) = unzip $ parMap rseq (onFunction src) (progFunctions prog)
+  in (Prog funs, mconcat srcs)
+  where onFunction src f = runState (ft f) src
