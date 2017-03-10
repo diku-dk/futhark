@@ -439,7 +439,7 @@ commandLineOptions = [
   , Option "p" ["pass-option"]
     (ReqArg (\opt ->
                Right $ \config ->
-               config { configExtraOptions = opt : configExtraOptions config })
+               config { configExtraOptions = configExtraOptions config ++ [opt] })
      "OPT")
     "Pass this option to programs being run."
   ]
