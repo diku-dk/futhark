@@ -37,7 +37,7 @@ as follows::
 
   [tags { tags... }]
   [entry: name]
-  [compiled|nobench|notravis] input {
+  [compiled|nobench] input {
     values...
   }
   output { values... } | error: regex
@@ -46,8 +46,7 @@ If ``compiled`` is present before the ``input`` keyword, this test
 case will never be passed to the interpreter.  This is useful for test
 cases that are annoyingly slow to interpret.  The ``nobench`` keyword
 is for data sets that are too small to be worth benchmarking, and only
-has meaning to futhark-bench(1).  The ``notravis`` keyword is used by
-the ``--travis`` option (see below).
+has meaning to futhark-bench(1).
 
 After the ``input`` block, the expected result of the test case is
 written as either another block of values, or an expected run-time
@@ -97,8 +96,8 @@ Futhark source directory.  A simple example can be found in
 OPTIONS
 =======
 
---travis
-  Disable test of input sets marked ``notravis``.
+--nobuffer
+  Print each result on a line by itself, without buffering.
 
 --exclude=tag
   Ignore benchmarks with the specified tag.

@@ -325,7 +325,7 @@ runTests config paths = do
 
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar) included
-  isTTY <- (|| configUnbufferOutput config) <$> hIsTerminalDevice stdout
+  isTTY <- (&& not (configUnbufferOutput config)) <$> hIsTerminalDevice stdout
 
   let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
@@ -415,13 +415,9 @@ commandLineOptions = [
   , Option "c" ["only-compile"]
     (NoArg $ Right $ \config -> config { configTestMode = OnlyCompile })
     "Only run compiled code"
-  , Option [] ["travis"]
-    (NoArg $ Right $ \config -> config { configExclude = T.pack "notravis" :
-                                                         configExclude config
-                                       , configUnbufferOutput = True
-                                       })
-    "Only run compiled code not marked notravis"
-
+  , Option [] ["nobuffer"]
+    (NoArg $ Right $ \config -> config { configUnbufferOutput = True })
+    "Do not buffer output, and write each result on a line by itself."
   , Option [] ["typechecker"]
     (ReqArg (Right . changeProgConfig . setTypeChecker)
      "PROGRAM")
