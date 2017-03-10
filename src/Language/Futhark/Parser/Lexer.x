@@ -80,9 +80,9 @@ tokens :-
   @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.takeWhile (/='u') }
   @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.takeWhile (/='u') }
   @intlit                  { tokenM $ return . INTLIT . readIntegral }
-  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . (<>"0") . T.takeWhile (/='f') }
-  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . (<>"0") . T.takeWhile (/='f') }
-  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . (<>"0") }
+  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.takeWhile (/='f') }
+  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.takeWhile (/='f') }
+  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . suffZero }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 
@@ -161,6 +161,10 @@ mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
   []   -> fail "mkQualId: no components"
   k:qs -> return (map nameFromText (reverse qs), nameFromText k)
+
+-- | Suffix a zero if the last character is dot.
+suffZero :: T.Text -> T.Text
+suffZero s = if T.last s == '.' then s <> "0" else s
 
 tryRead :: Read a => String -> T.Text -> Alex a
 tryRead desc s = case reads s' of
