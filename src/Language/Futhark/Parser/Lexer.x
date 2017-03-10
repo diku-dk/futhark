@@ -18,6 +18,7 @@ import Data.Word (Word8)
 import Data.Bits
 import Data.Function (fix)
 import Data.List
+import Data.Monoid
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText, nameToText)
 import Language.Futhark.Attributes (leadingOperator)
@@ -33,7 +34,7 @@ import Language.Futhark.Syntax (BinOp(..))
 @declit = [0-9]+
 @binlit = 0[bB][01]+
 @intlit = @hexlit|@binlit|@declit
-@reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
+@reallit = (([0-9]+("."[0-9]*)?))([eE][\+\-]?[0-9]+)?
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
@@ -79,9 +80,9 @@ tokens :-
   @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.takeWhile (/='u') }
   @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.takeWhile (/='u') }
   @intlit                  { tokenM $ return . INTLIT . readIntegral }
-  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . T.takeWhile (/='f') }
-  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . T.takeWhile (/='f') }
-  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
+  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . (<>"0") . T.takeWhile (/='f') }
+  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . (<>"0") . T.takeWhile (/='f') }
+  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . (<>"0") }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 
