@@ -64,6 +64,7 @@ type Closure = [VName]
 data FunBinding = FunBinding
                   { internalFun :: (Name, ConstParams, Closure,
                                     [VName], [DeclType],
+                                    [FParam],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.StructType, [E.StructType])
                   }

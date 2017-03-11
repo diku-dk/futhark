@@ -60,8 +60,12 @@ builtinFtable = HM.fromList $ mapMaybe addBuiltin $ HM.toList E.intrinsics
            FunBinding
            (baseName name,
             [], [], [], map (I.Prim . internalisePrimType) paramts,
+            params,
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
            (E.Prim t, map E.Prim paramts))
+          where params =
+                  [Param (ID (nameFromString "x", i)) (I.Prim $ internalisePrimType pt)
+                  | (i,pt) <- zip [0..] paramts]
         addBuiltin _ =
           Nothing
 
@@ -89,6 +93,7 @@ preprocessValDecs = noteFunctions . HM.fromList <=< mapM funFrom
                                                 [],
                                                 shapenames,
                                                 map declTypeOf $ concat values,
+                                                consts++shapes++concat values,
                                                 applyRetType
                                                 (ExtRetType rettype')
                                                 (consts++shapes++concat values)
@@ -379,7 +384,8 @@ internaliseExp desc (E.Apply fname args _ _)
 internaliseExp desc (E.Apply qfname args _ loc) = do
   fname <- lookupSubst qfname
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
-  (fname', constparams, closure, shapes, value_paramts, rettype_fun) <- internalFun <$> lookupFunction fname
+  (fname', constparams, closure, shapes, value_paramts, fun_params, rettype_fun) <-
+    internalFun <$> lookupFunction fname
   (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
   closure_ts <- mapM (fmap (`toDecl` Nonunique) . lookupType) closure
   argts <- mapM subExpType args'
@@ -393,7 +399,8 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
   case rettype_fun $ zip args'' argts' of
     Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
                pretty args'' ++ "\nof types\n " ++
-               pretty argts'
+               pretty argts' ++
+               "Function has parameters\n " ++ pretty fun_params
     Just rettype -> letTupExp' desc $ I.Apply fname' (zip args'' diets) rettype
 
 internaliseExp desc (E.LetPat pat e body _) = do
@@ -434,6 +441,7 @@ internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
                       map I.paramName free_params,
                       shapenames,
                       map declTypeOf $ concat params',
+                      all_params,
                       applyRetType (ExtRetType rettype') all_params)
                  , externalFun = (rettype, map E.patternStructType params)
                  }
@@ -1205,7 +1213,7 @@ internaliseCurrying :: QualName VName
                     ([I.LParam], I.Body, [I.ExtType])
 internaliseCurrying qfname curargs loc row_ts = do
   fname <- lookupSubst qfname
-  (fname', constparams, closure, shapes, value_param_ts, int_rettype_fun) <-
+  (fname', constparams, closure, shapes, value_param_ts, fun_params, int_rettype_fun) <-
     internalFun <$> lookupFunction fname
 
   closure_ts <- mapM (fmap (`toDecl` Nonunique) . lookupType) closure
@@ -1232,7 +1240,8 @@ internaliseCurrying qfname curargs loc row_ts = do
       Nothing ->
         fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
         pretty (constargs ++ closureargs ++ shapeargs ++ valargs) ++ "\nof types\n " ++
-        pretty param_ts
+        pretty param_ts ++
+        "Function has parameters\n " ++ pretty fun_params
       Just (ExtRetType ts) -> do
         res <- letTupExp "curried_fun_result" $
                I.Apply fname' (zip allargs diets) $ ExtRetType ts
@@ -1448,7 +1457,7 @@ lookupConstant :: VName -> InternaliseM (Maybe [SubExp])
 lookupConstant name = do
   is_const <- fmap internalFun <$> lookupFunction' name
   case is_const of
-    Just (fname, constparams, _, _, _, mk_rettype) -> do
+    Just (fname, constparams, _, _, _, _, mk_rettype) -> do
       (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
       case mk_rettype $ zip constargs $ map I.fromDecl const_ts of
         Nothing -> fail $ "lookupConstant: " ++ pretty name ++ " failed"
