@@ -163,9 +163,6 @@ def read_double(f):
     optional(read_float_trailer, f)
     return float(sign + bef + '.' + aft + 'E' + expt)
 
-def read_float(f):
-    return read_double(f)
-
 def read_float_trailer(f):
   parse_specific_char(f, 'f')
   while peek_char(f).isdigit():
@@ -229,19 +226,6 @@ def verify_array_dims(l, dims):
     if len(dims) > 1:
         for x in l:
             verify_array_dims(x, dims[1:])
-
-def read_double_signed(f):
-
-    skip_spaces(f)
-    c = get_char(f)
-
-    if c == '-' and peek_char(f).isdigit():
-      v = -1 * read_double(f)
-    else:
-      unget_char(f, c)
-      v = read_double(f)
-
-    return v
 
 def read_array(f, elem_reader, type_name, rank, bt):
     elems = read_array_helper(f, elem_reader, type_name, rank)

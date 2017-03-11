@@ -438,11 +438,10 @@ valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
 
 readerElem :: PrimType -> Imp.Signedness -> String
-readerElem (FloatType Float32) _ = "read_float"
-readerElem (FloatType Float64) _ = "read_double_signed"
-readerElem IntType{} _           = "read_int"
-readerElem Bool _                = "read_bool"
-readerElem Cert _                = error "Cert is never used. ReaderElem doesn't handle this"
+readerElem (FloatType _) _ = "read_double"
+readerElem IntType{} _     = "read_int"
+readerElem Bool _          = "read_bool"
+readerElem Cert _          = error "Cert is never used. ReaderElem doesn't handle this"
 
 readInput :: Imp.ExternalValue -> PyStmt
 readInput (Imp.OpaqueValue desc _) =
