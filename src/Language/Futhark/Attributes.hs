@@ -474,7 +474,7 @@ isTupleRecord _ = Nothing
 
 areTupleFields :: HM.HashMap Name a -> Maybe [a]
 areTupleFields fs =
-  let fs' = sortFields $ HM.toList fs
+  let fs' = sortFields fs
   in if and $ zipWith (==) (map fst fs') tupleFieldNames
      then Just $ map snd fs'
      else Nothing
@@ -486,9 +486,10 @@ tupleFieldNames = map (nameFromString . show) [(1::Int)..]
 -- | Sort fields by their name; taking care to sort numeric fields by
 -- their numeric value.  This ensures that tuples and tuple-like
 -- records match.
-sortFields :: [(Name,a)] -> [(Name,a)]
-sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l) l
-  where fieldish s = case reads $ nameToString s of
+sortFields :: HM.HashMap Name a -> [(Name,a)]
+sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l') l'
+  where l' = HM.toList l
+        fieldish s = case reads $ nameToString s of
           [(x, "")] -> Left (x::Int)
           _         -> Right s
 
