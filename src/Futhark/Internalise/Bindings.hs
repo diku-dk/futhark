@@ -153,12 +153,12 @@ flattenPattern = flattenPattern' []
         flattenPattern' ts (E.TuplePattern pats _) =
           concat <$> zipWithM flattenPattern' (tupleComponents ts ++ repeat []) pats
         flattenPattern' ts (E.RecordPattern fs loc) =
-          flattenPattern' ts $ E.TuplePattern (map snd $ sortFields fs) loc
+          flattenPattern' ts $ E.TuplePattern (map snd $ sortFields $ HM.fromList fs) loc
         flattenPattern' ts (E.PatternAscription p td) =
           flattenPattern' (unInfo (expandedType td):ts) p
 
         tupleComponents = transpose . map tupleComponents'
-        tupleComponents' (E.Record ts) = map snd $ sortFields $ HM.toList ts
+        tupleComponents' (E.Record ts) = map snd $ sortFields ts
         tupleComponents' t             = [t]
 
 bindingPattern :: E.Pattern -> [I.ExtType] -> (I.Pattern -> InternaliseM a)
