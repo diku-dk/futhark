@@ -314,14 +314,14 @@ internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
 
 internaliseExp desc (E.RecordLit orig_fields _) =
-  concatMap snd . sortFields . HM.toList . HM.unions . reverse <$> mapM internaliseField orig_fields
+  concatMap snd . sortFields . HM.unions . reverse <$> mapM internaliseField orig_fields
   where internaliseField (E.RecordField name e _) = do
           e' <- internaliseExp desc e
           return $ HM.singleton name e'
         internaliseField (E.RecordRecord e) = do
           (field_names, field_types) <-
             case E.typeOf e of
-              Record fs -> return $ unzip $ sortFields $ HM.toList fs
+              Record fs -> return $ unzip $ sortFields fs
               _         -> fail $ "Type of " ++ pretty e ++ " is not record."
           e' <- internaliseExp desc e
           lens <- mapM internalisedTypeSize field_types
@@ -861,8 +861,7 @@ internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- internalisedTypeSize rt
   i' <- fmap sum $ mapM internalisedTypeSize $
         case E.typeOf e of
-               Record fs -> map snd $ filter ((<k) . fst) $
-                            sortFields $ HM.toList fs
+               Record fs -> map snd $ filter ((<k) . fst) $ sortFields fs
                t         -> [t]
   take n . drop i' <$> internaliseExp desc e
 
