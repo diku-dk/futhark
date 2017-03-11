@@ -15,6 +15,7 @@ cache:
 
 install:
  - set PATH=%CD%\_stack;C:\msys64\usr\bin;%PATH%
+ - set PATH=C:\Users\appveyor\AppData\Roaming\local\bin\;%PATH%
  - curl -sS -ostack.zip -L --insecure http://www.stackage.org/stack/windows-i386
  - 7z x stack.zip stack.exe > nul
  - stack setup > nul
