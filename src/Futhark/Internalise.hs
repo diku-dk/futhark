@@ -400,7 +400,7 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
     Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
                pretty args'' ++ "\nof types\n " ++
                pretty argts' ++
-               "Function has parameters\n " ++ pretty fun_params
+               "\nFunction has parameters\n " ++ pretty fun_params
     Just rettype -> letTupExp' desc $ I.Apply fname' (zip args'' diets) rettype
 
 internaliseExp desc (E.LetPat pat e body _) = do
@@ -1241,7 +1241,7 @@ internaliseCurrying qfname curargs loc row_ts = do
         fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
         pretty (constargs ++ closureargs ++ shapeargs ++ valargs) ++ "\nof types\n " ++
         pretty param_ts ++
-        "Function has parameters\n " ++ pretty fun_params
+        "\nFunction has parameters\n " ++ pretty fun_params
       Just (ExtRetType ts) -> do
         res <- letTupExp "curried_fun_result" $
                I.Apply fname' (zip allargs diets) $ ExtRetType ts
