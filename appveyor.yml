@@ -20,7 +20,8 @@ install:
  - stack setup > nul
  - stack build alex happy
  - stack --no-terminal test --only-dependencies -j 3
+ - stack install
 
 test_script:
 - stack --no-terminal test
-- stack exec futhark-test -- --nobuffer tests examples
+- futhark-test -- --nobuffer tests examples
