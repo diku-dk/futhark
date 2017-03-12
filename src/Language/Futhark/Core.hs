@@ -26,6 +26,7 @@ module Language.Futhark.Core
 
     -- * Integer re-export
   , Int8, Int16, Int32, Int64
+  , Word8, Word16, Word32, Word64
   )
 
 where
@@ -33,6 +34,7 @@ where
 import Data.Monoid
 import Data.Hashable
 import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Loc
 import Data.List
 import qualified Data.Text as T
