@@ -474,7 +474,7 @@ readInput (Imp.OpaqueValue desc _) =
 
 readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
   let reader' = readFun bt ept
-      stdin = Var "sys.stdin"
+      stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall reader' [stdin]
 
 -- TODO: If the type identifier of 'Float32' is changed, currently the error
@@ -484,7 +484,7 @@ readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
   let rank' = Var $ show $ length dims
       type_enum = Var $ readTypeEnum bt ept
       ct = Var $ compilePrimType bt
-      stdin = Var "sys.stdin"
+      stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
      [stdin, type_enum, StringLiteral $ pretty bt, rank', ct]
 
