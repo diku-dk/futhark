@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Main (main) where
 
 import Control.Monad
@@ -13,11 +14,13 @@ import Futhark.Compiler
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.CodeGen.Backends.SequentialPython as SequentialPy
 import Futhark.Util.Options
+import Futhark.Util.Pretty (prettyText)
 
 import Prelude
 
 main :: IO ()
-main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
+main = reportingIOErrors $
+       mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 
@@ -36,7 +39,7 @@ pyCodeAction filepath config =
           let class_name
                 | compilerModule config = Just $ takeBaseName filepath
                 | otherwise             = Nothing
-          pyprog <- either compileFail return =<< SequentialPy.compileProg class_name prog
+          pyprog <- either (`internalError` prettyText prog) return =<< SequentialPy.compileProg class_name prog
           let binpath = outputFilePath filepath config
           let pypath = if compilerModule config
                        then binpath `replaceExtension` "py"

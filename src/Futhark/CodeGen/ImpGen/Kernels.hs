@@ -20,6 +20,7 @@ import Data.List
 
 import Prelude hiding (quot)
 
+import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
@@ -49,7 +50,7 @@ inKernelOperations constants = (ImpGen.defaultOperations $ compileInKernelOp con
                                , ImpGen.opsBodyCompiler = compileNestedKernelBody constants
                                }
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either String Imp.Program)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
 compileProg prog =
   fmap (setDefaultSpace (Imp.Space "device")) <$>
   ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
@@ -64,7 +65,7 @@ opCompiler dest (Inner kernel) =
 compileInKernelOp :: KernelConstants -> ImpGen.Destination -> Op InKernel
                   -> InKernelGen ()
 compileInKernelOp _ _ Alloc{} =
-  throwError "Cannot allocate memory in kernel."
+  compilerLimitationS "Cannot allocate memory in kernel."
 compileInKernelOp constants dest (Inner op) =
   compileKernelExp constants dest op
 
@@ -314,7 +315,9 @@ inKernelCopy = ImpGen.copyElementWise
 
 inKernelExpCompiler :: ImpGen.ExpCompiler InKernel Imp.KernelOp
 inKernelExpCompiler _ (BasicOp (Assert _ loc)) =
-  fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
+  compilerLimitationS $
+  unlines [ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
+          , "As a workaround, surround the expression with 'unsafe'."]
 inKernelExpCompiler dest e =
   ImpGen.defCompileExp dest e
 
@@ -946,10 +949,8 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
             isSimpleThreadInSpace bnd = Just bnd
 
 compileKernelExp _ dest e =
-  throwError $ unlines ["Invalid target",
-                         "  " ++ show dest,
-                         "for kernel expression",
-                         "  " ++ pretty e]
+  compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
+                          "for kernel expression", "  " ++ pretty e]
 
 allThreads :: KernelConstants -> InKernelGen () -> InKernelGen Imp.KernelCode
 allThreads constants = ImpGen.subImpM_ $ inKernelOperations constants'

@@ -100,6 +100,7 @@ import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Construct (fullSliceNum)
 import Futhark.MonadFreshNames
+import Futhark.Error
 import Futhark.Util
 
 -- | How to compile an 'Op'.
@@ -206,12 +207,12 @@ newEnv ops ds = Env { envVtable = HM.empty
                     , envVolatility = Imp.Nonvolatile
                     }
 
-newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) VNameSource (Either String) a)
+newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) VNameSource (Either InternalError) a)
   deriving (Functor, Applicative, Monad,
             MonadState VNameSource,
             MonadReader (Env lore op),
             MonadWriter (Imp.Code op),
-            MonadError String)
+            MonadError InternalError)
 
 instance MonadFreshNames (ImpM lore op) where
   getNameSource = get
@@ -231,7 +232,7 @@ instance HasScope SOACS (ImpM lore op) where
 
 runImpM :: ImpM lore op a
         -> Operations lore op -> Imp.Space -> VNameSource
-        -> Either String (a, VNameSource, Imp.Code op)
+        -> Either InternalError (a, VNameSource, Imp.Code op)
 runImpM (ImpM m) comp = runRWST m . newEnv comp
 
 subImpM_ :: Operations lore' op' -> ImpM lore' op' a
@@ -277,7 +278,7 @@ emit = tell
 
 compileProg :: (ExplicitMemorish lore, MonadFreshNames m) =>
                Operations lore op -> Imp.Space
-            -> Prog lore -> m (Either String (Imp.Functions op))
+            -> Prog lore -> m (Either InternalError (Imp.Functions op))
 compileProg ops ds prog =
   modifyNameSource $ \src ->
   case mapAccumLM (compileFunDef ops ds) src (progFunctions prog) of
@@ -383,7 +384,7 @@ compileOutParams orig_rts orig_epts = do
         mkExts _ _ = return ([], [])
 
         mkParam ReturnsMemory{} _ =
-          throwError "Functions may not explicitly return memory blocks."
+          compilerBugS "Functions may not explicitly return memory blocks."
         mkParam (ReturnsScalar t) ept = do
           out <- imp $ newVName "scalar_out"
           tell [Imp.ScalarParam out t]
@@ -440,7 +441,7 @@ compileFunDef :: ExplicitMemorish lore =>
                  Operations lore op -> Imp.Space
               -> VNameSource
               -> FunDef lore
-              -> Either String (VNameSource, (Name, Imp.Function op))
+              -> Either InternalError (VNameSource, (Name, Imp.Function op))
 compileFunDef ops ds src (FunDef entry fname rettype params body) = do
   ((outparams, inparams, results, args), src', body') <-
     runImpM compile ops ds src
@@ -740,7 +741,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
 defCompileBasicOp (Destination []) _ = return () -- No arms, no cake.
 
 defCompileBasicOp target e =
-  throwError $ "ImpGen.defCompileBasicOp: Invalid target\n  " ++
+  compilerBugS $ "ImpGen.defCompileBasicOp: Invalid target\n  " ++
   show target ++ "\nfor expression\n  " ++ pretty e
 
 writeExp :: ValueDestination -> Imp.Exp -> ImpM lore op ()
@@ -750,7 +751,7 @@ writeExp (ArrayElemDestination destmem bt space elemoffset) e = do
   vol <- asks envVolatility
   emit $ Imp.Write destmem elemoffset bt space vol e
 writeExp target e =
-  throwError $ "Cannot write " ++ pretty e ++ " to " ++ show target
+  compilerBugS $ "Cannot write " ++ pretty e ++ " to " ++ show target
 
 insertInVtable :: VName -> VarEntry lore -> Env lore op -> Env lore op
 insertInVtable name entry env =
@@ -856,7 +857,7 @@ funcallTargets (Destination dests) =
   where funcallTarget (ScalarDestination name) =
           return [name]
         funcallTarget ArrayElemDestination{} =
-          throwError "Cannot put scalar function return in-place yet." -- FIXME
+          compilerBugS "Cannot put scalar function return in-place yet." -- FIXME
         funcallTarget (ArrayDestination (CopyIntoMemory _) shape) =
           return $ catMaybes shape
         funcallTarget (ArrayDestination (SetMemory mem memsize) shape) =
@@ -870,7 +871,7 @@ subExpToDimSize (Var v) =
 subExpToDimSize (Constant (IntValue (Int32Value i))) =
   return $ Imp.ConstSize $ fromIntegral i
 subExpToDimSize Constant{} =
-  throwError "Size subexp is not an int32 constant."
+  compilerBugS "Size subexp is not an int32 constant."
 
 compileSubExpTo :: ValueDestination -> SubExp -> ImpM lore op ()
 compileSubExpTo dest se = copyDWIMDest dest [] se []
@@ -882,7 +883,7 @@ compileSubExp (Var v) = do
   t <- lookupType v
   case t of
     Prim pt -> return $ Imp.var v pt
-    _       -> throwError $ "compileSubExp: SubExp is not a primitive type: " ++ pretty v
+    _       -> compilerBugS $ "compileSubExp: SubExp is not a primitive type: " ++ pretty v
 
 compileSubExpOfType :: PrimType -> SubExp -> Imp.Exp
 compileSubExpOfType _ (Constant v) = Imp.ValueExp v
@@ -902,14 +903,14 @@ lookupVar name = do
   res <- asks $ HM.lookup name . envVtable
   case res of
     Just entry -> return entry
-    _ -> throwError $ "Unknown variable: " ++ textual name
+    _ -> compilerBugS $ "Unknown variable: " ++ textual name
 
 lookupArray :: VName -> ImpM lore op ArrayEntry
 lookupArray name = do
   res <- lookupVar name
   case res of
     ArrayVar _ entry -> return entry
-    _                -> throwError $ "ImpGen.lookupArray: not an array: " ++ textual name
+    _                -> compilerBugS $ "ImpGen.lookupArray: not an array: " ++ textual name
 
 arrayLocation :: VName -> ImpM lore op MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
@@ -919,7 +920,7 @@ lookupMemory name = do
   res <- lookupVar name
   case res of
     MemVar _ entry -> return entry
-    _              -> throwError $ "Unknown memory block: " ++ textual name
+    _              -> compilerBugS $ "Unknown memory block: " ++ textual name
 
 destinationFromParam :: Param (MemBound u) -> ImpM lore op ValueDestination
 destinationFromParam param
@@ -1122,7 +1123,7 @@ copyDWIMDest :: ValueDestination -> [PrimExp VName] -> SubExp -> [PrimExp VName]
              -> ImpM lore op ()
 
 copyDWIMDest _ _ (Constant v) (_:_) =
-  throwError $
+  compilerBugS $
   unwords ["copyDWIMDest: constant source", pretty v, "cannot be indexed."]
 copyDWIMDest dest dest_is (Constant v) [] =
   case dest of
@@ -1132,7 +1133,7 @@ copyDWIMDest dest dest_is (Constant v) [] =
     vol <- asks envVolatility
     emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
   MemoryDestination{} ->
-    throwError $
+    compilerBugS $
     unwords ["copyDWIMDest: constant source", pretty v, "cannot be written to memory destination."]
   ArrayDestination (CopyIntoMemory dest_loc) _ -> do
     (dest_mem, dest_space, dest_i) <-
@@ -1140,7 +1141,7 @@ copyDWIMDest dest dest_is (Constant v) [] =
     vol <- asks envVolatility
     emit $ Imp.Write dest_mem dest_i bt dest_space vol $ Imp.ValueExp v
   ArrayDestination{} ->
-    throwError $
+    compilerBugS $
     unwords ["copyDWIMDest: constant source", pretty v,
              "cannot be written to array destination that is not CopyIntoMemory"]
   where bt = primValueType v
@@ -1158,20 +1159,20 @@ copyDWIMDest dest dest_is (Var src) src_is = do
           innerExp $ Imp.dimSizeToExp memsize
 
     (MemoryDestination{}, _) ->
-      throwError $
+      compilerBugS $
       unwords ["copyDWIMDest: cannot write", pretty src, "to memory destination."]
 
     (_, MemVar{}) ->
-      throwError $
+      compilerBugS $
       unwords ["copyDWIMDest: source", pretty src, "is a memory block."]
 
     (_, ScalarVar _ (ScalarEntry _)) | not $ null src_is ->
-      throwError $
+      compilerBugS $
       unwords ["copyDWIMDest: prim-typed source", pretty src, "with nonzero indices."]
 
 
     (ScalarDestination name, _) | not $ null dest_is ->
-      throwError $
+      compilerBugS $
       unwords ["copyDWIMDest: prim-typed target", pretty name, "with nonzero indices."]
 
     (ScalarDestination name, ScalarVar _ (ScalarEntry pt)) ->
@@ -1185,7 +1186,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       emit $ Imp.SetScalar name $ Imp.index mem i bt space vol
 
     (ArrayElemDestination{}, _) | not $ null dest_is->
-      throwError $
+      compilerBugS $
       unwords ["copyDWIMDest: array elemenent destination given indices:", pretty dest_is]
 
     (ArrayElemDestination dest_mem _ dest_space dest_i,
@@ -1203,7 +1204,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
             Imp.index src_mem src_i bt src_space vol
 
     (ArrayElemDestination{}, ArrayVar{}) ->
-      throwError $
+      compilerBugS $
       unwords ["copyDWIMDest: array element destination, but array source",
                pretty src,
                "with incomplete indexing."]
@@ -1221,7 +1222,7 @@ copyDWIMDest dest dest_is (Var src) src_is = do
       emit $ Imp.Write dest_mem dest_i bt dest_space vol (Imp.var src bt)
 
     (ArrayDestination{} , ScalarVar{}) ->
-      throwError $
+      compilerBugS $
       "copyDWIMDest: array destination but scalar source" <>
       pretty src
 
@@ -1275,7 +1276,7 @@ compileAlloc (Destination [MemoryDestination mem sizevar]) e space = do
   case sizevar of Just sizevar' -> emit $ Imp.SetScalar sizevar' e'
                   Nothing       -> return ()
 compileAlloc dest _ _ =
-  throwError $ "compileAlloc: Invalid destination: " ++ show dest
+  compilerBugS $ "compileAlloc: Invalid destination: " ++ show dest
 
 dimSizeToSubExp :: Imp.Size -> SubExp
 dimSizeToSubExp (Imp.ConstSize n) = constant n

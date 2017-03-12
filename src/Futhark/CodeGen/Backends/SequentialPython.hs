@@ -5,6 +5,7 @@ module Futhark.CodeGen.Backends.SequentialPython
 import Control.Monad
 import Data.Traversable
 
+import Futhark.Error
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
@@ -15,7 +16,8 @@ import Futhark.MonadFreshNames
 
 import Prelude
 
-compileProg :: MonadFreshNames m => Maybe String -> Prog ExplicitMemory -> m (Either String String)
+compileProg :: MonadFreshNames m =>
+               Maybe String -> Prog ExplicitMemory -> m (Either InternalError String)
 compileProg module_name =
   ImpGen.compileProg >=>
   traverse (GenericPython.compileProg
