@@ -83,14 +83,14 @@ optimisedProgramMetrics (SOACSPipeline pipeline) program = do
   res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline program) False
   case res of
     Left err ->
-      throwError $ errorDesc err
+      throwError $ T.pack $ show err
     Right prog ->
       return $ progMetrics prog
 optimisedProgramMetrics (KernelsPipeline pipeline) program = do
   res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline program) False
   case res of
     Left err ->
-      throwError $ errorDesc err
+      throwError $ T.pack $ show err
     Right prog ->
       return $ progMetrics prog
 

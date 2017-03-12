@@ -8,7 +8,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Monoid
-import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.IO
 import System.Exit
@@ -134,30 +133,24 @@ explicitMemoryProg :: String -> UntypedPassState -> FutharkM (Prog ExplicitMemor
 explicitMemoryProg _ (ExplicitMemory prog) =
   return prog
 explicitMemoryProg name rep =
-  compileError (T.pack $
-                "Pass " ++ name ++
-                " expects ExplicitMemory representation, but got " ++ representation rep) $
-  pretty rep
+  externalErrorS $ "Pass " ++ name ++
+  " expects ExplicitMemory representation, but got " ++ representation rep
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
   return prog
 soacsProg name rep =
-  compileError (T.pack $
-                "Pass " ++ name ++
-                " expects SOACS representation, but got " ++ representation rep) $
-  pretty rep
+  externalErrorS $ "Pass " ++ name ++
+  " expects SOACS representation, but got " ++ representation rep
 
 kernelsProg :: String -> UntypedPassState -> FutharkM (Prog Kernels.Kernels)
 kernelsProg _ (Kernels prog) =
   return prog
 kernelsProg name rep =
-  compileError (T.pack $
-                "Pass " ++ name ++
-                " expects Kernels representation, but got " ++ representation rep) $
-  pretty rep
+  externalErrorS $
+  "Pass " ++ name ++" expects Kernels representation, but got " ++ representation rep
 
-typedPassOption :: Checkable tolore =>
+typedPassOption :: (Checkable fromlore, Checkable tolore) =>
                    (String -> UntypedPassState -> FutharkM (Prog fromlore))
                 -> (Prog tolore -> UntypedPassState)
                 -> Pass fromlore tolore
@@ -224,8 +217,8 @@ pipelineOption getprog repdesc repf desc pipeline =
             Just prog ->
               repf <$> runPasses pipeline config prog
             Nothing   ->
-              compileErrorS (T.pack $ "Expected " ++ repdesc ++ " representation, but got " ++
-                             representation rep) $ pretty rep
+              externalErrorS $ "Expected " ++ repdesc ++ " representation, but got " ++
+              representation rep
 
 soacsPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
                     -> FutharkOption
@@ -352,11 +345,10 @@ runPolyPasses config prog = do
         actionProcedure mem_action mem_prog
 
       (_, action) ->
-        compileError (T.pack $ "Action " <>
-                      untypedActionName action <>
-                      " expects " ++ representation action ++ " representation, but got " ++
-                     representation prog' ++ ".") $
-        pretty prog'
+        externalErrorS $ "Action " <>
+        untypedActionName action <>
+        " expects " ++ representation action ++ " representation, but got " ++
+        representation prog' ++ "."
   where pipeline_config =
           PipelineConfig { pipelineVerbose = isJust $ futharkVerbose $ futharkConfig config
                          , pipelineValidate = True

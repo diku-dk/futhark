@@ -101,6 +101,7 @@ Library
                    Futhark.CodeGen.SetDefaultSpace
                    Futhark.Compiler
                    Futhark.Construct
+                   Futhark.Error
                    Futhark.FreshNames
                    Futhark.Internalise
                    Futhark.Internalise.AccurateSizes

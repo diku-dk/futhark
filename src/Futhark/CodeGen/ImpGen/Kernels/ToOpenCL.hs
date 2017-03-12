@@ -19,6 +19,7 @@ import Prelude
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
+import Futhark.Error
 import Futhark.Representation.AST.Attributes.Types (int32)
 import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
@@ -34,7 +35,7 @@ import Futhark.Util.IntegralExp (quotRoundingUp)
 
 -- | Translate a kernels-program to an OpenCL-program.
 kernelsToOpenCL :: ImpKernels.Program
-                -> Either String ImpOpenCL.Program
+                -> Either InternalError ImpOpenCL.Program
 kernelsToOpenCL prog = do
   (prog', ToOpenCL extra_funs kernels requirements) <-
     runWriterT $ traverse onHostOp prog
@@ -80,7 +81,7 @@ instance Monoid ToOpenCL where
   ToOpenCL f1 k1 r1 `mappend` ToOpenCL f2 k2 r2 =
     ToOpenCL (f1<>f2) (k1<>k2) (r1<>r2)
 
-type OnKernelM = WriterT ToOpenCL (Either String)
+type OnKernelM = WriterT ToOpenCL (Either InternalError)
 
 onHostOp :: HostOp -> OnKernelM OpenCL
 onHostOp (CallKernel k) = onKernel k

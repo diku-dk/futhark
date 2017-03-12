@@ -35,7 +35,7 @@ import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
-import Futhark.Util.Pretty (text, ppr, prettyDoc)
+import Futhark.Util.Pretty (text, ppr, prettyDoc, prettyText)
 
 printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
@@ -65,8 +65,9 @@ seqCodeGenAction :: Action ExplicitMemory
 seqCodeGenAction =
   Action { actionName = "Compile sequentially"
          , actionDescription = "Translate program into sequential C and write it on standard output."
-         , actionProcedure = either compileFail (liftIO . putStrLn) <=<
-                             SequentialC.compileProg
+         , actionProcedure = \prog ->
+                               either (`internalError` prettyText prog) (liftIO . putStrLn) =<<
+                               SequentialC.compileProg prog
          }
 
 
@@ -74,16 +75,18 @@ impCodeGenAction :: Action ExplicitMemory
 impCodeGenAction =
   Action { actionName = "Compile imperative"
          , actionDescription = "Translate program into imperative IL and write it on standard output."
-         , actionProcedure = either compileFail (liftIO . putStrLn . pretty) <=<
-                             ImpGenSequential.compileProg
+         , actionProcedure = \prog ->
+                               either (`internalError` prettyText prog) (liftIO . putStrLn . pretty) =<<
+                               ImpGenSequential.compileProg prog
          }
 
 kernelImpCodeGenAction :: Action ExplicitMemory
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
-         , actionProcedure = either compileFail (liftIO . putStrLn . pretty) <=<
-                             ImpGenKernels.compileProg
+         , actionProcedure = \prog ->
+                               either (`internalError` prettyText prog) (liftIO . putStrLn . pretty) =<<
+                               ImpGenKernels.compileProg prog
          }
 
 interpret :: Show error =>

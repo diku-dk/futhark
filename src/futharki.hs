@@ -44,7 +44,8 @@ banner = unlines [
   ]
 
 main :: IO ()
-main = mainWithOptions interpreterConfig options run
+main = reportingIOErrors $
+       mainWithOptions interpreterConfig options run
   where run [prog] config = Just $ interpret config prog
         run []     _      = Just repl
         run _      _      = Nothing
@@ -169,7 +170,7 @@ Quit futharki.
           liftIO $ T.putStrLn $ "Reading " <> file
           res <- liftIO $ runExceptT (readProgram $ T.unpack file)
                  `catch` \(err::IOException) ->
-                 return (Left (CompileError (T.pack $ show err) mempty))
+                 return (Left (ExternalError (T.pack $ show err)))
           case res of
             Left err -> liftIO $ dumpError newFutharkConfig err
             Right (prog, _, imports, src) ->
