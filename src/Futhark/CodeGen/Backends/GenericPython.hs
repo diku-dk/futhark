@@ -438,8 +438,16 @@ valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
 
 readerElem :: PrimType -> Imp.Signedness -> String
-readerElem (FloatType _) _ = "read_double"
-readerElem IntType{} _     = "read_int"
+readerElem (FloatType Float32) _ = "read_f32"
+readerElem (FloatType Float64) _ = "read_f64"
+readerElem (IntType Int8)  Imp.TypeUnsigned = "read_u8"
+readerElem (IntType Int16) Imp.TypeUnsigned = "read_u16"
+readerElem (IntType Int32) Imp.TypeUnsigned = "read_u32"
+readerElem (IntType Int64) Imp.TypeUnsigned = "read_u64"
+readerElem (IntType Int8)  Imp.TypeDirect   = "read_i8"
+readerElem (IntType Int16) Imp.TypeDirect   = "read_i16"
+readerElem (IntType Int32) Imp.TypeDirect   = "read_i32"
+readerElem (IntType Int64) Imp.TypeDirect   = "read_i64"
 readerElem Bool _          = "read_bool"
 readerElem Cert _          = error "Cert is never used. ReaderElem doesn't handle this"
 

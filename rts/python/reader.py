@@ -66,6 +66,13 @@ def optional(p, *args):
     except ValueError:
         return None
 
+def optional_specific_string(f, s):
+    c = peek_char(f)
+    if c == s[0]:
+        return parse_specific_string(f, s)
+    else:
+        return False
+
 def sepBy(p, sep, *args):
     elems = []
     x = optional(p, *args)
@@ -98,7 +105,8 @@ def parse_int(f):
             else:
                 unget_char(f, c)
                 break
-    optional(read_int_trailer, f)
+    if len(s) == 0:
+        raise ValueError
     return s
 
 def parse_int_signed(f):
@@ -114,22 +122,40 @@ def parse_int_signed(f):
 
     return s
 
-def read_int_trailer(f):
-  if peek_char(f) == 'i':
-      parse_specific_char(f, 'i')
-  elif peek_char(f) == 'u':
-      parse_specific_char(f, 'u')
-  while peek_char(f).isdigit():
-    get_char(f)
-
 def read_comma(f):
     skip_spaces(f)
     parse_specific_char(f, ',')
     return ','
 
-def read_int(f):
+def read_int(f, s):
     skip_spaces(f)
-    return int(parse_int_signed(f))
+    x = int(parse_int_signed(f))
+    optional_specific_string(f, s)
+    return x
+
+def read_uint(f, s):
+    skip_spaces(f)
+    x = int(parse_int(f))
+    optional_specific_string(f, s)
+    return x
+
+def read_i8(f):
+    return read_int(f, 'i8')
+def read_i16(f):
+    return read_int(f, 'i16')
+def read_i32(f):
+    return read_int(f, 'i32')
+def read_i64(f):
+    return read_int(f, 'i64')
+
+def read_u8(f):
+    return read_int(f, 'i8')
+def read_u16(f):
+    return read_int(f, 'i16')
+def read_u32(f):
+    return read_int(f, 'i32')
+def read_u64(f):
+    return read_int(f, 'i64')
 
 def read_char(f):
     skip_spaces(f)
@@ -138,7 +164,7 @@ def read_char(f):
     parse_specific_char(f, '\'')
     return c
 
-def read_double(f):
+def read_decimal(f):
     skip_spaces(f)
     c = get_char(f)
     if (c == '-'):
@@ -160,13 +186,17 @@ def read_double(f):
         expt = parse_int_signed(f)
     else:
         expt = '0'
-    optional(read_float_trailer, f)
     return float(sign + bef + '.' + aft + 'E' + expt)
 
-def read_float_trailer(f):
-  parse_specific_char(f, 'f')
-  while peek_char(f).isdigit():
-    get_char(f)
+def read_f32(f):
+    x = read_decimal(f)
+    optional_specific_string(f, 'f32')
+    return x
+
+def read_f64(f):
+    x = read_decimal(f)
+    optional_specific_string(f, 'f64')
+    return x
 
 def read_bool(f):
     skip_spaces(f)
