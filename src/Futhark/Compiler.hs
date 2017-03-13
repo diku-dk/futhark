@@ -83,11 +83,14 @@ reportingIOErrors = flip catches [Handler onExit, Handler onError]
   where onExit :: ExitCode -> IO ()
         onExit = throwIO
         onError :: SomeException -> IO ()
-        onError e = do
-          T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
-          T.hPutStrLn stderr "Please report this at https://github.com/HIPERFIT/futhark/issues."
-          T.hPutStrLn stderr $ T.pack $ show e
-          exitWith $ ExitFailure 1
+        onError e
+          | Just UserInterrupt <- asyncExceptionFromException e =
+              return () -- This corresponds to CTRL-C, which is not an error.
+          | otherwise = do
+              T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
+              T.hPutStrLn stderr "Please report this at https://github.com/HIPERFIT/futhark/issues."
+              T.hPutStrLn stderr $ T.pack $ show e
+              exitWith $ ExitFailure 1
 
 runCompilerOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS lore
