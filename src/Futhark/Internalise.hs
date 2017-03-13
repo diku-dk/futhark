@@ -386,8 +386,7 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
   (fname', constparams, closure, shapes, value_paramts, fun_params, rettype_fun) <-
     internalFun <$> lookupFunction fname
-  (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
-  closure_ts <- mapM (fmap (`toDecl` Nonunique) . lookupType) closure
+  (constargs, const_ds, _) <- unzip3 <$> constFunctionArgs constparams
   argts <- mapM subExpType args'
   let shapeargs = argShapes shapes value_paramts argts
       diets = const_ds ++ replicate (length closure + length shapeargs) I.Observe ++
@@ -1209,18 +1208,16 @@ internaliseCurrying :: QualName VName
                     -> [E.Exp]
                     -> SrcLoc
                     -> [I.Type]
-                    -> InternaliseM
-                    ([I.LParam], I.Body, [I.ExtType])
+                    -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 internaliseCurrying qfname curargs loc row_ts = do
   fname <- lookupSubst qfname
   (fname', constparams, closure, shapes, value_param_ts, fun_params, int_rettype_fun) <-
     internalFun <$> lookupFunction fname
 
-  closure_ts <- mapM (fmap (`toDecl` Nonunique) . lookupType) closure
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_ts <- mapM subExpType curargs'
   params <- mapM (newParam "not_curried") row_ts
-  (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
+  (constargs, const_ds, _) <- unzip3 <$> constFunctionArgs constparams
 
   let closureargs = map I.Var closure
       valargs = curargs' ++ map (I.Var . I.paramName) params
