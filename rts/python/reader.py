@@ -284,50 +284,42 @@ def read_str_array(f, elem_reader, type_name, rank, bt):
 
 READ_BINARY_VERSION = 1
 
-# Format specified at https://docs.python.org/2/library/struct.html#format-characters
+# struct format specified at
+# https://docs.python.org/2/library/struct.html#format-characters
 
-def read_bin_i8(f):
-    s = get_chars(f, 1)
-    return struct.unpack('b', s)[0]
+FUTHARK_INT8 = 0
+FUTHARK_INT16 = 1
+FUTHARK_INT32 = 2
+FUTHARK_INT64 = 3
+FUTHARK_UINT8 = 4
+FUTHARK_UINT16 = 5
+FUTHARK_UINT32 = 6
+FUTHARK_UINT64 = 7
+FUTHARK_FLOAT32 = 8
+FUTHARK_FLOAT64 = 9
+FUTHARK_BOOL = 10
 
-def read_bin_i16(f):
-    s = get_chars(f, 2)
-    return struct.unpack('<h', s)[0]
+def mk_bin_scalar_reader(t):
+    def bin_reader(f):
+        fmt = FUTHARK_PRIMTYPES[t]['bin_format']
+        size = FUTHARK_PRIMTYPES[t]['size']
+        return struct.unpack('<' + fmt, get_chars(f, size))[0]
+    return bin_reader
 
-def read_bin_i32(f):
-    s = get_chars(f, 4)
-    return struct.unpack('<i', s)[0]
+read_bin_i8 = mk_bin_scalar_reader(FUTHARK_INT8)
+read_bin_i16 = mk_bin_scalar_reader(FUTHARK_INT16)
+read_bin_i32 = mk_bin_scalar_reader(FUTHARK_INT32)
+read_bin_i64 = mk_bin_scalar_reader(FUTHARK_INT64)
 
-def read_bin_i64(f):
-    s = get_chars(f, 8)
-    return struct.unpack('<q', s)[0]
+read_bin_u8 = mk_bin_scalar_reader(FUTHARK_UINT8)
+read_bin_u16 = mk_bin_scalar_reader(FUTHARK_UINT16)
+read_bin_u32 = mk_bin_scalar_reader(FUTHARK_UINT32)
+read_bin_u64 = mk_bin_scalar_reader(FUTHARK_UINT64)
 
-def read_bin_u8(f):
-    s = get_chars(f, 1)
-    return struct.unpack('B', s)[0]
+read_bin_f32 = mk_bin_scalar_reader(FUTHARK_FLOAT32)
+read_bin_f64 = mk_bin_scalar_reader(FUTHARK_FLOAT64)
 
-def read_bin_u16(f):
-    s = get_chars(f, 2)
-    return struct.unpack('<H', s)[0]
-
-def read_bin_u32(f):
-    s = get_chars(f, 4)
-    return struct.unpack('<I', s)[0]
-
-def read_bin_u64(f):
-    s = get_chars(f, 8)
-    return struct.unpack('<Q', s)[0]
-
-def read_bin_f32(f):
-    s = get_chars(f, 4)
-    return struct.unpack('<f', s)[0]
-
-def read_bin_f64(f):
-    s = get_chars(f, 8)
-    return struct.unpack('<d', s)[0]
-
-def read_bin_bool(f):
-    return read_bin_i8(f) != 0
+read_bin_bool = mk_bin_scalar_reader(FUTHARK_BOOL)
 
 def read_is_binary(f):
     skip_spaces(f)
@@ -342,47 +334,38 @@ def read_is_binary(f):
         unget_char(f, c)
         return False
 
-FUTHARK_INT8 = 0
-FUTHARK_INT16 = 1
-FUTHARK_INT32 = 2
-FUTHARK_INT64 = 3
-FUTHARK_UINT8 = 4
-FUTHARK_UINT16 = 5
-FUTHARK_UINT32 = 6
-FUTHARK_UINT64 = 7
-FUTHARK_FLOAT32 = 8
-FUTHARK_FLOAT64 = 9
-FUTHARK_BOOL = 10
-
-
 FUTHARK_PRIMTYPES = {}
 FUTHARK_PRIMTYPES[FUTHARK_INT8] = \
     {'binname' : b"  i8",
      'type_name' : "i8",
      'size' : 1,
      'bin_reader': read_bin_i8,
-     'str_reader': read_str_i8
+     'str_reader': read_str_i8,
+     'bin_format': 'b'
     }
 FUTHARK_PRIMTYPES[FUTHARK_INT16]   = \
     {'binname' : b" i16",
      'type_name' : "i16",
      'size' : 2,
      'bin_reader': read_bin_i16,
-     'str_reader': read_str_i16
+     'str_reader': read_str_i16,
+     'bin_format': 'h'
     }
 FUTHARK_PRIMTYPES[FUTHARK_INT32]   = \
     {'binname' : b" i32",
      'type_name' : "i32",
      'size' : 4,
      'bin_reader': read_bin_i32,
-     'str_reader': read_str_i32
+     'str_reader': read_str_i32,
+     'bin_format': 'i'
     }
 FUTHARK_PRIMTYPES[FUTHARK_INT64]   = \
     {'binname' : b" i64",
      'type_name' : "i64",
      'size' : 8,
      'bin_reader': read_bin_i64,
-     'str_reader': read_str_i64
+     'str_reader': read_str_i64,
+     'bin_format': 'q'
     }
 
 FUTHARK_PRIMTYPES[FUTHARK_UINT8] = \
@@ -390,28 +373,32 @@ FUTHARK_PRIMTYPES[FUTHARK_UINT8] = \
      'type_name' : "u8",
      'size' : 1,
      'bin_reader': read_bin_u8,
-     'str_reader': read_str_u8
+     'str_reader': read_str_u8,
+     'bin_format': 'B'
     }
 FUTHARK_PRIMTYPES[FUTHARK_UINT16]   = \
     {'binname' : b" i16",
      'type_name' : "u16",
      'size' : 2,
      'bin_reader': read_bin_u16,
-     'str_reader': read_str_u16
+     'str_reader': read_str_u16,
+     'bin_format': 'H'
     }
 FUTHARK_PRIMTYPES[FUTHARK_UINT32]   = \
     {'binname' : b" i32",
      'type_name' : "u32",
      'size' : 4,
      'bin_reader': read_bin_u32,
-     'str_reader': read_str_u32
+     'str_reader': read_str_u32,
+     'bin_format': 'I'
     }
 FUTHARK_PRIMTYPES[FUTHARK_UINT64]   = \
     {'binname' : b" i64",
      'type_name' : "u64",
      'size' : 8,
      'bin_reader': read_bin_u64,
-     'str_reader': read_str_u64
+     'str_reader': read_str_u64,
+     'bin_format': 'Q'
     }
 
 FUTHARK_PRIMTYPES[FUTHARK_FLOAT32] = \
@@ -419,21 +406,24 @@ FUTHARK_PRIMTYPES[FUTHARK_FLOAT32] = \
      'type_name' : "f32",
      'size' : 4,
      'bin_reader': read_bin_f32,
-     'str_reader': read_str_f32
+     'str_reader': read_str_f32,
+     'bin_format': 'f'
     }
 FUTHARK_PRIMTYPES[FUTHARK_FLOAT64] = \
     {'binname' : b" f64",
      'type_name' : "f64",
      'size' : 8,
      'bin_reader': read_bin_f64,
-     'str_reader': read_str_f64
+     'str_reader': read_str_f64,
+     'bin_format': 'd'
     }
 FUTHARK_PRIMTYPES[FUTHARK_BOOL]    = \
     {'binname' : b"bool",
      'type_name' : "bool",
      'size' : 1,
      'bin_reader': read_bin_bool,
-     'str_reader': read_str_bool
+     'str_reader': read_str_bool,
+     'bin_format': 'b'
     }
 
 def read_bin_read_type_enum(f):
@@ -523,19 +513,21 @@ def read_array(f, expected_type, type_name, rank, ctype):
         elem_count *= bin_size
         shape.append(bin_size)
 
-    bin_reader = FUTHARK_PRIMTYPES[bin_type_enum]['bin_reader']
+    bin_fmt = FUTHARK_PRIMTYPES[bin_type_enum]['bin_format']
+    size = FUTHARK_PRIMTYPES[bin_type_enum]['size']
 
+    fmt = '<' + str(elem_count) + bin_fmt
     arr = np.empty(elem_count, dtype=ctype)
-    for i in range(elem_count):
-        arr[i] = bin_reader(f)
+    arr[:] = struct.unpack(fmt, get_chars(f, elem_count * size))
     arr.shape = shape
-    return arr
 
-################################################################################
-### end of reader.py
-################################################################################
+    return arr
 
 if sys.version_info >= (3,0):
     input_stream = sys.stdin.buffer
 else:
     input_stream = sys.stdin
+
+################################################################################
+### end of reader.py
+################################################################################
