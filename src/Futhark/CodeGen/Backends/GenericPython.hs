@@ -437,19 +437,35 @@ valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
 
-readerElem :: PrimType -> Imp.Signedness -> String
-readerElem (FloatType Float32) _ = "read_f32"
-readerElem (FloatType Float64) _ = "read_f64"
-readerElem (IntType Int8)  Imp.TypeUnsigned = "read_u8"
-readerElem (IntType Int16) Imp.TypeUnsigned = "read_u16"
-readerElem (IntType Int32) Imp.TypeUnsigned = "read_u32"
-readerElem (IntType Int64) Imp.TypeUnsigned = "read_u64"
-readerElem (IntType Int8)  Imp.TypeDirect   = "read_i8"
-readerElem (IntType Int16) Imp.TypeDirect   = "read_i16"
-readerElem (IntType Int32) Imp.TypeDirect   = "read_i32"
-readerElem (IntType Int64) Imp.TypeDirect   = "read_i64"
-readerElem Bool _          = "read_bool"
-readerElem Cert _          = error "Cert is never used. ReaderElem doesn't handle this"
+readFun :: PrimType -> Imp.Signedness -> String
+readFun (FloatType Float32) _ = "read_f32"
+readFun (FloatType Float64) _ = "read_f64"
+readFun (IntType Int8)  Imp.TypeUnsigned = "read_u8"
+readFun (IntType Int16) Imp.TypeUnsigned = "read_u16"
+readFun (IntType Int32) Imp.TypeUnsigned = "read_u32"
+readFun (IntType Int64) Imp.TypeUnsigned = "read_u64"
+readFun (IntType Int8)  Imp.TypeDirect   = "read_i8"
+readFun (IntType Int16) Imp.TypeDirect   = "read_i16"
+readFun (IntType Int32) Imp.TypeDirect   = "read_i32"
+readFun (IntType Int64) Imp.TypeDirect   = "read_i64"
+readFun Bool _          = "read_bool"
+readFun Cert _          = error "Cert is never used. ReaderElem doesn't handle this"
+
+-- The value returned will be used when reading binary arrays, to indicate what
+-- the expected type is
+readTypeEnum :: PrimType -> Imp.Signedness -> String
+readTypeEnum (IntType Int8)  Imp.TypeUnsigned = "FUTHARK_UINT8"
+readTypeEnum (IntType Int16) Imp.TypeUnsigned = "FUTHARK_UINT16"
+readTypeEnum (IntType Int32) Imp.TypeUnsigned = "FUTHARK_UINT32"
+readTypeEnum (IntType Int64) Imp.TypeUnsigned = "FUTHARK_UINT64"
+readTypeEnum (IntType Int8)  Imp.TypeDirect   = "FUTHARK_INT8"
+readTypeEnum (IntType Int16) Imp.TypeDirect   = "FUTHARK_INT16"
+readTypeEnum (IntType Int32) Imp.TypeDirect   = "FUTHARK_INT32"
+readTypeEnum (IntType Int64) Imp.TypeDirect   = "FUTHARK_INT64"
+readTypeEnum (FloatType Float32) _ = "FUTHARK_FLOAT32"
+readTypeEnum (FloatType Float64) _ = "FUTHARK_FLOAT64"
+readTypeEnum Bool _ = "FUTHARK_BOOL"
+readTypeEnum Cert _ = error "Cert is never used. readTypeEnum doesn't handle this"
 
 readInput :: Imp.ExternalValue -> PyStmt
 readInput (Imp.OpaqueValue desc _) =
@@ -457,17 +473,20 @@ readInput (Imp.OpaqueValue desc _) =
   [StringLiteral $ "Cannot read argument of type " ++ desc ++ "."]
 
 readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
-  let reader' = readerElem bt ept
-      stdin = Var "sys.stdin"
+  let reader' = readFun bt ept
+      stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall reader' [stdin]
 
+-- TODO: If the type identifier of 'Float32' is changed, currently the error
+-- messages for reading binary input will not use this new name. This is also a
+-- problem for the C runtime system.
 readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
   let rank' = Var $ show $ length dims
-      reader' = Var $ readerElem bt ept
-      bt' = Var $ compilePrimType bt
-      stdin = Var "sys.stdin"
+      type_enum = Var $ readTypeEnum bt ept
+      ct = Var $ compilePrimType bt
+      stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
-     [stdin, reader', StringLiteral $ pretty bt, rank', bt']
+     [stdin, type_enum, StringLiteral $ pretty bt, rank', ct]
 
 printPrimStm :: PyExp -> PrimType -> Imp.Signedness -> PyStmt
 printPrimStm val t ept =
