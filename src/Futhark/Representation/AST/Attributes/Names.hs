@@ -81,8 +81,8 @@ freeWalker = identityWalker {
           let (ctxparams, ctxinits) = unzip ctxmerge
               (valparams, valinits) = unzip valmerge
           mapM_ subExpFree $ ctxinits ++ valinits
-          tell $ freeIn cond
           binding (HS.fromList (map paramName $ ctxparams ++ valparams)) $ do
+            tell $ freeIn cond
             mapM_ (tell . freeIn) $ ctxparams ++ valparams
             bodyFree loopbody
 
