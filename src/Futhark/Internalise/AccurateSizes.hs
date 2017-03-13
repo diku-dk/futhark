@@ -8,7 +8,6 @@ module Futhark.Internalise.AccurateSizes
   , ensureExtShape
   , ensureShape
   , ensureArgShapes
-  , ensureShapeVar
   )
   where
 

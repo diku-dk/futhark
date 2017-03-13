@@ -392,9 +392,9 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
   let shapeargs = argShapes shapes value_paramts argts
       diets = const_ds ++ replicate (length closure + length shapeargs) I.Observe ++
               map I.diet value_paramts
-      paramts = const_ts ++ closure_ts ++ map (const $ I.Prim int32) shapeargs ++ value_paramts
-  args'' <- ensureArgShapes asserting loc shapes paramts $
-            constargs ++ map I.Var closure ++ shapeargs ++ args'
+      paramts = map (const $ I.Prim int32) shapeargs ++ value_paramts
+  args'' <- ((constargs++map I.Var closure)++) <$>
+            ensureArgShapes asserting loc shapes paramts (shapeargs ++ args')
   argts' <- mapM subExpType args''
   case rettype_fun $ zip args'' argts' of
     Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
@@ -423,7 +423,8 @@ internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
         constparams = map (mkConstParam . snd) cm
         shapenames = map I.paramName shapeparams
         normal_params = shapenames ++ map paramName (concat params')
-        free_in_fun = freeInBody e'' `HS.difference` HS.fromList normal_params
+        normal_param_names = HS.fromList normal_params
+        free_in_fun = freeInBody e'' `HS.difference` normal_param_names
 
     used_free_params <- forM (HS.toList free_in_fun) $ \v -> do
       v_t <- lookupType v
@@ -1229,17 +1230,17 @@ internaliseCurrying qfname curargs loc row_ts = do
               replicate (length closure) I.Observe ++
               replicate (length shapeargs) I.Observe ++
               map I.diet value_param_ts
-      param_ts = const_ts ++ closure_ts ++ map (const $ I.Prim int32) shapeargs ++ value_param_ts
+      param_ts = map (const $ I.Prim int32) shapeargs ++ value_param_ts
 
   ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectStms $ do
-    allargs <- ensureArgShapes asserting loc shapes param_ts $
-               constargs ++ closureargs ++ shapeargs ++ valargs
+    allargs <- ((constargs ++ closureargs)++) <$>
+               ensureArgShapes asserting loc shapes param_ts (shapeargs ++ valargs)
     argts' <- mapM subExpType allargs
     case int_rettype_fun $ zip allargs argts' of
       Nothing ->
         fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
         pretty (constargs ++ closureargs ++ shapeargs ++ valargs) ++ "\nof types\n " ++
-        pretty param_ts ++
+        pretty argts' ++
         "\nFunction has parameters\n " ++ pretty fun_params
       Just (ExtRetType ts) -> do
         res <- letTupExp "curried_fun_result" $
