@@ -595,6 +595,11 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
       do_run = body ++ pre_timing
       (do_run_with_timing, close_runtime_file) = addTiming do_run
 
+      -- We ignore overflow errors and the like for executable entry
+      -- points.  These are (somewhat) well-defined in Futhark.
+      ignore s = ArgKeyword s $ StringLiteral "ignore"
+      errstate = Call (Var "np.errstate") $ map ignore ["divide", "over", "under", "invalid"]
+
       do_warmup_run =
         If (Var "do_warmup_run") do_run []
 
@@ -608,7 +613,7 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
 
   return (Def fname' [] $
            str_input ++ prepareIn ++
-           [Try [do_warmup_run, do_num_runs] [except']] ++
+           [Try [With errstate [do_warmup_run, do_num_runs]] [except']] ++
            [close_runtime_file] ++
            str_output,
 

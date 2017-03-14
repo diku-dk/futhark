@@ -52,6 +52,7 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
             | Try [PyStmt] [PyExcept]
             | While PyExp [PyStmt]
             | For String PyExp [PyStmt]
+            | With PyExp [PyStmt]
             | Assign PyExp PyExp
             | AssignOp String PyExp PyExp
             | Comment String [PyStmt]
@@ -155,6 +156,10 @@ instance Pretty PyStmt where
 
   ppr (For i what body) =
     text  "for" <+> ppr i <+> text "in" <+> ppr what <> text ":" </>
+    indent 2 (stack $ map ppr body)
+
+  ppr (With what body) =
+    text "with" <+> ppr what <> text ":" </>
     indent 2 (stack $ map ppr body)
 
   ppr (Assign e1 e2) = ppr e1 <+> text "=" <+> ppr e2
