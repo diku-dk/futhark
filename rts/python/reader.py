@@ -517,8 +517,7 @@ def read_array(f, expected_type, type_name, rank, ctype):
     size = FUTHARK_PRIMTYPES[bin_type_enum]['size']
 
     fmt = '<' + str(elem_count) + bin_fmt
-    arr = np.empty(elem_count, dtype=ctype)
-    arr[:] = struct.unpack(fmt, get_chars(f, elem_count * size))
+    arr = np.fromfile(f, dtype='<'+bin_fmt, count=elem_count, sep='')
     arr.shape = shape
 
     return arr
