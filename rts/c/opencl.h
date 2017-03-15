@@ -20,7 +20,7 @@ static size_t cl_num_groups = 128;
 static size_t cl_tile_size = 32;
 static size_t cl_lockstep_width = 1;
 static const char* cl_dump_program_to = NULL;
-static const char* cl_read_program_from = NULL;
+static const char* cl_load_program_from = NULL;
 
 struct opencl_device_option {
   cl_platform_id platform;
@@ -355,26 +355,29 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
   // Make sure this function is defined.
   post_opencl_setup(&device_option);
 
+  char *fut_opencl_src = NULL;
+  size_t src_size = 0;
+
   // Maybe we have to read OpenCL source from somewhere else (used for debugging).
-  if (cl_read_program_from) {
-    FILE *f = fopen(cl_read_program_from, "r");
+  if (cl_load_program_from) {
+    FILE *f = fopen(cl_load_program_from, "r");
     assert(f != NULL);
     fseek(f, 0, SEEK_END);
-    size_t length = ftell(f);
+    src_size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    src = malloc(length);
-    fread((void*)src, 1, length, f);
+    fut_opencl_src = malloc(src_size);
+    fread(fut_opencl_src, 1, src_size, f);
     fclose(f);
+  } else {
+    // Build the OpenCL program.  First we have to prepend the prelude to the program source.
+    size_t prelude_size = strlen(prelude_src);
+    size_t program_size = strlen(src);
+    src_size = prelude_size + program_size;
+    fut_opencl_src = malloc(src_size + 1);
+    strncpy(fut_opencl_src, prelude_src, src_size);
+    strncpy(fut_opencl_src+prelude_size, src, src_size-prelude_size);
+    fut_opencl_src[src_size] = 0;
   }
-
-  // Build the OpenCL program.  First we have to prepend the prelude to the program source.
-  size_t prelude_size = strlen(prelude_src);
-  size_t program_size = strlen(src);
-  size_t src_size = prelude_size + program_size;
-  char *fut_opencl_src = malloc(src_size + 1);
-  strncpy(fut_opencl_src, prelude_src, src_size);
-  strncpy(fut_opencl_src+prelude_size, src, src_size-prelude_size);
-  fut_opencl_src[src_size] = 0;
 
   cl_program prog;
   error = 0;

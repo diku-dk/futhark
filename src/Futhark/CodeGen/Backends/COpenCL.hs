@@ -77,10 +77,10 @@ compileProg prog = do
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_dump_program_to = optarg;|]
                            }
-                  , Option { optionLongName = "read-opencl"
+                  , Option { optionLongName = "load-opencl"
                            , optionShortName = Nothing
                            , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|cl_read_program_from = optarg;|]
+                           , optionAction = [C.cstm|cl_load_program_from = optarg;|]
                            }
                   ]
 
