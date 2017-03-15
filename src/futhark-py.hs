@@ -31,8 +31,8 @@ compile config filepath =
 
 pyCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 pyCodeAction filepath config =
-  Action { actionName = "Compile sequential C"
-         , actionDescription = "Generate sequential C code from optimised Futhark program."
+  Action { actionName = "Compile sequential Python"
+         , actionDescription = "Generate sequential Python code from optimised Futhark program."
          , actionProcedure = procedure
          }
   where procedure prog = do
