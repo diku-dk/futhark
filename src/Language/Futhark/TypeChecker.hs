@@ -37,85 +37,6 @@ import Language.Futhark.TypeChecker.Terms
 
 --- The main checker
 
--- | Get leading values and functions with return type information.
-chompDecs :: [DecBase NoInfo Name]
-          -> ([ValDecBase NoInfo Name], [DecBase NoInfo Name])
-chompDecs (ValDec dec : xs)
-  | typed dec = let (valdecs, xs') = chompDecs xs
-                in (dec : valdecs, xs')
-  where typed (FunDec fb)   = isJust $ funBindRetDecl fb
-        typed (ConstDec cb) = isJust $ constBindTypeDecl cb
-chompDecs xs                = ([], xs)
-
-boundByValDec :: ValDecBase f Name -> [(Namespace, Name)]
-boundByValDec (FunDec dec)  = [(Term, funBindName dec)]
-boundByValDec (ConstDec dec) = [(Term, constBindName dec)]
-
-buildEnvFromDecs :: [ValDecBase NoInfo Name]
-                 -> TypeM Env
-buildEnvFromDecs = foldM expandV mempty
-  where
-    paramDeclaredType (PatternParens p _) =
-      paramDeclaredType p
-    paramDeclaredType (PatternAscription _ t) =
-      Just $ declaredType t
-    paramDeclaredType (TuplePattern ps loc) =
-      TETuple <$> mapM paramDeclaredType ps <*> pure loc
-    paramDeclaredType _ =
-      Nothing
-
-    expandV env (FunDec (FunBind _ fname maybe_ret _ params _ loc)) = do
-      fname' <- checkName Term fname loc
-      argtypes <- forM params $ \param ->
-        case paramDeclaredType param of
-          Just t -> return t
-          Nothing -> bad $ TypeError (srclocOf param) $
-                     "Missing type information for parameter " ++
-                     pretty param
-      argtypes' <- mapM (fmap snd . checkTypeExpNoDims) argtypes
-      boundf <- case maybe_ret of
-        Just ret -> do (_, ret') <- checkTypeExpNoDims ret
-                       return $ BoundF (argtypes', ret')
-        Nothing -> bad $ TypeError loc $
-                   "Missing return type for function " ++ pretty fname
-      return env { envVtable = HM.insert fname' boundf $
-                                 envVtable env
-                 , envNameMap = HM.insert (Term, fname) fname' $
-                                envNameMap env
-                 }
-
-    expandV env (ConstDec (ConstBind cname maybe_t NoInfo _ loc)) = do
-      cname' <- checkName Term cname loc
-      entry <- case maybe_t of
-        Just t -> do (_, st') <- checkTypeExpNoDims t
-                     return $ BoundV $ removeShapeAnnotations $ fromStruct st'
-        Nothing -> bad $ TypeError loc $
-                   "Missing type information for variable " ++ pretty cname
-      return env { envVtable = HM.insert cname' entry $
-                                 envVtable env
-                 , envNameMap = HM.insert (Term, cname) cname' $
-                                envNameMap env
-                 }
-
-valDecEnv :: ValDecBase Info VName -> Env
-valDecEnv (FunDec fb) =
-  mempty { envVtable =
-             HM.singleton (funBindName fb)
-             (BoundF (map paramType (funBindParams fb),
-                      unInfo $ funBindRetType fb))
-         , envNameMap =
-             HM.singleton (Term, baseName (funBindName fb)) (funBindName fb)
-         }
-  where paramType :: Pattern -> StructType
-        paramType = vacuousShapeAnnotations . toStruct . patternType
-valDecEnv (ConstDec cb) =
-  mempty { envVtable =
-             HM.singleton (constBindName cb)
-             (BoundV $ removeShapeAnnotations $ fromStruct $ unInfo $ constBindType cb)
-         , envNameMap =
-             HM.singleton (Term, baseName (constBindName cb)) (constBindName cb)
-         }
-
 localEnv :: (Env -> Env) -> TypeM a -> TypeM a
 localEnv = local . first
 
@@ -181,10 +102,10 @@ checkForDuplicateDecs =
               bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ HM.insert (namespace, name) loc known
 
-        f (ValDec (FunDec (FunBind _ name _ _ _ _ loc))) =
+        f (FunDec (FunBind _ name _ _ _ _ loc)) =
           check Term name loc
 
-        f (ValDec (ConstDec (ConstBind name _ _ _ loc))) =
+        f (ValDec (ValBind name _ _ _ loc)) =
           check Term name loc
 
         f (TypeDec (TypeBind name _ loc)) =
@@ -476,6 +397,59 @@ checkTypeBind (TypeBind name td loc) = do
                    },
             TypeBind name' td' loc)
 
+checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
+checkValBind (ValBind name maybe_t NoInfo e loc) = do
+  name' <- bindSpaced [(Term, name)] $ checkName Term name loc
+  (maybe_t', e') <- case maybe_t of
+    Just t  -> do
+      (tdecl, tdecl_type) <- runTermTypeM $ checkTypeExp t
+      let t_structural = toStructural tdecl_type
+      when (anythingUnique t_structural) $
+        bad $ UniqueConstType loc name t_structural
+      e' <- require [t_structural] =<< runTermTypeM (checkExp e)
+      return (Just tdecl, e')
+    Nothing -> do
+      e' <- runTermTypeM $ checkExp e
+      return (Nothing, e')
+  let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
+  return (mempty { envVtable =
+                     HM.singleton name' (BoundV $ typeOf e' `setAliases` mempty)
+                 , envNameMap =
+                     HM.singleton (Term, name) name'
+                 },
+          ValBind name' maybe_t' (Info e_t) e' loc)
+  where anythingUnique (Record fs) = any anythingUnique fs
+        anythingUnique et          = unique et
+
+checkFunBind :: FunBindBase NoInfo Name -> TypeM (Env, FunBind)
+checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
+  (fname', params', maybe_retdecl', rettype, body') <-
+    bindSpaced [(Term, fname)] $
+    runTermTypeM $ checkFunDef (fname, maybe_retdecl, params, body, loc)
+
+  when entry $
+    case maybe_retdecl of
+      Just retdecl
+        | Just problem <-
+            find (not . (`HS.member` mconcat (map patNameSet params))) $
+            mapMaybe dimDeclName $ arrayDims' retdecl ->
+              bad $ EntryPointConstReturnDecl loc fname $ qualName problem
+      _ -> return ()
+
+  return (mempty { envVtable =
+                     HM.singleton fname'
+                     (BoundF (map paramType params', rettype))
+                 , envNameMap =
+                     HM.singleton (Term, fname) fname'
+                 },
+           FunBind entry fname' maybe_retdecl' (Info rettype) params' body' loc)
+
+  where dimDeclName (NamedDim name) = Just name
+        dimDeclName _               = Nothing
+
+        paramType :: Pattern -> StructType
+        paramType = vacuousShapeAnnotations . toStruct . patternType
+
 checkDecs :: [DecBase NoInfo Name] -> TypeM (Env, [DecBase Info VName])
 checkDecs (StructDec struct:rest) = do
   (modenv, struct') <- checkStructBind struct
@@ -511,79 +485,20 @@ checkDecs (OpenDec x xs loc:rest) = do
     return (env <> env_ext,
             OpenDec x' xs' loc: rest')
 
+checkDecs (ValDec vb:rest) = do
+  (ext, vb') <- checkValBind vb
+  localEnv (ext<>) $ do
+    (env, vds') <- checkDecs rest
+    return (env <> ext, ValDec vb' : vds')
+
+checkDecs (FunDec fb:rest) = do
+  (ext, fb') <- checkFunBind fb
+  localEnv (ext<>) $ do
+    (env, vds') <- checkDecs rest
+    return (env <> ext, FunDec fb' : vds')
+
 checkDecs [] =
   return (mempty, [])
-
-checkDecs decs@(ValDec{}:_)
-  | (t_and_f_decs@(_:_), rest) <- chompDecs decs = do
-      let bound = concatMap boundByValDec t_and_f_decs
-      bindSpaced bound $ do
-        t_and_f_env <- buildEnvFromDecs t_and_f_decs
-        localEnv (t_and_f_env<>) $ do
-          (env, decs') <- checkValDecs t_and_f_decs rest
-          return (env <> t_and_f_env,
-                  decs')
-
-checkDecs (ValDec vd:rest) =
-  bindSpaced (boundByValDec vd) $ checkValDecs [vd] rest
-
-checkValDecs :: [ValDecBase NoInfo Name]
-             -> [DecBase NoInfo Name]
-             -> TypeM (Env, [DecBase Info VName])
-checkValDecs [] ds = checkDecs ds
-checkValDecs (FunDec fundec:vds) ds = do
-  fundec' <- checkFun fundec
-  let ext = valDecEnv $ FunDec fundec'
-  localEnv (ext<>) $ do
-    (env, vds') <- checkValDecs vds ds
-    return (env <> ext, ValDec (FunDec fundec') : vds')
-checkValDecs (ConstDec constdec:vds) ds = do
-  constdec' <- checkConst constdec
-  let ext = valDecEnv $ ConstDec constdec'
-  localEnv (ext<>) $ do
-    (env, vds') <- checkValDecs vds ds
-    return (env <> ext, ValDec (ConstDec constdec') : vds')
-
-checkConst :: ConstBindBase NoInfo Name -> TypeM ConstBind
-checkConst (ConstBind name maybe_t NoInfo e loc) = do
-  name' <- checkName Term name loc
-  (maybe_t', e') <- case maybe_t of
-    Just t  -> do
-      (tdecl, tdecl_type) <- runTermTypeM $ checkTypeExp t
-      let t_structural = toStructural tdecl_type
-      when (anythingUnique t_structural) $
-        bad $ UniqueConstType loc name t_structural
-      e' <- require [t_structural] =<< runTermTypeM (checkExp e)
-      return (Just tdecl, e')
-    Nothing -> do
-      e' <- runTermTypeM $ checkExp e
-      return (Nothing, e')
-  let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
-  return $ ConstBind name' maybe_t' (Info e_t) e' loc
-  where anythingUnique (Record fs) = any anythingUnique fs
-        anythingUnique et          = unique et
-
-checkFun :: FunBindBase NoInfo Name -> TypeM FunBind
-checkFun (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
-  (fname', params', maybe_retdecl', rettype, body') <-
-    runTermTypeM $ checkFunDef (fname, maybe_retdecl, params, body, loc)
-
-  when entry $
-    case maybe_retdecl of
-      Just retdecl
-        | Just problem <-
-            find (not . (`HS.member` mconcat (map patNameSet params))) $
-            mapMaybe dimDeclName $ arrayDims' retdecl ->
-              bad $ EntryPointConstReturnDecl loc fname $ qualName problem
-      _ -> return ()
-
-  return $ FunBind entry fname' maybe_retdecl' (Info rettype) params' body' loc
-
-  where dimDeclName (NamedDim name) = Just name
-        dimDeclName _               = Nothing
-
-checkTypeExpNoDims :: TypeExp Name -> TypeM (TypeExp VName, StructType)
-checkTypeExpNoDims = expandType $ \_ _ -> return AnyDim
 
 checkTypeDecl :: TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VName)
 checkTypeDecl (TypeDecl t NoInfo) = do

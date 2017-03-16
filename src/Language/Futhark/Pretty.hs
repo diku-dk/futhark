@@ -334,6 +334,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ProgBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
   ppr (ValDec dec)     = ppr dec
+  ppr (FunDec dec)     = ppr dec
   ppr (TypeDec dec)    = ppr dec
   ppr (SigDec sig)     = ppr sig
   ppr (StructDec sd)   = ppr sd
@@ -356,10 +357,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (StructBindBase ty vn) where
   ppr (StructBind name e _) = text "module" <+> ppr name <+> equals <+> ppr e
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValDecBase ty vn) where
-  ppr (FunDec fun) = ppr fun
-  ppr (ConstDec c) = ppr c
-
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
   ppr (TypeBind name usertype _) =
     text "type" <+> ppr name <+> equals <+> ppr usertype
@@ -375,8 +372,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
                        Just rettype -> text ":" <+> ppr rettype
                        Nothing      -> mempty
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ConstBindBase ty vn) where
-  ppr (ConstBind name maybe_t _ e _) =
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
+  ppr (ValBind name maybe_t _ e _) =
     text "val" <+> ppr name <> t' <+> text "=" <+> ppr e
     where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty

@@ -127,7 +127,7 @@ readEvalPrint = do
                                 , funBindBody = e
                                 , funBindLocation = noLoc
                                 }
-              prog' = Prog $ opens ++ [ValDec $ FunDec mainfun]
+              prog' = Prog $ opens ++ [FunDec mainfun]
           runProgram prog imports src prog'
 
 runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()

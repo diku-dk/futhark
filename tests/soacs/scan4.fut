@@ -8,10 +8,6 @@
 --   [4339, 4586, 4929, 5654, 6120, 6554, 7046, 7535]
 -- }
 
-fun main(xs: [n]i32): [n]i32 =
-  loop (xs) = for i < 2 do
-    step(xs)
-  in xs
 
 fun step(xs: [n]i32): [n]i32 =
   let bits = map (+1) xs
@@ -20,3 +16,8 @@ fun step(xs: [n]i32): [n]i32 =
   let ps1' = map (+bits_sum) ps1
   let xs' = map (+) (ps1') xs
   in xs'
+
+fun main(xs: [n]i32): [n]i32 =
+  loop (xs) = for i < 2 do
+    step(xs)
+  in xs

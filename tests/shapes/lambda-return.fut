@@ -16,7 +16,8 @@
 -- }
 
 fun multiply(a: []i32, n: i32): []i32 =
-  if n == 1 then a else multiply(concat a a, n-1)
+  loop (a) = for i < n-1 do concat a a
+  in a
 
 fun main(a: [m][]i32, x: i32): [][]i32 =
   let n = m * (2 ** (x-1))

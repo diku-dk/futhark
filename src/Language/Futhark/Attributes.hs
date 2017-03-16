@@ -63,11 +63,6 @@ module Language.Futhark.Attributes
   , areTupleFields
   , sortFields
 
-  -- * Getters for decs
-  , isValDec
-  , isStructDec
-  , isSigDec
-
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
   -- which is syntactically required.
@@ -939,18 +934,6 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
 maxIntrinsicTag :: Int
 maxIntrinsicTag = maximum $ map baseTag $ HM.keys intrinsics
 
-isValDec :: DecBase f vn -> Maybe (ValDecBase f vn)
-isValDec (ValDec d) = Just d
-isValDec _          = Nothing
-
-isSigDec :: DecBase f vn -> Maybe (SigBindBase f vn)
-isSigDec (SigDec sig) = Just sig
-isSigDec _            = Nothing
-
-isStructDec :: DecBase f vn -> Maybe (StructBindBase f vn)
-isStructDec (StructDec sd) = Just sd
-isStructDec _              = Nothing
-
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v
 qualName = QualName []
@@ -970,6 +953,7 @@ progImports (Prog decs) = concatMap decImports decs
         decImports SigDec{} = []
         decImports TypeDec{} = []
         decImports ValDec{} = []
+        decImports FunDec{} = []
 
         modExpImports ModVar{}              = []
         modExpImports (ModParens p _)       = modExpImports p

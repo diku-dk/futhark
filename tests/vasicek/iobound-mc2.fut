@@ -27,32 +27,29 @@ fun nextrQ(lastr: f32, wq: f32): f32 =
   lastr + kappa() * (thetaQ() - lastr) + sigma() * wq
 
 fun seqRedSumP(lastr: f32, ws: [n]f32): f32 =
-  if n == 0
-  then lastr
-  else
-    let (w0, wns) = split (1) ws in
-    seqRedSumP(nextrP(lastr, w0[0]), wns)
+  loop (lastr) = for i < n do nextrP(lastr, ws[i])
+  in lastr
 
 fun seqRedSumQ(lastr: f32, ws: [n]f32): f32 =
-  if n == 0
-  then lastr
-  else
-    let (w0, wns) = split (1) ws in
-    lastr + seqRedSumQ(nextrQ(lastr, w0[0]), wns)
+  loop (lastr) = for i < n do nextrQ(lastr, ws[i])
+  in lastr
 
-fun mc1(wpss: [][]f32): []f32 =
-  map mc1step wpss
 fun mc1step(wps: []f32): f32 =
   seqRedSumP(r0(), wps)
 
-fun mc2(wqsss: [][][]f32, r1s: []f32): []f32 =
-  map mc2sim (zip wqsss r1s)
+fun mc1(wpss: [][]f32): []f32 =
+  map mc1step wpss
+
+fun mc2step (wqs: []f32) (r1: f32): f32 =
+  seqRedSumQ(r1, wqs)
+
 fun mc2sim(arg: ([tn][]f32, f32)): f32 =
   let ( wqss, r1 ) = arg
   let sum_r = map mc2step wqss (replicate tn r1) in
   mean(sum_r)
-fun mc2step (wqs: []f32) (r1: f32): f32 =
-  seqRedSumQ(r1, wqs)
+
+fun mc2(wqsss: [][][]f32, r1s: []f32): []f32 =
+  map mc2sim (zip wqsss r1s)
 
 fun main(wpss: [][]f32, wqsss: [][][]f32): []f32 = --mc1(wpss)
   mc2(wqsss, mc1(wpss))

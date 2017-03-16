@@ -234,8 +234,8 @@ Prog :: { UncheckedProg }
 
 
 Dec :: { [UncheckedDec] }
-    : Fun               { [ValDec $ FunDec $1] }
-    | Const             { [ValDec $ ConstDec $1] }
+    : Fun               { [FunDec $1] }
+    | Val               { [ValDec $1] }
     | TypeAbbr          { map TypeDec $1 }
     | SigBind           { [SigDec $1 ] }
     | StructBind        { [StructDec $1 ] }
@@ -394,12 +394,12 @@ Fun     : fun id many1(Param) maybeAscription(TypeExpDecl) '=' Exp
           }
 ;
 
-Const : val id ':' TypeExpDecl '=' Exp
-        { let L loc (ID name) = $2
-          in ConstBind name (Just $ declaredType $4) NoInfo $6 loc }
+Val : val id ':' TypeExpDecl '=' Exp
+      { let L loc (ID name) = $2
+        in ValBind name (Just $ declaredType $4) NoInfo $6 loc }
       | val id '=' Exp
-        { let L loc (ID name) = $2
-          in ConstBind name Nothing NoInfo $4 loc }
+      { let L loc (ID name) = $2
+        in ValBind name Nothing NoInfo $4 loc }
 
 SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
              : TypeExpDecl
