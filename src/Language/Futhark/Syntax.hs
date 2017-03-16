@@ -65,8 +65,7 @@ module Language.Futhark.Syntax
 
   -- * Definitions
   , FunBindBase(..)
-  , ConstBindBase(..)
-  , ValDecBase(..)
+  , ValBindBase(..)
   , TypeBindBase(..)
   , ProgBase(..)
   , DecBase(..)
@@ -688,16 +687,16 @@ deriving instance Showable f vn => Show (FunBindBase f vn)
 instance Located (FunBindBase f vn) where
   locOf = locOf . funBindLocation
 
--- | Constant declaration
-data ConstBindBase f vn = ConstBind { constBindName     :: vn
-                                    , constBindTypeDecl :: Maybe (TypeExp vn)
-                                    , constBindType     :: f (StructTypeBase vn)
-                                    , constBindDef      :: ExpBase f vn
-                                    , constBindLocation :: SrcLoc
-                                    }
-deriving instance Showable f vn => Show (ConstBindBase f vn)
+-- | Value declaration.
+data ValBindBase f vn = ValBind { constBindName     :: vn
+                                , constBindTypeDecl :: Maybe (TypeExp vn)
+                                , constBindType     :: f (StructTypeBase vn)
+                                , constBindDef      :: ExpBase f vn
+                                , constBindLocation :: SrcLoc
+                                }
+deriving instance Showable f vn => Show (ValBindBase f vn)
 
-instance Located (ConstBindBase f vn) where
+instance Located (ValBindBase f vn) where
   locOf = locOf . constBindLocation
 
 -- | Type Declarations
@@ -796,18 +795,9 @@ deriving instance Showable f vn => Show (FunctorBindBase f vn)
 instance Located (FunctorBindBase f vn) where
   locOf = locOf . functorLocation
 
--- | A top-level binding of a term variable to either a function or a
--- constant.
-data ValDecBase f vn = FunDec (FunBindBase f vn)
-                     | ConstDec (ConstBindBase f vn)
-deriving instance Showable f vn => Show (ValDecBase f vn)
-
-instance Located (ValDecBase f vn) where
-  locOf (FunDec d)   = locOf d
-  locOf (ConstDec d) = locOf d
-
 -- | A top-level binding.
-data DecBase f vn = ValDec (ValDecBase f vn)
+data DecBase f vn = ValDec (ValBindBase f vn)
+                  | FunDec (FunBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | StructDec (StructBindBase f vn)
@@ -817,6 +807,7 @@ deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
   locOf (ValDec d)        = locOf d
+  locOf (FunDec d)        = locOf d
   locOf (TypeDec d)       = locOf d
   locOf (SigDec d)        = locOf d
   locOf (StructDec d)     = locOf d

@@ -48,12 +48,11 @@ of the following form::
 A function must declare both its return type and the types of all its
 parameters.  All functions (except for inline anonymous functions; see
 below) are defined globally.  Futhark does not use type inference.  As
-a concrete example, here is the recursive definition of the factorial
+a concrete example, here is the a parallel definition of the factorial
 function in Futhark::
 
   fun fact(n: i32): i32 =
-    if n == 0 then 1
-              else n * fact(n-1)
+    reduce (*) 1 (map (1+) (iota n))
 
 Indentation has no syntactical significance in Futhark, but recommended for
 readability.
@@ -141,7 +140,9 @@ function for computing the Fibonacci numbers::
   fun fibhelper(x: i32, y: i32, n: i32): i32 =
     if n == 1 then x else fibhelper(y, x+y, n-1)
 
-We can rewrite this using the ``loop`` construct::
+This is not valid Futhark, as Futhark does not presently allow
+recursive functions.  Instead, we can write this using the ``loop``
+construct::
 
   fun fib(n: i32): i32 =
     loop ((x, y) = (1,1)) = for i < n do

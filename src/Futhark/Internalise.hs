@@ -79,77 +79,67 @@ internaliseFunctionName entry fname = do
           then nameFromString $ pretty $ baseName fname'
           else nameFromString $ pretty fname' ++ "f")
 
-preprocessValDecs :: [E.ValDec] -> InternaliseM ()
-preprocessValDecs = noteFunctions . HM.fromList <=< mapM funFrom
-  where funFrom (E.FunDec (E.FunBind entry ofname _ (Info rettype) params _ _)) =
-          bindingParams params $ \shapes values -> do
-            (fname, fname') <- internaliseFunctionName entry ofname
-            (rettype', _, cm) <- internaliseReturnType rettype
-            let shapenames = map I.paramName shapes
-                consts = map ((`Param` I.Prim int32) . snd) cm
-            return (fname,
-                    FunBinding { internalFun = (fname',
-                                                cm,
-                                                [],
-                                                shapenames,
-                                                map declTypeOf $ concat values,
-                                                consts++shapes++concat values,
-                                                applyRetType
-                                                (ExtRetType rettype')
-                                                (consts++shapes++concat values)
-                                               )
-                               , externalFun = (rettype,
-                                                map E.patternStructType params)
-                               })
-        funFrom (E.ConstDec (E.ConstBind name _ t e loc)) =
-          funFrom $ E.FunDec $ E.FunBind False name Nothing t [] e loc
+preprocessValBind :: E.ValBind -> InternaliseM ()
+preprocessValBind (E.ValBind name _ t e loc) =
+  preprocessFunBind $ E.FunBind False name Nothing t [] e loc
 
-
-nextDec :: [E.Dec] -> (Either [E.ValDec] E.Dec, [E.Dec])
-nextDec [] = (Left [], [])
-nextDec ds | (vds, ds') <- chompDecs ds, not $ null vds = (Left vds, ds')
-  where chompDecs :: [E.Dec] -> ([E.ValDec], [E.Dec])
-        chompDecs (ValDec dec : xs) = let (valdecs, xs') = chompDecs xs
-                                      in (dec : valdecs, xs')
-        chompDecs xs                = ([], xs)
-nextDec (d:ds) = (Right d, ds)
+preprocessFunBind :: E.FunBind -> InternaliseM ()
+preprocessFunBind (E.FunBind entry ofname _ (Info rettype) params _ _) =
+  noteFunctions <=< fmap (uncurry HM.singleton) $
+  bindingParams params $ \shapes values -> do
+    (fname, fname') <- internaliseFunctionName entry ofname
+    (rettype', _, cm) <- internaliseReturnType rettype
+    let shapenames = map I.paramName shapes
+        consts = map ((`Param` I.Prim int32) . snd) cm
+    return (fname,
+            FunBinding { internalFun = (fname',
+                                        cm,
+                                        [],
+                                        shapenames,
+                                        map declTypeOf $ concat values,
+                                        consts++shapes++concat values,
+                                        applyRetType
+                                        (ExtRetType rettype')
+                                        (consts++shapes++concat values)
+                                       )
+                       , externalFun = (rettype,
+                                        map E.patternStructType params)
+                       })
 
 internaliseDecs :: [E.Dec] -> InternaliseM ()
 internaliseDecs ds =
-  case nextDec ds of
-    (Left [], _) ->
+  case ds of
+    [] ->
       return ()
-    (Left vdecs, ds') -> do
-      preprocessValDecs vdecs
-      mapM_ internaliseValDec vdecs
+    ValDec vdec : ds' -> do
+      preprocessValBind vdec
+      internaliseValBind vdec
       internaliseDecs ds'
-    (Right (E.StructDec sb), ds') -> do
+    FunDec fdec : ds' -> do
+      preprocessFunBind fdec
+      internaliseFunBind fdec
+      internaliseDecs ds'
+    E.StructDec sb : ds' -> do
       internaliseModExp (structExp sb)
       v <- lookupSubst $ E.qualName $ E.structName sb
       noteMod v $ E.structExp sb
       internaliseDecs ds'
-    (Right (E.FunctorDec fb), ds') -> do
+    E.FunctorDec fb : ds' -> do
       v <- lookupSubst $ E.qualName $ E.functorName fb
       substs <- asks envFunctorSubsts
       noteModFun v (fst $ E.functorParam fb) substs (E.functorBody fb)
       internaliseDecs ds'
-    (Right (E.TypeDec tb), ds') -> do
+    E.TypeDec tb : ds' -> do
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
       t <- map fromDecl <$> internaliseType
            (E.unInfo $ E.expandedType $ E.typeExp tb)
       noteType v t
       internaliseDecs ds'
-    (Right (E.OpenDec e es _), ds') -> do
+    E.OpenDec e es _ : ds' -> do
       mapM_ internaliseModExp (e:es)
       internaliseDecs ds'
-    (Right _, ds') ->
+    _ :ds' ->
       internaliseDecs ds'
-
-internaliseValDec :: E.ValDec -> InternaliseM ()
-internaliseValDec (E.FunDec fb) =
-  internaliseFun fb
-internaliseValDec (E.ConstDec (E.ConstBind name _ t e loc)) =
-  internaliseFun $ E.FunBind False name Nothing t [] e loc
 
 internaliseModExp :: E.ModExp
                   -> InternaliseM ()
@@ -208,8 +198,12 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
         evalModExp E.ModImport{} =
           return Nothing
 
-internaliseFun :: E.FunBind -> InternaliseM ()
-internaliseFun (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =
+internaliseValBind :: E.ValBind -> InternaliseM ()
+internaliseValBind (E.ValBind name _ t e loc) =
+  internaliseFunBind $ E.FunBind False name Nothing t [] e loc
+
+internaliseFunBind :: E.FunBind -> InternaliseM ()
+internaliseFunBind (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =
   bindingParams params $ \shapeparams params' -> do
     (_, fname') <- internaliseFunctionName entry ofname
     (rettype', _, cm) <- internaliseEntryReturnType rettype

@@ -6,7 +6,7 @@ module Language.Futhark
 
   , Ident, DimIndex, Exp, Lambda, Pattern
   , ModExp, SigExp, StructBind
-  , FunBind, ConstBind, Dec, ValDec, Prog
+  , FunBind, ValBind, Dec, Prog
   , Type, StructType, ArrayType
   )
   where
@@ -34,7 +34,7 @@ type Pattern = PatternBase Info VName
 type FunBind = FunBindBase Info VName
 
 -- | An constant declaration with type information.
-type ConstBind = ConstBindBase Info VName
+type ValBind = ValBindBase Info VName
 
 -- | A type-checked module binding.
 type StructBind = StructBindBase Info VName
@@ -47,9 +47,6 @@ type SigExp = SigExpBase Info VName
 
 -- | A type-checked declaration.
 type Dec = DecBase Info VName
-
--- | A type-checked declaration.
-type ValDec = ValDecBase Info VName
 
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName

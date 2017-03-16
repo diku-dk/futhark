@@ -727,18 +727,18 @@ Declaring Functions and Values
 .. productionlist::
    val_bind: "val" `id` [":" `ty_exp`] "=" `exp`
 
-A function declaration must specify the name, parameters, return
-type, and body of the function::
+Functions and values must be defined before they are used.  A function
+declaration must specify the name, parameters, return type, and body
+of the function::
 
   fun name params...: rettype = body
 
 Type inference is not supported, and functions are fully monomorphic.
-A parameter is written as ``(name: type)``.  If the function is
-neither recursive or referenced before it is defined, the return type
-may be elided.  Optionally, the programmer may put *shape
-declarations* in the return type and parameter types.  These can be
-used to express invariants about the shapes of arrays that are
-accepted or produced by the function, e.g::
+A parameter is written as ``(name: type)``.  Functions may not be
+recursive.  Optionally, the programmer may put *shape declarations* in
+the return type and parameter types.  These can be used to express
+invariants about the shapes of arrays that are accepted or produced by
+the function, e.g::
 
   fun f (a: [n]i32) (b: [n]i32): [n]i32 =
     map (+) a b

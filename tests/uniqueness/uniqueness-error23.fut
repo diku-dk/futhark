@@ -1,7 +1,11 @@
 -- ==
 -- error: .*consumed.*
+
+fun g(ar: *[]i32, a: *[][]i32): i32 =
+  ar[0]
+
 fun f(ar: *[]i32, a: *[][]i32): i32 =
-  f(a[0], a) -- Should be a type error, as both are supposed to be unique
+  g(a[0], a) -- Should be a type error, as both are supposed to be unique
 
 fun main(n: i32): i32 =
   let a = copy(replicate n (iota n))
