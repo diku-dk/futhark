@@ -36,16 +36,6 @@ val ks: [64]u32 =
      0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1 ,
      0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391 ])
 
-fun md5(ms: [n][16]u32): md5 =
-  let a0 = u32(0x67452301)
-  let b0 = u32(0xefcdab89)
-  let c0 = u32(0x98badcfe)
-  let d0 = u32(0x10325476)
-  loop ((a0,b0,c0,d0)) = for i < n do
-    let (a,b,c,d) = md5_chunk (a0,b0,c0,d0) ms[i]
-    in (a0+a, b0+b, c0+c, d0+d)
-  in (a0,b0,c0,d0)
-
 fun rotate_left(x: u32, c: u32): u32 = (x << c) | (x >> (32u32 - c))
 
 fun bytes(x: u32): [4]u8 = [u8(x),
@@ -62,13 +52,6 @@ fun unbytes(bs: [4]u8): u32 =
 fun unbytes_block(block: [64]u8): [16]u32 =
   map unbytes (reshape (16,4) block)
 
-fun main(ms: [n]u8): [16]u8 =
-  let padding = 64 - (n % 64)
-  let n_padded = n + padding
-  let ms_padded = concat ms (bytes 0x80u32) (replicate (padding-12) 0x0u8) (bytes (u32(n*8))) ([0u8,0u8,0u8,0u8])
-  let (a,b,c,d) = md5 (map unbytes_block (reshape (n_padded / 64, 64) ms_padded))
-  in reshape 16 (map bytes ([a,b,c,d]))
-
 -- Process 512 bits of the input.
 fun md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
   loop ((a,b,c,d) = (a0,b0,c0,d0)) = for i < 64 do
@@ -83,3 +66,20 @@ fun md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
                            i32((7u32*u32(i))        % 16u32))
     in (d, b + rotate_left(a + f + ks[i] + m[g], rs[i]), b, c)
   in (a,b,c,d)
+
+fun md5(ms: [n][16]u32): md5 =
+  let a0 = u32(0x67452301)
+  let b0 = u32(0xefcdab89)
+  let c0 = u32(0x98badcfe)
+  let d0 = u32(0x10325476)
+  loop ((a0,b0,c0,d0)) = for i < n do
+    let (a,b,c,d) = md5_chunk (a0,b0,c0,d0) ms[i]
+    in (a0+a, b0+b, c0+c, d0+d)
+  in (a0,b0,c0,d0)
+
+fun main(ms: [n]u8): [16]u8 =
+  let padding = 64 - (n % 64)
+  let n_padded = n + padding
+  let ms_padded = concat ms (bytes 0x80u32) (replicate (padding-12) 0x0u8) (bytes (u32(n*8))) ([0u8,0u8,0u8,0u8])
+  let (a,b,c,d) = md5 (map unbytes_block (reshape (n_padded / 64, 64) ms_padded))
+  in reshape 16 (map bytes ([a,b,c,d]))
