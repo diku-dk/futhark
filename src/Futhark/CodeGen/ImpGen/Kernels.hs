@@ -570,6 +570,9 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
     zipWithM_ (writeParamToLocalMemory $ Imp.var local_id int32)
     acc_local_mem y_params
   let andBlockActive = Imp.BinOpExp LogAnd active
+      maybeBarrier = Imp.If (Imp.CmpOpExp (CmpSle Int32) lockstep_width (Imp.var skip_threads int32))
+                     (Imp.Op Imp.Barrier) mempty
+
   ImpGen.emit $
     Imp.Comment "in-block scan (hopefully no barriers needed)" $
     Imp.DeclareScalar skip_threads int32 <>
@@ -579,11 +582,11 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
       (Imp.Comment "read operands" read_operands <>
        Imp.Comment "perform operation" op_to_y) mempty <>
 
-     Imp.If (Imp.CmpOpExp (CmpSlt Int32) lockstep_width (Imp.var skip_threads int32))
-      (Imp.Op Imp.Barrier) mempty <>
+     maybeBarrier <>
 
      Imp.If (andBlockActive in_block_thread_active)
       (Imp.Comment "write result" write_operation_result) mempty <>
+     maybeBarrier <>
      Imp.SetScalar skip_threads (Imp.var skip_threads int32 * 2))
   where block_id = Imp.BinOpExp (SQuot Int32) (Imp.var local_id int32) block_size
         in_block_id = Imp.var local_id int32 - block_id * block_size
