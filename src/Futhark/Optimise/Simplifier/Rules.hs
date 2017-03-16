@@ -971,10 +971,12 @@ simplifyReshapeScratch _ _ _ = Nothing
 
 simplifyReshapeReplicate :: LetTopDownRule lore u
 simplifyReshapeReplicate defOf seType (Reshape [] newshape v)
-  | Just oldrank <- arrayRank <$> seType (Var v),
-    Just (Replicate _ se) <- asBasicOp =<< defOf v,
-    oldrank == shapeRank (newShape newshape) =
-      Just $ Replicate (newShape newshape) se
+  | Just (Replicate _ se) <- asBasicOp =<< defOf v,
+    Just oldshape <- arrayShape <$> seType se,
+    shapeDims oldshape `isSuffixOf` newDims newshape =
+      let new = take (length newshape - shapeRank oldshape) $
+                newDims newshape
+      in Just $ Replicate (Shape new) se
 simplifyReshapeReplicate _ _ _ = Nothing
 
 
