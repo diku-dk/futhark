@@ -49,8 +49,7 @@ standardPipeline :: CompilationMode -> Pipeline SOACS SOACS
 standardPipeline mode =
   checkForEntryPoints mode >>>
   passes [ simplifySOACS
-         , inlineAggressively
-         , removeDeadFunctions
+         , inlineAndRemoveDeadFunctions
          , performCSE True
          , simplifySOACS
            -- We run fusion twice
