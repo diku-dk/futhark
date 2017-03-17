@@ -3,13 +3,12 @@
 module Futhark.Analysis.CallGraph
   ( CallGraph
   , buildCallGraph
-  , FunctionTable
-  , buildFunctionTable
   )
   where
 
 import Control.Monad.Reader
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import Data.Maybe (isJust)
 
 import Futhark.Representation.SOACS
@@ -35,7 +34,7 @@ runCGM = runReader
 -- | The call graph is just a mapping from a function name, i.e., the
 -- caller, to a list of the names of functions called by the function.
 -- The order of this list is not significant.
-type CallGraph = HM.HashMap Name [Name]
+type CallGraph = HM.HashMap Name (HS.HashSet Name)
 
 -- | @buildCallGraph prog@ build the program's Call Graph. The representation
 -- is a hashtable that maps function names to a list of callee names.
@@ -55,19 +54,19 @@ buildCGfun cg fname  = do
     Just f ->
       case HM.lookup fname cg of
         Just _  -> return cg
-        Nothing -> do let callees = buildCGbody [] $ funDefBody f
+        Nothing -> do let callees = buildCGbody mempty $ funDefBody f
                       let cg' = HM.insert fname callees cg
 
                       -- recursively build the callees
                       foldM buildCGfun cg' callees
 
-buildCGbody :: [Name] -> Body -> [Name]
+buildCGbody :: HS.HashSet Name -> Body -> HS.HashSet Name
 buildCGbody callees = foldl (\x -> buildCGexp x . bindingExp) callees . bodyStms
 
-buildCGexp :: [Name] -> Exp -> [Name]
+buildCGexp :: HS.HashSet Name -> Exp -> HS.HashSet Name
 buildCGexp callees (Apply fname _ _)
   | fname `elem` callees = callees
-  | otherwise            = fname:callees
+  | otherwise            = HS.insert fname callees
 buildCGexp callees (Op op) =
   case op of Map _ _ lam _ ->
                buildCGbody callees $ lambdaBody lam
