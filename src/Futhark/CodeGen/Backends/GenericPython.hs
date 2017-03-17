@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , Constructor (..)
   , emptyConstructor
 
+  , compileName
   , compileDim
   , compileExp
   , compileCode
@@ -217,7 +218,7 @@ paramsTypes = map paramType
         paramType (Imp.ScalarParam _ t) = Imp.Scalar t
 
 compileOutput :: [Imp.Param] -> [PyExp]
-compileOutput = map (Var . textual . Imp.paramName)
+compileOutput = map (Var . compileName . Imp.paramName)
 
 runCompilerM :: Imp.Functions op -> Operations op s
              -> VNameSource
@@ -339,7 +340,7 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
 compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
   body' <- collect $ compileCode body
-  let inputs' = map (pretty . Imp.paramName) inputs
+  let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
   return $ Def (futharkFun . nameToString $ fname) ("self" : inputs') (body'++[ret])
 
@@ -352,9 +353,12 @@ tupleOrSingle es = Tuple es
 simpleCall :: String -> [PyExp] -> PyExp
 simpleCall fname = Call (Var fname) . map Arg
 
+compileName :: VName -> String
+compileName = zEncodeString . textual
+
 compileDim :: Imp.DimSize -> PyExp
 compileDim (Imp.ConstSize i) = Constant $ value i
-compileDim (Imp.VarSize v) = Var $ pretty v
+compileDim (Imp.VarSize v) = Var $ compileName v
 
 unpackDim :: PyExp -> Imp.DimSize -> Int32 -> CompilerM op s ()
 unpackDim arr_name (Imp.ConstSize c) i = do
@@ -366,7 +370,7 @@ unpackDim arr_name (Imp.ConstSize c) i = do
 unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Field arr_name "shape"
   let src = Index shape_name $ IdxExp $ Constant $ value i
-  let dest = Var $ pretty var
+  let dest = Var $ compileName var
   let makeNumpy = simpleCall "np.int32" [src]
   stm $ Try [Assert (BinOp "==" dest makeNumpy) "variant dimension wrong"]
         [Catch (Var "NameError") [Assign dest makeNumpy]]
@@ -376,10 +380,10 @@ entryPointOutput (Imp.OpaqueValue desc vs) =
   simpleCall "opaque" . (StringLiteral (pretty desc):) <$>
   mapM (entryPointOutput . Imp.TransparentValue) vs
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
-  return $ simpleCall tf [Var $ pretty name]
+  return $ simpleCall tf [Var $ compileName name]
   where tf = compilePrimToExtNp bt ept
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
-  let cast = Cast (Var $ pretty mem) (compilePrimTypeExt bt ept)
+  let cast = Cast (Var $ compileName mem) (compilePrimTypeExt bt ept)
   return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
   pack_output <- asks envEntryOutput
@@ -391,7 +395,7 @@ entryPointInput (Imp.OpaqueValue _ vs) e =
   (map (Index (Field e "data") . IdxExp . Constant . value) [(0::Int32)..])
 
 entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
-  let vname' = Var $ pretty name
+  let vname' = Var $ compileName name
       -- HACK: A Numpy int64 will signal an OverflowError if we pass
       -- it a number bigger than 2**63.  This does not happen if we
       -- pass e.g. int8 a number bigger than 2**7.  As a workaround,
@@ -405,12 +409,12 @@ entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
 
 entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace _ _ dims)) e = do
   zipWithM_ (unpackDim e) dims [0..]
-  let dest = Var $ pretty mem
+  let dest = Var $ compileName mem
       unwrap_call = simpleCall "unwrapArray" [e]
 
   case memsize of
     Imp.VarSize sizevar ->
-      stm $ Assign (Var $ pretty sizevar) $
+      stm $ Assign (Var $ compileName sizevar) $
       simpleCall "np.int32" [Field e "nbytes"]
     Imp.ConstSize _ ->
       return ()
@@ -431,7 +435,7 @@ extName :: String -> String
 extName = (++"_ext")
 
 valueDescName :: Imp.ValueDesc -> String
-valueDescName = pretty . valueDescVName
+valueDescName = compileName . valueDescVName
 
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
@@ -519,7 +523,7 @@ printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) e = do
   first <- newVName "print_first"
   let size = simpleCall "np.product" [List $ map compileDim $ outer:shape]
       emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
-  printelem <- printStm (Imp.ArrayValue mem memsize space bt ept shape) $ Var $ pretty v
+  printelem <- printStm (Imp.ArrayValue mem memsize space bt ept shape) $ Var $ compileName v
   return $ If (BinOp "==" size (Constant (value (0::Int32))))
     [puts emptystr]
     [Assign (Var $ pretty first) $ Var "True",
@@ -559,14 +563,14 @@ prepareEntry :: (Name, Imp.Function op)
                 (String, [String], [PyStmt], [PyStmt], [PyStmt],
                  [(Imp.ExternalValue, PyExp)])
 prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
-  let output_paramNames = map (pretty . Imp.paramName) outputs
+  let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
   prepareIn <- collect $ zipWithM_ entryPointInput args $
                map (Var . extValueDescName) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
-  let inputArgs = map (pretty . Imp.paramName) inputs
+  let inputArgs = map (compileName . Imp.paramName) inputs
       fname' = "self." ++ futharkFun (nameToString fname)
       funCall = simpleCall fname' (fmap Var inputArgs)
       call = [Assign funTuple funCall]
@@ -751,7 +755,7 @@ compileExp :: Imp.Exp -> CompilerM op s PyExp
 compileExp (Imp.ValueExp v) = return $ compilePrimValue v
 
 compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
-  return $ Var $ pretty vname
+  return $ Var $ compileName vname
 
 compileExp (Imp.LeafExp (Imp.SizeOf t) _) = do
   let t' = compileSizeOfType t
@@ -762,7 +766,7 @@ compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace _) _) = 
   iexp' <- compileExp iexp
   let bt' = compilePrimType bt
   let nptype = compilePrimToNp bt
-  return $ simpleCall "indexArray" [Var $ pretty src, iexp', Var bt', Var nptype]
+  return $ simpleCall "indexArray" [Var $ compileName src, iexp', Var bt', Var nptype]
 
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
   join $ asks envReadScalar
@@ -828,7 +832,7 @@ compileCode (Imp.While cond body) = do
 
 compileCode (Imp.For i it bound body) = do
   bound' <- compileExp bound
-  let i' = pretty i
+  let i' = compileName i
   body' <- collect $ compileCode body
   counter <- pretty <$> newVName "counter"
   one <- pretty <$> newVName "one"
@@ -838,7 +842,7 @@ compileCode (Imp.For i it bound body) = do
     body' ++ [AssignOp "+" (Var i') (Var one)]
 
 compileCode (Imp.SetScalar vname exp1) = do
-  let name' = Var $ pretty vname
+  let name' = Var $ compileName vname
   exp1' <- compileExp exp1
   stm $ Assign name' exp1'
 
@@ -855,7 +859,7 @@ compileCode (Imp.Assert e loc) = do
 
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args
-  let dests' = tupleOrSingle $ fmap Var (map pretty dests)
+  let dests' = tupleOrSingle $ fmap Var (map compileName dests)
       fname'
         | isBuiltInFunction fname = futharkFun (pretty  fname)
         | otherwise               = "self." ++ futharkFun (pretty  fname)
@@ -865,18 +869,18 @@ compileCode (Imp.Call dests fname args) = do
   stm $ if null dests
         then Exp call'
         else Assign dests' call'
-  where compileArg (Imp.MemArg m) = return $ Var $ pretty m
+  where compileArg (Imp.MemArg m) = return $ Var $ compileName m
         compileArg (Imp.ExpArg e) = compileExp e
 
 compileCode (Imp.SetMem dest src _) = do
-  let src' = Var (pretty src)
-  let dest' = Var (pretty dest)
+  let src' = Var (compileName src)
+  let dest' = Var (compileName dest)
   stm $ Assign dest' src'
 
 compileCode (Imp.Allocate name (Imp.Count e) DefaultSpace) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
-  let name' = Var (pretty name)
+  let name' = Var (compileName name)
   stm $ Assign name' allocate'
 
 compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
@@ -888,8 +892,8 @@ compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
 compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
-  let dest' = Var (pretty dest)
-  let src' = Var (pretty src)
+  let dest' = Var (compileName dest)
+  let src' = Var (compileName src)
   size' <- compileExp size
   let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
   let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
@@ -905,7 +909,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
 compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  let dest' = Var $ pretty dest
+  let dest' = Var $ compileName dest
   let elemtype' = compilePrimType elemtype
   let ctype = simpleCall elemtype' [elemexp']
   stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
