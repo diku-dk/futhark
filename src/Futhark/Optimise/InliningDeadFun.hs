@@ -3,6 +3,7 @@
 module Futhark.Optimise.InliningDeadFun
   ( inlineAggressively
   , removeDeadFunctions
+  , inlineAndRemoveDeadFunctions
   )
   where
 
@@ -30,10 +31,6 @@ type CGM = Reader CGEnv
 runCGM :: CGM a -> CGEnv -> a
 runCGM = runReader
 
-------------------------------------------------------------------
-------------------------------------------------------------------
-------------------------------------------------------------------
-------------------------------------------------------------------
 -- | This pass performs aggressive inlining for all
 -- functions in @prog@ by repeatedly inlining the functions with
 -- empty-apply-callee set into other callers.
@@ -181,3 +178,12 @@ removeDeadFunctions =
               ftable' = HM.filter (isFunInCallGraph cg) ftable
           in Prog $ HM.elems ftable'
         isFunInCallGraph cg fundec = isJust $ HM.lookup (funDefName fundec) cg
+
+-- | A composition of 'inlineAggressively' and 'removeDeadFunctions',
+-- to avoid the cost of type-checking the intermediate stage.
+inlineAndRemoveDeadFunctions :: Pass SOACS SOACS
+inlineAndRemoveDeadFunctions =
+  Pass { passName = "Inline and remove dead functions"
+       , passDescription = "Inline and remove resulting dead functions."
+       , passFunction = passFunction removeDeadFunctions <=< passFunction inlineAggressively
+       }

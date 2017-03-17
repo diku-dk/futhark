@@ -274,6 +274,7 @@ commandLineOptions =
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAggressively []
   , soacsPassOption removeDeadFunctions []
+  , soacsPassOption inlineAndRemoveDeadFunctions []
   , kernelsPassOption inPlaceLowering []
   , kernelsPassOption babysitKernels []
   , kernelsPassOption tileLoops []
