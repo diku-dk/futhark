@@ -272,8 +272,6 @@ commandLineOptions =
     "Memory block playground."
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
-  , soacsPassOption inlineAggressively []
-  , soacsPassOption removeDeadFunctions []
   , soacsPassOption inlineAndRemoveDeadFunctions []
   , kernelsPassOption inPlaceLowering []
   , kernelsPassOption babysitKernels []
