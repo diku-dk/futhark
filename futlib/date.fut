@@ -8,6 +8,8 @@
 -- separate interface files (or some other such mechanism), this
 -- should go away.
 
+import "futlib/math"
+
 module type date = {
   type date
 
@@ -15,6 +17,10 @@ module type date = {
   val add_days: date -> i32 -> date
   -- Subtract days from date.
   val sub_days: date -> i32 -> date
+
+  -- Add months to date.  If necessary, will truncate the day-number
+  -- to the end of the new month.
+  val add_months: date -> i32 -> date
 
   -- The time from the first date to the second, in fractions of a
   -- 365-day year.
@@ -32,6 +38,12 @@ module type date = {
   val check_date: (i32,i32,i32) -> bool
 
   val same_date: date -> date -> bool
+
+  -- The earliest of the two given dates.
+  val earliest: date -> date -> date
+
+  -- The latest of the two given dates.
+  val latest: date -> date -> date
 }
 
 open ({
@@ -79,15 +91,19 @@ open ({
        then {year = y, month = m, day = d, hour = 12, minute = 0}
        else {year = y, month = m, day = d, hour = daytime / 60, minute = daytime % 60}
 
+  fun leap (year: i32) =
+    year % 4 == 0 && ((year % 400 == 0) || (year % 100 != 0))
+
+  fun end_of_month(year: i32) (month: i32): i32 =
+    if month == 2 && leap(year) then 29
+    else if  month == 2 then 28
+    else if ( month == 4 || month == 6 || month == 9 || month == 11 ) then 30
+    else 31
+
   fun check_date ((year,month,day): (i32,i32,i32)) =
     1 <= day &&
     1 <= month && month <= 12 &&
-    (day <= 28 ||
-     if month == 2 then
-     day == 29 && year % 4 == 0 && ((year % 400 == 0) || (year % 100 != 0))
-     else if month == 4 || month == 6 || month == 9 || month == 11
-     then day <= 30
-     else day <= 31)
+    day <= end_of_month year month
 
   fun date_of_triple (year: i32, month: i32, day: i32) =
     date_of_gregorian {year=year, month=month, day=day, hour=12, minute=0}
@@ -109,11 +125,27 @@ open ({
     date_of_int(int_of_date t1 + displ * minutes_in_day)
   fun sub_days (t1: date) (displ: i32) =
     add_days t1 (-displ)
+
+  fun add_months (date: date) (nbmonths: i32) =
+    let {year=y, month=m, day=d, hour=h, minute=min} = gregorian_of_date date
+    let m = m + nbmonths
+    let (y, m) = (y + (m-1) / 12, (m-1) % 12 + 1)
+    let (y, m) = if m <= 0 then (y - 1, m + 12) else (y, m)
+    in date_of_gregorian {year=y,
+                          month=m,
+                          day=i32.min d (end_of_month y m),
+                          hour=h,
+                          minute=min}
+
   fun days_between (t1: date) (t2: date) =
     (f64 (int_of_date t2 - int_of_date t1)) * inv_fminutes_in_day
+
   fun diff_dates (t1: date) (t2: date) =
     days_between t1 t2 / 365.0
 
   fun same_date (x: date) (y: date) = x == y
+
+  fun latest (x: date) (y: date) = i32.max x y
+  fun earliest (x: date) (y: date) = i32.min x y
 
 } : date)
