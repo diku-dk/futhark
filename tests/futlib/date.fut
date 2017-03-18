@@ -64,3 +64,12 @@ entry diff_dates (x1:i32) (y1:i32) (z1:i32) (x2:i32) (y2:i32) (z2:i32) =
   let t1 = date.date_of_triple (x1,y1,z1)
   let t2 = date.date_of_triple (x2,y2,z2)
   in date.diff_dates t1 t2
+
+-- ==
+-- entry: add_months
+-- input { 1 2 3 1 } output { 1 3 3 }
+-- input { 1996 12 31 1 } output { 1997 1 31 }
+-- input { 1996 12 31 2 } output { 1997 2 28 }
+
+entry add_months (x:i32) (y:i32) (z:i32) (d:i32) =
+  date.triple_of_date (date.add_months (date.date_of_triple (x,y,z)) d)
