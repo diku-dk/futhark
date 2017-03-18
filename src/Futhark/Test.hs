@@ -56,7 +56,7 @@ import Futhark.Pipeline
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Passes
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (pretty, prettyText)
 import Futhark.Test.Values
 
 -- | Description of a test to be carried out on a Futhark program.
@@ -186,7 +186,11 @@ parseRunCases = parseRunCases' (0::Int)
           expr <- parseExpectedResult
           return $ TestRun runmode input expr $ desc i input
         desc _ (InFile path) = path
-        desc i Values{}      = "#" ++ show i
+        desc i (Values vs) =
+          "#" ++ show i ++ " (\"" ++ vs' ++ "\")"
+          where vs' = case unwords (map pretty vs) of
+                        s | length s > 50 -> take 50 s ++ "..."
+                          | otherwise     -> s
 
 
 parseExpectedResult :: Parser (ExpectedResult Values)
