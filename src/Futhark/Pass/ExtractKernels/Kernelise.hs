@@ -155,7 +155,8 @@ transformStm (Let pat _ (DoLoop [] val (ForLoop i Int32 bound) body)) = do
   -- original stream.
   accs' <- forM val $ \(p, initial) ->
     case initial of
-      Var v | not $ unique $ paramDeclType p ->
+      Var v | not $ unique $ paramDeclType p,
+              not $ primType $ paramDeclType p ->
                 letSubExp "streamseq_merge_copy" $ BasicOp $ Copy v
       _     -> return initial
 
