@@ -68,6 +68,9 @@ executables:
       - data-binary-ieee754
       - process-extras
     ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg"
+  futharki:
+    <<: *futhark
+    main: src/futharki.hs
   futhark-c:
     <<: *futhark
     main: src/futhark-c.hs
