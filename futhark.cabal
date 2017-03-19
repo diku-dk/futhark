@@ -237,7 +237,7 @@ Executable futhark
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-Options:        -Wall -threaded -rtsopts "-with-rtsopts=-N -qg"
 
 Executable futhark-c
   Main-is: src/futhark-c.hs
@@ -254,7 +254,7 @@ Executable futhark-c
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-Options:        -Wall -threaded -rtsopts "-with-rtsopts=-N -qg"
 
 Executable futhark-py
   Main-is: src/futhark-py.hs
@@ -271,7 +271,7 @@ Executable futhark-py
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-Options:        -Wall -threaded -rtsopts "-with-rtsopts=-N -qg"
 
 Executable futhark-pyopencl
   Main-is: src/futhark-pyopencl.hs
@@ -288,7 +288,7 @@ Executable futhark-pyopencl
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-Options:        -Wall -threaded -rtsopts "-with-rtsopts=-N -qg"
 
 Executable futharki
   Main-is: src/futharki.hs
@@ -329,7 +329,7 @@ Executable futhark-test
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-Options:        -Wall -threaded -rtsopts "-with-rtsopts=-N -qg"
 
 Executable futhark-bench
   Main-is: src/futhark-bench.hs
@@ -354,7 +354,7 @@ Executable futhark-bench
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-Options:        -Wall -threaded -rtsopts "-with-rtsopts=-N -qg"
 
 Executable futhark-dataset
   Main-is: src/futhark-dataset.hs
@@ -392,7 +392,7 @@ Executable futhark-opencl
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-Options:        -Wall -threaded -rtsopts "-with-rtsopts=-N -qg"
 
 Test-suite unit
   Type:              exitcode-stdio-1.0
