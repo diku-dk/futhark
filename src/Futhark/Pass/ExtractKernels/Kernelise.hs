@@ -150,8 +150,17 @@ transformStm (Let pat _ (DoLoop [] val (ForLoop i Int32 bound) body)) = do
                                   , Out.groupStreamAccParams = map (fmap fromDecl . fst) val
                                   , Out.groupStreamArrParams = []
                                   , Out.groupStreamLambdaBody = body' }
+
+  -- Copy the initial merge parameters that were not unique in the
+  -- original stream.
+  accs' <- forM val $ \(p, initial) ->
+    case initial of
+      Var v | not $ unique $ paramDeclType p ->
+                letSubExp "streamseq_merge_copy" $ BasicOp $ Copy v
+      _     -> return initial
+
   addStm $ Let pat () $ Op $ Out.GroupStream
-    bound (constant (1::Int32)) lam (map snd val) []
+    bound (constant (1::Int32)) lam accs' []
 
 transformStm (Let pat _ (If cond tb fb ts)) = do
   tb' <- transformBody tb
