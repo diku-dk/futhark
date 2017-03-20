@@ -765,6 +765,12 @@ commutativeBinOp Or{} = True
 commutativeBinOp Xor{} = True
 commutativeBinOp LogOr{} = True
 commutativeBinOp LogAnd{} = True
+commutativeBinOp SMax{} = True
+commutativeBinOp SMin{} = True
+commutativeBinOp UMax{} = True
+commutativeBinOp UMin{} = True
+commutativeBinOp FMax{} = True
+commutativeBinOp FMin{} = True
 commutativeBinOp _ = False
 
 -- Prettyprinting instances
