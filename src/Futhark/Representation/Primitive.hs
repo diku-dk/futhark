@@ -276,6 +276,19 @@ data BinOp = Add IntType -- ^ Integer addition.
              -- ^ Signed integer division.  Rounds towards zero.
              -- This corresponds to the @srem@ instruction in LLVM.
 
+           | SMin IntType
+             -- ^ Returns the smallest of two signed integers.
+           | UMin IntType
+             -- ^ Returns the smallest of two unsigned integers.
+           | FMin FloatType
+             -- ^ Returns the smallest of two floating-point numbers.
+           | SMax IntType
+             -- ^ Returns the greatest of two signed integers.
+           | UMax IntType
+             -- ^ Returns the greatest of two unsigned integers.
+           | FMax FloatType
+             -- ^ Returns the greatest of two floating-point numbers.
+
            | Shl IntType -- ^ Left-shift.
            | LShr IntType -- ^ Logical right-shift, zero-extended.
            | AShr IntType -- ^ Arithmetic right-shift, sign-extended.
@@ -375,6 +388,12 @@ doBinOp UMod{}   = doRiskyIntBinOp doUMod
 doBinOp SMod{}   = doRiskyIntBinOp doSMod
 doBinOp SQuot{}  = doRiskyIntBinOp doSQuot
 doBinOp SRem{}   = doRiskyIntBinOp doSRem
+doBinOp SMin{}   = doIntBinOp doSMin
+doBinOp UMin{}   = doIntBinOp doUMin
+doBinOp FMin{}   = doFloatBinOp min min
+doBinOp SMax{}   = doIntBinOp doSMax
+doBinOp UMax{}   = doIntBinOp doUMax
+doBinOp FMax{}   = doFloatBinOp max max
 doBinOp Shl{}    = doIntBinOp doShl
 doBinOp LShr{}   = doIntBinOp doLShr
 doBinOp AShr{}   = doIntBinOp doAShr
@@ -467,6 +486,22 @@ doSRem :: IntValue -> IntValue -> Maybe IntValue
 doSRem v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `rem` intToInt64 v2
+
+-- | Minimum of two signed integers.
+doSMin :: IntValue -> IntValue -> IntValue
+doSMin v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `min` intToInt64 v2
+
+-- | Minimum of two unsigned integers.
+doUMin :: IntValue -> IntValue -> IntValue
+doUMin v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `min` intToWord64 v2
+
+-- | Maximum of two signed integers.
+doSMax :: IntValue -> IntValue -> IntValue
+doSMax v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `max` intToInt64 v2
+
+-- | Maximum of two unsigned integers.
+doUMax :: IntValue -> IntValue -> IntValue
+doUMax v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `max` intToWord64 v2
 
 -- | Left-shift.
 doShl :: IntValue -> IntValue -> IntValue
@@ -630,6 +665,12 @@ binOpType (SQuot t) = IntType t
 binOpType (SRem t)  = IntType t
 binOpType (UDiv t)  = IntType t
 binOpType (UMod t)  = IntType t
+binOpType (SMin t)  = IntType t
+binOpType (UMin t)  = IntType t
+binOpType (FMin t)  = FloatType t
+binOpType (SMax t)  = IntType t
+binOpType (UMax t)  = IntType t
+binOpType (FMax t)  = FloatType t
 binOpType (Shl t)   = IntType t
 binOpType (LShr t)  = IntType t
 binOpType (AShr t)  = IntType t
@@ -742,6 +783,12 @@ instance Pretty BinOp where
   ppr (SQuot t) = taggedI "squot" t
   ppr (SRem t)  = taggedI "srem" t
   ppr (FDiv t)  = taggedF "fdiv" t
+  ppr (SMin t)  = taggedI "smin" t
+  ppr (UMin t)  = taggedI "umin" t
+  ppr (FMin t)  = taggedF "fmin" t
+  ppr (SMax t)  = taggedI "smax" t
+  ppr (UMax t)  = taggedI "umax" t
+  ppr (FMax t)  = taggedF "fmax" t
   ppr (Shl t)   = taggedI "shl" t
   ppr (LShr t)  = taggedI "lshr" t
   ppr (AShr t)  = taggedI "ashr" t

@@ -71,8 +71,8 @@ module i8: (integral with t = i8) = {
   fun sgn (x: i8) = intrinsics.sgn x
   fun abs (x: i8) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.smax8 x y
+  fun min (x: t) (y: t) = intrinsics.smin8 x y
 }
 
 module i16: (integral with t = i16) = {
@@ -93,8 +93,8 @@ module i16: (integral with t = i16) = {
   fun sgn (x: i16) = intrinsics.sgn x
   fun abs (x: i16) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.smax16 x y
+  fun min (x: t) (y: t) = intrinsics.smin16 x y
 }
 
 module i32: (integral with t = i32) = {
@@ -115,8 +115,8 @@ module i32: (integral with t = i32) = {
   fun sgn (x: i32) = intrinsics.sgn x
   fun abs (x: i32) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.smax32 x y
+  fun min (x: t) (y: t) = intrinsics.smin32 x y
 }
 
 module i64: (integral with t = i64) = {
@@ -137,8 +137,8 @@ module i64: (integral with t = i64) = {
   fun sgn (x: i64) = intrinsics.sgn x
   fun abs (x: i64) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.smax64 x y
+  fun min (x: t) (y: t) = intrinsics.smin64 x y
 }
 
 module u8: (integral with t = u8) = {
@@ -159,8 +159,8 @@ module u8: (integral with t = u8) = {
   fun sgn (x: u8) = intrinsics.sgn x
   fun abs (x: u8) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.umax8 x y
+  fun min (x: t) (y: t) = intrinsics.umin8 x y
 }
 
 module u16: (integral with t = u16) = {
@@ -181,8 +181,8 @@ module u16: (integral with t = u16) = {
   fun sgn (x: u16) = intrinsics.sgn x
   fun abs (x: u16) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.umax16 x y
+  fun min (x: t) (y: t) = intrinsics.umin16 x y
 }
 
 module u32: (integral with t = u32) = {
@@ -203,8 +203,8 @@ module u32: (integral with t = u32) = {
   fun sgn (x: u32) = intrinsics.sgn x
   fun abs (x: u32) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.umax32 x y
+  fun min (x: t) (y: t) = intrinsics.umin32 x y
 }
 
 module u64: (integral with t = u64) = {
@@ -225,8 +225,8 @@ module u64: (integral with t = u64) = {
   fun sgn (x: u64) = intrinsics.sgn x
   fun abs (x: u64) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.umax64 x y
+  fun min (x: t) (y: t) = intrinsics.umin64 x y
 }
 
 module f64: (real with t = f64) = {
@@ -245,8 +245,8 @@ module f64: (real with t = f64) = {
   fun (x: f64) <  (y: f64) = x intrinsics.< y
   fun (x: f64) >  (y: f64) = x intrinsics.> y
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.fmax64 x y
+  fun min (x: t) (y: t) = intrinsics.fmin64 x y
 
   fun sgn (x: f64) = if      x intrinsics.< 0f64  then -1f64
                      else if x intrinsics.== 0f64 then  0f64
@@ -290,8 +290,8 @@ module f32: (real with t = f32) = {
   fun (x: f32) <  (y: f32) = x intrinsics.< y
   fun (x: f32) >  (y: f32) = x intrinsics.> y
 
-  fun max (x: t) (y: t) = if x < y then y else x
-  fun min (x: t) (y: t) = if x < y then x else y
+  fun max (x: t) (y: t) = intrinsics.fmax32 x y
+  fun min (x: t) (y: t) = intrinsics.fmin32 x y
 
   fun sgn (x: f32) = if      x intrinsics.< 0f32  then -1f32
                      else if x intrinsics.== 0f32 then  0f32

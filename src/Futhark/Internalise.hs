@@ -1270,8 +1270,8 @@ internaliseDimConstant fname name =
   letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
   I.Apply fname [] $ primRetType I.int32
 
--- | Some operators and functions are overloaded - we detect and treat
--- them here.
+-- | Some operators and functions are overloaded or otherwise special
+-- - we detect and treat them here.
 isOverloadedFunction :: E.QualName VName -> [E.Exp]
                      -> Maybe (String -> InternaliseM [SubExp])
 isOverloadedFunction qname args = do
@@ -1287,6 +1287,28 @@ isOverloadedFunction qname args = do
     handle [x] "u16" = Just $ toUnsigned I.Int16 x
     handle [x] "u32" = Just $ toUnsigned I.Int32 x
     handle [x] "u64" = Just $ toUnsigned I.Int64 x
+
+    handle [x,y] "smin8" = Just $ binopF (I.SMin I.Int8) x y
+    handle [x,y] "smin16" = Just $ binopF (I.SMin I.Int16) x y
+    handle [x,y] "smin32" = Just $ binopF (I.SMin I.Int32) x y
+    handle [x,y] "smin64" = Just $ binopF (I.SMin I.Int64) x y
+    handle [x,y] "umin8" = Just $ binopF (I.UMin I.Int8) x y
+    handle [x,y] "umin16" = Just $ binopF (I.UMin I.Int16) x y
+    handle [x,y] "umin32" = Just $ binopF (I.UMin I.Int32) x y
+    handle [x,y] "umin64" = Just $ binopF (I.UMin I.Int64) x y
+    handle [x,y] "fmin32" = Just $ binopF (I.FMin I.Float32) x y
+    handle [x,y] "fmin64" = Just $ binopF (I.FMin I.Float64) x y
+
+    handle [x,y] "smax8" = Just $ binopF (I.SMax I.Int8) x y
+    handle [x,y] "smax16" = Just $ binopF (I.SMax I.Int16) x y
+    handle [x,y] "smax32" = Just $ binopF (I.SMax I.Int32) x y
+    handle [x,y] "smax64" = Just $ binopF (I.SMax I.Int64) x y
+    handle [x,y] "umax8" = Just $ binopF (I.UMax I.Int8) x y
+    handle [x,y] "umax16" = Just $ binopF (I.UMax I.Int16) x y
+    handle [x,y] "umax32" = Just $ binopF (I.UMax I.Int32) x y
+    handle [x,y] "umax64" = Just $ binopF (I.UMax I.Int64) x y
+    handle [x,y] "fmax32" = Just $ binopF (I.FMax I.Float32) x y
+    handle [x,y] "fmax64" = Just $ binopF (I.FMax I.Float64) x y
 
     handle [x] "f32" = Just $ toFloat I.Float32 x
     handle [x] "f64" = Just $ toFloat I.Float64 x
@@ -1441,6 +1463,11 @@ isOverloadedFunction qname args = do
                    letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
                  _ ->
                    fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
+
+    binopF op x y desc = do
+      x' <- internaliseExp1 "min_x" x
+      y' <- internaliseExp1 "min_y" y
+      fmap pure $ letSubExp desc $ I.BasicOp $ I.BinOp op x' y'
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.

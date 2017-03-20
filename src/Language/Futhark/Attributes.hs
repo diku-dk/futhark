@@ -838,6 +838,28 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
              ,("atan2_64", ([FloatType Float64, FloatType Float64], FloatType Float64))
              ,("isinf64", ([FloatType Float64], Bool))
              ,("isnan64", ([FloatType Float64], Bool))
+
+             ,("smin8", ([Signed Int8, Signed Int8], Signed Int8))
+             ,("smin16", ([Signed Int16, Signed Int16], Signed Int16))
+             ,("smin32", ([Signed Int32, Signed Int32], Signed Int32))
+             ,("smin64", ([Signed Int64, Signed Int64], Signed Int64))
+             ,("umin8", ([Unsigned Int8, Unsigned Int8], Unsigned Int8))
+             ,("umin16", ([Unsigned Int16, Unsigned Int16], Unsigned Int16))
+             ,("umin32", ([Unsigned Int32, Unsigned Int32], Unsigned Int32))
+             ,("umin64", ([Unsigned Int64, Unsigned Int64], Unsigned Int64))
+             ,("fmin32", ([FloatType Float32, FloatType Float32], FloatType Float32))
+             ,("fmin64", ([FloatType Float64, FloatType Float64], FloatType Float64))
+
+             ,("smax8", ([Signed Int8, Signed Int8], Signed Int8))
+             ,("smax16", ([Signed Int16, Signed Int16], Signed Int16))
+             ,("smax32", ([Signed Int32, Signed Int32], Signed Int32))
+             ,("smax64", ([Signed Int64, Signed Int64], Signed Int64))
+             ,("umax8", ([Unsigned Int8, Unsigned Int8], Unsigned Int8))
+             ,("umax16", ([Unsigned Int16, Unsigned Int16], Unsigned Int16))
+             ,("umax32", ([Unsigned Int32, Unsigned Int32], Unsigned Int32))
+             ,("umax64", ([Unsigned Int64, Unsigned Int64], Unsigned Int64))
+             ,("fmax32", ([FloatType Float32, FloatType Float32], FloatType Float32))
+             ,("fmax64", ([FloatType Float64, FloatType Float64], FloatType Float64))
              ] ++
 
              [ ("sgn", anyIntFun)

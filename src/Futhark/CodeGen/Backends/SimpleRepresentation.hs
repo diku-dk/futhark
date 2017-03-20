@@ -94,6 +94,8 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                mkUDiv, mkUMod,
                mkSDiv, mkSMod,
                mkSQuot, mkSRem,
+               mkSMin, mkUMin,
+               mkSMax, mkUMax,
                mkShl, mkLShr, mkAShr,
                mkAnd, mkOr, mkXor,
                mkUlt, mkUle,  mkSlt, mkSle,
@@ -112,6 +114,8 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
         mkMul = simpleIntOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
+        mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
+        mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
 
         mkSDiv t =
           let ct = intTypeToCType t
@@ -131,6 +135,8 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
 
         mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
         mkSRem = simpleIntOp "srem" [C.cexp|x % y|]
+        mkSMax = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
+        mkSMin = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
         mkShl = simpleUintOp "shl" [C.cexp|x << y|]
         mkLShr = simpleUintOp "lshr" [C.cexp|x >> y|]
         mkAShr = simpleIntOp "ashr" [C.cexp|x >> y|]
@@ -196,7 +202,7 @@ cFloatConvOps :: [C.Definition]
         taggedF s Float64 = s ++ "64"
         convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
-        mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkPow, mkCmpLt, mkCmpLe] ++
+        mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe] ++
                 map (mkFPConvIF "sitofp") [minBound..maxBound] ++
                 map (mkFPConvUF "uitofp") [minBound..maxBound] ++
                 map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
@@ -206,6 +212,8 @@ cFloatConvOps :: [C.Definition]
         mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
         mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
         mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
+        mkFMin = simpleFloatOp "fmin" [C.cexp|x < y ? x : y|]
+        mkFMax = simpleFloatOp "fmax" [C.cexp|x < y ? y : x|]
         mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
         mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
 
