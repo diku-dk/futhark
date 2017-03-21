@@ -58,15 +58,15 @@ transformExp (Op (Inner (Kernel desc cs space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
       (alloc_bnds, alloc_offsets) <-
-        expandedAllocations num_threads global_tid thread_allocs
+        expandedAllocations
+        (spaceNumThreads space, spaceNumGroups space, spaceGroupSize space)
+        (spaceGlobalId space, spaceGroupId space, spaceLocalId space) thread_allocs
       let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
 
       return (alloc_bnds,
               Op $ Inner $ Kernel desc cs space ts kbody'')
 
-  where global_tid = spaceGlobalId space
-        num_threads = spaceNumThreads space
-        bound_in_kernel =
+  where bound_in_kernel =
           HS.fromList $ HM.keys $ scopeOfKernelSpace space <>
           scopeOf (kernelBodyStms kbody)
 
@@ -105,11 +105,11 @@ extractThreadAllocations bound_before_body bnds = do
         isAlloc allocs bnd =
           return (allocs, Just bnd)
 
-expandedAllocations :: SubExp
-                    -> VName
+expandedAllocations :: (SubExp,SubExp, SubExp)
+                    -> (VName, VName, VName)
                     -> HM.HashMap VName (SubExp, Space)
                     -> ExpandM ([Stm ExplicitMemory], RebaseMap)
-expandedAllocations num_threads thread_index thread_allocs = do
+expandedAllocations (num_threads, num_groups, group_size) (_thread_index, group_id, local_id) thread_allocs = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
   (alloc_bnds, rebase_map) <- unzip <$> mapM expand (HM.toList thread_allocs)
@@ -118,8 +118,8 @@ expandedAllocations num_threads thread_index thread_allocs = do
   -- thread number.
   let alloc_offsets =
         RebaseMap { rebaseMap = mconcat rebase_map
-                  , indexVariable = thread_index
-                  , kernelWidth = num_threads
+                  , indexVariable = (group_id, local_id)
+                  , kernelWidth = (num_groups, group_size)
                   }
   return (concat alloc_bnds, alloc_offsets)
   where expand (mem, (per_thread_size, Space "local")) = do
@@ -138,19 +138,23 @@ expandedAllocations num_threads thread_index thread_allocs = do
                    HM.singleton mem newBase)
 
         newBase old_shape =
-          let perm = [length old_shape, 0] ++ [1..length old_shape-1]
-              root_ixfun = IxFun.iota (old_shape ++ [primExpFromSubExp int32 num_threads])
+          let num_dims = length old_shape
+              perm = [0, num_dims+1] ++ [1..num_dims]
+              root_ixfun = IxFun.iota (primExpFromSubExp int32 num_groups : old_shape
+                                       ++ [primExpFromSubExp int32 group_size])
               permuted_ixfun = IxFun.permute root_ixfun perm
+              untouched d = DimSlice 0 d 1
               offset_ixfun = IxFun.slice permuted_ixfun $
-                             fullSliceNum (IxFun.shape permuted_ixfun)
-                             [DimFix $ LeafExp thread_index int32]
+                             [DimFix (LeafExp group_id int32),
+                              DimFix (LeafExp local_id int32)] ++
+                             map untouched old_shape
           in offset_ixfun
 
 data RebaseMap = RebaseMap {
     rebaseMap :: HM.HashMap VName ([PrimExp VName] -> IxFun)
     -- ^ A map from memory block names to new index function bases.
-  , indexVariable :: VName
-  , kernelWidth :: SubExp
+  , indexVariable :: (VName, VName)
+  , kernelWidth :: (SubExp, SubExp)
   }
 
 lookupNewBase :: VName -> [PrimExp VName] -> RebaseMap -> Maybe IxFun
@@ -221,6 +225,8 @@ offsetMemoryInExp offsets (Op (Inner (GroupStream w max_chunk lam accs arrs))) =
 offsetMemoryInExp offsets (Op (Inner (GroupReduce w lam input))) =
   Op (Inner (GroupReduce w lam' input))
   where lam' = lam { lambdaBody = offsetMemoryInBody offsets $ lambdaBody lam }
+offsetMemoryInExp offsets (Op (Inner (Combine cspace ts active body))) =
+  Op $ Inner $ Combine cspace ts active $ offsetMemoryInBody offsets body
 offsetMemoryInExp offsets e = mapExp recurse e
   where recurse = identityMapper { mapOnBody = const $ return . offsetMemoryInBody offsets
                                  }
