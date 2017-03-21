@@ -90,7 +90,11 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
   step_two_pat <- basicPattern' [] <$>
                   mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
 
-  let step_two_size = KernelSize one num_chunks one num_chunks num_chunks
+  -- Dynamically computed chunk sizes are a mess, so we always pick a
+  -- static one here.  This _must_ be at least as big as the chunk
+  -- size of the step one kernel.
+  group_size <- letSubExp "group_size" $ Op GroupSize
+  let step_two_size = KernelSize one group_size one num_chunks group_size
 
   step_two <- reduceKernel [] step_two_size reduce_lam' nes $ take (length nes) $ patternNames step_one_pat
 
@@ -156,7 +160,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   return $ Kernel (KernelDebugHints "chunked_reduce" [("input size", w)]) cs space ts $
     KernelBody () (chunk_and_fold++combine_reds++[reduce_chunk]) rets
 
-reduceKernel :: MonadBinder m =>
+reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
                 Certificates
              -> KernelSize
              -> Lambda InKernel
@@ -170,34 +174,41 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
            FlatThreadSpace []
   let thread_id = spaceGlobalId space
 
-  (copy_input, arrs_index) <-
-    fmap unzip $ forM (zip red_ts arrs) $ \(t, arr) -> do
-      arr_index <- newVName (baseString arr ++ "_index")
-      return (Let (Pattern [] [PatElem arr_index BindVar t]) () $
-              BasicOp $ Index [] arr $
-              fullSlice (t `arrayOfRow` group_size) [DimFix (Var thread_id)]
-             , arr_index)
+  (rets, kstms) <- runBinder $ do
+    in_bounds <- letSubExp "in_bounds" $ BasicOp $ CmpOp (CmpSlt Int32)
+                 (Var $ spaceLocalId space)
+                 (kernelTotalElements step_two_size)
 
-  (combine_arrs, arrs') <-
-    fmap unzip $ forM (zip red_ts arrs_index) $ \(red_t, arr_index) -> do
-      arr' <- newVName $ baseString arr_index ++ "_combined"
-      let pe = PatElem arr' BindVar $ red_t `arrayOfRow` group_size
-      return (Let (Pattern [] [pe]) () $
-              Op $ Combine [(spaceLocalId space, group_size)] [red_t] (constant True) $
-              Body () [] [Var arr_index],
-              arr')
+    combine_body <- runBodyBinder $
+      fmap resultBody $ forM (zip arrs nes) $ \(arr, ne) -> do
+        arr_t <- lookupType arr
+        letSubExp "elem" =<<
+          eIf (eSubExp in_bounds)
+          (eBody [pure $ BasicOp $ Index [] arr $
+                  fullSlice arr_t [DimFix (Var thread_id)]])
+          (resultBodyM [ne])
 
-  final_res_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
-    pe_name <- newVName "final_result"
-    return $ PatElem pe_name BindVar t
-  let reduce = Let (Pattern [] final_res_pes) () $ Op $
-               GroupReduce group_size reduce_lam' $ zip nes arrs'
+    combine_pat <- fmap (Pattern []) $ forM (zip arrs red_ts) $ \(arr, red_t) -> do
+      arr' <- newVName $ baseString arr ++ "_combined"
+      return $ PatElem arr' BindVar $ red_t `arrayOfRow` group_size
 
-  rets <- forM final_res_pes $ \pe ->
-    return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
+    letBind_ combine_pat $
+      Op $ Combine [(spaceLocalId space, group_size)]
+      (map rowType $ patternTypes combine_pat) (constant True) combine_body
+
+    let arrs' = patternNames combine_pat
+
+    final_res_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
+      pe_name <- newVName "final_result"
+      return $ PatElem pe_name BindVar t
+    letBind_ (Pattern [] final_res_pes) $
+      Op $ GroupReduce group_size reduce_lam' $ zip nes arrs'
+
+    forM final_res_pes $ \pe ->
+      return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
 
   return $ Kernel (KernelDebugHints "reduce" []) cs space (lambdaReturnType reduce_lam')  $
-    KernelBody () (copy_input++combine_arrs++[reduce]) rets
+    KernelBody () kstms rets
 
 chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
                Pattern Kernels -> [SubExp] -> Lambda InKernel -> m (Lambda InKernel)
@@ -391,14 +402,29 @@ data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              }
                 deriving (Eq, Ord, Show)
 
+numberOfGroups :: MonadBinder m => SubExp -> SubExp -> SubExp -> m (SubExp, SubExp)
+numberOfGroups w group_size max_num_groups = do
+  -- If 'w' is small, we launch fewer groups than we normally would.
+  -- We don't want any idle groups.
+  w_div_group_size <- letSubExp "w_div_group_size" =<<
+    eDivRoundingUp Int32 (eSubExp w) (eSubExp group_size)
+  -- We also don't want zero groups.
+  num_groups_maybe_zero <- letSubExp "num_groups_maybe_zero" $ BasicOp $ BinOp (SMin Int32)
+                           w_div_group_size max_num_groups
+  num_groups <- letSubExp "num_groups" $
+                BasicOp $ BinOp (SMax Int32) (constant (1::Int32))
+                num_groups_maybe_zero
+  num_threads <-
+    letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32) num_groups group_size
+  return (num_groups, num_threads)
+
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
                      SubExp -> m KernelSize
 blockedKernelSize w = do
-  num_groups <- letSubExp "num_groups" $ Op NumGroups
   group_size <- letSubExp "group_size" $ Op GroupSize
+  max_num_groups <- letSubExp "max_num_groups" $ Op NumGroups
 
-  num_threads <-
-    letSubExp "num_threads" $ BasicOp $ BinOp (Mul Int32) num_groups group_size
+  (num_groups, num_threads) <- numberOfGroups w group_size max_num_groups
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
