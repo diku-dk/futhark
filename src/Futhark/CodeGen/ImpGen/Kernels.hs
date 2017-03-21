@@ -365,8 +365,20 @@ localMemSize :: Imp.MemSize -> CallKernelGen (Either Imp.MemSize Imp.KernelConst
 localMemSize (Imp.ConstSize x) =
   return $ Right $ ValueExp $ IntValue $ Int32Value x
 localMemSize (Imp.VarSize v) = isConstExp v >>= \case
-  Nothing -> return $ Left $ Imp.VarSize v
-  Just e  -> return $ Right e
+  Just e | isStaticExp e -> return $ Right e
+  _ -> return $ Left $ Imp.VarSize v
+
+-- | Only some constant expressions quality as *static* expressions,
+-- which we can use for static memory allocation.  This is a bit of a
+-- hack, as it is primarly motivated by what you can put as the size
+-- when declaring an array in C.
+isStaticExp :: Imp.KernelConstExp -> Bool
+isStaticExp LeafExp{} = True
+isStaticExp ValueExp{} = True
+isStaticExp (BinOpExp Add{} x y) = isStaticExp x && isStaticExp y
+isStaticExp (BinOpExp Sub{} x y) = isStaticExp x && isStaticExp y
+isStaticExp (BinOpExp Mul{} x y) = isStaticExp x && isStaticExp y
+isStaticExp _ = False
 
 isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
 isConstExp v = do
