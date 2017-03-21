@@ -74,7 +74,7 @@ redomapToMapAndReduce (Pattern [] patelems) lore
       map_bnd = mkLet [] map_pat $
                 Op $ Map certs outersz newmap_lam arrs
       red_args = zip accs $ map (identName . fst) map_accpat
-      red_bnd = Let (Pattern [] patelems) lore $
+      red_bnd = Let (Pattern [] acc_patelems) lore $
                 Op $ Reduce certs outersz comm redlam red_args
   return (map_bnd, red_bnd)
   where
