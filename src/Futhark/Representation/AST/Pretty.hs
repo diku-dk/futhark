@@ -191,6 +191,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
 
 instance Pretty (BasicOp lore) where
   ppr (SubExp se) = ppr se
+  ppr (Opaque e) = text "opaque" <> apply [ppr e]
   ppr (ArrayLit [] rt) =
     text "empty" <> parens (ppr rt)
   ppr (ArrayLit es rt) =

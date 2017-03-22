@@ -807,9 +807,10 @@ namesToPrimTypes = HM.fromList
 -- or polymorphic.  A polymorphic builtin is a mapping from valid
 -- parameter types to the result type.
 data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
-             | IntrinsicPolyFun [([PrimType], PrimType)]
-             | IntrinsicType PrimType
-             | IntrinsicEquality -- Special cased.
+               | IntrinsicPolyFun [([PrimType], PrimType)]
+               | IntrinsicType PrimType
+               | IntrinsicEquality -- Special cased.
+               | IntrinsicOpaque
 
 -- | A map of all built-ins.
 intrinsics :: HM.HashMap VName Intrinsic
@@ -868,6 +869,8 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
                      [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
                      [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
              , ("!", IntrinsicPolyFun [([Bool], Bool)])] ++
+
+             [("opaque", IntrinsicOpaque)] ++
 
              map (convertFun anyPrimType) anyPrimType ++
 

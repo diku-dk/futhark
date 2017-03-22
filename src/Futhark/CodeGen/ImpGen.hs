@@ -557,6 +557,9 @@ defCompileBasicOp :: Destination -> BasicOp lore -> ImpM lore op ()
 defCompileBasicOp (Destination [target]) (SubExp se) =
   compileSubExpTo target se
 
+defCompileBasicOp (Destination [target]) (Opaque se) =
+  compileSubExpTo target se
+
 defCompileBasicOp (Destination [target]) (UnOp op e) = do
   e' <- compileSubExp e
   writeExp target $ Imp.UnOpExp op e'

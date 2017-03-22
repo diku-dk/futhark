@@ -1317,6 +1317,7 @@ isOverloadedFunction qname args = do
     handle [x] "abs" = Just $ absF x
     handle [x] "!" = Just $ notF x
     handle [x] "~" = Just $ complementF x
+    handle [x] "opaque" = Just $ opaqueF x
 
     -- Short-circuiting operators are magical.
     handle [x,y] "&&" = Just $ \desc ->
@@ -1463,6 +1464,9 @@ isOverloadedFunction qname args = do
                    letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
                  _ ->
                    fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
+
+    opaqueF e desc =
+      mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" e
 
     binopF op x y desc = do
       x' <- internaliseExp1 "min_x" x

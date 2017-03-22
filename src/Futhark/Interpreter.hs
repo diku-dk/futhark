@@ -483,6 +483,9 @@ evalBasicOp :: BasicOp -> FutharkM [Value]
 evalBasicOp (SubExp se) =
   single <$> evalSubExp se
 
+evalBasicOp (Opaque se) =
+  single <$> evalSubExp se
+
 evalBasicOp (ArrayLit es rt) = do
   rowshape <- mapM (asInt "evalBasicOp ArrayLit" <=< evalSubExp) $ arrayDims rt
   single <$> (arrayVal <$>

@@ -75,6 +75,8 @@ primOpType :: HasScope t m =>
               BasicOp lore -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
+primOpType (Opaque se) =
+  pure <$> subExpType se
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where n = Constant (value (length es))

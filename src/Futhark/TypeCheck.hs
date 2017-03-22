@@ -668,6 +668,9 @@ checkBasicOp :: Checkable lore =>
 checkBasicOp (SubExp es) =
   void $ checkSubExp es
 
+checkBasicOp (Opaque es) =
+  void $ checkSubExp es
+
 checkBasicOp (ArrayLit [] _) =
   return ()
 

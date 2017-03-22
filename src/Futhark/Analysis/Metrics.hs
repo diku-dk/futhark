@@ -92,6 +92,7 @@ expMetrics (Op op) =
 
 primOpMetrics :: BasicOp lore -> MetricsM ()
 primOpMetrics (SubExp _) = seen "SubExp"
+primOpMetrics (Opaque _) = seen "Opaque"
 primOpMetrics ArrayLit{} = seen "ArrayLit"
 primOpMetrics BinOp{} = seen "BinOp"
 primOpMetrics UnOp{} = seen "UnOp"
