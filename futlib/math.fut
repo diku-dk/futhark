@@ -56,17 +56,17 @@ module type real = {
 module i8: (integral with t = i8) = {
   type t = i8
 
-  fun (x: i8) + (y: i8) = x intrinsics.+ y
-  fun (x: i8) - (y: i8) = x intrinsics.- y
-  fun (x: i8) * (y: i8) = x intrinsics.* y
-  fun (x: i8) / (y: i8) = x intrinsics./ y
-  fun (x: i8) % (y: i8) = x intrinsics.% y
+  fun (x: i8) + (y: i8) = intrinsics.add8 x y
+  fun (x: i8) - (y: i8) = intrinsics.sub8 x y
+  fun (x: i8) * (y: i8) = intrinsics.mul8 x y
+  fun (x: i8) / (y: i8) = intrinsics.sdiv8 x y
+  fun (x: i8) % (y: i8) = intrinsics.smod8 x y
 
   fun fromInt(x: i32) = i8 x
 
-  fun (x: i8) == (y: i8) = x intrinsics.== y
-  fun (x: i8) < (y: i8) = x intrinsics.< y
-  fun (x: i8) > (y: i8) = x intrinsics.> y
+  fun (x: i8) == (y: i8) = intrinsics.eq_i8 x y
+  fun (x: i8) < (y: i8) = intrinsics.slt8 x y
+  fun (x: i8) > (y: i8) = intrinsics.slt8 y x
 
   fun sgn (x: i8) = intrinsics.sgn x
   fun abs (x: i8) = intrinsics.abs x
@@ -78,17 +78,17 @@ module i8: (integral with t = i8) = {
 module i16: (integral with t = i16) = {
   type t = i16
 
-  fun (x: i16) + (y: i16) = x intrinsics.+ y
-  fun (x: i16) - (y: i16) = x intrinsics.- y
-  fun (x: i16) * (y: i16) = x intrinsics.* y
-  fun (x: i16) / (y: i16) = x intrinsics./ y
-  fun (x: i16) % (y: i16) = x intrinsics.% y
+  fun (x: i16) + (y: i16) = intrinsics.add16 x y
+  fun (x: i16) - (y: i16) = intrinsics.sub16 x y
+  fun (x: i16) * (y: i16) = intrinsics.mul16 x y
+  fun (x: i16) / (y: i16) = intrinsics.sdiv16 x y
+  fun (x: i16) % (y: i16) = intrinsics.smod16 x y
 
   fun fromInt(x: i32) = i16 x
 
-  fun (x: i16) == (y: i16) = x intrinsics.== y
-  fun (x: i16) < (y: i16) = x intrinsics.< y
-  fun (x: i16) > (y: i16) = x intrinsics.> y
+  fun (x: i16) == (y: i16) = intrinsics.eq_i16 x y
+  fun (x: i16) < (y: i16) = intrinsics.slt16 x y
+  fun (x: i16) > (y: i16) = intrinsics.slt16 y x
 
   fun sgn (x: i16) = intrinsics.sgn x
   fun abs (x: i16) = intrinsics.abs x
@@ -100,17 +100,17 @@ module i16: (integral with t = i16) = {
 module i32: (integral with t = i32) = {
   type t = i32
 
-  fun (x: i32) + (y: i32) = x intrinsics.+ y
-  fun (x: i32) - (y: i32) = x intrinsics.- y
-  fun (x: i32) * (y: i32) = x intrinsics.* y
-  fun (x: i32) / (y: i32) = x intrinsics./ y
-  fun (x: i32) % (y: i32) = x intrinsics.% y
+  fun (x: i32) + (y: i32) = intrinsics.add32 x y
+  fun (x: i32) - (y: i32) = intrinsics.sub32 x y
+  fun (x: i32) * (y: i32) = intrinsics.mul32 x y
+  fun (x: i32) / (y: i32) = intrinsics.sdiv32 x y
+  fun (x: i32) % (y: i32) = intrinsics.smod32 x y
 
   fun fromInt(x: i32) = x
 
-  fun (x: i32) == (y: i32) = x intrinsics.== y
-  fun (x: i32) < (y: i32) = x intrinsics.< y
-  fun (x: i32) > (y: i32) = x intrinsics.> y
+  fun (x: i32) == (y: i32) = intrinsics.eq_i32 x y
+  fun (x: i32) < (y: i32) = intrinsics.slt32 x y
+  fun (x: i32) > (y: i32) = intrinsics.slt32 y x
 
   fun sgn (x: i32) = intrinsics.sgn x
   fun abs (x: i32) = intrinsics.abs x
@@ -122,17 +122,17 @@ module i32: (integral with t = i32) = {
 module i64: (integral with t = i64) = {
   type t = i64
 
-  fun (x: i64) + (y: i64) = x intrinsics.+ y
-  fun (x: i64) - (y: i64) = x intrinsics.- y
-  fun (x: i64) * (y: i64) = x intrinsics.* y
-  fun (x: i64) / (y: i64) = x intrinsics./ y
-  fun (x: i64) % (y: i64) = x intrinsics.% y
+  fun (x: i64) + (y: i64) = intrinsics.add64 x y
+  fun (x: i64) - (y: i64) = intrinsics.sub64 x y
+  fun (x: i64) * (y: i64) = intrinsics.mul64 x y
+  fun (x: i64) / (y: i64) = intrinsics.sdiv64 x y
+  fun (x: i64) % (y: i64) = intrinsics.smod64 x y
 
   fun fromInt(x: i32) = i64 x
 
-  fun (x: i64) == (y: i64) = x intrinsics.== y
-  fun (x: i64) < (y: i64) = x intrinsics.< y
-  fun (x: i64) > (y: i64) = x intrinsics.> y
+  fun (x: i64) == (y: i64) = intrinsics.eq_i64 x y
+  fun (x: i64) < (y: i64) = intrinsics.slt64 x y
+  fun (x: i64) > (y: i64) = intrinsics.slt64 y x
 
   fun sgn (x: i64) = intrinsics.sgn x
   fun abs (x: i64) = intrinsics.abs x
@@ -144,113 +144,113 @@ module i64: (integral with t = i64) = {
 module u8: (integral with t = u8) = {
   type t = u8
 
-  fun (x: u8) + (y: u8) = x intrinsics.+ y
-  fun (x: u8) - (y: u8) = x intrinsics.- y
-  fun (x: u8) * (y: u8) = x intrinsics.* y
-  fun (x: u8) / (y: u8) = x intrinsics./ y
-  fun (x: u8) % (y: u8) = x intrinsics.% y
+  fun (x: u8) + (y: u8) = u8 (intrinsics.add8 (i8 x) (i8 y))
+  fun (x: u8) - (y: u8) = u8 (intrinsics.sub8 (i8 x) (i8 y))
+  fun (x: u8) * (y: u8) = u8 (intrinsics.mul8 (i8 x) (i8 y))
+  fun (x: u8) / (y: u8) = u8 (intrinsics.udiv8 (i8 x) (i8 y))
+  fun (x: u8) % (y: u8) = u8 (intrinsics.umod8 (i8 x) (i8 y))
 
   fun fromInt(x: i32) = u8 x
 
-  fun (x: u8) == (y: u8) = x intrinsics.== y
-  fun (x: u8) < (y: u8) = x intrinsics.< y
-  fun (x: u8) > (y: u8) = x intrinsics.> y
+  fun (x: u8) == (y: u8) = intrinsics.eq_i8 (i8 x) (i8 y)
+  fun (x: u8) < (y: u8) = intrinsics.ult8 (i8 x) (i8 y)
+  fun (x: u8) > (y: u8) = intrinsics.ult8 (i8 y) (i8 x)
 
   fun sgn (x: u8) = intrinsics.sgn x
   fun abs (x: u8) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = intrinsics.umax8 x y
-  fun min (x: t) (y: t) = intrinsics.umin8 x y
+  fun max (x: t) (y: t) = u8 (intrinsics.umax8 (i8 x) (i8 y))
+  fun min (x: t) (y: t) = u8 (intrinsics.umin8 (i8 x) (i8 y))
 }
 
 module u16: (integral with t = u16) = {
   type t = u16
 
-  fun (x: u16) + (y: u16) = x intrinsics.+ y
-  fun (x: u16) - (y: u16) = x intrinsics.- y
-  fun (x: u16) * (y: u16) = x intrinsics.* y
-  fun (x: u16) / (y: u16) = x intrinsics./ y
-  fun (x: u16) % (y: u16) = x intrinsics.% y
+  fun (x: u16) + (y: u16) = u16 (intrinsics.add16 (i16 x) (i16 y))
+  fun (x: u16) - (y: u16) = u16 (intrinsics.sub16 (i16 x) (i16 y))
+  fun (x: u16) * (y: u16) = u16 (intrinsics.mul16 (i16 x) (i16 y))
+  fun (x: u16) / (y: u16) = u16 (intrinsics.udiv16 (i16 x) (i16 y))
+  fun (x: u16) % (y: u16) = u16 (intrinsics.umod16 (i16 x) (i16 y))
 
   fun fromInt(x: i32) = u16 x
 
-  fun (x: u16) == (y: u16) = x intrinsics.== y
-  fun (x: u16) < (y: u16) = x intrinsics.< y
-  fun (x: u16) > (y: u16) = x intrinsics.> y
+  fun (x: u16) == (y: u16) = intrinsics.eq_i16 (i16 x) (i16 y)
+  fun (x: u16) < (y: u16) = intrinsics.ult16 (i16 x) (i16 y)
+  fun (x: u16) > (y: u16) = intrinsics.ult16 (i16 y) (i16 x)
 
   fun sgn (x: u16) = intrinsics.sgn x
   fun abs (x: u16) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = intrinsics.umax16 x y
-  fun min (x: t) (y: t) = intrinsics.umin16 x y
+  fun max (x: t) (y: t) = u16 (intrinsics.umax16 (i16 x) (i16 y))
+  fun min (x: t) (y: t) = u16 (intrinsics.umin16 (i16 x) (i16 y))
 }
 
 module u32: (integral with t = u32) = {
   type t = u32
 
-  fun (x: u32) + (y: u32) = x intrinsics.+ y
-  fun (x: u32) - (y: u32) = x intrinsics.- y
-  fun (x: u32) * (y: u32) = x intrinsics.* y
-  fun (x: u32) / (y: u32) = x intrinsics./ y
-  fun (x: u32) % (y: u32) = x intrinsics.% y
+  fun (x: u32) + (y: u32) = u32 (intrinsics.add32 (i32 x) (i32 y))
+  fun (x: u32) - (y: u32) = u32 (intrinsics.sub32 (i32 x) (i32 y))
+  fun (x: u32) * (y: u32) = u32 (intrinsics.mul32 (i32 x) (i32 y))
+  fun (x: u32) / (y: u32) = u32 (intrinsics.udiv32 (i32 x) (i32 y))
+  fun (x: u32) % (y: u32) = u32 (intrinsics.umod32 (i32 x) (i32 y))
 
   fun fromInt(x: i32) = u32 x
 
-  fun (x: u32) == (y: u32) = x intrinsics.== y
-  fun (x: u32) < (y: u32) = x intrinsics.< y
-  fun (x: u32) > (y: u32) = x intrinsics.> y
+  fun (x: u32) == (y: u32) = intrinsics.eq_i32 (i32 x) (i32 y)
+  fun (x: u32) < (y: u32) = intrinsics.ult32 (i32 x) (i32 y)
+  fun (x: u32) > (y: u32) = intrinsics.ult32 (i32 y) (i32 x)
 
   fun sgn (x: u32) = intrinsics.sgn x
   fun abs (x: u32) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = intrinsics.umax32 x y
-  fun min (x: t) (y: t) = intrinsics.umin32 x y
+  fun max (x: t) (y: t) = u32 (intrinsics.umax32 (i32 x) (i32 y))
+  fun min (x: t) (y: t) = u32 (intrinsics.umin32 (i32 x) (i32 y))
 }
 
 module u64: (integral with t = u64) = {
   type t = u64
 
-  fun (x: u64) + (y: u64) = x intrinsics.+ y
-  fun (x: u64) - (y: u64) = x intrinsics.- y
-  fun (x: u64) * (y: u64) = x intrinsics.* y
-  fun (x: u64) / (y: u64) = x intrinsics./ y
-  fun (x: u64) % (y: u64) = x intrinsics.% y
+  fun (x: u64) + (y: u64) = u64 (intrinsics.add64 (i64 x) (i64 y))
+  fun (x: u64) - (y: u64) = u64 (intrinsics.sub64 (i64 x) (i64 y))
+  fun (x: u64) * (y: u64) = u64 (intrinsics.mul64 (i64 x) (i64 y))
+  fun (x: u64) / (y: u64) = u64 (intrinsics.udiv64 (i64 x) (i64 y))
+  fun (x: u64) % (y: u64) = u64 (intrinsics.umod64 (i64 x) (i64 y))
 
   fun fromInt(x: i32) = u64 x
 
-  fun (x: u64) == (y: u64) = x intrinsics.== y
-  fun (x: u64) < (y: u64) = x intrinsics.< y
-  fun (x: u64) > (y: u64) = x intrinsics.> y
+  fun (x: u64) == (y: u64) = intrinsics.eq_i64 (i64 x) (i64 y)
+  fun (x: u64) < (y: u64) = intrinsics.ult64 (i64 x) (i64 y)
+  fun (x: u64) > (y: u64) = intrinsics.ult64 (i64 y) (i64 x)
 
   fun sgn (x: u64) = intrinsics.sgn x
   fun abs (x: u64) = intrinsics.abs x
 
-  fun max (x: t) (y: t) = intrinsics.umax64 x y
-  fun min (x: t) (y: t) = intrinsics.umin64 x y
+  fun max (x: t) (y: t) = u64 (intrinsics.umax64 (i64 x) (i64 y))
+  fun min (x: t) (y: t) = u64 (intrinsics.umin64 (i64 x) (i64 y))
 }
 
 module f64: (real with t = f64) = {
   type t = f64
 
-  fun (x: f64) + (y: f64) = x intrinsics.+ y
-  fun (x: f64) - (y: f64) = x intrinsics.- y
-  fun (x: f64) * (y: f64) = x intrinsics.* y
-  fun (x: f64) / (y: f64) = x intrinsics./ y
+  fun (x: f64) + (y: f64) = intrinsics.fadd64 x y
+  fun (x: f64) - (y: f64) = intrinsics.fsub64 x y
+  fun (x: f64) * (y: f64) = intrinsics.fmul64 x y
+  fun (x: f64) / (y: f64) = intrinsics.fdiv64 x y
 
   fun fromInt (x: i32) = f64 x
-  fun fromFraction (x: i32) (y: i32) = f64 x intrinsics./ f64 y
+  fun fromFraction (x: i32) (y: i32) = f64 x / f64 y
   fun toInt (x: f64) = i32 x
 
-  fun (x: f64) == (y: f64) = x intrinsics.== y
-  fun (x: f64) <  (y: f64) = x intrinsics.< y
-  fun (x: f64) >  (y: f64) = x intrinsics.> y
+  fun (x: f64) == (y: f64) = intrinsics.eq_f64 x y
+  fun (x: f64) < (y: f64) = intrinsics.lt64 x y
+  fun (x: f64) > (y: f64) = intrinsics.lt64 y x
 
   fun max (x: t) (y: t) = intrinsics.fmax64 x y
   fun min (x: t) (y: t) = intrinsics.fmin64 x y
 
-  fun sgn (x: f64) = if      x intrinsics.< 0f64  then -1f64
-                     else if x intrinsics.== 0f64 then  0f64
-                     else                               1f64
+  fun sgn (x: f64) = if      x < 0f64  then -1f64
+                     else if x == 0f64 then  0f64
+                     else                    1f64
   fun abs (x: f64) = intrinsics.abs x
 
   fun sqrt (x: f64) = intrinsics.sqrt64 x
@@ -277,25 +277,25 @@ module f64: (real with t = f64) = {
 module f32: (real with t = f32) = {
   type t = f32
 
-  fun (x: f32) + (y: f32) = x intrinsics.+ y
-  fun (x: f32) - (y: f32) = x intrinsics.- y
-  fun (x: f32) * (y: f32) = x intrinsics.* y
-  fun (x: f32) / (y: f32) = x intrinsics./ y
+  fun (x: f32) + (y: f32) = intrinsics.fadd32 x y
+  fun (x: f32) - (y: f32) = intrinsics.fsub32 x y
+  fun (x: f32) * (y: f32) = intrinsics.fmul32 x y
+  fun (x: f32) / (y: f32) = intrinsics.fdiv32 x y
 
   fun fromInt (x: i32) = f32 x
-  fun fromFraction (x: i32) (y: i32) = f32 x intrinsics./ f32 y
+  fun fromFraction (x: i32) (y: i32) = f32 x / f32 y
   fun toInt (x: f32) = i32 x
 
-  fun (x: f32) == (y: f32) = x intrinsics.== y
-  fun (x: f32) <  (y: f32) = x intrinsics.< y
-  fun (x: f32) >  (y: f32) = x intrinsics.> y
+  fun (x: f32) == (y: f32) = intrinsics.eq_f32 x y
+  fun (x: f32) < (y: f32) = intrinsics.lt32 x y
+  fun (x: f32) > (y: f32) = intrinsics.lt32 y x
 
   fun max (x: t) (y: t) = intrinsics.fmax32 x y
   fun min (x: t) (y: t) = intrinsics.fmin32 x y
 
-  fun sgn (x: f32) = if      x intrinsics.< 0f32  then -1f32
-                     else if x intrinsics.== 0f32 then  0f32
-                     else                               1f32
+  fun sgn (x: f32) = if      x < 0f32  then -1f32
+                     else if x == 0f32 then  0f32
+                     else                    1f32
   fun abs (x: f32) = intrinsics.abs x
 
   fun sqrt (x: f32) = intrinsics.sqrt32 x

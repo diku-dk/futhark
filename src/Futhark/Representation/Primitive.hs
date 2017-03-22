@@ -7,9 +7,9 @@
 -- Futhark language that operates on primitive types.
 module Futhark.Representation.Primitive
        ( -- * Types
-         IntType (..)
-       , FloatType (..)
-       , PrimType (..)
+         IntType (..), allIntTypes
+       , FloatType (..), allFloatTypes
+       , PrimType (..), allPrimTypes
 
          -- * Values
        , IntValue(..)
@@ -21,10 +21,10 @@ module Futhark.Representation.Primitive
        , blankPrimValue
 
          -- * Operations
-       , UnOp (..)
-       , BinOp (..)
-       , ConvOp (..)
-       , CmpOp (..)
+       , UnOp (..), allUnOps
+       , BinOp (..), allBinOps
+       , ConvOp (..), allConvOps
+       , CmpOp (..), allCmpOps
 
          -- ** Unary Operations
        , doUnOp
@@ -53,6 +53,7 @@ module Futhark.Representation.Primitive
        , convTypes
        , binOpType
        , unOpType
+       , cmpOpType
 
          -- * Utility
        , zeroIsh
@@ -94,6 +95,10 @@ instance Pretty IntType where
   ppr Int32 = text "i32"
   ppr Int64 = text "i64"
 
+-- | A list of all integer types.
+allIntTypes :: [IntType]
+allIntTypes = [minBound..maxBound]
+
 -- | A floating point type.
 data FloatType = Float32
                | Float64
@@ -105,6 +110,10 @@ instance Hashable FloatType where
 instance Pretty FloatType where
   ppr Float32 = text "f32"
   ppr Float64 = text "f64"
+
+-- | A list of all floating-point types.
+allFloatTypes :: [FloatType]
+allFloatTypes = [minBound..maxBound]
 
 -- | Low-level primitive types.
 data PrimType = IntType IntType
@@ -144,6 +153,12 @@ instance Pretty PrimType where
   ppr (FloatType t) = ppr t
   ppr Bool          = text "bool"
   ppr Cert          = text "cert"
+
+-- | A list of all primitive types.
+allPrimTypes :: [PrimType]
+allPrimTypes = map IntType allIntTypes ++
+               map FloatType allFloatTypes ++
+               [Bool, Cert]
 
 -- | An integer value.
 data IntValue = Int8Value !Int8
@@ -344,6 +359,69 @@ data ConvOp = ZExt IntType IntType
             | SIToFP IntType FloatType
               -- ^ Convert a signed integer to a floating-point value.
              deriving (Eq, Ord, Show)
+
+-- | A list of all unary operators for all types.
+allUnOps :: [UnOp]
+allUnOps = Not :
+           map Complement [minBound..maxBound] ++
+           map Abs [minBound..maxBound] ++
+           map FAbs [minBound..maxBound] ++
+           map SSignum [minBound..maxBound] ++
+           map USignum [minBound..maxBound]
+
+-- | A list of all binary operators for all types.
+allBinOps :: [BinOp]
+allBinOps = concat [ map Add allIntTypes
+                   , map FAdd allFloatTypes
+                   , map Sub allIntTypes
+                   , map FSub allFloatTypes
+                   , map Mul allIntTypes
+                   , map FMul allFloatTypes
+                   , map UDiv allIntTypes
+                   , map SDiv allIntTypes
+                   , map FDiv allFloatTypes
+                   , map UMod allIntTypes
+                   , map SMod allIntTypes
+                   , map SQuot allIntTypes
+                   , map SRem allIntTypes
+                   , map SMin allIntTypes
+                   , map UMin allIntTypes
+                   , map FMin allFloatTypes
+                   , map SMax allIntTypes
+                   , map UMax allIntTypes
+                   , map FMax allFloatTypes
+                   , map Shl allIntTypes
+                   , map LShr allIntTypes
+                   , map AShr allIntTypes
+                   , map And allIntTypes
+                   , map Or allIntTypes
+                   , map Xor allIntTypes
+                   , map Pow allIntTypes
+                   , map FPow allFloatTypes
+                   , [LogAnd, LogOr]
+                   ]
+
+-- | A list of all comparison operators for all types.
+allCmpOps :: [CmpOp]
+allCmpOps = concat [ map CmpEq allPrimTypes
+                   , map CmpUlt allIntTypes
+                   , map CmpUle allIntTypes
+                   , map CmpSlt allIntTypes
+                   , map CmpSle allIntTypes
+                   , map FCmpLt allFloatTypes
+                   , map FCmpLe allFloatTypes
+                   ]
+
+-- | A list of all conversion operators for all types.
+allConvOps :: [ConvOp]
+allConvOps = concat [ ZExt <$> allIntTypes <*> allIntTypes
+                    , SExt <$> allIntTypes <*> allIntTypes
+                    , FPConv <$> allFloatTypes <*> allFloatTypes
+                    , FPToUI <$> allFloatTypes <*> allIntTypes
+                    , FPToSI <$> allFloatTypes <*> allIntTypes
+                    , UIToFP <$> allIntTypes <*> allFloatTypes
+                    , SIToFP <$> allIntTypes <*> allFloatTypes
+                    ]
 
 doUnOp :: UnOp -> PrimValue -> Maybe PrimValue
 doUnOp Not (BoolValue b)         = Just $ BoolValue $ not b
@@ -685,6 +763,17 @@ binOpType (FAdd t)  = FloatType t
 binOpType (FSub t)  = FloatType t
 binOpType (FMul t)  = FloatType t
 binOpType (FDiv t)  = FloatType t
+
+-- | The operand types of a comparison operator.
+cmpOpType :: CmpOp -> PrimType
+cmpOpType (CmpEq t) = t
+cmpOpType (CmpSlt t) = IntType t
+cmpOpType (CmpSle t) = IntType t
+cmpOpType (CmpUlt t) = IntType t
+cmpOpType (CmpUle t) = IntType t
+cmpOpType (FCmpLt t) = FloatType t
+cmpOpType (FCmpLe t) = FloatType t
+
 
 -- | The operand and result type of a unary operator.
 unOpType :: UnOp -> PrimType
