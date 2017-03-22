@@ -870,9 +870,11 @@ expReturns :: (Monad m, HasScope lore m,
                ExplicitMemorish lore) =>
               Exp lore -> m [ExpReturns]
 
-expReturns (BasicOp (SubExp (Var v))) = do
-  r <- varReturns v
-  return [r]
+expReturns (BasicOp (SubExp (Var v))) =
+  pure <$> varReturns v
+
+expReturns (BasicOp (Opaque (Var v))) =
+  pure <$> varReturns v
 
 expReturns (BasicOp (Reshape _ newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v

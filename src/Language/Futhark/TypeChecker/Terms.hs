@@ -114,6 +114,7 @@ data ValBinding = BoundV Type
                 -- ^ The occurences is non-empty only for local functions.
                 | OverloadedF [([TypeBase Rank ()],FunBinding)]
                 | EqualityF
+                | OpaqueF
                 | WasConsumed SrcLoc
                 deriving (Show)
 
@@ -165,6 +166,8 @@ initialTermScope = TermScope initialVtable topLevelNameMap
           where frob (pts, rt) = (map Prim pts, (map Prim pts, Prim rt))
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
+        addIntrinsicF (name, IntrinsicOpaque) =
+          Just (name, OpaqueF)
         addIntrinsicF _ = Nothing
 
 instance MonadTypeChecker TermTypeM where
@@ -230,6 +233,12 @@ lookupFunction qn argtypes loc = do
                    " not defined for arguments of types " ++
                    intercalate ", " (map pretty argtypes)
         Just f -> return (qn', f, mempty)
+    Just OpaqueF
+      | [t] <- argtypes ->
+          let t' = vacuousShapeAnnotations $ toStruct t
+          in return (qn', ([t' `setUniqueness` Nonunique], t' `setUniqueness` Nonunique), mempty)
+      | otherwise ->
+          bad $ TypeError loc "Opaque function takes just a single argument."
     Just EqualityF
       | [t1,t2] <- argtypes,
         concreteType t1,
@@ -251,6 +260,7 @@ lookupVar qn loc = do
                     | otherwise -> return (qn', t)
     Just BoundF{} -> bad $ FunctionIsNotValue loc qn
     Just EqualityF -> bad $ FunctionIsNotValue loc qn
+    Just OpaqueF -> bad $ FunctionIsNotValue loc qn
     Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
@@ -1454,6 +1464,7 @@ noUnique = local (\scope -> scope { scopeVtable = HM.map set $ scopeVtable scope
         set (BoundF f closure) = BoundF f closure
         set (OverloadedF f)    = OverloadedF f
         set EqualityF          = EqualityF
+        set OpaqueF            = OpaqueF
         set (WasConsumed loc)  = WasConsumed loc
 
 onlySelfAliasing :: TermTypeM a -> TermTypeM a
@@ -1462,4 +1473,5 @@ onlySelfAliasing = local (\scope -> scope { scopeVtable = HM.mapWithKey set $ sc
         set _ (BoundF f closure) = BoundF f closure
         set _ (OverloadedF f)    = OverloadedF f
         set _ EqualityF          = EqualityF
+        set _ OpaqueF            = OpaqueF
         set _ (WasConsumed loc)  = WasConsumed loc
