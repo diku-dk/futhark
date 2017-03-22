@@ -100,6 +100,7 @@ import           Prelude
 import           Futhark.Util.Pretty
 
 import           Language.Futhark.Syntax
+import qualified Futhark.Representation.Primitive as Primitive
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -840,27 +841,6 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
              ,("isinf64", ([FloatType Float64], Bool))
              ,("isnan64", ([FloatType Float64], Bool))
 
-             ,("smin8", ([Signed Int8, Signed Int8], Signed Int8))
-             ,("smin16", ([Signed Int16, Signed Int16], Signed Int16))
-             ,("smin32", ([Signed Int32, Signed Int32], Signed Int32))
-             ,("smin64", ([Signed Int64, Signed Int64], Signed Int64))
-             ,("umin8", ([Unsigned Int8, Unsigned Int8], Unsigned Int8))
-             ,("umin16", ([Unsigned Int16, Unsigned Int16], Unsigned Int16))
-             ,("umin32", ([Unsigned Int32, Unsigned Int32], Unsigned Int32))
-             ,("umin64", ([Unsigned Int64, Unsigned Int64], Unsigned Int64))
-             ,("fmin32", ([FloatType Float32, FloatType Float32], FloatType Float32))
-             ,("fmin64", ([FloatType Float64, FloatType Float64], FloatType Float64))
-
-             ,("smax8", ([Signed Int8, Signed Int8], Signed Int8))
-             ,("smax16", ([Signed Int16, Signed Int16], Signed Int16))
-             ,("smax32", ([Signed Int32, Signed Int32], Signed Int32))
-             ,("smax64", ([Signed Int64, Signed Int64], Signed Int64))
-             ,("umax8", ([Unsigned Int8, Unsigned Int8], Unsigned Int8))
-             ,("umax16", ([Unsigned Int16, Unsigned Int16], Unsigned Int16))
-             ,("umax32", ([Unsigned Int32, Unsigned Int32], Unsigned Int32))
-             ,("umax64", ([Unsigned Int64, Unsigned Int64], Unsigned Int64))
-             ,("fmax32", ([FloatType Float32, FloatType Float32], FloatType Float32))
-             ,("fmax64", ([FloatType Float64, FloatType Float64], FloatType Float64))
              ] ++
 
              [ ("sgn", anyIntFun)
@@ -873,6 +853,10 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
              [("opaque", IntrinsicOpaque)] ++
 
              map (convertFun anyPrimType) anyPrimType ++
+
+             map binOpFun Primitive.allBinOps ++
+
+             map cmpOpFun Primitive.allCmpOps ++
 
              map intrinsicType (map Signed [minBound..maxBound] ++
                                 map Unsigned [minBound..maxBound] ++
@@ -887,6 +871,17 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
 
         convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
         convertFun from to = (pretty to, IntrinsicPolyFun $ zip (map pure from) (repeat to))
+
+        binOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] t)
+          where t = unPrim $ Primitive.binOpType bop
+
+        cmpOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] Bool)
+          where t = unPrim $ Primitive.cmpOpType bop
+
+        unPrim (Primitive.IntType t) = Signed t
+        unPrim (Primitive.FloatType t) = FloatType t
+        unPrim Primitive.Bool = Bool
+        unPrim Primitive.Cert = Bool
 
         intrinsicType t = (pretty t, IntrinsicType t)
 
