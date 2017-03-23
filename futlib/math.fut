@@ -24,6 +24,8 @@ module type integral = {
   include numeric
 
   val %: t -> t -> t
+  val //: t -> t -> t
+  val %%: t -> t -> t
 }
 
 module type real = {
@@ -61,6 +63,8 @@ module i8: (integral with t = i8) = {
   fun (x: i8) * (y: i8) = intrinsics.mul8 x y
   fun (x: i8) / (y: i8) = intrinsics.sdiv8 x y
   fun (x: i8) % (y: i8) = intrinsics.smod8 x y
+  fun (x: i8) // (y: i8) = intrinsics.squot8 x y
+  fun (x: i8) %% (y: i8) = intrinsics.srem8 x y
 
   fun fromInt(x: i32) = i8 x
 
@@ -83,6 +87,8 @@ module i16: (integral with t = i16) = {
   fun (x: i16) * (y: i16) = intrinsics.mul16 x y
   fun (x: i16) / (y: i16) = intrinsics.sdiv16 x y
   fun (x: i16) % (y: i16) = intrinsics.smod16 x y
+  fun (x: i16) // (y: i16) = intrinsics.squot16 x y
+  fun (x: i16) %% (y: i16) = intrinsics.srem16 x y
 
   fun fromInt(x: i32) = i16 x
 
@@ -105,6 +111,8 @@ module i32: (integral with t = i32) = {
   fun (x: i32) * (y: i32) = intrinsics.mul32 x y
   fun (x: i32) / (y: i32) = intrinsics.sdiv32 x y
   fun (x: i32) % (y: i32) = intrinsics.smod32 x y
+  fun (x: i32) // (y: i32) = intrinsics.squot32 x y
+  fun (x: i32) %% (y: i32) = intrinsics.srem32 x y
 
   fun fromInt(x: i32) = x
 
@@ -127,6 +135,8 @@ module i64: (integral with t = i64) = {
   fun (x: i64) * (y: i64) = intrinsics.mul64 x y
   fun (x: i64) / (y: i64) = intrinsics.sdiv64 x y
   fun (x: i64) % (y: i64) = intrinsics.smod64 x y
+  fun (x: i64) // (y: i64) = intrinsics.squot64 x y
+  fun (x: i64) %% (y: i64) = intrinsics.srem64 x y
 
   fun fromInt(x: i32) = i64 x
 
@@ -149,6 +159,8 @@ module u8: (integral with t = u8) = {
   fun (x: u8) * (y: u8) = u8 (intrinsics.mul8 (i8 x) (i8 y))
   fun (x: u8) / (y: u8) = u8 (intrinsics.udiv8 (i8 x) (i8 y))
   fun (x: u8) % (y: u8) = u8 (intrinsics.umod8 (i8 x) (i8 y))
+  fun (x: u8) // (y: u8) = u8 (intrinsics.udiv8 (i8 x) (i8 y))
+  fun (x: u8) %% (y: u8) = u8 (intrinsics.umod8 (i8 x) (i8 y))
 
   fun fromInt(x: i32) = u8 x
 
@@ -171,6 +183,8 @@ module u16: (integral with t = u16) = {
   fun (x: u16) * (y: u16) = u16 (intrinsics.mul16 (i16 x) (i16 y))
   fun (x: u16) / (y: u16) = u16 (intrinsics.udiv16 (i16 x) (i16 y))
   fun (x: u16) % (y: u16) = u16 (intrinsics.umod16 (i16 x) (i16 y))
+  fun (x: u16) // (y: u16) = u16 (intrinsics.udiv16 (i16 x) (i16 y))
+  fun (x: u16) %% (y: u16) = u16 (intrinsics.umod16 (i16 x) (i16 y))
 
   fun fromInt(x: i32) = u16 x
 
@@ -193,6 +207,8 @@ module u32: (integral with t = u32) = {
   fun (x: u32) * (y: u32) = u32 (intrinsics.mul32 (i32 x) (i32 y))
   fun (x: u32) / (y: u32) = u32 (intrinsics.udiv32 (i32 x) (i32 y))
   fun (x: u32) % (y: u32) = u32 (intrinsics.umod32 (i32 x) (i32 y))
+  fun (x: u32) // (y: u32) = u32 (intrinsics.udiv32 (i32 x) (i32 y))
+  fun (x: u32) %% (y: u32) = u32 (intrinsics.umod32 (i32 x) (i32 y))
 
   fun fromInt(x: i32) = u32 x
 
@@ -215,6 +231,8 @@ module u64: (integral with t = u64) = {
   fun (x: u64) * (y: u64) = u64 (intrinsics.mul64 (i64 x) (i64 y))
   fun (x: u64) / (y: u64) = u64 (intrinsics.udiv64 (i64 x) (i64 y))
   fun (x: u64) % (y: u64) = u64 (intrinsics.umod64 (i64 x) (i64 y))
+  fun (x: u64) // (y: u64) = u64 (intrinsics.udiv64 (i64 x) (i64 y))
+  fun (x: u64) %% (y: u64) = u64 (intrinsics.umod64 (i64 x) (i64 y))
 
   fun fromInt(x: i32) = u64 x
 
