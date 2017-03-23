@@ -510,7 +510,7 @@ isInPlaceBound :: BlockPred m
 isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
                    patternElements . bindingPattern
 
-isNotCheap :: BlockPred m
+isNotCheap :: Attributes lore => BlockPred lore
 isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
         cheap (BasicOp BinOp{})   = True
@@ -518,9 +518,10 @@ isNotCheap _ = not . cheapBnd
         cheap (BasicOp UnOp{})    = True
         cheap (BasicOp CmpOp{})   = True
         cheap (BasicOp ConvOp{})  = True
-        cheap DoLoop{}           = False
-        cheap _                  = True -- Used to be False, but
-                                        -- let's try it out.
+        cheap DoLoop{}            = False
+        cheap (Op op)             = cheapOp op
+        cheap _                   = True -- Used to be False, but
+                                         -- let's try it out.
 hoistCommon :: SimplifiableLore lore =>
                SimpleM lore Result
             -> (ST.SymbolTable (Wise lore)

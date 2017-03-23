@@ -438,6 +438,8 @@ instance (Attributes lore,
 
 instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = True
+  cheapOp Kernel{} = False
+  cheapOp _ = True
 
 instance Ranged inner => RangedOp (Kernel inner) where
   opRanges op = replicate (length $ kernelType op) unknownRange

@@ -122,6 +122,7 @@ deriving instance Annotations lore => Ord (GroupStreamLambda lore)
 
 instance Attributes lore => IsOp (KernelExp lore) where
   safeOp _ = False
+  cheapOp _ = True
 
 instance Attributes lore => TypedOp (KernelExp lore) where
   opType SplitSpace{} =

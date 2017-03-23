@@ -309,6 +309,7 @@ instance (Attributes lore,
 
 instance Attributes lore => IsOp (SOAC lore) where
   safeOp _ = False
+  cheapOp _ = True
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Prim _) = tp

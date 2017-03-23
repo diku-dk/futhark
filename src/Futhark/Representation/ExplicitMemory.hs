@@ -195,6 +195,8 @@ instance PP.Pretty inner => PP.Pretty (MemOp inner) where
 instance IsOp inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True
   safeOp (Inner k) = safeOp k
+  cheapOp (Inner k) = cheapOp k
+  cheapOp Alloc{} = True
 
 instance UsageInOp inner => UsageInOp (MemOp inner) where
   usageInOp Alloc {} = mempty

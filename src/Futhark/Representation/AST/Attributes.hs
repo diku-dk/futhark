@@ -185,9 +185,12 @@ class (Eq op, Ord op, Show op,
        Pretty op) => IsOp op where
   -- | Like 'safeExp', but for arbitrary ops.
   safeOp :: op -> Bool
+  -- | Should we try to hoist this out of branches?
+  cheapOp :: op -> Bool
 
 instance IsOp () where
   safeOp () = True
+  cheapOp () = True
 
 -- | Lore-specific attributes; also means the lore supports some basic
 -- facilities.
