@@ -198,8 +198,8 @@ instance Show TypeError where
   show (UnappliedFunctor loc) =
     "Cannot have parametric module at " ++ locStr loc ++ "."
 
--- | A set of abstract types.
-type TySet = HS.HashSet VName
+-- | A set of abstract types and where their definition is expected.
+type TySet = HS.HashSet (QualName VName)
 
 -- | Representation of a module, which is either a plain environment,
 -- or a parametric module ("functor" in SML).
