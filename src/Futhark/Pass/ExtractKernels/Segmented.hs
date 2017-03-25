@@ -15,7 +15,6 @@ import Data.Monoid
 import Prelude
 
 import Futhark.Transform.Rename
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -837,10 +836,10 @@ regularSegmentedRedomapAsScan segment_size num_segments nest_sizes flat_pat
 
   body <- runBodyBinder $ localScope (HM.fromList $ zip is $ repeat $ IndexInfo Int32) $ do
     let segment_id = flattenIndex
-                     (map SE.intSubExpToScalExp nest_sizes)
-                     (map (SE.intSubExpToScalExp . Var) is)
-        offset = (segment_id + 1) * SE.intSubExpToScalExp segment_size - 1
-    j <- letSubExp "j" =<< SE.fromScalExp offset
+                     (map (primExpFromSubExp int32) nest_sizes)
+                     (map (primExpFromSubExp int32 . Var) is)
+        offset = (segment_id + 1) * primExpFromSubExp int32 segment_size - 1
+    j <- letSubExp "j" =<< toExp offset
     vals <- forM acc_arrs $ \arr ->
       letSubExp "v" $ BasicOp $ Index [] (identName arr) $
       fullSlice (identType arr) [DimFix j]
