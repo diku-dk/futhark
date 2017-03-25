@@ -1299,14 +1299,19 @@ isOverloadedFunction qname args = do
     handle [x] "opaque" = Just $ \desc ->
       mapM (letSubExp desc . BasicOp . Opaque) =<< internaliseExp "opaque_arg" x
 
+    handle [x] s
+      | Just unop <- find ((==s) . pretty) allUnOps = Just $ \desc -> do
+          x' <- internaliseExp1 "x" x
+          fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp unop x'
+
     handle [x,y] s
       | Just bop <- find ((==s) . pretty) allBinOps = Just $ \desc -> do
-          x' <- internaliseExp1 "min_x" x
-          y' <- internaliseExp1 "min_y" y
+          x' <- internaliseExp1 "x" x
+          y' <- internaliseExp1 "y" y
           fmap pure $ letSubExp desc $ I.BasicOp $ I.BinOp bop x' y'
       | Just cmp <- find ((==s) . pretty) allCmpOps = Just $ \desc -> do
-          x' <- internaliseExp1 "min_x" x
-          y' <- internaliseExp1 "min_y" y
+          x' <- internaliseExp1 "x" x
+          y' <- internaliseExp1 "y" y
           fmap pure $ letSubExp desc $ I.BasicOp $ I.CmpOp cmp x' y'
 
     -- Short-circuiting operators are magical.
