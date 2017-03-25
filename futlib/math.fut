@@ -6,7 +6,7 @@ module type numeric = {
   val *: t -> t -> t
   val /: t -> t -> t
 
-  val fromInt: i32 -> t
+  val from_i32: i32 -> t
 
   val ==: t -> t -> bool
   val <: t -> t -> bool
@@ -31,8 +31,8 @@ module type integral = {
 module type real = {
   include numeric
 
-  val fromFraction: i32 -> i32 -> t
-  val toInt: t -> i32
+  val from_fraction: i32 -> i32 -> t
+  val to_i32: t -> i32
 
   val sqrt: t -> t
   val exp: t -> t
@@ -66,7 +66,7 @@ module i8: (integral with t = i8) = {
   fun (x: i8) // (y: i8) = intrinsics.squot8 x y
   fun (x: i8) %% (y: i8) = intrinsics.srem8 x y
 
-  fun fromInt(x: i32) = i8 x
+  fun from_i32(x: i32) = i8 x
 
   fun (x: i8) == (y: i8) = intrinsics.eq_i8 x y
   fun (x: i8) < (y: i8) = intrinsics.slt8 x y
@@ -90,7 +90,7 @@ module i16: (integral with t = i16) = {
   fun (x: i16) // (y: i16) = intrinsics.squot16 x y
   fun (x: i16) %% (y: i16) = intrinsics.srem16 x y
 
-  fun fromInt(x: i32) = i16 x
+  fun from_i32(x: i32) = i16 x
 
   fun (x: i16) == (y: i16) = intrinsics.eq_i16 x y
   fun (x: i16) < (y: i16) = intrinsics.slt16 x y
@@ -114,7 +114,7 @@ module i32: (integral with t = i32) = {
   fun (x: i32) // (y: i32) = intrinsics.squot32 x y
   fun (x: i32) %% (y: i32) = intrinsics.srem32 x y
 
-  fun fromInt(x: i32) = x
+  fun from_i32(x: i32) = x
 
   fun (x: i32) == (y: i32) = intrinsics.eq_i32 x y
   fun (x: i32) < (y: i32) = intrinsics.slt32 x y
@@ -138,7 +138,7 @@ module i64: (integral with t = i64) = {
   fun (x: i64) // (y: i64) = intrinsics.squot64 x y
   fun (x: i64) %% (y: i64) = intrinsics.srem64 x y
 
-  fun fromInt(x: i32) = i64 x
+  fun from_i32(x: i32) = i64 x
 
   fun (x: i64) == (y: i64) = intrinsics.eq_i64 x y
   fun (x: i64) < (y: i64) = intrinsics.slt64 x y
@@ -162,7 +162,7 @@ module u8: (integral with t = u8) = {
   fun (x: u8) // (y: u8) = u8 (intrinsics.udiv8 (i8 x) (i8 y))
   fun (x: u8) %% (y: u8) = u8 (intrinsics.umod8 (i8 x) (i8 y))
 
-  fun fromInt(x: i32) = u8 x
+  fun from_i32(x: i32) = u8 x
 
   fun (x: u8) == (y: u8) = intrinsics.eq_i8 (i8 x) (i8 y)
   fun (x: u8) < (y: u8) = intrinsics.ult8 (i8 x) (i8 y)
@@ -186,7 +186,7 @@ module u16: (integral with t = u16) = {
   fun (x: u16) // (y: u16) = u16 (intrinsics.udiv16 (i16 x) (i16 y))
   fun (x: u16) %% (y: u16) = u16 (intrinsics.umod16 (i16 x) (i16 y))
 
-  fun fromInt(x: i32) = u16 x
+  fun from_i32(x: i32) = u16 x
 
   fun (x: u16) == (y: u16) = intrinsics.eq_i16 (i16 x) (i16 y)
   fun (x: u16) < (y: u16) = intrinsics.ult16 (i16 x) (i16 y)
@@ -210,7 +210,7 @@ module u32: (integral with t = u32) = {
   fun (x: u32) // (y: u32) = u32 (intrinsics.udiv32 (i32 x) (i32 y))
   fun (x: u32) %% (y: u32) = u32 (intrinsics.umod32 (i32 x) (i32 y))
 
-  fun fromInt(x: i32) = u32 x
+  fun from_i32(x: i32) = u32 x
 
   fun (x: u32) == (y: u32) = intrinsics.eq_i32 (i32 x) (i32 y)
   fun (x: u32) < (y: u32) = intrinsics.ult32 (i32 x) (i32 y)
@@ -234,7 +234,7 @@ module u64: (integral with t = u64) = {
   fun (x: u64) // (y: u64) = u64 (intrinsics.udiv64 (i64 x) (i64 y))
   fun (x: u64) %% (y: u64) = u64 (intrinsics.umod64 (i64 x) (i64 y))
 
-  fun fromInt(x: i32) = u64 x
+  fun from_i32(x: i32) = u64 x
 
   fun (x: u64) == (y: u64) = intrinsics.eq_i64 (i64 x) (i64 y)
   fun (x: u64) < (y: u64) = intrinsics.ult64 (i64 x) (i64 y)
@@ -255,9 +255,9 @@ module f64: (real with t = f64) = {
   fun (x: f64) * (y: f64) = intrinsics.fmul64 x y
   fun (x: f64) / (y: f64) = intrinsics.fdiv64 x y
 
-  fun fromInt (x: i32) = f64 x
-  fun fromFraction (x: i32) (y: i32) = f64 x / f64 y
-  fun toInt (x: f64) = i32 x
+  fun from_i32 (x: i32) = f64 x
+  fun from_fraction (x: i32) (y: i32) = f64 x / f64 y
+  fun to_i32 (x: f64) = i32 x
 
   fun (x: f64) == (y: f64) = intrinsics.eq_f64 x y
   fun (x: f64) < (y: f64) = intrinsics.lt64 x y
@@ -300,9 +300,9 @@ module f32: (real with t = f32) = {
   fun (x: f32) * (y: f32) = intrinsics.fmul32 x y
   fun (x: f32) / (y: f32) = intrinsics.fdiv32 x y
 
-  fun fromInt (x: i32) = f32 x
-  fun fromFraction (x: i32) (y: i32) = f32 x / f32 y
-  fun toInt (x: f32) = i32 x
+  fun from_i32 (x: i32) = f32 x
+  fun from_fraction (x: i32) (y: i32) = f32 x / f32 y
+  fun to_i32 (x: f32) = i32 x
 
   fun (x: f32) == (y: f32) = intrinsics.eq_f32 x y
   fun (x: f32) < (y: f32) = intrinsics.lt32 x y
