@@ -8,7 +8,7 @@
 
 fun add_then_reduce (xss : [m][n]f32) (y : f32): [m]f32 =
   let xss' = map (\xs -> map (y+) xs) xss
-  in  map (\xs -> reduceComm (+) 0.0f32 xs) xss'
+  in  map (\xs -> reduce_comm (+) 0.0f32 xs) xss'
 
 fun main (xsss : [l][m][n]f32, ys : [l]f32): [l][m]f32 =
   map add_then_reduce xsss ys

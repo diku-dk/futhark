@@ -248,22 +248,22 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "rotate@" <> ppr d <> apply [ppr x, ppr e]
   pprPrec _ (Map lam [a] _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Map lam as _) = ppSOAC "zipWith" [lam] as
-  pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]
+  pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Stream form lam arr _) =
     case form of
       MapLike o ->
-        let ord_str = if o == Disorder then "Per" else ""
-        in  text ("streamMap"++ord_str) <>
+        let ord_str = if o == Disorder then "_per" else ""
+        in  text ("stream_map"++ord_str) <>
             ppr lam </> pprPrec 10 arr
       RedLike o comm lam0 ->
-        let ord_str = if o == Disorder then "Per" else ""
-            comm_str = case comm of Commutative    -> "Comm"
+        let ord_str = if o == Disorder then "_per" else ""
+            comm_str = case comm of Commutative    -> "_comm"
                                     Noncommutative -> ""
-        in  text ("streamRed"++ord_str++comm_str) <>
+        in  text ("stream_red"++ord_str++comm_str) <>
             ppr lam0 </> ppr lam </> pprPrec 10 arr
       Sequential acc ->
-            text "streamSeq" <+>
+            text "stream_seq" <+>
             ppr lam </> spread [pprPrec 10 acc, pprPrec 10 arr]
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]

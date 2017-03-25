@@ -7,7 +7,7 @@
 
 fun main(a: [][n]i32): []i32 =
   map (\(a_row: []i32): i32  ->
-        streamSeq (\(acc: i32) (c: [chunk]i32): i32  ->
+        stream_seq (\(acc: i32) (c: [chunk]i32): i32  ->
                      let w = filter (>6) c
                      let w_sum = reduce (+) 0 w in
                      acc+w_sum

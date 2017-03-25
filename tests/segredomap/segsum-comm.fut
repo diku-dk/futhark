@@ -7,4 +7,4 @@
 --   [6.0f32, 15.0f32]
 -- }
 fun main (xss : [m][n]f32): [m]f32 =
-  map (\xs -> reduceComm (+) 0.0f32 xs) xss
+  map (\xs -> reduce_comm (+) 0.0f32 xs) xss

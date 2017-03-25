@@ -12,6 +12,6 @@ fun foo (x1:i32, x2:i32) (y1:i32, y2:i32) : (i32,i32) =
 fun main (xss : [m][n]i32): ([m]i32, [m]i32) =
   unzip (map (\xs ->
               let ys = map (\x -> (x,x)) xs
-              in reduceComm foo (0,0) ys
+              in reduce_comm foo (0,0) ys
              ) xss
         )

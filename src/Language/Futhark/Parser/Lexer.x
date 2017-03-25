@@ -124,7 +124,7 @@ keyword s =
     "rotate"       -> ROTATE
     "map"          -> MAP
     "reduce"       -> REDUCE
-    "reduceComm"   -> REDUCECOMM
+    "reduce_comm"  -> REDUCECOMM
     "zip"          -> ZIP
     "zipWith"      -> ZIPWITH
     "unzip"        -> UNZIP
@@ -137,11 +137,11 @@ keyword s =
     "empty"        -> EMPTY
     "copy"         -> COPY
     "while"        -> WHILE
-    "streamMap"    -> STREAM_MAP
-    "streamMapPer" -> STREAM_MAPPER
-    "streamRed"    -> STREAM_RED
-    "streamRedPer" -> STREAM_REDPER
-    "streamSeq"    -> STREAM_SEQ
+    "stream_map"     -> STREAM_MAP
+    "stream_map_per" -> STREAM_MAPPER
+    "stream_red"     -> STREAM_RED
+    "stream_red_per" -> STREAM_REDPER
+    "stream_seq"     -> STREAM_SEQ
     "write"        -> WRITE
     "include"      -> INCLUDE
     "import"       -> IMPORT

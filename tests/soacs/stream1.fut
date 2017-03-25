@@ -1,4 +1,4 @@
--- A simple streamRed that does not permit interchange of the
+-- A simple stream_red that does not permit interchange of the
 -- reduction operator.
 -- ==
 -- input { [[1,2,3], [4,5,6], [6,7,8]] }
@@ -16,4 +16,4 @@ fun process_chunk (chunk: [chunk_sz][m]i32): *[m]i32 =
   in acc
 
 fun main(xss: [n][m]i32): [m]i32 =
-  streamRedPer vecadd process_chunk xss
+  stream_red_per vecadd process_chunk xss
