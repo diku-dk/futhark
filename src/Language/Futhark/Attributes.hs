@@ -895,33 +895,6 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
                         map FloatType [minBound..maxBound]
         anyPrimType = Bool : anyNumberType
 
-        anyIntFun :: Intrinsic
-        anyIntFun = IntrinsicPolyFun
-                    [([Signed Int8], Signed Int8),
-                     ([Signed Int16], Signed Int16),
-                     ([Signed Int32], Signed Int32),
-                     ([Signed Int64], Signed Int64),
-
-                     ([Unsigned Int8], Unsigned Int8),
-                     ([Unsigned Int16], Unsigned Int16),
-                     ([Unsigned Int32], Unsigned Int32),
-                     ([Unsigned Int64], Unsigned Int64)]
-
-        anyNumberFun :: Intrinsic
-        anyNumberFun = IntrinsicPolyFun
-                       [([Signed Int8], Signed Int8),
-                        ([Signed Int16], Signed Int16),
-                        ([Signed Int32], Signed Int32),
-                        ([Signed Int64], Signed Int64),
-
-                        ([Unsigned Int8], Unsigned Int8),
-                        ([Unsigned Int16], Unsigned Int16),
-                        ([Unsigned Int32], Unsigned Int32),
-                        ([Unsigned Int64], Unsigned Int64),
-
-                        ([FloatType Float32], FloatType Float32),
-                        ([FloatType Float64], FloatType Float64)]
-
         mkIntrinsicBinOp :: BinOp -> (String, Intrinsic)
         mkIntrinsicBinOp op = (pretty op, intrinsicBinOp op)
 
