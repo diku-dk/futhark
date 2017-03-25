@@ -185,17 +185,17 @@ literals and variables, but also more complicated forms.
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
       : | "map" `fun` `exp`+
       : | "reduce" `fun` `exp` `exp`
-      : | "reduceComm" `fun` `exp` `exp`
+      : | "reduce_comm" `fun` `exp` `exp`
       : | "reduce" `fun` `exp` `exp`
       : | "scan" `fun` `exp` `exp`
       : | "filter" `fun` `exp`
       : | "partition" "(" `fun`+ ")" `exp`
       : | "write" `exp` `exp` `exp`
-      : | "streamMap" `fun` `exp`
-      : | "streamMapPer" `fun` `exp`
-      : | "streamRed" `fun` `exp` `exp`
-      : | "streamMapPer" `fun` `exp` `exp`
-      : | "streamSeq" `fun` `exp` `exp`
+      : | "stream_map" `fun` `exp`
+      : | "stream_map_per" `fun` `exp`
+      : | "stream_red" `fun` `exp` `exp`
+      : | "stream_map_per" `fun` `exp` `exp`
+      : | "stream_seq" `fun` `exp` `exp`
    field:   `fieldid` "=" `exp`
         : | `exp`
    pat:   `id`
@@ -655,13 +655,13 @@ Left-reduction with ``f`` across the elements of ``a``, with ``x`` as
 the neutral element for ``f``.  The function ``f`` must be
 associative.  If it is not, the return value is unspecified.
 
-``reduceComm f x a``
+``reduce_comm f x a``
 ....................
 
 Like ``reduce``, but with the added guarantee that the function ``f``
 is *commutative*.  This lets the compiler generate more efficient
 code.  If ``f`` is not commutative, the return value is unspecified.
-You do not need to explicitly use ``reduceComm`` with built-in
+You do not need to explicitly use ``reduce_comm`` with built-in
 operators like ``+`` - the compiler already knows that these are
 commutative.
 

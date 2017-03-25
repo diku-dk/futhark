@@ -168,11 +168,11 @@ import Language.Futhark.Parser.Lexer
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
       while           { L $$ WHILE }
-      streamMap       { L $$ STREAM_MAP }
-      streamMapPer    { L $$ STREAM_MAPPER }
-      streamRed       { L $$ STREAM_RED }
-      streamRedPer    { L $$ STREAM_REDPER }
-      streamSeq       { L $$ STREAM_SEQ }
+      stream_map      { L $$ STREAM_MAP }
+      stream_map_per  { L $$ STREAM_MAPPER }
+      stream_red      { L $$ STREAM_RED }
+      stream_red_per  { L $$ STREAM_REDPER }
+      stream_seq      { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       import          { L $$ IMPORT }
       write           { L $$ WRITE }
@@ -202,7 +202,7 @@ nonassoc with
 %nonassoc '['
 %nonassoc Id
 %left juxtprec
-%left indexprec iota shape copy transpose rotate rearrange split shape reduce map scan filter partition zipWith streamRed streamRedPer streamMap streamMapPer streamSeq
+%left indexprec iota shape copy transpose rotate rearrange split shape reduce map scan filter partition zipWith stream_red stream_red_per stream_map stream_map_per streamSeq
 %%
 
 -- Some parameterized productions.  Left-recursive, as this is faster
@@ -532,15 +532,15 @@ Exp2 :: { UncheckedExp }
 
      | copy Atom   { Copy $2 $1 }
 
-     | streamMap       FunAbstr Atom
+     | stream_map       FunAbstr Atom
                          { Stream (MapLike InOrder)  $2 $3 $1 }
-     | streamMapPer    FunAbstr Atom
+     | stream_map_per    FunAbstr Atom
                          { Stream (MapLike Disorder) $2 $3 $1 }
-     | streamRed       FunAbstr FunAbstr Atom
+     | stream_red       FunAbstr FunAbstr Atom
                          { Stream (RedLike InOrder Noncommutative $2) $3 $4 $1 }
-     | streamRedPer    FunAbstr FunAbstr Atom
+     | stream_red_per    FunAbstr FunAbstr Atom
                          { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
-     | streamSeq       FunAbstr Atom Atom
+     | stream_seq       FunAbstr Atom Atom
                          { Stream (Sequential $3) $2 $4 $1 }
      | write Atom Atom Atom
                          { Write $2 $3 $4 $1 }

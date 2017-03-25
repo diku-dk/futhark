@@ -122,7 +122,7 @@ fun main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f3
   let points = map (\(i: i32): [nfeatures]f32  ->
                      map (*100f32) (map f32.sin (map f32 (map (^i) (iota(nfeatures)))))
                   ) (iota(npoints)) in
-  streamRedPer (\(acc: *[nclusters][nfeatures]f32)
+  stream_red_per (\(acc: *[nclusters][nfeatures]f32)
                   (elem: *[nclusters][nfeatures]f32): *[nclusters][nfeatures]f32  ->
                  map (\(x: []f32) (y: []f32): [nfeatures]f32  ->
                            map (+) x y) acc elem) (
