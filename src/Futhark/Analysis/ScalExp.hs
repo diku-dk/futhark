@@ -83,7 +83,7 @@ instance Num ScalExp where
 
   abs = SAbs
   signum = SSignum
-  fromInteger = Val . IntValue . Int32Value . fromInteger
+  fromInteger = Val . IntValue . Int32Value . fromInteger -- probably not OK
   negate = SNeg
 
 instance IntegralExp ScalExp where
@@ -184,18 +184,16 @@ toScalExp look (BasicOp (SubExp (Var v)))
   | otherwise = do
     t <- lookupType v
     case t of
-      Prim bt | bt `elem` [Bool, int32] ->
+      Prim bt | typeIsOK bt ->
         return $ Just $ Id v bt
       _ ->
         return Nothing
 toScalExp _ (BasicOp (SubExp (Constant val)))
   | typeIsOK $ primValueType val =
     return $ Just $ Val val
-toScalExp look (BasicOp (CmpOp (CmpSlt t) x y))
-  | typeIsOK $ IntType t =
+toScalExp look (BasicOp (CmpOp (CmpSlt _) x y)) =
   Just . RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-toScalExp look (BasicOp (CmpOp (CmpSle t) x y))
-  | typeIsOK $ IntType t =
+toScalExp look (BasicOp (CmpOp (CmpSle _) x y)) =
   Just . RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (BasicOp (CmpOp (CmpEq t) x y))
   | typeIsOK t = do
@@ -218,7 +216,7 @@ toScalExp look (BasicOp (BinOp bop x y))
 toScalExp _ _ = return Nothing
 
 typeIsOK :: PrimType -> Bool
-typeIsOK = (`elem` [Bool, int32])
+typeIsOK = (`elem` Bool : map IntType allIntTypes)
 
 subExpToScalExp' :: HasScope t f =>
                     LookupVar -> SubExp -> f ScalExp
@@ -266,14 +264,14 @@ sminus x y = x `SMinus` y
 
  -- XXX: Only integers and booleans, OK?
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
-binOpScalExp bop = snd <$> find ((==bop) . fst)
-                   [ (Add Int32, SPlus)
-                   , (Sub Int32, SMinus)
-                   , (Mul Int32, STimes)
-                   , (AST.SDiv Int32, SDiv)
-                   , (AST.Pow Int32, SPow)
-                   , (LogAnd, SLogAnd)
-                   , (LogOr, SLogOr)
+binOpScalExp bop = fmap snd . find ((==bop) . fst) $
+                   concatMap intOps allIntTypes ++
+                   [ (LogAnd, SLogAnd), (LogOr, SLogOr) ]
+  where intOps t = [ (Add t, SPlus)
+                   , (Sub t, SMinus)
+                   , (Mul t, STimes)
+                   , (AST.SDiv t, SDiv)
+                   , (AST.Pow t, SPow)
                    ]
 
 instance FreeIn ScalExp where

@@ -25,6 +25,7 @@ import Prelude
 
 import Futhark.Representation.AST hiding (SDiv, SMod, SQuot, SRem, SSignum)
 import Futhark.Analysis.ScalExp
+import qualified Futhark.Representation.Primitive as P
 
 -- | Ranges are inclusive.
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
@@ -139,7 +140,7 @@ simplifyNRel inp_term@(NRelExp LTH0 inp_sofp) = do
     in_gauss <- asks inSolveLTH0
     let tp = typeOfNAlg inp_sofp
 
-    if in_gauss || isTrivialNRel term || (tp /= int32)
+    if in_gauss || isTrivialNRel term || tp `notElem` map IntType allIntTypes
     then return term
     else do ednf <- markGaussLTH0 $ gaussAllLTH0 True S.empty inp_sofp
             return $ case ednf of
@@ -170,8 +171,8 @@ gaussElimRel (RelExp LTH0 e) = do
     mapM (mapM (\f ->
                   case f of
                     LogCt c   -> return $ Val (BoolValue c)
-                    PosId i   -> return $ Id  i int32
-                    NegId i   -> return $ Id  i int32
+                    PosId i   -> return $ Id  i $ scalExpType e
+                    NegId i   -> return $ Id  i $ scalExpType e
                     NRelExp rel ee -> do
                       e_scal' <- fromNumSofP ee
                       return $ RelExp rel e_scal'
@@ -185,7 +186,7 @@ gaussElimRel _ =
 
 
 primScalExpLTH0 :: ScalExp -> Bool
-primScalExpLTH0 (Val (IntValue (Int32Value v))) = v < 0
+primScalExpLTH0 (Val (IntValue v)) = P.intToInt64 v < 0
 primScalExpLTH0 _ = False
 -----------------------------------------------------------
 -----------------------------------------------------------
@@ -488,7 +489,7 @@ linearForm idd (NSum terms tp) = do
                                             NProd (_:_) _ -> return t
                                             _ -> badAlgSimplifyM "linearForm: ILLEGAL111!!!!"
                                    t_scal <- fromNumSofP t0
-                                   simplifyScal $ SDiv t_scal (Id idd int32)
+                                   simplifyScal $ SDiv t_scal (Id idd (scalExpType t_scal))
                          ) terms
     let myiota  = [1..(length terms)]
     let ia_terms= filter (\(_,t)-> case t of
@@ -757,24 +758,20 @@ simplifyScal (SPow e1 e2) = do
     else if isCt1 e2'
     then return e1'
     else case (e1', e2') of
-            (Val v1, Val v2)    -> do
-                v <- powVals v1 v2
-                return $ Val v
-            (_, Val (IntValue (Int32Value n))) ->
-                if n >= 1
+            (Val v1, Val v2)
+              | Just v <- powVals v1 v2 -> return $ Val v
+            (_, Val (IntValue n)) ->
+                if P.intToInt64 n >= 1
                 then -- simplifyScal =<< fromNumSofP $ NProd (replicate n e1') tp
-                        do new_e <- fromNumSofP $ NProd (genericReplicate n e1') tp
+                        do new_e <- fromNumSofP $ NProd (genericReplicate (P.intToInt64 n) e1') tp
                            simplifyScal new_e
                 else return $ SPow e1' e2'
             (_, _) -> return $ SPow e1' e2'
 
     where
-        powVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-        powVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2))
-            | v2 < 0, v1 == 0 = badAlgSimplifyM "powVals: Negative exponential with zero base"
-            | v2 < 0          = return $ value $ 1 `div` (v1 ^ (-v2))
-            | otherwise       = return $ value $ v1 ^ v2
-        powVals _ _ = badAlgSimplifyM  "powVals: operands not of (the same) integer type! "
+        powVals :: PrimValue -> PrimValue -> Maybe PrimValue
+        powVals (IntValue v1) (IntValue v2) = IntValue <$> P.doPow v1 v2
+        powVals _ _ = Nothing
 
 -----------------------------------------------------
 --- Helpers for simplifyScal: MinMax related, etc ---
@@ -875,9 +872,9 @@ negateBTerm (NegId i) = return $ PosId i
 negateBTerm (NRelExp rel e) = do
     let tp = typeOfNAlg e
     case (tp, rel) of
-        (IntType Int32, LTH0) -> do
+        (IntType it, LTH0) -> do
             se <- fromNumSofP e
-            ne <- toNumSofP =<< simplifyScal (SNeg $ SPlus se 1)
+            ne <- toNumSofP =<< simplifyScal (SNeg $ SPlus se (Val (value (P.intValue it (1::Int)))))
             return $ NRelExp LTH0 ne
         _ -> do
             e' <- toNumSofP =<< negateSimplified =<< fromNumSofP e;
@@ -908,9 +905,9 @@ toDNF (Id      idd  _ ) = return [[PosId idd]]
 toDNF (RelExp  rel  e ) = do
   let t = scalExpType e
   case t of
-    IntType Int32 -> do
+    IntType it -> do
       e' <- if rel == LEQ0
-            then do m1 <- getNeg1 int32
+            then do m1 <- getNeg1 $ IntType it
                     return $ SPlus e $ Val m1
             else return e
       ne   <- toNumSofP =<< simplifyScal e'
@@ -1025,11 +1022,11 @@ simplifyAndOr is_and fs =
                 e1' <- fromNumSofP e1
                 e2' <- fromNumSofP e2
                 case (rel1, rel2, btp) of
-                    (LTH0, LTH0, IntType Int32) -> do
+                    (LTH0, LTH0, IntType _) -> do
                         e2me1m1 <- toNumSofP =<< simplifyScal (SMinus e2' $ SPlus e1' $ Val one)
                         diffrel <- simplifyNRel $ NRelExp LTH0 e2me1m1
                         return $ diffrel == LogCt True
-                    (_, _, IntType Int32) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
+                    (_, _, IntType _) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
                     (_, _, _) -> badAlgSimplifyM "impliesRel: exp of illegal type!"
         impliesRel p1 p2
             | p1 == p2  = return True
@@ -1217,7 +1214,7 @@ joinTerm ( NProd (Val l:fs) tp, v) = do
     let v'Lit = Val v'
     return $ NProd (v'Lit:sort fs) tp
 joinTerm ( e@(NProd fs tp), v)
-  | isOne v   = return e
+  | P.oneIsh v   = return e
   | otherwise = let vExp = Val v
                 in return $ NProd (vExp:sort fs) tp
 
@@ -1247,44 +1244,45 @@ getNeg1 (IntType t)     = return $ value $ intValue t (-1::Int)
 getNeg1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 valLTHEQ0 :: RelOp0 -> PrimValue -> AlgSimplifyM Bool
-valLTHEQ0 rel (IntValue (Int32Value v)) = return $ if rel==LEQ0 then v <= 0   else v < 0
+valLTHEQ0 LEQ0 (IntValue iv) = return $ P.intToInt64 iv <= 0
+valLTHEQ0 LTH0 (IntValue iv) = return $ P.intToInt64 iv < 0
 valLTHEQ0 _ _ = badAlgSimplifyM "valLTHEQ0 for non-numeric type!"
 
-isOne :: PrimValue -> Bool
-isOne (IntValue (Int32Value v)) = v == 1
-isOne _ = False
-
 isCt1 :: ScalExp -> Bool
-isCt1 (Val (IntValue (Int32Value one))) = one == 1
+isCt1 (Val v) = P.oneIsh v
 isCt1 _ = False
 
 isCt0 :: ScalExp -> Bool
-isCt0 (Val (IntValue (Int32Value zr))) = zr == 0
-isCt0 __                    = False
+isCt0 (Val v) = P.zeroIsh v
+isCt0 _       = False
 
 
 addVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-addVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2)) =
-  return $ value $ v1+v2
+addVals (IntValue v1) (IntValue v2) =
+  return $ IntValue $ P.doAdd v1 v2
 addVals _ _ =
   badAlgSimplifyM "addVals: operands not of (the same) numeral type! "
 
 mulVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-mulVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2)) =
-  return $ value $ v1*v2
+mulVals (IntValue v1) (IntValue v2) =
+  return $ IntValue $ P.doMul v1 v2
 mulVals v1 v2 =
   badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++
   pretty (PrimVal v1)++" "++pretty (PrimVal v2)
 
 divVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-divVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2)) =
-  return $ value $ v1 `div` v2
+divVals (IntValue v1) (IntValue v2) =
+  case P.doSDiv v1 v2 of
+    Just v -> return $ IntValue v
+    Nothing -> badAlgSimplifyM "Division by zero"
 divVals _ _ =
   badAlgSimplifyM "divVals: operands not of (the same) numeral type! "
 
 canDivValsEvenly :: PrimValue -> PrimValue -> AlgSimplifyM Bool
-canDivValsEvenly (IntValue (Int32Value _))     (IntValue (Int32Value 0)) = return False
-canDivValsEvenly (IntValue (Int32Value v1))    (IntValue (Int32Value v2)) = return $ v1 `mod` v2 == 0
+canDivValsEvenly (IntValue v1) (IntValue v2) =
+  case P.doSMod v1 v2 of
+    Just v -> return $ P.zeroIsh $ IntValue v
+    Nothing -> return False
 canDivValsEvenly _ _ =
   badAlgSimplifyM "canDivValsEvenly: operands not of (the same) numeral type!"
 
@@ -1352,11 +1350,11 @@ tryDivTriv (SPow a e1) (SPow d e2)
           one <- getPos1 tp
           e1me2 <- simplifyScal $ SMinus e1 e2
           case (tp, e1me2) of
-            (IntType Int32, Val (IntValue (Int32Value 0))) ->
+            (IntType _, Val v) | P.zeroIsh v ->
               return (True, Val one)
-            (IntType Int32, Val (IntValue (Int32Value 1))) ->
+            (IntType _, Val v) | P.oneIsh v ->
               return (True, a)
-            (IntType Int32, _) -> do
+            (IntType _, _) -> do
               e2me1 <- negateSimplified e1me2
               e2me1_sop <- toNumSofP e2me1
               p' <- simplifyNRel $ NRelExp LTH0 e2me1_sop
