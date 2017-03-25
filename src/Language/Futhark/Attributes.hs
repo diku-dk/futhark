@@ -844,16 +844,16 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
 
              ] ++
 
-             [ ("sgn", anyIntFun)
-             , ("abs", anyNumberFun)
-             , ("~", IntrinsicPolyFun $
+             [ ("~", IntrinsicPolyFun $
                      [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
                      [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
-             , ("!", IntrinsicPolyFun [([Bool], Bool)])] ++
+             , ("!", IntrinsicMonoFun [Bool] Bool)] ++
 
              [("opaque", IntrinsicOpaque)] ++
 
              map (convertFun anyPrimType) anyPrimType ++
+
+             map unOpFun Primitive.allUnOps ++
 
              map binOpFun Primitive.allBinOps ++
 
@@ -872,6 +872,9 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
 
         convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
         convertFun from to = (pretty to, IntrinsicPolyFun $ zip (map pure from) (repeat to))
+
+        unOpFun bop = (pretty bop, IntrinsicMonoFun [t] t)
+          where t = unPrim $ Primitive.unOpType bop
 
         binOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] t)
           where t = unPrim $ Primitive.binOpType bop

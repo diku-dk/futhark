@@ -72,8 +72,8 @@ module i8: (integral with t = i8) = {
   fun (x: i8) < (y: i8) = intrinsics.slt8 x y
   fun (x: i8) > (y: i8) = intrinsics.slt8 y x
 
-  fun sgn (x: i8) = intrinsics.sgn x
-  fun abs (x: i8) = intrinsics.abs x
+  fun sgn (x: i8) = intrinsics.ssignum8 x
+  fun abs (x: i8) = intrinsics.abs8 x
 
   fun max (x: t) (y: t) = intrinsics.smax8 x y
   fun min (x: t) (y: t) = intrinsics.smin8 x y
@@ -96,8 +96,8 @@ module i16: (integral with t = i16) = {
   fun (x: i16) < (y: i16) = intrinsics.slt16 x y
   fun (x: i16) > (y: i16) = intrinsics.slt16 y x
 
-  fun sgn (x: i16) = intrinsics.sgn x
-  fun abs (x: i16) = intrinsics.abs x
+  fun sgn (x: i16) = intrinsics.ssignum16 x
+  fun abs (x: i16) = intrinsics.abs16 x
 
   fun max (x: t) (y: t) = intrinsics.smax16 x y
   fun min (x: t) (y: t) = intrinsics.smin16 x y
@@ -120,8 +120,8 @@ module i32: (integral with t = i32) = {
   fun (x: i32) < (y: i32) = intrinsics.slt32 x y
   fun (x: i32) > (y: i32) = intrinsics.slt32 y x
 
-  fun sgn (x: i32) = intrinsics.sgn x
-  fun abs (x: i32) = intrinsics.abs x
+  fun sgn (x: i32) = intrinsics.ssignum32 x
+  fun abs (x: i32) = intrinsics.abs32 x
 
   fun max (x: t) (y: t) = intrinsics.smax32 x y
   fun min (x: t) (y: t) = intrinsics.smin32 x y
@@ -144,8 +144,8 @@ module i64: (integral with t = i64) = {
   fun (x: i64) < (y: i64) = intrinsics.slt64 x y
   fun (x: i64) > (y: i64) = intrinsics.slt64 y x
 
-  fun sgn (x: i64) = intrinsics.sgn x
-  fun abs (x: i64) = intrinsics.abs x
+  fun sgn (x: i64) = intrinsics.ssignum64 x
+  fun abs (x: i64) = intrinsics.abs64 x
 
   fun max (x: t) (y: t) = intrinsics.smax64 x y
   fun min (x: t) (y: t) = intrinsics.smin64 x y
@@ -168,8 +168,8 @@ module u8: (integral with t = u8) = {
   fun (x: u8) < (y: u8) = intrinsics.ult8 (i8 x) (i8 y)
   fun (x: u8) > (y: u8) = intrinsics.ult8 (i8 y) (i8 x)
 
-  fun sgn (x: u8) = intrinsics.sgn x
-  fun abs (x: u8) = intrinsics.abs x
+  fun sgn (x: u8) = u8 (intrinsics.usignum8 (i8 x))
+  fun abs (x: u8) = x
 
   fun max (x: t) (y: t) = u8 (intrinsics.umax8 (i8 x) (i8 y))
   fun min (x: t) (y: t) = u8 (intrinsics.umin8 (i8 x) (i8 y))
@@ -192,8 +192,8 @@ module u16: (integral with t = u16) = {
   fun (x: u16) < (y: u16) = intrinsics.ult16 (i16 x) (i16 y)
   fun (x: u16) > (y: u16) = intrinsics.ult16 (i16 y) (i16 x)
 
-  fun sgn (x: u16) = intrinsics.sgn x
-  fun abs (x: u16) = intrinsics.abs x
+  fun sgn (x: u16) = u16 (intrinsics.usignum16 (i16 x))
+  fun abs (x: u16) = x
 
   fun max (x: t) (y: t) = u16 (intrinsics.umax16 (i16 x) (i16 y))
   fun min (x: t) (y: t) = u16 (intrinsics.umin16 (i16 x) (i16 y))
@@ -216,8 +216,8 @@ module u32: (integral with t = u32) = {
   fun (x: u32) < (y: u32) = intrinsics.ult32 (i32 x) (i32 y)
   fun (x: u32) > (y: u32) = intrinsics.ult32 (i32 y) (i32 x)
 
-  fun sgn (x: u32) = intrinsics.sgn x
-  fun abs (x: u32) = intrinsics.abs x
+  fun sgn (x: u32) = u32 (intrinsics.usignum32 (i32 x))
+  fun abs (x: u32) = x
 
   fun max (x: t) (y: t) = u32 (intrinsics.umax32 (i32 x) (i32 y))
   fun min (x: t) (y: t) = u32 (intrinsics.umin32 (i32 x) (i32 y))
@@ -240,8 +240,8 @@ module u64: (integral with t = u64) = {
   fun (x: u64) < (y: u64) = intrinsics.ult64 (i64 x) (i64 y)
   fun (x: u64) > (y: u64) = intrinsics.ult64 (i64 y) (i64 x)
 
-  fun sgn (x: u64) = intrinsics.sgn x
-  fun abs (x: u64) = intrinsics.abs x
+  fun sgn (x: u64) = u64 (intrinsics.usignum64 (i64 x))
+  fun abs (x: u64) = x
 
   fun max (x: t) (y: t) = u64 (intrinsics.umax64 (i64 x) (i64 y))
   fun min (x: t) (y: t) = u64 (intrinsics.umin64 (i64 x) (i64 y))
@@ -269,7 +269,7 @@ module f64: (real with t = f64) = {
   fun sgn (x: f64) = if      x < 0f64  then -1f64
                      else if x == 0f64 then  0f64
                      else                    1f64
-  fun abs (x: f64) = intrinsics.abs x
+  fun abs (x: f64) = intrinsics.fabs64 x
 
   fun sqrt (x: f64) = intrinsics.sqrt64 x
 
@@ -314,7 +314,7 @@ module f32: (real with t = f32) = {
   fun sgn (x: f32) = if      x < 0f32  then -1f32
                      else if x == 0f32 then  0f32
                      else                    1f32
-  fun abs (x: f32) = intrinsics.abs x
+  fun abs (x: f32) = intrinsics.fabs32 x
 
   fun sqrt (x: f32) = intrinsics.sqrt32 x
 
