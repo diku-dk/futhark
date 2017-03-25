@@ -363,7 +363,7 @@ computeLocalMemoryUse free =
 
 localMemSize :: Imp.MemSize -> CallKernelGen (Either Imp.MemSize Imp.KernelConstExp)
 localMemSize (Imp.ConstSize x) =
-  return $ Right $ ValueExp $ IntValue $ Int32Value x
+  return $ Right $ ValueExp $ IntValue $ Int64Value x
 localMemSize (Imp.VarSize v) = isConstExp v >>= \case
   Just e | isStaticExp e -> return $ Right e
   _ -> return $ Left $ Imp.VarSize v

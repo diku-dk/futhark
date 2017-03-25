@@ -76,7 +76,7 @@ import Futhark.Analysis.PrimExp
 
 import Futhark.Util.Pretty hiding (space)
 
-data Size = ConstSize Int32
+data Size = ConstSize Int64
           | VarSize VName
           deriving (Eq, Show)
 

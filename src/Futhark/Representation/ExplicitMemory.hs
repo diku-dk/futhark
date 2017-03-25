@@ -536,7 +536,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkLParamLore = checkMemBound
   checkLetBoundLore = checkMemBound
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  checkOp (Alloc size _) = TypeCheck.require [Prim int32] size
+  checkOp (Alloc size _) = TypeCheck.require [Prim int64] size
   checkOp (Inner k) = TypeCheck.subCheck $ typeCheckKernel k
   primFParam name t = return $ Param name (Scalar t)
   primLParam name t = return $ Param name (Scalar t)
@@ -550,7 +550,7 @@ instance TypeCheck.Checkable InKernel where
   checkLParamLore = checkMemBound
   checkLetBoundLore = checkMemBound
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  checkOp (Alloc size _) = TypeCheck.require [Prim int32] size
+  checkOp (Alloc size _) = TypeCheck.require [Prim int64] size
   checkOp (Inner k) = typeCheckKernelExp k
   primFParam name t = return $ Param name (Scalar t)
   primLParam name t = return $ Param name (Scalar t)
@@ -624,7 +624,7 @@ matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
     matchBindee bindee (ReturnsMemory size@Constant{} space) =
       matchType bindee $ Mem size space
     matchBindee bindee (ReturnsMemory (Var size) space) = do
-      popSizeIfInCtx size
+      popSizeIfInCtx int64 size
       matchType bindee $ Mem (Var size) space
     matchBindee bindee (ReturnsArray et shape _ rets)
       | ArrayMem _ _ _ mem bindeeIxFun <- patElemAttr bindee = do
@@ -659,22 +659,22 @@ matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
         lift $ wrong $ "Memory " ++ pretty name ++
         " is supposed to be existential, but not bound in pattern."
 
-    popSizeFromCtx name
-      | inCtx name = popSize name
+    popSizeFromCtx t name
+      | inCtx name = popSize t name
       | otherwise =
         lift $ wrong $ "Size " ++ pretty name ++
         " is supposed to be existential, but not bound in pattern."
 
-    popSizeIfInCtx name
-      | inCtx name = popSize name
+    popSizeIfInCtx t name
+      | inCtx name = popSize t name
       | otherwise  = return () -- Must be free, then.
 
-    popSize name = do
+    popSize t name = do
       ctxbindees' <- get
       case partition ((==name) . patElemName) ctxbindees' of
         ([nameBindee], ctxbindees'') -> do
           put ctxbindees''
-          unless (patElemType nameBindee == Prim int32) $
+          unless (patElemType nameBindee == Prim t) $
             lift $ wrong $ "Size " ++ pretty name ++
             " is not an integer."
         _ ->
@@ -687,7 +687,7 @@ matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
           put ctxbindees''
           case patElemType memBindee of
             Mem (Var size) _ ->
-              popSizeIfInCtx size
+              popSizeIfInCtx int64 size
             Mem Constant{} _ ->
               return ()
             _ ->
@@ -696,9 +696,9 @@ matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
           return () -- OK, already seen.
 
     matchArrayDim (Var v) (Free _) =
-      popSizeIfInCtx v --  *May* be bound here.
+      popSizeIfInCtx int32 v --  *May* be bound here.
     matchArrayDim (Var v) (Ext _) =
-      popSizeFromCtx v --  *Has* to be bound here.
+      popSizeFromCtx int32 v --  *Has* to be bound here.
     matchArrayDim Constant{} (Free _) =
       return ()
     matchArrayDim Constant{} (Ext _) =
@@ -740,7 +740,7 @@ checkMemBound :: TypeCheck.Checkable lore =>
              -> TypeCheck.TypeM lore ()
 checkMemBound _ (Scalar _) = return ()
 checkMemBound _ (MemMem size _) =
-  TypeCheck.require [Prim int32] size
+  TypeCheck.require [Prim int64] size
 checkMemBound name (ArrayMem _ shape _ v ixfun) = do
   t <- lookupType v
   case t of
