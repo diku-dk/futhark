@@ -57,13 +57,18 @@ transformExp :: Exp ExplicitMemory -> ExpandM ([Stm ExplicitMemory], Exp Explici
 transformExp (Op (Inner (Kernel desc cs space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
+      num_threads64 <- newVName "num_threads64"
+      let num_threads64_pat = Pattern [] [PatElem num_threads64 BindVar $ Scalar int64]
+          num_threads64_bnd = Let num_threads64_pat () $ BasicOp $
+                              ConvOp (SExt Int32 Int64) (spaceNumThreads space)
+
       (alloc_bnds, alloc_offsets) <-
         expandedAllocations
-        (spaceNumThreads space, spaceNumGroups space, spaceGroupSize space)
+        (Var num_threads64, spaceNumGroups space, spaceGroupSize space)
         (spaceGlobalId space, spaceGroupId space, spaceLocalId space) thread_allocs
       let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
 
-      return (alloc_bnds,
+      return (num_threads64_bnd : alloc_bnds,
               Op $ Inner $ Kernel desc cs space ts kbody'')
 
   where bound_in_kernel =
@@ -109,7 +114,7 @@ expandedAllocations :: (SubExp,SubExp, SubExp)
                     -> (VName, VName, VName)
                     -> HM.HashMap VName (SubExp, Space)
                     -> ExpandM ([Stm ExplicitMemory], RebaseMap)
-expandedAllocations (num_threads, num_groups, group_size) (_thread_index, group_id, local_id) thread_allocs = do
+expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, group_id, local_id) thread_allocs = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
   (alloc_bnds, rebase_map) <- unzip <$> mapM expand (HM.toList thread_allocs)
@@ -130,10 +135,10 @@ expandedAllocations (num_threads, num_groups, group_size) (_thread_index, group_
 
         expand (mem, (per_thread_size, space)) = do
           total_size <- newVName "total_size"
-          let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int32]
+          let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int64]
               allocpat = Pattern [] [PatElem mem BindVar $
                                      MemMem (Var total_size) space]
-          return ([Let sizepat () $ BasicOp $ BinOp (Mul Int32) num_threads per_thread_size,
+          return ([Let sizepat () $ BasicOp $ BinOp (Mul Int64) num_threads64 per_thread_size,
                    Let allocpat () $ Op $ Alloc (Var total_size) space],
                    HM.singleton mem newBase)
 

@@ -47,7 +47,7 @@ data AllocStm = SizeComputation VName (PrimExp VName)
 bindAllocStm :: (MonadBinder m, Op (Lore m) ~ MemOp inner) =>
                 AllocStm -> m ()
 bindAllocStm (SizeComputation name pe) =
-  letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 pe)
+  letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int64 pe)
 bindAllocStm (Allocation name size space) =
   letBindNames'_ [name] $ Op $ Alloc size space
 bindAllocStm (ArrayCopy name bindage src) =
@@ -134,7 +134,7 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 instance Allocable fromlore OutInKernel =>
          Allocator ExplicitMemory (AllocM fromlore ExplicitMemory) where
   addAllocStm (SizeComputation name se) =
-    letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 se)
+    letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int64 se)
   addAllocStm (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocStm (ArrayCopy name bindage src) =
@@ -152,7 +152,7 @@ instance Allocable fromlore OutInKernel =>
 instance Allocable fromlore OutInKernel =>
          Allocator OutInKernel (AllocM fromlore OutInKernel) where
   addAllocStm (SizeComputation name se) =
-    letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int32 se)
+    letBindNames'_ [name] =<< toExp (coerceIntPrimExp Int64 se)
   addAllocStm (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocStm (ArrayCopy name bindage src) =
@@ -213,15 +213,17 @@ runPatAllocM (PatAllocM m) mems =
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
   product $
-  (ValueExp $ IntValue $ Int32Value $ primByteSize $ elemType t) :
-  map (primExpFromSubExp int32) (arrayDims t)
+  (ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t) :
+  map (toInt64 . primExpFromSubExp int32) (arrayDims t)
+  where toInt64 = ConvOpExp $ SExt Int32 Int64
 
 arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t =
   product .
-  ((ValueExp $ IntValue $ Int32Value $ primByteSize $ elemType t):) .
-  map (primExpFromSubExp int32) <$>
+  ((ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t):) .
+  map (toInt64 . primExpFromSubExp int32) <$>
   mapM dimAllocationSize (arrayDims t)
+  where toInt64 = ConvOpExp $ SExt Int32 Int64
 
 arraySizeInBytes :: Allocator lore m => Type -> m SubExp
 arraySizeInBytes = computeSize "bytes" <=< arraySizeInBytesExpM
@@ -321,7 +323,7 @@ allocsForPattern sizeidents validents rts hints = do
                             newIdent (baseString (identName ident)<>"_ext_buffer")
                             (identType ident `setArrayDims` sliceDims slice)
               (memsize,mem,(_,ixfun)) <- lift $ memForBindee tmp_buffer
-              tell ([PatElem (identName memsize) BindVar $ Scalar int32],
+              tell ([PatElem (identName memsize) BindVar $ Scalar int64],
                     [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                     [ArrayCopy (identName ident) bindage $
                      identName tmp_buffer])
@@ -330,7 +332,7 @@ allocsForPattern sizeidents validents rts hints = do
 
         ReturnsArray bt _ u _ -> do
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
-          tell ([PatElem (identName memsize) BindVar $ Scalar int32],
+          tell ([PatElem (identName memsize) BindVar $ Scalar int64],
                 [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                 [])
           return $ PatElem (identName ident') bindage $ ArrayMem bt shape u (identName mem) ixfun
@@ -355,7 +357,8 @@ summaryForBindage t@(Array bt shape u) BindVar NoHint = do
 summaryForBindage t BindVar (Hint ixfun space) = do
   let bt = elemType t
   bytes <- computeSize "bytes" $ product $
-           fromIntegral (primByteSize (elemType t)::Int32) : IxFun.base ixfun
+           fromIntegral (primByteSize (elemType t)::Int64) :
+           map (ConvOpExp (SExt Int32 Int64)) (IxFun.base ixfun)
   m <- allocateMemory "mem" bytes space
   return $ ArrayMem bt (arrayShape t) NoUniqueness m ixfun
 summaryForBindage _ (BindInPlace _ src _) _ =
@@ -367,7 +370,7 @@ memForBindee :: (MonadFreshNames m) =>
                    Ident,
                    (Ident, IxFun))
 memForBindee ident = do
-  size <- newIdent (memname <> "_size") (Prim int32)
+  size <- newIdent (memname <> "_size") (Prim int64)
   mem <- newIdent memname $ Mem (Var $ identName size) DefaultSpace
   return (size,
           mem,
@@ -401,7 +404,7 @@ allocInFParam param =
           ixfun = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
       memsize <- lift $ newVName (memname <> "_size")
       mem <- lift $ newVName memname
-      tell ([Param memsize $ Scalar int32],
+      tell ([Param memsize $ Scalar int64],
             [Param mem $ MemMem (Var memsize) DefaultSpace])
       return param { paramAttr =  ArrayMem bt shape u mem ixfun }
     Prim bt ->

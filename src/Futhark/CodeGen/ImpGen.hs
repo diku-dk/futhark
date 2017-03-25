@@ -317,7 +317,7 @@ compileInParams params orig_epts = do
 
       summaries = HM.fromList $ mapMaybe memSummary params
         where memSummary param
-                | MemMem (Constant (IntValue (Int32Value size))) space <- paramAttr param =
+                | MemMem (Constant (IntValue (Int64Value size))) space <- paramAttr param =
                     Just (paramName param, (Imp.ConstSize size, space))
                 | MemMem (Var size) space <- paramAttr param =
                     Just (paramName param, (Imp.VarSize size, space))
@@ -871,10 +871,12 @@ funcallTargets (Destination dests) =
 subExpToDimSize :: SubExp -> ImpM lore op Imp.DimSize
 subExpToDimSize (Var v) =
   return $ Imp.VarSize v
+subExpToDimSize (Constant (IntValue (Int64Value i))) =
+  return $ Imp.ConstSize $ fromIntegral i
 subExpToDimSize (Constant (IntValue (Int32Value i))) =
   return $ Imp.ConstSize $ fromIntegral i
 subExpToDimSize Constant{} =
-  compilerBugS "Size subexp is not an int32 constant."
+  compilerBugS "Size subexp is not an int32 or int64 constant."
 
 compileSubExpTo :: ValueDestination -> SubExp -> ImpM lore op ()
 compileSubExpTo dest se = copyDWIMDest dest [] se []

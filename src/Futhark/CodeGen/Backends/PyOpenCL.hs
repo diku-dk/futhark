@@ -226,7 +226,7 @@ unpackArrayInput mem memsize "device" _ _ dims e = do
   case memsize of
     Imp.VarSize sizevar ->
       Py.stm $ Assign (Var $ Py.compileName sizevar) $
-      Py.simpleCall "np.int32" [Field e "nbytes"]
+      Py.simpleCall "np.int64" [Field e "nbytes"]
     Imp.ConstSize _ ->
       return ()
 
