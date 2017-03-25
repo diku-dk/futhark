@@ -24,9 +24,9 @@ module type complex = {
   val exp: complex -> complex
   val log: complex -> complex
 
-  val fromInt: i32 -> complex
-  val fromFraction: i32 -> i32 -> complex
-  val toInt: complex -> i32
+  val from_i32: i32 -> complex
+  val from_fraction: i32 -> i32 -> complex
+  val to_i32: complex -> i32
 }
 
 module complex(T: real): (complex with real = T.t) = {
@@ -34,10 +34,10 @@ module complex(T: real): (complex with real = T.t) = {
   type complex = (T.t, T.t)
 
   fun mk (a: real) (b: real) = (a,b)
-  fun mk_re (a: real) = (a, T.fromInt 0)
-  fun mk_im (b: real) = (T.fromInt 0, b)
+  fun mk_re (a: real) = (a, T.from_i32 0)
+  fun mk_im (b: real) = (T.from_i32 0, b)
 
-  fun conj ((a,b): complex) = (a, T.fromInt 0 T.- b)
+  fun conj ((a,b): complex) = (a, T.from_i32 0 T.- b)
   fun re ((a,_b): complex) = a
   fun im ((_a,b): complex) = b
 
@@ -56,11 +56,11 @@ module complex(T: real): (complex with real = T.t) = {
 
   fun sqrt ((a,b): complex) =
     let gamma = T.sqrt ((a T.+ T.sqrt (a T.* a T.+ b T.* b)) T./
-                        T.fromInt 2)
-    let delta = T.fromInt (T.toInt (T.sgn b)) T.*
-                T.sqrt (((T.fromInt 0 T.- a) T.+
+                        T.from_i32 2)
+    let delta = T.from_i32 (T.to_i32 (T.sgn b)) T.*
+                T.sqrt (((T.from_i32 0 T.- a) T.+
                          T.sqrt (a T.* a T.+ b T.* b)) T./
-                        T.fromInt 2)
+                        T.from_i32 2)
     in (gamma, delta)
 
   fun exp ((a,b): complex) =
@@ -70,8 +70,8 @@ module complex(T: real): (complex with real = T.t) = {
   fun log (z: complex) =
     mk (T.log (mag z)) (arg z)
 
-  fun fromFraction (a: i32) (b: i32): complex =
-    mk (T.fromFraction a b) (T.fromInt 0)
-  fun fromInt (a: i32) = fromFraction a 1
-  fun toInt ((a,_): complex) = T.toInt a
+  fun from_fraction (a: i32) (b: i32): complex =
+    mk (T.from_fraction a b) (T.from_i32 0)
+  fun from_i32 (a: i32) = from_fraction a 1
+  fun to_i32 ((a,_): complex) = T.to_i32 a
 }
