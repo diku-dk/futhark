@@ -4,12 +4,9 @@ module Futhark.Analysis.ScalExp
   , ScalExp(..)
   , scalExpType
   , subExpToScalExp
-  , intSubExpToScalExp
   , toScalExp
   , expandScalExp
   , LookupVar
-  , fromScalExp
-  , freeIn
   , module Futhark.Representation.Primitive
   )
 where
@@ -28,7 +25,6 @@ import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SSignum)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import Futhark.Construct
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty hiding (pretty)
 
@@ -180,10 +176,6 @@ subExpToScalExp :: SubExp -> PrimType -> ScalExp
 subExpToScalExp (Var v) t        = Id v t
 subExpToScalExp (Constant val) _ = Val val
 
--- | Non-recursively convert an integral subexpression to a 'ScalExp'.
-intSubExpToScalExp :: SubExp -> ScalExp
-intSubExpToScalExp se = subExpToScalExp se $ IntType Int32
-
 toScalExp :: (HasScope t f, Monad f) =>
              LookupVar -> Exp lore -> f (Maybe ScalExp)
 toScalExp look (BasicOp (SubExp (Var v)))
@@ -283,45 +275,6 @@ binOpScalExp bop = snd <$> find ((==bop) . fst)
                    , (LogAnd, SLogAnd)
                    , (LogOr, SLogOr)
                    ]
-
-fromScalExp :: MonadBinder m => ScalExp
-             -> m (Exp (Lore m))
-fromScalExp = convert
-  where convert (Val val) = return $ BasicOp $ SubExp $ Constant val
-        convert (Id v _)  = return $ BasicOp $ SubExp $ Var v
-        convert (SNeg se) = eNegate $ convert se
-        convert (SNot se) = eNot $ convert se
-        convert (SAbs se) = eAbs $ convert se
-        convert (SSignum se) = eSignum $ convert se
-        convert (SPlus x y) = arithBinOp (Add Int32) x y
-        convert (SMinus x y) = arithBinOp (Sub Int32) x y
-        convert (STimes x y) = arithBinOp (Mul Int32) x y
-        convert (SDiv x y)  = arithBinOp (AST.SDiv Int32) x y
-        convert (SMod x y) = arithBinOp (AST.SMod Int32) x y
-        convert (SQuot x y) = arithBinOp (AST.SQuot Int32) x y
-        convert (SRem x y) = arithBinOp (AST.SRem Int32) x y
-        convert (SPow x y) = arithBinOp (AST.Pow Int32) x y
-        convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y)
-        convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y)
-        convert (RelExp LTH0 x) = eCmpOp (CmpSlt Int32) (convert x) (pure zero)
-        convert (RelExp LEQ0 x) = eCmpOp (CmpSle Int32) (convert x) (pure zero)
-        convert (MaxMin _ []) = fail "ScalExp.fromScalExp: MaxMin empty list"
-        convert (MaxMin isMin (e:es)) = do
-          e'  <- convert e
-          es' <- mapM convert es
-          foldM (select isMin) e' es'
-
-        arithBinOp bop x y =
-          eBinOp bop (convert x) (convert y)
-
-        select isMin cur next =
-          let cmp = eCmpOp (CmpSlt Int32) (pure cur) (pure next)
-              (pick, discard)
-                | isMin     = (cur, next)
-                | otherwise = (next, cur)
-          in eIf cmp (eBody [pure pick]) (eBody [pure discard])
-
-        zero = BasicOp $ SubExp $ intConst Int32 0
 
 instance FreeIn ScalExp where
   freeIn (Val   _) = mempty
