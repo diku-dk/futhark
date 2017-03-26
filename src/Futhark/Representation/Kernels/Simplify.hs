@@ -259,20 +259,22 @@ fuseStreamIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Lore m ~ Wise InKernel) =>
                  TopDownRule m
 fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
-  | ([(iota_param, iota_start, iota_stride)], params_and_arrs) <-
+  | ([(iota_param, iota_start, iota_stride, iota_t)], params_and_arrs) <-
       partitionEithers $ zipWith (isIota vtable) (groupStreamArrParams lam) arrs = do
 
       let (arr_params', arrs') = unzip params_and_arrs
           chunk_size = groupStreamChunkSize lam
           offset = groupStreamChunkOffset lam
 
-      body' <- insertStmsM $ do
-        offset' <- letSubExp "offset_by_stride" $
-          BasicOp $ BinOp (Mul Int32) (Var offset) iota_stride
+      body' <- insertStmsM $ inScopeOf lam $ do
+        -- Convert index to appropriate type.
+        offset' <- asIntS iota_t $ Var offset
+        offset'' <- letSubExp "offset_by_stride" $
+          BasicOp $ BinOp (Mul iota_t) offset' iota_stride
         start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) offset' iota_start
+            BasicOp $ BinOp (Add iota_t) offset'' iota_start
         letBindNames'_ [paramName iota_param] $
-          BasicOp $ Iota (Var chunk_size) start iota_stride Int32
+          BasicOp $ Iota (Var chunk_size) start iota_stride iota_t
         return $ groupStreamLambdaBody lam
       let lam' = lam { groupStreamArrParams = arr_params',
                        groupStreamLambdaBody = body'
@@ -280,10 +282,10 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
       letBind_ pat $ Op $ GroupStream w max_chunk lam' accs arrs'
 fuseStreamIota _ _ = cannotSimplify
 
-isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp, SubExp) (a, VName)
+isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp, SubExp, IntType) (a, VName)
 isIota vtable chunk arr
-  | Just (BasicOp (Iota _ x s Int32)) <- ST.lookupExp arr vtable =
-      Left (chunk, x, s)
+  | Just (BasicOp (Iota _ x s it)) <- ST.lookupExp arr vtable =
+      Left (chunk, x, s, it)
   | otherwise =
       Right (chunk, arr)
 
