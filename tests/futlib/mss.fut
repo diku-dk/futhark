@@ -10,27 +10,27 @@ module Int_measure = {
   type m = i32
 
   let zero = 0
-  fun max (x: i32) (y: i32) = i32.max x y
-  fun combine (x: i32) (y: i32) = x + y
-  fun single (x: i32) = x
+  let max (x: i32) (y: i32) = i32.max x y
+  let combine (x: i32) (y: i32) = x + y
+  let single (x: i32) = x
 }
 
 module Weird_measure = {
   type t = i32
   type m = (i32, i32)
 
-  fun asInt ((x,xlen): m) = x + xlen
+  let asInt ((x,xlen): m) = x + xlen
 
   let zero = (0, 0)
   -- Is this max actually associative?
-  fun max (x: m) (y: m) = if asInt x < asInt y then y else x
-  fun combine ((x,xlen): m) ((y,ylen): m) = (x+y, xlen+ylen)
-  fun single (x: i32) = (x, 1)
+  let max (x: m) (y: m) = if asInt x < asInt y then y else x
+  let combine ((x,xlen): m) ((y,ylen): m) = (x+y, xlen+ylen)
+  let single (x: i32) = (x, 1)
 }
 
 module MSS_Int = MSS(Int_measure)
 module MSS_Weird = MSS(Weird_measure)
 
-fun main(xs: []i32): (i32, i32) =
+let main(xs: []i32): (i32, i32) =
   (MSS_Int.mss xs,
    #1 (MSS_Weird.mss xs))

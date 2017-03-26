@@ -7,4 +7,4 @@
 
 default(i64)
 
-fun main(): i64 = 0
+let main(): i64 = 0

@@ -3,5 +3,5 @@
 -- ==
 -- error: underscore
 
-fun main (_x: i32): i32 =
+let main (_x: i32): i32 =
   _x

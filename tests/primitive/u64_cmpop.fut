@@ -6,5 +6,5 @@
 -- input { 18446744073709551615u64 1u64 } output { false false false }
 -- input {  1u64 18446744073709551615u64 } output { true false true }
 
-fun main(x: u64, y: u64): (bool, bool, bool) =
+let main(x: u64, y: u64): (bool, bool, bool) =
   (x < y, x == y, x <= y)

@@ -9,10 +9,10 @@
 --   [6, 17, 6]
 -- }
 
-fun inner(a: [][](i32,i32)): []i32 =
+let inner(a: [][](i32,i32)): []i32 =
   map (\(r: [](i32,i32)): i32 -> let (x,y) = r[0] in x+y) a
 
-fun main(a1: [][]i32, a2: [][]i32): []i32 =
+let main(a1: [][]i32, a2: [][]i32): []i32 =
   let a = map (\(p: ([]i32,[]i32)): [](i32,i32)  ->
                 let (p1,p2) = p in
                 zip p1 p2) (

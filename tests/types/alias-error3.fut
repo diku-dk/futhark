@@ -6,4 +6,4 @@
 type mydup = i32
 type mydup = f32
 
-fun main(x: i32): i32 = x
+let main(x: i32): i32 = x

@@ -3,7 +3,7 @@
 -- ==
 -- error:
 
-fun main(indexes: [k]i32,
+let main(indexes: [k]i32,
        values0: [k]i32,
        values1: [k]f32,
        array1: *[n]i32,

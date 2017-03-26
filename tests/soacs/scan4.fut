@@ -9,7 +9,7 @@
 -- }
 
 
-fun step(xs: [n]i32): [n]i32 =
+let step(xs: [n]i32): [n]i32 =
   let bits = map (+1) xs
   let ps1 = scan (+) 0 bits
   let bits_sum = reduce (+) 0 bits
@@ -17,7 +17,7 @@ fun step(xs: [n]i32): [n]i32 =
   let xs' = map (+) (ps1') xs
   in xs'
 
-fun main(xs: [n]i32): [n]i32 =
+let main(xs: [n]i32): [n]i32 =
   loop (xs) = for i < 2 do
     step(xs)
   in xs

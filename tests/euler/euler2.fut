@@ -12,7 +12,7 @@
 --
 -- Our approach: simple sequential counting loop.
 
-fun main(bound: i32): i32 =
+let main(bound: i32): i32 =
   loop ((sum, fib0, fib1) = (0, 1, 1)) = while fib1 < bound do
     let newsum = if fib1 % 2 == 0 then sum + fib1
                                   else sum in

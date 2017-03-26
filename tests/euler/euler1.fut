@@ -6,7 +6,7 @@
 
 -- Approach: filter to get the numbers we are interested in, then sum
 -- them.  Ideally this will be fused into a single loop.
-fun main(bound: i32): i32 =
+let main(bound: i32): i32 =
   reduce (+) 0 (
          filter (\(x: i32): bool  ->
                   x % 3 == 0 || x % 5 == 0) (

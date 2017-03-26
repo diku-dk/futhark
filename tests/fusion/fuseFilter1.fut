@@ -6,6 +6,6 @@
 -- output {
 --   [1, 4]
 -- }
-fun main(a: []i32, b: []i32): []i32 =
+let main(a: []i32, b: []i32): []i32 =
   let (c,d) = unzip(filter (\(x,y) -> x+y < 0) (zip a b)) in
   filter (0<) d

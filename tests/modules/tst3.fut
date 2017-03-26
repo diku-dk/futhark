@@ -10,4 +10,4 @@ module A = { type t = f32 type s = i32 }
 module B = F(A)
 module C = F(B)
 
-fun main() : i32 = 3
+let main() : i32 = 3

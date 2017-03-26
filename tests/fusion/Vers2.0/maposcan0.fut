@@ -12,7 +12,7 @@
 --    Map    1
 -- }
 --
-fun main(arr: []f64): ([]f64,[]f64) =
+let main(arr: []f64): ([]f64,[]f64) =
     let sa = scan (+) (0.0) arr
     let b  = map  (*2.0) sa in
     (sa, b)

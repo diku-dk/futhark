@@ -9,5 +9,5 @@
 --   true
 -- }
 
-fun main(x: i32, y: i32): (bool,bool) =
+let main(x: i32, y: i32): (bool,bool) =
   (x > y, x >= y)

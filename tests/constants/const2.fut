@@ -6,4 +6,4 @@
 let x: i32 = 2
 let y: i32 = x + 1
 
-fun main(): i32 = y
+let main(): i32 = y

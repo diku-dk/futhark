@@ -11,7 +11,7 @@
 -- }
 -- structure { Write 1 }
 
-fun main(numbers: [k]i32,
+let main(numbers: [k]i32,
        array0: *[n]i32,
        array1: *[n]i32): ([n]i32, [n]i32) =
   let indexes0 = map (+1) numbers

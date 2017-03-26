@@ -8,12 +8,12 @@
 --  2
 -- }
 
-fun number(): i32 = 1
+let number(): i32 = 1
 module M0 = {
-  fun number(): i32 = 2
+  let number(): i32 = 2
   module M1 = {
-    fun foo(): i32 = number()
+    let foo(): i32 = number()
   }
 }
 
-fun main(): i32 = M0.M1.foo()
+let main(): i32 = M0.M1.foo()

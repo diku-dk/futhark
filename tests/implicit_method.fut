@@ -45,7 +45,7 @@
 
 default(f32)
 
-fun tridagSeq(a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
+let tridagSeq(a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
     loop ((y, b)) =
       for i < n-1 do
         let i    = i + 1
@@ -61,7 +61,7 @@ fun tridagSeq(a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
                  in  y
     in  y
 
-fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
+let implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
                    myMu: [n][m]f32, myVar: [n][m]f32,
                    u: [n][m]f32)
                   (dtInv: f32): *[n][m]f32 =
@@ -80,7 +80,7 @@ fun implicitMethod(myD:  [m][3]f32,  myDD: [m][3]f32,
      ) (zip myMu myVar (copy(u))
      )
 
-fun main(myD:  [m][3]f32,  myDD: [m][3]f32,
+let main(myD:  [m][3]f32,  myDD: [m][3]f32,
         myMu: [n][m]f32, myVar: [n][m]f32,
         u: *[n][m]f32,    dtInv: f32,
         num_samples: i32): *[num_samples][n][m]f32 =

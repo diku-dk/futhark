@@ -17,14 +17,14 @@
 
 import "futlib/math"
 
-fun strike(): i32 = 100
-fun bankDays(): i32 = 252
-fun s0(): i32 = 100
-fun r(): f64 = f64(0.03)
-fun alpha(): f64 = f64(0.07)
-fun sigma(): f64 = f64(0.20)
+let strike(): i32 = 100
+let bankDays(): i32 = 252
+let s0(): i32 = 100
+let r(): f64 = f64(0.03)
+let alpha(): f64 = f64(0.07)
+let sigma(): f64 = f64(0.20)
 
-fun binom(expiry: i32): f64 =
+let binom(expiry: i32): f64 =
   let n = expiry * bankDays()
   let dt = f64(expiry) / f64(n)
   let u = f64.exp(alpha()*dt+sigma()*f64.sqrt(dt))
@@ -52,5 +52,5 @@ fun binom(expiry: i32): f64 =
       (map (qDR*) (put_init)))) in
   put[0]
 
-fun main(expiry: i32): f64 =
+let main(expiry: i32): f64 =
   binom(expiry)

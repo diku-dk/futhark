@@ -8,6 +8,6 @@
 -- structure {
 --   Scanomap 1
 -- }
-fun main(a: []i32): []i32 =
+let main(a: []i32): []i32 =
   let b = scan (+) 0 (map (+2) a) in
   b

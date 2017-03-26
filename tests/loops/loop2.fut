@@ -7,6 +7,6 @@
 --   861
 -- }
 
-fun main(n: i32): i32 =
+let main(n: i32): i32 =
   loop (x = 0) = for i < n do x + i in
   x

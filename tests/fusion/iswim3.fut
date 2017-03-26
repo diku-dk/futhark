@@ -7,9 +7,9 @@
 --
 -- structure { Map 1 Redomap 1 Scanomap 1 }
 
-fun take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
+let take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
-fun correlateDeltas(md_c:  [num_und][num_und]f64,
+let correlateDeltas(md_c:  [num_und][num_und]f64,
                  zds: [num_dates][num_und]f64
 ): [num_dates][num_und]f64 =
     map (\(zi: [num_und]f64): [num_und]f64  ->
@@ -19,7 +19,7 @@ fun correlateDeltas(md_c:  [num_und][num_und]f64,
                ) (iota(num_und) )
        ) zds
 
-fun blackScholes(md_c:
+let blackScholes(md_c:
                 [num_und][num_und]f64,
                 md_vols: [num_dates][num_und]f64,
                 md_drifts: [num_dates][num_und]f64,
@@ -31,7 +31,7 @@ fun blackScholes(md_c:
             ) (md_starts) noises
 
 
-fun main(md_cs:
+let main(md_cs:
              [num_und][num_und]f64,
              md_vols: [num_dates][num_und]f64,
              md_drifts: [num_dates][num_und]f64,

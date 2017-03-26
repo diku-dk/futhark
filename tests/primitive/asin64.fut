@@ -7,4 +7,4 @@
 
 import "futlib/math"
 
-fun main(x: f64): f64 = f64.asin(x)
+let main(x: f64): f64 = f64.asin(x)

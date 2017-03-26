@@ -74,7 +74,7 @@
 
 default (f32)
 
-fun tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
+let tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
   unsafe
 ----------------------------------------------------
   -- Recurrence 1: b[i] = b[i] - a[i]*c[i-1]/b[i-1] --
@@ -143,7 +143,7 @@ fun tridagPar(a:  [n]f32, b: *[]f32, c: []f32, y: *[]f32 ): *[]f32 =
   let y    = map  (\(i: i32): f32  -> y[n-i-1]) (iota n)
   in y
 
-fun main(myD:  [inner][3]f32, myDD: [inner][3]f32,
+let main(myD:  [inner][3]f32, myDD: [inner][3]f32,
          myMu: [outer][inner]f32,  myVar: [outer][inner]f32,
          u:   *[outer][inner]f32,  dtInv: f32  ): *[][]f32 =
   map (\mu_row var_row (u_row: *[]f32): *[inner]f32  ->

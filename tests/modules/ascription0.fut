@@ -15,7 +15,7 @@ module Struct: SIG = {
 
   let x: (i32, i32) = (2,2)
 
-  fun f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
+  let f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }
 
-fun main(xs: []i32, ys: []i32): Struct.t = Struct.f (zip xs ys)
+let main(xs: []i32, ys: []i32): Struct.t = Struct.f (zip xs ys)

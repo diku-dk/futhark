@@ -2,8 +2,8 @@
 -- ==
 -- error:
 
-fun f(a: *[]i32): []i32 = a -- OK, because unique is a subtype of nonunique
+let f(a: *[]i32): []i32 = a -- OK, because unique is a subtype of nonunique
 
-fun g(a: []i32): *[]i32 = a -- Wrong!
+let g(a: []i32): *[]i32 = a -- Wrong!
 
-fun main(): i32 = 0
+let main(): i32 = 0

@@ -40,9 +40,9 @@
 
 import "futlib/math"
 
-fun take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
+let take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
-fun correlateDeltas(md_c: [num_und][num_und]f64,
+let correlateDeltas(md_c: [num_und][num_und]f64,
                     zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   map (\(zi: [num_und]f64): [num_und]f64  ->
          map (\(j: i32): f64  ->
@@ -51,12 +51,12 @@ fun correlateDeltas(md_c: [num_und][num_und]f64,
             ) (iota(num_und) )
      ) zds
 
-fun combineVs(n_row:   [num_und]f64,
+let combineVs(n_row:   [num_und]f64,
               vol_row: [num_und]f64,
               dr_row: [num_und]f64 ): [num_und]f64 =
   map (+) dr_row (map (*) n_row vol_row)
 
-fun mkPrices(md_vols: [num_dates][num_und]f64,
+let mkPrices(md_vols: [num_dates][num_und]f64,
              md_drifts: [num_dates][num_und]f64,
              noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let c_rows = map combineVs (zip noises (md_vols) (md_drifts) )
@@ -67,7 +67,7 @@ fun mkPrices(md_vols: [num_dates][num_und]f64,
           ) (replicate num_und 1.0) (e_rows )
 
   -- Formerly blackScholes.
-fun main(md_c: [num_und][num_und]f64,
+let main(md_c: [num_und][num_und]f64,
          md_vols: [num_dates][num_und]f64,
          md_drifts: [num_dates][num_und]f64,
          bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =

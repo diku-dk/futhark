@@ -7,8 +7,8 @@ module type SIG = {
 }
 
 module Struct: SIG = {
-  fun f (x: i32): i32 = x + 2
-  fun g (x: i32): i32 = x + 3
+  let f (x: i32): i32 = x + 2
+  let g (x: i32): i32 = x + 3
 }
 
-fun main(x: i32): i32 = Struct.g x
+let main(x: i32): i32 = Struct.g x

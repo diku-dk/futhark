@@ -3,6 +3,6 @@
 -- ==
 -- error: cannot match
 
-fun main() =
+let main() =
   let r:{a:i32,b:i32} = {a=0}
   in 0

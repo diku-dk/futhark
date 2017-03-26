@@ -10,4 +10,4 @@ module M1: MT = {
   module M(P: {val y:i32}) = { let x = P.y }
 }
 
-fun main() = M1.M.x
+let main() = M1.M.x

@@ -17,26 +17,26 @@
 
 type complex = (f64,f64)
 
-fun complexAdd((a,b): complex) ((c,d): complex): complex =
+let complexAdd((a,b): complex) ((c,d): complex): complex =
   (a + c,
    b + d)
 
-fun complexMult((a,b): complex) ((c,d): complex): complex =
+let complexMult((a,b): complex) ((c,d): complex): complex =
  (a*c - b * d,
   a*d + b * c)
 
-fun complexInv((r,i): complex): complex =
+let complexInv((r,i): complex): complex =
   let denom = r*r + i * i
   in (r / denom,
       -i / denom)
 
-fun complexNeg((r,i): complex): complex =
+let complexNeg((r,i): complex): complex =
   (-r, -i)
 
-fun complexConj((r,i): complex): complex =
+let complexConj((r,i): complex): complex =
   (r, -i)
 
-fun main (o: i32) (a: complex) (b: complex): complex =
+let main (o: i32) (a: complex) (b: complex): complex =
   if      o == 0 then complexAdd a b
   else if o == 1 then complexMult a b
   else if o == 2 then complexInv a

@@ -9,6 +9,6 @@
 --   Kernel/GroupStream 1
 -- }
 
-fun main(a: []i32): []i32 =
+let main(a: []i32): []i32 =
   map (\(i: i32): i32  ->
         reduce (+) 0 (map (+1) (iota(i)))) a

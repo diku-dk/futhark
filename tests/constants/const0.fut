@@ -5,4 +5,4 @@
 
 let v: i32 = 2
 
-fun main(): i32 = v
+let main(): i32 = v

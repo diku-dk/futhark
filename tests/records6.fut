@@ -5,6 +5,6 @@
 -- ==
 -- input { 2 } output { 4 3 }
 
-fun main(x: i32) =
+let main(x: i32) =
   let r = {a=x, b=x+1, a=x+2}
   in (#a r, #b r)

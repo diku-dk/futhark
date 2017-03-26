@@ -11,4 +11,4 @@ module f(M: mt) = {
 
 module m2 = f(m1)
 
-fun main() = m2.x + m2.y
+let main() = m2.x + m2.y

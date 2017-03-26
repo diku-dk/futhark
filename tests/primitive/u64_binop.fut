@@ -24,7 +24,7 @@
 -- input { 3 4021u64 6u64 } output { 2424947974056870057u64 }
 -- input { 3 4021u64 7u64 } output { 10834932764031245949u64 }
 
-fun main(f: i32, x: u64, y: u64): u64 =
+let main(f: i32, x: u64, y: u64): u64 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

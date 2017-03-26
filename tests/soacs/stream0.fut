@@ -5,7 +5,7 @@
 -- input { 10 1 1 }
 -- output { [[0], [1], [1], [1], [1], [1], [1], [1], [1], [1]] }
 
-fun main(num_mc_it: i32,
+let main(num_mc_it: i32,
          num_dates: i32,
          num_und: i32): [][]i32 =
   let sobvctsz  = num_dates*num_und in

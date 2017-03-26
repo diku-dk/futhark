@@ -7,4 +7,4 @@
 
 default(i16)
 
-fun main(): i16 = 0
+let main(): i16 = 0

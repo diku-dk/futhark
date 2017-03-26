@@ -7,4 +7,4 @@
 
 default(f64)
 
-fun main(): f64 = 0.1
+let main(): f64 = 0.1

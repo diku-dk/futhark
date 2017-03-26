@@ -6,9 +6,9 @@
 --   0
 -- }
 
-fun f(a: *[]i32): i32 = a[0]
+let f(a: *[]i32): i32 = a[0]
 
-fun main(): i32 =
+let main(): i32 =
     let n = 10
     let b = iota(n)
     let a = b -- Alias a to b.

@@ -6,4 +6,4 @@
 
 import "futlib/math"
 
-fun main(x: f64): f64 = f64.acos(x)
+let main(x: f64): f64 = f64.acos(x)

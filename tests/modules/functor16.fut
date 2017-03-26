@@ -17,12 +17,12 @@ module type MT2 = {
 module M = {
   module T1(P1: MT1) = {
     module T2(P2: MT1): MT2 = {
-      fun g(x: i32) = P2.f (P1.f x x) x
+      let g(x: i32) = P2.f (P1.f x x) x
     }
   }
 }
 
-module T1a = M.T1({fun f (x: i32) (y: i32) = x + y})
-module T = T1a.T2({fun f (x: i32) (y: i32) = x * y})
+module T1a = M.T1({let f (x: i32) (y: i32) = x + y})
+module T = T1a.T2({let f (x: i32) (y: i32) = x * y})
 
-fun main (x: i32) = T.g x
+let main (x: i32) = T.g x

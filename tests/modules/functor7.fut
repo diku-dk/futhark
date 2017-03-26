@@ -12,9 +12,9 @@ module f1(R0: { type cell }) = {
 module f2(R1: { type cell }) = {
   module L = f1(R1)
   open L
-  fun id (x: cell) = x
+  let id (x: cell) = x
 }
 
 module m2 = f2({type cell = i32})
 
-fun main(): m2.cell = m2.id 2
+let main(): m2.cell = m2.id 2

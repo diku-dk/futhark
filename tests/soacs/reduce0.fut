@@ -12,5 +12,5 @@
 -- output { 887459712 }
 -- structure distributed { Iota 0 }
 
-fun main(n: i32): i32 =
+let main(n: i32): i32 =
   reduce (+) 0 (iota(n))

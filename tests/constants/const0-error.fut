@@ -4,4 +4,4 @@
 
 val x: i32 = 2.0
 
-fun main(): i32 = 2
+let main(): i32 = 2

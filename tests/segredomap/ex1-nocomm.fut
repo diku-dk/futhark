@@ -12,9 +12,9 @@
 
 -- Add a data-driven branch to prevent the compiler from noticing that
 -- this is commutative.
-fun add (b: bool) (x : i32) (y : i32): i32 = if b then x + y else x - y
+let add (b: bool) (x : i32) (y : i32): i32 = if b then x + y else x - y
 
-fun main (b: bool) (xss : [m][n]f32): ([m]i32, [m][n]f64) =
+let main (b: bool) (xss : [m][n]f32): ([m]i32, [m][n]f64) =
   unzip (map( \(xs : [n]f32) : (i32, [n]f64) ->
          let (xs_int, xs_neg) = unzip (map( \(x : f32) : (i32, f64) -> (i32 x, f64(-x))) xs)
          in (reduce (add b) 0 xs_int, xs_neg)

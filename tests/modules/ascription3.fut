@@ -5,7 +5,7 @@
 module type S = { val f: i32 -> []i32 }
 
 module M: S = {
-  fun f(x: i32): *[]i32 = replicate x 0
+  let f(x: i32): *[]i32 = replicate x 0
 }
 
-fun main(n: i32): []i32 = M.f n
+let main(n: i32): []i32 = M.f n

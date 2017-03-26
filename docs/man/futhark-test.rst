@@ -153,13 +153,13 @@ The following program tests simple indexing and bounds checking::
   -- }
   -- error: Assertion.*failed
 
-  fun main([]i32: a:, i32: i:): : i32 =
+  let main([]i32: a:, i32: i:): : i32 =
     a[i]
 
 The following program contains two entry points, both of which are
 tested::
 
-  fun add(x: i32, y: i32): i32 = x + y
+  let add(x: i32, y: i32): i32 = x + y
 
   -- Test the add1 function.
   -- ==

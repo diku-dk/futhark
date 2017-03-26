@@ -47,13 +47,13 @@
 
 import "futlib/math"
 
-fun analytic(t0: f64) (time: f64): f64 =
+let analytic(t0: f64) (time: f64): f64 =
   20.0 + (t0 - 20.0) * f64.exp(-0.07*time)
 
-fun cooling(_time: f64) (temperature: f64): f64 =
+let cooling(_time: f64) (temperature: f64): f64 =
   -0.07 * (temperature-20.0)
 
-fun main(t0: f64) (a: f64) (b: f64) (h: f64): []f64 =
+let main(t0: f64) (a: f64) (b: f64) (h: f64): []f64 =
   let steps = i32((b-a)/h)
   let temps = replicate steps 0.0
   loop ((t,temps)=(t0,temps)) = for i < steps do

@@ -8,7 +8,7 @@
 --   [0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000]
 -- }
 
-fun main(): ([]f64, []f64) =
+let main(): ([]f64, []f64) =
   let n = 10 in
   loop (looparr = (copy(replicate n 0.0),
                    copy(replicate n 0.0))) = for i < n  do

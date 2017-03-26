@@ -37,30 +37,30 @@
 
 default(f32)
 
-fun dotV (x: [d]f32) (y: [d]f32): f32 =
+let dotV (x: [d]f32) (y: [d]f32): f32 =
   reduce (+) 0.0 (map (*) x y)
 
-fun addV (x: [d]f32) (y: [d]f32): [d]f32 =
+let addV (x: [d]f32) (y: [d]f32): [d]f32 =
   map (+) x y
 
-fun scaleV (x: [d]f32) (a: f32): [d]f32 =
+let scaleV (x: [d]f32) (a: f32): [d]f32 =
   map (*a) x
 
-fun checkClass (w: [d]f32) (x: [d]f32): f32 =
+let checkClass (w: [d]f32) (x: [d]f32): f32 =
   if dotV x w > 0.0 then 1.0 else -1.0
 
-fun checkList (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): bool =
+let checkList (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): bool =
   reduce (&&) true (map (\x y -> checkClass w x * y != -1.0) xs ys)
 
-fun accuracy (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): f32 =
+let accuracy (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): f32 =
   reduce (+) 0.0 (map (\x y -> f32 (checkClass w x * y != -1.0)) xs ys)
 
-fun train (w: [d]f32) (x: [d]f32) (y: f32) (eta: f32): [d]f32 =
+let train (w: [d]f32) (x: [d]f32) (y: f32) (eta: f32): [d]f32 =
   if checkClass w x == y then w
   else addV w (scaleV (scaleV x eta) y)
 
 -- Returns: #iterations, final 'w', accuracy from 0-1.
-fun main (w: [d]f32) (xd: [m][d]f32) (yd: [m]f32) (limit: i32) (eta: f32): (i32, [d]f32, f32) =
+let main (w: [d]f32) (xd: [m][d]f32) (yd: [m]f32) (limit: i32) (eta: f32): (i32, [d]f32, f32) =
   loop ((w, i) = (w, 0)) = while i < limit && !(checkList w xd yd) do
     -- Find data for this iteration.
     let x = xd[i%m]
