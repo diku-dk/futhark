@@ -127,7 +127,6 @@ keyword s =
     "reduce"       -> REDUCE
     "reduce_comm"  -> REDUCECOMM
     "zip"          -> ZIP
-    "zipWith"      -> ZIPWITH
     "unzip"        -> UNZIP
     "unsafe"       -> UNSAFE
     "scan"         -> SCAN
@@ -294,7 +293,6 @@ data Token = ID Name
            | REARRANGE
            | TRANSPOSE
            | ROTATE
-           | ZIPWITH
            | ZIP
            | UNZIP
            | UNSAFE
