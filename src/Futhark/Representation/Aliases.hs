@@ -115,6 +115,8 @@ instance (Annotations lore, CanBeAliased (Op lore)) =>
 instance AliasesOf (VarAliases, attr) where
   aliasesOf = unNames . fst
 
+instance FreeAttr Names' where
+
 instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) where
   expContext pat e = do
     env <- asksScope removeScopeAliases

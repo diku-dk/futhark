@@ -262,7 +262,6 @@ foldExp m x = runIdentity . foldExpM m x
 data Walker lore m = Walker {
     walkOnSubExp :: SubExp -> m ()
   , walkOnBody :: Body lore -> m ()
-  , walkOnStm :: Stm lore -> m ()
   , walkOnVName :: VName -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
@@ -276,7 +275,6 @@ identityWalker :: Monad m => Walker lore m
 identityWalker = Walker {
                    walkOnSubExp = const $ return ()
                  , walkOnBody = const $ return ()
-                 , walkOnStm = const $ return ()
                  , walkOnVName = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()

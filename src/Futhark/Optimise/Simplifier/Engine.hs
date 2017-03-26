@@ -444,10 +444,7 @@ provides :: Stm lore -> [VName]
 provides = patternNames . bindingPattern
 
 requires :: Attributes lore => Stm lore -> Names
-requires bnd =
-  (mconcat (map freeIn $ patternElements $ bindingPattern bnd)
-  `HS.difference` HS.fromList (provides bnd)) <>
-  freeInExp (bindingExp bnd)
+requires = freeInStm
 
 expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
                UT.UsageTable -> Stm lore -> UT.UsageTable
@@ -561,22 +558,21 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
                      , usageTable = f1 <> f2
                      })
   where filterBnds is_alloc_fn getArrSz_fn all_bnds =
-          let sz_nms     = HS.fromList $
-                            concatMap (HS.toList . getArrSz_fn) all_bnds
+          let sz_nms     = mconcat $ map getArrSz_fn all_bnds
               sz_needs   = transClosSizes all_bnds sz_nms []
               alloc_bnds = filter is_alloc_fn all_bnds
               sel_nms    = HS.fromList $
-                            concatMap (patternNames . bindingPattern)
-                                      (sz_needs ++ alloc_bnds)
+                           concatMap (patternNames . bindingPattern)
+                                     (sz_needs ++ alloc_bnds)
           in  sel_nms
         transClosSizes all_bnds scal_nms hoist_bnds =
           let new_bnds = filter (hasPatName scal_nms) all_bnds
-              new_nms  = HS.fromList $ concatMap (HS.toList . freeInExp . bindingExp) new_bnds
+              new_nms  = mconcat $ map (freeInExp . bindingExp) new_bnds
           in  if null new_bnds
               then hoist_bnds
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
-        hasPatName nms bnd = not $ HS.null $ HS.intersection nms $
-                               HS.fromList $ patternNames $ bindingPattern bnd
+        hasPatName nms bnd = intersects nms $ HS.fromList $
+                             patternNames $ bindingPattern bnd
         isNotHoistableBnd :: Names -> BlockPred m
         isNotHoistableBnd nms _ bnd = not $ hasPatName nms bnd
 
