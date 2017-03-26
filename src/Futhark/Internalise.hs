@@ -888,8 +888,8 @@ internaliseExp desc (E.Write si v a loc) = do
 
     return (tv, sv')
 
-  let indexType = I.Prim (IntType Int32)
-      bodyTypes = replicate (length tvs) indexType ++ tvs
+  indexType <- rowType <$> lookupType si'
+  let bodyTypes = replicate (length tvs) indexType ++ tvs
       paramTypes = indexType : tvs
 
   indexName <- newVName "write_index"
@@ -917,11 +917,11 @@ internaliseExp desc (E.Write si v a loc) = do
 internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
                     -> InternaliseM (I.DimIndex SubExp, Certificates)
 internaliseDimIndex loc w (E.DimFix i) = do
-  i' <- internaliseExp1 "i" i
+  (i', _) <- internaliseDimExp "i" i
   cs <- assertingOne $ boundsCheck loc w i'
   return (I.DimFix i', cs)
 internaliseDimIndex loc w (E.DimSlice i j s) = do
-  s' <- maybe (return one) (internaliseExp1 "s") s
+  s' <- maybe (return one) (fmap fst . internaliseDimExp "s") s
   s_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum Int32) s'
   backwards <- letSubExp "backwards" $ I.BasicOp $ I.CmpOp (I.CmpEq int32) s_sign negone
   w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int32) w one
@@ -931,8 +931,8 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
       j_def = letSubExp "j_def" $ I.If backwards
               (resultBody [negone])
               (resultBody [w]) [I.Prim int32]
-  i' <- maybe i_def (internaliseExp1 "i") i
-  j' <- maybe j_def (internaliseExp1 "j") j
+  i' <- maybe i_def (fmap fst . internaliseDimExp "i") i
+  j' <- maybe j_def (fmap fst . internaliseDimExp "j") j
   j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32) j' i'
   n <- letSubExp "n" =<< eDivRoundingUp Int32
        (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
