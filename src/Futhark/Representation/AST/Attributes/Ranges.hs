@@ -69,6 +69,9 @@ instance FreeIn KnownBound where
   freeIn (MaximumBound b1 b2) = freeIn b1 <> freeIn b2
   freeIn (ScalarBound e)      = freeIn e
 
+instance FreeAttr KnownBound where
+  precomputed _ = id
+
 instance PP.Pretty KnownBound where
   ppr (VarBound v) =
     PP.text "variable " <> PP.ppr v

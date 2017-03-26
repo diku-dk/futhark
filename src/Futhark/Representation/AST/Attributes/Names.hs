@@ -9,6 +9,7 @@ module Futhark.Representation.AST.Attributes.Names
            FreeIn (..)
          , Names
          -- * Specialised Functions
+         , freeInStmsAndRes
          , freeInBody
          , freeInExp
          , freeInStm
@@ -20,6 +21,8 @@ module Futhark.Representation.AST.Attributes.Names
          , boundByStms
          , boundByLambda
          , boundByExtLambda
+
+         , FreeAttr(..)
        )
        where
 
@@ -33,97 +36,86 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Attributes.Patterns
 
-freeWalker :: (FreeIn (ExpAttr lore),
-               FreeIn (BodyAttr lore),
+freeWalker :: (FreeAttr (ExpAttr lore),
+               FreeAttr (BodyAttr lore),
                FreeIn (FParamAttr lore),
                FreeIn (LParamAttr lore),
                FreeIn (LetAttr lore),
                FreeIn (Op lore)) =>
               Walker lore (Writer Names)
 freeWalker = identityWalker {
-               walkOnSubExp = subExpFree
-             , walkOnBody = bodyFree
-             , walkOnStm = bindingFree
+               walkOnSubExp = tell . freeIn
+             , walkOnBody = tell . freeInBody
              , walkOnVName = tell . HS.singleton
              , walkOnCertificates = tell . HS.fromList
              , walkOnOp = tell . freeIn
              }
-  where subExpFree = tell . freeIn
 
-        binding bound = censor (`HS.difference` bound)
-
-        bodyFree (Body lore [] ses) = do
-          tell $ freeIn lore
-          mapM_ subExpFree ses
-        bodyFree (Body lore (Let pat annot e:bnds) res) = do
-          tell $ freeIn annot
-          expFree e
-          binding (HS.fromList $ patternNames pat) $ do
-            tell $ freeIn pat
-            bodyFree $ Body lore bnds res
-
-        bindingFree (Let pat annot e) = do
-          tell $ freeIn annot
-          expFree e
-          binding (HS.fromList $ patternNames pat) $
-            tell $ freeIn pat
-
-        expFree (DoLoop ctxmerge valmerge (ForLoop i _ boundexp) loopbody) = do
-          let (ctxparams, ctxinits) = unzip ctxmerge
-              (valparams, valinits) = unzip valmerge
-          mapM_ subExpFree $ ctxinits ++ valinits
-          subExpFree boundexp
-          binding (i `HS.insert` HS.fromList (map paramName $ ctxparams ++ valparams)) $ do
-            mapM_ (tell . freeIn) $ ctxparams ++ valparams
-            bodyFree loopbody
-
-        expFree (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
-          let (ctxparams, ctxinits) = unzip ctxmerge
-              (valparams, valinits) = unzip valmerge
-          mapM_ subExpFree $ ctxinits ++ valinits
-          binding (HS.fromList (map paramName $ ctxparams ++ valparams)) $ do
-            tell $ freeIn cond
-            mapM_ (tell . freeIn) $ ctxparams ++ valparams
-            bodyFree loopbody
-
-        expFree e = walkExpM freeWalker e
+-- | Return the set of variable names that are free in the given
+-- statements and result.  Filters away the names that are bound by
+-- the statements.
+freeInStmsAndRes :: (FreeIn (Op lore),
+                     FreeIn (LetAttr lore),
+                     FreeIn (LParamAttr lore),
+                     FreeIn (FParamAttr lore),
+                     FreeAttr (BodyAttr lore),
+                     FreeAttr (ExpAttr lore)) =>
+                    [Stm lore] -> Result -> Names
+freeInStmsAndRes stms res =
+  mconcat (freeIn res : map freeInStm stms) `HS.difference` boundByStms stms
 
 -- | Return the set of variable names that are free in the given body.
-freeInBody :: (FreeIn (ExpAttr lore),
-               FreeIn (BodyAttr lore),
+freeInBody :: (FreeAttr (ExpAttr lore),
+               FreeAttr (BodyAttr lore),
                FreeIn (FParamAttr lore),
                FreeIn (LParamAttr lore),
                FreeIn (LetAttr lore),
                FreeIn (Op lore)) =>
               Body lore -> Names
-freeInBody = execWriter . walkOnBody freeWalker
+freeInBody (Body attr stms res) =
+  precomputed attr $ freeIn attr <> freeInStmsAndRes stms res
 
 -- | Return the set of variable names that are free in the given
 -- expression.
-freeInExp :: (FreeIn (ExpAttr lore),
-              FreeIn (BodyAttr lore),
+freeInExp :: (FreeAttr (ExpAttr lore),
+              FreeAttr (BodyAttr lore),
               FreeIn (FParamAttr lore),
               FreeIn (LParamAttr lore),
               FreeIn (LetAttr lore),
               FreeIn (Op lore)) =>
              Exp lore -> Names
-freeInExp = execWriter . walkExpM freeWalker
+freeInExp (DoLoop ctxmerge valmerge (ForLoop i _ boundexp) loopbody) =
+  let (ctxparams, ctxinits) = unzip ctxmerge
+      (valparams, valinits) = unzip valmerge
+      bound_here = HS.fromList $ i : map paramName (ctxparams ++ valparams)
+  in freeIn (ctxinits ++ valinits) <> freeIn boundexp <>
+     ((freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
+      `HS.difference` bound_here)
+freeInExp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) =
+  let (ctxparams, ctxinits) = unzip ctxmerge
+      (valparams, valinits) = unzip valmerge
+      bound_here = HS.fromList $ map paramName (ctxparams ++ valparams)
+  in freeIn (ctxinits ++ valinits) <>
+     ((freeIn cond <> freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
+      `HS.difference` bound_here)
+freeInExp e = execWriter $ walkExpM freeWalker e
 
 -- | Return the set of variable names that are free in the given
 -- binding.
-freeInStm :: (FreeIn (ExpAttr lore),
-                  FreeIn (BodyAttr lore),
-                  FreeIn (FParamAttr lore),
-                  FreeIn (LParamAttr lore),
-                  FreeIn (LetAttr lore),
-                  FreeIn (Op lore)) =>
-                 Stm lore -> Names
-freeInStm = execWriter . walkOnStm freeWalker
+freeInStm :: (FreeAttr (ExpAttr lore),
+              FreeAttr (BodyAttr lore),
+              FreeIn (FParamAttr lore),
+              FreeIn (LParamAttr lore),
+              FreeIn (LetAttr lore),
+              FreeIn (Op lore)) =>
+             Stm lore -> Names
+freeInStm (Let pat attr e) =
+  precomputed attr $ freeIn attr <> freeInExp e <> freeIn pat
 
 -- | Return the set of variable names that are free in the given
 -- lambda, including shape annotations in the parameters.
-freeInLambda :: (FreeIn (ExpAttr lore),
-                 FreeIn (BodyAttr lore),
+freeInLambda :: (FreeAttr (ExpAttr lore),
+                 FreeAttr (BodyAttr lore),
                  FreeIn (FParamAttr lore),
                  FreeIn (LParamAttr lore),
                  FreeIn (LetAttr lore),
@@ -134,8 +126,8 @@ freeInLambda (Lambda params body rettype) =
 
 -- | Return the set of identifiers that are free in the given
 -- existential lambda, including shape annotations in the parameters.
-freeInExtLambda :: (FreeIn (ExpAttr lore),
-                    FreeIn (BodyAttr lore),
+freeInExtLambda :: (FreeAttr (ExpAttr lore),
+                    FreeAttr (BodyAttr lore),
                     FreeIn (FParamAttr lore),
                     FreeIn (LParamAttr lore),
                     FreeIn (LetAttr lore),
@@ -144,8 +136,8 @@ freeInExtLambda :: (FreeIn (ExpAttr lore),
 freeInExtLambda (ExtLambda params body rettype) =
   freeInLambdaIsh params body rettype
 
-freeInLambdaIsh :: (FreeIn attr, FreeIn a, FreeIn (ExpAttr lore),
-                    FreeIn (BodyAttr lore), FreeIn (FParamAttr lore),
+freeInLambdaIsh :: (FreeIn attr, FreeIn a, FreeAttr (ExpAttr lore),
+                    FreeAttr (BodyAttr lore), FreeIn (FParamAttr lore),
                     FreeIn (LParamAttr lore), FreeIn (LetAttr lore),
                     FreeIn (Op lore)) =>
                    [ParamT attr] -> Body lore -> [a] -> Names
@@ -233,7 +225,28 @@ instance FreeIn d => FreeIn (DimIndex d) where
 
 instance FreeIn attr => FreeIn (PatternT attr) where
   freeIn (Pattern context values) =
-    mconcat $ map freeIn $ context ++ values
+    mconcat (map freeIn $ context ++ values) `HS.difference` bound_here
+    where bound_here = HS.fromList $ map patElemName $ context ++ values
+
+-- | Either return precomputed free names stored in the attribute, or
+-- the freshly computed names.  Relies on lazy evaluation to avoid the
+-- work.
+class FreeIn attr => FreeAttr attr where
+  precomputed :: attr -> Names -> Names
+  precomputed _ = id
+
+instance FreeAttr () where
+
+instance (FreeAttr a, FreeIn b) => FreeAttr (a,b) where
+  precomputed (a,_) = precomputed a
+
+instance FreeAttr a => FreeAttr [a] where
+  precomputed [] = id
+  precomputed (a:_) = precomputed a
+
+instance FreeAttr a => FreeAttr (Maybe a) where
+  precomputed Nothing = id
+  precomputed (Just a) = precomputed a
 
 -- | The names bound by the bindings immediately in a 'Body'.
 boundInBody :: Body lore -> Names
@@ -245,7 +258,7 @@ boundByStm = HS.fromList . patternNames . bindingPattern
 
 -- | The names bound by the bindings.
 boundByStms :: [Stm lore] -> Names
-boundByStms = mconcat . map boundByStm
+boundByStms = HS.unions . map boundByStm
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]
