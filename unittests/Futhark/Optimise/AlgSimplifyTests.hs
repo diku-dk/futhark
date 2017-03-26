@@ -6,8 +6,7 @@ import Test.Framework
 import Test.Framework.Providers.HUnit
 
 import Data.List
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST
 import Futhark.Analysis.ScalExp
@@ -81,7 +80,7 @@ declareVars = M.fromList . snd . mapAccumL declare 0
 
 instantiateRanges :: VarInfo -> RangesRep' -> RangesRep
 instantiateRanges varinfo r =
-  HM.fromList $ snd $ mapAccumL fix 0 r
+  M.fromList $ snd $ mapAccumL fix 0 r
   where fix i (name, lower,upper) =
           (i+1,
            (lookupVarName name varinfo,
