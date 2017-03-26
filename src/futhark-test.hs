@@ -112,7 +112,8 @@ testMetrics program (StructureTest pipeline expected) = context "Checking metric
 
 runTestCase :: TestCase -> TestM ()
 runTestCase (TestCase mode program testcase progs extra_options) = do
-  forM_ (testExpectedStructure testcase) $ testMetrics program
+  unless (mode == OnlyTypeCheck) $
+    forM_ (testExpectedStructure testcase) $ testMetrics program
 
   case testAction testcase of
 
