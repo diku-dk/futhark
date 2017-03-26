@@ -61,8 +61,8 @@ let all_neighbours(board: [n][m]bool): [n][m]i32 =
 
 let iteration(board: [n][m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
-  zipWith (\(lives_r: []i32) (board_r: []bool): []bool  ->
-            zipWith (\(neighbors: i32) (alive: bool): bool  ->
+  map (\(lives_r: []i32) (board_r: []bool): []bool  ->
+            map (\(neighbors: i32) (alive: bool): bool  ->
                       if neighbors < 2
                       then false
                       else if neighbors == 3 then true
