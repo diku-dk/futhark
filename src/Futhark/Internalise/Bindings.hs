@@ -13,7 +13,7 @@ import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
 
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.List
 import Data.Traversable (mapM)
 
@@ -43,26 +43,26 @@ bindingParams params m = do
       -- names so we can map them to the actually bound names from
       -- param_ts'.
       (ascripted_ts, ascript_ctx) <- internaliseParamTypes param_ascripts
-      let ascript_ctx_rev = HM.fromList $ map (uncurry $ flip (,)) $ HM.toList ascript_ctx
+      let ascript_ctx_rev = M.fromList $ map (uncurry $ flip (,)) $ M.toList ascript_ctx
       return (param_ts', param_unnamed_dims,
-              HM.map pure $ mconcat $ zipWith (forwardDims ascript_ctx_rev) param_ts' $
+              M.map pure $ mconcat $ zipWith (forwardDims ascript_ctx_rev) param_ts' $
               transpose ascripted_ts)
 
-  let named_shape_params = map nonuniqueParamFromIdent (HM.elems shape_ctx')
+  let named_shape_params = map nonuniqueParamFromIdent (M.elems shape_ctx')
       shape_params = named_shape_params ++ concat unnamed_shape_params
   bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
     bindingIdentTypes (map I.paramIdent $ shape_params++concat valueparams) $
     local (\env -> env { envSubsts = mconcat ascriptsubsts
-                                     `HM.union` shapesubst
-                                     `HM.union` envSubsts env}) $
+                                     `M.union` shapesubst
+                                     `M.union` envSubsts env}) $
     m shape_params valueparams
 
     where forwardDims ctx ref =
             mconcat . map (mconcat . zipWith (forwardDim ctx) (I.arrayDims ref) .
                             I.extShapeDims . I.arrayShape)
-          forwardDim ctx d (I.Ext i) | Just v <- HM.lookup i ctx,
-                                       I.Var v /= d = HM.singleton v d
-          forwardDim _ _ _ = HM.empty
+          forwardDim ctx d (I.Ext i) | Just v <- M.lookup i ctx,
+                                       I.Var v /= d = M.singleton v d
+          forwardDim _ _ _ = M.empty
 
 bindingLambdaParams :: [E.Pattern] -> [I.Type]
                     -> ([I.LParam] -> InternaliseM a)
@@ -80,7 +80,7 @@ bindingLambdaParams params ts m = do
       (concat (replicate (length ascript) p_t))
 
   bindingFlatPattern params_idents ts $ \params' ->
-    local (\env -> env { envSubsts = ascript_substs `HM.union` envSubsts env }) $
+    local (\env -> env { envSubsts = ascript_substs `M.union` envSubsts env }) $
     bindingIdentTypes (map I.paramIdent $ concat params') $ m $ concat params'
 
   where typesForParams (p:ps) ts' = let (p_ts, ts'') = splitAt (length p) ts'
@@ -93,7 +93,7 @@ processFlatPattern = processFlatPattern' []
   where
     processFlatPattern' pat []       _  = do
       let (vs, substs) = unzip pat
-          substs' = HM.fromList substs
+          substs' = M.fromList substs
           idents = reverse vs
       return (idents, substs')
 
@@ -129,7 +129,7 @@ bindingFlatPattern :: [E.Ident] -> [t]
                    -> InternaliseM a
 bindingFlatPattern idents ts m = do
   (ps, substs) <- processFlatPattern idents ts
-  local (\env -> env { envSubsts = substs `HM.union` envSubsts env}) $
+  local (\env -> env { envSubsts = substs `M.union` envSubsts env}) $
     m ps
 
 -- | Flatten a pattern.  Returns a list of identifiers.  Each
@@ -153,7 +153,7 @@ flattenPattern = flattenPattern' []
         flattenPattern' ts (E.TuplePattern pats _) =
           concat <$> zipWithM flattenPattern' (tupleComponents ts ++ repeat []) pats
         flattenPattern' ts (E.RecordPattern fs loc) =
-          flattenPattern' ts $ E.TuplePattern (map snd $ sortFields $ HM.fromList fs) loc
+          flattenPattern' ts $ E.TuplePattern (map snd $ sortFields $ M.fromList fs) loc
         flattenPattern' ts (E.PatternAscription p td) =
           flattenPattern' (unInfo (expandedType td):ts) p
 
@@ -170,23 +170,23 @@ bindingPattern pat ts m = do
   bindingFlatPattern pat' ts' addShapeStms
 
 makeShapeIdentsFromContext :: MonadFreshNames m =>
-                              HM.HashMap VName Int
-                           -> m (HM.HashMap Int I.Ident,
+                              M.Map VName Int
+                           -> m (M.Map Int I.Ident,
                                  VarSubstitutions)
 makeShapeIdentsFromContext ctx = do
-  (ctx', substs) <- fmap unzip $ forM (HM.toList ctx) $ \(name, i) -> do
+  (ctx', substs) <- fmap unzip $ forM (M.toList ctx) $ \(name, i) -> do
     v <- newIdent (baseString name) $ I.Prim I.int32
     return ((i, v), (name, [I.Var $ I.identName v]))
-  return (HM.fromList ctx', HM.fromList substs)
+  return (M.fromList ctx', M.fromList substs)
 
 instantiateShapesWithDecls :: MonadFreshNames m =>
-                              HM.HashMap Int I.Ident
+                              M.Map Int I.Ident
                            -> [I.DeclExtType]
                            -> m ([I.DeclType], [I.FParam])
 instantiateShapesWithDecls ctx ts =
   runWriterT $ instantiateShapes instantiate ts
   where instantiate x
-          | Just v <- HM.lookup x ctx =
+          | Just v <- M.lookup x ctx =
             return $ I.Var $ I.identName v
 
           | otherwise = do
@@ -194,18 +194,18 @@ instantiateShapesWithDecls ctx ts =
             tell [v]
             return $ I.Var $ I.paramName v
 
-lambdaShapeSubstitutions :: HM.HashMap VName Int
+lambdaShapeSubstitutions :: M.Map VName Int
                          -> [I.TypeBase I.ExtShape Uniqueness]
                          -> [I.Type]
                          -> VarSubstitutions
 lambdaShapeSubstitutions shape_ctx param_ts ts =
   mconcat $ zipWith matchTypes param_ts ts
-  where ctx_to_names = HM.fromList $ map (uncurry $ flip (,)) $ HM.toList shape_ctx
+  where ctx_to_names = M.fromList $ map (uncurry $ flip (,)) $ M.toList shape_ctx
 
         matchTypes pt t =
           mconcat $ zipWith matchDims (I.extShapeDims $ I.arrayShape pt) (I.arrayDims t)
         matchDims (I.Ext i) d
-          | Just v <- HM.lookup i ctx_to_names = HM.singleton v [d]
+          | Just v <- M.lookup i ctx_to_names = M.singleton v [d]
         matchDims _ _ =
           mempty
 

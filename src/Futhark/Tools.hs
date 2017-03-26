@@ -25,7 +25,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -137,7 +137,7 @@ sequentialStreamWholeArray pat cs width nes fun arrs = do
 
   mapM_ addStm body_bnds
   shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
-  forM_ (HM.toList shapemap) $ \(name,se) ->
+  forM_ (M.toList shapemap) $ \(name,se) ->
     when (name `elem` patternContextNames pat) $
       addStm =<< mkLetNames' [name] (BasicOp $ SubExp se)
   mapM_ addStm res_bnds

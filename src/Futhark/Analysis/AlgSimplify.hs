@@ -14,8 +14,7 @@ module Futhark.Analysis.AlgSimplify
 import Control.Applicative
 
 import qualified Data.Set as S
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.List
 import Control.Monad
 import Control.Monad.Reader
@@ -28,12 +27,12 @@ import Futhark.Analysis.ScalExp
 import qualified Futhark.Representation.Primitive as P
 
 -- | Ranges are inclusive.
-type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+type RangesRep = M.Map VName (Int, Maybe ScalExp, Maybe ScalExp)
 
 -- | Prettyprint a 'RangesRep'.  Do not rely on the format of this
 -- string.  Does not include the loop nesting depth information.
 ppRangesRep :: RangesRep -> String
-ppRangesRep = unlines . sort . map ppRange . HM.toList
+ppRangesRep = unlines . sort . map ppRange . M.toList
   where ppRange (name, (_, lower, upper)) =
           pretty name ++ ": " ++
           if lower == upper
@@ -321,7 +320,7 @@ gaussAllLTH0 static_only el_syms sofp = do
                                          return (mm, fs, [])
         findMinMaxTerm ii (NSum (t:ts) tp)= do
             rangesrep <- asks ranges
-            case HM.lookup ii rangesrep of
+            case M.lookup ii rangesrep of
                 Just (_, Just _, Just _) -> do
                     f <- findMinMaxFact ii t
                     case f of
@@ -336,7 +335,7 @@ gaussAllLTH0 static_only el_syms sofp = do
             case f of
                 MaxMin ismin ts -> do
                         let id_set = mconcat $ map freeIn ts
-                        if HS.member ii id_set
+                        if S.member ii id_set
                         then return (Just (MaxMin ismin ts), fs)
                         else do (mm, fs') <- findMinMaxFact ii (NProd fs tp)
                                 return (mm, f:fs')
@@ -368,7 +367,7 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
             aleq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms am1
             ageq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms mam1
 
-            case HM.lookup i rangesrep of
+            case M.lookup i rangesrep of
                 Nothing ->
                     badAlgSimplifyM "gaussOneDefaultLTH0: sym not in ranges!"
                 Just (_, Nothing, Nothing) ->
@@ -447,14 +446,14 @@ pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe VName
 pickSymToElim rangesrep elsyms0 e_scal =
 --    ranges <- asks ranges
 --    e_scal <- fromNumSofP e0
-    let ids0= HS.toList $ freeIn e_scal
+    let ids0= S.toList $ freeIn e_scal
         ids1= filter (\s -> not (S.member s elsyms0)) ids0
-        ids2= filter (\s -> case HM.lookup s rangesrep of
+        ids2= filter (\s -> case M.lookup s rangesrep of
                                 Nothing -> False
                                 Just _  -> True
                      ) ids1
-        ids = sortBy (\n1 n2 -> let n1p = HM.lookup n1 rangesrep
-                                    n2p = HM.lookup n2 rangesrep
+        ids = sortBy (\n1 n2 -> let n1p = M.lookup n1 rangesrep
+                                    n2p = M.lookup n2 rangesrep
                                 in case (n1p, n2p) of
                                      (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
                                      (_            , _            ) -> compare (1::Int) (1::Int)
@@ -505,7 +504,7 @@ linearForm idd (NSum terms tp) = do
                         case x of
                            NProd fs _ -> do let fs_scal = foldl STimes 1 fs
                                             let b_ids = freeIn fs_scal
-                                            return $ acc && not (idd `HS.member` b_ids)
+                                            return $ acc && not (idd `S.member` b_ids)
                            _          -> badAlgSimplifyM "linearForm: ILLEGAL222!!!!"
                     ) True b_terms
 
@@ -1389,11 +1388,11 @@ mkRelExp 1 =
         (i,j,n,p,m) = (Id i', Id j', Id n', Id p', Id m')
         one = Val (IntVal 1)
         min_p_nm1 = MaxMin True [p, SMinus n one]
-        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+        hash = M.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
                                (identName p', ( 1::Int, Just (Val (IntVal 0)), Nothing ) ),
                                (identName i', ( 5::Int, Just (Val (IntVal 0)), Just min_p_nm1 ) )
                              , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just i ) )
-                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+                             ] -- M.Map VName (Int, Maybe ScalExp, Maybe ScalExp)
         ij_p_j_p_1_m_m = SMinus (SPlus (STimes i j) (SPlus j one)) m
         rel1 = RelExp LTH0 ij_p_j_p_1_m_m
         m_ij_m_j_m_2 = SNeg ( SPlus (STimes i j) (SPlus j (Val (IntVal 2))) )
@@ -1403,7 +1402,7 @@ mkRelExp 1 =
 mkRelExp 2 =
     let (i',a',b',l',u') = (tident "int i", tident "int a", tident "int b", tident "int l", tident "int u")
         (i,a,b,l,u) = (Id i', Id a', Id b', Id l', Id u')
-        hash = HM.fromList $ [ (identName i', ( 5::Int, Just l, Just u ) ) ]
+        hash = M.fromList $ [ (identName i', ( 5::Int, Just l, Just u ) ) ]
         ai_p_b = SPlus (STimes a i) b
         rel1 = RelExp LTH0 ai_p_b
 
@@ -1414,11 +1413,11 @@ mkRelExp 3 =
         one = Val (IntVal 1)
         two = Val (IntVal 2)
         min_j_nm1 = MaxMin True [MaxMin False [Val (IntVal 0), SMinus i (STimes two n)], SMinus n one]
-        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+        hash = M.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
                                (identName m', ( 2::Int, Just (Val (IntVal 1)), Nothing ) ),
                                (identName i', ( 5::Int, Just (Val (IntVal 0)), Just (SMinus m one) ) )
                              , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just min_j_nm1 ) )
-                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+                             ] -- M.Map VName (Int, Maybe ScalExp, Maybe ScalExp)
         ij_m_m = SMinus (STimes i j) m
         rel1 = RelExp LTH0 ij_m_m
 --        rel3 = RelExp LTH0 (SMinus i (SPlus (STimes two n) j))
@@ -1431,7 +1430,7 @@ mkRelExp 3 =
 
     in (hash, rel1, rel2)
 
-mkRelExp _ = let hash = HM.empty
+mkRelExp _ = let hash = M.empty
                  rel = RelExp LTH0 (Val (IntVal (-1)))
              in (hash, rel, rel)
 -}

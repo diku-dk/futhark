@@ -22,7 +22,7 @@ import Control.Monad.Except
 import Data.Array
 import Data.List
 import Data.Loc
-import qualified Data.HashMap.Strict as HM
+import qualified Data.Map.Strict as M
 import Data.Maybe
 
 import Prelude
@@ -89,9 +89,9 @@ instance Show InterpreterError where
   show DivisionByZero =
     "Division by zero."
 
-type FunTable = HM.HashMap Name ([Value] -> FutharkM [Value])
+type FunTable = M.Map Name ([Value] -> FutharkM [Value])
 
-type VTable = HM.HashMap VName Value
+type VTable = M.Map VName Value
 
 data FutharkEnv = FutharkEnv { envVtable :: VTable
                              , envFtable :: FunTable
@@ -148,7 +148,7 @@ bindVars :: [(Ident, Bindage, Value)]
          -> FutharkM VTable
 bindVars bnds = do
   let (idents, bindages, vals) = unzip3 bnds
-  HM.fromList . zip (map identName idents) <$>
+  M.fromList . zip (map identName idents) <$>
     zipWithM bindVar bindages vals
 
 binding :: [(Ident, Bindage, Value)]
@@ -180,13 +180,13 @@ binding bnds m = do
 
 lookupVar :: VName -> FutharkM Value
 lookupVar vname = do
-  val <- asks $ HM.lookup vname . envVtable
+  val <- asks $ M.lookup vname . envVtable
   case val of Just val' -> return val'
               Nothing   -> bad $ TypeError $ "lookupVar " ++ pretty vname
 
 lookupFun :: Name -> FutharkM ([Value] -> FutharkM [Value])
 lookupFun fname = do
-  fun <- asks $ HM.lookup fname . envFtable
+  fun <- asks $ M.lookup fname . envFtable
   case fun of Just fun' -> return fun'
               Nothing   -> bad $ TypeError $ "lookupFun " ++ pretty fname
 
@@ -248,10 +248,10 @@ runFun :: Name -> [Value] -> Prog
        -> Either InterpreterError [Value]
 runFun fname mainargs prog = do
   let ftable = buildFunTable prog
-      futharkenv = FutharkEnv { envVtable = HM.empty
+      futharkenv = FutharkEnv { envVtable = M.empty
                               , envFtable = ftable
                               }
-  case (funDefByName fname prog, HM.lookup fname ftable) of
+  case (funDefByName fname prog, M.lookup fname ftable) of
     (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
       runThisFun fundec mainargs ftable
@@ -265,10 +265,10 @@ runFunWithShapes :: Name -> [Value] -> Prog
                  -> Either InterpreterError [Value]
 runFunWithShapes fname valargs prog = do
   let ftable = buildFunTable prog
-      futharkenv = FutharkEnv { envVtable = HM.empty
+      futharkenv = FutharkEnv { envVtable = M.empty
                               , envFtable = ftable
                               }
-  case (funDefByName fname prog, HM.lookup fname ftable) of
+  case (funDefByName fname prog, M.lookup fname ftable) of
     (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
       let args' = shapes (funDefParams fundec) ++ valargs
@@ -283,7 +283,7 @@ runFunWithShapes fname valargs prog = do
                          (map paramType valparams)
                          (map valueShape valargs)
           in map (PrimVal . IntValue . Int32Value . fromIntegral . fromMaybe 0 .
-                  flip HM.lookup shapemap .
+                  flip M.lookup shapemap .
                   paramName)
              shapeparams
 
@@ -298,7 +298,7 @@ runThisFun (FunDef _ fname _ fparams _) args ftable
     argtypes
   where argtypes = map (rankShaped . valueType) args
         paramtypes = map (rankShaped . paramType) fparams
-        futharkenv = FutharkEnv { envVtable = HM.empty
+        futharkenv = FutharkEnv { envVtable = M.empty
                                 , envFtable = ftable
                                 }
 
@@ -309,7 +309,7 @@ buildFunTable = foldl expand builtins . progFunctions
         expand ftable' (FunDef _ name _ params body) =
           let fun funargs = binding (zip3 (map paramIdent params) (repeat BindVar) funargs) $
                             evalBody body
-          in HM.insert name fun ftable'
+          in M.insert name fun ftable'
 
 --------------------------------------------
 --------------------------------------------
@@ -317,8 +317,8 @@ buildFunTable = foldl expand builtins . progFunctions
 --------------------------------------------
 --------------------------------------------
 
-builtins :: HM.HashMap Name ([Value] -> FutharkM [Value])
-builtins = HM.fromList $ map namify
+builtins :: M.Map Name ([Value] -> FutharkM [Value])
+builtins = M.fromList $ map namify
            [("sqrt32", builtin "sqrt32")
            ,("log32", builtin "log32")
            ,("exp32", builtin "exp32")

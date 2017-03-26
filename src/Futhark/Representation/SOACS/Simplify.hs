@@ -21,8 +21,8 @@ import Data.Either
 import Data.List hiding (any, all)
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set      as S
 
 import Prelude hiding (any, all)
 
@@ -64,7 +64,7 @@ getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) =>
 getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ bindingPattern bnd
       tps2 = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
-  in  HS.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
+  in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
 simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
@@ -192,16 +192,16 @@ liftIdentityMapping (_, usages) (Let pat _ (Op (Map cs outersize fun arrs))) =
                      }
       mapM_ (uncurry letBind) invariant
       letBindNames'_ (map patElemName pat') $ Op $ Map cs outersize fun' arrs
-  where inputMap = HM.fromList $ zip (map paramName $ lambdaParams fun) arrs
+  where inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
         ses = bodyResult $ lambdaBody fun
 
-        freeOrConst (Var v)    = v `HS.member` free
+        freeOrConst (Var v)    = v `S.member` free
         freeOrConst Constant{} = True
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
-          | Just inp <- HM.lookup v inputMap =
+          | Just inp <- M.lookup v inputMap =
               let e | patElemName outId `UT.isConsumed` usages = Copy inp
                     | otherwise                                = SubExp $ Var inp
               in ((Pattern [] [outId], BasicOp e) : invariant,
@@ -279,7 +279,7 @@ removeUnusedMapInput _ (Let pat _ (Op (Map cs width fun arrs)))
       letBind_ pat $ Op $ Map cs width fun' used_arrs
   where params_and_arrs = zip (lambdaParams fun) arrs
         used_in_body = freeInBody $ lambdaBody fun
-        usedInput (param, _) = paramName param `HS.member` used_in_body
+        usedInput (param, _) = paramName param `S.member` used_in_body
 removeUnusedMapInput _ _ = cannotSimplify
 
 removeDeadMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
@@ -421,12 +421,12 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
                               (Free (Constant c), _) -> (lst++[Free (Constant c)], i)
                               ( _,      Constant c ) -> (lst++[Free (Constant c)], i)
                               (Free (Var tid), Var pid) ->
-                                if not (HM.member tid vtab) &&
-                                        HM.member pid vtab
+                                if not (M.member tid vtab) &&
+                                        M.member pid vtab
                                 then (lst++[Free (Var pid)], i)
                                 else (lst++[Free (Var tid)], i)
                               (Ext _, Var pid) ->
-                                if HM.member pid vtab ||
+                                if M.member pid vtab ||
                                    pid `elem` parnms
                                 then (lst ++ [Free (Var pid)], i)
                                 else (lst ++ [Ext i],        i+1)

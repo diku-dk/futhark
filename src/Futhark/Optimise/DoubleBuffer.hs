@@ -28,8 +28,8 @@ import           Control.Applicative
 import           Control.Monad.State
 import           Control.Monad.Writer
 import           Control.Monad.Reader
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import           Data.Maybe
 import           Data.List
 
@@ -200,8 +200,8 @@ doubleBufferMergeParams :: (ExplicitMemorish lore, MonadFreshNames m) =>
                         -> DoubleBufferM lore m [DoubleBuffer lore]
 doubleBufferMergeParams ctx_and_res val_params bound_in_loop = do
   copy_init <- asks envCopyInit
-  evalStateT (mapM (buffer copy_init) val_params) HM.empty
-  where loopVariant v = v `HS.member` bound_in_loop || v `elem` map (paramName . fst) ctx_and_res
+  evalStateT (mapM (buffer copy_init) val_params) M.empty
+  where loopVariant v = v `S.member` bound_in_loop || v `elem` map (paramName . fst) ctx_and_res
 
         loopInvariantSize copy_init (Constant v) =
           Just (Constant v, copy_init)
@@ -221,11 +221,11 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop = do
             | Just (size', b) <- loopInvariantSize copy_init size -> do
                 -- Let us double buffer this!
                 bufname <- lift $ newVName "double_buffer_mem"
-                modify $ HM.insert (paramName fparam) (bufname, b)
+                modify $ M.insert (paramName fparam) (bufname, b)
                 return $ BufferAlloc bufname size' space b
           Array {}
             | ArrayMem _ _ _ mem ixfun <- paramAttr fparam -> do
-                buffered <- gets $ HM.lookup mem
+                buffered <- gets $ M.lookup mem
                 case buffered of
                   Just (bufname, b) -> do
                     copyname <- lift $ newVName "double_buffer_array"
@@ -282,11 +282,11 @@ doubleBufferResult valparams buffered (Body () bnds res) =
         buffer _ _ se =
           (Nothing, se)
 
-        parammap = HM.fromList $ zip (map paramName valparams) res
+        parammap = M.fromList $ zip (map paramName valparams) res
 
         resultType t = t `setArrayDims` map substitute (arrayDims t)
 
         substitute (Var v)
-          | Just replacement <- HM.lookup v parammap = replacement
+          | Just replacement <- M.lookup v parammap = replacement
         substitute se =
           se

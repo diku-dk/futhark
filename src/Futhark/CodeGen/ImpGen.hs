@@ -83,8 +83,8 @@ import Control.Monad.Writer hiding (mapM, forM)
 import Control.Monad.Except hiding (mapM, forM)
 import Data.Either
 import Data.Traversable
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -188,7 +188,7 @@ data ArrayMemoryDestination = SetMemory VName (Maybe VName)
                             deriving (Show)
 
 data Env lore op = Env {
-    envVtable :: HM.HashMap VName (VarEntry lore)
+    envVtable :: M.Map VName (VarEntry lore)
   , envExpCompiler :: ExpCompiler lore op
   , envBodyCompiler :: BodyCompiler lore op
   , envOpCompiler :: OpCompiler lore op
@@ -198,7 +198,7 @@ data Env lore op = Env {
   }
 
 newEnv :: Operations lore op -> Imp.Space -> Env lore op
-newEnv ops ds = Env { envVtable = HM.empty
+newEnv ops ds = Env { envVtable = M.empty
                     , envExpCompiler = opsExpCompiler ops
                     , envBodyCompiler = opsBodyCompiler ops
                     , envOpCompiler = opsOpCompiler ops
@@ -219,7 +219,7 @@ instance MonadFreshNames (ImpM lore op) where
   putNameSource = put
 
 instance HasScope SOACS (ImpM lore op) where
-  askScope = HM.map (LetInfo . entryType) <$> asks envVtable
+  askScope = M.map (LetInfo . entryType) <$> asks envVtable
     where entryType (MemVar _ memEntry) =
             Mem (dimSizeToSubExp $ entryMemSize memEntry) (entryMemSpace memEntry)
           entryType (ArrayVar _ arrayEntry) =
@@ -248,7 +248,7 @@ subImpM ops (ImpM m) = do
                      , envBodyCompiler = opsBodyCompiler ops
                      , envCopyCompiler = opsCopyCompiler ops
                      , envOpCompiler = opsOpCompiler ops
-                     , envVtable = HM.map scrubExps $ envVtable env
+                     , envVtable = M.map scrubExps $ envVtable env
                      }
        src of
     Left err -> throwError err
@@ -300,10 +300,10 @@ compileInParam fparam = case paramAttr fparam of
 
 data ArrayDecl = ArrayDecl VName PrimType MemLocation
 
-fparamSizes :: Typed attr => Param attr -> HS.HashSet VName
+fparamSizes :: Typed attr => Param attr -> S.Set VName
 fparamSizes fparam
-  | Mem (Var size) _ <- paramType fparam = HS.singleton size
-  | otherwise = HS.fromList $ subExpVars $ arrayDims $ paramType fparam
+  | Mem (Var size) _ <- paramType fparam = S.singleton size
+  | otherwise = S.fromList $ subExpVars $ arrayDims $ paramType fparam
 
 compileInParams :: ExplicitMemorish lore =>
                    [FParam lore] -> [EntryPointType]
@@ -315,7 +315,7 @@ compileInParams params orig_epts = do
   let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes $ ctx_params++val_params
 
-      summaries = HM.fromList $ mapMaybe memSummary params
+      summaries = M.fromList $ mapMaybe memSummary params
         where memSummary param
                 | MemMem (Constant (IntValue (Int64Value size))) space <- paramAttr param =
                     Just (paramName param, (Imp.ConstSize size, space))
@@ -325,7 +325,7 @@ compileInParams params orig_epts = do
                     Nothing
 
       findMemInfo :: VName -> Maybe (Imp.MemSize, Space)
-      findMemInfo = flip HM.lookup summaries
+      findMemInfo = flip M.lookup summaries
 
       mkValueDesc fparam signedness =
         case (findArray $ paramName fparam, paramType fparam) of
@@ -333,7 +333,7 @@ compileInParams params orig_epts = do
             (memsize, memspace) <- findMemInfo mem
             Just $ Imp.ArrayValue mem memsize memspace bt signedness shape
           (_, Prim bt)
-            | paramName fparam `HS.member` sizes ->
+            | paramName fparam `S.member` sizes ->
               Nothing
             | otherwise ->
               Just $ Imp.ScalarValue bt signedness $ paramName fparam
@@ -361,7 +361,7 @@ compileOutParams :: ExplicitMemorish lore =>
                  -> ImpM lore op ([Imp.ExternalValue], [Imp.Param], Destination)
 compileOutParams orig_rts orig_epts = do
   ((extvs, dests), outparams) <-
-    runWriterT $ evalStateT (mkExts orig_epts orig_rts) (HM.empty, HM.empty)
+    runWriterT $ evalStateT (mkExts orig_epts orig_rts) (M.empty, M.empty)
   return (extvs, outparams, Destination dests)
   where imp = lift . lift
 
@@ -414,11 +414,11 @@ compileOutParams orig_rts orig_epts = do
 
         inspectExtDimSize (Ext x) = do
           (memseen,arrseen) <- get
-          case HM.lookup x arrseen of
+          case M.lookup x arrseen of
             Nothing -> do
               out <- imp $ newVName "out_arrsize"
               tell [Imp.ScalarParam out int32]
-              put (memseen, HM.insert x out arrseen)
+              put (memseen, M.insert x out arrseen)
               return (Imp.VarSize out, Just out)
             Just out ->
               return (Imp.VarSize out, Nothing)
@@ -430,10 +430,10 @@ compileOutParams orig_rts orig_epts = do
         -- 'x', creating it if it does not already exist.
         ensureMemSizeOut x = do
           (memseen, arrseen) <- get
-          case HM.lookup x memseen of
+          case M.lookup x memseen of
             Nothing -> do sizeout <- imp $ newVName "out_memsize"
                           tell [Imp.ScalarParam sizeout int32]
-                          put (HM.insert x sizeout memseen, arrseen)
+                          put (M.insert x sizeout memseen, arrseen)
                           return (Just sizeout, sizeout)
             Just sizeout -> return (Nothing, sizeout)
 
@@ -674,7 +674,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
     -- first we declare scalars to hold the size.  We do this by
     -- creating a mapping from equivalence classes to the name of the
     -- scalar holding the size.
-    let sizes = HM.fromList $ zip [0..n-1] sizenames
+    let sizes = M.fromList $ zip [0..n-1] sizenames
 
     -- We initialise ecah size to zero.
     forM_ sizenames $ \sizename ->
@@ -689,7 +689,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
           Imp.If (Imp.CmpOpExp (CmpEq int32) (Imp.var eqclass int32) (fromIntegral c))
           (Imp.SetScalar sizevar $ Imp.var sizevar int32 + 1)
           code
-        sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
+        sizeLoopBody = M.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
     emit $ Imp.For i Int32 outer_dim $
       Imp.SetScalar eqclass read_flags_i <>
       sizeLoopBody
@@ -731,7 +731,7 @@ defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
            Imp.SetScalar offsetvar
              (Imp.var offsetvar int32 + 1))
           code
-        writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
+        writeLoopBody = M.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
     emit $ Imp.For i Int32 outer_dim $
       Imp.SetScalar eqclass read_flags_i <>
       writeLoopBody
@@ -758,7 +758,7 @@ writeExp target e =
 
 insertInVtable :: VName -> VarEntry lore -> Env lore op -> Env lore op
 insertInVtable name entry env =
-  env { envVtable = HM.insert name entry $ envVtable env }
+  env { envVtable = M.insert name entry $ envVtable env }
 
 withArray :: ArrayDecl -> ImpM lore op a -> ImpM lore op a
 withArray (ArrayDecl name bt location) m = do
@@ -834,7 +834,7 @@ declaringName e name info m = do
         infoAttr (IndexInfo it) = Scalar $ IntType it
 
 declaringScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op a -> ImpM lore op a
-declaringScope e scope m = foldr (uncurry $ declaringName e) m $ HM.toList scope
+declaringScope e scope m = foldr (uncurry $ declaringName e) m $ M.toList scope
 
 declaringScopes :: [(Maybe (Exp lore), Scope ExplicitMemory)] -> ImpM lore op a -> ImpM lore op a
 declaringScopes es_and_scopes m = foldr (uncurry declaringScope) m es_and_scopes
@@ -905,7 +905,7 @@ constIndex = fromIntegral
 
 lookupVar :: VName -> ImpM lore op (VarEntry lore)
 lookupVar name = do
-  res <- asks $ HM.lookup name . envVtable
+  res <- asks $ M.lookup name . envVtable
   case res of
     Just entry -> return entry
     _ -> compilerBugS $ "Unknown variable: " ++ textual name

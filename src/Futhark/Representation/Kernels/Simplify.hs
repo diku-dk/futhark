@@ -23,8 +23,8 @@ import Data.Either
 import Data.List
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set      as S
 
 import Prelude
 
@@ -83,7 +83,7 @@ simplifyKernelOp ops env (Kernel desc cs space ts kbody) = do
   return $ Kernel desc cs' space' ts' $ mkWiseKernelBody () kbody_bnds' kbody_res'
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
-        bound_here = HS.fromList $ HM.keys scope
+        bound_here = S.fromList $ M.keys scope
 
 simplifyKernelOp _ _ NumGroups = return NumGroups
 simplifyKernelOp _ _ GroupSize = return GroupSize
@@ -182,7 +182,7 @@ simplifyGroupStreamLambda :: Engine.SimplifiableLore lore =>
                           -> Engine.SimpleM lore (GroupStreamLambda (Wise lore))
 simplifyGroupStreamLambda lam w max_chunk arrs = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
-      bound_here = HS.fromList $ block_size : block_offset :
+      bound_here = S.fromList $ block_size : block_offset :
                    map paramName (acc_params ++ arr_params)
   (body_res', body_bnds') <-
     Engine.enterLoop $
@@ -357,7 +357,7 @@ distributeKernelResults (vtable, used)
         kspace_slice <- map (DimFix . Var . fst) $ spaceDimensions kspace,
         kspace_slice `isPrefixOf` slice,
         remaining_slice <- drop (length kspace_slice) slice,
-        all (isJust . flip ST.lookup vtable) $ HS.toList $
+        all (isJust . flip ST.lookup vtable) $ S.toList $
           freeIn cs <> freeIn arr <> freeIn remaining_slice,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (\(_, d) -> DimSlice
@@ -373,7 +373,7 @@ distributeKernelResults (vtable, used)
                     letBind_ (Pattern [] [kpe]) $ BasicOp $ Copy precopy
             else index kpe
           return (kpes'', kts'', kres'',
-                  if patElemName pe `HS.member` free_in_kstms
+                  if patElemName pe `S.member` free_in_kstms
                   then bnd : kstms_rev
                   else kstms_rev)
 

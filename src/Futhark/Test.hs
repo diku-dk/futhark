@@ -28,7 +28,7 @@ import Control.Category ((>>>))
 import Control.Applicative
 import Control.Monad hiding (forM_)
 import Control.Monad.IO.Class
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.Char
 import Data.Maybe
 import Data.Monoid
@@ -250,7 +250,7 @@ optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
           onePass simplifyKernels
 
 parseMetrics :: Parser AstMetrics
-parseMetrics = braces $ fmap HM.fromList $ many $
+parseMetrics = braces $ fmap M.fromList $ many $
                (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
   where constituent c = isAlpha c || c == '/'
 

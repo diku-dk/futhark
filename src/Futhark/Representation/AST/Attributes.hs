@@ -37,7 +37,7 @@ module Futhark.Representation.AST.Attributes
 
 import Data.List
 import Data.Maybe (mapMaybe, isJust)
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -57,11 +57,11 @@ import Futhark.Util.Pretty (Pretty)
 
 -- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
 isBuiltInFunction :: Name -> Bool
-isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
+isBuiltInFunction fnm = fnm `M.member` builtInFunctions
 
 -- | A map of all built-in functions and their types.
-builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])
-builtInFunctions = HM.fromList $ map namify
+builtInFunctions :: M.Map Name (PrimType,[PrimType])
+builtInFunctions = M.fromList $ map namify
                    [("sqrt32", (FloatType Float32, [FloatType Float32]))
                    ,("log32", (FloatType Float32, [FloatType Float32]))
                    ,("exp32", (FloatType Float32, [FloatType Float32]))

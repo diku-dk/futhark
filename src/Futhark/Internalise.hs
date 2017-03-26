@@ -16,8 +16,8 @@ import Control.Arrow ((***))
 import Control.Applicative
 import Control.Monad.State  hiding (mapM, sequence)
 import Control.Monad.Reader hiding (mapM, sequence)
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -53,7 +53,7 @@ internaliseProg prog = do
   sequence $ fmap I.renameProg prog'
 
 builtinFtable :: FunTable
-builtinFtable = HM.fromList $ mapMaybe addBuiltin $ HM.toList E.intrinsics
+builtinFtable = M.fromList $ mapMaybe addBuiltin $ M.toList E.intrinsics
   where addBuiltin (name, E.IntrinsicMonoFun paramts t) =
           Just
           (name,
@@ -85,7 +85,7 @@ preprocessValBind (E.ValBind name _ t e loc) =
 
 preprocessFunBind :: E.FunBind -> InternaliseM ()
 preprocessFunBind (E.FunBind entry ofname _ (Info rettype) params _ _) =
-  noteFunctions <=< fmap (uncurry HM.singleton) $
+  noteFunctions <=< fmap (uncurry M.singleton) $
   bindingParams params $ \shapes values -> do
     (fname, fname') <- internaliseFunctionName entry ofname
     (rettype', _, cm) <- internaliseReturnType rettype
@@ -172,7 +172,7 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
               ModExp e -> evalModExp e
               ModFun p e_substs e -> do
                 substs <- asks envFunctorSubsts
-                return $ Just (p, substs `HM.union` e_substs, e)
+                return $ Just (p, substs `M.union` e_substs, e)
         evalModExp (E.ModLambda (p, _) _ me _) = do
           substs <- asks envFunctorSubsts
           return $ Just (p, substs, me)
@@ -288,7 +288,7 @@ internaliseExp _ (E.Var v t loc) = do
     Just ses ->
       return ses
     _ -> do
-      subst <- asks $ HM.lookup name . envSubsts
+      subst <- asks $ M.lookup name . envSubsts
       case subst of
         Nothing     -> (:[]) . I.Var <$> internaliseIdent (E.Ident name t loc)
         Just substs -> return substs
@@ -308,10 +308,10 @@ internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
 
 internaliseExp desc (E.RecordLit orig_fields _) =
-  concatMap snd . sortFields . HM.unions . reverse <$> mapM internaliseField orig_fields
+  concatMap snd . sortFields . M.unions . reverse <$> mapM internaliseField orig_fields
   where internaliseField (E.RecordField name e _) = do
           e' <- internaliseExp desc e
-          return $ HM.singleton name e'
+          return $ M.singleton name e'
         internaliseField (E.RecordRecord e) = do
           (field_names, field_types) <-
             case E.typeOf e of
@@ -319,7 +319,7 @@ internaliseExp desc (E.RecordLit orig_fields _) =
               _         -> fail $ "Type of " ++ pretty e ++ " is not record."
           e' <- internaliseExp desc e
           lens <- mapM internalisedTypeSize field_types
-          return $ HM.fromList $ zip field_names $ chunks lens e'
+          return $ M.fromList $ zip field_names $ chunks lens e'
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
@@ -366,7 +366,7 @@ internaliseExp desc (E.Apply fname args _ _)
       internalise desc
 
 internaliseExp desc (E.Apply fname args _ _)
-  | Just (rettype, _) <- HM.lookup fname' I.builtInFunctions = do
+  | Just (rettype, _) <- M.lookup fname' I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
   letTupExp' desc $ I.Apply fname' args'' (ExtRetType [I.Prim rettype])
@@ -416,10 +416,10 @@ internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
         constparams = map (mkConstParam . snd) cm
         shapenames = map I.paramName shapeparams
         normal_params = shapenames ++ map paramName (concat params')
-        normal_param_names = HS.fromList normal_params
-        free_in_fun = freeInBody e'' `HS.difference` normal_param_names
+        normal_param_names = S.fromList normal_params
+        free_in_fun = freeInBody e'' `S.difference` normal_param_names
 
-    used_free_params <- forM (HS.toList free_in_fun) $ \v -> do
+    used_free_params <- forM (S.toList free_in_fun) $ \v -> do
       v_t <- lookupType v
       return $ Param v $ toDecl v_t Nonunique
 
@@ -428,7 +428,7 @@ internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
         free_params = nub $ free_shape_params ++ used_free_params
         all_params = constparams ++ free_params ++ shapeparams ++ concat params'
 
-    noteFunctions $ HM.singleton fname
+    noteFunctions $ M.singleton fname
       FunBinding { internalFun =
                      (fname',
                       cm,
@@ -802,7 +802,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
 
             let consumed = consumedByLambda $ Alias.analyseLambda lam0'
                 copyIfConsumed p (I.Var v)
-                  | paramName p `HS.member` consumed =
+                  | paramName p `S.member` consumed =
                       letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
                 copyIfConsumed _ x = return x
 
@@ -1518,11 +1518,11 @@ shadowIdentsInExp substs bnds res = do
           | v == name =
             return nameSubsts
           | otherwise =
-            return $ HM.insert name v nameSubsts
+            return $ M.insert name v nameSubsts
         handleSubst nameSubsts (name, se) = do
           letBindNames'_ [name] $ BasicOp $ SubExp se
           return nameSubsts
-    nameSubsts <- foldM handleSubst HM.empty substs
+    nameSubsts <- foldM handleSubst M.empty substs
     mapM_ addStm $ substituteNames nameSubsts bnds
     return $ resultBody [substituteNames nameSubsts res]
   res' <- bodyBind body

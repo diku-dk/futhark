@@ -46,7 +46,7 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import Data.Maybe
 
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -138,7 +138,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
-  , envFtable     :: HM.HashMap Name [Imp.Type]
+  , envFtable     :: M.Map Name [Imp.Type]
 }
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -167,9 +167,9 @@ newCompilerEnv (Imp.Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
               }
-  where ftable = HM.fromList $ map funReturn funs
+  where ftable = M.fromList $ map funReturn funs
         funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
-        builtinFtable = HM.map (map Imp.Scalar . snd) builtInFunctions
+        builtinFtable = M.map (map Imp.Scalar . snd) builtInFunctions
 
 data CompilerState s = CompilerState {
     compNameSrc :: VNameSource

@@ -29,7 +29,7 @@ module Futhark.Optimise.Simplifier.Lore
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -156,14 +156,14 @@ removeWisdom = Rephraser { rephraseExpLore = return . snd
                          }
 
 removeScopeWisdom :: Scope (Wise lore) -> Scope lore
-removeScopeWisdom = HM.map unAlias
+removeScopeWisdom = M.map unAlias
   where unAlias (LetInfo (_, attr)) = LetInfo attr
         unAlias (FParamInfo attr) = FParamInfo attr
         unAlias (LParamInfo attr) = LParamInfo attr
         unAlias (IndexInfo it) = IndexInfo it
 
 addScopeWisdom :: Scope lore -> Scope (Wise lore)
-addScopeWisdom = HM.map alias
+addScopeWisdom = M.map alias
   where alias (LetInfo attr) = LetInfo (VarWisdom mempty unknownRange, attr)
         alias (FParamInfo attr) = FParamInfo attr
         alias (LParamInfo attr) = LParamInfo attr

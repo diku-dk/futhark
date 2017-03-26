@@ -89,8 +89,8 @@ where
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import Data.Foldable (traverse_)
 import Data.Maybe
 import Data.List
@@ -280,7 +280,7 @@ instance FreeIn (MemBound u) where
     freeIn shape <> freeIn mem <> freeIn ixfun
   freeIn (MemMem size _) =
     freeIn size
-  freeIn (Scalar _) = HS.empty
+  freeIn (Scalar _) = S.empty
 
 instance Substitute (MemBound u) where
   substituteNames subst (ArrayMem bt shape u mem f) =
@@ -471,7 +471,7 @@ generaliseReturns :: (HasScope lore m, Monad m,
                       ExplicitMemorish lore) =>
                      [BodyReturns] -> [BodyReturns] -> m [BodyReturns]
 generaliseReturns r1s r2s =
-  evalStateT (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
+  evalStateT (zipWithM generaliseReturns' r1s r2s) (0, M.empty, M.empty)
   where generaliseReturns'
           (ReturnsArray bt shape1 _ summary1)
           (ReturnsArray _  shape2 _ summary2) =
@@ -523,10 +523,10 @@ generaliseReturns r1s r2s =
           ReturnsNewBlock <$> newMem x <*> pure Nothing
 
         newSize x = do (i, sizemap, memmap) <- get
-                       put (i + 1, HM.insert x i sizemap, memmap)
+                       put (i + 1, M.insert x i sizemap, memmap)
                        return i
         newMem x = do (i, sizemap, memmap) <- get
-                      put (i + 1, sizemap, HM.insert x i memmap)
+                      put (i + 1, sizemap, M.insert x i memmap)
                       return i
 
 instance TypeCheck.Checkable ExplicitMemory where
@@ -772,14 +772,14 @@ instance Attributes ExplicitMemory where
         combreturns <- generaliseReturns treturns freturns
         let ext_mapping =
               returnsMapping pat (map patElemAttr $ patternValueElements pat) combreturns
-        return $ map (`HM.lookup` ext_mapping) $ patternContextNames pat
+        return $ map (`M.lookup` ext_mapping) $ patternContextNames pat
       _ ->
         return ext_context
 
 instance Attributes InKernel where
 
 returnsMapping :: Pattern ExplicitMemory -> [MemBound NoUniqueness] -> [BodyReturns]
-               -> HM.HashMap VName SubExp
+               -> M.Map VName SubExp
 returnsMapping pat bounds returns =
   mconcat $ zipWith inspect bounds returns
   where ctx = patternContextElements pat
@@ -789,7 +789,7 @@ returnsMapping pat bounds returns =
             | Just pat_mem_elem <- find ((==pat_mem) . patElemName) ctx,
               Mem (Var pat_mem_elem_size) _ <- patElemType pat_mem_elem,
               Just pat_mem_elem_size_elem <- find ((==pat_mem_elem_size) . patElemName) ctx =
-                HM.singleton (patElemName pat_mem_elem_size_elem) size
+                M.singleton (patElemName pat_mem_elem_size_elem) size
         inspect _ _ = mempty
 
 instance PP.Pretty u => PrettyAnnot (PatElemT (MemBound u)) where
@@ -1020,7 +1020,7 @@ bodyReturns ts (Body _ bnds res) = do
       inspect (Array et shape u) (Var v) = do
 
         memsummary <- do
-          summary <- case HM.lookup v boundHere of
+          summary <- case M.lookup v boundHere of
             Nothing -> lift $ lookupMemBound v
             Just bindee -> return $ patElemAttr bindee
 
@@ -1031,12 +1031,12 @@ bodyReturns ts (Body _ bnds res) = do
               fail "bodyReturns: inconsistent memory summary"
 
             ArrayMem _ _ NoUniqueness mem ixfun
-              | mem `HM.member` boundHere -> do
+              | mem `M.member` boundHere -> do
                 (i, memmap) <- get
 
-                case HM.lookup mem memmap of
+                case M.lookup mem memmap of
                   Nothing -> do
-                    put (i+1, HM.insert mem (i+1) memmap)
+                    put (i+1, M.insert mem (i+1) memmap)
                     return $ ReturnsNewBlock i Nothing
 
                   Just _ ->
@@ -1045,14 +1045,14 @@ bodyReturns ts (Body _ bnds res) = do
                   return $ ReturnsInBlock mem ixfun
         return $ ReturnsArray et shape u memsummary
   evalStateT (zipWithM inspect ts res)
-    (0, HM.empty)
+    (0, M.empty)
 
-boundInStms :: [Stm lore] -> HM.HashMap VName (PatElem lore)
-boundInStms [] = HM.empty
+boundInStms :: [Stm lore] -> M.Map VName (PatElem lore)
+boundInStms [] = M.empty
 boundInStms (bnd:bnds) =
-  boundInStm `HM.union` boundInStms bnds
+  boundInStm `M.union` boundInStms bnds
   where boundInStm =
-          HM.fromList
+          M.fromList
           [ (patElemName bindee, bindee)
           | bindee <- patternElements $ bindingPattern bnd
           ]
@@ -1068,12 +1068,12 @@ applyFunReturns rets params args
   | otherwise =
     Nothing
   where rettype = ExtRetType $ map returnsToType rets
-        parammap :: HM.HashMap VName (SubExp, Type)
-        parammap = HM.fromList $
+        parammap :: M.Map VName (SubExp, Type)
+        parammap = M.fromList $
                    zip (map paramName params) args
 
         substSubExp (Var v)
-          | Just (se,_) <- HM.lookup v parammap = se
+          | Just (se,_) <- M.lookup v parammap = se
         substSubExp se = se
 
         correctDims (ReturnsScalar t) =
@@ -1093,7 +1093,7 @@ applyFunReturns rets params args
         correctSummary (ReturnsInBlock mem ixfun) =
           -- FIXME: we should also do a replacement in ixfun here.
           ReturnsInBlock mem' ixfun
-          where mem' = case HM.lookup mem parammap of
+          where mem' = case M.lookup mem parammap of
                   Just (Var v, _) -> v
                   _               -> mem
 

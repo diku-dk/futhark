@@ -23,7 +23,7 @@ import Control.Applicative
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Prelude hiding (quot)
 
@@ -76,10 +76,10 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
       params_to_arrs = zip (map paramName $ drop 1 $ lambdaParams fold_lam') arrs
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
       consumed_in_fold =
-        HS.map consumedArray $ consumedByLambda $ Alias.analyseLambda fold_lam
+        S.map consumedArray $ consumedByLambda $ Alias.analyseLambda fold_lam
 
   arrs_copies <- forM arrs $ \arr ->
-    if arr `HS.member` consumed_in_fold then
+    if arr `S.member` consumed_in_fold then
       letExp (baseString arr <> "_copy") $ BasicOp $ Copy arr
     else return arr
 
@@ -597,7 +597,7 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
           -- We have to copy the initial merge parameter (the neutral
           -- element) if it is consumed inside the lambda.
           case se of
-            Var v | pname `HS.member` consumed_in_foldlam -> do
+            Var v | pname `S.member` consumed_in_foldlam -> do
                       se' <- letSubExp "scan_ne_copy" $ BasicOp $ Copy v
                       return (Param pname' $ toDecl ptype Unique,
                               se')

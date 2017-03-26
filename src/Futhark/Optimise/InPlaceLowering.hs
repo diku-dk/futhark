@@ -63,8 +63,8 @@ module Futhark.Optimise.InPlaceLowering
 
 import Control.Applicative
 import Control.Monad.RWS hiding (mapM_)
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Foldable
 import Data.Maybe
 
@@ -164,7 +164,7 @@ data Entry = Entry { entryNumber :: Int
                    , entryType :: NameInfo (Aliases Kernels)
                    }
 
-type VTable = HM.HashMap VName Entry
+type VTable = M.Map VName Entry
 
 data TopDown = TopDown { topDownCounter :: Int
                        , topDownTable :: VTable
@@ -200,13 +200,13 @@ instance MonadFreshNames ForwardingM where
   putNameSource = put
 
 instance HasScope (Aliases Kernels) ForwardingM where
-  askScope = HM.map entryType <$> asks topDownTable
+  askScope = M.map entryType <$> asks topDownTable
 
 runForwardingM :: ForwardingM a -> VNameSource -> (a, VNameSource)
 runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown src
                                      in (x, src')
   where emptyTopDown = TopDown { topDownCounter = 0
-                               , topDownTable = HM.empty
+                               , topDownTable = M.empty
                                , topDownDepth = 0
                                }
 
@@ -218,8 +218,8 @@ bindingParams f params = local $ \(TopDown n vtable d) ->
   let entry fparam =
         (paramName fparam,
          Entry n mempty d False $ f $ paramAttr fparam)
-      entries = HM.fromList $ map entry params
-  in TopDown (n+1) (HM.union entries vtable) d
+      entries = M.fromList $ map entry params
+  in TopDown (n+1) (M.union entries vtable) d
 
 bindingFParams :: [FParam (Aliases Kernels)]
                -> ForwardingM a
@@ -230,26 +230,26 @@ bindingStm :: Stm (Aliases Kernels)
            -> ForwardingM a
            -> ForwardingM a
 bindingStm (Let pat _ _) = local $ \(TopDown n vtable d) ->
-  let entries = HM.fromList $ map entry $ patternElements pat
+  let entries = M.fromList $ map entry $ patternElements pat
       entry patElem =
         let (aliases, _) = patElemAttr patElem
         in (patElemName patElem,
             Entry n (unNames aliases) d True $ LetInfo $ patElemAttr patElem)
-  in TopDown (n+1) (HM.union entries vtable) d
+  in TopDown (n+1) (M.union entries vtable) d
 
 bindingIndices :: [(VName,IntType)]
                -> ForwardingM a
                -> ForwardingM a
 bindingIndices is = local $ \(TopDown n vtable d) ->
-  let entries = HM.fromList $ map entry is
+  let entries = M.fromList $ map entry is
       entry (v,it) =
         (v,
          Entry n mempty d False $ IndexInfo it)
-  in TopDown (n+1) (HM.union entries vtable) d
+  in TopDown (n+1) (M.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int
 bindingNumber name = do
-  res <- asks $ fmap entryNumber . HM.lookup name . topDownTable
+  res <- asks $ fmap entryNumber . M.lookup name . topDownTable
   case res of Just n  -> return n
               Nothing -> fail $ "bindingNumber: variable " ++
                          pretty name ++ " not found."
@@ -266,14 +266,14 @@ areAvailableBefore ses point = do
 isInCurrentBody :: VName -> ForwardingM Bool
 isInCurrentBody name = do
   current <- asks topDownDepth
-  res <- asks $ fmap entryDepth . HM.lookup name . topDownTable
+  res <- asks $ fmap entryDepth . M.lookup name . topDownTable
   case res of Just d  -> return $ d == current
               Nothing -> fail $ "isInCurrentBody: variable " ++
                          pretty name ++ " not found."
 
 isOptimisable :: VName -> ForwardingM Bool
 isOptimisable name = do
-  res <- asks $ fmap entryOptimisable . HM.lookup name . topDownTable
+  res <- asks $ fmap entryOptimisable . M.lookup name . topDownTable
   case res of Just b  -> return b
               Nothing -> fail $ "isOptimisable: variable " ++
                          pretty name ++ " not found."
@@ -282,8 +282,8 @@ seenVar :: VName -> ForwardingM ()
 seenVar name = do
   aliases <- asks $
              maybe mempty entryAliases .
-             HM.lookup name . topDownTable
-  tell $ mempty { bottomUpSeen = HS.insert name aliases }
+             M.lookup name . topDownTable
+  tell $ mempty { bottomUpSeen = S.insert name aliases }
 
 tapBottomUp :: ForwardingM a -> ForwardingM (a, BottomUp)
 tapBottomUp m = do (x,bup) <- listen m

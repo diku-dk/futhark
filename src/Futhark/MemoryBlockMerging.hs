@@ -7,8 +7,8 @@ module Futhark.MemoryBlockMerging
 import Prelude
 import Data.Maybe
 import Control.Arrow
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set      as S
 
 import Debug.Trace
 
@@ -30,7 +30,7 @@ import Futhark.Optimise.MemBlkMerging.ArrayCoalescing
 -----------------------------------
 -----------------------------------
 
-type IntrfTab = HM.HashMap VName Names
+type IntrfTab = M.Map VName Names
 
 data IntrfEnv = IntrfEnv { intrf :: IntrfTab
                          -- ^ the interference table: a memory block
@@ -57,18 +57,18 @@ data IntrfEnv = IntrfEnv { intrf :: IntrfTab
                          }
 
 emptyInterfEnv :: IntrfEnv
-emptyInterfEnv = IntrfEnv { intrf = HM.empty, alloc = HS.empty
-                          , alias = HM.empty, v2mem = HM.empty, active = HS.empty }
+emptyInterfEnv = IntrfEnv { intrf = M.empty, alloc = S.empty
+                          , alias = M.empty, v2mem = M.empty, active = S.empty }
 
-intrfAnPrg :: LUTabPrg -> ExpMem.Prog ExpMem.ExplicitMemory -> HM.HashMap Name IntrfEnv
+intrfAnPrg :: LUTabPrg -> ExpMem.Prog ExpMem.ExplicitMemory -> M.Map Name IntrfEnv
 intrfAnPrg lutab prg =
   let aliased_prg = AnlAls.aliasAnalysis prg
-  in  HM.fromList $ map (intrfAnFun lutab) $ progFunctions aliased_prg
+  in  M.fromList $ map (intrfAnFun lutab) $ progFunctions aliased_prg
 
 
 intrfAnFun :: LUTabPrg -> FunDef (Aliases ExpMem.ExplicitMemory) -> (Name,IntrfEnv)
 intrfAnFun lutabprg (FunDef _ fname _ _ body) =
-  let lutab = fromMaybe HM.empty (HM.lookup fname lutabprg)
+  let lutab = fromMaybe M.empty (M.lookup fname lutabprg)
       env = intrfAnBdy lutab emptyInterfEnv body
   in  (fname, env)
 
@@ -83,7 +83,7 @@ intrfAnBnd _ env (Let pat _ (Op (ExpMem.Alloc sz _)) ) =
   case patternNames pat of
     []   -> env
     nm:_ -> let nm' = trace ("AllocNode: "++pretty nm++" size: "++pretty sz) nm
-            in  env { alloc = HS.insert nm' (alloc env)}
+            in  env { alloc = S.insert nm' (alloc env)}
 
 intrfAnBnd lutab env (Let pat _ (DoLoop memctx var_ses _ body)) =
   -- BUG!!! you need to handle the potential circular aliasing
@@ -93,9 +93,9 @@ intrfAnBnd lutab env (Let pat _ (DoLoop memctx var_ses _ body)) =
       alias' = foldl (\acc ((fpar,_),patel) ->
                         let patnm = patElemName patel
                             parnm = paramName fpar
-                        in  case trace ("LOOPMEMCTX: "++pretty patnm++" "++pretty parnm) $ HM.lookup patnm alias0 of
+                        in  case trace ("LOOPMEMCTX: "++pretty patnm++" "++pretty parnm) $ M.lookup patnm alias0 of
                                     Nothing -> acc
-                                    Just al -> trace (" found alias set: "++pretty (HS.toList al)) HM.insert parnm al acc
+                                    Just al -> trace (" found alias set: "++pretty (S.toList al)) M.insert parnm al acc
                      ) (alias env) $ zip memctx $ patternContextElements pat
       -- ^ update the aliasing of the loop's memory-block context
       --   with the aliasing info borrowed from the pattern.
@@ -107,11 +107,11 @@ intrfAnBnd lutab env (Let pat _ (DoLoop memctx var_ses _ body)) =
                                  Just (paramName fpar, MemBlock ptp shp mem_nm idxfun)
                              _ -> Nothing
                  ) lvars
-      v2mem' = HM.union (v2mem env) $ HM.fromList lvarmems
+      v2mem' = M.union (v2mem env) $ M.fromList lvarmems
       -- ^ update the v2mem with the memory blocks of the loop vars.
 
-      mems = HS.fromList $ map (\(MemBlock _ _ mn _) -> mn) $ snd $ unzip lvarmems
-      active' = HS.union (active env) $ HS.intersection (alloc env) $
+      mems = S.fromList $ map (\(MemBlock _ _ mn _) -> mn) $ snd $ unzip lvarmems
+      active' = S.union (active env) $ S.intersection (alloc env) $
                 aliasTransClos alias' mems
       -- ^ add the alias-transitive closure of loop-vars mem blocks to active
       env' = intrfAnBdy lutab (env{v2mem = v2mem', active = active', alias = alias'}) body
@@ -127,7 +127,7 @@ defInterference lutab env pat =
       -- ^ record the aliasing of the current statement
 
       arrmems= map (\(a,b,_)->(a,b)) $ getArrMemAssoc pat
-      v2mem' = HM.union (v2mem env) $ HM.fromList arrmems
+      v2mem' = M.union (v2mem env) $ M.fromList arrmems
       -- ^ update v2mem with pattern's (array-var -> mem-block) bindings
 
       patmems = map (\(MemBlock _ _ mn _) -> mn) $ snd $ unzip arrmems
@@ -135,14 +135,14 @@ defInterference lutab env pat =
       -- ^ update interference: get the alias-transitive closure of each memory
       --   block in pattern and mark its interference with the current active set.
 
-      lus    = fromMaybe HS.empty (HM.lookup (head $ patternNames pat) lutab)
+      lus    = fromMaybe S.empty (M.lookup (head $ patternNames pat) lutab)
       lumems = getLastUseMem v2mem' lus
-      active1= HS.difference (active env) lumems
+      active1= S.difference (active env) lumems
       -- ^ get the memory blocks associated to the variables lastly used in this
       --   statement and subtract them from the active set.
 
-      active'= HS.union active1 $ HS.intersection (alloc env) $
-               aliasTransClos alias' $ HS.fromList patmems
+      active'= S.union active1 $ S.intersection (alloc env) $
+               aliasTransClos alias' $ S.fromList patmems
       -- ^ update the active set with the alias-transitive closure of this stmt
       --   memory blocks (keep only the allocated ones of course).
 
@@ -164,13 +164,13 @@ intrfAnBnd lutab env (Let pat _ e) =
                                    ExpMem.ArrayMem tp shp u nm indfun ->
                                      trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++pretty u++" , "++pretty nm++" , "++pretty indfun++" ("++pretty l1++") ") al0
                             al_nms = unNames al
-                            al_trns= HS.foldl' (\acc x -> case HM.lookup x stabb of
+                            al_trns= S.foldl' (\acc x -> case M.lookup x stabb of
                                                             Nothing -> acc
-                                                            Just aal -> HS.union acc aal
+                                                            Just aal -> S.union acc aal
                                                ) al_nms al_nms
---al_trns' = trace ("AL Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (HS.toList al_trns)) al_trns
+--al_trns' = trace ("AL Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (S.toList al_trns)) al_trns
                         in  if null al_trns then stabb
-                        else HM.insert (patElemName patel) al_trns stabb
+                        else M.insert (patElemName patel) al_trns stabb
                     ) stab $ patternValueElements pat -- patternContextElements pat
   in  env { alias = stab' }
 --}
@@ -178,23 +178,23 @@ intrfAnBnd lutab env (Let pat _ e) =
 
 updateInterference :: AliasTab -> AllocTab -> Names -> IntrfTab -> [VName] -> IntrfTab
 updateInterference alias0 alloc0 active0 =
-  foldl (\itrf mm -> let m_al = case HM.lookup mm alias0 of
-                                  Just al -> HS.insert mm al
-                                  Nothing -> HS.singleton mm
-                         m_ad = HS.intersection m_al alloc0
-                     in  HS.foldl' (\acc m -> case HM.lookup m acc of
-                                               Just mst-> HM.insert m (mst `HS.union` active0) acc
-                                               Nothing -> HM.insert m active0 acc
+  foldl (\itrf mm -> let m_al = case M.lookup mm alias0 of
+                                  Just al -> S.insert mm al
+                                  Nothing -> S.singleton mm
+                         m_ad = S.intersection m_al alloc0
+                     in  S.foldl' (\acc m -> case M.lookup m acc of
+                                               Just mst-> M.insert m (mst `S.union` active0) acc
+                                               Nothing -> M.insert m active0 acc
                                    ) itrf m_ad
         )
 
 getLastUseMem :: V2MemTab -> Names -> Names
 getLastUseMem v2mem0 =
-  HS.foldl' (\acc lu ->
-                case HM.lookup lu v2mem0 of
+  S.foldl' (\acc lu ->
+                case M.lookup lu v2mem0 of
                   Nothing -> acc
-                  Just (MemBlock _ _ m _)  -> HS.insert m acc
-            ) HS.empty
+                  Just (MemBlock _ _ m _)  -> S.insert m acc
+            ) S.empty
 
 ----------------------------------------------------------------
 --- Printer/Tester Main Program
@@ -204,7 +204,7 @@ getLastUseMem v2mem0 =
 
 lastUseAnPrg :: ExpMem.Prog ExpMem.ExplicitMemory -> LUTabPrg
 lastUseAnPrg prg = let aliased_prg = AnlAls.aliasAnalysis prg
-                   in  HM.fromList $ map lastUseAnFun $ progFunctions aliased_prg
+                   in  M.fromList $ map lastUseAnFun $ progFunctions aliased_prg
 
 --}
 
@@ -216,27 +216,27 @@ memoryBlockMerging prg = do
       envtab  = intrfAnPrg lutab prg
 
   putStrLn "LAST_USE RESULT:"
-  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (map (Control.Arrow.second HS.toList) . HM.toList) (HM.elems lutab))
+  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (map (Control.Arrow.second S.toList) . M.toList) (M.elems lutab))
 
   putStrLn "ALLOCATIONS RESULT:"
-  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (HS.toList . alloc) (HM.elems envtab))
---  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concat $ map (\env -> HM.toList $ alloc env) $ HM.elems envtab)
+  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (S.toList . alloc) (M.elems envtab))
+--  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concat $ map (\env -> M.toList $ alloc env) $ M.elems envtab)
 
   putStrLn "ALIAS RESULT:"
-  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (map (Control.Arrow.second HS.toList) . HM.toList . alias) (HM.elems envtab))
+  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (map (Control.Arrow.second S.toList) . M.toList . alias) (M.elems envtab))
 
   putStrLn "INTERFERENCE RESULT:"
-  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (map (Control.Arrow.second HS.toList) . HM.toList . intrf) (HM.elems envtab))
+  putStrLn $ unlines (map ("  "++) $ lines $ pretty $ concatMap (map (Control.Arrow.second S.toList) . M.toList . intrf) (M.elems envtab))
 
   let coaltab = mkCoalsTab $ AnlAls.aliasAnalysis prg
   putStrLn $ "COALESCING RESULT:" ++ pretty (length coaltab)
   let coal_info = map (\env ->
-                            ( dstmem env, dstind env, HS.toList $ alsmem env, HM.toList $ optdeps env
+                            ( dstmem env, dstind env, S.toList $ alsmem env, M.toList $ optdeps env
                             , map (\ (k,Coalesced _ (MemBlock _ _ b indfun) sbst) ->
-                                    (k,(b,indfun,HM.toList sbst))
-                                  ) $ HM.toList $ vartab env
+                                    (k,(b,indfun,M.toList sbst))
+                                  ) $ M.toList $ vartab env
                             )
-                      ) $ HM.elems coaltab
+                      ) $ M.elems coaltab
   putStrLn $ unlines (map ("  "++) $ lines $ pretty coal_info)
 
 

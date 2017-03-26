@@ -22,13 +22,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.String
 import Data.List
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
 import Futhark.Representation.AST
 
-type AstMetrics = HM.HashMap Text Int
+type AstMetrics = M.Map Text Int
 
 class OpMetrics op where
   opMetrics :: op -> MetricsM ()
@@ -45,7 +45,7 @@ instance Monoid CountMetrics where
 
 actualMetrics :: CountMetrics -> AstMetrics
 actualMetrics (CountMetrics metrics) =
-  HM.fromListWith (+) $ concatMap expand metrics
+  M.fromListWith (+) $ concatMap expand metrics
   where expand (ctx, k) =
           [ (T.intercalate "/" (ctx' ++ [k]), 1)
           | ctx' <- tails $ "" : ctx ]

@@ -13,8 +13,8 @@ module Futhark.Transform.Substitute
   where
 
 import Control.Monad.Identity
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
@@ -23,7 +23,7 @@ import Futhark.Analysis.PrimExp
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.
-type Substitutions = HM.HashMap VName VName
+type Substitutions = M.Map VName VName
 
 -- | A type that is an instance of this class supports substitution of
 -- any names contained within.
@@ -31,7 +31,7 @@ class Substitute a where
   -- | @substituteNames m e@ replaces the variable names in @e@ with
   -- new names, based on the mapping in @m@.  It is assumed that all
   -- names in @e@ are unique, i.e. there is no shadowing.
-  substituteNames :: HM.HashMap VName VName -> a -> a
+  substituteNames :: M.Map VName VName -> a -> a
 
 instance Substitute a => Substitute [a] where
   substituteNames substs = map $ substituteNames substs
@@ -60,7 +60,7 @@ instance Substitute Bool where
   substituteNames = flip const
 
 instance Substitute VName where
-  substituteNames substs k = HM.lookupDefault k k substs
+  substituteNames substs k = M.findWithDefault k k substs
 
 instance Substitute SubExp where
   substituteNames substs (Var v) = Var $ substituteNames substs v
@@ -117,7 +117,7 @@ instance Substitutable lore => Substitute (FunDef lore) where
       (substituteNames substs ps)
       (substituteNames substs body)
 -}
-replace :: (Substitutable lore) => HM.HashMap VName VName -> Mapper lore lore Identity
+replace :: (Substitutable lore) => M.Map VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
@@ -147,7 +147,7 @@ instance Substitute ExtDimSize where
   substituteNames _      (Ext x)   = Ext x
 
 instance Substitute Names where
-  substituteNames = HS.map . substituteNames
+  substituteNames = S.map . substituteNames
 
 instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Prim et) = Prim et

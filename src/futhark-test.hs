@@ -18,7 +18,7 @@ import Data.Foldable (forM_)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import System.Console.GetOpt
 import System.Directory
 import System.Process.Text (readProcessWithExitCode)
@@ -97,9 +97,9 @@ optimisedProgramMetrics (KernelsPipeline pipeline) program = do
 testMetrics :: FilePath -> StructureTest -> TestM ()
 testMetrics program (StructureTest pipeline expected) = context "Checking metrics" $ do
   actual <- optimisedProgramMetrics pipeline program
-  mapM_ (ok actual) $ HM.toList expected
+  mapM_ (ok actual) $ M.toList expected
   where ok metrics (name, expected_occurences) =
-          case HM.lookup name metrics of
+          case M.lookup name metrics of
             Nothing
               | expected_occurences > 0 ->
               throwError $ name <> " should have occurred " <> T.pack (show expected_occurences) <>

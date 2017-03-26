@@ -14,7 +14,7 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.List
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Maybe
 import Data.Monoid
 
@@ -276,7 +276,7 @@ binOpScalExp bop = fmap snd . find ((==bop) . fst) $
 
 instance FreeIn ScalExp where
   freeIn (Val   _) = mempty
-  freeIn (Id i _)  = HS.singleton i
+  freeIn (Id i _)  = S.singleton i
   freeIn (SNeg  e) = freeIn e
   freeIn (SNot  e) = freeIn e
   freeIn (SAbs  e) = freeIn e

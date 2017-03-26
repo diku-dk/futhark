@@ -19,8 +19,8 @@ module Futhark.Representation.Kernels.KernelExp
 import Control.Monad
 import Data.Monoid
 import Data.Maybe
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.Range as Range
@@ -155,8 +155,8 @@ instance Attributes lore => FreeIn (KernelExp lore) where
 
 instance Attributes lore => FreeIn (GroupStreamLambda lore) where
   freeIn (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
-    freeInBody body `HS.difference` bound_here
-    where bound_here = HS.fromList $
+    freeInBody body `S.difference` bound_here
+    where bound_here = S.fromList $
                        chunk_offset : chunk_size :
                        map paramName (acc_params ++ arr_params)
 
@@ -179,15 +179,15 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
     map (const mempty) $ groupStreamAccParams lam
 
   consumedInOp (GroupReduce _ _ input) =
-    HS.fromList $ map snd input
+    S.fromList $ map snd input
   consumedInOp (GroupScan _ _ input) =
-    HS.fromList $ map snd input
+    S.fromList $ map snd input
   consumedInOp (GroupStream _ _ lam accs arrs) =
     -- GroupStream always consumes array-typed accumulators.  This
     -- guarantees that we can use their storage for the result of the
     -- lambda.
-    HS.map consumedArray $
-    HS.fromList (map paramName acc_params) <> consumedInBody body
+    S.map consumedArray $
+    S.fromList (map paramName acc_params) <> consumedInBody body
     where GroupStreamLambda _ _ acc_params arr_params body = lam
           consumedArray v = fromMaybe v $ subExpVar =<< lookup v params_to_arrs
           params_to_arrs = zip (map paramName $ acc_params ++ arr_params) $
@@ -437,8 +437,8 @@ checkScanOrReduce w lam input = do
 instance LParamAttr lore1 ~ LParamAttr lore2 =>
          Scoped lore1 (GroupStreamLambda lore2) where
   scopeOf (GroupStreamLambda chunk_size chunk_offset acc_params arr_params _) =
-    HM.insert chunk_size (IndexInfo Int32) $
-    HM.insert chunk_offset (IndexInfo Int32) $
+    M.insert chunk_size (IndexInfo Int32) $
+    M.insert chunk_offset (IndexInfo Int32) $
     scopeOfLParams (acc_params ++ arr_params)
 
 instance PrettyLore lore => Pretty (KernelExp lore) where

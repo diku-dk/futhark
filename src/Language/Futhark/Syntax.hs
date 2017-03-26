@@ -83,9 +83,10 @@ import           Data.Array
 import           Data.Foldable
 import           Data.Functor
 import           Data.Hashable
-import qualified Data.HashMap.Lazy                as HM
-import qualified Data.HashSet                     as HS
+import qualified Data.Map.Strict                as M
+import qualified Data.Set                     as S
 import           Data.Loc
+import           Data.Ord
 import           Data.Monoid
 import           Data.Traversable
 import           Prelude
@@ -101,7 +102,7 @@ class (Show vn,
        Show (f vn),
        Show (f (CompTypeBase vn)),
        Show (f (StructTypeBase vn)),
-       Show (f (HM.HashMap VName VName)),
+       Show (f (M.Map VName VName)),
        Show (f ([CompTypeBase vn], CompTypeBase vn))) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
@@ -219,7 +220,7 @@ data RecordArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
   | PolyArrayElem TypeName as Uniqueness
-  | RecordArrayElem (HM.HashMap Name (RecordArrayElemTypeBase shape as))
+  | RecordArrayElem (M.Map Name (RecordArrayElemTypeBase shape as))
   deriving (Show)
 
 instance Eq shape =>
@@ -236,7 +237,7 @@ data ArrayTypeBase shape as =
     -- ^ An array whose elements are primitive types.
   | PolyArray TypeName shape Uniqueness as
     -- ^ An array whose elements are some polymorphic type.
-  | RecordArray (HM.HashMap Name (RecordArrayElemTypeBase shape as)) shape Uniqueness
+  | RecordArray (M.Map Name (RecordArrayElemTypeBase shape as)) shape Uniqueness
     -- ^ An array whose elements are records.  Note that tuples are
     -- also just records.
     deriving (Show)
@@ -257,7 +258,7 @@ instance Eq shape =>
 -- '==', aliases are ignored, but dimensions much match.
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
-                       | Record (HM.HashMap Name (TypeBase shape as))
+                       | Record (M.Map Name (TypeBase shape as))
                        | TypeVar TypeName
                           deriving (Eq, Show)
 
@@ -309,7 +310,7 @@ deriving instance Showable f vn => Show (TypeDeclBase f vn)
 -- example, we might say that a function taking an argument of type
 -- @([int], *[int], [int])@ has diet @ConsumeTuple [Observe, Consume,
 -- Observe]@.
-data Diet = RecordDiet (HM.HashMap Name Diet) -- ^ Consumes these fields in the record.
+data Diet = RecordDiet (M.Map Name Diet) -- ^ Consumes these fields in the record.
           | Consume -- ^ Consumes this value.
           | Observe -- ^ Only observes value in this position, does
                     -- not consume.
@@ -333,6 +334,9 @@ deriving instance Showable f vn => Show (IdentBase f vn)
 
 instance Eq vn => Eq (IdentBase ty vn) where
   x == y = identName x == identName y
+
+instance Ord vn => Ord (IdentBase ty vn) where
+  compare = comparing identName
 
 instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
@@ -759,9 +763,9 @@ data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                      | ModImport FilePath SrcLoc
                        -- ^ The contents of another file as a module.
                      | ModDecs [DecBase f vn] SrcLoc
-                     | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) (f (HM.HashMap VName VName)) SrcLoc
+                     | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
                        -- ^ Functor application.
-                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
+                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
                      | ModLambda (vn, SigExpBase f vn) (Maybe (SigExpBase f vn)) (ModExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (ModExpBase f vn)
 
@@ -818,7 +822,7 @@ newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 -- | A set of names.
-type Names = HS.HashSet
+type Names = S.Set
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.

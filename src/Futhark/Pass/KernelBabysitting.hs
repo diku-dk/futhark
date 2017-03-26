@@ -10,9 +10,8 @@ module Futhark.Pass.KernelBabysitting
 import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.State
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.List
 import Data.Maybe
 import Data.Monoid
@@ -37,7 +36,7 @@ babysitKernels =
 
 transformFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 transformFunDef fundec = do
-  (body', _) <- modifyNameSource $ runState (runBinderT m HM.empty)
+  (body', _) <- modifyNameSource $ runState (runBinderT m M.empty)
   return fundec { funDefBody = body' }
   where m = inScopeOf fundec $
             transformBody $ funDefBody fundec
@@ -46,7 +45,7 @@ type BabysitM = Binder Kernels
 
 transformBody :: Body Kernels -> BabysitM (Body Kernels)
 transformBody (Body () bnds res) = insertStmsM $ do
-  foldM_ transformStm HM.empty bnds
+  foldM_ transformStm M.empty bnds
   return $ resultBody res
 
 -- | Map from variable names to defining expression.  We use this to
@@ -54,11 +53,11 @@ transformBody (Body () bnds res) = insertStmsM $ do
 -- funky in memory (and we'd prefer it not to be).  If we cannot find
 -- it in the map, we just assume it's all good.  HACK and FIXME, I
 -- suppose.  We really should do this at the memory level.
-type ExpMap = HM.HashMap VName (Stm Kernels)
+type ExpMap = M.Map VName (Stm Kernels)
 
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
-  case HM.lookup name m of
+  case M.lookup name m of
     Just (Let _ _ (BasicOp (Rearrange _ perm _))) -> Just $ Just perm
     Just (Let _ _ (BasicOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
@@ -79,7 +78,7 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
   -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
   let thread_gids = map fst $ spaceDimensions space
-      thread_local = HS.fromList $ spaceGlobalId space : spaceLocalId space : thread_gids
+      thread_local = S.fromList $ spaceGlobalId space : spaceLocalId space : thread_gids
 
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
                          thread_local
@@ -90,14 +89,14 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
 
   let bnd' = Let pat () $ Op $ Kernel desc cs space ts kbody''
   addStm bnd'
-  return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
+  return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
   where num_threads = spaceNumThreads space
 
 transformStm expmap (Let pat () e) = do
   e' <- mapExpM transform e
   let bnd' = Let pat () e'
   addStm bnd'
-  return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
+  return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
 
 transform :: Mapper Kernels Kernels BabysitM
 transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody }
@@ -144,14 +143,14 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
                   BasicOp $ Index cs arr' is'
 
                 isThreadLocal v =
-                  not $ HS.null $
-                  thread_variant `HS.intersection`
-                  HM.lookupDefault (HS.singleton v) v variance
+                  not $ S.null $
+                  thread_variant `S.intersection`
+                  M.findWithDefault (S.singleton v) v variance
 
                 sizeSubst (Constant v) = Just $ Constant v
                 sizeSubst (Var v)
-                  | v `HM.member` outer_scope      = Just $ Var v
-                  | Just v' <- HM.lookup v szsubst = sizeSubst v'
+                  | v `M.member` outer_scope      = Just $ Var v
+                  | Just v' <- M.lookup v szsubst = sizeSubst v'
                   | otherwise                      = Nothing
 
         onStm (variance, szsubst, scope) (Let pat attr e) =
@@ -169,7 +168,7 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
 
         mkSizeSubsts = mconcat . map mkStmSizeSubst
           where mkStmSizeSubst (Let (Pattern [] [pe]) _ (Op (SplitSpace _ _ _ elems_per_i))) =
-                  HM.singleton (patElemName pe) elems_per_i
+                  M.singleton (patElemName pe) elems_per_i
                 mkStmSizeSubst _ = mempty
 
 -- Not a hashmap, as SubExp is not hashable.
@@ -183,7 +182,7 @@ ensureCoalescedAccess :: MonadBinder m =>
 ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
-  case (seen, isThreadLocal arr, typeOf <$> HM.lookup arr scope) of
+  case (seen, isThreadLocal arr, typeOf <$> M.lookup arr scope) of
     -- Already took care of this case elsewhere.
     (Just arr', _, _) ->
       pure $ Just (arr', slice)
@@ -205,7 +204,7 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
       -- padding, but it will also require us to know an upper bound
       -- on 'len'.
       | DimSlice offset len (Constant stride) : _rem_slice <- slice,
-        all isThreadLocal $ HS.toList $ freeIn offset,
+        all isThreadLocal $ S.toList $ freeIn offset,
         Just len' <- sizeSubst len,
         oneIsh stride ->
           replace =<< lift (rearrangeSlice (arraySize 0 t) num_threads len' arr)
@@ -218,7 +217,7 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
         not $ null rem_slice,
         not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
         is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
-        any isThreadLocal (HS.toList $ freeIn is) -> do
+        any isThreadLocal (S.toList $ freeIn is) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
@@ -364,7 +363,7 @@ paddedScanReduceInput w num_threads = do
 
 --- Computing variance.
 
-type VarianceTable = HM.HashMap VName Names
+type VarianceTable = M.Map VName Names
 
 varianceInStms :: VarianceTable -> [Stm InKernel] -> VarianceTable
 varianceInStms = foldl varianceInStm
@@ -372,6 +371,6 @@ varianceInStms = foldl varianceInStm
 varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
 varianceInStm variance bnd =
   foldl' add variance $ patternNames $ bindingPattern bnd
-  where add variance' v = HM.insert v binding_variance variance'
-        look variance' v = HS.insert v $ HM.lookupDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ HS.toList (freeInStm bnd)
+  where add variance' v = M.insert v binding_variance variance'
+        look variance' v = S.insert v $ M.findWithDefault mempty v variance'
+        binding_variance = mconcat $ map (look variance) $ S.toList (freeInStm bnd)

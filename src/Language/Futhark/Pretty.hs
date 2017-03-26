@@ -13,7 +13,7 @@ where
 import           Data.Array
 import           Data.Functor
 import           Data.Hashable
-import qualified Data.HashMap.Lazy       as HM
+import qualified Data.Map.Strict       as M
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
@@ -60,7 +60,7 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-        braces $ commasep $ map ppField $ HM.toList fs
+        braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (RecordArrayElemTypeBase Rank as) where
@@ -71,7 +71,7 @@ instance Pretty (RecordArrayElemTypeBase Rank as) where
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-        braces $ commasep $ map ppField $ HM.toList fs
+        braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn) as) where
@@ -91,7 +91,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn)
     | Just ts <- areTupleFields fs =
         prefix <> parens (commasep $ map ppr ts)
     | otherwise =
-        prefix <> braces (commasep $ map ppField $ HM.toList fs)
+        prefix <> braces (commasep $ map ppField $ M.toList fs)
     where prefix =       ppr u <> mconcat (map (brackets . f) ds)
           f AnyDim       = mempty
           f (NamedDim v) = ppr v
@@ -107,7 +107,7 @@ instance Pretty (ArrayTypeBase Rank as) where
     | Just ts <- areTupleFields fs =
         prefix <> parens (commasep $ map ppr ts)
     | otherwise =
-        prefix <> braces (commasep $ map ppField $ HM.toList fs)
+        prefix <> braces (commasep $ map ppField $ M.toList fs)
     where prefix = ppr u <> mconcat (replicate n (brackets mempty))
           ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
@@ -119,7 +119,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) 
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-        braces $ commasep $ map ppField $ HM.toList fs
+        braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (TypeBase Rank as) where
@@ -130,7 +130,7 @@ instance Pretty (TypeBase Rank as) where
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-      braces $ commasep $ map ppField $ HM.toList fs
+      braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where

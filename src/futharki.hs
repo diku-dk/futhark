@@ -13,7 +13,7 @@ import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
@@ -118,7 +118,7 @@ readEvalPrint = do
           -- expression as its body, append it to the stored program,
           -- then run it.
           let mkOpen f = OpenDec (ModImport f noLoc) [] noLoc
-              opens = map mkOpen $ HM.keys imports
+              opens = map mkOpen $ M.keys imports
               mainfun = FunBind { funBindEntryPoint = True
                                 , funBindName = nameFromString ""
                                 , funBindRetType = NoInfo

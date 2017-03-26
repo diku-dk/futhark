@@ -22,7 +22,7 @@ module Futhark.Representation.AST.Attributes.Aliases
 
 import Control.Arrow (first)
 import Data.Monoid
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Futhark.Representation.AST.Attributes (IsOp)
 import Futhark.Representation.AST.Syntax
@@ -35,7 +35,7 @@ class (Annotations lore, AliasedOp (Op lore),
   consumedInBody :: Body lore -> Names
 
 vnameAliases :: VName -> Names
-vnameAliases = HS.singleton
+vnameAliases = S.singleton
 
 subExpAliases :: SubExp -> Names
 subExpAliases Constant{} = mempty
@@ -79,8 +79,8 @@ primOpAliases (Partition _ n _ arr) =
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
-  map (HS.filter notConsumed) $ zipWith mappend als1 als2
-  where notConsumed = not . (`HS.member` cons)
+  map (S.filter notConsumed) $ zipWith mappend als1 als2
+  where notConsumed = not . (`S.member` cons)
         cons = cons1 <> cons2
 
 funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
@@ -94,10 +94,10 @@ expAliases (If _ tb fb _) =
   (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = primOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`HS.difference` merge_names) val_aliases
+  map (`S.difference` merge_names) val_aliases
   where (_ctx_aliases, val_aliases) =
           splitAt (length ctxmerge) $ bodyAliases loopbody
-        merge_names = HS.fromList $
+        merge_names = S.fromList $
                       map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t) =
   funcallAliases args $ retTypeValues t

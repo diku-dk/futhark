@@ -21,8 +21,8 @@ import Data.Either
 import Data.Ord
 import Data.Traversable (mapM)
 
-import qualified Data.HashMap.Strict as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude hiding (mapM)
 
@@ -46,24 +46,24 @@ instance Located Occurence where
   locOf = locOf . location
 
 observation :: Names VName -> SrcLoc -> Occurence
-observation = flip Occurence HS.empty
+observation = flip Occurence S.empty
 
 consumption :: Names VName -> SrcLoc -> Occurence
-consumption = Occurence HS.empty
+consumption = Occurence S.empty
 
 nullOccurence :: Occurence -> Bool
-nullOccurence occ = HS.null (observed occ) && HS.null (consumed occ)
+nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
 
 type Occurences = [Occurence]
 
-type UsageMap = HM.HashMap VName [Usage]
+type UsageMap = M.Map VName [Usage]
 
 usageMap :: Occurences -> UsageMap
-usageMap = foldl comb HM.empty
+usageMap = foldl comb M.empty
   where comb m (Occurence obs cons loc) =
-          let m' = HS.foldl' (ins $ Observed loc) m obs
-          in HS.foldl' (ins $ Consumed loc) m' cons
-        ins v m k = HM.insertWith (++) k [v] m
+          let m' = S.foldl' (ins $ Observed loc) m obs
+          in S.foldl' (ins $ Consumed loc) m' cons
+        ins v m k = M.insertWith (++) k [v] m
 
 combineOccurences :: VName -> Usage -> Usage -> Either TypeError Usage
 combineOccurences _ (Observed loc) (Observed _) = Right $ Observed loc
@@ -75,15 +75,15 @@ combineOccurences name (Consumed loc1) (Consumed loc2) =
   Left $ UseAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
 checkOccurences :: Occurences -> Either TypeError ()
-checkOccurences = void . HM.traverseWithKey comb . usageMap
+checkOccurences = void . M.traverseWithKey comb . usageMap
   where comb _    []     = Right ()
         comb name (u:us) = foldM_ (combineOccurences name) u us
 
 allObserved :: Occurences -> Names VName
-allObserved = HS.unions . map observed
+allObserved = S.unions . map observed
 
 allConsumed :: Occurences -> Names VName
-allConsumed = HS.unions . map consumed
+allConsumed = S.unions . map consumed
 
 allOccuring :: Occurences -> Names VName
 allOccuring occs = allConsumed occs <> allObserved occs
@@ -92,18 +92,18 @@ seqOccurences :: Occurences -> Occurences -> Occurences
 seqOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
-          occ { observed = observed occ `HS.difference` postcons }
+          occ { observed = observed occ `S.difference` postcons }
         postcons = allConsumed occurs2
 
 altOccurences :: Occurences -> Occurences -> Occurences
 altOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt1 occurs1 ++ map filt2 occurs2
   where filt1 occ =
-          occ { consumed = consumed occ `HS.difference` cons2
-              , observed = observed occ `HS.difference` cons2 }
+          occ { consumed = consumed occ `S.difference` cons2
+              , observed = observed occ `S.difference` cons2 }
         filt2 occ =
           occ { consumed = consumed occ
-              , observed = observed occ `HS.difference` cons1 }
+              , observed = observed occ `S.difference` cons1 }
         cons1 = allConsumed occurs1
         cons2 = allConsumed occurs2
 
@@ -121,18 +121,18 @@ data ValBinding = BoundV Type
 -- | Type checking happens with access to this environment.  The
 -- tables will be extended during type-checking as bindings come into
 -- scope.
-data TermScope = TermScope { scopeVtable  :: HM.HashMap VName ValBinding
+data TermScope = TermScope { scopeVtable  :: M.Map VName ValBinding
                            , scopeNameMap :: NameMap
                            } deriving (Show)
 
 instance Monoid TermScope where
   mempty = TermScope mempty mempty
   TermScope vt1 nt1 `mappend` TermScope vt2 nt2 =
-    TermScope (vt2 `HM.union` vt1) (nt2 `HM.union` nt1)
+    TermScope (vt2 `M.union` vt1) (nt2 `M.union` nt1)
 
 envToTermScope :: Env -> TermScope
 envToTermScope env = TermScope vtable (envNameMap env)
-  where vtable = HM.map valBinding $ envVtable env
+  where vtable = M.map valBinding $ envVtable env
         valBinding (TypeM.BoundV v) = BoundV v
         valBinding (TypeM.BoundF f) = BoundF f mempty
 
@@ -157,7 +157,7 @@ liftTypeM = TermTypeM . lift . lift
 
 initialTermScope :: TermScope
 initialTermScope = TermScope initialVtable topLevelNameMap
-  where initialVtable = HM.fromList $ mapMaybe addIntrinsicF $ HM.toList intrinsics
+  where initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
           Just (name, BoundF (map Prim ts, Prim t) mempty)
@@ -198,7 +198,7 @@ checkQualName space qn@(QualName quals name) loc = do
   scope <- ask
   descend scope quals
   where descend scope []
-          | Just name' <- HM.lookup (space, name) $ scopeNameMap scope =
+          | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
               return (scope, QualName quals name')
 
         descend _ _ =
@@ -206,7 +206,7 @@ checkQualName space qn@(QualName quals name) loc = do
 
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
-  | Just v <- HM.lookup (space, name) intrinsicsNameMap = do
+  | Just v <- M.lookup (space, name) intrinsicsNameMap = do
       scope <- ask
       return (scope, QualName [nameFromString "intrinsics"] v)
   | otherwise =
@@ -222,7 +222,7 @@ checkReallyQualName space qn loc = do
 lookupFunction :: QualName Name -> [Type] -> SrcLoc -> TermTypeM (QualName VName, FunBinding, Occurences)
 lookupFunction qn argtypes loc = do
   (scope, qn'@(QualName _ name)) <- checkQualName Term qn loc
-  case HM.lookup name $ scopeVtable scope of
+  case M.lookup name $ scopeVtable scope of
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
     Just (BoundV t) -> bad $ ValueIsNotFunction loc qn t
@@ -254,7 +254,7 @@ lookupFunction qn argtypes loc = do
 lookupVar :: QualName Name -> SrcLoc -> TermTypeM (QualName VName, Type)
 lookupVar qn loc = do
   (scope, qn'@(QualName _ name)) <- checkQualName Term qn loc
-  case HM.lookup name $ scopeVtable scope of
+  case M.lookup name $ scopeVtable scope of
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                     | otherwise -> return (qn', t)
@@ -267,7 +267,7 @@ lookupVar qn loc = do
 bindSpaced :: [(Namespace, Name)] -> TermTypeM a -> TermTypeM a
 bindSpaced names body = do
   names' <- mapM (newID . snd) names
-  let mapping = HM.fromList (zip names names')
+  let mapping = M.fromList (zip names names')
   bindNameMap mapping body
 
 bindNameMap :: NameMap -> TermTypeM a -> TermTypeM a
@@ -294,9 +294,9 @@ unifyTypes (Array at1) (Array at2) =
   Array <$> unifyArrayTypes at1 at2
 unifyTypes (Record ts1) (Record ts2)
   | length ts1 == length ts2,
-    sort (HM.keys ts1) == sort (HM.keys ts2) =
+    sort (M.keys ts1) == sort (M.keys ts2) =
       Record <$> traverse (uncurry unifyTypes)
-      (HM.intersectionWith (,) ts1 ts2)
+      (M.intersectionWith (,) ts1 ts2)
 unifyTypes _ _ = Nothing
 
 unifyArrayTypes :: Monoid (as vn) =>
@@ -311,9 +311,9 @@ unifyArrayTypes (PolyArray bt1 shape1 u1 als1) (PolyArray bt2 shape2 u2 als2)
     Just $ PolyArray bt1 shape1 (u1 <> u2) (als1 <> als2)
 unifyArrayTypes (RecordArray et1 shape1 u1) (RecordArray et2 shape2 u2)
   | shapeRank shape1 == shapeRank shape2,
-    sort (HM.keys et1) == sort (HM.keys et2) =
+    sort (M.keys et1) == sort (M.keys et2) =
     RecordArray <$>
-    traverse (uncurry unifyRecordArrayElemTypes) (HM.intersectionWith (,) et1 et2) <*>
+    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) et1 et2) <*>
     pure shape1 <*> pure (u1 <> u2)
 unifyArrayTypes _ _ =
   Nothing
@@ -331,9 +331,9 @@ unifyRecordArrayElemTypes (PolyArrayElem bt1 als1 u1) (PolyArrayElem bt2 als2 u2
 unifyRecordArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
   ArrayArrayElem <$> unifyArrayTypes at1 at2
 unifyRecordArrayElemTypes (RecordArrayElem ts1) (RecordArrayElem ts2)
-  | sort (HM.keys ts1) == sort (HM.keys ts2) =
+  | sort (M.keys ts1) == sort (M.keys ts2) =
     RecordArrayElem <$>
-    traverse (uncurry unifyRecordArrayElemTypes) (HM.intersectionWith (,) ts1 ts2)
+    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) ts1 ts2)
 unifyRecordArrayElemTypes _ _ =
   Nothing
 
@@ -358,20 +358,20 @@ binding bnds = check . local (`bindVars` bnds)
 
         bindVar :: TermScope -> Ident -> TermScope
         bindVar scope (Ident name (Info tp) _) =
-          let inedges = HS.toList $ aliases tp
+          let inedges = S.toList $ aliases tp
               update (BoundV tp')
               -- If 'name' is record-typed, don't alias the components
               -- to 'name', because records have no identity beyond
               -- their components.
                 | Record _ <- tp = BoundV tp'
-                | otherwise      = BoundV (tp' `addAliases` HS.insert name)
+                | otherwise      = BoundV (tp' `addAliases` S.insert name)
               update b = b
-          in scope { scopeVtable = HM.insert name (BoundV tp) $
+          in scope { scopeVtable = M.insert name (BoundV tp) $
                                    adjustSeveral update inedges $
                                    scopeVtable scope
                    }
 
-        adjustSeveral f = flip $ foldl $ flip $ HM.adjust f
+        adjustSeveral f = flip $ foldl $ flip $ M.adjust f
 
         -- Check whether the bound variables have been used correctly
         -- within their scope.
@@ -395,8 +395,8 @@ binding bnds = check . local (`bindVars` bnds)
                                  (con1, con2) = divide $ consumed occ
                              in (occ { observed = obs1, consumed = con1 },
                                  occ { observed = obs2, consumed = con2 }))
-                names = HS.fromList $ map identName bnds
-                divide s = (s `HS.intersection` names, s `HS.difference` names)
+                names = S.fromList $ map identName bnds
+                divide s = (s `S.intersection` names, s `S.difference` names)
 
 -- | A hack that also binds the names in the name map.  This is useful
 -- if the same names are visible in two entirely different expressions
@@ -405,7 +405,7 @@ bindingAlsoNames :: [Ident] -> TermTypeM a -> TermTypeM a
 bindingAlsoNames idents body = do
   let varnames = map ((Term,) . baseName . identName) idents
       substs   = map identName idents
-  bindNameMap (HM.fromList (zip varnames substs)) $
+  bindNameMap (M.fromList (zip varnames substs)) $
     binding idents body
 
 bindingIdent :: IdentBase NoInfo Name -> Type -> (Ident -> TermTypeM a)
@@ -422,7 +422,7 @@ bindingPatterns ps m = do
   names <- checkForDuplicateNames $ map fst ps
   bindSpaced names $ do
     ps' <- mapM (uncurry checkPattern) ps
-    binding (HS.toList $ HS.unions $ map patIdentSet ps') $ do
+    binding (S.toList $ S.unions $ map patIdentSet ps') $ do
       -- Perform an observation of every declared dimension.  This
       -- prevents unused-name warnings for otherwise unused dimensions.
       mapM_ observe $ concatMap patternDims ps'
@@ -434,7 +434,7 @@ bindingPattern p t m = do
   names <- checkForDuplicateNames [p]
   bindSpaced names $ do
     p' <- checkPattern p t
-    binding (HS.toList $ patIdentSet p') $ do
+    binding (S.toList $ patIdentSet p') $ do
       -- Perform an observation of every declared dimension.  This
       -- prevents unused-name warnings for otherwise unused dimensions.
       mapM_ observe $ patternDims p'
@@ -470,20 +470,20 @@ checkExp (RecordLit fs loc) = do
   return $ RecordLit fs' loc
   where checkField (RecordField f e rloc) = do
           warnIfAlreadySet f rloc
-          modify $ HM.insert f rloc
+          modify $ M.insert f rloc
           RecordField f <$> lift (checkExp e) <*> pure rloc
         checkField (RecordRecord e) = do
           e' <- lift $ checkExp e
           case typeOf e' of
             Record rfs -> do
-              mapM_ (`warnIfAlreadySet` srclocOf e) $ HM.keys rfs
+              mapM_ (`warnIfAlreadySet` srclocOf e) $ M.keys rfs
               return $ RecordRecord e'
             t ->
               lift $ bad $ TypeError loc $
               "Expression in record literal must be of record type, but is " ++ pretty t
 
         warnIfAlreadySet f rloc = do
-          maybe_sloc <- gets $ HM.lookup f
+          maybe_sloc <- gets $ M.lookup f
           case maybe_sloc of
             Just sloc ->
               lift $ warn sloc $ "This value for field " ++ pretty f ++
@@ -538,7 +538,7 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   case typeOf e' of
-    Record fs | Just t <- HM.lookup k fs ->
+    Record fs | Just t <- M.lookup k fs ->
                 return $ Project k e' (Info t) loc
     _ -> bad $ InvalidField loc (typeOf e') (pretty k)
 
@@ -546,7 +546,7 @@ checkExp (If e1 e2 e3 _ pos) =
   sequentially (require [Prim Bool] =<< checkExp e1) $ \e1' _ -> do
   ((e2', e3'), dflow) <- tapOccurences $ checkExp e2 `alternative` checkExp e3
   brancht <- unifyExpTypes e2' e3'
-  let t' = addAliases brancht (`HS.difference` allConsumed dflow)
+  let t' = addAliases brancht (`S.difference` allConsumed dflow)
   return $ If e1' e2' e3' (Info t') pos
 
 checkExp (Parens e loc) =
@@ -624,7 +624,7 @@ checkExp (LetFun name (params, maybe_retdecl, NoInfo, e) body loc) =
 
     let paramType = toStruct . vacuousShapeAnnotations . patternType
         entry = BoundF (map paramType params', rettype) closure
-        bindF scope = scope { scopeVtable = HM.insert name' entry $ scopeVtable scope }
+        bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope }
     body' <- local bindF $ checkExp body
 
     return $ LetFun name' (params', maybe_retdecl', Info rettype, e') body' loc
@@ -642,10 +642,10 @@ checkExp (LetWith dest src idxes ve body pos) = do
                (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [toStructural elemt] =<< checkExp ve) $ \ve' _ -> do
-        when (identName src' `HS.member` aliases (typeOf ve')) $
+        when (identName src' `S.member` aliases (typeOf ve')) $
           bad $ BadLetWithValue pos
 
-        bindingIdent dest (unInfo (identType src') `setAliases` HS.empty) $ \dest' -> do
+        bindingIdent dest (unInfo (identType src') `setAliases` S.empty) $ \dest' -> do
           body' <- consuming src' $ checkExp body
           return $ LetWith dest' src' idxes' ve' body' pos
   where isFix DimFix{} = True
@@ -666,7 +666,7 @@ checkExp (Update src idxes ve loc) =
       Just elemt -> do
         ve' <- require [toStructural elemt] =<< checkExp ve
 
-        unless (HS.null $ aliases (typeOf src') `HS.intersection` aliases (typeOf ve')) $
+        unless (S.null $ aliases (typeOf src') `S.intersection` aliases (typeOf ve')) $
           bad $ BadLetWithValue loc
 
         consume loc src_als
@@ -834,9 +834,9 @@ checkExp (Stream form lam arr pos) = do
 
   lam' <- checkLambda lam aas
   (_, dflow)<- collectOccurences $ checkLambda lam faas
-  let arr_aliasses = HS.toList $ aliases $ typeOf arr'
+  let arr_aliasses = S.toList $ aliases $ typeOf arr'
   let usages = usageMap dflow
-  when (any (`HM.member` usages) arr_aliasses) $
+  when (any (`M.member` usages) arr_aliasses) $
      bad $ TypeError pos "Stream with input array used inside lambda."
 
   -- (i) properly check the lambda on its parameter and
@@ -947,14 +947,14 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                   While cond',
                   loopbody')
 
-  let consumed_merge = HS.map identName (patIdentSet mergepat') `HS.intersection`
+  let consumed_merge = S.map identName (patIdentSet mergepat') `S.intersection`
                        allConsumed bodyflow
       uniquePat (Wildcard (Info t) wloc) =
         Wildcard (Info $ t `setUniqueness` Nonunique) wloc
       uniquePat (PatternParens p ploc) =
         PatternParens (uniquePat p) ploc
       uniquePat (Id (Ident name (Info t) iloc))
-        | name `HS.member` consumed_merge =
+        | name `S.member` consumed_merge =
             let t' = t `setUniqueness` Unique `setAliases` mempty
             in Id (Ident name (Info t') iloc)
         | otherwise =
@@ -981,19 +981,19 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- alias something bound outside the loop, AND that anything
   -- returned for a unique merge parameter does not alias anything
   -- else returned.
-  bound_outside <- asks $ HS.fromList . HM.keys . scopeVtable
+  bound_outside <- asks $ S.fromList . M.keys . scopeVtable
   let checkMergeReturn (Id ident) t
         | unique $ unInfo $ identType ident,
-          v:_ <- HS.toList $ aliases t `HS.intersection` bound_outside =
+          v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
             lift $ bad $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
             pretty (identName ident) ++ " aliases " ++ pretty v ++ "."
         | otherwise = do
             (cons,obs) <- get
-            unless (HS.null $ aliases t `HS.intersection` cons) $
+            unless (S.null $ aliases t `S.intersection` cons) $
               lift $ bad $ TypeError loc $ "Loop return value for merge parameter " ++
               pretty (identName ident) ++ " aliases other consumed merge parameter."
             when (unique (unInfo $ identType ident) &&
-                  not (HS.null (aliases t `HS.intersection` (cons<>obs)))) $
+                  not (S.null (aliases t `S.intersection` (cons<>obs)))) $
               lift $ bad $ TypeError loc $ "Loop return value for consuming merge parameter " ++
               pretty (identName ident) ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
             if unique (unInfo $ identType ident)
@@ -1016,9 +1016,9 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 
   let loopOccur = do
         occur $ mergeflow `seqOccurences` merge_consume `seqOccurences` freeflow
-        mapM_ observe $ HS.toList $ patIdentSet mergepat''
+        mapM_ observe $ S.toList $ patIdentSet mergepat''
 
-  bindingAlsoNames (HS.toList $ patIdentSet mergepat'') $ do
+  bindingAlsoNames (S.toList $ patIdentSet mergepat'') $ do
     -- It is OK for merge parameters to not occur here, because they
     -- might be useful for the loop body.
     letbody' <- sequentially loopOccur $ \_ _ -> checkExp letbody
@@ -1103,21 +1103,21 @@ checkPattern (TuplePattern ps loc) NoneInferred =
   TuplePattern <$> mapM (`checkPattern` NoneInferred) ps <*> pure loc
 
 checkPattern (RecordPattern p_fs loc) (Inferred (Record t_fs))
-  | sort (map fst p_fs) == sort (HM.keys t_fs) =
-    RecordPattern . HM.toList <$> check <*> pure loc
-    where check = traverse (uncurry checkPattern) $ HM.intersectionWith (,)
-                  (HM.fromList p_fs) (fmap Inferred t_fs)
+  | sort (map fst p_fs) == sort (M.keys t_fs) =
+    RecordPattern . M.toList <$> check <*> pure loc
+    where check = traverse (uncurry checkPattern) $ M.intersectionWith (,)
+                  (M.fromList p_fs) (fmap Inferred t_fs)
 checkPattern (RecordPattern p_fs loc) (Ascribed (Record t_fs))
-  | sort (map fst p_fs) == sort (HM.keys t_fs) =
-    RecordPattern . HM.toList <$> check <*> pure loc
-    where check = traverse (uncurry checkPattern) $ HM.intersectionWith (,)
-                  (HM.fromList p_fs) (fmap Ascribed t_fs)
+  | sort (map fst p_fs) == sort (M.keys t_fs) =
+    RecordPattern . M.toList <$> check <*> pure loc
+    where check = traverse (uncurry checkPattern) $ M.intersectionWith (,)
+                  (M.fromList p_fs) (fmap Ascribed t_fs)
 checkPattern p@RecordPattern{} (Inferred t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern p@RecordPattern{} (Ascribed t) =
   bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
 checkPattern (RecordPattern fs loc) NoneInferred =
-  RecordPattern . HM.toList <$> traverse (`checkPattern` NoneInferred) (HM.fromList fs) <*> pure loc
+  RecordPattern . M.toList <$> traverse (`checkPattern` NoneInferred) (M.fromList fs) <*> pure loc
 
 checkPattern fullp@(PatternAscription p td) maybe_outer_t = do
   td' <- checkBindingTypeDecl td
@@ -1151,18 +1151,18 @@ checkForDuplicateNames = fmap toNames . flip execStateT mempty . mapM_ check
 
         seeing b name vloc = do
           seen <- get
-          case (b, HM.lookup name seen) of
+          case (b, M.lookup name seen) of
             (_, Just (BoundAsVar, loc)) ->
               lift $ bad $ DupPatternError name vloc loc
             (BoundAsVar, Just (BoundAsDim, loc)) ->
               lift $ bad $ DupPatternError name vloc loc
-            _ -> modify $ HM.insert name (b, vloc)
+            _ -> modify $ M.insert name (b, vloc)
 
         checkDimDecl _ AnyDim = return ()
         checkDimDecl _ ConstDim{} = return ()
         checkDimDecl loc (NamedDim v) = seeing BoundAsDim v loc
 
-        toNames = map pairUp . HM.toList
+        toNames = map pairUp . M.toList
         pairUp (name, _) = (Term, name)
 
 
@@ -1216,7 +1216,7 @@ checkFuncall fname loc paramtypes args = do
 
 consumeArg :: SrcLoc -> Type -> Diet -> [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =
-  concat $ HM.elems $ HM.intersectionWith (consumeArg loc) ets ds
+  concat $ M.elems $ M.intersectionWith (consumeArg loc) ets ds
 consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
@@ -1249,32 +1249,32 @@ checkFunDef (fname, maybe_retdecl, params, body, loc) = do
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
         checkReturnAlias rettp params' =
-          foldM_ (checkReturnAlias' params') HS.empty . returnAliasing rettp
+          foldM_ (checkReturnAlias' params') S.empty . returnAliasing rettp
         checkReturnAlias' params' seen (Unique, names)
-          | any (`HS.member` HS.map snd seen) $ HS.toList names =
+          | any (`S.member` S.map snd seen) $ S.toList names =
             bad $ UniqueReturnAliased fname loc
           | otherwise = do
             notAliasingParam params' names
-            return $ seen `HS.union` tag Unique names
+            return $ seen `S.union` tag Unique names
         checkReturnAlias' _ seen (Nonunique, names)
-          | any (`HS.member` seen) $ HS.toList $ tag Unique names =
+          | any (`S.member` seen) $ S.toList $ tag Unique names =
             bad $ UniqueReturnAliased fname loc
-          | otherwise = return $ seen `HS.union` tag Nonunique names
+          | otherwise = return $ seen `S.union` tag Nonunique names
 
         notAliasingParam params' names =
           forM_ params' $ \p ->
           let consumedNonunique p' =
-                not (unique $ unInfo $ identType p') && (identName p' `HS.member` names)
-          in case find consumedNonunique $ HS.toList $ patIdentSet p of
+                not (unique $ unInfo $ identType p') && (identName p' `S.member` names)
+          in case find consumedNonunique $ S.toList $ patIdentSet p of
                Just p' ->
                  bad $ ReturnAliased fname (baseName $ identName p') loc
                Nothing ->
                  return ()
 
-        tag u = HS.map $ \name -> (u, name)
+        tag u = S.map $ \name -> (u, name)
 
         returnAliasing (Record ets1) (Record ets2) =
-          concat $ HM.elems $ HM.intersectionWith returnAliasing ets1 ets2
+          concat $ M.elems $ M.intersectionWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
 checkFunBody :: Name
@@ -1412,7 +1412,7 @@ occur = tell
 -- | Proclaim that we have made read-only use of the given variable.
 observe :: Ident -> TermTypeM ()
 observe (Ident nm (Info t) loc) =
-  let als = nm `HS.insert` aliases t
+  let als = nm `S.insert` aliases t
   in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
@@ -1424,10 +1424,10 @@ consume loc als = occur [consumption als loc]
 -- computation.
 consuming :: Ident -> TermTypeM a -> TermTypeM a
 consuming (Ident name (Info t) loc) m = do
-  consume loc $ name `HS.insert` aliases t
+  consume loc $ name `S.insert` aliases t
   local consume' m
   where consume' scope =
-          scope { scopeVtable = HM.insert name (WasConsumed loc) $ scopeVtable scope }
+          scope { scopeVtable = M.insert name (WasConsumed loc) $ scopeVtable scope }
 
 collectOccurences :: TermTypeM a -> TermTypeM (a, Occurences)
 collectOccurences m = pass $ do
@@ -1442,7 +1442,7 @@ maybeCheckOccurences = badOnLeft . checkOccurences
 
 checkIfUsed :: Occurences -> Ident -> TermTypeM ()
 checkIfUsed occs v
-  | not $ identName v `HS.member` allOccuring occs,
+  | not $ identName v `S.member` allOccuring occs,
     not $ "_" `isPrefixOf` pretty (identName v) =
       warn (srclocOf v) $ "Unused variable '"++pretty (baseName $ identName v)++"'."
   | otherwise =
@@ -1459,7 +1459,7 @@ alternative m1 m2 = pass $ do
 
 -- | Make all bindings nonunique.
 noUnique :: TermTypeM a -> TermTypeM a
-noUnique = local (\scope -> scope { scopeVtable = HM.map set $ scopeVtable scope})
+noUnique = local (\scope -> scope { scopeVtable = M.map set $ scopeVtable scope})
   where set (BoundV t)         = BoundV $ t `setUniqueness` Nonunique
         set (BoundF f closure) = BoundF f closure
         set (OverloadedF f)    = OverloadedF f
@@ -1468,8 +1468,8 @@ noUnique = local (\scope -> scope { scopeVtable = HM.map set $ scopeVtable scope
         set (WasConsumed loc)  = WasConsumed loc
 
 onlySelfAliasing :: TermTypeM a -> TermTypeM a
-onlySelfAliasing = local (\scope -> scope { scopeVtable = HM.mapWithKey set $ scopeVtable scope})
-  where set k (BoundV t)         = BoundV $ t `addAliases` HS.intersection (HS.singleton k)
+onlySelfAliasing = local (\scope -> scope { scopeVtable = M.mapWithKey set $ scopeVtable scope})
+  where set k (BoundV t)         = BoundV $ t `addAliases` S.intersection (S.singleton k)
         set _ (BoundF f closure) = BoundF f closure
         set _ (OverloadedF f)    = OverloadedF f
         set _ EqualityF          = EqualityF

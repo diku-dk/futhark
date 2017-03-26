@@ -18,8 +18,8 @@ import Control.Monad
 import Data.List
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude
 
@@ -107,9 +107,9 @@ fromSOAC' bound (SOAC.Map cs w lam inps) = do
             | otherwise =
               Nothing
           boundUsedInBody =
-            mapMaybe isBound $ HS.toList $ freeInLambda lam
+            mapMaybe isBound $ S.toList $ freeInLambda lam
       newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
-      let subst = HM.fromList $
+      let subst = M.fromList $
                   zip (map identName boundUsedInBody) (map identName newParams)
           inps' = map (substituteNames subst) inps ++
                   map (SOAC.addTransform (SOAC.Replicate $ Shape [w]) . SOAC.identInput)

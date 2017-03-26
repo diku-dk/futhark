@@ -47,7 +47,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
@@ -164,7 +164,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
-  , envFtable     :: HM.HashMap Name [Type]
+  , envFtable     :: M.Map Name [Type]
   }
 
 data CompilerAcc op s = CompilerAcc {
@@ -207,11 +207,11 @@ newCompilerEnv (Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
               }
-  where ftable = HM.fromList $ map funReturn funs
+  where ftable = M.fromList $ map funReturn funs
         funReturn (name, fun) =
           (name, paramsTypes $ functionOutput fun)
         builtinFtable =
-          HM.map (map Scalar . snd) builtInFunctions
+          M.map (map Scalar . snd) builtInFunctions
 
 -- | Return a list of struct definitions for the tuples and arrays
 -- seen during compilation.  The list is sorted according to
@@ -264,7 +264,7 @@ collect' m = pass $ do
 
 lookupFunction :: Name -> CompilerM op s [Type]
 lookupFunction name = do
-  res <- asks $ HM.lookup name . envFtable
+  res <- asks $ M.lookup name . envFtable
   case res of
     Nothing -> fail $ "Function " ++ nameToString name ++ " not found."
     Just ts -> return ts
