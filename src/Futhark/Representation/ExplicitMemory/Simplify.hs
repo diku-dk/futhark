@@ -10,7 +10,7 @@ module Futhark.Representation.ExplicitMemory.Simplify
 where
 
 import Control.Monad
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Monoid
 import Data.Maybe
 
@@ -59,7 +59,7 @@ isResultAlloc _ _ = False
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent array and memory-block sizes.
 getShapeNames :: ExplicitMemorish lore =>
-                 Stm (Wise lore) -> HS.HashSet VName
+                 Stm (Wise lore) -> S.Set VName
 getShapeNames bnd =
   let tps = map patElemType $ patternElements $ bindingPattern bnd
       ats = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
@@ -68,7 +68,7 @@ getShapeNames bnd =
                                  ArrayMem _ _ _ nm _ -> Just nm
                                  _                   -> Nothing
                      ) ats
-  in  HS.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
+  in  S.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
 
 isAlloc0 :: Op lore ~ MemOp op => AST.Stm lore -> Bool
 isAlloc0 (Let _ _ (Op Alloc{})) = True
@@ -146,7 +146,7 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
 
       letBind_ pat { patternContextElements = remaining_ctx} $
         If cond tbranch' fbranch' ret
-  where onlyUsedIn name here = not $ any ((name `HS.member`) . freeIn) $
+  where onlyUsedIn name here = not $ any ((name `S.member`) . freeIn) $
                                           filter ((/=here) . patElemName) $
                                           patternValueElements pat
         knownSize Constant{} = True

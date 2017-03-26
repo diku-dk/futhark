@@ -13,7 +13,7 @@ import Control.Applicative
 import Control.Monad
 import Data.List
 import Data.Loc
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Language.Futhark as E
 import Futhark.Representation.SOACS as I
@@ -71,7 +71,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
       let sizefun_safe =
             all (I.safeExp . I.bindingExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
-            not $ any (`HS.member` freeInBody (I.lambdaBody sizefun')) $
+            not $ any (`S.member` freeInBody (I.lambdaBody sizefun')) $
             map I.paramName $ lambdaParams sizefun'
       if sizefun_safe && sizefun_arg_invariant
         then do ses <- bodyBind $ lambdaBody sizefun'

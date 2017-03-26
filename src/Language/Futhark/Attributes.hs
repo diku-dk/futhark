@@ -89,8 +89,8 @@ import           Control.Arrow           (second)
 import           Control.Monad.Writer
 import           Data.Foldable
 import           Data.Hashable
-import qualified Data.HashMap.Lazy       as HM
-import qualified Data.HashSet            as HS
+import qualified Data.Map.Strict       as M
+import qualified Data.Set            as S
 import           Data.List
 import           Data.Loc
 import           Data.Maybe
@@ -245,16 +245,16 @@ subtypeOf
 subtypeOf
   (Array (RecordArray et1 dims1 u1))
   (Array (RecordArray et2 dims2 u2)) =
-  and [sort (HM.keys et1) == sort (HM.keys et2),
+  and [sort (M.keys et1) == sort (M.keys et2),
        u1 `subuniqueOf` u2,
        length et1 == length et2,
-       and (HM.intersectionWith subtypeOf
+       and (M.intersectionWith subtypeOf
             (fmap recordArrayElemToType et1)
             (fmap recordArrayElemToType et2)),
        dims1 == dims2]
 subtypeOf (Record ts1) (Record ts2) =
-  sort (HM.keys ts1) == sort (HM.keys ts2) &&
-  length ts1 == length ts2 && and (HM.intersectionWith subtypeOf ts1 ts2)
+  sort (M.keys ts1) == sort (M.keys ts2) &&
+  length ts1 == length ts2 && and (M.intersectionWith subtypeOf ts1 ts2)
 subtypeOf (Prim bt1) (Prim bt2) = bt1 == bt2
 subtypeOf (TypeVar v1) (TypeVar v2) = v1 == v2
 subtypeOf _ _ = False
@@ -305,9 +305,9 @@ recordArrayElemAliases (ArrayArrayElem (PrimArray _ _ _ als)) =
 recordArrayElemAliases (ArrayArrayElem (PolyArray _ _ _ als)) =
   als
 recordArrayElemAliases (ArrayArrayElem (RecordArray ts _ _)) =
-  fold $ HM.map recordArrayElemAliases ts
+  fold $ M.map recordArrayElemAliases ts
 recordArrayElemAliases (RecordArrayElem ts) =
-  fold $ HM.map recordArrayElemAliases ts
+  fold $ M.map recordArrayElemAliases ts
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
@@ -331,7 +331,7 @@ maskAliases :: Monoid as =>
 maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
 maskAliases (Record ets) (RecordDiet ds) =
-  Record $ HM.intersectionWith maskAliases ets ds
+  Record $ M.intersectionWith maskAliases ets ds
 maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 -- | Convert any type to one that has rank information, no alias
@@ -349,7 +349,7 @@ toStruct t = t `setAliases` ()
 -- | Replace no aliasing with an empty alias set.
 fromStruct :: TypeBase shape as
            -> TypeBase shape (Names vn)
-fromStruct t = t `setAliases` HS.empty
+fromStruct t = t `setAliases` S.empty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -463,13 +463,13 @@ stripArray _ t = t
 -- | Create a record type corresponding to a tuple with the given
 -- element types.
 tupleRecord :: [TypeBase shape as] -> TypeBase shape as
-tupleRecord = Record . HM.fromList . zip tupleFieldNames
+tupleRecord = Record . M.fromList . zip tupleFieldNames
 
 isTupleRecord :: TypeBase shape as -> Maybe [TypeBase shape as]
 isTupleRecord (Record fs) = areTupleFields fs
 isTupleRecord _ = Nothing
 
-areTupleFields :: HM.HashMap Name a -> Maybe [a]
+areTupleFields :: M.Map Name a -> Maybe [a]
 areTupleFields fs =
   let fs' = sortFields fs
   in if and $ zipWith (==) (map fst fs') tupleFieldNames
@@ -483,9 +483,9 @@ tupleFieldNames = map (nameFromString . show) [(1::Int)..]
 -- | Sort fields by their name; taking care to sort numeric fields by
 -- their numeric value.  This ensures that tuples and tuple-like
 -- records match.
-sortFields :: HM.HashMap Name a -> [(Name,a)]
+sortFields :: M.Map Name a -> [(Name,a)]
 sortFields l = map snd $ sortBy (comparing fst) $ zip (map (fieldish . fst) l') l'
-  where l' = HM.toList l
+  where l' = M.toList l
         fieldish s = case reads $ nameToString s of
           [(x, "")] -> Left (x::Int)
           _         -> Right s
@@ -599,9 +599,9 @@ typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
-  -- Reverse, because HM.unions is biased to the left.
-  Record $ HM.unions $ reverse $ map record fs
-  where record (RecordField name e _) = HM.singleton name $ typeOf e
+  -- Reverse, because M.unions is biased to the left.
+  Record $ M.unions $ reverse $ map record fs
+  where record (RecordField name e _) = M.singleton name $ typeOf e
         record (RecordRecord e) = case typeOf e of
           Record rfs -> rfs
           _          -> error "typeOf: RecordLit: the impossible happened."
@@ -613,7 +613,7 @@ typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info (Record ets)) _) = Record ets
-typeOf (Var qn (Info t) _) = t `addAliases` HS.insert (qualLeaf qn)
+typeOf (Var qn (Info t) _) = t `addAliases` S.insert (qualLeaf qn)
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
@@ -635,12 +635,12 @@ typeOf (Reshape shape  e _) =
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Transpose e _) = typeOf e
 typeOf (Rotate _ _ e _) = typeOf e
-typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` HS.empty
+typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` S.empty
   where et = lambdaReturnType f
 typeOf (Reduce _ fun _ _ _) =
   lambdaReturnType fun `setAliases` mempty
 typeOf (Zip i e es _) =
-  Array $ RecordArray (HM.fromList $ zip tupleFieldNames $
+  Array $ RecordArray (M.fromList $ zip tupleFieldNames $
                        zipWith typeToRecordArrayElem es_ts es_us) (Rank (1+i)) u
   where ts' = map typeOf $ e:es
         es_ts = map (stripArray (1+i)) ts'
@@ -660,23 +660,23 @@ typeOf (Partition funs arr _) =
 typeOf (Stream form lam _ _) =
   case form of
     MapLike{}    -> lambdaReturnType lam
-                    `setAliases` HS.empty
+                    `setAliases` S.empty
                     `setUniqueness` Unique
     RedLike{}    -> lambdaReturnType lam
-                    `setAliases` HS.empty
+                    `setAliases` S.empty
                     `setUniqueness` Unique
     Sequential{} -> lambdaReturnType lam
-                    `setAliases` HS.empty
+                    `setAliases` S.empty
                     `setUniqueness` Unique
 typeOf (Concat _ x _ _) =
-  typeOf x `setUniqueness` Unique `setAliases` HS.empty
+  typeOf x `setUniqueness` Unique `setAliases` S.empty
 typeOf (Split _ splitexps e _) =
   tupleRecord $ replicate (1 + n) (typeOf e)
   where n = case typeOf splitexps of Record ts -> length ts
                                      _         -> 1
-typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
+typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
 typeOf (DoLoop _ _ _ _ body _) = typeOf body
-typeOf (Write _i _v a _) = typeOf a `setAliases` HS.empty
+typeOf (Write _i _v a _) = typeOf a `setAliases` S.empty
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -693,7 +693,7 @@ returnType (Record fs) ds args =
 returnType (Prim t) _ _ = Prim t
 returnType (TypeVar t) _ _ = TypeVar t
 
-arrayReturnType :: (Eq vn, Hashable vn) =>
+arrayReturnType :: (Ord vn, Hashable vn) =>
                    ArrayTypeBase shape ()
                 -> [Diet]
                 -> [CompTypeBase vn]
@@ -713,7 +713,7 @@ arrayReturnType (PolyArray et sz Unique ()) _ _ =
 arrayReturnType (RecordArray et sz Unique) _ _ =
   RecordArray (fmap (`addRecordArrayElemAliases` const mempty) et) sz Unique
 
-recordArrayElemReturnType :: (Eq vn, Hashable vn) =>
+recordArrayElemReturnType :: (Ord vn, Hashable vn) =>
                             RecordArrayElemTypeBase shape ()
                          -> [Diet]
                          -> [CompTypeBase vn]
@@ -754,13 +754,13 @@ concreteType (Array at) = concreteArrayType at
         concreteRecordArrayElem (RecordArrayElem fs) = all concreteRecordArrayElem fs
 
 -- | The set of names bound in a pattern, including dimension declarations.
-patNameSet :: (Ord vn, Hashable vn) => PatternBase NoInfo vn -> HS.HashSet vn
-patNameSet =  HS.fromList . map identName . patIdentsGen sizeIdent
+patNameSet :: (Ord vn, Hashable vn) => PatternBase NoInfo vn -> S.Set vn
+patNameSet =  S.fromList . map identName . patIdentsGen sizeIdent
   where sizeIdent name = Ident name NoInfo
 
 -- | The set of identifiers bound in a pattern, including dimension declarations.
-patIdentSet :: (Ord vn, Hashable vn) => PatternBase Info vn -> HS.HashSet (IdentBase Info vn)
-patIdentSet = HS.fromList . patIdentsGen sizeIdent
+patIdentSet :: (Ord vn, Hashable vn) => PatternBase Info vn -> S.Set (IdentBase Info vn)
+patIdentSet = S.fromList . patIdentsGen sizeIdent
   where sizeIdent name = Ident name (Info $ Prim $ Signed Int32)
 
 patIdentsGen :: (Ord vn, Hashable vn) =>
@@ -783,7 +783,7 @@ patternType (Wildcard (Info t) _)   = t
 patternType (PatternParens p _)     = patternType p
 patternType (Id ident)              = unInfo $ identType ident
 patternType (TuplePattern pats _)   = tupleRecord $ map patternType pats
-patternType (RecordPattern fs _)    = Record $ patternType <$> HM.fromList fs
+patternType (RecordPattern fs _)    = Record $ patternType <$> M.fromList fs
 patternType (PatternAscription p _) = patternType p
 
 -- | The type matched by the pattern, including shape declarations if present.
@@ -792,13 +792,13 @@ patternStructType (PatternAscription _ td) = unInfo $ expandedType td
 patternStructType (PatternParens p _) = patternStructType p
 patternStructType (Id v) = vacuousShapeAnnotations $ toStruct $ unInfo $ identType v
 patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
-patternStructType (RecordPattern fs _) = Record $ patternStructType <$> HM.fromList fs
+patternStructType (RecordPattern fs _) = Record $ patternStructType <$> M.fromList fs
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.
-namesToPrimTypes :: HM.HashMap Name PrimType
-namesToPrimTypes = HM.fromList
+namesToPrimTypes :: M.Map Name PrimType
+namesToPrimTypes = M.fromList
                    [ (nameFromString $ pretty t, t) |
                      t <- Bool :
                           map Signed [minBound..maxBound] ++
@@ -815,8 +815,8 @@ data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
                | IntrinsicOpaque
 
 -- | A map of all built-ins.
-intrinsics :: HM.HashMap VName Intrinsic
-intrinsics = HM.fromList $ zipWith namify [0..] $
+intrinsics :: M.Map VName Intrinsic
+intrinsics = M.fromList $ zipWith namify [0..] $
              map (second $ uncurry IntrinsicMonoFun)
              [("sqrt32", ([FloatType Float32], FloatType Float32))
              ,("log32", ([FloatType Float32], FloatType Float32))
@@ -929,7 +929,7 @@ intrinsics = HM.fromList $ zipWith namify [0..] $
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
 maxIntrinsicTag :: Int
-maxIntrinsicTag = maximum $ map baseTag $ HM.keys intrinsics
+maxIntrinsicTag = maximum $ map baseTag $ M.keys intrinsics
 
 -- | Create a name with no qualifiers from a name.
 qualName :: v -> QualName v

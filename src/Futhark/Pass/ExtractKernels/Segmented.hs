@@ -9,7 +9,7 @@ module Futhark.Pass.ExtractKernels.Segmented
        where
 
 import Control.Monad
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.Monoid
 
 import Prelude
@@ -836,7 +836,7 @@ regularSegmentedRedomapAsScan segment_size num_segments nest_sizes flat_pat
 
   is <- replicateM (length nest_sizes) $ newVName "i"
 
-  body <- runBodyBinder $ localScope (HM.fromList $ zip is $ repeat $ IndexInfo Int32) $ do
+  body <- runBodyBinder $ localScope (M.fromList $ zip is $ repeat $ IndexInfo Int32) $ do
     let segment_id = flattenIndex
                      (map (primExpFromSubExp int32) nest_sizes)
                      (map (primExpFromSubExp int32 . Var) is)
@@ -901,7 +901,7 @@ regularSegmentedScan segment_size pat cs w lam fold_lam ispace inps nes arrs = d
 
   unused_flag_array <- newVName "unused_flag_array"
   flags_body <-
-    runBodyBinder $ localScope (HM.singleton flags_i $ IndexInfo Int32) $ do
+    runBodyBinder $ localScope (M.singleton flags_i $ IndexInfo Int32) $ do
       segment_index <- letSubExp "segment_index" $
                        BasicOp $ BinOp (SRem Int32) (Var flags_i) segment_size
       start_of_segment <- letSubExp "start_of_segment" $

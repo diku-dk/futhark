@@ -36,7 +36,7 @@ import qualified Data.Text.IO as T
 import Data.Char (ord)
 import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.Monoid
 
 import Language.Futhark.Syntax hiding (ID)
@@ -908,7 +908,7 @@ putTokens :: [L Token] -> ParserMonad ()
 putTokens ts = lift $ lift $ put ts
 
 primTypeFromName :: Name -> ParserMonad PrimType
-primTypeFromName s = maybe boom return $ HM.lookup s namesToPrimTypes
+primTypeFromName s = maybe boom return $ M.lookup s namesToPrimTypes
   where boom = fail $ "No type named " ++ nameToString s
 
 defaultType :: Name -> ParserMonad ()

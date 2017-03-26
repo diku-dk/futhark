@@ -11,8 +11,8 @@ import Control.Monad.Identity
 
 import Data.List
 import Data.Maybe
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude
 
@@ -24,14 +24,14 @@ import Futhark.Pass
 
 aggInlining :: CallGraph -> [FunDef] -> [FunDef]
 aggInlining cg = filter (isJust . funDefEntryPoint) . recurse
-  where noInterestingCalls :: HS.HashSet Name -> FunDef -> Bool
+  where noInterestingCalls :: S.Set Name -> FunDef -> Bool
         noInterestingCalls interesting fundec =
-          case HM.lookup (funDefName fundec) cg of
+          case M.lookup (funDefName fundec) cg of
             Just calls | not $ any (`elem` interesting) calls -> True
             _                                                 -> False
 
         recurse funs =
-          let interesting = HS.fromList $ map funDefName funs
+          let interesting = S.fromList $ map funDefName funs
               (to_be_inlined, to_inline_in) =
                 partition (noInterestingCalls interesting) funs
               inlined_but_entry_points =
@@ -137,4 +137,4 @@ removeDeadFunctions =
           let cg        = buildCallGraph prog
               live_funs = filter (isFunInCallGraph cg) (progFunctions prog)
           in Prog live_funs
-        isFunInCallGraph cg fundec = isJust $ HM.lookup (funDefName fundec) cg
+        isFunInCallGraph cg fundec = isJust $ M.lookup (funDefName fundec) cg

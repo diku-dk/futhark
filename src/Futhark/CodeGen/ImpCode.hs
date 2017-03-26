@@ -62,7 +62,7 @@ import Data.List hiding (foldr)
 import Data.Loc
 import Data.Traversable
 import Data.Foldable
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Prelude hiding (foldr)
 
@@ -411,22 +411,22 @@ instance Traversable Code where
     pure $ DebugPrint s t e
 
 declaredIn :: Code a -> Names
-declaredIn (DeclareMem name _) = HS.singleton name
-declaredIn (DeclareScalar name _) = HS.singleton name
+declaredIn (DeclareMem name _) = S.singleton name
+declaredIn (DeclareScalar name _) = S.singleton name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
-declaredIn (For i _ _ body) = HS.singleton i <> declaredIn body
+declaredIn (For i _ _ body) = S.singleton i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
 declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn a => FreeIn (Code a) where
   freeIn (x :>>: y) =
-    freeIn x <> freeIn y `HS.difference` declaredIn x
+    freeIn x <> freeIn y `S.difference` declaredIn x
   freeIn Skip =
     mempty
   freeIn (For i _ bound body) =
-    i `HS.delete` (freeIn bound <> freeIn body)
+    i `S.delete` (freeIn bound <> freeIn body)
   freeIn (While cond body) =
     freeIn cond <> freeIn body
   freeIn DeclareMem{} =
@@ -466,13 +466,13 @@ instance FreeIn Arg where
   freeIn (ExpArg e) = freeIn e
 
 instance FreeIn Size where
-  freeIn (VarSize name) = HS.singleton name
+  freeIn (VarSize name) = S.singleton name
   freeIn (ConstSize _) = mempty
 
-functionsCalled :: Code a -> HS.HashSet Name
+functionsCalled :: Code a -> S.Set Name
 functionsCalled (If _ t f) = functionsCalled t <> functionsCalled f
 functionsCalled (x :>>: y) = functionsCalled x <> functionsCalled y
 functionsCalled (For _ _ _ body) = functionsCalled body
 functionsCalled (While _ body) = functionsCalled body
-functionsCalled (Call _ fname _) = HS.singleton fname
+functionsCalled (Call _ fname _) = S.singleton fname
 functionsCalled _ = mempty

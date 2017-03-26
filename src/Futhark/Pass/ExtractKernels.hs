@@ -165,8 +165,8 @@ import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -213,7 +213,7 @@ newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log VNameSource a)
 runDistribM :: (MonadLogger m, MonadFreshNames m) =>
                DistribM a -> m a
 runDistribM (DistribM m) = do
-  (x, msgs) <- modifyNameSource $ positionNameSource . runRWS m HM.empty
+  (x, msgs) <- modifyNameSource $ positionNameSource . runRWS m M.empty
   addLog msgs
   return x
   where positionNameSource (x, src, msgs) = ((x, msgs), src)
@@ -528,7 +528,7 @@ withStm bnd = local $ \env ->
           letBindInInnerNesting provided $
           kernelNest env
       }
-  where provided = HS.fromList $ patternNames $ bindingPattern bnd
+  where provided = S.fromList $ patternNames $ bindingPattern bnd
 
 mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
@@ -555,10 +555,10 @@ inNesting (outer, nests) = local $ \env ->
 unbalancedLambda :: Lambda -> Bool
 unbalancedLambda lam =
   unbalancedBody
-  (HS.fromList $ map paramName $ lambdaParams lam) $
+  (S.fromList $ map paramName $ lambdaParams lam) $
   lambdaBody lam
 
-  where subExpBound (Var i) bound = i `HS.member` bound
+  where subExpBound (Var i) bound = i `S.member` bound
         subExpBound (Constant _) _ = False
 
         unbalancedBody bound body =
@@ -583,7 +583,7 @@ unbalancedLambda lam =
         unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations) body) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
-          where bound' = foldr HS.insert bound $
+          where bound' = foldr S.insert bound $
                          i : map (paramName . fst) merge
         unbalancedStm _ (DoLoop _ _ (WhileLoop _) _) =
           False
@@ -716,7 +716,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
              used_in_body = freeInBody kbody
              (used_params, used_arrs) =
                unzip $
-               filter ((`HS.member` used_in_body) . paramName . fst) $
+               filter ((`S.member` used_in_body) . paramName . fst) $
                zip (lambdaParams lam) arrs
          stms <- runBinder_ $ Kernelise.mapIsh pat cs w used_params kbody used_arrs
          return $ addStmsToKernel stms acc' { kernelStms = [] }
@@ -757,7 +757,7 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form body)) acc
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | length res == patternSize pat,
-        HS.null $ freeIn form `HS.intersection` boundInKernelNest nest -> do
+        S.null $ freeIn form `S.intersection` boundInKernelNest nest -> do
       addKernels kernels
       localScope (typeEnvFromKernelAcc acc') $ do
         types <- asksScope scopeForSOACs
@@ -819,7 +819,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs)))
           permutationAndMissing res = do
             let pes = patternValueElements pat
                 (_used,unused) =
-                  partition ((`HS.member` freeIn res) . patElemName) pes
+                  partition ((`S.member` freeIn res) . patElemName) pes
                 res_expanded = res ++ map (Var . patElemName) unused
             perm <- map (Var . patElemName) pes `isPermutationOf` res_expanded
             return (perm, unused)
@@ -1000,12 +1000,12 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
   (pre_bnds, nesting_size, ispace, kernel_inps, _rets) <- flatKernel nest
 
-  unless (HS.null $ free_in_op `HS.intersection` bound_by_nest) $
+  unless (S.null $ free_in_op `S.intersection` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace
 
-      prepareNe (Var v) | v `HS.member` bound_by_nest =
+      prepareNe (Var v) | v `S.member` bound_by_nest =
                           fail "Neutral element bound in nest"
       prepareNe ne = return ne
 
@@ -1013,7 +1013,7 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
         case find ((==arr) . kernelInputName) kernel_inps of
           Just inp | kernelInputIndices inp == map Var indices ->
             return $ return $ kernelInputArray inp
-          Nothing | not (arr `HS.member` bound_by_nest) ->
+          Nothing | not (arr `S.member` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
                       -- it.
@@ -1095,7 +1095,7 @@ intraGroupParallelise knest body = do
   (w_stms, w, ispace, inps, rts) <- flatKernel knest
 
   ((kspace, read_input_stms), prelude_stms) <- runBinder $ do
-    let inputIsUsed input = kernelInputName input `HS.member` freeInBody body
+    let inputIsUsed input = kernelInputName input `S.member` freeInBody body
         used_inps = filter inputIsUsed inps
 
     (kspace, kspace_stms, read_input_stms) <-

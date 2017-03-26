@@ -7,19 +7,19 @@ module Futhark.Analysis.CallGraph
   where
 
 import Control.Monad.Reader
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe (isJust)
 
 import Futhark.Representation.SOACS
 
-type FunctionTable = HM.HashMap Name FunDef
+type FunctionTable = M.Map Name FunDef
 
 buildFunctionTable :: Prog -> FunctionTable
 buildFunctionTable =
-  foldl expand HM.empty . progFunctions
+  foldl expand M.empty . progFunctions
   where expand ftab f =
-          HM.insert (funDefName f) f ftab
+          M.insert (funDefName f) f ftab
 
 -- | The symbol table for functions
 newtype CGEnv = CGEnv { envFtable  :: FunctionTable }
@@ -34,39 +34,39 @@ runCGM = runReader
 -- | The call graph is just a mapping from a function name, i.e., the
 -- caller, to a list of the names of functions called by the function.
 -- The order of this list is not significant.
-type CallGraph = HM.HashMap Name (HS.HashSet Name)
+type CallGraph = M.Map Name (S.Set Name)
 
 -- | @buildCallGraph prog@ build the program's Call Graph. The representation
 -- is a hashtable that maps function names to a list of callee names.
 buildCallGraph :: Prog -> CallGraph
 buildCallGraph prog = do
   let ftable = buildFunctionTable prog
-  runCGM (foldM buildCGfun HM.empty entry_points) $ CGEnv ftable
+  runCGM (foldM buildCGfun M.empty entry_points) $ CGEnv ftable
   where entry_points = map funDefName $ filter (isJust . funDefEntryPoint) $ progFunctions prog
 
 -- | @buildCallGraph cg f@ updates Call Graph @cg@ with the contributions of function
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
 buildCGfun :: CallGraph -> Name -> CGM CallGraph
 buildCGfun cg fname  = do
-  bnd <- asks $ HM.lookup fname . envFtable
+  bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> return cg -- Must be builtin or similar.
     Just f ->
-      case HM.lookup fname cg of
+      case M.lookup fname cg of
         Just _  -> return cg
         Nothing -> do let callees = buildCGbody mempty $ funDefBody f
-                      let cg' = HM.insert fname callees cg
+                      let cg' = M.insert fname callees cg
 
                       -- recursively build the callees
                       foldM buildCGfun cg' callees
 
-buildCGbody :: HS.HashSet Name -> Body -> HS.HashSet Name
+buildCGbody :: S.Set Name -> Body -> S.Set Name
 buildCGbody callees = foldl (\x -> buildCGexp x . bindingExp) callees . bodyStms
 
-buildCGexp :: HS.HashSet Name -> Exp -> HS.HashSet Name
+buildCGexp :: S.Set Name -> Exp -> S.Set Name
 buildCGexp callees (Apply fname _ _)
   | fname `elem` callees = callees
-  | otherwise            = HS.insert fname callees
+  | otherwise            = S.insert fname callees
 buildCGexp callees (Op op) =
   case op of Map _ _ lam _ ->
                buildCGbody callees $ lambdaBody lam

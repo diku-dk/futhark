@@ -33,8 +33,8 @@ module Futhark.Representation.Kernels.Kernel
 import Control.Applicative
 import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import Data.List
 import Data.Foldable (mapM_) -- for stack LTS 1.15
 
@@ -256,7 +256,7 @@ instance FreeIn WhichThreads where
 
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn (KernelBody attr stms res) =
-    (freeIn attr <> free_in_stms <> free_in_res) `HS.difference` bound_in_stms
+    (freeIn attr <> free_in_stms <> free_in_res) `S.difference` bound_in_stms
     where free_in_stms = mconcat $ map freeInStm stms
           free_in_res = freeIn res
           bound_in_stms = mconcat $ map boundByStm stms
@@ -335,7 +335,7 @@ instance Attributes lore => Rename (KernelBody lore) where
   rename (KernelBody attr [] res) =
     KernelBody <$> rename attr <*> pure [] <*> rename res
   rename (KernelBody attr (stm:stms) res) =
-    bindingForRename (HS.toList $ boundByStm stm) $ do
+    bindingForRename (S.toList $ boundByStm stm) $ do
       stm' <- rename stm
       KernelBody attr' stms' res' <- rename $ KernelBody attr stms res
       return $ KernelBody attr' (stm':stms') res'
@@ -348,7 +348,7 @@ instance Rename WhichThreads where
 
 scopeOfKernelSpace :: KernelSpace -> Scope lore
 scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
-  HM.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
+  M.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat $ IndexInfo Int32
   where structure' = case structure of
                        FlatThreadSpace dims -> map fst dims
                        FlatGroupSpace dims -> map fst dims
@@ -405,7 +405,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   consumedInOp (Kernel _ _ _ _ kbody) =
     consumedInKernelBody kbody <>
     mconcat (map consumedByReturn (kernelBodyResult kbody))
-    where consumedByReturn (WriteReturn _ a _ _) = HS.singleton a
+    where consumedByReturn (WriteReturn _ a _ _) = S.singleton a
           consumedByReturn _                     = mempty
   consumedInOp _ = mempty
 
@@ -477,7 +477,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 
 instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ _ kbody) =
-    mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
   usageInOp TileSize = mempty

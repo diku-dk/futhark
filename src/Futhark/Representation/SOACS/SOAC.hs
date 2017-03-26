@@ -24,8 +24,8 @@ module Futhark.Representation.SOACS.SOAC
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -210,7 +210,7 @@ soacType (Scanomap _ outersize outerfun innerfun _ _) =
 soacType (Stream _ outersize form lam _) =
   map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
-        substs = HM.fromList $ zip nms (outersize:accs)
+        substs = M.fromList $ zip nms (outersize:accs)
         ExtLambda params _ rtp = lam
         accs = case form of
                 MapLike _ -> []
@@ -248,28 +248,28 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   -- Only Map, Redomap and Stream can consume anything.  The operands
   -- to Scan and Reduce functions are always considered "fresh".
   consumedInOp (Map _ _ lam arrs) =
-    HS.map consumedArray $ consumedByLambda lam
+    S.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
   consumedInOp (Redomap _ _ _ foldlam _ nes arrs) =
-    HS.map consumedArray $ consumedByLambda foldlam
+    S.map consumedArray $ consumedByLambda foldlam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName $ drop (length nes) (lambdaParams foldlam)) arrs
   consumedInOp (Stream _ _ form lam arrs) =
-    HS.fromList $ subExpVars $
+    S.fromList $ subExpVars $
     case form of MapLike{} ->
-                   map (consumedArray []) $ HS.toList $ consumedByExtLambda lam
+                   map (consumedArray []) $ S.toList $ consumedByExtLambda lam
                  Sequential accs ->
-                   map (consumedArray accs) $ HS.toList $ consumedByExtLambda lam
+                   map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
                  RedLike _ _ _ accs ->
-                   map (consumedArray accs) $ HS.toList $ consumedByExtLambda lam
+                   map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
     where consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
           -- Drop the chunk parameter, which cannot alias anything.
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ extLambdaParams lam)
                                (accs++map Var arrs)
   consumedInOp (Write _ _ _ _ as) =
-    HS.fromList $ map snd as
+    S.fromList $ map snd as
   consumedInOp _ =
     mempty
 
@@ -311,18 +311,18 @@ instance Attributes lore => IsOp (SOAC lore) where
   safeOp _ = False
   cheapOp _ = True
 
-substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
+substNamesInExtType :: M.Map VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Prim _) = tp
 substNamesInExtType subs (Mem se space) =
   Mem (substNamesInSubExp subs se) space
 substNamesInExtType subs (Array btp shp u) =
   let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
   in  Array btp shp' u
-substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
+substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
-  HM.lookupDefault (Var idd) idd subs
-substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
+  M.findWithDefault (Var idd) idd subs
+substNamesInExtDimSize :: M.Map VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 
@@ -424,15 +424,15 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                 TC.checkExtLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
   let usages = TC.usageMap occurs
   arr_aliases <- mapM TC.lookupAliases arrexps
-  let aliased_syms = HS.toList $ HS.fromList $ concatMap HS.toList arr_aliases
-  when (any (`HM.member` usages) aliased_syms) $
+  let aliased_syms = S.toList $ S.fromList $ concatMap S.toList arr_aliases
+  when (any (`M.member` usages) aliased_syms) $
      TC.bad $ TC.TypeError "Stream with input array used inside lambda."
   -- check outerdim of Lambda's streamed-in array params are NOT specified,
   -- and that return type inner dimens are all specified but not as other
   -- lambda parameters!
   let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
       lamarr_ptp = map paramType $ drop (acc_len+1) $ extLambdaParams lam
-      names_lamparams = HS.fromList $ map paramName $ extLambdaParams lam
+      names_lamparams = S.fromList $ map paramName $ extLambdaParams lam
   _ <- mapM (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
   _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp
   return ()
@@ -456,7 +456,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
             " streamed-out arrays MUST be specified!"
           checkInnerDim lamparnms innerdims = do
             rtp_iner_syms <- catMaybes <$> mapM boundDim innerdims
-            case find (`HS.member` lamparnms) rtp_iner_syms of
+            case find (`S.member` lamparnms) rtp_iner_syms of
                 Just name -> TC.bad $ TC.TypeError $
                              "Stream's lambda: " ++ pretty name ++
                              " cannot specify an inner result shape"

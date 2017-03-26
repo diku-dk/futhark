@@ -14,8 +14,8 @@ import Control.Monad.Reader
 import Control.Applicative
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.List
 
 import Prelude hiding (quot)
@@ -98,7 +98,7 @@ kernelCompiler dest (Kernel desc _ space _ kernel_body) = do
   num_threads' <- ImpGen.subExpToDimSize $ spaceNumThreads space
 
   let bound_in_kernel =
-        HM.keys $ mconcat $
+        M.keys $ mconcat $
         scopeOfKernelSpace space :
         map scopeOf (kernelBodyStms kernel_body)
 
@@ -289,7 +289,7 @@ callKernelCopy bt
     let writes_to = [Imp.MemoryUse destmem destmem_size]
 
     reads_from <- readsFromSet $
-                  HS.singleton srcmem <>
+                  S.singleton srcmem <>
                   freeIn destIxFun <> freeIn srcIxFun <> freeIn destshape
 
     let kernel_size = Imp.innerExp n * product (drop 1 shape)
@@ -325,7 +325,7 @@ computeKernelUses :: FreeIn a =>
                      a -> [VName]
                   -> CallKernelGen ([Imp.KernelUse], [Imp.LocalMemoryUse])
 computeKernelUses kernel_body bound_in_kernel = do
-    let actually_free = freeIn kernel_body `HS.difference` HS.fromList bound_in_kernel
+    let actually_free = freeIn kernel_body `S.difference` S.fromList bound_in_kernel
 
     -- Compute the variables that we need to pass to the kernel.
     reads_from <- readsFromSet actually_free
@@ -337,7 +337,7 @@ computeKernelUses kernel_body bound_in_kernel = do
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
 readsFromSet free =
   fmap catMaybes $
-  forM (HS.toList free) $ \var -> do
+  forM (S.toList free) $ \var -> do
     t <- lookupType var
     case t of
       Array {} -> return Nothing
@@ -353,7 +353,7 @@ readsFromSet free =
 computeLocalMemoryUse :: Names -> CallKernelGen [Imp.LocalMemoryUse]
 computeLocalMemoryUse free =
   fmap catMaybes $
-  forM (HS.toList free) $ \var -> do
+  forM (S.toList free) $ \var -> do
     t <- lookupType var
     case t of
       Mem memsize (Space "local") -> do
@@ -383,7 +383,7 @@ isStaticExp _ = False
 isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
 isConstExp v = do
   vtable <- asks ImpGen.envVtable
-  let lookupConstExp name = constExp =<< hasExp =<< HM.lookup name vtable
+  let lookupConstExp name = constExp =<< hasExp =<< M.lookup name vtable
       kernelConst (Op (Inner NumGroups)) = Just $ LeafExp Imp.NumGroupsConst int32
       kernelConst (Op (Inner GroupSize)) = Just $ LeafExp Imp.GroupSizeConst int32
       kernelConst (Op (Inner TileSize)) = Just $ LeafExp Imp.TileSizeConst int32
@@ -403,7 +403,7 @@ isConstExp v = do
 makeAllMemoryGlobal :: CallKernelGen a
                     -> CallKernelGen a
 makeAllMemoryGlobal =
-  local $ \env -> env { ImpGen.envVtable = HM.map globalMemory $ ImpGen.envVtable env
+  local $ \env -> env { ImpGen.envVtable = M.map globalMemory $ ImpGen.envVtable env
                       , ImpGen.envDefaultSpace = Imp.Space "global"
                       }
   where globalMemory (ImpGen.MemVar _ entry)

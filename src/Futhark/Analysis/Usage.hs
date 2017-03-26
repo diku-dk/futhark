@@ -9,7 +9,7 @@ module Futhark.Analysis.Usage
        where
 
 import Data.Monoid
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
@@ -24,8 +24,8 @@ usageInStm (Let pat lore e) =
            UT.usages (freeInExp e)]
   where usageInPat =
           UT.usages (mconcat (map freeIn $ patternElements pat)
-                     `HS.difference`
-                     HS.fromList (patternNames pat))
+                     `S.difference`
+                     S.fromList (patternNames pat))
           <> mconcat (map consumptionInPatElem $ patternElements pat)
         usageInExpLore =
           UT.usages $ freeIn lore
@@ -37,14 +37,14 @@ usageInStm (Let pat lore e) =
 usageInExp :: (Aliased lore, UsageInOp (Op lore)) => Exp lore -> UT.UsageTable
 usageInExp (Apply _ args _) =
   mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ subExpAliases arg
+            S.toList $ subExpAliases arg
           | (arg,d) <- args, d == Consume ]
 usageInExp (DoLoop _ merge _ _) =
   mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ subExpAliases se
+            S.toList $ subExpAliases se
           | (v,se) <- merge, unique $ paramDeclType v ]
 usageInExp (Op op) =
-  mconcat $ usageInOp op : map UT.consumedUsage (HS.toList $ consumedInOp op)
+  mconcat $ usageInOp op : map UT.consumedUsage (S.toList $ consumedInOp op)
 usageInExp _ = UT.empty
 
 class UsageInOp op where
@@ -58,7 +58,7 @@ usageInLambda :: Aliased lore =>
 usageInLambda lam arrs =
   mconcat $
   map (UT.consumedUsage . snd) $
-  filter ((`HS.member` consumed_in_body) . fst) $
+  filter ((`S.member` consumed_in_body) . fst) $
   zip (map paramName arr_params) arrs
   where arr_params = snd $ splitAt n $ lambdaParams lam
         consumed_in_body = consumedInBody $ lambdaBody lam

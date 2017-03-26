@@ -33,7 +33,7 @@ module Futhark.Representation.Ranges
 where
 
 import Control.Monad.Identity
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Hashable
 import Data.Maybe
 import Data.Monoid
@@ -157,7 +157,7 @@ mkPatternRanges pat e =
 mkBodyRanges :: [Stm lore] -> Result -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
   where boundInBnds =
-          mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds
+          mconcat $ map (S.fromList . patternNames . bindingPattern) bnds
         removeUnknownBounds (lower,upper) =
           (removeUnknownBound lower,
            removeUnknownBound upper)
@@ -167,8 +167,8 @@ mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
         removeUnknownBound Nothing =
           Nothing
 
-intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
-intersects a b = not $ HS.null $ a `HS.intersection` b
+intersects :: (Ord a, Hashable a) => S.Set a -> S.Set a -> Bool
+intersects a b = not $ S.null $ a `S.intersection` b
 
 mkRangedLetStm :: (Attributes lore, CanBeRanged (Op lore)) =>
                   Pattern lore

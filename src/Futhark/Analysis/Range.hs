@@ -12,7 +12,7 @@ module Futhark.Analysis.Range
        where
 
 import Control.Applicative
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Control.Monad.Reader
 import Data.Maybe
 import Data.List
@@ -100,10 +100,10 @@ analyseExtLambda lam = do
 
 -- Monad and utility definitions
 
-type RangeEnv = HM.HashMap VName Range
+type RangeEnv = M.Map VName Range
 
 emptyRangeEnv :: RangeEnv
-emptyRangeEnv = HM.empty
+emptyRangeEnv = M.empty
 
 type RangeM = Reader RangeEnv
 
@@ -119,7 +119,7 @@ bindFunParams (param:params) m = do
   local bindFunParam $
     local (refineDimensionRanges ranges dims) $
     bindFunParams params m
-  where bindFunParam = HM.insert (paramName param) unknownRange
+  where bindFunParam = M.insert (paramName param) unknownRange
         dims = arrayDims $ paramType param
 
 bindPattern :: Typed attr =>
@@ -132,7 +132,7 @@ bindPattern pat m = do
   where bindPatElems env =
           foldl bindPatElem env $ patternElements pat
         bindPatElem env patElem =
-          HM.insert (patElemName patElem) (fst $ patElemAttr patElem) env
+          M.insert (patElemName patElem) (fst $ patElemAttr patElem) env
         dims = nub $ concatMap arrayDims $ patternTypes pat
 
 refineDimensionRanges :: AS.RangesRep -> [SubExp]
@@ -150,7 +150,7 @@ refineDimensionRanges ranges = flip $ foldl refineShape
 refineRange :: AS.RangesRep -> VName -> Range -> RangeEnv
             -> RangeEnv
 refineRange =
-  HM.insertWith . refinedRange
+  M.insertWith . refinedRange
 
 -- New range, old range, result range.
 refinedRange :: AS.RangesRep -> Range -> Range -> Range
@@ -167,7 +167,7 @@ refineUpperBound :: Bound -> Bound -> Bound
 refineUpperBound = flip minimumBound
 
 lookupRange :: VName -> RangeM Range
-lookupRange = asks . HM.lookupDefault unknownRange
+lookupRange = asks . M.findWithDefault unknownRange
 
 simplifyPatRanges :: PatternT (Range, attr)
                   -> RangeM (PatternT (Range, attr))
@@ -221,6 +221,6 @@ betterUpperBound bound =
 -- range.  We just put a zero because I don't think it's used for
 -- anything in this case.
 rangesRep :: RangeM AS.RangesRep
-rangesRep = HM.map addLeadingZero <$> ask
+rangesRep = M.map addLeadingZero <$> ask
   where addLeadingZero (x,y) =
           (0, boundToScalExp =<< x, boundToScalExp =<< y)

@@ -10,7 +10,7 @@ module Futhark.Pass.ExtractKernels.Interchange
 
 import Control.Applicative
 import Control.Monad.RWS.Strict
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -67,7 +67,7 @@ interchangeLoop
   where free_in_body = freeInBody body
 
         copyOrRemoveParam (param, arr)
-          | not (paramName param `HS.member` free_in_body) =
+          | not (paramName param `S.member` free_in_body) =
             return Nothing
           | otherwise =
             return $ Just (param, arr)

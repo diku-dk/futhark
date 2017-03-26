@@ -27,7 +27,7 @@ module Futhark.Representation.AST.Attributes.Names
        where
 
 import Control.Monad.Writer
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Foldable (foldMap)
 
 import Prelude
@@ -46,8 +46,8 @@ freeWalker :: (FreeAttr (ExpAttr lore),
 freeWalker = identityWalker {
                walkOnSubExp = tell . freeIn
              , walkOnBody = tell . freeInBody
-             , walkOnVName = tell . HS.singleton
-             , walkOnCertificates = tell . HS.fromList
+             , walkOnVName = tell . S.singleton
+             , walkOnCertificates = tell . S.fromList
              , walkOnOp = tell . freeIn
              }
 
@@ -62,7 +62,7 @@ freeInStmsAndRes :: (FreeIn (Op lore),
                      FreeAttr (ExpAttr lore)) =>
                     [Stm lore] -> Result -> Names
 freeInStmsAndRes stms res =
-  mconcat (freeIn res : map freeInStm stms) `HS.difference` boundByStms stms
+  mconcat (freeIn res : map freeInStm stms) `S.difference` boundByStms stms
 
 -- | Return the set of variable names that are free in the given body.
 freeInBody :: (FreeAttr (ExpAttr lore),
@@ -87,17 +87,17 @@ freeInExp :: (FreeAttr (ExpAttr lore),
 freeInExp (DoLoop ctxmerge valmerge (ForLoop i _ boundexp) loopbody) =
   let (ctxparams, ctxinits) = unzip ctxmerge
       (valparams, valinits) = unzip valmerge
-      bound_here = HS.fromList $ i : map paramName (ctxparams ++ valparams)
+      bound_here = S.fromList $ i : map paramName (ctxparams ++ valparams)
   in freeIn (ctxinits ++ valinits) <> freeIn boundexp <>
      ((freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
-      `HS.difference` bound_here)
+      `S.difference` bound_here)
 freeInExp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) =
   let (ctxparams, ctxinits) = unzip ctxmerge
       (valparams, valinits) = unzip valmerge
-      bound_here = HS.fromList $ map paramName (ctxparams ++ valparams)
+      bound_here = S.fromList $ map paramName (ctxparams ++ valparams)
   in freeIn (ctxinits ++ valinits) <>
      ((freeIn cond <> freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
-      `HS.difference` bound_here)
+      `S.difference` bound_here)
 freeInExp e = execWriter $ walkExpM freeWalker e
 
 -- | Return the set of variable names that are free in the given
@@ -145,7 +145,7 @@ freeInLambdaIsh params body rettype =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeIn params
-        inBody = HS.filter (`notElem` paramnames) $ freeInBody body
+        inBody = S.filter (`notElem` paramnames) $ freeInBody body
         paramnames = map paramName params
 
 -- | A class indicating that we can obtain free variable information
@@ -175,7 +175,7 @@ instance FreeIn a => FreeIn (Maybe a) where
   freeIn = maybe mempty freeIn
 
 instance FreeIn VName where
-  freeIn = HS.singleton
+  freeIn = S.singleton
 
 instance FreeIn Ident where
   freeIn = freeIn . identType
@@ -225,8 +225,8 @@ instance FreeIn d => FreeIn (DimIndex d) where
 
 instance FreeIn attr => FreeIn (PatternT attr) where
   freeIn (Pattern context values) =
-    mconcat (map freeIn $ context ++ values) `HS.difference` bound_here
-    where bound_here = HS.fromList $ map patElemName $ context ++ values
+    mconcat (map freeIn $ context ++ values) `S.difference` bound_here
+    where bound_here = S.fromList $ map patElemName $ context ++ values
 
 -- | Either return precomputed free names stored in the attribute, or
 -- the freshly computed names.  Relies on lazy evaluation to avoid the
@@ -254,11 +254,11 @@ boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
 boundByStm :: Stm lore -> Names
-boundByStm = HS.fromList . patternNames . bindingPattern
+boundByStm = S.fromList . patternNames . bindingPattern
 
 -- | The names bound by the bindings.
 boundByStms :: [Stm lore] -> Names
-boundByStms = HS.unions . map boundByStm
+boundByStms = S.unions . map boundByStm
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]

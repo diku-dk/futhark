@@ -43,7 +43,7 @@ import Control.Monad.Reader
 import Data.List
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Traversable hiding (mapM)
 
 import Prelude hiding (mapM)
@@ -167,7 +167,7 @@ bodyExtType (Body _ bnds res) =
   extendedScope (traverse subExpType res) bndscope
   where bndscope = scopeOf bnds
         boundInLet (Let pat _ _) = patternNames pat
-        bound = HS.fromList $ concatMap boundInLet bnds
+        bound = S.fromList $ concatMap boundInLet bnds
 
 -- | Given an the return type of a function and the values returned by
 -- that function, return the size context.
@@ -188,7 +188,7 @@ subExpShapeContext rettype ses =
 -- constitute the returned context.
 loopResultContext :: FreeIn attr => [Param attr] -> [Param attr] -> [Param attr]
 loopResultContext ctx val = filter usedInValue ctx
-  where usedInValue = (`HS.member` used) . paramName
+  where usedInValue = (`S.member` used) . paramName
         used = freeIn val <> freeIn ctx
 
 -- | Given the context and value merge parameters of a Futhark @loop@,
@@ -196,7 +196,7 @@ loopResultContext ctx val = filter usedInValue ctx
 loopExtType :: [Ident] -> [Ident] -> [ExtType]
 loopExtType ctx val =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType val
-  where inaccessible = HS.fromList $ map identName ctx
+  where inaccessible = S.fromList $ map identName ctx
 
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).

@@ -16,8 +16,8 @@ import Data.List hiding (all)
 import Data.Maybe
 import Data.Monoid
 
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set      as S
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -100,7 +100,7 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
 
       resIsNecessary ((v,_), _) =
         usedAfterLoop v ||
-        paramName v `HS.member` necessaryForReturned ||
+        paramName v `S.member` necessaryForReturned ||
         referencedInPat v ||
         referencedInForm v
 
@@ -119,7 +119,7 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
       free_in_keeps = freeIn keep_valpatelems
 
       stillUsedContext pat_elem =
-        patElemName pat_elem `HS.member`
+        patElemName pat_elem `S.member`
         (free_in_keeps <>
          freeIn (filter (/=pat_elem) $ patternContextElements pat))
 
@@ -143,10 +143,10 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
         usedAfterLoop = flip elem used_vals . paramName
         usedAfterLoopOrInForm p =
-          usedAfterLoop p || paramName p `HS.member` freeIn form
+          usedAfterLoop p || paramName p `S.member` freeIn form
         patAnnotNames = freeIn $ map fst $ ctx++val
-        referencedInPat = (`HS.member` patAnnotNames) . paramName
-        referencedInForm = (`HS.member` freeIn form) . paramName
+        referencedInPat = (`S.member` patAnnotNames) . paramName
+        referencedInForm = (`S.member` freeIn form) . paramName
 
         dummyStms = map dummyStm
         dummyStm ((p,e), _)
@@ -157,7 +157,7 @@ removeRedundantMergeVariables _ _ =
   cannotSimplify
 
 findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
-                         -> HM.HashMap VName Names
+                         -> M.Map VName Names
                          -> Names
 findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
   iterateNecessary mempty
@@ -166,13 +166,13 @@ findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
           | otherwise                   = iterateNecessary necessary
           where necessary = mconcat $ map dependencies returnedResultSubExps
                 usedAfterLoopOrNecessary param =
-                  usedAfterLoop param || paramName param `HS.member` prev_necessary
+                  usedAfterLoop param || paramName param `S.member` prev_necessary
                 returnedResultSubExps =
                   map snd $ filter (usedAfterLoopOrNecessary . fst) merge_and_res
                 dependencies (Constant _) =
-                  HS.empty
+                  S.empty
                 dependencies (Var v)      =
-                  HM.lookupDefault (HS.singleton v) v allDependencies
+                  M.findWithDefault (S.singleton v) v allDependencies
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
@@ -208,7 +208,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (DoLoop ctx val form loopbody)) =
         explpat = zip (patternValueElements pat) $
                   map (paramName . fst) val
 
-        namesOfMergeParams = HS.fromList $ map (paramName . fst) $ ctx++val
+        namesOfMergeParams = S.fromList $ map (paramName . fst) $ ctx++val
 
         removeFromResult (mergeParam,mergeInit) explpat' =
           case partition ((==paramName mergeParam) . snd) explpat' of
@@ -236,7 +236,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (DoLoop ctx val form loopbody)) =
             isInvariant (Var v2)
               | paramName mergeParam == v2 =
                 allExistentialInvariant
-                (HS.fromList $ map (identName . fst) invariant) mergeParam
+                (S.fromList $ map (identName . fst) invariant) mergeParam
             --  (1) or identical to the initial value of the parameter.
             isInvariant _ = mergeInit == resExp
 
@@ -245,10 +245,10 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (DoLoop ctx val form loopbody)) =
 
         allExistentialInvariant namesOfInvariant mergeParam =
           all (invariantOrNotMergeParam namesOfInvariant)
-          (paramName mergeParam `HS.delete` freeIn mergeParam)
+          (paramName mergeParam `S.delete` freeIn mergeParam)
         invariantOrNotMergeParam namesOfInvariant name =
-          not (name `HS.member` namesOfMergeParams) ||
-          name `HS.member` namesOfInvariant
+          not (name `S.member` namesOfMergeParams) ||
+          name `S.member` namesOfInvariant
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
 -- | A function that, given a variable name, returns its definition.
@@ -271,7 +271,7 @@ letRule _ _ _ =
 
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
 simplifyClosedFormLoop _ (Let pat _ (DoLoop [] val (ForLoop i _ bound) body)) =
-  loopClosedForm pat val (HS.singleton i) bound body
+  loopClosedForm pat val (S.singleton i) bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
 simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
@@ -288,7 +288,7 @@ simplifKnownIterationLoop _ (Let pat _
     letBindNames' [paramName mergevar] $ BasicOp $ SubExp mergeinit
   letBindNames'_ [i] $ BasicOp $ SubExp $ intConst it 0
   (loop_body_ctx, loop_body_val) <- splitAt (length ctx) <$> (mapM asVar =<< bodyBind body)
-  let subst = HM.fromList $ zip (map (paramName . fst) ctx) loop_body_ctx
+  let subst = M.fromList $ zip (map (paramName . fst) ctx) loop_body_ctx
       ctx_params = substituteNames subst $ map fst ctx
       val_params = substituteNames subst $ map fst val
       res_context = loopResultContext ctx_params val_params
@@ -888,9 +888,9 @@ simplifyBranchContext _ (Let pat _ (If cond tbranch fbranch _))
           branch_ctx <- letSubExp "branch_ctx" $ If cond tbody fbody [Prim p_t]
           return (pe, branch_ctx)
         let subst =
-              HM.fromList [ (patElemName pe, v) | (pe, Var v) <- free_ctx' ]
+              M.fromList [ (patElemName pe, v) | (pe, Var v) <- free_ctx' ]
             ret' = existentialiseExtTypes
-                   (HS.fromList $ map patElemName new_ctx) $
+                   (S.fromList $ map patElemName new_ctx) $
                    substituteNames subst $
                    staticShapes $ patternValueTypes pat
             pat' = (substituteNames subst pat) { patternContextElements = new_ctx }
@@ -1072,8 +1072,8 @@ simplifyBranchResultComparison vtable (Let pat _ (BasicOp (CmpOp (CmpEq t) se1 s
             If p tbranch fbranch _ <- bindingExp bnd,
             Just (y, z) <-
               returns v (bindingPattern bnd) tbranch fbranch,
-            HS.null $ freeIn y `HS.intersection` boundInBody tbranch,
-            HS.null $ freeIn z `HS.intersection` boundInBody fbranch = Just $ do
+            S.null $ freeIn y `S.intersection` boundInBody tbranch,
+            S.null $ freeIn z `S.intersection` boundInBody fbranch = Just $ do
                 eq_x_y <-
                   letSubExp "eq_x_y" $ BasicOp $ CmpOp (CmpEq t) x y
                 eq_x_z <-

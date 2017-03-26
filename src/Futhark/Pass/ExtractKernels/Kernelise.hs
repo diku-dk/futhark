@@ -16,7 +16,7 @@ module Futhark.Pass.ExtractKernels.Kernelise
 import Control.Applicative
 import Control.Monad
 import Data.Monoid
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Prelude
 
@@ -81,7 +81,7 @@ transformStm (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
   let consumed = consumedByLambda $ Alias.analyseLambda fold_lam
   nes' <- forM (zip fold_acc_params nes) $ \(p,e) ->
     case e of
-      Var v | not $ paramName p `HS.member` consumed,
+      Var v | not $ paramName p `S.member` consumed,
               not $ primType $ paramType p ->
                 letSubExp "groupstream_mapaccum_copy" $ BasicOp $ Copy v
       _ -> return e
@@ -134,7 +134,7 @@ transformStm (Let pat _ (Op (Stream [] w (Sequential accs) fold_lam arrs)))
   let consumed = consumedByExtLambda $ Alias.analyseExtLambda fold_lam
   accs' <- forM (zip fold_acc_params accs) $ \(p, acc) ->
     case acc of
-      Var v | not $ paramName p `HS.member` consumed,
+      Var v | not $ paramName p `S.member` consumed,
               not $ primType $ paramType p ->
                 letSubExp "streamseq_acc_copy" $ BasicOp $ Copy v
       _     -> return acc

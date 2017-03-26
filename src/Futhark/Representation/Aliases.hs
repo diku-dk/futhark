@@ -45,8 +45,8 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude
 
@@ -90,7 +90,7 @@ instance FreeIn Names' where
   freeIn = const mempty
 
 instance PP.Pretty Names' where
-  ppr = PP.commasep . map PP.ppr . HS.toList . unNames
+  ppr = PP.commasep . map PP.ppr . S.toList . unNames
 
 -- | The aliases of the let-bound variable.
 type VarAliases = Names'
@@ -158,7 +158,7 @@ instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
                    bodyAliases body
               _ -> Nothing
 
-          expAttr = case HS.toList $ unNames consumed of
+          expAttr = case S.toList $ unNames consumed of
             []  -> Nothing
             als -> Just $ PP.oneLine $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
@@ -168,18 +168,18 @@ maybeComment [] = Nothing
 maybeComment cs = Just $ PP.folddoc (PP.</>) cs
 
 aliasComment :: (PP.Pretty a, PP.Pretty b) =>
-                a -> HS.HashSet b -> Maybe PP.Doc
+                a -> S.Set b -> Maybe PP.Doc
 aliasComment name als =
-  case HS.toList als of
+  case S.toList als of
     [] -> Nothing
     als' -> Just $ PP.oneLine $
             PP.text "-- " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
 resultAliasComment :: (PP.Pretty a, PP.Pretty b) =>
-                a -> HS.HashSet b -> Maybe PP.Doc
+                a -> S.Set b -> Maybe PP.Doc
 resultAliasComment name als =
-  case HS.toList als of
+  case S.toList als of
     [] -> Nothing
     als' -> Just $ PP.oneLine $
             PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases " <>
@@ -196,7 +196,7 @@ removeAliases = Rephraser { rephraseExpLore = return . snd
                           }
 
 removeScopeAliases :: Scope (Aliases lore) -> Scope lore
-removeScopeAliases = HM.map unAlias
+removeScopeAliases = M.map unAlias
   where unAlias (LetInfo (_, attr)) = LetInfo attr
         unAlias (FParamInfo attr) = FParamInfo attr
         unAlias (LParamInfo attr) = LParamInfo attr
@@ -274,15 +274,15 @@ mkContextAliases :: (Attributes lore, Aliased lore) =>
 mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
   let ctx = loopResultContext (map fst ctxmerge) (map fst valmerge)
       init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
-      expand als = als <> HS.unions (mapMaybe (`lookup` init_als) (HS.toList als))
+      expand als = als <> S.unions (mapMaybe (`lookup` init_als) (S.toList als))
       merge_als = zip mergenames $
-                  map ((`HS.difference` mergenames_set) . expand) $
+                  map ((`S.difference` mergenames_set) . expand) $
                   bodyAliases body
   in if length ctx == length (patternContextElements pat)
      then map (fromMaybe mempty . flip lookup merge_als . paramName) ctx
      else map (const mempty) $ patternContextElements pat
   where mergenames = map (paramName . fst) $ ctxmerge ++ valmerge
-        mergenames_set = HS.fromList mergenames
+        mergenames_set = S.fromList mergenames
 -- FIXME: handle If here as well.
 mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty
@@ -298,10 +298,10 @@ mkBodyAliases bnds res =
   -- bound in bnds.
   let (aliases, consumed) = mkStmsAliases bnds res
       boundNames =
-        mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds
-      bound = (`HS.member` boundNames)
-      aliases' = map (HS.filter (not . bound)) aliases
-      consumed' = HS.filter (not . bound) consumed
+        mconcat $ map (S.fromList . patternNames . bindingPattern) bnds
+      bound = (`S.member` boundNames)
+      aliases' = map (S.filter (not . bound)) aliases
+      consumed' = S.filter (not . bound) consumed
   in (map Names' aliases', Names' consumed')
 
 mkStmsAliases :: Aliased lore =>
@@ -314,14 +314,14 @@ mkStmsAliases bnds res = delve mempty bnds
         delve (aliasmap, consumed) (bnd:bnds') =
           delve (trackAliases (aliasmap, consumed) bnd) bnds'
         aliasClosure aliasmap names =
-          names `HS.union` mconcat (map look $ HS.toList names)
-          where look k = HM.lookupDefault mempty k aliasmap
+          names `S.union` mconcat (map look $ S.toList names)
+          where look k = M.findWithDefault mempty k aliasmap
 
 -- | Everything consumed in the given bindings and result (even transitively).
 consumedInStms :: Aliased lore => [Stm lore] -> [SubExp] -> Names
 consumedInStms bnds res = snd $ mkStmsAliases bnds res
 
-type AliasesAndConsumed = (HM.HashMap VName Names,
+type AliasesAndConsumed = (M.Map VName Names,
                            Names)
 
 trackAliases :: Aliased lore =>
@@ -329,14 +329,14 @@ trackAliases :: Aliased lore =>
              -> AliasesAndConsumed
 trackAliases (aliasmap, consumed) bnd =
   let pat = bindingPattern bnd
-      als = HM.fromList $
+      als = M.fromList $
             zip (patternNames pat) (map addAliasesOfAliases $ patternAliases pat)
       aliasmap' = als <> aliasmap
       consumed' = consumed <> addAliasesOfAliases (consumedInStm bnd)
   in (aliasmap', consumed')
   where addAliasesOfAliases names = names <> aliasesOfAliases names
-        aliasesOfAliases =  mconcat . map look . HS.toList
-        look k = HM.lookupDefault mempty k aliasmap
+        aliasesOfAliases =  mconcat . map look . S.toList
+        look k = M.findWithDefault mempty k aliasmap
 
 mkAliasedLetStm :: (Attributes lore, CanBeAliased (Op lore)) =>
                    Pattern lore

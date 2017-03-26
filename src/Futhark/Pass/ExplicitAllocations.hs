@@ -14,8 +14,8 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Monad.RWS.Strict
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 
 import Prelude hiding (div, mod, quot, rem)
@@ -90,7 +90,7 @@ type Allocable fromlore tolore =
 -- HACK: This is part of a hack to add loop-invariant allocations to
 -- reduce kernels, because memory expansion does not use range
 -- analysis yet (it should).
-type ChunkMap = HM.HashMap VName SubExp
+type ChunkMap = M.Map VName SubExp
 
 data AllocEnv fromlore tolore  =
   AllocEnv { chunkMap :: ChunkMap
@@ -103,7 +103,7 @@ boundDims m env = env { chunkMap = m <> chunkMap env }
 
 boundDim :: VName -> SubExp -> AllocEnv fromlore tolore
          -> AllocEnv fromlore tolore
-boundDim name se = boundDims $ HM.singleton name se
+boundDim name se = boundDims $ M.singleton name se
 
 -- | Monad for adding allocations to an entire program.
 newtype AllocM fromlore tolore a =
@@ -143,7 +143,7 @@ instance Allocable fromlore OutInKernel =>
   dimAllocationSize (Var v) =
     -- It is important to recurse here, as the substitution may itself
     -- be a chunk size.
-    maybe (return $ Var v) dimAllocationSize =<< asks (HM.lookup v . chunkMap)
+    maybe (return $ Var v) dimAllocationSize =<< asks (M.lookup v . chunkMap)
   dimAllocationSize size =
     return size
 
@@ -161,7 +161,7 @@ instance Allocable fromlore OutInKernel =>
   dimAllocationSize (Var v) =
     -- It is important to recurse here, as the substitution may itself
     -- be a chunk size.
-    maybe (return $ Var v) dimAllocationSize =<< asks (HM.lookup v . chunkMap)
+    maybe (return $ Var v) dimAllocationSize =<< asks (M.lookup v . chunkMap)
   dimAllocationSize size =
     return size
 
@@ -538,7 +538,7 @@ memoryInRetType (ExtRetType ts) =
           return $ ReturnsArray bt shape u $ ReturnsNewBlock i Nothing
 
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
-startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
+startOfFreeIDRange = (1+) . S.foldl' max 0 . shapeContext
 
 allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
 allocInFun (FunDef entry fname rettype params fbody) =
@@ -648,7 +648,7 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
         (_valparams, valinit) = unzip val
         (ctxres, valres) = splitAt (length ctx) bodyres
         formBinds (ForLoop i it _) =
-          localScope $ HM.singleton i $ IndexInfo it
+          localScope $ M.singleton i $ IndexInfo it
         formBinds (WhileLoop _) =
           id
 allocInExp (Apply fname args rettype) = do
@@ -741,7 +741,7 @@ instance SizeSubst op => SizeSubst (MemOp op) where
 
 instance SizeSubst (KernelExp lore) where
   opSizeSubst (Pattern _ [size]) (SplitSpace _ _ _ elems_per_thread) =
-    HM.singleton (patElemName size) elems_per_thread
+    M.singleton (patElemName size) elems_per_thread
   opSizeSubst _ _ = mempty
 
 sizeSubst :: SizeSubst (Op lore) => Stm lore -> ChunkMap
@@ -762,8 +762,8 @@ allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries = do
     allocInChunkedParameters (LeafExp block_offset int32) $
     zip arr_params arr_summaries
 
-  body' <- localScope (HM.insert block_size (IndexInfo Int32) $
-                       HM.insert block_offset (IndexInfo Int32) $
+  body' <- localScope (M.insert block_size (IndexInfo Int32) $
+                       M.insert block_offset (IndexInfo Int32) $
                        scopeOfLParams $ acc_params' ++ arr_params')  $
            local (boundDim block_size maxchunk) $ do
            body' <- allocInBodyNoDirect body
