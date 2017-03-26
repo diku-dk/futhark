@@ -78,7 +78,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
   map_out_arrs <- forM (drop num_redres $ patternIdents pat) $ \(Ident name t) -> do
     tmp <- letExp (baseString name <> "_out_in") $
            BasicOp $ Scratch (elemType t) (arrayDims t)
-    -- This reshape will not always work.
+    -- This reshape will not always work. TODO
     -- For example if the "map" part takes an input a 1D array and produces a 2D
     -- array, this is clearly wrong. See ex3.fut
     letExp (baseString name ++ "_out_in") $
@@ -571,8 +571,10 @@ smallKernel segment_size num_segments cs in_arrs scratch_arrs
   let kernel_return_types = red_ts ++ map_ts
 
   let wasted_thread_part1 = do
-        unless (all primType kernel_return_types) $ fail "TODO: segreodmap, when using GroupScan, cannot handle non-PrimType return types for fold_lam"
-        let dummy_vals = map (Constant . blankPrimValue . elemType) kernel_return_types
+        let create_dummy_val (Prim ty) = return $ Constant $ blankPrimValue ty
+            create_dummy_val (Array ty sh _) = letSubExp "dummy" $ BasicOp $ Scratch ty (shapeDims sh)
+            create_dummy_val Mem{} = fail "segredomap, 'Mem' used as result type"
+        dummy_vals <- mapM create_dummy_val kernel_return_types
         return (negone : dummy_vals)
 
   let normal_thread_part1 = do
