@@ -584,12 +584,14 @@ simplifyIndexing vtable seType ocs idd inds consuming =
           + primExpFromSubExp (IntType to_it) x
       | [DimSlice i_offset i_n i_stride] <- inds ->
           Just $ do
-            i_offset' <- letSubExp "iota_offset" $
-                         BasicOp $ BinOp (Add Int32) x i_offset
-            i_stride' <- letSubExp "iota_offset" $
-                         BasicOp $ BinOp (Mul Int32) s i_stride
+            i_offset' <- asIntS to_it i_offset
+            i_stride' <- asIntS to_it i_stride
+            i_offset'' <- letSubExp "iota_offset" $
+                          BasicOp $ BinOp (Add Int32) x i_offset'
+            i_stride'' <- letSubExp "iota_offset" $
+                          BasicOp $ BinOp (Mul Int32) s i_stride'
             fmap SubExpResult $ letSubExp "slice_iota" $
-              BasicOp $ Iota i_n i_offset' i_stride' to_it
+              BasicOp $ Iota i_n i_offset'' i_stride'' to_it
 
     Just (Rotate cs offsets a) -> Just $ do
       dims <- arrayDims <$> lookupType a
