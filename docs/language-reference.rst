@@ -656,7 +656,7 @@ the neutral element for ``f``.  The function ``f`` must be
 associative.  If it is not, the return value is unspecified.
 
 ``reduce_comm f x a``
-....................
+.....................
 
 Like ``reduce``, but with the added guarantee that the function ``f``
 is *commutative*.  This lets the compiler generate more efficient
