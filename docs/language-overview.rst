@@ -253,7 +253,7 @@ parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
   let dotProduct(a: [n]i32, b: [n]i32): i32 =
-    reduce (+) 0 (zipWith (*) a b)
+    reduce (+) 0 (map (*) a b)
 
 Or matrix multiplication::
 
