@@ -8,7 +8,7 @@ module type MT = {
 module M0: MT = {
   module M = {
     type t = i32
-    val x = 0
+    let x = 0
     fun f (y: t) = y + 1
   }
 }

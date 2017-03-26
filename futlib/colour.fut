@@ -129,18 +129,18 @@ module colourspace(C: colour): colourspace with colour = C.colour = {
     in from_rgba (r - 0.2f32) (g - 0.2f32) (b - 0.2f32) a
 
   -- Basic colours
-  val black: colour = from_rgba 0f32 0f32 0f32 1f32
-  val red: colour = from_rgba 1f32 0f32 0f32 1f32
-  val green: colour = from_rgba 0f32 1f32 0f32 1f32
-  val blue: colour = from_rgba 0f32 0f32 1f32 1f32
-  val white: colour = from_rgba 1f32 1f32 1f32 1f32
-  val brown: colour = from_rgba 0.49f32 0.19f32 0.11f32 1f32
+  let black: colour = from_rgba 0f32 0f32 0f32 1f32
+  let red: colour = from_rgba 1f32 0f32 0f32 1f32
+  let green: colour = from_rgba 0f32 1f32 0f32 1f32
+  let blue: colour = from_rgba 0f32 0f32 1f32 1f32
+  let white: colour = from_rgba 1f32 1f32 1f32 1f32
+  let brown: colour = from_rgba 0.49f32 0.19f32 0.11f32 1f32
 
   -- Derived colours
-  val yellow: colour = add red green
-  val orange: colour = add yellow red
-  val magenta: colour = add red blue
-  val violet: colour = add magenta blue
+  let yellow: colour = add red green
+  let orange: colour = add yellow red
+  let magenta: colour = add red blue
+  let violet: colour = add magenta blue
 
   fun gray (d: f32): colour = from_rgba d d d 1f32
 }

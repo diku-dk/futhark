@@ -14,7 +14,7 @@ module type SIG = {
 module Struct: SIG = {
   type t = (i32,i32)
 
-  val x: (i32, i32) = (2,2)
+  let x: (i32, i32) = (2,2)
 
   fun inject (x: i32) (y: i32): t = (x, y)
   fun extract (v:t): t = v

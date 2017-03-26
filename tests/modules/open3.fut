@@ -5,14 +5,14 @@
 -- output { 1 3 }
 
 module M1 = {
-  val x = 1
+  let x = 1
   module M2 = {
-    val y = 2
+    let y = 2
   }
 }
 
 module M2 = {
-  val y = 3
+  let y = 3
 }
 
 open M1 M2

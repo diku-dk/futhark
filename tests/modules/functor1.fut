@@ -15,16 +15,16 @@ module Int = {
   type num = i32
   fun plus (x: i32) (y: i32): i32 = x + y
   fun mult (x: i32) (y: i32): i32 = x * y
-  val one: i32 = 1
-  val zero: i32 = 0
+  let one: i32 = 1
+  let zero: i32 = 0
 }
 
 module Float32 = {
   type num = f32
   fun plus (x: f32) (y: f32): f32 = x + y
   fun mult (x: f32) (y: f32): f32 = x * y
-  val one: f32 = 1f32
-  val zero: f32 = 0f32
+  let one: f32 = 1f32
+  let zero: f32 = 0f32
 }
 
 module DotProd(T: NUMERIC) = {

@@ -55,10 +55,10 @@ open ({
                      hour: i32,
                      minute: i32 }
 
-  val hours_in_day = 24
-  val minutes_in_day = hours_in_day * 60
-  val fminutes_in_day = f64 minutes_in_day
-  val minutes_to_noon = (hours_in_day / 2) * 60
+  let hours_in_day = 24
+  let minutes_in_day = hours_in_day * 60
+  let fminutes_in_day = f64 minutes_in_day
+  let minutes_to_noon = (hours_in_day / 2) * 60
 
   -- Communications of the ACM by Henry F. Fliegel and Thomas C. Van Flandern,
   -- ``A Machine Algorithm for Processing Calendar Dates'',
@@ -115,9 +115,9 @@ open ({
   fun int_of_date (x: date) = x
   fun date_of_int (x: i32) = x
 
-  val fminutes_in_365 = f64 (minutes_in_day * 365)
-  val inv_fminutes_in_365 = 1.0 / fminutes_in_365
-  val inv_fminutes_in_day = 1.0 / fminutes_in_day
+  let fminutes_in_365 = f64 (minutes_in_day * 365)
+  let inv_fminutes_in_365 = 1.0 / fminutes_in_365
+  let inv_fminutes_in_day = 1.0 / fminutes_in_day
 
   fun add_act_365 (t: date) (dt: f64) =
     date_of_int (i32 (f64 (int_of_date t) + fminutes_in_365 * dt))

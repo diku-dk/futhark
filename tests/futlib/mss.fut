@@ -9,7 +9,7 @@ module Int_measure = {
   type t = i32
   type m = i32
 
-  val zero = 0
+  let zero = 0
   fun max (x: i32) (y: i32) = i32.max x y
   fun combine (x: i32) (y: i32) = x + y
   fun single (x: i32) = x
@@ -21,7 +21,7 @@ module Weird_measure = {
 
   fun asInt ((x,xlen): m) = x + xlen
 
-  val zero = (0, 0)
+  let zero = (0, 0)
   -- Is this max actually associative?
   fun max (x: m) (y: m) = if asInt x < asInt y then y else x
   fun combine ((x,xlen): m) ((y,ylen): m) = (x+y, xlen+ylen)
