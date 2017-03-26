@@ -13,7 +13,7 @@ module type SIG = {
 module Struct: SIG = {
   type t = (i32,i32)
 
-  val x: (i32, i32) = (2,2)
+  let x: (i32, i32) = (2,2)
 
   fun f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }

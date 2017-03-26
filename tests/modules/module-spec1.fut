@@ -9,7 +9,7 @@ module PM(P: {type t val x: t module PM: {val f: t -> t}}) = {
 
 module M = PM({
   type t = i32
-  val x = 0
+  let x = 0
   module PM = {
     fun f(a: i32) = a + 1
   }

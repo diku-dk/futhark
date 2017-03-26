@@ -3,10 +3,10 @@
 
 fun mod(x: i32, y: i32): i32 = x - (x/y)*y
 
-val hours_in_dayI: i32 = 24
-val minutes_in_dayI: i32 = hours_in_dayI * 60
-val minutes_to_noonI: i32 = (hours_in_dayI / 2) * 60
-val minutes_in_day: f64 = 24.0*60.0
+let hours_in_dayI: i32 = 24
+let minutes_in_dayI: i32 = hours_in_dayI * 60
+let minutes_to_noonI: i32 = (hours_in_dayI / 2) * 60
+let minutes_in_day: f64 = 24.0*60.0
 
 fun date_of_gregorian(date:  (i32,i32,i32,i32,i32)): i32 =
   let (year, month, day, hour, mins) = date

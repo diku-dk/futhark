@@ -725,7 +725,7 @@ Declaring Functions and Values
            : | ("fun" | "entry") `pat` `binop` `pat` [":" `ty_exp`] "=" `exp`
 
 .. productionlist::
-   val_bind: "val" `id` [":" `ty_exp`] "=" `exp`
+   val_bind: "let" `id` [":" `ty_exp`] "=" `exp`
 
 Functions and values must be defined before they are used.  A function
 declaration must specify the name, parameters, return type, and body
@@ -800,12 +800,12 @@ Value Declarations
 
 A named value/constant can be declared as follows::
 
-  val name: type = definition
+  let name: type = definition
 
 The definition can be an arbitrary expression, including function
-calls and other values.  You can even define circular values, although
-these will likely result in an infinite loop at execution.  The type
-annotation can be elided if the value is defined before it is used.
+calls and other values, although they must be in scope before the
+value is defined.  The type annotation can be elided if the value is
+defined before it is used.
 
 Values can be used in shape declarations, except in the return value
 of entry points.

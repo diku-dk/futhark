@@ -111,6 +111,7 @@ keyword s =
     "in"           -> IN
     "default"      -> DEFAULT
     "fun"          -> FUN
+    "val"          -> VAL
     "for"          -> FOR
     "do"           -> DO
     "with"         -> WITH
@@ -148,7 +149,6 @@ keyword s =
     "type"         -> TYPE
     "entry"        -> ENTRY
     "module"       -> MODULE
-    "val"          -> VAL
     "open"         -> OPEN
     _              -> ID $ nameFromText s
 

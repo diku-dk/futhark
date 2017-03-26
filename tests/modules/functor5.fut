@@ -2,11 +2,11 @@
 
 module type mt = { val x: i32 }
 
-module m1: mt = { val x = 2 }
+module m1: mt = { let x = 2 }
 
 module f(M: mt) = {
   open M
-  val y = x + 2
+  let y = x + 2
 }
 
 module m2 = f(m1)

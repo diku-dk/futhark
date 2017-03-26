@@ -285,11 +285,11 @@ module f64: (real with t = f64) = {
   fun isinf (x: f64) = intrinsics.isinf64 x
   fun isnan (x: f64) = intrinsics.isnan64 x
 
-  val inf = 1f64 / 0f64
-  val nan = 0f64 / 0f64
+  let inf = 1f64 / 0f64
+  let nan = 0f64 / 0f64
 
-  val pi = 3.1415926535897932384626433832795028841971693993751058209749445923078164062f64
-  val e = 2.718281828459045235360287471352662497757247093699959574966967627724076630353f64
+  let pi = 3.1415926535897932384626433832795028841971693993751058209749445923078164062f64
+  let e = 2.718281828459045235360287471352662497757247093699959574966967627724076630353f64
 }
 
 module f32: (real with t = f32) = {
@@ -330,10 +330,9 @@ module f32: (real with t = f32) = {
   fun isinf (x: f32) = intrinsics.isinf32 x
   fun isnan (x: f32) = intrinsics.isnan32 x
 
-  val inf = 1f32 / 0f32
-  val nan = 0f32 / 0f32
+  let inf = 1f32 / 0f32
+  let nan = 0f32 / 0f32
 
-  val pi = f32 f64.pi
-  val e = f32 f64.pi
-
+  let pi = f32 f64.pi
+  let e = f32 f64.pi
 }

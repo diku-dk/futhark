@@ -394,10 +394,10 @@ Fun     : fun id many1(Param) maybeAscription(TypeExpDecl) '=' Exp
           }
 ;
 
-Val : val id ':' TypeExpDecl '=' Exp
+Val : let id ':' TypeExpDecl '=' Exp
       { let L loc (ID name) = $2
         in ValBind name (Just $ declaredType $4) NoInfo $6 loc }
-      | val id '=' Exp
+    | let id '=' Exp
       { let L loc (ID name) = $2
         in ValBind name Nothing NoInfo $4 loc }
 
