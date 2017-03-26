@@ -14,7 +14,7 @@
 -- }
 -- structure { Write 1 }
 
-fun main(indexes: [k]i32,
+let main(indexes: [k]i32,
        values: [k]i32,
        array1: *[n]i32,
        array2: *[n]i32,

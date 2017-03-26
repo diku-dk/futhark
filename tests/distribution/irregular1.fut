@@ -27,10 +27,10 @@
 -- }
 -- structure distributed { }
 
-fun addRows (xs: []i32, ys: []i32): []i32 =
+let addRows (xs: []i32, ys: []i32): []i32 =
   map (+) xs ys
 
-fun main (xssss: [][][][]i32, cs: []i32): [][][][]i32 =
+let main (xssss: [][][][]i32, cs: []i32): [][][][]i32 =
   map (\(xsss: [][][]i32) (c: i32): [][][]i32  ->
             let yss = unsafe reshape (2,c) xsss in
             map  (\(xss: [][]i32): [][]i32  ->

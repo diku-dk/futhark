@@ -10,4 +10,4 @@ module M1: MT = {
   module M = { let QUUX2 = 2 }
 }
 
-fun main() = M1.M.x
+let main() = M1.M.x

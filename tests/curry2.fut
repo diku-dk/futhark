@@ -7,7 +7,7 @@
 --   [9,6,5,4,3,2]
 -- }
 
-fun add(x: i32) (y: i32): i32 = x + y
+let add(x: i32) (y: i32): i32 = x + y
 
-fun main(a: []i32): []i32 =
+let main(a: []i32): []i32 =
   map (add(1)) a

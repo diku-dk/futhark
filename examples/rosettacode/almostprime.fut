@@ -6,7 +6,7 @@
 --           [4i32, 6i32, 9i32, 10i32, 14i32, 15i32, 21i32, 22i32, 25i32, 26i32]] }
 
 
-fun kprime(n: i32, k: i32): bool =
+let kprime(n: i32, k: i32): bool =
   let (p,f) = (2, 0)
   loop ((n, p, f)) = while f < k && p*p <= n do
     loop ((n,f)) = while 0 == n % p do
@@ -14,7 +14,7 @@ fun kprime(n: i32, k: i32): bool =
     in (n, p+1, f)
   in f + (if n > 1 then 1 else 0) == k
 
-fun main(m: i32): [][]i32 =
+let main(m: i32): [][]i32 =
   map (\k: [10]i32 ->
          let ps = replicate 10 0
          loop ((i,c,ps) = (2,0,ps)) = while c < 10 do

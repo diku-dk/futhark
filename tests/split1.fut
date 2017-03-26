@@ -6,5 +6,5 @@
 -- output {
 --   [9.000000, 8.000000]
 -- }
-fun main(n: i32, a: []f64): []f64 =
+let main(n: i32, a: []f64): []f64 =
   let (first, rest) = split (n) a in first

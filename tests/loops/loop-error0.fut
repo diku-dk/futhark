@@ -1,6 +1,6 @@
 -- ==
 -- error:
-fun main(): ([]f64,[][]f64) =
+let main(): ([]f64,[][]f64) =
   let e_rows = empty([]f64)
   let arr = copy(e_rows)
   let acc = copy([1.0]) in

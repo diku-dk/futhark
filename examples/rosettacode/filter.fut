@@ -10,5 +10,5 @@
 -- input { [1,3] }
 -- output { empty(i32) }
 
-fun main(as: []i32): []i32 =
+let main(as: []i32): []i32 =
   filter (\x -> x%2 == 0) as

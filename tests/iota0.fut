@@ -5,4 +5,4 @@
 -- input { 2 }
 -- output { [0,1] }
 
-fun main(n: i32): []i32 = iota(n)
+let main(n: i32): []i32 = iota(n)

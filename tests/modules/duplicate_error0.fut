@@ -3,9 +3,9 @@
 -- error: .*Dup.*
 
 module Foo = {
-  fun foo(): i32 = 1
+  let foo(): i32 = 1
 }
-fun bar(): i32 = 1
-fun bar(): i32 = 2
+let bar(): i32 = 1
+let bar(): i32 = 2
 
-fun main(): i32 = 0
+let main(): i32 = 0

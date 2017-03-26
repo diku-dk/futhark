@@ -6,5 +6,5 @@
 -- input { 255u8 1u8 } output { false false false }
 -- input {  1u8 255u8 } output { true false true }
 
-fun main(x: u8, y: u8): (bool, bool, bool) =
+let main(x: u8, y: u8): (bool, bool, bool) =
   (x < y, x == y, x <= y)

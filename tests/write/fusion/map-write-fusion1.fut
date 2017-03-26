@@ -10,7 +10,7 @@
 -- }
 -- structure { Write 1 }
 
-fun main(indexes: [k]i32,
+let main(indexes: [k]i32,
        values: [k]i32,
        array: *[n]i32): [n]i32 =
   let values' = map (+) indexes values

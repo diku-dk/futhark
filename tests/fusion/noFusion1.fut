@@ -1,8 +1,8 @@
 -- ==
-fun f(a: f64): f64 = a + 3.0
-fun g(a: f64) (b: f64): f64 = a * b
+let f(a: f64): f64 = a + 3.0
+let g(a: f64) (b: f64): f64 = a * b
 
-fun main(arr: []f64): f64 =
+let main(arr: []f64): f64 =
     let n = i32(arr[0])
     let x = map f arr   in
     loop(arr) = for i < n do

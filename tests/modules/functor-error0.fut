@@ -8,4 +8,4 @@ module F (P: { val x: i32 }) = {
 
 module F' = F({let x: f32 = 1.0f32})
 
-fun main(): i32 = F'.x
+let main(): i32 = F'.x

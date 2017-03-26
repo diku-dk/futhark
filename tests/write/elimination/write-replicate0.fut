@@ -9,6 +9,6 @@
 -- }
 -- structure { Write 1 }
 
-fun main(indexes: [k]i32,
+let main(indexes: [k]i32,
        array: *[n]i32): [n]i32 =
   write indexes (replicate k 5) (array)

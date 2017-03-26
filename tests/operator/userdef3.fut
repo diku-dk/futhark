@@ -3,6 +3,6 @@
 -- ==
 -- input { 2 3 } output { 5 }
 
-fun (x: i32) - (y: i32) = x + y
+let (x: i32) - (y: i32) = x + y
 
-fun main (x: i32, y: i32) = x - y
+let main (x: i32, y: i32) = x - y

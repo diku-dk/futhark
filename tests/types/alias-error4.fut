@@ -5,4 +5,4 @@
 
 type foo = bar
 
-fun main(x: foo): foo = x
+let main(x: foo): foo = x

@@ -9,4 +9,4 @@ module intconstant: (constant with t = i32) = {
   let x = 40
 }
 
-fun main(y: i32) = intconstant.x + y
+let main(y: i32) = intconstant.x + y

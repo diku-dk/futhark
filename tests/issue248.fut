@@ -4,9 +4,9 @@
 -- input { [67,67,67,65,65,67,66,65,65,68,65,66,67,65,65,67,68,67,65,67,68,68,66,67,68,68,67,67,67,66,65,68,67,66,67,67,67,65,67,67,67,66,67,67,66,65,67,67] }
 -- output { true }
 
-fun eqb (x: bool) (y: bool): bool =
+let eqb (x: bool) (y: bool): bool =
   (! ((x || y)) || (x && y))
-fun reshape_int (l: i32) (x: []i32): []i32 =
+let reshape_int (l: i32) (x: []i32): []i32 =
   let roundUp = ((l + ((shape (x))[0] - 1)) / (shape (x))[0]) in
   let extend = reshape ((((shape (x))[0] * roundUp))) (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in

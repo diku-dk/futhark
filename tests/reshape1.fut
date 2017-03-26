@@ -8,8 +8,8 @@
 
 import "futlib/math"
 
-fun intsqrt(x: i32): i32 =
+let intsqrt(x: i32): i32 =
     i32(f32.sqrt(f32(x)))
 
-fun main (a: [n]i32): [][]i32 =
+let main (a: [n]i32): [][]i32 =
     reshape (intsqrt(n), intsqrt(n)) a

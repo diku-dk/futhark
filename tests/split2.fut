@@ -8,7 +8,7 @@
 --   [100.000000, 9.000000, 1.000000, 65.000000]
 --   [1, 2, 6, 3]
 -- }
-fun main(n: i32, a1: []f64, a2: []i32): ([]f64, []i32) =
+let main(n: i32, a1: []f64, a2: []i32): ([]f64, []i32) =
   let b = zip a1 a2
   let (first, rest) = split (n) b in
   unzip(first)

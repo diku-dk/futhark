@@ -136,7 +136,6 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '@'             { L $$ AT }
       '\\'            { L $$ BACKSLASH }
-      fun             { L $$ FUN }
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
       '<-'            { L $$ LEFT_ARROW }
@@ -379,7 +378,7 @@ BindingBinOp :: { Name }
                    return name }
       | '-'   { nameFromString "-" }
 
-Fun     : fun id many1(Param) maybeAscription(TypeExpDecl) '=' Exp
+Fun     : let id many1(Param) maybeAscription(TypeExpDecl) '=' Exp
           { let L pos (ID name) = $2
             in FunBind (name==defaultEntryPoint) name (fmap declaredType $4) NoInfo
                (fst $3 : snd $3) $6 pos
@@ -389,7 +388,7 @@ Fun     : fun id many1(Param) maybeAscription(TypeExpDecl) '=' Exp
           { let L pos (ID name) = $2
             in FunBind True name (fmap declaredType $4) NoInfo (fst $3 : snd $3) $6 pos }
 
-        | fun Param BindingBinOp Param maybeAscription(TypeExpDecl) '=' Exp
+        | let Param BindingBinOp Param maybeAscription(TypeExpDecl) '=' Exp
           { FunBind False $3 (fmap declaredType $5) NoInfo [$2,$4] $7 $1
           }
 ;

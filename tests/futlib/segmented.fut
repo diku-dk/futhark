@@ -9,7 +9,7 @@ import "futlib/segmented"
 module i32plus = {
   type t = i32
   let ne = 0
-  fun op (x: i32) (y: i32) = x + y
+  let op (x: i32) (y: i32) = x + y
 }
 
 module segprefixsum = segmented_scan(i32plus)

@@ -6,5 +6,5 @@ import "futlib/linalg"
 
 module f32linalg = linalg(f32)
 
-fun main(A: [n][n]f32): [n][n]f32 =
+let main(A: [n][n]f32): [n][n]f32 =
   f32linalg.inv A

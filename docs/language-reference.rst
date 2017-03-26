@@ -721,8 +721,8 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   fun_bind:   ("fun" | "entry") `id` `pat`+ [":" `ty_exp`] "=" `exp`
-           : | ("fun" | "entry") `pat` `binop` `pat` [":" `ty_exp`] "=" `exp`
+   fun_bind:   ("let" | "entry") `id` `pat`+ [":" `ty_exp`] "=" `exp`
+           : | ("let" | "entry") `pat` `binop` `pat` [":" `ty_exp`] "=" `exp`
 
 .. productionlist::
    val_bind: "let" `id` [":" `ty_exp`] "=" `exp`
@@ -731,7 +731,7 @@ Functions and values must be defined before they are used.  A function
 declaration must specify the name, parameters, return type, and body
 of the function::
 
-  fun name params...: rettype = body
+  let name params...: rettype = body
 
 Type inference is not supported, and functions are fully monomorphic.
 A parameter is written as ``(name: type)``.  Functions may not be
@@ -740,7 +740,7 @@ the return type and parameter types.  These can be used to express
 invariants about the shapes of arrays that are accepted or produced by
 the function, e.g::
 
-  fun f (a: [n]i32) (b: [n]i32): [n]i32 =
+  let f (a: [n]i32) (b: [n]i32): [n]i32 =
     map (+) a b
 
 In general, shape declarations in parameters are fresh names, whilst
@@ -756,11 +756,11 @@ User-Defined Operators
 
 Infix operators are defined much like functions::
 
-  fun (p1: t1) op (p2: t2): rt = ...
+  let (p1: t1) op (p2: t2): rt = ...
 
 For example::
 
-  fun (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
+  let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
 
 A valid operator name is a non-empty sequence of characters chosen
 from the string ``"+-*/%=!><&^"``.  The fixity of an operator is
@@ -840,7 +840,7 @@ attributes are overrided by outer ones::
   type uniqueIntLists = *nonuniqueIntLists
 
   -- Error: using non-unique value for a unique return value.
-  fun uniqueIntLists (nonuniqueIntLists p) = p
+  let uniqueIntLists (nonuniqueIntLists p) = p
 
 
 Module System
@@ -871,7 +871,7 @@ enclosed in curly braces::
 
   module Vec3 = {
     type t = ( f32 , f32 , f32 )
-    fun add(a: t) (b: t): t =
+    let add(a: t) (b: t): t =
       let (a1, a2, a3) = a in
       let (b1, b2, b3) = b in
       (a1 + b1, a2 + b2 , a3 + b3)
@@ -883,7 +883,7 @@ Functions and types within modules can be accessed using dot
 notation::
 
     type vector = Vec3.t
-    fun double(v: vector): vector = Vec3.add v v
+    let double(v: vector): vector = Vec3.add v v
 
 We can also use ``open Vec3`` to bring the names defined by ``Vec3``
 into the current scope.  Multiple modules can be opened simultaneously
@@ -924,7 +924,7 @@ Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
   module Times(M: Addable) = {
-    fun times (x: M.t) (k: int): M.t =
+    let times (x: M.t) (k: int): M.t =
       loop (x' = x) = for i < k do
         T.add x' x
       in x'

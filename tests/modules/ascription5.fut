@@ -14,4 +14,4 @@ module M: MT = {
   module B = { type a = bool type b = i32 }
 }
 
-fun main() = 2
+let main() = 2

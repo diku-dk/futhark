@@ -6,7 +6,7 @@
 -- ==
 -- structure distributed { If/Kernel 0 }
 
-fun main(a: [][]i32): [][]i32 =
+let main(a: [][]i32): [][]i32 =
   map (\(a_r: []i32): []i32  ->
         if a_r[0] > 0
         then map (*2) (a_r)

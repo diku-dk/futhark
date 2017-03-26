@@ -11,7 +11,7 @@
 
 default(f32)
 
-fun main(n_histo: i32, n_image: i32): *[n_histo]f32 =
+let main(n_histo: i32, n_image: i32): *[n_histo]f32 =
   let as = iota(n_image) in
   stream_red_per (\(a: []f32) (b: []f32): *[]f32  ->
                      map (+) a b

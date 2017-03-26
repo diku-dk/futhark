@@ -10,7 +10,7 @@
 
 -- Add a data-driven branch to prevent the compiler from noticing that
 -- this is commutative.
-fun add (b: bool) (x : f32) (y : f32): f32 = if b then x + y else x - y
+let add (b: bool) (x : f32) (y : f32): f32 = if b then x + y else x - y
 
-fun main (b: bool) (xss : [m][n]f32): [m]f32 =
+let main (b: bool) (xss : [m][n]f32): [m]f32 =
   map (\xs -> reduce (add b) 0.0f32 xs) xss

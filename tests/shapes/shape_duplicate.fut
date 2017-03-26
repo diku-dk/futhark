@@ -5,7 +5,7 @@
 -- input { 2 [1,2,3] }
 -- output { 7 }
 
-fun f ((_, elems: [n]i32): (i32,[m]i32)): i32 =
+let f ((_, elems: [n]i32): (i32,[m]i32)): i32 =
   n + m + elems[0]
 
-fun main (x: i32, y: []i32): i32 = f (x, y)
+let main (x: i32, y: []i32): i32 = f (x, y)

@@ -7,5 +7,5 @@
 -- input {  1i64 -1i64 } output { false false false }
 -- input { -2i64 -1i64 } output { true false true }
 
-fun main(x: i64, y: i64): (bool, bool, bool) =
+let main(x: i64, y: i64): (bool, bool, bool) =
   (x < y, x == y, x <= y)

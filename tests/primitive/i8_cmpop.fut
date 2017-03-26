@@ -7,5 +7,5 @@
 -- input {  1i8 -1i8 } output { false false false }
 -- input { -2i8 -1i8 } output { true false true }
 
-fun main(x: i8, y: i8): (bool, bool, bool) =
+let main(x: i8, y: i8): (bool, bool, bool) =
   (x < y, x == y, x <= y)

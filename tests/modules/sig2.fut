@@ -9,4 +9,4 @@ module type S = {
   val f: []t -> t
 }
 
-fun main(): S.t = (0,0)
+let main(): S.t = (0,0)

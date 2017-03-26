@@ -15,5 +15,5 @@
 --           127i8] }
 
 
-fun main(n: u8): []u8 =
+let main(n: u8): []u8 =
   iota n

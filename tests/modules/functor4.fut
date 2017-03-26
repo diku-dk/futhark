@@ -11,15 +11,15 @@ module type foo = {
 module rgba_foo: foo = {
   type foo = i32
 
-  fun mkfoo (x: i32) = x
+  let mkfoo (x: i32) = x
 }
 
 module foospace(C: foo) = {
   open C
 
-  fun frob (x: foo): foo = x
+  let frob (x: foo): foo = x
 }
 
 module rgba = foospace(rgba_foo)
 
-fun main() = 2
+let main() = 2

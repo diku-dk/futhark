@@ -23,10 +23,10 @@
 --    [[[16, 14, 12],
 --      [22, 20, 18]]]]
 -- }
-fun addRows (xs: []i32, ys: []i32): []i32 =
+let addRows (xs: []i32, ys: []i32): []i32 =
   map (+) xs ys
 
-fun main (xssss: [][][][]i32, cs: []i32, y: i32): [][][][]i32 =
+let main (xssss: [][][][]i32, cs: []i32, y: i32): [][][][]i32 =
   map  (\(xsss: [][][]i32, c: i32): [][][]i32  ->
          unsafe
          let yss = reshape (2,c) xsss in

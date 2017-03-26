@@ -9,7 +9,7 @@
 -- input { 10 }
 -- output { [false, true, false, false, true, false, false, false, false, true] }
 
-fun main(n: i32): [n]bool =
+let main(n: i32): [n]bool =
   let is_open = replicate n false
   loop (is_open) = for i < n do
     let js = map (*i+1) (iota n)

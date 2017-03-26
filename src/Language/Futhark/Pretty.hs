@@ -367,14 +367,14 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
     spread (map ppr args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
     where fun | entry     = "entry"
-              | otherwise = "fun"
+              | otherwise = "let"
           retdecl' = case retdecl of
                        Just rettype -> text ":" <+> ppr rettype
                        Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
   ppr (ValBind name maybe_t _ e _) =
-    text "val" <+> ppr name <> t' <+> text "=" <+> ppr e
+    text "let" <+> ppr name <> t' <+> text "=" <+> ppr e
     where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
 

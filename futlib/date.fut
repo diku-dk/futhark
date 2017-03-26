@@ -63,7 +63,7 @@ open ({
   -- Communications of the ACM by Henry F. Fliegel and Thomas C. Van Flandern,
   -- ``A Machine Algorithm for Processing Calendar Dates'',
   -- CACM, volume 11, number 10, October 1968, p. 657
-  fun date_of_gregorian ({year = y, month = m, day = d, hour = hr, minute = mn}: gregorian) =
+  let date_of_gregorian ({year = y, month = m, day = d, hour = hr, minute = mn}: gregorian) =
     ((if m == 1 || m == 2 then
        (1461 * (y + 4800 - 1)) / 4 +
         (367 * (m + 10)) / 12 -
@@ -74,7 +74,7 @@ open ({
          (3 * ((y + 4900) / 100)) / 4) + d - 32075 - 2444238) * minutes_in_day
     + hr * 60 + mn
 
-  fun gregorian_of_date (minutes_since_epoch: i32) =
+  let gregorian_of_date (minutes_since_epoch: i32) =
     let jul = minutes_since_epoch / minutes_in_day
     let l = jul + 68569 + 2444238
     let n = (4 * l) / 146097
@@ -91,42 +91,42 @@ open ({
        then {year = y, month = m, day = d, hour = 12, minute = 0}
        else {year = y, month = m, day = d, hour = daytime / 60, minute = daytime % 60}
 
-  fun leap (year: i32) =
+  let leap (year: i32) =
     year % 4 == 0 && ((year % 400 == 0) || (year % 100 != 0))
 
-  fun end_of_month(year: i32) (month: i32): i32 =
+  let end_of_month(year: i32) (month: i32): i32 =
     if month == 2 && leap(year) then 29
     else if  month == 2 then 28
     else if ( month == 4 || month == 6 || month == 9 || month == 11 ) then 30
     else 31
 
-  fun check_date ((year,month,day): (i32,i32,i32)) =
+  let check_date ((year,month,day): (i32,i32,i32)) =
     1 <= day &&
     1 <= month && month <= 12 &&
     day <= end_of_month year month
 
-  fun date_of_triple (year: i32, month: i32, day: i32) =
+  let date_of_triple (year: i32, month: i32, day: i32) =
     date_of_gregorian {year=year, month=month, day=day, hour=12, minute=0}
 
-  fun triple_of_date (x: date) =
+  let triple_of_date (x: date) =
     let {year, month, day, hour = _, minute = _} = gregorian_of_date x
     in (year, month, day)
 
-  fun int_of_date (x: date) = x
-  fun date_of_int (x: i32) = x
+  let int_of_date (x: date) = x
+  let date_of_int (x: i32) = x
 
   let fminutes_in_365 = f64 (minutes_in_day * 365)
   let inv_fminutes_in_365 = 1.0 / fminutes_in_365
   let inv_fminutes_in_day = 1.0 / fminutes_in_day
 
-  fun add_act_365 (t: date) (dt: f64) =
+  let add_act_365 (t: date) (dt: f64) =
     date_of_int (i32 (f64 (int_of_date t) + fminutes_in_365 * dt))
-  fun add_days (t1: date) (displ: i32) =
+  let add_days (t1: date) (displ: i32) =
     date_of_int(int_of_date t1 + displ * minutes_in_day)
-  fun sub_days (t1: date) (displ: i32) =
+  let sub_days (t1: date) (displ: i32) =
     add_days t1 (-displ)
 
-  fun add_months (date: date) (nbmonths: i32) =
+  let add_months (date: date) (nbmonths: i32) =
     let {year=y, month=m, day=d, hour=h, minute=min} = gregorian_of_date date
     let m = m + nbmonths
     let (y, m) = (y + (m-1) / 12, (m-1) % 12 + 1)
@@ -137,15 +137,15 @@ open ({
                           hour=h,
                           minute=min}
 
-  fun days_between (t1: date) (t2: date) =
+  let days_between (t1: date) (t2: date) =
     (f64 (int_of_date t2 - int_of_date t1)) * inv_fminutes_in_day
 
-  fun diff_dates (t1: date) (t2: date) =
+  let diff_dates (t1: date) (t2: date) =
     days_between t1 t2 / 365.0
 
-  fun same_date (x: date) (y: date) = x == y
+  let same_date (x: date) (y: date) = x == y
 
-  fun latest (x: date) (y: date) = i32.max x y
-  fun earliest (x: date) (y: date) = i32.min x y
+  let latest (x: date) (y: date) = i32.max x y
+  let earliest (x: date) (y: date) = i32.min x y
 
 } : date)

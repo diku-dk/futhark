@@ -3,5 +3,5 @@
 -- ==
 -- input { [[1,2],[3,4],[5,6]] } output { 3 }
 
-fun main(arg: [n][]i32): i32 =
+let main(arg: [n][]i32): i32 =
   n

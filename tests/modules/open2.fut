@@ -14,4 +14,4 @@ module M2 = {
 
 open M1 M2
 
-fun main() = the_value
+let main() = the_value

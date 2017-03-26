@@ -112,7 +112,7 @@ be maintained as *merge parameters* of the Futhark ``do``-loop.
 The Futhark program resulting from a straightforward port looks as
 follows::
 
-  fun main(a: u16): u16 =
+  let main(a: u16): u16 =
     let b = 0x10001u32
     let u = 0i32
     let v = 1i32

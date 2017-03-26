@@ -7,4 +7,4 @@
 -- output {
 --   [2, 3, 4]
 -- }
-fun main(a: []i32, y: i32): []i32 = map (\(x: i32): i32  -> (x+y)) a
+let main(a: []i32, y: i32): []i32 = map (\(x: i32): i32  -> (x+y)) a

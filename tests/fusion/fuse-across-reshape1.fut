@@ -7,7 +7,7 @@
 -- structure {
 --   Map 2
 -- }
-fun main(): [][]i32 =
+let main(): [][]i32 =
   let n = 9
   let a = map (+1) (iota(n))
   let b = reshape (3,3) a in

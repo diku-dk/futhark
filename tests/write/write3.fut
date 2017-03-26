@@ -8,7 +8,7 @@
 --   true
 -- }
 
-fun main(n: i32): bool =
+let main(n: i32): bool =
   let indexes = iota(n)
   let values = map (+2) indexes
   let array = map (+5) indexes

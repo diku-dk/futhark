@@ -18,4 +18,4 @@ module f2(R2: rules) = {
 
 module conway = f2({type cell = bool})
 
-fun main(x: conway.cell): conway.cell = x
+let main(x: conway.cell): conway.cell = x

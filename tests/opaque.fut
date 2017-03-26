@@ -3,4 +3,4 @@
 -- input {} output {4}
 -- structure { BinOp 1 Opaque 1 }
 
-fun main() = intrinsics.opaque 2 + 2
+let main() = intrinsics.opaque 2 + 2

@@ -4,6 +4,6 @@
 
 let n: i32 = 3
 
-fun f(): [n]i32 = replicate n 0
+let f(): [n]i32 = replicate n 0
 
-fun main(): []i32 = f ()
+let main(): []i32 = f ()

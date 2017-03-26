@@ -10,5 +10,5 @@
 -- }
 -- structure { Write 1 }
 
-fun main(k: i32, array: *[n]i32): [n]i32 =
+let main(k: i32, array: *[n]i32): [n]i32 =
   write (iota k) (map (-9) (iota k)) array

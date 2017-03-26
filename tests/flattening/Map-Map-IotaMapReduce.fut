@@ -8,7 +8,7 @@
 -- , [21, 7, 0 ]
 -- ]
 -- }
-fun main (xss: [m][n]i32, ys: [m]i32): [][]i32 =
+let main (xss: [m][n]i32, ys: [m]i32): [][]i32 =
   map (\(xs: [n]i32, y: i32): [n]i32  ->
          map  (\(x: i32): i32  ->
                 let tmp1 = iota(x)

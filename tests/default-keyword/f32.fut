@@ -7,4 +7,4 @@
 
 default(f32)
 
-fun main(): f32 = 0.1
+let main(): f32 = 0.1

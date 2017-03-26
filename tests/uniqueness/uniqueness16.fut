@@ -5,16 +5,16 @@
 
 default(f32)
 
-fun iota32(num: i32): [num]f32 =
+let iota32(num: i32): [num]f32 =
     map f32 (iota(num))
 
-fun reduceBins(acc: *[numBins]i64) (elm: *[numBins]i64): *[numBins]i64 =
+let reduceBins(acc: *[numBins]i64) (elm: *[numBins]i64): *[numBins]i64 =
     loop (newVal = acc) = for i < numBins do
         let newVal[i] = newVal[i] + elm[i] in newVal
     in
         newVal
 
-fun doCompute(data1:
+let doCompute(data1:
     [num1]f32,
     data2: [num2]f32,
     numBins: i32,
@@ -33,7 +33,7 @@ fun doCompute(data1:
     in
     reduce reduceBins (replicate numBins2 0i64) value
 
-fun main(numBins: i32): *[]i64 =
+let main(numBins: i32): *[]i64 =
     let binb = map (\(k: f32): f32  -> k) (iota32(numBins + 1))
     let datapoints = iota32(10)
     let randompoints = replicate 1 datapoints

@@ -46,7 +46,7 @@
 --   [8, -4, 9, 1, 77, 100]
 -- }
 
-fun main(indexes: [k]i32,
+let main(indexes: [k]i32,
        values: [k]i32,
        array: *[n]i32): [n]i32 =
   write indexes values array

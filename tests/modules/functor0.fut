@@ -7,4 +7,4 @@ module S0: SIG = { let x: i32 = 2 }
 module F0(P: SIG) = { let x: i32 = P.x + 1 }
 module S1 = F0(S0)
 
-fun main(x: i32): i32 = x + S1.x
+let main(x: i32): i32 = x + S1.x

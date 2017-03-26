@@ -6,4 +6,4 @@
 
 val n: i32 = 3
 
-fun main(): [n]i32 = replicate n 0
+let main(): [n]i32 = replicate n 0

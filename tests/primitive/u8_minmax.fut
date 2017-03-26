@@ -6,6 +6,6 @@
 
 import "futlib/math"
 
-fun main(x: u8) (y: u8): (u8,u8) =
+let main(x: u8) (y: u8): (u8,u8) =
   (u8.max x y,
    u8.min x y)
