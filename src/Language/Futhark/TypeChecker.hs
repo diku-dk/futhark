@@ -78,7 +78,7 @@ initialEnv = intrinsicsModule
   where initialTypeTable = M.fromList $ mapMaybe addIntrinsicT $ M.toList intrinsics
         initialModTable = M.singleton intrinsics_v (ModEnv intrinsicsModule)
 
-        intrinsics_v = ID (nameFromString "intrinsics", 0)
+        intrinsics_v = VName (nameFromString "intrinsics") 0
 
         intrinsicsModule = Env mempty initialTypeTable mempty mempty intrinsicsNameMap
 

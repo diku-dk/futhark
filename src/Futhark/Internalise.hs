@@ -64,7 +64,7 @@ builtinFtable = M.fromList $ mapMaybe addBuiltin $ M.toList E.intrinsics
             const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
            (E.Prim t, map E.Prim paramts))
           where params =
-                  [Param (ID (nameFromString "x", i)) (I.Prim $ internalisePrimType pt)
+                  [Param (VName (nameFromString "x") i) (I.Prim $ internalisePrimType pt)
                   | (i,pt) <- zip [0..] paramts]
         addBuiltin _ =
           Nothing
