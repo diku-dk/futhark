@@ -354,7 +354,7 @@ simpleCall :: String -> [PyExp] -> PyExp
 simpleCall fname = Call (Var fname) . map Arg
 
 compileName :: VName -> String
-compileName = zEncodeString . textual
+compileName = zEncodeString . pretty
 
 compileDim :: Imp.DimSize -> PyExp
 compileDim (Imp.ConstSize i) = Constant $ value i

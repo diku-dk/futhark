@@ -358,7 +358,7 @@ getValues dir (InFile file) = do
     Right vs -> return vs
   where file' = dir </> file
 
--- | Extract a textual representation of some 'Values'.  In the IO
+-- | Extract a pretty representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
 -- guarantee that the resulting text yields a readable value.
 getValuesText :: MonadIO m => FilePath -> Values -> m T.Text

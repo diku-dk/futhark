@@ -273,7 +273,7 @@ item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . zEncodeString . textual
+  toIdent = C.toIdent . zEncodeString . pretty
 
 instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]
@@ -1202,7 +1202,7 @@ compileCode (Allocate name (Count e) space) = do
   allocMem name size space
 
 compileCode (For i it bound body) = do
-  let i' = textual i
+  let i' = pretty i
       it' = intTypeToCType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body

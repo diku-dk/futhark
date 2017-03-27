@@ -437,7 +437,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
   _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp
   return ()
     where checkOuterDim chunknm outdim = do
-            let chunk_str = textual chunknm
+            let chunk_str = pretty chunknm
             case outdim of
                     Constant _ ->
                       TC.bad $ TC.TypeError

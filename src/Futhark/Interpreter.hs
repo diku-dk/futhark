@@ -132,7 +132,7 @@ bindVar (BindInPlace _ src slice) val = do
   slice' <- mapM evalDimIndex slice
   case srcv of
     ArrayVal arr bt shape -> do
-      is <- indexArray (textual src) slice' shape
+      is <- indexArray (pretty src) slice' shape
       case (is, val) of
         ([i], PrimVal bv) ->
           return $ ArrayVal (arr // [(i, bv)]) bt shape

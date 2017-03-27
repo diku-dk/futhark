@@ -748,7 +748,7 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
       return ()
     _        ->
       TypeCheck.bad $ TypeCheck.TypeError $
-      "Variable " ++ textual v ++
+      "Variable " ++ pretty v ++
       " used as memory block, but is of type " ++
       pretty t ++ "."
 

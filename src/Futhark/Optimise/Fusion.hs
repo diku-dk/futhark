@@ -771,7 +771,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac = do
       case M.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ Error
                                    ("In Fusion.hs, replaceSOAC, outArr in ker_name "
-                                    ++"which is not in Res: "++textual (unKernName knm))
+                                    ++"which is not in Res: "++pretty (unKernName knm))
         Just ker -> do
           when (null $ fusedVars ker) $
             badFusionGM $ Error

@@ -105,18 +105,18 @@ instance Checkable lore => Show (ErrorCase lore) where
   show (DupDefinitionError name) =
     "Duplicate definition of function " ++ nameToString name ++ ""
   show (DupParamError funname paramname) =
-    "Parameter " ++ textual paramname ++
+    "Parameter " ++ pretty paramname ++
     " mentioned multiple times in argument list of function " ++
     nameToString funname ++ "."
   show (DupPatternError name) =
-    "Variable " ++ textual name ++ " bound twice in pattern."
+    "Variable " ++ pretty name ++ " bound twice in pattern."
   show (InvalidPatternError pat t desc) =
     "Pattern " ++ pretty pat ++
     " cannot match value of type " ++ prettyTuple t ++ end
     where end = case desc of Nothing -> "."
                              Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError name) =
-    "Use of unknown variable " ++ textual name ++ "."
+    "Use of unknown variable " ++ pretty name ++ "."
   show (UnknownFunctionError fname) =
     "Call of unknown function " ++ nameToString fname ++ "."
   show (ParameterMismatch fname expected got) =
@@ -135,7 +135,7 @@ instance Checkable lore => Show (ErrorCase lore) where
     ", but derived to be " ++ pretty got ++ "."
   show (ReturnAliased fname name) =
     "Unique return value of function " ++ nameToString fname ++
-    " is aliased to " ++ textual name ++ ", which is not consumed."
+    " is aliased to " ++ pretty name ++ ", which is not consumed."
   show (UniqueReturnAliased fname) =
     "A unique tuple element of return value of function " ++
     nameToString fname ++ " is aliased to some other tuple component."
@@ -145,7 +145,7 @@ instance Checkable lore => Show (ErrorCase lore) where
   show (PermutationError perm rank name) =
     "The permutation (" ++ intercalate ", " (map show perm) ++
     ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ "."
-    where name' = maybe "" ((++" ") . textual) name
+    where name' = maybe "" ((++" ") . pretty) name
 
 -- | A type error.
 data TypeError lore = Error [String] (ErrorCase lore)
@@ -958,7 +958,7 @@ matchExtPattern pat ts = do
     bad $ InvalidPatternError (Pattern [] pat) ts Nothing
   evalStateT (zipWithM_ checkStm' restpat ts') []
   where checkStm' patElem@(PatElem name _ _) t = do
-          lift $ checkAnnotation ("binding of variable " ++ textual name)
+          lift $ checkAnnotation ("binding of variable " ++ pretty name)
             (patElemRequires patElem) t
           add name
 

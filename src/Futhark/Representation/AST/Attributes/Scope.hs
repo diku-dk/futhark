@@ -82,7 +82,7 @@ class (Applicative m, Annotations lore) => HasScope lore m | m -> lore where
   lookupInfo name =
     asksScope (M.findWithDefault notFound name)
     where notFound =
-            error $ "Scope.lookupInfo: Name " ++ textual name ++
+            error $ "Scope.lookupInfo: Name " ++ pretty name ++
             " not found in type environment."
 
   -- | Return the type environment contained in the applicative
