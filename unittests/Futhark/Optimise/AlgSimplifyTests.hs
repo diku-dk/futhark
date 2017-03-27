@@ -72,7 +72,7 @@ type VarInfo = M.Map String (Int, Type)
 lookupVarName :: String -> VarInfo -> VName
 lookupVarName s varinfo = case M.lookup s varinfo of
   Nothing    -> error $ "Unknown variable " ++ s
-  Just (x,_) -> ID (nameFromString s, x)
+  Just (x,_) -> VName (nameFromString s) x
 
 declareVars :: VarDecls -> VarInfo
 declareVars = M.fromList . snd . mapAccumL declare 0
