@@ -209,7 +209,7 @@ data Mod = ModEnv Env
 
 -- | A parametric functor consists of a set of abstract types, the
 -- environment of its parameter, and the resulting module type.
-data FunSig = FunSig TySet Env MTy
+data FunSig = FunSig TySet Mod MTy
             deriving (Show)
 
 -- | Return type and a list of argument types, and names that are used
