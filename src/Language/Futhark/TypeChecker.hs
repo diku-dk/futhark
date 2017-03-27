@@ -156,16 +156,15 @@ checkSpecs (TypeAbbrSpec tdec : specs) =
 
 checkSpecs (TypeSpec name loc : specs) =
   bindSpaced [(Type, name)] $ do
-    abs_name <- newID name
     name' <- checkName Type name loc
     let tenv = mempty
                { envNameMap =
                    M.singleton (Type, name) name'
                , envTypeTable =
-                   M.singleton name' $ TypeAbbr $ TypeVar $ typeName abs_name
+                   M.singleton name' $ TypeAbbr $ TypeVar $ typeName name'
                }
     (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
-    return (S.insert (qualName abs_name) abstypes,
+    return (S.insert (qualName name') abstypes,
             tenv <> env,
             TypeSpec name' loc : specs')
 
@@ -207,26 +206,26 @@ checkSigExp (SigWith s (TypeRef tname td) loc) = do
   (s_abs', s_env') <- refineEnv loc s_abs s_env tname' $ unInfo $ expandedType td'
   return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
-  (s_abs, e1_env, e1') <- checkSigExpToEnv e1
+  (MTy s_abs e1_mod, e1') <- checkSigExp e1
   (env_for_e2, maybe_pname') <-
     case maybe_pname of
       Just pname -> bindSpaced [(Structure, pname)] $ do
         pname' <- checkName Structure pname loc
         return (mempty { envNameMap = M.singleton (Structure, pname) pname'
-                       , envModTable = M.singleton pname' $ ModEnv e1_env
+                       , envModTable = M.singleton pname' e1_mod
                        },
                 Just pname')
       Nothing ->
         return (mempty, Nothing)
   (e2_mod, e2') <- localEnv (env_for_e2<>) $ checkSigExp e2
-  return (MTy mempty $ ModFun $ FunSig s_abs e1_env e2_mod,
+  return (MTy mempty $ ModFun $ FunSig s_abs e1_mod e2_mod,
           SigArrow maybe_pname' e1' e2' loc)
 
 checkSigExpToEnv :: SigExpBase NoInfo Name -> TypeM (TySet, Env, SigExpBase Info VName)
 checkSigExpToEnv e = do
-  (mod, e') <- checkSigExp e
-  case mtyMod mod of
-    ModEnv env -> return (mtyAbs mod, env, e')
+  (MTy abs mod, e') <- checkSigExp e
+  case mod of
+    ModEnv env -> return (abs, env, e')
     ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (Env, SigBindBase Info VName)
@@ -271,12 +270,12 @@ checkModExp (ModImport name loc) = do
   env <- lookupImport loc name
   return (MTy mempty $ ModEnv env, ModImport name loc)
 checkModExp (ModApply f e NoInfo NoInfo loc) = do
-  (maybe_functor, f') <- checkModExp f
-  case mtyMod maybe_functor of
+  (f_mty, f') <- checkModExp f
+  case mtyMod f_mty of
     ModFun functor -> do
       (e_mty, e') <- checkModExp e
-      (f_mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
-      return (f_mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
+      (mty, psubsts, rsubsts) <- applyFunctor loc functor e_mty
+      return (mty, ModApply f' e' (Info psubsts) (Info rsubsts) loc)
     _ ->
       bad $ TypeError loc "Cannot apply non-parametric module."
 checkModExp (ModAscript me se NoInfo loc) = do
@@ -304,21 +303,21 @@ checkModFun :: Name
             -> Maybe (SigExpBase NoInfo Name)
             -> ModExpBase NoInfo Name
             -> SrcLoc
-            -> TypeM (VName, TySet, Env, SigExp, Maybe SigExp, ModExp, MTy)
+            -> TypeM (VName, TySet, Mod, SigExp, Maybe SigExp, ModExp, MTy)
 checkModFun p psig_e maybe_fsig_e body_e loc = do
-  (p_abs, p_env, psig_e') <- checkSigExpToEnv psig_e
+  (MTy p_abs p_mod, psig_e') <- checkSigExp psig_e
   bindSpaced [(Structure, p)] $ do
     p' <- checkName Structure p loc
-    let in_body_env = mempty { envModTable = M.singleton p' $ ModEnv p_env }
+    let in_body_env = mempty { envModTable = M.singleton p' p_mod }
     localEnv (in_body_env<>) $ do
       (body_env, body_e') <- checkModExp body_e
       case maybe_fsig_e of
         Nothing ->
-          return (p', p_abs, p_env, psig_e', Nothing, body_e', body_env)
+          return (p', p_abs, p_mod, psig_e', Nothing, body_e', body_env)
         Just fsig_e -> do
           (fsig_env, fsig_e') <- checkSigExp fsig_e
           (env', _) <- badOnLeft $ matchMTys body_env fsig_env loc
-          return (p', p_abs, p_env, psig_e', Just fsig_e', body_e', env')
+          return (p', p_abs, p_mod, psig_e', Just fsig_e', body_e', env')
 
 applyFunctor :: SrcLoc
              -> FunSig
@@ -326,8 +325,8 @@ applyFunctor :: SrcLoc
              -> TypeM (MTy,
                        M.Map VName VName,
                        M.Map VName VName)
-applyFunctor applyloc (FunSig p_abs p_env body_mty) a_mty = do
-  (_, p_subst) <- badOnLeft $ matchMTys a_mty (MTy p_abs $ ModEnv p_env) applyloc
+applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
+  (_, p_subst) <- badOnLeft $ matchMTys a_mty (MTy p_abs p_mod) applyloc
 
   -- Apply type abbreviations from a_mty to body_mty.
   let a_abbrs = M.map TypeAbbr $ mtyTypeAbbrs a_mty
@@ -373,12 +372,12 @@ checkForDuplicateSpecs =
 
 checkFunctorBind :: FunctorBindBase NoInfo Name -> TypeM (Env, FunctorBindBase Info VName)
 checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
-  (p', p_abs, p_env, psig_e', maybe_fsig_e', body_e', mty) <-
+  (p', p_abs, p_mod, psig_e', maybe_fsig_e', body_e', mty) <-
     checkModFun p psig_e maybe_fsig_e body_e loc
   bindSpaced [(Structure, name)] $ do
     name' <- checkName Structure name loc
     return (mempty { envModTable =
-                       M.singleton name' $ ModFun $ FunSig p_abs p_env mty
+                       M.singleton name' $ ModFun $ FunSig p_abs p_mod mty
                    , envNameMap =
                        M.singleton (Structure, name) name'
                    },
@@ -560,12 +559,12 @@ matchMTys = matchMTys' mempty mempty
               (ModFun (FunSig mod_abs mod_pmod mod_mod))
               (ModFun (FunSig sig_abs sig_pmod sig_mod))
               loc = do
-      abs_substs <- resolveAbsTypes mod_abs (ModEnv mod_pmod) sig_abs loc
+      abs_substs <- resolveAbsTypes mod_abs mod_pmod sig_abs loc
       let abs_subst_to_type = old_abs_subst_to_type <> M.map snd abs_substs
           abs_subst_to_name = old_abs_subst_to_name <>
                               M.map (TypeAbbr . TypeVar . typeNameFromQualName . fst) abs_substs
 
-      (mod_pmod', pmod_substs) <- matchEnvs abs_subst_to_type abs_subst_to_name mod_pmod sig_pmod loc
+      (mod_pmod', pmod_substs) <- matchMods abs_subst_to_type abs_subst_to_name mod_pmod sig_pmod loc
       (mod_mod', mod_substs) <- matchMTys' abs_subst_to_type abs_subst_to_name mod_mod sig_mod loc
       return (ModFun (FunSig mod_abs mod_pmod' mod_mod'),
               pmod_substs <> mod_substs)
@@ -698,8 +697,8 @@ matchMTys = matchMTys' mempty mempty
 substituteTypesInMod :: M.Map VName TypeBinding -> Mod -> Mod
 substituteTypesInMod substs (ModEnv e) =
   ModEnv $ substituteTypesInEnv substs e
-substituteTypesInMod substs (ModFun (FunSig abs env mty)) =
-  ModFun $ FunSig abs (substituteTypesInEnv substs env) (substituteTypesInMTy substs mty)
+substituteTypesInMod substs (ModFun (FunSig abs mod mty)) =
+  ModFun $ FunSig abs (substituteTypesInMod substs mod) (substituteTypesInMTy substs mty)
 
 substituteTypesInMTy :: M.Map VName TypeBinding -> MTy -> MTy
 substituteTypesInMTy substs (MTy abs mod) = MTy abs $ substituteTypesInMod substs mod
@@ -749,8 +748,8 @@ allNamesInMTy (MTy abs mod) =
 
 allNamesInMod :: Mod -> S.Set VName
 allNamesInMod (ModEnv env) = allNamesInEnv env
-allNamesInMod (ModFun (FunSig abs env mty)) =
-  S.map qualLeaf abs <> allNamesInEnv env <> allNamesInMTy mty
+allNamesInMod (ModFun (FunSig abs mod mty)) =
+  S.map qualLeaf abs <> allNamesInMod mod <> allNamesInMTy mty
 
 -- All names defined anywhere in the env.
 allNamesInEnv :: Env -> S.Set VName
@@ -812,9 +811,9 @@ newNamesForMTy except orig_mty = do
         substituteInMod substs (ModFun funsig) =
           ModFun $ substituteInFunSig substs funsig
 
-        substituteInFunSig substs (FunSig abs env mty) =
+        substituteInFunSig substs (FunSig abs mod mty) =
           FunSig (S.map (fmap $ substitute substs) abs)
-          (substituteInEnv substs env) (substituteInMTy substs mty)
+          (substituteInMod substs mod) (substituteInMTy substs mty)
 
         substituteInTypeBinding substs (TypeAbbr t) =
           TypeAbbr $ substituteInType substs t
@@ -831,8 +830,8 @@ mtyTypeAbbrs (MTy _ mod) = modTypeAbbrs mod
 modTypeAbbrs :: Mod -> M.Map VName StructType
 modTypeAbbrs (ModEnv env) =
   envTypeAbbrs env
-modTypeAbbrs (ModFun (FunSig _ env mty)) =
-  envTypeAbbrs env <> mtyTypeAbbrs mty
+modTypeAbbrs (ModFun (FunSig _ mod mty)) =
+  modTypeAbbrs mod <> mtyTypeAbbrs mty
 
 envTypeAbbrs :: Env -> M.Map VName StructType
 envTypeAbbrs env =
