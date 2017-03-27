@@ -9,7 +9,7 @@ futhark-test
 SYNOPSIS
 ========
 
-futhark-test [-c | -t | -i] infiles...
+futhark-test [-c | -C | -t | -i] infiles...
 
 DESCRIPTION
 ===========
@@ -103,13 +103,16 @@ OPTIONS
   Ignore benchmarks with the specified tag.
 
 -c
-  Only compile - do not run any interpreters.
+  Only run compiled code - do not run any interpreters.
 
 -i
-  Only interpret - do not run any code generators.
+  Only interpret - do not run any compilers.
+
+-C
+  Compile the programs, but do not run them.
 
 -t
-  Compile, but do not run.
+  Type-check the programs, but do not run them.
 
 --compiler=program
   The program used to compile Futhark programs.  This option can be
