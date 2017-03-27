@@ -135,7 +135,7 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
               zipWithM updateResult (patternValueElements pat) res
           updateResult pat_elem (Var v)
             | Just _ <- lookup pat_elem concretised = do
-                v_copy <- newVName $ textual v <> "_copy"
+                v_copy <- newVName $ pretty v <> "_copy"
                 letBind_ (Pattern [] [PatElem v_copy BindVar $ patElemAttr pat_elem]) $
                   BasicOp $ Copy v
                 return $ Var v_copy

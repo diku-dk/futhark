@@ -908,14 +908,14 @@ lookupVar name = do
   res <- asks $ M.lookup name . envVtable
   case res of
     Just entry -> return entry
-    _ -> compilerBugS $ "Unknown variable: " ++ textual name
+    _ -> compilerBugS $ "Unknown variable: " ++ pretty name
 
 lookupArray :: VName -> ImpM lore op ArrayEntry
 lookupArray name = do
   res <- lookupVar name
   case res of
     ArrayVar _ entry -> return entry
-    _                -> compilerBugS $ "ImpGen.lookupArray: not an array: " ++ textual name
+    _                -> compilerBugS $ "ImpGen.lookupArray: not an array: " ++ pretty name
 
 arrayLocation :: VName -> ImpM lore op MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
@@ -925,7 +925,7 @@ lookupMemory name = do
   res <- lookupVar name
   case res of
     MemVar _ entry -> return entry
-    _              -> compilerBugS $ "Unknown memory block: " ++ textual name
+    _              -> compilerBugS $ "Unknown memory block: " ++ pretty name
 
 destinationFromParam :: Param (MemBound u) -> ImpM lore op ValueDestination
 destinationFromParam param

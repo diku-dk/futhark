@@ -19,7 +19,7 @@ module Language.Futhark.Core
   , baseTag
   , baseName
   , baseString
-  , textual
+  , pretty
   -- * Special identifiers
   , defaultEntryPoint
 
@@ -151,6 +151,3 @@ instance Pretty VName where
 
 instance Hashable VName where
   hashWithSalt salt (VName _ i) = salt * i
-
-textual :: VName -> String
-textual = pretty
