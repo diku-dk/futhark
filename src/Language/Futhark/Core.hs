@@ -15,11 +15,10 @@ module Language.Futhark.Core
   , nameFromString
   , nameToText
   , nameFromText
-  , ID(..)
+  , VName(..)
   , baseTag
   , baseName
   , baseString
-  , VName
   , textual
   -- * Special identifiers
   , defaultEntryPoint
@@ -124,38 +123,34 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
   file ++ ":" ++ show line1 ++ ":" ++ show col1
        ++ "-" ++ show line2 ++ ":" ++ show col2
 
--- | An arbitrary value tagged with some integer.  Only the integer is
--- used in comparisons, no matter the type of @vn@.
-newtype ID vn = ID (vn, Int)
+-- | A name tagged with some integer.  Only the integer is used in
+-- comparisons, no matter the type of @vn@.
+data VName = VName !Name !Int
   deriving (Show)
 
--- | Alias for a tagged 'Name'.  This is used as the name
--- representation in most of the compiler.
-type VName = ID Name
+-- | Return the tag contained in the 'VName'.
+baseTag :: VName -> Int
+baseTag (VName _ tag) = tag
 
--- | Return the tag contained in the 'ID'.
-baseTag :: ID vn -> Int
-baseTag (ID (_, tag)) = tag
-
--- | Return the name contained in the 'ID'.
-baseName :: ID vn -> vn
-baseName (ID (vn, _)) = vn
+-- | Return the name contained in the 'VName'.
+baseName :: VName -> Name
+baseName (VName vn _) = vn
 
 -- | Return the base 'Name' converted to a string.
 baseString :: VName -> String
 baseString = nameToString . baseName
 
-instance Eq (ID vn) where
-  ID (_, x) == ID (_, y) = x == y
+instance Eq VName where
+  VName _ x == VName _ y = x == y
 
-instance Ord (ID vn) where
-  ID (_, x) `compare` ID (_, y) = x `compare` y
+instance Ord VName where
+  VName _ x `compare` VName _ y = x `compare` y
 
-instance Pretty vn => Pretty (ID vn) where
-  ppr (ID (vn, i)) = ppr vn <> text "_" <> text (show i)
+instance Pretty VName where
+  ppr (VName vn i) = ppr vn <> text "_" <> text (show i)
 
-instance Hashable (ID vn) where
-  hashWithSalt salt (ID (_,i)) = salt * i
+instance Hashable VName where
+  hashWithSalt salt (VName _ i) = salt * i
 
 textual :: VName -> String
 textual = pretty

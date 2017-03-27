@@ -366,7 +366,7 @@ instance MonadTypeChecker TypeM where
                  put src'
                  return s'
 
-  newID s = newName $ ID (s, 0)
+  newID s = newName $ VName s 0
 
   checkName space name loc = do
     (_, QualName _ name') <- checkQualName space (qualName name) loc

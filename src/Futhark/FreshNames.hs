@@ -22,7 +22,7 @@ instance Monoid VNameSource where
 
 -- | Produce a fresh name, using the given name as a template.
 newName :: VNameSource -> VName -> (VName, VNameSource)
-newName (VNameSource i) k = (ID (baseName k, i), VNameSource (i+1))
+newName (VNameSource i) k = (VName (baseName k) i, VNameSource (i+1))
 
 -- | A blank name source.
 blankNameSource :: VNameSource
@@ -38,4 +38,4 @@ newVName src = newVNameFromName src . nameFromString
 
 -- | Produce a fresh 'VName', using the given base name as a template.
 newVNameFromName :: VNameSource -> Name -> (VName, VNameSource)
-newVNameFromName src s = newName src $ ID (s, 0)
+newVNameFromName src s = newName src $ VName s 0

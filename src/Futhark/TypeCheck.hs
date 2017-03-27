@@ -497,7 +497,7 @@ initialFtable _ = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts
           return (fname, (primRetType t, ps))
-        name = ID (nameFromString "x", 0)
+        name = VName (nameFromString "x") 0
 
 checkFun :: Checkable lore =>
             FunDef (Aliases lore) -> TypeM lore ()

@@ -396,8 +396,8 @@ generateTransposeFunction bt =
     }
   where bt' = GenericC.primTypeToCType bt
         space = ImpOpenCL.Space "device"
-        memparam s i = MemParam (ID (nameFromString s, i)) space
-        intparam s i = ScalarParam (ID (nameFromString s, i)) $ IntType Int32
+        memparam s i = MemParam (VName (nameFromString s) i) space
+        intparam s i = ScalarParam (VName (nameFromString s) i) $ IntType Int32
 
         params = [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
                 num_arrays_p, x_p, y_p, in_p, out_p]

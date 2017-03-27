@@ -868,7 +868,7 @@ intrinsics = M.fromList $ zipWith namify [0..] $
              -- get a missing case warning if we forget a case.
              map mkIntrinsicBinOp [minBound..maxBound]
 
-  where namify i (k,v) = (ID (nameFromString k, i), v)
+  where namify i (k,v) = (VName (nameFromString k) i, v)
 
         convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
         convertFun from to = (pretty to, IntrinsicPolyFun $ zip (map pure from) (repeat to))
