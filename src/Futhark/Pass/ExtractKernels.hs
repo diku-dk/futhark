@@ -865,6 +865,13 @@ maybeDistributeStm bnd@(Let _ _ (BasicOp Copy{})) acc =
   distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
   addKernel [Let outerpat () $ BasicOp $ Copy arr]
 
+-- Opaques are applied to the full array, because otherwise they can
+-- drastically inhibit parallelisation in some cases.
+maybeDistributeStm bnd@(Let (Pattern [] [pe]) _ (BasicOp Opaque{})) acc
+  | not $ primType $ typeOf pe =
+      distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
+      addKernel [Let outerpat () $ BasicOp $ Copy arr]
+
 maybeDistributeStm bnd@(Let _ _ (BasicOp (Rearrange cs perm _))) acc =
   distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
     let r = length (snd nest) + 1
