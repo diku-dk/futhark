@@ -2,8 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 -- | Multiversion segmented reduction.
 module Futhark.Pass.ExtractKernels.Segmented
-       ( regularSegmentedRedomapAsScan
-       , regularSegmentedRedomap
+       ( regularSegmentedRedomap
        , regularSegmentedScan
        )
        where
@@ -809,52 +808,6 @@ addManualIspaceCalcStms outer_index ispace = do
               addStm $ Let (Pattern [] [pe]) () $ BasicOp $ BinOp (SRem Int32) prev_val size
               letSubExp "tmp_val" $ BasicOp $ BinOp (SQuot Int32) prev_val size
         foldM_ calc_ispace_index outer_index (reverse ispace)
-
-regularSegmentedRedomapAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
-                                SubExp
-                             -> SubExp
-                             -> [SubExp]
-                             -> Pattern Kernels
-                             -> Pattern Kernels
-                             -> Certificates
-                             -> SubExp
-                             -> Commutativity
-                             -> Lambda InKernel
-                             -> Lambda InKernel
-                             -> [(VName, SubExp)]
-                             -> [KernelInput]
-                             -> [SubExp] -> [VName]
-                             -> m ()
-regularSegmentedRedomapAsScan segment_size num_segments nest_sizes flat_pat
-                              pat cs w _comm lam fold_lam ispace inps nes arrs = do
-  regularSegmentedScan segment_size flat_pat cs w lam fold_lam ispace inps nes arrs
-
-  let (acc_arrs, map_arrs) = splitAt (length nes) $ patternValueIdents flat_pat
-      (acc_pes, map_pes) = splitAt (length nes) $ patternValueElements pat
-      acc_ts = lambdaReturnType lam
-      acc_pat = Pattern [] acc_pes
-
-  is <- replicateM (length nest_sizes) $ newVName "i"
-
-  body <- runBodyBinder $ localScope (M.fromList $ zip is $ repeat $ IndexInfo Int32) $ do
-    let segment_id = flattenIndex
-                     (map (primExpFromSubExp int32) nest_sizes)
-                     (map (primExpFromSubExp int32 . Var) is)
-        offset = (segment_id + 1) * primExpFromSubExp int32 segment_size - 1
-    j <- letSubExp "j" =<< toExp offset
-    vals <- forM acc_arrs $ \arr ->
-      letSubExp "v" $ BasicOp $ Index [] (identName arr) $
-      fullSlice (identType arr) [DimFix j]
-    return $ resultBody vals
-
-  (mapk_bnds, mapk) <-
-    mapKernelFromBody [] num_segments (FlatThreadSpace $ zip is nest_sizes) [] acc_ts body
-  mapM_ addStm mapk_bnds
-  letBind_ acc_pat $ Op mapk
-
-  forM_ (zip map_pes map_arrs) $ \(pe,arr) ->
-    letBind_ (Pattern [] [pe]) $
-    BasicOp $ Reshape [] (map DimNew $ arrayDims $ typeOf pe) $ identName arr
 
 addFlagToLambda :: (MonadBinder m, Lore m ~ Kernels) =>
                    [SubExp] -> Lambda InKernel -> m (Lambda InKernel)
