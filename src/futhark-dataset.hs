@@ -28,7 +28,6 @@ import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 
 import Futhark.Util.Options
-import Futhark.Util.Pretty
 
 main :: IO ()
 main = mainWithOptions initialDataOptions commandLineOptions f
