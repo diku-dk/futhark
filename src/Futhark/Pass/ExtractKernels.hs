@@ -963,14 +963,9 @@ regularSegmentedRedomapKernel nest perm cs segment_size comm lam fold_lam nes ar
   isSegmentedOp nest perm segment_size
     (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
     \pat flat_pat num_segments total_num_elements ispace inps nes' arrs' ->
-      kernel_generation
+      regularSegmentedRedomap
         segment_size num_segments (kernelNestWidths nest)
         flat_pat pat cs total_num_elements comm lam fold_lam ispace inps nes' arrs'
-   where kernel_generation =
-           if newSegmentedRedomap
-           then regularSegmentedRedomap
-           else regularSegmentedRedomapAsScan
-
 
 isSegmentedOp :: KernelNest
               -> [Int]
