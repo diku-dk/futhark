@@ -60,8 +60,8 @@ module Language.Futhark.Syntax
   , TypeRefBase(..)
   , SigBindBase(..)
   , ModExpBase(..)
-  , StructBindBase(..)
-  , FunctorBindBase(..)
+  , ModBindBase(..)
+  , ModParamBase(..)
 
   -- * Definitions
   , FunBindBase(..)
@@ -766,7 +766,10 @@ data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                      | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
                        -- ^ Functor application.
                      | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
-                     | ModLambda (vn, SigExpBase f vn) (Maybe (SigExpBase f vn)) (ModExpBase f vn) SrcLoc
+                     | ModLambda (ModParamBase f vn)
+                                 (Maybe (SigExpBase f vn))
+                                 (ModExpBase f vn)
+                                 SrcLoc
 deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
@@ -778,34 +781,33 @@ instance Located (ModExpBase f vn) where
   locOf (ModAscript _ _ _ loc) = locOf loc
   locOf (ModLambda _ _ _ loc)  = locOf loc
 
-data StructBindBase f vn =
-  StructBind { structName     :: vn
-             , structExp      :: ModExpBase f vn
-             , structLocation :: SrcLoc
-             }
-deriving instance Showable f vn => Show (StructBindBase f vn)
+data ModBindBase f vn =
+  ModBind { modName      :: vn
+          , modParams    :: [ModParamBase f vn]
+          , modSignature :: Maybe (SigExpBase f vn, f (M.Map VName VName))
+          , modExp       :: ModExpBase f vn
+          , modLocation  :: SrcLoc
+          }
+deriving instance Showable f vn => Show (ModBindBase f vn)
 
-instance Located (StructBindBase f vn) where
-  locOf = locOf . structLocation
+instance Located (ModBindBase f vn) where
+  locOf = locOf . modLocation
 
-data FunctorBindBase f vn = FunctorBind { functorName      :: vn
-                                        , functorParam     :: (vn, SigExpBase f vn)
-                                        , functorSignature :: Maybe (SigExpBase f vn)
-                                        , functorBody      :: ModExpBase f vn
-                                        , functorLocation  :: SrcLoc
-                                        }
-deriving instance Showable f vn => Show (FunctorBindBase f vn)
+data ModParamBase f vn = ModParam { modParamName :: vn
+                                  , modParamType :: SigExpBase f vn
+                                  , modParamLocation :: SrcLoc
+                                  }
+deriving instance Showable f vn => Show (ModParamBase f vn)
 
-instance Located (FunctorBindBase f vn) where
-  locOf = locOf . functorLocation
+instance Located (ModParamBase f vn) where
+  locOf = locOf . modParamLocation
 
 -- | A top-level binding.
 data DecBase f vn = ValDec (ValBindBase f vn)
                   | FunDec (FunBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
-                  | StructDec (StructBindBase f vn)
-                  | FunctorDec (FunctorBindBase f vn)
+                  | ModDec (ModBindBase f vn)
                   | OpenDec (ModExpBase f vn) [ModExpBase f vn] SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
@@ -814,8 +816,7 @@ instance Located (DecBase f vn) where
   locOf (FunDec d)        = locOf d
   locOf (TypeDec d)       = locOf d
   locOf (SigDec d)        = locOf d
-  locOf (StructDec d)     = locOf d
-  locOf (FunctorDec d)    = locOf d
+  locOf (ModDec d)     = locOf d
   locOf (OpenDec _ _ loc) = locOf loc
 
 newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }

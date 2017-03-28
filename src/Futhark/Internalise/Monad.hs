@@ -26,7 +26,6 @@ module Futhark.Internalise.Monad
   , bindingParamTypes
   , noteFunctions
   , noteMod
-  , noteModFun
   , noteType
   , noteDecSubsts
   , generatingFunctor
@@ -71,8 +70,7 @@ data FunBinding = FunBinding
 
 type FunTable = M.Map VName FunBinding
 
-data ModBinding = ModExp E.ModExp
-                | ModFun VName DecSubstitutions E.ModExp
+data ModBinding = ModBinding DecSubstitutions E.ModExp
                 deriving (Show)
 
 type TypeTable = M.Map VName [TypeBase Rank NoUniqueness]
@@ -233,13 +231,9 @@ noteFunctions :: FunTable -> InternaliseM ()
 noteFunctions ftable_expansion =
   modify $ \s -> s { stateFtable = ftable_expansion <> stateFtable s }
 
-noteMod :: VName -> E.ModExp -> InternaliseM ()
-noteMod name me =
-  modify $ \s -> s { stateModTable = M.insert name (ModExp me) $ stateModTable s }
-
-noteModFun :: VName -> VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
-noteModFun name p substs me =
-  modify $ \s -> s { stateModTable = M.insert name (ModFun p substs me) $ stateModTable s }
+noteMod :: VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
+noteMod name substs me =
+  modify $ \s -> s { stateModTable = M.insert name (ModBinding substs me) $ stateModTable s }
 
 noteType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM ()
 noteType name t =
