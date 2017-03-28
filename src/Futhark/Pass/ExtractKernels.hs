@@ -636,11 +636,6 @@ containsNestedParallelism lam =
 versionedCode :: Bool
 versionedCode = False
 
--- Enable if you want to try the new segmented-redomap code. Here be dragons
--- (and possibly worse performance).
-newSegmentedRedomap :: Bool
-newSegmentedRedomap = False
-
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
