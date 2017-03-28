@@ -114,10 +114,7 @@ checkForDuplicateDecs =
         f (SigDec (SigBind name _ loc)) =
           check Signature name loc
 
-        f (StructDec (StructBind name _ loc)) =
-          check Structure name loc
-
-        f (FunctorDec (FunctorBind name _ _ _ loc)) =
+        f (ModDec (ModBind name _ _ _ loc)) =
           check Structure name loc
 
         f OpenDec{} = return
@@ -285,11 +282,11 @@ checkModExp (ModAscript me se NoInfo loc) = do
   -- See issue #262 for martinsubst justification.
   (mty', martinsubst) <- newNamesForMTy mempty mty
   return (mty', ModAscript me' se' (Info martinsubst) loc)
-checkModExp (ModLambda (p, psig_e) maybe_fsig_e body_e loc) = do
-  (p', p_abs, p_env, psig_e', maybe_fsig_e', body_e', mty) <-
-    checkModFun p psig_e maybe_fsig_e body_e loc
-  return (MTy mempty $ ModFun $ FunSig p_abs p_env mty,
-          ModLambda (p', psig_e') maybe_fsig_e' body_e' loc)
+checkModExp (ModLambda param maybe_fsig_e body_e loc) =
+  withModParam param $ \param' param_abs param_mod -> do
+  (maybe_fsig_e', body_e', mty) <- checkModFunBody maybe_fsig_e body_e loc
+  return (MTy mempty $ ModFun $ FunSig param_abs param_mod mty,
+          ModLambda param' maybe_fsig_e' body_e' loc)
 
 checkModExpToEnv :: ModExpBase NoInfo Name -> TypeM (TySet, Env, ModExpBase Info VName)
 checkModExpToEnv e = do
@@ -298,26 +295,54 @@ checkModExpToEnv e = do
     ModEnv env -> return (abs, env, e')
     ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
 
-checkModFun :: Name
-            -> SigExpBase NoInfo Name
-            -> Maybe (SigExpBase NoInfo Name)
+withModParam :: ModParamBase NoInfo Name
+             -> (ModParamBase Info VName -> TySet -> Mod -> TypeM a)
+             -> TypeM a
+withModParam (ModParam pname psig_e loc) m = do
+  (MTy p_abs p_mod, psig_e') <- checkSigExp psig_e
+  bindSpaced [(Structure, pname)] $ do
+    pname' <- checkName Structure pname loc
+    let in_body_env = mempty { envModTable = M.singleton pname' p_mod }
+    localEnv (in_body_env<>) $ m (ModParam pname' psig_e' loc) p_abs p_mod
+
+withModParams :: [ModParamBase NoInfo Name]
+              -> ([(ModParamBase Info VName, TySet, Mod)] -> TypeM a)
+              -> TypeM a
+withModParams [] m = m []
+withModParams (p:ps) m =
+  withModParam p $ \p' pabs pmod ->
+  withModParams ps $ \ps' -> m $ (p',pabs,pmod) : ps'
+
+checkModDef :: Maybe (SigExpBase NoInfo Name, a)
             -> ModExpBase NoInfo Name
             -> SrcLoc
-            -> TypeM (VName, TySet, Mod, SigExp, Maybe SigExp, ModExp, MTy)
-checkModFun p psig_e maybe_fsig_e body_e loc = do
-  (MTy p_abs p_mod, psig_e') <- checkSigExp psig_e
-  bindSpaced [(Structure, p)] $ do
-    p' <- checkName Structure p loc
-    let in_body_env = mempty { envModTable = M.singleton p' p_mod }
-    localEnv (in_body_env<>) $ do
-      (body_env, body_e') <- checkModExp body_e
-      case maybe_fsig_e of
-        Nothing ->
-          return (p', p_abs, p_mod, psig_e', Nothing, body_e', body_env)
-        Just fsig_e -> do
-          (fsig_env, fsig_e') <- checkSigExp fsig_e
-          (env', _) <- badOnLeft $ matchMTys body_env fsig_env loc
-          return (p', p_abs, p_mod, psig_e', Just fsig_e', body_e', env')
+            -> TypeM (Maybe (SigExp, Info (M.Map VName VName)),
+                      ModExp, MTy)
+checkModDef maybe_fsig_e body_e loc = do
+  (body_mty, body_e') <- checkModExp body_e
+  case maybe_fsig_e of
+    Nothing ->
+      return (Nothing, body_e', body_mty)
+    Just (fsig_e, _) -> do
+      (fsig_env, fsig_e') <- checkSigExp fsig_e
+      (mty, _) <- badOnLeft $ matchMTys body_mty fsig_env loc
+      -- See issue #262 for martinsubst justification.
+      (mty', martinsubst) <- newNamesForMTy mempty mty
+      return (Just (fsig_e', Info martinsubst), body_e', mty')
+
+checkModFunBody :: Maybe (SigExpBase NoInfo Name)
+                -> ModExpBase NoInfo Name
+                -> SrcLoc
+                -> TypeM (Maybe SigExp, ModExp, MTy)
+checkModFunBody maybe_fsig_e body_e loc = do
+  (body_mty, body_e') <- checkModExp body_e
+  case maybe_fsig_e of
+    Nothing ->
+      return (Nothing, body_e', body_mty)
+    Just fsig_e -> do
+      (fsig_env, fsig_e') <- checkSigExp fsig_e
+      (mty, _) <- badOnLeft $ matchMTys body_mty fsig_env loc
+      return (Just fsig_e', body_e', mty)
 
 applyFunctor :: SrcLoc
              -> FunSig
@@ -336,15 +361,33 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
 
   return (body_mty'', p_subst, body_subst)
 
-checkStructBind :: StructBindBase NoInfo Name -> TypeM (Env, StructBindBase Info VName)
-checkStructBind (StructBind name e loc) = do
-  (mty, e') <- checkModExp e
+checkModBind :: ModBindBase NoInfo Name -> TypeM (Env, ModBindBase Info VName)
+checkModBind (ModBind name [] maybe_fsig_e e loc) = do
+  (maybe_fsig_e', e', mty) <- checkModDef maybe_fsig_e e loc
   bindSpaced [(Structure, name)] $ do
     name' <- checkName Structure name loc
     return (mempty { envModTable = M.singleton name' $ mtyMod mty
                    , envNameMap = M.singleton (Structure, name) name'
                    },
-            StructBind name' e' loc)
+            ModBind name' [] maybe_fsig_e' e' loc)
+checkModBind (ModBind name (p:ps) maybe_fsig_e body_e loc) = do
+  (params', maybe_fsig_e', body_e', funsig) <-
+    withModParam p $ \p' p_abs p_mod ->
+    withModParams ps $ \params_stuff -> do
+    let (ps', ps_abs, ps_mod) = unzip3 params_stuff
+    (maybe_fsig_e', body_e', mty) <- checkModFunBody (fst <$> maybe_fsig_e) body_e loc
+    let addParam (x,y) mty' = MTy mempty $ ModFun $ FunSig x y mty'
+    return (p' : ps', (,Info mempty) <$> maybe_fsig_e', body_e',
+            FunSig p_abs p_mod $ foldr addParam mty $ zip ps_abs ps_mod)
+  bindSpaced [(Structure, name)] $ do
+    name' <- checkName Structure name loc
+    return (mempty { envModTable =
+                       M.singleton name' $ ModFun funsig
+                   , envNameMap =
+                       M.singleton (Structure, name) name'
+                   },
+            ModBind name' params' maybe_fsig_e' body_e' loc)
+
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
 checkForDuplicateSpecs =
@@ -369,19 +412,6 @@ checkForDuplicateSpecs =
 
         f IncludeSpec{} =
           return
-
-checkFunctorBind :: FunctorBindBase NoInfo Name -> TypeM (Env, FunctorBindBase Info VName)
-checkFunctorBind (FunctorBind name (p, psig_e) maybe_fsig_e body_e loc) = do
-  (p', p_abs, p_mod, psig_e', maybe_fsig_e', body_e', mty) <-
-    checkModFun p psig_e maybe_fsig_e body_e loc
-  bindSpaced [(Structure, name)] $ do
-    name' <- checkName Structure name loc
-    return (mempty { envModTable =
-                       M.singleton name' $ ModFun $ FunSig p_abs p_mod mty
-                   , envNameMap =
-                       M.singleton (Structure, name) name'
-                   },
-            FunctorBind name' (p', psig_e') maybe_fsig_e' body_e' loc)
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
@@ -450,23 +480,17 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
         paramType = vacuousShapeAnnotations . toStruct . patternType
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (Env, [DecBase Info VName])
-checkDecs (StructDec struct:rest) = do
-  (modenv, struct') <- checkStructBind struct
+checkDecs (ModDec struct:rest) = do
+  (modenv, struct') <- checkModBind struct
   localEnv (modenv<>) $ do
     (env, rest') <- checkDecs rest
-    return (env <> modenv, StructDec struct' : rest')
+    return (env <> modenv, ModDec struct' : rest')
 
 checkDecs (SigDec sig:rest) = do
   (sigenv, sig') <- checkSigBind sig
   localEnv (sigenv<>) $ do
     (env, rest') <- checkDecs rest
     return (env <> sigenv, SigDec sig' : rest')
-
-checkDecs (FunctorDec func:rest) = do
-  (funcenv, func') <- checkFunctorBind func
-  localEnv (funcenv<>) $ do
-    (env, rest') <- checkDecs rest
-    return (funcenv <> env, FunctorDec func' : rest')
 
 checkDecs (TypeDec tdec:rest) = do
   (tenv, tdec') <- checkTypeBind tdec

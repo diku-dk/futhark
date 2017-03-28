@@ -847,7 +847,8 @@ Module System
 -------------
 
 .. productionlist::
-   mod_bind: "module" `id` "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_bind: "module" `id` `mod_param`+ "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_param: "(" `id` ":" `mod_type_exp` ")"
    mod_ty_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*

@@ -336,8 +336,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
   ppr (FunDec dec)     = ppr dec
   ppr (TypeDec dec)    = ppr dec
   ppr (SigDec sig)     = ppr sig
-  ppr (StructDec sd)   = ppr sd
-  ppr (FunctorDec fd)  = ppr fd
+  ppr (ModDec sd)      = ppr sd
   ppr (OpenDec x xs _) = text "open" <+> spread (map ppr (x:xs))
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
@@ -347,14 +346,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
   ppr (ModApply f a _ _ _) = parens $ ppr f <+> parens (ppr a)
   ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
-  ppr (ModLambda (p, psig) maybe_sig body _) =
-    text "\\" <> parens (ppr p <> colon <+> ppr psig) <> maybe_sig' <+>
+  ppr (ModLambda param maybe_sig body _) =
+    text "\\" <> ppr param <> maybe_sig' <+>
     text "->" </> indent 2 (ppr body)
     where maybe_sig' = case maybe_sig of Nothing  -> mempty
                                          Just sig -> colon <+> ppr sig
-
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (StructBindBase ty vn) where
-  ppr (StructBind name e _) = text "module" <+> ppr name <+> equals <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
   ppr (TypeBind name usertype _) =
@@ -403,12 +399,15 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
   ppr (SigBind name e _) =
     text "module type" <+> ppr name <+> equals <+> ppr e
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunctorBindBase ty vn) where
-  ppr (FunctorBind name (pname,psig) sig e _) =
-    text "module" <+> ppr name <>
-    parens (ppr pname <> colon <+> ppr psig) <+> sig' <+> equals <+> ppr e
-    where sig' = case sig of Nothing -> mempty
-                             Just s  -> colon <+> ppr s <> text " "
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModParamBase ty vn) where
+  ppr (ModParam pname psig _) =
+    parens (ppr pname <> colon <+> ppr psig)
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModBindBase ty vn) where
+  ppr (ModBind name ps sig e _) =
+    text "module" <+> ppr name <+> spread (map ppr ps) <+> sig' <+> equals <+> ppr e
+    where sig' = case sig of Nothing    -> mempty
+                             Just (s,_) -> colon <+> ppr s <> text " "
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn) =>
                Int -> QualName vn -> ExpBase ty vn -> ExpBase ty vn -> Doc

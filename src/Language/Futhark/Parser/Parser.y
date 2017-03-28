@@ -1,5 +1,6 @@
 {
 {-# LANGUAGE OverloadedStrings  #-}
+{-# LANGUAGE TupleSections #-}
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
@@ -236,8 +237,7 @@ Dec :: { [UncheckedDec] }
     | Val               { [ValDec $1] }
     | TypeAbbr          { map TypeDec $1 }
     | SigBind           { [SigDec $1 ] }
-    | StructBind        { [StructDec $1 ] }
-    | FunctorBind       { [FunctorDec $1] }
+    | ModBind           { [ModDec $1 ] }
     | DefaultDec        { [] }
     | import stringlit
       { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] $1] }
@@ -275,9 +275,8 @@ ModExp :: { UncheckedModExp }
         : import stringlit { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
-        | '\\' '(' id ':' SigExp ')' maybeAscription(SimpleSigExp) '->' ModExp
-          { let L _ (ID pname) = $3
-            in ModLambda (pname, $5) $7 $9 $1 }
+        | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
+          { ModLambda $2 $3 $5 $1 }
         | ModExpApply
           { $1 }
         | ModExpAtom
@@ -300,18 +299,14 @@ SimpleSigExp :: { UncheckedSigExp }
              : QualName            { let (v, loc) = $1 in SigVar v loc }
              | '(' SigExp ')'      { $2 }
 
-StructBind :: { StructBindBase NoInfo Name }
-           : module id maybeAscription(SigExp) '=' ModExp
-             { let L pos (ID name) = $2
-               in StructBind name (case $3 of {Just mty -> ModAscript $5 mty NoInfo pos;
-                                               Nothing -> $5}) pos
-             }
+ModBind :: { ModBindBase NoInfo Name }
+         : module id many(ModParam) maybeAscription(SigExp) '=' ModExp
+           { let L floc (ID fname) = $2;
+             in ModBind fname $3 (fmap (,NoInfo) $4) $6 $1
+           }
 
-FunctorBind :: { FunctorBindBase NoInfo Name }
-             : module id '(' id ':' SigExp ')' maybeAscription(SigExp) '=' ModExp
-               { let L floc (ID fname) = $2; L ploc (ID pname) = $4
-                 in FunctorBind fname (pname, $6) $8 $10 $1
-               }
+ModParam :: { ModParamBase NoInfo Name }
+          : '(' id ':' SigExp ')' { let L _ (ID name) = $2 in ModParam name $4 $1 }
 
 Spec :: { SpecBase NoInfo Name }
       : val id ':' SigTypeDecl

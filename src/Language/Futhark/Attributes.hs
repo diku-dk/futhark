@@ -947,10 +947,8 @@ progImports :: ProgBase f vn -> [String]
 progImports (Prog decs) = concatMap decImports decs
   where decImports (OpenDec x xs _) =
           concatMap modExpImports $ x:xs
-        decImports (FunctorDec fb) =
-          modExpImports $ functorBody fb
-        decImports (StructDec sb) =
-          modExpImports $ structExp sb
+        decImports (ModDec md) =
+          modExpImports $ modExp md
         decImports SigDec{} = []
         decImports TypeDec{} = []
         decImports ValDec{} = []

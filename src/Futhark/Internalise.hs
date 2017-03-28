@@ -119,15 +119,19 @@ internaliseDecs ds =
       preprocessFunBind fdec
       internaliseFunBind fdec
       internaliseDecs ds'
-    E.StructDec sb : ds' -> do
-      internaliseModExp (structExp sb)
-      v <- lookupSubst $ E.qualName $ E.structName sb
-      noteMod v $ E.structExp sb
+    E.ModDec mb : ds' | null (modParams mb) -> do
+      let me = maybeAscript (srclocOf mb) (E.modSignature mb) $ modExp mb
+      internaliseModExp me
+      v <- lookupSubst $ E.qualName $ E.modName mb
+      noteMod v mempty me
       internaliseDecs ds'
-    E.FunctorDec fb : ds' -> do
-      v <- lookupSubst $ E.qualName $ E.functorName fb
+    E.ModDec mb : ds' -> do
+      v <- lookupSubst $ E.qualName $ E.modName mb
       substs <- asks envFunctorSubsts
-      noteModFun v (fst $ E.functorParam fb) substs (E.functorBody fb)
+      let addParam p me = E.ModLambda p Nothing me $ srclocOf me
+      noteMod v substs $
+        foldr addParam (maybeAscript (srclocOf mb) (E.modSignature mb) $ E.modExp mb) $
+        modParams mb
       internaliseDecs ds'
     E.TypeDec tb : ds' -> do
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
@@ -140,6 +144,11 @@ internaliseDecs ds =
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
+
+maybeAscript :: SrcLoc -> Maybe (SigExp, Info (M.Map VName VName)) -> ModExp
+             -> ModExp
+maybeAscript loc (Just (mtye, substs)) me = ModAscript me mtye substs loc
+maybeAscript _ Nothing me = me
 
 internaliseModExp :: E.ModExp
                   -> InternaliseM ()
@@ -161,19 +170,20 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
     f_e <- evalModExp orig_f
     case f_e of
       Just (p, substs, body) -> do
-        noteMod p orig_arg
+        noteMod p mempty orig_arg
         withDecSubstitutions substs $
           internaliseModExp body
       Nothing ->
         fail $ "Cannot apply " ++ pretty orig_f ++ " to " ++ pretty orig_arg
   where evalModExp (E.ModVar v _) = do
-            v' <- lookupMod =<< lookupSubst v
-            case v' of
-              ModExp e -> evalModExp e
-              ModFun p e_substs e -> do
-                substs <- asks envFunctorSubsts
-                return $ Just (p, substs `M.union` e_substs, e)
-        evalModExp (E.ModLambda (p, _) _ me _) = do
+          ModBinding v_substs me <- lookupMod =<< lookupSubst v
+          f_e <- evalModExp me
+          case f_e of
+            Just (p, me_substs, body) ->
+              return $ Just (p, me_substs `M.union` v_substs, body)
+            _ ->
+              return Nothing
+        evalModExp (E.ModLambda (ModParam p _ _) _ me _) = do
           substs <- asks envFunctorSubsts
           return $ Just (p, substs, me)
         evalModExp (E.ModParens e _) =
@@ -186,7 +196,7 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
           internaliseModExp arg
           case f_e of
             Just (p, substs, body) -> do
-              noteMod p arg
+              noteMod p mempty arg
               generatingFunctor p_substs b_substs $
                 withDecSubstitutions substs $
                 evalModExp body
