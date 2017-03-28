@@ -20,7 +20,7 @@
 --    [662i32, 1090i32, 1728i32]]
 -- }
 -- structure distributed {
---   DoLoop/Kernel 5
+--   DoLoop/Kernel 1
 --   Kernel 7
 -- }
 
