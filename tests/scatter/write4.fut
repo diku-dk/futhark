@@ -16,4 +16,4 @@ let main(indexes: [k]i32,
          values: [k]i32,
          array1: *[n]i32,
          array2: *[n]i32): ([n]i32, [n]i32) =
-  unzip (write indexes (zip values values) (zip array1 array2))
+  unzip (scatter (zip array1 array2) indexes (zip values values))

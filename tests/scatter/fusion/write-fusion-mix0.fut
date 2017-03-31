@@ -1,4 +1,4 @@
--- Test that map-write fusion and write-write fusion work together.
+-- Test that map-scatter fusion and scatter-scatter fusion work together.
 -- ==
 -- input {
 --   [2, 0]
@@ -12,7 +12,7 @@
 --   [84, 2, 104, 6, 9]
 --   [240, 270, 14, 16, 19]
 -- }
--- structure { Write 1 }
+-- structure { Scatter 1 }
 
 let main(indexes0: [k]i32,
        indexes1: [k]i32,
@@ -22,6 +22,6 @@ let main(indexes0: [k]i32,
        array1: *[n]i32): ([n]i32, [n]i32) =
   let values0' = map (+4) values0
   let values1' = map (*3) values1
-  let array0' = write indexes0 values0' array0
-  let array1' = write indexes1 values1' array1
+  let array0' = scatter array0 indexes0 values0'
+  let array1' = scatter array1 indexes1 values1'
   in (array0', array1')

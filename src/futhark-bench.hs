@@ -268,7 +268,7 @@ commandLineOptions = [
     (ReqArg (\file ->
                Right $ \config -> config { optJSON = Just file})
     "FILE")
-    "Write results in JSON format here."
+    "Scatter results in JSON format here."
   ]
 
 main :: IO ()

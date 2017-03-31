@@ -8,11 +8,11 @@
 -- output {
 --   [0, 200, 4, 100, 9]
 -- }
--- structure { Write 1 }
+-- structure { Scatter 1 }
 
 let main(indexes: [k]i32,
        values: [k]i32,
        array: *[n]i32): [n]i32 =
   let indexes' = map (+1) indexes
-  let array' = write indexes' values array
+  let array' = scatter array indexes' values
   in array'

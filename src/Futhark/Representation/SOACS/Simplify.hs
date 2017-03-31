@@ -146,13 +146,13 @@ simplifySOAC (Scanomap cs w outerfun innerfun acc arrs) =
   mapM Engine.simplify acc <*>
   mapM Engine.simplify arrs
 
-simplifySOAC (Write cs len lam ivs as) = do
+simplifySOAC (Scatter cs len lam ivs as) = do
   cs' <- Engine.simplify cs
   len' <- Engine.simplify len
   lam' <- Engine.simplifyLambda lam Nothing $ map Just ivs
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
-  return $ Write cs' len' lam' ivs' as'
+  return $ Scatter cs' len' lam' ivs' as'
 
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,
@@ -234,12 +234,12 @@ removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun n
       letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
 
--- | Like 'removeReplicateMapping', but for 'Write'.
+-- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-removeReplicateWrite vtable (Let pat _ (Op (Write cs len lam ivs as)))
+removeReplicateWrite vtable (Let pat _ (Op (Scatter cs len lam ivs as)))
   | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = do
       mapM_ (uncurry letBindNames') bnds
-      letBind_ pat $ Op $ Write cs len lam' ivs' as
+      letBind_ pat $ Op $ Scatter cs len lam' ivs' as
 removeReplicateWrite _ _ = cannotSimplify
 
 removeReplicateInput :: ST.SymbolTable lore
@@ -298,7 +298,7 @@ removeDeadMapping _ _ = cannotSimplify
 
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
-removeDeadWrite (_, used) (Let pat _ (Op (Write cs w fun arrs dests))) =
+removeDeadWrite (_, used) (Let pat _ (Op (Scatter cs w fun arrs dests))) =
   let (i_ses, v_ses) = splitAt (length dests) $ bodyResult $ lambdaBody fun
       (i_ts, v_ts) = splitAt (length dests) $ lambdaReturnType fun
       isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
@@ -309,7 +309,7 @@ removeDeadWrite (_, used) (Let pat _ (Op (Write cs w fun arrs dests))) =
                  , lambdaReturnType = i_ts' ++ v_ts'
                  }
   in if pat /= Pattern [] pat'
-     then letBind_ (Pattern [] pat') $ Op $ Write cs w fun' arrs dests'
+     then letBind_ (Pattern [] pat') $ Op $ Scatter cs w fun' arrs dests'
      else cannotSimplify
 removeDeadWrite _ _ = cannotSimplify
 

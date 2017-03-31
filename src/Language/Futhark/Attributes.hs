@@ -676,7 +676,7 @@ typeOf (Split _ splitexps e _) =
                                      _         -> 1
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
 typeOf (DoLoop _ _ _ _ body _) = typeOf body
-typeOf (Write _i _v a _) = typeOf a `setAliases` S.empty
+typeOf (Scatter a _i _v _) = typeOf a `setAliases` S.empty
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with

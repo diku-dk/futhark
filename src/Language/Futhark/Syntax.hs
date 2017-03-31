@@ -547,8 +547,8 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Write (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @write [0, 2, -1] [9, 7, 0] [3, 4, 5] = [9, 4, 7]@.
+            | Scatter (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            -- ^ @write [3, 4, 5] [0, 2, -1] [9, 7, 0] = [9, 4, 7]@.
 
             | Zip Int (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ Conventional zip taking nonzero arrays as arguments.
@@ -609,7 +609,7 @@ instance Located (ExpBase f vn) where
   locOf (DoLoop _ _ _ _ _ pos)   = locOf pos
   locOf (Stream _ _ _  pos)      = locOf pos
   locOf (Unsafe _ loc)           = locOf loc
-  locOf (Write _ _ _ loc)        = locOf loc
+  locOf (Scatter _ _ _ loc)      = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordField Name (ExpBase f vn) SrcLoc

@@ -21,4 +21,4 @@ let main (vs: [n]f32, classes: [n]i32): (i32, i32, i32, []f32) =
                        else if c == 2 then size_0 + size_1 + ci - 1
                        else                -1) is0 classes
   in (size_0, size_1, size_2,
-      write is1 vs (replicate filter_size 0f32))
+      scatter (replicate filter_size 0f32) is1 vs)

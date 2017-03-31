@@ -18,5 +18,5 @@ let main(n: i32): [n]bool =
                        then unsafe !is_open[j]
                        else true -- Doesn't matter.
                     ) js
-    in write js flips is_open
+    in scatter is_open js flips
   in is_open

@@ -8,4 +8,4 @@
 
 let main(is: [n]i32, vs: [m]i32): []i32 =
   let a = replicate 10 0
-  in write is vs a
+  in scatter a is vs

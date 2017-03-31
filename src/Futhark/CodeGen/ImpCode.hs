@@ -151,7 +151,7 @@ data Code a = Skip
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName (Count Bytes) PrimType Space Volatility Exp
+            | Scatter VName (Count Bytes) PrimType Space Volatility Exp
             | SetScalar VName Exp
             | SetMem VName VName Space
               -- ^ Must be in same space.
@@ -298,7 +298,7 @@ instance Pretty op => Pretty (Code op) where
     text "var" <+> ppr name <> text ":" <+> ppr t
   ppr (Allocate name e space) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
-  ppr (Write name i bt space vol val) =
+  ppr (Scatter name i bt space vol val) =
     ppr name <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr i) <+>
     text "<-" <+> ppr val
     where vol' = case vol of Volatile -> text "volatile "
@@ -395,8 +395,8 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
     pure $ Copy dest destoffset destspace src srcoffset srcspace size
-  traverse _ (Write name i bt val space vol) =
-    pure $ Write name i bt val space vol
+  traverse _ (Scatter name i bt val space vol) =
+    pure $ Scatter name i bt val space vol
   traverse _ (SetScalar name val) =
     pure $ SetScalar name val
   traverse _ (SetMem dest from space) =
@@ -439,7 +439,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
   freeIn (SetMem x y _) =
     freeIn x <> freeIn y
-  freeIn (Write v i _ _ _ e) =
+  freeIn (Scatter v i _ _ _ e) =
     freeIn v <> freeIn i <> freeIn e
   freeIn (SetScalar x y) =
     freeIn x <> freeIn y

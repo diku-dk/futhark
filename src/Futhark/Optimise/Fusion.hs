@@ -550,7 +550,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
     Right soac@(SOAC.Map _ _ lam _) ->
       mapLike soac lam
 
-    Right soac@(SOAC.Write _cs _len lam _ivs _as) ->
+    Right soac@(SOAC.Scatter _cs _len lam _ivs _as) ->
       mapLike soac lam
 
     Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) ->
@@ -660,7 +660,7 @@ fusionGatherExp _ (Op Futhark.Reduce{}) = errorIllegal "reduce"
 fusionGatherExp _ (Op Futhark.Scan{}) = errorIllegal "scan"
 fusionGatherExp _ (Op Futhark.Redomap{}) = errorIllegal "redomap"
 fusionGatherExp _ (Op Futhark.Scanomap{}) = errorIllegal "scanomap"
-fusionGatherExp _ (Op Futhark.Write{}) = errorIllegal "write"
+fusionGatherExp _ (Op Futhark.Scatter{}) = errorIllegal "write"
 
 -----------------------------------
 ---- Generic Traversal         ----

@@ -1026,7 +1026,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     form'
                     loopbody' letbody' loc
 
-checkExp (Write i v a pos) = do
+checkExp (Scatter a i v pos) = do
   i' <- checkExp i
   v' <- checkExp v
   (a', aflow) <- collectOccurences . checkExp $ a
@@ -1045,12 +1045,12 @@ checkExp (Write i v a pos) = do
   let at = typeOf a'
   if unique at
     then occur $ aflow `seqOccurences` [consumption (aliases at) pos]
-    else bad $ TypeError pos $ "Write source '" ++
+    else bad $ TypeError pos $ "Scatter source '" ++
          pretty a' ++
          "' has type " ++ pretty at ++
          ", which is not unique."
 
-  return (Write i' v' a' pos)
+  return (Scatter a' i' v' pos)
 
 checkSOACArrayArg :: ExpBase NoInfo Name
                   -> TermTypeM (Exp, Arg)

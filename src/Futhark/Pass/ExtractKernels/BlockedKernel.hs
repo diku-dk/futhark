@@ -497,7 +497,7 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
             -- Apply the body of the fold function.
             fold_res <- eLambda foldlam $ j : map (Var . paramName) acc_params ++ arr_elems
 
-            -- Write the to_map parts to the mapout arrays using
+            -- Scatter the to_map parts to the mapout arrays using
             -- in-place updates, and return the to_scan parts.
             let (to_scan, to_map) = splitAt (length nes) fold_res
             mapout_arrs' <- forM (zip to_map mapout_arr_params) $ \(se,arr) -> do
@@ -527,7 +527,7 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
               let slice = fullSlice arr_t [DimFix $ Var lid]
               letSubExp (baseString arr ++ "_elem") $ BasicOp $ Index [] arr slice
 
-            -- Write the to_map parts to the scanout arrays using
+            -- Scatter the to_map parts to the scanout arrays using
             -- in-place updates.
             scanout_arrs' <- forM (zip arr_elems scanout_arr_params) $ \(se,p) -> do
               let slice = fullSlice (paramType p) [DimFix j]

@@ -19,4 +19,4 @@
 let main(indexes: [k]i32,
        values: [k][t][m]i32,
        array: *[n][t][m]i32): [n][t][m]i32 =
-  write indexes values array
+  scatter array indexes values

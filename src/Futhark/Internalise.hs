@@ -873,7 +873,7 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.BasicOp $ I.Copy se | se <- ses]
 
-internaliseExp desc (E.Write si v a loc) = do
+internaliseExp desc (E.Scatter a si v loc) = do
   si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
   svs <- internaliseExpToVars "write_arg_v" v
   sas <- internaliseExpToVars "write_arg_a" a
@@ -922,7 +922,7 @@ internaliseExp desc (E.Write si v a loc) = do
                    }
       sivs = si' : svs'
   aws <- mapM (fmap (arraySize 0) . lookupType) sas
-  letTupExp' desc $ I.Op $ I.Write [] si_w lam sivs $ zip aws sas
+  letTupExp' desc $ I.Op $ I.Scatter [] si_w lam sivs $ zip aws sas
 
 internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
                     -> InternaliseM (I.DimIndex SubExp, Certificates)
@@ -1602,7 +1602,7 @@ partitionWithSOACS k lam arrs = do
                                      replicate (length arr_ts) offset ++
                                      map (I.Var . paramName) value_params
                     }
-  results <- letTupExp "partition_res" $ I.Op $ I.Write [] w
+  results <- letTupExp "partition_res" $ I.Op $ I.Scatter [] w
              write_lam (classes : all_offsets ++ arrs) $ zip (repeat sum_of_partition_sizes) blanks
   return (map I.Var sizes, results)
   where

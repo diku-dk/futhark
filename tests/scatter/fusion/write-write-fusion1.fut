@@ -1,4 +1,4 @@
--- Test that write-write fusion works with more than two arrays.
+-- Test that scatter-scatter fusion works with more than two arrays.
 -- ==
 -- input {
 --   [0]
@@ -12,14 +12,14 @@
 --   [99, 200, 300, 400, 500]
 --   [99, 2000, 3000, 4000, 5000]
 -- }
--- structure { Write 1 }
+-- structure { Scatter 1 }
 
 let main(indexes: [k]i32,
        values: [k]i32,
        array1: *[n]i32,
        array2: *[n]i32,
        array3: *[n]i32): ([n]i32, [n]i32, [n]i32) =
-  let array1' = write indexes values array1
-  let array2' = write indexes values array2
-  let array3' = write indexes values array3
+  let array1' = scatter array1 indexes values
+  let array2' = scatter array2 indexes values
+  let array3' = scatter array3 indexes values
   in (array1', array2', array3')
