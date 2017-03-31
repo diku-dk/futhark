@@ -142,7 +142,7 @@ keyword s =
     "stream_red"     -> STREAM_RED
     "stream_red_per" -> STREAM_REDPER
     "stream_seq"     -> STREAM_SEQ
-    "write"        -> WRITE
+    "scatter"      -> SCATTER
     "include"      -> INCLUDE
     "import"       -> IMPORT
     "type"         -> TYPE
@@ -311,7 +311,7 @@ data Token = ID Name
            | STREAM_RED
            | STREAM_REDPER
            | STREAM_SEQ
-           | WRITE
+           | SCATTER
            | INCLUDE
            | IMPORT
            | ENTRY

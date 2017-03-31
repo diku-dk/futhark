@@ -374,7 +374,7 @@ transformStm (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   transformStms =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
-transformStm (Let pat () (Op (Write cs w lam ivs as))) = runBinder_ $ do
+transformStm (Let pat () (Op (Scatter cs w lam ivs as))) = runBinder_ $ do
   lam' <- Kernelise.transformLambda lam
   write_i <- newVName "write_i"
   let (i_res, v_res) = splitAt (length as) $ bodyResult $ lambdaBody lam'
@@ -578,7 +578,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedStm bound (Op (Stream _ w _ _ _)) =
           w `subExpBound` bound
-        unbalancedStm _ (Op Write{}) =
+        unbalancedStm _ (Op Scatter{}) =
           False
         unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations) body) =
           iterations `subExpBound` bound ||

@@ -65,7 +65,7 @@ import Futhark.Representation.AST.Attributes (builtInFunctions, isBuiltInFunctio
 -- compilation function.
 type OpCompiler op s = op -> CompilerM op s ()
 
--- | Write a scalar to the given memory block with the given index and
+-- | Scatter a scalar to the given memory block with the given index and
 -- in the given memory space.
 type WriteScalar op s = VName -> PyExp -> PrimType -> Imp.SpaceId -> PyExp
                         -> CompilerM op s ()
@@ -906,7 +906,7 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
     <*> pure src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size <*> pure (IntType Int32) -- FIXME
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
+compileCode (Imp.Scatter dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
   let dest' = Var $ compileName dest
@@ -914,7 +914,7 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = d
   let ctype = simpleCall elemtype' [elemexp']
   stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
+compileCode (Imp.Scatter dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $ asks envWriteScalar
     <*> pure dest
     <*> compileExp idx

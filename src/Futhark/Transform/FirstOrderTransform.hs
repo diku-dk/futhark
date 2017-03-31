@@ -610,7 +610,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
-transformSOAC pat (Write cs len lam ivs as) = do
+transformSOAC pat (Scatter cs len lam ivs as) = do
   iter <- newVName "write_iter"
 
   ts <- mapM (lookupType . snd) as
@@ -620,7 +620,7 @@ transformSOAC pat (Write cs len lam ivs as) = do
 --  ivs'' <- mapM subExpToVName ivs'
   let ivsLen = length (lambdaReturnType lam) `div` 2
 
-  -- Write is in-place, so we use the input array as the output array.
+  -- Scatter is in-place, so we use the input array as the output array.
   let merge = loopMerge asOuts $ map (Var . snd) as
   loopBody <- runBodyBinder $
     localScope (M.insert iter (IndexInfo Int32) $

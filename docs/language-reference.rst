@@ -190,7 +190,7 @@ literals and variables, but also more complicated forms.
       : | "scan" `fun` `exp` `exp`
       : | "filter" `fun` `exp`
       : | "partition" "(" `fun`+ ")" `exp`
-      : | "write" `exp` `exp` `exp`
+      : | "scatter" `exp` `exp` `exp`
       : | "stream_map" `fun` `exp`
       : | "stream_map_per" `fun` `exp`
       : | "stream_red" `fun` `exp` `exp`
@@ -689,10 +689,10 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``write is vs as``
+``scatter as is vs``
 ..................
 
-The ``write`` expression calculates the equivalent of this imperative
+The ``scatter`` expression calculates the equivalent of this imperative
 code::
 
   for index in 0..shape(is)[0]-1:
@@ -700,7 +700,7 @@ code::
     v = vs[index]
     as[i] = v
 
-The ``is`` and ``vs`` arrays must have the same outer size.  ``write``
+The ``is`` and ``vs`` arrays must have the same outer size.  ``scatter``
 acts in-place and consumes the ``as`` array, returning a new array
 that has the same type and elements as ``as``, except for the indices
 in ``is``.  If ``is`` contains duplicates (i.e. several writes are

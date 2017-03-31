@@ -8,6 +8,6 @@ let main(a: *[n]i32, x: i32): [n]i32 =
     let tmp = z * z
     let a[i] = tmp
     let x = [a[i]-1]
-    let b = write ([i]) x a
+    let b = scatter a [i] x
     in (b, tmp+2)
   in a

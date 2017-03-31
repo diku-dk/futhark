@@ -4,4 +4,4 @@
 -- error: .*unique.*
 
 let main(a: []i32): []i32 =
-  write ([0]) ([1]) a
+  scatter a [0] [1]

@@ -714,11 +714,11 @@ evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, res_acc:l, acc_arr)
 
-evalSOAC (Write _cs len lam ivs as) = do
+evalSOAC (Scatter _cs len lam ivs as) = do
 
   let valInt :: Value -> FutharkM Int
       valInt (PrimVal (IntValue (Int32Value l))) = return $ fromIntegral l
-      valInt _ = bad $ TypeError "evalSOAC Write: Wrong type for length"
+      valInt _ = bad $ TypeError "evalSOAC Scatter: Wrong type for length"
 
   len' <- valInt =<< evalSubExp len
 
@@ -734,7 +734,7 @@ evalSOAC (Write _cs len lam ivs as) = do
   is' <- mapM (mapM valInt) is
 
   (aArrs, aPrimTypes, aShapes) <-
-    unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for 'array' array") as'
+    unzip3 <$> mapM (toArrayVal "evalSOAC Scatter: Wrong type for 'array' array") as'
 
   let handleIteration :: [Array Int PrimValue] -> Int -> FutharkM [Array Int PrimValue]
       handleIteration arrs iter = do

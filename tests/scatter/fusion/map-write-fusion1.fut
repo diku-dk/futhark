@@ -1,4 +1,4 @@
--- Test that map-write fusion works in a slightly less simple case.
+-- Test that map-scatter fusion works in a slightly less simple case.
 -- ==
 -- input {
 --   [2, 0]
@@ -8,11 +8,11 @@
 -- output {
 --   [200, 2, 102, 6, 9]
 -- }
--- structure { Write 1 }
+-- structure { Scatter 1 }
 
 let main(indexes: [k]i32,
        values: [k]i32,
        array: *[n]i32): [n]i32 =
   let values' = map (+) indexes values
-  let array' = write indexes values' array
+  let array' = scatter array indexes values'
   in array'

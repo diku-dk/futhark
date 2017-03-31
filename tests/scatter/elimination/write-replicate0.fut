@@ -7,8 +7,8 @@
 -- output {
 --   [5, 5, -3, 5, 41]
 -- }
--- structure { Write 1 }
+-- structure { Scatter 1 }
 
 let main(indexes: [k]i32,
        array: *[n]i32): [n]i32 =
-  write indexes (replicate k 5) (array)
+  scatter array indexes (replicate k 5)

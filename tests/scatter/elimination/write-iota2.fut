@@ -8,7 +8,7 @@
 -- output {
 --   [-9, -8, -7, -6, -5, 30]
 -- }
--- structure { Write 1 }
+-- structure { Scatter 1 }
 
 let main(k: i32, array: *[n]i32): [n]i32 =
-  write (iota k) (map (-9) (iota k)) array
+  scatter array (iota k) (map (-9) (iota k))

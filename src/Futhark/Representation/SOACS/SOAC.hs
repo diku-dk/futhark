@@ -66,8 +66,8 @@ data SOAC lore =
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Scanomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
-  | Write Certificates SubExp (LambdaT lore) [VName] [(SubExp, VName)]
-    -- Write <cs> <length> <lambda> <original index and value arrays>
+  | Scatter Certificates SubExp (LambdaT lore) [VName] [(SubExp, VName)]
+    -- Scatter <cs> <length> <lambda> <original index and value arrays>
     -- <input/output arrays along with their sizes>
     --
     -- <length> is the length of each index array and value array, since they
@@ -79,7 +79,7 @@ data SOAC lore =
     --
     --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
     --
-    -- This must be consistent along all Write-related optimisations.
+    -- This must be consistent along all Scatter-related optimisations.
     --
     -- The original index arrays and value arrays are concatenated.
     deriving (Eq, Ord, Show)
@@ -151,8 +151,8 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
-mapSOACM tv (Write cs len lam ivs as) =
-  Write
+mapSOACM tv (Scatter cs len lam ivs as) =
+  Scatter
   <$> mapOnSOACCertificates tv cs
   <*> mapOnSOACSubExp tv len
   <*> mapOnSOACLambda tv lam
@@ -216,7 +216,7 @@ soacType (Stream _ outersize form lam _) =
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
-soacType (Write _cs _w lam _ivs as) =
+soacType (Scatter _cs _w lam _ivs as) =
   staticShapes $ zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
@@ -242,7 +242,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> map (const mempty) $ lambdaReturnType lam0
                Sequential _       -> []
     in a1 ++ map (const mempty) (extLambdaReturnType lam)
-  opAliases (Write _cs _len lam _ivs _as) =
+  opAliases (Scatter _cs _len lam _ivs _as) =
     map (const mempty) $ lambdaReturnType lam
 
   -- Only Map, Redomap and Stream can consume anything.  The operands
@@ -268,7 +268,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ extLambdaParams lam)
                                (accs++map Var arrs)
-  consumedInOp (Write _ _ _ _ as) =
+  consumedInOp (Scatter _ _ _ _ as) =
     S.fromList $ map snd as
   consumedInOp _ =
     mempty
@@ -300,8 +300,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
-  addOpAliases (Write cs len lam ivs as) =
-    Write cs len (Alias.analyseLambda lam) ivs as
+  addOpAliases (Scatter cs len lam ivs as) =
+    Scatter cs len (Alias.analyseLambda lam) ivs as
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -363,8 +363,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
-  addOpRanges (Write cs len lam ivs as) =
-    Write cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as
+  addOpRanges (Scatter cs len lam ivs as) =
+    Scatter cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -462,7 +462,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs w lam ivs as) = do
+typeCheckSOAC (Scatter cs w lam ivs as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -497,11 +497,11 @@ typeCheckSOAC (Write cs w lam ivs as) = do
 
   -- 1.
   unless (rtsLen == length as)
-    $ TC.bad $ TC.TypeError "Write: Uneven number of index types, value types, and I/O arrays."
+    $ TC.bad $ TC.TypeError "Scatter: Uneven number of index types, value types, and I/O arrays."
 
   -- 2.
   forM_ rtsI $ \rtI -> unless (Prim int32 == rtI)
-                       $ TC.bad $ TC.TypeError "Write: Index return type must be i32."
+                       $ TC.bad $ TC.TypeError "Scatter: Index return type must be i32."
 
   forM_ (zip rtsV as) $ \(rtV, (aw, a)) -> do
     -- All lengths must have type i32.
@@ -516,7 +516,7 @@ typeCheckSOAC (Write cs w lam ivs as) = do
         return ()
       _ ->
         TC.bad $ TC.TypeError
-        "Write values and input arrays do not have the same primitive type"
+        "Scatter values and input arrays do not have the same primitive type"
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
@@ -608,8 +608,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Scanomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
-  opMetrics (Write _cs _len lam _ivs _as) =
-    inside "Write" $ lambdaMetrics lam
+  opMetrics (Scatter _cs _len lam _ivs _as) =
+    inside "Scatter" $ lambdaMetrics lam
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
@@ -657,7 +657,7 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                ppr outer <> comma </>
                ppr inner <> comma </>
                commasep (PP.braces (commasep $ map ppr es) : map ppr as))
-  ppr (Write cs len lam ivs as) =
+  ppr (Scatter cs len lam ivs as) =
     PP.ppCertificates' cs <> ppSOAC "write" len [lam] (Just (map Var ivs)) (map snd as)
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc

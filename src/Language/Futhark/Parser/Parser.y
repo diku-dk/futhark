@@ -174,7 +174,7 @@ import Language.Futhark.Parser.Lexer
       stream_seq      { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       import          { L $$ IMPORT }
-      write           { L $$ WRITE }
+      scatter         { L $$ SCATTER }
       type            { L $$ TYPE }
       module          { L $$ MODULE }
       val             { L $$ VAL }
@@ -532,8 +532,8 @@ Exp2 :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
      | stream_seq       FunAbstr Atom Atom
                          { Stream (Sequential $3) $2 $4 $1 }
-     | write Atom Atom Atom
-                         { Write $2 $3 $4 $1 }
+     | scatter Atom Atom Atom
+                         { Scatter $2 $3 $4 $1 }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }

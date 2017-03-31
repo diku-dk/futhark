@@ -282,7 +282,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (Write i v a _) = text "write" <> spread [pprPrec 10 i, pprPrec 10 v, pprPrec 10 a]
+  pprPrec _ (Scatter i v a _) = text "scatter" <> spread [pprPrec 10 i, pprPrec 10 v, pprPrec 10 a]
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
   ppr (RecordField name e _) = ppr name <> equals <> ppr e

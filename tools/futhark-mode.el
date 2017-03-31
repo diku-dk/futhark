@@ -67,7 +67,7 @@
     '("pow" "iota" "shape" "replicate" "reshape" "rotate" "transpose" "map"
       "reduce" "reduceComm" "zip" "unzip" "zipWith" "scan" "split"
       "concat" "filter" "partition" "redomap" "empty" "copy" "size"
-      "write")
+      "scatter")
     "All Futhark builtin SOACs, functions, and non-symbolic operators.")
 
   (defconst futhark-builtin-types

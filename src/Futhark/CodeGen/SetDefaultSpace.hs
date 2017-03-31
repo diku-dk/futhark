@@ -50,8 +50,8 @@ setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n)
   setCountSpace space n
   where dest_space' = setSpace space dest_space
         src_space' = setSpace space src_space
-setBodySpace space (Write dest dest_offset bt dest_space vol e) =
-  Write dest (setCountSpace space dest_offset) bt (setSpace space dest_space)
+setBodySpace space (Scatter dest dest_offset bt dest_space vol e) =
+  Scatter dest (setCountSpace space dest_offset) bt (setSpace space dest_space)
   vol (setExpSpace space e)
 setBodySpace space (c1 :>>: c2) =
   setBodySpace space c1 :>>: setBodySpace space c2
