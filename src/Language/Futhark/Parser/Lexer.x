@@ -33,7 +33,8 @@ import Language.Futhark.Syntax (BinOp(..))
 @hexlit = 0[xX][0-9a-fA-F]+
 @declit = [0-9]+
 @binlit = 0[bB][01]+
-@intlit = @hexlit|@binlit|@declit
+@romlit = 0[rR][IVXLCM]+
+@intlit = @hexlit|@binlit|@declit|@romlit
 @reallit = (([0-9]+("."[0-9]*)?))([eE][\+\-]?[0-9]+)?
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
@@ -177,6 +178,8 @@ readIntegral s
       T.foldl (another hex_digits) 0 (T.drop 2 s)
   | "0b" `T.isPrefixOf` s || "0b" `T.isPrefixOf` s =
       T.foldl (another binary_digits) 0 (T.drop 2 s)
+  | "0r" `T.isPrefixOf` s =
+       fromRoman (T.drop 2 s)
   | otherwise =
       T.foldl (another decimal_digits) 0 s
       where another digits acc c = acc * base + maybe 0 fromIntegral (elemIndex (toLower c) digits)
@@ -209,6 +212,30 @@ symbol [] q
   | nameToText q == ">=" = GEQ
   | otherwise = SYMBOL (leadingOperator q) [] q
 symbol qs q = SYMBOL (leadingOperator q) qs q
+
+
+romanNumerals :: Integral a => [(T.Text,a)]
+romanNumerals = reverse
+                [ ("I",     1)
+                , ("IV",    4)
+                , ("V",     5)
+                , ("IX",    9)
+                , ("X",    10)
+                , ("XL",   40)
+                , ("L",    50)
+                , ("XC",   90)
+                , ("C",   100)
+                , ("CD",  400)
+                , ("D",   500)
+                , ("CM",  900)
+                , ("M",  1000)
+                ]
+
+fromRoman :: Integral a => T.Text -> a
+fromRoman s =
+  case find ((`T.isPrefixOf` s) . fst) romanNumerals of
+    Nothing -> 0
+    Just (d,n) -> n+fromRoman (T.drop (T.length d) s)
 
 alexEOF = return ((0,0,0), (0,0,0), EOF)
 
