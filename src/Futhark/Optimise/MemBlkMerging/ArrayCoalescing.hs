@@ -100,6 +100,10 @@ markSuccessCoal (actv,succc) m_b info_b =
   ( M.delete m_b actv
   , appendCoalsInfo m_b info_b succc )
 
+prettyInhibitTab :: InhibitTab -> String
+prettyInhibitTab tab =
+  let list_tups = map (second S.toList) (M.toList tab)
+  in  pretty list_tups
 
 --------------------------------------------------------------------------------
 --- Main Coalescing Transformation computes a successful coalescing table    ---
@@ -249,8 +253,15 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
       res_mem_then = findMemBodyResult activeCoals0 (scope td_env) pat_val_elms body_then
       res_mem_else = findMemBodyResult activeCoals0 (scope td_env) pat_val_elms body_else
 
-      actv_then = foldl transferCoalsToBody activeCoals0 res_mem_then
-      actv_else = foldl transferCoalsToBody activeCoals0 res_mem_else
+      actv_then_i = foldl transferCoalsToBody activeCoals0 res_mem_then
+      actv_else_i = foldl transferCoalsToBody activeCoals0 res_mem_else
+
+      -- eliminate the original pattern binding of the if statement,
+      -- @let x = if y[0,0] > 0 then map (+y[0,0) a else map (+1) b@
+      -- @let y[0] = x@
+      -- should succeed because @m_y@ is used before @x@ is created.
+      (actv_then, actv_else) = foldl (\(acth,acel) (m_b,_,_,_) -> (M.delete m_b acth, M.delete m_b acel) )
+                                     (actv_then_i, actv_else_i) res_mem_then
 
   --iii) process the then and else bodies
       res_then = mkCoalsTabBdy lutab body_then td_env (bu_env {activeCoals = actv_then})
@@ -274,19 +285,20 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
                       _ -> -- one of the branches has failed coalescing, hence remove
                            -- the coalescing of the result.
                            trace ("COALESCING: if-then-else fails "++pretty b++pretty m_b)
-                                 (markFailedCoal (act,inhb) m_b, succc) 
+                                 (markFailedCoal (act,inhb) m_b, succc)
               ) ((activeCoals0, inhibit0), successCoals0) (zip res_mem_then res_mem_else)
 
   --  v) unify coalescing results of all branches by taking the union
   --     of all entries in the current/then/else success tables.
       actv_com_then = M.intersectionWith unionCoalsEntry actv_then0 activeCoals0
       then_diff_com = M.difference actv_then0 actv_com_then
-      (_,inhb_then1)= foldl markFailedCoal (then_diff_com,inhb_then0) (M.keys then_diff_com)
+      (_,inhb_then1)= --trace ("DIFF COM: "++prettyCoalTab then_diff_com ++ " INHIBIT: "++prettyInhibitTab inhb_then0) $
+                      foldl markFailedCoal (then_diff_com,inhb_then0) (M.keys then_diff_com)
 
       actv_com_else = M.intersectionWith unionCoalsEntry actv_else0 activeCoals0
-      else_diff_com = M.difference actv_then0 actv_com_else
+      else_diff_com = M.difference actv_else0 actv_com_else
       (_,inhb_else1)= foldl markFailedCoal (else_diff_com,inhb_else0) (M.keys else_diff_com)
-      
+
       actv_res0 = M.intersectionWith unionCoalsEntry actv_then0 $
                   M.intersectionWith unionCoalsEntry actv_else0 activeCoals1
 
@@ -307,7 +319,8 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
         mkCoalsHelper1FilterActive patt body_free_vars (scope td_env)
                                    (scals bu_env) actv_res0 inhibit1
 
-      inhibit_res = M.unionWith S.union inhibit_res0 $
+      inhibit_res = --trace ("COALESCING IF inhibits: " ++ prettyInhibitTab inhibit_res0 ++ " " ++ prettyInhibitTab inhb_then1 ++ " " ++ prettyInhibitTab inhb_else1) $
+                    M.unionWith S.union inhibit_res0 $
                     M.unionWith S.union inhb_then1 inhb_else1
   in  bu_env { activeCoals = actv_res, successCoals = succ_res, inhibit = inhibit_res }
 
