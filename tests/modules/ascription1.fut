@@ -14,12 +14,12 @@ module type SIG = {
 module Struct: SIG = {
   type t = (i32,i32)
 
-  val x: (i32, i32) = (2,2)
+  let x: (i32, i32) = (2,2)
 
-  fun inject (x: i32) (y: i32): t = (x, y)
-  fun extract (v:t): t = v
-  fun f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
+  let inject (x: i32) (y: i32): t = (x, y)
+  let extract (v:t): t = v
+  let f (as: []t): t = reduce (\(a,b) (c,d) -> (a+c,b+d)) (0,0) as
 }
 
-fun main(xs: []i32, ys: []i32): (i32,i32) =
+let main(xs: []i32, ys: []i32): (i32,i32) =
   Struct.extract (Struct.f (map Struct.inject xs ys))

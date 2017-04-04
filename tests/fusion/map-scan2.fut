@@ -8,7 +8,7 @@
 -- structure {
 --   Scanomap 1
 -- }
-fun main(a: []i32): []i32 =
+let main(a: []i32): []i32 =
   let (_,b) = unzip(map (\(x: i32): (i32,i32)  -> (x+2,x-2)) a)
   let c = scan (+) 0 b in
   c

@@ -47,7 +47,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
@@ -93,7 +93,7 @@ type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
 -- | The type of a memory block in the given memory space.
 type MemoryType op s = SpaceId -> CompilerM op s C.Type
 
--- | Write a scalar to the given memory block with the given index and
+-- | Scatter a scalar to the given memory block with the given index and
 -- in the given memory space.
 type WriteScalar op s =
   C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
@@ -164,7 +164,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
-  , envFtable     :: HM.HashMap Name [Type]
+  , envFtable     :: M.Map Name [Type]
   }
 
 data CompilerAcc op s = CompilerAcc {
@@ -207,11 +207,11 @@ newCompilerEnv (Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
               }
-  where ftable = HM.fromList $ map funReturn funs
+  where ftable = M.fromList $ map funReturn funs
         funReturn (name, fun) =
           (name, paramsTypes $ functionOutput fun)
         builtinFtable =
-          HM.map (map Scalar . snd) builtInFunctions
+          M.map (map Scalar . snd) builtInFunctions
 
 -- | Return a list of struct definitions for the tuples and arrays
 -- seen during compilation.  The list is sorted according to
@@ -264,7 +264,7 @@ collect' m = pass $ do
 
 lookupFunction :: Name -> CompilerM op s [Type]
 lookupFunction name = do
-  res <- asks $ HM.lookup name . envFtable
+  res <- asks $ M.lookup name . envFtable
   case res of
     Nothing -> fail $ "Function " ++ nameToString name ++ " not found."
     Just ts -> return ts
@@ -273,7 +273,7 @@ item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . zEncodeString . textual
+  toIdent = C.toIdent . zEncodeString . pretty
 
 instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]
@@ -1202,7 +1202,7 @@ compileCode (Allocate name (Count e) space) = do
   allocMem name size space
 
 compileCode (For i it bound body) = do
-  let i' = textual i
+  let i' = pretty i
       it' = intTypeToCType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
@@ -1246,7 +1246,7 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
 
-compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
+compileCode (Scatter dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
            <$> compileExp idx
@@ -1256,7 +1256,7 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   where vol' = case vol of Volatile -> [C.ctyquals|volatile|]
                            Nonvolatile -> []
 
-compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
+compileCode (Scatter dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
     <*> compileExp idx

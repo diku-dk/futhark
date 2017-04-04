@@ -157,6 +157,12 @@ data BasicOp lore
     -- ^ Subexpressions, doubling as tuple literals if the
     -- list has anything but a single element.
 
+  | Opaque SubExp
+    -- ^ Semantically and operationally just identity, but is
+    -- invisible/impenetrable to optimisations (hopefully).  This is
+    -- just a hack to avoid optimisation (so, to work around compiler
+    -- limitations).
+
   | ArrayLit  [SubExp] Type
     -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of of the rows of the array.

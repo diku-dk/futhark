@@ -165,8 +165,8 @@ import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -213,7 +213,7 @@ newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log VNameSource a)
 runDistribM :: (MonadLogger m, MonadFreshNames m) =>
                DistribM a -> m a
 runDistribM (DistribM m) = do
-  (x, msgs) <- modifyNameSource $ positionNameSource . runRWS m HM.empty
+  (x, msgs) <- modifyNameSource $ positionNameSource . runRWS m M.empty
   addLog msgs
   return x
   where positionNameSource (x, src, msgs) = ((x, msgs), src)
@@ -374,7 +374,7 @@ transformStm (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   transformStms =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
-transformStm (Let pat () (Op (Write cs w lam ivs as))) = runBinder_ $ do
+transformStm (Let pat () (Op (Scatter cs w lam ivs as))) = runBinder_ $ do
   lam' <- Kernelise.transformLambda lam
   write_i <- newVName "write_i"
   let (i_res, v_res) = splitAt (length as) $ bodyResult $ lambdaBody lam'
@@ -528,7 +528,7 @@ withStm bnd = local $ \env ->
           letBindInInnerNesting provided $
           kernelNest env
       }
-  where provided = HS.fromList $ patternNames $ bindingPattern bnd
+  where provided = S.fromList $ patternNames $ bindingPattern bnd
 
 mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
@@ -555,10 +555,10 @@ inNesting (outer, nests) = local $ \env ->
 unbalancedLambda :: Lambda -> Bool
 unbalancedLambda lam =
   unbalancedBody
-  (HS.fromList $ map paramName $ lambdaParams lam) $
+  (S.fromList $ map paramName $ lambdaParams lam) $
   lambdaBody lam
 
-  where subExpBound (Var i) bound = i `HS.member` bound
+  where subExpBound (Var i) bound = i `S.member` bound
         subExpBound (Constant _) _ = False
 
         unbalancedBody bound body =
@@ -578,12 +578,12 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedStm bound (Op (Stream _ w _ _ _)) =
           w `subExpBound` bound
-        unbalancedStm _ (Op Write{}) =
+        unbalancedStm _ (Op Scatter{}) =
           False
         unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations) body) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
-          where bound' = foldr HS.insert bound $
+          where bound' = foldr S.insert bound $
                          i : map (paramName . fst) merge
         unbalancedStm _ (DoLoop _ _ (WhileLoop _) _) =
           False
@@ -635,11 +635,6 @@ containsNestedParallelism lam =
 -- slower in practice.  Caveat emptor (and you are the emptor).
 versionedCode :: Bool
 versionedCode = False
-
--- Enable if you want to try the new segmented-redomap code. Here be dragons
--- (and possibly worse performance).
-newSegmentedRedomap :: Bool
-newSegmentedRedomap = False
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
@@ -716,7 +711,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
              used_in_body = freeInBody kbody
              (used_params, used_arrs) =
                unzip $
-               filter ((`HS.member` used_in_body) . paramName . fst) $
+               filter ((`S.member` used_in_body) . paramName . fst) $
                zip (lambdaParams lam) arrs
          stms <- runBinder_ $ Kernelise.mapIsh pat cs w used_params kbody used_arrs
          return $ addStmsToKernel stms acc' { kernelStms = [] }
@@ -757,7 +752,7 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form body)) acc
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | length res == patternSize pat,
-        HS.null $ freeIn form `HS.intersection` boundInKernelNest nest -> do
+        S.null $ freeIn form `S.intersection` boundInKernelNest nest -> do
       addKernels kernels
       localScope (typeEnvFromKernelAcc acc') $ do
         types <- asksScope scopeForSOACs
@@ -803,17 +798,26 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
+      | Just (perm, pat_unused) <- permutationAndMissing res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
+          nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
           foldlam' <- Kernelise.transformLambda foldlam
-          regularSegmentedRedomapKernel nest perm cs w comm' lam' foldlam' nes arrs >>=
+          regularSegmentedRedomapKernel nest' perm cs w comm' lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
     where comm' | commutativeLambda lam = Commutative
                 | otherwise             = comm
-
+          permutationAndMissing res = do
+            let pes = patternValueElements pat
+                (_used,unused) =
+                  partition ((`S.member` freeIn res) . patElemName) pes
+                res_expanded = res ++ map (Var . patElemName) unused
+            perm <- map (Var . patElemName) pes `isPermutationOf` res_expanded
+            return (perm, unused)
 
 -- Redomap and Scanomap are general cases, so pretend nested
 -- reductions and scans are Redomap and Scanomap.  Well, not for
@@ -822,6 +826,8 @@ maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
           let (nes, arrs) = unzip input
           lam' <- Kernelise.transformLambda lam
@@ -832,6 +838,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
       addStmToKernel bnd acc
     where comm' | commutativeLambda lam = Commutative
                 | otherwise             = comm
+
 maybeDistributeStm (Let pat attr (Op (Scan cs w lam input))) acc | versionedCode = do
   let (nes, arrs) = unzip input
   lam_renamed <- renameLambda lam
@@ -857,6 +864,13 @@ maybeDistributeStm (Let pat attr (BasicOp (Replicate (Shape (d:ds)) v))) acc
 maybeDistributeStm bnd@(Let _ _ (BasicOp Copy{})) acc =
   distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
   addKernel [Let outerpat () $ BasicOp $ Copy arr]
+
+-- Opaques are applied to the full array, because otherwise they can
+-- drastically inhibit parallelisation in some cases.
+maybeDistributeStm bnd@(Let (Pattern [] [pe]) _ (BasicOp Opaque{})) acc
+  | not $ primType $ typeOf pe =
+      distributeSingleUnaryStm acc bnd $ \_ outerpat arr ->
+      addKernel [Let outerpat () $ BasicOp $ Copy arr]
 
 maybeDistributeStm bnd@(Let _ _ (BasicOp (Rearrange cs perm _))) acc =
   distributeSingleUnaryStm acc bnd $ \nest outerpat arr -> do
@@ -951,14 +965,9 @@ regularSegmentedRedomapKernel nest perm cs segment_size comm lam fold_lam nes ar
   isSegmentedOp nest perm segment_size
     (lambdaReturnType fold_lam) (freeInLambda lam) (freeInLambda fold_lam) nes arrs $
     \pat flat_pat num_segments total_num_elements ispace inps nes' arrs' ->
-      kernel_generation
+      regularSegmentedRedomap
         segment_size num_segments (kernelNestWidths nest)
         flat_pat pat cs total_num_elements comm lam fold_lam ispace inps nes' arrs'
-   where kernel_generation =
-           if newSegmentedRedomap
-           then regularSegmentedRedomap
-           else regularSegmentedRedomapAsScan
-
 
 isSegmentedOp :: KernelNest
               -> [Int]
@@ -988,12 +997,12 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
   (pre_bnds, nesting_size, ispace, kernel_inps, _rets) <- flatKernel nest
 
-  unless (HS.null $ free_in_op `HS.intersection` bound_by_nest) $
+  unless (S.null $ free_in_op `S.intersection` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
 
   let indices = map fst ispace
 
-      prepareNe (Var v) | v `HS.member` bound_by_nest =
+      prepareNe (Var v) | v `S.member` bound_by_nest =
                           fail "Neutral element bound in nest"
       prepareNe ne = return ne
 
@@ -1001,7 +1010,7 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
         case find ((==arr) . kernelInputName) kernel_inps of
           Just inp | kernelInputIndices inp == map Var indices ->
             return $ return $ kernelInputArray inp
-          Nothing | not (arr `HS.member` bound_by_nest) ->
+          Nothing | not (arr `S.member` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
                       -- it.
@@ -1045,6 +1054,29 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
     m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
 
+-- Add extra pattern elements to every kernel nesting level.
+expandKernelNest :: MonadFreshNames m =>
+                    [PatElem] -> KernelNest -> m KernelNest
+expandKernelNest pes (outer_nest, inner_nests) = do
+  let outer_size = loopNestingWidth outer_nest :
+                   map loopNestingWidth inner_nests
+      inner_sizes = tails $ map loopNestingWidth inner_nests
+  outer_nest' <- expandWith outer_nest outer_size
+  inner_nests' <- zipWithM expandWith inner_nests inner_sizes
+  return (outer_nest', inner_nests')
+  where expandWith nest dims = do
+           pes' <- mapM (expandPatElemWith dims) pes
+           return nest { loopNestingPattern =
+                           Pattern [] $
+                           patternElements (loopNestingPattern nest) <> pes'
+                       }
+
+        expandPatElemWith dims pe = do
+          name <- newVName $ baseString $ patElemName pe
+          return pe { patElemName = name
+                    , patElemAttr = patElemType pe `arrayOfShape` Shape dims
+                    }
+
 -- | Convert the statements inside a map nest to kernel statements,
 -- attempting to parallelise any remaining (top-level) parallel
 -- statements.  Anything that is not a map, scan or reduction will
@@ -1060,7 +1092,7 @@ intraGroupParallelise knest body = do
   (w_stms, w, ispace, inps, rts) <- flatKernel knest
 
   ((kspace, read_input_stms), prelude_stms) <- runBinder $ do
-    let inputIsUsed input = kernelInputName input `HS.member` freeInBody body
+    let inputIsUsed input = kernelInputName input `S.member` freeInBody body
         used_inps = filter inputIsUsed inps
 
     (kspace, kspace_stms, read_input_stms) <-

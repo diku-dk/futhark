@@ -5,11 +5,11 @@
 -- output {
 --   65.000000
 -- }
-fun f(a: f64        ): f64 = a + 3.0
-fun g(a: f64        ): f64 = a * 3.0
-fun h(a: f64, b: f64): f64 = a * b - (a + b)
+let f(a: f64        ): f64 = a + 3.0
+let g(a: f64        ): f64 = a * 3.0
+let h(a: f64, b: f64): f64 = a * b - (a + b)
 
-fun main(arr: []f64): f64 =
+let main(arr: []f64): f64 =
     let b = map f arr
     --let arr[1] = 3.33   in
     let x = map f b

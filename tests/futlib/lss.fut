@@ -11,22 +11,22 @@ import "futlib/lss"
 module Ascending = {
   type t = i32
 
-  val blank = 0
-  fun pred1 (x: i32) = true
-  fun pred2 (x: i32) (y: i32) = x <= y
+  let blank = 0
+  let pred1 (x: i32) = true
+  let pred2 (x: i32) (y: i32) = x <= y
 }
 
 module Descending = {
   type t = i32
 
-  val blank = 0
-  fun pred1 (x: i32) = true
-  fun pred2 (x: i32) (y: i32) = x >= y
+  let blank = 0
+  let pred1 (x: i32) = true
+  let pred2 (x: i32) (y: i32) = x >= y
 }
 
 module LSS_ascending = LSS(Ascending)
 module LSS_descending = LSS(Descending)
 
-fun main(xs: []i32): (i32,i32) =
+let main(xs: []i32): (i32,i32) =
   (LSS_ascending.lss xs,
    LSS_descending.lss xs)

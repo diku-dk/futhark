@@ -13,7 +13,7 @@
 --      Map 1
 -- }
 --
-fun main(arr: []f64): ([]f64,[]f64,[]f64,[]f64,[]f64) =
+let main(arr: []f64): ([]f64,[]f64,[]f64,[]f64,[]f64) =
     let xy = map (\(a: f64): (f64,f64)  -> (a+1.0,a+2.0)) arr
     let (x,y) = unzip(xy)
     let z  = map (*2.0) x

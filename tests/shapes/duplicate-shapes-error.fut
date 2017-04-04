@@ -3,5 +3,5 @@
 -- ==
 -- error:
 
-fun main(n: f64, a: [n]i32): []i32 =
+let main(n: f64, a: [n]i32): []i32 =
   map (+2) a

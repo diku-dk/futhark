@@ -1,6 +1,6 @@
 -- Loops can use any signed integral type
 
-fun main (x: i8): i64 =
+let main (x: i8): i64 =
   loop (x = x) = for i < 0x80i8 do
     x + i
   loop (x = i16 x) = for i < 0x80i16 do

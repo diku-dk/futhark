@@ -14,12 +14,13 @@ import Control.Monad.Reader
 import Control.Applicative
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.List
 
 import Prelude hiding (quot)
 
+import Futhark.Error
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
@@ -49,7 +50,7 @@ inKernelOperations constants = (ImpGen.defaultOperations $ compileInKernelOp con
                                , ImpGen.opsBodyCompiler = compileNestedKernelBody constants
                                }
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either String Imp.Program)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError Imp.Program)
 compileProg prog =
   fmap (setDefaultSpace (Imp.Space "device")) <$>
   ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
@@ -64,7 +65,7 @@ opCompiler dest (Inner kernel) =
 compileInKernelOp :: KernelConstants -> ImpGen.Destination -> Op InKernel
                   -> InKernelGen ()
 compileInKernelOp _ _ Alloc{} =
-  throwError "Cannot allocate memory in kernel."
+  compilerLimitationS "Cannot allocate memory in kernel."
 compileInKernelOp constants dest (Inner op) =
   compileKernelExp constants dest op
 
@@ -97,7 +98,7 @@ kernelCompiler dest (Kernel desc _ space _ kernel_body) = do
   num_threads' <- ImpGen.subExpToDimSize $ spaceNumThreads space
 
   let bound_in_kernel =
-        HM.keys $ mconcat $
+        M.keys $ mconcat $
         scopeOfKernelSpace space :
         map scopeOf (kernelBodyStms kernel_body)
 
@@ -174,7 +175,7 @@ expCompiler
     x' <- ImpGen.compileSubExp x
     s' <- ImpGen.compileSubExp s
 
-    let body = Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
+    let body = Imp.Scatter destmem destidx (IntType et) destspace Imp.Nonvolatile $
                Imp.ConvOpExp (SExt Int32 et) (Imp.var thread_gid int32) * s' + x'
 
     (group_size, num_groups) <- computeMapKernelGroups n'
@@ -281,14 +282,14 @@ callKernelCopy bt
     (_, destspace, destidx) <- ImpGen.fullyIndexArray' destloc dest_is bt
     (_, srcspace, srcidx) <- ImpGen.fullyIndexArray' srcloc src_is bt
 
-    let body = Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
+    let body = Imp.Scatter destmem destidx bt destspace Imp.Nonvolatile $
                Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
     destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
     let writes_to = [Imp.MemoryUse destmem destmem_size]
 
     reads_from <- readsFromSet $
-                  HS.singleton srcmem <>
+                  S.singleton srcmem <>
                   freeIn destIxFun <> freeIn srcIxFun <> freeIn destshape
 
     let kernel_size = Imp.innerExp n * product (drop 1 shape)
@@ -314,7 +315,9 @@ inKernelCopy = ImpGen.copyElementWise
 
 inKernelExpCompiler :: ImpGen.ExpCompiler InKernel Imp.KernelOp
 inKernelExpCompiler _ (BasicOp (Assert _ loc)) =
-  fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
+  compilerLimitationS $
+  unlines [ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
+          , "As a workaround, surround the expression with 'unsafe'."]
 inKernelExpCompiler dest e =
   ImpGen.defCompileExp dest e
 
@@ -322,7 +325,7 @@ computeKernelUses :: FreeIn a =>
                      a -> [VName]
                   -> CallKernelGen ([Imp.KernelUse], [Imp.LocalMemoryUse])
 computeKernelUses kernel_body bound_in_kernel = do
-    let actually_free = freeIn kernel_body `HS.difference` HS.fromList bound_in_kernel
+    let actually_free = freeIn kernel_body `S.difference` S.fromList bound_in_kernel
 
     -- Compute the variables that we need to pass to the kernel.
     reads_from <- readsFromSet actually_free
@@ -334,7 +337,7 @@ computeKernelUses kernel_body bound_in_kernel = do
 readsFromSet :: Names -> CallKernelGen [Imp.KernelUse]
 readsFromSet free =
   fmap catMaybes $
-  forM (HS.toList free) $ \var -> do
+  forM (S.toList free) $ \var -> do
     t <- lookupType var
     case t of
       Array {} -> return Nothing
@@ -350,7 +353,7 @@ readsFromSet free =
 computeLocalMemoryUse :: Names -> CallKernelGen [Imp.LocalMemoryUse]
 computeLocalMemoryUse free =
   fmap catMaybes $
-  forM (HS.toList free) $ \var -> do
+  forM (S.toList free) $ \var -> do
     t <- lookupType var
     case t of
       Mem memsize (Space "local") -> do
@@ -360,15 +363,27 @@ computeLocalMemoryUse free =
 
 localMemSize :: Imp.MemSize -> CallKernelGen (Either Imp.MemSize Imp.KernelConstExp)
 localMemSize (Imp.ConstSize x) =
-  return $ Right $ ValueExp $ IntValue $ Int32Value x
+  return $ Right $ ValueExp $ IntValue $ Int64Value x
 localMemSize (Imp.VarSize v) = isConstExp v >>= \case
-  Nothing -> return $ Left $ Imp.VarSize v
-  Just e  -> return $ Right e
+  Just e | isStaticExp e -> return $ Right e
+  _ -> return $ Left $ Imp.VarSize v
+
+-- | Only some constant expressions quality as *static* expressions,
+-- which we can use for static memory allocation.  This is a bit of a
+-- hack, as it is primarly motivated by what you can put as the size
+-- when declaring an array in C.
+isStaticExp :: Imp.KernelConstExp -> Bool
+isStaticExp LeafExp{} = True
+isStaticExp ValueExp{} = True
+isStaticExp (BinOpExp Add{} x y) = isStaticExp x && isStaticExp y
+isStaticExp (BinOpExp Sub{} x y) = isStaticExp x && isStaticExp y
+isStaticExp (BinOpExp Mul{} x y) = isStaticExp x && isStaticExp y
+isStaticExp _ = False
 
 isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
 isConstExp v = do
   vtable <- asks ImpGen.envVtable
-  let lookupConstExp name = constExp =<< hasExp =<< HM.lookup name vtable
+  let lookupConstExp name = constExp =<< hasExp =<< M.lookup name vtable
       kernelConst (Op (Inner NumGroups)) = Just $ LeafExp Imp.NumGroupsConst int32
       kernelConst (Op (Inner GroupSize)) = Just $ LeafExp Imp.GroupSizeConst int32
       kernelConst (Op (Inner TileSize)) = Just $ LeafExp Imp.TileSizeConst int32
@@ -388,7 +403,7 @@ isConstExp v = do
 makeAllMemoryGlobal :: CallKernelGen a
                     -> CallKernelGen a
 makeAllMemoryGlobal =
-  local $ \env -> env { ImpGen.envVtable = HM.map globalMemory $ ImpGen.envVtable env
+  local $ \env -> env { ImpGen.envVtable = M.map globalMemory $ ImpGen.envVtable env
                       , ImpGen.envDefaultSpace = Imp.Space "global"
                       }
   where globalMemory (ImpGen.MemVar _ entry)
@@ -454,7 +469,7 @@ writeParamToLocalMemory :: Typed (MemBound u) =>
 writeParamToLocalMemory i (mem, _) param
   | Prim t <- paramType param =
       ImpGen.emit $
-      Imp.Write mem (bytes i') bt (Space "local") Imp.Volatile $
+      Imp.Scatter mem (bytes i') bt (Space "local") Imp.Volatile $
       Imp.var (paramName param) t
   | otherwise =
       return ()
@@ -567,6 +582,9 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
     zipWithM_ (writeParamToLocalMemory $ Imp.var local_id int32)
     acc_local_mem y_params
   let andBlockActive = Imp.BinOpExp LogAnd active
+      maybeBarrier = Imp.If (Imp.CmpOpExp (CmpSle Int32) lockstep_width (Imp.var skip_threads int32))
+                     (Imp.Op Imp.Barrier) mempty
+
   ImpGen.emit $
     Imp.Comment "in-block scan (hopefully no barriers needed)" $
     Imp.DeclareScalar skip_threads int32 <>
@@ -576,11 +594,11 @@ inBlockScan lockstep_width block_size active local_id acc_local_mem scan_lam = I
       (Imp.Comment "read operands" read_operands <>
        Imp.Comment "perform operation" op_to_y) mempty <>
 
-     Imp.If (Imp.CmpOpExp (CmpSlt Int32) lockstep_width (Imp.var skip_threads int32))
-      (Imp.Op Imp.Barrier) mempty <>
+     maybeBarrier <>
 
      Imp.If (andBlockActive in_block_thread_active)
       (Imp.Comment "write result" write_operation_result) mempty <>
+     maybeBarrier <>
      Imp.SetScalar skip_threads (Imp.var skip_threads int32 * 2))
   where block_id = Imp.BinOpExp (SQuot Int32) (Imp.var local_id int32) block_size
         in_block_id = Imp.var local_id int32 - block_id * block_size
@@ -946,10 +964,8 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
             isSimpleThreadInSpace bnd = Just bnd
 
 compileKernelExp _ dest e =
-  throwError $ unlines ["Invalid target",
-                         "  " ++ show dest,
-                         "for kernel expression",
-                         "  " ++ pretty e]
+  compilerBugS $ unlines ["Invalid target", "  " ++ show dest,
+                          "for kernel expression", "  " ++ pretty e]
 
 allThreads :: KernelConstants -> InKernelGen () -> InKernelGen Imp.KernelCode
 allThreads constants = ImpGen.subImpM_ $ inKernelOperations constants'

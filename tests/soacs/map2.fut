@@ -5,4 +5,4 @@
 -- output {
 --   [3, 4, 5, 6, 7, 8, 9, 10]
 -- }
-fun main(a: []i32): []i32 = map (+2) a
+let main(a: []i32): []i32 = map (+2) a

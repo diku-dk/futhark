@@ -26,7 +26,7 @@
 -- input { 3 47i32 6i32 } output { -2105686559i32 }
 -- input { 3 47i32 7i32 } output { -183020465i32 }
 
-fun main(f: i32, x: i32, y: i32): i32 =
+let main(f: i32, x: i32, y: i32): i32 =
   if      f == 0 then x + y
   else if f == 1 then x - y
   else if f == 2 then x * y

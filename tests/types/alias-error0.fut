@@ -5,4 +5,4 @@
 
 type t = t
 
-fun main(x: t): t = x
+let main(x: t): t = x

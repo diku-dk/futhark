@@ -8,8 +8,8 @@
 
 default (f32)
 
-fun Gauss_Jordan (A: [n][m]f32) (i: i32): [n][m]f32 =
-  if i == n then A else
+let Gauss_Jordan (A: [n][m]f32): [n][m]f32 =
+  loop (A) = for i < n do
     let irow = A[0]
     let Ap = A[1:n]
     let v1 = irow[i]
@@ -18,17 +18,18 @@ fun Gauss_Jordan (A: [n][m]f32) (i: i32): [n][m]f32 =
                     let scale = jrow[i]
                     in map (\x y -> y - scale * x) irow jrow)
                  Ap
-    in Gauss_Jordan (concat Ap ([irow])) (i+1)
+    in concat Ap ([irow])
+  in A
 
-fun matrix_inverse (A: [n][n]f32): [n][n]f32 =
+let matrix_inverse (A: [n][n]f32): [n][n]f32 =
   -- Pad the matrix with the identity matrix.
   let Ap = map (\row i ->
                       let padding = replicate n 0.0
                       let padding[i] = 1.0
                       in concat row padding)
                     A (iota n)
-  let Ap' = Gauss_Jordan Ap 0
+  let Ap' = Gauss_Jordan Ap
   -- Drop the identity matrix at the front.
   in Ap'[0:n,n:n*2]
 
-fun main (A: [n][n]f32): [n][n]f32 = matrix_inverse A
+let main (A: [n][n]f32): [n][n]f32 = matrix_inverse A

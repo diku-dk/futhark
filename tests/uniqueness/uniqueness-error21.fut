@@ -3,7 +3,7 @@
 -- ==
 -- error:
 
-fun floydSbsImp(N: i32, D: *[][]i32): [][]i32 =
+let floydSbsImp(N: i32, D: *[][]i32): [][]i32 =
     let DT = transpose(D) in -- DT aliases D.
     loop (D) = for i < N do
         loop (D) = for j < N do

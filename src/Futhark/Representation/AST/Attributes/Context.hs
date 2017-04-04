@@ -6,8 +6,8 @@ module Futhark.Representation.AST.Attributes.Context
   where
 
 import Control.Monad
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import Data.Monoid
 
 import Futhark.Representation.AST.Attributes.Types
@@ -32,15 +32,15 @@ ifExtContext pat tbranch fbranch = do
   ftype <- bodyExtType fbranch
   let extdims_t = map (extShapeDims . arrayShape) ttype
       extdims_f = map (extShapeDims . arrayShape) ftype
-      ext_mapping_t :: HM.HashMap VName ExtDimSize
+      ext_mapping_t :: M.Map VName ExtDimSize
       ext_mapping_t = shapeMapping' (patternValueTypes pat) extdims_t
-      ext_mapping_f :: HM.HashMap VName ExtDimSize
+      ext_mapping_f :: M.Map VName ExtDimSize
       ext_mapping_f = shapeMapping' (patternValueTypes pat) extdims_f
       hasFreeDim name = do
-        Free tv <- HM.lookup name ext_mapping_t
-        Free fv <- HM.lookup name ext_mapping_f
-        guard $ HS.null $ HS.intersection (freeIn tv) bound_in_branches
-        guard $ HS.null $ HS.intersection (freeIn fv) bound_in_branches
+        Free tv <- M.lookup name ext_mapping_t
+        Free fv <- M.lookup name ext_mapping_f
+        guard $ S.null $ S.intersection (freeIn tv) bound_in_branches
+        guard $ S.null $ S.intersection (freeIn fv) bound_in_branches
         return (tv, fv)
   return $ map (hasFreeDim . identName) $ patternContextIdents pat
   where bound_in_branches = boundInBody tbranch <> boundInBody fbranch

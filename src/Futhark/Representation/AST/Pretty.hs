@@ -191,6 +191,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
 
 instance Pretty (BasicOp lore) where
   ppr (SubExp se) = ppr se
+  ppr (Opaque e) = text "opaque" <> apply [ppr e]
   ppr (ArrayLit [] rt) =
     text "empty" <> parens (ppr rt)
   ppr (ArrayLit es rt) =
@@ -224,7 +225,7 @@ instance Pretty (BasicOp lore) where
     ppCertificates cs <> text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
-  ppr (Assert e _) = text "assert" <> parens (ppr e)
+  ppr (Assert e loc) = text "assert" <> apply [ppr e, text $ show $ locStr loc]
   ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
     text "partition" <>

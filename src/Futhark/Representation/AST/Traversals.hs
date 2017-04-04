@@ -155,6 +155,8 @@ mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e loc)) =
   BasicOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
+mapExpM tv (BasicOp (Opaque e)) =
+  BasicOp <$> (Opaque <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (Partition cs n flags arr)) =
   BasicOp <$> (pure Partition <*> mapOnCertificates tv cs <*>
               pure n <*>
@@ -260,7 +262,6 @@ foldExp m x = runIdentity . foldExpM m x
 data Walker lore m = Walker {
     walkOnSubExp :: SubExp -> m ()
   , walkOnBody :: Body lore -> m ()
-  , walkOnStm :: Stm lore -> m ()
   , walkOnVName :: VName -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
@@ -274,7 +275,6 @@ identityWalker :: Monad m => Walker lore m
 identityWalker = Walker {
                    walkOnSubExp = const $ return ()
                  , walkOnBody = const $ return ()
-                 , walkOnStm = const $ return ()
                  , walkOnVName = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()

@@ -35,8 +35,8 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 
-import qualified Data.HashMap.Strict as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 
 import Prelude
@@ -51,7 +51,7 @@ import Futhark.Transform.Substitute
 
 runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
 runRenamer m src = runReader (runStateT m src) env
-  where env = RenameEnv HM.empty newName
+  where env = RenameEnv M.empty newName
 
 -- | Rename variables such that each is unique.  The semantics of the
 -- program are unaffected, under the assumption that the program was
@@ -104,7 +104,7 @@ renameFun :: (Renameable lore, MonadFreshNames m) =>
 renameFun = modifyNameSource . runRenamer . rename
 
 data RenameEnv = RenameEnv {
-    envNameMap :: HM.HashMap VName VName
+    envNameMap :: M.Map VName VName
   , envNameFn  :: VNameSource -> VName -> (VName, VNameSource)
   }
 
@@ -140,7 +140,7 @@ class Rename a where
 
 instance Rename VName where
   rename name = fromMaybe name <$>
-                asks (HM.lookup name . envNameMap)
+                asks (M.lookup name . envNameMap)
 
 instance Rename a => Rename [a] where
   rename = mapM rename
@@ -177,8 +177,8 @@ bind vars body = do
   -- This works because map union prefers elements from left
   -- operand.
   local (bind' vars') body
-  where bind' vars' env = env { envNameMap = HM.fromList (zip vars vars')
-                                             `HM.union` envNameMap env }
+  where bind' vars' env = env { envNameMap = M.fromList (zip vars vars')
+                                             `M.union` envNameMap env }
 
 instance Renameable lore => Rename (FunDef lore) where
   rename (FunDef entry fname ret params body) =
@@ -286,7 +286,7 @@ instance Renameable lore => Rename (ExtLambda lore) where
       return $ ExtLambda params' body' rettype'
 
 instance Rename Names where
-  rename = fmap HS.fromList . mapM rename . HS.toList
+  rename = fmap S.fromList . mapM rename . S.toList
 
 instance Rename Rank where
   rename = return

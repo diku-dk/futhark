@@ -5,7 +5,7 @@
 -- output {
 --    [ 0 , 1 , 1 , 2 , 3 , 5 , 8 , 13 , 21 , 34  ]
 -- }
-fun computefibs(arr: *[n]i32): *[]i32 =
+let computefibs(arr: *[n]i32): *[]i32 =
     let arr[0] = 0
     let arr[1] = 1 in
     loop (arr) = for i < n-2 do
@@ -15,10 +15,10 @@ fun computefibs(arr: *[n]i32): *[]i32 =
                    in arr
     in arr
 
-fun fibs(arr: []i32, n: i32): *[][]i32 =
+let fibs(arr: []i32, n: i32): *[][]i32 =
     map (\(i: i32): *[]i32  -> computefibs(copy(arr))) (iota(n))
 
 -- Read an integer from the user, then compute that number of fibonacci numbers.
-fun main(n: i32): []i32 =
+let main(n: i32): []i32 =
     let res = fibs(iota(n), n) in
     res[0]

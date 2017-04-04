@@ -19,9 +19,9 @@ module LSS(P: LSS_PRED): { val lss: []P.t -> i32 } = {
 
   type slug = (i32,i32,i32,i32,t,t)
 
-  fun max (x: i32) (y: i32) = if x < y then y else x
+  let max (x: i32) (y: i32) = if x < y then y else x
 
-  fun redOp((lssx, lisx, lcsx, tlx, firstx, lastx): slug)
+  let redOp((lssx, lisx, lcsx, tlx, firstx, lastx): slug)
            ((lssy, lisy, lcsy, tly, firsty, lasty): slug): slug =
 
     let connect = P.pred2 lastx firsty
@@ -34,11 +34,11 @@ module LSS(P: LSS_PRED): { val lss: []P.t -> i32 } = {
     let last  = if tly == 0 then lastx else lasty
     in (newlss, newlis, newlcs, tlx+tly, first, last)
 
-  fun mapOp (x: t): slug =
+  let mapOp (x: t): slug =
     let xmatch = if P.pred1 x then 1 else 0
     in (xmatch, xmatch, xmatch, 1, x, x)
 
-  fun lss(xs: []t): i32 =
+  let lss(xs: []t): i32 =
     let (x,_,_,_,_,_) =
       reduce redOp (0,0,0,0,P.blank,P.blank) (map mapOp xs)
     in x

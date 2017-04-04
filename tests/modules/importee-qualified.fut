@@ -2,4 +2,4 @@
 -- ==
 -- tags { disable }
 
-fun whatever(x: i32) = x + 2
+let whatever(x: i32) = x + 2

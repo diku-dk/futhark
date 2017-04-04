@@ -3,9 +3,9 @@
 -- error: .*Dup.*
 
 module Foo = {
-  fun foo(): foo = 1
+  let foo(): foo = 1
 }
 type foo = i32
 type foo = float
 
-fun main(): i32 = 0
+let main(): i32 = 0

@@ -58,8 +58,8 @@ import Data.Either
 import Data.Ord
 import Data.Hashable
 
-import qualified Data.HashMap.Strict as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude hiding (mapM)
 
@@ -198,8 +198,8 @@ instance Show TypeError where
   show (UnappliedFunctor loc) =
     "Cannot have parametric module at " ++ locStr loc ++ "."
 
--- | A set of abstract types.
-type TySet = HS.HashSet VName
+-- | A set of abstract types and where their definition is expected.
+type TySet = S.Set (QualName VName)
 
 -- | Representation of a module, which is either a plain environment,
 -- or a parametric module ("functor" in SML).
@@ -209,7 +209,7 @@ data Mod = ModEnv Env
 
 -- | A parametric functor consists of a set of abstract types, the
 -- environment of its parameter, and the resulting module type.
-data FunSig = FunSig TySet Env MTy
+data FunSig = FunSig TySet Mod MTy
             deriving (Show)
 
 -- | Return type and a list of argument types, and names that are used
@@ -231,13 +231,13 @@ data ValBinding = BoundV Type
                 | BoundF FunBinding
                 deriving (Show)
 
-type NameMap = HM.HashMap (Namespace, Name) VName
+type NameMap = M.Map (Namespace, Name) VName
 
 -- | Modules produces environment with this representation.
-data Env = Env { envVtable :: HM.HashMap VName ValBinding
-               , envTypeTable :: HM.HashMap VName TypeBinding
-               , envSigTable :: HM.HashMap VName MTy
-               , envModTable :: HM.HashMap VName Mod
+data Env = Env { envVtable :: M.Map VName ValBinding
+               , envTypeTable :: M.Map VName TypeBinding
+               , envSigTable :: M.Map VName MTy
+               , envModTable :: M.Map VName Mod
                , envNameMap :: NameMap
                } deriving (Show)
 
@@ -247,14 +247,14 @@ instance Monoid Env where
     Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
 
 envVals :: Env -> [(VName, ([StructType], StructType))]
-envVals = map select . HM.toList . envVtable
+envVals = map select . M.toList . envVtable
   where select (name, BoundF fun) =
           (name, fun)
         select (name, BoundV t) =
           (name, ([], vacuousShapeAnnotations $ toStruct t))
 
 envMods :: Env -> [(VName,Mod)]
-envMods = HM.toList . envModTable
+envMods = M.toList . envModTable
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
@@ -277,7 +277,7 @@ instance Show Warnings where
 singleWarning :: SrcLoc -> String -> Warnings
 singleWarning loc problem = Warnings [(loc, problem)]
 
-type ImportTable = HM.HashMap FilePath Env
+type ImportTable = M.Map FilePath Env
 
 -- | The type checker runs in this monad.
 newtype TypeM a = TypeM (RWST
@@ -334,10 +334,10 @@ expandType look t@(TERecord fs loc) = do
   unless (sort field_names == sort (nub field_names)) $
     bad $ TypeError loc $ "Duplicate record fields in " ++ pretty t
 
-  fs_and_ts <- traverse (expandType look) $ HM.fromList fs
+  fs_and_ts <- traverse (expandType look) $ M.fromList fs
   let fs' = fmap fst fs_and_ts
       ts_s = fmap snd fs_and_ts
-  return (TERecord (HM.toList fs') loc, Record ts_s)
+  return (TERecord (M.toList fs') loc, Record ts_s)
 expandType look (TEArray t d loc) = do
   (t', st) <- expandType look t
   d' <- look loc d
@@ -366,7 +366,7 @@ instance MonadTypeChecker TypeM where
                  put src'
                  return s'
 
-  newID s = newName $ ID (s, 0)
+  newID s = newName $ VName s 0
 
   checkName space name loc = do
     (_, QualName _ name') <- checkQualName space (qualName name) loc
@@ -374,24 +374,24 @@ instance MonadTypeChecker TypeM where
 
   lookupType loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Type qn loc
-    case HM.lookup name $ envTypeTable scope of
+    case M.lookup name $ envTypeTable scope of
       Nothing             -> bad $ UndefinedType loc qn
       Just (TypeAbbr def) -> return (qn', def)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
-    case HM.lookup name $ envModTable scope of
+    case M.lookup name $ envModTable scope of
       Nothing -> bad $ UnknownVariableError Structure qn loc
       Just m  -> return (qn', m)
 
   lookupMTy loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Signature qn loc
-    (qn',) <$> maybe explode return (HM.lookup name $ envSigTable scope)
+    (qn',) <$> maybe explode return (M.lookup name $ envSigTable scope)
     where explode = bad $ UnknownVariableError Signature qn loc
 
   lookupImport loc file = do
     imports <- askImportTable
-    case HM.lookup file imports of
+    case M.lookup file imports of
       Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\""
       Just scope -> return scope
 
@@ -400,14 +400,14 @@ checkQualName space qn@(QualName quals name) loc = do
   env <- askEnv
   descend env quals
   where descend scope []
-          | Just name' <- HM.lookup (space, name) $ envNameMap scope =
+          | Just name' <- M.lookup (space, name) $ envNameMap scope =
               return (scope, QualName quals name')
           | otherwise =
               bad $ UnknownVariableError space qn loc
 
         descend scope (q:qs)
-          | Just q' <- HM.lookup (Structure, q) $ envNameMap scope,
-            Just res <- HM.lookup q' $ envModTable scope =
+          | Just q' <- M.lookup (Structure, q) $ envNameMap scope,
+            Just res <- M.lookup q' $ envModTable scope =
               case res of
                 ModEnv q_scope -> descend q_scope qs
                 ModFun{} -> bad $ UnappliedFunctor loc
@@ -453,17 +453,17 @@ instance Hashable Namespace where
   hashWithSalt salt = hashWithSalt salt . fromEnum
 
 intrinsicsNameMap :: NameMap
-intrinsicsNameMap = HM.fromList $ map mapping $ HM.toList intrinsics
+intrinsicsNameMap = M.fromList $ map mapping $ M.toList intrinsics
   where mapping (v, IntrinsicType{}) = ((Type, baseName v), v)
         mapping (v, _)               = ((Term, baseName v), v)
 
 topLevelNameMap :: NameMap
-topLevelNameMap = HM.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
+topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
   where atTopLevel :: (Namespace, Name) -> Bool
         atTopLevel (Type, _) = True
-        atTopLevel (Term, v) = v `HS.member` (type_names <> binop_names <> unop_names)
-          where type_names = HS.fromList $ map (nameFromString . pretty) anyPrimType
-                binop_names = HS.fromList $ map (nameFromString . pretty)
+        atTopLevel (Term, v) = v `S.member` (type_names <> binop_names <> unop_names)
+          where type_names = S.fromList $ map (nameFromString . pretty) anyPrimType
+                binop_names = S.fromList $ map (nameFromString . pretty)
                               [minBound..(maxBound::BinOp)]
-                unop_names = HS.fromList $ map nameFromString ["~", "!"]
+                unop_names = S.fromList $ map nameFromString ["~", "!"]
         atTopLevel _         = False

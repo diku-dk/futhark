@@ -13,7 +13,7 @@
 --    [10, 11, 12, 13, 14, 15, 16, 17]]
 -- }
 
-fun main(n: i32, m: i32, k: i32): [n][k]i32 =
+let main(n: i32, m: i32, k: i32): [n][k]i32 =
   let a = replicate n (iota m) in
   map (\(i: i32) (r: [m]i32): [k]i32  ->
             let x = reduce (+) 0 r

@@ -14,7 +14,7 @@
 --
 -- structure distributed { Map/DoLoop 0 }
 
-fun main(a: [n][m][k]i32): ([n][k]i32,[n]i32) =
+let main(a: [n][m][k]i32): ([n][k]i32,[n]i32) =
   let acc = replicate k 0
   let accnum = 1 in
   unzip(map (\(a_r: [m][k]i32): ([k]i32,i32)  ->
@@ -25,7 +25,7 @@ fun main(a: [n][m][k]i32): ([n][k]i32,[n]i32) =
      ) a)
 
 -- Example of what we want - this is dead code.
-fun main_distributed(a: [n][m][k]i32): ([n][k]i32,[n]i32) =
+let main_distributed(a: [n][m][k]i32): ([n][k]i32,[n]i32) =
   let acc_expanded = replicate n (replicate k 0)
   let accnum_expanded = replicate n 1 in
   loop((acc_expanded,accnum_expanded)) = for i < m do

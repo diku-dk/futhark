@@ -5,5 +5,5 @@
 -- input { [[1,2],[3,4]] }
 -- output { [4, 4] }
 
-fun main (xss: [][]i32): []i32 =
+let main (xss: [][]i32): []i32 =
   map (\((_xs: [m]i32): [n]i32): i32 -> n + m) xss

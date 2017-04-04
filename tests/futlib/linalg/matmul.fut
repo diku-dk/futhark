@@ -11,5 +11,5 @@ import "futlib/linalg"
 
 module i32linalg = linalg(i32)
 
-fun main(x: [][]i32, y: [][]i32): [][]i32 =
+let main(x: [][]i32, y: [][]i32): [][]i32 =
   i32linalg.matmul x y

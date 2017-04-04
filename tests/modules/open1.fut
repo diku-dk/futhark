@@ -2,12 +2,12 @@
 -- ==
 -- input { } output { 4 }
 
-val the_value = 2
+let the_value = 2
 
 module M = {
-  val the_value = 4
+  let the_value = 4
 }
 
 open M
 
-fun main() = the_value
+let main() = the_value

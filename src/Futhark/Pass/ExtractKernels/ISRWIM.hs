@@ -17,6 +17,8 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.SOACS
 import Futhark.Tools
 
+-- | Interchange Scan With Inner Map. Tries to turn a @scan(map)@ into a
+-- @map(scan)
 iswim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
       -> Certificates
@@ -62,6 +64,8 @@ iswim res_pat cs w scan_fun scan_input
                      BasicOp $ Rearrange [] perm $ identName from
   | otherwise = Nothing
 
+-- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
+-- @map(reduce)
 irwim :: (MonadBinder m, Lore m ~ SOACS, LocalScope SOACS m) =>
          Pattern
       -> Certificates

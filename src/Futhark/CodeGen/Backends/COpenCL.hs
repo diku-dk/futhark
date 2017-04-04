@@ -13,6 +13,7 @@ import Prelude hiding (mapM)
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
+import Futhark.Error
 import Futhark.Representation.ExplicitMemory
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
@@ -21,7 +22,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either String String)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError String)
 compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
@@ -49,12 +50,12 @@ compileProg prog = do
         options = [ Option { optionLongName = "platform"
                            , optionShortName = Just 'p'
                            , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|cl_preferred_platform = optarg;|]
+                           , optionAction = [C.cstm|set_preferred_platform(optarg);|]
                            }
                   , Option { optionLongName = "device"
                            , optionShortName = Just 'd'
                            , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|cl_preferred_device = optarg;|]
+                           , optionAction = [C.cstm|set_preferred_device(optarg);|]
                            }
                   , Option { optionLongName = "synchronous"
                            , optionShortName = Just 's'
@@ -70,6 +71,16 @@ compileProg prog = do
                            , optionShortName = Nothing
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_num_groups = atoi(optarg);|]
+                           }
+                  , Option { optionLongName = "dump-opencl"
+                           , optionShortName = Nothing
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_dump_program_to = optarg;|]
+                           }
+                  , Option { optionLongName = "load-opencl"
+                           , optionShortName = Nothing
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_load_program_from = optarg;|]
                            }
                   ]
 

@@ -16,16 +16,16 @@ module argb_colour: colour with colour = i32 = {
   -- ARGB storage.
   type colour = i32
 
-  fun clamp_channel (x: f32): f32 =
+  let clamp_channel (x: f32): f32 =
     if x < 0f32 then 0f32 else if x > 1f32 then 1f32 else x
 
-  fun from_rgba (r: f32) (g: f32) (b: f32) (a: f32): colour =
+  let from_rgba (r: f32) (g: f32) (b: f32) (a: f32): colour =
     ((i32 (clamp_channel a * 255f32) << 24) |
      (i32 (clamp_channel r * 255f32) << 16) |
      (i32 (clamp_channel g * 255f32) << 8)  |
      (i32 (clamp_channel b * 255f32)))
 
-  fun to_rgba (x: colour): (f32,f32,f32,f32) =
+  let to_rgba (x: colour): (f32,f32,f32,f32) =
     (f32 ((x>>16) & 0xFF) / 255f32,
      f32 ((x>>8) & 0xFF) / 255f32,
      f32 ((x>>0) & 0xFF) / 255f32,
@@ -68,19 +68,19 @@ module type colourspace = {
 module colourspace(C: colour): colourspace with colour = C.colour = {
   open C
 
-  fun max_channel (x: f32) (y: f32): f32 =
+  let max_channel (x: f32) (y: f32): f32 =
     if x < y then y else x
 
-  fun from_rgb_normalised (r: f32) (g: f32) (b: f32): colour =
+  let from_rgb_normalised (r: f32) (g: f32) (b: f32): colour =
     let m = max_channel r (max_channel g b)
     in from_rgba (r / m) (g / m) (b / m) 1f32
 
   -- Normalise a color to the value of its largest RGB component.
-  fun normalised_colour (r: f32) (g: f32) (b: f32) (a: f32): colour =
+  let normalised_colour (r: f32) (g: f32) (b: f32) (a: f32): colour =
     let m = max_channel r (max_channel g b)
     in from_rgba (r / m) (g / m) (b / m) a
 
-  fun add (x: colour) (y: colour): colour =
+  let add (x: colour) (y: colour): colour =
     let (r1,g1,b1,a1) = to_rgba x
     let (r2,g2,b2,a2) = to_rgba y
     in normalised_colour
@@ -89,7 +89,7 @@ module colourspace(C: colour): colourspace with colour = C.colour = {
        (max_channel b1 b2)
        ((a1+a2)/2f32)
 
-  fun mix (m1: f32) (c1: colour) (m2: f32) (c2: colour): colour =
+  let mix (m1: f32) (c1: colour) (m2: f32) (c2: colour): colour =
     let (r1,g1,b1,a1) = to_rgba c1
     let (r2,g2,b2,a2) = to_rgba c2
 
@@ -112,37 +112,37 @@ module colourspace(C: colour): colourspace with colour = C.colour = {
                  ((m1 * a1 + m2 * a2) / m12)
 
 
-  fun bright (c: colour): colour =
+  let bright (c: colour): colour =
     let (r,g,b,a) = to_rgba c
     in from_rgba (r * 1.2f32) (g * 1.2f32) (b * 1.2f32) a
 
-  fun dim (c: colour): colour =
+  let dim (c: colour): colour =
     let (r,g,b,a) = to_rgba c
     in from_rgba (r * 0.8f32) (g * 0.8f32) (b * 0.8f32) a
 
-  fun light (c: colour): colour =
+  let light (c: colour): colour =
     let (r,g,b,a) = to_rgba c
     in from_rgba (r + 0.2f32) (g + 0.2f32) (b + 0.2f32) a
 
-  fun dark (c: colour): colour =
+  let dark (c: colour): colour =
     let (r,g,b,a) = to_rgba c
     in from_rgba (r - 0.2f32) (g - 0.2f32) (b - 0.2f32) a
 
   -- Basic colours
-  val black: colour = from_rgba 0f32 0f32 0f32 1f32
-  val red: colour = from_rgba 1f32 0f32 0f32 1f32
-  val green: colour = from_rgba 0f32 1f32 0f32 1f32
-  val blue: colour = from_rgba 0f32 0f32 1f32 1f32
-  val white: colour = from_rgba 1f32 1f32 1f32 1f32
-  val brown: colour = from_rgba 0.49f32 0.19f32 0.11f32 1f32
+  let black: colour = from_rgba 0f32 0f32 0f32 1f32
+  let red: colour = from_rgba 1f32 0f32 0f32 1f32
+  let green: colour = from_rgba 0f32 1f32 0f32 1f32
+  let blue: colour = from_rgba 0f32 0f32 1f32 1f32
+  let white: colour = from_rgba 1f32 1f32 1f32 1f32
+  let brown: colour = from_rgba 0.49f32 0.19f32 0.11f32 1f32
 
   -- Derived colours
-  val yellow: colour = add red green
-  val orange: colour = add yellow red
-  val magenta: colour = add red blue
-  val violet: colour = add magenta blue
+  let yellow: colour = add red green
+  let orange: colour = add yellow red
+  let magenta: colour = add red blue
+  let violet: colour = add magenta blue
 
-  fun gray (d: f32): colour = from_rgba d d d 1f32
+  let gray (d: f32): colour = from_rgba d d d 1f32
 }
 
 module argb = colourspace(argb_colour)

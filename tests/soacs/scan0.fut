@@ -8,6 +8,6 @@
 -- compiled input { 1000000 } output { 1783293664i32 }
 -- structure distributed { Kernel 3 Iota 0 }
 
-fun main(n: i32): i32 =
+let main(n: i32): i32 =
   let a = scan (+) 0 (iota(n))
   in a[n-1]

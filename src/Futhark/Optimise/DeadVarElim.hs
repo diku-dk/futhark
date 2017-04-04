@@ -11,7 +11,7 @@ module Futhark.Optimise.DeadVarElim
 import Control.Applicative
 import Control.Monad.Writer
 
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Prelude
 
@@ -32,8 +32,8 @@ data DCElimRes = DCElimRes {
 
 instance Monoid DCElimRes where
   DCElimRes s1 m1 `mappend` DCElimRes s2 m2 =
-    DCElimRes (s1 || s2) (m1 `HS.union` m2) --(io1 || io2)
-  mempty = DCElimRes False HS.empty -- False
+    DCElimRes (s1 || s2) (m1 `S.union` m2) --(io1 || io2)
+  mempty = DCElimRes False S.empty -- False
 
 type DCElimM = Writer DCElimRes
 
@@ -43,7 +43,7 @@ runDCElimM = runWriter
 collectRes :: [VName] -> DCElimM a -> DCElimM (a, Bool)
 collectRes mvars m = pass collect
   where wasNotUsed hashtab vnm =
-          return $ not (HS.member vnm hashtab)
+          return $ not (S.member vnm hashtab)
 
         collect = do
           (x,res) <- listen m
@@ -123,7 +123,7 @@ deadCodeElimExp = mapExpM mapper
 
 deadCodeElimVName :: VName -> DCElimM VName
 deadCodeElimVName vnm = do
-  seen $ HS.singleton vnm
+  seen $ S.singleton vnm
   return vnm
 
 deadCodeElimPat :: FreeIn attr => PatternT attr -> DCElimM ()
@@ -131,7 +131,7 @@ deadCodeElimPat = mapM_ deadCodeElimPatElem . patternElements
 
 deadCodeElimPatElem :: FreeIn attr => PatElemT attr -> DCElimM ()
 deadCodeElimPatElem patelem =
-  seen $ patElemName patelem `HS.delete` freeIn patelem
+  seen $ patElemName patelem `S.delete` freeIn patelem
 
 seen :: Names -> DCElimM ()
 seen = tell . DCElimRes False

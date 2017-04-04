@@ -13,20 +13,20 @@ module type MSS_MEASURE = {
 
 module MSS(M: MSS_MEASURE): { val mss: []M.t -> M.m } = {
 
-  fun redOp((mssx, misx, mcsx, tsx): (M.m,M.m,M.m,M.m))
+  let redOp((mssx, misx, mcsx, tsx): (M.m,M.m,M.m,M.m))
          ((mssy, misy, mcsy, tsy): (M.m,M.m,M.m,M.m)): (M.m,M.m,M.m,M.m) =
     ( M.max mssx (M.max mssy (M.combine mcsx misy))
     , M.max misx (M.combine tsx misy)
     , M.max mcsy (M.combine mcsx tsy)
     , M.combine tsx tsy)
 
-  fun mapOp (x: M.t): (M.m,M.m,M.m,M.m) =
+  let mapOp (x: M.t): (M.m,M.m,M.m,M.m) =
     ( M.max (M.single x) M.zero
     , M.max (M.single x) M.zero
     , M.max (M.single x) M.zero
     , M.single x)
 
-  fun mss(xs: []M.t): M.m =
+  let mss(xs: []M.t): M.m =
     let (x, _, _, _) =
       reduce redOp (M.zero,M.zero,M.zero,M.zero) (map mapOp xs) in
     x

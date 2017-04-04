@@ -24,8 +24,8 @@ module Futhark.Representation.AST.Attributes.Ranges
        where
 
 import Data.Monoid
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -68,6 +68,9 @@ instance FreeIn KnownBound where
   freeIn (MinimumBound b1 b2) = freeIn b1 <> freeIn b2
   freeIn (MaximumBound b1 b2) = freeIn b1 <> freeIn b2
   freeIn (ScalarBound e)      = freeIn e
+
+instance FreeAttr KnownBound where
+  precomputed _ = id
 
 instance PP.Pretty KnownBound where
   ppr (VarBound v) =
@@ -186,6 +189,9 @@ primOpRanges (BinOp (Mul t) x y) =
 primOpRanges (BinOp (SDiv t) x y) =
   [scalExpRange $ SE.SDiv (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
 
+primOpRanges (ConvOp (SExt from to) x)
+  | from < to = [rangeOf x]
+
 primOpRanges (Iota n x s Int32) =
   [(Just $ ScalarBound x',
     Just $ ScalarBound $ x' + (n' - 1) * s')]
@@ -233,7 +239,7 @@ expRanges (If _ tbranch fbranch _) =
 expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations) body) =
   zipWith returnedRange valmerge $ rangesOf body
   where bound_in_loop =
-          HS.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
+          S.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
           concatMap (patternNames . bindingPattern) (bodyStms body)
 
         returnedRange mergeparam (lower, upper) =
@@ -244,8 +250,8 @@ expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations) body) =
           | paramType param == Prim (IntType Int32),
             Just bound' <- boundToScalExp bound,
             let se_diff =
-                  AS.simplify (SE.SMinus (SE.Id (paramName param) $ IntType Int32) bound') HM.empty,
-            HS.null $ HS.intersection bound_in_loop $ freeIn se_diff =
+                  AS.simplify (SE.SMinus (SE.Id (paramName param) $ IntType Int32) bound') M.empty,
+            S.null $ S.intersection bound_in_loop $ freeIn se_diff =
               Just $ ScalarBound $ SE.SPlus (SE.subExpToScalExp mergeinit $ IntType Int32) $
               SE.STimes se_diff $ SE.MaxMin False
               [SE.subExpToScalExp iterations $ IntType Int32, 0]

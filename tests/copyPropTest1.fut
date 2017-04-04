@@ -5,10 +5,10 @@
 --   52
 -- }
 -- structure { Replicate 0 }
-fun getInt (): i32 = if((1-1)*3 + (3/3 - 1) == 0) then (15 / 3)*2 else 10000000
-fun plus1(x: []i32): []i32 = map (\(y: i32): i32->y+1) x
+let getInt (): i32 = if((1-1)*3 + (3/3 - 1) == 0) then (15 / 3)*2 else 10000000
+let plus1(x: []i32): []i32 = map (\(y: i32): i32->y+1) x
 
-fun main(): i32 =
+let main(): i32 =
     let n  = getInt()            -- Int
     let x  = iota(n)             -- [n]Int
     let m  = (n*1)+(n*0)         -- n :: Int

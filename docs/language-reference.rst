@@ -155,7 +155,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ")"
        : | "(" `exp` ("," `exp`)* ")"
        : | "{" "}"
-       : | "{" `fieldid` "=" `exp` ("," `fieldid` "=" `exp`)* "}"
+       : | "{" field ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | "[" `exp` ("," `exp`)* "]"
@@ -185,17 +185,19 @@ literals and variables, but also more complicated forms.
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
       : | "map" `fun` `exp`+
       : | "reduce" `fun` `exp` `exp`
-      : | "reduceComm" `fun` `exp` `exp`
+      : | "reduce_comm" `fun` `exp` `exp`
       : | "reduce" `fun` `exp` `exp`
       : | "scan" `fun` `exp` `exp`
       : | "filter" `fun` `exp`
       : | "partition" "(" `fun`+ ")" `exp`
-      : | "write" `exp` `exp` `exp`
-      : | "streamMap" `fun` `exp`
-      : | "streamMapPer" `fun` `exp`
-      : | "streamRed" `fun` `exp` `exp`
-      : | "streamMapPer" `fun` `exp` `exp`
-      : | "streamSeq" `fun` `exp` `exp`
+      : | "scatter" `exp` `exp` `exp`
+      : | "stream_map" `fun` `exp`
+      : | "stream_map_per" `fun` `exp`
+      : | "stream_red" `fun` `exp` `exp`
+      : | "stream_map_per" `fun` `exp` `exp`
+      : | "stream_seq" `fun` `exp` `exp`
+   field:   `fieldid` "=" `exp`
+        : | `exp`
    pat:   `id`
       : |  "_"
       : | "(" ")"
@@ -302,11 +304,24 @@ Evaluates to the result of ``e``.
 Evaluates to a tuple containing ``N`` values.  Equivalent to ``(1=e1,
 2=e2, ..., N=eN)``.
 
-``{f1=e1, f2=e2, ..., f3=eN}``
-..............................
+``{f1, f2, ..., fN}``
+.....................
 
-Evaluates to a record containing ``N`` fields.  It is an error to have
-duplicate field names.
+A record expression consists of a comma-separated sequence of *field
+expressions*.  A record expression is evaluated by creating an empty
+record, then processing the field expressions from left to right.
+Each field expression adds fields to the record being constructed.  A
+field expression can take one of two forms:
+
+  ``f = e``: adds a field with the name ``f`` and the value resulting
+  from evaluating ``e``.
+
+  ``e``: the expression ``e`` must evaluate to a record, whose fields
+  are added to the record being constructed.
+
+If a field expression attempts to add a field that already exists in
+the record being constructed, the new value for the field supercedes
+the old one.
 
 ``a[i]``
 ........
@@ -325,7 +340,7 @@ bracket.  This disambiguates the array indexing ``a[i]``, from ``a
 ............
 
 Return a slice of the array ``a`` from index ``i`` to ``j``, the
-latter inclusive and the latter exclusive, taking every ``s``th
+latter inclusive and the latter exclusive, taking every ``s``-th
 element.  The ``s`` parameter may not be zero.  If ``s`` is negative,
 it means to start at ``i`` and descend by steps of size ``s`` to ``j``
 (not inclusive).
@@ -640,13 +655,13 @@ Left-reduction with ``f`` across the elements of ``a``, with ``x`` as
 the neutral element for ``f``.  The function ``f`` must be
 associative.  If it is not, the return value is unspecified.
 
-``reduceComm f x a``
-....................
+``reduce_comm f x a``
+.....................
 
 Like ``reduce``, but with the added guarantee that the function ``f``
 is *commutative*.  This lets the compiler generate more efficient
 code.  If ``f`` is not commutative, the return value is unspecified.
-You do not need to explicitly use ``reduceComm`` with built-in
+You do not need to explicitly use ``reduce_comm`` with built-in
 operators like ``+`` - the compiler already knows that these are
 commutative.
 
@@ -674,10 +689,10 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``write is vs as``
+``scatter as is vs``
 ..................
 
-The ``write`` expression calculates the equivalent of this imperative
+The ``scatter`` expression calculates the equivalent of this imperative
 code::
 
   for index in 0..shape(is)[0]-1:
@@ -685,7 +700,7 @@ code::
     v = vs[index]
     as[i] = v
 
-The ``is`` and ``vs`` arrays must have the same outer size.  ``write``
+The ``is`` and ``vs`` arrays must have the same outer size.  ``scatter``
 acts in-place and consumes the ``as`` array, returning a new array
 that has the same type and elements as ``as``, except for the indices
 in ``is``.  If ``is`` contains duplicates (i.e. several writes are
@@ -706,26 +721,26 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   fun_bind:   ("fun" | "entry") `id` `pat`+ [":" `ty_exp`] "=" `exp`
-           : | ("fun" | "entry") `pat` `binop` `pat` [":" `ty_exp`] "=" `exp`
+   fun_bind:   ("let" | "entry") `id` `pat`+ [":" `ty_exp`] "=" `exp`
+           : | ("let" | "entry") `pat` `binop` `pat` [":" `ty_exp`] "=" `exp`
 
 .. productionlist::
-   val_bind: "val" `id` [":" `ty_exp`] "=" `exp`
+   val_bind: "let" `id` [":" `ty_exp`] "=" `exp`
 
-A function declaration must specify the name, parameters, return
-type, and body of the function::
+Functions and values must be defined before they are used.  A function
+declaration must specify the name, parameters, return type, and body
+of the function::
 
-  fun name params...: rettype = body
+  let name params...: rettype = body
 
 Type inference is not supported, and functions are fully monomorphic.
-A parameter is written as ``(name: type)``.  If the function is
-neither recursive or referenced before it is defined, the return type
-may be elided.  Optionally, the programmer may put *shape
-declarations* in the return type and parameter types.  These can be
-used to express invariants about the shapes of arrays that are
-accepted or produced by the function, e.g::
+A parameter is written as ``(name: type)``.  Functions may not be
+recursive.  Optionally, the programmer may put *shape declarations* in
+the return type and parameter types.  These can be used to express
+invariants about the shapes of arrays that are accepted or produced by
+the function, e.g::
 
-  fun f (a: [n]i32) (b: [n]i32): [n]i32 =
+  let f (a: [n]i32) (b: [n]i32): [n]i32 =
     map (+) a b
 
 In general, shape declarations in parameters are fresh names, whilst
@@ -741,11 +756,11 @@ User-Defined Operators
 
 Infix operators are defined much like functions::
 
-  fun (p1: t1) op (p2: t2): rt = ...
+  let (p1: t1) op (p2: t2): rt = ...
 
 For example::
 
-  fun (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
+  let (a:i32,b:i32) +^ (c:i32,d:i32) = (a+c, b+d)
 
 A valid operator name is a non-empty sequence of characters chosen
 from the string ``"+-*/%=!><&^"``.  The fixity of an operator is
@@ -785,12 +800,12 @@ Value Declarations
 
 A named value/constant can be declared as follows::
 
-  val name: type = definition
+  let name: type = definition
 
 The definition can be an arbitrary expression, including function
-calls and other values.  You can even define circular values, although
-these will likely result in an infinite loop at execution.  The type
-annotation can be elided if the value is defined before it is used.
+calls and other values, although they must be in scope before the
+value is defined.  The type annotation can be elided if the value is
+defined before it is used.
 
 Values can be used in shape declarations, except in the return value
 of entry points.
@@ -825,14 +840,15 @@ attributes are overrided by outer ones::
   type uniqueIntLists = *nonuniqueIntLists
 
   -- Error: using non-unique value for a unique return value.
-  fun uniqueIntLists (nonuniqueIntLists p) = p
+  let uniqueIntLists (nonuniqueIntLists p) = p
 
 
 Module System
 -------------
 
 .. productionlist::
-   mod_bind: "module" `id` "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_bind: "module" `id` `mod_param`+ "=" [":" mod_type_exp] "=" `mod_exp`
+   mod_param: "(" `id` ":" `mod_type_exp` ")"
    mod_ty_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
@@ -856,7 +872,7 @@ enclosed in curly braces::
 
   module Vec3 = {
     type t = ( f32 , f32 , f32 )
-    fun add(a: t) (b: t): t =
+    let add(a: t) (b: t): t =
       let (a1, a2, a3) = a in
       let (b1, b2, b3) = b in
       (a1 + b1, a2 + b2 , a3 + b3)
@@ -868,7 +884,7 @@ Functions and types within modules can be accessed using dot
 notation::
 
     type vector = Vec3.t
-    fun double(v: vector): vector = Vec3.add v v
+    let double(v: vector): vector = Vec3.add v v
 
 We can also use ``open Vec3`` to bring the names defined by ``Vec3``
 into the current scope.  Multiple modules can be opened simultaneously
@@ -909,7 +925,7 @@ Parametric modules allow us to write definitions that abstract over
 modules.  For example::
 
   module Times(M: Addable) = {
-    fun times (x: M.t) (k: int): M.t =
+    let times (x: M.t) (k: int): M.t =
       loop (x' = x) = for i < k do
         T.add x' x
       in x'

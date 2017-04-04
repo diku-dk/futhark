@@ -49,13 +49,14 @@ module Futhark.TypeCheck
   where
 
 import Control.Applicative
+import Control.Parallel.Strategies
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS
 import Data.List
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 
 import Prelude
@@ -104,18 +105,18 @@ instance Checkable lore => Show (ErrorCase lore) where
   show (DupDefinitionError name) =
     "Duplicate definition of function " ++ nameToString name ++ ""
   show (DupParamError funname paramname) =
-    "Parameter " ++ textual paramname ++
+    "Parameter " ++ pretty paramname ++
     " mentioned multiple times in argument list of function " ++
     nameToString funname ++ "."
   show (DupPatternError name) =
-    "Variable " ++ textual name ++ " bound twice in pattern."
+    "Variable " ++ pretty name ++ " bound twice in pattern."
   show (InvalidPatternError pat t desc) =
     "Pattern " ++ pretty pat ++
     " cannot match value of type " ++ prettyTuple t ++ end
     where end = case desc of Nothing -> "."
                              Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError name) =
-    "Use of unknown variable " ++ textual name ++ "."
+    "Use of unknown variable " ++ pretty name ++ "."
   show (UnknownFunctionError fname) =
     "Call of unknown function " ++ nameToString fname ++ "."
   show (ParameterMismatch fname expected got) =
@@ -134,7 +135,7 @@ instance Checkable lore => Show (ErrorCase lore) where
     ", but derived to be " ++ pretty got ++ "."
   show (ReturnAliased fname name) =
     "Unique return value of function " ++ nameToString fname ++
-    " is aliased to " ++ textual name ++ ", which is not consumed."
+    " is aliased to " ++ pretty name ++ ", which is not consumed."
   show (UniqueReturnAliased fname) =
     "A unique tuple element of return value of function " ++
     nameToString fname ++ " is aliased to some other tuple component."
@@ -144,7 +145,7 @@ instance Checkable lore => Show (ErrorCase lore) where
   show (PermutationError perm rank name) =
     "The permutation (" ++ intercalate ", " (map show perm) ++
     ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ "."
-    where name' = maybe "" ((++" ") . textual) name
+    where name' = maybe "" ((++" ") . pretty) name
 
 -- | A type error.
 data TypeError lore = Error [String] (ErrorCase lore)
@@ -171,48 +172,48 @@ data Occurence = Occurence { observed :: Names
              deriving (Eq, Show)
 
 observation :: Names -> Occurence
-observation = flip Occurence HS.empty
+observation = flip Occurence S.empty
 
 consumption :: Names -> Occurence
-consumption = Occurence HS.empty
+consumption = Occurence S.empty
 
 nullOccurence :: Occurence -> Bool
-nullOccurence occ = HS.null (observed occ) && HS.null (consumed occ)
+nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
 
 type Occurences = [Occurence]
 
-type UsageMap = HM.HashMap VName [Usage]
+type UsageMap = M.Map VName [Usage]
 
 usageMap :: Occurences -> UsageMap
-usageMap = foldl comb HM.empty
+usageMap = foldl comb M.empty
   where comb m (Occurence obs cons) =
-          let m' = HS.foldl' (ins Observed) m obs
-          in HS.foldl' (ins Consumed) m' cons
-        ins v m k = HM.insertWith (++) k [v] m
+          let m' = S.foldl' (ins Observed) m obs
+          in S.foldl' (ins Consumed) m' cons
+        ins v m k = M.insertWith (++) k [v] m
 
 allConsumed :: Occurences -> Names
-allConsumed = HS.unions . map consumed
+allConsumed = S.unions . map consumed
 
 seqOccurences :: Occurences -> Occurences -> Occurences
 seqOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
-          occ { observed = observed occ `HS.difference` postcons }
+          occ { observed = observed occ `S.difference` postcons }
         postcons = allConsumed occurs2
 
 altOccurences :: Occurences -> Occurences -> Occurences
 altOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
-          occ { consumed = consumed occ `HS.difference` postcons
-              , observed = observed occ `HS.difference` postcons }
+          occ { consumed = consumed occ `S.difference` postcons
+              , observed = observed occ `S.difference` postcons }
         postcons = allConsumed occurs2
 
 unOccur :: Names -> Occurences -> Occurences
 unOccur to_be_removed = filter (not . nullOccurence) . map unOccur'
   where unOccur' occ =
-          occ { observed = observed occ `HS.difference` to_be_removed
-              , consumed = consumed occ `HS.difference` to_be_removed
+          occ { observed = observed occ `S.difference` to_be_removed
+              , consumed = consumed occ `S.difference` to_be_removed
               }
 
 -- | The 'Consumption' data structure is used to keep track of which
@@ -226,7 +227,7 @@ instance Monoid Consumption where
   ConsumptionError e `mappend` _ = ConsumptionError e
   _ `mappend` ConsumptionError e = ConsumptionError e
   Consumption o1 `mappend` Consumption o2
-    | v:_ <- HS.toList $ consumed_in_o1 `HS.intersection` used_in_o2 =
+    | v:_ <- S.toList $ consumed_in_o1 `S.intersection` used_in_o2 =
         ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
     | otherwise =
         Consumption $ o1 `seqOccurences` o2
@@ -239,8 +240,8 @@ instance Monoid Consumption where
 -- variable table will be extended during type-checking when
 -- let-expressions are encountered.
 data Env lore =
-  Env { envVtable :: HM.HashMap VName (VarBinding lore)
-      , envFtable :: HM.HashMap Name (FunBinding lore)
+  Env { envVtable :: M.Map VName (VarBinding lore)
+      , envFtable :: M.Map Name (FunBinding lore)
       , envContext :: [String]
       }
 
@@ -259,7 +260,7 @@ newtype TypeM lore a = TypeM (RWST
 instance Checkable lore =>
          HasScope (Aliases lore) (TypeM lore) where
   lookupType = fmap typeOf . lookupVar
-  askScope = asks $ HM.fromList . mapMaybe varType . HM.toList . envVtable
+  askScope = asks $ M.fromList . mapMaybe varType . M.toList . envVtable
     where varType (name, attr) = Just (name, attr)
 
 runTypeM :: Env lore -> TypeM lore a
@@ -291,10 +292,10 @@ liftEitherS = either (bad . TypeError) return
 -- | Mark a name as bound.  If the name has been bound previously in
 -- the program, report a type error.
 bound :: VName -> TypeM lore ()
-bound name = do already_seen <- gets $ HS.member name
+bound name = do already_seen <- gets $ S.member name
                 when already_seen $
                   bad $ TypeError $ "Name " ++ pretty name ++ " bound twice"
-                modify $ HS.insert name
+                modify $ S.insert name
 
 occur :: Occurences -> TypeM lore ()
 occur = tell . Consumption
@@ -306,7 +307,7 @@ observe :: Checkable lore =>
 observe name = do
   attr <- lookupVar name
   unless (primType $ typeOf attr) $
-    occur [observation $ HS.insert name $ aliases attr]
+    occur [observation $ S.insert name $ aliases attr]
 
 -- | Proclaim that we have written to the given variable.
 consume :: Names -> TypeM lore ()
@@ -317,9 +318,6 @@ collectOccurences m = pass $ do
   (x, c) <- listen m
   o <- checkConsumption c
   return ((x, o), const mempty)
-
-noDataflow :: TypeM lore a -> TypeM lore a
-noDataflow = censor $ const mempty
 
 checkConsumption :: Consumption -> TypeM lore Occurences
 checkConsumption (ConsumptionError e) = bad $ TypeError e
@@ -344,7 +342,7 @@ consumeOnlyParams consumable m = do
   tell . Consumption =<< mapM inspect os
   return x
   where inspect o = do
-          new_consumed <- mconcat <$> mapM wasConsumed (HS.toList $ consumed o)
+          new_consumed <- mconcat <$> mapM wasConsumed (S.toList $ consumed o)
           return o { consumed = new_consumed }
         wasConsumed v
           | Just als <- lookup v consumable = return als
@@ -358,9 +356,9 @@ consumeOnlyParams consumable m = do
 -- | Given the immediate aliases, compute the full transitive alias
 -- set (including the immediate aliases).
 expandAliases :: Names -> Env lore -> Names
-expandAliases names env = names `HS.union` aliasesOfAliases
-  where aliasesOfAliases =  mconcat . map look . HS.toList $ names
-        look k = case HM.lookup k $ envVtable env of
+expandAliases names env = names `S.union` aliasesOfAliases
+  where aliasesOfAliases =  mconcat . map look . S.toList $ names
+        look k = case M.lookup k $ envVtable env of
           Just (LetInfo (als, _)) -> unNames als
           _                       -> mempty
 
@@ -368,37 +366,37 @@ binding :: Scope (Aliases lore)
         -> TypeM lore a
         -> TypeM lore a
 binding bnds = check . local (`bindVars` bnds)
-  where bindVars = HM.foldlWithKey' bindVar
-        boundnames = HM.keys bnds
-        boundnameset = HS.fromList boundnames
+  where bindVars = M.foldlWithKey' bindVar
+        boundnames = M.keys bnds
+        boundnameset = S.fromList boundnames
 
         bindVar env name (LetInfo (Names' als, attr)) =
           let als' = expandAliases als env
-              inedges = HS.toList als'
+              inedges = S.toList als'
               update (LetInfo (Names' thesenames, thisattr)) =
-                LetInfo (Names' $ HS.insert name thesenames, thisattr)
+                LetInfo (Names' $ S.insert name thesenames, thisattr)
               update b = b
           in env { envVtable =
-                      HM.insert name (LetInfo (Names' als', attr)) $
+                      M.insert name (LetInfo (Names' als', attr)) $
                       adjustSeveral update inedges $
                       envVtable env
                  }
         bindVar env name attr =
-          env { envVtable = HM.insert name attr $ envVtable env }
+          env { envVtable = M.insert name attr $ envVtable env }
 
-        adjustSeveral f = flip $ foldl $ flip $ HM.adjust f
+        adjustSeveral f = flip $ foldl $ flip $ M.adjust f
 
         -- Check whether the bound variables have been used correctly
         -- within their scope.
         check m = do
-          mapM_ bound $ HM.keys bnds
+          mapM_ bound $ M.keys bnds
           (a, os) <- collectOccurences m
           tell $ Consumption $ unOccur boundnameset os
           return a
 
 lookupVar :: VName -> TypeM lore (NameInfo (Aliases lore))
 lookupVar name = do
-  bnd <- asks $ HM.lookup name . envVtable
+  bnd <- asks $ M.lookup name . envVtable
   case bnd of
     Nothing -> bad $ UnknownVariableError name
     Just attr -> return attr
@@ -406,7 +404,7 @@ lookupVar name = do
 lookupAliases :: VName -> TypeM lore Names
 lookupAliases name = do
   als <- aliases <$> lookupVar name
-  return $ HS.insert name als
+  return $ S.insert name als
 
 aliases :: NameInfo (Aliases lore) -> Names
 aliases (LetInfo (als, _)) = unNames als
@@ -421,7 +419,7 @@ lookupFun :: Checkable lore =>
           -> [SubExp]
           -> TypeM lore (RetType lore, [DeclType])
 lookupFun fname args = do
-  bnd <- asks $ HM.lookup fname . envFtable
+  bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname
     Just (ftype, params) -> do
@@ -466,15 +464,16 @@ checkArrIdent v = do
 checkProg :: Checkable lore =>
              Prog lore -> Either (TypeError lore) ()
 checkProg prog = do
-  let typeenv = Env { envVtable = HM.empty
+  let typeenv = Env { envVtable = M.empty
                     , envFtable = mempty
                     , envContext = []
                     }
-
-  fmap fst $ runTypeM typeenv $ do
-    ftable <- buildFtable
-    local (\env -> env { envFtable = ftable }) $
-      mapM_ (noDataflow . checkFun) $ progFunctions prog'
+  let onFunction fun =
+        fmap fst $ runTypeM typeenv $ do
+          ftable <- buildFtable
+          local (\env -> env { envFtable = ftable }) $
+            checkFun fun
+  sequence_ $ parMap rseq onFunction $ progFunctions prog'
   where
     prog' = aliasAnalysis prog
     -- To build the ftable we loop through the list of function
@@ -486,19 +485,19 @@ checkProg prog = do
     buildFtable = do table <- initialFtable prog'
                      foldM expand table $ progFunctions prog'
     expand ftable (FunDef _ name ret params _)
-      | HM.member name ftable =
+      | M.member name ftable =
         bad $ DupDefinitionError name
       | otherwise =
-        return $ HM.insert name (ret,params) ftable
+        return $ M.insert name (ret,params) ftable
 
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Checkable lore =>
-                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunBinding lore))
-initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunctions
+                 Prog (Aliases lore) -> TypeM lore (M.Map Name (FunBinding lore))
+initialFtable _ = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts
           return (fname, (primRetType t, ps))
-        name = ID (nameFromString "x", 0)
+        name = VName (nameFromString "x") 0
 
 checkFun :: Checkable lore =>
             FunDef (Aliases lore) -> TypeM lore ()
@@ -544,7 +543,7 @@ checkFun' :: Checkable lore =>
           -> TypeM lore ()
 checkFun' (fname, rettype, params, body) consumable check = do
   checkNoDuplicateParams
-  binding (HM.fromList params) $
+  binding (M.fromList params) $
     consumeOnlyParams consumable $ do
       check
       checkReturnAlias $ bodyAliases body
@@ -561,20 +560,20 @@ checkFun' (fname, rettype, params, body) consumable check = do
         -- | Check that unique return values do not alias a
         -- non-consumed parameter.
         checkReturnAlias =
-          foldM_ checkReturnAlias' HS.empty . returnAliasing rettype
+          foldM_ checkReturnAlias' S.empty . returnAliasing rettype
 
         checkReturnAlias' seen (Unique, names)
-          | any (`HS.member` HS.map snd seen) $ HS.toList names =
+          | any (`S.member` S.map snd seen) $ S.toList names =
             bad $ UniqueReturnAliased fname
           | otherwise = do
             consume names
-            return $ seen `HS.union` tag Unique names
+            return $ seen `S.union` tag Unique names
         checkReturnAlias' seen (Nonunique, names)
-          | any (`HS.member` seen) $ HS.toList $ tag Unique names =
+          | any (`S.member` seen) $ S.toList $ tag Unique names =
             bad $ UniqueReturnAliased fname
-          | otherwise = return $ seen `HS.union` tag Nonunique names
+          | otherwise = return $ seen `S.union` tag Nonunique names
 
-        tag u = HS.map $ \name -> (u, name)
+        tag u = S.map $ \name -> (u, name)
 
         returnAliasing expected got =
           [ (uniqueness p, names) |
@@ -595,7 +594,7 @@ subCheck m = do
     Right (x, cons) -> tell cons >> return x
     where newEnv :: Env lore -> Env newlore
           newEnv (Env vtable ftable ctx) =
-            Env (HM.map coerceVar vtable) ftable ctx
+            Env (M.map coerceVar vtable) ftable ctx
           coerceVar (LetInfo x) = LetInfo x
           coerceVar (FParamInfo x) = FParamInfo x
           coerceVar (LParamInfo x) = LParamInfo x
@@ -667,6 +666,9 @@ checkBasicOp :: Checkable lore =>
                BasicOp (Aliases lore) -> TypeM lore ()
 
 checkBasicOp (SubExp es) =
+  void $ checkSubExp es
+
+checkBasicOp (Opaque es) =
   void $ checkSubExp es
 
 checkBasicOp (ArrayLit [] _) =
@@ -956,7 +958,7 @@ matchExtPattern pat ts = do
     bad $ InvalidPatternError (Pattern [] pat) ts Nothing
   evalStateT (zipWithM_ checkStm' restpat ts') []
   where checkStm' patElem@(PatElem name _ _) t = do
-          lift $ checkAnnotation ("binding of variable " ++ textual name)
+          lift $ checkAnnotation ("binding of variable " ++ pretty name)
             (patElemRequires patElem) t
           add name
 
@@ -978,7 +980,7 @@ patternContext :: Typed attr =>
                   [PatElemT attr] -> [ExtType] ->
                   Either String ([Type], [PatElemT attr], [PatElemT attr])
 patternContext pat rt = do
-  (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, HM.empty)
+  (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, M.empty)
   return (rt', restpat, shapepat)
   where extract t = setArrayShape t . Shape <$>
                     mapM extract' (extShapeDims $ arrayShape t)
@@ -986,12 +988,12 @@ patternContext pat rt = do
         extract' (Ext x)   = correspondingVar x
         correspondingVar x = do
           (remnames, m) <- get
-          case (remnames, HM.lookup x m) of
+          case (remnames, M.lookup x m) of
             (_, Just v) -> return $ Var $ patElemName v
             (v:vs, Nothing)
               | Prim (IntType Int32) <- patElemType v -> do
                 tell [v]
-                put (vs, HM.insert x v m)
+                put (vs, M.insert x v m)
                 return $ Var $ patElemName v
             (_, Nothing) ->
               lift $ Left "Pattern cannot match context"

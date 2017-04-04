@@ -43,17 +43,16 @@ Simple Futhark
 An Futhark program consists of a sequence of *function definitions*,
 of the following form::
 
-   fun name params... : return_type = body
+   let name params... : return_type = body
 
 A function must declare both its return type and the types of all its
 parameters.  All functions (except for inline anonymous functions; see
 below) are defined globally.  Futhark does not use type inference.  As
-a concrete example, here is the recursive definition of the factorial
+a concrete example, here is the a parallel definition of the factorial
 function in Futhark::
 
-  fun fact(n: i32): i32 =
-    if n == 0 then 1
-              else n * fact(n-1)
+  let fact(n: i32): i32 =
+    reduce (*) 1 (map (1+) (iota n))
 
 Indentation has no syntactical significance in Futhark, but recommended for
 readability.
@@ -111,17 +110,17 @@ Two-way ``if-then-else`` is the only branching construct in Futhark.
 Pattern matching is supported in a limited way for taking apart
 tuples, for example::
 
-  fun sumpair((x, y): (i32, i32)): i32 = x + y
+  let sumpair((x, y): (i32, i32)): i32 = x + y
 
 We can also add the type ascription on the tuple components::
 
-  fun sumpair(x: i32, y: i32): i32 = x + y
+  let sumpair(x: i32, y: i32): i32 = x + y
 
 Apart from pattern-matching, the components of a tuple can also be
 accessed by using the tuple projection syntax: ``#i``, where ``i``
 indicates the component to extract (0-indexed)::
 
-  fun sumpair(p: (i32, i32)): i32 = #0 p + #1 p
+  let sumpair(p: (i32, i32)): i32 = #0 p + #1 p
 
 In most cases, pattern matching is better style.
 
@@ -136,14 +135,16 @@ Futhark has a built-in syntax for expressing certain tail-recursive
 functions.  Consider the following tail-recursive formulation of a
 function for computing the Fibonacci numbers::
 
-  fun fib(n: i32): i32 = fibhelper(1,1,n)
+  let fib(n: i32): i32 = fibhelper(1,1,n)
 
-  fun fibhelper(x: i32, y: i32, n: i32): i32 =
+  let fibhelper(x: i32, y: i32, n: i32): i32 =
     if n == 1 then x else fibhelper(y, x+y, n-1)
 
-We can rewrite this using the ``loop`` construct::
+This is not valid Futhark, as Futhark does not presently allow
+recursive functions.  Instead, we can write this using the ``loop``
+construct::
 
-  fun fib(n: i32): i32 =
+  let fib(n: i32): i32 =
     loop ((x, y) = (1,1)) = for i < n do
                               (y, x+y)
     in x
@@ -176,7 +177,7 @@ For example, denoting by ``t`` the type of ``x``, this loop::
 
 has the semantics of a call to this tail-recursive function::
 
-  fun f(i: i32, n: i32, x: t): t =
+  let f(i: i32, n: i32, x: t): t =
     if i >= n then x
        else f(i+1, n, g(x))
 
@@ -202,7 +203,7 @@ used for convergence loops, where the number of iterations cannot be
 predicted in advance.  For example, the following program doubles a
 given number until it exceeds a given threshold value::
 
-  fun main(x: i32, bound: i32): i32 =
+  let main(x: i32, bound: i32): i32 =
     loop (x) = while x < bound do x * 2
     in x
 
@@ -213,7 +214,7 @@ For brevity, the initial value expression can be elided, in which case
 an expression equivalent to the pattern is implied.  This is easier to
 understand with an example.  The loop::
 
-  fun fib(n: i32): i32 =
+  let fib(n: i32): i32 =
     let x = 1
     let y = 1
     loop ((x, y) = (x, y)) = for i < n do (y, x+y)
@@ -221,7 +222,7 @@ understand with an example.  The loop::
 
 can also be written::
 
-  fun fib(n: i32): i32 =
+  let fib(n: i32): i32 =
     let x = 1
     let y = 1
     loop ((x, y)) = for i < n do (y, x+y)
@@ -237,7 +238,7 @@ type and parameter types of a function declaration.  These can be used
 to express invariants about the shapes of arrays that are accepted or
 produced by the function, e.g::
 
-  fun f (a: [n]i32): [n]i32 =
+  let f (a: [n]i32): [n]i32 =
     map (+1) a
 
 The above declaration specifies a function that accepts an array
@@ -251,12 +252,12 @@ The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  fun dotProduct(a: [n]i32, b: [n]i32): i32 =
-    reduce (+) 0 (zipWith (*) a b)
+  let dotProduct(a: [n]i32, b: [n]i32): i32 =
+    reduce (+) 0 (map (*) a b)
 
 Or matrix multiplication::
 
-  fun matMult(x: [n][m]i32, y: [m][n]i32): [n][n]i32 =
+  let matMult(x: [n][m]i32, y: [m][n]i32): [n][n]i32 =
     ...
 
 The dimension names bound in a parameter shape declaration can be used
@@ -312,7 +313,7 @@ simply a case of normal name shadowing.
 For example, this loop implements the "imperative" version of matrix
 multiplication of an ``m * o`` with an ``o * n`` matrix::
 
-  fun matmult(a: [m][o]f32,  b: [o][n]f32): [m][n]f32 =
+  let matmult(a: [m][o]f32,  b: [o][n]f32): [m][n]f32 =
     let res = replicate(m, replicate(n,0f32)) in
     loop (res) = for i < m do
         loop (res) = for j < n do
@@ -391,7 +392,7 @@ occasionally prove useful to express certain algorithms in an
 imperative style.  Consider a function for computing the *n* first
 Fibonacci numbers::
 
-  fun fib(n: i32): []i32 =
+  let fib(n: i32): []i32 =
     -- Create "empty" array.
     let arr = iota(n) in
     -- Fill array with Fibonacci numbers.
@@ -431,7 +432,7 @@ guaranteed.
 The simplest way to introduce uniqueness types is through examples.
 To that end, let us consider the following function definition::
 
-  fun modify(a: *[]i32, i: i32, x: i32): *[]i32 =
+  let modify(a: *[]i32, i: i32, x: i32): *[]i32 =
     let a[i] = a[i] + x in
     a
 
@@ -482,7 +483,7 @@ analysis in greater detail.
 
 Let us consider the definition of a function returning a unique array::
 
-  fun f(a: []i32): *[]i32 = body
+  let f(a: []i32): *[]i32 = body
 
 Note that the argument, ``a``, is non-unique, and hence we cannot
 modify it.  There is another restriction as well: ``a`` must not be
@@ -518,7 +519,7 @@ rules:
     of a call to the function is the only reference to that value.  An
     example violation::
 
-      fun broken(a: [][]i32, i: i32): *[]i32 =
+      let broken(a: [][]i32, i: i32): *[]i32 =
         a[i] -- Return value aliased with 'a'.
 
   **Uniqueness Rule 3**

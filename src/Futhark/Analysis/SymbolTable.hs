@@ -52,9 +52,8 @@ import Data.Ord
 import Data.Maybe
 import Data.Monoid
 import Data.List hiding (elem, insert, lookup)
-import qualified Data.Set          as S
-import qualified Data.HashSet      as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set        as S
+import qualified Data.Map.Strict as M
 
 import Prelude hiding (elem, lookup)
 
@@ -70,7 +69,7 @@ import qualified Futhark.Representation.AST.Attributes.Ranges as Ranges
 
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int
-  , bindings :: HM.HashMap VName (Entry lore)
+  , bindings :: M.Map VName (Entry lore)
   }
 
 instance Monoid (SymbolTable lore) where
@@ -81,10 +80,10 @@ instance Monoid (SymbolTable lore) where
   mempty = empty
 
 empty :: SymbolTable lore
-empty = SymbolTable 0 HM.empty
+empty = SymbolTable 0 M.empty
 
 fromScope :: Scope lore -> SymbolTable lore
-fromScope = HM.foldlWithKey' insertFreeVar' empty
+fromScope = M.foldlWithKey' insertFreeVar' empty
   where insertFreeVar' m k attr = insertFreeVar k attr m
 
 -- | Try to convert a symbol table for one representation into a
@@ -120,7 +119,7 @@ genCastSymbolTable :: (LoopVarEntry fromlore -> Entry tolore)
                    -> SymbolTable fromlore
                    -> SymbolTable tolore
 genCastSymbolTable loopVar letBound fParam lParam freeVar (SymbolTable depth entries) =
-  SymbolTable depth $ HM.map onEntry entries
+  SymbolTable depth $ M.map onEntry entries
   where onEntry (LoopVar entry) = loopVar entry
         onEntry (LetBound entry) = letBound entry
         onEntry (FParam entry) = fParam entry
@@ -303,7 +302,7 @@ elem :: VName -> SymbolTable lore -> Bool
 elem name = isJust . lookup name
 
 lookup :: VName -> SymbolTable lore -> Maybe (Entry lore)
-lookup name = HM.lookup name . bindings
+lookup name = M.lookup name . bindings
 
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
 lookupExp name vtable = asExp =<< lookup name vtable
@@ -352,13 +351,13 @@ enclosingLoopVars free vtable =
                         return (name, e)
 
 rangesRep :: SymbolTable lore -> AS.RangesRep
-rangesRep = HM.filter knownRange . HM.map toRep . bindings
+rangesRep = M.filter knownRange . M.map toRep . bindings
   where toRep entry = (bindingDepth entry, lower, upper)
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
 typeEnv :: SymbolTable lore -> Scope lore
-typeEnv = HM.map nameType . bindings
+typeEnv = M.map nameType . bindings
   where nameType (LetBound entry) = LetInfo $ letBoundAttr entry
         nameType (LoopVar entry) = IndexInfo $ loopVarType entry
         nameType (FParam entry) = FParamInfo $ fparamAttr entry
@@ -437,7 +436,7 @@ insertEntries entries vtable =
          }
   where insertWithDepth bnds (name, entry) =
           let entry' = setStmDepth (loopDepth vtable) entry
-          in HM.insert name entry' bnds
+          in M.insert name entry' bnds
 
 insertStm :: Ranged lore =>
              Stm lore
@@ -541,7 +540,7 @@ updateBounds' cond sym_tab =
       updateBound (sym,True ,bound) = setUpperBound sym bound
       updateBound (sym,False,bound) = setLowerBound sym bound
 
-      ranges = HM.filter nonEmptyRange $ HM.map toRep $ bindings sym_tab
+      ranges = M.filter nonEmptyRange $ M.map toRep $ bindings sym_tab
       toRep entry = (bindingDepth entry, lower, upper)
         where (lower, upper) = valueRange entry
       nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
@@ -594,28 +593,28 @@ updateBounds' cond sym_tab =
         let candidates = freeIn e_scal
             sym0 = AS.pickSymToElim ranges elsyms0 e_scal
         case sym0 of
-            Just sy -> let trclsyms = foldl trClSymsInRange HS.empty $ HS.toList $
-                                        candidates `HS.difference` HS.singleton sy
-                       in  if   HS.member sy trclsyms
+            Just sy -> let trclsyms = foldl trClSymsInRange S.empty $ S.toList $
+                                        candidates `S.difference` S.singleton sy
+                       in  if   S.member sy trclsyms
                            then pickRefinedSym (S.insert sy elsyms0) e_scal
                            else sym0
             Nothing -> sym0
       -- computes the transitive closure of the symbols appearing
       -- in the ranges of a symbol
-      trClSymsInRange :: HS.HashSet VName -> VName -> HS.HashSet VName
+      trClSymsInRange :: S.Set VName -> VName -> S.Set VName
       trClSymsInRange cur_syms sym =
-        if HS.member sym cur_syms then cur_syms
-        else case HM.lookup sym ranges of
-               Just (_,lb,ub) -> let sym_bds = concatMap (HS.toList . freeIn) (catMaybes [lb, ub])
+        if S.member sym cur_syms then cur_syms
+        else case M.lookup sym ranges of
+               Just (_,lb,ub) -> let sym_bds = concatMap (S.toList . freeIn) (catMaybes [lb, ub])
                                  in  foldl trClSymsInRange
-                                           (HS.insert sym cur_syms)
-                                           (HS.toList $ HS.fromList sym_bds)
-               Nothing        -> HS.insert sym cur_syms
+                                           (S.insert sym cur_syms)
+                                           (S.toList $ S.fromList sym_bds)
+               Nothing        -> S.insert sym cur_syms
 
 setUpperBound :: VName -> ScalExp -> SymbolTable lore
               -> SymbolTable lore
 setUpperBound name bound vtable =
-  vtable { bindings = HM.adjust setUpperBound' name $ bindings vtable }
+  vtable { bindings = M.adjust setUpperBound' name $ bindings vtable }
   where setUpperBound' entry =
           let (oldLowerBound, oldUpperBound) = valueRange entry
           in setValueRange
@@ -625,7 +624,7 @@ setUpperBound name bound vtable =
 
 setLowerBound :: VName -> ScalExp -> SymbolTable lore -> SymbolTable lore
 setLowerBound name bound vtable =
-  vtable { bindings = HM.adjust setLowerBound' name $ bindings vtable }
+  vtable { bindings = M.adjust setLowerBound' name $ bindings vtable }
   where setLowerBound' entry =
           let (oldLowerBound, oldUpperBound) = valueRange entry
           in setValueRange

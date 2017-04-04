@@ -5,7 +5,7 @@
 -- output {
 --   [ 6, 18, 27 ]
 -- }
-fun main (xss: [][]i32): []i32 =
+let main (xss: [][]i32): []i32 =
   map  (\(xs: []i32 ): i32  ->
          reduce (+) 0 xs
       ) xss

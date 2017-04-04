@@ -11,13 +11,14 @@ import Data.Traversable
 
 import Prelude
 
+import Futhark.Error
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either String String)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either InternalError String)
 compileProg = traverse (GenericC.compileProg operations () [DefaultSpace] [] [] [] [] []) <=<
               ImpGen.compileProg
   where operations :: GenericC.Operations Imp.Sequential ()

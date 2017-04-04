@@ -97,7 +97,7 @@ mapTranspose kernel_name elem_type transpose_type =
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Write the transposed matrix tile to global memory.
+    // Scatter the transposed matrix tile to global memory.
     x_index = $exp:x_out_index;
     y_index = $exp:y_out_index;
 

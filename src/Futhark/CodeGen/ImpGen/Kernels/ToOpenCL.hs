@@ -11,14 +11,15 @@ import Control.Monad.Identity
 import Control.Monad.Writer
 import Data.List
 import Data.Maybe
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import Prelude
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
+import Futhark.Error
 import Futhark.Representation.AST.Attributes.Types (int32)
 import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
@@ -34,15 +35,15 @@ import Futhark.Util.IntegralExp (quotRoundingUp)
 
 -- | Translate a kernels-program to an OpenCL-program.
 kernelsToOpenCL :: ImpKernels.Program
-                -> Either String ImpOpenCL.Program
+                -> Either InternalError ImpOpenCL.Program
 kernelsToOpenCL prog = do
   (prog', ToOpenCL extra_funs kernels requirements) <-
     runWriterT $ traverse onHostOp prog
-  let kernel_names = HM.keys kernels
-      opencl_code = openClCode $ HM.elems kernels
+  let kernel_names = M.keys kernels
+      opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genOpenClPrelude requirements
   return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names $
-    ImpOpenCL.Functions (HM.toList extra_funs) <> prog'
+    ImpOpenCL.Functions (M.toList extra_funs) <> prog'
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
@@ -58,7 +59,7 @@ type UsedFunctions = [(String,C.Func)] -- The ordering is important!
 
 data OpenClRequirements =
   OpenClRequirements { _kernelUsedFunctions :: UsedFunctions
-                     , _kernelUsedTypes :: HS.HashSet PrimType
+                     , _kernelUsedTypes :: S.Set PrimType
                      , _kernelConstants :: [(VName, KernelConstExp)]
                      }
 
@@ -69,8 +70,8 @@ instance Monoid OpenClRequirements where
     OpenClRequirements (nubBy cmpFst $ used1 <> used2) (ts1 <> ts2) (consts1 <> consts2)
     where cmpFst (x, _) (y, _) = x == y
 
-data ToOpenCL = ToOpenCL { clExtraFuns :: HM.HashMap Name ImpOpenCL.Function
-                         , clKernels :: HM.HashMap KernelName C.Func
+data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
+                         , clKernels :: M.Map KernelName C.Func
                          , clRequirements :: OpenClRequirements
                          }
 
@@ -80,7 +81,7 @@ instance Monoid ToOpenCL where
   ToOpenCL f1 k1 r1 `mappend` ToOpenCL f2 k2 r2 =
     ToOpenCL (f1<>f2) (k1<>k2) (r1<>r2)
 
-type OnKernelM = WriterT ToOpenCL (Either String)
+type OnKernelM = WriterT ToOpenCL (Either InternalError)
 
 onHostOp :: HostOp -> OnKernelM OpenCL
 onHostOp (CallKernel k) = onKernel k
@@ -109,7 +110,7 @@ onKernel called@(Map kernel) = do
 
   tell ToOpenCL
     { clExtraFuns = mempty
-    , clKernels = HM.singleton (mapKernelName kernel)
+    , clKernels = M.singleton (mapKernelName kernel)
                   [C.cfun|__kernel void $id:(mapKernelName kernel) ($params:params) {
                      const uint $id:(mapKernelThreadNum kernel) = get_global_id(0);
                      $items:funbody
@@ -144,7 +145,7 @@ onKernel called@(AnyKernel kernel) = do
       params = catMaybes local_memory_params ++ use_params
 
   tell ToOpenCL { clExtraFuns = mempty
-                , clKernels = HM.singleton name
+                , clKernels = M.singleton name
                               [C.cfun|__kernel void $id:name ($params:params) {
                                   $items:local_memory_init
                                   $items:kernel_body
@@ -193,9 +194,9 @@ useAsConst :: KernelUse -> Maybe (VName, KernelConstExp)
 useAsConst (ConstUse v e) = Just (v,e)
 useAsConst _ = Nothing
 
-requiredFunctions :: HS.HashSet Name -> [(String, C.Func)]
+requiredFunctions :: S.Set Name -> [(String, C.Func)]
 requiredFunctions kernel_funs =
-  let used_in_kernel = (`HS.member` kernel_funs) . nameFromString . fst
+  let used_in_kernel = (`S.member` kernel_funs) . nameFromString . fst
       funs32_used = filter used_in_kernel funs32
       funs64_used = filter used_in_kernel funs64
 
@@ -259,7 +260,7 @@ $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attr
   (if uses_float64 then cFloat64Ops ++ cFloatConvOps else []) ++
   [ [C.cedecl|$func:used_fun|] | (_, used_fun) <- used_funs ] ++
   [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
-  where uses_float64 = FloatType Float64 `HS.member` ts
+  where uses_float64 = FloatType Float64 `S.member` ts
         constToDefine (name, e) =
           let e' = compilePrimExp e
           in unwords ["#define", zEncodeString (pretty name), "("++prettyOneLine e'++")"]
@@ -383,9 +384,9 @@ generateTransposeFunction bt =
   -- comment in Futhark.CodeGen.OpenCL.OpenCL.Kernels.hs for more details.
 
   tell ToOpenCL
-    { clExtraFuns = HM.singleton (transposeName bt) $
+    { clExtraFuns = M.singleton (transposeName bt) $
                     ImpOpenCL.Function False [] params transpose_code [] []
-    , clKernels = HM.fromList $
+    , clKernels = M.fromList $
         map (\tt -> let name = transposeKernelName bt tt
                     in (name, Kernels.mapTranspose name bt' tt))
         [Kernels.TransposeNormal, Kernels.TransposeLowWidth,
@@ -395,8 +396,8 @@ generateTransposeFunction bt =
     }
   where bt' = GenericC.primTypeToCType bt
         space = ImpOpenCL.Space "device"
-        memparam s i = MemParam (ID (nameFromString s, i)) space
-        intparam s i = ScalarParam (ID (nameFromString s, i)) $ IntType Int32
+        memparam s i = MemParam (VName (nameFromString s) i) space
+        intparam s i = ScalarParam (VName (nameFromString s) i) $ IntType Int32
 
         params = [destmem_p, destoffset_p, srcmem_p, srcoffset_p,
                 num_arrays_p, x_p, y_p, in_p, out_p]
@@ -544,23 +545,23 @@ useToArg (MemoryUse mem _) = Just $ MemKArg mem
 useToArg (ScalarUse v bt)  = Just $ ValueKArg (LeafExp (ScalarVar v) bt) bt
 useToArg ConstUse{}        = Nothing
 
-typesInKernel :: CallKernel -> HS.HashSet PrimType
+typesInKernel :: CallKernel -> S.Set PrimType
 typesInKernel (Map kernel) = typesInCode $ mapKernelBody kernel
 typesInKernel (AnyKernel kernel) = typesInCode $ kernelBody kernel
 typesInKernel MapTranspose{} = mempty
 
-typesInCode :: ImpKernels.KernelCode -> HS.HashSet PrimType
+typesInCode :: ImpKernels.KernelCode -> S.Set PrimType
 typesInCode Skip = mempty
 typesInCode (c1 :>>: c2) = typesInCode c1 <> typesInCode c2
-typesInCode (For _ it e c) = IntType it `HS.insert` typesInExp e <> typesInCode c
+typesInCode (For _ it e c) = IntType it `S.insert` typesInExp e <> typesInCode c
 typesInCode (While e c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem{} = mempty
-typesInCode (DeclareScalar _ t) = HS.singleton t
+typesInCode (DeclareScalar _ t) = S.singleton t
 typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
-typesInCode (Write _ (Count e1) t _ _ e2) =
-  typesInExp e1 <> HS.singleton t <> typesInExp e2
+typesInCode (Scatter _ (Count e1) t _ _ e2) =
+  typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e
 typesInCode SetMem{} = mempty
 typesInCode (Call _ _ es) = mconcat $ map typesInArg es
@@ -573,13 +574,13 @@ typesInCode (Comment _ c) = typesInCode c
 typesInCode (DebugPrint _ _ e) = typesInExp e
 typesInCode Op{} = mempty
 
-typesInExp :: Exp -> HS.HashSet PrimType
-typesInExp (ValueExp v) = HS.singleton $ primValueType v
+typesInExp :: Exp -> S.Set PrimType
+typesInExp (ValueExp v) = S.singleton $ primValueType v
 typesInExp (BinOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
 typesInExp (CmpOpExp _ e1 e2) = typesInExp e1 <> typesInExp e2
-typesInExp (ConvOpExp op e) = HS.fromList [from, to] <> typesInExp e
+typesInExp (ConvOpExp op e) = S.fromList [from, to] <> typesInExp e
   where (from, to) = convTypes op
 typesInExp (UnOpExp _ e) = typesInExp e
-typesInExp (LeafExp (Index _ (Count e) t _ _) _) = HS.singleton t <> typesInExp e
+typesInExp (LeafExp (Index _ (Count e) t _ _) _) = S.singleton t <> typesInExp e
 typesInExp (LeafExp ScalarVar{} _) = mempty
-typesInExp (LeafExp (SizeOf t) _) = HS.singleton t
+typesInExp (LeafExp (SizeOf t) _) = S.singleton t

@@ -2,6 +2,6 @@
 -- ==
 -- error: \|\|
 
-fun (x: bool) || (y: bool) = x
+let (x: bool) || (y: bool) = x
 
-fun main(x: bool) = x || x
+let main(x: bool) = x || x

@@ -9,8 +9,8 @@ module Futhark.Optimise.TileLoops
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import Data.Monoid
 import Data.List
 
@@ -47,7 +47,7 @@ optimiseStm :: Stm Kernels -> TileM [Stm Kernels]
 optimiseStm (Let pat () (Op (Kernel desc cs space ts body))) = do
   (extra_bnds, space', body') <- tileInKernelBody mempty initial_variance space body
   return $ extra_bnds ++ [Let pat () $ Op $ Kernel desc cs space' ts body']
-  where initial_variance = HM.map mempty $ scopeOfKernelSpace space
+  where initial_variance = M.map mempty $ scopeOfKernelSpace space
 optimiseStm (Let pat () e) =
   pure <$> (Let pat () <$> mapExpM optimise e)
   where optimise = identityMapper { mapOnBody = const optimiseBody }
@@ -186,8 +186,8 @@ is1dTileable :: MonadFreshNames m =>
                            LParam InKernel,
                            [Stm InKernel]))
 is1dTileable branch_variant kspace variance block_size arr block_param = do
-  guard $ HS.null $ HM.lookupDefault mempty arr variance
-  guard $ HS.null branch_variant
+  guard $ S.null $ M.findWithDefault mempty arr variance
+  guard $ S.null branch_variant
   guard $ primType $ rowType $ paramType block_param
 
   return $ do
@@ -258,8 +258,8 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
         invariantToInnermostDimension =
           case reverse $ spaceDimensions kspace of
             (i,d) : _
-              | not $ i `HS.member` HM.lookupDefault mempty arr variance,
-                not $ i `HS.member` branch_variant -> Just (i,d)
+              | not $ i `S.member` M.findWithDefault mempty arr variance,
+                not $ i `S.member` branch_variant -> Just (i,d)
             _ -> Nothing
 
 tile1d :: MonadFreshNames m =>
@@ -294,7 +294,7 @@ is2dTileable :: MonadFreshNames m =>
                 Names -> KernelSpace -> VarianceTable -> SubExp -> VName -> LParam InKernel
              -> Maybe (SubExp -> [VName] -> m (LParam InKernel, [Stm InKernel]))
 is2dTileable branch_variant kspace variance block_size arr block_param = do
-  guard $ HS.null branch_variant
+  guard $ S.null branch_variant
   guard $ primType $ rowType $ paramType block_param
 
   pt <- case rowType $ paramType block_param of
@@ -345,10 +345,10 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
   where invariantToOneOfTwoInnerDims :: Maybe [Int]
         invariantToOneOfTwoInnerDims = do
           (j,_) : (i,_) : _ <- Just $ reverse $ spaceDimensions kspace
-          let variant_to = HM.lookupDefault mempty arr variance
-          if i `HS.member` variant_to && not (j `HS.member` variant_to) then
+          let variant_to = M.findWithDefault mempty arr variance
+          if i `S.member` variant_to && not (j `S.member` variant_to) then
             Just [0,1]
-          else if j `HS.member` variant_to && not (i `HS.member` variant_to) then
+          else if j `S.member` variant_to && not (i `S.member` variant_to) then
             Just [1,0]
           else
             Nothing
@@ -358,7 +358,7 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
 -- that name depends on.  If a variable is not present in this table,
 -- that means it is bound outside the kernel (and so can be considered
 -- invariant to all dimensions).
-type VarianceTable = HM.HashMap VName Names
+type VarianceTable = M.Map VName Names
 
 varianceInStms :: VarianceTable -> [Stm InKernel] -> VarianceTable
 varianceInStms = foldl varianceInStm
@@ -366,9 +366,9 @@ varianceInStms = foldl varianceInStm
 varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
 varianceInStm variance bnd =
   foldl' add variance $ patternNames $ bindingPattern bnd
-  where add variance' v = HM.insert v binding_variance variance'
-        look variance' v = HS.insert v $ HM.lookupDefault mempty v variance'
-        binding_variance = mconcat $ map (look variance) $ HS.toList (freeInStm bnd)
+  where add variance' v = M.insert v binding_variance variance'
+        look variance' v = S.insert v $ M.findWithDefault mempty v variance'
+        binding_variance = mconcat $ map (look variance) $ S.toList (freeInStm bnd)
 
 sufficientGroups :: MonadBinder m =>
                     [(VName, SubExp, VName, SubExp)] -> SubExp

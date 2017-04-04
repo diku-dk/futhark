@@ -18,8 +18,8 @@ module Futhark.Optimise.Fusion.LoopKernel
 import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -109,7 +109,7 @@ data FusedKer = FusedKer {
 newKernel :: SOAC -> Names -> [VName] -> Scope SOACS -> FusedKer
 newKernel soac consumed out_nms scope =
   FusedKer { fsoac = soac
-           , inplace = HS.empty
+           , inplace = S.empty
            , fusedVars = []
            , fusedConsumed = consumed
            , outputTransform = SOAC.noTransforms
@@ -117,8 +117,8 @@ newKernel soac consumed out_nms scope =
            , kernelScope = scope
            }
 
-arrInputs :: FusedKer -> HS.HashSet VName
-arrInputs = HS.fromList . map SOAC.inputArray . inputs
+arrInputs :: FusedKer -> S.Set VName
+arrInputs = S.fromList . map SOAC.inputArray . inputs
 
 inputs :: FusedKer -> [SOAC.Input]
 inputs = SOAC.inputs . fsoac
@@ -208,7 +208,7 @@ removeUnusedParams l inps =
         (ps', inps') = case (unzip $ filter (used . fst) pInps, pInps) of
                          (([], []), (p,inp):_) -> ([p], [inp])
                          ((ps_, inps_), _)     -> (ps_, inps_)
-        used p = paramName p `HS.member` freeVars
+        used p = paramName p `S.member` freeVars
         freeVars = freeInBody $ lambdaBody l
 
 -- | Check that the consumer uses at least one output of the producer
@@ -232,13 +232,13 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
       cs1      = SOAC.certificates soac1
       cs2      = SOAC.certificates soac2
       inp1_arr = SOAC.inputs soac1
-      horizFuse= not (HS.null unfus_set) &&
+      horizFuse= not (S.null unfus_set) &&
                  SOAC.width soac1 == SOAC.width soac2
       inp2_arr = SOAC.inputs soac2
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2
       w        = SOAC.width soac1
-      returned_outvars = filter (`HS.member` unfus_set) outVars
+      returned_outvars = filter (`S.member` unfus_set) outVars
       success res_outnms res_soac = do
         let fusedVars_new = fusedVars ker++outVars
         -- Avoid name duplication, because the producer lambda is not
@@ -256,7 +256,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
 
   let mapLikeFusionCheck =
         let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
-            (extra_nms,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
+            (extra_nms,extra_rtps) = unzip $ filter ((`S.member` unfus_set) . fst) $
               zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
             res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
         in (extra_nms, res_lam', new_inp)
@@ -293,7 +293,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
     (SOAC.Redomap _ _ comm2 lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
-          (_,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
+          (_,extra_rtps) = unzip $ filter ((`S.member` unfus_set) . fst) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ returned_outvars) $
@@ -318,27 +318,27 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
       -- Create new inner reduction function
       let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
           -- Get the lists from soac1 that still need to be returned
-          (_,extra_rtps) = unzip $ filter (\(nm,_)->nm `HS.member` unfus_set) $
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->nm `S.member` unfus_set) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ returned_outvars) $
               SOAC.Scanomap (cs1++cs2) w lam21 res_lam' nes new_inp
 
     ------------------
-    -- Write fusion --
+    -- Scatter fusion --
     ------------------
 
     -- Map-write fusion.
-    (SOAC.Write _cs _len _lam _ivs as,
+    (SOAC.Scatter _cs _len _lam _ivs as,
      SOAC.Map {})
       | mapWriteFusionOK (outVars ++ map snd as) ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
-            SOAC.Write (cs1++cs2) w res_lam' new_inp as
+            SOAC.Scatter (cs1++cs2) w res_lam' new_inp as
 
-    -- Write-write fusion.
-    (SOAC.Write _cs2 _len2 _lam2 ivs2 as2,
-     SOAC.Write _cs1 _len1 _lam1 ivs1 as1)
+    -- Scatter-write fusion.
+    (SOAC.Scatter _cs2 _len2 _lam2 ivs2 as2,
+     SOAC.Scatter _cs1 _len1 _lam1 ivs1 as1)
       | horizFuse -> do
           let zipW xs ys = ys1 ++ xs1 ++ ys2 ++ xs2
                 where len = length xs `div` 2 -- same as with ys
@@ -356,11 +356,11 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
                             , lambdaReturnType = zipW (lambdaReturnType lam1) (lambdaReturnType lam2)
                             }
           success (outNames ker ++ returned_outvars) $
-            SOAC.Write (cs1 ++ cs2) w lam' (ivs1 ++ ivs2) (as2 ++ as1)
+            SOAC.Scatter (cs1 ++ cs2) w lam' (ivs1 ++ ivs2) (as2 ++ as1)
 
-    (SOAC.Write {}, _) ->
+    (SOAC.Scatter {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"
-    (_, SOAC.Write {}) ->
+    (_, SOAC.Scatter {}) ->
       fail "Cannot fuse a write with anything else than a write or a map"
 
     ----------------------------
@@ -448,7 +448,7 @@ fuseStreamHelper out_kernms unfus_set outVars outPairs
           let nes1    = getStreamAccums form1
               chunk1  = head $ lambdaParams lam1
               chunk2  = head $ lambdaParams lam2
-              hmnms = HM.fromList [(paramName chunk2, paramName chunk1)]
+              hmnms = M.fromList [(paramName chunk2, paramName chunk1)]
               lam20 = substituteNames hmnms lam2
               lam1' = lam1  { lambdaParams = tail $ lambdaParams lam1  }
               lam2' = lam20 { lambdaParams = tail $ lambdaParams lam20 }
@@ -456,7 +456,7 @@ fuseStreamHelper out_kernms unfus_set outVars outPairs
                                                 inp1_arr outPairs lam2' inp2_arr
               res_lam'' = res_lam' { lambdaParams = chunk1 : lambdaParams res_lam' }
               unfus_accs  = take (length nes1) outVars
-              unfus_arrs  = filter (`HS.member` unfus_set) outVars
+              unfus_arrs  = filter (`S.member` unfus_set) outVars
           res_form <- mergeForms form2 form1
           return (  unfus_accs ++ out_kernms ++ unfus_arrs,
                     SOAC.Stream (cs1++cs2) w2 res_form res_lam'' new_inp )

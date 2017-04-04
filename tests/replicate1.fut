@@ -4,7 +4,7 @@
 -- input { 20 } output { 3810 }
 -- compiled input { 2000 } output { -296967286i32 }
 -- structure distributed { Replicate 1 }
-fun main(n: i32): i32 =
+let main(n: i32): i32 =
   let x  = iota n
   let y  = replicate n x
   -- Hack to force manifestation.

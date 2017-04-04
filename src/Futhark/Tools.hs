@@ -23,8 +23,9 @@ where
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
+import Control.Parallel.Strategies
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -73,7 +74,7 @@ redomapToMapAndReduce (Pattern [] patelems) lore
       map_bnd = mkLet [] map_pat $
                 Op $ Map certs outersz newmap_lam arrs
       red_args = zip accs $ map (identName . fst) map_accpat
-      red_bnd = Let (Pattern [] patelems) lore $
+      red_bnd = Let (Pattern [] acc_patelems) lore $
                 Op $ Reduce certs outersz comm redlam red_args
   return (map_bnd, red_bnd)
   where
@@ -136,7 +137,7 @@ sequentialStreamWholeArray pat cs width nes fun arrs = do
 
   mapM_ addStm body_bnds
   shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
-  forM_ (HM.toList shapemap) $ \(name,se) ->
+  forM_ (M.toList shapemap) $ \(name,se) ->
     when (name `elem` patternContextNames pat) $
       addStm =<< mkLetNames' [name] (BasicOp $ SubExp se)
   mapM_ addStm res_bnds
@@ -203,4 +204,7 @@ intraproceduralTransformation :: MonadFreshNames m =>
                                  (FunDef fromlore -> State VNameSource (FunDef tolore))
                               -> Prog fromlore -> m (Prog tolore)
 intraproceduralTransformation ft prog =
-  modifyNameSource $ runState $ Prog <$> mapM ft (progFunctions prog)
+  modifyNameSource $ \src ->
+  let (funs, srcs) = unzip $ parMap rseq (onFunction src) (progFunctions prog)
+  in (Prog funs, mconcat srcs)
+  where onFunction src f = runState (ft f) src

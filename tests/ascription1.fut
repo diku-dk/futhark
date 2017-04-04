@@ -3,4 +3,4 @@
 -- ==
 -- error: f64.*i32
 
-fun main(x: i32) = x : f64
+let main(x: i32) = x : f64

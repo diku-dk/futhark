@@ -13,7 +13,7 @@ where
 import           Data.Array
 import           Data.Functor
 import           Data.Hashable
-import qualified Data.HashMap.Lazy       as HM
+import qualified Data.Map.Strict       as M
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
@@ -60,7 +60,7 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-        braces $ commasep $ map ppField $ HM.toList fs
+        braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (RecordArrayElemTypeBase Rank as) where
@@ -71,7 +71,7 @@ instance Pretty (RecordArrayElemTypeBase Rank as) where
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-        braces $ commasep $ map ppField $ HM.toList fs
+        braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn) as) where
@@ -91,7 +91,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase (ShapeDecl vn)
     | Just ts <- areTupleFields fs =
         prefix <> parens (commasep $ map ppr ts)
     | otherwise =
-        prefix <> braces (commasep $ map ppField $ HM.toList fs)
+        prefix <> braces (commasep $ map ppField $ M.toList fs)
     where prefix =       ppr u <> mconcat (map (brackets . f) ds)
           f AnyDim       = mempty
           f (NamedDim v) = ppr v
@@ -107,7 +107,7 @@ instance Pretty (ArrayTypeBase Rank as) where
     | Just ts <- areTupleFields fs =
         prefix <> parens (commasep $ map ppr ts)
     | otherwise =
-        prefix <> braces (commasep $ map ppField $ HM.toList fs)
+        prefix <> braces (commasep $ map ppField $ M.toList fs)
     where prefix = ppr u <> mconcat (replicate n (brackets mempty))
           ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
@@ -119,7 +119,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase (ShapeDecl vn) as) 
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-        braces $ commasep $ map ppField $ HM.toList fs
+        braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (TypeBase Rank as) where
@@ -130,7 +130,7 @@ instance Pretty (TypeBase Rank as) where
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
-      braces $ commasep $ map ppField $ HM.toList fs
+      braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
@@ -175,9 +175,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     | any hasArrayLit es = parens $ commastack $ map ppr es
     | otherwise          = parens $ commasep $ map ppr es
   pprPrec _ (RecordLit fs _)
-    | any (hasArrayLit . snd) fs = braces $ commastack $ map ppField fs
-    | otherwise                  = braces $ commasep $ map ppField fs
-    where ppField (name, t) = text (nameToString name) <> equals <> ppr t
+    | any (hasArrayLit . recExp) fs = braces $ commastack $ map ppr fs
+    | otherwise                     = braces $ commasep $ map ppr fs
+    where recExp (RecordField _ e _) = e
+          recExp (RecordRecord e) = e
   pprPrec _ (Empty (TypeDecl t _) _) =
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
@@ -226,6 +227,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
       text "with" <+> brackets (commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
+  pprPrec _ (Update src idxs ve _) =
+    ppr src <+> text "with" <+>
+    brackets (commasep (map ppr idxs)) <+>
+    text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Iota e _) = text "iota" <+> pprPrec 10 e
@@ -241,24 +246,23 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "transpose" <> apply [ppr e]
   pprPrec _ (Rotate d x e _) =
     text "rotate@" <> ppr d <> apply [ppr x, ppr e]
-  pprPrec _ (Map lam [a] _) = ppSOAC "map" [lam] [a]
-  pprPrec _ (Map lam as _) = ppSOAC "zipWith" [lam] as
-  pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]
+  pprPrec _ (Map lam as _) = ppSOAC "map" [lam] as
+  pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Stream form lam arr _) =
     case form of
       MapLike o ->
-        let ord_str = if o == Disorder then "Per" else ""
-        in  text ("streamMap"++ord_str) <>
+        let ord_str = if o == Disorder then "_per" else ""
+        in  text ("stream_map"++ord_str) <>
             ppr lam </> pprPrec 10 arr
       RedLike o comm lam0 ->
-        let ord_str = if o == Disorder then "Per" else ""
-            comm_str = case comm of Commutative    -> "Comm"
+        let ord_str = if o == Disorder then "_per" else ""
+            comm_str = case comm of Commutative    -> "_comm"
                                     Noncommutative -> ""
-        in  text ("streamRed"++ord_str++comm_str) <>
+        in  text ("stream_red"++ord_str++comm_str) <>
             ppr lam0 </> ppr lam </> pprPrec 10 arr
       Sequential acc ->
-            text "streamSeq" <+>
+            text "stream_seq" <+>
             ppr lam </> spread [pprPrec 10 acc, pprPrec 10 arr]
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
@@ -278,7 +282,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (Write i v a _) = text "write" <> spread [pprPrec 10 i, pprPrec 10 v, pprPrec 10 a]
+  pprPrec _ (Scatter i v a _) = text "scatter" <> spread [pprPrec 10 i, pprPrec 10 v, pprPrec 10 a]
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
+  ppr (RecordField name e _) = ppr name <> equals <> ppr e
+  ppr (RecordRecord e) = ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LoopFormBase ty vn) where
   ppr (For FromUpTo lbound i ubound) =
@@ -325,10 +333,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ProgBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
   ppr (ValDec dec)     = ppr dec
+  ppr (FunDec dec)     = ppr dec
   ppr (TypeDec dec)    = ppr dec
   ppr (SigDec sig)     = ppr sig
-  ppr (StructDec sd)   = ppr sd
-  ppr (FunctorDec fd)  = ppr fd
+  ppr (ModDec sd)      = ppr sd
   ppr (OpenDec x xs _) = text "open" <+> spread (map ppr (x:xs))
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
@@ -338,18 +346,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
   ppr (ModApply f a _ _ _) = parens $ ppr f <+> parens (ppr a)
   ppr (ModAscript me se _ _) = ppr me <> colon <+> ppr se
-  ppr (ModLambda (p, psig) maybe_sig body _) =
-    text "\\" <> parens (ppr p <> colon <+> ppr psig) <> maybe_sig' <+>
+  ppr (ModLambda param maybe_sig body _) =
+    text "\\" <> ppr param <> maybe_sig' <+>
     text "->" </> indent 2 (ppr body)
     where maybe_sig' = case maybe_sig of Nothing  -> mempty
                                          Just sig -> colon <+> ppr sig
-
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (StructBindBase ty vn) where
-  ppr (StructBind name e _) = text "module" <+> ppr name <+> equals <+> ppr e
-
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValDecBase ty vn) where
-  ppr (FunDec fun) = ppr fun
-  ppr (ConstDec c) = ppr c
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
   ppr (TypeBind name usertype _) =
@@ -361,14 +362,14 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
     spread (map ppr args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
     where fun | entry     = "entry"
-              | otherwise = "fun"
+              | otherwise = "let"
           retdecl' = case retdecl of
                        Just rettype -> text ":" <+> ppr rettype
                        Nothing      -> mempty
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ConstBindBase ty vn) where
-  ppr (ConstBind name maybe_t _ e _) =
-    text "val" <+> ppr name <> t' <+> text "=" <+> ppr e
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
+  ppr (ValBind name maybe_t _ e _) =
+    text "let" <+> ppr name <> t' <+> text "=" <+> ppr e
     where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
 
@@ -398,12 +399,15 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
   ppr (SigBind name e _) =
     text "module type" <+> ppr name <+> equals <+> ppr e
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunctorBindBase ty vn) where
-  ppr (FunctorBind name (pname,psig) sig e _) =
-    text "module" <+> ppr name <>
-    parens (ppr pname <> colon <+> ppr psig) <+> sig' <+> equals <+> ppr e
-    where sig' = case sig of Nothing -> mempty
-                             Just s  -> colon <+> ppr s <> text " "
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModParamBase ty vn) where
+  ppr (ModParam pname psig _) =
+    parens (ppr pname <> colon <+> ppr psig)
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModBindBase ty vn) where
+  ppr (ModBind name ps sig e _) =
+    text "module" <+> ppr name <+> spread (map ppr ps) <+> sig' <+> equals <+> ppr e
+    where sig' = case sig of Nothing    -> mempty
+                             Just (s,_) -> colon <+> ppr s <> text " "
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn) =>
                Int -> QualName vn -> ExpBase ty vn -> ExpBase ty vn -> Doc

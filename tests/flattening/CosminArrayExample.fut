@@ -9,7 +9,7 @@
 -- output {
 --   [1, 6, 15, 28]
 -- }
-fun main (xs: []i32): []i32 =
+let main (xs: []i32): []i32 =
   map (\(x: i32): i32  ->
         let arr = iota(2 * x)
         let arr' = reshape (2,x) arr in

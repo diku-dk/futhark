@@ -7,8 +7,8 @@ module Futhark.Analysis.DataDependencies
   where
 
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude
 
@@ -18,11 +18,11 @@ import Futhark.Representation.AST
 -- the value of @v@ is dependent.  The intuition is that we could
 -- remove all other variables, and @v@ would still be computable.
 -- This also includes names bound in loops or by lambdas.
-type Dependencies = HM.HashMap VName Names
+type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
 dataDependencies :: Attributes lore => Body lore -> Dependencies
-dataDependencies = dataDependencies' HM.empty
+dataDependencies = dataDependencies' M.empty
 
 dataDependencies' :: Attributes lore =>
                      Dependencies -> Body lore -> Dependencies
@@ -33,22 +33,22 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
               cdeps = depsOf deps c
               comb (pe, tres, fres) =
                 (patElemName pe,
-                 HS.unions $ [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres] ++
-                 map (depsOfVar deps) (HS.toList $ freeIn pe))
+                 S.unions $ [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres] ++
+                 map (depsOfVar deps) (S.toList $ freeIn pe))
               branchdeps =
-                HM.fromList $ map comb $ zip3 (patternValueElements pat)
+                M.fromList $ map comb $ zip3 (patternValueElements pat)
                 (bodyResult tb)
                 (bodyResult fb)
-          in HM.unions [branchdeps, deps, tdeps, fdeps]
+          in M.unions [branchdeps, deps, tdeps, fdeps]
 
         grow deps (Let pat _ e) =
           let free = freeIn pat <> freeInExp e
-              freeDeps = HS.unions $ map (depsOfVar deps) $ HS.toList free
-          in HM.fromList [ (name, freeDeps) | name <- patternNames pat ] `HM.union` deps
+              freeDeps = S.unions $ map (depsOfVar deps) $ S.toList free
+          in M.fromList [ (name, freeDeps) | name <- patternNames pat ] `M.union` deps
 
 depsOf :: Dependencies -> SubExp -> Names
-depsOf _ (Constant _) = HS.empty
+depsOf _ (Constant _) = S.empty
 depsOf deps (Var v)   = depsOfVar deps v
 
 depsOfVar :: Dependencies -> VName -> Names
-depsOfVar deps name = HS.insert name $ HM.lookupDefault HS.empty name deps
+depsOfVar deps name = S.insert name $ M.findWithDefault S.empty name deps

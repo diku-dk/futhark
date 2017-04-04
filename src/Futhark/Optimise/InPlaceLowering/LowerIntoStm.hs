@@ -12,7 +12,7 @@ import Control.Monad.Writer
 import Data.List (find)
 import Data.Maybe (mapMaybe)
 import Data.Either
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Prelude
 
@@ -166,7 +166,7 @@ summariseLoop updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
   where summariseLoopResult (se, v) (fparam, mergeinit)
           | Just update <- find (updateHasValue $ identName v) updates =
-            if updateSource update `HS.member` usedInBody
+            if updateSource update `S.member` usedInBody
             then Nothing
             else if hasLoopInvariantShape fparam then Just $ do
               lowered_array <- newVName "lowered_array"

@@ -2,9 +2,9 @@
 -- ==
 -- error:
 
-fun f(x: i32): i32 = x
+let f(x: i32): i32 = x
 
-fun main(): i32 =
+let main(): i32 =
     let n = 10
     let a = iota(n)
     let b = iota(n)

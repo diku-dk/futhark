@@ -5,11 +5,11 @@
 module type repeater = (P:{type t val f: t -> t}) -> {val g: P.t -> P.t}
 
 module twice_(P: {type t val f: t -> t}) = {
-  fun g (x: P.t) = P.f (P.f x)
+  let g (x: P.t) = P.f (P.f x)
 }
 
 module twice = twice_ : repeater
 
-module twice_mult = twice({type t = i32 fun f (x: t) = x * 2})
+module twice_mult = twice({type t = i32 let f (x: t) = x * 2})
 
-fun main(x: i32) = twice_mult.g x
+let main(x: i32) = twice_mult.g x

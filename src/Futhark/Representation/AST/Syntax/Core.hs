@@ -57,8 +57,8 @@ import Data.Traversable hiding (mapM)
 import Data.Hashable
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -115,16 +115,16 @@ instance ArrayShape ExtShape where
     -- Must agree on Free dimensions, and ds1 may not be existential
     -- where ds2 is Free.  Existentials must also be congruent.
     length ds1 == length ds2 &&
-    evalState (and <$> zipWithM subDimOf ds1 ds2) HM.empty
+    evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
     where subDimOf (Free se1) (Free se2) = return $ se1 == se2
           subDimOf (Ext _)    (Free _)   = return False
           subDimOf (Free _)   (Ext _)    = return True
           subDimOf (Ext x)    (Ext y)    = do
             extmap <- get
-            case HM.lookup y extmap of
+            case M.lookup y extmap of
               Just ywas | ywas == x -> return True
                         | otherwise -> return False
-              Nothing -> do put $ HM.insert y x extmap
+              Nothing -> do put $ M.insert y x extmap
                             return True
 
 instance Monoid Rank where
@@ -309,4 +309,4 @@ instance Functor PatElemT where
   fmap f (PatElem name bindage attr) = PatElem name bindage (f attr)
 
 -- | A set of names.
-type Names = HS.HashSet VName
+type Names = S.Set VName

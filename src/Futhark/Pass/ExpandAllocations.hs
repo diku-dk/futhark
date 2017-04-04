@@ -7,8 +7,8 @@ module Futhark.Pass.ExpandAllocations
 import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.State
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 import Data.Monoid
@@ -57,17 +57,22 @@ transformExp :: Exp ExplicitMemory -> ExpandM ([Stm ExplicitMemory], Exp Explici
 transformExp (Op (Inner (Kernel desc cs space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
+      num_threads64 <- newVName "num_threads64"
+      let num_threads64_pat = Pattern [] [PatElem num_threads64 BindVar $ Scalar int64]
+          num_threads64_bnd = Let num_threads64_pat () $ BasicOp $
+                              ConvOp (SExt Int32 Int64) (spaceNumThreads space)
+
       (alloc_bnds, alloc_offsets) <-
-        expandedAllocations num_threads global_tid thread_allocs
+        expandedAllocations
+        (Var num_threads64, spaceNumGroups space, spaceGroupSize space)
+        (spaceGlobalId space, spaceGroupId space, spaceLocalId space) thread_allocs
       let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
 
-      return (alloc_bnds,
+      return (num_threads64_bnd : alloc_bnds,
               Op $ Inner $ Kernel desc cs space ts kbody'')
 
-  where global_tid = spaceGlobalId space
-        num_threads = spaceNumThreads space
-        bound_in_kernel =
-          HS.fromList $ HM.keys $ scopeOfKernelSpace space <>
+  where bound_in_kernel =
+          S.fromList $ M.keys $ scopeOfKernelSpace space <>
           scopeOf (kernelBodyStms kbody)
 
 transformExp e =
@@ -77,49 +82,49 @@ transformExp e =
 -- 'extractThreadAllocations'.
 extractKernelBodyAllocations :: Names -> KernelBody InKernel
                              -> Either String (KernelBody InKernel,
-                                               HM.HashMap VName (SubExp, Space))
+                                               M.Map VName (SubExp, Space))
 extractKernelBodyAllocations bound_before_body kbody = do
-  (allocs, stms) <- mapAccumLM extract HM.empty $ kernelBodyStms kbody
+  (allocs, stms) <- mapAccumLM extract M.empty $ kernelBodyStms kbody
   return (kbody { kernelBodyStms = concat stms }, allocs)
   where extract allocs bnd = do
           (bnds, body_allocs) <- extractThreadAllocations bound_before_body [bnd]
           return (allocs <> body_allocs, bnds)
 
 extractThreadAllocations :: Names -> [Stm InKernel]
-                         -> Either String ([Stm InKernel], HM.HashMap VName (SubExp, Space))
+                         -> Either String ([Stm InKernel], M.Map VName (SubExp, Space))
 extractThreadAllocations bound_before_body bnds = do
-  (allocs, bnds') <- mapAccumLM isAlloc HM.empty bnds
+  (allocs, bnds') <- mapAccumLM isAlloc M.empty bnds
   return (catMaybes bnds', allocs)
-  where bound_here = bound_before_body `HS.union` boundByStms bnds
+  where bound_here = bound_before_body `S.union` boundByStms bnds
 
         isAlloc _ (Let (Pattern [] [patElem]) () (Op (Alloc (Var v) _)))
-          | v `HS.member` bound_here =
+          | v `S.member` bound_here =
             throwError $ "Size " ++ pretty v ++
             " for block " ++ pretty patElem ++
             " is not lambda-invariant"
 
         isAlloc allocs (Let (Pattern [] [patElem]) () (Op (Alloc size space))) =
-          return (HM.insert (patElemName patElem) (size, space) allocs,
+          return (M.insert (patElemName patElem) (size, space) allocs,
                   Nothing)
 
         isAlloc allocs bnd =
           return (allocs, Just bnd)
 
-expandedAllocations :: SubExp
-                    -> VName
-                    -> HM.HashMap VName (SubExp, Space)
+expandedAllocations :: (SubExp,SubExp, SubExp)
+                    -> (VName, VName, VName)
+                    -> M.Map VName (SubExp, Space)
                     -> ExpandM ([Stm ExplicitMemory], RebaseMap)
-expandedAllocations num_threads thread_index thread_allocs = do
+expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, group_id, local_id) thread_allocs = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
-  (alloc_bnds, rebase_map) <- unzip <$> mapM expand (HM.toList thread_allocs)
+  (alloc_bnds, rebase_map) <- unzip <$> mapM expand (M.toList thread_allocs)
 
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
   let alloc_offsets =
         RebaseMap { rebaseMap = mconcat rebase_map
-                  , indexVariable = thread_index
-                  , kernelWidth = num_threads
+                  , indexVariable = (group_id, local_id)
+                  , kernelWidth = (num_groups, group_size)
                   }
   return (concat alloc_bnds, alloc_offsets)
   where expand (mem, (per_thread_size, Space "local")) = do
@@ -130,31 +135,35 @@ expandedAllocations num_threads thread_index thread_allocs = do
 
         expand (mem, (per_thread_size, space)) = do
           total_size <- newVName "total_size"
-          let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int32]
+          let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int64]
               allocpat = Pattern [] [PatElem mem BindVar $
                                      MemMem (Var total_size) space]
-          return ([Let sizepat () $ BasicOp $ BinOp (Mul Int32) num_threads per_thread_size,
+          return ([Let sizepat () $ BasicOp $ BinOp (Mul Int64) num_threads64 per_thread_size,
                    Let allocpat () $ Op $ Alloc (Var total_size) space],
-                   HM.singleton mem newBase)
+                   M.singleton mem newBase)
 
         newBase old_shape =
-          let perm = [length old_shape, 0] ++ [1..length old_shape-1]
-              root_ixfun = IxFun.iota (old_shape ++ [primExpFromSubExp int32 num_threads])
+          let num_dims = length old_shape
+              perm = [0, num_dims+1] ++ [1..num_dims]
+              root_ixfun = IxFun.iota (primExpFromSubExp int32 num_groups : old_shape
+                                       ++ [primExpFromSubExp int32 group_size])
               permuted_ixfun = IxFun.permute root_ixfun perm
+              untouched d = DimSlice 0 d 1
               offset_ixfun = IxFun.slice permuted_ixfun $
-                             fullSliceNum (IxFun.shape permuted_ixfun)
-                             [DimFix $ LeafExp thread_index int32]
+                             [DimFix (LeafExp group_id int32),
+                              DimFix (LeafExp local_id int32)] ++
+                             map untouched old_shape
           in offset_ixfun
 
 data RebaseMap = RebaseMap {
-    rebaseMap :: HM.HashMap VName ([PrimExp VName] -> IxFun)
+    rebaseMap :: M.Map VName ([PrimExp VName] -> IxFun)
     -- ^ A map from memory block names to new index function bases.
-  , indexVariable :: VName
-  , kernelWidth :: SubExp
+  , indexVariable :: (VName, VName)
+  , kernelWidth :: (SubExp, SubExp)
   }
 
 lookupNewBase :: VName -> [PrimExp VName] -> RebaseMap -> Maybe IxFun
-lookupNewBase name dims = fmap ($dims) . HM.lookup name . rebaseMap
+lookupNewBase name dims = fmap ($dims) . M.lookup name . rebaseMap
 
 offsetMemoryInKernelBody :: RebaseMap -> KernelBody InKernel
                          -> KernelBody InKernel
@@ -221,6 +230,8 @@ offsetMemoryInExp offsets (Op (Inner (GroupStream w max_chunk lam accs arrs))) =
 offsetMemoryInExp offsets (Op (Inner (GroupReduce w lam input))) =
   Op (Inner (GroupReduce w lam' input))
   where lam' = lam { lambdaBody = offsetMemoryInBody offsets $ lambdaBody lam }
+offsetMemoryInExp offsets (Op (Inner (Combine cspace ts active body))) =
+  Op $ Inner $ Combine cspace ts active $ offsetMemoryInBody offsets body
 offsetMemoryInExp offsets e = mapExp recurse e
   where recurse = identityMapper { mapOnBody = const $ return . offsetMemoryInBody offsets
                                  }

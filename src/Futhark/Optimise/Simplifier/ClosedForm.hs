@@ -15,8 +15,8 @@ where
 import Control.Monad
 import Control.Applicative
 import Data.Maybe
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Monoid
 
 import Prelude
@@ -87,13 +87,13 @@ loopClosedForm pat merge i bound body = do
   where (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
         mergenames = map paramName mergepat
-        knownStms = HM.fromList $ zip mergenames mergeexp
+        knownStms = M.fromList $ zip mergenames mergeexp
 
 checkResults :: MonadBinder m =>
                 [VName]
              -> SubExp
              -> Names
-             -> HM.HashMap VName SubExp
+             -> M.Map VName SubExp
              -> [VName] -- ^ Lambda-bound
              -> Body (Lore m)
              -> [SubExp]
@@ -108,11 +108,11 @@ checkResults pat size untouchable knownStms params body accs = do
         res = bodyResult body
 
         nonFree = boundInBody body <>
-                  HS.fromList params <>
+                  S.fromList params <>
                   untouchable
 
         checkResult (p, Var v) (accparam, acc) = do
-          e@(BasicOp (BinOp bop x y)) <- liftMaybe $ HM.lookup v bndMap
+          e@(BasicOp (BinOp bop x y)) <- liftMaybe $ M.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
           let isThisAccum = (==Var accparam)
@@ -143,7 +143,7 @@ checkResults pat size untouchable knownStms params body accs = do
 
         asFreeSubExp :: SubExp -> Maybe SubExp
         asFreeSubExp (Var v)
-          | HS.member v nonFree = HM.lookup v knownStms
+          | S.member v nonFree = M.lookup v knownStms
         asFreeSubExp se = Just se
 
         properIntSize Int32 = Just $ return size
@@ -155,22 +155,22 @@ checkResults pat size untouchable knownStms params body accs = do
           BasicOp $ ConvOp (SIToFP Int32 t) size
 
 determineKnownStms :: VarLookup lore -> Lambda lore -> [SubExp] -> [VName]
-                       -> HM.HashMap VName SubExp
+                       -> M.Map VName SubExp
 determineKnownStms look lam accs arrs =
   accStms <> arrStms
   where (accparams, arrparams) =
           splitAt (length accs) $ lambdaParams lam
-        accStms = HM.fromList $
+        accStms = M.fromList $
                       zip (map paramName accparams) accs
-        arrStms = HM.fromList $ mapMaybe isReplicate $
+        arrStms = M.fromList $ mapMaybe isReplicate $
                       zip (map paramName arrparams) arrs
 
         isReplicate (p, v)
           | Just (BasicOp (Replicate _ ve)) <- look v = Just (p, ve)
         isReplicate _ = Nothing
 
-makeBindMap :: Body lore -> HM.HashMap VName (Exp lore)
-makeBindMap = HM.fromList . mapMaybe isSingletonStm . bodyStms
+makeBindMap :: Body lore -> M.Map VName (Exp lore)
+makeBindMap = M.fromList . mapMaybe isSingletonStm . bodyStms
   where isSingletonStm (Let pat _ e) = case patternNames pat of
           [v] -> Just (v,e)
           _   -> Nothing

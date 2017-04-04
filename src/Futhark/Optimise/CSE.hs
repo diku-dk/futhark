@@ -34,9 +34,8 @@ module Futhark.Optimise.CSE
 
 import Control.Applicative
 import Control.Monad.Reader
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
-import qualified Data.Map.Lazy as M
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -134,14 +133,14 @@ cseInStm consumed (Let pat eattr e) m = do
   where bad cse_arrays pe
           | Mem{} <- patElemType pe = True
           | Array{} <- patElemType pe, not cse_arrays = True
-          | patElemName pe `HS.member` consumed = True
+          | patElemName pe `S.member` consumed = True
           | BindInPlace{} <- patElemBindage pe = True
           | otherwise = False
 
 type ExpressionSubstitutions lore = M.Map
                                     (ExpAttr lore, Exp lore)
                                     (Pattern lore)
-type NameSubstitutions = HM.HashMap VName VName
+type NameSubstitutions = M.Map VName VName
 
 data CSEState lore = CSEState
                      { _cseSubstitutions :: (ExpressionSubstitutions lore, NameSubstitutions)
@@ -149,14 +148,14 @@ data CSEState lore = CSEState
                      }
 
 newCSEState :: Bool -> CSEState lore
-newCSEState = CSEState (M.empty, HM.empty)
+newCSEState = CSEState (M.empty, M.empty)
 
-mkSubsts :: PatternT attr -> PatternT attr -> HM.HashMap VName VName
-mkSubsts pat vs = HM.fromList $ zip (patternNames pat) (patternNames vs)
+mkSubsts :: PatternT attr -> PatternT attr -> M.Map VName VName
+mkSubsts pat vs = M.fromList $ zip (patternNames pat) (patternNames vs)
 
 addNameSubst :: PatternT attr -> PatternT attr -> CSEState lore -> CSEState lore
 addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
-  CSEState (esubsts, mkSubsts pat subpat `HM.union` nsubsts) cse_arrays
+  CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst :: Attributes lore =>
                Pattern lore -> ExpAttr lore -> Exp lore

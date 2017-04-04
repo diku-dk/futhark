@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Main (main) where
 
 import Control.Monad.IO.Class
@@ -13,9 +14,11 @@ import Futhark.Compiler
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Util.Options
+import Futhark.Util.Pretty (prettyText)
 
 main :: IO ()
-main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
+main = reportingIOErrors $
+       mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 
@@ -31,7 +34,7 @@ cCodeAction filepath config =
          , actionProcedure = procedure
          }
   where procedure prog = do
-          cprog <- either compileFail return =<< SequentialC.compileProg prog
+          cprog <- either (`internalError` prettyText prog) return =<< SequentialC.compileProg prog
           let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
           liftIO $ writeFile cpath cprog
@@ -39,7 +42,7 @@ cCodeAction filepath config =
             liftIO $ readProcessWithExitCode "gcc"
             [cpath, "-o", binpath, "-lm", "-O3", "-std=c99"] ""
           case gccCode of
-            ExitFailure code -> compileFail $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
+            ExitFailure code -> externalErrorS $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
             ExitSuccess      -> return ()
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))

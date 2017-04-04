@@ -29,7 +29,7 @@ module Futhark.Optimise.Simplifier.Lore
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -65,12 +65,31 @@ instance FreeIn VarWisdom where
   freeIn (VarWisdom als range) = freeIn als <> freeIn range
 
 -- | Wisdom about an expression.
-type ExpWisdom = ConsumedInExp
+data ExpWisdom = ExpWisdom { _expWisdomConsumed :: ConsumedInExp
+                           , expWisdomFree :: Names'
+                           }
+                 deriving (Eq, Ord, Show)
+
+instance FreeIn ExpWisdom where
+  freeIn = mempty
+
+instance FreeAttr ExpWisdom where
+  precomputed = const . unNames . expWisdomFree
+
+instance Substitute ExpWisdom where
+  substituteNames substs (ExpWisdom cons free) =
+    ExpWisdom
+    (substituteNames substs cons)
+    (substituteNames substs free)
+
+instance Rename ExpWisdom where
+  rename = substituteRename
 
 -- | Wisdom about a body.
 data BodyWisdom = BodyWisdom { bodyWisdomAliases :: [VarAliases]
                              , bodyWisdomConsumed :: ConsumedInExp
                              , bodyWisdomRanges :: [Range]
+                             , bodyWisdomFree :: Names'
                              }
                   deriving (Eq, Ord, Show)
 
@@ -78,15 +97,19 @@ instance Rename BodyWisdom where
   rename = substituteRename
 
 instance Substitute BodyWisdom where
-  substituteNames substs (BodyWisdom als cons rs) =
+  substituteNames substs (BodyWisdom als cons rs free) =
     BodyWisdom
     (substituteNames substs als)
     (substituteNames substs cons)
     (substituteNames substs rs)
+    (substituteNames substs free)
 
 instance FreeIn BodyWisdom where
-  freeIn (BodyWisdom als cons rs) =
-    freeIn als <> freeIn cons <> freeIn rs
+  freeIn (BodyWisdom als cons rs free) =
+    freeIn als <> freeIn cons <> freeIn rs <> freeIn free
+
+instance FreeAttr BodyWisdom where
+  precomputed = const . unNames . bodyWisdomFree
 
 instance (Annotations lore,
           CanBeWise (Op lore)) => Annotations (Wise lore) where
@@ -133,14 +156,14 @@ removeWisdom = Rephraser { rephraseExpLore = return . snd
                          }
 
 removeScopeWisdom :: Scope (Wise lore) -> Scope lore
-removeScopeWisdom = HM.map unAlias
+removeScopeWisdom = M.map unAlias
   where unAlias (LetInfo (_, attr)) = LetInfo attr
         unAlias (FParamInfo attr) = FParamInfo attr
         unAlias (LParamInfo attr) = LParamInfo attr
         unAlias (IndexInfo it) = IndexInfo it
 
 addScopeWisdom :: Scope lore -> Scope (Wise lore)
-addScopeWisdom = HM.map alias
+addScopeWisdom = M.map alias
   where alias (LetInfo attr) = LetInfo (VarWisdom mempty unknownRange, attr)
         alias (FParamInfo attr) = FParamInfo attr
         alias (LParamInfo attr) = LParamInfo attr
@@ -190,7 +213,8 @@ addWisdomToPattern pat e =
 mkWiseBody :: (Attributes lore, CanBeWise (Op lore)) =>
               BodyAttr lore -> [Stm (Wise lore)] -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
-  Body (BodyWisdom aliases consumed ranges, innerlore) bnds res
+  Body (BodyWisdom aliases consumed ranges (Names' $ freeInStmsAndRes bnds res),
+        innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
         ranges = Ranges.mkBodyRanges bnds res
 
@@ -200,7 +224,10 @@ mkWiseLetStm :: (Attributes lore, CanBeWise (Op lore)) =>
              -> Stm (Wise lore)
 mkWiseLetStm pat explore e =
   Let (addWisdomToPattern pat e)
-  (Names' $ consumedInPattern pat <> consumedInExp e, explore)
+  (ExpWisdom
+    (Names' $ consumedInPattern pat <> consumedInExp e)
+    (Names' $ freeIn pat <> freeIn explore <> freeInExp e),
+   explore)
   e
 
 instance (Bindable lore,

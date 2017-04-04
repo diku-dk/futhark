@@ -3,11 +3,11 @@
 -- ==
 -- error:
 
-fun f(x: (i32, i32), t: (i32, i32, []i32)): []i32 =
+let f(x: (i32, i32), t: (i32, i32, []i32)): []i32 =
     let (x, y, a) = t in
     a
 
-fun main(): []i32 =
+let main(): []i32 =
     let n = 10
     let a = iota(n)
     let t = (3, 4, a)

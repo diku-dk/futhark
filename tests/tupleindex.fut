@@ -5,7 +5,7 @@
 --   0
 --   1
 -- }
-fun main(): (i32, i32) =
+let main(): (i32, i32) =
   let arr = [(0,1), (2,3), (4,5)]
   let n = (shape arr)[0]
   let outarr = replicate n (0,0)

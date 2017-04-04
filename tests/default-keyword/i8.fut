@@ -7,4 +7,4 @@
 
 default(i8)
 
-fun main(): i8 = 0
+let main(): i8 = 0

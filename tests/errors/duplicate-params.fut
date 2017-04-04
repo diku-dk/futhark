@@ -3,4 +3,4 @@
 -- ==
 -- error: Duplicate.*x.*
 
-fun main (x: i32) (x: i32): i32 = x
+let main (x: i32) (x: i32): i32 = x

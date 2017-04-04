@@ -9,7 +9,7 @@
 -- }
 
 module F = {
-  fun plus(a: i32) (b: i32): i32 = a+b
+  let plus(a: i32) (b: i32): i32 = a+b
 }
 
-fun main(a: []i32): i32 = reduce F.plus 0 a
+let main(a: []i32): i32 = reduce F.plus 0 a

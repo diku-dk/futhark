@@ -2,4 +2,4 @@
 -- ==
 -- error:
 
-fun main(): i32 = 2.0
+let main(): i32 = 2.0

@@ -26,7 +26,6 @@ module Futhark.Internalise.Monad
   , bindingParamTypes
   , noteFunctions
   , noteMod
-  , noteModFun
   , noteType
   , noteDecSubsts
   , generatingFunctor
@@ -44,7 +43,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS hiding (mapM)
 
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.List
 import Data.Maybe
 
@@ -64,24 +63,24 @@ type Closure = [VName]
 data FunBinding = FunBinding
                   { internalFun :: (Name, ConstParams, Closure,
                                     [VName], [DeclType],
+                                    [FParam],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.StructType, [E.StructType])
                   }
 
-type FunTable = HM.HashMap VName FunBinding
+type FunTable = M.Map VName FunBinding
 
-data ModBinding = ModExp E.ModExp
-                | ModFun VName DecSubstitutions E.ModExp
+data ModBinding = ModBinding DecSubstitutions E.ModExp
                 deriving (Show)
 
-type TypeTable = HM.HashMap VName [TypeBase Rank NoUniqueness]
+type TypeTable = M.Map VName [TypeBase Rank NoUniqueness]
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
-type VarSubstitutions = HM.HashMap VName [SubExp]
+type VarSubstitutions = M.Map VName [SubExp]
 
 -- | Mapping from original top-level names to new top-level names.
-type DecSubstitutions = HM.HashMap VName VName
+type DecSubstitutions = M.Map VName VName
 
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
@@ -94,7 +93,7 @@ data InternaliseState =
   InternaliseState { stateDecSubsts :: DecSubstitutions
                    , stateFtable :: FunTable
                    , stateTtable :: TypeTable
-                   , stateModTable :: HM.HashMap VName ModBinding
+                   , stateModTable :: M.Map VName ModBinding
                    , stateNameSource :: VNameSource
                    }
 
@@ -162,7 +161,7 @@ addFunction = InternaliseM . lift . tell . InternaliseResult . pure
 lookupFunction' :: VName -> InternaliseM (Maybe FunBinding)
 lookupFunction' fname = do
   ftable <- gets stateFtable
-  case HM.lookup fname ftable of
+  case M.lookup fname ftable of
     Nothing   -> return Nothing
     Just fun' -> return $ Just fun'
 
@@ -174,20 +173,20 @@ lookupFunction fname =
 
 lookupTypeVar :: VName -> InternaliseM [TypeBase Rank NoUniqueness]
 lookupTypeVar tname = do
-  t <- gets $ HM.lookup tname. stateTtable
+  t <- gets $ M.lookup tname. stateTtable
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just t' -> return t'
 
 lookupMod :: VName -> InternaliseM ModBinding
 lookupMod mname = do
-  maybe_me <- gets $ HM.lookup mname . stateModTable
+  maybe_me <- gets $ M.lookup mname . stateModTable
   case maybe_me of
     Nothing -> fail $ "Internalise.lookupMod: Module '" ++
                pretty mname ++ "' not found"
     Just me -> return me
 
 allSubsts :: InternaliseM DecSubstitutions
-allSubsts = HM.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
+allSubsts = M.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
 
 -- | Substitution for any variable or defined name.  Used for functor
 -- application.  Never pick apart QualNames directly in the
@@ -195,7 +194,7 @@ allSubsts = HM.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
 -- substitution, the name is just returned.
 lookupSubst :: E.QualName VName -> InternaliseM VName
 lookupSubst (E.QualName _ name) = do
-  r <- HM.lookup name <$> allSubsts
+  r <- M.lookup name <$> allSubsts
   case r of
     Just v | v /= name -> lookupSubst $ E.qualName v
            | otherwise -> return v
@@ -206,12 +205,12 @@ lookupSubst (E.QualName _ name) = do
 newOrExistingSubst :: VName -> InternaliseM VName
 newOrExistingSubst name = do
   in_functor <- asks envGeneratingFunctor
-  r <- HM.lookup name <$> allSubsts
+  r <- M.lookup name <$> allSubsts
   case r of
     Just v | v /= name -> lookupSubst $ E.qualName v
            | otherwise -> return v
     Nothing | in_functor -> do x <- newName name
-                               noteDecSubsts $ HM.singleton name x
+                               noteDecSubsts $ M.singleton name x
                                return x
             | otherwise  -> return name
 
@@ -221,7 +220,7 @@ bindingIdentTypes idents (InternaliseM m) =
   InternaliseM $ localScope (typeEnvFromIdents idents) m
 
 typeEnvFromIdents :: [Ident] -> Scope SOACS
-typeEnvFromIdents = HM.fromList . map assoc
+typeEnvFromIdents = M.fromList . map assoc
   where assoc ident = (identName ident, LetInfo $ identType ident)
 
 bindingParamTypes :: [LParam] -> InternaliseM a
@@ -232,33 +231,29 @@ noteFunctions :: FunTable -> InternaliseM ()
 noteFunctions ftable_expansion =
   modify $ \s -> s { stateFtable = ftable_expansion <> stateFtable s }
 
-noteMod :: VName -> E.ModExp -> InternaliseM ()
-noteMod name me =
-  modify $ \s -> s { stateModTable = HM.insert name (ModExp me) $ stateModTable s }
-
-noteModFun :: VName -> VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
-noteModFun name p substs me =
-  modify $ \s -> s { stateModTable = HM.insert name (ModFun p substs me) $ stateModTable s }
+noteMod :: VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
+noteMod name substs me =
+  modify $ \s -> s { stateModTable = M.insert name (ModBinding substs me) $ stateModTable s }
 
 noteType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM ()
 noteType name t =
-  modify $ \s -> s { stateTtable = HM.insert name t $ stateTtable s }
+  modify $ \s -> s { stateTtable = M.insert name t $ stateTtable s }
 
-setDecSubsts :: HM.HashMap VName VName -> InternaliseM ()
+setDecSubsts :: M.Map VName VName -> InternaliseM ()
 setDecSubsts substs = modify $ \s -> s { stateDecSubsts = substs }
 
-noteDecSubsts :: HM.HashMap VName VName -> InternaliseM ()
+noteDecSubsts :: M.Map VName VName -> InternaliseM ()
 noteDecSubsts substs = do
   cur_substs <- allSubsts
   -- Some substitutions of these names may already exist.
-  let substs' = HM.map (forward cur_substs) substs
+  let substs' = M.map (forward cur_substs) substs
   modify $ \s ->
-    s { stateDecSubsts = substs' `HM.union` stateDecSubsts s
+    s { stateDecSubsts = substs' `M.union` stateDecSubsts s
       }
-  where forward old_substs v = fromMaybe v $ HM.lookup v old_substs
+  where forward old_substs v = fromMaybe v $ M.lookup v old_substs
 
-generatingFunctor :: HM.HashMap VName VName
-                  -> HM.HashMap VName VName
+generatingFunctor :: M.Map VName VName
+                  -> M.Map VName VName
                   -> InternaliseM a -> InternaliseM a
 generatingFunctor p_substs b_substs m = do
   -- Some substitutions of these names may already exist.  Also, we
@@ -268,28 +263,28 @@ generatingFunctor p_substs b_substs m = do
   cur_substs <- allSubsts
 
   let frob (k, v)
-        | Just v' <- HM.lookup k cur_substs, v' /= v = Just (v', v)
+        | Just v' <- M.lookup k cur_substs, v' /= v = Just (v', v)
         | otherwise                                   = Nothing
   let extra_substs = if in_functor
-                     then HM.fromList $ mapMaybe frob $ HM.toList b_substs
+                     then M.fromList $ mapMaybe frob $ M.toList b_substs
                      else mempty
-      forwards = HM.fromList $ mapMaybe frob $ HM.toList p_substs
+      forwards = M.fromList $ mapMaybe frob $ M.toList p_substs
   let recs = [extra_substs,
               forwards,
               p_substs,
               b_substs]
-      nexts = extra_substs `HM.union` b_substs
+      nexts = extra_substs `M.union` b_substs
       update env =
         env { envGeneratingFunctor = True
-            , envFunctorSubsts = HM.unions recs `HM.union`
+            , envFunctorSubsts = M.unions recs `M.union`
                                  envFunctorSubsts env
             }
   old_dec_substs <- gets stateDecSubsts
-  local update m <* setDecSubsts (nexts `HM.union` old_dec_substs)
+  local update m <* setDecSubsts (nexts `M.union` old_dec_substs)
 
 withDecSubstitutions :: DecSubstitutions
                      -> InternaliseM a -> InternaliseM a
 withDecSubstitutions p_substs m = do
   let update env =
-        env { envFunctorSubsts = p_substs `HM.union` envFunctorSubsts env }
+        env { envFunctorSubsts = p_substs `M.union` envFunctorSubsts env }
   local update m

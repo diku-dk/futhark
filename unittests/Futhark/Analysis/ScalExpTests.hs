@@ -56,12 +56,12 @@ newVar s t = do (x, m) <- getState
                 case M.lookup s m of
                   Just _ -> fail $ "Variable " ++ s ++ " double-declared."
                   Nothing -> do setState (x+1, M.insert s (x,t) m)
-                                return $ Ident (ID (nameFromString s, x)) t
+                                return $ Ident (VName (nameFromString s) x) t
 
 knownVar :: String -> Parser Ident
 knownVar s = do (_, m) <- getState
                 case M.lookup s m of
-                  Just (y,t) -> return $ Ident (ID (nameFromString s, y)) t
+                  Just (y,t) -> return $ Ident (VName (nameFromString s) y) t
                   Nothing -> fail $ "Undeclared variable " ++ s
 
 reservedOp :: String -> Parser ()

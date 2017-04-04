@@ -9,9 +9,9 @@
 --   [[1,2], [3,4], [6,7]]
 -- }
 
-fun take (n: i32) (r: []i32): []i32 =
+let take (n: i32) (r: []i32): []i32 =
   let (part, _) = split (n) r in
   part
 
-fun main(rs: [][]i32, n: i32): [][]i32 =
+let main(rs: [][]i32, n: i32): [][]i32 =
   map (take(n)) rs

@@ -21,37 +21,37 @@ import "futlib/math"
 
 default (f32)
 
-val pi: f32 = f32.acos 0.0 * 2.0
+let pi: f32 = f32.acos 0.0 * 2.0
 
 type complex = (f32, f32)
 
-fun complexAdd ((a, b): complex) ((c, d): complex): complex =
+let complexAdd ((a, b): complex) ((c, d): complex): complex =
   (a+c, b+d)
 
-fun complexMult ((a,b): complex) ((c,d): complex): complex =
+let complexMult ((a,b): complex) ((c,d): complex): complex =
   (a*c - b*d,
    a*d + b*c)
 
-fun toComplex (a: f32): complex = (a, 0f32)
+let toComplex (a: f32): complex = (a, 0f32)
 
-fun complexExp ((a,b): complex): complex =
+let complexExp ((a,b): complex): complex =
   complexMult (toComplex (f32.exp a)) (f32.cos b, f32.sin b)
 
-fun toPolar ((a,b): complex): (f32, f32) =
+let toPolar ((a,b): complex): (f32, f32) =
   (f32.sqrt (a*a + b*b),
    f32.atan (b/a))
 
-fun fromPolar (r: f32, angle: f32): complex =
+let fromPolar (r: f32, angle: f32): complex =
   (r * f32.cos angle,
    r * f32.sin angle)
 
-fun complexPow (c: complex) (n: i32): complex =
+let complexPow (c: complex) (n: i32): complex =
   let (r, angle) = toPolar c
   let (r', angle') = (r ** f32 n,
                       f32 n * angle)
   in fromPolar (r', angle')
 
-fun f(a: [n]f32) (j: i32): complex =
+let f(a: [n]f32) (j: i32): complex =
   let x = complexExp (complexMult (-2.0,0.0)
                       (complexMult (toComplex pi)
                        (complexMult (0.0, 1.0)
@@ -61,7 +61,7 @@ fun f(a: [n]f32) (j: i32): complex =
    (map toComplex a)
    (map (complexPow x) (map (j*) (iota n))))
 
-fun sft(a: [n]f32): [n]complex =
+let sft(a: [n]f32): [n]complex =
   map (f a) (iota n)
 
-fun main(a: [n]f32): ([n]f32, [n]f32) = unzip (sft a)
+let main(a: [n]f32): ([n]f32, [n]f32) = unzip (sft a)

@@ -28,7 +28,7 @@ import Control.Category ((>>>))
 import Control.Applicative
 import Control.Monad hiding (forM_)
 import Control.Monad.IO.Class
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.Char
 import Data.Maybe
 import Data.Monoid
@@ -56,7 +56,7 @@ import Futhark.Pipeline
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Passes
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty (pretty, prettyText)
 import Futhark.Test.Values
 
 -- | Description of a test to be carried out on a Futhark program.
@@ -186,7 +186,11 @@ parseRunCases = parseRunCases' (0::Int)
           expr <- parseExpectedResult
           return $ TestRun runmode input expr $ desc i input
         desc _ (InFile path) = path
-        desc i Values{}      = "#" ++ show i
+        desc i (Values vs) =
+          "#" ++ show i ++ " (\"" ++ vs' ++ "\")"
+          where vs' = case unwords (map pretty vs) of
+                        s | length s > 50 -> take 50 s ++ "..."
+                          | otherwise     -> s
 
 
 parseExpectedResult :: Parser (ExpectedResult Values)
@@ -246,7 +250,7 @@ optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
           onePass simplifyKernels
 
 parseMetrics :: Parser AstMetrics
-parseMetrics = braces $ fmap HM.fromList $ many $
+parseMetrics = braces $ fmap M.fromList $ many $
                (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
   where constituent c = isAlpha c || c == '/'
 
@@ -354,7 +358,7 @@ getValues dir (InFile file) = do
     Right vs -> return vs
   where file' = dir </> file
 
--- | Extract a textual representation of some 'Values'.  In the IO
+-- | Extract a pretty representation of some 'Values'.  In the IO
 -- monad because this might involve reading from a file.  There is no
 -- guarantee that the resulting text yields a readable value.
 getValuesText :: MonadIO m => FilePath -> Values -> m T.Text

@@ -11,14 +11,14 @@ module type mt = {
 module f1(R: mt) = {
   type cell = R.cell
 
-  fun init(bs: [n]bool): [n]cell =
+  let init(bs: [n]bool): [n]cell =
     map R.init bs
 }
 
 module f2(R: mt) = {
   module m = {
     type cell = (R.cell, i32)
-    fun init (b: bool) = (R.init b, 0)
+    let init (b: bool) = (R.init b, 0)
   }
   module m' = f1(m)
   open m'
@@ -26,10 +26,10 @@ module f2(R: mt) = {
 
 module m1 = {
   type cell = bool
-  fun init (b: bool) = b
+  let init (b: bool) = b
 }
 
 module m2 = f2(m1)
 
-fun main(bs: [n]bool) =
+let main(bs: [n]bool) =
   unzip (m2.init bs)

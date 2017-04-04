@@ -2,4 +2,4 @@
 -- exponent.
 -- ==
 
-fun main() = 2 ** -1
+let main() = 2 ** -1

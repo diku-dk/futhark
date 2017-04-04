@@ -14,8 +14,8 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 import Control.Applicative
 import Data.Monoid
 import Control.Monad
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Prelude
 
@@ -30,7 +30,7 @@ type IndexSubstitutions attr = [(VName, IndexSubstitution attr)]
 
 typeEnvFromSubstitutions :: LetAttr lore ~ attr =>
                             IndexSubstitutions attr -> Scope lore
-typeEnvFromSubstitutions = HM.fromList . map (fromSubstitution . snd)
+typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
   where fromSubstitution (_, name, t, _) =
           (name, LetInfo t)
 
@@ -104,7 +104,7 @@ substituteIndicesInExp substs e = do
                                          []) substs'
               consumingSubst substs' _ =
                 return substs'
-          in foldM consumingSubst substs . HS.toList . consumedInExp
+          in foldM consumingSubst substs . S.toList . consumedInExp
 
 substituteIndicesInSubExp :: MonadBinder m =>
                              IndexSubstitutions (LetAttr (Lore m))
