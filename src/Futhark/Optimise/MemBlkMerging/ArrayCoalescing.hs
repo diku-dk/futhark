@@ -264,10 +264,10 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
                 case M.lookup m_b act of
                   Nothing   -> Exc.assert False ((act,inhb),succc) -- impossible
                   Just info ->
-                    case (HM.lookup mr1 succ_then0, HM.lookup mr2 succ_else0) of
+                    case (M.lookup mr1 succ_then0, M.lookup mr2 succ_else0) of
                       (Just _, Just _) -> -- Optimistically promote and append!
-                        let info' = info { optdeps = HM.insert r2 mr2 $
-                                           HM.insert r1 mr1 $ optdeps info }
+                        let info' = info { optdeps = M.insert r2 mr2 $
+                                           M.insert r1 mr1 $ optdeps info }
                             (act',succc') = markSuccessCoal (act,succc) m_b info'
                         in trace ("COALESCING: if-then-else promotion: "++pretty b++pretty m_b)
                                  ((act',inhb), succc')
@@ -307,8 +307,8 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
         mkCoalsHelper1FilterActive patt body_free_vars (scope td_env)
                                    (scals bu_env) actv_res0 inhibit1
 
-      inhibit_res = M.unionWith HS.union inhibit_res0 $
-                    M.unionWith HS.union inhb_then1 inhb_else1
+      inhibit_res = M.unionWith S.union inhibit_res0 $
+                    M.unionWith S.union inhb_then1 inhb_else1
   in  bu_env { activeCoals = actv_res, successCoals = succ_res, inhibit = inhibit_res }
 
 --mkCoalsTabBnd lutab (Let pat _ (Op (ExpMem.Inner (ExpMem.Kernel str cs ker_space tps ker_bdy)))) td_env bu_env =
