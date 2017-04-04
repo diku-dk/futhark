@@ -191,12 +191,22 @@ createsNewArrIK (BasicOp Concat{}) = True
 createsNewArrIK (BasicOp ArrayLit{}) = True
 createsNewArrIK _ = False
 
+-- | While Rearrange and Rotate create aliased arrays, we
+--   do not yet support them because it would mean we have
+--   to "revers" the index function, for example to support
+--   coalescing in the case below,
+--       @let a = map f a0   @
+--       @let b = transpose a@
+--       @let y[4] = copy(b) @
+--   we would need to assign to @a@ as index function, the
+--   inverse of the transpose, such that, when creating @b@
+--   by transposition we get a directly-mapped array, which
+--   is expected by the copying in y[4].
 createsAliasedArrOK :: Exp (Aliases ExpMem.ExplicitMemory) -> Maybe VName --ExpMem.IxFun
-createsAliasedArrOK (BasicOp (Rearrange _ _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (Reshape   _ _ arr_nm)) = Just arr_nm
-createsAliasedArrOK (BasicOp (Rotate    _ _ arr_nm)) = Just arr_nm
 createsAliasedArrOK (BasicOp (SubExp  (Var arr_nm))) = Just arr_nm
--- funny, with the above uncommented it becomes very complicated.
+--createsAliasedArrOK (BasicOp (Rearrange _ _ arr_nm)) = Just arr_nm
+--createsAliasedArrOK (BasicOp (Rotate    _ _ arr_nm)) = Just arr_nm
 createsAliasedArrOK _ = Nothing
 
 prettyCoalTab :: CoalsTab -> String
