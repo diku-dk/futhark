@@ -16,4 +16,4 @@ instance Arbitrary Name where
   arbitrary = nameFromString <$> listOf1 (elements ['a'..'z'])
 
 instance Arbitrary VName where
-  arbitrary = curry ID <$> arbitrary <*> arbitrary
+  arbitrary = VName <$> arbitrary <*> arbitrary

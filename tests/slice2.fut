@@ -31,7 +31,7 @@
 -- }
 -- structure distributed { Kernel 1 }
 
-fun main(mat: [m][m][b][b]f32): [m][b][b]f32 =
+let main(mat: [m][m][b][b]f32): [m][b][b]f32 =
   let mat_rows = map (\(mat_row: [m][b][b]f32): [b][b]f32  ->
                        mat_row[0]) mat
   in map  (\(blk: *[b][b]f32): [b][b]f32  ->

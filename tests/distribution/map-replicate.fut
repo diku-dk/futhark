@@ -6,6 +6,6 @@
 -- output { [[1,1], [2,2], [3,3]] }
 -- structure distributed { Kernel 1 }
 
-fun main(xs: [n]i32, m: i32): [n][m]i32 =
+let main(xs: [n]i32, m: i32): [n][m]i32 =
   map (\(x: i32): [m]i32  ->
         replicate m x) xs

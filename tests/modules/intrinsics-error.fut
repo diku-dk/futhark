@@ -4,4 +4,4 @@
 
 module M = intrinsics
 
-fun main() = 0
+let main() = 0

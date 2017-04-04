@@ -24,8 +24,8 @@ module Futhark.Representation.SOACS.SOAC
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -66,8 +66,8 @@ data SOAC lore =
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Scanomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
-  | Write Certificates SubExp (LambdaT lore) [VName] [(SubExp, VName)]
-    -- Write <cs> <length> <lambda> <original index and value arrays>
+  | Scatter Certificates SubExp (LambdaT lore) [VName] [(SubExp, VName)]
+    -- Scatter <cs> <length> <lambda> <original index and value arrays>
     -- <input/output arrays along with their sizes>
     --
     -- <length> is the length of each index array and value array, since they
@@ -79,7 +79,7 @@ data SOAC lore =
     --
     --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
     --
-    -- This must be consistent along all Write-related optimisations.
+    -- This must be consistent along all Scatter-related optimisations.
     --
     -- The original index arrays and value arrays are concatenated.
     deriving (Eq, Ord, Show)
@@ -151,8 +151,8 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
-mapSOACM tv (Write cs len lam ivs as) =
-  Write
+mapSOACM tv (Scatter cs len lam ivs as) =
+  Scatter
   <$> mapOnSOACCertificates tv cs
   <*> mapOnSOACSubExp tv len
   <*> mapOnSOACLambda tv lam
@@ -210,13 +210,13 @@ soacType (Scanomap _ outersize outerfun innerfun _ _) =
 soacType (Stream _ outersize form lam _) =
   map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
-        substs = HM.fromList $ zip nms (outersize:accs)
+        substs = M.fromList $ zip nms (outersize:accs)
         ExtLambda params _ rtp = lam
         accs = case form of
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
-soacType (Write _cs _w lam _ivs as) =
+soacType (Scatter _cs _w lam _ivs as) =
   staticShapes $ zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
@@ -242,34 +242,34 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> map (const mempty) $ lambdaReturnType lam0
                Sequential _       -> []
     in a1 ++ map (const mempty) (extLambdaReturnType lam)
-  opAliases (Write _cs _len lam _ivs _as) =
+  opAliases (Scatter _cs _len lam _ivs _as) =
     map (const mempty) $ lambdaReturnType lam
 
   -- Only Map, Redomap and Stream can consume anything.  The operands
   -- to Scan and Reduce functions are always considered "fresh".
   consumedInOp (Map _ _ lam arrs) =
-    HS.map consumedArray $ consumedByLambda lam
+    S.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
   consumedInOp (Redomap _ _ _ foldlam _ nes arrs) =
-    HS.map consumedArray $ consumedByLambda foldlam
+    S.map consumedArray $ consumedByLambda foldlam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName $ drop (length nes) (lambdaParams foldlam)) arrs
   consumedInOp (Stream _ _ form lam arrs) =
-    HS.fromList $ subExpVars $
+    S.fromList $ subExpVars $
     case form of MapLike{} ->
-                   map (consumedArray []) $ HS.toList $ consumedByExtLambda lam
+                   map (consumedArray []) $ S.toList $ consumedByExtLambda lam
                  Sequential accs ->
-                   map (consumedArray accs) $ HS.toList $ consumedByExtLambda lam
+                   map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
                  RedLike _ _ _ accs ->
-                   map (consumedArray accs) $ HS.toList $ consumedByExtLambda lam
+                   map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
     where consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
           -- Drop the chunk parameter, which cannot alias anything.
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ extLambdaParams lam)
                                (accs++map Var arrs)
-  consumedInOp (Write _ _ _ _ as) =
-    HS.fromList $ map snd as
+  consumedInOp (Scatter _ _ _ _ as) =
+    S.fromList $ map snd as
   consumedInOp _ =
     mempty
 
@@ -300,8 +300,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
-  addOpAliases (Write cs len lam ivs as) =
-    Write cs len (Alias.analyseLambda lam) ivs as
+  addOpAliases (Scatter cs len lam ivs as) =
+    Scatter cs len (Alias.analyseLambda lam) ivs as
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -309,19 +309,20 @@ instance (Attributes lore,
 
 instance Attributes lore => IsOp (SOAC lore) where
   safeOp _ = False
+  cheapOp _ = True
 
-substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
+substNamesInExtType :: M.Map VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Prim _) = tp
 substNamesInExtType subs (Mem se space) =
   Mem (substNamesInSubExp subs se) space
 substNamesInExtType subs (Array btp shp u) =
   let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
   in  Array btp shp' u
-substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
+substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
-  HM.lookupDefault (Var idd) idd subs
-substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
+  M.findWithDefault (Var idd) idd subs
+substNamesInExtDimSize :: M.Map VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 
@@ -362,8 +363,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
-  addOpRanges (Write cs len lam ivs as) =
-    Write cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as
+  addOpRanges (Scatter cs len lam ivs as) =
+    Scatter cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -423,20 +424,20 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                 TC.checkExtLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
   let usages = TC.usageMap occurs
   arr_aliases <- mapM TC.lookupAliases arrexps
-  let aliased_syms = HS.toList $ HS.fromList $ concatMap HS.toList arr_aliases
-  when (any (`HM.member` usages) aliased_syms) $
+  let aliased_syms = S.toList $ S.fromList $ concatMap S.toList arr_aliases
+  when (any (`M.member` usages) aliased_syms) $
      TC.bad $ TC.TypeError "Stream with input array used inside lambda."
   -- check outerdim of Lambda's streamed-in array params are NOT specified,
   -- and that return type inner dimens are all specified but not as other
   -- lambda parameters!
   let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
       lamarr_ptp = map paramType $ drop (acc_len+1) $ extLambdaParams lam
-      names_lamparams = HS.fromList $ map paramName $ extLambdaParams lam
+      names_lamparams = S.fromList $ map paramName $ extLambdaParams lam
   _ <- mapM (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
   _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp
   return ()
     where checkOuterDim chunknm outdim = do
-            let chunk_str = textual chunknm
+            let chunk_str = pretty chunknm
             case outdim of
                     Constant _ ->
                       TC.bad $ TC.TypeError
@@ -455,13 +456,13 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
             " streamed-out arrays MUST be specified!"
           checkInnerDim lamparnms innerdims = do
             rtp_iner_syms <- catMaybes <$> mapM boundDim innerdims
-            case find (`HS.member` lamparnms) rtp_iner_syms of
+            case find (`S.member` lamparnms) rtp_iner_syms of
                 Just name -> TC.bad $ TC.TypeError $
                              "Stream's lambda: " ++ pretty name ++
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs w lam ivs as) = do
+typeCheckSOAC (Scatter cs w lam ivs as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -496,11 +497,11 @@ typeCheckSOAC (Write cs w lam ivs as) = do
 
   -- 1.
   unless (rtsLen == length as)
-    $ TC.bad $ TC.TypeError "Write: Uneven number of index types, value types, and I/O arrays."
+    $ TC.bad $ TC.TypeError "Scatter: Uneven number of index types, value types, and I/O arrays."
 
   -- 2.
   forM_ rtsI $ \rtI -> unless (Prim int32 == rtI)
-                       $ TC.bad $ TC.TypeError "Write: Index return type must be i32."
+                       $ TC.bad $ TC.TypeError "Scatter: Index return type must be i32."
 
   forM_ (zip rtsV as) $ \(rtV, (aw, a)) -> do
     -- All lengths must have type i32.
@@ -515,7 +516,7 @@ typeCheckSOAC (Write cs w lam ivs as) = do
         return ()
       _ ->
         TC.bad $ TC.TypeError
-        "Write values and input arrays do not have the same primitive type"
+        "Scatter values and input arrays do not have the same primitive type"
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
@@ -607,8 +608,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Scanomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
-  opMetrics (Write _cs _len lam _ivs _as) =
-    inside "Write" $ lambdaMetrics lam
+  opMetrics (Scatter _cs _len lam _ivs _as) =
+    inside "Scatter" $ lambdaMetrics lam
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
@@ -656,7 +657,7 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                ppr outer <> comma </>
                ppr inner <> comma </>
                commasep (PP.braces (commasep $ map ppr es) : map ppr as))
-  ppr (Write cs len lam ivs as) =
+  ppr (Scatter cs len lam ivs as) =
     PP.ppCertificates' cs <> ppSOAC "write" len [lam] (Just (map Var ivs)) (map snd as)
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc

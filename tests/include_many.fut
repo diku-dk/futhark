@@ -10,6 +10,6 @@
 import "include_many_includee0"
 import "include_many_includee1"
 
-fun main(s: i32): i32 =
+let main(s: i32): i32 =
   includee0_function(s)
   + includee1_function(s) * includee0_includee_function(s)

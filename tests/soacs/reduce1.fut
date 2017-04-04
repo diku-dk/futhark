@@ -5,4 +5,4 @@
 -- output {
 --   362880
 -- }
-fun main(a: []i32): i32 = reduce (*) 1 a
+let main(a: []i32): i32 = reduce (*) 1 a

@@ -258,23 +258,23 @@
 
 import "futlib/math"
 
-fun horner (x: f64): f64 =
+let horner (x: f64): f64 =
    let (c1,c2,c3,c4,c5) = (0.31938153,-0.356563782,1.781477937,-1.821255978,1.330274429)
    in x * (c1 + x * (c2 + x * (c3 + x * (c4 + x * c5))))
 
-fun fabs (x: f64): f64 = if x < 0.0 then -x else x
+let fabs (x: f64): f64 = if x < 0.0 then -x else x
 
-fun cnd0 (d: f64): f64 =
+let cnd0 (d: f64): f64 =
    let k        = 1.0 / (1.0 + 0.2316419 * fabs(d))
    let p        = horner(k)
    let rsqrt2pi = 0.39894228040143267793994605993438 in
    rsqrt2pi * f64.exp(-0.5*d*d) * p
 
-fun cnd (d: f64): f64 =
+let cnd (d: f64): f64 =
    let c = cnd0(d)
    in if 0.0 < d then 1.0 - c else c
 
-fun go (x: (bool,f64,f64,f64)): f64 =
+let go (x: (bool,f64,f64,f64)): f64 =
    let (call, price, strike, years) = x
    let r       = 0.08  -- riskfree
    let v       = 0.30  -- volatility
@@ -289,10 +289,10 @@ fun go (x: (bool,f64,f64,f64)): f64 =
    else
      x_expRT * (1.0 - cndD2) - price * (1.0 - cndD1)
 
-fun blackscholes (xs: [](bool,f64,f64,f64)): []f64 =
+let blackscholes (xs: [](bool,f64,f64,f64)): []f64 =
    map  go xs
 
-fun main (years: i32): []f64 =
+let main (years: i32): []f64 =
   let days = years*365
   let a = map (+1) (iota(days))
   let a = map f64 a

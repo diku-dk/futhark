@@ -46,6 +46,24 @@ def squotN(x,y):
 def sremN(x,y):
   return np.fmod(x,y)
 
+def sminN(x,y):
+  return min(x,y)
+
+def smaxN(x,y):
+  return max(x,y)
+
+def uminN(x,y):
+  return signed(min(unsigned(x),unsigned(y)))
+
+def umaxN(x,y):
+  return signed(max(unsigned(x),unsigned(y)))
+
+def fminN(x,y):
+  return min(x,y)
+
+def fmaxN(x,y):
+  return max(x,y)
+
 def powN(x,y):
   return x ** y
 
@@ -144,8 +162,14 @@ udiv8 = udiv16 = udiv32 = udiv64 = udivN
 umod8 = umod16 = umod32 = umod64 = umodN
 squot8 = squot16 = squot32 = squot64 = squotN
 srem8 = srem16 = srem32 = srem64 = sremN
+smax8 = smax16 = smax32 = smax64 = smaxN
+smin8 = smin16 = smin32 = smin64 = sminN
+umax8 = umax16 = umax32 = umax64 = umaxN
+umin8 = umin16 = umin32 = umin64 = uminN
 pow8 = pow16 = pow32 = pow64 = powN
 fpow32 = fpow64 = fpowN
+fmax32 = fmax64 = fmaxN
+fmin32 = fmin64 = fminN
 sle8 = sle16 = sle32 = sle64 = sleN
 slt8 = slt16 = slt32 = slt64 = sltN
 ule8 = ule16 = ule32 = ule64 = uleN

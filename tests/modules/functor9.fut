@@ -3,11 +3,11 @@
 -- input { 2 true } output { 2 true }
 
 module f(P: {type t}) = {
-  fun id (x: P.t) = x
+  let id (x: P.t) = x
 }
 
 module m1 = f({type t = i32})
 module m2 = f({type t = bool})
 
-fun main(x: i32, y: bool) =
+let main(x: i32, y: bool) =
   (m1.id x, m2.id y)

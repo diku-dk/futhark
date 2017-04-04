@@ -9,7 +9,7 @@ module Futhark.Representation.AST.RetType
        )
        where
 
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Types
@@ -44,8 +44,8 @@ newtype ExtRetType = ExtRetType [DeclExtType]
 -- types of arguments accepted.
 expectedTypes :: Typed t => [VName] -> [t] -> [SubExp] -> [Type]
 expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
-    where parammap :: HM.HashMap VName SubExp
-          parammap = HM.fromList $ zip shapes args
+    where parammap :: M.Map VName SubExp
+          parammap = M.fromList $ zip shapes args
 
           correctDims t =
             t `setArrayShape`
@@ -53,7 +53,7 @@ expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
 
           correctDim (Constant v) = Constant v
           correctDim (Var v)
-            | Just se <- HM.lookup v parammap = se
+            | Just se <- M.lookup v parammap = se
             | otherwise                       = Var v
 
 instance IsRetType ExtRetType where
@@ -69,8 +69,8 @@ instance IsRetType ExtRetType where
     else Nothing
     where argtypes = map snd args
 
-          parammap :: HM.HashMap VName SubExp
-          parammap = HM.fromList $ zip (map paramName params) (map fst args)
+          parammap :: M.Map VName SubExp
+          parammap = M.fromList $ zip (map paramName params) (map fst args)
 
           correctExtDims t =
             t `setArrayShape`
@@ -81,5 +81,5 @@ instance IsRetType ExtRetType where
 
           correctDim (Constant v) = Constant v
           correctDim (Var v)
-            | Just se <- HM.lookup v parammap = se
+            | Just se <- M.lookup v parammap = se
             | otherwise                       = Var v

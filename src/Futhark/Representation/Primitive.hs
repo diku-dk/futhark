@@ -7,9 +7,9 @@
 -- Futhark language that operates on primitive types.
 module Futhark.Representation.Primitive
        ( -- * Types
-         IntType (..)
-       , FloatType (..)
-       , PrimType (..)
+         IntType (..), allIntTypes
+       , FloatType (..), allFloatTypes
+       , PrimType (..), allPrimTypes
 
          -- * Values
        , IntValue(..)
@@ -21,10 +21,10 @@ module Futhark.Representation.Primitive
        , blankPrimValue
 
          -- * Operations
-       , UnOp (..)
-       , BinOp (..)
-       , ConvOp (..)
-       , CmpOp (..)
+       , UnOp (..), allUnOps
+       , BinOp (..), allBinOps
+       , ConvOp (..), allConvOps
+       , CmpOp (..), allCmpOps
 
          -- ** Unary Operations
        , doUnOp
@@ -34,6 +34,8 @@ module Futhark.Representation.Primitive
 
          -- ** Binary Operations
        , doBinOp
+       , doAdd, doMul, doSDiv, doSMod
+       , doPow
 
          -- ** Conversion Operations
        , doConvOp
@@ -41,6 +43,7 @@ module Futhark.Representation.Primitive
        , doFPConv
        , doFPToUI, doFPToSI
        , doUIToFP, doSIToFP
+       , intToInt64, intToWord64
 
          -- * Comparison Operations
        , doCmpOp
@@ -53,6 +56,7 @@ module Futhark.Representation.Primitive
        , convTypes
        , binOpType
        , unOpType
+       , cmpOpType
 
          -- * Utility
        , zeroIsh
@@ -76,9 +80,9 @@ import           Prelude
 
 import           Futhark.Util.Pretty
 
--- | An integer type.  Note that signedness is not a property of the
--- type, but a property of the operations performed on values of these
--- types.
+-- | An integer type, ordered by size.  Note that signedness is not a
+-- property of the type, but a property of the operations performed on
+-- values of these types.
 data IntType = Int8
              | Int16
              | Int32
@@ -94,6 +98,10 @@ instance Pretty IntType where
   ppr Int32 = text "i32"
   ppr Int64 = text "i64"
 
+-- | A list of all integer types.
+allIntTypes :: [IntType]
+allIntTypes = [minBound..maxBound]
+
 -- | A floating point type.
 data FloatType = Float32
                | Float64
@@ -105,6 +113,10 @@ instance Hashable FloatType where
 instance Pretty FloatType where
   ppr Float32 = text "f32"
   ppr Float64 = text "f64"
+
+-- | A list of all floating-point types.
+allFloatTypes :: [FloatType]
+allFloatTypes = [minBound..maxBound]
 
 -- | Low-level primitive types.
 data PrimType = IntType IntType
@@ -144,6 +156,12 @@ instance Pretty PrimType where
   ppr (FloatType t) = ppr t
   ppr Bool          = text "bool"
   ppr Cert          = text "cert"
+
+-- | A list of all primitive types.
+allPrimTypes :: [PrimType]
+allPrimTypes = map IntType allIntTypes ++
+               map FloatType allFloatTypes ++
+               [Bool, Cert]
 
 -- | An integer value.
 data IntValue = Int8Value !Int8
@@ -276,6 +294,19 @@ data BinOp = Add IntType -- ^ Integer addition.
              -- ^ Signed integer division.  Rounds towards zero.
              -- This corresponds to the @srem@ instruction in LLVM.
 
+           | SMin IntType
+             -- ^ Returns the smallest of two signed integers.
+           | UMin IntType
+             -- ^ Returns the smallest of two unsigned integers.
+           | FMin FloatType
+             -- ^ Returns the smallest of two floating-point numbers.
+           | SMax IntType
+             -- ^ Returns the greatest of two signed integers.
+           | UMax IntType
+             -- ^ Returns the greatest of two unsigned integers.
+           | FMax FloatType
+             -- ^ Returns the greatest of two floating-point numbers.
+
            | Shl IntType -- ^ Left-shift.
            | LShr IntType -- ^ Logical right-shift, zero-extended.
            | AShr IntType -- ^ Arithmetic right-shift, sign-extended.
@@ -332,6 +363,69 @@ data ConvOp = ZExt IntType IntType
               -- ^ Convert a signed integer to a floating-point value.
              deriving (Eq, Ord, Show)
 
+-- | A list of all unary operators for all types.
+allUnOps :: [UnOp]
+allUnOps = Not :
+           map Complement [minBound..maxBound] ++
+           map Abs [minBound..maxBound] ++
+           map FAbs [minBound..maxBound] ++
+           map SSignum [minBound..maxBound] ++
+           map USignum [minBound..maxBound]
+
+-- | A list of all binary operators for all types.
+allBinOps :: [BinOp]
+allBinOps = concat [ map Add allIntTypes
+                   , map FAdd allFloatTypes
+                   , map Sub allIntTypes
+                   , map FSub allFloatTypes
+                   , map Mul allIntTypes
+                   , map FMul allFloatTypes
+                   , map UDiv allIntTypes
+                   , map SDiv allIntTypes
+                   , map FDiv allFloatTypes
+                   , map UMod allIntTypes
+                   , map SMod allIntTypes
+                   , map SQuot allIntTypes
+                   , map SRem allIntTypes
+                   , map SMin allIntTypes
+                   , map UMin allIntTypes
+                   , map FMin allFloatTypes
+                   , map SMax allIntTypes
+                   , map UMax allIntTypes
+                   , map FMax allFloatTypes
+                   , map Shl allIntTypes
+                   , map LShr allIntTypes
+                   , map AShr allIntTypes
+                   , map And allIntTypes
+                   , map Or allIntTypes
+                   , map Xor allIntTypes
+                   , map Pow allIntTypes
+                   , map FPow allFloatTypes
+                   , [LogAnd, LogOr]
+                   ]
+
+-- | A list of all comparison operators for all types.
+allCmpOps :: [CmpOp]
+allCmpOps = concat [ map CmpEq allPrimTypes
+                   , map CmpUlt allIntTypes
+                   , map CmpUle allIntTypes
+                   , map CmpSlt allIntTypes
+                   , map CmpSle allIntTypes
+                   , map FCmpLt allFloatTypes
+                   , map FCmpLe allFloatTypes
+                   ]
+
+-- | A list of all conversion operators for all types.
+allConvOps :: [ConvOp]
+allConvOps = concat [ ZExt <$> allIntTypes <*> allIntTypes
+                    , SExt <$> allIntTypes <*> allIntTypes
+                    , FPConv <$> allFloatTypes <*> allFloatTypes
+                    , FPToUI <$> allFloatTypes <*> allIntTypes
+                    , FPToSI <$> allFloatTypes <*> allIntTypes
+                    , UIToFP <$> allIntTypes <*> allFloatTypes
+                    , SIToFP <$> allIntTypes <*> allFloatTypes
+                    ]
+
 doUnOp :: UnOp -> PrimValue -> Maybe PrimValue
 doUnOp Not (BoolValue b)         = Just $ BoolValue $ not b
 doUnOp Complement{} (IntValue v) = Just $ IntValue $ doComplement v
@@ -375,6 +469,12 @@ doBinOp UMod{}   = doRiskyIntBinOp doUMod
 doBinOp SMod{}   = doRiskyIntBinOp doSMod
 doBinOp SQuot{}  = doRiskyIntBinOp doSQuot
 doBinOp SRem{}   = doRiskyIntBinOp doSRem
+doBinOp SMin{}   = doIntBinOp doSMin
+doBinOp UMin{}   = doIntBinOp doUMin
+doBinOp FMin{}   = doFloatBinOp min min
+doBinOp SMax{}   = doIntBinOp doSMax
+doBinOp UMax{}   = doIntBinOp doUMax
+doBinOp FMax{}   = doFloatBinOp max max
 doBinOp Shl{}    = doIntBinOp doShl
 doBinOp LShr{}   = doIntBinOp doLShr
 doBinOp AShr{}   = doIntBinOp doAShr
@@ -467,6 +567,22 @@ doSRem :: IntValue -> IntValue -> Maybe IntValue
 doSRem v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `rem` intToInt64 v2
+
+-- | Minimum of two signed integers.
+doSMin :: IntValue -> IntValue -> IntValue
+doSMin v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `min` intToInt64 v2
+
+-- | Minimum of two unsigned integers.
+doUMin :: IntValue -> IntValue -> IntValue
+doUMin v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `min` intToWord64 v2
+
+-- | Maximum of two signed integers.
+doSMax :: IntValue -> IntValue -> IntValue
+doSMax v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `max` intToInt64 v2
+
+-- | Maximum of two unsigned integers.
+doUMax :: IntValue -> IntValue -> IntValue
+doUMax v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `max` intToWord64 v2
 
 -- | Left-shift.
 doShl :: IntValue -> IntValue -> IntValue
@@ -589,12 +705,14 @@ doFCmpLt = (<)
 doFCmpLe :: FloatValue -> FloatValue -> Bool
 doFCmpLe = (<=)
 
+-- | Translate an 'IntValue' to 'Word64'.  This is guaranteed to fit.
 intToWord64 :: IntValue -> Word64
 intToWord64 (Int8Value v)  = fromIntegral (fromIntegral v :: Word8)
 intToWord64 (Int16Value v) = fromIntegral (fromIntegral v :: Word16)
 intToWord64 (Int32Value v) = fromIntegral (fromIntegral v :: Word32)
 intToWord64 (Int64Value v) = fromIntegral (fromIntegral v :: Word64)
 
+-- | Translate an 'IntValue' to 'Int64'.  This is guaranteed to fit.
 intToInt64 :: IntValue -> Int64
 intToInt64 (Int8Value v)  = fromIntegral v
 intToInt64 (Int16Value v) = fromIntegral v
@@ -630,6 +748,12 @@ binOpType (SQuot t) = IntType t
 binOpType (SRem t)  = IntType t
 binOpType (UDiv t)  = IntType t
 binOpType (UMod t)  = IntType t
+binOpType (SMin t)  = IntType t
+binOpType (UMin t)  = IntType t
+binOpType (FMin t)  = FloatType t
+binOpType (SMax t)  = IntType t
+binOpType (UMax t)  = IntType t
+binOpType (FMax t)  = FloatType t
 binOpType (Shl t)   = IntType t
 binOpType (LShr t)  = IntType t
 binOpType (AShr t)  = IntType t
@@ -644,6 +768,17 @@ binOpType (FAdd t)  = FloatType t
 binOpType (FSub t)  = FloatType t
 binOpType (FMul t)  = FloatType t
 binOpType (FDiv t)  = FloatType t
+
+-- | The operand types of a comparison operator.
+cmpOpType :: CmpOp -> PrimType
+cmpOpType (CmpEq t) = t
+cmpOpType (CmpSlt t) = IntType t
+cmpOpType (CmpSle t) = IntType t
+cmpOpType (CmpUlt t) = IntType t
+cmpOpType (CmpUle t) = IntType t
+cmpOpType (FCmpLt t) = FloatType t
+cmpOpType (FCmpLe t) = FloatType t
+
 
 -- | The operand and result type of a unary operator.
 unOpType :: UnOp -> PrimType
@@ -724,6 +859,12 @@ commutativeBinOp Or{} = True
 commutativeBinOp Xor{} = True
 commutativeBinOp LogOr{} = True
 commutativeBinOp LogAnd{} = True
+commutativeBinOp SMax{} = True
+commutativeBinOp SMin{} = True
+commutativeBinOp UMax{} = True
+commutativeBinOp UMin{} = True
+commutativeBinOp FMax{} = True
+commutativeBinOp FMin{} = True
 commutativeBinOp _ = False
 
 -- Prettyprinting instances
@@ -742,6 +883,12 @@ instance Pretty BinOp where
   ppr (SQuot t) = taggedI "squot" t
   ppr (SRem t)  = taggedI "srem" t
   ppr (FDiv t)  = taggedF "fdiv" t
+  ppr (SMin t)  = taggedI "smin" t
+  ppr (UMin t)  = taggedI "umin" t
+  ppr (FMin t)  = taggedF "fmin" t
+  ppr (SMax t)  = taggedI "smax" t
+  ppr (UMax t)  = taggedI "umax" t
+  ppr (FMax t)  = taggedF "fmax" t
   ppr (Shl t)   = taggedI "shl" t
   ppr (LShr t)  = taggedI "lshr" t
   ppr (AShr t)  = taggedI "ashr" t

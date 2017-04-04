@@ -7,5 +7,5 @@
 
 import "futlib/math"
 
-fun main(x: f64, y: f64): (bool, bool) =
+let main(x: f64, y: f64): (bool, bool) =
   (f64.isinf(x / y), f64.isnan(f64.sqrt(x)))

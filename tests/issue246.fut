@@ -6,7 +6,7 @@
 
 import "futlib/math"
 
-fun take_arrint (l: i32) (x: [][]i32): [][]i32 =
+let take_arrint (l: i32) (x: [][]i32): [][]i32 =
   if (0 <= l)
   then if (l <= (shape (x))[0])
   then let (v1, _) = split (l) (x) in
@@ -16,7 +16,7 @@ fun take_arrint (l: i32) (x: [][]i32): [][]i32 =
   then let (_, v2) = split ((l + (shape (x))[0])) (x) in
   v2
   else concat (replicate ((i32.abs (l) - (shape (x))[0])) (replicate ((shape (x))[1]) (0))) (x)
-fun reshape_int (l: i32) (x: []i32): []i32 =
+let reshape_int (l: i32) (x: []i32): []i32 =
   let roundUp = ((l + ((shape (x))[0] - 1)) / (shape (x))[0]) in
   let extend = reshape ((((shape (x))[0] * roundUp))) (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in

@@ -11,8 +11,8 @@ module Futhark.Optimise.MemBlkMerging.DataStructs
 
 import Prelude
 import Data.Maybe
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set      as S
 
 --import Debug.Trace
 
@@ -25,7 +25,7 @@ data CoalescedKind = Ccopy -- let x    = copy b^{lu}
                    | Trans -- transitive, i.e., other variables aliased with b.
 data ArrayMemBound = MemBlock PrimType Shape VName ExpMem.IxFun
 
-type FreeVarSubsts = HM.HashMap VName (ExpMem.PrimExp VName)
+type FreeVarSubsts = M.Map VName (ExpMem.PrimExp VName)
 
 -- | Coalesced Access Entry
 data Coalesced = Coalesced CoalescedKind -- the kind of coalescing
@@ -39,9 +39,9 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             , alsmem :: Names
                             -- ^ aliased destination memory blocks can appear
                             --   due to repeated (optimistical) coalescing.
-                            , vartab :: HM.HashMap VName Coalesced
+                            , vartab :: M.Map VName Coalesced
                             -- ^ per variable-name coalesced entries
-                            , optdeps:: HM.HashMap VName VName
+                            , optdeps:: M.Map VName VName
                             -- ^ keys are variable names, values are memblock names;
                             --   it records optimistically added coalesced nodes,
                             --   e.g., in the case of if-then-else expressions
@@ -64,19 +64,19 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             --   you need a copying.
                             }
 
-type AllocTab = Names--HM.HashMap VName SubExp
+type AllocTab = Names--M.Map VName SubExp
 -- ^ the allocatted memory blocks
-type V2MemTab = HM.HashMap VName ArrayMemBound
+type V2MemTab = M.Map VName ArrayMemBound
 -- ^ maps array-variable names to their memory block info (including index function)
-type AliasTab = HM.HashMap VName Names
+type AliasTab = M.Map VName Names
 -- ^ maps a variable or memory block to its aliases
-type LUTabFun = HM.HashMap VName Names
+type LUTabFun = M.Map VName Names
 -- ^ maps a name indentifying a stmt to the last uses in that stmt
-type LUTabPrg = HM.HashMap Name  LUTabFun
+type LUTabPrg = M.Map Name  LUTabFun
 -- ^ maps function names to last-use tables
-type ScalarTab= HM.HashMap VName (ExpMem.PrimExp VName)
+type ScalarTab= M.Map VName (ExpMem.PrimExp VName)
 -- ^ maps a variable name to its PrimExp scalar expression
-type CoalsTab = HM.HashMap VName CoalsEntry
+type CoalsTab = M.Map VName CoalsEntry
 -- ^ maps a memory-block name to a Map in which each variable
 --   associated to that memory block is bound to its @Coalesced@ info.
 
@@ -84,9 +84,9 @@ unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
 unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2  alsmem2 vartab2 optdeps2) =
   if   dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
   then etry1
-  else etry1 { alsmem = alsmem  etry1 `HS.union` alsmem2
-             , optdeps= optdeps etry1 `HM.union` optdeps2
-             , vartab = vartab  etry1 `HM.union` vartab2 }
+  else etry1 { alsmem = alsmem  etry1 `S.union` alsmem2
+             , optdeps= optdeps etry1 `M.union` optdeps2
+             , vartab = vartab  etry1 `M.union` vartab2 }
 
 getNamesFromSubExps :: [SubExp] -> [VName]
 getNamesFromSubExps =
@@ -96,9 +96,9 @@ getNamesFromSubExps =
 
 aliasTransClos :: AliasTab -> Names -> Names
 aliasTransClos alstab args =
-  HS.foldl' (\acc x -> case HM.lookup x alstab of
+  S.foldl' (\acc x -> case M.lookup x alstab of
                         Nothing -> acc
-                        Just al -> acc `HS.union` al
+                        Just al -> acc `S.union` al
             ) args args
 
 updateAliasing :: AliasTab -> Pattern (Aliases ExpMem.ExplicitMemory) -> AliasTab
@@ -112,14 +112,14 @@ updateAliasing stab pat =
                 al_nms0 = unNames al
                 al_nms = case patElemBindage patel of
                            BindVar -> al_nms0
-                           BindInPlace _ nm _ -> HS.insert nm al_nms0
-                al_trns= HS.foldl' (\acc x -> case HM.lookup x stabb of
+                           BindInPlace _ nm _ -> S.insert nm al_nms0
+                al_trns= S.foldl' (\acc x -> case M.lookup x stabb of
                                                 Nothing -> acc
-                                                Just aal -> acc `HS.union` aal
+                                                Just aal -> acc `S.union` aal
                                    ) al_nms al_nms
-                -- al_trns' = trace ("ALIAS Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (HS.toList al_trns)) al_trns
+                -- al_trns' = trace ("ALIAS Pattern: "++(pretty (patElemName patel))++" aliases: "++pretty (S.toList al_trns)) al_trns
             in  if null al_trns then stabb
-                else HM.insert (patElemName patel) al_trns stabb
+                else M.insert (patElemName patel) al_trns stabb
         ) stab $ patternContextElements pat ++ patternValueElements pat
 
 
@@ -143,24 +143,24 @@ getArrMemAssocFParam =
            )
 
 
-getUniqueMemFParam :: [FParam (Aliases ExpMem.ExplicitMemory)] -> HM.HashMap VName (SubExp,Space)
+getUniqueMemFParam :: [FParam (Aliases ExpMem.ExplicitMemory)] -> M.Map VName (SubExp,Space)
 getUniqueMemFParam params =
   let mems = mapMaybe (\el -> case paramAttr el of
                                 ExpMem.MemMem sz sp -> Just (paramName el, (sz,sp))
                                 _ -> Nothing
                       ) params
-      upms = HS.fromList $
+      upms = S.fromList $
              mapMaybe (\el -> case paramAttr el of
                                 ExpMem.ArrayMem _ _ Unique mem_nm _ ->
                                     Just mem_nm
                                 _ -> Nothing
                       ) params
-  in HM.fromList $ filter (\ (k,_) -> HS.member k upms) mems
+  in M.fromList $ filter (\ (k,_) -> S.member k upms) mems
 
 getScopeMemInfo :: VName -> Scope (Aliases ExpMem.ExplicitMemory)
                 -> Maybe ArrayMemBound
 getScopeMemInfo r scope_env0 =
-  case HM.lookup r scope_env0 of
+  case M.lookup r scope_env0 of
     Just (LetInfo  (_,ExpMem.ArrayMem tp shp _ m idx)) -> Just (MemBlock tp shp m idx)
     Just (FParamInfo (ExpMem.ArrayMem tp shp _ m idx)) -> Just (MemBlock tp shp m idx)
     Just (LParamInfo (ExpMem.ArrayMem tp shp _ m idx)) -> Just (MemBlock tp shp m idx)
@@ -212,6 +212,6 @@ createsAliasedArrOK _ = Nothing
 prettyCoalTab :: CoalsTab -> String
 prettyCoalTab tab =
   let list_tups = map (\(m_b, CoalsEntry md _ als vtab deps) ->
-                          (m_b, md, HS.toList als, HM.keys vtab, HM.toList deps)
-                      ) $ HM.toList tab
+                          (m_b, md, S.toList als, M.keys vtab, M.toList deps)
+                      ) $ M.toList tab
   in  pretty list_tups

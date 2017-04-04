@@ -27,5 +27,5 @@ module M1
 
 type baz = M1.baz -- is defined at l. 13
 
-fun main(a: i32, b: float): baz = (1,2,3)
+let main(a: i32, b: float): baz = (1,2,3)
 

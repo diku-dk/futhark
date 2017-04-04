@@ -86,7 +86,7 @@ import Data.Hashable
 import Data.List
 import Data.Maybe
 
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Foldable (traverse_)
 
 import Prelude
@@ -124,7 +124,7 @@ data HoistBlockers m = HoistBlockers
                        }
 
 noExtraHoistBlockers :: HoistBlockers m
-noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (const HS.empty) (const False)
+noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (const S.empty) (const False)
 
 data Env m = Env { envRules         :: RuleBook m
                  , envHoistBlockers :: HoistBlockers m
@@ -298,7 +298,7 @@ boundFree :: Names -> SimpleM lore ()
 boundFree fs = tellNeed $ Need [] $ UT.usages fs
 
 usedName :: VName -> SimpleM lore ()
-usedName = boundFree . HS.singleton
+usedName = boundFree . S.singleton
 
 -- | Register the fact that the given name is consumed.
 consumedName :: VName -> SimpleM lore ()
@@ -431,12 +431,12 @@ hoistStms rules block vtable uses needs = do
 blockUnhoistedDeps :: Attributes lore =>
                       [Either (Stm lore) (Stm lore)]
                    -> [Either (Stm lore) (Stm lore)]
-blockUnhoistedDeps = snd . mapAccumL block HS.empty
+blockUnhoistedDeps = snd . mapAccumL block S.empty
   where block blocked (Left need) =
-          (blocked <> HS.fromList (provides need), Left need)
+          (blocked <> S.fromList (provides need), Left need)
         block blocked (Right need)
           | blocked `intersects` requires need =
-            (blocked <> HS.fromList (provides need), Left need)
+            (blocked <> S.fromList (provides need), Left need)
           | otherwise =
             (blocked, Right need)
 
@@ -444,10 +444,7 @@ provides :: Stm lore -> [VName]
 provides = patternNames . bindingPattern
 
 requires :: Attributes lore => Stm lore -> Names
-requires bnd =
-  (mconcat (map freeIn $ patternElements $ bindingPattern bnd)
-  `HS.difference` HS.fromList (provides bnd)) <>
-  freeInExp (bindingExp bnd)
+requires = freeInStm
 
 expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
                UT.UsageTable -> Stm lore -> UT.UsageTable
@@ -458,10 +455,10 @@ expandUsage utable bnd = utable <> usageInStm bnd <> usageThroughAliases
           zip (patternNames pat) (patternAliases pat)
         usageThroughBindeeAliases (name, aliases) = do
           uses <- UT.lookup name utable
-          return $ mconcat $ map (`UT.usage` uses) $ HS.toList aliases
+          return $ mconcat $ map (`UT.usage` uses) $ S.toList aliases
 
-intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
-intersects a b = not $ HS.null $ a `HS.intersection` b
+intersects :: (Ord a, Hashable a) => S.Set a -> S.Set a -> Bool
+intersects a b = not $ S.null $ a `S.intersection` b
 
 type BlockPred lore = UT.UsageTable -> Stm lore -> Bool
 
@@ -510,7 +507,7 @@ isInPlaceBound :: BlockPred m
 isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
                    patternElements . bindingPattern
 
-isNotCheap :: BlockPred m
+isNotCheap :: Attributes lore => BlockPred lore
 isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
         cheap (BasicOp BinOp{})   = True
@@ -518,9 +515,10 @@ isNotCheap _ = not . cheapBnd
         cheap (BasicOp UnOp{})    = True
         cheap (BasicOp CmpOp{})   = True
         cheap (BasicOp ConvOp{})  = True
-        cheap DoLoop{}           = False
-        cheap _                  = True -- Used to be False, but
-                                        -- let's try it out.
+        cheap DoLoop{}            = False
+        cheap (Op op)             = cheapOp op
+        cheap _                   = True -- Used to be False, but
+                                         -- let's try it out.
 hoistCommon :: SimplifiableLore lore =>
                SimpleM lore Result
             -> (ST.SymbolTable (Wise lore)
@@ -560,22 +558,21 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
                      , usageTable = f1 <> f2
                      })
   where filterBnds is_alloc_fn getArrSz_fn all_bnds =
-          let sz_nms     = HS.fromList $
-                            concatMap (HS.toList . getArrSz_fn) all_bnds
+          let sz_nms     = mconcat $ map getArrSz_fn all_bnds
               sz_needs   = transClosSizes all_bnds sz_nms []
               alloc_bnds = filter is_alloc_fn all_bnds
-              sel_nms    = HS.fromList $
-                            concatMap (patternNames . bindingPattern)
-                                      (sz_needs ++ alloc_bnds)
+              sel_nms    = S.fromList $
+                           concatMap (patternNames . bindingPattern)
+                                     (sz_needs ++ alloc_bnds)
           in  sel_nms
         transClosSizes all_bnds scal_nms hoist_bnds =
           let new_bnds = filter (hasPatName scal_nms) all_bnds
-              new_nms  = HS.fromList $ concatMap (HS.toList . freeInExp . bindingExp) new_bnds
+              new_nms  = mconcat $ map (freeInExp . bindingExp) new_bnds
           in  if null new_bnds
               then hoist_bnds
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
-        hasPatName nms bnd = not $ HS.null $ HS.intersection nms $
-                               HS.fromList $ patternNames $ bindingPattern bnd
+        hasPatName nms bnd = intersects nms $ S.fromList $
+                             patternNames $ bindingPattern bnd
         isNotHoistableBnd :: Names -> BlockPred m
         isNotHoistableBnd nms _ bnd = not $ hasPatName nms bnd
 
@@ -652,7 +649,7 @@ simplifyExp (DoLoop ctx val form loopbody) = do
     ForLoop loopvar it boundexp -> do
       boundexp' <- simplify boundexp
       return (ForLoop loopvar it boundexp',
-              loopvar `HS.insert` fparamnames,
+              loopvar `S.insert` fparamnames,
               bindLoopVar loopvar it boundexp')
     WhileLoop cond -> do
       cond' <- simplify cond
@@ -664,14 +661,14 @@ simplifyExp (DoLoop ctx val form loopbody) = do
     enterLoop $
     bindFParams (ctxparams'++valparams') $ wrapbody $
     blockIf
-    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $ do
+    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker `orIf` isNotSafe) $ do
       res <- simplifyBody diets loopbody
       isDoLoopResult res
       return res
   loopbody' <- mkBodyM loopbnds' loopres'
   consumeResult $ zip diets $ ctxinit' ++ valinit'
   return $ DoLoop ctx' val' form' loopbody'
-  where fparamnames = HS.fromList (map (paramName . fst) $ ctx++val)
+  where fparamnames = S.fromList (map (paramName . fst) $ ctx++val)
 
 
 simplifyExp e = simplifyExpBase e
@@ -820,7 +817,7 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) nes arrs = do
   params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
-      paramnames = HS.fromList $ boundByLambda lam
+      paramnames = S.fromList $ boundByLambda lam
   (body_res', body_bnds') <-
     enterLoop $
     bindLParams nonarrayparams $
@@ -831,7 +828,7 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) nes arrs = do
   rettype' <- mapM simplify rettype
   let consumed_in_body = consumedInBody body'
       paramWasConsumed p (Just (Var arr))
-        | p `HS.member` consumed_in_body = consumedName arr
+        | p `S.member` consumed_in_body = consumedName arr
       paramWasConsumed _ _ =
         return ()
   zipWithM_ paramWasConsumed (map paramName arrayparams) $ map (fmap Var) arrs
@@ -850,7 +847,7 @@ simplifyExtLambda :: SimplifiableLore lore =>
                   -> SimpleM lore (ExtLambda (Wise lore))
 simplifyExtLambda lam@(ExtLambda params body rettype) nes parbnds = do
   params' <- mapM (simplifyParam simplify) params
-  let paramnames = HS.fromList $ boundByExtLambda lam
+  let paramnames = S.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   (body_res', body_bnds') <-
@@ -862,7 +859,7 @@ simplifyExtLambda lam@(ExtLambda params body rettype) nes parbnds = do
   body' <- mkBodyM body_bnds' body_res'
   let consumed_in_body = consumedInBody body'
       paramWasConsumed p (Var arr)
-        | p `HS.member` consumed_in_body = consumedName arr
+        | p `S.member` consumed_in_body = consumedName arr
       paramWasConsumed _ _ =
         return ()
       accparams = take (length nes) $ drop 1 params

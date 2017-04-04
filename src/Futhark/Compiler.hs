@@ -9,6 +9,7 @@ module Futhark.Compiler
        , FutharkConfig (..)
        , newFutharkConfig
        , dumpError
+       , reportingIOErrors
        )
 where
 
@@ -17,7 +18,7 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Except
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.List
 import System.FilePath
@@ -53,13 +54,43 @@ newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkWarn = True
                                  }
 
-dumpError :: FutharkConfig -> CompileError -> IO ()
-dumpError config err = do
-  T.hPutStrLn stderr $ errorDesc err
-  case (errorData err, futharkVerbose config) of
-    (s, Just outfile) ->
-      maybe (T.hPutStr stderr) T.writeFile outfile $ s <> "\n"
-    _ -> return ()
+dumpError :: FutharkConfig -> CompilerError -> IO ()
+dumpError config err =
+  case err of
+    ExternalError s -> do
+      T.hPutStrLn stderr s
+      T.hPutStrLn stderr "If you find this error message confusing, uninformative, or wrong, please open an issue at https://github.com/HIPERFIT/futhark/issues."
+    InternalError s info CompilerBug -> do
+      T.hPutStrLn stderr "Internal compiler error."
+      T.hPutStrLn stderr "Please report this at https://github.com/HIPERFIT/futhark/issues."
+      report s info
+    InternalError s info CompilerLimitation -> do
+      T.hPutStrLn stderr "Known compiler limitation encountered.  Sorry."
+      T.hPutStrLn stderr "Revise your program or try a different Futhark compiler."
+      report s info
+  where report s info = do
+          T.hPutStrLn stderr s
+          case futharkVerbose config of
+            Just outfile ->
+              maybe (T.hPutStr stderr) T.writeFile outfile $ info <> "\n"
+            _ -> return ()
+
+-- | Catch all IO exceptions and print a better error message if they
+-- happen.  Use this at the top-level of all Futhark compiler
+-- frontends.
+reportingIOErrors :: IO () -> IO ()
+reportingIOErrors = flip catches [Handler onExit, Handler onError]
+  where onExit :: ExitCode -> IO ()
+        onExit = throwIO
+        onError :: SomeException -> IO ()
+        onError e
+          | Just UserInterrupt <- asyncExceptionFromException e =
+              return () -- This corresponds to CTRL-C, which is not an error.
+          | otherwise = do
+              T.hPutStrLn stderr "Internal compiler error (unhandled IO exception)."
+              T.hPutStrLn stderr "Please report this at https://github.com/HIPERFIT/futhark/issues."
+              T.hPutStrLn stderr $ T.pack $ show e
+              exitWith $ ExitFailure 1
 
 runCompilerOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS lore
@@ -93,7 +124,7 @@ runPipelineOnProgram config pipeline file = do
   res <- internaliseProg tagged_ext_prog
   case res of
     Left err ->
-      compileErrorS "During internalisation:" err
+      internalErrorS ("During internalisation: " <> pretty err) tagged_ext_prog
     Right int_prog -> do
       typeCheckInternalProgram int_prog
       runPasses pipeline pipeline_config int_prog
@@ -113,19 +144,19 @@ data ReaderState = ReaderState { alreadyImported :: E.Imports
 
 newtype SearchPath = SearchPath FilePath -- Make this a list, eventually.
 
-readImport :: (MonadError CompileError m, MonadIO m) =>
+readImport :: (MonadError CompilerError m, MonadIO m) =>
               SearchPath -> [FilePath] -> String -> CompilerM m ()
 readImport search_path steps name
   | name `elem` steps =
-      throwError $ CompileError
-      (T.pack $ "Import cycle: " ++ intercalate " -> " (reverse $ name:steps)) mempty
+      throwError $ ExternalError $ T.pack $
+      "Import cycle: " ++ intercalate " -> " (reverse $ name:steps)
   | otherwise = do
-      already_done <- gets $ HM.member name . alreadyImported
+      already_done <- gets $ M.member name . alreadyImported
 
       unless already_done $ do
         (file_contents, file_name) <- readImportFile search_path name
         prog <- case parseFuthark file_name file_contents of
-          Left err -> throwError $ CompileError (T.pack $ show err) mempty
+          Left err -> externalErrorS $ show err
           Right prog -> return prog
 
         mapM_ (readImport search_path (name:steps)) $ E.progImports prog
@@ -137,16 +168,16 @@ readImport search_path steps name
 
         case E.checkProg imports src prog of
           Left err ->
-            throwError $ CompileError (T.pack $ show err) mempty
+            externalError $ T.pack $ show err
           Right ((progmod, prog'), ws, src') ->
             modify $ \s ->
-              s { alreadyImported = HM.insert name progmod imports
+              s { alreadyImported = M.insert name progmod imports
                 , nameSource      = src'
                 , warnings        = warnings s <> ws
                 , resultProgs     = prog' : resultProgs s
                 }
 
-readImportFile :: (MonadError CompileError m, MonadIO m) =>
+readImportFile :: (MonadError CompilerError m, MonadIO m) =>
                   SearchPath -> String -> m (T.Text, FilePath)
 readImportFile (SearchPath dir) name = do
   -- First we try to find a file of the given name in the search path,
@@ -155,8 +186,8 @@ readImportFile (SearchPath dir) name = do
   case (r, lookup name_with_ext futlib) of
     (Right s, _)            -> return (s, dir </> name_with_ext)
     (Left Nothing, Just t)  -> return (t, "[builtin]" </> name_with_ext)
-    (Left Nothing, Nothing) -> throwError $ CompileError not_found mempty
-    (Left (Just e), _)      -> throwError e
+    (Left Nothing, Nothing) -> externalErrorS not_found
+    (Left (Just e), _)      -> externalErrorS e
   where name_with_ext = includeToPath name <.> "fut"
 
         couldNotRead e
@@ -164,11 +195,10 @@ readImportFile (SearchPath dir) name = do
               return $ Left Nothing
           | otherwise             =
               return $ Left $ Just $
-              CompileError (T.pack $ "Could not import " ++ show name ++ ": "
-                            ++ show e) mempty
+              "Could not import " ++ show name ++ ": " ++ show e
 
         not_found =
-          T.pack $ "Could not find import '" ++ name ++ "' in path '" ++ dir ++ "'."
+          "Could not find import '" ++ name ++ "' in path '" ++ dir ++ "'."
 
         -- | Some bad operating systems do not use forward slash as directory
         -- separator - this is where we convert Futhark includes (which always
@@ -177,15 +207,14 @@ readImportFile (SearchPath dir) name = do
         includeToPath = joinPath . Posix.splitDirectories
 
 -- | Read and type-check a Futhark program, including all imports.
-readProgram :: (MonadError CompileError m, MonadIO m) =>
+readProgram :: (MonadError CompilerError m, MonadIO m) =>
                FilePath -> m (E.Prog,
                               E.Warnings,
                               E.Imports,
                               VNameSource)
 readProgram fp = do
   unless (ext == ".fut") $
-    throwError $ CompileError
-    ("File does not have a .fut extension: " <> T.pack fp) mempty
+    externalErrorS $ "File does not have a .fut extension: " <> fp
   s' <- execStateT (readImport (SearchPath dir) [] file_root) s
   return (E.Prog $ concatMap E.progDecs $ reverse $ resultProgs s',
           warnings s',
@@ -197,12 +226,12 @@ readProgram fp = do
 
 newNameSourceForCompiler :: VNameSource
 newNameSourceForCompiler = newNameSource $ succ $ maximum $ map baseTag $
-                           HM.keys E.intrinsics
+                           M.keys E.intrinsics
 
 typeCheckInternalProgram :: I.Prog -> FutharkM ()
 typeCheckInternalProgram prog =
   case I.checkProg prog of
-    Left err -> compileError (T.pack $ "After internalisation:\n" ++ show err) prog
+    Left err -> internalErrorS ("After internalisation:\n" ++ show err) (Just prog)
     Right () -> return ()
 
 interpretAction' :: Name -> Action I.SOACS

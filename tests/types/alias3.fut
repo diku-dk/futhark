@@ -4,4 +4,4 @@ type t = i32
 type ts = []t
 type tss = []ts
 
-fun main(xss: tss): tss = xss
+let main(xss: tss): tss = xss

@@ -35,6 +35,6 @@
 --   [0i32, 1i32, 2i32]]]
 -- }
 
-fun main(n: i32, m: i32, l: i32): [][][]i32 =
+let main(n: i32, m: i32, l: i32): [][][]i32 =
   let a = replicate n (replicate m (iota l))
   in rotate@1 (-1) a

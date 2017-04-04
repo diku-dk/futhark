@@ -4,7 +4,7 @@
 -- ==
 -- tags { no_opencl }
 
-fun main(points: [numD]f32,
+let main(points: [numD]f32,
                            numBins: i32,
                            numBins2: i32,
                            threshold: f32): [][numBins2]i32 =

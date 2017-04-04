@@ -23,8 +23,8 @@ import Data.Either
 import Data.List
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set      as S
 
 import Prelude
 
@@ -83,7 +83,7 @@ simplifyKernelOp ops env (Kernel desc cs space ts kbody) = do
   return $ Kernel desc cs' space' ts' $ mkWiseKernelBody () kbody_bnds' kbody_res'
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
-        bound_here = HS.fromList $ HM.keys scope
+        bound_here = S.fromList $ M.keys scope
 
 simplifyKernelOp _ _ NumGroups = return NumGroups
 simplifyKernelOp _ _ GroupSize = return GroupSize
@@ -182,7 +182,7 @@ simplifyGroupStreamLambda :: Engine.SimplifiableLore lore =>
                           -> Engine.SimpleM lore (GroupStreamLambda (Wise lore))
 simplifyGroupStreamLambda lam w max_chunk arrs = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
-      bound_here = HS.fromList $ block_size : block_offset :
+      bound_here = S.fromList $ block_size : block_offset :
                    map paramName (acc_params ++ arr_params)
   (body_res', body_bnds') <-
     Engine.enterLoop $
@@ -259,20 +259,22 @@ fuseStreamIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Lore m ~ Wise InKernel) =>
                  TopDownRule m
 fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
-  | ([(iota_param, iota_start, iota_stride)], params_and_arrs) <-
+  | ([(iota_param, iota_start, iota_stride, iota_t)], params_and_arrs) <-
       partitionEithers $ zipWith (isIota vtable) (groupStreamArrParams lam) arrs = do
 
       let (arr_params', arrs') = unzip params_and_arrs
           chunk_size = groupStreamChunkSize lam
           offset = groupStreamChunkOffset lam
 
-      body' <- insertStmsM $ do
-        offset' <- letSubExp "offset_by_stride" $
-          BasicOp $ BinOp (Mul Int32) (Var offset) iota_stride
+      body' <- insertStmsM $ inScopeOf lam $ do
+        -- Convert index to appropriate type.
+        offset' <- asIntS iota_t $ Var offset
+        offset'' <- letSubExp "offset_by_stride" $
+          BasicOp $ BinOp (Mul iota_t) offset' iota_stride
         start <- letSubExp "iota_start" $
-            BasicOp $ BinOp (Add Int32) offset' iota_start
+            BasicOp $ BinOp (Add iota_t) offset'' iota_start
         letBindNames'_ [paramName iota_param] $
-          BasicOp $ Iota (Var chunk_size) start iota_stride Int32
+          BasicOp $ Iota (Var chunk_size) start iota_stride iota_t
         return $ groupStreamLambdaBody lam
       let lam' = lam { groupStreamArrParams = arr_params',
                        groupStreamLambdaBody = body'
@@ -280,10 +282,10 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
       letBind_ pat $ Op $ GroupStream w max_chunk lam' accs arrs'
 fuseStreamIota _ _ = cannotSimplify
 
-isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp, SubExp) (a, VName)
+isIota :: ST.SymbolTable lore -> a -> VName -> Either (a, SubExp, SubExp, IntType) (a, VName)
 isIota vtable chunk arr
-  | Just (BasicOp (Iota _ x s Int32)) <- ST.lookupExp arr vtable =
-      Left (chunk, x, s)
+  | Just (BasicOp (Iota _ x s it)) <- ST.lookupExp arr vtable =
+      Left (chunk, x, s, it)
   | otherwise =
       Right (chunk, arr)
 
@@ -355,7 +357,7 @@ distributeKernelResults (vtable, used)
         kspace_slice <- map (DimFix . Var . fst) $ spaceDimensions kspace,
         kspace_slice `isPrefixOf` slice,
         remaining_slice <- drop (length kspace_slice) slice,
-        all (isJust . flip ST.lookup vtable) $ HS.toList $
+        all (isJust . flip ST.lookup vtable) $ S.toList $
           freeIn cs <> freeIn arr <> freeIn remaining_slice,
         Just (kpe, kpes'', kts'', kres'') <- isResult kpes' kts' kres' pe = do
           let outer_slice = map (\(_, d) -> DimSlice
@@ -371,7 +373,7 @@ distributeKernelResults (vtable, used)
                     letBind_ (Pattern [] [kpe]) $ BasicOp $ Copy precopy
             else index kpe
           return (kpes'', kts'', kres'',
-                  if patElemName pe `HS.member` free_in_kstms
+                  if patElemName pe `S.member` free_in_kstms
                   then bnd : kstms_rev
                   else kstms_rev)
 

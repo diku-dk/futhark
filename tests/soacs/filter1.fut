@@ -11,4 +11,4 @@
 -- output {
 --   empty(i32)
 -- }
-fun main(a: []i32): []i32 = filter (0<) a
+let main(a: []i32): []i32 = filter (0<) a

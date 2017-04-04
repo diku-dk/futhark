@@ -14,7 +14,7 @@
 --
 -- structure distributed { Map/Loop 0 }
 
-fun main(a: [n][m][k]i32): [n][k]i32 =
+let main(a: [n][m][k]i32): [n][k]i32 =
   map (\(a_r: [m][k]i32): [k]i32  ->
         let acc = a_r[0] in
         loop(acc) = for i < m do

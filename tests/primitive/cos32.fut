@@ -7,4 +7,4 @@
 
 import "futlib/math"
 
-fun main(x: f32): f32 = f32.cos(x)
+let main(x: f32): f32 = f32.cos(x)

@@ -26,7 +26,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Error.Class
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -57,7 +57,7 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
 instance (Attributes lore, Monad m) =>
          HasScope lore (BinderT lore m) where
   lookupType name = do
-    t <- BinderT $ gets $ HM.lookup name
+    t <- BinderT $ gets $ M.lookup name
     case t of
       Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
       Just t' -> return $ typeOf t'
@@ -66,9 +66,9 @@ instance (Attributes lore, Monad m) =>
 instance (Attributes lore, Monad m) =>
          LocalScope lore (BinderT lore m) where
   localScope types (BinderT m) = BinderT $ do
-    modify (`HM.union` types)
+    modify (`M.union` types)
     x <- m
-    modify (`HM.difference` types)
+    modify (`M.difference` types)
     return x
 
 instance (Attributes lore, Bindable lore, MonadFreshNames m) =>
@@ -131,7 +131,7 @@ addBinderStm :: Monad m =>
                 Stm lore -> BinderT lore m ()
 addBinderStm binding = do
   tell $ DL.singleton binding
-  BinderT $ modify (`HM.union` scopeOf binding)
+  BinderT $ modify (`M.union` scopeOf binding)
 
 collectBinderStms :: Monad m =>
                      BinderT lore m a
@@ -139,7 +139,7 @@ collectBinderStms :: Monad m =>
 collectBinderStms m = pass $ do
   (x, bnds) <- listen m
   let bnds' = DL.toList bnds
-  BinderT $ modify (`HM.difference` scopeOf bnds')
+  BinderT $ modify (`M.difference` scopeOf bnds')
   return ((x, bnds'), const DL.empty)
 
 -- Utility instance defintions for MTL classes.  These require

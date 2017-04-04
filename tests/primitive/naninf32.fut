@@ -5,7 +5,7 @@
 
 import "futlib/math"
 
-fun main(x: f32) =
+let main(x: f32) =
   (x < f32.nan,
    x < f32.inf,
    x - f32.inf < x + f32.inf,

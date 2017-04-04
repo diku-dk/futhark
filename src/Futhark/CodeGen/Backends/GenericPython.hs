@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , Constructor (..)
   , emptyConstructor
 
+  , compileName
   , compileDim
   , compileExp
   , compileCode
@@ -45,7 +46,7 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import Data.Maybe
 
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -64,7 +65,7 @@ import Futhark.Representation.AST.Attributes (builtInFunctions, isBuiltInFunctio
 -- compilation function.
 type OpCompiler op s = op -> CompilerM op s ()
 
--- | Write a scalar to the given memory block with the given index and
+-- | Scatter a scalar to the given memory block with the given index and
 -- in the given memory space.
 type WriteScalar op s = VName -> PyExp -> PrimType -> Imp.SpaceId -> PyExp
                         -> CompilerM op s ()
@@ -137,7 +138,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
-  , envFtable     :: HM.HashMap Name [Imp.Type]
+  , envFtable     :: M.Map Name [Imp.Type]
 }
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -166,9 +167,9 @@ newCompilerEnv (Imp.Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
               }
-  where ftable = HM.fromList $ map funReturn funs
+  where ftable = M.fromList $ map funReturn funs
         funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
-        builtinFtable = HM.map (map Imp.Scalar . snd) builtInFunctions
+        builtinFtable = M.map (map Imp.Scalar . snd) builtInFunctions
 
 data CompilerState s = CompilerState {
     compNameSrc :: VNameSource
@@ -217,7 +218,7 @@ paramsTypes = map paramType
         paramType (Imp.ScalarParam _ t) = Imp.Scalar t
 
 compileOutput :: [Imp.Param] -> [PyExp]
-compileOutput = map (Var . textual . Imp.paramName)
+compileOutput = map (Var . compileName . Imp.paramName)
 
 runCompilerM :: Imp.Functions op -> Operations op s
              -> VNameSource
@@ -339,7 +340,7 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
 compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
   body' <- collect $ compileCode body
-  let inputs' = map (pretty . Imp.paramName) inputs
+  let inputs' = map (compileName . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
   return $ Def (futharkFun . nameToString $ fname) ("self" : inputs') (body'++[ret])
 
@@ -352,9 +353,12 @@ tupleOrSingle es = Tuple es
 simpleCall :: String -> [PyExp] -> PyExp
 simpleCall fname = Call (Var fname) . map Arg
 
+compileName :: VName -> String
+compileName = zEncodeString . pretty
+
 compileDim :: Imp.DimSize -> PyExp
 compileDim (Imp.ConstSize i) = Constant $ value i
-compileDim (Imp.VarSize v) = Var $ pretty v
+compileDim (Imp.VarSize v) = Var $ compileName v
 
 unpackDim :: PyExp -> Imp.DimSize -> Int32 -> CompilerM op s ()
 unpackDim arr_name (Imp.ConstSize c) i = do
@@ -366,7 +370,7 @@ unpackDim arr_name (Imp.ConstSize c) i = do
 unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Field arr_name "shape"
   let src = Index shape_name $ IdxExp $ Constant $ value i
-  let dest = Var $ pretty var
+  let dest = Var $ compileName var
   let makeNumpy = simpleCall "np.int32" [src]
   stm $ Try [Assert (BinOp "==" dest makeNumpy) "variant dimension wrong"]
         [Catch (Var "NameError") [Assign dest makeNumpy]]
@@ -376,10 +380,10 @@ entryPointOutput (Imp.OpaqueValue desc vs) =
   simpleCall "opaque" . (StringLiteral (pretty desc):) <$>
   mapM (entryPointOutput . Imp.TransparentValue) vs
 entryPointOutput (Imp.TransparentValue (Imp.ScalarValue bt ept name)) =
-  return $ simpleCall tf [Var $ pretty name]
+  return $ simpleCall tf [Var $ compileName name]
   where tf = compilePrimToExtNp bt ept
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ Imp.DefaultSpace bt ept dims)) = do
-  let cast = Cast (Var $ pretty mem) (compilePrimTypeExt bt ept)
+  let cast = Cast (Var $ compileName mem) (compilePrimTypeExt bt ept)
   return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt ept dims)) = do
   pack_output <- asks envEntryOutput
@@ -391,7 +395,7 @@ entryPointInput (Imp.OpaqueValue _ vs) e =
   (map (Index (Field e "data") . IdxExp . Constant . value) [(0::Int32)..])
 
 entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
-  let vname' = Var $ pretty name
+  let vname' = Var $ compileName name
       -- HACK: A Numpy int64 will signal an OverflowError if we pass
       -- it a number bigger than 2**63.  This does not happen if we
       -- pass e.g. int8 a number bigger than 2**7.  As a workaround,
@@ -405,12 +409,12 @@ entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
 
 entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace _ _ dims)) e = do
   zipWithM_ (unpackDim e) dims [0..]
-  let dest = Var $ pretty mem
+  let dest = Var $ compileName mem
       unwrap_call = simpleCall "unwrapArray" [e]
 
   case memsize of
     Imp.VarSize sizevar ->
-      stm $ Assign (Var $ pretty sizevar) $
+      stm $ Assign (Var $ compileName sizevar) $
       simpleCall "np.int32" [Field e "nbytes"]
     Imp.ConstSize _ ->
       return ()
@@ -431,18 +435,41 @@ extName :: String -> String
 extName = (++"_ext")
 
 valueDescName :: Imp.ValueDesc -> String
-valueDescName = pretty . valueDescVName
+valueDescName = compileName . valueDescVName
 
 valueDescVName :: Imp.ValueDesc -> VName
 valueDescVName (Imp.ScalarValue _ _ vname) = vname
 valueDescVName (Imp.ArrayValue vname _ _ _ _ _) = vname
 
-readerElem :: PrimType -> Imp.Signedness -> String
-readerElem (FloatType Float32) _ = "read_float"
-readerElem (FloatType Float64) _ = "read_double_signed"
-readerElem IntType{} _           = "read_int"
-readerElem Bool _                = "read_bool"
-readerElem Cert _                = error "Cert is never used. ReaderElem doesn't handle this"
+readFun :: PrimType -> Imp.Signedness -> String
+readFun (FloatType Float32) _ = "read_f32"
+readFun (FloatType Float64) _ = "read_f64"
+readFun (IntType Int8)  Imp.TypeUnsigned = "read_u8"
+readFun (IntType Int16) Imp.TypeUnsigned = "read_u16"
+readFun (IntType Int32) Imp.TypeUnsigned = "read_u32"
+readFun (IntType Int64) Imp.TypeUnsigned = "read_u64"
+readFun (IntType Int8)  Imp.TypeDirect   = "read_i8"
+readFun (IntType Int16) Imp.TypeDirect   = "read_i16"
+readFun (IntType Int32) Imp.TypeDirect   = "read_i32"
+readFun (IntType Int64) Imp.TypeDirect   = "read_i64"
+readFun Bool _          = "read_bool"
+readFun Cert _          = error "Cert is never used. ReaderElem doesn't handle this"
+
+-- The value returned will be used when reading binary arrays, to indicate what
+-- the expected type is
+readTypeEnum :: PrimType -> Imp.Signedness -> String
+readTypeEnum (IntType Int8)  Imp.TypeUnsigned = "FUTHARK_UINT8"
+readTypeEnum (IntType Int16) Imp.TypeUnsigned = "FUTHARK_UINT16"
+readTypeEnum (IntType Int32) Imp.TypeUnsigned = "FUTHARK_UINT32"
+readTypeEnum (IntType Int64) Imp.TypeUnsigned = "FUTHARK_UINT64"
+readTypeEnum (IntType Int8)  Imp.TypeDirect   = "FUTHARK_INT8"
+readTypeEnum (IntType Int16) Imp.TypeDirect   = "FUTHARK_INT16"
+readTypeEnum (IntType Int32) Imp.TypeDirect   = "FUTHARK_INT32"
+readTypeEnum (IntType Int64) Imp.TypeDirect   = "FUTHARK_INT64"
+readTypeEnum (FloatType Float32) _ = "FUTHARK_FLOAT32"
+readTypeEnum (FloatType Float64) _ = "FUTHARK_FLOAT64"
+readTypeEnum Bool _ = "FUTHARK_BOOL"
+readTypeEnum Cert _ = error "Cert is never used. readTypeEnum doesn't handle this"
 
 readInput :: Imp.ExternalValue -> PyStmt
 readInput (Imp.OpaqueValue desc _) =
@@ -450,17 +477,20 @@ readInput (Imp.OpaqueValue desc _) =
   [StringLiteral $ "Cannot read argument of type " ++ desc ++ "."]
 
 readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
-  let reader' = readerElem bt ept
-      stdin = Var "sys.stdin"
+  let reader' = readFun bt ept
+      stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall reader' [stdin]
 
+-- TODO: If the type identifier of 'Float32' is changed, currently the error
+-- messages for reading binary input will not use this new name. This is also a
+-- problem for the C runtime system.
 readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
   let rank' = Var $ show $ length dims
-      reader' = Var $ readerElem bt ept
-      bt' = Var $ compilePrimType bt
-      stdin = Var "sys.stdin"
+      type_enum = Var $ readTypeEnum bt ept
+      ct = Var $ compilePrimType bt
+      stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
-     [stdin, reader', StringLiteral $ pretty bt, rank', bt']
+     [stdin, type_enum, StringLiteral $ pretty bt, rank', ct]
 
 printPrimStm :: PyExp -> PrimType -> Imp.Signedness -> PyStmt
 printPrimStm val t ept =
@@ -493,7 +523,7 @@ printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) e = do
   first <- newVName "print_first"
   let size = simpleCall "np.product" [List $ map compileDim $ outer:shape]
       emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
-  printelem <- printStm (Imp.ArrayValue mem memsize space bt ept shape) $ Var $ pretty v
+  printelem <- printStm (Imp.ArrayValue mem memsize space bt ept shape) $ Var $ compileName v
   return $ If (BinOp "==" size (Constant (value (0::Int32))))
     [puts emptystr]
     [Assign (Var $ pretty first) $ Var "True",
@@ -533,14 +563,14 @@ prepareEntry :: (Name, Imp.Function op)
                 (String, [String], [PyStmt], [PyStmt], [PyStmt],
                  [(Imp.ExternalValue, PyExp)])
 prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
-  let output_paramNames = map (pretty . Imp.paramName) outputs
+  let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
   prepareIn <- collect $ zipWithM_ entryPointInput args $
                map (Var . extValueDescName) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
-  let inputArgs = map (pretty . Imp.paramName) inputs
+  let inputArgs = map (compileName . Imp.paramName) inputs
       fname' = "self." ++ futharkFun (nameToString fname)
       funCall = simpleCall fname' (fmap Var inputArgs)
       call = [Assign funTuple funCall]
@@ -569,6 +599,11 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
       do_run = body ++ pre_timing
       (do_run_with_timing, close_runtime_file) = addTiming do_run
 
+      -- We ignore overflow errors and the like for executable entry
+      -- points.  These are (somewhat) well-defined in Futhark.
+      ignore s = ArgKeyword s $ StringLiteral "ignore"
+      errstate = Call (Var "np.errstate") $ map ignore ["divide", "over", "under", "invalid"]
+
       do_warmup_run =
         If (Var "do_warmup_run") do_run []
 
@@ -582,7 +617,7 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
 
   return (Def fname' [] $
            str_input ++ prepareIn ++
-           [Try [do_warmup_run, do_num_runs] [except']] ++
+           [Try [With errstate [do_warmup_run, do_num_runs]] [except']] ++
            [close_runtime_file] ++
            str_output,
 
@@ -720,7 +755,7 @@ compileExp :: Imp.Exp -> CompilerM op s PyExp
 compileExp (Imp.ValueExp v) = return $ compilePrimValue v
 
 compileExp (Imp.LeafExp (Imp.ScalarVar vname) _) =
-  return $ Var $ pretty vname
+  return $ Var $ compileName vname
 
 compileExp (Imp.LeafExp (Imp.SizeOf t) _) = do
   let t' = compileSizeOfType t
@@ -731,7 +766,7 @@ compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) bt DefaultSpace _) _) = 
   iexp' <- compileExp iexp
   let bt' = compilePrimType bt
   let nptype = compilePrimToNp bt
-  return $ simpleCall "indexArray" [Var $ pretty src, iexp', Var bt', Var nptype]
+  return $ simpleCall "indexArray" [Var $ compileName src, iexp', Var bt', Var nptype]
 
 compileExp (Imp.LeafExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space) _) _) =
   join $ asks envReadScalar
@@ -797,7 +832,7 @@ compileCode (Imp.While cond body) = do
 
 compileCode (Imp.For i it bound body) = do
   bound' <- compileExp bound
-  let i' = pretty i
+  let i' = compileName i
   body' <- collect $ compileCode body
   counter <- pretty <$> newVName "counter"
   one <- pretty <$> newVName "one"
@@ -807,7 +842,7 @@ compileCode (Imp.For i it bound body) = do
     body' ++ [AssignOp "+" (Var i') (Var one)]
 
 compileCode (Imp.SetScalar vname exp1) = do
-  let name' = Var $ pretty vname
+  let name' = Var $ compileName vname
   exp1' <- compileExp exp1
   stm $ Assign name' exp1'
 
@@ -824,7 +859,7 @@ compileCode (Imp.Assert e loc) = do
 
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args
-  let dests' = tupleOrSingle $ fmap Var (map pretty dests)
+  let dests' = tupleOrSingle $ fmap Var (map compileName dests)
       fname'
         | isBuiltInFunction fname = futharkFun (pretty  fname)
         | otherwise               = "self." ++ futharkFun (pretty  fname)
@@ -834,18 +869,18 @@ compileCode (Imp.Call dests fname args) = do
   stm $ if null dests
         then Exp call'
         else Assign dests' call'
-  where compileArg (Imp.MemArg m) = return $ Var $ pretty m
+  where compileArg (Imp.MemArg m) = return $ Var $ compileName m
         compileArg (Imp.ExpArg e) = compileExp e
 
 compileCode (Imp.SetMem dest src _) = do
-  let src' = Var (pretty src)
-  let dest' = Var (pretty dest)
+  let src' = Var (compileName src)
+  let dest' = Var (compileName dest)
   stm $ Assign dest' src'
 
 compileCode (Imp.Allocate name (Imp.Count e) DefaultSpace) = do
   e' <- compileExp e
   let allocate' = simpleCall "allocateMem" [e']
-  let name' = Var (pretty name)
+  let name' = Var (compileName name)
   stm $ Assign name' allocate'
 
 compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
@@ -857,8 +892,8 @@ compileCode (Imp.Allocate name (Imp.Count e) (Imp.Space space)) =
 compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count srcoffset) DefaultSpace (Imp.Count size)) = do
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
-  let dest' = Var (pretty dest)
-  let src' = Var (pretty src)
+  let dest' = Var (compileName dest)
+  let src' = Var (compileName src)
   size' <- compileExp size
   let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
   let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
@@ -871,15 +906,15 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcof
     <*> pure src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size <*> pure (IntType Int32) -- FIXME
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
+compileCode (Imp.Scatter dest (Imp.Count idx) elemtype DefaultSpace _ elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
-  let dest' = Var $ pretty dest
+  let dest' = Var $ compileName dest
   let elemtype' = compilePrimType elemtype
   let ctype = simpleCall elemtype' [elemexp']
   stm $ Exp $ simpleCall "writeScalarArray" [dest', idx', ctype]
 
-compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
+compileCode (Imp.Scatter dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $ asks envWriteScalar
     <*> pure dest
     <*> compileExp idx

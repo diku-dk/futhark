@@ -1,5 +1,5 @@
--- Duplicate fields in a record expression is an error.
+-- A plain expression in a record literal must be a record itself.
 -- ==
--- error: Duplicate
+-- error: record
 
-val bad = {x=1, x=2}
+val bad = {x=1, 2}

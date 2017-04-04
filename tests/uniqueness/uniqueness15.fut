@@ -6,13 +6,13 @@
 --
 -- From issue #191.
 
-fun reduceBins(acc: *[numBins]i32) (elm: *[numBins]i32): *[numBins]i32 =
+let reduceBins(acc: *[numBins]i32) (elm: *[numBins]i32): *[numBins]i32 =
     loop (newVal = acc) = for i < numBins do
         let newVal[i] = newVal[i] + elm[i] in newVal
     in
         newVal
 
-fun main(): []i32 =
+let main(): []i32 =
     let
     (rrs, drs) = unzip(map (\(i: i32): (*[]i32, *[]i32) ->
                              (replicate 2 0,

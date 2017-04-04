@@ -19,7 +19,7 @@
 -- structure {
 --   /Map/Stream/Scanomap 1
 -- }
-fun main(n: i32, m: i32): i32 =
+let main(n: i32, m: i32): i32 =
   let factors = map (^123) (iota n)
   let res = map (\factor ->
                    reduce (+) 0 (scan (+) 0 (map (*factor) (iota m))))

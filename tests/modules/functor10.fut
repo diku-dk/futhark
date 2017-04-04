@@ -22,4 +22,4 @@ module f3(R: mt) = {
 
 module m = f3({type t = bool})
 
-fun main(x: m.t): m.t = x
+let main(x: m.t): m.t = x

@@ -73,7 +73,7 @@ different sizes::
   -- compiled input { 100000000 }
   -- output { 887459712 }
 
-  fun main(n: i32): i32 =
+  let main(n: i32): i32 =
     reduce(+, 0, iota(n))
 
 SEE ALSO

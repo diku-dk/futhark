@@ -18,9 +18,8 @@ module Futhark.Optimise.Fusion.Composing
   where
 
 import Data.List
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
@@ -60,10 +59,10 @@ fuseMaps :: Bindable lore =>
          -> [SOAC.Input] -- ^ Input of SOAC to be fused with.
          -> (Lambda lore, [SOAC.Input]) -- ^ The fused lambda and the inputs of
                                    -- the resulting SOAC.
-fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
+fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = [ Param name t
-                                | Ident name t <- lam2redparams ++ HM.keys inputmap ]
+                                | Ident name t <- lam2redparams ++ M.keys inputmap ]
                , lambdaBody   = new_body2'
                }
         new_body2 = let bnds res = [ mkLet' [] [p] $ BasicOp $ SubExp e
@@ -84,7 +83,7 @@ fuseInputs :: Bindable lore =>
            -> Lambda lore -> [SOAC.Input] -> [(VName,Ident)]
            -> Lambda lore -> [SOAC.Input]
            -> ([Ident], [Ident], [Ident],
-               HM.HashMap Ident SOAC.Input,
+               M.Map Ident SOAC.Input,
                Body lore -> Body lore, Body lore -> Body lore)
 fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
   (lam2redparams, unfus_vars, outbnds, inputmap, makeCopies, makeCopiesInner)
@@ -92,41 +91,41 @@ fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
           splitAt (length lam2params - length inp2) lam2params
         lam1params = map paramIdent $ lambdaParams lam1
         lam2params = map paramIdent $ lambdaParams lam2
-        lam1inputmap = HM.fromList $ zip lam1params inp1
-        lam2inputmap = HM.fromList $ zip lam2arrparams            inp2
+        lam1inputmap = M.fromList $ zip lam1params inp1
+        lam2inputmap = M.fromList $ zip lam2arrparams            inp2
         (lam2inputmap', makeCopiesInner) = removeDuplicateInputs lam2inputmap
-        originputmap = lam1inputmap `HM.union` lam2inputmap'
+        originputmap = lam1inputmap `M.union` lam2inputmap'
         outins = uncurry (outParams $ map fst out1) $
-                 unzip $ HM.toList lam2inputmap'
+                 unzip $ M.toList lam2inputmap'
         outbnds= filterOutParams out1 outins
         (inputmap, makeCopies) =
-          removeDuplicateInputs $ originputmap `HM.difference` outins
+          removeDuplicateInputs $ originputmap `M.difference` outins
         -- Cosmin: @unfus_vars@ is supposed to be the lam2 vars corresponding to unfus_nms (?)
         getVarParPair x = case SOAC.isVarInput (snd x) of
                             Just nm -> Just (nm, fst x)
                             Nothing -> Nothing --should not be reached!
-        outinsrev = HM.fromList $ mapMaybe getVarParPair $ HM.toList outins
+        outinsrev = M.fromList $ mapMaybe getVarParPair $ M.toList outins
         unfusible outname
-          | outname `HS.member` unfus_nms =
-            outname `HM.lookup` HM.union outinsrev (HM.fromList out1)
+          | outname `S.member` unfus_nms =
+            outname `M.lookup` M.union outinsrev (M.fromList out1)
         unfusible _ = Nothing
         unfus_vars= mapMaybe (unfusible . fst) out1
 
 outParams :: [VName] -> [Ident] -> [SOAC.Input]
-          -> HM.HashMap Ident SOAC.Input
+          -> M.Map Ident SOAC.Input
 outParams out1 lam2arrparams inp2 =
-  HM.fromList $ mapMaybe isOutParam $ zip lam2arrparams inp2
+  M.fromList $ mapMaybe isOutParam $ zip lam2arrparams inp2
   where isOutParam (p, inp)
           | Just a <- SOAC.isVarInput inp,
             a `elem` out1 = Just (p, inp)
         isOutParam _      = Nothing
 
 filterOutParams :: [(VName,Ident)]
-                -> HM.HashMap Ident SOAC.Input
+                -> M.Map Ident SOAC.Input
                 -> [Ident]
 filterOutParams out1 outins =
   snd $ mapAccumL checkUsed outUsage out1
-  where outUsage = HM.foldlWithKey' add M.empty outins
+  where outUsage = M.foldlWithKey' add M.empty outins
           where add m p inp =
                   case SOAC.isVarInput inp of
                     Just v  -> M.insertWith (++) v [p] m
@@ -138,12 +137,12 @@ filterOutParams out1 outins =
             _           -> (m, ra)
 
 removeDuplicateInputs :: Bindable lore =>
-                         HM.HashMap Ident SOAC.Input
-                      -> (HM.HashMap Ident SOAC.Input, Body lore -> Body lore)
-removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
+                         M.Map Ident SOAC.Input
+                      -> (M.Map Ident SOAC.Input, Body lore -> Body lore)
+removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
   where comb ((parmap, inner), arrmap) par arr =
           case M.lookup arr arrmap of
-            Nothing -> ((HM.insert par arr parmap, inner),
+            Nothing -> ((M.insert par arr parmap, inner),
                         M.insert arr (identName par) arrmap)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
@@ -161,7 +160,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   --   (i) we remove the accumulator formal paramter and corresponding
   --       (body) result from from redomap's fold-lambda body
   let acc_len     = length p_nes
-      unfus_arrs  = filter (`HS.member` unfus_nms) outVars
+      unfus_arrs  = filter (`S.member` unfus_nms) outVars
       lam1_body   = lambdaBody p_lam
       lam1_accres = take acc_len $ bodyResult lam1_body
       lam1_arrres = drop acc_len $ bodyResult lam1_body
@@ -172,7 +171,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   --       @outPairs@, then ``map o redomap'' fuse the two lambdas
   --       (in the usual way), and construct the extra return types
   --       for the arrays that fall through.
-      (res_lam, new_inp) = fuseMaps (HS.fromList unfus_arrs) lam1_hacked p_inparr
+      (res_lam, new_inp) = fuseMaps (S.fromList unfus_arrs) lam1_hacked p_inparr
                                     (drop acc_len outPairs) c_lam c_inparr
       (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
                        zip (drop acc_len outVars) $ drop acc_len $

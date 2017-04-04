@@ -24,7 +24,7 @@ module Futhark.CodeGen.ImpCode.Kernels
 
 import Control.Monad.Writer
 import Data.List
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Traversable
 
 import Prelude
@@ -180,7 +180,7 @@ instance Pretty Kernel where
 
 instance FreeIn MapKernel where
   freeIn kernel =
-    mapKernelThreadNum kernel `HS.delete` freeIn (mapKernelBody kernel)
+    mapKernelThreadNum kernel `S.delete` freeIn (mapKernelBody kernel)
 
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int

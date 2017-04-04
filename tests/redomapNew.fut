@@ -21,7 +21,7 @@
 --       [20, 20, 20, 20, 20]]]
 -- }
 
-fun main(arr: []i32): ([]i32,[][][]i32) =
+let main(arr: []i32): ([]i32,[][][]i32) =
   let vs = map (\(a: i32): []i32  ->
                   map (\(x: i32): i32  -> 2*x*a
                      ) (iota(3) )
@@ -32,5 +32,5 @@ fun main(arr: []i32): ([]i32,[][][]i32) =
              transpose(replicate 5 r)) vs)
 
 
-fun main0(arr: []i32): i32 =
+let main0(arr: []i32): i32 =
   reduce (+) 0 (map (2*) arr)

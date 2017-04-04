@@ -25,8 +25,7 @@ module Futhark.Analysis.UsageTable
 import Control.Arrow (first)
 import qualified Data.Foldable as Foldable
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Prelude hiding (lookup)
@@ -34,32 +33,32 @@ import Prelude hiding (lookup)
 import Futhark.Transform.Substitute
 import Futhark.Representation.AST
 
-newtype UsageTable = UsageTable (HM.HashMap VName Usages)
+newtype UsageTable = UsageTable (M.Map VName Usages)
                    deriving (Eq, Show)
 
 instance Monoid UsageTable where
   mempty = empty
   UsageTable table1 `mappend` UsageTable table2 =
-    UsageTable $ HM.unionWith S.union table1 table2
+    UsageTable $ M.unionWith S.union table1 table2
 
 instance Substitute UsageTable where
   substituteNames subst (UsageTable table)
-    | not $ HM.null $ subst `HM.intersection` table =
-      UsageTable $ HM.fromList $
-      map (first $ substituteNames subst) $ HM.toList table
+    | not $ M.null $ subst `M.intersection` table =
+      UsageTable $ M.fromList $
+      map (first $ substituteNames subst) $ M.toList table
     | otherwise = UsageTable table
 
 empty :: UsageTable
-empty = UsageTable HM.empty
+empty = UsageTable M.empty
 
 contains :: UsageTable -> [VName] -> Bool
-contains (UsageTable table) = Foldable.any (`HM.member` table)
+contains (UsageTable table) = Foldable.any (`M.member` table)
 
 without :: UsageTable -> [VName] -> UsageTable
-without (UsageTable table) = UsageTable . Foldable.foldl (flip HM.delete) table
+without (UsageTable table) = UsageTable . Foldable.foldl (flip M.delete) table
 
 lookup :: VName -> UsageTable -> Maybe Usages
-lookup name (UsageTable table) = HM.lookup name table
+lookup name (UsageTable table) = M.lookup name table
 
 lookupPred :: (Usages -> Bool) -> VName -> UsageTable -> Bool
 lookupPred f name = maybe False f . lookup name
@@ -68,7 +67,7 @@ used :: VName -> UsageTable -> Bool
 used = lookupPred $ const True
 
 keys :: UsageTable -> [VName]
-keys (UsageTable table) = HM.keys table
+keys (UsageTable table) = M.keys table
 
 is :: Usage -> VName -> UsageTable -> Bool
 is = lookupPred . S.member
@@ -84,23 +83,23 @@ isEqualTo what = is $ EqualTo what
 
 allConsumed :: UsageTable -> Names
 allConsumed (UsageTable m) =
-  HS.fromList . map fst . filter (S.member Consumed . snd) $ HM.toList m
+  S.fromList . map fst . filter (S.member Consumed . snd) $ M.toList m
 
 usages :: Names -> UsageTable
-usages names = UsageTable $ HM.fromList [ (name, S.empty) | name <- HS.toList names ]
+usages names = UsageTable $ M.fromList [ (name, S.empty) | name <- S.toList names ]
 
 usage :: VName -> Usages -> UsageTable
-usage name uses = UsageTable $ HM.singleton name uses
+usage name uses = UsageTable $ M.singleton name uses
 
 consumedUsage :: VName -> UsageTable
-consumedUsage name = UsageTable $ HM.singleton name $ S.singleton Consumed
+consumedUsage name = UsageTable $ M.singleton name $ S.singleton Consumed
 
 inResultUsage :: VName -> UsageTable
-inResultUsage name = UsageTable $ HM.singleton name $ S.singleton InResult
+inResultUsage name = UsageTable $ M.singleton name $ S.singleton InResult
 
 equalToUsage :: VName -> SubExp -> UsageTable
 equalToUsage name what =
-  UsageTable $ HM.singleton name $ S.singleton $ EqualTo what
+  UsageTable $ M.singleton name $ S.singleton $ EqualTo what
 
 type Usages = S.Set Usage
 
@@ -110,7 +109,7 @@ data Usage = Consumed
              deriving (Eq, Ord, Show)
 
 leftScope :: UsageTable -> UsageTable
-leftScope (UsageTable table) = UsageTable $ HM.map (S.filter $ not . scopeSpecific) table
+leftScope (UsageTable table) = UsageTable $ M.map (S.filter $ not . scopeSpecific) table
   where scopeSpecific (EqualTo _) = True
         scopeSpecific InResult    = True
         scopeSpecific _           = False

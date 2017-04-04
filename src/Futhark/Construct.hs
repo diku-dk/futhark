@@ -59,7 +59,7 @@ module Futhark.Construct
 where
 
 import qualified Data.Array as A
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.Loc (SrcLoc)
 
 import Control.Applicative
@@ -378,16 +378,16 @@ instantiateShapes :: Monad m =>
                      (Int -> m SubExp)
                   -> [TypeBase ExtShape u]
                   -> m [TypeBase Shape u]
-instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
+instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
   where instantiate t = do
           shape <- mapM instantiate' $ extShapeDims $ arrayShape t
           return $ t `setArrayShape` Shape shape
         instantiate' (Ext x) = do
           m <- get
-          case HM.lookup x m of
+          case M.lookup x m of
             Just se -> return se
             Nothing -> do se <- lift $ f x
-                          put $ HM.insert x se m
+                          put $ M.insert x se m
                           return se
         instantiate' (Free se) = return se
 

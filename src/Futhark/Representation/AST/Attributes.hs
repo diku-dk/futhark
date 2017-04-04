@@ -35,10 +35,9 @@ module Futhark.Representation.AST.Attributes
   )
   where
 
-import Control.Monad
 import Data.List
 import Data.Maybe (mapMaybe, isJust)
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -58,11 +57,11 @@ import Futhark.Util.Pretty (Pretty)
 
 -- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
 isBuiltInFunction :: Name -> Bool
-isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
+isBuiltInFunction fnm = fnm `M.member` builtInFunctions
 
 -- | A map of all built-in functions and their types.
-builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])
-builtInFunctions = HM.fromList $ map namify
+builtInFunctions :: M.Map Name (PrimType,[PrimType])
+builtInFunctions = M.fromList $ map namify
                    [("sqrt32", (FloatType Float32, [FloatType Float32]))
                    ,("log32", (FloatType Float32, [FloatType Float32]))
                    ,("exp32", (FloatType Float32, [FloatType Float32]))
@@ -121,12 +120,15 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp ConvOp{} = True
         safeBasicOp _ = False
 
-safeExp DoLoop{} = False
+safeExp (DoLoop _ _ _ body) = safeBody body
 safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyStms tbranch) &&
   all (safeExp . bindingExp) (bodyStms fbranch)
 safeExp (Op op) = safeOp op
+
+safeBody :: IsOp (Op lore) => Body lore -> Bool
+safeBody = all (safeExp . bindingExp) . bodyStms
 
 -- | Return the variable names used in 'Var' subexpressions.  May contain
 -- duplicates.
@@ -148,14 +150,22 @@ shapeVars = subExpVars . shapeDims
 -- represents a known arithmetic operator; don't expect anything
 -- clever here.
 commutativeLambda :: Lambda lore -> Bool
-commutativeLambda lam = isJust $ do
-  [xp,yp] <- Just $ lambdaParams lam
-  Body _ [Let (Pattern [] [v]) _ (BasicOp (BinOp op (Var x) (Var y)))] [res] <-
-    Just $ lambdaBody lam
-  guard $ Var (patElemName v) == res
-  guard $ x == paramName xp && y == paramName yp ||
-          y == paramName xp && x == paramName yp
-  guard $ commutativeBinOp op
+commutativeLambda lam =
+  let body = lambdaBody lam
+      n2 = length (lambdaParams lam) `div` 2
+      (xps,yps) = splitAt n2 (lambdaParams lam)
+
+      okComponent c = isJust $ find (okBinOp c) $ bodyStms body
+      okBinOp (xp,yp,Var r) (Let (Pattern [] [pe]) _ (BasicOp (BinOp op (Var x) (Var y)))) =
+        patElemName pe == r &&
+        commutativeBinOp op &&
+        ((x == paramName xp && y == paramName yp) ||
+         (y == paramName xp && x == paramName yp))
+      okBinOp _ _ = False
+
+  in n2 * 2 == length (lambdaParams lam) &&
+     n2 == length (bodyResult body) &&
+     all okComponent (zip3 xps yps $ bodyResult body)
 
 -- | How many value parameters are accepted by this entry point?  This
 -- is used to determine which of the function parameters correspond to
@@ -175,9 +185,12 @@ class (Eq op, Ord op, Show op,
        Pretty op) => IsOp op where
   -- | Like 'safeExp', but for arbitrary ops.
   safeOp :: op -> Bool
+  -- | Should we try to hoist this out of branches?
+  cheapOp :: op -> Bool
 
 instance IsOp () where
   safeOp () = True
+  cheapOp () = True
 
 -- | Lore-specific attributes; also means the lore supports some basic
 -- facilities.
@@ -186,9 +199,9 @@ class (Annotations lore,
        PrettyLore lore,
 
        Renameable lore, Substitutable lore,
-       FreeIn (ExpAttr lore),
+       FreeAttr (ExpAttr lore),
        FreeIn (LetAttr lore),
-       FreeIn (BodyAttr lore),
+       FreeAttr (BodyAttr lore),
        FreeIn (FParamAttr lore),
        FreeIn (LParamAttr lore),
        FreeIn (RetType lore),

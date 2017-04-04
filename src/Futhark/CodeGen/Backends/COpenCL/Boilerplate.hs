@@ -21,9 +21,7 @@ openClDecls block_dim kernel_names opencl_program opencl_prelude =
   openclPrelude ++ openclBoilerplate ++ kernelDeclarations
   where kernelDeclarations =
           [C.cedecl|static const char fut_opencl_prelude[] = $string:opencl_prelude;|] :
-          [C.cedecl|$esc:("static const char fut_opencl_program[] = FUT_KERNEL(\n" ++
-                         opencl_program ++
-                         ");")|] :
+          [C.cedecl|static const char fut_opencl_program[] = $string:opencl_program;|] :
           concat
           [ [ [C.cedecl|static typename cl_kernel $id:name;|]
             , [C.cedecl|static int $id:(kernelRuntime name) = 0;|]

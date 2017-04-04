@@ -6,19 +6,21 @@
   #include <CL/cl.h>
 #endif
 
-#define FUT_KERNEL(s) #s
 #define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)
 
 static cl_context fut_cl_context;
 static cl_command_queue fut_cl_queue;
 static const char *cl_preferred_platform = "";
 static const char *cl_preferred_device = "";
+static int cl_preferred_device_num = 0;
 static int cl_debug = 0;
 
 static size_t cl_group_size = 256;
 static size_t cl_num_groups = 128;
 static size_t cl_tile_size = 32;
 static size_t cl_lockstep_width = 1;
+static const char* cl_dump_program_to = NULL;
+static const char* cl_load_program_from = NULL;
 
 struct opencl_device_option {
   cl_platform_id platform;
@@ -106,6 +108,26 @@ static void opencl_succeed(unsigned int ret,
     panic(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, opencl_error_string(ret));
   }
+}
+
+void set_preferred_platform(const char *s) {
+  cl_preferred_platform = s;
+}
+
+void set_preferred_device(const char *s) {
+  int x = 0;
+  if (*s == '#') {
+    s++;
+    while (isdigit(*s)) {
+      x = x * 10 + (*s++)-'0';
+    }
+    // Skip trailing spaces.
+    while (isspace(*s)) {
+      s++;
+    }
+  }
+  cl_preferred_device = s;
+  cl_preferred_device_num = x;
 }
 
 static char* opencl_platform_info(cl_platform_id platform,
@@ -218,10 +240,14 @@ static struct opencl_device_option get_preferred_device() {
 
   opencl_all_device_options(&devices, &num_devices);
 
+  int num_platform_matches = 0;
+  int num_device_matches = 0;
+
   for (size_t i = 0; i < num_devices; i++) {
     struct opencl_device_option device = devices[i];
     if (strstr(device.platform_name, cl_preferred_platform) != NULL &&
-        strstr(device.device_name, cl_preferred_device) != NULL) {
+        strstr(device.device_name, cl_preferred_device) != NULL &&
+        num_device_matches++ == cl_preferred_device_num) {
       // Free all the platform and device names, except the ones we have chosen.
       for (size_t j = 0; j < num_devices; j++) {
         if (j != i) {
@@ -326,21 +352,44 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
   fut_cl_queue = clCreateCommandQueue(fut_cl_context, device, 0, &error);
   assert(error == 0);
 
-  /* Make sure this function is defined. */
+  // Make sure this function is defined.
   post_opencl_setup(&device_option);
 
-  // Build the OpenCL program.  First we have to prepend the prelude to the program source.
-  size_t prelude_size = strlen(prelude_src);
-  size_t program_size = strlen(src);
-  size_t src_size = prelude_size + program_size;
-  char *fut_opencl_src = malloc(src_size + 1);
-  strncpy(fut_opencl_src, prelude_src, src_size);
-  strncpy(fut_opencl_src+prelude_size, src, src_size-prelude_size);
-  fut_opencl_src[src_size] = '0';
+  char *fut_opencl_src = NULL;
+  size_t src_size = 0;
+
+  // Maybe we have to read OpenCL source from somewhere else (used for debugging).
+  if (cl_load_program_from) {
+    FILE *f = fopen(cl_load_program_from, "r");
+    assert(f != NULL);
+    fseek(f, 0, SEEK_END);
+    src_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    fut_opencl_src = malloc(src_size);
+    fread(fut_opencl_src, 1, src_size, f);
+    fclose(f);
+  } else {
+    // Build the OpenCL program.  First we have to prepend the prelude to the program source.
+    size_t prelude_size = strlen(prelude_src);
+    size_t program_size = strlen(src);
+    src_size = prelude_size + program_size;
+    fut_opencl_src = malloc(src_size + 1);
+    strncpy(fut_opencl_src, prelude_src, src_size);
+    strncpy(fut_opencl_src+prelude_size, src, src_size-prelude_size);
+    fut_opencl_src[src_size] = 0;
+  }
 
   cl_program prog;
   error = 0;
   const char* src_ptr[] = {fut_opencl_src};
+
+  if (cl_dump_program_to) {
+    FILE *f = fopen(cl_dump_program_to, "w");
+    assert(f != NULL);
+    fputs(fut_opencl_src, f);
+    fclose(f);
+  }
+
   prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
   assert(error == 0);
   char compile_opts[1024];

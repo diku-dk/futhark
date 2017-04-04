@@ -34,7 +34,7 @@
 -- }
 
 
-fun tridag(nn:   i32,
+let tridag(nn:   i32,
                             b: *[]f64, d: *[]f64,
                             a: []f64, c: []f64 ): ([]f64,[]f64) =
     if (nn == 1)
@@ -57,7 +57,7 @@ fun tridag(nn:   i32,
             (b, d)
 
 
-fun main(): ([]f64,[]f64) =
+let main(): ([]f64,[]f64) =
     let nn = reduce (+) 0 ([1,2,3,4])
     let a = replicate nn 3.33
     let b = map (\(x: i32): f64  -> f64(x) + 1.0) (iota(nn))

@@ -5,7 +5,7 @@
 --         [0, 1, 2, 3, 0, 1, 2, 3, 0] }
 -- output { 3 2 2 [1f32, 5f32, 9f32, 2f32, 6f32, 3f32, 7f32] }
 
-fun main (vs: [n]f32, classes: [n]i32): (i32, i32, i32, []f32) =
+let main (vs: [n]f32, classes: [n]i32): (i32, i32, i32, []f32) =
   let flags = map (\c  ->
                      if      c == 0 then (1, 0, 0)
                      else if c == 1 then (0, 1, 0)
@@ -21,4 +21,4 @@ fun main (vs: [n]f32, classes: [n]i32): (i32, i32, i32, []f32) =
                        else if c == 2 then size_0 + size_1 + ci - 1
                        else                -1) is0 classes
   in (size_0, size_1, size_2,
-      write is1 vs (replicate filter_size 0f32))
+      scatter (replicate filter_size 0f32) is1 vs)

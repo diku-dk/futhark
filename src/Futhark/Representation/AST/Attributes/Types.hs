@@ -3,7 +3,6 @@
 module Futhark.Representation.AST.Attributes.Types
        (
          rankShaped
-       , extShaped
        , arrayRank
        , arrayShape
        , modifyArrayShape
@@ -70,8 +69,8 @@ import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -84,13 +83,6 @@ rankShaped :: ArrayShape shape => TypeBase shape u -> TypeBase Rank u
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
 rankShaped (Prim et) = Prim et
 rankShaped (Mem size space) = Mem size space
-
--- | Add vacuous existential type information to a type.  Every
--- dimension will be its own 'Ext'.
-extShaped :: ArrayShape shape => TypeBase shape u -> TypeBase ExtShape u
-extShaped (Array et sz u) = Array et (ExtShape $ map Ext [0..shapeRank sz-1]) u
-extShaped (Prim et) = Prim et
-extShaped (Mem size space) = Mem size space
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -353,27 +345,27 @@ fromDecl (Mem size space) = Mem size space
 -- return type.
 extractShapeContext :: [TypeBase ExtShape u] -> [[a]] -> [a]
 extractShapeContext ts shapes =
-  evalState (concat <$> zipWithM extract ts shapes) HS.empty
+  evalState (concat <$> zipWithM extract ts shapes) S.empty
   where extract t shape =
           catMaybes <$> zipWithM extract' (extShapeDims $ arrayShape t) shape
         extract' (Ext x) v = do
-          seen <- gets $ HS.member x
+          seen <- gets $ S.member x
           if seen then return Nothing
-            else do modify $ HS.insert x
+            else do modify $ S.insert x
                     return $ Just v
         extract' (Free _) _ = return Nothing
 
 -- | The set of identifiers used for the shape context in the given
 -- 'ExtType's.
-shapeContext :: [TypeBase ExtShape u] -> HS.HashSet Int
-shapeContext = HS.fromList
+shapeContext :: [TypeBase ExtShape u] -> S.Set Int
+shapeContext = S.fromList
                . concatMap (mapMaybe ext . extShapeDims . arrayShape)
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
 -- | The size of the set that would be returned by 'shapeContext'.
 shapeContextSize :: [ExtType] -> Int
-shapeContextSize = HS.size . shapeContext
+shapeContextSize = S.size . shapeContext
 
 -- | If all dimensions of the given 'RetType' are statically known,
 -- return the corresponding list of 'Type'.
@@ -397,7 +389,7 @@ generaliseExtTypes :: [TypeBase ExtShape u]
                    -> [TypeBase ExtShape u]
                    -> [TypeBase ExtShape u]
 generaliseExtTypes rt1 rt2 =
-  evalState (zipWithM unifyExtShapes rt1 rt2) (0, HM.empty)
+  evalState (zipWithM unifyExtShapes rt1 rt2) (0, M.empty)
   where unifyExtShapes t1 t2 =
           setArrayShape t1 . ExtShape <$>
           zipWithM unifyExtDims
@@ -410,11 +402,11 @@ generaliseExtTypes rt1 rt2 =
                             return $ Ext n
         unifyExtDims (Ext x) (Ext y)
           | x == y = Ext <$> (maybe (new x) return =<<
-                              gets (HM.lookup x . snd))
+                              gets (M.lookup x . snd))
         unifyExtDims (Ext x) _ = Ext <$> new x
         unifyExtDims _ (Ext x) = Ext <$> new x
         new x = do (n,m) <- get
-                   put (n + 1, HM.insert x n m)
+                   put (n + 1, M.insert x n m)
                    return n
 
 -- | Given a list of 'ExtType's and a set of "forbidden" names, modify
@@ -424,26 +416,26 @@ generaliseExtTypes rt1 rt2 =
 existentialiseExtTypes :: Names -> [ExtType] -> [ExtType]
 existentialiseExtTypes inaccessible ts =
   evalState (mapM makeBoundShapesFree ts)
-  (firstavail, HM.empty, HM.empty)
-  where firstavail = 1 + HS.foldl' max (-1) (shapeContext ts)
+  (firstavail, M.empty, M.empty)
+  where firstavail = 1 + S.foldl' max (-1) (shapeContext ts)
         makeBoundShapesFree t = do
           shape <- mapM checkDim $ extShapeDims $ arrayShape t
           return $ t `setArrayShape` ExtShape shape
         checkDim (Free (Var v))
-          | v `HS.member` inaccessible =
+          | v `S.member` inaccessible =
             replaceVar v
         checkDim (Free se) = return $ Free se
         checkDim (Ext x)   = replaceExt x
         replaceExt x = do
           (n, extmap, varmap) <- get
-          case HM.lookup x extmap of
-            Nothing -> do put (n+1, HM.insert x (Ext n) extmap, varmap)
+          case M.lookup x extmap of
+            Nothing -> do put (n+1, M.insert x (Ext n) extmap, varmap)
                           return $ Ext n
             Just replacement -> return replacement
         replaceVar name = do
           (n, extmap, varmap) <- get
-          case HM.lookup name varmap of
-            Nothing -> do put (n+1, extmap, HM.insert name (Ext n) varmap)
+          case M.lookup name varmap of
+            Nothing -> do put (n+1, extmap, M.insert name (Ext n) varmap)
                           return $ Ext n
             Just replacement -> return replacement
 
@@ -456,12 +448,12 @@ existentialiseExtTypes inaccessible ts =
 -- This function is useful when @ts1@ are the value parameters of some
 -- function and @ts2@ are the value arguments, and we need to figure
 -- out which shape context to pass.
-shapeMapping :: [TypeBase Shape u0] -> [TypeBase Shape u1] -> HM.HashMap VName SubExp
+shapeMapping :: [TypeBase Shape u0] -> [TypeBase Shape u1] -> M.Map VName SubExp
 shapeMapping ts = shapeMapping' ts . map arrayDims
 
 -- | Like @shapeMapping@, but works with explicit dimensions.
-shapeMapping' :: [TypeBase Shape u] -> [[a]] -> HM.HashMap VName a
-shapeMapping' ts shapes = HM.fromList $ concat $ zipWith inspect ts shapes
+shapeMapping' :: [TypeBase Shape u] -> [[a]] -> M.Map VName a
+shapeMapping' ts shapes = M.fromList $ concat $ zipWith inspect ts shapes
   where inspect t shape =
           mapMaybe match $ zip (arrayDims t) shape
         match (Constant {}, _) = Nothing

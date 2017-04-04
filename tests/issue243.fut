@@ -8,12 +8,12 @@
 -- input { 10 }
 -- output { [4i32, 3i32, 4i32, 2i32, 4i32, 2i32, 3i32, 2i32, 2i32, 1i32] }
 
-fun boolToInt (x: bool): i32 =
+let boolToInt (x: bool): i32 =
   if x
   then 1
   else 0
 
-fun resi (x: i32) (y: i32): i32 =
+let resi (x: i32) (y: i32): i32 =
   if (x == 0)
   then y
   else (y % x)

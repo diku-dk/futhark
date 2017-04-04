@@ -4,4 +4,4 @@
 -- input { [1,2,3,4] }
 -- output { [4,3,2,1] }
 
-fun main(s: []i32) = s[::-1]
+let main(s: []i32) = s[::-1]

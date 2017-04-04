@@ -5,4 +5,4 @@
 
 type t = i32
 
-fun main(x: *t): t = x
+let main(x: *t): t = x

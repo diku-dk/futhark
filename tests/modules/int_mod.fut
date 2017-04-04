@@ -7,11 +7,11 @@
 -- }
 
 module IntLib = {
-  fun plus(a: i32, b: i32): i32 = a + b
-  fun numberFour(): i32 = 4
+  let plus(a: i32, b: i32): i32 = a + b
+  let numberFour(): i32 = 4
 }
 
-fun localplus(a: i32, b: i32): i32 = IntLib.plus (a,b)
+let localplus(a: i32, b: i32): i32 = IntLib.plus (a,b)
 
-fun main(a: i32, b: i32): i32 =
+let main(a: i32, b: i32): i32 =
   localplus(a,b)

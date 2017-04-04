@@ -5,7 +5,7 @@
 
 import "futlib/math"
 
-fun main(x: f64) =
+let main(x: f64) =
   (x < f64.nan,
    x < f64.inf,
    x - f64.inf < x + f64.inf,

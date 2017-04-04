@@ -2,5 +2,5 @@
 
 type uniqlist = *[]i32
 
-fun main(p: [][]i32): []uniqlist =
+let main(p: [][]i32): []uniqlist =
   p

@@ -8,14 +8,13 @@ module Futhark.Internalise.AccurateSizes
   , ensureExtShape
   , ensureShape
   , ensureArgShapes
-  , ensureShapeVar
   )
   where
 
 import Control.Applicative
 import Control.Monad
 import Data.Loc
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -43,7 +42,7 @@ argShapes shapes valts valargts =
   map addShape shapes
   where mapping = shapeMapping valts valargts
         addShape name
-          | Just se <- HM.lookup name mapping = se
+          | Just se <- M.lookup name mapping = se
           | otherwise                         = intConst Int32 0
 
 ensureResultShape :: MonadBinder m =>

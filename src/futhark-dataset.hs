@@ -11,7 +11,7 @@ import qualified Data.Binary as Bin (put)
 import Data.Binary.IEEE754
 import Data.Binary.Put
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.List
 import Data.Maybe
 import qualified Data.Text as T
@@ -28,7 +28,6 @@ import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 
 import Futhark.Util.Options
-import Futhark.Util.Pretty
 
 main :: IO ()
 main = mainWithOptions initialDataOptions commandLineOptions f
@@ -150,7 +149,7 @@ toSimpleType (TEArray t d _) =
   where constantDim (ConstDim k) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
 toSimpleType (TEVar (QualName [] v) _)
-  | Just t <- HM.lookup v namesToPrimTypes = Right $ SimplePrim t
+  | Just t <- M.lookup v namesToPrimTypes = Right $ SimplePrim t
 toSimpleType (TEVar v _) =
   Left $ "Unknown type " ++ pretty v
 

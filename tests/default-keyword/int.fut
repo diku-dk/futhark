@@ -7,4 +7,4 @@
 --   0i32
 -- }
 
-fun main(): i32 = 0
+let main(): i32 = 0

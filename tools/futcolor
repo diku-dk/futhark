@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+
+"""
+A small utility to colorize variable names in Futhark output.
+"""
+
+import re
+from sys import stdin, argv
+
+# All Futhark-generated variables have this form
+var = re.compile(r'[\w_]+_\d+')
+
+
+if __name__ == "__main__":
+    args = argv[1:]
+    if len(args) == 0:
+        files = [stdin]
+    else:
+        files = map(open, args)
+
+    for f in files:
+        content = f.read()
+        all_vars = var.findall(content)
+        all_vars = sorted(set(all_vars), key=all_vars.index)
+        for i, v in enumerate(all_vars):
+            color = (7*i) % 256
+            colored_v = "\033[38;5;{}m{}\033[0m".format(color, v)
+            content = content.replace(v, colored_v)
+        print(content)

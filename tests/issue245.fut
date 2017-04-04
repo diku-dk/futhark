@@ -6,9 +6,9 @@
 -- input { 2 3 }
 -- output { [[1i32, 2i32], [4i32, 5i32]] }
 
-fun take_arrint (l: i32) (x: [][]i32): [][]i32 =
+let take_arrint (l: i32) (x: [][]i32): [][]i32 =
   let (v1, _) = split (l) (x) in v1
-fun reshape_int (l: i32) (x: []i32): []i32 =
+let reshape_int (l: i32) (x: []i32): []i32 =
   let roundUp = ((l + ((shape (x))[0] - 1)) / (shape (x))[0]) in
   let extend = reshape ((((shape (x))[0] * roundUp))) (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in

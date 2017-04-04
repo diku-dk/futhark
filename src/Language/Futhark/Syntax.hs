@@ -46,6 +46,7 @@ module Language.Futhark.Syntax
   , IdentBase (..)
   , DimIndexBase(..)
   , ExpBase(..)
+  , FieldBase(..)
   , LoopFormBase (..)
   , ForLoopDirection (..)
   , LowerBoundBase(..)
@@ -59,13 +60,12 @@ module Language.Futhark.Syntax
   , TypeRefBase(..)
   , SigBindBase(..)
   , ModExpBase(..)
-  , StructBindBase(..)
-  , FunctorBindBase(..)
+  , ModBindBase(..)
+  , ModParamBase(..)
 
   -- * Definitions
   , FunBindBase(..)
-  , ConstBindBase(..)
-  , ValDecBase(..)
+  , ValBindBase(..)
   , TypeBindBase(..)
   , ProgBase(..)
   , DecBase(..)
@@ -83,9 +83,10 @@ import           Data.Array
 import           Data.Foldable
 import           Data.Functor
 import           Data.Hashable
-import qualified Data.HashMap.Lazy                as HM
-import qualified Data.HashSet                     as HS
+import qualified Data.Map.Strict                as M
+import qualified Data.Set                     as S
 import           Data.Loc
+import           Data.Ord
 import           Data.Monoid
 import           Data.Traversable
 import           Prelude
@@ -101,7 +102,7 @@ class (Show vn,
        Show (f vn),
        Show (f (CompTypeBase vn)),
        Show (f (StructTypeBase vn)),
-       Show (f (HM.HashMap VName VName)),
+       Show (f (M.Map VName VName)),
        Show (f ([CompTypeBase vn], CompTypeBase vn))) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
@@ -219,7 +220,7 @@ data RecordArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
   | PolyArrayElem TypeName as Uniqueness
-  | RecordArrayElem (HM.HashMap Name (RecordArrayElemTypeBase shape as))
+  | RecordArrayElem (M.Map Name (RecordArrayElemTypeBase shape as))
   deriving (Show)
 
 instance Eq shape =>
@@ -236,7 +237,7 @@ data ArrayTypeBase shape as =
     -- ^ An array whose elements are primitive types.
   | PolyArray TypeName shape Uniqueness as
     -- ^ An array whose elements are some polymorphic type.
-  | RecordArray (HM.HashMap Name (RecordArrayElemTypeBase shape as)) shape Uniqueness
+  | RecordArray (M.Map Name (RecordArrayElemTypeBase shape as)) shape Uniqueness
     -- ^ An array whose elements are records.  Note that tuples are
     -- also just records.
     deriving (Show)
@@ -257,7 +258,7 @@ instance Eq shape =>
 -- '==', aliases are ignored, but dimensions much match.
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
-                       | Record (HM.HashMap Name (TypeBase shape as))
+                       | Record (M.Map Name (TypeBase shape as))
                        | TypeVar TypeName
                           deriving (Eq, Show)
 
@@ -309,7 +310,7 @@ deriving instance Showable f vn => Show (TypeDeclBase f vn)
 -- example, we might say that a function taking an argument of type
 -- @([int], *[int], [int])@ has diet @ConsumeTuple [Observe, Consume,
 -- Observe]@.
-data Diet = RecordDiet (HM.HashMap Name Diet) -- ^ Consumes these fields in the record.
+data Diet = RecordDiet (M.Map Name Diet) -- ^ Consumes these fields in the record.
           | Consume -- ^ Consumes this value.
           | Observe -- ^ Only observes value in this position, does
                     -- not consume.
@@ -333,6 +334,9 @@ deriving instance Showable f vn => Show (IdentBase f vn)
 
 instance Eq vn => Eq (IdentBase ty vn) where
   x == y = identName x == identName y
+
+instance Ord vn => Ord (IdentBase ty vn) where
+  compare = comparing identName
 
 instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
@@ -403,8 +407,8 @@ data ExpBase f vn =
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
-            | RecordLit [(Name,ExpBase f vn)] SrcLoc
-            -- ^ Record literals, e.g. @{x=2,y=3}@.
+            | RecordLit [FieldBase f vn] SrcLoc
+            -- ^ Record literals, e.g. @{x=2,y=3,z}@.
 
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
@@ -543,8 +547,8 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Write (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @write [0, 2, -1] [9, 7, 0] [3, 4, 5] = [9, 4, 7]@.
+            | Scatter (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            -- ^ @write [3, 4, 5] [0, 2, -1] [9, 7, 0] = [9, 4, 7]@.
 
             | Zip Int (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ Conventional zip taking nonzero arrays as arguments.
@@ -605,7 +609,17 @@ instance Located (ExpBase f vn) where
   locOf (DoLoop _ _ _ _ _ pos)   = locOf pos
   locOf (Stream _ _ _  pos)      = locOf pos
   locOf (Unsafe _ loc)           = locOf loc
-  locOf (Write _ _ _ loc)        = locOf loc
+  locOf (Scatter _ _ _ loc)      = locOf loc
+
+-- | An entry in a record literal.
+data FieldBase f vn = RecordField Name (ExpBase f vn) SrcLoc
+                    | RecordRecord (ExpBase f vn)
+
+deriving instance Showable f vn => Show (FieldBase f vn)
+
+instance Located (FieldBase f vn) where
+  locOf (RecordField _ _ loc) = locOf loc
+  locOf (RecordRecord e) = locOf e
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (LowerBoundBase f vn) (IdentBase f vn) (ExpBase f vn)
@@ -677,16 +691,16 @@ deriving instance Showable f vn => Show (FunBindBase f vn)
 instance Located (FunBindBase f vn) where
   locOf = locOf . funBindLocation
 
--- | Constant declaration
-data ConstBindBase f vn = ConstBind { constBindName     :: vn
-                                    , constBindTypeDecl :: Maybe (TypeExp vn)
-                                    , constBindType     :: f (StructTypeBase vn)
-                                    , constBindDef      :: ExpBase f vn
-                                    , constBindLocation :: SrcLoc
-                                    }
-deriving instance Showable f vn => Show (ConstBindBase f vn)
+-- | Value declaration.
+data ValBindBase f vn = ValBind { constBindName     :: vn
+                                , constBindTypeDecl :: Maybe (TypeExp vn)
+                                , constBindType     :: f (StructTypeBase vn)
+                                , constBindDef      :: ExpBase f vn
+                                , constBindLocation :: SrcLoc
+                                }
+deriving instance Showable f vn => Show (ValBindBase f vn)
 
-instance Located (ConstBindBase f vn) where
+instance Located (ValBindBase f vn) where
   locOf = locOf . constBindLocation
 
 -- | Type Declarations
@@ -749,10 +763,13 @@ data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                      | ModImport FilePath SrcLoc
                        -- ^ The contents of another file as a module.
                      | ModDecs [DecBase f vn] SrcLoc
-                     | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (HM.HashMap VName VName)) (f (HM.HashMap VName VName)) SrcLoc
+                     | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
                        -- ^ Functor application.
-                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (HM.HashMap VName VName)) SrcLoc
-                     | ModLambda (vn, SigExpBase f vn) (Maybe (SigExpBase f vn)) (ModExpBase f vn) SrcLoc
+                     | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
+                     | ModLambda (ModParamBase f vn)
+                                 (Maybe (SigExpBase f vn))
+                                 (ModExpBase f vn)
+                                 SrcLoc
 deriving instance Showable f vn => Show (ModExpBase f vn)
 
 instance Located (ModExpBase f vn) where
@@ -764,59 +781,49 @@ instance Located (ModExpBase f vn) where
   locOf (ModAscript _ _ _ loc) = locOf loc
   locOf (ModLambda _ _ _ loc)  = locOf loc
 
-data StructBindBase f vn =
-  StructBind { structName     :: vn
-             , structExp      :: ModExpBase f vn
-             , structLocation :: SrcLoc
-             }
-deriving instance Showable f vn => Show (StructBindBase f vn)
+data ModBindBase f vn =
+  ModBind { modName      :: vn
+          , modParams    :: [ModParamBase f vn]
+          , modSignature :: Maybe (SigExpBase f vn, f (M.Map VName VName))
+          , modExp       :: ModExpBase f vn
+          , modLocation  :: SrcLoc
+          }
+deriving instance Showable f vn => Show (ModBindBase f vn)
 
-instance Located (StructBindBase f vn) where
-  locOf = locOf . structLocation
+instance Located (ModBindBase f vn) where
+  locOf = locOf . modLocation
 
-data FunctorBindBase f vn = FunctorBind { functorName      :: vn
-                                        , functorParam     :: (vn, SigExpBase f vn)
-                                        , functorSignature :: Maybe (SigExpBase f vn)
-                                        , functorBody      :: ModExpBase f vn
-                                        , functorLocation  :: SrcLoc
-                                        }
-deriving instance Showable f vn => Show (FunctorBindBase f vn)
+data ModParamBase f vn = ModParam { modParamName :: vn
+                                  , modParamType :: SigExpBase f vn
+                                  , modParamLocation :: SrcLoc
+                                  }
+deriving instance Showable f vn => Show (ModParamBase f vn)
 
-instance Located (FunctorBindBase f vn) where
-  locOf = locOf . functorLocation
-
--- | A top-level binding of a term variable to either a function or a
--- constant.
-data ValDecBase f vn = FunDec (FunBindBase f vn)
-                     | ConstDec (ConstBindBase f vn)
-deriving instance Showable f vn => Show (ValDecBase f vn)
-
-instance Located (ValDecBase f vn) where
-  locOf (FunDec d)   = locOf d
-  locOf (ConstDec d) = locOf d
+instance Located (ModParamBase f vn) where
+  locOf = locOf . modParamLocation
 
 -- | A top-level binding.
-data DecBase f vn = ValDec (ValDecBase f vn)
+data DecBase f vn = ValDec (ValBindBase f vn)
+                  | FunDec (FunBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
-                  | StructDec (StructBindBase f vn)
-                  | FunctorDec (FunctorBindBase f vn)
+                  | ModDec (ModBindBase f vn)
                   | OpenDec (ModExpBase f vn) [ModExpBase f vn] SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
   locOf (ValDec d)        = locOf d
+  locOf (FunDec d)        = locOf d
   locOf (TypeDec d)       = locOf d
   locOf (SigDec d)        = locOf d
-  locOf (StructDec d)     = locOf d
-  locOf (FunctorDec d)    = locOf d
+  locOf (ModDec d)     = locOf d
   locOf (OpenDec _ _ loc) = locOf loc
 
 newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 -- | A set of names.
-type Names = HS.HashSet
+type Names = S.Set
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.

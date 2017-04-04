@@ -8,5 +8,5 @@
 --   3
 -- }
 
-fun main(a: []i32, i: i32): i32 =
+let main(a: []i32, i: i32): i32 =
   a[i]

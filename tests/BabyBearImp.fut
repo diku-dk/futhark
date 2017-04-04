@@ -47,7 +47,7 @@
 
 import "futlib/math"
 
-fun floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
+let floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
     let dT = transpose(d) in
     loop (d = copy d) = for i < n do
         loop (d) = for j < n do
@@ -59,6 +59,6 @@ fun floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
         in d
     in d
 
-fun main(): [][]i32 =
+let main(): [][]i32 =
     let arr = [[2,4,5], [1,1000,3], [3,7,1]] in
     floydSbsImp(3, copy(arr))

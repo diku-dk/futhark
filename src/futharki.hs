@@ -13,7 +13,7 @@ import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
@@ -44,7 +44,8 @@ banner = unlines [
   ]
 
 main :: IO ()
-main = mainWithOptions interpreterConfig options run
+main = reportingIOErrors $
+       mainWithOptions interpreterConfig options run
   where run [prog] config = Just $ interpret config prog
         run []     _      = Just repl
         run _      _      = Nothing
@@ -117,7 +118,7 @@ readEvalPrint = do
           -- expression as its body, append it to the stored program,
           -- then run it.
           let mkOpen f = OpenDec (ModImport f noLoc) [] noLoc
-              opens = map mkOpen $ HM.keys imports
+              opens = map mkOpen $ M.keys imports
               mainfun = FunBind { funBindEntryPoint = True
                                 , funBindName = nameFromString ""
                                 , funBindRetType = NoInfo
@@ -126,7 +127,7 @@ readEvalPrint = do
                                 , funBindBody = e
                                 , funBindLocation = noLoc
                                 }
-              prog' = Prog $ opens ++ [ValDec $ FunDec mainfun]
+              prog' = Prog $ opens ++ [FunDec mainfun]
           runProgram prog imports src prog'
 
 runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
@@ -169,7 +170,7 @@ Quit futharki.
           liftIO $ T.putStrLn $ "Reading " <> file
           res <- liftIO $ runExceptT (readProgram $ T.unpack file)
                  `catch` \(err::IOException) ->
-                 return (Left (CompileError (T.pack $ show err) mempty))
+                 return (Left (ExternalError (T.pack $ show err)))
           case res of
             Left err -> liftIO $ dumpError newFutharkConfig err
             Right (prog, _, imports, src) ->
