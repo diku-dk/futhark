@@ -213,7 +213,26 @@ mkCoalsTabBnd _ (Let (Pattern [] [pe]) _ e) td_env bu_env
   | Just primexp <- primExpFromExp (basePMconv (scope td_env) (scals bu_env)) e =
   bu_env { scals = HM.insert (patElemName pe) primexp (scals bu_env) }
 
--- | STILL BUGGY (the rule for IF)
+-- | Assume the if-result is a candidate for coalescing (further in the code).
+--   For now we conservatively treat only the case when both then and else
+--   result arrays are created inside their corresponding branches of the @if@.
+--   Otherwise we need more complex analysis, and may open pandora box.
+--   For example, the code below:
+--        @let a = map f a0                @
+--        @let (c,x) = if cond             @
+--        @            then (a,x)          @
+--        @            else let b = map g a@
+--        @                 let x[1] = a   @
+--        @                 in (b,x)       @
+--        @let y[3] = c                    @
+--  If coalescing of the if-result succeeds than both @a@ and @b@ are placed
+--  to @m_y[3]@. First, this is buggy because @b = map g a@ on the else branch.
+--  Second this is buggy because @a@ will be associated to @m_y[3]@ on the then
+--  branch, and with @m_x[1]@ on the else branch. Currently, unifying two
+--  mappings with different memory destinations, just picks one of them.
+--  If @m_x[1]@ is picked than we have an inconsisstent state. All these
+--  because we allow such cases, which is unclear whether appear and can
+--  be optimized in practice.
 mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
   let pat_val_elms  = patternValueElements patt
       not_ip_pat = all notInPlace pat_val_elms
@@ -226,7 +245,7 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
   -- ii) extend @activeCoals@ by transfering the pattern-elements bindings existent
   --     in @activeCoals@ to the body results of the then and else branches, but only
   --     if the current pattern element can be potentially coalesced and also
-  --     if the current pattern element satisfies safety conditions 2 & 5
+  --     if the current pattern element satisfies safety conditions 2 & 5.
       res_mem_then = findMemBodyResult activeCoals0 (scope td_env) pat_val_elms body_then
       res_mem_else = findMemBodyResult activeCoals0 (scope td_env) pat_val_elms body_else
 
@@ -244,39 +263,33 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
         foldl (\ ((act,inhb),succc) ((m_b,b,r1,mr1),(_,_,r2,mr2)) ->
                 case HM.lookup m_b act of
                   Nothing   -> Exc.assert False ((act,inhb),succc) -- impossible
-                  Just info -> -- Optimistically promote and append!
-                    let has_no_chance_then =
-                          case (HM.lookup mr1 actv_then0, HM.lookup mr1 succ_then0) of
-                            (Nothing,Nothing) -> True
-                            _                 -> False
-                        has_no_chance_else =
-                          case (HM.lookup mr2 actv_else0, HM.lookup mr2 succ_else0) of
-                            (Nothing,Nothing) -> True
-                            _                 -> False
-                    in  if has_no_chance_then || has_no_chance_else
-                        -- either then-result or else-result already failed coalescing,
-                        -- hence the if-result already failed coalescing; remove it.
-                        -- we can additionally do some filtering of the then/else tables,
-                        -- but I feel lazy so we will carry them around.
-                        then trace ("COALESCING: optimistic if-then-else fails "++pretty has_no_chance_then++" "++pretty has_no_chance_else)
-                                   (markFailedCoal (act,inhb) m_b, succc)
-                        else let info' = info { optdeps = HM.insert r2 mr2 $
-                                                HM.insert r1 mr1 $ optdeps info }
-                                 (act',succc') = markSuccessCoal (act,succc) m_b info'
-                             in  trace ("COALESCING: optimistic if-then-else promotion: "++pretty b++pretty m_b)
-                                       ((act',inhb), succc')
+                  Just info ->
+                    case (HM.lookup mr1 succ_then0, HM.lookup mr2 succ_else0) of
+                      (Just _, Just _) -> -- Optimistically promote and append!
+                        let info' = info { optdeps = HM.insert r2 mr2 $
+                                           HM.insert r1 mr1 $ optdeps info }
+                            (act',succc') = markSuccessCoal (act,succc) m_b info'
+                        in trace ("COALESCING: if-then-else promotion: "++pretty b++pretty m_b)
+                                 ((act',inhb), succc')
+                      _ -> -- one of the branches has failed coalescing, hence remove
+                           -- the coalescing of the result.
+                           trace ("COALESCING: if-then-else fails "++pretty b++pretty m_b)
+                                 (markFailedCoal (act,inhb) m_b, succc) 
               ) ((activeCoals0, inhibit0), successCoals0) (zip res_mem_then res_mem_else)
 
   --  v) unify coalescing results of all branches by taking the union
-  --     of all entries in the current/then/else active and success tables.
-      actv_com  = HM.intersectionWith unionCoalsEntry actv_then0 $
+  --     of all entries in the current/then/else success tables.
+      actv_com_then = HM.intersectionWith unionCoalsEntry actv_then0 activeCoals0
+      then_diff_com = HM.difference actv_then0 actv_com_then
+      (_,inhb_then1)= foldl markFailedCoal (then_diff_com,inhb_then0) (HM.keys then_diff_com)
+
+      actv_com_else = HM.intersectionWith unionCoalsEntry actv_else0 activeCoals0
+      else_diff_com = HM.difference actv_then0 actv_com_else
+      (_,inhb_else1)= foldl markFailedCoal (else_diff_com,inhb_else0) (HM.keys else_diff_com)
+      
+      actv_res0 = HM.intersectionWith unionCoalsEntry actv_then0 $
                   HM.intersectionWith unionCoalsEntry actv_else0 activeCoals1
-      then_diff_com = HM.difference actv_then0 activeCoals0 --actv_com
-      else_diff_com = HM.difference actv_else0 activeCoals0 --actv_com
-      actv_res0 = HM.unionWith unionCoalsEntry then_diff_com $
-                  HM.unionWith unionCoalsEntry else_diff_com actv_com
-                  -- HM.unionWith unionCoalsEntry activeCoals1 $
-                  -- HM.unionWith unionCoalsEntry actv_then0 actv_else0
+
       succ_res  = HM.unionWith unionCoalsEntry succ_then0 $
                   HM.unionWith unionCoalsEntry succ_else0 successCoals1
 
@@ -294,7 +307,7 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
         mkCoalsHelper1FilterActive patt body_free_vars (scope td_env)
                                    (scals bu_env) actv_res0 inhibit1
       inhibit_res = HM.unionWith HS.union inhibit_res0 $
-                    HM.unionWith HS.union inhb_then0 inhb_else0
+                    HM.unionWith HS.union inhb_then1 inhb_else1
   in  bu_env { activeCoals = actv_res, successCoals = succ_res, inhibit = inhibit_res }
 
 --mkCoalsTabBnd lutab (Let pat _ (Op (ExpMem.Inner (ExpMem.Kernel str cs ker_space tps ker_bdy)))) td_env bu_env =
