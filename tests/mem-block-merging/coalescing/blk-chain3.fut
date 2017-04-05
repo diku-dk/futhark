@@ -14,6 +14,7 @@
 --          ] 
 --        }
 
+-- Should result in 3 successful coalescing operations (all).
 fun main(a: [n]i32, y: *[n][n][n]i32): [n][n][n]i32 =
   let x = map (\i -> replicate n i) a
   let b = map (+1) a
