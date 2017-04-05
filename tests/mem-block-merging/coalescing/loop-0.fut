@@ -7,7 +7,7 @@
 --          [ [1i32, 9i32], [3i32, 4i32] ]
 --        }
 
-fun main(y: *[n][m]i32, a : [m]i32): *[n][m]i32 =
+fun main(y: *[#n][#m]i32, a : [#m]i32): *[n][m]i32 =
   let y[0,1] = 9
   let a0 = copy(a)
   loop(a1 = a0) = for i < n do

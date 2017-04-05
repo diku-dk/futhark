@@ -9,7 +9,7 @@
 -- succeed if the allocation of `y` is hoisted
 -- before the creation of `x` and `a2` 
 
-fun main(a: [n]i32): [][n]i32 =
+fun main(a: [#n]i32): [][n]i32 =
   let x = map (\i -> replicate n i) a
 --  in  copy(x)
   let b = map (+1) a

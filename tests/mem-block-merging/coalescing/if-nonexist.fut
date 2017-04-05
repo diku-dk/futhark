@@ -22,7 +22,7 @@
 -- existensial then we can track the creation of `z` outside
 -- the branches. Note that `z[0] = x2` and `z[1] = x1` are not
 -- coalesced.
-fun main(y: *[n][n][n]i32, a : [n]i32): *[n][n][n]i32 =
+fun main(y: *[#n][#n][#n]i32, a : [#n]i32): *[n][n][n]i32 =
   let z  = replicate n (replicate n 0)
   let x2 = map (*2) a
   let z2 = if (n > 3)

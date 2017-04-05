@@ -14,7 +14,7 @@
 --          ] 
 --        }
 
-fun main(a: [n]i32, y: *[n][n][n]i32): [n][n][n]i32 =
+fun main(a: [#n]i32, y: *[#n][#n][#n]i32): [n][n][n]i32 =
   let x = map (\i -> replicate n i) a
   let b = map (+1) a
   let x[n-3] = b
