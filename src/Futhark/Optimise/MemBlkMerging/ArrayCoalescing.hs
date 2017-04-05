@@ -351,7 +351,7 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
   let pat_val_elms  = patternValueElements pat
       not_ip_pat = all notInPlace pat_val_elms
 
-  --  i) Filter @activeCoals@ by the 2ND, 3rd AND 5th safety conditions:
+  --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions:
       (activeCoals00,inhibit00) =
         filterSafetyCond2and5 (activeCoals bu_env) (inhibit bu_env) (scals bu_env)
                               (alloc td_env) (scope td_env) pat_val_elms
@@ -370,12 +370,12 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                   scopeOfLoopForm lform))
   -- ii) Extend @activeCoals@ by transfering the pattern-elements bindings existent
   --     in @activeCoals@ to the loop-body results, but only if:
-  --        a) the pattern element is a candidate for coalescing,     and
-  --        b) the pattern element satisfies safety conditions 2 & 5,
-  --           (conditions 1 and 2 have already been checked above),  and
-  --        c) the memory block of the corresponding body result is
+  --       (a) the pattern element is a candidate for coalescing,     and
+  --       (b) the pattern element satisfies safety conditions 2 & 5,
+  --           (conditions (a) and (b) have already been checked above), and
+  --       (c) the memory block of the corresponding body result is
   --           allocated outside the loop, i.e., non-existential,     and
-  --        d) the init name is lastly-used in the initialization
+  --       (d) the init name is lastly-used in the initialization
   --           of the loop variant.
   --     Otherwise fail and remove from active-coalescing table!
       scopetab_loop = scopetab <> scopeOf (bodyStms body)
@@ -412,21 +412,39 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                 ) (zip3 pat_val_elms arginis bdy_ress)
 
       -- remove the other pattern elements from the active coalescing table:
-      coal_pat_mems = S.fromList $ map fst patmems
+      coal_pat_names = S.fromList $ map fst patmems
       (actv1,inhibit1) =
         foldl (\(act,inhb) (b, MemBlock _ _ m_b _, _) ->
-                 if   S.member b coal_pat_mems then (act,inhb) -- ok
+                 if   S.member b coal_pat_names then (act,inhb) -- ok
                  else markFailedCoal (act,inhb) m_b -- remove from active
               ) (actv0,inhibit0) (getArrMemAssoc pat)
 
-  -- iii) process the loop's body
+  -- iii) Process the loop's body.
+  --      If the memory blocks of the loop result and loop variant param differ
+  --      then make the original memory block of the loop result conflict with
+  --      the original memory block of the loop parameter. This is done in
+  --      order to prevent the coalescing of @a1@, @a0@, @x@ and @db@ in the
+  --      same memory block of @y@ in the example below:
+  --      @loop(a1 = a0) = for i < n do @
+  --      @    let x = map (+1) a1      @
+  --      @    let db = copy x          @
+  --      @    in db                    @
+  --      @let y[0] = a1                @
+  --      Meaning the coalescing of @x@ in @let db = copy x@ should fail because
+  --      @a1@ appears in the definition of @let x = map (+1) a1@.
       res_mem_bdy = zipWith (\(b,m_b) (r,m_r) -> (m_b,b,r,m_r)) patmems resmems
       res_mem_arg = zipWith (\(b,m_b) (r,m_r) -> (m_b,b,r,m_r)) patmems argmems
       res_mem_ini = zipWith (\(b,m_b) (r,m_r) -> (m_b,b,r,m_r)) patmems inimems
       actv2 = foldl transferCoalsToBody actv1 (res_mem_bdy++res_mem_arg++res_mem_ini)
+      actv3 = foldl (\ tab ((_,_,_,m_r),(_,_,_,m_a)) ->
+                        if m_r == m_a then tab
+                        else case M.lookup m_r tab of
+                                Nothing   -> tab
+                                Just etry -> M.insert m_r (etry { alsmem = S.insert m_a (alsmem etry) }) tab
+                    ) actv2 (zip res_mem_bdy res_mem_arg)
 
       res_env_body = mkCoalsTabBdy lutab body (td_env { scope    = scopetab })
-                                              (bu_env { activeCoals = actv2
+                                              (bu_env { activeCoals = actv3
                                                       , inhibit = inhibit1  })
 
   -- iv) optimistically mark the pattern succesful if there is any chance to succeed
