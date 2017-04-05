@@ -138,7 +138,7 @@ mkCoalsTabFun fun@(FunDef _ _ _ fpars body) =
               new_inhibited = M.unionWith S.union inhb_tab (inhibited topenv0)
           in  if not (M.null actv_tab1)
               then trace ("COALESCING ROOT: BROKEN INV, active not empty: " ++ pretty (M.keys actv_tab1) ) M.empty
-              else if   trace ("COALESCING ROOT, new inhibitions : "++pretty (map (Control.Arrow.second S.toList) $ M.toList inhb_tab)) $
+              else if   trace ("COALESCING ROOT, new inhibitions : "++prettyInhibitTab inhb_tab) $
                         M.null inhb_tab
                    then succ_tab
                    else fixPointCoalesce lutab fpars0 body0 (topenv0{ inhibited = new_inhibited })
@@ -260,8 +260,11 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
       -- @let x = if y[0,0] > 0 then map (+y[0,0) a else map (+1) b@
       -- @let y[0] = x@
       -- should succeed because @m_y@ is used before @x@ is created.
-      (actv_then, actv_else) = foldl (\(acth,acel) (m_b,_,_,_) -> (M.delete m_b acth, M.delete m_b acel) )
-                                     (actv_then_i, actv_else_i) res_mem_then
+      (actv_then, actv_else) = foldl (\(acth,acel) (m_b,_,_,m_r) ->
+                                            if m_b == m_r
+                                            then (acth, acel)
+                                            else (M.delete m_b acth, M.delete m_b acel)
+                                     ) (actv_then_i, actv_else_i) res_mem_then
 
   --iii) process the then and else bodies
       res_then = mkCoalsTabBdy lutab body_then td_env (bu_env {activeCoals = actv_then})
@@ -282,10 +285,27 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
                             (act',succc') = markSuccessCoal (act,succc) m_b info'
                         in trace ("COALESCING: if-then-else promotion: "++pretty b++pretty m_b)
                                  ((act',inhb), succc')
-                      _ -> -- one of the branches has failed coalescing, hence remove
-                           -- the coalescing of the result.
-                           trace ("COALESCING: if-then-else fails "++pretty b++pretty m_b)
-                                 (markFailedCoal (act,inhb) m_b, succc)
+                      _ -> if m_b == mr1 && m_b == mr2
+                           then -- special case resembling:
+                                -- @let x0 = map (+1) a                                  @
+                                -- @let x3 = if cond then let x1 = x0 with [0] <- 2 in x1@
+                                -- @                 else let x2 = x0 with [1] <- 3 in x2@
+                                -- @let z[1] = y                                         @
+                                -- In this case the result active table should be the union
+                                -- of the @m_x@ entries of the then and else active tables.
+                                case (M.lookup mr1 actv_then0, M.lookup mr2 actv_else0) of
+                                  (Just info_then, Just info_else) -> -- add it to active
+                                    let info' = unionCoalsEntry info $
+                                                unionCoalsEntry info_then info_else
+                                        act'  = M.insert m_b info' act
+                                    in  ((act',inhb),succc)
+                                  -- otherwise remove the coalescing result
+                                  _ -> trace ("COALESCING: if-then-else fails m_b == mr1 == mr2 "++pretty b++" "++pretty m_b)
+                                             (markFailedCoal (act,inhb) m_b, succc)
+                           else -- one of the branches has failed coalescing, hence remove
+                                -- the coalescing of the result.
+                                trace ("COALESCING: if-then-else fails "++pretty b++pretty m_b)
+                                      (markFailedCoal (act,inhb) m_b, succc)
               ) ((activeCoals0, inhibit0), successCoals0) (zip res_mem_then res_mem_else)
 
   --  v) unify coalescing results of all branches by taking the union
@@ -465,7 +485,7 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                           -- we are at the definition of some variable aliased with
                           -- the coalesced variable @b@, hence extend @activeCoals@,
                           -- e.g., @let a = map f arr  @
-                          --       @let b = transpose a@ <- current statement
+                          --       @let b = reshape a  @ <- current statement
                           --       @ ... use of b ...  @
                           --       @let x[i] = a       @
                           --       we need to add variable @b@ to the entry of @m_a@
