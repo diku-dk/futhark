@@ -6,6 +6,6 @@
 -- input { [0] [1,2] }
 -- error:
 
-let main(is: [n]i32, vs: [m]i32): []i32 =
+let main(is: [#n]i32, vs: [#m]i32): []i32 =
   let a = replicate 10 0
   in scatter a is vs

@@ -19,7 +19,7 @@
 -- The read from `y` should not disable coalescing of
 -- `y[0] = z` because it occurs before `z` is actually
 -- created (not in the lifespan of `z`).
-fun main(y : *[n][q]i32, a : [n]i32, b : [m]i32): *[n][q]i32 =
+fun main(y : *[#n][#q]i32, a : [#n]i32, b : [#m]i32): *[n][q]i32 =
 --  let y = replicate n (replicate (n+m) 1i32)
   let z = if (y[0,0]) > 0 
           then let a1 = map (+y[0,0]) a

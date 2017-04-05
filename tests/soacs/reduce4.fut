@@ -2,7 +2,7 @@
 -- ==
 -- input { [[1,2],[3,4],[5,6]] }
 -- output { [9, 12] }
-let main(as: [][m]i32): []i32 =
+let main(as: [][#m]i32): []i32 =
   reduce_comm(\(acc: []i32) (r: []i32): []i32  ->
                map (+) acc r)
              (replicate m 0)

@@ -26,6 +26,7 @@ module Language.Futhark.Syntax
   , qualNameFromTypeName
   , TypeBase(..)
   , TypeExp(..)
+  , TypeArg(..)
   , RecordArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
@@ -79,9 +80,9 @@ module Language.Futhark.Syntax
   where
 
 import           Control.Applicative
+import           Control.Monad
 import           Data.Array
 import           Data.Foldable
-import           Data.Functor
 import           Data.Hashable
 import qualified Data.Map.Strict                as M
 import qualified Data.Set                     as S
@@ -157,18 +158,29 @@ class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
   -- @shape@, returning 'Nothing' if this would result in zero or
   -- fewer dimensions.
   stripDims :: Int -> shape -> Maybe shape
+  -- | @unifyShapes x y@ combines @x@ and @y@ to contain their maximum
+  -- common information, and fails if they conflict.
+  unifyShapes :: shape -> shape -> Maybe shape
 
 -- | Declaration of a dimension size.
-data DimDecl vn = NamedDim vn
-                  -- ^ The size of the dimension is this name.  In a
-                  -- function parameter, this is in a binding
-                  -- position.  In a return type, this will give rise
-                  -- to an assertion.
+data DimDecl vn = BoundDim vn
+                  -- ^ The size of the dimension is this name, in a
+                  -- binding position.
+                | NamedDim (QualName vn)
+                  -- ^ The size of the dimension is this name, which
+                  -- must be in scope.  In a return type, this will
+                  -- give rise to an assertion.
                 | ConstDim Int
                   -- ^ The size is a constant.
                 | AnyDim
                   -- ^ No dimension declaration.
                 deriving (Eq, Ord, Show)
+
+instance Functor DimDecl where
+  fmap f (BoundDim x) = BoundDim $ f x
+  fmap f (NamedDim (QualName qs x)) = NamedDim $ QualName qs $ f x
+  fmap _ (ConstDim x) = ConstDim x
+  fmap _ AnyDim = AnyDim
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
@@ -183,10 +195,15 @@ instance Monoid Rank where
   mempty = Rank 0
   Rank n `mappend` Rank m = Rank $ n + m
 
+instance Functor ShapeDecl where
+  fmap f (ShapeDecl ds) = ShapeDecl $ map (fmap f) ds
+
 instance ArrayShape Rank where
   shapeRank (Rank n) = n
   stripDims i (Rank n) | i < n     = Just $ Rank $ n - i
                        | otherwise = Nothing
+  unifyShapes (Rank x) (Rank y) | x == y = Just $ Rank x
+                                | otherwise = Nothing
 
 instance Monoid (ShapeDecl vn) where
   mempty = ShapeDecl []
@@ -197,6 +214,14 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
   stripDims i (ShapeDecl l)
     | i < length l = Just $ ShapeDecl $ drop i l
     | otherwise    = Nothing
+  unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
+    guard $ length xs == length ys
+    ShapeDecl <$> zipWithM unifyShapeDecl xs ys
+    where unifyShapeDecl AnyDim y = Just y
+          unifyShapeDecl x AnyDim = Just x
+          unifyShapeDecl (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
+          unifyShapeDecl (ConstDim x) (ConstDim y) | x == y = Just $ ConstDim x
+          unifyShapeDecl _ _ = Nothing
 
 -- | A type name consists of qualifiers (for error messages) and a
 -- 'VName' (for equality checking).
@@ -282,6 +307,15 @@ instance Located (TypeExp vn) where
   locOf (TEVar _ loc)     = locOf loc
   locOf (TEUnique _ loc)  = locOf loc
 
+data TypeArg vn = TypeArgVarSize vn SrcLoc
+                | TypeArgBoundSize vn SrcLoc -- ^ Being implicitly bound.
+                | TypeArgConstSize Int SrcLoc
+                deriving (Eq, Show)
+
+instance Located (TypeArg vn) where
+  locOf (TypeArgVarSize _ loc) = locOf loc
+  locOf (TypeArgBoundSize _ loc) = locOf loc
+  locOf (TypeArgConstSize _ loc) = locOf loc
 --
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.

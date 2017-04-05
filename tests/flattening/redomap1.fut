@@ -6,9 +6,9 @@
 -- output {
 --   [12, 27]
 -- }
-let main (xss: [m][n]i32, yss: [m][n]i32): [m]i32 =
+let main (xss: [#m][#n]i32, yss: [#m][#n]i32): [m]i32 =
     let final_res =
-      map (\(xs: [n]i32, ys: [n]i32): i32  ->
+      map (\(xs: [#n]i32, ys: [#n]i32): i32  ->
             let tmp =
               map  (\(x: i32, y: i32): i32  -> x+y
                   ) (zip  xs ys) in

@@ -13,7 +13,7 @@
 -- coalescing of `a` (and `y`) into the memory block
 -- of `w` fails. Also `y'[1]` cannot reuse the space
 -- of `w` for obvious reasons (only reshape operations can).
-let main(x: [n]i32): []i32 =
+let main(x: [#n]i32): []i32 =
   let y = map (*2) x in
   let y'= reshape (2,n/2) y
   loop(a=y) = for i < n do

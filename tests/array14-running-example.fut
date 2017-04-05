@@ -2,7 +2,7 @@
 -- ==
 -- tags { no_opencl }
 
-let main(xs: *[]i32, as: *[m][n]f64): [][]f64 =
+let main(xs: *[]i32, as: *[#m][#n]f64): [][]f64 =
   map  (\(e: (i32, *[]f64)): *[]f64  ->
          let (i, a) = e in
          loop(a) = for j < n do

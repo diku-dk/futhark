@@ -67,7 +67,7 @@ let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
     in (d, b + rotate_left(a + f + ks[i] + m[g], rs[i]), b, c)
   in (a,b,c,d)
 
-let md5(ms: [n][16]u32): md5 =
+let md5(ms: [#n][16]u32): md5 =
   let a0 = u32(0x67452301)
   let b0 = u32(0xefcdab89)
   let c0 = u32(0x98badcfe)
@@ -77,7 +77,7 @@ let md5(ms: [n][16]u32): md5 =
     in (a0+a, b0+b, c0+c, d0+d)
   in (a0,b0,c0,d0)
 
-let main(ms: [n]u8): [16]u8 =
+let main(ms: [#n]u8): [16]u8 =
   let padding = 64 - (n % 64)
   let n_padded = n + padding
   let ms_padded = concat ms (bytes 0x80u32) (replicate (padding-12) 0x0u8) (bytes (u32(n*8))) ([0u8,0u8,0u8,0u8])

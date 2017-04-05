@@ -18,17 +18,17 @@ module linalg(T: numeric): {
 } = {
   open T
   type t = T.t
-  let dotprod (xs: [n]t) (ys: [n]t): t =
+  let dotprod (xs: [#n]t) (ys: [#n]t): t =
     reduce (+) (from_i32 0) (map (*) xs ys)
 
-  let matvecmul (xss: [n][m]t) (ys: [m]t) =
+  let matvecmul (xss: [#n][#m]t) (ys: [#m]t) =
     map (dotprod ys) xss
 
-  let matmul (xss: [n][p]t) (yss: [p][m]t): [n][m]t =
+  let matmul (xss: [#n][#p]t) (yss: [#p][#m]t): [n][m]t =
     map (\xs -> map (dotprod xs) (transpose yss)) xss
 
   -- Matrix inversion is implemented with Gauss-Jordan.
-  let gauss_jordan (A: [n][m]t) (i: i32): [n][m]t =
+  let gauss_jordan (A: [#n][#m]t) (i: i32): [n][m]t =
     loop (A) = for i < n do
       (let irow = A[0]
        let Ap = A[1:n]
@@ -41,7 +41,7 @@ module linalg(T: numeric): {
        in concat Ap [irow])
     in A
 
-  let inv (A: [n][n]t): [n][n]t =
+  let inv (A: [#n][#n]t): [n][n]t =
     -- Pad the matrix with the identity matrix.
     let Ap = map (\row i ->
                   let padding = replicate n (from_i32 0)
@@ -53,6 +53,6 @@ module linalg(T: numeric): {
     in Ap'[0:n,n:n intrinsics.* 2]
 
   -- Solves Ax=b.
-  let ols (X: [n][m]t) (b: [n]t): [m]t =
+  let ols (X: [#n][#m]t) (b: [#n]t): [m]t =
     matvecmul (matmul (inv (matmul (transpose X) X)) (transpose X)) b
 }

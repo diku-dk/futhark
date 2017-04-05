@@ -16,7 +16,7 @@
 -- }
 --
 let mul2(x: []f64) (i: i32): f64 = x[i]*2.0
-let main(arr: [n]f64): (f64,[]f64,f64,[]f64,f64,[]f64) =
+let main(arr: [#n]f64): (f64,[]f64,f64,[]f64,f64,[]f64) =
     let r1 = reduce (+) (0.0) arr
     let x  = map    (+1.0) arr
     let r2 = reduce (*) (1.0) x

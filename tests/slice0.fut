@@ -10,5 +10,5 @@
 -- input { [1,2,3,4,5] 1 0 }
 -- error: Assertion.*failed
 
-let main(as: [n]i32, i: i32, j: i32): []i32 =
+let main(as: [#n]i32, i: i32, j: i32): []i32 =
   as[i:j]

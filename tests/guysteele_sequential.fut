@@ -14,7 +14,7 @@ let min(x: i32) (y: i32): i32 =
 let max(x: i32) (y: i32): i32 =
   if x < y then y else x
 
-let reverse(a: [n]i32): [n]i32 =
+let reverse(a: [#n]i32): [n]i32 =
   map (\(i: i32): i32  -> a[n-i-1]) (iota(n))
 
 let main(a: []i32): i32 =
