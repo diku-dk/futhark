@@ -6,7 +6,7 @@
 --   33
 -- }
 
-let main(arr: [m]i32): i32 =
+let main(arr: [#m]i32): i32 =
   let k = 0 in
   loop (k) =
     for i < m-1 do

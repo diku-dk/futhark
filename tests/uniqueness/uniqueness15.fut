@@ -6,7 +6,7 @@
 --
 -- From issue #191.
 
-let reduceBins(acc: *[numBins]i32) (elm: *[numBins]i32): *[numBins]i32 =
+let reduceBins(acc: *[#numBins]i32) (elm: *[#numBins]i32): *[numBins]i32 =
     loop (newVal = acc) = for i < numBins do
         let newVal[i] = newVal[i] + elm[i] in newVal
     in

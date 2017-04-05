@@ -8,10 +8,10 @@ module Language.Futhark.TypeChecker.Monad
   , askEnv
   , askImportTable
   , checkQualName
+  , bindSpaced
 
   , MonadTypeChecker(..)
   , badOnLeft
-  , expandType
 
   , require
 
@@ -78,7 +78,7 @@ data TypeError =
   | DupDefinitionError Namespace Name SrcLoc SrcLoc
   | DupPatternError Name SrcLoc SrcLoc
   | InvalidPatternError (PatternBase NoInfo Name)
-    (TypeBase Rank ()) (Maybe String) SrcLoc
+    (TypeBase (ShapeDecl Name) ()) (Maybe String) SrcLoc
   | UnknownVariableError Namespace (QualName Name) SrcLoc
   | ParameterMismatch (Maybe (QualName Name)) SrcLoc
     (Either Int [TypeBase Rank ()]) [TypeBase Rank ()]
@@ -89,7 +89,7 @@ data TypeError =
   | ReturnAliased Name Name SrcLoc
   | UniqueReturnAliased Name SrcLoc
   | PermutationError SrcLoc [Int] Int
-  | DimensionNotInteger SrcLoc Name
+  | DimensionNotInteger SrcLoc (QualName Name)
   | InvalidUniqueness SrcLoc (TypeBase Rank ())
   | UndefinedType SrcLoc (QualName Name)
   | InvalidField SrcLoc Type String
@@ -225,7 +225,7 @@ data MTy = MTy { mtyAbs :: TySet
 
 -- | A binding from a name to its definition as a type.
 newtype TypeBinding = TypeAbbr StructType
-                    deriving (Show)
+                 deriving (Show)
 
 data ValBinding = BoundV Type
                 | BoundF FunBinding
@@ -311,42 +311,15 @@ class MonadError TypeError m => MonadTypeChecker m where
   newName :: VName -> m VName
   newID :: Name -> m VName
 
+  bindNameMap :: NameMap -> m a -> m a
+
   checkName :: Namespace -> Name -> SrcLoc -> m VName
 
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, StructType)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m Env
-
-expandType :: MonadTypeChecker m =>
-              (SrcLoc -> DimDecl Name -> m (DimDecl VName))
-           -> TypeExp Name
-           -> m (TypeExp VName, StructType)
-expandType _ (TEVar name loc) = do
-  (name', t) <- lookupType loc name
-  return (TEVar name' loc, t)
-expandType look (TETuple ts loc) = do
-  (ts', ts_s) <- unzip <$> mapM (expandType look) ts
-  return (TETuple ts' loc, tupleRecord ts_s)
-expandType look t@(TERecord fs loc) = do
-  -- Check for duplicate field names.
-  let field_names = map fst fs
-  unless (sort field_names == sort (nub field_names)) $
-    bad $ TypeError loc $ "Duplicate record fields in " ++ pretty t
-
-  fs_and_ts <- traverse (expandType look) $ M.fromList fs
-  let fs' = fmap fst fs_and_ts
-      ts_s = fmap snd fs_and_ts
-  return (TERecord (M.toList fs') loc, Record ts_s)
-expandType look (TEArray t d loc) = do
-  (t', st) <- expandType look t
-  d' <- look loc d
-  return (TEArray t' d' loc, arrayOf st (ShapeDecl [d']) Nonunique)
-expandType look (TEUnique t loc) = do
-  (t', st) <- expandType look t
-  case st of
-    Array{} -> return (t', st `setUniqueness` Unique)
-    _       -> throwError $ InvalidUniqueness loc $ toStructural st
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, Type)
 
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
@@ -355,6 +328,12 @@ require ts e
   | any (toStruct (typeOf e) `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e)
                       (toStructural $ typeOf e) ts
+
+bindSpaced :: MonadTypeChecker m => [(Namespace, Name)] -> m a -> m a
+bindSpaced names body = do
+  names' <- mapM (newID . snd) names
+  let mapping = M.fromList (zip names names')
+  bindNameMap mapping body
 
 instance MonadTypeChecker TypeM where
   bad = throwError
@@ -368,6 +347,10 @@ instance MonadTypeChecker TypeM where
 
   newID s = newName $ VName s 0
 
+  bindNameMap m = local $ \(env, imports) ->
+    (env { envNameMap = m <> envNameMap env },
+     imports)
+
   checkName space name loc = do
     (_, QualName _ name') <- checkQualName space (qualName name) loc
     return name'
@@ -375,7 +358,7 @@ instance MonadTypeChecker TypeM where
   lookupType loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualName Type qn loc
     case M.lookup name $ envTypeTable scope of
-      Nothing             -> bad $ UndefinedType loc qn
+      Nothing -> bad $ UndefinedType loc qn
       Just (TypeAbbr def) -> return (qn', def)
 
   lookupMod loc qn = do
@@ -394,6 +377,14 @@ instance MonadTypeChecker TypeM where
     case M.lookup file imports of
       Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\""
       Just scope -> return scope
+
+  lookupVar loc qn = do
+    (env, qn'@(QualName _ name)) <- checkQualName Term qn loc
+    case M.lookup name $ envVtable env of
+      Nothing -> bad $ UnknownVariableError Term qn loc
+      Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
+                      | otherwise -> return (qn', t)
+      Just BoundF{} -> bad $ FunctionIsNotValue loc qn
 
 checkQualName :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualName space qn@(QualName quals name) loc = do

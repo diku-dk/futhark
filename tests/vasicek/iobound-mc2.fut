@@ -9,7 +9,7 @@ default(f32)
 
 -- Some useful (for mc2) Futhark extensions.
 let sum(xs: []f32): f32 = reduce (+) (0.0) xs
-let mean(xs: [n]f32): f32 = sum(map (/f32(n)) xs)
+let mean(xs: [#n]f32): f32 = sum(map (/f32(n)) xs)
 
 
 -- Vasicek model parameters.
@@ -26,11 +26,11 @@ let nextrP(lastr: f32, wp: f32): f32 =
 let nextrQ(lastr: f32, wq: f32): f32 =
   lastr + kappa() * (thetaQ() - lastr) + sigma() * wq
 
-let seqRedSumP(lastr: f32, ws: [n]f32): f32 =
+let seqRedSumP(lastr: f32, ws: [#n]f32): f32 =
   loop (lastr) = for i < n do nextrP(lastr, ws[i])
   in lastr
 
-let seqRedSumQ(lastr: f32, ws: [n]f32): f32 =
+let seqRedSumQ(lastr: f32, ws: [#n]f32): f32 =
   loop (lastr) = for i < n do nextrQ(lastr, ws[i])
   in lastr
 
@@ -43,7 +43,7 @@ let mc1(wpss: [][]f32): []f32 =
 let mc2step (wqs: []f32) (r1: f32): f32 =
   seqRedSumQ(r1, wqs)
 
-let mc2sim(arg: ([tn][]f32, f32)): f32 =
+let mc2sim(arg: ([#tn][]f32, f32)): f32 =
   let ( wqss, r1 ) = arg
   let sum_r = map mc2step wqss (replicate tn r1) in
   mean(sum_r)

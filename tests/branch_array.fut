@@ -8,7 +8,7 @@
 -- input { false 3 }
 -- output { [1337,1337,1337] }
 
-let f(a: [n]i32): []i32 = a
+let f(a: [#n]i32): []i32 = a
 
 let g(n: i32): []i32 = replicate n 1337
 

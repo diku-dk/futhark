@@ -31,11 +31,10 @@ type InternaliseLambda =
   E.Lambda -> [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 
 internaliseMapLambda :: InternaliseLambda
-                     -> (InternaliseM Certificates -> InternaliseM Certificates)
                      -> E.Lambda
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
-internaliseMapLambda internaliseLambda asserting lam args = do
+internaliseMapLambda internaliseLambda lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda lam rowtypes
@@ -95,14 +94,13 @@ bindMapShapes inner_shapes sizefun args outer_shape
           letSubExp "elem" $ I.BasicOp $ I.Index [] arg' $ fullSlice arg_t [I.DimFix zero]
 
 internaliseFoldLambda :: InternaliseLambda
-                      -> (InternaliseM Certificates -> InternaliseM Certificates)
                       -> E.Lambda
                       -> [I.Type] -> [I.Type]
                       -> InternaliseM I.Lambda
-internaliseFoldLambda internaliseLambda asserting lam acctypes arrtypes = do
+internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
   (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
-  let rettype' = [ t `I.setArrayShape` arrayShape shape
+  let rettype' = [ t `I.setArrayShape` I.arrayShape shape
                    | (t,shape) <- zip rettype acctypes ]
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.  We accomplish this with an assertion and
@@ -113,12 +111,11 @@ internaliseFoldLambda internaliseLambda asserting lam acctypes arrtypes = do
 
 
 internaliseRedomapInnerLambda :: InternaliseLambda
-                              -> (InternaliseM Certificates -> InternaliseM Certificates)
                               -> E.Lambda
                               -> [I.SubExp]
                               -> [I.SubExp]
                               -> InternaliseM I.Lambda
-internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
+internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   arrtypes <- mapM I.subExpType arr_args
   acctypes <- mapM I.subExpType nes
   let rowtypes = map I.rowType arrtypes
@@ -149,7 +146,7 @@ internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
   bindMapShapes inner_shapes shapefun arr_args outer_shape
   --
   -- for the reduce part
-  let acctype' = [ t `I.setArrayShape` arrayShape shape
+  let acctype' = [ t `I.setArrayShape` I.arrayShape shape
                    | (t,shape) <- zip acc_tps acctypes ]
   -- The reduce-part result of the body must have the exact same
   -- shape as the initial accumulator.  We accomplish this with
@@ -161,12 +158,11 @@ internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
   return $ I.Lambda params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda
-                        -> (InternaliseM Certificates -> InternaliseM Certificates)
                         -> E.Lambda
                         -> [I.Type]
                         -> [I.Type]
                         -> InternaliseM I.ExtLambda
-internaliseStreamLambda internaliseLambda asserting lam acctypes rowts = do
+internaliseStreamLambda internaliseLambda lam acctypes rowts = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param chunk_size $ I.Prim int32
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
@@ -187,7 +183,7 @@ internaliseStreamLambda internaliseLambda asserting lam acctypes rowts = do
   let assertProperShape t se =
         let name = "result_stream_proper_shape"
         in  ensureShape asserting (srclocOf lam) t name se
-  let acctype' = [ t `I.setArrayShape` arrayShape shape
+  let acctype' = [ t `I.setArrayShape` I.arrayShape shape
                    | (t,shape) <- zip lam_acc_tps acctypes ]
   body' <- insertStmsM $ do
                 let mkArrType :: (VName, ExtType) -> InternaliseM I.Type

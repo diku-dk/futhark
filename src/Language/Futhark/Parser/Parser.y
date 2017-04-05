@@ -235,7 +235,7 @@ Prog :: { UncheckedProg }
 Dec :: { [UncheckedDec] }
     : Fun               { [FunDec $1] }
     | Val               { [ValDec $1] }
-    | TypeAbbr          { map TypeDec $1 }
+    | TypeAbbr          { [TypeDec $1] }
     | SigBind           { [SigDec $1 ] }
     | ModBind           { [ModDec $1 ] }
     | DefaultDec        { [] }
@@ -243,14 +243,6 @@ Dec :: { [UncheckedDec] }
       { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] $1] }
     | open many1(ModExpAtom)
       { [OpenDec (fst $2) (snd $2) $1] }
-;
-
-
-Aliases : id ',' Aliases
-            { let L loc (ID name) = $1
-                in (name,loc) : $3 }
-        | id { let L loc (ID name) = $1
-               in [(name,loc)] }
 ;
 
 SigExp :: { UncheckedSigExp }
@@ -315,9 +307,8 @@ Spec :: { SpecBase NoInfo Name }
       | val BindingBinOp ':' SigTypeDecl
         { let (ps, r) = $4
           in ValSpec $2 ps r $1  }
-      | type id '=' TypeExpDecl
-        { let L loc (ID name) = $2
-          in TypeAbbrSpec (TypeBind name $4 loc) }
+      | TypeAbbr
+        { TypeAbbrSpec $1 }
       | type id
         { let L loc (ID name) = $2
           in TypeSpec name loc }
@@ -403,10 +394,10 @@ SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
 TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp { TypeDecl $1 NoInfo }
 
-TypeAbbr :: { [TypeBindBase NoInfo Name] }
-TypeAbbr : type Aliases '=' TypeExpDecl
-                  { let aliases = $2
-                    in map (\(name, loc) -> TypeBind name $4 loc) aliases }
+TypeAbbr :: { TypeBindBase NoInfo Name }
+TypeAbbr : type id '=' TypeExpDecl
+           { let L loc (ID name) = $2
+              in TypeBind name $4 loc }
 
 TypeExp :: { UncheckedTypeExp }
          : '*' TypeExp             { TEUnique $2 $1 }
@@ -422,9 +413,11 @@ TypeExp :: { UncheckedTypeExp }
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
 DimDecl :: { DimDecl Name }
-        : id
-          { let L _ (ID name) = $1
-            in NamedDim name }
+        : QualName
+          { NamedDim (fst $1) }
+        | '#' id
+          { let L _ (ID name) = $2
+            in BoundDim name }
         | declit
           { let L _ (DECLIT n) = $1
             in ConstDim (fromIntegral n) }

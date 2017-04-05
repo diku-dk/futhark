@@ -34,20 +34,12 @@ import Language.Futhark
 import Futhark.FreshNames hiding (newName)
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Terms
+import Language.Futhark.TypeChecker.Types
 
 --- The main checker
 
 localEnv :: (Env -> Env) -> TypeM a -> TypeM a
 localEnv = local . first
-
-bindSpaced :: [(Namespace, Name)] -> TypeM a -> TypeM a
-bindSpaced names body = do
-  names' <- mapM (newID . snd) names
-  let mapping = M.fromList (zip names names')
-  bindNameMap mapping body
-
-bindNameMap :: NameMap -> TypeM a -> TypeM a
-bindNameMap m = localEnv $ \scope -> scope { envNameMap = m <> envNameMap scope }
 
 -- | The (abstract) result of type checking some file.  Can be passed
 -- to further invocations of the type checker.
@@ -126,8 +118,8 @@ checkSpecs [] = return (mempty, mempty, [])
 checkSpecs (ValSpec name paramtypes rettype loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    paramtypes' <- mapM checkTypeDecl paramtypes
-    rettype' <- checkTypeDecl rettype
+    paramtypes' <- mapM (checkTypeDecl loc) paramtypes
+    rettype' <- checkTypeDecl loc rettype
     let paramtypes'' = map (unInfo . expandedType) paramtypes'
         rettype'' = unInfo $ expandedType rettype'
         valenv =
@@ -198,7 +190,7 @@ checkSigExp (SigSpecs specs loc) = do
   return (MTy abstypes $ ModEnv env, SigSpecs specs' loc)
 checkSigExp (SigWith s (TypeRef tname td) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
-  td' <- checkTypeDecl td
+  td' <- checkTypeDecl loc td
   tname' <- localEnv (s_env<>) $ snd <$> checkQualName Type tname loc
   (s_abs', s_env') <- refineEnv loc s_abs s_env tname' $ unInfo $ expandedType td'
   return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
@@ -416,7 +408,7 @@ checkForDuplicateSpecs =
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
 checkTypeBind (TypeBind name td loc) = do
-  td' <- checkTypeDecl td
+  td' <- checkTypeDecl loc td
   bindSpaced [(Type, name)] $ do
     name' <- checkName Type name loc
     return (mempty { envTypeTable =
@@ -431,7 +423,11 @@ checkValBind (ValBind name maybe_t NoInfo e loc) = do
   name' <- bindSpaced [(Term, name)] $ checkName Term name loc
   (maybe_t', e') <- case maybe_t of
     Just t  -> do
-      (tdecl, tdecl_type) <- runTermTypeM $ checkTypeExp t
+      (tdecl, tdecl_type, implicit) <- checkTypeExp t
+      unless (M.null $ implicitNameMap implicit) $
+        bad $ TypeError loc
+        "Type ascription for let-binding may not have shape declarations."
+
       let t_structural = toStructural tdecl_type
       when (anythingUnique t_structural) $
         bad $ UniqueConstType loc name t_structural
@@ -473,8 +469,8 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
                  },
            FunBind entry fname' maybe_retdecl' (Info rettype) params' body' loc)
 
-  where dimDeclName (NamedDim name) = Just name
-        dimDeclName _               = Nothing
+  where dimDeclName (NamedDim (QualName [] name)) = Just name
+        dimDeclName _                             = Nothing
 
         paramType :: Pattern -> StructType
         paramType = vacuousShapeAnnotations . toStruct . patternType
@@ -523,9 +519,11 @@ checkDecs (FunDec fb:rest) = do
 checkDecs [] =
   return (mempty, [])
 
-checkTypeDecl :: TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VName)
-checkTypeDecl (TypeDecl t NoInfo) = do
-  (t', st) <- runTermTypeM $ checkTypeExp t
+checkTypeDecl :: SrcLoc -> TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VName)
+checkTypeDecl loc (TypeDecl t NoInfo) = do
+  (t', st, implicit) <- checkTypeExp t
+  unless (M.null $ implicitNameMap implicit) $
+    bad $ TypeError loc "Type may not have shape declarations here."
   return $ TypeDecl t' $ Info st
 
 --- Signature matching

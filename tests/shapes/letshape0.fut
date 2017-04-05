@@ -1,0 +1,13 @@
+-- It is OK to bind a name in a let-shape declaration.
+--
+-- ==
+-- input { [1,2,3,4,5,6] }
+-- output { 3 }
+
+default (f32)
+
+let even(x: i32): bool = x % 2 == 0
+
+let main(xs: [#n]i32): i32 =
+  let xs': [#num_even]i32 = filter even xs
+  in num_even

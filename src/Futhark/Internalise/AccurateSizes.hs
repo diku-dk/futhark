@@ -83,9 +83,9 @@ ensureShape asserting loc = ensureExtShape asserting loc . staticShapes1
 -- | Reshape the arguments to a function so that they fit the expected
 -- shape declarations.  Not used to change rank of arguments.  Assumes
 -- everything is otherwise type-correct.
-ensureArgShapes :: MonadBinder m =>
+ensureArgShapes :: (MonadBinder m, Typed (TypeBase Shape u)) =>
                    (m Certificates -> m Certificates)
-                -> SrcLoc -> [VName] -> [DeclType] -> [SubExp]
+                -> SrcLoc -> [VName] -> [TypeBase Shape u] -> [SubExp]
                 -> m [SubExp]
 ensureArgShapes asserting loc shapes paramts args =
   zipWithM ensureArgShape (expectedTypes shapes paramts args) args

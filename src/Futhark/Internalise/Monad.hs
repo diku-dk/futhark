@@ -31,6 +31,9 @@ module Futhark.Internalise.Monad
   , generatingFunctor
   , withDecSubstitutions
 
+  , asserting
+  , assertingOne
+
     -- * Convenient reexports
   , module Futhark.Tools
   )
@@ -288,3 +291,20 @@ withDecSubstitutions p_substs m = do
   let update env =
         env { envFunctorSubsts = p_substs `M.union` envFunctorSubsts env }
   local update m
+
+
+-- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
+-- just return an empty list.
+asserting :: InternaliseM Certificates
+          -> InternaliseM Certificates
+asserting m = do
+  doBoundsChecks <- asks envDoBoundsChecks
+  if doBoundsChecks
+  then m
+  else return []
+
+-- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
+-- just return an empty list.
+assertingOne :: InternaliseM VName
+             -> InternaliseM Certificates
+assertingOne m = asserting $ fmap pure m
