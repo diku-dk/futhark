@@ -24,9 +24,11 @@ module Futhark.Representation.AST.Attributes.Types
        , setOuterDim
        , setDim
        , setArrayDims
+       , setArrayExtDims
        , peelArray
        , stripArray
        , arrayDims
+       , arrayExtDims
        , shapeSize
        , arraySize
        , arraysSize
@@ -202,6 +204,11 @@ arrayOfShape t shape = arrayOf t shape NoUniqueness
 setArrayDims :: TypeBase oldshape u -> [SubExp] -> TypeBase Shape u
 setArrayDims t dims = t `setArrayShape` Shape dims
 
+-- | Set the existential dimensions of an array.  If the given type is
+-- not an array, return the type unchanged.
+setArrayExtDims :: TypeBase oldshape u -> [ExtDimSize] -> TypeBase ExtShape u
+setArrayExtDims t dims = t `setArrayShape` ExtShape dims
+
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setOuterSize :: TypeBase Shape u -> SubExp -> TypeBase Shape u
@@ -251,6 +258,11 @@ shapeSize i shape = case drop i $ shapeDims shape of
 -- empty list.
 arrayDims :: TypeBase Shape u -> [SubExp]
 arrayDims = shapeDims . arrayShape
+
+-- | Return the existential dimensions of a type - for non-arrays,
+-- this is the empty list.
+arrayExtDims :: TypeBase ExtShape u -> [ExtDimSize]
+arrayExtDims = extShapeDims . arrayShape
 
 -- | Return the size of the given dimension.  If the dimension does
 -- not exist, the zero constant is returned.

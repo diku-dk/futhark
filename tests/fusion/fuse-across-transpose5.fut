@@ -5,7 +5,7 @@
 -- output {
 --   [[0, 1, 2], [0, 2, 4], [0, 3, 6]]
 -- }
-let main(a: [n][m]i32): [][]i32 =
+let main(a: [#n][#m]i32): [][]i32 =
   let foo = replicate m (iota n)
   let bar = replicate m (iota n)
   let b = replicate n (iota m)

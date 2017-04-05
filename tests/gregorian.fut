@@ -40,10 +40,10 @@ let gregorian_of_date (minutes_since_epoch:  i32 ): (i32,i32,i32,i32,i32) =
 
   if ( daytime == minutes_to_noonI )
 
-  --then [year = y; month = m; day = d; hour = 12; minute = 0]
+  --then [#year = y; month = m; day = d; hour = 12; minute = 0]
   then (y, m, d, 12, 0)
 
-  --else [year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
+  --else [#year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
   else (y, m, d, daytime / 60, mod(daytime, 60) )
 
 let main(x: i32): i32 =

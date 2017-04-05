@@ -5,5 +5,5 @@
 -- output { 1.75f64 }
 
 -- Divide first to improve numerical behaviour.
-let main(as: [n]f64): f64 =
+let main(as: [#n]f64): f64 =
   reduce (+) 0f64 (map (/f64(n)) as)

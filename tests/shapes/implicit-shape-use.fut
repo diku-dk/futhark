@@ -15,9 +15,9 @@
 --    [0.0, 0.0, 0.0]]
 -- }
 
-let brownianBridgeDates (bb_inds: [3][num_dates]i32)
-                        (bb_data: [3][num_dates]f64)
-                        (gauss: [num_dates]f64): []f64 =
+let brownianBridgeDates (bb_inds: [3][#num_dates]i32)
+                        (bb_data: [3][#num_dates]f64)
+                        (gauss: [#num_dates]f64): []f64 =
     let bi = bb_inds[0]
     let li = bb_inds[1]
     let ri = bb_inds[2]
@@ -55,8 +55,8 @@ let brownianBridgeDates (bb_inds: [3][num_dates]i32)
 
 let brownianBridge (num_und:
                 i32,
-                bb_inds: [3][num_dates]i32,
-                bb_data: [3][num_dates]f64,
+                bb_inds: [3][#num_dates]i32,
+                bb_data: [3][#num_dates]f64,
                  gaussian_arr: []f64
             ): [][]f64 =
     let gauss2d  = reshape (num_dates,num_und) gaussian_arr
@@ -67,7 +67,7 @@ let brownianBridge (num_und:
 
 let main(num_und:
               i32,
-             bb_inds: [3][num_dates]i32,
+             bb_inds: [3][#num_dates]i32,
              arr_usz: []f64
 ): [][]f64 =
   let arr    = reshape (num_dates*num_und) arr_usz

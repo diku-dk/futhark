@@ -44,7 +44,7 @@ let to_bool_board(board: [][]i32): [][]bool =
 let to_int_board(board: [][]bool): [][]i32 =
   map (\(r: []bool): []i32  -> map bint r) board
 
-let cell_neighbors(i: i32, j: i32, board: [n][m]bool): i32 =
+let cell_neighbors(i: i32, j: i32, board: [#n][#m]bool): i32 =
   unsafe
   let above = (i - 1) % n
   let below = (i + 1) % n
@@ -54,12 +54,12 @@ let cell_neighbors(i: i32, j: i32, board: [n][m]bool): i32 =
   bint board[i,left] + bint board[i,right] +
   bint board[below,left] + bint board[below,j] + bint board[below,right]
 
-let all_neighbours(board: [n][m]bool): [n][m]i32 =
+let all_neighbours(board: [#n][#m]bool): [n][m]i32 =
   map (\(i: i32): []i32  ->
         map (\(j: i32): i32  -> cell_neighbors(i,j,board)) (iota m))
       (iota n)
 
-let iteration(board: [n][m]bool): [n][m]bool =
+let iteration(board: [#n][#m]bool): [n][m]bool =
   let lives = all_neighbours(board) in
   map (\(lives_r: []i32) (board_r: []bool): []bool  ->
             map (\(neighbors: i32) (alive: bool): bool  ->

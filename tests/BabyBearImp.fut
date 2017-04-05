@@ -11,7 +11,7 @@
 --inline i32[.,.] floydSbs1(i32[.,.] d ) [
 --    dT = transpose(d);
 --    res = with
---        (. <= [i,j] <= .) :
+--        (. <= [#i,j] <= .) :
 --            min( d[i,j], minval( d[i] + dT[j]));
 --        : modarray(d);
 --    return( res);

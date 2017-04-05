@@ -5,5 +5,5 @@
 
 import "futlib/math"
 
-let main(as: [n]f64): f64 =
+let main(as: [#n]f64): f64 =
   f64.sqrt ((reduce (+) 0.0 (map (**2.0) as)) / f64(n))

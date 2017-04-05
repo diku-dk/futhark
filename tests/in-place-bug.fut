@@ -7,7 +7,7 @@ import "futlib/math"
 let tridagSeq(a:  []f64, b: []f64, c: []f64, y: []f64 ): []f64 =
   copy(concat a b c y)
 
-let explicitMethod(myD:  [][m]f64,  myDD: [][]f64,
+let explicitMethod(myD:  [][#m]f64,  myDD: [][]f64,
                               myMu: [][]f64, myVar: [][]f64, result: [][]f64 ): [][]f64 =
   copy( map (\(tup:  ([]f64,[]f64,[]f64) ): []f64  ->
                let (mu_row, var_row, result_row) = tup in
