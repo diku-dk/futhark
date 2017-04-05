@@ -4,7 +4,6 @@
 module Language.Futhark.TypeChecker.Terms
   ( checkExp
   , checkFunDef
-  , checkTypeExp
   , runTermTypeM
   )
 where
@@ -28,6 +27,7 @@ import Prelude hiding (mapM)
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (ValBinding, BoundV, BoundF, checkQualName)
+import Language.Futhark.TypeChecker.Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
 
 --- Uniqueness
@@ -180,10 +180,25 @@ instance MonadTypeChecker TermTypeM where
     (_, QualName _ name') <- checkQualName space (qualName name) loc
     return name'
 
+  bindNameMap m = local $ \scope ->
+    scope { scopeNameMap = m <> scopeNameMap scope }
+
   lookupType loc name = liftTypeM $ TypeM.lookupType loc name
   lookupMod loc name = liftTypeM $ TypeM.lookupMod loc name
   lookupMTy loc name = liftTypeM $ TypeM.lookupMTy loc name
   lookupImport loc name = liftTypeM $ TypeM.lookupImport loc name
+
+  lookupVar loc qn = do
+    (scope, qn'@(QualName _ name)) <- checkQualName Term qn loc
+    case M.lookup name $ scopeVtable scope of
+      Nothing -> bad $ UnknownVariableError Term qn loc
+      Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
+                      | otherwise -> return (qn', t)
+      Just BoundF{} -> bad $ FunctionIsNotValue loc qn
+      Just EqualityF -> bad $ FunctionIsNotValue loc qn
+      Just OpaqueF -> bad $ FunctionIsNotValue loc qn
+      Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
+      Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
 checkQualName :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualName space qn@(QualName [q] _) loc
@@ -251,91 +266,7 @@ lookupFunction qn argtypes loc = do
           bad $ TypeError loc $ "Equality not defined for arguments of types " ++
           intercalate ", " (map pretty argtypes)
 
-lookupVar :: QualName Name -> SrcLoc -> TermTypeM (QualName VName, Type)
-lookupVar qn loc = do
-  (scope, qn'@(QualName _ name)) <- checkQualName Term qn loc
-  case M.lookup name $ scopeVtable scope of
-    Nothing -> bad $ UnknownVariableError Term qn loc
-    Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
-                    | otherwise -> return (qn', t)
-    Just BoundF{} -> bad $ FunctionIsNotValue loc qn
-    Just EqualityF -> bad $ FunctionIsNotValue loc qn
-    Just OpaqueF -> bad $ FunctionIsNotValue loc qn
-    Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
-    Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
-
-bindSpaced :: [(Namespace, Name)] -> TermTypeM a -> TermTypeM a
-bindSpaced names body = do
-  names' <- mapM (newID . snd) names
-  let mapping = M.fromList (zip names names')
-  bindNameMap mapping body
-
-bindNameMap :: NameMap -> TermTypeM a -> TermTypeM a
-bindNameMap m = local $ \scope -> scope { scopeNameMap = m <> scopeNameMap scope }
-
 --- Basic checking
-
--- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
--- unification cannot happen, 'Nothing' is returned, otherwise a type
--- that combines the aliasing of @t1@ and @t2@ is returned.  The
--- uniqueness of the resulting type will be the least of the
--- uniqueness of @t1@ and @t2@.
-unifyTypes :: Monoid (as vn) =>
-              TypeBase Rank (as vn)
-           -> TypeBase Rank (as vn)
-           -> Maybe (TypeBase Rank (as vn))
-unifyTypes (Prim t1) (Prim t2)
-  | t1 == t2  = Just $ Prim t1
-  | otherwise = Nothing
-unifyTypes (TypeVar t1) (TypeVar t2)
-  | t1 == t2  = Just $ TypeVar t1
-  | otherwise = Nothing
-unifyTypes (Array at1) (Array at2) =
-  Array <$> unifyArrayTypes at1 at2
-unifyTypes (Record ts1) (Record ts2)
-  | length ts1 == length ts2,
-    sort (M.keys ts1) == sort (M.keys ts2) =
-      Record <$> traverse (uncurry unifyTypes)
-      (M.intersectionWith (,) ts1 ts2)
-unifyTypes _ _ = Nothing
-
-unifyArrayTypes :: Monoid (as vn) =>
-                   ArrayTypeBase Rank (as vn)
-                -> ArrayTypeBase Rank (as vn)
-                -> Maybe (ArrayTypeBase Rank (as vn))
-unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
-  | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
-    Just $ PrimArray bt1 shape1 (u1 <> u2) (als1 <> als2)
-unifyArrayTypes (PolyArray bt1 shape1 u1 als1) (PolyArray bt2 shape2 u2 als2)
-  | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
-    Just $ PolyArray bt1 shape1 (u1 <> u2) (als1 <> als2)
-unifyArrayTypes (RecordArray et1 shape1 u1) (RecordArray et2 shape2 u2)
-  | shapeRank shape1 == shapeRank shape2,
-    sort (M.keys et1) == sort (M.keys et2) =
-    RecordArray <$>
-    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) et1 et2) <*>
-    pure shape1 <*> pure (u1 <> u2)
-unifyArrayTypes _ _ =
-  Nothing
-
-unifyRecordArrayElemTypes :: Monoid (as vn) =>
-                            RecordArrayElemTypeBase Rank (as vn)
-                         -> RecordArrayElemTypeBase Rank (as vn)
-                         -> Maybe (RecordArrayElemTypeBase Rank (as vn))
-unifyRecordArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
-  | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
-  | otherwise  = Nothing
-unifyRecordArrayElemTypes (PolyArrayElem bt1 als1 u1) (PolyArrayElem bt2 als2 u2)
-  | bt1 == bt2 = Just $ PolyArrayElem bt1 (als1 <> als2) (u1 <> u2)
-  | otherwise  = Nothing
-unifyRecordArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
-  ArrayArrayElem <$> unifyArrayTypes at1 at2
-unifyRecordArrayElemTypes (RecordArrayElem ts1) (RecordArrayElem ts2)
-  | sort (M.keys ts1) == sort (M.keys ts2) =
-    RecordArrayElem <$>
-    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) ts1 ts2)
-unifyRecordArrayElemTypes _ _ =
-  Nothing
 
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
@@ -416,29 +347,25 @@ bindingIdent (Ident v NoInfo vloc) t m =
     let ident = Ident v' (Info t) vloc
     binding [ident] $ m ident
 
-bindingPatterns :: [(PatternBase NoInfo Name, InferredType)]
+bindingPatternGroup :: [(PatternBase NoInfo Name, InferredType)]
                -> ([Pattern] -> TermTypeM a) -> TermTypeM a
-bindingPatterns ps m = do
-  names <- checkForDuplicateNames $ map fst ps
-  bindSpaced names $ do
-    ps' <- mapM (uncurry checkPattern) ps
+bindingPatternGroup ps m =
+  checkPatternGroup ps $ \ps' ->
     binding (S.toList $ S.unions $ map patIdentSet ps') $ do
-      -- Perform an observation of every declared dimension.  This
-      -- prevents unused-name warnings for otherwise unused dimensions.
-      mapM_ observe $ concatMap patternDims ps'
-      m ps'
+    -- Perform an observation of every declared dimension.  This
+    -- prevents unused-name warnings for otherwise unused dimensions.
+    mapM_ observe $ concatMap patternDims ps'
+    m ps'
 
 bindingPattern :: PatternBase NoInfo Name -> InferredType
                -> (Pattern -> TermTypeM a) -> TermTypeM a
-bindingPattern p t m = do
-  names <- checkForDuplicateNames [p]
-  bindSpaced names $ do
-    p' <- checkPattern p t
+bindingPattern p t m =
+  checkPattern p t $ \ p' ->
     binding (S.toList $ patIdentSet p') $ do
-      -- Perform an observation of every declared dimension.  This
-      -- prevents unused-name warnings for otherwise unused dimensions.
-      mapM_ observe $ patternDims p'
-      m p'
+    -- Perform an observation of every declared dimension.  This
+    -- prevents unused-name warnings for otherwise unused dimensions.
+    mapM_ observe $ patternDims p'
+    m p'
 
 patternDims :: Pattern -> [Ident]
 patternDims (PatternParens p _) = patternDims p
@@ -447,7 +374,8 @@ patternDims (PatternAscription p t) =
   patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
   where dimIdent _ AnyDim            = Nothing
         dimIdent _ (ConstDim _)      = Nothing
-        dimIdent loc (NamedDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
+        dimIdent _ NamedDim{}        = Nothing
+        dimIdent loc (BoundDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
 patternDims _ = []
 
 --- Main checkers
@@ -507,11 +435,11 @@ checkExp (ArrayLit es _ loc) = do
   return $ ArrayLit es' (Info et) loc
 
 checkExp (Empty decl loc) = do
-  decl' <- checkTypeDecl decl
+  decl' <- checkTypeDecl loc decl
   return $ Empty decl' loc
 
 checkExp (Ascript e decl loc) = do
-  decl' <- checkTypeDecl decl
+  decl' <- checkTypeDecl loc decl
   e' <- require [removeShapeAnnotations $ unInfo $ expandedType decl']
         =<< checkExp e
   return $ Ascript e' decl' loc
@@ -553,7 +481,7 @@ checkExp (Parens e loc) =
   Parens <$> checkExp e <*> pure loc
 
 checkExp (Var qn NoInfo loc) = do
-  (qn'@(QualName _ name'), t) <- lookupVar qn loc
+  (qn'@(QualName _ name'), t) <- lookupVar loc qn
   observe $ Ident name' (Info t) loc
   return $ Var qn' (Info t) loc
 
@@ -578,44 +506,9 @@ checkExp (LetPat pat e body pos) =
   sequentially (checkExp e) $ \e' _ ->
   -- Not technically an ascription, but we want the pattern to have
   -- exactly the type of 'e'.
-  bindingPattern pat (Ascribed $ typeOf e') $ \pat' -> do
-    when (hasShapeDecl pat') $
-      bad $ TypeError (srclocOf pat')
-      "Type ascription for let-binding may not have shape declarations."
+  bindingPattern pat (Ascribed $ vacuousShapeAnnotations $ typeOf e') $ \pat' -> do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
-  where -- HACK: Until we figure out what they should mean, shape
-        -- declarations are banned in let binding type ascriptions.
-    hasShapeDecl (TuplePattern ps _) = any hasShapeDecl ps
-    hasShapeDecl (RecordPattern fs _) = any (hasShapeDecl . snd) fs
-    hasShapeDecl (PatternParens p _) = hasShapeDecl p
-    hasShapeDecl Id{} = False
-    hasShapeDecl Wildcard{} = False
-    hasShapeDecl (PatternAscription p td) =
-      hasShapeDecl p ||
-      hasShapeDecl' (unInfo $ expandedType td)
-
-    hasShapeDecl' Prim{} = False
-    hasShapeDecl' TypeVar{} = False
-    hasShapeDecl' (Record ts) = any hasShapeDecl' ts
-    hasShapeDecl' (Array at) = arrayElemHasShapeDecl at
-
-    arrayElemHasShapeDecl (PrimArray _ shape _ _) =
-      any (/=AnyDim) (shapeDims shape)
-    arrayElemHasShapeDecl (PolyArray _ shape _ _) =
-      any (/=AnyDim) (shapeDims shape)
-    arrayElemHasShapeDecl (RecordArray ts shape _) =
-      any (/=AnyDim) (shapeDims shape) ||
-      any recordArrayElemHasShapeDecl ts
-
-    recordArrayElemHasShapeDecl (ArrayArrayElem at) =
-      arrayElemHasShapeDecl at
-    recordArrayElemHasShapeDecl (RecordArrayElem ts) =
-      any recordArrayElemHasShapeDecl ts
-    recordArrayElemHasShapeDecl PrimArrayElem{} =
-      False
-    recordArrayElemHasShapeDecl PolyArrayElem{} =
-      False
 
 checkExp (LetFun name (params, maybe_retdecl, NoInfo, e) body loc) =
   bindSpaced [(Term, name)] $
@@ -931,7 +824,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                 void $ unifyExpTypes e' uboundexp'
                 return $ ExpBound e'
         collectOccurences $ bindingIdent i (typeOf uboundexp') $ \i' ->
-          noUnique $ bindingPattern mergepat (Ascribed $ typeOf mergeexp' `setAliases` mempty) $
+          noUnique $ bindingPattern mergepat (Ascribed $ vacuousShapeAnnotations $
+                                              typeOf mergeexp' `setAliases` mempty) $
           \mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
             return (mergepat',
@@ -939,7 +833,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     loopbody')
       While cond ->
         noUnique $ collectOccurences $
-        bindingPattern mergepat (Ascribed $ typeOf mergeexp' `setAliases` mempty) $ \mergepat' ->
+        bindingPattern mergepat (Ascribed $ vacuousShapeAnnotations $
+                                 typeOf mergeexp' `setAliases` mempty) $ \mergepat' ->
         onlySelfAliasing $ tapOccurences $
         sequentially (require [Prim Bool] =<< checkExp cond) $ \cond' _ -> do
           loopbody' <- checkExp loopbody
@@ -1061,112 +956,9 @@ checkSOACArrayArg e = do
     Just rt -> return (e', (rt, dflow, argloc))
 
 checkIdent :: IdentBase NoInfo Name -> TermTypeM Ident
-checkIdent (Ident name _ pos) = do
-  (QualName _ name', vt) <- lookupVar (qualName name) pos
-  return $ Ident name' (Info vt) pos
-
-data InferredType = NoneInferred
-                  | Inferred Type
-                  | Ascribed Type
-
-checkPattern :: PatternBase NoInfo Name -> InferredType
-             -> TermTypeM Pattern
-
-checkPattern (PatternParens p loc) t =
-  PatternParens <$> checkPattern p t <*> pure loc
-
-checkPattern (Id (Ident name NoInfo loc)) (Inferred t) = do
-  name' <- checkName Term name loc
-  let t' = typeOf $ Var (qualName name') (Info t) loc
-  return $ Id $ Ident name' (Info $ t' `setUniqueness` Nonunique) loc
-checkPattern (Id (Ident name NoInfo loc)) (Ascribed t) = do
-  name' <- checkName Term name loc
-  let t' = typeOf $ Var (qualName name') (Info t) loc
-  return $ Id $ Ident name' (Info t') loc
-
-checkPattern (Wildcard _ loc) (Inferred t) =
-  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
-checkPattern (Wildcard _ loc) (Ascribed t) =
-  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
-
-checkPattern (TuplePattern ps loc) (Inferred t)
-  | Just ts <- isTupleRecord t, length ts == length ps =
-  TuplePattern <$> zipWithM checkPattern ps (map Inferred ts) <*> pure loc
-checkPattern (TuplePattern ps loc) (Ascribed t)
-  | Just ts <- isTupleRecord t, length ts == length ps =
-      TuplePattern <$> zipWithM checkPattern ps (map Ascribed ts) <*> pure loc
-checkPattern p@TuplePattern{} (Inferred t) =
-  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern p@TuplePattern{} (Ascribed t) =
-  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern (TuplePattern ps loc) NoneInferred =
-  TuplePattern <$> mapM (`checkPattern` NoneInferred) ps <*> pure loc
-
-checkPattern (RecordPattern p_fs loc) (Inferred (Record t_fs))
-  | sort (map fst p_fs) == sort (M.keys t_fs) =
-    RecordPattern . M.toList <$> check <*> pure loc
-    where check = traverse (uncurry checkPattern) $ M.intersectionWith (,)
-                  (M.fromList p_fs) (fmap Inferred t_fs)
-checkPattern (RecordPattern p_fs loc) (Ascribed (Record t_fs))
-  | sort (map fst p_fs) == sort (M.keys t_fs) =
-    RecordPattern . M.toList <$> check <*> pure loc
-    where check = traverse (uncurry checkPattern) $ M.intersectionWith (,)
-                  (M.fromList p_fs) (fmap Ascribed t_fs)
-checkPattern p@RecordPattern{} (Inferred t) =
-  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern p@RecordPattern{} (Ascribed t) =
-  bad $ TypeError (srclocOf p) $ "Pattern " ++ pretty p ++ " cannot match " ++ pretty t
-checkPattern (RecordPattern fs loc) NoneInferred =
-  RecordPattern . M.toList <$> traverse (`checkPattern` NoneInferred) (M.fromList fs) <*> pure loc
-
-checkPattern fullp@(PatternAscription p td) maybe_outer_t = do
-  td' <- checkBindingTypeDecl td
-  let maybe_outer_t' = case maybe_outer_t of Inferred t -> Just t
-                                             Ascribed t -> Just t
-                                             NoneInferred -> Nothing
-      t' = fromStruct (removeShapeAnnotations $ unInfo $ expandedType td')
-           `addAliases` (<> maybe mempty aliases maybe_outer_t')
-  case maybe_outer_t' of
-    Just outer_t
-      | not (outer_t `subtypeOf` t') ->
-          bad $ InvalidPatternError fullp (toStructural outer_t) Nothing $ srclocOf p
-    _ -> PatternAscription <$> checkPattern p (Ascribed t') <*> pure td'
-
-checkPattern p NoneInferred =
-  bad $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty p
-
--- | Check for duplication of names inside a binding group.
--- Duplication of shape names are permitted, but only if they are not
--- also bound as values.
-checkForDuplicateNames :: [PatternBase NoInfo Name] -> TermTypeM [(Namespace, Name)]
-checkForDuplicateNames = fmap toNames . flip execStateT mempty . mapM_ check
-  where check (Id v) = seeing BoundAsVar (identName v) (srclocOf v)
-        check (PatternParens p _) = check p
-        check Wildcard{} = return ()
-        check (TuplePattern ps _) = mapM_ check ps
-        check (RecordPattern fs _) = mapM_ (check . snd) fs
-        check (PatternAscription p t) = do
-          check p
-          mapM_ (checkDimDecl $ srclocOf p) $ nestedDims' $ declaredType t
-
-        seeing b name vloc = do
-          seen <- get
-          case (b, M.lookup name seen) of
-            (_, Just (BoundAsVar, loc)) ->
-              lift $ bad $ DupPatternError name vloc loc
-            (BoundAsVar, Just (BoundAsDim, loc)) ->
-              lift $ bad $ DupPatternError name vloc loc
-            _ -> modify $ M.insert name (b, vloc)
-
-        checkDimDecl _ AnyDim = return ()
-        checkDimDecl _ ConstDim{} = return ()
-        checkDimDecl loc (NamedDim v) = seeing BoundAsDim v loc
-
-        toNames = map pairUp . M.toList
-        pairUp (name, _) = (Term, name)
-
-
-data Bindage = BoundAsDim | BoundAsVar
+checkIdent (Ident name _ loc) = do
+  (QualName _ name', vt) <- lookupVar loc (qualName name)
+  return $ Ident name' (Info vt) loc
 
 checkDimIndex :: DimIndexBase NoInfo Name -> TermTypeM DimIndex
 checkDimIndex (DimFix i) =
@@ -1231,10 +1023,17 @@ checkFunDef (fname, maybe_retdecl, params, body, loc) = do
   when (baseString fname' == "||") $
     bad $ TypeError loc "The || operator may not be redefined."
 
-  bindingPatterns (zip params $ repeat NoneInferred) $ \params' -> do
-    maybe_retdecl' <- case maybe_retdecl of
-                        Just rettype -> Just <$> checkTypeExp rettype
-                        Nothing      -> return Nothing
+  bindingPatternGroup (zip params $ repeat NoneInferred) $ \params' -> do
+    maybe_retdecl' <-
+      case maybe_retdecl of
+        Just rettype -> do
+          (rettype', rettype_st, ret_implicit) <-
+            checkTypeExp rettype
+          if M.null $ implicitNameMap ret_implicit
+            then return $ Just (rettype', rettype_st)
+            else throwError $ TypeError loc
+                 "Fresh sizes may not be bound in return type."
+        Nothing -> return Nothing
 
     body' <- checkFunBody fname body (snd <$> maybe_retdecl') loc
     (maybe_retdecl'', rettype) <- case maybe_retdecl' of
@@ -1299,8 +1098,9 @@ checkLambda :: LambdaBase NoInfo Name -> [Arg]
 checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
   | length params == length args = do
       let params_with_ts = zip params $ map (Inferred . fromStruct . argType) args
-      (maybe_ret', params', body') <- noUnique $ bindingPatterns params_with_ts $ \params' -> do
-        maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl) maybe_ret
+      (maybe_ret', params', body') <-
+        noUnique $ bindingPatternGroup params_with_ts $ \params' -> do
+        maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl loc) maybe_ret
         body' <- checkFunBody (nameFromString "<anonymous>") body
                  (unInfo . expandedType <$> maybe_ret') loc
         return (maybe_ret', params', body')
@@ -1373,36 +1173,14 @@ checkCurryBinOp arg_ordering binop x loc y_arg = do
 
   return (x', binop', fromStruct $ removeShapeAnnotations ret)
 
-checkDim :: SrcLoc -> DimDecl Name -> TermTypeM (DimDecl VName)
-checkDim _ AnyDim =
-  return AnyDim
-checkDim _ (ConstDim k) =
-  return $ ConstDim k
-checkDim loc (NamedDim name) = do
-  (QualName _ name', t) <- lookupVar (qualName name) loc
-  observe $ Ident name' (Info (Prim (Signed Int32))) loc
-  case t of
-    Prim (Signed Int32) -> return $ NamedDim name'
-    _                   -> bad $ DimensionNotInteger loc name
-
-checkTypeExp :: TypeExp Name -> TermTypeM (TypeExp VName, StructType)
-checkTypeExp = expandType checkDim
-
-checkTypeExpBindingDims :: TypeExp Name -> TermTypeM (TypeExp VName, StructType)
-checkTypeExpBindingDims = expandType checkBindingDim
-  where checkBindingDim _ AnyDim = return AnyDim
-        checkBindingDim _ (ConstDim k) = return $ ConstDim k
-        checkBindingDim loc (NamedDim name) = NamedDim <$> checkName Term name loc
-
-checkTypeDecl :: TypeDeclBase NoInfo Name -> TermTypeM (TypeDeclBase Info VName)
-checkTypeDecl (TypeDecl t NoInfo) = do
-  (t', st) <- checkTypeExp t
-  return $ TypeDecl t' $ Info st
-
-checkBindingTypeDecl :: TypeDeclBase NoInfo Name -> TermTypeM (TypeDeclBase Info VName)
-checkBindingTypeDecl (TypeDecl t NoInfo) = do
-  (t', st) <- checkTypeExpBindingDims t
-  return $ TypeDecl t' $ Info st
+checkTypeDecl :: SrcLoc -> TypeDeclBase NoInfo Name
+              -> TermTypeM (TypeDeclBase Info VName)
+checkTypeDecl loc (TypeDecl t NoInfo) = do
+  (t', st, implicit) <- checkTypeExp t
+  if M.null $ implicitNameMap implicit
+    then return $ TypeDecl t' $ Info st
+    else throwError $ TypeError loc
+         "May not bind size variables in type here."
 
 --- Consumption
 

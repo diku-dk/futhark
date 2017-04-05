@@ -9,10 +9,10 @@
 
 let take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
-let correlateDeltas(md_c:  [num_und][num_und]f64,
-                 zds: [num_dates][num_und]f64
-): [num_dates][num_und]f64 =
-    map (\(zi: [num_und]f64): [num_und]f64  ->
+let correlateDeltas(md_c:  [#num_und][#num_und]f64,
+                   zds: [#num_dates][#num_und]f64
+                   ): [num_dates][num_und]f64 =
+    map (\(zi: [#num_und]f64): [num_und]f64  ->
             map (\(j: i32): f64  ->
                     let x = map (*) zi (md_c[j] )
                     in  reduce (+) (0.0) x
@@ -20,23 +20,22 @@ let correlateDeltas(md_c:  [num_und][num_und]f64,
        ) zds
 
 let blackScholes(md_c:
-                [num_und][num_und]f64,
-                md_vols: [num_dates][num_und]f64,
-                md_drifts: [num_dates][num_und]f64,
-                 md_starts: [num_und]f64,
-                bb_arr: [num_dates][num_und]f64
+                [#num_und][#num_und]f64,
+                md_vols: [#num_dates][#num_und]f64,
+                md_drifts: [#num_dates][#num_und]f64,
+                 md_starts: [#num_und]f64,
+                bb_arr: [#num_dates][#num_und]f64
            ): [num_dates][num_und]f64 =
     let noises = correlateDeltas(md_c, bb_arr) in
         scan (\(x: []f64) (y: []f64): []f64  -> map (*) x y
             ) (md_starts) noises
 
 
-let main(md_cs:
-             [num_und][num_und]f64,
-             md_vols: [num_dates][num_und]f64,
-             md_drifts: [num_dates][num_und]f64,
-             md_sts: [num_und]f64,
-             bb_row: [num_dates][num_und]f64
-): [][]f64 =
+let main(md_cs: [#num_und][#num_und]f64,
+         md_vols: [#num_dates][#num_und]f64,
+         md_drifts: [#num_dates][#num_und]f64,
+         md_sts: [#num_und]f64,
+         bb_row: [#num_dates][#num_und]f64
+        ): [][]f64 =
   let bd_row = blackScholes(md_cs, md_vols, md_drifts, md_sts, bb_row)
   in  bd_row

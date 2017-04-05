@@ -14,7 +14,7 @@
 --    [5,6,10,0]]
 -- }
 
-let oneToEach(r: [n]i32): [n]i32 =
+let oneToEach(r: [#n]i32): [n]i32 =
   map (+1) r
 
 let main(a: [][]i32): [][]i32 =

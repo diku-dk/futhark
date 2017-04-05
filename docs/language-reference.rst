@@ -101,7 +101,7 @@ type ``()``.
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
-   dim: `qualid` | `decimal`
+   dim: `qualid` | `decimal` | "#" `id`
 
 An array value is written as a nonempty sequence of comma-separated
 values enclosed in square brackets: ``[1,2,3]``.  An array type is
@@ -740,16 +740,21 @@ the return type and parameter types.  These can be used to express
 invariants about the shapes of arrays that are accepted or produced by
 the function, e.g::
 
-  let f (a: [n]i32) (b: [n]i32): [n]i32 =
+  let f (a: [#n]i32) (b: [#n]i32): [n]i32 =
     map (+) a b
 
-In general, shape declarations in parameters are fresh names, whilst
-shape declarations in return types must refer to a name of type
-``i32`` in scope.  A shape declaration can also be an integer constant
-(with no suffix).  The dimension names bound in a parameter shape
-declaration can be used as ordinary variables within the scope of the
-parameter.  If a function is called with arguments that do not fulfill
-the shape constraints, the program will fail with a runtime error.
+When prefixed with a ``#`` character, a name is *freshly bound*,
+whilst an unadorned name must be in scope.  In the example above, we
+do not use a ``#`` in the return type, because we wish to refer to the
+``n`` bound by the parameters.  If we refer to the same freshly bound
+variable in multiple parameters (as above), each occurence must be
+prefixed with ``#``.
+
+A shape declaration can also be an integer constant (with no suffix).
+The dimension names bound in a parameter shape declaration can be used
+as ordinary variables within the scope of the parameter.  If a
+function is called with arguments that do not fulfill the shape
+constraints, the program will fail with a runtime error.
 
 User-Defined Operators
 ~~~~~~~~~~~~~~~~~~~~~~

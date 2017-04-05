@@ -19,7 +19,7 @@
 --   Concat 1
 -- }
 
-let main(a: [n][an][]i32, b: [n][bn]i32): ([][]i32,[][]i32) =
+let main(a: [#n][#an][]i32, b: [#n][#bn]i32): ([][]i32,[][]i32) =
   unzip(map (\(a_row: [][]i32) (b_row: []i32): ([bn]i32,[an]i32)  ->
                   (map (-1) (b_row),
                    map (\(a_row_row: []i32): i32  ->

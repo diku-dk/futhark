@@ -24,5 +24,5 @@ let seqloop (num_dates: i32) (gauss: f64): [num_dates]f64 =
       in  bbrow
   in bbrow
 
-let main(gausses: [num_dates]f64): [][]f64 =
+let main(gausses: [#num_dates]f64): [][]f64 =
   map (seqloop(num_dates)) gausses

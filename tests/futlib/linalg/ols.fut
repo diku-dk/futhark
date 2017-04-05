@@ -12,4 +12,4 @@ import "futlib/linalg"
 
 module f32linalg = linalg(f32)
 
-let main (X: [n][m]f32) (b: [n]f32): [m]f32 = f32linalg.ols X b
+let main (X: [#n][#m]f32) (b: [#n]f32): [m]f32 = f32linalg.ols X b

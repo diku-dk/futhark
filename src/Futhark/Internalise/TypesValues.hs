@@ -39,7 +39,7 @@ internaliseParamTypes :: [E.TypeBase (E.ShapeDecl VName) als]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        M.Map VName Int)
 internaliseParamTypes ts = do
-  (ts', (_, subst, _)) <- runStateT (mapM (internaliseDeclType' BindDims) ts) (0, M.empty, mempty)
+  (ts', (_, subst, _)) <- runStateT (mapM internaliseDeclType' ts) (0, M.empty, mempty)
   return (ts', subst)
 
 internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als
@@ -47,8 +47,8 @@ internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als
                                        M.Map VName Int,
                                        ConstParams)
 internaliseReturnType t = do
-  (ts', subst, cm) <- internaliseEntryReturnType t
-  return (concat ts', subst, cm)
+  (ts', subst', cm') <- internaliseEntryReturnType t
+  return (concat ts', subst', cm')
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
@@ -59,34 +59,30 @@ internaliseEntryReturnType :: E.TypeBase (E.ShapeDecl VName) als
 internaliseEntryReturnType t = do
   let ts = case isTupleRecord t of Just tts -> tts
                                    _        -> [t]
-  (ts', (_, subst, cm)) <-
-    runStateT (mapM (internaliseDeclType' AssertDims) ts) (0, M.empty, mempty)
-  return (ts', subst, cm)
+  (ts', (_, subst', cm')) <-
+    runStateT (mapM internaliseDeclType' ts) (0, mempty, mempty)
+  return (ts', subst', cm')
 
 internaliseType :: E.ArrayShape shape =>
                    E.TypeBase shape als
                 -> InternaliseM [I.TypeBase I.Rank Uniqueness]
 internaliseType t = do
   (t', _) <- runStateT
-             (internaliseDeclType' BindDims $ vacuousShapeAnnotations t)
+             (internaliseDeclType' $ vacuousShapeAnnotations t)
              (0, M.empty, mempty)
   return $ map I.rankShaped t'
 
-data DimDeclInterpretation = AssertDims
-                           | BindDims
-
-internaliseDeclType' :: DimDeclInterpretation
-                     -> E.TypeBase (E.ShapeDecl VName) als
+internaliseDeclType' :: E.TypeBase (E.ShapeDecl VName) als
                      -> StateT (Int, M.Map VName Int, ConstParams)
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
-internaliseDeclType' ddi orig_t =
+internaliseDeclType' orig_t =
   case orig_t of
     E.Prim bt -> return [I.Prim $ internalisePrimType bt]
     E.TypeVar v -> do
       v' <- lift $ lookupSubst $ qualNameFromTypeName v
       mapM (extShaped . (`toDecl` Nonunique)) =<< lift (lookupTypeVar v')
     E.Record ets ->
-      concat <$> mapM (internaliseDeclType' ddi . snd) (sortFields ets)
+      concat <$> mapM (internaliseDeclType' . snd) (sortFields ets)
     E.Array at ->
       internaliseArrayType at
   where internaliseArrayType (E.PrimArray bt shape u _) = do
@@ -131,16 +127,16 @@ internaliseDeclType' ddi orig_t =
                           return i
             Just j  -> return j
 
-        internaliseShape = mapM (internaliseDim ddi) . E.shapeDims
+        internaliseShape = mapM internaliseDim . E.shapeDims
 
-        internaliseDim _ AnyDim =
+        internaliseDim AnyDim =
           Ext <$> newId
-        internaliseDim _ (ConstDim n) =
+        internaliseDim (ConstDim n) =
           return $ Free $ intConst I.Int32 $ toInteger n
-        internaliseDim BindDims (NamedDim name) =
+        internaliseDim (BoundDim name) =
           Ext <$> knownOrNewId name
-        internaliseDim AssertDims (NamedDim name) = do
-          subst <- asks $ M.lookup name . envSubsts
+        internaliseDim (NamedDim name) = do
+          subst <- asks $ M.lookup (E.qualLeaf name) . envSubsts
           I.Free <$> case subst of
             Just [v] -> return v
             _ -> do -- Then it must be a constant.
@@ -148,7 +144,7 @@ internaliseDeclType' ddi orig_t =
               (i,m,cm) <- get
               case find ((==fname) . fst) cm of
                 Just (_, known) -> return $ I.Var known
-                Nothing -> do new <- lift $ newVName $ baseString name
+                Nothing -> do new <- lift $ newVName $ baseString $ qualLeaf name
                               put (i, m, (fname,new):cm)
                               return $ I.Var new
 

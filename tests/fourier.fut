@@ -51,7 +51,7 @@ let complexPow (c: complex) (n: i32): complex =
                       f32 n * angle)
   in fromPolar (r', angle')
 
-let f(a: [n]f32) (j: i32): complex =
+let f(a: [#n]f32) (j: i32): complex =
   let x = complexExp (complexMult (-2.0,0.0)
                       (complexMult (toComplex pi)
                        (complexMult (0.0, 1.0)
@@ -61,7 +61,7 @@ let f(a: [n]f32) (j: i32): complex =
    (map toComplex a)
    (map (complexPow x) (map (j*) (iota n))))
 
-let sft(a: [n]f32): [n]complex =
+let sft(a: [#n]f32): [n]complex =
   map (f a) (iota n)
 
-let main(a: [n]f32): ([n]f32, [n]f32) = unzip (sft a)
+let main(a: [#n]f32): ([n]f32, [n]f32) = unzip (sft a)

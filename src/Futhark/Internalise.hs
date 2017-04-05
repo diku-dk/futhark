@@ -88,7 +88,7 @@ preprocessFunBind (E.FunBind entry ofname _ (Info rettype) params _ _) =
   noteFunctions <=< fmap (uncurry M.singleton) $
   bindingParams params $ \shapes values -> do
     (fname, fname') <- internaliseFunctionName entry ofname
-    (rettype', _, cm) <- internaliseReturnType rettype
+    (rettype', _, cm) <- internaliseEntryReturnType rettype
     let shapenames = map I.paramName shapes
         consts = map ((`Param` I.Prim int32) . snd) cm
     return (fname,
@@ -99,7 +99,7 @@ preprocessFunBind (E.FunBind entry ofname _ (Info rettype) params _ _) =
                                         map declTypeOf $ concat values,
                                         consts++shapes++concat values,
                                         applyRetType
-                                        (ExtRetType rettype')
+                                        (ExtRetType $ concat rettype')
                                         (consts++shapes++concat values)
                                        )
                        , externalFun = (rettype,
@@ -215,8 +215,8 @@ internaliseValBind (E.ValBind name _ t e loc) =
 internaliseFunBind :: E.FunBind -> InternaliseM ()
 internaliseFunBind (E.FunBind entry ofname _ (Info rettype) orig_params body loc) =
   bindingParams params $ \shapeparams params' -> do
-    (_, fname') <- internaliseFunctionName entry ofname
     (rettype', _, cm) <- internaliseEntryReturnType rettype
+    (_, fname') <- internaliseFunctionName entry ofname
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape asserting loc
              (map I.fromDecl $ concat rettype') firstbody
@@ -406,12 +406,13 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
                "\nFunction has parameters\n " ++ pretty fun_params
     Just rettype -> letTupExp' desc $ I.Apply fname' (zip args'' diets) rettype
 
-internaliseExp desc (E.LetPat pat e body _) = do
+internaliseExp desc (E.LetPat pat e body loc) = do
   ses <- internaliseExp desc e
   t <- I.staticShapes <$> mapM I.subExpType ses
-  bindingPattern pat t $ \pat' -> do
-    forM_ (zip (patternIdents pat') ses) $ \(p,se) ->
-      letBind (basicPattern' [] [p]) $ I.BasicOp $ I.SubExp se
+  bindingPattern pat t $ \pat_names match -> do
+    ses' <- match loc ses
+    forM_ (zip pat_names ses') $ \(v,se) ->
+      letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
     internaliseExp desc body
 
 internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
@@ -454,7 +455,7 @@ internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
 
   internaliseExp desc body
 
-internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
+internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody loc) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
   mergeinit_ts <- mapM subExpType mergeinit
 
@@ -492,7 +493,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
 
   (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
     wrap $ bindingParams [mergepat] $ \shapepat nested_mergepat ->
-        internaliseBodyStms loopbody $ \ses -> do
+    internaliseBodyStms loopbody $ \ses -> do
       sets <- mapM subExpType ses
       let mergepat' = concat nested_mergepat
           shapeinit = argShapes
@@ -562,8 +563,10 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       valmerge = zip mergepat' mergeinit'
       loop = I.DoLoop ctxmerge valmerge form' loopbody'
   loopt <- I.expExtType loop
-  bindingPattern (frob mergepat) loopt $ \mergepat'' -> do
-    letBind_ mergepat'' loop
+  bindingPattern (frob mergepat) loopt $ \mergepat_names match -> do
+    loop_res <- match loc . map I.Var =<< letTupExp "loop_res" loop
+    forM_ (zip mergepat_names loop_res) $ \(v,se) ->
+      letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
     internaliseExp desc letbody
 
   where addAnother t =
@@ -586,9 +589,10 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
           BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
-  bindingPattern (E.Id name) dstt $ \pat' -> do
-    forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
-      letBind (basicPattern' [] [p]) $ I.BasicOp $ I.SubExp $ I.Var dst
+  bindingPattern (E.Id name) dstt $ \pat_names match -> do
+    dsts' <- match loc $ map I.Var dsts
+    forM_ (zip pat_names dsts') $ \(v,dst) ->
+      letBindNames'_ [v] $ I.BasicOp $ I.SubExp dst
     internaliseExp desc body
 
 internaliseExp desc (E.Update src slice ve loc) = do
@@ -737,7 +741,7 @@ internaliseExp desc (E.Map lam (arr:arrs) loc) = do
   -- This would be a type error in the source language, but it's the
   -- same in the core language.
   arrs' <- internaliseExpToVars "map_arr" (Zip 0 arr arrs loc)
-  lam' <- internaliseMapLambda internaliseLambda asserting lam $ map I.Var arrs'
+  lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $ I.Op $ I.Map [] w lam' arrs'
 
@@ -774,7 +778,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
                    return (accs, acc_ts)
 
   rowts <- mapM (fmap I.rowType . lookupType) arrs
-  lam' <- internaliseStreamLambda internaliseLambda asserting lam lam_acc_param_ts rowts
+  lam' <- internaliseStreamLambda internaliseLambda lam lam_acc_param_ts rowts
 
   -- If the stream form is a reduce, we also have to fiddle with the
   -- lambda to incorporate the reduce function.  FIXME: can't we just
@@ -800,7 +804,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
         acctps <- mapM I.subExpType accs
         outsz  <- arraysSize 0 <$> mapM lookupType arrs
         let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
-        lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
+        lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
         let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
         acc_params <- forM lam0_acc_params $ \p -> do
           name <- newVName $ baseString $ paramName p
@@ -878,12 +882,12 @@ internaliseExp desc (E.Scatter a si v loc) = do
   svs <- internaliseExpToVars "write_arg_v" v
   sas <- internaliseExpToVars "write_arg_a" a
 
-  si_shape <- arrayShape <$> lookupType si'
+  si_shape <- I.arrayShape <$> lookupType si'
   let si_w = shapeSize 0 si_shape
 
   (tvs, svs') <- fmap unzip $ forM svs $ \sv -> do
     tv <- rowType <$> lookupType sv -- the element type
-    sv_shape <- arrayShape <$> lookupType sv
+    sv_shape <- I.arrayShape <$> lookupType sv
     let sv_w = shapeSize 0 sv_shape
 
     -- Generate an assertion and reshapes to ensure that sv and si' are the same
@@ -1000,7 +1004,7 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
     ensureShape asserting loc rowtype (what++"_ne_right_shape") ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
+  lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ f [] w lam' input
@@ -1171,8 +1175,8 @@ internaliseLambda :: InternaliseLambda
 
 internaliseLambda (E.AnonymFun params body _ (Info rettype) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
-    body' <- internaliseBody body
     (rettype', _, cm) <- internaliseReturnType rettype
+    body' <- internaliseBody body
     mapM_ (uncurry internaliseDimConstant) cm
     return (params', body', map I.fromDecl rettype')
 
@@ -1491,22 +1495,6 @@ constFunctionArgs = mapM arg
           se <- letSubExp (baseString name ++ "_arg") $
                 I.Apply fname [] $ primRetType I.int32
           return (se, I.Observe, I.Prim I.int32)
-
--- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
--- just return an empty list.
-asserting :: InternaliseM I.Certificates
-          -> InternaliseM I.Certificates
-asserting m = do
-  doBoundsChecks <- asks envDoBoundsChecks
-  if doBoundsChecks
-  then m
-  else return []
-
--- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
--- just return an empty list.
-assertingOne :: InternaliseM VName
-             -> InternaliseM I.Certificates
-assertingOne m = asserting $ fmap pure m
 
 boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc w e = do

@@ -5,6 +5,7 @@ module Futhark.Internalise.Bindings
     bindingParams
   , bindingLambdaParams
   , bindingPattern
+  , MatchPattern
   )
   where
 
@@ -15,6 +16,7 @@ import Control.Monad.Writer hiding (mapM)
 
 import qualified Data.Map.Strict as M
 import Data.List
+import Data.Loc
 import Data.Traversable (mapM)
 
 import Language.Futhark as E
@@ -23,6 +25,7 @@ import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
+import Futhark.Internalise.AccurateSizes
 
 import Prelude hiding (mapM)
 
@@ -161,13 +164,35 @@ flattenPattern = flattenPattern' []
         tupleComponents' (E.Record ts) = map snd $ sortFields ts
         tupleComponents' t             = [t]
 
-bindingPattern :: E.Pattern -> [I.ExtType] -> (I.Pattern -> InternaliseM a)
+type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
+
+bindingPattern :: E.Pattern -> [I.ExtType] -> ([VName] -> MatchPattern -> InternaliseM a)
                -> InternaliseM a
 bindingPattern pat ts m = do
-  (pat', _, _) <- unzip3 <$> flattenPattern pat
-  (ts',shapes) <- instantiateShapes' ts
-  let addShapeStms = m . I.basicPattern' shapes . map I.paramIdent . concat
+  (pat', _, pat_types) <- unzip3 <$> flattenPattern pat
+  (ts',_) <- instantiateShapes' ts
+  (pat_types', ctx) <- internaliseParamTypes pat_types
+  let ctx_rev = M.fromList $ map (uncurry $ flip (,)) $ M.toList ctx
+      pat_types'' = map I.fromDecl $ concat pat_types'
+  let addShapeStms l =
+        m (map I.paramName $ concat l) (matchPattern ctx_rev pat_types'')
   bindingFlatPattern pat' ts' addShapeStms
+
+matchPattern :: M.Map Int VName -> [I.ExtType] -> MatchPattern
+matchPattern ctx exts loc ses =
+  forM (zip exts ses) $ \(et, se) -> do
+  se_t <- I.subExpType se
+  et' <- unExistentialise ctx et se_t
+  ensureExtShape asserting loc et' "correct_shape" se
+
+unExistentialise :: M.Map Int VName -> I.ExtType -> I.Type -> InternaliseM I.ExtType
+unExistentialise substs et t = do
+  new_dims <- zipWithM inspectDim (I.extShapeDims $ I.arrayShape et) (I.arrayDims t)
+  return $ t `I.setArrayShape` I.ExtShape new_dims
+  where inspectDim (I.Ext i) d | Just v <- M.lookup i substs = do
+          letBindNames'_ [v] $ I.BasicOp $ I.SubExp d
+          return $ I.Free $ I.Var v
+        inspectDim ed _ = return ed
 
 makeShapeIdentsFromContext :: MonadFreshNames m =>
                               M.Map VName Int

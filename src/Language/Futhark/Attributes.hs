@@ -40,9 +40,7 @@ module Language.Futhark.Attributes
   , arrayDims'
   , nestedDims
   , nestedDims'
-  , setArrayShape
-  , removeShapeAnnotations
-  , vacuousShapeAnnotations
+  , arrayShape
   , returnType
   , lambdaReturnType
   , concreteType
@@ -57,6 +55,10 @@ module Language.Futhark.Attributes
   , setAliases
   , addAliases
   , setUniqueness
+  , modifyShapeAnnotations
+  , setArrayShape
+  , removeShapeAnnotations
+  , vacuousShapeAnnotations
   , typeToRecordArrayElem
   , recordArrayElemToType
   , tupleRecord
@@ -163,13 +165,13 @@ nestedDims' _               = mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
-setArrayShape :: shape -> TypeBase shape as -> TypeBase shape as
-setArrayShape ds (Array (PrimArray et _ u as)) = Array $ PrimArray et ds u as
-setArrayShape ds (Array (PolyArray v _ u as))  = Array $ PolyArray v ds u as
-setArrayShape ds (Array (RecordArray et _ u))  = Array $ RecordArray et ds u
-setArrayShape _  (Record ts)                   = Record ts
-setArrayShape _  (Prim t)                      = Prim t
-setArrayShape _  (TypeVar x)                   = TypeVar x
+setArrayShape :: TypeBase shape as -> shape -> TypeBase shape as
+setArrayShape (Array (PrimArray et _ u as)) ds = Array $ PrimArray et ds u as
+setArrayShape (Array (PolyArray v _ u as))  ds = Array $ PolyArray v ds u as
+setArrayShape (Array (RecordArray et _ u))  ds = Array $ RecordArray et ds u
+setArrayShape (Record ts)                   _  = Record ts
+setArrayShape (Prim t)                      _  = Prim t
+setArrayShape (TypeVar x)                   _  = TypeVar x
 
 -- | Change the shape of a type to be just the 'Rank'.
 removeShapeAnnotations :: ArrayShape shape =>
@@ -629,7 +631,7 @@ typeOf (Iota e _) = arrayType 1 (typeOf e) Unique
 typeOf (Shape _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique `setAliases` mempty
 typeOf (Reshape shape  e _) =
-  Rank n `setArrayShape` typeOf e
+  typeOf e `setArrayShape` Rank n
   where n = case typeOf shape of Record ts -> length ts
                                  _         -> 1
 typeOf (Rearrange _ e _) = typeOf e
@@ -775,7 +777,8 @@ patIdentsGen f (PatternAscription p t) =
   patIdentsGen f p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
   where dimIdent _ AnyDim            = Nothing
         dimIdent _ (ConstDim _)      = Nothing
-        dimIdent loc (NamedDim name) = Just $ f name loc
+        dimIdent _ (NamedDim _)      = Nothing
+        dimIdent loc (BoundDim name) = Just $ f name loc
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> CompTypeBase VName
