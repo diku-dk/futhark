@@ -7,6 +7,7 @@ module Futhark.MemoryBlockMerging
 import Prelude
 import Data.Maybe
 import Control.Arrow
+import Control.Monad
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 
@@ -237,7 +238,7 @@ memoryBlockMerging prg = do
                                   ) $ M.toList $ vartab env
                             )
                       ) $ M.elems coaltab
-  putStrLn $ unlines (map ("  "++) $ lines $ pretty coal_info)
+  forM_ coal_info $ putStrLn . ("  " ++) . pretty
 
 
 lookAtFunction :: ExpMem.FunDef ExpMem.ExplicitMemory -> IO ()
