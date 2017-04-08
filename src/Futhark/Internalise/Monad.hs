@@ -255,7 +255,7 @@ noteDecSubsts substs = do
       }
   where keyHasExisting cur_substs (k,v) = do
           v' <- M.lookup k cur_substs
-          return (v, v')
+          keyHasExisting cur_substs (v,v') `mplus` return (v,v')
 
 generatingFunctor :: M.Map VName VName
                   -> M.Map VName VName
@@ -282,14 +282,23 @@ generatingFunctor p_substs b_substs m = do
               forwards,
               p_substs,
               b_substs]
-      nexts = extra_substs `M.union` b_substs
       update env =
         env { envGeneratingFunctor = True
             , envFunctorSubsts = M.unions recs `M.union`
                                  envFunctorSubsts env
             }
   old_dec_substs <- gets stateDecSubsts
-  local update m <* setDecSubsts (nexts `M.union` old_dec_substs)
+  x <- local update m
+  -- Some of the dec substs may be relevant for the result of the
+  -- functor.  A relevant substitution is one that affects an element
+  -- of b_subst.
+  new_dec_substs <- gets stateDecSubsts
+  let b_elems = M.elems b_substs
+      new_relevant k _ = k `elem` b_elems
+      nexts = M.filterWithKey new_relevant new_dec_substs
+              `M.union` extra_substs `M.union` b_substs
+  setDecSubsts (nexts `M.union` old_dec_substs)
+  return x
 
 withDecSubstitutions :: DecSubstitutions
                      -> InternaliseM a -> InternaliseM a
