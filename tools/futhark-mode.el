@@ -525,6 +525,8 @@ Ignore BEGIN, END, and LENGTH (present to satisfy Emacs)."
   (set (make-local-variable 'indent-region-function) nil)
   (set (make-local-variable 'comment-start) "--")
   (set (make-local-variable 'comment-padding) " ")
+  (set (make-local-variable 'paragraph-separate)
+       (concat comment-start " ==$"))
   (add-hook 'after-change-functions 'futhark-check-unsafe nil))
 
 (provide 'futhark-mode)
