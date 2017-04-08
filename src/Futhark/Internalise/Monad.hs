@@ -249,11 +249,13 @@ noteDecSubsts :: M.Map VName VName -> InternaliseM ()
 noteDecSubsts substs = do
   cur_substs <- allSubsts
   -- Some substitutions of these names may already exist.
-  let substs' = M.map (forward cur_substs) substs
+  let also_substs = M.fromList $ mapMaybe (keyHasExisting cur_substs) $ M.toList substs
   modify $ \s ->
-    s { stateDecSubsts = substs' `M.union` stateDecSubsts s
+    s { stateDecSubsts = also_substs `M.union` substs `M.union` stateDecSubsts s
       }
-  where forward old_substs v = fromMaybe v $ M.lookup v old_substs
+  where keyHasExisting cur_substs (k,v) = do
+          v' <- M.lookup k cur_substs
+          return (v, v')
 
 generatingFunctor :: M.Map VName VName
                   -> M.Map VName VName
@@ -266,13 +268,17 @@ generatingFunctor p_substs b_substs m = do
   cur_substs <- allSubsts
 
   let frob (k, v)
-        | Just v' <- M.lookup k cur_substs, v' /= v = Just (v', v)
-        | otherwise                                   = Nothing
-  let extra_substs = if in_functor
+        | Just v' <- M.lookup k cur_substs, v' /= v =
+            frob (v', v) `mplus` Just (v', v)
+        | otherwise =
+            Nothing
+
+      extra_substs = if in_functor
                      then M.fromList $ mapMaybe frob $ M.toList b_substs
                      else mempty
       forwards = M.fromList $ mapMaybe frob $ M.toList p_substs
-  let recs = [extra_substs,
+
+      recs = [extra_substs,
               forwards,
               p_substs,
               b_substs]

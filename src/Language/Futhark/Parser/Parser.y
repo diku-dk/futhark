@@ -268,7 +268,7 @@ ModExp :: { UncheckedModExp }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
-          { ModLambda $2 $3 $5 $1 }
+        { ModLambda $2 (fmap (,NoInfo) $3) $5 $1 }
         | ModExpApply
           { $1 }
         | ModExpAtom

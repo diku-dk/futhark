@@ -348,8 +348,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModLambda param maybe_sig body _) =
     text "\\" <> ppr param <> maybe_sig' <+>
     text "->" </> indent 2 (ppr body)
-    where maybe_sig' = case maybe_sig of Nothing  -> mempty
-                                         Just sig -> colon <+> ppr sig
+    where maybe_sig' = case maybe_sig of Nothing       -> mempty
+                                         Just (sig, _) -> colon <+> ppr sig
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
   ppr (TypeBind name usertype _) =
