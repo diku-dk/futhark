@@ -801,7 +801,7 @@ data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                        -- ^ Functor application.
                      | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
                      | ModLambda (ModParamBase f vn)
-                                 (Maybe (SigExpBase f vn))
+                                 (Maybe (SigExpBase f vn, f (M.Map VName VName)))
                                  (ModExpBase f vn)
                                  SrcLoc
 deriving instance Showable f vn => Show (ModExpBase f vn)
