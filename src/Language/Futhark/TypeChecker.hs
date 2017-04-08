@@ -512,7 +512,6 @@ checkTypeDecl loc (TypeDecl t NoInfo) = do
 --- Signature matching
 
 type AbsToTypes = M.Map VName TypeBinding
-type AbsToNames = M.Map VName TypeBinding
 
 -- Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for
@@ -520,59 +519,53 @@ type AbsToNames = M.Map VName TypeBinding
 -- second the env it must match.
 matchMTys :: MTy -> MTy -> SrcLoc
           -> Either TypeError (M.Map VName VName)
-matchMTys = matchMTys' mempty mempty
+matchMTys = matchMTys' mempty
   where
-    matchMTys' :: AbsToTypes -> AbsToNames -> MTy -> MTy -> SrcLoc
+    matchMTys' :: AbsToTypes -> MTy -> MTy -> SrcLoc
                -> Either TypeError (M.Map VName VName)
 
-    matchMTys' _ _(MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
+    matchMTys' _(MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
       Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
 
-    matchMTys' _ _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
+    matchMTys' _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
       Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
 
-    matchMTys' old_abs_subst_to_type old_abs_subst_to_name
-              (MTy mod_abs mod) (MTy sig_abs sig)
-              loc = do
+    matchMTys' old_abs_subst_to_type (MTy mod_abs mod) (MTy sig_abs sig) loc = do
       -- Check that abstract types in 'sig' have an implementation in
       -- 'mod'.  This also gives us a substitution that we use to check
       -- the types of values.
       abs_substs <- resolveAbsTypes mod_abs mod sig_abs loc
 
       let abs_subst_to_type = old_abs_subst_to_type <> M.map snd abs_substs
-          abs_subst_to_name = old_abs_subst_to_name <>
-                              M.map (TypeAbbr . TypeVar . typeNameFromQualName . fst) abs_substs
           abs_name_substs   = M.map (qualLeaf . fst) abs_substs
-      substs <- matchMods abs_subst_to_type abs_subst_to_name mod sig loc
+      substs <- matchMods abs_subst_to_type mod sig loc
       return (substs <> abs_name_substs)
 
-    matchMods :: AbsToTypes -> AbsToNames -> Mod -> Mod -> SrcLoc
+    matchMods :: AbsToTypes -> Mod -> Mod -> SrcLoc
               -> Either TypeError (M.Map VName VName)
-    matchMods _ _ ModEnv{} ModFun{} loc =
+    matchMods _ ModEnv{} ModFun{} loc =
       Left $ TypeError loc "Cannot match non-parametric module with paramatric module type."
-    matchMods _ _ ModFun{} ModEnv{} loc =
+    matchMods _ ModFun{} ModEnv{} loc =
       Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
 
-    matchMods abs_subst_to_type abs_subst_to_name (ModEnv mod) (ModEnv sig) loc =
-      matchEnvs abs_subst_to_type abs_subst_to_name mod sig loc
+    matchMods abs_subst_to_type (ModEnv mod) (ModEnv sig) loc =
+      matchEnvs abs_subst_to_type mod sig loc
 
-    matchMods old_abs_subst_to_type old_abs_subst_to_name
+    matchMods old_abs_subst_to_type
               (ModFun (FunSig mod_abs mod_pmod mod_mod))
               (ModFun (FunSig sig_abs sig_pmod sig_mod))
               loc = do
       abs_substs <- resolveAbsTypes mod_abs mod_pmod sig_abs loc
       let abs_subst_to_type = old_abs_subst_to_type <> M.map snd abs_substs
-          abs_subst_to_name = old_abs_subst_to_name <>
-                              M.map (TypeAbbr . TypeVar . typeNameFromQualName . fst) abs_substs
 
-      pmod_substs <- matchMods abs_subst_to_type abs_subst_to_name mod_pmod sig_pmod loc
-      mod_substs <- matchMTys' abs_subst_to_type abs_subst_to_name mod_mod sig_mod loc
+      pmod_substs <- matchMods abs_subst_to_type mod_pmod sig_pmod loc
+      mod_substs <- matchMTys' abs_subst_to_type mod_mod sig_mod loc
       return (pmod_substs <> mod_substs)
 
-    matchEnvs :: AbsToTypes -> AbsToNames
+    matchEnvs :: AbsToTypes
               -> Env -> Env -> SrcLoc
               -> Either TypeError (M.Map VName VName)
-    matchEnvs abs_subst_to_type abs_subst_to_name env sig loc = do
+    matchEnvs abs_subst_to_type env sig loc = do
       -- XXX: we only want to create substitutions for visible names.
       -- This must be wrong in some cases.  Probably we need to
       -- rethink how we do shadowing for module types.
@@ -619,8 +612,7 @@ matchMTys = matchMTys' mempty mempty
       mod_substs <- fmap M.unions $ forM (envMods sig) $ \(name, modspec) ->
         case findBinding envModTable Structure (baseName name) env of
           Just (name', mod) -> do
-            mod_substs <-
-              matchMods abs_subst_to_type abs_subst_to_name mod modspec loc
+            mod_substs <- matchMods abs_subst_to_type mod modspec loc
             return (M.insert name name' mod_substs)
           Nothing ->
             missingMod loc $ baseName name
