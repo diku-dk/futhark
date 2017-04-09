@@ -749,58 +749,75 @@ newNamesForMTy except orig_mty = do
 
   return (substituteInMTy substs orig_mty, substs)
 
-  where substituteInMTy substs (MTy abs mod) =
-          MTy (S.map (fmap $ substitute substs) abs) (substituteInMod substs mod)
-
-        substituteInEnv :: M.Map VName VName -> Env -> Env
-        substituteInEnv substs (Env vtable ttable _stable modtable names) =
-          let vtable' = substituteInMap substs substituteInBinding vtable
-              ttable' = substituteInMap substs substituteInTypeBinding ttable
-              mtable' = substituteInMap substs substituteInMod modtable
+  where
+    substituteInMTy :: M.Map VName VName -> MTy -> MTy
+    substituteInMTy substs (MTy mty_abs mty_mod) =
+      MTy (S.map (fmap substitute) mty_abs) (substituteInMod mty_mod)
+      where
+        substituteInEnv (Env vtable ttable _stable modtable names) =
+          let vtable' = substituteInMap substituteInBinding vtable
+              ttable' = substituteInMap substituteInTypeBinding ttable
+              mtable' = substituteInMap substituteInMod modtable
           in Env { envVtable = vtable'
                  , envTypeTable = ttable'
                  , envSigTable = mempty
                  , envModTable = mtable'
-                 , envNameMap = M.map (substitute substs) names
+                 , envNameMap = M.map substitute names
                  }
 
-        substitute substs v =
+        substitute v =
           fromMaybe v $ M.lookup v substs
 
-        substituteInMap substs f m =
+        substituteInMap f m =
           let (ks, vs) = unzip $ M.toList m
           in M.fromList $
              zip (map (\k -> fromMaybe k $ M.lookup k substs) ks)
-                 (map (f substs) vs)
+                 (map f vs)
 
-        substituteInBinding :: M.Map VName VName -> ValBinding
-                            -> ValBinding
-        substituteInBinding substs (BoundV t) =
+        substituteInBinding (BoundV t) =
           BoundV $ fromStruct $ toStructural $
-          substituteInType substs $
-          vacuousShapeAnnotations $ toStruct t
-        substituteInBinding substs (BoundF (pts,t)) =
-          BoundF (map (substituteInType substs) pts, substituteInType substs t)
+          substituteInType $ vacuousShapeAnnotations $ toStruct t
+        substituteInBinding (BoundF (pts,t)) =
+          BoundF (map substituteInType pts, substituteInType t)
 
-        substituteInMod :: M.Map VName VName -> Mod
-                        -> Mod
-        substituteInMod substs (ModEnv env) =
-          ModEnv $ substituteInEnv substs env
-        substituteInMod substs (ModFun funsig) =
-          ModFun $ substituteInFunSig substs funsig
+        substituteInMod (ModEnv env) =
+          ModEnv $ substituteInEnv env
+        substituteInMod (ModFun funsig) =
+          ModFun $ substituteInFunSig funsig
 
-        substituteInFunSig substs (FunSig abs mod mty) =
-          FunSig (S.map (fmap $ substitute substs) abs)
-          (substituteInMod substs mod) (substituteInMTy substs mty)
+        substituteInFunSig (FunSig abs mod mty) =
+          FunSig (S.map (fmap substitute) abs)
+          (substituteInMod mod) (substituteInMTy substs mty)
 
-        substituteInTypeBinding substs (TypeAbbr t) =
-          TypeAbbr $ substituteInType substs t
+        substituteInTypeBinding (TypeAbbr t) =
+          TypeAbbr $ substituteInType t
 
-        substituteInType :: M.Map VName VName -> StructType
-                         -> StructType
-        substituteInType substs =
-          substituteTypes $
-          M.map (TypeAbbr . TypeVar . typeNameFromQualName . qualName) substs
+        substituteInType :: StructType -> StructType
+        substituteInType (TypeVar (TypeName qs v)) =
+          TypeVar $ TypeName qs $ substitute v
+        substituteInType (Prim t) =
+          Prim t
+        substituteInType (Record ts) =
+          Record $ fmap substituteInType ts
+        substituteInType (Array (PrimArray t shape u ())) =
+          Array $ PrimArray t (substituteInShape shape) u ()
+        substituteInType (Array (PolyArray (TypeName qs v) shape u ()))
+          | Just v' <- M.lookup v substs =
+              Array $ PolyArray (TypeName qs v') (substituteInShape shape) u ()
+          | otherwise =
+              Array $ PolyArray (TypeName qs v) (substituteInShape shape) u ()
+        substituteInType (Array (RecordArray ts shape u)) =
+          Array $ RecordArray ts' (substituteInShape shape) u
+          where ts' = fmap (flip typeToRecordArrayElem u .
+                            substituteInType . recordArrayElemToType) ts
+
+        substituteInShape (ShapeDecl ds) =
+          ShapeDecl $ map substituteInDim ds
+        substituteInDim (NamedDim (QualName qs v)) =
+          NamedDim $ QualName qs $ substitute v
+        substituteInDim (BoundDim v) =
+          BoundDim $ substitute v
+        substituteInDim d = d
 
 mtyTypeAbbrs :: MTy -> M.Map VName StructType
 mtyTypeAbbrs (MTy _ mod) = modTypeAbbrs mod
