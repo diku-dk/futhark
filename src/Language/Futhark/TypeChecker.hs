@@ -663,10 +663,10 @@ matchMTys = matchMTys' mempty
                         (map (fmap baseName) $ S.toList mod_abs) (S.toList mod_abs)
       fmap M.fromList $ forM (S.toList sig_abs) $ \name ->
         case findTypeDef (fmap baseName name) mod of
-          _ | Just name' <- M.lookup (fmap baseName name) abs_mapping ->
-                return (qualLeaf name, (name', TypeAbbr $ TypeVar $ typeNameFromQualName name'))
-          Just (name', TypeAbbr t) ->
-            return (qualLeaf name, (qualName name', TypeAbbr t))
+          Just (name', TypeAbbr t)
+            | Just abs_name <- M.lookup (fmap baseName name) abs_mapping ->
+                return (qualLeaf name, (abs_name, TypeAbbr t))
+            | otherwise -> return (qualLeaf name, (qualName name', TypeAbbr t))
           _ ->
             missingType loc $ fmap baseName name
 
