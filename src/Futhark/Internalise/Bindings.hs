@@ -26,6 +26,7 @@ import Futhark.MonadFreshNames
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.AccurateSizes
+import Futhark.Util
 
 import Prelude hiding (mapM)
 
@@ -33,9 +34,11 @@ bindingParams :: [E.Pattern]
               -> ([I.FParam] -> [[I.FParam]] -> InternaliseM a)
               -> InternaliseM a
 bindingParams params m = do
-  (params_idents, params_ascripts, params_types) <-
-    unzip3 . concat <$> mapM flattenPattern params
+  flattened_params <- mapM flattenPattern params
+  let (params_idents, params_ascripts, params_types) = unzip3 $ concat flattened_params
   (params_ts, shape_ctx) <- internaliseParamTypes params_types
+  let num_param_idents = map length flattened_params
+      num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
   (shape_ctx', shapesubst) <- makeShapeIdentsFromContext shape_ctx
 
   (params_ts', unnamed_shape_params, ascriptsubsts) <-
@@ -58,7 +61,7 @@ bindingParams params m = do
     local (\env -> env { envSubsts = mconcat ascriptsubsts
                                      `M.union` shapesubst
                                      `M.union` envSubsts env}) $
-    m shape_params valueparams
+    m shape_params $ chunks num_param_ts (concat valueparams)
 
     where forwardDims ctx ref =
             mconcat . map (mconcat . zipWith (forwardDim ctx) (I.arrayDims ref) .
