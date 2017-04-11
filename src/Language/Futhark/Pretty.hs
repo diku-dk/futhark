@@ -52,13 +52,12 @@ instance Pretty PrimValue where
   ppr (FloatValue v) = ppr v
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DimDecl vn) where
-  ppr AnyDim       = mempty
   ppr (NamedDim v) = ppr v
   ppr (BoundDim v) = text "#" <> ppr v
   ppr (ConstDim n) = ppr n
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ShapeDecl vn) where
-  ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
+  ppr (ShapeDecl ds) = mconcat (map (brackets . maybe mempty ppr) ds)
 
 instance Pretty Rank where
   ppr (Rank n) = mconcat (replicate n (brackets mempty))

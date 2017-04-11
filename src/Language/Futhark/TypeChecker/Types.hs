@@ -15,6 +15,7 @@ where
 
 import Control.Monad.Except
 import Control.Monad.State
+import Data.Foldable
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -135,11 +136,9 @@ checkTypeExp' t@(TERecord fs loc) = do
   return (TERecord (M.toList fs') loc, Record ts_s)
 checkTypeExp' (TEArray t d loc) = do
   (t', st) <- checkTypeExp' t
-  d' <- checkDimDecl d
+  d' <- traverse checkDimDecl d
   return (TEArray t' d' loc, arrayOf st (ShapeDecl [d']) Nonunique)
-  where checkDimDecl AnyDim =
-          return AnyDim
-        checkDimDecl (ConstDim k) =
+  where checkDimDecl (ConstDim k) =
           return $ ConstDim k
         checkDimDecl (BoundDim v) =
           BoundDim <$> checkBoundDim loc v
@@ -293,9 +292,8 @@ checkForDuplicateNamesTypeExp' (TETuple ts _) =
 checkForDuplicateNamesTypeExp' (TEUnique t _) =
   checkForDuplicateNamesTypeExp' t
 checkForDuplicateNamesTypeExp' (TEArray te d loc) =
-  checkForDuplicateNamesTypeExp' te >> checkDimDecl d
-  where checkDimDecl AnyDim = return ()
-        checkDimDecl ConstDim{} = return ()
+  checkForDuplicateNamesTypeExp' te >> traverse_ checkDimDecl d
+  where checkDimDecl ConstDim{} = return ()
         checkDimDecl (NamedDim (QualName [] v)) = seeing UsedFree v loc
         checkDimDecl (NamedDim _) = return ()
         checkDimDecl (BoundDim v) = seeing BoundAsDim v loc

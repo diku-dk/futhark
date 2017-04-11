@@ -146,7 +146,7 @@ toSimpleType TERecord{} = Left "Cannot handle records yet."
 toSimpleType (TEUnique t _) = toSimpleType t
 toSimpleType (TEArray t d _) =
   SimpleArray <$> toSimpleType t <*> constantDim d
-  where constantDim (ConstDim k) = Right k
+  where constantDim (Just (ConstDim k)) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
 toSimpleType (TEVar (QualName [] v) _)
   | Just t <- M.lookup v namesToPrimTypes = Right $ SimplePrim t
