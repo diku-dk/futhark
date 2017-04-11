@@ -264,11 +264,12 @@ SigBind :: { SigBindBase NoInfo Name }
             in SigBind name $5 pos }
 
 ModExp :: { UncheckedModExp }
-        : import stringlit { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
+        : import stringlit
+          { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
         | ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
-        { ModLambda $2 (fmap (,NoInfo) $3) $5 $1 }
+          { ModLambda $2 (fmap (,NoInfo) $3) $5 $1 }
         | ModExpApply
           { $1 }
         | ModExpAtom
