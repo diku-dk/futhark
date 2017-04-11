@@ -370,8 +370,7 @@ patternDims (PatternParens p _) = patternDims p
 patternDims (TuplePattern pats _) = concatMap patternDims pats
 patternDims (PatternAscription p t) =
   patternDims p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
-  where dimIdent _ AnyDim            = Nothing
-        dimIdent _ (ConstDim _)      = Nothing
+  where dimIdent _ (ConstDim _)      = Nothing
         dimIdent _ NamedDim{}        = Nothing
         dimIdent loc (BoundDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
 patternDims _ = []

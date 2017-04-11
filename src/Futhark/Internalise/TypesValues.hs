@@ -129,13 +129,13 @@ internaliseDeclType' orig_t =
 
         internaliseShape = mapM internaliseDim . E.shapeDims
 
-        internaliseDim AnyDim =
+        internaliseDim Nothing =
           Ext <$> newId
-        internaliseDim (ConstDim n) =
+        internaliseDim (Just (ConstDim n)) =
           return $ Free $ intConst I.Int32 $ toInteger n
-        internaliseDim (BoundDim name) =
+        internaliseDim (Just (BoundDim name)) =
           Ext <$> knownOrNewId name
-        internaliseDim (NamedDim name) = do
+        internaliseDim (Just (NamedDim name)) = do
           subst <- asks $ M.lookup (E.qualLeaf name) . envSubsts
           I.Free <$> case subst of
             Just [v] -> return v
