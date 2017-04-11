@@ -192,7 +192,7 @@ checkSigExp (SigSpecs specs loc) = do
 checkSigExp (SigWith s (TypeRef tname td) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
   td' <- checkTypeDecl loc td
-  tname' <- localEnv (s_env<>) $ snd <$> checkQualName Type tname loc
+  tname' <- localEnv (s_env<>) $ snd <$> checkQualNameWithEnv Type tname loc
   (s_abs', s_env') <- refineEnv loc s_abs s_env tname' $ unInfo $ expandedType td'
   return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do

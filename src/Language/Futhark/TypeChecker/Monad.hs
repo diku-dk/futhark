@@ -7,10 +7,11 @@ module Language.Futhark.TypeChecker.Monad
   , runTypeM
   , askEnv
   , askImportTable
-  , checkQualName
+  , checkQualNameWithEnv
   , bindSpaced
 
   , MonadTypeChecker(..)
+  , checkName
   , badOnLeft
 
   , require
@@ -313,13 +314,16 @@ class MonadError TypeError m => MonadTypeChecker m where
 
   bindNameMap :: NameMap -> m a -> m a
 
-  checkName :: Namespace -> Name -> SrcLoc -> m VName
+  checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
 
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, StructType)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m Env
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, Type)
+
+checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
+checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
@@ -351,24 +355,22 @@ instance MonadTypeChecker TypeM where
     (env { envNameMap = m <> envNameMap env },
      imports)
 
-  checkName space name loc = do
-    (_, QualName _ name') <- checkQualName space (qualName name) loc
-    return name'
+  checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 
   lookupType loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualName Type qn loc
+    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
       Nothing -> bad $ UndefinedType loc qn
       Just (TypeAbbr def) -> return (qn', def)
 
   lookupMod loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualName Structure qn loc
+    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Structure qn loc
     case M.lookup name $ envModTable scope of
       Nothing -> bad $ UnknownVariableError Structure qn loc
       Just m  -> return (qn', m)
 
   lookupMTy loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualName Signature qn loc
+    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Signature qn loc
     (qn',) <$> maybe explode return (M.lookup name $ envSigTable scope)
     where explode = bad $ UnknownVariableError Signature qn loc
 
@@ -379,15 +381,15 @@ instance MonadTypeChecker TypeM where
       Just scope -> return scope
 
   lookupVar loc qn = do
-    (env, qn'@(QualName _ name)) <- checkQualName Term qn loc
+    (env, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
       Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                       | otherwise -> return (qn', t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
 
-checkQualName :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
-checkQualName space qn@(QualName quals name) loc = do
+checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
+checkQualNameWithEnv space qn@(QualName quals name) loc = do
   env <- askEnv
   descend env quals
   where descend scope []

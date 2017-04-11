@@ -26,7 +26,7 @@ import qualified Data.Set as S
 import Prelude hiding (mapM)
 
 import Language.Futhark
-import Language.Futhark.TypeChecker.Monad hiding (ValBinding, BoundV, BoundF, checkQualName)
+import Language.Futhark.TypeChecker.Monad hiding (ValBinding, BoundV, BoundF, checkQualNameWithEnv)
 import Language.Futhark.TypeChecker.Types
 import qualified Language.Futhark.TypeChecker.Monad as TypeM
 
@@ -176,9 +176,7 @@ instance MonadTypeChecker TermTypeM where
   newName = liftTypeM . newName
   newID = liftTypeM . newID
 
-  checkName space name loc = do
-    (_, QualName _ name') <- checkQualName space (qualName name) loc
-    return name'
+  checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 
   bindNameMap m = local $ \scope ->
     scope { scopeNameMap = m <> scopeNameMap scope }
@@ -189,7 +187,7 @@ instance MonadTypeChecker TermTypeM where
   lookupImport loc name = liftTypeM $ TypeM.lookupImport loc name
 
   lookupVar loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualName Term qn loc
+    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
       Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
@@ -200,16 +198,16 @@ instance MonadTypeChecker TermTypeM where
       Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
       Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
 
-checkQualName :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
-checkQualName space qn@(QualName [q] _) loc
+checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
+checkQualNameWithEnv space qn@(QualName [q] _) loc
   | nameToString q == "intrinsics" = do
       -- Check if we are referring to the magical intrinsics
       -- module.
-      (_, QualName _ q') <- liftTypeM $ TypeM.checkQualName Structure (QualName [] q) loc
+      (_, QualName _ q') <- liftTypeM $ TypeM.checkQualNameWithEnv Structure (QualName [] q) loc
       if baseTag q' <= maxIntrinsicTag
         then checkIntrinsic space qn loc
         else checkReallyQualName space qn loc
-checkQualName space qn@(QualName quals name) loc = do
+checkQualNameWithEnv space qn@(QualName quals name) loc = do
   scope <- ask
   descend scope quals
   where descend scope []
@@ -229,14 +227,14 @@ checkIntrinsic space qn@(QualName _ name) loc
 
 checkReallyQualName :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkReallyQualName space qn loc = do
-  (env, name') <- liftTypeM $ TypeM.checkQualName space qn loc
+  (env, name') <- liftTypeM $ TypeM.checkQualNameWithEnv space qn loc
   return (envToTermScope env, name')
 
 -- | In a few rare cases (overloaded builtin functions), the type of
 -- the parameters actually matters.
 lookupFunction :: QualName Name -> [Type] -> SrcLoc -> TermTypeM (QualName VName, FunBinding, Occurences)
 lookupFunction qn argtypes loc = do
-  (scope, qn'@(QualName _ name)) <- checkQualName Term qn loc
+  (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
   case M.lookup name $ scopeVtable scope of
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
