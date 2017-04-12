@@ -452,8 +452,8 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
                  },
            FunBind entry fname' maybe_retdecl' (Info rettype) params' body' loc)
 
-  where dimDeclName (Just (NamedDim (QualName [] name))) = Just name
-        dimDeclName _                                    = Nothing
+  where dimDeclName (NamedDim (QualName [] name)) = Just name
+        dimDeclName _                             = Nothing
 
         paramType :: Pattern -> StructType
         paramType = vacuousShapeAnnotations . toStruct . patternType
@@ -812,7 +812,7 @@ newNamesForMTy except orig_mty = do
                             substituteInType . recordArrayElemToType) ts
 
         substituteInShape (ShapeDecl ds) =
-          ShapeDecl $ map (fmap substituteInDim) ds
+          ShapeDecl $ map substituteInDim ds
         substituteInDim (NamedDim (QualName qs v)) =
           NamedDim $ QualName qs $ substitute v
         substituteInDim (BoundDim v) =

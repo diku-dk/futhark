@@ -127,11 +127,11 @@ arrayShape' (TEUnique t _)  = arrayShape' t
 arrayShape' _               = mempty
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims :: Ord vn => TypeBase (ShapeDecl vn) as -> [Maybe (DimDecl vn)]
+arrayDims :: Ord vn => TypeBase (ShapeDecl vn) as -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims' :: TypeExp vn -> [Maybe (DimDecl vn)]
+arrayDims' :: TypeExp vn -> [DimDecl vn]
 arrayDims' = shapeDims . arrayShape'
 
 -- | Return any shape declaration in the type, with duplicates removed.
@@ -142,11 +142,11 @@ nestedDims t =
             Prim{}    -> mempty
             TypeVar{} -> mempty
   where arrayNestedDims (PrimArray _ ds _ _) =
-          catMaybes $ shapeDims ds
+          shapeDims ds
         arrayNestedDims (PolyArray _ ds _ _) =
-          catMaybes $ shapeDims ds
+          shapeDims ds
         arrayNestedDims (RecordArray ts ds _) =
-          catMaybes (shapeDims ds) <> fold (fmap recordArrayElemNestedDims ts)
+          shapeDims ds <> fold (fmap recordArrayElemNestedDims ts)
         recordArrayElemNestedDims (ArrayArrayElem a) =
           arrayNestedDims a
         recordArrayElemNestedDims (RecordArrayElem fs) =
@@ -158,11 +158,10 @@ nestedDims t =
 
 -- | Return any shape declaration in the type, with duplicates removed.
 nestedDims' :: Ord vn => TypeExp vn -> [DimDecl vn]
-nestedDims' (TEArray t (Just d) _) = nub $ d : nestedDims' t
-nestedDims' (TEArray t Nothing _)  = nestedDims' t
-nestedDims' (TETuple ts _)         = nub $ mconcat $ map nestedDims' ts
-nestedDims' (TEUnique t _)         = nestedDims' t
-nestedDims' _                      = mempty
+nestedDims' (TEArray t d _) = nub $ d : nestedDims' t
+nestedDims' (TETuple ts _)  = nub $ mconcat $ map nestedDims' ts
+nestedDims' (TEUnique t _)  = nestedDims' t
+nestedDims' _               = mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -184,7 +183,7 @@ removeShapeAnnotations = modifyShapeAnnotations $ Rank . shapeRank
 vacuousShapeAnnotations :: ArrayShape shape =>
                            TypeBase shape as -> TypeBase (ShapeDecl vn) as
 vacuousShapeAnnotations = modifyShapeAnnotations $ \shape ->
-  ShapeDecl (replicate (shapeRank shape) Nothing)
+  ShapeDecl (replicate (shapeRank shape) AnyDim)
 
 -- | Change the shape of a type.
 modifyShapeAnnotations :: (oldshape -> newshape)
@@ -776,7 +775,8 @@ patIdentsGen f (RecordPattern fs _)    = mconcat $ map (patIdentsGen f . snd) fs
 patIdentsGen _ Wildcard{}              = []
 patIdentsGen f (PatternAscription p t) =
   patIdentsGen f p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
-  where dimIdent _ (ConstDim _)      = Nothing
+  where dimIdent _ AnyDim            = Nothing
+        dimIdent _ (ConstDim _)      = Nothing
         dimIdent _ (NamedDim _)      = Nothing
         dimIdent loc (BoundDim name) = Just $ f name loc
 
