@@ -172,16 +172,19 @@ data DimDecl vn = BoundDim vn
                   -- give rise to an assertion.
                 | ConstDim Int
                   -- ^ The size is a constant.
+                | AnyDim
+                  -- ^ No dimension declaration.
                 deriving (Eq, Ord, Show)
 
 instance Functor DimDecl where
   fmap f (BoundDim x) = BoundDim $ f x
   fmap f (NamedDim (QualName qs x)) = NamedDim $ QualName qs $ f x
   fmap _ (ConstDim x) = ConstDim x
+  fmap _ AnyDim = AnyDim
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-newtype ShapeDecl vn = ShapeDecl { shapeDims :: [Maybe (DimDecl vn)] }
+newtype ShapeDecl vn = ShapeDecl { shapeDims :: [DimDecl vn] }
                      deriving (Eq, Ord, Show)
 
 -- | The rank of an array as a positive natural number.
@@ -193,7 +196,7 @@ instance Monoid Rank where
   Rank n `mappend` Rank m = Rank $ n + m
 
 instance Functor ShapeDecl where
-  fmap f (ShapeDecl ds) = ShapeDecl $ map (fmap $ fmap f) ds
+  fmap f (ShapeDecl ds) = ShapeDecl $ map (fmap f) ds
 
 instance ArrayShape Rank where
   shapeRank (Rank n) = n
@@ -214,10 +217,10 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
   unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
     guard $ length xs == length ys
     ShapeDecl <$> zipWithM unifyShapeDecl xs ys
-    where unifyShapeDecl Nothing y = Just y
-          unifyShapeDecl x Nothing = Just x
-          unifyShapeDecl (Just (NamedDim x)) (Just (NamedDim y)) | x == y = Just $ Just $ NamedDim x
-          unifyShapeDecl (Just (ConstDim x)) (Just (ConstDim y)) | x == y = Just $ Just $ ConstDim x
+    where unifyShapeDecl AnyDim y = Just y
+          unifyShapeDecl x AnyDim = Just x
+          unifyShapeDecl (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
+          unifyShapeDecl (ConstDim x) (ConstDim y) | x == y = Just $ ConstDim x
           unifyShapeDecl _ _ = Nothing
 
 -- | A type name consists of qualifiers (for error messages) and a
@@ -293,7 +296,7 @@ type CompTypeBase vn = TypeBase Rank (Names vn)
 data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TETuple [TypeExp vn] SrcLoc
                 | TERecord [(Name, TypeExp vn)] SrcLoc
-                | TEArray (TypeExp vn) (Maybe (DimDecl vn)) SrcLoc
+                | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
                  deriving (Eq, Show)
 

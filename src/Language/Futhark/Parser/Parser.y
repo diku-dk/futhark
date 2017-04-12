@@ -402,8 +402,7 @@ TypeAbbr : type id '=' TypeExpDecl
 
 TypeExp :: { UncheckedTypeExp }
          : '*' TypeExp             { TEUnique $2 $1 }
-         | '[' DimDecl ']' TypeExp { TEArray $4 (Just $2) $1 }
-         | '[' ']' TypeExp         { TEArray $3 Nothing $1 }
+         | '[' DimDecl ']' TypeExp { TEArray $4 $2 $1 }
          | '(' ')'                 { TETuple [] $1 }
          | '(' TypeExp ')'         { $2 }
          | QualName                { TEVar (fst $1) (snd $1) }
@@ -426,6 +425,7 @@ DimDecl :: { DimDecl Name }
         | intlit
           { let L _ (INTLIT n) = $1
             in ConstDim (fromIntegral n) }
+        | { AnyDim }
 
 Param :: { PatternBase NoInfo Name }
 Param : InnerPattern { $1 }
