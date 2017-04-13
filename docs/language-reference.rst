@@ -690,7 +690,7 @@ with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
 ``scatter as is vs``
-..................
+....................
 
 The ``scatter`` expression calculates the equivalent of this imperative
 code::
