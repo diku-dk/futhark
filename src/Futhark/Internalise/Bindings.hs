@@ -58,9 +58,7 @@ bindingParams params m = do
       shape_params = named_shape_params ++ concat unnamed_shape_params
   bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
     bindingIdentTypes (map I.paramIdent $ shape_params++concat valueparams) $
-    local (\env -> env { envSubsts = mconcat ascriptsubsts
-                                     `M.union` shapesubst
-                                     `M.union` envSubsts env}) $
+    substitutingVars (mconcat ascriptsubsts `M.union` shapesubst) $
     m cm shape_params $ chunks num_param_ts (concat valueparams)
 
     where forwardDims ctx ref =

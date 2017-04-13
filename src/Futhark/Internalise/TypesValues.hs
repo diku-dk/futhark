@@ -22,14 +22,16 @@ import Control.Monad.Reader
 import qualified Data.Array as A
 import Data.List
 import qualified Data.Map.Strict as M
+import Data.Maybe
 import Data.Monoid
 
 import Prelude hiding (mapM)
 
-import Language.Futhark as E
+import qualified Language.Futhark as E
 import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
 import Futhark.MonadFreshNames
+import Futhark.Util
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
@@ -58,8 +60,8 @@ internaliseEntryReturnType :: E.TypeBase (E.ShapeDecl VName) als
                                             M.Map VName Int,
                                             ConstParams)
 internaliseEntryReturnType t = do
-  let ts = case isTupleRecord t of Just tts -> tts
-                                   _        -> [t]
+  let ts = case E.isTupleRecord t of Just tts -> tts
+                                     _        -> [t]
   (ts', (_, subst', cm')) <-
     runStateT (mapM internaliseDeclType' ts) (0, mempty, mempty)
   return (ts', subst', cm')
@@ -69,21 +71,70 @@ internaliseType :: E.ArrayShape shape =>
                 -> InternaliseM [I.TypeBase I.Rank Uniqueness]
 internaliseType t = do
   (t', _) <- runStateT
-             (internaliseDeclType' $ vacuousShapeAnnotations t)
+             (internaliseDeclType' $ E.vacuousShapeAnnotations t)
              (0, M.empty, mempty)
   return $ map I.rankShaped t'
 
+type InternaliseTypeM = StateT (Int, M.Map VName Int, ConstParams) InternaliseM
+
+reExt :: TypeBase ExtShape u -> InternaliseTypeM (TypeBase ExtShape u)
+reExt (Array t (ExtShape ds) u) = do
+  (_, ds') <- mapAccumLM update mempty ds
+  return $ Array t (ExtShape ds') u
+  where update seen (Ext x)
+          | Just x' <- M.lookup x seen =
+              return (seen, Ext x')
+          | otherwise = do
+              x' <- newId
+              return (M.insert x x' seen, Ext x')
+        update seen d =
+          return (seen, d)
+
+reExt t = return t
+
+newId :: InternaliseTypeM Int
+newId = do (i,m,cm) <- get
+           put (i + 1, m, cm)
+           return i
+
+internaliseDim :: E.DimDecl VName
+               -> InternaliseTypeM ExtDimSize
+internaliseDim d =
+  case d of
+    E.AnyDim -> Ext <$> newId
+    E.ConstDim n -> return $ Free $ intConst I.Int32 $ toInteger n
+    E.BoundDim name -> Ext <$> knownOrNewId name
+    E.NamedDim name -> I.Free <$> namedDim name
+  where knownOrNewId name = do
+          (i,m,cm) <- get
+          case M.lookup name m of
+            Nothing -> do put (i + 1, M.insert name i m, cm)
+                          return i
+            Just j  -> return j
+
+        namedDim name = do
+          name' <- lift $ lookupSubst name
+          subst <- asks $ M.lookup name' . envSubsts
+          case subst of
+            Just [v] -> return v
+            _ -> do -- Then it must be a constant.
+              let fname = nameFromString $ pretty name' ++ "f"
+              (i,m,cm) <- get
+              case find ((==fname) . fst) cm of
+                Just (_, known) -> return $ I.Var known
+                Nothing -> do new <- lift $ newVName $ baseString name'
+                              put (i, m, (fname,new):cm)
+                              return $ I.Var new
+
 internaliseDeclType' :: E.TypeBase (E.ShapeDecl VName) als
-                     -> StateT (Int, M.Map VName Int, ConstParams)
-                        InternaliseM [I.TypeBase ExtShape Uniqueness]
+                     -> InternaliseTypeM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' orig_t =
   case orig_t of
     E.Prim bt -> return [I.Prim $ internalisePrimType bt]
-    E.TypeVar v -> do
-      v' <- lift $ lookupSubst $ qualNameFromTypeName v
-      mapM (extShaped . (`toDecl` Nonunique)) =<< lift (lookupTypeVar v')
+    E.TypeVar v targs ->
+      map (`toDecl` Nonunique) <$> applyType v targs
     E.Record ets ->
-      concat <$> mapM (internaliseDeclType' . snd) (sortFields ets)
+      concat <$> mapM (internaliseDeclType' . snd) (E.sortFields ets)
     E.Array at ->
       internaliseArrayType at
   where internaliseArrayType (E.PrimArray bt shape u _) = do
@@ -91,71 +142,31 @@ internaliseDeclType' orig_t =
           return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
                   internaliseUniqueness u]
 
-        internaliseArrayType (E.PolyArray v shape u _) = do
-          ts <- lift $ lookupTypeVar =<< lookupSubst (qualNameFromTypeName v)
+        internaliseArrayType (E.PolyArray v targs shape u _) = do
+          ts <- applyType v targs
           dims <- internaliseShape shape
-          forM ts $ \t -> do
-            t' <- extShaped t
-            return $ I.arrayOf t' (ExtShape dims) $ internaliseUniqueness u
+          forM ts $ \t ->
+            return $ I.arrayOf t (ExtShape dims) $ internaliseUniqueness u
 
         internaliseArrayType (E.RecordArray elemts shape u) = do
           innerdims <- ExtShape <$> internaliseShape shape
-          ts <- concat <$> mapM (internaliseRecordArrayElem . snd) (sortFields elemts)
+          ts <- concat <$> mapM (internaliseRecordArrayElem . snd) (E.sortFields elemts)
           return [ I.arrayOf ct innerdims $
                    if I.unique ct then Unique
                    else if I.primType ct then u
                         else I.uniqueness ct
                  | ct <- ts ]
 
-        internaliseRecordArrayElem (PrimArrayElem bt _ _) =
+        internaliseRecordArrayElem (E.PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
-        internaliseRecordArrayElem (PolyArrayElem v _ _) = do
-          v' <- lift $ lookupSubst $ qualNameFromTypeName v
-          mapM (extShaped . (`toDecl` Nonunique)) =<< lift (lookupTypeVar v')
-        internaliseRecordArrayElem (ArrayArrayElem aet) =
+        internaliseRecordArrayElem (E.PolyArrayElem v targs _ _) =
+          map (`toDecl` Nonunique) <$> applyType v targs
+        internaliseRecordArrayElem (E.ArrayArrayElem aet) =
           internaliseArrayType aet
-        internaliseRecordArrayElem (RecordArrayElem ts) =
-          concat <$> mapM (internaliseRecordArrayElem . snd) (sortFields ts)
-
-        newId = do (i,m,cm) <- get
-                   put (i + 1, m, cm)
-                   return i
-
-        knownOrNewId name = do
-          (i,m,cm) <- get
-          case M.lookup name m of
-            Nothing -> do put (i + 1, M.insert name i m, cm)
-                          return i
-            Just j  -> return j
+        internaliseRecordArrayElem (E.RecordArrayElem ts) =
+          concat <$> mapM (internaliseRecordArrayElem . snd) (E.sortFields ts)
 
         internaliseShape = mapM internaliseDim . E.shapeDims
-
-        internaliseDim AnyDim =
-          Ext <$> newId
-        internaliseDim (ConstDim n) =
-          return $ Free $ intConst I.Int32 $ toInteger n
-        internaliseDim (BoundDim name) =
-          Ext <$> knownOrNewId name
-        internaliseDim (NamedDim name) = do
-          subst <- asks $ M.lookup (E.qualLeaf name) . envSubsts
-          I.Free <$> case subst of
-            Just [v] -> return v
-            _ -> do -- Then it must be a constant.
-              let fname = nameFromString $ pretty name ++ "f"
-              (i,m,cm) <- get
-              case find ((==fname) . fst) cm of
-                Just (_, known) -> return $ I.Var known
-                Nothing -> do new <- lift $ newVName $ baseString $ qualLeaf name
-                              put (i, m, (fname,new):cm)
-                              return $ I.Var new
-
-        -- | Add vacuous existential type information to a type.  Every
-        -- dimension will be its own 'Ext'.
-        extShaped (I.Array et sz u) = do
-          dims <- map I.Ext <$> replicateM (I.shapeRank sz) newId
-          return $ I.Array et (I.ExtShape dims) u
-        extShaped (I.Prim et) = return $ I.Prim et
-        extShaped (I.Mem size space) = return $ I.Mem size space
 
 internaliseSimpleType :: E.TypeBase E.Rank als
                       -> Maybe [I.TypeBase ExtShape NoUniqueness]
@@ -169,37 +180,64 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
         internaliseType' (E.Prim bt) =
           return [I.Prim $ internalisePrimType bt]
         internaliseType' (E.Record ets) =
-          concat <$> mapM (internaliseType' . snd) (sortFields ets)
+          concat <$> mapM (internaliseType' . snd) (E.sortFields ets)
         internaliseType' (E.Array at) =
           internaliseArrayType at
 
         internaliseArrayType E.PolyArray{} =
           lift Nothing
         internaliseArrayType (E.PrimArray bt shape u _) = do
-          dims <- map Ext <$> replicateM (E.shapeRank shape) newId
+          dims <- map Ext <$> replicateM (E.shapeRank shape) newId'
           return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
                   internaliseUniqueness u]
         internaliseArrayType (E.RecordArray elemts shape u) = do
-          dims <- map Ext <$> replicateM (E.shapeRank shape) newId
-          ts <- concat <$> mapM (internaliseRecordArrayElem . snd) (sortFields elemts)
+          dims <- map Ext <$> replicateM (E.shapeRank shape) newId'
+          ts <- concat <$> mapM (internaliseRecordArrayElem . snd) (E.sortFields elemts)
           return [ I.arrayOf t (ExtShape dims) $
                     if I.unique t then Unique
                     else if I.primType t then u
                          else I.uniqueness t
                  | t <- ts ]
 
-        internaliseRecordArrayElem PolyArrayElem{} =
+        internaliseRecordArrayElem E.PolyArrayElem{} =
           lift Nothing
-        internaliseRecordArrayElem (PrimArrayElem bt _ _) =
+        internaliseRecordArrayElem (E.PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
-        internaliseRecordArrayElem (ArrayArrayElem at) =
+        internaliseRecordArrayElem (E.ArrayArrayElem at) =
           internaliseArrayType at
-        internaliseRecordArrayElem (RecordArrayElem ts) =
-          concat <$> mapM (internaliseRecordArrayElem . snd) (sortFields ts)
+        internaliseRecordArrayElem (E.RecordArrayElem ts) =
+          concat <$> mapM (internaliseRecordArrayElem . snd) (E.sortFields ts)
 
-        newId = do i <- get
-                   put $ i + 1
-                   return i
+        newId' = do i <- get
+                    put $ i + 1
+                    return i
+
+newtype TypeArg = TypeArgDim ExtDimSize
+
+internaliseTypeArg :: E.TypeArg VName -> InternaliseTypeM TypeArg
+internaliseTypeArg (E.TypeArgDim d _) = TypeArgDim <$> internaliseDim d
+
+applyType :: E.TypeName -> [E.TypeArg VName]
+          -> InternaliseTypeM [I.TypeBase ExtShape NoUniqueness]
+applyType tname targs = do
+  tname' <- lift $ lookupSubst $ E.qualNameFromTypeName tname
+  (ps, t) <- lift $ lookupTypeVar tname'
+  t' <- mapM reExt t
+  targs' <- mapM internaliseTypeArg targs
+  let substs = M.fromList $ zip ps targs'
+  return $ substituteInTypes substs t'
+
+substituteInTypes :: M.Map VName TypeArg
+                  -> [I.TypeBase ExtShape NoUniqueness]
+                  -> [I.TypeBase ExtShape NoUniqueness]
+substituteInTypes substs = map substituteInType
+  where substituteInType (I.Array t (ExtShape dims) u) =
+          I.Array t (ExtShape $ map substituteInDim dims) u
+        substituteInType t = t
+
+        substituteInDim (Free (I.Var v))
+          | Just (TypeArgDim d) <- M.lookup v substs = d
+        substituteInDim d = d
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

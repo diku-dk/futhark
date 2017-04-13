@@ -220,7 +220,7 @@ data MTy = MTy { mtyAbs :: TySet
          deriving (Show)
 
 -- | A binding from a name to its definition as a type.
-newtype TypeBinding = TypeAbbr StructType
+data TypeBinding = TypeAbbr [TypeParam] StructType
                  deriving (Show)
 
 data ValBinding = BoundV Type
@@ -311,7 +311,7 @@ class MonadError TypeError m => MonadTypeChecker m where
 
   checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
 
-  lookupType :: SrcLoc -> QualName Name -> m (QualName VName, StructType)
+  lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructType)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m Env
@@ -356,7 +356,7 @@ instance MonadTypeChecker TypeM where
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
       Nothing -> bad $ UndefinedType loc qn
-      Just (TypeAbbr def) -> return (qn', def)
+      Just (TypeAbbr ps def) -> return (qn', ps, def)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Structure qn loc

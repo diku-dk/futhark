@@ -68,6 +68,7 @@ module Language.Futhark.Syntax
   , FunBindBase(..)
   , ValBindBase(..)
   , TypeBindBase(..)
+  , TypeParamBase(..)
   , ProgBase(..)
   , DecBase(..)
 
@@ -244,24 +245,28 @@ qualNameFromTypeName (TypeName qs x) = QualName qs x
 data RecordArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
-  | PolyArrayElem TypeName as Uniqueness
+  | PolyArrayElem TypeName [TypeArg VName] as Uniqueness
   | RecordArrayElem (M.Map Name (RecordArrayElemTypeBase shape as))
   deriving (Show)
 
-instance Eq shape =>
-         Eq (RecordArrayElemTypeBase shape as) where
-  PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
-  PolyArrayElem bt1 _ u1 == PolyArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
-  ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
-  RecordArrayElem ts1     == RecordArrayElem ts2     = ts1 == ts2
-  _                      == _                      = False
+instance Eq shape => Eq (RecordArrayElemTypeBase shape as) where
+  PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 =
+    bt1 == bt2 && u1 == u2
+  PolyArrayElem bt1 targs1 _ u1 == PolyArrayElem bt2 targs2 _ u2 =
+    bt1 == bt2 && targs1 == targs2 && u1 == u2
+  ArrayArrayElem at1 == ArrayArrayElem at2 =
+    at1 == at2
+  RecordArrayElem ts1 == RecordArrayElem ts2 =
+    ts1 == ts2
+  _ == _ =
+    False
 
 -- | An array type.
 data ArrayTypeBase shape as =
     PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
-  | PolyArray TypeName shape Uniqueness as
-    -- ^ An array whose elements are some polymorphic type.
+  | PolyArray TypeName [TypeArg VName] shape Uniqueness as
+    -- ^ An array whose elements are some polymorphic type, possibly with arguments.
   | RecordArray (M.Map Name (RecordArrayElemTypeBase shape as)) shape Uniqueness
     -- ^ An array whose elements are records.  Note that tuples are
     -- also just records.
@@ -271,8 +276,8 @@ instance Eq shape =>
          Eq (ArrayTypeBase shape as) where
   PrimArray et1 dims1 u1 _ == PrimArray et2 dims2 u2 _ =
     et1 == et2 && dims1 == dims2 && u1 == u2
-  PolyArray et1 dims1 u1 _ == PolyArray et2 dims2 u2 _ =
-    et1 == et2 && dims1 == dims2 && u1 == u2
+  PolyArray et1 args1 dims1 u1 _ == PolyArray et2 args2 dims2 u2 _ =
+    et1 == et2 && args1 == args2 && dims1 == dims2 && u1 == u2
   RecordArray ts1 dims1 u1 == RecordArray ts2 dims2 u2 =
     ts1 == ts2 && dims1 == dims2 && u1 == u2
   _ == _ =
@@ -284,7 +289,7 @@ instance Eq shape =>
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
                        | Record (M.Map Name (TypeBase shape as))
-                       | TypeVar TypeName
+                       | TypeVar TypeName [TypeArg VName]
                           deriving (Eq, Show)
 
 -- | A type with aliasing information and no shape annotations, used
@@ -298,6 +303,7 @@ data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TERecord [(Name, TypeExp vn)] SrcLoc
                 | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
+                | TEApply (QualName vn) [TypeArg vn] SrcLoc
                  deriving (Eq, Show)
 
 instance Located (TypeExp vn) where
@@ -306,16 +312,13 @@ instance Located (TypeExp vn) where
   locOf (TERecord _ loc)  = locOf loc
   locOf (TEVar _ loc)     = locOf loc
   locOf (TEUnique _ loc)  = locOf loc
+  locOf (TEApply _ _ loc) = locOf loc
 
-data TypeArg vn = TypeArgVarSize vn SrcLoc
-                | TypeArgBoundSize vn SrcLoc -- ^ Being implicitly bound.
-                | TypeArgConstSize Int SrcLoc
+data TypeArg vn = TypeArgDim (DimDecl vn) SrcLoc
                 deriving (Eq, Show)
 
 instance Located (TypeArg vn) where
-  locOf (TypeArgVarSize _ loc) = locOf loc
-  locOf (TypeArgBoundSize _ loc) = locOf loc
-  locOf (TypeArgConstSize _ loc) = locOf loc
+  locOf (TypeArgDim _ loc) = locOf loc
 --
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
@@ -739,6 +742,7 @@ instance Located (ValBindBase f vn) where
 
 -- | Type Declarations
 data TypeBindBase f vn = TypeBind { typeAlias        :: vn
+                                  , typeParams       :: [TypeParamBase vn]
                                   , typeExp          :: TypeDeclBase f vn
                                   , typeBindLocation :: SrcLoc
                                   }
@@ -747,13 +751,22 @@ deriving instance Showable f vn => Show (TypeBindBase f vn)
 instance Located (TypeBindBase f vn) where
   locOf = locOf . typeBindLocation
 
+data TypeParamBase vn = TypeSizeParam { typeParamName :: vn
+                                      , typeParamLocation :: SrcLoc
+                                      }
+                        -- ^ A type parameter that must be a size.
+  deriving (Show)
+
+instance Located (TypeParamBase vn) where
+  locOf (TypeSizeParam _ loc) = locOf loc
+
 data SpecBase f vn = ValSpec  { specName     :: vn
                               , specParams   :: [TypeDeclBase f vn]
                               , specRettype  :: TypeDeclBase f vn
                               , specLocation :: SrcLoc
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
-                   | TypeSpec vn SrcLoc -- ^ Abstract type.
+                   | TypeSpec vn [TypeParamBase vn] SrcLoc -- ^ Abstract type.
                    | ModSpec vn (SigExpBase f vn) SrcLoc
                    | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
@@ -761,7 +774,7 @@ deriving instance Showable f vn => Show (SpecBase f vn)
 instance Located (SpecBase f vn) where
   locOf (ValSpec _ _ _ loc)  = locOf loc
   locOf (TypeAbbrSpec tbind) = locOf tbind
-  locOf (TypeSpec _ loc)     = locOf loc
+  locOf (TypeSpec _ _ loc)   = locOf loc
   locOf (ModSpec _ _ loc)    = locOf loc
   locOf (IncludeSpec _ loc)  = locOf loc
 

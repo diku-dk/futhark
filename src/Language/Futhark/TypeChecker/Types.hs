@@ -10,6 +10,12 @@ module Language.Futhark.TypeChecker.Types
   , checkPattern
   , checkPatternGroup
   , InferredType(..)
+
+  , checkTypeParams
+
+  , TypeSub(..)
+  , TypeSubs
+  , substituteTypes
   )
 where
 
@@ -37,8 +43,8 @@ unifyTypes :: (Monoid als, ArrayShape shape) =>
 unifyTypes (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
-unifyTypes (TypeVar t1) (TypeVar t2)
-  | t1 == t2  = Just $ TypeVar t1
+unifyTypes (TypeVar t1 targs1) (TypeVar t2 targs2)
+  | t1 == t2, targs1 == targs2 = Just $ TypeVar t1 targs1
   | otherwise = Nothing
 unifyTypes (Array at1) (Array at2) =
   Array <$> unifyArrayTypes at1 at2
@@ -56,9 +62,10 @@ unifyArrayTypes :: (Monoid als, ArrayShape shape) =>
 unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
   | Just shape <- unifyShapes shape1 shape2, bt1 == bt2 =
     Just $ PrimArray bt1 shape (u1 <> u2) (als1 <> als2)
-unifyArrayTypes (PolyArray bt1 shape1 u1 als1) (PolyArray bt2 shape2 u2 als2)
-  | Just shape <- unifyShapes shape1 shape2, bt1 == bt2 =
-    Just $ PolyArray bt1 shape (u1 <> u2) (als1 <> als2)
+unifyArrayTypes (PolyArray bt1 targs1 shape1 u1 als1) (PolyArray bt2 targs2 shape2 u2 als2)
+  | Just shape <- unifyShapes shape1 shape2,
+    bt1 == bt2, targs1 == targs2 =
+    Just $ PolyArray bt1 targs1 shape (u1 <> u2) (als1 <> als2)
 unifyArrayTypes (RecordArray et1 shape1 u1) (RecordArray et2 shape2 u2)
   | Just shape <- unifyShapes shape1 shape2,
     sort (M.keys et1) == sort (M.keys et2) =
@@ -75,8 +82,8 @@ unifyRecordArrayElemTypes :: (Monoid als, ArrayShape shape) =>
 unifyRecordArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
   | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
-unifyRecordArrayElemTypes (PolyArrayElem bt1 als1 u1) (PolyArrayElem bt2 als2 u2)
-  | bt1 == bt2 = Just $ PolyArrayElem bt1 (als1 <> als2) (u1 <> u2)
+unifyRecordArrayElemTypes (PolyArrayElem bt1 targs1 als1 u1) (PolyArrayElem bt2 targs2 als2 u2)
+  | bt1 == bt2, targs1 == targs2 = Just $ PolyArrayElem bt1 targs1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
 unifyRecordArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
   ArrayArrayElem <$> unifyArrayTypes at1 at2
@@ -118,8 +125,11 @@ checkTypeExp' :: MonadTypeChecker m =>
                  TypeExp Name
               -> StateT ImplicitlyBound m (TypeExp VName, StructType)
 checkTypeExp' (TEVar name loc) = do
-  (name', t) <- lift $ lookupType loc name
-  return (TEVar name' loc, t)
+  (name', ps, t) <- lift $ lookupType loc name
+  case ps of
+    [] -> return (TEVar name' loc, t)
+    _  -> throwError $ TypeError loc $
+          "Type constructor " ++ pretty name ++ " used without any arguments."
 checkTypeExp' (TETuple ts loc) = do
   (ts', ts_s) <- unzip <$> mapM checkTypeExp' ts
   return (TETuple ts' loc, tupleRecord ts_s)
@@ -150,6 +160,30 @@ checkTypeExp' (TEUnique t loc) = do
   case st of
     Array{} -> return (t', st `setUniqueness` Unique)
     _       -> throwError $ InvalidUniqueness loc $ toStructural st
+checkTypeExp' (TEApply tname targs loc) = do
+  (tname', ps, t) <- lift $ lookupType loc tname
+  if length ps /= length targs
+  then throwError $ TypeError loc $
+       "Type constructor " ++ pretty tname ++ " requires " ++ show (length ps) ++
+       " arguments, but use at " ++ locStr loc ++ " provides only " ++ show (length targs)
+  else do
+    (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
+    return (TEApply tname' targs' loc,
+            substituteTypes (mconcat substs) t)
+  where checkArgApply (TypeSizeParam pv _) (TypeArgDim (NamedDim v) loc) = do
+          v' <- checkNamedDim loc v
+          return (TypeArgDim (NamedDim v') loc,
+                  M.singleton pv $ DimSub $ NamedDim v')
+        checkArgApply (TypeSizeParam pv _) (TypeArgDim (BoundDim v) loc) = do
+          v' <- checkBoundDim loc v
+          return (TypeArgDim (BoundDim v') loc,
+                  M.singleton pv $ DimSub $ BoundDim v')
+        checkArgApply (TypeSizeParam pv _) (TypeArgDim (ConstDim x) loc) =
+          return (TypeArgDim (ConstDim x) loc,
+                  M.singleton pv $ DimSub $ ConstDim x)
+        checkArgApply (TypeSizeParam pv _) (TypeArgDim AnyDim loc) =
+          return (TypeArgDim AnyDim loc,
+                  M.singleton pv $ DimSub AnyDim)
 
 checkNamedDim :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> StateT ImplicitlyBound m (QualName VName)
@@ -292,13 +326,19 @@ checkForDuplicateNamesTypeExp' (TETuple ts _) =
   mapM_ checkForDuplicateNamesTypeExp' ts
 checkForDuplicateNamesTypeExp' (TEUnique t _) =
   checkForDuplicateNamesTypeExp' t
+checkForDuplicateNamesTypeExp' (TEApply _ targs _) =
+  mapM_ check targs
+  where check (TypeArgDim d loc) = checkDimDecl loc d
 checkForDuplicateNamesTypeExp' (TEArray te d loc) =
-  checkForDuplicateNamesTypeExp' te >> checkDimDecl d
-  where checkDimDecl AnyDim = return ()
-        checkDimDecl ConstDim{} = return ()
-        checkDimDecl (NamedDim (QualName [] v)) = seeing UsedFree v loc
-        checkDimDecl (NamedDim _) = return ()
-        checkDimDecl (BoundDim v) = seeing BoundAsDim v loc
+  checkForDuplicateNamesTypeExp' te >> checkDimDecl loc d
+
+checkDimDecl :: MonadTypeChecker m => SrcLoc -> DimDecl Name
+             -> StateT (M.Map (Namespace, Name) (VName, Bindage, SrcLoc)) m ()
+checkDimDecl _ ConstDim{} = return ()
+checkDimDecl _ AnyDim{} = return ()
+checkDimDecl loc (NamedDim (QualName [] v)) = seeing UsedFree v loc
+checkDimDecl _ (NamedDim _) = return ()
+checkDimDecl loc (BoundDim v) = seeing BoundAsDim v loc
 
 seeing :: MonadTypeChecker m => Bindage -> Name -> SrcLoc
        -> StateT (M.Map (Namespace, Name) (VName, Bindage, SrcLoc)) m ()
@@ -329,3 +369,71 @@ seeing b v vloc = do
   where newlyBound b name vloc = do
           name' <- lift $ newID name
           modify $ M.insert (Term, name) (name', b, vloc)
+
+checkTypeParams :: MonadTypeChecker m =>
+                   [TypeParamBase Name]
+                -> ([TypeParamBase VName] -> m a)
+                -> m a
+checkTypeParams ps m =
+  bindSpaced (map typeParamSpace ps) $ m =<< mapM checkTypeParam ps
+  where typeParamSpace (TypeSizeParam pv _) = (Term, pv)
+
+        checkTypeParam (TypeSizeParam pv loc) =
+          TypeSizeParam <$> checkName Term pv loc <*> pure loc
+
+data TypeSub = TypeSub TypeBinding
+             | DimSub (DimDecl VName)
+             deriving (Show)
+
+type TypeSubs = M.Map VName TypeSub
+
+substituteTypes :: TypeSubs -> StructType -> StructType
+substituteTypes substs ot = case ot of
+  Array at -> substituteTypesInArray at
+  Prim t -> Prim t
+  TypeVar v targs
+    | Just (TypeSub (TypeAbbr ps t)) <-
+        M.lookup (qualLeaf (qualNameFromTypeName v)) substs ->
+        applyType ps t $ map substituteInTypeArg targs
+    | otherwise -> TypeVar v $ map substituteInTypeArg targs
+  Record ts ->
+    Record $ fmap (substituteTypes substs) ts
+  where substituteTypesInArray (PrimArray t shape u ()) =
+          Array $ PrimArray t (substituteInShape shape) u ()
+        substituteTypesInArray (PolyArray v targs shape u ())
+          | Just (TypeSub (TypeAbbr ps t)) <-
+              M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
+              arrayOf (applyType ps t $ map substituteInTypeArg targs)
+                      (substituteInShape shape) u
+          | otherwise =
+              Array $ PolyArray v (map substituteInTypeArg targs)
+                                  (substituteInShape shape) u ()
+        substituteTypesInArray (RecordArray ts shape u) =
+          Array $ RecordArray ts' (substituteInShape shape) u
+          where ts' = fmap (flip typeToRecordArrayElem u .
+                            substituteTypes substs .
+                            recordArrayElemToType) ts
+
+        substituteInTypeArg (TypeArgDim d loc) =
+          TypeArgDim (substituteInDim d) loc
+
+        substituteInShape (ShapeDecl ds) =
+          ShapeDecl $ map substituteInDim ds
+
+        substituteInDim (NamedDim v)
+          | Just (DimSub d) <- M.lookup (qualLeaf v) substs = d
+        substituteInDim d = d
+
+applyType :: [TypeParam] -> StructType -> [TypeArg VName] -> StructType
+applyType ps t args =
+  substituteTypes substs t
+  where substs = M.fromList $ zipWith mkSubst ps args
+        -- We are assuming everything has already been type-checked for correctness.
+        mkSubst (TypeSizeParam pv _) (TypeArgDim (NamedDim v) _) =
+          (pv, DimSub $ NamedDim v)
+        mkSubst (TypeSizeParam pv _) (TypeArgDim (BoundDim v) _) =
+          (pv, DimSub $ BoundDim v)
+        mkSubst (TypeSizeParam pv _) (TypeArgDim (ConstDim x) _) =
+          (pv, DimSub $ ConstDim x)
+        mkSubst (TypeSizeParam pv _) (TypeArgDim AnyDim  _) =
+          (pv, DimSub AnyDim)
