@@ -1025,8 +1025,7 @@ checkFunDef (fname, maybe_retdecl, params, body, loc) = do
     maybe_retdecl' <-
       case maybe_retdecl of
         Just rettype -> do
-          (rettype', rettype_st, ret_implicit) <-
-            checkTypeExp rettype
+          (rettype', rettype_st, ret_implicit) <- checkTypeExp rettype
           if M.null $ implicitNameMap ret_implicit
             then return $ Just (rettype', rettype_st)
             else throwError $ TypeError loc

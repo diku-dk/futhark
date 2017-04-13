@@ -97,11 +97,12 @@ although they are not very useful-these are written ``()`` and are of
 type ``()``.
 
 .. productionlist::
-   type: `qualid` | `array_type` | `tuple_type` | `record_type`
+   type: `qualid` | `array_type` | `tuple_type` | `record_type` | `type` `type_arg`
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
-   dim: `qualid` | `decimal` | "#" `id`
+   type_arg: `dim`
+   dim: `qualid` | `decimal` | "#" `id` | `_`
 
 An array value is written as a nonempty sequence of comma-separated
 values enclosed in square brackets: ``[1,2,3]``.  An array type is
@@ -128,6 +129,11 @@ Records are mappings from field names to values, with the field names
 known statically.  A tuple behaves in all respects like a record with
 numeric field names, and vice versa.  It is an error for a record type
 to name the same field twice.
+
+A parametric type abbreviation can be applied by juxtaposing its name
+and its arguments.  The application must provide as many arguments as
+the type abbreviation has parameters - partial application is
+presently not allowed.  See `Type Abbreviations`_ for further details.
 
 String literals are supported, but only as syntactic sugar for arrays
 of ``i32`` values.  There is no ``char`` type in Futhark.
@@ -167,7 +173,7 @@ literals and variables, but also more complicated forms.
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
-      : | "let" `id` `pat`+ [":" `ty_exp`] "=" `exp` "in" `exp`
+      : | "let" `id` `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "loop" "(" `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
       : | "iota" `exp`
       : | "shape" `exp`
@@ -712,7 +718,7 @@ Declarations
 ------------
 
 .. productionlist::
-   dec:   `fun_bind` | `val_bind` | `ty_bind` | `mod_bind` | `mod_ty_bind`
+   dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
       : | "open" `mod_exp`+
       : | `default_dec`
       : | "import" `stringlit`
@@ -721,11 +727,11 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   fun_bind:   ("let" | "entry") `id` `pat`+ [":" `ty_exp`] "=" `exp`
-           : | ("let" | "entry") `pat` `binop` `pat` [":" `ty_exp`] "=" `exp`
+   fun_bind:   ("let" | "entry") `id` `pat`+ [":" `type`] "=" `exp`
+           : | ("let" | "entry") `pat` `binop` `pat` [":" `type`] "=" `exp`
 
 .. productionlist::
-   val_bind: "let" `id` [":" `ty_exp`] "=" `exp`
+   val_bind: "let" `id` [":" `type`] "=" `exp`
 
 Functions and values must be defined before they are used.  A function
 declaration must specify the name, parameters, return type, and body
@@ -751,10 +757,11 @@ variable in multiple parameters (as above), each occurence must be
 prefixed with ``#``.
 
 A shape declaration can also be an integer constant (with no suffix).
-The dimension names bound in a parameter shape declaration can be used
-as ordinary variables within the scope of the parameter.  If a
-function is called with arguments that do not fulfill the shape
-constraints, the program will fail with a runtime error.
+A shape declaration can also be an underscore, which is equivalent to
+leaving it out.  The dimension names bound in a parameter shape
+declaration can be used as ordinary variables within the scope of the
+parameter.  If a function is called with arguments that do not fulfill
+the shape constraints, the program will fail with a runtime error.
 
 User-Defined Operators
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -819,33 +826,35 @@ Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   ty_bind: "type" `id` "=" `type`
+   type_bind: "type" `id` `type_param`* "=" `type`
+   type_param: "#" `id`
 
-Futhark supports simple type abbreviations to improve code readability.
-Examples::
+Type abbreviations function as shorthands for purpose of documentation
+or brevity.  After a type binding ``type t1 = t2``, the name ``t1``
+can be used as a shorthand for the type ``t2``.  Type abbreviations do
+not create new unique types.  After the previous binding, the types
+``t1`` and ``t2`` are entirely interchangeable.
 
-  type person_id                = i32
-  type int_pair                 = (i32, i32)
-  type position, velocity, vec3 = (f32, f32, f32)
+A type abbreviation can have zero or more parameters.  A type
+parameter prefixed with a ``#`` is a *shape parameter*, and can be
+used in the definition as an array dimension size, or as a dimension
+argument to other type abbreviations.  Example::
 
-  type pilot      = person_id
-  type passengers = []person_id
-  type mass       = f32
+  type two_intvecs #n = ([n]i32, [n]i32)
 
-  type airplane = (pilot, passengers, position, velocity, mass)
+  let (a,b): two_intvecs 2 = (iota 2, replicate 2 0)
 
-The abbreviations are merely a syntactic convenience.  With respect to type
-checking the ``position`` and ``velocity`` types are identical.  It is
-currently not possible to put shape declarations in type abbreviations.
-When using uniqueness attributes with type abbreviations, inner uniqueness
-attributes are overrided by outer ones::
+Shape parameters work much like shape declarations for arrays.
 
-  type uniqueInts = *[]i32
-  type nonuniqueIntLists = []intlist
-  type uniqueIntLists = *nonuniqueIntLists
+When using uniqueness attributes with type abbreviations, inner
+uniqueness attributes are overrided by outer ones::
+
+  type unique_ints = *[]i32
+  type nonunique_int_lists = []unique_ints
+  type unique_int_lists = *nonunique_int_lists
 
   -- Error: using non-unique value for a unique return value.
-  let uniqueIntLists (nonuniqueIntLists p) = p
+  let f (p: nonunique_int_lists): unique_int_lists = p
 
 
 Module System
@@ -854,7 +863,7 @@ Module System
 .. productionlist::
    mod_bind: "module" `id` `mod_param`+ "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_ty_bind: "module" "type" `id` "=" `mod_type_exp`
+   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules.  *Module types* are
@@ -963,7 +972,7 @@ Module Type Expressions
 .. productionlist::
    mod_type_exp:   `qualid`
              : | "{" `spec`* "}"
-             : | `mod_type_exp` "with" `qualid` "=" `ty_exp`
+             : | `mod_type_exp` "with" `qualid` "=" `type`
              : | "(" `mod_type_exp` ")"
              : | "(" `id` ":" `mod_type_exp` ")" "->" `mod_type_exp`
              : | `mod_type_exp` "->" `mod_type_exp`
@@ -972,7 +981,7 @@ Module Type Expressions
 .. productionlist::
    spec:   "val" `id` ":" `spec_type`
        : | "val" `binop` ":" `spec_type`
-       : | "type" `id` "=" `type`
+       : | "type" `id` `type_param`* "=" `type`
        : | "type `id`
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`

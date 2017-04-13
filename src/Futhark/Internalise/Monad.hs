@@ -13,6 +13,8 @@ module Futhark.Internalise.Monad
   , FunBinding (..)
   , ModBinding (..)
 
+  , substitutingVars
+
   , addFunction
 
   , lookupFunction
@@ -76,7 +78,7 @@ type FunTable = M.Map VName FunBinding
 data ModBinding = ModBinding DecSubstitutions E.ModExp
                 deriving (Show)
 
-type TypeTable = M.Map VName [TypeBase Rank NoUniqueness]
+type TypeTable = M.Map VName ([VName],[TypeBase ExtShape NoUniqueness])
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
@@ -157,6 +159,9 @@ runInternaliseM ftable (InternaliseM m) =
                            , stateNameSource = src
                            }
 
+substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
+substitutingVars substs = local $ \env -> env { envSubsts = substs <> envSubsts env }
+
 -- | Add a function definition to the program being constructed.
 addFunction :: FunDef -> InternaliseM ()
 addFunction = InternaliseM . lift . tell . InternaliseResult . pure
@@ -170,11 +175,11 @@ lookupFunction fname =
   where bad = fail $
               "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
-lookupTypeVar :: VName -> InternaliseM [TypeBase Rank NoUniqueness]
+lookupTypeVar :: VName -> InternaliseM ([VName], [TypeBase ExtShape NoUniqueness])
 lookupTypeVar tname = do
   t <- gets $ M.lookup tname. stateTtable
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
-            Just t' -> return t'
+            Just x -> return x
 
 lookupMod :: VName -> InternaliseM ModBinding
 lookupMod mname = do
@@ -234,9 +239,9 @@ noteMod :: VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
 noteMod name substs me =
   modify $ \s -> s { stateModTable = M.insert name (ModBinding substs me) $ stateModTable s }
 
-noteType :: VName -> [TypeBase Rank NoUniqueness] -> InternaliseM ()
-noteType name t =
-  modify $ \s -> s { stateTtable = M.insert name t $ stateTtable s }
+noteType :: VName -> [VName] -> [TypeBase ExtShape NoUniqueness] -> InternaliseM ()
+noteType name ps t =
+  modify $ \s -> s { stateTtable = M.insert name (ps,t) $ stateTtable s }
 
 setDecSubsts :: M.Map VName VName -> InternaliseM ()
 setDecSubsts substs = modify $ \s -> s { stateDecSubsts = substs }

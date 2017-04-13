@@ -133,15 +133,21 @@ internaliseDecs ds =
       internaliseDecs ds'
     E.TypeDec tb : ds' -> do
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
-      t <- map fromDecl <$> internaliseType
-           (E.unInfo $ E.expandedType $ E.typeExp tb)
-      noteType v t
+      -- Map every type parameter to itself, just so they do not look
+      -- free.
+      let ps = typeBindParams tb
+          ps_substs = M.fromList $ zip ps $ map (pure . I.Var) ps
+      (t,_,cm) <- substitutingVars ps_substs $
+        internaliseReturnType $ E.unInfo $ E.expandedType $ E.typeExp tb
+      mapM_ (uncurry internaliseDimConstant) cm
+      noteType v ps $ map fromDecl t
       internaliseDecs ds'
     E.OpenDec e es _ : ds' -> do
       mapM_ internaliseModExp (e:es)
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
+  where typeBindParams = map E.typeParamName . E.typeParams
 
 maybeAscript :: SrcLoc -> Maybe (SigExp, Info (M.Map VName VName)) -> ModExp
              -> ModExp
@@ -234,7 +240,7 @@ generateEntryPoint :: E.FunBind -> InternaliseM ()
 generateEntryPoint (E.FunBind _ ofname _ (Info rettype) orig_params _ loc) =
   -- We remove all shape annotations, so there should be no constant
   -- parameters here.
-  bindingParams (map patternNoShapeAnnotations params) $ \_ shapeparams params' -> do
+  bindingParams (map E.patternNoShapeAnnotations params) $ \_ shapeparams params' -> do
     (entry_rettype, _, _) <- internaliseEntryReturnType $
                              E.vacuousShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (rettype, entry_rettype)
@@ -357,9 +363,9 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
-      rowtypes <- map (zeroDim . fromDecl) <$> internaliseType rowtype
+      rowtypes <- internaliseType rowtype
       let arraylit rt = I.BasicOp $ I.ArrayLit [] rt
-      letSubExps desc $ map arraylit rowtypes
+      letSubExps desc $ map (arraylit . zeroDim . fromDecl) rowtypes
     e' : _ -> do
       rowtypes <- mapM subExpType e'
       let arraylit ks rt = do
@@ -379,7 +385,8 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
 
 internaliseExp desc (E.Ascript e (TypeDecl _ (Info et)) loc) = do
   es <- internaliseExp desc e
-  (ts, _, _) <- internaliseReturnType et
+  (ts, _, cm) <- internaliseReturnType et
+  mapM_ (uncurry internaliseDimConstant) cm
   forM (zip es ts) $ \(e',t') ->
     ensureExtShape asserting loc (I.fromDecl t') desc e'
 

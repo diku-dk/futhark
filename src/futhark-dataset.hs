@@ -143,6 +143,7 @@ data SimpleType = SimpleArray SimpleType Int
 toSimpleType :: UncheckedTypeExp -> Either String SimpleType
 toSimpleType TETuple{} = Left "Cannot handle tuples yet."
 toSimpleType TERecord{} = Left "Cannot handle records yet."
+toSimpleType TEApply{} = Left "Cannot handle type applications yet."
 toSimpleType (TEUnique t _) = toSimpleType t
 toSimpleType (TEArray t d _) =
   SimpleArray <$> toSimpleType t <*> constantDim d

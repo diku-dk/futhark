@@ -310,15 +310,18 @@ Spec :: { SpecBase NoInfo Name }
           in ValSpec $2 ps r $1  }
       | TypeAbbr
         { TypeAbbrSpec $1 }
-      | type id
+      | type id many(TypeParam)
         { let L loc (ID name) = $2
-          in TypeSpec name loc }
+          in TypeSpec name $3 loc }
       | module id ':' SigExp
         { let L _ (ID name) = $2
           in ModSpec name $4 $1 }
       | include SigExp
         { IncludeSpec $2 $1 }
 ;
+
+TypeParam :: { TypeParamBase Name }
+           : '#' id { let L _ (ID name) = $2 in TypeSizeParam name $1 }
 
 DefaultDec :: { () }
            :  default '(' id ')' {% let L _ (ID s) = $3 in defaultType s  }
@@ -396,36 +399,47 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
-TypeAbbr : type id '=' TypeExpDecl
+TypeAbbr : type id many(TypeParam) '=' TypeExpDecl
            { let L loc (ID name) = $2
-              in TypeBind name $4 loc }
+              in TypeBind name $3 $5 loc }
 
 TypeExp :: { UncheckedTypeExp }
-         : '*' TypeExp             { TEUnique $2 $1 }
-         | '[' DimDecl ']' TypeExp { TEArray $4 $2 $1 }
-         | '(' ')'                 { TETuple [] $1 }
-         | '(' TypeExp ')'         { $2 }
-         | QualName                { TEVar (fst $1) (snd $1) }
-         | '{' sepBy(FieldType, ',') '}'
-           { TERecord $2 $1 }
-         | '(' sepBy2(TypeExp, ',') ')'
-           { TETuple $2 $1 }
+         : TypeExpApply { TEApply (fst (fst $1)) (snd $1) (snd (fst $1)) }
+         | '*' TypeExp  { TEUnique $2 $1 }
+         | TypeExpAtom  { $1 }
+
+TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArg Name]) }
+              : TypeExpApply TypeArg { (fst $1, snd $1 ++ [$2]) }
+              | QualName TypeArg     { ($1, [$2]) }
+
+TypeExpAtom :: { UncheckedTypeExp }
+             : '(' TypeExp ')'               { $2 }
+             | '{' sepBy(FieldType, ',') '}' { TERecord $2 $1 }
+             | '(' sepBy2(TypeExp, ',') ')'  { TETuple $2 $1 }
+             | '[' DimDecl ']' TypeExpAtom   { TEArray $4 (fst $2) $1 }
+             | '['  ']' TypeExpAtom          { TEArray $3 AnyDim $1 }
+             | '(' ')'                       { TETuple [] $1 }
+             | QualName                      { TEVar (fst $1) (snd $1) }
+
+TypeArg :: { TypeArg Name }
+        : DimDecl { TypeArgDim (fst $1) (snd $1) }
 
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
-DimDecl :: { DimDecl Name }
+DimDecl :: { (DimDecl Name, SrcLoc) }
         : QualName
-          { NamedDim (fst $1) }
+          { (NamedDim (fst $1), snd $1) }
         | '#' id
           { let L _ (ID name) = $2
-            in BoundDim name }
+            in (BoundDim name, $1) }
         | declit
-          { let L _ (DECLIT n) = $1
-            in ConstDim (fromIntegral n) }
+          { let L loc (DECLIT n) = $1
+            in (ConstDim (fromIntegral n), loc) }
         | intlit
-          { let L _ (INTLIT n) = $1
-            in ConstDim (fromIntegral n) }
-        | { AnyDim }
+          { let L loc (INTLIT n) = $1
+            in (ConstDim (fromIntegral n), loc) }
+        | '_'
+          { (AnyDim, $1) }
 
 Param :: { PatternBase NoInfo Name }
 Param : InnerPattern { $1 }
