@@ -241,7 +241,7 @@ generateEntryPoint (E.FunBind _ ofname _ (Info rettype) orig_params _ loc) =
         args = map (I.Var . I.paramName) $ concat params'
 
     entry_body <- insertStmsM $
-      resultBody <$> funcall "entry_result" (E.qualName ofname) args loc
+      resultBody . fst <$> funcall "entry_result" (E.qualName ofname) args loc
 
     addFunction $
       I.FunDef (Just entry') (baseName ofname)
@@ -409,7 +409,7 @@ internaliseExp desc (E.Apply fname args _ _)
 
 internaliseExp desc (E.Apply qfname args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
-  funcall desc qfname args' loc
+  fst <$> funcall desc qfname args' loc
 
 internaliseExp desc (E.LetPat pat e body loc) = do
   ses <- internaliseExp desc e
@@ -1227,39 +1227,12 @@ internaliseCurrying :: QualName VName
                     -> [I.Type]
                     -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 internaliseCurrying qfname curargs loc row_ts = do
-  fname <- lookupSubst qfname
-  (fname', constparams, closure, shapes, value_param_ts, fun_params, int_rettype_fun) <-
-    internalFun <$> lookupFunction fname
 
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
-  curarg_ts <- mapM subExpType curargs'
   params <- mapM (newParam "not_curried") row_ts
-  (constargs, const_ds, _) <- unzip3 <$> constFunctionArgs constparams
-
-  let closureargs = map I.Var closure
-      valargs = curargs' ++ map (I.Var . I.paramName) params
-      valargs_ts = curarg_ts ++ row_ts
-      shapeargs = argShapes shapes value_param_ts valargs_ts
-      diets = const_ds ++
-              replicate (length closure) I.Observe ++
-              replicate (length shapeargs) I.Observe ++
-              map I.diet value_param_ts
-      param_ts = map (const $ I.Prim int32) shapeargs ++ value_param_ts
-
-  ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectStms $ do
-    allargs <- ((constargs ++ closureargs)++) <$>
-               ensureArgShapes asserting loc shapes param_ts (shapeargs ++ valargs)
-    argts' <- mapM subExpType allargs
-    case int_rettype_fun $ zip allargs argts' of
-      Nothing ->
-        fail $ "Cannot apply " ++ pretty fname ++ " to arguments\n " ++
-        pretty (constargs ++ closureargs ++ shapeargs ++ valargs) ++ "\nof types\n " ++
-        pretty argts' ++
-        "\nFunction has parameters\n " ++ pretty fun_params
-      Just (ExtRetType ts) -> do
-        res <- letTupExp "curried_fun_result" $
-               I.Apply fname' (zip allargs diets) $ ExtRetType ts
-        return (map I.Var res, map I.fromDecl ts)
+  let args = curargs' ++ map (I.Var . I.paramName) params
+  ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectStms $
+    funcall "curry_result" qfname args loc
   return (params, mkBody fun_bnds res, ts)
 
 binOpFunToLambda :: E.QualName VName -> E.Type -> E.Type -> E.Type
@@ -1505,7 +1478,8 @@ constFunctionArgs = mapM arg
                 I.Apply fname [] $ primRetType I.int32
           return (se, I.Observe, I.Prim I.int32)
 
-funcall :: String -> QualName VName -> [SubExp] -> SrcLoc -> InternaliseM [SubExp]
+funcall :: String -> QualName VName -> [SubExp] -> SrcLoc
+        -> InternaliseM ([SubExp], [I.ExtType])
 funcall desc qfname args loc = do
   fname <- lookupSubst qfname
   (fname', constparams, closure, shapes, value_paramts, fun_params, rettype_fun) <-
@@ -1527,7 +1501,9 @@ funcall desc qfname args loc = do
                pretty args' ++ "\nof types\n " ++
                pretty argts' ++
                "\nFunction has parameters\n " ++ pretty fun_params
-    Just rettype -> letTupExp' desc $ I.Apply fname' (zip args' diets) rettype
+    Just (ExtRetType ts) -> do
+      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) (ExtRetType ts)
+      return (ses, map I.fromDecl ts)
 
 
 boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
