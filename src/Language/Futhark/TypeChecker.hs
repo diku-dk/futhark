@@ -435,15 +435,6 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
     bindSpaced [(Term, fname)] $
     runTermTypeM $ checkFunDef (fname, maybe_retdecl, params, body, loc)
 
-  when entry $
-    case maybe_retdecl of
-      Just retdecl
-        | Just problem <-
-            find (not . (`S.member` mconcat (map patNameSet params))) $
-            mapMaybe dimDeclName $ arrayDims' retdecl ->
-              bad $ EntryPointConstReturnDecl loc fname $ qualName problem
-      _ -> return ()
-
   return (mempty { envVtable =
                      M.singleton fname'
                      (BoundF (map paramType params', rettype))
@@ -452,10 +443,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
                  },
            FunBind entry fname' maybe_retdecl' (Info rettype) params' body' loc)
 
-  where dimDeclName (NamedDim (QualName [] name)) = Just name
-        dimDeclName _                             = Nothing
-
-        paramType :: Pattern -> StructType
+  where paramType :: Pattern -> StructType
         paramType = vacuousShapeAnnotations . toStruct . patternType
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (Env, [DecBase Info VName])

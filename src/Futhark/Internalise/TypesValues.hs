@@ -37,10 +37,11 @@ internaliseUniqueness E.Unique = I.Unique
 
 internaliseParamTypes :: [E.TypeBase (E.ShapeDecl VName) als]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
-                                       M.Map VName Int)
+                                       M.Map VName Int,
+                                       ConstParams)
 internaliseParamTypes ts = do
-  (ts', (_, subst, _)) <- runStateT (mapM internaliseDeclType' ts) (0, M.empty, mempty)
-  return (ts', subst)
+  (ts', (_, subst, cm)) <- runStateT (mapM internaliseDeclType' ts) (0, M.empty, mempty)
+  return (ts', subst, cm)
 
 internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als
                       -> InternaliseM ([I.TypeBase ExtShape Uniqueness],

@@ -43,7 +43,7 @@ argShapes shapes valts valargts =
   where mapping = shapeMapping valts valargts
         addShape name
           | Just se <- M.lookup name mapping = se
-          | otherwise                         = intConst Int32 0
+          | otherwise                        = intConst Int32 0
 
 ensureResultShape :: MonadBinder m =>
                      (m Certificates -> m Certificates)

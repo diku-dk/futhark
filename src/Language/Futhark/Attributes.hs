@@ -26,6 +26,7 @@ module Language.Futhark.Attributes
   , patIdentSet
   , patternType
   , patternStructType
+  , patternNoShapeAnnotations
 
   -- * Queries on types
   , uniqueness
@@ -797,6 +798,23 @@ patternStructType (Id v) = vacuousShapeAnnotations $ toStruct $ unInfo $ identTy
 patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
 patternStructType (RecordPattern fs _) = Record $ patternStructType <$> M.fromList fs
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
+
+-- | Remove all shape annotations from a pattern, leaving them unnamed
+-- instead.  Note that this will change the names bound by the
+-- pattern.
+patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
+patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t))) =
+  PatternAscription (patternNoShapeAnnotations p) $
+  TypeDecl te $ Info $ vacuousShapeAnnotations t
+patternNoShapeAnnotations (PatternParens p loc) =
+  PatternParens (patternNoShapeAnnotations p) loc
+patternNoShapeAnnotations (Id v) = Id v
+patternNoShapeAnnotations (TuplePattern ps loc) =
+  TuplePattern (map patternNoShapeAnnotations ps) loc
+patternNoShapeAnnotations (RecordPattern ps loc) =
+  RecordPattern (map (fmap patternNoShapeAnnotations) ps) loc
+patternNoShapeAnnotations (Wildcard t loc) =
+  Wildcard t loc
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.
