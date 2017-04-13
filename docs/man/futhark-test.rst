@@ -156,7 +156,7 @@ The following program tests simple indexing and bounds checking::
   -- }
   -- error: Assertion.*failed
 
-  let main([]i32: a:, i32: i:): : i32 =
+  let main(a: []i32:, i: i32): i32 =
     a[i]
 
 The following program contains two entry points, both of which are

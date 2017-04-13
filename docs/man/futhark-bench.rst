@@ -74,7 +74,7 @@ different sizes::
   -- output { 887459712 }
 
   let main(n: i32): i32 =
-    reduce(+, 0, iota(n))
+    reduce (+) 0 (iota n)
 
 SEE ALSO
 ========
