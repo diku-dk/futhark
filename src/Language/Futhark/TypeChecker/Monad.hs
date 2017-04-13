@@ -98,7 +98,6 @@ data TypeError =
   | ValueIsNotFunction SrcLoc (QualName Name) Type
   | FunctionIsNotValue SrcLoc (QualName Name)
   | UniqueConstType SrcLoc Name (TypeBase Rank ())
-  | EntryPointConstReturnDecl SrcLoc Name (QualName Name)
   | UndeclaredFunctionReturnType SrcLoc (QualName Name)
   | UnappliedFunctor SrcLoc
 
@@ -189,10 +188,6 @@ instance Show TypeError where
   show (UniqueConstType loc name t) =
     "Constant " ++ pretty name ++ " defined with unique type " ++ pretty t ++ " at " ++
     locStr loc ++ ", which is not allowed."
-  show (EntryPointConstReturnDecl loc fname cname) =
-    "Use of constant " ++ pretty cname ++
-    " to annotate return type of entry point " ++ pretty fname ++
-    " at " ++ locStr loc ++ " is not allowed."
   show (UndeclaredFunctionReturnType loc fname) =
     "Function '" ++ pretty fname ++ "' with no return type declaration called at " ++
     locStr loc

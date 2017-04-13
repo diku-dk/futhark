@@ -162,11 +162,7 @@ addFunction :: FunDef -> InternaliseM ()
 addFunction = InternaliseM . lift . tell . InternaliseResult . pure
 
 lookupFunction' :: VName -> InternaliseM (Maybe FunBinding)
-lookupFunction' fname = do
-  ftable <- gets stateFtable
-  case M.lookup fname ftable of
-    Nothing   -> return Nothing
-    Just fun' -> return $ Just fun'
+lookupFunction' fname = gets $ M.lookup fname . stateFtable
 
 lookupFunction :: VName -> InternaliseM FunBinding
 lookupFunction fname =
