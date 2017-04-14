@@ -22,7 +22,6 @@ module Language.Futhark.Attributes
   , typeOf
 
   -- * Queries on patterns
-  , patNameSet
   , patIdentSet
   , patternType
   , patternStructType
@@ -38,9 +37,7 @@ module Language.Futhark.Attributes
   , similarTo
   , arrayRank
   , arrayDims
-  , arrayDims'
   , nestedDims
-  , nestedDims'
   , arrayShape
   , returnType
   , lambdaReturnType
@@ -122,19 +119,9 @@ arrayShape (Array (PolyArray _ _ ds _ _)) = ds
 arrayShape (Array (RecordArray _ ds _))   = ds
 arrayShape _                              = mempty
 
--- | Return the shape of a type - for non-arrays, this is 'mempty'.
-arrayShape' :: TypeExp vn -> ShapeDecl vn
-arrayShape' (TEArray t d _) = ShapeDecl [d] <> arrayShape' t
-arrayShape' (TEUnique t _)  = arrayShape' t
-arrayShape' _               = mempty
-
 -- | Return the dimensions of a type with (possibly) known dimensions.
 arrayDims :: Ord vn => TypeBase (ShapeDecl vn) as -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
-
--- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims' :: TypeExp vn -> [DimDecl vn]
-arrayDims' = shapeDims . arrayShape'
 
 -- | Return any shape declaration in the type, with duplicates removed.
 nestedDims :: TypeBase (ShapeDecl VName) as -> [DimDecl VName]
@@ -159,16 +146,6 @@ nestedDims t =
           concatMap typeArgDims targs
 
         typeArgDims (TypeArgDim d _) = [d]
-
-
--- | Return any shape declaration in the type, with duplicates removed.
-nestedDims' :: Ord vn => TypeExp vn -> [DimDecl vn]
-nestedDims' (TEArray t d _)     = nub $ d : nestedDims' t
-nestedDims' (TETuple ts _)      = nub $ mconcat $ map nestedDims' ts
-nestedDims' (TEUnique t _)      = nestedDims' t
-nestedDims' (TEApply _ targs _) = concatMap typeArgDims targs
-  where typeArgDims (TypeArgExpDim d _) = [d]
-nestedDims' _                   = mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -707,30 +684,19 @@ concreteType (Array at) = concreteArrayType at
         concreteRecordArrayElem PolyArrayElem{} = False
         concreteRecordArrayElem (RecordArrayElem fs) = all concreteRecordArrayElem fs
 
--- | The set of names bound in a pattern, including dimension declarations.
-patNameSet :: (Ord vn, Hashable vn) => PatternBase NoInfo vn -> S.Set vn
-patNameSet =  S.fromList . map identName . patIdentsGen sizeIdent
-  where sizeIdent name = Ident name NoInfo
-
 -- | The set of identifiers bound in a pattern, including dimension declarations.
-patIdentSet :: (Ord vn, Hashable vn) => PatternBase Info vn -> S.Set (IdentBase Info vn)
-patIdentSet = S.fromList . patIdentsGen sizeIdent
-  where sizeIdent name = Ident name (Info $ Prim $ Signed Int32)
-
-patIdentsGen :: (Ord vn, Hashable vn) =>
-                (vn -> SrcLoc -> IdentBase f vn) -> PatternBase f vn
-             -> [IdentBase f vn]
-patIdentsGen _ (Id ident)              = [ident]
-patIdentsGen f (PatternParens p _)     = patIdentsGen f p
-patIdentsGen f (TuplePattern pats _)   = mconcat $ map (patIdentsGen f) pats
-patIdentsGen f (RecordPattern fs _)    = mconcat $ map (patIdentsGen f . snd) fs
-patIdentsGen _ Wildcard{}              = []
-patIdentsGen f (PatternAscription p t) =
-  patIdentsGen f p <> mapMaybe (dimIdent (srclocOf p)) (nestedDims' (declaredType t))
+patIdentSet :: PatternBase Info VName -> S.Set (IdentBase Info VName)
+patIdentSet (Id ident)              = S.singleton ident
+patIdentSet (PatternParens p _)     = patIdentSet p
+patIdentSet (TuplePattern pats _)   = mconcat $ map patIdentSet pats
+patIdentSet (RecordPattern fs _)    = mconcat $ map (patIdentSet . snd) fs
+patIdentSet Wildcard{}              = mempty
+patIdentSet (PatternAscription p (TypeDecl _ (Info t))) =
+  patIdentSet p <> S.fromList (mapMaybe (dimIdent (srclocOf p)) (nestedDims t))
   where dimIdent _ AnyDim            = Nothing
         dimIdent _ (ConstDim _)      = Nothing
         dimIdent _ (NamedDim _)      = Nothing
-        dimIdent loc (BoundDim name) = Just $ f name loc
+        dimIdent loc (BoundDim name) = Just $ Ident name (Info $ Prim $ Signed Int32) loc
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> CompTypeBase VName
