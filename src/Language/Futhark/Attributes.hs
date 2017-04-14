@@ -88,7 +88,6 @@ module Language.Futhark.Attributes
   )
   where
 
-import           Control.Arrow           (second)
 import           Control.Monad.Writer
 import           Data.Foldable
 import           Data.Hashable
@@ -98,6 +97,8 @@ import           Data.List
 import           Data.Loc
 import           Data.Maybe
 import           Data.Ord
+import           Data.Bifunctor
+import           Data.Bifoldable
 
 import           Prelude
 
@@ -201,44 +202,7 @@ vacuousShapeAnnotations = modifyShapeAnnotations $ \shape ->
 modifyShapeAnnotations :: (oldshape -> newshape)
                        -> TypeBase oldshape as
                        -> TypeBase newshape as
-modifyShapeAnnotations f (Array at) =
-  Array $ modifyShapeAnnotationsFromArray f at
-modifyShapeAnnotations f (Record ts) =
-  Record $ fmap (modifyShapeAnnotations f) ts
-modifyShapeAnnotations _ (Prim t) =
-  Prim t
-modifyShapeAnnotations _ (TypeVar x targs) =
-  TypeVar x $ map modifyArg targs
-  where modifyArg (TypeArgDim d loc) = TypeArgDim d loc
-
-modifyShapeAnnotationsFromArray :: (oldshape -> newshape)
-                                -> ArrayTypeBase oldshape as
-                                -> ArrayTypeBase newshape as
-modifyShapeAnnotationsFromArray f (PrimArray et shape u as) =
-  PrimArray et (f shape) u as
-modifyShapeAnnotationsFromArray f (PolyArray et targs shape u as) =
-  PolyArray et (map (modifyShapeAnnotationsFromTypeArg f) targs) (f shape) u as
-modifyShapeAnnotationsFromArray f (RecordArray ts shape u) =
-  RecordArray
-  (fmap (modifyShapeAnnotationsFromRecordArrayElem f) ts)
-  (f shape) u
-
--- Try saying this one three times fast.
-modifyShapeAnnotationsFromRecordArrayElem :: (oldshape -> newshape)
-                                          -> RecordArrayElemTypeBase oldshape as
-                                          -> RecordArrayElemTypeBase newshape as
-modifyShapeAnnotationsFromRecordArrayElem _ (PrimArrayElem bt as u) =
-  PrimArrayElem bt as u
-modifyShapeAnnotationsFromRecordArrayElem f (PolyArrayElem bt targs as u) =
-  PolyArrayElem bt (map (modifyShapeAnnotationsFromTypeArg f) targs) as u
-modifyShapeAnnotationsFromRecordArrayElem f (ArrayArrayElem at) =
-  ArrayArrayElem $ modifyShapeAnnotationsFromArray f at
-modifyShapeAnnotationsFromRecordArrayElem f (RecordArrayElem ts) =
-  RecordArrayElem $ fmap (modifyShapeAnnotationsFromRecordArrayElem f) ts
-
-modifyShapeAnnotationsFromTypeArg :: (oldshape -> newshape)
-                                  -> TypeArg oldshape as -> TypeArg shape as
-modifyShapeAnnotationsFromTypeArg _ (TypeArgDim v loc) = TypeArgDim v loc
+modifyShapeAnnotations f = bimap f id
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -315,25 +279,7 @@ unique = (==Unique) . uniqueness
 -- | Return the set of all variables mentioned in the aliasing of a
 -- type.
 aliases :: Monoid as => TypeBase shape as -> as
-aliases (Array (PrimArray _ _ _ als))   = als
-aliases (Array (PolyArray _ _ _ _ als)) = als
-aliases (Array (RecordArray ts _ _))    = fold $ fmap recordArrayElemAliases ts
-aliases (Record et)                     = fold $ fmap aliases et
-aliases (Prim _)                        = mempty
-aliases TypeVar{}                       = mempty
-
-recordArrayElemAliases :: Monoid as =>
-                         RecordArrayElemTypeBase shape as -> as
-recordArrayElemAliases (PrimArrayElem _ als _) = als
-recordArrayElemAliases (PolyArrayElem _ _ als _) = als
-recordArrayElemAliases (ArrayArrayElem (PrimArray _ _ _ als)) =
-  als
-recordArrayElemAliases (ArrayArrayElem (PolyArray _ _ _ _ als)) =
-  als
-recordArrayElemAliases (ArrayArrayElem (RecordArray ts _ _)) =
-  fold $ M.map recordArrayElemAliases ts
-recordArrayElemAliases (RecordArrayElem ts) =
-  fold $ M.map recordArrayElemAliases ts
+aliases = bifoldMap (const mempty) id
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
@@ -555,39 +501,12 @@ setAliases t = addAliases t . const
 -- aliasing replaced by @f@ applied to that aliasing.
 addAliases :: TypeBase shape asf -> (asf -> ast)
            -> TypeBase shape ast
-addAliases (Array at) f =
-  Array $ addArrayAliases at f
-addAliases (Record ts) f =
-  Record $ fmap (`addAliases` f) ts
-addAliases (Prim et) _ =
-  Prim et
-addAliases (TypeVar et targs) f =
-  TypeVar et $ map (`addTypeArgAliases` f) targs
-
-addTypeArgAliases :: TypeArg shape asf -> (asf -> ast) -> TypeArg shape ast
-addTypeArgAliases (TypeArgDim d loc) _ = TypeArgDim d loc
-
-addArrayAliases :: ArrayTypeBase shape asf
-                -> (asf -> ast)
-                -> ArrayTypeBase shape ast
-addArrayAliases (PrimArray et dims u als) f =
-  PrimArray et dims u $ f als
-addArrayAliases (PolyArray et targs dims u als) f =
-  PolyArray et (map (`addTypeArgAliases` f) targs) dims u $ f als
-addArrayAliases (RecordArray et dims u) f =
-  RecordArray (fmap (`addRecordArrayElemAliases` f) et) dims u
+addAliases t f = bimap id f t
 
 addRecordArrayElemAliases :: RecordArrayElemTypeBase shape asf
-                         -> (asf -> ast)
-                         -> RecordArrayElemTypeBase shape ast
-addRecordArrayElemAliases (PrimArrayElem bt als u) f =
-  PrimArrayElem bt (f als) u
-addRecordArrayElemAliases (PolyArrayElem bt targs als u) f =
-  PolyArrayElem bt (map (`addTypeArgAliases` f) targs) (f als) u
-addRecordArrayElemAliases (ArrayArrayElem at) f =
-  ArrayArrayElem $ addArrayAliases at f
-addRecordArrayElemAliases (RecordArrayElem ts) f =
-  RecordArrayElem $ fmap (`addRecordArrayElemAliases` f) ts
+                          -> (asf -> ast)
+                          -> RecordArrayElemTypeBase shape ast
+addRecordArrayElemAliases t f = bimap id f t
 
 intValueType :: IntValue -> IntType
 intValueType Int8Value{}  = Int8
@@ -870,7 +789,7 @@ data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
 intrinsics = M.fromList $ zipWith namify [0..] $
-             map (second $ uncurry IntrinsicMonoFun)
+             map (\(name, (ts,t)) -> (name, IntrinsicMonoFun ts t))
              [("sqrt32", ([FloatType Float32], FloatType Float32))
              ,("log32", ([FloatType Float32], FloatType Float32))
              ,("exp32", ([FloatType Float32], FloatType Float32))
