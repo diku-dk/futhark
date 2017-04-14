@@ -3,6 +3,6 @@
 -- input { 0 } error: Assertion
 -- input { 3 } output { [0,1,2] }
 
-type ints #n = [n]i32
+type ints [n] = [n]i32
 
 fun main(n: i32): ints [3] = iota n

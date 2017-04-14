@@ -3,7 +3,7 @@
 -- input { 2 } output { [0,1] }
 -- input { 1 } error:
 
-type ints #n = [n]i32
+type ints [n] = [n]i32
 
 module type MT = {
   val k: i32

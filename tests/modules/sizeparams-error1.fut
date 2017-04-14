@@ -2,7 +2,7 @@
 -- ==
 -- error: k_ints
 
-type ints #n = [n]i32
+type ints [n] = [n]i32
 
 module type MT = {
   val k: i32

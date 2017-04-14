@@ -827,7 +827,7 @@ Type Abbreviations
 
 .. productionlist::
    type_bind: "type" `id` `type_param`* "=" `type`
-   type_param: "#" `id`
+   type_param: "[" `id` "]"
 
 Type abbreviations function as shorthands for purpose of documentation
 or brevity.  After a type binding ``type t1 = t2``, the name ``t1``

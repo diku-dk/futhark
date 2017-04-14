@@ -4,6 +4,6 @@
 -- input { [1,2,3] [1,2,3] } output { [1,2,3,1,2,3] }
 -- input { [1,2,3] [1,2,3,4] } error:
 
-type ints #n = [n]i32
+type ints [n] = [n]i32
 
 fun main(a: ints [#n], b: ints [#n]) = concat a b

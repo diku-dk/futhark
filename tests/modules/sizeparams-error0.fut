@@ -3,7 +3,7 @@
 -- error: intvec
 
 module type MT = {
-  type intvec #n
+  type intvec[n]
 
   val singleton: i32 -> intvec [1]
   val first: intvec [] -> i32
