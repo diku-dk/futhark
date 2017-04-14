@@ -170,19 +170,19 @@ checkTypeExp' (TEApply tname targs loc) = do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
     return (TEApply tname' targs' loc,
             substituteTypes (mconcat substs) t)
-  where checkArgApply (TypeSizeParam pv _) (TypeArgDim (NamedDim v) loc) = do
+  where checkArgApply (TypeParamDim pv _) (TypeArgExpDim (NamedDim v) loc) = do
           v' <- checkNamedDim loc v
-          return (TypeArgDim (NamedDim v') loc,
+          return (TypeArgExpDim (NamedDim v') loc,
                   M.singleton pv $ DimSub $ NamedDim v')
-        checkArgApply (TypeSizeParam pv _) (TypeArgDim (BoundDim v) loc) = do
+        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (BoundDim v) loc) = do
           v' <- checkBoundDim loc v
-          return (TypeArgDim (BoundDim v') loc,
+          return (TypeArgExpDim (BoundDim v') loc,
                   M.singleton pv $ DimSub $ BoundDim v')
-        checkArgApply (TypeSizeParam pv _) (TypeArgDim (ConstDim x) loc) =
-          return (TypeArgDim (ConstDim x) loc,
+        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (ConstDim x) loc) =
+          return (TypeArgExpDim (ConstDim x) loc,
                   M.singleton pv $ DimSub $ ConstDim x)
-        checkArgApply (TypeSizeParam pv _) (TypeArgDim AnyDim loc) =
-          return (TypeArgDim AnyDim loc,
+        checkArgApply (TypeParamDim pv _) (TypeArgExpDim AnyDim loc) =
+          return (TypeArgExpDim AnyDim loc,
                   M.singleton pv $ DimSub AnyDim)
 
 checkNamedDim :: MonadTypeChecker m =>
@@ -328,7 +328,7 @@ checkForDuplicateNamesTypeExp' (TEUnique t _) =
   checkForDuplicateNamesTypeExp' t
 checkForDuplicateNamesTypeExp' (TEApply _ targs _) =
   mapM_ check targs
-  where check (TypeArgDim d loc) = checkDimDecl loc d
+  where check (TypeArgExpDim d loc) = checkDimDecl loc d
 checkForDuplicateNamesTypeExp' (TEArray te d loc) =
   checkForDuplicateNamesTypeExp' te >> checkDimDecl loc d
 
@@ -376,10 +376,10 @@ checkTypeParams :: MonadTypeChecker m =>
                 -> m a
 checkTypeParams ps m =
   bindSpaced (map typeParamSpace ps) $ m =<< mapM checkTypeParam ps
-  where typeParamSpace (TypeSizeParam pv _) = (Term, pv)
+  where typeParamSpace (TypeParamDim pv _) = (Term, pv)
 
-        checkTypeParam (TypeSizeParam pv loc) =
-          TypeSizeParam <$> checkName Term pv loc <*> pure loc
+        checkTypeParam (TypeParamDim pv loc) =
+          TypeParamDim <$> checkName Term pv loc <*> pure loc
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
@@ -424,16 +424,16 @@ substituteTypes substs ot = case ot of
           | Just (DimSub d) <- M.lookup (qualLeaf v) substs = d
         substituteInDim d = d
 
-applyType :: [TypeParam] -> StructType -> [TypeArg VName] -> StructType
+applyType :: [TypeParam] -> StructType -> [StructTypeArg] -> StructType
 applyType ps t args =
   substituteTypes substs t
   where substs = M.fromList $ zipWith mkSubst ps args
         -- We are assuming everything has already been type-checked for correctness.
-        mkSubst (TypeSizeParam pv _) (TypeArgDim (NamedDim v) _) =
+        mkSubst (TypeParamDim pv _) (TypeArgDim (NamedDim v) _) =
           (pv, DimSub $ NamedDim v)
-        mkSubst (TypeSizeParam pv _) (TypeArgDim (BoundDim v) _) =
+        mkSubst (TypeParamDim pv _) (TypeArgDim (BoundDim v) _) =
           (pv, DimSub $ BoundDim v)
-        mkSubst (TypeSizeParam pv _) (TypeArgDim (ConstDim x) _) =
+        mkSubst (TypeParamDim pv _) (TypeArgDim (ConstDim x) _) =
           (pv, DimSub $ ConstDim x)
-        mkSubst (TypeSizeParam pv _) (TypeArgDim AnyDim  _) =
+        mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim  _) =
           (pv, DimSub AnyDim)

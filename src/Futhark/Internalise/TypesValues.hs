@@ -214,10 +214,10 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
 
 newtype TypeArg = TypeArgDim ExtDimSize
 
-internaliseTypeArg :: E.TypeArg VName -> InternaliseTypeM TypeArg
+internaliseTypeArg :: E.TypeArg (E.ShapeDecl VName) als -> InternaliseTypeM TypeArg
 internaliseTypeArg (E.TypeArgDim d _) = TypeArgDim <$> internaliseDim d
 
-applyType :: E.TypeName -> [E.TypeArg VName]
+applyType :: E.TypeName -> [E.TypeArg (E.ShapeDecl VName) als]
           -> InternaliseTypeM [I.TypeBase ExtShape NoUniqueness]
 applyType tname targs = do
   tname' <- lift $ lookupSubst $ E.qualNameFromTypeName tname

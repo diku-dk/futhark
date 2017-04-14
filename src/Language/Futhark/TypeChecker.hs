@@ -157,7 +157,7 @@ checkSpecs (TypeSpec name ps loc : specs) =
     return (S.insert (qualName name') abstypes,
             tenv <> env,
             TypeSpec name' ps' loc : specs')
-      where paramToArg (TypeSizeParam v ploc) =
+      where paramToArg (TypeParamDim v ploc) =
               TypeArgDim (NamedDim $ qualName v) ploc
 
 checkSpecs (ModSpec name sig loc : specs) =
@@ -405,7 +405,7 @@ checkTypeBind (TypeBind name ps td loc) =
                      },
               TypeBind name' ps' td' loc)
   where bindingTypeParams ps' = localEnv $ \e -> e <> mconcat (map typeParamEnv ps')
-        typeParamEnv (TypeSizeParam pv _) =
+        typeParamEnv (TypeParamDim pv _) =
           mempty { envVtable = M.singleton pv $ BoundV $ Prim $ Signed Int32 }
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
@@ -621,7 +621,7 @@ matchMTys = matchMTys' mempty
         else nomatch
         where nomatch = mismatchedType loc (baseName spec_name) (spec_ps, spec_t) (ps, t)
 
-              matchTypeParam (TypeSizeParam x _) (TypeSizeParam y _) =
+              matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
                 M.singleton x $ DimSub $ NamedDim $ qualName y
 
     missingType loc name =
@@ -780,8 +780,8 @@ newNamesForMTy except orig_mty = do
 
         substituteInTypeBinding (TypeAbbr ps t) =
           TypeAbbr (map substituteInTypeParam ps) $ substituteInType t
-          where substituteInTypeParam (TypeSizeParam p loc) =
-                  TypeSizeParam (substitute p) loc
+          where substituteInTypeParam (TypeParamDim p loc) =
+                  TypeParamDim (substitute p) loc
 
         substituteInType :: StructType -> StructType
         substituteInType (TypeVar (TypeName qs v) targs) =

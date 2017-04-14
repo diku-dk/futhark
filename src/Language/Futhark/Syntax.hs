@@ -25,8 +25,9 @@ module Language.Futhark.Syntax
   , typeNameFromQualName
   , qualNameFromTypeName
   , TypeBase(..)
-  , TypeExp(..)
   , TypeArg(..)
+  , TypeExp(..)
+  , TypeArgExp(..)
   , RecordArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
@@ -69,6 +70,7 @@ module Language.Futhark.Syntax
   , ValBindBase(..)
   , TypeBindBase(..)
   , TypeParamBase(..)
+  , typeParamName
   , ProgBase(..)
   , DecBase(..)
 
@@ -245,7 +247,7 @@ qualNameFromTypeName (TypeName qs x) = QualName qs x
 data RecordArrayElemTypeBase shape as =
     PrimArrayElem PrimType as Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as)
-  | PolyArrayElem TypeName [TypeArg VName] as Uniqueness
+  | PolyArrayElem TypeName [TypeArg shape as] as Uniqueness
   | RecordArrayElem (M.Map Name (RecordArrayElemTypeBase shape as))
   deriving (Show)
 
@@ -265,7 +267,7 @@ instance Eq shape => Eq (RecordArrayElemTypeBase shape as) where
 data ArrayTypeBase shape as =
     PrimArray PrimType shape Uniqueness as
     -- ^ An array whose elements are primitive types.
-  | PolyArray TypeName [TypeArg VName] shape Uniqueness as
+  | PolyArray TypeName [TypeArg shape as] shape Uniqueness as
     -- ^ An array whose elements are some polymorphic type, possibly with arguments.
   | RecordArray (M.Map Name (RecordArrayElemTypeBase shape as)) shape Uniqueness
     -- ^ An array whose elements are records.  Note that tuples are
@@ -289,8 +291,12 @@ instance Eq shape =>
 data TypeBase shape as = Prim PrimType
                        | Array (ArrayTypeBase shape as)
                        | Record (M.Map Name (TypeBase shape as))
-                       | TypeVar TypeName [TypeArg VName]
+                       | TypeVar TypeName [TypeArg shape as]
                           deriving (Eq, Show)
+
+data TypeArg shape as = TypeArgDim (DimDecl VName) SrcLoc
+             deriving (Eq, Show)
+
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
@@ -303,7 +309,7 @@ data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TERecord [(Name, TypeExp vn)] SrcLoc
                 | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
-                | TEApply (QualName vn) [TypeArg vn] SrcLoc
+                | TEApply (QualName vn) [TypeArgExp vn] SrcLoc
                  deriving (Eq, Show)
 
 instance Located (TypeExp vn) where
@@ -314,11 +320,11 @@ instance Located (TypeExp vn) where
   locOf (TEUnique _ loc)  = locOf loc
   locOf (TEApply _ _ loc) = locOf loc
 
-data TypeArg vn = TypeArgDim (DimDecl vn) SrcLoc
+data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
                 deriving (Eq, Show)
 
-instance Located (TypeArg vn) where
-  locOf (TypeArgDim _ loc) = locOf loc
+instance Located (TypeArgExp vn) where
+  locOf (TypeArgExpDim _ loc) = locOf loc
 --
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
@@ -751,14 +757,15 @@ deriving instance Showable f vn => Show (TypeBindBase f vn)
 instance Located (TypeBindBase f vn) where
   locOf = locOf . typeBindLocation
 
-data TypeParamBase vn = TypeSizeParam { typeParamName :: vn
-                                      , typeParamLocation :: SrcLoc
-                                      }
+data TypeParamBase vn = TypeParamDim vn SrcLoc
                         -- ^ A type parameter that must be a size.
   deriving (Show)
 
 instance Located (TypeParamBase vn) where
-  locOf (TypeSizeParam _ loc) = locOf loc
+  locOf (TypeParamDim _ loc) = locOf loc
+
+typeParamName :: TypeParamBase vn -> vn
+typeParamName (TypeParamDim v _) = v
 
 data SpecBase f vn = ValSpec  { specName     :: vn
                               , specParams   :: [TypeDeclBase f vn]
