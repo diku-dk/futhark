@@ -409,8 +409,12 @@ TypeExp :: { UncheckedTypeExp }
          | TypeExpAtom  { $1 }
 
 TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArgExp Name]) }
-              : TypeExpApply TypeArgExp { (fst $1, snd $1 ++ [$2]) }
-              | QualName TypeArgExp     { ($1, [$2]) }
+              : TypeExpApply TypeArg { (fst $1, snd $1 ++ [$2]) }
+              | QualName TypeArg     { ($1, [$2]) }
+              | 'id[' DimDecl ']'    { let L loc (INDEXING v) = $1
+                                       in ((QualName [] v, loc), [TypeArgExpDim (fst $2) loc]) }
+              | 'qid[' DimDecl ']'   { let L loc (QUALINDEXING qs v) = $1
+                                       in ((QualName qs v, loc), [TypeArgExpDim (fst $2) loc]) }
 
 TypeExpAtom :: { UncheckedTypeExp }
              : '(' TypeExp ')'               { $2 }
@@ -421,8 +425,9 @@ TypeExpAtom :: { UncheckedTypeExp }
              | '(' ')'                       { TETuple [] $1 }
              | QualName                      { TEVar (fst $1) (snd $1) }
 
-TypeArgExp :: { TypeArgExp Name }
-        : DimDecl { TypeArgExpDim (fst $1) (snd $1) }
+TypeArg :: { TypeArgExp Name }
+         : '[' DimDecl ']' { TypeArgExpDim (fst $2) $1 }
+         | '[' ']'         { TypeArgExpDim AnyDim $1 }
 
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
@@ -438,8 +443,6 @@ DimDecl :: { (DimDecl Name, SrcLoc) }
         | intlit
           { let L loc (INTLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
-        | '_'
-          { (AnyDim, $1) }
 
 Param :: { PatternBase NoInfo Name }
 Param : InnerPattern { $1 }

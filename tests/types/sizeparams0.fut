@@ -5,4 +5,4 @@
 
 type ints #n = [n]i32
 
-fun main(n: i32): ints n = iota n
+fun main(n: i32): ints [n] = iota n

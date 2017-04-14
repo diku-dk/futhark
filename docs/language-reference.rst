@@ -101,8 +101,8 @@ type ``()``.
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
-   type_arg: `dim`
-   dim: `qualid` | `decimal` | "#" `id` | `_`
+   type_arg: "[" [`dim`] "]"
+   dim: `qualid` | `decimal` | "#" `id`
 
 An array value is written as a nonempty sequence of comma-separated
 values enclosed in square brackets: ``[1,2,3]``.  An array type is
@@ -838,13 +838,16 @@ not create new unique types.  After the previous binding, the types
 A type abbreviation can have zero or more parameters.  A type
 parameter prefixed with a ``#`` is a *shape parameter*, and can be
 used in the definition as an array dimension size, or as a dimension
-argument to other type abbreviations.  Example::
+argument to other type abbreviations.  When passing an argument for a
+shape parameter, it must be encloses in square brackets.  Example::
 
   type two_intvecs #n = ([n]i32, [n]i32)
 
-  let (a,b): two_intvecs 2 = (iota 2, replicate 2 0)
+  let (a,b): two_intvecs [2] = (iota 2, replicate 2 0)
 
-Shape parameters work much like shape declarations for arrays.
+Shape parameters work much like shape declarations for arrays.  Like
+shape declarations, they can be elided via square brackets containing
+nothing.
 
 When using uniqueness attributes with type abbreviations, inner
 uniqueness attributes are overrided by outer ones::

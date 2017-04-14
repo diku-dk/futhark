@@ -6,4 +6,4 @@
 
 type ints #n = [n]i32
 
-fun main(a: ints #n, b: ints #n) = concat a b
+fun main(a: ints [#n], b: ints [#n]) = concat a b

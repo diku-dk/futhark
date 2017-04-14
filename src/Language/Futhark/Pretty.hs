@@ -102,7 +102,7 @@ instance Pretty shape => Pretty (TypeBase shape as) where
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty shape => Pretty (TypeArg shape as) where
-  ppr (TypeArgDim d _) = ppr d
+  ppr (TypeArgDim d _) = brackets $ ppr d
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
