@@ -85,23 +85,23 @@ module Language.Futhark.Syntax
 import           Control.Applicative
 import           Control.Monad
 import           Data.Array
+import           Data.Bifoldable
+import           Data.Bifunctor
+import           Data.Bitraversable
 import           Data.Foldable
 import           Data.Hashable
-import qualified Data.Map.Strict                as M
-import qualified Data.Set                     as S
 import           Data.Loc
-import           Data.Ord
+import qualified Data.Map.Strict                  as M
 import           Data.Monoid
+import           Data.Ord
+import qualified Data.Set                         as S
 import           Data.Traversable
-import           Data.Bitraversable
-import           Data.Bifunctor
-import           Data.Bifoldable
 import           Prelude
 
-import           Futhark.Util.Pretty
 import           Futhark.Representation.Primitive (FloatType (..),
                                                    FloatValue (..),
                                                    IntType (..), IntValue (..))
+import           Futhark.Util.Pretty
 import           Language.Futhark.Core
 
 -- | Convenience class for deriving 'Show' instances for the AST.
@@ -183,10 +183,10 @@ data DimDecl vn = BoundDim vn
                 deriving (Eq, Ord, Show)
 
 instance Functor DimDecl where
-  fmap f (BoundDim x) = BoundDim $ f x
+  fmap f (BoundDim x)               = BoundDim $ f x
   fmap f (NamedDim (QualName qs x)) = NamedDim $ QualName qs $ f x
-  fmap _ (ConstDim x) = ConstDim x
-  fmap _ AnyDim = AnyDim
+  fmap _ (ConstDim x)               = ConstDim x
+  fmap _ AnyDim                     = AnyDim
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
@@ -664,45 +664,45 @@ data StreamForm f vn = MapLike    StreamOrd
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
-  locOf (Literal _ loc)          = locOf loc
-  locOf (Parens _ loc)           = locOf loc
-  locOf (TupLit _ pos)           = locOf pos
-  locOf (RecordLit _ pos)        = locOf pos
-  locOf (Project _ _ _ pos)      = locOf pos
-  locOf (ArrayLit _ _ pos)       = locOf pos
-  locOf (Empty _ pos)            = locOf pos
-  locOf (BinOp _ _ _ _ pos)      = locOf pos
-  locOf (If _ _ _ _ pos)         = locOf pos
-  locOf (Var _ _ loc)            = locOf loc
-  locOf (Ascript _ _ loc)        = locOf loc
-  locOf (Negate _ pos)           = locOf pos
-  locOf (Apply _ _ _ pos)        = locOf pos
-  locOf (LetPat _ _ _ pos)       = locOf pos
-  locOf (LetFun _ _ _ loc)       = locOf loc
-  locOf (LetWith _ _ _ _ _ pos)  = locOf pos
-  locOf (Index _ _ pos)          = locOf pos
-  locOf (Update _ _ _ pos)       = locOf pos
-  locOf (Iota _ pos)             = locOf pos
-  locOf (Shape _ pos)            = locOf pos
-  locOf (Replicate _ _ pos)      = locOf pos
-  locOf (Reshape _ _ pos)        = locOf pos
-  locOf (Transpose _ pos)        = locOf pos
-  locOf (Rearrange _ _ pos)      = locOf pos
-  locOf (Rotate _ _ _ pos)       = locOf pos
-  locOf (Map _ _ pos)            = locOf pos
-  locOf (Reduce _ _ _ _ pos)     = locOf pos
-  locOf (Zip _ _ _ pos)          = locOf pos
-  locOf (Unzip _ _ pos)          = locOf pos
-  locOf (Scan _ _ _ pos)         = locOf pos
-  locOf (Filter _ _ pos)         = locOf pos
-  locOf (Partition _ _ pos)      = locOf pos
-  locOf (Split _ _ _ pos)        = locOf pos
-  locOf (Concat _ _ _ pos)       = locOf pos
-  locOf (Copy _ pos)             = locOf pos
-  locOf (DoLoop _ _ _ _ _ pos)   = locOf pos
-  locOf (Stream _ _ _  pos)      = locOf pos
-  locOf (Unsafe _ loc)           = locOf loc
-  locOf (Scatter _ _ _ loc)      = locOf loc
+  locOf (Literal _ loc)         = locOf loc
+  locOf (Parens _ loc)          = locOf loc
+  locOf (TupLit _ pos)          = locOf pos
+  locOf (RecordLit _ pos)       = locOf pos
+  locOf (Project _ _ _ pos)     = locOf pos
+  locOf (ArrayLit _ _ pos)      = locOf pos
+  locOf (Empty _ pos)           = locOf pos
+  locOf (BinOp _ _ _ _ pos)     = locOf pos
+  locOf (If _ _ _ _ pos)        = locOf pos
+  locOf (Var _ _ loc)           = locOf loc
+  locOf (Ascript _ _ loc)       = locOf loc
+  locOf (Negate _ pos)          = locOf pos
+  locOf (Apply _ _ _ pos)       = locOf pos
+  locOf (LetPat _ _ _ pos)      = locOf pos
+  locOf (LetFun _ _ _ loc)      = locOf loc
+  locOf (LetWith _ _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ pos)         = locOf pos
+  locOf (Update _ _ _ pos)      = locOf pos
+  locOf (Iota _ pos)            = locOf pos
+  locOf (Shape _ pos)           = locOf pos
+  locOf (Replicate _ _ pos)     = locOf pos
+  locOf (Reshape _ _ pos)       = locOf pos
+  locOf (Transpose _ pos)       = locOf pos
+  locOf (Rearrange _ _ pos)     = locOf pos
+  locOf (Rotate _ _ _ pos)      = locOf pos
+  locOf (Map _ _ pos)           = locOf pos
+  locOf (Reduce _ _ _ _ pos)    = locOf pos
+  locOf (Zip _ _ _ pos)         = locOf pos
+  locOf (Unzip _ _ pos)         = locOf pos
+  locOf (Scan _ _ _ pos)        = locOf pos
+  locOf (Filter _ _ pos)        = locOf pos
+  locOf (Partition _ _ pos)     = locOf pos
+  locOf (Split _ _ _ pos)       = locOf pos
+  locOf (Concat _ _ _ pos)      = locOf pos
+  locOf (Copy _ pos)            = locOf pos
+  locOf (DoLoop _ _ _ _ _ pos)  = locOf pos
+  locOf (Stream _ _ _  pos)     = locOf pos
+  locOf (Unsafe _ loc)          = locOf loc
+  locOf (Scatter _ _ _ loc)     = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordField Name (ExpBase f vn) SrcLoc
@@ -712,7 +712,7 @@ deriving instance Showable f vn => Show (FieldBase f vn)
 
 instance Located (FieldBase f vn) where
   locOf (RecordField _ _ loc) = locOf loc
-  locOf (RecordRecord e) = locOf e
+  locOf (RecordRecord e)      = locOf e
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (LowerBoundBase f vn) (IdentBase f vn) (ExpBase f vn)
@@ -897,8 +897,8 @@ deriving instance Showable f vn => Show (ModBindBase f vn)
 instance Located (ModBindBase f vn) where
   locOf = locOf . modLocation
 
-data ModParamBase f vn = ModParam { modParamName :: vn
-                                  , modParamType :: SigExpBase f vn
+data ModParamBase f vn = ModParam { modParamName     :: vn
+                                  , modParamType     :: SigExpBase f vn
                                   , modParamLocation :: SrcLoc
                                   }
 deriving instance Showable f vn => Show (ModParamBase f vn)
@@ -920,7 +920,7 @@ instance Located (DecBase f vn) where
   locOf (FunDec d)        = locOf d
   locOf (TypeDec d)       = locOf d
   locOf (SigDec d)        = locOf d
-  locOf (ModDec d)     = locOf d
+  locOf (ModDec d)        = locOf d
   locOf (OpenDec _ _ loc) = locOf loc
 
 newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
