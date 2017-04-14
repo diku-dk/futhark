@@ -329,7 +329,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
     text "type" <+> ppr name <+> spread (map ppr params) <+> equals <+> ppr usertype
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
-  ppr (TypeParamDim name _) = text "#" <> ppr name
+  ppr (TypeParamDim name _) = brackets $ ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
   ppr (FunBind entry name retdecl _ args body _) =

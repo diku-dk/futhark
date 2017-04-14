@@ -2,12 +2,12 @@
 -- ==
 -- input { 1 2 } output { [[0,0]] }
 
-module PM(P: { type vec #n val mk_a: i32 -> vec [] }) = {
+module PM(P: { type vec [n] val mk_a: i32 -> vec [] }) = {
  let mk_b (m: i32) (n: i32): [m](P.vec [n]) = replicate m (P.mk_a n)
 }
 
 module intmat = PM {
-  type vec #n = [n]i32
+  type vec [n] = [n]i32
   let mk_a (n: i32) = replicate n 0
 }
 

@@ -313,6 +313,9 @@ Spec :: { SpecBase NoInfo Name }
       | type id many(TypeParam)
         { let L loc (ID name) = $2
           in TypeSpec name $3 loc }
+      | type 'id[' id ']' many(TypeParam)
+        { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
+          in TypeSpec name (TypeParamDim pname ploc : $5) loc }
       | module id ':' SigExp
         { let L _ (ID name) = $2
           in ModSpec name $4 $1 }
@@ -321,7 +324,7 @@ Spec :: { SpecBase NoInfo Name }
 ;
 
 TypeParam :: { TypeParamBase Name }
-           : '#' id { let L _ (ID name) = $2 in TypeParamDim name $1 }
+           : '[' id ']' { let L _ (ID name) = $2 in TypeParamDim name $1 }
 
 DefaultDec :: { () }
            :  default '(' id ')' {% let L _ (ID s) = $3 in defaultType s  }
@@ -402,6 +405,9 @@ TypeAbbr :: { TypeBindBase NoInfo Name }
 TypeAbbr : type id many(TypeParam) '=' TypeExpDecl
            { let L loc (ID name) = $2
               in TypeBind name $3 $5 loc }
+         | type 'id[' id ']' many(TypeParam) '=' TypeExpDecl
+           { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
+             in TypeBind name (TypeParamDim pname ploc:$5) $7 loc }
 
 TypeExp :: { UncheckedTypeExp }
          : TypeExpApply { TEApply (fst (fst $1)) (snd $1) (snd (fst $1)) }
