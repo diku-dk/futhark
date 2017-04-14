@@ -93,6 +93,9 @@ import           Data.Loc
 import           Data.Ord
 import           Data.Monoid
 import           Data.Traversable
+import           Data.Bitraversable
+import           Data.Bifunctor
+import           Data.Bifoldable
 import           Prelude
 
 import           Futhark.Util.Pretty
@@ -263,6 +266,20 @@ instance Eq shape => Eq (RecordArrayElemTypeBase shape as) where
   _ == _ =
     False
 
+instance Bitraversable RecordArrayElemTypeBase where
+  bitraverse _ g (PrimArrayElem t as u) = PrimArrayElem t <$> g as <*> pure u
+  bitraverse f g (ArrayArrayElem a) = ArrayArrayElem <$> bitraverse f g a
+  bitraverse f g (PolyArrayElem t args as u) =
+    PolyArrayElem t <$> traverse (bitraverse f g) args <*> g as <*> pure u
+  bitraverse f g (RecordArrayElem fs) =
+    RecordArrayElem <$> traverse (bitraverse f g) fs
+
+instance Bifunctor RecordArrayElemTypeBase where
+  bimap = bimapDefault
+
+instance Bifoldable RecordArrayElemTypeBase where
+  bifoldMap = bifoldMapDefault
+
 -- | An array type.
 data ArrayTypeBase shape as =
     PrimArray PrimType shape Uniqueness as
@@ -285,6 +302,20 @@ instance Eq shape =>
   _ == _ =
     False
 
+instance Bitraversable ArrayTypeBase where
+  bitraverse f g (PrimArray t shape u as) =
+    PrimArray t <$> f shape <*> pure u <*> g as
+  bitraverse f g (PolyArray t args shape u as) =
+    PolyArray t <$> traverse (bitraverse f g) args <*> f shape <*> pure u <*> g as
+  bitraverse f g (RecordArray fs shape u) =
+    RecordArray <$> traverse (bitraverse f g) fs <*> f shape <*> pure u
+
+instance Bifunctor ArrayTypeBase where
+  bimap = bimapDefault
+
+instance Bifoldable ArrayTypeBase where
+  bifoldMap = bifoldMapDefault
+
 -- | An expanded Futhark type is either an array, a prim type, a
 -- tuple, or a type variable.  When comparing types for equality with
 -- '==', aliases are ignored, but dimensions much match.
@@ -294,9 +325,29 @@ data TypeBase shape as = Prim PrimType
                        | TypeVar TypeName [TypeArg shape as]
                           deriving (Eq, Show)
 
+instance Bitraversable TypeBase where
+  bitraverse _ _ (Prim t) = pure $ Prim t
+  bitraverse f g (Array a) = Array <$> bitraverse f g a
+  bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
+  bitraverse f g (TypeVar t args) = TypeVar t <$> traverse (bitraverse f g) args
+
+instance Bifunctor TypeBase where
+  bimap = bimapDefault
+
+instance Bifoldable TypeBase where
+  bifoldMap = bifoldMapDefault
+
 data TypeArg shape as = TypeArgDim (DimDecl VName) SrcLoc
              deriving (Eq, Show)
 
+instance Bitraversable TypeArg where
+  bitraverse _ _ (TypeArgDim v loc) = pure $ TypeArgDim v loc
+
+instance Bifunctor TypeArg where
+  bimap = bimapDefault
+
+instance Bifoldable TypeArg where
+  bifoldMap = bifoldMapDefault
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
@@ -325,12 +376,11 @@ data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
 
 instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
---
+
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
 
 type StructTypeBase vn = TypeBase (ShapeDecl vn) ()
-
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
