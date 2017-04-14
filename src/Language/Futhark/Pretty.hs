@@ -101,6 +101,9 @@ instance Pretty shape => Pretty (TypeBase shape as) where
         braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
+instance Pretty shape => Pretty (TypeArg shape as) where
+  ppr (TypeArgDim d _) = ppr d
+
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
   ppr (TEArray at d _) = brackets (ppr d) <> ppr at
@@ -110,8 +113,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEVar name _) = ppr name
   ppr (TEApply t args _) = ppr t <+> spread (map ppr args)
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeArg vn) where
-  ppr (TypeArgDim d _) = ppr d
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeArgExp vn) where
+  ppr (TypeArgExpDim d _) = ppr d
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
@@ -326,7 +329,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
     text "type" <+> ppr name <+> spread (map ppr params) <+> equals <+> ppr usertype
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
-  ppr (TypeSizeParam name _) = text "#" <> ppr name
+  ppr (TypeParamDim name _) = text "#" <> ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
   ppr (FunBind entry name retdecl _ args body _) =

@@ -7,7 +7,7 @@ module Language.Futhark
   , Ident, DimIndex, Exp, Lambda, Pattern
   , ModExp, SigExp, ModBind
   , FunBind, ValBind, Dec, Prog
-  , Type, StructType, ArrayType
+  , Type, StructType, StructTypeArg, ArrayType
   , TypeParam
   )
   where
@@ -57,6 +57,9 @@ type Type = TypeBase Rank (Names VName)
 
 -- | A known type with shape annotations but no aliasing information.
 type StructType = TypeBase (ShapeDecl VName) ()
+
+-- | A known type arg with shape annotations but no aliasing information.
+type StructTypeArg = TypeArg (ShapeDecl VName) ()
 
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName

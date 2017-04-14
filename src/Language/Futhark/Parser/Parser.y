@@ -321,7 +321,7 @@ Spec :: { SpecBase NoInfo Name }
 ;
 
 TypeParam :: { TypeParamBase Name }
-           : '#' id { let L _ (ID name) = $2 in TypeSizeParam name $1 }
+           : '#' id { let L _ (ID name) = $2 in TypeParamDim name $1 }
 
 DefaultDec :: { () }
            :  default '(' id ')' {% let L _ (ID s) = $3 in defaultType s  }
@@ -408,9 +408,9 @@ TypeExp :: { UncheckedTypeExp }
          | '*' TypeExp  { TEUnique $2 $1 }
          | TypeExpAtom  { $1 }
 
-TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArg Name]) }
-              : TypeExpApply TypeArg { (fst $1, snd $1 ++ [$2]) }
-              | QualName TypeArg     { ($1, [$2]) }
+TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArgExp Name]) }
+              : TypeExpApply TypeArgExp { (fst $1, snd $1 ++ [$2]) }
+              | QualName TypeArgExp     { ($1, [$2]) }
 
 TypeExpAtom :: { UncheckedTypeExp }
              : '(' TypeExp ')'               { $2 }
@@ -421,8 +421,8 @@ TypeExpAtom :: { UncheckedTypeExp }
              | '(' ')'                       { TETuple [] $1 }
              | QualName                      { TEVar (fst $1) (snd $1) }
 
-TypeArg :: { TypeArg Name }
-        : DimDecl { TypeArgDim (fst $1) (snd $1) }
+TypeArgExp :: { TypeArgExp Name }
+        : DimDecl { TypeArgExpDim (fst $1) (snd $1) }
 
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
