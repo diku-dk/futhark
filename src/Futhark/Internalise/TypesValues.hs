@@ -89,7 +89,6 @@ reExt (Array t (ExtShape ds) u) = do
               return (M.insert x x' seen, Ext x')
         update seen d =
           return (seen, d)
-
 reExt t = return t
 
 newId :: InternaliseTypeM Int
@@ -212,20 +211,18 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
                     put $ i + 1
                     return i
 
-newtype TypeArg = TypeArgDim ExtDimSize
-
 internaliseTypeArg :: E.TypeArg (E.ShapeDecl VName) als -> InternaliseTypeM TypeArg
-internaliseTypeArg (E.TypeArgDim d _) = TypeArgDim <$> internaliseDim d
+internaliseTypeArg (E.TypeArgDim d _) =
+  TypeArgDim <$> internaliseDim d
+internaliseTypeArg (E.TypeArgType t _) =
+  TypeArgType . map fromDecl <$> internaliseDeclType' t
 
 applyType :: E.TypeName -> [E.TypeArg (E.ShapeDecl VName) als]
           -> InternaliseTypeM [I.TypeBase ExtShape NoUniqueness]
 applyType tname targs = do
-  tname' <- lift $ lookupSubst $ E.qualNameFromTypeName tname
-  (ps, t) <- lift $ lookupTypeVar tname'
-  t' <- mapM reExt t
+  m <- lift $ lookupTypeVar =<< lookupSubst (E.qualNameFromTypeName tname)
   targs' <- mapM internaliseTypeArg targs
-  let substs = M.fromList $ zip ps targs'
-  return $ substituteInTypes substs t'
+  mapM reExt =<< lift (m targs')
 
 substituteInTypes :: M.Map VName TypeArg
                   -> [I.TypeBase ExtShape NoUniqueness]

@@ -346,7 +346,7 @@ bindingIdent (Ident v NoInfo vloc) t m =
     binding [ident] $ m ident
 
 bindingPatternGroup :: [(PatternBase NoInfo Name, InferredType)]
-               -> ([Pattern] -> TermTypeM a) -> TermTypeM a
+                    -> ([Pattern] -> TermTypeM a) -> TermTypeM a
 bindingPatternGroup ps m =
   checkPatternGroup ps $ \ps' ->
     binding (S.toList $ S.unions $ map patIdentSet ps') $ do

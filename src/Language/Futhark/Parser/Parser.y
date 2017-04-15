@@ -137,6 +137,7 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '@'             { L $$ AT }
       '\\'            { L $$ BACKSLASH }
+      '\''            { L $$ APOSTROPHE }
       entry           { L $$ ENTRY }
       '->'            { L $$ RIGHT_ARROW }
       '<-'            { L $$ LEFT_ARROW }
@@ -325,6 +326,7 @@ Spec :: { SpecBase NoInfo Name }
 
 TypeParam :: { TypeParamBase Name }
            : '[' id ']' { let L _ (ID name) = $2 in TypeParamDim name $1 }
+           | '\'' id { let L _ (ID name) = $2 in TypeParamType name $1 }
 
 DefaultDec :: { () }
            :  default '(' id ')' {% let L _ (ID s) = $3 in defaultType s  }
@@ -412,6 +414,8 @@ TypeAbbr : type id many(TypeParam) '=' TypeExpDecl
 TypeExp :: { UncheckedTypeExp }
          : TypeExpApply { TEApply (fst (fst $1)) (snd $1) (snd (fst $1)) }
          | '*' TypeExp  { TEUnique $2 $1 }
+         | '[' DimDecl ']' TypeExp   { TEArray $4 (fst $2) $1 }
+         | '['  ']' TypeExp          { TEArray $3 AnyDim $1 }
          | TypeExpAtom  { $1 }
 
 TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArgExp Name]) }
@@ -424,16 +428,15 @@ TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArgExp Name]) }
 
 TypeExpAtom :: { UncheckedTypeExp }
              : '(' TypeExp ')'               { $2 }
+             | '(' ')'                       { TETuple [] $1 }
              | '{' sepBy(FieldType, ',') '}' { TERecord $2 $1 }
              | '(' sepBy2(TypeExp, ',') ')'  { TETuple $2 $1 }
-             | '[' DimDecl ']' TypeExpAtom   { TEArray $4 (fst $2) $1 }
-             | '['  ']' TypeExpAtom          { TEArray $3 AnyDim $1 }
-             | '(' ')'                       { TETuple [] $1 }
              | QualName                      { TEVar (fst $1) (snd $1) }
 
 TypeArg :: { TypeArgExp Name }
          : '[' DimDecl ']' { TypeArgExpDim (fst $2) $1 }
          | '[' ']'         { TypeArgExpDim AnyDim $1 }
+         | TypeExpAtom     { TypeArgExpType $1 }
 
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 

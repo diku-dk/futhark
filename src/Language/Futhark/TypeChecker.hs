@@ -159,6 +159,8 @@ checkSpecs (TypeSpec name ps loc : specs) =
             TypeSpec name' ps' loc : specs')
       where paramToArg (TypeParamDim v ploc) =
               TypeArgDim (NamedDim $ qualName v) ploc
+            paramToArg (TypeParamType v ploc) =
+              TypeArgType (TypeVar (typeName v) []) ploc
 
 checkSpecs (ModSpec name sig loc : specs) =
   bindSpaced [(Structure, name)] $ do
@@ -407,6 +409,8 @@ checkTypeBind (TypeBind name ps td loc) =
   where bindingTypeParams ps' = localEnv $ \e -> e <> mconcat (map typeParamEnv ps')
         typeParamEnv (TypeParamDim pv _) =
           mempty { envVtable = M.singleton pv $ BoundV $ Prim $ Signed Int32 }
+        typeParamEnv (TypeParamType pv _) =
+          mempty { envTypeTable = M.singleton pv $ TypeAbbr [] $ TypeVar (typeName pv) [] }
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind name maybe_t NoInfo e loc) = do
@@ -613,8 +617,8 @@ matchMTys = matchMTys' mempty
     matchTypeAbbr loc abs_subst_to_type val_substs spec_name spec_ps spec_t name ps t = do
       -- We have to create substitutions for the type parameters, too.
       unless (length spec_ps == length ps) nomatch
-      let param_substs = mconcat $ zipWith matchTypeParam spec_ps ps
-          val_substs' = M.map (DimSub . NamedDim . qualName) val_substs
+      param_substs <- mconcat <$> zipWithM matchTypeParam spec_ps ps
+      let val_substs' = M.map (DimSub . NamedDim . qualName) val_substs
           spec_t' = substituteTypes (val_substs'<>param_substs<>abs_subst_to_type) spec_t
       if spec_t' == t
         then return (spec_name, name)
@@ -622,7 +626,11 @@ matchMTys = matchMTys' mempty
         where nomatch = mismatchedType loc (baseName spec_name) (spec_ps, spec_t) (ps, t)
 
               matchTypeParam (TypeParamDim x _) (TypeParamDim y _) =
-                M.singleton x $ DimSub $ NamedDim $ qualName y
+                pure $ M.singleton x $ DimSub $ NamedDim $ qualName y
+              matchTypeParam (TypeParamType x _) (TypeParamType y _) =
+                pure $ M.singleton x $ TypeSub $ TypeAbbr [] $ TypeVar (typeName y) []
+              matchTypeParam _ _ =
+                nomatch
 
     missingType loc name =
       Left $ TypeError loc $
@@ -782,6 +790,8 @@ newNamesForMTy except orig_mty = do
           TypeAbbr (map substituteInTypeParam ps) $ substituteInType t
           where substituteInTypeParam (TypeParamDim p loc) =
                   TypeParamDim (substitute p) loc
+                substituteInTypeParam (TypeParamType p loc) =
+                  TypeParamType (substitute p) loc
 
         substituteInType :: StructType -> StructType
         substituteInType (TypeVar (TypeName qs v) targs) =
@@ -816,6 +826,8 @@ newNamesForMTy except orig_mty = do
           TypeArgDim (ConstDim x) loc
         substituteInTypeArg (TypeArgDim AnyDim loc) =
           TypeArgDim AnyDim loc
+        substituteInTypeArg (TypeArgType t loc) =
+          TypeArgType (substituteInType t) loc
 
 mtyTypeAbbrs :: MTy -> M.Map VName TypeBinding
 mtyTypeAbbrs (MTy _ mod) = modTypeAbbrs mod

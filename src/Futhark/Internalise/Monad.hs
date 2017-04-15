@@ -4,6 +4,7 @@ module Futhark.Internalise.Monad
   , runInternaliseM
   , throwError
   , FunTable
+  , TypeArg (..)
   , TypeTable
   , VarSubstitutions
   , DecSubstitutions
@@ -14,6 +15,7 @@ module Futhark.Internalise.Monad
   , ModBinding (..)
 
   , substitutingVars
+  , withTypes
 
   , addFunction
 
@@ -78,7 +80,9 @@ type FunTable = M.Map VName FunBinding
 data ModBinding = ModBinding DecSubstitutions E.ModExp
                 deriving (Show)
 
-type TypeTable = M.Map VName ([VName],[TypeBase ExtShape NoUniqueness])
+data TypeArg = TypeArgDim ExtDimSize | TypeArgType [TypeBase ExtShape NoUniqueness]
+
+type TypeTable = M.Map VName ([TypeArg] -> InternaliseM [TypeBase ExtShape NoUniqueness])
 
 -- | A mapping from external variable names to the corresponding
 -- internalised subexpressions.
@@ -92,6 +96,7 @@ data InternaliseEnv = InternaliseEnv {
   , envDoBoundsChecks :: Bool
   , envGeneratingFunctor :: Bool
   , envFunctorSubsts :: DecSubstitutions
+  , envTtable :: TypeTable
   }
 
 data InternaliseState =
@@ -150,6 +155,7 @@ runInternaliseM ftable (InternaliseM m) =
                  , envDoBoundsChecks = True
                  , envGeneratingFunctor = False
                  , envFunctorSubsts = mempty
+                 , envTtable = mempty
                  }
         newState src =
           InternaliseState { stateFtable = ftable
@@ -161,6 +167,9 @@ runInternaliseM ftable (InternaliseM m) =
 
 substitutingVars :: VarSubstitutions -> InternaliseM a -> InternaliseM a
 substitutingVars substs = local $ \env -> env { envSubsts = substs <> envSubsts env }
+
+withTypes :: TypeTable -> InternaliseM a -> InternaliseM a
+withTypes ttable = local $ \env -> env { envTtable = ttable <> envTtable env }
 
 -- | Add a function definition to the program being constructed.
 addFunction :: FunDef -> InternaliseM ()
@@ -175,9 +184,9 @@ lookupFunction fname =
   where bad = fail $
               "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
-lookupTypeVar :: VName -> InternaliseM ([VName], [TypeBase ExtShape NoUniqueness])
+lookupTypeVar :: VName -> InternaliseM ([TypeArg] -> InternaliseM [TypeBase ExtShape NoUniqueness])
 lookupTypeVar tname = do
-  t <- gets $ M.lookup tname. stateTtable
+  t <- M.lookup tname <$> typeTable
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just x -> return x
 
@@ -191,6 +200,9 @@ lookupMod mname = do
 
 allSubsts :: InternaliseM DecSubstitutions
 allSubsts = M.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
+
+typeTable :: InternaliseM TypeTable
+typeTable = M.union <$> asks envTtable <*> gets stateTtable
 
 -- | Substitution for any variable or defined name.  Used for functor
 -- application.  Never pick apart QualNames directly in the
@@ -239,9 +251,9 @@ noteMod :: VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
 noteMod name substs me =
   modify $ \s -> s { stateModTable = M.insert name (ModBinding substs me) $ stateModTable s }
 
-noteType :: VName -> [VName] -> [TypeBase ExtShape NoUniqueness] -> InternaliseM ()
-noteType name ps t =
-  modify $ \s -> s { stateTtable = M.insert name (ps,t) $ stateTtable s }
+noteType :: VName -> ([TypeArg] -> InternaliseM [TypeBase ExtShape NoUniqueness]) -> InternaliseM ()
+noteType name a =
+  modify $ \s -> s { stateTtable = M.insert name a $ stateTtable s }
 
 setDecSubsts :: M.Map VName VName -> InternaliseM ()
 setDecSubsts substs = modify $ \s -> s { stateDecSubsts = substs }

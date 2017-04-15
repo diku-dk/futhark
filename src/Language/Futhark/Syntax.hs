@@ -338,10 +338,12 @@ instance Bifoldable TypeBase where
   bifoldMap = bifoldMapDefault
 
 data TypeArg shape as = TypeArgDim (DimDecl VName) SrcLoc
+                      | TypeArgType (TypeBase shape as) SrcLoc
              deriving (Eq, Show)
 
 instance Bitraversable TypeArg where
   bitraverse _ _ (TypeArgDim v loc) = pure $ TypeArgDim v loc
+  bitraverse f g (TypeArgType t loc) = TypeArgType <$> bitraverse f g t <*> pure loc
 
 instance Bifunctor TypeArg where
   bimap = bimapDefault
@@ -372,14 +374,15 @@ instance Located (TypeExp vn) where
   locOf (TEApply _ _ loc) = locOf loc
 
 data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
+                   | TypeArgExpType (TypeExp vn)
                 deriving (Eq, Show)
 
 instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
+  locOf (TypeArgExpType t)    = locOf t
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
-
 type StructTypeBase vn = TypeBase (ShapeDecl vn) ()
 
 -- | An array type with shape annotations and no aliasing information,
@@ -809,13 +812,17 @@ instance Located (TypeBindBase f vn) where
 
 data TypeParamBase vn = TypeParamDim vn SrcLoc
                         -- ^ A type parameter that must be a size.
+                      | TypeParamType vn SrcLoc
+                        -- ^ A type parameter that must be a type.
   deriving (Show)
 
 instance Located (TypeParamBase vn) where
-  locOf (TypeParamDim _ loc) = locOf loc
+  locOf (TypeParamDim _ loc)  = locOf loc
+  locOf (TypeParamType _ loc) = locOf loc
 
 typeParamName :: TypeParamBase vn -> vn
-typeParamName (TypeParamDim v _) = v
+typeParamName (TypeParamDim v _)  = v
+typeParamName (TypeParamType v _) = v
 
 data SpecBase f vn = ValSpec  { specName     :: vn
                               , specParams   :: [TypeDeclBase f vn]

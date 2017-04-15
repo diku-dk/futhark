@@ -68,6 +68,7 @@ tokens :-
   ":"                      { tokenC COLON }
   "@"                      { tokenC AT }
   "\"                      { tokenC BACKSLASH }
+  "'"                      { tokenC APOSTROPHE }
   "#"                      { tokenC HASH }
 
   @declit                  { tokenM $ return . DECLIT . readIntegral }
@@ -278,6 +279,7 @@ data Token = ID Name
            | COLON
            | AT
            | BACKSLASH
+           | APOSTROPHE
            | HASH
            | LPAR
            | RPAR

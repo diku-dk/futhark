@@ -28,7 +28,7 @@ import Data.Loc
 
 import Prelude hiding (mapM, sequence, mod)
 
-import Language.Futhark as E
+import Language.Futhark as E hiding (TypeArg)
 import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
@@ -37,7 +37,7 @@ import Futhark.Tools
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 
-import Futhark.Internalise.Monad
+import Futhark.Internalise.Monad as I
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
@@ -135,19 +135,25 @@ internaliseDecs ds =
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
       -- Map every type parameter to itself, just so they do not look
       -- free.
-      let ps = typeBindParams tb
-          ps_substs = M.fromList $ zip ps $ map (pure . I.Var) ps
-      (t,_,cm) <- substitutingVars ps_substs $
-        internaliseReturnType $ E.unInfo $ E.expandedType $ E.typeExp tb
-      mapM_ (uncurry internaliseDimConstant) cm
-      noteType v ps $ map fromDecl t
+      let internalise args = do
+            let dim_substs = M.fromList $ mapMaybe dimSubst $ E.typeParams tb
+                t_substs = M.fromList $ mapMaybe typeSubst $ zip (E.typeParams tb) args
+            (t,_,cm) <- substitutingVars dim_substs $ withTypes t_substs $
+              internaliseReturnType $ E.unInfo $ E.expandedType $ E.typeExp tb
+            -- XXX: why is it OK to internalise constants here?
+            mapM_ (uncurry internaliseDimConstant) cm
+            return $ map fromDecl t
+      noteType v internalise
       internaliseDecs ds'
     E.OpenDec e es _ : ds' -> do
       mapM_ internaliseModExp (e:es)
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
-  where typeBindParams = map E.typeParamName . E.typeParams
+  where dimSubst (E.TypeParamDim p _) = Just (p, [I.Var p])
+        dimSubst _ = Nothing
+        typeSubst (E.TypeParamType p _, I.TypeArgType ts) = Just (p, const $ return ts)
+        typeSubst _ = Nothing
 
 maybeAscript :: SrcLoc -> Maybe (SigExp, Info (M.Map VName VName)) -> ModExp
              -> ModExp
