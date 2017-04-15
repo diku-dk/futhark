@@ -62,7 +62,6 @@ import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.Util.Pretty hiding (space, spaces)
 import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
 
