@@ -8,6 +8,6 @@ type ints [n] = [n]i32
 
 type pairints [n] [m] = (ints [n], ints [m])
 
-fun main(a: ints [#n], b: ints [#m]) : pairints [n] [n] =
+let main(a: ints [#n], b: ints [#m]) : pairints [n] [n] =
   let b' = #1 (split n b)
   in (a,b')

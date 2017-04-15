@@ -9,7 +9,7 @@
 
 -- Code below should result in 1 mem-block coalescing,
 -- corresponding to 4 coalesced variables.
-fun main(y: *[#n][#m]i32, a : [#m]i32): *[n][m]i32 =
+let main(y: *[#n][#m]i32, a : [#m]i32): *[n][m]i32 =
   let y[0,1] = 9
   let a0 = copy(a)
   loop(a1 = a0) = for i < m do

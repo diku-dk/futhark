@@ -7,16 +7,16 @@ module F = \(P_f: (P_f_a: {type a val f: a -> a}) -> {val f: P_f_a.a -> P_f_a.a}
             {type a = P_x.a open (P_f P_x)}
 
 module twice = \(twice_P: {type a val f: a -> a}) -> {
-  fun f (x: twice_P.a) = twice_P.f (twice_P.f x)
+  let f (x: twice_P.a) = twice_P.f (twice_P.f x)
 }
 
 module thrice = \(thrice_P: {type a val f: a -> a}) -> {
-  fun f (x: thrice_P.a) = thrice_P.f (thrice_P.f (thrice_P.f x))
+  let f (x: thrice_P.a) = thrice_P.f (thrice_P.f (thrice_P.f x))
 }
 
-module add_one = {type a = i32 fun f(x: i32) = x + 1}
+module add_one = {type a = i32 let f(x: i32) = x + 1}
 module F_2 = F twice add_one
 module F_3 = F thrice add_one
 module F_6 = F twice F_3
 
-fun main(x: i32) = (F_2.f x, F_3.f x, F_6.f x)
+let main(x: i32) = (F_2.f x, F_3.f x, F_6.f x)

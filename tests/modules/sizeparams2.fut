@@ -11,4 +11,4 @@ module intmat = PM {
   let mk_a (n: i32) = replicate n 0
 }
 
-fun main (m: i32) (n: i32) = intmat.mk_b m n
+let main (m: i32) (n: i32) = intmat.mk_b m n

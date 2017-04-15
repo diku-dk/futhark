@@ -112,7 +112,6 @@ keyword s =
     "loop"         -> LOOP
     "in"           -> IN
     "default"      -> DEFAULT
-    "fun"          -> LET -- retained for backwards compatibility; remove soon
     "val"          -> VAL
     "for"          -> FOR
     "do"           -> DO
