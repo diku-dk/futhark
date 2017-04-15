@@ -133,15 +133,12 @@ internaliseDecs ds =
       internaliseDecs ds'
     E.TypeDec tb : ds' -> do
       v <- lookupSubst $ E.qualName $ E.typeAlias tb
-      -- Map every type parameter to itself, just so they do not look
-      -- free.
-      let internalise args = do
-            let dim_substs = M.fromList $ mapMaybe dimSubst $ E.typeParams tb
-                t_substs = M.fromList $ mapMaybe typeSubst $ zip (E.typeParams tb) args
-            (t,_,cm) <- substitutingVars dim_substs $ withTypes t_substs $
-              internaliseReturnType $ E.unInfo $ E.expandedType $ E.typeExp tb
-            -- XXX: why is it OK to internalise constants here?
-            mapM_ (uncurry internaliseDimConstant) cm
+      substs <- asks envFunctorSubsts
+      let internalise args = withTypeDecSubstitutions substs $ do
+            let dims = M.fromList $ mapMaybe dimSubst $ zip (E.typeParams tb) args
+                types = M.fromList $ mapMaybe typeSubst $ zip (E.typeParams tb) args
+            t <- withDims dims $ withTypes types $
+                 internaliseTypeM $ E.unInfo $ E.expandedType $ E.typeExp tb
             return $ map fromDecl t
       noteType v internalise
       internaliseDecs ds'
@@ -150,7 +147,7 @@ internaliseDecs ds =
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
-  where dimSubst (E.TypeParamDim p _) = Just (p, [I.Var p])
+  where dimSubst (E.TypeParamDim p _, I.TypeArgDim d) = Just (p, d)
         dimSubst _ = Nothing
         typeSubst (E.TypeParamType p _, I.TypeArgType ts) = Just (p, const $ return ts)
         typeSubst _ = Nothing
