@@ -103,6 +103,7 @@ instance Pretty shape => Pretty (TypeBase shape as) where
 
 instance Pretty shape => Pretty (TypeArg shape as) where
   ppr (TypeArgDim d _) = brackets $ ppr d
+  ppr (TypeArgType t _) = ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
@@ -115,6 +116,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = ppr d
+  ppr (TypeArgExpType d) = ppr d
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
@@ -330,6 +332,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ ppr name
+  ppr (TypeParamType name _) = text "'" <> ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
   ppr (FunBind entry name retdecl _ args body _) =

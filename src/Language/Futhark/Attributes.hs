@@ -146,6 +146,7 @@ nestedDims t =
           concatMap typeArgDims targs
 
         typeArgDims (TypeArgDim d _) = [d]
+        typeArgDims (TypeArgType at _) = nestedDims at
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -223,8 +224,10 @@ subtypeOf (TypeVar v1 targs1) (TypeVar v2 targs2) =
   and (zipWith subargOf targs1 targs2)
 subtypeOf _ _ = False
 
-subargOf :: TypeArg shape as1 -> TypeArg shape as2 -> Bool
+subargOf :: ArrayShape shape => TypeArg shape as1 -> TypeArg shape as2 -> Bool
 subargOf TypeArgDim{} TypeArgDim{} = True
+subargOf (TypeArgType t1 _) (TypeArgType t2 _) = t1 `subtypeOf` t2
+subargOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
 -- ignoring uniqueness.
@@ -622,7 +625,10 @@ returnType (TypeVar t targs) ds args =
 typeArgReturnType :: (Ord vn, Hashable vn) =>
                      TypeArg shape () -> [Diet] -> [CompTypeBase vn]
                   -> TypeArg shape (Names vn)
-typeArgReturnType (TypeArgDim v loc) _ _ = TypeArgDim v loc
+typeArgReturnType (TypeArgDim v loc) _ _ =
+  TypeArgDim v loc
+typeArgReturnType (TypeArgType t loc) ds args =
+  TypeArgType (returnType t ds args) loc
 
 arrayReturnType :: (Ord vn, Hashable vn) =>
                    ArrayTypeBase shape ()

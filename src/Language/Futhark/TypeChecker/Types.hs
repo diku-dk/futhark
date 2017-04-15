@@ -185,6 +185,16 @@ checkTypeExp' (TEApply tname targs loc) = do
           return (TypeArgExpDim AnyDim loc,
                   M.singleton pv $ DimSub AnyDim)
 
+        checkArgApply (TypeParamType pv _) (TypeArgExpType te) = do
+          (te', st) <- checkTypeExp' te
+          return (TypeArgExpType te',
+                  M.singleton pv $ TypeSub $ TypeAbbr [] st)
+
+        checkArgApply p a =
+          throwError $ TypeError loc $ "Type argument " ++ pretty a ++
+          " not valid for a type parameter " ++ pretty p
+
+
 checkNamedDim :: MonadTypeChecker m =>
                  SrcLoc -> QualName Name -> StateT ImplicitlyBound m (QualName VName)
 checkNamedDim loc v = do
@@ -329,6 +339,7 @@ checkForDuplicateNamesTypeExp' (TEUnique t _) =
 checkForDuplicateNamesTypeExp' (TEApply _ targs _) =
   mapM_ check targs
   where check (TypeArgExpDim d loc) = checkDimDecl loc d
+        check (TypeArgExpType t) = checkForDuplicateNamesTypeExp' t
 checkForDuplicateNamesTypeExp' (TEArray te d loc) =
   checkForDuplicateNamesTypeExp' te >> checkDimDecl loc d
 
@@ -377,9 +388,12 @@ checkTypeParams :: MonadTypeChecker m =>
 checkTypeParams ps m =
   bindSpaced (map typeParamSpace ps) $ m =<< mapM checkTypeParam ps
   where typeParamSpace (TypeParamDim pv _) = (Term, pv)
+        typeParamSpace (TypeParamType pv _) = (Type, pv)
 
         checkTypeParam (TypeParamDim pv loc) =
           TypeParamDim <$> checkName Term pv loc <*> pure loc
+        checkTypeParam (TypeParamType pv loc) =
+          TypeParamType <$> checkName Type pv loc <*> pure loc
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
@@ -416,6 +430,8 @@ substituteTypes substs ot = case ot of
 
         substituteInTypeArg (TypeArgDim d loc) =
           TypeArgDim (substituteInDim d) loc
+        substituteInTypeArg (TypeArgType t loc) =
+          TypeArgType (substituteTypes substs t) loc
 
         substituteInShape (ShapeDecl ds) =
           ShapeDecl $ map substituteInDim ds
@@ -437,3 +453,7 @@ applyType ps t args =
           (pv, DimSub $ ConstDim x)
         mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim  _) =
           (pv, DimSub AnyDim)
+        mkSubst (TypeParamType pv _) (TypeArgType t _) =
+          (pv, TypeSub $ TypeAbbr [] t)
+        mkSubst p a =
+          error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
