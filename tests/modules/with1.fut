@@ -20,4 +20,4 @@ module applied = functor { type cell = bool }
 -- We can't create a value of this type, but let's just refer to it.
 entry quux (x: applied.cell) = x
 
-fun main(x: i32) = x
+let main(x: i32) = x

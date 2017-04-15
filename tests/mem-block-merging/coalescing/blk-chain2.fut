@@ -22,7 +22,7 @@
 -- However if `ind1` is computed as `i1+1` (uncomment) then
 -- all three coalescing opportunities should be exploited,
 -- i.e., including `z[i1+i2+k] = u`.
-fun main( i1 : i32, i2 : i32, k : i32 
+let main( i1 : i32, i2 : i32, k : i32 
         , a : [#n]i32, v : [#m][#n]i32
         , z: *[#n][#m][#n]i32)
         : *[n][m][n]i32 =

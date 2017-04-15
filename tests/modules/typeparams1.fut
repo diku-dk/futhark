@@ -18,4 +18,4 @@ module M1: MT = {
   type i32matrix = [][]i32
 }
 
-fun main() = 2
+let main() = 2

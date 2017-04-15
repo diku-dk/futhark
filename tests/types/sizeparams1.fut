@@ -5,4 +5,4 @@
 
 type ints [n] = [n]i32
 
-fun main(_: ints [#n]) : i32 = n
+let main(_: ints [#n]) : i32 = n
