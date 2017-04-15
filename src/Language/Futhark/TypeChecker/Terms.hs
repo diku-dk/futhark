@@ -2,9 +2,8 @@
 -- | Facilities for type-checking Futhark terms.  Checking a term
 -- requires a little more context to track uniqueness and such.
 module Language.Futhark.TypeChecker.Terms
-  ( checkExp
+  ( checkOneExp
   , checkFunDef
-  , runTermTypeM
   )
 where
 
@@ -510,7 +509,7 @@ checkExp (LetPat pat e body pos) =
 
 checkExp (LetFun name (params, maybe_retdecl, NoInfo, e) body loc) =
   bindSpaced [(Term, name)] $
-  sequentially (checkFunDef (name, maybe_retdecl, params, e, loc)) $
+  sequentially (checkFunDef' (name, maybe_retdecl, params, e, loc)) $
     \(name', params', maybe_retdecl', rettype, e') closure -> do
 
     let paramType = toStruct . vacuousShapeAnnotations . patternType
@@ -1010,9 +1009,16 @@ consumeArg loc (Record ets) (RecordDiet ds) =
 consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
+checkOneExp :: UncheckedExp -> TypeM Exp
+checkOneExp = runTermTypeM . checkExp
+
 checkFunDef :: (Name, Maybe UncheckedTypeExp, [UncheckedPattern], UncheckedExp, SrcLoc)
+            -> TypeM (VName, [Pattern], Maybe (TypeExp VName), StructType, Exp)
+checkFunDef = runTermTypeM . checkFunDef'
+
+checkFunDef' :: (Name, Maybe UncheckedTypeExp, [UncheckedPattern], UncheckedExp, SrcLoc)
             -> TermTypeM (VName, [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkFunDef (fname, maybe_retdecl, params, body, loc) = do
+checkFunDef' (fname, maybe_retdecl, params, body, loc) = do
   fname' <- checkName Term fname loc
 
   when (baseString fname' == "&&") $

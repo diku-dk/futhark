@@ -425,10 +425,10 @@ checkValBind (ValBind name maybe_t NoInfo e loc) = do
       let t_structural = toStructural tdecl_type
       when (anythingUnique t_structural) $
         bad $ UniqueConstType loc name t_structural
-      e' <- require [t_structural] =<< runTermTypeM (checkExp e)
+      e' <- require [t_structural] =<< checkOneExp e
       return (Just tdecl, e')
     Nothing -> do
-      e' <- runTermTypeM $ checkExp e
+      e' <- checkOneExp e
       return (Nothing, e')
   let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
   return (mempty { envVtable =
@@ -444,7 +444,7 @@ checkFunBind :: FunBindBase NoInfo Name -> TypeM (Env, FunBind)
 checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
   (fname', params', maybe_retdecl', rettype, body') <-
     bindSpaced [(Term, fname)] $
-    runTermTypeM $ checkFunDef (fname, maybe_retdecl, params, body, loc)
+    checkFunDef (fname, maybe_retdecl, params, body, loc)
 
   return (mempty { envVtable =
                      M.singleton fname'
