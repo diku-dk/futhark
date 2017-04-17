@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE FlexibleContexts #-}
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp
@@ -160,15 +159,15 @@ checkTypeExp' (TEUnique t loc) = do
   case st of
     Array{} -> return (t', st `setUniqueness` Unique)
     _       -> throwError $ InvalidUniqueness loc $ toStructural st
-checkTypeExp' (TEApply tname targs loc) = do
-  (tname', ps, t) <- lift $ lookupType loc tname
+checkTypeExp' (TEApply tname targs tloc) = do
+  (tname', ps, t) <- lift $ lookupType tloc tname
   if length ps /= length targs
-  then throwError $ TypeError loc $
+  then throwError $ TypeError tloc $
        "Type constructor " ++ pretty tname ++ " requires " ++ show (length ps) ++
-       " arguments, but use at " ++ locStr loc ++ " provides only " ++ show (length targs)
+       " arguments, but use at " ++ locStr tloc ++ " provides only " ++ show (length targs)
   else do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
-    return (TEApply tname' targs' loc,
+    return (TEApply tname' targs' tloc,
             substituteTypes (mconcat substs) t)
   where checkArgApply (TypeParamDim pv _) (TypeArgExpDim (NamedDim v) loc) = do
           v' <- checkNamedDim loc v
@@ -191,7 +190,7 @@ checkTypeExp' (TEApply tname targs loc) = do
                   M.singleton pv $ TypeSub $ TypeAbbr [] st)
 
         checkArgApply p a =
-          throwError $ TypeError loc $ "Type argument " ++ pretty a ++
+          throwError $ TypeError tloc $ "Type argument " ++ pretty a ++
           " not valid for a type parameter " ++ pretty p
 
 
@@ -310,7 +309,7 @@ checkPattern' p NoneInferred =
 -- used as free.
 checkForDuplicateNames :: MonadTypeChecker m =>
                           [PatternBase NoInfo Name] -> m ImplicitlyBound
-checkForDuplicateNames = fmap ImplicitlyBound . flip execStateT mempty . mapM_ check
+checkForDuplicateNames = flip execStateT mempty . mapM_ check
   where check (Id v) = seeing BoundAsVar (identName v) (srclocOf v)
         check (PatternParens p _) = check p
         check Wildcard{} = return ()
@@ -323,12 +322,12 @@ checkForDuplicateNames = fmap ImplicitlyBound . flip execStateT mempty . mapM_ c
 checkForDuplicateNamesTypeExp :: MonadTypeChecker m =>
                                  ImplicitlyBound
                               -> TypeExp Name -> m ImplicitlyBound
-checkForDuplicateNamesTypeExp (ImplicitlyBound implicit) te =
-  ImplicitlyBound <$> execStateT (checkForDuplicateNamesTypeExp' te) implicit
+checkForDuplicateNamesTypeExp implicit te =
+  execStateT (checkForDuplicateNamesTypeExp' te) implicit
 
 checkForDuplicateNamesTypeExp' :: MonadTypeChecker m =>
                                   TypeExp Name
-                               -> StateT (M.Map (Namespace, Name) (VName, Bindage, SrcLoc)) m ()
+                               -> StateT ImplicitlyBound m ()
 checkForDuplicateNamesTypeExp' TEVar{} = return ()
 checkForDuplicateNamesTypeExp' (TERecord fs _) =
   mapM_ (checkForDuplicateNamesTypeExp' . snd) fs
@@ -338,23 +337,23 @@ checkForDuplicateNamesTypeExp' (TEUnique t _) =
   checkForDuplicateNamesTypeExp' t
 checkForDuplicateNamesTypeExp' (TEApply _ targs _) =
   mapM_ check targs
-  where check (TypeArgExpDim d loc) = checkDimDecl loc d
+  where check (TypeArgExpDim d loc) = lookAtDimDecl loc d
         check (TypeArgExpType t) = checkForDuplicateNamesTypeExp' t
 checkForDuplicateNamesTypeExp' (TEArray te d loc) =
-  checkForDuplicateNamesTypeExp' te >> checkDimDecl loc d
+  checkForDuplicateNamesTypeExp' te >> lookAtDimDecl loc d
 
-checkDimDecl :: MonadTypeChecker m => SrcLoc -> DimDecl Name
-             -> StateT (M.Map (Namespace, Name) (VName, Bindage, SrcLoc)) m ()
-checkDimDecl _ ConstDim{} = return ()
-checkDimDecl _ AnyDim{} = return ()
-checkDimDecl loc (NamedDim (QualName [] v)) = seeing UsedFree v loc
-checkDimDecl _ (NamedDim _) = return ()
-checkDimDecl loc (BoundDim v) = seeing BoundAsDim v loc
+lookAtDimDecl :: MonadTypeChecker m => SrcLoc -> DimDecl Name
+              -> StateT ImplicitlyBound m ()
+lookAtDimDecl _ ConstDim{} = return ()
+lookAtDimDecl _ AnyDim{} = return ()
+lookAtDimDecl loc (NamedDim (QualName [] v)) = seeing UsedFree v loc
+lookAtDimDecl _ (NamedDim _) = return ()
+lookAtDimDecl loc (BoundDim v) = seeing BoundAsDim v loc
 
 seeing :: MonadTypeChecker m => Bindage -> Name -> SrcLoc
-       -> StateT (M.Map (Namespace, Name) (VName, Bindage, SrcLoc)) m ()
+       -> StateT ImplicitlyBound m ()
 seeing b v vloc = do
-  seen <- get
+  ImplicitlyBound seen <- get
   case (b, M.lookup (Term, v) seen) of
     (BoundAsDim, Just (_, BoundAsDim, _)) ->
       return ()
@@ -366,8 +365,8 @@ seeing b v vloc = do
         " previously implicitly bound at " ++ locStr loc
     (UsedFree, sb) -> do
       v' <- lift $ checkName Term v vloc
-      when (isNothing sb) $
-        modify $ M.insert (Term, v) (v', b, vloc)
+      when (isNothing sb) $ modify $ \(ImplicitlyBound m) ->
+        ImplicitlyBound $ M.insert (Term, v) (v', b, vloc) m
     (BoundAsVar, Just (_, BoundAsDim, loc)) ->
       throwError $ DupPatternError v vloc loc
     (BoundAsVar, Just (_, UsedFree, loc)) ->
@@ -375,11 +374,10 @@ seeing b v vloc = do
       "bound here, but also referenced at " ++ locStr loc
     (_, Just (_, BoundAsVar, loc)) ->
       throwError $ DupPatternError v vloc loc
-    (_, Nothing) -> newlyBound b v vloc
-
-  where newlyBound b name vloc = do
-          name' <- lift $ newID name
-          modify $ M.insert (Term, name) (name', b, vloc)
+    (_, Nothing) -> do
+      name' <- lift $ newID v
+      modify $ \(ImplicitlyBound m) ->
+        ImplicitlyBound $ M.insert (Term, v) (name', b, vloc) m
 
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]
@@ -453,7 +451,7 @@ applyType ps t args =
           (pv, DimSub $ ConstDim x)
         mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim  _) =
           (pv, DimSub AnyDim)
-        mkSubst (TypeParamType pv _) (TypeArgType t _) =
-          (pv, TypeSub $ TypeAbbr [] t)
+        mkSubst (TypeParamType pv _) (TypeArgType at _) =
+          (pv, TypeSub $ TypeAbbr [] at)
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
