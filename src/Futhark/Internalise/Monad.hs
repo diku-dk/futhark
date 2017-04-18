@@ -14,7 +14,7 @@ module Futhark.Internalise.Monad
   , ModBinding (..)
 
   , substitutingVars
-
+  , allSubsts
   , addFunction
 
   , lookupFunction
