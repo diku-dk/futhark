@@ -132,8 +132,8 @@ internaliseDecs ds =
         modParams mb
       internaliseDecs ds'
     E.TypeDec tb : ds' -> do
-      v <- lookupSubst $ E.qualName $ E.typeAlias tb
-      substs <- asks envFunctorSubsts
+      v <- newOrExistingSubst $ E.typeAlias tb
+      substs <- allSubsts
       let internalise args = withTypeDecSubstitutions substs $ do
             let dims = M.fromList $ mapMaybe dimSubst $ zip (E.typeParams tb) args
                 types = M.fromList $ mapMaybe typeSubst $ zip (E.typeParams tb) args
