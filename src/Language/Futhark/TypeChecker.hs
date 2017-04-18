@@ -82,7 +82,7 @@ initialEnv = intrinsicsModule
 checkProgM :: UncheckedProg -> TypeM (FileModule, Prog)
 checkProgM (Prog decs) = do
   checkForDuplicateDecs decs
-  (env, decs') <- checkDecs decs
+  (_, env, decs') <- checkDecs decs
   return (FileModule env, Prog decs')
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
@@ -252,8 +252,8 @@ checkModExp (ModParens e loc) = do
   return (mty, ModParens e' loc)
 checkModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
-  (env, decs') <- checkDecs decs
-  return (MTy mempty $ ModEnv env,
+  (abstypes, env, decs') <- checkDecs decs
+  return (MTy abstypes $ ModEnv env,
           ModDecs decs' loc)
 checkModExp (ModVar v loc) = do
   (v', env) <- lookupMod loc v
@@ -457,49 +457,50 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
   where paramType :: Pattern -> StructType
         paramType = vacuousShapeAnnotations . toStruct . patternType
 
-checkDecs :: [DecBase NoInfo Name] -> TypeM (Env, [DecBase Info VName])
+checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
 checkDecs (ModDec struct:rest) = do
   (modenv, struct') <- checkModBind struct
   localEnv (modenv<>) $ do
-    (env, rest') <- checkDecs rest
-    return (env <> modenv, ModDec struct' : rest')
+    (abstypes, env, rest') <- checkDecs rest
+    return (abstypes, env <> modenv, ModDec struct' : rest')
 
 checkDecs (SigDec sig:rest) = do
   (sigenv, sig') <- checkSigBind sig
   localEnv (sigenv<>) $ do
-    (env, rest') <- checkDecs rest
-    return (env <> sigenv, SigDec sig' : rest')
+    (abstypes, env, rest') <- checkDecs rest
+    return (abstypes, env <> sigenv, SigDec sig' : rest')
 
 checkDecs (TypeDec tdec:rest) = do
   (tenv, tdec') <- checkTypeBind tdec
   localEnv (tenv<>) $ do
-    (env, rest') <- checkDecs rest
-    return (env <> tenv, TypeDec tdec' : rest')
+    (abstypes, env, rest') <- checkDecs rest
+    return (abstypes, env <> tenv, TypeDec tdec' : rest')
 
 checkDecs (OpenDec x xs loc:rest) = do
-  (_x_abs, x_env, x') <- checkModExpToEnv x
-  (_xs_abs, xs_envs, xs') <- unzip3 <$> mapM checkModExpToEnv xs
+  (x_abs, x_env, x') <- checkModExpToEnv x
+  (xs_abs, xs_envs, xs') <- unzip3 <$> mapM checkModExpToEnv xs
    -- We cannot use mconcat, as mconcat is a right-fold.
   let env_ext = foldl (flip mappend) x_env xs_envs
   localEnv (env_ext<>) $ do
-    (env, rest') <- checkDecs rest
-    return (env <> env_ext,
+    (abstypes, env, rest') <- checkDecs rest
+    return (x_abs <> mconcat xs_abs <> abstypes,
+            env <> env_ext,
             OpenDec x' xs' loc: rest')
 
 checkDecs (ValDec vb:rest) = do
   (ext, vb') <- checkValBind vb
   localEnv (ext<>) $ do
-    (env, vds') <- checkDecs rest
-    return (env <> ext, ValDec vb' : vds')
+    (abstypes, env, vds') <- checkDecs rest
+    return (abstypes, env <> ext, ValDec vb' : vds')
 
 checkDecs (FunDec fb:rest) = do
   (ext, fb') <- checkFunBind fb
   localEnv (ext<>) $ do
-    (env, vds') <- checkDecs rest
-    return (env <> ext, FunDec fb' : vds')
+    (abstypes, env, vds') <- checkDecs rest
+    return (abstypes, env <> ext, FunDec fb' : vds')
 
 checkDecs [] =
-  return (mempty, [])
+  return (mempty, mempty, [])
 
 checkTypeDecl :: SrcLoc -> TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VName)
 checkTypeDecl loc (TypeDecl t NoInfo) = do
