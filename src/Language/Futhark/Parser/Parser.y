@@ -805,9 +805,9 @@ ArrayValue :  '[' Value ']'
              {% return $ ArrayValue (arrayFromList [$2]) $ toStruct $ valueType $2
              }
            |  '[' Value ',' Values ']'
-             {% case combArrayTypes (valueType $2) $ map valueType $4 of
-                  Nothing -> throwError "Invalid array value"
-                  Just ts -> return $ ArrayValue (arrayFromList $ $2:$4) ts
+             {% case combArrayElements $2 $4 of
+                  Left e -> throwError e
+                  Right v -> return $ ArrayValue (arrayFromList $ $2:$4) $ valueType v
              }
            | empty '(' PrimType ')'
              { ArrayValue (listArray (0,-1) []) (Prim $3) }
@@ -892,14 +892,14 @@ getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
 getNoLines (GetLine _) = Left "Unexpected end of input"
 
-combArrayTypes :: TypeBase Rank ()
-               -> [TypeBase Rank ()]
-               -> Maybe (TypeBase Rank ())
-combArrayTypes t ts = foldM comb t ts
+combArrayElements :: Value
+                  -> [Value]
+                  -> Either String Value
+combArrayElements t ts = foldM comb t ts
   where comb x y
-          | x == y    = Just x
-          | otherwise = Nothing
-
+          | valueType x == valueType y = Right x
+          | otherwise                  = Left $ "Elements " ++ pretty x ++ " and " ++
+                                         pretty y ++ " cannot exist in same array."
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
