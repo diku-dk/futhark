@@ -2,7 +2,9 @@
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
-    internaliseReturnType
+    BoundInTypes
+  , boundInTypes
+  , internaliseReturnType
   , internaliseEntryReturnType
   , internaliseParamTypes
   , internaliseType
@@ -23,6 +25,7 @@ import Control.Monad.Reader
 import qualified Data.Array as A
 import Data.List
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.Monoid
 
@@ -38,12 +41,27 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-internaliseParamTypes :: [E.TypeBase (E.ShapeDecl VName) als]
+-- | The names that are bound for some types, either implicitly or
+-- explicitly.
+newtype BoundInTypes = BoundInTypes (S.Set VName)
+
+-- | Determine the names bound for some types.
+boundInTypes :: [E.TypeParam] -> [E.TypeBase (E.ShapeDecl VName) als]
+             -> BoundInTypes
+boundInTypes tparams ts =
+  case mapMaybe isTypeParam tparams of
+    [] -> BoundInTypes $ mconcat $ map E.dimsBoundByType ts
+    names -> BoundInTypes $ S.fromList names
+  where isTypeParam (E.TypeParamDim v _) = Just v
+        isTypeParam E.TypeParamType{} = Nothing
+
+internaliseParamTypes :: BoundInTypes
+                      -> [E.TypeBase (E.ShapeDecl VName) als]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        M.Map VName Int,
                                        ConstParams)
-internaliseParamTypes ts = do
-  (ts', subst, cm) <- runInternaliseTypeM $ mapM internaliseTypeM ts
+internaliseParamTypes (BoundInTypes bound) ts = do
+  (ts', subst, cm) <- runInternaliseTypeM bound $ mapM internaliseTypeM ts
   return (ts', subst, cm)
 
 internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) als
@@ -64,7 +82,7 @@ internaliseEntryReturnType t = do
   let ts = case E.isTupleRecord t of Just tts -> tts
                                      _        -> [t]
   (ts', subst', cm') <-
-    runInternaliseTypeM $ mapM internaliseTypeM ts
+    runInternaliseTypeM mempty $ mapM internaliseTypeM ts
   return (ts', subst', cm')
 
 internaliseType :: E.ArrayShape shape =>
@@ -72,7 +90,7 @@ internaliseType :: E.ArrayShape shape =>
                 -> InternaliseM [I.TypeBase I.Rank Uniqueness]
 internaliseType t = do
   (t', _, _) <-
-    runInternaliseTypeM $ internaliseTypeM $ E.vacuousShapeAnnotations t
+    runInternaliseTypeM mempty $ internaliseTypeM $ E.vacuousShapeAnnotations t
   return $ map I.rankShaped t'
 
 reExt :: TypeBase ExtShape u -> InternaliseTypeM (TypeBase ExtShape u)
@@ -100,16 +118,9 @@ internaliseDim d =
   case d of
     E.AnyDim -> Ext <$> newId
     E.ConstDim n -> return $ Free $ intConst I.Int32 $ toInteger n
-    E.BoundDim name -> Ext <$> knownOrNewId name
+    E.BoundDim name -> namedDim $ E.qualName name
     E.NamedDim name -> namedDim name
-  where knownOrNewId name = do
-          (i,m,cm) <- get
-          case M.lookup name m of
-            Nothing -> do put (i + 1, M.insert name i m, cm)
-                          return i
-            Just j  -> return j
-
-        namedDim name = do
+  where namedDim name = do
           name' <- liftInternaliseM $ lookupSubst name
           subst <- liftInternaliseM $ asks $ M.lookup name' . envSubsts
           is_dim <- lookupDim name'

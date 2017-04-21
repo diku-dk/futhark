@@ -79,12 +79,12 @@ internaliseFunctionName fname = do
 
 preprocessValBind :: E.ValBind -> InternaliseM ()
 preprocessValBind (E.ValBind name _ t e loc) =
-  preprocessFunBind $ E.FunBind False name Nothing t [] e loc
+  preprocessFunBind $ E.FunBind False name Nothing t [] [] e loc
 
 preprocessFunBind :: E.FunBind -> InternaliseM ()
-preprocessFunBind (E.FunBind _ ofname _ (Info rettype) params _ _) =
+preprocessFunBind (E.FunBind _ ofname _ (Info rettype) tparams params _ _) =
   noteFunctions <=< fmap (uncurry M.singleton) $
-  bindingParams params $ \pcm shapes values -> do
+  bindingParams tparams params $ \pcm shapes values -> do
     (fname, fname') <- internaliseFunctionName ofname
     (rettype', _, rcm) <- internaliseEntryReturnType rettype
     let shapenames = map I.paramName shapes
@@ -217,11 +217,11 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind (E.ValBind name _ t e loc) =
-  internaliseFunBind $ E.FunBind False name Nothing t [] e loc
+  internaliseFunBind $ E.FunBind False name Nothing t [] [] e loc
 
 internaliseFunBind :: E.FunBind -> InternaliseM ()
-internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) params body loc) =
-  bindingParams params $ \pcm shapeparams params' -> do
+internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body loc) =
+  bindingParams tparams params $ \pcm shapeparams params' -> do
     (rettype', _, rcm) <- internaliseEntryReturnType rettype
     (_, fname') <- internaliseFunctionName ofname
     let mkConstParam name = Param name $ I.Prim int32
@@ -240,10 +240,11 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) params body loc) 
     when entry $ generateEntryPoint fb
 
 generateEntryPoint :: E.FunBind -> InternaliseM ()
-generateEntryPoint (E.FunBind _ ofname _ (Info rettype) orig_params _ loc) =
+generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ loc) =
   -- We remove all shape annotations, so there should be no constant
   -- parameters here.
-  bindingParams (map E.patternNoShapeAnnotations params) $ \_ shapeparams params' -> do
+  bindingParams [] (map E.patternNoShapeAnnotations params) $
+  \_ shapeparams params' -> do
     (entry_rettype, _, _) <- internaliseEntryReturnType $
                              E.vacuousShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (rettype, entry_rettype)
@@ -421,18 +422,18 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
   fst <$> funcall desc qfname args' loc
 
-internaliseExp desc (E.LetPat pat e body loc) = do
+internaliseExp desc (E.LetPat tparams pat e body loc) = do
   ses <- internaliseExp desc e
   t <- I.staticShapes <$> mapM I.subExpType ses
-  bindingPattern pat t $ \cm pat_names match -> do
+  bindingPattern tparams pat t $ \cm pat_names match -> do
     mapM_ (uncurry internaliseDimConstant) cm
     ses' <- match loc ses
     forM_ (zip pat_names ses') $ \(v,se) ->
       letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
     internaliseExp desc body
 
-internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
-  bindingParams params $ \pcm shapeparams params' -> do
+internaliseExp desc (E.LetFun ofname (tparams, params, _, Info rettype, e) body loc) = do
+  bindingParams tparams params $ \pcm shapeparams params' -> do
     (fname, fname') <- internaliseFunctionName ofname
     (rettype', _, rcm) <- internaliseReturnType rettype
     e' <- internaliseBody e
@@ -471,7 +472,7 @@ internaliseExp desc (E.LetFun ofname (params, _, Info rettype, e) body loc) = do
 
   internaliseExp desc body
 
-internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody loc) = do
+internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
   mergeinit_ts <- mapM subExpType mergeinit
 
@@ -508,7 +509,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody loc) = do
       return (id, Right cond)
 
   (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
-    wrap $ bindingParams [mergepat] $ \mergecm shapepat nested_mergepat -> do
+    wrap $ bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
     mapM_ (uncurry internaliseDimConstant) mergecm
     internaliseBodyStms loopbody $ \ses -> do
       sets <- mapM subExpType ses
@@ -580,7 +581,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody loc) = do
       valmerge = zip mergepat' mergeinit'
       loop = I.DoLoop ctxmerge valmerge form' loopbody'
   loopt <- I.expExtType loop
-  bindingPattern (frob mergepat) loopt $ \cm mergepat_names match -> do
+  bindingPattern tparams (frob mergepat) loopt $ \cm mergepat_names match -> do
     mapM_ (uncurry internaliseDimConstant) cm
     loop_res <- match loc . map I.Var =<< letTupExp "loop_res" loop
     forM_ (zip mergepat_names loop_res) $ \(v,se) ->
@@ -607,7 +608,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
           BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
-  bindingPattern (E.Id name) dstt $ \cm pat_names match -> do
+  bindingPattern [] (E.Id name) dstt $ \cm pat_names match -> do
     mapM_ (uncurry internaliseDimConstant) cm
     dsts' <- match loc $ map I.Var dsts
     forM_ (zip pat_names dsts') $ \(v,dst) ->
@@ -622,7 +623,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
       dest_ident = E.Ident dest_name (E.Info src_t) loc
 
   internaliseExp desc $
-    E.LetPat (E.Id src_ident) src
+    E.LetPat [] (E.Id src_ident) src
     (E.LetWith dest_ident src_ident slice ve
       (E.Var (E.qualName dest_name) (E.Info src_t) loc)
       loc)
@@ -1192,8 +1193,8 @@ simpleCmpOp desc op x y =
 
 internaliseLambda :: InternaliseLambda
 
-internaliseLambda (E.AnonymFun params body _ (Info rettype) _) rowtypes =
-  bindingLambdaParams params rowtypes $ \pcm params' -> do
+internaliseLambda (E.AnonymFun tparams params body _ (Info rettype) _) rowtypes =
+  bindingLambdaParams tparams params rowtypes $ \pcm params' -> do
     (rettype', _, rcm) <- internaliseReturnType rettype
     body' <- internaliseBody body
     mapM_ (uncurry internaliseDimConstant) $ pcm<>rcm
@@ -1219,17 +1220,17 @@ internaliseLambda (E.CurryFun qfname curargs _ loc) rowtypes =
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
-  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
+  internaliseLambda (AnonymFun [] params body Nothing (Info rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype, Info _) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
+  internaliseLambda (AnonymFun [] params body Nothing (Info rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
-  internaliseLambda (AnonymFun params body Nothing (Info rettype') loc) rowts
+  internaliseLambda (AnonymFun [] params body Nothing (Info rettype') loc) rowts
 
 internaliseCurrying :: QualName VName
                     -> [E.Exp]

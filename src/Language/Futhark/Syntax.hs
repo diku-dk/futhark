@@ -517,9 +517,9 @@ data ExpBase f vn =
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
 
-            | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
 
-            | LetFun vn ([PatternBase f vn], Maybe (TypeExp vn), f (StructTypeBase vn), ExpBase f vn)
+            | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f (StructTypeBase vn), ExpBase f vn)
               (ExpBase f vn) SrcLoc
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
@@ -530,6 +530,7 @@ data ExpBase f vn =
               -- ^ Numeric negation (ugly special case; Haskell did it first).
 
             | DoLoop
+              [TypeParamBase vn]
               (PatternBase f vn) -- Merge variable pattern
               (ExpBase f vn) -- Initial values of merge variables.
               (LoopFormBase f vn) -- Do or while loop.
@@ -667,45 +668,45 @@ data StreamForm f vn = MapLike    StreamOrd
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
-  locOf (Literal _ loc)         = locOf loc
-  locOf (Parens _ loc)          = locOf loc
-  locOf (TupLit _ pos)          = locOf pos
-  locOf (RecordLit _ pos)       = locOf pos
-  locOf (Project _ _ _ pos)     = locOf pos
-  locOf (ArrayLit _ _ pos)      = locOf pos
-  locOf (Empty _ pos)           = locOf pos
-  locOf (BinOp _ _ _ _ pos)     = locOf pos
-  locOf (If _ _ _ _ pos)        = locOf pos
-  locOf (Var _ _ loc)           = locOf loc
-  locOf (Ascript _ _ loc)       = locOf loc
-  locOf (Negate _ pos)          = locOf pos
-  locOf (Apply _ _ _ pos)       = locOf pos
-  locOf (LetPat _ _ _ pos)      = locOf pos
-  locOf (LetFun _ _ _ loc)      = locOf loc
-  locOf (LetWith _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ pos)         = locOf pos
-  locOf (Update _ _ _ pos)      = locOf pos
-  locOf (Iota _ pos)            = locOf pos
-  locOf (Shape _ pos)           = locOf pos
-  locOf (Replicate _ _ pos)     = locOf pos
-  locOf (Reshape _ _ pos)       = locOf pos
-  locOf (Transpose _ pos)       = locOf pos
-  locOf (Rearrange _ _ pos)     = locOf pos
-  locOf (Rotate _ _ _ pos)      = locOf pos
-  locOf (Map _ _ pos)           = locOf pos
-  locOf (Reduce _ _ _ _ pos)    = locOf pos
-  locOf (Zip _ _ _ pos)         = locOf pos
-  locOf (Unzip _ _ pos)         = locOf pos
-  locOf (Scan _ _ _ pos)        = locOf pos
-  locOf (Filter _ _ pos)        = locOf pos
-  locOf (Partition _ _ pos)     = locOf pos
-  locOf (Split _ _ _ pos)       = locOf pos
-  locOf (Concat _ _ _ pos)      = locOf pos
-  locOf (Copy _ pos)            = locOf pos
-  locOf (DoLoop _ _ _ _ _ pos)  = locOf pos
-  locOf (Stream _ _ _  pos)     = locOf pos
-  locOf (Unsafe _ loc)          = locOf loc
-  locOf (Scatter _ _ _ loc)     = locOf loc
+  locOf (Literal _ loc)          = locOf loc
+  locOf (Parens _ loc)           = locOf loc
+  locOf (TupLit _ pos)           = locOf pos
+  locOf (RecordLit _ pos)        = locOf pos
+  locOf (Project _ _ _ pos)      = locOf pos
+  locOf (ArrayLit _ _ pos)       = locOf pos
+  locOf (Empty _ pos)            = locOf pos
+  locOf (BinOp _ _ _ _ pos)      = locOf pos
+  locOf (If _ _ _ _ pos)         = locOf pos
+  locOf (Var _ _ loc)            = locOf loc
+  locOf (Ascript _ _ loc)        = locOf loc
+  locOf (Negate _ pos)           = locOf pos
+  locOf (Apply _ _ _ pos)        = locOf pos
+  locOf (LetPat _ _ _ _ pos)     = locOf pos
+  locOf (LetFun _ _ _ loc)       = locOf loc
+  locOf (LetWith _ _ _ _ _ pos)  = locOf pos
+  locOf (Index _ _ pos)          = locOf pos
+  locOf (Update _ _ _ pos)       = locOf pos
+  locOf (Iota _ pos)             = locOf pos
+  locOf (Shape _ pos)            = locOf pos
+  locOf (Replicate _ _ pos)      = locOf pos
+  locOf (Reshape _ _ pos)        = locOf pos
+  locOf (Transpose _ pos)        = locOf pos
+  locOf (Rearrange _ _ pos)      = locOf pos
+  locOf (Rotate _ _ _ pos)       = locOf pos
+  locOf (Map _ _ pos)            = locOf pos
+  locOf (Reduce _ _ _ _ pos)     = locOf pos
+  locOf (Zip _ _ _ pos)          = locOf pos
+  locOf (Unzip _ _ pos)          = locOf pos
+  locOf (Scan _ _ _ pos)         = locOf pos
+  locOf (Filter _ _ pos)         = locOf pos
+  locOf (Partition _ _ pos)      = locOf pos
+  locOf (Split _ _ _ pos)        = locOf pos
+  locOf (Concat _ _ _ pos)       = locOf pos
+  locOf (Copy _ pos)             = locOf pos
+  locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
+  locOf (Stream _ _ _  pos)      = locOf pos
+  locOf (Unsafe _ loc)           = locOf loc
+  locOf (Scatter _ _ _ loc)      = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordField Name (ExpBase f vn) SrcLoc
@@ -735,7 +736,7 @@ data LowerBoundBase f vn = ZeroBound
 deriving instance Showable f vn => Show (LowerBoundBase f vn)
 
 -- | Anonymous function passed to a SOAC.
-data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
+data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
                       | CurryFun (QualName vn) [ExpBase f vn] (f ([CompTypeBase vn], CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
@@ -748,7 +749,7 @@ data LambdaBase f vn = AnonymFun [PatternBase f vn] (ExpBase f vn) (Maybe (TypeD
 deriving instance Showable f vn => Show (LambdaBase f vn)
 
 instance Located (LambdaBase f vn) where
-  locOf (AnonymFun _ _ _ _ loc)       = locOf loc
+  locOf (AnonymFun _ _ _ _ _ loc)     = locOf loc
   locOf (CurryFun  _ _ _ loc)         = locOf loc
   locOf (BinOpFun _ _ _ _ loc)        = locOf loc
   locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
@@ -778,6 +779,7 @@ data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
                                 , funBindName       :: vn
                                 , funBindRetDecl    :: Maybe (TypeExp vn)
                                 , funBindRetType    :: f (StructTypeBase vn)
+                                , funBindTypeParams :: [TypeParamBase vn]
                                 , funBindParams     :: [PatternBase f vn]
                                 , funBindBody       :: ExpBase f vn
                                 , funBindLocation   :: SrcLoc

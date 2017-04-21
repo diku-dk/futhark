@@ -42,6 +42,7 @@ module Language.Futhark.Attributes
   , returnType
   , lambdaReturnType
   , concreteType
+  , dimsBoundByType
 
   -- * Operations on types
   , peelArray
@@ -78,6 +79,7 @@ module Language.Futhark.Attributes
   , UncheckedModExp
   , UncheckedSigExp
   , UncheckedLambda
+  , UncheckedTypeParam
   , UncheckedPattern
   , UncheckedFunBind
   , UncheckedDec
@@ -545,7 +547,7 @@ typeOf (Var qn (Info t) _) = t `addAliases` S.insert (qualLeaf qn)
 typeOf (Ascript e _ _) = typeOf e
 typeOf (Apply _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
-typeOf (LetPat _ _ body _) = typeOf body
+typeOf (LetPat _ _ _ body _) = typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
@@ -603,7 +605,7 @@ typeOf (Split _ splitexps e _) =
   where n = case typeOf splitexps of Record ts -> length ts
                                      _         -> 1
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
-typeOf (DoLoop _ _ _ _ body _) = typeOf body
+typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (Scatter a _i _v _) = typeOf a `setAliases` S.empty
 
 -- | The result of applying the arguments of the given types to a
@@ -669,7 +671,7 @@ recordArrayElemReturnType (RecordArrayElem ts) ds args =
 -- | The specified return type of a lambda.
 lambdaReturnType :: Ord vn =>
                     LambdaBase Info vn -> TypeBase Rank ()
-lambdaReturnType (AnonymFun _ _ _ (Info t) _)       = removeShapeAnnotations t
+lambdaReturnType (AnonymFun _ _ _ _ (Info t) _)     = removeShapeAnnotations t
 lambdaReturnType (CurryFun _ _ (Info (_, t)) _)     = toStruct t
 lambdaReturnType (BinOpFun _ _ _ (Info t) _)        = toStruct t
 lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _)  = toStruct t
@@ -690,6 +692,14 @@ concreteType (Array at) = concreteArrayType at
         concreteRecordArrayElem PolyArrayElem{} = False
         concreteRecordArrayElem (RecordArrayElem fs) = all concreteRecordArrayElem fs
 
+-- | The dimension names bound by the shape declarations in the type.
+dimsBoundByType :: TypeBase (ShapeDecl VName) als -> S.Set VName
+dimsBoundByType = S.fromList . mapMaybe dimIdent . nestedDims
+  where dimIdent AnyDim          = Nothing
+        dimIdent (ConstDim _)    = Nothing
+        dimIdent (NamedDim _)    = Nothing
+        dimIdent (BoundDim name) = Just name
+
 -- | The set of identifiers bound in a pattern, including dimension declarations.
 patIdentSet :: PatternBase Info VName -> S.Set (IdentBase Info VName)
 patIdentSet (Id ident)              = S.singleton ident
@@ -698,11 +708,8 @@ patIdentSet (TuplePattern pats _)   = mconcat $ map patIdentSet pats
 patIdentSet (RecordPattern fs _)    = mconcat $ map (patIdentSet . snd) fs
 patIdentSet Wildcard{}              = mempty
 patIdentSet (PatternAscription p (TypeDecl _ (Info t))) =
-  patIdentSet p <> S.fromList (mapMaybe (dimIdent (srclocOf p)) (nestedDims t))
-  where dimIdent _ AnyDim            = Nothing
-        dimIdent _ (ConstDim _)      = Nothing
-        dimIdent _ (NamedDim _)      = Nothing
-        dimIdent loc (BoundDim name) = Just $ Ident name (Info $ Prim $ Signed Int32) loc
+  patIdentSet p <> S.map asIdent (dimsBoundByType t)
+  where asIdent name = Ident name (Info $ Prim $ Signed Int32) (srclocOf p)
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> CompTypeBase VName
@@ -944,6 +951,9 @@ type UncheckedSigExp = SigExpBase NoInfo Name
 
 -- | A lambda with no type annotations.
 type UncheckedLambda = LambdaBase NoInfo Name
+
+-- | A type parameter with no type annotations.
+type UncheckedTypeParam = TypeParamBase Name
 
 -- | A pattern with no type annotations.
 type UncheckedPattern = PatternBase NoInfo Name

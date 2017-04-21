@@ -211,27 +211,25 @@ data InferredType = NoneInferred
                   | Ascribed (TypeBase (ShapeDecl VName) (Names VName))
 
 checkPatternGroup :: MonadTypeChecker m =>
-                     [(PatternBase NoInfo Name, InferredType)]
+                     [TypeParam] -> [(UncheckedPattern, InferredType)]
                   -> ([Pattern] -> m a)
                   -> m a
-checkPatternGroup ps m = do
-  implicit <- checkForDuplicateNames $ map fst ps
-  bindNameMap (implicitNameMap implicit) $ do
-    ps' <- evalStateT (mapM (uncurry checkPattern') ps) implicit
-    m ps'
+checkPatternGroup tps ps m = do
+  implicit <- checkForDuplicateNames tps $ map fst ps
+  bindNameMap (implicitNameMap implicit) $
+    m =<< evalStateT (mapM (uncurry checkPattern') ps) implicit
 
 checkPattern :: MonadTypeChecker m =>
-                PatternBase NoInfo Name -> InferredType
+                [TypeParam] -> UncheckedPattern -> InferredType
              -> (Pattern -> m a)
              -> m a
-checkPattern p t m = do
-  implicit <- checkForDuplicateNames [p]
-  bindNameMap (implicitNameMap implicit) $ do
-    p' <- evalStateT (checkPattern' p t) implicit
-    m p'
+checkPattern tps p t m = do
+  implicit <- checkForDuplicateNames tps [p]
+  bindNameMap (implicitNameMap implicit) $
+    m =<< evalStateT (checkPattern' p t) implicit
 
 checkPattern' :: MonadTypeChecker m =>
-                 PatternBase NoInfo Name -> InferredType
+                 UncheckedPattern -> InferredType
               -> StateT ImplicitlyBound m Pattern
 
 checkPattern' (PatternParens p loc) t =
@@ -308,8 +306,9 @@ checkPattern' p NoneInferred =
 -- are not also bound as values.  Also, a bound size must not also be
 -- used as free.
 checkForDuplicateNames :: MonadTypeChecker m =>
-                          [PatternBase NoInfo Name] -> m ImplicitlyBound
-checkForDuplicateNames = flip execStateT mempty . mapM_ check
+                          [TypeParam] -> [UncheckedPattern] -> m ImplicitlyBound
+checkForDuplicateNames tps =
+  sanityCheck <=< flip execStateT mempty . mapM_ check
   where check (Id v) = seeing BoundAsVar (identName v) (srclocOf v)
         check (PatternParens p _) = check p
         check Wildcard{} = return ()
@@ -318,6 +317,22 @@ checkForDuplicateNames = flip execStateT mempty . mapM_ check
         check (PatternAscription p t) = do
           check p
           checkForDuplicateNamesTypeExp' $ declaredType t
+
+        sanityCheck (ImplicitlyBound m)
+          | problem : _ <- mapMaybe problematic tps = throwError problem
+          where problematic (TypeParamDim tpv tploc)
+                  | not $ any uses m =
+                      Just $ TypeError tploc $
+                      "Type parameter " ++ pretty (baseName tpv) ++ " not used in parameters."
+                  where uses (v, UsedFree, _) = v == tpv
+                        uses _                = False
+                problematic _ = Nothing
+        sanityCheck (ImplicitlyBound m)
+          | tp : _ <- tps, Just (_, _, ploc) <- find binds m =
+              throwError $ TypeError ploc $ "Implicit shape declaration not permitted when explicit declarations are also used at " ++ locStr (srclocOf tp)
+          where binds (_, BoundAsDim, _) = True
+                binds _ = False
+        sanityCheck implicit = return implicit
 
 checkForDuplicateNamesTypeExp :: MonadTypeChecker m =>
                                  ImplicitlyBound
@@ -360,9 +375,6 @@ seeing b v vloc = do
     (BoundAsDim, Just (_, UsedFree, loc)) ->
       throwError $ TypeError vloc $ "Name " ++ pretty v ++
         " previously used free at " ++ locStr loc
-    (UsedFree, Just (_, BoundAsDim, loc)) ->
-      throwError $ TypeError vloc $ "Name " ++ pretty v ++
-        " previously implicitly bound at " ++ locStr loc
     (UsedFree, sb) -> do
       v' <- lift $ checkName Term v vloc
       when (isNothing sb) $ modify $ \(ImplicitlyBound m) ->

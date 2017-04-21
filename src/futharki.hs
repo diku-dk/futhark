@@ -123,6 +123,7 @@ readEvalPrint = do
                                 , funBindName = nameFromString ""
                                 , funBindRetType = NoInfo
                                 , funBindRetDecl = Nothing
+                                , funBindTypeParams = []
                                 , funBindParams = []
                                 , funBindBody = e
                                 , funBindLocation = noLoc
