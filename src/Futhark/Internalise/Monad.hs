@@ -61,6 +61,7 @@ import Control.Monad.Writer
 import Control.Monad.RWS hiding (mapM)
 
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.List
 import Data.Maybe
 
@@ -354,11 +355,15 @@ newtype InternaliseTypeM a =
 liftInternaliseM :: InternaliseM a -> InternaliseTypeM a
 liftInternaliseM = InternaliseTypeM . lift . lift
 
-runInternaliseTypeM :: InternaliseTypeM a -> InternaliseM (a, M.Map VName Int, ConstParams)
-runInternaliseTypeM (InternaliseTypeM m) = do
+runInternaliseTypeM :: S.Set VName
+                    -> InternaliseTypeM a
+                    -> InternaliseM (a, M.Map VName Int, ConstParams)
+runInternaliseTypeM bound (InternaliseTypeM m) = do
   types <- gets stateTtable
-  let new_env = TypeEnv types mempty
-      new_state = (0, mempty, mempty)
+  let bound' = M.fromList $ zip (S.toList bound) [0..]
+      dims = M.map Ext bound'
+      new_env = TypeEnv types dims
+      new_state = (S.size bound + 1, bound', mempty)
   (x, (_, substs, cm)) <- runStateT (runReaderT m new_env) new_state
   return (x, substs, cm)
 

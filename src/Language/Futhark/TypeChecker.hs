@@ -94,7 +94,7 @@ checkForDuplicateDecs =
               bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
-        f (FunDec (FunBind _ name _ _ _ _ loc)) =
+        f (FunDec (FunBind _ name _ _ _ _ _ loc)) =
           check Term name loc
 
         f (ValDec (ValBind name _ _ _ loc)) =
@@ -441,10 +441,10 @@ checkValBind (ValBind name maybe_t NoInfo e loc) = do
         anythingUnique et          = unique et
 
 checkFunBind :: FunBindBase NoInfo Name -> TypeM (Env, FunBind)
-checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
-  (fname', params', maybe_retdecl', rettype, body') <-
+checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) = do
+  (fname', tparams', params', maybe_retdecl', rettype, body') <-
     bindSpaced [(Term, fname)] $
-    checkFunDef (fname, maybe_retdecl, params, body, loc)
+    checkFunDef (fname, maybe_retdecl, tparams, params, body, loc)
 
   return (mempty { envVtable =
                      M.singleton fname'
@@ -452,7 +452,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo params body loc) = do
                  , envNameMap =
                      M.singleton (Term, fname) fname'
                  },
-           FunBind entry fname' maybe_retdecl' (Info rettype) params' body' loc)
+           FunBind entry fname' maybe_retdecl' (Info rettype) tparams' params' body' loc)
 
   where paramType :: Pattern -> StructType
         paramType = vacuousShapeAnnotations . toStruct . patternType

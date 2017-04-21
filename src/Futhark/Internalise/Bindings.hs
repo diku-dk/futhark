@@ -9,7 +9,6 @@ module Futhark.Internalise.Bindings
   )
   where
 
-import Control.Applicative
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
@@ -28,15 +27,14 @@ import Futhark.Internalise.TypesValues
 import Futhark.Internalise.AccurateSizes
 import Futhark.Util
 
-import Prelude hiding (mapM)
-
-bindingParams :: [E.Pattern]
+bindingParams :: [E.TypeParam] -> [E.Pattern]
               -> (ConstParams -> [I.FParam] -> [[I.FParam]] -> InternaliseM a)
               -> InternaliseM a
-bindingParams params m = do
+bindingParams tparams params m = do
   flattened_params <- mapM flattenPattern params
   let (params_idents, params_ascripts, params_types) = unzip3 $ concat flattened_params
-  (params_ts, shape_ctx, cm) <- internaliseParamTypes params_types
+      bound = boundInTypes tparams $ params_types ++ concat params_ascripts
+  (params_ts, shape_ctx, cm) <- internaliseParamTypes bound params_types
   let num_param_idents = map length flattened_params
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
   (shape_ctx', shapesubst) <- makeShapeIdentsFromContext shape_ctx
@@ -48,7 +46,7 @@ bindingParams params m = do
       -- Context does not matter for the ascription - we just want the
       -- names so we can map them to the actually bound names from
       -- param_ts'.
-      (ascripted_ts, ascript_ctx, _) <- internaliseParamTypes param_ascripts
+      (ascripted_ts, ascript_ctx, _) <- internaliseParamTypes bound param_ascripts
       let ascript_ctx_rev = M.fromList $ map (uncurry $ flip (,)) $ M.toList ascript_ctx
       return (param_ts', param_unnamed_dims,
               M.map pure $ mconcat $ zipWith (forwardDims ascript_ctx_rev) param_ts' $
@@ -68,18 +66,19 @@ bindingParams params m = do
                                        I.Var v /= d = M.singleton v d
           forwardDim _ _ _ = M.empty
 
-bindingLambdaParams :: [E.Pattern] -> [I.Type]
+bindingLambdaParams :: [E.TypeParam] ->[E.Pattern] -> [I.Type]
                     -> (ConstParams -> [I.LParam] -> InternaliseM a)
                     -> InternaliseM a
-bindingLambdaParams params ts m = do
+bindingLambdaParams tparams params ts m = do
   (params_idents, params_ascripts, params_types) <-
     unzip3 . concat <$> mapM flattenPattern params
-  (params_ts, _, cm) <- internaliseParamTypes params_types
+  let bound = boundInTypes tparams $ params_types ++ concat params_ascripts
+  (params_ts, _, cm) <- internaliseParamTypes bound params_types
 
   let ts_for_ps = typesForParams params_ts ts
 
   ascript_substs <- fmap mconcat . forM (zip params_ascripts ts_for_ps) $ \(ascript, p_t) -> do
-    (ascript_ts, shape_ctx, _) <- internaliseParamTypes ascript
+    (ascript_ts, shape_ctx, _) <- internaliseParamTypes bound ascript
     return $ lambdaShapeSubstitutions shape_ctx (concat ascript_ts)
       (concat (replicate (length ascript) p_t))
 
@@ -122,11 +121,14 @@ processFlatPattern = processFlatPattern' []
     internaliseBindee bindee = do
       -- XXX: we gotta be screwing up somehow by ignoring the extra
       -- return values.  If not, why not?
-      (tss, _, _) <- internaliseParamTypes [E.vacuousShapeAnnotations $ E.unInfo $ E.identType bindee]
+      (tss, _, _) <- internaliseParamTypes nothing_bound [E.vacuousShapeAnnotations $ E.unInfo $ E.identType bindee]
       forM (concat tss) $ \t -> do
         name <- newVName base
         return (name, t)
           where base = nameToString $ baseName $ E.identName bindee
+
+    -- Fixed up later.
+    nothing_bound = boundInTypes [] []
 
 bindingFlatPattern :: [E.Ident] -> [t]
                    -> ([[I.Param t]] -> InternaliseM a)
@@ -167,13 +169,13 @@ flattenPattern = flattenPattern' []
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 
-bindingPattern :: E.Pattern -> [I.ExtType]
+bindingPattern :: [E.TypeParam] -> E.Pattern -> [I.ExtType]
                -> (ConstParams -> [VName] -> MatchPattern -> InternaliseM a)
                -> InternaliseM a
-bindingPattern pat ts m = do
+bindingPattern tparams pat ts m = do
   (pat', _, pat_types) <- unzip3 <$> flattenPattern pat
   (ts',_) <- instantiateShapes' ts
-  (pat_types', ctx, cm) <- internaliseParamTypes pat_types
+  (pat_types', ctx, cm) <- internaliseParamTypes (boundInTypes tparams pat_types) pat_types
   let ctx_rev = M.fromList $ map (uncurry $ flip (,)) $ M.toList ctx
       pat_types'' = map I.fromDecl $ concat pat_types'
   let addShapeStms l =

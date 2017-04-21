@@ -171,10 +171,10 @@ literals and variables, but also more complicated forms.
       : | `exp` `exp`
       : | `exp` ":" `type`
       : | "if" `exp` "then" `exp` "else" `exp`
-      : | "let" `pat` "=" `exp` "in" `exp`
+      : | "let" `type_param`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
-      : | "let" `id` `pat`+ [":" `type`] "=" `exp` "in" `exp`
-      : | "loop" "(" `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
+      : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
+      : | "loop" "(" `type_param`* `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
       : | "iota" `exp`
       : | "shape" `exp`
       : | "replicate" `exp` `exp`
@@ -473,7 +473,7 @@ If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
 
 Evaluate ``e`` and bind the result to the pattern ``pat`` while
 evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
-``let`` or ``loop`` expression.
+``let`` or ``loop`` expression. See also `Shape Declarations`_.
 
 ``let a[i] = v in body``
 ........................................
@@ -489,7 +489,8 @@ of ``v`` must be an array of the proper size.  Syntactic sugar for
 Bind ``f`` to a function with the given parameters and definition
 (``e``) and evaluate ``body``.  The function will be treated as
 aliasing any free variables in ``e``.  The function is not in scope of
-itself, and hence cannot be recursive.
+itself, and hence cannot be recursive.  See also `Shape
+Declarations`_.
 
 ``loop (pat = initial) = for i < bound do loopbody in body``
 ............................................................
@@ -510,6 +511,8 @@ the pattern are taken from equivalently named variables in the
 environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 = ...``.
 
+See also `Shape Declarations`_.
+
 ``loop (pat = initial) = while cond do loopbody in body``
 ............................................................
 
@@ -519,6 +522,8 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
    ``pat`` to be the value returned by the body.
 
 3. Evaluate ``body`` with ``pat`` bound to its final value.
+
+See also `Shape Declarations`_.
 
 ``iota n``
 ...........
@@ -714,6 +719,49 @@ performed to the same location), the result is unspecified.  It is not
 guaranteed that one of the duplicate writes will complete atomically -
 they may be interleaved.
 
+Shape Declarations
+------------------
+
+Whenever a pattern occurs (in ``let``, ``loop``, and function
+parameters), as well as in return types, *shape declarations* may be
+used to express invariants about the shapes of arrays
+that are accepted or produced by the function.  For example::
+
+  let f (a: [#n]i32) (b: [#n]i32): [n]i32 =
+    map (+) a b
+
+When prefixed with a ``#`` character, a name is *freshly bound*,
+whilst an unadorned name must be in scope.  In the example above,
+``#`` is not used in the return type, because we wish to refer to the
+``n`` bound by the parameters.  If we refer to the same freshly bound
+variable in multiple parameters (as above), each occurence must be
+prefixed with ``#``.  The sizes can also be explicitly quantified::
+
+  let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
+    map (+) a b
+
+This has the same meaning as above.  It is an error to mix explicit
+and implicit sizes.  Note that the ``[n]`` parameter need not be
+explicitly passed when calling ``f``.  Any explicitly bound size must
+be used in a parameters.  This is an error::
+
+  let f [n] (x: i32) = n
+
+A shape declaration can also be an integer constant (with no suffix).
+The dimension names bound can be used as ordinary variables within the
+scope of the parameters.  If a function is called with arguments, or
+returns a value, that does not fulfill the shape constraints, the
+program will fail with a runtime error.  Likewise, if a pattern with
+shape declarations is attempted bound to a value that does not fulfill
+the invariants, the program will fail with a runtime error.  For
+example, this will fail::
+
+  let x: [3]i32 = iota 2
+
+While this will succeed and bind ``n`` to ``2``::
+
+  let [n] x: [n]i32 = iota 2
+
 Declarations
 ------------
 
@@ -727,7 +775,7 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   fun_bind:   ("let" | "entry") `id` `pat`+ [":" `type`] "=" `exp`
+   fun_bind:   ("let" | "entry") `id` `type_param`* `pat`+ [":" `type`] "=" `exp`
            : | ("let" | "entry") `pat` `binop` `pat` [":" `type`] "=" `exp`
 
 .. productionlist::
@@ -742,26 +790,7 @@ of the function::
 Type inference is not supported, and functions are fully monomorphic.
 A parameter is written as ``(name: type)``.  Functions may not be
 recursive.  Optionally, the programmer may put *shape declarations* in
-the return type and parameter types.  These can be used to express
-invariants about the shapes of arrays that are accepted or produced by
-the function, e.g::
-
-  let f (a: [#n]i32) (b: [#n]i32): [n]i32 =
-    map (+) a b
-
-When prefixed with a ``#`` character, a name is *freshly bound*,
-whilst an unadorned name must be in scope.  In the example above, we
-do not use a ``#`` in the return type, because we wish to refer to the
-``n`` bound by the parameters.  If we refer to the same freshly bound
-variable in multiple parameters (as above), each occurence must be
-prefixed with ``#``.
-
-A shape declaration can also be an integer constant (with no suffix).
-A shape declaration can also be an underscore, which is equivalent to
-leaving it out.  The dimension names bound in a parameter shape
-declaration can be used as ordinary variables within the scope of the
-parameter.  If a function is called with arguments that do not fulfill
-the shape constraints, the program will fail with a runtime error.
+the return type and parameter types; see `Shape Declarations`_.
 
 User-Defined Operators
 ~~~~~~~~~~~~~~~~~~~~~~

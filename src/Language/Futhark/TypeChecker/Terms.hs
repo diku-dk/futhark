@@ -188,7 +188,7 @@ instance MonadTypeChecker TermTypeM where
   lookupVar loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
-      Nothing -> bad $ UnknownVariableError Term qn loc
+      Nothing -> error $ "not in vtable" ++ show qn' -- bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                       | otherwise -> return (qn', t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
@@ -326,15 +326,30 @@ binding bnds = check . local (`bindVars` bnds)
                 names = S.fromList $ map identName bnds
                 divide s = (s `S.intersection` names, s `S.difference` names)
 
+bindingTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
+bindingTypeParams tparams = binding $ mapMaybe typeParamIdent tparams
+  where typeParamIdent (TypeParamDim v loc) =
+          Just $ Ident v (Info (Prim (Signed Int32))) loc
+        typeParamIdent TypeParamType{} =
+          Nothing
+
 -- | A hack that also binds the names in the name map.  This is useful
 -- if the same names are visible in two entirely different expressions
 -- (e.g. for do loops).
-bindingAlsoNames :: [Ident] -> TermTypeM a -> TermTypeM a
-bindingAlsoNames idents body = do
+bindingAlsoIdents :: [Ident] -> TermTypeM a -> TermTypeM a
+bindingAlsoIdents idents body = do
   let varnames = map ((Term,) . baseName . identName) idents
       substs   = map identName idents
   bindNameMap (M.fromList (zip varnames substs)) $
     binding idents body
+
+-- | Like 'bindingAlsoIdents', but for 'TypeParam's.
+bindingAlsoTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
+bindingAlsoTypeParams tparams body =
+  bindNameMap (M.fromList $ map typeParamSpace tparams) $
+  bindingTypeParams tparams body
+  where typeParamSpace (TypeParamDim vn _) = ((Term, baseName vn), vn)
+        typeParamSpace (TypeParamType vn _) = ((Type, baseName vn), vn)
 
 bindingIdent :: IdentBase NoInfo Name -> Type -> (Ident -> TermTypeM a)
              -> TermTypeM a
@@ -344,25 +359,37 @@ bindingIdent (Ident v NoInfo vloc) t m =
     let ident = Ident v' (Info t) vloc
     binding [ident] $ m ident
 
-bindingPatternGroup :: [(PatternBase NoInfo Name, InferredType)]
-                    -> ([Pattern] -> TermTypeM a) -> TermTypeM a
-bindingPatternGroup ps m =
-  checkPatternGroup ps $ \ps' ->
-    binding (S.toList $ S.unions $ map patIdentSet ps') $ do
+noTypeParams :: MonadTypeChecker m => [TypeParam] -> m ()
+noTypeParams = mapM_ check
+  where check TypeParamDim{} = return ()
+        check (TypeParamType _ loc) =
+          throwError $ TypeError loc "No type parameters permitted for patterns yet."
+
+bindingPatternGroup :: [UncheckedTypeParam]
+                    -> [(UncheckedPattern, InferredType)]
+                    -> ([TypeParam] -> [Pattern] -> TermTypeM a) -> TermTypeM a
+bindingPatternGroup tps ps m =
+  checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
+  checkPatternGroup tps' ps $ \ps' ->
+  binding (S.toList $ S.unions $ map patIdentSet ps') $ do
+    noTypeParams tps'
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
     mapM_ observe $ concatMap patternDims ps'
-    m ps'
+    m tps' ps'
 
-bindingPattern :: PatternBase NoInfo Name -> InferredType
-               -> (Pattern -> TermTypeM a) -> TermTypeM a
-bindingPattern p t m =
-  checkPattern p t $ \ p' ->
-    binding (S.toList $ patIdentSet p') $ do
+bindingPattern :: [UncheckedTypeParam]
+               -> PatternBase NoInfo Name -> InferredType
+               -> ([TypeParam] -> Pattern -> TermTypeM a) -> TermTypeM a
+bindingPattern tps p t m =
+  checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
+  checkPattern tps' p t $ \p' ->
+  binding (S.toList $ patIdentSet p') $ do
+    noTypeParams tps'
     -- Perform an observation of every declared dimension.  This
     -- prevents unused-name warnings for otherwise unused dimensions.
     mapM_ observe $ patternDims p'
-    m p'
+    m tps' p'
 
 patternDims :: Pattern -> [Ident]
 patternDims (PatternParens p _) = patternDims p
@@ -499,25 +526,25 @@ checkExp (Apply fname args _ loc) = do
 
   return $ Apply fname' (zip args' $ map diet paramtypes) (Info rettype') loc
 
-checkExp (LetPat pat e body pos) =
+checkExp (LetPat tparams pat e body pos) =
   sequentially (checkExp e) $ \e' _ ->
   -- Not technically an ascription, but we want the pattern to have
   -- exactly the type of 'e'.
-  bindingPattern pat (Ascribed $ vacuousShapeAnnotations $ typeOf e') $ \pat' -> do
+  bindingPattern tparams pat (Ascribed $ vacuousShapeAnnotations $ typeOf e') $ \tparams' pat' -> do
     body' <- checkExp body
-    return $ LetPat pat' e' body' pos
+    return $ LetPat tparams' pat' e' body' pos
 
-checkExp (LetFun name (params, maybe_retdecl, NoInfo, e) body loc) =
+checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   bindSpaced [(Term, name)] $
-  sequentially (checkFunDef' (name, maybe_retdecl, params, e, loc)) $
-    \(name', params', maybe_retdecl', rettype, e') closure -> do
+  sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
+    \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
     let paramType = toStruct . vacuousShapeAnnotations . patternType
         entry = BoundF (map paramType params', rettype) closure
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope }
     body' <- local bindF $ checkExp body
 
-    return $ LetFun name' (params', maybe_retdecl', Info rettype, e') body' loc
+    return $ LetFun name' (tparams', params', maybe_retdecl', Info rettype, e') body' loc
 
 checkExp (LetWith dest src idxes ve body pos) = do
   src' <- checkIdent src
@@ -799,7 +826,7 @@ checkExp (Copy e pos) = do
   e' <- checkExp e
   return $ Copy e' pos
 
-checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
+checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
   (mergeexp', mergeflow) <- collectOccurences $ checkExp mergeexp
 
   -- First we do a basic check of the loop body to figure out which of
@@ -809,7 +836,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   --
   -- Play a little with occurences to ensure it does not look like
   -- none of the merge variables are being used.
-  (((mergepat', form', loopbody'), bodyflow), freeflow) <-
+  (((tparams', mergepat', form', loopbody'), bodyflow), freeflow) <-
     case form of
       For dir lboundexp i uboundexp -> do
         uboundexp' <- require anySignedType =<< checkExp uboundexp
@@ -821,21 +848,24 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                 void $ unifyExpTypes e' uboundexp'
                 return $ ExpBound e'
         collectOccurences $ bindingIdent i (typeOf uboundexp') $ \i' ->
-          noUnique $ bindingPattern mergepat (Ascribed $ vacuousShapeAnnotations $
-                                              typeOf mergeexp' `setAliases` mempty) $
-          \mergepat' -> onlySelfAliasing $ tapOccurences $ do
+          noUnique $ bindingPattern tparams mergepat
+          (Ascribed $ vacuousShapeAnnotations $ typeOf mergeexp' `setAliases` mempty) $
+          \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
-            return (mergepat',
+            return (tparams',
+                    mergepat',
                     For dir lboundexp' i' uboundexp',
                     loopbody')
       While cond ->
         noUnique $ collectOccurences $
-        bindingPattern mergepat (Ascribed $ vacuousShapeAnnotations $
-                                 typeOf mergeexp' `setAliases` mempty) $ \mergepat' ->
+        bindingPattern tparams mergepat
+        (Ascribed $ vacuousShapeAnnotations $
+          typeOf mergeexp' `setAliases` mempty) $ \tparams' mergepat' ->
         onlySelfAliasing $ tapOccurences $
         sequentially (require [Prim Bool] =<< checkExp cond) $ \cond' _ -> do
           loopbody' <- checkExp loopbody
-          return (mergepat',
+          return (tparams',
+                  mergepat',
                   While cond',
                   loopbody')
 
@@ -910,13 +940,14 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
         occur $ mergeflow `seqOccurences` merge_consume `seqOccurences` freeflow
         mapM_ observe $ S.toList $ patIdentSet mergepat''
 
-  bindingAlsoNames (S.toList $ patIdentSet mergepat'') $ do
-    -- It is OK for merge parameters to not occur here, because they
-    -- might be useful for the loop body.
-    letbody' <- sequentially loopOccur $ \_ _ -> checkExp letbody
-    return $ DoLoop mergepat'' mergeexp'
-                    form'
-                    loopbody' letbody' loc
+  bindingAlsoTypeParams tparams' $
+    bindingAlsoIdents (S.toList (patIdentSet mergepat'')) $ do
+      -- It is OK for merge parameters to not occur here, because they
+      -- might be useful for the loop body.
+      letbody' <- sequentially loopOccur $ \_ _ -> checkExp letbody
+      return $ DoLoop tparams' mergepat'' mergeexp'
+                      form'
+                      loopbody' letbody' loc
 
 checkExp (Scatter a i v pos) = do
   i' <- checkExp i
@@ -1012,13 +1043,17 @@ consumeArg loc at _       = [observation (aliases at) loc]
 checkOneExp :: UncheckedExp -> TypeM Exp
 checkOneExp = runTermTypeM . checkExp
 
-checkFunDef :: (Name, Maybe UncheckedTypeExp, [UncheckedPattern], UncheckedExp, SrcLoc)
-            -> TypeM (VName, [Pattern], Maybe (TypeExp VName), StructType, Exp)
+checkFunDef :: (Name, Maybe UncheckedTypeExp,
+                [UncheckedTypeParam], [UncheckedPattern],
+                UncheckedExp, SrcLoc)
+            -> TypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
 checkFunDef = runTermTypeM . checkFunDef'
 
-checkFunDef' :: (Name, Maybe UncheckedTypeExp, [UncheckedPattern], UncheckedExp, SrcLoc)
-            -> TermTypeM (VName, [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkFunDef' (fname, maybe_retdecl, params, body, loc) = do
+checkFunDef' :: (Name, Maybe UncheckedTypeExp,
+                 [UncheckedTypeParam], [UncheckedPattern],
+                 UncheckedExp, SrcLoc)
+             -> TermTypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
+checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = do
   fname' <- checkName Term fname loc
 
   when (baseString fname' == "&&") $
@@ -1027,7 +1062,7 @@ checkFunDef' (fname, maybe_retdecl, params, body, loc) = do
   when (baseString fname' == "||") $
     bad $ TypeError loc "The || operator may not be redefined."
 
-  bindingPatternGroup (zip params $ repeat NoneInferred) $ \params' -> do
+  bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
     maybe_retdecl' <-
       case maybe_retdecl of
         Just rettype -> do
@@ -1046,7 +1081,7 @@ checkFunDef' (fname, maybe_retdecl, params, body, loc) = do
         return (Just retdecl', retdecl_type)
       Nothing -> return (Nothing, vacuousShapeAnnotations $ toStruct $ typeOf body')
 
-    return (fname', params', maybe_retdecl'', rettype, body')
+    return (fname', tparams', params', maybe_retdecl'', rettype, body')
 
   where -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -1098,20 +1133,20 @@ checkFunBody fname body maybe_rettype loc = do
 
 checkLambda :: LambdaBase NoInfo Name -> [Arg]
             -> TermTypeM Lambda
-checkLambda (AnonymFun params body maybe_ret NoInfo loc) args
+checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
   | length params == length args = do
       let params_with_ts = zip params $ map (Inferred . fromStruct . argType) args
-      (maybe_ret', params', body') <-
-        noUnique $ bindingPatternGroup params_with_ts $ \params' -> do
+      (maybe_ret', tparams', params', body') <-
+        noUnique $ bindingPatternGroup tparams params_with_ts $ \tparams' params' -> do
         maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl loc) maybe_ret
         body' <- checkFunBody (nameFromString "<anonymous>") body
                  (unInfo . expandedType <$> maybe_ret') loc
-        return (maybe_ret', params', body')
+        return (maybe_ret', tparams', params', body')
       checkFuncall Nothing loc (map patternStructType params') args
       let ret' = case maybe_ret' of
                    Nothing -> toStruct $ vacuousShapeAnnotations $ typeOf body'
                    Just (TypeDecl _ (Info ret)) -> ret
-      return $ AnonymFun params' body' maybe_ret' (Info ret') loc
+      return $ AnonymFun tparams' params' body' maybe_ret' (Info ret') loc
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do

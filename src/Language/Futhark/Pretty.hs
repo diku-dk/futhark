@@ -165,9 +165,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Apply fname args _ _) = ppr fname <+>
                                      spread (map (ppr . fst) args)
   pprPrec _ (Negate e _) = text "-" <> ppr e
-  pprPrec p (LetPat pat e body _) =
+  pprPrec p (LetPat tparams pat e body _) =
     mparens $ align $
-    text "let" <+> align (ppr pat) <+>
+    text "let" <+> align (spread $ map ppr tparams ++ [ppr pat]) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) <+> text "in" </>
@@ -184,9 +184,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
                         If{}       -> True
                         ArrayLit{} -> False
                         _          -> hasArrayLit e
-  pprPrec _ (LetFun fname (params, retdecl, _, e) body _) =
-    text "let" <+> ppr fname <+> spread (map ppr params) <> retdecl' <+> equals </>
-    indent 2 (ppr e) <+> text "in" </>
+  pprPrec _ (LetFun fname (tparams, params, retdecl, _, e) body _) =
+    text "let" <+> ppr fname <+> spread (map ppr tparams ++ map ppr params) <>
+    retdecl' <+> equals </> indent 2 (ppr e) <+> text "in" </>
     ppr body
     where retdecl' = case retdecl of
                        Just rettype -> text ":" <+> ppr rettype
@@ -250,8 +250,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
   pprPrec _ (Copy e _) = text "copy" <> pprPrec 10 e
-  pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
-    text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+> equals <+>
+  pprPrec _ (DoLoop tparams pat initexp form loopbody letbody _) =
+    text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals
+                            <+> ppr initexp) <+> equals <+>
     ppr form <+>
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
@@ -291,9 +292,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ pretty fname
   ppr (CurryFun fname curryargs _ _) =
     ppr fname <+> apply (map ppr curryargs)
-  ppr (AnonymFun params body ascript _ _) =
+  ppr (AnonymFun tparams params body ascript _ _) =
     text "fn" <+>
-    apply (map ppr params) <> ppAscription ascript <+>
+    apply (map ppr tparams ++ map ppr params) <> ppAscription ascript <+>
     text "=>" </> indent 2 (ppr body)
   ppr (BinOpFun binop _ _ _ _) =
     ppr binop
@@ -335,9 +336,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamType name _) = text "'" <> ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
-  ppr (FunBind entry name retdecl _ args body _) =
+  ppr (FunBind entry name retdecl _ tparams args body _) =
     text fun <+> ppr name <+>
-    spread (map ppr args) <> retdecl' <+> equals </>
+    spread (map ppr tparams ++ map ppr args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
     where fun | entry     = "entry"
               | otherwise = "let"

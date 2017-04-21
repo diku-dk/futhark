@@ -372,18 +372,19 @@ BindingBinOp :: { Name }
                    return name }
       | '-'   { nameFromString "-" }
 
-Fun     : let id many1(Param) maybeAscription(TypeExpDecl) '=' Exp
-          { let L pos (ID name) = $2
-            in FunBind (name==defaultEntryPoint) name (fmap declaredType $4) NoInfo
-               (fst $3 : snd $3) $6 pos
+Fun     : let id many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '=' Exp
+          { let L loc (ID name) = $2
+            in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
+               $3 (fst $4 : snd $4) $7 loc
           }
 
-        | entry id many1(Param) maybeAscription(TypeExpDecl) '=' Exp
-          { let L pos (ID name) = $2
-            in FunBind True name (fmap declaredType $4) NoInfo (fst $3 : snd $3) $6 pos }
+        | entry id many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '=' Exp
+          { let L loc (ID name) = $2
+            in FunBind True name (fmap declaredType $5) NoInfo
+               $3 (fst $4 : snd $4) $7 loc }
 
         | let Param BindingBinOp Param maybeAscription(TypeExpDecl) '=' Exp
-          { FunBind False $3 (fmap declaredType $5) NoInfo [$2,$4] $7 $1
+          { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 $1
           }
 ;
 
@@ -625,23 +626,26 @@ Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordField (fst $1) $3 (snd $1) }
        | Exp             { RecordRecord $1 }
 
+-- The two productions for LetPat are split instead of using many() to
+-- avoid a shift/reduce-conflict.
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
-                      { LetPat $2 $4 $5 $1 }
+                      { LetPat [] $2 $4 $5 $1 }
+     | let many1(TypeParam) Pattern '=' Exp LetBody
+                      { LetPat (fst $2 : snd $2) $3 $5 $6 $1 }
 
-     | let id many1(Param) maybeAscription(TypeExpDecl) '=' Exp LetBody
-                      { let L _ (ID name) = $2
-                        in LetFun name (fst $3 : snd $3, (fmap declaredType $4), NoInfo, $6) $7 $1 }
+     | let id many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '=' Exp LetBody
+       { let L _ (ID name) = $2
+         in LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7) $8 $1 }
 
      | let VarSlice '=' Exp LetBody
                       { let (v,slice,loc) = $2; ident = Ident v NoInfo loc
                         in LetWith ident ident slice $4 $5 loc }
 
-     | loop '(' Pattern ')' '=' LoopForm do Exp LetBody
-                      {% liftM (\t -> DoLoop $3 t $6 $8 $9 $1)
-                               (patternExp $3) }
-     | loop '(' Pattern '=' Exp ')' '=' LoopForm do Exp LetBody
-                  { DoLoop $3 $5 $8 $10 $11 $1 }
+     | loop '(' many(TypeParam) Pattern ')' '=' LoopForm do Exp LetBody
+       {% fmap (\t -> DoLoop $3 $4 t $7 $9 $10 $1) (patternExp $4) }
+     | loop '(' many(TypeParam) Pattern '=' Exp ')' '=' LoopForm do Exp LetBody
+       { DoLoop $3 $4 $6 $9 $11 $12 $1 }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
@@ -713,8 +717,8 @@ Curry : Curry Atom
         { (fst $1, [$2], snd $1) }
 
 FunAbstr :: { UncheckedLambda }
-         : '(' '\\' many1(Param) maybeAscription(TypeExpDecl) '->' Exp ')'
-           { AnonymFun (fst $3 : snd $3) $6 $4 NoInfo $1 }
+         : '(' '\\' many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '->' Exp ')'
+           { AnonymFun $3 (fst $4 : snd $4) $7 $5 NoInfo $1 }
          | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }
          | '(' QualUnOpName ')'
@@ -900,6 +904,7 @@ combArrayElements t ts = foldM comb t ts
           | valueType x == valueType y = Right x
           | otherwise                  = Left $ "Elements " ++ pretty x ++ " and " ++
                                          pretty y ++ " cannot exist in same array."
+
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
