@@ -384,14 +384,25 @@ checkTypeParams :: MonadTypeChecker m =>
                 -> ([TypeParamBase VName] -> m a)
                 -> m a
 checkTypeParams ps m =
-  bindSpaced (map typeParamSpace ps) $ m =<< mapM checkTypeParam ps
+  bindSpaced (map typeParamSpace ps) $
+  m =<< evalStateT (mapM checkTypeParam ps) mempty
   where typeParamSpace (TypeParamDim pv _) = (Term, pv)
         typeParamSpace (TypeParamType pv _) = (Type, pv)
 
+        checkParamName ns v loc = do
+          seen <- M.lookup (ns,v) <$> get
+          case seen of
+            Just prev ->
+              throwError $ TypeError loc $
+              "Type parameter " ++ pretty v ++ " previously defined at " ++ locStr prev
+            Nothing -> do
+              modify $ M.insert (ns,v) loc
+              lift $ checkName ns v loc
+
         checkTypeParam (TypeParamDim pv loc) =
-          TypeParamDim <$> checkName Term pv loc <*> pure loc
+          TypeParamDim <$> checkParamName Term pv loc <*> pure loc
         checkTypeParam (TypeParamType pv loc) =
-          TypeParamType <$> checkName Type pv loc <*> pure loc
+          TypeParamType <$> checkParamName Type pv loc <*> pure loc
 
 data TypeSub = TypeSub TypeBinding
              | DimSub (DimDecl VName)
