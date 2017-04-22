@@ -62,8 +62,7 @@ builtinFtable = M.fromList $ mapMaybe addBuiltin $ M.toList E.intrinsics
            (baseName name,
             [], [], [], map (I.Prim . internalisePrimType) paramts,
             params,
-            const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
-           (E.Prim t, map E.Prim paramts))
+            const $ Just $ ExtRetType [I.Prim $ internalisePrimType t]))
           where params =
                   [Param (VName (nameFromString "x") i) (I.Prim $ internalisePrimType pt)
                   | (i,pt) <- zip [0..] paramts]
@@ -100,8 +99,6 @@ preprocessFunBind (E.FunBind _ ofname _ (Info rettype) tparams params _ _) =
                                         (ExtRetType $ concat rettype')
                                         (consts++shapes++concat values)
                                        )
-                       , externalFun = (rettype,
-                                        map E.patternStructType params)
                        })
 
 internaliseDecs :: [E.Dec] -> InternaliseM ()
@@ -465,7 +462,6 @@ internaliseExp desc (E.LetFun ofname (tparams, params, _, Info rettype, e) body 
                       map declTypeOf $ concat params',
                       all_params,
                       applyRetType (ExtRetType rettype') all_params)
-                 , externalFun = (rettype, map E.patternStructType params)
                  }
 
     addFunction $ I.FunDef Nothing fname' (ExtRetType rettype') all_params e''

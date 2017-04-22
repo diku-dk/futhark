@@ -78,13 +78,12 @@ type ConstParams = [(Name,VName)]
 -- corresponds to the closure of a locally defined function.
 type Closure = [VName]
 
-data FunBinding = FunBinding
-                  { internalFun :: (Name, ConstParams, Closure,
-                                    [VName], [DeclType],
-                                    [FParam],
-                                    [(SubExp,Type)] -> Maybe ExtRetType)
-                  , externalFun :: (E.StructType, [E.StructType])
-                  }
+newtype FunBinding = FunBinding
+                     { internalFun :: (Name, ConstParams, Closure,
+                                       [VName], [DeclType],
+                                       [FParam],
+                                       [(SubExp,Type)] -> Maybe ExtRetType)
+                     }
 
 type FunTable = M.Map VName FunBinding
 
