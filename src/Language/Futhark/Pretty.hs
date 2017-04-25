@@ -162,8 +162,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
-  pprPrec _ (Apply fname args _ _) = ppr fname <+>
-                                     spread (map (ppr . fst) args)
+  pprPrec _ (Apply fname args _ _) =
+    ppr fname <+> spread (map (ppr . fst) args)
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat tparams pat e body _) =
     mparens $ align $
@@ -355,8 +355,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec name ps _) = text "type" <+> ppr name <+> spread (map ppr ps)
-  ppr (ValSpec name params rettype _) =
-    text "val" <+> ppr name <> colon <+>
+  ppr (ValSpec name tparams params rettype _) =
+    text "val" <+> ppr name <+> spread (map ppr tparams) <> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
   ppr (ModSpec name sig _) =
     text "module" <+> ppr name <> colon <+> ppr sig

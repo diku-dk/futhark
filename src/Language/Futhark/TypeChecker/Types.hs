@@ -15,9 +15,13 @@ module Language.Futhark.TypeChecker.Types
   , TypeSub(..)
   , TypeSubs
   , substituteTypes
+  , substituteTypesInValBinding
+
+  , instantiatePolymorphic
   )
 where
 
+import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
 import Data.List
@@ -461,6 +465,12 @@ substituteTypes substs ot = case ot of
           | Just (DimSub d) <- M.lookup (qualLeaf v) substs = d
         substituteInDim d = d
 
+substituteTypesInValBinding :: TypeSubs -> ValBinding -> ValBinding
+substituteTypesInValBinding substs (BoundV t) =
+  BoundV $ substituteTypes substs t
+substituteTypesInValBinding substs (BoundF (tps, pts, t)) =
+  BoundF (tps, map (substituteTypes substs) pts, substituteTypes substs t)
+
 applyType :: [TypeParam] -> StructType -> [StructTypeArg] -> StructType
 applyType ps t args =
   substituteTypes substs t
@@ -478,3 +488,80 @@ applyType ps t args =
           (pv, TypeSub $ TypeAbbr [] at)
         mkSubst p a =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
+
+type InstantiateM = StateT
+                    (M.Map VName (TypeBase Rank (),SrcLoc))
+                    (Either (Maybe String))
+
+instantiatePolymorphic :: [VName] -> SrcLoc -> M.Map VName (TypeBase Rank (),SrcLoc)
+                       -> TypeBase Rank () -> TypeBase Rank ()
+                       -> Either (Maybe String) (M.Map VName (TypeBase Rank (),SrcLoc))
+instantiatePolymorphic tnames loc orig_substs x y =
+  execStateT (instantiate x y) orig_substs
+  where
+
+    instantiate :: TypeBase Rank () -> TypeBase Rank ()
+                -> InstantiateM ()
+    instantiate (TypeVar (TypeName [] tn) []) arg_t
+      | tn `elem` tnames = do
+          substs <- get
+          case M.lookup tn substs of
+            Just (old_arg_t, old_arg_loc) | old_arg_t /= arg_t ->
+              lift $ Left $ Just $ "Argument determines type parameter '" ++
+              pretty (baseName tn) ++ "' as " ++ pretty arg_t ++
+              ", but previously determined as " ++ pretty old_arg_t ++
+              " at " ++ locStr old_arg_loc
+            _ -> modify $ M.insert tn (arg_t, loc)
+    instantiate (TypeVar (TypeName [] tn) targs)
+                (TypeVar (TypeName [] arg_tn) arg_targs)
+      | tn == arg_tn, length targs == length arg_targs =
+          zipWithM_ instantiateTypeArg targs arg_targs
+    instantiate (Record fs) (Record arg_fs)
+      | M.keys fs == M.keys arg_fs =
+        mapM_ (uncurry instantiate) $ M.intersectionWith (,) fs arg_fs
+    instantiate (Array at) (Array p_at) =
+      instantiateArrayType at p_at
+    instantiate (Prim pt) (Prim p_pt)
+      | pt == p_pt = return ()
+    instantiate _ _ =
+      lift $ Left Nothing
+
+    instantiateArrayType (PrimArray pt shape u ()) (PrimArray arg_pt arg_shape arg_u ())
+      | shape == arg_shape, arg_u `subuniqueOf` u, pt == arg_pt =
+          return ()
+    instantiateArrayType (RecordArray fs shape u) (RecordArray arg_fs arg_shape arg_u)
+      | shape == arg_shape, arg_u `subuniqueOf` u,
+        M.keys fs == M.keys arg_fs =
+          mapM_ (uncurry instantiateRecordArrayType) $
+          M.intersectionWith (,) fs arg_fs
+    instantiateArrayType (PolyArray tn [] shape u ()) arg_t
+      | uniqueness (Array arg_t) `subuniqueOf` u,
+        Just arg_t' <- peelArray (shapeRank shape) $ Array arg_t =
+          instantiate (TypeVar tn []) arg_t'
+    instantiateArrayType _ _ =
+      lift $ Left Nothing
+
+    instantiateRecordArrayType (PrimArrayElem pt () u) (PrimArrayElem arg_pt () arg_u)
+      | pt == arg_pt, arg_u `subuniqueOf` u =
+          return ()
+    instantiateRecordArrayType (ArrayArrayElem at) (ArrayArrayElem arg_at) =
+      instantiateArrayType at arg_at
+    instantiateRecordArrayType (PolyArrayElem tn targs () u) (PolyArrayElem arg_tn arg_targs () arg_u)
+      | arg_u `subuniqueOf` u,
+        tn == arg_tn, length targs == length arg_targs =
+          zipWithM_ instantiateTypeArg targs arg_targs
+    instantiateRecordArrayType (PolyArrayElem tn [] () u) arg_t
+      | recordArrayElemUniqueness arg_t `subuniqueOf` u =
+          instantiate (TypeVar tn []) (recordArrayElemToType arg_t)
+    instantiateRecordArrayType (RecordArrayElem fs) (RecordArrayElem arg_fs)
+      | M.keys fs == M.keys arg_fs =
+          mapM_ (uncurry instantiateRecordArrayType) $ M.intersectionWith (,) fs arg_fs
+    instantiateRecordArrayType _ _ =
+      lift $ Left Nothing
+
+    instantiateTypeArg TypeArgDim{} TypeArgDim{} =
+      return ()
+    instantiateTypeArg (TypeArgType t _) (TypeArgType arg_t _) =
+      instantiate t arg_t
+    instantiateTypeArg _ _ =
+      lift $ Left Nothing

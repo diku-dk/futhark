@@ -142,10 +142,10 @@ freeInLambdaIsh :: (FreeIn attr, FreeIn a, FreeAttr (ExpAttr lore),
                     FreeIn (Op lore)) =>
                    [ParamT attr] -> Body lore -> [a] -> Names
 freeInLambdaIsh params body rettype =
-  inRet <> inParams <> inBody
+  S.filter (`notElem` paramnames) $ inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeIn params
-        inBody = S.filter (`notElem` paramnames) $ freeInBody body
+        inBody = freeInBody body
         paramnames = map paramName params
 
 -- | A class indicating that we can obtain free variable information

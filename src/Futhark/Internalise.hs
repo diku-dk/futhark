@@ -49,57 +49,24 @@ import Futhark.Util (chunks, dropAt)
 internaliseProg :: MonadFreshNames m =>
                    E.Prog -> m (Either String I.Prog)
 internaliseProg prog = do
-  prog' <- fmap (fmap I.Prog) $ runInternaliseM builtinFtable $
-           internaliseDecs $ progDecs prog
+  prog' <- fmap (fmap I.Prog) $ runInternaliseM $ do
+    addBuiltinFunctions
+    internaliseDecs $ progDecs prog
   sequence $ fmap I.renameProg prog'
 
-builtinFtable :: FunTable
-builtinFtable = M.fromList $ mapMaybe addBuiltin $ M.toList E.intrinsics
+addBuiltinFunctions :: InternaliseM ()
+addBuiltinFunctions = mapM_ addBuiltin $ M.toList E.intrinsics
   where addBuiltin (name, E.IntrinsicMonoFun paramts t) =
-          Just
-          (name,
-           FunBinding
-           (baseName name,
-            [], [], [], map (I.Prim . internalisePrimType) paramts,
-            params,
-            const $ Just $ ExtRetType [I.Prim $ internalisePrimType t]))
+          noteFunction name $ const $
+           return (baseName name,
+                   [], [], [], map (I.Prim . internalisePrimType) paramts,
+                   params,
+                   const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
           where params =
                   [Param (VName (nameFromString "x") i) (I.Prim $ internalisePrimType pt)
                   | (i,pt) <- zip [0..] paramts]
         addBuiltin _ =
-          Nothing
-
-internaliseFunctionName :: VName -> InternaliseM (VName, Name)
-internaliseFunctionName fname = do
-  -- Note that we may have another name for this function if we are
-  -- inside of a functor application.
-  fname' <- newOrExistingSubst fname
-  return (fname', nameFromString $ pretty fname' ++ "f")
-
-preprocessValBind :: E.ValBind -> InternaliseM ()
-preprocessValBind (E.ValBind name _ t e loc) =
-  preprocessFunBind $ E.FunBind False name Nothing t [] [] e loc
-
-preprocessFunBind :: E.FunBind -> InternaliseM ()
-preprocessFunBind (E.FunBind _ ofname _ (Info rettype) tparams params _ _) =
-  noteFunctions <=< fmap (uncurry M.singleton) $
-  bindingParams tparams params $ \pcm shapes values -> do
-    (fname, fname') <- internaliseFunctionName ofname
-    (rettype', _, rcm) <- internaliseEntryReturnType rettype
-    let shapenames = map I.paramName shapes
-        consts = map ((`Param` I.Prim int32) . snd) $ pcm<>rcm
-    return (fname,
-            FunBinding { internalFun = (fname',
-                                        pcm<>rcm,
-                                        [],
-                                        shapenames,
-                                        map declTypeOf $ concat values,
-                                        consts++shapes++concat values,
-                                        applyRetType
-                                        (ExtRetType $ concat rettype')
-                                        (consts++shapes++concat values)
-                                       )
-                       })
+          return ()
 
 internaliseDecs :: [E.Dec] -> InternaliseM ()
 internaliseDecs ds =
@@ -107,11 +74,9 @@ internaliseDecs ds =
     [] ->
       return ()
     ValDec vdec : ds' -> do
-      preprocessValBind vdec
       internaliseValBind vdec
       internaliseDecs ds'
     FunDec fdec : ds' -> do
-      preprocessFunBind fdec
       internaliseFunBind fdec
       internaliseDecs ds'
     E.ModDec mb : ds' | null (modParams mb) -> do
@@ -131,23 +96,14 @@ internaliseDecs ds =
     E.TypeDec tb : ds' -> do
       v <- newOrExistingSubst $ E.typeAlias tb
       substs <- allSubsts
-      let internalise args = withTypeDecSubstitutions substs $ do
-            let dims = M.fromList $ mapMaybe dimSubst $ zip (E.typeParams tb) args
-                types = M.fromList $ mapMaybe typeSubst $ zip (E.typeParams tb) args
-            t <- withDims dims $ withTypes types $
-                 internaliseTypeM $ E.unInfo $ E.expandedType $ E.typeExp tb
-            return $ map fromDecl t
-      noteType v internalise
+      noteType v (substs, E.typeParams tb,
+                  E.unInfo $ E.expandedType $ E.typeExp tb)
       internaliseDecs ds'
     E.OpenDec e es _ : ds' -> do
       mapM_ internaliseModExp (e:es)
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
-  where dimSubst (E.TypeParamDim p _, I.TypeArgDim d) = Just (p, d)
-        dimSubst _ = Nothing
-        typeSubst (E.TypeParamType p _, I.TypeArgType ts) = Just (p, const $ return ts)
-        typeSubst _ = Nothing
 
 maybeAscript :: SrcLoc -> Maybe (SigExp, Info (M.Map VName VName)) -> ModExp
              -> ModExp
@@ -216,25 +172,61 @@ internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind (E.ValBind name _ t e loc) =
   internaliseFunBind $ E.FunBind False name Nothing t [] [] e loc
 
+internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
+internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
+internaliseFunName ofname _  = nameFromString . pretty <$> newVName (baseString ofname)
+
 internaliseFunBind :: E.FunBind -> InternaliseM ()
-internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body loc) =
-  bindingParams tparams params $ \pcm shapeparams params' -> do
-    (rettype', _, rcm) <- internaliseEntryReturnType rettype
-    (_, fname') <- internaliseFunctionName ofname
-    let mkConstParam name = Param name $ I.Prim int32
-        params_constparams = map (mkConstParam . snd) pcm
-        ret_constparams = map (mkConstParam . snd) rcm
-        constparams = params_constparams <> ret_constparams
-        all_params = constparams ++ shapeparams ++ concat params'
+internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body loc) = do
+  fname <- newOrExistingSubst ofname
+  substs <- allSubsts
+  noteFunction fname $ \(e_ts, _) -> withDecSubstitutions substs $
+    generatingFunctor mempty mempty $ do
+      let param_ts = map (E.removeShapeAnnotations . E.patternStructType) params
 
-    firstbody <- internaliseBody body
-    body' <- ensureResultExtShape asserting loc
-             (map I.fromDecl $ concat rettype') firstbody
+      mapping <- fmap mconcat $ zipWithM mapTypeVariables param_ts $
+                 map E.removeShapeAnnotations e_ts
 
-    addFunction $
-      I.FunDef Nothing fname' (ExtRetType $ concat rettype') all_params body'
+      let mkEntry (tp, et) = (tp, (substs, [], E.vacuousShapeAnnotations et))
+          types = map mkEntry $ M.toList mapping
+      notingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
+        (rettype', _, rcm) <- internaliseReturnType rettype
+        fname' <- internaliseFunName fname params
+        body' <- ensureResultExtShape asserting loc (map I.fromDecl rettype')
+                 =<< internaliseBody body
 
-    when entry $ generateEntryPoint fb
+        let mkConstParam name = Param name $ I.Prim int32
+            constparams = map (mkConstParam . snd) $ pcm<>rcm
+            shapenames = map I.paramName shapeparams
+            normal_params = map paramName constparams ++ shapenames ++ map paramName (concat params')
+            normal_param_names = S.fromList normal_params
+            free_in_fun = freeInBody body' `S.difference` normal_param_names
+
+        used_free_params <- forM (S.toList free_in_fun) $ \v -> do
+          v_t <- lookupType v
+          return $ Param v $ toDecl v_t Nonunique
+
+        let free_shape_params = map (`Param` I.Prim int32) $
+                                concatMap (I.shapeVars . I.arrayShape . paramType) used_free_params
+            free_params = nub $ free_shape_params ++ used_free_params
+            all_params = constparams ++ free_params ++ shapeparams ++ concat params'
+
+        addFunction $ I.FunDef Nothing fname' (ExtRetType rettype') all_params body'
+
+        return (fname',
+                pcm<>rcm,
+                map I.paramName free_params,
+                shapenames,
+                map declTypeOf $ concat params',
+                all_params,
+                applyRetType (ExtRetType rettype') all_params)
+
+  -- For any nullary function we force immediate generation.  Note
+  -- that this means value declarations are also generated here - this
+  -- is important!
+  when (null params) $ void $ lookupFunction fname ([],[])
+
+  when entry $ generateEntryPoint fb
 
 generateEntryPoint :: E.FunBind -> InternaliseM ()
 generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ loc) =
@@ -246,9 +238,11 @@ generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ loc) =
                              E.vacuousShapeAnnotations rettype
     let entry' = entryPoint (zip params params') (rettype, entry_rettype)
         args = map (I.Var . I.paramName) $ concat params'
+        e_ts = map (flip setAliases () . E.patternType) orig_params
+        i_ts = staticShapes $ map I.paramType $ concat params'
 
     entry_body <- insertStmsM $
-      resultBody . fst <$> funcall "entry_result" (E.qualName ofname) args loc
+      resultBody . fst <$> funcall "entry_result" (E.qualName ofname) (e_ts,i_ts) args loc
 
     addFunction $
       I.FunDef (Just entry') (baseName ofname)
@@ -357,14 +351,14 @@ internaliseExp desc (E.RecordLit orig_fields _) =
               Record fs -> return $ unzip $ sortFields fs
               _         -> fail $ "Type of " ++ pretty e ++ " is not record."
           e' <- internaliseExp desc e
-          lens <- mapM internalisedTypeSize field_types
+          lens <- mapM (internalisedTypeSize . flip setAliases ()) field_types
           return $ M.fromList $ zip field_names $ chunks lens e'
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
-      rowtypes <- internaliseType rowtype
+      rowtypes <- internaliseType (rowtype `setAliases` ())
       let arraylit rt = I.BasicOp $ I.ArrayLit [] rt
       letSubExps desc $ map (arraylit . zeroDim . fromDecl) rowtypes
     e' : _ -> do
@@ -400,7 +394,9 @@ internaliseExp desc (E.Negate e _) = do
                letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
              _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
--- Some functions are special (polymorphic) and we handle that here.
+-- Some functions are magical (overloaded) and we handle that here.
+-- Note that polymorphic functions (which are not magical) are not
+-- handled here.
 internaliseExp desc (E.Apply fname args _ _)
   | Just internalise <- isOverloadedFunction fname $ map fst args =
       internalise desc
@@ -417,7 +413,9 @@ internaliseExp desc (E.Apply fname args _ _)
 
 internaliseExp desc (E.Apply qfname args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
-  fst <$> funcall desc qfname args' loc
+  i_ts <- staticShapes <$> mapM subExpType args'
+  let e_ts = map (flip setAliases () . E.typeOf . fst) args
+  fst <$> funcall desc qfname (e_ts, i_ts) args' loc
 
 internaliseExp desc (E.LetPat tparams pat e body loc) = do
   ses <- internaliseExp desc e
@@ -429,44 +427,9 @@ internaliseExp desc (E.LetPat tparams pat e body loc) = do
       letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
     internaliseExp desc body
 
-internaliseExp desc (E.LetFun ofname (tparams, params, _, Info rettype, e) body loc) = do
-  bindingParams tparams params $ \pcm shapeparams params' -> do
-    (fname, fname') <- internaliseFunctionName ofname
-    (rettype', _, rcm) <- internaliseReturnType rettype
-    e' <- internaliseBody e
-    e'' <- ensureResultExtShape asserting loc
-           (map I.fromDecl rettype') e'
-
-    let mkConstParam name = Param name $ I.Prim int32
-        constparams = map (mkConstParam . snd) $ pcm<>rcm
-        shapenames = map I.paramName shapeparams
-        normal_params = shapenames ++ map paramName (concat params')
-        normal_param_names = S.fromList normal_params
-        free_in_fun = freeInBody e'' `S.difference` normal_param_names
-
-    used_free_params <- forM (S.toList free_in_fun) $ \v -> do
-      v_t <- lookupType v
-      return $ Param v $ toDecl v_t Nonunique
-
-    let free_shape_params = map (`Param` I.Prim int32) $
-                            concatMap (I.shapeVars . I.arrayShape . paramType) used_free_params
-        free_params = nub $ free_shape_params ++ used_free_params
-        all_params = constparams ++ free_params ++ shapeparams ++ concat params'
-
-    noteFunctions $ M.singleton fname
-      FunBinding { internalFun =
-                     (fname',
-                      pcm<>rcm,
-                      map I.paramName free_params,
-                      shapenames,
-                      map declTypeOf $ concat params',
-                      all_params,
-                      applyRetType (ExtRetType rettype') all_params)
-                 }
-
-    addFunction $ I.FunDef Nothing fname' (ExtRetType rettype') all_params e''
-
-  internaliseExp desc body
+internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
+  internaliseFunBind $ E.FunBind False ofname retdecl (Info rettype) tparams params body loc
+  internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
@@ -868,7 +831,7 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
   ce' <- internaliseExp1 "cond" ce
   te' <- internaliseBody te
   fe' <- internaliseBody fe
-  (t', _, _) <- internaliseReturnType $ E.vacuousShapeAnnotations t
+  (t', _, _) <- internaliseReturnType $ E.vacuousShapeAnnotations t `setAliases` ()
   letTupExp' desc $ I.If ce' te' fe' $ map I.fromDecl t'
 
 -- Builtin operators are handled specially because they are
@@ -882,9 +845,9 @@ internaliseExp desc (E.BinOp op xarg yarg ret loc) =
   internaliseExp desc $ E.Apply op [xarg,yarg] ret loc
 
 internaliseExp desc (E.Project k e (Info rt) _) = do
-  n <- internalisedTypeSize rt
+  n <- internalisedTypeSize $ rt `setAliases` ()
   i' <- fmap sum $ mapM internalisedTypeSize $
-        case E.typeOf e of
+        case E.typeOf e `setAliases` () of
                Record fs -> map snd $ filter ((<k) . fst) $ sortFields fs
                t         -> [t]
   take n . drop i' <$> internaliseExp desc e
@@ -1209,13 +1172,14 @@ internaliseLambda (E.CurryFun qfname [] (Info ([et], _)) loc) [it] = do
       body_t <- bodyExtType body
       return ([param], body, body_t)
     Nothing ->
-      internaliseCurrying qfname [] loc [it]
+      internaliseCurrying qfname [] loc ([et], [it])
 
-internaliseLambda (E.CurryFun qfname curargs _ loc) rowtypes =
-  internaliseCurrying qfname curargs loc rowtypes
+internaliseLambda (E.CurryFun qfname curargs (Info (paramts, _)) loc) rowtypes =
+  internaliseCurrying qfname curargs loc (paramts, rowtypes)
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
-  (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
+  (params, body, rettype') <-
+    binOpFunToLambda unop xtype ytype rettype
   internaliseLambda (AnonymFun [] params body Nothing (Info rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype, Info _) (Info rettype) loc) rowts = do
@@ -1231,18 +1195,20 @@ internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rett
 internaliseCurrying :: QualName VName
                     -> [E.Exp]
                     -> SrcLoc
-                    -> [I.Type]
+                    -> ([E.Type], [I.Type])
                     -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
-internaliseCurrying qfname curargs loc row_ts = do
-
+internaliseCurrying qfname curargs loc (row_ets, row_its) = do
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
-  params <- mapM (newParam "not_curried") row_ts
+  i_ts <- staticShapes <$> mapM subExpType curargs'
+  params <- mapM (newParam "not_curried") row_its
   let args = curargs' ++ map (I.Var . I.paramName) params
+      e_ts = map (`setAliases` ()) $ map E.typeOf curargs ++ row_ets
   ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectStms $
-    funcall "curry_result" qfname args loc
+    funcall "curry_result" qfname (e_ts, i_ts) args loc
   return (params, mkBody fun_bnds res, ts)
 
-binOpFunToLambda :: E.QualName VName -> E.Type -> E.Type -> E.Type
+binOpFunToLambda :: E.QualName VName
+                 -> E.Type -> E.Type -> E.Type
                  -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
@@ -1256,7 +1222,8 @@ binOpFunToLambda op xtype ytype rettype = do
            (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
-binOpCurriedToLambda :: E.QualName VName -> E.Type -> E.Type
+binOpCurriedToLambda :: E.QualName VName
+                     -> E.Type -> E.Type
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
                      -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
@@ -1467,7 +1434,7 @@ isOverloadedFunction qname args = do
 -- function call and return the corresponding subexpressions.
 lookupConstant :: VName -> InternaliseM (Maybe [SubExp])
 lookupConstant name = do
-  is_const <- fmap internalFun <$> lookupFunction' name
+  is_const <- lookupFunction' name
   case is_const of
     Just (fname, constparams, _, _, _, _, mk_rettype) -> do
       (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs constparams
@@ -1485,12 +1452,13 @@ constFunctionArgs = mapM arg
                 I.Apply fname [] $ primRetType I.int32
           return (se, I.Observe, I.Prim I.int32)
 
-funcall :: String -> QualName VName -> [SubExp] -> SrcLoc
+funcall :: String -> QualName VName -> SpecArgs -> [SubExp] -> SrcLoc
         -> InternaliseM ([SubExp], [I.ExtType])
-funcall desc qfname args loc = do
+funcall desc qfname (e_ts, i_ts) args loc = do
   fname <- lookupSubst qfname
+  e_ts' <- mapM fullyApplyType e_ts
   (fname', constparams, closure, shapes, value_paramts, fun_params, rettype_fun) <-
-    internalFun <$> lookupFunction fname
+    lookupFunction fname (e_ts', i_ts)
   (constargs, const_ds, _) <- unzip3 <$> constFunctionArgs constparams
   argts <- mapM subExpType args
   closure_ts <- mapM lookupType closure

@@ -101,7 +101,7 @@ type ``()``.
    array_type: "[" [`dim`] "]" `type`
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
-   type_arg: "[" [`dim`] "]"
+   type_arg: "[" [`dim`] "]" | `type`
    dim: `qualid` | `decimal` | "#" `id`
 
 An array value is written as a nonempty sequence of comma-separated
@@ -790,7 +790,14 @@ of the function::
 Type inference is not supported, and functions are fully monomorphic.
 A parameter is written as ``(name: type)``.  Functions may not be
 recursive.  Optionally, the programmer may put *shape declarations* in
-the return type and parameter types; see `Shape Declarations`_.
+the return type and parameter types; see `Shape Declarations`_.  A
+function can be *polymorphic* by using type parameters, in the same
+way as for `Type Abbreviations`_::
+
+  let reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
+
+Shape and type parameters are not passed explicitly when calling
+function, but are automatically derived.
 
 User-Defined Operators
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -856,7 +863,7 @@ Type Abbreviations
 
 .. productionlist::
    type_bind: "type" `id` `type_param`* "=" `type`
-   type_param: "[" `id` "]"
+   type_param: "[" `id` "]" | "'" `id`
 
 Type abbreviations function as shorthands for purpose of documentation
 or brevity.  After a type binding ``type t1 = t2``, the name ``t1``
@@ -865,18 +872,29 @@ not create new unique types.  After the previous binding, the types
 ``t1`` and ``t2`` are entirely interchangeable.
 
 A type abbreviation can have zero or more parameters.  A type
-parameter prefixed with a ``#`` is a *shape parameter*, and can be
-used in the definition as an array dimension size, or as a dimension
-argument to other type abbreviations.  When passing an argument for a
-shape parameter, it must be encloses in square brackets.  Example::
+parameter enclosed with square brackets is a *shape parameter*, and
+can be used in the definition as an array dimension size, or as a
+dimension argument to other type abbreviations.  When passing an
+argument for a shape parameter, it must be encloses in square
+brackets.  Example::
 
-  type two_intvecs #n = ([n]i32, [n]i32)
+  type two_intvecs [n] = ([n]i32, [n]i32)
 
   let (a,b): two_intvecs [2] = (iota 2, replicate 2 0)
 
 Shape parameters work much like shape declarations for arrays.  Like
 shape declarations, they can be elided via square brackets containing
 nothing.
+
+A type parameter prefixed with a single quote is a *type parameter*.
+It is in scope as a type in the definition of the type abbreviation.
+Whenever the type abbreviation is used in a type expression, a type
+argument must be passed for the parameter.  Type arguments need not be
+prefixed with single quotes::
+
+  type two_vecs [n] 't = ([n]t, [n]t)
+  type two_intvecs [n] = two_vecs [n] i32
+  let (a,b): two_vecs [2] i32 = (iota 2, replicate 2 0)
 
 When using uniqueness attributes with type abbreviations, inner
 uniqueness attributes are overrided by outer ones::
@@ -895,7 +913,7 @@ Module System
 .. productionlist::
    mod_bind: "module" `id` `mod_param`+ "=" [":" mod_type_exp] "=" `mod_exp`
    mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
+   mod_type_bind: "module" "type" `id` `type_param`* "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules.  *Module types* are
@@ -1011,10 +1029,10 @@ Module Type Expressions
 
 
 .. productionlist::
-   spec:   "val" `id` ":" `spec_type`
+   spec:   "val" `id` `type_param`* ":" `spec_type`
        : | "val" `binop` ":" `spec_type`
        : | "type" `id` `type_param`* "=" `type`
-       : | "type `id`
+       : | "type `id` `type_param`*
        : | "module" `id` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
    spec_type: `type` | `type` "->" `spec_type`

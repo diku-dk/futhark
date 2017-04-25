@@ -33,6 +33,7 @@ module Language.Futhark.Attributes
   , recordArrayElemUniqueness
   , aliases
   , diet
+  , subuniqueOf
   , subtypeOf
   , similarTo
   , arrayRank

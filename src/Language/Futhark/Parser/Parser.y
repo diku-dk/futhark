@@ -303,12 +303,12 @@ ModParam :: { ModParamBase NoInfo Name }
           : '(' id ':' SigExp ')' { let L _ (ID name) = $2 in ModParam name $4 $1 }
 
 Spec :: { SpecBase NoInfo Name }
-      : val id ':' SigTypeDecl
-        { let L loc (ID name) = $2; (ps, r) = $4
-          in ValSpec name ps r loc  }
+      : val id many(TypeParam) ':' SigTypeDecl
+        { let L loc (ID name) = $2; (ps, r) = $5
+          in ValSpec name $3 ps r loc  }
       | val BindingBinOp ':' SigTypeDecl
         { let (ps, r) = $4
-          in ValSpec $2 ps r $1  }
+          in ValSpec $2 [] ps r $1  }
       | TypeAbbr
         { TypeAbbrSpec $1 }
       | type id many(TypeParam)
@@ -732,7 +732,8 @@ FunAbstr :: { UncheckedLambda }
          | '(' '-' ')'
            { BinOpFun (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo $1 }
          | '(' Exp2 '-' ')'
-           { CurryBinOpLeft (QualName [] (nameFromString "-")) $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
+           { CurryBinOpLeft (QualName [] (nameFromString "-"))
+             $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
          | '(' BinOp Exp2 ')'
            { CurryBinOpRight $2 $3 (NoInfo, NoInfo) NoInfo $1 }
          | '(' Exp2 BinOp ')'

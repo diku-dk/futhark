@@ -29,9 +29,6 @@ module Language.Futhark.TypeChecker.Monad
   , TypeBinding(..)
   , MTy(..)
 
-  , envVals
-  , envMods
-
   , anySignedType
   , anyUnsignedType
   , anyIntType
@@ -208,9 +205,10 @@ data Mod = ModEnv Env
 data FunSig = FunSig TySet Mod MTy
             deriving (Show)
 
--- | Return type and a list of argument types, and names that are used
--- free inside the function.
-type FunBinding = ([StructType], StructType)
+-- | Type parameters, list of parameter types, and return type.  The
+-- type parameters are in scope in both parameter types and the return
+-- type.
+type FunBinding = ([TypeParam], [StructType], StructType)
 
 -- | Representation of a module type.
 data MTy = MTy { mtyAbs :: TySet
@@ -223,7 +221,7 @@ data MTy = MTy { mtyAbs :: TySet
 data TypeBinding = TypeAbbr [TypeParam] StructType
                  deriving (Show)
 
-data ValBinding = BoundV Type
+data ValBinding = BoundV StructType
                 | BoundF FunBinding
                 deriving (Show)
 
@@ -241,16 +239,6 @@ instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
   Env vt1 tt1 st1 mt1 nt1 `mappend` Env vt2 tt2 st2 mt2 nt2 =
     Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
-
-envVals :: Env -> [(VName, ([StructType], StructType))]
-envVals = map select . M.toList . envVtable
-  where select (name, BoundF fun) =
-          (name, fun)
-        select (name, BoundV t) =
-          (name, ([], vacuousShapeAnnotations $ toStruct t))
-
-envMods :: Env -> [(VName,Mod)]
-envMods = M.toList . envModTable
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
@@ -380,7 +368,7 @@ instance MonadTypeChecker TypeM where
     case M.lookup name $ envVtable env of
       Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
-                      | otherwise -> return (qn', t)
+                      | otherwise -> return (qn', removeShapeAnnotations $ fromStruct t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
