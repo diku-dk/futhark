@@ -108,6 +108,7 @@ import           Language.Futhark.Core
 class (Show vn,
        Show (f vn),
        Show (f (CompTypeBase vn)),
+       Show (f [TypeBase Rank ()]),
        Show (f (StructTypeBase vn)),
        Show (f (M.Map VName VName)),
        Show (f ([CompTypeBase vn], CompTypeBase vn))) => Showable f vn where
@@ -524,7 +525,7 @@ data ExpBase f vn =
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
-            | Apply  (QualName vn) [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
+            | Apply (QualName vn) [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
 
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
@@ -538,7 +539,8 @@ data ExpBase f vn =
               (ExpBase f vn) -- Let-body.
               SrcLoc
 
-            | BinOp (QualName vn) (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f (CompTypeBase vn)) SrcLoc
+            | BinOp (QualName vn)
+              (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f (CompTypeBase vn)) SrcLoc
 
             | Project Name (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
@@ -738,13 +740,17 @@ deriving instance Showable f vn => Show (LowerBoundBase f vn)
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
-                      | CurryFun (QualName vn) [ExpBase f vn] (f ([CompTypeBase vn], CompTypeBase vn)) SrcLoc
+                      | CurryFun (QualName vn)
+                        [ExpBase f vn] (f ([CompTypeBase vn], CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
-                      | BinOpFun (QualName vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | BinOpFun (QualName vn)
+                        (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+@; first two types are operands, third is result.
-                      | CurryBinOpLeft (QualName vn) (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | CurryBinOpLeft (QualName vn)
+                        (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @2+@; first type is operand, second is result.
-                      | CurryBinOpRight (QualName vn) (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                      | CurryBinOpRight (QualName vn)
+                        (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+2@; first type is operand, second is result.
 deriving instance Showable f vn => Show (LambdaBase f vn)
 
@@ -826,10 +832,11 @@ typeParamName :: TypeParamBase vn -> vn
 typeParamName (TypeParamDim v _)  = v
 typeParamName (TypeParamType v _) = v
 
-data SpecBase f vn = ValSpec  { specName     :: vn
-                              , specParams   :: [TypeDeclBase f vn]
-                              , specRettype  :: TypeDeclBase f vn
-                              , specLocation :: SrcLoc
+data SpecBase f vn = ValSpec  { specName       :: vn
+                              , specTypeParams :: [TypeParamBase vn]
+                              , specParams     :: [TypeDeclBase f vn]
+                              , specRettype    :: TypeDeclBase f vn
+                              , specLocation   :: SrcLoc
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
                    | TypeSpec vn [TypeParamBase vn] SrcLoc -- ^ Abstract type.
@@ -838,11 +845,11 @@ data SpecBase f vn = ValSpec  { specName     :: vn
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ loc)  = locOf loc
-  locOf (TypeAbbrSpec tbind) = locOf tbind
-  locOf (TypeSpec _ _ loc)   = locOf loc
-  locOf (ModSpec _ _ loc)    = locOf loc
-  locOf (IncludeSpec _ loc)  = locOf loc
+  locOf (ValSpec _ _ _ _ loc) = locOf loc
+  locOf (TypeAbbrSpec tbind)  = locOf tbind
+  locOf (TypeSpec _ _ loc)    = locOf loc
+  locOf (ModSpec _ _ loc)     = locOf loc
+  locOf (IncludeSpec _ loc)   = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigParens (SigExpBase f vn) SrcLoc

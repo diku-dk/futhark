@@ -1,5 +1,5 @@
 -- ==
--- error: expecting
+-- error: M1.M.f
 
 module type MT = {
   module M: {type t val x: t val f: t -> t}

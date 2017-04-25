@@ -111,29 +111,42 @@ checkForDuplicateDecs =
 
         f OpenDec{} = return
 
+bindingTypeParams :: [TypeParam] -> TypeM a -> TypeM a
+bindingTypeParams tparams = localEnv (<>env)
+  where env = mconcat $ map typeParamEnv tparams
+
+        typeParamEnv (TypeParamDim v _) =
+          mempty { envVtable =
+                     M.singleton v $ BoundV (Prim (Signed Int32)) }
+        typeParamEnv (TypeParamType v _) =
+          mempty { envTypeTable =
+                     M.singleton v $ TypeAbbr [] $ TypeVar (typeName v) [] }
+
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 
 checkSpecs [] = return (mempty, mempty, [])
 
-checkSpecs (ValSpec name paramtypes rettype loc : specs) =
+checkSpecs (ValSpec name tparams paramtypes rettype loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    paramtypes' <- mapM (checkTypeDecl loc) paramtypes
-    rettype' <- checkTypeDecl loc rettype
+    (tparams', paramtypes', rettype') <-
+      checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
+        paramtypes' <- mapM (checkTypeDecl loc) paramtypes
+        rettype' <- checkTypeDecl loc rettype
+        return (tparams', paramtypes', rettype')
     let paramtypes'' = map (unInfo . expandedType) paramtypes'
         rettype'' = unInfo $ expandedType rettype'
         valenv =
           mempty { envVtable = M.singleton name' $
                                if null paramtypes''
-                               then BoundV $ removeShapeAnnotations $
-                                    rettype'' `addAliases` mempty
-                               else BoundF (paramtypes'', rettype'')
+                               then BoundV rettype''
+                               else BoundF (tparams', paramtypes'', rettype'')
                  , envNameMap = M.singleton (Term, name) name'
                  }
     (abstypes, env, specs') <- localEnv (valenv<>) $ checkSpecs specs
     return (abstypes,
             env <> valenv,
-            ValSpec name' paramtypes' rettype' loc : specs')
+            ValSpec name' tparams' paramtypes' rettype' loc : specs')
 
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
@@ -378,7 +391,7 @@ checkForDuplicateSpecs =
               bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
-        f (ValSpec name _ _ loc) =
+        f (ValSpec name _ _ _ loc) =
           check Term name loc
 
         f (TypeAbbrSpec (TypeBind name _ _ loc)) =
@@ -406,11 +419,6 @@ checkTypeBind (TypeBind name ps td loc) =
                          M.singleton (Type, name) name'
                      },
               TypeBind name' ps' td' loc)
-  where bindingTypeParams ps' = localEnv $ \e -> e <> mconcat (map typeParamEnv ps')
-        typeParamEnv (TypeParamDim pv _) =
-          mempty { envVtable = M.singleton pv $ BoundV $ Prim $ Signed Int32 }
-        typeParamEnv (TypeParamType pv _) =
-          mempty { envTypeTable = M.singleton pv $ TypeAbbr [] $ TypeVar (typeName pv) [] }
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind name maybe_t NoInfo e loc) = do
@@ -432,7 +440,7 @@ checkValBind (ValBind name maybe_t NoInfo e loc) = do
       return (Nothing, e')
   let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
   return (mempty { envVtable =
-                     M.singleton name' (BoundV $ typeOf e' `setAliases` mempty)
+                     M.singleton name' (BoundV e_t)
                  , envNameMap =
                      M.singleton (Term, name) name'
                  },
@@ -448,7 +456,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) 
 
   return (mempty { envVtable =
                      M.singleton fname'
-                     (BoundF (map paramType params', rettype))
+                     (BoundF (tparams', map paramType params', rettype))
                  , envNameMap =
                      M.singleton (Term, fname) fname'
                  },
@@ -574,21 +582,10 @@ matchMTys = matchMTys' mempty
 
       -- Check that all values are defined correctly, substituting the
       -- abstract types first.
-      val_substs <- fmap M.fromList $ forM (envVals sig) $ \(name, (spec_pts, spec_t)) -> do
-        let spec_pts' = map (substituteTypes abs_subst_to_type) spec_pts
-            spec_t'   = substituteTypes abs_subst_to_type spec_t
+      val_substs <- fmap M.fromList $ forM (M.toList $ envVtable sig) $ \(name, spec_bv) -> do
+        let spec_bv' = substituteTypesInValBinding abs_subst_to_type spec_bv
         case findBinding envVtable Term (baseName name) env of
-          Just (name', BoundV t)
-            | null spec_pts', toStructural t `subtypeOf` toStructural spec_t' ->
-                return (name, name')
-            | otherwise ->
-                mismatchedVal loc name (spec_pts', spec_t') ([], t)
-          Just (name', BoundF (pts, ret))
-            | and (zipWith subtypeOf (map toStructural pts) (map toStructural spec_pts')),
-              toStructural ret `subtypeOf` toStructural spec_t' ->
-                return (name, name')
-            | otherwise ->
-                mismatchedVal loc (baseName name) (spec_pts', spec_t') (pts, ret)
+          Just (name', bv) -> matchVal loc name spec_bv' name' bv
           _ -> missingVal loc (baseName name)
 
       -- Check that all type abbreviations are correctly defined.
@@ -601,7 +598,7 @@ matchMTys = matchMTys' mempty
           Nothing -> missingType loc $ baseName name
 
       -- Check for correct modules.
-      mod_substs <- fmap M.unions $ forM (envMods sig) $ \(name, modspec) ->
+      mod_substs <- fmap M.unions $ forM (M.toList $ envModTable sig) $ \(name, modspec) ->
         case findBinding envModTable Structure (baseName name) env of
           Just (name', mod) -> do
             mod_substs <- matchMods abs_subst_to_type mod modspec loc
@@ -633,6 +630,39 @@ matchMTys = matchMTys' mempty
               matchTypeParam _ _ =
                 nomatch
 
+    matchVal :: SrcLoc
+             -> VName -> ValBinding
+             -> VName -> ValBinding
+             -> Either TypeError (VName, VName)
+    matchVal _ spec_name (BoundV spec_t) name (BoundV t)
+      | toStructural t `subtypeOf` toStructural spec_t =
+          return (spec_name, name)
+    matchVal loc spec_name (BoundF spec_f) name (BoundF f)
+      | matchFunBinding loc spec_f f =
+          return (spec_name, name)
+    matchVal loc spec_name spec_v _ v =
+      Left $ TypeError loc $ "Value " ++ baseString spec_name ++ " specified as type " ++
+      ppValBind spec_v ++ " in signature, but has " ++ ppValBind v ++ " in structure."
+
+    matchFunBinding :: SrcLoc -> FunBinding -> FunBinding -> Bool
+    matchFunBinding loc (_, spec_pts, spec_ret) (tps, pts, ret)
+      | length spec_pts == length pts,
+        Just substs_and_locs <-
+          foldM match mempty $
+          zip (map toStructural pts) (map toStructural spec_pts) =
+          let substs = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst)
+                       substs_and_locs
+              -- This relies on the property that there can be no new
+              -- type variables in the return type.
+          in toStructural (substituteTypes substs ret)
+             `subtypeOf` toStructural spec_ret
+      where tnames = map typeParamName tps
+            match substs (spec_t, t) =
+              case instantiatePolymorphic tnames loc substs spec_t t of
+                Right substs' -> Just substs'
+                Left _        -> Nothing
+    matchFunBinding _ _ _ = False
+
     missingType loc name =
       Left $ TypeError loc $
       "Module does not define a type named " ++ pretty name ++ "."
@@ -648,10 +678,6 @@ matchMTys = matchMTys' mempty
     mismatchedType loc name spec_t env_t =
       Left $ TypeError loc $ "Type " ++ pretty name ++ " specified as " ++
       ppTypeAbbr spec_t ++ " in signature, but " ++ ppTypeAbbr env_t ++ " in structure."
-
-    mismatchedVal loc name spec_t env_t =
-      Left $ TypeError loc $ "Value " ++ pretty name ++ " specified as type " ++
-      ppFunType spec_t ++ " in signature, but has " ++ ppFunType env_t ++ " in structure."
 
     findBinding :: (Env -> M.Map VName v)
                   -> Namespace -> Name
@@ -683,8 +709,9 @@ matchMTys = matchMTys' mempty
           _ ->
             missingType loc $ fmap baseName name
 
-    ppFunType (paramts, ret) =
-      intercalate " -> " $ map pretty $ paramts ++ [ret]
+    ppValBind (BoundV t) = pretty t
+    ppValBind (BoundF (tps, pts, t)) =
+      unwords $ map pretty tps ++ intersperse "->" (map pretty $ pts ++ [t])
 
     ppTypeAbbr (ps, t) =
       "type " ++ unwords (map pretty ps) ++ " = " ++ pretty t
@@ -700,19 +727,11 @@ substituteTypesInMTy substs (MTy abs mod) = MTy abs $ substituteTypesInMod subst
 
 substituteTypesInEnv :: TypeSubs -> Env -> Env
 substituteTypesInEnv substs env =
-  env { envVtable    = M.map subV $ envVtable env
+  env { envVtable    = M.map (substituteTypesInValBinding substs) $ envVtable env
       , envTypeTable = M.mapWithKey subT $ envTypeTable env
       , envModTable  = M.map (substituteTypesInMod substs) $ envModTable env
       }
-  where subV (BoundV t) =
-          BoundV $ fromStruct $ toStructural $
-          substituteTypes substs $
-          vacuousShapeAnnotations $ toStruct t
-        subV (BoundF (ts, t)) =
-          BoundF (map (substituteTypes substs) ts,
-                  substituteTypes substs t)
-
-        subT name _
+  where subT name _
           | Just (TypeSub (TypeAbbr ps t)) <- M.lookup name substs = TypeAbbr ps t
         subT _ (TypeAbbr ps t) = TypeAbbr ps $ substituteTypes substs t
 
@@ -772,11 +791,11 @@ newNamesForMTy except orig_mty = do
                  (map f vs)
 
         substituteInBinding (BoundV t) =
-          BoundV $ fromStruct $ toStructural $
-
-          substituteInType $ vacuousShapeAnnotations $ toStruct t
-        substituteInBinding (BoundF (pts,t)) =
-          BoundF (map substituteInType pts, substituteInType t)
+          BoundV $ substituteInType t
+        substituteInBinding (BoundF (ps, pts,t)) =
+          BoundF (map substituteInTypeParam ps,
+                  map substituteInType pts,
+                  substituteInType t)
 
         substituteInMod (ModEnv env) =
           ModEnv $ substituteInEnv env
@@ -789,10 +808,11 @@ newNamesForMTy except orig_mty = do
 
         substituteInTypeBinding (TypeAbbr ps t) =
           TypeAbbr (map substituteInTypeParam ps) $ substituteInType t
-          where substituteInTypeParam (TypeParamDim p loc) =
-                  TypeParamDim (substitute p) loc
-                substituteInTypeParam (TypeParamType p loc) =
-                  TypeParamType (substitute p) loc
+
+        substituteInTypeParam (TypeParamDim p loc) =
+          TypeParamDim (substitute p) loc
+        substituteInTypeParam (TypeParamType p loc) =
+          TypeParamType (substitute p) loc
 
         substituteInType :: StructType -> StructType
         substituteInType (TypeVar (TypeName qs v) targs) =

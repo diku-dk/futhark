@@ -121,7 +121,9 @@ processFlatPattern = processFlatPattern' []
     internaliseBindee bindee = do
       -- XXX: we gotta be screwing up somehow by ignoring the extra
       -- return values.  If not, why not?
-      (tss, _, _) <- internaliseParamTypes nothing_bound [E.vacuousShapeAnnotations $ E.unInfo $ E.identType bindee]
+      (tss, _, _) <- internaliseParamTypes nothing_bound
+                     [flip E.setAliases () $ E.vacuousShapeAnnotations $
+                      E.unInfo $ E.identType bindee]
       forM (concat tss) $ \t -> do
         name <- newVName base
         return (name, t)
