@@ -454,7 +454,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) 
     bindSpaced [(Term, fname)] $
     checkFunDef (fname, maybe_retdecl, tparams, params, body, loc)
 
-  when (entry && not (null tparams)) $
+  when (entry && any isTypeParam tparams) $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
 
   return (mempty { envVtable =
@@ -467,6 +467,9 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) 
 
   where paramType :: Pattern -> StructType
         paramType = vacuousShapeAnnotations . toStruct . patternType
+
+        isTypeParam TypeParamType{} = True
+        isTypeParam _ = False
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
 checkDecs (ModDec struct:rest) = do
