@@ -454,6 +454,9 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) 
     bindSpaced [(Term, fname)] $
     checkFunDef (fname, maybe_retdecl, tparams, params, body, loc)
 
+  when (entry && not (null tparams)) $
+    throwError $ TypeError loc "Entry point functions may not be polymorphic."
+
   return (mempty { envVtable =
                      M.singleton fname'
                      (BoundF (tparams', map paramType params', rettype))
