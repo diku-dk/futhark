@@ -816,6 +816,11 @@ ArrayValue :  '[' Value ']'
              }
            | empty '(' PrimType ')'
              { ArrayValue (listArray (0,-1) []) (Prim $3) }
+           | empty '(' RowType ')'
+             { ArrayValue (listArray (0,-1) []) $3 }
+
+RowType : '[' ']' RowType   { arrayOf $3 (Rank 1) Nonunique }
+        | '[' ']' PrimType  { arrayOf (Prim $3) (Rank 1) Nonunique }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }
