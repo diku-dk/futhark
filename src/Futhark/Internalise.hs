@@ -935,7 +935,7 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
     -- Bounds checks depend on whether we are slicing forwards or
     -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
     -- backwards, '-1 <= j && j <= i'.  In both cases, we check '0 <=
-    -- i+n*s && i+n*s <= w'.  We only check if the slice is nonempty.
+    -- i+n*s && i+(n-1)*s < w'.  We only check if the slice is nonempty.
     empty_slice <- letSubExp "empty_slice" $ I.BasicOp $ I.CmpOp (CmpEq int32) n zero
 
     m <- letSubExp "m" $ I.BasicOp $ I.BinOp (Sub Int32) n one
@@ -945,12 +945,14 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
                           I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i_p_m_t_s
     i_p_m_t_s_leq_w <- letSubExp "i_p_m_t_s_leq_w" $
                        I.BasicOp $ I.CmpOp (I.CmpSle Int32) i_p_m_t_s w
+    i_p_m_t_s_lth_w <- letSubExp "i_p_m_t_s_leq_w" $
+                       I.BasicOp $ I.CmpOp (I.CmpSlt Int32) i_p_m_t_s w
 
     zero_lte_i <- letSubExp "zero_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) zero i'
     i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) i' j'
     forwards_ok <- letSubExp "forwards_ok" =<<
                    foldBinOp I.LogAnd zero_lte_i
-                   [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
+                   [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
 
     negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) negone j'
     j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int32) j' i'
