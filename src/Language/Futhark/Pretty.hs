@@ -52,7 +52,7 @@ instance Pretty PrimValue where
   ppr (FloatValue v) = ppr v
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DimDecl vn) where
-  ppr AnyDim       = text "_"
+  ppr AnyDim       = mempty
   ppr (NamedDim v) = ppr v
   ppr (BoundDim v) = text "#" <> ppr v
   ppr (ConstDim n) = ppr n
