@@ -23,7 +23,7 @@ Identifiers and Keywords
    binop: `symbol`+
    qualbinop: `binop` | `quals` `binop`
    fieldid: `decimal` | `id`
-   symbol: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
+   symbol: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^" | "."
 
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
