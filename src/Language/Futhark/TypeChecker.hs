@@ -656,7 +656,7 @@ matchMTys = matchMTys' mempty
       | length spec_pts == length pts,
         Just substs_and_locs <-
           foldM match mempty $
-          zip (map toStructural pts) (map toStructural spec_pts) =
+          zip (map toStructural spec_pts) (map toStructural pts) =
           let substs = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst)
                        substs_and_locs
               -- This relies on the property that there can be no new
@@ -665,7 +665,7 @@ matchMTys = matchMTys' mempty
              `subtypeOf` toStructural spec_ret
       where tnames = map typeParamName tps
             match substs (spec_t, t) =
-              case instantiatePolymorphic tnames loc substs spec_t t of
+              case instantiatePolymorphic tnames loc substs t spec_t of
                 Right substs' -> Just substs'
                 Left _        -> Nothing
     matchFunBinding _ _ _ = False
