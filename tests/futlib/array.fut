@@ -106,7 +106,6 @@ entry test_intersperse (x: i32) (xs: []i32) = intersperse x xs
 -- ==
 -- entry: test_intercalate
 -- input { empty(i32) empty([]i32) } output { empty(i32) }
--- input { [1,2] empty([]i32) } output { empty(i32) }
 -- input { [1,0] [[1,2],[3,4]] } output { [1,2,1,0,3,4] }
 -- input { [1,0] [[1,2],[3,4],[5,6]] } output { [1,2,1,0,3,4,1,0,5,6] }
 
