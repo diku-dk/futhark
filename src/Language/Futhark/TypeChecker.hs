@@ -160,14 +160,15 @@ checkSpecs (TypeSpec name ps loc : specs) =
   checkTypeParams ps $ \ps' ->
   bindSpaced [(Type, name)] $ do
     name' <- checkName Type name loc
+    abs_name <- newName name'
     let tenv = mempty
                { envNameMap =
                    M.singleton (Type, name) name'
                , envTypeTable =
-                   M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName name') $ map paramToArg ps'
+                   M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName abs_name) $ map paramToArg ps'
                }
     (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
-    return (S.insert (qualName name') abstypes,
+    return (S.insert (qualName abs_name) abstypes,
             tenv <> env,
             TypeSpec name' ps' loc : specs')
       where paramToArg (TypeParamDim v ploc) =
@@ -536,7 +537,7 @@ matchMTys = matchMTys' mempty
     matchMTys' :: TypeSubs -> MTy -> MTy -> SrcLoc
                -> Either TypeError (M.Map VName VName)
 
-    matchMTys' _(MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
+    matchMTys' _ (MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
       Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
 
     matchMTys' _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
