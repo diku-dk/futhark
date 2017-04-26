@@ -5,13 +5,18 @@ module type numeric = {
   val -: t -> t -> t
   val *: t -> t -> t
   val /: t -> t -> t
+  val **: t -> t -> t
 
   val from_i32: i32 -> t
 
   val ==: t -> t -> bool
   val <: t -> t -> bool
   val >: t -> t -> bool
+  val <=: t -> t -> bool
+  val >=: t -> t -> bool
+  val !=: t -> t -> bool
 
+  val negate: t-> t
   val max: t -> t -> t
   val min: t -> t -> t
 
@@ -33,6 +38,7 @@ module type real = {
 
   val from_fraction: i32 -> i32 -> t
   val to_i32: t -> i32
+  val from_f64: f64 -> t
 
   val sqrt: t -> t
   val exp: t -> t
@@ -62,6 +68,7 @@ module i8: (integral with t = i8) = {
   let (x: i8) - (y: i8) = intrinsics.sub8 x y
   let (x: i8) * (y: i8) = intrinsics.mul8 x y
   let (x: i8) / (y: i8) = intrinsics.sdiv8 x y
+  let (x: i8) ** (y: i8) = intrinsics.pow8 x y
   let (x: i8) % (y: i8) = intrinsics.smod8 x y
   let (x: i8) // (y: i8) = intrinsics.squot8 x y
   let (x: i8) %% (y: i8) = intrinsics.srem8 x y
@@ -71,10 +78,14 @@ module i8: (integral with t = i8) = {
   let (x: i8) == (y: i8) = intrinsics.eq_i8 x y
   let (x: i8) < (y: i8) = intrinsics.slt8 x y
   let (x: i8) > (y: i8) = intrinsics.slt8 y x
+  let (x: i8) <= (y: i8) = intrinsics.sle8 x y
+  let (x: i8) >= (y: i8) = intrinsics.sle8 y x
+  let (x: i8) != (y: i8) = ! (x == y)
 
   let sgn (x: i8) = intrinsics.ssignum8 x
   let abs (x: i8) = intrinsics.abs8 x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax8 x y
   let min (x: t) (y: t) = intrinsics.smin8 x y
 }
@@ -86,6 +97,7 @@ module i16: (integral with t = i16) = {
   let (x: i16) - (y: i16) = intrinsics.sub16 x y
   let (x: i16) * (y: i16) = intrinsics.mul16 x y
   let (x: i16) / (y: i16) = intrinsics.sdiv16 x y
+  let (x: i16) ** (y: i16) = intrinsics.pow16 x y
   let (x: i16) % (y: i16) = intrinsics.smod16 x y
   let (x: i16) // (y: i16) = intrinsics.squot16 x y
   let (x: i16) %% (y: i16) = intrinsics.srem16 x y
@@ -95,10 +107,14 @@ module i16: (integral with t = i16) = {
   let (x: i16) == (y: i16) = intrinsics.eq_i16 x y
   let (x: i16) < (y: i16) = intrinsics.slt16 x y
   let (x: i16) > (y: i16) = intrinsics.slt16 y x
+  let (x: i16) <= (y: i16) = intrinsics.sle16 x y
+  let (x: i16) >= (y: i16) = intrinsics.sle16 y x
+  let (x: i16) != (y: i16) = ! (x == y)
 
   let sgn (x: i16) = intrinsics.ssignum16 x
   let abs (x: i16) = intrinsics.abs16 x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax16 x y
   let min (x: t) (y: t) = intrinsics.smin16 x y
 }
@@ -110,6 +126,7 @@ module i32: (integral with t = i32) = {
   let (x: i32) - (y: i32) = intrinsics.sub32 x y
   let (x: i32) * (y: i32) = intrinsics.mul32 x y
   let (x: i32) / (y: i32) = intrinsics.sdiv32 x y
+  let (x: i32) ** (y: i32) = intrinsics.pow32 x y
   let (x: i32) % (y: i32) = intrinsics.smod32 x y
   let (x: i32) // (y: i32) = intrinsics.squot32 x y
   let (x: i32) %% (y: i32) = intrinsics.srem32 x y
@@ -119,10 +136,14 @@ module i32: (integral with t = i32) = {
   let (x: i32) == (y: i32) = intrinsics.eq_i32 x y
   let (x: i32) < (y: i32) = intrinsics.slt32 x y
   let (x: i32) > (y: i32) = intrinsics.slt32 y x
+  let (x: i32) <= (y: i32) = intrinsics.sle32 x y
+  let (x: i32) >= (y: i32) = intrinsics.sle32 y x
+  let (x: i32) != (y: i32) = ! (x == y)
 
   let sgn (x: i32) = intrinsics.ssignum32 x
   let abs (x: i32) = intrinsics.abs32 x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax32 x y
   let min (x: t) (y: t) = intrinsics.smin32 x y
 }
@@ -134,6 +155,7 @@ module i64: (integral with t = i64) = {
   let (x: i64) - (y: i64) = intrinsics.sub64 x y
   let (x: i64) * (y: i64) = intrinsics.mul64 x y
   let (x: i64) / (y: i64) = intrinsics.sdiv64 x y
+  let (x: i64) ** (y: i64) = intrinsics.pow64 x y
   let (x: i64) % (y: i64) = intrinsics.smod64 x y
   let (x: i64) // (y: i64) = intrinsics.squot64 x y
   let (x: i64) %% (y: i64) = intrinsics.srem64 x y
@@ -143,10 +165,14 @@ module i64: (integral with t = i64) = {
   let (x: i64) == (y: i64) = intrinsics.eq_i64 x y
   let (x: i64) < (y: i64) = intrinsics.slt64 x y
   let (x: i64) > (y: i64) = intrinsics.slt64 y x
+  let (x: i64) <= (y: i64) = intrinsics.sle64 x y
+  let (x: i64) >= (y: i64) = intrinsics.sle64 y x
+  let (x: i64) != (y: i64) = ! (x == y)
 
   let sgn (x: i64) = intrinsics.ssignum64 x
   let abs (x: i64) = intrinsics.abs64 x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax64 x y
   let min (x: t) (y: t) = intrinsics.smin64 x y
 }
@@ -158,6 +184,7 @@ module u8: (integral with t = u8) = {
   let (x: u8) - (y: u8) = u8 (intrinsics.sub8 (i8 x) (i8 y))
   let (x: u8) * (y: u8) = u8 (intrinsics.mul8 (i8 x) (i8 y))
   let (x: u8) / (y: u8) = u8 (intrinsics.udiv8 (i8 x) (i8 y))
+  let (x: u8) ** (y: u8) = u8 (intrinsics.pow8 (i8 x) (i8 y))
   let (x: u8) % (y: u8) = u8 (intrinsics.umod8 (i8 x) (i8 y))
   let (x: u8) // (y: u8) = u8 (intrinsics.udiv8 (i8 x) (i8 y))
   let (x: u8) %% (y: u8) = u8 (intrinsics.umod8 (i8 x) (i8 y))
@@ -167,10 +194,14 @@ module u8: (integral with t = u8) = {
   let (x: u8) == (y: u8) = intrinsics.eq_i8 (i8 x) (i8 y)
   let (x: u8) < (y: u8) = intrinsics.ult8 (i8 x) (i8 y)
   let (x: u8) > (y: u8) = intrinsics.ult8 (i8 y) (i8 x)
+  let (x: u8) <= (y: u8) = intrinsics.ule8 (i8 x) (i8 y)
+  let (x: u8) >= (y: u8) = intrinsics.ule8 (i8 y) (i8 x)
+  let (x: u8) != (y: u8) = ! (x == y)
 
   let sgn (x: u8) = u8 (intrinsics.usignum8 (i8 x))
   let abs (x: u8) = x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = u8 (intrinsics.umax8 (i8 x) (i8 y))
   let min (x: t) (y: t) = u8 (intrinsics.umin8 (i8 x) (i8 y))
 }
@@ -182,6 +213,7 @@ module u16: (integral with t = u16) = {
   let (x: u16) - (y: u16) = u16 (intrinsics.sub16 (i16 x) (i16 y))
   let (x: u16) * (y: u16) = u16 (intrinsics.mul16 (i16 x) (i16 y))
   let (x: u16) / (y: u16) = u16 (intrinsics.udiv16 (i16 x) (i16 y))
+  let (x: u16) ** (y: u16) = u16 (intrinsics.pow16 (i16 x) (i16 y))
   let (x: u16) % (y: u16) = u16 (intrinsics.umod16 (i16 x) (i16 y))
   let (x: u16) // (y: u16) = u16 (intrinsics.udiv16 (i16 x) (i16 y))
   let (x: u16) %% (y: u16) = u16 (intrinsics.umod16 (i16 x) (i16 y))
@@ -191,10 +223,14 @@ module u16: (integral with t = u16) = {
   let (x: u16) == (y: u16) = intrinsics.eq_i16 (i16 x) (i16 y)
   let (x: u16) < (y: u16) = intrinsics.ult16 (i16 x) (i16 y)
   let (x: u16) > (y: u16) = intrinsics.ult16 (i16 y) (i16 x)
+  let (x: u16) <= (y: u16) = intrinsics.ule16 (i16 x) (i16 y)
+  let (x: u16) >= (y: u16) = intrinsics.ule16 (i16 y) (i16 x)
+  let (x: u16) != (y: u16) = ! (x == y)
 
   let sgn (x: u16) = u16 (intrinsics.usignum16 (i16 x))
   let abs (x: u16) = x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = u16 (intrinsics.umax16 (i16 x) (i16 y))
   let min (x: t) (y: t) = u16 (intrinsics.umin16 (i16 x) (i16 y))
 }
@@ -206,6 +242,7 @@ module u32: (integral with t = u32) = {
   let (x: u32) - (y: u32) = u32 (intrinsics.sub32 (i32 x) (i32 y))
   let (x: u32) * (y: u32) = u32 (intrinsics.mul32 (i32 x) (i32 y))
   let (x: u32) / (y: u32) = u32 (intrinsics.udiv32 (i32 x) (i32 y))
+  let (x: u32) ** (y: u32) = u32 (intrinsics.pow32 (i32 x) (i32 y))
   let (x: u32) % (y: u32) = u32 (intrinsics.umod32 (i32 x) (i32 y))
   let (x: u32) // (y: u32) = u32 (intrinsics.udiv32 (i32 x) (i32 y))
   let (x: u32) %% (y: u32) = u32 (intrinsics.umod32 (i32 x) (i32 y))
@@ -215,10 +252,14 @@ module u32: (integral with t = u32) = {
   let (x: u32) == (y: u32) = intrinsics.eq_i32 (i32 x) (i32 y)
   let (x: u32) < (y: u32) = intrinsics.ult32 (i32 x) (i32 y)
   let (x: u32) > (y: u32) = intrinsics.ult32 (i32 y) (i32 x)
+  let (x: u32) <= (y: u32) = intrinsics.ule32 (i32 x) (i32 y)
+  let (x: u32) >= (y: u32) = intrinsics.ule32 (i32 y) (i32 x)
+  let (x: u32) != (y: u32) = ! (x == y)
 
   let sgn (x: u32) = u32 (intrinsics.usignum32 (i32 x))
   let abs (x: u32) = x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = u32 (intrinsics.umax32 (i32 x) (i32 y))
   let min (x: t) (y: t) = u32 (intrinsics.umin32 (i32 x) (i32 y))
 }
@@ -230,6 +271,7 @@ module u64: (integral with t = u64) = {
   let (x: u64) - (y: u64) = u64 (intrinsics.sub64 (i64 x) (i64 y))
   let (x: u64) * (y: u64) = u64 (intrinsics.mul64 (i64 x) (i64 y))
   let (x: u64) / (y: u64) = u64 (intrinsics.udiv64 (i64 x) (i64 y))
+  let (x: u64) ** (y: u64) = u64 (intrinsics.pow64 (i64 x) (i64 y))
   let (x: u64) % (y: u64) = u64 (intrinsics.umod64 (i64 x) (i64 y))
   let (x: u64) // (y: u64) = u64 (intrinsics.udiv64 (i64 x) (i64 y))
   let (x: u64) %% (y: u64) = u64 (intrinsics.umod64 (i64 x) (i64 y))
@@ -239,10 +281,14 @@ module u64: (integral with t = u64) = {
   let (x: u64) == (y: u64) = intrinsics.eq_i64 (i64 x) (i64 y)
   let (x: u64) < (y: u64) = intrinsics.ult64 (i64 x) (i64 y)
   let (x: u64) > (y: u64) = intrinsics.ult64 (i64 y) (i64 x)
+  let (x: u64) <= (y: u64) = intrinsics.ule64 (i64 x) (i64 y)
+  let (x: u64) >= (y: u64) = intrinsics.ule64 (i64 y) (i64 x)
+  let (x: u64) != (y: u64) = ! (x == y)
 
   let sgn (x: u64) = u64 (intrinsics.usignum64 (i64 x))
   let abs (x: u64) = x
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = u64 (intrinsics.umax64 (i64 x) (i64 y))
   let min (x: t) (y: t) = u64 (intrinsics.umin64 (i64 x) (i64 y))
 }
@@ -254,15 +300,21 @@ module f64: (real with t = f64) = {
   let (x: f64) - (y: f64) = intrinsics.fsub64 x y
   let (x: f64) * (y: f64) = intrinsics.fmul64 x y
   let (x: f64) / (y: f64) = intrinsics.fdiv64 x y
+  let (x: f64) ** (y: f64) = intrinsics.fpow64 x y
 
   let from_i32 (x: i32) = f64 x
   let from_fraction (x: i32) (y: i32) = f64 x / f64 y
   let to_i32 (x: f64) = i32 x
+  let from_f64 (x: f64) = x
 
   let (x: f64) == (y: f64) = intrinsics.eq_f64 x y
   let (x: f64) < (y: f64) = intrinsics.lt64 x y
   let (x: f64) > (y: f64) = intrinsics.lt64 y x
+  let (x: f64) <= (y: f64) = intrinsics.le64 x y
+  let (x: f64) >= (y: f64) = intrinsics.le64 y x
+  let (x: f64) != (y: f64) = ! (x == y)
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.fmax64 x y
   let min (x: t) (y: t) = intrinsics.fmin64 x y
 
@@ -299,15 +351,21 @@ module f32: (real with t = f32) = {
   let (x: f32) - (y: f32) = intrinsics.fsub32 x y
   let (x: f32) * (y: f32) = intrinsics.fmul32 x y
   let (x: f32) / (y: f32) = intrinsics.fdiv32 x y
+  let (x: f32) ** (y: f32) = intrinsics.fpow32 x y
 
   let from_i32 (x: i32) = f32 x
   let from_fraction (x: i32) (y: i32) = f32 x / f32 y
   let to_i32 (x: f32) = i32 x
+  let from_f64 (x: f64) = f32 x
 
   let (x: f32) == (y: f32) = intrinsics.eq_f32 x y
   let (x: f32) < (y: f32) = intrinsics.lt32 x y
   let (x: f32) > (y: f32) = intrinsics.lt32 y x
+  let (x: f32) <= (y: f32) = intrinsics.le32 x y
+  let (x: f32) >= (y: f32) = intrinsics.le32 y x
+  let (x: f32) != (y: f32) = ! (x == y)
 
+  let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.fmax32 x y
   let min (x: t) (y: t) = intrinsics.fmin32 x y
 
