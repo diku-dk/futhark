@@ -797,7 +797,9 @@ instance Located (FunBindBase f vn) where
   locOf = locOf . funBindLocation
 
 -- | Value declaration.
-data ValBindBase f vn = ValBind { constBindName     :: vn
+data ValBindBase f vn = ValBind { constBindEntryPoint :: Bool
+                                -- ^ True if this value is an entry point.
+                                , constBindName     :: vn
                                 , constBindTypeDecl :: Maybe (TypeExp vn)
                                 , constBindType     :: f (StructTypeBase vn)
                                 , constBindDef      :: ExpBase f vn
