@@ -233,7 +233,8 @@ def read_str_empty_array(f, type_name, rank):
         parse_specific_string(f, '[]')
     parse_specific_string(f, type_name)
     parse_specific_char(f, b')')
-    return []
+
+    return None
 
 def read_str_array_elems(f, elem_reader, type_name, rank):
     skip_spaces(f)
@@ -276,9 +277,13 @@ def verify_array_dims(l, dims):
 
 def read_str_array(f, elem_reader, type_name, rank, bt):
     elems = read_str_array_helper(f, elem_reader, type_name, rank)
-    dims = expected_array_dims(elems, rank)
-    verify_array_dims(elems, dims)
-    return np.array(elems, dtype=bt)
+    if elems == None:
+        # Empty array
+        return np.empty([0]*rank, dtype=bt)
+    else:
+        dims = expected_array_dims(elems, rank)
+        verify_array_dims(elems, dims)
+        return np.array(elems, dtype=bt)
 
 ################################################################################
 
