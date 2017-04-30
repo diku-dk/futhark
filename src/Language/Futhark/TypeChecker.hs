@@ -97,7 +97,7 @@ checkForDuplicateDecs =
         f (FunDec (FunBind _ name _ _ _ _ _ loc)) =
           check Term name loc
 
-        f (ValDec (ValBind name _ _ _ loc)) =
+        f (ValDec (ValBind _ name _ _ _ loc)) =
           check Term name loc
 
         f (TypeDec (TypeBind name _ _ loc)) =
@@ -421,7 +421,7 @@ checkTypeBind (TypeBind name ps td loc) =
               TypeBind name' ps' td' loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
-checkValBind (ValBind name maybe_t NoInfo e loc) = do
+checkValBind (ValBind entry name maybe_t NoInfo e loc) = do
   name' <- bindSpaced [(Term, name)] $ checkName Term name loc
   (maybe_t', e') <- case maybe_t of
     Just t  -> do
@@ -444,7 +444,7 @@ checkValBind (ValBind name maybe_t NoInfo e loc) = do
                  , envNameMap =
                      M.singleton (Term, name) name'
                  },
-          ValBind name' maybe_t' (Info e_t) e' loc)
+          ValBind entry name' maybe_t' (Info e_t) e' loc)
   where anythingUnique (Record fs) = any anythingUnique fs
         anythingUnique et          = unique et
 

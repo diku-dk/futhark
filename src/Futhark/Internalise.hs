@@ -169,8 +169,8 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
           return Nothing
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind (E.ValBind name _ t e loc) =
-  internaliseFunBind $ E.FunBind False name Nothing t [] [] e loc
+internaliseValBind (E.ValBind entry name _ t e loc) =
+  internaliseFunBind $ E.FunBind entry name Nothing t [] [] e loc
 
 internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"

@@ -347,10 +347,12 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
                        Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
-  ppr (ValBind name maybe_t _ e _) =
-    text "let" <+> ppr name <> t' <+> text "=" <+> ppr e
+  ppr (ValBind entry name maybe_t _ e _) =
+    text s <+> ppr name <> t' <+> text "=" <+> ppr e
     where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
+          s | entry     = "entry"
+            | otherwise = "let"
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
