@@ -187,7 +187,8 @@ parseRunCases = parseRunCases' (0::Int)
           return $ TestRun runmode input expr $ desc i input
         desc _ (InFile path) = path
         desc i (Values vs) =
-          "#" ++ show i ++ " (\"" ++ vs' ++ "\")"
+          -- Turn linebreaks into spaces.
+          "#" ++ show i ++ " (\"" ++ unwords (lines vs') ++ "\")"
           where vs' = case unwords (map pretty vs) of
                         s | length s > 50 -> take 50 s ++ "..."
                           | otherwise     -> s
