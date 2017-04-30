@@ -307,12 +307,12 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppr . progDecs
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
-  ppr (ValDec dec)     = ppr dec
-  ppr (FunDec dec)     = ppr dec
-  ppr (TypeDec dec)    = ppr dec
-  ppr (SigDec sig)     = ppr sig
-  ppr (ModDec sd)      = ppr sd
-  ppr (OpenDec x xs _) = text "open" <+> spread (map ppr (x:xs))
+  ppr (ValDec dec)       = ppr dec
+  ppr (FunDec dec)       = ppr dec
+  ppr (TypeDec dec)      = ppr dec
+  ppr (SigDec sig)       = ppr sig
+  ppr (ModDec sd)        = ppr sd
+  ppr (OpenDec x xs _ _) = text "open" <+> spread (map ppr (x:xs))
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModVar v _) = ppr v

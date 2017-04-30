@@ -241,9 +241,9 @@ Dec :: { [UncheckedDec] }
     | ModBind           { [ModDec $1 ] }
     | DefaultDec        { [] }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] $1] }
+      { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] NoInfo $1] }
     | open many1(ModExpAtom)
-      { [OpenDec (fst $2) (snd $2) $1] }
+      { [OpenDec (fst $2) (snd $2) NoInfo $1] }
 ;
 
 SigExp :: { UncheckedSigExp }

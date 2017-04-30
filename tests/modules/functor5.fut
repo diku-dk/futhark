@@ -1,4 +1,6 @@
 -- Open and functors must work together.
+-- ==
+-- input {} output {6}
 
 module type mt = { val x: i32 }
 
