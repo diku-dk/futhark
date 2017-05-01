@@ -558,7 +558,7 @@ Permute the dimensions in the array, returning a new array.  The
 ``d_i`` must be *static* integers, and constitute a proper
 length-``n`` permutation.
 
-For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
+For example, if ``b==rearrange (2,0,1) a``, then ``b[x,y,z] =
 a[y,z,x]``.
 
 ``transpose a``
@@ -573,7 +573,7 @@ Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.
 Intuitively, you can think of it as subtracting ``i`` from every index
 (modulo the size of the array).
 
-For example, if ``b=rotate(1, i, a)``, then ``b[x,y+1] = a[x,y]``.
+For example, if ``b==rotate 1 i a``, then ``b[x,y+1] = a[x,y]``.
 
 ``split (i_1, ..., i_n) a``
 .............................
@@ -582,7 +582,7 @@ Partitions the given array ``a`` into ``n+1`` disjoint arrays
 ``(a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...])``, returned as a tuple.
 The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
 
-Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
+Example: ``split (1,1,3) [5,6,7,8] == ([5],[],[6,7],[8])``
 
 ``split@i (i_1, ..., i_n) a``
 .............................
