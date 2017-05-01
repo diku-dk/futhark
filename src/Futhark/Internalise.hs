@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -86,7 +85,7 @@ internaliseDecs ds =
       noteMod v mempty me
       internaliseDecs ds'
     E.ModDec mb : ds' -> do
-      v <- lookupSubst $ E.qualName $ E.modName mb
+      v <- fulfillingPromise $ E.modName mb
       substs <- asks envFunctorSubsts
       let addParam p me = E.ModLambda p Nothing me $ srclocOf me
       noteMod v substs $
@@ -94,13 +93,14 @@ internaliseDecs ds =
         modParams mb
       internaliseDecs ds'
     E.TypeDec tb : ds' -> do
-      v <- newOrExistingSubst $ E.typeAlias tb
+      v <- fulfillingPromise $ E.typeAlias tb
       substs <- allSubsts
       noteType v (substs, E.typeParams tb,
                   E.unInfo $ E.expandedType $ E.typeExp tb)
       internaliseDecs ds'
-    E.OpenDec e es _ : ds' -> do
+    E.OpenDec e es (Info added) _ : ds' -> do
       mapM_ internaliseModExp (e:es)
+      mapM_ openedName added
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
@@ -121,9 +121,9 @@ internaliseModExp (E.ModParens e _) =
 internaliseModExp E.ModImport{} = return ()
 internaliseModExp (E.ModDecs ds _) =
   internaliseDecs ds
-internaliseModExp (E.ModAscript me _ (Info subst) _) = do
-  noteDecSubsts subst
-  internaliseModExp me
+internaliseModExp (E.ModAscript me _ (Info substs) _) = do
+  noteDecSubsts substs
+  morePromises substs $ internaliseModExp me
 internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_substs) _) = do
   internaliseModExp orig_arg
   generatingFunctor orig_p_substs orig_b_substs $ do
@@ -148,9 +148,9 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
           return $ Just (p, substs, maybeAscript loc sig me)
         evalModExp (E.ModParens e _) =
           evalModExp e
-        evalModExp (E.ModAscript me _ (Info subst) _) = do
-          noteDecSubsts subst
-          evalModExp me
+        evalModExp (E.ModAscript me _ (Info substs) _) = do
+          noteDecSubsts substs
+          morePromises substs $ evalModExp me
         evalModExp (E.ModApply f arg (Info p_substs) (Info b_substs) _) = do
           f_e <- evalModExp f
           internaliseModExp arg
@@ -169,8 +169,8 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
           return Nothing
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind (E.ValBind name _ t e loc) =
-  internaliseFunBind $ E.FunBind False name Nothing t [] [] e loc
+internaliseValBind (E.ValBind entry name _ t e loc) =
+  internaliseFunBind $ E.FunBind entry name Nothing t [] [] e loc
 
 internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
@@ -178,7 +178,7 @@ internaliseFunName ofname _  = nameFromString . pretty <$> newVName (baseString 
 
 internaliseFunBind :: E.FunBind -> InternaliseM ()
 internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body loc) = do
-  fname <- newOrExistingSubst ofname
+  fname <- fulfillingPromise ofname
   substs <- allSubsts
   noteFunction fname $ \(e_ts, _) -> withDecSubstitutions substs $
     generatingFunctor mempty mempty $ do

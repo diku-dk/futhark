@@ -5,6 +5,7 @@ module Futhark.Internalise.Monad
   , throwError
   , VarSubstitutions
   , DecSubstitutions
+  , PromisedNames
   , InternaliseEnv (..)
   , ConstParams
   , Closure
@@ -22,7 +23,7 @@ module Futhark.Internalise.Monad
   , lookupFunction'
   , lookupMod
   , lookupSubst
-  , newOrExistingSubst
+  , fulfillingPromise
 
   , bindingIdentTypes
   , bindingParamTypes
@@ -32,8 +33,10 @@ module Futhark.Internalise.Monad
   , notingTypes
   , notedTypes
   , noteDecSubsts
+  , morePromises
   , generatingFunctor
   , withDecSubstitutions
+  , openedName
 
   , asserting
   , assertingOne
@@ -115,11 +118,19 @@ type VarSubstitutions = M.Map VName [SubExp]
 -- | Mapping from original top-level names to new top-level names.
 type DecSubstitutions = M.Map VName VName
 
+-- | Mapping from what we think somethings name is, to what we would
+-- like to use it as.
+type PromisedNames = M.Map VName VName
+
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
   , envGeneratingFunctor :: Bool
   , envFunctorSubsts :: DecSubstitutions
+    -- ^ Mapping from names in functor parameters to their actual
+    -- realised names.
+  , envPromises :: PromisedNames
+    -- ^ We'll get around to it, promise!
   }
 
 data InternaliseState =
@@ -178,6 +189,7 @@ runInternaliseM (InternaliseM m) =
                  , envDoBoundsChecks = True
                  , envGeneratingFunctor = False
                  , envFunctorSubsts = mempty
+                 , envPromises = mempty
                  }
         newState src =
           InternaliseState { stateFtable = mempty
@@ -235,19 +247,29 @@ lookupSubst (E.QualName _ name) = do
            | otherwise -> return v
     _      -> return name
 
--- | Like lookupSubst, but creates a fresh name if inside a functor
--- and a substitution does not already exist.
-newOrExistingSubst :: VName -> InternaliseM VName
-newOrExistingSubst name = do
-  in_functor <- asks envGeneratingFunctor
-  r <- M.lookup name <$> allSubsts
-  case r of
-    Just v | v /= name -> lookupSubst $ E.qualName v
-           | otherwise -> return v
-    Nothing | in_functor -> do x <- newName name
-                               noteDecSubsts $ M.singleton name x
-                               return x
-            | otherwise  -> return name
+lookupPromise :: VName -> InternaliseM VName
+lookupPromise name = do
+  promises <- asks envPromises
+  return $ findSubst name promises
+  where findSubst v promises
+          | Just v' <- M.lookup v promises = findSubst v' promises
+          | otherwise                      = v
+
+fulfillingPromise :: VName -> InternaliseM VName
+fulfillingPromise name = do
+  promises <- asks envPromises
+  if M.null promises
+    then return name
+    else do name' <- newName name
+            noteDecSubsts $ M.singleton name name'
+            fulfill name' name promises
+            return name'
+  where fulfill name' v promises
+          | Just v' <- M.lookup v promises = do
+              noteDecSubsts $ M.singleton v' name'
+              fulfill name' v' promises
+          | otherwise =
+              return ()
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
@@ -288,63 +310,36 @@ notingTypes types m = do
 notedTypes :: InternaliseM TypeTable
 notedTypes = gets stateTtable
 
-setDecSubsts :: M.Map VName VName -> InternaliseM ()
-setDecSubsts substs = modify $ \s -> s { stateDecSubsts = substs }
-
 noteDecSubsts :: M.Map VName VName -> InternaliseM ()
-noteDecSubsts substs = do
-  cur_substs <- allSubsts
-  -- Some substitutions of these names may already exist.
-  let also_substs = M.fromList $ mapMaybe (keyHasExisting cur_substs) $ M.toList substs
-  modify $ \s ->
-    s { stateDecSubsts = also_substs `M.union` substs `M.union` stateDecSubsts s
-      }
-  where keyHasExisting cur_substs (k,v) = do
-          v' <- M.lookup k cur_substs
-          keyHasExisting cur_substs (v,v') `mplus` return (v,v')
+noteDecSubsts substs =
+  modify $ \s -> s { stateDecSubsts = substs <> stateDecSubsts s }
 
-generatingFunctor :: M.Map VName VName
-                  -> M.Map VName VName
+morePromises :: M.Map VName VName -> InternaliseM a -> InternaliseM a
+morePromises substs =
+  local $ \env -> env { envPromises = promises <> envPromises env
+                      , envGeneratingFunctor = True
+                      }
+  where promises = M.fromList $ map (uncurry $ flip (,)) $ M.toList substs
+
+generatingFunctor :: DecSubstitutions
+                  -> PromisedNames
                   -> InternaliseM a -> InternaliseM a
 generatingFunctor p_substs b_substs m = do
-  -- Some substitutions of these names may already exist.  Also, we
-  -- ensure we have fresh names for everything in the functor, except
-  -- for those names that are already unique from the applications.
-  in_functor <- asks envGeneratingFunctor
   cur_substs <- allSubsts
 
-  let frob (k, v)
-        | Just v' <- M.lookup k cur_substs, v' /= v =
-            frob (v', v) `mplus` Just (v', v)
-        | otherwise =
-            Nothing
+  let forward (k,v)
+        | Just v' <- M.lookup k cur_substs = Just (v',v)
+        | otherwise                        = Nothing
+      contras = M.fromList $ mapMaybe forward $ M.toList b_substs
+      forwards = M.fromList $ mapMaybe forward $ M.toList p_substs
 
-      extra_substs = if in_functor
-                     then M.fromList $ mapMaybe frob $ M.toList b_substs
-                     else mempty
-      forwards = M.fromList $ mapMaybe frob $ M.toList p_substs
-
-      recs = [extra_substs,
-              forwards,
-              p_substs,
-              b_substs]
-      update env =
+  let update env =
         env { envGeneratingFunctor = True
-            , envFunctorSubsts = M.unions recs `M.union`
-                                 envFunctorSubsts env
+            , envFunctorSubsts = forwards <> p_substs <> envFunctorSubsts env
+            , envPromises = forwards <> contras <> b_substs <> envPromises env
             }
-  old_dec_substs <- gets stateDecSubsts
-  x <- local update m
-  -- Some of the dec substs may be relevant for the result of the
-  -- functor.  A relevant substitution is one that affects an element
-  -- of b_subst.
-  new_dec_substs <- gets stateDecSubsts
-  let b_elems = M.elems b_substs
-      new_relevant k _ = k `elem` b_elems
-      nexts = M.filterWithKey new_relevant new_dec_substs
-              `M.union` extra_substs `M.union` b_substs
-  setDecSubsts (nexts `M.union` old_dec_substs)
-  return x
+
+  local update m
 
 withDecSubstitutions :: DecSubstitutions
                      -> InternaliseM a -> InternaliseM a
@@ -353,6 +348,12 @@ withDecSubstitutions p_substs m = do
         env { envFunctorSubsts = p_substs `M.union` envFunctorSubsts env }
   local update m
 
+openedName :: VName -> InternaliseM ()
+openedName o = do
+  v <- lookupSubst $ E.qualName o
+  v' <- lookupPromise o
+  when (v /= v') $
+    noteDecSubsts $ M.fromList [(v',v)]
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

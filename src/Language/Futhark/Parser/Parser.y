@@ -241,9 +241,9 @@ Dec :: { [UncheckedDec] }
     | ModBind           { [ModDec $1 ] }
     | DefaultDec        { [] }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] $1] }
+      { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] NoInfo $1] }
     | open many1(ModExpAtom)
-      { [OpenDec (fst $2) (snd $2) $1] }
+      { [OpenDec (fst $2) (snd $2) NoInfo $1] }
 ;
 
 SigExp :: { UncheckedSigExp }
@@ -388,12 +388,12 @@ Fun     : let id many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '=' E
           }
 ;
 
-Val : let id ':' TypeExpDecl '=' Exp
-      { let L loc (ID name) = $2
-        in ValBind name (Just $ declaredType $4) NoInfo $6 loc }
-    | let id '=' Exp
-      { let L loc (ID name) = $2
-        in ValBind name Nothing NoInfo $4 loc }
+Val : let id maybeAscription(TypeExpDecl) '=' Exp
+      { let L _ (ID name) = $2
+        in ValBind (name==defaultEntryPoint) name (fmap declaredType $3) NoInfo $5 $1 }
+    | entry id maybeAscription(TypeExpDecl) '=' Exp
+      { let L _ (ID name) = $2
+        in ValBind True name (fmap declaredType $3) NoInfo $5 $1 }
 
 SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
              : TypeExpDecl
