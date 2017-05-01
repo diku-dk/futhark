@@ -97,7 +97,7 @@ checkForDuplicateDecs =
         f (FunDec (FunBind _ name _ _ _ _ _ loc)) =
           check Term name loc
 
-        f (ValDec (ValBind name _ _ _ loc)) =
+        f (ValDec (ValBind _ name _ _ _ loc)) =
           check Term name loc
 
         f (TypeDec (TypeBind name _ _ loc)) =
@@ -160,14 +160,15 @@ checkSpecs (TypeSpec name ps loc : specs) =
   checkTypeParams ps $ \ps' ->
   bindSpaced [(Type, name)] $ do
     name' <- checkName Type name loc
+    abs_name <- newName name'
     let tenv = mempty
                { envNameMap =
                    M.singleton (Type, name) name'
                , envTypeTable =
-                   M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName name') $ map paramToArg ps'
+                   M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName abs_name) $ map paramToArg ps'
                }
     (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
-    return (S.insert (qualName name') abstypes,
+    return (S.insert (qualName abs_name) abstypes,
             tenv <> env,
             TypeSpec name' ps' loc : specs')
       where paramToArg (TypeParamDim v ploc) =
@@ -201,7 +202,7 @@ checkSigExp (SigParens e loc) = do
   return (mty, SigParens e' loc)
 checkSigExp (SigVar name loc) = do
   (name', mty) <- lookupMTy loc name
-  (mty', _) <- newNamesForMTy mempty mty
+  (mty', _) <- newNamesForMTy mty
   return (mty', SigVar name' loc)
 checkSigExp (SigSpecs specs loc) = do
   checkForDuplicateSpecs specs
@@ -350,8 +351,7 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   let a_abbrs = mtyTypeAbbrs a_mty
   let type_subst = M.mapMaybe (fmap TypeSub . (`M.lookup` a_abbrs)) p_subst
   let body_mty' = substituteTypesInMTy type_subst body_mty
-  (body_mty'', body_subst) <- newNamesForMTy p_subst body_mty'
-
+  (body_mty'', body_subst) <- newNamesForMTy body_mty'
   return (body_mty'', p_subst, body_subst)
 
 checkModBind :: ModBindBase NoInfo Name -> TypeM (Env, ModBindBase Info VName)
@@ -421,7 +421,7 @@ checkTypeBind (TypeBind name ps td loc) =
               TypeBind name' ps' td' loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
-checkValBind (ValBind name maybe_t NoInfo e loc) = do
+checkValBind (ValBind entry name maybe_t NoInfo e loc) = do
   name' <- bindSpaced [(Term, name)] $ checkName Term name loc
   (maybe_t', e') <- case maybe_t of
     Just t  -> do
@@ -444,7 +444,7 @@ checkValBind (ValBind name maybe_t NoInfo e loc) = do
                  , envNameMap =
                      M.singleton (Term, name) name'
                  },
-          ValBind name' maybe_t' (Info e_t) e' loc)
+          ValBind entry name' maybe_t' (Info e_t) e' loc)
   where anythingUnique (Record fs) = any anythingUnique fs
         anythingUnique et          = unique et
 
@@ -490,16 +490,17 @@ checkDecs (TypeDec tdec:rest) = do
     (abstypes, env, rest') <- checkDecs rest
     return (abstypes, env <> tenv, TypeDec tdec' : rest')
 
-checkDecs (OpenDec x xs loc:rest) = do
+checkDecs (OpenDec x xs NoInfo loc:rest) = do
   (x_abs, x_env, x') <- checkModExpToEnv x
   (xs_abs, xs_envs, xs') <- unzip3 <$> mapM checkModExpToEnv xs
    -- We cannot use mconcat, as mconcat is a right-fold.
   let env_ext = foldl (flip mappend) x_env xs_envs
+      names = S.toList $ S.unions $ map allNamesInEnv $ x_env:xs_envs
   localEnv (env_ext<>) $ do
     (abstypes, env, rest') <- checkDecs rest
     return (x_abs <> mconcat xs_abs <> abstypes,
             env <> env_ext,
-            OpenDec x' xs' loc: rest')
+            OpenDec x' xs' (Info names) loc : rest')
 
 checkDecs (ValDec vb:rest) = do
   (ext, vb') <- checkValBind vb
@@ -536,7 +537,7 @@ matchMTys = matchMTys' mempty
     matchMTys' :: TypeSubs -> MTy -> MTy -> SrcLoc
                -> Either TypeError (M.Map VName VName)
 
-    matchMTys' _(MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
+    matchMTys' _ (MTy _ ModFun{}) (MTy _ ModEnv{}) loc =
       Left $ TypeError loc "Cannot match parametric module with non-paramatric module type."
 
     matchMTys' _ (MTy _ ModEnv{}) (MTy _ ModFun{}) loc =
@@ -655,7 +656,7 @@ matchMTys = matchMTys' mempty
       | length spec_pts == length pts,
         Just substs_and_locs <-
           foldM match mempty $
-          zip (map toStructural pts) (map toStructural spec_pts) =
+          zip (map toStructural spec_pts) (map toStructural pts) =
           let substs = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst)
                        substs_and_locs
               -- This relies on the property that there can be no new
@@ -664,7 +665,7 @@ matchMTys = matchMTys' mempty
              `subtypeOf` toStructural spec_ret
       where tnames = map typeParamName tps
             match substs (spec_t, t) =
-              case instantiatePolymorphic tnames loc substs spec_t t of
+              case instantiatePolymorphic tnames loc substs t spec_t of
                 Right substs' -> Just substs'
                 Left _        -> Nothing
     matchFunBinding _ _ _ = False
@@ -747,8 +748,7 @@ allNamesInMTy (MTy abs mod) =
 
 allNamesInMod :: Mod -> S.Set VName
 allNamesInMod (ModEnv env) = allNamesInEnv env
-allNamesInMod (ModFun (FunSig abs mod mty)) =
-  S.map qualLeaf abs <> allNamesInMod mod <> allNamesInMTy mty
+allNamesInMod ModFun{} = mempty
 
 -- All names defined anywhere in the env.
 allNamesInEnv :: Env -> S.Set VName
@@ -760,14 +760,13 @@ allNamesInEnv (Env vtable ttable stable modtable _names) =
            map allNamesInType (M.elems ttable))
   where allNamesInType (TypeAbbr ps _) = S.fromList $ map typeParamName ps
 
-newNamesForMTy :: M.Map VName VName -> MTy -> TypeM (MTy, M.Map VName VName)
-newNamesForMTy except orig_mty = do
+newNamesForMTy :: MTy -> TypeM (MTy, M.Map VName VName)
+newNamesForMTy orig_mty = do
   -- Create unique renames for the module type.
-  substs <- fmap M.fromList $ forM (S.toList $ allNamesInMTy orig_mty) $ \v ->
-    case M.lookup v except of
-      Just v' -> return (v, v')
-      Nothing -> do v' <- newName v
-                    return (v, v')
+  pairs <- forM (S.toList $ allNamesInMTy orig_mty) $ \v -> do
+    v' <- newName v
+    return (v, v')
+  let substs = M.fromList pairs
 
   return (substituteInMTy substs orig_mty, substs)
 

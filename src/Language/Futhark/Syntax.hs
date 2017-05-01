@@ -107,6 +107,7 @@ import           Language.Futhark.Core
 -- | Convenience class for deriving 'Show' instances for the AST.
 class (Show vn,
        Show (f vn),
+       Show (f [VName]),
        Show (f (CompTypeBase vn)),
        Show (f [TypeBase Rank ()]),
        Show (f (StructTypeBase vn)),
@@ -796,7 +797,9 @@ instance Located (FunBindBase f vn) where
   locOf = locOf . funBindLocation
 
 -- | Value declaration.
-data ValBindBase f vn = ValBind { constBindName     :: vn
+data ValBindBase f vn = ValBind { constBindEntryPoint :: Bool
+                                -- ^ True if this value is an entry point.
+                                , constBindName     :: vn
                                 , constBindTypeDecl :: Maybe (TypeExp vn)
                                 , constBindType     :: f (StructTypeBase vn)
                                 , constBindDef      :: ExpBase f vn
@@ -928,16 +931,16 @@ data DecBase f vn = ValDec (ValBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | ModDec (ModBindBase f vn)
-                  | OpenDec (ModExpBase f vn) [ModExpBase f vn] SrcLoc
+                  | OpenDec (ModExpBase f vn) [ModExpBase f vn] (f [VName]) SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
-  locOf (ValDec d)        = locOf d
-  locOf (FunDec d)        = locOf d
-  locOf (TypeDec d)       = locOf d
-  locOf (SigDec d)        = locOf d
-  locOf (ModDec d)        = locOf d
-  locOf (OpenDec _ _ loc) = locOf loc
+  locOf (ValDec d)          = locOf d
+  locOf (FunDec d)          = locOf d
+  locOf (TypeDec d)         = locOf d
+  locOf (SigDec d)          = locOf d
+  locOf (ModDec d)          = locOf d
+  locOf (OpenDec _ _ _ loc) = locOf loc
 
 newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)

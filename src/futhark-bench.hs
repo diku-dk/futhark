@@ -113,7 +113,8 @@ compileBenchmark opts (program, spec) =
         hasRuns (InputOutputs _ runs) = not $ null runs
 
 runBenchmark :: BenchOptions -> (FilePath, [InputOutputs]) -> IO BenchResult
-runBenchmark opts (program, cases) =
+runBenchmark opts (program, cases) = do
+  putStr $ "Results for " ++ program ++ ":\n"
   BenchResult program . catMaybes . concat <$> mapM forInputOutputs cases
   where forInputOutputs (InputOutputs "main" runs) =
           mapM (runBenchmarkCase opts program) runs

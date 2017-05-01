@@ -98,9 +98,9 @@ type Pattern lore = PatternT (LetAttr lore)
 
 -- | A local variable binding.
 data Stm lore = Let { bindingPattern :: Pattern lore
-                        , bindingLore :: ExpAttr lore
-                        , bindingExp :: Exp lore
-                        }
+                    , bindingLore :: ExpAttr lore
+                    , bindingExp :: Exp lore
+                    }
 
 deriving instance Annotations lore => Ord (Stm lore)
 deriving instance Annotations lore => Show (Stm lore)

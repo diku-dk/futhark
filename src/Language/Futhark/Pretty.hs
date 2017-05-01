@@ -52,7 +52,7 @@ instance Pretty PrimValue where
   ppr (FloatValue v) = ppr v
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DimDecl vn) where
-  ppr AnyDim       = text "_"
+  ppr AnyDim       = mempty
   ppr (NamedDim v) = ppr v
   ppr (BoundDim v) = text "#" <> ppr v
   ppr (ConstDim n) = ppr n
@@ -307,12 +307,12 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppr . progDecs
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
-  ppr (ValDec dec)     = ppr dec
-  ppr (FunDec dec)     = ppr dec
-  ppr (TypeDec dec)    = ppr dec
-  ppr (SigDec sig)     = ppr sig
-  ppr (ModDec sd)      = ppr sd
-  ppr (OpenDec x xs _) = text "open" <+> spread (map ppr (x:xs))
+  ppr (ValDec dec)       = ppr dec
+  ppr (FunDec dec)       = ppr dec
+  ppr (TypeDec dec)      = ppr dec
+  ppr (SigDec sig)       = ppr sig
+  ppr (ModDec sd)        = ppr sd
+  ppr (OpenDec x xs _ _) = text "open" <+> spread (map ppr (x:xs))
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModVar v _) = ppr v
@@ -347,10 +347,12 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
                        Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
-  ppr (ValBind name maybe_t _ e _) =
-    text "let" <+> ppr name <> t' <+> text "=" <+> ppr e
+  ppr (ValBind entry name maybe_t _ e _) =
+    text s <+> ppr name <> t' <+> text "=" <+> ppr e
     where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
+          s | entry     = "entry"
+            | otherwise = "let"
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
