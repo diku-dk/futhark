@@ -33,6 +33,8 @@ module type real = {
 
   val from_fraction: i32 -> i32 -> t
   val to_i32: t -> i32
+  val from_f64 : f64 -> t
+  val to_f64   : t -> f64
 
   val sqrt: t -> t
   val exp: t -> t
@@ -258,6 +260,8 @@ module f64: (real with t = f64) = {
   let from_i32 (x: i32) = f64 x
   let from_fraction (x: i32) (y: i32) = f64 x / f64 y
   let to_i32 (x: f64) = i32 x
+  let from_f64 (x: f64) = x
+  let to_f64   (x: f64) = x
 
   let (x: f64) == (y: f64) = intrinsics.eq_f64 x y
   let (x: f64) < (y: f64) = intrinsics.lt64 x y
@@ -303,6 +307,8 @@ module f32: (real with t = f32) = {
   let from_i32 (x: i32) = f32 x
   let from_fraction (x: i32) (y: i32) = f32 x / f32 y
   let to_i32 (x: f32) = i32 x
+  let from_f64 (x: f64) = f32 x
+  let to_f64   (x: f32) = f64 x
 
   let (x: f32) == (y: f32) = intrinsics.eq_f32 x y
   let (x: f32) < (y: f32) = intrinsics.lt32 x y

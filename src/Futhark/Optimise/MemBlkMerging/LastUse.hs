@@ -18,10 +18,10 @@ import Futhark.Optimise.MemBlkMerging.DataStructs
 
 -- | Last-Use analysis of a Futhark program in aliased explicit-memory lore form.
 --   Takes as input such a program and produces a `M.Map VName [VName]`,
---   in which the key identified the let stmt, and the list argument
+--   in which the key identifies the let stmt, and the list argument
 --   identifies the variables that were lastly used in that stmt.
 --   Note that the results of a body do not have a last use, and neither
---   do a function parameters if it happens to not be used inside function's body.
+--   do a function parameter if it happens to not be used inside function's body.
 --   Such cases are supposed to be treated separately.
 lastUsePrg :: Prog (Aliases ExpMem.ExplicitMemory) -> LUTabPrg
 lastUsePrg prg = M.fromList $ map lastUseFun $ progFunctions prg
