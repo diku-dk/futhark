@@ -554,9 +554,6 @@ data ExpBase f vn =
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
-            | Shape (ExpBase f vn) SrcLoc
-            -- ^ The shape of the argument.
-
             | Split Int (ExpBase f vn) (ExpBase f vn) SrcLoc
             -- ^ @split@0( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2,
             -- 3], [4]}@.  Note that this is different from in the
@@ -639,9 +636,6 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Scatter (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @write [3, 4, 5] [0, 2, -1] [9, 7, 0] = [9, 4, 7]@.
-
             | Zip Int (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ Conventional zip taking nonzero arrays as arguments.
             -- All arrays must have the exact same length.
@@ -682,7 +676,6 @@ instance Located (ExpBase f vn) where
   locOf (Index _ _ pos)          = locOf pos
   locOf (Update _ _ _ pos)       = locOf pos
   locOf (Iota _ pos)             = locOf pos
-  locOf (Shape _ pos)            = locOf pos
   locOf (Replicate _ _ pos)      = locOf pos
   locOf (Reshape _ _ pos)        = locOf pos
   locOf (Rearrange _ _ pos)      = locOf pos
@@ -699,7 +692,6 @@ instance Located (ExpBase f vn) where
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
   locOf (Stream _ _ _  pos)      = locOf pos
   locOf (Unsafe _ loc)           = locOf loc
-  locOf (Scatter _ _ _ loc)      = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordField Name (ExpBase f vn) SrcLoc

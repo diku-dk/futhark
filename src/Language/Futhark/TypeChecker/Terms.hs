@@ -163,9 +163,14 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
           Just (name, BoundF ([], map Prim ts, Prim t) mempty)
-        addIntrinsicF (name, IntrinsicPolyFun variants) =
+        addIntrinsicF (name, IntrinsicOverloadedFun variants) =
           Just (name, OverloadedF $ map frob variants)
           where frob (pts, rt) = (map Prim pts, ([], map Prim pts, Prim rt))
+        addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
+          Just (name, BoundF (tvs,
+                              map vacuousShapeAnnotations pts,
+                              vacuousShapeAnnotations rt)
+                      mempty)
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
         addIntrinsicF (name, IntrinsicOpaque) =
@@ -673,14 +678,6 @@ checkExp (Iota e pos) = do
   e' <- require anyIntType =<< checkExp e
   return $ Iota e' pos
 
-checkExp (Shape e loc) = do
-  e' <- checkExp e
-  case typeOf e' of
-    t | arrayRank t > 0 -> return $ Shape e' loc
-      | otherwise ->
-          bad $ TypeError loc
-          $ "Argument to shape must be an array, not of type " ++ pretty (typeOf e') ++ "."
-
 checkExp (Replicate countexp valexp pos) = do
   countexp' <- require anyIntType =<< checkExp countexp
   valexp' <- checkExp valexp
@@ -1010,32 +1007,6 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
       return $ DoLoop tparams' mergepat'' mergeexp'
                       form'
                       loopbody' letbody' loc
-
-checkExp (Scatter a i v pos) = do
-  i' <- checkExp i
-  v' <- checkExp v
-  (a', aflow) <- collectOccurences . checkExp $ a
-
-  -- Check indexes type.
-  case typeOf i' of
-    Array (PrimArray (Signed Int32) (Rank 1) _ _) ->
-      return ()
-    _ -> bad $ TypeError pos
-         "A write index array must consist of signed 32-bit ints only."
-
-  -- Check that values arrays and I/O arrays have the same structure.
-  void $ unifyExpTypes v' a'
-
-  -- Check that all I/O arrays are properly unique.
-  let at = typeOf a'
-  if unique at
-    then occur $ aflow `seqOccurences` [consumption (aliases at) pos]
-    else bad $ TypeError pos $ "Scatter source '" ++
-         pretty a' ++
-         "' has type " ++ pretty at ++
-         ", which is not unique."
-
-  return (Scatter a' i' v' pos)
 
 checkSOACArrayArg :: ExpBase NoInfo Name
                   -> TermTypeM (Exp, Arg)

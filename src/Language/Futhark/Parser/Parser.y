@@ -146,7 +146,6 @@ import Language.Futhark.Parser.Lexer
       do              { L $$ DO }
       with            { L $$ WITH }
       iota            { L $$ IOTA }
-      shape           { L $$ SHAPE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
       reduce          { L $$ REDUCE }
@@ -173,7 +172,6 @@ import Language.Futhark.Parser.Lexer
       stream_seq      { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       import          { L $$ IMPORT }
-      scatter         { L $$ SCATTER }
       type            { L $$ TYPE }
       module          { L $$ MODULE }
       val             { L $$ VAL }
@@ -200,7 +198,7 @@ nonassoc with
 %nonassoc '['
 %nonassoc Id
 %left juxtprec
-%left indexprec iota shape copy rotate rearrange split shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
+%left indexprec iota copy rotate rearrange split shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
 %%
 
 -- Some parameterized productions.  Left-recursive, as this is faster
@@ -479,8 +477,6 @@ Exp2 :: { UncheckedExp }
 
      | iota Atom { Iota $2 $1 }
 
-     | shape Atom { Shape $2 $1 }
-
      | replicate Atom Atom { Replicate $2 $3 $1 }
 
      | reshape Atom Atom
@@ -546,8 +542,6 @@ Exp2 :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
      | stream_seq       FunAbstr Atom Atom
                          { Stream (Sequential $3) $2 $4 $1 }
-     | scatter Atom Atom Atom
-                         { Scatter $2 $3 $4 $1 }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }

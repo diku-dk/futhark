@@ -208,8 +208,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Iota e _) = text "iota" <+> pprPrec 10 e
-  pprPrec _ (Shape e _) =
-    text "shape" <+> pprPrec 10 e
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <+> spread [pprPrec 10 ne, pprPrec 10 ve]
   pprPrec _ (Reshape shape e _) =
@@ -254,7 +252,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (Scatter i v a _) = text "scatter" <> spread [pprPrec 10 i, pprPrec 10 v, pprPrec 10 a]
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
   ppr (RecordField name e _) = ppr name <> equals <> ppr e

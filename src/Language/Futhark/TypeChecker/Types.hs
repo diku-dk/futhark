@@ -502,16 +502,18 @@ instantiatePolymorphic tnames loc orig_substs x y =
 
     instantiate :: TypeBase Rank () -> TypeBase Rank ()
                 -> InstantiateM ()
-    instantiate (TypeVar (TypeName [] tn) []) arg_t
+    instantiate (TypeVar (TypeName [] tn) []) orig_arg_t
       | tn `elem` tnames = do
           substs <- get
           case M.lookup tn substs of
-            Just (old_arg_t, old_arg_loc) | old_arg_t /= arg_t ->
+            Just (old_arg_t, old_arg_loc) | old_arg_t /= orig_arg_t ->
               lift $ Left $ Just $ "Argument determines type parameter '" ++
               pretty (baseName tn) ++ "' as " ++ pretty arg_t ++
               ", but previously determined as " ++ pretty old_arg_t ++
               " at " ++ locStr old_arg_loc
             _ -> modify $ M.insert tn (arg_t, loc)
+            -- Ignore uniqueness when dealing with type variables.
+            where arg_t = orig_arg_t `setUniqueness` Nonunique
     instantiate (TypeVar (TypeName [] tn) targs)
                 (TypeVar (TypeName [] arg_tn) arg_targs)
       | tn == arg_tn, length targs == length arg_targs =

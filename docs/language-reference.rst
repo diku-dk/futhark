@@ -176,7 +176,6 @@ literals and variables, but also more complicated forms.
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "loop" "(" `type_param`* `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
       : | "iota" `exp`
-      : | "shape" `exp`
       : | "replicate" `exp` `exp`
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
@@ -194,7 +193,6 @@ literals and variables, but also more complicated forms.
       : | "scan" `fun` `exp` `exp`
       : | "filter" `fun` `exp`
       : | "partition" "(" `fun`+ ")" `exp`
-      : | "scatter" `exp` `exp` `exp`
       : | "stream_map" `fun` `exp`
       : | "stream_map_per" `fun` `exp`
       : | "stream_red" `fun` `exp` `exp`
@@ -690,7 +688,7 @@ elements of the partitions retain their original relative positions.
 ``scatter as is vs``
 ....................
 
-The ``scatter`` expression calculates the equivalent of this imperative
+This ``scatter`` expression calculates the equivalent of this imperative
 code::
 
   for index in 0..shape(is)[0]-1:
