@@ -221,6 +221,10 @@ packArrayOutput _ sid _ _ _ =
 
 unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
 unpackArrayInput mem memsize "device" _ _ dims e = do
+  Py.stm $ Assert (BinOp "in" (Py.simpleCall "type" [e])
+                    (List [Var "np.ndarray", Var "cl.array.Array"]))
+    "Parameter has unexpected type"
+
   zipWithM_ (Py.unpackDim e) dims [0..]
 
   case memsize of
