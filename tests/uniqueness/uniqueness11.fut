@@ -12,7 +12,7 @@ let f (x: i32): i32 = x
 let g (x: i32): i32 = x
 
 let main(): i32 =
-  let a      = copy(iota(10))
+  let a      = iota(10)
   let x      = map f a
   let a[1]   = 3
   let y      = map g x in

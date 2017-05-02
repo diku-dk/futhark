@@ -10,6 +10,8 @@
 --    [0.000000, -1.500000]]
 -- }
 
+import "/futlib/array"
+
 let lu_inplace(a: *[#n][]f64): (*[][]f64, *[][]f64) =
   loop ((a,l,u) = (a,
                    replicate n (replicate n 0.0),

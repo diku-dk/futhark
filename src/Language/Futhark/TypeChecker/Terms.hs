@@ -886,10 +886,6 @@ checkExp (Concat i arr1exp arr2exps loc) = do
           | otherwise = return ()
           where t = typeOf e
 
-checkExp (Copy e pos) = do
-  e' <- checkExp e
-  return $ Copy e' pos
-
 checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
   (mergeexp', mergeflow) <- collectOccurences $ checkExp mergeexp
 

@@ -43,6 +43,8 @@
 --           [[0.226438f32, -0.114818f32], [-0.527942f32, 0.242899f32]]]
 -- }
 
+import "/futlib/array"
+
 default(f32)
 
 let tridagSeq(a:  [#n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =

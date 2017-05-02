@@ -7,6 +7,8 @@
 --          [ [1i32, 9i32], [1i32, 3i32] ]
 --        }
 
+import "/futlib/array"
+
 -- Code below should result in 1 mem-block coalescing,
 -- corresponding to 4 coalesced variables.
 let main(y: *[#n][#m]i32, a : [#m]i32): *[n][m]i32 =

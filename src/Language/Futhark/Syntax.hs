@@ -568,10 +568,6 @@ data ExpBase f vn =
             -- static integer indicates which dimension to concatenate
             -- across.
 
-            | Copy (ExpBase f vn) SrcLoc
-            -- ^ Copy the value return by the expression.  This only
-            -- makes a difference in do-loops with merge variables.
-
             -- Array construction.
             | Iota (ExpBase f vn) SrcLoc
             -- ^ @iota(n) = [0,1,..,n-1]@
@@ -700,7 +696,6 @@ instance Located (ExpBase f vn) where
   locOf (Partition _ _ pos)      = locOf pos
   locOf (Split _ _ _ pos)        = locOf pos
   locOf (Concat _ _ _ pos)       = locOf pos
-  locOf (Copy _ pos)             = locOf pos
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
   locOf (Stream _ _ _  pos)      = locOf pos
   locOf (Unsafe _ loc)           = locOf loc

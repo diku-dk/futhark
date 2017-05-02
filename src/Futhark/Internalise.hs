@@ -848,10 +848,6 @@ internaliseExp desc (E.Project k e (Info rt) _) = do
                t         -> [t]
   take n . drop i' <$> internaliseExp desc e
 
-internaliseExp desc (E.Copy e _) = do
-  ses <- internaliseExpToVars "copy_arg" e
-  letSubExps desc [I.BasicOp $ I.Copy se | se <- ses]
-
 internaliseExp desc (E.Scatter a si v loc) = do
   si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
   svs <- internaliseExpToVars "write_arg_v" v

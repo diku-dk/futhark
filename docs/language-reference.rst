@@ -186,7 +186,6 @@ literals and variables, but also more complicated forms.
       : | "zip" ["@" `nat_int`] `exp`+
       : | "unzip" `exp`
       : | "unsafe" `exp`
-      : | "copy" `exp`
       : | `exp` "with" "[" `index` ("," `index`)* "]" "<-" `exp`
       : | "map" `fun` `exp`+
       : | "reduce" `fun` `exp` `exp`
@@ -631,12 +630,6 @@ Elide safety checks (such as bounds checking) for operations lexically
 with ``e``.  This is useful if the compiler is otherwise unable to
 avoid bounds checks (e.g. when using indirect indexes), but you really
 do not want them here.
-
-``copy a``
-...........
-Return a deep copy of the argument.  Semantically, this is just
-the identity function, but it has special semantics related to
-uniqueness types as described in :ref:`uniqueness-types`.
 
 ``a with [i] <- e``
 ...................

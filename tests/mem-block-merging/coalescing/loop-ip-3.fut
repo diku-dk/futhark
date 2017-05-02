@@ -9,6 +9,8 @@
 --           ]
 --        }
 
+import "/futlib/array"
+
 -- Code below should result in 1 mem-block coalescing,
 -- corresponding to 4 coalesced variables.
 -- The statement `let a1[i] = x` should NOT result in colaescing

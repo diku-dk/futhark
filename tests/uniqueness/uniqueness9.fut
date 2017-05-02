@@ -9,7 +9,7 @@
 
 let main(): i32 =
   let n = 10
-  let inarr  = copy(replicate n 0) in
+  let inarr  = replicate n 0 in
   loop ( outarr  = inarr ) = for i < n  do
       if i == 0
       then outarr

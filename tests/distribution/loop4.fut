@@ -4,6 +4,8 @@
 --
 -- structure distributed { Map/Loop 0 }
 
+import "/futlib/array"
+
 let main(m: i32, a: [#n][#k]i32): [n][k]i32 =
   map (\(a_r: [#k]i32): [k]i32  ->
         let a_r_copy = copy(a_r) in
