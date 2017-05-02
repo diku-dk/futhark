@@ -17,7 +17,7 @@ let mul2(a: [#n][#m]i32, b: [#n][#m]i32): [n][m]i32 = map mul1 (zip a b)
 let replin(n: i32) (a: [#m]i32): [n][m]i32 = replicate n a
 
 let matmultFun(a: [#n][#m]i32, b: [#m][#n]i32 ): [n][n]i32 =
-    let br  = replicate n (transpose b)
+    let br  = replicate n (rearrange (1,0) b)
     let ar  = map       (replin n) a
     let abr = map   mul2 (zip ar br)
     in map redplus2 abr

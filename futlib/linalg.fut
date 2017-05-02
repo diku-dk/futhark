@@ -1,6 +1,7 @@
 -- Small library of linear algebra-ish operations.
 
 import "/futlib/math"
+import "/futlib/array"
 
 module type linalg = {
   type t

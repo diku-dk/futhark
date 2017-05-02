@@ -582,10 +582,6 @@ data ExpBase f vn =
             | Reshape (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array.
 
-            | Transpose (ExpBase f vn) SrcLoc
-            -- ^ Transpose two-dimensional array.  @transpose(a) =
-            -- rearrange((1,0), a)@.
-
             | Rearrange [Int] (ExpBase f vn) SrcLoc
             -- ^ Permute the dimensions of the input array.  The list
             -- of integers is a list of dimensions (0-indexed), which
@@ -693,7 +689,6 @@ instance Located (ExpBase f vn) where
   locOf (Shape _ pos)            = locOf pos
   locOf (Replicate _ _ pos)      = locOf pos
   locOf (Reshape _ _ pos)        = locOf pos
-  locOf (Transpose _ pos)        = locOf pos
   locOf (Rearrange _ _ pos)      = locOf pos
   locOf (Rotate _ _ _ pos)       = locOf pos
   locOf (Map _ _ pos)            = locOf pos

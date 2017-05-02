@@ -14,5 +14,5 @@
 
 let main(x: [#n][#m]i32, y: [#m][#p]i32): [n][p]i32 =
   map (\xr -> map (\yc -> reduce (+) 0 (map (*) xr yc))
-                    (transpose y))
+                    (rearrange (1,0) y))
        x

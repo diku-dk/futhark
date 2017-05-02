@@ -564,7 +564,6 @@ typeOf (Reshape shape  e _) =
   where n = case typeOf shape of Record ts -> length ts
                                  _         -> 1
 typeOf (Rearrange _ e _) = typeOf e
-typeOf (Transpose e _) = typeOf e
 typeOf (Rotate _ _ e _) = typeOf e
 typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` S.empty
   where et = lambdaReturnType f

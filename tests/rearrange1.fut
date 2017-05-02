@@ -7,4 +7,4 @@
 -- output { [[1,2,3], [4,5,6],[7,8,9], [10,11,12]] }
 
 let main(a: [][#n]i32, b: [#n][]i32, c: [][#n]i32): [][]i32 =
-  concat a (transpose(b)) c
+  concat a (rearrange (1,0) b) c

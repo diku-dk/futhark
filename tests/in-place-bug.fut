@@ -51,6 +51,6 @@ let main(numX: i32, numY: i32, numT: i32, s0: f64, strike: f64, t: f64, alpha: f
     let u = implicitMethod( myDx, myDxx, myMuX, myVarX, u, 1.0 )
     -- implicitY
     let y = map (\(u_row: []f64): []f64  ->
-                   map (+1.0) (u_row)) (
-                   transpose(u)) in
+                   map (+1.0) (u_row))
+                (rearrange (1,0) u) in
     y[0,0]

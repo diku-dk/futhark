@@ -9,6 +9,6 @@ let main(): [][]i32 =
   let n = 9
   let a = map (+1) (iota(n))
   let b = reshape (3,3) a
-  let c = transpose b in
+  let c = rearrange (1,0) b in
   map  (\(row: []i32): []i32  ->
          map  (*2) row) c
