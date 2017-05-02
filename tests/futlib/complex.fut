@@ -1,3 +1,4 @@
+import "/futlib/math"
 import "/futlib/complex"
 
 module C = complex(f32)

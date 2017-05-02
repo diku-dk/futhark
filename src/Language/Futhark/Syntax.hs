@@ -914,6 +914,7 @@ data DecBase f vn = ValDec (ValBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | ModDec (ModBindBase f vn)
                   | OpenDec (ModExpBase f vn) [ModExpBase f vn] (f [VName]) SrcLoc
+                  | LocalDec (DecBase f vn) SrcLoc
 deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
@@ -923,6 +924,7 @@ instance Located (DecBase f vn) where
   locOf (SigDec d)          = locOf d
   locOf (ModDec d)          = locOf d
   locOf (OpenDec _ _ _ loc) = locOf loc
+  locOf (LocalDec _ loc)    = locOf loc
 
 newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)

@@ -307,6 +307,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
   ppr (SigDec sig)       = ppr sig
   ppr (ModDec sd)        = ppr sd
   ppr (OpenDec x xs _ _) = text "open" <+> spread (map ppr (x:xs))
+  ppr (LocalDec dec _)   = text "local" <+> ppr dec
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
   ppr (ModVar v _) = ppr v

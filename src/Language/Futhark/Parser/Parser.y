@@ -176,6 +176,7 @@ import Language.Futhark.Parser.Lexer
       module          { L $$ MODULE }
       val             { L $$ VAL }
       open            { L $$ OPEN }
+      local           { L $$ LOCAL }
 
 %left bottom
 %left ifprec letprec
@@ -237,9 +238,10 @@ Dec :: { [UncheckedDec] }
     | ModBind           { [ModDec $1 ] }
     | DefaultDec        { [] }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in [OpenDec (ModImport s loc) [] NoInfo $1] }
+      { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s loc) [] NoInfo $1) $1] }
     | open many1(ModExpAtom)
       { [OpenDec (fst $2) (snd $2) NoInfo $1] }
+    | local Dec         { map (`LocalDec` $1) $2 }
 ;
 
 SigExp :: { UncheckedSigExp }
