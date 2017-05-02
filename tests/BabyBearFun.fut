@@ -45,6 +45,7 @@
 --      enddo
 --    enddo
 
+import "futlib/array"
 
 let min(a: i32) (b: i32): i32 = if(a<b) then a else b
 

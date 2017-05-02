@@ -17,6 +17,6 @@ let main(a: [][#n][#m]i32): [][][]i32 =
                       scan (+) 0 (a_row_row)
                    ) (a_row) in
         map (\(b_col: []i32): []i32  ->
-              scan (+) 0 (b_col)
-           ) (transpose(b))
+             scan (+) 0 (b_col))
+            (rearrange (1,0) b)
      ) a

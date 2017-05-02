@@ -707,12 +707,6 @@ checkExp (Rearrange perm arrexp pos) = do
     bad $ PermutationError pos perm rank
   return $ Rearrange perm arrexp' pos
 
-checkExp (Transpose arrexp pos) = do
-  arrexp' <- checkExp arrexp
-  when (arrayRank (typeOf arrexp') /= 2) $
-    bad $ TypeError pos "Argument to transpose is not two-dimensional array."
-  return $ Transpose arrexp' pos
-
 checkExp (Rotate d offexp arrexp loc) = do
   arrexp' <- checkExp arrexp
   offexp' <- require [Prim $ Signed Int32] =<< checkExp offexp

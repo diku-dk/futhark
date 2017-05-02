@@ -7,6 +7,6 @@ let main(a_1: [#n][#m]i32, a_2: [#n][#m]i32): [][]i32 =
                 map (\(x: i32, y: i32): (i32,i32)  ->
                       (x+y,x-y)) row) a
   let c = map (\(row: [](i32,i32)): [n]i32  ->
-                map (\(x,y) -> x + y) row) (
-              transpose(b))
+                map (\(x,y) -> x + y) row)
+              (rearrange (1,0) b)
   in c

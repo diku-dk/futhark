@@ -73,6 +73,6 @@ let main(md_c: [#num_und][#num_und]f64,
          bb_arr: [#num_und][#num_dates]f64): [num_dates][num_und]f64 =
   -- I don't want to import the entire Brownian bridge, so we just
   -- transpose bb_arr.
-  let bb_row = transpose(bb_arr)
+  let bb_row = rearrange (1,0) bb_arr
   let noises = correlateDeltas(md_c, bb_row) in
   mkPrices(md_vols, md_drifts, noises)

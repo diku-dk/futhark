@@ -35,3 +35,6 @@ let intersperse [n] 't (x: t) (xs: [n]t): []t =
 
 let intercalate [n] [m] 't (x: [m]t) (xs: [n][m]t): []t =
   flatten (intersperse x xs)
+
+let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
+  rearrange (1,0) a

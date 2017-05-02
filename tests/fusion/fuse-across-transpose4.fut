@@ -3,8 +3,8 @@
 -- output { [[10, 7], [12, 9], [14, 11]] }
 -- structure { Map 2 }
 let main(a: [#n][#m]i32, b: [#n][#m]i32): [][]i32 =
-  let a2 = map (\r: [n]i32  -> map (+1) r) (transpose(a))
-  let b2 = map (\r: [n]i32  -> map (+1) r) (transpose(b))
+  let a2 = map (\r: [n]i32  -> map (+1) r) (rearrange (1,0) a)
+  let b2 = map (\r: [n]i32  -> map (+1) r) (rearrange (1,0) b)
   let c  = map (\rp: [n]i32  ->
                  let (rx,ry) = rp in
                  map (+) rx ry)

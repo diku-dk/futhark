@@ -180,7 +180,6 @@ literals and variables, but also more complicated forms.
       : | "replicate" `exp` `exp`
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
-      : | "transpose" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
       : | "split" ["@" `nat_int`] `exp` `exp`
       : | "concat" ["@" `nat_int`] `exp`+
@@ -560,11 +559,6 @@ length-``n`` permutation.
 
 For example, if ``b==rearrange (2,0,1) a``, then ``b[x,y,z] =
 a[y,z,x]``.
-
-``transpose a``
-................
-
-Return the transpose of ``a``, which must be a two-dimensional array.
 
 ``rotate@d i a``
 ................

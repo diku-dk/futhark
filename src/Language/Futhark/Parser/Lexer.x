@@ -122,7 +122,6 @@ keyword s =
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
-    "transpose"    -> TRANSPOSE
     "rotate"       -> ROTATE
     "map"          -> MAP
     "reduce"       -> REDUCE
@@ -319,7 +318,6 @@ data Token = ID Name
            | REDUCECOMM
            | RESHAPE
            | REARRANGE
-           | TRANSPOSE
            | ROTATE
            | ZIP
            | UNZIP

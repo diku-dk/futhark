@@ -216,8 +216,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "reshape" <+> ppr shape <+> ppr e
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  pprPrec _ (Transpose e _) =
-    text "transpose" <> apply [ppr e]
   pprPrec _ (Rotate d x e _) =
     text "rotate@" <> ppr d <> apply [ppr x, ppr e]
   pprPrec _ (Map lam as _) = ppSOAC "map" [lam] as

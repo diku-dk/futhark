@@ -153,7 +153,6 @@ import Language.Futhark.Parser.Lexer
       reduceComm      { L $$ REDUCECOMM }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
-      transpose       { L $$ TRANSPOSE }
       rotate          { L $$ ROTATE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
@@ -202,7 +201,7 @@ nonassoc with
 %nonassoc '['
 %nonassoc Id
 %left juxtprec
-%left indexprec iota shape copy transpose rotate rearrange split shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
+%left indexprec iota shape copy rotate rearrange split shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
 %%
 
 -- Some parameterized productions.  Left-recursive, as this is faster
@@ -490,9 +489,6 @@ Exp2 :: { UncheckedExp }
 
      | rearrange '(' NaturalInts ')' Atom
                       { Rearrange $3 $5 $1 }
-
-     | transpose Atom
-                      { Transpose $2 $1 }
 
      | rotate '@' NaturalInt Atom Atom { Rotate $3 $4 $5 $1 }
 
