@@ -165,7 +165,6 @@ import Language.Futhark.Parser.Lexer
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       empty           { L $$ EMPTY }
-      copy            { L $$ COPY }
       while           { L $$ WHILE }
       stream_map      { L $$ STREAM_MAP }
       stream_map_per  { L $$ STREAM_MAPPER }
@@ -536,8 +535,6 @@ Exp2 :: { UncheckedExp }
 
      | partition '(' sepBy1(FunAbstr, ',') ')' Atom
                       { Partition (fst $3 : snd $3) $5 $1 }
-
-     | copy Atom   { Copy $2 $1 }
 
      | stream_map       FunAbstr Atom
                          { Stream (MapLike InOrder)  $2 $3 $1 }

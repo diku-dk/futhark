@@ -38,3 +38,6 @@ let intercalate [n] [m] 't (x: [m]t) (xs: [n][m]t): []t =
 
 let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
   rearrange (1,0) a
+
+let copy [n] 't (a: [n]t): *[n]t =
+  map (\x -> x) a

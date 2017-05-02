@@ -604,7 +604,6 @@ typeOf (Split _ splitexps e _) =
   tupleRecord $ replicate (1 + n) (typeOf e)
   where n = case typeOf splitexps of Record ts -> length ts
                                      _         -> 1
-typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (Scatter a _i _v _) = typeOf a `setAliases` S.empty
 

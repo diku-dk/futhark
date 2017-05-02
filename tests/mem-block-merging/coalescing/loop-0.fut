@@ -7,6 +7,8 @@
 --          [ [1i32, 9i32], [3i32, 4i32] ]
 --        }
 
+import "/futlib/array"
+
 -- Code below should result in 4 successful coalescing
 -- operations in the memory block of `y`. These are:
 -- (i) @y[n/2] = a1@, (ii) `a1 = implicit-copy(x2)`,

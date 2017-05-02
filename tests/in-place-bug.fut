@@ -3,6 +3,7 @@
 -- ==
 
 import "/futlib/math"
+import "/futlib/array"
 
 let tridagSeq(a:  []f64, b: []f64, c: []f64, y: []f64 ): []f64 =
   copy(concat a b c y)

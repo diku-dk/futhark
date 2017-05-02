@@ -135,7 +135,6 @@ keyword s =
     "filter"       -> FILTER
     "partition"    -> PARTITION
     "empty"        -> EMPTY
-    "copy"         -> COPY
     "while"        -> WHILE
     "stream_map"     -> STREAM_MAP
     "stream_map_per" -> STREAM_MAPPER
@@ -330,7 +329,6 @@ data Token = ID Name
            | TRUE
            | FALSE
            | EMPTY
-           | COPY
            | WHILE
            | STREAM_MAP
            | STREAM_MAPPER

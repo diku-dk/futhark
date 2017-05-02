@@ -567,5 +567,5 @@ Most operations produce arrays without any aliases.  You can think of
 these as producing fresh arrays.  The exceptions are ``split``,
 ``reshape``, ``transpose``, ``rearrange``, ``zip`` and ``unzip``, as
 well as function calls and ``if`` expressions (depending on types).
-You can use ``copy`` to "break" sharing by forcing the argument to be
-manifested freshly in memory.
+You can use ``copy`` from ``/futlib/array`` to "break" sharing by
+forcing the argument to be manifested freshly in memory.

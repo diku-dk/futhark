@@ -247,7 +247,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "split@" <> ppr i <+> pprPrec 10 e <+> pprPrec 10 a
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
-  pprPrec _ (Copy e _) = text "copy" <> pprPrec 10 e
   pprPrec _ (DoLoop tparams pat initexp form loopbody letbody _) =
     text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals
                             <+> ppr initexp) <+> equals <+>
