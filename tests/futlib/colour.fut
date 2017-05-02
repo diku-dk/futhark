@@ -1,7 +1,7 @@
 -- Proper tests of this library require drawing colours to the screen,
 -- I think.
 
-import "futlib/colour"
+import "/futlib/colour"
 
 -- ==
 -- entry: basic_mix

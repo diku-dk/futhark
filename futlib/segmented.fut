@@ -1,6 +1,6 @@
 -- Segmented operations using parametric modules.
 
-import "futlib/monoid"
+import "/futlib/monoid"
 
 module segmented_scan(M: monoid): {
   val segmented_scan: []bool -> []M.t -> []M.t

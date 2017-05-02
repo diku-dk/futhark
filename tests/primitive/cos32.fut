@@ -5,6 +5,6 @@
 -- input { 3.1415927f32 } output { -1f32 }
 -- input { -3.1415927f32 } output { -1f32 }
 
-import "futlib/math"
+import "/futlib/math"
 
 let main(x: f32): f32 = f32.cos(x)

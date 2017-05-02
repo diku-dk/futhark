@@ -1,6 +1,6 @@
 -- Utility functions for arrays.
 
-import "futlib/math"
+import "/futlib/math"
 
 let length [n] 't (_: [n]t) = n
 

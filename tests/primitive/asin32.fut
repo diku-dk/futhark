@@ -5,6 +5,6 @@
 -- input { -8.742278e-8f32 } output { -8.742278e-8f32 }
 -- input { 8.742278e-8f32 } output { 8.742278e-8f32 }
 
-import "futlib/math"
+import "/futlib/math"
 
 let main(x: f32): f32 = f32.asin(x)

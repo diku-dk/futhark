@@ -1052,7 +1052,9 @@ You can also include files from subdirectories::
 
   include "path/to/a/file"
 
-The above will include the file ``path/to/a/file.fut``.
+The above will include the file ``path/to/a/file.fut``.  When
+importing a nonlocal file (such as the standard library or the
+compiler search path), the path must begin with a forward slash.
 
 Qualified imports are also possible, where a module is created for the
 file::

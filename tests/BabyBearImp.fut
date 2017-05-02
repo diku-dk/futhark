@@ -45,7 +45,7 @@
 --      enddo
 --    enddo
 
-import "futlib/math"
+import "/futlib/math"
 
 let floydSbsImp(n: i32, d: *[][]i32): [][]i32 =
     let dT = transpose(d) in

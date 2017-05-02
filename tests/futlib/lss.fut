@@ -6,7 +6,7 @@
 -- input { [1, 2, 3, 4, 5] }
 -- output { 5 1 }
 
-import "futlib/lss"
+import "/futlib/lss"
 
 module Ascending = {
   type t = i32

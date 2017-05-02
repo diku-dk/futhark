@@ -15,7 +15,7 @@
 
 -- constants
 
-import "futlib/math"
+import "/futlib/math"
 
 let strike(): i32 = 100
 let bankDays(): i32 = 252

@@ -6,7 +6,7 @@
 --   [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 -- }
 
-import "futlib/math"
+import "/futlib/math"
 
 let intsqrt(x: i32): i32 =
     i32(f32.sqrt(f32(x)))

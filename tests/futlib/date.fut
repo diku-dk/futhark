@@ -8,7 +8,7 @@
 -- ==
 -- tags { no_opencl }
 
-module date = import "futlib/date"
+module date = import "/futlib/date"
 
 -- ==
 -- entry: date_triples_inv

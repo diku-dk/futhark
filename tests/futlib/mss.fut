@@ -2,8 +2,8 @@
 -- input { [1, -2, 3, 4, -1, 5, -6, 1] }
 -- output { 11 10 }
 
-import "futlib/math"
-import "futlib/mss"
+import "/futlib/math"
+import "/futlib/mss"
 
 module Int_measure = {
   type t = i32

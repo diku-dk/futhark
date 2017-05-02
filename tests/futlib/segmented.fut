@@ -1,5 +1,5 @@
-import "futlib/monoid"
-import "futlib/segmented"
+import "/futlib/monoid"
+import "/futlib/segmented"
 
 -- ==
 -- entry: test_segmented_scan

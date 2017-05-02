@@ -1,4 +1,4 @@
-import "futlib/array"
+import "/futlib/array"
 
 -- ==
 -- entry: test_length

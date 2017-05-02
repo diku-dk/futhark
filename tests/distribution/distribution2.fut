@@ -7,7 +7,7 @@
 --   DoLoop 3
 -- }
 
-import "futlib/math"
+import "/futlib/math"
 
 let take(n: i32, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in first
 
