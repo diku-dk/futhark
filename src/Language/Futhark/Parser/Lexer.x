@@ -118,7 +118,6 @@ keyword s =
     "with"         -> WITH
 
     "iota"         -> IOTA
-    "shape"        -> SHAPE
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
@@ -141,7 +140,6 @@ keyword s =
     "stream_red"     -> STREAM_RED
     "stream_red_per" -> STREAM_REDPER
     "stream_seq"     -> STREAM_SEQ
-    "scatter"      -> SCATTER
     "include"      -> INCLUDE
     "import"       -> IMPORT
     "type"         -> TYPE
@@ -309,7 +307,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | SHAPE
            | IOTA
            | REPLICATE
            | MAP
@@ -335,7 +332,6 @@ data Token = ID Name
            | STREAM_RED
            | STREAM_REDPER
            | STREAM_SEQ
-           | SCATTER
            | INCLUDE
            | IMPORT
            | ENTRY

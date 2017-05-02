@@ -397,8 +397,8 @@ internaliseExp desc (E.Negate e _) = do
 -- Some functions are magical (overloaded) and we handle that here.
 -- Note that polymorphic functions (which are not magical) are not
 -- handled here.
-internaliseExp desc (E.Apply fname args _ _)
-  | Just internalise <- isOverloadedFunction fname $ map fst args =
+internaliseExp desc (E.Apply fname args _ loc)
+  | Just internalise <- isOverloadedFunction fname (map fst args) loc =
       internalise desc
 
 internaliseExp desc (E.Apply fname args _ _)
@@ -587,13 +587,6 @@ internaliseExp desc (E.Update src slice ve loc) = do
       (E.Var (E.qualName dest_name) (E.Info src_t) loc)
       loc)
     loc
-
-internaliseExp desc (E.Shape e _) = do
-  ks <- internaliseExp (desc<>"_shape") e
-  case ks of
-    (k:_) -> do kt <- I.subExpType k
-                letSubExps desc [I.BasicOp $ I.ArrayLit (I.arrayDims kt) $ I.Prim int32]
-    _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
 
 internaliseExp desc (E.Unzip e _ _) =
   internaliseExp desc e
@@ -832,8 +825,8 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
 
 -- Builtin operators are handled specially because they are
 -- overloaded.
-internaliseExp desc (E.BinOp op (xe,_) (ye,_) _ _)
-  | Just internalise <- isOverloadedFunction op [xe, ye] =
+internaliseExp desc (E.BinOp op (xe,_) (ye,_) _ loc)
+  | Just internalise <- isOverloadedFunction op [xe, ye] loc =
       internalise desc
 
 -- User-defined operators are just the same as a function call.
@@ -847,57 +840,6 @@ internaliseExp desc (E.Project k e (Info rt) _) = do
                Record fs -> map snd $ filter ((<k) . fst) $ sortFields fs
                t         -> [t]
   take n . drop i' <$> internaliseExp desc e
-
-internaliseExp desc (E.Scatter a si v loc) = do
-  si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
-  svs <- internaliseExpToVars "write_arg_v" v
-  sas <- internaliseExpToVars "write_arg_a" a
-
-  si_shape <- I.arrayShape <$> lookupType si'
-  let si_w = shapeSize 0 si_shape
-
-  (tvs, svs') <- fmap unzip $ forM svs $ \sv -> do
-    tv <- rowType <$> lookupType sv -- the element type
-    sv_shape <- I.arrayShape <$> lookupType sv
-    let sv_w = shapeSize 0 sv_shape
-
-    -- Generate an assertion and reshapes to ensure that sv and si' are the same
-    -- size.
-    cmp <- letSubExp "write_cmp" $ I.BasicOp $
-      I.CmpOp (I.CmpEq I.int32) si_w sv_w
-    c   <- assertingOne $
-      letExp "write_cert" $ I.BasicOp $
-      I.Assert cmp loc
-    sv' <- letExp (baseString sv ++ "_write_sv") $
-      I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
-
-    return (tv, sv')
-
-  indexType <- rowType <$> lookupType si'
-  let bodyTypes = replicate (length tvs) indexType ++ tvs
-      paramTypes = indexType : tvs
-
-  indexName <- newVName "write_index"
-  valueNames <- replicateM (length tvs) $ newVName "write_value"
-
-  let bodyNames = indexName : valueNames
-  let bodyParams = zipWith I.Param bodyNames paramTypes
-
-  -- This body is pretty boring right now, as every input is exactly the output.
-  -- But it can get funky later on if fused with something else.
-  (body, _) <- runBinderEmptyEnv $ insertStmsM $ do
-    let outs = replicate (length valueNames) indexName ++ valueNames
-    results <- forM outs $ \name ->
-      letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
-    return $ resultBody results
-
-  let lam = Lambda { I.lambdaParams = bodyParams
-                   , I.lambdaReturnType = bodyTypes
-                   , I.lambdaBody = body
-                   }
-      sivs = si' : svs'
-  aws <- mapM (fmap (arraySize 0) . lookupType) sas
-  letTupExp' desc $ I.Op $ I.Scatter [] si_w lam sivs $ zip aws sas
 
 internaliseDimIndex :: SrcLoc -> SubExp -> E.DimIndex
                     -> InternaliseM (I.DimIndex SubExp, Certificates)
@@ -1158,7 +1100,7 @@ internaliseLambda (E.AnonymFun tparams params body _ (Info rettype) _) rowtypes 
 internaliseLambda (E.CurryFun qfname [] (Info ([et], _)) loc) [it] = do
   param <- newParam "not_curried" it
   let arg = E.Var (E.qualName (paramName param)) (Info et) loc
-  case isOverloadedFunction qfname [arg] of
+  case isOverloadedFunction qfname [arg] loc of
     Just special -> do
       (res, stms) <- localScope (scopeOfLParams [param]) $
                      collectStms $ special "curried_result"
@@ -1236,9 +1178,9 @@ internaliseDimConstant fname name =
 
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
-isOverloadedFunction :: E.QualName VName -> [E.Exp]
+isOverloadedFunction :: E.QualName VName -> [E.Exp] -> SrcLoc
                      -> Maybe (String -> InternaliseM [SubExp])
-isOverloadedFunction qname args = do
+isOverloadedFunction qname args loc = do
   guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
   handle args $ baseString $ qualLeaf qname
   where
@@ -1345,6 +1287,10 @@ isOverloadedFunction qname args = do
             internaliseBinOp desc bop x' y' t1 t2
           _ -> fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
+    handle [a, si, v] "scatter" = Just $ scatterF a si v
+
+    handle [e] "shape" = Just $ shapeF e
+
     handle _ _ = Nothing
 
     toSigned int_to e desc = do
@@ -1423,6 +1369,65 @@ isOverloadedFunction qname args = do
                    letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
                  _ ->
                    fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
+
+    scatterF a si v desc = do
+      si' <- letExp "write_si" . BasicOp . SubExp =<< internaliseExp1 "write_arg_i" si
+      svs <- internaliseExpToVars "write_arg_v" v
+      sas <- internaliseExpToVars "write_arg_a" a
+
+      si_shape <- I.arrayShape <$> lookupType si'
+      let si_w = shapeSize 0 si_shape
+
+      (tvs, svs') <- fmap unzip $ forM svs $ \sv -> do
+        tv <- rowType <$> lookupType sv -- the element type
+        sv_shape <- I.arrayShape <$> lookupType sv
+        let sv_w = shapeSize 0 sv_shape
+
+        -- Generate an assertion and reshapes to ensure that sv and si' are the same
+        -- size.
+        cmp <- letSubExp "write_cmp" $ I.BasicOp $
+          I.CmpOp (I.CmpEq I.int32) si_w sv_w
+        c   <- assertingOne $
+          letExp "write_cert" $ I.BasicOp $
+          I.Assert cmp loc
+        sv' <- letExp (baseString sv ++ "_write_sv") $
+          I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
+
+        return (tv, sv')
+
+      indexType <- rowType <$> lookupType si'
+      let bodyTypes = replicate (length tvs) indexType ++ tvs
+          paramTypes = indexType : tvs
+
+      indexName <- newVName "write_index"
+      valueNames <- replicateM (length tvs) $ newVName "write_value"
+
+      let bodyNames = indexName : valueNames
+      let bodyParams = zipWith I.Param bodyNames paramTypes
+
+      -- This body is pretty boring right now, as every input is exactly the output.
+      -- But it can get funky later on if fused with something else.
+      (body, _) <- runBinderEmptyEnv $ insertStmsM $ do
+        let outs = replicate (length valueNames) indexName ++ valueNames
+        results <- forM outs $ \name ->
+          letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
+        return $ resultBody results
+
+      let lam = Lambda { I.lambdaParams = bodyParams
+                       , I.lambdaReturnType = bodyTypes
+                       , I.lambdaBody = body
+                       }
+          sivs = si' : svs'
+      aws <- mapM (fmap (arraySize 0) . lookupType) sas
+      letTupExp' desc $ I.Op $ I.Scatter [] si_w lam sivs $ zip aws sas
+
+    shapeF e desc = do
+      ks <- internaliseExp (desc<>"_shape") e
+      case ks of
+        (k:_) -> do kt <- I.subExpType k
+                    letSubExps desc [I.BasicOp $ I.ArrayLit (I.arrayDims kt) $ I.Prim int32]
+        _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
+
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.

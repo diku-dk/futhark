@@ -557,7 +557,6 @@ typeOf (Index ident idx _) =
         isFix _        = False
 typeOf (Update e _ _ _) = typeOf e
 typeOf (Iota e _) = arrayType 1 (typeOf e) Unique
-typeOf (Shape _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique `setAliases` mempty
 typeOf (Reshape shape  e _) =
   typeOf e `setArrayShape` Rank n
@@ -605,7 +604,6 @@ typeOf (Split _ splitexps e _) =
   where n = case typeOf splitexps of Record ts -> length ts
                                      _         -> 1
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
-typeOf (Scatter a _i _v _) = typeOf a `setAliases` S.empty
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -756,17 +754,18 @@ namesToPrimTypes = M.fromList
                           map FloatType [minBound..maxBound] ]
 
 -- | The nature of something predefined.  These can either be monomorphic
--- or polymorphic.  A polymorphic builtin is a mapping from valid
+-- or overloaded.  An overloaded builtin is a mapping from valid
 -- parameter types to the result type.
 data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
-               | IntrinsicPolyFun [([PrimType], PrimType)]
+               | IntrinsicOverloadedFun [([PrimType], PrimType)]
+               | IntrinsicPolyFun [TypeParamBase VName] [TypeBase Rank ()] (TypeBase Rank ())
                | IntrinsicType PrimType
                | IntrinsicEquality -- Special cased.
                | IntrinsicOpaque
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
-intrinsics = M.fromList $ zipWith namify [0..] $
+intrinsics = M.fromList $ zipWith namify [10..] $
              map (\(name, (ts,t)) -> (name, IntrinsicMonoFun ts t))
              [("sqrt32", ([FloatType Float32], FloatType Float32))
              ,("log32", ([FloatType Float32], FloatType Float32))
@@ -794,7 +793,7 @@ intrinsics = M.fromList $ zipWith namify [0..] $
 
              ] ++
 
-             [ ("~", IntrinsicPolyFun $
+             [ ("~", IntrinsicOverloadedFun $
                      [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
                      [([Unsigned t], Unsigned t) | t <- [minBound..maxBound] ])
              , ("!", IntrinsicMonoFun [Bool] Bool)] ++
@@ -816,12 +815,24 @@ intrinsics = M.fromList $ zipWith namify [0..] $
 
              -- The reason for the loop formulation is to ensure that we
              -- get a missing case warning if we forget a case.
-             map mkIntrinsicBinOp [minBound..maxBound]
+             map mkIntrinsicBinOp [minBound..maxBound] ++
 
-  where namify i (k,v) = (VName (nameFromString k) i, v)
+             [("scatter", IntrinsicPolyFun [TypeParamType tv_a noLoc]
+                          [Array $ PolyArray tv_a' [] (Rank 1) Unique (),
+                           Array $ PrimArray (Signed Int32) (Rank 1) Nonunique (),
+                           Array $ PolyArray tv_a' [] (Rank 1) Nonunique ()] $
+                          Array $ PolyArray tv_a' [] (Rank 1) Unique ()),
+              ("shape", IntrinsicPolyFun [TypeParamType tv_a noLoc]
+                        [Array $ PolyArray tv_a' [] (Rank 1) Nonunique ()] $
+                        Array $ PrimArray (Signed Int32) (Rank 1) Unique ())]
+
+  where tv_a = VName (nameFromString "a") 0
+        tv_a' = typeName tv_a
+
+        namify i (k,v) = (VName (nameFromString k) i, v)
 
         convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
-        convertFun from to = (pretty to, IntrinsicPolyFun $ zip (map pure from) (repeat to))
+        convertFun from to = (pretty to, IntrinsicOverloadedFun $ zip (map pure from) (repeat to))
 
         unOpFun bop = (pretty bop, IntrinsicMonoFun [t] t)
           where t = unPrim $ Primitive.unOpType bop
@@ -849,7 +860,7 @@ intrinsics = M.fromList $ zipWith namify [0..] $
         mkIntrinsicBinOp op = (pretty op, intrinsicBinOp op)
 
         binOp :: [PrimType] -> Intrinsic
-        binOp ts = IntrinsicPolyFun [ ([t,t], t) | t <- ts ]
+        binOp ts = IntrinsicOverloadedFun [ ([t,t], t) | t <- ts ]
 
         intrinsicBinOp Plus     = binOp anyNumberType
         intrinsicBinOp Minus    = binOp anyNumberType
@@ -874,7 +885,7 @@ intrinsics = M.fromList $ zipWith namify [0..] $
         intrinsicBinOp Greater  = ordering
         intrinsicBinOp Geq      = ordering
 
-        ordering = IntrinsicPolyFun [ ([t,t], Bool) | t <- anyPrimType ]
+        ordering = IntrinsicOverloadedFun [ ([t,t], Bool) | t <- anyPrimType ]
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
