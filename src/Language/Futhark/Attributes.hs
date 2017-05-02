@@ -914,6 +914,7 @@ progImports (Prog decs) = concatMap decImports decs
         decImports TypeDec{} = []
         decImports ValDec{} = []
         decImports FunDec{} = []
+        decImports (LocalDec d _) = decImports d
 
         modExpImports ModVar{}              = []
         modExpImports (ModParens p _)       = modExpImports p
