@@ -4,6 +4,6 @@
 -- input { 0.5403023f32 } output { 1f32 }
 -- input { -1f32 } output { 3.1415927f32 }
 
-import "futlib/math"
+import "/futlib/math"
 
 let main(x: f32): f32 = f32.acos(x)

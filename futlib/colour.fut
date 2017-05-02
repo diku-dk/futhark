@@ -3,7 +3,7 @@
 -- Adapted from the gloss library by Ben Lippmeier:
 -- https://hackage.haskell.org/package/gloss
 
-import "futlib/math"
+import "/futlib/math"
 
 module type colour = {
   type colour

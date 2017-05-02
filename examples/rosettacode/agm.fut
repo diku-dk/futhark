@@ -4,7 +4,7 @@
 -- input { 1.0f64 2.0f64 }
 -- output { 1.456791f64 }
 
-import "futlib/math"
+import "/futlib/math"
 
 let agm(a: f64, g: f64): f64 =
   let eps = 1.0E-16

@@ -8,7 +8,7 @@
 -- separate interface files (or some other such mechanism), this
 -- should go away.
 
-import "futlib/math"
+import "/futlib/math"
 
 module type date = {
   type date
