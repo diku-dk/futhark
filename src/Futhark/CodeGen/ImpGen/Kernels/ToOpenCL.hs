@@ -560,7 +560,7 @@ typesInCode (DeclareScalar _ t) = S.singleton t
 typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
-typesInCode (Scatter _ (Count e1) t _ _ e2) =
+typesInCode (Write _ (Count e1) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (SetScalar _ e) = typesInExp e
 typesInCode SetMem{} = mempty

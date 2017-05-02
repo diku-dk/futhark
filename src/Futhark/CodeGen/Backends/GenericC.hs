@@ -92,7 +92,7 @@ type PointerQuals op s = String -> CompilerM op s [C.TypeQual]
 -- | The type of a memory block in the given memory space.
 type MemoryType op s = SpaceId -> CompilerM op s C.Type
 
--- | Scatter a scalar to the given memory block with the given index and
+-- | Write a scalar to the given memory block with the given index and
 -- in the given memory space.
 type WriteScalar op s =
   C.Exp -> C.Exp -> C.Type -> SpaceId -> Volatility -> C.Exp -> CompilerM op s ()
@@ -1245,7 +1245,7 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
     <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
 
-compileCode (Scatter dest (Count idx) elemtype DefaultSpace vol elemexp) = do
+compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   dest' <- rawMem dest
   deref <- derefPointer dest'
            <$> compileExp idx
@@ -1255,7 +1255,7 @@ compileCode (Scatter dest (Count idx) elemtype DefaultSpace vol elemexp) = do
   where vol' = case vol of Volatile -> [C.ctyquals|volatile|]
                            Nonvolatile -> []
 
-compileCode (Scatter dest (Count idx) elemtype (Space space) vol elemexp) =
+compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
   join $ asks envWriteScalar
     <*> rawMem dest
     <*> compileExp idx

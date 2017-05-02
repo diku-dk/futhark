@@ -175,7 +175,7 @@ expCompiler
     x' <- ImpGen.compileSubExp x
     s' <- ImpGen.compileSubExp s
 
-    let body = Imp.Scatter destmem destidx (IntType et) destspace Imp.Nonvolatile $
+    let body = Imp.Write destmem destidx (IntType et) destspace Imp.Nonvolatile $
                Imp.ConvOpExp (SExt Int32 et) (Imp.var thread_gid int32) * s' + x'
 
     (group_size, num_groups) <- computeMapKernelGroups n'
@@ -282,7 +282,7 @@ callKernelCopy bt
     (_, destspace, destidx) <- ImpGen.fullyIndexArray' destloc dest_is bt
     (_, srcspace, srcidx) <- ImpGen.fullyIndexArray' srcloc src_is bt
 
-    let body = Imp.Scatter destmem destidx bt destspace Imp.Nonvolatile $
+    let body = Imp.Write destmem destidx bt destspace Imp.Nonvolatile $
                Imp.index srcmem srcidx bt srcspace Imp.Nonvolatile
 
     destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
@@ -469,7 +469,7 @@ writeParamToLocalMemory :: Typed (MemBound u) =>
 writeParamToLocalMemory i (mem, _) param
   | Prim t <- paramType param =
       ImpGen.emit $
-      Imp.Scatter mem (bytes i') bt (Space "local") Imp.Volatile $
+      Imp.Write mem (bytes i') bt (Space "local") Imp.Volatile $
       Imp.var (paramName param) t
   | otherwise =
       return ()
