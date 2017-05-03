@@ -15,4 +15,3 @@ let main(x: [#n]i32): []i32 =
   in
   let w = concat a (y'[1])
   in w
-

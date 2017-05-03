@@ -1,12 +1,13 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 -- | Playground for work on merging memory blocks
-module Futhark.Optimise.MemBlkMerging.LastUse
-       ( lastUseFun, lastUsePrg )
-       where
+module Futhark.Pass.MemoryBlockMerging.LastUse
+  ( lastUseFun
+  , lastUsePrg
+  ) where
 
 import Prelude
 import qualified Data.Map.Strict as M
-import qualified Data.Set      as S
+import qualified Data.Set as S
 
 --import Debug.Trace
 
@@ -14,7 +15,7 @@ import qualified Data.Set      as S
 
 import Futhark.Representation.Aliases
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
-import Futhark.Optimise.MemBlkMerging.DataStructs
+import Futhark.Pass.MemoryBlockMerging.DataStructs
 
 -- | Last-Use analysis of a Futhark program in aliased explicit-memory lore form.
 --   Takes as input such a program and produces a `M.Map VName [VName]`,
