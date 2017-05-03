@@ -347,15 +347,16 @@ bindingTypes types = local $ \scope ->
 bindingTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
 bindingTypeParams tparams = binding (mapMaybe typeParamIdent tparams) .
                             bindingTypes (mapMaybe typeParamType tparams)
-  where typeParamIdent (TypeParamDim v loc) =
-          Just $ Ident v (Info (Prim (Signed Int32))) loc
-        typeParamIdent TypeParamType{} =
-          Nothing
-
-        typeParamType (TypeParamType v _) =
+  where typeParamType (TypeParamType v _) =
           Just (v, TypeAbbr [] $ TypeVar (typeName v) [])
         typeParamType TypeParamDim{} =
           Nothing
+
+typeParamIdent :: TypeParam -> Maybe Ident
+typeParamIdent (TypeParamDim v loc) =
+  Just $ Ident v (Info (Prim (Signed Int32))) loc
+typeParamIdent TypeParamType{} =
+  Nothing
 
 -- | A hack that also binds the names in the name map.  This is useful
 -- if the same names are visible in two entirely different expressions
@@ -390,9 +391,10 @@ bindingPatternGroup tps ps m =
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
   checkPatternGroup tps' ps $ \ps' ->
   binding (S.toList $ S.unions $ map patIdentSet ps') $ do
-    -- Perform an observation of every declared dimension.  This
-    -- prevents unused-name warnings for otherwise unused dimensions.
-    mapM_ observe $ concatMap patternDims ps'
+    -- Perform an observation of every type parameter and every
+    -- declared dimension.  This prevents unused-name warnings for
+    -- otherwise unused dimensions.
+    mapM_ observe $ concatMap patternDims ps' ++ mapMaybe typeParamIdent tps'
 
     checkTypeParamsUsed tps' ps'
 
