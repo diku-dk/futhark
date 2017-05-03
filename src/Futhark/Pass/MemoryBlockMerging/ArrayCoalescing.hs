@@ -1,8 +1,8 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 -- | Playground for work on merging memory blocks
-module Futhark.Optimise.MemBlkMerging.ArrayCoalescing
-       ( mkCoalsTab )
-       where
+module Futhark.Pass.MemoryBlockMerging.ArrayCoalescing
+  ( mkCoalsTab
+  ) where
 
 import Prelude
 import Data.Maybe
@@ -10,7 +10,7 @@ import Data.Monoid
 import Data.List
 import Control.Arrow
 import qualified Data.Map.Strict as M
-import qualified Data.Set      as S
+import qualified Data.Set as S
 import qualified Control.Exception.Base as Exc
 import Debug.Trace
 
@@ -19,8 +19,10 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.Aliases
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import Futhark.Optimise.MemBlkMerging.DataStructs
-import Futhark.Optimise.MemBlkMerging.LastUse
+
+import Futhark.Pass.MemoryBlockMerging.DataStructs
+import Futhark.Pass.MemoryBlockMerging.LastUse
+
 
 type ScopeTab = Scope (Aliases ExpMem.ExplicitMemory)
 -- ^ maps array-variable names to various info, including

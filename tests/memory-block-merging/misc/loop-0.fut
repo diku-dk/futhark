@@ -16,9 +16,9 @@ import "/futlib/array"
 -- Note that the coalescing of `x1` in `x2 = copy x1`
 -- should FAIL, because its computation requires `a1`,
 -- hence `x1` cannot be coalesced in the memory block
--- of `y`, i.e., getting 5 successful coalescing 
+-- of `y`, i.e., getting 5 successful coalescing
 -- operations would be incorrect! This last memory reuse
--- can potentially be done by linear-scan register 
+-- can potentially be done by linear-scan register
 -- allocation later!
 let main(y: *[#n][#m]i32, a : [#m]i32): *[n][m]i32 =
   let y[0,1] = 9
@@ -27,6 +27,6 @@ let main(y: *[#n][#m]i32, a : [#m]i32): *[n][m]i32 =
     let x1 = map (+1) a1
     let x2 = copy x1
     in x2
- 
+
   let y[n/2] = a1
   in  y

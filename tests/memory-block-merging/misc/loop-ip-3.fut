@@ -24,6 +24,6 @@ let main(y: *[#n][#n][#n]i32, a : [#n][#n]i32): *[n][n][n]i32 =
     let x = map (+1) (a1[i])
     let a1[i] = x
     in  a1
- 
+
   let y[n/2] = a1
   in  y
