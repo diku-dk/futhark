@@ -1,17 +1,17 @@
 -- Test2 Memory-Block Merging: Coalescing transitive in-place update
 -- ==
--- input { 
+-- input {
 --          [3, 5, 7]
 --          [  [ [1,2,3], [4,5,6], [7,8,9] ]
 --          ,  [ [1,2,3], [4,5,6], [7,8,9] ]
 --          ,  [ [1,2,3], [4,5,6], [7,8,9] ]
---          ] 
+--          ]
 --       }
--- output { 
+-- output {
 --          [  [ [1,2,3], [4,5,6], [7,8,9] ]
 --          ,  [ [4,6,8], [5,5,5], [7,7,7] ]
 --          ,  [ [6,6,6], [10,10,10], [14,14,14] ]
---          ] 
+--          ]
 --        }
 
 -- Should result in 3 successful coalescing operations (all).

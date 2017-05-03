@@ -6,7 +6,6 @@ module Futhark.Actions
   , kernelImpCodeGenAction
   , seqCodeGenAction
   , rangeAction
-  , memoryAction
   )
 where
 
@@ -30,7 +29,6 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Interpreter
-import Futhark.MemoryBlockMerging --C.O.
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
@@ -118,10 +116,3 @@ interpret parseValues entry prog =
           text $ show (fromIntegral v :: Word64) ++ "u64"
         prettyPrim _ v =
           ppr v
-
-memoryAction :: Action ExplicitMemory --C.O.
-memoryAction =
-  Action { actionName = "Memory playground"
-         , actionDescription = "Memory block merging playground"
-         , actionProcedure = liftIO . memoryBlockMerging
-         }

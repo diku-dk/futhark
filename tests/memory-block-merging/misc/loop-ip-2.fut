@@ -17,6 +17,6 @@ let main(y: *[#n][#m]i32, a : [#m]i32): *[n][m]i32 =
   loop(a1 = a0) = for i < m do
     let a1[i] = i+a1[i]
     in  a1
- 
+
   let y[n/2] = a1
   in  y
