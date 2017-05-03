@@ -201,7 +201,7 @@ instance MonadTypeChecker TermTypeM where
   lookupVar loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
-      Nothing -> error $ "not in vtable" ++ show qn' -- bad $ UnknownVariableError Term qn loc
+      Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                       | otherwise -> return (qn', t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
