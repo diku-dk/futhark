@@ -11,12 +11,12 @@
 --          ]
 --        }
 
--- Number of coalescing is 1, but corresponds to 4 coalescing 
--- operations on the same memory block, i.e., 
+-- Number of coalescing is 1, but corresponds to 4 coalescing
+-- operations on the same memory block, i.e.,
 --   (i) `y[1] = z2`, at the very bottom
---  (ii) `z2 = z0` where `z0` is the result of the then branch, 
+--  (ii) `z2 = z0` where `z0` is the result of the then branch,
 -- (iii) `z2 = z1` where `z1` is the result of the else branch,
---  (iv) and finaly the creation of `z` (transitive closure 
+--  (iv) and finaly the creation of `z` (transitive closure
 --       added by `z2` and `z1`).
 -- Basically, since the memory block of the if-result is not
 -- existensial then we can track the creation of `z` outside

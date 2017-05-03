@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
-module Futhark.Optimise.MemBlkMerging.DataStructs
+module Futhark.Pass.MemoryBlockMerging.DataStructs
        ( Coalesced(..),CoalescedKind(..), ArrayMemBound(..), AllocTab
        , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
        , CoalsEntry(..), FreeVarSubsts
@@ -12,7 +12,7 @@ module Futhark.Optimise.MemBlkMerging.DataStructs
 import Prelude
 import Data.Maybe
 import qualified Data.Map.Strict as M
-import qualified Data.Set      as S
+import qualified Data.Set as S
 
 --import Debug.Trace
 
@@ -23,7 +23,10 @@ data CoalescedKind = Ccopy -- let x    = copy b^{lu}
                    | InPl  -- let x[i] = b^{lu}
                    | Conc  -- let x    = concat(a, b^{lu})
                    | Trans -- transitive, i.e., other variables aliased with b.
+  deriving (Show)
+
 data ArrayMemBound = MemBlock PrimType Shape VName ExpMem.IxFun
+  deriving (Show)
 
 type FreeVarSubsts = M.Map VName (ExpMem.PrimExp VName)
 
@@ -31,6 +34,7 @@ type FreeVarSubsts = M.Map VName (ExpMem.PrimExp VName)
 data Coalesced = Coalesced CoalescedKind -- the kind of coalescing
                            ArrayMemBound -- destination mem_block info @f_m_x[i]@ (must be ArrayMem)
                            FreeVarSubsts -- substitutions for free vars in index function
+  deriving (Show)
 
 data CoalsEntry = CoalsEntry{ dstmem :: VName
                             -- ^ destination memory block
@@ -62,7 +66,7 @@ data CoalsEntry = CoalsEntry{ dstmem :: VName
                             --   from the successfully coalesced table if @m_x@ is
                             --   unsuccessful. Ok, this case cannot happen because
                             --   you need a copying.
-                            }
+                            } deriving (Show)
 
 type AllocTab = Names--M.Map VName SubExp
 -- ^ the allocatted memory blocks
@@ -174,6 +178,7 @@ createsNewArrOK (BasicOp Manifest{}) = True
 createsNewArrOK (BasicOp ExpMem.Copy{}) = True
 createsNewArrOK (BasicOp Concat{}) = True
 createsNewArrOK (BasicOp ArrayLit{}) = True
+createsNewArrOK (BasicOp Scratch{}) = True
 createsNewArrOK (Op (ExpMem.Inner ExpMem.Kernel{})) = True
 createsNewArrOK _ = False
 

@@ -5,7 +5,6 @@ module Futhark.Passes
   ( standardPipeline
   , sequentialPipeline
   , gpuPipeline
-
   , CompilationMode (..)
   )
 where
@@ -16,6 +15,10 @@ import Data.Maybe
 
 import Prelude hiding (id)
 
+-- Only used for an experimental feature.
+import System.IO.Unsafe (unsafePerformIO)
+import System.Environment (lookupEnv)
+
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
@@ -23,6 +26,7 @@ import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Unstream
+import Futhark.Pass.MemoryBlockMerging
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExtractKernels
@@ -76,8 +80,31 @@ standardPipeline mode =
           | otherwise =
               return ()
 
+-- Experimental!  Enable by setting the environment variable
+-- MEMORY_BLOCK_MERGING to 1.
+{-# NOINLINE usesExperimentalMemoryBlockMerging #-}
+usesExperimentalMemoryBlockMerging :: Bool
+usesExperimentalMemoryBlockMerging = unsafePerformIO $ do
+  val <- lookupEnv "MEMORY_BLOCK_MERGING"
+  return $ val == Just "1"
+
+withExperimentalMemoryBlockMerging :: Pipeline SOACS ExplicitMemory
+                                   -> Pipeline SOACS ExplicitMemory
+withExperimentalMemoryBlockMerging =
+  (>>> passes [ mergeMemoryBlocks
+              , simplifyExplicitMemory
+              ])
+
+withExperimentalPasses :: Pipeline SOACS ExplicitMemory
+                       -> Pipeline SOACS ExplicitMemory
+withExperimentalPasses pipeline =
+  if usesExperimentalMemoryBlockMerging
+  then withExperimentalMemoryBlockMerging pipeline
+  else pipeline
+
 sequentialPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
 sequentialPipeline mode =
+  withExperimentalPasses $
   standardPipeline mode >>>
   onePass firstOrderTransform >>>
   passes [ simplifyKernels
@@ -93,6 +120,7 @@ sequentialPipeline mode =
 
 gpuPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
 gpuPipeline mode =
+  withExperimentalPasses $
   standardPipeline mode >>>
   onePass extractKernels >>>
   passes [ simplifyKernels

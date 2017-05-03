@@ -7,7 +7,7 @@
 -- The successful coalescing refers to the last
 -- statement of the loop `double_mem_buffer = copy(e)`
 -- which is invisible and is introduced by the compiler.
--- The rest is negativve testing: 
+-- The rest is negativve testing:
 -- The init parameter `y` is not lastly used in the
 -- initialization of the loop variant `a`. Hence the
 -- coalescing of `a` (and `y`) into the memory block
@@ -25,4 +25,3 @@ let main(x: [#n]i32): []i32 =
   in
   let w = concat a (y'[1])
   in w
-
