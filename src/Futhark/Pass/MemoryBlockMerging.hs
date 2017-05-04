@@ -81,13 +81,13 @@ transformFunDef :: MonadFreshNames m
                 -> m (FunDef ExpMem.ExplicitMemory)
 transformFunDef coaltab fundef = do
   let scope = scopeOfFParams (funDefParams fundef)
-  (body', _) <- 
+  (body', _) <-
     modifyNameSource $ \src ->
       let x = runBinderT m scope
           y = runReaderT x coaltab
           (z,newsrc) = runState y src
       in  (z,newsrc)
-  
+
   return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
@@ -100,9 +100,8 @@ transformBody (Body () bnds res) = do
 
 transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory] --MergeM ()
 transformStm (Let (Pattern patCtxElems patValElems) () e) = do
-  (e', newstmts1) <- 
-    collectStms $ do
-      mapExpM transform e
+  (e', newstmts1) <-
+    collectStms $ mapExpM transform e
 
   -- FIXME: Remove any context pattern elements not in use anymore.  It should
   -- not be necessary to add new ones, since we only reuse memory, not introduce
@@ -110,13 +109,14 @@ transformStm (Let (Pattern patCtxElems patValElems) () e) = do
   let patCtxElems' = patCtxElems
 
   --patValElems' <- mapM transformPatValElemT patValElems
+
   (patValElems', newstmts2) <-
-    collectStms $ do
-      mapM transformPatValElemT patValElems
+    collectStms $ mapM transformPatValElemT patValElems
 
   let pat' = Pattern patCtxElems' patValElems'
-  
+
   return (newstmts1 ++ newstmts2 ++ [Let pat' () e'])
+
   where transform = identityMapper { mapOnBody = const transformBody
                                    , mapOnFParam = transformFParam
                                    }
@@ -146,9 +146,9 @@ newMemBound x xmem u = do
         Nothing -> return Nothing
         Just (DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) transl) -> do
            let (old_nms, pexps) = unzip $ M.toList transl
-           new_nms <- mapM (\n-> newName n) old_nms --(Prim (IntType Int32))
+           new_nms <- mapM newName old_nms
            let xixfun'  = substituteNames (M.fromList (zip old_nms new_nms)) xixfun
-           exps <- mapM (\pe -> primExpToExp primeExpCoreFun pe) pexps
+           exps <- mapM (primExpToExp primeExpCoreFun) pexps
            mapM_ (\(n,e) -> do
                     let pel = PatElem n BindVar (ExpMem.Scalar (IntType Int32))
                     let pat = Pattern [] [pel]
@@ -163,6 +163,5 @@ newMemBound x xmem u = do
     entry <- M.lookup xmem coaltab
     DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) transl <-
       M.lookup x $ DS.vartab entry
-    
     return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
 -}
