@@ -15,6 +15,7 @@ module Futhark.Util
         maybeNth,
         splitAt3,
         focusNth,
+        unixEnvironment,
         zEncodeString
        )
        where
@@ -23,6 +24,8 @@ import Numeric
 import Data.Char
 import Data.List
 import Data.Either
+import System.Environment
+import System.IO.Unsafe
 
 -- | Like 'mapAccumL', but monadic.
 mapAccumLM :: Monad m =>
@@ -78,6 +81,11 @@ focusNth :: Integral int => int -> [a] -> Maybe ([a], a, [a])
 focusNth i xs
   | (bef, x:aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise                           = Nothing
+
+{-# NOINLINE unixEnvironment #-}
+-- | The Unix environment when the Futhark compiler started.
+unixEnvironment :: [(String,String)]
+unixEnvironment = unsafePerformIO getEnvironment
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --
