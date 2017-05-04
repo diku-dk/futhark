@@ -97,12 +97,13 @@ instance TypeCheck.Checkable SOACS where
 
 instance Bindable SOACS where
   mkBody = AST.Body ()
-  mkLet context values = AST.Let (basicPattern context values) ()
+  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpAttr _ _ = ()
   mkLetNames = simpleMkLetNames
 
 instance BinderOps SOACS where
+  mkExpAttrB = bindableMkExpAttrB
   mkBodyB = bindableMkBodyB
-  mkLetB = bindableMkLetB
   mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore SOACS where

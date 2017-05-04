@@ -37,7 +37,7 @@ instance (Monad m, LocalScope t m) => LocalScope t (RuleM m) where
 
 instance MonadBinder m => MonadBinder (RuleM m) where
   type Lore (RuleM m) = Lore m
-  mkLetM pat e = RuleM $ lift $ mkLetM pat e
+  mkExpAttrM pat e = RuleM $ lift $ mkExpAttrM pat e
   mkLetNamesM names e = RuleM $ lift $ mkLetNamesM names e
   mkBodyM bnds res = RuleM $ lift $ mkBodyM bnds res
 

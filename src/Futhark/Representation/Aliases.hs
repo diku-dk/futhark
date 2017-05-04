@@ -348,9 +348,12 @@ mkAliasedLetStm pat explore e =
   e
 
 instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where
-  mkLet context values e =
-    let Let pat' explore _ = mkLet context values $ removeExpAliases e
-    in mkAliasedLetStm pat' explore e
+  mkExpAttr pat e =
+    let attr = mkExpAttr (removePatternAliases pat) $ removeExpAliases e
+    in (Names' $ consumedInPattern pat <> consumedInExp e, attr)
+
+  mkExpPat ctx val e =
+    addAliasesToPattern (mkExpPat ctx val $ removeExpAliases e) e
 
   mkLetNames names e = do
     env <- asksScope removeScopeAliases
@@ -364,5 +367,5 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
 
 instance Bindable (Aliases lore) => BinderOps (Aliases lore) where
   mkBodyB = bindableMkBodyB
-  mkLetB = bindableMkLetB
+  mkExpAttrB = bindableMkExpAttrB
   mkLetNamesB = bindableMkLetNamesB

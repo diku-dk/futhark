@@ -21,6 +21,7 @@ module Futhark.Optimise.Simplifier.Lore
        , addWisdomToPattern
        , mkWiseBody
        , mkWiseLetStm
+       , mkWiseExpAttr
 
        , CanBeWise (..)
        )
@@ -223,18 +224,25 @@ mkWiseLetStm :: (Attributes lore, CanBeWise (Op lore)) =>
              -> ExpAttr lore -> Exp (Wise lore)
              -> Stm (Wise lore)
 mkWiseLetStm pat explore e =
-  Let (addWisdomToPattern pat e)
+  let pat' = addWisdomToPattern pat e
+  in Let pat' (mkWiseExpAttr pat' explore e) e
+
+mkWiseExpAttr :: (Attributes lore, CanBeWise (Op lore)) =>
+                 Pattern (Wise lore) -> ExpAttr lore -> Exp (Wise lore)
+              -> ExpAttr (Wise lore)
+mkWiseExpAttr pat explore e =
   (ExpWisdom
     (Names' $ consumedInPattern pat <> consumedInExp e)
     (Names' $ freeIn pat <> freeIn explore <> freeInExp e),
    explore)
-  e
 
 instance (Bindable lore,
           CanBeWise (Op lore)) => Bindable (Wise lore) where
-  mkLet context values e =
-    let Let pat' explore _ = mkLet context values $ removeExpWisdom e
-    in mkWiseLetStm pat' explore e
+  mkExpPat ctx val e =
+    addWisdomToPattern (mkExpPat ctx val $ removeExpWisdom e) e
+
+  mkExpAttr pat e =
+    mkWiseExpAttr pat (mkExpAttr (removePatternWisdom pat) $ removeExpWisdom e) e
 
   mkLetNames names e = do
     env <- asksScope removeScopeWisdom
