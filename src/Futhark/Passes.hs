@@ -15,10 +15,6 @@ import Data.Maybe
 
 import Prelude hiding (id)
 
--- Only used for an experimental feature.
-import System.IO.Unsafe (unsafePerformIO)
-import System.Environment (lookupEnv)
-
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.InPlaceLowering
@@ -38,6 +34,7 @@ import Futhark.Pipeline
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.AST.Syntax
+import Futhark.Util
 
 -- | Are we compiling the Futhark program as an executable or a
 -- library?  This affects which functions are considered as roots for
@@ -82,11 +79,9 @@ standardPipeline mode =
 
 -- Experimental!  Enable by setting the environment variable
 -- MEMORY_BLOCK_MERGING to 1.
-{-# NOINLINE usesExperimentalMemoryBlockMerging #-}
 usesExperimentalMemoryBlockMerging :: Bool
-usesExperimentalMemoryBlockMerging = unsafePerformIO $ do
-  val <- lookupEnv "MEMORY_BLOCK_MERGING"
-  return $ val == Just "1"
+usesExperimentalMemoryBlockMerging =
+  maybe False (=="1") $ lookup "MEMORY_BLOCK_MERGING" unixEnvironment
 
 withExperimentalMemoryBlockMerging :: Pipeline SOACS ExplicitMemory
                                    -> Pipeline SOACS ExplicitMemory
