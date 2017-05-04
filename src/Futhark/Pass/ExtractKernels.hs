@@ -188,6 +188,7 @@ import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.Segmented
 import Futhark.Pass.ExtractKernels.Interchange
+import Futhark.Util
 import Futhark.Util.Log
 
 type KernelsStm = Out.Stm Out.Kernels
@@ -634,7 +635,7 @@ containsNestedParallelism lam =
 -- Enable if you want the cool new versioned code.  Beware: may be
 -- slower in practice.  Caveat emptor (and you are the emptor).
 versionedCode :: Bool
-versionedCode = False
+versionedCode = isJust $ lookup "FUTHARK_VERSIONED_CODE" unixEnvironment
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc

@@ -201,7 +201,7 @@ instance MonadTypeChecker TermTypeM where
   lookupVar loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
-      Nothing -> error $ "not in vtable" ++ show qn' -- bad $ UnknownVariableError Term qn loc
+      Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                       | otherwise -> return (qn', t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
@@ -347,15 +347,16 @@ bindingTypes types = local $ \scope ->
 bindingTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
 bindingTypeParams tparams = binding (mapMaybe typeParamIdent tparams) .
                             bindingTypes (mapMaybe typeParamType tparams)
-  where typeParamIdent (TypeParamDim v loc) =
-          Just $ Ident v (Info (Prim (Signed Int32))) loc
-        typeParamIdent TypeParamType{} =
-          Nothing
-
-        typeParamType (TypeParamType v _) =
+  where typeParamType (TypeParamType v _) =
           Just (v, TypeAbbr [] $ TypeVar (typeName v) [])
         typeParamType TypeParamDim{} =
           Nothing
+
+typeParamIdent :: TypeParam -> Maybe Ident
+typeParamIdent (TypeParamDim v loc) =
+  Just $ Ident v (Info (Prim (Signed Int32))) loc
+typeParamIdent TypeParamType{} =
+  Nothing
 
 -- | A hack that also binds the names in the name map.  This is useful
 -- if the same names are visible in two entirely different expressions
@@ -390,9 +391,10 @@ bindingPatternGroup tps ps m =
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
   checkPatternGroup tps' ps $ \ps' ->
   binding (S.toList $ S.unions $ map patIdentSet ps') $ do
-    -- Perform an observation of every declared dimension.  This
-    -- prevents unused-name warnings for otherwise unused dimensions.
-    mapM_ observe $ concatMap patternDims ps'
+    -- Perform an observation of every type parameter and every
+    -- declared dimension.  This prevents unused-name warnings for
+    -- otherwise unused dimensions.
+    mapM_ observe $ concatMap patternDims ps' ++ mapMaybe typeParamIdent tps'
 
     checkTypeParamsUsed tps' ps'
 
@@ -557,7 +559,8 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
   case paramtypes of
     [e1_pt, e2_pt] -> do
       occur closure
-      rettype' <- checkFuncall (Just op) loc (tparams, paramtypes, ftype) [e1_arg, e2_arg]
+      (_, rettype') <-
+        checkFuncall (Just op) loc (tparams, paramtypes, ftype) [e1_arg, e2_arg]
       return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt)
         (Info $ removeShapeAnnotations rettype') loc
     _ ->
@@ -595,7 +598,7 @@ checkExp (Apply fname args _ loc) = do
     lookupFunction fname (map argType argflows) loc
 
   occur closure
-  rettype' <- checkFuncall (Just fname) loc (tparams, paramtypes, ftype) argflows
+  (_, rettype') <- checkFuncall (Just fname) loc (tparams, paramtypes, ftype) argflows
 
   return $ Apply fname'
     (zip args' $ map diet paramtypes) (Info $ removeShapeAnnotations rettype') loc
@@ -1049,7 +1052,8 @@ checkArg arg = do
 
 checkFuncall :: Maybe (QualName Name) -> SrcLoc
              -> FunBinding -> [Arg]
-             -> TermTypeM (TypeBase (ShapeDecl VName) (Names VName))
+             -> TermTypeM ([TypeBase (ShapeDecl VName) ()],
+                            TypeBase (ShapeDecl VName) (Names VName))
 checkFuncall fname loc funbind args = do
   (_, paramtypes, rettype) <-
     instantiatePolymorphicFunction fname loc funbind args
@@ -1059,7 +1063,8 @@ checkFuncall fname loc funbind args = do
     let occurs = consumeArg argloc t d
     occur $ dflow `seqOccurences` occurs
 
-  return $ returnType rettype (map diet paramtypes) (map argType args)
+  return (paramtypes,
+          returnType rettype (map diet paramtypes) (map argType args))
 
 -- | Find concrete types for a call to a polymorphic function.
 instantiatePolymorphicFunction :: MonadTypeChecker m =>
@@ -1202,30 +1207,32 @@ checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
       let ret' = case maybe_ret' of
                    Nothing -> toStruct $ vacuousShapeAnnotations $ typeOf body'
                    Just (TypeDecl _ (Info ret)) -> ret
-      ret'' <- checkFuncall Nothing loc ([], map patternStructType params', ret') args
+      (_, ret'') <- checkFuncall Nothing loc ([], map patternStructType params', ret') args
       return $ AnonymFun tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   (fname', (tparams, paramtypes, rt), closure) <- lookupFunction fname (map argType $ curryargs++args) loc
-  let paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
   case find (unique . snd) $ zip curryargexps paramtypes of
     Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
     _           -> return ()
 
   occur closure
-  rettype' <- checkFuncall Nothing loc (tparams, paramtypes, rt) (curryargs ++ args)
+  (paramtypes', rettype') <-
+    checkFuncall Nothing loc (tparams, paramtypes, rt) (curryargs ++ args)
 
   return $ CurryFun fname'
-    curryargexps' (Info (paramtypes', removeShapeAnnotations rettype')) loc
+    curryargexps' (Info (map (removeShapeAnnotations . (`setAliases` mempty)) paramtypes',
+                         removeShapeAnnotations rettype')) loc
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) [x_arg,y_arg] = do
   (op', (tparams, paramtypes, rt), closure) <- lookupFunction op (map argType [x_arg,y_arg]) loc
   let paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
 
   occur closure
-  rettype' <- checkFuncall Nothing loc (tparams, paramtypes, rt) [x_arg,y_arg]
+  (_, rettype') <-
+    checkFuncall Nothing loc (tparams, paramtypes, rt) [x_arg,y_arg]
 
   case paramtypes' of
     [x_t, y_t] ->
@@ -1266,7 +1273,8 @@ checkCurryBinOp arg_ordering binop x loc y_arg = do
     lookupFunction binop [argType first_arg, argType second_arg] loc
 
   occur closure
-  rettype <- checkFuncall Nothing loc fun [first_arg,second_arg]
+  (_, rettype) <-
+    checkFuncall Nothing loc fun [first_arg,second_arg]
 
   return (x', binop', removeShapeAnnotations rettype)
 
