@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections, LambdaCase, FlexibleInstances, MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
        , simplifiable
@@ -167,14 +168,14 @@ instance Allocable fromlore OutInKernel =>
 
   expHints = inKernelExpHints
 
-runAllocM :: MonadFreshNames m =>
+runAllocM :: (MonadFreshNames m, BinderOps tolore) =>
              (Op fromlore -> AllocM fromlore tolore (Op tolore))
           -> AllocM fromlore tolore a -> m a
 runAllocM handleOp (AllocM m) =
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBinderT m mempty) env
   where env = AllocEnv mempty handleOp
 
-subAllocM :: (SameScope tolore1 tolore2, ExplicitMemorish tolore2) =>
+subAllocM :: (SameScope tolore1 tolore2, ExplicitMemorish tolore2, BinderOps tolore1) =>
              (Op fromlore1 -> AllocM fromlore1 tolore1 (Op tolore1))
           -> AllocM fromlore1 tolore1 a
           -> AllocM fromlore2 tolore2 a
@@ -786,6 +787,27 @@ allocInAccParameters :: [LParam InInKernel]
                      -> AllocM InInKernel OutInKernel [LParam OutInKernel]
 allocInAccParameters = zipWithM allocInAccParameter
   where allocInAccParameter p attr = return p { paramAttr = attr }
+
+
+mkLetNamesB' :: (ExpAttr (Lore m) ~ (),
+                 Op (Lore m) ~ MemOp inner,
+                 MonadBinder m,
+                 Allocator (Lore m) (PatAllocM (Lore m))) =>
+                [(VName, Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
+mkLetNamesB' names e = do
+  scope <- askScope
+  pat <- bindPatternWithAllocations scope names e
+  return $ Let pat () e
+
+instance BinderOps ExplicitMemory where
+  mkLetB pat e = return $ Let pat () e
+  mkBodyB stms res = return $ Body () stms res
+  mkLetNamesB = mkLetNamesB'
+
+instance BinderOps OutInKernel where
+  mkLetB pat e = return $ Let pat () e
+  mkBodyB stms res = return $ Body () stms res
+  mkLetNamesB = mkLetNamesB'
 
 simplifiable :: (Engine.SimplifiableLore lore,
                  ExpAttr lore ~ (),

@@ -22,7 +22,7 @@ import Futhark.Construct
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 
-shapeBody :: (HasScope lore m, MonadFreshNames m, Bindable lore) =>
+shapeBody :: (HasScope lore m, MonadFreshNames m, BinderOps lore, Bindable lore) =>
              [VName] -> [Type] -> Body lore
           -> m (Body lore)
 shapeBody shapenames ts body =

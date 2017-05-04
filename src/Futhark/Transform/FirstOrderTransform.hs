@@ -49,13 +49,13 @@ import Futhark.Representation.AST.Attributes.Aliases
 --  intraproceduralTransformation transformFunDef prg
 
 -- | Perform the first-order transformation on an Futhark program.
-transformProg :: (MonadFreshNames m, Bindable tolore,
+transformProg :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                   LetAttr SOACS ~ LetAttr tolore,
                   CanBeAliased (Op tolore)) =>
                  Prog -> m (AST.Prog tolore)
 transformProg = intraproceduralTransformation transformFunDef
 
-transformFunDef :: (MonadFreshNames m, Bindable tolore,
+transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     LetAttr SOACS ~ LetAttr tolore,
                     CanBeAliased (Op tolore)) =>
                    FunDef -> m (AST.FunDef tolore)
@@ -70,7 +70,7 @@ transformFunDef (FunDef entry fname rettype params body) = do
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.
 type Transformer m = (MonadBinder m,
-                      Bindable (Lore m),
+                      Bindable (Lore m), BinderOps (Lore m),
                       LocalScope (Lore m) m,
                       LetAttr SOACS ~ LetAttr (Lore m),
                       LParamAttr SOACS ~ LParamAttr (Lore m),
@@ -660,7 +660,7 @@ transformSOAC pat (Scatter cs len lam ivs as) = do
 
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
-                    Bindable lore,
+                    Bindable lore, BinderOps lore,
                     LocalScope somelore m,
                     SameScope somelore lore,
                     LetAttr SOACS ~ LetAttr lore,
@@ -674,7 +674,7 @@ transformLambda (Lambda params body rettype) = do
 
 -- | Recursively first-order-transform a lambda.
 transformExtLambda :: (MonadFreshNames m,
-                       Bindable lore,
+                       Bindable lore, BinderOps lore,
                        LocalScope lore m,
                        LetAttr SOACS ~ LetAttr lore,
                        CanBeAliased (Op lore)) =>
@@ -765,7 +765,8 @@ data MEQType = ExactBd SubExp
 
 -- | Turn a Haskell-style mapAccumL into a sequential do-loop.  This
 -- is the guts of transforming a 'Redomap'.
-doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
+doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m,
+                    Bindable (Lore m), BinderOps (Lore m),
                     LetAttr (Lore m) ~ Type,
                     CanBeAliased (Op (Lore m))) =>
                    Certificates
@@ -780,7 +781,8 @@ doLoopMapAccumL cs width innerfun accexps arrexps mapout_arrs = do
     doLoopMapAccumL' cs width innerfun accexps arrexps mapout_arrs
   return $ DoLoop [] merge (ForLoop i Int32 width) loopbody
 
-doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
+doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m,
+                     Bindable (Lore m), BinderOps (Lore m),
                     LetAttr (Lore m) ~ Type,
                     CanBeAliased (Op (Lore m))) =>
                    Certificates

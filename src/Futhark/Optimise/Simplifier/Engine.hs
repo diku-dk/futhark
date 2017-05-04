@@ -697,7 +697,8 @@ type SimplifiableLore lore = (Attributes lore,
                               Simplifiable (FParamAttr lore),
                               Simplifiable (LParamAttr lore),
                               Simplifiable (RetType lore),
-                              CanBeWise (Op lore))
+                              CanBeWise (Op lore),
+                              BinderOps lore)
 
 class Simplifiable e where
   simplify :: SimplifiableLore lore => e -> SimpleM lore e

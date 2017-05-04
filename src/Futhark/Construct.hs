@@ -294,16 +294,16 @@ foldBinOp bop ne (e:es) =
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
-binOpLambda :: (MonadFreshNames m, Bindable lore) =>
+binOpLambda :: (MonadFreshNames m, BinderOps lore, Bindable lore) =>
                BinOp -> PrimType -> m (Lambda lore)
 binOpLambda bop t = binLambda (BinOp bop) t t
 
 -- | As 'binOpLambda', but for 'CmpOp's.
-cmpOpLambda :: (MonadFreshNames m, Bindable lore) =>
+cmpOpLambda :: (MonadFreshNames m, BinderOps lore, Bindable lore) =>
                CmpOp -> PrimType -> m (Lambda lore)
 cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
 
-binLambda :: (MonadFreshNames m, Bindable lore) =>
+binLambda :: (MonadFreshNames m, BinderOps lore, Bindable lore) =>
              (SubExp -> SubExp -> BasicOp lore) -> PrimType -> PrimType
           -> m (Lambda lore)
 binLambda bop arg_t ret_t = do
