@@ -1095,20 +1095,17 @@ internaliseLambda (E.AnonymFun tparams params body _ (Info rettype) _) rowtypes 
     mapM_ (uncurry internaliseDimConstant) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
--- All overloaded functions are unary, so if they're here, they have
--- no curried arguments and only one real argument.
-internaliseLambda (E.CurryFun qfname [] (Info ([et], _)) loc) [it] = do
-  param <- newParam "not_curried" it
-  let arg = E.Var (E.qualName (paramName param)) (Info et) loc
-  case isOverloadedFunction qfname [arg] loc of
-    Just special -> do
-      (res, stms) <- localScope (scopeOfLParams [param]) $
-                     collectStms $ special "curried_result"
-      let body = mkBody stms res
-      body_t <- bodyExtType body
-      return ([param], body, body_t)
-    Nothing ->
-      internaliseCurrying qfname [] loc ([et], [it])
+internaliseLambda (E.CurryFun qfname [] (Info (ets, rettype)) loc) rowtypes = do
+  params <- forM ets $ \et -> do
+    name <- newVName "not_curried"
+    return $ E.Ident name (Info et) loc
+  let params' = map E.Id params
+      args = map paramToArg params
+      body = E.Apply qfname (map (,E.Observe) args) (Info rettype) loc
+      rettype' = E.vacuousShapeAnnotations rettype `E.setAliases` ()
+  internaliseLambda (E.AnonymFun [] params' body Nothing (Info rettype') loc) rowtypes
+  where paramToArg (E.Ident v (Info t) _) =
+          E.Var (E.qualName v) (Info t) loc
 
 internaliseLambda (E.CurryFun qfname curargs (Info (paramts, _)) loc) rowtypes =
   internaliseCurrying qfname curargs loc (paramts, rowtypes)
