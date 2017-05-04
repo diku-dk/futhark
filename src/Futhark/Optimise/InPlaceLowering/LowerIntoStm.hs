@@ -38,7 +38,8 @@ instance Functor DesiredUpdate where
 updateHasValue :: VName -> DesiredUpdate attr -> Bool
 updateHasValue name = (name==) . updateValue
 
-lowerUpdate :: (Bindable lore, LetAttr lore ~ (als, Type), Aliased lore,
+lowerUpdate :: (Bindable lore, BinderOps lore,
+                LetAttr lore ~ (als, Type), Aliased lore,
                 MonadFreshNames m) =>
                Stm lore -> [DesiredUpdate (LetAttr lore)] -> Maybe (m [Stm lore])
 lowerUpdate (Let pat _ (DoLoop ctx val form body)) updates = do
@@ -65,7 +66,8 @@ lowerUpdate
 lowerUpdate _ _ =
   Nothing
 
-lowerUpdateIntoLoop :: (Bindable lore, Aliased lore, LetAttr lore ~ (als, Type),
+lowerUpdateIntoLoop :: (Bindable lore, BinderOps lore,
+                        Aliased lore, LetAttr lore ~ (als, Type),
                         MonadFreshNames m) =>
                        [DesiredUpdate (LetAttr lore)]
                     -> Pattern lore

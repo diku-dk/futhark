@@ -84,9 +84,19 @@ instance Bindable Kernels where
   mkLet context values = Let (basicPattern context values) ()
   mkLetNames = simpleMkLetNames
 
+instance BinderOps Kernels where
+  mkBodyB = bindableMkBodyB
+  mkLetB = bindableMkLetB
+  mkLetNamesB = bindableMkLetNamesB
+
 instance Bindable InKernel where
   mkBody = Body ()
   mkLet context values = Let (basicPattern context values) ()
   mkLetNames = simpleMkLetNames
+
+instance BinderOps InKernel where
+  mkBodyB = bindableMkBodyB
+  mkLetB = bindableMkLetB
+  mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Kernels where

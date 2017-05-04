@@ -100,4 +100,9 @@ instance Bindable SOACS where
   mkLet context values = AST.Let (basicPattern context values) ()
   mkLetNames = simpleMkLetNames
 
+instance BinderOps SOACS where
+  mkBodyB = bindableMkBodyB
+  mkLetB = bindableMkLetB
+  mkLetNamesB = bindableMkLetNamesB
+
 instance PrettyLore SOACS where

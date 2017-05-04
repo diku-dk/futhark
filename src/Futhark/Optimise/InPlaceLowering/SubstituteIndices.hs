@@ -34,7 +34,8 @@ typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
   where fromSubstitution (_, name, t, _) =
           (name, LetInfo t)
 
-substituteIndices :: (MonadFreshNames m, Bindable lore, Aliased lore, LetAttr lore ~ attr) =>
+substituteIndices :: (MonadFreshNames m, BinderOps lore, Bindable lore,
+                      Aliased lore, LetAttr lore ~ attr) =>
                      IndexSubstitutions attr -> [Stm lore]
                   -> m (IndexSubstitutions attr, [Stm lore])
 substituteIndices substs bnds =

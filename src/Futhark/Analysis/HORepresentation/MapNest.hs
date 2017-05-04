@@ -127,7 +127,7 @@ fromSOAC' bound (SOAC.Map cs w lam inps) = do
 fromSOAC' _ _ = return Nothing
 
 toSOAC :: (MonadFreshNames m, HasScope lore m,
-           Bindable lore, Op lore ~ Futhark.SOAC lore) =>
+           Bindable lore, BinderOps lore, Op lore ~ Futhark.SOAC lore) =>
           MapNest lore -> m (SOAC lore)
 toSOAC (MapNest cs w lam [] inps) =
   return $ SOAC.Map cs w lam inps
