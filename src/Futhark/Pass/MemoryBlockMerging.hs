@@ -25,6 +25,8 @@ import Futhark.Analysis.Alias (aliasAnalysis)
 import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.ArrayCoalescing as ArrayCoalescing
+import Futhark.Transform.Substitute
+-- import qualified Futhark.Representation.ExplicitMemory.IndexFunction()
 -- import qualified Futhark.Pass.MemoryBlockMerging.Interference as Interference
 
 
@@ -98,7 +100,9 @@ transformBody (Body () bnds res) = do
 
 transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory] --MergeM ()
 transformStm (Let (Pattern patCtxElems patValElems) () e) = do
-  e' <- mapExpM transform e
+  (e', newstmts1) <- 
+    collectStms $ do
+      mapExpM transform e
 
   -- FIXME: Remove any context pattern elements not in use anymore.  It should
   -- not be necessary to add new ones, since we only reuse memory, not introduce
@@ -106,13 +110,13 @@ transformStm (Let (Pattern patCtxElems patValElems) () e) = do
   let patCtxElems' = patCtxElems
 
   --patValElems' <- mapM transformPatValElemT patValElems
-  (patValElems', newstmts) <-
+  (patValElems', newstmts2) <-
     collectStms $ do
       mapM transformPatValElemT patValElems
 
   let pat' = Pattern patCtxElems' patValElems'
   
-  return (newstmts ++ [Let pat' () e'])
+  return (newstmts1 ++ newstmts2 ++ [Let pat' () e'])
   where transform = identityMapper { mapOnBody = const transformBody
                                    , mapOnFParam = transformFParam
                                    }
@@ -135,8 +139,30 @@ transformPatValElemT pe = return pe
 newMemBound :: VName -> VName -> u -> MergeM (Maybe (ExpMem.MemBound u))
 newMemBound x xmem u = do
   coaltab <- ask
+  case M.lookup xmem coaltab of
+    Nothing -> return Nothing
+    Just entry ->
+      case M.lookup x $ DS.vartab entry of
+        Nothing -> return Nothing
+        Just (DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) transl) -> do
+           let (old_nms, pexps) = unzip $ M.toList transl
+           new_nms <- mapM (\n-> newName n) old_nms --(Prim (IntType Int32))
+           let xixfun'  = substituteNames (M.fromList (zip old_nms new_nms)) xixfun
+           exps <- mapM (\pe -> primExpToExp primeExpCoreFun pe) pexps
+           mapM_ (\(n,e) -> do
+                    let pel = PatElem n BindVar (ExpMem.Scalar (IntType Int32))
+                    let pat = Pattern [] [pel]
+                    stmt <- mkLetM pat e
+                    addStm stmt
+                 ) $ zip new_nms exps
+           return $ Just $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
+  where
+    primeExpCoreFun nm = return $ BasicOp (SubExp (Var nm))
+{-
   return $ do
     entry <- M.lookup xmem coaltab
-    DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) _ <-
+    DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) transl <-
       M.lookup x $ DS.vartab entry
-    return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun
+    
+    return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
+-}
