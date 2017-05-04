@@ -702,8 +702,13 @@ translateIndFunFreeVar :: ScopeTab -> ScalarTab -> ExpMem.IxFun
                        -> (Bool,FreeVarSubsts)
 translateIndFunFreeVar scope0 scals0 indfun =
   let fv_indfun     = S.toList $ freeIn indfun
-      fv_trans_vars = trace ("COALESCING: free vars in indexfun: "++pretty indfun++" are: "++pretty fv_indfun) $ filter (\x -> not $ M.member x scope0) fv_indfun
-      fv_trans_exps = mapMaybe (`M.lookup` scals0) fv_trans_vars
+      fv_trans_vars = trace ("COALESCING: free vars in indexfun: "++pretty indfun++" are: "++pretty fv_indfun) $
+                      filter (\x -> not $ M.member x scope0) fv_indfun
+      fv_trans_exps = mapMaybe (\x -> case M.lookup x scals0 of
+                                        Nothing -> Nothing
+                                        Just pe -> if all (`M.member` scope0) (S.toList $ freeIn pe)
+                                                   then Just pe else Nothing
+                               ) fv_trans_vars
   in  if  length fv_trans_exps == length fv_trans_vars
       then trace ("COALESCING translation: vars: "++pretty fv_trans_vars++" exps: "++pretty fv_trans_exps) (True , M.fromList $ zip fv_trans_vars fv_trans_exps)
       else (False, M.empty)
