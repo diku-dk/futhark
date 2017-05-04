@@ -317,15 +317,17 @@ lookupSubExp name vtable = do
     BasicOp (SubExp se) -> Just se
     _                  -> Nothing
 
-lookupScalExp :: VName -> SymbolTable lore -> Maybe ScalExp
+lookupScalExp :: Annotations lore => VName -> SymbolTable lore -> Maybe ScalExp
 lookupScalExp name vtable =
-  case (asScalExp =<< lookup name vtable, lookupRange name vtable) of
-    -- If we know the lower and upper bound, and these are the
-    -- same, then we morally know the ScalExp.
-    (_, (Just lower, Just upper))
-      | lower == upper, scalExpType lower == int32 ->
+  case (lookup name vtable, lookupRange name vtable) of
+    -- If we know the lower and upper bound, and these are the same,
+    -- then we morally know the ScalExp, but only if the variable has
+    -- the right type.
+    (Just entry, (Just lower, Just upper))
+      | entryType entry == Prim int32,
+        lower == upper, scalExpType lower == int32 ->
           Just $ expandScalExp (`lookupScalExp` vtable) lower
-    (Just se, _) -> Just se
+    (Just entry, _) -> asScalExp entry
     _ -> Nothing
 
 lookupValue :: VName -> SymbolTable lore -> Maybe Value
