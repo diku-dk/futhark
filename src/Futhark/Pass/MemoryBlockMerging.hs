@@ -18,6 +18,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass
 import Futhark.Representation.AST
+import Futhark.Pass.ExplicitAllocations()
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Analysis.Alias (aliasAnalysis)
 
@@ -77,18 +78,25 @@ transformFunDef :: MonadFreshNames m
                 -> FunDef ExpMem.ExplicitMemory
                 -> m (FunDef ExpMem.ExplicitMemory)
 transformFunDef coaltab fundef = do
-  body' <- modifyNameSource $ runState $ runReaderT m coaltab
+  let scope = scopeOfFParams (funDefParams fundef)
+  (body', _) <- 
+    modifyNameSource $ \src ->
+      let x = runBinderT m scope
+          y = runReaderT x coaltab
+          (z,newsrc) = runState y src
+      in  (z,newsrc)
+  
   return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
-type MergeM = ReaderT DS.CoalsTab (State VNameSource)
+type MergeM = BinderT ExpMem.ExplicitMemory (ReaderT DS.CoalsTab (State VNameSource))
 
 transformBody :: Body ExpMem.ExplicitMemory -> MergeM (Body ExpMem.ExplicitMemory)
 transformBody (Body () bnds res) = do
   bnds' <- concat <$> mapM transformStm bnds
   return $ Body () bnds' res
 
-transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory]
+transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory] --MergeM ()
 transformStm (Let (Pattern patCtxElems patValElems) () e) = do
   e' <- mapExpM transform e
 
@@ -97,9 +105,14 @@ transformStm (Let (Pattern patCtxElems patValElems) () e) = do
   -- new memory.  Seek inspiration in ExpMem.matchPatternToReturns.
   let patCtxElems' = patCtxElems
 
-  patValElems' <- mapM transformPatValElemT patValElems
+  --patValElems' <- mapM transformPatValElemT patValElems
+  (patValElems', newstmts) <-
+    collectStms $ do
+      mapM transformPatValElemT patValElems
+
   let pat' = Pattern patCtxElems' patValElems'
-  return [Let pat' () e']
+  
+  return (newstmts ++ [Let pat' () e'])
   where transform = identityMapper { mapOnBody = const transformBody
                                    , mapOnFParam = transformFParam
                                    }

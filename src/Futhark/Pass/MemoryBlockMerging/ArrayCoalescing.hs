@@ -243,9 +243,11 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env =
   let pat_val_elms  = patternValueElements patt
       not_ip_pat = all notInPlace pat_val_elms
   --  i) Filter @activeCoals@ by the 2ND AND 5th safety conditions:
-      (activeCoals0, inhibit0) =
+      (activeCoals00, inhibit00) =
         filterSafetyCond2and5 (activeCoals bu_env) (inhibit bu_env) (scals bu_env)
                               (alloc td_env) (scope td_env) pat_val_elms
+      -- filter out the exitential-size array bindings
+      (activeCoals0, inhibit0) = filterExistPatElms activeCoals00 inhibit00 patt
       successCoals0 = successCoals bu_env
 
   -- ii) extend @activeCoals@ by transfering the pattern-elements bindings existent
@@ -354,14 +356,17 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
       not_ip_pat = all notInPlace pat_val_elms
 
   --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions:
-      (activeCoals00,inhibit00) =
+      (activeCoals000,inhibit000) =
         filterSafetyCond2and5 (activeCoals bu_env) (inhibit bu_env) (scals bu_env)
                               (alloc td_env) (scope td_env) pat_val_elms
+      -- filter out the exitential-size array bindings
+      (activeCoals00, inhibit00) = filterExistPatElms activeCoals000 inhibit000 pat
+
       loop_fv = freeInBody body `S.union`
                   S.fromList (mapMaybe (\(_,i)->case i of
                                                      Var v -> Just v
                                                      _     -> Nothing
-                                        ) arginis)
+                                       ) arginis)
       ((actv0,inhibit0),_) =
         Exc.assert not_ip_pat $
         mkCoalsHelper1FilterActive pat loop_fv (scope td_env)
@@ -878,3 +883,20 @@ notInPlace :: PatElem (Aliases ExpMem.ExplicitMemory) -> Bool
 notInPlace pel = case patElemBindage pel of
                   BindVar       -> True
                   BindInPlace{} -> False
+
+filterExistPatElms :: CoalsTab -> InhibitTab -> Pattern (Aliases ExpMem.ExplicitMemory)
+                    -> (CoalsTab, InhibitTab)
+filterExistPatElms act_coal inhb_coal patt =
+  let ctxnms = S.fromList $ map patElemName $ patternContextElements patt
+      exist_patels =
+        filter (\el -> let shape_fvs = freeIn $ patElemType el
+                       in  not (S.null $ S.intersection shape_fvs ctxnms)
+               ) $ patternValueElements patt
+  in  foldl (\ (acc,inhb) patel ->
+               case patElemAttr patel of
+                 (_,ExpMem.ArrayMem _ _ _ m_b _) ->
+                   case M.lookup m_b acc of
+                     Nothing -> (acc,inhb)
+                     Just _  -> markFailedCoal (acc,inhb) m_b
+                 _ -> (acc,inhb)
+            ) (act_coal,inhb_coal) exist_patels
