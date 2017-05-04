@@ -1095,20 +1095,17 @@ internaliseLambda (E.AnonymFun tparams params body _ (Info rettype) _) rowtypes 
     mapM_ (uncurry internaliseDimConstant) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.CurryFun qfname [] (Info (ets, rettype)) loc) rowtypes = do
-  params <- forM ets $ \et -> do
+internaliseLambda (E.CurryFun qfname currargs (Info (ets, rettype)) loc) rowtypes = do
+  params <- forM (drop (length currargs) ets) $ \et -> do
     name <- newVName "not_curried"
     return $ E.Ident name (Info et) loc
   let params' = map E.Id params
-      args = map paramToArg params
+      args = currargs ++ map paramToArg params
       body = E.Apply qfname (map (,E.Observe) args) (Info rettype) loc
       rettype' = E.vacuousShapeAnnotations rettype `E.setAliases` ()
   internaliseLambda (E.AnonymFun [] params' body Nothing (Info rettype') loc) rowtypes
   where paramToArg (E.Ident v (Info t) _) =
           E.Var (E.qualName v) (Info t) loc
-
-internaliseLambda (E.CurryFun qfname curargs (Info (paramts, _)) loc) rowtypes =
-  internaliseCurrying qfname curargs loc (paramts, rowtypes)
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
@@ -1124,21 +1121,6 @@ internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rett
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
   internaliseLambda (AnonymFun [] params body Nothing (Info rettype') loc) rowts
-
-internaliseCurrying :: QualName VName
-                    -> [E.Exp]
-                    -> SrcLoc
-                    -> ([E.Type], [I.Type])
-                    -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
-internaliseCurrying qfname curargs loc (row_ets, row_its) = do
-  curargs' <- concat <$> mapM (internaliseExp "curried") curargs
-  i_ts <- staticShapes <$> mapM subExpType curargs'
-  params <- mapM (newParam "not_curried") row_its
-  let args = curargs' ++ map (I.Var . I.paramName) params
-      e_ts = map (`setAliases` ()) $ map E.typeOf curargs ++ row_ets
-  ((res, ts), fun_bnds) <- localScope (scopeOfLParams params) $ collectStms $
-    funcall "curry_result" qfname (e_ts, i_ts) args loc
-  return (params, mkBody fun_bnds res, ts)
 
 binOpFunToLambda :: E.QualName VName
                  -> E.Type -> E.Type -> E.Type
