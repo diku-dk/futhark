@@ -148,9 +148,9 @@ emptyState = State { stateVtable = ST.empty
                    }
 
 data SimpleOps lore =
-  SimpleOps { mkLetS :: ST.SymbolTable (Wise lore)
-                     -> Pattern (Wise lore) -> Exp (Wise lore)
-                     -> SimpleM lore (Stm (Wise lore))
+  SimpleOps { mkExpAttrS :: ST.SymbolTable (Wise lore)
+                         -> Pattern (Wise lore) -> Exp (Wise lore)
+                         -> SimpleM lore (ExpAttr (Wise lore))
             , mkBodyS :: ST.SymbolTable (Wise lore)
                       -> [Stm (Wise lore)] -> Result
                       -> SimpleM lore (Body (Wise lore))
@@ -164,12 +164,8 @@ type SimplifyOp lore = Op lore -> SimpleM lore (OpWithWisdom (Op lore))
 
 bindableSimpleOps :: (SimplifiableLore lore, Bindable lore) =>
                      SimplifyOp lore -> SimpleOps lore
-bindableSimpleOps = SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  where mkLetS' _ pat e = return $
-                          mkLet (map asPair $ patternContextElements pat)
-                          (map asPair $ patternValueElements pat)
-                          e
-          where asPair patElem = (patElemIdent patElem, patElemBindage patElem)
+bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS'
+  where mkExpAttrS' _ pat e = return $ mkExpAttr pat e
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
 
@@ -204,10 +200,10 @@ instance SimplifiableLore lore =>
 
 instance SimplifiableLore lore => MonadBinder (SimpleM lore) where
   type Lore (SimpleM lore) = Wise lore
-  mkLetM pat e = do
+  mkExpAttrM pat e = do
     vtable <- getVtable
     simpl <- fst <$> ask
-    mkLetS simpl vtable pat e
+    mkExpAttrS simpl vtable pat e
   mkBodyM bnds res = do
     vtable <- getVtable
     simpl <- fst <$> ask

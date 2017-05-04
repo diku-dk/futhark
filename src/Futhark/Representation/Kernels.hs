@@ -81,22 +81,24 @@ instance TypeCheck.Checkable InKernel where
 
 instance Bindable Kernels where
   mkBody = Body ()
-  mkLet context values = Let (basicPattern context values) ()
+  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpAttr _ _ = ()
   mkLetNames = simpleMkLetNames
 
 instance BinderOps Kernels where
+  mkExpAttrB = bindableMkExpAttrB
   mkBodyB = bindableMkBodyB
-  mkLetB = bindableMkLetB
   mkLetNamesB = bindableMkLetNamesB
 
 instance Bindable InKernel where
   mkBody = Body ()
-  mkLet context values = Let (basicPattern context values) ()
+  mkExpPat ctx val _ = basicPattern ctx val
+  mkExpAttr _ _ = ()
   mkLetNames = simpleMkLetNames
 
 instance BinderOps InKernel where
+  mkExpAttrB = bindableMkExpAttrB
   mkBodyB = bindableMkBodyB
-  mkLetB = bindableMkLetB
   mkLetNamesB = bindableMkLetNamesB
 
 instance PrettyLore Kernels where
