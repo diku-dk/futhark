@@ -26,7 +26,7 @@ import Futhark.Optimise.Simplifier.Lore
   (mkWiseBody,
    mkWiseLetStm,
    removeExpWisdom,
-   removePatternWisdom,
+
    removeScopeWisdom)
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
@@ -119,7 +119,7 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
          MonadBinder (AllocM fromlore tolore) where
   type Lore (AllocM fromlore tolore) = tolore
 
-  mkLetM pat e = return $ Let pat () e
+  mkExpAttrM _ _ = return ()
 
   mkLetNamesM names e = do
     pat <- patternWithAllocations names e
@@ -800,12 +800,12 @@ mkLetNamesB' names e = do
   return $ Let pat () e
 
 instance BinderOps ExplicitMemory where
-  mkLetB pat e = return $ Let pat () e
+  mkExpAttrB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB'
 
 instance BinderOps OutInKernel where
-  mkLetB pat e = return $ Let pat () e
+  mkExpAttrB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
   mkLetNamesB = mkLetNamesB'
 
@@ -817,9 +817,9 @@ simplifiable :: (Engine.SimplifiableLore lore,
                 (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner))
              -> SimpleOps lore
 simplifiable simplifyInnerOp =
-  SimpleOps mkLetS' mkBodyS' mkLetNamesS' simplifyOp
-  where mkLetS' _ pat e =
-          return $ mkWiseLetStm (removePatternWisdom pat) () e
+  SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS' simplifyOp
+  where mkExpAttrS' _ pat e =
+          return $ Engine.mkWiseExpAttr pat () e
 
         mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
 
