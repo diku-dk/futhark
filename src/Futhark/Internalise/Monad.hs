@@ -165,7 +165,7 @@ instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) wh
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
-  mkLetM pat e = InternaliseM $ mkLetM pat e
+  mkExpAttrM pat e = InternaliseM $ mkExpAttrM pat e
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
