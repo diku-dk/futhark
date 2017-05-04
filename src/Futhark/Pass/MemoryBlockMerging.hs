@@ -79,13 +79,13 @@ transformFunDef :: MonadFreshNames m
                 -> m (FunDef ExpMem.ExplicitMemory)
 transformFunDef coaltab fundef = do
   let scope = scopeOfFParams (funDefParams fundef)
-  (body', _) <- 
+  (body', _) <-
     modifyNameSource $ \src ->
       let x = runBinderT m scope
           y = runReaderT x coaltab
           (z,newsrc) = runState y src
       in  (z,newsrc)
-  
+
   return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
@@ -107,11 +107,11 @@ transformStm (Let (Pattern patCtxElems patValElems) () e) = do
 
   --patValElems' <- mapM transformPatValElemT patValElems
   (patValElems', newstmts) <-
-    collectStms $ do
+    collectStms $
       mapM transformPatValElemT patValElems
 
   let pat' = Pattern patCtxElems' patValElems'
-  
+
   return (newstmts ++ [Let pat' () e'])
   where transform = identityMapper { mapOnBody = const transformBody
                                    , mapOnFParam = transformFParam
