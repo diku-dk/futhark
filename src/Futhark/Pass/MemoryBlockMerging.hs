@@ -47,9 +47,10 @@ transformProg prog = do
       coaltab = ArrayCoalescing.mkCoalsTab $ aliasAnalysis prog
 
   prog' <- intraproceduralTransformation (transformFunDef coaltab) prog
+  prog'' <- intraproceduralTransformation cleanUpContextFunDef prog'
 
   let debug = coaltab `seq` unsafePerformIO $ do
-        putStrLn $ pretty prog'
+        putStrLn $ pretty prog''
 
         -- Print last uses.
         replicateM_ 5 $ putStrLn ""
@@ -74,7 +75,7 @@ transformProg prog = do
           putStrLn $ L.intercalate "   " $ map pretty (M.keys (DS.vartab entry))
           putStrLn $ replicate 70 '-'
 
-  debug `seq` return prog'
+  debug `seq` return prog''
 
 transformFunDef :: MonadFreshNames m
                 => DS.CoalsTab
@@ -99,22 +100,15 @@ transformBody (Body () bnds res) = do
   bnds' <- concat <$> mapM transformStm bnds
   return $ Body () bnds' res
 
-transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory] --MergeM ()
+transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory]
 transformStm (Let (Pattern patCtxElems patValElems) () e) = do
   (e', newstmts1) <-
     collectStms $ mapExpM transform e
 
-  -- FIXME: Remove any context pattern elements not in use anymore.  It should
-  -- not be necessary to add new ones, since we only reuse memory, not introduce
-  -- new memory.  Seek inspiration in ExpMem.matchPatternToReturns.
-  let patCtxElems' = patCtxElems
-
-  --patValElems' <- mapM transformPatValElemT patValElems
-
   (patValElems', newstmts2) <-
     collectStms $ mapM transformPatValElemT patValElems
 
-  let pat' = Pattern patCtxElems' patValElems'
+  let pat' = Pattern patCtxElems patValElems'
 
   return (newstmts1 ++ newstmts2 ++ [Let pat' () e'])
 
@@ -152,3 +146,34 @@ newMemBound x xmem u = do
         return (name, name')
       let xixfun' = substituteNames (M.fromList substs) xixfun
       return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
+
+
+cleanUpContextFunDef :: MonadFreshNames m
+                     => FunDef ExpMem.ExplicitMemory
+                     -> m (FunDef ExpMem.ExplicitMemory)
+cleanUpContextFunDef fundef = do
+  let scope = scopeOfFParams (funDefParams fundef)
+  (body', _) <-
+    -- FIXME: We don't really need all this.
+    modifyNameSource $ \src ->
+      let x = runBinderT m scope
+          y = runReaderT x M.empty
+          (z,newsrc) = runState y src
+      in  (z,newsrc)
+
+  return fundef { funDefBody = body' }
+  where m = cleanUpContextBody $ funDefBody fundef
+
+cleanUpContextBody :: Body ExpMem.ExplicitMemory -> MergeM (Body ExpMem.ExplicitMemory)
+cleanUpContextBody (Body () bnds res) = do
+  bnds' <- concat <$> mapM cleanUpContextStm bnds
+  return $ Body () bnds' res
+
+cleanUpContextStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory]
+cleanUpContextStm (Let pat@(Pattern patCtxElems patValElems) () e) = do
+  remaining <- ExpMem.findUnusedPatternPartsInExp pat e
+  let patCtxElems' = S.toList $ S.fromList patCtxElems S.\\ S.fromList remaining
+  let pat' = Pattern patCtxElems' patValElems
+  e' <- mapExpM cleanUpContext e
+  return [Let pat' () e']
+  where cleanUpContext = identityMapper { mapOnBody = const cleanUpContextBody }
