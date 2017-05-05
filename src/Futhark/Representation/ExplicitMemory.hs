@@ -74,6 +74,7 @@ module Futhark.Representation.ExplicitMemory
        , lookupArraySummary
        , fullyDirect
        , ixFunMatchesInnerShape
+       , findUnusedPatternPartsInExp
 
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
@@ -601,10 +602,20 @@ matchPatternToReturns :: Monad m =>
                       -> [ExpReturns]
                       -> m ()
 matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
-  remaining <- execStateT (zipWithM matchBindee valbindees rt) ctxbindees
+  remaining <- execStateT (zipWithM (matchBindeeEntry wrong ctxbindees) valbindees rt) ctxbindees
   unless (null remaining) $
     wrong $ "Unused parts of pattern: " ++
     intercalate ", " (map pretty remaining)
+
+matchBindeeEntry :: (PP.Pretty (PatElemT (MemBound u)), PP.Pretty (PatElemT lore),
+                     Typed (MemBound u), Typed lore,
+                     MonadTrans t, Monad m, MonadState [PatElemT lore] (t m))
+                 => (String -> m ())
+                 -> [PatElemT lore]
+                 -> PatElemT (MemBound u)
+                 -> Returns u (Maybe MemReturn)
+                 -> t m ()
+matchBindeeEntry wrong ctxbindees = matchBindee
   where
     inCtx = (`elem` map patElemName ctxbindees)
 
@@ -617,7 +628,6 @@ matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
         ", but expression returns " ++ pretty t ++ "."
       where bindeet = rankShaped $ patElemRequires bindee
             t'      = rankShaped (t :: ExtType)
-
 
     matchBindee bindee (ReturnsScalar bt) =
       matchType bindee $ Prim bt
@@ -704,6 +714,16 @@ matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
     matchArrayDim Constant{} (Ext _) =
       lift $ wrong
       "Existential dimension in expression return, but constant in pattern."
+
+findUnusedPatternPartsInExp :: (ExplicitMemorish lore, Monad m,
+                                HasScope lore m)
+                            => Pattern lore
+                            -> Exp lore
+                            -> m [PatElemT (LetAttr ExplicitMemory)]
+findUnusedPatternPartsInExp (Pattern ctxbindees valbindees) e = do
+  scope <- askScope
+  rt <- runReaderT (expReturns e) scope
+  execStateT (zipWithM (matchBindeeEntry fail ctxbindees) valbindees rt) ctxbindees
 
 varMemBound :: ExplicitMemorish lore =>
                VName -> TypeCheck.TypeM lore (MemBound NoUniqueness)
