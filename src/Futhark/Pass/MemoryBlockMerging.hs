@@ -182,13 +182,11 @@ cleanUpContextFunDef :: MonadFreshNames m
                      => FunDef ExpMem.ExplicitMemory
                      -> m (FunDef ExpMem.ExplicitMemory)
 cleanUpContextFunDef fundef = do
-  body' <- modifyNameSource $ \src ->
-    let m = localScope (scopeOfFParams (funDefParams fundef))
-            $ cleanUpContextBody $ funDefBody fundef
-    in runState (runReaderT m M.empty) src
+  let m = cleanUpContextBody $ funDefBody fundef
+      body' = runReader m $ scopeOfFParams (funDefParams fundef)
   return fundef { funDefBody = body' }
 
-type CleanUpM = ReaderT (Scope ExpMem.ExplicitMemory) (State VNameSource)
+type CleanUpM = Reader (Scope ExpMem.ExplicitMemory)
 
 cleanUpContextBody :: Body ExpMem.ExplicitMemory -> CleanUpM (Body ExpMem.ExplicitMemory)
 cleanUpContextBody (Body () bnds res) = do
