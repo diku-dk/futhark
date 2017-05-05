@@ -518,18 +518,19 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                             Nothing -> (failed,s_acc)
                             Just new_indfun ->
                               case translateIndFunFreeVar (scope td_env) (scals bu_env) new_indfun of
-                                (False, _) -> (failed, s_acc)
-                                (True, fv_subst) ->
-                                   let mem_info = Coalesced Trans (MemBlock tp shp x_mem new_indfun) fv_subst
+                                (False, _, _) -> (failed, s_acc)
+                                (True, fv_subst, new_indfun') ->
+                                   let mem_info = Coalesced Trans (MemBlock tp shp x_mem new_indfun') fv_subst
                                        info' = info { vartab = M.insert b mem_info vtab }
                                    in  ((M.insert mb info' a_acc,inhb), s_acc)
-                        Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
+                        Just (Coalesced k (MemBlock ptp shpp nm new_indfun) _) ->
                           -- we are at the definition of the coalesced variable @b@
                           -- if 2,4,5 hold promote it to successful coalesced table,
                           -- or if e = reshape/transpose/rotate then postpone decision
                           --    for later on
                           let safe_2 = S.member x_mem (alloc td_env)
-                              (safe_5, fv_subst) = translateIndFunFreeVar (scope td_env) (scals bu_env) new_indfun
+                              (safe_5, fv_subst, new_indfun') = translateIndFunFreeVar (scope td_env) (scals bu_env) new_indfun
+                              mblk = MemBlock ptp shpp nm new_indfun'
                               (alias_var, in_place) =
                                   case bnd of
                                     BindInPlace{} -> Exc.assert safe_4 (Nothing, True)
@@ -638,20 +639,22 @@ mkCoalsHelper1FilterActive pat inner_free_vars scope_tab scals_tab active_tab in
                                    BindInPlace _  _ slice_b -> trace ("COALESCING: FAILS : "++pretty b++" "++pretty mem_nm)
                                      ( failed, updateIndFunSlice indf slice_b : indfuns )
 
-                      Just (Coalesced k mblk@(MemBlock _ _ _ b_indfun) _) ->
+                      Just (Coalesced k (MemBlock ptp shp nm b_indfun) _) ->
                         case bnd of
                           BindVar -> ((act_tab,inhb_tab), b_indfun : indfuns)
                           BindInPlace _  b' slice_b ->
                             let b_ind_slice  = updateIndFunSlice b_indfun slice_b
                                 indfuns'     = b_ind_slice : indfuns
-                                (ok,fv_subs) = -- CORRECTNESS ASSUMPTION: the righ-hand side of
+                                (ok,fv_subs, b_indfun') =
+                                               -- CORRECTNESS ASSUMPTION: the righ-hand side of
                                                -- an in-place update should create a new array!
                                                -- Exc.assert (createsNewArrOK e) $
                                                translateIndFunFreeVar scope_tab scals_tab b_indfun
+                                mblk' = MemBlock ptp shp nm b_indfun'
                             in  if not ok then (failed, indfuns')
-                                else let coal_etry_b  = Coalesced k mblk fv_subs
+                                else let coal_etry_b  = Coalesced k mblk' fv_subs
                                          info' = info { vartab = M.insert b' coal_etry_b $
-                                                        M.insert b  coal_etry_b vtab }
+                                                        M.insert b coal_etry_b vtab }
                                      in  ((M.insert mem_nm info' act_tab,inhb_tab), indfuns')
               ) ((active_tab1,inhibit_tab1), []) memasoc
 
@@ -704,7 +707,7 @@ mkCoalsHelper3PatternMatch  pat e lutab td_env successCoals_tab activeCoals_tab 
             ) activeCoals_tab clst
 
 translateIndFunFreeVar :: ScopeTab -> ScalarTab -> ExpMem.IxFun
-                       -> (Bool,FreeVarSubsts)
+                       -> (Bool, FreeVarSubsts, ExpMem.IxFun)
 translateIndFunFreeVar scope0 scals0 indfun =
   let fv_indfun     = S.toList $ freeIn indfun
       fv_trans_vars = trace ("COALESCING: free vars in indexfun: "++pretty indfun++" are: "++pretty fv_indfun) $
@@ -715,8 +718,11 @@ translateIndFunFreeVar scope0 scals0 indfun =
                                                    then Just pe else Nothing
                                ) fv_trans_vars
   in  if  length fv_trans_exps == length fv_trans_vars
-      then trace ("COALESCING translation: vars: "++pretty fv_trans_vars++" exps: "++pretty fv_trans_exps) (True , M.fromList $ zip fv_trans_vars fv_trans_exps)
-      else (False, M.empty)
+      then let fv_substs_tab = M.fromList $ zip fv_trans_vars fv_trans_exps
+               indfun' = IxFun.substInIdxFun fv_substs_tab indfun
+           in  trace ("COALESCING translation: vars: "++pretty fv_trans_vars++" exps: "++pretty fv_trans_exps)
+               (True, M.empty, indfun')
+      else (False, M.empty, indfun)
 
 -- | merges entries in the coalesced table.
 appendCoalsInfo :: VName -> CoalsEntry -> CoalsTab -> CoalsTab
@@ -828,11 +834,11 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env allocs_env scope_env =
                    in
                     case M.lookup b vtab of
                      Nothing -> failed -- too drastic ?
-                     Just (Coalesced k mblk@(MemBlock _ _ _ new_indfun) _) ->
-                       let (safe_5, fv_subst) = translateIndFunFreeVar scope_env scals_env new_indfun
+                     Just (Coalesced k (MemBlock ptp shp nm new_indfun) _) ->
+                       let (safe_5, fv_subst, new_indfun') = translateIndFunFreeVar scope_env scals_env new_indfun
                            safe_2 = S.member x_mem allocs_env
                        in  if safe_5 && safe_2
-                           then let mem_info = Coalesced k mblk fv_subst
+                           then let mem_info = Coalesced k (MemBlock ptp shp nm new_indfun') fv_subst
                                     info' = info { vartab = M.insert b mem_info vtab }
                                 in  (M.insert m_b info' acc, inhb)
                            else failed
