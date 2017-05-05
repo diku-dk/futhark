@@ -77,6 +77,9 @@ transformProg prog = do
 
   debug `seq` return prog''
 
+
+-- Initial transformations from the findings in ArrayCoalescing.
+
 transformFunDef :: MonadFreshNames m
                 => DS.CoalsTab
                 -> FunDef ExpMem.ExplicitMemory
@@ -148,32 +151,36 @@ newMemBound x xmem u = do
       return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
 
 
+-- Clean up the existential contexts in the parameters.
+
 cleanUpContextFunDef :: MonadFreshNames m
                      => FunDef ExpMem.ExplicitMemory
                      -> m (FunDef ExpMem.ExplicitMemory)
 cleanUpContextFunDef fundef = do
-  let scope = scopeOfFParams (funDefParams fundef)
-  (body', _) <-
-    -- FIXME: We don't really need all this.
-    modifyNameSource $ \src ->
-      let x = runBinderT m scope
-          y = runReaderT x M.empty
-          (z,newsrc) = runState y src
-      in  (z,newsrc)
-
+  body' <- modifyNameSource $ \src ->
+    let m = localScope (scopeOfFParams (funDefParams fundef))
+            $ cleanUpContextBody $ funDefBody fundef
+    in runState (runReaderT m M.empty) src
   return fundef { funDefBody = body' }
-  where m = cleanUpContextBody $ funDefBody fundef
 
-cleanUpContextBody :: Body ExpMem.ExplicitMemory -> MergeM (Body ExpMem.ExplicitMemory)
+type CleanUpM = ReaderT (Scope ExpMem.ExplicitMemory) (State VNameSource)
+
+cleanUpContextBody :: Body ExpMem.ExplicitMemory -> CleanUpM (Body ExpMem.ExplicitMemory)
 cleanUpContextBody (Body () bnds res) = do
-  bnds' <- concat <$> mapM cleanUpContextStm bnds
+  bnds' <- cleanUpContextStms bnds
   return $ Body () bnds' res
 
-cleanUpContextStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory]
+cleanUpContextStms :: [Stm ExpMem.ExplicitMemory] -> CleanUpM [Stm ExpMem.ExplicitMemory]
+cleanUpContextStms [] = return []
+cleanUpContextStms (bnd : bnds) = do
+  bnd' <- cleanUpContextStm bnd
+  inScopeOf bnd' $ (bnd' :) <$> cleanUpContextStms bnds
+
+cleanUpContextStm :: Stm ExpMem.ExplicitMemory -> CleanUpM (Stm ExpMem.ExplicitMemory)
 cleanUpContextStm (Let pat@(Pattern patCtxElems patValElems) () e) = do
   remaining <- ExpMem.findUnusedPatternPartsInExp pat e
   let patCtxElems' = S.toList $ S.fromList patCtxElems S.\\ S.fromList remaining
   let pat' = Pattern patCtxElems' patValElems
   e' <- mapExpM cleanUpContext e
-  return [Let pat' () e']
+  return $ Let pat' () e'
   where cleanUpContext = identityMapper { mapOnBody = const cleanUpContextBody }
