@@ -5,6 +5,7 @@ module Futhark.Analysis.PrimExp.Convert
     primExpToExp
   , primExpFromExp
   , primExpFromSubExp
+  , substituteInPrimExp
 
     -- * Module reexport
     , module Futhark.Analysis.PrimExp
@@ -13,6 +14,8 @@ module Futhark.Analysis.PrimExp.Convert
 import           Control.Applicative
 
 import           Prelude
+import qualified Data.Map.Strict as M
+import           Data.Maybe
 
 import           Futhark.Analysis.PrimExp
 import           Futhark.Construct
@@ -72,3 +75,20 @@ primExpFromSubExpM f = primExpFromExp f . BasicOp . SubExp
 primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
 primExpFromSubExp t (Var v)      = LeafExp v t
 primExpFromSubExp _ (Constant v) = ValueExp v
+
+-- | Substituting names in a PrimExp with other PrimExps
+substituteInPrimExp :: Ord v => M.Map v (PrimExp v)
+                    -> PrimExp v -> PrimExp v
+substituteInPrimExp tab pexp@(LeafExp v _) =
+    fromMaybe pexp $ M.lookup v tab
+substituteInPrimExp _ pexp@(ValueExp _) = pexp
+substituteInPrimExp tab (BinOpExp bop pe1 pe2) =
+    BinOpExp bop (substituteInPrimExp tab pe1)
+                 (substituteInPrimExp tab pe2)
+substituteInPrimExp tab (CmpOpExp cop pe1 pe2) =
+    CmpOpExp cop (substituteInPrimExp tab pe1)
+                 (substituteInPrimExp tab pe2)
+substituteInPrimExp tab (UnOpExp uop pe) =
+    UnOpExp uop $ substituteInPrimExp tab pe
+substituteInPrimExp tab (ConvOpExp cop pe) =
+    ConvOpExp cop $ substituteInPrimExp tab pe
