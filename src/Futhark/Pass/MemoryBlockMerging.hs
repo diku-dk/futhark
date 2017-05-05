@@ -148,10 +148,7 @@ newMemBound x xmem u = do
       substs <- forM (M.assocs fv_substs) $ \(name, pe) -> do
         name' <- newName name
         e <- primExpToExp (return . BasicOp . SubExp . Var) pe
-        let patelem = PatElem name' BindVar (ExpMem.Scalar (IntType Int32))
-        let pat = Pattern [] [patelem]
-        stmt <- mkLetM pat e
-        addStm stmt
+        letBindNames'_ [name'] e
         return (name, name')
       let xixfun' = substituteNames (M.fromList substs) xixfun
       return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
