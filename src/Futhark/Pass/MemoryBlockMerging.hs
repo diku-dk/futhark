@@ -18,14 +18,15 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass
 import Futhark.Representation.AST
-import Futhark.Pass.ExplicitAllocations()
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Pass.ExplicitAllocations()
+import Futhark.Analysis.PrimExp.Convert (primExpToExp)
+import Futhark.Transform.Substitute
 import Futhark.Analysis.Alias (aliasAnalysis)
 
 import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.ArrayCoalescing as ArrayCoalescing
-import Futhark.Transform.Substitute
 -- import qualified Futhark.Representation.ExplicitMemory.IndexFunction()
 -- import qualified Futhark.Pass.MemoryBlockMerging.Interference as Interference
 
@@ -139,29 +140,18 @@ transformPatValElemT pe = return pe
 newMemBound :: VName -> VName -> u -> MergeM (Maybe (ExpMem.MemBound u))
 newMemBound x xmem u = do
   coaltab <- ask
-  case M.lookup xmem coaltab of
-    Nothing -> return Nothing
-    Just entry ->
-      case M.lookup x $ DS.vartab entry of
-        Nothing -> return Nothing
-        Just (DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) transl) -> do
-           let (old_nms, pexps) = unzip $ M.toList transl
-           new_nms <- mapM newName old_nms
-           let xixfun'  = substituteNames (M.fromList (zip old_nms new_nms)) xixfun
-           exps <- mapM (primExpToExp primeExpCoreFun) pexps
-           mapM_ (\(n,e) -> do
-                    let pel = PatElem n BindVar (ExpMem.Scalar (IntType Int32))
-                    let pat = Pattern [] [pel]
-                    stmt <- mkLetM pat e
-                    addStm stmt
-                 ) $ zip new_nms exps
-           return $ Just $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
-  where
-    primeExpCoreFun nm = return $ BasicOp (SubExp (Var nm))
-{-
-  return $ do
+  sequence $ do
     entry <- M.lookup xmem coaltab
-    DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) transl <-
+    DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) fv_substs <-
       M.lookup x $ DS.vartab entry
-    return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
--}
+    return $ do
+      substs <- forM (M.assocs fv_substs) $ \(name, pe) -> do
+        name' <- newName name
+        e <- primExpToExp (return . BasicOp . SubExp . Var) pe
+        let patelem = PatElem name' BindVar (ExpMem.Scalar (IntType Int32))
+        let pat = Pattern [] [patelem]
+        stmt <- mkLetM pat e
+        addStm stmt
+        return (name, name')
+      let xixfun' = substituteNames (M.fromList substs) xixfun
+      return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
