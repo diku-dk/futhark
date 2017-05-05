@@ -1,4 +1,5 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | Merge memory blocks where possible.
 module Futhark.Pass.MemoryBlockMerging
   ( mergeMemoryBlocks
@@ -88,15 +89,21 @@ transformFunDef coaltab fundef = do
   let scope = scopeOfFParams (funDefParams fundef)
   (body', _) <-
     modifyNameSource $ \src ->
-      let x = runBinderT m scope
-          y = runReaderT x coaltab
-          (z,newsrc) = runState y src
+      let m1 = runBinderT m scope
+          m2 = runReaderT m1 coaltab
+          m3 = evalStateT m2 M.empty
+          (z,newsrc) = runState m3 src
       in  (z,newsrc)
 
   return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
-type MergeM = BinderT ExpMem.ExplicitMemory (ReaderT DS.CoalsTab (State VNameSource))
+type MergeM = BinderT ExpMem.ExplicitMemory (ReaderT DS.CoalsTab (StateT (M.Map VName VName) (State VNameSource)))
+
+-- Maybe do this nicer.
+instance MonadFreshNames (StateT (M.Map VName VName) (State VNameSource)) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
 
 transformBody :: Body ExpMem.ExplicitMemory -> MergeM (Body ExpMem.ExplicitMemory)
 transformBody (Body () bnds res) = do
@@ -134,6 +141,14 @@ transformPatValElemT (PatElem x bindage
   return $ PatElem x bindage $ fromMaybe membound_orig membound
 transformPatValElemT pe = return pe
 
+checkAlreadyConverted :: VName -> MergeM (Maybe VName)
+checkAlreadyConverted x = do
+  table <- get
+  return $ M.lookup x table
+
+addAlreadyConverted :: VName -> VName -> MergeM ()
+addAlreadyConverted from to = modify (M.insert from to)
+
 newMemBound :: VName -> VName -> u -> MergeM (Maybe (ExpMem.MemBound u))
 newMemBound x xmem u = do
   coaltab <- ask
@@ -143,9 +158,19 @@ newMemBound x xmem u = do
       M.lookup x $ DS.vartab entry
     return $ do
       substs <- forM (M.assocs fv_substs) $ \(name, pe) -> do
-        name' <- newName name
-        e <- primExpToExp (return . BasicOp . SubExp . Var) pe
-        letBindNames'_ [name'] e
+        -- If the variable has already been converted from a PrimExp to an Exp
+        -- and been assigned a new name, just use that.  This will have happened
+        -- prior to the current area, so it will be in scope.  This also avoids
+        -- confusing the type checker.
+        status <- checkAlreadyConverted name
+        name' <- case status of
+          Just name' -> return name'
+          Nothing -> do
+            name' <- newName name
+            e <- primExpToExp (return . BasicOp . SubExp . Var) pe
+            letBindNames'_ [name'] e
+            addAlreadyConverted name name'
+            return name'
         return (name, name')
       let xixfun' = substituteNames (M.fromList substs) xixfun
       return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun'
