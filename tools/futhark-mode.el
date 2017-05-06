@@ -303,6 +303,16 @@ In general, prefer as little indentation as possible."
                      (goto-char m)
                      (+ (current-column) futhark-indent-level)))))
 
+       ;; Don't align "let" if the previous line is blank (be conservative!).
+       (save-excursion
+         (and (futhark-looking-at-word "let")
+              (let ((cur (current-column)))
+                (save-excursion
+                  (forward-line -1)
+                  (and
+                   (futhark-is-empty-line)
+                   cur)))))
+
        ;; Align "in", "let", or "loop" to the closest previous "let" or "loop".
        (save-excursion
          (and (or (futhark-looking-at-word "in")
@@ -415,6 +425,14 @@ In general, prefer as little indentation as possible."
    (save-excursion
      (futhark-beginning-of-line-text)
      (point))))
+
+(defun futhark-is-empty-line ()
+  "Check if the line of the current point is empty.
+It is considered empty if the line consists of zero or more
+whitespace characters."
+  (let ((cur (line-number-at-pos)))
+    (futhark-beginning-of-line-text)
+    (not (= cur (line-number-at-pos)))))
 
 (defun futhark-is-looking-at-keyword ()
   "Check if we are currently looking at a keyword."

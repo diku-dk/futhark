@@ -1,4 +1,4 @@
 module m (r: s):
   foo = {
-  fun f (x: int) = x
+  let f (x: int) = x
 }
