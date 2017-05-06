@@ -207,9 +207,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "<-" <+> align (ppr ve)
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
-  pprPrec _ (Iota e _) = text "iota" <+> pprPrec 10 e
-  pprPrec _ (Replicate ne ve _) =
-    text "replicate" <+> spread [pprPrec 10 ne, pprPrec 10 ve]
   pprPrec _ (Reshape shape e _) =
     text "reshape" <+> ppr shape <+> ppr e
   pprPrec _ (Rearrange perm e _) =

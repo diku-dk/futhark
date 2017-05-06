@@ -14,6 +14,8 @@
 --           116i8, 117i8, 118i8, 119i8, 120i8, 121i8, 122i8, 123i8, 124i8, 125i8, 126i8,
 --           127i8] }
 
+import "/futlib/math"
+
 
 let main(n: u8): []u8 =
-  iota n
+  u8.iota n

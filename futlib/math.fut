@@ -33,6 +33,13 @@ module type integral = {
   val %%: t -> t -> t
 }
 
+module type size = {
+  include integral
+
+  val iota: t -> *[]t
+  val replicate 'v: t -> v -> *[]v
+}
+
 module type real = {
   include numeric
 
@@ -62,7 +69,7 @@ module type real = {
   val e: t
 }
 
-module i8: (integral with t = i8) = {
+module i8: (size with t = i8) = {
   type t = i8
 
   let (x: i8) + (y: i8) = intrinsics.add8 x y
@@ -89,9 +96,12 @@ module i8: (integral with t = i8) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax8 x y
   let min (x: t) (y: t) = intrinsics.smin8 x y
+
+  let iota (n: i8) = intrinsics.iota_i8 n
+  let replicate 'v (n: i8) (x: v) = intrinsics.replicate (i32 n) x
 }
 
-module i16: (integral with t = i16) = {
+module i16: (size with t = i16) = {
   type t = i16
 
   let (x: i16) + (y: i16) = intrinsics.add16 x y
@@ -118,9 +128,12 @@ module i16: (integral with t = i16) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax16 x y
   let min (x: t) (y: t) = intrinsics.smin16 x y
+
+  let iota (n: i16) = intrinsics.iota_i16 n
+  let replicate 'v (n: i16) (x: v) = intrinsics.replicate (i32 n) x
 }
 
-module i32: (integral with t = i32) = {
+module i32: (size with t = i32) = {
   type t = i32
 
   let (x: i32) + (y: i32) = intrinsics.add32 x y
@@ -147,9 +160,12 @@ module i32: (integral with t = i32) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax32 x y
   let min (x: t) (y: t) = intrinsics.smin32 x y
+
+  let iota (n: i32) = intrinsics.iota_i32 n
+  let replicate 'v (n: i32) (x: v) = intrinsics.replicate (i32 n) x
 }
 
-module i64: (integral with t = i64) = {
+module i64: (size with t = i64) = {
   type t = i64
 
   let (x: i64) + (y: i64) = intrinsics.add64 x y
@@ -176,9 +192,12 @@ module i64: (integral with t = i64) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = intrinsics.smax64 x y
   let min (x: t) (y: t) = intrinsics.smin64 x y
+
+  let iota (n: i64) = intrinsics.iota_i64 n
+  let replicate 'v (n: i64) (x: v) = intrinsics.replicate (i32 n) x
 }
 
-module u8: (integral with t = u8) = {
+module u8: (size with t = u8) = {
   type t = u8
 
   let (x: u8) + (y: u8) = u8 (intrinsics.add8 (i8 x) (i8 y))
@@ -205,9 +224,12 @@ module u8: (integral with t = u8) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = u8 (intrinsics.umax8 (i8 x) (i8 y))
   let min (x: t) (y: t) = u8 (intrinsics.umin8 (i8 x) (i8 y))
+
+  let iota (n: u8) = intrinsics.iota_u8 n
+  let replicate 'v (n: u8) (x: v) = intrinsics.replicate (i32 n) x
 }
 
-module u16: (integral with t = u16) = {
+module u16: (size with t = u16) = {
   type t = u16
 
   let (x: u16) + (y: u16) = u16 (intrinsics.add16 (i16 x) (i16 y))
@@ -234,9 +256,12 @@ module u16: (integral with t = u16) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = u16 (intrinsics.umax16 (i16 x) (i16 y))
   let min (x: t) (y: t) = u16 (intrinsics.umin16 (i16 x) (i16 y))
+
+  let iota (n: u16) = intrinsics.iota_u16 n
+  let replicate 'v (n: u16) (x: v) = intrinsics.replicate (i32 n) x
 }
 
-module u32: (integral with t = u32) = {
+module u32: (size with t = u32) = {
   type t = u32
 
   let (x: u32) + (y: u32) = u32 (intrinsics.add32 (i32 x) (i32 y))
@@ -263,9 +288,12 @@ module u32: (integral with t = u32) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = u32 (intrinsics.umax32 (i32 x) (i32 y))
   let min (x: t) (y: t) = u32 (intrinsics.umin32 (i32 x) (i32 y))
+
+  let iota (n: u32) = intrinsics.iota_u32 n
+  let replicate 'v (n: u32) (x: v) = intrinsics.replicate (i32 n) x
 }
 
-module u64: (integral with t = u64) = {
+module u64: (size with t = u64) = {
   type t = u64
 
   let (x: u64) + (y: u64) = u64 (intrinsics.add64 (i64 x) (i64 y))
@@ -292,6 +320,9 @@ module u64: (integral with t = u64) = {
   let negate (x: t) = -x
   let max (x: t) (y: t) = u64 (intrinsics.umax64 (i64 x) (i64 y))
   let min (x: t) (y: t) = u64 (intrinsics.umin64 (i64 x) (i64 y))
+
+  let iota (n: u64) = intrinsics.iota_u64 n
+  let replicate 'v (n: u64) (x: v) = intrinsics.replicate (i32 n) x
 }
 
 module f64: (real with t = f64) = {

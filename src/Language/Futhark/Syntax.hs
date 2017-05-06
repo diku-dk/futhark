@@ -565,12 +565,6 @@ data ExpBase f vn =
             -- static integer indicates which dimension to concatenate
             -- across.
 
-            -- Array construction.
-            | Iota (ExpBase f vn) SrcLoc
-            -- ^ @iota(n) = [0,1,..,n-1]@
-            | Replicate (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @replicate(3,1) = [1, 1, 1]@
-
             -- Array index space transformation.
             | Reshape (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array.
@@ -675,8 +669,6 @@ instance Located (ExpBase f vn) where
   locOf (LetWith _ _ _ _ _ pos)  = locOf pos
   locOf (Index _ _ pos)          = locOf pos
   locOf (Update _ _ _ pos)       = locOf pos
-  locOf (Iota _ pos)             = locOf pos
-  locOf (Replicate _ _ pos)      = locOf pos
   locOf (Reshape _ _ pos)        = locOf pos
   locOf (Rearrange _ _ pos)      = locOf pos
   locOf (Rotate _ _ _ pos)       = locOf pos

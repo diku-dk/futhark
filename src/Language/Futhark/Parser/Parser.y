@@ -145,8 +145,6 @@ import Language.Futhark.Parser.Lexer
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      iota            { L $$ IOTA }
-      replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
       reduce          { L $$ REDUCE }
       reduceComm      { L $$ REDUCECOMM }
@@ -476,10 +474,6 @@ Exp2 :: { UncheckedExp }
                       { If $2 $4 $6 NoInfo $1 }
 
      | LetExp %prec letprec { $1 }
-
-     | iota Atom { Iota $2 $1 }
-
-     | replicate Atom Atom { Replicate $2 $3 $1 }
 
      | reshape Atom Atom
                       { Reshape $2 $3 $1 }

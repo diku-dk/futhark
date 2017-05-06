@@ -804,15 +804,6 @@ internaliseExp desc (E.Stream form lam arr _) = do
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
-internaliseExp desc (E.Iota e _) = do
-  (e', it) <- internaliseDimExp "n" e
-  letTupExp' desc $ I.BasicOp $ I.Iota e' (intConst it 0) (intConst it 1) it
-
-internaliseExp desc (E.Replicate ne ve _) = do
-  (ne', _) <- internaliseDimExp "n" ne
-  ves <- internaliseExp "replicate_v" ve
-  letSubExps desc $ I.BasicOp . I.Replicate (I.Shape [ne']) <$> ves
-
 internaliseExp _ (E.Literal v _) =
   return [I.Constant $ internalisePrimValue v]
 
@@ -1256,8 +1247,8 @@ isOverloadedFunction qname args loc = do
                     letSubExp "arrays_equal" $
                       I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
 
-    handle [x,y] name = do
-      bop <- find ((name==) . pretty) [minBound..maxBound::E.BinOp]
+    handle [x,y] name
+      | Just bop <- find ((name==) . pretty) [minBound..maxBound::E.BinOp] =
       Just $ \desc -> do
         x' <- internaliseExp1 "x" x
         y' <- internaliseExp1 "y" y
@@ -1269,6 +1260,18 @@ isOverloadedFunction qname args loc = do
     handle [a, si, v] "scatter" = Just $ scatterF a si v
 
     handle [e] "shape" = Just $ shapeF e
+
+    handle [n, v] "replicate"  = Just $ replicateF n v
+
+    handle [n] "iota"  = Just $ iotaF n
+    handle [n] "iota_i8"  = Just $ iotaF n
+    handle [n] "iota_i16" = Just $ iotaF n
+    handle [n] "iota_i32" = Just $ iotaF n
+    handle [n] "iota_i64" = Just $ iotaF n
+    handle [n] "iota_u8"  = Just $ iotaF n
+    handle [n] "iota_u16" = Just $ iotaF n
+    handle [n] "iota_u32" = Just $ iotaF n
+    handle [n] "iota_u64" = Just $ iotaF n
 
     handle _ _ = Nothing
 
@@ -1407,6 +1410,14 @@ isOverloadedFunction qname args loc = do
                     letSubExps desc [I.BasicOp $ I.ArrayLit (I.arrayDims kt) $ I.Prim int32]
         _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
 
+    replicateF ne ve desc = do
+      (ne', _) <- internaliseDimExp "n" ne
+      ves <- internaliseExp "replicate_v" ve
+      letSubExps desc $ I.BasicOp . I.Replicate (I.Shape [ne']) <$> ves
+
+    iotaF e desc = do
+      (e', it) <- internaliseDimExp "n" e
+      letTupExp' desc $ I.BasicOp $ I.Iota e' (intConst it 0) (intConst it 1) it
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.
