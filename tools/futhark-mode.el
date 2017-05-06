@@ -288,6 +288,21 @@ In general, prefer as little indentation as possible."
                   (futhark-keyword-backward "module")
                   (current-column))))))
 
+       ;; If the previous code line ends with "=", align to the matching "let"
+       ;; or "loop" column plus one indent level.
+       (save-excursion
+         (and (futhark-backward-part)
+              (looking-at "=[[:space:]]*$")
+              (let ((m
+                     (futhark-max
+                      (save-excursion
+                        (futhark-keyword-backward "let"))
+                      (save-excursion
+                        (futhark-keyword-backward "loop")))))
+                (and (not (eq nil m))
+                     (goto-char m)
+                     (+ (current-column) futhark-indent-level)))))
+
        ;; Align "in", "let", or "loop" to the closest previous "let" or "loop".
        (save-excursion
          (and (or (futhark-looking-at-word "in")
@@ -317,24 +332,6 @@ In general, prefer as little indentation as possible."
                 (and (not (eq nil m))
                      (goto-char m)
                      (current-column)))))
-
-       ;; If the previous code line ends with "=", align to the matching "fun"
-       ;; or "let" or "loop" column plus one indent level.
-       (save-excursion
-         (and (futhark-backward-part)
-              (looking-at "=[[:space:]]*$")
-              (let ((m
-                     (futhark-max
-                      (futhark-max
-                       (save-excursion
-                         (futhark-keyword-backward "fun"))
-                       (save-excursion
-                         (futhark-keyword-backward "let")))
-                      (save-excursion
-                        (futhark-keyword-backward "loop")))))
-                (and (not (eq nil m))
-                     (goto-char m)
-                     (+ (current-column) futhark-indent-level)))))
 
        ;; Align "then" to nearest "else if" or "if".
        (save-excursion
