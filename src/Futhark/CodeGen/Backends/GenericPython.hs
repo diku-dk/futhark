@@ -407,9 +407,12 @@ entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
       npcall = simpleCall npobject [ctcall]
   stm $ Assign vname' npcall
 
-entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace _ _ dims)) e = do
-  stm $ Assert (BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"]))
-    "Parameter has unexpected type"
+entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t _ dims)) e = do
+  let type_is_ok = BinOp "and"
+                   (BinOp "in" (simpleCall "type" [e])
+                     (List [Var "cl.array.Array"]))
+                   (BinOp "==" (Field e "dtype") (Var (compilePrimToNp t)))
+  stm $ Assert type_is_ok "Parameter has unexpected type"
 
   zipWithM_ (unpackDim e) dims [0..]
   let dest = Var $ compileName mem
