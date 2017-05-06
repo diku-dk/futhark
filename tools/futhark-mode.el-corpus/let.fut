@@ -1,21 +1,21 @@
-fun f0 () =
+let f0 () =
   let x = 0
   in x
 
-fun f1 () =
+let f1 () =
   let x = 0 in
   x
 
-fun f2 () =
+let f2 () =
   let x = 0
   let y = 0
   in x
 
-fun f3 () =
+let f3 () =
   let x = 0
   let y = 0 in
   x
 
-fun f4 () =
+let f4 () =
   let x =
     0

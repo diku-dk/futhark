@@ -8,7 +8,7 @@ module B {
 
     val t = 3
 
-    fun main () : int = 0
+    let main () : int = 0
 
     entry cat () : int = 0
   }

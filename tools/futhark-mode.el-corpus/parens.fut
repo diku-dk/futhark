@@ -1,6 +1,6 @@
-fun t () = f (3,
+let t () = f (3,
               1)
 
-fun u () = f ( 3
+let u () = f ( 3
              , 1
              )
