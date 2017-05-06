@@ -677,15 +677,6 @@ checkExp (Index e idxes pos) = do
   idxes' <- mapM checkDimIndex idxes
   return $ Index e' idxes' pos
 
-checkExp (Iota e pos) = do
-  e' <- require anyIntType =<< checkExp e
-  return $ Iota e' pos
-
-checkExp (Replicate countexp valexp pos) = do
-  countexp' <- require anyIntType =<< checkExp countexp
-  valexp' <- checkExp valexp
-  return $ Replicate countexp' valexp' pos
-
 checkExp (Reshape shapeexp arrexp loc) = do
   shapeexp' <- checkExp shapeexp
   arrexp' <- checkExp arrexp

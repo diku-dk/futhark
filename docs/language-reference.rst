@@ -175,8 +175,6 @@ literals and variables, but also more complicated forms.
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "loop" "(" `type_param`* `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
-      : | "iota" `exp`
-      : | "replicate" `exp` `exp`
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
@@ -537,8 +535,8 @@ readable to use shape declaration names instead of ``shape``.
 ``replicate n x``
 ...................
 
-An array consisting of ``n`` copies of ``a``.  The ``n`` argument can
-be of any integral type.
+An array consisting of ``n`` copies of ``a``.  The ``n`` argument must
+be of type ``i32``.
 
 ``reshape (d_1, ..., d_n) a``
 ...............................

@@ -117,8 +117,6 @@ keyword s =
     "do"           -> DO
     "with"         -> WITH
 
-    "iota"         -> IOTA
-    "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
     "rotate"       -> ROTATE

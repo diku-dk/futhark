@@ -442,5 +442,5 @@ topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap
                 binop_names = S.fromList $ map (nameFromString . pretty)
                               [minBound..(maxBound::BinOp)]
                 unop_names = S.fromList $ map nameFromString ["~", "!"]
-                fun_names = S.fromList $ map nameFromString ["shape", "scatter"]
+                fun_names = S.fromList $ map nameFromString ["shape", "scatter", "replicate", "iota"]
         atTopLevel _         = False

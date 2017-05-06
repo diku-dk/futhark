@@ -556,8 +556,6 @@ typeOf (Index ident idx _) =
   where isFix DimFix{} = True
         isFix _        = False
 typeOf (Update e _ _ _) = typeOf e
-typeOf (Iota e _) = arrayType 1 (typeOf e) Unique
-typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique `setAliases` mempty
 typeOf (Reshape shape  e _) =
   typeOf e `setArrayShape` Rank n
   where n = case typeOf shape of Record ts -> length ts
@@ -816,18 +814,26 @@ intrinsics = M.fromList $ zipWith namify [10..] $
              -- The reason for the loop formulation is to ensure that we
              -- get a missing case warning if we forget a case.
              map mkIntrinsicBinOp [minBound..maxBound] ++
+             map mkIota (map Signed [minBound..maxBound] ++
+                         map Unsigned [minBound..maxBound]) ++
 
-             [("scatter", IntrinsicPolyFun [TypeParamType tv_a noLoc]
+             [("scatter", IntrinsicPolyFun [tp_a]
                           [Array $ PolyArray tv_a' [] (Rank 1) Unique (),
                            Array $ PrimArray (Signed Int32) (Rank 1) Nonunique (),
                            Array $ PolyArray tv_a' [] (Rank 1) Nonunique ()] $
                           Array $ PolyArray tv_a' [] (Rank 1) Unique ()),
-              ("shape", IntrinsicPolyFun [TypeParamType tv_a noLoc]
+              ("shape", IntrinsicPolyFun [tp_a]
                         [Array $ PolyArray tv_a' [] (Rank 1) Nonunique ()] $
-                        Array $ PrimArray (Signed Int32) (Rank 1) Unique ())]
+                        Array $ PrimArray (Signed Int32) (Rank 1) Unique ()),
+              ("replicate", IntrinsicPolyFun [tp_a]
+                            [Prim $ Signed Int32, TypeVar tv_a' []] $
+                            Array $ PolyArray tv_a' [] (Rank 1) Unique ()),
+              ("iota", IntrinsicPolyFun [] [Prim $ Signed Int32] $
+                       Array $ PrimArray (Signed Int32) (Rank 1) Unique ())]
 
   where tv_a = VName (nameFromString "a") 0
         tv_a' = typeName tv_a
+        tp_a = TypeParamType tv_a noLoc
 
         namify i (k,v) = (VName (nameFromString k) i, v)
 
@@ -886,6 +892,10 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         intrinsicBinOp Geq      = ordering
 
         ordering = IntrinsicOverloadedFun [ ([t,t], Bool) | t <- anyPrimType ]
+
+        mkIota t = ("iota_" ++ pretty t,
+                    IntrinsicPolyFun [] [Prim t] $
+                    Array $ PrimArray t (Rank 1) Unique ())
 
 -- | The largest tag used by an intrinsic - this can be used to
 -- determine whether a 'VName' refers to an intrinsic or a user-defined name.
