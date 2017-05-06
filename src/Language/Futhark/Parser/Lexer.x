@@ -116,6 +116,19 @@ keyword s =
     "for"          -> FOR
     "do"           -> DO
     "with"         -> WITH
+    "local"        -> LOCAL
+    "open"         -> OPEN
+    "include"      -> INCLUDE
+    "import"       -> IMPORT
+    "type"         -> TYPE
+    "entry"        -> ENTRY
+    "module"       -> MODULE
+    "empty"        -> EMPTY
+    "while"        -> WHILE
+    "unsafe"       -> UNSAFE
+
+-- In a perfect language, the remaining tokens would all be functions.
+-- Perhaps we can eventually permit their use as variable names anyway.
 
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
@@ -125,26 +138,17 @@ keyword s =
     "reduce_comm"  -> REDUCECOMM
     "zip"          -> ZIP
     "unzip"        -> UNZIP
-    "unsafe"       -> UNSAFE
     "scan"         -> SCAN
     "split"        -> SPLIT
     "concat"       -> CONCAT
     "filter"       -> FILTER
     "partition"    -> PARTITION
-    "empty"        -> EMPTY
-    "while"        -> WHILE
     "stream_map"     -> STREAM_MAP
     "stream_map_per" -> STREAM_MAPPER
     "stream_red"     -> STREAM_RED
     "stream_red_per" -> STREAM_REDPER
     "stream_seq"     -> STREAM_SEQ
-    "include"      -> INCLUDE
-    "import"       -> IMPORT
-    "type"         -> TYPE
-    "entry"        -> ENTRY
-    "module"       -> MODULE
-    "open"         -> OPEN
-    "local"        -> LOCAL
+
     _              -> ID $ nameFromText s
 
 indexing :: T.Text -> Alex Name
@@ -306,8 +310,6 @@ data Token = ID Name
            | FOR
            | DO
            | WITH
-           | IOTA
-           | REPLICATE
            | MAP
            | REDUCE
            | REDUCECOMM
