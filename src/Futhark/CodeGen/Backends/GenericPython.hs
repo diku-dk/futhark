@@ -407,11 +407,11 @@ entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
       npcall = simpleCall npobject [ctcall]
   stm $ Assign vname' npcall
 
-entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t _ dims)) e = do
-  let type_is_ok = BinOp "and"
-                   (BinOp "in" (simpleCall "type" [e])
-                     (List [Var "cl.array.Array"]))
-                   (BinOp "==" (Field e "dtype") (Var (compilePrimToNp t)))
+entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t s dims)) e = do
+  let type_is_ok =
+        BinOp "and"
+        (BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"]))
+        (BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s)))
   stm $ Assert type_is_ok "Parameter has unexpected type"
 
   zipWithM_ (unpackDim e) dims [0..]
@@ -706,7 +706,7 @@ compilePrimTypeExt t ept =
     (FloatType Float32, _) -> "ct.c_float"
     (FloatType Float64, _) -> "ct.c_double"
     (Bool, _) -> "ct.c_bool"
-    (Cert, _) -> "ct.c_bool"
+    (Cert, _) -> "ct.c_byte"
 
 compilePrimToNp :: Imp.PrimType -> String
 compilePrimToNp bt =
@@ -733,7 +733,7 @@ compilePrimToExtNp bt ept =
     (IntType Int64, _) -> "np.int64"
     (FloatType Float32, _) -> "np.float32"
     (FloatType Float64, _) -> "np.float64"
-    (Bool, _) -> "np.byte"
+    (Bool, _) -> "np.bool"
     (Cert, _) -> "np.byte"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
