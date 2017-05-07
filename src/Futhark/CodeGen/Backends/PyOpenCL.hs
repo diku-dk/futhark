@@ -220,11 +220,11 @@ packArrayOutput _ sid _ _ _ =
   fail $ "Cannot return array from " ++ sid ++ " space."
 
 unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
-unpackArrayInput mem memsize "device" t _ dims e = do
-  let type_is_ok = BinOp "and"
-                   (BinOp "in" (Py.simpleCall "type" [e])
-                     (List [Var "np.ndarray", Var "cl.array.Array"]))
-                   (BinOp "==" (Field e "dtype") (Var (Py.compilePrimToNp t)))
+unpackArrayInput mem memsize "device" t s dims e = do
+  let type_is_ok =
+        BinOp "and"
+        (BinOp "in" (Py.simpleCall "type" [e]) (List [Var "np.ndarray", Var "cl.array.Array"]))
+        (BinOp "==" (Field e "dtype") (Var (Py.compilePrimToExtNp t s)))
   Py.stm $ Assert type_is_ok "Parameter has unexpected type"
 
   zipWithM_ (Py.unpackDim e) dims [0..]
