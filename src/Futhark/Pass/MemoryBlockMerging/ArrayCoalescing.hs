@@ -784,7 +784,7 @@ genCoalStmtInfo lutab scopetab pat e =
                                       _ -> (False, zero)
                                   offs' = BinOpExp (Add Int32) offs_b offs
                               in  if S.member b last_uses && succ1
-                                  then let ind_x_slice = IxFun.offsetIndex ind_x offs'
+                                  then let ind_x_slice = IxFun.offsetIndex ind_x offs
                                        in  (acc++[(Conc,x,m_x,ind_x_slice,b,m_b,ind_b,tpb,shpb)],offs',succ1)
                                   else (acc,offs',succ1)
                             _ ->  (acc,offs,False)
