@@ -493,7 +493,7 @@ readInput decl@(Imp.TransparentValue (Imp.ScalarValue bt ept _)) =
 readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
   let rank' = Var $ show $ length dims
       type_enum = Var $ readTypeEnum bt ept
-      ct = Var $ compilePrimType bt
+      ct = Var $ compilePrimToExtNp bt ept
       stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
      [stdin, type_enum, StringLiteral $ pretty bt, rank', ct]
