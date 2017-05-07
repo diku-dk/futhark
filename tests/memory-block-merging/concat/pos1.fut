@@ -1,5 +1,5 @@
 -- Memory block merging with a concat of multiple arrays into a multidimensional
--- array.  Requires allocation hoisting of the memory block for 't3'.
+-- array.
 -- ==
 -- input { [5, 15]
 --         0
