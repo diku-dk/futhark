@@ -20,7 +20,7 @@ import Futhark.Pass
 import Futhark.Representation.AST
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Pass.ExplicitAllocations()
-import Futhark.Analysis.Alias (aliasAnalysis)
+import Futhark.Analysis.Alias (analyseFun)
 
 import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
@@ -38,17 +38,28 @@ transformProg :: MonadFreshNames m
               => Prog ExpMem.ExplicitMemory
               -> m (Prog ExpMem.ExplicitMemory)
 transformProg prog = do
-  let coaltab = ArrayCoalescing.mkCoalsTab $ aliasAnalysis prog
-  prog1 <- intraproceduralTransformation (transformFunDef coaltab) prog
+  prog1 <- intraproceduralTransformation transformFunDef prog
   prog2 <- intraproceduralTransformation cleanUpContextFunDef prog1
 
-  let debug = coaltab `seq` unsafePerformIO $ do
-        putStrLn $ pretty prog2
+  let debug = unsafePerformIO $ putStrLn $ pretty prog2
 
+  debug `seq` return prog2
+
+
+-- Initial transformations from the findings in ArrayCoalescing.
+
+transformFunDef :: MonadFreshNames m
+                => FunDef ExpMem.ExplicitMemory
+                -> m (FunDef ExpMem.ExplicitMemory)
+transformFunDef fundef = do
+  let coaltab = ArrayCoalescing.mkCoalsTabFun $ analyseFun fundef
+  let scope = scopeOfFParams (funDefParams fundef)
+
+  let debug = unsafePerformIO $ do
         -- Print last uses.
-        let lutab_prg = LastUse.lastUsePrg $ aliasAnalysis prog
+        let lutab_prg = M.fromList [LastUse.lastUseFun $ analyseFun fundef]
         replicateM_ 5 $ putStrLn ""
-        putStrLn $ replicate 10 '*' ++ " Last use result " ++ replicate 10 '*'
+        putStrLn $ replicate 10 '*' ++ " Last use result in "  ++ pretty (funDefName fundef) ++ replicate 10 '*'
         putStrLn $ replicate 70 '-'
         forM_ (M.assocs lutab_prg) $ \(fun_name, lutab_fun) ->
           forM_ (M.assocs lutab_fun) $ \(stmt_name, lu_names) -> do
@@ -58,7 +69,7 @@ transformProg prog = do
 
         -- Print coalescings.
         replicateM_ 5 $ putStrLn ""
-        putStrLn $ replicate 10 '*' ++ " Coalescings result " ++ "(" ++ show (M.size coaltab) ++ ") " ++ replicate 10 '*'
+        putStrLn $ replicate 10 '*' ++ " Coalescings result in " ++ pretty (funDefName fundef) ++ "(" ++ show (M.size coaltab) ++ ") " ++ replicate 10 '*'
         putStrLn $ replicate 70 '-'
         forM_ (M.assocs coaltab) $ \(xmem, entry) -> do
           putStrLn $ "Source memory block: " ++ pretty xmem
@@ -68,17 +79,6 @@ transformProg prog = do
           putStrLn $ L.intercalate "   " $ map pretty (M.keys (DS.vartab entry))
           putStrLn $ replicate 70 '-'
 
-  debug `seq` return prog2
-
-
--- Initial transformations from the findings in ArrayCoalescing.
-
-transformFunDef :: MonadFreshNames m
-                => DS.CoalsTab
-                -> FunDef ExpMem.ExplicitMemory
-                -> m (FunDef ExpMem.ExplicitMemory)
-transformFunDef coaltab fundef = do
-  let scope = scopeOfFParams (funDefParams fundef)
   (body', _) <-
     modifyNameSource $ \src ->
       let m1 = runBinderT m scope
@@ -86,7 +86,7 @@ transformFunDef coaltab fundef = do
           (z,newsrc) = runState m2 src
       in  (z,newsrc)
 
-  return fundef { funDefBody = body' }
+  debug `seq` return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
 type MergeM = BinderT ExpMem.ExplicitMemory (ReaderT DS.CoalsTab (State VNameSource))
