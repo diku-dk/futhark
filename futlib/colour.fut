@@ -36,6 +36,8 @@ module type colourspace = {
   include colour
 
   val add: colour -> colour -> colour
+  val mult: colour -> colour -> colour
+  val scale: colour -> f32 -> colour
   val mix: f32 -> colour -> f32 -> colour -> colour
 
   -- Brighten 20%
@@ -68,26 +70,32 @@ module type colourspace = {
 module colourspace(C: colour): colourspace with colour = C.colour = {
   open C
 
-  let max_channel (x: f32) (y: f32): f32 =
-    if x < y then y else x
-
   let from_rgb_normalised (r: f32) (g: f32) (b: f32): colour =
-    let m = max_channel r (max_channel g b)
+    let m = f32.max r (f32.max g b)
     in from_rgba (r / m) (g / m) (b / m) 1f32
 
   -- Normalise a color to the value of its largest RGB component.
   let normalised_colour (r: f32) (g: f32) (b: f32) (a: f32): colour =
-    let m = max_channel r (max_channel g b)
+    let m = f32.max r (f32.max g b)
     in from_rgba (r / m) (g / m) (b / m) a
 
   let add (x: colour) (y: colour): colour =
     let (r1,g1,b1,a1) = to_rgba x
     let (r2,g2,b2,a2) = to_rgba y
     in normalised_colour
-       (max_channel r1 r2)
-       (max_channel g1 g2)
-       (max_channel b1 b2)
+       (f32.max r1 r2)
+       (f32.max g1 g2)
+       (f32.max b1 b2)
        ((a1+a2)/2f32)
+
+  let mult (x: colour) (y: colour): colour =
+    let (r1,g1,b1,a1) = to_rgba x
+    let (r2,g2,b2,a2) = to_rgba y
+    in from_rgba (r1*r2) (g1*g2) (b1*b2) (a1*a2)
+
+  let scale (x: colour) (s: f32): colour =
+    let (r,g,b,a) = to_rgba x
+    in from_rgba (r*s) (g*s) (b*s) (a*s)
 
   let mix (m1: f32) (c1: colour) (m2: f32) (c2: colour): colour =
     let (r1,g1,b1,a1) = to_rgba c1
