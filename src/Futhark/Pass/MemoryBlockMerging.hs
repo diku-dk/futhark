@@ -25,8 +25,6 @@ import Futhark.Analysis.Alias (aliasAnalysis)
 import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.ArrayCoalescing as ArrayCoalescing
--- import qualified Futhark.Representation.ExplicitMemory.IndexFunction()
--- import qualified Futhark.Pass.MemoryBlockMerging.Interference as Interference
 
 
 mergeMemoryBlocks :: Pass ExpMem.ExplicitMemory ExpMem.ExplicitMemory
@@ -40,17 +38,15 @@ transformProg :: MonadFreshNames m
               => Prog ExpMem.ExplicitMemory
               -> m (Prog ExpMem.ExplicitMemory)
 transformProg prog = do
-  let lutab_prg = LastUse.lastUsePrg $ aliasAnalysis prog
-      -- envtab = Interference.intrfAnPrg lutab prog
-      coaltab = ArrayCoalescing.mkCoalsTab $ aliasAnalysis prog
-
-  prog' <- intraproceduralTransformation (transformFunDef coaltab) prog
-  prog'' <- intraproceduralTransformation cleanUpContextFunDef prog'
+  let coaltab = ArrayCoalescing.mkCoalsTab $ aliasAnalysis prog
+  prog1 <- intraproceduralTransformation (transformFunDef coaltab) prog
+  prog2 <- intraproceduralTransformation cleanUpContextFunDef prog1
 
   let debug = coaltab `seq` unsafePerformIO $ do
-        putStrLn $ pretty prog''
+        putStrLn $ pretty prog2
 
         -- Print last uses.
+        let lutab_prg = LastUse.lastUsePrg $ aliasAnalysis prog
         replicateM_ 5 $ putStrLn ""
         putStrLn $ replicate 10 '*' ++ " Last use result " ++ replicate 10 '*'
         putStrLn $ replicate 70 '-'
@@ -67,13 +63,12 @@ transformProg prog = do
         forM_ (M.assocs coaltab) $ \(xmem, entry) -> do
           putStrLn $ "Source memory block: " ++ pretty xmem
           putStrLn $ "Destination memory block: " ++ pretty (DS.dstmem entry)
-          -- putStrLn $ "Destination index function: " ++ show (DS.dstind entry)
           putStrLn $ "Aliased destination memory blocks: " ++ L.intercalate "   " (map pretty $ S.toList $ DS.alsmem entry)
           putStrLn "Variables currently using the source memory block:"
           putStrLn $ L.intercalate "   " $ map pretty (M.keys (DS.vartab entry))
           putStrLn $ replicate 70 '-'
 
-  debug `seq` return prog''
+  debug `seq` return prog2
 
 
 -- Initial transformations from the findings in ArrayCoalescing.
@@ -119,25 +114,25 @@ transformStm (Let (Pattern patCtxElems patValElems) () e) = do
 
 transformFParam :: FParam ExpMem.ExplicitMemory -> MergeM (FParam ExpMem.ExplicitMemory)
 transformFParam (Param x
-                 membound_orig@(ExpMem.ArrayMem _pt _shape u xmem _xixfun)) = do
-  membound <- newMemBound x xmem u
+                 membound_orig@(ExpMem.ArrayMem _pt shape u xmem _xixfun)) = do
+  membound <- newMemBound x xmem shape u
   return $ Param x $ fromMaybe membound_orig membound
 transformFParam fp = return fp
 
 transformPatValElemT :: PatElemT (LetAttr ExpMem.ExplicitMemory)
                      -> MergeM (PatElemT (LetAttr ExpMem.ExplicitMemory))
 transformPatValElemT (PatElem x bindage
-                      membound_orig@(ExpMem.ArrayMem _pt _shape u xmem _xixfun)) = do
-  membound <- newMemBound x xmem u
+                      membound_orig@(ExpMem.ArrayMem _pt shape u xmem _xixfun)) = do
+  membound <- newMemBound x xmem shape u
   return $ PatElem x bindage $ fromMaybe membound_orig membound
 transformPatValElemT pe = return pe
 
-newMemBound :: VName -> VName -> u -> MergeM (Maybe (ExpMem.MemBound u))
-newMemBound x xmem u = do
+newMemBound :: VName -> VName -> Shape -> u -> MergeM (Maybe (ExpMem.MemBound u))
+newMemBound x xmem shape u = do
   coaltab <- ask
   return $ do
     entry <- M.lookup xmem coaltab
-    DS.Coalesced _ (DS.MemBlock pt shape _ xixfun) _ <-
+    DS.Coalesced _ (DS.MemBlock pt _shape _ xixfun) _ <-
       M.lookup x $ DS.vartab entry
     return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun
 
