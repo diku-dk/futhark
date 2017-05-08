@@ -14,7 +14,7 @@ import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
---import Debug.Trace
+import Debug.Trace
 
 import Futhark.Representation.Aliases
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
@@ -131,7 +131,7 @@ getArrMemAssoc :: Pattern (Aliases ExpMem.ExplicitMemory) -> [(VName,ArrayMemBou
 getArrMemAssoc pat =
   mapMaybe (\patel -> case snd $ patElemAttr patel of
                         (ExpMem.ArrayMem tp shp _ mem_nm indfun) ->
-                            -- let mem_nm' = trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++pretty u++" , "++pretty mem_nm++" , "++pretty indfun++" ("++pretty l1++") ") mem_nm
+                            --let mem_nm' = trace ("MemLore: "++(pretty (patElemName patel))++" is ArrayMem: "++pretty tp++" , "++pretty shp++" , "++" , "++pretty mem_nm++" , "++pretty indfun) mem_nm
                             Just (patElemName patel, MemBlock tp shp mem_nm indfun, patElemBindage patel)
                         ExpMem.MemMem _ _ -> Nothing
                         ExpMem.Scalar _   -> Nothing
