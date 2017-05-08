@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 -- | Playground for work on merging memory blocks
 module Futhark.Pass.MemoryBlockMerging.ArrayCoalescing
-  ( mkCoalsTab
+  ( mkCoalsTabFun
   ) where
 
 import Prelude
@@ -110,9 +110,6 @@ prettyInhibitTab tab =
 --------------------------------------------------------------------------------
 --- Main Coalescing Transformation computes a successful coalescing table    ---
 --------------------------------------------------------------------------------
-
-mkCoalsTab :: Prog (Aliases ExpMem.ExplicitMemory) -> CoalsTab
-mkCoalsTab prg = foldl M.union M.empty $ map mkCoalsTabFun $ progFunctions prg
 
 mkCoalsTabFun :: FunDef (Aliases ExpMem.ExplicitMemory) -> CoalsTab
 mkCoalsTabFun fun@(FunDef _ _ _ fpars body) =
