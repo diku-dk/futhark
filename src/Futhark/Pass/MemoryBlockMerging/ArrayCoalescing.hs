@@ -392,11 +392,11 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                         , paramName arg, ini, bdyres) of
                      (b, (_,ExpMem.ArrayMem _ _ _ m_b _), BindVar, a, Var a0, Var r) ->
                        case M.lookup m_b actv0 of
-                         Nothing -> Nothing
+                         Nothing -> trace ("COALESCING loop FAILED1 "++pretty b++" "++pretty m_b) Nothing
                          Just (CoalsEntry _ _ _ vtab _) ->
                            -- if here, then a) and b) have been satisfied.
                            case M.lookup b vtab of
-                             Nothing -> Nothing
+                             Nothing -> trace ("COALESCING loop FAILED2 "++pretty b++" "++pretty m_b) Nothing
                              Just _  ->
                                -- ok, b is in active coalesced table
                                case ( getScopeMemInfo a  scopetab_loop
@@ -410,9 +410,9 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                                    in  if is_lu_a0 && S.member m_r (alloc td_env)
                                        then trace ("COALESCING loop candidate: "++pretty b++" "++pretty m_b++" "++pretty r++" "++pretty m_r) $
                                                   Just ((b,m_b), (a,m_a), (a0,m_a0), (r,m_r))
-                                       else Nothing
-                                 _ -> trace ("COALESCING loop FAILED "++pretty b++" "++pretty m_b) Nothing
-                     _ -> Nothing
+                                       else trace ("COALESCING loop FAILED3 "++pretty b++" "++pretty m_b) Nothing
+                                 _ -> trace ("COALESCING loop FAILED4 "++pretty b++" "++pretty m_b) Nothing
+                     _ -> trace "COALESCING loop FAILED5 " Nothing
                 ) (zip3 pat_val_elms arginis bdy_ress)
 
       -- remove the other pattern elements from the active coalescing table:
