@@ -53,7 +53,6 @@ transformFunDef :: MonadFreshNames m
                 -> m (FunDef ExpMem.ExplicitMemory)
 transformFunDef fundef = do
   let coaltab = ArrayCoalescing.mkCoalsTabFun $ analyseFun fundef
-  let scope = scopeOfFParams (funDefParams fundef)
 
   let debug = unsafePerformIO $ do
         -- Print last uses.
@@ -79,17 +78,16 @@ transformFunDef fundef = do
           putStrLn $ L.intercalate "   " $ map pretty (M.keys (DS.vartab entry))
           putStrLn $ replicate 70 '-'
 
-  (body', _) <-
+  body' <-
     modifyNameSource $ \src ->
-      let m1 = runBinderT m scope
-          m2 = runReaderT m1 coaltab
-          (z,newsrc) = runState m2 src
+      let m1 = runReaderT m coaltab
+          (z,newsrc) = runState m1 src
       in  (z,newsrc)
 
   debug `seq` return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
-type MergeM = BinderT ExpMem.ExplicitMemory (ReaderT DS.CoalsTab (State VNameSource))
+type MergeM = ReaderT DS.CoalsTab (State VNameSource)
 
 transformBody :: Body ExpMem.ExplicitMemory -> MergeM (Body ExpMem.ExplicitMemory)
 transformBody (Body () bnds res) = do
@@ -98,15 +96,12 @@ transformBody (Body () bnds res) = do
 
 transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory]
 transformStm (Let (Pattern patCtxElems patValElems) () e) = do
-  (e', newstmts1) <-
-    collectStms $ mapExpM transform e
-
-  (patValElems', newstmts2) <-
-    collectStms $ mapM transformPatValElemT patValElems
+  e' <- mapExpM transform e
+  patValElems' <- mapM transformPatValElemT patValElems
 
   let pat' = Pattern patCtxElems patValElems'
 
-  return (newstmts1 ++ newstmts2 ++ [Let pat' () e'])
+  return [Let pat' () e']
 
   where transform = identityMapper { mapOnBody = const transformBody
                                    , mapOnFParam = transformFParam
