@@ -509,7 +509,12 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
       safe_4    = createsNewArrOK     e
       ((activeCoals'',inhibit''), successCoals') =
         foldl (\((a_acc,inhb),s_acc) (b,MemBlock tp shp mb b_indfun, bnd) ->
-                  case M.lookup mb a_acc of
+                  let m_info = case (M.lookup mb a_acc, M.lookup mb s_acc) of
+                                (Just info_actv, _) -> Just info_actv
+                                (Nothing, Just info_succ) -> Just info_succ
+                                (Nothing, Nothing) -> Nothing
+                  in
+                   case m_info of
                     Nothing -> ((a_acc,inhb),s_acc)
                     Just info@(CoalsEntry x_mem x_indfun _ vtab _) ->
                       let failed = markFailedCoal (a_acc,inhb) mb
@@ -583,7 +588,7 @@ mkCoalsTabBnd lutab (Let pat _ e) td_env bu_env =
                                                   info'' = info' { vartab = M.insert b_al mem_info_al vtab }
                                               in  trace ("COALESCING: postponed promotion: "++pretty b)
                                                         ((M.insert mb info'' a_acc,inhb), s_acc)
-                                _ -> (failed, s_acc) -- conservatively remove from active
+                                _ -> trace ("!!!BIG FAIL!!! "++pretty b++" "++pretty mb) (failed, s_acc) -- conservatively remove from active
 
               ) ((activeCoals',inhibit'), successCoals bu_env) (getArrMemAssoc pat)
 
@@ -674,39 +679,43 @@ mkCoalsHelper3PatternMatch  pat e lutab td_env successCoals_tab activeCoals_tab 
     Nothing   -> activeCoals_tab
     Just clst ->
       foldl (\ acc (knd,x,m_x,ind_x, b,m_b,ind_b,tp_b,shp_b) ->
-              -- test whether we are in a transitive coalesced case, i.e.,
-              --      @let x[j] = b@
-              --      @let y[i] = x@
-              -- and compose the index function of @x@ with that of @y@,
-              -- and update aliasing with @m_y@ and @m_x@, i.e.,
-              -- validity condition 3) should check that @m_y@ and @m_x@ ...
-              -- are not used during the liveness of @b@.
-              let proper_coals_tab = case knd of
-                                       InPl -> activeCoals_tab
-                                       _    -> successCoals_tab
-                  (success0, m_yx, ind_yx, mem_yx_al, x_deps) =
-                    case M.lookup m_x proper_coals_tab of
-                      Nothing -> (True, m_x, ind_x, S.singleton m_x, M.empty)
-                      Just (CoalsEntry m_y ind_y y_al _ x_deps0) ->
-                        case tryRebase ind_y ind_x of
-                          Just new_fun -> (True,  m_y, new_fun, S.insert m_x y_al, x_deps0)
-                          Nothing      -> (False, m_y, ind_y, y_al, x_deps0)
-              in  case (success0, tryRebase ind_yx ind_b, m_b /= m_yx, S.member m_yx (alloc td_env)) of
-                    (True, Just new_ind, True, True) ->
-                      -- finally update the @activeCoals@ table with a fresh
-                      -- binding for @m_b@; if such one exists then overwrite.
-                      let mem_info  = Coalesced knd (MemBlock tp_b shp_b m_yx new_ind) M.empty
-                          coal_etry = CoalsEntry m_yx ind_yx mem_yx_al (M.singleton b mem_info) $
-                                        -- coalescing is dependent on the coalescing
-                                        -- success of the parent node (if any)
-                                        if m_yx == m_x then M.empty
-                                        else M.insert x m_x x_deps
-                          updt_acc  = M.insert m_b coal_etry acc
-                      in  case M.lookup m_b inhibit_tab of
-                            Nothing -> updt_acc
-                            Just nms-> if S.member m_yx nms then acc -- inhibited coalescing.
-                                       else updt_acc
-                    _ -> acc
+              -- if m_b already in active table, then DO NOTHING
+              case M.lookup m_b acc of
+                Just _ -> trace ("COALESCED OP NEGATIVE: "++pretty b++" "++pretty m_b) acc
+                Nothing->
+                  -- test whether we are in a transitive coalesced case, i.e.,
+                  --      @let x[j] = b@
+                  --      @let y[i] = x@
+                  -- and compose the index function of @x@ with that of @y@,
+                  -- and update aliasing with @m_y@ and @m_x@, i.e.,
+                  -- validity condition 3) should check that @m_y@ and @m_x@ ...
+                  -- are not used during the liveness of @b@.
+                  let proper_coals_tab = case knd of
+                                           InPl -> activeCoals_tab
+                                           _    -> successCoals_tab
+                      (success0, m_yx, ind_yx, mem_yx_al, x_deps) =
+                        case M.lookup m_x proper_coals_tab of
+                          Nothing -> (True, m_x, ind_x, S.singleton m_x, M.empty)
+                          Just (CoalsEntry m_y ind_y y_al _ x_deps0) ->
+                            case tryRebase ind_y ind_x of
+                              Just new_fun -> (True,  m_y, new_fun, S.insert m_x y_al, x_deps0)
+                              Nothing      -> (False, m_y, ind_y, y_al, x_deps0)
+                  in  case (success0, tryRebase ind_yx ind_b, m_b /= m_yx, S.member m_yx (alloc td_env)) of
+                        (True, Just new_ind, True, True) ->
+                          -- finally update the @activeCoals@ table with a fresh
+                          -- binding for @m_b@; if such one exists then overwrite.
+                          let mem_info  = Coalesced knd (MemBlock tp_b shp_b m_yx new_ind) M.empty
+                              coal_etry = CoalsEntry m_yx ind_yx mem_yx_al (M.singleton b mem_info) $
+                                            -- coalescing is dependent on the coalescing
+                                            -- success of the parent node (if any)
+                                            if m_yx == m_x then M.empty
+                                            else M.insert x m_x x_deps
+                              updt_acc  = M.insert m_b coal_etry acc
+                          in  case M.lookup m_b inhibit_tab of
+                                Nothing -> updt_acc
+                                Just nms-> if S.member m_yx nms then acc -- inhibited coalescing.
+                                           else updt_acc
+                        _ -> acc
             ) activeCoals_tab clst
 
 translateIndFunFreeVar :: ScopeTab -> ScalarTab -> ExpMem.IxFun
@@ -753,7 +762,8 @@ genCoalStmtInfo lutab scopetab pat e =
         case (M.lookup x lutab, getScopeMemInfo b scopetab) of
             (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->
                 if not (S.member b last_uses) then Nothing
-                else Just [(Ccopy,x,m_x,ind_x,b,m_b,ind_b,tpb,shpb)]
+                else trace ("COALESCING: copy PATTERN found for "++pretty b++" "++pretty m_b++" "++pretty m_x++" "++pretty x) $
+                     Just [(Ccopy,x,m_x,ind_x,b,m_b,ind_b,tpb,shpb)]
             _ -> Nothing
 
     -- CASE c) @let y[i] = b^{lu}@
@@ -862,10 +872,10 @@ transferCoalsToBody activeCoals_tab (m_b, b, r, m_r) =
   -- the @Nothing@ pattern for the two @case ... of@ cannot happen
   -- because they were already chaked in @findMemBodyResult@
   case M.lookup m_b activeCoals_tab of
-    Nothing -> Exc.assert False activeCoals_tab -- cannot happen
+    Nothing -> trace ("ERROR1111111 "++pretty b++" "++pretty m_b) activeCoals_tab -- cannot happen
     Just etry@(CoalsEntry m_x ind_x als_x vtab opts_x) ->
       case M.lookup b vtab of
-        Nothing -> Exc.assert False activeCoals_tab -- cannot happen
+        Nothing -> trace ("ERROR2222222 "++pretty b++" "++pretty m_b++" in: "++pretty m_x) activeCoals_tab -- cannot happen
         Just (Coalesced knd (MemBlock btp shp _ ind_b) subst_b) ->
           -- by definition of if-stmt, r and b have the same basic type, shape and
           -- index function, hence, for example, do not need to rebase
@@ -874,12 +884,14 @@ transferCoalsToBody activeCoals_tab (m_b, b, r, m_r) =
           in  if m_r == m_b -- already unified, just add binding for @r@
               then let etry' = etry { optdeps = M.insert r m_r opts_x
                                     , vartab  = M.insert r mem_info vtab }
-                   in  M.insert m_r etry' activeCoals_tab
+                   in  trace ("AT LOOP/IF INSERTING 1 in active "++pretty r++" "++pretty m_r++pretty b++" "++pretty m_b++" in: "++pretty m_x) $
+                       M.insert m_r etry' activeCoals_tab
               else -- make them both optimistically depend on each other
                    let opts_x_new = M.insert r m_r opts_x
                        coal_etry  = CoalsEntry m_x ind_x als_x (M.singleton r mem_info) $
                                     M.insert b m_b opts_x
-                   in  M.insert m_b (etry{optdeps = opts_x_new}) $
+                   in  trace ("AT LOOP/IF INSERTING 2 in active "++pretty r++" "++pretty m_r++" in: "++pretty m_x) $
+                       M.insert m_b (etry{optdeps = opts_x_new}) $
                        M.insert m_r coal_etry activeCoals_tab
 
 
