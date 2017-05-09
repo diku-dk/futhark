@@ -48,7 +48,6 @@ data CompilationMode = Executable
 
 standardPipeline :: CompilationMode -> Pipeline SOACS SOACS
 standardPipeline mode =
-  checkForEntryPoints mode >>>
   passes [ simplifySOACS
          , inlineAndRemoveDeadFunctions
          , performCSE True
@@ -62,20 +61,6 @@ standardPipeline mode =
          , simplifySOACS
          , removeDeadFunctions
          ]
-  where checkForEntryPoints :: CompilationMode -> Pipeline SOACS SOACS
-        checkForEntryPoints Library = id
-        checkForEntryPoints Executable =
-          onePass Pass { passName = "Check for main function"
-                       , passDescription = "Check if an entry point exists"
-                       , passFunction = \prog -> do checkForMain $ progFunctions prog
-                                                    return prog
-                       }
-
-        checkForMain ps
-          | not $ any (isJust . funDefEntryPoint) ps =
-              throwError "No entry points defined."
-          | otherwise =
-              return ()
 
 -- Experimental!  Enable by setting the environment variable
 -- MEMORY_BLOCK_MERGING to 1.
