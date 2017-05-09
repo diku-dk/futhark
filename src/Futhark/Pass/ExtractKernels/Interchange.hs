@@ -24,17 +24,17 @@ import Prelude
 
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
-data SeqLoop = SeqLoop Pattern [(FParam, SubExp)] LoopForm Body
+data SeqLoop = SeqLoop [Int] Pattern [(FParam, SubExp)] LoopForm Body
 
 seqLoopStm :: SeqLoop -> Stm
-seqLoopStm (SeqLoop pat merge form body) =
+seqLoopStm (SeqLoop _ pat merge form body) =
   Let pat () $ DoLoop [] merge form body
 
 interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
                    SeqLoop -> LoopNesting
                 -> m SeqLoop
 interchangeLoop
-  (SeqLoop loop_pat merge form body)
+  (SeqLoop perm loop_pat merge form body)
   (MapNesting pat cs w params_and_arrs) = do
     merge_expanded <-
       localScope (scopeOfLParams $ map fst params_and_arrs) $
@@ -60,9 +60,10 @@ interchangeLoop
         map_bnd = Let loop_pat_expanded () $
                   Op $ Map cs w lam $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
+        pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
     return $
-      SeqLoop pat merge_expanded form $
+      SeqLoop [0..patternSize pat-1] pat' merge_expanded form $
       mkBody (pre_copy_bnds++[map_bnd]) res
   where free_in_body = freeInBody body
 

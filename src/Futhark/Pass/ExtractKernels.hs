@@ -407,7 +407,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
       env = KernelEnv { kernelNest =
                         singleNesting (Nesting mempty loopnest)
                       , kernelScope =
-                        types <> scopeForKernels (scopeOf lam)
+                        scopeForKernels (scopeOf lam) <> types
                       }
   let res = map Var $ patternNames pat
   par_stms <- fmap (postKernelsStms . snd) $ runKernelM env $
@@ -496,7 +496,7 @@ instance HasScope Out.Kernels KernelM where
 
 instance LocalScope Out.Kernels KernelM where
   localScope types = local $ \env ->
-    env { kernelScope = kernelScope env <> types }
+    env { kernelScope = types <> kernelScope env }
 
 instance MonadLogger KernelM where
   addLog msgs = tell mempty { accLog = msgs }
@@ -524,7 +524,7 @@ addKernel bnds = addKernels $ PostKernels [PostKernel bnds]
 withStm :: Stm -> KernelM a -> KernelM a
 withStm bnd = local $ \env ->
   env { kernelScope =
-          kernelScope env <> scopeForKernels (scopeOf [bnd])
+          scopeForKernels (scopeOf [bnd]) <> kernelScope env
       , kernelNest =
           letBindInInnerNesting provided $
           kernelNest env
@@ -536,7 +536,7 @@ mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
 mapNesting pat cs w lam arrs = local $ \env ->
   env { kernelNest = pushInnerNesting nest $ kernelNest env
-      , kernelScope = kernelScope env <> scopeForKernels (scopeOf lam)
+      , kernelScope =  scopeForKernels (scopeOf lam) <> kernelScope env
       }
   where nest = Nesting mempty $
                MapNesting pat cs w $
@@ -545,7 +545,7 @@ mapNesting pat cs w lam arrs = local $ \env ->
 inNesting :: KernelNest -> KernelM a -> KernelM a
 inNesting (outer, nests) = local $ \env ->
   env { kernelNest = (inner, nests')
-      , kernelScope = kernelScope env <> mconcat (map scopeOf $ outer : nests)
+      , kernelScope =  mconcat (map scopeOf $ outer : nests) <> kernelScope env
       }
   where (inner, nests') =
           case reverse nests of
@@ -749,22 +749,25 @@ maybeDistributeStm bnd@(Let pat _ (Op (Map cs w lam arrs))) acc =
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 
 maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form body)) acc
-  | bodyContainsMap body =
+  | null (patternContextElements pat), bodyContainsMap body =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | length res == patternSize pat,
-        S.null $ freeIn form `S.intersection` boundInKernelNest nest -> do
-      addKernels kernels
-      localScope (typeEnvFromKernelAcc acc') $ do
-        types <- asksScope scopeForSOACs
-        bnds <- runReaderT
-                (interchangeLoops nest (SeqLoop pat val form body)) types
-        -- runDistribM starts out with an empty scope, so we have to
-        -- immmediately insert the real one.
-        scope <- askScope
-        bnds' <- runDistribM $ localScope scope $ transformStms bnds
-        addKernel bnds'
-      return acc'
+      | S.null $ freeIn form `S.intersection` boundInKernelNest nest,
+        Just (perm, pat_unused) <- permutationAndMissing pat res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
+          localScope (typeEnvFromKernelAcc acc') $ do
+          nest' <- expandKernelNest pat_unused nest
+          addKernels kernels
+          types <- asksScope scopeForSOACs
+          bnds <- runReaderT
+                  (interchangeLoops nest' (SeqLoop perm pat val form body)) types
+          -- runDistribM starts out with an empty scope, so we have to
+          -- immmediately insert the real one.
+          scope <- askScope
+          bnds' <- runDistribM $ localScope scope $ transformStms bnds
+          addKernel bnds'
+          return acc'
     _ ->
       addStmToKernel bnd acc
 
@@ -799,7 +802,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just (perm, pat_unused) <- permutationAndMissing res ->
+      | Just (perm, pat_unused) <- permutationAndMissing pat res ->
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
@@ -812,13 +815,6 @@ maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs)))
       addStmToKernel bnd acc
     where comm' | commutativeLambda lam = Commutative
                 | otherwise             = comm
-          permutationAndMissing res = do
-            let pes = patternValueElements pat
-                (_used,unused) =
-                  partition ((`S.member` freeIn res) . patElemName) pes
-                res_expanded = res ++ map (Var . patElemName) unused
-            perm <- map (Var . patElemName) pes `isPermutationOf` res_expanded
-            return (perm, unused)
 
 -- Redomap and Scanomap are general cases, so pretend nested
 -- reductions and scans are Redomap and Scanomap.  Well, not for
@@ -1054,6 +1050,15 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
                 (patternValueElements pat) ret
 
     m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
+
+permutationAndMissing :: Pattern -> [SubExp] -> Maybe ([Int], [PatElem])
+permutationAndMissing pat res = do
+  let pes = patternValueElements pat
+      (_used,unused) =
+        partition ((`S.member` freeIn res) . patElemName) pes
+      res_expanded = res ++ map (Var . patElemName) unused
+  perm <- map (Var . patElemName) pes `isPermutationOf` res_expanded
+  return (perm, unused)
 
 -- Add extra pattern elements to every kernel nesting level.
 expandKernelNest :: MonadFreshNames m =>
