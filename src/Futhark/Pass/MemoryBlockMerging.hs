@@ -138,28 +138,26 @@ cleanUpContextFunDef :: MonadFreshNames m
                      => FunDef ExpMem.ExplicitMemory
                      -> m (FunDef ExpMem.ExplicitMemory)
 cleanUpContextFunDef fundef = do
-  let m = cleanUpContextBody $ funDefBody fundef
-      body' = runReader m $ scopeOfFParams (funDefParams fundef)
+  let m = cleanUpContextBody (scopeOf fundef) $ funDefBody fundef
+      body' = runReader m M.empty
   return fundef { funDefBody = body' }
 
 type CleanUpM = Reader (Scope ExpMem.ExplicitMemory)
 
-cleanUpContextBody :: Body ExpMem.ExplicitMemory -> CleanUpM (Body ExpMem.ExplicitMemory)
-cleanUpContextBody (Body () bnds res) = do
-  bnds' <- cleanUpContextStms bnds
+cleanUpContextBody :: Scope ExpMem.ExplicitMemory
+                   -> Body ExpMem.ExplicitMemory
+                   -> CleanUpM (Body ExpMem.ExplicitMemory)
+cleanUpContextBody scope (Body () bnds res) = do
+  bnds' <- localScope scope $ localScope (scopeOf bnds)
+           $ mapM cleanUpContextStm bnds
   return $ Body () bnds' res
 
-cleanUpContextStms :: [Stm ExpMem.ExplicitMemory] -> CleanUpM [Stm ExpMem.ExplicitMemory]
-cleanUpContextStms [] = return []
-cleanUpContextStms (bnd : bnds) = do
-  bnd' <- cleanUpContextStm bnd
-  inScopeOf bnd' $ (bnd' :) <$> cleanUpContextStms bnds
-
-cleanUpContextStm :: Stm ExpMem.ExplicitMemory -> CleanUpM (Stm ExpMem.ExplicitMemory)
+cleanUpContextStm :: Stm ExpMem.ExplicitMemory
+                  -> CleanUpM (Stm ExpMem.ExplicitMemory)
 cleanUpContextStm (Let pat@(Pattern patCtxElems patValElems) () e) = do
   remaining <- ExpMem.findUnusedPatternPartsInExp pat e
   let patCtxElems' = S.toList $ S.fromList patCtxElems S.\\ S.fromList remaining
   let pat' = Pattern patCtxElems' patValElems
   e' <- mapExpM cleanUpContext e
   return $ Let pat' () e'
-  where cleanUpContext = identityMapper { mapOnBody = const cleanUpContextBody }
+  where cleanUpContext = identityMapper { mapOnBody = cleanUpContextBody }
