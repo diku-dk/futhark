@@ -32,12 +32,18 @@ type InhibitTab = M.Map VName Names
 -- ^ inhibited memory-block mergings from the key (memory block)
 --   to the value (set of memory blocks)
 
+type LoopTab = M.Map VName Names
+
 data TopDnEnv = TopDnEnv { alloc   :: AllocTab
                          -- ^ contains the already allocated memory blocks
                          , scope   :: ScopeTab
                          -- ^ variable info, including var-to-memblock assocs
                          , inhibited :: InhibitTab
                          -- ^ the inherited inhibitions from the previous try
+                         , loops :: LoopTab
+                         -- ^ the memory block of the loop-iteration result
+                         --   is mapped to the memory blocks of the loop
+                         --   result, loop-variant, and loop-init.
                          }
 
 data BotUpEnv = BotUpEnv { scals :: ScalarTab
@@ -52,7 +58,8 @@ data BotUpEnv = BotUpEnv { scals :: ScalarTab
                          }
 
 emptyTopDnEnv :: TopDnEnv
-emptyTopDnEnv = TopDnEnv { alloc = S.empty, scope = M.empty, inhibited = M.empty }
+emptyTopDnEnv = TopDnEnv { alloc = S.empty, scope = M.empty
+                         , inhibited = M.empty, loops = M.empty }
 
 emptyBotUpEnv :: BotUpEnv
 emptyBotUpEnv = BotUpEnv { scals = M.empty, activeCoals = M.empty
@@ -353,6 +360,9 @@ mkCoalsTabBnd lutab (Let patt _ (If _ body_then body_else _)) td_env bu_env
 mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env bu_env
   | True <- all notInPlace (patternValueElements pat) =
   let pat_val_elms  = patternValueElements pat
+      bdy_ress = drop (length arginis_ctx) $ bodyResult body
+      scopetab_loop = scopetab <> scopeOf (bodyStms body)
+      loopstab = extendLoopTab scopetab_loop (loops td_env) pat_val_elms arginis bdy_ress
 
   --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions:
       (activeCoals000,inhibit000) =
@@ -383,8 +393,6 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
   --       (d) the init name is lastly-used in the initialization
   --           of the loop variant.
   --     Otherwise fail and remove from active-coalescing table!
-      scopetab_loop = scopetab <> scopeOf (bodyStms body)
-      bdy_ress = drop (length arginis_ctx) $ bodyResult body
       (patmems, argmems, inimems, resmems) =
         trace ("COALESCING loop input: "++pretty (map patElemName pat_val_elms)) $
         Data.List.unzip4 $
@@ -449,12 +457,12 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                         if m_r == m_a then tab
                         else case M.lookup m_r tab of
                                 Nothing   -> tab
-                                Just etry -> M.insert m_r (etry { alsmem = S.insert m_a (alsmem etry) }) tab
+                                Just etry -> trace ("ADDED LOOP CONSTRAINT x TO y"++pretty m_a++" "++pretty m_a) $
+                                                   M.insert m_r (etry { alsmem = S.insert m_a (alsmem etry) }) tab
                     ) actv2 (zip res_mem_bdy res_mem_arg)
 
-      res_env_body = mkCoalsTabBdy lutab body (td_env { scope    = scopetab })
-                                              (bu_env { activeCoals = actv3
-                                                      , inhibit = inhibit1  })
+      res_env_body = mkCoalsTabBdy lutab body (td_env { scope = scopetab, loops = loopstab })
+                                              (bu_env { activeCoals = actv3, inhibit = inhibit1  })
 
   -- iv) optimistically mark the pattern succesful if there is any chance to succeed
       (res_actv, res_succ, res_inhb) = (activeCoals res_env_body, successCoals res_env_body, inhibit res_env_body)
@@ -681,7 +689,7 @@ mkCoalsHelper3PatternMatch  pat e lutab td_env successCoals_tab activeCoals_tab 
       foldl (\ acc (knd,x,m_x,ind_x, b,m_b,ind_b,tp_b,shp_b) ->
               -- if m_b already in active table, then DO NOTHING
               case M.lookup m_b acc of
-                Just _ -> trace ("COALESCED OP NEGATIVE: "++pretty b++" "++pretty m_b) acc
+                Just _ -> trace ("COALESCED PATTERN NEGATIVE: "++pretty b++" "++pretty m_b) acc
                 Nothing->
                   -- test whether we are in a transitive coalesced case, i.e.,
                   --      @let x[j] = b@
@@ -704,8 +712,12 @@ mkCoalsHelper3PatternMatch  pat e lutab td_env successCoals_tab activeCoals_tab 
                         (True, Just new_ind, True, True) ->
                           -- finally update the @activeCoals@ table with a fresh
                           -- binding for @m_b@; if such one exists then overwrite.
-                          let mem_info  = Coalesced knd (MemBlock tp_b shp_b m_yx new_ind) M.empty
-                              coal_etry = CoalsEntry m_yx ind_yx mem_yx_al (M.singleton b mem_info) $
+                          let -- extend mem_yx_al based on loopTab info
+                              mem_alias = S.foldl (\ accals xy ->
+                                                    S.union accals $ fromMaybe S.empty (M.lookup xy (loops td_env))
+                                                  ) mem_yx_al mem_yx_al
+                              mem_info  = Coalesced knd (MemBlock tp_b shp_b m_yx new_ind) M.empty
+                              coal_etry = CoalsEntry m_yx ind_yx mem_alias (M.singleton b mem_info) $
                                             -- coalescing is dependent on the coalescing
                                             -- success of the parent node (if any)
                                             if m_yx == m_x then M.empty
@@ -919,3 +931,22 @@ filterExistPatElms act_coal inhb_coal patt =
                      Just _  -> markFailedCoal (acc,inhb) m_b
                  _ -> (acc,inhb)
             ) (act_coal,inhb_coal) exist_patels
+
+extendLoopTab :: ScopeTab -> LoopTab -> [PatElem (Aliases ExpMem.ExplicitMemory)]
+              -> [(FParam (Aliases ExpMem.ExplicitMemory), SubExp)]
+              -> [SubExp] -> LoopTab
+extendLoopTab scopetab_loop looptab pat_val_elms arginis bdy_ress =
+  foldl (\tab (patel, (arg,ini), bdyres) ->
+            case  ( patElemAttr patel, patElemBindage patel
+                  , paramName arg, ini, bdyres ) of
+                ( (_,ExpMem.ArrayMem _ _ _ m_pel _), BindVar, a, Var a0, Var r) ->
+                    case ( getScopeMemInfo a  scopetab_loop
+                         , getScopeMemInfo a0 scopetab_loop
+                         , getScopeMemInfo r  scopetab_loop ) of
+                            ( Just (MemBlock _ _ m_a  _), Just (MemBlock _ _ m_a0 _), Just (MemBlock _ _ m_r  _) ) ->
+                                let addme = S.union (S.fromList [m_pel, m_a, m_a0]) $
+                                                    fromMaybe S.empty $ M.lookup m_r tab
+                                in  M.insert m_r addme tab
+                            (_, _, _) -> tab
+                (_,_,_,_,_) -> tab
+        ) looptab (zip3 pat_val_elms arginis bdy_ress)
