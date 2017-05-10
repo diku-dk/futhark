@@ -3,7 +3,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.Representation.Kernels.Simplify
        ( simplifyKernels
