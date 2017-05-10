@@ -19,9 +19,9 @@ import Futhark.Tools
 import Futhark.Pass
 import Futhark.Representation.AST
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
-import Futhark.Pass.ExplicitAllocations()
 import Futhark.Analysis.Alias (analyseFun)
 
+import qualified Futhark.Pass.MemoryBlockMerging.AllocHoisting as AH
 import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.ArrayCoalescing as ArrayCoalescing
@@ -38,12 +38,13 @@ transformProg :: MonadFreshNames m
               => Prog ExpMem.ExplicitMemory
               -> m (Prog ExpMem.ExplicitMemory)
 transformProg prog = do
-  prog1 <- intraproceduralTransformation transformFunDef prog
-  prog2 <- intraproceduralTransformation cleanUpContextFunDef prog1
+  prog1 <- intraproceduralTransformation AH.hoistAllocsFunDef prog
+  prog2 <- intraproceduralTransformation transformFunDef prog1
+  prog3 <- intraproceduralTransformation cleanUpContextFunDef prog2
 
-  let debug = unsafePerformIO $ putStrLn $ pretty prog2
+  let debug = unsafePerformIO $ putStrLn $ pretty prog3
 
-  debug `seq` return prog2
+  debug `seq` return prog3
 
 
 -- Initial transformations from the findings in ArrayCoalescing.
