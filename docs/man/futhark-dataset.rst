@@ -19,7 +19,7 @@ generating input datasets for program testing.  All Futhark primitive
 types are supported.  Tuples are not supported.  Arrays of specific
 (non-random) sizes can be generated.  You can specify maximum and
 minimum bounds for values, as well as the random seed used when
-generating the numbers.  The generated values are written to standard
+generating the data.  The generated values are written to standard
 output.
 
 OPTIONS
@@ -34,8 +34,7 @@ OPTIONS
 --T-bounds=min:max
   Set inclusive lower and upper bounds on generated values of type
   ``T``.  ``T`` is any primitive type, e.g. ``i32`` or ``f32``.  The
-  bounds apply to any following uses of the ``-g`` option.  Note that
-  ``i32`` does not work; use ``i32`` instead.
+  bounds apply to any following uses of the ``-g`` option.
 
 You can alter the output format using the following flags. To use them, add them
 before data generation (--generate):
