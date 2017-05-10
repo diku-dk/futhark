@@ -102,7 +102,7 @@ intrfAnBnd lutab env (Let pat _ (DoLoop memctx var_ses _ body)) =
       v2mem' = M.union (v2mem env) $ M.fromList lvarmems
       -- ^ update the v2mem with the memory blocks of the loop vars.
 
-      mems = S.fromList $ map (\(MemBlock _ _ mn _) -> mn) $ snd $ unzip lvarmems
+      mems = S.fromList $ map (\(_, MemBlock _ _ mn _) -> mn) lvarmems
       active' = S.union (active env) $ S.intersection (alloc env) $
                 aliasTransClos alias' mems
       -- ^ add the alias-transitive closure of loop-vars mem blocks to active
@@ -122,7 +122,7 @@ defInterference lutab env pat =
       v2mem' = M.union (v2mem env) $ M.fromList arrmems
       -- ^ update v2mem with pattern's (array-var -> mem-block) bindings
 
-      patmems = map (\(MemBlock _ _ mn _) -> mn) $ snd $ unzip arrmems
+      patmems = map (\(_, MemBlock _ _ mn _) -> mn) arrmems
       intrf' = updateInterference alias' (alloc env) (active env) (intrf env) patmems
       -- ^ update interference: get the alias-transitive closure of each memory
       --   block in pattern and mark its interference with the current active set.

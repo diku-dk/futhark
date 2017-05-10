@@ -380,8 +380,8 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
         mkCoalsHelper1FilterActive pat loop_fv (scope td_env)
                                    (scals bu_env) activeCoals00 inhibit00
       scopetab = scope td_env                              <>
-                 (scopeOfFParams (fst $ unzip arginis_ctx) <>
-                 (scopeOfFParams (fst $ unzip arginis    ) <>
+                 (scopeOfFParams (map fst arginis_ctx) <>
+                 (scopeOfFParams (map fst arginis    ) <>
                   scopeOfLoopForm lform))
   -- ii) Extend @activeCoals@ by transfering the pattern-elements bindings existent
   --     in @activeCoals@ to the loop-body results, but only if:

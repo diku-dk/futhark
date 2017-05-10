@@ -305,7 +305,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
   let (exszvar,    exszarres,  exszses  ) = unzip3 $ catMaybes mexistszs
       (exindvars,  indvarres,  exindses ) = unzip3 $ catMaybes mexistinds
       (lftedrtps1, lftedrtps2, exactrtps) = unzip3   botharrtps
-      patarrnms = map (baseString . identName) (fst $ unzip assocs)
+      patarrnms = map (baseString . identName . fst) assocs
   -- various result array identifiers
   outarrinit <- forM (zip initrtps  patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_init") t

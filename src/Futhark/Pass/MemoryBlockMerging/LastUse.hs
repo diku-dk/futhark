@@ -171,7 +171,7 @@ lastUseAnExp alstab (DoLoop _ var_ses _ body) used_nms0 =
       -- being:  (free_in_body - loop-variants-a) + used_nms0. As such we disable cases b)
       -- and c) to produce loop-variant last uses inside the loop, and also we prevent
       -- the free-loop-variables to having last uses inside the loop.
-      free_in_body' = S.difference free_in_body $ S.fromList $ fst $ unzip var_inis_a
+      free_in_body' = S.difference free_in_body $ S.fromList $ map fst var_inis_a
       used_nms = S.union used_nms0 free_in_body'
       (_, body_lutab, _) = lastUseAnBdy alstab body (M.empty,used_nms)
 
@@ -180,7 +180,7 @@ lastUseAnExp alstab (DoLoop _ var_ses _ body) used_nms0 =
       lutab_res = M.union body_lutab $ M.fromList var_inis_a
 
       -- the result used names are:
-      fpar_nms = S.fromList $ map (identName . paramIdent) $ fst $ unzip var_ses
+      fpar_nms = S.fromList $ map (identName . paramIdent . fst) var_ses
       used_nms' = S.difference free_in_body fpar_nms
       used_nms_res = S.union used_nms0 used_nms'
 

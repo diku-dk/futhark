@@ -569,7 +569,7 @@ soacToStream soac = do
     --    {acc', strm_resids}
     Scan _ _ _ nesinps -> do
       -- the array and accumulator result types
-      let nes = fst $ unzip nesinps
+      let (nes, _) = unzip nesinps
           accrtps= lambdaReturnType lam
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
@@ -624,7 +624,7 @@ soacToStream soac = do
     --    {acc'}
     Reduce _ _ comm _ nesinps -> do
       -- the array and accumulator result types
-      let nes = fst $ unzip nesinps
+      let (nes,_) = unzip nesinps
           accrtps= lambdaReturnType lam
       -- array result and input IDs of the stream's lambda
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
