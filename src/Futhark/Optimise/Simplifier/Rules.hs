@@ -376,14 +376,6 @@ simplifyRotate vtable (Let pat _ (BasicOp (Rotate cs offsets v)))
 simplifyRotate _ _ = cannotSimplify
 
 simplifyReplicate :: MonadBinder m => TopDownRule m
-simplifyReplicate vtable
-  (Let pat@(Pattern [] [pe]) _ (BasicOp (Replicate (Shape ds) (Var v))))
-  | (_, ds') <- partition isCt1 ds,
-    Just v_t <- ST.lookupType v vtable,
-    ds' /= ds,
-    not $ null ds' && primType v_t = do
-      v' <- letExp "replicate" $ BasicOp $ Replicate (Shape ds') $ Var v
-      letBind_ pat $ BasicOp $ Reshape [] (map DimNew $ arrayDims $ patElemType pe) v'
 simplifyReplicate _ (Let pat _ (BasicOp (Replicate (Shape []) se@Constant{}))) =
   letBind_ pat $ BasicOp $ SubExp se
 simplifyReplicate _ (Let pat _ (BasicOp (Replicate (Shape []) (Var v)))) = do
