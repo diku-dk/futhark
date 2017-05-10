@@ -12,8 +12,8 @@ cache:
 matrix:
   include:
     - env: BUILD=stack STACK_YAML=stack.yaml
-    - env: BUILD=stack STACK_YAML=stack-lts-7.0.yaml
-    - env: BUILD=stack STACK_YAML=stack-lts-6.0.yaml
+    - env: BUILD=stack STACK_YAML=stack-lts-7.22.yaml
+    - env: BUILD=stack STACK_YAML=stack-lts-6.31.yaml
 
 addons:
   apt:
