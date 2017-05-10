@@ -63,7 +63,7 @@ repl = do
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram newFutharkConfig (standardPipeline Executable) $
+  runCompilerOnProgram newFutharkConfig standardPipeline $
   interpretAction' $ interpreterEntryPoint config
 
 newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }

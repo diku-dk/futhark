@@ -26,7 +26,7 @@ main = reportingIOErrors $
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  (gpuPipeline Executable) (openclCodeAction filepath config) filepath
+  gpuPipeline (openclCodeAction filepath config) filepath
 
 openclCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 openclCodeAction filepath config =

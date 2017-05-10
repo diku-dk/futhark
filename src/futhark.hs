@@ -285,11 +285,11 @@ commandLineOptions =
   , simplifyOption "e"
 
   , soacsPipelineOption "Run the default optimised pipeline"
-    (standardPipeline Library) "s" ["standard"]
+    standardPipeline "s" ["standard"]
   , explicitMemoryPipelineOption "Run the full GPU compilation pipeline"
-    (gpuPipeline Library) [] ["gpu"]
+    gpuPipeline [] ["gpu"]
   , explicitMemoryPipelineOption "Run the sequential CPU compilation pipeline"
-    (sequentialPipeline Library) [] ["cpu"]
+    sequentialPipeline [] ["cpu"]
   ]
 
 -- | Entry point.  Non-interactive, except when reading interpreter

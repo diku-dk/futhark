@@ -9,11 +9,8 @@ module Futhark.Passes
   )
 where
 
-import Control.Category ((>>>), id)
-import Control.Monad.Except
+import Control.Category ((>>>))
 import Data.Maybe
-
-import Prelude hiding (id)
 
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -29,11 +26,9 @@ import Futhark.Pass.ExtractKernels
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
-import Futhark.Pass
 import Futhark.Pipeline
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.SOACS (SOACS)
-import Futhark.Representation.AST.Syntax
 import Futhark.Util
 
 -- | Are we compiling the Futhark program as an executable or a
@@ -46,8 +41,8 @@ data CompilationMode = Executable
                        -- ^ Only top-level functions marked @entry@
                        -- are alive.
 
-standardPipeline :: CompilationMode -> Pipeline SOACS SOACS
-standardPipeline mode =
+standardPipeline :: Pipeline SOACS SOACS
+standardPipeline =
   passes [ simplifySOACS
          , inlineAndRemoveDeadFunctions
          , performCSE True
@@ -82,10 +77,10 @@ withExperimentalPasses pipeline =
   then withExperimentalMemoryBlockMerging pipeline
   else pipeline
 
-sequentialPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
-sequentialPipeline mode =
+sequentialPipeline :: Pipeline SOACS ExplicitMemory
+sequentialPipeline =
   withExperimentalPasses $
-  standardPipeline mode >>>
+  standardPipeline >>>
   onePass firstOrderTransform >>>
   passes [ simplifyKernels
          , inPlaceLowering
@@ -98,10 +93,10 @@ sequentialPipeline mode =
          , simplifyExplicitMemory
          ]
 
-gpuPipeline :: CompilationMode -> Pipeline SOACS ExplicitMemory
-gpuPipeline mode =
+gpuPipeline :: Pipeline SOACS ExplicitMemory
+gpuPipeline =
   withExperimentalPasses $
-  standardPipeline mode >>>
+  standardPipeline >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
          , babysitKernels

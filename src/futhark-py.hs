@@ -27,7 +27,7 @@ main = reportingIOErrors $
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  (sequentialPipeline Executable) (pyCodeAction filepath config) filepath
+  sequentialPipeline (pyCodeAction filepath config) filepath
 
 pyCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 pyCodeAction filepath config =
