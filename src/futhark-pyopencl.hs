@@ -25,9 +25,7 @@ main = reportingIOErrors $
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
   runCompilerOnProgram (futharkConfig config)
-  (gpuPipeline mode) (pyCodeAction filepath config) filepath
-  where mode | compilerModule config = Library
-             | otherwise             = Executable
+  gpuPipeline (pyCodeAction filepath config) filepath
 
 pyCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
 pyCodeAction filepath config =
