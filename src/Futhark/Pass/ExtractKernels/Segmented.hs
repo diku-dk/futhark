@@ -407,10 +407,9 @@ largeKernel segment_size num_segments cs all_arrs comm
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
         mapM_ addStm [ Let (Pattern [] [pe']) () $
-                        Op $ Combine [(spaceLocalId space, group_size)] [patElemType pe]
-                                     (constant True) $
-                                     Body () [] [Var $ patElemName pe]
-                           | (pe', pe) <- zip combine_red_pes red_pes ]
+                       Op $ Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
+                       Body () [] [Var $ patElemName pe]
+                     | (pe', pe) <- zip combine_red_pes red_pes ]
 
         final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
           pe_name <- newVName "final_result"
@@ -641,10 +640,9 @@ smallKernel segment_size num_segments cs in_arrs scratch_arrs
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
         mapM_ addStm [ Let (Pattern [] [pe']) () $ Op $
-                             Combine [(spaceLocalId space, group_size)] [patElemType pe]
-                             (constant True) $
-                             Body () [] [Var $ patElemName pe]
-                           | (pe', pe) <- zip combine_red_pes' red_pes_wflag ]
+                       Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
+                       Body () [] [Var $ patElemName pe]
+                     | (pe', pe) <- zip combine_red_pes' red_pes_wflag ]
 
         scan_red_pes_wflag <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "scanned"

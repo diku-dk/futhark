@@ -1141,7 +1141,7 @@ intraGroupParalleliseBody kspace body = do
                 Kernelise.transformStms $ bodyStms $ lambdaBody fun
               let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
               letBind_ pat $ Op $
-                Out.Combine [(ltid,w)] (lambdaReturnType fun) (constant True) comb_body
+                Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
 
             Op (Scanomap cs w scanfun foldfun nes arrs) -> do
               fold_stms <- collectStms_ $ do
@@ -1159,7 +1159,7 @@ intraGroupParalleliseBody kspace body = do
                 Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
               let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
               scan_input <- letTupExp "scan_input" $ Op $
-                Out.Combine [(ltid,w)] (lambdaReturnType foldfun) (constant True) fold_body
+                Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
 
               scanfun' <- Kernelise.transformLambda scanfun
 
