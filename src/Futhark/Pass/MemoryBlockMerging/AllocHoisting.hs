@@ -49,28 +49,51 @@ hoistAllocsFunDef :: MonadFreshNames m
                   => FunDef ExpMem.ExplicitMemory
                   -> m (FunDef ExpMem.ExplicitMemory)
 hoistAllocsFunDef fundef = do
-  let scope = scopeOf fundef
-      bindingmap = M.fromList $ mapMaybe scopeBindingMap $ M.toList scope
-      m = hoistAllocsBody scope bindingmap $ funDefBody fundef
+  let scope_new = scopeOf fundef
+      scope_old = M.empty
+      bindingmap_cur = M.empty
+      m = hoistAllocsBody scope_new scope_old bindingmap_cur $ funDefBody fundef
   body' <- modifyNameSource (runState m)
   return fundef { funDefBody = body' }
+
+type HoistAllocsM = State VNameSource
+
+-- This is a bit messy.
+hoistAllocsBody :: Scope ExpMem.ExplicitMemory
+                -> Scope ExpMem.ExplicitMemory
+                -> BindingMap
+                -> Body ExpMem.ExplicitMemory
+                -> HoistAllocsM (Body ExpMem.ExplicitMemory)
+hoistAllocsBody scope_new scope_old bindingmap_old body = do
+  let allocs = findAllocations body
+      allocs' = filter (isSimpleMemUse body) allocs
+
+  let scope_cur = scope_old <> scope_new
+      bindingmap_new = M.fromList $ mapMaybe scopeBindingMap $ M.toList scope_new
+      bindingmap_cur = bindingmap_old <> bindingmap_new
+
+  Body () bnds res <-
+    foldM (hoistAlloc scope_cur bindingmap_cur) body allocs'
+
+  let scope_bnds = scopeOf bnds
+      scope = scope_cur <> scope_bnds
+
+      bindingmap_bnds = bodyBindingMap bnds
+      bindingmap = bindingmap_cur <> bindingmap_bnds
+
+      debug = unsafePerformIO $ do
+        putStrLn $ replicate 10 '*' ++ " Allocations found in body "  ++ replicate 10 '*'
+        forM_ allocs' print
+        putStrLn $ replicate 70 '-'
+
+  bnds' <- mapM (hoistRecursivelyStm scope bindingmap) bnds
+  debug `seq` return $ Body () bnds' res
 
   where scopeBindingMap :: (VName, NameInfo ExpMem.ExplicitMemory)
                         -> Maybe (VName, PrimBinding)
         scopeBindingMap (x, ni) = case typeOf ni of
           Prim pt -> Just (x, PrimBinding Nothing (Just pt) FromFParam)
           _ -> Just (x, PrimBinding Nothing Nothing FromFParam)
-
-type HoistAllocsM = State VNameSource
-
-hoistAllocsBody :: Scope ExpMem.ExplicitMemory
-                -> BindingMap
-                -> Body ExpMem.ExplicitMemory
-                -> HoistAllocsM (Body ExpMem.ExplicitMemory)
-hoistAllocsBody scope_cur bindingmap_cur body =
-  let allocs = findAllocations body
-      allocs' = filter (isSimpleMemUse body) allocs
-  in foldM (hoistAlloc scope_cur bindingmap_cur) body allocs'
 
 findAllocations :: Body ExpMem.ExplicitMemory
                 -> [Allocation]
@@ -116,7 +139,7 @@ hoistAlloc scope_cur bindingmap_cur body alloc = do
   let scope_new = scopeOf $ bodyStms body
       scope = M.union scope_cur scope_new
 
-      bindingmap_new = bodyBindingMap body
+      bindingmap_new = bodyBindingMap $ bodyStms body
       bindingmap = M.union bindingmap_cur bindingmap_new
 
       size = runReader (sizePrimExpFromAlloc alloc) bindingmap
@@ -133,6 +156,16 @@ hoistAlloc scope_cur bindingmap_cur body alloc = do
 
   debug `seq` return body2
 
+hoistRecursivelyStm :: Scope ExpMem.ExplicitMemory
+                    -> BindingMap
+                    -> Stm ExpMem.ExplicitMemory
+                    -> HoistAllocsM (Stm ExpMem.ExplicitMemory)
+hoistRecursivelyStm scope bindingmap (Let pat () e) =
+  Let pat () <$> mapExpM transform e
+
+  where transform = identityMapper { mapOnBody = mapper }
+        mapper scope_new = hoistAllocsBody scope_new scope bindingmap
+
 lookupPrimBinding :: VName
                    -> Reader BindingMap PrimBinding
 lookupPrimBinding vname = do
@@ -141,9 +174,9 @@ lookupPrimBinding vname = do
     Just b -> return b
     Nothing -> error (pretty vname ++ " was not found in BindingMap.  This should not happen! No non-PrimType should ever be in this use.")
 
-bodyBindingMap :: Body ExpMem.ExplicitMemory -> BindingMap
-bodyBindingMap body =
-  M.fromList $ concatMap createBindingStmt $ zip [0..] $ bodyStms body
+bodyBindingMap :: [Stm ExpMem.ExplicitMemory] -> BindingMap
+bodyBindingMap stms =
+  M.fromList $ concatMap createBindingStmt $ zip [0..] stms
 
   where createBindingStmt :: (Line, Stm ExpMem.ExplicitMemory)
                           -> [(VName, PrimBinding)]

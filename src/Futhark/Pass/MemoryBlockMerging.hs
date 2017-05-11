@@ -69,7 +69,7 @@ transformFunDef fundef = do
 
         -- Print coalescings.
         replicateM_ 5 $ putStrLn ""
-        putStrLn $ replicate 10 '*' ++ " Coalescings result in " ++ pretty (funDefName fundef) ++ "(" ++ show (M.size coaltab) ++ ") " ++ replicate 10 '*'
+        putStrLn $ replicate 10 '*' ++ " Coalescings result in " ++ pretty (funDefName fundef) ++ " (" ++ show (M.size coaltab) ++ ") " ++ replicate 10 '*'
         putStrLn $ replicate 70 '-'
         forM_ (M.assocs coaltab) $ \(xmem, entry) -> do
           putStrLn $ "Source memory block: " ++ pretty xmem
