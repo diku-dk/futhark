@@ -7,6 +7,7 @@ module Futhark.Test
        , valuesFromText
        , getValues
        , getValuesText
+       , getValuesBS
        , compareValues
        , Mismatch
 
@@ -26,6 +27,7 @@ module Futhark.Test
 
 import Control.Category ((>>>))
 import Control.Applicative
+import qualified Data.ByteString as BS
 import Control.Monad hiding (forM_)
 import Control.Monad.IO.Class
 import qualified Data.Map.Strict as M
@@ -36,6 +38,7 @@ import Data.List hiding (foldl')
 import Data.Foldable (foldl')
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Encoding as T
 import System.Directory.Tree (readDirectoryWith, flattenDir,
                               DirTree(File), AnchoredDirTree(..),
                               FileName)
@@ -367,4 +370,14 @@ getValuesText _ (Values vs) =
   return $ T.unlines $ map prettyText vs
 getValuesText dir (InFile file) =
   liftIO $ T.readFile file'
+  where file' = dir </> file
+
+-- | Extract a pretty representation of some 'Values'.  In the IO
+-- monad because this might involve reading from a file.  There is no
+-- guarantee that the resulting byte string yields a readable value.
+getValuesBS :: MonadIO m => FilePath -> Values -> m BS.ByteString
+getValuesBS _ (Values vs) =
+  return $ T.encodeUtf8 $ T.unlines $ map prettyText vs
+getValuesBS dir (InFile file) =
+  liftIO $ BS.readFile file'
   where file' = dir </> file
