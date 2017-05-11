@@ -8,17 +8,19 @@ module Main (main) where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except hiding (forM_)
+import qualified Data.ByteString.Char8 as BS
 import Data.Maybe
 import Data.Monoid
 import Data.List
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Encoding as T
 import System.Console.GetOpt
 import System.FilePath
 import System.Directory
 import System.IO
 import System.IO.Temp
-import System.Process.Text (readProcessWithExitCode)
+import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import qualified Text.JSON as JSON
 import Text.Printf
@@ -104,7 +106,8 @@ compileBenchmark opts (program, spec) =
         ExitSuccess     -> return $ Just (program, cases)
         ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
                               return Nothing
-        ExitFailure _   -> do putStrLn $ "Failed:\n" ++ T.unpack futerr
+        ExitFailure _   -> do putStrLn "Failed:\n"
+                              BS.putStrLn futerr
                               return Nothing
     _ ->
       return Nothing
@@ -151,7 +154,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
-  input <- getValuesText dir input_spec
+  input <- getValuesBS dir input_spec
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
   let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
 
@@ -164,9 +167,10 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   fmap (Just .  DataResult dataset_desc) $ runBenchM $ do
     case maybe_expected of
       Nothing ->
-        didNotFail program progCode progerr
+        didNotFail program progCode $ T.decodeUtf8 progerr
       Just expected ->
-        compareResult program expected =<< runResult program progCode output progerr
+        compareResult program expected =<<
+        runResult program progCode (T.decodeUtf8 output) (T.decodeUtf8 progerr)
     runtime_result <- io $ T.readFile tmpfile
     runtimes <- case mapM readRuntime $ T.lines runtime_result of
       Just runtimes -> return $ map RunResult runtimes
