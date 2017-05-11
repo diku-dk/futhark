@@ -158,6 +158,11 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
   let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
 
+  -- Report the dataset name before running the program, so that if an
+  -- error occurs it's easier to see where.
+  putStr $ "dataset " ++ dataset_desc ++ ": "
+  hFlush stdout
+
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no program component.
@@ -176,7 +181,6 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
       Just runtimes -> return $ map RunResult runtimes
       Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
 
-    io $ putStr $ "dataset " ++ dataset_desc ++ ": "
     io $ reportResult runtimes
     return runtimes
 
