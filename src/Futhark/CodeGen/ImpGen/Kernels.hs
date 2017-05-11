@@ -697,12 +697,11 @@ compileKernelExp _ dest (SplitSpace o w i elems_per_thread)
       elems_per_thread' <- Imp.elements <$> ImpGen.compileSubExp elems_per_thread
       computeThreadChunkSize o i' elems_per_thread' num_elements size
 
-compileKernelExp constants dest (Combine cspace ts active body)
+compileKernelExp constants dest (Combine cspace ts aspace body)
   | Just dest' <- ImpGen.Destination <$> zipWithM index ts (ImpGen.valueDestinations dest) = do
       copy <- allThreads constants $ ImpGen.compileBody dest' body
       ImpGen.emit $ Imp.Op Imp.Barrier
-      ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd (isActive cspace) $
-                            ImpGen.compileSubExpOfType Bool active) copy mempty
+      ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) copy mempty
       ImpGen.emit $ Imp.Op Imp.Barrier
         where index t (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
                 let space_dims = map (ImpGen.varIndex . fst) cspace

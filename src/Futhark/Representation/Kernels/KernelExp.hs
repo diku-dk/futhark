@@ -63,13 +63,13 @@ data KernelExp lore = SplitSpace SplitOrdering SubExp SubExp SubExp
                       -- the thread will receive elements @i,
                       -- i+stride, i+2*stride, ...,
                       -- i+(elems_per_thread-1)*stride@.
-                    | Combine [(VName,SubExp)] [Type] SubExp (Body lore)
-                      -- ^ @Combine cspace ts active body@ will combine values
+                    | Combine [(VName,SubExp)] [Type] [(VName,SubExp)] (Body lore)
+                      -- ^ @Combine cspace ts aspace body@ will combine values
                       -- from threads to a single (multidimensional) array.
                       -- If we define @(is, ws) = unzip cspace@, then @ws@
                       -- is defined the same accross all threads.
                       -- Only threads for which
-                      -- @active && all (\(i,w) -> i < w) cspace@ is true will
+                      -- @all (\(i,w) -> i < w) aspace && all (\(i,w) -> i < w) cspace@ is true will
                       -- provide a value (of type @ts@), which is generated
                       -- by @body@.
                       --
@@ -376,13 +376,15 @@ typeCheckKernelExp (SplitSpace o w i elems_per_thread) = do
     SplitStrided stride -> TC.require [Prim int32] stride
   mapM_ (TC.require [Prim int32]) [w, i, elems_per_thread]
 
-typeCheckKernelExp (Combine cspace ts active body) = do
+typeCheckKernelExp (Combine cspace ts aspace body) = do
   mapM_ (TC.requireI [Prim int32]) is
-  mapM_ TC.checkType ts
   mapM_ (TC.require [Prim int32]) ws
-  TC.require [Prim Bool] active
+  mapM_ TC.checkType ts
+  mapM_ (TC.requireI [Prim int32]) a_is
+  mapM_ (TC.require [Prim int32]) a_ws
   TC.checkLambdaBody ts body
   where (is, ws) = unzip cspace
+        (a_is, a_ws) = unzip aspace
 
 typeCheckKernelExp (GroupReduce w lam input) =
   checkScanOrReduce w lam input

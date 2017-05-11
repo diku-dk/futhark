@@ -140,7 +140,7 @@ simplifyKernelExp (Combine cspace ts active body) = do
   Combine
     <$> mapM Engine.simplify cspace
     <*> mapM Engine.simplify ts
-    <*> Engine.simplify active
+    <*> mapM Engine.simplify active
     <*> pure body'
 
 simplifyKernelExp (GroupReduce w lam input) = do
