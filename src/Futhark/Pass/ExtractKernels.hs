@@ -785,11 +785,15 @@ maybeDistributeStm (Let pat _ (Op (Reduce cs w comm lam input))) acc
 maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just perm <- map Var (patternNames pat) `isPermutationOf` res -> do
+      | Just (perm, pat_unused) <- permutationAndMissing pat res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
+          localScope (typeEnvFromKernelAcc acc') $ do
+          nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
           fold_lam' <- Kernelise.transformLambda fold_lam
           localScope (typeEnvFromKernelAcc acc') $
-            segmentedScanomapKernel nest perm cs w lam' fold_lam' nes arrs >>=
+            segmentedScanomapKernel nest' perm cs w lam' fold_lam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
