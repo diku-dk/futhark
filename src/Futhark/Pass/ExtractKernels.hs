@@ -836,7 +836,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
     where comm' | commutativeLambda lam = Commutative
                 | otherwise             = comm
 
-maybeDistributeStm (Let pat attr (Op (Scan cs w lam input))) acc | versionedCode = do
+maybeDistributeStm (Let pat attr (Op (Scan cs w lam input))) acc = do
   let (nes, arrs) = unzip input
   lam_renamed <- renameLambda lam
   let bnd = Let pat attr $ Op $ Scanomap cs w lam lam_renamed nes arrs
