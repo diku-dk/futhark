@@ -10,7 +10,6 @@ module Futhark.Passes
 where
 
 import Control.Category ((>>>))
-import Data.Maybe
 
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
