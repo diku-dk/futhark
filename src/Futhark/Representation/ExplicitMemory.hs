@@ -585,8 +585,8 @@ matchFunctionReturnType fname rettype result = do
               | otherwise ->
                   TypeCheck.bad $ TypeCheck.TypeError $
                   "Array " ++ pretty v ++
-                  " returned by function, but has nontrivial index function" ++
-                  pretty ixfun
+                  " returned by function, but has nontrivial index function " ++
+                  pretty ixfun ++ " " ++ show ixfun
 
 matchPatternToExp :: (ExplicitMemorish lore) =>
                      Pattern (Aliases lore)
