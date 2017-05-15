@@ -1,8 +1,11 @@
--- | Move certain allocations up in the program to enable more array
--- coalescings.
+-- | Move allocation statements upwards in the bodies of a program to enable
+-- more array coalescings.
 --
--- This should be run *before* memory block merging.  Otherwise it might get
--- confused?
+-- This should be run *before* the actual memory block merging, as it enables
+-- more optimisations.
+--
+-- It hoists only allocations used by Copy or Concat, as those are the only ones
+-- considered for merging in the remaining parts of the optimisation.
 module Futhark.Pass.MemoryBlockMerging.AllocHoisting
   ( hoistAllocsFunDef
   ) where
@@ -53,13 +56,17 @@ hoistAllocsBody :: Scope ExpMem.ExplicitMemory
 hoistAllocsBody scope_new bindingmap_old body =
   let allocs = findAllocations body
 
+      -- We use the possibly non-empty scope to extend our BindingMap.
       bindingmap_fromscope = M.fromList $ map scopeBindingMap $ M.toList scope_new
       bindingmap = bindingmap_old <> bindingmap_fromscope <> bodyBindingMap (bodyStms body)
 
+      -- Create a new body where all allocations have been moved as much upwards
+      -- in the statement list as possible.
       (Body () bnds res, bindingmap') =
         foldl (\(body0, bindingmap0) -> hoistAlloc bindingmap0 body0)
         (body, bindingmap) allocs
 
+      -- Touch upon any subbodies.
       bnds' = map (hoistRecursivelyStm bindingmap') bnds
       body' = Body () bnds' res
 
@@ -80,8 +87,7 @@ bodyBindingMap stms =
 
   where createBindingStmt :: (Line, Stm ExpMem.ExplicitMemory)
                           -> [(VName, PrimBinding)]
-        createBindingStmt (line,
-                           stmt@(Let (Pattern _ patelems) () _)) =
+        createBindingStmt (line, stmt@(Let (Pattern _ patelems) () _)) =
           let frees = S.toList $ freeInStm stmt
           in map (\(PatElem x _ _) ->
                      (x, PrimBinding frees (FromLine line))) patelems
@@ -94,6 +100,8 @@ hoistRecursivelyStm bindingmap (Let pat () e) =
 
   where transform = identityMapper { mapOnBody = mapper }
         mapper scope_new = return . hoistAllocsBody scope_new bindingmap'
+        -- The nested body cannot move to any of its locations of its parent's
+        -- body, so we say that all its parent's bindings are parameters.
         bindingmap' = M.map (\(PrimBinding vs _) -> PrimBinding vs FromFParam) bindingmap
 
 findAllocations :: Body ExpMem.ExplicitMemory
@@ -165,6 +173,9 @@ moveLetUpwards letname body = do
   case letorig of
     FromFParam -> return body
     FromLine line_cur -> do
+      -- Sort by how close they are to the beginning of the body.  The closest
+      -- one should be the first one to hoist, so that the other ones can maybe
+      -- exploit it.
       deps' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t) deps
       body' <- foldM (flip moveLetUpwards) body deps'
       origins <- mapM (\t -> pbOrigin <$> lookupPrimBinding t) deps'
@@ -182,6 +193,7 @@ moveLetUpwards letname body = do
 
       debug `seq` return body' { bodyStms = stms' }
 
+-- Both move the statement to the new line, and update the BindingMap.
 moveLetToLine :: VName -> Line -> Line -> [Stm ExpMem.ExplicitMemory]
               -> State BindingMap [Stm ExpMem.ExplicitMemory]
 moveLetToLine stm_cur_name line_cur line_dest stms
@@ -199,9 +211,8 @@ moveLetToLine stm_cur_name line_cur line_dest stms
                                     then PrimBinding vars (FromLine (l + 1))
                                     else pb)
 
-  do
-    PrimBinding vars _ <- lookupPrimBinding stm_cur_name
-    modify $ M.delete stm_cur_name
-    modify $ M.insert stm_cur_name (PrimBinding vars (FromLine line_dest))
+  PrimBinding vars _ <- lookupPrimBinding stm_cur_name
+  modify $ M.delete stm_cur_name
+  modify $ M.insert stm_cur_name (PrimBinding vars (FromLine line_dest))
 
   return stms2
