@@ -17,7 +17,7 @@ import Control.Monad.Identity
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (sortBy)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust)
 import Data.Function (on)
 
 import Futhark.MonadFreshNames
@@ -26,6 +26,10 @@ import Data.Monoid
 import Futhark.Representation.AST
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Pass.ExplicitAllocations()
+
+import Futhark.Util (unixEnvironment)
+usesDebugging :: Bool
+usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
 
 type Line = Int
 data Origin = FromFParam
@@ -70,7 +74,7 @@ hoistAllocsBody scope_new bindingmap_old body =
       bnds' = map (hoistRecursivelyStm bindingmap') bnds
       body' = Body () bnds' res
 
-      debug = unsafePerformIO $ do
+      debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 10 '*' ++ " Allocations found in body "  ++ replicate 10 '*'
         forM_ hoistees print
         putStrLn $ replicate 70 '-'
@@ -154,7 +158,7 @@ hoist bindingmap_cur body hoistee =
 
       body' = runState (moveLetUpwards hoistee body) bindingmap
 
-      debug = unsafePerformIO $ do
+      debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 10 '*' ++ " Hoisting "  ++ replicate 10 '*'
         putStrLn $ "Name: " ++ show hoistee
         putStrLn $ replicate 70 '-'
@@ -192,7 +196,7 @@ moveLetUpwards letname body = do
             FromLine n -> n + 1
       stms' <- moveLetToLine letname line_cur line_dest $ bodyStms body'
 
-      let debug = line_dest `seq` unsafePerformIO $ do
+      let debug = line_dest `seq` unsafePerformIO $ when usesDebugging $ do
             print letname
             print deps'
             print line_cur

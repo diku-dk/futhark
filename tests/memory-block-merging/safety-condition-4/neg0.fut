@@ -11,6 +11,7 @@
 -- output { [[9, 12],
 --           [2, 2]]
 --        }
+-- structure cpu { Alloc 1 }
 
 let main (xs: *[#n][#n]i32, zs0: [#n][#n]i32, i: i32, j: i32): [n][n]i32 =
   let zs = map (\z -> map (* 3) z) zs0

@@ -10,6 +10,7 @@
 --          , [ [0i32, 0i32], [2i32, 4i32] ]
 --          ]
 --        }
+-- structure cpu { Alloc 1 }
 
 -- Number of coalescing is 1, but corresponds to 4 coalescing
 -- operations on the same memory block, i.e.,
@@ -20,11 +21,13 @@
 --       added by `z2` and `z1`).
 -- Basically, since the memory block of the if-result is not
 -- existensial then we can track the creation of `z` outside
--- the branches. Note that `z[0] = x2` and `z[1] = x1` are not
+-- the branches. Note that `z[0] = x2` and `z[1] = x2` are not
 -- coalesced.
 let main(y: *[#n][#n][#n]i32, a : [#n]i32): *[n][n][n]i32 =
   let z  = replicate n (replicate n 0)
-  let x2 = map (*2) a
+  let x2 = map (*2) a -- The sole allocation.  This could be stored in either
+                      -- z[0] or z[1], but both might need it, so we do not
+                      -- merge memory.
   let z2 = if (n > 3)
            then let z[0] = x2
                 in  z

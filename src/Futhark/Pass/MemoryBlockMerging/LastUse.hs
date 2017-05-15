@@ -9,8 +9,6 @@ import Prelude
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
---import Debug.Trace
-
 --import Futhark.Representation.AST.Syntax
 
 import Futhark.Representation.Aliases

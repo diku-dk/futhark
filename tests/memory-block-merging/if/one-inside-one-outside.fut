@@ -9,6 +9,10 @@
 --       }
 -- output { [[1, 4], [1, 2]]
 --        }
+-- structure cpu { Alloc 2 }
+
+-- This should hopefully end up as 'structure cpu { Alloc 0 }' when we extend
+-- the optimisation.
 
 let main (xs: *[#n][#n]i32, cond: bool, i: i32): [n][n]i32 =
   let ys0 = iota n
