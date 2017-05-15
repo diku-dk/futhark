@@ -4,6 +4,8 @@
 module Futhark.Passes
   ( standardPipeline
   , sequentialPipeline
+  , kernelsPipeline
+  , sequentialCpuPipeline
   , gpuPipeline
   , CompilationMode (..)
   )
@@ -27,6 +29,7 @@ import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.Kernels (Kernels)
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Util
 
@@ -76,25 +79,8 @@ withExperimentalPasses pipeline =
   then withExperimentalMemoryBlockMerging pipeline
   else pipeline
 
-sequentialPipeline :: Pipeline SOACS ExplicitMemory
-sequentialPipeline =
-  withExperimentalPasses $
-  standardPipeline >>>
-  onePass firstOrderTransform >>>
-  passes [ simplifyKernels
-         , inPlaceLowering
-         ] >>>
-  onePass explicitAllocations >>>
-  passes [ simplifyExplicitMemory
-         , performCSE False
-         , simplifyExplicitMemory
-         , doubleBuffer
-         , simplifyExplicitMemory
-         ]
-
-gpuPipeline :: Pipeline SOACS ExplicitMemory
-gpuPipeline =
-  withExperimentalPasses $
+kernelsPipeline :: Pipeline SOACS Kernels
+kernelsPipeline =
   standardPipeline >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
@@ -106,7 +92,32 @@ gpuPipeline =
          , performCSE True
          , simplifyKernels
          , inPlaceLowering
-         ] >>>
+         ]
+
+sequentialPipeline :: Pipeline SOACS Kernels
+sequentialPipeline =
+  standardPipeline >>>
+  onePass firstOrderTransform >>>
+  passes [ simplifyKernels
+         , inPlaceLowering
+         ]
+
+sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
+sequentialCpuPipeline =
+  withExperimentalPasses $
+  sequentialPipeline >>>
+  onePass explicitAllocations >>>
+  passes [ simplifyExplicitMemory
+         , performCSE False
+         , simplifyExplicitMemory
+         , doubleBuffer
+         , simplifyExplicitMemory
+         ]
+
+gpuPipeline :: Pipeline SOACS ExplicitMemory
+gpuPipeline =
+  withExperimentalPasses $
+  kernelsPipeline >>>
   onePass explicitAllocations >>>
   passes [ simplifyExplicitMemory
          , performCSE False

@@ -289,7 +289,7 @@ commandLineOptions =
   , explicitMemoryPipelineOption "Run the full GPU compilation pipeline"
     gpuPipeline [] ["gpu"]
   , explicitMemoryPipelineOption "Run the sequential CPU compilation pipeline"
-    sequentialPipeline [] ["cpu"]
+    sequentialCpuPipeline [] ["cpu"]
   ]
 
 -- | Entry point.  Non-interactive, except when reading interpreter
