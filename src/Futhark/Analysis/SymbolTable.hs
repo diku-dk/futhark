@@ -21,6 +21,7 @@ module Futhark.Analysis.SymbolTable
     -- * Lookup
   , elem
   , lookup
+  , lookupStm
   , lookupExp
   , lookupType
   , lookupSubExp
@@ -232,8 +233,8 @@ loopVariable :: Entry lore -> Bool
 loopVariable (LoopVar _) = True
 loopVariable _           = False
 
-asExp :: Entry lore -> Maybe (Exp lore)
-asExp = fmap (bindingExp . letBoundStm) . isVarBound
+asStm :: Entry lore -> Maybe (Stm lore)
+asStm = fmap letBoundStm . isVarBound
 
 entryType :: Annotations lore => Entry lore -> Type
 entryType (LetBound entry) = typeOf $ letBoundAttr entry
@@ -304,8 +305,11 @@ elem name = isJust . lookup name
 lookup :: VName -> SymbolTable lore -> Maybe (Entry lore)
 lookup name = M.lookup name . bindings
 
+lookupStm :: VName -> SymbolTable lore -> Maybe (Stm lore)
+lookupStm name vtable = asStm =<< lookup name vtable
+
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
-lookupExp name vtable = asExp =<< lookup name vtable
+lookupExp name vtable = bindingExp <$> lookupStm name vtable
 
 lookupType :: Annotations lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
