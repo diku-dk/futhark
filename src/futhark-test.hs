@@ -84,6 +84,10 @@ optimisedProgramMetrics pipeline program =
                      check standardPipeline
                    KernelsPipeline ->
                      check kernelsPipeline
+                   SequentialCpuPipeline ->
+                     check sequentialCpuPipeline
+                   GpuPipeline ->
+                     check gpuPipeline
   where check pipeline' = do
           res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline' program) False
           case res of

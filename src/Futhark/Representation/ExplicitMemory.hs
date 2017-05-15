@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -98,10 +99,10 @@ import Data.List
 import Data.Monoid
 import Prelude
 
+import Futhark.Analysis.Metrics
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
-
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -192,6 +193,10 @@ instance PP.Pretty inner => PP.Pretty (MemOp inner) where
   ppr (Alloc e DefaultSpace) = PP.text "alloc" <> PP.apply [PP.ppr e]
   ppr (Alloc e (Space sp)) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.text sp]
   ppr (Inner k) = PP.ppr k
+
+instance OpMetrics inner => OpMetrics (MemOp inner) where
+  opMetrics Alloc{} = seen "Alloc"
+  opMetrics (Inner k) = opMetrics k
 
 instance IsOp inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True

@@ -91,6 +91,8 @@ instance Show ExpectedError where
 -- | How a program can be transformed.
 data StructurePipeline = KernelsPipeline
                        | SOACSPipeline
+                       | SequentialCpuPipeline
+                       | GpuPipeline
 
 -- | A structure test specifies a compilation pipeline, as well as
 -- metrics for the program coming out the other end.
@@ -237,12 +239,10 @@ parseExpectedStructure =
   (StructureTest <$> optimisePipeline <*> parseMetrics)
 
 optimisePipeline :: Parser StructurePipeline
-optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
-                   pure defaultPipelineConfig
-  where defaultPipelineConfig =
-          SOACSPipeline
-        distributePipelineConfig =
-          KernelsPipeline
+optimisePipeline = lexstr "distributed" *> pure KernelsPipeline <|>
+                   lexstr "gpu" *> pure GpuPipeline <|>
+                   lexstr "cpu" *> pure SequentialCpuPipeline <|>
+                   pure SOACSPipeline
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ fmap M.fromList $ many $
