@@ -12,7 +12,7 @@ import Control.Monad.Reader
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -26,6 +26,9 @@ import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.ArrayCoalescing as ArrayCoalescing
 
+import Futhark.Util (unixEnvironment)
+usesDebugging :: Bool
+usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
 
 mergeMemoryBlocks :: Pass ExpMem.ExplicitMemory ExpMem.ExplicitMemory
 mergeMemoryBlocks = simplePass
@@ -42,7 +45,7 @@ transformProg prog = do
   prog2 <- intraproceduralTransformation transformFunDef prog1
   prog3 <- intraproceduralTransformation cleanUpContextFunDef prog2
 
-  let debug = unsafePerformIO $ putStrLn $ pretty prog3
+  let debug = unsafePerformIO $ when usesDebugging $ putStrLn $ pretty prog3
 
   debug `seq` return prog3
 
@@ -55,7 +58,7 @@ transformFunDef :: MonadFreshNames m
 transformFunDef fundef = do
   let coaltab = ArrayCoalescing.mkCoalsTabFun $ analyseFun fundef
 
-  let debug = unsafePerformIO $ do
+  let debug = unsafePerformIO $ when usesDebugging $ do
         -- Print last uses.
         let lutab_prg = M.fromList [LastUse.lastUseFun $ analyseFun fundef]
         replicateM_ 5 $ putStrLn ""

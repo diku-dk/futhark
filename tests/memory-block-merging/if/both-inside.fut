@@ -8,12 +8,17 @@
 --       }
 -- output { [[1, 4], [1, 2]]
 --        }
+-- structure cpu { Alloc 0 }
 
 let main (xs: *[#n][#n]i32, cond: bool, i: i32): [n][n]i32 =
+  -- Both branches will use the memory of ys, which will use the memory of
+  -- xs[i].
   let ys = if cond
            then let ys0 = iota n
                 in ys0
            else let ys1 = map (+ 1) (iota n)
                 in ys1
+
+  -- xs is not allocated in this body, so we end up with zero allocations.
   let xs[i] = ys
   in xs

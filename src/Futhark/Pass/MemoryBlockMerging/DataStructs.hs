@@ -14,8 +14,6 @@ import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Debug.Trace
-
 import Futhark.Representation.Aliases
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 

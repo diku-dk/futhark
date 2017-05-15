@@ -13,10 +13,11 @@
 --          ,  [ [6,6,6], [10,10,10], [14,14,14] ]
 --          ]
 --        }
+-- structure cpu { Alloc 2 }
 
 -- Should result in 3 successful coalescing operations (all).
 let main(a: [#n]i32, y: *[#n][#n][#n]i32): [n][n][n]i32 =
-  let x = map (\i -> replicate n i) a
+  let x = map (\i -> replicate n i) a -- This is two allocations.
   let b = map (+1) a
   let x[n-3] = b
   let y[n-2] = x
