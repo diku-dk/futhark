@@ -50,7 +50,6 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyIndexIntoReshape
                , removeEmptySplits
                , removeSingletonSplits
-               , simplifyConcat
                , evaluateBranch
                , simplifyBoolBranch
                , hoistBranchInvariant
@@ -72,6 +71,7 @@ bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , simplifyIndex
+                , simplifyConcat
                 ]
 
 -- | A set of standard simplification rules.  These assume pure
@@ -755,10 +755,10 @@ removeSingletonSplits _ (Let pat _ (BasicOp (Split _ i [n] arr))) = do
 removeSingletonSplits _ _ =
   cannotSimplify
 
-simplifyConcat :: MonadBinder m => TopDownRule m
+simplifyConcat :: MonadBinder m => BottomUpRule m
 
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
-simplifyConcat vtable (Let pat _ (BasicOp (Concat cs i x xs new_d)))
+simplifyConcat (vtable, _) (Let pat _ (BasicOp (Concat cs i x xs new_d)))
   | Just r <- arrayRank <$> ST.lookupType x vtable,
     let perm = [i] ++ [0..i-1] ++ [i+1..r-1],
     Just (x',x_cs) <- transposedBy perm x,
@@ -772,6 +772,20 @@ simplifyConcat vtable (Let pat _ (BasicOp (Concat cs i x xs new_d)))
             Just (BasicOp (Rearrange vcs perm2 v'))
               | perm1 == perm2 -> Just (v', vcs)
             _ -> Nothing
+
+-- concat of a split array is identity.
+simplifyConcat (vtable, used) (Let pat _ (BasicOp (Concat cs i x xs new_d)))
+  | Just (Let split_pat _ (BasicOp (Split split_cs split_i _ split_arr))) <-
+      ST.lookupStm x vtable,
+    i == split_i,
+    x:xs == patternNames split_pat = do
+      split_arr_t <- lookupType split_arr
+      let reshape = map DimCoercion $ arrayDims $ setDimSize i split_arr_t new_d
+      split_arr' <- letExp "concat_reshape" $ BasicOp $ Reshape (cs<>split_cs) reshape split_arr
+      if any (`UT.isConsumed` used) $ patternNames pat
+        then letBind_ pat $ BasicOp $ Copy split_arr'
+        else letBind_ pat $ BasicOp $ SubExp $ Var split_arr'
+
 simplifyConcat _ _ =
   cannotSimplify
 
