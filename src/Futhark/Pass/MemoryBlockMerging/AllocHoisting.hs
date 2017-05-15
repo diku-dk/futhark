@@ -54,17 +54,17 @@ hoistAllocsBody :: Scope ExpMem.ExplicitMemory
                 -> Body ExpMem.ExplicitMemory
                 -> Body ExpMem.ExplicitMemory
 hoistAllocsBody scope_new bindingmap_old body =
-  let allocs = findAllocations body
+  let hoistees = findHoistees body
 
       -- We use the possibly non-empty scope to extend our BindingMap.
       bindingmap_fromscope = M.fromList $ map scopeBindingMap $ M.toList scope_new
       bindingmap = bindingmap_old <> bindingmap_fromscope <> bodyBindingMap (bodyStms body)
 
-      -- Create a new body where all allocations have been moved as much upwards
-      -- in the statement list as possible.
+      -- Create a new body where all hoistees have been moved as much upwards in
+      -- the statement list as possible.
       (Body () bnds res, bindingmap') =
-        foldl (\(body0, bindingmap0) -> hoistAlloc bindingmap0 body0)
-        (body, bindingmap) allocs
+        foldl (\(body0, bindingmap0) -> hoist bindingmap0 body0)
+        (body, bindingmap) hoistees
 
       -- Touch upon any subbodies.
       bnds' = map (hoistRecursivelyStm bindingmap') bnds
@@ -72,7 +72,7 @@ hoistAllocsBody scope_new bindingmap_old body =
 
       debug = unsafePerformIO $ do
         putStrLn $ replicate 10 '*' ++ " Allocations found in body "  ++ replicate 10 '*'
-        forM_ allocs print
+        forM_ hoistees print
         putStrLn $ replicate 70 '-'
 
   in debug `seq` body'
@@ -104,51 +104,59 @@ hoistRecursivelyStm bindingmap (Let pat () e) =
         -- body, so we say that all its parent's bindings are parameters.
         bindingmap' = M.map (\(PrimBinding vs _) -> PrimBinding vs FromFParam) bindingmap
 
-findAllocations :: Body ExpMem.ExplicitMemory
-                -> [VName]
-findAllocations body = mapMaybe findAllocation stms
+findHoistees :: Body ExpMem.ExplicitMemory
+             -> [VName]
+findHoistees body = concatMap findThem stms
 
   where stms :: [Stm ExpMem.ExplicitMemory]
         stms = bodyStms body
 
-        findAllocation :: Stm ExpMem.ExplicitMemory -> Maybe VName
-        findAllocation (Let (Pattern _ [PatElem xmem _ _])
-                        () (Op (ExpMem.Alloc _ _)))
-          | isUsedByCopyOrConcat xmem = Just xmem
-        findAllocation _ = Nothing
+        findThem :: Stm ExpMem.ExplicitMemory -> [VName]
+        findThem (Let (Pattern _ [PatElem xmem _ _])
+                  () (Op (ExpMem.Alloc _ _))) = usedByCopyOrConcat xmem
+        findThem _ = []
 
-        -- Is the allocated memory used by either Copy or Concat in the function body?
-        -- Those are the only kinds of memory we care about, since those are the cases
-        -- handled in ArrayCoalescing.
-        isUsedByCopyOrConcat :: VName -> Bool
-        isUsedByCopyOrConcat xmem_alloc = any checkStm stms
+        -- Is the allocated memory used by either Copy or Concat in the function
+        -- body?  Those are the only kinds of memory we care about, since those
+        -- are the cases handled in ArrayCoalescing.  Also find the names used
+        -- by inplace updates, since those also need to be hoisted (as an
+        -- example of this, consider the 'copy/pos1.fut' test where the
+        -- replicate expression needs to be hoisted as well as its memory
+        -- allocation).
+        usedByCopyOrConcat :: VName -> [VName]
+        usedByCopyOrConcat xmem_alloc =
+          let vs = mapMaybe checkStm stms
+          in if null vs then [] else xmem_alloc : concat vs
 
-          where checkStm :: Stm ExpMem.ExplicitMemory -> Bool
+          where checkStm :: Stm ExpMem.ExplicitMemory -> Maybe [VName]
                 checkStm (Let
                           (Pattern _
-                           [PatElem _ _
+                           [PatElem _ bindage
                             (ExpMem.ArrayMem _ _ _ xmem_pat _)])
                            ()
                            (BasicOp bop))
                   | xmem_pat == xmem_alloc =
-                      case bop of
-                        Copy{} -> True
-                        Concat{} -> True
-                        _ -> False
-                checkStm _ = False
+                      let vs = Just $ case bindage of
+                            BindVar -> []
+                            BindInPlace _ v _ -> [v]
+                      in case bop of
+                        Copy{} -> vs
+                        Concat{} -> vs
+                        _ -> Nothing
+                checkStm _ = Nothing
 
-hoistAlloc :: BindingMap
-           -> Body ExpMem.ExplicitMemory
-           -> VName
-           -> (Body ExpMem.ExplicitMemory, BindingMap)
-hoistAlloc bindingmap_cur body xmem =
+hoist :: BindingMap
+      -> Body ExpMem.ExplicitMemory
+      -> VName
+      -> (Body ExpMem.ExplicitMemory, BindingMap)
+hoist bindingmap_cur body hoistee =
   let bindingmap = bindingmap_cur <> bodyBindingMap (bodyStms body)
 
-      body' = runState (moveLetUpwards xmem body) bindingmap
+      body' = runState (moveLetUpwards hoistee body) bindingmap
 
       debug = unsafePerformIO $ do
-        putStrLn $ replicate 10 '*' ++ " Allocation hoisting "  ++ replicate 10 '*'
-        putStrLn $ "Allocation: " ++ show xmem
+        putStrLn $ replicate 10 '*' ++ " Hoisting "  ++ replicate 10 '*'
+        putStrLn $ "Name: " ++ show hoistee
         putStrLn $ replicate 70 '-'
 
   in debug `seq` body'
@@ -158,7 +166,7 @@ lookupPrimBinding vname = do
   m <- M.lookup vname <$> get
   case m of
     Just b -> return b
-    Nothing -> error (pretty vname ++ " was not found in BindingMap.  This should not happen!  No non-PrimType should ever be in this use.")
+    Nothing -> error (pretty vname ++ " was not found in BindingMap.  This should not happen!")
 
 sortByKeyM :: (Ord t, Monad m) => (a -> m t) -> [a] -> m [a]
 sortByKeyM f xs = do
