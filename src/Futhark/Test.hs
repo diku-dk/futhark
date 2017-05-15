@@ -25,7 +25,6 @@ module Futhark.Test
        )
        where
 
-import Control.Category ((>>>))
 import Control.Applicative
 import qualified Data.ByteString as BS
 import Control.Monad hiding (forM_)
@@ -52,13 +51,8 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Representation.SOACS (SOACS)
-import Futhark.Representation.Kernels (Kernels)
+
 import Futhark.Analysis.Metrics
-import Futhark.Pipeline
-import Futhark.Pass.Simplify
-import Futhark.Pass.ExtractKernels
-import Futhark.Passes
 import Futhark.Util.Pretty (pretty, prettyText)
 import Futhark.Test.Values
 
@@ -95,8 +89,8 @@ instance Show ExpectedError where
   show (ThisError r _) = "ThisError " ++ show r
 
 -- | How a program can be transformed.
-data StructurePipeline = KernelsPipeline (Pipeline SOACS Kernels)
-                       | SOACSPipeline (Pipeline SOACS SOACS)
+data StructurePipeline = KernelsPipeline
+                       | SOACSPipeline
 
 -- | A structure test specifies a compilation pipeline, as well as
 -- metrics for the program coming out the other end.
@@ -246,12 +240,9 @@ optimisePipeline :: Parser StructurePipeline
 optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
                    pure defaultPipelineConfig
   where defaultPipelineConfig =
-          SOACSPipeline standardPipeline
+          SOACSPipeline
         distributePipelineConfig =
-          KernelsPipeline $
-          standardPipeline >>>
-          onePass extractKernels >>>
-          onePass simplifyKernels
+          KernelsPipeline
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ fmap M.fromList $ many $
