@@ -29,8 +29,9 @@ let flatten [n] [m] 't (xs: [n][m]t): []t =
   reshape (n*m) xs
 
 let intersperse [n] 't (x: t) (xs: [n]t): []t =
+  unsafe
   map (\i -> if i % 2 == 1 && i != 2*n then x
-             else unsafe xs[i/2])
+             else xs[i/2])
       (iota (i32.max (2*n-1) 0))
 
 let intercalate [n] [m] 't (x: [m]t) (xs: [n][m]t): []t =
