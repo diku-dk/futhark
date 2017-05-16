@@ -215,6 +215,28 @@ static int read_str_array(int64_t elem_size, int (*elem_reader)(void*),
   return ret;
 }
 
+/* Makes a copy of numeric literal removing any underscores, and
+   length of the literal. */
+static int remove_underscores(char* buf) {
+  int buf_index = 0;
+  char c = getchar();
+  while (isxdigit(c) || c == '.' || c == '+' || c == '-' ||
+         c == 'x' || c == 'X' ||
+         c == 'e' || c == 'E' || c == '_') {
+    if (c == '_') {
+      c = getchar();
+      continue;
+    }
+    else {
+      buf[buf_index++] = c;
+      c = getchar();
+    }
+  }
+  buf[buf_index] = 0;
+  ungetc(c, stdin);             /* unget 'i' */
+  return buf_index;
+}
+
 static int read_str_int8(void* dest) {
   skipspaces();
   /* Some platforms (WINDOWS) does not support scanf %hhd or its
@@ -223,7 +245,9 @@ static int read_str_int8(void* dest) {
 
      https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
   int x;
-  if (scanf("%i", &x) == 1) {
+  char buf[128];
+  remove_underscores(buf);
+  if (sscanf(buf, "%i", &x) == 1) {
     *(int8_t*)dest = x;
     scanf("i8");
     return next_is_not_constituent() ? 0 : 1;
@@ -234,7 +258,9 @@ static int read_str_int8(void* dest) {
 
 static int read_str_int16(void* dest) {
   skipspaces();
-  if (scanf("%"SCNi16, (int16_t*)dest) == 1) {
+  char buf[128];
+  remove_underscores(buf);
+  if (sscanf(buf, "%"SCNi16, (int16_t*)dest) == 1) {
     scanf("i16");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -244,7 +270,9 @@ static int read_str_int16(void* dest) {
 
 static int read_str_int32(void* dest) {
   skipspaces();
-  if (scanf("%"SCNi32, (int32_t*)dest) == 1) {
+  char buf[128];
+  remove_underscores(buf);
+  if (sscanf(buf, "%"SCNi32, (int32_t*)dest) == 1) {
     scanf("i32");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -254,7 +282,9 @@ static int read_str_int32(void* dest) {
 
 static int read_str_int64(void* dest) {
   skipspaces();
-  if (scanf("%"SCNi64, (int64_t*)dest) == 1) {
+  char buf[128];
+  remove_underscores(buf);
+  if (sscanf(buf, "%"SCNi64, (int64_t*)dest) == 1) {
     scanf("i64");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -264,7 +294,9 @@ static int read_str_int64(void* dest) {
 
 static int read_str_float(void* dest) {
   skipspaces();
-  if (scanf("%f", (float*)dest) == 1) {
+  char buf[128];
+  remove_underscores(buf);
+  if (sscanf(buf, "%f", (float*)dest) == 1) {
     scanf("f32");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -274,7 +306,9 @@ static int read_str_float(void* dest) {
 
 static int read_str_double(void* dest) {
   skipspaces();
-  if (scanf("%lf", (double*)dest) == 1) {
+  char buf[128];
+  remove_underscores(buf);
+  if (sscanf(buf, "%lf", (double*)dest) == 1) {
     scanf("f64");
     return next_is_not_constituent() ? 0 : 1;
   } else {
