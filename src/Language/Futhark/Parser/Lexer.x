@@ -30,12 +30,12 @@ import Language.Futhark.Syntax (BinOp(..))
 
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
 @stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+)|\n)
-@hexlit = 0[xX][0-9a-fA-F]+
-@declit = [0-9]+
-@binlit = 0[bB][01]+
-@romlit = 0[rR][IVXLCM]+
+@hexlit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*
+@declit = [0-9][0-9_]*
+@binlit = 0[bB][01][01_]*
+@romlit = 0[rR][IVXLCM][IVXLCM_]*
 @intlit = @hexlit|@binlit|@declit|@romlit
-@reallit = (([0-9]+("."[0-9]*)?))([eE][\+\-]?[0-9]+)?
+@reallit = (([0-9][0-9_]*("."[0-9]?[0-9_]*)?))([eE][\+\-]?[0-9]+)?
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
@@ -71,20 +71,20 @@ tokens :-
   "'"                      { tokenC APOSTROPHE }
   "#"                      { tokenC HASH }
 
-  @declit                  { tokenM $ return . DECLIT . readIntegral }
+  @declit                  { tokenM $ return . DECLIT . readIntegral . T.filter (/= '_') }
 
-  @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.takeWhile (/='i') }
-  @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.takeWhile (/='i') }
-  @intlit i32              { tokenM $ return . I32LIT . readIntegral . T.takeWhile (/='i') }
-  @intlit i64              { tokenM $ return . I64LIT . readIntegral . T.takeWhile (/='i') }
-  @intlit u8               { tokenM $ return . U8LIT . readIntegral . T.takeWhile (/='u') }
-  @intlit u16              { tokenM $ return . U16LIT . readIntegral . T.takeWhile (/='u') }
-  @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.takeWhile (/='u') }
-  @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.takeWhile (/='u') }
-  @intlit                  { tokenM $ return . INTLIT . readIntegral }
-  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.takeWhile (/='f') }
-  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.takeWhile (/='f') }
-  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . suffZero }
+  @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i32              { tokenM $ return . I32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i64              { tokenM $ return . I64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit u8               { tokenM $ return . U8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u16              { tokenM $ return . U16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit                  { tokenM $ return . INTLIT . readIntegral . T.filter (/= '_') }
+  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 

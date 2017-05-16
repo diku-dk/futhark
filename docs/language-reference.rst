@@ -57,16 +57,16 @@ with ``0b``.
 
 .. productionlist::
    intnumber: (`decimal` | `hexadecimal` | `binary`) [`int_type`]
-   decimal: `decdigit`+
-   hexadecimal: 0 ("x" | "X") `hexdigit`+
-   binary: 0 ("b" | "B") `bindigit`+
+   decimal: `decdigit` (`decdigit` |"_")*
+   hexadecimal: 0 ("x" | "X") `hexdigit` (`hexdigit` |"_")*
+   binary: 0 ("b" | "B") `bindigit` (`bindigit` | "_")*
 
 .. productionlist::
    floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
    pointfloat: [`intpart`] `fraction` | `intpart` "."
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
-   intpart: `decdigit`+
-   fraction: "." `decdigit`+
+   intpart: `decdigit` (`decdigit` |"_")*
+   fraction: "." `decdigit` (`decdigit` |"_")*
    exponent: ("e" | "E") ["+" | "-"] `decdigit`+
 
 .. productionlist::
