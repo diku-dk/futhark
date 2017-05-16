@@ -79,6 +79,13 @@ withExperimentalGPUPasses pipeline =
   then withExperimentalMemoryBlockMerging pipeline
   else pipeline
 
+withExperimentalCPUPasses :: Pipeline SOACS ExplicitMemory
+                       -> Pipeline SOACS ExplicitMemory
+withExperimentalCPUPasses pipeline =
+  if usesExperimentalMemoryBlockMerging
+  then withExperimentalMemoryBlockMerging pipeline
+  else pipeline
+
 kernelsPipeline :: Pipeline SOACS Kernels
 kernelsPipeline =
   standardPipeline >>>
@@ -104,14 +111,13 @@ sequentialPipeline =
 
 sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
 sequentialCpuPipeline =
+  withExperimentalCPUPasses $
   sequentialPipeline >>>
   onePass explicitAllocations >>>
   passes [ simplifyExplicitMemory
          , performCSE False
          , simplifyExplicitMemory
          , doubleBuffer
-         , simplifyExplicitMemory
-         , mergeMemoryBlocks
          , simplifyExplicitMemory
          ]
 
