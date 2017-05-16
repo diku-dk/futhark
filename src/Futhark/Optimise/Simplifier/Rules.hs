@@ -818,10 +818,13 @@ simplifyBoolBranch _
   letBind_ pat $ BasicOp $ BinOp LogOr cond se
 -- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
-  | Body _ [] [tres] <- tb,
-    Body _ [] [fres] <- fb,
+  | Body _ tstms [tres] <- tb,
+    Body _ fstms [fres] <- fb,
     patternSize pat == length ts,
+    all (safeExp . bindingExp) $ tstms ++ fstms,
     all (==Prim Bool) ts = do
+  mapM_ addStm tstms
+  mapM_ addStm fstms
   e <- eBinOp LogOr (pure $ BasicOp $ BinOp LogAnd cond tres)
                     (eBinOp LogAnd (pure $ BasicOp $ UnOp Not cond)
                      (pure $ BasicOp $ SubExp fres))
