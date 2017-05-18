@@ -827,7 +827,7 @@ simplifiable simplifyInnerOp =
           pat' <- bindPatternWithAllocations env names $
                   removeExpWisdom e
           return $ mkWiseLetStm pat' () e
-          where env = removeScopeWisdom $ ST.typeEnv vtable
+          where env = removeScopeWisdom $ ST.toScope vtable
 
         simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
         simplifyOp (Inner k) = Inner <$> simplifyInnerOp k

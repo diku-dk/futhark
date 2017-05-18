@@ -67,6 +67,7 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyParam
        , bindLParams
        , bindArrayLParams
+       , bindChunkLParams
        , bindLoopVar
        , enterLoop
        , consumedName
@@ -185,7 +186,7 @@ instance MonadFreshNames (SimpleM lore) where
   putNameSource y = modify $ \(x, _) -> (x,y)
 
 instance SimplifiableLore lore => HasScope (Wise lore) (SimpleM lore) where
-  askScope = ST.typeEnv <$> getVtable
+  askScope = ST.toScope <$> getVtable
   lookupType name = do
     vtable <- getVtable
     case ST.lookupType name vtable of
@@ -373,6 +374,12 @@ bindArrayLParams :: SimplifiableLore lore =>
 bindArrayLParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayLParam) vtable params
+
+bindChunkLParams :: SimplifiableLore lore =>
+                    VName -> [(LParam (Wise lore),VName)] -> SimpleM lore a -> SimpleM lore a
+bindChunkLParams offset params =
+  localVtable $ \vtable ->
+    foldr (uncurry $ ST.insertChunkLParam offset) vtable params
 
 bindLoopVar :: SimplifiableLore lore =>
                VName -> IntType -> SubExp -> SimpleM lore a -> SimpleM lore a
