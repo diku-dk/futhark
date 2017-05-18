@@ -10,6 +10,7 @@
 --          , [ [0i32, 0i32], [2i32, 4i32] ]
 --          ]
 --        }
+
 -- structure cpu { Alloc 1 }
 
 -- Number of coalescing is 1, but corresponds to 4 coalescing

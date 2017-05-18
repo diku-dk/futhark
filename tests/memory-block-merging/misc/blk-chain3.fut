@@ -13,6 +13,7 @@
 --          ,  [ [6,6,6], [10,10,10], [14,14,14] ]
 --          ]
 --        }
+
 -- structure cpu { Alloc 2 }
 
 -- Should result in 3 successful coalescing operations (all).

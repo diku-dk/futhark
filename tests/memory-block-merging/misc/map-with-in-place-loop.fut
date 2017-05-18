@@ -1,5 +1,6 @@
 -- A tricky case for array coalescing.
 -- ==
+
 -- structure cpu { Alloc 1 }
 
 import "/futlib/array"

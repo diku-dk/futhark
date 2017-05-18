@@ -9,6 +9,7 @@
 --           [3, 4, 5],
 --           [6, 7, 8]]
 --        }
+
 -- structure cpu { Alloc 1 }
 
 let main (i: i32, ys: [#n]i32): [n][n]i32 =

@@ -2,6 +2,7 @@
 -- ==
 -- input { [0, 3, 5, 7, 9] }
 -- output { [[0i32, 0i32, 0i32, 0i32, 0i32],[6i32, 6i32, 6i32, 6i32, 6i32],[10i32, 10i32, 10i32, 10i32, 10i32],[14i32, 14i32, 14i32, 14i32, 14i32],[18i32, 18i32, 18i32, 18i32, 18i32],[0i32, 0i32, 0i32, 0i32, 0i32],[3i32, 3i32, 3i32, 3i32, 3i32],[1i32, 4i32, 6i32, 8i32, 10i32],[7i32, 7i32, 7i32, 7i32, 7i32],[9i32, 9i32, 9i32, 9i32, 9i32]] }
+
 -- structure cpu { Alloc 2 }
 
 -- Without allocation hoisting, there is only one coalescing opportunity, i.e.

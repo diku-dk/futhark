@@ -14,6 +14,7 @@
 --          , [ [5i32, 6i32], [7i32, 8i32] ]
 --          ]
 --        }
+
 -- structure cpu { Alloc 2 }
 
 -- With the current code, there are only 2 coalescing opportunities, namely
