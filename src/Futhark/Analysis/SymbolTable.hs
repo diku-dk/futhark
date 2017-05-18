@@ -243,62 +243,6 @@ entryType (FParam entry)   = typeOf $ fparamAttr entry
 entryType (LoopVar entry)  = Prim $ IntType $ loopVarType entry
 entryType (FreeVar entry)  = typeOf $ freeVarAttr entry
 
-instance Substitutable lore => Substitute (LetBoundEntry lore) where
-  substituteNames substs entry =
-    LetBoundEntry {
-        letBoundRange = substituteNames substs $ letBoundRange entry
-      , letBoundAttr = substituteNames substs $ letBoundAttr entry
-      , letBoundStm = substituteNames substs $ letBoundStm entry
-      , letBoundScalExp = substituteNames substs $ letBoundScalExp entry
-      , letBoundStmDepth = letBoundStmDepth entry
-      , letBoundBindage = substituteNames substs $ letBoundBindage entry
-      }
-
-instance Substitutable lore => Substitute (FParamEntry lore) where
-  substituteNames substs entry =
-    FParamEntry {
-          fparamRange = substituteNames substs $ fparamRange entry
-        , fparamAttr = substituteNames substs $ fparamAttr entry
-        , fparamStmDepth = fparamStmDepth entry
-      }
-
-instance Substitutable lore => Substitute (LParamEntry lore) where
-  substituteNames substs entry =
-    LParamEntry {
-          lparamRange = substituteNames substs $ lparamRange entry
-        , lparamStmDepth = lparamStmDepth entry
-        , lparamAttr = substituteNames substs $ lparamAttr entry
-      }
-
-instance Substitute (LoopVarEntry lore) where
-  substituteNames substs entry =
-    LoopVarEntry {
-          loopVarRange = substituteNames substs $ loopVarRange entry
-        , loopVarStmDepth = loopVarStmDepth entry
-        , loopVarType = loopVarType entry
-      }
-
-instance Substitute (NameInfo lore) => Substitute (FreeVarEntry lore) where
-  substituteNames substs entry =
-    FreeVarEntry {
-        freeVarRange = substituteNames substs $ freeVarRange entry
-      , freeVarAttr = substituteNames substs $ freeVarAttr entry
-      , freeVarStmDepth = freeVarStmDepth entry
-      }
-
-instance Substitutable lore =>
-         Substitute (Entry lore) where
-  substituteNames substs (LetBound entry) =
-    LetBound $ substituteNames substs entry
-  substituteNames substs (FParam entry) =
-    FParam $ substituteNames substs entry
-  substituteNames substs (LParam entry) =
-    LParam $ substituteNames substs entry
-  substituteNames substs (LoopVar entry) =
-    LoopVar $ substituteNames substs entry
-  substituteNames substs (FreeVar entry) =
-    FreeVar $ substituteNames substs entry
-
 elem :: VName -> SymbolTable lore -> Bool
 elem name = isJust . lookup name
 
