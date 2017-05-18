@@ -6,6 +6,7 @@ module Futhark.Analysis.SymbolTable
   ( SymbolTable (bindings)
   , empty
   , fromScope
+  , toScope
   , castSymbolTable
     -- * Entries
   , Entry
@@ -28,11 +29,13 @@ module Futhark.Analysis.SymbolTable
   , lookupScalExp
   , lookupValue
   , lookupVar
+  , index
     -- * Insertion
   , insertStm
   , insertFParams
   , insertLParam
   , insertArrayLParam
+  , insertChunkLParam
   , insertLoopVar
     -- * Bounds
   , updateBounds
@@ -42,7 +45,6 @@ module Futhark.Analysis.SymbolTable
     -- * Misc
   , enclosingLoopVars
   , rangesRep
-  , typeEnv
   )
   where
 
@@ -58,15 +60,17 @@ import qualified Data.Map.Strict as M
 
 import Prelude hiding (elem, lookup)
 
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, lookupType)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Analysis.ScalExp
-import Futhark.Transform.Substitute
+
 import Futhark.Analysis.Rephrase
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Representation.AST.Attributes.Ranges
   (Range, ScalExpRange, Ranged)
 import qualified Futhark.Representation.AST.Attributes.Ranges as Ranges
+
 
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int
@@ -86,6 +90,14 @@ empty = SymbolTable 0 M.empty
 fromScope :: Scope lore -> SymbolTable lore
 fromScope = M.foldlWithKey' insertFreeVar' empty
   where insertFreeVar' m k attr = insertFreeVar k attr m
+
+toScope :: SymbolTable lore -> Scope lore
+toScope = M.map nameType . bindings
+  where nameType (LetBound entry) = LetInfo $ letBoundAttr entry
+        nameType (LoopVar entry) = IndexInfo $ loopVarType entry
+        nameType (FParam entry) = FParamInfo $ fparamAttr entry
+        nameType (LParam entry) = LParamInfo $ lparamAttr entry
+        nameType (FreeVar entry) = freeVarAttr entry
 
 -- | Try to convert a symbol table for one representation into a
 -- symbol table for another.  The two symbol tables will have the same
@@ -108,6 +120,7 @@ castSymbolTable = genCastSymbolTable loopVar letBound fParam lParam freeVar
                                    , freeVarStmDepth = letBoundStmDepth e
                                    , freeVarRange = letBoundRange e
                                    }
+
         fParam e = FParam e { fparamAttr = fparamAttr e }
         lParam e = LParam e { lparamAttr = lparamAttr e }
         freeVar e = FreeVar e { freeVarAttr = castNameInfo $ freeVarAttr e }
@@ -130,6 +143,9 @@ genCastSymbolTable loopVar letBound fParam lParam freeVar (SymbolTable depth ent
 deepen :: SymbolTable lore -> SymbolTable lore
 deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
 
+-- | Indexing a delayed array if possible.
+type IndexArray = [PrimExp VName] -> Maybe (PrimExp VName)
+
 data Entry lore = LoopVar (LoopVarEntry lore)
                 | LetBound (LetBoundEntry lore)
                 | FParam (FParamEntry lore)
@@ -149,6 +165,8 @@ data LetBoundEntry lore =
                 , letBoundStmDepth :: Int
                 , letBoundScalExp  :: Maybe ScalExp
                 , letBoundBindage  :: Bindage
+                , letBoundIndex    :: IndexArray
+                -- ^ Index a delayed array, if possible.
                 }
 
 data FParamEntry lore =
@@ -161,6 +179,7 @@ data LParamEntry lore =
   LParamEntry { lparamRange    :: ScalExpRange
               , lparamAttr     :: LParamAttr lore
               , lparamStmDepth :: Int
+              , lparamIndex    :: IndexArray
               }
 
 data FreeVarEntry lore =
@@ -258,6 +277,10 @@ lookupExp name vtable = bindingExp <$> lookupStm name vtable
 lookupType :: Annotations lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
 
+lookupSubExpType :: Annotations lore => SubExp -> SymbolTable lore -> Maybe Type
+lookupSubExpType (Var v) = lookupType v
+lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
+
 lookupSubExp :: VName -> SymbolTable lore -> Maybe SubExp
 lookupSubExp name vtable = do
   e <- lookupExp name vtable
@@ -288,6 +311,22 @@ lookupVar name vtable = case lookupSubExp name vtable of
                           Just (Var v) -> Just v
                           _            -> Nothing
 
+index :: Annotations lore => VName -> [SubExp] -> SymbolTable lore -> Maybe (PrimExp VName)
+index name is table = do
+  is' <- mapM asPrimExp is
+  index' name is' table
+  where asPrimExp i = do
+          Prim t <- lookupSubExpType i table
+          return $ primExpFromSubExp t i
+
+index' :: VName -> [PrimExp VName] -> SymbolTable lore -> Maybe (PrimExp VName)
+index' name is vtable = do
+  entry <- lookup name vtable
+  case entry of
+    LetBound entry' -> letBoundIndex entry' is
+    LParam entry' -> lparamIndex entry' is
+    _ -> Nothing
+
 lookupRange :: VName -> SymbolTable lore -> ScalExpRange
 lookupRange name vtable =
   maybe (Nothing, Nothing) valueRange $ lookup name vtable
@@ -306,13 +345,49 @@ rangesRep = M.filter knownRange . M.map toRep . bindings
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
-typeEnv :: SymbolTable lore -> Scope lore
-typeEnv = M.map nameType . bindings
-  where nameType (LetBound entry) = LetInfo $ letBoundAttr entry
-        nameType (LoopVar entry) = IndexInfo $ loopVarType entry
-        nameType (FParam entry) = FParamInfo $ fparamAttr entry
-        nameType (LParam entry) = LParamInfo $ lparamAttr entry
-        nameType (FreeVar entry) = freeVarAttr entry
+indexExp :: Annotations lore => SymbolTable lore -> Exp lore -> IndexArray
+
+indexExp _ (BasicOp (Iota _ x s to_it)) [i]
+  | IntType from_it <- primExpType i =
+      Just $ ConvOpExp (SExt from_it to_it) i
+      * primExpFromSubExp (IntType to_it) s
+      + primExpFromSubExp (IntType to_it) x
+
+indexExp table (BasicOp (Replicate (Shape ds) v)) is
+  | length ds == length is,
+    Just (Prim t) <- lookupSubExpType v table =
+      Just $ primExpFromSubExp t v
+
+indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) (_:is) =
+  index' v is table
+
+indexExp table (BasicOp (Reshape _ newshape v)) is
+  | Just oldshape <- arrayDims <$> lookupType v table =
+      let is' =
+            reshapeIndex (map (primExpFromSubExp int32) oldshape)
+                         (map (primExpFromSubExp int32) $ newDims newshape)
+                         is
+      in index' v is' table
+
+indexExp table (BasicOp (Index _ v slice)) is =
+  index' v (adjust slice is) table
+  where adjust (DimFix j:js') is' =
+          pe j : adjust js' is'
+        adjust (DimSlice j _ s:js') (i:is') =
+          let i_t_s = i * pe s
+              j_p_i_t_s = pe j + i_t_s
+          in j_p_i_t_s : adjust js' is'
+        adjust _ _ = []
+
+        pe = primExpFromSubExp (IntType Int32)
+
+indexExp _ _ _ = Nothing
+
+indexChunk :: Annotations lore => SymbolTable lore -> VName -> VName -> IndexArray
+indexChunk table offset array (i:is) =
+  index' array (offset'+i:is) table
+  where offset' = primExpFromSubExp (IntType Int32) (Var offset)
+indexChunk _ _ _ _ = Nothing
 
 defBndEntry :: Annotations lore =>
                SymbolTable lore
@@ -329,11 +404,12 @@ defBndEntry vtable patElem range bnd =
       runReader (toScalExp (`lookupScalExp` vtable) (bindingExp bnd)) types
     , letBoundStmDepth = 0
     , letBoundBindage = patElemBindage patElem
+    , letBoundIndex = indexExp vtable $ bindingExp bnd
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
 
-        types = typeEnv vtable
+        types = toScope vtable
 
         scalExpRange :: Range -> ScalExpRange
         scalExpRange (lower, upper) =
@@ -412,9 +488,9 @@ insertFParams :: [AST.FParam lore]
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 
 insertLParamWithRange :: Annotations lore =>
-                         LParam lore -> ScalExpRange -> SymbolTable lore
+                         LParam lore -> ScalExpRange -> IndexArray -> SymbolTable lore
                       -> SymbolTable lore
-insertLParamWithRange param range vtable =
+insertLParamWithRange param range indexf vtable =
   -- We know that the sizes in the type of param are at least zero,
   -- since they are array sizes.
   let vtable' = insertEntry name bind vtable
@@ -422,6 +498,7 @@ insertLParamWithRange param range vtable =
   where bind = LParam LParamEntry { lparamRange = range
                                   , lparamAttr = AST.paramAttr param
                                   , lparamStmDepth = 0
+                                  , lparamIndex = indexf
                                   }
         name = AST.paramName param
         sizevars = subExpVars $ arrayDims $ AST.paramType param
@@ -429,7 +506,7 @@ insertLParamWithRange param range vtable =
 insertLParam :: Annotations lore =>
                 LParam lore -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
-  insertLParamWithRange param (Nothing, Nothing)
+  insertLParamWithRange param (Nothing, Nothing) (const Nothing)
 
 insertArrayLParam :: Annotations lore =>
                      LParam lore -> Maybe VName -> SymbolTable lore
@@ -438,13 +515,26 @@ insertArrayLParam param (Just array) vtable =
   -- We now know that the outer size of 'array' is at least one, and
   -- that the inner sizes are at least zero, since they are array
   -- sizes.
-  let vtable' = insertLParamWithRange param (lookupRange array vtable) vtable
+  let vtable' = insertLParamWithRange param (lookupRange array vtable) (const Nothing) vtable
   in case arrayDims <$> lookupType array vtable of
     Just (Var v:_) -> (v `isAtLeast` 1) vtable'
     _              -> vtable'
 insertArrayLParam param Nothing vtable =
   -- Well, we still know that it's a param...
   insertLParam param vtable
+
+insertChunkLParam :: Annotations lore =>
+                     VName -> LParam lore -> VName -> SymbolTable lore
+                  -> SymbolTable lore
+insertChunkLParam offset param array vtable =
+  -- We now know that the outer size of 'array' is at least one, and
+  -- that the inner sizes are at least zero, since they are array
+  -- sizes.
+  let vtable' = insertLParamWithRange param
+                (lookupRange array vtable) (indexChunk vtable offset array) vtable
+  in case arrayDims <$> lookupType array vtable of
+    Just (Var v:_) -> (v `isAtLeast` 1) vtable'
+    _              -> vtable'
 
 insertLoopVar :: VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name it bound = insertEntry name bind
@@ -471,7 +561,7 @@ updateBounds isTrue cond vtable =
       let cond'' | isTrue    = cond'
                  | otherwise = SNot cond'
       in updateBounds' cond'' vtable
-  where types = typeEnv vtable
+  where types = toScope vtable
 
 -- | Updating the ranges of all symbols whenever we enter a branch is
 -- presently too expensive, and disabled here.

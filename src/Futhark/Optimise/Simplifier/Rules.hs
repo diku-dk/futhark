@@ -553,7 +553,7 @@ data IndexResult = IndexResult Certificates VName (Slice SubExp)
                  | SubExpResult SubExp
 
 simplifyIndexing :: MonadBinder m =>
-                    ST.SymbolTable lore -> TypeLookup
+                    ST.SymbolTable (Lore m) -> TypeLookup
                  -> Certificates -> VName -> Slice SubExp -> Bool
                  -> Maybe (m IndexResult)
 simplifyIndexing vtable seType ocs idd inds consuming =
@@ -561,6 +561,10 @@ simplifyIndexing vtable seType ocs idd inds consuming =
     _ | Just t <- seType (Var idd),
         inds == fullSlice t [] ->
           Just $ pure $ SubExpResult $ Var idd
+
+      | Just inds' <- sliceIndices inds,
+        Just e <- ST.index idd inds' vtable ->
+        Just $ SubExpResult <$> (letSubExp "index_primexp" =<< toExp e)
 
     Nothing -> Nothing
 
