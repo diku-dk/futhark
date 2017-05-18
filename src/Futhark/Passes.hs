@@ -86,13 +86,6 @@ withExperimentalGPUPasses pipeline =
   then withExperimentalMemoryBlockMerging pipeline
   else pipeline
 
-withExperimentalCPUPasses :: Pipeline SOACS ExplicitMemory
-                       -> Pipeline SOACS ExplicitMemory
-withExperimentalCPUPasses pipeline =
-  if usesExperimentalMemoryBlockMerging
-  then withExperimentalMemoryBlockMerging pipeline
-  else pipeline
-
 kernelsPipeline :: Pipeline SOACS Kernels
 kernelsPipeline =
   standardPipeline >>>
