@@ -435,7 +435,9 @@ distributeMap pat (MapLoop cs w lam arrs) = do
       group_size <- letSubExp "group_size" $ Op GroupSize
       group_available_par <-
         letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
-      letSubExp "group_suff_par" $ Op $ SufficientParallelism group_available_par
+      if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
+        letSubExp "group_suff_par" $ Op $ SufficientParallelism group_available_par
+      else return $ constant False
 
     ((outer_suff_stms++intra_suff_stms)++) <$>
       kernelAlternatives pat par_body [(outer_suff, seq_body),
