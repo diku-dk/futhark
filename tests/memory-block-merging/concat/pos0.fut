@@ -3,6 +3,7 @@
 -- ==
 -- input { [5, 15] }
 -- output { [6, 16, 10, 30, 1, 5] }
+
 -- structure cpu { Alloc 1 }
 
 let main (ns: []i32): []i32 =

@@ -72,8 +72,15 @@ withExperimentalMemoryBlockMerging =
               , simplifyExplicitMemory
               ])
 
+withExperimentalCPUPasses :: Pipeline SOACS ExplicitMemory
+                          -> Pipeline SOACS ExplicitMemory
+withExperimentalCPUPasses pipeline =
+  if usesExperimentalMemoryBlockMerging
+  then withExperimentalMemoryBlockMerging pipeline
+  else pipeline
+
 withExperimentalGPUPasses :: Pipeline SOACS ExplicitMemory
-                       -> Pipeline SOACS ExplicitMemory
+                          -> Pipeline SOACS ExplicitMemory
 withExperimentalGPUPasses pipeline =
   if usesExperimentalMemoryBlockMerging
   then withExperimentalMemoryBlockMerging pipeline

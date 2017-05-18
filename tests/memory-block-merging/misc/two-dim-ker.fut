@@ -2,6 +2,7 @@
 -- ==
 -- input { [ [ [0, 1], [2, 3] ], [ [4, 5], [6, 7] ] ]  }
 -- output { [[[0i32, 9i32], [0i32, 13i32]]]}
+
 -- structure cpu { Alloc 1 }
 
 let main(xsss: [#n][#n][#n]i32): [][n][n]i32 =
