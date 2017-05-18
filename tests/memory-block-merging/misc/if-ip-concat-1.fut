@@ -11,6 +11,7 @@
 --          , [1i32, 1i32, 1i32, 1i32 ]
 --          ]
 --        }
+
 -- structure cpu { Alloc 0 }
 
 -- Should result in 7 successful coalescing operations:

@@ -3,6 +3,7 @@
 -- ==
 -- input { [7, 0, 7] }
 -- output { [8, 1, 8] }
+
 -- structure cpu { Alloc 1 }
 
 import "/futlib/array"

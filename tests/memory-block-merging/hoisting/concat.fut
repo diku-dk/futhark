@@ -2,6 +2,7 @@
 -- but currently we just test that the final number of allocations match (it is
 -- the same for the other hoisting tests).
 -- ==
+
 -- structure cpu { Alloc 1 }
 
 import "/futlib/array"

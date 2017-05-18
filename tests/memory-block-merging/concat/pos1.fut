@@ -7,6 +7,7 @@
 -- output { [[6, 16, 10, 30, 1, 5],
 --           [0,  0,  0,  0, 0, 0]]
 --        }
+
 -- structure cpu { Concat 1 }
 
 let main (ns: [#n]i32, i: i32): [][]i32 =

@@ -9,6 +9,7 @@
 --       }
 -- output { [[1, 4], [1, 2]]
 --        }
+
 -- structure cpu { Alloc 2 }
 
 -- This should hopefully end up as 'structure cpu { Alloc 0 }' when we extend
