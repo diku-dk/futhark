@@ -114,7 +114,7 @@ for benchmark_name, datasets in benchmarks:
 
     fig, ax = plt.subplots()
     ax.set_ylim([0, maximum * 1.1])
-    ax.set_title('Benchmark comparisons')
+    ax.set_title('Runtimes of {}'.format(benchmark_name))
     ax.set_ylabel('Microseconds')
     ax.set_xticks(ind)
     ax.set_xticklabels(list(map(lambda x: x[0], flat_results)))
