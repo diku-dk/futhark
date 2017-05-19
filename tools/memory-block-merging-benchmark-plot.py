@@ -54,12 +54,18 @@ def average_improvement(datasets):
 
 benchmarks.sort(key=lambda t: average_improvement(t[1]), reverse=True)
 
+def cut_desc(s):
+    if s[0] == '#':
+        return s.split(' ')[0]
+    else:
+        return s
+
 for benchmark_name, datasets in benchmarks:
     print('# {}'.format(benchmark_name))
     print('Average improvement: {:.3f}'.format(average_improvement(datasets)))
     print('Datasets:')
     for dataset_name, runtimes, improvement in datasets:
-        print('  ## Dataset: {}'.format(dataset_name))
+        print('  ## Dataset: {}'.format(cut_desc(dataset_name)))
         print('  Runtimes: Without: {} us, with: {} us'.format(runtimes['without.json'], runtimes['with.json']))
         print('  Improvement: {}'.format(improvement))
     print('')
@@ -80,19 +86,26 @@ json_colors = {}
 for json_path, color in zip(json_paths, colors):
     json_colors[json_path] = color
 
-
+def short_path_name(path):
+    try:
+        return {'with.json': 'enabled',
+                'without.json': 'disabled'}[path]
+    except KeyError:
+        return path
 
 for benchmark_name, datasets in benchmarks:
     pdf_path = os.path.normpath(os.path.join(out_dir, benchmark_name + '.pdf'))
     os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
     flat_results = []
     for dataset_name, results, _ in datasets:
-        for json_path, runtime in sorted(results.items()):
+        for json_path in ['without.json', 'with.json']:
+            runtime = results[json_path]
             color = json_colors[json_path]
-            flat_results.append(('{}: {}'.format(json_path, dataset_name),
+            flat_results.append(('{}: {}'.format(short_path_name(json_path),
+                                                 cut_desc(dataset_name)),
                                  runtime, color))
 
-    print('To be plotted:', flat_results)
+    print('Plotting {} into {}.'.format(benchmark_name, pdf_path))
 
     ind = np.arange(len(flat_results))
     width = 0.35
@@ -102,7 +115,7 @@ for benchmark_name, datasets in benchmarks:
     fig, ax = plt.subplots()
     ax.set_ylim([0, maximum * 1.1])
     ax.set_title('Benchmark comparisons')
-    ax.set_ylabel('Milliseconds')
+    ax.set_ylabel('Microseconds')
     ax.set_xticks(ind)
     ax.set_xticklabels(list(map(lambda x: x[0], flat_results)))
     plt.tick_params(axis='x', which='major', labelsize=4)
@@ -116,3 +129,4 @@ for benchmark_name, datasets in benchmarks:
 
     plt.rc('text')
     plt.savefig(pdf_path, format='pdf')
+    plt.close()
