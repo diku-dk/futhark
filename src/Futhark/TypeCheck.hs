@@ -53,7 +53,7 @@ import Control.Parallel.Strategies
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
-import Control.Monad.RWS
+import Control.Monad.RWS.Strict
 import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S

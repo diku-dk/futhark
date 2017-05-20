@@ -100,7 +100,7 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Construct
 import Futhark.MonadFreshNames
-import Control.Monad.RWS
+import Control.Monad.RWS.Strict
 import Futhark.Optimise.Simplifier.Lore
 import qualified Futhark.Analysis.ScalExp as SE
 
