@@ -20,6 +20,7 @@ import System.FilePath
 import System.Directory
 import System.IO
 import System.IO.Temp
+import System.Timeout
 import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import qualified Text.JSON as JSON
@@ -36,10 +37,11 @@ data BenchOptions = BenchOptions
                    , optRuns :: Int
                    , optExtraOptions :: [String]
                    , optJSON :: Maybe FilePath
+                   , optTimeout :: Int
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing
+initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1)
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -166,25 +168,31 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no program component.
-  (progCode, output, progerr) <-
+  run_res <-
+    timeout (optTimeout opts * 1000000) $
     readProcessWithExitCode ("." </> binaryName program) options input
 
-  fmap (Just .  DataResult dataset_desc) $ runBenchM $ do
-    case maybe_expected of
-      Nothing ->
-        didNotFail program progCode $ T.decodeUtf8 progerr
-      Just expected ->
-        compareResult program expected =<<
-        runResult program progCode (T.decodeUtf8 output) (T.decodeUtf8 progerr)
-    runtime_result <- io $ T.readFile tmpfile
-    runtimes <- case mapM readRuntime $ T.lines runtime_result of
-      Just runtimes -> return $ map RunResult runtimes
-      Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
+  fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
+    Just (progCode, output, progerr) ->
+      do
+        case maybe_expected of
+          Nothing ->
+            didNotFail program progCode $ T.decodeUtf8 progerr
+          Just expected ->
+            compareResult program expected =<<
+            runResult program progCode (T.decodeUtf8 output) (T.decodeUtf8 progerr)
+        runtime_result <- io $ T.readFile tmpfile
+        runtimes <- case mapM readRuntime $ T.lines runtime_result of
+          Just runtimes -> return $ map RunResult runtimes
+          Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
 
-    io $ reportResult runtimes
-    return runtimes
+        io $ reportResult runtimes
+        return runtimes
+    Nothing ->
+      itWentWrong $ T.pack $ "Execution exceeded " ++ show (optTimeout opts) ++ " seconds."
 
   where dir = takeDirectory program
+
 
 readRuntime :: T.Text -> Maybe Int
 readRuntime s = case reads $ T.unpack s of
@@ -278,7 +286,20 @@ commandLineOptions = [
                Right $ \config -> config { optJSON = Just file})
     "FILE")
     "Scatter results in JSON format here."
+  , Option [] ["timeout"]
+    (ReqArg (\n ->
+               case reads n of
+                 [(n', "")]
+                   | n' < max_timeout ->
+                   Right $ \config -> config { optTimeout = fromIntegral n' }
+                 _ ->
+                   Left $ error $ "'" ++ n ++
+                   "' is not an integer smaller than" ++ show max_timeout ++ ".")
+    "SECONDS")
+    "Number of seconds before a dataset is aborted."
   ]
+  where max_timeout :: Int
+        max_timeout = maxBound `div` 1000000
 
 main :: IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions $ \progs config ->
