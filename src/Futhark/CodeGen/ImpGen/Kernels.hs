@@ -498,20 +498,11 @@ computeThreadChunkSize :: SplitOrdering
                        -> ImpGen.ImpM lore op ()
 computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var = do
   stride' <- ImpGen.compileSubExp stride
-  remaining_elements <- newVName "remaining_elements"
-  ImpGen.emit $
-    Imp.DeclareScalar remaining_elements int32
-  ImpGen.emit $
-    Imp.SetScalar remaining_elements $
+  ImpGen.emit $ Imp.SetScalar chunk_var $ Imp.BinOpExp (SMin Int32)
+    (Imp.innerExp elements_per_thread) $
     (Imp.innerExp num_elements - thread_index)
     `quotRoundingUp`
     stride'
-  ImpGen.emit $
-    Imp.If (Imp.CmpOpExp (CmpSlt Int32)
-            (Imp.innerExp elements_per_thread)
-            (Imp.var remaining_elements int32))
-    (Imp.SetScalar chunk_var (Imp.innerExp elements_per_thread))
-    (Imp.SetScalar chunk_var (Imp.var remaining_elements int32))
 
 computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
   starting_point <- newVName "starting_point"
