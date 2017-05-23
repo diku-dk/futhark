@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 -- | Kernel extraction.
 --
 -- In the following, I will use the term "width" to denote the amount
@@ -160,7 +161,7 @@
 module Futhark.Pass.ExtractKernels
        (extractKernels)
        where
-
+import Debug.Trace
 import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
@@ -805,7 +806,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
+maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | trace "nested redomap" True, versionedCode, trace "looking closely" True =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -1011,14 +1012,18 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
       prepareArr arr =
         case find ((==arr) . kernelInputName) kernel_inps of
-          Just inp | kernelInputIndices inp == map Var indices ->
-            return $ return $ kernelInputArray inp
+          Just inp
+            | kernelInputIndices inp == map Var indices ->
+                return $ return (Nothing, kernelInputArray inp)
+            | not (kernelInputArray inp `S.member` bound_by_nest) ->
+                return $ replicateMissing ispace inp
           Nothing | not (arr `S.member` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
                       -- it.
-                      return $ letExp (baseString arr ++ "_repd") $
-                      BasicOp $ Replicate (Shape [nesting_size]) $ Var arr
+                      return $ (Nothing,) <$>
+                      letExp (baseString arr ++ "_repd")
+                      (BasicOp $ Replicate (Shape [nesting_size]) $ Var arr)
           _ ->
             fail "Input not free or outermost."
 
@@ -1043,7 +1048,9 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
           letExp (baseString arr ++ "_flat") $
             BasicOp $ Reshape [] reshape arr
 
-    arrs' <- mapM flatten =<< sequence mk_arrs
+    (extra_inps, nested_arrs) <- unzip <$> sequence mk_arrs
+
+    arrs' <- mapM flatten nested_arrs
 
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
@@ -1055,7 +1062,27 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
                 zipWithM flatPatElem
                 (patternValueElements pat) ret
 
-    m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
+    let kernel_inps' = kernel_inps ++ catMaybes extra_inps
+
+    m pat flat_pat nesting_size total_num_elements ispace kernel_inps' nes' arrs'
+
+  where replicateMissing ispace inp = do
+          t <- lookupType $ kernelInputArray inp
+          let inp_is = kernelInputIndices inp
+              shapes = determineRepeats ispace inp_is
+              (outer_shapes, inner_shape) = repeatShapes shapes t
+          repeated <- letExp "repeated" $ BasicOp $
+                      Repeat outer_shapes inner_shape $ kernelInputArray inp
+          return (Nothing,
+                  repeated)
+
+        determineRepeats ((gtid,n):ispace) (i:is)
+          | Var gtid == i =
+              Shape [] : determineRepeats ispace is
+          | otherwise =
+            Shape [n] : determineRepeats ispace (i:is)
+        determineRepeats ispace _ =
+          [Shape $ map snd ispace]
 
 permutationAndMissing :: Pattern -> [SubExp] -> Maybe ([Int], [PatElem])
 permutationAndMissing pat res = do

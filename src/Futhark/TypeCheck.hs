@@ -712,6 +712,12 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int32]) dims
   void $ checkSubExp valexp
 
+checkBasicOp (Repeat shapes innershape v) = do
+  v_t <- lookupType v
+  mapM_ (mapM_ (require [Prim int32]) . shapeDims) $ innershape : shapes
+  unless (length shapes == arrayRank v_t) $
+    bad $ TypeError "Incorrect number of shapes in repeat."
+
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 

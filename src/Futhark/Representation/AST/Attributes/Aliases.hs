@@ -56,6 +56,8 @@ primOpAliases Iota{} =
   [mempty]
 primOpAliases Replicate{} =
   [mempty]
+primOpAliases (Repeat _ _ v) =
+  [vnameAliases v]
 primOpAliases Scratch{} =
   [mempty]
 primOpAliases (Reshape _ _ e) =

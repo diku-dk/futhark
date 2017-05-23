@@ -658,6 +658,9 @@ defCompileBasicOp _ Rotate{} =
 defCompileBasicOp _ Reshape{} =
   return ()
 
+defCompileBasicOp _ Repeat{} =
+  return ()
+
 defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
   | (sizedests, arrdest) <- splitAt n dests,
     Just sizenames <- mapM fromScalarDestination sizedests,
