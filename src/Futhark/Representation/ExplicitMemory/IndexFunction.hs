@@ -13,6 +13,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , slice
        , base
        , rebase
+       , repeat
        , shape
        , rank
        , linearWithOffset
@@ -25,9 +26,9 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
 import Control.Applicative
 import Data.Maybe
 import Data.Monoid
-import Data.List
+import Data.List hiding (repeat)
 
-import Prelude hiding (div, mod, quot, rem)
+import Prelude hiding (div, mod, quot, rem, repeat)
 
 import qualified Data.Map.Strict as M
 
@@ -53,6 +54,8 @@ data IxFun num = Direct (Shape num)
                | Rotate (IxFun num) (Indices num)
                | Index (IxFun num) (Slice num)
                | Reshape (IxFun num) (ShapeChange num)
+               | Repeat (IxFun num) [Shape num] (Shape num)
+               deriving (Show)
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
@@ -72,14 +75,9 @@ instance (IntegralExp num, Eq num) => Eq (IxFun num) where
           eqIndex _ _ = False
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
     ixfun1 == ixfun2 && length shape1 == length shape2
+  Repeat ixfun1 outer_shapes1 inner_shape1 == Repeat ixfun2 outer_shapes2 inner_shape2 =
+    ixfun1 == ixfun2 && outer_shapes1 == outer_shapes2 && inner_shape1 == inner_shape2
   _ == _ = False
-
-instance Show num => Show (IxFun num) where
-  show (Direct n) = "Direct (" ++ show n ++ ")"
-  show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
-  show (Rotate fun offsets) = "Rotate (" ++ show fun ++ ", " ++ show offsets ++ ")"
-  show (Index fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
-  show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
 
 instance Pretty num => Pretty (IxFun num) where
   ppr (Direct dims) =
@@ -88,8 +86,10 @@ instance Pretty num => Pretty (IxFun num) where
   ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
   ppr (Index fun is) = ppr fun <> brackets (commasep $ map ppr is)
   ppr (Reshape fun oldshape) =
-    ppr fun <> text "->" <>
+    ppr fun <> text "->reshape" <>
     parens (commasep (map ppr oldshape))
+  ppr (Repeat fun outer_shapes inner_shape) =
+    ppr fun <> text "->repeat" <> parens (commasep (map ppr $ outer_shapes++ [inner_shape]))
 
 instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) where
   substituteNames _ (Direct n) =
@@ -106,6 +106,8 @@ instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) whe
     reshape
     (substituteNames subst fun)
     (map (substituteNames subst) newshape)
+  substituteNames subst (Repeat fun outer_shapes inner_shape) =
+    repeat (substituteNames subst fun) outer_shapes inner_shape
 
 instance FreeIn num => FreeIn (IxFun num) where
   freeIn (Direct dims) = freeIn dims
@@ -115,6 +117,8 @@ instance FreeIn num => FreeIn (IxFun num) where
     freeIn ixfun <> mconcat (map freeIn is)
   freeIn (Reshape ixfun dims) =
     freeIn ixfun <> freeIn dims
+  freeIn (Repeat fun outer_shapes inner_shape) =
+    freeIn fun <> freeIn outer_shapes <> freeIn inner_shape
 
 instance (Eq num, IntegralExp num, Substitute num) => Rename (IxFun num) where
   rename = substituteRename
@@ -143,6 +147,14 @@ index (Index fun js) is element_size =
 index (Reshape fun newshape) is element_size =
   let new_indices = reshapeIndex (shape fun) (newDims newshape) is
   in index fun new_indices element_size
+
+index (Repeat fun outer_shapes _) is element_size =
+  -- Discard those indices that are just repeats.  It is intentional
+  -- that we cut off those indices that correspond to the innermost
+  -- repeated dimensions.
+  index fun is' element_size
+  where flags dims = replicate (length dims) True ++ [False]
+        is' = map snd $ filter (not . fst) $ zip (concatMap flags outer_shapes) is
 
 iota :: Shape num -> IxFun num
 iota = Direct
@@ -176,6 +188,10 @@ rotate :: IntegralExp num =>
 rotate (Rotate ixfun old_offsets) offsets =
   Rotate ixfun $ zipWith (+) old_offsets offsets
 rotate ixfun offsets = Rotate ixfun offsets
+
+repeat :: (Eq num, IntegralExp num) =>
+          IxFun num -> [Shape num] -> Shape num -> IxFun num
+repeat = Repeat
 
 reshape :: (Eq num, IntegralExp num) =>
            IxFun num -> ShapeChange num -> IxFun num
@@ -229,6 +245,9 @@ shape (Index _ how) =
   sliceDims how
 shape (Reshape _ dims) =
   map newDim dims
+shape (Repeat ixfun outer_shapes inner_shape) =
+  concat (zipWith repeated outer_shapes (shape ixfun)) ++ inner_shape
+  where repeated outer_ds d = outer_ds ++ [d]
 
 base :: IxFun num -> Shape num
 base (Direct dims) =
@@ -240,6 +259,8 @@ base (Rotate ixfun _) =
 base (Index ixfun _) =
   base ixfun
 base (Reshape ixfun _) =
+  base ixfun
+base (Repeat ixfun _ _) =
   base ixfun
 
 rebase :: (Eq num, IntegralExp num) =>
@@ -257,6 +278,8 @@ rebase new_base (Index ixfun is) =
   slice (rebase new_base ixfun) is
 rebase new_base (Reshape ixfun new_shape) =
   reshape (rebase new_base ixfun) new_shape
+rebase new_base (Repeat ixfun outer_shapes inner_shape) =
+  Repeat (rebase new_base ixfun) outer_shapes inner_shape
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.
@@ -309,6 +332,8 @@ substInIdxFun tab (Index ixfun sl) =
   Index (substInIdxFun tab ixfun) $ substInSlice tab sl
 substInIdxFun tab (Reshape ixfun shpchange) =
   Reshape (substInIdxFun tab ixfun) $ substInShapeChange tab shpchange
+substInIdxFun tab (Repeat ixfun outer_shapes inner_shape) =
+  Repeat (substInIdxFun tab ixfun) outer_shapes inner_shape
 
 substInSlice  :: M.Map VName (PrimExp VName) -> Slice (PrimExp VName)
               -> Slice (PrimExp VName)

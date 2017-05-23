@@ -98,6 +98,11 @@ primOpType (Iota n _ _ et) =
   pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
 primOpType (Replicate (Shape []) e) =
   pure <$> subExpType e
+primOpType (Repeat shape innershape v) =
+  pure . modifyArrayShape repeatDims <$> lookupType v
+  where repeatDims (Shape ds) =
+          Shape $ concat (zipWith (++) (map shapeDims shape) (map pure ds)) ++
+          shapeDims innershape
 primOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 primOpType (Scratch t shape) =
