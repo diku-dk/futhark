@@ -1011,7 +1011,7 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
       prepareArr arr =
         case find ((==arr) . kernelInputName) kernel_inps of
-          Just inp | kernelInputIndices inp == map Var indices ->
+          Just inp | not (kernelInputArray inp `S.member` bound_by_nest) ->
             return $ return $ kernelInputArray inp
           Nothing | not (arr `S.member` bound_by_nest) ->
                       -- This input is something that is free inside
