@@ -1003,7 +1003,9 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
   unless (S.null $ free_in_op `S.intersection` bound_by_nest) $
     fail "Non-fold lambda uses nest-bound parameters."
 
-  let prepareNe (Var v) | v `S.member` bound_by_nest =
+  let indices = map fst ispace
+
+      prepareNe (Var v) | v `S.member` bound_by_nest =
                           fail "Neutral element bound in nest"
       prepareNe ne = return ne
 
