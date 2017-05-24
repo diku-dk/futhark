@@ -1014,14 +1014,14 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
         case find ((==arr) . kernelInputName) kernel_inps of
           Just inp
             | kernelInputIndices inp == map Var indices ->
-                return $ return (Nothing, kernelInputArray inp)
+                return $ return $ kernelInputArray inp
             | not (kernelInputArray inp `S.member` bound_by_nest) ->
                 return $ replicateMissing ispace inp
           Nothing | not (arr `S.member` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
                       -- it.
-                      return $ (Nothing,) <$>
+                      return $
                       letExp (baseString arr ++ "_repd")
                       (BasicOp $ Replicate (Shape [nesting_size]) $ Var arr)
           _ ->
@@ -1048,8 +1048,7 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
           letExp (baseString arr ++ "_flat") $
             BasicOp $ Reshape [] reshape arr
 
-    (extra_inps, nested_arrs) <- unzip <$> sequence mk_arrs
-
+    nested_arrs <- sequence mk_arrs
     arrs' <- mapM flatten nested_arrs
 
     let pat = Pattern [] $ rearrangeShape perm $
@@ -1062,19 +1061,15 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
                 zipWithM flatPatElem
                 (patternValueElements pat) ret
 
-    let kernel_inps' = kernel_inps ++ catMaybes extra_inps
-
-    m pat flat_pat nesting_size total_num_elements ispace kernel_inps' nes' arrs'
+    m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
 
   where replicateMissing ispace inp = do
           t <- lookupType $ kernelInputArray inp
           let inp_is = kernelInputIndices inp
               shapes = determineRepeats ispace inp_is
               (outer_shapes, inner_shape) = repeatShapes shapes t
-          repeated <- letExp "repeated" $ BasicOp $
-                      Repeat outer_shapes inner_shape $ kernelInputArray inp
-          return (Nothing,
-                  repeated)
+          letExp "repeated" $ BasicOp $
+            Repeat outer_shapes inner_shape $ kernelInputArray inp
 
         determineRepeats ((gtid,n):ispace) (i:is)
           | Var gtid == i =
