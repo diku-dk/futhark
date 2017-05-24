@@ -11,6 +11,7 @@
 --           [4, 5]]
 --          3
 --        }
+-- structure cpu { Alloc 2 }
 
 let main (xs: *[#n][#n]i32, ys0: [#n]i32, i: i32): ([n][n]i32, i32) =
   let ys = map (+ 1) ys0

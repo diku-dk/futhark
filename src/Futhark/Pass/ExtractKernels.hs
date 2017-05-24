@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 -- | Kernel extraction.
 --
 -- In the following, I will use the term "width" to denote the amount
@@ -435,7 +436,9 @@ distributeMap pat (MapLoop cs w lam arrs) = do
       group_size <- letSubExp "group_size" $ Op GroupSize
       group_available_par <-
         letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
-      letSubExp "group_suff_par" $ Op $ SufficientParallelism group_available_par
+      if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
+        letSubExp "group_suff_par" $ Op $ SufficientParallelism group_available_par
+      else return $ constant False
 
     ((outer_suff_stms++intra_suff_stms)++) <$>
       kernelAlternatives pat par_body [(outer_suff, seq_body),
@@ -785,11 +788,15 @@ maybeDistributeStm (Let pat _ (Op (Reduce cs w comm lam input))) acc
 maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just perm <- map Var (patternNames pat) `isPermutationOf` res -> do
+      | Just (perm, pat_unused) <- permutationAndMissing pat res ->
+          -- We need to pretend pat_unused was used anyway, by adding
+          -- it to the kernel nest.
+          localScope (typeEnvFromKernelAcc acc') $ do
+          nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
           fold_lam' <- Kernelise.transformLambda fold_lam
           localScope (typeEnvFromKernelAcc acc') $
-            segmentedScanomapKernel nest perm cs w lam' fold_lam' nes arrs >>=
+            segmentedScanomapKernel nest' perm cs w lam' fold_lam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
@@ -822,21 +829,22 @@ maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs)))
 maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
+      | Just (perm, pat_unused) <- permutationAndMissing pat res ->
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
           let (nes, arrs) = unzip input
+          nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
           foldlam' <- renameLambda lam'
-          regularSegmentedRedomapKernel nest perm cs w comm' lam' foldlam' nes arrs >>=
+          regularSegmentedRedomapKernel nest' perm cs w comm' lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
     where comm' | commutativeLambda lam = Commutative
                 | otherwise             = comm
 
-maybeDistributeStm (Let pat attr (Op (Scan cs w lam input))) acc | versionedCode = do
+maybeDistributeStm (Let pat attr (Op (Scan cs w lam input))) acc = do
   let (nes, arrs) = unzip input
   lam_renamed <- renameLambda lam
   let bnd = Let pat attr $ Op $ Scanomap cs w lam lam_renamed nes arrs
@@ -1005,14 +1013,18 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
 
       prepareArr arr =
         case find ((==arr) . kernelInputName) kernel_inps of
-          Just inp | kernelInputIndices inp == map Var indices ->
-            return $ return $ kernelInputArray inp
+          Just inp
+            | kernelInputIndices inp == map Var indices ->
+                return $ return $ kernelInputArray inp
+            | not (kernelInputArray inp `S.member` bound_by_nest) ->
+                return $ replicateMissing ispace inp
           Nothing | not (arr `S.member` bound_by_nest) ->
                       -- This input is something that is free inside
                       -- the loop nesting. We will have to replicate
                       -- it.
-                      return $ letExp (baseString arr ++ "_repd") $
-                      BasicOp $ Replicate (Shape [nesting_size]) $ Var arr
+                      return $
+                      letExp (baseString arr ++ "_repd")
+                      (BasicOp $ Replicate (Shape [nesting_size]) $ Var arr)
           _ ->
             fail "Input not free or outermost."
 
@@ -1037,7 +1049,8 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
           letExp (baseString arr ++ "_flat") $
             BasicOp $ Reshape [] reshape arr
 
-    arrs' <- mapM flatten =<< sequence mk_arrs
+    nested_arrs <- sequence mk_arrs
+    arrs' <- mapM flatten nested_arrs
 
     let pat = Pattern [] $ rearrangeShape perm $
               patternValueElements $ loopNestingPattern $ fst nest
@@ -1050,6 +1063,22 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
                 (patternValueElements pat) ret
 
     m pat flat_pat nesting_size total_num_elements ispace kernel_inps nes' arrs'
+
+  where replicateMissing ispace inp = do
+          t <- lookupType $ kernelInputArray inp
+          let inp_is = kernelInputIndices inp
+              shapes = determineRepeats ispace inp_is
+              (outer_shapes, inner_shape) = repeatShapes shapes t
+          letExp "repeated" $ BasicOp $
+            Repeat outer_shapes inner_shape $ kernelInputArray inp
+
+        determineRepeats ((gtid,n):ispace) (i:is)
+          | Var gtid == i =
+              Shape [] : determineRepeats ispace is
+          | otherwise =
+            Shape [n] : determineRepeats ispace (i:is)
+        determineRepeats ispace _ =
+          [Shape $ map snd ispace]
 
 permutationAndMissing :: Pattern -> [SubExp] -> Maybe ([Int], [PatElem])
 permutationAndMissing pat res = do
@@ -1141,7 +1170,7 @@ intraGroupParalleliseBody kspace body = do
                 Kernelise.transformStms $ bodyStms $ lambdaBody fun
               let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
               letBind_ pat $ Op $
-                Out.Combine [(ltid,w)] (lambdaReturnType fun) (constant True) comb_body
+                Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
 
             Op (Scanomap cs w scanfun foldfun nes arrs) -> do
               fold_stms <- collectStms_ $ do
@@ -1159,7 +1188,7 @@ intraGroupParalleliseBody kspace body = do
                 Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
               let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
               scan_input <- letTupExp "scan_input" $ Op $
-                Out.Combine [(ltid,w)] (lambdaReturnType foldfun) (constant True) fold_body
+                Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
 
               scanfun' <- Kernelise.transformLambda scanfun
 

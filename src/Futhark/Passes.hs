@@ -4,13 +4,14 @@
 module Futhark.Passes
   ( standardPipeline
   , sequentialPipeline
+  , kernelsPipeline
+  , sequentialCpuPipeline
   , gpuPipeline
   , CompilationMode (..)
   )
 where
 
 import Control.Category ((>>>))
-import Data.Maybe
 
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -28,6 +29,7 @@ import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.Kernels (Kernels)
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Util
 
@@ -70,32 +72,22 @@ withExperimentalMemoryBlockMerging =
               , simplifyExplicitMemory
               ])
 
-withExperimentalPasses :: Pipeline SOACS ExplicitMemory
-                       -> Pipeline SOACS ExplicitMemory
-withExperimentalPasses pipeline =
+withExperimentalCPUPasses :: Pipeline SOACS ExplicitMemory
+                          -> Pipeline SOACS ExplicitMemory
+withExperimentalCPUPasses pipeline =
   if usesExperimentalMemoryBlockMerging
   then withExperimentalMemoryBlockMerging pipeline
   else pipeline
 
-sequentialPipeline :: Pipeline SOACS ExplicitMemory
-sequentialPipeline =
-  withExperimentalPasses $
-  standardPipeline >>>
-  onePass firstOrderTransform >>>
-  passes [ simplifyKernels
-         , inPlaceLowering
-         ] >>>
-  onePass explicitAllocations >>>
-  passes [ simplifyExplicitMemory
-         , performCSE False
-         , simplifyExplicitMemory
-         , doubleBuffer
-         , simplifyExplicitMemory
-         ]
+withExperimentalGPUPasses :: Pipeline SOACS ExplicitMemory
+                          -> Pipeline SOACS ExplicitMemory
+withExperimentalGPUPasses pipeline =
+  if usesExperimentalMemoryBlockMerging
+  then withExperimentalMemoryBlockMerging pipeline
+  else pipeline
 
-gpuPipeline :: Pipeline SOACS ExplicitMemory
-gpuPipeline =
-  withExperimentalPasses $
+kernelsPipeline :: Pipeline SOACS Kernels
+kernelsPipeline =
   standardPipeline >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
@@ -107,7 +99,32 @@ gpuPipeline =
          , performCSE True
          , simplifyKernels
          , inPlaceLowering
-         ] >>>
+         ]
+
+sequentialPipeline :: Pipeline SOACS Kernels
+sequentialPipeline =
+  standardPipeline >>>
+  onePass firstOrderTransform >>>
+  passes [ simplifyKernels
+         , inPlaceLowering
+         ]
+
+sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
+sequentialCpuPipeline =
+  withExperimentalCPUPasses $
+  sequentialPipeline >>>
+  onePass explicitAllocations >>>
+  passes [ simplifyExplicitMemory
+         , performCSE False
+         , simplifyExplicitMemory
+         , doubleBuffer
+         , simplifyExplicitMemory
+         ]
+
+gpuPipeline :: Pipeline SOACS ExplicitMemory
+gpuPipeline =
+  withExperimentalGPUPasses $
+  kernelsPipeline >>>
   onePass explicitAllocations >>>
   passes [ simplifyExplicitMemory
          , performCSE False

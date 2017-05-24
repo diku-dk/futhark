@@ -7,13 +7,21 @@ import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Debug.Trace
-
 import Futhark.Representation.Aliases
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import qualified Futhark.Analysis.Alias as AnlAls
 
 import Futhark.Pass.MemoryBlockMerging.DataStructs
+
+--import Debug.Trace
+import Futhark.Util (unixEnvironment)
+import System.IO.Unsafe (unsafePerformIO)
+usesDebugging :: Bool
+usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
+trace :: String -> a -> a
+trace s x = if usesDebugging
+            then unsafePerformIO (putStrLn s) `seq` x
+            else x
 
 
 -----------------------------------

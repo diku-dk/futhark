@@ -89,7 +89,7 @@ block, and may only be present immediately preceding these
 input-output pairs.  If no ``entry`` is given, the default of ``main``
 is assumed.  See below for an example.
 
-For many usage examples, see the ``data/tests`` directory in the
+For many usage examples, see the ``tests`` directory in the
 Futhark source directory.  A simple example can be found in
 ``EXAMPLES`` below.
 
