@@ -161,7 +161,7 @@
 module Futhark.Pass.ExtractKernels
        (extractKernels)
        where
-import Debug.Trace
+
 import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
@@ -806,7 +806,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Scanomap cs w lam fold_lam nes arrs))) ac
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | trace "nested redomap" True, versionedCode, trace "looking closely" True =
+maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs))) acc | versionedCode =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
