@@ -12,7 +12,9 @@
 --           [10, 14, 18]]
 --        }
 
+-- structure cpu { Alloc 0 }
+
 let main (i: i32, xs: *[#n][#n]i32, ys0: [#n]i32): [n][n]i32 =
-  let ys = map (* 2) ys0
+  let ys = map (* 2) ys0 -- Will use the memory of xs[i].
   let xs[i] = ys
   in xs

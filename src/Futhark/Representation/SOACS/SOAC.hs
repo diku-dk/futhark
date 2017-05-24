@@ -420,13 +420,8 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
-  (_,occurs) <- TC.collectOccurences $
-                TC.checkExtLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
-  let usages = TC.usageMap occurs
-  arr_aliases <- mapM TC.lookupAliases arrexps
-  let aliased_syms = S.toList $ S.fromList $ concatMap S.toList arr_aliases
-  when (any (`M.member` usages) aliased_syms) $
-     TC.bad $ TC.TypeError "Stream with input array used inside lambda."
+  TC.checkExtLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
+
   -- check outerdim of Lambda's streamed-in array params are NOT specified,
   -- and that return type inner dimens are all specified but not as other
   -- lambda parameters!

@@ -284,7 +284,7 @@ tile1d kspace block_size block_param = do
         PatElem (paramName block_param) BindVar $ paramType outer_block_param
       write_block_stms =
         [ Let (Pattern [] [block_pe]) () $ Op $
-          Combine block_cspace [patElemType pe] (constant True) $
+          Combine block_cspace [patElemType pe] [] $
           Body () [read_elem_bnd] [Var $ patElemName pe]
         | pe <- patternElements $ bindingPattern read_elem_bnd ]
 
@@ -310,9 +310,6 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
       name <- newVName $ baseString (paramName block_param) ++ "_outer"
       return block_param { paramName = name }
 
-    do_index <- newVName "do_index"
-    let do_index_bnd = mkLet' [] [Ident do_index $ Prim Bool] $
-                       BasicOp $ CmpOp (CmpSlt Int32) (Var global_i) global_d
     elem_name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
     let read_elem_bnd = mkLet' [] [Ident elem_name $ Prim pt] $
                         BasicOp $ Index [] (paramName outer_block_param) $
@@ -327,7 +324,7 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
           rowType (paramType outer_block_param) `arrayOfShape` block_size_2d
         write_block_stm =
          Let (Pattern [] [block_pe]) () $
-          Op $ Combine block_cspace [Prim pt] (Var do_index) $
+          Op $ Combine block_cspace [Prim pt] [(global_i, global_d)] $
           Body () [read_elem_bnd] [Var elem_name]
 
     block_param_aux_name <- newVName $ baseString $ paramName block_param
@@ -340,7 +337,7 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
             BasicOp $ Index [] (identName block_param_aux) $
             fullSlice (identType block_param_aux) [DimFix $ Var variant_i]]
 
-    return (outer_block_param, do_index_bnd : write_block_stm : index_block_kstms)
+    return (outer_block_param, write_block_stm : index_block_kstms)
 
   where invariantToOneOfTwoInnerDims :: Maybe [Int]
         invariantToOneOfTwoInnerDims = do

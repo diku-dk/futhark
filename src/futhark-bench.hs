@@ -8,17 +8,20 @@ module Main (main) where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except hiding (forM_)
+import qualified Data.ByteString.Char8 as BS
 import Data.Maybe
 import Data.Monoid
 import Data.List
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Encoding as T
 import System.Console.GetOpt
 import System.FilePath
 import System.Directory
 import System.IO
 import System.IO.Temp
-import System.Process.Text (readProcessWithExitCode)
+import System.Timeout
+import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import qualified Text.JSON as JSON
 import Text.Printf
@@ -34,10 +37,11 @@ data BenchOptions = BenchOptions
                    , optRuns :: Int
                    , optExtraOptions :: [String]
                    , optJSON :: Maybe FilePath
+                   , optTimeout :: Int
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing
+initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1)
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -104,7 +108,8 @@ compileBenchmark opts (program, spec) =
         ExitSuccess     -> return $ Just (program, cases)
         ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
                               return Nothing
-        ExitFailure _   -> do putStrLn $ "Failed:\n" ++ T.unpack futerr
+        ExitFailure _   -> do putStrLn "Failed:\n"
+                              BS.putStrLn futerr
                               return Nothing
     _ ->
       return Nothing
@@ -151,32 +156,43 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
-  input <- getValuesText dir input_spec
+  input <- getValuesBS dir input_spec
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
   let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
+
+  -- Report the dataset name before running the program, so that if an
+  -- error occurs it's easier to see where.
+  putStr $ "dataset " ++ dataset_desc ++ ": "
+  hFlush stdout
 
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no program component.
-  (progCode, output, progerr) <-
+  run_res <-
+    timeout (optTimeout opts * 1000000) $
     readProcessWithExitCode ("." </> binaryName program) options input
 
-  fmap (Just .  DataResult dataset_desc) $ runBenchM $ do
-    case maybe_expected of
-      Nothing ->
-        didNotFail program progCode progerr
-      Just expected ->
-        compareResult program expected =<< runResult program progCode output progerr
-    runtime_result <- io $ T.readFile tmpfile
-    runtimes <- case mapM readRuntime $ T.lines runtime_result of
-      Just runtimes -> return $ map RunResult runtimes
-      Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
+  fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
+    Just (progCode, output, progerr) ->
+      do
+        case maybe_expected of
+          Nothing ->
+            didNotFail program progCode $ T.decodeUtf8 progerr
+          Just expected ->
+            compareResult program expected =<<
+            runResult program progCode (T.decodeUtf8 output) (T.decodeUtf8 progerr)
+        runtime_result <- io $ T.readFile tmpfile
+        runtimes <- case mapM readRuntime $ T.lines runtime_result of
+          Just runtimes -> return $ map RunResult runtimes
+          Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
 
-    io $ putStr $ "dataset " ++ dataset_desc ++ ": "
-    io $ reportResult runtimes
-    return runtimes
+        io $ reportResult runtimes
+        return runtimes
+    Nothing ->
+      itWentWrong $ T.pack $ "Execution exceeded " ++ show (optTimeout opts) ++ " seconds."
 
   where dir = takeDirectory program
+
 
 readRuntime :: T.Text -> Maybe Int
 readRuntime s = case reads $ T.unpack s of
@@ -270,7 +286,20 @@ commandLineOptions = [
                Right $ \config -> config { optJSON = Just file})
     "FILE")
     "Scatter results in JSON format here."
+  , Option [] ["timeout"]
+    (ReqArg (\n ->
+               case reads n of
+                 [(n', "")]
+                   | n' < max_timeout ->
+                   Right $ \config -> config { optTimeout = fromIntegral n' }
+                 _ ->
+                   Left $ error $ "'" ++ n ++
+                   "' is not an integer smaller than" ++ show max_timeout ++ ".")
+    "SECONDS")
+    "Number of seconds before a dataset is aborted."
   ]
+  where max_timeout :: Int
+        max_timeout = maxBound `div` 1000000
 
 main :: IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions $ \progs config ->

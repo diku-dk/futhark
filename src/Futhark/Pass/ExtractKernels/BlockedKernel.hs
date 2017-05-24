@@ -139,8 +139,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
     pe_name <- newVName "chunk_fold_red"
     return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
   let combine_reds = [ Let (Pattern [] [pe']) () $ Op $
-                       Combine [(spaceLocalId space, group_size)] [patElemType pe]
-                       (constant True) $
+                       Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
                        Body () [] [Var $ patElemName pe]
                      | (pe', pe) <- zip chunk_red_pes' chunk_red_pes ]
 
@@ -194,7 +193,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
 
     letBind_ combine_pat $
       Op $ Combine [(spaceLocalId space, group_size)]
-      (map rowType $ patternTypes combine_pat) (constant True) combine_body
+      (map rowType $ patternTypes combine_pat) [] combine_body
 
     let arrs' = patternNames combine_pat
 
@@ -514,7 +513,7 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
 
       -- Create an array of per-thread fold results and scan it.
       to_scan_arrs <- letTupExp "combined" $
-                      Op $ Combine [(spaceLocalId kspace, group_size)] scan_ts (constant True) $
+                      Op $ Combine [(spaceLocalId kspace, group_size)] scan_ts [] $
                       Body () [] $ map Var fold_accs
       scanned_arrs <- letTupExp "scanned" $
                       Op $ GroupScan group_size lam $ zip nes to_scan_arrs
@@ -629,8 +628,7 @@ scanKernel2 cs scan_sizes lam input = do
           letSubExp (baseString arr <> "_elem") $ BasicOp $ Index [] arr slice
     read_elements <- runBodyBinder $ resultBody <$> mapM indexMine arrs
     to_scan_arrs <- letTupExp "combined" $
-                    Op $ Combine [(lid, group_size)] scan_ts (constant True)
-                    read_elements
+                    Op $ Combine [(lid, group_size)] scan_ts [] read_elements
     scanned_arrs <- letTupExp "scanned" $
                     Op $ GroupScan group_size lam $ zip nes to_scan_arrs
 

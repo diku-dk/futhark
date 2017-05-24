@@ -29,7 +29,7 @@ import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.Reader
-import Control.Monad.RWS
+import Control.Monad.RWS.Strict
 import Control.Monad.Error.Class
 import qualified Data.Map.Strict as M
 

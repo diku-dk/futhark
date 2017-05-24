@@ -7,6 +7,7 @@ module Futhark.Test
        , valuesFromText
        , getValues
        , getValuesText
+       , getValuesBS
        , compareValues
        , Mismatch
 
@@ -24,8 +25,8 @@ module Futhark.Test
        )
        where
 
-import Control.Category ((>>>))
 import Control.Applicative
+import qualified Data.ByteString as BS
 import Control.Monad hiding (forM_)
 import Control.Monad.IO.Class
 import qualified Data.Map.Strict as M
@@ -36,6 +37,7 @@ import Data.List hiding (foldl')
 import Data.Foldable (foldl')
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Encoding as T
 import System.Directory.Tree (readDirectoryWith, flattenDir,
                               DirTree(File), AnchoredDirTree(..),
                               FileName)
@@ -49,13 +51,8 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Representation.SOACS (SOACS)
-import Futhark.Representation.Kernels (Kernels)
+
 import Futhark.Analysis.Metrics
-import Futhark.Pipeline
-import Futhark.Pass.Simplify
-import Futhark.Pass.ExtractKernels
-import Futhark.Passes
 import Futhark.Util.Pretty (pretty, prettyText)
 import Futhark.Test.Values
 
@@ -92,8 +89,10 @@ instance Show ExpectedError where
   show (ThisError r _) = "ThisError " ++ show r
 
 -- | How a program can be transformed.
-data StructurePipeline = KernelsPipeline (Pipeline SOACS Kernels)
-                       | SOACSPipeline (Pipeline SOACS SOACS)
+data StructurePipeline = KernelsPipeline
+                       | SOACSPipeline
+                       | SequentialCpuPipeline
+                       | GpuPipeline
 
 -- | A structure test specifies a compilation pipeline, as well as
 -- metrics for the program coming out the other end.
@@ -240,15 +239,10 @@ parseExpectedStructure =
   (StructureTest <$> optimisePipeline <*> parseMetrics)
 
 optimisePipeline :: Parser StructurePipeline
-optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
-                   pure defaultPipelineConfig
-  where defaultPipelineConfig =
-          SOACSPipeline standardPipeline
-        distributePipelineConfig =
-          KernelsPipeline $
-          standardPipeline >>>
-          onePass extractKernels >>>
-          onePass simplifyKernels
+optimisePipeline = lexstr "distributed" *> pure KernelsPipeline <|>
+                   lexstr "gpu" *> pure GpuPipeline <|>
+                   lexstr "cpu" *> pure SequentialCpuPipeline <|>
+                   pure SOACSPipeline
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ fmap M.fromList $ many $
@@ -367,4 +361,14 @@ getValuesText _ (Values vs) =
   return $ T.unlines $ map prettyText vs
 getValuesText dir (InFile file) =
   liftIO $ T.readFile file'
+  where file' = dir </> file
+
+-- | Extract a pretty representation of some 'Values'.  In the IO
+-- monad because this might involve reading from a file.  There is no
+-- guarantee that the resulting byte string yields a readable value.
+getValuesBS :: MonadIO m => FilePath -> Values -> m BS.ByteString
+getValuesBS _ (Values vs) =
+  return $ T.encodeUtf8 $ T.unlines $ map prettyText vs
+getValuesBS dir (InFile file) =
+  liftIO $ BS.readFile file'
   where file' = dir </> file

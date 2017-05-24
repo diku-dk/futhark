@@ -110,6 +110,8 @@ def parse_int(f):
             if c in string.hexdigits:
                 s += c
                 c = get_char(f)
+            elif c == '_':
+                c = get_char(f) # skip _
             else:
                 unget_char(f, c)
                 s = str(int(s, 16))
@@ -119,6 +121,8 @@ def parse_int(f):
             if c.isdigit():
                 s += c
                 c = get_char(f)
+            elif c == '_':
+                c = get_char(f) # skip _
             else:
                 unget_char(f, c)
                 break

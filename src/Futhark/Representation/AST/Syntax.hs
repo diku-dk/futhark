@@ -219,6 +219,14 @@ data BasicOp lore
   | Replicate Shape SubExp
   -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
 
+  | Repeat [Shape] Shape VName
+  -- ^ Repeat each dimension of the input array some number of times,
+  -- given by the corresponding shape.  For an array of rank @k@, the
+  -- list must contain @k@ shapes.  A shape may be empty (in which
+  -- case the dimension is not repeated, but it is still present).
+  -- The last shape indicates the amount of extra innermost
+  -- dimensions.  All other extra dimensions are added *before* the original dimension.
+
   | Scratch PrimType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 

@@ -50,7 +50,6 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyIndexIntoReshape
                , removeEmptySplits
                , removeSingletonSplits
-               , simplifyConcat
                , evaluateBranch
                , simplifyBoolBranch
                , hoistBranchInvariant
@@ -72,6 +71,7 @@ bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , simplifyIndex
+                , simplifyConcat
                 ]
 
 -- | A set of standard simplification rules.  These assume pure
@@ -376,14 +376,6 @@ simplifyRotate vtable (Let pat _ (BasicOp (Rotate cs offsets v)))
 simplifyRotate _ _ = cannotSimplify
 
 simplifyReplicate :: MonadBinder m => TopDownRule m
-simplifyReplicate vtable
-  (Let pat@(Pattern [] [pe]) _ (BasicOp (Replicate (Shape ds) (Var v))))
-  | (_, ds') <- partition isCt1 ds,
-    Just v_t <- ST.lookupType v vtable,
-    ds' /= ds,
-    not $ null ds' && primType v_t = do
-      v' <- letExp "replicate" $ BasicOp $ Replicate (Shape ds') $ Var v
-      letBind_ pat $ BasicOp $ Reshape [] (map DimNew $ arrayDims $ patElemType pe) v'
 simplifyReplicate _ (Let pat _ (BasicOp (Replicate (Shape []) se@Constant{}))) =
   letBind_ pat $ BasicOp $ SubExp se
 simplifyReplicate _ (Let pat _ (BasicOp (Replicate (Shape []) (Var v)))) = do
@@ -561,7 +553,7 @@ data IndexResult = IndexResult Certificates VName (Slice SubExp)
                  | SubExpResult SubExp
 
 simplifyIndexing :: MonadBinder m =>
-                    ST.SymbolTable lore -> TypeLookup
+                    ST.SymbolTable (Lore m) -> TypeLookup
                  -> Certificates -> VName -> Slice SubExp -> Bool
                  -> Maybe (m IndexResult)
 simplifyIndexing vtable seType ocs idd inds consuming =
@@ -569,6 +561,10 @@ simplifyIndexing vtable seType ocs idd inds consuming =
     _ | Just t <- seType (Var idd),
         inds == fullSlice t [] ->
           Just $ pure $ SubExpResult $ Var idd
+
+      | Just inds' <- sliceIndices inds,
+        Just e <- ST.index idd inds' vtable ->
+        Just $ SubExpResult <$> (letSubExp "index_primexp" =<< toExp e)
 
     Nothing -> Nothing
 
@@ -763,10 +759,10 @@ removeSingletonSplits _ (Let pat _ (BasicOp (Split _ i [n] arr))) = do
 removeSingletonSplits _ _ =
   cannotSimplify
 
-simplifyConcat :: MonadBinder m => TopDownRule m
+simplifyConcat :: MonadBinder m => BottomUpRule m
 
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
-simplifyConcat vtable (Let pat _ (BasicOp (Concat cs i x xs new_d)))
+simplifyConcat (vtable, _) (Let pat _ (BasicOp (Concat cs i x xs new_d)))
   | Just r <- arrayRank <$> ST.lookupType x vtable,
     let perm = [i] ++ [0..i-1] ++ [i+1..r-1],
     Just (x',x_cs) <- transposedBy perm x,
@@ -780,6 +776,20 @@ simplifyConcat vtable (Let pat _ (BasicOp (Concat cs i x xs new_d)))
             Just (BasicOp (Rearrange vcs perm2 v'))
               | perm1 == perm2 -> Just (v', vcs)
             _ -> Nothing
+
+-- concat of a split array is identity.
+simplifyConcat (vtable, used) (Let pat _ (BasicOp (Concat cs i x xs new_d)))
+  | Just (Let split_pat _ (BasicOp (Split split_cs split_i _ split_arr))) <-
+      ST.lookupStm x vtable,
+    i == split_i,
+    x:xs == patternNames split_pat = do
+      split_arr_t <- lookupType split_arr
+      let reshape = map DimCoercion $ arrayDims $ setDimSize i split_arr_t new_d
+      split_arr' <- letExp "concat_reshape" $ BasicOp $ Reshape (cs<>split_cs) reshape split_arr
+      if any (`UT.isConsumed` used) $ patternNames pat
+        then letBind_ pat $ BasicOp $ Copy split_arr'
+        else letBind_ pat $ BasicOp $ SubExp $ Var split_arr'
+
 simplifyConcat _ _ =
   cannotSimplify
 
@@ -812,10 +822,13 @@ simplifyBoolBranch _
   letBind_ pat $ BasicOp $ BinOp LogOr cond se
 -- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
-  | Body _ [] [tres] <- tb,
-    Body _ [] [fres] <- fb,
+  | Body _ tstms [tres] <- tb,
+    Body _ fstms [fres] <- fb,
     patternSize pat == length ts,
+    all (safeExp . bindingExp) $ tstms ++ fstms,
     all (==Prim Bool) ts = do
+  mapM_ addStm tstms
+  mapM_ addStm fstms
   e <- eBinOp LogOr (pure $ BasicOp $ BinOp LogAnd cond tres)
                     (eBinOp LogAnd (pure $ BasicOp $ UnOp Not cond)
                      (pure $ BasicOp $ SubExp fres))

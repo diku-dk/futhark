@@ -1,16 +1,14 @@
 -- A tricky case for array coalescing.
+-- ==
 
+-- structure cpu { Alloc 1 }
 
 import "/futlib/array"
 
 let mapper (_arg: i32): []i32 =
   let xs = replicate 1 0
 
-  loop (xs) =
-    for _i < 2 do
-      let xs[0] = xs[0]
-      in xs
-
+  -- Will be merged.
   loop (xs) =
     for _i < 2 do
       let xs[0] = xs[0]

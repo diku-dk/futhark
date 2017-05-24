@@ -140,7 +140,7 @@ simplifyKernelExp (Combine cspace ts active body) = do
   Combine
     <$> mapM Engine.simplify cspace
     <*> mapM Engine.simplify ts
-    <*> Engine.simplify active
+    <*> mapM Engine.simplify active
     <*> pure body'
 
 simplifyKernelExp (GroupReduce w lam input) = do
@@ -164,8 +164,7 @@ simplifyKernelExp (GroupStream w maxchunk lam accs arrs) = do
   maxchunk' <- Engine.simplify maxchunk
   accs' <- mapM Engine.simplify accs
   arrs' <- mapM Engine.simplify arrs
-  lam' <- simplifyGroupStreamLambda lam w' maxchunk' $
-          map (const Nothing) arrs'
+  lam' <- simplifyGroupStreamLambda lam w' maxchunk' arrs'
   return $ GroupStream w' maxchunk' lam' accs' arrs'
 
 simplifyKernelBody :: Engine.SimplifiableLore lore =>
@@ -177,7 +176,7 @@ simplifyKernelBody (KernelBody _ stms res) = do
 
 simplifyGroupStreamLambda :: Engine.SimplifiableLore lore =>
                              GroupStreamLambda lore
-                          -> SubExp -> SubExp -> [Maybe VName]
+                          -> SubExp -> SubExp -> [VName]
                           -> Engine.SimpleM lore (GroupStreamLambda (Wise lore))
 simplifyGroupStreamLambda lam w max_chunk arrs = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
@@ -185,10 +184,10 @@ simplifyGroupStreamLambda lam w max_chunk arrs = do
                    map paramName (acc_params ++ arr_params)
   (body_res', body_bnds') <-
     Engine.enterLoop $
-    Engine.bindLParams acc_params $
-    Engine.bindArrayLParams (zip arr_params arrs) $
     Engine.bindLoopVar block_size Int32 max_chunk $
     Engine.bindLoopVar block_offset Int32 w $
+    Engine.bindLParams acc_params $
+    Engine.bindChunkLParams block_offset (zip arr_params arrs) $
     Engine.blockIf (Engine.hasFree bound_here `Engine.orIf` Engine.isConsumed) $
     Engine.simplifyBody (repeat Observe) body
   acc_params' <- mapM (Engine.simplifyParam Engine.simplify) acc_params
@@ -415,9 +414,24 @@ simplifyKnownIterationStream _ (Let pat _
         letBindNames'_ [patElemName pe] $ BasicOp $ SubExp r
 simplifyKnownIterationStream _ _ = cannotSimplify
 
+removeUnusedStreamInputs :: (LocalScope (Lore m) m,
+                              MonadBinder m, Lore m ~ Wise InKernel) =>
+                            TopDownRule m
+removeUnusedStreamInputs _ (Let pat _ (Op (GroupStream w maxchunk lam accs arrs)))
+  | (used,unused) <- partition (isUsed . paramName . fst) $ zip arr_params arrs,
+    not $ null unused = do
+      let (arr_params', arrs') = unzip used
+          lam' = GroupStreamLambda chunk_size chunk_offset acc_params arr_params' body
+      letBind_ pat $ Op $ GroupStream w maxchunk lam' accs arrs'
+  where GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
+
+        isUsed = (`S.member` freeInBody body)
+removeUnusedStreamInputs _ _ = cannotSimplify
+
 inKernelRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Lore m ~ Wise InKernel) => RuleBook m
 inKernelRules = standardRules <>
                 RuleBook [fuseStreamIota,
-                          simplifyKnownIterationStream] []
+                          simplifyKnownIterationStream,
+                          removeUnusedStreamInputs] []

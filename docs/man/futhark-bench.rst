@@ -55,6 +55,16 @@ OPTIONS
 
     futhark-bench prog.fut --compiler=futhark-opencl --pass-option=-dHawaii
 
+--timeout=seconds
+
+  If the runtime for a dataset exceeds this integral number of
+  seconds, it is aborted.  Note that the time is allotted not *per
+  run*, but for *all runs* for a dataset.  A twenty second limit for
+  ten runs thus means each run has only two seconds (minus
+  initialisation overhead).
+
+  A negative timeout means to wait indefinitely.
+
 EXAMPLES
 ========
 

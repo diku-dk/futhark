@@ -48,7 +48,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
-import Control.Monad.RWS
+import Control.Monad.RWS.Strict
 import Data.List
 import Data.Loc
 import Data.Maybe

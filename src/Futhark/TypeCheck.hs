@@ -53,7 +53,7 @@ import Control.Parallel.Strategies
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
-import Control.Monad.RWS
+import Control.Monad.RWS.Strict
 import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -711,6 +711,12 @@ checkBasicOp (Iota e x s et) = do
 checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int32]) dims
   void $ checkSubExp valexp
+
+checkBasicOp (Repeat shapes innershape v) = do
+  v_t <- lookupType v
+  mapM_ (mapM_ (require [Prim int32]) . shapeDims) $ innershape : shapes
+  unless (length shapes == arrayRank v_t) $
+    bad $ TypeError "Incorrect number of shapes in repeat."
 
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape

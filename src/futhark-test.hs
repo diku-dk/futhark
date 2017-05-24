@@ -3,7 +3,6 @@
 -- test suite, and its test programs.
 module Main (main) where
 
-
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad hiding (forM_)
@@ -34,6 +33,7 @@ import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
 import Futhark.Test
+import Futhark.Passes
 
 import Futhark.Util.Options
 
@@ -79,20 +79,22 @@ structTestConfig :: FutharkConfig
 structTestConfig = newFutharkConfig { futharkWarn = False }
 
 optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
-optimisedProgramMetrics (SOACSPipeline pipeline) program = do
-  res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline program) False
-  case res of
-    Left err ->
-      throwError $ T.pack $ show err
-    Right prog ->
-      return $ progMetrics prog
-optimisedProgramMetrics (KernelsPipeline pipeline) program = do
-  res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline program) False
-  case res of
-    Left err ->
-      throwError $ T.pack $ show err
-    Right prog ->
-      return $ progMetrics prog
+optimisedProgramMetrics pipeline program =
+  case pipeline of SOACSPipeline ->
+                     check standardPipeline
+                   KernelsPipeline ->
+                     check kernelsPipeline
+                   SequentialCpuPipeline ->
+                     check sequentialCpuPipeline
+                   GpuPipeline ->
+                     check gpuPipeline
+  where check pipeline' = do
+          res <- io $ runFutharkM (runPipelineOnProgram structTestConfig pipeline' program) False
+          case res of
+            Left err ->
+              throwError $ T.pack $ show err
+            Right prog ->
+              return $ progMetrics prog
 
 testMetrics :: FilePath -> StructureTest -> TestM ()
 testMetrics program (StructureTest pipeline expected) = context "Checking metrics" $ do

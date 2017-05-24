@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -98,10 +99,10 @@ import Data.List
 import Data.Monoid
 import Prelude
 
+import Futhark.Analysis.Metrics
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
-
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -192,6 +193,10 @@ instance PP.Pretty inner => PP.Pretty (MemOp inner) where
   ppr (Alloc e DefaultSpace) = PP.text "alloc" <> PP.apply [PP.ppr e]
   ppr (Alloc e (Space sp)) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.text sp]
   ppr (Inner k) = PP.ppr k
+
+instance OpMetrics inner => OpMetrics (MemOp inner) where
+  opMetrics Alloc{} = seen "Alloc"
+  opMetrics (Inner k) = opMetrics k
 
 instance IsOp inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True
@@ -580,8 +585,8 @@ matchFunctionReturnType fname rettype result = do
               | otherwise ->
                   TypeCheck.bad $ TypeCheck.TypeError $
                   "Array " ++ pretty v ++
-                  " returned by function, but has nontrivial index function" ++
-                  pretty ixfun
+                  " returned by function, but has nontrivial index function " ++
+                  pretty ixfun ++ " " ++ show ixfun
 
 matchPatternToExp :: (ExplicitMemorish lore) =>
                      Pattern (Aliases lore)
@@ -897,6 +902,18 @@ expReturns (BasicOp (SubExp (Var v))) =
 
 expReturns (BasicOp (Opaque (Var v))) =
   pure <$> varReturns v
+
+expReturns (BasicOp (Repeat outer_shapes inner_shape v)) = do
+  t <- modifyArrayShape repeatDims <$> lookupType v
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  let outer_shapes' = map (map (primExpFromSubExp int32) . shapeDims) outer_shapes
+      inner_shape' = map (primExpFromSubExp int32) $ shapeDims inner_shape
+  return [ReturnsArray et (ExtShape $ map Free $ arrayDims t) NoUniqueness $
+          Just $ ReturnsInBlock mem $
+          IxFun.repeat ixfun outer_shapes' inner_shape']
+  where repeatDims (Shape ds) =
+          Shape $ concat (zipWith (++) (map shapeDims outer_shapes) (map pure ds)) ++
+          shapeDims inner_shape
 
 expReturns (BasicOp (Reshape _ newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
