@@ -65,7 +65,7 @@ regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels)
                         -> [SubExp]          -- nes
                         -> [VName]           -- arrs_flat
                         -> m ()
-regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
+regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
                         pat cs w comm reduce_lam fold_lam ispace inps nes arrs_flat = do
   unless (null $ patternContextElements pat) $ fail "regularSegmentedRedomap result pattern contains context elements, and Rasmus did not think this would ever happen."
 
@@ -205,7 +205,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
 
-      (kernel, _, _) <- largeKernel segment_size num_segments cs
+      (kernel, _, _) <- largeKernel segment_size num_segments nest_sizes cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w OneGroupOneSegment
         ispace inps
@@ -225,7 +225,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
 
-      (firstkernel, num_groups_used, num_groups_per_segment) <- largeKernel segment_size num_segments cs
+      (firstkernel, num_groups_used, num_groups_per_segment) <- largeKernel segment_size num_segments nest_sizes cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w ManyGroupsOneSegment
         ispace inps
@@ -259,7 +259,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
       -- Large kernel, using one group per segment (ogps)
       (large_ses, large_stms) <- runBinder $ do
-        (large_kernel, _, _) <- largeKernel new_segment_size num_segments cs
+        (large_kernel, _, _) <- largeKernel new_segment_size num_segments nest_sizes cs
           tmp_redres comm reduce_lam' kern_chunk_reduce_lam
           nes new_total_elems OneGroupOneSegment
           ispace inps
@@ -304,6 +304,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 largeKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
        -> SubExp            -- num_segments
+       -> [SubExp]          -- nest sizes
        -> Certificates      -- cs
        -> [VName]           -- all_arrs: flat arrays (also the "map_out" ones)
        -> Commutativity     -- comm
@@ -315,7 +316,7 @@ largeKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Kernel InKernel, SubExp, SubExp)
-largeKernel segment_size num_segments cs all_arrs comm
+largeKernel segment_size num_segments nest_sizes cs all_arrs comm
                       reduce_lam' kern_chunk_fold_lam
                       nes w segver ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
@@ -384,9 +385,14 @@ largeKernel segment_size num_segments cs all_arrs comm
         addKernelInputStms inps
 
         forM_ (zip all_arrs patelems_res_of_split) $ \(arr, pe) -> do
-          tp <- lookupType arr
-          let slice = fullSlice tp [DimSlice offset chunksize_se stride]
-          addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
+          let pe_t = patElemType pe
+              segment_dims = nest_sizes ++ arrayDims (pe_t `setOuterSize` segment_size)
+          arr_nested <- letExp (baseString arr ++ "_nested") $
+            BasicOp $ Reshape [] (map DimNew segment_dims) arr
+          arr_nested_t <- lookupType arr_nested
+          let slice = fullSlice arr_nested_t $ map (DimFix . Var . fst) ispace ++
+                      [DimSlice index_within_segment chunksize_se stride]
+          addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr_nested slice
 
         red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
