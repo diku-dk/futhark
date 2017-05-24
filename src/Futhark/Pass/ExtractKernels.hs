@@ -829,14 +829,15 @@ maybeDistributeStm bnd@(Let pat _ (Op (Redomap cs w comm lam foldlam nes arrs)))
 maybeDistributeStm bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
+      | Just (perm, pat_unused) <- permutationAndMissing pat res ->
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
           let (nes, arrs) = unzip input
+          nest' <- expandKernelNest pat_unused nest
           lam' <- Kernelise.transformLambda lam
           foldlam' <- renameLambda lam'
-          regularSegmentedRedomapKernel nest perm cs w comm' lam' foldlam' nes arrs >>=
+          regularSegmentedRedomapKernel nest' perm cs w comm' lam' foldlam' nes arrs >>=
             kernelOrNot bnd acc kernels acc'
     _ ->
       addStmToKernel bnd acc
