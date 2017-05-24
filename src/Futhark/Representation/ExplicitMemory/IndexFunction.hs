@@ -19,7 +19,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , linearWithOffset
        , rearrangeWithOffset
        , isDirect
-       , substInIdxFun
+       , substituteInIxFun
        )
        where
 
@@ -36,7 +36,7 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax
-  (ShapeChange, DimIndex(..), DimChange(..), Slice, sliceDims, unitSlice, VName)
+  (ShapeChange, DimIndex(..), Slice, sliceDims, unitSlice, VName)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -320,36 +320,17 @@ isDirect =
 
 
 -- | Substituting a name with a PrimExp in an index function.
-substInIdxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
-              -> IxFun (PrimExp VName)
-substInIdxFun tab (Direct pes) =
+substituteInIxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
+                  -> IxFun (PrimExp VName)
+substituteInIxFun tab (Direct pes) =
   Direct $ map (substituteInPrimExp tab) pes
-substInIdxFun tab (Permute ixfun p) =
-  Permute (substInIdxFun tab ixfun) p
-substInIdxFun tab (Rotate  ixfun pes) =
-  Rotate (substInIdxFun tab ixfun) $ map (substituteInPrimExp tab) pes
-substInIdxFun tab (Index ixfun sl) =
-  Index (substInIdxFun tab ixfun) $ substInSlice tab sl
-substInIdxFun tab (Reshape ixfun shpchange) =
-  Reshape (substInIdxFun tab ixfun) $ substInShapeChange tab shpchange
-substInIdxFun tab (Repeat ixfun outer_shapes inner_shape) =
-  Repeat (substInIdxFun tab ixfun) outer_shapes inner_shape
-
-substInSlice  :: M.Map VName (PrimExp VName) -> Slice (PrimExp VName)
-              -> Slice (PrimExp VName)
-substInSlice tab = map (substInDimIndex tab)
-substInDimIndex :: M.Map VName (PrimExp VName) -> DimIndex (PrimExp VName)
-                -> DimIndex (PrimExp VName)
-substInDimIndex tab (DimFix pe) = DimFix (substituteInPrimExp tab pe)
-substInDimIndex tab (DimSlice pe1 pe2 pe3) =
-    DimSlice (substituteInPrimExp tab pe1)
-             (substituteInPrimExp tab pe2)
-             (substituteInPrimExp tab pe3)
-
-substInShapeChange :: M.Map VName (PrimExp VName) -> ShapeChange (PrimExp VName)
-                   -> ShapeChange (PrimExp VName)
-substInShapeChange tab = map (substInDimChange tab)
-substInDimChange :: M.Map VName (PrimExp VName) -> DimChange (PrimExp VName)
-                 -> DimChange (PrimExp VName)
-substInDimChange tab (DimCoercion pe) = DimCoercion (substituteInPrimExp tab pe)
-substInDimChange tab (DimNew      pe) = DimNew      (substituteInPrimExp tab pe)
+substituteInIxFun tab (Permute ixfun p) =
+  Permute (substituteInIxFun tab ixfun) p
+substituteInIxFun tab (Rotate  ixfun pes) =
+  Rotate (substituteInIxFun tab ixfun) $ map (substituteInPrimExp tab) pes
+substituteInIxFun tab (Index ixfun sl) =
+  Index (substituteInIxFun tab ixfun) $ map (fmap $ substituteInPrimExp tab) sl
+substituteInIxFun tab (Reshape ixfun newshape) =
+  Reshape (substituteInIxFun tab ixfun) $ map (fmap $ substituteInPrimExp tab) newshape
+substituteInIxFun tab (Repeat ixfun outer_shapes inner_shape) =
+  Repeat (substituteInIxFun tab ixfun) outer_shapes inner_shape
