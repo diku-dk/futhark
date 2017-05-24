@@ -425,8 +425,10 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
   let usages = TC.usageMap occurs
   arr_aliases <- mapM TC.lookupAliases arrexps
   let aliased_syms = S.toList $ S.fromList $ concatMap S.toList arr_aliases
-  when (any (`M.member` usages) aliased_syms) $
-     TC.bad $ TC.TypeError "Stream with input array used inside lambda."
+  case find (`M.member` usages) aliased_syms of
+    Just bad_array ->
+      TC.bad $ TC.TypeError $ "Stream with input array " ++ pretty bad_array ++ " used inside lambda."
+    Nothing -> return ()
   -- check outerdim of Lambda's streamed-in array params are NOT specified,
   -- and that return type inner dimens are all specified but not as other
   -- lambda parameters!
