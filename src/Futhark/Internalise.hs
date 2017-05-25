@@ -1167,6 +1167,8 @@ isOverloadedFunction qname args loc = do
     handle [x] "f32" = Just $ toFloat I.Float32 x
     handle [x] "f64" = Just $ toFloat I.Float64 x
 
+    handle [x] "bool" = Just $ toBool x
+
     handle [x] "sgn" = Just $ signumF x
     handle [x] "abs" = Just $ absF x
     handle [x] "!" = Just $ notF x
@@ -1319,6 +1321,23 @@ isOverloadedFunction qname args loc = do
         E.Prim (E.FloatType float_from) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
         _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
+
+    toBool e desc = do
+      e' <- internaliseExp1 "tofloat_arg" e
+      case E.typeOf e of
+        E.Prim E.Bool ->
+          return [e']
+        E.Prim (E.Signed int_from) ->
+          letTupExp' desc =<<
+          eNot (pure $ I.BasicOp $ I.CmpOp (CmpEq $ I.IntType int_from) e' $ intConst int_from 0)
+        E.Prim (E.Unsigned int_from) ->
+          letTupExp' desc =<<
+          eNot (pure $ I.BasicOp $ I.CmpOp (CmpEq $ I.IntType int_from) e' $ intConst int_from 0)
+        E.Prim (E.FloatType float_from) ->
+          letTupExp' "is_zero" =<<
+          eNot (pure $ I.BasicOp $ I.CmpOp (CmpEq $ I.FloatType float_from) e' $ floatConst float_from 0)
+
+        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in toBool"
 
     signumF e desc = do
       e' <- internaliseExp1 "signum_arg" e
