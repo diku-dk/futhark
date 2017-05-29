@@ -368,7 +368,8 @@ largeKernel segment_size num_segments nest_sizes cs all_arrs comm
                  (eBinOp (SRem Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
               )
 
-        offset <- makeOffsetExp ordering index_within_segment elements_per_thread segment_index
+        (in_segment_offset,offset) <-
+          makeOffsetExp ordering index_within_segment elements_per_thread segment_index
 
         let (_, chunksize, [], arr_params) =
               partitionChunkedKernelFoldParameters 0 $ lambdaParams kern_chunk_fold_lam
@@ -391,7 +392,7 @@ largeKernel segment_size num_segments nest_sizes cs all_arrs comm
             BasicOp $ Reshape [] (map DimNew segment_dims) arr
           arr_nested_t <- lookupType arr_nested
           let slice = fullSlice arr_nested_t $ map (DimFix . Var . fst) ispace ++
-                      [DimSlice index_within_segment chunksize_se stride]
+                      [DimSlice in_segment_offset chunksize_se stride]
           addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr_nested slice
 
         red_pes <- forM red_ts $ \red_t -> do
@@ -463,14 +464,15 @@ largeKernel segment_size num_segments nest_sizes cs all_arrs comm
       ManyGroupsOneSegment -> "segmented_redomap__large_"  ++ commname ++ "_many"
 
     makeOffsetExp SplitContiguous index_within_segment elements_per_thread segment_index = do
-      e <- eBinOp (Add Int32)
-             (eBinOp (Mul Int32) (eSubExp elements_per_thread) (eSubExp index_within_segment))
-             (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
-      letSubExp "offset" e
+      in_segment_offset <- letSubExp "in_segment_offset" $
+        BasicOp $ BinOp (Mul Int32) elements_per_thread index_within_segment
+      offset <- letSubExp "offset" =<< eBinOp (Add Int32) (eSubExp in_segment_offset)
+                (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
+      return (in_segment_offset, offset)
     makeOffsetExp (SplitStrided _) index_within_segment _elements_per_thread segment_index = do
-      e <- eBinOp (Add Int32) (eSubExp index_within_segment)
-             (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
-      letSubExp "offset" e
+      offset <- letSubExp "offset" =<< eBinOp (Add Int32) (eSubExp index_within_segment)
+                (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
+      return (index_within_segment, offset)
 
 calcGroupsPerSegmentAndElementsPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
                         SubExp
