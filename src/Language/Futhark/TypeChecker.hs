@@ -8,7 +8,7 @@ module Language.Futhark.TypeChecker
   ( checkProg
   , TypeError
   , Warnings
-  , FileModule
+  , FileModule(FileModule)
   , Imports
   )
   where
