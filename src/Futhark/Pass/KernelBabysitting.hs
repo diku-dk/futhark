@@ -174,7 +174,7 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
 -- Not a hashmap, as SubExp is not hashable.
 type Replacements = M.Map (VName, Slice SubExp) VName
 
-ensureCoalescedAccess :: MonadBinder m =>
+ensureCoalescedAccess :: (MonadBinder m, Lore m ~ Kernels) =>
                          ExpMap
                       -> [VName]
                       -> SubExp
@@ -197,17 +197,18 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
       -- We are taking a slice of the array with a unit stride.  We
-      -- assume that the array will be traversed sequentially.
+      -- assume that the slice will be traversed sequentially.
       --
-      -- We will really want to treat the outer dimension like two
+      -- We will really want to treat the sliced dimension like two
       -- dimensions so we can transpose them.  This may require
       -- padding, but it will also require us to know an upper bound
       -- on 'len'.
-      | DimSlice offset len (Constant stride) : _rem_slice <- slice,
-        all isThreadLocal $ S.toList $ freeIn offset,
+      | (is, rem_slice) <- splitSlice slice,
+        DimSlice offset len (Constant stride) : _ <- rem_slice,
+        all isThreadLocal $ freeIn offset,
         Just len' <- sizeSubst len,
         oneIsh stride ->
-          replace =<< lift (rearrangeSlice (arraySize 0 t) num_threads len' arr)
+          replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_threads arr)
 
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, and some indices are
@@ -318,28 +319,31 @@ rowMajorArray arr = do
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0..rank-1] arr
 
 rearrangeSlice :: MonadBinder m =>
-                  SubExp -> SubExp -> SubExp -> VName
+                  Int -> SubExp -> SubExp -> VName
                -> m VName
-rearrangeSlice w num_threads elements_per_thread arr = do
-  (w_padded, padding) <- paddedScanReduceInput w num_threads
+rearrangeSlice d w stride arr = do
+  (w_padded, padding) <- paddedScanReduceInput w stride
 
+  per_stride <- letSubExp "per_stride" $ BasicOp $ BinOp (SQuot Int32) w_padded stride
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
-  rearrange w_padded (baseString arr) arr_padded (rowType arr_t)
+  rearrange w_padded per_stride (baseString arr) arr_padded arr_t
 
   where padArray w_padded padding arr_t = do
           let arr_shape = arrayShape arr_t
-              padding_shape = arr_shape `setOuterDim` padding
+              padding_shape = setDim d arr_shape padding
           arr_padding <-
             letExp (baseString arr <> "_padding") $
             BasicOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
           letExp (baseString arr <> "_padded") $
-            BasicOp $ Concat [] 0 arr [arr_padding] w_padded
+            BasicOp $ Concat [] d arr [arr_padding] w_padded
 
-        rearrange w_padded arr_name arr_padded row_type = do
-          let row_dims = arrayDims row_type
-              extradim_shape = Shape $ [num_threads, elements_per_thread] ++ row_dims
-              tr_perm = [1] ++ [2..shapeRank extradim_shape-1] ++ [0]
+        rearrange w_padded per_stride arr_name arr_padded arr_t = do
+          let arr_dims = arrayDims arr_t
+              pre_dims = take d arr_dims
+              post_dims = drop (d+1) arr_dims
+              extradim_shape = Shape $ pre_dims ++ [stride, per_stride] ++ post_dims
+              tr_perm = [0..d-1] ++ map (+d) ([1] ++ [2..shapeRank extradim_shape-1-d] ++ [0])
           arr_extradim <-
             letExp (arr_name <> "_extradim") $
             BasicOp $ Reshape [] (map DimNew $ shapeDims extradim_shape) arr_padded
@@ -347,17 +351,17 @@ rearrangeSlice w num_threads elements_per_thread arr = do
             letExp (arr_name <> "_extradim_tr") $
             BasicOp $ Manifest tr_perm arr_extradim
           arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
-            BasicOp $ Reshape [] (reshapeOuter [DimNew w_padded] 2 extradim_shape)
+            BasicOp $ Reshape [] (map DimCoercion pre_dims ++ map DimNew (w_padded : post_dims))
             arr_extradim_tr
           letExp (arr_name <> "_inv_tr_init") $
-            BasicOp $ Split [] 0 [w] arr_inv_tr
+            BasicOp $ Split [] d [w] arr_inv_tr
 
 paddedScanReduceInput :: MonadBinder m =>
                          SubExp -> SubExp
                       -> m (SubExp, SubExp)
-paddedScanReduceInput w num_threads = do
+paddedScanReduceInput w stride = do
   w_padded <- letSubExp "padded_size" =<<
-              eRoundToMultipleOf Int32 (eSubExp w) (eSubExp num_threads)
+              eRoundToMultipleOf Int32 (eSubExp w) (eSubExp stride)
   padding <- letSubExp "padding" $ BasicOp $ BinOp (Sub Int32) w_padded w
   return (w_padded, padding)
 
