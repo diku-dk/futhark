@@ -207,7 +207,6 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
   mk_structure <-
     case spaceStructure kspace of
       NestedThreadSpace{} -> Nothing
-      FlatGroupSpace{} -> Nothing
       FlatThreadSpace gtids_and_gdims ->
         return $ do
           -- Force a functioning group size. XXX: not pretty.

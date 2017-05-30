@@ -340,10 +340,11 @@ largeKernel segment_size num_segments nest_sizes cs all_arrs comm
     BasicOp $ BinOp (Mul Int32) group_size num_groups_per_segment
 
   gtid_vn <- newVName "gtid"
+  gtid_ln <- newVName "gtid"
 
   -- the array passed here is the structure for how to layout the kernel space
   space <- newKernelSpace (num_groups, group_size, num_threads) $
-    FlatGroupSpace $ ispace ++ [(gtid_vn, num_groups_per_segment)]
+    FlatThreadSpace $ ispace ++ [(gtid_vn, num_groups_per_segment),(gtid_ln,group_size)]
 
   let red_ts = take num_redres $ lambdaReturnType kern_chunk_fold_lam
   let map_ts = map rowType $ drop num_redres $ lambdaReturnType kern_chunk_fold_lam
@@ -362,7 +363,7 @@ largeKernel segment_size num_segments nest_sizes cs all_arrs comm
         -- localId + (group_size * (groupId % num_groups_per_segment))
         index_within_segment <- letSubExp "index_within_segment" =<<
           eBinOp (Add Int32)
-              (eSubExp $ Var $ spaceLocalId space)
+              (eSubExp $ Var gtid_ln)
               (eBinOp (Mul Int32)
                  (eSubExp group_size)
                  (eBinOp (SRem Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
@@ -414,7 +415,7 @@ largeKernel segment_size num_segments nest_sizes cs all_arrs comm
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
         mapM_ addStm [ Let (Pattern [] [pe']) () $
-                       Op $ Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
+                       Op $ Combine [(gtid_ln, group_size)] [patElemType pe] [] $
                        Body () [] [Var $ patElemName pe]
                      | (pe', pe) <- zip combine_red_pes red_pes ]
 
