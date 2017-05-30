@@ -377,7 +377,6 @@ defineMemorySpace space = do
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure sid
   let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:mty *block, typename int32_t size) {
-  assert(size >= 0);
   $id:(fatMemUnRef space)(block);
   $items:alloc
   block->references = (int*) malloc(sizeof(int));
