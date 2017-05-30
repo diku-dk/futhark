@@ -216,9 +216,8 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
       | (is, rem_slice) <- splitSlice slice,
         not $ null rem_slice,
         not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
-        is /= map Var (take (length is) thread_gids) || length is == length thread_gids || any isThreadLocal (S.toList $ freeIn rem_slice),
-        any isThreadLocal (S.toList $ freeIn is),
-        not $ any nonUnitStride rem_slice -> do
+        is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
+        any isThreadLocal (S.toList $ freeIn is) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
@@ -237,9 +236,6 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
   where replace arr' = do
           modify $ M.insert (arr, slice) arr'
           return $ Just (arr', slice)
-
-        nonUnitStride (DimSlice _ _ stride) = stride /= intConst Int32 1
-        nonUnitStride _ = False
 
 -- Heuristic for avoiding rearranging too small arrays.
 tooSmallSlice :: Int32 -> Slice SubExp -> Bool
