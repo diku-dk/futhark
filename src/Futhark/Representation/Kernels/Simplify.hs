@@ -207,9 +207,6 @@ instance Engine.Simplifiable SpaceStructure where
   simplify (FlatThreadSpace dims) =
     FlatThreadSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
     where (gtids, gdims) = unzip dims
-  simplify (FlatGroupSpace dims) =
-    FlatGroupSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
-    where (gtids, gdims) = unzip dims
   simplify (NestedThreadSpace dims) =
     NestedThreadSpace
     <$> (zip4 gtids
