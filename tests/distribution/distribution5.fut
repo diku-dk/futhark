@@ -16,7 +16,7 @@
 --
 -- structure distributed {
 --   Kernel 8
---   Concat 1
+--   Concat 2
 -- }
 
 let main(a: [#n][#an][]i32, b: [#n][#bn]i32): ([][]i32,[][]i32) =
