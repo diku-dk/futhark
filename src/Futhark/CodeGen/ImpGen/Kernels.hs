@@ -1051,8 +1051,6 @@ setSpaceIndices space =
   case spaceStructure space of
     FlatThreadSpace is_and_dims ->
       flatSpaceWith gtid is_and_dims
-    FlatGroupSpace is_and_dims ->
-      flatSpaceWith gid is_and_dims
     NestedThreadSpace is_and_dims -> do
       let (gtids, gdims, ltids, ldims) = unzip4 is_and_dims
       gdims' <- mapM ImpGen.compileSubExp gdims
@@ -1063,7 +1061,6 @@ setSpaceIndices space =
       forM_ (zip ltids ltid_es) $ \(i,e) ->
         ImpGen.emit $ Imp.SetScalar i e
   where gtid = Imp.var (spaceGlobalId space) int32
-        gid = Imp.var (spaceGroupId space) int32
 
         flatSpaceWith base is_and_dims = do
           let (is, dims) = unzip is_and_dims

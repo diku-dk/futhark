@@ -1131,7 +1131,7 @@ intraGroupParallelise knest body = do
         used_inps = filter inputIsUsed inps
 
     (kspace, kspace_stms, read_input_stms) <-
-      mapKernelSkeleton w (FlatGroupSpace ispace) used_inps
+      mapKernelSkeleton w (FlatThreadSpace ispace) used_inps
 
     mapM_ addStm w_stms
     mapM_ addStm kspace_stms
