@@ -1125,16 +1125,26 @@ intraGroupParallelise :: (MonadFreshNames m,
                       -> m [Out.Stm Out.Kernels]
 intraGroupParallelise knest body = do
   (w_stms, w, ispace, inps, rts) <- flatKernel knest
+  let num_groups = w
 
   ((kspace, read_input_stms), prelude_stms) <- runBinder $ do
     let inputIsUsed input = kernelInputName input `S.member` freeInBody body
         used_inps = filter inputIsUsed inps
 
-    (kspace, kspace_stms, read_input_stms) <-
-      mapKernelSkeleton w (FlatThreadSpace ispace) used_inps
-
     mapM_ addStm w_stms
-    mapM_ addStm kspace_stms
+    group_size_v <- newVName "group_size"
+    letBindNames'_ [group_size_v] $ Op GroupSize
+
+    num_threads <- letSubExp "num_threads" $
+                   BasicOp $ BinOp (Mul Int32) num_groups (Var group_size_v)
+
+    let ksize = (num_groups, Var group_size_v, num_threads)
+
+    ltid <- newVName "ltid"
+
+    kspace <- newKernelSpace ksize $ FlatThreadSpace $ ispace ++ [(ltid,Var group_size_v)]
+
+    read_input_stms <- mapM readKernelInput used_inps
 
     return (kspace, read_input_stms)
 
@@ -1173,22 +1183,7 @@ intraGroupParalleliseBody kspace body = do
                 Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
 
             Op (Scanomap cs w scanfun foldfun nes arrs) -> do
-              fold_stms <- collectStms_ $ do
-                let (fold_acc_params, fold_arr_params) =
-                      splitAt (length nes) $ lambdaParams foldfun
-
-                forM_ (zip fold_acc_params nes) $ \(p, ne) ->
-                  letBindNames'_ [paramName p] $ BasicOp $ SubExp ne
-
-                forM_ (zip fold_arr_params arrs) $ \(p, arr) -> do
-                  arr_t <- lookupType arr
-                  letBindNames' [paramName p] $ BasicOp $ Index cs arr $
-                    fullSlice arr_t [DimFix $ Var ltid]
-
-                Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
-              let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
-              scan_input <- letTupExp "scan_input" $ Op $
-                Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
+              scan_input <- procInput w cs foldfun nes arrs
 
               scanfun' <- Kernelise.transformLambda scanfun
 
@@ -1203,6 +1198,22 @@ intraGroupParalleliseBody kspace body = do
                                        }
               letBind_ pat $ Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
 
+            Op (Redomap cs w _ redfun foldfun nes arrs) -> do
+              red_input <- procInput w cs foldfun nes arrs
+
+              redfun' <- Kernelise.transformLambda redfun
+
+              -- A GroupReduce lambda needs two more parameters.
+              my_index <- newVName "my_index"
+              other_index <- newVName "other_index"
+              let my_index_param = Param my_index (Prim int32)
+                  other_index_param = Param other_index (Prim int32)
+                  redfun'' = redfun' { lambdaParams = my_index_param :
+                                                      other_index_param :
+                                                      lambdaParams redfun'
+                                       }
+              letBind_ pat $ Op $ Out.GroupReduce w redfun'' $ zip nes red_input
+
             Op (Stream cs w (Sequential accs) lam arrs) -> do
 
               types <- asksScope castScope
@@ -1211,10 +1222,29 @@ intraGroupParalleliseBody kspace body = do
               processStms stream_bnds
             _ ->
               Kernelise.transformStm stm
+          where procInput :: SubExp -> Certificates -> Lambda -> [SubExp] -> [VName]
+                          -> Binder Out.InKernel [VName]
+                procInput w cs foldfun nes arrs = do
+                  fold_stms <- collectStms_ $ do
+                    let (fold_acc_params, fold_arr_params) =
+                          splitAt (length nes) $ lambdaParams foldfun
+
+                    forM_ (zip fold_acc_params nes) $ \(p, ne) ->
+                      letBindNames'_ [paramName p] $ BasicOp $ SubExp ne
+
+                    forM_ (zip fold_arr_params arrs) $ \(p, arr) -> do
+                      arr_t <- lookupType arr
+                      letBindNames' [paramName p] $ BasicOp $ Index cs arr $
+                        fullSlice arr_t [DimFix $ Var ltid]
+
+                    Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
+                  let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
+                  letTupExp "red_input" $ Op $
+                    Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
 
     processStms $ bodyStms body
 
-  return $ KernelBody () kstms $ map (ThreadsReturn ThreadsInSpace) $ bodyResult body
+  return $ KernelBody () kstms $ map (ThreadsReturn $ OneThreadPerGroup $ intConst Int32 0) $ bodyResult body
 
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                       Out.Pattern Out.Kernels
