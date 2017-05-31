@@ -216,7 +216,7 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
       -- padding, but it will also require us to know an upper bound
       -- on 'len'.
       | (is, rem_slice) <- splitSlice slice,
-        DimSlice offset len (Constant stride) : _ <- rem_slice,
+        [DimSlice offset len (Constant stride)] <- rem_slice,
         all isThreadLocal $ freeIn offset,
         Just len' <- sizeSubst len,
         oneIsh stride -> do
