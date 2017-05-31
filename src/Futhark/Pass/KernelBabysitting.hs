@@ -207,8 +207,9 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
         DimSlice offset len (Constant stride) : _ <- rem_slice,
         all isThreadLocal $ freeIn offset,
         Just len' <- sizeSubst len,
-        oneIsh stride ->
-          replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_threads arr)
+        oneIsh stride -> do
+          let num_chunks = if null is then num_threads else len'
+          replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
 
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, and some indices are
@@ -321,13 +322,13 @@ rowMajorArray arr = do
 rearrangeSlice :: MonadBinder m =>
                   Int -> SubExp -> SubExp -> VName
                -> m VName
-rearrangeSlice d w stride arr = do
-  (w_padded, padding) <- paddedScanReduceInput w stride
+rearrangeSlice d w num_chunks arr = do
+  (w_padded, padding) <- paddedScanReduceInput w num_chunks
 
-  per_stride <- letSubExp "per_stride" $ BasicOp $ BinOp (SQuot Int32) w_padded stride
+  per_chunk <- letSubExp "per_chunk" $ BasicOp $ BinOp (SQuot Int32) w_padded num_chunks
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
-  rearrange w_padded per_stride (baseString arr) arr_padded arr_t
+  rearrange w_padded per_chunk (baseString arr) arr_padded arr_t
 
   where padArray w_padded padding arr_t = do
           let arr_shape = arrayShape arr_t
@@ -338,11 +339,11 @@ rearrangeSlice d w stride arr = do
           letExp (baseString arr <> "_padded") $
             BasicOp $ Concat [] d arr [arr_padding] w_padded
 
-        rearrange w_padded per_stride arr_name arr_padded arr_t = do
+        rearrange w_padded per_chunk arr_name arr_padded arr_t = do
           let arr_dims = arrayDims arr_t
               pre_dims = take d arr_dims
               post_dims = drop (d+1) arr_dims
-              extradim_shape = Shape $ pre_dims ++ [stride, per_stride] ++ post_dims
+              extradim_shape = Shape $ pre_dims ++ [num_chunks, per_chunk] ++ post_dims
               tr_perm = [0..d-1] ++ map (+d) ([1] ++ [2..shapeRank extradim_shape-1-d] ++ [0])
           arr_extradim <-
             letExp (arr_name <> "_extradim") $
