@@ -196,6 +196,18 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
         Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
+      -- We are not fully indexing the array, and the indices are not
+      -- a proper prefix of the thread indices, and some indices are
+      -- thread local, so we assume (HEURISTIC!)  that the remaining
+      -- dimensions will be traversed sequentially.
+      | (is, rem_slice) <- splitSlice slice,
+        not $ null rem_slice,
+        not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
+        is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
+        any isThreadLocal (S.toList $ freeIn is) -> do
+          let perm = coalescingPermutation (length is) $ arrayRank t
+          replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
+
       -- We are taking a slice of the array with a unit stride.  We
       -- assume that the slice will be traversed sequentially.
       --
@@ -210,18 +222,6 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
         oneIsh stride -> do
           let num_chunks = if null is then num_threads else len'
           replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
-
-      -- We are not fully indexing the array, and the indices are not
-      -- a proper prefix of the thread indices, and some indices are
-      -- thread local, so we assume (HEURISTIC!)  that the remaining
-      -- dimensions will be traversed sequentially.
-      | (is, rem_slice) <- splitSlice slice,
-        not $ null rem_slice,
-        not $ tooSmallSlice (primByteSize (elemType t)) rem_slice,
-        is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
-        any isThreadLocal (S.toList $ freeIn is) -> do
-          let perm = coalescingPermutation (length is) $ arrayRank t
-          replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
       -- Everything is fine... assuming that the array is in row-major
       -- order!  Make sure that is the case.
