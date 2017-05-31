@@ -332,12 +332,10 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
     -- Map-write fusion.
     (SOAC.Scatter _cs _len _lam _ivs as,
      SOAC.Map _ _ map_lam map_inp)
-      | S.null ( S.intersection (S.fromList $ map snd as) $
-            S.union (S.fromList $ map SOAC.inputArray map_inp)
-                    (freeInLambda map_lam)
-               ) &&
+      | S.null (S.intersection (S.fromList $ map snd as) $
+                S.fromList (map SOAC.inputArray map_inp) `S.union`
+                freeInLambda map_lam),
         mapWriteFusionOK outVars ker -> do
-        -- mapWriteFusionOK (outVars ++ map snd as) ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
             SOAC.Scatter (cs1++cs2) w res_lam' new_inp as
