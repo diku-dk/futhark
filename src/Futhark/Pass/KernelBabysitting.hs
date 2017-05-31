@@ -135,8 +135,8 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
                 szsubst' = mkSizeSubsts stms <> szsubst
                 scope' = scope <> scopeOf stms
 
-        onStm (variance, szsubst, scope) (Let pat attr (BasicOp (Index cs arr is))) =
-          Let pat attr . oldOrNew <$> f isThreadLocal sizeSubst scope arr is
+        onStm (variance, szsubst, _) (Let pat attr (BasicOp (Index cs arr is))) =
+          Let pat attr . oldOrNew <$> f isThreadLocal sizeSubst outer_scope arr is
           where oldOrNew Nothing =
                   BasicOp $ Index cs arr is
                 oldOrNew (Just (arr', is')) =
@@ -179,10 +179,10 @@ ensureCoalescedAccess :: (MonadBinder m, Lore m ~ Kernels) =>
                       -> [VName]
                       -> SubExp
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst scope arr slice = do
+ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst outer_scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
-  case (seen, isThreadLocal arr, typeOf <$> M.lookup arr scope) of
+  case (seen, isThreadLocal arr, typeOf <$> M.lookup arr outer_scope) of
     -- Already took care of this case elsewhere.
     (Just arr', _, _) ->
       pure $ Just (arr', slice)
