@@ -23,7 +23,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Monoid
 import Data.List
-import Debug.Trace
+--import Debug.Trace
 
 import Prelude
 
@@ -333,16 +333,14 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
     (SOAC.Scatter _cs _len _lam _ivs as,
      SOAC.Map _ _ map_lam map_inp)
       | -- 1. the to-be-written arrays are not used inside the map!
-        S.null ( S.intersection (S.fromList $ map snd as) $
-            S.union (S.fromList $ map SOAC.inputArray map_inp)
-                    (freeInLambda map_lam)
-               ) &&
+        S.null (S.intersection (S.fromList $ map snd as) $
+                S.fromList (map SOAC.inputArray map_inp) `S.union`
+                freeInLambda map_lam),
         -- 2. all arrays produced by the map are ONLY used (consumed)
         --    by the scatter, i.e., not used elsewhere.
-        not (any (`S.member` unfus_set) outVars) &&
+        not (any (`S.member` unfus_set) outVars),
         -- 3. all arrays produced by the map are input to the scatter.
         mapWriteFusionOK outVars ker -> do
-        -- mapWriteFusionOK (outVars ++ map snd as) ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
             SOAC.Scatter (cs1++cs2) w res_lam' new_inp as

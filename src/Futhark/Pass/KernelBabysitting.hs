@@ -135,8 +135,8 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
                 szsubst' = mkSizeSubsts stms <> szsubst
                 scope' = scope <> scopeOf stms
 
-        onStm (variance, szsubst, scope) (Let pat attr (BasicOp (Index cs arr is))) =
-          Let pat attr . oldOrNew <$> f isThreadLocal sizeSubst scope arr is
+        onStm (variance, szsubst, _) (Let pat attr (BasicOp (Index cs arr is))) =
+          Let pat attr . oldOrNew <$> f isThreadLocal sizeSubst outer_scope arr is
           where oldOrNew Nothing =
                   BasicOp $ Index cs arr is
                 oldOrNew (Just (arr', is')) =
@@ -179,10 +179,10 @@ ensureCoalescedAccess :: (MonadBinder m, Lore m ~ Kernels) =>
                       -> [VName]
                       -> SubExp
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst scope arr slice = do
+ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst outer_scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
-  case (seen, isThreadLocal arr, typeOf <$> M.lookup arr scope) of
+  case (seen, isThreadLocal arr, typeOf <$> M.lookup arr outer_scope) of
     -- Already took care of this case elsewhere.
     (Just arr', _, _) ->
       pure $ Just (arr', slice)
@@ -196,20 +196,6 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
         Just perm <- is' `isPermutationOf` is ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
-      -- We are taking a slice of the array with a unit stride.  We
-      -- assume that the slice will be traversed sequentially.
-      --
-      -- We will really want to treat the sliced dimension like two
-      -- dimensions so we can transpose them.  This may require
-      -- padding, but it will also require us to know an upper bound
-      -- on 'len'.
-      | (is, rem_slice) <- splitSlice slice,
-        DimSlice offset len (Constant stride) : _ <- rem_slice,
-        all isThreadLocal $ freeIn offset,
-        Just len' <- sizeSubst len,
-        oneIsh stride ->
-          replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_threads arr)
-
       -- We are not fully indexing the array, and the indices are not
       -- a proper prefix of the thread indices, and some indices are
       -- thread local, so we assume (HEURISTIC!)  that the remaining
@@ -221,6 +207,22 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst sco
         any isThreadLocal (S.toList $ freeIn is) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
+
+      -- We are taking a slice of the array with a unit stride.  We
+      -- assume that the slice will be traversed sequentially.
+      --
+      -- We will really want to treat the sliced dimension like two
+      -- dimensions so we can transpose them.  This may require
+      -- padding, but it will also require us to know an upper bound
+      -- on 'len'.
+      | (is, rem_slice) <- splitSlice slice,
+        null is,
+        DimSlice offset len (Constant stride):_ <- rem_slice,
+        all isThreadLocal $ freeIn offset,
+        Just len' <- sizeSubst len,
+        oneIsh stride -> do
+          let num_chunks = if null is then num_threads else len'
+          replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
 
       -- Everything is fine... assuming that the array is in row-major
       -- order!  Make sure that is the case.
@@ -321,13 +323,13 @@ rowMajorArray arr = do
 rearrangeSlice :: MonadBinder m =>
                   Int -> SubExp -> SubExp -> VName
                -> m VName
-rearrangeSlice d w stride arr = do
-  (w_padded, padding) <- paddedScanReduceInput w stride
+rearrangeSlice d w num_chunks arr = do
+  (w_padded, padding) <- paddedScanReduceInput w num_chunks
 
-  per_stride <- letSubExp "per_stride" $ BasicOp $ BinOp (SQuot Int32) w_padded stride
+  per_chunk <- letSubExp "per_chunk" $ BasicOp $ BinOp (SQuot Int32) w_padded num_chunks
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
-  rearrange w_padded per_stride (baseString arr) arr_padded arr_t
+  rearrange w_padded per_chunk (baseString arr) arr_padded arr_t
 
   where padArray w_padded padding arr_t = do
           let arr_shape = arrayShape arr_t
@@ -338,11 +340,11 @@ rearrangeSlice d w stride arr = do
           letExp (baseString arr <> "_padded") $
             BasicOp $ Concat [] d arr [arr_padding] w_padded
 
-        rearrange w_padded per_stride arr_name arr_padded arr_t = do
+        rearrange w_padded per_chunk arr_name arr_padded arr_t = do
           let arr_dims = arrayDims arr_t
               pre_dims = take d arr_dims
               post_dims = drop (d+1) arr_dims
-              extradim_shape = Shape $ pre_dims ++ [stride, per_stride] ++ post_dims
+              extradim_shape = Shape $ pre_dims ++ [num_chunks, per_chunk] ++ post_dims
               tr_perm = [0..d-1] ++ map (+d) ([1] ++ [2..shapeRank extradim_shape-1-d] ++ [0])
           arr_extradim <-
             letExp (arr_name <> "_extradim") $
