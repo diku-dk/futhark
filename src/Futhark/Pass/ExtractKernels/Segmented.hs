@@ -65,7 +65,7 @@ regularSegmentedRedomap :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels)
                         -> [SubExp]          -- nes
                         -> [VName]           -- arrs_flat
                         -> m ()
-regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
+regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
                         pat cs w comm reduce_lam fold_lam ispace inps nes arrs_flat = do
   unless (null $ patternContextElements pat) $ fail "regularSegmentedRedomap result pattern contains context elements, and Rasmus did not think this would ever happen."
 
@@ -205,7 +205,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
 
-      (kernel, _, _) <- largeKernel segment_size num_segments cs
+      (kernel, _, _) <- largeKernel segment_size num_segments nest_sizes cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w OneGroupOneSegment
         ispace inps
@@ -225,7 +225,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
         vn' <- newName $ patElemName pe
         return $ PatElem vn' BindVar $ patElemType pe
 
-      (firstkernel, num_groups_used, num_groups_per_segment) <- largeKernel segment_size num_segments cs
+      (firstkernel, num_groups_used, num_groups_per_segment) <- largeKernel segment_size num_segments nest_sizes cs
         all_arrs comm reduce_lam' kern_chunk_fold_lam
         nes w ManyGroupsOneSegment
         ispace inps
@@ -259,7 +259,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 
       -- Large kernel, using one group per segment (ogps)
       (large_ses, large_stms) <- runBinder $ do
-        (large_kernel, _, _) <- largeKernel new_segment_size num_segments cs
+        (large_kernel, _, _) <- largeKernel new_segment_size num_segments nest_sizes cs
           tmp_redres comm reduce_lam' kern_chunk_reduce_lam
           nes new_total_elems OneGroupOneSegment
           ispace inps
@@ -304,6 +304,7 @@ regularSegmentedRedomap segment_size num_segments _nest_sizes flat_pat
 largeKernel :: (MonadBinder m, Lore m ~ Kernels) =>
           SubExp            -- segment_size
        -> SubExp            -- num_segments
+       -> [SubExp]          -- nest sizes
        -> Certificates      -- cs
        -> [VName]           -- all_arrs: flat arrays (also the "map_out" ones)
        -> Commutativity     -- comm
@@ -315,7 +316,7 @@ largeKernel :: (MonadBinder m, Lore m ~ Kernels) =>
        -> [(VName, SubExp)] -- ispace = pair of (gtid, size) for the maps on "top" of this redomap
        -> [KernelInput]     -- inps = inputs that can be looked up by using the gtids from ispace
        -> m (Kernel InKernel, SubExp, SubExp)
-largeKernel segment_size num_segments cs all_arrs comm
+largeKernel segment_size num_segments nest_sizes cs all_arrs comm
                       reduce_lam' kern_chunk_fold_lam
                       nes w segver ispace inps = do
   let num_redres = length nes -- number of reduction results (tuple size for
@@ -339,10 +340,11 @@ largeKernel segment_size num_segments cs all_arrs comm
     BasicOp $ BinOp (Mul Int32) group_size num_groups_per_segment
 
   gtid_vn <- newVName "gtid"
+  gtid_ln <- newVName "gtid"
 
   -- the array passed here is the structure for how to layout the kernel space
   space <- newKernelSpace (num_groups, group_size, num_threads) $
-    FlatGroupSpace $ ispace ++ [(gtid_vn, num_groups_per_segment)]
+    FlatThreadSpace $ ispace ++ [(gtid_vn, num_groups_per_segment),(gtid_ln,group_size)]
 
   let red_ts = take num_redres $ lambdaReturnType kern_chunk_fold_lam
   let map_ts = map rowType $ drop num_redres $ lambdaReturnType kern_chunk_fold_lam
@@ -361,13 +363,14 @@ largeKernel segment_size num_segments cs all_arrs comm
         -- localId + (group_size * (groupId % num_groups_per_segment))
         index_within_segment <- letSubExp "index_within_segment" =<<
           eBinOp (Add Int32)
-              (eSubExp $ Var $ spaceLocalId space)
+              (eSubExp $ Var gtid_ln)
               (eBinOp (Mul Int32)
                  (eSubExp group_size)
                  (eBinOp (SRem Int32) (eSubExp $ Var $ spaceGroupId space) (eSubExp num_groups_per_segment))
               )
 
-        offset <- makeOffsetExp ordering index_within_segment elements_per_thread segment_index
+        (in_segment_offset,offset) <-
+          makeOffsetExp ordering index_within_segment elements_per_thread segment_index
 
         let (_, chunksize, [], arr_params) =
               partitionChunkedKernelFoldParameters 0 $ lambdaParams kern_chunk_fold_lam
@@ -384,9 +387,14 @@ largeKernel segment_size num_segments cs all_arrs comm
         addKernelInputStms inps
 
         forM_ (zip all_arrs patelems_res_of_split) $ \(arr, pe) -> do
-          tp <- lookupType arr
-          let slice = fullSlice tp [DimSlice offset chunksize_se stride]
-          addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr slice
+          let pe_t = patElemType pe
+              segment_dims = nest_sizes ++ arrayDims (pe_t `setOuterSize` segment_size)
+          arr_nested <- letExp (baseString arr ++ "_nested") $
+            BasicOp $ Reshape [] (map DimNew segment_dims) arr
+          arr_nested_t <- lookupType arr_nested
+          let slice = fullSlice arr_nested_t $ map (DimFix . Var . fst) ispace ++
+                      [DimSlice in_segment_offset chunksize_se stride]
+          addStm $ Let (Pattern [] [pe]) () $ BasicOp $ Index cs arr_nested slice
 
         red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
@@ -407,7 +415,7 @@ largeKernel segment_size num_segments cs all_arrs comm
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
         mapM_ addStm [ Let (Pattern [] [pe']) () $
-                       Op $ Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
+                       Op $ Combine [(gtid_ln, group_size)] [patElemType pe] [] $
                        Body () [] [Var $ patElemName pe]
                      | (pe', pe) <- zip combine_red_pes red_pes ]
 
@@ -457,14 +465,15 @@ largeKernel segment_size num_segments cs all_arrs comm
       ManyGroupsOneSegment -> "segmented_redomap__large_"  ++ commname ++ "_many"
 
     makeOffsetExp SplitContiguous index_within_segment elements_per_thread segment_index = do
-      e <- eBinOp (Add Int32)
-             (eBinOp (Mul Int32) (eSubExp elements_per_thread) (eSubExp index_within_segment))
-             (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
-      letSubExp "offset" e
+      in_segment_offset <- letSubExp "in_segment_offset" $
+        BasicOp $ BinOp (Mul Int32) elements_per_thread index_within_segment
+      offset <- letSubExp "offset" =<< eBinOp (Add Int32) (eSubExp in_segment_offset)
+                (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
+      return (in_segment_offset, offset)
     makeOffsetExp (SplitStrided _) index_within_segment _elements_per_thread segment_index = do
-      e <- eBinOp (Add Int32) (eSubExp index_within_segment)
-             (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
-      letSubExp "offset" e
+      offset <- letSubExp "offset" =<< eBinOp (Add Int32) (eSubExp index_within_segment)
+                (eBinOp (Mul Int32) (eSubExp segment_size) (eSubExp segment_index))
+      return (index_within_segment, offset)
 
 calcGroupsPerSegmentAndElementsPerThread :: (MonadBinder m, Lore m ~ Kernels) =>
                         SubExp

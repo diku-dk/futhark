@@ -498,20 +498,11 @@ computeThreadChunkSize :: SplitOrdering
                        -> ImpGen.ImpM lore op ()
 computeThreadChunkSize (SplitStrided stride) thread_index elements_per_thread num_elements chunk_var = do
   stride' <- ImpGen.compileSubExp stride
-  remaining_elements <- newVName "remaining_elements"
-  ImpGen.emit $
-    Imp.DeclareScalar remaining_elements int32
-  ImpGen.emit $
-    Imp.SetScalar remaining_elements $
+  ImpGen.emit $ Imp.SetScalar chunk_var $ Imp.BinOpExp (SMin Int32)
+    (Imp.innerExp elements_per_thread) $
     (Imp.innerExp num_elements - thread_index)
     `quotRoundingUp`
     stride'
-  ImpGen.emit $
-    Imp.If (Imp.CmpOpExp (CmpSlt Int32)
-            (Imp.innerExp elements_per_thread)
-            (Imp.var remaining_elements int32))
-    (Imp.SetScalar chunk_var (Imp.innerExp elements_per_thread))
-    (Imp.SetScalar chunk_var (Imp.var remaining_elements int32))
 
 computeThreadChunkSize SplitContiguous thread_index elements_per_thread num_elements chunk_var = do
   starting_point <- newVName "starting_point"
@@ -1060,8 +1051,6 @@ setSpaceIndices space =
   case spaceStructure space of
     FlatThreadSpace is_and_dims ->
       flatSpaceWith gtid is_and_dims
-    FlatGroupSpace is_and_dims ->
-      flatSpaceWith gid is_and_dims
     NestedThreadSpace is_and_dims -> do
       let (gtids, gdims, ltids, ldims) = unzip4 is_and_dims
       gdims' <- mapM ImpGen.compileSubExp gdims
@@ -1072,7 +1061,6 @@ setSpaceIndices space =
       forM_ (zip ltids ltid_es) $ \(i,e) ->
         ImpGen.emit $ Imp.SetScalar i e
   where gtid = Imp.var (spaceGlobalId space) int32
-        gid = Imp.var (spaceGroupId space) int32
 
         flatSpaceWith base is_and_dims = do
           let (is, dims) = unzip is_and_dims

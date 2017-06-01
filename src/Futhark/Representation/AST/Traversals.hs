@@ -127,9 +127,10 @@ mapExpM tv (BasicOp (Index cs arr slice)) =
 mapExpM tv (BasicOp (Iota n x s et)) =
   BasicOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s <*> pure et)
 mapExpM tv (BasicOp (Replicate shape vexp)) =
-  BasicOp <$> (Replicate
-               <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape))
-               <*> mapOnSubExp tv vexp)
+  BasicOp <$> (Replicate <$> mapOnShape tv shape <*> mapOnSubExp tv vexp)
+mapExpM tv (BasicOp (Repeat shapes innershape v)) =
+  BasicOp <$> (Repeat <$> mapM (mapOnShape tv) shapes <*>
+               mapOnShape tv innershape <*> mapOnVName tv v)
 mapExpM tv (BasicOp (Scratch t shape)) =
   BasicOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
 mapExpM tv (BasicOp (Reshape cs shape arrexp)) =
@@ -175,6 +176,9 @@ mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
         (valparams,valinits) = unzip valmerge
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
+
+mapOnShape :: Monad m => Mapper flore tlore m -> Shape -> m Shape
+mapOnShape tv (Shape ds) = Shape <$> mapM (mapOnSubExp tv) ds
 
 mapOnExtType :: Monad m =>
                 Mapper flore tlore m -> TypeBase ExtShape u -> m (TypeBase ExtShape u)

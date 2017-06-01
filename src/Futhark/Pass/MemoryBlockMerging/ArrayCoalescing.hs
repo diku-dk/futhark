@@ -752,7 +752,7 @@ translateIndFunFreeVar scope0 scals0 indfun =
                                ) fv_trans_vars
   in  if  length fv_trans_exps == length fv_trans_vars
       then let fv_substs_tab = M.fromList $ zip fv_trans_vars fv_trans_exps
-               indfun' = IxFun.substInIdxFun fv_substs_tab indfun
+               indfun' = IxFun.substituteInIxFun fv_substs_tab indfun
            in  trace ("COALESCING translation: vars: "++pretty fv_trans_vars++" exps: "++pretty fv_trans_exps)
                (True, M.empty, indfun')
       else (False, M.empty, indfun)

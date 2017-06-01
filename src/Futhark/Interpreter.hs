@@ -562,6 +562,9 @@ evalBasicOp (Replicate (Shape ds) e2) = do
                             (concat $ genericReplicate n $ elems arr))
                   bt $ map fromIntegral ds'++shape]
 
+evalBasicOp Repeat{} =
+  bad $ TypeError "Repeat"
+
 evalBasicOp (Scratch bt shape) = do
   shape' <- mapM (asInt "evalBasicOp Scratch" <=< evalSubExp) shape
   let nelems = product shape'
