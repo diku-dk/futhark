@@ -334,7 +334,7 @@ rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True  e = [C.cexp|$exp:e.mem|]
 rawMem' False e = [C.cexp|$exp:e|]
 
-defineMemorySpace :: Space -> CompilerM op s ([C.Definition], C.BlockItem)
+defineMemorySpace :: Space -> CompilerM op s ([C.Definition], C.BlockItem, C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
   let structdef = [C.cedecl|struct $id:sname { int *references; $ty:rm mem; typename int64_t size; };|]
@@ -364,6 +364,9 @@ defineMemorySpace space = do
         fprintf(stderr, "%ld bytes freed (now allocated: %ld bytes)\n",
                 block->size, $id:usagename);
       }
+      if (detail_memory_simple) {
+        detail_memory_simple_total_freed += block->size;
+      }
     }
   }
 }|]
@@ -386,6 +389,9 @@ defineMemorySpace space = do
   if (detail_memory) {
     fprintf(stderr, $string:("Allocated %d bytes in " ++ spacedesc ++ " (now allocated: %ld bytes)"), size, $id:usagename);
   }
+  if (detail_memory_simple) {
+    detail_memory_simple_total_allocated += size;
+  }
   if ($id:usagename > $id:peakname) {
     $id:peakname = $id:usagename;
     if (detail_memory) {
@@ -407,6 +413,8 @@ defineMemorySpace space = do
 
   return ([peakdef, usagedef, structdef, unrefdef, allocdef, setdef],
           [C.citem|fprintf(stderr, $string:("Peak memory usage for " ++ spacedesc ++ ": %ld bytes.\n"),
+                           $id:peakname);|],
+          [C.citem|fprintf(stderr, $string:("%ld " ++ spacedesc ++ "\n"),
                            $id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
@@ -820,6 +828,11 @@ benchmarkOptions =
             , optionArgument = NoArgument
             , optionAction = [C.cstm|detail_memory = 1;|]
             }
+   , Option { optionLongName = "memory-reporting-simple"
+            , optionShortName = Just 'M'
+            , optionArgument = NoArgument
+            , optionAction = [C.cstm|detail_memory_simple = 1;|]
+            }
    , Option { optionLongName = "entry-point"
             , optionShortName = Just 'e'
             , optionArgument = RequiredArgument
@@ -852,7 +865,7 @@ compileProg :: MonadFreshNames m =>
             -> m String
 compileProg ops userstate spaces decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
-  let ((memtypes, memreport, prototypes, definitions,
+  let ((memtypes, memreport, memreport_simple, prototypes, definitions,
         entry_points), endstate) =
         runCompilerM prog ops src userstate compileProg'
       (entry_point_decls, entry_point_inits) = unzip entry_points
@@ -868,6 +881,9 @@ $esc:("#include <assert.h>")
 $esc:("#include <getopt.h>")
 
 static int detail_memory = 0;
+static int detail_memory_simple = 0;
+static size_t detail_memory_simple_total_allocated = 0;
+static size_t detail_memory_simple_total_freed = 0;
 static int debugging = 0;
 
 $esc:panic_h
@@ -951,6 +967,12 @@ int main(int argc, char** argv) {
   if (detail_memory) {
     $items:memreport
   }
+  if (detail_memory_simple) {
+    fprintf(stderr, "%ld\n%ld\n",
+            detail_memory_simple_total_allocated,
+            detail_memory_simple_total_freed);
+    $items:memreport_simple
+  }
   return 0;
 }
 
@@ -959,8 +981,8 @@ int main(int argc, char** argv) {
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
           entry_points <- mapM (uncurry $ mainCall pre_timing) $
                           filter (functionEntry . snd) funs
-          (memtypes, memreport) <- unzip <$> mapM defineMemorySpace spaces
-          return (concat memtypes, memreport, prototypes, definitions, entry_points)
+          (memtypes, memreport, memreport_simple) <- unzip3 <$> mapM defineMemorySpace spaces
+          return (concat memtypes, memreport, memreport_simple, prototypes, definitions, entry_points)
         funcToDef func = C.FuncDef func loc
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l

@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | Simple tool for benchmarking Futhark programs.  Use the @--json@
 -- flag for machine-readable output.
 module Main (main) where
@@ -48,7 +49,11 @@ binaryName :: FilePath -> FilePath
 binaryName = (`replaceExtension` "bin")
 
 newtype RunResult = RunResult { runMicroseconds :: Int }
-data DataResult = DataResult String (Either T.Text [RunResult])
+data MemoryInfo = MemoryInfo { totalAllocated :: Int
+                             , totalFreed :: Int
+                             , peakMemoryUsages :: [(Int, String)]
+                             }
+data DataResult = DataResult String (Either T.Text ([RunResult], MemoryInfo))
 data BenchResult = BenchResult FilePath [DataResult]
 
 resultsToJSON :: [BenchResult] -> JSON.JSValue
@@ -65,9 +70,16 @@ resultsToJSON = JSON.JSObject . JSON.toJSObject . map benchResultToJSObject
           -> (String, JSON.JSValue)
         dataResultToJSObject (DataResult desc (Left err)) =
           (desc, JSON.showJSON err)
-        dataResultToJSObject (DataResult desc (Right runtimes)) =
+        dataResultToJSObject (DataResult desc (Right (runtimes, memory_info))) =
           (desc, JSON.JSObject $ JSON.toJSObject
-                 [("runtimes", JSON.showJSON $ map runMicroseconds runtimes)])
+                 [ ("runtimes", JSON.showJSON $ map runMicroseconds runtimes)
+                 , ("total_allocated", JSON.showJSON $ totalAllocated memory_info)
+                 , ("total_freed", JSON.showJSON $ totalFreed memory_info)
+                 , ("peak_memory_usages",
+                    JSON.JSObject $ JSON.toJSObject $ map (\(n, subdesc) ->
+                                                             (subdesc, JSON.showJSON n))
+                    $ peakMemoryUsages memory_info)
+                 ])
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -158,7 +170,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesBS dir input_spec
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
-  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
+  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts, "-M"]
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
@@ -175,6 +187,25 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
     Just (progCode, output, progerr) ->
       do
+        (allocated_total, freed_total, peaks) <- case lines $ BS.unpack progerr of
+          (allocated_total : freed_total : peaks) -> do
+            let (allocated_total' :: Int, freed_total' :: Int) =
+                  (read allocated_total, read freed_total)
+            let peaks' = map ((\(x, y) ->
+                                 (read x :: Int, tail y)) . break (== ' '))
+                         peaks
+            return (allocated_total', freed_total', peaks')
+          _ -> itWentWrong "unexpected stderr text with flag -M"
+
+
+        io $ do
+          putStrLn ""
+          putStrLn $ "Total allocated: " ++ show allocated_total ++ " bytes."
+          putStrLn $ "Total freed: " ++ show freed_total ++ " bytes."
+          forM_ peaks $ \(peak_usage, space_kind) ->
+            putStrLn ("Peak memory usage for " ++ space_kind ++ ": "
+                       ++ show peak_usage ++ " bytes.")
+
         case maybe_expected of
           Nothing ->
             didNotFail program progCode $ T.decodeUtf8 progerr
@@ -187,7 +218,8 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
           Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
 
         io $ reportResult runtimes
-        return runtimes
+        let memory_info = MemoryInfo allocated_total freed_total peaks
+        return (runtimes, memory_info)
     Nothing ->
       itWentWrong $ T.pack $ "Execution exceeded " ++ show (optTimeout opts) ++ " seconds."
 
