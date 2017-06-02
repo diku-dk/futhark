@@ -9,6 +9,8 @@ import matplotlib
 matplotlib.use('Agg') # For headless use.
 import matplotlib.pyplot as plt
 
+# Ignore datasets with runtimes below 1 millisecond.
+runtime_limit_ignore = 1000.0
 
 out_dir = sys.argv[1]
 json_paths = sys.argv[2:]
@@ -45,16 +47,22 @@ for benchmark_name in benchmark_names:
         total_alloc = {}
         for json_path, local_benchmarks in sorted(raw_results.items()):
             try:
-                runtimes[json_path] = np.mean(local_benchmarks[benchmark_name]['datasets'][dataset_name]['runtimes'])
-                total_alloc[json_path] = local_benchmarks[benchmark_name]['datasets'][dataset_name]['total_allocated']
+                t = np.mean(local_benchmarks[benchmark_name]['datasets'][dataset_name]['runtimes'])
+                a = local_benchmarks[benchmark_name]['datasets'][dataset_name]['total_allocated']
             except TypeError:
-                pass
-        if 'without.json' in runtimes.keys() and 'with.json' in runtimes.keys():
+                continue
+            if t < runtime_limit_ignore:
+                continue
+            runtimes[json_path] = t
+            total_alloc[json_path] = a
+        if 'without.json' in runtimes.keys() and 'with.json' in runtimes.keys() \
+           and 'without.json' in total_alloc.keys() and 'with.json' in total_alloc.keys():
             improvement_time = (runtimes['without.json'] - runtimes['with.json']) / runtimes['without.json']
             improvement_alloc = (total_alloc['without.json'] - total_alloc['with.json']) / total_alloc['without.json']
             datasets.append((dataset_name, runtimes, total_alloc, improvement_time, improvement_alloc))
     datasets.sort(key=lambda t: t[3:], reverse=True)
-    benchmarks.append((benchmark_name, datasets))
+    if len(datasets) > 0:
+        benchmarks.append((benchmark_name, datasets))
 
 def average_improvements(datasets):
     t, a = 0, 0
@@ -65,34 +73,38 @@ def average_improvements(datasets):
     a /= len(datasets)
     return (t, a)
 
-benchmarks.sort(key=lambda t: average_improvements(t[1]), reverse=True)
-# benchmarks.sort(key=lambda t: average_improvements(t[1])[0], reverse=True)
-# benchmarks.sort(key=lambda t: average_improvements(t[1])[1], reverse=True)
-
 def cut_desc(s):
     if s[0] == '#':
         return s.split(' ')[0]
     else:
         return os.path.split(s)[1]
 
-for benchmark_name, datasets in benchmarks:
-    print('# {}'.format(benchmark_name))
-    t, a = average_improvements(datasets)
-    print('Average improvement in runtime: {:.3f}'.format(t))
-    print('Average improvement in total allocation: {:.3f}'.format(t))
-    print('Datasets:')
-    for dataset_name, runtimes, total_alloc, improvement_time, improvement_alloc in datasets:
-        print('  ## Dataset: {}'.format(cut_desc(dataset_name)))
-        print('  Runtimes: Without: {} us, with: {} us'.format(runtimes['without.json'], runtimes['with.json']))
-        print('  Total allocation: Without: {} us, with: {} us'.format(total_alloc['without.json'], total_alloc['with.json']))
-        print('  Improvement in runtime: {}'.format(improvement_time))
-        print('  Improvement in total allocation: {}'.format(improvement_alloc))
-    print('')
-
-
 # Plot!
 
 os.makedirs(out_dir, exist_ok=True)
+
+with open(os.path.join(out_dir, 'info.txt'), 'w') as sys.stdout:
+    for name, i in (('runtime', 0), ('total allocation', 1)):
+        benchmarks.sort(key=lambda t: average_improvements(t[1])[i], reverse=True)
+        print('Benchmarks sorted after the best average {} improvements: {}\n'.format(
+            name, ', '.join(t[0] for t in benchmarks)))
+
+    benchmarks.sort()
+    for benchmark_name, datasets in benchmarks:
+        print('# {}'.format(benchmark_name))
+        t, a = average_improvements(datasets)
+        print('Average improvement in runtime: {:.3f}'.format(t))
+        print('Average improvement in total allocation: {:.3f}'.format(a))
+        print('Datasets:')
+        for dataset_name, runtimes, total_alloc, improvement_time, improvement_alloc in datasets:
+            print('  ## Dataset: {}'.format(cut_desc(dataset_name)))
+            print('  Runtimes: Without: {} us, with: {} us'.format(
+                runtimes['without.json'], runtimes['with.json']))
+            print('  Total allocation: Without: {} us, with: {} us'.format(
+                total_alloc['without.json'], total_alloc['with.json']))
+            print('  Improvement in runtime: {}'.format(improvement_time))
+            print('  Improvement in total allocation: {}'.format(improvement_alloc))
+        print('')
 
 def forever_repeat(xs):
     while True:
@@ -124,7 +136,8 @@ for benchmark_name, datasets in benchmarks:
                                                   cut_desc(dataset_name)),
                                  runtime, color))
 
-    print('Plotting {} into {}.'.format(benchmark_name, pdf_path))
+    print('Plotting runtimes {} into {}.'.format(benchmark_name, pdf_path),
+          file=sys.stderr)
 
     ind = np.arange(len(flat_results))
     width = 0.35
@@ -162,7 +175,8 @@ for benchmark_name, datasets in benchmarks:
                                                   cut_desc(dataset_name)),
                                  alloc, color))
 
-    print('Plotting {} into {}.'.format(benchmark_name, pdf_path))
+    print('Plotting total allocations {} into {}.'.format(benchmark_name, pdf_path),
+          file=sys.stderr)
 
     ind = np.arange(len(flat_results))
     width = 0.35
