@@ -8,8 +8,7 @@ module Main (main) where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except hiding (forM_)
-import qualified Data.ByteString.Char8 as SBS
-import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.ByteString.Char8 as BS
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -110,7 +109,7 @@ compileBenchmark opts (program, spec) =
         ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
                               return Nothing
         ExitFailure _   -> do putStrLn "Failed:\n"
-                              SBS.putStrLn futerr
+                              BS.putStrLn futerr
                               return Nothing
     _ ->
       return Nothing
@@ -171,8 +170,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   -- no program component.
   run_res <-
     timeout (optTimeout opts * 1000000) $
-    readProcessWithExitCode ("." </> binaryName program) options $
-    LBS.toStrict input
+    readProcessWithExitCode ("." </> binaryName program) options input
 
   fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
     Just (progCode, output, progerr) ->
@@ -182,7 +180,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
             didNotFail program progCode $ T.decodeUtf8 progerr
           Just expected ->
             compareResult program expected =<<
-            runResult program progCode output progerr
+            runResult program progCode (T.decodeUtf8 output) (T.decodeUtf8 progerr)
         runtime_result <- io $ T.readFile tmpfile
         runtimes <- case mapM readRuntime $ T.lines runtime_result of
           Just runtimes -> return $ map RunResult runtimes
@@ -217,20 +215,20 @@ itWentWrong t = do
 runResult :: (MonadError T.Text m, MonadIO m) =>
              FilePath
           -> ExitCode
-          -> SBS.ByteString
-          -> SBS.ByteString
+          -> T.Text
+          -> T.Text
           -> m [Value]
 runResult program ExitSuccess stdout_s _ =
-  case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
+  case valuesFromText "stdout" stdout_s of
     Left e   -> do
       actual <- liftIO $ writeOutFile program "actual" stdout_s
       itWentWrong $ T.pack $ show e <> "\n(See " <> actual <> ")"
     Right vs -> return vs
 runResult program (ExitFailure code) _ stderr_s =
   itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
-  " and output:\n" ++ T.unpack (T.decodeUtf8 stderr_s)
+  " and output:\n" ++ T.unpack stderr_s
 
-writeOutFile :: FilePath -> String -> SBS.ByteString -> IO FilePath
+writeOutFile :: FilePath -> String -> T.Text -> IO FilePath
 writeOutFile base ext content =
   attempt (0::Int)
   where template = base `replaceExtension` ext
@@ -239,7 +237,7 @@ writeOutFile base ext content =
           exists <- doesFileExist filename
           if exists
             then attempt $ i+1
-            else do SBS.writeFile filename content
+            else do T.writeFile filename content
                     return filename
 
 compareResult :: (MonadError T.Text m, MonadIO m) =>
@@ -250,10 +248,10 @@ compareResult program expectedResult actualResult =
     Just mismatch -> do
       actualf <-
         liftIO $ writeOutFile program "actual" $
-        T.encodeUtf8 $ T.unlines $ map prettyText actualResult
+        T.unlines $ map prettyText actualResult
       expectedf <-
         liftIO $ writeOutFile program "expected" $
-        T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
+        T.unlines $ map prettyText expectedResult
       itWentWrong $ T.pack $
         actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
     Nothing ->
