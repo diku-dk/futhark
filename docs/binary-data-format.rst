@@ -44,7 +44,8 @@ encoding (currently 1), ``num_dims`` is the number of dimensions in the array as
 a single byte (0 for scalar), and ``type`` is a 4 character string describing
 the type of the values(s) -- see below for more details.
 
-Encoding a scalar value is done by treating it as a 0-dimensional array::
+Encoding a scalar value is done by appending the binary little endian
+representation of it::
 
   b <version> 0 <type> <value>
 

@@ -22,17 +22,13 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import qualified Data.Array as A
-import Data.Binary (Binary)
-import Data.Binary.Get
-import Data.Binary.IEEE754
-import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Maybe
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Char (isSpace)
-import Data.Vector.Binary
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import qualified Data.Vector.Unboxed as UVec
 import Data.Vector.Generic (freeze)
+import qualified Data.Text as T
 
 import Prelude
 
@@ -97,26 +93,26 @@ valueShape (BoolValue shape _) = UVec.toList shape
 
 -- The parser
 
-dropRestOfLine, dropSpaces :: BS.ByteString -> BS.ByteString
-dropRestOfLine = BS.drop 1 . BS.dropWhile (/='\n')
-dropSpaces t = case BS.dropWhile isSpace t of
-  t' | "--" `BS.isPrefixOf` t' -> dropSpaces $ dropRestOfLine t'
+dropRestOfLine, dropSpaces :: T.Text -> T.Text
+dropRestOfLine = T.drop 1 . T.dropWhile (/='\n')
+dropSpaces t = case T.dropWhile isSpace t of
+  t' | "--" `T.isPrefixOf` t' -> dropSpaces $ dropRestOfLine t'
      | otherwise -> t'
 
-type ReadValue v = BS.ByteString -> Maybe (v, BS.ByteString)
+type ReadValue v = T.Text -> Maybe (v, T.Text)
 
-symbol :: Char -> BS.ByteString -> Maybe BS.ByteString
+symbol :: Char -> T.Text -> Maybe T.Text
 symbol c t
-  | Just (c', t') <- BS.uncons t, c' == c = Just $ dropSpaces t'
+  | Just (c', t') <- T.uncons t, c' == c = Just $ dropSpaces t'
   | otherwise = Nothing
 
-lexeme :: BS.ByteString -> BS.ByteString -> Maybe BS.ByteString
+lexeme :: T.Text -> T.Text -> Maybe T.Text
 lexeme l t
-  | l `BS.isPrefixOf` t = Just $ dropSpaces $ BS.drop (BS.length l) t
+  | l `T.isPrefixOf` t = Just $ dropSpaces $ T.drop (T.length l) t
   | otherwise = Nothing
 
 -- (Used elements, shape, elements, remaining input)
-type State s v = (Int, Vector Int, STVector s v, BS.ByteString)
+type State s v = (Int, Vector Int, STVector s v, T.Text)
 
 readArrayElemsST :: UMVec.Unbox v =>
                     Int -> Int -> ReadValue v -> State s v
@@ -170,7 +166,7 @@ closeArray r j (i, shape, arr, t) = do
   return (i, shape', arr, t')
 
 readRankedArrayOf :: UMVec.Unbox v =>
-                     Int -> ReadValue v -> BS.ByteString -> Maybe (Vector Int, Vector v, BS.ByteString)
+                     Int -> ReadValue v -> T.Text -> Maybe (Vector Int, Vector v, T.Text)
 readRankedArrayOf r rv t = runST $ do
   arr <- UMVec.new 1024
   ms <- readRankedArrayOfST r rv (0, UVec.replicate r (-1), arr, t)
@@ -200,7 +196,7 @@ readIntegral f t = do
          Right [L _ NEGATE, L _ tok] -> negate <$> f tok
          _ -> Nothing
   return (v, dropSpaces b)
-  where (a,b) = BS.span constituent t
+  where (a,b) = T.span constituent t
 
 readInt8 :: ReadValue Int8
 readInt8 = readIntegral f
@@ -235,7 +231,7 @@ readFloat f t = do
          Right [L _ NEGATE, L _ tok] -> negate <$> f tok
          _ -> Nothing
   return (v, dropSpaces b)
-  where (a,b) = BS.span constituent t
+  where (a,b) = T.span constituent t
         fromDouble = uncurry encodeFloat . decodeFloat
 
 readFloat32 :: ReadValue Float
@@ -254,7 +250,7 @@ readBool t = do v <- case scanTokens "" a of
                        Right [L _ FALSE] -> Just False
                        _                 -> Nothing
                 return (v, dropSpaces b)
-  where (a,b) = BS.span constituent t
+  where (a,b) = T.span constituent t
 
 readPrimType :: ReadValue PrimType
 readPrimType t = do
@@ -269,9 +265,9 @@ readPrimType t = do
             | F.nameToString s == "bool" -> Just Bool
           _                            -> Nothing
   return (pt, dropSpaces b)
-  where (a,b) = BS.span constituent t
+  where (a,b) = T.span constituent t
 
-readEmptyArrayOfRank :: Int -> BS.ByteString -> Maybe (Value, BS.ByteString)
+readEmptyArrayOfRank :: Int -> T.Text -> Maybe (Value, T.Text)
 readEmptyArrayOfRank r t
   | Just t' <- symbol '[' t,
     Just t'' <- symbol ']' t' = readEmptyArrayOfRank (r+1) t''
@@ -288,50 +284,15 @@ readEmptyArrayOfRank r t
                 Cert -> BoolValue (UVec.replicate r 0) UVec.empty
       return (v, t')
 
-readEmptyArray :: BS.ByteString -> Maybe (Value, BS.ByteString)
+readEmptyArray :: T.Text -> Maybe (Value, T.Text)
 readEmptyArray t = do
   t' <- symbol '(' =<< lexeme "empty" t
   (v, t'') <- readEmptyArrayOfRank 1 t'
   t''' <- symbol ')' t''
   return (v, t''')
 
-readBinaryValueWith :: (Binary a, UVec.Unbox a) => (Vector a -> Value) -> Get a -> Int -> Get Value
-readBinaryValueWith mk get_elem num_elems =
-  mk <$> genericGetVectorWith (pure num_elems) get_elem
-
-readBinaryValue :: Get Value
-readBinaryValue = do
-  version <- getInt8
-  unless (version == 1) $
-    fail $ "Expecting binary format version 1; found version: " ++ show version
-
-  rank <- fromIntegral <$> getInt8
-  unless (rank >= 0) $
-    fail $ "Rank must be non-negative, but is: " ++ show rank
-
-  shape <- replicateM rank $ fromIntegral <$> getInt64le
-  type_f <- getLazyByteString 4
-  let num_elems = product shape
-      shape' = UVec.fromList shape
-
-  case BS.unpack type_f of
-    "  i8" -> readBinaryValueWith (Int8Value shape') getInt8 num_elems
-    " i16" -> readBinaryValueWith (Int16Value shape') getInt16le num_elems
-    " i32" -> readBinaryValueWith (Int32Value shape') getInt32le num_elems
-    " i64" -> readBinaryValueWith (Int64Value shape') getInt64le num_elems
-    " f32" -> readBinaryValueWith (Float32Value shape') getFloat32le num_elems
-    " f64" -> readBinaryValueWith (Float64Value shape') getFloat64le num_elems
-    "bool" -> readBinaryValueWith (BoolValue shape') getBool num_elems
-    s      -> fail $ "Cannot parse binary values of type " ++ show s
-  where getBool = (/=0) <$> getWord8
-
-readValue :: BS.ByteString -> Maybe (Value, BS.ByteString)
-readValue full_t
-  | Just ('b', t) <- BS.uncons full_t =
-      case runGetOrFail readBinaryValue t of
-        Left _ -> Nothing
-        Right (t', _, v) -> Just (v, dropSpaces t')
-  | otherwise = readEmptyArray full_t `mplus` insideBrackets 0 full_t
+readValue :: T.Text -> Maybe (Value, T.Text)
+readValue full_t = readEmptyArray full_t `mplus` insideBrackets 0 full_t
   where insideBrackets r t = maybe (tryValueAndReadValue r t) (insideBrackets (r+1)) $ symbol '[' t
         tryWith f mk r t
           | Just _ <- f t = do
@@ -349,11 +310,11 @@ readValue full_t
 
           tryWith readBool BoolValue r t
 
--- | Parse Futhark values from the given bytestring.
-readValues :: BS.ByteString -> Maybe [Value]
+-- | Parse Futhark values from the given string.
+readValues :: T.Text -> Maybe [Value]
 readValues = readValues' . dropSpaces
   where readValues' t
-          | BS.null t = Just []
+          | T.null t = Just []
           | otherwise = do (a, t') <- readValue t
                            (a:) <$> readValues' t'
 
