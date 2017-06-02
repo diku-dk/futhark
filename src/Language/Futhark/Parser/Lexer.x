@@ -6,6 +6,7 @@ module Language.Futhark.Parser.Lexer
   ( Token(..)
   , L(..)
   , scanTokens
+  , scanTokensText
   ) where
 
 import qualified Data.ByteString.Lazy as BS
@@ -346,10 +347,11 @@ data Token = ID Name
 
              deriving (Show, Eq)
 
--- The Alex wrapper only works on ByteStrings, so we have to encode
--- the Text as UTF-8.  Ugh.
-scanTokens :: FilePath -> T.Text -> Either String [L Token]
-scanTokens file str = runAlex (BS.fromStrict $ T.encodeUtf8 str) $ do
+scanTokensText :: FilePath -> T.Text -> Either String [L Token]
+scanTokensText file = scanTokens file . BS.fromStrict . T.encodeUtf8
+
+scanTokens :: FilePath -> BS.ByteString -> Either String [L Token]
+scanTokens file str = runAlex str $ do
   fix $ \loop -> do
     tok <- alexMonadScan
     case tok of

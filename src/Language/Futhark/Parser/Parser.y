@@ -970,7 +970,7 @@ lexer cont = do
       case ended of
         Right x -> return x
         Left _ -> do
-          ts' <- scanTokens <$> getFilename <*> readLine
+          ts' <- scanTokensText <$> getFilename <*> readLine
           ts'' <- case ts' of Right x -> return x
                               Left e  -> throwError e
           case ts'' of
@@ -999,7 +999,7 @@ parseInMonad :: ParserMonad a -> FilePath -> T.Text
 parseInMonad p file program =
   either (Left . ParseError) Right <$> either (return . Left)
   (evalStateT (evalStateT (runExceptT p) env))
-  (scanTokens file program)
+  (scanTokensText file program)
   where env = newParserEnv file Int32 Float64
 
 parseIncrementalIO :: ParserMonad a -> FilePath -> T.Text
