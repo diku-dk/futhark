@@ -17,10 +17,11 @@ import Data.Foldable (forM_)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Map.Strict as M
 import System.Console.GetOpt
 import System.Directory
-import System.Process.Text (readProcessWithExitCode)
+import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import System.IO
 import System.FilePath
@@ -127,8 +128,8 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
         case code of
          ExitSuccess -> throwError "Expected failure\n"
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
-         ExitFailure 1 -> throwError err
-         ExitFailure _ -> checkError expected_error err
+         ExitFailure 1 -> throwError $ T.decodeUtf8 err
+         ExitFailure _ -> checkError expected_error $ T.decodeUtf8 err
 
     RunCases _ | mode == TypeCheck -> do
       let typeChecker = configTypeChecker progs
@@ -138,7 +139,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
         case code of
          ExitSuccess -> return ()
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
-         ExitFailure _ -> throwError err
+         ExitFailure _ -> throwError $ T.decodeUtf8 err
 
     RunCases ios -> do
       -- Compile up-front and reuse same executable for several entry points.
@@ -188,15 +189,16 @@ getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: String -> FilePath -> T.Text -> TestRun -> TestM ()
 interpretTestProgram futharki program entry (TestRun _ inputValues expectedResult _) = do
-  input <- T.unlines . map prettyText <$> getValues dir inputValues
+  input <- getValuesBS dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
-  (code, output, err) <-
+  (code, output, progerr) <-
     io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] input
   case code of
     ExitFailure 127 ->
       throwError $ progNotFound $ T.pack futharki
     _               ->
-      compareResult program expectedResult' =<< runResult program code output err
+      compareResult program expectedResult' =<<
+      runResult program code (T.decodeUtf8 output) (T.decodeUtf8 progerr)
   where dir = takeDirectory program
 
 compileTestProgram :: String -> FilePath -> TestM ()
@@ -206,13 +208,13 @@ compileTestProgram futharkc program = do
     [program, "-o", binOutputf] ""
   case futcode of
     ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
-    ExitFailure _   -> throwError futerr
+    ExitFailure _   -> throwError $ T.decodeUtf8 futerr
     ExitSuccess     -> return ()
   where binOutputf = program `replaceExtension` "bin"
 
 runCompiledTestProgram :: [String] -> String -> T.Text -> TestRun -> TestM ()
 runCompiledTestProgram extra_options program entry (TestRun _ inputValues expectedResult _) = do
-  input <- getValuesText dir inputValues
+  input <- getValuesBS dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
@@ -223,7 +225,8 @@ runCompiledTestProgram extra_options program entry (TestRun _ inputValues expect
     (progCode, output, progerr) <-
       io $ readProcessWithExitCode binpath (entry_options ++ extra_options) input
     withExceptT validating $
-      compareResult program expectedResult' =<< runResult program progCode output progerr
+      compareResult program expectedResult' =<<
+      runResult program progCode (T.decodeUtf8 output) (T.decodeUtf8 progerr)
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
         validating = ("validating test result:\n"<>)
