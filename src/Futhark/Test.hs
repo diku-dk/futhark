@@ -4,9 +4,8 @@
 module Futhark.Test
        ( testSpecFromFile
        , testSpecsFromPaths
-       , valuesFromText
+       , valuesFromByteString
        , getValues
-       , getValuesText
        , getValuesBS
        , compareValues
        , Mismatch
@@ -26,7 +25,7 @@ module Futhark.Test
        where
 
 import Control.Applicative
-import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BS
 import Control.Monad hiding (forM_)
 import Control.Monad.IO.Class
 import qualified Data.Map.Strict as M
@@ -213,7 +212,7 @@ parseInput = lexstr "input" *> parseValues
 
 parseValues :: Parser Values
 parseValues = do s <- parseBlock
-                 case valuesFromText "input" s of
+                 case valuesFromByteString "input" $ BS.fromStrict $ T.encodeUtf8 s of
                    Left err -> fail $ show err
                    Right vs -> return $ Values vs
               <|> lexstr "@" *> lexeme (InFile . T.unpack <$> restOfLine)
@@ -335,10 +334,10 @@ directoryContents dir = do
   where isFile (File _ path) = Just path
         isFile _             = Nothing
 
--- | Try to parse a several values from a text.  The 'SourceName'
+-- | Try to parse a several values from a byte string.  The 'SourceName'
 -- parameter is used for error messages.
-valuesFromText :: SourceName -> T.Text -> Either String [Value]
-valuesFromText srcname = maybe (Left srcname) Right . readValues
+valuesFromByteString :: SourceName -> BS.ByteString -> Either String [Value]
+valuesFromByteString srcname = maybe (Left srcname) Right . readValues
 
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The 'FilePath' is the directory which file paths
@@ -347,20 +346,10 @@ getValues :: MonadIO m => FilePath -> Values -> m [Value]
 getValues _ (Values vs) =
   return vs
 getValues dir (InFile file) = do
-  s <- liftIO $ T.readFile file'
-  case valuesFromText file' s of
+  s <- liftIO $ BS.readFile file'
+  case valuesFromByteString file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
-  where file' = dir </> file
-
--- | Extract a pretty representation of some 'Values'.  In the IO
--- monad because this might involve reading from a file.  There is no
--- guarantee that the resulting text yields a readable value.
-getValuesText :: MonadIO m => FilePath -> Values -> m T.Text
-getValuesText _ (Values vs) =
-  return $ T.unlines $ map prettyText vs
-getValuesText dir (InFile file) =
-  liftIO $ T.readFile file'
   where file' = dir </> file
 
 -- | Extract a pretty representation of some 'Values'.  In the IO
@@ -368,7 +357,7 @@ getValuesText dir (InFile file) =
 -- guarantee that the resulting byte string yields a readable value.
 getValuesBS :: MonadIO m => FilePath -> Values -> m BS.ByteString
 getValuesBS _ (Values vs) =
-  return $ T.encodeUtf8 $ T.unlines $ map prettyText vs
+  return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map prettyText vs
 getValuesBS dir (InFile file) =
   liftIO $ BS.readFile file'
   where file' = dir </> file
