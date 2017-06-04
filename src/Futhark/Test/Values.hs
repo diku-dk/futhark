@@ -22,13 +22,14 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import qualified Data.Array as A
-import Data.Binary (Binary)
+import Data.Binary
+import Data.Binary.Put
 import Data.Binary.Get
 import Data.Binary.IEEE754
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Maybe
 import Data.Int (Int8, Int16, Int32, Int64)
-import Data.Char (isSpace)
+import Data.Char (isSpace, ord, chr)
 import Data.Vector.Binary
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import qualified Data.Vector.Unboxed as UVec
@@ -47,7 +48,9 @@ import Futhark.Representation.AST.Pretty ()
 type STVector s = UMVec.STVector s
 type Vector = UVec.Vector
 
--- | An efficiently represented Futhark value.
+-- | An efficiently represented Futhark value.  Use 'pretty' to get a
+-- human-readable representation, and the instances of 'Get' and 'Put'
+-- to obtain binary representations
 data Value = Int8Value (Vector Int) (Vector Int8)
            | Int16Value (Vector Int) (Vector Int16)
            | Int32Value (Vector Int) (Vector Int32)
@@ -58,6 +61,62 @@ data Value = Int8Value (Vector Int) (Vector Int8)
 
            | BoolValue (Vector Int) (Vector Bool)
            deriving Show
+
+binaryFormatVersion :: Word8
+binaryFormatVersion = 1
+
+instance Binary Value where
+  put (Int8Value shape vs) = putBinaryValue "  i8" shape vs putInt8
+  put (Int16Value shape vs) = putBinaryValue " i16" shape vs putInt16le
+  put (Int32Value shape vs) = putBinaryValue " i32" shape vs putInt32le
+  put (Int64Value shape vs) = putBinaryValue " i64" shape vs putInt64le
+  put (Float32Value shape vs) = putBinaryValue " f32" shape vs putFloat32le
+  put (Float64Value shape vs) = putBinaryValue " f64" shape vs putFloat64le
+  put (BoolValue shape vs) = putBinaryValue " f64" shape vs $ putInt8 . boolToInt
+    where boolToInt True = 1
+          boolToInt False = 0
+
+  get = do
+    first <- getInt8
+    version <- getWord8
+    rank <- fromIntegral <$> getInt8
+
+    unless (chr (fromIntegral first) == 'b') $
+      fail "Input does not begin with ASCII 'b'."
+    unless (version == binaryFormatVersion) $
+      fail $ "Expecting binary format version 1; found version: " ++ show version
+    unless (rank >= 0) $
+      fail $ "Rank must be non-negative, but is: " ++ show rank
+
+    type_f <- getLazyByteString 4
+
+    shape <- replicateM (fromIntegral rank) $ fromIntegral <$> getInt64le
+    let num_elems = product shape
+        shape' = UVec.fromList shape
+
+    case BS.unpack type_f of
+      "  i8" -> get' (Int8Value shape') getInt8 num_elems
+      " i16" -> get' (Int16Value shape') getInt16le num_elems
+      " i32" -> get' (Int32Value shape') getInt32le num_elems
+      " i64" -> get' (Int64Value shape') getInt64le num_elems
+      " f32" -> get' (Float32Value shape') getFloat32le num_elems
+      " f64" -> get' (Float64Value shape') getFloat64le num_elems
+      "bool" -> get' (BoolValue shape') getBool num_elems
+      s      -> fail $ "Cannot parse binary values of type " ++ show s
+    where getBool = (/=0) <$> getWord8
+
+          get' mk get_elem num_elems =
+            mk <$> genericGetVectorWith (pure num_elems) get_elem
+
+putBinaryValue :: UVec.Unbox a =>
+                  String -> Vector Int -> Vector a -> (a -> Put) -> Put
+putBinaryValue tstr shape vs putv = do
+  putInt8 $ fromIntegral $ ord 'b'
+  putWord8 binaryFormatVersion
+  putWord8 $ fromIntegral $ UVec.length shape
+  mapM_ (putInt8 . fromIntegral . ord) tstr
+  mapM_ (putInt64le . fromIntegral) $ UVec.toList shape
+  mapM_ putv $ UVec.toList vs
 
 instance PP.Pretty Value where
   ppr (Int8Value shape vs) = pprAsCoreValue (IntType Int8) shape vs
@@ -295,42 +354,10 @@ readEmptyArray t = do
   t''' <- symbol ')' t''
   return (v, t''')
 
-readBinaryValueWith :: (Binary a, UVec.Unbox a) => (Vector a -> Value) -> Get a -> Int -> Get Value
-readBinaryValueWith mk get_elem num_elems =
-  mk <$> genericGetVectorWith (pure num_elems) get_elem
-
-readBinaryValue :: Get Value
-readBinaryValue = do
-  version <- getInt8
-  unless (version == 1) $
-    fail $ "Expecting binary format version 1; found version: " ++ show version
-
-  rank <- fromIntegral <$> getInt8
-  unless (rank >= 0) $
-    fail $ "Rank must be non-negative, but is: " ++ show rank
-
-  shape <- replicateM rank $ fromIntegral <$> getInt64le
-  type_f <- getLazyByteString 4
-  let num_elems = product shape
-      shape' = UVec.fromList shape
-
-  case BS.unpack type_f of
-    "  i8" -> readBinaryValueWith (Int8Value shape') getInt8 num_elems
-    " i16" -> readBinaryValueWith (Int16Value shape') getInt16le num_elems
-    " i32" -> readBinaryValueWith (Int32Value shape') getInt32le num_elems
-    " i64" -> readBinaryValueWith (Int64Value shape') getInt64le num_elems
-    " f32" -> readBinaryValueWith (Float32Value shape') getFloat32le num_elems
-    " f64" -> readBinaryValueWith (Float64Value shape') getFloat64le num_elems
-    "bool" -> readBinaryValueWith (BoolValue shape') getBool num_elems
-    s      -> fail $ "Cannot parse binary values of type " ++ show s
-  where getBool = (/=0) <$> getWord8
-
 readValue :: BS.ByteString -> Maybe (Value, BS.ByteString)
 readValue full_t
-  | Just ('b', t) <- BS.uncons full_t =
-      case runGetOrFail readBinaryValue t of
-        Left _ -> Nothing
-        Right (t', _, v) -> Just (v, dropSpaces t')
+  | Right (t', _, v) <- decodeOrFail full_t =
+      Just (v, dropSpaces t')
   | otherwise = readEmptyArray full_t `mplus` insideBrackets 0 full_t
   where insideBrackets r t = maybe (tryValueAndReadValue r t) (insideBrackets (r+1)) $ symbol '[' t
         tryWith f mk r t
