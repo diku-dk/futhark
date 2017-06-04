@@ -22,6 +22,10 @@ minimum bounds for values, as well as the random seed used when
 generating the data.  The generated values are written to standard
 output.
 
+If no ``-g``/``--generate`` options are passed, values are read from
+standard input, and printed to standard output in the indicated
+format.
+
 OPTIONS
 =======
 
