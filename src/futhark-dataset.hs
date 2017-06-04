@@ -7,7 +7,8 @@ import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State
-import qualified Data.Binary as Bin (put)
+import qualified Data.Binary as Bin
+import qualified Data.ByteString.Lazy as BS
 import Data.Binary.IEEE754
 import Data.Binary.Put
 import qualified Data.ByteString.Lazy as BL
@@ -27,12 +28,22 @@ import Language.Futhark.Attributes (UncheckedTypeExp, namesToPrimTypes)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 
+import Futhark.Test.Values
 import Futhark.Util.Options
 
 main :: IO ()
 main = mainWithOptions initialDataOptions commandLineOptions f
-  where f [] config =
-          Just $ zipWithM_ ($) (optOrders config) $ map mkStdGen [optSeed config..]
+  where f [] config
+          | null $ optOrders config = Just $ do
+              maybe_vs <- readValues <$> BS.getContents
+              case maybe_vs of
+                Nothing -> error "Malformed data on standard input."
+                Just vs ->
+                  case format config of
+                    Text -> mapM_ (putStrLn . pretty) vs
+                    Binary{} -> mapM_ (BS.putStr . Bin.encode) vs
+          | otherwise =
+              Just $ zipWithM_ ($) (optOrders config) $ map mkStdGen [optSeed config..]
         f _ _ =
           Nothing
 
