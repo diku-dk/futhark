@@ -179,6 +179,7 @@ static int read_str_array(int64_t elem_size, int (*elem_reader)(void*),
   int ret;
   struct array_reader reader;
   int64_t read_dims = 0;
+
   while (1) {
     int c;
     skipspaces();
@@ -292,7 +293,7 @@ static int read_str_u16(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi16, (uint16_t*)dest) == 1) {
+  if (sscanf(buf, "%"SCNi16, (int16_t*)dest) == 1) {
     scanf("u16");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -316,7 +317,7 @@ static int read_str_u32(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi32, (uint32_t*)dest) == 1) {
+  if (sscanf(buf, "%"SCNi32, (int32_t*)dest) == 1) {
     scanf("u32");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -340,7 +341,10 @@ static int read_str_u64(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%"SCNi64, (uint64_t*)dest) == 1) {
+  // FIXME: This is not correct, as SCNu64 only permits decimal
+  // literals.  However, SCNi64 does not handle very large numbers
+  // correctly (it's really for signed numbers, so that's fair).
+  if (sscanf(buf, "%"SCNu64, (int64_t*)dest) == 1) {
     scanf("u64");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -392,109 +396,53 @@ static int read_str_bool(void* dest) {
 }
 
 static int write_str_i8(FILE *out, int8_t *src) {
-  fprintf(out, "%hhdi8", *src);
+  return fprintf(out, "%hhdi8", *src);
 }
 
 static int write_str_u8(FILE *out, uint8_t *src) {
-  fprintf(out, "%hhuu8", *src);
+  return fprintf(out, "%hhuu8", *src);
 }
 
 static int write_str_i16(FILE *out, int16_t *src) {
-  fprintf(out, "%hdi16", *src);
+  return fprintf(out, "%hdi16", *src);
 }
 
 static int write_str_u16(FILE *out, uint16_t *src) {
-  fprintf(out, "%huu16", *src);
+  return fprintf(out, "%huu16", *src);
 }
 
 static int write_str_i32(FILE *out, int32_t *src) {
-  fprintf(out, "%di32", *src);
+  return fprintf(out, "%di32", *src);
 }
 
 static int write_str_u32(FILE *out, uint32_t *src) {
-  fprintf(out, "%uu32", *src);
+  return fprintf(out, "%uu32", *src);
 }
 
 static int write_str_i64(FILE *out, int64_t *src) {
-  fprintf(out, "%lldi64", *src);
+  return fprintf(out, "%"PRIi64"i64", *src);
 }
 
 static int write_str_u64(FILE *out, uint64_t *src) {
-  fprintf(out, "%lluu64", *src);
+  return fprintf(out, "%"PRIu64"u64", *src);
 }
 
 static int write_str_f32(FILE *out, float *src) {
-  fprintf(out, "%.6ff32", *src);
+  return fprintf(out, "%.6ff32", *src);
 }
 
 static int write_str_f64(FILE *out, double *src) {
-  fprintf(out, "%.6ff64", *src);
+  return fprintf(out, "%.6ff64", *src);
 }
 
 static int write_str_bool(FILE *out, void *src) {
-  fprintf(out, *(char*)src ? "true" : "false");
+  return fprintf(out, *(char*)src ? "true" : "false");
 }
-
-//// Types
-
-typedef int (*writer)(FILE*, void*);
-typedef int (*reader)(void*);
-
-struct primtype_info_t {
-  const char binname[4]; // Used for parsing binary data.
-  const char* type_name; // Same name as in Futhark.
-  const int size; // in bytes
-  const writer write; // Write in text format.
-  const reader read; // Read in text format.
-};
-
-const static struct primtype_info_t i8 =
-  {.binname = "  i8", .type_name = "i8",   .size = 1,
-   .write = (writer)write_str_i8, .read = (reader)read_str_i8};
-const static struct primtype_info_t i16 =
-  {.binname = " i16", .type_name = "i16",  .size = 2,
-   .write = (writer)write_str_i16, .read = (reader)read_str_i16};
-const static struct primtype_info_t i32 =
-  {.binname = " i32", .type_name = "i32",  .size = 4,
-   .write = (writer)write_str_i32, .read = (reader)read_str_i32};
-const static struct primtype_info_t i64 =
-  {.binname = " i64", .type_name = "i64",  .size = 8,
-   .write = (writer)write_str_i64, .read = (reader)read_str_i64};
-const static struct primtype_info_t u8 =
-  {.binname = "  i8", .type_name = "u8",   .size = 1,
-   .write = (writer)write_str_u8, .read = (reader)read_str_u8};
-const static struct primtype_info_t u16 =
-  {.binname = " i16", .type_name = "u16",  .size = 2,
-   .write = (writer)write_str_u16, .read = (reader)read_str_u16};
-const static struct primtype_info_t u32 =
-  {.binname = " i32", .type_name = "u32",  .size = 4,
-   .write = (writer)write_str_u32, .read = (reader)read_str_u32};
-const static struct primtype_info_t u64 =
-  {.binname = " i64", .type_name = "u64",  .size = 8,
-   .write = (writer)write_str_u64, .read = (reader)read_str_u64};
-const static struct primtype_info_t f32 =
-  {.binname = " f32", .type_name = "f32",  .size = 4,
-   .write = (writer)write_str_f32, .read = (reader)read_str_f32};
-const static struct primtype_info_t f64 =
-  {.binname = " f64", .type_name = "f64",  .size = 8,
-   .write = (writer)write_str_f64, .read = (reader)read_str_f64};
-const static struct primtype_info_t bool =
-  {.binname = "bool", .type_name = "bool", .size = 1,
-   .write = (writer)write_str_bool, .read = (reader)read_str_bool};
-
-static const struct primtype_info_t* primtypes[] = {
-  &i8, &i16, &i32, &i64,
-  &u8, &u16, &u32, &u64,
-  &f32, &f64,
-  &bool,
-  NULL // NULL-terminated
-};
 
 //// Binary I/O
 
-#define IS_BIG_ENDIAN (!*(unsigned char *)&(uint16_t){1})
-
 #define BINARY_FORMAT_VERSION 2
+#define IS_BIG_ENDIAN (!*(unsigned char *)&(uint16_t){1})
 
 // Reading little-endian byte sequences.  On big-endian hosts, we flip
 // the resulting bytes.
@@ -546,6 +494,118 @@ static int read_le_8byte(void* dest) {
   return num_elems_read == 1 ? 0 : 1;
 }
 
+static int write_byte(void* dest) {
+  int num_elems_written = fwrite(dest, 1, 1, stdin);
+  return num_elems_written == 1 ? 0 : 1;
+}
+
+static int write_le_2byte(void* dest) {
+  uint16_t x = *(uint16_t*)dest;
+  if (IS_BIG_ENDIAN) {
+    x = (x>>8) | (x<<8);
+  }
+  int num_elems_written = fwrite(&x, 2, 1, stdin);
+  return num_elems_written == 1 ? 0 : 1;
+}
+
+static int write_le_4byte(void* dest) {
+  uint32_t x = *(uint32_t*)dest;
+  if (IS_BIG_ENDIAN) {
+    x =
+      ((x>>24)&0xFF) |
+      ((x>>8) &0xFF00) |
+      ((x<<8) &0xFF0000) |
+      ((x<<24)&0xFF000000);
+  }
+  int num_elems_written = fwrite(&x, 4, 1, stdin);
+  return num_elems_written == 1 ? 0 : 1;
+}
+
+static int write_le_8byte(void* dest) {
+  uint64_t x = *(uint64_t*)dest;
+  if (IS_BIG_ENDIAN) {
+    x =
+      ((x>>56)&0xFFull) |
+      ((x>>40)&0xFF00ull) |
+      ((x>>24)&0xFF0000ull) |
+      ((x>>8) &0xFF000000ull) |
+      ((x<<8) &0xFF00000000ull) |
+      ((x<<24)&0xFF0000000000ull) |
+      ((x<<40)&0xFF000000000000ull) |
+      ((x<<56)&0xFF00000000000000ull);
+  }
+  int num_elems_written = fwrite(&x, 8, 1, stdin);
+  return num_elems_written == 1 ? 0 : 1;
+}
+
+//// Types
+
+typedef int (*writer)(FILE*, void*);
+typedef int (*reader)(void*);
+
+struct primtype_info_t {
+  const char binname[4]; // Used for parsing binary data.
+  const char* type_name; // Same name as in Futhark.
+  const int size; // in bytes
+  const writer write_str; // Write in text format.
+  const reader read_str; // Read in text format.
+  const writer write_bin; // Write in binary format.
+  const reader read_bin; // Read in binary format.
+};
+
+const static struct primtype_info_t i8 =
+  {.binname = "  i8", .type_name = "i8",   .size = 1,
+   .write_str = (writer)write_str_i8, .read_str = (reader)read_str_i8,
+   .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
+const static struct primtype_info_t i16 =
+  {.binname = " i16", .type_name = "i16",  .size = 2,
+   .write_str = (writer)write_str_i16, .read_str = (reader)read_str_i16,
+   .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
+const static struct primtype_info_t i32 =
+  {.binname = " i32", .type_name = "i32",  .size = 4,
+   .write_str = (writer)write_str_i32, .read_str = (reader)read_str_i32,
+   .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
+const static struct primtype_info_t i64 =
+  {.binname = " i64", .type_name = "i64",  .size = 8,
+   .write_str = (writer)write_str_i64, .read_str = (reader)read_str_i64,
+   .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
+const static struct primtype_info_t u8 =
+  {.binname = "  i8", .type_name = "u8",   .size = 1,
+   .write_str = (writer)write_str_u8, .read_str = (reader)read_str_u8,
+   .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
+const static struct primtype_info_t u16 =
+  {.binname = " i16", .type_name = "u16",  .size = 2,
+   .write_str = (writer)write_str_u16, .read_str = (reader)read_str_u16,
+   .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
+const static struct primtype_info_t u32 =
+  {.binname = " i32", .type_name = "u32",  .size = 4,
+   .write_str = (writer)write_str_u32, .read_str = (reader)read_str_u32,
+   .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
+const static struct primtype_info_t u64 =
+  {.binname = " i64", .type_name = "u64",  .size = 8,
+   .write_str = (writer)write_str_u64, .read_str = (reader)read_str_u64,
+   .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
+const static struct primtype_info_t f32 =
+  {.binname = " f32", .type_name = "f32",  .size = 4,
+   .write_str = (writer)write_str_f32, .read_str = (reader)read_str_f32,
+   .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
+const static struct primtype_info_t f64 =
+  {.binname = " f64", .type_name = "f64",  .size = 8,
+   .write_str = (writer)write_str_f64, .read_str = (reader)read_str_f64,
+   .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
+const static struct primtype_info_t bool =
+  {.binname = "bool", .type_name = "bool", .size = 1,
+   .write_str = (writer)write_str_bool, .read_str = (reader)read_str_bool,
+   .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
+
+static const struct primtype_info_t* primtypes[] = {
+  &i8, &i16, &i32, &i64,
+  &u8, &u16, &u32, &u64,
+  &f32, &f64,
+  &bool,
+  NULL // NULL-terminated
+};
+
 // General value interface.  All endian business taken care of at
 // lower layers.
 
@@ -585,6 +645,7 @@ static const struct primtype_info_t* read_bin_read_type_enum() {
     }
   }
   panic(1, "binary-input: Did not recognize the type '%s'.\n", read_binname);
+  return NULL;
 }
 
 static void read_bin_ensure_scalar(const struct primtype_info_t *expected_type) {
@@ -605,70 +666,9 @@ static void read_bin_ensure_scalar(const struct primtype_info_t *expected_type) 
   }
 }
 
-static int read_i8(void* dest) {
-  if (read_is_binary()) {
-    read_bin_ensure_scalar(&i8);
-    return read_byte(dest);
-  }
-  return read_str_i8(dest);
-}
+//// High-level interface
 
-static int read_i16(void* dest) {
-  if (read_is_binary()) {
-    read_bin_ensure_scalar(&i16);
-    return read_le_2byte(dest);
-  }
-  return read_str_i16(dest);
-}
-
-static int read_i32(void* dest) {
-  if (read_is_binary()) {
-    read_bin_ensure_scalar(&i32);
-    return read_le_4byte(dest);
-  }
-  return read_str_i32(dest);
-}
-
-static int read_i64(void* dest) {
-  if (read_is_binary()) {
-    read_bin_ensure_scalar(&i64);
-    return read_le_8byte(dest);
-  }
-  return read_str_i64(dest);
-}
-
-static int read_f32(void* dest) {
-  if (read_is_binary()) {
-    read_bin_ensure_scalar(&f32);
-    return read_le_4byte(dest);
-  }
-  return read_str_f32(dest);
-}
-
-static int read_f64(void* dest) {
-  if (read_is_binary()) {
-    read_bin_ensure_scalar(&f64);
-    return read_le_8byte(dest);
-  }
-  return read_str_f64(dest);
-}
-
-static int read_bool(void* dest) {
-  if (read_is_binary()) {
-    read_bin_ensure_scalar(&bool);
-    return read_byte(dest);
-  }
-  return read_str_bool(dest);
-}
-
-//// General array interface
-
-static int read_array(const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
-  if (!read_is_binary()) {
-    return read_str_array(expected_type->size, (reader)expected_type->read, expected_type->type_name, data, shape, dims);
-  }
-
-  // now we know it is binary :)
+static int read_bin_array(const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
   int ret;
 
   int8_t bin_dims;
@@ -727,9 +727,17 @@ static int read_array(const struct primtype_info_t *expected_type, void **data, 
   return 0;
 }
 
+static int read_array(const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
+  if (!read_is_binary()) {
+    return read_str_array(expected_type->size, (reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
+  } else {
+    return read_bin_array(expected_type, data, shape, dims);
+  }
+}
+
 static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, unsigned char *data, int64_t *shape, int8_t rank) {
   if (rank==0) {
-    elem_type->write(out, (void*)data);
+    elem_type->write_str(out, (void*)data);
   } else {
     int64_t len = shape[0];
     int64_t slice_size = 1;
@@ -749,7 +757,7 @@ static int write_str_array(FILE *out, const struct primtype_info_t *elem_type, u
     } else if (rank==1) {
       putchar('[');
       for (int64_t i = 0; i < len; i++) {
-        elem_type->write(out, (void*) (data + i * elem_size));
+        elem_type->write_str(out, (void*) (data + i * elem_size));
         if (i != len-1) {
           printf(", ");
         }
@@ -795,12 +803,28 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
   return 0;
 }
 
-// Rank may be zero, which then writes a scalar.
 static int write_array(FILE *out, int write_binary,
                        const struct primtype_info_t *elem_type, void *data, int64_t *shape, int8_t rank) {
   if (write_binary) {
     return write_bin_array(out, elem_type, data, shape, rank);
   } else {
     return write_str_array(out, elem_type, data, shape, rank);
+  }
+}
+
+static int read_scalar(const struct primtype_info_t *expected_type, void *dest) {
+  if (!read_is_binary()) {
+    return expected_type->read_str(dest);
+  } else {
+    read_bin_ensure_scalar(expected_type);
+    return expected_type->read_bin(dest);
+  }
+}
+
+static int write_scalar(FILE *out, int write_binary, const struct primtype_info_t *type, void *src) {
+  if (write_binary) {
+    return write_bin_array(out, type, src, NULL, 0);
+  } else {
+    return type->write_str(out, src);
   }
 }

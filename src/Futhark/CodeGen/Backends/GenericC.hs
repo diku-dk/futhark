@@ -492,7 +492,7 @@ primTypeInfo Cert _ = [C.cexp|bool|]
 
 printPrimStm :: (C.ToExp a, C.ToIdent b) => a -> b -> PrimType -> Signedness -> C.Stm
 printPrimStm dest val bt ept =
-  [C.cstm|$exp:(primTypeInfo bt ept).write($exp:dest, &$id:val);|]
+  [C.cstm|write_scalar($exp:dest, binary_output, &$exp:(primTypeInfo bt ept), &$id:val);|]
 
 -- | Return a statement printing the given external value.
 printStm :: ExternalValue -> CompilerM op s C.Stm
@@ -519,7 +519,7 @@ paramsTypes = map paramType
 
 readPrimStm :: C.ToExp a => a -> PrimType -> Signedness -> C.Stm
 readPrimStm place t ept =
-  [C.cstm|if ($exp:(primTypeInfo t ept).read(&$exp:place) != 0) {
+  [C.cstm|if (read_scalar(&$exp:(primTypeInfo t ept),&$exp:place) != 0) {
         panic(1, "Syntax error when reading %s.\n", $exp:(primTypeInfo t ept).type_name);
       }|]
 
@@ -1110,6 +1110,7 @@ compileCode (DebugPrint s t e) = do
   let ct = primTypeToCType t
       printstm = printPrimStm [C.cexp|stderr|] x t TypeDirect
   stm [C.cstm|if (debugging) {
+          int binary_output = 0;
           $ty:ct $id:x = $e';
           fprintf(stderr, "%s: ", $exp:s);
           $stm:printstm
