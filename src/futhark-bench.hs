@@ -159,7 +159,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesBS dir input_spec
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
-  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
+  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts, "-b"]
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
