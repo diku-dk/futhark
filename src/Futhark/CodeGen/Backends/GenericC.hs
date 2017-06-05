@@ -806,6 +806,8 @@ static int binary_output = 0;
 
 $esc:panic_h
 
+$esc:values_h
+
 $esc:timing_h
 
 $edecls:decls
@@ -823,8 +825,6 @@ $edecls:builtin
 static int detail_timing = 0;
 
 $edecls:(map funcToDef definitions)
-
-$esc:values_h
 
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
