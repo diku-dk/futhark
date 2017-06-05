@@ -494,7 +494,7 @@ static const struct primtype_info_t* primtypes[] = {
 
 #define IS_BIG_ENDIAN (!*(unsigned char *)&(uint16_t){1})
 
-#define READ_BINARY_VERSION 2
+#define BINARY_FORMAT_VERSION 2
 
 // Reading little-endian byte sequences.  On big-endian hosts, we flip
 // the resulting bytes.
@@ -558,9 +558,9 @@ static int read_is_binary() {
 
     if (ret != 0) { panic(1, "binary-input: could not read version.\n"); }
 
-    if (bin_version != READ_BINARY_VERSION) {
+    if (bin_version != BINARY_FORMAT_VERSION) {
       panic(1, "binary-input: File uses version %i, but I only understand version %i.\n",
-            bin_version, READ_BINARY_VERSION);
+            bin_version, BINARY_FORMAT_VERSION);
     }
 
     return 1;
@@ -776,7 +776,7 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
   }
 
   fputc('b', out);
-  fputc('\1', out);
+  fputc((char)BINARY_FORMAT_VERSION, out);
   fwrite(&rank, sizeof(int8_t), 1, out);
   fputs(elem_type->binname, out);
   fwrite(shape, sizeof(int64_t), rank, out);
