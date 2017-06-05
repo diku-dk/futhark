@@ -676,7 +676,9 @@ readInput refcount known_sizes
                        shape,
                        $int:(length shape))
             != 0) {
-          panic(1, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
+          panic(1, "Syntax error when reading %s%s.\n",
+                    $string:(concat $ replicate rank "[]"),
+                    $exp:(primTypeInfo t ept).type_name);
         }
         $stms:copyshape
         $stms:copymemsize
@@ -1264,10 +1266,6 @@ compileFunBody outputs code = do
     [output] -> stm [C.cstm|$id:retval = $id:(paramName output);|]
     _        -> zipWithM_ setRetVal' [0..] outputs
   return retval
-
-ppArrayType :: PrimType -> Int -> String
-ppArrayType t 0 = pretty t
-ppArrayType t n = "[]" ++ ppArrayType t (n-1)
 
 declareAndSet :: Code op -> Maybe (VName, PrimType, Exp, Code op)
 declareAndSet (DeclareScalar name t :>>: (SetScalar dest e :>>: c))
