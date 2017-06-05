@@ -474,26 +474,25 @@ typeToCType t = do
                 ct <- typeToCType [et]
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
+
+primTypeInfo :: PrimType -> Signedness -> C.Exp
+primTypeInfo (IntType it) t = case (it, t) of
+  (Int8,  TypeUnsigned) -> [C.cexp|u8|]
+  (Int16, TypeUnsigned) -> [C.cexp|u16|]
+  (Int32, TypeUnsigned) -> [C.cexp|u32|]
+  (Int64, TypeUnsigned) -> [C.cexp|u64|]
+  (Int8,  _) -> [C.cexp|i8|]
+  (Int16, _) -> [C.cexp|i16|]
+  (Int32, _) -> [C.cexp|i32|]
+  (Int64, _) -> [C.cexp|i64|]
+primTypeInfo (FloatType Float32) _ = [C.cexp|f32|]
+primTypeInfo (FloatType Float64) _ = [C.cexp|f64|]
+primTypeInfo Bool _ = [C.cexp|bool|]
+primTypeInfo Cert _ = [C.cexp|bool|]
+
 printPrimStm :: (C.ToExp a, C.ToExp b) => a -> b -> PrimType -> Signedness -> C.Stm
-printPrimStm dest val (IntType it) t =
-  [C.cstm|fprintf($exp:dest, $string:format, $exp:val);|]
-  where format = case (it, t) of
-                   (Int8, TypeUnsigned) -> "%hhuu8"
-                   (Int16, TypeUnsigned) -> "%huu16"
-                   (Int32, TypeUnsigned) -> "%uu32"
-                   (Int64, TypeUnsigned) -> "%lluu64"
-                   (Int8, _) -> "%hhdi8"
-                   (Int16, _) -> "%hdi16"
-                   (Int32, _) -> "%di32"
-                   (Int64, _) -> "%lldi64"
-printPrimStm dest val Bool _ =
-  [C.cstm|fprintf($exp:dest, $exp:val ? "true" : "false");|]
-printPrimStm dest val (FloatType Float32) _ =
-  [C.cstm|fprintf($exp:dest, "%.6ff32", $exp:val);|]
-printPrimStm dest val (FloatType Float64) _ =
-  [C.cstm|fprintf($exp:dest, "%.6ff64", $exp:val);|]
-printPrimStm dest _ Cert _ =
-  [C.cstm|fprintf($exp:dest,"Checked");|]
+printPrimStm dest val bt ept =
+  [C.cstm|$exp:(primTypeInfo bt ept).write($exp:dest, &$exp:val);|]
 
 -- | Return a statement printing the given external value.
 printStm :: ExternalValue -> CompilerM op s C.Stm
@@ -503,73 +502,13 @@ printStm (TransparentValue (ScalarValue bt ept name)) =
   return $ printPrimStm [C.cexp|stdout|] name bt ept
 printStm (TransparentValue (ArrayValue mem _ _ bt ept shape)) = do
   mem' <- rawMem mem
-  printArrayStm mem' bt ept shape
-
-printArrayStm :: C.ToExp a => a -> PrimType -> Signedness -> [DimSize] -> CompilerM op s C.Stm
-printArrayStm mem bt ept [] =
-  return $ printPrimStm [C.cexp|stdout|] val bt ept
-  where val = [C.cexp|*$exp:mem|]
-printArrayStm mem bt ept (dim:shape) = do
-  i <- newVName "print_i"
-  v <- newVName "print_elem"
-  let dim' = dimSizeToExp dim
-      shape' = cproduct $ map dimSizeToExp shape
-      bt'  = primTypeToCType bt
-  printelem <- printArrayStm v bt ept shape
   return [C.cstm|{
-               if ($exp:dim' * $exp:shape' == 0) {
-                   printf("empty(%s)", $exp:(ppArrayType bt (length shape)));
-               } else {
-                   int $id:i;
-                   putchar('[');
-                   for ($id:i = 0; $id:i < $exp:dim'; $id:i++) {
-                           $ty:bt' *$id:v = (($ty:bt'*) $exp:mem) + $id:i * $exp:shape';
-                           $stm:printelem
-                           if ($id:i != $exp:dim'-1) {
-                             printf(", ");
-                           }
-                   }
-               putchar(']');
-               }
-             }|]
-
--- We read unsigned integers using the signed functions, and hope it
--- all works out in the end.
-
--- The C-function returned will handle both binary and text input
-readFun :: PrimType -> Signedness -> Maybe String
-readFun (IntType Int8) _ = Just "read_int8"
-readFun (IntType Int16) _ = Just "read_int16"
-readFun (IntType Int32) _ = Just "read_int32"
-readFun (IntType Int64) _ = Just "read_int64"
-readFun Bool _ = Just "read_bool"
-readFun (FloatType Float32) _ = Just "read_float"
-readFun (FloatType Float64) _ = Just "read_double"
-readFun _ _ = Nothing
-
--- The C-function returned will only be used to read elements of a text-based
--- array
-readStrFun :: PrimType -> Signedness -> Maybe String
-readStrFun (IntType Int8) _ = Just "read_str_int8"
-readStrFun (IntType Int16) _ = Just "read_str_int16"
-readStrFun (IntType Int32) _ = Just "read_str_int32"
-readStrFun (IntType Int64) _ = Just "read_str_int64"
-readStrFun Bool _ = Just "read_str_bool"
-readStrFun (FloatType Float32) _ = Just "read_str_float"
-readStrFun (FloatType Float64) _ = Just "read_str_double"
-readStrFun _ _ = Nothing
-
--- The C-value returned will be used when reading binary arrays, to indicate
--- what the expected type is
-readTypeEnum :: PrimType -> Signedness -> Maybe String
-readTypeEnum (IntType Int8) _ = Just "FUTHARK_INT8"
-readTypeEnum (IntType Int16) _ = Just "FUTHARK_INT16"
-readTypeEnum (IntType Int32) _ = Just "FUTHARK_INT32"
-readTypeEnum (IntType Int64) _ = Just "FUTHARK_INT64"
-readTypeEnum (FloatType Float32) _ = Just "FUTHARK_FLOAT32"
-readTypeEnum (FloatType Float64) _ = Just "FUTHARK_FLOAT64"
-readTypeEnum Bool _ = Just "FUTHARK_BOOL"
-readTypeEnum _ _ = Nothing
+      typename int64_t shape[] = {$inits:shape_inits};
+      write_array(stdout, binary_output, &$exp:(primTypeInfo bt ept), $exp:mem', shape, $int:rank);
+  }|]
+  where rank = length shape
+        shape_inits = map shapeInit shape
+        shapeInit ds = [C.cinit|$exp:(dimSizeToExp ds)|]
 
 paramsTypes :: [Param] -> [Type]
 paramsTypes = map paramType
@@ -579,16 +518,9 @@ paramsTypes = map paramType
         paramType (ScalarParam _ t) = Scalar t
 
 readPrimStm :: C.ToExp a => a -> PrimType -> Signedness -> C.Stm
-readPrimStm place t ept
-  | Just f <- readFun t ept =
-    [C.cstm|if ($id:f(&$exp:place) != 0) {
-          panic(1, "Syntax error when reading %s.\n", $string:(pretty t));
-        }|]
-readPrimStm _ Cert _ =
-  [C.cstm|;|]
-readPrimStm _ t _ =
-  [C.cstm|{
-        panic(1, "Cannot read %s.\n", $string:(pretty t));
+readPrimStm place t ept =
+  [C.cstm|if ($exp:(primTypeInfo t ept).read(&$exp:place) != 0) {
+        panic(1, "Syntax error when reading %s.\n", $exp:(primTypeInfo t ept).type_name);
       }|]
 
 -- | Our strategy for main() is to parse everything into host memory
@@ -715,8 +647,7 @@ readInput _ known_sizes (OpaqueValue desc _) =
 readInput _ known_sizes (TransparentValue (ScalarValue t ept name)) =
   (known_sizes, readPrimStm name t ept)
 readInput refcount known_sizes
-          (TransparentValue (ArrayValue name maybe_memsize _ t ept shape))
-  | (Just str_reader, Just type_val) <- (readStrFun t ept , readTypeEnum t ept) =
+          (TransparentValue (ArrayValue name maybe_memsize _ t ept shape)) =
   -- We need to create an array for the array parser to put
   -- the shapes.
   let t' = primTypeToCType t
@@ -740,9 +671,7 @@ readInput refcount known_sizes
   in (known_sizes ++ wrote_sizes,
       [C.cstm|{
         typename int64_t shape[$int:rank];
-        if (read_array($id:type_val,
-                       sizeof($ty:t'),
-                       $id:str_reader, $string:(pretty t),
+        if (read_array(&$exp:(primTypeInfo t ept),
                        (void**)& $exp:dest,
                        shape,
                        $int:(length shape))
@@ -752,8 +681,6 @@ readInput refcount known_sizes
         $stms:copyshape
         $stms:copymemsize
       }|])
-  | otherwise =
-    (known_sizes, [C.cstm|panic(1, "Cannot read %s.\n", $string:(pretty t));|])
   where wrote_sizes = mapMaybe isVarSize shape
         isVarSize ConstSize{} = Nothing
         isVarSize (VarSize d) = Just d
@@ -825,6 +752,11 @@ benchmarkOptions =
             , optionArgument = RequiredArgument
             , optionAction = [C.cstm|entry_point = optarg;|]
             }
+   , Option { optionLongName = "binary-output"
+            , optionShortName = Just 'b'
+            , optionArgument = NoArgument
+            , optionAction = [C.cstm|binary_output = 1;|]
+            }
    ]
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
@@ -861,6 +793,7 @@ $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
 $esc:("#include <stdint.h>")
+$esc:("#include <inttypes.h>")
 $esc:("#include <math.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
@@ -869,6 +802,7 @@ $esc:("#include <getopt.h>")
 
 static int detail_memory = 0;
 static int debugging = 0;
+static int binary_output = 0;
 
 $esc:panic_h
 
@@ -890,8 +824,7 @@ static int detail_timing = 0;
 
 $edecls:(map funcToDef definitions)
 
-$esc:reader_h
-$esc:readerbin_h
+$esc:values_h
 
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
@@ -971,8 +904,7 @@ int main(int argc, char** argv) {
           where asDecl fun = [C.cedecl|$func:fun|]
 
         panic_h = $(embedStringFile "rts/c/panic.h")
-        reader_h = $(embedStringFile "rts/c/reader.h")
-        readerbin_h = $(embedStringFile "rts/c/reader-bin.h")
+        values_h = $(embedStringFile "rts/c/values.h")
         timing_h = $(embedStringFile "rts/c/timing.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
