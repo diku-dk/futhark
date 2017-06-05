@@ -11,11 +11,8 @@ category: Language
 ghc-options: -Wall
 
 extra-source-files:
-  - rts/python/memory.py
-  - rts/python/reader.py
-  - rts/python/scalar.py
-  - rts/c/reader.h
-  - rts/c/opencl.h
+  - rts/python/*.py
+  - rts/c/*.h
 
   - futlib/*.fut
 
