@@ -158,7 +158,11 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesBS dir input_spec
-  maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
+  let getValuesAndBS vs = do
+        vs' <- getValues dir vs
+        bs <- getValuesBS dir vs
+        return (LBS.toStrict bs, vs')
+  maybe_expected <- maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
   let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts, "-b"]
 
   -- Report the dataset name before running the program, so that if an
@@ -219,13 +223,13 @@ runResult :: (MonadError T.Text m, MonadIO m) =>
           -> ExitCode
           -> SBS.ByteString
           -> SBS.ByteString
-          -> m [Value]
+          -> m (SBS.ByteString, [Value])
 runResult program ExitSuccess stdout_s _ =
   case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
     Left e   -> do
       actual <- liftIO $ writeOutFile program "actual" stdout_s
       itWentWrong $ T.pack $ show e <> "\n(See " <> actual <> ")"
-    Right vs -> return vs
+    Right vs -> return (stdout_s, vs)
 runResult program (ExitFailure code) _ stderr_s =
   itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
   " and output:\n" ++ T.unpack (T.decodeUtf8 stderr_s)
@@ -243,17 +247,13 @@ writeOutFile base ext content =
                     return filename
 
 compareResult :: (MonadError T.Text m, MonadIO m) =>
-                 FilePath -> [Value] -> [Value]
+                 FilePath -> (SBS.ByteString, [Value]) -> (SBS.ByteString, [Value])
               -> m ()
-compareResult program expectedResult actualResult =
-  case compareValues actualResult expectedResult of
+compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
+  case compareValues actual_vs expected_vs of
     Just mismatch -> do
-      actualf <-
-        liftIO $ writeOutFile program "actual" $
-        T.encodeUtf8 $ T.unlines $ map prettyText actualResult
-      expectedf <-
-        liftIO $ writeOutFile program "expected" $
-        T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
+      actualf <- liftIO $ writeOutFile program "actual" actual_bs
+      expectedf <- liftIO $ writeOutFile program "expected" expected_bs
       itWentWrong $ T.pack $
         actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
     Nothing ->
