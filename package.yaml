@@ -92,6 +92,12 @@ executables:
   futhark-dataset:
     <<: *futhark
     main: src/futhark-dataset.hs
+  futdoc:
+    <<: *futhark
+    dependencies:
+      - futhark
+      - blaze-html
+    main: src/futdoc.hs
 
 tests:
   unit:
