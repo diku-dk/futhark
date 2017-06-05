@@ -266,7 +266,7 @@ static int read_str_u8(void* dest) {
   int x;
   char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%u", &x) == 1) {
+  if (sscanf(buf, "%i", &x) == 1) {
     *(uint8_t*)dest = x;
     scanf("u8");
     return next_is_not_constituent() ? 0 : 1;
@@ -292,7 +292,7 @@ static int read_str_u16(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%"SCNu16, (int16_t*)dest) == 1) {
+  if (sscanf(buf, "%"SCNi16, (uint16_t*)dest) == 1) {
     scanf("u16");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -316,7 +316,7 @@ static int read_str_u32(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%"SCNu32, (uint32_t*)dest) == 1) {
+  if (sscanf(buf, "%"SCNi32, (uint32_t*)dest) == 1) {
     scanf("u32");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -340,7 +340,7 @@ static int read_str_u64(void* dest) {
   skipspaces();
   char buf[128];
   remove_underscores(buf);
-  if (sscanf(buf, "%"SCNu64, (uint64_t*)dest) == 1) {
+  if (sscanf(buf, "%"SCNi64, (uint64_t*)dest) == 1) {
     scanf("u64");
     return next_is_not_constituent() ? 0 : 1;
   } else {
