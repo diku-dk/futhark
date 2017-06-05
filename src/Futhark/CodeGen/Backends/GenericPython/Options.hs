@@ -53,6 +53,7 @@ generateOptionParser options =
 
                   NoArgument ->
                     [ArgKeyword "action" (StringLiteral "append_const"),
+                     ArgKeyword "default" $ List [],
                      ArgKeyword "const" None]
 
                   OptionalArgument ->

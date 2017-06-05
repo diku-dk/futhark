@@ -3,8 +3,8 @@
 -- At one point the compiler missimplified the convergence loop.
 --
 -- ==
--- input { 2i16 } output { 32769i32 }
--- input { 33799i16 } output { 28110i32 }
+-- input { 2u16 } output { 32769u32 }
+-- input { 33799u16 } output { 28110u32 }
 
 let main(a: u16): u32 =
   let b = 0x10001u32

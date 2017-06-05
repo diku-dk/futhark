@@ -199,7 +199,7 @@ printSimpleValueT = (>>putStrLn "") . flip evalStateT 0 . p
             else put $ i + 1
 
 binaryFormatVersion :: Int
-binaryFormatVersion = 1
+binaryFormatVersion = 2
 
 printSimpleValueB :: BinaryOutputFormat -> SimpleType -> SimpleValue -> IO ()
 printSimpleValueB fmt st sv =
@@ -226,10 +226,13 @@ printSimpleValueB fmt st sv =
     putElemType (SimplePrim (Signed Int16)) = mapM_ Bin.put (" i16" :: String)
     putElemType (SimplePrim (Signed Int32)) = mapM_ Bin.put (" i32" :: String)
     putElemType (SimplePrim (Signed Int64)) = mapM_ Bin.put (" i64" :: String)
+    putElemType (SimplePrim (Unsigned Int8))  = mapM_ Bin.put ("  u8" :: String)
+    putElemType (SimplePrim (Unsigned Int16)) = mapM_ Bin.put (" u16" :: String)
+    putElemType (SimplePrim (Unsigned Int32)) = mapM_ Bin.put (" u32" :: String)
+    putElemType (SimplePrim (Unsigned Int64)) = mapM_ Bin.put (" u64" :: String)
     putElemType (SimplePrim (FloatType Float32)) = mapM_ Bin.put (" f32" :: String)
     putElemType (SimplePrim (FloatType Float64)) = mapM_ Bin.put (" f64" :: String)
     putElemType (SimplePrim Bool) = mapM_ Bin.put ("bool" :: String)
-    putElemType (SimplePrim (Unsigned t)) = putElemType $ SimplePrim $ Signed t
     putElemType (SimpleArray ty _) = putElemType ty
 
     getDims (SimplePrim _) = []

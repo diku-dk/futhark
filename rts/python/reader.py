@@ -170,13 +170,13 @@ def read_str_i64(f):
     return read_str_int(f, 'i64')
 
 def read_str_u8(f):
-    return read_str_int(f, 'i8')
+    return read_str_int(f, 'u8')
 def read_str_u16(f):
-    return read_str_int(f, 'i16')
+    return read_str_int(f, 'u16')
 def read_str_u32(f):
-    return read_str_int(f, 'i32')
+    return read_str_int(f, 'u32')
 def read_str_u64(f):
-    return read_str_int(f, 'i64')
+    return read_str_int(f, 'u64')
 
 def read_char(f):
     skip_spaces(f)
@@ -291,7 +291,7 @@ def read_str_array(f, elem_reader, type_name, rank, bt):
 
 ################################################################################
 
-READ_BINARY_VERSION = 1
+READ_BINARY_VERSION = 2
 
 # struct format specified at
 # https://docs.python.org/2/library/struct.html#format-characters
@@ -378,7 +378,7 @@ FUTHARK_PRIMTYPES[FUTHARK_INT64]   = \
     }
 
 FUTHARK_PRIMTYPES[FUTHARK_UINT8] = \
-    {'binname' : b"  i8",
+    {'binname' : b"  u8",
      'type_name' : "u8",
      'size' : 1,
      'bin_reader': read_bin_u8,
@@ -386,7 +386,7 @@ FUTHARK_PRIMTYPES[FUTHARK_UINT8] = \
      'bin_format': 'B'
     }
 FUTHARK_PRIMTYPES[FUTHARK_UINT16]   = \
-    {'binname' : b" i16",
+    {'binname' : b" u16",
      'type_name' : "u16",
      'size' : 2,
      'bin_reader': read_bin_u16,
@@ -394,7 +394,7 @@ FUTHARK_PRIMTYPES[FUTHARK_UINT16]   = \
      'bin_format': 'H'
     }
 FUTHARK_PRIMTYPES[FUTHARK_UINT32]   = \
-    {'binname' : b" i32",
+    {'binname' : b" u32",
      'type_name' : "u32",
      'size' : 4,
      'bin_reader': read_bin_u32,
@@ -402,7 +402,7 @@ FUTHARK_PRIMTYPES[FUTHARK_UINT32]   = \
      'bin_format': 'I'
     }
 FUTHARK_PRIMTYPES[FUTHARK_UINT64]   = \
-    {'binname' : b" i64",
+    {'binname' : b" u64",
      'type_name' : "u64",
      'size' : 8,
      'bin_reader': read_bin_u64,
@@ -498,10 +498,10 @@ def read_f64(f):
 def read_bool(f):
     return read_general(f, FUTHARK_BOOL)
 
-def read_array(f, expected_type, type_name, rank, ctype):
+def read_array(f, expected_type, rank, ctype):
     if not read_is_binary(f):
         str_reader = FUTHARK_PRIMTYPES[expected_type]['str_reader']
-        return read_str_array(f, str_reader, type_name, rank, ctype)
+        return read_str_array(f, str_reader, FUTHARK_PRIMTYPES[expected_type]['type_name'], rank, ctype)
 
     bin_rank = read_bin_u8(f)
 

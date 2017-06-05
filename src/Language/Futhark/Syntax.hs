@@ -41,6 +41,7 @@ module Language.Futhark.Syntax
   , IntValue(..)
   , FloatValue(..)
   , PrimValue(..)
+  , IsPrimValue(..)
   , Value(..)
 
   -- * Abstract syntax tree
@@ -155,6 +156,36 @@ data PrimValue = SignedValue !IntValue
                | FloatValue !FloatValue
                | BoolValue !Bool
                deriving (Eq, Ord, Show)
+
+class IsPrimValue v where
+  primValue :: v -> PrimValue
+
+instance IsPrimValue Int8 where
+  primValue = SignedValue . Int8Value
+instance IsPrimValue Int16 where
+  primValue = SignedValue . Int16Value
+instance IsPrimValue Int32 where
+  primValue = SignedValue . Int32Value
+instance IsPrimValue Int64 where
+  primValue = SignedValue . Int64Value
+
+instance IsPrimValue Word8 where
+  primValue = UnsignedValue . Int8Value . fromIntegral
+instance IsPrimValue Word16 where
+  primValue = UnsignedValue . Int16Value . fromIntegral
+instance IsPrimValue Word32 where
+  primValue = UnsignedValue . Int32Value . fromIntegral
+instance IsPrimValue Word64 where
+  primValue = UnsignedValue . Int64Value . fromIntegral
+
+instance IsPrimValue Float where
+  primValue = FloatValue . Float32Value
+
+instance IsPrimValue Double where
+  primValue = FloatValue . Float64Value
+
+instance IsPrimValue Bool where
+  primValue = BoolValue
 
 -- | The class of types that can represent an array size.  The
 -- 'Monoid' instance must define 'mappend' such that @dims1 `mappend`

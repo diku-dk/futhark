@@ -254,6 +254,12 @@ standardOptions = [
          , optionArgument = RequiredArgument
          , optionAction =
            [ Assign (Var "entry_point") $ Var "optarg" ]
+         },
+  -- The -b option is just a dummy for now.
+  Option { optionLongName = "binary-output"
+         , optionShortName = Just 'b'
+         , optionArgument = NoArgument
+         , optionAction = [Pass]
          }
   ]
 
@@ -496,7 +502,7 @@ readInput decl@(Imp.TransparentValue (Imp.ArrayValue _ _ _ bt ept dims)) =
       ct = Var $ compilePrimToExtNp bt ept
       stdin = Var "input_stream"
   in Assign (Var $ extValueDescName decl) $ simpleCall "read_array"
-     [stdin, type_enum, StringLiteral $ pretty bt, rank', ct]
+     [stdin, type_enum, rank', ct]
 
 printPrimStm :: PyExp -> PrimType -> Imp.Signedness -> PyStmt
 printPrimStm val t ept =

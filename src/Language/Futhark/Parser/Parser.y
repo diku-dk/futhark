@@ -771,10 +771,10 @@ SignedLit :: { (IntValue, SrcLoc) }
                        return (num, pos) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
-            : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
-            | u16lit { let L pos (U16LIT num) = $1 in (Int16Value num, pos) }
-            | u32lit { let L pos (U32LIT num) = $1 in (Int32Value num, pos) }
-            | u64lit { let L pos (U64LIT num) = $1 in (Int64Value num, pos) }
+            : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value $ fromIntegral num, pos) }
+            | u16lit { let L pos (U16LIT num) = $1 in (Int16Value $ fromIntegral num, pos) }
+            | u32lit { let L pos (U32LIT num) = $1 in (Int32Value $ fromIntegral num, pos) }
+            | u64lit { let L pos (U64LIT num) = $1 in (Int64Value $ fromIntegral num, pos) }
 
 FloatLit :: { (FloatValue, SrcLoc) }
          : f32lit { let L pos (F32LIT num) = $1 in (Float32Value num, pos) }

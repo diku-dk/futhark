@@ -21,7 +21,6 @@ module Futhark.Test.Values
 import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
-import qualified Data.Array as A
 import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
@@ -30,6 +29,7 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Maybe
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Char (isSpace, ord, chr)
+import Data.List
 import Data.Vector.Binary
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import qualified Data.Vector.Unboxed as UVec
@@ -37,13 +37,14 @@ import Data.Vector.Generic (freeze)
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Syntax.Core as F
-import Futhark.Representation.Primitive
-       (PrimType(..), IntType(..), FloatType(..), PrimValue)
+import qualified Language.Futhark.Syntax as F
+import Language.Futhark.Pretty()
+import Futhark.Representation.Primitive (PrimValue)
 import Language.Futhark.Parser.Lexer
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Representation.AST.Attributes.Constants (IsValue(..))
 import Futhark.Representation.AST.Pretty ()
+import Futhark.Util.Pretty
 
 type STVector s = UMVec.STVector s
 type Vector = UVec.Vector
@@ -56,6 +57,11 @@ data Value = Int8Value (Vector Int) (Vector Int8)
            | Int32Value (Vector Int) (Vector Int32)
            | Int64Value (Vector Int) (Vector Int64)
 
+           | Word8Value (Vector Int) (Vector Word8)
+           | Word16Value (Vector Int) (Vector Word16)
+           | Word32Value (Vector Int) (Vector Word32)
+           | Word64Value (Vector Int) (Vector Word64)
+
            | Float32Value (Vector Int) (Vector Float)
            | Float64Value (Vector Int) (Vector Double)
 
@@ -63,13 +69,17 @@ data Value = Int8Value (Vector Int) (Vector Int8)
            deriving Show
 
 binaryFormatVersion :: Word8
-binaryFormatVersion = 1
+binaryFormatVersion = 2
 
 instance Binary Value where
   put (Int8Value shape vs) = putBinaryValue "  i8" shape vs putInt8
   put (Int16Value shape vs) = putBinaryValue " i16" shape vs putInt16le
   put (Int32Value shape vs) = putBinaryValue " i32" shape vs putInt32le
   put (Int64Value shape vs) = putBinaryValue " i64" shape vs putInt64le
+  put (Word8Value shape vs) = putBinaryValue "  i8" shape vs putWord8
+  put (Word16Value shape vs) = putBinaryValue " i16" shape vs putWord16le
+  put (Word32Value shape vs) = putBinaryValue " i32" shape vs putWord32le
+  put (Word64Value shape vs) = putBinaryValue " i64" shape vs putWord64le
   put (Float32Value shape vs) = putBinaryValue " f32" shape vs putFloat32le
   put (Float64Value shape vs) = putBinaryValue " f64" shape vs putFloat64le
   put (BoolValue shape vs) = putBinaryValue " f64" shape vs $ putInt8 . boolToInt
@@ -79,7 +89,7 @@ instance Binary Value where
   get = do
     first <- getInt8
     version <- getWord8
-    rank <- fromIntegral <$> getInt8
+    rank <- getInt8
 
     unless (chr (fromIntegral first) == 'b') $
       fail "Input does not begin with ASCII 'b'."
@@ -99,6 +109,10 @@ instance Binary Value where
       " i16" -> get' (Int16Value shape') getInt16le num_elems
       " i32" -> get' (Int32Value shape') getInt32le num_elems
       " i64" -> get' (Int64Value shape') getInt64le num_elems
+      "  u8" -> get' (Word8Value shape') getWord8 num_elems
+      " u16" -> get' (Word16Value shape') getWord16le num_elems
+      " u32" -> get' (Word32Value shape') getWord32le num_elems
+      " u64" -> get' (Word64Value shape') getWord64le num_elems
       " f32" -> get' (Float32Value shape') getFloat32le num_elems
       " f64" -> get' (Float64Value shape') getFloat64le num_elems
       "bool" -> get' (BoolValue shape') getBool num_elems
@@ -119,37 +133,52 @@ putBinaryValue tstr shape vs putv = do
   mapM_ putv $ UVec.toList vs
 
 instance PP.Pretty Value where
-  ppr (Int8Value shape vs) = pprAsCoreValue (IntType Int8) shape vs
-  ppr (Int16Value shape vs) = pprAsCoreValue (IntType Int16) shape vs
-  ppr (Int32Value shape vs) = pprAsCoreValue (IntType Int32) shape vs
-  ppr (Int64Value shape vs) = pprAsCoreValue (IntType Int64) shape vs
-  ppr (Float32Value shape vs) = pprAsCoreValue (FloatType Float32) shape vs
-  ppr (Float64Value shape vs) = pprAsCoreValue (FloatType Float64) shape vs
-  ppr (BoolValue shape vs) = pprAsCoreValue Bool shape vs
+  ppr v | product (valueShape v) == 0 =
+            text "empty" <>
+            parens (dims <> text (valueType v))
+    where dims = mconcat $ replicate (length (valueShape v)-1) $ text "[]"
+  ppr (Int8Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Int16Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Int32Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Int64Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Word8Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Word16Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Word32Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Word64Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Float32Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (Float64Value shape vs) = pprArray (UVec.toList shape) vs
+  ppr (BoolValue shape vs) = pprArray (UVec.toList shape) vs
 
-pprAsCoreValue :: (UVec.Unbox v, IsValue v) =>
-                  PrimType -> Vector Int -> Vector v -> PP.Doc
-pprAsCoreValue bt shape vs
-  | [v] <- vs', UVec.null shape = PP.ppr v
-  | otherwise = PP.ppr $ F.ArrayVal (A.listArray (0, n-1) vs') bt shape'
-  where n = UVec.product shape
-        vs' = map value $ UVec.toList vs
-        shape' = UVec.toList shape
+pprArray :: (UVec.Unbox a, F.IsPrimValue a) => [Int] -> UVec.Vector a -> Doc
+pprArray [] vs =
+  ppr $ F.primValue $ UVec.head vs
+pprArray (d:ds) vs =
+  brackets $ commasep $ map (pprArray ds . slice) [0..d-1]
+  where slice_size = product ds
+        slice i = UVec.slice (i*slice_size) slice_size vs
 
-valueType :: Value -> PrimType
-valueType (Int8Value _ _) = IntType Int8
-valueType (Int16Value _ _) = IntType Int16
-valueType (Int32Value _ _) = IntType Int32
-valueType (Int64Value _ _) = IntType Int64
-valueType (Float32Value _ _) = FloatType Float32
-valueType (Float64Value _ _) = FloatType Float64
-valueType (BoolValue _ _) = Bool
+valueType :: Value -> String
+valueType (Int8Value _ _) = "i8"
+valueType (Int16Value _ _) = "i16"
+valueType (Int32Value _ _) = "i32"
+valueType (Int64Value _ _) = "i64"
+valueType (Word8Value _ _) = "u8"
+valueType (Word16Value _ _) = "u16"
+valueType (Word32Value _ _) = "u32"
+valueType (Word64Value _ _) = "u64"
+valueType (Float32Value _ _) = "f32"
+valueType (Float64Value _ _) = "f64"
+valueType (BoolValue _ _) = "bool"
 
 valueShape :: Value -> [Int]
 valueShape (Int8Value shape _) = UVec.toList shape
 valueShape (Int16Value shape _) = UVec.toList shape
 valueShape (Int32Value shape _) = UVec.toList shape
 valueShape (Int64Value shape _) = UVec.toList shape
+valueShape (Word8Value shape _) = UVec.toList shape
+valueShape (Word16Value shape _) = UVec.toList shape
+valueShape (Word32Value shape _) = UVec.toList shape
+valueShape (Word64Value shape _) = UVec.toList shape
 valueShape (Float32Value shape _) = UVec.toList shape
 valueShape (Float64Value shape _) = UVec.toList shape
 valueShape (BoolValue shape _) = UVec.toList shape
@@ -264,25 +293,41 @@ readIntegral f t = do
 readInt8 :: ReadValue Int8
 readInt8 = readIntegral f
   where f (I8LIT x) = Just x
-        f (U8LIT x) = Just x
         f _          = Nothing
 
 readInt16 :: ReadValue Int16
 readInt16 = readIntegral f
   where f (I16LIT x) = Just x
-        f (U16LIT x) = Just x
         f _          = Nothing
 
 readInt32 :: ReadValue Int32
 readInt32 = readIntegral f
   where f (I32LIT x) = Just x
-        f (U32LIT x) = Just x
         f _          = Nothing
 
 readInt64 :: ReadValue Int64
 readInt64 = readIntegral f
   where f (I64LIT x) = Just x
-        f (U64LIT x) = Just x
+        f _          = Nothing
+
+readWord8 :: ReadValue Word8
+readWord8 = readIntegral f
+  where f (U8LIT x) = Just x
+        f _          = Nothing
+
+readWord16 :: ReadValue Word16
+readWord16 = readIntegral f
+  where f (U16LIT x) = Just x
+        f _          = Nothing
+
+readWord32 :: ReadValue Word32
+readWord32 = readIntegral f
+  where f (U32LIT x) = Just x
+        f _          = Nothing
+
+readWord64 :: ReadValue Word64
+readWord64 = readIntegral f
+  where f (U64LIT x) = Just x
         f _          = Nothing
 
 readFloat :: RealFloat float => (Token -> Maybe float) -> ReadValue float
@@ -315,18 +360,11 @@ readBool t = do v <- case scanTokens "" a of
                 return (v, dropSpaces b)
   where (a,b) = BS.span constituent t
 
-readPrimType :: ReadValue PrimType
+readPrimType :: ReadValue String
 readPrimType t = do
   pt <- case scanTokens "" a of
-          Right [L _ (ID s)]
-            | F.nameToString s == "i8"   -> Just $ IntType Int8
-            | F.nameToString s == "i16"  -> Just $ IntType Int16
-            | F.nameToString s == "i32"  -> Just $ IntType Int32
-            | F.nameToString s == "i64"  -> Just $ IntType Int64
-            | F.nameToString s == "f32"  -> Just $ FloatType Float32
-            | F.nameToString s == "f64"  -> Just $ FloatType Float64
-            | F.nameToString s == "bool" -> Just Bool
-          _                            -> Nothing
+          Right [L _ (ID s)] -> Just $ F.nameToString s
+          _                  -> Nothing
   return (pt, dropSpaces b)
   where (a,b) = BS.span constituent t
 
@@ -336,15 +374,19 @@ readEmptyArrayOfRank r t
     Just t'' <- symbol ']' t' = readEmptyArrayOfRank (r+1) t''
   | otherwise = do
       (pt, t') <- readPrimType t
-      let v = case pt of
-                IntType Int8 -> Int8Value (UVec.replicate r 0) UVec.empty
-                IntType Int16 -> Int16Value (UVec.replicate r 0) UVec.empty
-                IntType Int32 -> Int32Value (UVec.replicate r 0) UVec.empty
-                IntType Int64 -> Int64Value (UVec.replicate r 0) UVec.empty
-                FloatType Float32 -> Float32Value (UVec.replicate r 0) UVec.empty
-                FloatType Float64 -> Float64Value (UVec.replicate r 0) UVec.empty
-                Bool -> BoolValue (UVec.replicate r 0) UVec.empty
-                Cert -> BoolValue (UVec.replicate r 0) UVec.empty
+      v <- case pt of
+             "i8" -> Just $ Int8Value (UVec.replicate r 0) UVec.empty
+             "i16" -> Just $ Int16Value (UVec.replicate r 0) UVec.empty
+             "i32" -> Just $ Int32Value (UVec.replicate r 0) UVec.empty
+             "i64" -> Just $ Int64Value (UVec.replicate r 0) UVec.empty
+             "u8" -> Just $ Word8Value (UVec.replicate r 0) UVec.empty
+             "u16" -> Just $ Word16Value (UVec.replicate r 0) UVec.empty
+             "u32" -> Just $ Word32Value (UVec.replicate r 0) UVec.empty
+             "u64" -> Just $ Word64Value (UVec.replicate r 0) UVec.empty
+             "f32" -> Just $ Float32Value (UVec.replicate r 0) UVec.empty
+             "f64" -> Just $ Float64Value (UVec.replicate r 0) UVec.empty
+             "bool" -> Just $ BoolValue (UVec.replicate r 0) UVec.empty
+             _  -> Nothing
       return (v, t')
 
 readEmptyArray :: BS.ByteString -> Maybe (Value, BS.ByteString)
@@ -366,10 +408,17 @@ readValue full_t
               return (mk shape arr, rest_t)
           | otherwise = Nothing
         tryValueAndReadValue r t =
+          -- 32-bit signed integers come first such that we parse
+          -- unsuffixed integer constants as of that type.
           tryWith readInt32 Int32Value r t `mplus`
           tryWith readInt8 Int8Value r t `mplus`
           tryWith readInt16 Int16Value r t `mplus`
           tryWith readInt64 Int64Value r t `mplus`
+
+          tryWith readWord8 Word8Value r t `mplus`
+          tryWith readWord16 Word16Value r t `mplus`
+          tryWith readWord32 Word32Value r t `mplus`
+          tryWith readWord64 Word64Value r t `mplus`
 
           tryWith readFloat64 Float64Value r t `mplus`
           tryWith readFloat32 Float32Value r t `mplus`
@@ -391,7 +440,7 @@ data Mismatch = PrimValueMismatch (Int,Int) PrimValue PrimValue
               -- ^ The position the value number and a flat index
               -- into the array.
               | ArrayShapeMismatch Int [Int] [Int]
-              | TypeMismatch Int PrimType PrimType
+              | TypeMismatch Int String String
               | ValueCountMismatch Int Int
 
 instance Show Mismatch where
@@ -431,6 +480,14 @@ compareValue i got_v expected_v
       (Int32Value _ got_vs, Int32Value _ expected_vs) ->
         compareNum 1 got_vs expected_vs
       (Int64Value _ got_vs, Int64Value _ expected_vs) ->
+        compareNum 1 got_vs expected_vs
+      (Word8Value _ got_vs, Word8Value _ expected_vs) ->
+        compareNum 1 got_vs expected_vs
+      (Word16Value _ got_vs, Word16Value _ expected_vs) ->
+        compareNum 1 got_vs expected_vs
+      (Word32Value _ got_vs, Word32Value _ expected_vs) ->
+        compareNum 1 got_vs expected_vs
+      (Word64Value _ got_vs, Word64Value _ expected_vs) ->
         compareNum 1 got_vs expected_vs
       (Float32Value _ got_vs, Float32Value _ expected_vs) ->
         compareNum (tolerance expected_vs) got_vs expected_vs
