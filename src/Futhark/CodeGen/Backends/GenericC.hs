@@ -490,9 +490,9 @@ primTypeInfo (FloatType Float64) _ = [C.cexp|f64|]
 primTypeInfo Bool _ = [C.cexp|bool|]
 primTypeInfo Cert _ = [C.cexp|bool|]
 
-printPrimStm :: (C.ToExp a, C.ToExp b) => a -> b -> PrimType -> Signedness -> C.Stm
+printPrimStm :: (C.ToExp a, C.ToIdent b) => a -> b -> PrimType -> Signedness -> C.Stm
 printPrimStm dest val bt ept =
-  [C.cstm|$exp:(primTypeInfo bt ept).write($exp:dest, &$exp:val);|]
+  [C.cstm|$exp:(primTypeInfo bt ept).write($exp:dest, &$id:val);|]
 
 -- | Return a statement printing the given external value.
 printStm :: ExternalValue -> CompilerM op s C.Stm
@@ -1103,9 +1103,12 @@ compileCode (Comment s code) = do
              |]
 
 compileCode (DebugPrint s t e) = do
+  x <- newVName "x"
   e' <- compileExp e
-  let printstm = printPrimStm [C.cexp|stderr|] e' t TypeDirect
+  let ct = primTypeToCType t
+      printstm = printPrimStm [C.cexp|stderr|] x t TypeDirect
   stm [C.cstm|if (debugging) {
+          $ty:ct $id:x = $e';
           fprintf(stderr, "%s: ", $exp:s);
           $stm:printstm
           fprintf(stderr, "\n");
