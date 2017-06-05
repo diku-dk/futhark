@@ -30,7 +30,6 @@ import Text.Printf
 import Prelude
 
 import Futhark.Test
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
