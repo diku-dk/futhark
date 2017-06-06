@@ -570,19 +570,19 @@ const static struct primtype_info_t i64 =
    .write_str = (writer)write_str_i64, .read_str = (reader)read_str_i64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
 const static struct primtype_info_t u8 =
-  {.binname = "  i8", .type_name = "u8",   .size = 1,
+  {.binname = "  u8", .type_name = "u8",   .size = 1,
    .write_str = (writer)write_str_u8, .read_str = (reader)read_str_u8,
    .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
 const static struct primtype_info_t u16 =
-  {.binname = " i16", .type_name = "u16",  .size = 2,
+  {.binname = " u16", .type_name = "u16",  .size = 2,
    .write_str = (writer)write_str_u16, .read_str = (reader)read_str_u16,
    .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
 const static struct primtype_info_t u32 =
-  {.binname = " i32", .type_name = "u32",  .size = 4,
+  {.binname = " u32", .type_name = "u32",  .size = 4,
    .write_str = (writer)write_str_u32, .read_str = (reader)read_str_u32,
    .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
 const static struct primtype_info_t u64 =
-  {.binname = " i64", .type_name = "u64",  .size = 8,
+  {.binname = " u64", .type_name = "u64",  .size = 8,
    .write_str = (writer)write_str_u64, .read_str = (reader)read_str_u64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
 const static struct primtype_info_t f32 =
