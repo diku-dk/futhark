@@ -154,8 +154,7 @@ type ShapeChange d = [DimChange d]
 -- does not itself contain any bindings.
 data BasicOp lore
   = SubExp SubExp
-    -- ^ Subexpressions, doubling as tuple literals if the
-    -- list has anything but a single element.
+    -- ^ A variable or constant.
 
   | Opaque SubExp
     -- ^ Semantically and operationally just identity, but is
@@ -169,11 +168,10 @@ data BasicOp lore
     -- Scalar operations
 
   | UnOp UnOp SubExp
-    -- ^ Unary operation - result type is the same as the input type.
+    -- ^ Unary operation.
 
   | BinOp BinOp SubExp SubExp
-    -- ^ Binary operation - result type is the same as the input
-    -- types.
+    -- ^ Binary operation.
 
   | CmpOp CmpOp SubExp SubExp
     -- ^ Comparison - result type is always boolean.
@@ -181,7 +179,6 @@ data BasicOp lore
   | ConvOp ConvOp SubExp
     -- ^ Conversion "casting".
 
-  -- Assertion management.
   | Assert SubExp SrcLoc
   -- ^ Turn a boolean into a certificate, halting the
   -- program if the boolean is false.
