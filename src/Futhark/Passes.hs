@@ -86,6 +86,17 @@ withExperimentalGPUPasses pipeline =
   then withExperimentalMemoryBlockMerging pipeline
   else pipeline
 
+-- Currently enabled by default.  Disable by setting the environment variable
+-- IN_PLACE_LOWERING to 0.
+usesInPlaceLowering :: Bool
+usesInPlaceLowering =
+  maybe True (/= "0") $ lookup "IN_PLACE_LOWERING" unixEnvironment
+
+inPlaceLoweringMaybe :: Pipeline Kernels Kernels
+inPlaceLoweringMaybe = if usesInPlaceLowering
+                       then onePass inPlaceLowering
+                       else passes []
+
 kernelsPipeline :: Pipeline SOACS Kernels
 kernelsPipeline =
   standardPipeline >>>
@@ -98,16 +109,16 @@ kernelsPipeline =
          , simplifyKernels
          , performCSE True
          , simplifyKernels
-         , inPlaceLowering
-         ]
+         ] >>>
+  inPlaceLoweringMaybe
 
 sequentialPipeline :: Pipeline SOACS Kernels
 sequentialPipeline =
   standardPipeline >>>
   onePass firstOrderTransform >>>
   passes [ simplifyKernels
-         , inPlaceLowering
-         ]
+         ] >>>
+  inPlaceLoweringMaybe
 
 sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
 sequentialCpuPipeline =
