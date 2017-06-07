@@ -42,6 +42,7 @@ import qualified Futhark.TypeCheck as I
 
 import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
+import Futhark.Util.Log
 import Language.Futhark.Futlib
 
 data FutharkConfig = FutharkConfig
@@ -116,16 +117,22 @@ runPipelineOnProgram :: FutharkConfig
                      -> FilePath
                      -> FutharkM (Prog tolore)
 runPipelineOnProgram config pipeline file = do
+  when (pipelineVerbose pipeline_config) $
+    logMsg ("Reading and type-checking source program" :: String)
   (tagged_ext_prog, ws, _, namesrc) <- readProgram file
 
   when (futharkWarn config) $
     liftIO $ hPutStr stderr $ show ws
   putNameSource namesrc
+  when (pipelineVerbose pipeline_config) $
+    logMsg ("Internalising program" :: String)
   res <- internaliseProg tagged_ext_prog
   case res of
     Left err ->
       internalErrorS ("During internalisation: " <> pretty err) tagged_ext_prog
     Right int_prog -> do
+      when (pipelineVerbose pipeline_config) $
+        logMsg ("Type-checking internalised program" :: String)
       typeCheckInternalProgram int_prog
       runPasses pipeline pipeline_config int_prog
   where pipeline_config =
