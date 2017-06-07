@@ -44,6 +44,7 @@ dependencies:
   - gitrev >= 1.2.0
   - parallel >= 3.2.1.0
   - bifunctors
+  - json
 
 library:
   build-tools:

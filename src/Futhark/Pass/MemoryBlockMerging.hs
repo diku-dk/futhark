@@ -20,6 +20,7 @@ import Futhark.Pass
 import Futhark.Representation.AST
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Analysis.Alias (analyseFun)
+import qualified Text.JSON as JSON
 
 import qualified Futhark.Pass.MemoryBlockMerging.AllocHoisting as AH
 import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
@@ -29,6 +30,13 @@ import qualified Futhark.Pass.MemoryBlockMerging.ArrayCoalescing as ArrayCoalesc
 import Futhark.Util (unixEnvironment)
 usesDebugging :: Bool
 usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
+
+-- Possibly useful for outputting compiler data and using it together with
+-- benchmarking data.  If this is True, all output lines will be in JSON (the
+-- actual output will not in itself be valid JSON, just the individual lines --
+-- this is easier to work with in the compiler).
+usesDebuggingInJSON :: Bool
+usesDebuggingInJSON = isJust $ lookup "FUTHARK_DEBUG_JSON" unixEnvironment
 
 mergeMemoryBlocks :: Pass ExpMem.ExplicitMemory ExpMem.ExplicitMemory
 mergeMemoryBlocks = simplePass
@@ -82,13 +90,30 @@ transformFunDef fundef = do
           putStrLn $ L.intercalate "   " $ map pretty (M.keys (DS.vartab entry))
           putStrLn $ replicate 70 '-'
 
+  let debug_json = unsafePerformIO $ when usesDebuggingInJSON $ do
+        let info =
+              JSON.JSObject $ JSON.toJSObject
+              [("memory block merging",
+                JSON.JSArray $ flip map (M.assocs coaltab) $ \(xmem, entry) ->
+                   JSON.JSObject $ JSON.toJSObject
+                   [ ("source memory block",
+                      JSON.showJSON $ pretty xmem)
+                   , ("destination memory block",
+                      JSON.showJSON $ pretty (DS.dstmem entry))
+                   , ("aliased destination memory blocks",
+                      JSON.showJSON $ map pretty $ S.toList $ DS.alsmem entry)
+                   , ("variables currently using the source memory block",
+                      JSON.showJSON $ map pretty (M.keys (DS.vartab entry)))
+                   ])]
+        putStrLn $ JSON.encode info
+
   body' <-
     modifyNameSource $ \src ->
       let m1 = runReaderT m coaltab
           (z,newsrc) = runState m1 src
       in  (z,newsrc)
 
-  debug `seq` return fundef { funDefBody = body' }
+  debug `seq` debug_json `seq` return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
 type MergeM = ReaderT DS.CoalsTab (State VNameSource)

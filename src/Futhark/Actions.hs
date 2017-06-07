@@ -34,12 +34,21 @@ import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
 import Futhark.Util.Pretty (text, ppr, prettyDoc, prettyText)
+import Futhark.Util (unixEnvironment)
+
+usesDebuggingInJSON :: Bool
+usesDebuggingInJSON = isJust $ lookup "FUTHARK_DEBUG_JSON" unixEnvironment
+
+putStrLnMaybe :: String -> IO ()
+putStrLnMaybe = if not usesDebuggingInJSON -- FIXME: This is a hack.
+                then putStrLn
+                else const $ return ()
 
 printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
   Action { actionName = "Prettyprint"
          , actionDescription = "Prettyprint the resulting internal representation on standard output."
-         , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+         , actionProcedure = liftIO . putStrLnMaybe . pretty . aliasAnalysis
          }
 
 interpretAction :: Show error =>
