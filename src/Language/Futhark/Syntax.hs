@@ -160,6 +160,9 @@ data PrimValue = SignedValue !IntValue
 class IsPrimValue v where
   primValue :: v -> PrimValue
 
+instance IsPrimValue Int where
+  primValue = SignedValue . Int32Value . fromIntegral
+
 instance IsPrimValue Int8 where
   primValue = SignedValue . Int8Value
 instance IsPrimValue Int16 where
