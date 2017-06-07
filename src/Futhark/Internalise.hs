@@ -354,7 +354,23 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           lens <- mapM (internalisedTypeSize . flip setAliases ()) field_types
           return $ M.fromList $ zip field_names $ chunks lens e'
 
-internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
+
+internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
+  -- If this is a multidimensional array literal of primitives, we
+  -- treat it specially by flattening it out followed by a reshape.
+  -- This cuts down on the amount of statements that are produced, and
+  -- thus allows us to efficiently handle huge array literals - a
+  -- corner case, but an important one.
+  | Just ((eshape,e'):es') <- mapM isArrayLiteral es,
+    not $ null eshape,
+    all ((eshape==) . fst) es',
+    Just basetype <- E.peelArray (length eshape) rowtype =
+      let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
+          new_shape = E.TupLit [E.Literal (E.primValue k) loc
+                               | k <- length es:eshape] loc
+      in internaliseExp desc $ E.Reshape new_shape flat_lit loc
+
+  | otherwise = do
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
@@ -369,6 +385,15 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
   where zeroDim t = t `I.setArrayShape`
                     I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
+
+        isArrayLiteral :: E.Exp -> Maybe ([Int],[E.Exp])
+        isArrayLiteral (E.ArrayLit inner_es _ _) = do
+          (eshape,e):inner_es' <- mapM isArrayLiteral inner_es
+          guard $ all ((eshape==) . fst) inner_es'
+          return (length inner_es:eshape, e ++ concatMap snd inner_es')
+        isArrayLiteral e =
+          Just ([], [e])
+
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et
