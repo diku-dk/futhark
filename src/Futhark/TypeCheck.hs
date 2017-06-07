@@ -195,7 +195,7 @@ allConsumed :: Occurences -> Names
 allConsumed = S.unions . map consumed
 
 seqOccurences :: Occurences -> Occurences -> Occurences
-seqOccurences occurs1 occurs2 = -- | trace (show (length occurs1, length occurs2)) True =
+seqOccurences occurs1 occurs2 =
   filter (not . nullOccurence) (map filt occurs1) ++ occurs2
   where filt occ =
           occ { observed = observed occ `S.difference` postcons }
