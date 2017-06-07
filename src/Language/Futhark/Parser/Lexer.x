@@ -6,6 +6,7 @@ module Language.Futhark.Parser.Lexer
   ( Token(..)
   , L(..)
   , scanTokens
+  , scanTokensText
   ) where
 
 import qualified Data.ByteString.Lazy as BS
@@ -20,7 +21,9 @@ import Data.Function (fix)
 import Data.List
 import Data.Monoid
 
-import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name, nameFromText, nameToText)
+import Language.Futhark.Core (Int8, Int16, Int32, Int64,
+                              Word8, Word16, Word32, Word64,
+                              Name, nameFromText, nameToText)
 import Language.Futhark.Attributes (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
 
@@ -265,10 +268,10 @@ data Token = ID Name
            | I16LIT Int16
            | I32LIT Int32
            | I64LIT Int64
-           | U8LIT Int8
-           | U16LIT Int16
-           | U32LIT Int32
-           | U64LIT Int64
+           | U8LIT Word8
+           | U16LIT Word16
+           | U32LIT Word32
+           | U64LIT Word64
            | REALLIT Double
            | F32LIT Float
            | F64LIT Double
@@ -346,10 +349,11 @@ data Token = ID Name
 
              deriving (Show, Eq)
 
--- The Alex wrapper only works on ByteStrings, so we have to encode
--- the Text as UTF-8.  Ugh.
-scanTokens :: FilePath -> T.Text -> Either String [L Token]
-scanTokens file str = runAlex (BS.fromStrict $ T.encodeUtf8 str) $ do
+scanTokensText :: FilePath -> T.Text -> Either String [L Token]
+scanTokensText file = scanTokens file . BS.fromStrict . T.encodeUtf8
+
+scanTokens :: FilePath -> BS.ByteString -> Either String [L Token]
+scanTokens file str = runAlex str $ do
   fix $ \loop -> do
     tok <- alexMonadScan
     case tok of

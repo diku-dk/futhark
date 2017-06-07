@@ -40,12 +40,11 @@ The general format has this header::
   b <version> <num_dims> <type>
 
 Where ``version`` is a byte containing the version of the binary format used for
-encoding (currently 1), ``num_dims`` is the number of dimensions in the array as
+encoding (currently 2), ``num_dims`` is the number of dimensions in the array as
 a single byte (0 for scalar), and ``type`` is a 4 character string describing
 the type of the values(s) -- see below for more details.
 
-Encoding a scalar value is done by appending the binary little endian
-representation of it::
+Encoding a scalar value is done by treating it as a 0-dimensional array::
 
   b <version> 0 <type> <value>
 
@@ -66,6 +65,13 @@ types are::
   " i16"
   " i32"
   " i64"
+  "  u8"
+  " u16"
+  " u32"
+  " u64"
   " f32"
   " f64"
   "bool"
+
+Note that unsigned and signed integers have the same byte-level
+representation.

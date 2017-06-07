@@ -9,7 +9,8 @@ module Main (main) where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except hiding (forM_)
-import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Char8 as SBS
+import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -30,7 +31,6 @@ import Text.Printf
 import Prelude
 
 import Futhark.Test
-import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Options
 
 data BenchOptions = BenchOptions
@@ -121,7 +121,7 @@ compileBenchmark opts (program, spec) =
         ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
                               return Nothing
         ExitFailure _   -> do putStrLn "Failed:\n"
-                              BS.putStrLn futerr
+                              SBS.putStrLn futerr
                               return Nothing
     _ ->
       return Nothing
@@ -169,8 +169,12 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesBS dir input_spec
-  maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
-  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts, "-M"]
+  let getValuesAndBS vs = do
+        vs' <- getValues dir vs
+        bs <- getValuesBS dir vs
+        return (LBS.toStrict bs, vs')
+  maybe_expected <- maybe (return Nothing) (fmap Just . getValuesAndBS) expected_spec
+  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts, "-b", "-M"]
 
   -- Report the dataset name before running the program, so that if an
   -- error occurs it's easier to see where.
@@ -182,12 +186,13 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
   -- no program component.
   run_res <-
     timeout (optTimeout opts * 1000000) $
-    readProcessWithExitCode ("." </> binaryName program) options input
+    readProcessWithExitCode ("." </> binaryName program) options $
+    LBS.toStrict input
 
   fmap (Just .  DataResult dataset_desc) $ runBenchM $ case run_res of
     Just (progCode, output, progerr) ->
       do
-        (allocated_total, freed_total, peaks) <- case lines $ BS.unpack progerr of
+        (allocated_total, freed_total, peaks) <- case lines $ SBS.unpack progerr of
           (allocated_total : freed_total : peaks) -> do
             let (allocated_total' :: Int, freed_total' :: Int) =
                   (read allocated_total, read freed_total)
@@ -211,7 +216,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
             didNotFail program progCode $ T.decodeUtf8 progerr
           Just expected ->
             compareResult program expected =<<
-            runResult program progCode (T.decodeUtf8 output) (T.decodeUtf8 progerr)
+            runResult program progCode output progerr
         runtime_result <- io $ T.readFile tmpfile
         runtimes <- case mapM readRuntime $ T.lines runtime_result of
           Just runtimes -> return $ map RunResult runtimes
@@ -247,20 +252,20 @@ itWentWrong t = do
 runResult :: (MonadError T.Text m, MonadIO m) =>
              FilePath
           -> ExitCode
-          -> T.Text
-          -> T.Text
-          -> m [Value]
+          -> SBS.ByteString
+          -> SBS.ByteString
+          -> m (SBS.ByteString, [Value])
 runResult program ExitSuccess stdout_s _ =
-  case valuesFromText "stdout" stdout_s of
+  case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
     Left e   -> do
       actual <- liftIO $ writeOutFile program "actual" stdout_s
       itWentWrong $ T.pack $ show e <> "\n(See " <> actual <> ")"
-    Right vs -> return vs
+    Right vs -> return (stdout_s, vs)
 runResult program (ExitFailure code) _ stderr_s =
   itWentWrong $ T.pack $ program ++ " failed with error code " ++ show code ++
-  " and output:\n" ++ T.unpack stderr_s
+  " and output:\n" ++ T.unpack (T.decodeUtf8 stderr_s)
 
-writeOutFile :: FilePath -> String -> T.Text -> IO FilePath
+writeOutFile :: FilePath -> String -> SBS.ByteString -> IO FilePath
 writeOutFile base ext content =
   attempt (0::Int)
   where template = base `replaceExtension` ext
@@ -269,21 +274,17 @@ writeOutFile base ext content =
           exists <- doesFileExist filename
           if exists
             then attempt $ i+1
-            else do T.writeFile filename content
+            else do SBS.writeFile filename content
                     return filename
 
 compareResult :: (MonadError T.Text m, MonadIO m) =>
-                 FilePath -> [Value] -> [Value]
+                 FilePath -> (SBS.ByteString, [Value]) -> (SBS.ByteString, [Value])
               -> m ()
-compareResult program expectedResult actualResult =
-  case compareValues actualResult expectedResult of
+compareResult program (expected_bs, expected_vs) (actual_bs, actual_vs) =
+  case compareValues actual_vs expected_vs of
     Just mismatch -> do
-      actualf <-
-        liftIO $ writeOutFile program "actual" $
-        T.unlines $ map prettyText actualResult
-      expectedf <-
-        liftIO $ writeOutFile program "expected" $
-        T.unlines $ map prettyText expectedResult
+      actualf <- liftIO $ writeOutFile program "actual" actual_bs
+      expectedf <- liftIO $ writeOutFile program "expected" expected_bs
       itWentWrong $ T.pack $
         actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
     Nothing ->

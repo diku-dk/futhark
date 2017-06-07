@@ -23,6 +23,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Monoid
 import Data.List
+--import Debug.Trace
 
 import Prelude
 
@@ -330,8 +331,16 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
 
     -- Map-write fusion.
     (SOAC.Scatter _cs _len _lam _ivs as,
-     SOAC.Map {})
-      | mapWriteFusionOK (outVars ++ map snd as) ker -> do
+     SOAC.Map _ _ map_lam map_inp)
+      | -- 1. the to-be-written arrays are not used inside the map!
+        S.null (S.intersection (S.fromList $ map snd as) $
+                S.fromList (map SOAC.inputArray map_inp) `S.union`
+                freeInLambda map_lam),
+        -- 2. all arrays produced by the map are ONLY used (consumed)
+        --    by the scatter, i.e., not used elsewhere.
+        not (any (`S.member` unfus_set) outVars),
+        -- 3. all arrays produced by the map are input to the scatter.
+        mapWriteFusionOK outVars ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
             SOAC.Scatter (cs1++cs2) w res_lam' new_inp as
@@ -341,11 +350,12 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
      SOAC.Scatter _cs1 _len1 _lam1 ivs1 as1)
       | horizFuse -> do
           let zipW xs ys = ys1 ++ xs1 ++ ys2 ++ xs2
-                where len = length xs `div` 2 -- same as with ys
-                      xs1 = take len xs
-                      xs2 = drop len xs
-                      ys1 = take len ys
-                      ys2 = drop len ys
+                where lenx = length xs `div` 2
+                      xs1  = take lenx xs
+                      xs2  = drop lenx xs
+                      leny = length ys `div` 2
+                      ys1  = take leny ys
+                      ys2  = drop leny ys
           let (body1, body2) = (lambdaBody lam1, lambdaBody lam2)
           let body' = Body { bodyLore = bodyLore body1 -- body1 and body2 have the same lores
                            , bodyStms = bodyStms body1 ++ bodyStms body2

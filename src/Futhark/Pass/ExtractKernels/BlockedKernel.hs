@@ -9,7 +9,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , mapKernel
        , mapKernelFromBody
        , KernelInput(..)
-       , mapKernelSkeleton
+       , readKernelInput
 
        -- Helper functions shared with at least Segmented.hs
        , kerneliseLambda
@@ -766,7 +766,6 @@ mapKernelSkeleton w ispace inputs = do
 
   space <- newKernelSpace ksize ispace
   return (space, ksize_bnds, read_input_bnds)
-
 
 -- Given the desired minium number of threads and the number of
 -- threads per group, compute the number of groups and total number of

@@ -4,6 +4,8 @@
 module Main (main) where
 
 import Control.Applicative
+import qualified Data.ByteString as SBS
+import qualified Data.ByteString.Lazy as LBS
 import Control.Concurrent
 import Control.Monad hiding (forM_)
 import Control.Exception hiding (try)
@@ -17,10 +19,11 @@ import Data.Foldable (forM_)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Map.Strict as M
 import System.Console.GetOpt
 import System.Directory
-import System.Process.Text (readProcessWithExitCode)
+import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import System.IO
 import System.FilePath
@@ -69,7 +72,7 @@ instance Eq TestCase where
 instance Ord TestCase where
   x `compare` y = testCaseProgram x `compare` testCaseProgram y
 
-data RunResult = ErrorResult Int T.Text
+data RunResult = ErrorResult Int SBS.ByteString
                | SuccessResult [Value]
 
 progNotFound :: T.Text -> T.Text
@@ -127,7 +130,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
         case code of
          ExitSuccess -> throwError "Expected failure\n"
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
-         ExitFailure 1 -> throwError err
+         ExitFailure 1 -> throwError $ T.decodeUtf8 err
          ExitFailure _ -> checkError expected_error err
 
     RunCases _ | mode == TypeCheck -> do
@@ -138,7 +141,7 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
         case code of
          ExitSuccess -> return ()
          ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
-         ExitFailure _ -> throwError err
+         ExitFailure _ -> throwError $ T.decodeUtf8 err
 
     RunCases ios -> do
       -- Compile up-front and reuse same executable for several entry points.
@@ -161,17 +164,17 @@ runTestCase (TestCase mode program testcase progs extra_options) = do
         context "Running compiled program" $
           runCompiledTestProgram extra_options program entry run
 
-checkError :: ExpectedError -> T.Text -> TestM ()
+checkError :: ExpectedError -> SBS.ByteString -> TestM ()
 checkError (ThisError regex_s regex) err
-  | not (match regex $ T.unpack err) =
+  | not (match regex $ T.unpack $ T.decodeUtf8 err) =
      throwError $ "Expected error:\n  " <> regex_s <>
-     "\nGot error:\n  " <> err
+     "\nGot error:\n  " <> T.decodeUtf8 err
 checkError _ _ =
   return ()
 
-runResult :: FilePath -> ExitCode -> T.Text -> T.Text -> TestM RunResult
+runResult :: FilePath -> ExitCode -> SBS.ByteString -> SBS.ByteString -> TestM RunResult
 runResult program ExitSuccess stdout_s _ =
-  case valuesFromText "stdout" stdout_s of
+  case valuesFromByteString "stdout" $ LBS.fromStrict stdout_s of
     Left e   -> do
       actual <- io $ writeOutFile program "actual" stdout_s
       throwError $ T.pack (show e) <> "\n(See " <> T.pack actual <> ")"
@@ -191,7 +194,8 @@ interpretTestProgram futharki program entry (TestRun _ inputValues expectedResul
   input <- T.unlines . map prettyText <$> getValues dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (code, output, err) <-
-    io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] input
+    io $ readProcessWithExitCode futharki ["-e", T.unpack entry, program] $
+    T.encodeUtf8 input
   case code of
     ExitFailure 127 ->
       throwError $ progNotFound $ T.pack futharki
@@ -202,17 +206,16 @@ interpretTestProgram futharki program entry (TestRun _ inputValues expectedResul
 compileTestProgram :: String -> FilePath -> TestM ()
 compileTestProgram futharkc program = do
   (futcode, _, futerr) <-
-    io $ readProcessWithExitCode futharkc
-    [program, "-o", binOutputf] ""
+    io $ readProcessWithExitCode futharkc [program, "-o", binOutputf] ""
   case futcode of
     ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
-    ExitFailure _   -> throwError futerr
+    ExitFailure _   -> throwError $ T.decodeUtf8 futerr
     ExitSuccess     -> return ()
   where binOutputf = program `replaceExtension` "bin"
 
 runCompiledTestProgram :: [String] -> String -> T.Text -> TestRun -> TestM ()
 runCompiledTestProgram extra_options program entry (TestRun _ inputValues expectedResult _) = do
-  input <- getValuesText dir inputValues
+  input <- getValuesBS dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
@@ -221,7 +224,8 @@ runCompiledTestProgram extra_options program entry (TestRun _ inputValues expect
       entry_options = ["-e", T.unpack entry]
   context ("Running " <> T.pack (unwords $ binpath : entry_options ++ extra_options)) $ do
     (progCode, output, progerr) <-
-      io $ readProcessWithExitCode binpath (entry_options ++ extra_options) input
+      io $ readProcessWithExitCode binpath (entry_options ++ extra_options) $
+      LBS.toStrict input
     withExceptT validating $
       compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
@@ -237,10 +241,10 @@ compareResult program (Succeeds (Just expectedResult)) (SuccessResult actualResu
     Just mismatch -> do
       actualf <-
         io $ writeOutFile program "actual" $
-        T.unlines $ map prettyText actualResult
+        T.encodeUtf8 $ T.unlines $ map prettyText actualResult
       expectedf <-
         io $ writeOutFile program "expected" $
-        T.unlines $ map prettyText expectedResult
+        T.encodeUtf8 $ T.unlines $ map prettyText expectedResult
       throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
         " do not match:\n" <> T.pack (show mismatch)
     Nothing ->
@@ -249,11 +253,11 @@ compareResult _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
   checkError expectedError actualError
 compareResult _ (Succeeds _) (ErrorResult code err) =
   throwError $ "Program failed with error code " <>
-  T.pack (show code) <> " and stderr:\n  " <> err
+  T.pack (show code) <> " and stderr:\n  " <> T.decodeUtf8 err
 compareResult _ (RunTimeFailure f) (SuccessResult _) =
   throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
 
-writeOutFile :: FilePath -> String -> T.Text -> IO FilePath
+writeOutFile :: FilePath -> String -> SBS.ByteString -> IO FilePath
 writeOutFile base ext content =
   attempt (0::Int)
   where template = base `replaceExtension` ext
@@ -262,7 +266,7 @@ writeOutFile base ext content =
           exists <- doesFileExist filename
           if exists
             then attempt $ i+1
-            else do T.writeFile filename content
+            else do SBS.writeFile filename content
                     return filename
 
 ---

@@ -11,18 +11,18 @@ category: Language
 ghc-options: -Wall
 
 extra-source-files:
-  - rts/python/memory.py
-  - rts/python/reader.py
-  - rts/python/scalar.py
-  - rts/c/reader.h
-  - rts/c/opencl.h
+  - rts/python/*.py
+  - rts/c/*.h
 
   - futlib/*.fut
 
 dependencies:
   - base >= 4 && < 5
   - array >= 0.4
+  - binary
+  - data-binary-ieee754
   - vector
+  - vector-binary-instances
   - containers >= 0.5
   - mtl >= 2.2.1
   - transformers >= 0.3
@@ -63,9 +63,7 @@ executables:
     dependencies:
       - futhark
       - process
-      - binary
       - random
-      - data-binary-ieee754
       - process-extras
       - temporary
       - json

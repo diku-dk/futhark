@@ -771,10 +771,10 @@ SignedLit :: { (IntValue, SrcLoc) }
                        return (num, pos) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
-            : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
-            | u16lit { let L pos (U16LIT num) = $1 in (Int16Value num, pos) }
-            | u32lit { let L pos (U32LIT num) = $1 in (Int32Value num, pos) }
-            | u64lit { let L pos (U64LIT num) = $1 in (Int64Value num, pos) }
+            : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value $ fromIntegral num, pos) }
+            | u16lit { let L pos (U16LIT num) = $1 in (Int16Value $ fromIntegral num, pos) }
+            | u32lit { let L pos (U32LIT num) = $1 in (Int32Value $ fromIntegral num, pos) }
+            | u64lit { let L pos (U64LIT num) = $1 in (Int64Value $ fromIntegral num, pos) }
 
 FloatLit :: { (FloatValue, SrcLoc) }
          : f32lit { let L pos (F32LIT num) = $1 in (Float32Value num, pos) }
@@ -970,7 +970,7 @@ lexer cont = do
       case ended of
         Right x -> return x
         Left _ -> do
-          ts' <- scanTokens <$> getFilename <*> readLine
+          ts' <- scanTokensText <$> getFilename <*> readLine
           ts'' <- case ts' of Right x -> return x
                               Left e  -> throwError e
           case ts'' of
@@ -999,7 +999,7 @@ parseInMonad :: ParserMonad a -> FilePath -> T.Text
 parseInMonad p file program =
   either (Left . ParseError) Right <$> either (return . Left)
   (evalStateT (evalStateT (runExceptT p) env))
-  (scanTokens file program)
+  (scanTokensText file program)
   where env = newParserEnv file Int32 Float64
 
 parseIncrementalIO :: ParserMonad a -> FilePath -> T.Text
