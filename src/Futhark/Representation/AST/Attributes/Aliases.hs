@@ -44,7 +44,7 @@ subExpAliases (Var v)    = vnameAliases v
 primOpAliases :: BasicOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
 primOpAliases (Opaque se) = [subExpAliases se]
-primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
+primOpAliases (ArrayLit _ _) = [mempty]
 primOpAliases BinOp{} = [mempty]
 primOpAliases ConvOp{} = [mempty]
 primOpAliases CmpOp{} = [mempty]
