@@ -562,6 +562,7 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '<=...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '>...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '>=...' Exp2   { binOp $1 $2 $3 }
 
      | Exp2 '>=' Exp2      { binOp $1 (L $2 (SYMBOL Geq [] (nameFromString ">="))) $3 }
      | Exp2 '>' Exp2       { binOp $1 (L $2 (SYMBOL Greater [] (nameFromString ">"))) $3 }
