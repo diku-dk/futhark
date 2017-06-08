@@ -3,7 +3,6 @@
 !/*/
 
 # Ignore Emacs autosave files.
-
 \#*\#
 .#*
 
@@ -31,6 +30,10 @@ examples/**/*bin
 examples/*c
 examples/**/*c
 *~
+
+# Ignore Python cruft.
+__pycache__
+*.pyc
 
 # Ignore side-effects of compilation.
 *.aux
