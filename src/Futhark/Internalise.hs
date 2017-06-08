@@ -72,6 +72,8 @@ internaliseDecs ds =
   case ds of
     [] ->
       return ()
+    LocalDec d _ : ds' ->
+      internaliseDecs $ d : ds'
     ValDec vdec : ds' -> do
       internaliseValBind vdec
       internaliseDecs ds'
