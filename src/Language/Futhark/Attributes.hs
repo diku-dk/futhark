@@ -536,8 +536,8 @@ typeOf (RecordLit fs _) =
         record (RecordRecord e) = case typeOf e of
           Record rfs -> rfs
           _          -> error "typeOf: RecordLit: the impossible happened."
-typeOf (ArrayLit es (Info t) _) =
-  arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
+typeOf (ArrayLit _ (Info t) _) =
+  arrayType 1 t Unique `setAliases` mempty
 typeOf (Empty (TypeDecl _ (Info t)) _) =
   arrayType 1 (fromStruct t) Unique
 typeOf (BinOp _ _ _ (Info t) _) = t
