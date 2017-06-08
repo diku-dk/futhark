@@ -197,7 +197,7 @@ openclMemoryType space =
 staticOpenCLArray :: GenericC.StaticArray OpenCL ()
 staticOpenCLArray name "device" t vs = do
   let ct = GenericC.primTypeToCType t
-      vs' = [[C.cinit|$exp:v|] | v <- vs]
+      vs' = [[C.cinit|$exp:(GenericC.compilePrimValue v)|] | v <- vs]
       num_elems = length vs
   name_realtype <- newVName $ baseString name ++ "_realtype"
   GenericC.topLevelDefinition [C.cedecl|static $ty:ct $id:name_realtype[$int:num_elems] = {$inits:vs'};|]

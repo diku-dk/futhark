@@ -31,6 +31,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileCode
   , compileExp
   , compilePrimExp
+  , compilePrimValue
   , compileExpToName
   , dimSizeToExp
   , rawMem
@@ -1249,7 +1250,7 @@ compileCode (DeclareScalar name t) = do
 
 compileCode (DeclareArray name DefaultSpace t vs) = do
   let ct = primTypeToCType t
-      vs' = [[C.cinit|$exp:v|] | v <- vs]
+      vs' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs]
   name_realtype <- newVName $ baseString name ++ "_realtype"
   topLevelDefinition [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs)] = {$inits:vs'};|]
   -- Fake a memory block.
