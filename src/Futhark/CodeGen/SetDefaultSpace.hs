@@ -43,6 +43,8 @@ setBodySpace space (Allocate v e old_space) =
   Allocate v (setCountSpace space e) $ setSpace space old_space
 setBodySpace space (DeclareMem name old_space) =
   DeclareMem name $ setSpace space old_space
+setBodySpace space (DeclareArray name _ t vs) =
+  DeclareArray name space t vs
 setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
   Copy
   dest (setCountSpace space dest_offset) dest_space'

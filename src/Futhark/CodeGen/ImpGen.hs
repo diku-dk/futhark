@@ -645,9 +645,25 @@ defCompileBasicOp
           copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
           emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
-defCompileBasicOp (Destination [dest]) (ArrayLit es _) =
-  forM_ (zip [0..] es) $ \(i,e) ->
-  copyDWIMDest dest [constIndex i] e []
+defCompileBasicOp (Destination [dest]) (ArrayLit es _)
+  | ArrayDestination (CopyIntoMemory dest_mem) _ <- dest,
+    Just (vs@(v:_)) <- mapM isLiteral es = do
+      dest_space <- entryMemSpace <$> lookupMemory (memLocationName dest_mem)
+      let t = primValueType v
+      static_array <- newVName "static_array"
+      emit $ Imp.DeclareArray static_array dest_space t vs
+      let static_src = MemLocation static_array [Imp.ConstSize $ genericLength es] $
+                       IxFun.iota [genericLength es]
+          num_bytes = Imp.ConstSize $ genericLength es * primByteSize t
+          entry = MemVar Nothing $ MemEntry num_bytes dest_space
+      local (insertInVtable static_array entry) $
+        copy t dest_mem static_src $ genericLength es
+  | otherwise =
+    forM_ (zip [0..] es) $ \(i,e) ->
+      copyDWIMDest dest [constIndex i] e []
+
+  where isLiteral (Constant v) = Just v
+        isLiteral _ = Nothing
 
 defCompileBasicOp _ Rearrange{} =
   return ()
