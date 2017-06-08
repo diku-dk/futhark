@@ -2,6 +2,9 @@
 Helper functions.
 '''
 
+import numpy as np
+
+
 def average_improvement(benchmark_info, val_func):
     datasets = benchmark_info['datasets'].values()
     return np.mean(
