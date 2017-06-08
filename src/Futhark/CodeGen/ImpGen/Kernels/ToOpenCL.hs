@@ -330,6 +330,7 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
+                     , GenericC.opsStaticArray = noStaticArrays
                      , GenericC.opsFatMemory = False
                      }
   where kernelOps :: GenericC.OpCompiler KernelOp UsedFunctions
@@ -359,6 +360,10 @@ inKernelOperations = GenericC.Operations
         copyInKernel :: GenericC.Copy KernelOp UsedFunctions
         copyInKernel _ _ _ _ _ _ _ =
           fail "Cannot bulk copy in kernel."
+
+        noStaticArrays :: GenericC.StaticArray KernelOp UsedFunctions
+        noStaticArrays _ _ _ _ =
+          fail "Cannot create static array in kernel."
 
         kernelMemoryType space = do
           quals <- pointerQuals space
@@ -557,6 +562,7 @@ typesInCode (For _ it e c) = IntType it `S.insert` typesInExp e <> typesInCode c
 typesInCode (While e c) = typesInExp e <> typesInCode c
 typesInCode DeclareMem{} = mempty
 typesInCode (DeclareScalar _ t) = S.singleton t
+typesInCode (DeclareArray _ _ t _) = S.singleton t
 typesInCode (Allocate _ (Count e) _) = typesInExp e
 typesInCode (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
   typesInExp e1 <> typesInExp e2 <> typesInExp e3
