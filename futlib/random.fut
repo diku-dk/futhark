@@ -1,4 +1,10 @@
 -- Random number generation inspired by <random> in C++.
+--
+-- Example usage:
+--
+-- module dist = uniform_real_distribution f32 u32 (convert u32 f32) minstd_rand
+-- let rng = minstd_rand.rng_from_seed [123]
+-- let (rng, x) = dist.rand (1,6)
 
 import "/futlib/math"
 
@@ -139,24 +145,17 @@ module minstd_rand0: rng_engine with t = u32 =
     let m = 2147483647u32
 }
 
+-- | Conversion between two numeric types.
 module type convert = { type from type to val convert: from -> to}
 
-module u32_to_f32 = {
-  type from = u32
-  type to = f32
-  let convert (x: u32) = f32 x
-}
-
-module u32_to_f64 = {
-  type from = u32
-  type to = f64
-  let convert (x: u32) = f64 x
-}
-
-module u32_to_i32 = {
-  type from = u32
-  type to = i32
-  let convert (x: u32) = i32 x
+-- | Converting one type to another via an interim conversion to 64
+-- | bit integers.  The compiler should be smart enough to elide this
+-- | conversion in most dcases.
+module convert (from: numeric) (to: numeric):
+ convert with from = from.t with to = to.t = {
+  type from = from.t
+  type to = to.t
+  let convert (x: from.t): to.t = to.from_i64 (from.to_i64 x)
 }
 
 -- | This uniform integer distribution generates integers in a given
