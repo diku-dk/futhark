@@ -529,6 +529,18 @@ simplifyConvOp _ _ (ConvOp op (Constant v)) =
 simplifyConvOp _ _ (ConvOp op se)
   | (from, to) <- convTypes op, from == to =
   Just $ SubExp se
+simplifyConvOp lookupVar _ (ConvOp (SExt _ t1) (Var v))
+  | Just (BasicOp (ConvOp (SExt t3 _) se)) <- lookupVar v =
+      Just $ ConvOp (SExt t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (ZExt _ t1) (Var v))
+  | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v =
+      Just $ ConvOp (ZExt t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (SIToFP _ t1) (Var v))
+  | Just (BasicOp (ConvOp (SExt t3 _) se)) <- lookupVar v =
+      Just $ ConvOp (SIToFP t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (UIToFP _ t1) (Var v))
+  | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v =
+      Just $ ConvOp (UIToFP t3 t1) se
 simplifyConvOp _ _ _ =
   Nothing
 
