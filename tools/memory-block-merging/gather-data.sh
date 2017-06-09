@@ -64,10 +64,10 @@ get_compilation_info() {
     }
 }
 
-# get_compilation_info > "$base/compilation_in-place-lowering_memory-block-merging.json"
-# IN_PLACE_LOWERING=0 get_compilation_info > "$base/compilation_no-in-place-lowering_memory-block-merging.json"
-# # It doesn't make sense to run get_compilation_info with memory block merging
-# # disabled, since that will just give us less information.
+get_compilation_info > "$base/compilation_in-place-lowering_memory-block-merging.json"
+IN_PLACE_LOWERING=0 get_compilation_info > "$base/compilation_no-in-place-lowering_memory-block-merging.json"
+# It doesn't make sense to run get_compilation_info with memory block merging
+# disabled, since that will just give us less information.
 
 # Then run different versions of the compiler on the datasets.
 futhark-bench $flags --json \
