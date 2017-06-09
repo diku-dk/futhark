@@ -446,6 +446,11 @@ simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing
 
+simplifyBinOp _ _ (BinOp FDiv{} e1 e2)
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e1
+  | isCt0 e2 = Nothing
+
 simplifyBinOp _ _ (BinOp (SRem t) e1 e2)
   | isCt1 e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = binOpRes $ IntValue $ intValue t (1 :: Int)
