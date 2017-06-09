@@ -213,8 +213,7 @@ checkSigExp (SigSpecs specs loc) = do
 checkSigExp (SigWith s (TypeRef tname td) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
   td' <- checkTypeDecl loc td
-  tname' <- localEnv (s_env<>) $ snd <$> checkQualNameWithEnv Type tname loc
-  (s_abs', s_env') <- refineEnv loc s_abs s_env tname' $ unInfo $ expandedType td'
+  (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname $ unInfo $ expandedType td'
   return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
   (MTy s_abs e1_mod, e1') <- checkSigExp e1
@@ -698,22 +697,6 @@ matchMTys = matchMTys' mempty
       Left $ TypeError loc $ "Type " ++ pretty name ++ " specified as " ++
       ppTypeAbbr spec_t ++ " in signature, but " ++ ppTypeAbbr env_t ++ " in structure."
 
-    findBinding :: (Env -> M.Map VName v)
-                  -> Namespace -> Name
-                  -> Env
-                  -> Maybe (VName, v)
-    findBinding table namespace name the_env = do
-      name' <- M.lookup (namespace, name) $ envNameMap the_env
-      (name',) <$> M.lookup name' (table the_env)
-
-    findTypeDef :: QualName Name -> Mod -> Maybe (VName, TypeBinding)
-    findTypeDef _ ModFun{} = Nothing
-    findTypeDef (QualName [] name) (ModEnv the_env) =
-      findBinding envTypeTable Type name the_env
-    findTypeDef (QualName (q:qs) name) (ModEnv the_env) = do
-      (_, q_mod) <- findBinding envModTable Structure q the_env
-      findTypeDef (QualName qs name) q_mod
-
     resolveAbsTypes :: TySet -> Mod -> TySet -> SrcLoc
                     -> Either TypeError (M.Map VName (QualName VName, TypeBinding))
     resolveAbsTypes mod_abs mod sig_abs loc = do
@@ -734,6 +717,23 @@ matchMTys = matchMTys' mempty
 
     ppTypeAbbr (ps, t) =
       "type " ++ unwords (map pretty ps) ++ " = " ++ pretty t
+
+
+findBinding :: (Env -> M.Map VName v)
+            -> Namespace -> Name
+            -> Env
+            -> Maybe (VName, v)
+findBinding table namespace name the_env = do
+  name' <- M.lookup (namespace, name) $ envNameMap the_env
+  (name',) <$> M.lookup name' (table the_env)
+
+findTypeDef :: QualName Name -> Mod -> Maybe (VName, TypeBinding)
+findTypeDef _ ModFun{} = Nothing
+findTypeDef (QualName [] name) (ModEnv the_env) =
+  findBinding envTypeTable Type name the_env
+findTypeDef (QualName (q:qs) name) (ModEnv the_env) = do
+  (_, q_mod) <- findBinding envModTable Structure q the_env
+  findTypeDef (QualName qs name) q_mod
 
 substituteTypesInMod :: TypeSubs -> Mod -> Mod
 substituteTypesInMod substs (ModEnv e) =
@@ -882,16 +882,17 @@ envTypeAbbrs env =
   (mconcat . map modTypeAbbrs . M.elems . envModTable) env
 
 -- | Refine the given type name in the given env.
-refineEnv :: SrcLoc -> TySet -> Env -> QualName VName -> StructType
-          -> TypeM (TySet, Env)
+refineEnv :: SrcLoc -> TySet -> Env -> QualName Name -> StructType
+          -> TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname t
-  | Just (TypeAbbr [] (TypeVar (TypeName qs v) _)) <-
-      M.lookup (qualLeaf tname) $ envTypeTable env,
-    QualName qs v `S.member` tset =
-      return (QualName qs v `S.delete` tset,
+  | Just (tname', TypeAbbr [] (TypeVar (TypeName qs v) _)) <-
+      findTypeDef tname (ModEnv env),
+    QualName (qualQuals tname) v `S.member` tset =
+      return (tname { qualLeaf = tname' },
+              QualName qs v `S.delete` tset,
               substituteTypesInEnv
-               (M.fromList [(qualLeaf tname, TypeSub $ TypeAbbr [] t),
-                             (v, TypeSub $ TypeAbbr [] t)])
+               (M.fromList [(tname', TypeSub $ TypeAbbr [] t),
+                            (v, TypeSub $ TypeAbbr [] t)])
               env)
   | otherwise =
       bad $ TypeError loc $
