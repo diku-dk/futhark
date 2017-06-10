@@ -37,79 +37,42 @@ plots_dir = os.path.join(data_dir, 'plots')
 os.makedirs(plots_dir, exist_ok=True)
 
 for benchmark_name, benchmark_info in benchmarks:
-    pdf_path = os.path.normpath(os.path.join(plots_dir, benchmark_name + '-runtimes.pdf'))
-    os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
-    flat_results = []
-    for dataset_name, dataset_info in benchmark_info['datasets'].items():
-        for key, short_name, color in (
-                ('with-in-place-lowering-without-memory-block-merging', 'disabled', 'red'),
-                ('without-in-place-lowering-with-memory-block-merging', 'enabled', 'blue')
-        ):
-            runtime = dataset_info[key]['average_runtime']
-            flat_results.append(('{}:\n{}'.format(short_name, dataset_name), runtime, color))
+    for name, unit, val_func in attributes:
+        pdf_path = os.path.normpath(os.path.join(plots_dir,
+                                                 '{}-{}.pdf'.format(benchmark_name, name.replace(' ', '_'))))
+        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        flat_results = []
+        for dataset_name, dataset_info in benchmark_info['datasets'].items():
+            for key, short_name, color in (
+                    ('with-in-place-lowering-without-memory-block-merging', 'disabled', 'red'),
+                    ('without-in-place-lowering-with-memory-block-merging', 'enabled', 'blue')
+            ):
+                value = dataset_info[key]['average_runtime']
+                flat_results.append(('{}:\n{}'.format(short_name, dataset_name), value, color))
 
-    print('Plotting {} runtimes into {}.'.format(benchmark_name, pdf_path),
-          file=sys.stderr)
+        # print('Plotting {} {} into {}.'.format(benchmark_name, name, pdf_path),
+        #       file=sys.stderr)
 
-    ind = np.arange(len(flat_results))
-    width = 0.9
+        ind = np.arange(len(flat_results))
+        width = 0.9
 
-    maximum = max(map(lambda x: x[1], flat_results))
+        maximum = max(map(lambda x: x[1], flat_results))
 
-    fig, ax = plt.subplots()
-    ax.set_ylim([0, maximum * 1.1])
-    ax.set_title('Runtimes of {}'.format(benchmark_name))
-    ax.set_ylabel('Microseconds')
-    ax.set_xticks(ind)
-    ax.set_xticklabels(list(map(lambda x: x[0], flat_results)))
-    plt.tick_params(axis='x', which='major', labelsize=4)
+        fig, ax = plt.subplots()
+        ax.set_ylim([0, maximum * 1.1])
+        ax.set_title('{} of {}'.format(name, benchmark_name))
+        ax.set_ylabel(unit)
+        ax.set_xticks(ind)
+        ax.set_xticklabels(list(map(lambda x: x[0], flat_results)))
+        plt.tick_params(axis='x', which='major', labelsize=4)
 
-    plt.bar(ind,
-            list(map(lambda x: x[1], flat_results)),
-            width,
-            color=list(map(lambda x: x[2], flat_results)))
+        plt.bar(ind,
+                list(map(lambda x: x[1], flat_results)),
+                width,
+                color=list(map(lambda x: x[2], flat_results)))
 
-    plt.tight_layout(pad=0.4, w_pad=0.5, h_pad=1.0)
+        plt.tight_layout(pad=0.4, w_pad=0.5, h_pad=1.0)
 
-    plt.rc('text')
-    plt.savefig(pdf_path, format='pdf')
-    plt.close()
-
-
-    # pdf_path = os.path.normpath(os.path.join(data_dir, benchmark_name + '-allocations.pdf'))
-    # os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
-    # flat_results = []
-    # for dataset_name, runtimes, total_alloc, _, _ in datasets:
-    #     for json_path in ['without.json', 'with.json']:
-    #         alloc = total_alloc[json_path]
-    #         color = json_colors[json_path]
-    #         flat_results.append(('{}:\n{}'.format(short_path_name(json_path),
-    #                                               cut_desc(dataset_name)),
-    #                              alloc, color))
-
-    # print('Plotting total allocations {} into {}.'.format(benchmark_name, pdf_path),
-    #       file=sys.stderr)
-
-    # ind = np.arange(len(flat_results))
-    # width = 0.35
-
-    # maximum = max(map(lambda x: x[1], flat_results))
-
-    # fig, ax = plt.subplots()
-    # ax.set_ylim([0, maximum * 1.1])
-    # ax.set_title('Cumulative allocations in {}'.format(benchmark_name))
-    # ax.set_ylabel('Bytes')
-    # ax.set_xticks(ind)
-    # ax.set_xticklabels(list(map(lambda x: x[0], flat_results)))
-    # plt.tick_params(axis='x', which='major', labelsize=4)
-
-    # plt.bar(ind,
-    #         list(map(lambda x: x[1], flat_results)),
-    #         width,
-    #         color=list(map(lambda x: x[2], flat_results)))
-
-    # plt.tight_layout(pad=0.4, w_pad=0.5, h_pad=1.0)
-
-    # plt.rc('text')
-    # plt.savefig(pdf_path, format='pdf')
-    # plt.close()
+        plt.rc('text')
+        plt.savefig(pdf_path, format='pdf')
+        plt.close()
