@@ -126,24 +126,23 @@ internaliseModExp (E.ModDecs ds _) =
 internaliseModExp (E.ModAscript me _ (Info substs) _) = do
   noteDecSubsts substs
   morePromises substs $ internaliseModExp me
-internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_substs) _) = do
-  internaliseModExp orig_arg
-  generatingFunctor orig_p_substs orig_b_substs $ do
-    f_e <- evalModExp orig_f
-    case f_e of
-      Just (p, p_substs, b_substs, body) -> do
-        noteMod p mempty orig_arg
-        generatingFunctor p_substs mempty $
-          withDecSubstitutions b_substs $
-          internaliseModExp body
-      Nothing ->
-        fail $ "Cannot apply " ++ pretty orig_f ++ " to " ++ pretty orig_arg
+internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_substs) _) = do
+  internaliseModExp outer_arg
+  f_e <- evalModExp outer_f
+  case f_e of
+    Just (p, f_p_substs, dec_substs, body) -> do
+      noteMod p mempty outer_arg
+      withDecSubstitutions dec_substs $
+        generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
+        internaliseModExp body
+    Nothing ->
+      fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
   where evalModExp (E.ModVar v _) = do
-          ModBinding b_substs me <- lookupMod =<< lookupSubst v
+          ModBinding dec_substs me <- lookupMod =<< lookupSubst v
           f_e <- evalModExp me
           case f_e of
-            Just (p, p_substs, more_b_substs, body) ->
-              return $ Just (p, p_substs, more_b_substs <> b_substs, body)
+            Just (p, f_p_substs, f_dec_substs, body) ->
+              return $ Just (p, f_p_substs, f_dec_substs <> dec_substs, body)
             _ ->
               return Nothing
         evalModExp (E.ModLambda (ModParam p _ _) sig me loc) = do
@@ -154,14 +153,18 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
         evalModExp (E.ModAscript me _ (Info substs) _) = do
           noteDecSubsts substs
           morePromises substs $ evalModExp me
-        evalModExp (E.ModApply f arg (Info p_substs) (Info b_substs) _) = do
+        evalModExp (E.ModApply f arg (Info p_substs) _ _) = do
+          -- Invariant guaranteed by the type checker - only an
+          -- application resulting in a non-parametric module will
+          -- have non-null result substitutions.  This is why we
+          -- ignore them here.
           f_e <- evalModExp f
           internaliseModExp arg
           case f_e of
-            Just (p, more_p_substs, more_b_substs, body) -> do
+            Just (p, f_p_substs, f_b_substs, body) -> do
               noteMod p mempty arg
-              generatingFunctor (more_p_substs<>p_substs) mempty $
-                withDecSubstitutions (more_b_substs<>b_substs) $
+              withDecSubstitutions f_b_substs $
+                generatingFunctor (p_substs<>f_p_substs) mempty $
                 evalModExp body
             Nothing ->
               fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg
@@ -285,11 +288,13 @@ entryPoint params (eret,crets) =
           [I.TypeOpaque (pretty t) $ length ts]
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) loc) =
+internaliseIdent (E.Ident name (Info tp) loc) = do
+  substs <- allSubsts
   case tp of
     E.Prim{} -> return name
-    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-                       ++ pretty name ++ "' at " ++ locStr loc ++ "."
+    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '" ++ show substs
+                       ++ pretty name ++ " of type " ++ pretty tp ++
+                       " at " ++ locStr loc ++ "."
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertStmsM $ do
