@@ -131,23 +131,24 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
   generatingFunctor orig_p_substs orig_b_substs $ do
     f_e <- evalModExp orig_f
     case f_e of
-      Just (p, substs, body) -> do
+      Just (p, p_substs, b_substs, body) -> do
         noteMod p mempty orig_arg
-        withDecSubstitutions substs $
+        generatingFunctor p_substs mempty $
+          withDecSubstitutions b_substs $
           internaliseModExp body
       Nothing ->
         fail $ "Cannot apply " ++ pretty orig_f ++ " to " ++ pretty orig_arg
   where evalModExp (E.ModVar v _) = do
-          ModBinding v_substs me <- lookupMod =<< lookupSubst v
+          ModBinding b_substs me <- lookupMod =<< lookupSubst v
           f_e <- evalModExp me
           case f_e of
-            Just (p, me_substs, body) ->
-              return $ Just (p, me_substs `M.union` v_substs, body)
+            Just (p, p_substs, more_b_substs, body) ->
+              return $ Just (p, p_substs, more_b_substs <> b_substs, body)
             _ ->
               return Nothing
         evalModExp (E.ModLambda (ModParam p _ _) sig me loc) = do
-          substs <- asks envFunctorSubsts
-          return $ Just (p, substs, maybeAscript loc sig me)
+          p_substs <- asks envFunctorSubsts
+          return $ Just (p, p_substs, mempty, maybeAscript loc sig me)
         evalModExp (E.ModParens e _) =
           evalModExp e
         evalModExp (E.ModAscript me _ (Info substs) _) = do
@@ -157,10 +158,10 @@ internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_
           f_e <- evalModExp f
           internaliseModExp arg
           case f_e of
-            Just (p, substs, body) -> do
+            Just (p, more_p_substs, more_b_substs, body) -> do
               noteMod p mempty arg
-              generatingFunctor p_substs b_substs $
-                withDecSubstitutions substs $
+              generatingFunctor (more_p_substs<>p_substs) mempty $
+                withDecSubstitutions (more_b_substs<>b_substs) $
                 evalModExp body
             Nothing ->
               fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg

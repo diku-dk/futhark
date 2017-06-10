@@ -328,8 +328,8 @@ generatingFunctor p_substs b_substs m = do
   cur_substs <- allSubsts
 
   let forward (k,v)
-        | Just v' <- M.lookup k cur_substs = Just (v',v)
-        | otherwise                        = Nothing
+        | Just v' <- M.lookup k cur_substs, v /= v' = Just (v',v)
+        | otherwise                                 = Nothing
       contras = M.fromList $ mapMaybe forward $ M.toList b_substs
       forwards = M.fromList $ mapMaybe forward $ M.toList p_substs
 
