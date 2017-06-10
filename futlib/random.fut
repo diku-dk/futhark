@@ -182,15 +182,6 @@ module shuffle_order_engine
   let max = E.max
 }
 
--- | Converting one type to another via an interim conversion to 64
--- bit integers.  The compiler should be smart enough to short-cut
--- this conversion in most cases.
-local module convert (from: numeric) (to: numeric) = {
-  type from = from.t
-  type to = to.t
-  let convert (x: from.t): to.t = to.from_i64 (from.to_i64 x)
-}
-
 -- | This uniform integer distribution generates integers in a given
 -- range with equal probability for each.
 module uniform_int_distribution
