@@ -129,23 +129,24 @@ internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_su
   internaliseModExp outer_arg
   f_e <- evalModExp outer_f
   case f_e of
-    Just (p, f_p_substs, body) -> do
+    Just (p, f_p_substs, dec_substs, body) -> do
       noteMod p outer_arg
-      generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
+      withDecSubstitutions dec_substs $
+        generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
         internaliseModExp body
     Nothing ->
       fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
   where evalModExp (E.ModVar v _) = do
-          ModBinding v_p_substs me <- lookupMod =<< lookupSubst v
+          ModBinding dec_substs me <- lookupMod =<< lookupSubst v
           f_e <- evalModExp me
           case f_e of
-            Just (p, f_p_substs, body) ->
-              return $ Just (p, f_p_substs <> v_p_substs, body)
+            Just (p, f_p_substs, f_dec_substs, body) ->
+              return $ Just (p, f_p_substs, f_dec_substs <> dec_substs, body)
             _ ->
               return Nothing
         evalModExp (E.ModLambda (ModParam p _ _) sig me loc) = do
           p_substs <- asks envFunctorSubsts
-          return $ Just (p, p_substs, maybeAscript loc sig me)
+          return $ Just (p, p_substs, mempty, maybeAscript loc sig me)
         evalModExp (E.ModParens e _) =
           evalModExp e
         evalModExp (E.ModAscript me _ (Info substs) _) = do
@@ -159,9 +160,10 @@ internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_su
           f_e <- evalModExp f
           internaliseModExp arg
           case f_e of
-            Just (p, f_p_substs, body) -> do
+            Just (p, f_p_substs, f_b_substs, body) -> do
               noteMod p arg
-              generatingFunctor (p_substs<>f_p_substs) mempty $
+              withDecSubstitutions f_b_substs $
+                generatingFunctor (p_substs<>f_p_substs) mempty $
                 evalModExp body
             Nothing ->
               fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg
@@ -183,7 +185,8 @@ internaliseFunBind :: E.FunBind -> InternaliseM ()
 internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body loc) = do
   fname <- fulfillingPromise ofname
   substs <- allSubsts
-  noteFunction fname $ \(e_ts, _) -> generatingFunctor substs mempty $ do
+  noteFunction fname $ \(e_ts, _) -> withDecSubstitutions substs $
+    generatingFunctor mempty mempty $ do
       let param_ts = map (E.removeShapeAnnotations . E.patternStructType) params
 
       mapping <- fmap mconcat $ zipWithM mapTypeVariables param_ts $
