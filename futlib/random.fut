@@ -92,8 +92,8 @@ module linear_congruential_engine (T: integral) (P: {
   let max = P.m
 }
 
--- | The xorshift128+ engine.  Use two 64-bit words as state.
-module xorshift128plus_engine: rng_engine with int.t = u64 = {
+-- | The xorshift128+ engine.  Uses two 64-bit words as state.
+module xorshift128plus: rng_engine with int.t = u64 = {
   module int = u64
   type rng = (u64,u64)
 
@@ -104,20 +104,21 @@ module xorshift128plus_engine: rng_engine with int.t = u64 = {
     in ((new_x,new_y), new_y + y)
 
   let rng_from_seed [n] (seed: [n]i32) =
-    loop (seed' = 1u64) = for i < n do
-      ((seed' >>> 32u64) ^ seed') ^
-      u64.from_i32 (seed[i] ^ 0b1010101010101)
-    in #1 (rand (seed'>>>32u64, seed'))
+    loop ((a,b) = (1u64,u64.from_i32 n)) = for i < n do
+      if n % 2 == 0
+      then #1 (rand (a^u64.from_i32 (hash seed[i]),b))
+      else #1 (rand (a, b^u64.from_i32 (hash seed[i])))
+    in (a,b)
 
   let split_rng (n: i32) ((x,y): rng): [n]rng =
-    map (\i -> (x ^ u64.from_i32 (hash i),
-                y ^ u64.from_i32 (hash i))) (iota n)
+    map (\i -> let (a,b) = #1 (rand (rng_from_seed [hash (i^n)]))
+               in #1 (rand (x^a,y^b))) (iota n)
 
   let join_rng [n] (xs: [n]rng): rng =
     reduce (\(x1,y1) (x2,y2) -> (x1^x2,y1^y2)) (0u64,0u64) xs
 
   let min = 0u64
-  let max = 0xFFFFFFFFFFFFFFFFu64
+  let max = 0xFF_FF_FF_FF_FF_FF_FF_FFu64
 }
 
 -- | A 'linear_congruential_engine' producing 'u32' values and
@@ -191,23 +192,25 @@ module uniform_int_distribution
                    with rng = E.rng
                    with distribution = (D.t,D.t) = {
 
-  let convert (x: E.int.t) = D.from_i64 (E.int.to_i64 x)
-
   type t = D.t
+
+  let to_D (x: E.int.t) = D.from_i64 (E.int.to_i64 x)
+  let to_E (x: D.t) = E.int.from_i64 (D.to_i64 x)
+
   type rng = E.rng
-  type distribution = (t,t) -- Lower and upper bounds.
-  let uniform (min: t) (max: t) = (min,max)
+  type distribution = (D.t,D.t) -- Lower and upper bounds.
+  let uniform (min: D.t) (max: D.t) = (min,max)
 
   let rand ((min,max): distribution) (rng: E.rng) =
-    let range = max D.- min D.+ D.from_i32 1
-    in if range D.<= D.from_i32 0
-       then (rng, convert E.min) -- Avoid infinite loop below.
-       else let emax = convert E.max
-            let secure_max = emax D.- emax D.% range
+    let min = to_E min
+    let max = to_E max
+    let range = max E.int.- min E.int.+ E.int.from_i32 1
+    in if range E.int.<= E.int.from_i32 0
+       then (rng, to_D E.min) -- Avoid infinite loop below.
+       else let secure_max = E.max E.int.- E.max E.int.%% range
             loop ((rng, x) = E.rand rng) =
-              while convert x D.>= secure_max do E.rand rng
-            in (rng, min D.+ convert x D./ (secure_max D./ range))
-
+              while x E.int.>= secure_max do E.rand rng
+            in (rng, to_D (min E.int.+ x E.int./ (secure_max E.int./ range)))
 }
 
 -- | This uniform integer distribution generates floats in a given
@@ -216,7 +219,7 @@ module uniform_real_distribution (R: real) (E: rng_engine):
   rng_distribution with t = R.t
                    with rng = E.rng
                    with distribution = (R.t,R.t) = {
-  let convert (x: E.int.t) = R.from_i64 (E.int.to_i64 x)
+  let to_D (x: E.int.t) = R.from_i64 (E.int.to_i64 x)
 
   type t = R.t
   type rng = E.rng
@@ -224,19 +227,17 @@ module uniform_real_distribution (R: real) (E: rng_engine):
 
   let uniform (min: t) (max: t) = (min,max)
 
-  open R
-
   let rand ((min,max): distribution) (rng: E.rng) =
     let (rng', x) = E.rand rng
-    let x' = convert x / convert E.max
-    in (rng', min + x' * (max - min))
+    let x' = to_D x R./ to_D E.max
+    in (rng', min R.+ x' R.* (max R.- min))
 }
 
 module normal_distribution (R: real) (E: rng_engine):
   rng_distribution with t = R.t
                    with rng = E.rng
                    with distribution = {mean:R.t,stddev:R.t} = {
-  let convert (x: E.int.t) = R.from_i64 (E.int.to_i64 x)
+  let to_R (x: E.int.t) = R.from_i64 (E.int.to_i64 x)
 
   type t = R.t
   type rng = E.rng
@@ -250,8 +251,8 @@ module normal_distribution (R: real) (E: rng_engine):
     -- Box-Muller where we only use one of the generated points.
     let (rng, u1) = E.rand rng
     let (rng, u2) = E.rand rng
-    let u1 = convert u1 / convert E.max
-    let u2 = convert u2 / convert E.max
+    let u1 = to_R u1 / to_R E.max
+    let u2 = to_R u2 / to_R E.max
     let r = sqrt (from_i32 (-2) * log u1)
     let theta = from_i32 2 * pi * u2
     in (rng, mean + stddev * (r * cos theta))

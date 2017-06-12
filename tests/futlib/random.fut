@@ -3,8 +3,8 @@ import "/futlib/random"
 
 -- ==
 -- entry: test_i32_rand
--- input { 0 10000 } output { 28 50 }
--- input { 1 10000 } output { 37 50 }
+-- input { 0 10000 } output { 72 50 }
+-- input { 1 10000 } output { 10 50 }
 
 module i32_rand = uniform_int_distribution i32 minstd_rand
 
@@ -17,8 +17,8 @@ entry test_i32_rand (x: i32) (n: i32) =
 
 -- ==
 -- entry: test_f32_rand
--- input { 0 10000 } output { 28.439787f32 50.383465f32 }
--- input { 1 10000 } output { 36.858000f32 50.435020f32 }
+-- input { 0 10000 } output { 71.806786f32 50.383465f32 }
+-- input { 1 10000 } output { 10.207669f32 50.246120f32 }
 
 module f32_rand = uniform_real_distribution f32 minstd_rand
 
