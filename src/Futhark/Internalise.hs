@@ -129,24 +129,23 @@ internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_su
   internaliseModExp outer_arg
   f_e <- evalModExp outer_f
   case f_e of
-    Just (p, f_p_substs, dec_substs, body) -> do
+    Just (p, f_p_substs, body) -> do
       noteMod p outer_arg
-      withDecSubstitutions dec_substs $
-        generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
+      generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
         internaliseModExp body
     Nothing ->
       fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
   where evalModExp (E.ModVar v _) = do
-          ModBinding dec_substs me <- lookupMod =<< lookupSubst v
+          ModBinding v_p_substs me <- lookupMod =<< lookupSubst v
           f_e <- evalModExp me
           case f_e of
-            Just (p, f_p_substs, f_dec_substs, body) ->
-              return $ Just (p, f_p_substs, f_dec_substs <> dec_substs, body)
+            Just (p, f_p_substs, body) ->
+              return $ Just (p, f_p_substs <> f_p_substs <> v_p_substs, body)
             _ ->
               return Nothing
         evalModExp (E.ModLambda (ModParam p _ _) sig me loc) = do
           p_substs <- asks envFunctorSubsts
-          return $ Just (p, p_substs, mempty, maybeAscript loc sig me)
+          return $ Just (p, p_substs, maybeAscript loc sig me)
         evalModExp (E.ModParens e _) =
           evalModExp e
         evalModExp (E.ModAscript me _ (Info substs) _) = do
@@ -160,10 +159,9 @@ internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_su
           f_e <- evalModExp f
           internaliseModExp arg
           case f_e of
-            Just (p, f_p_substs, f_b_substs, body) -> do
+            Just (p, f_p_substs, body) -> do
               noteMod p arg
-              withDecSubstitutions f_b_substs $
-                generatingFunctor (p_substs<>f_p_substs) mempty $
+              generatingFunctor (p_substs<>f_p_substs) mempty $
                 evalModExp body
             Nothing ->
               fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg
