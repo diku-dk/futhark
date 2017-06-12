@@ -36,6 +36,7 @@ module Futhark.Internalise.Monad
   , noteDecSubsts
   , morePromises
   , generatingFunctor
+  , withDecSubstitutions
   , openedName
 
   , asserting
@@ -130,7 +131,7 @@ data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
   , envGeneratingFunctor :: Bool
-  , envFunctorSubsts :: ModParamSubstitutions
+  , envFunctorSubsts :: DecSubstitutions
     -- ^ Mapping from names in functor parameters to their actual
     -- realised names.
   , envPromises :: PromisedNames
@@ -237,7 +238,7 @@ lookupMod mname = do
     Just me -> return me
 
 allSubsts :: InternaliseM DecSubstitutions
-allSubsts = M.union <$> gets stateDecSubsts <*> asks envFunctorSubsts
+allSubsts = M.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
 
 -- | Substitution for any variable or defined name.  Used for functor
 -- application.  Never pick apart QualNames directly in the
@@ -357,12 +358,12 @@ generatingFunctor p_substs b_substs m = do
 
   local update m
 
-withModParamSubsts :: ModParamSubstitutions
-                  -> InternaliseM a -> InternaliseM a
-withModParamSubsts p_substs =
+withDecSubstitutions :: DecSubstitutions
+                     -> InternaliseM a -> InternaliseM a
+withDecSubstitutions p_substs m = do
   let update env =
         env { envFunctorSubsts = p_substs `M.union` envFunctorSubsts env }
-  in local update
+  local update m
 
 openedName :: VName -> InternaliseM ()
 openedName o = do
@@ -440,6 +441,6 @@ withTypeDecSubstitutions :: DecSubstitutions
 withTypeDecSubstitutions substs (InternaliseTypeM m) = do
   s <- get
   e <- ask
-  (x, s') <- liftInternaliseM $ withModParamSubsts substs $ runStateT (runReaderT m e) s
+  (x, s') <- liftInternaliseM $ withDecSubstitutions substs $ runStateT (runReaderT m e) s
   put s'
   return x
