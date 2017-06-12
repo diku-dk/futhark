@@ -5,6 +5,7 @@ module Futhark.Internalise.Monad
   , throwError
   , VarSubstitutions
   , DecSubstitutions
+  , ModParamSubstitutions
   , PromisedNames
   , InternaliseEnv (..)
   , ConstParams
@@ -35,7 +36,6 @@ module Futhark.Internalise.Monad
   , noteDecSubsts
   , morePromises
   , generatingFunctor
-  , withDecSubstitutions
   , openedName
 
   , asserting
@@ -104,7 +104,7 @@ type FunInfo = (Name, ConstParams, Closure,
 
 type FunTable = M.Map VName FunBinding
 
-data ModBinding = ModBinding DecSubstitutions E.ModExp
+data ModBinding = ModBinding ModParamSubstitutions E.ModExp
                 deriving (Show)
 
 type TypeEntry = (DecSubstitutions, [E.TypeParam], E.StructType)
@@ -118,6 +118,10 @@ type VarSubstitutions = M.Map VName [SubExp]
 -- | Mapping from original top-level names to new top-level names.
 type DecSubstitutions = M.Map VName VName
 
+-- | Mapping from original top-level names to new top-level names, for
+-- things bound in a module parameter.
+type ModParamSubstitutions = M.Map VName VName
+
 -- | Mapping from what we think somethings name is, to what we would
 -- like to use it as.
 type PromisedNames = M.Map VName VName
@@ -126,7 +130,7 @@ data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
   , envGeneratingFunctor :: Bool
-  , envFunctorSubsts :: DecSubstitutions
+  , envFunctorSubsts :: ModParamSubstitutions
     -- ^ Mapping from names in functor parameters to their actual
     -- realised names.
   , envPromises :: PromisedNames
@@ -233,7 +237,7 @@ lookupMod mname = do
     Just me -> return me
 
 allSubsts :: InternaliseM DecSubstitutions
-allSubsts = M.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
+allSubsts = M.union <$> gets stateDecSubsts <*> asks envFunctorSubsts
 
 -- | Substitution for any variable or defined name.  Used for functor
 -- application.  Never pick apart QualNames directly in the
@@ -289,8 +293,9 @@ noteFunction fname generate =
   modify $ \s -> s { stateFtable = M.singleton fname entry <> stateFtable s }
   where entry = FunBinding mempty generate
 
-noteMod :: VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
-noteMod name substs me =
+noteMod :: VName -> E.ModExp -> InternaliseM ()
+noteMod name me = do
+  substs <- asks envFunctorSubsts
   modify $ \s -> s { stateModTable = M.insert name (ModBinding substs me) $ stateModTable s }
 
 noteType :: VName -> TypeEntry -> InternaliseM ()
@@ -332,7 +337,7 @@ morePromises substs m = do
               noteDecSubsts $ M.singleton v k_v
             Nothing -> return ()
 
-generatingFunctor :: DecSubstitutions
+generatingFunctor :: ModParamSubstitutions
                   -> PromisedNames
                   -> InternaliseM a -> InternaliseM a
 generatingFunctor p_substs b_substs m = do
@@ -352,12 +357,12 @@ generatingFunctor p_substs b_substs m = do
 
   local update m
 
-withDecSubstitutions :: DecSubstitutions
-                     -> InternaliseM a -> InternaliseM a
-withDecSubstitutions p_substs m = do
+withModParamSubsts :: ModParamSubstitutions
+                  -> InternaliseM a -> InternaliseM a
+withModParamSubsts p_substs =
   let update env =
         env { envFunctorSubsts = p_substs `M.union` envFunctorSubsts env }
-  local update m
+  in local update
 
 openedName :: VName -> InternaliseM ()
 openedName o = do
@@ -435,6 +440,6 @@ withTypeDecSubstitutions :: DecSubstitutions
 withTypeDecSubstitutions substs (InternaliseTypeM m) = do
   s <- get
   e <- ask
-  (x, s') <- liftInternaliseM $ withDecSubstitutions substs $ runStateT (runReaderT m e) s
+  (x, s') <- liftInternaliseM $ withModParamSubsts substs $ runStateT (runReaderT m e) s
   put s'
   return x
