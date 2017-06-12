@@ -446,6 +446,11 @@ simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing
 
+simplifyBinOp _ _ (BinOp FDiv{} e1 e2)
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e1
+  | isCt0 e2 = Nothing
+
 simplifyBinOp _ _ (BinOp (SRem t) e1 e2)
   | isCt1 e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = binOpRes $ IntValue $ intValue t (1 :: Int)
@@ -524,6 +529,18 @@ simplifyConvOp _ _ (ConvOp op (Constant v)) =
 simplifyConvOp _ _ (ConvOp op se)
   | (from, to) <- convTypes op, from == to =
   Just $ SubExp se
+simplifyConvOp lookupVar _ (ConvOp (SExt t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (SExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (SExt t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (ZExt t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (ZExt t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (SIToFP t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (SExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (SIToFP t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (UIToFP t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (UIToFP t3 t1) se
 simplifyConvOp _ _ _ =
   Nothing
 

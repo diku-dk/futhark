@@ -8,6 +8,8 @@ module type numeric = {
   val **: t -> t -> t
 
   val from_i32: i32 -> t
+  val from_i64: i64 -> t
+  val to_i64: t -> i64
 
   val ==: t -> t -> bool
   val <: t -> t -> bool
@@ -31,6 +33,14 @@ module type integral = {
   val %: t -> t -> t
   val //: t -> t -> t
   val %%: t -> t -> t
+
+  val &: t -> t -> t
+  val |: t -> t -> t
+  val ^: t -> t -> t
+
+  val <<: t -> t -> t
+  val >>: t -> t -> t
+  val >>>: t -> t -> t
 }
 
 module type size = {
@@ -45,8 +55,9 @@ module type real = {
 
   val from_fraction: i32 -> i32 -> t
   val to_i32: t -> i32
-  val from_f64 : f64 -> t
-  val to_f64   : t -> f64
+  val to_i64: t -> i64
+  val from_f64: f64 -> t
+  val to_f64: t -> f64
 
   val sqrt: t -> t
   val exp: t -> t
@@ -81,7 +92,17 @@ module i8: (size with t = i8) = {
   let (x: i8) // (y: i8) = intrinsics.squot8 x y
   let (x: i8) %% (y: i8) = intrinsics.srem8 x y
 
+  let (x: i8) & (y: i8) = intrinsics.and8 x y
+  let (x: i8) | (y: i8) = intrinsics.or8 x y
+  let (x: i8) ^ (y: i8) = intrinsics.xor8 x y
+
+  let (x: i8) << (y: i8) = intrinsics.shl8 x y
+  let (x: i8) >> (y: i8) = intrinsics.ashr8 x y
+  let (x: i8) >>> (y: i8) = intrinsics.lshr8 x y
+
   let from_i32(x: i32) = i8 x
+  let from_i64(x: i64) = i8 x
+  let to_i64(x: i8) = i64 x
 
   let (x: i8) == (y: i8) = intrinsics.eq_i8 x y
   let (x: i8) < (y: i8) = intrinsics.slt8 x y
@@ -113,7 +134,17 @@ module i16: (size with t = i16) = {
   let (x: i16) // (y: i16) = intrinsics.squot16 x y
   let (x: i16) %% (y: i16) = intrinsics.srem16 x y
 
+  let (x: i16) & (y: i16) = intrinsics.and16 x y
+  let (x: i16) | (y: i16) = intrinsics.or16 x y
+  let (x: i16) ^ (y: i16) = intrinsics.xor16 x y
+
+  let (x: i16) << (y: i16) = intrinsics.shl16 x y
+  let (x: i16) >> (y: i16) = intrinsics.ashr16 x y
+  let (x: i16) >>> (y: i16) = intrinsics.lshr16 x y
+
   let from_i32(x: i32) = i16 x
+  let from_i64(x: i64) = i16 x
+  let to_i64(x: i16) = i64 x
 
   let (x: i16) == (y: i16) = intrinsics.eq_i16 x y
   let (x: i16) < (y: i16) = intrinsics.slt16 x y
@@ -145,7 +176,17 @@ module i32: (size with t = i32) = {
   let (x: i32) // (y: i32) = intrinsics.squot32 x y
   let (x: i32) %% (y: i32) = intrinsics.srem32 x y
 
+  let (x: i32) & (y: i32) = intrinsics.and32 x y
+  let (x: i32) | (y: i32) = intrinsics.or32 x y
+  let (x: i32) ^ (y: i32) = intrinsics.xor32 x y
+
+  let (x: i32) << (y: i32) = intrinsics.shl32 x y
+  let (x: i32) >> (y: i32) = intrinsics.ashr32 x y
+  let (x: i32) >>> (y: i32) = intrinsics.lshr32 x y
+
   let from_i32(x: i32) = x
+  let from_i64(x: i64) = i32 x
+  let to_i64(x: i32) = i64 x
 
   let (x: i32) == (y: i32) = intrinsics.eq_i32 x y
   let (x: i32) < (y: i32) = intrinsics.slt32 x y
@@ -177,7 +218,17 @@ module i64: (size with t = i64) = {
   let (x: i64) // (y: i64) = intrinsics.squot64 x y
   let (x: i64) %% (y: i64) = intrinsics.srem64 x y
 
+  let (x: i64) & (y: i64) = intrinsics.and64 x y
+  let (x: i64) | (y: i64) = intrinsics.or64 x y
+  let (x: i64) ^ (y: i64) = intrinsics.xor64 x y
+
+  let (x: i64) << (y: i64) = intrinsics.shl64 x y
+  let (x: i64) >> (y: i64) = intrinsics.ashr64 x y
+  let (x: i64) >>> (y: i64) = intrinsics.lshr64 x y
+
   let from_i32(x: i32) = i64 x
+  let from_i64(x: i64) = x
+  let to_i64(x: i64) = x
 
   let (x: i64) == (y: i64) = intrinsics.eq_i64 x y
   let (x: i64) < (y: i64) = intrinsics.slt64 x y
@@ -209,7 +260,17 @@ module u8: (size with t = u8) = {
   let (x: u8) // (y: u8) = u8 (intrinsics.udiv8 (i8 x) (i8 y))
   let (x: u8) %% (y: u8) = u8 (intrinsics.umod8 (i8 x) (i8 y))
 
+  let (x: u8) & (y: u8) = u8 (intrinsics.and8 (i8 x) (i8 y))
+  let (x: u8) | (y: u8) = u8 (intrinsics.or8 (i8 x) (i8 y))
+  let (x: u8) ^ (y: u8) = u8 (intrinsics.xor8 (i8 x) (i8 y))
+
+  let (x: u8) << (y: u8) = u8 (intrinsics.shl8 (i8 x) (i8 y))
+  let (x: u8) >> (y: u8) = u8 (intrinsics.ashr8 (i8 x) (i8 y))
+  let (x: u8) >>> (y: u8) = u8 (intrinsics.lshr8 (i8 x) (i8 y))
+
   let from_i32(x: i32) = u8 x
+  let from_i64(x: i64) = u8 x
+  let to_i64(x: u8) = i64 x
 
   let (x: u8) == (y: u8) = intrinsics.eq_i8 (i8 x) (i8 y)
   let (x: u8) < (y: u8) = intrinsics.ult8 (i8 x) (i8 y)
@@ -241,7 +302,17 @@ module u16: (size with t = u16) = {
   let (x: u16) // (y: u16) = u16 (intrinsics.udiv16 (i16 x) (i16 y))
   let (x: u16) %% (y: u16) = u16 (intrinsics.umod16 (i16 x) (i16 y))
 
+  let (x: u16) & (y: u16) = u16 (intrinsics.and16 (i16 x) (i16 y))
+  let (x: u16) | (y: u16) = u16 (intrinsics.or16 (i16 x) (i16 y))
+  let (x: u16) ^ (y: u16) = u16 (intrinsics.xor16 (i16 x) (i16 y))
+
+  let (x: u16) << (y: u16) = u16 (intrinsics.shl16 (i16 x) (i16 y))
+  let (x: u16) >> (y: u16) = u16 (intrinsics.ashr16 (i16 x) (i16 y))
+  let (x: u16) >>> (y: u16) = u16 (intrinsics.lshr16 (i16 x) (i16 y))
+
   let from_i32(x: i32) = u16 x
+  let from_i64(x: i64) = u16 x
+  let to_i64(x: u16) = i64 x
 
   let (x: u16) == (y: u16) = intrinsics.eq_i16 (i16 x) (i16 y)
   let (x: u16) < (y: u16) = intrinsics.ult16 (i16 x) (i16 y)
@@ -273,7 +344,17 @@ module u32: (size with t = u32) = {
   let (x: u32) // (y: u32) = u32 (intrinsics.udiv32 (i32 x) (i32 y))
   let (x: u32) %% (y: u32) = u32 (intrinsics.umod32 (i32 x) (i32 y))
 
+  let (x: u32) & (y: u32) = u32 (intrinsics.and32 (i32 x) (i32 y))
+  let (x: u32) | (y: u32) = u32 (intrinsics.or32 (i32 x) (i32 y))
+  let (x: u32) ^ (y: u32) = u32 (intrinsics.xor32 (i32 x) (i32 y))
+
+  let (x: u32) << (y: u32) = u32 (intrinsics.shl32 (i32 x) (i32 y))
+  let (x: u32) >> (y: u32) = u32 (intrinsics.ashr32 (i32 x) (i32 y))
+  let (x: u32) >>> (y: u32) = u32 (intrinsics.lshr32 (i32 x) (i32 y))
+
   let from_i32(x: i32) = u32 x
+  let from_i64(x: i64) = u32 x
+  let to_i64(x: u32) = i64 x
 
   let (x: u32) == (y: u32) = intrinsics.eq_i32 (i32 x) (i32 y)
   let (x: u32) < (y: u32) = intrinsics.ult32 (i32 x) (i32 y)
@@ -305,7 +386,17 @@ module u64: (size with t = u64) = {
   let (x: u64) // (y: u64) = u64 (intrinsics.udiv64 (i64 x) (i64 y))
   let (x: u64) %% (y: u64) = u64 (intrinsics.umod64 (i64 x) (i64 y))
 
+  let (x: u64) & (y: u64) = u64 (intrinsics.and64 (i64 x) (i64 y))
+  let (x: u64) | (y: u64) = u64 (intrinsics.or64 (i64 x) (i64 y))
+  let (x: u64) ^ (y: u64) = u64 (intrinsics.xor64 (i64 x) (i64 y))
+
+  let (x: u64) << (y: u64) = u64 (intrinsics.shl64 (i64 x) (i64 y))
+  let (x: u64) >> (y: u64) = u64 (intrinsics.ashr64 (i64 x) (i64 y))
+  let (x: u64) >>> (y: u64) = u64 (intrinsics.lshr64 (i64 x) (i64 y))
+
   let from_i32(x: i32) = u64 x
+  let from_i64(x: i64) = u64 x
+  let to_i64(x: u64) = i64 x
 
   let (x: u64) == (y: u64) = intrinsics.eq_i64 (i64 x) (i64 y)
   let (x: u64) < (y: u64) = intrinsics.ult64 (i64 x) (i64 y)
@@ -335,10 +426,12 @@ module f64: (real with t = f64) = {
   let (x: f64) ** (y: f64) = intrinsics.fpow64 x y
 
   let from_i32 (x: i32) = f64 x
+  let from_i64 (x: i64) = f64 x
   let from_fraction (x: i32) (y: i32) = f64 x / f64 y
   let to_i32 (x: f64) = i32 x
   let from_f64 (x: f64) = x
   let to_f64   (x: f64) = x
+  let to_i64   (x: f64) = i64 x
 
   let (x: f64) == (y: f64) = intrinsics.eq_f64 x y
   let (x: f64) < (y: f64) = intrinsics.lt64 x y
@@ -387,10 +480,12 @@ module f32: (real with t = f32) = {
   let (x: f32) ** (y: f32) = intrinsics.fpow32 x y
 
   let from_i32 (x: i32) = f32 x
+  let from_i64 (x: i64) = f32 x
   let from_fraction (x: i32) (y: i32) = f32 x / f32 y
   let to_i32 (x: f32) = i32 x
   let from_f64 (x: f64) = f32 x
   let to_f64   (x: f32) = f64 x
+  let to_i64   (x: f32) = i64 x
 
   let (x: f32) == (y: f32) = intrinsics.eq_f32 x y
   let (x: f32) < (y: f32) = intrinsics.lt32 x y

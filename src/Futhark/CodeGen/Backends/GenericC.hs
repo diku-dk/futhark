@@ -18,6 +18,7 @@ module Futhark.CodeGen.Backends.GenericC
   , Allocate
   , Deallocate
   , Copy
+  , StaticArray
   -- * Monadic compiler interface
   , CompilerM
   , CompilerState (compUserState)
@@ -30,6 +31,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileCode
   , compileExp
   , compilePrimExp
+  , compilePrimValue
   , compileExpToName
   , dimSizeToExp
   , rawMem
@@ -37,6 +39,8 @@ module Futhark.CodeGen.Backends.GenericC
   , stm
   , stms
   , decl
+  , topLevelDefinition
+  , atInit
   -- * Building Blocks
   , primTypeToCType
   ) where
@@ -111,6 +115,8 @@ type Allocate op s = C.Exp -> C.Exp -> SpaceId
 -- space.
 type Deallocate op s = C.Exp -> SpaceId -> CompilerM op s ()
 
+-- | Create a static array of values - initialised at load time.
+type StaticArray op s = VName -> SpaceId -> PrimType -> [PrimValue] -> CompilerM op s ()
 
 -- | Copy from one memory block to another.
 type Copy op s = C.Exp -> C.Exp -> Space ->
@@ -124,6 +130,7 @@ data Operations op s =
              , opsAllocate :: Allocate op s
              , opsDeallocate :: Deallocate op s
              , opsCopy :: Copy op s
+             , opsStaticArray :: StaticArray op s
 
              , opsMemoryType :: MemoryType op s
              , opsCompiler :: OpCompiler op s
@@ -142,6 +149,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsAllocate  = defAllocate
                                , opsDeallocate  = defDeallocate
                                , opsCopy = defCopy
+                               , opsStaticArray = defStaticArray
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
                                , opsFatMemory = True
@@ -156,6 +164,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           fail "Cannot deallocate in non-default memory space"
         defCopy _ _ _ _ _ _ _ =
           fail "Cannot copy to or from non-default memory space"
+        defStaticArray _ _ _ _ =
+          fail "Cannot create static array in non-default memory space"
         defMemoryType _ =
           fail "Has no type for non-default memory space"
         defCompiler _ =
@@ -196,6 +206,9 @@ envDeallocate = opsDeallocate . envOperations
 
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
+
+envStaticArray :: CompilerEnv op s -> StaticArray op s
+envStaticArray = opsStaticArray . envOperations
 
 envFatMemory :: CompilerEnv op s -> Bool
 envFatMemory = opsFatMemory . envOperations
@@ -249,6 +262,14 @@ modifyUserState :: (s -> s) -> CompilerM op s ()
 modifyUserState f = modify $ \compstate ->
   compstate { compUserState = f $ compUserState compstate }
 
+topLevelDefinition :: C.Definition -> CompilerM op s ()
+topLevelDefinition d = modify $ \s ->
+  s { compVarDefinitions = compVarDefinitions s ++ [d] }
+
+atInit :: C.Stm -> CompilerM op s ()
+atInit x = modify $ \s ->
+  s { compInit = compInit s ++ [x] }
+
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = pass $ do
   ((), w) <- listen m
@@ -276,6 +297,23 @@ instance C.ToIdent VName where
 
 instance C.ToExp VName where
   toExp v _ = [C.cexp|$id:v|]
+
+instance C.ToExp IntValue where
+  toExp (Int8Value v) = C.toExp v
+  toExp (Int16Value v) = C.toExp v
+  toExp (Int32Value v) = C.toExp v
+  toExp (Int64Value v) = C.toExp v
+
+instance C.ToExp FloatValue where
+  toExp (Float32Value v) = C.toExp v
+  toExp (Float64Value v) = C.toExp v
+
+instance C.ToExp PrimValue where
+  toExp (IntValue v) = C.toExp v
+  toExp (FloatValue v) = C.toExp v
+  toExp (BoolValue True) = C.toExp (1::Int8)
+  toExp (BoolValue False) = C.toExp (0::Int8)
+  toExp Checked = C.toExp (1::Int8)
 
 stm :: C.Stm -> CompilerM op s ()
 stm (C.Block items _) = mapM_ item items
@@ -867,13 +905,14 @@ int main(int argc, char** argv) {
     $inits:entry_point_inits
   };
 
-  $stms:(compInit endstate)
-
   int parsed_options = parse_options(argc, argv);
   argc -= parsed_options;
   argv += parsed_options;
 
   $stms:pre_main_stms
+
+  /* Various final initialisation */
+  $stms:(compInit endstate)
 
   int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
   entry_point_fun *entry_point_fun = NULL;
@@ -1230,6 +1269,18 @@ compileCode (DeclareMem name space) =
 compileCode (DeclareScalar name t) = do
   let ct = primTypeToCType t
   decl [C.cdecl|$ty:ct $id:name;|]
+
+compileCode (DeclareArray name DefaultSpace t vs) = do
+  let ct = primTypeToCType t
+      vs' = [[C.cinit|$exp:(compilePrimValue v)|] | v <- vs]
+  name_realtype <- newVName $ baseString name ++ "_realtype"
+  topLevelDefinition [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs)] = {$inits:vs'};|]
+  -- Fake a memory block.
+  topLevelDefinition [C.cedecl|static struct memblock $id:name = {NULL, $id:name_realtype, 0};|]
+
+compileCode (DeclareArray name (Space space) t vs) =
+  join $ asks envStaticArray <*>
+  pure name <*> pure space <*> pure t <*> pure vs
 
 -- For assignments of the form 'x = x OP e', we generate C assignment
 -- operators to make the resulting code slightly nicer.  This has no

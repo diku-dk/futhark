@@ -315,11 +315,22 @@ noteDecSubsts substs =
   modify $ \s -> s { stateDecSubsts = substs <> stateDecSubsts s }
 
 morePromises :: M.Map VName VName -> InternaliseM a -> InternaliseM a
-morePromises substs =
-  local $ \env -> env { envPromises = promises <> envPromises env
-                      , envGeneratingFunctor = True
-                      }
-  where promises = M.fromList $ map (uncurry $ flip (,)) $ M.toList substs
+morePromises substs m = do
+  mapM_ (uncurry maybeForwardPromise <=< traverse lookupPromise) rev_substs
+  local (\env -> env { envPromises = M.fromList rev_substs <> envPromises env
+                     , envGeneratingFunctor = True
+           }) m
+  where rev_substs = map (uncurry $ flip (,)) $ M.toList substs
+        maybeForwardPromise k v = do
+          maybe_k <- asks $ M.lookup k . envFunctorSubsts
+          case maybe_k of
+            Just k_v ->
+              -- This means we are expected to make 'k' available under the
+              -- name 'v', but 'k' is actually bound by a functor parameter,
+              -- so we can't access its definition (which is 'k_v').  Thus, we
+              -- note that 'v', when seen, should be turned into 'k_v'.
+              noteDecSubsts $ M.singleton v k_v
+            Nothing -> return ()
 
 generatingFunctor :: DecSubstitutions
                   -> PromisedNames
@@ -328,8 +339,8 @@ generatingFunctor p_substs b_substs m = do
   cur_substs <- allSubsts
 
   let forward (k,v)
-        | Just v' <- M.lookup k cur_substs = Just (v',v)
-        | otherwise                        = Nothing
+        | Just v' <- M.lookup k cur_substs, v /= v' = Just (v',v)
+        | otherwise                                 = Nothing
       contras = M.fromList $ mapMaybe forward $ M.toList b_substs
       forwards = M.fromList $ mapMaybe forward $ M.toList p_substs
 

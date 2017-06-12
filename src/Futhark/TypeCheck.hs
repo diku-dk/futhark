@@ -196,14 +196,14 @@ allConsumed = S.unions . map consumed
 
 seqOccurences :: Occurences -> Occurences -> Occurences
 seqOccurences occurs1 occurs2 =
-  filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
+  filter (not . nullOccurence) (map filt occurs1) ++ occurs2
   where filt occ =
           occ { observed = observed occ `S.difference` postcons }
         postcons = allConsumed occurs2
 
 altOccurences :: Occurences -> Occurences -> Occurences
 altOccurences occurs1 occurs2 =
-  filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
+  filter (not . nullOccurence) (map filt occurs1) ++ occurs2
   where filt occ =
           occ { consumed = consumed occ `S.difference` postcons
               , observed = observed occ `S.difference` postcons }
@@ -298,7 +298,7 @@ bound name = do already_seen <- gets $ S.member name
                 modify $ S.insert name
 
 occur :: Occurences -> TypeM lore ()
-occur = tell . Consumption
+occur = tell . Consumption . filter (not . nullOccurence)
 
 -- | Proclaim that we have made read-only use of the given variable.
 -- No-op unless the variable is array-typed.

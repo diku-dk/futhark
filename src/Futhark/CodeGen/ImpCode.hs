@@ -144,6 +144,8 @@ data Code a = Skip
             | While Exp (Code a)
             | DeclareMem VName Space
             | DeclareScalar VName PrimType
+            | DeclareArray VName Space PrimType [PrimValue]
+              -- ^ Create a read-only array containing the given values.
             | Allocate VName (Count Bytes) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
@@ -296,6 +298,9 @@ instance Pretty op => Pretty (Code op) where
     text "var" <+> ppr name <> text ": mem" <> parens (ppr space)
   ppr (DeclareScalar name t) =
     text "var" <+> ppr name <> text ":" <+> ppr t
+  ppr (DeclareArray name space t vs) =
+    text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t <+>
+    equals <+> braces (commasep $ map ppr vs)
   ppr (Allocate name e space) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
   ppr (Write name i bt space vol val) =
@@ -391,6 +396,8 @@ instance Traversable Code where
     pure $ DeclareMem name space
   traverse _ (DeclareScalar name bt) =
     pure $ DeclareScalar name bt
+  traverse _ (DeclareArray name space t vs) =
+    pure $ DeclareArray name space t vs
   traverse _ (Allocate name size s) =
     pure $ Allocate name size s
   traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
@@ -413,6 +420,7 @@ instance Traversable Code where
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = S.singleton name
 declaredIn (DeclareScalar name _) = S.singleton name
+declaredIn (DeclareArray name _ _ _) = S.singleton name
 declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ _ body) = S.singleton i <> declaredIn body
@@ -432,6 +440,8 @@ instance FreeIn a => FreeIn (Code a) where
   freeIn DeclareMem{} =
     mempty
   freeIn DeclareScalar{} =
+    mempty
+  freeIn DeclareArray{} =
     mempty
   freeIn (Allocate name size _) =
     freeIn name <> freeIn size

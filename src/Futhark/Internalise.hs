@@ -72,6 +72,8 @@ internaliseDecs ds =
   case ds of
     [] ->
       return ()
+    LocalDec d _ : ds' ->
+      internaliseDecs $ d : ds'
     ValDec vdec : ds' -> do
       internaliseValBind vdec
       internaliseDecs ds'
@@ -124,41 +126,45 @@ internaliseModExp (E.ModDecs ds _) =
 internaliseModExp (E.ModAscript me _ (Info substs) _) = do
   noteDecSubsts substs
   morePromises substs $ internaliseModExp me
-internaliseModExp (E.ModApply orig_f orig_arg (Info orig_p_substs) (Info orig_b_substs) _) = do
-  internaliseModExp orig_arg
-  generatingFunctor orig_p_substs orig_b_substs $ do
-    f_e <- evalModExp orig_f
-    case f_e of
-      Just (p, substs, body) -> do
-        noteMod p mempty orig_arg
-        withDecSubstitutions substs $
-          internaliseModExp body
-      Nothing ->
-        fail $ "Cannot apply " ++ pretty orig_f ++ " to " ++ pretty orig_arg
+internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_substs) _) = do
+  internaliseModExp outer_arg
+  f_e <- evalModExp outer_f
+  case f_e of
+    Just (p, f_p_substs, dec_substs, body) -> do
+      noteMod p mempty outer_arg
+      withDecSubstitutions dec_substs $
+        generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
+        internaliseModExp body
+    Nothing ->
+      fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
   where evalModExp (E.ModVar v _) = do
-          ModBinding v_substs me <- lookupMod =<< lookupSubst v
+          ModBinding dec_substs me <- lookupMod =<< lookupSubst v
           f_e <- evalModExp me
           case f_e of
-            Just (p, me_substs, body) ->
-              return $ Just (p, me_substs `M.union` v_substs, body)
+            Just (p, f_p_substs, f_dec_substs, body) ->
+              return $ Just (p, f_p_substs, f_dec_substs <> dec_substs, body)
             _ ->
               return Nothing
         evalModExp (E.ModLambda (ModParam p _ _) sig me loc) = do
-          substs <- asks envFunctorSubsts
-          return $ Just (p, substs, maybeAscript loc sig me)
+          p_substs <- asks envFunctorSubsts
+          return $ Just (p, p_substs, mempty, maybeAscript loc sig me)
         evalModExp (E.ModParens e _) =
           evalModExp e
         evalModExp (E.ModAscript me _ (Info substs) _) = do
           noteDecSubsts substs
           morePromises substs $ evalModExp me
-        evalModExp (E.ModApply f arg (Info p_substs) (Info b_substs) _) = do
+        evalModExp (E.ModApply f arg (Info p_substs) _ _) = do
+          -- Invariant guaranteed by the type checker - only an
+          -- application resulting in a non-parametric module will
+          -- have non-null result substitutions.  This is why we
+          -- ignore them here.
           f_e <- evalModExp f
           internaliseModExp arg
           case f_e of
-            Just (p, substs, body) -> do
+            Just (p, f_p_substs, f_b_substs, body) -> do
               noteMod p mempty arg
-              generatingFunctor p_substs b_substs $
-                withDecSubstitutions substs $
+              withDecSubstitutions f_b_substs $
+                generatingFunctor (p_substs<>f_p_substs) mempty $
                 evalModExp body
             Nothing ->
               fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg
@@ -282,11 +288,13 @@ entryPoint params (eret,crets) =
           [I.TypeOpaque (pretty t) $ length ts]
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) loc) =
+internaliseIdent (E.Ident name (Info tp) loc) = do
+  substs <- allSubsts
   case tp of
     E.Prim{} -> return name
-    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
-                       ++ pretty name ++ "' at " ++ locStr loc ++ "."
+    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '" ++ show substs
+                       ++ pretty name ++ " of type " ++ pretty tp ++
+                       " at " ++ locStr loc ++ "."
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertStmsM $ do
@@ -354,7 +362,23 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           lens <- mapM (internalisedTypeSize . flip setAliases ()) field_types
           return $ M.fromList $ zip field_names $ chunks lens e'
 
-internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
+
+internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
+  -- If this is a multidimensional array literal of primitives, we
+  -- treat it specially by flattening it out followed by a reshape.
+  -- This cuts down on the amount of statements that are produced, and
+  -- thus allows us to efficiently handle huge array literals - a
+  -- corner case, but an important one.
+  | Just ((eshape,e'):es') <- mapM isArrayLiteral es,
+    not $ null eshape,
+    all ((eshape==) . fst) es',
+    Just basetype <- E.peelArray (length eshape) rowtype =
+      let flat_lit = E.ArrayLit (e' ++ concatMap snd es') (Info basetype) loc
+          new_shape = E.TupLit [E.Literal (E.primValue k) loc
+                               | k <- length es:eshape] loc
+      in internaliseExp desc $ E.Reshape new_shape flat_lit loc
+
+  | otherwise = do
   es' <- mapM (internaliseExp "arr_elem") es
   case es' of
     [] -> do
@@ -369,6 +393,15 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc) = do
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
   where zeroDim t = t `I.setArrayShape`
                     I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
+
+        isArrayLiteral :: E.Exp -> Maybe ([Int],[E.Exp])
+        isArrayLiteral (E.ArrayLit inner_es _ _) = do
+          (eshape,e):inner_es' <- mapM isArrayLiteral inner_es
+          guard $ all ((eshape==) . fst) inner_es'
+          return (length inner_es:eshape, e ++ concatMap snd inner_es')
+        isArrayLiteral e =
+          Just ([], [e])
+
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et
