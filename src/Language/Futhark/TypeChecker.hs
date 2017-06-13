@@ -583,10 +583,10 @@ matchMTys = matchMTys' mempty
       abs_substs <- resolveAbsTypes mod_abs mod_pmod sig_abs loc
       let abs_subst_to_type = old_abs_subst_to_type <>
                               M.map (TypeSub . snd) abs_substs
-
+          abs_name_substs   = M.map (qualLeaf . fst) abs_substs
       pmod_substs <- matchMods abs_subst_to_type mod_pmod sig_pmod loc
       mod_substs <- matchMTys' abs_subst_to_type mod_mod sig_mod loc
-      return (pmod_substs <> mod_substs)
+      return (pmod_substs <> mod_substs <> abs_name_substs)
 
     matchEnvs :: TypeSubs
               -> Env -> Env -> SrcLoc
