@@ -127,14 +127,15 @@ internaliseModExp (E.ModAscript me _ (Info substs) _) = do
   morePromises substs $ internaliseModExp me
 internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_substs) _) = do
   internaliseModExp outer_arg
-  f_e <- evalModExp outer_f
-  case f_e of
-    Just (p, f_p_substs, body) -> do
-      noteMod p outer_arg
-      generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
-        internaliseModExp body
-    Nothing ->
-      fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
+  generatingFunctor mempty mempty $ do
+    f_e <- evalModExp outer_f
+    case f_e of
+      Just (p, f_p_substs, body) -> do
+        noteMod p outer_arg
+        generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
+          internaliseModExp body
+      Nothing ->
+        fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
   where evalModExp (E.ModVar v _) = do
           ModBinding v_p_substs me <- lookupMod =<< lookupSubst v
           f_e <- evalModExp me

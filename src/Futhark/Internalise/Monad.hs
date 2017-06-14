@@ -262,10 +262,11 @@ lookupPromise name = do
 
 fulfillingPromise :: VName -> InternaliseM VName
 fulfillingPromise name = do
-  promises <- asks envPromises
-  if M.null promises
+  in_functor <- asks envGeneratingFunctor
+  if not in_functor
     then return name
-    else do name' <- newName name
+    else do promises <- asks envPromises
+            name' <- newName name
             noteDecSubsts $ M.singleton name name'
             fulfill name' name promises
             return name'
