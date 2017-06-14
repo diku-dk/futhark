@@ -74,6 +74,13 @@ bottomUpRules = [ removeRedundantMergeVariables
                 , simplifyConcat
                 ]
 
+asInt32PrimExp :: PrimExp v -> PrimExp v
+asInt32PrimExp pe
+  | IntType it <- primExpType pe, it /= Int32 =
+      ConvOpExp (SExt it Int32) pe
+  | otherwise =
+      pe
+
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
@@ -325,15 +332,11 @@ simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs1 perm1 v1)))
     Just (Rearrange cs3 perm3 v3) <- asBasicOp =<< ST.lookupExp v2 vtable,
     dim1:_ <- perm1,
     perm1 == rearrangeInverse perm3 = do
-      to_drop' <- letSubExp "drop" =<< toExp (asDim to_drop)
-      to_take' <- letSubExp "take" =<< toExp (asDim to_take)
+      to_drop' <- letSubExp "drop" =<< toExp (asInt32PrimExp to_drop)
+      to_take' <- letSubExp "take" =<< toExp (asInt32PrimExp to_take)
       [_, v] <- letTupExp' "simplify_rearrange" $
         BasicOp $ Split (cs1<>cs2<>cs3) dim1 [to_drop', to_take'] v3
       letBind_ pat $ BasicOp $ SubExp v
-    where asDim pe | IntType it <- primExpType pe, it /= Int32 =
-                       ConvOpExp (SExt it Int32) pe
-                   | otherwise =
-                       pe
 
 -- Rearranging a replicate where the outer dimension is left untouched.
 simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs perm v1)))
@@ -749,7 +752,7 @@ simplifyIndexIntoReshape vtable (Let pat _ (BasicOp (Index cs idd slice)))
                              (map (primExpFromSubExp int32) $ newDims newshape)
                              (map (primExpFromSubExp int32) inds)
           new_inds' <-
-            mapM (letSubExp "new_index" <=< toExp) new_inds
+            mapM (letSubExp "new_index" <=< toExp . asInt32PrimExp) new_inds
           letBind_ pat $ BasicOp $ Index (cs++cs2) idd2 $ map DimFix new_inds'
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
