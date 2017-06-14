@@ -1,7 +1,7 @@
 -- Ascription of a module containing a parametric module whose
 -- parameter contains an abstract type.
 -- ==
--- input {} output {0}
+-- input {} output {0.0}
 
 module type sobol = {
   module Reduce :
@@ -23,4 +23,4 @@ module R = Sobol.Reduce { type t = f64
                           let ne = 0f64
                         }
 
-entry pi () : f64 = R.run 100000
+let main () : f64 = R.run 100000
