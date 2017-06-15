@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp
+  , checkTypeDecl
   , ImplicitlyBound
   , implicitNameMap
 
@@ -10,6 +11,7 @@ module Language.Futhark.TypeChecker.Types
   , checkPatternGroup
   , InferredType(..)
 
+  , checkParams
   , checkTypeParams
 
   , TypeSub(..)
@@ -21,6 +23,7 @@ module Language.Futhark.TypeChecker.Types
   )
 where
 
+import Control.Arrow (first)
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
@@ -114,6 +117,15 @@ implicitNameMap (ImplicitlyBound m) = M.mapMaybe firstOne m
   where firstOne (x, BoundAsDim, _) = Just x
         firstOne (x, BoundAsVar, _) = Just x
         firstOne (_, UsedFree, _) = Nothing
+
+checkTypeDecl :: MonadTypeChecker m =>
+                 SrcLoc -> TypeDeclBase NoInfo Name -> m (TypeDeclBase Info VName)
+checkTypeDecl loc (TypeDecl t NoInfo) = do
+  (t', st, implicit) <- checkTypeExp t
+  if M.null $ implicitNameMap implicit
+    then return $ TypeDecl t' $ Info st
+    else throwError $ TypeError loc
+         "May not bind size variables in type here."
 
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
@@ -394,6 +406,41 @@ seeing b v vloc = do
       name' <- lift $ newID v
       modify $ \(ImplicitlyBound m) ->
         ImplicitlyBound $ M.insert (Term, v) (name', b, vloc) m
+
+checkParams :: [ParamBase NoInfo Name]
+            -> ([ParamBase Info VName] -> TypeM a)
+            -> TypeM a
+checkParams orig_ps m = do
+  mapM_ isBoundTwice names
+  bindSpaced (zip (repeat Term) names) $ descend [] orig_ps
+  where names = mapMaybe paramName orig_ps
+        hasName v = maybe False (==v) . paramName
+
+        isBoundTwice v
+          | p1 : p2 : _ <- filter (hasName v) orig_ps =
+              throwError $ TypeError (srclocOf p1) $
+              "Parameter named '" ++ pretty v ++ "' also declared at " ++
+              locStr (srclocOf p2) ++ "."
+          | otherwise = return ()
+
+        -- The parameter names are only bound at the end, to avoid
+        -- invalid types like '(n: i32) -> [n]bool -> bool'.
+        descend ps' [] =
+          let inspect (NamedParam v t _) =
+                Just (v, BoundV $ unInfo $ expandedType t )
+              inspect UnnamedParam{} =
+                Nothing
+              scope = mempty { envVtable = M.fromList $ mapMaybe inspect ps' }
+          in localEnv (scope<>) $ m $ reverse ps'
+        descend ps' (UnnamedParam t:ps) = do
+          t' <- checkTypeDecl (srclocOf t) t
+          descend (UnnamedParam t':ps') ps
+        descend ps' (NamedParam v t loc:ps) = do
+          t' <- checkTypeDecl (srclocOf t) t
+          v' <- checkName Term v loc
+          descend (NamedParam v' t' loc:ps') ps
+
+        localEnv = local . first
 
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]

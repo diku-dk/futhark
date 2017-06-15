@@ -346,6 +346,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
           s | entry     = "entry"
             | otherwise = "let"
 
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase ty vn) where
+  ppr (NamedParam v t _) = parens $ ppr v <> colon <+> ppr t
+  ppr (UnnamedParam t)   = ppr t
+
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec name ps _) = text "type" <+> ppr name <+> spread (map ppr ps)
