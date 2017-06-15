@@ -21,11 +21,13 @@ module Language.Futhark.Attributes
   -- * Queries on expressions
   , typeOf
 
-  -- * Queries on patterns
+  -- * Queries on patterns and params
   , patIdentSet
   , patternType
   , patternStructType
   , patternNoShapeAnnotations
+  , paramType
+  , paramName
 
   -- * Queries on types
   , uniqueness
@@ -740,6 +742,16 @@ patternNoShapeAnnotations (RecordPattern ps loc) =
   RecordPattern (map (fmap patternNoShapeAnnotations) ps) loc
 patternNoShapeAnnotations (Wildcard t loc) =
   Wildcard t loc
+
+-- | The type of a parameter.
+paramType :: ParamBase f vn -> TypeDeclBase f vn
+paramType (UnnamedParam t) = t
+paramType (NamedParam _ t _) = t
+
+-- | The name of a parameter.  Not all parameters have names.
+paramName :: ParamBase f vn -> Maybe vn
+paramName UnnamedParam{} = Nothing
+paramName (NamedParam v _ _) = Just v
 
 -- | Names of primitive types to types.  This is only valid if no
 -- shadowing is going on, but useful for tools.

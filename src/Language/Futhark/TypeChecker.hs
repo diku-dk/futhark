@@ -128,27 +128,27 @@ checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName]
 
 checkSpecs [] = return (mempty, mempty, [])
 
-checkSpecs (ValSpec name tparams paramtypes rettype loc : specs) =
+checkSpecs (ValSpec name tparams params rettype loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    (tparams', paramtypes', rettype') <-
-      checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        paramtypes' <- mapM (checkTypeDecl loc) paramtypes
+    (tparams', params', rettype') <-
+      checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $
+      checkParams params $ \params' -> do
         rettype' <- checkTypeDecl loc rettype
-        return (tparams', paramtypes', rettype')
-    let paramtypes'' = map (unInfo . expandedType) paramtypes'
+        return (tparams', params', rettype')
+    let paramtypes = map (unInfo . expandedType . paramType) params'
         rettype'' = unInfo $ expandedType rettype'
         valenv =
           mempty { envVtable = M.singleton name' $
-                               if null paramtypes''
+                               if null params'
                                then BoundV rettype''
-                               else BoundF (tparams', paramtypes'', rettype'')
+                               else BoundF (tparams', paramtypes, rettype'')
                  , envNameMap = M.singleton (Term, name) name'
                  }
     (abstypes, env, specs') <- localEnv (valenv<>) $ checkSpecs specs
     return (abstypes,
             env <> valenv,
-            ValSpec name' tparams' paramtypes' rettype' loc : specs')
+            ValSpec name' tparams' params' rettype' loc : specs')
 
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
@@ -460,16 +460,13 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) 
 
   return (mempty { envVtable =
                      M.singleton fname'
-                     (BoundF (tparams', map paramType params', rettype))
+                     (BoundF (tparams', map patternStructType params', rettype))
                  , envNameMap =
                      M.singleton (Term, fname) fname'
                  },
            FunBind entry fname' maybe_retdecl' (Info rettype) tparams' params' body' loc)
 
-  where paramType :: Pattern -> StructType
-        paramType = vacuousShapeAnnotations . toStruct . patternType
-
-        isTypeParam TypeParamType{} = True
+  where isTypeParam TypeParamType{} = True
         isTypeParam _ = False
 
 checkDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
@@ -527,13 +524,6 @@ checkDecs (d:ds) = do
 
 checkDecs [] =
   return (mempty, mempty, [])
-
-checkTypeDecl :: SrcLoc -> TypeDeclBase NoInfo Name -> TypeM (TypeDeclBase Info VName)
-checkTypeDecl loc (TypeDecl t NoInfo) = do
-  (t', st, implicit) <- checkTypeExp t
-  unless (M.null $ implicitNameMap implicit) $
-    bad $ TypeError loc "Type may not have shape declarations here."
-  return $ TypeDecl t' $ Info st
 
 --- Signature matching
 
