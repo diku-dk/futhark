@@ -195,16 +195,23 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
           types = map mkEntry $ M.toList mapping
       notingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
         (rettype', _, rcm) <- internaliseReturnType rettype
-        fname' <- internaliseFunName fname params
-        body' <- ensureResultExtShape asserting loc (map I.fromDecl rettype')
-                 =<< internaliseBody body
 
         let mkConstParam name = Param name $ I.Prim int32
             constparams = map (mkConstParam . snd) $ pcm<>rcm
+            constnames = map I.paramName constparams
+            constscope = M.fromList $ zip constnames $ repeat $
+                         FParamInfo $ I.Prim $ IntType Int32
+
             shapenames = map I.paramName shapeparams
             normal_params = map paramName constparams ++ shapenames ++ map paramName (concat params')
             normal_param_names = S.fromList normal_params
-            free_in_fun = freeInBody body' `S.difference` normal_param_names
+
+        fname' <- internaliseFunName fname params
+        body' <- localScope constscope $
+                 ensureResultExtShape asserting loc (map I.fromDecl rettype')
+                 =<< internaliseBody body
+
+        let free_in_fun = freeInBody body' `S.difference` normal_param_names
 
         used_free_params <- forM (S.toList free_in_fun) $ \v -> do
           v_t <- lookupType v
