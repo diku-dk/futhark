@@ -6,21 +6,13 @@ module array = import "/futlib/array"
 module S3 = Sobol sobol_dir { let D = 3 }
 module S2 = Sobol sobol_dir { let D = 2 }
 
-let mean [n] (xs: [n]f64) : f64 =
-  reduce (+) 0.0 xs / f64(n)
-
 module R = S2.Reduce { type t = f64
                        let ne = 0f64
- 		       let op (x:f64) (y:f64) = x f64.+ y
-		       let f (v : [2]f64) : f64 =
+                       let op (x:f64) (y:f64) = x f64.+ y
+                       let f (v : [2]f64) : f64 =
                          let x = v[0]
-		 	 let y = v[1]
-			 in f64(x*x+y*y < 1f64) }
-
-
--- let main () : []f64 = map mean (array.transpose (S8.chunk 0 10000))
-
--- let main () : bool = test()
+                         let y = v[1]
+                         in f64(x*x+y*y < 1f64) }
 
 -- ==
 -- entry: test_chunk
