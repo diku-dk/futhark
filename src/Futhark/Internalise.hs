@@ -84,13 +84,12 @@ internaliseDecs ds =
       let me = maybeAscript (srclocOf mb) (E.modSignature mb) $ modExp mb
       internaliseModExp me
       v <- lookupSubst $ E.qualName $ E.modName mb
-      noteMod v mempty me
+      noteMod v me
       internaliseDecs ds'
     E.ModDec mb : ds' -> do
       v <- fulfillingPromise $ E.modName mb
-      substs <- asks envFunctorSubsts
       let addParam p me = E.ModLambda p Nothing me $ srclocOf me
-      noteMod v substs $
+      noteMod v $
         foldr addParam (maybeAscript (srclocOf mb) (E.modSignature mb) $ E.modExp mb) $
         modParams mb
       internaliseDecs ds'
@@ -128,26 +127,26 @@ internaliseModExp (E.ModAscript me _ (Info substs) _) = do
   morePromises substs $ internaliseModExp me
 internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_substs) _) = do
   internaliseModExp outer_arg
-  f_e <- evalModExp outer_f
-  case f_e of
-    Just (p, f_p_substs, dec_substs, body) -> do
-      noteMod p mempty outer_arg
-      withDecSubstitutions dec_substs $
+  generatingFunctor mempty mempty $ do
+    f_e <- evalModExp outer_f
+    case f_e of
+      Just (p, f_p_substs, body) -> do
+        noteMod p outer_arg
         generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
-        internaliseModExp body
-    Nothing ->
-      fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
+          internaliseModExp body
+      Nothing ->
+        fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
   where evalModExp (E.ModVar v _) = do
-          ModBinding dec_substs me <- lookupMod =<< lookupSubst v
+          ModBinding v_p_substs me <- lookupMod =<< lookupSubst v
           f_e <- evalModExp me
           case f_e of
-            Just (p, f_p_substs, f_dec_substs, body) ->
-              return $ Just (p, f_p_substs, f_dec_substs <> dec_substs, body)
+            Just (p, f_p_substs, body) ->
+              return $ Just (p, f_p_substs <> f_p_substs <> v_p_substs, body)
             _ ->
               return Nothing
         evalModExp (E.ModLambda (ModParam p _ _) sig me loc) = do
           p_substs <- asks envFunctorSubsts
-          return $ Just (p, p_substs, mempty, maybeAscript loc sig me)
+          return $ Just (p, p_substs, maybeAscript loc sig me)
         evalModExp (E.ModParens e _) =
           evalModExp e
         evalModExp (E.ModAscript me _ (Info substs) _) = do
@@ -161,10 +160,9 @@ internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_su
           f_e <- evalModExp f
           internaliseModExp arg
           case f_e of
-            Just (p, f_p_substs, f_b_substs, body) -> do
-              noteMod p mempty arg
-              withDecSubstitutions f_b_substs $
-                generatingFunctor (p_substs<>f_p_substs) mempty $
+            Just (p, f_p_substs, body) -> do
+              noteMod p arg
+              generatingFunctor (p_substs<>f_p_substs) mempty $
                 evalModExp body
             Nothing ->
               fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg
@@ -197,23 +195,30 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
           types = map mkEntry $ M.toList mapping
       notingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
         (rettype', _, rcm) <- internaliseReturnType rettype
-        fname' <- internaliseFunName fname params
-        body' <- ensureResultExtShape asserting loc (map I.fromDecl rettype')
-                 =<< internaliseBody body
 
         let mkConstParam name = Param name $ I.Prim int32
             constparams = map (mkConstParam . snd) $ pcm<>rcm
+            constnames = map I.paramName constparams
+            constscope = M.fromList $ zip constnames $ repeat $
+                         FParamInfo $ I.Prim $ IntType Int32
+
             shapenames = map I.paramName shapeparams
-            normal_params = map paramName constparams ++ shapenames ++ map paramName (concat params')
+            normal_params = map I.paramName constparams ++ shapenames ++ map I.paramName (concat params')
             normal_param_names = S.fromList normal_params
-            free_in_fun = freeInBody body' `S.difference` normal_param_names
+
+        fname' <- internaliseFunName fname params
+        body' <- localScope constscope $
+                 ensureResultExtShape asserting loc (map I.fromDecl rettype')
+                 =<< internaliseBody body
+
+        let free_in_fun = freeInBody body' `S.difference` normal_param_names
 
         used_free_params <- forM (S.toList free_in_fun) $ \v -> do
           v_t <- lookupType v
           return $ Param v $ toDecl v_t Nonunique
 
         let free_shape_params = map (`Param` I.Prim int32) $
-                                concatMap (I.shapeVars . I.arrayShape . paramType) used_free_params
+                                concatMap (I.shapeVars . I.arrayShape . I.paramType) used_free_params
             free_params = nub $ free_shape_params ++ used_free_params
             all_params = constparams ++ free_params ++ shapeparams ++ concat params'
 
@@ -808,7 +813,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
         lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
         let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
         acc_params <- forM lam0_acc_params $ \p -> do
-          name <- newVName $ baseString $ paramName p
+          name <- newVName $ baseString $ I.paramName p
           return p { I.paramName = name }
 
         body_with_lam0 <-
@@ -817,7 +822,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
 
             let consumed = consumedByLambda $ Alias.analyseLambda lam0'
                 copyIfConsumed p (I.Var v)
-                  | paramName p `S.member` consumed =
+                  | I.paramName p `S.member` consumed =
                       letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
                 copyIfConsumed _ x = return x
 
@@ -1572,7 +1577,7 @@ partitionWithSOACS k lam arrs = do
                   localScope (scopeOfLParams $ add_lam_x_params++add_lam_y_params) $
     fmap resultBody $ forM (zip add_lam_x_params add_lam_y_params) $ \(x,y) ->
       letSubExp "z" $ I.BasicOp $ I.BinOp (I.Add Int32)
-      (I.Var $ paramName x) (I.Var $ paramName y)
+      (I.Var $ I.paramName x) (I.Var $ I.paramName y)
   let add_lam = I.Lambda { I.lambdaBody = add_lam_body
                          , I.lambdaParams = add_lam_x_params ++ add_lam_y_params
                          , I.lambdaReturnType = replicate k $ I.Prim int32
@@ -1608,13 +1613,13 @@ partitionWithSOACS k lam arrs = do
     value_params <- forM arr_ts $ \arr_t ->
       I.Param <$> newVName "v" <*> pure (I.rowType arr_t)
     (offset, offset_stms) <- collectStms $ mkOffsetLambdaBody (map I.Var sizes)
-                             (I.Var $ paramName c_param) 0 offset_params
+                             (I.Var $ I.paramName c_param) 0 offset_params
     return I.Lambda { I.lambdaParams = c_param : offset_params ++ value_params
                     , I.lambdaReturnType = replicate (length arr_ts) (I.Prim int32) ++
                                            map I.rowType arr_ts
                     , I.lambdaBody = mkBody offset_stms $
                                      replicate (length arr_ts) offset ++
-                                     map (I.Var . paramName) value_params
+                                     map (I.Var . I.paramName) value_params
                     }
   results <- letTupExp "partition_res" $ I.Op $ I.Scatter [] w
              write_lam (classes : all_offsets ++ arrs) $ zip (repeat sum_of_partition_sizes) blanks
@@ -1632,6 +1637,6 @@ partitionWithSOACS k lam arrs = do
       next_one <- mkOffsetLambdaBody sizes c (i+1) ps
       this_one <- letSubExp "this_offset" =<<
                   foldBinOp (Add Int32) (constant (-1::Int32))
-                  (I.Var (paramName p) : take i sizes)
+                  (I.Var (I.paramName p) : take i sizes)
       letSubExp "total_res" $ I.If is_this_one
         (resultBody [this_one]) (resultBody [next_one]) [I.Prim int32]

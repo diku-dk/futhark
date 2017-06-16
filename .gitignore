@@ -20,7 +20,7 @@ tests/**/*expected-*
 tests/*bin
 tests/**/*bin
 tests/*c
-tests/**/*c
+tests/**/*.c
 examples/*actual-*
 examples/**/*actual-*
 examples/*expected-*

@@ -3,7 +3,25 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
--- | This module implements an optimisation that moves in-place
+-- | This module has been deprecated in favour of MemoryBlockMerging.  It does
+-- not work on the current representation.  Obituary:
+--
+-- The optimisation is never applied.  The module looks for patterns of the
+-- structure
+--
+--   [PatElem v (BindInPlace cs src [DimFix i]) attr]
+--
+-- which it expects is the internal representation of statements
+--
+--   let x[i] = r in
+--
+-- but in the current internal language, that pattern does not have the slice
+-- '[DimFix i]', but instead something like '[DimFix i, DimSlice ...]', which
+-- the pass does not recognize.
+--
+-- Original documentation:
+--
+-- This module implements an optimisation that moves in-place
 -- updates into/before loops where possible, with the end goal of
 -- minimising memory copies.  As an example, consider this program:
 --

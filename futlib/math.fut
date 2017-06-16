@@ -70,6 +70,11 @@ module type real = {
 
   val log: t -> t
 
+  val ceil : t -> t
+  val floor : t -> t
+  val trunc : t -> t
+  val round : t -> t
+
   val isinf: t -> bool
   val isnan: t -> bool
 
@@ -460,6 +465,32 @@ module f64: (real with t = f64) = {
   let atan (x: f64) = intrinsics.atan64 x
   let atan2 (x: f64) (y: f64) = intrinsics.atan2_64 x y
 
+  let ceil (x:f64) : f64 =
+    let i = i64 x
+    let ix = f64 i
+    in if x >= 0.0 then
+         if ix < x then f64(i i64.+ 1i64) else x
+       else if ix > x then ix else x
+
+  let floor (x:f64) : f64 =
+    let i = i64 x
+    let ix = f64 i
+    in if x >= 0.0 then
+         if ix < x then ix else x
+       else if ix > x then f64(i i64.- 1i64) else x
+
+  let trunc (x:f64) : f64 = f64(i64 x)
+
+  let even (x:f64) = i64 x % 2i64 i64.== 0i64
+
+  let round (x:f64) : f64 =
+    let t0 = x + 0.5f64
+    let floor_t0 = floor t0
+    in if floor_t0 == t0 then
+	  let t = floor x
+	  in if even t then t else floor_t0
+	else floor_t0
+
   let isinf (x: f64) = intrinsics.isinf64 x
   let isnan (x: f64) = intrinsics.isnan64 x
 
@@ -513,6 +544,32 @@ module f32: (real with t = f32) = {
   let asin (x: f32) = intrinsics.asin32 x
   let atan (x: f32) = intrinsics.atan32 x
   let atan2 (x: f32) (y: f32) = intrinsics.atan2_32 x y
+
+  let ceil (x:f32) : f32 =
+    let i = i32 x
+    let ix = f32 i
+    in if x >= 0.0f32 then
+         if ix < x then f32(i i32.+ 1i32) else x
+       else if ix > x then ix else x
+
+  let floor (x:f32) : f32 =
+    let i = i32 x
+    let ix = f32 i
+    in if x >= 0.0f32 then
+         if ix < x then ix else x
+       else if ix > x then f32(i i32.- 1i32) else x
+
+  let trunc (x:f32) : f32 = f32(i32 x)
+
+  let even (x:f32) = i32 x % 2i32 i32.== 0i32
+
+  let round (x:f32) : f32 =
+    let t0 = x + 0.5f32
+    let floor_t0 = floor t0
+    in if floor_t0 == t0 then
+	  let t = floor x
+	  in if even t then t else floor_t0
+	else floor_t0
 
   let isinf (x: f32) = intrinsics.isinf32 x
   let isnan (x: f32) = intrinsics.isnan32 x
