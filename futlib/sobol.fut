@@ -1,12 +1,11 @@
--- Copyright 2017, HIPERFIT, MIT License
-
 import "/futlib/math"
 import "/futlib/monoid"
 
 module type sobol_dir = {
-  val a: []u32
-  val s: []i32
-  val m: [][]u32
+  val n: i32
+  val a: [n]u32
+  val s: [n]i32
+  val m: [n][]u32
 }
 
 module type sobol = {
