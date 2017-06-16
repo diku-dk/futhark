@@ -5,10 +5,12 @@
 -- https://github.com/HIPERFIT/sobol-futhark
 
 module sobol_dir : {
-  val m : [][]u32
-  val a : []u32
-  val s : []i32
+  val n : i32
+  val m : [n][]u32
+  val a : [n]u32
+  val s : [n]i32
 } = {
+  let n : i32 = 1000
   let m : [1000][13]u32 = 
     [[1u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32],
      [1u32, 3u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32],
