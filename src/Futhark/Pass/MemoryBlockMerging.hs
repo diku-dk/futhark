@@ -33,7 +33,7 @@ usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
 mergeMemoryBlocks :: Pass ExpMem.ExplicitMemory ExpMem.ExplicitMemory
 mergeMemoryBlocks = simplePass
                     "merge memory blocks"
-                    "Transform program to reuse non-interfering memory blocks"
+                    "Transform program to coalesce memory blocks"
                     transformProg
 
 
