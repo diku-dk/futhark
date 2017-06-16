@@ -1,5 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 -- | Merge memory blocks where possible.
+--
+-- Enable by setting the environment variable MEMORY_BLOCK_MERGING=1.
 module Futhark.Pass.MemoryBlockMerging
   ( mergeMemoryBlocks
   ) where
