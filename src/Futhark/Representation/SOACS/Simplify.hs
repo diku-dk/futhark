@@ -402,7 +402,8 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
   let bodyres = bodyResult body
       bodyenv = scopeOf $ bodyStms body
       vtable' = foldr ST.insertLParam vtable params
-  rettype' <- zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
+  rettype' <- localScope (scopeOfLParams params) $
+              zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
   return $ ExtLambda params body rettype'
     where refineArrType :: (MonadBinder m, LocalScope (Lore m) m) =>
                            ST.SymbolTable (Lore m)
