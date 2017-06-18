@@ -64,20 +64,25 @@ get_compilation_info() {
     }
 }
 
-get_compilation_info > "$base/compilation_in-place-lowering_memory-block-merging.json"
-IN_PLACE_LOWERING=0 get_compilation_info > "$base/compilation_no-in-place-lowering_memory-block-merging.json"
-# It doesn't make sense to run get_compilation_info with memory block merging
-# disabled, since that will just give us less information.
+# Get compilation information.
+get_compilation_info > \
+                     "$base/compilation_without-memory-block-merging_without-register-allocation.json"
+MEMORY_BLOCK_MERGING=1 get_compilation_info > \
+                    "$base/compilation_with-memory-block-merging_without-register-allocation.json"
+REGISTER_ALLOCATION=1 get_compilation_info > \
+                   "$base/compilation_without-memory-block-merging_with-register-allocation.json"
+MEMORY_BLOCK_MERGING=1 REGISTER_ALLOCATION=1 get_compilation_info > \
+                    "$base/compilation_with-memory-block-merging_with-register-allocation.json"
 
-# Then run different versions of the compiler on the datasets.
+# Get runtime information.
 futhark-bench $flags --json \
-              "$base/measurements_in-place-lowering_no-memory-block-merging.json" . || true
-
-IN_PLACE_LOWERING=0 futhark-bench $flags --json \
-                 "$base/measurements_no-in-place-lowering_no-memory-block-merging.json" . || true
+              "$base/measurements_without-memory-block-merging_without-register-allocation.json" . || true
 
 MEMORY_BLOCK_MERGING=1 futhark-bench $flags --json \
-                    "$base/measurements_in-place-lowering_memory-block-merging.json" . || true
+                 "$base/measurements_with-memory-block-merging_without-register-allocation.json" . || true
 
-IN_PLACE_LOWERING=0 MEMORY_BLOCK_MERGING=1 futhark-bench $flags --json \
-                 "$base/measurements_no-in-place-lowering_memory-block-merging.json" . || true
+REGISTER_ALLOCATION=1 futhark-bench $flags --json \
+                   "$base/measurements_without-memory-block-merging_with-register-allocation.json" . || true
+
+MEMORY_BLOCK_MERGING=1 REGISTER_ALLOCATION=1 futhark-bench $flags --json \
+                   "$base/measurements_with-memory-block-merging_with-register-allocation.json" . || true
