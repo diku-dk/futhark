@@ -17,17 +17,15 @@ if ! [ "$result_dir" ]; then
     exit 1
 fi
 
-timeout_secs="$FUTHARK_BENCH_MEMORY_BLOCK_MERGING_TIMEOUT"
-if [ "$timeout_secs" = '0' ]; then
-    # No limit on runtime.
+timeout_secs="$2"
+if ! [ "$timeout_secs" ]; then
+    # No limit on runtimes.
     flags=''
 else
-    if ! [ "$timeout_secs" ]; then
-        timeout_secs=60
-    fi
-    # Ignore too large datasets.
+    # Effectively ignore too large datasets.
     flags="--timeout $timeout_secs"
 fi
+echo $flags
 
 base="$(readlink -f "$result_dir")"
 

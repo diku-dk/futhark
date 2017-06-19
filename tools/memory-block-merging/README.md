@@ -1,17 +1,14 @@
 # Memory block merging benchmarking
 
-Default limits: To make the full benchmarking finish reasonably fast,
-runs are set to time out after 60 seconds by default.  Change this by
-setting the environment variable
-`FUTHARK_BENCH_MEMORY_BLOCK_MERGING_TIMEOUT` to a number of seconds, or
-0 if there should be no limit.  Runs below 1 millisecond are always
-ignored.
-
 First run `./gather-data.sh OUT_DIRECTORY` to run all the
 futhark-benchmark programs multiple times with different settings.
+**WARNING**: This takes a long time, since it runs the entire benchmark
+suite with 4 different configurations.  Run `./gather-data.sh
+OUT_DIRECTORY TIMEOUT_SECS` to specify a timeout for every dataset run.
 
 Then run `./merge-data.py OUT_DIRECTORY` to gather all results in one
-cleaned-up JSON file named `full.json` (is quick).
+cleaned-up JSON file named `full.json` (is quick).  Runs below 1
+millisecond are always ignored (this should maybe be higher).
 
 At this point you can run `./summarize.py OUT_DIRECTORY` to get a
 pretty-printed summary of the results in the full JSON file, and you can
@@ -21,6 +18,8 @@ See the individual files for more comments on usage and effects.
 
 
 # Structure in output `full.json` from `./merge-data.py`:
+
+This file is currently used by `summarize.py` and `plot.py`.
 
 ```
 top-level: { benchmark_name: benchmark_info }
