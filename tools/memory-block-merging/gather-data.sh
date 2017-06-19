@@ -43,7 +43,6 @@ mkdir "$base"
 get_compilation_info() {
     temp_storage="$(mktemp)"
     {
-        export MEMORY_BLOCK_MERGING=1
         export FUTHARK_DEBUG_JSON=1
         echo '{'
         find -name '*.fut' | while read file; do
