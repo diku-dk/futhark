@@ -958,13 +958,16 @@ simplifyScalExp vtable (Let pat _ e) = do
     Just se
       | not $ isConstant se,
         Just ses <- lth0s se,
+        all ((<size_bound) . SE.scalExpSize) ses,
         Right True <- and <$> mapM truish ses ->
         letBind_ pat $ BasicOp $ SubExp $ Constant $ BoolValue True
       | isNothing $ valOrVar se,
+        SE.scalExpSize se < size_bound,
         Just se' <- valOrVar $ AS.simplify se ranges ->
         letBind_ pat $ BasicOp $ SubExp se'
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
+        size_bound = 30 -- don't touch scalexps bigger than this.
         lth0s se@(SE.RelExp SE.LTH0 _) = Just [se]
         lth0s (SE.RelExp SE.LEQ0 x) = Just [SE.RelExp SE.LTH0 $ x - 1]
         lth0s (SE.SLogAnd x y) = (++) <$> lth0s x <*> lth0s y

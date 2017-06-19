@@ -3,6 +3,7 @@ module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
   , scalExpType
+  , scalExpSize
   , subExpToScalExp
   , toScalExp
   , expandScalExp
@@ -158,6 +159,28 @@ scalExpType (SLogOr  _ _) = Bool
 scalExpType (RelExp  _ _) = Bool
 scalExpType (MaxMin _ []) = IntType Int32 -- arbitrary and probably wrong.
 scalExpType (MaxMin _ (e:_)) = scalExpType e
+
+-- | Number of nodes in the scalar expression.
+scalExpSize :: ScalExp -> Int
+scalExpSize Val{} = 1
+scalExpSize Id{} = 1
+scalExpSize (SNeg    e) = scalExpSize e
+scalExpSize (SNot    e) = scalExpSize e
+scalExpSize (SAbs    e) = scalExpSize e
+scalExpSize (SSignum e) = scalExpSize e
+scalExpSize (SPlus   x y) = scalExpSize x + scalExpSize y
+scalExpSize (SMinus  x y) = scalExpSize x + scalExpSize y
+scalExpSize (STimes  x y) = scalExpSize x + scalExpSize y
+scalExpSize (SDiv x y) = scalExpSize x + scalExpSize y
+scalExpSize (SMod x y)    = scalExpSize x + scalExpSize y
+scalExpSize (SPow x y) = scalExpSize x + scalExpSize y
+scalExpSize (SQuot x y) = scalExpSize x + scalExpSize y
+scalExpSize (SRem x y) = scalExpSize x + scalExpSize y
+scalExpSize (SLogAnd x y) = scalExpSize x + scalExpSize y
+scalExpSize (SLogOr  x y) = scalExpSize x + scalExpSize y
+scalExpSize (RelExp  _ x) = scalExpSize x
+scalExpSize (MaxMin _ []) = 0
+scalExpSize (MaxMin _ es) = sum $ map scalExpSize es
 
 -- | A function that checks whether a variable name corresponds to a
 -- scalar expression.
