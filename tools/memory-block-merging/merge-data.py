@@ -14,6 +14,7 @@ pretty-print version of the JSON file, and './plot.py' to plot the data.
 import sys
 import os
 import json
+import itertools
 import functools
 import numpy as np
 
@@ -31,56 +32,35 @@ def load(path):
     with open(os.path.join(data_dir, 'runs', path)) as f:
         return json.load(f)
 
-comp_ipl_mbm = load('compilation_in-place-lowering_memory-block-merging.json')
-comp_no_ipl_mbm = load('compilation_no-in-place-lowering_memory-block-merging.json')
-comps = (comp_ipl_mbm, comp_no_ipl_mbm)
-meas_ipl_no_mbm = load('measurements_in-place-lowering_no-memory-block-merging.json')
-meas_no_ipl_no_mbm = load('measurements_no-in-place-lowering_no-memory-block-merging.json')
-meas_ipl_mbm = load('measurements_in-place-lowering_memory-block-merging.json')
-meas_no_ipl_mbm = load('measurements_no-in-place-lowering_memory-block-merging.json')
-meass = (meas_ipl_no_mbm, meas_no_ipl_no_mbm, meas_ipl_mbm, meas_no_ipl_mbm)
+enabling_attributes = ['without', 'with']
+attributes = ['memory-block-merging', 'register-allocation']
 
+enabling_attributes_products = list(itertools.product(
+    *([enabling_attributes] * len(attributes))))
 
-# STRUCTURE IN OUTPUT JSON:
-#
-# top-level: { benchmark_name: benchmark_info }
-#            for every benchmark_name of the benchmarks
-#
-# benchmark_info: { 'compilation': compilation_info
-#                 , 'datasets': datasets
-#                 }
-#
-# compilation_info: { 'with-in-place-lowering': compilation_info_base
-#                   , 'without-in-place-lowering': compilation_info_base
-#                   }
-#                   where compilation_info_base is just whatever JSON the
-#                   compiler spouts
-#
-# datasets: { dataset_name: dataset_info }
-#           for every dataset_name of the benchmark
-#
-# dataset_info: { 'without-in-place-lowering-without-memory-block-merging': dataset_info_base
-#               ,    'without-in-place-lowering-with-memory-block-merging': dataset_info_base
-#               ,    'with-in-place-lowering-without-memory-block-merging': dataset_info_base
-#               ,       'with-in-place-lowering-with-memory-block-merging': dataset_info_base
-#               }
-#
-# dataset_info_base: { 'average_runtime': microseconds
-#                    , 'total_cumulative_allocations': bytes
-#                    , 'total_cumulative_frees': bytes
-#                    , 'peak_memory_usages': peak_memory_usages
-#                    }
-#
-# peak_memory_usages: { space_name: bytes }
-#                     for every space_name in the available memory spaces
+variants = ['_'.join('{}-{}'.format(e, a)
+                     for e, a in zip(p, attributes))
+            for p in enabling_attributes_products]
+
+print('Variants:', variants)
+
+compilation_raw = {}
+for v in variants:
+    path = 'compilation_' + v + '.json'
+    compilation_raw[v] = load(path)
+
+measurements_raw = {}
+for v in variants:
+    path = 'measurements_' + v + '.json'
+    measurements_raw[v] = load(path)
 
 
 # DATA BUILDING
 
 benchmark_names_sets = []
-for comp in comps:
+for comp in compilation_raw.values():
     benchmark_names_sets.append(set(comp.keys()))
-for meas in meass:
+for meas in measurements_raw.values():
     benchmark_names_sets.append(set(meas.keys()))
 # These benchmarks exist in all datasets.
 benchmark_names = list(functools.reduce(set.intersection, benchmark_names_sets))
@@ -88,7 +68,7 @@ benchmark_names = list(functools.reduce(set.intersection, benchmark_names_sets))
 dataset_names = {}
 for benchmark_name in benchmark_names:
     dataset_names_sets = []
-    for meas in meass:
+    for meas in measurements_raw.values():
         dataset_names_local = []
         for dataset_name, dataset_info in meas[benchmark_name]['datasets'].items():
             if isinstance(dataset_info, dict):
@@ -121,35 +101,18 @@ def cut_desc(s):
 
 benchmarks = {}
 for benchmark_name in benchmark_names:
-    compilation_info = {
-        'with-in-place-lowering': comp_ipl_mbm[benchmark_name],
-        'without-in-place-lowering': comp_no_ipl_mbm[benchmark_name]
-    }
+    compilation_info = {}
+    for v in variants:
+        compilation_info[v] = compilation_raw[v][benchmark_name]
 
     datasets = {}
     for dataset_name in dataset_names[benchmark_name]:
-        d_no_ipl_no_mbm = get_dataset_info_base(meas_no_ipl_no_mbm, benchmark_name, dataset_name)
-        d_no_ipl_mbm = get_dataset_info_base(meas_no_ipl_mbm, benchmark_name, dataset_name)
-        d_ipl_no_mbm = get_dataset_info_base(meas_ipl_no_mbm, benchmark_name, dataset_name)
-        d_ipl_mbm = get_dataset_info_base(meas_ipl_mbm, benchmark_name, dataset_name)
-        if d_no_ipl_no_mbm is None or \
-           d_no_ipl_mbm is None or \
-           d_ipl_no_mbm is None or \
-           d_ipl_mbm is None:
-            continue # Ignore.
-
-        dataset_info = {
-            'without-in-place-lowering-without-memory-block-merging':
-            d_no_ipl_no_mbm,
-            'without-in-place-lowering-with-memory-block-merging':
-            d_no_ipl_mbm,
-            'with-in-place-lowering-without-memory-block-merging':
-            d_ipl_no_mbm,
-            'with-in-place-lowering-with-memory-block-merging':
-            d_ipl_mbm
-        }
-        dataset_name = cut_desc(dataset_name)
-        datasets[dataset_name] = dataset_info
+        dataset_name_short = cut_desc(dataset_name)
+        dataset_info = {}
+        for v in variants:
+            dataset_info[v] = get_dataset_info_base(measurements_raw[v], benchmark_name, dataset_name)
+        if not None in dataset_info.values():
+            datasets[dataset_name_short] = dataset_info
 
     if len(datasets) > 0:
         benchmark_info = {'compilation': compilation_info,

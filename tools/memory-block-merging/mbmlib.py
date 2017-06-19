@@ -2,6 +2,7 @@
 Helper functions.
 '''
 
+import sys
 import numpy as np
 
 
@@ -28,8 +29,8 @@ def average_improvement(benchmark_info, val_func):
 
 def dataset_improvement(dataset_info, val_func):
     return speedup_improvement(
-        val_func(dataset_info['with-in-place-lowering-without-memory-block-merging']),
-        val_func(dataset_info['without-in-place-lowering-with-memory-block-merging']))
+        val_func(dataset_info['without-memory-block-merging_without-register-allocation']),
+        val_func(dataset_info['with-memory-block-merging_with-register-allocation']))
 
 def speedup_improvement(runtime_before, runtime_after):
     runtime_decrease = runtime_before - runtime_after
