@@ -644,7 +644,8 @@ pullRearrange soac ots = do
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
   if rearrangeReach perm <= mapDepth nest then do
     let -- Expand perm to cover the full extent of the input dimensionality
-        perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
+        perm' inp = take r perm ++ [length perm..r-1]
+          where r = SOAC.inputRank inp
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
         inputs' = map addPerm $ MapNest.inputs nest
     soac' <- MapNest.toSOAC $
