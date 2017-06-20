@@ -23,7 +23,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Monoid
 import Data.List
---import Debug.Trace
 
 import Prelude
 
