@@ -43,6 +43,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , isVarishInput
   , addTransform
   , addTransforms
+  , addInitialTransforms
   , inputArray
   , inputRank
   , inputType
@@ -267,6 +268,11 @@ addTransform tr (Input trs a t) =
 -- list.
 addTransforms :: ArrayTransforms -> Input -> Input
 addTransforms ts (Input ots a t) = Input (ots <> ts) a t
+
+-- | Add several transformations to the start of the transformation
+-- list.
+addInitialTransforms :: ArrayTransforms -> Input -> Input
+addInitialTransforms ts (Input ots a t) = Input (ts <> ots) a t
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: (MonadBinder m) =>
