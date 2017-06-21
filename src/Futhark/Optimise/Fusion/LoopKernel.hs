@@ -262,6 +262,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
         in (extra_nms, res_lam', new_inp)
 
   case (soac2, soac1) of
+    _ | SOAC.width soac1 /= SOAC.width soac2 -> fail "SOAC widths must match."
     ------------------------------
     -- Redomap-Redomap Fusions: --
     ------------------------------
