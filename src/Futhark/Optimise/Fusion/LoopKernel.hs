@@ -133,7 +133,7 @@ tryOptimizeSOAC :: Names -> [VName] -> SOAC -> Names -> FusedKer
                 -> TryFusion FusedKer
 tryOptimizeSOAC unfus_nms outVars soac consumed ker = do
   (soac', ots) <- optimizeSOAC Nothing soac mempty
-  let ker' = map (SOAC.addTransforms ots) (inputs ker) `setInputs` ker
+  let ker' = map (SOAC.addInitialTransforms ots) (inputs ker) `setInputs` ker
       outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
       ker'' = fixInputTypes outIdents ker'
   applyFusionRules unfus_nms outVars soac' consumed ker''
