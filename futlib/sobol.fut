@@ -39,13 +39,13 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
   -- direction vector for dimension j
   let dirvec (j:i32) : [L]u32 = unsafe
     if j == 0 then
-       map (\i -> 1u32 << (32u32-u32(i+1))
+       map (\i -> 1u32 << (u32(L)-u32(i+1))
            ) (iota L)
     else
        let s = D.s[j-1]
        let a = D.a[j-1]
        let V = map (\i -> if i >= s then 0u32
-                          else D.m[j-1,i] << (32u32-u32(i+1))
+                          else D.m[j-1,i] << (u32(L)-u32(i+1))
                    ) (iota L)
        loop ((i,V) = (s, V)) =
          while i < L do
@@ -63,7 +63,7 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
       while i < 32 && ((x>>i)&1) != 0 do i + 1
     in i
 
-  let norm = 2.0 f64.** 32.0
+  let norm = 2.0 f64.** f64(L)
 
   let grayCode (x: i32): i32 = (x >> 1) ^ x
 
@@ -74,8 +74,7 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
     map dirvec (iota D)
 
   let recSob (i:i32) (dirvec:[L]u32) (x:u32) : u32 =
-    unsafe if i == 0 then 0u32
-           else x ^ dirvec[index_of_least_significant_0 (i-1)]
+    unsafe (x ^ dirvec[index_of_least_significant_0 i])
 
   let recurrent (i:i32) (xs:[D]u32) : [D]u32 =
     map (recSob i) dirvecs xs
@@ -107,16 +106,11 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
   module Reduce (X : { include monoid
                        val f : [D]f64 -> t }) : { val run : i32 -> X.t } =
   {
-    -- let run (N:i32) : X.t =
-    --   stream_red_per X.op (\ [sz] (ns:[sz]i32) : X.t ->
-    --                       reduce X.op X.ne (map X.f (chunk ns[0] sz)))
-    --    (iota N)
-
     let run (N:i32) : X.t =
-      let vs = stream_map (\ [sz] (ns: [sz]i32): [sz][D]f64  ->
-                           chunk ns[0] sz)
-                          (iota N)
-      let fs = map X.f vs
-      in reduce X.op X.ne fs
+      stream_red X.op (\ [sz] (ns:[sz]i32) : X.t ->
+                       if sz > 0 then
+                          reduce X.op X.ne (map X.f (chunk ns[0] sz))
+                       else X.ne)
+      (iota N)
   }
 }
