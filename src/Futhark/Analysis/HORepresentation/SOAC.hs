@@ -371,23 +371,19 @@ inputs (Scatter _cs _len _lam ivs _as) = ivs
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
 setInputs arrs (Map cs w lam _) =
-  Map cs (newWidth arrs w) lam arrs
+  Map cs w lam arrs
 setInputs arrs (Reduce cs w comm lam args) =
-  Reduce cs (newWidth arrs w) comm lam (zip (map fst args) arrs)
+  Reduce cs w comm lam (zip (map fst args) arrs)
 setInputs arrs (Scan cs w lam args) =
-  Scan cs (newWidth arrs w) lam (zip (map fst args) arrs)
+  Scan cs w lam (zip (map fst args) arrs)
 setInputs arrs (Redomap cs w comm lam1 lam ne _) =
-  Redomap cs (newWidth arrs w) comm lam1 lam ne arrs
+  Redomap cs w comm lam1 lam ne arrs
 setInputs arrs (Scanomap cs w lam1 lam ne _) =
-  Scanomap cs (newWidth arrs w) lam1 lam ne arrs
+  Scanomap cs w lam1 lam ne arrs
 setInputs arrs (Stream cs w form lam _) =
-  Stream cs (newWidth arrs w) form lam arrs
-setInputs arrs (Scatter cs w lam _ivs as) =
-  Scatter cs (newWidth arrs w) lam arrs as
-
-newWidth :: [Input] -> SubExp -> SubExp
-newWidth [] w = w
-newWidth (inp:_) _ = arraySize 0 $ inputType inp
+  Stream cs w form lam arrs
+setInputs arrs (Scatter cs len lam _ivs as) =
+  Scatter cs len lam arrs as
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC lore -> Lambda lore
