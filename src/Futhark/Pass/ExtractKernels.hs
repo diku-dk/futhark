@@ -353,14 +353,14 @@ transformStm (Let pat () (Op (Stream cs w
 
 
 transformStm (Let pat () (Op (Stream cs w
-                                  (RedLike _ comm red_fun nes) fold_fun arrs)))
+                               (RedLike o comm red_fun nes) fold_fun arrs)))
   | Just fold_fun' <- extLambdaToLambda fold_fun = do
   -- Generate a kernel immediately.
   red_fun_sequential <- Kernelise.transformLambda red_fun
   fold_fun_sequential <- Kernelise.transformLambda fold_fun'
   blockedReductionStream pat cs w comm' red_fun_sequential fold_fun_sequential nes arrs
-  where comm' | commutativeLambda red_fun = Commutative
-              | otherwise                 = comm
+  where comm' | commutativeLambda red_fun, o /= InOrder = Commutative
+              | otherwise                               = comm
 
 transformStm (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
