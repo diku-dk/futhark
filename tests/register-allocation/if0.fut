@@ -11,13 +11,14 @@
 --        }
 -- structure cpu { Alloc 1 }
 
-let main (n: i32, cond: bool, i: i32): [n]i32 =
-  let xs = replicate n 1
+let main (xs0: [#n]i32, cond: bool, i: i32): [n]i32 =
+  let xs = map (+ 1) xs0
   let ys =
     if cond
     then let k = xs[i]
          let zs = map (+ k) (iota n) -- Can use the memory of 'xs'.
          in zs
-    else let zs = xs
+    else let zs = replicate n (reduce (+) 0 xs) -- xs
          in zs
-  in ys
+  let zs = map (+ 1) ys
+  in zs
