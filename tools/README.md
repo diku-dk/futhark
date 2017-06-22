@@ -15,7 +15,7 @@ You can install this mode with Emacs' package manager.  Enable the
 https://melpa.org/ archive, and install the `futhark-mode` package.
 Alternatively, add the following lines to your Emacs init file:
 
-    (add-to-list 'load-path "~/.emacs.d/futhark-mode")
+    (add-to-list 'load-path "path/to/futhark/tools")
     (require 'futhark-mode)
 
 
