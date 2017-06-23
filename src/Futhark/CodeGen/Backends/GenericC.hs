@@ -1180,7 +1180,7 @@ compileCode (Allocate name (Count e) space) = do
   allocMem name size space
 
 compileCode (For i it bound body) = do
-  let i' = pretty i
+  let i' = C.toIdent i
       it' = intTypeToCType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
