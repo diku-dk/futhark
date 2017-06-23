@@ -423,12 +423,13 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
                                  (Just (MemBlock _ _ m_a idx_a), Just (MemBlock _ _ m_a0 idx_a0), Just (MemBlock _ _ m_r _)) ->
                                    -- checking c) and d)
                                    let is_lu_a0 = (m_a == m_a0 && idx_a == idx_a0) || -- if in-place update then OK!
-                                                  case patternNames pat of
-                                                    [] -> False
-                                                    (fst_pat_name:_) ->
-                                                      case M.lookup fst_pat_name lutab of
-                                                        Nothing -> False
-                                                        Just nms-> S.member a0 nms
+                                                    case arginis of
+                                                      [] -> False
+                                                      (fst_arg,_):_ ->
+                                                        let fst_arg_name = paramName fst_arg
+                                                        in case M.lookup fst_arg_name lutab of
+                                                            Nothing -> False
+                                                            Just nms-> trace ("In isLU: "++pretty a0++pretty nms++pretty fst_arg_name) $ S.member a0 nms
                                    in  if is_lu_a0 && S.member m_r (alloc td_env)
                                        then trace ("COALESCING loop candidate: "++pretty b++" "++pretty m_b++" "++pretty r++" "++pretty m_r) $
                                                   Just ((b,m_b), (a,m_a), (a0,m_a0), (r,m_r))
