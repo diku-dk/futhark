@@ -74,6 +74,13 @@ bottomUpRules = [ removeRedundantMergeVariables
                 , simplifyConcat
                 ]
 
+asInt32PrimExp :: PrimExp v -> PrimExp v
+asInt32PrimExp pe
+  | IntType it <- primExpType pe, it /= Int32 =
+      ConvOpExp (SExt it Int32) pe
+  | otherwise =
+      pe
+
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
@@ -325,15 +332,11 @@ simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs1 perm1 v1)))
     Just (Rearrange cs3 perm3 v3) <- asBasicOp =<< ST.lookupExp v2 vtable,
     dim1:_ <- perm1,
     perm1 == rearrangeInverse perm3 = do
-      to_drop' <- letSubExp "drop" =<< toExp (asDim to_drop)
-      to_take' <- letSubExp "take" =<< toExp (asDim to_take)
+      to_drop' <- letSubExp "drop" =<< toExp (asInt32PrimExp to_drop)
+      to_take' <- letSubExp "take" =<< toExp (asInt32PrimExp to_take)
       [_, v] <- letTupExp' "simplify_rearrange" $
         BasicOp $ Split (cs1<>cs2<>cs3) dim1 [to_drop', to_take'] v3
       letBind_ pat $ BasicOp $ SubExp v
-    where asDim pe | IntType it <- primExpType pe, it /= Int32 =
-                       ConvOpExp (SExt it Int32) pe
-                   | otherwise =
-                       pe
 
 -- Rearranging a replicate where the outer dimension is left untouched.
 simplifyRearrange vtable (Let pat _ (BasicOp (Rearrange cs perm v1)))
@@ -446,6 +449,11 @@ simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing
 
+simplifyBinOp _ _ (BinOp FDiv{} e1 e2)
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e1
+  | isCt0 e2 = Nothing
+
 simplifyBinOp _ _ (BinOp (SRem t) e1 e2)
   | isCt1 e2 = binOpRes $ IntValue $ intValue t (0 :: Int)
   | e1 == e2 = binOpRes $ IntValue $ intValue t (1 :: Int)
@@ -524,6 +532,18 @@ simplifyConvOp _ _ (ConvOp op (Constant v)) =
 simplifyConvOp _ _ (ConvOp op se)
   | (from, to) <- convTypes op, from == to =
   Just $ SubExp se
+simplifyConvOp lookupVar _ (ConvOp (SExt t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (SExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (SExt t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (ZExt t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (ZExt t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (SIToFP t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (SExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (SIToFP t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (UIToFP t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (UIToFP t3 t1) se
 simplifyConvOp _ _ _ =
   Nothing
 
@@ -732,7 +752,7 @@ simplifyIndexIntoReshape vtable (Let pat _ (BasicOp (Index cs idd slice)))
                              (map (primExpFromSubExp int32) $ newDims newshape)
                              (map (primExpFromSubExp int32) inds)
           new_inds' <-
-            mapM (letSubExp "new_index" <=< toExp) new_inds
+            mapM (letSubExp "new_index" <=< toExp . asInt32PrimExp) new_inds
           letBind_ pat $ BasicOp $ Index (cs++cs2) idd2 $ map DimFix new_inds'
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
@@ -938,13 +958,16 @@ simplifyScalExp vtable (Let pat _ e) = do
     Just se
       | not $ isConstant se,
         Just ses <- lth0s se,
+        all ((<size_bound) . SE.scalExpSize) ses,
         Right True <- and <$> mapM truish ses ->
         letBind_ pat $ BasicOp $ SubExp $ Constant $ BoolValue True
       | isNothing $ valOrVar se,
+        SE.scalExpSize se < size_bound,
         Just se' <- valOrVar $ AS.simplify se ranges ->
         letBind_ pat $ BasicOp $ SubExp se'
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
+        size_bound = 30 -- don't touch scalexps bigger than this.
         lth0s se@(SE.RelExp SE.LTH0 _) = Just [se]
         lth0s (SE.RelExp SE.LEQ0 x) = Just [SE.RelExp SE.LTH0 $ x - 1]
         lth0s (SE.SLogAnd x y) = (++) <$> lth0s x <*> lth0s y

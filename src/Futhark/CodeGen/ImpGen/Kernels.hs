@@ -318,6 +318,10 @@ inKernelExpCompiler _ (BasicOp (Assert _ loc)) =
   compilerLimitationS $
   unlines [ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
           , "As a workaround, surround the expression with 'unsafe'."]
+-- The static arrays stuff does not work inside kernels.
+inKernelExpCompiler (ImpGen.Destination [dest]) (BasicOp (ArrayLit es _)) =
+  forM_ (zip [0..] es) $ \(i,e) ->
+  ImpGen.copyDWIMDest dest [fromIntegral (i::Int32)] e []
 inKernelExpCompiler dest e =
   ImpGen.defCompileExp dest e
 

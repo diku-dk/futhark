@@ -21,6 +21,7 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Unstream
 import Futhark.Pass.MemoryBlockMerging
+import Futhark.Pass.RegisterAllocation
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExtractKernels
@@ -72,28 +73,49 @@ withExperimentalMemoryBlockMerging =
               , simplifyExplicitMemory
               ])
 
+-- Experimental!  Enable by setting the environment variable
+-- REGISTER_ALLOCATION to 1.
+usesExperimentalRegisterAllocation :: Bool
+usesExperimentalRegisterAllocation =
+  maybe False (=="1") $ lookup "REGISTER_ALLOCATION" unixEnvironment
+
+withExperimentalRegisterAllocation :: Pipeline SOACS ExplicitMemory
+                                   -> Pipeline SOACS ExplicitMemory
+withExperimentalRegisterAllocation =
+  (>>> passes [ runThroughAllocations
+              , simplifyExplicitMemory
+              ])
+
 withExperimentalCPUPasses :: Pipeline SOACS ExplicitMemory
                           -> Pipeline SOACS ExplicitMemory
 withExperimentalCPUPasses pipeline =
-  if usesExperimentalMemoryBlockMerging
-  then withExperimentalMemoryBlockMerging pipeline
-  else pipeline
+  let pipeline1 = if usesExperimentalMemoryBlockMerging
+                  then withExperimentalMemoryBlockMerging pipeline
+                  else pipeline
+      pipeline2 = if usesExperimentalRegisterAllocation
+                  then withExperimentalRegisterAllocation pipeline1
+                  else pipeline1
+  in pipeline2
 
 withExperimentalGPUPasses :: Pipeline SOACS ExplicitMemory
                           -> Pipeline SOACS ExplicitMemory
 withExperimentalGPUPasses pipeline =
-  if usesExperimentalMemoryBlockMerging
-  then withExperimentalMemoryBlockMerging pipeline
-  else pipeline
+  let pipeline1 = if usesExperimentalMemoryBlockMerging
+                  then withExperimentalMemoryBlockMerging pipeline
+                  else pipeline
+      pipeline2 = if usesExperimentalRegisterAllocation
+                  then withExperimentalRegisterAllocation pipeline1
+                  else pipeline1
+  in pipeline2
 
--- Currently enabled by default.  Disable by setting the environment variable
--- IN_PLACE_LOWERING to 0.
-usesInPlaceLowering :: Bool
-usesInPlaceLowering =
-  maybe True (/= "0") $ lookup "IN_PLACE_LOWERING" unixEnvironment
+-- Old!  Does not work.  See the module for more details.  Enable by setting the
+-- environment variable IN_PLACE_LOWERING to 1.
+usesOldInPlaceLowering :: Bool
+usesOldInPlaceLowering =
+  maybe False (== "1") $ lookup "IN_PLACE_LOWERING" unixEnvironment
 
 inPlaceLoweringMaybe :: Pipeline Kernels Kernels
-inPlaceLoweringMaybe = if usesInPlaceLowering
+inPlaceLoweringMaybe = if usesOldInPlaceLowering
                        then onePass inPlaceLowering
                        else passes []
 

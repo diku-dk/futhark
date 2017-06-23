@@ -43,6 +43,7 @@ compileProg prog = do
                      , GenericC.opsAllocate = allocateOpenCLBuffer
                      , GenericC.opsDeallocate = deallocateOpenCLBuffer
                      , GenericC.opsCopy = copyOpenCLMemory
+                     , GenericC.opsStaticArray = staticOpenCLArray
                      , GenericC.opsMemoryType = openclMemoryType
                      , GenericC.opsFatMemory = True
                      }
@@ -192,6 +193,36 @@ openclMemoryType "device" = pure [C.cty|typename cl_mem|]
 openclMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
 openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
+
+staticOpenCLArray :: GenericC.StaticArray OpenCL ()
+staticOpenCLArray name "device" t vs = do
+  let ct = GenericC.primTypeToCType t
+      vs' = [[C.cinit|$exp:(GenericC.compilePrimValue v)|] | v <- vs]
+      num_elems = length vs
+  name_realtype <- newVName $ baseString name ++ "_realtype"
+  GenericC.topLevelDefinition [C.cedecl|static $ty:ct $id:name_realtype[$int:num_elems] = {$inits:vs'};|]
+  -- Fake a memory block.
+  GenericC.topLevelDefinition [C.cedecl|static struct memblock_device $id:name;|]
+  -- During startup, copy the data to where we need it.
+  GenericC.atInit [C.cstm|{
+    typename cl_int success;
+    $id:name.references = NULL;
+    $id:name.size = 0;
+    $id:name.mem = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE,
+                                  ($int:num_elems > 0 ? $int:num_elems : 1)*sizeof($ty:ct), NULL,
+                                  &success);
+    OPENCL_SUCCEED(success);
+    if ($int:num_elems > 0) {
+      OPENCL_SUCCEED(
+        clEnqueueWriteBuffer(fut_cl_queue, $id:name.mem, CL_TRUE,
+                             0, $int:num_elems*sizeof($ty:ct),
+                             $id:name_realtype,
+                             0, NULL, NULL));
+    }
+  }|]
+
+staticOpenCLArray _ space _ _ =
+  fail $ "OpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
 callKernel :: GenericC.OpCompiler OpenCL ()
 callKernel (GetNumGroups v) =

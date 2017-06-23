@@ -176,7 +176,8 @@ bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
                  removeDeadWrite,
                  removeUnnecessaryCopy,
-                 liftIdentityMapping
+                 liftIdentityMapping,
+                 removeDuplicateMapOutput
                 ]
 
 liftIdentityMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
@@ -296,6 +297,34 @@ removeDeadMapping (_, used) (Let pat _ (Op (Map cs width fun arrs))) =
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
+removeDuplicateMapOutput :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
+removeDuplicateMapOutput (_, used) (Let pat _ (Op (Map cs width fun arrs))) =
+  let ses = bodyResult $ lambdaBody fun
+      ts = lambdaReturnType fun
+      pes = patternValueElements pat
+      ses_ts_pes = zip3 ses ts pes
+      (ses_ts_pes', copies) =
+        foldl checkForDuplicates (mempty,mempty) ses_ts_pes
+  in if null copies then cannotSimplify
+     else do
+       let (ses', ts', pes') = unzip3 ses_ts_pes'
+           pat' = Pattern [] pes'
+           fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = ses' }
+                      , lambdaReturnType = ts' }
+       letBind_ pat' $ Op $ Map cs width fun' arrs
+       forM_ copies $ \(from,to) ->
+         if UT.isConsumed (patElemName to) used then
+           letBind_ (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
+         else
+           letBind_ (Pattern [] [to]) $ BasicOp $ SubExp $ Var $ patElemName from
+  where checkForDuplicates (ses_ts_pes',copies) (se,t,pe)
+          | Just (_,_,pe') <- find (\(x,_,_) -> x == se) ses_ts_pes' =
+              -- This subexp has been returned before, producing the
+              -- array pe'.
+              (ses_ts_pes', (pe', pe) : copies)
+          | otherwise = (ses_ts_pes' ++ [(se,t,pe)], copies)
+removeDuplicateMapOutput _ _ = cannotSimplify
+
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
 removeDeadWrite (_, used) (Let pat _ (Op (Scatter cs w fun arrs dests))) =
@@ -402,7 +431,8 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
   let bodyres = bodyResult body
       bodyenv = scopeOf $ bodyStms body
       vtable' = foldr ST.insertLParam vtable params
-  rettype' <- zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
+  rettype' <- localScope (scopeOfLParams params) $
+              zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
   return $ ExtLambda params body rettype'
     where refineArrType :: (MonadBinder m, LocalScope (Lore m) m) =>
                            ST.SymbolTable (Lore m)

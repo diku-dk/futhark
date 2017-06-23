@@ -617,8 +617,8 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
-    let paramType = toStruct . vacuousShapeAnnotations . patternType
-        entry = BoundF (tparams', map paramType params', rettype) closure
+    let patternType' = toStruct . vacuousShapeAnnotations . patternType
+        entry = BoundF (tparams', map patternType' params', rettype) closure
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope }
     body' <- local bindF $ checkExp body
 
@@ -1268,15 +1268,6 @@ checkCurryBinOp arg_ordering binop x loc y_arg = do
     checkFuncall Nothing loc fun [first_arg,second_arg]
 
   return (x', binop', removeShapeAnnotations rettype)
-
-checkTypeDecl :: SrcLoc -> TypeDeclBase NoInfo Name
-              -> TermTypeM (TypeDeclBase Info VName)
-checkTypeDecl loc (TypeDecl t NoInfo) = do
-  (t', st, implicit) <- checkTypeExp t
-  if M.null $ implicitNameMap implicit
-    then return $ TypeDecl t' $ Info st
-    else throwError $ TypeError loc
-         "May not bind size variables in type here."
 
 --- Consumption
 

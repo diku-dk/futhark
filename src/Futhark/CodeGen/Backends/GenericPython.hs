@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , compileDim
   , compileExp
   , compileCode
+  , compilePrimValue
   , compilePrimType
   , compilePrimTypeExt
   , compilePrimToNp
@@ -24,6 +25,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , ReadScalar
   , Allocate
   , Copy
+  , StaticArray
   , EntryOutput
   , EntryInput
 
@@ -31,6 +33,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , CompilerState(..)
   , stm
   , stms
+  , atInit
   , collect'
   , collect
   , simpleCall
@@ -86,6 +89,9 @@ type Copy op s = VName -> PyExp -> Imp.Space ->
                  PyExp -> PrimType ->
                  CompilerM op s ()
 
+-- | Create a static array of values - initialised at load time.
+type StaticArray op s = VName -> Imp.SpaceId -> PrimType -> [PrimValue] -> CompilerM op s ()
+
 -- | Construct the Python array being returned from an entry point.
 type EntryOutput op s = VName -> Imp.SpaceId ->
                         PrimType -> Imp.Signedness ->
@@ -104,6 +110,7 @@ data Operations op s = Operations { opsWriteScalar :: WriteScalar op s
                                   , opsReadScalar :: ReadScalar op s
                                   , opsAllocate :: Allocate op s
                                   , opsCopy :: Copy op s
+                                  , opsStaticArray :: StaticArray op s
                                   , opsCompiler :: OpCompiler op s
                                   , opsEntryOutput :: EntryOutput op s
                                   , opsEntryInput :: EntryInput op s
@@ -117,6 +124,7 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsReadScalar = defReadScalar
                                , opsAllocate  = defAllocate
                                , opsCopy = defCopy
+                               , opsStaticArray = defStaticArray
                                , opsCompiler = defCompiler
                                , opsEntryOutput = defEntryOutput
                                , opsEntryInput = defEntryInput
@@ -129,6 +137,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           fail "Cannot allocate in non-default memory space"
         defCopy _ _ _ _ _ _ _ _ =
           fail "Cannot copy to or from non-default memory space"
+        defStaticArray _ _ _ _ =
+          fail "Cannot create static array in non-default memory space"
         defCompiler _ =
           fail "The default compiler cannot compile extended operations"
         defEntryOutput _ _ _ _ =
@@ -156,6 +166,9 @@ envAllocate = opsAllocate . envOperations
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
 
+envStaticArray :: CompilerEnv op s -> StaticArray op s
+envStaticArray = opsStaticArray . envOperations
+
 envEntryOutput :: CompilerEnv op s -> EntryOutput op s
 envEntryOutput = opsEntryOutput . envOperations
 
@@ -173,11 +186,13 @@ newCompilerEnv (Imp.Functions funs) ops =
 
 data CompilerState s = CompilerState {
     compNameSrc :: VNameSource
+  , compInit :: [PyStmt]
   , compUserState :: s
 }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
 newCompilerState src s = CompilerState { compNameSrc = src
+                                       , compInit = []
                                        , compUserState = s }
 
 newtype CompilerM op s a = CompilerM (RWS (CompilerEnv op s) [PyStmt] (CompilerState s) a)
@@ -190,9 +205,6 @@ instance MonadFreshNames (CompilerM op s) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-
-
-
 collect :: CompilerM op s () -> CompilerM op s [PyStmt]
 collect m = pass $ do
   ((), w) <- listen m
@@ -202,6 +214,10 @@ collect' :: CompilerM op s a -> CompilerM op s (a, [PyStmt])
 collect' m = pass $ do
   (x, w) <- listen m
   return ((x, w), const mempty)
+
+atInit :: PyStmt -> CompilerM op s ()
+atInit x = modify $ \s ->
+  s { compInit = compInit s ++ [x] }
 
 stm :: PyStmt -> CompilerM op s ()
 stm x = tell [x]
@@ -272,9 +288,9 @@ data Constructor = Constructor [String] [PyStmt]
 emptyConstructor :: Constructor
 emptyConstructor = Constructor ["self"] [Pass]
 
-constructorToFunDef :: Constructor -> PyFunDef
-constructorToFunDef (Constructor params body) =
-  Def "__init__" params body
+constructorToFunDef :: Constructor -> [PyStmt] -> PyFunDef
+constructorToFunDef (Constructor params body) at_init =
+  Def "__init__" params $ body <> at_init
 
 compileProg :: MonadFreshNames m =>
                Maybe String
@@ -299,9 +315,12 @@ compileProg module_name constructor imports defines ops userstate pre_timing opt
             defines ++
             [Escape pyUtility] ++
             prog')
-  where constructor' = constructorToFunDef constructor
-        compileProg' = do
+  where compileProg' = do
           definitions <- mapM compileFunc funs
+          at_inits <- gets compInit
+
+          let constructor' = constructorToFunDef constructor at_inits
+
           case module_name of
             Just name -> do
               entry_points <- mapM compileEntryFun $ filter (Imp.functionEntry . snd) funs
@@ -860,6 +879,19 @@ compileCode (Imp.SetScalar vname exp1) = do
 
 compileCode Imp.DeclareMem{} = return ()
 compileCode Imp.DeclareScalar{} = return ()
+
+compileCode (Imp.DeclareArray name DefaultSpace t vs) = do
+  atInit $ Assign (Field (Var "self") name') $
+    simpleCall "unwrapArray"
+    [Call (Var "np.array")
+      [Arg $ List $ map compilePrimValue vs,
+       ArgKeyword "dtype" $ Var $ compilePrimToNp t]]
+  stm $ Assign (Var name') $ Field (Var "self") name'
+  where name' = compileName name
+
+compileCode (Imp.DeclareArray name (Space space) t vs) =
+  join $ asks envStaticArray <*>
+  pure name <*> pure space <*> pure t <*> pure vs
 
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code

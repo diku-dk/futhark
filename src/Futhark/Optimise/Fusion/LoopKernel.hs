@@ -23,7 +23,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Monoid
 import Data.List
---import Debug.Trace
 
 import Prelude
 
@@ -134,7 +133,7 @@ tryOptimizeSOAC :: Names -> [VName] -> SOAC -> Names -> FusedKer
                 -> TryFusion FusedKer
 tryOptimizeSOAC unfus_nms outVars soac consumed ker = do
   (soac', ots) <- optimizeSOAC Nothing soac mempty
-  let ker' = map (SOAC.addTransforms ots) (inputs ker) `setInputs` ker
+  let ker' = map (SOAC.addInitialTransforms ots) (inputs ker) `setInputs` ker
       outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
       ker'' = fixInputTypes outIdents ker'
   applyFusionRules unfus_nms outVars soac' consumed ker''
@@ -263,6 +262,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
         in (extra_nms, res_lam', new_inp)
 
   case (soac2, soac1) of
+    _ | SOAC.width soac1 /= SOAC.width soac2 -> fail "SOAC widths must match."
     ------------------------------
     -- Redomap-Redomap Fusions: --
     ------------------------------
@@ -644,7 +644,8 @@ pullRearrange soac ots = do
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
   if rearrangeReach perm <= mapDepth nest then do
     let -- Expand perm to cover the full extent of the input dimensionality
-        perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
+        perm' inp = take r perm ++ [length perm..r-1]
+          where r = SOAC.inputRank inp
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
         inputs' = map addPerm $ MapNest.inputs nest
     soac' <- MapNest.toSOAC $
