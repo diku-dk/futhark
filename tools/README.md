@@ -9,16 +9,24 @@ Emacs mode
 See the file `futhark-mode.el`.  This Emacs mode provides both syntax
 highlighting and automatic indentation.
 
-*Installation:* You can install this mode with Emacs' package manager.
-Enable the https://melpa.org/ archive, and install the `futhark-mode`
-package.  Alternatively, follow the manual install instructions in
-`futhark-mode.el`.
+### Installation
 
-Run `futhark-mode.el-corpus-test.sh` to test if the mode's
-auto-indentation works.  If you find pieces of code that futhark-mode
-cannot indent properly, please fix it, and put small examples into the
+You can install this mode with Emacs' package manager.  Enable the
+https://melpa.org/ archive, and install the `futhark-mode` package.
+Alternatively, add the following lines to your Emacs init file:
+
+    (add-to-list 'load-path "path/to/futhark/tools")
+    (require 'futhark-mode)
+
+
+### Testing
+
+Run `futhark-mode.el-corpus-test.sh` to test if the auto-indentation
+works.  If you find a piece of code that futhark-mode cannot indent
+properly, please fix it, and put a small example in the
 `futhark-mode.el-corpus` directory to ensure that it doesn't break in
 the future.
+
 
 ### Authors
 

@@ -3,6 +3,7 @@ module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
   , scalExpType
+  , scalExpSize
   , subExpToScalExp
   , toScalExp
   , expandScalExp
@@ -25,7 +26,6 @@ import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SSignum)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty hiding (pretty)
 
 -----------------------------------------------------------------
@@ -86,12 +86,6 @@ instance Num ScalExp where
   fromInteger = Val . IntValue . Int32Value . fromInteger -- probably not OK
   negate = SNeg
 
-instance IntegralExp ScalExp where
-  quot = SQuot
-  rem = SRem
-  div = SDiv
-  mod = SMod
-
 instance Pretty ScalExp where
   pprPrec _ (Val val) = ppr $ PrimVal val
   pprPrec _ (Id v _) = ppr v
@@ -109,12 +103,12 @@ instance Pretty ScalExp where
   pprPrec prec (SRem x y) = ppBinOp prec "%%" 5 10 x y
   pprPrec prec (SLogOr x y) = ppBinOp prec "||" 0 0 x y
   pprPrec prec (SLogAnd x y) = ppBinOp prec "&&" 1 1 x y
-  pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e 0
-  pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e 0
+  pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e (0::Int)
+  pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e (0::Int)
   pprPrec _ (MaxMin True es) = text "min" <> parens (commasep $ map ppr es)
   pprPrec _ (MaxMin False es) = text "max" <> parens (commasep $ map ppr es)
 
-ppBinOp :: Int -> String -> Int -> Int -> ScalExp -> ScalExp -> Doc
+ppBinOp :: (Pretty a, Pretty b) => Int -> String -> Int -> Int -> a -> b -> Doc
 ppBinOp p bop precedence rprecedence x y =
   parensIf (p > precedence) $
            pprPrec precedence x <+/>
@@ -165,6 +159,28 @@ scalExpType (SLogOr  _ _) = Bool
 scalExpType (RelExp  _ _) = Bool
 scalExpType (MaxMin _ []) = IntType Int32 -- arbitrary and probably wrong.
 scalExpType (MaxMin _ (e:_)) = scalExpType e
+
+-- | Number of nodes in the scalar expression.
+scalExpSize :: ScalExp -> Int
+scalExpSize Val{} = 1
+scalExpSize Id{} = 1
+scalExpSize (SNeg    e) = scalExpSize e
+scalExpSize (SNot    e) = scalExpSize e
+scalExpSize (SAbs    e) = scalExpSize e
+scalExpSize (SSignum e) = scalExpSize e
+scalExpSize (SPlus   x y) = scalExpSize x + scalExpSize y
+scalExpSize (SMinus  x y) = scalExpSize x + scalExpSize y
+scalExpSize (STimes  x y) = scalExpSize x + scalExpSize y
+scalExpSize (SDiv x y) = scalExpSize x + scalExpSize y
+scalExpSize (SMod x y)    = scalExpSize x + scalExpSize y
+scalExpSize (SPow x y) = scalExpSize x + scalExpSize y
+scalExpSize (SQuot x y) = scalExpSize x + scalExpSize y
+scalExpSize (SRem x y) = scalExpSize x + scalExpSize y
+scalExpSize (SLogAnd x y) = scalExpSize x + scalExpSize y
+scalExpSize (SLogOr  x y) = scalExpSize x + scalExpSize y
+scalExpSize (RelExp  _ x) = scalExpSize x
+scalExpSize (MaxMin _ []) = 0
+scalExpSize (MaxMin _ es) = sum $ map scalExpSize es
 
 -- | A function that checks whether a variable name corresponds to a
 -- scalar expression.

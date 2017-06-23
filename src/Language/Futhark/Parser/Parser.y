@@ -368,18 +368,18 @@ BindingBinOp :: { Name }
                    return name }
       | '-'   { nameFromString "-" }
 
-Fun     : let id many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '=' Exp
+Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
                $3 (fst $4 : snd $4) $7 loc
           }
 
-        | entry id many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '=' Exp
+        | entry id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind True name (fmap declaredType $5) NoInfo
                $3 (fst $4 : snd $4) $7 loc }
 
-        | let Param BindingBinOp Param maybeAscription(TypeExpDecl) '=' Exp
+        | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
           { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 $1
           }
 ;
@@ -391,10 +391,14 @@ Val : let id maybeAscription(TypeExpDecl) '=' Exp
       { let L _ (ID name) = $2
         in ValBind True name (fmap declaredType $3) NoInfo $5 $1 }
 
-SigTypeDecl :: { ([TypeDeclBase NoInfo Name], TypeDeclBase NoInfo Name) }
+Param :: { ParamBase NoInfo Name }
+       : '(' id ':' TypeExpDecl ')' { let L _ (ID v) = $2 in NamedParam v $4 $1 }
+       | TypeExpDecl                { UnnamedParam $1 }
+
+SigTypeDecl :: { ([ParamBase NoInfo Name], TypeDeclBase NoInfo Name) }
              : TypeExpDecl
                { ([], $1) }
-             | TypeExpDecl '->' SigTypeDecl
+             | Param '->' SigTypeDecl
                { let (ts, t) = $3 in ($1 : ts, t) }
 
 TypeExpDecl :: { TypeDeclBase NoInfo Name }
@@ -450,8 +454,8 @@ DimDecl :: { (DimDecl Name, SrcLoc) }
           { let L loc (INTLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
 
-Param :: { PatternBase NoInfo Name }
-Param : InnerPattern { $1 }
+FunParam :: { PatternBase NoInfo Name }
+FunParam : InnerPattern { $1 }
 
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
@@ -562,6 +566,7 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '<=...' Exp2   { binOp $1 $2 $3 }
      | Exp2 '>...' Exp2    { binOp $1 $2 $3 }
+     | Exp2 '>=...' Exp2   { binOp $1 $2 $3 }
 
      | Exp2 '>=' Exp2      { binOp $1 (L $2 (SYMBOL Geq [] (nameFromString ">="))) $3 }
      | Exp2 '>' Exp2       { binOp $1 (L $2 (SYMBOL Greater [] (nameFromString ">"))) $3 }
@@ -617,7 +622,7 @@ LetExp :: { UncheckedExp }
      | let many1(TypeParam) Pattern '=' Exp LetBody
                       { LetPat (fst $2 : snd $2) $3 $5 $6 $1 }
 
-     | let id many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '=' Exp LetBody
+     | let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2
          in LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7) $8 $1 }
 
@@ -700,7 +705,7 @@ Curry : Curry Atom
         { (fst $1, [$2], snd $1) }
 
 FunAbstr :: { UncheckedLambda }
-         : '(' '\\' many(TypeParam) many1(Param) maybeAscription(TypeExpDecl) '->' Exp ')'
+         : '(' '\\' many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '->' Exp ')'
            { AnonymFun $3 (fst $4 : snd $4) $7 $5 NoInfo $1 }
          | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }

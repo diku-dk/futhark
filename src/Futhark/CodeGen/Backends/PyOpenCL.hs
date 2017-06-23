@@ -81,6 +81,7 @@ compileProg module_name prog = do
                      , Py.opsReadScalar = readOpenCLScalar
                      , Py.opsAllocate = allocateOpenCLBuffer
                      , Py.opsCopy = copyOpenCLMemory
+                     , Py.opsStaticArray = staticOpenCLArray
                      , Py.opsEntryOutput = packArrayOutput
                      , Py.opsEntryInput = unpackArrayInput
                      }
@@ -208,6 +209,38 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
+
+staticOpenCLArray :: Py.StaticArray Imp.OpenCL ()
+staticOpenCLArray name "device" t vs = do
+  mapM_ Py.atInit <=< Py.collect $ do
+    -- Create host-side Numpy array with intended values.
+    Py.stm $ Assign (Var name') $
+      Call (Var "np.array")
+      [Arg $ List $ map Py.compilePrimValue vs,
+       ArgKeyword "dtype" $ Var $ Py.compilePrimToNp t]
+
+    -- Create memory block on the device.
+    static_mem <- newVName "static_mem"
+    let size = Constant $ IntValue $ Int32Value $
+               genericLength vs * primByteSize t
+    allocateOpenCLBuffer static_mem size "device"
+
+    -- Copy Numpy array to the device memory block.
+    Py.stm $ ifNotZeroSize size $
+      Exp $ Call (Var "cl.enqueue_copy")
+      [Arg $ Var "self.queue",
+       Arg $ Var $ Py.compileName static_mem,
+       Arg $ Call (Var "normaliseArray") [Arg (Var name')],
+       ArgKeyword "is_blocking" $ Var "synchronous"]
+
+    -- Store the memory block for later reference.
+    Py.stm $ Assign (Field (Var "self") name') $
+      Var $ Py.compileName static_mem
+
+  Py.stm $ Assign (Var name') (Field (Var "self") name')
+  where name' = Py.compileName name
+staticOpenCLArray _ space _ _ =
+  fail $ "PyOpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
 packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims =

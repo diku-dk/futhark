@@ -5,6 +5,7 @@ module Futhark.Internalise.Monad
   , throwError
   , VarSubstitutions
   , DecSubstitutions
+  , ModParamSubstitutions
   , PromisedNames
   , InternaliseEnv (..)
   , ConstParams
@@ -104,7 +105,7 @@ type FunInfo = (Name, ConstParams, Closure,
 
 type FunTable = M.Map VName FunBinding
 
-data ModBinding = ModBinding DecSubstitutions E.ModExp
+data ModBinding = ModBinding ModParamSubstitutions E.ModExp
                 deriving (Show)
 
 type TypeEntry = (DecSubstitutions, [E.TypeParam], E.StructType)
@@ -117,6 +118,10 @@ type VarSubstitutions = M.Map VName [SubExp]
 
 -- | Mapping from original top-level names to new top-level names.
 type DecSubstitutions = M.Map VName VName
+
+-- | Mapping from original top-level names to new top-level names, for
+-- things bound in a module parameter.
+type ModParamSubstitutions = M.Map VName VName
 
 -- | Mapping from what we think somethings name is, to what we would
 -- like to use it as.
@@ -257,10 +262,11 @@ lookupPromise name = do
 
 fulfillingPromise :: VName -> InternaliseM VName
 fulfillingPromise name = do
-  promises <- asks envPromises
-  if M.null promises
+  in_functor <- asks envGeneratingFunctor
+  if not in_functor
     then return name
-    else do name' <- newName name
+    else do promises <- asks envPromises
+            name' <- newName name
             noteDecSubsts $ M.singleton name name'
             fulfill name' name promises
             return name'
@@ -289,8 +295,9 @@ noteFunction fname generate =
   modify $ \s -> s { stateFtable = M.singleton fname entry <> stateFtable s }
   where entry = FunBinding mempty generate
 
-noteMod :: VName -> DecSubstitutions -> E.ModExp -> InternaliseM ()
-noteMod name substs me =
+noteMod :: VName -> E.ModExp -> InternaliseM ()
+noteMod name me = do
+  substs <- asks envFunctorSubsts
   modify $ \s -> s { stateModTable = M.insert name (ModBinding substs me) $ stateModTable s }
 
 noteType :: VName -> TypeEntry -> InternaliseM ()
@@ -315,21 +322,32 @@ noteDecSubsts substs =
   modify $ \s -> s { stateDecSubsts = substs <> stateDecSubsts s }
 
 morePromises :: M.Map VName VName -> InternaliseM a -> InternaliseM a
-morePromises substs =
-  local $ \env -> env { envPromises = promises <> envPromises env
-                      , envGeneratingFunctor = True
-                      }
-  where promises = M.fromList $ map (uncurry $ flip (,)) $ M.toList substs
+morePromises substs m = do
+  mapM_ (uncurry maybeForwardPromise <=< traverse lookupPromise) rev_substs
+  local (\env -> env { envPromises = M.fromList rev_substs <> envPromises env
+                     , envGeneratingFunctor = True
+           }) m
+  where rev_substs = map (uncurry $ flip (,)) $ M.toList substs
+        maybeForwardPromise k v = do
+          maybe_k <- asks $ M.lookup k . envFunctorSubsts
+          case maybe_k of
+            Just k_v ->
+              -- This means we are expected to make 'k' available under the
+              -- name 'v', but 'k' is actually bound by a functor parameter,
+              -- so we can't access its definition (which is 'k_v').  Thus, we
+              -- note that 'v', when seen, should be turned into 'k_v'.
+              noteDecSubsts $ M.singleton v k_v
+            Nothing -> return ()
 
-generatingFunctor :: DecSubstitutions
+generatingFunctor :: ModParamSubstitutions
                   -> PromisedNames
                   -> InternaliseM a -> InternaliseM a
 generatingFunctor p_substs b_substs m = do
   cur_substs <- allSubsts
 
   let forward (k,v)
-        | Just v' <- M.lookup k cur_substs = Just (v',v)
-        | otherwise                        = Nothing
+        | Just v' <- M.lookup k cur_substs, v /= v' = Just (v',v)
+        | otherwise                                 = Nothing
       contras = M.fromList $ mapMaybe forward $ M.toList b_substs
       forwards = M.fromList $ mapMaybe forward $ M.toList p_substs
 

@@ -58,6 +58,7 @@ module Language.Futhark.Syntax
   , StreamForm(..)
 
   -- * Module language
+  , ParamBase(..)
   , SpecBase(..)
   , SigExpBase(..)
   , TypeRefBase(..)
@@ -159,6 +160,9 @@ data PrimValue = SignedValue !IntValue
 
 class IsPrimValue v where
   primValue :: v -> PrimValue
+
+instance IsPrimValue Int where
+  primValue = SignedValue . Int32Value . fromIntegral
 
 instance IsPrimValue Int8 where
   primValue = SignedValue . Int8Value
@@ -434,6 +438,9 @@ data TypeDeclBase f vn =
                              -- ^ The type deduced by the type checker.
            }
 deriving instance Showable f vn => Show (TypeDeclBase f vn)
+
+instance Located (TypeDeclBase f vn) where
+  locOf = locOf . declaredType
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking an argument of type
@@ -840,9 +847,17 @@ typeParamName :: TypeParamBase vn -> vn
 typeParamName (TypeParamDim v _)  = v
 typeParamName (TypeParamType v _) = v
 
+data ParamBase f vn = NamedParam vn (TypeDeclBase f vn) SrcLoc
+                    | UnnamedParam (TypeDeclBase f vn)
+deriving instance Showable f vn => Show (ParamBase f vn)
+
+instance Located (ParamBase f vn) where
+  locOf (NamedParam _ _ loc) = locOf loc
+  locOf (UnnamedParam t)     = locOf t
+
 data SpecBase f vn = ValSpec  { specName       :: vn
                               , specTypeParams :: [TypeParamBase vn]
-                              , specParams     :: [TypeDeclBase f vn]
+                              , specParams     :: [ParamBase f vn]
                               , specRettype    :: TypeDeclBase f vn
                               , specLocation   :: SrcLoc
                               }

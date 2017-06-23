@@ -1,5 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 -- | Merge memory blocks where possible.
+--
+-- Enable by setting the environment variable MEMORY_BLOCK_MERGING=1.
 module Futhark.Pass.MemoryBlockMerging
   ( mergeMemoryBlocks
   ) where
@@ -33,7 +35,7 @@ usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
 mergeMemoryBlocks :: Pass ExpMem.ExplicitMemory ExpMem.ExplicitMemory
 mergeMemoryBlocks = simplePass
                     "merge memory blocks"
-                    "Transform program to reuse non-interfering memory blocks"
+                    "Transform program to coalesce memory blocks"
                     transformProg
 
 
