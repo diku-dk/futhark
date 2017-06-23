@@ -3,10 +3,13 @@
 -- input { [0, 3, 5, 7, 9, 11] }
 -- output { [0i32, 384i32, 640i32, 896i32, 1152i32, 1408i32, 14i32, 18i32, 22i32] }
 
+import "/futlib/array"
+
 let main(x: [#n]i32): []i32 =
   let y = map (*2) x in
   let y'= reshape (2,n/2) y
-  loop(a=y) = for i < n do
+  let ylu = copy y
+  loop(a=ylu) = for i < n do
       let b = map (*2) a
       let c = map (+ (b[0])) b
       let d = map (+ (c[0])) c
