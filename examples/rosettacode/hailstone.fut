@@ -34,7 +34,7 @@ let hailstone_seq(x: i32): []i32 =
   let i = 1
   let steps = replicate capacity (-1)
   let steps[0] = x
-  let (_,_,steps,_) = loop ((capacity,i,steps,x)) while x != 1 do
+  let (_,i,steps,_) = loop ((capacity,i,steps,x)) while x != 1 do
     let (steps, capacity) =
       if i == capacity then
         (concat steps (replicate capacity (-1)),
