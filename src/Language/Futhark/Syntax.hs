@@ -790,6 +790,7 @@ data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
                                 , funBindParams     :: [PatternBase f vn]
                                 , funBindBody       :: ExpBase f vn
                                 , funBindLocation   :: SrcLoc
+                                , funBindDoc        :: Maybe String
                                 }
 deriving instance Showable f vn => Show (FunBindBase f vn)
 
@@ -804,6 +805,7 @@ data ValBindBase f vn = ValBind { constBindEntryPoint :: Bool
                                 , constBindType     :: f (StructTypeBase vn)
                                 , constBindDef      :: ExpBase f vn
                                 , constBindLocation :: SrcLoc
+                                , constDoc          :: Maybe String
                                 }
 deriving instance Showable f vn => Show (ValBindBase f vn)
 
@@ -815,6 +817,7 @@ data TypeBindBase f vn = TypeBind { typeAlias        :: vn
                                   , typeParams       :: [TypeParamBase vn]
                                   , typeExp          :: TypeDeclBase f vn
                                   , typeBindLocation :: SrcLoc
+                                  , typeDoc          :: Maybe String
                                   }
 deriving instance Showable f vn => Show (TypeBindBase f vn)
 
@@ -848,19 +851,20 @@ data SpecBase f vn = ValSpec  { specName       :: vn
                               , specParams     :: [ParamBase f vn]
                               , specRettype    :: TypeDeclBase f vn
                               , specLocation   :: SrcLoc
+                              , specDoc        :: Maybe String
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
-                   | TypeSpec vn [TypeParamBase vn] SrcLoc -- ^ Abstract type.
+                   | TypeSpec vn [TypeParamBase vn] SrcLoc (Maybe String) -- ^ Abstract type.
                    | ModSpec vn (SigExpBase f vn) SrcLoc
                    | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ _ loc) = locOf loc
-  locOf (TypeAbbrSpec tbind)  = locOf tbind
-  locOf (TypeSpec _ _ loc)    = locOf loc
-  locOf (ModSpec _ _ loc)     = locOf loc
-  locOf (IncludeSpec _ loc)   = locOf loc
+  locOf (ValSpec _ _ _ _ loc _) = locOf loc
+  locOf (TypeAbbrSpec tbind)    = locOf tbind
+  locOf (TypeSpec _ _ loc _)      = locOf loc
+  locOf (ModSpec _ _ loc)       = locOf loc
+  locOf (IncludeSpec _ loc)     = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigParens (SigExpBase f vn) SrcLoc
@@ -883,6 +887,7 @@ instance Located (SigExpBase f vn) where
 data SigBindBase f vn = SigBind { sigName :: vn
                                 , sigExp  :: SigExpBase f vn
                                 , sigLoc  :: SrcLoc
+                                , sigDoc  :: Maybe String
                                 }
 deriving instance Showable f vn => Show (SigBindBase f vn)
 

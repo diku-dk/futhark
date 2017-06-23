@@ -127,6 +127,7 @@ readEvalPrint = do
                                 , funBindParams = []
                                 , funBindBody = e
                                 , funBindLocation = noLoc
+                                , funBindDoc = Nothing
                                 }
               prog' = Prog $ opens ++ [FunDec mainfun]
           runProgram prog imports src prog'
