@@ -358,24 +358,6 @@ typeParamIdent (TypeParamDim v loc) =
 typeParamIdent TypeParamType{} =
   Nothing
 
--- | A hack that also binds the names in the name map.  This is useful
--- if the same names are visible in two entirely different expressions
--- (e.g. for do loops).
-bindingAlsoIdents :: [Ident] -> TermTypeM a -> TermTypeM a
-bindingAlsoIdents idents body = do
-  let varnames = map ((Term,) . baseName . identName) idents
-      substs   = map identName idents
-  bindNameMap (M.fromList (zip varnames substs)) $
-    binding idents body
-
--- | Like 'bindingAlsoIdents', but for 'TypeParam's.
-bindingAlsoTypeParams :: [TypeParam] -> TermTypeM a -> TermTypeM a
-bindingAlsoTypeParams tparams body =
-  bindNameMap (M.fromList $ map typeParamSpace tparams) $
-  bindingTypeParams tparams body
-  where typeParamSpace (TypeParamDim vn _) = ((Term, baseName vn), vn)
-        typeParamSpace (TypeParamType vn _) = ((Type, baseName vn), vn)
-
 bindingIdent :: IdentBase NoInfo Name -> Type -> (Ident -> TermTypeM a)
              -> TermTypeM a
 bindingIdent (Ident v NoInfo vloc) t m =
@@ -877,8 +859,8 @@ checkExp (Concat i arr1exp arr2exps loc) = do
           | otherwise = return ()
           where t = typeOf e
 
-checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
-  (mergeexp', mergeflow) <- collectOccurences $ checkExp mergeexp
+checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
+  sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
 
   noTypeParamsPermitted tparams
 
@@ -889,7 +871,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
   --
   -- Play a little with occurences to ensure it does not look like
   -- none of the merge variables are being used.
-  (((tparams', mergepat', form', loopbody'), bodyflow), freeflow) <-
+  ((tparams', mergepat', form', loopbody'), bodyflow) <-
     case form of
       For dir lboundexp i uboundexp -> do
         uboundexp' <- require anySignedType =<< checkExp uboundexp
@@ -900,7 +882,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
                 e' <- require anySignedType =<< checkExp e
                 void $ unifyExpTypes e' uboundexp'
                 return $ ExpBound e'
-        collectOccurences $ bindingIdent i (typeOf uboundexp') $ \i' ->
+        bindingIdent i (typeOf uboundexp') $ \i' ->
           noUnique $ bindingPattern tparams mergepat
           (Ascribed $ vacuousShapeAnnotations $ typeOf mergeexp' `setAliases` mempty) $
           \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
@@ -910,8 +892,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
                     For dir lboundexp' i' uboundexp',
                     loopbody')
       While cond ->
-        noUnique $ collectOccurences $
-        bindingPattern tparams mergepat
+        noUnique $ bindingPattern tparams mergepat
         (Ascribed $ vacuousShapeAnnotations $
           typeOf mergeexp' `setAliases` mempty) $ \tparams' mergepat' ->
         onlySelfAliasing $ tapOccurences $
@@ -986,21 +967,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
         zipWithM_ consumeMerge pats ts
       consumeMerge _ _ =
         return ()
-  ((), merge_consume) <-
-    collectOccurences $ consumeMerge mergepat'' $ typeOf mergeexp'
-
-  let loopOccur = do
-        occur $ mergeflow `seqOccurences` merge_consume `seqOccurences` freeflow
-        mapM_ observe $ S.toList $ patIdentSet mergepat''
-
-  bindingAlsoTypeParams tparams' $
-    bindingAlsoIdents (S.toList (patIdentSet mergepat'')) $ do
-      -- It is OK for merge parameters to not occur here, because they
-      -- might be useful for the loop body.
-      letbody' <- sequentially loopOccur $ \_ _ -> checkExp letbody
-      return $ DoLoop tparams' mergepat'' mergeexp'
-                      form'
-                      loopbody' letbody' loc
+  consumeMerge mergepat'' $ typeOf mergeexp'
+  return $ DoLoop tparams' mergepat'' mergeexp' form' loopbody' loc
 
 checkSOACArrayArg :: ExpBase NoInfo Name
                   -> TermTypeM (Exp, Arg)

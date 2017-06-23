@@ -242,13 +242,12 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "split@" <> ppr i <+> pprPrec 10 e <+> pprPrec 10 a
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
-  pprPrec _ (DoLoop tparams pat initexp form loopbody letbody _) =
+  pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
     text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals
                             <+> ppr initexp) <+> equals <+>
     ppr form <+>
     text "do" </>
-    indent 2 (ppr loopbody) <+> text "in" </>
-    ppr letbody
+    indent 2 (ppr loopbody)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
   ppr (RecordField name e _) = ppr name <> equals <> ppr e

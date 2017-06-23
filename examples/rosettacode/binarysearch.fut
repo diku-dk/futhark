@@ -9,7 +9,7 @@
 let main(as: [#n]i32, value: i32): i32 =
   let low = 0
   let high = n-1
-  loop ((low,high)) = while low <= high do
+  let (low, _) = loop ((low,high)) while low <= high do
     -- invariants: value > as[i] for all i < low
     --             value < as[i] for all i > high
     let mid = (low+high) / 2

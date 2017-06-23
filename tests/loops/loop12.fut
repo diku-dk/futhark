@@ -9,6 +9,6 @@
 -- input { 3 [1] } output { 8 }
 
 let main (n: i32) (as: []i32): i32 =
-  loop (as) = for _i < n do
+  let as = loop (as) for _i < n do
     concat as as
   in (shape as)[0]

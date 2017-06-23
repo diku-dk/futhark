@@ -20,7 +20,7 @@ import "/futlib/array"
 let main(y: *[#n][#n][#n]i32, a : [#n][#n]i32): *[n][n][n]i32 =
   let y[0,0,0] = 9
   let a0 = copy(a)
-  loop(a1 = a0) = for i < n do
+  let a1 = loop(a1 = a0) for i < n do
     let x = map (+1) (a1[i])
     let a1[i] = x
     in  a1

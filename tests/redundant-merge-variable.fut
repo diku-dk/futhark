@@ -5,8 +5,7 @@
 -- structure { DoLoop/Negate 0 }
 
 let main(a: *[]i32, b: *[]i32, n: i32): []i32 =
-  loop ((a,b)) = for i < n do
-    let a[i] = a[i] + 1
-    let b[i] = -b[i] in
-    (a,b) in
-  a
+  #1 (loop ((a,b)) for i < n do
+        let a[i] = a[i] + 1
+        let b[i] = -b[i]
+        in (a,b))

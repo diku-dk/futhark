@@ -10,7 +10,7 @@
 import "/futlib/array"
 
 let Gauss_Jordan (A: [#n][#m]f32): [n][m]f32 =
-  loop (A) = for i < n do
+  loop (A) for i < n do
     let irow = A[0]
     let Ap = A[1:n]
     let v1 = irow[i]
@@ -20,7 +20,6 @@ let Gauss_Jordan (A: [#n][#m]f32): [n][m]f32 =
                     in map (\x y -> y - scale * x) irow jrow)
                  Ap
     in concat Ap ([irow])
-  in A
 
 let linear_solve (A: [#n][#m]f32) (b: [#n]f32): [n]f32 =
   -- Pad the matrix with b.

@@ -11,9 +11,8 @@
 let main(): ([]f64, []f64) =
   let n = 10 in
   loop (looparr = (replicate n 0.0,
-                   replicate n 0.0)) = for i < n  do
+                   replicate n 0.0)) for i < n  do
     let (a, b) = looparr
     let a[ i ] = 0.0
     let b[ i ] = 0.0 in
     (a, b)
-  in looparr

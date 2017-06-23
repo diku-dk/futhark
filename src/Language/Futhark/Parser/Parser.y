@@ -471,11 +471,17 @@ QualUnOpName :: { (QualName Name, SrcLoc) }
 -- array slices).
 Exp :: { UncheckedExp }
      : Exp ':' TypeExpDecl { Ascript $1 $3 $2 }
-     | Exp2 %prec ':'          { $1 }
+     | Exp2 %prec ':'      { $1 }
 
 Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
+
+     | loop '(' many(TypeParam) Pattern ')' LoopForm do Exp %prec ifprec
+         {% fmap (\t -> DoLoop $3 $4 t $6 $8 $1) (patternExp $4) }
+
+     | loop '(' many(TypeParam) Pattern '=' Exp ')' LoopForm do Exp %prec ifprec
+         { DoLoop $3 $4 $6 $8 $10 $1 }
 
      | LetExp %prec letprec { $1 }
 
@@ -629,11 +635,6 @@ LetExp :: { UncheckedExp }
      | let VarSlice '=' Exp LetBody
                       { let (v,slice,loc) = $2; ident = Ident v NoInfo loc
                         in LetWith ident ident slice $4 $5 loc }
-
-     | loop '(' many(TypeParam) Pattern ')' '=' LoopForm do Exp LetBody
-       {% fmap (\t -> DoLoop $3 $4 t $7 $9 $10 $1) (patternExp $4) }
-     | loop '(' many(TypeParam) Pattern '=' Exp ')' '=' LoopForm do Exp LetBody
-       { DoLoop $3 $4 $6 $9 $11 $12 $1 }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }

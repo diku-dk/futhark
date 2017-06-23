@@ -575,7 +575,6 @@ data ExpBase f vn =
               (ExpBase f vn) -- Initial values of merge variables.
               (LoopFormBase f vn) -- Do or while loop.
               (ExpBase f vn) -- Loop body.
-              (ExpBase f vn) -- Let-body.
               SrcLoc
 
             | BinOp (QualName vn)
@@ -719,7 +718,7 @@ instance Located (ExpBase f vn) where
   locOf (Partition _ _ pos)      = locOf pos
   locOf (Split _ _ _ pos)        = locOf pos
   locOf (Concat _ _ _ pos)       = locOf pos
-  locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
+  locOf (DoLoop _ _ _ _ _ pos)   = locOf pos
   locOf (Stream _ _ _  pos)      = locOf pos
   locOf (Unsafe _ loc)           = locOf loc
 

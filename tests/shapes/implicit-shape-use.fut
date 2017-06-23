@@ -28,8 +28,7 @@ let brownianBridgeDates (bb_inds: [3][#num_dates]i32)
     let bbrow = replicate num_dates 0.0
     let bbrow[ bi[0]-1 ] = sd[0] * gauss[0] in
 
-    loop (bbrow) =
-        for i < num_dates-1 do  -- use i+1 since i in 1 .. num_dates-1
+    let bbrow = loop (bbrow) for i < num_dates-1 do  -- use i+1 since i in 1 .. num_dates-1
             unsafe
             let j  = li[i+1] - 1
             let k  = ri[i+1] - 1
@@ -46,12 +45,11 @@ let brownianBridgeDates (bb_inds: [3][#num_dates]i32)
 
         -- This can be written as map-reduce, but it
         --   needs delayed arrays to be mapped nicely!
-    in loop (bbrow) =
+    in loop (bbrow)
         for ii < num_dates-1 do
             let i = num_dates - (ii+1)
             let bbrow[i] = bbrow[i] - bbrow[i-1]
             in  bbrow
-       in bbrow
 
 let brownianBridge (num_und:
                 i32,

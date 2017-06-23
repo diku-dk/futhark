@@ -174,7 +174,7 @@ literals and variables, but also more complicated forms.
       : | "let" `type_param`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
-      : | "loop" "(" `type_param`* `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
+      : | "loop" "(" `type_param`* `pat` [("=" `exp`)] ")" `loopform` "do" `exp`
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
@@ -467,7 +467,7 @@ If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
 
 Evaluate ``e`` and bind the result to the pattern ``pat`` while
 evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
-``let`` or ``loop`` expression. See also `Shape Declarations`_.
+``let`` expression. See also `Shape Declarations`_.
 
 ``let a[i] = v in body``
 ........................................
@@ -486,19 +486,17 @@ aliasing any free variables in ``e``.  The function is not in scope of
 itself, and hence cannot be recursive.  See also `Shape
 Declarations`_.
 
-``loop (pat = initial) = for i < bound do loopbody in body``
+``loop (pat = initial) for i < bound do loopbody``
 ............................................................
 
 The name ``i`` is bound here and initialised to zero.
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
-2. While ``i < bound``, evaluate ``loopbody``, rebinding ``pat`` to be
-   the value returned by the body, increasing ``i`` by one after each
-   iteration.
+2. If ``i < bound``, bind ``pat`` to the result of evaluating
+   ``loopbody``, increase ``i`` by one, and repeat the step.
 
-3. Evaluate ``body`` with ``pat`` bound to its final
-   value.
+3. Return the final value of ``pat``.
 
 The ``= initial`` can be left out, in which case initial values for
 the pattern are taken from equivalently named variables in the
@@ -507,15 +505,15 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 
 See also `Shape Declarations`_.
 
-``loop (pat = initial) = while cond do loopbody in body``
+``loop (pat = initial) = while cond do loopbody``
 ............................................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
-2. While ``cond`` evaluates to true, evaluate ``loopbody``, rebinding
-   ``pat`` to be the value returned by the body.
+2. If ``cond`` evaluates to true, bind ``pat`` to the result of
+   evaluating ``loopbody``, and repeat the step.
 
-3. Evaluate ``body`` with ``pat`` bound to its final value.
+3. Return the final value of ``pat``.
 
 See also `Shape Declarations`_.
 
@@ -973,9 +971,8 @@ modules.  For example::
 
   module Times(M: Addable) = {
     let times (x: M.t) (k: int): M.t =
-      loop (x' = x) = for i < k do
+      loop (x' = x) for i < k do
         T.add x' x
-      in x'
   }
 
 We can instantiate ``Times`` with any module that fulfills the module

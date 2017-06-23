@@ -6,8 +6,7 @@
 -- output { empty(i32) }
 
 let main(l: i32, a: [#n]i32): []i32 =
-  loop (b = replicate (n-l) 0) = for n > i >= l do
+  loop (b = replicate (n-l) 0) for n > i >= l do
     let j = n - i - 1
-    let b[j] = a[i] in
-    b
-  in b
+    let b[j] = a[i]
+    in b

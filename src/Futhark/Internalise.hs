@@ -469,7 +469,7 @@ internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, bo
   internaliseFunBind $ E.FunBind False ofname retdecl (Info rettype) tparams params body loc
   internaliseExp desc letbody
 
-internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody letbody loc) = do
+internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody _) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
   mergeinit_ts <- mapM subExpType mergeinit
 
@@ -505,7 +505,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody letbody lo
     E.While cond ->
       return (id, Right cond)
 
-  (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
+  (loopbody', (form', shapepat, mergepat', mergeinit', pre_bnds)) <-
     wrap $ bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
     mapM_ (uncurry internaliseDimConstant) mergecm
     internaliseBodyStms loopbody $ \ses -> do
@@ -528,7 +528,6 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody letbody lo
                       (I.ForLoop i' it bound,
                        shapepat,
                        mergepat',
-                       id,
                        mergeinit,
                        []))
             t ->
@@ -562,7 +561,6 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody letbody lo
                   (I.WhileLoop $ I.paramName loop_while,
                    shapepat,
                    loop_while : mergepat',
-                   addAnother,
                    loop_initial_cond : mergeinit,
                    init_loop_cond_bnds))
 
@@ -576,17 +574,10 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody letbody lo
                 mergeinit_ts'
       ctxmerge = zip shapepat ctxinit
       valmerge = zip mergepat' mergeinit'
-      loop = I.DoLoop ctxmerge valmerge form' loopbody'
-  loopt <- I.expExtType loop
-  bindingPattern tparams (frob mergepat) loopt $ \cm mergepat_names match -> do
-    mapM_ (uncurry internaliseDimConstant) cm
-    loop_res <- match loc . map I.Var =<< letTupExp "loop_res" loop
-    forM_ (zip mergepat_names loop_res) $ \(v,se) ->
-      letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
-    internaliseExp desc letbody
-
-  where addAnother t =
-          TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
+      dropCond = case form of E.For{} -> id
+                              E.While{} -> drop 1
+  loop_res <- letTupExp desc $ I.DoLoop ctxmerge valmerge form' loopbody'
+  return $ map I.Var $ dropCond loop_res
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $

@@ -18,6 +18,5 @@ let step(xs: [#n]i32): [n]i32 =
   in xs'
 
 let main(xs: [#n]i32): [n]i32 =
-  loop (xs) = for i < 2 do
+  loop (xs) for i < 2 do
     step(xs)
-  in xs
