@@ -14,14 +14,21 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.CodeGen.OpenCL.Kernels
+import Futhark.Util (chunk)
 
 openClDecls :: Int -> [String] -> String -> String
             -> [C.Definition]
 openClDecls block_dim kernel_names opencl_program opencl_prelude =
-  openclPrelude ++ openclBoilerplate ++ kernelDeclarations
-  where kernelDeclarations =
-          [C.cedecl|static const char fut_opencl_prelude[] = $string:opencl_prelude;|] :
-          [C.cedecl|static const char fut_opencl_program[] = $string:opencl_program;|] :
+  openCL_prelude ++ openCL_boilerplate ++ kernel_declarations
+  where opencl_program_fragments =
+          -- Some C compilers limit the size of literal strings, so
+          -- chunk the entire program into small bits here, and
+          -- concatenate it again at runtime.
+          [ [C.cinit|$string:s|] | s <- chunk 2000 (opencl_prelude++opencl_program) ]
+        nullptr = [C.cinit|NULL|]
+        kernel_declarations =
+          [C.cedecl|static const char *fut_opencl_program[] =
+                    {$inits:(opencl_program_fragments++[nullptr])};|] :
           concat
           [ [ [C.cedecl|static typename cl_kernel $id:name;|]
             , [C.cedecl|static int $id:(kernelRuntime name) = 0;|]
@@ -31,7 +38,7 @@ openClDecls block_dim kernel_names opencl_program opencl_prelude =
           [[C.cedecl|
 void setup_opencl_and_load_kernels() {
   typename cl_int error;
-  typename cl_program prog = setup_opencl(fut_opencl_prelude, fut_opencl_program);
+  typename cl_program prog = setup_opencl(fut_opencl_program);
 
   // Load all the kernels.
   $stms:(map (loadKernelByName) kernel_names)
@@ -40,11 +47,11 @@ void post_opencl_setup(struct opencl_device_option *option) {
   $stms:(map lockstepWidthHeuristicsCode lockstepWidthHeuristicsTable)
 }|]]
 
-        openclPrelude = [ [C.cedecl|$esc:("#define FUT_BLOCK_DIM " ++ show block_dim)|] ]
+        openCL_prelude = [ [C.cedecl|$esc:("#define FUT_BLOCK_DIM " ++ show block_dim)|] ]
 
-        opencl_h = $(embedStringFile "rts/c/opencl.h")
+        openCL_h = $(embedStringFile "rts/c/opencl.h")
 
-        openclBoilerplate = [C.cunit|$esc:opencl_h|]
+        openCL_boilerplate = [C.cunit|$esc:openCL_h|]
 
 loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
