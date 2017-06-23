@@ -9,6 +9,4 @@
 -- }
 
 let main(xs: []i32, n: i32): []i32 =
-  loop (xs) = for i < n do
-    concat xs xs
-  in xs
+  loop (xs) for i < n do concat xs xs

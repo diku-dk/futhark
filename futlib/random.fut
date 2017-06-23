@@ -77,9 +77,10 @@ module linear_congruential_engine (T: integral) (P: {
     in (rng',rng')
 
   let rng_from_seed [n] (seed: [n]i32) =
-    loop (seed' = T.from_i32 1) = for i < n do
-      ((seed' T.>>> T.from_i32 16) T.^ seed') T.^
-      T.from_i32 (seed[i] ^ 0b1010101010101)
+    let seed' =
+      loop (seed' = T.from_i32 1) for i < n do
+        ((seed' T.>>> T.from_i32 16) T.^ seed') T.^
+        T.from_i32 (seed[i] ^ 0b1010101010101)
     in #1 (rand seed')
 
   let split_rng (n: i32) (x: rng): [n]rng =
@@ -104,11 +105,10 @@ module xorshift128plus: rng_engine with int.t = u64 = {
     in ((new_x,new_y), new_y + y)
 
   let rng_from_seed [n] (seed: [n]i32) =
-    loop ((a,b) = (1u64,u64.from_i32 n)) = for i < n do
+    loop ((a,b) = (1u64,u64.from_i32 n)) for i < n do
       if n % 2 == 0
       then #1 (rand (a^u64.from_i32 (hash seed[i]),b))
       else #1 (rand (a, b^u64.from_i32 (hash seed[i])))
-    in (a,b)
 
   let split_rng (n: i32) ((x,y): rng): [n]rng =
     map (\i -> let (a,b) = #1 (rand (rng_from_seed [hash (i^n)]))
@@ -157,10 +157,9 @@ module shuffle_order_engine
 
   let build_table (rng: E.rng) =
     let xs = replicate K.k (I.from_i32 0)
-    loop ((rng,xs)) = for i < K.k do
-      (let (rng,x) = E.rand rng
-       in (rng, xs with [i] <- x))
-    in (rng, xs)
+    in loop ((rng,xs)) for i < K.k do
+         let (rng,x) = E.rand rng
+         in (rng, xs with [i] <- x)
 
   let rng_from_seed (xs: []i32) =
     let rng = E.rng_from_seed xs
@@ -208,8 +207,8 @@ module uniform_int_distribution
     in if range E.int.<= E.int.from_i32 0
        then (rng, to_D E.min) -- Avoid infinite loop below.
        else let secure_max = E.max E.int.- E.max E.int.%% range
-            loop ((rng, x) = E.rand rng) =
-              while x E.int.>= secure_max do E.rand rng
+            let (rng,x) = loop ((rng, x) = E.rand rng)
+                          while x E.int.>= secure_max do E.rand rng
             in (rng, to_D (min E.int.+ x E.int./ (secure_max E.int./ range)))
 }
 

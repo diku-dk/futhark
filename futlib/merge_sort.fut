@@ -11,7 +11,7 @@ module mk_merge_sort(C: {
 } = {
   let log2 (n: i32) : i32 =
     let r = 0
-    loop ((r,n)) = while 1 < n do
+    let (r, _) = loop ((r,n)) while 1 < n do
       let n = n / 2
       let r = r + 1
       in (r,n)
@@ -46,10 +46,7 @@ module mk_merge_sort(C: {
   -- using that for the padding.  Then we know that the padding will
   -- all be at the end, so we can easily cut it off.
   let merge_sort [n] (data: [n]C.t): *[n]C.t =
-    let (data, d) = ensure_pow_2 data
-    loop (data) = for i < d do
-      loop (data) = for j < i+1 do
-         kernel_par data i j
-      in data
-    in #1 (split n data)
+    let (data, d) = ensure_pow_2 data in
+    #1 (split n (loop (data) for i < d do
+                   loop (data) for j < i+1 do kernel_par data i j))
 }

@@ -127,8 +127,7 @@ let main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f3
                  map (\(x: []f32) (y: []f32): [nfeatures]f32  ->
                            map (+) x y) acc elem) (
                  \(inp: [#chunk]([#nfeatures]f32,i32)): *[nclusters][nfeatures]f32  ->
-                   loop (acc = replicate nclusters (replicate nfeatures 0.0f32)) = for i < chunk do
+                   loop (acc = replicate nclusters (replicate nfeatures 0.0f32)) for i < chunk do
                      let (point, c) = inp[i] in
                      unsafe let acc[c] = map (+) (acc[c]) (map (/f32(features_in_cluster[c])) point) in
-                     acc in
-                   acc) (zip points membership)
+                     acc) (zip points membership)

@@ -27,12 +27,10 @@ let nextrQ(lastr: f32, wq: f32): f32 =
   lastr + kappa() * (thetaQ() - lastr) + sigma() * wq
 
 let seqRedSumP(lastr: f32, ws: [#n]f32): f32 =
-  loop (lastr) = for i < n do nextrP(lastr, ws[i])
-  in lastr
+  loop (lastr) for i < n do nextrP(lastr, ws[i])
 
 let seqRedSumQ(lastr: f32, ws: [#n]f32): f32 =
-  loop (lastr) = for i < n do nextrQ(lastr, ws[i])
-  in lastr
+  loop (lastr) for i < n do nextrQ(lastr, ws[i])
 
 let mc1step(wps: []f32): f32 =
   seqRedSumP(r0(), wps)

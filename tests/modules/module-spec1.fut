@@ -4,7 +4,7 @@
 -- input { 10 } output { 10 }
 
 module PM(P: {type t val x: t module PM: {val f: t -> t}}) = {
-  let iterate(n: i32) = loop (x = P.x) = for i < n do P.PM.f x in x
+  let iterate(n: i32) = loop (x = P.x) for i < n do P.PM.f x
 }
 
 module M = PM({

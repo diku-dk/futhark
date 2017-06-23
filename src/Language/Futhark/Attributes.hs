@@ -527,7 +527,7 @@ valueType (ArrayValue _ (Array (RecordArray et shape _))) =
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
+typeOf :: ExpBase Info VName -> CompTypeBase VName
 typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es
@@ -603,7 +603,7 @@ typeOf (Split _ splitexps e _) =
   tupleRecord $ replicate (1 + n) (typeOf e)
   where n = case typeOf splitexps of Record ts -> length ts
                                      _         -> 1
-typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
+typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with

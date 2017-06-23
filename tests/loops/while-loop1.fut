@@ -11,6 +11,4 @@
 -- }
 
 let main(a: []i32, i: i32, bound: i32): []i32 =
-  loop (a) = while a[i] < bound do
-    map (+1) a in
-  a
+  loop (a) while a[i] < bound do map (+1) a

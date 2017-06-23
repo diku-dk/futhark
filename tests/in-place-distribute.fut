@@ -18,11 +18,9 @@ let seqloop (num_dates: i32) (gauss: f64): [num_dates]f64 =
   let bbrow = replicate num_dates 0.0f64
   let bbrow[ 0 ] = gauss in
 
-  loop (bbrow) =
-    for 1 <= i < num_dates do
+  loop (bbrow) for 1 <= i < num_dates do
       let bbrow[i] = bbrow[i-1] * bbrow[i-1]
       in  bbrow
-  in bbrow
 
 let main(gausses: [#num_dates]f64): [][]f64 =
   map (seqloop(num_dates)) gausses

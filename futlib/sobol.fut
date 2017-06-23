@@ -47,23 +47,18 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
        let V = map (\i -> if i >= s then 0u32
                           else D.m[j-1,i] << (u32(L)-u32(i+1))
                    ) (iota L)
-       loop (V) =
-         for i' < L-s do
-           let i = i'+s
-           let v = V[i-s]
-           let vi0 = v ^ (v >> (u32(s)))
-           let vi =
-             loop (vi = vi0) = for k' < s-1 do
-               let k = k'+1
-               in vi ^ (((a >> u32(s-1-k)) & 1u32) * V[i-k])
-             in vi
-           in V with [i] <- vi
-       in V
+       in loop (V) for i' < L-s do
+            let i = i'+s
+            let v = V[i-s]
+            let vi0 = v ^ (v >> (u32(s)))
+            let vi =
+              loop (vi = vi0) for k' < s-1 do
+                let k = k'+1
+                in vi ^ (((a >> u32(s-1-k)) & 1u32) * V[i-k])
+            in V with [i] <- vi
 
   let index_of_least_significant_0 (x:i32) : i32 =
-    loop (i = 0) =
-      while i < 32 && ((x>>i)&1) != 0 do i + 1
-    in i
+    loop (i = 0) while i < 32 && ((x>>i)&1) != 0 do i + 1
 
   let norm = 2.0 f64.** f64(L)
 

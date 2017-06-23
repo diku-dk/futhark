@@ -7,8 +7,6 @@
 let main(): []i32 =
     let n = 10
     let x = iota(n)
-    loop (x) =
-        for i < n-1 do
-            let x[i+1] = x[i+1] + x[i]
-            in  x
-    in x
+    in loop (x) for i < n-1 do
+         let x[i+1] = x[i+1] + x[i]
+         in  x

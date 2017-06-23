@@ -54,7 +54,7 @@ let unbytes_block(block: [64]u8): [16]u32 =
 
 -- Process 512 bits of the input.
 let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
-  loop ((a,b,c,d) = (a0,b0,c0,d0)) = for i < 64 do
+  loop ((a,b,c,d) = (a0,b0,c0,d0)) for i < 64 do
     let (f,g) =
       if      i < 16 then ((b & c) | ((~b) & d),
                            i)
@@ -65,17 +65,15 @@ let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
       else                (c ^ (b | (~d)),
                            i32((7u32*u32(i))        % 16u32))
     in (d, b + rotate_left(a + f + ks[i] + m[g], rs[i]), b, c)
-  in (a,b,c,d)
 
 let md5(ms: [#n][16]u32): md5 =
   let a0 = u32(0x67452301)
   let b0 = u32(0xefcdab89)
   let c0 = u32(0x98badcfe)
   let d0 = u32(0x10325476)
-  loop ((a0,b0,c0,d0)) = for i < n do
-    let (a,b,c,d) = md5_chunk (a0,b0,c0,d0) ms[i]
-    in (a0+a, b0+b, c0+c, d0+d)
-  in (a0,b0,c0,d0)
+  in loop ((a0,b0,c0,d0)) for i < n do
+       let (a,b,c,d) = md5_chunk (a0,b0,c0,d0) ms[i]
+       in (a0+a, b0+b, c0+c, d0+d)
 
 let main(ms: [#n]u8): [16]u8 =
   let padding = 64 - (n % 64)

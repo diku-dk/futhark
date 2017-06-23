@@ -8,7 +8,7 @@ import "/futlib/math"
 
 let agm(a: f64, g: f64): f64 =
   let eps = 1.0E-16
-  loop ((a,g)) = while f64.abs(a-g) > eps do
+  let (a,_) = loop ((a,g)) while f64.abs(a-g) > eps do
     ((a+g) / 2.0,
      f64.sqrt (a*g))
   in a

@@ -45,13 +45,12 @@ let sobolIndI (dir_vs:  [][]i32, n: i32 ): []i32 =
 --------------------------------
 let index_of_least_significant_0(num_bits: i32, n: i32): i32 =
   let (goon,k) = (true,0) in
-  loop ((goon,k,n)) =
-        for i < num_bits do
-          if(goon)
-          then if (n & 1) == 1
-               then (true, k+1, n>>1)
-               else (false,k,   n   )
-          else      (false,k,   n   )
+  let (_,k,_) = loop ((goon,k,n)) for i < num_bits do
+    if(goon)
+    then if (n & 1) == 1
+         then (true, k+1, n>>1)
+         else (false,k,   n   )
+    else      (false,k,   n   )
   in k
 
 let sobolRecI(sob_dir_vs: [][#num_bits]i32, prev: []i32, n: i32): []i32 =
