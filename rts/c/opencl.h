@@ -306,7 +306,11 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
   return build_status;
 }
 
-static cl_program setup_opencl(const char *prelude_src, const char *src) {
+// We take as input several strings representing the program, because
+// C does not guarantee that the compiler supports particularly large
+// literals.  Notably, Visual C has a limit of 2048 characters.  The
+// array must be NULL-terminated.
+static cl_program setup_opencl(const char *srcs[]) {
 
   cl_int error;
   cl_platform_id platform;
@@ -369,14 +373,20 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
     fread(fut_opencl_src, 1, src_size, f);
     fclose(f);
   } else {
-    // Build the OpenCL program.  First we have to prepend the prelude to the program source.
-    size_t prelude_size = strlen(prelude_src);
-    size_t program_size = strlen(src);
-    src_size = prelude_size + program_size;
+    // Build the OpenCL program.  First we have to concatenate all the fragments.
+    for (const char **src = srcs; *src; src++) {
+      src_size += strlen(*src);
+    }
+
     fut_opencl_src = malloc(src_size + 1);
-    strncpy(fut_opencl_src, prelude_src, src_size);
-    strncpy(fut_opencl_src+prelude_size, src, src_size-prelude_size);
+
+    size_t n, i;
+    for (i = 0, n = 0; srcs[i]; i++) {
+      strncpy(fut_opencl_src+n, srcs[i], src_size-n);
+      n += strlen(srcs[i]);
+    }
     fut_opencl_src[src_size] = 0;
+
   }
 
   cl_program prog;

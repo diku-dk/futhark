@@ -502,7 +502,9 @@ linearForm idd (NSum terms tp) = do
     -- check that b_terms do not contain idd
     b_succ <- foldM (\acc x ->
                         case x of
-                           NProd fs _ -> do let fs_scal = foldl STimes 1 fs
+                           NProd fs _ -> do let fs_scal = case fs of
+                                                            [] -> Val $ IntValue $ Int32Value 1
+                                                            f:fs' -> foldl STimes f fs'
                                             let b_ids = freeIn fs_scal
                                             return $ acc && not (idd `S.member` b_ids)
                            _          -> badAlgSimplifyM "linearForm: ILLEGAL222!!!!"

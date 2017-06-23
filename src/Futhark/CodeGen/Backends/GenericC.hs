@@ -842,6 +842,8 @@ compileProg ops userstate spaces decls pre_main_stms pre_timing post_main_items 
         runCompilerM prog ops src userstate compileProg'
       (entry_point_decls, entry_point_inits) = unzip entry_points
   return $ pretty [C.cunit|
+$esc:("#ifdef _MSC_VER\n#define inline __inline\n#endif")
+
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
