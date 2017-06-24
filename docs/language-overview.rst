@@ -145,14 +145,13 @@ recursive functions.  Instead, we can write this using the ``loop``
 construct::
 
   let fib(n: i32): i32 =
-    loop ((x, y) = (1,1)) = for i < n do
-                              (y, x+y)
+    let (x, y) = loop ((x, y) = (1,1)) for i < n do (y, x+y)
     in x
 
 The semantics of this is precisely as in the tail-recursive function
 formulation.  In general, a loop::
 
-  loop (pat = initial) = for i < bound do loopbody
+  loop (pat = initial) for i < bound do loopbody
   in body
 
 Has the following the semantics:
@@ -163,26 +162,20 @@ Has the following the semantics:
    value returned by the body.  At the end of each iteration, increment
    *i* by one.
 
-3. Evaluate *body* with *pat* bound to its final value.
+3. Return final value of *pat*.
 
 Semantically, a ``loop`` expression is completely equivalent to a
 call to its corresponding tail-recursive function.
 
 For example, denoting by ``t`` the type of ``x``, this loop::
 
-  loop (x = a) =
-    for i < n do
-      g(x)
-    in body
+  loop (x = a) for i < n do g(x)
 
 has the semantics of a call to this tail-recursive function::
 
   let f(i: i32, n: i32, x: t): t =
     if i >= n then x
        else f(i+1, n, g(x))
-
-  let x = f(i, n, a)
-  in body
 
 The purpose of ``loop`` is partly to render some sequential
 computations slightly more convenient, but primarily to express
@@ -204,8 +197,7 @@ predicted in advance.  For example, the following program doubles a
 given number until it exceeds a given threshold value::
 
   let main(x: i32, bound: i32): i32 =
-    loop (x) = while x < bound do x * 2
-    in x
+    while x < bound do x * 2
 
 In all respects other than termination criteria, ``while``-loops
 behave identically to ``for``-loops.
@@ -217,16 +209,14 @@ understand with an example.  The loop::
   let fib(n: i32): i32 =
     let x = 1
     let y = 1
-    loop ((x, y) = (x, y)) = for i < n do (y, x+y)
-    in x
+    let (x, y) = loop ((x, y) = (x, y)) for i < n do (y, x+y)
 
 can also be written::
 
   let fib(n: i32): i32 =
     let x = 1
     let y = 1
-    loop ((x, y)) = for i < n do (y, x+y)
-    in x
+    let (x, y) = loop ((x, y)) for i < n do (y, x+y)
 
 This can sometimes make imperative code look more natural.
 
@@ -318,14 +308,12 @@ multiplication of an ``m * o`` with an ``o * n`` matrix::
 
   let matmult(a: [#m][#o]f32,  b: [#o][#n]f32): [m][n]f32 =
     let res = replicate(m, replicate(n,0f32)) in
-    loop (res) = for i < m do
-        loop (res) = for j < n do
+    loop (res) for i < m do
+        loop (res) for j < n do
             loop (partsum = 0f32) = for k < o do
               partsum + a[i,k] * b[k,j]
             let res[i,j] = partsum
             in res
-        in res
-    in res
 
 With the naive implementation based on copying the source array,
 executing the ``let-with`` expression would require memory
@@ -399,10 +387,9 @@ Fibonacci numbers::
     -- Create "empty" array.
     let arr = iota(n) in
     -- Fill array with Fibonacci numbers.
-    loop (arr) = for i < n-2 do
-                   let arr[i+2] = arr[i] + arr[i+1]
-                   in arr
-    in arr
+    loop (arr) for i < n-2 do
+      let arr[i+2] = arr[i] + arr[i+1]
+      in arr
 
 If the array ``arr`` is copied for each iteration of the loop, we
 are going to put enormous pressure on memory, and spend a lot of time
