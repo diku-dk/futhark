@@ -112,6 +112,7 @@ import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Analysis.PrimExp.Convert
+import Futhark.Analysis.PrimExp.Simplify
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Optimise.Simplifier.Lore
@@ -302,13 +303,17 @@ instance Substitute (MemBound u) where
 instance Rename (MemBound u) where
   rename = substituteRename
 
+simplifyIxFun :: Engine.SimplifiableLore lore =>
+                 IxFun.IxFun (PrimExp VName) -> Engine.SimpleM lore (IxFun.IxFun (PrimExp VName))
+simplifyIxFun = traverse simplifyPrimExp
+
 instance Engine.Simplifiable (MemBound u) where
   simplify (Scalar bt) =
     return $ Scalar bt
   simplify (MemMem size space) =
     MemMem <$> Engine.simplify size <*> pure space
   simplify (ArrayMem bt shape u mem ixfun) =
-    ArrayMem bt shape u <$> Engine.simplify mem <*> pure ixfun
+    ArrayMem bt shape u <$> Engine.simplify mem <*> simplifyIxFun ixfun
 
 instance PP.Pretty u => PP.Pretty (MemBound u) where
   ppr (Scalar bt) = PP.ppr bt
@@ -418,7 +423,7 @@ instance Engine.Simplifiable MemReturn where
   simplify (ReturnsNewBlock i size) =
     ReturnsNewBlock i <$> Engine.simplify size
   simplify (ReturnsInBlock v ixfun) =
-    ReturnsInBlock <$> Engine.simplify v <*> pure ixfun
+    ReturnsInBlock <$> Engine.simplify v <*> simplifyIxFun ixfun
 
 instance Engine.Simplifiable [FunReturns] where
   simplify = mapM Engine.simplify

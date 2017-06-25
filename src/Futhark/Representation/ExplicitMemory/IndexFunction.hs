@@ -72,10 +72,8 @@ instance (IntegralExp num, Eq num) => Eq (IxFun num) where
     ixfun1 == ixfun2 && length is1 == length is2 && and (zipWith eqIndex is1 is2)
     -- Two DimSlices are considered equal even if their slice lengths
     -- are not equal, as this allows us to get rid of reshapes.
-    -- FIXME: everything of the same kind is considered equal, as a
-    -- workaround for missing simplification
-    where eqIndex (DimFix _i) (DimFix _j) = True
-          eqIndex (DimSlice _i _ _s0) (DimSlice _j _ _s1) = True
+    where eqIndex (DimFix i) (DimFix j) = i == j
+          eqIndex (DimSlice i _ s0) (DimSlice j _ s1) = i==j && s0==s1
           eqIndex _ _ = False
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
     ixfun1 == ixfun2 && length shape1 == length shape2
