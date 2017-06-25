@@ -2,6 +2,7 @@
 -- memory blocks, since 'zs' would then map over the contents of 'ys' instead of
 -- the original contents of 'xs[i]'.
 -- ==
+-- tags { disable }
 -- input { [[2, 2],
 --          [2, 2]]
 --         [3, 4]

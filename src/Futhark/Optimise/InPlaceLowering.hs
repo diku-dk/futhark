@@ -3,25 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
--- | This module has been deprecated in favour of MemoryBlockMerging.  It does
--- not work on the current representation.  Obituary:
---
--- The optimisation is never applied.  The module looks for patterns of the
--- structure
---
---   [PatElem v (BindInPlace cs src [DimFix i]) attr]
---
--- which it expects is the internal representation of statements
---
---   let x[i] = r in
---
--- but in the current internal language, that pattern does not have the slice
--- '[DimFix i]', but instead something like '[DimFix i, DimSlice ...]', which
--- the pass does not recognize.
---
--- Original documentation:
---
--- This module implements an optimisation that moves in-place
+-- | This module implements an optimisation that moves in-place
 -- updates into/before loops where possible, with the end goal of
 -- minimising memory copies.  As an example, consider this program:
 --
@@ -93,7 +75,7 @@ import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Pass
-import Futhark.Tools (intraproceduralTransformation)
+import Futhark.Tools (intraproceduralTransformation, fullSlice)
 
 import Prelude hiding (any, mapM_, elem, all)
 
@@ -147,7 +129,8 @@ optimiseStms (bnd:bnds) m = do
   where boundHere = patternNames $ bindingPattern bnd
 
         checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
-            | [PatElem v (BindInPlace cs src [DimFix i]) attr] <- patternElements pat,
+            | [PatElem v (BindInPlace cs src (DimFix i:slice)) attr] <- patternElements pat,
+              slice == drop 1 (fullSlice (typeOf attr) [DimFix i]),
               BasicOp (SubExp (Var ve)) <- e = do
                 forwarded <- maybeForward ve v attr cs src i
                 return $ if forwarded
@@ -204,7 +187,7 @@ updateStm fwd =
              BindInPlace
              (updateCertificates fwd)
              (updateSource fwd)
-             (updateIndices fwd))] $
+             (fullSlice (typeOf $ updateType fwd) $ updateIndices fwd))] $
   BasicOp $ SubExp $ Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)

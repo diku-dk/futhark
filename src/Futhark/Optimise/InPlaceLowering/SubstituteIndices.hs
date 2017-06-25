@@ -23,6 +23,7 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST
 import Futhark.Construct
 import Futhark.MonadFreshNames
+import Futhark.Tools (fullSlice)
 import Futhark.Util
 
 type IndexSubstitution attr = (Certificates, VName, attr, Slice SubExp)
@@ -73,7 +74,8 @@ substituteIndicesInPattern substs pat = do
           | Just (cs2, src2, src2attr, is2) <- lookup src substs = do
               let attr' = attr `setType` typeOf src2attr
               return (update src name (cs2, name, attr', is2) substs',
-                      PatElem name (BindInPlace (cs++cs2) src2 $ is2++is) attr')
+                      PatElem name (BindInPlace (cs++cs2) src2 $
+                                    fullSlice (typeOf src2attr) $ is2++is) attr')
         sub substs' patElem =
           return (substs', patElem)
 
@@ -95,7 +97,7 @@ substituteIndicesInExp substs e = do
           let consumingSubst substs' v
                 | Just (cs2, src2, src2attr, is2) <- lookup v substs = do
                     row <- letExp (baseString v ++ "_row") $
-                           BasicOp $ Index cs2 src2 is2
+                           BasicOp $ Index cs2 src2 $ fullSlice (typeOf src2attr) is2
                     row_copy <- letExp (baseString v ++ "_row_copy") $
                                 BasicOp $ Copy row
                     return $ update v v ([],
@@ -121,8 +123,8 @@ substituteIndicesInVar :: MonadBinder m =>
 substituteIndicesInVar substs v
   | Just ([], src2, _, []) <- lookup v substs =
     letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
-  | Just (cs2, src2, _, is2) <- lookup v substs =
-    letExp "idx" $ BasicOp $ Index cs2 src2 is2
+  | Just (cs2, src2, src2_attr, is2) <- lookup v substs =
+    letExp "idx" $ BasicOp $ Index cs2 src2 $ fullSlice (typeOf src2_attr) is2
   | otherwise =
     return v
 

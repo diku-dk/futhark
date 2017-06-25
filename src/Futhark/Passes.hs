@@ -108,17 +108,6 @@ withExperimentalGPUPasses pipeline =
                   else pipeline1
   in pipeline2
 
--- Old!  Does not work.  See the module for more details.  Enable by setting the
--- environment variable IN_PLACE_LOWERING to 1.
-usesOldInPlaceLowering :: Bool
-usesOldInPlaceLowering =
-  maybe False (== "1") $ lookup "IN_PLACE_LOWERING" unixEnvironment
-
-inPlaceLoweringMaybe :: Pipeline Kernels Kernels
-inPlaceLoweringMaybe = if usesOldInPlaceLowering
-                       then onePass inPlaceLowering
-                       else passes []
-
 kernelsPipeline :: Pipeline SOACS Kernels
 kernelsPipeline =
   standardPipeline >>>
@@ -131,16 +120,16 @@ kernelsPipeline =
          , simplifyKernels
          , performCSE True
          , simplifyKernels
-         ] >>>
-  inPlaceLoweringMaybe
+         , inPlaceLowering
+         ]
 
 sequentialPipeline :: Pipeline SOACS Kernels
 sequentialPipeline =
   standardPipeline >>>
   onePass firstOrderTransform >>>
   passes [ simplifyKernels
-         ] >>>
-  inPlaceLoweringMaybe
+         , inPlaceLowering
+         ]
 
 sequentialCpuPipeline :: Pipeline SOACS ExplicitMemory
 sequentialCpuPipeline =
