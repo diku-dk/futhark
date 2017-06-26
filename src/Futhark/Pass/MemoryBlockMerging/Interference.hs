@@ -9,7 +9,6 @@ import qualified Data.Set as S
 
 import Futhark.Representation.Aliases
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
-import qualified Futhark.Analysis.Alias as AnlAls
 
 import Futhark.Pass.MemoryBlockMerging.DataStructs
 
@@ -60,16 +59,9 @@ emptyInterfEnv :: IntrfEnv
 emptyInterfEnv = IntrfEnv { intrf = M.empty, alloc = S.empty
                           , alias = M.empty, v2mem = M.empty, active = S.empty }
 
-intrfAnPrg :: LUTabPrg -> ExpMem.Prog ExpMem.ExplicitMemory -> M.Map Name IntrfEnv
-intrfAnPrg lutab prg =
-  let aliased_prg = AnlAls.aliasAnalysis prg
-  in  M.fromList $ map (intrfAnFun lutab) $ progFunctions aliased_prg
-
-
-intrfAnFun :: LUTabPrg -> FunDef (Aliases ExpMem.ExplicitMemory) -> (Name,IntrfEnv)
-intrfAnFun lutabprg (FunDef _ fname _ _ body) =
-  let lutab = fromMaybe M.empty (M.lookup fname lutabprg)
-      env = intrfAnBdy lutab emptyInterfEnv body
+intrfAnFun :: LUTabFun -> FunDef (Aliases ExpMem.ExplicitMemory) -> (Name,IntrfEnv)
+intrfAnFun lutabfun (FunDef _ fname _ _ body) =
+  let env = intrfAnBdy lutabfun emptyInterfEnv body
   in  (fname, env)
 
 intrfAnBdy :: LUTabFun -> IntrfEnv -> Body (Aliases ExpMem.ExplicitMemory)
