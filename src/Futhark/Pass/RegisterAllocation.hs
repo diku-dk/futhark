@@ -12,13 +12,17 @@ module Futhark.Pass.RegisterAllocation
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
 import Control.Monad.Except
+import Control.Monad.Reader
 import Data.Maybe (isJust)
+import qualified Data.Map.Strict as M
 
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass
 import Futhark.Representation.AST
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+
+import Futhark.Pass.RegisterAllocation.Traversal (regAllocFunDef, RegAllocResult)
 
 import Futhark.Util (unixEnvironment)
 usesDebugging :: Bool
@@ -45,4 +49,36 @@ transformProg prog = do
 transformFunDef :: MonadFreshNames m
                 => FunDef ExpMem.ExplicitMemory
                 -> m (FunDef ExpMem.ExplicitMemory)
-transformFunDef = return
+transformFunDef fundef = do
+  let allocs = regAllocFunDef fundef
+      body' = runReader (transformBody $ funDefBody fundef) allocs
+  return fundef { funDefBody = body' }
+
+type TransformM = Reader RegAllocResult
+
+transformBody :: Body ExpMem.ExplicitMemory -> TransformM (Body ExpMem.ExplicitMemory)
+transformBody (Body () bnds res) = do
+  bnds' <- mapM transformStm bnds
+  return $ Body () bnds' res
+
+transformStm :: Stm ExpMem.ExplicitMemory -> TransformM (Stm ExpMem.ExplicitMemory)
+transformStm (Let (Pattern patctxelems patvalelems) () e) = do
+  e' <- mapExpM transform e
+  patvalelems' <- mapM transformPatValElemT patvalelems
+
+  let pat' = Pattern patctxelems patvalelems'
+
+  return $ Let pat' () e'
+
+  where transform = identityMapper { mapOnBody = const transformBody
+                                   }
+transformPatValElemT :: PatElemT (LetAttr ExpMem.ExplicitMemory)
+                     -> TransformM (PatElemT (LetAttr ExpMem.ExplicitMemory))
+transformPatValElemT (PatElem x bindage
+                      membound@(ExpMem.ArrayMem pt shape u _xmem xixfun)) = do
+  mapping <- M.lookup x <$> ask
+  let membound' = case mapping of
+        Nothing -> membound
+        Just xmem' -> ExpMem.ArrayMem pt shape u xmem' xixfun
+  return $ PatElem x bindage membound'
+transformPatValElemT pe = return pe
