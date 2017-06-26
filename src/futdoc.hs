@@ -259,13 +259,17 @@ specHtml spec = case spec of
     renderDoc doc <>
     toHtml "val " <> vnameHtml name <>
     foldMap (toHtml " " <>) (map prettyTypeParam tparams) <>
-    toHtml " : " <> foldMap (\tp -> typeDeclHtml tp <> toHtml " -> ") params <>
+    toHtml " : " <> foldMap (\tp -> paramBaseHtml tp <> toHtml " -> ") params <>
     typeDeclHtml rettype
   (ModSpec name sig _) ->
     do m <- vnameHtmlM Structure name
        s <- renderSigExp sig
        return $ toHtml "module " <> m <> toHtml ": "<> s
   (IncludeSpec e _) -> H.div . (toHtml "include " <>) <$> renderSigExp e
+
+paramBaseHtml :: ParamBase Info VName -> Html
+paramBaseHtml (NamedParam v t _) = parens $ vnameHtml v <> toHtml ": " <> typeDeclHtml t
+paramBaseHtml (UnnamedParam t) = typeDeclHtml t
 
 typeDeclHtml :: TypeDeclBase f VName -> Html
 typeDeclHtml = typeExpHtml . declaredType
