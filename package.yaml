@@ -44,6 +44,7 @@ dependencies:
   - gitrev >= 1.2.0
   - parallel >= 3.2.1.0
   - bifunctors
+  - blaze-html
 
 library:
   build-tools:
@@ -94,9 +95,6 @@ executables:
     main: src/futhark-dataset.hs
   futdoc:
     <<: *futhark
-    dependencies:
-      - futhark
-      - blaze-html
     main: src/futdoc.hs
 
 tests:
