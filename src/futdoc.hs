@@ -168,31 +168,64 @@ prettyValBind (name, (BoundF (tps, pts, rettype))) =
   foldMap (\t -> prettyType t <> toHtml " -> ") pts <> toHtml " " <> prettyType rettype
 prettyValBind (name, BoundV t) = toHtml "val " <> vnameHtml name <> toHtml " : " <> prettyType t
 
+primTypeHtml :: PrimType -> Html
+primTypeHtml = docToHtml . ppr
+
 prettyType :: StructType -> Html
 prettyType t = case t of
-  (Prim et) -> docToHtml . ppr $ et
-  (Array (PrimArray et (ShapeDecl ds) u _)) ->
-    prettyU u <> mconcat (map (brackets . prettyD) ds) <> docToHtml (ppr et)
+  Prim et -> primTypeHtml et
   Record fs
     | Just ts <- areTupleFields fs ->
         parens $ commas (map prettyType ts)
     | otherwise ->
         braces $ commas (map ppField $ M.toList fs)
     where ppField (name, tp) = toHtml (nameToString name) <> toHtml ":" <> prettyType tp
-  (Array (PolyArray et targs shape u _)) ->
-    prettyU u <> prettyShapeDecl shape <> (docToHtml . ppr) (baseName <$> qualNameFromTypeName et) <> foldMap (<> toHtml " ") (map prettyTypeArg targs)
-  (Array arr@(RecordArray _ _ _)) -> docToHtml $ ppr arr
-  v@(TypeVar _et _targs) -> docToHtml $ ppr v
+  TypeVar et targs ->
+    prettyTypeName et <> foldMap ((<> toHtml " ") . prettyTypeArg) targs
+  Array arr -> prettyArray arr
+
+prettyArray :: ArrayTypeBase (ShapeDecl VName) () -> Html
+prettyArray arr = case arr of
+  PrimArray et (ShapeDecl ds) u _ ->
+    prettyU u <> foldMap (brackets . prettyD) ds <> primTypeHtml et 
+  PolyArray et targs shape u _ ->
+    prettyU u <> prettyShapeDecl shape <> prettyTypeName et <>
+    foldMap (<> toHtml " ") (map prettyTypeArg targs)
+  RecordArray fs shape u
+    | Just ts <- areTupleFields fs ->
+        prefix <> parens (commas $ map prettyElem ts)
+    | otherwise ->
+        prefix <> braces (commas $ map ppField $ M.toList fs)
+    where prefix = prettyU u <> prettyShapeDecl shape
+          ppField (name, tp) = toHtml (nameToString name) <> toHtml ":" <> prettyElem tp
+
+prettyElem :: RecordArrayElemTypeBase (ShapeDecl VName) () -> Html
+prettyElem e = case e of
+  PrimArrayElem bt _ u -> prettyU u <> primTypeHtml bt
+  PolyArrayElem bt targs _ u ->
+    prettyU u <> prettyTypeName  bt <> foldMap (toHtml " " <>) (map prettyTypeArg targs)
+  ArrayArrayElem at -> prettyArray at
+  RecordArrayElem fs
+    | Just ts <- areTupleFields fs
+      -> parens $ commas $ map prettyElem ts
+    | otherwise
+      -> braces . commas $ map ppField $ M.toList fs
+    where ppField (name, t) = toHtml (nameToString name) <> toHtml ":" <> prettyElem t
+
+
+prettyTypeName :: TypeName -> Html
+prettyTypeName et = (docToHtml . ppr) (baseName <$> qualNameFromTypeName et)
 
 prettyU :: Uniqueness -> Html
 prettyU = docToHtml . ppr
 
 prettyShapeDecl :: ShapeDecl VName -> Html
 prettyShapeDecl (ShapeDecl ds) =
-  mconcat (map (brackets . prettyDimDecl) ds)
+  foldMap (brackets . prettyDimDecl) ds
 
 prettyTypeArg :: TypeArg (ShapeDecl VName) () -> Html
-prettyTypeArg = docToHtml . ppr
+prettyTypeArg (TypeArgDim d _) = brackets $ prettyDimDecl d
+prettyTypeArg (TypeArgType t _) = prettyType t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = return mempty
@@ -201,7 +234,7 @@ modParamHtml ((ModParam pname psig _):mps) = liftM2 f (renderSigExp psig) (modPa
                       params
 
 prettyD :: DimDecl VName -> Html
-prettyD (NamedDim v) = qualNameHtml v
+prettyD (NamedDim v) = prettyQualName v
 prettyD (BoundDim _) = mempty
 prettyD (ConstDim _) = mempty
 prettyD AnyDim = mempty
@@ -305,7 +338,7 @@ qualNameHtml (QualName names (VName name tag)) =
       then prefix <> renderName name
       else prefix <> (a ! A.href (fromString ("#" ++ show tag)) $ renderName name)
   where prefix :: Html
-        prefix = foldMap ((<> toHtml ".") . docToHtml . ppr) names
+        prefix = foldMap ((<> toHtml ".") . renderName) names
 
 renderQualName :: Namespace -> QualName VName -> DocM Html
 renderQualName ns (QualName names (VName name tag)) =
@@ -313,7 +346,7 @@ renderQualName ns (QualName names (VName name tag)) =
       then return $ prefix <> renderName name
       else f <$> ref
   where prefix :: Html
-        prefix = mapM_ ((<> toHtml ".") . docToHtml . ppr) names
+        prefix = mapM_ ((<> toHtml ".") . renderName) names
         f s = prefix <> (a ! A.href (fromString s) $ renderName name)
         trunc ('/':xs) = xs
         trunc xs = xs
@@ -350,7 +383,8 @@ prettyDimDecl (BoundDim v) = toHtml "#" <> vnameHtml v
 prettyDimDecl (ConstDim n) = toHtml (show n)
 
 prettyTypeArgExp :: TypeArgExp VName -> Html
-prettyTypeArgExp = docToHtml . ppr
+prettyTypeArgExp (TypeArgExpDim d _) = prettyDimDecl d
+prettyTypeArgExp (TypeArgExpType d) = typeExpHtml d
 
 prettyTypeParam :: TypeParam -> Html
 prettyTypeParam (TypeParamDim name _) = brackets $ vnameHtml name
