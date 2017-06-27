@@ -649,11 +649,15 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       val' = zip valparams' valinit'
       diets = map (diet . paramDeclType) $ ctxparams' ++ valparams'
   (form', boundnames, wrapbody) <- case form of
-    ForLoop loopvar it boundexp -> do
+    ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
-      return (ForLoop loopvar it boundexp',
-              loopvar `S.insert` fparamnames,
-              bindLoopVar loopvar it boundexp')
+      let (loop_params, loop_arrs) = unzip loopvars
+      loop_params' <- mapM (simplifyParam simplify) loop_params
+      loop_arrs' <- mapM simplify loop_arrs
+      return (ForLoop loopvar it boundexp' (zip loop_params' loop_arrs'),
+              S.fromList (loopvar : map paramName loop_params') <> fparamnames,
+              bindLoopVar loopvar it boundexp' .
+              bindArrayLParams (zip loop_params' $ map Just loop_arrs'))
     WhileLoop cond -> do
       cond' <- simplify cond
       return (WhileLoop cond',
@@ -691,6 +695,8 @@ simplifyExpBase = mapExpM hoist
                 , mapOnRetType = simplify
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
+                , mapOnLParam =
+                  fail "Unhandled LParam in simplification engine."
                 , mapOnOp =
                   simplifyOp
                 }
@@ -701,6 +707,7 @@ type SimplifiableLore lore = (Attributes lore,
                               Simplifiable (LParamAttr lore),
                               Simplifiable (RetType lore),
                               CanBeWise (Op lore),
+                              ST.IndexOp (OpWithWisdom (Op lore)),
                               BinderOps lore)
 
 class Simplifiable e where

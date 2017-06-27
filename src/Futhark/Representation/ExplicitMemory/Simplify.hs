@@ -21,6 +21,7 @@ import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, PatElem, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType)
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.Kernels.Simplify
   (simplifyKernelOp, simplifyKernelExp)
@@ -88,6 +89,7 @@ blockers = Engine.HoistBlockers {
 
 
 callKernelRules :: (MonadBinder m,
+                    Aliased (Lore m),
                     LetAttr (Lore m) ~ (VarWisdom, MemBound u),
                     Lore m ~ Wise lore,
                     ExplicitMemorish lore) => RuleBook m
@@ -95,6 +97,7 @@ callKernelRules = standardRules <>
                   RuleBook [copyCopyToCopy] []
 
 inKernelRules :: (MonadBinder m,
+                  Aliased (Lore m),
                   LetAttr (Lore m) ~ (VarWisdom, MemBound u),
                   OpWithWisdom (Op lore) ~ MemOp inner,
                   Lore m ~ Wise lore,

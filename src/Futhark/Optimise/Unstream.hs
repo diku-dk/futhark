@@ -71,7 +71,7 @@ optimiseInKernelStm (Let pat () (Op (GroupStream w max_chunk lam accs arrs)))
 
       -- Accumulators are updated in-place and must hence be unique.
       let merge = zip (map (fmap (`toDecl` Unique)) acc_params) accs
-      letBind_ pat $ DoLoop [] merge (ForLoop chunk_offset Int32 w) loop_body
+      letBind_ pat $ DoLoop [] merge (ForLoop chunk_offset Int32 w []) loop_body
 optimiseInKernelStm (Let pat () e) =
   addStm =<< (Let pat () <$> mapExpM optimise e)
   where optimise = identityMapper

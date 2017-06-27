@@ -32,6 +32,7 @@ import Futhark.Optimise.Simplifier.Lore
 import Futhark.Analysis.Usage
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.ScalExp as SE
+import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Util.Pretty
   ((<+>), (</>), ppr, commasep, Pretty, parens, text, apply, braces, annot, indent)
 import qualified Futhark.TypeCheck as TC
@@ -354,6 +355,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
     Combine ispace ts active $ removeBodyWisdom body
   removeOpWisdom (SplitSpace o w i elems_per_thread) =
     SplitSpace o w i elems_per_thread
+
+instance ST.IndexOp (KernelExp lore) where
 
 instance UsageInOp (KernelExp lore) where
   usageInOp _ = mempty

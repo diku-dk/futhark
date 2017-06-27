@@ -98,6 +98,7 @@ transformStmRecursively (Let pat () e) =
   where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
                                    , mapOnFParam = return
+                                   , mapOnLParam = return
                                    , mapOnOp = fail "Unhandled Op in first order transform"
                                    }
 
@@ -122,7 +123,7 @@ transformSOAC pat (Map cs width fun arrs) = do
     x <- bindLambda fun =<< index cs arrs (Var i)
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (BasicOp . SubExp) x
     return $ resultBody $ map Var dests
-  letBind_ pat $ DoLoop [] merge (ForLoop i Int32 width) loopbody
+  letBind_ pat $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
 
 transformSOAC pat (Reduce cs width _ fun args) = do
   i <- newVName "i"
@@ -134,7 +135,7 @@ transformSOAC pat (Reduce cs width _ fun args) = do
             index cs (map identName inarrs) (Var i)
     return $ resultBody (map (Var . identName) inarrs ++ acc')
   pat' <- discardPattern (map identType inarrs) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width) loopbody
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
@@ -153,7 +154,7 @@ transformSOAC pat (Scan cs width fun args) = do
     rowcopies <- mapM copyIfArray irows
     return $ resultBody $ rowcopies ++ map Var dests
   pat' <- discardPattern (map identType acc) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width) loopbody
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
@@ -183,7 +184,7 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
     rowcopies <- mapM copyIfArray irows
     return $ resultBody $ rowcopies ++ map Var dests ++ map Var mapdests
   pat' <- discardPattern (map identType acc) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width) loopbody
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
   where accts = map paramType $ take (length accexps) $  lambdaParams fun
         scan_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                      | t <- take (length accexps) (lambdaReturnType fun)]
@@ -415,7 +416,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                     map (Var . identName) dests)
   -- 4.) Build the loop
   let loopres = DoLoop ctxmerge valmerge
-                       (ForLoop loopind Int32 (Var $ identName loopcnt)) loopbody
+                       (ForLoop loopind Int32 (Var $ identName loopcnt) []) loopbody
       loopbnd = mkLet' exszarres (indvarres++strmresacc++strmresarrl) loopres
   -- 5.) A stream needs prologue-loop-epilogue bindings, so we make a dummy
   --     IF exp to return one expression
@@ -574,7 +575,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                                     return $ resultBody [Var aldest]
                                 let alloopres = DoLoop []
                                                   (loopMerge [bnew] [Var bnew0])
-                                                  (ForLoop alloclid Int32 (Var $ identName k)) allocloopbody
+                                                  (ForLoop alloclid Int32 (Var $ identName k) []) allocloopbody
                                 bnew' <- newIdent (baseString (identName glboutid)++"_new0") =<<
                                          lookupType bnew0
                                 myLetBind alloopres bnew'
@@ -606,7 +607,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                 return $ resultBody [Var dest]
             -- make loop
             let loopres = DoLoop [] outmerge
-                          (ForLoop loopid Int32 locoutid_size) loopbody
+                          (ForLoop loopid Int32 locoutid_size []) loopbody
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
@@ -656,7 +657,7 @@ transformSOAC pat (Scatter cs len lam ivs as) = do
         $ If outside_bounds outside_bounds_branch in_bounds_branch
         $ staticShapes [t]
     return $ resultBody (map Var ress)
-  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len) loopBody
+  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
@@ -779,7 +780,7 @@ doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m,
 doLoopMapAccumL cs width innerfun accexps arrexps mapout_arrs = do
   (merge, i, loopbody) <-
     doLoopMapAccumL' cs width innerfun accexps arrexps mapout_arrs
-  return $ DoLoop [] merge (ForLoop i Int32 width) loopbody
+  return $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
 
 doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m,
                      Bindable (Lore m), BinderOps (Lore m),

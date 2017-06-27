@@ -864,6 +864,9 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
 
   noTypeParamsPermitted tparams
 
+  let merge_t =
+        Ascribed $ vacuousShapeAnnotations $ typeOf mergeexp' `setAliases` mempty
+
   -- First we do a basic check of the loop body to figure out which of
   -- the merge parameters are being consumed.  For this, we first need
   -- to check the merge pattern, which requires the (initial) merge
@@ -873,28 +876,35 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   -- none of the merge variables are being used.
   ((tparams', mergepat', form', loopbody'), bodyflow) <-
     case form of
-      For dir lboundexp i uboundexp -> do
+      For i uboundexp -> do
         uboundexp' <- require anySignedType =<< checkExp uboundexp
-        lboundexp' <-
-          case lboundexp of
-            ZeroBound -> return ZeroBound
-            ExpBound e -> do
-                e' <- require anySignedType =<< checkExp e
-                void $ unifyExpTypes e' uboundexp'
-                return $ ExpBound e'
         bindingIdent i (typeOf uboundexp') $ \i' ->
-          noUnique $ bindingPattern tparams mergepat
-          (Ascribed $ vacuousShapeAnnotations $ typeOf mergeexp' `setAliases` mempty) $
+          noUnique $ bindingPattern tparams mergepat merge_t $
           \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
             return (tparams',
                     mergepat',
-                    For dir lboundexp' i' uboundexp',
+                    For i' uboundexp',
                     loopbody')
+
+      ForIn xpat e -> do
+        e' <- checkExp e
+        case typeOf e' of
+          t | Just t' <- peelArray 1 t ->
+                bindingPattern [] xpat (Ascribed $ vacuousShapeAnnotations t') $ \_ xpat' ->
+                noUnique $ bindingPattern tparams mergepat merge_t $
+                \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
+                  loopbody' <- checkExp loopbody
+                  return (tparams',
+                          mergepat',
+                          ForIn xpat' e',
+                          loopbody')
+            | otherwise ->
+                bad $ TypeError (srclocOf e) $
+                "Iteratee of a for-in loop must be an array, but expression has type " ++ pretty t
+
       While cond ->
-        noUnique $ bindingPattern tparams mergepat
-        (Ascribed $ vacuousShapeAnnotations $
-          typeOf mergeexp' `setAliases` mempty) $ \tparams' mergepat' ->
+        noUnique $ bindingPattern tparams mergepat merge_t $ \tparams' mergepat' ->
         onlySelfAliasing $ tapOccurences $
         sequentially (require [Prim Bool] =<< checkExp cond) $ \cond' _ -> do
           loopbody' <- checkExp loopbody

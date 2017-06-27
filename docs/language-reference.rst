@@ -206,11 +206,9 @@ literals and variables, but also more complicated forms.
       : | "{" "}"
       : | "{" `fieldid` "=" `pat` ["," `fieldid` "=" `pat`] "}"
       : | `pat` ":" `type`
-   loopform: "for" `id` "<" `exp`
-           : | "for" `atom` "<=" `id` "<" `exp`
-           : | "for" `atom` ">" `id` ">=" `exp`
-           : | "for" `atom` ">" `id`
-           : | "while" `exp`
+   loopform :   "for" `id` "<" `exp`
+            : | "for" `pat` "in" `exp`
+            : | "while" `exp`
 
 Some of the built-in expression forms have parallel semantics, but it
 is not guaranteed that the the parallel constructs in Futhark are
@@ -486,15 +484,13 @@ aliasing any free variables in ``e``.  The function is not in scope of
 itself, and hence cannot be recursive.  See also `Shape
 Declarations`_.
 
-``loop (pat = initial) for i < bound do loopbody``
-............................................................
-
-The name ``i`` is bound here and initialised to zero.
+``loop (pat = initial) for x in a do loopbody``
+...............................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
-2. If ``i < bound``, bind ``pat`` to the result of evaluating
-   ``loopbody``, increase ``i`` by one, and repeat the step.
+2. For each element ``x`` in ``a``, evaluate ``loopbody`` and rebind
+   ``pat`` to the result of the evaluation.
 
 3. Return the final value of ``pat``.
 
@@ -504,6 +500,11 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 = ...``.
 
 See also `Shape Declarations`_.
+
+``loop (pat = initial) for x < n do loopbody``
+...............................................
+
+Equivalent to ``loop (pat = initial) for x in iota n do loopbody``.
 
 ``loop (pat = initial) = while cond do loopbody``
 ............................................................

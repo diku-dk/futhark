@@ -268,10 +268,16 @@ transformStm (Let pat () (If c tb fb rt)) = do
   return [Let pat () $ If c tb' fb' rt]
 
 transformStm (Let pat () (DoLoop ctx val form body)) =
-  localScope (scopeOfLoopForm form <> scopeOfFParams mergeparams) $ do
+  localScope (castScope (scopeOfLoopForm form) <>
+              scopeOfFParams mergeparams) $ do
     body' <- transformBody body
-    return [Let pat () $ DoLoop ctx val form body']
+    return [Let pat () $ DoLoop ctx val form' body']
   where mergeparams = map fst $ ctx ++ val
+        form' = case form of
+                  WhileLoop cond ->
+                    WhileLoop cond
+                  ForLoop i it bound ps ->
+                    ForLoop i it bound ps
 
 transformStm (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
@@ -584,7 +590,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedStm _ (Op Scatter{}) =
           False
-        unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations) body) =
+        unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations _) body) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
           where bound' = foldr S.insert bound $

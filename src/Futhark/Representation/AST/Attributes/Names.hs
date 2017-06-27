@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts, UndecidableInstances #-}
 -- | Facilities for determining which names are used in some syntactic
 -- construct.  The most important interface is the 'FreeIn' class and
 -- its instances, but for reasons related to the Haskell type system,
@@ -27,6 +27,7 @@ module Futhark.Representation.AST.Attributes.Names
        where
 
 import Control.Monad.Writer
+import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Foldable (foldMap)
 
@@ -35,6 +36,7 @@ import Prelude
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.Representation.AST.Attributes.Scope
 
 freeWalker :: (FreeAttr (ExpAttr lore),
                FreeAttr (BodyAttr lore),
@@ -84,20 +86,15 @@ freeInExp :: (FreeAttr (ExpAttr lore),
               FreeIn (LetAttr lore),
               FreeIn (Op lore)) =>
              Exp lore -> Names
-freeInExp (DoLoop ctxmerge valmerge (ForLoop i _ boundexp) loopbody) =
+freeInExp (DoLoop ctxmerge valmerge form loopbody) =
   let (ctxparams, ctxinits) = unzip ctxmerge
       (valparams, valinits) = unzip valmerge
-      bound_here = S.fromList $ i : map paramName (ctxparams ++ valparams)
-  in freeIn (ctxinits ++ valinits) <> freeIn boundexp <>
-     ((freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
-      `S.difference` bound_here)
-freeInExp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) =
-  let (ctxparams, ctxinits) = unzip ctxmerge
-      (valparams, valinits) = unzip valmerge
-      bound_here = S.fromList $ map paramName (ctxparams ++ valparams)
-  in freeIn (ctxinits ++ valinits) <>
-     ((freeIn cond <> freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
-      `S.difference` bound_here)
+      bound_here = S.fromList $ M.keys $
+                   scopeOfLoopForm form <>
+                   scopeOfFParams (ctxparams ++ valparams)
+  in (freeIn (ctxinits ++ valinits) <> freeIn form <>
+      freeIn (ctxparams ++ valparams) <> freeInBody loopbody)
+     `S.difference` bound_here
 freeInExp e = execWriter $ walkExpM freeWalker e
 
 -- | Return the set of variable names that are free in the given
@@ -213,8 +210,8 @@ instance FreeIn Bindage where
 instance FreeIn ExtRetType where
   freeIn = mconcat . map freeIn . retTypeValues
 
-instance FreeIn LoopForm where
-  freeIn (ForLoop _ _ bound) = freeIn bound
+instance FreeIn (LParamAttr lore) => FreeIn (LoopForm lore) where
+  freeIn (ForLoop _ _ bound loop_vars) = freeIn bound <> freeIn loop_vars
   freeIn (WhileLoop cond) = freeIn cond
 
 instance FreeIn d => FreeIn (DimChange d) where
