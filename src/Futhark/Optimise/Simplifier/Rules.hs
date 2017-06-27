@@ -29,16 +29,18 @@ import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
 import Futhark.Transform.Substitute
 import Futhark.Util
 
 import Prelude hiding (all)
 
-topDownRules :: MonadBinder m => TopDownRules m
+topDownRules :: (MonadBinder m, Aliased (Lore m)) => TopDownRules m
 topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyClosedFormLoop
                , simplifKnownIterationLoop
+               , simplifyLoopVariables
                , simplifyRearrange
                , simplifyRotate
                , letRule simplifyBinOp
@@ -84,7 +86,7 @@ asInt32PrimExp pe
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: MonadBinder m => RuleBook m
+standardRules :: (MonadBinder m, Aliased (Lore m)) => RuleBook m
 standardRules = RuleBook topDownRules bottomUpRules
 
 -- This next one is tricky - it's easy enough to determine that some
@@ -277,23 +279,88 @@ letRule _ _ _ =
   cannotSimplify
 
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
-simplifyClosedFormLoop _ (Let pat _ (DoLoop [] val (ForLoop i _ bound) body)) =
+simplifyClosedFormLoop _ (Let pat _ (DoLoop [] val (ForLoop i _ bound []) body)) =
   loopClosedForm pat val (S.singleton i) bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
-simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
+simplifyLoopVariables :: (MonadBinder m, Aliased (Lore m)) => TopDownRule m
+simplifyLoopVariables vtable (Let pat _
+                              (DoLoop ctx val form@(ForLoop i it num_iters loop_vars) body))
+  | simplifiable <- map checkIfSimplifiable loop_vars,
+    not $ all isNothing simplifiable = do
+      -- Check if the simplifications throw away more information than
+      -- we are comfortable with at this stage.
+      (maybe_loop_vars, body_prefix_stms) <-
+        localScope (scopeOfLoopForm form) $
+        unzip <$> zipWithM onLoopVar loop_vars simplifiable
+      if maybe_loop_vars == map Just loop_vars
+        then cannotSimplify
+        else do body' <- insertStmsM $ do
+                  mapM_ addStm $ concat body_prefix_stms
+                  resultBodyM =<< bodyBind body
+                letBind_ pat $ DoLoop ctx val
+                  (ForLoop i it num_iters $ catMaybes maybe_loop_vars) body'
+
+  where seType (Var v)
+          | v == i = Just $ Prim $ IntType it
+          | otherwise = ST.lookupType v vtable
+        seType (Constant v) = Just $ Prim $ primValueType v
+        consumed_in_body = consumedInBody body
+
+        vtable' = ST.fromScope (scopeOfLoopForm form) <> vtable
+
+        checkIfSimplifiable (p,arr) =
+          simplifyIndexing vtable' seType [] arr
+          (DimFix (Var i) : fullSlice (paramType p) []) $
+          paramName p `S.member` consumed_in_body
+
+        -- We only want this simplification it the result does not refer
+        -- to 'i' at all, or does not contain accesses.
+        onLoopVar (p,arr) Nothing =
+          return (Just (p,arr), mempty)
+        onLoopVar (p,arr) (Just m) = do
+          (x,x_stms) <- collectStms m
+          case x of
+            IndexResult cs arr' slice
+              | all (not . (i `S.member`) . freeInStm) x_stms,
+                DimFix (Var j) : slice' <- slice,
+                j == i, not $ i `S.member` freeIn slice -> do
+                  mapM_ addStm x_stms
+                  w <- arraySize 0 <$> lookupType arr'
+                  for_in_partial <- letExp "for_in_partial" $ BasicOp $ Index cs arr' $
+                    DimSlice (intConst Int32 0) w (intConst Int32 1) : slice'
+                  return (Just (p, for_in_partial), mempty)
+
+            SubExpResult se
+              | all (safeExp . bindingExp) x_stms -> do
+                  x_stms' <- collectStms_ $ do
+                    mapM_ addStm x_stms
+                    letBindNames'_ [paramName p] $ BasicOp $ SubExp se
+                  return (Nothing, x_stms')
+
+            _ -> return (Just (p,arr), mempty)
+simplifyLoopVariables _ _ = cannotSimplify
+
+simplifKnownIterationLoop :: MonadBinder m => TopDownRule m
 simplifKnownIterationLoop _ (Let pat _
                                 (DoLoop ctx val
-                                 (ForLoop i it (Constant iters)) body))
+                                 (ForLoop i it (Constant iters) loop_vars) body))
   | zeroIsh iters = do
       let bindResult p r = letBindNames' [patElemName p] $ BasicOp $ SubExp r
       zipWithM_ bindResult (patternContextElements pat) (map snd ctx)
       zipWithM_ bindResult (patternValueElements pat) (map snd val)
 
   | oneIsh iters = do
+
   forM_ (ctx++val) $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ BasicOp $ SubExp mergeinit
+
   letBindNames'_ [i] $ BasicOp $ SubExp $ intConst it 0
+
+  forM_ loop_vars $ \(p,arr) ->
+    letBindNames'_ [paramName p] $ BasicOp $ Index [] arr $
+    DimFix (intConst Int32 0) : fullSlice (paramType p) []
+
   (loop_body_ctx, loop_body_val) <- splitAt (length ctx) <$> (mapM asVar =<< bodyBind body)
   let subst = M.fromList $ zip (map (paramName . fst) ctx) loop_body_ctx
       ctx_params = substituteNames subst $ map fst ctx

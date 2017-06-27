@@ -77,6 +77,7 @@ analyseExp = mapExpM analyse
                     , mapOnBody = const analyseBody
                     , mapOnRetType = return
                     , mapOnFParam = return
+                    , mapOnLParam = return
                     , mapOnOp = return . addOpRanges
                     }
 

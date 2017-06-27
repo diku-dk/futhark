@@ -51,8 +51,6 @@ module Language.Futhark.Syntax
   , ExpBase(..)
   , FieldBase(..)
   , LoopFormBase (..)
-  , ForLoopDirection (..)
-  , LowerBoundBase(..)
   , LambdaBase(..)
   , PatternBase(..)
   , StreamForm(..)
@@ -733,21 +731,10 @@ instance Located (FieldBase f vn) where
   locOf (RecordRecord e)      = locOf e
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
-data LoopFormBase f vn = For ForLoopDirection (LowerBoundBase f vn) (IdentBase f vn) (ExpBase f vn)
+data LoopFormBase f vn = For (IdentBase f vn) (ExpBase f vn)
+                       | ForIn (PatternBase f vn) (ExpBase f vn)
                        | While (ExpBase f vn)
 deriving instance Showable f vn => Show (LoopFormBase f vn)
-
--- | The iteration order of a @for@-loop.
-data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
-                                 -- just below the upper bound.
-                      | FromDownTo -- ^ Iterates from just below the
-                                   -- upper bound to the lower bound.
-                        deriving (Eq, Ord, Show)
-
--- | The lower bound of a for loop.
-data LowerBoundBase f vn = ZeroBound
-                         | ExpBound (ExpBase f vn)
-deriving instance Showable f vn => Show (LowerBoundBase f vn)
 
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc

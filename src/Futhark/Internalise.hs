@@ -313,13 +313,6 @@ internaliseBodyStms e m = do
     collectStms $ m =<< internaliseExp "res" e
   (,x) <$> mkBodyM (otherbnds <> bnds) res
 
-extraBodyStms :: [Stm]
-                  -> InternaliseM (Body, a)
-                  -> InternaliseM (Body, a)
-extraBodyStms bnds m = do
-  (body, x) <- m
-  return (insertStms bnds body, x)
-
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
 internaliseExp desc (E.Parens e _) =
@@ -471,100 +464,11 @@ internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, bo
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody _) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
-  mergeinit_ts <- mapM subExpType mergeinit
 
-  (wrap, form_contents) <- case form of
-    E.For dir lbound i ubound -> do
-      ubound' <- internaliseExp1 "upper_bound" ubound
-      i' <- internaliseIdent i
-      ubound_t <- I.subExpType ubound'
-      it <- case ubound_t of
-              I.Prim (IntType it) -> return it
-              _                   -> fail "internaliseExp DoLoop: invalid type"
-      lbound' <- case lbound of
-                   ZeroBound -> return $ I.intConst it 0
-                   ExpBound e -> internaliseExp1 "lower_bound" e
-      num_iterations <- letSubExp "num_iterations" $
-                        BasicOp $ I.BinOp (I.Sub it) ubound' lbound'
+  (loopbody', (form', shapepat, mergepat', mergeinit', pre_stms)) <-
+    handleForm mergeinit form
 
-      j <- newVName $ baseString i'
-      let i_ident = I.Ident i' $ I.Prim $ IntType it
-      i_bnds <- case dir of
-        E.FromUpTo ->
-          return [mkLet' [] [i_ident] $
-                  I.BasicOp $ I.BinOp (I.Add it) lbound' (I.Var j)]
-        E.FromDownTo -> do
-          upper_bound_less_one <-
-            letSubExp "upper_bound_less_one" $
-            BasicOp $ I.BinOp (I.Sub it) ubound' (intConst it 1)
-          return [mkLet' [] [i_ident] $
-                  I.BasicOp $ I.BinOp (I.Sub it) upper_bound_less_one (I.Var j)]
-      return ( bindingIdentTypes [I.Ident j $ I.Prim $ IntType it, i_ident] .
-               extraBodyStms i_bnds
-             , Left (j, num_iterations))
-    E.While cond ->
-      return (id, Right cond)
-
-  (loopbody', (form', shapepat, mergepat', mergeinit', pre_bnds)) <-
-    wrap $ bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
-    mapM_ (uncurry internaliseDimConstant) mergecm
-    internaliseBodyStms loopbody $ \ses -> do
-      sets <- mapM subExpType ses
-      let mergepat' = concat nested_mergepat
-          shapeinit = argShapes
-                      (map I.paramName shapepat)
-                      (map I.paramType mergepat')
-                      mergeinit_ts
-          shapeargs = argShapes
-                      (map I.paramName shapepat)
-                      (map I.paramType mergepat')
-                      sets
-      case form_contents of
-        Left (i', bound) -> do
-          bound_t <- I.subExpType bound
-          case bound_t of
-            I.Prim (IntType it) ->
-              return (resultBody $ shapeargs ++ ses,
-                      (I.ForLoop i' it bound,
-                       shapepat,
-                       mergepat',
-                       mergeinit,
-                       []))
-            t ->
-              fail $ "internaliseExp DoLoop: bound has unexpected type: " ++ pretty t
-        Right cond -> do
-          -- We need to insert 'cond' twice - once for the initial
-          -- condition (do we enter the loop at all?), and once with
-          -- the result values of the loop (do we continue into the
-          -- next iteration?).  This is safe, as the type rules for
-          -- the external language guarantees that 'cond' does not
-          -- consume anything.
-          loop_while <- newParam "loop_while" $ I.Prim I.Bool
-          (loop_cond, loop_cond_bnds) <-
-            collectStms $ internaliseExp1 "loop_cond" cond
-          let initsubst = [ (I.paramName mergeparam, initval)
-                            | (mergeparam, initval) <-
-                               zip (shapepat++mergepat') (shapeinit++mergeinit)
-                            ]
-              endsubst = [ (I.paramName mergeparam, endval)
-                         | (mergeparam, endval) <-
-                              zip (shapepat++mergepat') (shapeargs++ses)
-                         ]
-          (loop_initial_cond, init_loop_cond_bnds) <-
-            collectStms $
-            shadowIdentsInExp initsubst loop_cond_bnds loop_cond
-          (loop_end_cond, loop_end_cond_bnds) <-
-            collectStms $
-            shadowIdentsInExp endsubst loop_cond_bnds loop_cond
-          return (mkBody loop_end_cond_bnds $
-                  shapeargs++[loop_end_cond]++ses,
-                  (I.WhileLoop $ I.paramName loop_while,
-                   shapepat,
-                   loop_while : mergepat',
-                   loop_initial_cond : mergeinit,
-                   init_loop_cond_bnds))
-
-  mapM_ addStm pre_bnds
+  mapM_ addStm pre_stms
 
   mergeinit_ts' <- mapM subExpType mergeinit'
 
@@ -574,10 +478,112 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody _) = do
                 mergeinit_ts'
       ctxmerge = zip shapepat ctxinit
       valmerge = zip mergepat' mergeinit'
-      dropCond = case form of E.For{} -> id
-                              E.While{} -> drop 1
+      dropCond = case form of E.While{} -> drop 1
+                              _         -> id
+
   loop_res <- letTupExp desc $ I.DoLoop ctxmerge valmerge form' loopbody'
   return $ map I.Var $ dropCond loop_res
+
+  where
+    handleForm mergeinit (E.ForIn x arr) = do
+      arr' <- internaliseExpToVars "for_in_arr" arr
+      arr_ts <- mapM lookupType arr'
+      let w = arraysSize 0 arr_ts
+
+      i <- newVName "i"
+
+      bindingIdentTypes [I.Ident i $ I.Prim $ IntType Int32] $
+        bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat ->
+        bindingLambdaParams [] [x] (map rowType arr_ts) $ \x_cm x_params -> do
+          mapM_ (uncurry internaliseDimConstant) x_cm
+          mapM_ (uncurry internaliseDimConstant) mergecm
+          let loopvars = zip x_params arr'
+          internaliseBodyStms loopbody $ \ses -> do
+            sets <- mapM subExpType ses
+            let mergepat' = concat nested_mergepat
+                shapeargs = argShapes
+                            (map I.paramName shapepat)
+                            (map I.paramType mergepat')
+                            sets
+            return (resultBody $ shapeargs ++ ses,
+                    (I.ForLoop i Int32 w loopvars,
+                     shapepat,
+                     mergepat',
+                     mergeinit,
+                     []))
+
+    handleForm mergeinit (E.For i num_iterations) = do
+      num_iterations' <- internaliseExp1 "upper_bound" num_iterations
+      i' <- internaliseIdent i
+      num_iterations_t <- I.subExpType num_iterations'
+      it <- case num_iterations_t of
+              I.Prim (IntType it) -> return it
+              _                   -> fail "internaliseExp DoLoop: invalid type"
+
+      let i_ident = I.Ident i' $ I.Prim $ IntType it
+
+      bindingIdentTypes [i_ident] $ bindingParams tparams [mergepat] $
+        \mergecm shapepat nested_mergepat -> do
+        mapM_ (uncurry internaliseDimConstant) mergecm
+        internaliseBodyStms loopbody $ \ses -> do
+          sets <- mapM subExpType ses
+          let mergepat' = concat nested_mergepat
+              shapeargs = argShapes
+                          (map I.paramName shapepat)
+                          (map I.paramType mergepat')
+                          sets
+          return (resultBody $ shapeargs ++ ses,
+                  (I.ForLoop i' it num_iterations' [],
+                   shapepat,
+                   mergepat',
+                   mergeinit,
+                   []))
+
+    handleForm mergeinit (E.While cond) =
+      bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
+        mergeinit_ts <- mapM subExpType mergeinit
+        mapM_ (uncurry internaliseDimConstant) mergecm
+        let mergepat' = concat nested_mergepat
+        -- We need to insert 'cond' twice - once for the initial
+        -- condition (do we enter the loop at all?), and once with
+        -- the result values of the loop (do we continue into the
+        -- next iteration?).  This is safe, as the type rules for
+        -- the external language guarantees that 'cond' does not
+        -- consume anything.
+        let shapeinit = argShapes
+                        (map I.paramName shapepat)
+                        (map I.paramType mergepat')
+                        mergeinit_ts
+            initsubst = [ (I.paramName mergeparam, initval)
+                        | (mergeparam, initval) <-
+                            zip (shapepat++mergepat') (shapeinit++mergeinit)
+                        ]
+
+        internaliseBodyStms loopbody $ \ses -> do
+          sets <- mapM subExpType ses
+          loop_while <- newParam "loop_while" $ I.Prim I.Bool
+          (loop_cond, loop_cond_bnds) <-
+            collectStms $ internaliseExp1 "loop_cond" cond
+          let endsubst = [ (I.paramName mergeparam, endval)
+                         | (mergeparam, endval) <-
+                              zip (shapepat++mergepat') (shapeargs++ses)
+                         ]
+              shapeargs = argShapes
+                          (map I.paramName shapepat)
+                          (map I.paramType mergepat')
+                          sets
+          (loop_initial_cond, init_loop_cond_bnds) <-
+            collectStms $
+            shadowIdentsInExp initsubst loop_cond_bnds loop_cond
+          (loop_end_cond, loop_end_cond_bnds) <-
+            collectStms $ shadowIdentsInExp endsubst loop_cond_bnds loop_cond
+          return (mkBody loop_end_cond_bnds $ shapeargs++[loop_end_cond]++ses,
+                  (I.WhileLoop $ I.paramName loop_while,
+                   shapepat,
+                   loop_while : mergepat',
+                   loop_initial_cond : mergeinit,
+                   init_loop_cond_bnds))
+
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   srcs <- internaliseExpToVars "src" $

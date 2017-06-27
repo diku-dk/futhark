@@ -230,17 +230,22 @@ instance Renameable lore => Rename (Exp lore) where
     ctxinit' <- mapM rename ctxinit
     valinit' <- mapM rename valinit
     case form of
-      ForLoop loopvar it boundexp -> do
+      ForLoop loopvar it boundexp loop_vars -> do
+        let (loop_params, loop_arrs) = unzip loop_vars
         boundexp' <- rename boundexp
-        bind (map paramName $ ctxparams++valparams) $ do
+        loop_arrs' <- rename loop_arrs
+        bind (map paramName (ctxparams++valparams) ++
+              map paramName loop_params) $ do
           ctxparams' <- mapM rename ctxparams
           valparams' <- mapM rename valparams
+          loop_params' <- mapM rename loop_params
           bind [loopvar] $ do
             loopvar'  <- rename loopvar
             loopbody' <- rename loopbody
             return $ DoLoop
               (zip ctxparams' ctxinit') (zip valparams' valinit')
-              (ForLoop loopvar' it boundexp') loopbody'
+              (ForLoop loopvar' it boundexp' $
+               zip loop_params' loop_arrs') loopbody'
       WhileLoop cond ->
         bind (map paramName $ ctxparams++valparams) $ do
           ctxparams' <- mapM rename ctxparams
@@ -258,6 +263,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnCertificates = mapM rename
                     , mapOnRetType = rename
                     , mapOnFParam = rename
+                    , mapOnLParam = rename
                     , mapOnOp = rename
                     }
 

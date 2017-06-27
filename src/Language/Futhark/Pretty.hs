@@ -254,16 +254,12 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
   ppr (RecordRecord e) = ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LoopFormBase ty vn) where
-  ppr (For FromUpTo lbound i ubound) =
-    text "for" <+> align (ppr lbound) <+> ppr i <+> text "<" <+> align (ppr ubound)
-  ppr (For FromDownTo lbound i ubound) =
-    text "for" <+> align (ppr ubound) <+> ppr i <+> text ">" <+> align (ppr lbound)
+  ppr (For i ubound) =
+    text "for" <+> ppr i <+> text "<" <+> align (ppr ubound)
+  ppr (ForIn x e) =
+    text "for" <+> ppr x <+> text "in" <+> ppr e
   ppr (While cond) =
     text "while" <+> ppr cond
-
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LowerBoundBase ty vn) where
-  ppr ZeroBound    = text "0"
-  ppr (ExpBound e) = ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t

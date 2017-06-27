@@ -27,6 +27,7 @@ import Data.Maybe
 
 import Prelude
 
+import Futhark.Construct (fullSliceNum)
 import Futhark.Representation.SOACS
 import Futhark.Util
 
@@ -439,23 +440,27 @@ evalExp (Apply fname args rettype) = do
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs
 evalExp (BasicOp op) = evalBasicOp op
 
-evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp) loopbody) = do
+evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp loopvars) loopbody) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
     PrimVal (IntValue bound_iv) -> do
       let n = valueIntegral bound_iv
-      vs <- foldM iteration mergestart [0::Integer .. n-1]
+      vs <- foldM iteration mergestart [0::Int .. n-1]
       binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
         mapM (lookupVar . paramName) $
         loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
     _ -> bad $ TypeError "evalBody DoLoop for"
   where merge = ctxmerge ++ valmerge
         (mergepat, mergeexp) = unzip merge
-        iteration mergeval i =
-          binding [(Ident loopvar $ Prim $ IntType it,
+        (loop_params, loop_arrs) = unzip loopvars
+        iteration mergeval i = do
+          let slice v = indexArrayValue v $ fullSliceNum (valueShape v) [DimFix i]
+          vs <- mapM (slice <=< lookupVar) loop_arrs
+          binding ((Ident loopvar $ Prim $ IntType it,
                     BindVar,
-                    PrimVal $ IntValue $ intValue it i)] $
+                    PrimVal $ IntValue $ intValue it i) :
+                    zip3 (map paramIdent loop_params) (repeat BindVar) vs) $
             binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
 

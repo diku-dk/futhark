@@ -118,6 +118,9 @@ deadCodeElimExp = mapExpM mapper
                  , mapOnFParam = \fparam -> do
                    seen $ freeIn fparam
                    return fparam
+                 , mapOnLParam = \lparam -> do
+                   seen $ freeIn lparam
+                   return lparam
                  , mapOnOp = \op -> seen (freeIn op) >> return op
                  }
 

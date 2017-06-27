@@ -24,7 +24,7 @@ import Prelude
 
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
-data SeqLoop = SeqLoop [Int] Pattern [(FParam, SubExp)] LoopForm Body
+data SeqLoop = SeqLoop [Int] Pattern [(FParam, SubExp)] (LoopForm SOACS) Body
 
 seqLoopStm :: SeqLoop -> Stm
 seqLoopStm (SeqLoop _ pat merge form body) =

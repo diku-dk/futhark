@@ -466,7 +466,7 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
                 zip mapout_arr_params (map Var mapout_arrs) ++
                 zip acc_params nes'
     i <- newVName "i"
-    let form = ForLoop i Int32 num_iterations
+    let form = ForLoop i Int32 num_iterations []
 
     loop_body <- runBodyBinder $ localScope (scopeOfFParams (map fst merge) <>
                                              scopeOfLoopForm form) $ do
