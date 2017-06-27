@@ -1,4 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- | Merge memory blocks where possible.
 --
 -- Enable by setting the environment variable MEMORY_BLOCK_MERGING=1.
@@ -14,12 +16,13 @@ import Control.Monad.Reader
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, catMaybes)
 
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Pass
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Scope()
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Analysis.Alias (analyseFun)
 
@@ -45,11 +48,10 @@ transformProg :: MonadFreshNames m
 transformProg prog = do
   prog1 <- intraproceduralTransformation AH.hoistAllocsFunDef prog
   prog2 <- intraproceduralTransformation transformFunDef prog1
-  prog3 <- intraproceduralTransformation cleanUpContextFunDef prog2
 
-  let debug = unsafePerformIO $ when usesDebugging $ putStrLn $ pretty prog3
+  let debug = unsafePerformIO $ when usesDebugging $ putStrLn $ pretty prog2
 
-  debug `seq` return prog3
+  debug `seq` return prog2
 
 
 -- Initial transformations from the findings in ArrayCoalescing.
@@ -84,49 +86,174 @@ transformFunDef fundef = do
           putStrLn $ L.intercalate "   " $ map pretty (M.keys (DS.vartab entry))
           putStrLn $ replicate 70 '-'
 
-  body' <-
-    modifyNameSource $ \src ->
-      let m1 = runReaderT m coaltab
-          (z,newsrc) = runState m1 src
-      in  (z,newsrc)
+  let MergeM m0 = m
+      m1 = runReaderT m0 coaltab
+      body' = evalState m1 M.empty
 
   debug `seq` return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
-type MergeM = ReaderT DS.CoalsTab (State VNameSource)
+--type ForbiddenMemoryBlocks = M.Map VName
 
-transformBody :: Body ExpMem.ExplicitMemory -> MergeM (Body ExpMem.ExplicitMemory)
+data ExistentialMemoryBlockFix = ExistentialMemoryBlockFix Shape ExpMem.IxFun
+  deriving (Show)
+
+newtype MergeM a = MergeM (ReaderT DS.CoalsTab (State (M.Map VName ExistentialMemoryBlockFix)) a)
+  deriving (Monad, Functor, Applicative,
+            MonadReader DS.CoalsTab,
+            MonadState (M.Map VName ExistentialMemoryBlockFix))
+
+transformBody :: Body ExpMem.ExplicitMemory
+              -> MergeM (Body ExpMem.ExplicitMemory)
 transformBody (Body () bnds res) = do
-  bnds' <- concat <$> mapM transformStm bnds
-  return $ Body () bnds' res
+  bnds' <- mapM transformStm bnds
+  res' <- mapM transformResultSubExp res
+  return $ Body () bnds' res'
 
-transformStm :: Stm ExpMem.ExplicitMemory -> MergeM [Stm ExpMem.ExplicitMemory]
-transformStm (Let (Pattern patCtxElems patValElems) () e) = do
-  e' <- mapExpM transform e
-  patValElems' <- mapM transformPatValElemT patValElems
+transformStm :: Stm ExpMem.ExplicitMemory
+             -> MergeM (Stm ExpMem.ExplicitMemory)
+transformStm (Let pat () e) = do
+  (pat', e') <- case (pat, e) of
 
-  let pat' = Pattern patCtxElems patValElems'
+    (Pattern [] patvalelems, _) -> do
+      -- No context to consider, so just replace any memory block you find.
+      patvalelems' <- mapM transformPatValElemT patvalelems
+      let pat' = Pattern [] patvalelems'
+      e' <- case e of
+        DoLoop [] mergevalparams loopform body -> do
+          -- Also update the memory names in the merge parameters in the loop.
+          mergevalparams' <- mapM transformValMergeParam mergevalparams
+          return $ DoLoop [] mergevalparams' loopform body
+        _ -> return e
+      return (pat', e')
 
-  return [Let pat' () e']
+    (Pattern patctxelems patvalelems, DoLoop mergectxparams mergevalparams loopform body) -> do
+      -- A loop with a context.  Update the actual memory blocks linked from the
+      -- context memory blocks.
 
-  where transform = identityMapper { mapOnBody = const transformBody
-                                   , mapOnFParam = transformFParam
-                                   }
+      let ctx_names = map (identName . patElemIdent) patctxelems
+      ctx_mem_fixes <- catMaybes <$> mapM (getExistentialMemoryBlockFix ctx_names) patvalelems
+      modify $ M.union (M.fromList ctx_mem_fixes)
 
-transformFParam :: FParam ExpMem.ExplicitMemory -> MergeM (FParam ExpMem.ExplicitMemory)
-transformFParam (Param x
-                 membound_orig@(ExpMem.ArrayMem _pt shape u xmem _xixfun)) = do
+
+      patvalelems' <- mapM transformPatValElemT patvalelems
+      --applyExistentialMemoryBlockFix
+      let pat' = Pattern patctxelems patvalelems'
+
+
+      mergectxparams' <- mapM transformCtxMergeParam mergectxparams
+      mergevalparams' <- mapM transformValMergeParamLight mergevalparams
+      let e' = DoLoop mergectxparams' mergevalparams' loopform body
+      return (pat', e')
+
+    (Pattern patctxelems patvalelems, If {}) -> do
+      -- An if with a context.  This should be fine, as the context memory block
+      -- does not constitute extra memory allocation, but just a reference to
+      -- the memory of whatever branch is taken.  However, the current array
+      -- coalescing module is very aggressive, so it will say that the context
+      -- block needs to be coalesced as well -- but the If expects an existental
+      -- memory block!
+
+      -- Make sure the context memory blocks are not updated from the coalescing
+      -- table in @transformPatValElemT@ by putting it into the
+      -- ForbiddenMemoryBlocks field.
+
+      let ctx_names = map (identName . patElemIdent) patctxelems
+      ctx_mem_fixes <- catMaybes <$> mapM (getExistentialMemoryBlockFix ctx_names) patvalelems
+      modify $ M.union (M.fromList ctx_mem_fixes)
+
+
+
+
+      let debug = unsafePerformIO $ do
+            putStrLn "----------------------------"
+            print patctxelems
+            print patvalelems
+            print ctx_mem_fixes
+            putStrLn "----------------------------"
+
+      patvalelems' <- mapM transformPatValElemT patvalelems
+      --applyExistentialMemoryBlockFix
+      let pat' = Pattern patctxelems patvalelems'
+
+      debug `seq` return (pat', e)
+
+    _ -> notReallySure (show (pat, e))
+
+  e'' <- mapExpM transform e'
+
+  return $ Let pat' () e''
+
+  where transform = identityMapper { mapOnBody = const transformBody }
+
+        notReallySure extra = error ("MemoryBlockMerging: transformStm: Is this '"
+                                     ++ extra ++ "' thing a case that can occur?  (It is if you see this error message.)")
+
+
+transformResultSubExp :: SubExp -> MergeM SubExp
+transformResultSubExp s@(Var xmem) = do
+  m <- get
+  case M.lookup xmem m of
+    Just _ -> return s
+    Nothing -> do
+      coaltab <- ask
+      return $ fromMaybe s $ do
+        entry <- M.lookup xmem coaltab
+        return $ Var $ DS.dstmem entry
+transformResultSubExp s = return s
+
+transformCtxMergeParam :: (FParam ExpMem.ExplicitMemory, SubExp)
+                       -> MergeM (FParam ExpMem.ExplicitMemory, SubExp)
+transformCtxMergeParam t@(param, Var xmem) = do
+  coaltab <- ask
+  return $ fromMaybe t $ do
+    entry <- M.lookup xmem coaltab
+    return (param, Var $ DS.dstmem entry)
+transformCtxMergeParam t = return t
+
+transformValMergeParam :: (FParam ExpMem.ExplicitMemory, SubExp)
+                       -> MergeM (FParam ExpMem.ExplicitMemory, SubExp)
+transformValMergeParam (Param x membound_orig@(ExpMem.ArrayMem _pt shape u xmem _xixfun), se) = do
   membound <- newMemBound x xmem shape u
-  return $ Param x $ fromMaybe membound_orig membound
-transformFParam fp = return fp
+  return (Param x $ fromMaybe membound_orig membound, se)
+transformValMergeParam t = return t
+
+transformValMergeParamLight :: (FParam ExpMem.ExplicitMemory, SubExp)
+                            -> MergeM (FParam ExpMem.ExplicitMemory, SubExp)
+transformValMergeParamLight t@(Param x membound_orig@(ExpMem.ArrayMem pt shape u xmem _xixfun), se) = do
+
+  m <- get
+  case M.lookup xmem m of
+    Just (ExistentialMemoryBlockFix shape' xixfun') ->
+      return (Param x (ExpMem.ArrayMem pt shape' u xmem xixfun'), se)
+    Nothing ->
+      transformValMergeParam t
+
+transformValMergeParamLight t = return t
 
 transformPatValElemT :: PatElemT (LetAttr ExpMem.ExplicitMemory)
                      -> MergeM (PatElemT (LetAttr ExpMem.ExplicitMemory))
 transformPatValElemT (PatElem x bindage
-                      membound_orig@(ExpMem.ArrayMem _pt shape u xmem _xixfun)) = do
-  membound <- newMemBound x xmem shape u
-  return $ PatElem x bindage $ fromMaybe membound_orig membound
+                      membound_orig@(ExpMem.ArrayMem pt shape u xmem _xixfun)) = do
+  m <- get
+  case M.lookup xmem m of
+    Just (ExistentialMemoryBlockFix shape' xixfun') ->
+      return $ PatElem x bindage $ ExpMem.ArrayMem pt shape' u xmem xixfun'
+    Nothing -> do
+      membound <- newMemBound x xmem shape u
+      return $ PatElem x bindage $ fromMaybe membound_orig membound
 transformPatValElemT pe = return pe
+
+getExistentialMemoryBlockFix :: [VName] -> PatElemT (LetAttr ExpMem.ExplicitMemory)
+                             -> MergeM (Maybe (VName, ExistentialMemoryBlockFix))
+getExistentialMemoryBlockFix ctx_names (PatElem x _bindage
+                                        (ExpMem.ArrayMem _pt0 shape0 u0 xmem0 _xixfun0))
+  | xmem0 `elem` ctx_names = do
+  n <- newMemBound x xmem0 shape0 u0
+  return $ do
+    ExpMem.ArrayMem _pt1 shape1 _u1 _xmem1 xixfun1 <- n
+    return (xmem0, ExistentialMemoryBlockFix shape1 xixfun1)
+getExistentialMemoryBlockFix _ _ = return Nothing
 
 newMemBound :: VName -> VName -> Shape -> u -> MergeM (Maybe (ExpMem.MemBound u))
 newMemBound x xmem shape u = do
@@ -136,34 +263,3 @@ newMemBound x xmem shape u = do
     DS.Coalesced _ (DS.MemBlock pt _shape _ xixfun) _ <-
       M.lookup x $ DS.vartab entry
     return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun
-
-
--- Clean up the existential contexts in the parameters.
-
-cleanUpContextFunDef :: MonadFreshNames m
-                     => FunDef ExpMem.ExplicitMemory
-                     -> m (FunDef ExpMem.ExplicitMemory)
-cleanUpContextFunDef fundef = do
-  let m = cleanUpContextBody (scopeOf fundef) $ funDefBody fundef
-      body' = runReader m M.empty
-  return fundef { funDefBody = body' }
-
-type CleanUpM = Reader (Scope ExpMem.ExplicitMemory)
-
-cleanUpContextBody :: Scope ExpMem.ExplicitMemory
-                   -> Body ExpMem.ExplicitMemory
-                   -> CleanUpM (Body ExpMem.ExplicitMemory)
-cleanUpContextBody scope (Body () bnds res) = do
-  bnds' <- localScope scope $ localScope (scopeOf bnds)
-           $ mapM cleanUpContextStm bnds
-  return $ Body () bnds' res
-
-cleanUpContextStm :: Stm ExpMem.ExplicitMemory
-                  -> CleanUpM (Stm ExpMem.ExplicitMemory)
-cleanUpContextStm (Let pat@(Pattern patCtxElems patValElems) () e) = do
-  remaining <- ExpMem.findUnusedPatternPartsInExp pat e
-  let patCtxElems' = S.toList $ S.fromList patCtxElems S.\\ S.fromList remaining
-  let pat' = Pattern patCtxElems' patValElems
-  e' <- mapExpM cleanUpContext e
-  return $ Let pat' () e'
-  where cleanUpContext = identityMapper { mapOnBody = cleanUpContextBody }
