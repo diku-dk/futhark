@@ -61,7 +61,7 @@ compileProg prog = do
                   , Option { optionLongName = "synchronous"
                            , optionShortName = Just 's'
                            , optionArgument = NoArgument
-                           , optionAction = [C.cstm|debugging = 1;|]
+                           , optionAction = [C.cstm|cl_debug = debugging = 1;|]
                            }
                   , Option { optionLongName = "group-size"
                            , optionShortName = Nothing
