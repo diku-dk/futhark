@@ -24,14 +24,14 @@ import Documentation.Generator
 
 main :: IO ()
 main = mainWithOptions () [] f
-  where f [file] _ = Just $ (runFutharkM (m file)  True >> return ())
+  where f [file] _ = Just $ void (runFutharkM (m file) True)
         f _ _ = Nothing
         m ::FilePath -> Futhark.Pipeline.FutharkM ()
         m file = do
           (Prog prog, _w, imports, _vns) <- readProgram file
           liftIO (printDecs imports prog)
 
-type DocEnv = M.Map (Namespace,VName) (String)
+type DocEnv = M.Map (Namespace,VName) String
 
 printDecs :: Imports -> [Dec] -> IO ()
 printDecs imports decs = mapM_ write . run $ mapM (f $ render decs) (init (M.toList imports))
@@ -45,4 +45,3 @@ render :: [Dec] -> (String, FileModule) -> State DocEnv String
 render decs (name,fm) = runReaderT m (name,fm)
   where putName = h1 (toHtml name)
         m = renderHtml . docTypeHtml . (putName <>) <$> renderDecs decs
-
