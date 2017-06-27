@@ -558,7 +558,9 @@ paramsTypes = map paramType
 readPrimStm :: C.ToExp a => a -> PrimType -> Signedness -> C.Stm
 readPrimStm place t ept =
   [C.cstm|if (read_scalar(&$exp:(primTypeInfo t ept),&$exp:place) != 0) {
-        panic(1, "Syntax error when reading %s.\n", $exp:(primTypeInfo t ept).type_name);
+        panic(1, "Error when reading input of type %s (errno: %s).\n",
+              $exp:(primTypeInfo t ept).type_name,
+              strerror(errno));
       }|]
 
 -- | Our strategy for main() is to parse everything into host memory
@@ -709,14 +711,16 @@ readInput refcount known_sizes
   in (known_sizes ++ wrote_sizes,
       [C.cstm|{
         typename int64_t shape[$int:rank];
+        errno = 0;
         if (read_array(&$exp:(primTypeInfo t ept),
                        (void**)& $exp:dest,
                        shape,
                        $int:(length shape))
             != 0) {
-          panic(1, "Syntax error when reading %s%s.\n",
+          panic(1, "Failed reading input of type %s%s (errno: %s).\n",
                     $string:(concat $ replicate rank "[]"),
-                    $exp:(primTypeInfo t ept).type_name);
+                    $exp:(primTypeInfo t ept).type_name,
+                    strerror(errno));
         }
         $stms:copyshape
         $stms:copymemsize
