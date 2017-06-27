@@ -11,7 +11,9 @@ struct array_reader {
 
 static int peekc() {
   int c = getchar();
-  ungetc(c,stdin);
+  if (c != EOF) {
+    ungetc(c,stdin);
+  }
   return c;
 }
 
