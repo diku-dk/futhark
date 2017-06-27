@@ -60,7 +60,7 @@ class (Attributes lore,
 -- bindings, however.
 class (Attributes (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
-       HasScope (Lore m) m) =>
+       LocalScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: *
   mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
