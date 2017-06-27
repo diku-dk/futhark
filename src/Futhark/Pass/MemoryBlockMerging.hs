@@ -16,7 +16,7 @@ import Control.Monad.Reader
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe (fromMaybe, isJust, catMaybes)
+import Data.Maybe (fromMaybe, isJust)
 
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -88,20 +88,17 @@ transformFunDef fundef = do
 
   let MergeM m0 = m
       m1 = runReaderT m0 coaltab
-      body' = evalState m1 M.empty
+      body' = evalState m1 S.empty
 
   debug `seq` return fundef { funDefBody = body' }
   where m = transformBody $ funDefBody fundef
 
---type ForbiddenMemoryBlocks = M.Map VName
+type Existentials = Names
 
-data ExistentialMemoryBlockFix = ExistentialMemoryBlockFix Shape ExpMem.IxFun
-  deriving (Show)
-
-newtype MergeM a = MergeM (ReaderT DS.CoalsTab (State (M.Map VName ExistentialMemoryBlockFix)) a)
+newtype MergeM a = MergeM (ReaderT DS.CoalsTab (State Existentials) a)
   deriving (Monad, Functor, Applicative,
             MonadReader DS.CoalsTab,
-            MonadState (M.Map VName ExistentialMemoryBlockFix))
+            MonadState Existentials)
 
 transformBody :: Body ExpMem.ExplicitMemory
               -> MergeM (Body ExpMem.ExplicitMemory)
@@ -112,100 +109,52 @@ transformBody (Body () bnds res) = do
 
 transformStm :: Stm ExpMem.ExplicitMemory
              -> MergeM (Stm ExpMem.ExplicitMemory)
-transformStm (Let pat () e) = do
-  (pat', e') <- case (pat, e) of
+transformStm (Let (Pattern patctxelems patvalelems) () e) = do
+  -- General approach: If a memory block has a coalesced mapping, replace it
+  -- with that.  However, if it is an existential memory block (e.g. from a loop
+  -- context or an if context), keep the existential memory block, and use the
+  -- shape and index function of the coalesced memory block.  In that case, also
+  -- make sure that the existential memory block is set to refer to its
+  -- coalesced counterpart.
 
-    (Pattern [] patvalelems, _) -> do
-      -- No context to consider, so just replace any memory block you find.
-      patvalelems' <- mapM transformPatValElemT patvalelems
-      let pat' = Pattern [] patvalelems'
-      e' <- case e of
-        DoLoop [] mergevalparams loopform body -> do
-          -- Also update the memory names in the merge parameters in the loop.
-          mergevalparams' <- mapM transformValMergeParam mergevalparams
-          return $ DoLoop [] mergevalparams' loopform body
-        _ -> return e
-      return (pat', e')
+  let existentials0 = S.fromList $ map (identName . patElemIdent) patctxelems
+      existentials = S.union existentials0 $ case e of
+        DoLoop mergectxparams _ _ _ ->
+          -- A loop has an extra context.
+          S.fromList $ map (identName . paramIdent . fst) mergectxparams
+        _ -> S.empty
+  modify $ S.union existentials -- Keep track of all existentials.
 
-    (Pattern patctxelems patvalelems, DoLoop mergectxparams mergevalparams loopform body) -> do
-      -- A loop with a context.  Update the actual memory blocks linked from the
-      -- context memory blocks.
-
-      let ctx_names = map (identName . patElemIdent) patctxelems
-      ctx_mem_fixes <- catMaybes <$> mapM (getExistentialMemoryBlockFix ctx_names) patvalelems
-
-      let ctx_names1 = map (identName . paramIdent . fst) mergectxparams
-      ctx_mem_fixes1 <- catMaybes <$> mapM (getExistentialMemoryBlockFix1 ctx_names1) mergevalparams
-
-      modify $ M.union (M.union (M.fromList ctx_mem_fixes) (M.fromList ctx_mem_fixes1))
-
-
-      patvalelems' <- mapM transformPatValElemT patvalelems
-      --applyExistentialMemoryBlockFix
-      let pat' = Pattern patctxelems patvalelems'
-
-
+  e' <- case e of
+    DoLoop mergectxparams mergevalparams loopform body -> do
+      -- More special loop handling because of its extra pattern-like info.
       mergectxparams' <- mapM transformCtxMergeParam mergectxparams
-      mergevalparams' <- mapM transformValMergeParamLight mergevalparams
-      let e' = DoLoop mergectxparams' mergevalparams' loopform body
-      return (pat', e')
+      mergevalparams' <- mapM transformValMergeParam mergevalparams
+      return $ DoLoop mergectxparams' mergevalparams' loopform body
+    _ -> return e
 
-    (Pattern patctxelems patvalelems, If {}) -> do
-      -- An if with a context.  This should be fine, as the context memory block
-      -- does not constitute extra memory allocation, but just a reference to
-      -- the memory of whatever branch is taken.  However, the current array
-      -- coalescing module is very aggressive, so it will say that the context
-      -- block needs to be coalesced as well -- but the If expects an existental
-      -- memory block!
-
-      -- Make sure the context memory blocks are not updated from the coalescing
-      -- table in @transformPatValElemT@ by putting it into the
-      -- ForbiddenMemoryBlocks field.
-
-      let ctx_names = map (identName . patElemIdent) patctxelems
-      ctx_mem_fixes <- catMaybes <$> mapM (getExistentialMemoryBlockFix ctx_names) patvalelems
-      modify $ M.union (M.fromList ctx_mem_fixes)
-
-
-
-
-      let debug = unsafePerformIO $ do
-            putStrLn "----------------------------"
-            print patctxelems
-            print patvalelems
-            print ctx_mem_fixes
-            putStrLn "----------------------------"
-
-      patvalelems' <- mapM transformPatValElemT patvalelems
-      --applyExistentialMemoryBlockFix
-      let pat' = Pattern patctxelems patvalelems'
-
-      debug `seq` return (pat', e)
-
-    _ -> notReallySure (show (pat, e))
-
+  patvalelems' <- mapM transformPatValElemT patvalelems
+  let pat' = Pattern patctxelems patvalelems'
   e'' <- mapExpM transform e'
-
   return $ Let pat' () e''
 
   where transform = identityMapper { mapOnBody = const transformBody }
 
-        notReallySure extra = error ("MemoryBlockMerging: transformStm: Is this '"
-                                     ++ extra ++ "' thing a case that can occur?  (It is if you see this error message.)")
-
-
+-- | Update memory block names in the result values of a body.
 transformResultSubExp :: SubExp -> MergeM SubExp
 transformResultSubExp s@(Var xmem) = do
-  m <- get
-  case M.lookup xmem m of
-    Just _ -> return s
-    Nothing -> do
-      coaltab <- ask
-      return $ fromMaybe s $ do
-        entry <- M.lookup xmem coaltab
-        return $ Var $ DS.dstmem entry
+  existentals <- get
+  if S.member xmem existentals
+    then return s
+    else do
+    coaltab <- ask
+    return $ fromMaybe s $ do
+      entry <- M.lookup xmem coaltab
+      return $ Var $ DS.dstmem entry
 transformResultSubExp s = return s
 
+-- | Update the actual memory block referred to by a context memory block in a
+-- loop.
 transformCtxMergeParam :: (FParam ExpMem.ExplicitMemory, SubExp)
                        -> MergeM (FParam ExpMem.ExplicitMemory, SubExp)
 transformCtxMergeParam t@(param, Var xmem) = do
@@ -217,63 +166,37 @@ transformCtxMergeParam t = return t
 
 transformValMergeParam :: (FParam ExpMem.ExplicitMemory, SubExp)
                        -> MergeM (FParam ExpMem.ExplicitMemory, SubExp)
-transformValMergeParam (Param x membound_orig@(ExpMem.ArrayMem _pt shape u xmem _xixfun), se) = do
-  membound <- newMemBound x xmem shape u
-  return (Param x $ fromMaybe membound_orig membound, se)
-transformValMergeParam t = return t
-
-transformValMergeParamLight :: (FParam ExpMem.ExplicitMemory, SubExp)
-                            -> MergeM (FParam ExpMem.ExplicitMemory, SubExp)
-transformValMergeParamLight t@(Param x membound_orig@(ExpMem.ArrayMem pt shape u xmem _xixfun), se) = do
-
-  m <- get
-  case M.lookup xmem m of
-    Just (ExistentialMemoryBlockFix shape' xixfun') ->
-      return (Param x (ExpMem.ArrayMem pt shape' u xmem xixfun'), se)
-    Nothing ->
-      transformValMergeParam t
-
-transformValMergeParamLight t = return t
+transformValMergeParam (Param x membound, se) = do
+  membound' <- transformValMem x membound
+  return (Param x membound', se)
 
 transformPatValElemT :: PatElemT (LetAttr ExpMem.ExplicitMemory)
                      -> MergeM (PatElemT (LetAttr ExpMem.ExplicitMemory))
-transformPatValElemT (PatElem x bindage
-                      membound_orig@(ExpMem.ArrayMem pt shape u xmem _xixfun)) = do
-  m <- get
-  case M.lookup xmem m of
-    Just (ExistentialMemoryBlockFix shape' xixfun') ->
-      return $ PatElem x bindage $ ExpMem.ArrayMem pt shape' u xmem xixfun'
-    Nothing -> do
-      membound <- newMemBound x xmem shape u
-      return $ PatElem x bindage $ fromMaybe membound_orig membound
-transformPatValElemT pe = return pe
+transformPatValElemT (PatElem x bindage membound) = do
+  membound' <- transformValMem x membound
+  return $ PatElem x bindage membound'
 
-getExistentialMemoryBlockFix :: [VName] -> PatElemT (LetAttr ExpMem.ExplicitMemory)
-                             -> MergeM (Maybe (VName, ExistentialMemoryBlockFix))
-getExistentialMemoryBlockFix ctx_names (PatElem x _bindage
-                                        (ExpMem.ArrayMem _pt0 shape0 u0 xmem0 _xixfun0))
-  | xmem0 `elem` ctx_names = do
-  n <- newMemBound x xmem0 shape0 u0
-  return $ do
-    ExpMem.ArrayMem _pt1 shape1 _u1 _xmem1 xixfun1 <- n
-    return (xmem0, ExistentialMemoryBlockFix shape1 xixfun1)
-getExistentialMemoryBlockFix _ _ = return Nothing
+transformValMem :: VName -> ExpMem.MemBound u -> MergeM (ExpMem.MemBound u)
+transformValMem x membound@(ExpMem.ArrayMem pt shape u xmem _xixfun) = do
+  existentials <- get
+  meminfo <- findCoalescedMemBound x xmem
+  return $ case (S.member xmem existentials, meminfo) of
+    (True, Just (_xmem', xixfun')) ->
+      -- Keep the existential memory while using the index function from the
+      -- memory block to which it is coalesced.  The simplifier will remove the
+      -- existential memory if possible -- and even so, it doesn't constitute an
+      -- allocation, just another reference in the generated code.
+      ExpMem.ArrayMem pt shape u xmem xixfun'
+    (False, Just (xmem', xixfun')) ->
+      -- Not existential, so replace both memory block and index function.
+      ExpMem.ArrayMem pt shape u xmem' xixfun'
+    _ -> membound
+transformValMem _ m = return m
 
-getExistentialMemoryBlockFix1 :: [VName] -> (FParam ExpMem.ExplicitMemory, SubExp)
-                              -> MergeM (Maybe (VName, ExistentialMemoryBlockFix))
-getExistentialMemoryBlockFix1 ctx_names (Param x (ExpMem.ArrayMem _pt0 shape0 u0 xmem0 _xixfun0), _se)
-  | xmem0 `elem` ctx_names = do
-  n <- newMemBound x xmem0 shape0 u0
-  return $ do
-    ExpMem.ArrayMem _pt1 shape1 _u1 _xmem1 xixfun1 <- n
-    return (xmem0, ExistentialMemoryBlockFix shape1 xixfun1)
-getExistentialMemoryBlockFix1 _ _ = return Nothing
-
-newMemBound :: VName -> VName -> Shape -> u -> MergeM (Maybe (ExpMem.MemBound u))
-newMemBound x xmem shape u = do
+findCoalescedMemBound :: VName -> VName -> MergeM (Maybe (VName, ExpMem.IxFun))
+findCoalescedMemBound x xmem = do
   coaltab <- ask
   return $ do
     entry <- M.lookup xmem coaltab
-    DS.Coalesced _ (DS.MemBlock pt _shape _ xixfun) _ <-
-      M.lookup x $ DS.vartab entry
-    return $ ExpMem.ArrayMem pt shape u (DS.dstmem entry) xixfun
+    DS.Coalesced _ (DS.MemBlock _ _ _ xixfun) _ <- M.lookup x $ DS.vartab entry
+    return (DS.dstmem entry, xixfun)
