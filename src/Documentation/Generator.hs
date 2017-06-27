@@ -5,7 +5,7 @@ import Control.Monad
 import Control.Monad.State
 import Control.Monad.Reader
 import Data.Monoid
-import Data.Maybe (maybe)
+import Data.Maybe (maybe,mapMaybe)
 import qualified Data.Map as M
 import System.FilePath (normalise)
 
@@ -25,8 +25,7 @@ type DocM = ReaderT Context (State DocEnv)
 
 renderDecs :: [Dec] -> DocM Html
 renderDecs decs = asks snd >>= f
-  where f fm = mconcat <$> mapM (fmap pre)
-               Data.Maybe.catMaybes (map (prettyDec fm) decs)
+  where f fm = mconcat <$> mapM (fmap pre) (mapMaybe (prettyDec fm) decs)
 
 prettyDec :: FileModule -> Dec -> Maybe (DocM Html)
 prettyDec fileModule dec = case dec of
