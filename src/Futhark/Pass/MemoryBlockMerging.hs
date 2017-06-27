@@ -133,7 +133,11 @@ transformStm (Let pat () e) = do
 
       let ctx_names = map (identName . patElemIdent) patctxelems
       ctx_mem_fixes <- catMaybes <$> mapM (getExistentialMemoryBlockFix ctx_names) patvalelems
-      modify $ M.union (M.fromList ctx_mem_fixes)
+
+      let ctx_names1 = map (identName . paramIdent . fst) mergectxparams
+      ctx_mem_fixes1 <- catMaybes <$> mapM (getExistentialMemoryBlockFix1 ctx_names1) mergevalparams
+
+      modify $ M.union (M.union (M.fromList ctx_mem_fixes) (M.fromList ctx_mem_fixes1))
 
 
       patvalelems' <- mapM transformPatValElemT patvalelems
@@ -254,6 +258,16 @@ getExistentialMemoryBlockFix ctx_names (PatElem x _bindage
     ExpMem.ArrayMem _pt1 shape1 _u1 _xmem1 xixfun1 <- n
     return (xmem0, ExistentialMemoryBlockFix shape1 xixfun1)
 getExistentialMemoryBlockFix _ _ = return Nothing
+
+getExistentialMemoryBlockFix1 :: [VName] -> (FParam ExpMem.ExplicitMemory, SubExp)
+                              -> MergeM (Maybe (VName, ExistentialMemoryBlockFix))
+getExistentialMemoryBlockFix1 ctx_names (Param x (ExpMem.ArrayMem _pt0 shape0 u0 xmem0 _xixfun0), _se)
+  | xmem0 `elem` ctx_names = do
+  n <- newMemBound x xmem0 shape0 u0
+  return $ do
+    ExpMem.ArrayMem _pt1 shape1 _u1 _xmem1 xixfun1 <- n
+    return (xmem0, ExistentialMemoryBlockFix shape1 xixfun1)
+getExistentialMemoryBlockFix1 _ _ = return Nothing
 
 newMemBound :: VName -> VName -> Shape -> u -> MergeM (Maybe (ExpMem.MemBound u))
 newMemBound x xmem shape u = do
