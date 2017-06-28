@@ -61,12 +61,14 @@ memBlockSizes fundef = M.union fromParams fromBody
         onStm stm = foldExp folder [] $ bindingExp stm
         folder = identityFolder
           { foldOnStm = \sizes stm -> return (sizes ++ onStm stm)
+
+          -- Sizes found from the functions below are scope-local, but that does
+          -- not matter; we want all sizes so that we can lookup anything.
           , foldOnFParam = \sizes fparam -> return (sizes ++ onParam fparam)
           , foldOnLParam = \sizes lparam -> return (sizes ++ onParam lparam)
           }
 
-regAllocFunDef :: FunDef ExpMem.ExplicitMemory
-                  -> RegAllocResult
+regAllocFunDef :: FunDef ExpMem.ExplicitMemory -> RegAllocResult
 regAllocFunDef fundef = do
   let fundef_aliases = analyseFun fundef
       lutab = LastUse.lastUseFun fundef_aliases
@@ -105,15 +107,16 @@ regAllocStm :: Stm ExpMem.ExplicitMemory -> TraversalMonad ()
 regAllocStm (Let (Pattern _ patelems) () e) = do
   withLocalState $ walkExpM walker e
 
+  let creates_new_array = createsNewArrOK e
+  when creates_new_array $ mapM_ handleNewArray patelems
+
   let debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 70 '-'
         putStrLn "Statement."
         print patelems
-        print e
         putStrLn $ replicate 70 '-'
 
-  -- watch out for copy and concat
-  debug `seq` when (createsNewArrOK e) $ mapM_ handleNewArray patelems
+  debug `seq` return ()
 
   where walker = identityWalker { walkOnBody = regAllocBody }
 
@@ -141,25 +144,32 @@ handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
         print sizes
         putStrLn $ replicate 70 '-'
 
-  debug `seq` case L.find (\t -> notTheSame t && noneInterfere t && sizesMatch t) $ M.assocs uses of
+  let canBeUsed t = notTheSame t && noneInterfere t && sizesMatch t
+
+  case L.find canBeUsed $ M.assocs uses of
     Just (kmem, _vars) -> do
       modify $ \cur -> cur { curUses = M.alter (insertOrNew x) kmem $ curUses cur }
       tell $ M.singleton x kmem
     Nothing ->
       modify $ \cur -> cur { curUses = M.alter (insertOrNew x) xmem $ curUses cur }
 
+  debug `seq` return ()
+
 handleNewArray _ = return ()
 
 -- FIXME: Less conservative, please.  Would require some more state.
 equalSizeSubExps :: SubExp -> SubExp -> Bool
 equalSizeSubExps x y =
-  let debug = unsafePerformIO $ when usesDebugging $ do
+  let eq = (x == y)
+
+      debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 70 '-'
         putStrLn "Equal sizes?"
         print x
         print y
         putStrLn $ replicate 70 '-'
-  in debug `seq` (x == y)
+
+  in debug `seq` eq
 
 insertOrNew :: Ord a => a -> Maybe (S.Set a) -> Maybe (S.Set a)
 insertOrNew x m = Just $ case m of
@@ -168,6 +178,7 @@ insertOrNew x m = Just $ case m of
 
 
 -- FIXME: Generalise the one from DataStructs.
+-- watch out for copy and concat
 createsNewArrOK :: Exp ExpMem.ExplicitMemory -> Bool
 createsNewArrOK (BasicOp Partition{}) = True
 createsNewArrOK (BasicOp Replicate{}) = True
