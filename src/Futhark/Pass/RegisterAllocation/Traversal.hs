@@ -112,6 +112,9 @@ handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
   x_interferences <- (fromMaybe S.empty . M.lookup x . ctxInterferences) <$> ask
   sizes <- ctxSizes <$> ask
 
+  let notTheSame :: (VName, Names) -> Bool
+      notTheSame (kmem, _vars) = kmem /= xmem
+
   let noneInterfere :: (VName, Names) -> Bool
       noneInterfere (_kmem, vars) = S.null $ S.intersection vars x_interferences
 
@@ -127,7 +130,7 @@ handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
         print sizes
         putStrLn $ replicate 70 '-'
 
-  debug `seq` case L.find (\t -> noneInterfere t && sizesMatch t) $ M.assocs uses of
+  debug `seq` case L.find (\t -> notTheSame t && noneInterfere t && sizesMatch t) $ M.assocs uses of
     Just (kmem, _vars) -> do
       modify $ \cur -> cur { curUses = M.alter (insertOrNew x) kmem $ curUses cur }
       tell $ M.singleton x kmem
