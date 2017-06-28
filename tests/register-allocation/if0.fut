@@ -13,12 +13,11 @@
 
 let main (xs0: [#n]i32, cond: bool, i: i32): [n]i32 =
   let xs = map (+ 1) xs0
+  let k = xs[i]
   let ys =
     if cond
-    then let k = xs[i]
-         let zs = map (+ k) (iota n) -- Can use the memory of 'xs'.
+    then let zs = replicate n k
          in zs
-    else let zs = replicate n (reduce (+) 0 xs) -- xs
+    else let zs = xs
          in zs
-  let zs = map (+ 1) ys
-  in zs
+  in ys
