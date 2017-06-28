@@ -43,14 +43,20 @@ newtype Current = Current { curUses :: M.Map VName Names }
 type TraversalMonad a = RWS Context RegAllocResult Current a
 
 
-memBlockSizes :: Body ExpMem.ExplicitMemory -> Sizes
-memBlockSizes = foldl onStm M.empty . bodyStms
-  where onStm sizes (Let (Pattern _ [PatElem mem _ _]) ()
-                     (Op (ExpMem.Alloc size _))) = M.insert mem size sizes
-        onStm sizes stm = foldExp folder sizes $ bindingExp stm
+memBlockSizes :: FunDef ExpMem.ExplicitMemory -> Sizes
+memBlockSizes fundef = M.union fromParams fromBody
+  where fromParams = M.fromList $ concatMap onParam $ funDefParams fundef
+        onParam (Param mem (ExpMem.MemMem size _space)) = [(mem, size)]
+        onParam _ = []
 
-        folder = identityFolder {
-          foldOnBody = \sizes body -> return $ M.union sizes $ memBlockSizes body
+        fromBody = M.fromList $ concatMap onStm $ bodyStms $ funDefBody fundef
+        onStm (Let (Pattern _ [PatElem mem _ _]) ()
+               (Op (ExpMem.Alloc size _))) = [(mem, size)]
+        onStm stm = foldExp folder [] $ bindingExp stm
+        folder = identityFolder
+          { foldOnStm = \sizes stm -> return (sizes ++ onStm stm)
+          , foldOnFParam = \sizes fparam -> return (sizes ++ onParam fparam)
+          , foldOnLParam = \sizes lparam -> return (sizes ++ onParam lparam)
           }
 
 regAllocFunDef :: FunDef ExpMem.ExplicitMemory
@@ -59,7 +65,7 @@ regAllocFunDef fundef = do
   let fundef_aliases = analyseFun fundef
       lutab = LastUse.lastUseFun fundef_aliases
       interferences = Interference.intrf $ snd $ Interference.intrfAnFun lutab fundef_aliases
-      sizes = memBlockSizes $ funDefBody fundef
+      sizes = memBlockSizes fundef
       context = Context lutab sizes
       current_empty = Current M.empty
 
