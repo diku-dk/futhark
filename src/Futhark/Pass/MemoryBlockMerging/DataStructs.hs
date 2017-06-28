@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Futhark.Pass.MemoryBlockMerging.DataStructs
        ( Coalesced(..),CoalescedKind(..), ArrayMemBound(..), AllocTab
-       , V2MemTab, AliasTab, LUTabFun, LUTabPrg, ScalarTab,  CoalsTab
+       , V2MemTab, AliasTab, LUTabFun, ScalarTab, CoalsTab
        , CoalsEntry(..), FreeVarSubsts
        , aliasTransClos, updateAliasing, getNamesFromSubExps, unionCoalsEntry
        , getArrMemAssocFParam, createsAliasedArrOK, getScopeMemInfo, prettyCoalTab
@@ -74,8 +74,6 @@ type AliasTab = M.Map VName Names
 -- ^ maps a variable or memory block to its aliases
 type LUTabFun = M.Map VName Names
 -- ^ maps a name indentifying a stmt to the last uses in that stmt
-type LUTabPrg = M.Map Name  LUTabFun
--- ^ maps function names to last-use tables
 type ScalarTab= M.Map VName (ExpMem.PrimExp VName)
 -- ^ maps a variable name to its PrimExp scalar expression
 type CoalsTab = M.Map VName CoalsEntry

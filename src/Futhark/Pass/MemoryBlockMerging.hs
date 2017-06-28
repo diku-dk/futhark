@@ -28,7 +28,6 @@ import Futhark.Analysis.Alias (analyseFun)
 
 import qualified Futhark.Pass.MemoryBlockMerging.AllocHoisting as AH
 import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
-import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.ArrayCoalescing as ArrayCoalescing
 
 import Futhark.Util (unixEnvironment)
@@ -63,17 +62,6 @@ transformFunDef fundef = do
   let coaltab = ArrayCoalescing.mkCoalsTabFun $ analyseFun fundef
 
   let debug = unsafePerformIO $ when usesDebugging $ do
-        -- Print last uses.
-        let lutab_prg = M.fromList [LastUse.lastUseFun $ analyseFun fundef]
-        replicateM_ 5 $ putStrLn ""
-        putStrLn $ replicate 10 '*' ++ " Last use result in "  ++ pretty (funDefName fundef) ++ replicate 10 '*'
-        putStrLn $ replicate 70 '-'
-        forM_ (M.assocs lutab_prg) $ \(fun_name, lutab_fun) ->
-          forM_ (M.assocs lutab_fun) $ \(stmt_name, lu_names) -> do
-            putStrLn $ "Last uses in function " ++ pretty fun_name ++ ", statement " ++ pretty stmt_name ++ ":"
-            putStrLn $ L.intercalate "   " $ map pretty $ S.toList lu_names
-            putStrLn $ replicate 70 '-'
-
         -- Print coalescings.
         replicateM_ 5 $ putStrLn ""
         putStrLn $ replicate 10 '*' ++ " Coalescings result in " ++ pretty (funDefName fundef) ++ " (" ++ show (M.size coaltab) ++ ") " ++ replicate 10 '*'

@@ -129,7 +129,7 @@ prettyInhibitTab tab =
 
 mkCoalsTabFun :: FunDef (Aliases ExpMem.ExplicitMemory) -> CoalsTab
 mkCoalsTabFun fun@(FunDef _ _ _ fpars body) =
-  let (_, lutab) = lastUseFun fun
+  let lutab = lastUseFun fun
       unique_mems = S.fromList $ M.keys $ getUniqueMemFParam fpars
       topenv = emptyTopDnEnv { scope = scopeOfFParams fpars
                              , alloc = unique_mems
