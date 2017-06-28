@@ -1,16 +1,20 @@
--- Requires that 'n' and '(shape xs)[0]' are recognized as the same value.
+-- Requires that 'n' and '(shape xs)[0]' are recognized as the same value.  This
+-- should be easy for the compiler unless there are some layers of indirection
+-- not removed by a simplifier.
 -- ==
-
--- input {
+-- input { [1, 3, 6]
+--         1
 --       }
--- output {
+-- output { [4, 4, 4]
 --        }
+
 -- structure cpu { Alloc 1 }
 
-let main (n: i32, i: i32): [n]i32 =
-  let xs = iota n
+let main (xs0: [#n]i32, i: i32): [n]i32 =
+  let xs = map (+ 1) xs0
   let xs_length = (shape xs)[0]
 
-  let ys = replicate xs_length xs[0]
+  let k = xs[i]
+  let ys = replicate xs_length k
 
   in ys

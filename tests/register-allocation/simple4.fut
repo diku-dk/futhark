@@ -1,16 +1,19 @@
--- Just a longer chain of non-overlapping memory blocks.
+-- A longer chain of non-overlapping memory blocks.
 -- ==
-
--- input {
+-- input { [5, 7]
+--         1
 --       }
--- output {
+-- output { [15, 15]
 --        }
+
 -- structure cpu { Alloc 1 }
 
-let main (n: i32, i: i32): [n]i32 =
-  let xs = replicate (n + 1) 1
+-- FIXME: Needs better memory-in-loop support from the module.
+
+let main (ns: [#n]i32, i: i32): [n]i32 =
+  let xs = map (+ 1) ns
   let k0 = xs[i]
-  let ys = replicate n k0
+  let ys = map (+ k0) ns -- Can end up in mem_xs.
   let k1 = ys[i]
-  let zs = replicate n k1
+  let zs = replicate n k1 -- Can end up in mem_ys, and by extension mem_xs.
   in zs
