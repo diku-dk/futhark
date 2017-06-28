@@ -2,33 +2,27 @@
 -- | Playground for work on merging memory blocks
 module Futhark.Pass.MemoryBlockMerging.LastUse
   ( lastUseFun
-  , lastUsePrg
   ) where
 
 import Prelude
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
---import Futhark.Representation.AST.Syntax
-
 import Futhark.Representation.Aliases
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Pass.MemoryBlockMerging.DataStructs
 
--- | Last-Use analysis of a Futhark program in aliased explicit-memory lore form.
---   Takes as input such a program and produces a `M.Map VName [VName]`,
+-- | Last-Use analysis of a function in aliased explicit-memory lore form.
+--   Takes as input such a function and produces a `M.Map VName Names`,
 --   in which the key identifies the let stmt, and the list argument
 --   identifies the variables that were lastly used in that stmt.
 --   Note that the results of a body do not have a last use, and neither
 --   do a function parameter if it happens to not be used inside function's body.
 --   Such cases are supposed to be treated separately.
-lastUsePrg :: Prog (Aliases ExpMem.ExplicitMemory) -> LUTabPrg
-lastUsePrg prg = M.fromList $ map lastUseFun $ progFunctions prg
-
-lastUseFun :: FunDef (Aliases ExpMem.ExplicitMemory) -> (Name,LUTabFun)
-lastUseFun (FunDef _ fname _ _ body) =
-  let (_,res,_) = lastUseAnBdy M.empty body (M.empty,S.empty)
-  in  (fname, res)
+lastUseFun :: FunDef (Aliases ExpMem.ExplicitMemory) -> LUTabFun
+lastUseFun fundef =
+  let (_, res, _) = lastUseAnBdy M.empty (funDefBody fundef) (M.empty,S.empty)
+  in  res
 
 -- | Performing the last-use analysis on a body. Arguments are:
 --     (i) the aliasing table,

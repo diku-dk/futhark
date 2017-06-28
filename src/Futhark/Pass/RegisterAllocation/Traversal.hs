@@ -21,7 +21,7 @@ import Futhark.Pass.ExplicitAllocations()
 
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.Interference as Interference
-import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
+-- import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 
 import Futhark.Util (unixEnvironment)
 usesDebugging :: Bool
@@ -57,7 +57,7 @@ regAllocFunDef :: FunDef ExpMem.ExplicitMemory
                   -> RegAllocResult
 regAllocFunDef fundef = do
   let fundef_aliases = analyseFun fundef
-      lutab = snd $ LastUse.lastUseFun fundef_aliases
+      lutab = LastUse.lastUseFun fundef_aliases
       interferences = Interference.intrf $ snd $ Interference.intrfAnFun lutab fundef_aliases
       sizes = memBlockSizes $ funDefBody fundef
       context = Context lutab sizes
