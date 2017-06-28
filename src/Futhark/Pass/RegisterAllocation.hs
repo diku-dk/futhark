@@ -38,13 +38,8 @@ runThroughAllocations = simplePass
 transformProg :: MonadFreshNames m
               => Prog ExpMem.ExplicitMemory
               -> m (Prog ExpMem.ExplicitMemory)
-transformProg prog = do
-  prog1 <- intraproceduralTransformation transformFunDef prog
-
-  let debug = unsafePerformIO $ when usesDebugging $ putStrLn $ pretty prog1
-
-  debug `seq` return prog1
-
+transformProg prog =
+  intraproceduralTransformation transformFunDef prog
 
 transformFunDef :: MonadFreshNames m
                 => FunDef ExpMem.ExplicitMemory

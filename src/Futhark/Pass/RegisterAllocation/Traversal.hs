@@ -42,6 +42,12 @@ newtype Current = Current { curUses :: M.Map VName Names }
 
 type TraversalMonad a = RWS Context RegAllocResult Current a
 
+withLocalState :: TraversalMonad a -> TraversalMonad a
+withLocalState m = do
+  s <- get
+  res <- m
+  put s
+  return res
 
 memBlockSizes :: FunDef ExpMem.ExplicitMemory -> Sizes
 memBlockSizes fundef = M.union fromParams fromBody
@@ -96,15 +102,20 @@ regAllocBody (Body () bnds _res) =
   mapM_ regAllocStm bnds
 
 regAllocStm :: Stm ExpMem.ExplicitMemory -> TraversalMonad ()
-regAllocStm (Let (Pattern _ patelems) () e) =
+regAllocStm (Let (Pattern _ patelems) () e) = do
+  withLocalState $ walkExpM walker e
+
   let debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 70 '-'
         putStrLn "Statement."
         print patelems
         print e
         putStrLn $ replicate 70 '-'
-  in debug `seq` when (createsNewArrOK e) -- watch out for copy and concat
-  $ mapM_ handleNewArray patelems
+
+  -- watch out for copy and concat
+  debug `seq` when (createsNewArrOK e) $ mapM_ handleNewArray patelems
+
+  where walker = identityWalker { walkOnBody = regAllocBody }
 
 handleNewArray :: PatElem ExpMem.ExplicitMemory -> TraversalMonad ()
 handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
