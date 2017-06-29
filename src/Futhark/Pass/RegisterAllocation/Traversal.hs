@@ -2,7 +2,7 @@
 -- | Traverse a body to find memory blocks that can be allocated together.
 module Futhark.Pass.RegisterAllocation.Traversal
   ( regAllocFunDef
-  , RegAllocResult
+  , RegAllocResult(..)
   ) where
 
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
@@ -11,7 +11,7 @@ import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.List as L
-import Data.Maybe (isJust, fromMaybe)
+import Data.Maybe (isJust, fromMaybe, mapMaybe)
 
 import Futhark.Analysis.Alias (analyseFun)
 import Futhark.Tools
@@ -28,8 +28,16 @@ import Futhark.Util (unixEnvironment)
 usesDebugging :: Bool
 usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
 
-type RegAllocResult =
-  M.Map VName VName -- ^ Mapping from old memory block to new memory block.
+data RegAllocResult = RegAllocResult
+  { -- | Mapping from variable name to new memory block.  Only includes the
+    -- variable names where there is a new mapping.
+    regMappings :: M.Map VName VName
+
+    -- | Fixes in body results where a memory block needs to be replaced by
+    -- another memory block.  Can occur in loops.
+  , regMemFixes :: M.Map VName VName
+  }
+  deriving (Show)
 
 type Sizes = M.Map VName SubExp
 
@@ -39,6 +47,7 @@ data Context = Context { ctxInterferences :: Interference.IntrfTab
   deriving (Show)
 
 data Current = Current { curUses :: M.Map VName Names
+
                          -- Mostly used as in a writer monad, but not fully.
                        , curResult :: RegAllocResult
                        }
@@ -55,9 +64,16 @@ insertOrNew x m = Just $ case m of
   Just s -> S.insert x s
   Nothing -> S.singleton x
 
-saveRecord :: VName -> VName -> TraversalMonad ()
-saveRecord x mem =
-    modify $ \cur -> cur { curResult = M.union (M.singleton x mem) $ curResult cur }
+modifyResult :: (RegAllocResult -> RegAllocResult) -> TraversalMonad ()
+modifyResult f = modify $ \cur -> cur { curResult = f $ curResult cur }
+
+recordMapping :: VName -> VName -> TraversalMonad ()
+recordMapping x mem =
+    modifyResult $ \res -> res { regMappings = M.union (M.singleton x mem) $ regMappings res }
+
+recordMemFix :: VName -> VName -> TraversalMonad ()
+recordMemFix xmem ymem =
+    modifyResult $ \res -> res { regMemFixes = M.union (M.singleton xmem ymem) $ regMemFixes res }
 
 withLocalUses :: TraversalMonad a -> TraversalMonad a
 withLocalUses m = do
@@ -93,7 +109,7 @@ regAllocFunDef fundef = do
       interferences = Interference.intrf $ snd $ Interference.intrfAnFun lutab fundef_aliases
       sizes = memBlockSizes fundef
       context = Context lutab sizes
-      current_empty = Current M.empty M.empty
+      current_empty = Current M.empty $ RegAllocResult M.empty M.empty
 
       m = regAllocBody $ funDefBody fundef
       result = curResult $ fst $ execRWS m context current_empty
@@ -107,6 +123,13 @@ regAllocFunDef fundef = do
           putStrLn $ "Interferences for " ++ pretty stmt_name ++ ":"
           putStrLn $ L.intercalate "   " $ map pretty $ S.toList interf_names
           putStrLn $ replicate 70 '-'
+
+        -- Print sizes
+        replicateM_ 5 $ putStrLn ""
+        putStrLn $ replicate 10 '*' ++ " Sizes in "  ++ pretty (funDefName fundef) ++ " " ++ replicate 10 '*'
+        putStrLn $ replicate 70 '-'
+        forM_ (M.assocs sizes) $ \(x, size) ->
+          putStrLn $ "Sizes for " ++ pretty x ++ ": " ++ show size
 
         -- Print results.
         putStrLn $ replicate 70 '-'
@@ -122,41 +145,73 @@ regAllocBody (Body () bnds _res) =
   mapM_ regAllocStm bnds
 
 regAllocStm :: Stm ExpMem.ExplicitMemory -> TraversalMonad ()
-regAllocStm (Let (Pattern _ patelems) () e) = do
+regAllocStm (Let (Pattern patctxelems patvalelems) () e) = do
   withLocalUses $ walkExpM walker e
 
   let creates_new_array = createsNewArrOK e
-  when creates_new_array $ mapM_ handleNewArray patelems
+  when creates_new_array $ mapM_ handleNewArray patvalelems
 
   case e of
-    DoLoop _mergectxparams mergevalparams _loopform _body -> do
+    DoLoop _mergectxparams mergevalparams _loopform body -> do
       -- In this case we need to record mappings to a memory block for all
       -- existential loop variables whose initial value maps to that memory
       -- block.
-      res_so_far <- curResult <$> get
+      res_so_far <- gets (regMappings . curResult)
       let findMem (_, Var y) = M.lookup y res_so_far
           findMem _ = Nothing
           mem_replaces = map findMem mergevalparams
 
           updateFromReplace (Just mem) x = do
             insertUse mem x
-            saveRecord x mem
+            recordMapping x mem
           updateFromReplace Nothing _ = return ()
 
       forM_ (zip mem_replaces mergevalparams) $ \(mem_may, (Param x _, _)) ->
         updateFromReplace mem_may x
 
-      forM_ (zip mem_replaces patelems) $ \(mem_may, PatElem x _ _) ->
+      forM_ (zip mem_replaces patvalelems) $ \(mem_may, PatElem x _ _) ->
         updateFromReplace mem_may x
 
-      let debug = unsafePerformIO $ when usesDebugging $ print mergevalparams
+      -- The body of a loop can return a memory block in its results.  This is
+      -- the memory block used by a variable which is also part of the results.
+      -- If the memory block of that variable is changed, we need a way to
+      -- record that the memory block in the body result also needs to change.
+      let zipped = zip [(0::Int)..] (patctxelems ++ patvalelems) -- Should be fine?
+          findMemLinks (i, PatElem _x _binding (ExpMem.ArrayMem _ _ _ xmem _)) =
+            case L.find (\(_, PatElem ymem _ _) -> ymem == xmem) zipped of
+              Just (j, _) -> Just (j, i)
+              Nothing -> Nothing
+          findMemLinks _ = Nothing
+
+          mem_links = mapMaybe findMemLinks zipped
+
+          res = bodyResult body
+
+      res_so_far' <- gets (regMappings . curResult)
+      let fixResRecord (i, se)
+            | Var mem <- se
+            , Just j <- L.lookup i mem_links
+            , Var related_var <- res L.!! j
+            , Just mem_new <- M.lookup related_var res_so_far' =
+                recordMemFix mem mem_new
+            | otherwise = return ()
+
+      forM_ (zip [(0::Int)..] res) fixResRecord
+
+      let debug = unsafePerformIO $ when usesDebugging $ do
+            putStrLn "Extraordinary loop handling."
+            print patctxelems
+            print patvalelems
+            print mem_links
+
       debug `seq` return ()
     _ -> return ()
 
   let debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 70 '-'
         putStrLn "Statement."
-        print patelems
+        print patvalelems
+        print e
         putStrLn $ replicate 70 '-'
 
   debug `seq` return ()
@@ -192,7 +247,7 @@ handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
   case L.find canBeUsed $ M.assocs uses of
     Just (kmem, _vars) -> do
       insertUse kmem x
-      saveRecord x kmem
+      recordMapping x kmem
     Nothing ->
       insertUse xmem x
 
