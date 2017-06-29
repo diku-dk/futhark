@@ -152,7 +152,6 @@ The semantics of this is precisely as in the tail-recursive function
 formulation.  In general, a loop::
 
   loop (pat = initial) for i < bound do loopbody
-  in body
 
 Has the following the semantics:
 
@@ -209,14 +208,14 @@ understand with an example.  The loop::
   let fib(n: i32): i32 =
     let x = 1
     let y = 1
-    let (x, y) = loop ((x, y) = (x, y)) for i < n do (y, x+y)
+    in loop ((x, y) = (x, y)) for i < n do (y, x+y)
 
 can also be written::
 
   let fib(n: i32): i32 =
     let x = 1
     let y = 1
-    let (x, y) = loop ((x, y)) for i < n do (y, x+y)
+    in loop ((x, y)) for i < n do (y, x+y)
 
 This can sometimes make imperative code look more natural.
 
