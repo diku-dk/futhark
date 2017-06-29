@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 -- | Traverse a body to find memory blocks that can be allocated together.
 module Futhark.Pass.RegisterAllocation.Traversal
   ( regAllocFunDef
@@ -37,16 +38,33 @@ data Context = Context { ctxInterferences :: Interference.IntrfTab
                        }
   deriving (Show)
 
-newtype Current = Current { curUses :: M.Map VName Names }
+data Current = Current { curUses :: M.Map VName Names
+                         -- Mostly used as in a writer monad, but not fully.
+                       , curResult :: RegAllocResult
+                       }
   deriving (Show)
 
-type TraversalMonad a = RWS Context RegAllocResult Current a
+type TraversalMonad a = RWS Context () Current a
 
-withLocalState :: TraversalMonad a -> TraversalMonad a
-withLocalState m = do
-  s <- get
+insertUse :: VName -> VName -> TraversalMonad ()
+insertUse mem x =
+  modify $ \cur -> cur { curUses = M.alter (insertOrNew x) mem $ curUses cur }
+
+insertOrNew :: Ord a => a -> Maybe (S.Set a) -> Maybe (S.Set a)
+insertOrNew x m = Just $ case m of
+  Just s -> S.insert x s
+  Nothing -> S.singleton x
+
+saveRecord :: VName -> VName -> TraversalMonad ()
+saveRecord x mem =
+    modify $ \cur -> cur { curResult = M.union (M.singleton x mem) $ curResult cur }
+
+withLocalUses :: TraversalMonad a -> TraversalMonad a
+withLocalUses m = do
+  -- Keep the curResult.
+  uses <- gets curUses
   res <- m
-  put s
+  modify $ \cur -> cur { curUses = uses }
   return res
 
 memBlockSizes :: FunDef ExpMem.ExplicitMemory -> Sizes
@@ -75,10 +93,10 @@ regAllocFunDef fundef = do
       interferences = Interference.intrf $ snd $ Interference.intrfAnFun lutab fundef_aliases
       sizes = memBlockSizes fundef
       context = Context lutab sizes
-      current_empty = Current M.empty
+      current_empty = Current M.empty M.empty
 
       m = regAllocBody $ funDefBody fundef
-      result = snd $ evalRWS m context current_empty
+      result = curResult $ fst $ execRWS m context current_empty
 
   let debug = interferences `seq` unsafePerformIO $ when usesDebugging $ do
         -- Print interferences.
@@ -105,10 +123,35 @@ regAllocBody (Body () bnds _res) =
 
 regAllocStm :: Stm ExpMem.ExplicitMemory -> TraversalMonad ()
 regAllocStm (Let (Pattern _ patelems) () e) = do
-  withLocalState $ walkExpM walker e
+  withLocalUses $ walkExpM walker e
 
   let creates_new_array = createsNewArrOK e
   when creates_new_array $ mapM_ handleNewArray patelems
+
+  case e of
+    DoLoop mergectxparams mergevalparams loopform body -> do
+      -- In this case we need to record mappings to a memory block for all
+      -- existential loop variables whose initial value maps to that memory
+      -- block.
+      res_so_far <- curResult <$> get
+      let findMem (_, Var y) = M.lookup y res_so_far
+          findMem _ = Nothing
+          mem_replaces = map findMem mergevalparams
+
+          updateFromReplace (Just mem) x = do
+            insertUse mem x
+            saveRecord x mem
+          updateFromReplace Nothing _ = return ()
+
+      forM_ (zip mem_replaces mergevalparams) $ \(mem_may, (Param x _, _)) ->
+        updateFromReplace mem_may x
+
+      forM_ (zip mem_replaces patelems) $ \(mem_may, PatElem x _ _) ->
+        updateFromReplace mem_may x
+
+      let debug = unsafePerformIO $ when usesDebugging $ print mergevalparams
+      debug `seq` return ()
+    _ -> return ()
 
   let debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 70 '-'
@@ -148,10 +191,10 @@ handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
 
   case L.find canBeUsed $ M.assocs uses of
     Just (kmem, _vars) -> do
-      modify $ \cur -> cur { curUses = M.alter (insertOrNew x) kmem $ curUses cur }
-      tell $ M.singleton x kmem
+      insertUse kmem x
+      saveRecord x kmem
     Nothing ->
-      modify $ \cur -> cur { curUses = M.alter (insertOrNew x) xmem $ curUses cur }
+      insertUse xmem x
 
   debug `seq` return ()
 
@@ -170,12 +213,6 @@ equalSizeSubExps x y =
         putStrLn $ replicate 70 '-'
 
   in debug `seq` eq
-
-insertOrNew :: Ord a => a -> Maybe (S.Set a) -> Maybe (S.Set a)
-insertOrNew x m = Just $ case m of
-  Just s -> S.insert x s
-  Nothing -> S.singleton x
-
 
 -- FIXME: Generalise the one from DataStructs.
 -- watch out for copy and concat
