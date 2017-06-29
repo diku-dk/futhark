@@ -711,13 +711,9 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
 fuseInBody :: Body -> FusionGM Body
 
 fuseInBody (Body _ (Let pat () e:bnds) res) = do
-  maybesoac <- SOAC.fromExp e
   body' <- bindingPat pat $ fuseInBody $ mkBody bnds res
-  case maybesoac of
-    Right soac -> do soac_bnds <- replaceSOAC pat soac
-                     return $ insertStms soac_bnds body'
-    _ -> do e' <- fuseInExp e
-            return $ insertStms [Let pat () e'] body'
+  soac_bnds <- replaceSOAC pat e
+  return $ insertStms soac_bnds body'
 
 fuseInBody (Body () [] res) =
   return $ Body () [] res
@@ -756,17 +752,16 @@ fuseInExtLambda (ExtLambda params body rtp) = do
   body' <- binding (map paramIdent params) $ fuseInBody body
   return $ ExtLambda params body' rtp
 
-replaceSOAC :: Pattern -> SOAC -> FusionGM [Stm]
+replaceSOAC :: Pattern -> Exp -> FusionGM [Stm]
 replaceSOAC (Pattern _ []) _ = return []
-replaceSOAC pat@(Pattern _ (patElem : _)) soac = do
+replaceSOAC pat@(Pattern _ (patElem : _)) e = do
   fres  <- asks fusedRes
   let pat_nm = patElemName patElem
       names  = patternIdents pat
   case M.lookup pat_nm (outArr fres) of
     Nothing  -> do
-      (e,bnds) <- runBinder $ SOAC.toExp soac
       e'    <- fuseInExp e
-      return $ bnds++[mkLet' [] names e']
+      return [Let pat () e']
     Just knm ->
       case M.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ Error
