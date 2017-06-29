@@ -83,7 +83,7 @@ transformValMergeParam (Param x membound, se) = do
 
 transformPatValElemT :: PatElemT (LetAttr ExpMem.ExplicitMemory)
                      -> TransformM (PatElemT (LetAttr ExpMem.ExplicitMemory))
-transformPatValElemT (PatElem x binding@(BindInPlace certs y slice) membound) = do
+transformPatValElemT (PatElem x binding@(BindInPlace _certs y _slice) membound) = do
   membound' <- transformValMem y membound
   return $ PatElem x binding membound'
 transformPatValElemT (PatElem x bindage membound) = do

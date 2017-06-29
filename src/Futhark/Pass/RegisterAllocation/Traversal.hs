@@ -129,7 +129,7 @@ regAllocStm (Let (Pattern _ patelems) () e) = do
   when creates_new_array $ mapM_ handleNewArray patelems
 
   case e of
-    DoLoop mergectxparams mergevalparams loopform body -> do
+    DoLoop _mergectxparams mergevalparams _loopform _body -> do
       -- In this case we need to record mappings to a memory block for all
       -- existential loop variables whose initial value maps to that memory
       -- block.
