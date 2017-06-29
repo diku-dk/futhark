@@ -8,8 +8,6 @@
 
 -- structure cpu { Alloc 1 }
 
--- FIXME: Needs better memory-in-loop support from the module.
-
 let main (ns: [#n]i32, i: i32): [n]i32 =
   let xs = map (+ 1) ns
   let k0 = xs[i]
