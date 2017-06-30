@@ -1,6 +1,9 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 -- | Playground for work on merging memory blocks
-module Futhark.Pass.MemoryBlockMerging.Interference where
+module Futhark.Pass.MemoryBlockMerging.Interference
+  ( intrfAnFun
+  , IntrfEnv(..)
+  ) where
 
 import Prelude
 import Data.Maybe
@@ -54,15 +57,15 @@ data IntrfEnv = IntrfEnv { intrf :: IntrfTab
                          -- ^ array variables that are newly created, i.e., they "own"
                          --   their memory block during their life span.
                          }
+              deriving (Show)
 
 emptyInterfEnv :: IntrfEnv
 emptyInterfEnv = IntrfEnv { intrf = M.empty, alloc = S.empty
                           , alias = M.empty, v2mem = M.empty, active = S.empty }
 
-intrfAnFun :: LUTabFun -> FunDef (Aliases ExpMem.ExplicitMemory) -> (Name,IntrfEnv)
+intrfAnFun :: LUTabFun -> FunDef (Aliases ExpMem.ExplicitMemory) -> IntrfEnv
 intrfAnFun lutabfun (FunDef _ fname _ _ body) =
-  let env = intrfAnBdy lutabfun emptyInterfEnv body
-  in  (fname, env)
+  intrfAnBdy lutabfun emptyInterfEnv body
 
 intrfAnBdy :: LUTabFun -> IntrfEnv -> Body (Aliases ExpMem.ExplicitMemory)
            -> IntrfEnv
