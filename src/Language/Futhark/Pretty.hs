@@ -228,9 +228,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
                                     Noncommutative -> ""
         in  text ("stream_red"++ord_str++comm_str) <>
             ppr lam0 </> ppr lam </> pprPrec 10 arr
-      Sequential acc ->
-            text "stream_seq" <+>
-            ppr lam </> spread [pprPrec 10 acc, pprPrec 10 arr]
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]

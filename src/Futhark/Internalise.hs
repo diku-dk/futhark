@@ -772,16 +772,9 @@ internaliseExp desc (E.Partition lams arr _) = do
 
 internaliseExp desc (E.Stream form lam arr _) = do
   arrs <- internaliseExpToVars "stream_input" arr
-  (lam_accs, lam_acc_param_ts) <-
-    case form of E.MapLike{} -> return ([], [])
-                 E.RedLike{} -> return ([], [])
-                 E.Sequential acc -> do
-                   accs <- internaliseExp "stream_acc" acc
-                   acc_ts <- mapM I.subExpType accs
-                   return (accs, acc_ts)
 
   rowts <- mapM (fmap I.rowType . lookupType) arrs
-  lam' <- internaliseStreamLambda internaliseLambda lam lam_acc_param_ts rowts
+  lam' <- internaliseStreamLambda internaliseLambda lam rowts
 
   -- If the stream form is a reduce, we also have to fiddle with the
   -- lambda to incorporate the reduce function.  FIXME: can't we just
@@ -789,7 +782,6 @@ internaliseExp desc (E.Stream form lam arr _) = do
   (form', lam'') <-
     case form of
       E.MapLike o -> return (I.MapLike o, lam')
-      E.Sequential _ -> return (I.Sequential lam_accs, lam')
       E.RedLike o comm lam0 -> do
         -- Synthesize neutral elements by applying the fold function
         -- to an empty chunk.

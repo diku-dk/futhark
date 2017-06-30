@@ -594,9 +594,6 @@ typeOf (Stream form lam _ _) =
     RedLike{}    -> lambdaReturnType lam
                     `setAliases` S.empty
                     `setUniqueness` Unique
-    Sequential{} -> lambdaReturnType lam
-                    `setAliases` S.empty
-                    `setUniqueness` Unique
 typeOf (Concat _ x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` S.empty
 typeOf (Split _ splitexps e _) =

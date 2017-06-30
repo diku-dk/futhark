@@ -160,19 +160,15 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
 internaliseStreamLambda :: InternaliseLambda
                         -> E.Lambda
                         -> [I.Type]
-                        -> [I.Type]
                         -> InternaliseM I.ExtLambda
-internaliseStreamLambda internaliseLambda lam acctypes rowts = do
+internaliseStreamLambda internaliseLambda lam rowts = do
   chunk_size <- newVName "chunk_size"
   let chunk_param = I.Param chunk_size $ I.Prim int32
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
   (params, body, rettype) <- localScope (scopeOfLParams [chunk_param]) $
-                             internaliseLambda lam $ acctypes++chunktypes
-  -- split rettype into (i) accummulator types && (ii) result-array-elem types
-  let acc_len = length acctypes
-      lam_acc_tps = take acc_len rettype
-  let lam_arr_tps = drop acc_len rettype
-  --
+                             internaliseLambda lam chunktypes
+
+
   -- The accumulator result of the body must have the exact same
   -- shape as the initial accumulator.  We accomplish this with
   -- an assertion and reshape().  For the result arrays, we allow
@@ -183,8 +179,7 @@ internaliseStreamLambda internaliseLambda lam acctypes rowts = do
   let assertProperShape t se =
         let name = "result_stream_proper_shape"
         in  ensureShape asserting (srclocOf lam) t name se
-  let acctype' = [ t `I.setArrayShape` I.arrayShape shape
-                   | (t,shape) <- zip lam_acc_tps acctypes ]
+
   body' <- insertStmsM $ do
                 let mkArrType :: (VName, ExtType) -> InternaliseM I.Type
                     mkArrType (x, I.Array btp shp u) = do
@@ -201,17 +196,14 @@ internaliseStreamLambda internaliseLambda lam acctypes rowts = do
                     mkArrType (_, I.Mem se sid) =
                       return $ I.Mem se sid
                 lamres <- bodyBind body
-                let (lamacc_res, lamarr_res) = (take acc_len lamres, drop acc_len lamres)
-                    lamarr_idtps = concatMap (\(y,tp) -> case y of
+                let lamarr_idtps = concatMap (\(y,tp) -> case y of
                                                            I.Var ii -> [(ii,tp)]
                                                            _        -> []
-                                             ) (zip lamarr_res lam_arr_tps)
+                                             ) (zip lamres rettype)
                 arrtype' <- mapM mkArrType lamarr_idtps
-                reses1 <- zipWithM assertProperShape acctype' lamacc_res
-                reses2 <- zipWithM assertProperShape arrtype' lamarr_res
-                return $ resultBody $ reses1 ++ reses2
-  return $ I.ExtLambda (chunk_param:params) body' $
-            staticShapes acctypes ++ lam_arr_tps
+                reses <- zipWithM assertProperShape arrtype' lamres
+                return $ resultBody reses
+  return $ I.ExtLambda (chunk_param:params) body' rettype
 
 -- Given @k@ lambdas, this will return a lambda that returns an
 -- (k+2)-element tuple of integers.  The first element is the

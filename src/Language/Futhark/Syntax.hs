@@ -682,7 +682,6 @@ deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
                      | RedLike    StreamOrd Commutativity (LambdaBase f vn)
-                     | Sequential (ExpBase f vn)
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
