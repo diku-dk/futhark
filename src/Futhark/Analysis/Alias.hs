@@ -61,6 +61,7 @@ analyseExp = mapExp analyse
                  , mapOnBody = const $ return . analyseBody
                  , mapOnRetType = return
                  , mapOnFParam = return
+                 , mapOnLParam = return
                  , mapOnOp = return . addOpAliases
                  }
 

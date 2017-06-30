@@ -47,9 +47,12 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeExtLambdaAliases)
 import Futhark.Analysis.Usage
+import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.Range as Range
+import Futhark.Util (maybeNth)
 
 data SOAC lore =
     Map Certificates SubExp (LambdaT lore) [VName]
@@ -374,6 +377,44 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
                    (return . removeLambdaWisdom)
                    (return . removeExtLambdaWisdom)
                    return return
+
+instance Annotations lore => ST.IndexOp (SOAC lore) where
+  indexOp vtable k soac [i] = do
+    (lam,se,arr_params,arrs) <- lambdaAndSubExp soac
+    let arr_indexes = M.fromList $ catMaybes $ zipWith arrIndex arr_params arrs
+        arr_indexes' = foldl expandPrimExpTable arr_indexes $ bodyStms $ lambdaBody lam
+    case se of
+      Var v -> M.lookup v arr_indexes'
+      _ -> Nothing
+      where lambdaAndSubExp (Map _ _ lam arrs) =
+              nthMapOut 0 lam arrs
+            lambdaAndSubExp (Redomap _ _ _ _ lam nes arrs) =
+              nthMapOut (length nes) lam arrs
+            lambdaAndSubExp _ =
+              Nothing
+
+            nthMapOut num_accs lam arrs = do
+              se <- maybeNth (num_accs+k) $ bodyResult $ lambdaBody lam
+              return (lam, se, drop num_accs $ lambdaParams lam, arrs)
+
+            arrIndex p arr = do
+              pe <- ST.index' arr [i] vtable
+              return (paramName p, pe)
+
+            expandPrimExpTable table stm
+              | [v] <- patternNames $ bindingPattern stm,
+                Just pe <- primExpFromExp (asPrimExp table) $ bindingExp stm =
+                  M.insert v pe table
+              | otherwise =
+                  table
+
+            asPrimExp table (BasicOp (SubExp (Var v)))
+              | Just e <- M.lookup v table = Just e
+              | Just (Prim pt) <- ST.lookupType v vtable = Just $ LeafExp v pt
+            asPrimExp _ (BasicOp (SubExp (Constant v))) =
+              Just $ ValueExp v
+            asPrimExp _ _ = Nothing
+  indexOp _ _ _ _ = Nothing
 
 instance Aliased lore => UsageInOp (SOAC lore) where
   usageInOp (Map _ _ f arrs) = usageInLambda f arrs

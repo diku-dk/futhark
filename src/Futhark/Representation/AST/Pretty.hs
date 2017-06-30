@@ -246,13 +246,20 @@ instance PrettyLore lore => Pretty (Exp lore) where
     text "loop" <+> ppPattern ctxparams valparams <+>
     equals <+> ppTuple' (ctxinit++valinit) </>
     (case form of
-      ForLoop i it bound ->
-        text "for" <+> ppr i <> text ":" <> ppr it <+> text "<" <+> align (ppr bound)
+      ForLoop i it bound [] ->
+        text "for" <+> align (ppr i <> text ":" <> ppr it <+>
+                              text "<" <+> align (ppr bound))
+      ForLoop i it bound loop_vars ->
+        annot (mapMaybe (ppAnnot . fst) loop_vars) $
+        text "for" <+> align (ppr i <> text ":" <> ppr it <+>
+                              text "<" <+> align (ppr bound) </>
+                             stack (map pprLoopVar loop_vars))
       WhileLoop cond ->
         text "while" <+> ppr cond
     ) <+> text "do" <+> nestedBlock "{" "}" (ppr loopbody)
     where (ctxparams, ctxinit) = unzip ctx
           (valparams, valinit) = unzip val
+          pprLoopVar (p,a) = ppr p <+> text "in" <+> ppr a
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =

@@ -159,9 +159,10 @@ instance Scoped lore (FunDef lore) where
 instance Scoped lore (VName, NameInfo lore) where
   scopeOf = uncurry M.singleton
 
-scopeOfLoopForm :: LoopForm -> Scope lore
+scopeOfLoopForm :: LoopForm lore -> Scope lore
 scopeOfLoopForm (WhileLoop _) = mempty
-scopeOfLoopForm (ForLoop i it _) = M.singleton i (IndexInfo it)
+scopeOfLoopForm (ForLoop i it _ xs) =
+  M.insert i (IndexInfo it) $ scopeOfLParams (map fst xs)
 
 scopeOfLParams :: LParamAttr lore ~ attr =>
                   [ParamT attr] -> Scope lore

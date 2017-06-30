@@ -155,11 +155,13 @@ simplifySOAC (Scatter cs len lam ivs as) = do
   return $ Scatter cs' len' lam' ivs' as'
 
 soacRules :: (MonadBinder m,
+              Aliased (Lore m),
               LocalScope (Lore m) m,
               Op (Lore m) ~ SOAC (Lore m)) => RuleBook m
 soacRules = standardRules <> RuleBook topDownRules bottomUpRules
 
 topDownRules :: (MonadBinder m,
+                 Aliased (Lore m),
                  LocalScope (Lore m) m,
                  Op (Lore m) ~ SOAC (Lore m)) => TopDownRules m
 topDownRules = [removeReplicateMapping,
@@ -172,7 +174,9 @@ topDownRules = [removeReplicateMapping,
                 simplifyKnownIterationSOAC
                ]
 
-bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
+bottomUpRules :: (MonadBinder m,
+                  Aliased (Lore m),
+                  Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
                  removeDeadWrite,
                  removeUnnecessaryCopy,

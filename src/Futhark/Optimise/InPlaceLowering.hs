@@ -147,12 +147,10 @@ optimiseInStm (Let pat attr e) = do
 
 optimiseExp :: Exp (Aliases Kernels) -> ForwardingM (Exp (Aliases Kernels))
 optimiseExp (DoLoop ctx val form body) =
-  bindingIndices (boundInForm form) $
+  bindingScope False (scopeOfLoopForm form) $
   bindingFParams (map fst $ ctx ++ val) $ do
     body' <- optimiseBody body
     return $ DoLoop ctx val form body'
-  where boundInForm (ForLoop i it _) = [(i,it)]
-        boundInForm (WhileLoop _) = []
 -- TODO: handle Kernel here.
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = const optimiseBody
@@ -227,6 +225,18 @@ bindingFParams :: [FParam (Aliases Kernels)]
                -> ForwardingM a
 bindingFParams = bindingParams FParamInfo
 
+bindingScope :: Bool
+             -> Scope (Aliases Kernels)
+             -> ForwardingM a
+             -> ForwardingM a
+bindingScope optimisable scope = local $ \(TopDown n vtable d) ->
+  let entries = M.map entry scope
+      infoAliases :: NameInfo (Aliases Kernels) -> Names
+      infoAliases (LetInfo (aliases, _)) = unNames aliases
+      infoAliases _ = mempty
+      entry info = Entry n (infoAliases info) d optimisable info
+  in TopDown (n+1) (entries<>vtable) d
+
 bindingStm :: Stm (Aliases Kernels)
            -> ForwardingM a
            -> ForwardingM a
@@ -236,16 +246,6 @@ bindingStm (Let pat _ _) = local $ \(TopDown n vtable d) ->
         let (aliases, _) = patElemAttr patElem
         in (patElemName patElem,
             Entry n (unNames aliases) d True $ LetInfo $ patElemAttr patElem)
-  in TopDown (n+1) (M.union entries vtable) d
-
-bindingIndices :: [(VName,IntType)]
-               -> ForwardingM a
-               -> ForwardingM a
-bindingIndices is = local $ \(TopDown n vtable d) ->
-  let entries = M.fromList $ map entry is
-      entry (v,it) =
-        (v,
-         Entry n mempty d False $ IndexInfo it)
   in TopDown (n+1) (M.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int

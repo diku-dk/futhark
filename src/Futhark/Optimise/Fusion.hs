@@ -29,6 +29,7 @@ import Futhark.Representation.SOACS.Simplify
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Construct
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Pass
@@ -544,7 +545,59 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
       equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
-fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
+-- Some forms of do-loops can profitably be considered streamSeqs.  We
+-- are careful to ensure that the generated nested loop cannot itself
+-- be considered a stream, to avoid infinite recursion.
+fusionGatherBody fres (Body blore (Let (Pattern [] pes) bndtp
+                                   (DoLoop [] merge (ForLoop i it w loop_vars) body)
+                                   :bnds) res) | not $ null loop_vars = do
+  let (merge_params,merge_init) = unzip merge
+      (loop_params,loop_arrs) = unzip loop_vars
+  chunk_size <- newVName "chunk_size"
+  offset <- newVName "offset"
+  let chunk_param = Param chunk_size $ Prim int32
+      offset_param = Param offset $ Prim $ IntType it
+
+  acc_params <- forM merge_params $ \p ->
+    Param <$> newVName (baseString (paramName p) ++ "_outer") <*>
+    pure (paramType p)
+
+  chunked_params <- forM loop_vars $ \(p,arr) ->
+    Param <$> newVName (baseString arr ++ "_chunk") <*>
+    pure (paramType p `arrayOfRow` Futhark.Var chunk_size)
+
+  let lam_params = chunk_param : acc_params ++ [offset_param] ++ chunked_params
+
+  lam_body <- runBodyBinder $ localScope (scopeOfLParams lam_params) $ do
+    let merge' = zip merge_params $ map (Futhark.Var . paramName) acc_params
+    j <- newVName "j"
+    loop_body <- runBodyBinder $ do
+      forM_ (zip loop_params chunked_params) $ \(p,a_p) ->
+        letBindNames'_ [paramName p] $ BasicOp $ Index [] (paramName a_p) $
+         fullSlice (paramType a_p) [DimFix $ Futhark.Var j]
+      letBindNames'_ [i] $ BasicOp $ BinOp (Add it) (Futhark.Var offset) (Futhark.Var j)
+      return body
+    eBody [pure $
+           DoLoop [] merge' (ForLoop j it (Futhark.Var chunk_size) []) loop_body,
+           pure $
+           BasicOp $ BinOp (Add Int32) (Futhark.Var offset) (Futhark.Var chunk_size)]
+  let lam = ExtLambda { extLambdaParams = lam_params
+                      , extLambdaBody = lam_body
+                      , extLambdaReturnType =
+                          staticShapes $ map paramType $ acc_params ++ [offset_param]
+                      }
+      stream = Futhark.Stream [] w (Sequential $ merge_init ++ [intConst it 0]) lam loop_arrs
+
+  -- It is important that the (discarded) final-offset is not the
+  -- first element in the pattern, as we use the first element to
+  -- identify the SOAC in the second phase of fusion.
+  discard <- newVName "discard"
+  let discard_pe = PatElem discard BindVar $ Prim int32
+
+  fusionGatherBody fres $ Body blore
+    (Let (Pattern [] (pes++[discard_pe])) bndtp (Op stream):bnds) res
+
+fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
     Right soac@(SOAC.Map _ _ lam _) ->
@@ -580,13 +633,17 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
                         _                  -> [lam]
       reduceLike soac lambdas $ getStreamAccums form
 
-    _ -> do
-      let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-      bres <- gatherStmPattern pat $ fusionGatherBody fres body
-      foldM fusionGatherExp bres (e:pat_vars)
+    _ | [pe] <- patternValueElements pat,
+        Just (src,trns) <- SOAC.transformFromExp e ->
+          bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
+      | otherwise -> do
+          let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
+          bres <- gatherStmPattern pat $ fusionGatherBody fres $ mkBody bnds res
+          foldM fusionGatherExp bres (e:pat_vars)
+
   where body = mkBody bnds res
         rem_bnds = bnd : bnds
-        consumed = consumedInOp $ addOpAliases f_soac
+        consumed = consumedInExp $ Alias.analyseExp e
 
         reduceLike soac lambdas nes = do
           (used_lam, lres)  <- foldM fusionGatherLam (S.empty, fres) lambdas
@@ -598,15 +655,6 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e@(Op f_soac)):bnds) res) = do
           bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (S.empty, bres) lambda
           greedyFuse rem_bnds used_lam blres (pat, soac, consumed)
-
-fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
-  | [pe] <- patternValueElements pat,
-    Just (src,trns) <- SOAC.transformFromExp e =
-      bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
-  | otherwise = do
-      let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-      bres <- gatherStmPattern pat $ fusionGatherBody fres $ mkBody bnds res
-      foldM fusionGatherExp bres (e:pat_vars)
 
 fusionGatherBody fres (Body _ [] res) =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
@@ -623,8 +671,9 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   let pat_vars = map (Var . paramName)  merge_pat
   fres' <- foldM fusionGatherSubExp fres (ini_val++pat_vars)
   (fres'', form_idents) <- case form of
-    ForLoop i _ bound ->
-      (,) <$> fusionGatherSubExp fres' bound <*> pure [Ident i $ Prim int32]
+    ForLoop i _ bound loopvars ->
+      (,) <$> foldM fusionGatherSubExp fres' (bound:map (Var . snd) loopvars) <*>
+      pure (Ident i (Prim int32) : map (paramIdent . fst) loopvars)
     WhileLoop cond ->
       (,) <$> fusionGatherSubExp fres' (Var cond) <*> pure []
 
@@ -729,7 +778,9 @@ fuseInExp (DoLoop ctx val form loopbody) =
     return $ DoLoop ctx val form loopbody'
   where form_idents = case form of
           WhileLoop{} -> []
-          ForLoop i it _ -> [Ident i $ Prim $ IntType it]
+          ForLoop i it _ loopvars ->
+            Ident i (Prim $ IntType it) :
+            map (paramIdent . fst) loopvars
 
 fuseInExp e = mapExpM fuseIn e
 

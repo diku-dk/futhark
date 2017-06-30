@@ -41,3 +41,10 @@ let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
 
 let copy [n] 't (a: [n]t): *[n]t =
   map (\x -> x) a
+
+let steps (start: i32) (num_steps: i32) (step: i32): [num_steps]i32 =
+  map (start+) (map (step*) (iota num_steps))
+
+let range (start: i32) (end: i32) (step: i32): []i32 =
+  let w = (end-start)/step
+  in steps start w step
