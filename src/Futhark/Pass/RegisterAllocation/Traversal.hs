@@ -22,7 +22,7 @@ import Futhark.Pass.ExplicitAllocations()
 
 import qualified Futhark.Pass.MemoryBlockMerging.LastUse as LastUse
 import qualified Futhark.Pass.MemoryBlockMerging.Interference as Interference
--- import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
+import qualified Futhark.Pass.MemoryBlockMerging.DataStructs as DS
 
 import Futhark.Util (unixEnvironment)
 usesDebugging :: Bool
@@ -41,7 +41,7 @@ data RegAllocResult = RegAllocResult
 
 type Sizes = M.Map VName SubExp
 
-data Context = Context { ctxInterferences :: Interference.IntrfTab
+data Context = Context { ctxInterferences :: Interference.IntrfEnv
                        , ctxSizes :: Sizes
                        }
   deriving (Show)
@@ -106,22 +106,46 @@ regAllocFunDef :: FunDef ExpMem.ExplicitMemory -> RegAllocResult
 regAllocFunDef fundef = do
   let fundef_aliases = analyseFun fundef
       lutab = LastUse.lastUseFun fundef_aliases
-      interferences = Interference.intrf $ snd $ Interference.intrfAnFun lutab fundef_aliases
+      interferences = Interference.intrfAnFun lutab fundef_aliases
       sizes = memBlockSizes fundef
-      context = Context lutab sizes
+      context = Context interferences sizes
       current_empty = Current M.empty $ RegAllocResult M.empty M.empty
 
       m = regAllocBody $ funDefBody fundef
       result = curResult $ fst $ execRWS m context current_empty
 
   let debug = interferences `seq` unsafePerformIO $ when usesDebugging $ do
+        -- Print last uses.
+        replicateM_ 5 $ putStrLn ""
+        putStrLn $ replicate 10 '*' ++ " Last uses in "  ++ pretty (funDefName fundef) ++ " " ++ replicate 10 '*'
+        putStrLn $ replicate 70 '-'
+        forM_ (M.assocs lutab) $ \(stmt_name, lu_names) -> do
+          putStrLn $ "Last uses for " ++ pretty stmt_name ++ ":"
+          putStrLn $ L.intercalate "   " $ map pretty $ S.toList lu_names
+          putStrLn $ replicate 70 '-'
+
         -- Print interferences.
         replicateM_ 5 $ putStrLn ""
-        putStrLn $ replicate 10 '*' ++ " Interferences in "  ++ pretty (funDefName fundef) ++ " " ++ replicate 10 '*'
+        putStrLn $ replicate 10 '*' ++ " Memory block interferences in "  ++ pretty (funDefName fundef) ++ " " ++ replicate 10 '*'
         putStrLn $ replicate 70 '-'
-        forM_ (M.assocs interferences) $ \(stmt_name, interf_names) -> do
+        forM_ (M.assocs $ Interference.intrf interferences) $ \(stmt_name, interf_names) -> do
           putStrLn $ "Interferences for " ++ pretty stmt_name ++ ":"
           putStrLn $ L.intercalate "   " $ map pretty $ S.toList interf_names
+          putStrLn $ replicate 70 '-'
+
+        replicateM_ 5 $ putStrLn ""
+        putStrLn $ replicate 10 '*' ++ " Aliases in "  ++ pretty (funDefName fundef) ++ " " ++ replicate 10 '*'
+        putStrLn $ replicate 70 '-'
+        forM_ (M.assocs $ Interference.alias interferences) $ \(stmt_name, alias_names) -> do
+          putStrLn $ "Aliases for " ++ pretty stmt_name ++ ":"
+          putStrLn $ L.intercalate "   " $ map pretty $ S.toList alias_names
+          putStrLn $ replicate 70 '-'
+
+        replicateM_ 5 $ putStrLn ""
+        putStrLn $ replicate 10 '*' ++ " v2mem in "  ++ pretty (funDefName fundef) ++ " " ++ replicate 10 '*'
+        putStrLn $ replicate 70 '-'
+        forM_ (M.assocs $ Interference.v2mem interferences) $ \(stmt_name, DS.MemBlock _ _ var_mem _) -> do
+          putStrLn $ "Memory block for var " ++ pretty stmt_name ++ ": " ++ pretty var_mem
           putStrLn $ replicate 70 '-'
 
         -- Print sizes
@@ -220,18 +244,39 @@ regAllocStm (Let (Pattern patctxelems patvalelems) () e) = do
 
 handleNewArray :: PatElem ExpMem.ExplicitMemory -> TraversalMonad ()
 handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
-  uses <- curUses <$> get
-  x_interferences <- (fromMaybe S.empty . M.lookup x . ctxInterferences) <$> ask
-  sizes <- ctxSizes <$> ask
+  uses <- gets curUses
+  interferences <- asks ctxInterferences
+  sizes <- asks ctxSizes
+
+  let varMem var = (\(DS.MemBlock _ _ var_mem _) -> var_mem)
+                   <$> M.lookup var (Interference.v2mem interferences)
+
+      memMems mem = S.union
+                    (S.singleton mem)
+                    (fromMaybe S.empty $ M.lookup mem $ Interference.alias interferences)
+
+      memInterferences mem = S.foldl S.union S.empty $ S.map memInterferences' $ memMems mem
+        where memInterferences' m = S.union (S.singleton m) (fromMaybe S.empty $ M.lookup m $ Interference.intrf interferences)
+
+  let memInterferesWithVar mem var
+        | Just var_mem <- varMem var =
+            let debug = unsafePerformIO $ when usesDebugging $ do
+                  putStrLn $ replicate 70 '-'
+                  putStrLn ("Mem " ++ pretty mem ++ " interferes with var " ++ pretty var ++ " (mem " ++ pretty var_mem ++ ")?")
+                  print $ memInterferences mem
+                  print $ memInterferences var_mem
+                  putStrLn $ replicate 70 '-'
+            in debug `seq` (S.member mem (memInterferences var_mem) || S.member var_mem (memInterferences mem))
+        | otherwise = True
 
   let notTheSame :: (VName, Names) -> Bool
       notTheSame (kmem, _vars) = kmem /= xmem
 
-  let noneInterfere :: (VName, Names) -> Bool
-      noneInterfere (_kmem, vars) = S.null $ S.intersection vars x_interferences
-
   let sizesMatch :: (VName, Names) -> Bool
       sizesMatch (kmem, _vars) = equalSizeSubExps (sizes M.! kmem) (sizes M.! xmem)
+
+  let noneInterfere :: (VName, Names) -> Bool
+      noneInterfere (_kmem, vars) = not $ any (memInterferesWithVar xmem) vars
 
   let debug = unsafePerformIO $ when usesDebugging $ do
         putStrLn $ replicate 70 '-'
@@ -242,7 +287,7 @@ handleNewArray (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
         print sizes
         putStrLn $ replicate 70 '-'
 
-  let canBeUsed t = notTheSame t && noneInterfere t && sizesMatch t
+  let canBeUsed t = notTheSame t && sizesMatch t && noneInterfere t
 
   case L.find canBeUsed $ M.assocs uses of
     Just (kmem, _vars) -> do
