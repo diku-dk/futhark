@@ -259,7 +259,7 @@ data ExpT lore
 
   | If     SubExp (BodyT lore) (BodyT lore) [ExtType]
 
-  | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+  | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
     -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
     -- parameters are divided into context and value part.
 
@@ -270,9 +270,12 @@ deriving instance Annotations lore => Show (ExpT lore)
 deriving instance Annotations lore => Ord (ExpT lore)
 
 -- | For-loop or while-loop?
-data LoopForm = ForLoop VName IntType SubExp
-              | WhileLoop VName
-              deriving (Eq, Show, Ord)
+data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
+                   | WhileLoop VName
+
+deriving instance Annotations lore => Eq (LoopForm lore)
+deriving instance Annotations lore => Show (LoopForm lore)
+deriving instance Annotations lore => Ord (LoopForm lore)
 
 -- | A type alias for namespace control.
 type Exp = ExpT

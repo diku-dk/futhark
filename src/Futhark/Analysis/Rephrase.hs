@@ -95,6 +95,7 @@ mapper rephraser = identityMapper {
     mapOnBody = const $ rephraseBody rephraser
   , mapOnRetType = rephraseRetType rephraser
   , mapOnFParam = rephraseParam (rephraseFParamLore rephraser)
+  , mapOnLParam = rephraseParam (rephraseLParamLore rephraser)
   , mapOnOp = rephraseOp rephraser
   }
 

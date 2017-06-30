@@ -125,6 +125,7 @@ replace substs = Mapper {
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
+                 , mapOnLParam = return . substituteNames substs
                  , mapOnOp = return . substituteNames substs
                  }
 

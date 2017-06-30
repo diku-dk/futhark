@@ -30,6 +30,8 @@ module Futhark.Analysis.SymbolTable
   , lookupValue
   , lookupVar
   , index
+  , index'
+  , IndexOp(..)
     -- * Insertion
   , insertStm
   , insertFParams
@@ -165,7 +167,7 @@ data LetBoundEntry lore =
                 , letBoundStmDepth :: Int
                 , letBoundScalExp  :: Maybe ScalExp
                 , letBoundBindage  :: Bindage
-                , letBoundIndex    :: IndexArray
+                , letBoundIndex    :: Int -> IndexArray
                 -- ^ Index a delayed array, if possible.
                 }
 
@@ -323,7 +325,10 @@ index' :: VName -> [PrimExp VName] -> SymbolTable lore -> Maybe (PrimExp VName)
 index' name is vtable = do
   entry <- lookup name vtable
   case entry of
-    LetBound entry' -> letBoundIndex entry' is
+    LetBound entry' |
+      Just k <- elemIndex name $ patternValueNames $
+                bindingPattern $ letBoundStm entry' ->
+        letBoundIndex entry' k is
     LParam entry' -> lparamIndex entry' is
     _ -> Nothing
 
@@ -345,23 +350,35 @@ rangesRep = M.filter knownRange . M.map toRep . bindings
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
-indexExp :: Annotations lore => SymbolTable lore -> Exp lore -> IndexArray
+class IndexOp op where
+  indexOp :: (Annotations lore, IndexOp (Op lore)) =>
+             SymbolTable lore -> Int -> op
+          -> [PrimExp VName] -> Maybe (PrimExp VName)
+  indexOp _ _ _ _ = Nothing
 
-indexExp _ (BasicOp (Iota _ x s to_it)) [i]
+instance IndexOp () where
+
+indexExp :: (IndexOp (Op lore), Annotations lore) =>
+            SymbolTable lore -> Exp lore -> Int -> IndexArray
+
+indexExp vtable (Op op) k is =
+  indexOp vtable k op is
+
+indexExp _ (BasicOp (Iota _ x s to_it)) _ [i]
   | IntType from_it <- primExpType i =
       Just $ ConvOpExp (SExt from_it to_it) i
       * primExpFromSubExp (IntType to_it) s
       + primExpFromSubExp (IntType to_it) x
 
-indexExp table (BasicOp (Replicate (Shape ds) v)) is
+indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
       Just $ primExpFromSubExp t v
 
-indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) (_:is) =
+indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_:is) =
   index' v is table
 
-indexExp table (BasicOp (Reshape _ newshape v)) is
+indexExp table (BasicOp (Reshape _ newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
       let is' =
             reshapeIndex (map (primExpFromSubExp int32) oldshape)
@@ -369,7 +386,7 @@ indexExp table (BasicOp (Reshape _ newshape v)) is
                          is
       in index' v is' table
 
-indexExp table (BasicOp (Index _ v slice)) is =
+indexExp table (BasicOp (Index _ v slice)) _ is =
   index' v (adjust slice is) table
   where adjust (DimFix j:js') is' =
           pe j : adjust js' is'
@@ -381,7 +398,7 @@ indexExp table (BasicOp (Index _ v slice)) is =
 
         pe = primExpFromSubExp (IntType Int32)
 
-indexExp _ _ _ = Nothing
+indexExp _ _ _ _ = Nothing
 
 indexChunk :: Annotations lore => SymbolTable lore -> VName -> VName -> IndexArray
 indexChunk table offset array (i:is) =
@@ -389,7 +406,7 @@ indexChunk table offset array (i:is) =
   where offset' = primExpFromSubExp (IntType Int32) (Var offset)
 indexChunk _ _ _ _ = Nothing
 
-defBndEntry :: Annotations lore =>
+defBndEntry :: (Annotations lore, IndexOp (Op lore)) =>
                SymbolTable lore
             -> PatElem lore
             -> Range
@@ -442,7 +459,7 @@ defBndEntry vtable patElem range bnd =
         simplifyBound _ =
           Nothing
 
-bindingEntries :: Ranged lore =>
+bindingEntries :: (Ranged lore, IndexOp (Op lore)) =>
                   Stm lore -> SymbolTable lore
                -> [LetBoundEntry lore]
 bindingEntries bnd@(Let pat _ _) vtable =
@@ -464,7 +481,7 @@ insertEntries entries vtable =
           let entry' = setStmDepth (loopDepth vtable) entry
           in M.insert name entry' bnds
 
-insertStm :: Ranged lore =>
+insertStm :: (IndexOp (Op lore), Ranged lore) =>
              Stm lore
           -> SymbolTable lore
           -> SymbolTable lore

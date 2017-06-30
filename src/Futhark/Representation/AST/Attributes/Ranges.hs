@@ -236,7 +236,7 @@ expRanges (If _ tbranch fbranch _) =
   (zipWith maximumBound t_upper f_upper)
   where (t_lower, t_upper) = unzip $ rangesOf tbranch
         (f_lower, f_upper) = unzip $ rangesOf fbranch
-expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations) body) =
+expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations _) body) =
   zipWith returnedRange valmerge $ rangesOf body
   where bound_in_loop =
           S.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
