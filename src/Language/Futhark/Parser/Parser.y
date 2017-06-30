@@ -167,7 +167,6 @@ import Language.Futhark.Parser.Lexer
       stream_map_per  { L $$ STREAM_MAPPER }
       stream_red      { L $$ STREAM_RED }
       stream_red_per  { L $$ STREAM_REDPER }
-      stream_seq      { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       import          { L $$ IMPORT }
       type            { L $$ TYPE }
@@ -546,8 +545,6 @@ Exp2 :: { UncheckedExp }
                          { Stream (RedLike InOrder Noncommutative $2) $3 $4 $1 }
      | stream_red_per    FunAbstr FunAbstr Atom
                          { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
-     | stream_seq       FunAbstr Atom Atom
-                         { Stream (Sequential $3) $2 $4 $1 }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }

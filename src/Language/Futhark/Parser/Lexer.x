@@ -150,7 +150,6 @@ keyword s =
     "stream_map_per" -> STREAM_MAPPER
     "stream_red"     -> STREAM_RED
     "stream_red_per" -> STREAM_REDPER
-    "stream_seq"     -> STREAM_SEQ
 
     _              -> ID $ nameFromText s
 

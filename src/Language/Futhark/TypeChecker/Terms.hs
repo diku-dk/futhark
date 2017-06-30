@@ -777,9 +777,6 @@ checkExp (Stream form lam arr pos) = do
   macctup <- case form of
                MapLike{} -> return Nothing
                RedLike{} -> return Nothing
-               Sequential acc -> do
-                 (acc',accarg) <- checkArg acc
-                 return $ Just (acc',accarg)
 
   let fakearg = (fromStruct $ typeOf arr', mempty, srclocOf pos)
       (aas,faas) = case macctup of
@@ -822,9 +819,6 @@ checkExp (Stream form lam arr pos) = do
             bad $ TypeError pos $ "Stream's fold fun: Fold function returns type type " ++
                   pretty (argType accarg) ++ ", but reduce fun returns type "++pretty redtype++"."
         return $ RedLike o comm lam0'
-      Sequential acc -> do
-        (acc',_) <- checkArg acc
-        return $ Sequential acc'
 
   return $ Stream form' lam' arr' pos
 
