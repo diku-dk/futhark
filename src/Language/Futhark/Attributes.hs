@@ -530,6 +530,7 @@ valueType (ArrayValue _ (Array (RecordArray et shape _))) =
 typeOf :: ExpBase Info VName -> CompTypeBase VName
 typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
+typeOf (QualParens _ e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
   -- Reverse, because M.unions is biased to the left.

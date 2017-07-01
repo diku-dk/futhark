@@ -95,6 +95,8 @@ tokens :-
   @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
   @qualidentifier          { tokenM $ fmap (uncurry QUALID) . mkQualId }
   @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
+  @identifier "." "("      { tokenM $ fmap (QUALPAREN []) . indexing . T.init . T.takeWhile (/='(') }
+  @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
 
   @unop                    { tokenS $ UNOP . nameFromText }
   @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
@@ -256,6 +258,7 @@ data Token = ID Name
            | INDEXING Name
            | QUALID [Name] Name
            | QUALINDEXING [Name] Name
+           | QUALPAREN [Name] Name
            | UNOP Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name

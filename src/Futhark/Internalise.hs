@@ -318,6 +318,9 @@ internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 
+internaliseExp desc (E.QualParens _ e _) =
+  internaliseExp desc e
+
 internaliseExp _ (E.Var v t loc) = do
   name <- lookupSubst v
   -- If this identifier is the name of a constant, we have to turn it

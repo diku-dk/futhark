@@ -74,6 +74,8 @@ import Language.Futhark.Parser.Lexer
       qid             { L _ (QUALID _ _) }
       'qid['          { L _ (QUALINDEXING _ _) }
 
+      'qid.('         { L _ (QUALPAREN _ _) }
+
       unop            { L _ (UNOP _) }
       qunop           { L _ (QUALUNOP _ _) }
 
@@ -612,6 +614,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | QualName { Var (fst $1) NoInfo (snd $1) }
      | '#' FieldId Atom { Project (fst $2) $3 NoInfo $1 }
      | '{' sepBy(Field, ',') '}' { RecordLit $2 $1 }
+     | 'qid.(' Exp ')'
+       { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordField (fst $1) $3 (snd $1) }

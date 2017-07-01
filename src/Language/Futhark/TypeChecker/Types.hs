@@ -23,7 +23,6 @@ module Language.Futhark.TypeChecker.Types
   )
 where
 
-import Control.Arrow (first)
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
@@ -431,7 +430,7 @@ checkParams orig_ps m = do
               inspect UnnamedParam{} =
                 Nothing
               scope = mempty { envVtable = M.fromList $ mapMaybe inspect ps' }
-          in localEnv (scope<>) $ m $ reverse ps'
+          in localEnv scope $ m $ reverse ps'
         descend ps' (UnnamedParam t:ps) = do
           t' <- checkTypeDecl (srclocOf t) t
           descend (UnnamedParam t':ps') ps
@@ -439,8 +438,6 @@ checkParams orig_ps m = do
           t' <- checkTypeDecl (srclocOf t) t
           v' <- checkName Term v loc
           descend (NamedParam v' t' loc:ps') ps
-
-        localEnv = local . first
 
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]

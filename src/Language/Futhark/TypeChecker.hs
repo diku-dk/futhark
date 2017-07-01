@@ -13,10 +13,8 @@ module Language.Futhark.TypeChecker
   )
   where
 
-import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.Except hiding (mapM)
-import Control.Monad.Reader hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
 import Data.List
 import Data.Loc
@@ -37,9 +35,6 @@ import Language.Futhark.TypeChecker.Terms
 import Language.Futhark.TypeChecker.Types
 
 --- The main checker
-
-localEnv :: (Env -> Env) -> TypeM a -> TypeM a
-localEnv = local . first
 
 -- | The (abstract) result of type checking some file.  Can be passed
 -- to further invocations of the type checker.
@@ -114,7 +109,7 @@ checkForDuplicateDecs =
         f LocalDec{} = return
 
 bindingTypeParams :: [TypeParam] -> TypeM a -> TypeM a
-bindingTypeParams tparams = localEnv (<>env)
+bindingTypeParams tparams = localEnv env
   where env = mconcat $ map typeParamEnv tparams
 
         typeParamEnv (TypeParamDim v _) =
@@ -145,7 +140,7 @@ checkSpecs (ValSpec name tparams params rettype loc : specs) =
                                else BoundF (tparams', paramtypes, rettype'')
                  , envNameMap = M.singleton (Term, name) name'
                  }
-    (abstypes, env, specs') <- localEnv (valenv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv valenv $ checkSpecs specs
     return (abstypes,
             env <> valenv,
             ValSpec name' tparams' params' rettype' loc : specs')
@@ -153,7 +148,7 @@ checkSpecs (ValSpec name tparams params rettype loc : specs) =
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
     (tenv, tdec') <- checkTypeBind tdec
-    (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (abstypes,
             tenv <> env,
             TypeAbbrSpec tdec' : specs')
@@ -169,7 +164,7 @@ checkSpecs (TypeSpec name ps loc : specs) =
                , envTypeTable =
                    M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName abs_name) $ map paramToArg ps'
                }
-    (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (S.insert (qualName abs_name) abstypes,
             tenv <> env,
             TypeSpec name' ps' loc : specs')
@@ -185,7 +180,7 @@ checkSpecs (ModSpec name sig loc : specs) =
     let senv = mempty { envNameMap = M.singleton (Structure, name) name'
                       , envModTable = M.singleton name' $ mtyMod mty
                       }
-    (abstypes, env, specs') <- localEnv (senv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv senv $ checkSpecs specs
     return (S.map (qualify name) (mtyAbs mty) <> abstypes,
             senv <> env,
             ModSpec name' sig' loc : specs')
@@ -193,7 +188,7 @@ checkSpecs (ModSpec name sig loc : specs) =
 checkSpecs (IncludeSpec e loc : specs) = do
   (e_abs, e_env, e') <- checkSigExpToEnv e
 
-  (abstypes, env, specs') <- localEnv (e_env<>) $ checkSpecs specs
+  (abstypes, env, specs') <- localEnv e_env $ checkSpecs specs
   return (e_abs <> abstypes,
           e_env <> env,
           IncludeSpec e' loc : specs')
@@ -227,7 +222,7 @@ checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
                 Just pname')
       Nothing ->
         return (mempty, Nothing)
-  (e2_mod, e2') <- localEnv (env_for_e2<>) $ checkSigExp e2
+  (e2_mod, e2') <- localEnv env_for_e2 $ checkSigExp e2
   return (MTy mempty $ ModFun $ FunSig s_abs e1_mod e2_mod,
           SigArrow maybe_pname' e1' e2' loc)
 
@@ -314,7 +309,7 @@ withModParam (ModParam pname psig_e loc) m = do
   bindSpaced [(Structure, pname)] $ do
     pname' <- checkName Structure pname loc
     let in_body_env = mempty { envModTable = M.singleton pname' p_mod }
-    localEnv (in_body_env<>) $ m (ModParam pname' psig_e' loc) p_abs p_mod
+    localEnv in_body_env $ m (ModParam pname' psig_e' loc) p_abs p_mod
 
 withModParams :: [ModParamBase NoInfo Name]
               -> ([(ModParamBase Info VName, TySet, Mod)] -> TypeM a)
@@ -510,14 +505,14 @@ checkDec (FunDec fb) = do
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
 checkDecs (LocalDec d loc:ds) = do
   (d_abstypes, d_env, d') <- checkDec d
-  (ds_abstypes, ds_env, ds') <- localEnv (d_env<>) $ checkDecs ds
+  (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
   return (d_abstypes <> ds_abstypes,
           ds_env,
           LocalDec d' loc : ds')
 
 checkDecs (d:ds) = do
   (d_abstypes, d_env, d') <- checkDec d
-  (ds_abstypes, ds_env, ds') <- localEnv (d_env<>) $ checkDecs ds
+  (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
   return (d_abstypes <> ds_abstypes,
           ds_env <> d_env,
           d' : ds')
