@@ -166,6 +166,7 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | "[" `exp` ("," `exp`)* "]"
        : | "#" `fieldid` `exp`
+       : | `quals`"(" `exp` ")"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -367,6 +368,14 @@ and will hopefully be fixed in the future.
 
 Access field ``f`` of the expression ``e``, which must be a record or
 tuple.
+
+``m.(e)``
+.........
+
+Evaluate the expression ``e`` with the module ``m`` locally opened, as
+if by ``open``.  This can make some expressions easier to read and
+write, without polluting the global scope with a declaration-level
+``open``.
 
 ``x`` *binop* ``y``
 ...................

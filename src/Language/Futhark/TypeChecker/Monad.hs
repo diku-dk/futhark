@@ -43,6 +43,7 @@ module Language.Futhark.TypeChecker.Monad
   )
 where
 
+import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.Reader
@@ -296,6 +297,7 @@ class MonadError TypeError m => MonadTypeChecker m where
   newID :: Name -> m VName
 
   bindNameMap :: NameMap -> m a -> m a
+  localEnv :: Env -> m a -> m a
 
   checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
 
@@ -337,6 +339,8 @@ instance MonadTypeChecker TypeM where
   bindNameMap m = local $ \(env, imports) ->
     (env { envNameMap = m <> envNameMap env },
      imports)
+
+  localEnv env = local $ first (env<>)
 
   checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 

@@ -538,6 +538,8 @@ data ExpBase f vn =
             | Parens (ExpBase f vn) SrcLoc
             -- ^ A parenthesized expression.
 
+            | QualParens (QualName vn) (ExpBase f vn) SrcLoc
+
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
@@ -687,6 +689,7 @@ deriving instance Showable f vn => Show (StreamForm f vn)
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc)          = locOf loc
   locOf (Parens _ loc)           = locOf loc
+  locOf (QualParens _ _ loc)     = locOf loc
   locOf (TupLit _ pos)           = locOf pos
   locOf (RecordLit _ pos)        = locOf pos
   locOf (Project _ _ _ pos)      = locOf pos

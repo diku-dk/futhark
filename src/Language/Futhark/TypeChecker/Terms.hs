@@ -22,7 +22,7 @@ import Data.Traversable (mapM)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Prelude hiding (mapM)
+import Prelude hiding (mod, mapM)
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (ValBinding, BoundV, BoundF, checkQualNameWithEnv)
@@ -149,10 +149,11 @@ newtype TermTypeM a = TermTypeM (ReaderT
             MonadWriter Occurences,
             MonadError TypeError)
 
-runTermTypeM :: TermTypeM a -> TypeM a
+runTermTypeM :: TermTypeM a -> TypeM (a, Occurences)
 runTermTypeM (TermTypeM m) = do
   initial_scope <- (initialTermScope<>) <$> (envToTermScope <$> askEnv)
-  fst <$> runWriterT (runReaderT m initial_scope)
+  runWriterT (runReaderT m initial_scope)
+
 
 liftTypeM :: TypeM a -> TermTypeM a
 liftTypeM = TermTypeM . lift . lift
@@ -187,6 +188,15 @@ instance MonadTypeChecker TermTypeM where
 
   bindNameMap m = local $ \scope ->
     scope { scopeNameMap = m <> scopeNameMap scope }
+
+  localEnv env (TermTypeM m) = do
+    cur_scope <- ask
+    let cur_scope' =
+          cur_scope { scopeNameMap = scopeNameMap cur_scope `M.difference` envNameMap env }
+    (x,occs) <- liftTypeM $ localEnv env $
+                runWriterT (runReaderT m cur_scope')
+    tell occs
+    return x
 
   lookupType loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Type qn loc
@@ -564,6 +574,15 @@ checkExp (If e1 e2 e3 _ pos) =
 
 checkExp (Parens e loc) =
   Parens <$> checkExp e <*> pure loc
+
+checkExp (QualParens modname e loc) = do
+  (modname',mod) <- lookupMod loc modname
+  case mod of
+    ModEnv env -> localEnv env $ do
+      e' <- checkExp e
+      return $ QualParens modname' e' loc
+    ModFun{} ->
+      bad $ TypeError loc $ "Module " ++ pretty modname ++ " is a parametric module."
 
 checkExp (Var qn NoInfo loc) = do
   (qn'@(QualName _ name'), t) <- lookupVar loc qn
@@ -1066,13 +1085,13 @@ consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
 checkOneExp :: UncheckedExp -> TypeM Exp
-checkOneExp = runTermTypeM . checkExp
+checkOneExp = fmap fst . runTermTypeM . checkExp
 
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
                 UncheckedExp, SrcLoc)
             -> TypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkFunDef = runTermTypeM . checkFunDef'
+checkFunDef = fmap fst . runTermTypeM . checkFunDef'
 
 checkFunDef' :: (Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
