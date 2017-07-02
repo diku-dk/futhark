@@ -35,11 +35,11 @@ install:
  - stack --no-terminal test --fast --only-dependencies -j 3
 
 script:
-# - stack --no-terminal test -j 3
-# - stack install
+ - stack --no-terminal test -j 3
+ - stack install
 
 # Now for integration testing
-# - futhark-test --nobuffer tests examples # Run integration test suite.
+ - futhark-test --nobuffer tests examples # Run integration test suite.
 # Numpy is broken on Travis in a weird way I can't reproduce anywhere else.
 # - futhark-test tests examples --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
 
