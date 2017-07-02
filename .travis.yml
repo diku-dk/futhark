@@ -30,8 +30,8 @@ before_install:
  - ./.travis-setup.sh
 
 install:
- - stack build alex happy
- - stack --no-terminal test --only-dependencies -j 3
+ - stack build --fast alex happy
+ - stack --no-terminal test --fast --only-dependencies -j 3
 
 script:
  - stack --no-terminal test -j 3
