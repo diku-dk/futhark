@@ -35,8 +35,8 @@ install:
  - stack --no-terminal test --fast --only-dependencies -j 3
 
 script:
- - stack --no-terminal test -j 3
- - stack install
+# - stack --no-terminal test -j 3
+# - stack install
 
 # Now for integration testing
  - futhark-test --nobuffer tests examples # Run integration test suite.
