@@ -253,7 +253,8 @@ generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ loc) =
         i_ts = staticShapes $ map I.paramType $ concat params'
 
     entry_body <- insertStmsM $
-      resultBody . fst <$> funcall "entry_result" (E.qualName ofname) (e_ts,i_ts) args loc
+      resultBody . fst <$> funcall "entry_result" (E.qualName ofname)
+                           (e_ts,map rankShaped i_ts) args loc
 
     addFunction $
       I.FunDef (Just entry') (baseName ofname)
@@ -449,7 +450,7 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
   i_ts <- staticShapes <$> mapM subExpType args'
   let e_ts = map (flip setAliases () . E.typeOf . fst) args
-  fst <$> funcall desc qfname (e_ts, i_ts) args' loc
+  fst <$> funcall desc qfname (e_ts, map I.rankShaped i_ts) args' loc
 
 internaliseExp desc (E.LetPat tparams pat e body loc) = do
   ses <- internaliseExp desc e

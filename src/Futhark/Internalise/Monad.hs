@@ -86,10 +86,10 @@ type ConstParams = [(Name,VName)]
 type Closure = [VName]
 
 -- | The type arguments to a polymorhic function.
-type SpecArgs = ([E.TypeBase E.Rank ()], [ExtType])
+type SpecArgs = ([E.TypeBase E.Rank ()], SpecParams)
 
--- | The type internalise arguments to a polymorhic function.
-type SpecParams = [ExtType]
+-- | The type internalise arguments to a polymorphic function.
+type SpecParams = [TypeBase Rank NoUniqueness]
 
 data FunBinding = FunBinding
   { polymorphicSpecialisations :: M.Map SpecParams FunInfo
