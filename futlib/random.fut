@@ -98,11 +98,16 @@ module xorshift128plus: rng_engine with int.t = u64 = {
   module int = u64
   type rng = (u64,u64)
 
+  -- We currently have a problem where everything that is produced
+  -- must be convertible (losslessly) to a i64.  Therefore, we mask
+  -- off the highest bit to avoid negative numbers.
+  let mask (x: u64) = x & (~(1u64<<63u64))
+
   let rand ((x,y): rng): (rng, u64) =
     let x = x ^ (x << 23u64)
     let new_x = y
     let new_y = x ^ y ^ (x >> 17u64) ^ (y >> 26u64)
-    in ((new_x,new_y), new_y + y)
+    in ((new_x,new_y), mask (new_y + y))
 
   let rng_from_seed [n] (seed: [n]i32) =
     loop ((a,b) = (1u64,u64.from_i32 n)) for i < n do
@@ -118,7 +123,7 @@ module xorshift128plus: rng_engine with int.t = u64 = {
     reduce (\(x1,y1) (x2,y2) -> (x1^x2,y1^y2)) (0u64,0u64) xs
 
   let min = 0u64
-  let max = 0xFF_FF_FF_FF_FF_FF_FF_FFu64
+  let max = mask 0xFF_FF_FF_FF_FF_FF_FF_FFu64
 }
 
 -- | A 'linear_congruential_engine' producing 'u32' values and
@@ -226,10 +231,10 @@ module uniform_real_distribution (R: real) (E: rng_engine):
 
   let uniform (min: t) (max: t) = (min,max)
 
-  let rand ((min,max): distribution) (rng: E.rng) =
+  let rand ((min_r,max_r): distribution) (rng: E.rng) =
     let (rng', x) = E.rand rng
     let x' = to_D x R./ to_D E.max
-    in (rng', min R.+ x' R.* (max R.- min))
+    in (rng', R.(min_r + x' * (max_r - min_r)))
 }
 
 module normal_distribution (R: real) (E: rng_engine):
