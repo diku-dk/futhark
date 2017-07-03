@@ -170,7 +170,7 @@ Quit futharki.
   where loadCommand :: Command
         loadCommand file = do
           liftIO $ T.putStrLn $ "Reading " <> file
-          res <- liftIO $ runExceptT (readProgram $ T.unpack file)
+          res <- liftIO $ runExceptT (readProgram [T.unpack file])
                  `catch` \(err::IOException) ->
                  return (Left (ExternalError (T.pack $ show err)))
           case res of
