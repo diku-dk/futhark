@@ -1,5 +1,4 @@
-
-module Documentation.Generator (renderDecs) where
+module Futhark.Doc.Generator (renderDecs) where
 
 import Control.Monad
 import Control.Monad.State
@@ -17,7 +16,7 @@ import Text.Blaze.Html5 as H hiding (text, map, main)
 import qualified Text.Blaze.Html5.Attributes as A
 import Data.String (fromString)
 
-import Documentation.Util
+import Futhark.Doc.Html
 
 type Context = (String,FileModule)
 type DocEnv = M.Map (Namespace,VName) String

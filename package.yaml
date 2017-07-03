@@ -93,9 +93,9 @@ executables:
   futhark-dataset:
     <<: *futhark
     main: src/futhark-dataset.hs
-  futdoc:
+  futhark-doc:
     <<: *futhark
-    main: src/futdoc.hs
+    main: src/futhark-doc.hs
 
 tests:
   unit:
