@@ -119,7 +119,7 @@ runPipelineOnProgram :: FutharkConfig
 runPipelineOnProgram config pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (tagged_ext_prog, ws, _, namesrc) <- readProgram file
+  (tagged_ext_prog, ws, _, namesrc) <- readProgram [file]
 
   when (futharkWarn config) $
     liftIO $ hPutStr stderr $ show ws
@@ -215,21 +215,23 @@ readImportFile (SearchPath dir) name = do
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               FilePath -> m (E.Prog,
-                              E.Warnings,
-                              E.Imports,
-                              VNameSource)
-readProgram fp = do
-  unless (ext == ".fut") $
-    externalErrorS $ "File does not have a .fut extension: " <> fp
-  s' <- execStateT (readImport (SearchPath dir) [] file_root) s
+               [FilePath] -> m (E.Prog,
+                                E.Warnings,
+                                E.Imports,
+                                VNameSource)
+readProgram fps = do
+  let s = ReaderState mempty mempty newNameSourceForCompiler mempty
+  s' <- execStateT (mapM onFile fps) s
   return (E.Prog $ concatMap E.progDecs $ reverse $ resultProgs s',
           warnings s',
           alreadyImported s',
           nameSource s')
-  where s = ReaderState mempty mempty newNameSourceForCompiler mempty
-        (dir, file) = splitFileName fp
-        (file_root, ext) = splitExtension file
+  where onFile fp =  do
+          unless (ext == ".fut") $
+            externalErrorS $ "File does not have a .fut extension: " <> fp
+          readImport (SearchPath dir) [] file_root
+            where (dir, file) = splitFileName fp
+                  (file_root, ext) = splitExtension file
 
 newNameSourceForCompiler :: VNameSource
 newNameSourceForCompiler = newNameSource $ succ $ maximum $ map baseTag $

@@ -16,6 +16,7 @@ module Futhark.Util
         splitAt3,
         focusNth,
         unixEnvironment,
+        directoryContents,
         zEncodeString
        )
        where
@@ -24,8 +25,11 @@ import Numeric
 import Data.Char
 import Data.List
 import Data.Either
+import Data.Maybe
 import System.Environment
 import System.IO.Unsafe
+import System.Directory.Tree (readDirectoryWith, flattenDir,
+                              DirTree(File), AnchoredDirTree(..))
 
 -- | Like 'mapAccumL', but monadic.
 mapAccumLM :: Monad m =>
@@ -86,6 +90,14 @@ focusNth i xs
 -- | The Unix environment when the Futhark compiler started.
 unixEnvironment :: [(String,String)]
 unixEnvironment = unsafePerformIO getEnvironment
+
+-- | Every non-directory file contained in a directory tree.
+directoryContents :: FilePath -> IO [FilePath]
+directoryContents dir = do
+  _ :/ tree <- readDirectoryWith return dir
+  return $ mapMaybe isFile $ flattenDir tree
+  where isFile (File _ path) = Just path
+        isFile _             = Nothing
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

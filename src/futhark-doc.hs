@@ -7,7 +7,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Data.Monoid
 import qualified Data.Map as M
-import System.FilePath ((-<.>), takeDirectory)
+import System.FilePath ((-<.>), takeDirectory, takeExtension)
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt
 import System.IO
@@ -19,24 +19,38 @@ import Text.Blaze.Html.Renderer.String
 import Language.Futhark.TypeChecker (Imports, FileModule(..))
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark
-import Futhark.Util.Options
 import Futhark.Doc.Generator
-import Futhark.Compiler (readProgram)
+import Futhark.Compiler (readProgram, dumpError, newFutharkConfig)
 import Futhark.Pipeline (runFutharkM, FutharkM)
+import Futhark.Util.Options
+import Futhark.Util (directoryContents)
 
 main :: IO ()
 main = mainWithOptions initialDocConfig commandLineOptions f
-  where f [file] config = Just $ void (runFutharkM (m config file) True)
+  where f [dir] config = Just $ do
+          res <- runFutharkM (m config dir) True
+          case res of
+            Left err -> liftIO $ do
+              dumpError newFutharkConfig err
+              exitWith $ ExitFailure 2
+            Right () ->
+              return ()
+
         f _ _ = Nothing
         m :: DocConfig -> FilePath -> Futhark.Pipeline.FutharkM ()
-        m config file =
+        m config dir =
           case docOutput config of
             Nothing -> liftIO $ do
               hPutStrLn stderr "Must specify output directory with -o."
               exitWith $ ExitFailure 1
-            Just dir -> do
-              (Prog prog, _w, imports, _vns) <- readProgram file
-              liftIO $ printDecs dir imports prog
+            Just outdir -> do
+              files <- liftIO $ futFiles dir
+              (Prog prog, _w, imports, _vns) <- readProgram files
+              liftIO $ printDecs outdir imports prog
+
+futFiles :: FilePath -> IO [FilePath]
+futFiles dir = filter isFut <$> directoryContents dir
+  where isFut = (==".fut") . takeExtension
 
 type DocEnv = M.Map (Namespace,VName) String
 
@@ -45,6 +59,7 @@ printDecs dir imports decs = mapM_ write . run $ mapM (f $ render decs) (init (M
   where run s = evalState s M.empty
         f g x = (fst x,) <$> g x
         write (name, content) = do let file = dir ++ "/" ++ name -<.> "html"
+                                   print file
                                    createDirectoryIfMissing True $ takeDirectory file
                                    writeFile file content
 
