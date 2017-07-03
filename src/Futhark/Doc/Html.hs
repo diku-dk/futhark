@@ -1,5 +1,4 @@
-
-module Documentation.Util where
+module Futhark.Doc.Html where
 
 import Data.Monoid
 

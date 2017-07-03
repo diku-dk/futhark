@@ -20,7 +20,7 @@ import Language.Futhark
 import Text.Blaze.Html5 (docTypeHtml, toHtml, h1)
 import Text.Blaze.Html.Renderer.String
 
-import Documentation.Generator
+import Futhark.Doc.Generator
 
 main :: IO ()
 main = mainWithOptions () [] f
