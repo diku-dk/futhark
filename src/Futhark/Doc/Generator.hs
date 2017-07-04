@@ -6,7 +6,7 @@ import Control.Monad.Reader
 import Data.Monoid
 import Data.Maybe (maybe,mapMaybe)
 import qualified Data.Map as M
-import System.FilePath (normalise)
+import System.FilePath (splitPath)
 
 import Language.Futhark.TypeChecker (FileModule(..))
 import Language.Futhark.TypeChecker.Monad
@@ -317,9 +317,7 @@ renderQualName ns (QualName names (VName name tag)) =
 
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
-  concat (replicate (length $ filter (== '/') src') "../") ++ dest'
-  where (dest',src') = unzip $
-          dropWhile (uncurry (==)) (zip (normalise dest) (normalise src))
+  concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 --getVName :: Namespace -> QualName Name -> DocM VName
 --getVName ns (QualName names name) = do

@@ -40,19 +40,21 @@ import Language.Futhark.TypeChecker.Types
 -- to further invocations of the type checker.
 newtype FileModule = FileModule { fileEnv :: Env }
 
--- | A mapping from import names to imports.
-type Imports = M.Map FilePath FileModule
+-- | A mapping from import names to imports.  The ordering is significant.
+type Imports = [(String, FileModule)]
 
 -- | Type check a program containing no type information, yielding
 -- either a type error or a program with complete type information.
 -- Accepts a mapping from file names (excluding extension) to
--- previously type checker results.
+-- previously type checker results.  The 'FilePath' is used to resolve
+-- relative @import@s.
 checkProg :: Imports
           -> VNameSource
+          -> FilePath
           -> UncheckedProg
           -> Either TypeError ((FileModule, Prog), Warnings, VNameSource)
-checkProg files src prog =
-  runTypeM initialEnv (M.map fileEnv files) src $ checkProgM prog
+checkProg files src fpath prog =
+  runTypeM initialEnv (M.map fileEnv $ M.fromList files) fpath src $ checkProgM prog
 
 initialEnv :: Env
 initialEnv = intrinsicsModule
