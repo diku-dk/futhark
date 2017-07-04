@@ -35,9 +35,9 @@ main = mainWithOptions initialDocConfig commandLineOptions f
               exitWith $ ExitFailure 2
             Right () ->
               return ()
-
         f _ _ = Nothing
-        m :: DocConfig -> FilePath -> Futhark.Pipeline.FutharkM ()
+
+        m :: DocConfig -> FilePath -> FutharkM ()
         m config dir =
           case docOutput config of
             Nothing -> liftIO $ do
@@ -55,7 +55,7 @@ futFiles dir = filter isFut <$> directoryContents dir
 type DocEnv = M.Map (Namespace,VName) String
 
 printDecs :: FilePath -> Imports -> [Dec] -> IO ()
-printDecs dir imports decs = mapM_ write . run $ mapM (f $ render decs) (init (M.toList imports))
+printDecs dir imports decs = mapM_ write . run $ mapM (f $ render decs) imports
   where run s = evalState s M.empty
         f g x = (fst x,) <$> g x
         write (name, content) = do let file = dir ++ "/" ++ name -<.> "html"
