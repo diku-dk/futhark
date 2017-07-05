@@ -43,7 +43,7 @@ prettyDec fileModule dec = case dec of
     --envs = foldMap (renderEnv . (\(ModEnv e) -> e) . (modtable M.!)) names
 
 prettyFun :: FileModule -> FunBindBase t VName -> Maybe Html
-prettyFun fm (FunBind _ name _retdecl _rettype _tparams _args _ _ doc)
+prettyFun fm (FunBind _ name _retdecl _rettype _tparams _args _ doc _)
   | Just (BoundF (tps,pts,rett)) <- M.lookup name vtable
   , visible Term name fm = Just $
     renderDoc doc <> toHtml "val " <> vnameHtml name <>
@@ -53,7 +53,7 @@ prettyFun fm (FunBind _ name _retdecl _rettype _tparams _args _ _ doc)
 prettyFun _ _ = Nothing
 
 prettyVal :: FileModule -> ValBindBase Info VName -> Maybe (DocM Html)
-prettyVal fm (ValBind _entry name maybe_t _ _e _ doc)
+prettyVal fm (ValBind _entry name maybe_t _ _e doc _)
   | Just (BoundV st) <- M.lookup name vtable
   , visible Term name fm =
     Just . return . H.div $
@@ -63,7 +63,7 @@ prettyVal fm (ValBind _entry name maybe_t _ _e _ doc)
 prettyVal _ _ = Nothing
 
 prettySig :: FileModule -> SigBindBase Info VName -> Maybe (DocM Html)
-prettySig fm (SigBind vname se _ doc)
+prettySig fm (SigBind vname se doc _)
   | M.member vname sigtable && visible Signature vname fm =
     Just $ H.div <$> do
       name <- vnameHtmlM Signature vname
@@ -253,10 +253,10 @@ vnameHtmlM ns (VName name tag) =
 specHtml :: SpecBase Info VName -> DocM Html
 specHtml spec = case spec of
   TypeAbbrSpec tpsig -> H.div <$> typeBindHtml tpsig
-  TypeSpec name ps _ doc -> return . H.div $
+  TypeSpec name ps doc _ -> return . H.div $
     renderDoc doc <> toHtml "type " <> vnameHtml name <>
     joinBy (toHtml " ") (map prettyTypeParam ps)
-  ValSpec name tparams params rettype _ doc -> return . H.div $
+  ValSpec name tparams params rettype doc _ -> return . H.div $
     renderDoc doc <>
     toHtml "val " <> vnameHtml name <>
     foldMap (toHtml " " <>) (map prettyTypeParam tparams) <> toHtml " : " <>
@@ -355,7 +355,7 @@ prettyTypeParam (TypeParamDim name _) = brackets $ vnameHtml name
 prettyTypeParam (TypeParamType name _) = toHtml "'" <> vnameHtml name
 
 typeBindHtml :: TypeBindBase Info VName -> DocM Html
-typeBindHtml (TypeBind name params usertype _ doc) =
+typeBindHtml (TypeBind name params usertype doc _) =
     return $ renderDoc doc <> typeHtml name params <> typeDeclHtml usertype
 
 typeHtml :: VName -> [TypeParam] -> Html
