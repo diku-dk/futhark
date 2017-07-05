@@ -173,15 +173,15 @@ internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_su
           return Nothing
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
-internaliseValBind (E.ValBind entry name _ t e loc) =
-  internaliseFunBind $ E.FunBind entry name Nothing t [] [] e loc
+internaliseValBind (E.ValBind entry name _ t e doc loc) =
+  internaliseFunBind $ E.FunBind entry name Nothing t [] [] e doc loc
 
 internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
 internaliseFunName ofname _  = nameFromString . pretty <$> newVName (baseString ofname)
 
 internaliseFunBind :: E.FunBind -> InternaliseM ()
-internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body loc) = do
+internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body _ loc) = do
   fname <- fulfillingPromise ofname
   substs <- allSubsts
   noteFunction fname $ \(e_ts, _) -> withDecSubstitutions substs $
@@ -240,7 +240,7 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
   when entry $ generateEntryPoint fb
 
 generateEntryPoint :: E.FunBind -> InternaliseM ()
-generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ loc) =
+generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
   -- We remove all shape annotations, so there should be no constant
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
@@ -463,7 +463,7 @@ internaliseExp desc (E.LetPat tparams pat e body loc) = do
     internaliseExp desc body
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
-  internaliseFunBind $ E.FunBind False ofname retdecl (Info rettype) tparams params body loc
+  internaliseFunBind $ E.FunBind False ofname retdecl (Info rettype) tparams params body Nothing loc
   internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody _) = do

@@ -37,9 +37,6 @@ import Data.Foldable (foldl')
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
-import System.Directory.Tree (readDirectoryWith, flattenDir,
-                              DirTree(File), AnchoredDirTree(..),
-                              FileName)
 import System.IO
 import System.FilePath
 
@@ -54,6 +51,7 @@ import Prelude
 import Futhark.Analysis.Metrics
 import Futhark.Util.Pretty (pretty, prettyText)
 import Futhark.Test.Values
+import Futhark.Util (directoryContents)
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -323,16 +321,9 @@ testSpecsFromPath path = do
 testSpecsFromPaths :: [FilePath] -> IO [(FilePath, ProgramTest)]
 testSpecsFromPaths = fmap concat . mapM testSpecsFromPath
 
-testPrograms :: FilePath -> IO [FileName]
+testPrograms :: FilePath -> IO [FilePath]
 testPrograms dir = filter isFut <$> directoryContents dir
   where isFut = (==".fut") . takeExtension
-
-directoryContents :: FilePath -> IO [FileName]
-directoryContents dir = do
-  _ :/ tree <- readDirectoryWith return dir
-  return $ mapMaybe isFile $ flattenDir tree
-  where isFile (File _ path) = Just path
-        isFile _             = Nothing
 
 -- | Try to parse a several values from a byte string.  The 'SourceName'
 -- parameter is used for error messages.

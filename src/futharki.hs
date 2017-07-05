@@ -13,7 +13,6 @@ import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Monoid
-import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
@@ -118,7 +117,7 @@ readEvalPrint = do
           -- expression as its body, append it to the stored program,
           -- then run it.
           let mkOpen f = OpenDec (ModImport f noLoc) [] NoInfo noLoc
-              opens = map mkOpen $ M.keys imports
+              opens = map (mkOpen . fst) imports
               mainfun = FunBind { funBindEntryPoint = True
                                 , funBindName = nameFromString ""
                                 , funBindRetType = NoInfo
@@ -127,13 +126,14 @@ readEvalPrint = do
                                 , funBindParams = []
                                 , funBindBody = e
                                 , funBindLocation = noLoc
+                                , funBindDoc = Nothing
                                 }
               prog' = Prog $ opens ++ [FunDec mainfun]
           runProgram prog imports src prog'
 
 runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
 runProgram proglib imports src prog = liftIO $
-  case checkProg imports src prog of
+  case checkProg imports src "" prog of
     Left err -> print err
     Right ((_, prog'), _, src') ->
       let full_prog = Prog $ progDecs proglib ++ progDecs prog'
@@ -169,7 +169,7 @@ Quit futharki.
   where loadCommand :: Command
         loadCommand file = do
           liftIO $ T.putStrLn $ "Reading " <> file
-          res <- liftIO $ runExceptT (readProgram $ T.unpack file)
+          res <- liftIO $ runExceptT (readProgram [T.unpack file])
                  `catch` \(err::IOException) ->
                  return (Left (ExternalError (T.pack $ show err)))
           case res of

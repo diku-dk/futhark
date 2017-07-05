@@ -313,7 +313,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
                                          Just (sig, _) -> colon <+> ppr sig
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
-  ppr (TypeBind name params usertype _) =
+  ppr (TypeBind name params usertype _ _) =
     text "type" <+> ppr name <+> spread (map ppr params) <+> equals <+> ppr usertype
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
@@ -321,7 +321,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamType name _) = text "'" <> ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
-  ppr (FunBind entry name retdecl _ tparams args body _) =
+  ppr (FunBind entry name retdecl _ tparams args body _ _) =
     text fun <+> ppr name <+>
     spread (map ppr tparams ++ map ppr args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
@@ -332,7 +332,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
                        Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
-  ppr (ValBind entry name maybe_t _ e _) =
+  ppr (ValBind entry name maybe_t _ e _ _) =
     text s <+> ppr name <> t' <+> text "=" <+> ppr e
     where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
@@ -345,8 +345,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
-  ppr (TypeSpec name ps _) = text "type" <+> ppr name <+> spread (map ppr ps)
-  ppr (ValSpec name tparams params rettype _) =
+  ppr (TypeSpec name ps _ _) = text "type" <+> ppr name <+> spread (map ppr ps)
+  ppr (ValSpec name tparams params rettype _ _) =
     text "val" <+> ppr name <+> spread (map ppr tparams) <> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
   ppr (ModSpec name sig _) =
@@ -366,7 +366,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigExpBase ty vn) where
     ppr e1 <+> text "->" <+> ppr e2
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
-  ppr (SigBind name e _) =
+  ppr (SigBind name e _ _) =
     text "module type" <+> ppr name <+> equals <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModParamBase ty vn) where
