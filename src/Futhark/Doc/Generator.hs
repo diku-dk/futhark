@@ -1,4 +1,4 @@
-module Futhark.Doc.Generator (renderDecs) where
+module Futhark.Doc.Generator (renderDecs, indexPage) where
 
 import Control.Monad
 import Control.Monad.State
@@ -6,7 +6,7 @@ import Control.Monad.Reader
 import Data.Monoid
 import Data.Maybe (maybe,mapMaybe)
 import qualified Data.Map as M
-import System.FilePath (splitPath)
+import System.FilePath (splitPath, (-<.>), makeRelative)
 
 import Language.Futhark.TypeChecker (FileModule(..))
 import Language.Futhark.TypeChecker.Monad
@@ -318,6 +318,13 @@ renderQualName ns (QualName names (VName name tag)) =
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
+
+indexPage :: [(String, String)] -> Html
+indexPage pages = docTypeHtml $ h1 (toHtml "Futhark Documentation") <>
+  ul (mconcat $ map linkTo pages)
+  where linkTo (name, _) =
+          let file = makeRelative "/" $ name -<.> "html"
+          in li $ a ! A.href (fromString file) $ fromString name
 
 --getVName :: Namespace -> QualName Name -> DocM VName
 --getVName ns (QualName names name) = do
