@@ -1,4 +1,5 @@
-module Futhark.Doc.Generator (renderDecs, indexPage) where
+{-# LANGUAGE OverloadedStrings #-}
+module Futhark.Doc.Generator (renderFile, indexPage, header) where
 
 import Control.Monad
 import Control.Monad.State
@@ -7,20 +8,41 @@ import Data.Monoid
 import Data.Maybe (maybe,mapMaybe)
 import qualified Data.Map as M
 import System.FilePath (splitPath, (-<.>), makeRelative)
-
-import Language.Futhark.TypeChecker (FileModule(..))
-import Language.Futhark.TypeChecker.Monad
-import Language.Futhark
-
 import Text.Blaze.Html5 as H hiding (text, map, main)
 import qualified Text.Blaze.Html5.Attributes as A
 import Data.String (fromString)
 
+import Prelude hiding (head)
+
+import Language.Futhark.TypeChecker (FileModule(..))
+import Language.Futhark.TypeChecker.Monad
+import Language.Futhark
 import Futhark.Doc.Html
+
 
 type Context = (String,FileModule)
 type DocEnv = M.Map (Namespace,VName) String
 type DocM = ReaderT Context (State DocEnv)
+
+renderFile :: [Dec] -> DocM Html
+renderFile ds = do
+  current <- asks fst
+  addHeader current . body <$> renderDecs ds
+
+indexPage :: [(String, String)] -> Html
+indexPage pages = docTypeHtml $ addHeader "/" $ body $
+                  h1 "Futhark Documentation" <>
+                  ul (mconcat $ map linkTo pages)
+  where linkTo (name, _) =
+          let file = makeRelative "/" $ name -<.> "html"
+          in li $ a ! A.href (fromString file) $ fromString name
+
+addHeader :: String -> Html -> Html
+addHeader current bodyHtml =
+  let headHtml = head $ link ! A.href (fromString $ relativise "style.css" current)
+                             ! A.rel "stylesheet"
+                             ! A.type_ "text/css"
+  in headHtml <> bodyHtml
 
 renderDecs :: [Dec] -> DocM Html
 renderDecs decs = asks snd >>= f
@@ -46,9 +68,9 @@ prettyFun :: FileModule -> FunBindBase t VName -> Maybe Html
 prettyFun fm (FunBind _ name _retdecl _rettype _tparams _args _ doc _)
   | Just (BoundF (tps,pts,rett)) <- M.lookup name vtable
   , visible Term name fm = Just $
-    renderDoc doc <> toHtml "val " <> vnameHtml name <>
-    foldMap (toHtml " " <>) (map prettyTypeParam tps) <> toHtml ": " <>
-    foldMap (\t -> prettyType t <> toHtml " -> ") pts <> prettyType rett
+    renderDoc doc <> "val " <> vnameHtml name <>
+    foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
+    foldMap (\t -> prettyType t <> " -> ") pts <> prettyType rett
     where FileModule Env {envVtable = vtable} = fm
 prettyFun _ _ = Nothing
 
@@ -57,7 +79,7 @@ prettyVal fm (ValBind _entry name maybe_t _ _e doc _)
   | Just (BoundV st) <- M.lookup name vtable
   , visible Term name fm =
     Just . return . H.div $
-    renderDoc doc <> toHtml "let " <> vnameHtml name <> toHtml " : " <>
+    renderDoc doc <> "let " <> vnameHtml name <> " : " <>
     maybe (prettyType st) typeExpHtml maybe_t
     where (FileModule Env {envVtable = vtable}) = fm
 prettyVal _ _ = Nothing
@@ -68,8 +90,8 @@ prettySig fm (SigBind vname se doc _)
     Just $ H.div <$> do
       name <- vnameHtmlM Signature vname
       expHtml <- renderSigExp se
-      return $ renderDoc doc <> toHtml "module type " <> name <>
-        toHtml " = " <> expHtml
+      return $ renderDoc doc <> "module type " <> name <>
+        " = " <> expHtml
     where (FileModule Env { envSigTable = sigtable }) = fm
 prettySig _ _ = Nothing
 
@@ -81,7 +103,7 @@ prettyMod fm (ModBind name ps sig _me _)
     params <- modParamHtml ps
     s <- case sig of Nothing -> envSig env
                      Just (s,_) -> renderSigExp s
-    return $ toHtml "module " <> vname <> toHtml ": " <> params <> s
+    return $ "module " <> vname <> ": " <> params <> s
     where FileModule Env { envModTable = modtable} = fm
           envSig (ModEnv e) = renderEnv e
           envSig (ModFun (FunSig _ _ (MTy _ m))) = envSig m
@@ -104,7 +126,7 @@ _ = let
     ModDecs ds _ ->
       renderDecs ds --nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
     ModApply _f _a _ _ _ -> return mempty --parens $ ppr f <+> parens (ppr a)
-    ModAscript _me se _ _ -> (toHtml "{...}: " <>) <$> renderSigExp se
+    ModAscript _me se _ _ -> ("{...}: " <>) <$> renderSigExp se
     --ppr me <> colon <+> ppr se
     ModLambda _param _maybe_sig _body _ ->
       error "It should not be possible to open a lambda"
@@ -118,8 +140,7 @@ visible _ _ _ = False
 
 renderDoc :: ToMarkup a => Maybe a -> Html
 renderDoc (Just doc) =
-  H.div ! A.style (fromString "padding-left: 2em; font-style: italic") $
-  (fromString "-- | " <> toHtml doc)
+  H.div ! A.class_ "comment" $ (fromString "-- | " <> toHtml doc)
 renderDoc Nothing = mempty
 
 renderEnv :: Env -> DocM Html
@@ -133,11 +154,11 @@ renderEnv (Env vtable ttable sigtable modtable _) =
 
 renderModType :: (VName, MTy) -> Html
 renderModType (name, _sig) =
-  toHtml "module type " <> vnameHtml name
+  "module type " <> vnameHtml name
 
 renderMod :: (VName, Mod) -> Html
 renderMod (name, _mod) =
-  toHtml "module " <> vnameHtml name
+  "module " <> vnameHtml name
 
 renderValBind :: (VName, ValBinding) -> Html
 renderValBind = H.div . prettyValBind
@@ -148,12 +169,12 @@ renderTypeBind (name, TypeAbbr tps tp) =
 
 prettyValBind :: (VName, ValBinding) -> Html
 prettyValBind (name, BoundF (tps, pts, rettype)) =
-  toHtml "val " <> vnameHtml name <>
-  foldMap (toHtml " " <>) (map prettyTypeParam tps) <> toHtml ": " <>
-  foldMap (\t -> prettyType t <> toHtml " -> ") pts <> toHtml " " <>
+  "val " <> vnameHtml name <>
+  foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
+  foldMap (\t -> prettyType t <> " -> ") pts <> " " <>
   prettyType rettype
 prettyValBind (name, BoundV t) =
-  toHtml "val " <> vnameHtml name <> toHtml " : " <> prettyType t
+  "val " <> vnameHtml name <> " : " <> prettyType t
 
 prettyType :: StructType -> Html
 prettyType t = case t of
@@ -164,9 +185,9 @@ prettyType t = case t of
     | otherwise ->
         braces $ commas (map ppField $ M.toList fs)
     where ppField (name, tp) =
-            toHtml (nameToString name) <> toHtml ":" <> prettyType tp
+            toHtml (nameToString name) <> ":" <> prettyType tp
   TypeVar et targs ->
-    prettyTypeName et <> foldMap ((<> toHtml " ") . prettyTypeArg) targs
+    prettyTypeName et <> foldMap ((<> " ") . prettyTypeArg) targs
   Array arr -> prettyArray arr
 
 prettyArray :: ArrayTypeBase (ShapeDecl VName) () -> Html
@@ -175,7 +196,7 @@ prettyArray arr = case arr of
     prettyU u <> foldMap (brackets . prettyD) ds <> primTypeHtml et
   PolyArray et targs shape u _ ->
     prettyU u <> prettyShapeDecl shape <> prettyTypeName et <>
-    foldMap (<> toHtml " ") (map prettyTypeArg targs)
+    foldMap (<> " ") (map prettyTypeArg targs)
   RecordArray fs shape u
     | Just ts <- areTupleFields fs ->
         prefix <> parens (commas $ map prettyElem ts)
@@ -183,13 +204,13 @@ prettyArray arr = case arr of
         prefix <> braces (commas $ map ppField $ M.toList fs)
     where prefix = prettyU u <> prettyShapeDecl shape
           ppField (name, tp) = toHtml (nameToString name) <>
-                               toHtml ":" <> prettyElem tp
+                               ":" <> prettyElem tp
 
 prettyElem :: RecordArrayElemTypeBase (ShapeDecl VName) () -> Html
 prettyElem e = case e of
   PrimArrayElem bt _ u -> prettyU u <> primTypeHtml bt
   PolyArrayElem bt targs _ u ->
-    prettyU u <> prettyTypeName  bt <> foldMap (toHtml " " <>)
+    prettyU u <> prettyTypeName  bt <> foldMap (" " <>)
     (map prettyTypeArg targs)
   ArrayArrayElem at -> prettyArray at
   RecordArrayElem fs
@@ -198,7 +219,7 @@ prettyElem e = case e of
     | otherwise
       -> braces . commas $ map ppField $ M.toList fs
     where ppField (name, t) = toHtml (nameToString name) <>
-            toHtml ":" <> prettyElem t
+            ":" <> prettyElem t
 
 prettyShapeDecl :: ShapeDecl VName -> Html
 prettyShapeDecl (ShapeDecl ds) =
@@ -212,8 +233,8 @@ modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = return mempty
 modParamHtml (ModParam pname psig _ : mps) =
   liftM2 f (renderSigExp psig) (modParamHtml mps)
-  where f se params = toHtml "(" <> vnameHtml pname <>
-                      toHtml ": " <> se <> toHtml ") -> " <> params
+  where f se params = "(" <> vnameHtml pname <>
+                      ": " <> se <> ") -> " <> params
 
 prettyD :: DimDecl VName -> Html
 prettyD (NamedDim v) = prettyQualName v
@@ -229,17 +250,17 @@ renderSigExp e = case e of
   SigWith s (TypeRef v t) _ ->
     do e' <- renderSigExp s
        --name <- renderQualName Type v
-       return $ e' <> toHtml " with " <> prettyQualName v <>
-         toHtml " = "  <> typeDeclHtml t
+       return $ e' <> " with " <> prettyQualName v <>
+         " = "  <> typeDeclHtml t
   SigArrow Nothing e1 e2 _ ->
     liftM2 f (renderSigExp e1) (renderSigExp e2)
-    where f e1' e2' = e1' <> toHtml " -> " <> e2'
+    where f e1' e2' = e1' <> " -> " <> e2'
   SigArrow (Just v) e1 e2 _ ->
     do name <- vnameHtmlM Signature v
        e1' <- renderSigExp e1
        e2' <- renderSigExp e2
-       return $ toHtml "(" <> name <> toHtml ": " <>
-         e1' <> toHtml ") -> " <> e2'
+       return $ "(" <> name <> ": " <>
+         e1' <> ") -> " <> e2'
 
 vnameHtml :: VName -> Html
 vnameHtml (VName name tag) =
@@ -255,23 +276,23 @@ specHtml :: SpecBase Info VName -> DocM Html
 specHtml spec = case spec of
   TypeAbbrSpec tpsig -> H.div <$> typeBindHtml tpsig
   TypeSpec name ps doc _ -> return . H.div $
-    renderDoc doc <> toHtml "type " <> vnameHtml name <>
-    joinBy (toHtml " ") (map prettyTypeParam ps)
+    renderDoc doc <> "type " <> vnameHtml name <>
+    joinBy " " (map prettyTypeParam ps)
   ValSpec name tparams params rettype doc _ -> return . H.div $
     renderDoc doc <>
-    toHtml "val " <> vnameHtml name <>
-    foldMap (toHtml " " <>) (map prettyTypeParam tparams) <> toHtml " : " <>
-    foldMap (\tp -> paramBaseHtml tp <> toHtml " -> ") params <>
+    "val " <> vnameHtml name <>
+    foldMap (" " <>) (map prettyTypeParam tparams) <> " : " <>
+    foldMap (\tp -> paramBaseHtml tp <> " -> ") params <>
     typeDeclHtml rettype
   ModSpec name sig _ ->
     do m <- vnameHtmlM Structure name
        s <- renderSigExp sig
-       return $ toHtml "module " <> m <> toHtml ": "<> s
-  IncludeSpec e _ -> H.div . (toHtml "include " <>) <$> renderSigExp e
+       return $ "module " <> m <> ": "<> s
+  IncludeSpec e _ -> H.div . ("include " <>) <$> renderSigExp e
 
 paramBaseHtml :: ParamBase Info VName -> Html
 paramBaseHtml (NamedParam v t _) =
-  parens $ vnameHtml v <> toHtml ": " <> typeDeclHtml t
+  parens $ vnameHtml v <> ": " <> typeDeclHtml t
 paramBaseHtml (UnnamedParam t) = typeDeclHtml t
 
 typeDeclHtml :: TypeDeclBase f VName -> Html
@@ -279,15 +300,15 @@ typeDeclHtml = typeExpHtml . declaredType
 
 typeExpHtml :: TypeExp VName -> Html
 typeExpHtml e = case e of
-  TEUnique t _  -> toHtml "*" >> typeExpHtml t
+  TEUnique t _  -> "*" >> typeExpHtml t
   TEArray at d _ -> brackets (prettyDimDecl d) <> typeExpHtml at
   TETuple ts _ -> parens $ commas (map typeExpHtml ts)
   TERecord fs _ -> braces $ commas (map ppField fs)
     where ppField (name, t) = toHtml (nameToString name) <>
-            toHtml "=" <> typeExpHtml t
+            "=" <> typeExpHtml t
   TEVar name  _ -> qualNameHtml name
   TEApply t args _ ->
-    qualNameHtml t <> foldMap (toHtml " " <>) (map prettyTypeArgExp args)
+    qualNameHtml t <> foldMap (" " <>) (map prettyTypeArgExp args)
 
 qualNameHtml :: QualName VName -> Html
 qualNameHtml (QualName names (VName name tag)) =
@@ -295,7 +316,7 @@ qualNameHtml (QualName names (VName name tag)) =
       then prefix <> renderName name
       else prefix <> (a ! A.href (fromString ("#" ++ show tag)) $ renderName name)
   where prefix :: Html
-        prefix = foldMap ((<> toHtml ".") . renderName) names
+        prefix = foldMap ((<> ".") . renderName) names
 
 renderQualName :: Namespace -> QualName VName -> DocM Html
 renderQualName ns (QualName names (VName name tag)) =
@@ -303,29 +324,20 @@ renderQualName ns (QualName names (VName name tag)) =
       then return $ prefix <> renderName name
       else f <$> ref
   where prefix :: Html
-        prefix = mapM_ ((<> toHtml ".") . renderName) names
+        prefix = mapM_ ((<> ".") . renderName) names
         f s = prefix <> (a ! A.href (fromString s) $ renderName name)
-        trunc ('/':xs) = xs
-        trunc xs = xs
-        --link = do (file,vname) <- gets (M.! (ns,QualName names name))
+
         ref = do --vname <- getVName ns (QualName names name)
                  Just file <- gets (M.lookup (ns, VName name tag))
                  current <- asks fst
                  if file == current
                      then return ("#" ++ show tag)
-                     else return $ relativise (trunc file) (trunc current) ++
+                     else return $ relativise file current ++
                           ".html#" ++ show tag
 
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
-  concat (replicate (length (splitPath src) - 1) "../") ++ dest
-
-indexPage :: [(String, String)] -> Html
-indexPage pages = docTypeHtml $ h1 (toHtml "Futhark Documentation") <>
-  ul (mconcat $ map linkTo pages)
-  where linkTo (name, _) =
-          let file = makeRelative "/" $ name -<.> "html"
-          in li $ a ! A.href (fromString file) $ fromString name
+  concat (replicate (length (splitPath src) - 2) "../") ++ dest
 
 --getVName :: Namespace -> QualName Name -> DocM VName
 --getVName ns (QualName names name) = do
@@ -344,7 +356,7 @@ indexPage pages = docTypeHtml $ h1 (toHtml "Futhark Documentation") <>
 prettyDimDecl :: DimDecl VName -> Html
 prettyDimDecl AnyDim = mempty
 prettyDimDecl (NamedDim v) = prettyQualName v
-prettyDimDecl (BoundDim v) = toHtml "#" <> vnameHtml v
+prettyDimDecl (BoundDim v) = "#" <> vnameHtml v
 prettyDimDecl (ConstDim n) = toHtml (show n)
 
 prettyTypeArgExp :: TypeArgExp VName -> Html
@@ -353,7 +365,7 @@ prettyTypeArgExp (TypeArgExpType d) = typeExpHtml d
 
 prettyTypeParam :: TypeParam -> Html
 prettyTypeParam (TypeParamDim name _) = brackets $ vnameHtml name
-prettyTypeParam (TypeParamType name _) = toHtml "'" <> vnameHtml name
+prettyTypeParam (TypeParamType name _) = "'" <> vnameHtml name
 
 typeBindHtml :: TypeBindBase Info VName -> DocM Html
 typeBindHtml (TypeBind name params usertype doc _) =
@@ -361,6 +373,6 @@ typeBindHtml (TypeBind name params usertype doc _) =
 
 typeHtml :: VName -> [TypeParam] -> Html
 typeHtml name params =
-  toHtml "type " <> vnameHtml name <>
-  joinBy (toHtml " ") (map prettyTypeParam params) <>
-  toHtml " = "
+  "type " <> vnameHtml name <>
+  joinBy " " (map prettyTypeParam params) <>
+  " = "
