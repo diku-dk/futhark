@@ -11,7 +11,9 @@ language still lacks certain niceties and features.
 
 For more information, see [the website](http://futhark-lang.org).
 
-The [documentation is here](http://futhark.readthedocs.io).
+Also see the [compiler and language
+documentation](http://futhark.readthedocs.io) and the [basis library
+documentation](https://futhark-lang.org/docs).
 
 [Installation instructions here.](http://futhark.readthedocs.io/en/latest/installation.html)
 
