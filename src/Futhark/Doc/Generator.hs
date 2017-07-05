@@ -4,6 +4,7 @@ module Futhark.Doc.Generator (renderFile, indexPage) where
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.List (sort)
 import Data.Monoid
 import Data.Maybe (maybe,mapMaybe)
 import qualified Data.Map as M
@@ -33,7 +34,7 @@ renderFile ds = do
 indexPage :: [(String, String)] -> Html
 indexPage pages = docTypeHtml $ addBoilerplate "/" $
                   h1 "Futhark Library Documentation" <>
-                  ul (mconcat $ map linkTo pages)
+                  ul (mconcat $ map linkTo $ sort pages)
   where linkTo (name, _) =
           let file = makeRelative "/" $ name -<.> "html"
           in li $ a ! A.href (fromString file) $ fromString name
