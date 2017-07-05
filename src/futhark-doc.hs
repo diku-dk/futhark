@@ -55,11 +55,14 @@ futFiles dir = filter isFut <$> directoryContents dir
 type DocEnv = M.Map (Namespace,VName) String
 
 printDecs :: FilePath -> Imports -> [Dec] -> IO ()
-printDecs dir imports decs = mapM_ write . run $ mapM (f $ render decs) imports
-  where run s = evalState s M.empty
-        f g x = (fst x,) <$> g x
+printDecs dir imports decs = do
+  let to_write = evalState (mapM (f $ render decs) imports) mempty
+  mapM_ write to_write
+
+  write ("index", renderHtml $ indexPage to_write)
+
+  where f g x = (fst x,) <$> g x
         write (name, content) = do let file = dir ++ "/" ++ name -<.> "html"
-                                   print file
                                    createDirectoryIfMissing True $ takeDirectory file
                                    writeFile file content
 
