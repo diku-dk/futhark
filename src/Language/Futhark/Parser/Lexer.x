@@ -52,9 +52,13 @@ import Language.Futhark.Syntax (BinOp(..))
 @binop = @symbols+
 @qualbinop = (@identifier ".")+ @binop
 
+@doc2 = ".."[^\n]*
+@doc = "-- |"[^\n]*(\n$white*"--"[^\n]*)*
+
 tokens :-
 
   $white+                               ;
+  @doc                     { tokenM $ return . DOC . T.unpack . T.concat . map (T.drop 2 . T.stripStart) . T.split (== '\n') . T.drop 2 }
   "--"[^\n]*                            ;
   "="                      { tokenC EQU }
   "("                      { tokenC LPAR }
@@ -346,6 +350,8 @@ data Token = ID Name
            | VAL
            | OPEN
            | LOCAL
+
+           | DOC String
 
            | EOF
 
