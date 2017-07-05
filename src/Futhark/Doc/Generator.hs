@@ -118,7 +118,8 @@ visible _ _ _ = False
 
 renderDoc :: ToMarkup a => Maybe a -> Html
 renderDoc (Just doc) =
-  H.div ! A.style (fromString "padding-left: 2em") $ toHtml doc
+  H.div ! A.style (fromString "padding-left: 2em; font-style: italic") $
+  (fromString "-- | " <> toHtml doc)
 renderDoc Nothing = mempty
 
 renderEnv :: Env -> DocM Html
