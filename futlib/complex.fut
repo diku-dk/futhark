@@ -1,18 +1,33 @@
 import "/futlib/math"
 
+-- | The type of modules that implement a notion of complex numbers.
+-- Semantically, a complex number can be seen as a pair of two numbers
+-- (but this need not be the representation).
 module type complex = {
+  -- | The type of the components of the complex number.
   type real
+  -- | The type of complex numbers.
   type complex
 
+  -- | Construct a complex number from real and imaginary components.
   val mk: real -> real -> complex
+  -- | Construct a complex number from just the real component.  The
+  -- imaginary part will be zero.
   val mk_re: real -> complex
+  -- | Construct a complex number from just the imaginary component.  The
+  -- real part will be zero.
   val mk_im: real -> complex
 
+  -- | Conjugate a complex number.
   val conj: complex -> complex
+  -- | The real part of a complex number.
   val re: complex -> real
+  -- | The imaginary part of a complex number.
   val im: complex -> real
 
+  -- | The magnitude (or modulus, or absolute value) of a complex number.
   val mag: complex -> real
+  -- | The argument (or phase) of a complex number.
   val arg: complex -> real
 
   val +: complex -> complex -> complex
@@ -26,9 +41,10 @@ module type complex = {
 
   val from_i32: i32 -> complex
   val from_fraction: i32 -> i32 -> complex
-  val to_i32: complex -> i32
 }
 
+-- | Given a module describing a number type, construct a module
+-- implementing complex numbers.
 module complex(T: real): (complex with real = T.t) = {
   type real = T.t
   type complex = (T.t, T.t)
@@ -73,5 +89,4 @@ module complex(T: real): (complex with real = T.t) = {
   let from_fraction (a: i32) (b: i32): complex =
     mk (T.from_fraction a b) (T.from_i32 0)
   let from_i32 (a: i32) = from_fraction a 1
-  let to_i32 ((a,_): complex) = T.to_i32 a
 }

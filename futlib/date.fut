@@ -11,6 +11,7 @@
 import "/futlib/math"
 
 module type date = {
+  -- A date.
   type date
 
   -- Add days to date.
