@@ -261,7 +261,7 @@ TypeRef :: { TypeRefBase NoInfo Name }
 SigBind :: { SigBindBase NoInfo Name }
          : module type id '=' SigExp
           { let L pos (ID name) = $3
-            in SigBind name $5 pos Nothing }
+            in SigBind name $5 Nothing pos }
 
 ModExp :: { UncheckedModExp }
         : import stringlit
@@ -304,18 +304,18 @@ ModParam :: { ModParamBase NoInfo Name }
 Spec :: { SpecBase NoInfo Name }
       : val id many(TypeParam) ':' SigTypeDecl
         { let L loc (ID name) = $2; (ps, r) = $5
-          in ValSpec name $3 ps r loc Nothing }
+          in ValSpec name $3 ps r Nothing loc }
       | val BindingBinOp ':' SigTypeDecl
         { let (ps, r) = $4
-          in ValSpec $2 [] ps r $1 Nothing }
+          in ValSpec $2 [] ps r Nothing $1 }
       | TypeAbbr
         { TypeAbbrSpec $1 }
       | type id many(TypeParam)
         { let L loc (ID name) = $2
-          in TypeSpec name $3 loc Nothing }
+          in TypeSpec name $3 Nothing loc }
       | type 'id[' id ']' many(TypeParam)
         { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
-          in TypeSpec name (TypeParamDim pname ploc : $5) loc Nothing }
+          in TypeSpec name (TypeParamDim pname ploc : $5) Nothing loc }
       | module id ':' SigExp
         { let L _ (ID name) = $2
           in ModSpec name $4 $1 }
@@ -376,25 +376,25 @@ BindingBinOp :: { Name }
 Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
-               $3 (fst $4 : snd $4) $7 loc Nothing
+               $3 (fst $4 : snd $4) $7 Nothing loc
           }
 
         | entry id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind True name (fmap declaredType $5) NoInfo
-               $3 (fst $4 : snd $4) $7 loc Nothing }
+               $3 (fst $4 : snd $4) $7 Nothing loc }
 
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 $1 Nothing
+          { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 Nothing $1
           }
 ;
 
 Val : let id maybeAscription(TypeExpDecl) '=' Exp
       { let L _ (ID name) = $2
-        in ValBind (name==defaultEntryPoint) name (fmap declaredType $3) NoInfo $5 $1 Nothing }
+        in ValBind (name==defaultEntryPoint) name (fmap declaredType $3) NoInfo $5 Nothing $1 }
     | entry id maybeAscription(TypeExpDecl) '=' Exp
       { let L _ (ID name) = $2
-        in ValBind True name (fmap declaredType $3) NoInfo $5 $1 Nothing }
+        in ValBind True name (fmap declaredType $3) NoInfo $5 Nothing $1 }
 
 Param :: { ParamBase NoInfo Name }
        : '(' id ':' TypeExpDecl ')' { let L _ (ID v) = $2 in NamedParam v $4 $1 }
@@ -412,10 +412,10 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
 TypeAbbr :: { TypeBindBase NoInfo Name }
 TypeAbbr : type id many(TypeParam) '=' TypeExpDecl
            { let L loc (ID name) = $2
-              in TypeBind name $3 $5 loc Nothing }
+              in TypeBind name $3 $5 Nothing loc }
          | type 'id[' id ']' many(TypeParam) '=' TypeExpDecl
            { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
-             in TypeBind name (TypeParamDim pname ploc:$5) $7 loc Nothing }
+             in TypeBind name (TypeParamDim pname ploc:$5) $7 Nothing loc }
 
 TypeExp :: { UncheckedTypeExp }
          : TypeExpApply { TEApply (fst (fst $1)) (snd $1) (snd (fst $1)) }
@@ -829,7 +829,7 @@ addDoc _ dec = dec
 addDocSpec :: String -> SpecBase NoInfo Name -> SpecBase NoInfo Name
 addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig { typeDoc = Just doc })
 addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
-addDocSpec doc (TypeSpec name ps loc _) = TypeSpec name ps loc (Just doc)
+addDocSpec doc (TypeSpec name ps _ loc) = TypeSpec name ps (Just doc) loc
 addDocSpec _ spec = spec
 
 reverseNonempty :: (a, [a]) -> (a, [a])
