@@ -2,24 +2,34 @@
 
 import "/futlib/math"
 
+-- | The size of the outer dimensionion of an array.
 let length [n] 't (_: [n]t) = n
 
+-- | Is the array empty?
 let null [n] 't (_: [n]t) = n == 0
 
+-- | The first element of the array.
 let head [n] 't (x: [n]t) = x[0]
 
-let tail [n] 't (x: [n]t) = x[1:]
-
-let init [n] 't (x: [n]t) = x[0:n-1]
-
+-- | The last element of the array.
 let last [n] 't (x: [n]t) = x[n-1]
 
+-- | Everything but the first element of the array.
+let tail [n] 't (x: [n]t) = x[1:]
+
+-- | Everything but the last element of the array.
+let init [n] 't (x: [n]t) = x[0:n-1]
+
+-- | Take some number of elements from the head of the array.
 let take [n] 't (i: i32) (x: [n]t): [i]t = x[0:i]
 
+-- | Remove some number of elements from the head of the array.
 let drop [n] 't (i: i32) (x: [n]t) = x[i:]
 
+-- | Return the elements of the array in reverse order.
 let reverse [n] 't (x: [n]t): [n]t = x[::-1]
 
+-- | Replace an element of the array with a new value.
 let update [n] 't (xs: *[n]t) (i: i32) (x: t): [n]t = xs with [i] <- x
 
 let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): [n]t =
