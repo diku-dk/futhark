@@ -922,6 +922,7 @@ data ModBindBase f vn =
           , modParams    :: [ModParamBase f vn]
           , modSignature :: Maybe (SigExpBase f vn, f (M.Map VName VName))
           , modExp       :: ModExpBase f vn
+          , modDoc       :: Maybe String
           , modLocation  :: SrcLoc
           }
 deriving instance Showable f vn => Show (ModBindBase f vn)

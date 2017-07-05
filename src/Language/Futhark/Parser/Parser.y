@@ -295,7 +295,7 @@ SimpleSigExp :: { UncheckedSigExp }
 ModBind :: { ModBindBase NoInfo Name }
          : module id many(ModParam) maybeAscription(SigExp) '=' ModExp
            { let L floc (ID fname) = $2;
-             in ModBind fname $3 (fmap (,NoInfo) $4) $6 $1
+             in ModBind fname $3 (fmap (,NoInfo) $4) $6 Nothing $1
            }
 
 ModParam :: { ModParamBase NoInfo Name }
@@ -824,6 +824,7 @@ addDoc doc (ValDec val) = ValDec (val { constDoc = Just doc })
 addDoc doc (FunDec fun) = FunDec (fun { funBindDoc = Just doc })
 addDoc doc (TypeDec tp) = TypeDec (tp { typeDoc = Just doc })
 addDoc doc (SigDec sig) = SigDec (sig { sigDoc = Just doc })
+addDoc doc (ModDec mod) = ModDec (mod { modDoc = Just doc })
 addDoc _ dec = dec
 
 addDocSpec :: String -> SpecBase NoInfo Name -> SpecBase NoInfo Name

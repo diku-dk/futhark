@@ -103,7 +103,7 @@ checkForDuplicateDecs =
         f (SigDec (SigBind name _ _ loc)) =
           check Signature name loc
 
-        f (ModDec (ModBind name _ _ _ loc)) =
+        f (ModDec (ModBind name _ _ _ _ loc)) =
           check Structure name loc
 
         f OpenDec{} = return
@@ -353,15 +353,15 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   return (body_mty'', p_subst, body_subst)
 
 checkModBind :: ModBindBase NoInfo Name -> TypeM (Env, ModBindBase Info VName)
-checkModBind (ModBind name [] maybe_fsig_e e loc) = do
+checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
   (maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
   bindSpaced [(Structure, name)] $ do
     name' <- checkName Structure name loc
     return (mempty { envModTable = M.singleton name' $ mtyMod mty
                    , envNameMap = M.singleton (Structure, name) name'
                    },
-            ModBind name' [] maybe_fsig_e' e' loc)
-checkModBind (ModBind name (p:ps) maybe_fsig_e body_e loc) = do
+            ModBind name' [] maybe_fsig_e' e' doc loc)
+checkModBind (ModBind name (p:ps) maybe_fsig_e body_e doc loc) = do
   (params', maybe_fsig_e', body_e', funsig) <-
     withModParam p $ \p' p_abs p_mod ->
     withModParams ps $ \params_stuff -> do
@@ -377,7 +377,7 @@ checkModBind (ModBind name (p:ps) maybe_fsig_e body_e loc) = do
                    , envNameMap =
                        M.singleton (Structure, name) name'
                    },
-            ModBind name' params' maybe_fsig_e' body_e' loc)
+            ModBind name' params' maybe_fsig_e' body_e' doc loc)
 
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()

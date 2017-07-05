@@ -374,7 +374,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModParamBase ty vn) where
     parens (ppr pname <> colon <+> ppr psig)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModBindBase ty vn) where
-  ppr (ModBind name ps sig e _) =
+  ppr (ModBind name ps sig e _ _) =
     text "module" <+> ppr name <+> spread (map ppr ps) <+> sig' <+> equals <+> ppr e
     where sig' = case sig of Nothing    -> mempty
                              Just (s,_) -> colon <+> ppr s <> text " "
