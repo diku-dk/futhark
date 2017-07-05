@@ -1,13 +1,15 @@
 {-# LANGUAGE TupleSections #-}
-
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main (main) where
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.FileEmbed
 import Data.Monoid
 import qualified Data.Map as M
-import System.FilePath ((-<.>), takeDirectory, takeExtension)
+import System.FilePath ((<.>), takeDirectory, takeExtension)
 import System.Directory (createDirectoryIfMissing)
 import System.Console.GetOpt
 import System.IO
@@ -60,16 +62,21 @@ printDecs dir imports decs = do
   mapM_ write to_write
 
   write ("index", renderHtml $ indexPage to_write)
+  write' ("style.css", cssFile)
 
   where f g x = (fst x,) <$> g x
-        write (name, content) = do let file = dir ++ "/" ++ name -<.> "html"
-                                   createDirectoryIfMissing True $ takeDirectory file
-                                   writeFile file content
+        write (name, content) = write' (name <.> "html", content)
+        write' (name, content) = do let file = dir ++ "/" ++ name
+                                    createDirectoryIfMissing True $ takeDirectory file
+                                    writeFile file content
 
 render :: [Dec] -> (String, FileModule) -> State DocEnv String
 render decs (name,fm) = runReaderT m (name,fm)
   where putName = h1 (toHtml name)
-        m = renderHtml . docTypeHtml . (putName <>) <$> renderDecs decs
+        m = renderHtml . docTypeHtml . (putName <>) <$> renderFile decs
+
+cssFile :: String
+cssFile = $(embedStringFile "rts/futhark-doc/style.css")
 
 newtype DocConfig = DocConfig {
   docOutput :: Maybe FilePath
