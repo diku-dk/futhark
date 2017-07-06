@@ -217,14 +217,16 @@ readImportFile :: (MonadError CompilerError m, MonadIO m) =>
                   SearchPath -> FutharkInclude -> m (T.Text, FilePath)
 readImportFile (SearchPath dir) include = do
   -- First we try to find a file of the given name in the search path,
-  -- then we look at the builtin library if we have to.
+  -- then we look at the builtin library if we have to.  For the
+  -- builtins, we don't use the search path.
   r <- liftIO $ (Right <$> T.readFile filepath) `catch` couldNotRead
-  case (r, lookup filepath futlib) of
+  case (r, lookup abs_filepath futlib) of
     (Right s, _)            -> return (s, dir </> filepath)
     (Left Nothing, Just t)  -> return (t, "[builtin]" </> filepath)
     (Left Nothing, Nothing) -> externalErrorS not_found
     (Left (Just e), _)      -> externalErrorS e
   where filepath = includeToFilePath dir include
+        abs_filepath = includeToFilePath "/" include
 
         couldNotRead e
           | isDoesNotExistError e =
