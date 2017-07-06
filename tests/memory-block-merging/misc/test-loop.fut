@@ -9,7 +9,7 @@ let main(x: [#n]i32): []i32 =
   let y = map (*2) x in
   let y'= reshape (2,n/2) y
   let ylu = copy y
-  let a = loop(a=ylu) for i < n do
+  let a = loop a=ylu for i < n do
       let b = map (*2) a
       let c = map (+ (b[0])) b
       let d = map (+ (c[0])) c

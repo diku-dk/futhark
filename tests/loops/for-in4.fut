@@ -4,4 +4,4 @@
 -- output { 6 }
 
 let main (xss: [][]i32) =
-  loop (a = 0) for xs in xss do a + xs[0]
+  loop a = 0 for xs in xss do a + xs[0]

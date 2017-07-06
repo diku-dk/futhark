@@ -24,7 +24,7 @@ let main (y: *[#n][#m]i32, a0: [#m]i32): *[n][m]i32 =
   -- y: [[5, 9], [0, 0]]
   let a1 = copy a0
   -- a1: [1, 2]
-  let a2 = loop (a = a1) for _i < n do
+  let a2 = loop a = a1 for _i < n do
     let a' = map (+ 1) a
     in a'
   -- a2: [3, 4]

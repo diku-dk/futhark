@@ -8,6 +8,6 @@
 -- structure cpu { Alloc 1 }
 
 let main (xs0: [#n]i32): [n]i32 =
-  loop (xs = xs0) for _i < n do
+  loop xs = xs0 for _i < n do
     let xs' = map (+ 1) xs
     in xs'

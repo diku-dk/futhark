@@ -10,5 +10,5 @@ let main (n: i32) =
   let sumup [k] (chunk: [k]i32) =
     if k == 0 then 0
     else let j = chunk[0]
-         in loop (x = 0) for i < k do x + i + j
+         in loop x = 0 for i < k do x + i + j
   in stream_red (+) sumup (iota n)

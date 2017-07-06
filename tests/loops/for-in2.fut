@@ -6,4 +6,4 @@
 
 let main(n: i32) =
   let xs = replicate n n in
-  loop (a=0) for x in xs do (a<<1) ^ x
+  loop a=0 for x in xs do (a<<1) ^ x

@@ -7,5 +7,5 @@
 -- input { 40 } output { 102334155 }
 
 let main(n: i32): i32 =
-  let (a,_) = loop((a,b) = (0,1)) for _i < n do (b, a + b)
+  let (a,_) = loop (a,b) = (0,1) for _i < n do (b, a + b)
   in a
