@@ -14,6 +14,7 @@ module Futhark.Compiler
 where
 
 import Data.Monoid
+import Data.Loc
 import Control.Exception
 import Control.Monad
 import Control.Monad.State
@@ -153,18 +154,21 @@ newtype SearchPath = SearchPath FilePath -- Make this a list, eventually.
 
 -- | Absolute reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  The 'FilePath' must be absolute.
-newtype FutharkInclude = FutharkInclude Posix.FilePath
+data FutharkInclude = FutharkInclude Posix.FilePath SrcLoc
   deriving (Eq, Show)
 
-mkInitialInclude :: String -> FutharkInclude
-mkInitialInclude s = FutharkInclude $ "/" Posix.</> s
+instance Located FutharkInclude where
+  locOf (FutharkInclude _ loc) = locOf loc
 
-mkInclude :: FutharkInclude -> String -> FutharkInclude
-mkInclude (FutharkInclude includer) includee =
-  FutharkInclude $ takeDirectory includer Posix.</> includee
+mkInitialInclude :: String -> FutharkInclude
+mkInitialInclude s = FutharkInclude ("/" Posix.</> s) noLoc
+
+mkInclude :: FutharkInclude -> String -> SrcLoc -> FutharkInclude
+mkInclude (FutharkInclude includer _) includee =
+  FutharkInclude (takeDirectory includer Posix.</> includee)
 
 includeToFilePath :: FilePath -> FutharkInclude -> FilePath
-includeToFilePath dir (FutharkInclude fp) =
+includeToFilePath dir (FutharkInclude fp _) =
   dir </> fromPOSIX (Posix.makeRelative "/" fp) <.> "fut"
   where
     -- | Some bad operating systems do not use forward slash as
@@ -174,10 +178,10 @@ includeToFilePath dir (FutharkInclude fp) =
     fromPOSIX = joinPath . Posix.splitDirectories
 
 includeToString :: FutharkInclude -> String
-includeToString (FutharkInclude s) = s
+includeToString (FutharkInclude s _) = s
 
 includePath :: FutharkInclude -> String
-includePath (FutharkInclude s) = Posix.takeDirectory s
+includePath (FutharkInclude s _) = Posix.takeDirectory s
 
 readImport :: (MonadError CompilerError m, MonadIO m) =>
               SearchPath -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
@@ -195,7 +199,7 @@ readImport search_path steps include
           Left err -> externalErrorS $ show err
           Right prog -> return prog
 
-        mapM_ (readImport search_path (include:steps) . mkInclude include) $ E.progImports prog
+        mapM_ (readImport search_path (include:steps) . uncurry (mkInclude include)) $ E.progImports prog
 
         -- It is important to not read these before the above calls to
         -- readImport.
@@ -236,7 +240,8 @@ readImportFile (SearchPath dir) include = do
               "Could not import " ++ includeToString include ++ ": " ++ show e
 
         not_found =
-          "Could not find import '" ++ includeToString include ++ "' in path '" ++ dir ++ "'."
+          "Could not find import '" ++ includeToString include ++ "' at " ++
+          locStr (srclocOf include) ++ " in path '" ++ dir ++ "'."
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>

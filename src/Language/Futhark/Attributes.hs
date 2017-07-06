@@ -924,7 +924,7 @@ qualify k (QualName ks v) = QualName (k:ks) v
 typeName :: VName -> TypeName
 typeName = typeNameFromQualName . qualName
 
-progImports :: ProgBase f vn -> [String]
+progImports :: ProgBase f vn -> [(String,SrcLoc)]
 progImports (Prog decs) = concatMap decImports decs
   where decImports (OpenDec x xs _ _) =
           concatMap modExpImports $ x:xs
@@ -938,7 +938,7 @@ progImports (Prog decs) = concatMap decImports decs
 
         modExpImports ModVar{}              = []
         modExpImports (ModParens p _)       = modExpImports p
-        modExpImports (ModImport f _)       = [f]
+        modExpImports (ModImport f loc)     = [(f,loc)]
         modExpImports (ModDecs ds _)        = concatMap decImports ds
         modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me
