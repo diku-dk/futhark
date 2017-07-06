@@ -53,13 +53,13 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
             let v = V[i-s]
             let vi0 = v ^ (v >> (u32(s)))
             let vi =
-              loop (vi = vi0) for k' < s-1 do
+              loop vi = vi0 for k' < s-1 do
                 let k = k'+1
                 in vi ^ (((a >> u32(s-1-k)) & 1u32) * V[i-k])
             in V with [i] <- vi
 
   let index_of_least_significant_0 (x:i32) : i32 =
-    loop (i = 0) while i < 32 && ((x>>i)&1) != 0 do i + 1
+    loop i = 0 while i < 32 && ((x>>i)&1) != 0 do i + 1
 
   let norm = 2.0 f64.** f64(L)
 
