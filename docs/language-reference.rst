@@ -175,7 +175,7 @@ literals and variables, but also more complicated forms.
       : | "let" `type_param`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
-      : | "loop" "(" `type_param`* `pat` [("=" `exp`)] ")" `loopform` "do" `exp`
+      : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
@@ -493,8 +493,8 @@ aliasing any free variables in ``e``.  The function is not in scope of
 itself, and hence cannot be recursive.  See also `Shape
 Declarations`_.
 
-``loop (pat = initial) for x in a do loopbody``
-...............................................
+``loop pat = initial for x in a do loopbody``
+.............................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
@@ -510,13 +510,13 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 
 See also `Shape Declarations`_.
 
-``loop (pat = initial) for x < n do loopbody``
-...............................................
+``loop pat = initial for x < n do loopbody``
+............................................
 
 Equivalent to ``loop (pat = initial) for x in iota n do loopbody``.
 
-``loop (pat = initial) = while cond do loopbody``
-............................................................
+``loop pat = initial = while cond do loopbody``
+...............................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
