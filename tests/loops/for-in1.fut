@@ -6,4 +6,4 @@
 
 let main(n: i32) =
   let xs = iota n in
-  loop (a=0) for x in xs do a ^ x
+  loop a=0 for x in xs do a ^ x

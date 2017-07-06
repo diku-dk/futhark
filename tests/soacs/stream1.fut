@@ -10,7 +10,7 @@ let vecadd(xs: *[#m]i32) (ys: [#m]i32): *[m]i32 =
     in xs
 
 let process_chunk (chunk: [#chunk_sz][#m]i32): *[m]i32 =
-  loop (acc = replicate m 0) for i < chunk_sz do
+  loop acc = replicate m 0 for i < chunk_sz do
                    vecadd acc chunk[i]
 
 let main(xss: [#n][#m]i32): [m]i32 =

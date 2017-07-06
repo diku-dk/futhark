@@ -482,11 +482,11 @@ Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
 
-     | loop '(' many(TypeParam) Pattern ')' LoopForm do Exp %prec ifprec
-         {% fmap (\t -> DoLoop $3 $4 t $6 $8 $1) (patternExp $4) }
+     | loop many(TypeParam) Pattern LoopForm do Exp %prec ifprec
+         {% fmap (\t -> DoLoop $2 $3 t $4 $6 $1) (patternExp $3) }
 
-     | loop '(' many(TypeParam) Pattern '=' Exp ')' LoopForm do Exp %prec ifprec
-         { DoLoop $3 $4 $6 $8 $10 $1 }
+     | loop many(TypeParam) Pattern '=' Exp LoopForm do Exp %prec ifprec
+         { DoLoop $2 $3 $5 $6 $8 $1 }
 
      | LetExp %prec letprec { $1 }
 
@@ -923,6 +923,10 @@ patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var (QualName [] (identName ident)) NoInfo $ srclocOf ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+patternExp (PatternAscription pat _) = patternExp pat
+patternExp (PatternParens pat _) = patternExp pat
+patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
+  where field (name, pat) = RecordField name <$> patternExp pat <*> pure loc
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF

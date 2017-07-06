@@ -4,4 +4,4 @@
 -- output { 15 }
 
 let main(xs: []i32) =
-  loop (a=0) for x in xs do a + x
+  loop a=0 for x in xs do a + x

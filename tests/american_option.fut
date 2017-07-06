@@ -39,7 +39,7 @@ let binom(expiry: i32): f64 =
   let dPow = map (d**) (map f64 (map (n-) (iota(n+1))))
   let st = map (f64(s0())*) (map (*) uPow dPow)
   let finalPut = map (f64.max(f64(0.0))) (map (f64(strike())-) st) in
-  let put = loop (put = finalPut) for i in reverse (map (1+) (iota n)) do
+  let put = loop put = finalPut for i in reverse (map (1+) (iota n)) do
     let (uPow_start, _) = split (i) uPow
     let (_, dPow_end) = split (n+1-i) dPow
     let st = map (f64(s0())*) (map (*) uPow_start dPow_end)

@@ -35,7 +35,7 @@ let addComplex(x: complex, y: complex): complex =
       b + d)
 
 let divergence(depth: i32, c0: complex): i32 =
-  #2 (loop ((c, i) = (c0, 0)) while i < depth && dot(c) < 4.0 do
+  #2 (loop (c, i) = (c0, 0) while i < depth && dot(c) < 4.0 do
         (addComplex(c0, multComplex(c, c)),
         i + 1))
 

@@ -8,4 +8,4 @@
 -- }
 
 let main(n: i32): i32 =
-  loop (x = 0) for i < n do x + i
+  loop x = 0 for i < n do x + i

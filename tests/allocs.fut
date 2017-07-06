@@ -5,7 +5,7 @@
 -- output { 1300103225i32 }
 
 let main(a: [#n]i32): i32 =
-  let b = loop (b = iota(10)) for i < n do
+  let b = loop b = iota(10) for i < n do
     (let m = a[i]
      in if m < (shape b)[0]
         then b
