@@ -161,7 +161,10 @@ instance Located FutharkInclude where
   locOf (FutharkInclude _ loc) = locOf loc
 
 mkInitialInclude :: String -> FutharkInclude
-mkInitialInclude s = FutharkInclude ("/" Posix.</> s) noLoc
+mkInitialInclude s = FutharkInclude ("/" Posix.</> toPOSIX s) noLoc
+  where
+    toPOSIX :: FilePath -> Posix.FilePath
+    toPOSIX = Posix.joinPath . splitDirectories
 
 mkInclude :: FutharkInclude -> String -> SrcLoc -> FutharkInclude
 mkInclude (FutharkInclude includer _) includee =
