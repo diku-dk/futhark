@@ -48,8 +48,8 @@ import Language.Futhark.Syntax (BinOp(..))
 @unop = ("!"|"~")
 @qualunop = (@identifier ".")+ @unop
 
-@symbols = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
-@binop = @symbols+
+@opchar = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
+@binop = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^") @opchar*
 @qualbinop = (@identifier ".")+ @binop
 
 @doc2 = ".."[^\n]*
