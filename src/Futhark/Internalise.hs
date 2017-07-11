@@ -404,6 +404,61 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
         isArrayLiteral e =
           Just ([], [e])
 
+internaliseExp desc (E.Range start maybe_second end _) = do
+  start' <- internaliseExp1 "range_start" start
+
+  start_t <- subExpType start'
+  it <- case start_t of
+          I.Prim (I.IntType it) -> return it
+          _ -> fail $ "Start value in range has type " ++ pretty start_t
+
+  let zero = intConst it 0
+      one = intConst it 1
+      negone = intConst it (-1)
+      default_step = case end of DownToExclusive{} -> negone
+                                 UpToInclusive{} -> one
+                                 UpToExclusive{} -> one
+
+  step <- case maybe_second of
+            Just second -> do
+              second' <- internaliseExp1 "range_second" second
+              letSubExp "range_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
+            Nothing -> return default_step
+
+  downwards <- case end of
+    DownToExclusive{} -> return $ constant True
+    UpToExclusive{} -> return $ constant False
+    _ -> do
+      step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
+      letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+
+  end' <- internaliseExp1 "range_end" $ case end of
+    DownToExclusive e -> e
+    UpToInclusive e -> e
+    UpToExclusive e -> e
+
+  end_exclusive <- case end of
+    DownToExclusive{} -> return end'
+    UpToExclusive{} -> return end'
+    UpToInclusive{} ->
+      letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step
+
+  end_from_above <- letSubExp "end_from_above" $ I.BasicOp $ I.BinOp (I.SMin it) start' end_exclusive
+  end_from_below <- letSubExp "end_from_below" $ I.BasicOp $ I.BinOp (I.SMax it) start' end_exclusive
+
+  end_constrained <- letSubExp "end_constrained" $
+                     I.If downwards (resultBody [end_from_above]) (resultBody [end_from_below])
+                     [I.Prim $ IntType it]
+
+  up_distance <- letSubExp "up_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
+  down_distance <- letSubExp "down_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
+  distance <- letSubExp "distance" $
+              I.If downwards (resultBody [down_distance]) (resultBody [up_distance])
+              [I.Prim $ IntType it]
+  num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" $ I.BasicOp $ I.BinOp (I.SDiv it) distance step
+  num_elems <- letSubExp "num_elems" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_maybe_neg
+
+  pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et

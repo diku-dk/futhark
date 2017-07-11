@@ -158,6 +158,14 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
+  pprPrec _ (Range start maybe_step end _) =
+    brackets $
+    ppr start <>
+    maybe mempty ((text ".." <>) . ppr) maybe_step <>
+    case end of
+      DownToExclusive end' -> text "..>" <> ppr end'
+      UpToInclusive   end' -> text "..." <> ppr end'
+      UpToExclusive   end' -> text "..<" <> ppr end'
   pprPrec p (BinOp bop (x,_) (y,_) _ _) = prettyBinOp p bop x y
   pprPrec _ (Project k e _ _) = text "#" <> ppr k <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>

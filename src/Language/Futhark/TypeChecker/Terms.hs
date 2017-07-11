@@ -531,6 +531,20 @@ checkExp (ArrayLit es _ loc) = do
 
   return $ ArrayLit es' (Info et) loc
 
+checkExp (Range start maybe_step end loc) = do
+  start' <- require anySignedType =<< checkExp start
+  let start_t = toStructural $ typeOf start'
+  maybe_step' <- case maybe_step of
+    Nothing -> return Nothing
+    Just step -> Just <$> (require [start_t] =<< checkExp step)
+
+  end' <- case end of
+    DownToExclusive e -> DownToExclusive <$> (require [start_t] =<< checkExp e)
+    UpToExclusive e -> UpToExclusive <$> (require [start_t] =<< checkExp e)
+    UpToInclusive e -> UpToInclusive <$> (require [start_t] =<< checkExp e)
+
+  return $ Range start' maybe_step' end' loc
+
 checkExp (Empty decl loc) = do
   decl' <- checkTypeDecl loc decl
   return $ Empty decl' loc

@@ -541,6 +541,8 @@ typeOf (RecordLit fs _) =
           _          -> error "typeOf: RecordLit: the impossible happened."
 typeOf (ArrayLit _ (Info t) _) =
   arrayType 1 t Unique `setAliases` mempty
+typeOf (Range e _ _ _) =
+  arrayType 1 (typeOf e) Unique `setAliases` mempty
 typeOf (Empty (TypeDecl _ (Info t)) _) =
   arrayType 1 (fromStruct t) Unique
 typeOf (BinOp _ _ _ (Info t) _) = t
