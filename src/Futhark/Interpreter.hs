@@ -75,7 +75,7 @@ instance Show InterpreterError where
     "Split not valid for sizes " ++ show sizes ++
     " on array '" ++ var ++ "', with shape " ++ show arrsz ++ "."
   show (NegativeIota n) =
-    "Argument " ++ show n ++ " to iota at is negative."
+    "Length argument " ++ show n ++ " to iota at is negative."
   show (NegativeReplicate n) =
     "Argument " ++ show n ++ " to replicate is negative."
   show (TypeError s) =
@@ -546,7 +546,7 @@ evalBasicOp (Iota e x s et) = do
                              [x'',x''+s''..x''+(toInteger e'-1)*s''])
                    (IntType et) [fromIntegral e']]
       | otherwise ->
-        bad $ NegativeIota $ valueIntegral x'
+          bad $ NegativeIota $ fromIntegral e'
     _ -> bad $ TypeError "evalBasicOp Iota"
 
 evalBasicOp (Replicate (Shape ds) e2) = do
