@@ -20,10 +20,11 @@ Identifiers and Keywords
    id: `letter` (`letter` | "_" | "'")* | "_" `id`
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
-   binop: `symbol`+
+   binop: `opstartchar` `opchar`*
    qualbinop: `binop` | `quals` `binop`
    fieldid: `decimal` | `id`
-   symbol: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^" | "."
+   opstartchar = "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
+   opchar: `opstartchar` | "."
 
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
