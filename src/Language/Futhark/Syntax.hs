@@ -47,6 +47,7 @@ module Language.Futhark.Syntax
   -- * Abstract syntax tree
   , BinOp (..)
   , IdentBase (..)
+  , Inclusiveness(..)
   , DimIndexBase(..)
   , ExpBase(..)
   , FieldBase(..)
@@ -504,9 +505,23 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Geq
              deriving (Eq, Ord, Show, Enum, Bounded)
 
+-- | Whether a bound for an end-point of a 'DimSlice' or a range
+-- literal is inclusive or exclusive.
+data Inclusiveness a = DownToExclusive a
+                     | UpToInclusive a -- ^ May still be "down to" if step is negative.
+                     | UpToExclusive a -- ^ May still be "down to" if step is negative.
+                     deriving (Eq, Ord, Show)
+
+instance Located a => Located (Inclusiveness a) where
+  locOf (DownToExclusive x) = locOf x
+  locOf (UpToInclusive x) = locOf x
+  locOf (UpToExclusive x) = locOf x
+
 -- | An indexing of a single dimension.
 data DimIndexBase f vn = DimFix (ExpBase f vn)
-                       | DimSlice (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn))
+                       | DimSlice (Maybe (ExpBase f vn))
+                                  (Maybe (ExpBase f vn))
+                                  (Maybe (ExpBase f vn))
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.
@@ -549,6 +564,8 @@ data ExpBase f vn =
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
+
+            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) SrcLoc
 
             | Empty (TypeDeclBase f vn) SrcLoc
 
@@ -694,6 +711,7 @@ instance Located (ExpBase f vn) where
   locOf (RecordLit _ pos)        = locOf pos
   locOf (Project _ _ _ pos)      = locOf pos
   locOf (ArrayLit _ _ pos)       = locOf pos
+  locOf (Range _ _ _ pos)        = locOf pos
   locOf (Empty _ pos)            = locOf pos
   locOf (BinOp _ _ _ _ pos)      = locOf pos
   locOf (If _ _ _ _ pos)         = locOf pos

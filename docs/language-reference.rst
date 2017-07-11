@@ -165,9 +165,10 @@ literals and variables, but also more complicated forms.
        : | "{" field ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
-       : | "[" `exp` ("," `exp`)* "]"
        : | "#" `fieldid` `exp`
-       : | `quals`"(" `exp` ")"
+       : | `quals`."(" `exp` ")"
+       : | "[" `exp` ("," `exp`)* "]"
+       : | "[" `exp` [".." `exp`] "..." `exp` "]"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -363,6 +364,33 @@ have the same type and shape.  At least one element must be provided -
 empty arrays must be constructed with the ``empty`` construct.  This
 restriction is due to limited type inference in the Futhark compiler,
 and will hopefully be fixed in the future.
+
+``[x..y...z]``
+..............
+
+Construct an integer array whose first element is ``x`` and which
+proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
+``..y`` part can be elided in which case a stride of 1 is used.  The
+stride may not be zero.  An empty array is returned in cases where
+``z`` would never be reached.
+
+``[x..y...<z]``
+...............
+
+Construct an integer array whose first elements is ``x``, and which
+proceeds upwards with a stride of ``y`` until reaching ``z``
+(exclusive).  The ``..y`` part can be elided in which case a stride of
+1 is used.  An empty array is returned in cases where ``z`` would
+never be reached.
+
+``[x..y...>z]``
+...............
+
+Construct an integer array whose first elements is ``x``, and which
+proceeds downwards with a stride of ``y`` until reaching ``z``
+(exclusive).  The ``..y`` part can be elided in which case a stride of
+-1 is used.  An empty array is returned in cases where ``z`` would
+never be reached.
 
 ``#f e``
 ........

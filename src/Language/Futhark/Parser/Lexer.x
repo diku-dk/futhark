@@ -77,6 +77,10 @@ tokens :-
   "\"                      { tokenC BACKSLASH }
   "'"                      { tokenC APOSTROPHE }
   "#"                      { tokenC HASH }
+  "..<"                    { tokenC TWO_DOTS_LT }
+  "..>"                    { tokenC TWO_DOTS_GT }
+  "..."                    { tokenC THREE_DOTS }
+  ".."                     { tokenC TWO_DOTS }
 
   @declit                  { tokenM $ return . DECLIT . readIntegral . T.filter (/= '_') }
 
@@ -288,6 +292,10 @@ data Token = ID Name
            | BACKSLASH
            | APOSTROPHE
            | HASH
+           | THREE_DOTS
+           | TWO_DOTS
+           | TWO_DOTS_LT
+           | TWO_DOTS_GT
            | LPAR
            | RPAR
            | RPAR_THEN_LBRACKET
