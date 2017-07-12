@@ -147,7 +147,7 @@ optimiseInStm (Let pat attr e) = do
 
 optimiseExp :: Exp (Aliases Kernels) -> ForwardingM (Exp (Aliases Kernels))
 optimiseExp (DoLoop ctx val form body) =
-  bindingScope False (scopeOfLoopForm form) $
+  bindingScope False (scopeOf form) $
   bindingFParams (map fst $ ctx ++ val) $ do
     body' <- optimiseBody body
     return $ DoLoop ctx val form body'
