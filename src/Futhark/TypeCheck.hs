@@ -611,11 +611,10 @@ checkStms :: Checkable lore =>
              [Stm (Aliases lore)] -> TypeM lore a
           -> TypeM lore a
 checkStms origbnds m = delve origbnds
-  where delve (Let pat (_,annot) e:bnds) = do
+  where delve (stm@(Let pat _ e):bnds) = do
           context ("In expression of statement " ++ pretty pat) $
             checkExp e
-          checkExpLore annot
-          checkStm pat e $
+          checkStm stm $
             delve bnds
         delve [] =
           m
@@ -825,7 +824,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
       (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
-  binding (scopeOfLoopForm form) $ do
+  binding (scopeOf form) $ do
     case form of
       ForLoop loopvar it boundexp loopvars -> do
         iparam <- primFParam loopvar $ IntType it
@@ -958,13 +957,14 @@ checkBindage (BindInPlace cs src is) = do
     bad $ SlicingError (arrayRank srct) (length is)
 
 checkStm :: Checkable lore =>
-            Pattern (Aliases lore) -> Exp (Aliases lore)
+            Stm (Aliases lore)
          -> TypeM lore a
          -> TypeM lore a
-checkStm pat e m = do
+checkStm stm@(Let pat (_,attr) e) m = do
+  checkExpLore attr
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e
-  binding (scopeOf pat) $ do
+  binding (scopeOf stm) $ do
     mapM_ checkPatElem (patternElements $ removePatternAliases pat)
     m
 

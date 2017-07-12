@@ -20,7 +20,8 @@ module Futhark.Representation.AST.Attributes.Scope
        , inScopeOf
        , scopeOfLParams
        , scopeOfFParams
-       , scopeOfLoopForm
+       , scopeOfPattern
+       , scopeOfPatElem
 
        , SameScope
        , castScope
@@ -137,21 +138,12 @@ class Scoped lore a | a -> lore where
 inScopeOf :: (Scoped lore a, LocalScope lore m) => a -> m b -> m b
 inScopeOf = localScope . scopeOf
 
-instance LetAttr lore ~ attr =>
-         Scoped lore (PatElemT attr) where
-  scopeOf (PatElem name _ attr) =
-    M.singleton name $ LetInfo attr
-
-instance LetAttr lore ~ attr =>
-         Scoped lore (PatternT attr) where
-  scopeOf = mconcat . map scopeOf . patternElements
-
 instance Scoped lore a =>
          Scoped lore [a] where
   scopeOf = mconcat . map scopeOf
 
 instance Scoped lore (Stm lore) where
-  scopeOf = scopeOf . bindingPattern
+  scopeOf = scopeOfPattern . bindingPattern
 
 instance Scoped lore (FunDef lore) where
   scopeOf = scopeOfFParams . funDefParams
@@ -159,10 +151,18 @@ instance Scoped lore (FunDef lore) where
 instance Scoped lore (VName, NameInfo lore) where
   scopeOf = uncurry M.singleton
 
-scopeOfLoopForm :: LoopForm lore -> Scope lore
-scopeOfLoopForm (WhileLoop _) = mempty
-scopeOfLoopForm (ForLoop i it _ xs) =
-  M.insert i (IndexInfo it) $ scopeOfLParams (map fst xs)
+instance Scoped lore (LoopForm lore) where
+  scopeOf (WhileLoop _) = mempty
+  scopeOf (ForLoop i it _ xs) =
+    M.insert i (IndexInfo it) $ scopeOfLParams (map fst xs)
+
+scopeOfPattern :: LetAttr lore ~ attr => PatternT attr -> Scope lore
+scopeOfPattern =
+  mconcat . map scopeOfPatElem . patternElements
+
+scopeOfPatElem :: LetAttr lore ~ attr => PatElemT attr -> Scope lore
+scopeOfPatElem (PatElem name _ attr) =
+  M.singleton name $ LetInfo attr
 
 scopeOfLParams :: LParamAttr lore ~ attr =>
                   [ParamT attr] -> Scope lore

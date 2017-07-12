@@ -634,7 +634,7 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
   allocInMergeParams (map paramName ctxparams') val $
   \new_ctx_params valparams' mk_loop_val -> do
   form' <- allocInLoopForm form
-  localScope (scopeOfLoopForm form') $ do
+  localScope (scopeOf form') $ do
     (valinit_ctx, valinit') <- mk_loop_val valinit
     body' <- insertStmsM $ allocInStms bodybnds $ \bodybnds' -> do
       ((val_ses,valres'),val_retbnds) <- collectStms $ mk_loop_val valres

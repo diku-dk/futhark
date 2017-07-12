@@ -439,8 +439,7 @@ checkScanOrReduce w lam input = do
     map asArg [Prim int32, Prim int32] ++
     map TC.noArgAliases (neargs ++ arrargs)
 
-instance LParamAttr lore1 ~ LParamAttr lore2 =>
-         Scoped lore1 (GroupStreamLambda lore2) where
+instance Scoped lore (GroupStreamLambda lore) where
   scopeOf (GroupStreamLambda chunk_size chunk_offset acc_params arr_params _) =
     M.insert chunk_size (IndexInfo Int32) $
     M.insert chunk_offset (IndexInfo Int32) $

@@ -169,7 +169,7 @@ mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   ctxparams' <- mapM (mapOnFParam tv) ctxparams
   valparams' <- mapM (mapOnFParam tv) valparams
   form' <- mapOnLoopForm tv form
-  let scope = scopeOfLoopForm form' <> scopeOfFParams (ctxparams'++valparams')
+  let scope = scopeOf form' <> scopeOfFParams (ctxparams'++valparams')
   DoLoop <$>
     (zip ctxparams' <$> mapM (mapOnSubExp tv) ctxinits) <*>
     (zip valparams' <$> mapM (mapOnSubExp tv) valinits) <*>
