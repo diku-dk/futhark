@@ -268,7 +268,7 @@ transformStm (Let pat () (If c tb fb rt)) = do
   return [Let pat () $ If c tb' fb' rt]
 
 transformStm (Let pat () (DoLoop ctx val form body)) =
-  localScope (castScope (scopeOfLoopForm form) <>
+  localScope (castScope (scopeOf form) <>
               scopeOfFParams mergeparams) $ do
     body' <- transformBody body
     return [Let pat () $ DoLoop ctx val form' body']
@@ -482,7 +482,7 @@ postKernelsStms :: PostKernels -> [KernelsStm]
 postKernelsStms (PostKernels kernels) = concatMap unPostKernel kernels
 
 typeEnvFromKernelAcc :: KernelAcc -> Scope Out.Kernels
-typeEnvFromKernelAcc = scopeOf . fst . outerTarget . kernelTargets
+typeEnvFromKernelAcc = scopeOfPattern . fst . outerTarget . kernelTargets
 
 addStmsToKernel :: [InKernelStm] -> KernelAcc -> KernelAcc
 addStmsToKernel stms acc =

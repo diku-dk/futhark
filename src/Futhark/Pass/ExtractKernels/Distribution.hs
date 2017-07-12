@@ -104,7 +104,7 @@ popInnerTarget (Targets t ts) =
     []   -> Nothing
 
 targetScope :: Target -> Scope Kernels
-targetScope = scopeOf . fst
+targetScope = scopeOfPattern . fst
 
 targetsScope :: Targets -> Scope Kernels
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
