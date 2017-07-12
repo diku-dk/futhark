@@ -291,7 +291,7 @@ simplifyLoopVariables vtable (Let pat _
       -- Check if the simplifications throw away more information than
       -- we are comfortable with at this stage.
       (maybe_loop_vars, body_prefix_stms) <-
-        localScope (scopeOfLoopForm form) $
+        localScope (scopeOf form) $
         unzip <$> zipWithM onLoopVar loop_vars simplifiable
       if maybe_loop_vars == map Just loop_vars
         then cannotSimplify
@@ -307,7 +307,7 @@ simplifyLoopVariables vtable (Let pat _
         seType (Constant v) = Just $ Prim $ primValueType v
         consumed_in_body = consumedInBody body
 
-        vtable' = ST.fromScope (scopeOfLoopForm form) <> vtable
+        vtable' = ST.fromScope (scopeOf form) <> vtable
 
         checkIfSimplifiable (p,arr) =
           simplifyIndexing vtable' seType [] arr

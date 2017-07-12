@@ -90,7 +90,7 @@ freeInExp (DoLoop ctxmerge valmerge form loopbody) =
   let (ctxparams, ctxinits) = unzip ctxmerge
       (valparams, valinits) = unzip valmerge
       bound_here = S.fromList $ M.keys $
-                   scopeOfLoopForm form <>
+                   scopeOf form <>
                    scopeOfFParams (ctxparams ++ valparams)
   in (freeIn (ctxinits ++ valinits) <> freeIn form <>
       freeIn (ctxparams ++ valparams) <> freeInBody loopbody)

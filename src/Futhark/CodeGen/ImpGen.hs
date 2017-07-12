@@ -811,7 +811,7 @@ withFParams = flip $ foldr withFParam
 declaringVars :: ExplicitMemorish lore =>
                  Maybe (Exp lore) -> [PatElem lore] -> ImpM lore op a -> ImpM lore op a
 declaringVars e = flip $ foldr declaringVar
-  where declaringVar = declaringScope e . scopeOf
+  where declaringVar = declaringScope e . scopeOfPatElem
 
 declaringFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore op a -> ImpM lore op a
 declaringFParams = declaringScope Nothing . scopeOfFParams

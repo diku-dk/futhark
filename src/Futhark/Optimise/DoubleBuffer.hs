@@ -127,7 +127,7 @@ optimiseStms (e:es) = do
 optimiseStm :: LoreConstraints lore inner m =>
                Stm lore -> DoubleBufferM lore m [Stm lore]
 optimiseStm (Let pat () (DoLoop ctx val form body)) = do
-  body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst $ ctx++val)) $
+  body' <- localScope (scopeOf form <> scopeOfFParams (map fst $ ctx++val)) $
            optimiseBody body
   (bnds, ctx', val', body'') <- optimiseLoop ctx val body'
   return $ bnds ++ [Let pat () $ DoLoop ctx' val' form body'']

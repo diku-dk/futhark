@@ -391,7 +391,7 @@ mkCoalsTabBnd lutab (Let pat _ (DoLoop arginis_ctx arginis lform body)) td_env b
       scopetab = scope td_env                              <>
                  (scopeOfFParams (map fst arginis_ctx) <>
                  (scopeOfFParams (map fst arginis    ) <>
-                  scopeOfLoopForm lform))
+                  scopeOf lform))
   -- ii) Extend @activeCoals@ by transfering the pattern-elements bindings existent
   --     in @activeCoals@ to the loop-body results, but only if:
   --       (a) the pattern element is a candidate for coalescing,     and
