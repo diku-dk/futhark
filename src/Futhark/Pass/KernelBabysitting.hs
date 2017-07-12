@@ -83,7 +83,7 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
                          thread_local
                          (castScope scope <> scopeOfKernelSpace space)
-                         (ensureCoalescedAccess expmap thread_gids num_threads)
+                         (ensureCoalescedAccess expmap (spaceDimensions space) num_threads)
                          kbody)
              mempty
 
@@ -176,10 +176,10 @@ type Replacements = M.Map (VName, Slice SubExp) VName
 
 ensureCoalescedAccess :: (MonadBinder m, Lore m ~ Kernels) =>
                          ExpMap
-                      -> [VName]
+                      -> [(VName,SubExp)]
                       -> SubExp
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst outer_scope arr slice = do
+ensureCoalescedAccess expmap thread_space num_threads isThreadLocal sizeSubst outer_scope arr slice = do
   seen <- gets $ M.lookup (arr, slice)
 
   case (seen, isThreadLocal arr, typeOf <$> M.lookup arr outer_scope) of
@@ -213,15 +213,16 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst out
       --
       -- We will really want to treat the sliced dimension like two
       -- dimensions so we can transpose them.  This may require
-      -- padding, but it will also require us to know an upper bound
-      -- on 'len'.
+      -- padding.
       | (is, rem_slice) <- splitSlice slice,
         and $ zipWith (==) is $ map Var thread_gids,
         DimSlice offset len (Constant stride):_ <- rem_slice,
         isThreadLocalSubExp offset,
-        Just len' <- sizeSubst len,
+        Just {} <- sizeSubst len,
         oneIsh stride -> do
-          let num_chunks = if null is then num_threads else len'
+          let num_chunks = if null is
+                           then primExpFromSubExp int32 num_threads
+                           else product $ map (primExpFromSubExp int32) $ drop (length is) thread_gdims
           replace =<< lift (rearrangeSlice (length is) (arraySize (length is) t) num_chunks arr)
 
       -- Everything is fine... assuming that the array is in row-major
@@ -236,7 +237,9 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst out
 
     _ -> return Nothing
 
-  where replace arr' = do
+  where (thread_gids, thread_gdims) = unzip thread_space
+
+        replace arr' = do
           modify $ M.insert (arr, slice) arr'
           return $ Just (arr', slice)
 
@@ -324,15 +327,17 @@ rowMajorArray arr = do
   letExp (baseString arr ++ "_rowmajor") $ BasicOp $ Manifest [0..rank-1] arr
 
 rearrangeSlice :: MonadBinder m =>
-                  Int -> SubExp -> SubExp -> VName
+                  Int -> SubExp -> PrimExp VName -> VName
                -> m VName
 rearrangeSlice d w num_chunks arr = do
-  (w_padded, padding) <- paddedScanReduceInput w num_chunks
+  num_chunks' <- letSubExp "num_chunks" =<< toExp num_chunks
 
-  per_chunk <- letSubExp "per_chunk" $ BasicOp $ BinOp (SQuot Int32) w_padded num_chunks
+  (w_padded, padding) <- paddedScanReduceInput w num_chunks'
+
+  per_chunk <- letSubExp "per_chunk" $ BasicOp $ BinOp (SQuot Int32) w_padded num_chunks'
   arr_t <- lookupType arr
   arr_padded <- padArray w_padded padding arr_t
-  rearrange w_padded per_chunk (baseString arr) arr_padded arr_t
+  rearrange num_chunks' w_padded per_chunk (baseString arr) arr_padded arr_t
 
   where padArray w_padded padding arr_t = do
           let arr_shape = arrayShape arr_t
@@ -343,11 +348,11 @@ rearrangeSlice d w num_chunks arr = do
           letExp (baseString arr <> "_padded") $
             BasicOp $ Concat [] d arr [arr_padding] w_padded
 
-        rearrange w_padded per_chunk arr_name arr_padded arr_t = do
+        rearrange num_chunks' w_padded per_chunk arr_name arr_padded arr_t = do
           let arr_dims = arrayDims arr_t
               pre_dims = take d arr_dims
               post_dims = drop (d+1) arr_dims
-              extradim_shape = Shape $ pre_dims ++ [num_chunks, per_chunk] ++ post_dims
+              extradim_shape = Shape $ pre_dims ++ [num_chunks', per_chunk] ++ post_dims
               tr_perm = [0..d-1] ++ map (+d) ([1] ++ [2..shapeRank extradim_shape-1-d] ++ [0])
           arr_extradim <-
             letExp (arr_name <> "_extradim") $
