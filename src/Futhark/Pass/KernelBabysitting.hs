@@ -216,9 +216,9 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst out
       -- padding, but it will also require us to know an upper bound
       -- on 'len'.
       | (is, rem_slice) <- splitSlice slice,
-        null is,
+        and $ zipWith (==) is $ map Var thread_gids,
         DimSlice offset len (Constant stride):_ <- rem_slice,
-        all isThreadLocal $ freeIn offset,
+        isThreadLocalSubExp offset,
         Just len' <- sizeSubst len,
         oneIsh stride -> do
           let num_chunks = if null is then num_threads else len'
@@ -239,6 +239,9 @@ ensureCoalescedAccess expmap thread_gids num_threads isThreadLocal sizeSubst out
   where replace arr' = do
           modify $ M.insert (arr, slice) arr'
           return $ Just (arr', slice)
+
+        isThreadLocalSubExp (Var v) = isThreadLocal v
+        isThreadLocalSubExp Constant{} = False
 
 -- Heuristic for avoiding rearranging too small arrays.
 tooSmallSlice :: Int32 -> Slice SubExp -> Bool
