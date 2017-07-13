@@ -38,7 +38,7 @@ import Language.Futhark.Syntax (BinOp(..))
 @binlit = 0[bB][01][01_]*
 @romlit = 0[rR][IVXLCM][IVXLCM_]*
 @intlit = @hexlit|@binlit|@declit|@romlit
-@reallit = (([0-9][0-9_]*("."[0-9]?[0-9_]*)?))([eE][\+\-]?[0-9]+)?
+@reallit = (([0-9][0-9_]*("."[0-9][0-9_]*)?))([eE][\+\-]?[0-9]+)?
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
