@@ -1101,7 +1101,7 @@ boundInStms (bnd:bnds) =
   where boundInStm =
           M.fromList
           [ (patElemName bindee, bindee)
-          | bindee <- patternElements $ bindingPattern bnd
+          | bindee <- patternElements $ stmPattern bnd
           ]
 
 applyFunReturns :: Typed attr =>

@@ -62,8 +62,8 @@ simplifySOACS =
 getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) =>
                  AST.Stm lore -> Names
 getShapeNames bnd =
-  let tps1 = map patElemType $ patternElements $ bindingPattern bnd
-      tps2 = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
+  let tps1 = map patElemType $ patternElements $ stmPattern bnd
+      tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
   in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
 simplifyFun :: MonadFreshNames m => FunDef -> m FunDef

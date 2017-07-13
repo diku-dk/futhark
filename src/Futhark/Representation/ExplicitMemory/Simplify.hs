@@ -62,8 +62,8 @@ isResultAlloc _ _ = False
 getShapeNames :: ExplicitMemorish lore =>
                  Stm (Wise lore) -> S.Set VName
 getShapeNames bnd =
-  let tps = map patElemType $ patternElements $ bindingPattern bnd
-      ats = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
+  let tps = map patElemType $ patternElements $ stmPattern bnd
+      ats = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
       nms = mapMaybe (\attr -> case attr of
                                  MemMem (Var nm) _   -> Just nm
                                  ArrayMem _ _ _ nm _ -> Just nm

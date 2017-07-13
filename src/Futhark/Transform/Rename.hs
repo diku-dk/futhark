@@ -77,8 +77,8 @@ renameExp = modifyNameSource . runRenamer . rename
 renameStm :: (Renameable lore, MonadFreshNames m) =>
              Stm lore -> m (Stm lore)
 renameStm binding = do
-  e <- renameExp $ bindingExp binding
-  return binding { bindingExp = e }
+  e <- renameExp $ stmExp binding
+  return binding { stmExp = e }
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the body is unaffected, under the assumption that the body was
@@ -215,7 +215,7 @@ instance Renameable lore => Rename (Body lore) where
   rename (Body lore [] res) =
     Body <$> rename lore <*> pure [] <*> rename res
   rename (Body blore (bnd:bnds) res) =
-    bind (patternNames $ bindingPattern bnd) $ do
+    bind (patternNames $ stmPattern bnd) $ do
       bnd' <- rename bnd
       Body blore' bnds' res' <- rename $ Body blore bnds res
       return $ Body blore' (bnd':bnds') res'

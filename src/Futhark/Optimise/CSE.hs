@@ -102,8 +102,8 @@ cseInStms consumed (bnd:bnds) m =
     bnd'' <- mapM nestedCSE bnd'
     return $ Body bodyattr (bnd''++bnds') es
   where nestedCSE bnd' = do
-          e <- mapExpM cse $ bindingExp bnd'
-          return bnd' { bindingExp = e }
+          e <- mapExpM cse $ stmExp bnd'
+          return bnd' { stmExp = e }
         cse = identityMapper { mapOnBody = const cseInBody
                              , mapOnOp = cseInOp
                              }

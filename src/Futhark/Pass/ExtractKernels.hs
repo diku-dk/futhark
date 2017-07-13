@@ -347,8 +347,8 @@ transformStm (Let pat () (Op (Stream cs w
       concat_pat = Pattern [] concat_pat_elems
 
   (map_bnd, map_misc_bnds) <- blockedMap concat_pat cs w InOrder fold_fun_sequential nes arrs
-  let num_threads = arraysSize 0 $ patternTypes $ bindingPattern map_bnd
-      red_input = zip nes $ patternNames $ bindingPattern map_bnd
+  let num_threads = arraysSize 0 $ patternTypes $ stmPattern map_bnd
+      red_input = zip nes $ patternNames $ stmPattern map_bnd
 
   ((map_misc_bnds++[map_bnd])++) <$>
     inScopeOf (map_misc_bnds++[map_bnd])
@@ -538,7 +538,7 @@ withStm bnd = local $ \env ->
           letBindInInnerNesting provided $
           kernelNest env
       }
-  where provided = S.fromList $ patternNames $ bindingPattern bnd
+  where provided = S.fromList $ patternNames $ stmPattern bnd
 
 mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
@@ -572,7 +572,7 @@ unbalancedLambda lam =
         subExpBound (Constant _) _ = False
 
         unbalancedBody bound body =
-          any (unbalancedStm (bound <> boundInBody body) . bindingExp) $
+          any (unbalancedStm (bound <> boundInBody body) . stmExp) $
           bodyStms body
 
         -- XXX - our notion of balancing is probably still too naive.
@@ -607,12 +607,12 @@ unbalancedLambda lam =
           not $ isBuiltInFunction fname
 
 bodyContainsParallelism :: Body -> Bool
-bodyContainsParallelism = any (isMap . bindingExp) . bodyStms
+bodyContainsParallelism = any (isMap . stmExp) . bodyStms
   where isMap Op{} = True
         isMap _ = False
 
 bodyContainsMap :: Body -> Bool
-bodyContainsMap = any (isMap . bindingExp) . bodyStms
+bodyContainsMap = any (isMap . stmExp) . bodyStms
   where isMap (Op Map{}) = True
         isMap _ = False
 
@@ -621,7 +621,7 @@ lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
 -- | Returns the sizes of immediate nested parallelism.
 nestedParallelism :: Body -> [SubExp]
-nestedParallelism = concatMap (parallelism . bindingExp) . bodyStms
+nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
   where parallelism (Op (Reduce _ w _ _ _)) = [w]
         parallelism (Op (Scan _ w _ _)) = [w]
         parallelism (Op (Scanomap _ w _ _ _ _)) = [w]
@@ -905,7 +905,7 @@ distributeSingleUnaryStm :: KernelAcc
 distributeSingleUnaryStm acc bnd f =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | res == map Var (patternNames $ bindingPattern bnd),
+      | res == map Var (patternNames $ stmPattern bnd),
         (outer, _) <- nest,
         [(_, arr)] <- loopNestingParamsAndArrs outer -> do
           addKernels kernels

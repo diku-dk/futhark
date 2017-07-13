@@ -61,7 +61,7 @@ buildCGfun cg fname  = do
                       foldM buildCGfun cg' callees
 
 buildCGbody :: S.Set Name -> Body -> S.Set Name
-buildCGbody callees = foldl (\x -> buildCGexp x . bindingExp) callees . bodyStms
+buildCGbody callees = foldl (\x -> buildCGexp x . stmExp) callees . bodyStms
 
 buildCGexp :: S.Set Name -> Exp -> S.Set Name
 buildCGexp callees (Apply fname _ _)

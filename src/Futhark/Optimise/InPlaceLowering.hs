@@ -126,7 +126,7 @@ optimiseStms (bnd:bnds) m = do
         Nothing       -> checkIfForwardableUpdate bnd' $
                          updateStms ++ bnds'
 
-  where boundHere = patternNames $ bindingPattern bnd
+  where boundHere = patternNames $ stmPattern bnd
 
         checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
             | [PatElem v (BindInPlace cs src (DimFix i:slice)) attr] <- patternElements pat,

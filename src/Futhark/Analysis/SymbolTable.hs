@@ -274,7 +274,7 @@ lookupStm :: VName -> SymbolTable lore -> Maybe (Stm lore)
 lookupStm name vtable = asStm =<< lookup name vtable
 
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
-lookupExp name vtable = bindingExp <$> lookupStm name vtable
+lookupExp name vtable = stmExp <$> lookupStm name vtable
 
 lookupType :: Annotations lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
@@ -327,7 +327,7 @@ index' name is vtable = do
   case entry of
     LetBound entry' |
       Just k <- elemIndex name $ patternValueNames $
-                bindingPattern $ letBoundStm entry' ->
+                stmPattern $ letBoundStm entry' ->
         letBoundIndex entry' k is
     LParam entry' -> lparamIndex entry' is
     _ -> Nothing
@@ -418,10 +418,10 @@ defBndEntry vtable patElem range bnd =
     , letBoundAttr = patElemAttr patElem
     , letBoundStm = bnd
     , letBoundScalExp =
-      runReader (toScalExp (`lookupScalExp` vtable) (bindingExp bnd)) types
+      runReader (toScalExp (`lookupScalExp` vtable) (stmExp bnd)) types
     , letBoundStmDepth = 0
     , letBoundBindage = patElemBindage patElem
-    , letBoundIndex = indexExp vtable $ bindingExp bnd
+    , letBoundIndex = indexExp vtable $ stmExp bnd
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
@@ -487,7 +487,7 @@ insertStm :: (IndexOp (Op lore), Ranged lore) =>
           -> SymbolTable lore
 insertStm bnd vtable =
   insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
-  where names = patternNames $ bindingPattern bnd
+  where names = patternNames $ stmPattern bnd
 
 insertFParam :: AST.FParam lore
              -> SymbolTable lore

@@ -4,7 +4,7 @@ module Futhark.Internalise.Bindings
   -- * Internalising bindings
     bindingParams
   , bindingLambdaParams
-  , bindingPattern
+  , stmPattern
   , MatchPattern
   )
   where
@@ -171,10 +171,10 @@ flattenPattern = flattenPattern' []
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 
-bindingPattern :: [E.TypeParam] -> E.Pattern -> [I.ExtType]
+stmPattern :: [E.TypeParam] -> E.Pattern -> [I.ExtType]
                -> (ConstParams -> [VName] -> MatchPattern -> InternaliseM a)
                -> InternaliseM a
-bindingPattern tparams pat ts m = do
+stmPattern tparams pat ts m = do
   (pat', _, pat_types) <- unzip3 <$> flattenPattern pat
   (ts',_) <- instantiateShapes' ts
   (pat_types', ctx, cm) <- internaliseParamTypes (boundInTypes tparams pat_types) pat_types

@@ -68,7 +68,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
       let size_args = replicate (length $ lambdaParams sizefun) Nothing
       sizefun' <- deadCodeElimLambda <$> simplifyLambda sizefun Nothing size_args
       let sizefun_safe =
-            all (I.safeExp . I.bindingExp) $ I.bodyStms $ I.lambdaBody sizefun'
+            all (I.safeExp . I.stmExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =
             not $ any (`S.member` freeInBody (I.lambdaBody sizefun')) $
             map I.paramName $ lambdaParams sizefun'
@@ -138,7 +138,7 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
                         ) (zip acc_params nes)
 
       map_bindings= acc_bindings ++ bodyStms body
-      map_lore    = bodyLore body
+      map_lore    = bodyAttr body
       map_body = I.Body map_lore map_bindings map_bodyres
   shape_body <- bindingParamTypes params $
                 shapeBody (map I.identName inner_shapes) rettypearr' map_body

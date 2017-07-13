@@ -376,10 +376,10 @@ bindingIdent (Ident v NoInfo vloc) t m =
     let ident = Ident v' (Info t) vloc
     binding [ident] $ m ident
 
-bindingPatternGroup :: [UncheckedTypeParam]
+stmPatternGroup :: [UncheckedTypeParam]
                     -> [(UncheckedPattern, InferredType)]
                     -> ([TypeParam] -> [Pattern] -> TermTypeM a) -> TermTypeM a
-bindingPatternGroup tps ps m =
+stmPatternGroup tps ps m =
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
   checkPatternGroup tps' ps $ \ps' ->
   binding (S.toList $ S.unions $ map patIdentSet ps') $ do
@@ -392,10 +392,10 @@ bindingPatternGroup tps ps m =
 
     m tps' ps'
 
-bindingPattern :: [UncheckedTypeParam]
+stmPattern :: [UncheckedTypeParam]
                -> PatternBase NoInfo Name -> InferredType
                -> ([TypeParam] -> Pattern -> TermTypeM a) -> TermTypeM a
-bindingPattern tps p t m =
+stmPattern tps p t m =
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
   checkPattern tps' p t $ \p' ->
   binding (S.toList $ patIdentSet p') $ do
@@ -623,7 +623,7 @@ checkExp (LetPat tparams pat e body pos) = do
   sequentially (checkExp e) $ \e' _ ->
     -- Not technically an ascription, but we want the pattern to have
     -- exactly the type of 'e'.
-    bindingPattern tparams pat (Ascribed $ vacuousShapeAnnotations $ typeOf e') $ \tparams' pat' -> do
+    stmPattern tparams pat (Ascribed $ vacuousShapeAnnotations $ typeOf e') $ \tparams' pat' -> do
     body' <- checkExp body
     return $ LetPat tparams' pat' e' body' pos
 
@@ -906,7 +906,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
       For i uboundexp -> do
         uboundexp' <- require anySignedType =<< checkExp uboundexp
         bindingIdent i (typeOf uboundexp') $ \i' ->
-          noUnique $ bindingPattern tparams mergepat merge_t $
+          noUnique $ stmPattern tparams mergepat merge_t $
           \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
             loopbody' <- checkExp loopbody
             return (tparams',
@@ -918,8 +918,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         e' <- checkExp e
         case typeOf e' of
           t | Just t' <- peelArray 1 t ->
-                bindingPattern [] xpat (Ascribed $ vacuousShapeAnnotations t') $ \_ xpat' ->
-                noUnique $ bindingPattern tparams mergepat merge_t $
+                stmPattern [] xpat (Ascribed $ vacuousShapeAnnotations t') $ \_ xpat' ->
+                noUnique $ stmPattern tparams mergepat merge_t $
                 \tparams' mergepat' -> onlySelfAliasing $ tapOccurences $ do
                   loopbody' <- checkExp loopbody
                   return (tparams',
@@ -931,7 +931,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
                 "Iteratee of a for-in loop must be an array, but expression has type " ++ pretty t
 
       While cond ->
-        noUnique $ bindingPattern tparams mergepat merge_t $ \tparams' mergepat' ->
+        noUnique $ stmPattern tparams mergepat merge_t $ \tparams' mergepat' ->
         onlySelfAliasing $ tapOccurences $
         sequentially (require [Prim Bool] =<< checkExp cond) $ \cond' _ -> do
           loopbody' <- checkExp loopbody
@@ -1120,7 +1120,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = do
   when (baseString fname' == "||") $
     bad $ TypeError loc "The || operator may not be redefined."
 
-  bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
+  stmPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
     maybe_retdecl' <-
       case maybe_retdecl of
         Just rettype -> do
@@ -1195,7 +1195,7 @@ checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
   | length params == length args = do
       let params_with_ts = zip params $ map (Inferred . fromStruct . argType) args
       (maybe_ret', tparams', params', body') <-
-        noUnique $ bindingPatternGroup tparams params_with_ts $ \tparams' params' -> do
+        noUnique $ stmPatternGroup tparams params_with_ts $ \tparams' params' -> do
         maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl loc) maybe_ret
         body' <- checkFunBody (nameFromString "<anonymous>") body
                  (unInfo . expandedType <$> maybe_ret') loc

@@ -56,7 +56,7 @@ analyseStms = analyseStms' []
           m $ reverse acc
         analyseStms' acc (bnd:bnds) m = do
           bnd' <- analyseStm bnd
-          bindPattern (bindingPattern bnd') $
+          bindPattern (stmPattern bnd') $
             analyseStms' (bnd':acc) bnds m
 
 analyseStm :: (Attributes lore, CanBeRanged (Op lore)) =>

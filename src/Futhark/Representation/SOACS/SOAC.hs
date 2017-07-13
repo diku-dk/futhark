@@ -402,8 +402,8 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
               return (paramName p, pe)
 
             expandPrimExpTable table stm
-              | [v] <- patternNames $ bindingPattern stm,
-                Just pe <- primExpFromExp (asPrimExp table) $ bindingExp stm =
+              | [v] <- patternNames $ stmPattern stm,
+                Just pe <- primExpFromExp (asPrimExp table) $ stmExp stm =
                   M.insert v pe table
               | otherwise =
                   table

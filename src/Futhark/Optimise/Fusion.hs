@@ -448,7 +448,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac, consumed) = do
   -- for each kernel get the index in the bindings where the kernel is located
   -- and sort based on the index so that partial fusion may succeed.
   kernminds <- forM (zip to_fuse_knms to_fuse_kers) $ \(ker_nm, ker) -> do
-                    let bnd_nms = map (patternNames . bindingPattern) rem_bnds
+                    let bnd_nms = map (patternNames . stmPattern) rem_bnds
                         out_nm  = case fsoac ker of
                                     SOAC.Stream _ _ frm _ _
                                       | x:_ <- drop (length $ getStreamAccums frm) $ outNames ker ->
@@ -480,7 +480,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac, consumed) = do
                     -- output transforms.
                     cons_no_out_transf = SOAC.nullTransforms $ outputTransform ker
                 consumer_ok   <- do let consumer_bnd   = rem_bnds !! bnd_ind
-                                    maybesoac <- SOAC.fromExp $ bindingExp consumer_bnd
+                                    maybesoac <- SOAC.fromExp $ stmExp consumer_bnd
                                     case maybesoac of
                                       -- check that consumer's lambda body does not use
                                       -- directly the produced arrays (e.g., see noFusion3.fut).
@@ -492,14 +492,14 @@ horizontGreedyFuse rem_bnds res (out_idds, soac, consumed) = do
                                        -- (i) check that the in-between bindings do
                                        --     not use the result of current kernel OR
                                        S.null ( S.intersection curker_outset $
-                                                      freeInExp (bindingExp bnd) ) ||
+                                                      freeInExp (stmExp bnd) ) ||
                                        --(ii) that the pattern-binding corresponds to
                                        --     the result of the consumer kernel; in the
                                        --     latter case it means it corresponds to a
                                        --     kernel that has been fused in the consumer,
                                        --     hence it should be ignored
                                        not ( null $ curker_outnms `L.intersect`
-                                                         patternNames (bindingPattern bnd) )
+                                                         patternNames (stmPattern bnd) )
                             ) True (drop (prev_ind+1) $ take bnd_ind rem_bnds)
                 if not interm_bnds_ok then return (False,n,bnd_ind,cur_ker,S.empty)
                 else do new_ker <- attemptFusion ufus_nms (outNames cur_ker)
@@ -716,7 +716,7 @@ fusionGatherExp _ (Op Futhark.Scatter{}) = errorIllegal "write"
 -----------------------------------
 
 fusionGatherExp fres e = do
-    let foldstct = identityFolder { foldOnStm = \x -> fusionGatherExp x . bindingExp
+    let foldstct = identityFolder { foldOnStm = \x -> fusionGatherExp x . stmExp
                                   , foldOnSubExp = fusionGatherSubExp
                                   }
     foldExpM foldstct fres e

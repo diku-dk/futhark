@@ -332,7 +332,7 @@ simplifyLoopVariables vtable (Let pat _
                   return (Just (p, for_in_partial), mempty)
 
             SubExpResult se
-              | all (safeExp . bindingExp) x_stms -> do
+              | all (safeExp . stmExp) x_stms -> do
                   x_stms' <- collectStms_ $ do
                     mapM_ addStm x_stms
                     letBindNames'_ [paramName p] $ BasicOp $ SubExp se
@@ -912,7 +912,7 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
   | Body _ tstms [tres] <- tb,
     Body _ fstms [fres] <- fb,
     patternSize pat == length ts,
-    all (safeExp . bindingExp) $ tstms ++ fstms,
+    all (safeExp . stmExp) $ tstms ++ fstms,
     all (==Prim Bool) ts = do
   mapM_ addStm tstms
   mapM_ addStm fstms
@@ -1172,9 +1172,9 @@ simplifyBranchResultComparison vtable (Let pat _ (BasicOp (CmpOp (CmpEq t) se1 s
   | Just m <- simplifyWith se2 se1 = m
   where simplifyWith (Var v) x
           | Just bnd <- ST.entryStm =<< ST.lookup v vtable,
-            If p tbranch fbranch _ <- bindingExp bnd,
+            If p tbranch fbranch _ <- stmExp bnd,
             Just (y, z) <-
-              returns v (bindingPattern bnd) tbranch fbranch,
+              returns v (stmPattern bnd) tbranch fbranch,
             S.null $ freeIn y `S.intersection` boundInBody tbranch,
             S.null $ freeIn z `S.intersection` boundInBody fbranch = Just $ do
                 eq_x_y <-

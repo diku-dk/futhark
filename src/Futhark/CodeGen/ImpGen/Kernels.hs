@@ -651,7 +651,7 @@ compileKernelStms constants ungrouped_bnds m =
   where compileGroupedKernelStms' [] = m
         compileGroupedKernelStms' ((g, bnds):rest_bnds) =
           ImpGen.declaringScopes
-          (map ((Just . bindingExp) &&& (castScope . scopeOf)) bnds) $ do
+          (map ((Just . stmExp) &&& (castScope . scopeOf)) bnds) $ do
             protect g $ mapM_ compileKernelStm bnds
             compileGroupedKernelStms' rest_bnds
 

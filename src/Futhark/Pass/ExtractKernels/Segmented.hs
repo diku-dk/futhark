@@ -102,7 +102,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
   -- or if reduction operator uses lists... must check
   chunk_pat <- fmap (Pattern []) $ forM (patternValueElements pat) $ \pat_e ->
     case patElemType pat_e of
-      (Array ty (Shape (dim0:_)) u) -> do
+      Array ty (Shape (dim0:_)) u -> do
           vn' <- newName $ patElemName pat_e
           return $ PatElem vn' BindVar $ Array ty (Shape [dim0]) u
       _ -> fail $ "segmentedRedomap: result pattern is not array " ++ pretty pat_e
