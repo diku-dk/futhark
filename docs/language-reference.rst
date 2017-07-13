@@ -374,7 +374,7 @@ proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
 stride may not be zero.  An empty array is returned in cases where
 ``z`` would never be reached.
 
-``[x..y...<z]``
+``[x..y..<z]``
 ...............
 
 Construct an integer array whose first elements is ``x``, and which
@@ -383,7 +383,7 @@ proceeds upwards with a stride of ``y`` until reaching ``z``
 1 is used.  An empty array is returned in cases where ``z`` would
 never be reached.
 
-``[x..y...>z]``
+``[x..y..>z]``
 ...............
 
 Construct an integer array whose first elements is ``x``, and which
