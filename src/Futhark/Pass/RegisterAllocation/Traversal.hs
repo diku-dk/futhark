@@ -92,7 +92,7 @@ memBlockSizes fundef = M.union fromParams fromBody
         fromBody = M.fromList $ concatMap onStm $ bodyStms $ funDefBody fundef
         onStm (Let (Pattern _ [PatElem mem _ _]) ()
                (Op (ExpMem.Alloc size _))) = [(mem, size)]
-        onStm stm = foldExp folder [] $ bindingExp stm
+        onStm stm = foldExp folder [] $ stmExp stm
         folder = identityFolder
           { foldOnStm = \sizes stm -> return (sizes ++ onStm stm)
 

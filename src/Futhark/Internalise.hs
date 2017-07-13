@@ -28,7 +28,7 @@ import Data.Loc
 import Prelude hiding (mapM, sequence, mod)
 
 import Language.Futhark as E hiding (TypeArg)
-import Futhark.Representation.SOACS as I hiding (bindingPattern)
+import Futhark.Representation.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
@@ -510,7 +510,7 @@ internaliseExp desc (E.Apply qfname args _ loc) = do
 internaliseExp desc (E.LetPat tparams pat e body loc) = do
   ses <- internaliseExp desc e
   t <- I.staticShapes <$> mapM I.subExpType ses
-  bindingPattern tparams pat t $ \cm pat_names match -> do
+  stmPattern tparams pat t $ \cm pat_names match -> do
     mapM_ (uncurry internaliseDimConstant) cm
     ses' <- match loc ses
     forM_ (zip pat_names ses') $ \(v,se) ->
@@ -661,7 +661,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
           BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
-  bindingPattern [] (E.Id name) dstt $ \cm pat_names match -> do
+  stmPattern [] (E.Id name) dstt $ \cm pat_names match -> do
     mapM_ (uncurry internaliseDimConstant) cm
     dsts' <- match loc $ map I.Var dsts
     forM_ (zip pat_names dsts') $ \(v,dst) ->

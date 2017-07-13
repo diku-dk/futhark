@@ -143,7 +143,7 @@ instance Scoped lore a =>
   scopeOf = mconcat . map scopeOf
 
 instance Scoped lore (Stm lore) where
-  scopeOf = scopeOfPattern . bindingPattern
+  scopeOf = scopeOfPattern . stmPattern
 
 instance Scoped lore (FunDef lore) where
   scopeOf = scopeOfFParams . funDefParams

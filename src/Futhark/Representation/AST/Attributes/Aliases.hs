@@ -121,8 +121,8 @@ maskAliases _   Consume = mempty
 maskAliases als Observe = als
 
 consumedInStm :: Aliased lore => Stm lore -> Names
-consumedInStm binding = consumedInPattern (bindingPattern binding) <>
-                            consumedInExp (bindingExp binding)
+consumedInStm binding = consumedInPattern (stmPattern binding) <>
+                            consumedInExp (stmExp binding)
 
 consumedInExp :: (Aliased lore) => Exp lore -> Names
 consumedInExp (Apply _ args _) =

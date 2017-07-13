@@ -97,9 +97,9 @@ instance Monoid (PatternT lore) where
 type Pattern lore = PatternT (LetAttr lore)
 
 -- | A local variable binding.
-data Stm lore = Let { bindingPattern :: Pattern lore
-                    , bindingLore :: ExpAttr lore
-                    , bindingExp :: Exp lore
+data Stm lore = Let { stmPattern :: Pattern lore
+                    , stmAttr :: ExpAttr lore
+                    , stmExp :: Exp lore
                     }
 
 deriving instance Annotations lore => Ord (Stm lore)
@@ -111,7 +111,7 @@ type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT lore = Body { bodyLore :: BodyAttr lore
+data BodyT lore = Body { bodyAttr :: BodyAttr lore
                        , bodyStms :: [Stm lore]
                        , bodyResult :: Result
                        }

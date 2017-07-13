@@ -251,7 +251,7 @@ boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
 boundByStm :: Stm lore -> Names
-boundByStm = S.fromList . patternNames . bindingPattern
+boundByStm = S.fromList . patternNames . stmPattern
 
 -- | The names bound by the bindings.
 boundByStms :: [Stm lore] -> Names

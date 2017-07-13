@@ -285,7 +285,7 @@ tile1d kspace block_size block_param = do
         [ Let (Pattern [] [block_pe]) () $ Op $
           Combine block_cspace [patElemType pe] [] $
           Body () [read_elem_bnd] [Var $ patElemName pe]
-        | pe <- patternElements $ bindingPattern read_elem_bnd ]
+        | pe <- patternElements $ stmPattern read_elem_bnd ]
 
   return (outer_block_param, write_block_stms)
 
@@ -361,7 +361,7 @@ varianceInStms = foldl varianceInStm
 
 varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
 varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ bindingPattern bnd
+  foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'
         look variance' v = S.insert v $ M.findWithDefault mempty v variance'
         binding_variance = mconcat $ map (look variance) $ S.toList (freeInStm bnd)

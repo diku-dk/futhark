@@ -135,7 +135,7 @@ instance PrettyLore lore => Pretty (Body lore) where
 
 bindingAnnotation :: PrettyLore lore => Stm lore -> Doc -> Doc
 bindingAnnotation bnd =
-  case mapMaybe ppAnnot $ patternElements $ bindingPattern bnd of
+  case mapMaybe ppAnnot $ patternElements $ stmPattern bnd of
     []     -> id
     annots -> (stack annots </>)
 

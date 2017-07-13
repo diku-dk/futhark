@@ -192,7 +192,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
 
 mergeReduceOps :: Lambda lore -> Lambda lore -> Lambda lore
 mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
-  let body' = Body (bodyLore bdy1)
+  let body' = Body (bodyAttr bdy1)
                    (bodyStms bdy1 ++ bodyStms bdy2)
                    (bodyResult   bdy1 ++ bodyResult   bdy2)
       (len1, len2) = (length rtp1, length rtp2)

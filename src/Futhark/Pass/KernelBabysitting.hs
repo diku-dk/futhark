@@ -384,7 +384,7 @@ varianceInStms = foldl varianceInStm
 
 varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
 varianceInStm variance bnd =
-  foldl' add variance $ patternNames $ bindingPattern bnd
+  foldl' add variance $ patternNames $ stmPattern bnd
   where add variance' v = M.insert v binding_variance variance'
         look variance' v = S.insert v $ M.findWithDefault mempty v variance'
         binding_variance = mconcat $ map (look variance) $ S.toList (freeInStm bnd)
