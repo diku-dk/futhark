@@ -64,7 +64,7 @@ with ``0b``.
 
 .. productionlist::
    floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
-   pointfloat: [`intpart`] `fraction` | `intpart` "."
+   pointfloat: [`intpart`] `fraction`
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
    intpart: `decdigit` (`decdigit` |"_")*
    fraction: "." `decdigit` (`decdigit` |"_")*
