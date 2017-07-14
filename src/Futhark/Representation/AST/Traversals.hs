@@ -74,6 +74,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
+  , mapOnLParam :: LParam flore -> m (LParam tlore)
   , mapOnOp :: Op flore -> m (Op tlore)
   }
 
@@ -86,6 +87,7 @@ identityMapper = Mapper {
                  , mapOnCertificates = return
                  , mapOnRetType = return
                  , mapOnFParam = return
+                 , mapOnLParam = return
                  , mapOnOp = return
                  }
 
@@ -167,7 +169,7 @@ mapExpM tv (DoLoop ctxmerge valmerge form loopbody) = do
   ctxparams' <- mapM (mapOnFParam tv) ctxparams
   valparams' <- mapM (mapOnFParam tv) valparams
   form' <- mapOnLoopForm tv form
-  let scope = scopeOfLoopForm form' <> scopeOfFParams (ctxparams'++valparams')
+  let scope = scopeOf form' <> scopeOfFParams (ctxparams'++valparams')
   DoLoop <$>
     (zip ctxparams' <$> mapM (mapOnSubExp tv) ctxinits) <*>
     (zip valparams' <$> mapM (mapOnSubExp tv) valinits) <*>
@@ -191,9 +193,11 @@ mapOnExtType _ (Prim bt) = return $ Prim bt
 mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 
 mapOnLoopForm :: Monad m =>
-                 Mapper flore tlore m -> LoopForm -> m LoopForm
-mapOnLoopForm tv (ForLoop i it bound) =
-  ForLoop <$> mapOnVName tv i <*> pure it <*> mapOnSubExp tv bound
+                 Mapper flore tlore m -> LoopForm flore -> m (LoopForm tlore)
+mapOnLoopForm tv (ForLoop i it bound loop_vars) =
+  ForLoop <$> mapOnVName tv i <*> pure it <*> mapOnSubExp tv bound <*>
+  (zip <$> mapM (mapOnLParam tv) loop_lparams <*> mapM (mapOnVName tv) loop_arrs)
+  where (loop_lparams,loop_arrs) = unzip loop_vars
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
 
@@ -243,6 +247,7 @@ foldMapper f = Mapper {
                , mapOnCertificates = wrap foldOnCertificates
                , mapOnRetType = wrap foldOnRetType
                , mapOnFParam = wrap foldOnFParam
+               , mapOnLParam = wrap foldOnLParam
                , mapOnOp = wrap foldOnOp
                }
   where wrap op k = do
@@ -295,6 +300,7 @@ walkMapper f = Mapper {
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType
                , mapOnFParam = wrap walkOnFParam
+               , mapOnLParam = wrap walkOnLParam
                , mapOnOp = wrap walkOnOp
                }
   where wrap op k = op f k >> return k

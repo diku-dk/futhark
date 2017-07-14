@@ -62,8 +62,8 @@ simplifySOACS =
 getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) =>
                  AST.Stm lore -> Names
 getShapeNames bnd =
-  let tps1 = map patElemType $ patternElements $ bindingPattern bnd
-      tps2 = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
+  let tps1 = map patElemType $ patternElements $ stmPattern bnd
+      tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
   in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
 simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
@@ -155,11 +155,13 @@ simplifySOAC (Scatter cs len lam ivs as) = do
   return $ Scatter cs' len' lam' ivs' as'
 
 soacRules :: (MonadBinder m,
+              Aliased (Lore m),
               LocalScope (Lore m) m,
               Op (Lore m) ~ SOAC (Lore m)) => RuleBook m
 soacRules = standardRules <> RuleBook topDownRules bottomUpRules
 
 topDownRules :: (MonadBinder m,
+                 Aliased (Lore m),
                  LocalScope (Lore m) m,
                  Op (Lore m) ~ SOAC (Lore m)) => TopDownRules m
 topDownRules = [removeReplicateMapping,
@@ -172,7 +174,9 @@ topDownRules = [removeReplicateMapping,
                 simplifyKnownIterationSOAC
                ]
 
-bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
+bottomUpRules :: (MonadBinder m,
+                  Aliased (Lore m),
+                  Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
                  removeDeadWrite,
                  removeUnnecessaryCopy,
@@ -219,7 +223,8 @@ liftIdentityMapping _ _ = cannotSimplify
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
-removeReplicateMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateMapping :: (MonadBinder m, Aliased (Lore m),
+                           Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
 removeReplicateMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
   | Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = do
       mapM_ (uncurry letBindNames') bnds
@@ -228,7 +233,8 @@ removeReplicateMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
 removeReplicateMapping _ _ = cannotSimplify
 
 -- | Like 'removeReplicateMapping', but for 'Redomap'.
-removeReplicateRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateRedomap :: (MonadBinder m, Aliased (Lore m),
+                           Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
 removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes arrs)))
   | Just (bnds, foldfun', arrs') <- removeReplicateInput vtable foldfun arrs = do
       mapM_ (uncurry letBindNames') bnds
@@ -236,17 +242,19 @@ removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun n
 removeReplicateRedomap _ _ = cannotSimplify
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
-removeReplicateWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateWrite :: (MonadBinder m, Aliased (Lore m),
+                         Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
 removeReplicateWrite vtable (Let pat _ (Op (Scatter cs len lam ivs as)))
   | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = do
       mapM_ (uncurry letBindNames') bnds
       letBind_ pat $ Op $ Scatter cs len lam' ivs' as
 removeReplicateWrite _ _ = cannotSimplify
 
-removeReplicateInput :: ST.SymbolTable lore
-                        -> AST.Lambda lore -> [VName]
-                        -> Maybe ([([VName], AST.Exp lore)],
-                                  AST.Lambda lore, [VName])
+removeReplicateInput :: Aliased lore =>
+                        ST.SymbolTable lore
+                     -> AST.Lambda lore -> [VName]
+                     -> Maybe ([([VName], AST.Exp lore)],
+                                AST.Lambda lore, [VName])
 removeReplicateInput vtable fun arrs
   | not $ null parameterBnds = do
   let (arr_params', arrs') = unzip params_and_arrs
@@ -258,11 +266,12 @@ removeReplicateInput vtable fun arrs
         (acc_params, arr_params) =
           splitAt (length params - length arrs) params
         (params_and_arrs, parameterBnds) =
-          partitionEithers $ zipWith isReplicate arr_params arrs
+          partitionEithers $ zipWith isReplicateAndNotConsumed arr_params arrs
 
-        isReplicate p v
+        isReplicateAndNotConsumed p v
           | Just (Replicate (Shape (_:ds)) e) <-
-            asBasicOp =<< ST.lookupExp v vtable =
+              asBasicOp =<< ST.lookupExp v vtable,
+            not $ paramName p `S.member` consumedByLambda fun =
               Right ([paramName p],
                      case ds of
                        [] -> BasicOp $ SubExp e

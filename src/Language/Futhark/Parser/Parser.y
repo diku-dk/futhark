@@ -74,6 +74,8 @@ import Language.Futhark.Parser.Lexer
       qid             { L _ (QUALID _ _) }
       'qid['          { L _ (QUALINDEXING _ _) }
 
+      'qid.('         { L _ (QUALPAREN _ _) }
+
       unop            { L _ (UNOP _) }
       qunop           { L _ (QUALUNOP _ _) }
 
@@ -94,6 +96,10 @@ import Language.Futhark.Parser.Lexer
       charlit         { L _ (CHARLIT _) }
 
       '#'             { L $$ HASH }
+      '..'            { L $$ TWO_DOTS }
+      '...'           { L $$ THREE_DOTS }
+      '..<'           { L $$ TWO_DOTS_LT }
+      '..>'           { L $$ TWO_DOTS_GT }
       '='             { L $$ EQU }
 
       '*'             { L $$ ASTERISK }
@@ -167,7 +173,6 @@ import Language.Futhark.Parser.Lexer
       stream_map_per  { L $$ STREAM_MAPPER }
       stream_red      { L $$ STREAM_RED }
       stream_red_per  { L $$ STREAM_REDPER }
-      stream_seq      { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       import          { L $$ IMPORT }
       type            { L $$ TYPE }
@@ -175,6 +180,7 @@ import Language.Futhark.Parser.Lexer
       val             { L $$ VAL }
       open            { L $$ OPEN }
       local           { L $$ LOCAL }
+      doc             { L _  (DOC _) }
 
 %left bottom
 %left ifprec letprec
@@ -240,6 +246,7 @@ Dec :: { [UncheckedDec] }
     | open many1(ModExpAtom)
       { [OpenDec (fst $2) (snd $2) NoInfo $1] }
     | local Dec         { map (`LocalDec` $1) $2 }
+    | doc Dec           { let L _ (DOC s) = $1 in map (addDoc s) $2 }
 ;
 
 SigExp :: { UncheckedSigExp }
@@ -258,7 +265,7 @@ TypeRef :: { TypeRefBase NoInfo Name }
 SigBind :: { SigBindBase NoInfo Name }
          : module type id '=' SigExp
           { let L pos (ID name) = $3
-            in SigBind name $5 pos }
+            in SigBind name $5 Nothing pos }
 
 ModExp :: { UncheckedModExp }
         : import stringlit
@@ -292,7 +299,7 @@ SimpleSigExp :: { UncheckedSigExp }
 ModBind :: { ModBindBase NoInfo Name }
          : module id many(ModParam) maybeAscription(SigExp) '=' ModExp
            { let L floc (ID fname) = $2;
-             in ModBind fname $3 (fmap (,NoInfo) $4) $6 $1
+             in ModBind fname $3 (fmap (,NoInfo) $4) $6 Nothing $1
            }
 
 ModParam :: { ModParamBase NoInfo Name }
@@ -301,23 +308,25 @@ ModParam :: { ModParamBase NoInfo Name }
 Spec :: { SpecBase NoInfo Name }
       : val id many(TypeParam) ':' SigTypeDecl
         { let L loc (ID name) = $2; (ps, r) = $5
-          in ValSpec name $3 ps r loc  }
+          in ValSpec name $3 ps r Nothing loc }
       | val BindingBinOp ':' SigTypeDecl
         { let (ps, r) = $4
-          in ValSpec $2 [] ps r $1  }
+          in ValSpec $2 [] ps r Nothing $1 }
       | TypeAbbr
         { TypeAbbrSpec $1 }
       | type id many(TypeParam)
         { let L loc (ID name) = $2
-          in TypeSpec name $3 loc }
+          in TypeSpec name $3 Nothing loc }
       | type 'id[' id ']' many(TypeParam)
         { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
-          in TypeSpec name (TypeParamDim pname ploc : $5) loc }
+          in TypeSpec name (TypeParamDim pname ploc : $5) Nothing loc }
       | module id ':' SigExp
         { let L _ (ID name) = $2
           in ModSpec name $4 $1 }
       | include SigExp
         { IncludeSpec $2 $1 }
+      | doc Spec
+        { let L _ (DOC s) = $1 in addDocSpec s $2 }
 ;
 
 TypeParam :: { TypeParamBase Name }
@@ -371,25 +380,25 @@ BindingBinOp :: { Name }
 Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
-               $3 (fst $4 : snd $4) $7 loc
+               $3 (fst $4 : snd $4) $7 Nothing loc
           }
 
         | entry id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind True name (fmap declaredType $5) NoInfo
-               $3 (fst $4 : snd $4) $7 loc }
+               $3 (fst $4 : snd $4) $7 Nothing loc }
 
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 $1
+          { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 Nothing $1
           }
 ;
 
 Val : let id maybeAscription(TypeExpDecl) '=' Exp
       { let L _ (ID name) = $2
-        in ValBind (name==defaultEntryPoint) name (fmap declaredType $3) NoInfo $5 $1 }
+        in ValBind (name==defaultEntryPoint) name (fmap declaredType $3) NoInfo $5 Nothing $1 }
     | entry id maybeAscription(TypeExpDecl) '=' Exp
       { let L _ (ID name) = $2
-        in ValBind True name (fmap declaredType $3) NoInfo $5 $1 }
+        in ValBind True name (fmap declaredType $3) NoInfo $5 Nothing $1 }
 
 Param :: { ParamBase NoInfo Name }
        : '(' id ':' TypeExpDecl ')' { let L _ (ID v) = $2 in NamedParam v $4 $1 }
@@ -407,10 +416,10 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
 TypeAbbr :: { TypeBindBase NoInfo Name }
 TypeAbbr : type id many(TypeParam) '=' TypeExpDecl
            { let L loc (ID name) = $2
-              in TypeBind name $3 $5 loc }
+              in TypeBind name $3 $5 Nothing loc }
          | type 'id[' id ']' many(TypeParam) '=' TypeExpDecl
            { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
-             in TypeBind name (TypeParamDim pname ploc:$5) $7 loc }
+             in TypeBind name (TypeParamDim pname ploc:$5) $7 Nothing loc }
 
 TypeExp :: { UncheckedTypeExp }
          : TypeExpApply { TEApply (fst (fst $1)) (snd $1) (snd (fst $1)) }
@@ -477,11 +486,11 @@ Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
 
-     | loop '(' many(TypeParam) Pattern ')' LoopForm do Exp %prec ifprec
-         {% fmap (\t -> DoLoop $3 $4 t $6 $8 $1) (patternExp $4) }
+     | loop many(TypeParam) Pattern LoopForm do Exp %prec ifprec
+         {% fmap (\t -> DoLoop $2 $3 t $4 $6 $1) (patternExp $3) }
 
-     | loop '(' many(TypeParam) Pattern '=' Exp ')' LoopForm do Exp %prec ifprec
-         { DoLoop $3 $4 $6 $8 $10 $1 }
+     | loop many(TypeParam) Pattern '=' Exp LoopForm do Exp %prec ifprec
+         { DoLoop $2 $3 $5 $6 $8 $1 }
 
      | LetExp %prec letprec { $1 }
 
@@ -546,8 +555,6 @@ Exp2 :: { UncheckedExp }
                          { Stream (RedLike InOrder Noncommutative $2) $3 $4 $1 }
      | stream_red_per    FunAbstr FunAbstr Atom
                          { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
-     | stream_seq       FunAbstr Atom Atom
-                         { Stream (Sequential $3) $2 $4 $1 }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
      | Exp2 '-...' Exp2    { binOp $1 $2 $3 }
@@ -610,11 +617,21 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '(' sepBy2(Exp, ',') ')'    { TupLit $2 $1 }
      | '('      ')'                { TupLit [] $1 }
      | '[' sepBy1(Exp, ',') ']'    { ArrayLit (fst $2:snd $2) NoInfo $1 }
+
+     | '[' Exp '...' Exp ']'          { Range $2 Nothing (UpToInclusive $4) $1 }
+     | '[' Exp '..<' Exp ']'          { Range $2 Nothing (UpToExclusive $4) $1 }
+     | '[' Exp '..>' Exp ']'          { Range $2 Nothing (DownToExclusive $4) $1 }
+     | '[' Exp '..' Exp '...' Exp ']' { Range $2 (Just $4) (UpToInclusive $6) $1 }
+     | '[' Exp '..' Exp '..<' Exp ']' { Range $2 (Just $4) (UpToExclusive $6) $1 }
+     | '[' Exp '..' Exp '..>' Exp ']' { Range $2 (Just $4) (DownToExclusive $6) $1 }
+
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
      | QualName { Var (fst $1) NoInfo (snd $1) }
      | '#' FieldId Atom { Project (fst $2) $3 NoInfo $1 }
      | '{' sepBy(Field, ',') '}' { RecordLit $2 $1 }
+     | 'qid.(' Exp ')'
+       { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordField (fst $1) $3 (snd $1) }
@@ -641,14 +658,11 @@ LetBody :: { UncheckedExp }
     | LetExp %prec letprec { $1 }
 
 LoopForm : for VarId '<' Exp
-           { For FromUpTo ZeroBound $2 $4 }
-         | for Atom '<=' VarId '<' Exp
-           { For FromUpTo (ExpBound $2) $4 $6 }
-         | for Atom '>' VarId '>=' Exp
-           { For FromDownTo (ExpBound $6) $4 $2 }
-         | for Atom '>' VarId
-           { For FromDownTo ZeroBound $4 $2 }
-         | while Exp      { While $2 }
+           { For $2 $4 }
+         | for Pattern in Exp
+           { ForIn $2 $4 }
+         | while Exp
+           { While $2 }
 
 VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
           : 'id[' sepBy(DimIndex, ',') ']'
@@ -817,6 +831,20 @@ Values : Value ',' Values { $1 : $3 }
 
 {
 
+addDoc :: String -> UncheckedDec -> UncheckedDec
+addDoc doc (ValDec val) = ValDec (val { constDoc = Just doc })
+addDoc doc (FunDec fun) = FunDec (fun { funBindDoc = Just doc })
+addDoc doc (TypeDec tp) = TypeDec (tp { typeDoc = Just doc })
+addDoc doc (SigDec sig) = SigDec (sig { sigDoc = Just doc })
+addDoc doc (ModDec mod) = ModDec (mod { modDoc = Just doc })
+addDoc _ dec = dec
+
+addDocSpec :: String -> SpecBase NoInfo Name -> SpecBase NoInfo Name
+addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig { typeDoc = Just doc })
+addDocSpec doc val@(ValSpec {}) = val { specDoc = Just doc }
+addDocSpec doc (TypeSpec name ps _ loc) = TypeSpec name ps (Just doc) loc
+addDocSpec _ spec = spec
+
 reverseNonempty :: (a, [a]) -> (a, [a])
 reverseNonempty (x, l) =
   case reverse (x:l) of
@@ -907,6 +935,10 @@ patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var (QualName [] (identName ident)) NoInfo $ srclocOf ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+patternExp (PatternAscription pat _) = patternExp pat
+patternExp (PatternParens pat _) = patternExp pat
+patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
+  where field (name, pat) = RecordField name <$> patternExp pat <*> pure loc
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF

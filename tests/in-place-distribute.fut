@@ -18,7 +18,7 @@ let seqloop (num_dates: i32) (gauss: f64): [num_dates]f64 =
   let bbrow = replicate num_dates 0.0f64
   let bbrow[ 0 ] = gauss in
 
-  loop (bbrow) for 1 <= i < num_dates do
+  loop (bbrow) for i in map (+1) (iota (num_dates-1)) do
       let bbrow[i] = bbrow[i-1] * bbrow[i-1]
       in  bbrow
 

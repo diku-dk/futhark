@@ -7,12 +7,13 @@ cache:
     - $HOME/.ghc
     - $HOME/.cabal
     - $HOME/.stack
+    - $HOME/.stack-lts-7.22
 
 # We test against different Stackage snapshots.
 matrix:
   include:
-    - env: BUILD=stack STACK_YAML=stack.yaml
-    - env: BUILD=stack STACK_YAML=stack-lts-7.22.yaml
+    - env: BUILD=stack STACK_YAML=stack.yaml STACK_ROOT=$HOME/.stack
+    - env: BUILD=stack STACK_YAML=stack-lts-7.22.yaml STACK_ROOT=$HOME/.stack-lts-7.22
 
 addons:
   apt:
@@ -30,8 +31,8 @@ before_install:
  - ./.travis-setup.sh
 
 install:
- - stack build alex happy
- - stack --no-terminal test --only-dependencies -j 3
+ - stack build --fast alex happy
+ - stack --no-terminal test --fast --only-dependencies -j 3
 
 script:
  - stack --no-terminal test -j 3

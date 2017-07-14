@@ -142,7 +142,7 @@ transformStm (Let pat _ (Op (Stream [] w (Sequential accs) fold_lam arrs)))
   addStm $ Let pat () $ Op $
     Out.GroupStream w w stream_lam (accs'++map Var mapout_arrs) arrs
 
-transformStm (Let pat _ (DoLoop [] val (ForLoop i Int32 bound) body)) = do
+transformStm (Let pat _ (DoLoop [] val (ForLoop i Int32 bound []) body)) = do
   dummy_chunk_size <- newVName "dummy_chunk_size"
   body' <- localScope (scopeOfFParams (map fst val)) $ transformBody body
   let lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size

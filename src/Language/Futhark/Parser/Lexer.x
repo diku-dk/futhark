@@ -38,7 +38,7 @@ import Language.Futhark.Syntax (BinOp(..))
 @binlit = 0[bB][01][01_]*
 @romlit = 0[rR][IVXLCM][IVXLCM_]*
 @intlit = @hexlit|@binlit|@declit|@romlit
-@reallit = (([0-9][0-9_]*("."[0-9]?[0-9_]*)?))([eE][\+\-]?[0-9]+)?
+@reallit = (([0-9][0-9_]*("."[0-9][0-9_]*)?))([eE][\+\-]?[0-9]+)?
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
@@ -48,13 +48,17 @@ import Language.Futhark.Syntax (BinOp(..))
 @unop = ("!"|"~")
 @qualunop = (@identifier ".")+ @unop
 
-@symbols = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
-@binop = @symbols+
+@opchar = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
+@binop = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^") @opchar*
 @qualbinop = (@identifier ".")+ @binop
+
+@doc2 = ".."[^\n]*
+@doc = "-- |"[^\n]*(\n$white*"--"[^\n]*)*
 
 tokens :-
 
   $white+                               ;
+  @doc                     { tokenM $ return . DOC . T.unpack . T.concat . map (T.drop 2 . T.stripStart) . T.split (== '\n') . T.drop 2 }
   "--"[^\n]*                            ;
   "="                      { tokenC EQU }
   "("                      { tokenC LPAR }
@@ -73,6 +77,10 @@ tokens :-
   "\"                      { tokenC BACKSLASH }
   "'"                      { tokenC APOSTROPHE }
   "#"                      { tokenC HASH }
+  "..<"                    { tokenC TWO_DOTS_LT }
+  "..>"                    { tokenC TWO_DOTS_GT }
+  "..."                    { tokenC THREE_DOTS }
+  ".."                     { tokenC TWO_DOTS }
 
   @declit                  { tokenM $ return . DECLIT . readIntegral . T.filter (/= '_') }
 
@@ -95,6 +103,8 @@ tokens :-
   @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
   @qualidentifier          { tokenM $ fmap (uncurry QUALID) . mkQualId }
   @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
+  @identifier "." "("      { tokenM $ fmap (QUALPAREN []) . indexing . T.init . T.takeWhile (/='(') }
+  @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
 
   @unop                    { tokenS $ UNOP . nameFromText }
   @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
@@ -150,7 +160,6 @@ keyword s =
     "stream_map_per" -> STREAM_MAPPER
     "stream_red"     -> STREAM_RED
     "stream_red_per" -> STREAM_REDPER
-    "stream_seq"     -> STREAM_SEQ
 
     _              -> ID $ nameFromText s
 
@@ -257,6 +266,7 @@ data Token = ID Name
            | INDEXING Name
            | QUALID [Name] Name
            | QUALINDEXING [Name] Name
+           | QUALPAREN [Name] Name
            | UNOP Name
            | QUALUNOP [Name] Name
            | SYMBOL BinOp [Name] Name
@@ -282,6 +292,10 @@ data Token = ID Name
            | BACKSLASH
            | APOSTROPHE
            | HASH
+           | THREE_DOTS
+           | TWO_DOTS
+           | TWO_DOTS_LT
+           | TWO_DOTS_GT
            | LPAR
            | RPAR
            | RPAR_THEN_LBRACKET
@@ -344,6 +358,8 @@ data Token = ID Name
            | VAL
            | OPEN
            | LOCAL
+
+           | DOC String
 
            | EOF
 

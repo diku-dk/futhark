@@ -9,17 +9,18 @@ module type sobol_dir = {
 }
 
 module type sobol = {
-  val D : i32                              -- dimensionality of sequence
-  val norm : f64                           -- the value 2**32
-  val independent : i32 -> [D]u32          -- [independent i] returns the i'th
-                                           -- sobol vector (in u32)
-  val recurrent : i32 -> [D]u32 -> [D]u32  -- [recurrent i v] returns the i'th
-                                           -- sobol vector given v is the
-                                           -- (i-1)'th sobol vector
-  val chunk : i32 -> (n:i32) -> [n][D]f64  -- [chunk i n] returns the array
-                                           -- [v_i,...,v_(i+n-1)] of sobol
-                                           -- vectors where v_j is the j'th
-                                           -- D-dimensional sobol vector
+  -- | Dimensionality of sequence.
+  val D : i32
+  -- | The value 2**32.
+  val norm : f64
+  -- | [independent i] returns the i'th sobol vector (in u32)
+  val independent : i32 -> [D]u32
+  -- | [recurrent i v] returns the i'th sobol vector given v is the
+  -- (i-1)'th sobol vector
+  val recurrent : i32 -> [D]u32 -> [D]u32
+  -- | [chunk i n] returns the array [v_i,...,v_(i+n-1)] of sobol
+  -- vectors where v_j is the j'th D-dimensional sobol vector
+  val chunk : i32 -> (n:i32) -> [n][D]f64
   module Reduce :
       (X : { include monoid
              val f : [D]f64 -> t }) -> { val run : i32 -> X.t }
@@ -52,13 +53,13 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
             let v = V[i-s]
             let vi0 = v ^ (v >> (u32(s)))
             let vi =
-              loop (vi = vi0) for k' < s-1 do
+              loop vi = vi0 for k' < s-1 do
                 let k = k'+1
                 in vi ^ (((a >> u32(s-1-k)) & 1u32) * V[i-k])
             in V with [i] <- vi
 
   let index_of_least_significant_0 (x:i32) : i32 =
-    loop (i = 0) while i < 32 && ((x>>i)&1) != 0 do i + 1
+    loop i = 0 while i < 32 && ((x>>i)&1) != 0 do i + 1
 
   let norm = 2.0 f64.** f64(L)
 

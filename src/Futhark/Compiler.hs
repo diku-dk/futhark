@@ -14,6 +14,7 @@ module Futhark.Compiler
 where
 
 import Data.Monoid
+import Data.Loc
 import Control.Exception
 import Control.Monad
 import Control.Monad.State
@@ -119,7 +120,7 @@ runPipelineOnProgram :: FutharkConfig
 runPipelineOnProgram config pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (tagged_ext_prog, ws, _, namesrc) <- readProgram file
+  (tagged_ext_prog, ws, _, namesrc) <- readProgram [file]
 
   when (futharkWarn config) $
     liftIO $ hPutStr stderr $ show ws
@@ -151,85 +152,130 @@ data ReaderState = ReaderState { alreadyImported :: E.Imports
 
 newtype SearchPath = SearchPath FilePath -- Make this a list, eventually.
 
+-- | Absolute reference to a Futhark code file.  Does not include the
+-- @.fut@ extension.  The 'FilePath' must be absolute.
+data FutharkInclude = FutharkInclude Posix.FilePath SrcLoc
+  deriving (Eq, Show)
+
+instance Located FutharkInclude where
+  locOf (FutharkInclude _ loc) = locOf loc
+
+mkInitialInclude :: String -> FutharkInclude
+mkInitialInclude s = FutharkInclude ("/" Posix.</> toPOSIX s) noLoc
+  where
+    toPOSIX :: FilePath -> Posix.FilePath
+    toPOSIX = Posix.joinPath . splitDirectories
+
+mkInclude :: FutharkInclude -> String -> SrcLoc -> FutharkInclude
+mkInclude (FutharkInclude includer _) includee =
+  FutharkInclude (takeDirectory includer Posix.</> includee)
+
+includeToFilePath :: FilePath -> FutharkInclude -> FilePath
+includeToFilePath dir (FutharkInclude fp _) =
+  dir </> fromPOSIX (Posix.makeRelative "/" fp) <.> "fut"
+  where
+    -- | Some bad operating systems do not use forward slash as
+    -- directory separator - this is where we convert Futhark includes
+    -- (which always use forward slash) to native paths.
+    fromPOSIX :: Posix.FilePath -> FilePath
+    fromPOSIX = joinPath . Posix.splitDirectories
+
+includeToString :: FutharkInclude -> String
+includeToString (FutharkInclude s _) = s
+
+includePath :: FutharkInclude -> String
+includePath (FutharkInclude s _) = Posix.takeDirectory s
+
 readImport :: (MonadError CompilerError m, MonadIO m) =>
-              SearchPath -> [FilePath] -> String -> CompilerM m ()
-readImport search_path steps name
-  | name `elem` steps =
+              SearchPath -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
+readImport search_path steps include
+  | include `elem` steps =
       throwError $ ExternalError $ T.pack $
-      "Import cycle: " ++ intercalate " -> " (reverse $ name:steps)
+      "Import cycle: " ++ intercalate " -> "
+      (map includeToString $ reverse $ include:steps)
   | otherwise = do
-      already_done <- gets $ M.member name . alreadyImported
+      already_done <- gets $ isJust . lookup (includeToString include) . alreadyImported
 
-      unless already_done $ do
-        (file_contents, file_name) <- readImportFile search_path name
-        prog <- case parseFuthark file_name file_contents of
-          Left err -> externalErrorS $ show err
-          Right prog -> return prog
+      unless already_done $
+        uncurry (handleFile search_path steps include) =<<
+        readImportFile search_path include
 
-        mapM_ (readImport search_path (name:steps)) $ E.progImports prog
+handleFile :: (MonadIO m, MonadError CompilerError m) =>
+              SearchPath
+           -> [FutharkInclude]
+           -> FutharkInclude
+           -> T.Text
+           -> FilePath
+           -> CompilerM m ()
+handleFile search_path steps include file_contents file_name = do
+  prog <- case parseFuthark file_name file_contents of
+    Left err -> externalErrorS $ show err
+    Right prog -> return prog
 
-        -- It is important to not read these before the above calls to
-        -- readImport.
-        imports <- gets alreadyImported
-        src <- gets nameSource
+  mapM_ (readImport search_path (include:steps) . uncurry (mkInclude include)) $
+    E.progImports prog
 
-        case E.checkProg imports src prog of
-          Left err ->
-            externalError $ T.pack $ show err
-          Right ((progmod, prog'), ws, src') ->
-            modify $ \s ->
-              s { alreadyImported = M.insert name progmod imports
-                , nameSource      = src'
-                , warnings        = warnings s <> ws
-                , resultProgs     = prog' : resultProgs s
-                }
+  -- It is important to not read these before the above calls to
+  -- readImport.
+  imports <- gets alreadyImported
+  src <- gets nameSource
+
+  case E.checkProg imports src (includePath include) prog of
+    Left err ->
+      externalError $ T.pack $ show err
+    Right ((progmod, prog'), ws, src') ->
+      modify $ \s ->
+        s { alreadyImported = (includeToString include,progmod) : imports
+          , nameSource      = src'
+          , warnings        = warnings s <> ws
+          , resultProgs     = prog' : resultProgs s
+          }
 
 readImportFile :: (MonadError CompilerError m, MonadIO m) =>
-                  SearchPath -> String -> m (T.Text, FilePath)
-readImportFile (SearchPath dir) name = do
+                  SearchPath -> FutharkInclude -> m (T.Text, FilePath)
+readImportFile (SearchPath dir) include = do
   -- First we try to find a file of the given name in the search path,
-  -- then we look at the builtin library if we have to.
-  r <- liftIO $ (Right <$> T.readFile (dir </> name_with_ext)) `catch` couldNotRead
-  case (r, lookup name_with_ext futlib) of
-    (Right s, _)            -> return (s, dir </> name_with_ext)
-    (Left Nothing, Just t)  -> return (t, "[builtin]" </> name_with_ext)
+  -- then we look at the builtin library if we have to.  For the
+  -- builtins, we don't use the search path.
+  r <- liftIO $ (Right <$> T.readFile filepath) `catch` couldNotRead
+  case (r, lookup abs_filepath futlib) of
+    (Right s, _)            -> return (s, dir </> filepath)
+    (Left Nothing, Just t)  -> return (t, "[builtin]" </> filepath)
     (Left Nothing, Nothing) -> externalErrorS not_found
     (Left (Just e), _)      -> externalErrorS e
-  where name_with_ext = includeToPath name <.> "fut"
+  where filepath = includeToFilePath dir include
+        abs_filepath = includeToFilePath "/" include
 
         couldNotRead e
           | isDoesNotExistError e =
               return $ Left Nothing
           | otherwise             =
               return $ Left $ Just $
-              "Could not import " ++ show name ++ ": " ++ show e
+              "Could not import " ++ includeToString include ++ ": " ++ show e
 
         not_found =
-          "Could not find import '" ++ name ++ "' in path '" ++ dir ++ "'."
-
-        -- | Some bad operating systems do not use forward slash as directory
-        -- separator - this is where we convert Futhark includes (which always
-        -- use forward slash) to native paths.
-        includeToPath :: String -> FilePath
-        includeToPath = joinPath . Posix.splitDirectories
+          "Could not find import '" ++ includeToString include ++ "' at " ++
+          locStr (srclocOf include) ++ " in path '" ++ dir ++ "'."
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               FilePath -> m (E.Prog,
-                              E.Warnings,
-                              E.Imports,
-                              VNameSource)
-readProgram fp = do
-  unless (ext == ".fut") $
-    externalErrorS $ "File does not have a .fut extension: " <> fp
-  s' <- execStateT (readImport (SearchPath dir) [] file_root) s
+               [FilePath] -> m (E.Prog,
+                                E.Warnings,
+                                E.Imports,
+                                VNameSource)
+readProgram fps = do
+  let s = ReaderState mempty mempty newNameSourceForCompiler mempty
+  s' <- execStateT (mapM onFile fps) s
   return (E.Prog $ concatMap E.progDecs $ reverse $ resultProgs s',
           warnings s',
-          alreadyImported s',
+          reverse $ alreadyImported s',
           nameSource s')
-  where s = ReaderState mempty mempty newNameSourceForCompiler mempty
-        (dir, file) = splitFileName fp
-        (file_root, ext) = splitExtension file
+  where onFile fp =  do
+
+          fs <- liftIO $ T.readFile fp
+
+          handleFile (SearchPath ".") [] (mkInitialInclude name) fs fp
+            where (name, _) = splitExtension fp
 
 newNameSourceForCompiler :: VNameSource
 newNameSourceForCompiler = newNameSource $ succ $ maximum $ map baseTag $

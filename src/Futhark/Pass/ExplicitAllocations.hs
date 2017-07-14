@@ -632,26 +632,21 @@ allocInExp :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolo
 allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
   allocInMergeParams mempty ctx $ \_ ctxparams' _ ->
   allocInMergeParams (map paramName ctxparams') val $
-  \new_ctx_params valparams' mk_loop_val ->
-  formBinds form $ do
+  \new_ctx_params valparams' mk_loop_val -> do
+  form' <- allocInLoopForm form
+  localScope (scopeOf form') $ do
     (valinit_ctx, valinit') <- mk_loop_val valinit
     body' <- insertStmsM $ allocInStms bodybnds $ \bodybnds' -> do
       ((val_ses,valres'),val_retbnds) <- collectStms $ mk_loop_val valres
-      return $ Body ()
-        (bodybnds'<>val_retbnds)
-        (val_ses++ctxres++valres')
+      return $ Body () (bodybnds'<>val_retbnds) (val_ses++ctxres++valres')
     return $
       DoLoop
       (zip (new_ctx_params++ctxparams') (valinit_ctx++ctxinit))
       (zip valparams' valinit')
-      form body'
+      form' body'
   where (_ctxparams, ctxinit) = unzip ctx
         (_valparams, valinit) = unzip val
         (ctxres, valres) = splitAt (length ctx) bodyres
-        formBinds (ForLoop i it _) =
-          localScope $ M.singleton i $ IndexInfo it
-        formBinds (WhileLoop _) =
-          id
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype)
@@ -660,9 +655,28 @@ allocInExp e = mapExpM alloc e
           identityMapper { mapOnBody = const allocInBody
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
+                         , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
                          , mapOnOp = \op -> do handle <- asks allocInOp
                                                handle op
                          }
+
+allocInLoopForm :: (Allocable fromlore tolore,
+                    Allocator tolore (AllocM fromlore tolore)) =>
+                   LoopForm fromlore -> AllocM fromlore tolore (LoopForm tolore)
+allocInLoopForm (WhileLoop v) = return $ WhileLoop v
+allocInLoopForm (ForLoop i it n loopvars) =
+  ForLoop i it n <$> mapM allocInLoopVar loopvars
+  where allocInLoopVar (p,a) = do
+          (mem, ixfun) <- lookupArraySummary a
+          case paramType p of
+            Array bt shape u ->
+              let ixfun' = IxFun.slice ixfun $
+                           fullSliceNum (IxFun.shape ixfun) [DimFix $ LeafExp i int32]
+              in return (p { paramAttr = ArrayMem bt shape u mem ixfun' }, a)
+            Prim bt ->
+              return (p { paramAttr = Scalar bt }, a)
+            Mem size space ->
+              return (p { paramAttr = MemMem size space }, a)
 
 allocInReduceLambda :: Lambda InInKernel
                     -> [(VName, IxFun)]

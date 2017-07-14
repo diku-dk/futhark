@@ -161,7 +161,7 @@ instance RangeOf attr => RangesOf (PatternT attr) where
   rangesOf = map rangeOf . patternElements
 
 instance Ranged lore => RangesOf (Body lore) where
-  rangesOf = rangesOf . bodyLore
+  rangesOf = rangesOf . bodyAttr
 
 subExpKnownRange :: SubExp -> (KnownBound, KnownBound)
 subExpKnownRange (Var v) =
@@ -236,11 +236,11 @@ expRanges (If _ tbranch fbranch _) =
   (zipWith maximumBound t_upper f_upper)
   where (t_lower, t_upper) = unzip $ rangesOf tbranch
         (f_lower, f_upper) = unzip $ rangesOf fbranch
-expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations) body) =
+expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations _) body) =
   zipWith returnedRange valmerge $ rangesOf body
   where bound_in_loop =
           S.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
-          concatMap (patternNames . bindingPattern) (bodyStms body)
+          concatMap (patternNames . stmPattern) (bodyStms body)
 
         returnedRange mergeparam (lower, upper) =
           (returnedBound mergeparam lower,

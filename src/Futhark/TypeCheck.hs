@@ -611,11 +611,10 @@ checkStms :: Checkable lore =>
              [Stm (Aliases lore)] -> TypeM lore a
           -> TypeM lore a
 checkStms origbnds m = delve origbnds
-  where delve (Let pat (_,annot) e:bnds) = do
+  where delve (stm@(Let pat _ e):bnds) = do
           context ("In expression of statement " ++ pretty pat) $
             checkExp e
-          checkExpLore annot
-          checkStm pat e $
+          checkStm stm $
             delve bnds
         delve [] =
           m
@@ -825,49 +824,62 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
       (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
-  funparams <- case form of
-    ForLoop loopvar it boundexp -> do
-      iparam <- primFParam loopvar $ IntType it
-      let funparams = iparam : mergepat
-          paramts   = map paramDeclType funparams
+  binding (scopeOf form) $ do
+    case form of
+      ForLoop loopvar it boundexp loopvars -> do
+        iparam <- primFParam loopvar $ IntType it
+        let funparams = iparam : mergepat
+            paramts   = map paramDeclType funparams
 
-      boundarg <- checkArg boundexp
-      checkFuncall Nothing paramts $ boundarg : mergeargs
-      return funparams
-    WhileLoop cond -> do
-      case find ((==cond) . paramName . fst) merge of
-        Just (condparam,_) ->
-          unless (paramType condparam == Prim Bool) $
-          bad $ TypeError $
-          "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but " ++
-          pretty (paramType condparam) ++ "."
-        Nothing ->
-          bad $ TypeError $
-          "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge varible."
-      let funparams = mergepat
-          paramts   = map paramDeclType funparams
-      checkFuncall Nothing paramts mergeargs
-      return funparams
+        forM_ loopvars $ \(p,a) -> do
+          a_t <- lookupType a
+          observe a
+          case peelArray 1 a_t of
+            Just a_t_r -> do
+              checkLParamLore (paramName p) $ paramAttr p
+              unless (a_t_r `subtypeOf` typeOf (paramAttr p)) $
+                 bad $ TypeError $ "Loop parameter " ++ pretty p ++
+                 " not valid for element of " ++ pretty a ++ ", which has row type " ++ pretty a_t_r
+              return ()
+            _ -> bad $ TypeError $ "Cannot loop over " ++ pretty a ++
+                 " of type " ++ pretty a_t
 
-  let rettype = map paramDeclType mergepat
-      consumable = [ (paramName param, mempty)
-                   | param <- mergepat,
-                     unique $ paramDeclType param
-                   ]
+        boundarg <- checkArg boundexp
+        checkFuncall Nothing paramts $ boundarg : mergeargs
 
-  context "Inside the loop body" $
-    checkFun' (nameFromString "<loop body>",
-               staticShapes rettype,
-               funParamsToNameInfos funparams,
-               loopbody) consumable $ do
-        checkFunParams funparams
-        checkBody loopbody
-        bodyt <- map (`toDecl` Unique) <$> bodyExtType loopbody
-        unless (map rankShaped bodyt `subtypesOf`
-                map rankShaped (staticShapes rettype)) $
-          bad $ ReturnTypeError (nameFromString "<loop body>")
-          (map fromDecl $ staticShapes rettype)
-          (map fromDecl bodyt)
+      WhileLoop cond -> do
+        case find ((==cond) . paramName . fst) merge of
+          Just (condparam,_) ->
+            unless (paramType condparam == Prim Bool) $
+            bad $ TypeError $
+            "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but " ++
+            pretty (paramType condparam) ++ "."
+          Nothing ->
+            bad $ TypeError $
+            "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge varible."
+        let funparams = mergepat
+            paramts   = map paramDeclType funparams
+        checkFuncall Nothing paramts mergeargs
+
+    let rettype = map paramDeclType mergepat
+        consumable = [ (paramName param, mempty)
+                     | param <- mergepat,
+                       unique $ paramDeclType param
+                     ]
+
+    context "Inside the loop body" $
+      checkFun' (nameFromString "<loop body>",
+                 staticShapes rettype,
+                 funParamsToNameInfos mergepat,
+                 loopbody) consumable $ do
+          checkFunParams mergepat
+          checkBody loopbody
+          bodyt <- map (`toDecl` Unique) <$> bodyExtType loopbody
+          unless (map rankShaped bodyt `subtypesOf`
+                  map rankShaped (staticShapes rettype)) $
+            bad $ ReturnTypeError (nameFromString "<loop body>")
+            (map fromDecl $ staticShapes rettype)
+            (map fromDecl bodyt)
 
 checkExp (Op op) = checkOp op
 
@@ -945,13 +957,14 @@ checkBindage (BindInPlace cs src is) = do
     bad $ SlicingError (arrayRank srct) (length is)
 
 checkStm :: Checkable lore =>
-            Pattern (Aliases lore) -> Exp (Aliases lore)
+            Stm (Aliases lore)
          -> TypeM lore a
          -> TypeM lore a
-checkStm pat e m = do
+checkStm stm@(Let pat (_,attr) e) m = do
+  checkExpLore attr
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e
-  binding (scopeOf pat) $ do
+  binding (scopeOf stm) $ do
     mapM_ checkPatElem (patternElements $ removePatternAliases pat)
     m
 

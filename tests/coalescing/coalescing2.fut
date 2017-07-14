@@ -27,5 +27,5 @@
 let main(rss: [#k][#n][#m]i32): [][]i32 =
   map (\(rs: [][]i32)  ->
         map (\(r: []i32): i32  ->
-              loop (x = 0) for i < m do
+              loop x = 0 for i < m do
                 x * 2 + r[i]) rs) rss

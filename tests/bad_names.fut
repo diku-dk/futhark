@@ -6,4 +6,4 @@
 -- output { 17 }
 
 let main(r': bool, x_: i32): i32 =
-  if r' then 123 else (x_ + 1) * 2 + 6 + (loop (x=1) for i' < x_ do (x<<1)^i')
+  if r' then 123 else (x_ + 1) * 2 + 6 + (loop x=1 for i' < x_ do (x<<1)^i')

@@ -54,7 +54,7 @@ let unbytes_block(block: [64]u8): [16]u32 =
 
 -- Process 512 bits of the input.
 let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
-  loop ((a,b,c,d) = (a0,b0,c0,d0)) for i < 64 do
+  loop (a,b,c,d) = (a0,b0,c0,d0) for i < 64 do
     let (f,g) =
       if      i < 16 then ((b & c) | ((~b) & d),
                            i)

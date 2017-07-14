@@ -268,10 +268,16 @@ transformStm (Let pat () (If c tb fb rt)) = do
   return [Let pat () $ If c tb' fb' rt]
 
 transformStm (Let pat () (DoLoop ctx val form body)) =
-  localScope (scopeOfLoopForm form <> scopeOfFParams mergeparams) $ do
+  localScope (castScope (scopeOf form) <>
+              scopeOfFParams mergeparams) $ do
     body' <- transformBody body
-    return [Let pat () $ DoLoop ctx val form body']
+    return [Let pat () $ DoLoop ctx val form' body']
   where mergeparams = map fst $ ctx ++ val
+        form' = case form of
+                  WhileLoop cond ->
+                    WhileLoop cond
+                  ForLoop i it bound ps ->
+                    ForLoop i it bound ps
 
 transformStm (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
@@ -341,8 +347,8 @@ transformStm (Let pat () (Op (Stream cs w
       concat_pat = Pattern [] concat_pat_elems
 
   (map_bnd, map_misc_bnds) <- blockedMap concat_pat cs w InOrder fold_fun_sequential nes arrs
-  let num_threads = arraysSize 0 $ patternTypes $ bindingPattern map_bnd
-      red_input = zip nes $ patternNames $ bindingPattern map_bnd
+  let num_threads = arraysSize 0 $ patternTypes $ stmPattern map_bnd
+      red_input = zip nes $ patternNames $ stmPattern map_bnd
 
   ((map_misc_bnds++[map_bnd])++) <$>
     inScopeOf (map_misc_bnds++[map_bnd])
@@ -476,7 +482,7 @@ postKernelsStms :: PostKernels -> [KernelsStm]
 postKernelsStms (PostKernels kernels) = concatMap unPostKernel kernels
 
 typeEnvFromKernelAcc :: KernelAcc -> Scope Out.Kernels
-typeEnvFromKernelAcc = scopeOf . fst . outerTarget . kernelTargets
+typeEnvFromKernelAcc = scopeOfPattern . fst . outerTarget . kernelTargets
 
 addStmsToKernel :: [InKernelStm] -> KernelAcc -> KernelAcc
 addStmsToKernel stms acc =
@@ -532,7 +538,7 @@ withStm bnd = local $ \env ->
           letBindInInnerNesting provided $
           kernelNest env
       }
-  where provided = S.fromList $ patternNames $ bindingPattern bnd
+  where provided = S.fromList $ patternNames $ stmPattern bnd
 
 mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
@@ -566,7 +572,7 @@ unbalancedLambda lam =
         subExpBound (Constant _) _ = False
 
         unbalancedBody bound body =
-          any (unbalancedStm (bound <> boundInBody body) . bindingExp) $
+          any (unbalancedStm (bound <> boundInBody body) . stmExp) $
           bodyStms body
 
         -- XXX - our notion of balancing is probably still too naive.
@@ -584,7 +590,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedStm _ (Op Scatter{}) =
           False
-        unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations) body) =
+        unbalancedStm bound (DoLoop _ merge (ForLoop i _ iterations _) body) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
           where bound' = foldr S.insert bound $
@@ -601,12 +607,12 @@ unbalancedLambda lam =
           not $ isBuiltInFunction fname
 
 bodyContainsParallelism :: Body -> Bool
-bodyContainsParallelism = any (isMap . bindingExp) . bodyStms
+bodyContainsParallelism = any (isMap . stmExp) . bodyStms
   where isMap Op{} = True
         isMap _ = False
 
 bodyContainsMap :: Body -> Bool
-bodyContainsMap = any (isMap . bindingExp) . bodyStms
+bodyContainsMap = any (isMap . stmExp) . bodyStms
   where isMap (Op Map{}) = True
         isMap _ = False
 
@@ -615,7 +621,7 @@ lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
 -- | Returns the sizes of immediate nested parallelism.
 nestedParallelism :: Body -> [SubExp]
-nestedParallelism = concatMap (parallelism . bindingExp) . bodyStms
+nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
   where parallelism (Op (Reduce _ w _ _ _)) = [w]
         parallelism (Op (Scan _ w _ _)) = [w]
         parallelism (Op (Scanomap _ w _ _ _ _)) = [w]
@@ -899,7 +905,7 @@ distributeSingleUnaryStm :: KernelAcc
 distributeSingleUnaryStm acc bnd f =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | res == map Var (patternNames $ bindingPattern bnd),
+      | res == map Var (patternNames $ stmPattern bnd),
         (outer, _) <- nest,
         [(_, arr)] <- loopNestingParamsAndArrs outer -> do
           addKernels kernels

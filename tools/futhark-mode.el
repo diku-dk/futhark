@@ -524,13 +524,14 @@ Ignore BEGIN, END, and LENGTH (present to satisfy Emacs)."
 (define-derived-mode futhark-mode fundamental-mode "Futhark"
   "Major mode for editing Futhark source files."
   :syntax-table futhark-mode-syntax-table
-  (set (make-local-variable 'font-lock-defaults) '(futhark-font-lock))
-  (set (make-local-variable 'indent-line-function) 'futhark-indent-line)
-  (set (make-local-variable 'indent-region-function) nil)
-  (set (make-local-variable 'comment-start) "--")
-  (set (make-local-variable 'comment-padding) " ")
-  (set (make-local-variable 'paragraph-separate)
-       (concat comment-start " ==$"))
+  (setq-local font-lock-defaults '(futhark-font-lock))
+  (setq-local indent-line-function 'futhark-indent-line)
+  (setq-local indent-region-function nil)
+  (setq-local comment-start "--")
+  (setq-local comment-start-skip "--[ \t]*")
+  (setq-local paragraph-start (concat " *-- |\\| ==$\\|" page-delimiter))
+  (setq-local paragraph-separate (concat " *-- ==$\\|" page-delimiter))
+  (setq-local comment-padding " ")
   (add-hook 'after-change-functions 'futhark-check-unsafe nil))
 
 (provide 'futhark-mode)

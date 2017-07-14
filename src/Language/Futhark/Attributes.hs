@@ -530,6 +530,7 @@ valueType (ArrayValue _ (Array (RecordArray et shape _))) =
 typeOf :: ExpBase Info VName -> CompTypeBase VName
 typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
+typeOf (QualParens _ e _) = typeOf e
 typeOf (TupLit es _) = tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
   -- Reverse, because M.unions is biased to the left.
@@ -540,6 +541,8 @@ typeOf (RecordLit fs _) =
           _          -> error "typeOf: RecordLit: the impossible happened."
 typeOf (ArrayLit _ (Info t) _) =
   arrayType 1 t Unique `setAliases` mempty
+typeOf (Range e _ _ _) =
+  arrayType 1 (typeOf e) Unique `setAliases` mempty
 typeOf (Empty (TypeDecl _ (Info t)) _) =
   arrayType 1 (fromStruct t) Unique
 typeOf (BinOp _ _ _ (Info t) _) = t
@@ -592,9 +595,6 @@ typeOf (Stream form lam _ _) =
                     `setAliases` S.empty
                     `setUniqueness` Unique
     RedLike{}    -> lambdaReturnType lam
-                    `setAliases` S.empty
-                    `setUniqueness` Unique
-    Sequential{} -> lambdaReturnType lam
                     `setAliases` S.empty
                     `setUniqueness` Unique
 typeOf (Concat _ x _ _) =
@@ -926,7 +926,7 @@ qualify k (QualName ks v) = QualName (k:ks) v
 typeName :: VName -> TypeName
 typeName = typeNameFromQualName . qualName
 
-progImports :: ProgBase f vn -> [String]
+progImports :: ProgBase f vn -> [(String,SrcLoc)]
 progImports (Prog decs) = concatMap decImports decs
   where decImports (OpenDec x xs _ _) =
           concatMap modExpImports $ x:xs
@@ -940,7 +940,7 @@ progImports (Prog decs) = concatMap decImports decs
 
         modExpImports ModVar{}              = []
         modExpImports (ModParens p _)       = modExpImports p
-        modExpImports (ModImport f _)       = [f]
+        modExpImports (ModImport f loc)     = [(f,loc)]
         modExpImports (ModDecs ds _)        = concatMap decImports ds
         modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me

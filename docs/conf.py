@@ -246,6 +246,8 @@ man_pages = [
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-bench', 'futhark-bench', 'Futhark benchmarking tool',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
+    ('man/futhark-doc', 'futhark-doc', 'Futhark documentation generator',
+     ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-dataset', 'futhark-dataset', 'Generate random data sets',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
 ]
