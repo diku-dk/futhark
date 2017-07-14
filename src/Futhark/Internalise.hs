@@ -436,12 +436,14 @@ internaliseExp desc (E.Range start maybe_second end _) = do
               same_step <- letSubExp "same_step" $ I.BasicOp $ I.SubExp $ constant False
               return (default_step, same_step)
 
+  step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
+  let eDivRounding x y =
+        eBinOp (SQuot it) (eBinOp (Add it) x (eBinOp (Sub it) y (eSubExp step_sign))) y
+
   downwards <- case end of
     DownToExclusive{} -> return $ constant True
     UpToExclusive{} -> return $ constant False
-    _ -> do
-      step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
-      letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+    _ -> letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
 
   end' <- internaliseExp1 "range_end" $ case end of
     DownToExclusive e -> e
@@ -450,7 +452,7 @@ internaliseExp desc (E.Range start maybe_second end _) = do
 
   end_exclusive <- case end of
     UpToInclusive{} ->
-      letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step
+      letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step_sign
     _ -> return end'
 
   end_from_above <- letSubExp "end_from_above" $ I.BasicOp $ I.BinOp (I.SMin it) start' end_exclusive
@@ -461,7 +463,8 @@ internaliseExp desc (E.Range start maybe_second end _) = do
                      [I.Prim $ IntType it]
 
   distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
-  num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" $ I.BasicOp $ I.BinOp (I.SDiv it) distance step
+  num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" =<<
+                         eDivRounding (eSubExp distance) (eSubExp step)
   num_elems_not_neg <- letSubExp "num_elems_not_neg" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_maybe_neg
   num_elems <- letSubExp "num_elems" $
                I.If step_invalid (resultBody [zero]) (resultBody [num_elems_not_neg])
