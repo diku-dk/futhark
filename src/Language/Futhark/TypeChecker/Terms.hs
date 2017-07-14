@@ -537,9 +537,10 @@ checkExp (Range start maybe_step end loc) = do
   maybe_step' <- case maybe_step of
     Nothing -> return Nothing
     Just step -> do
+      let warning = warn loc "First and second element of range are identical, this will produce an empty array."
       case (start, step) of
-        ((Literal (SignedValue (Int32Value x)) _), (Literal (SignedValue (Int32Value y)) _)) -> do
-          when (x == y) $ warn loc "First and second element of range are identical, this will produce an empty array."
+        (Literal x _, Literal y _) -> when (x == y) warning
+        (Var x_name _ _, Var y_name _ _) -> when (x_name == y_name) warning
         _ -> return ()
       Just <$> (require [start_t] =<< checkExp step)
 
