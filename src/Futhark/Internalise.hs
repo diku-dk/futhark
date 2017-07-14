@@ -419,46 +419,59 @@ internaliseExp desc (E.Range start maybe_second end _) = do
                                  UpToInclusive{} -> one
                                  UpToExclusive{} -> one
 
-  step <- case maybe_second of
+  (maybe_step, maybe_step_valid) <- case maybe_second of
             Just second -> do
               second' <- internaliseExp1 "range_second" second
-              letSubExp "range_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
-            Nothing -> return default_step
+              subtracted_step <- letSubExp "subtracted_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
+              case (start', second') of
+                (Constant (IntValue (Int32Value x)), Constant (IntValue (Int32Value y)))
+                  | x /= y -> return $ (Just subtracted_step, Nothing)
+                  | otherwise -> return (Nothing, Nothing)
+                _ -> do
+                  same_step <- letSubExp "same_step" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
+                  return (Just subtracted_step, Just same_step)
+            Nothing -> return $ (Just default_step, Nothing)
 
-  downwards <- case end of
-    DownToExclusive{} -> return $ constant True
-    UpToExclusive{} -> return $ constant False
-    _ -> do
-      step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
-      letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+  empty_array <- letSubExp desc (I.BasicOp $ I.Iota (intConst it 0) (intConst it 0) (intConst it 1) it)
+  case maybe_step of
+    Just step -> do
+      downwards <- case end of
+        DownToExclusive{} -> return $ constant True
+        UpToExclusive{} -> return $ constant False
+        _ -> do
+          step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
+          letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
 
-  end' <- internaliseExp1 "range_end" $ case end of
-    DownToExclusive e -> e
-    UpToInclusive e -> e
-    UpToExclusive e -> e
+      end' <- internaliseExp1 "range_end" $ case end of
+        DownToExclusive e -> e
+        UpToInclusive e -> e
+        UpToExclusive e -> e
 
-  end_exclusive <- case end of
-    DownToExclusive{} -> return end'
-    UpToExclusive{} -> return end'
-    UpToInclusive{} ->
-      letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step
+      end_exclusive <- case end of
+        DownToExclusive{} -> return end'
+        UpToExclusive{} -> return end'
+        UpToInclusive{} ->
+          letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step
 
-  end_from_above <- letSubExp "end_from_above" $ I.BasicOp $ I.BinOp (I.SMin it) start' end_exclusive
-  end_from_below <- letSubExp "end_from_below" $ I.BasicOp $ I.BinOp (I.SMax it) start' end_exclusive
+      end_from_above <- letSubExp "end_from_above" $ I.BasicOp $ I.BinOp (I.SMin it) start' end_exclusive
+      end_from_below <- letSubExp "end_from_below" $ I.BasicOp $ I.BinOp (I.SMax it) start' end_exclusive
 
-  end_constrained <- letSubExp "end_constrained" $
-                     I.If downwards (resultBody [end_from_above]) (resultBody [end_from_below])
-                     [I.Prim $ IntType it]
+      end_constrained <- letSubExp "end_constrained" $
+                         I.If downwards (resultBody [end_from_above]) (resultBody [end_from_below])
+                         [I.Prim $ IntType it]
 
-  up_distance <- letSubExp "up_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
-  down_distance <- letSubExp "down_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
-  distance <- letSubExp "distance" $
-              I.If downwards (resultBody [down_distance]) (resultBody [up_distance])
-              [I.Prim $ IntType it]
-  num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" $ I.BasicOp $ I.BinOp (I.SDiv it) distance step
-  num_elems <- letSubExp "num_elems" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_maybe_neg
-
-  pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
+      up_distance <- letSubExp "up_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
+      down_distance <- letSubExp "down_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
+      distance <- letSubExp "distance" $
+                  I.If downwards (resultBody [down_distance]) (resultBody [up_distance])
+                  [I.Prim $ IntType it]
+      num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" $ I.BasicOp $ I.BinOp (I.SDiv it) distance step
+      num_elems <- letSubExp "num_elems" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_maybe_neg
+      array <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
+      case maybe_step_valid of
+        Just step_valid -> pure <$> letSubExp "range_step" (I.If step_valid (resultBody [array]) (resultBody [empty_array]) [I.Prim $ IntType it])
+        Nothing -> pure $ return array
+    Nothing -> pure $ return empty_array
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et
