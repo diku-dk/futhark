@@ -425,12 +425,14 @@ internaliseExp desc (E.Range start maybe_second end _) = do
               letSubExp "range_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
             Nothing -> return default_step
 
+  step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
+  let eDivRounding x y =
+        eBinOp (SQuot it) (eBinOp (Add it) x (eBinOp (Sub it) y (eSubExp step_sign))) y
+
   downwards <- case end of
     DownToExclusive{} -> return $ constant True
     UpToExclusive{} -> return $ constant False
-    _ -> do
-      step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
-      letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+    _ -> letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
 
   end' <- internaliseExp1 "range_end" $ case end of
     DownToExclusive e -> e
@@ -441,7 +443,7 @@ internaliseExp desc (E.Range start maybe_second end _) = do
     DownToExclusive{} -> return end'
     UpToExclusive{} -> return end'
     UpToInclusive{} ->
-      letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step
+      letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step_sign
 
   end_from_above <- letSubExp "end_from_above" $ I.BasicOp $ I.BinOp (I.SMin it) start' end_exclusive
   end_from_below <- letSubExp "end_from_below" $ I.BasicOp $ I.BinOp (I.SMax it) start' end_exclusive
@@ -455,7 +457,8 @@ internaliseExp desc (E.Range start maybe_second end _) = do
   distance <- letSubExp "distance" $
               I.If downwards (resultBody [down_distance]) (resultBody [up_distance])
               [I.Prim $ IntType it]
-  num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" $ I.BasicOp $ I.BinOp (I.SDiv it) distance step
+  num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" =<<
+                         eDivRounding (eSubExp distance) (eSubExp step)
   num_elems <- letSubExp "num_elems" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_maybe_neg
 
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
