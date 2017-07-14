@@ -196,29 +196,40 @@ readImport search_path steps include
   | otherwise = do
       already_done <- gets $ isJust . lookup (includeToString include) . alreadyImported
 
-      unless already_done $ do
-        (file_contents, file_name) <- readImportFile search_path include
-        prog <- case parseFuthark file_name file_contents of
-          Left err -> externalErrorS $ show err
-          Right prog -> return prog
+      unless already_done $
+        uncurry (handleFile search_path steps include) =<<
+        readImportFile search_path include
 
-        mapM_ (readImport search_path (include:steps) . uncurry (mkInclude include)) $ E.progImports prog
+handleFile :: (MonadIO m, MonadError CompilerError m) =>
+              SearchPath
+           -> [FutharkInclude]
+           -> FutharkInclude
+           -> T.Text
+           -> FilePath
+           -> CompilerM m ()
+handleFile search_path steps include file_contents file_name = do
+  prog <- case parseFuthark file_name file_contents of
+    Left err -> externalErrorS $ show err
+    Right prog -> return prog
 
-        -- It is important to not read these before the above calls to
-        -- readImport.
-        imports <- gets alreadyImported
-        src <- gets nameSource
+  mapM_ (readImport search_path (include:steps) . uncurry (mkInclude include)) $
+    E.progImports prog
 
-        case E.checkProg imports src (includePath include) prog of
-          Left err ->
-            externalError $ T.pack $ show err
-          Right ((progmod, prog'), ws, src') ->
-            modify $ \s ->
-              s { alreadyImported = (includeToString include,progmod) : imports
-                , nameSource      = src'
-                , warnings        = warnings s <> ws
-                , resultProgs     = prog' : resultProgs s
-                }
+  -- It is important to not read these before the above calls to
+  -- readImport.
+  imports <- gets alreadyImported
+  src <- gets nameSource
+
+  case E.checkProg imports src (includePath include) prog of
+    Left err ->
+      externalError $ T.pack $ show err
+    Right ((progmod, prog'), ws, src') ->
+      modify $ \s ->
+        s { alreadyImported = (includeToString include,progmod) : imports
+          , nameSource      = src'
+          , warnings        = warnings s <> ws
+          , resultProgs     = prog' : resultProgs s
+          }
 
 readImportFile :: (MonadError CompilerError m, MonadIO m) =>
                   SearchPath -> FutharkInclude -> m (T.Text, FilePath)
@@ -260,10 +271,11 @@ readProgram fps = do
           reverse $ alreadyImported s',
           nameSource s')
   where onFile fp =  do
-          unless (ext == ".fut") $
-            externalErrorS $ "File does not have a .fut extension: " <> fp
-          readImport (SearchPath ".") [] $ mkInitialInclude name
-            where (name, ext) = splitExtension fp
+
+          fs <- liftIO $ T.readFile fp
+
+          handleFile (SearchPath ".") [] (mkInitialInclude name) fs fp
+            where (name, _) = splitExtension fp
 
 newNameSourceForCompiler :: VNameSource
 newNameSourceForCompiler = newNameSource $ succ $ maximum $ map baseTag $
