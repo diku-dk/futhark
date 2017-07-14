@@ -134,7 +134,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
             let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
                 body_vars1 = map (paramName . fst) mergevalparams
                 body_vars2 = concatMap (map patElemName
-                                        . patternValueElements . bindingPattern)
+                                        . patternValueElements . stmPattern)
                              $ bodyStms body
                 body_vars = body_vars0 ++ body_vars1 ++ body_vars2
             -- Find the ones using the same memory as the result of the loop
@@ -168,7 +168,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
             let ifBlocks body se = do
                   res <- fromVar se
                   res_mem <- memSrcName <$> M.lookup res var_to_mem
-                  let body_vars = concatMap (map patElemName . patternValueElements . bindingPattern)
+                  let body_vars = concatMap (map patElemName . patternValueElements . stmPattern)
                                   $ bodyStms body
                       body_first_uses = S.unions $ map (`lookupEmptyable` first_uses_all) body_vars
                   Just $ return (S.member res_mem body_first_uses, res)

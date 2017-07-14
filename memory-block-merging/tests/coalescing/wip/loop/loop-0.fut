@@ -43,7 +43,7 @@ import "/futlib/array"
 -- allocation later!
 let main(y: *[#n][#m]i32, a: [#m]i32): *[n][m]i32 =
   let y[0,1] = 9
-  let a1 = loop (a1 = a) for _i < n do
+  let a1 = loop a1 = a for _i < n do
     let x1 = map (+1) a1
     let x2 = copy x1
     in x1

@@ -20,7 +20,7 @@ import "/futlib/array"
 --   because of the loop
 
 let main (ns: [#n]i32): [n]i32 =
-  let loop_result = loop (xs = ns) for i < n do
+  let loop_result = loop xs = ns for i < n do
     -- Create a new array using ys_mem.
     --
     -- We add '+ 1' to avoid the expression being a no-op in the first iteration
