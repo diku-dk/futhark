@@ -283,8 +283,8 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
               _ -> return (Just var, mem)
             let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
                 body_vars1 = map (paramName . fst) mergevalparams
-                varFromStm stm = map patElemName (patternValueElements $ bindingPattern stm)
-                                 ++ foldExp folder [] (bindingExp stm)
+                varFromStm stm = map patElemName (patternValueElements $ stmPattern stm)
+                                 ++ foldExp folder [] (stmExp stm)
                 folder = identityFolder { foldOnBody = \vs fbody -> return (vs ++ concatMap varFromStm (bodyStms fbody)) }
                 body_vars2 = foldExp folder [] e -- Get all statements in the
                                                  -- body *and* any sub-bodies,
@@ -330,7 +330,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
             let ifBlocks body se = do
                   res <- fromVar se
                   res_mem <- memSrcName <$> M.lookup res var_to_mem
-                  let body_vars = concatMap (map patElemName . patternValueElements . bindingPattern)
+                  let body_vars = concatMap (map patElemName . patternValueElements . stmPattern)
                                   $ bodyStms body
                       body_first_uses = S.unions $ map (`lookupEmptyable` first_uses_all) body_vars
                   Just $ return (S.member res_mem body_first_uses, res)

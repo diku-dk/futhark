@@ -13,7 +13,7 @@
 import "/futlib/array"
 
 let main (a0: []i32, n_iter: i32): []i32 =
-  let a2 = loop (a = a0) for _i < n_iter do
+  let a2 = loop a = a0 for _i < n_iter do
     -- This map reads from the memory of 'a' and writes to the loop result
     -- memory.  mem_a aliases mem_result, which means that the compiler cannot
     -- naively coalesce mem_a' into mem_result, since then it would read and

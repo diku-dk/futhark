@@ -11,7 +11,7 @@ let main (xsss: [#n][#n][#n]i32): [][n][n]i32 =
   let (_,asss) = split (1) xsss
   in  map (\ass ->
                 map (\as ->
-                        let r = loop r=0 for i < n do
+                        let r = loop r = 0 for i < n do
                             let r = r + as[i]
                             in  r
                         in

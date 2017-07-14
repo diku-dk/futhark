@@ -68,7 +68,7 @@ findMemAliases fundef var_to_mem = cleanupMapping $ expandWithAliases fromBody f
           -- you have more than one loop array.  Fixing this would require
           -- either changing the Aliases representation, or building something
           -- on top of it.
-          let aliases = S.unions $ map (lookupMems . unNames) $ fst $ fst $ bodyLore body
+          let aliases = S.unions $ map (lookupMems . unNames) $ fst $ fst $ bodyAttr body
           in [(mem, aliases)]
         onMergeValParam _ _ = []
 
