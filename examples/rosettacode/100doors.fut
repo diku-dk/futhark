@@ -10,7 +10,7 @@
 -- output { [false, true, false, false, true, false, false, false, false, true] }
 
 let main(n: i32): [n]bool =
-  loop (is_open = replicate n false) for i < n do
+  loop is_open = replicate n false for i < n do
     let js = map (*i+1) (iota n)
     let flips = map (\j ->
                        if j < n

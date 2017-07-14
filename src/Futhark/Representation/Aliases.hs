@@ -123,8 +123,8 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) 
     return $ runReader (expContext (removePatternAliases pat) (removeExpAliases e)) env
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
-  bodyAliases = map unNames . fst . fst . bodyLore
-  consumedInBody = unNames . snd . fst . bodyLore
+  bodyAliases = map unNames . fst . fst . bodyAttr
+  consumedInBody = unNames . snd . fst . bodyAttr
 
 instance PrettyAnnot (PatElemT attr) =>
   PrettyAnnot (PatElemT (VarAliases, attr)) where
@@ -298,7 +298,7 @@ mkBodyAliases bnds res =
   -- bound in bnds.
   let (aliases, consumed) = mkStmsAliases bnds res
       boundNames =
-        mconcat $ map (S.fromList . patternNames . bindingPattern) bnds
+        mconcat $ map (S.fromList . patternNames . stmPattern) bnds
       bound = (`S.member` boundNames)
       aliases' = map (S.filter (not . bound)) aliases
       consumed' = S.filter (not . bound) consumed
@@ -328,7 +328,7 @@ trackAliases :: Aliased lore =>
                 AliasesAndConsumed -> Stm lore
              -> AliasesAndConsumed
 trackAliases (aliasmap, consumed) bnd =
-  let pat = bindingPattern bnd
+  let pat = stmPattern bnd
       als = M.fromList $
             zip (patternNames pat) (map addAliasesOfAliases $ patternAliases pat)
       aliasmap' = als <> aliasmap

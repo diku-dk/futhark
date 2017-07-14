@@ -47,12 +47,11 @@ module Language.Futhark.Syntax
   -- * Abstract syntax tree
   , BinOp (..)
   , IdentBase (..)
+  , Inclusiveness(..)
   , DimIndexBase(..)
   , ExpBase(..)
   , FieldBase(..)
   , LoopFormBase (..)
-  , ForLoopDirection (..)
-  , LowerBoundBase(..)
   , LambdaBase(..)
   , PatternBase(..)
   , StreamForm(..)
@@ -506,9 +505,23 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Geq
              deriving (Eq, Ord, Show, Enum, Bounded)
 
+-- | Whether a bound for an end-point of a 'DimSlice' or a range
+-- literal is inclusive or exclusive.
+data Inclusiveness a = DownToExclusive a
+                     | UpToInclusive a -- ^ May still be "down to" if step is negative.
+                     | UpToExclusive a -- ^ May still be "down to" if step is negative.
+                     deriving (Eq, Ord, Show)
+
+instance Located a => Located (Inclusiveness a) where
+  locOf (DownToExclusive x) = locOf x
+  locOf (UpToInclusive x) = locOf x
+  locOf (UpToExclusive x) = locOf x
+
 -- | An indexing of a single dimension.
 data DimIndexBase f vn = DimFix (ExpBase f vn)
-                       | DimSlice (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn)) (Maybe (ExpBase f vn))
+                       | DimSlice (Maybe (ExpBase f vn))
+                                  (Maybe (ExpBase f vn))
+                                  (Maybe (ExpBase f vn))
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.
@@ -540,6 +553,8 @@ data ExpBase f vn =
             | Parens (ExpBase f vn) SrcLoc
             -- ^ A parenthesized expression.
 
+            | QualParens (QualName vn) (ExpBase f vn) SrcLoc
+
             | TupLit    [ExpBase f vn] SrcLoc
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
@@ -549,6 +564,8 @@ data ExpBase f vn =
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
+
+            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) SrcLoc
 
             | Empty (TypeDeclBase f vn) SrcLoc
 
@@ -684,16 +701,17 @@ deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
                      | RedLike    StreamOrd Commutativity (LambdaBase f vn)
-                     | Sequential (ExpBase f vn)
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc)          = locOf loc
   locOf (Parens _ loc)           = locOf loc
+  locOf (QualParens _ _ loc)     = locOf loc
   locOf (TupLit _ pos)           = locOf pos
   locOf (RecordLit _ pos)        = locOf pos
   locOf (Project _ _ _ pos)      = locOf pos
   locOf (ArrayLit _ _ pos)       = locOf pos
+  locOf (Range _ _ _ pos)        = locOf pos
   locOf (Empty _ pos)            = locOf pos
   locOf (BinOp _ _ _ _ pos)      = locOf pos
   locOf (If _ _ _ _ pos)         = locOf pos
@@ -733,21 +751,10 @@ instance Located (FieldBase f vn) where
   locOf (RecordRecord e)      = locOf e
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
-data LoopFormBase f vn = For ForLoopDirection (LowerBoundBase f vn) (IdentBase f vn) (ExpBase f vn)
+data LoopFormBase f vn = For (IdentBase f vn) (ExpBase f vn)
+                       | ForIn (PatternBase f vn) (ExpBase f vn)
                        | While (ExpBase f vn)
 deriving instance Showable f vn => Show (LoopFormBase f vn)
-
--- | The iteration order of a @for@-loop.
-data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
-                                 -- just below the upper bound.
-                      | FromDownTo -- ^ Iterates from just below the
-                                   -- upper bound to the lower bound.
-                        deriving (Eq, Ord, Show)
-
--- | The lower bound of a for loop.
-data LowerBoundBase f vn = ZeroBound
-                         | ExpBound (ExpBase f vn)
-deriving instance Showable f vn => Show (LowerBoundBase f vn)
 
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
@@ -800,6 +807,7 @@ data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
                                 , funBindTypeParams :: [TypeParamBase vn]
                                 , funBindParams     :: [PatternBase f vn]
                                 , funBindBody       :: ExpBase f vn
+                                , funBindDoc        :: Maybe String
                                 , funBindLocation   :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (FunBindBase f vn)
@@ -814,6 +822,7 @@ data ValBindBase f vn = ValBind { constBindEntryPoint :: Bool
                                 , constBindTypeDecl :: Maybe (TypeExp vn)
                                 , constBindType     :: f (StructTypeBase vn)
                                 , constBindDef      :: ExpBase f vn
+                                , constDoc          :: Maybe String
                                 , constBindLocation :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (ValBindBase f vn)
@@ -825,6 +834,7 @@ instance Located (ValBindBase f vn) where
 data TypeBindBase f vn = TypeBind { typeAlias        :: vn
                                   , typeParams       :: [TypeParamBase vn]
                                   , typeExp          :: TypeDeclBase f vn
+                                  , typeDoc          :: Maybe String
                                   , typeBindLocation :: SrcLoc
                                   }
 deriving instance Showable f vn => Show (TypeBindBase f vn)
@@ -858,20 +868,21 @@ data SpecBase f vn = ValSpec  { specName       :: vn
                               , specTypeParams :: [TypeParamBase vn]
                               , specParams     :: [ParamBase f vn]
                               , specRettype    :: TypeDeclBase f vn
+                              , specDoc        :: Maybe String
                               , specLocation   :: SrcLoc
                               }
                    | TypeAbbrSpec (TypeBindBase f vn)
-                   | TypeSpec vn [TypeParamBase vn] SrcLoc -- ^ Abstract type.
+                   | TypeSpec vn [TypeParamBase vn] (Maybe String) SrcLoc -- ^ Abstract type.
                    | ModSpec vn (SigExpBase f vn) SrcLoc
                    | IncludeSpec (SigExpBase f vn) SrcLoc
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ _ loc) = locOf loc
-  locOf (TypeAbbrSpec tbind)  = locOf tbind
-  locOf (TypeSpec _ _ loc)    = locOf loc
-  locOf (ModSpec _ _ loc)     = locOf loc
-  locOf (IncludeSpec _ loc)   = locOf loc
+  locOf (ValSpec _ _ _ _ _ loc) = locOf loc
+  locOf (TypeAbbrSpec tbind)    = locOf tbind
+  locOf (TypeSpec _ _ _ loc)    = locOf loc
+  locOf (ModSpec _ _ loc)       = locOf loc
+  locOf (IncludeSpec _ loc)     = locOf loc
 
 data SigExpBase f vn = SigVar (QualName vn) SrcLoc
                      | SigParens (SigExpBase f vn) SrcLoc
@@ -893,6 +904,7 @@ instance Located (SigExpBase f vn) where
 
 data SigBindBase f vn = SigBind { sigName :: vn
                                 , sigExp  :: SigExpBase f vn
+                                , sigDoc  :: Maybe String
                                 , sigLoc  :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (SigBindBase f vn)
@@ -928,6 +940,7 @@ data ModBindBase f vn =
           , modParams    :: [ModParamBase f vn]
           , modSignature :: Maybe (SigExpBase f vn, f (M.Map VName VName))
           , modExp       :: ModExpBase f vn
+          , modDoc       :: Maybe String
           , modLocation  :: SrcLoc
           }
 deriving instance Showable f vn => Show (ModBindBase f vn)

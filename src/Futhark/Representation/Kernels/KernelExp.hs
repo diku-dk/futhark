@@ -32,6 +32,7 @@ import Futhark.Optimise.Simplifier.Lore
 import Futhark.Analysis.Usage
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.ScalExp as SE
+import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Util.Pretty
   ((<+>), (</>), ppr, commasep, Pretty, parens, text, apply, braces, annot, indent)
 import qualified Futhark.TypeCheck as TC
@@ -355,6 +356,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
   removeOpWisdom (SplitSpace o w i elems_per_thread) =
     SplitSpace o w i elems_per_thread
 
+instance ST.IndexOp (KernelExp lore) where
+
 instance UsageInOp (KernelExp lore) where
   usageInOp _ = mempty
 
@@ -436,8 +439,7 @@ checkScanOrReduce w lam input = do
     map asArg [Prim int32, Prim int32] ++
     map TC.noArgAliases (neargs ++ arrargs)
 
-instance LParamAttr lore1 ~ LParamAttr lore2 =>
-         Scoped lore1 (GroupStreamLambda lore2) where
+instance Scoped lore (GroupStreamLambda lore) where
   scopeOf (GroupStreamLambda chunk_size chunk_offset acc_params arr_params _) =
     M.insert chunk_size (IndexInfo Int32) $
     M.insert chunk_offset (IndexInfo Int32) $

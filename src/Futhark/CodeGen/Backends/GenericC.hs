@@ -733,7 +733,7 @@ readInput refcount known_sizes
           [C.cstm|if ($exp:expected != $exp:got) {
                     fprintf(stderr, "Parameter %s has bad dimension (expected %d, got %d).\n",
                             $string:(baseString name), $exp:expected, $exp:got);
-                    abort();
+                    exit(1);
                   }|]
 
 printResult :: [ExternalValue] -> CompilerM op s [C.Stm]
@@ -1176,7 +1176,7 @@ compileCode (Assert e loc) = do
   stm [C.cstm|if (!$exp:e') {
                    fprintf(stderr, "Assertion %s at %s failed.\n",
                                    $string:(pretty e), $string:(locStr loc));
-                   abort();
+                   exit(1);
                  }|]
 
 compileCode (Allocate name (Count e) space) = do

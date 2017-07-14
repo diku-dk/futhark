@@ -261,7 +261,7 @@ passNeed = pass
 addStmEngine :: SimplifiableLore lore => Stm (Wise lore) -> SimpleM lore ()
 addStmEngine bnd = do
   modifyVtable $ ST.insertStm bnd
-  case bindingExp bnd of
+  case stmExp bnd of
     BasicOp (Assert se _) -> asserted se
     _                    -> return ()
   needStm bnd
@@ -444,7 +444,7 @@ blockUnhoistedDeps = snd . mapAccumL block S.empty
             (blocked, Right need)
 
 provides :: Stm lore -> [VName]
-provides = patternNames . bindingPattern
+provides = patternNames . stmPattern
 
 requires :: Attributes lore => Stm lore -> Names
 requires = freeInStm
@@ -452,7 +452,7 @@ requires = freeInStm
 expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
                UT.UsageTable -> Stm lore -> UT.UsageTable
 expandUsage utable bnd = utable <> usageInStm bnd <> usageThroughAliases
-  where pat = bindingPattern bnd
+  where pat = stmPattern bnd
         usageThroughAliases =
           mconcat $ mapMaybe usageThroughBindeeAliases $
           zip (patternNames pat) (patternAliases pat)
@@ -475,7 +475,7 @@ orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
 orIf p1 p2 body need = p1 body need || p2 body need
 
 isConsumed :: BlockPred lore
-isConsumed utable = any (`UT.isConsumed` utable) . patternNames . bindingPattern
+isConsumed utable = any (`UT.isConsumed` utable) . patternNames . stmPattern
 
 isOp :: BlockPred lore
 isOp _ (Let _ _ Op{}) = True
@@ -504,15 +504,15 @@ hasFree :: Attributes lore => Names -> BlockPred lore
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: Attributes lore => BlockPred lore
-isNotSafe _ = not . safeExp . bindingExp
+isNotSafe _ = not . safeExp . stmExp
 
 isInPlaceBound :: BlockPred m
 isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
-                   patternElements . bindingPattern
+                   patternElements . stmPattern
 
 isNotCheap :: Attributes lore => BlockPred lore
 isNotCheap _ = not . cheapBnd
-  where cheapBnd = cheap . bindingExp
+  where cheapBnd = cheap . stmExp
         cheap (BasicOp BinOp{})   = True
         cheap (BasicOp SubExp{})  = True
         cheap (BasicOp UnOp{})    = True
@@ -565,17 +565,17 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
               sz_needs   = transClosSizes all_bnds sz_nms []
               alloc_bnds = filter is_alloc_fn all_bnds
               sel_nms    = S.fromList $
-                           concatMap (patternNames . bindingPattern)
+                           concatMap (patternNames . stmPattern)
                                      (sz_needs ++ alloc_bnds)
           in  sel_nms
         transClosSizes all_bnds scal_nms hoist_bnds =
           let new_bnds = filter (hasPatName scal_nms) all_bnds
-              new_nms  = mconcat $ map (freeInExp . bindingExp) new_bnds
+              new_nms  = mconcat $ map (freeInExp . stmExp) new_bnds
           in  if null new_bnds
               then hoist_bnds
               else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
         hasPatName nms bnd = intersects nms $ S.fromList $
-                             patternNames $ bindingPattern bnd
+                             patternNames $ stmPattern bnd
         isNotHoistableBnd :: Names -> BlockPred m
         isNotHoistableBnd nms _ bnd = not $ hasPatName nms bnd
 
@@ -649,11 +649,15 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       val' = zip valparams' valinit'
       diets = map (diet . paramDeclType) $ ctxparams' ++ valparams'
   (form', boundnames, wrapbody) <- case form of
-    ForLoop loopvar it boundexp -> do
+    ForLoop loopvar it boundexp loopvars -> do
       boundexp' <- simplify boundexp
-      return (ForLoop loopvar it boundexp',
-              loopvar `S.insert` fparamnames,
-              bindLoopVar loopvar it boundexp')
+      let (loop_params, loop_arrs) = unzip loopvars
+      loop_params' <- mapM (simplifyParam simplify) loop_params
+      loop_arrs' <- mapM simplify loop_arrs
+      return (ForLoop loopvar it boundexp' (zip loop_params' loop_arrs'),
+              S.fromList (loopvar : map paramName loop_params') <> fparamnames,
+              bindLoopVar loopvar it boundexp' .
+              bindArrayLParams (zip loop_params' $ map Just loop_arrs'))
     WhileLoop cond -> do
       cond' <- simplify cond
       return (WhileLoop cond',
@@ -691,6 +695,8 @@ simplifyExpBase = mapExpM hoist
                 , mapOnRetType = simplify
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
+                , mapOnLParam =
+                  fail "Unhandled LParam in simplification engine."
                 , mapOnOp =
                   simplifyOp
                 }
@@ -701,6 +707,7 @@ type SimplifiableLore lore = (Attributes lore,
                               Simplifiable (LParamAttr lore),
                               Simplifiable (RetType lore),
                               CanBeWise (Op lore),
+                              ST.IndexOp (OpWithWisdom (Op lore)),
                               BinderOps lore)
 
 class Simplifiable e where

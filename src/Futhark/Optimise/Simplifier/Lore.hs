@@ -143,8 +143,8 @@ instance RangesOf (BodyWisdom, attr) where
   rangesOf = bodyWisdomRanges . fst
 
 instance (Attributes lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
-  bodyAliases = map unNames . bodyWisdomAliases . fst . bodyLore
-  consumedInBody = unNames . bodyWisdomConsumed . fst . bodyLore
+  bodyAliases = map unNames . bodyWisdomAliases . fst . bodyAttr
+  consumedInBody = unNames . bodyWisdomConsumed . fst . bodyAttr
 
 removeWisdom :: CanBeWise (Op lore) => Rephraser Identity (Wise lore) lore
 removeWisdom = Rephraser { rephraseExpLore = return . snd

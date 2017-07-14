@@ -8,15 +8,13 @@ module Language.Futhark.TypeChecker
   ( checkProg
   , TypeError
   , Warnings
-  , FileModule
+  , FileModule(FileModule)
   , Imports
   )
   where
 
-import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.Except hiding (mapM)
-import Control.Monad.Reader hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
 import Data.List
 import Data.Loc
@@ -38,26 +36,25 @@ import Language.Futhark.TypeChecker.Types
 
 --- The main checker
 
-localEnv :: (Env -> Env) -> TypeM a -> TypeM a
-localEnv = local . first
-
 -- | The (abstract) result of type checking some file.  Can be passed
 -- to further invocations of the type checker.
 newtype FileModule = FileModule { fileEnv :: Env }
 
--- | A mapping from import names to imports.
-type Imports = M.Map FilePath FileModule
+-- | A mapping from import names to imports.  The ordering is significant.
+type Imports = [(String, FileModule)]
 
 -- | Type check a program containing no type information, yielding
 -- either a type error or a program with complete type information.
 -- Accepts a mapping from file names (excluding extension) to
--- previously type checker results.
+-- previously type checker results.  The 'FilePath' is used to resolve
+-- relative @import@s.
 checkProg :: Imports
           -> VNameSource
+          -> FilePath
           -> UncheckedProg
           -> Either TypeError ((FileModule, Prog), Warnings, VNameSource)
-checkProg files src prog =
-  runTypeM initialEnv (M.map fileEnv files) src $ checkProgM prog
+checkProg files src fpath prog =
+  runTypeM initialEnv (M.map fileEnv $ M.fromList files) fpath src $ checkProgM prog
 
 initialEnv :: Env
 initialEnv = intrinsicsModule
@@ -94,19 +91,19 @@ checkForDuplicateDecs =
               bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
-        f (FunDec (FunBind _ name _ _ _ _ _ loc)) =
+        f (FunDec (FunBind _ name _ _ _ _ _ _ loc)) =
           check Term name loc
 
-        f (ValDec (ValBind _ name _ _ _ loc)) =
+        f (ValDec (ValBind _ name _ _ _ _ loc)) =
           check Term name loc
 
-        f (TypeDec (TypeBind name _ _ loc)) =
+        f (TypeDec (TypeBind name _ _ _ loc)) =
           check Type name loc
 
-        f (SigDec (SigBind name _ loc)) =
+        f (SigDec (SigBind name _ _ loc)) =
           check Signature name loc
 
-        f (ModDec (ModBind name _ _ _ loc)) =
+        f (ModDec (ModBind name _ _ _ _ loc)) =
           check Structure name loc
 
         f OpenDec{} = return
@@ -114,7 +111,7 @@ checkForDuplicateDecs =
         f LocalDec{} = return
 
 bindingTypeParams :: [TypeParam] -> TypeM a -> TypeM a
-bindingTypeParams tparams = localEnv (<>env)
+bindingTypeParams tparams = localEnv env
   where env = mconcat $ map typeParamEnv tparams
 
         typeParamEnv (TypeParamDim v _) =
@@ -128,7 +125,7 @@ checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName]
 
 checkSpecs [] = return (mempty, mempty, [])
 
-checkSpecs (ValSpec name tparams params rettype loc : specs) =
+checkSpecs (ValSpec name tparams params rettype doc loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
     (tparams', params', rettype') <-
@@ -145,20 +142,20 @@ checkSpecs (ValSpec name tparams params rettype loc : specs) =
                                else BoundF (tparams', paramtypes, rettype'')
                  , envNameMap = M.singleton (Term, name) name'
                  }
-    (abstypes, env, specs') <- localEnv (valenv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv valenv $ checkSpecs specs
     return (abstypes,
             env <> valenv,
-            ValSpec name' tparams' params' rettype' loc : specs')
+            ValSpec name' tparams' params' rettype' doc loc : specs')
 
 checkSpecs (TypeAbbrSpec tdec : specs) =
   bindSpaced [(Type, typeAlias tdec)] $ do
     (tenv, tdec') <- checkTypeBind tdec
-    (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (abstypes,
             tenv <> env,
             TypeAbbrSpec tdec' : specs')
 
-checkSpecs (TypeSpec name ps loc : specs) =
+checkSpecs (TypeSpec name ps doc loc : specs) =
   checkTypeParams ps $ \ps' ->
   bindSpaced [(Type, name)] $ do
     name' <- checkName Type name loc
@@ -169,10 +166,10 @@ checkSpecs (TypeSpec name ps loc : specs) =
                , envTypeTable =
                    M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName abs_name) $ map paramToArg ps'
                }
-    (abstypes, env, specs') <- localEnv (tenv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     return (S.insert (qualName abs_name) abstypes,
             tenv <> env,
-            TypeSpec name' ps' loc : specs')
+            TypeSpec name' ps' doc loc : specs')
       where paramToArg (TypeParamDim v ploc) =
               TypeArgDim (NamedDim $ qualName v) ploc
             paramToArg (TypeParamType v ploc) =
@@ -185,7 +182,7 @@ checkSpecs (ModSpec name sig loc : specs) =
     let senv = mempty { envNameMap = M.singleton (Structure, name) name'
                       , envModTable = M.singleton name' $ mtyMod mty
                       }
-    (abstypes, env, specs') <- localEnv (senv<>) $ checkSpecs specs
+    (abstypes, env, specs') <- localEnv senv $ checkSpecs specs
     return (S.map (qualify name) (mtyAbs mty) <> abstypes,
             senv <> env,
             ModSpec name' sig' loc : specs')
@@ -193,7 +190,7 @@ checkSpecs (ModSpec name sig loc : specs) =
 checkSpecs (IncludeSpec e loc : specs) = do
   (e_abs, e_env, e') <- checkSigExpToEnv e
 
-  (abstypes, env, specs') <- localEnv (e_env<>) $ checkSpecs specs
+  (abstypes, env, specs') <- localEnv e_env $ checkSpecs specs
   return (e_abs <> abstypes,
           e_env <> env,
           IncludeSpec e' loc : specs')
@@ -227,7 +224,7 @@ checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
                 Just pname')
       Nothing ->
         return (mempty, Nothing)
-  (e2_mod, e2') <- localEnv (env_for_e2<>) $ checkSigExp e2
+  (e2_mod, e2') <- localEnv env_for_e2 $ checkSigExp e2
   return (MTy mempty $ ModFun $ FunSig s_abs e1_mod e2_mod,
           SigArrow maybe_pname' e1' e2' loc)
 
@@ -239,7 +236,7 @@ checkSigExpToEnv e = do
     ModFun{}   -> bad $ UnappliedFunctor $ srclocOf e
 
 checkSigBind :: SigBindBase NoInfo Name -> TypeM (Env, SigBindBase Info VName)
-checkSigBind (SigBind name e loc) = do
+checkSigBind (SigBind name e doc loc) = do
   (env, e') <- checkSigExp e
   bindSpaced [(Signature, name)] $ do
     name' <- checkName Signature name loc
@@ -252,7 +249,7 @@ checkSigBind (SigBind name e loc) = do
                    , envNameMap = M.fromList [((Signature, name), name'),
                                                ((Structure, name), name')]
                    },
-            SigBind name' e' loc)
+            SigBind name' e' doc loc)
   where typeAbbrEnvFromSig (MTy _ (ModEnv env)) =
           let types = envTypeAbbrs env
               names = M.fromList $ map nameMapping $ M.toList types
@@ -314,7 +311,7 @@ withModParam (ModParam pname psig_e loc) m = do
   bindSpaced [(Structure, pname)] $ do
     pname' <- checkName Structure pname loc
     let in_body_env = mempty { envModTable = M.singleton pname' p_mod }
-    localEnv (in_body_env<>) $ m (ModParam pname' psig_e' loc) p_abs p_mod
+    localEnv in_body_env $ m (ModParam pname' psig_e' loc) p_abs p_mod
 
 withModParams :: [ModParamBase NoInfo Name]
               -> ([(ModParamBase Info VName, TySet, Mod)] -> TypeM a)
@@ -356,15 +353,15 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   return (body_mty'', p_subst, body_subst)
 
 checkModBind :: ModBindBase NoInfo Name -> TypeM (Env, ModBindBase Info VName)
-checkModBind (ModBind name [] maybe_fsig_e e loc) = do
+checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
   (maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
   bindSpaced [(Structure, name)] $ do
     name' <- checkName Structure name loc
     return (mempty { envModTable = M.singleton name' $ mtyMod mty
                    , envNameMap = M.singleton (Structure, name) name'
                    },
-            ModBind name' [] maybe_fsig_e' e' loc)
-checkModBind (ModBind name (p:ps) maybe_fsig_e body_e loc) = do
+            ModBind name' [] maybe_fsig_e' e' doc loc)
+checkModBind (ModBind name (p:ps) maybe_fsig_e body_e doc loc) = do
   (params', maybe_fsig_e', body_e', funsig) <-
     withModParam p $ \p' p_abs p_mod ->
     withModParams ps $ \params_stuff -> do
@@ -380,7 +377,7 @@ checkModBind (ModBind name (p:ps) maybe_fsig_e body_e loc) = do
                    , envNameMap =
                        M.singleton (Structure, name) name'
                    },
-            ModBind name' params' maybe_fsig_e' body_e' loc)
+            ModBind name' params' maybe_fsig_e' body_e' doc loc)
 
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
@@ -392,13 +389,13 @@ checkForDuplicateSpecs =
               bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
-        f (ValSpec name _ _ _ loc) =
+        f (ValSpec name _ _ _ _ loc) =
           check Term name loc
 
-        f (TypeAbbrSpec (TypeBind name _ _ loc)) =
+        f (TypeAbbrSpec (TypeBind name _ _ _ loc)) =
           check Type name loc
 
-        f (TypeSpec name _ loc) =
+        f (TypeSpec name _ _ loc) =
           check Type name loc
 
         f (ModSpec name _ loc) =
@@ -409,7 +406,7 @@ checkForDuplicateSpecs =
 
 checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
-checkTypeBind (TypeBind name ps td loc) =
+checkTypeBind (TypeBind name ps td doc loc) =
   checkTypeParams ps $ \ps' -> do
     td' <- bindingTypeParams ps' $ checkTypeDecl loc td
     bindSpaced [(Type, name)] $ do
@@ -419,10 +416,10 @@ checkTypeBind (TypeBind name ps td loc) =
                        envNameMap =
                          M.singleton (Type, name) name'
                      },
-              TypeBind name' ps' td' loc)
+              TypeBind name' ps' td' doc loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
-checkValBind (ValBind entry name maybe_t NoInfo e loc) = do
+checkValBind (ValBind entry name maybe_t NoInfo e doc loc) = do
   name' <- bindSpaced [(Term, name)] $ checkName Term name loc
   (maybe_t', e') <- case maybe_t of
     Just t  -> do
@@ -445,12 +442,12 @@ checkValBind (ValBind entry name maybe_t NoInfo e loc) = do
                  , envNameMap =
                      M.singleton (Term, name) name'
                  },
-          ValBind entry name' maybe_t' (Info e_t) e' loc)
+          ValBind entry name' maybe_t' (Info e_t) e' doc loc)
   where anythingUnique (Record fs) = any anythingUnique fs
         anythingUnique et          = unique et
 
 checkFunBind :: FunBindBase NoInfo Name -> TypeM (Env, FunBind)
-checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) = do
+checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body doc loc) = do
   (fname', tparams', params', maybe_retdecl', rettype, body') <-
     bindSpaced [(Term, fname)] $
     checkFunDef (fname, maybe_retdecl, tparams, params, body, loc)
@@ -464,7 +461,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body loc) 
                  , envNameMap =
                      M.singleton (Term, fname) fname'
                  },
-           FunBind entry fname' maybe_retdecl' (Info rettype) tparams' params' body' loc)
+           FunBind entry fname' maybe_retdecl' (Info rettype) tparams' params' body' doc loc)
 
   where isTypeParam TypeParamType{} = True
         isTypeParam _ = False
@@ -510,14 +507,14 @@ checkDec (FunDec fb) = do
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
 checkDecs (LocalDec d loc:ds) = do
   (d_abstypes, d_env, d') <- checkDec d
-  (ds_abstypes, ds_env, ds') <- localEnv (d_env<>) $ checkDecs ds
+  (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
   return (d_abstypes <> ds_abstypes,
           ds_env,
           LocalDec d' loc : ds')
 
 checkDecs (d:ds) = do
   (d_abstypes, d_env, d') <- checkDec d
-  (ds_abstypes, ds_env, ds') <- localEnv (d_env<>) $ checkDecs ds
+  (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
   return (d_abstypes <> ds_abstypes,
           ds_env <> d_env,
           d' : ds')

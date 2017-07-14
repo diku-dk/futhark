@@ -1,0 +1,30 @@
+body {
+    background: #fff4e2;
+    font-family: sans-serif;
+    padding: 0px;
+    margin: 0px;
+    margin-top: 1em;
+    margin-left: 1em;
+    margin-right: 1em;
+    overflow-y: scroll;
+    line-height: 1.4;
+}
+
+h1 {
+    font-size: 3em;
+    color: #5f021f;
+}
+
+h2 {
+    font-size: 2em;
+    color: #5f021f;
+}
+
+h3 {
+    font-size: 1em;
+    color: #5f021f;
+}
+
+.comment {
+    font-style: italic
+}

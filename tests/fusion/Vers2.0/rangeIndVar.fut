@@ -7,7 +7,7 @@
 -- }
 
 let main(arr: [#m]i32): i32 =
-  let k = loop (k = 0) for i < m-1 do
+  let k = loop k = 0 for i < m-1 do
             if i % 3 == 0
             then k + 1
             else k
