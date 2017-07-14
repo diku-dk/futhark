@@ -536,7 +536,12 @@ checkExp (Range start maybe_step end loc) = do
   let start_t = toStructural $ typeOf start'
   maybe_step' <- case maybe_step of
     Nothing -> return Nothing
-    Just step -> Just <$> (require [start_t] =<< checkExp step)
+    Just step -> do
+      case (start, step) of
+        ((Literal (SignedValue (Int32Value x)) _), (Literal (SignedValue (Int32Value y)) _)) -> do
+          when (x == y) $ warn loc "First and second element of range are identical, this will produce an empty array."
+        _ -> return ()
+      Just <$> (require [start_t] =<< checkExp step)
 
   end' <- case end of
     DownToExclusive e -> DownToExclusive <$> (require [start_t] =<< checkExp e)
