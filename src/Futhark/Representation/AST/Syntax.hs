@@ -164,7 +164,7 @@ data BasicOp lore
 
   | ArrayLit  [SubExp] Type
     -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
-    -- Second arg is the element type of of the rows of the array.
+    -- Second arg is the element type of the rows of the array.
     -- Scalar operations
 
   | UnOp UnOp SubExp
