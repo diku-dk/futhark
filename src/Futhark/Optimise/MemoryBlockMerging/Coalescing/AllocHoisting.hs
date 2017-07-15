@@ -18,6 +18,8 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
+import Futhark.Representation.Aliases
+import Futhark.Analysis.Alias (analyseStm)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
@@ -68,12 +70,13 @@ hoistAllocsBody scope_new bindingmap_old params body =
 
       -- We use the possibly non-empty scope to extend our BindingMap.
       bindingmap_fromscope = M.fromList $ map scopeBindingMap $ M.toList scope_new
-      bindingmap = bindingmap_old <> bindingmap_fromscope <> bodyBindingMap (bodyStms body)
+      bindingmap0 = bindingmap_old <> bindingmap_fromscope
+      bindingmap = bodyBindingMap bindingmap0 (bodyStms body)
 
       -- Create a new body where all hoistees have been moved as much upwards in
       -- the statement list as possible.
       (Body () bnds res, bindingmap') =
-        foldl (\(body0, bindingmap0) -> hoist bindingmap0 body0)
+        foldl (\(body0, lbindingmap) -> hoist lbindingmap body0)
         (body, bindingmap) hoistees
 
       -- Touch upon any subbodies.
@@ -92,19 +95,35 @@ scopeBindingMap :: (VName, NameInfo ExplicitMemory)
                 -> (VName, PrimBinding)
 scopeBindingMap (x, _) = (x, PrimBinding [] FromFParam)
 
-bodyBindingMap :: [Stm ExplicitMemory] -> BindingMap
-bodyBindingMap stms =
-  M.fromList $ concatMap createBindingStmt $ zip [0..] stms
+bodyBindingMap :: BindingMap -> [Stm ExplicitMemory] -> BindingMap
+bodyBindingMap bindingmap stms =
+  foldl createBindingStmt bindingmap $ zip [0..] stms
   -- We do not need to run this recursively on any sub-bodies, since this will
   -- be run for every call to hoistAllocsBody, which *does* run recursively on
   -- sub-bodies.
 
-  where createBindingStmt :: (Line, Stm ExplicitMemory)
-                          -> [(VName, PrimBinding)]
-        createBindingStmt (line, stmt@(Let (Pattern _ patelems) () _)) =
-          let frees = S.toList $ freeInStm stmt
-          in map (\(PatElem x _ _) ->
-                     (x, PrimBinding frees (FromLine line))) patelems
+  where createBindingStmt :: BindingMap -> (Line, Stm ExplicitMemory)
+                          -> BindingMap
+        createBindingStmt bmap (line, stmt@(Let (Pattern _ patelems) () _)) =
+          let -- Both free variables and consumed variables count as dependencies.
+              frees = S.toList $ S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
+              var_bindings = map (\(PatElem x _ _) ->
+                                    (x, PrimBinding frees (FromLine line))) patelems
+
+              -- Some variables exist only in a shape declaration and so will
+              -- have no PrimBinding.  If we hit the Nothing case, we assume
+              -- that's what happened.
+              shape_sizes = concatMap shapeSizes patelems
+              size_bindings = map (\size_var ->
+                                     (size_var, PrimBinding frees (FromLine line)))
+                              shape_sizes
+
+              bmap' = M.union bmap $ M.fromList (var_bindings ++ size_bindings)
+          in bmap'
+
+        shapeSizes (PatElem _ _ (ExpMem.ArrayMem _ shape _ _ _)) =
+          mapMaybe fromVar $ shapeDims shape
+        shapeSizes _ = []
 
 hoistRecursivelyStm :: BindingMap
                     -> Stm ExplicitMemory
@@ -205,7 +224,7 @@ hoist :: BindingMap
       -> VName
       -> (Body ExplicitMemory, BindingMap)
 hoist bindingmap_cur body hoistee =
-  let bindingmap = bindingmap_cur <> bodyBindingMap (bodyStms body)
+  let bindingmap = bodyBindingMap bindingmap_cur (bodyStms body)
 
       body' = runState (moveLetUpwards hoistee body) bindingmap
 

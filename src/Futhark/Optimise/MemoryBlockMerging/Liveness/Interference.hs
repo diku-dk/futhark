@@ -83,16 +83,21 @@ findInterferences mem_aliases first_uses last_uses fundef =
     -- Can the destination and source memory blocks share the same memory,
     -- i.e. is the reading and writing certain to be structured in a way that
     -- allows in-place use?
+    --
+    -- Currently disabled, as e.g. it is only true copy if its source has the
+    -- same index function as the destination (which is not the case for a
+    -- rearrange, for example).
     canShare :: Exp lore -> Bool
-    canShare e = case e of
-      BasicOp ExpMem.Copy{} -> True
-      BasicOp Concat{} -> True -- Watch out for this?
+    canShare e = False --case e of
+      -- BasicOp ExpMem.Copy{} -> True
+      -- BasicOp Concat{} -> True -- Watch out for this?
+
       -- More?  This should be enough to make the coalescing optimisation work,
       -- in any case.
       --
       -- There is no need to put expressions here that do not take arrays as
       -- input, such as iota.
-      _ -> False
+--      _ -> False
 
     -- For every declaration, see if any liveness intervals can be started or
     -- ended.

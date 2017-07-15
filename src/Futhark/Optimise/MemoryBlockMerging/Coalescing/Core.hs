@@ -7,7 +7,7 @@ module Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
 import qualified Data.Set as S
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -20,6 +20,7 @@ import Futhark.Tools
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 
+import Futhark.Optimise.MemoryBlockMerging.ActualVariables (findActualVariables)
 
 -- Some of these attributes could be split into separate Coalescing helper
 -- modules if it becomes confusing.  Their computations are fairly independent.
@@ -29,7 +30,6 @@ data Current = Current
   , curAllocatedBlocksBeforeCreation :: M.Map VName Names
 
     -- Safety condition 3 state.
---  , curMemUsesAfterCreation :: M.Map VName Names
   , curVarUsesAfterCreation :: M.Map VName Names
 
     -- Safety condition 5 state.
@@ -39,17 +39,6 @@ data Current = Current
     -- '- For index function variable-is-okay-to-use checking.
   , curDeclarationsSoFar :: Names
   , curVarsInUseBeforeMem :: M.Map VName Names
-
-    -- If and DoLoop statements have special requirements, as do some aliasing
-    -- expressions.  We don't want to (just) use the obvious statement variable;
-    -- sometimes updating the memory block of one variable actually means
-    -- updating the memory block of other variables!
-  , curActualVars :: M.Map VName Names
-    -- Sometimes it is convenient to treat existential memory blocks the same as
-    -- normal ones (e.g. putting them in curActualVars), but we still must keep
-    -- track of them so as to only change the index functions of variables using
-    -- them, not the memory block.
-  , curExistentials :: Names
 
     -- Coalescings state.  Also save offsets in the case that an optimistic
     -- coalescing later becomes part of a chain of coalescings, where it is
@@ -75,9 +64,6 @@ emptyCurrent = Current
   , curDeclarationsSoFar = S.empty
   , curVarsInUseBeforeMem = M.empty
 
-  , curActualVars = M.empty
-  , curExistentials = S.empty
-
   , curCoalescedIntos = M.empty
   , curMemsCoalesced = M.empty
   }
@@ -88,6 +74,19 @@ data Context = Context { ctxVarToMem :: VarMemMappings MemorySrc
                        , ctxVarAliases :: VarAliases
                        , ctxFirstUses :: FirstUses
                        , ctxLastUses :: LastUses
+
+    -- If and DoLoop statements have special requirements, as do some aliasing
+    -- expressions.  We don't want to (just) use the obvious statement variable;
+    -- sometimes updating the memory block of one variable actually means
+    -- updating the memory block of other variables!
+                       , ctxActualVars :: M.Map VName Names
+
+
+    -- Sometimes it is convenient to treat existential memory blocks the same as
+    -- normal ones (e.g. putting them in curActualVars), but we still must keep
+    -- track of them so as to only change the index functions of variables using
+    -- them, not the memory block.
+                       , ctxExistentials :: Names
                        }
   deriving (Show)
 
@@ -106,7 +105,8 @@ coreCoalesceFunDef :: FunDef ExplicitMemory -> VarMemMappings MemorySrc
                    -> MemAliases -> VarAliases -> FirstUses -> LastUses
                    -> FunDef ExplicitMemory
 coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses last_uses =
-  let context = Context var_to_mem mem_aliases var_aliases first_uses last_uses
+  let (actual_vars, existentials) = findActualVariables first_uses var_to_mem fundef
+      context = Context var_to_mem mem_aliases var_aliases first_uses last_uses actual_vars existentials
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef
@@ -256,121 +256,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
   forM_ new_decls $ \x ->
     modify $ \c -> c { curDeclarationsSoFar = S.insert x $ curDeclarationsSoFar c }
 
-  forM_ patvalelems $ \(PatElem var bindage _) ->
-    case bindage of
-      BindInPlace _ orig _ -> do
-        -- Record that when coalescing an in-place update statement, also look
-        -- at the original array.
-        let actuals = [var, orig]
-        modify $ \c -> c { curActualVars = M.insert var (S.fromList actuals)
-                                           $ curActualVars c }
-      _ -> return ()
 
 
-  -- Special handling of loops, ifs, etc.
-  case e of
-    DoLoop _mergectxparams mergevalparams _loopform body ->
-      forM_ patvalelems $ \(PatElem var _ membound) ->
-        case membound of
-          ExpMem.ArrayMem _ _ _ mem _ -> do
-            -- If mem is existential, we need to find the return memory that it
-            -- refers to.  We cannot just look at its memory aliases, since it
-            -- likely aliases both the initial memory and the final memory.
-            let zipped = zip patctxelems (bodyResult body)
-            (var_actual, mem_search) <- case L.find ((== mem) . patElemName . fst) zipped of
-              Just (_, Var res_mem) ->
-                return (Nothing, res_mem)
-              _ -> return (Just var, mem)
-            let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
-                body_vars1 = map (paramName . fst) mergevalparams
-                varFromStm stm = map patElemName (patternValueElements $ stmPattern stm)
-                                 ++ foldExp folder [] (stmExp stm)
-                folder = identityFolder { foldOnBody = \vs fbody -> return (vs ++ concatMap varFromStm (bodyStms fbody)) }
-                body_vars2 = foldExp folder [] e -- Get all statements in the
-                                                 -- body *and* any sub-bodies,
-                                                 -- etc.
-                body_vars = body_vars0 ++ body_vars1 ++ body_vars2
-            -- Find the ones using the same memory as the result of the loop
-            -- expression.
-            body_vars' <- filterM (\v -> do
-                                      m <- lookupVarMem v
-                                      return $ Just mem_search == (memSrcName <$> m)
-                                  ) body_vars
-            -- Not only the result variable needs to change its memory block in case
-            -- of a future coalescing with it; also the variables extracted above.
-            -- FIXME: This is probably an okay way to do it?  What if the memory is
-            -- used, but with a different index function?  Can that happen?
-            let actuals = maybeToList var_actual ++ body_vars'
-            modify $ \c -> c { curActualVars = M.insert var (S.fromList actuals)
-                               $ curActualVars c }
 
-            let debug = do
-                  putStrLn $ replicate 70 '~'
-                  putStrLn "coreCoalesceFunDef lookInStm DoLoop special handling:"
-                  putStrLn ("checking memory: " ++ pretty mem_search)
-                  putStrLn ("body vars: " ++ prettySet (S.fromList body_vars))
-                  putStrLn ("proper body vars: " ++ prettySet (S.fromList body_vars'))
-                  putStrLn $ replicate 70 '~'
-            withDebug debug $ return ()
-
-            -- If you extend this loop handling, make sure not to target existential
-            -- memory blocks.  We want those to stay.
-          _ -> return ()
-
-    If _se body_then body_else _types ->
-      -- We don't want to coalesce the existiential memory block of the if.
-      -- However, if a branch result has a memory block that is firstly used
-      -- inside the branch, it is okay to coalesce that in a future statement.
-      forM_ (zip3 patvalelems (bodyResult body_then) (bodyResult body_else))
-        $ \(PatElem var _ membound, res_then, res_else) ->
-        case membound of
-          (ExpMem.ArrayMem _ _ _ mem _) -> do
-            var_to_mem <- asks ctxVarToMem
-            first_uses_all <- asks ctxFirstUses
-            let ifBlocks body se = do
-                  res <- fromVar se
-                  res_mem <- memSrcName <$> M.lookup res var_to_mem
-                  let body_vars = concatMap (map patElemName . patternValueElements . stmPattern)
-                                  $ bodyStms body
-                      body_first_uses = S.unions $ map (`lookupEmptyable` first_uses_all) body_vars
-                  Just $ return (S.member res_mem body_first_uses, res)
-
-            case (ifBlocks body_then res_then,
-                  ifBlocks body_else res_else) of
-              (Just th, Just el) -> do -- prettify this stuff
-                (alloc_inside_then, var_then) <- th
-                (alloc_inside_else, var_else) <- el
-                when (alloc_inside_then || alloc_inside_else) $ do
-                  let actuals = [var, var_then, var_else]
-                  modify $ \c -> c { curActualVars = M.insert var (S.fromList actuals)
-                                     $ curActualVars c }
-                  when (L.elem mem $ map patElemName patctxelems) $
-                    modify $ \c -> c { curExistentials = S.insert var
-                                       $ curExistentials c }
-              _ -> return ()
-
-            let debug = do
-                  putStrLn $ replicate 70 '~'
-                  putStrLn "coreCoalesceFunDef lookInStm If special handling:"
-                  putStrLn $ replicate 70 '~'
-            withDebug debug $ return ()
-          _ -> return ()
-
-    BasicOp (Reshape _ _ src0) -> do
-      let var = patElemName $ head patvalelems -- probably ok
-      -- Also refer to the array that it's reshaping.
-
-      -- This might be redundant as it is also done later on.
-      src0_actuals <- lookupEmptyable src0 <$> gets curActualVars
-      let actuals = S.union (S.fromList [var, src0]) src0_actuals
-
-      modify $ \c -> c { curActualVars = M.insert var actuals
-                                         $ curActualVars c }
-
-
-    -- For expressions other than DoLoop and If and some aliasing, don't do
-    -- anything special.
-    _ -> return ()
 
   -- RECURSIVE BODY WALK.
   let walker = identityWalker { walkOnBody = lookInBody
@@ -403,7 +291,7 @@ getActualVars src0 = do
   where getActualVars' visited src
           | S.member src visited = return []
           | otherwise = do
-              actual_vars <- gets curActualVars
+              actual_vars <- asks ctxActualVars
               case M.lookup src actual_vars of
                 Nothing -> return [src]
                 Just a_srcs -> do
@@ -481,7 +369,7 @@ tryCoalesce dst ixfunFix bindage src offset = do
     -- We then need to record that, from what we currently know, src and any
     -- nested src0s can all use the memory of dst with the new index functions.
     forM_ (L.zip4 srcs offsets ixfunFixs ixfuns2) $ \(src_local, offset_local, ixfunFix_local, ixfun_local) -> do
-      describes_exi <- S.member src_local <$> gets curExistentials
+      describes_exi <- S.member src_local <$> asks ctxExistentials
       dst_memloc <-
         if describes_exi
         then do
@@ -661,7 +549,7 @@ safetyCond4 :: VName -> FindM Bool
 safetyCond4 src = do
   -- Aliases are not allowed unless the statement has been handled specially in
   -- lookInStm.  This is the case with reshape.  Still, this might be too broad.
-  actual_vars <- gets curActualVars
+  actual_vars <- asks ctxActualVars
   case M.lookup src actual_vars of
     Just _ -> return True
     Nothing -> do
