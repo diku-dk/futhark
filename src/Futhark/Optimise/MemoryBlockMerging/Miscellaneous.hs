@@ -54,7 +54,7 @@ makeCommutativeMap m =
 
 cleanupMapping :: Ord v => M.Map v (S.Set v) -> M.Map v (S.Set v)
 cleanupMapping = M.filter (not . S.null)
-                 . M.mapWithKey S.delete
+--                 . M.mapWithKey S.delete
 
 prettySet :: Pretty a => S.Set a -> String
 prettySet = L.intercalate ", " . map pretty . S.toList
