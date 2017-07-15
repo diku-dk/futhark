@@ -3,25 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
--- | This module has been deprecated in favour of MemoryBlockMerging.  It does
--- not work on the current representation.  Obituary:
---
--- The optimisation is never applied.  The module looks for patterns of the
--- structure
---
---   [PatElem v (BindInPlace cs src [DimFix i]) attr]
---
--- which it expects is the internal representation of statements
---
---   let x[i] = r in
---
--- but in the current internal language, that pattern does not have the slice
--- '[DimFix i]', but instead something like '[DimFix i, DimSlice ...]', which
--- the pass does not recognize.
---
--- Original documentation:
---
--- This module implements an optimisation that moves in-place
+-- | This module implements an optimisation that moves in-place
 -- updates into/before loops where possible, with the end goal of
 -- minimising memory copies.  As an example, consider this program:
 --
@@ -93,7 +75,7 @@ import Futhark.Optimise.InPlaceLowering.LowerIntoStm
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Pass
-import Futhark.Tools (intraproceduralTransformation)
+import Futhark.Tools (intraproceduralTransformation, fullSlice)
 
 import Prelude hiding (any, mapM_, elem, all)
 
@@ -144,10 +126,11 @@ optimiseStms (bnd:bnds) m = do
         Nothing       -> checkIfForwardableUpdate bnd' $
                          updateStms ++ bnds'
 
-  where boundHere = patternNames $ bindingPattern bnd
+  where boundHere = patternNames $ stmPattern bnd
 
         checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
-            | [PatElem v (BindInPlace cs src [DimFix i]) attr] <- patternElements pat,
+            | [PatElem v (BindInPlace cs src (DimFix i:slice)) attr] <- patternElements pat,
+              slice == drop 1 (fullSlice (typeOf attr) [DimFix i]),
               BasicOp (SubExp (Var ve)) <- e = do
                 forwarded <- maybeForward ve v attr cs src i
                 return $ if forwarded
@@ -164,12 +147,10 @@ optimiseInStm (Let pat attr e) = do
 
 optimiseExp :: Exp (Aliases Kernels) -> ForwardingM (Exp (Aliases Kernels))
 optimiseExp (DoLoop ctx val form body) =
-  bindingIndices (boundInForm form) $
+  bindingScope False (scopeOf form) $
   bindingFParams (map fst $ ctx ++ val) $ do
     body' <- optimiseBody body
     return $ DoLoop ctx val form body'
-  where boundInForm (ForLoop i it _) = [(i,it)]
-        boundInForm (WhileLoop _) = []
 -- TODO: handle Kernel here.
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = const optimiseBody
@@ -204,7 +185,7 @@ updateStm fwd =
              BindInPlace
              (updateCertificates fwd)
              (updateSource fwd)
-             (updateIndices fwd))] $
+             (fullSlice (typeOf $ updateType fwd) $ updateIndices fwd))] $
   BasicOp $ SubExp $ Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)
@@ -244,6 +225,18 @@ bindingFParams :: [FParam (Aliases Kernels)]
                -> ForwardingM a
 bindingFParams = bindingParams FParamInfo
 
+bindingScope :: Bool
+             -> Scope (Aliases Kernels)
+             -> ForwardingM a
+             -> ForwardingM a
+bindingScope optimisable scope = local $ \(TopDown n vtable d) ->
+  let entries = M.map entry scope
+      infoAliases :: NameInfo (Aliases Kernels) -> Names
+      infoAliases (LetInfo (aliases, _)) = unNames aliases
+      infoAliases _ = mempty
+      entry info = Entry n (infoAliases info) d optimisable info
+  in TopDown (n+1) (entries<>vtable) d
+
 bindingStm :: Stm (Aliases Kernels)
            -> ForwardingM a
            -> ForwardingM a
@@ -253,16 +246,6 @@ bindingStm (Let pat _ _) = local $ \(TopDown n vtable d) ->
         let (aliases, _) = patElemAttr patElem
         in (patElemName patElem,
             Entry n (unNames aliases) d True $ LetInfo $ patElemAttr patElem)
-  in TopDown (n+1) (M.union entries vtable) d
-
-bindingIndices :: [(VName,IntType)]
-               -> ForwardingM a
-               -> ForwardingM a
-bindingIndices is = local $ \(TopDown n vtable d) ->
-  let entries = M.fromList $ map entry is
-      entry (v,it) =
-        (v,
-         Entry n mempty d False $ IndexInfo it)
   in TopDown (n+1) (M.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int

@@ -34,8 +34,7 @@ let main(n: i32,
                     md_drifts: [][]f64,
                     md_starts: []f64,
                     noises_mat: [][][]f64): [][][]f64 =
-  loop (noises_mat) = for i < n do
+  loop (noises_mat) for i < n do
     map  (\(noises: [][]f64): [][]f64  ->
            mkPrices(md_starts, md_vols, md_drifts, noises)) (
-         noises_mat) in
-  noises_mat
+         noises_mat)

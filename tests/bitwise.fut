@@ -31,6 +31,5 @@ let frob(a: i32, b: i32, c: i32, d: i32): (i32, i32, i32, i32) =
   (d, a', b, c)
 
 let main(a: i32, b: i32, c: i32, d: i32, n: i32): (i32, i32, i32, i32) =
-  loop ((a',b',c',d') = (a,b,c,d)) = for i < n do
+  loop (a',b',c',d') = (a,b,c,d) for i < n do
     frob(a',b',c',d')
-  in (a', b', c', d')

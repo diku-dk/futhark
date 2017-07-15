@@ -143,6 +143,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
   pprPrec _ (Var name _ _) = ppr name
   pprPrec _ (Parens e _) = align $ parens $ ppr e
+  pprPrec _ (QualParens v e _) = ppr v <> text "." <> align (parens $ ppr e)
   pprPrec _ (Ascript e t _) = pprPrec 0 e <> pprPrec 0 t
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (TupLit es _)
@@ -157,6 +158,14 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
+  pprPrec _ (Range start maybe_step end _) =
+    brackets $
+    ppr start <>
+    maybe mempty ((text ".." <>) . ppr) maybe_step <>
+    case end of
+      DownToExclusive end' -> text "..>" <> ppr end'
+      UpToInclusive   end' -> text "..." <> ppr end'
+      UpToExclusive   end' -> text "..<" <> ppr end'
   pprPrec p (BinOp bop (x,_) (y,_) _ _) = prettyBinOp p bop x y
   pprPrec _ (Project k e _ _) = text "#" <> ppr k <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
@@ -228,9 +237,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
                                     Noncommutative -> ""
         in  text ("stream_red"++ord_str++comm_str) <>
             ppr lam0 </> ppr lam </> pprPrec 10 arr
-      Sequential acc ->
-            text "stream_seq" <+>
-            ppr lam </> spread [pprPrec 10 acc, pprPrec 10 arr]
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
@@ -242,29 +248,24 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "split@" <> ppr i <+> pprPrec 10 e <+> pprPrec 10 a
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
-  pprPrec _ (DoLoop tparams pat initexp form loopbody letbody _) =
+  pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
     text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals
                             <+> ppr initexp) <+> equals <+>
     ppr form <+>
     text "do" </>
-    indent 2 (ppr loopbody) <+> text "in" </>
-    ppr letbody
+    indent 2 (ppr loopbody)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
   ppr (RecordField name e _) = ppr name <> equals <> ppr e
   ppr (RecordRecord e) = ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LoopFormBase ty vn) where
-  ppr (For FromUpTo lbound i ubound) =
-    text "for" <+> align (ppr lbound) <+> ppr i <+> text "<" <+> align (ppr ubound)
-  ppr (For FromDownTo lbound i ubound) =
-    text "for" <+> align (ppr ubound) <+> ppr i <+> text ">" <+> align (ppr lbound)
+  ppr (For i ubound) =
+    text "for" <+> ppr i <+> text "<" <+> align (ppr ubound)
+  ppr (ForIn x e) =
+    text "for" <+> ppr x <+> text "in" <+> ppr e
   ppr (While cond) =
     text "while" <+> ppr cond
-
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LowerBoundBase ty vn) where
-  ppr ZeroBound    = text "0"
-  ppr (ExpBound e) = ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
@@ -320,7 +321,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
                                          Just (sig, _) -> colon <+> ppr sig
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
-  ppr (TypeBind name params usertype _) =
+  ppr (TypeBind name params usertype _ _) =
     text "type" <+> ppr name <+> spread (map ppr params) <+> equals <+> ppr usertype
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
@@ -328,7 +329,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamType name _) = text "'" <> ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
-  ppr (FunBind entry name retdecl _ tparams args body _) =
+  ppr (FunBind entry name retdecl _ tparams args body _ _) =
     text fun <+> ppr name <+>
     spread (map ppr tparams ++ map ppr args) <> retdecl' <+> equals </>
     indent 2 (ppr body)
@@ -339,7 +340,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
                        Nothing      -> mempty
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
-  ppr (ValBind entry name maybe_t _ e _) =
+  ppr (ValBind entry name maybe_t _ e _ _) =
     text s <+> ppr name <> t' <+> text "=" <+> ppr e
     where t' = case maybe_t of Just t  -> text ":" <+> ppr t
                                Nothing -> mempty
@@ -352,8 +353,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
-  ppr (TypeSpec name ps _) = text "type" <+> ppr name <+> spread (map ppr ps)
-  ppr (ValSpec name tparams params rettype _) =
+  ppr (TypeSpec name ps _ _) = text "type" <+> ppr name <+> spread (map ppr ps)
+  ppr (ValSpec name tparams params rettype _ _) =
     text "val" <+> ppr name <+> spread (map ppr tparams) <> colon <+>
     mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
   ppr (ModSpec name sig _) =
@@ -373,7 +374,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigExpBase ty vn) where
     ppr e1 <+> text "->" <+> ppr e2
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
-  ppr (SigBind name e _) =
+  ppr (SigBind name e _ _) =
     text "module type" <+> ppr name <+> equals <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModParamBase ty vn) where
@@ -381,7 +382,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModParamBase ty vn) where
     parens (ppr pname <> colon <+> ppr psig)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModBindBase ty vn) where
-  ppr (ModBind name ps sig e _) =
+  ppr (ModBind name ps sig e _ _) =
     text "module" <+> ppr name <+> spread (map ppr ps) <+> sig' <+> equals <+> ppr e
     where sig' = case sig of Nothing    -> mempty
                              Just (s,_) -> colon <+> ppr s <> text " "

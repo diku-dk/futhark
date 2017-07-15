@@ -157,7 +157,7 @@ mkPatternRanges pat e =
 mkBodyRanges :: [Stm lore] -> Result -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
   where boundInBnds =
-          mconcat $ map (S.fromList . patternNames . bindingPattern) bnds
+          mconcat $ map (S.fromList . patternNames . stmPattern) bnds
         removeUnknownBounds (lower,upper) =
           (removeUnknownBound lower,
            removeUnknownBound upper)

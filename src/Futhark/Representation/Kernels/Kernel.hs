@@ -43,6 +43,7 @@ import Prelude hiding (mapM_)
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.UsageTable as UT
+import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
   ((</>), (<+>), ppr, commasep, Pretty, parens, text)
@@ -465,6 +466,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
           removeKernelBodyWisdom (KernelBody attr stms res) =
             let Body attr' stms' _ = removeBodyWisdom $ Body attr stms []
             in KernelBody attr' stms' res
+
+instance ST.IndexOp (Kernel lore) where
 
 instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ _ kbody) =

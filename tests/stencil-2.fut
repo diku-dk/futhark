@@ -36,7 +36,7 @@
 -- }
 
 let main(num_iterations: i32, a: [#n][#m]f64): [][]f64 =
-  loop (a) = for i < num_iterations do
+  loop (a) for i < num_iterations do
     map (\(i: i32): []f64  ->
           map (\(j: i32): f64  ->
                 let center = unsafe a[i,j]
@@ -51,5 +51,4 @@ let main(num_iterations: i32, a: [#n][#m]f64): [][]f64 =
                 factor*south +
                 factor*west
              ) (iota(m))
-       ) (iota(n)) in
-  a
+       ) (iota(n))

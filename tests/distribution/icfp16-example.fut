@@ -32,7 +32,7 @@ let main(pss: [#n][#m]i32): ([n][m][m]i32, [n][m]i32) =
                                 let f = reduce (+) 0 cs
                                 let as = map (+f) ps
                                 in as) ps
-                loop (bs=ps) = for i < n do
+                let bs' = loop bs=ps for i < n do
                   let bs' = map (\(as: []i32, b: i32): i32  ->
                                   let d = reduce (+) 0 as
                                   let e = d + b
@@ -40,5 +40,5 @@ let main(pss: [#n][#m]i32): ([n][m][m]i32, [n][m]i32) =
                                   in b') (
                                 zip ass bs)
                   in bs'
-                in (ass, bs)) pss)
+                in (ass, bs')) pss)
   in (asss, bss)

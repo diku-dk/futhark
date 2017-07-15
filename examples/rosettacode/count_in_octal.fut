@@ -9,7 +9,7 @@
 --           12i32, 13i32, 14i32, 15i32, 16i32, 17i32, 20i32, 21i32, 22i32, 23i32] }
 
 let octal(x: i32): i32 =
-  loop ((out,mult,x) = (0,1,x)) = while x > 0 do
+  let (out,_,_) = loop (out,mult,x) = (0,1,x) while x > 0 do
     let digit = x % 8
     let out = out + digit * mult
     in (out, mult * 10, x / 8)

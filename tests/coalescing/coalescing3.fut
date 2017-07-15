@@ -8,7 +8,6 @@
 
 let main(rss: *[#n][#m]i32): [][]i32 =
   map (\(rs: *[]i32)  ->
-        loop (rs) = for i < m do
+        loop (rs) for i < m do
           let rs[i] = rs[i] + 1
-          in rs
-        in rs) rss
+          in rs) rss

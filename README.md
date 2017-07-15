@@ -5,15 +5,15 @@ Futhark is a purely functional data-parallel programming language.
 Its optimising compiler is able to compile it to typically very
 performant GPU code.  The language and compiler is developed as part
 of the [HIPERFIT](http://hiperfit.dk) project at
-[DIKU](http://diku.dk).  The project is still research-quality, and
+[DIKU](http://diku.dk).  The project is still in its early phases, and
 the focus has mostly been on ensuring high runtime-performance, so the
-source language still lacks many niceties for manual programming - it
-is fairly usable as a target for high-level code generation, however.
+language still lacks certain niceties and features.
 
 For more information, see [the website](http://futhark-lang.org).
 
-The [incomplete documentation is
-here](http://futhark.readthedocs.io).
+Also see the [compiler and language
+documentation](http://futhark.readthedocs.io) and the [basis library
+documentation](https://futhark-lang.org/docs).
 
 [Installation instructions here.](http://futhark.readthedocs.io/en/latest/installation.html)
 

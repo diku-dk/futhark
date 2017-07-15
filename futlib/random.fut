@@ -77,9 +77,10 @@ module linear_congruential_engine (T: integral) (P: {
     in (rng',rng')
 
   let rng_from_seed [n] (seed: [n]i32) =
-    loop (seed' = T.from_i32 1) = for i < n do
-      ((seed' T.>>> T.from_i32 16) T.^ seed') T.^
-      T.from_i32 (seed[i] ^ 0b1010101010101)
+    let seed' =
+      loop seed' = T.from_i32 1 for i < n do
+        ((seed' T.>>> T.from_i32 16) T.^ seed') T.^
+        T.from_i32 (seed[i] ^ 0b1010101010101)
     in #1 (rand seed')
 
   let split_rng (n: i32) (x: rng): [n]rng =
@@ -97,18 +98,22 @@ module xorshift128plus: rng_engine with int.t = u64 = {
   module int = u64
   type rng = (u64,u64)
 
+  -- We currently have a problem where everything that is produced
+  -- must be convertible (losslessly) to a i64.  Therefore, we mask
+  -- off the highest bit to avoid negative numbers.
+  let mask (x: u64) = x & (~(1u64<<63u64))
+
   let rand ((x,y): rng): (rng, u64) =
     let x = x ^ (x << 23u64)
     let new_x = y
     let new_y = x ^ y ^ (x >> 17u64) ^ (y >> 26u64)
-    in ((new_x,new_y), new_y + y)
+    in ((new_x,new_y), mask (new_y + y))
 
   let rng_from_seed [n] (seed: [n]i32) =
-    loop ((a,b) = (1u64,u64.from_i32 n)) = for i < n do
+    loop (a,b) = (1u64,u64.from_i32 n) for i < n do
       if n % 2 == 0
       then #1 (rand (a^u64.from_i32 (hash seed[i]),b))
       else #1 (rand (a, b^u64.from_i32 (hash seed[i])))
-    in (a,b)
 
   let split_rng (n: i32) ((x,y): rng): [n]rng =
     map (\i -> let (a,b) = #1 (rand (rng_from_seed [hash (i^n)]))
@@ -118,7 +123,7 @@ module xorshift128plus: rng_engine with int.t = u64 = {
     reduce (\(x1,y1) (x2,y2) -> (x1^x2,y1^y2)) (0u64,0u64) xs
 
   let min = 0u64
-  let max = 0xFF_FF_FF_FF_FF_FF_FF_FFu64
+  let max = mask 0xFF_FF_FF_FF_FF_FF_FF_FFu64
 }
 
 -- | A 'linear_congruential_engine' producing 'u32' values and
@@ -157,10 +162,9 @@ module shuffle_order_engine
 
   let build_table (rng: E.rng) =
     let xs = replicate K.k (I.from_i32 0)
-    loop ((rng,xs)) = for i < K.k do
-      (let (rng,x) = E.rand rng
-       in (rng, xs with [i] <- x))
-    in (rng, xs)
+    in loop (rng,xs) for i < K.k do
+         let (rng,x) = E.rand rng
+         in (rng, xs with [i] <- x)
 
   let rng_from_seed (xs: []i32) =
     let rng = E.rng_from_seed xs
@@ -208,8 +212,8 @@ module uniform_int_distribution
     in if range E.int.<= E.int.from_i32 0
        then (rng, to_D E.min) -- Avoid infinite loop below.
        else let secure_max = E.max E.int.- E.max E.int.%% range
-            loop ((rng, x) = E.rand rng) =
-              while x E.int.>= secure_max do E.rand rng
+            let (rng,x) = loop (rng, x) = E.rand rng
+                          while x E.int.>= secure_max do E.rand rng
             in (rng, to_D (min E.int.+ x E.int./ (secure_max E.int./ range)))
 }
 
@@ -227,10 +231,10 @@ module uniform_real_distribution (R: real) (E: rng_engine):
 
   let uniform (min: t) (max: t) = (min,max)
 
-  let rand ((min,max): distribution) (rng: E.rng) =
+  let rand ((min_r,max_r): distribution) (rng: E.rng) =
     let (rng', x) = E.rand rng
     let x' = to_D x R./ to_D E.max
-    in (rng', min R.+ x' R.* (max R.- min))
+    in (rng', R.(min_r + x' * (max_r - min_r)))
 }
 
 module normal_distribution (R: real) (E: rng_engine):

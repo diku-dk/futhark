@@ -6,7 +6,6 @@ module Language.Futhark.TypeChecker.Monad
   , TypeM
   , runTypeM
   , askEnv
-  , askImportTable
   , checkQualNameWithEnv
   , bindSpaced
 
@@ -55,9 +54,10 @@ import Data.Maybe
 import Data.Either
 import Data.Ord
 import Data.Hashable
-
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+
+import qualified System.FilePath.Posix as Posix
 
 import Prelude hiding (mapM)
 
@@ -263,30 +263,32 @@ singleWarning loc problem = Warnings [(loc, problem)]
 
 type ImportTable = M.Map FilePath Env
 
+data Context = Context { contextEnv :: Env
+                       , contextImportTable :: ImportTable
+                       , contextFilePath :: FilePath
+                       }
+
 -- | The type checker runs in this monad.
 newtype TypeM a = TypeM (RWST
-                         (Env, ImportTable) -- Reader
+                         Context -- Reader
                          Warnings           -- Writer
                          VNameSource        -- State
                          (Except TypeError) -- Inner monad
                          a)
   deriving (Monad, Functor, Applicative,
-            MonadReader (Env, ImportTable),
+            MonadReader Context,
             MonadWriter Warnings,
             MonadState VNameSource,
             MonadError TypeError)
 
-runTypeM :: Env -> ImportTable -> VNameSource -> TypeM a
+runTypeM :: Env -> ImportTable -> FilePath -> VNameSource -> TypeM a
          -> Either TypeError (a, Warnings, VNameSource)
-runTypeM env imports src (TypeM m) = do
-  (x, src', ws) <- runExcept $ runRWST m (env, imports) src
+runTypeM env imports fpath src (TypeM m) = do
+  (x, src', ws) <- runExcept $ runRWST m (Context env imports fpath) src
   return (x, ws, src')
 
-askImportTable :: TypeM ImportTable
-askImportTable = asks snd
-
 askEnv :: TypeM Env
-askEnv = asks fst
+askEnv = asks contextEnv
 
 class MonadError TypeError m => MonadTypeChecker m where
   bad :: TypeError -> m a
@@ -296,6 +298,7 @@ class MonadError TypeError m => MonadTypeChecker m where
   newID :: Name -> m VName
 
   bindNameMap :: NameMap -> m a -> m a
+  localEnv :: Env -> m a -> m a
 
   checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
 
@@ -334,9 +337,12 @@ instance MonadTypeChecker TypeM where
 
   newID s = newName $ VName s 0
 
-  bindNameMap m = local $ \(env, imports) ->
-    (env { envNameMap = m <> envNameMap env },
-     imports)
+  bindNameMap m = local $ \ctx ->
+    let env = contextEnv ctx
+    in ctx { contextEnv = env { envNameMap = m <> envNameMap env } }
+
+  localEnv env = local $ \ctx ->
+    ctx { contextEnv = env <> contextEnv ctx }
 
   checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 
@@ -358,10 +364,15 @@ instance MonadTypeChecker TypeM where
     where explode = bad $ UnknownVariableError Signature qn loc
 
   lookupImport loc file = do
-    imports <- askImportTable
-    case M.lookup file imports of
-      Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\""
+    imports <- asks contextImportTable
+    my_path <- asks contextFilePath
+    case M.lookup (my_path Posix.</> file) imports of
+      Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\"" ++ extra
       Just scope -> return scope
+      where extra | ".." `elem` Posix.splitDirectories file =
+                      "\nNote: '..' is not supported in file imports."
+                  | otherwise =
+                      ""
 
   lookupVar loc qn = do
     (env, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc

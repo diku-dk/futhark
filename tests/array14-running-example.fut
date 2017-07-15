@@ -5,7 +5,7 @@
 let main(xs: *[]i32, as: *[#m][#n]f64): [][]f64 =
   map  (\(e: (i32, *[]f64)): *[]f64  ->
          let (i, a) = e in
-         loop(a) = for j < n do
+         let a = loop(a) for j < n do
            let a[j] = a[ xs[j] ] * 2.0 in a
          in
          map  (\(j: i32): f64  ->

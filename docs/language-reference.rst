@@ -20,10 +20,11 @@ Identifiers and Keywords
    id: `letter` (`letter` | "_" | "'")* | "_" `id`
    quals: (`id` ".")+
    qualid: `id` | `quals` `id`
-   binop: `symbol`+
+   binop: `opstartchar` `opchar`*
    qualbinop: `binop` | `quals` `binop`
    fieldid: `decimal` | `id`
-   symbol: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^" | "."
+   opstartchar = "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
+   opchar: `opstartchar` | "."
 
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
@@ -63,7 +64,7 @@ with ``0b``.
 
 .. productionlist::
    floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
-   pointfloat: [`intpart`] `fraction` | `intpart` "."
+   pointfloat: [`intpart`] `fraction`
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
    intpart: `decdigit` (`decdigit` |"_")*
    fraction: "." `decdigit` (`decdigit` |"_")*
@@ -164,8 +165,10 @@ literals and variables, but also more complicated forms.
        : | "{" field ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
-       : | "[" `exp` ("," `exp`)* "]"
        : | "#" `fieldid` `exp`
+       : | `quals`."(" `exp` ")"
+       : | "[" `exp` ("," `exp`)* "]"
+       : | "[" `exp` [".." `exp`] "..." `exp` "]"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -174,7 +177,7 @@ literals and variables, but also more complicated forms.
       : | "let" `type_param`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
-      : | "loop" "(" `type_param`* `pat` [("=" `exp`)] ")" "=" `loopform` "do" `exp` in `exp`
+      : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
@@ -206,11 +209,9 @@ literals and variables, but also more complicated forms.
       : | "{" "}"
       : | "{" `fieldid` "=" `pat` ["," `fieldid` "=" `pat`] "}"
       : | `pat` ":" `type`
-   loopform: "for" `id` "<" `exp`
-           : | "for" `atom` "<=" `id` "<" `exp`
-           : | "for" `atom` ">" `id` ">=" `exp`
-           : | "for" `atom` ">" `id`
-           : | "while" `exp`
+   loopform :   "for" `id` "<" `exp`
+            : | "for" `pat` "in" `exp`
+            : | "while" `exp`
 
 Some of the built-in expression forms have parallel semantics, but it
 is not guaranteed that the the parallel constructs in Futhark are
@@ -364,11 +365,46 @@ empty arrays must be constructed with the ``empty`` construct.  This
 restriction is due to limited type inference in the Futhark compiler,
 and will hopefully be fixed in the future.
 
+``[x..y...z]``
+..............
+
+Construct an integer array whose first element is ``x`` and which
+proceeds stride of ``y-x`` until reaching ``z`` (inclusive).  The
+``..y`` part can be elided in which case a stride of 1 is used.  The
+stride may not be zero.  An empty array is returned in cases where
+``z`` would never be reached or `x` and `y` are the same value.
+
+``[x..y..<z]``
+...............
+
+Construct an integer array whose first elements is ``x``, and which
+proceeds upwards with a stride of ``y`` until reaching ``z``
+(exclusive).  The ``..y`` part can be elided in which case a stride of
+1 is used.  An empty array is returned in cases where ``z`` would
+never be reached or `x` and `y` are the same value.
+
+``[x..y..>z]``
+...............
+
+Construct an integer array whose first elements is ``x``, and which
+proceeds downwards with a stride of ``y`` until reaching ``z``
+(exclusive).  The ``..y`` part can be elided in which case a stride of
+-1 is used.  An empty array is returned in cases where ``z`` would
+never be reached or `x` and `y` are the same value.
+
 ``#f e``
 ........
 
 Access field ``f`` of the expression ``e``, which must be a record or
 tuple.
+
+``m.(e)``
+.........
+
+Evaluate the expression ``e`` with the module ``m`` locally opened, as
+if by ``open``.  This can make some expressions easier to read and
+write, without polluting the global scope with a declaration-level
+``open``.
 
 ``x`` *binop* ``y``
 ...................
@@ -467,7 +503,7 @@ If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
 
 Evaluate ``e`` and bind the result to the pattern ``pat`` while
 evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
-``let`` or ``loop`` expression. See also `Shape Declarations`_.
+``let`` expression. See also `Shape Declarations`_.
 
 ``let a[i] = v in body``
 ........................................
@@ -486,19 +522,15 @@ aliasing any free variables in ``e``.  The function is not in scope of
 itself, and hence cannot be recursive.  See also `Shape
 Declarations`_.
 
-``loop (pat = initial) = for i < bound do loopbody in body``
-............................................................
-
-The name ``i`` is bound here and initialised to zero.
+``loop pat = initial for x in a do loopbody``
+.............................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
-2. While ``i < bound``, evaluate ``loopbody``, rebinding ``pat`` to be
-   the value returned by the body, increasing ``i`` by one after each
-   iteration.
+2. For each element ``x`` in ``a``, evaluate ``loopbody`` and rebind
+   ``pat`` to the result of the evaluation.
 
-3. Evaluate ``body`` with ``pat`` bound to its final
-   value.
+3. Return the final value of ``pat``.
 
 The ``= initial`` can be left out, in which case initial values for
 the pattern are taken from equivalently named variables in the
@@ -507,15 +539,20 @@ environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
 
 See also `Shape Declarations`_.
 
-``loop (pat = initial) = while cond do loopbody in body``
-............................................................
+``loop pat = initial for x < n do loopbody``
+............................................
+
+Equivalent to ``loop (pat = initial) for x in iota n do loopbody``.
+
+``loop pat = initial = while cond do loopbody``
+...............................................
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
-2. While ``cond`` evaluates to true, evaluate ``loopbody``, rebinding
-   ``pat`` to be the value returned by the body.
+2. If ``cond`` evaluates to true, bind ``pat`` to the result of
+   evaluating ``loopbody``, and repeat the step.
 
-3. Evaluate ``body`` with ``pat`` bound to its final value.
+3. Return the final value of ``pat``.
 
 See also `Shape Declarations`_.
 
@@ -973,9 +1010,8 @@ modules.  For example::
 
   module Times(M: Addable) = {
     let times (x: M.t) (k: int): M.t =
-      loop (x' = x) = for i < k do
+      loop (x' = x) for i < k do
         T.add x' x
-      in x'
   }
 
 We can instantiate ``Times`` with any module that fulfills the module

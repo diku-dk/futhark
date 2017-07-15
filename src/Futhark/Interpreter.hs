@@ -27,6 +27,7 @@ import Data.Maybe
 
 import Prelude
 
+import Futhark.Construct (fullSliceNum)
 import Futhark.Representation.SOACS
 import Futhark.Util
 
@@ -74,7 +75,7 @@ instance Show InterpreterError where
     "Split not valid for sizes " ++ show sizes ++
     " on array '" ++ var ++ "', with shape " ++ show arrsz ++ "."
   show (NegativeIota n) =
-    "Argument " ++ show n ++ " to iota at is negative."
+    "Length argument " ++ show n ++ " to iota at is negative."
   show (NegativeReplicate n) =
     "Argument " ++ show n ++ " to replicate is negative."
   show (TypeError s) =
@@ -439,23 +440,27 @@ evalExp (Apply fname args rettype) = do
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs
 evalExp (BasicOp op) = evalBasicOp op
 
-evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp) loopbody) = do
+evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar it boundexp loopvars) loopbody) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
     PrimVal (IntValue bound_iv) -> do
       let n = valueIntegral bound_iv
-      vs <- foldM iteration mergestart [0::Integer .. n-1]
+      vs <- foldM iteration mergestart [0::Int .. n-1]
       binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
         mapM (lookupVar . paramName) $
         loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
     _ -> bad $ TypeError "evalBody DoLoop for"
   where merge = ctxmerge ++ valmerge
         (mergepat, mergeexp) = unzip merge
-        iteration mergeval i =
-          binding [(Ident loopvar $ Prim $ IntType it,
+        (loop_params, loop_arrs) = unzip loopvars
+        iteration mergeval i = do
+          let slice v = indexArrayValue v $ fullSliceNum (valueShape v) [DimFix i]
+          vs <- mapM (slice <=< lookupVar) loop_arrs
+          binding ((Ident loopvar $ Prim $ IntType it,
                     BindVar,
-                    PrimVal $ IntValue $ intValue it i)] $
+                    PrimVal $ IntValue $ intValue it i) :
+                    zip3 (map paramIdent loop_params) (repeat BindVar) vs) $
             binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
 
@@ -541,7 +546,7 @@ evalBasicOp (Iota e x s et) = do
                              [x'',x''+s''..x''+(toInteger e'-1)*s''])
                    (IntType et) [fromIntegral e']]
       | otherwise ->
-        bad $ NegativeIota $ valueIntegral x'
+          bad $ NegativeIota $ fromIntegral e'
     _ -> bad $ TypeError "evalBasicOp Iota"
 
 evalBasicOp (Replicate (Shape ds) e2) = do

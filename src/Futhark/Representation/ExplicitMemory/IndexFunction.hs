@@ -27,6 +27,8 @@ import Control.Applicative
 import Data.Maybe
 import Data.Monoid
 import Data.List hiding (repeat)
+import Control.Monad.Identity
+import Control.Monad.Writer
 
 import Prelude hiding (div, mod, quot, rem, repeat)
 
@@ -71,7 +73,7 @@ instance (IntegralExp num, Eq num) => Eq (IxFun num) where
     -- Two DimSlices are considered equal even if their slice lengths
     -- are not equal, as this allows us to get rid of reshapes.
     where eqIndex (DimFix i) (DimFix j) = i == j
-          eqIndex (DimSlice i _ s0) (DimSlice j _ s1) = i == j && s0 == s1
+          eqIndex (DimSlice i _ s0) (DimSlice j _ s1) = i==j && s0==s1
           eqIndex _ _ = False
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
     ixfun1 == ixfun2 && length shape1 == length shape2
@@ -92,33 +94,32 @@ instance Pretty num => Pretty (IxFun num) where
     ppr fun <> text "->repeat" <> parens (commasep (map ppr $ outer_shapes++ [inner_shape]))
 
 instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) where
-  substituteNames _ (Direct n) =
-    Direct n
-  substituteNames subst (Permute fun perm) =
-    Permute (substituteNames subst fun) perm
-  substituteNames subst (Rotate fun offsets) =
-    Rotate (substituteNames subst fun) offsets
-  substituteNames subst (Index fun is) =
-    slice
-    (substituteNames subst fun)
-    (map (substituteNames subst) is)
-  substituteNames subst (Reshape fun newshape) =
-    reshape
-    (substituteNames subst fun)
-    (map (substituteNames subst) newshape)
-  substituteNames subst (Repeat fun outer_shapes inner_shape) =
-    repeat (substituteNames subst fun) outer_shapes inner_shape
+  substituteNames substs = fmap $ substituteNames substs
 
 instance FreeIn num => FreeIn (IxFun num) where
-  freeIn (Direct dims) = freeIn dims
-  freeIn (Permute ixfun _) = freeIn ixfun
-  freeIn (Rotate ixfun offsets) = freeIn ixfun <> freeIn offsets
-  freeIn (Index ixfun is) =
-    freeIn ixfun <> mconcat (map freeIn is)
-  freeIn (Reshape ixfun dims) =
-    freeIn ixfun <> freeIn dims
-  freeIn (Repeat fun outer_shapes inner_shape) =
-    freeIn fun <> freeIn outer_shapes <> freeIn inner_shape
+  freeIn = foldMap freeIn
+
+instance Functor IxFun where
+  fmap f = runIdentity . traverse (return . f)
+
+instance Foldable IxFun where
+  foldMap f = execWriter . traverse (tell . f)
+
+instance Traversable IxFun where
+  traverse f (Direct dims) =
+    Direct <$> traverse f dims
+  traverse f (Permute ixfun perm) =
+    Permute <$> traverse f ixfun <*> pure perm
+  traverse f (Rotate ixfun offsets) =
+    Rotate <$> traverse f ixfun <*> traverse f offsets
+  traverse f (Index ixfun is) =
+    Index <$> traverse f ixfun <*> traverse (traverse f) is
+  traverse f (Reshape ixfun dims) =
+    Reshape <$> traverse f ixfun <*> traverse (traverse f) dims
+  traverse f (Repeat ixfun outer_shapes inner_shape) =
+    Repeat <$> traverse f ixfun <*>
+    traverse (traverse f) outer_shapes <*>
+    traverse f inner_shape
 
 instance (Eq num, IntegralExp num, Substitute num) => Rename (IxFun num) where
   rename = substituteRename

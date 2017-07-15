@@ -72,7 +72,7 @@ bodyMetrics :: OpMetrics (Op lore) => Body lore -> MetricsM ()
 bodyMetrics = mapM_ bindingMetrics . bodyStms
 
 bindingMetrics :: OpMetrics (Op lore) => Stm lore -> MetricsM ()
-bindingMetrics = expMetrics . bindingExp
+bindingMetrics = expMetrics . stmExp
 
 expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()
 expMetrics (BasicOp op) =

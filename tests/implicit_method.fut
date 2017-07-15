@@ -48,7 +48,7 @@ import "/futlib/array"
 default(f32)
 
 let tridagSeq(a:  [#n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
-    loop ((y, b)) =
+    let (y,b) = loop ((y, b))
       for i < n-1 do
         let i    = i + 1
         let beta = a[i] / b[i-1]
@@ -57,11 +57,10 @@ let tridagSeq(a:  [#n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
         in  (y, b)
 
     let y[n-1] = y[n-1]/b[n-1] in
-    loop (y) = for j < n - 1 do
-                 let i    = n - 2 - j
-                 let y[i] = (y[i] - c[i]*y[i+1]) / b[i]
-                 in  y
-    in  y
+    loop (y) for j < n - 1 do
+               let i    = n - 2 - j
+               let y[i] = (y[i] - c[i]*y[i+1]) / b[i]
+               in  y
 
 let implicitMethod(myD:  [#m][3]f32,  myDD: [#m][3]f32,
                    myMu: [#n][#m]f32, myVar: [#n][#m]f32,

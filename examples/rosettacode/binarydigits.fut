@@ -13,8 +13,7 @@
 -- output { 10001100101000i64 }
 
 let main(x: i32): i64 =
-  loop (out = 0i64) = for i < 32 do
+  loop out = 0i64 for i < 32 do
     let digit = (x >> (31-i)) & 1
     let out = (out * 10i64) + i64(digit)
     in out
-  in out

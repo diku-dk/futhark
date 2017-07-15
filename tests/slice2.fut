@@ -36,8 +36,7 @@ let main(mat: [#m][#m][#b][#b]f32): [m][b][b]f32 =
                        mat_row[0]) mat
   in map  (\(blk: *[#b][#b]f32): [b][b]f32  ->
             map (\(row0: *[#b]f32): [b]f32  ->
-                  loop(row=row0) = for j < b do
+                  loop row=row0 for j < b do
                     let row[j] = (row[j] - 1.0f32) / 2.0f32
-                    in  row
-                  in row) blk) (
+                    in  row) blk) (
           mat_rows)

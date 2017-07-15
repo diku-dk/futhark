@@ -16,8 +16,7 @@
 -- }
 
 let multiply(a: []i32, n: i32): []i32 =
-  loop (a) = for i < n-1 do concat a a
-  in a
+  loop (a) for i < n-1 do concat a a
 
 let main(a: [#m][]i32, x: i32): [][]i32 =
   let n = m * (2 ** (x-1))

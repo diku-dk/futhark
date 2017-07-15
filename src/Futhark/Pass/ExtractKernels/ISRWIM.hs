@@ -117,9 +117,9 @@ rwimPossible :: Lambda
              -> Maybe (Pattern, Certificates, SubExp, Lambda)
 rwimPossible fun
   | Body _ [bnd] res <- lambdaBody fun, -- Body has a single binding
-    map_pat <- bindingPattern bnd,
+    map_pat <- stmPattern bnd,
     map Var (patternNames map_pat) == res, -- Returned verbatim
-    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
+    Op (Map map_cs map_w map_fun map_arrs) <- stmExp bnd,
     map paramName (lambdaParams fun) == map_arrs =
       Just (map_pat, map_cs, map_w, map_fun)
   | otherwise =

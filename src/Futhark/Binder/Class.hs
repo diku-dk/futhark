@@ -60,7 +60,7 @@ class (Attributes lore,
 -- bindings, however.
 class (Attributes (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
-       HasScope (Lore m) m) =>
+       LocalScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: *
   mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
@@ -79,7 +79,7 @@ letBind :: MonadBinder m =>
 letBind pat e = do
   bnd <- mkLetM pat e
   addStm bnd
-  return $ patternValueIdents $ bindingPattern bnd
+  return $ patternValueIdents $ stmPattern bnd
 
 letBind_ :: MonadBinder m =>
             Pattern (Lore m) -> Exp (Lore m) -> m ()
@@ -111,7 +111,7 @@ letBindNames :: MonadBinder m =>
 letBindNames names e = do
   bnd <- mkLetNamesM names e
   addStm bnd
-  return $ patternValueIdents $ bindingPattern bnd
+  return $ patternValueIdents $ stmPattern bnd
 
 letBindNames' :: MonadBinder m =>
                  [VName] -> Exp (Lore m) -> m [Ident]

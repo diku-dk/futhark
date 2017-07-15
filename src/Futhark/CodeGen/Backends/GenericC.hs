@@ -566,7 +566,9 @@ paramsTypes = map paramType
 readPrimStm :: C.ToExp a => a -> PrimType -> Signedness -> C.Stm
 readPrimStm place t ept =
   [C.cstm|if (read_scalar(&$exp:(primTypeInfo t ept),&$exp:place) != 0) {
-        panic(1, "Syntax error when reading %s.\n", $exp:(primTypeInfo t ept).type_name);
+        panic(1, "Error when reading input of type %s (errno: %s).\n",
+              $exp:(primTypeInfo t ept).type_name,
+              strerror(errno));
       }|]
 
 -- | Our strategy for main() is to parse everything into host memory
@@ -717,14 +719,16 @@ readInput refcount known_sizes
   in (known_sizes ++ wrote_sizes,
       [C.cstm|{
         typename int64_t shape[$int:rank];
+        errno = 0;
         if (read_array(&$exp:(primTypeInfo t ept),
                        (void**)& $exp:dest,
                        shape,
                        $int:(length shape))
             != 0) {
-          panic(1, "Syntax error when reading %s%s.\n",
+          panic(1, "Failed reading input of type %s%s (errno: %s).\n",
                     $string:(concat $ replicate rank "[]"),
-                    $exp:(primTypeInfo t ept).type_name);
+                    $exp:(primTypeInfo t ept).type_name,
+                    strerror(errno));
         }
         $stms:copyshape
         $stms:copymemsize
@@ -737,7 +741,7 @@ readInput refcount known_sizes
           [C.cstm|if ($exp:expected != $exp:got) {
                     fprintf(stderr, "Parameter %s has bad dimension (expected %d, got %d).\n",
                             $string:(baseString name), $exp:expected, $exp:got);
-                    abort();
+                    exit(1);
                   }|]
 
 printResult :: [ExternalValue] -> CompilerM op s [C.Stm]
@@ -1194,7 +1198,7 @@ compileCode (Assert e loc) = do
   stm [C.cstm|if (!$exp:e') {
                    fprintf(stderr, "Assertion %s at %s failed.\n",
                                    $string:(pretty e), $string:(locStr loc));
-                   abort();
+                   exit(1);
                  }|]
 
 compileCode (Allocate name (Count e) space) = do
@@ -1202,7 +1206,7 @@ compileCode (Allocate name (Count e) space) = do
   allocMem name size space
 
 compileCode (For i it bound body) = do
-  let i' = pretty i
+  let i' = C.toIdent i
       it' = intTypeToCType it
   bound' <- compileExp bound
   body'  <- blockScope $ compileCode body
