@@ -419,11 +419,22 @@ internaliseExp desc (E.Range start maybe_second end _) = do
                                  UpToInclusive{} -> one
                                  UpToExclusive{} -> one
 
-  step <- case maybe_second of
+  (step, step_invalid) <- case maybe_second of
             Just second -> do
               second' <- internaliseExp1 "range_second" second
-              letSubExp "range_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
-            Nothing -> return default_step
+              subtracted_step <- letSubExp "subtracted_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
+              same_step <- letSubExp "same_step" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
+              -- Even though we won't actually use `num_elems_maybe_neg`
+              -- further down unless `start != second` it'll still be
+              -- evaluated by the If statement and cause an exception.
+              -- Which is why we have to make sure it's non-zero.
+              non_zero_step <- letSubExp "non_zero_step" $
+                               I.If same_step (resultBody [one]) (resultBody [subtracted_step])
+                               [I.Prim $ IntType it]
+              return (non_zero_step, same_step)
+            Nothing -> do
+              same_step <- letSubExp "same_step" $ I.BasicOp $ I.SubExp $ constant False
+              return (default_step, same_step)
 
   step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
   let eDivRounding x y =
@@ -440,10 +451,9 @@ internaliseExp desc (E.Range start maybe_second end _) = do
     UpToExclusive e -> e
 
   end_exclusive <- case end of
-    DownToExclusive{} -> return end'
-    UpToExclusive{} -> return end'
     UpToInclusive{} ->
       letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step_sign
+    _ -> return end'
 
   end_from_above <- letSubExp "end_from_above" $ I.BasicOp $ I.BinOp (I.SMin it) start' end_exclusive
   end_from_below <- letSubExp "end_from_below" $ I.BasicOp $ I.BinOp (I.SMax it) start' end_exclusive
@@ -452,15 +462,13 @@ internaliseExp desc (E.Range start maybe_second end _) = do
                      I.If downwards (resultBody [end_from_above]) (resultBody [end_from_below])
                      [I.Prim $ IntType it]
 
-  up_distance <- letSubExp "up_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
-  down_distance <- letSubExp "down_distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
-  distance <- letSubExp "distance" $
-              I.If downwards (resultBody [down_distance]) (resultBody [up_distance])
-              [I.Prim $ IntType it]
+  distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
   num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" =<<
                          eDivRounding (eSubExp distance) (eSubExp step)
-  num_elems <- letSubExp "num_elems" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_maybe_neg
-
+  num_elems_not_neg <- letSubExp "num_elems_not_neg" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_maybe_neg
+  num_elems <- letSubExp "num_elems" $
+               I.If step_invalid (resultBody [zero]) (resultBody [num_elems_not_neg])
+               [I.Prim $ IntType it]
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
