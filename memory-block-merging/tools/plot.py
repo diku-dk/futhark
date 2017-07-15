@@ -44,8 +44,8 @@ for benchmark_name, benchmark_info in benchmarks:
         flat_results = []
         for dataset_name, dataset_info in benchmark_info['datasets'].items():
             for key, short_name, color in (
-                    ('without-memory-block-merging_without-register-allocation', 'disabled', 'red'),
-                    ('with-memory-block-merging_with-register-allocation', 'enabled', 'blue')
+                    ('without-coalescing_without-reuse', 'disabled', 'red'),
+                    ('with-coalescing_with-reuse', 'enabled', 'blue')
             ):
                 value = dataset_info[key]['average_runtime']
                 flat_results.append(('{}:\n{}'.format(short_name, dataset_name), value, color))

@@ -1,4 +1,6 @@
 #!/bin/sh
+#
+# Check if in-place lowering has any effect.
 
 set -e # Exit on first error.
 

@@ -25,7 +25,6 @@ else
     # Effectively ignore too large datasets.
     flags="--timeout $timeout_secs"
 fi
-echo $flags
 
 base="$(readlink -f "$result_dir")"
 
@@ -63,23 +62,29 @@ get_compilation_info() {
 
 # Get compilation information.
 get_compilation_info > \
-                     "$base/compilation_without-memory-block-merging_without-register-allocation.json"
-MEMORY_BLOCK_MERGING=1 get_compilation_info > \
-                    "$base/compilation_with-memory-block-merging_without-register-allocation.json"
-REGISTER_ALLOCATION=1 get_compilation_info > \
-                   "$base/compilation_without-memory-block-merging_with-register-allocation.json"
-MEMORY_BLOCK_MERGING=1 REGISTER_ALLOCATION=1 get_compilation_info > \
-                    "$base/compilation_with-memory-block-merging_with-register-allocation.json"
+                     "$base/compilation_without-coalescing_without-reuse.json"
+IN_PLACE_LOWERING=0 MEMORY_BLOCK_MERGING_COALESCING=1 \
+                 get_compilation_info > \
+                    "$base/compilation_with-coalescing_without-reuse.json"
+IN_PLACE_LOWERING=0 MEMORY_BLOCK_MERGING_REUSE=1 \
+                 get_compilation_info > \
+                   "$base/compilation_without-coalescing_with-reuse.json"
+IN_PLACE_LOWERING=0 MEMORY_BLOCK_MERGING_COALESCING=1 MEMORY_BLOCK_MERGING_REUSE=1 \
+                 get_compilation_info > \
+                    "$base/compilation_with-coalescing_with-reuse.json"
 
 # Get runtime information.
 futhark-bench $flags --json \
-              "$base/measurements_without-memory-block-merging_without-register-allocation.json" . || true
+              "$base/measurements_without-coalescing_without-reuse.json" . || true
 
-MEMORY_BLOCK_MERGING=1 futhark-bench $flags --json \
-                 "$base/measurements_with-memory-block-merging_without-register-allocation.json" . || true
+IN_PLACE_LOWERING=0 MEMORY_BLOCK_MERGING_COALESCING=1 \
+                 futhark-bench $flags --json \
+                 "$base/measurements_with-coalescing_without-reuse.json" . || true
 
-REGISTER_ALLOCATION=1 futhark-bench $flags --json \
-                   "$base/measurements_without-memory-block-merging_with-register-allocation.json" . || true
+IN_PLACE_LOWERING=0 MEMORY_BLOCK_MERGING_REUSE=1 \
+                 futhark-bench $flags --json \
+                   "$base/measurements_without-coalescing_with-reuse.json" . || true
 
-MEMORY_BLOCK_MERGING=1 REGISTER_ALLOCATION=1 futhark-bench $flags --json \
-                   "$base/measurements_with-memory-block-merging_with-register-allocation.json" . || true
+IN_PLACE_LOWERING=0 MEMORY_BLOCK_MERGING_COALESCING=1 MEMORY_BLOCK_MERGING_REUSE=1 \
+                 futhark-bench $flags --json \
+                   "$base/measurements_with-coalescing_with-reuse.json" . || true

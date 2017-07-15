@@ -10,15 +10,16 @@ attributes = (
     ('average runtime',
      'microseconds',
      lambda d: d['average_runtime']),
-    ('average peak memory usage',
-     'bytes',
-     lambda d: np.mean(list(d['peak_memory_usages'].values()))),
-    ('total cumulative allocations',
-     'bytes',
-     lambda d: d['total_cumulative_allocations']),
-    ('total cumulative frees',
-     'bytes',
-     lambda d: d['total_cumulative_frees']),
+    # FIXME
+    # ('average peak memory usage',
+    #  'bytes',
+    #  lambda d: np.mean(list(d['peak_memory_usages'].values()))),
+    # ('total cumulative allocations',
+    #  'bytes',
+    #  lambda d: d['total_cumulative_allocations']),
+    # ('total cumulative frees',
+    #  'bytes',
+    #  lambda d: d['total_cumulative_frees']),
 )
 
 def average_improvement(benchmark_info, val_func):
@@ -29,8 +30,8 @@ def average_improvement(benchmark_info, val_func):
 
 def dataset_improvement(dataset_info, val_func):
     return speedup_improvement(
-        val_func(dataset_info['without-memory-block-merging_without-register-allocation']),
-        val_func(dataset_info['with-memory-block-merging_with-register-allocation']))
+        val_func(dataset_info['without-coalescing_without-reuse']),
+        val_func(dataset_info['with-coalescing_with-reuse']))
 
 def speedup_improvement(runtime_before, runtime_after):
     runtime_decrease = runtime_before - runtime_after

@@ -35,3 +35,11 @@ The tests in `mix` (new name for "register allocation") expect to be run
 with both `MEMORY_BLOCK_MERGING_COALESCING=1` and
 `MEMORY_BLOCK_MERGING_REUSE=1`.  Run `./test.sh` in the directory to do
 so.
+
+
+## Tools
+
+Specific to this branch because of further compiler modifications.
+
+Run the programs from futhark-benchmarks both with and without the
+memory block merging optimisations, and see if there is a speedup.

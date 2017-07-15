@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
+#
+# Merge all the data gathered through running './gather-data.sh' or
+# './gather-data-coarse.sh'.
+#
+# The sole argument should be the directory containing the gathered data.  This
+# script will output a new file 'full.json' in the same directory.
+#
+# When this script has completed, you can run './summarize.py' to get a
+# pretty-print version of the JSON file, and './plot.py' to plot the data.
 
-'''
-Merge all the data gathered through running
-'./gather-data.sh'.
-
-The sole argument should be the directory containing the gathered data.
-This script will output a new file 'full.json' in the same directory.
-
-When this script has completed, you can run './summarize.py' to get a
-pretty-print version of the JSON file, and './plot.py' to plot the data.
-'''
 
 import sys
 import os
@@ -33,7 +32,7 @@ def load(path):
         return json.load(f)
 
 enabling_attributes = ['without', 'with']
-attributes = ['memory-block-merging', 'register-allocation']
+attributes = ['coalescing', 'reuse']
 
 enabling_attributes_products = list(itertools.product(
     *([enabling_attributes] * len(attributes))))
@@ -47,12 +46,18 @@ print('Variants:', variants)
 compilation_raw = {}
 for v in variants:
     path = 'compilation_' + v + '.json'
-    compilation_raw[v] = load(path)
+    try:
+        compilation_raw[v] = load(path)
+    except IOError:
+        pass
 
 measurements_raw = {}
 for v in variants:
     path = 'measurements_' + v + '.json'
-    measurements_raw[v] = load(path)
+    try:
+        measurements_raw[v] = load(path)
+    except IOError:
+        pass
 
 
 # DATA BUILDING
@@ -85,9 +90,10 @@ def get_dataset_info_base(benchmarks, benchmark_name, dataset_name):
     if average_runtime > runtime_limit_ignore:
         dataset_info_base = {
             'average_runtime': average_runtime,
-            'total_cumulative_allocations': raw['total_allocated'],
-            'total_cumulative_frees': raw['total_freed'],
-            'peak_memory_usages': raw['peak_memory_usages']
+            # FIXME
+#            'total_cumulative_allocations': raw['total_allocated'],
+#            'total_cumulative_frees': raw['total_freed'],
+#            'peak_memory_usages': raw['peak_memory_usages']
         }
         return dataset_info_base
     else:
@@ -103,14 +109,22 @@ benchmarks = {}
 for benchmark_name in benchmark_names:
     compilation_info = {}
     for v in variants:
-        compilation_info[v] = compilation_raw[v][benchmark_name]
+        try:
+            compilation_info[v] = compilation_raw[v][benchmark_name]
+        except KeyError:
+            pass
 
     datasets = {}
     for dataset_name in dataset_names[benchmark_name]:
         dataset_name_short = cut_desc(dataset_name)
         dataset_info = {}
         for v in variants:
-            dataset_info[v] = get_dataset_info_base(measurements_raw[v], benchmark_name, dataset_name)
+            try:
+                measurements = measurements_raw[v]
+                dataset_info[v] = get_dataset_info_base(measurements,
+                                                        benchmark_name, dataset_name)
+            except KeyError:
+                pass
         if not None in dataset_info.values():
             datasets[dataset_name_short] = dataset_info
 
