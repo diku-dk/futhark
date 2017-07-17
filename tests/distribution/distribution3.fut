@@ -9,7 +9,7 @@
 --
 -- ==
 --
--- structure distributed { Kernel 8 }
+-- structure distributed { Kernel 6 }
 
 let main(a: [][#n][#m]i32): [][][]i32 =
   map (\(a_row: [][]i32): [m][n]i32  ->
