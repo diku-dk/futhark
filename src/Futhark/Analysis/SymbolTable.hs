@@ -110,7 +110,7 @@ castSymbolTable :: (SameScope from to,
                     BodyAttr from ~ BodyAttr to,
                     RetType from ~ RetType to) =>
                    SymbolTable from -> SymbolTable to
-castSymbolTable = genCastSymbolTable loopVar letBound fParam lParam freeVar
+castSymbolTable table = genCastSymbolTable loopVar letBound fParam lParam freeVar table
   where loopVar (LoopVarEntry r d it) = LoopVar $ LoopVarEntry r d it
         letBound e
           | Just e' <- castStm $ letBoundStm e =
@@ -118,10 +118,12 @@ castSymbolTable = genCastSymbolTable loopVar letBound fParam lParam freeVar
                          , letBoundAttr = letBoundAttr e
                          }
           | otherwise =
-              FreeVar FreeVarEntry { freeVarAttr = LetInfo $ letBoundAttr e
-                                   , freeVarStmDepth = letBoundStmDepth e
-                                   , freeVarRange = letBoundRange e
-                                   }
+              FreeVar FreeVarEntry
+              { freeVarAttr = LetInfo $ letBoundAttr e
+              , freeVarStmDepth = letBoundStmDepth e
+              , freeVarRange = letBoundRange e
+              , freeVarIndex = \name is -> index' name is table
+              }
 
         fParam e = FParam e { fparamAttr = fparamAttr e }
         lParam e = LParam e { lparamAttr = lparamAttr e }
@@ -188,6 +190,8 @@ data FreeVarEntry lore =
   FreeVarEntry { freeVarAttr     :: NameInfo lore
                , freeVarStmDepth :: Int
                , freeVarRange    :: ScalExpRange
+               , freeVarIndex    :: VName -> IndexArray
+                -- ^ Index a delayed array, if possible.
                }
 
 isVarBound :: Entry lore -> Maybe (LetBoundEntry lore)
@@ -329,6 +333,8 @@ index' name is vtable = do
       Just k <- elemIndex name $ patternValueNames $
                 stmPattern $ letBoundStm entry' ->
         letBoundIndex entry' k is
+    FreeVar entry' ->
+      freeVarIndex entry' name is
     LParam entry' -> lparamIndex entry' is
     _ -> Nothing
 
@@ -568,6 +574,7 @@ insertFreeVar name attr = insertEntry name entry
             freeVarAttr = attr
           , freeVarRange = (Nothing, Nothing)
           , freeVarStmDepth = 0
+          , freeVarIndex  = \_ _ -> Nothing
           }
 
 updateBounds :: Annotations lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
