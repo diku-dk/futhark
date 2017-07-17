@@ -30,15 +30,11 @@ module Futhark.Representation.Kernels.Kernel
        )
        where
 
-import Control.Applicative
 import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.List
-import Data.Foldable (mapM_) -- for stack LTS 1.15
-
-import Prelude hiding (mapM_)
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
