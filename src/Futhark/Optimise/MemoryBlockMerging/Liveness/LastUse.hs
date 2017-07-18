@@ -57,8 +57,8 @@ commitOptimistic mem = do
 -- Overkill with the lore?
 findLastUses :: forall lore. (ExplicitMemorish lore, ArrayUtils lore)
              => VarMemMappings MemorySrc -> MemAliases -> FirstUses -> FunDef lore -> LastUses
-findLastUses var_mem_mappings mem_aliases first_uses fundef =
-  let context = Context var_mem_mappings mem_aliases first_uses
+findLastUses var_to_mem mem_aliases first_uses fundef =
+  let context = Context var_to_mem mem_aliases first_uses
       m = unFindM $ do
         -- We do not need to look in the function paramaters, as they should not
         -- contain last uses -- in that case they would have been simplified away.
@@ -86,7 +86,7 @@ findLastUses var_mem_mappings mem_aliases first_uses fundef =
     -- Find the memory blocks used or aliased by a variable.
     varMems :: VName -> FindM Names
     varMems var = do
-      Context var_to_mem mem_aliases _ <- ask
+      -- Context var_to_mem mem_aliases _ <- ask
       return $ fromMaybe S.empty $ do
         mem <- memSrcName <$> M.lookup var var_to_mem
         return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
@@ -95,12 +95,12 @@ findLastUses var_mem_mappings mem_aliases first_uses fundef =
     lookInPatValElem e (PatElem x _bindage membound) = do
       case membound of
         ExpMem.ArrayMem _ _ _ xmem _ -> do
-          Context _ _ first_uses_all <- ask
-          let first_uses = lookupEmptyable x first_uses_all
+          -- Context _ _ first_uses <- ask
+          let first_uses_x = lookupEmptyable x first_uses
           -- When this is a new first use of a memory block, commit the previous
           -- optimistic last use of it, so that it can be considered unused in
-          -- the statements inbetween.
-          when (S.member xmem first_uses) $ commitOptimistic xmem
+          -- the statements inbetween.  FIXME: Aliasing problems?  Edge cases?
+          when (S.member xmem first_uses_x) $ commitOptimistic xmem
         _ -> return ()
 
       let e_free_vars = freeInExp e

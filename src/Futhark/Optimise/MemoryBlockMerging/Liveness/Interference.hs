@@ -12,7 +12,7 @@ import Control.Monad.RWS
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
-import qualified Futhark.Representation.ExplicitMemory as ExpMem
+-- import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
@@ -88,7 +88,7 @@ findInterferences mem_aliases first_uses last_uses fundef =
     -- same index function as the destination (which is not the case for a
     -- rearrange, for example).
     canShare :: Exp lore -> Bool
-    canShare e = False --case e of
+    canShare _e = False --case e of
       -- BasicOp ExpMem.Copy{} -> True
       -- BasicOp Concat{} -> True -- Watch out for this?
 
@@ -103,17 +103,17 @@ findInterferences mem_aliases first_uses last_uses fundef =
     -- ended.
     handleDeclaration :: VName -> Bool -> FindM ()
     handleDeclaration var can_share = do
-      Context first_uses_all last_uses_all <- ask
-      let first_uses = lookupEmptyable var first_uses_all
-          last_uses = lookupEmptyable var last_uses_all
+      -- Context first_uses last_uses <- ask
+      let first_uses_var = lookupEmptyable var first_uses
+          last_uses_var = lookupEmptyable var last_uses
 
-      mapM_ awaken $ S.toList first_uses
+      mapM_ awaken $ S.toList first_uses_var
       unless can_share
         -- Be conservative.  If a memory block has its last use here, and another
         -- memory block has its first use, they still interfere.  Only kill the
         -- last uses after the interferences have been recorded.
         recordCurrentInterferences
-      mapM_ kill $ S.toList last_uses
+      mapM_ kill $ S.toList last_uses_var
       when can_share
         -- Be un-conservative.  If a memory block has its last use here, don't
         -- let it interfere with any new firstly used memory blocks.

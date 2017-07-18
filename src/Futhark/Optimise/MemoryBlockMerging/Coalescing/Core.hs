@@ -21,6 +21,7 @@ import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 
 import Futhark.Optimise.MemoryBlockMerging.ActualVariables (findActualVariables)
+import Futhark.Optimise.MemoryBlockMerging.PrimExps (findPrimExpsFunDef)
 
 -- Some of these attributes could be split into separate Coalescing helper
 -- modules if it becomes confusing.  Their computations are fairly independent.
@@ -33,10 +34,6 @@ data Current = Current
   , curVarUsesAfterCreation :: M.Map VName Names
 
     -- Safety condition 5 state.
-    -- '- For index function simplification.
-  , curVarPrimTypes :: M.Map VName PrimType
-  , curVarPrimExps :: M.Map VName (PrimExp VName)
-    -- '- For index function variable-is-okay-to-use checking.
   , curDeclarationsSoFar :: Names
   , curVarsInUseBeforeMem :: M.Map VName Names
 
@@ -59,8 +56,6 @@ emptyCurrent = Current
 
   , curVarUsesAfterCreation = M.empty
 
-  , curVarPrimTypes = M.empty
-  , curVarPrimExps = M.empty
   , curDeclarationsSoFar = S.empty
   , curVarsInUseBeforeMem = M.empty
 
@@ -69,25 +64,27 @@ emptyCurrent = Current
   }
 
 
-data Context = Context { ctxVarToMem :: VarMemMappings MemorySrc
-                       , ctxMemAliases :: MemAliases
-                       , ctxVarAliases :: VarAliases
-                       , ctxFirstUses :: FirstUses
-                       , ctxLastUses :: LastUses
+data Context = Context
+  { ctxVarToMem :: VarMemMappings MemorySrc
+  , ctxMemAliases :: MemAliases
+  , ctxVarAliases :: VarAliases
+  , ctxFirstUses :: FirstUses
+  , ctxLastUses :: LastUses
 
     -- If and DoLoop statements have special requirements, as do some aliasing
     -- expressions.  We don't want to (just) use the obvious statement variable;
     -- sometimes updating the memory block of one variable actually means
     -- updating the memory block of other variables!
-                       , ctxActualVars :: M.Map VName Names
-
+  , ctxActualVars :: M.Map VName Names
 
     -- Sometimes it is convenient to treat existential memory blocks the same as
     -- normal ones (e.g. putting them in curActualVars), but we still must keep
     -- track of them so as to only change the index functions of variables using
     -- them, not the memory block.
-                       , ctxExistentials :: Names
-                       }
+  , ctxExistentials :: Names
+  
+  , ctxVarPrimExps :: M.Map VName (PrimExp VName)
+  }
   deriving (Show)
 
 newtype FindM a = FindM { unFindM :: RWS Context () Current a }
@@ -106,7 +103,8 @@ coreCoalesceFunDef :: FunDef ExplicitMemory -> VarMemMappings MemorySrc
                    -> FunDef ExplicitMemory
 coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses last_uses =
   let (actual_vars, existentials) = findActualVariables first_uses var_to_mem fundef
-      context = Context var_to_mem mem_aliases var_aliases first_uses last_uses actual_vars existentials
+      primexps = findPrimExpsFunDef fundef
+      context = Context var_to_mem mem_aliases var_aliases first_uses last_uses actual_vars existentials primexps
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef
@@ -229,24 +227,6 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
 
 
   -- Update attributes related to safety condition 5.
-  prim_types <- gets curVarPrimTypes
-  let varUse :: Exp ExplicitMemory -> Maybe (PrimExp VName)
-      varUse (BasicOp (SubExp (Var v))) = do
-        pt <- M.lookup v prim_types
-        return $ ExpMem.LeafExp v pt
-      varUse _ = Nothing
-  case patvalelems of
-    [PatElem dst _ _] ->
-      onJust (primExpFromExp varUse e)
-      $ \pe -> modify $ \c -> c { curVarPrimExps = M.insert dst pe $ curVarPrimExps c }
-    _ -> return ()
-
-  forM_ patvalelems $ \(PatElem var _ membound) ->
-    case typeOf membound of
-      Prim pt ->
-        modify $ \c -> c { curVarPrimTypes = M.insert var pt $ curVarPrimTypes c }
-      _ -> return ()
-
   first_uses <- asks ctxFirstUses
   forM_ (S.toList $ S.unions $ map (`lookupEmptyable` first_uses) new_decls) $ \mem ->
     modify $ \c -> c { curVarsInUseBeforeMem =
@@ -255,9 +235,6 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
 
   forM_ new_decls $ \x ->
     modify $ \c -> c { curDeclarationsSoFar = S.insert x $ curDeclarationsSoFar c }
-
-
-
 
 
   -- RECURSIVE BODY WALK.
@@ -424,7 +401,7 @@ insertOrNew x m = Just $ case m of
 -- expressions to use the index function.
 simplifyIxFun :: ExpMem.IxFun -> FindM ExpMem.IxFun
 simplifyIxFun ixfun = do
-  var_to_pe <- gets curVarPrimExps
+  var_to_pe <- asks ctxVarPrimExps
   let ixfun' = fixpointIterate (IxFun.substituteInIxFun var_to_pe) ixfun
   return ixfun'
 

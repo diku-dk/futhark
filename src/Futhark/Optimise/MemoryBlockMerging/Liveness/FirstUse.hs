@@ -45,8 +45,8 @@ recordMapping stmt_var mem = tell [M.singleton stmt_var (S.singleton mem)]
 -- Overkill with the lore?
 findFirstUses :: forall lore. (ExplicitMemorish lore, ArrayUtils lore)
               => VarMemMappings MemorySrc -> MemAliases -> FunDef lore -> FirstUses
-findFirstUses var_mem_mappings mem_aliases fundef =
-  let context = Context var_mem_mappings mem_aliases
+findFirstUses var_to_mem mem_aliases fundef =
+  let context = Context var_to_mem mem_aliases
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
@@ -104,7 +104,7 @@ findFirstUses var_mem_mappings mem_aliases fundef =
     -- Find the memory blocks used or aliased by a variable.
     varMems :: VName -> FindM Names
     varMems var = do
-      Context var_to_mem mem_aliases <- ask
+      -- Context var_to_mem mem_aliases <- ask
       return $ fromMaybe S.empty $ do
         mem <- memSrcName <$> M.lookup var var_to_mem
         return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
