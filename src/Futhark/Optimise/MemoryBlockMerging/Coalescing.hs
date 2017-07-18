@@ -37,5 +37,5 @@ coalesceInFunDef fundef0 =
                 (auxVarMemMappings aux1) (auxMemAliases aux1)
                 (auxVarAliases aux1) (auxFirstUses aux1) (auxLastUses aux1)
 
-      debug = debug0 >> debug1
+      debug = print fundef0 >> debug0 >> debug1
   in withDebug debug $ return fundef2
