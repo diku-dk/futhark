@@ -579,6 +579,26 @@ simplifyBinOp defOf _ (BinOp LogOr e1 e2)
     Just (UnOp Not e2') <- asBasicOp =<< defOf v,
     e2' == e1 = binOpRes $ BoolValue True
 
+simplifyBinOp defOf _ (BinOp (SMax it) e1 e2)
+  | e1 == e2 =
+      Just $ SubExp e1
+  | Var v1 <- e1,
+    Just (BasicOp (BinOp (SMax _) e1_1 e1_2)) <- defOf v1,
+    e1_1 == e2 =
+      Just $ BinOp (SMax it) e1_2 e2
+  | Var v1 <- e1,
+    Just (BasicOp (BinOp (SMax _) e1_1 e1_2)) <- defOf v1,
+    e1_2 == e2 =
+      Just $ BinOp (SMax it) e1_1 e2
+  | Var v2 <- e2,
+    Just (BasicOp (BinOp (SMax _) e2_1 e2_2)) <- defOf v2,
+    e2_1 == e1 =
+      Just $ BinOp (SMax it) e2_2 e1
+  | Var v2 <- e2,
+    Just (BasicOp (BinOp (SMax _) e2_1 e2_2)) <- defOf v2,
+    e2_2 == e1 =
+      Just $ BinOp (SMax it) e2_1 e1
+
 simplifyBinOp _ _ _ = Nothing
 
 binOpRes :: PrimValue -> Maybe (BasicOp lore)
