@@ -100,7 +100,7 @@ createsNewArrayBase e = case e of
   -- read and write.  Loops over scalars should be ignored.  See FirstUse.hs for
   -- an example.
 
-  -- BasicOp Scratch{} -> True
+  BasicOp Scratch{} -> True
 
   _ -> False
 

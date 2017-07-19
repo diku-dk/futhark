@@ -80,12 +80,12 @@ findInterferences mem_aliases first_uses last_uses fundef =
         let first_uses_var = lookupEmptyable var first_uses
         mapM_ awaken $ S.toList first_uses_var
 
-        cur <- get
-        doDebug $ do
-          putStrLn $ replicate 70 '~'
-          putStrLn ("Interference: awakening " ++ pretty var)
-          putStrLn ("current live: " ++ prettySet cur)
-          putStrLn $ replicate 70 '~'
+        -- cur <- get
+        -- doDebug $ do
+        --   putStrLn $ replicate 70 '~'
+        --   putStrLn ("Interference: awakening " ++ pretty var)
+        --   putStrLn ("current live: " ++ prettySet cur)
+        --   putStrLn $ replicate 70 '~'
       unless can_share
         -- Be conservative.  If a memory block has its last use here, and another
         -- memory block has its first use, they still interfere.  Only kill the
@@ -98,12 +98,12 @@ findInterferences mem_aliases first_uses last_uses fundef =
         let last_uses_var = lookupEmptyable var last_uses
         mapM_ kill $ S.toList last_uses_var
 
-        cur <- get
-        doDebug $ do
-          putStrLn $ replicate 70 '~'
-          putStrLn ("Interference: killing " ++ pretty var)
-          putStrLn ("current live: " ++ prettySet cur)
-          putStrLn $ replicate 70 '~'
+        -- cur <- get
+        -- doDebug $ do
+        --   putStrLn $ replicate 70 '~'
+        --   putStrLn ("Interference: killing " ++ pretty var)
+        --   putStrLn ("current live: " ++ prettySet cur)
+        --   putStrLn $ replicate 70 '~'
       when can_share
         -- Be un-conservative.  If a memory block has its last use here, don't
         -- let it interfere with any new firstly used memory blocks.

@@ -74,6 +74,12 @@ commitOptimistic mem = do
     Just x_lu -> recordMapping x_lu mem
     Nothing -> return ()
 
+  -- doDebug $ do
+  --   putStrLn $ replicate 70 '~'
+  --   putStrLn ("commitOptimistic " ++ pretty mem)
+  --   putStrLn ("res: " ++ show res)
+  --   putStrLn $ replicate 70 '~'
+
 -- Overkill with the lore?
 findLastUses :: forall lore. (ExplicitMemorish lore, ArrayUtils lore)
              => VarMemMappings MemorySrc -> MemAliases -> FirstUses -> FunDef lore -> LastUses
