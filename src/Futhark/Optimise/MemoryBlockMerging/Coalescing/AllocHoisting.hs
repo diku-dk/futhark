@@ -283,9 +283,9 @@ moveLetUpwards letname body = do
             print deps'
             print line_cur
             print line_dest
-            putStrLn $ replicate 70 '|'
-            putStrLn $ pretty body'
-            putStrLn $ replicate 70 '|'
+            -- putStrLn $ replicate 70 '|'
+            -- putStrLn $ pretty body'
+            -- putStrLn $ replicate 70 '|'
             putStrLn $ replicate 70 '~'
 
       withDebug debug $ return body' { bodyStms = stms' }

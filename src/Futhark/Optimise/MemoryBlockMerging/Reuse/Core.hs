@@ -181,15 +181,16 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
 
   actual_vars <- lookupActualVars x
   existentials <- asks ctxExistentials
-  let base_ok = not loop_disabled && not (S.null actual_vars)
-  case (base_ok, found_use) of
-    (True, (kmem, _) : _) -> do
+  let base_error = loop_disabled
+                   || S.null actual_vars
+                   || any (`S.member` existentials) actual_vars
+  case (base_error, found_use) of
+    (False, (kmem, _) : _) -> do
       -- There is a previous memory block that we can use.  Record the mapping.
       insertUse kmem xmem
-      forM_ actual_vars $ \var ->
-        unless (S.member var existentials) $ do
-          ixfun <- memSrcIxFun <$> lookupVarMem var
-          recordMapping var $ MemoryLoc kmem ixfun
+      forM_ actual_vars $ \var -> do
+        ixfun <- memSrcIxFun <$> lookupVarMem var
+        recordMapping var $ MemoryLoc kmem ixfun
     _ ->
       -- There is no previous memory block available for use.  Record that this
       -- memory block is available.
