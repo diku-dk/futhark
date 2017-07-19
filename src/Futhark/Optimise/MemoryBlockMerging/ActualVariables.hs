@@ -74,19 +74,6 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   -- Special handling of loops, ifs, etc.
   case e of
     DoLoop mergectxparams mergevalparams _loopform body -> do
-      forM_ mergevalparams $ \(Param var membound, _) -> do
-        case membound of
-          ExpMem.ArrayMem _ _ _ mem _ ->
-            when (mem `L.elem` map (paramName . fst) mergectxparams) $
-              modify $ S.insert var -- existentials, fixme make clearer, why
-                                    -- even in this module?
-          _ -> return ()
-
-        -- It seems wrong to change the memory of merge variables, so we disable
-        -- it.  If we were to accept it, we would need to record what other
-        -- variables to change as well.  Seems hard.
-        recordActuals var S.empty
-
       forM_ patvalelems $ \(PatElem var _ membound) ->
         case membound of
           ExpMem.ArrayMem _ _ _ mem _ -> do
@@ -118,12 +105,29 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
             -- of a future coalescing with it; also the variables extracted above.
             -- FIXME: This is probably an okay way to do it?  What if the memory is
             -- used, but with a different index function?  Can that happen?
-            let actuals = S.fromList (var : body_vars')
-            recordActuals var actuals
+            let actuals = var : body_vars'
+            forM_ actuals $ \a -> recordActuals a (S.fromList actuals)
+            -- Some of these can be changed later on to have an actual variable
+            -- set of S.empty, e.g. if one of the variables using the memory is
+            -- a rearrange operation.  This is fine, and will occur in the walk
+            -- later on.
 
             -- If you extend this loop handling, make sure not to target existential
             -- memory blocks.  We want those to stay.
           _ -> return ()
+
+      forM_ mergevalparams $ \(Param var membound, _) -> do
+        case membound of
+          ExpMem.ArrayMem _ _ _ mem _ ->
+            when (mem `L.elem` map (paramName . fst) mergectxparams) $
+              modify $ S.insert var -- existentials, fixme make clearer, why
+                                    -- even in this module?
+          _ -> return ()
+
+        -- It seems wrong to change the memory of merge variables, so we disable
+        -- it.  If we were to accept it, we would need to record what other
+        -- variables to change as well.  Seems hard.
+        recordActuals var S.empty
 
     If _se body_then body_else _types ->
       -- We don't want to coalesce the existiential memory block of the if.
