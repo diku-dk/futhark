@@ -98,7 +98,31 @@ findLastUses var_to_mem mem_aliases first_uses fundef =
 
     lookInStm :: Stm lore -> FindM ()
     lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
-      forM_ patvalelems $ lookInPatValElem e
+      -- First handle all pattern elements by themselves.
+      forM_ patvalelems $ \(PatElem x _ membound) ->
+        case membound of
+          ExpMem.ArrayMem _ _ _ xmem _ -> do
+            -- Context _ _ first_uses <- ask
+            let first_uses_x = lookupEmptyable x first_uses
+            modify $ \c -> c { curFirstUses = S.union first_uses_x $ curFirstUses c }
+            -- When this is a new first use of a memory block, commit the previous
+            -- optimistic last use of it, so that it can be considered unused in
+            -- the statements inbetween.  FIXME: Aliasing problems?  Edge cases?
+            when (S.member xmem first_uses_x) $ commitOptimistic xmem
+          _ -> return ()
+
+      -- Then find the new memory blocks.
+      let e_free_vars = freeInExp e
+      e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
+
+      -- Then handle the pattern elements by themselves again.
+      forM_ patvalelems $ \(PatElem x _ _) ->
+        -- Set all memory blocks being used as optimistic last uses.
+        forM_ (S.toList e_mems) $ \mem -> do
+          first_uses_before_loop <- asks ctxCurFirstUsesBeforeLoop
+          unless (mem `S.member` first_uses_before_loop) $
+            setOptimistic mem x
+
 
       -- When an loop contains a use of an array that is created before the
       -- loop, it must not reuse that memory, because there are cycles in loops.
@@ -120,33 +144,14 @@ findLastUses var_to_mem mem_aliases first_uses fundef =
       return $ fromMaybe S.empty $ do
         mem <- memSrcName <$> M.lookup var var_to_mem
         return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
+--
+--    lookInPatValElem :: Exp lore -> PatElem lore -> FindM ()
+--    lookInPatValElem e (PatElem x _bindage membound) = do
 
-    lookInPatValElem :: Exp lore -> PatElem lore -> FindM ()
-    lookInPatValElem e (PatElem x _bindage membound) = do
-      case membound of
-        ExpMem.ArrayMem _ _ _ xmem _ -> do
-          -- Context _ _ first_uses <- ask
-          let first_uses_x = lookupEmptyable x first_uses
-          modify $ \c -> c { curFirstUses = S.union first_uses_x $ curFirstUses c }
-          -- When this is a new first use of a memory block, commit the previous
-          -- optimistic last use of it, so that it can be considered unused in
-          -- the statements inbetween.  FIXME: Aliasing problems?  Edge cases?
-          when (S.member xmem first_uses_x) $ commitOptimistic xmem
-        _ -> return ()
-
-      let e_free_vars = freeInExp e
-      e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
-
-      -- Set all memory blocks being used as optimistic last uses.
-      forM_ (S.toList e_mems) $ \mem -> do
-        first_uses_before_loop <- asks ctxCurFirstUsesBeforeLoop
-        unless (mem `S.member` first_uses_before_loop) $
-          setOptimistic mem x
-
-      let debug = do
-            putStrLn $ replicate 70 '~'
-            putStrLn "LastUse lookInPatElem:"
-            putStrLn ("free vars in expression: " ++ prettySet e_free_vars)
-            putStrLn ("memblocks in or aliased: " ++ prettySet e_mems)
-            putStrLn $ replicate 70 '~'
-      doDebug debug
+      -- let debug = do
+      --       putStrLn $ replicate 70 '~'
+      --       putStrLn "LastUse lookInPatElem:"
+      --       putStrLn ("free vars in expression: " ++ prettySet e_free_vars)
+      --       putStrLn ("memblocks in or aliased: " ++ prettySet e_mems)
+      --       putStrLn $ replicate 70 '~'
+      -- doDebug debug
