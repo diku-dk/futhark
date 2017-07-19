@@ -93,13 +93,6 @@ createsNewArrayBase e = case e of
   BasicOp ExpMem.Copy{} -> True
   BasicOp Concat{} -> True
   BasicOp ArrayLit{} -> True
-
-  -- While a Scratch does create a new array, it does not actually read or write
-  -- anything to it, so it is not interesting from a memory use viewpoint.
-  -- Instead we focus on (in sequential code) loops over memory, and how they
-  -- read and write.  Loops over scalars should be ignored.  See FirstUse.hs for
-  -- an example.
-
   BasicOp Scratch{} -> True
 
   _ -> False

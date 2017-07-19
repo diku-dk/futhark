@@ -38,19 +38,30 @@ data Origin = FromFParam
   deriving (Eq, Ord, Show)
 
 -- The dependencies and the location.
-data PrimBinding = PrimBinding { _pbVars :: [VName]
+data PrimBinding = PrimBinding { _pbVars :: Names
                                , pbOrigin :: Origin
                                }
   deriving (Show)
 
-type BindingMap = M.Map VName PrimBinding
+-- A mapping from names to PrimBinding.  The key is a collection of names, since
+-- a statement can have multiple patterns.
+type BindingMap = [(Names, PrimBinding)]
+
+lookupPrimBinding :: VName -> State BindingMap PrimBinding
+lookupPrimBinding vname = do
+  bm <- get
+  return $ snd $
+    fromJust (pretty vname ++ " was not found in BindingMap."
+              ++ "  This should not happen!  At least not with --cpu.")
+    $ L.find ((vname `S.member`) . fst) bm
 
 hoistAllocsFunDef :: FunDef ExplicitMemory
                   -> FunDef ExplicitMemory
 hoistAllocsFunDef fundef =
   let scope_new = scopeOf fundef
-      bindingmap_cur = M.empty
-      body' = hoistAllocsBody scope_new bindingmap_cur (Just (funDefParams fundef)) $ funDefBody fundef
+      bindingmap_cur = []
+      body' = hoistAllocsBody scope_new bindingmap_cur
+              (Just (funDefParams fundef)) $ funDefBody fundef
       fundef' = fundef { funDefBody = body' }
 
       debug = fundef' `seq` do
@@ -69,9 +80,9 @@ hoistAllocsBody scope_new bindingmap_old params body =
   let hoistees = findHoistees body params
 
       -- We use the possibly non-empty scope to extend our BindingMap.
-      bindingmap_fromscope = M.fromList $ map scopeBindingMap $ M.toList scope_new
-      bindingmap0 = bindingmap_old <> bindingmap_fromscope
-      bindingmap = bodyBindingMap bindingmap0 (bodyStms body)
+      bindingmap_fromscope = concatMap scopeBindingMap $ M.toList scope_new
+      bindingmap_body = bodyBindingMap (bodyStms body)
+      bindingmap = bindingmap_old ++ bindingmap_fromscope ++ bindingmap_body
 
       -- Create a new body where all hoistees have been moved as much upwards in
       -- the statement list as possible.
@@ -83,7 +94,7 @@ hoistAllocsBody scope_new bindingmap_old params body =
       bnds' = map (hoistRecursivelyStm bindingmap') bnds
       body' = Body () bnds' res
 
-      debug = do
+      debug = hoistees `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "Allocations found in body:"
         forM_ hoistees $ \h -> putStrLn ("hoistee: " ++ pretty h)
@@ -92,34 +103,32 @@ hoistAllocsBody scope_new bindingmap_old params body =
   in withDebug debug body'
 
 scopeBindingMap :: (VName, NameInfo ExplicitMemory)
-                -> (VName, PrimBinding)
-scopeBindingMap (x, _) = (x, PrimBinding [] FromFParam)
+                -> BindingMap
+scopeBindingMap (x, _) = [(S.singleton x, PrimBinding S.empty FromFParam)]
 
-bodyBindingMap :: BindingMap -> [Stm ExplicitMemory] -> BindingMap
-bodyBindingMap bindingmap stms =
-  foldl createBindingStmt bindingmap $ zip [0..] stms
+bodyBindingMap :: [Stm ExplicitMemory] -> BindingMap
+bodyBindingMap stms =
+  concatMap createBindingStmt $ zip [0..] stms
   -- We do not need to run this recursively on any sub-bodies, since this will
   -- be run for every call to hoistAllocsBody, which *does* run recursively on
   -- sub-bodies.
 
-  where createBindingStmt :: BindingMap -> (Line, Stm ExplicitMemory)
+  where createBindingStmt :: (Line, Stm ExplicitMemory)
                           -> BindingMap
-        createBindingStmt bmap (line, stmt@(Let (Pattern _ patelems) () _)) =
+        createBindingStmt (line, stmt@(Let (Pattern _ patelems) () _)) =
           let -- Both free variables and consumed variables count as dependencies.
-              frees = S.toList $ S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
-              var_bindings = map (\(PatElem x _ _) ->
-                                    (x, PrimBinding frees (FromLine line))) patelems
+              frees = S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
+              vars_binding = (S.fromList (map patElemName patelems),
+                              PrimBinding frees (FromLine line))
 
               -- Some variables exist only in a shape declaration and so will
               -- have no PrimBinding.  If we hit the Nothing case, we assume
               -- that's what happened.
-              shape_sizes = concatMap shapeSizes patelems
-              size_bindings = map (\size_var ->
-                                     (size_var, PrimBinding frees (FromLine line)))
-                              shape_sizes
+              shape_sizes = S.fromList $ concatMap shapeSizes patelems
+              sizes_binding = (shape_sizes, PrimBinding frees (FromLine line))
 
-              bmap' = M.union bmap $ M.fromList (var_bindings ++ size_bindings)
-          in bmap'
+              bmap = [vars_binding, sizes_binding]
+          in bmap
 
         shapeSizes (PatElem _ _ (ExpMem.ArrayMem _ shape _ _ _)) =
           mapMaybe fromVar $ shapeDims shape
@@ -135,12 +144,15 @@ hoistRecursivelyStm bindingmap (Let pat () e) =
         mapper scope_new = return . hoistAllocsBody scope_new bindingmap' Nothing
         -- The nested body cannot move to any of its locations of its parent's
         -- body, so we say that all its parent's bindings are parameters.
-        bindingmap' = M.map (\(PrimBinding vs _) -> PrimBinding vs FromFParam) bindingmap
+        bindingmap' = map (\(ns, PrimBinding vs _) ->
+                             (ns, PrimBinding vs FromFParam))
+                      bindingmap
 
 findHoistees :: Body ExplicitMemory -> Maybe [FParam ExplicitMemory]
              -> [VName]
 findHoistees body params =
-  let all_found = mapMaybe findThemStm stms ++ maybe [] (mapMaybe findThemFParam) params
+  let all_found = mapMaybe findThemStm stms
+                  ++ maybe [] (mapMaybe findThemFParam) params
       extras = concatMap snd all_found
       allocs = map fst all_found
       -- We must hoist the alloc expressions in the end.  If we hoist an alloc
@@ -224,7 +236,7 @@ hoist :: BindingMap
       -> VName
       -> (Body ExplicitMemory, BindingMap)
 hoist bindingmap_cur body hoistee =
-  let bindingmap = bodyBindingMap bindingmap_cur (bodyStms body)
+  let bindingmap = bindingmap_cur ++ bodyBindingMap (bodyStms body)
 
       body' = runState (moveLetUpwards hoistee body) bindingmap
 
@@ -235,13 +247,6 @@ hoist bindingmap_cur body hoistee =
         putStrLn $ replicate 70 '~'
 
   in withDebug debug body'
-
-lookupPrimBinding :: VName -> State BindingMap PrimBinding
-lookupPrimBinding vname = do
-  m <- M.lookup vname <$> get
-  case m of
-    Just b -> return b
-    Nothing -> error (pretty vname ++ " was not found in BindingMap.  This should not happen!  At least not with --cpu.")
 
 sortByKeyM :: (Ord t, Monad m) => (a -> m t) -> [a] -> m [a]
 sortByKeyM f xs = do
@@ -259,26 +264,37 @@ moveLetUpwards letname body = do
       -- Sort by how close they are to the beginning of the body.  The closest
       -- one should be the first one to hoist, so that the other ones can maybe
       -- exploit it.
-      deps' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t) deps
+      deps' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t) $ S.toList deps
       body' <- foldM (flip moveLetUpwards) body deps'
       origins <- mapM (\t -> pbOrigin <$> lookupPrimBinding t) deps'
       let line_dest = case foldl max FromFParam origins of
             FromFParam -> 0
             FromLine n -> n + 1
-      stms' <- moveLetToLine letname line_cur line_dest $ bodyStms body'
 
-      let debug = line_dest `seq` do
+      PrimBinding _ letorig' <- lookupPrimBinding letname
+      when (letorig' /= letorig) $ error "Assertion: This should not happen."
+
+      test0 <- lookupPrimBinding (VName (nameFromString "res") 86298)
+      stms' <- moveLetToLine letname line_cur line_dest $ bodyStms body'
+      test1 <- lookupPrimBinding (VName (nameFromString "res") 86298)
+
+      let debug = stms' `seq` do
             putStrLn $ replicate 70 '~'
             putStrLn "AllocHoisting moveLetUpwards"
+            print test0
+            print test1
             print letname
             print deps'
             print line_cur
             print line_dest
+            putStrLn $ replicate 70 '|'
+            putStrLn $ pretty body'
+            putStrLn $ replicate 70 '|'
             putStrLn $ replicate 70 '~'
 
       withDebug debug $ return body' { bodyStms = stms' }
 
--- Both move the statement to the new line, and update the BindingMap.
+-- Both move the statement to the new line and update the BindingMap.
 moveLetToLine :: VName -> Line -> Line -> [Stm ExplicitMemory]
               -> State BindingMap [Stm ExplicitMemory]
 moveLetToLine stm_cur_name line_cur line_dest stms
@@ -289,15 +305,20 @@ moveLetToLine stm_cur_name line_cur line_dest stms
       stms1 = take line_cur stms ++ drop (line_cur + 1) stms
       stms2 = take line_dest stms1 ++ [stm_cur] ++ drop line_dest stms1
 
-  modify $ M.map (\pb@(PrimBinding vars orig) ->
-                    case orig of
-                      FromFParam -> pb
-                      FromLine l -> if l >= line_dest && l < line_cur
-                                    then PrimBinding vars (FromLine (l + 1))
-                                    else pb)
+  modify $ map (\t@(ns, PrimBinding vars orig) ->
+                   case orig of
+                     FromFParam -> t
+                     FromLine l -> if l >= line_dest && l < line_cur
+                                   then (ns, PrimBinding vars (FromLine (l + 1)))
+                                   else t)
 
   PrimBinding vars _ <- lookupPrimBinding stm_cur_name
-  modify $ M.delete stm_cur_name
-  modify $ M.insert stm_cur_name (PrimBinding vars (FromLine line_dest))
+  modify $ replaceWhere stm_cur_name (PrimBinding vars (FromLine line_dest))
 
   return stms2
+
+replaceWhere :: VName -> PrimBinding -> BindingMap -> BindingMap
+replaceWhere n pb1 =
+  map (\(ns, pb) -> (ns, if n `S.member` ns
+                         then pb1
+                         else pb))
