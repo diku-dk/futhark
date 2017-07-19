@@ -85,7 +85,7 @@ findLastUses var_to_mem mem_aliases first_uses fundef =
 
     -- Find the memory blocks used or aliased by a variable.
     varMems :: VName -> FindM Names
-    varMems var = do
+    varMems var =
       -- Context var_to_mem mem_aliases _ <- ask
       return $ fromMaybe S.empty $ do
         mem <- memSrcName <$> M.lookup var var_to_mem

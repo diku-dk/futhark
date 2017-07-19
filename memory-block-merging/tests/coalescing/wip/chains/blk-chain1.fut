@@ -24,6 +24,7 @@
 --           [7, 7, 7, 7, 7],
 --           [9, 9, 9, 9, 9]]
 --        }
+
 -- structure cpu { Alloc 2 }
 
 -- Without allocation hoisting, there is only one coalescing opportunity, i.e.

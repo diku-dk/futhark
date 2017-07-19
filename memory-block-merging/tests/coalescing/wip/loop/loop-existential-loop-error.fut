@@ -6,6 +6,7 @@
 --       }
 -- output { [5, 5]
 --        }
+
 -- structure cpu { Alloc 2 }
 
 import "/futlib/array"

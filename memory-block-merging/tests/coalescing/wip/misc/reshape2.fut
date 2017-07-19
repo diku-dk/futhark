@@ -1,5 +1,6 @@
 -- Yet another reshape test program.
 -- ==
+
 -- structure cpu { Alloc 0 }
 
 import "/futlib/array"

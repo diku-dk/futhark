@@ -8,6 +8,7 @@
 -- output { [[[2, 2], [3, 5]], [[2, 2], [2, 2]]]
 --          [[[5, 5], [5, 5]], [[5, 5], [5, 5]]]
 --        }
+
 -- structure cpu { Alloc 3 }
 
 -- FIXME: The coalescing part seems fine on this one, but the allocation

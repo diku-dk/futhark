@@ -18,6 +18,7 @@ import Futhark.Optimise.MemoryBlockMerging.VariableAliases
 import Futhark.Optimise.MemoryBlockMerging.Liveness.FirstUse
 import Futhark.Optimise.MemoryBlockMerging.Liveness.LastUse
 import Futhark.Optimise.MemoryBlockMerging.Liveness.Interference
+import Futhark.Optimise.MemoryBlockMerging.ActualVariables
 
 
 getAuxiliaryInfo :: FunDef ExplicitMemory -> AuxiliaryInfo
@@ -29,6 +30,7 @@ getAuxiliaryInfo fundef =
       first_uses = findFirstUses var_to_mem mem_aliases fundef
       last_uses = findLastUses var_to_mem mem_aliases first_uses fundef
       interferences = findInterferences mem_aliases first_uses last_uses fundef
+      actual_variables = findActualVariables first_uses var_to_mem fundef
   in AuxiliaryInfo
      { auxName = name
      , auxVarMemMappings = var_to_mem
@@ -37,6 +39,7 @@ getAuxiliaryInfo fundef =
      , auxFirstUses = first_uses
      , auxLastUses = last_uses
      , auxInterferences = interferences
+     , auxActualVariables = actual_variables
      }
 
 debugAuxiliaryInfo :: AuxiliaryInfo -> String -> IO ()
@@ -68,5 +71,12 @@ debugAuxiliaryInfo aux desc = aux `seq` do
   putStrLn "Interferences of memory blocks:"
   forM_ (M.assocs $ auxInterferences aux) $ \(mem, mems) ->
     putStrLn ("In " ++ pretty mem ++ ": " ++ prettySet mems)
+  putStrLn $ replicate 70 '-'
+  putStrLn "Actual variables:"
+  forM_ (M.assocs $ fst $ auxActualVariables aux) $ \(var, vars) ->
+    putStrLn ("For " ++ pretty var ++ ": " ++ prettySet vars)
+  putStrLn $ replicate 70 '-'
+  putStrLn "Existentials:"
+  putStrLn $ prettySet $ snd $ auxActualVariables aux
   putStrLn $ replicate 70 '='
   putStrLn ""

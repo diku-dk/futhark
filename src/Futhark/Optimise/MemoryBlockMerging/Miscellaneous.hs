@@ -31,6 +31,9 @@ withDebug debug x
   | usesDebugging = unsafePerformIO debug `seq` x
   | otherwise = x
 
+doDebug :: Monad m => IO () -> m ()
+doDebug debug = withDebug debug $ return ()
+
 withDebugJSON :: IO () -> a -> a
 withDebugJSON debug x
   | usesDebuggingJSON = unsafePerformIO debug `seq` x
@@ -51,6 +54,13 @@ makeCommutativeMap m =
                           ns = S.union existing newly_found
                       in (n, ns)) names
   in M.fromList assocs
+
+insertOrUpdate :: (Ord k, Ord v) => k -> v -> M.Map k (S.Set v) -> M.Map k (S.Set v)
+insertOrUpdate k v = M.alter (insertOrNew v) k
+  where insertOrNew :: Ord a => a -> Maybe (S.Set a) -> Maybe (S.Set a)
+        insertOrNew x m = Just $ case m of
+          Just s -> S.insert x s
+          Nothing -> S.singleton x
 
 cleanupMapping :: Ord v => M.Map v (S.Set v) -> M.Map v (S.Set v)
 cleanupMapping = M.filter (not . S.null)
@@ -107,9 +117,17 @@ instance ArrayUtils InKernel where
 lookupEmptyable :: (Ord a, Monoid b) => a -> M.Map a b -> b
 lookupEmptyable x m = fromMaybe mempty $ M.lookup x m
 
-shouldWork :: String -> Maybe a -> a
-shouldWork _ (Just x) = x
-shouldWork mistake Nothing = error mistake
+-- Works for now.
+fromJust :: String -> Maybe a -> a
+fromJust _ (Just x) = x
+fromJust mistake Nothing = error mistake
+
+maybeFromBoolM :: Monad m => (a -> m Bool) -> (a -> m (Maybe a))
+maybeFromBoolM f a = do
+  res <- f a
+  return $ if res
+           then Just a
+           else Nothing
 
 onJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
 onJust may f = case may of

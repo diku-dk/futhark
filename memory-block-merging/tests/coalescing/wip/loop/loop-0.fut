@@ -13,8 +13,8 @@ import "/futlib/array"
 
 -- FIXME: The coalescing into y[n/2] causes problems for the loop: In the first
 -- iteration it uses a_mem -- which has no special index function -- but in the
--- second iteration it uses y_mem with an index function created from the
--- `[n/2]` slice.
+-- second iteration, if there is a coalescing, it uses y_mem with an index
+-- function created from the `[n/2]` slice.
 --
 -- The previous way to fix this was to set the initial value of a1 to 'copy a'
 -- instead of 'a', and then let both the 'copy a' memory block AND
