@@ -6,8 +6,9 @@ module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
   ) where
 
 import qualified Data.Set as S
-import qualified Data.List as L
 import qualified Data.Map.Strict as M
+import qualified Data.List as L
+import Data.Maybe (catMaybes, fromMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -19,7 +20,6 @@ import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 
 import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
-import Futhark.Optimise.MemoryBlockMerging.ActualVariables (findActualVariables)
 
 
 data Context = Context { ctxFirstUses :: FirstUses
@@ -27,6 +27,8 @@ data Context = Context { ctxFirstUses :: FirstUses
                        , ctxSizes :: Sizes
                        , ctxVarToMem :: VarMemMappings MemorySrc
                        , ctxActualVars :: M.Map VName Names
+                       , ctxExistentials :: Names
+                       , ctxCurLoopBodyRes :: Result
                        }
   deriving (Show)
 
@@ -45,14 +47,26 @@ newtype FindM a = FindM { unFindM :: RWS Context () Current a }
             MonadReader Context,
             MonadState Current)
 
+-- Lookup the memory block statically associated with a variable.
+lookupVarMem :: VName -> FindM MemorySrc
+lookupVarMem var =
+  -- This should always be called from a place where it is certain that 'var'
+  -- refers to a statement with an array expression.
+  (fromJust ("lookup memory block from " ++ pretty var) . M.lookup var)
+  <$> asks ctxVarToMem
+
+lookupActualVars :: VName -> FindM Names
+lookupActualVars var =
+  (fromMaybe (S.singleton var) . M.lookup var) <$> asks ctxActualVars
+
+lookupSize :: VName -> FindM SubExp
+lookupSize var =
+  (fromJust ("lookup size from " ++ pretty var) . M.lookup var)
+  <$> asks ctxSizes
+
 insertUse :: VName -> VName -> FindM ()
 insertUse new_mem old_mem =
-  modify $ \cur -> cur { curUses = M.alter (insertOrNew old_mem) new_mem $ curUses cur }
-
-insertOrNew :: Ord a => a -> Maybe (S.Set a) -> Maybe (S.Set a)
-insertOrNew x m = Just $ case m of
-  Just s -> S.insert x s
-  Nothing -> S.singleton x
+  modify $ \cur -> cur { curUses = insertOrUpdate new_mem old_mem $ curUses cur }
 
 recordMapping :: VName -> MemoryLoc -> FindM ()
 recordMapping x mem =
@@ -68,22 +82,22 @@ withLocalUses m = do
 
 coreReuseFunDef :: FunDef ExplicitMemory
                 -> FirstUses -> Interferences -> VarMemMappings MemorySrc
-                -> FunDef ExplicitMemory
-coreReuseFunDef fundef first_uses interferences var_to_mem =
+                -> (ActualVariables, Names) -> FunDef ExplicitMemory
+coreReuseFunDef fundef first_uses interferences var_to_mem (actual_vars, existentials) =
   let sizes = memBlockSizes fundef
-      (actual_vars, _existentials) = findActualVariables first_uses var_to_mem fundef
-      context = Context first_uses interferences sizes var_to_mem actual_vars
+      context = Context first_uses interferences sizes var_to_mem
+                actual_vars existentials []
       m = unFindM $ lookInBody $ funDefBody fundef
       var_to_mem_res = curResult $ fst $ execRWS m context emptyCurrent
       fundef' = transformFromVarMemMappings var_to_mem_res fundef
 
-      debug = var_to_mem_res `seq` do
+      debug = fundef' `seq` do
         putStrLn $ replicate 70 '='
         putStrLn "coreReuseFunDef reuse results:"
         forM_ (M.assocs var_to_mem_res) $ \(src, dstmem) ->
-          putStrLn ("Source " ++ pretty src ++ " reuses " ++ pretty (memLocName dstmem) ++ "; ixfun: " ++ show (memLocIxFun dstmem))
-        -- print fundef
-        -- putStrLn $ pretty fundef'
+          putStrLn ("Source " ++ pretty src ++ " reuses "
+                    ++ pretty (memLocName dstmem) ++ "; ixfun: "
+                    ++ show (memLocIxFun dstmem))
         putStrLn $ pretty fundef'
         putStrLn $ replicate 70 '='
 
@@ -96,12 +110,15 @@ lookInBody (Body () bnds _res) =
 
 lookInStm :: Stm ExplicitMemory -> FindM ()
 lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
-  withLocalUses $ walkExpM walker e
-
-  first_uses_all <- asks ctxFirstUses
   forM_ patvalelems $ \(PatElem var _ membound) -> do
-    let first_uses = lookupEmptyable var first_uses_all
-    mapM_ (handleNewArray var membound) first_uses
+    first_uses <- lookupEmptyable var <$> asks ctxFirstUses
+    forM_ first_uses $ handleNewArray var membound
+
+  let mMod = case e of
+        DoLoop _ _ _ loopbody ->
+          local (\ctx -> ctx { ctxCurLoopBodyRes = bodyResult loopbody })
+        _ -> id
+  withLocalUses $ mMod $ walkExpM walker e
 
   let debug = do
         putStrLn $ replicate 70 '~'
@@ -114,83 +131,8 @@ lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
 
   where walker = identityWalker { walkOnBody = lookInBody }
 
-getActualVars :: VName -> FindM [VName]
-getActualVars src0 = do
-  res <- getActualVars' S.empty src0
-
-  let debug = res `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "getActualVars:"
-        putStrLn ("src: " ++ pretty src0)
-        putStrLn ("result: " ++ prettySet (S.fromList res))
-        putStrLn $ replicate 70 '~'
-
-  withDebug debug $ return res
-  where getActualVars' visited src
-          | S.member src visited = return []
-          | otherwise = do
-              actual_vars <- asks ctxActualVars
-              case M.lookup src actual_vars of
-                Nothing -> return [src]
-                Just a_srcs -> do
-                  more <- mapM (getActualVars' (S.insert src visited))
-                          $ S.toList a_srcs
-                  return (S.toList a_srcs ++ concat more)
-
-handleNewArray :: VName -> ExpMem.MemBound u -> VName -> FindM ()
-handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
-  uses <- gets curUses
-  interferences <- asks ctxInterferences
-  sizes <- asks ctxSizes
-
-  let notTheSame :: (VName, Names) -> Bool
-      notTheSame (kmem, _) = kmem /= xmem
-
-  let sizesMatch :: (VName, Names) -> Bool
-      sizesMatch (kmem, _) = equalSizeSubExps (shouldWork ("find size of " ++ pretty kmem) $ M.lookup kmem sizes) (shouldWork ("find size of " ++ pretty xmem) $ M.lookup xmem sizes) -- (sizes M.! kmem) (sizes M.! xmem)
-
-  let noneInterfere :: (VName, Names) -> Bool
-      noneInterfere (_kmem, used_mems) =
-        -- A memory block can have already been reused.  For safety's sake, we
-        -- also check for interference with any previously merged blocks.  Might
-        -- not be necessary?
-        all (\used_mem -> not $ S.member xmem $ lookupEmptyable used_mem interferences)
-        $ S.toList used_mems
-
-  let canBeUsed t = notTheSame t && sizesMatch t && noneInterfere t
-      found_use = L.find canBeUsed $ M.assocs uses
-
-  case found_use of
-    Just (kmem, _) -> do
-      insertUse kmem xmem
-
-      -- hack
-      actual_vars <- getActualVars x
-      -- specially_handled <- M.lookup x <$> asks ctxActualVars
-      -- actual_vars <- case specially_handled of
-      --   Just _ -> getActualVars x
-      --   Nothing -> return [x]
-      forM_ actual_vars $ \var -> do
-        varmem <- (shouldWork "it's an array" . M.lookup var) <$> asks ctxVarToMem
-        recordMapping var $ MemoryLoc kmem (memSrcIxFun varmem)
-    Nothing ->
-      insertUse xmem xmem
-
-  let debug = uses `seq` sizes `seq` do
-        putStrLn $ replicate 70 '~'
-        putStrLn "Handle new array."
-        putStrLn ("var: " ++ pretty x)
-        putStrLn ("mem: " ++ pretty xmem)
-        putStrLn ("uses: " ++ show uses)
-        putStrLn ("sizes: " ++ show sizes)
-        putStrLn ("can be used: " ++ show found_use)
-        putStrLn $ replicate 70 '~'
-
-  withDebug debug $ return ()
-
-handleNewArray _ _ _ = return ()
-
--- FIXME: Less conservative, please.  Would require some more state.
+-- FIXME: Less conservative, please.  Would require some more state.  Also
+-- support using memory blocks of larger sizes?
 equalSizeSubExps :: SubExp -> SubExp -> Bool
 equalSizeSubExps x y =
   let eq = (x == y)
@@ -203,3 +145,64 @@ equalSizeSubExps x y =
         putStrLn $ replicate 70 '~'
 
   in withDebug debug eq
+
+handleNewArray :: VName -> ExpMem.MemBound u -> VName -> FindM ()
+handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
+  interferences <- asks ctxInterferences
+
+  -- If the statement is inside a loop body, and the loop result contains this
+  -- array, abort!  That is a sign of trouble.
+  --
+  -- This can be described in more general terms with interference, but the
+  -- existing interference analysis is not good enough, since it has to be rerun
+  -- in the case of loop memory block mergings.  We *can* do that, but it might
+  -- get messy.
+  cur_loop_body_res <- asks ctxCurLoopBodyRes
+  let loop_disabled = Var x `L.elem` cur_loop_body_res
+
+  let notTheSame :: (VName, Names) -> FindM Bool
+      notTheSame (kmem, _) = return (kmem /= xmem)
+
+  let sizesMatch :: (VName, Names) -> FindM Bool
+      sizesMatch (kmem, _) =
+        equalSizeSubExps <$> lookupSize kmem <*> lookupSize xmem
+
+  let noneInterfere :: (VName, Names) -> FindM Bool
+      noneInterfere (_kmem, used_mems) =
+        -- A memory block can have already been reused.  For safety's sake, we
+        -- also check for interference with any previously merged blocks.  Might
+        -- not be necessary?
+        return $ all (\used_mem -> not $ S.member xmem
+                                   $ lookupEmptyable used_mem interferences)
+        $ S.toList used_mems
+
+  let canBeUsed t = and <$> mapM ($ t) [notTheSame, sizesMatch, noneInterfere]
+  found_use <- catMaybes <$> (mapM (maybeFromBoolM canBeUsed) =<< (M.assocs <$> gets curUses))
+
+  existentials <- asks ctxExistentials
+  case (loop_disabled, found_use) of
+    (False, (kmem, _) : _) -> do
+      -- There is a previous memory block that we can use.  Record the mapping.
+      insertUse kmem xmem
+      actual_vars <- lookupActualVars x
+      forM_ actual_vars $ \var ->
+        unless (S.member var existentials) $ do
+          ixfun <- memSrcIxFun <$> lookupVarMem var
+          recordMapping var $ MemoryLoc kmem ixfun
+    _ ->
+      -- There is no previous memory block available for use.  Record that this
+      -- memory block is available.
+      unless (S.member x existentials) $ insertUse xmem xmem
+
+  let debug = found_use `seq` do
+        putStrLn $ replicate 70 '~'
+        putStrLn "Handle new array."
+        putStrLn ("var: " ++ pretty x)
+        putStrLn ("mem: " ++ pretty xmem)
+        putStrLn ("loop disabled: " ++ show loop_disabled)
+        putStrLn ("found use: " ++ show found_use)
+        putStrLn $ replicate 70 '~'
+
+  withDebug debug $ return ()
+
+handleNewArray _ _ _ = return ()

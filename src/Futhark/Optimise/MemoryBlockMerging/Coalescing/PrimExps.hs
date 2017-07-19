@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
-module Futhark.Optimise.MemoryBlockMerging.PrimExps
+module Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps
   ( findPrimExpsFunDef
   ) where
 

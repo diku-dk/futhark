@@ -16,6 +16,7 @@
 --       }
 -- output { [3, 3]
 --        }
+
 -- structure cpu { Alloc 1 }
 
 let main (xs0: [#n]i32, cond: bool, i: i32): [n]i32 =
