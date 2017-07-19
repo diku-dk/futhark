@@ -179,12 +179,13 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
   let canBeUsed t = and <$> mapM ($ t) [notTheSame, sizesMatch, noneInterfere]
   found_use <- catMaybes <$> (mapM (maybeFromBoolM canBeUsed) =<< (M.assocs <$> gets curUses))
 
+  actual_vars <- lookupActualVars x
   existentials <- asks ctxExistentials
-  case (loop_disabled, found_use) of
-    (False, (kmem, _) : _) -> do
+  let base_ok = not loop_disabled && not (S.null actual_vars)
+  case (base_ok, found_use) of
+    (True, (kmem, _) : _) -> do
       -- There is a previous memory block that we can use.  Record the mapping.
       insertUse kmem xmem
-      actual_vars <- lookupActualVars x
       forM_ actual_vars $ \var ->
         unless (S.member var existentials) $ do
           ixfun <- memSrcIxFun <$> lookupVarMem var
@@ -198,6 +199,7 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
         putStrLn $ replicate 70 '~'
         putStrLn "Handle new array."
         putStrLn ("var: " ++ pretty x)
+        putStrLn ("actual vars: " ++ prettySet actual_vars)
         putStrLn ("mem: " ++ pretty xmem)
         putStrLn ("loop disabled: " ++ show loop_disabled)
         putStrLn ("found use: " ++ show found_use)

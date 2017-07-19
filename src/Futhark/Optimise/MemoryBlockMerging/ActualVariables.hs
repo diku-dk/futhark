@@ -189,12 +189,13 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
           _ -> return ()
 
     -- Support reusing the memory of reshape operations by recording the origin
-    -- array that is being reshaped.
+    -- array that is being reshaped.  Unexpected behaviour if the source is also
+    -- a reshape or similar.
     BasicOp (Reshape _ _ orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
         -- let actuals = S.fromList [var, orig]
         recordActuals var S.empty -- actuals -- FIXME
-        recordActuals orig (S.singleton var)
+        recordActuals orig $ S.fromList [orig, var]
         -- FIXME: The problem is that a slice is relative to the shape of the
         -- reshaped array, and not the original array.  Disabled for now.
 
@@ -203,12 +204,12 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
     BasicOp (Rearrange _ _ orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
         recordActuals var S.empty
-        recordActuals orig (S.singleton var)
+        recordActuals orig $ S.fromList [orig, var]
 
     BasicOp (Split _ _ _ orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
         recordActuals var S.empty
-        recordActuals orig (S.singleton var)
+        recordActuals orig $ S.fromList [orig, var]
 
     _ -> return ()
 

@@ -274,15 +274,11 @@ moveLetUpwards letname body = do
       PrimBinding _ letorig' <- lookupPrimBinding letname
       when (letorig' /= letorig) $ error "Assertion: This should not happen."
 
-      test0 <- lookupPrimBinding (VName (nameFromString "res") 86298)
       stms' <- moveLetToLine letname line_cur line_dest $ bodyStms body'
-      test1 <- lookupPrimBinding (VName (nameFromString "res") 86298)
 
       let debug = stms' `seq` do
             putStrLn $ replicate 70 '~'
             putStrLn "AllocHoisting moveLetUpwards"
-            print test0
-            print test1
             print letname
             print deps'
             print line_cur
