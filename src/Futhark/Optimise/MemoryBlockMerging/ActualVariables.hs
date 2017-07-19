@@ -188,6 +188,19 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
 
           _ -> return ()
 
+    BasicOp (Index _ orig _) -> do
+      let ielem = head patvalelems -- Should be okay.
+          var = patElemName ielem
+      case patElemAttr ielem of
+        ExpMem.ArrayMem{} -> do
+          -- Disable merging for index expressions that return arrays.  Maybe
+          -- too restrictive.
+          recordActuals var S.empty
+          -- Make sure the source also updates the memory of the index when
+          -- updated.
+          recordActuals orig $ S.fromList [orig, var]
+        _ -> return ()
+
     -- Support reusing the memory of reshape operations by recording the origin
     -- array that is being reshaped.  Unexpected behaviour if the source is also
     -- a reshape or similar.
@@ -207,6 +220,11 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
         recordActuals orig $ S.fromList [orig, var]
 
     BasicOp (Split _ _ _ orig) ->
+      forM_ (map patElemName patvalelems) $ \var -> do
+        recordActuals var S.empty
+        recordActuals orig $ S.fromList [orig, var]
+
+    BasicOp (Opaque (Var orig)) ->
       forM_ (map patElemName patvalelems) $ \var -> do
         recordActuals var S.empty
         recordActuals orig $ S.fromList [orig, var]
