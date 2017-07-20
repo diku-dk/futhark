@@ -27,6 +27,9 @@ module Futhark.Representation.Kernels.Kernel
        , KernelMapper(..)
        , identityKernelMapper
        , mapKernelM
+       , KernelWalker(..)
+       , identityKernelWalker
+       , walkKernelM
        )
        where
 
@@ -233,6 +236,48 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
                               , mapOnKernelLParam = walk freeIn
                               , mapOnKernelKernelBody = walk freeIn
                               }
+
+-- | Like 'Walker', but just for 'Kernel's.
+data KernelWalker lore m = KernelWalker {
+    walkOnKernelSubExp :: SubExp -> m ()
+  , walkOnKernelLambda :: Lambda lore -> m ()
+  , walkOnKernelBody :: Body lore -> m ()
+  , walkOnKernelVName :: VName -> m ()
+  , walkOnKernelCertificates :: Certificates -> m ()
+  , walkOnKernelLParam :: LParam lore -> m ()
+  , walkOnKernelKernelBody :: KernelBody lore -> m ()
+  }
+
+-- | A no-op traversal.
+identityKernelWalker :: Monad m => KernelWalker lore m
+identityKernelWalker = KernelWalker {
+    walkOnKernelSubExp = const $ return ()
+  , walkOnKernelLambda = const $ return ()
+  , walkOnKernelBody = const $ return ()
+  , walkOnKernelVName = const $ return ()
+  , walkOnKernelCertificates = const $ return ()
+  , walkOnKernelLParam = const $ return ()
+  , walkOnKernelKernelBody = const $ return ()
+  }
+
+walkKernelMapper :: forall lore m. Monad m =>
+                    KernelWalker lore m -> KernelMapper lore lore m
+walkKernelMapper f = KernelMapper {
+    mapOnKernelSubExp = wrap walkOnKernelSubExp
+  , mapOnKernelLambda = wrap walkOnKernelLambda
+  , mapOnKernelBody = wrap walkOnKernelBody
+  , mapOnKernelVName = wrap walkOnKernelVName
+  , mapOnKernelCertificates = wrap walkOnKernelCertificates
+  , mapOnKernelLParam = wrap walkOnKernelLParam
+  , mapOnKernelKernelBody = wrap walkOnKernelKernelBody
+  }
+  where wrap :: (KernelWalker lore m -> a -> m ()) -> a -> m a
+        wrap op k = op f k >> return k
+
+-- | As 'mapKernelM', but ignoring the results.
+walkKernelM :: Monad m => KernelWalker lore m -> Kernel lore -> m ()
+walkKernelM f = void . mapKernelM m
+  where m = walkKernelMapper f
 
 instance FreeIn KernelResult where
   freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
