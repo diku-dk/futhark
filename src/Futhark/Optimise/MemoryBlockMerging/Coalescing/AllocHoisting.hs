@@ -134,7 +134,7 @@ bodyBindingMap stms =
                   -- This might do too much.
                   S.fromList ([ ExpMem.spaceGlobalId space
                               , ExpMem.spaceLocalId space
-                              , ExpMem.spaceGlobalId space]
+                              , ExpMem.spaceGroupId space]
                               ++ (case ExpMem.spaceStructure space of
                                     ExpMem.FlatThreadSpace ts ->
                                       map fst ts ++ mapMaybe (fromVar . snd) ts
@@ -148,7 +148,13 @@ bodyBindingMap stms =
               params_binding = (param_vars, PrimBinding S.empty FromFParam)
 
               bmap = [vars_binding, sizes_binding, params_binding]
-          in bmap
+
+              debug = do
+                putStrLn $ replicate 70 '~'
+                putStrLn "createBindingStmt:"
+                print param_vars
+                putStrLn $ replicate 70 '~'
+          in withDebug debug bmap
 
         shapeSizes (PatElem _ _ (ExpMem.ArrayMem _ shape _ _ _)) =
           mapMaybe fromVar $ shapeDims shape
