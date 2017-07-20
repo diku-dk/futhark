@@ -12,6 +12,7 @@
 --          , [[2, 3, 4, 5]]
 --          ]
 --        }
+
 -- structure cpu { Alloc 0 }
 
 import "/futlib/array"

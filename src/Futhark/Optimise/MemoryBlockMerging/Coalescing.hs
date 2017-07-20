@@ -36,6 +36,7 @@ coalesceInFunDef fundef0 =
       fundef2 = coreCoalesceFunDef fundef1
                 (auxVarMemMappings aux1) (auxMemAliases aux1)
                 (auxVarAliases aux1) (auxFirstUses aux1) (auxLastUses aux1)
+                (auxActualVariables aux1)
 
       debug = debug0 >> debug1
   in withDebug debug $ return fundef2

@@ -9,7 +9,7 @@
 --           [4, 8]]
 --        }
 
--- structure cpu { Alloc  }
+-- structure cpu { Alloc ? }
 
 import "/futlib/array"
 

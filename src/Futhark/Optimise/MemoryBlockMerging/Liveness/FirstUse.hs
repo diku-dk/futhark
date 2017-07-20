@@ -45,8 +45,8 @@ recordMapping stmt_var mem = tell [M.singleton stmt_var (S.singleton mem)]
 -- Overkill with the lore?
 findFirstUses :: forall lore. (ExplicitMemorish lore, ArrayUtils lore)
               => VarMemMappings MemorySrc -> MemAliases -> FunDef lore -> FirstUses
-findFirstUses var_mem_mappings mem_aliases fundef =
-  let context = Context var_mem_mappings mem_aliases
+findFirstUses var_to_mem mem_aliases fundef =
+  let context = Context var_to_mem mem_aliases
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
@@ -66,35 +66,40 @@ findFirstUses var_mem_mappings mem_aliases fundef =
 
     lookInStm :: Stm lore -> FindM ()
     lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
+      when (createsNewArray e) $ do
+        let e_free_vars = freeInExp e
+        e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
+        forM_ patvalelems $ \(PatElem x bindage membound) ->
+          case (bindage, membound) of
+            (BindVar, ExpMem.ArrayMem _ _ _ xmem _) -> do
+              x_mems <- varMems xmem
 
-      -- FIXME: are scratch preserved?  what about the following loop writing to the memory?
-      --              aliases1 = unNames $ snd $ fst $ bodyLore body -- Technically "consumed", but the poin
-      -- Maybe set DoLoop as valid fro createsNewArray and remove Scratch
-      -- consumedInExp?
+              -- For the first use to be a proper first use, it must write to
+              -- the memory, but not read from it.  We need to check this to
+              -- support multiple liveness intervals.  If we don't check this,
+              -- the last use analysis and the interference analysis might end
+              -- up wrong.
+              when (S.null $ S.intersection x_mems e_mems)
+                -- We only record the mapping between the statement and the
+                -- memory block, not any of its aliased memory blocks.  They
+                -- would not be aliased unless they are themselves created at
+                -- some point, so they will get their own FirstUses.  Putting
+                -- them into first use here would probably also be too
+                -- conservative.
+                $ recordMapping x xmem
+            _ -> return ()
 
-      let creates_new_array = createsNewArray e
-          creates_new_array_in_loop = case e of
-            DoLoop {} ->
-              let hasArrayMem (PatElem _ _ ExpMem.ArrayMem{}) = True
-                  hasArrayMem _ = False
-              in any hasArrayMem patvalelems
-            _ -> False
-      when (creates_new_array || creates_new_array_in_loop)
-        -- This whole "does it create a new array" search is crude.  Do we even
-        -- need this?  It might be simpler to state that a first use of a memory
-        -- block is when it is fully written into and not read from.
-        $ forM_ patvalelems $ lookInPatValElem e
-
-      -- Find first uses of existential memory blocks.
+      -- Find first uses of existential memory blocks.  Fairly conservative.
+      -- Covers the case where a loop uses multiple arrays by saying every
+      -- existential memory block overlaps with every result memory block.  Fine
+      -- for now.
       forM_ patctxelems
-          $ \p -> forM_ patvalelems -- Probably too conservative.  Covers the case
-                                    -- where a loop uses multiple arrays.
+          $ \p -> forM_ patvalelems
                   $ \el -> lookInPatCtxElem (patElemName el) p
       case e of
         DoLoop mergectxparams _mergevalparams _loopform _body ->
           forM_ mergectxparams
-          $ \p -> forM_ patvalelems -- Probably too conservative.  Covers the case
-                                    -- where a loop uses multiple arrays.
+          $ \p -> forM_ patvalelems
                   $ \el -> lookInMergeCtxParam (patElemName el) p
         _ -> return ()
 
@@ -103,44 +108,11 @@ findFirstUses var_mem_mappings mem_aliases fundef =
 
     -- Find the memory blocks used or aliased by a variable.
     varMems :: VName -> FindM Names
-    varMems var = do
-      Context var_to_mem mem_aliases <- ask
+    varMems var =
+      -- Context var_to_mem mem_aliases <- ask
       return $ fromMaybe S.empty $ do
         mem <- memSrcName <$> M.lookup var var_to_mem
         return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
-
-    lookInPatValElem :: Exp lore -> PatElem lore -> FindM ()
-    lookInPatValElem e (PatElem x _bindage (ExpMem.ArrayMem _ _ _ xmem _)) = do
-      -- This function is run only if the related expression creates a new array.
-
-      let e_free_vars = freeInExp e
-      e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
-
-      x_mems <- varMems xmem
-
-      -- For the first use to be a proper first use, it must write to the memory,
-      -- but not read from it.  We need to check this to support multiple liveness
-      -- intervals.  If we don't check this, the last use analysis and the
-      -- interference analysis might end up wrong.
-      when (null $ S.intersection x_mems e_mems)
-        -- We only record the mapping between the statement and the memory
-        -- block, not any of its aliased memory blocks.  They would not be
-        -- aliased unless they are themselves created at some point, so they
-        -- will get their own FirstUses.  Putting them into first use here would
-        -- probably also be too conservative.
-        $ recordMapping x xmem
-
-      -- let debug = do
-      --       putStrLn $ replicate 70 '~'
-      --       putStrLn "FirstUse lookInPatElem:"
-      --       putStrLn ("statement var: " ++ pretty x ++ ", var mem: " ++ pretty xmem)
-      --       putStrLn ("free vars in expression: " ++ prettySet e_free_vars)
-      --       putStrLn ("memblocks in or aliased: " ++ prettySet e_mems)
-      --       putStrLn $ replicate 70 '~'
-
-      -- withDebug debug $ return ()
-
-    lookInPatValElem _ _ = return ()
 
     lookInPatCtxElem :: VName -> PatElem lore -> FindM ()
     lookInPatCtxElem x (PatElem xmem _bindage ExpMem.MemMem{}) =

@@ -12,7 +12,7 @@ import Control.Monad.RWS
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
-import qualified Futhark.Representation.ExplicitMemory as ExpMem
+-- import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
@@ -62,8 +62,10 @@ findInterferences mem_aliases first_uses last_uses fundef =
 
   where
     lookInFunDefFParam :: FParam lore -> FindM ()
-    lookInFunDefFParam (Param var _) =
-      handleDeclaration var False
+    lookInFunDefFParam (Param var _) = do
+      let first_uses_var = lookupEmptyable var first_uses
+      mapM_ awaken $ S.toList first_uses_var
+      recordCurrentInterferences
 
     lookInBody :: Body lore -> FindM ()
     lookInBody (Body _ bnds _res) =
@@ -71,14 +73,43 @@ findInterferences mem_aliases first_uses last_uses fundef =
 
     lookInStm :: Stm lore -> FindM ()
     lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
-      mapM_ (lookInPatValElem e) patvalelems
+      -- Context first_uses last_uses <- ask
+      let can_share = canShare e
+
+      forM_ patvalelems $ \(PatElem var _ _) -> do
+        let first_uses_var = lookupEmptyable var first_uses
+        mapM_ awaken $ S.toList first_uses_var
+
+        -- cur <- get
+        -- doDebug $ do
+        --   putStrLn $ replicate 70 '~'
+        --   putStrLn ("Interference: awakening " ++ pretty var)
+        --   putStrLn ("current live: " ++ prettySet cur)
+        --   putStrLn $ replicate 70 '~'
+      unless can_share
+        -- Be conservative.  If a memory block has its last use here, and another
+        -- memory block has its first use, they still interfere.  Only kill the
+        -- last uses after the interferences have been recorded.
+        recordCurrentInterferences
 
       walkExpM walker e
-      where walker = identityWalker { walkOnBody = lookInBody }
 
-    lookInPatValElem :: Exp lore -> PatElem lore -> FindM ()
-    lookInPatValElem e (PatElem var _ _) =
-      handleDeclaration var $ canShare e
+      forM_ patvalelems $ \(PatElem var _ _) -> do
+        let last_uses_var = lookupEmptyable var last_uses
+        mapM_ kill $ S.toList last_uses_var
+
+        -- cur <- get
+        -- doDebug $ do
+        --   putStrLn $ replicate 70 '~'
+        --   putStrLn ("Interference: killing " ++ pretty var)
+        --   putStrLn ("current live: " ++ prettySet cur)
+        --   putStrLn $ replicate 70 '~'
+      when can_share
+        -- Be un-conservative.  If a memory block has its last use here, don't
+        -- let it interfere with any new firstly used memory blocks.
+        recordCurrentInterferences
+
+      where walker = identityWalker { walkOnBody = lookInBody }
 
     -- Can the destination and source memory blocks share the same memory,
     -- i.e. is the reading and writing certain to be structured in a way that
@@ -88,7 +119,7 @@ findInterferences mem_aliases first_uses last_uses fundef =
     -- same index function as the destination (which is not the case for a
     -- rearrange, for example).
     canShare :: Exp lore -> Bool
-    canShare e = False --case e of
+    canShare _e = False --case e of
       -- BasicOp ExpMem.Copy{} -> True
       -- BasicOp Concat{} -> True -- Watch out for this?
 
@@ -98,26 +129,6 @@ findInterferences mem_aliases first_uses last_uses fundef =
       -- There is no need to put expressions here that do not take arrays as
       -- input, such as iota.
 --      _ -> False
-
-    -- For every declaration, see if any liveness intervals can be started or
-    -- ended.
-    handleDeclaration :: VName -> Bool -> FindM ()
-    handleDeclaration var can_share = do
-      Context first_uses_all last_uses_all <- ask
-      let first_uses = lookupEmptyable var first_uses_all
-          last_uses = lookupEmptyable var last_uses_all
-
-      mapM_ awaken $ S.toList first_uses
-      unless can_share
-        -- Be conservative.  If a memory block has its last use here, and another
-        -- memory block has its first use, they still interfere.  Only kill the
-        -- last uses after the interferences have been recorded.
-        recordCurrentInterferences
-      mapM_ kill $ S.toList last_uses
-      when can_share
-        -- Be un-conservative.  If a memory block has its last use here, don't
-        -- let it interfere with any new firstly used memory blocks.
-        recordCurrentInterferences
 
 -- We end up also recording interferences with existential memory blocks.  This
 -- is not a problem, since the optimisations using the interference graph will

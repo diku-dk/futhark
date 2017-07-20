@@ -22,7 +22,10 @@ findVarAliases fundef = cleanupMapping $ expandWithAliases fromBody fromBody
   where fundef' = analyseFun fundef
 
         fromBody = M.unionsWith S.union $ map (uncurry M.singleton)
-                   $ concatMap onStm $ bodyStms $ funDefBody fundef'
+                   $ onBody $ funDefBody fundef'
+
+        onBody :: Body (Aliases lore) -> [(VName, Names)]
+        onBody body = concatMap onStm $ bodyStms body
 
         onStm :: Stm (Aliases lore) -> [(VName, Names)]
         onStm (Let (Pattern patctxelems patvalelems) _ e) =
@@ -31,12 +34,12 @@ findVarAliases fundef = cleanupMapping $ expandWithAliases fromBody fromBody
           in m0 ++ m1
 
         folder = identityFolder {
-          foldOnStm = \mappings stm -> return (mappings ++ onStm stm)
+          foldOnBody = \mappings body -> return (mappings ++ onBody body)
           }
 
         onPatElem :: PatElem (Aliases lore) -> [(VName, Names)]
-        onPatElem (PatElem x _ (names', ExpMem.ArrayMem{})) =
+        onPatElem (PatElem x _bindage (names', ExpMem.ArrayMem{})) =
           let aliases = unNames names'
           in [(x, aliases)]
-          -- Do we need to handle BindInPlace separately?
+
         onPatElem _ = []

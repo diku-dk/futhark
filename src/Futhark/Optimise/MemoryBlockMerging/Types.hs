@@ -36,6 +36,8 @@ type LastUses = M.Map VName Names
 
 type Interferences = M.Map VName Names
 
+type ActualVariables = M.Map VName Names
+
 -- Information needed by multiple transformations.
 data AuxiliaryInfo = AuxiliaryInfo
   { auxName :: Name -- For debugging.
@@ -45,5 +47,6 @@ data AuxiliaryInfo = AuxiliaryInfo
   , auxFirstUses :: FirstUses
   , auxLastUses :: LastUses
   , auxInterferences :: Interferences
+  , auxActualVariables :: (ActualVariables, Names) -- also existentials, a bit messy
   }
   deriving (Show)

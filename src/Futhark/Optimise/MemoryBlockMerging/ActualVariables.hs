@@ -11,7 +11,7 @@ module Futhark.Optimise.MemoryBlockMerging.ActualVariables
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (mapMaybe, maybeToList)
+import Data.Maybe (mapMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -27,8 +27,6 @@ import Futhark.Optimise.MemoryBlockMerging.Types
 -- in a body but uses the same memory block as the source variable, e.g. if a
 -- rearrange or a reshape.
 
-
-type ActualVariables = M.Map VName Names
 
 getFullMap :: [M.Map VName Names] -> M.Map VName Names
 getFullMap = M.unionsWith S.union
@@ -53,15 +51,10 @@ findActualVariables first_uses var_mem_mappings fundef =
       m = unFindM $ lookInBody $ funDefBody fundef
       res = execRWS m context S.empty
       actual_variables = getFullMap $ snd res
+      actual_variables' = expandWithAliases actual_variables actual_variables
+                          -- not actually "aliases", but same effect
       existentials = fst res
-
-      debug = do
-        putStrLn $ replicate 70 '='
-        putStrLn "all actual vars found"
-        print actual_variables
-        print existentials
-        putStrLn $ replicate 70 '='
-  in withDebug debug (actual_variables, existentials)
+  in (actual_variables', existentials)
 
 lookInBody :: Body ExplicitMemory -> FindM ()
 lookInBody (Body _ bnds _res) =
@@ -80,18 +73,22 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
 
   -- Special handling of loops, ifs, etc.
   case e of
-    DoLoop _mergectxparams mergevalparams _loopform body ->
+    DoLoop mergectxparams mergevalparams _loopform body -> do
       forM_ patvalelems $ \(PatElem var _ membound) ->
         case membound of
           ExpMem.ArrayMem _ _ _ mem _ -> do
             -- If mem is existential, we need to find the return memory that it
             -- refers to.  We cannot just look at its memory aliases, since it
             -- likely aliases both the initial memory and the final memory.
+
+            when (mem `L.elem` map patElemName patctxelems) $
+              modify $ S.insert var -- existentials, fixme make clearer, why
+                                    -- even in this module?
+
             let zipped = zip patctxelems (bodyResult body)
-            (var_actual, mem_search) <- case L.find ((== mem) . patElemName . fst) zipped of
-              Just (_, Var res_mem) ->
-                return (Nothing, res_mem)
-              _ -> return (Just var, mem)
+                mem_search = case L.find ((== mem) . patElemName . fst) zipped of
+                  Just (_, Var res_mem) -> res_mem
+                  _ -> mem
             let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
                 body_vars1 = map (paramName . fst) mergevalparams
                 body_vars2 = concatMap (map patElemName
@@ -108,20 +105,29 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
             -- of a future coalescing with it; also the variables extracted above.
             -- FIXME: This is probably an okay way to do it?  What if the memory is
             -- used, but with a different index function?  Can that happen?
-            let actuals = S.fromList (maybeToList var_actual ++ body_vars')
-            recordActuals var actuals
-
-            let debug = do
-                  putStrLn "UUUUUU"
-                  print var
-                  print (var_actual, mem_search)
-                  print actuals
-                  putStrLn "UUUUUU"
-            withDebug debug $ return ()
+            let actuals = var : body_vars'
+            forM_ actuals $ \a -> recordActuals a (S.fromList actuals)
+            -- Some of these can be changed later on to have an actual variable
+            -- set of S.empty, e.g. if one of the variables using the memory is
+            -- a rearrange operation.  This is fine, and will occur in the walk
+            -- later on.
 
             -- If you extend this loop handling, make sure not to target existential
             -- memory blocks.  We want those to stay.
           _ -> return ()
+
+      forM_ mergevalparams $ \(Param var membound, _) -> do
+        case membound of
+          ExpMem.ArrayMem _ _ _ mem _ ->
+            when (mem `L.elem` map (paramName . fst) mergectxparams) $
+              modify $ S.insert var -- existentials, fixme make clearer, why
+                                    -- even in this module?
+          _ -> return ()
+
+        -- It seems wrong to change the memory of merge variables, so we disable
+        -- it.  If we were to accept it, we would need to record what other
+        -- variables to change as well.  Seems hard.
+        recordActuals var S.empty
 
     If _se body_then body_else _types ->
       -- We don't want to coalesce the existiential memory block of the if.
@@ -133,7 +139,8 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
           ExpMem.ArrayMem _ _ _ mem _ ->
             if mem `L.elem` map patElemName patctxelems
               then do
-              modify $ S.insert var -- existentials, make clearer
+              modify $ S.insert var -- existentials, fixme make clearer, why
+                                    -- even in this module?
 
               var_to_mem <- asks ctxVarToMem
               first_uses_all <- asks ctxFirstUses
@@ -179,35 +186,50 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
               let actuals = S.fromList (var : body_vars')
               recordActuals var actuals
 
-              let debug = actuals `seq` do
-                    putStrLn "AAAAAAAAAAAAAAAAA"
-                    print var
-                    print actuals
-                    putStrLn "AAAAAAAAAAAAAAAAA"
-              withDebug debug $ return ()
-
           _ -> return ()
 
-    BasicOp (Reshape _ _ src0) -> do
-      let var = patElemName $ head patvalelems -- probably ok
-      -- Also refer to the array that it's reshaping.
+    BasicOp (Index _ orig _) -> do
+      let ielem = head patvalelems -- Should be okay.
+          var = patElemName ielem
+      case patElemAttr ielem of
+        ExpMem.ArrayMem{} -> do
+          -- Disable merging for index expressions that return arrays.  Maybe
+          -- too restrictive.
+          recordActuals var S.empty
+          -- Make sure the source also updates the memory of the index when
+          -- updated.
+          recordActuals orig $ S.fromList [orig, var]
+        _ -> return ()
 
-      let actuals = S.fromList [var, src0]
-      recordActuals var actuals
+    -- Support reusing the memory of reshape operations by recording the origin
+    -- array that is being reshaped.  Unexpected behaviour if the source is also
+    -- a reshape or similar.
+    BasicOp (Reshape _ _ orig) ->
+      forM_ (map patElemName patvalelems) $ \var -> do
+        -- let actuals = S.fromList [var, orig]
+        recordActuals var S.empty -- actuals -- FIXME
+        recordActuals orig $ S.fromList [orig, var]
+        -- FIXME: The problem is that a slice is relative to the shape of the
+        -- reshaped array, and not the original array.  Disabled for now.
 
-    --
+    -- For the other aliasing operations, disable their use for now.  If the
+    -- source has a change of memory block, make sure to change this as well.
     BasicOp (Rearrange _ _ orig) ->
-      forM_ (map patElemName patvalelems) $ \var ->
-        let debug = do
-              putStrLn "AAAAAAAAAAAAAAAAA"
-              print (var, orig)
-              putStrLn "AAAAAAAAAAAAAAAAA"
-        in withDebug debug $ do
-          recordActuals var S.empty -- disable its use for now
-          recordActuals orig (S.singleton var)
+      forM_ (map patElemName patvalelems) $ \var -> do
+        recordActuals var S.empty
+        recordActuals orig $ S.fromList [orig, var]
+
+    BasicOp (Split _ _ _ orig) ->
+      forM_ (map patElemName patvalelems) $ \var -> do
+        recordActuals var S.empty
+        recordActuals orig $ S.fromList [orig, var]
+
+    BasicOp (Opaque (Var orig)) ->
+      forM_ (map patElemName patvalelems) $ \var -> do
+        recordActuals var S.empty
+        recordActuals orig $ S.fromList [orig, var]
 
     _ -> return ()
-
 
   walkExpM walker e
   where walker = identityWalker { walkOnBody = lookInBody }

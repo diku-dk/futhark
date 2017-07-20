@@ -30,20 +30,17 @@ module Futhark.Representation.Kernels.Kernel
        )
        where
 
-import Control.Applicative
 import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Data.List
-import Data.Foldable (mapM_) -- for stack LTS 1.15
-
-import Prelude hiding (mapM_)
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.PrimExp.Convert
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
   ((</>), (<+>), ppr, commasep, Pretty, parens, text)
@@ -62,6 +59,7 @@ import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import qualified Futhark.Analysis.Range as Range
+import Futhark.Util (maybeNth)
 
 -- | Some information about what goes into a kernel, and where it came
 -- from.  Has no semantic meaning; only used for debugging generated
@@ -468,6 +466,38 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             in KernelBody attr' stms' res
 
 instance ST.IndexOp (Kernel lore) where
+  indexOp vtable k (Kernel _ _ space _ kbody) is = do
+    ThreadsReturn which se <- maybeNth k $ kernelBodyResult kbody
+
+    prim_table <- case (which, is) of
+      (AllThreads, [i]) ->
+        Just $ M.singleton (spaceGlobalId space) i
+      (ThreadsInSpace, _)
+        | (gtids, _) <- unzip $ spaceDimensions space,
+          length gtids == length is ->
+            Just $ M.fromList $ zip gtids is
+      _ ->
+        Nothing
+
+    let prim_table' = foldl expandPrimExpTable prim_table $ kernelBodyStms kbody
+    case se of
+      Var v -> M.lookup v prim_table'
+      _ -> Nothing
+    where expandPrimExpTable table stm
+            | [v] <- patternNames $ stmPattern stm,
+              Just pe <- primExpFromExp (asPrimExp table) $ stmExp stm =
+                M.insert v pe table
+            | otherwise =
+                table
+
+          asPrimExp table (BasicOp (SubExp (Var v)))
+            | Just e <- M.lookup v table = Just e
+            | Just (Prim pt) <- ST.lookupType v vtable = Just $ LeafExp v pt
+          asPrimExp _ (BasicOp (SubExp (Constant v))) =
+            Just $ ValueExp v
+          asPrimExp _ _ = Nothing
+
+  indexOp _ _ _ _ = Nothing
 
 instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ _ kbody) =
