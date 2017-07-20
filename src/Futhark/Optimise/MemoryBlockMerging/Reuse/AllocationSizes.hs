@@ -1,34 +1,109 @@
-module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes where
-
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
+module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
+  (memBlockSizes, Sizes) where
 
 import qualified Data.Map.Strict as M
+import Control.Monad.Writer
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.ExplicitMemory
+  (ExplicitMemorish, ExplicitMemory, InKernel)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
+
+import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 
 type Sizes = M.Map VName SubExp
 
-memBlockSizes :: FunDef ExplicitMemory -> Sizes
-memBlockSizes fundef = M.union fromParams fromBody
-  where fromParams = M.fromList $ concatMap onParam $ funDefParams fundef
-        onParam (Param mem (ExpMem.MemMem size _space)) = [(mem, size)]
-        onParam _ = []
+newtype FindM lore a = FindM { unFindM :: Writer Sizes a }
+  deriving (Monad, Functor, Applicative,
+            MonadWriter Sizes)
 
-        fromBody = M.fromList $ onBody $ funDefBody fundef
-        onBody = concatMap onStm . bodyStms
-        onStm (Let (Pattern _ [PatElem mem _ _]) ()
-               (Op (ExpMem.Alloc size _))) = [(mem, size)]
-        onStm (Let (Pattern patctxelems _) () e) =
-          concatMap onPatCtxElem patctxelems ++ foldExp folder [] e
-        onPatCtxElem (PatElem mem _ (ExpMem.MemMem size _)) = [(mem, size)]
-        onPatCtxElem _ = []
-        folder = identityFolder
-          { foldOnBody = \sizes body -> return (sizes ++ onBody body)
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             AllocSizeUtils lore,
+                             FullWalk lore)
 
-          -- Sizes found from the functions below are scope-local, but that does
-          -- not matter; we want all sizes so that we can lookup anything.
-          , foldOnFParam = \sizes fparam -> return (sizes ++ onParam fparam)
-          , foldOnLParam = \sizes lparam -> return (sizes ++ onParam lparam)
+recordMapping :: VName -> SubExp -> FindM lore ()
+recordMapping var size = tell $ M.singleton var size
+
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
+
+memBlockSizes :: LoreConstraints lore =>
+                 FunDef lore -> Sizes
+memBlockSizes fundef =
+  let m = unFindM $ do
+        mapM_ lookInFParam $ funDefParams fundef
+        lookInBody $ funDefBody fundef
+      mem_sizes = execWriter m
+  in mem_sizes
+
+lookInFParam :: LoreConstraints lore =>
+                FParam lore -> FindM lore ()
+lookInFParam (Param mem (ExpMem.MemMem size _space)) =
+  recordMapping mem size
+lookInFParam _ = return ()
+
+lookInLParam :: LoreConstraints lore =>
+                LParam lore -> FindM lore ()
+lookInLParam (Param mem (ExpMem.MemMem size _space)) =
+  recordMapping mem size
+lookInLParam _ = return ()
+
+lookInBody :: LoreConstraints lore =>
+              Body lore -> FindM lore ()
+lookInBody (Body _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody lore -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInStm :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
+lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
+  case patvalelems of
+    [PatElem mem _ _] ->
+      case lookForAllocSize e of
+        Just size ->
+          recordMapping mem size
+        Nothing -> return ()
+    _ -> return ()
+
+  mapM_ lookInPatCtxElem patctxelems
+  fullWalkExpM walker walker_kernel e
+  where walker = identityWalker
+          { walkOnBody = lookInBody
+          , walkOnFParam = lookInFParam
+          , walkOnLParam = lookInLParam
           }
+        walker_kernel = identityKernelWalker
+          { walkOnKernelBody = coerce . lookInBody
+          , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLParam = lookInLParam
+          }
+
+lookInPatCtxElem :: LoreConstraints lore =>
+                    PatElem lore -> FindM lore ()
+lookInPatCtxElem (PatElem mem _bindage (ExpMem.MemMem size _)) =
+  recordMapping mem size
+lookInPatCtxElem _ = return ()
+
+
+-- FIXME: Clean this up.
+class AllocSizeUtils lore where
+  lookForAllocSize :: Exp lore -> Maybe SubExp
+
+instance AllocSizeUtils ExplicitMemory where
+  lookForAllocSize (Op (ExpMem.Alloc size _)) = Just size
+  lookForAllocSize _ = Nothing
+
+instance AllocSizeUtils InKernel where
+  lookForAllocSize (Op (ExpMem.Alloc size _)) = Just size
+  lookForAllocSize _ = Nothing

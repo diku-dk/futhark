@@ -18,6 +18,7 @@ import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
+import Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
 
 import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
 

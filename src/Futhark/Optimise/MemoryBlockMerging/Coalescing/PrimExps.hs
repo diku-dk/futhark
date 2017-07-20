@@ -1,5 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps
   ( findPrimExpsFunDef
   ) where
@@ -9,8 +11,9 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
 import Futhark.Tools
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
@@ -19,13 +22,20 @@ import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 type CurrentTypes = M.Map VName PrimType
 type PrimExps = M.Map VName (PrimExp VName)
 
-newtype FindM a = FindM { unFindM :: RWS () PrimExps CurrentTypes a }
+newtype FindM lore a = FindM { unFindM :: RWS () PrimExps CurrentTypes a }
   deriving (Monad, Functor, Applicative,
             MonadWriter PrimExps,
             MonadState CurrentTypes)
 
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             FullWalk lore)
 
-findPrimExpsFunDef :: FunDef ExplicitMemory -> PrimExps
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
+
+findPrimExpsFunDef :: LoreConstraints lore =>
+                      FunDef lore -> PrimExps
 findPrimExpsFunDef fundef =
   let m = unFindM $
         -- We do not need to look in the function parameters.  That would likely
@@ -36,15 +46,21 @@ findPrimExpsFunDef fundef =
       res = snd $ evalRWS m () M.empty
   in res
 
-lookInBody :: Body ExplicitMemory -> FindM ()
+lookInBody :: LoreConstraints lore =>
+              Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
-lookInStm :: Stm ExplicitMemory -> FindM ()
-lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody lore -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInStm :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
+lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   prim_types <- get
-  let varUse :: Exp ExplicitMemory -> Maybe (PrimExp VName)
-      varUse (BasicOp (SubExp (Var v))) = do
+  let varUse (BasicOp (SubExp (Var v))) = do
         pt <- M.lookup v prim_types
         return $ ExpMem.LeafExp v pt
       varUse _ = Nothing
@@ -61,5 +77,10 @@ lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
       _ -> return ()
 
   -- RECURSIVE BODY WALK.
-  let walker = identityWalker { walkOnBody = lookInBody }
-  walkExpM walker e
+  fullWalkExpM walker walker_kernel e
+  where walker = identityWalker
+          { walkOnBody = lookInBody }
+        walker_kernel = identityKernelWalker
+          { walkOnKernelBody = coerce . lookInBody
+          , walkOnKernelKernelBody = coerce . lookInKernelBody
+          }

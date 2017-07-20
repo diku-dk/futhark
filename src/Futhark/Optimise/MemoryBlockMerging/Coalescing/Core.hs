@@ -19,6 +19,7 @@ import Futhark.Tools
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
+import Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
 
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps (findPrimExpsFunDef)
 
