@@ -1,45 +1,73 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Optimise.MemoryBlockMerging.VariableAliases where
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Control.Monad.Writer
 
 import Futhark.Representation.AST
 import Futhark.Representation.Aliases (Aliases, unNames)
 import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
 import Futhark.Analysis.Alias (analyseFun)
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 
 
-findVarAliases :: forall lore. ExplicitMemorish lore -- Maybe overkill.
-               => FunDef lore -> VarAliases
-findVarAliases fundef = cleanupMapping $ expandWithAliases fromBody fromBody
-  where fundef' = analyseFun fundef
+newtype FindM lore a = FindM { unFindM :: Writer [VarAliases] a }
+  deriving (Monad, Functor, Applicative,
+            MonadWriter [VarAliases])
 
-        fromBody = M.unionsWith S.union $ map (uncurry M.singleton)
-                   $ onBody $ funDefBody fundef'
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             FullWalkAliases lore)
 
-        onBody :: Body (Aliases lore) -> [(VName, Names)]
-        onBody body = concatMap onStm $ bodyStms body
+recordMapping :: VName -> Names -> FindM lore ()
+recordMapping var names = tell [M.singleton var names]
 
-        onStm :: Stm (Aliases lore) -> [(VName, Names)]
-        onStm (Let (Pattern patctxelems patvalelems) _ e) =
-          let m0 = concatMap onPatElem (patctxelems ++ patvalelems)
-              m1 = foldExp folder [] e
-          in m0 ++ m1
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
 
-        folder = identityFolder {
-          foldOnBody = \mappings body -> return (mappings ++ onBody body)
+findVarAliases :: LoreConstraints lore =>
+                  FunDef lore -> VarAliases
+findVarAliases fundef =
+  let fundef' = analyseFun fundef
+      m = unFindM $ lookInBody $ funDefBody fundef'
+      var_aliases = M.unionsWith S.union $ execWriter m
+      var_aliases' = cleanupMapping $ expandWithAliases var_aliases var_aliases
+  in var_aliases'
+
+lookInBody :: LoreConstraints lore =>
+              Body (Aliases lore) -> FindM lore ()
+lookInBody (Body _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody (Aliases lore) -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInStm :: LoreConstraints lore =>
+             Stm (Aliases lore) -> FindM lore ()
+lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
+  mapM_ lookInPatValElem patvalelems
+  fullWalkAliasesExpM walker walker_kernel e
+  where walker = identityWalker
+          { walkOnBody = lookInBody
+          }
+        walker_kernel = identityKernelWalker
+          { walkOnKernelBody = coerce . lookInBody
+          , walkOnKernelKernelBody = coerce . lookInKernelBody
           }
 
-        onPatElem :: PatElem (Aliases lore) -> [(VName, Names)]
-        onPatElem (PatElem x _bindage (names', ExpMem.ArrayMem{})) =
-          let aliases = unNames names'
-          in [(x, aliases)]
-
-        onPatElem _ = []
+lookInPatValElem :: LoreConstraints lore =>
+                    PatElem (Aliases lore) -> FindM lore ()
+lookInPatValElem (PatElem x _bindage (names', ExpMem.ArrayMem{})) = do
+  let aliases = unNames names'
+  recordMapping x aliases
+lookInPatValElem _ = return ()

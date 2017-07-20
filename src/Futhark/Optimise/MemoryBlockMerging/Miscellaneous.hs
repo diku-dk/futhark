@@ -7,13 +7,15 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.List as L
 import Data.Monoid()
-import Data.Maybe (isJust, fromMaybe, mapMaybe)
+import Data.Maybe (isJust, fromMaybe)
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
-       (ExplicitMemory, InKernel, ExplicitMemorish)
+       (ExplicitMemory, InKernel)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
+import Futhark.Representation.Aliases
 import Text.PrettyPrint.Mainland (Pretty)
 import Futhark.Util (unixEnvironment)
 
@@ -64,48 +66,9 @@ insertOrUpdate k v = M.alter (insertOrNew v) k
 
 cleanupMapping :: Ord v => M.Map v (S.Set v) -> M.Map v (S.Set v)
 cleanupMapping = M.filter (not . S.null)
---                 . M.mapWithKey S.delete
 
 prettySet :: Pretty a => S.Set a -> String
 prettySet = L.intercalate ", " . map pretty . S.toList
-
-
-createsNewArrayWithoutKernel :: Exp ExplicitMemory -> Bool
-createsNewArrayWithoutKernel e = case e of
-  Op (ExpMem.Inner ExpMem.Kernel{}) -> True -- Necessary?
-  _ -> createsNewArrayBase e
-
-createsNewArrayInKernel :: Exp InKernel -> Bool
-createsNewArrayInKernel e = case e of
-  Op (ExpMem.Inner ExpMem.GroupReduce{}) -> True
-  Op (ExpMem.Inner ExpMem.GroupScan{}) -> True
-  Op (ExpMem.Inner ExpMem.GroupStream{}) -> True
-  Op (ExpMem.Inner ExpMem.Combine{}) -> True
-  _ -> createsNewArrayBase e
-
-createsNewArrayBase :: ExplicitMemorish lore
-                    => Exp lore -> Bool
-createsNewArrayBase e = case e of
-  BasicOp Partition{} -> True
-  BasicOp Replicate{} -> True
-  BasicOp Iota{} -> True
-  BasicOp Manifest{} -> True
-  BasicOp ExpMem.Copy{} -> True
-  BasicOp Concat{} -> True
-  BasicOp ArrayLit{} -> True
-  BasicOp Scratch{} -> True
-
-  _ -> False
-
-class ArrayUtils lore where
-  createsNewArray :: Exp lore -> Bool
-
-instance ArrayUtils ExplicitMemory where
-  createsNewArray = createsNewArrayWithoutKernel
-
-instance ArrayUtils InKernel where
-  createsNewArray = createsNewArrayInKernel
-
 
 lookupEmptyable :: (Ord a, Monoid b) => a -> M.Map a b -> b
 lookupEmptyable x m = fromMaybe mempty $ M.lookup x m
@@ -145,87 +108,51 @@ fromVar :: SubExp -> Maybe VName
 fromVar (Var v) = Just v
 fromVar _ = Nothing
 
-transformFromVarMemMappings :: VarMemMappings MemoryLoc -> FunDef ExplicitMemory
-                            -> FunDef ExplicitMemory
-transformFromVarMemMappings var_to_mem fundef =
-  let body' = transformBody $ funDefBody fundef
-  in fundef { funDefBody = body' }
+-- Map on both ExplicitMemory and InKernel.
+class FullMap lore where
+  fullMapExpM :: Monad m => Mapper lore lore m -> KernelMapper InKernel InKernel m
+              -> Exp lore -> m (Exp lore)
 
-  where transformBody :: Body ExplicitMemory -> Body ExplicitMemory
-        transformBody (Body () bnds res) =
-          let bnds' = map transformStm bnds
-          in Body () bnds' res
+instance FullMap ExplicitMemory where
+  fullMapExpM mapper mapper_kernel e =
+    case e of
+      Op (ExpMem.Inner kernel) -> do
+        kernel' <- mapKernelM mapper_kernel kernel
+        return $ Op (ExpMem.Inner kernel')
+      _ -> mapExpM mapper e
 
-        transformStm :: Stm ExplicitMemory -> Stm ExplicitMemory
-        transformStm (Let (Pattern patctxelems patvalelems) () e) =
-          let patvalelems' = map transformPatValElem patvalelems
-              e' = mapExp mapper e
-              e'' = case e' of
-                DoLoop mergectxparams mergevalparams loopform body ->
-                  -- More special loop handling because of its extra
-                  -- pattern-like info.
-                  let mergevalparams' = map transformMergeValParam mergevalparams
-                      mergectxparams' = map transformMergeCtxParam mergectxparams
+instance FullMap InKernel where
+  fullMapExpM mapper _ = mapExpM mapper
 
-                  -- The body of a loop can return a memory block in its
-                  -- results.  This is the memory block used by a variable which
-                  -- is also part of the results.  If the memory block of that
-                  -- variable is changed, we need a way to record that the
-                  -- memory block in the body result also needs to change.
-                  --
-                  -- Should be fine?
-                      zipped = zip [(0::Int)..] (patctxelems ++ patvalelems) -- should maybe be patvalelems' (important?)
+-- Walk on both ExplicitMemory and InKernel.
+class FullWalk lore where
+  fullWalkExpM :: Monad m => Walker lore m -> KernelWalker InKernel m
+               -> Exp lore -> m ()
 
-                      findMemLinks (i, PatElem _x _binding (ExpMem.ArrayMem _ _ _ xmem _)) =
-                        case L.find (\(_, PatElem ymem _ _) -> ymem == xmem) zipped of
-                          Just (j, _) -> Just (j, i)
-                          Nothing -> Nothing
-                      findMemLinks _ = Nothing
+instance FullWalk ExplicitMemory where
+  fullWalkExpM walker walker_kernel e = do
+    walkExpM walker e
+    case e of
+      Op (ExpMem.Inner kernel) ->
+        walkKernelM walker_kernel kernel
+      _ -> return ()
 
-                      mem_links = mapMaybe findMemLinks zipped
+instance FullWalk InKernel where
+  fullWalkExpM walker _ = walkExpM walker
 
-                      res = bodyResult body
+-- FIXME: Integrate this into the above type class.
+class FullWalkAliases lore where
+  fullWalkAliasesExpM :: Monad m => Walker (Aliases lore) m
+                      -> KernelWalker (Aliases InKernel) m
+                      -> Exp (Aliases lore) -> m ()
 
-                      fixResRecord i se
-                        | Var _mem <- se
-                        , Just j <- L.lookup i mem_links
-                        , Var related_var <- res L.!! j
-                        , Just mem_new <- M.lookup related_var var_to_mem =
-                            Var $ memLocName mem_new
-                        | otherwise = se
+instance FullWalkAliases ExplicitMemory where
+  fullWalkAliasesExpM walker walker_kernel e = do
+    walkExpM walker e
+    case e of
+      Op (ExpMem.Inner kernel) ->
+        walkKernelM walker_kernel kernel
+      _ -> return ()
 
-                      res' = zipWith fixResRecord [(0::Int)..] res
-                      body' = body { bodyResult = res' }
-                  in DoLoop mergectxparams' mergevalparams' loopform body'
-                _ -> e'
-          in Let (Pattern patctxelems patvalelems') () e''
-          where mapper = identityMapper { mapOnBody = \_ body -> return $ transformBody body }
-
-        -- Update the actual memory block referred to by a context memory block
-        -- in a loop.
-        transformMergeCtxParam :: (FParam ExplicitMemory, SubExp)
-                               -> (FParam ExplicitMemory, SubExp)
-        transformMergeCtxParam (param@(Param ctxmem ExpMem.MemMem{}), mem) =
-          let mem' = fromMaybe mem ((Var . memLocName) <$> M.lookup ctxmem var_to_mem)
-          in (param, mem')
-        transformMergeCtxParam t = t
-
-        transformMergeValParam :: (FParam ExplicitMemory, SubExp)
-                               -> (FParam ExplicitMemory, SubExp)
-        transformMergeValParam (Param x membound, se) =
-          let membound' = newMemBound membound x
-          in (Param x membound', se)
-
-        transformPatValElem :: PatElem ExplicitMemory -> PatElem ExplicitMemory
-        transformPatValElem (PatElem x bindage membound) =
-          let membound' = newMemBound membound x
-          in PatElem x bindage membound'
-
-        newMemBound membound = fromMaybe membound . newMemBound' membound
-
-        newMemBound' :: ExpMem.MemBound u -> VName -> Maybe (ExpMem.MemBound u)
-        newMemBound' membound x
-          | ExpMem.ArrayMem pt shape u _ _ <- membound
-          , Just (MemoryLoc mem ixfun) <- M.lookup x var_to_mem =
-              Just $ ExpMem.ArrayMem pt shape u mem ixfun
-          | otherwise = Nothing
+instance FullWalkAliases InKernel where
+  fullWalkAliasesExpM walker _ = walkExpM walker
