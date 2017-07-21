@@ -653,7 +653,21 @@ defCompileBasicOp
               rows = case drop i $ entryArrayShape yentry of
                       []  -> error $ "defCompileBasicOp Concat: empty array shape for " ++ pretty y
                       r:_ -> innerExp $ Imp.dimSizeToExp r
-          copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
+
+          -- If the (experimental) memory block coalescing optimisation
+          -- (Futhark.Optimise.MemoryBlockMerging.Coalescing) has been run prior
+          -- to this pass, it may have coalesced the source and destination
+          -- memory of some Concat expressions, in which case there is no need
+          -- to have a copy in the imperative code.
+          --
+          -- FIXME: In the master branch this should be done properly by
+          -- comparing the index functions in the 'copy' call, not this hack.
+          let needs_copy = not usesMemoryBlockMergingCoalescing
+                           || (let srcmem = memLocationName srcloc
+                               in srcmem /= destmem)
+          when needs_copy $
+            copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
+
           emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
 defCompileBasicOp (Destination [dest]) (ArrayLit es _)

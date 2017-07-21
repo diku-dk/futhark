@@ -12,7 +12,6 @@ module Futhark.Passes
 where
 
 import Control.Category ((>>>))
-import Data.Maybe (fromMaybe)
 
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -62,34 +61,11 @@ standardPipeline =
          ]
 
 
--- Is an environment variable set to 0 or 1?  If 0, return False; if 1, True;
--- otherwise the default value.
-isEnvVarSet :: String -> Bool -> Bool
-isEnvVarSet name default_val = fromMaybe default_val $ do
-  val <- lookup name unixEnvironment
-  case val of
-    "0" -> return False
-    "1" -> return True
-    _ -> Nothing
-
--- Do we use in-place lowering?  Currently enabled by default.  Disable by
--- setting the environment variable IN_PLACE_LOWERING=0.
-usesInPlaceLowering :: Bool
-usesInPlaceLowering =
-  isEnvVarSet "IN_PLACE_LOWERING" True
-
 inPlaceLoweringMaybe :: Pipeline Kernels Kernels
 inPlaceLoweringMaybe =
   if usesInPlaceLowering
   then onePass inPlaceLowering
   else passes []
-
--- Do we use the coalescing part of memory block merging?  Currently disabled by
--- default.  Enable by setting the environment variable
--- MEMORY_BLOCK_MERGING_COALESCING=1.
-usesMemoryBlockMergingCoalescing :: Bool
-usesMemoryBlockMergingCoalescing =
-  isEnvVarSet "MEMORY_BLOCK_MERGING_COALESCING" False
 
 memoryBlockMergingCoalescingMaybe :: Pipeline ExplicitMemory ExplicitMemory
 memoryBlockMergingCoalescingMaybe =
@@ -104,13 +80,6 @@ memoryBlockMergingCoalescingMaybeCPU = memoryBlockMergingCoalescingMaybe
 
 memoryBlockMergingCoalescingMaybeGPU :: Pipeline ExplicitMemory ExplicitMemory
 memoryBlockMergingCoalescingMaybeGPU = memoryBlockMergingCoalescingMaybe
-
--- Do we use the reuse part of memory block merging?  Currently disabled by
--- default.  Enable by setting the environment variable
--- MEMORY_BLOCK_MERGING_REUSE=1.
-usesMemoryBlockMergingReuse :: Bool
-usesMemoryBlockMergingReuse =
-  isEnvVarSet "MEMORY_BLOCK_MERGING_REUSE" False
 
 memoryBlockMergingReuseMaybe :: Pipeline ExplicitMemory ExplicitMemory
 memoryBlockMergingReuseMaybe =
