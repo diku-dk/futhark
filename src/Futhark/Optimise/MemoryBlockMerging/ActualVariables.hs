@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- | Find the actual variables that need updating when a variable attribute
 -- needs updating.
 module Futhark.Optimise.MemoryBlockMerging.ActualVariables
@@ -16,8 +16,9 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
@@ -35,17 +36,25 @@ data Context = Context { ctxFirstUses :: FirstUses
                        , ctxVarToMem ::  VarMemMappings MemorySrc }
   deriving (Show)
 
-newtype FindM a = FindM { unFindM :: RWS Context [ActualVariables] Names a }
+newtype FindM lore a = FindM { unFindM :: RWS Context [ActualVariables] Names a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
             MonadWriter [ActualVariables],
             MonadState Names)
 
-recordActuals :: VName -> Names -> FindM ()
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             FullWalk lore)
+
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
+
+recordActuals :: VName -> Names -> FindM lore ()
 recordActuals stmt_var more_actuals = tell [M.singleton stmt_var more_actuals]
 
-findActualVariables :: FirstUses -> VarMemMappings MemorySrc
-                    -> FunDef ExplicitMemory -> (ActualVariables, Names)
+findActualVariables :: LoreConstraints lore =>
+                       FirstUses -> VarMemMappings MemorySrc
+                    -> FunDef lore -> (ActualVariables, Names)
 findActualVariables first_uses var_mem_mappings fundef =
   let context = Context first_uses var_mem_mappings
       m = unFindM $ lookInBody $ funDefBody fundef
@@ -56,11 +65,18 @@ findActualVariables first_uses var_mem_mappings fundef =
       existentials = fst res
   in (actual_variables', existentials)
 
-lookInBody :: Body ExplicitMemory -> FindM ()
+lookInBody :: LoreConstraints lore =>
+              Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
-lookInStm :: Stm ExplicitMemory -> FindM ()
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody lore -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInStm :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
 lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   forM_ patvalelems $ \(PatElem var bindage _) ->
     case bindage of
@@ -231,5 +247,10 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
 
     _ -> return ()
 
-  walkExpM walker e
-  where walker = identityWalker { walkOnBody = lookInBody }
+  fullWalkExpM walker walker_kernel e
+  where walker = identityWalker
+          { walkOnBody = lookInBody }
+        walker_kernel = identityKernelWalker
+          { walkOnKernelBody = coerce . lookInBody
+          , walkOnKernelKernelBody = coerce . lookInKernelBody
+          }

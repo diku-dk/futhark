@@ -115,11 +115,11 @@ bodyBindingMap stms =
 
   where createBindingStmt :: (Line, Stm ExplicitMemory)
                           -> BindingMap
-        createBindingStmt (line, stmt@(Let (Pattern _ patelems) () _)) =
+        createBindingStmt (line, stmt@(Let (Pattern _ patelems) () e)) =
           let -- Both free variables and consumed variables count as dependencies.
+              stmt_vars = S.fromList (map patElemName patelems)
               frees = S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
-              vars_binding = (S.fromList (map patElemName patelems),
-                              PrimBinding frees (FromLine line))
+              vars_binding = (stmt_vars, PrimBinding frees (FromLine line))
 
               -- Some variables exist only in a shape declaration and so will
               -- have no PrimBinding.  If we hit the Nothing case, we assume
@@ -127,8 +127,34 @@ bodyBindingMap stms =
               shape_sizes = S.fromList $ concatMap shapeSizes patelems
               sizes_binding = (shape_sizes, PrimBinding frees (FromLine line))
 
-              bmap = [vars_binding, sizes_binding]
-          in bmap
+              -- Some expressions contain special identifiers that are used in a
+              -- body.
+              param_vars = case e of
+                Op (ExpMem.Inner (ExpMem.Kernel _ _ space _ _)) ->
+                  -- This might do too much.
+                  S.fromList ([ ExpMem.spaceGlobalId space
+                              , ExpMem.spaceLocalId space
+                              , ExpMem.spaceGroupId space]
+                              ++ (case ExpMem.spaceStructure space of
+                                    ExpMem.FlatThreadSpace ts ->
+                                      map fst ts ++ mapMaybe (fromVar . snd) ts
+                                    ExpMem.NestedThreadSpace ts ->
+                                      map (\(x, _, _, _) -> x) ts
+                                      ++ mapMaybe (fromVar . (\(_, x, _, _) -> x)) ts
+                                      ++ map (\(_, _, x, _) -> x) ts
+                                      ++ mapMaybe (fromVar . (\(_, _, _, x) -> x)) ts
+                                 ))
+                _ -> S.empty
+              params_binding = (param_vars, PrimBinding S.empty FromFParam)
+
+              bmap = [vars_binding, sizes_binding, params_binding]
+
+              debug = do
+                putStrLn $ replicate 70 '~'
+                putStrLn "createBindingStmt:"
+                print param_vars
+                putStrLn $ replicate 70 '~'
+          in withDebug debug bmap
 
         shapeSizes (PatElem _ _ (ExpMem.ArrayMem _ shape _ _ _)) =
           mapMaybe fromVar $ shapeDims shape
