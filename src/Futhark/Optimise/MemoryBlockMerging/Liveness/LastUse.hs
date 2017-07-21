@@ -120,6 +120,18 @@ lookInKernelBody (KernelBody _ bnds _res) =
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
+  -- When an loop contains a use of an array that is created before the loop, it
+  -- must not reuse that memory, because there are cycles in loops.  This should
+  -- result in more interferences being recorded.  See
+  -- 'tests/reuse/loop/copy-from-outside.fut for an example of this.  We run
+  -- this at first to avoid it getting any of the new first uses, which might be
+  -- part of a loop, which means it is (kind of) created in the loop.
+  mMod <- case e of
+    DoLoop{} -> do
+      cur_first_uses <- gets curFirstUses
+      return $ local (\ctx -> ctx { ctxCurFirstUsesBeforeLoop = cur_first_uses })
+    _ -> return id
+
   -- First handle all pattern elements by themselves.
   forM_ patvalelems $ \(PatElem x _ membound) ->
     case membound of
@@ -143,16 +155,6 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       first_uses_before_loop <- asks ctxCurFirstUsesBeforeLoop
       unless (mem `S.member` first_uses_before_loop) $
         setOptimistic mem x
-
-  -- When an loop contains a use of an array that is created before the
-  -- loop, it must not reuse that memory, because there are cycles in loops.
-  -- This should result in more interferences being recorded.  See
-  -- 'tests/reuse/loop/copy-from-outside.fut for an example of this.
-  mMod <- case e of
-    DoLoop{} -> do
-      cur_first_uses <- gets curFirstUses
-      return $ local (\ctx -> ctx { ctxCurFirstUsesBeforeLoop = cur_first_uses })
-    _ -> return id
 
   withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker

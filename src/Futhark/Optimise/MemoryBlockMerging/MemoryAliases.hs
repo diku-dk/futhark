@@ -74,6 +74,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
       -- body results anyway (those that have a matching location
       -- with the mergectxparams).
       zipWithM_ lookInMergeCtxParam mergectxparams (bodyResult body)
+      zipWithM_ lookInCtx patctxelems mergectxparams
       mapM_ (lookInMergeValParam body) mergevalparams
       mapM_ (lookInBodyTuples patctxelems (map snd mergectxparams) (bodyResult body))
         patvalelems
@@ -98,6 +99,14 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
           }
+
+lookInCtx :: LoreConstraints lore =>
+             PatElem (Aliases lore) -> (FParam (Aliases lore), SubExp)
+          -> FindM lore ()
+lookInCtx (PatElem patmem _ (_, ExpMem.MemMem{})) (Param parammem ExpMem.MemMem{}, _) = do
+  recordMapping patmem (S.singleton parammem)
+  recordMapping parammem (S.singleton patmem)
+lookInCtx _ _ = return ()
 
 lookInMergeCtxParam :: LoreConstraints lore =>
                        (FParam (Aliases lore), SubExp) -> SubExp -> FindM lore ()
