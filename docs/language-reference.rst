@@ -29,8 +29,8 @@ Identifiers and Keywords
 Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
 a module, we use a qualified name (`qualid`).  The fields of a record
-are named with `fieldid`s.  Note that a `fieldid` can be decimal
-numbers.
+are named with `fieldid`.  Note that a `fieldid` can be a decimal
+number.
 
 Primitive Types and Values
 --------------------------
@@ -80,8 +80,8 @@ desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
 the floating-point number ``1.0`` to a 32-bit signed integer.
 Conversion from floating-point to integers is done by truncation.
 
-These can also be converted to numbers (1 for true, 0 for false) by
-using the desired numeric type as a function.
+Boolean values can also be converted to numbers (1 for true, 0 for
+false) by using the desired numeric type as a function.
 
 Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~
