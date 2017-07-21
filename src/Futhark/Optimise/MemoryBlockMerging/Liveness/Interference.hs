@@ -46,12 +46,20 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 awaken :: VName -> FindM lore ()
-awaken mem =
+awaken mem = do
   modify $ S.insert mem
+  cur <- get
+  doDebug $ do
+    putStrLn ("awaken " ++ pretty mem)
+    print cur
 
 kill :: VName -> FindM lore ()
-kill mem =
+kill mem = do
   modify $ S.delete mem
+  cur <- get
+  doDebug $ do
+    putStrLn ("kill " ++ pretty mem)
+    print cur
 
 recordCurrentInterferences :: FindM lore ()
 recordCurrentInterferences = do
