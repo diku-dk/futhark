@@ -15,6 +15,7 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.CodeGen.Backends.SequentialPython as SequentialPy
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Futlib.Prelude
 
 import Prelude
 
@@ -26,7 +27,7 @@ main = reportingIOErrors $
 
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
-  runCompilerOnProgram (futharkConfig config)
+  runCompilerOnProgram (futharkConfig config) preludeBasis
   sequentialCpuPipeline (pyCodeAction filepath config) filepath
 
 pyCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory

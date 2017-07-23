@@ -32,13 +32,30 @@ let reverse [n] 't (x: [n]t): [n]t = x[::-1]
 -- | Replace an element of the array with a new value.
 let update [n] 't (xs: *[n]t) (i: i32) (x: t): [n]t = xs with [i] <- x
 
-let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): [n]t =
+-- | Construct an array of consecutive integers of the given length,
+-- starting at 0.
+let iota (n: i32): *[n]i32 =
+  i32.iota n
+
+-- | Construct an array of the given length containing the given
+-- value.
+let replicate 't (n: i32) (x: t): *[n]t =
+  i32.replicate n x
+
+-- | Copy an array.
+let copy [n] 't (a: [n]t): *[n]t =
+  map (\x -> x) a
+
+let scatter 't [m] [n] (dest: *[m]t) (is: [n]i32) (vs: [n]t): *[m]t =
+  intrinsics.scatter dest is vs
+
+let pick [n] 't (flags: [n]bool) (xs: [n]t) (ys: [n]t): *[n]t =
   map (\flag x y -> if flag then x else y) flags xs ys
 
 let flatten [n] [m] 't (xs: [n][m]t): []t =
   reshape (n*m) xs
 
-let intersperse [n] 't (x: t) (xs: [n]t): []t =
+let intersperse [n] 't (x: t) (xs: [n]t): *[]t =
   map (\i -> if i % 2 == 1 && i != 2*n then x
              else unsafe xs[i/2])
       (iota (i32.max (2*n-1) 0))
@@ -48,9 +65,6 @@ let intercalate [n] [m] 't (x: [m]t) (xs: [n][m]t): []t =
 
 let transpose [n] [m] 't (a: [n][m]t): [m][n]t =
   rearrange (1,0) a
-
-let copy [n] 't (a: [n]t): *[n]t =
-  map (\x -> x) a
 
 let steps (start: i32) (num_steps: i32) (step: i32): [num_steps]i32 =
   map (start+) (map (step*) (iota num_steps))
