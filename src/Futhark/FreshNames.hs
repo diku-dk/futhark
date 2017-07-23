@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveLift #-}
 -- | This module provides facilities for generating unique names.
 module Futhark.FreshNames
   ( VNameSource
@@ -8,6 +9,8 @@ module Futhark.FreshNames
   , newVNameFromName
   ) where
 
+import Language.Haskell.TH.Syntax (Lift)
+
 import Language.Futhark.Core
 
 -- | A name source is conceptually an infinite sequence of names with
@@ -15,6 +18,7 @@ import Language.Futhark.Core
 -- source will return the name along with a new name source, which
 -- should then be used in place of the original.
 newtype VNameSource = VNameSource Int
+  deriving (Lift)
 
 instance Monoid VNameSource where
   mempty = blankNameSource

@@ -8,7 +8,7 @@ module Language.Futhark.TypeChecker
   ( checkProg
   , TypeError
   , Warnings
-  , FileModule(FileModule)
+  , FileModule(..)
   , Imports
   )
   where
@@ -22,7 +22,6 @@ import Data.Maybe
 import Data.Either
 import Data.Ord
 import Data.Traversable (mapM)
-
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
@@ -36,9 +35,11 @@ import Language.Futhark.TypeChecker.Types
 
 --- The main checker
 
--- | The (abstract) result of type checking some file.  Can be passed
--- to further invocations of the type checker.
-newtype FileModule = FileModule { fileEnv :: Env }
+-- | The result of type checking some file.  Can be passed to further
+-- invocations of the type checker.
+data FileModule = FileModule { fileEnv :: Env
+                             , fileProg :: Prog
+                             }
 
 -- | A mapping from import names to imports.  The ordering is significant.
 type Imports = [(String, FileModule)]
@@ -52,7 +53,7 @@ checkProg :: Imports
           -> VNameSource
           -> FilePath
           -> UncheckedProg
-          -> Either TypeError ((FileModule, Prog), Warnings, VNameSource)
+          -> Either TypeError (FileModule, Warnings, VNameSource)
 checkProg files src fpath prog =
   runTypeM initialEnv (M.map fileEnv $ M.fromList files) fpath src $ checkProgM prog
 
@@ -76,11 +77,11 @@ initialEnv = intrinsicsModule
         addIntrinsicT _ =
           Nothing
 
-checkProgM :: UncheckedProg -> TypeM (FileModule, Prog)
+checkProgM :: UncheckedProg -> TypeM FileModule
 checkProgM (Prog decs) = do
   checkForDuplicateDecs decs
   (_, env, decs') <- checkDecs decs
-  return (FileModule env, Prog decs')
+  return (FileModule env $ Prog decs')
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =

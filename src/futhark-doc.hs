@@ -26,6 +26,7 @@ import Futhark.Compiler (readProgram, dumpError, newFutharkConfig)
 import Futhark.Pipeline (runFutharkM, FutharkM)
 import Futhark.Util.Options
 import Futhark.Util (directoryContents)
+import Language.Futhark.Futlib.Prelude
 
 main :: IO ()
 main = mainWithOptions initialDocConfig commandLineOptions f
@@ -47,7 +48,7 @@ main = mainWithOptions initialDocConfig commandLineOptions f
               exitWith $ ExitFailure 1
             Just outdir -> do
               files <- liftIO $ futFiles dir
-              (Prog prog, _w, imports, _vns) <- readProgram files
+              (Prog prog, _w, imports, _vns) <- readProgram preludeBasis files
               liftIO $ printDecs outdir imports prog
 
 futFiles :: FilePath -> IO [FilePath]
