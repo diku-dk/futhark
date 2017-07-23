@@ -2,7 +2,7 @@
 #
 # Run all the tests in the subdirectories.
 #
-# With -a, do not exclude the wip directories.
+# With -w, exclude the wip directories.
 
 cd "$(dirname "$0")"
 
