@@ -787,7 +787,7 @@ Declarations
 
 .. productionlist::
    dec:   `fun_bind` | `val_bind` | `type_bind` | `mod_bind` | `mod_type_bind`
-      : | "open" `mod_exp`+
+      : | "open" `mod_exp`
       : | `default_dec`
       : | "import" `stringlit`
 
