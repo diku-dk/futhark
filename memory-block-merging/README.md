@@ -21,7 +21,7 @@ this is hopefully temporary.
     that is also enabled.
 
 
-## Tests
+## Testing
 
 The tests in `coalescing` expect to be run with only
 `MEMORY_BLOCK_MERGING_COALESCING=1`.  Run `./test.sh` in the directory
@@ -35,3 +35,9 @@ The tests in `mix` (new name for "register allocation") expect to be run
 with both `MEMORY_BLOCK_MERGING_COALESCING=1` and
 `MEMORY_BLOCK_MERGING_REUSE=1`.  Run `./test.sh` in the directory to do
 so.
+
+
+## Benchmarking
+
+For benchmarking, check out the niels-memory-block-merging-benchmarking
+branch.
