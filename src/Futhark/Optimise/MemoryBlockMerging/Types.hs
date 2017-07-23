@@ -7,18 +7,19 @@ import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
 
 
+-- FIXME: Better name.  Confusing that this can be a destination.
 data MemorySrc = MemorySrc
   { memSrcName :: VName -- ^ the memory block name
   , memSrcIxFun :: ExpMem.IxFun -- ^ the index function into the memory
   , memSrcShape :: Shape -- ^ the shape of the memory block
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data MemoryLoc = MemoryLoc
   { memLocName :: VName -- ^ the memory block name
   , memLocIxFun :: ExpMem.IxFun -- ^ the index function into the memory
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- A mapping from variable names to memory blocks (with varying details)
 type VarMemMappings t = M.Map VName t
