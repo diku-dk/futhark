@@ -502,8 +502,7 @@ canBeCoalesced dst src ixfun = do
   -- FIXME: Lookup nicer.
   actual_vars <- asks ctxActualVars
   let reverse_actual_srcs = S.toList $ S.unions $ M.elems
-                            $ M.filter (\actuals -> S.member src actuals)
-                            actual_vars
+                            $ M.filter (S.member src) actual_vars
 
   -- FIXME: This (and the rest) needs a cleanup, as it is the ActualVariables
   -- module that contains the logic ensuring that only one branch has its result
@@ -513,12 +512,12 @@ canBeCoalesced dst src ixfun = do
   existentials <- asks ctxExistentials
   let if_handling =
         -- We are sure this is an if.  This might not actually be necessary.
-        any (\a_src -> S.member a_src if_vars) reverse_actual_srcs
+        any (`S.member` if_vars) reverse_actual_srcs
         -- This does not refer to the result of a branch where the array is
         -- created outside the if.  It is a requirement that there is at most
         -- one such branch.  The extra safety here only relates to branches
         -- whose result arrays are created inside.
-        && not (any (\a_src -> S.member a_src if_branch_results_from_outer)
+        && not (any (`S.member` if_branch_results_from_outer)
                 actual_srcs)
         -- Ignore existentials as well.
         && not (S.member src existentials)
@@ -528,8 +527,7 @@ canBeCoalesced dst src ixfun = do
 
   safe3_if_handling <-
     if if_handling
-    then and <$> mapM (\mem_dst_virtual ->
-                         safetyCond3 mem_dst_virtual src)
+    then and <$> mapM (`safetyCond3` src)
          mem_actual_srcs_cur
     else return True
 
