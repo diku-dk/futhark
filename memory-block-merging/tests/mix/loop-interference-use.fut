@@ -26,10 +26,11 @@ let main (ns: [#n]i32): [n]i32 =
     -- aliased by the existential xs_mem, so conservatively it cannot be used
     -- either, since xs_mem and its aliases can be said to interfere with the
     -- entire loop.  However, since ts1 creates a new array that does not read
-    -- from xs, we can instead say that xs has a last use in ys and a first use
-    -- in ts1.  This allows the compiler to reuse the aliased xs0_mem inbetween
-    -- ys and ts1 (assuming xs0_mem does not have its own direct last use later
-    -- on, overriding any inherited last use from the existential xs_mem).
+    -- from xs_mem, we can instead say that xs_mem has a last use in ys and a
+    -- first use in ts1.  This allows the compiler to reuse the aliased xs0_mem
+    -- inbetween ys and ts1 (assuming xs0_mem does not have its own direct last
+    -- use later on, overriding any inherited last use from the existential
+    -- xs_mem).
     let ts0 = map (+ k) ns
     -- Last use of ys_mem and ts0_mem.
     let k0 = ys[n - i - 1] + ts0[i]
