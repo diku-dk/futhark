@@ -7,7 +7,7 @@ module Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
 import qualified Data.Set as S
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe (maybe, fromMaybe)
+import Data.Maybe (maybe, fromMaybe, mapMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -52,6 +52,10 @@ data Current = Current
     -- Keeps track of If expressions to handle more cases with safety condition
     -- 4.  A bit messy.
   , curIfVars :: Names
+    -- Keeps track of If expression branch results that are created prior to the
+    -- If statement in question.  Used for special if handling related to safety
+    -- condition 3.
+  , curIfBranchResultsFromOuter :: Names
   }
   deriving (Show)
 
@@ -70,6 +74,7 @@ emptyCurrent = Current
 
   , curLoopVars = S.empty
   , curIfVars = S.empty
+  , curIfBranchResultsFromOuter = S.empty
   }
 
 data Context = Context
@@ -202,11 +207,25 @@ zeroOffset = primExpFromSubExp (IntType Int32) (constant (0 :: Int32))
 
 lookInStm :: Stm ExplicitMemory -> FindM ()
 lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
-  case (patvalelems, e) of
-    ([PatElem dst _ ExpMem.ArrayMem{}], DoLoop{}) ->
-      modify $ \c -> c { curLoopVars = S.insert dst $ curLoopVars c }
-    ([PatElem dst _ ExpMem.ArrayMem{}], If{}) ->
-      modify $ \c -> c { curIfVars = S.insert dst $ curIfVars c }
+  -- Special recording.  There is absolutely no reason why this should be in
+  -- this module.  It is a mess.  FIXME: Probably make it possible to lookup
+  -- entire expressions by their statement names, and get rid of several state
+  -- fields.
+  case e of
+    DoLoop{} -> forM_ patvalelems $ \patelem -> case patelem of
+      PatElem dst _ ExpMem.ArrayMem{} ->
+        modify $ \c -> c { curLoopVars = S.insert dst $ curLoopVars c }
+      _ -> return ()
+    If _ body0 body1 _ -> do
+      forM_ patvalelems $ \patelem -> case patelem of
+        PatElem dst _ ExpMem.ArrayMem{} ->
+          modify $ \c -> c { curIfVars = S.insert dst $ curIfVars c }
+        _ -> return ()
+      modify $ \c -> c { curIfBranchResultsFromOuter =
+                         S.union (S.fromList $ mapMaybe fromVar
+                                  $ concatMap bodyResult
+                                  $ filter (null . bodyStms) [body0, body1])
+                         $ curIfBranchResultsFromOuter c }
     _ -> return ()
 
   -- COALESCING-SPECIFIC HANDLING for Copy and Concat.
@@ -267,7 +286,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
 
 
   -- Update attributes related to safety condition 3.
-  let e_free_vars = freeInExp e -- FIXME: should not include those consumed
+  let e_free_vars = freeInExp e -- FIXME: should maybe not include those consumed.
       e_used_vars = S.union e_free_vars (S.fromList new_decls)
 
   -- Update the existing entries.
@@ -297,13 +316,34 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
   forM_ new_decls $ \x ->
     modify $ \c -> c { curDeclarationsSoFar = S.insert x $ curDeclarationsSoFar c }
 
-
   -- RECURSIVE BODY WALK.
-  let walker = identityWalker { walkOnBody = lookInBody
-                              , walkOnFParam = lookInFParam
-                              }
-  walkExpM walker e -- Maybe this needs to be run locally for some of the state
-                    -- fields.
+  case e of
+    If _ body0 body1 _ -> do
+      -- This is not very If-specific, but rather specific to expressions with
+      -- multiple, independent bodies, where If is just the only such
+      -- expression.
+      --
+      -- We do not want the state of curVarUsesAfterCreation (for safety
+      -- condition 3) after traversing the first branch to be present when
+      -- traversing the second branch, since they really will never both be run,
+      -- so we compute them independently and then merge them at the end.
+      --
+      -- FIXME: Clean up.  Maybe this needs to be run locally for *more* of the
+      -- state fields?
+      before <- gets curVarUsesAfterCreation
+      lookInBody body0
+      after_body0 <- gets curVarUsesAfterCreation
+      modify $ \c -> c { curVarUsesAfterCreation = before }
+      lookInBody body1
+      after_body1 <- gets curVarUsesAfterCreation
+      modify $ \c -> c { curVarUsesAfterCreation = M.union after_body0 after_body1 }
+    _ -> do
+      -- In the general case, just look through any 'Body' and 'FParam's you can
+      -- find.  (This is for loops.)
+      let walker = identityWalker { walkOnBody = lookInBody
+                                  , walkOnFParam = lookInFParam
+                                  }
+      walkExpM walker e
 
 withMemAliases :: VName -> FindM Names
 withMemAliases mem = do
@@ -396,7 +436,7 @@ tryCoalesce dst ixfun_slices bindage src offset = do
   safe1 <- safetyCond1 dst mem_src_base
 
   when (safe0 && safe1) $ do
-    safes <- zipWithM (canBeCoalesced dst mem_dst) srcs ixfuns'
+    safes <- zipWithM (canBeCoalesced dst) srcs ixfuns'
     when (and safes) $ do
       -- Any previous src0s coalescings must be deleted.
       modify $ \c -> c { curCoalescedIntos = M.delete src $ curCoalescedIntos c }
@@ -437,25 +477,82 @@ tryCoalesce dst ixfun_slices bindage src offset = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return ()
 
-canBeCoalesced :: VName -> MemorySrc -> VName -> ExpMem.IxFun -> FindM Bool
-canBeCoalesced dst mem_dst src ixfun = do
+canBeCoalesced :: VName -> VName -> ExpMem.IxFun -> FindM Bool
+canBeCoalesced dst src ixfun = do
+  mem_dst <- lookupVarMem dst
   mem_src <- lookupVarMem src
 
   safe2 <- safetyCond2 mem_dst src
   safe3 <- safetyCond3 mem_dst src
+
+  -- Special handling: If src refers to an If expression, we need to check that
+  -- not just is mem_dst not used after src and before dst, but neither is any
+  -- other memory that will be merged after the coalescing.  Normally this is
+  -- not an issue, since a coalescing means changing just one memory block --
+  -- but in the case of an If expression, each branches can have its own memory
+  -- block, and both of them will try to be coalesced.  This extra test only
+  -- applies to the actual memory blocks in the branches, not any existential
+  -- memory block in the If, which in any case will be "used" in both branches.
+  --
+  -- See tests/coalescing/if/if-neg-3.fut for an example of where this should
+  -- fail.
+  if_vars <- gets curIfVars
+  actual_srcs <- S.toList <$> lookupActualVars src
+
+  -- FIXME: Lookup nicer.
+  actual_vars <- asks ctxActualVars
+  let reverse_actual_srcs = S.toList $ S.unions $ M.elems
+                            $ M.filter (\actuals -> S.member src actuals)
+                            actual_vars
+
+  -- FIXME: This (and the rest) needs a cleanup, as it is the ActualVariables
+  -- module that contains the logic ensuring that only one branch has its result
+  -- from an array created prior to the If expression.
+  if_branch_results_from_outer <- gets curIfBranchResultsFromOuter
+
+  existentials <- asks ctxExistentials
+  let if_handling =
+        -- We are sure this is an if.  This might not actually be necessary.
+        any (\a_src -> S.member a_src if_vars) reverse_actual_srcs
+        -- This does not refer to the result of a branch where the array is
+        -- created outside the if.  It is a requirement that there is at most
+        -- one such branch.  The extra safety here only relates to branches
+        -- whose result arrays are created inside.
+        && not (any (\a_src -> S.member a_src if_branch_results_from_outer)
+                actual_srcs)
+        -- Ignore existentials as well.
+        && not (S.member src existentials)
+  -- Get the memory used in the other branch.  Use a reverse lookup.
+  mem_actual_srcs <- L.nub <$> mapM lookupVarMem reverse_actual_srcs
+  let mem_actual_srcs_cur = L.delete mem_src mem_actual_srcs
+
+  safe3_if_handling <-
+    if if_handling
+    then and <$> mapM (\mem_dst_virtual ->
+                         safetyCond3 mem_dst_virtual src)
+         mem_actual_srcs_cur
+    else return True
+
   safe4 <- safetyCond4 src
   safe5 <- safetyCond5 mem_src ixfun
 
-  let safe_all = safe2 && safe3 && safe4 && safe5
+  let safe_all = safe2 && safe3 && safe4 && safe5 && safe3_if_handling
 
   let debug = safe_all `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "canBeCoalesced:"
         putStrLn ("dst: " ++ pretty dst ++ ", src: " ++ pretty src)
         putStrLn ("mem_dst: " ++ show mem_dst)
+        putStrLn ("mem_src: " ++ show mem_src)
+        putStrLn ("actual srcs: " ++ prettySet (S.fromList actual_srcs))
+        putStrLn ("reverse actual srcs: " ++ prettySet (S.fromList reverse_actual_srcs))
+        putStrLn ("actual srcs mems: " ++ prettySet (S.fromList $ map memSrcName mem_actual_srcs))
+        putStrLn ("actual srcs mems cur: " ++ prettySet (S.fromList $ map memSrcName mem_actual_srcs_cur))
         putStrLn ("safe: " ++ L.intercalate ", "
                   -- Safety condition 1 is true if canBeCoalesced is run.
-                  (map show [True, safe2, safe3, safe4, safe5]))
+                  (map show [True, safe2, safe3, safe4, safe5])
+                  ++ "; safe3 If handling (" ++ show if_handling ++ "): "
+                  ++ show safe3_if_handling)
         putStrLn $ replicate 70 '~'
   withDebug debug $ return safe_all
 
@@ -530,7 +627,7 @@ safetyCond3 mem_dst src = do
                     (S.toList uses_after_src_vars)
   let res = not $ S.member (memSrcName mem_dst) uses_after_src
 
-  let debug = do
+  let debug = uses_after_src `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "safetyCond3:"
         putStrLn ("mem_dst: " ++ show mem_dst)

@@ -176,6 +176,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
                   (alloc_inside_then, var_then) <- th
                   (alloc_inside_else, var_else) <- el
                   when (alloc_inside_then || alloc_inside_else) $ do
+                    -- FIXME: This is not enough to ensure that coalescing can
+                    -- occur.  Further checks are present in Coalescing.Core, so
+                    -- we should move all this checking over there as well.
                     let actuals = S.fromList [var, var_then, var_else]
                     recordActuals var actuals
                 _ -> return ()
