@@ -268,9 +268,7 @@ SigBind :: { SigBindBase NoInfo Name }
             in SigBind name $5 Nothing pos }
 
 ModExp :: { UncheckedModExp }
-        : import stringlit
-          { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
-        | ModExp ':' SigExp
+        : ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
           { ModLambda $2 (fmap (,NoInfo) $3) $5 $1 }
@@ -291,6 +289,8 @@ ModExpAtom :: { UncheckedModExp }
             | QualName
               { let (v, loc) = $1 in ModVar v loc }
             | '{' many(Dec) '}' { ModDecs (concat $2) $1 }
+            | import stringlit
+              { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
 
 SimpleSigExp :: { UncheckedSigExp }
              : QualName            { let (v, loc) = $1 in SigVar v loc }
