@@ -11,7 +11,7 @@ module Futhark.Optimise.MemoryBlockMerging.ActualVariables
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, catMaybes)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -32,9 +32,7 @@ import Futhark.Optimise.MemoryBlockMerging.Types
 getFullMap :: [M.Map VName Names] -> M.Map VName Names
 getFullMap = M.unionsWith S.union
 
-data Context = Context { ctxFirstUses :: FirstUses
-                       , ctxVarToMem ::  VarMemMappings MemorySrc }
-  deriving (Show)
+type Context = VarMemMappings MemorySrc
 
 newtype FindM lore a = FindM { unFindM :: RWS Context [ActualVariables] Names a }
   deriving (Monad, Functor, Applicative,
@@ -53,17 +51,15 @@ recordActuals :: VName -> Names -> FindM lore ()
 recordActuals stmt_var more_actuals = tell [M.singleton stmt_var more_actuals]
 
 findActualVariables :: LoreConstraints lore =>
-                       FirstUses -> VarMemMappings MemorySrc
+                       VarMemMappings MemorySrc
                     -> FunDef lore -> (ActualVariables, Names)
-findActualVariables first_uses var_mem_mappings fundef =
-  let context = Context first_uses var_mem_mappings
+findActualVariables var_mem_mappings fundef =
+  let context = var_mem_mappings
       m = unFindM $ lookInBody $ funDefBody fundef
       res = execRWS m context S.empty
       actual_variables = getFullMap $ snd res
-      actual_variables' = expandWithAliases actual_variables actual_variables
-                          -- not actually "aliases", but same effect
       existentials = fst res
-  in (actual_variables', existentials)
+  in (actual_variables, existentials)
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
@@ -114,7 +110,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
             -- Find the ones using the same memory as the result of the loop
             -- expression.
             body_vars' <- filterM (\v -> do
-                                      m <- M.lookup v <$> asks ctxVarToMem
+                                      m <- M.lookup v <$> ask
                                       return $ Just mem_search == (memSrcName <$> m)
                                   ) body_vars
             -- Not only the result variable needs to change its memory block in case
@@ -158,34 +154,15 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
               modify $ S.insert var -- existentials, fixme make clearer, why
                                     -- even in this module?
 
-              var_to_mem <- asks ctxVarToMem
-              first_uses_all <- asks ctxFirstUses
-              let ifBlocks body se = do
-                    res <- fromVar se
-                    res_mem <- memSrcName <$> M.lookup res var_to_mem
-                    let body_vars = concatMap (map patElemName . patternValueElements
-                                               . stmPattern)
-                                    $ bodyStms body
-                        body_first_uses = S.unions $ map (`lookupEmptyable` first_uses_all)
-                                          body_vars
-                    Just $ return (S.member res_mem body_first_uses, res)
-
-              case (ifBlocks body_then res_then,
-                    ifBlocks body_else res_else) of
-                (Just th, Just el) -> do -- prettify this stuff
-                  (alloc_inside_then, var_then) <- th
-                  (alloc_inside_else, var_else) <- el
-                  when (alloc_inside_then || alloc_inside_else) $ do
-                    -- FIXME: This is not enough to ensure that coalescing can
-                    -- occur.  Further checks are present in Coalescing.Core, so
-                    -- we should move all this checking over there as well.
-                    let actuals = S.fromList [var, var_then, var_else]
-                    recordActuals var actuals
-                _ -> return ()
+              -- If the memory block is existential, we say that the If result
+              -- refers to all results in the If.
+              let actuals = S.fromList (var : catMaybes [fromVar res_then, fromVar res_else])
+              recordActuals var actuals
 
               else do
               -- If the memory block is not existential, we need to find all the
-              -- variables in any sub-bodies using the same memory block.
+              -- variables in any sub-bodies using the same memory block (like
+              -- with loops).
               let varFromStm stm = map patElemName (patternValueElements $ stmPattern stm)
                                  ++ foldExp folder [] (stmExp stm)
                   folder = identityFolder { foldOnBody = \vs fbody -> return (vs ++ concatMap varFromStm (bodyStms fbody)) }
@@ -195,7 +172,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
               -- Find the ones using the same memory as the result of the loop
               -- expression.
               body_vars' <- filterM (\v -> do
-                                        m <- M.lookup v <$> asks ctxVarToMem
+                                        m <- M.lookup v <$> ask
                                         return $ Just mem == (memSrcName <$> m)
                                     ) body_vars
               -- Not only the result variable needs to change its memory block in case
