@@ -16,8 +16,8 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Aliases
-import Text.PrettyPrint.Mainland (Pretty)
 import Futhark.Util (unixEnvironment)
+import Futhark.Util.Pretty (Pretty)
 
 import Futhark.Optimise.MemoryBlockMerging.Types
 
