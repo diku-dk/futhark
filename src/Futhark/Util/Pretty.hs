@@ -1,6 +1,7 @@
 -- | A re-export of the prettyprinting library, along with a convenience function.
 module Futhark.Util.Pretty
        ( module Text.PrettyPrint.Mainland
+       , module Text.PrettyPrint.Mainland.Class
        , pretty
        , prettyDoc
        , prettyTuple
@@ -18,6 +19,7 @@ import Data.Text (Text)
 import qualified Data.Text.Lazy as LT
 
 import Text.PrettyPrint.Mainland hiding (pretty)
+import Text.PrettyPrint.Mainland.Class
 import qualified Text.PrettyPrint.Mainland as PP
 
 -- | Prettyprint a value, wrapped to 80 characters.

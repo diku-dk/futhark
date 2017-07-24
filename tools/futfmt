@@ -10,7 +10,8 @@
       (advice-remove 'message #'silence))))
 
 ;; Having "Indenting region..." messages on stderr are silly.
-(advice-add 'indent-region :around #'suppress-messages)
+(when (fboundp 'advice-add)
+  (advice-add 'indent-region :around #'suppress-messages))
 
 ;; "Wrote" messages (from `save-buffer') are also a bit annoying, but seem to
 ;; originate in the `write-region' function from Emacs' C code (and not Emacs
