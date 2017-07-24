@@ -24,20 +24,18 @@ import Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps (findPrimExpsFunDef)
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.Exps
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition2
+import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition3
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition5
 
 
 -- Some of these attributes could be split into separate Coalescing helper
 -- modules if it becomes confusing.  Their computations are fairly independent.
 data Current = Current
-  { -- Safety condition 3 state.
-    curVarUsesAfterCreation :: M.Map VName Names
-
-    -- Coalescings state.  Also save offsets and slices in the case that an
+  { -- Coalescings state.  Also save offsets and slices in the case that an
     -- optimistic coalescing later becomes part of a chain of coalescings, where
     -- it is offset yet again, and where it should maintain its old relative
     -- offset.
-  , curCoalescedIntos :: M.Map VName (S.Set (VName, PrimExp VName,
+    curCoalescedIntos :: M.Map VName (S.Set (VName, PrimExp VName,
                                              [Slice (PrimExp VName)]))
   , curMemsCoalesced :: M.Map VName MemoryLoc
   }
@@ -45,14 +43,14 @@ data Current = Current
 
 emptyCurrent :: Current
 emptyCurrent = Current
-  { curVarUsesAfterCreation = M.empty
-
-  , curCoalescedIntos = M.empty
+  { curCoalescedIntos = M.empty
   , curMemsCoalesced = M.empty
   }
 
 data Context = Context
-  { ctxVarToMem :: VarMemMappings MemorySrc
+  { ctxFunDef :: FunDef ExplicitMemory
+
+  , ctxVarToMem :: VarMemMappings MemorySrc
   , ctxMemAliases :: MemAliases
   , ctxVarAliases :: VarAliases
   , ctxFirstUses :: FirstUses
@@ -180,7 +178,8 @@ coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses last_use
       exps = findExpsFunDef fundef
       cond2 = findSafetyCondition2FunDef fundef
       cond5 = findSafetyCondition5FunDef fundef first_uses
-      context = Context { ctxVarToMem = var_to_mem
+      context = Context { ctxFunDef = fundef
+                        , ctxVarToMem = var_to_mem
                         , ctxMemAliases = mem_aliases
                         , ctxVarAliases = var_aliases
                         , ctxFirstUses = first_uses
@@ -216,7 +215,7 @@ zeroOffset :: PrimExp VName
 zeroOffset = primExpFromSubExp (IntType Int32) (constant (0 :: Int32))
 
 lookInStm :: Stm ExplicitMemory -> FindM ()
-lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
+lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
   -- COALESCING-SPECIFIC HANDLING for Copy and Concat.
   case patvalelems of
     [PatElem dst bindage ExpMem.ArrayMem{}] -> do
@@ -252,65 +251,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
     _ -> return ()
 
 
-  -- GENERAL STATE UPDATING.
-  let new_decls0 = map patElemName (patctxelems ++ patvalelems)
-      new_decls1 = case e of
-        DoLoop _mergectxparams mergevalparams _loopform _body ->
-          -- Technically not a declaration for the current expression, but very
-          -- close, and hopefully okay to consider it as one.
-          map (paramName . fst) mergevalparams
-        _ -> []
-      new_decls = new_decls0 ++ new_decls1
-
-
-  -- UPDATE ATTRIBUTES RELATED TO SAFETY CONDITION 3.  FIXME: It would be nice
-  -- to move this out of this large module.
-  let e_free_vars = freeInExp e -- FIXME: should maybe not include those consumed.
-      e_used_vars = S.union e_free_vars (S.fromList new_decls)
-
-  -- Update the existing entries.
-  --
-  -- Note that "used after creation" refers both to used in subsequent
-  -- statements AND any statements in any sub-bodies (if and loop).
-  uses_after <- gets curVarUsesAfterCreation
-  forM_ (M.keys uses_after) $ \x ->
-    modify $ \c -> c { curVarUsesAfterCreation =
-                         M.adjust (S.union e_used_vars) x
-                         $ curVarUsesAfterCreation c }
-
-  -- Create the new entries for the current statement.
-  forM_ new_decls $ \x ->
-    modify $ \c -> c { curVarUsesAfterCreation =
-                         M.insert x S.empty
-                         $ curVarUsesAfterCreation c }
-
-
   -- RECURSIVE BODY WALK.
-  case e of
-    If _ body0 body1 _ -> do
-      -- For safety condition 3: This is not very If-specific, but rather
-      -- specific to expressions with multiple, independent bodies, where If is
-      -- just the only such expression.
-      --
-      -- We do not want the state of curVarUsesAfterCreation (for safety
-      -- condition 3) after traversing the first branch to be present when
-      -- traversing the second branch, since they really will never both be run,
-      -- so we compute them independently and then merge them at the end.
-      --
-      -- FIXME: Clean up.  Maybe this needs to be run locally for *more* of the
-      -- state fields?
-      before <- gets curVarUsesAfterCreation
-      lookInBody body0
-      after_body0 <- gets curVarUsesAfterCreation
-      modify $ \c -> c { curVarUsesAfterCreation = before }
-      lookInBody body1
-      after_body1 <- gets curVarUsesAfterCreation
-      modify $ \c -> c { curVarUsesAfterCreation = M.union after_body0 after_body1 }
-    _ -> do
-      -- In the general case, just look through any 'Body' you can find.  (This
-      -- is the case for loops.)
-      let walker = identityWalker { walkOnBody = lookInBody }
-      walkExpM walker e
+  walkExpM walker e
+  where walker = identityWalker { walkOnBody = lookInBody }
 
 tryCoalesce :: VName -> [Slice (PrimExp VName)] -> Bindage -> VName
             -> PrimExp VName -> FindM ()
@@ -443,11 +386,11 @@ canBeCoalesced dst src ixfun = do
   mem_src <- lookupVarMem src
 
   safe2 <- safetyCond2 src mem_dst
-  safe3 <- safetyCond3 src mem_dst
+  safe3 <- safetyCond3 src dst mem_dst
   safe4 <- safetyCond4 src
   safe5 <- safetyCond5 mem_src ixfun
 
-  safe_if <- safeIf src
+  safe_if <- safetyIf src dst
 
   let safe_all = safe2 && safe3 && safe4 && safe5 && safe_if
 
@@ -474,8 +417,8 @@ canBeCoalesced dst src ixfun = do
 --    ctxAllocatedBlocksBeforeCreation.
 --
 -- 3. There is no use or creation of mem_dst after the creation of src and
---    before the current statement.  Handle by checking curVarUsesAfterCreation
---    and looking at both the original var-mem mappings *and* the new, temporary
+--    before the current statement.  Handle by calling getVarUsesBetween and
+--    looking at both the original var-mem mappings *and* the new, temporary
 --    ones.
 --
 -- 4. src (the variable, not the memory) does not alias anything.  Handle by
@@ -527,9 +470,10 @@ safetyCond2 src mem_dst = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond3 :: VName -> MemorySrc -> FindM Bool
-safetyCond3 src mem_dst = do
-  uses_after_src_vars <- lookupEmptyable src <$> gets curVarUsesAfterCreation
+safetyCond3 :: VName -> VName -> MemorySrc -> FindM Bool
+safetyCond3 src dst mem_dst = do
+  fundef <- asks ctxFunDef
+  let uses_after_src_vars = getVarUsesBetween fundef src dst
   uses_after_src <- S.unions <$> mapM (maybe (return S.empty) withMemAliases
                                        <=< lookupCurrentVarMem)
                     (S.toList uses_after_src_vars)
@@ -583,8 +527,8 @@ safetyCond5 mem_src ixfun = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safeIf :: VName -> FindM Bool
-safeIf src = do
+safetyIf :: VName -> VName -> FindM Bool
+safetyIf src dst = do
   -- Special handling: If src refers to an If expression, we need to check that
   -- not just is mem_dst not used after src and before dst, but neither is any
   -- other memory that will be merged after the coalescing.  Normally this is
@@ -659,7 +603,7 @@ safeIf src = do
       -- Get the memory used in the other branch.  Use a reverse lookup.
       mem_actual_srcs <- L.nub <$> mapM lookupVarMem reverse_actual_srcs
       let mem_actual_srcs_cur = L.delete mem_src mem_actual_srcs
-      and <$> mapM (safetyCond3 src) mem_actual_srcs_cur
+      and <$> mapM (safetyCond3 src dst) mem_actual_srcs_cur
     else return True
 
   -- The full result.
