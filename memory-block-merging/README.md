@@ -17,8 +17,8 @@ this is hopefully temporary.
   + Set `MEMORY_BLOCK_MERGING_COALESCING=1`: Enable the coalescing part
     of memory block merging.
   + Set `MEMORY_BLOCK_MERGING_REUSE=1`: Enable the reuse part of memory
-    block merging.  This will always be run after the coalescing part if
-    that is also enabled.
+    block merging (new name for "register allocation").  This will
+    always be run after the coalescing part if that is also enabled.
 
 
 ## Testing
@@ -27,14 +27,13 @@ The tests in `coalescing` expect to be run with only
 `MEMORY_BLOCK_MERGING_COALESCING=1`.  Run `./test.sh` in the directory
 to do so.
 
-The tests in `reuse` (new name for "register allocation") expect to be
-run with only `MEMORY_BLOCK_MERGING_REUSE=1`.  Run `./test.sh` in the
-directory to do so.
-
-The tests in `mix` (new name for "register allocation") expect to be run
-with both `MEMORY_BLOCK_MERGING_COALESCING=1` and
+The tests in `reuse` expect to be run with only
 `MEMORY_BLOCK_MERGING_REUSE=1`.  Run `./test.sh` in the directory to do
 so.
+
+The tests in `mix` expect to be run with both
+`MEMORY_BLOCK_MERGING_COALESCING=1` and `MEMORY_BLOCK_MERGING_REUSE=1`.
+Run `./test.sh` in the directory to do so.
 
 
 ## Benchmarking
