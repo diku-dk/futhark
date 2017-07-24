@@ -64,8 +64,20 @@ insertOrUpdate k v = M.alter (insertOrNew v) k
           Just s -> S.insert x s
           Nothing -> S.singleton x
 
-cleanupMapping :: Ord v => M.Map v (S.Set v) -> M.Map v (S.Set v)
-cleanupMapping = M.filter (not . S.null)
+removeEmptyMaps :: Ord k => M.Map k (S.Set v) -> M.Map k (S.Set v)
+removeEmptyMaps = M.filter (not . S.null)
+
+newDeclarationsStm :: Stm lore -> [VName]
+newDeclarationsStm (Let (Pattern patctxelems patvalelems) _ e) =
+  let new_decls0 = map patElemName (patctxelems ++ patvalelems)
+      new_decls1 = case e of
+        DoLoop mergectxparams mergevalparams _loopform _body ->
+          -- Technically not a declaration for the current expression, but very
+          -- close.
+          map (paramName . fst) (mergectxparams ++ mergevalparams)
+        _ -> []
+      new_decls = new_decls0 ++ new_decls1
+  in new_decls
 
 prettySet :: Pretty a => S.Set a -> String
 prettySet = L.intercalate ", " . map pretty . S.toList

@@ -12,6 +12,8 @@ import Control.Monad.RWS
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 
+import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
+
 
 data Context = Context
   { ctxSource :: VName
@@ -50,15 +52,8 @@ lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
 lookInStm :: Stm ExplicitMemory -> FindM ()
-lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
-  let new_decls0 = map patElemName (patctxelems ++ patvalelems)
-      new_decls1 = case e of
-        DoLoop _mergectxparams mergevalparams _loopform _body ->
-          -- Technically not a declaration for the current expression, but very
-          -- close, and hopefully okay to consider it as one.
-          map (paramName . fst) mergevalparams
-        _ -> []
-      new_decls = new_decls0 ++ new_decls1
+lookInStm stm@(Let _ _ e) = do
+  let new_decls = newDeclarationsStm stm
 
   dst <- asks ctxDestination
   when (dst `L.elem` new_decls)

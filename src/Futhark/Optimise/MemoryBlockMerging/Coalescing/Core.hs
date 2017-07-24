@@ -172,8 +172,9 @@ recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
 
 coreCoalesceFunDef :: FunDef ExplicitMemory -> VarMemMappings MemorySrc
                    -> MemAliases -> VarAliases -> FirstUses -> LastUses
-                   -> (ActualVariables, Names) -> FunDef ExplicitMemory
-coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses last_uses (actual_vars, existentials) =
+                   -> ActualVariables -> Names -> FunDef ExplicitMemory
+coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
+  last_uses actual_vars existentials =
   let primexps = findPrimExpsFunDef fundef
       exps = findExpsFunDef fundef
       cond2 = findSafetyCondition2FunDef fundef

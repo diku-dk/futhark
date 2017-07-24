@@ -103,7 +103,7 @@ findLastUses var_to_mem mem_aliases first_uses fundef =
         forM_ (M.assocs optimistics) $ \(mem, x_lu) ->
           recordMapping x_lu mem
 
-      last_uses = cleanupMapping $ expandWithAliases mem_aliases $ getLastUsesMap
+      last_uses = removeEmptyMaps $ expandWithAliases mem_aliases $ getLastUsesMap
                   $ snd $ evalRWS m context (Current M.empty S.empty)
   in last_uses
 

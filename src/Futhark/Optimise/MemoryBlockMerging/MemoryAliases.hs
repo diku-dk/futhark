@@ -2,8 +2,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Find memory block aliases.  The conceptual difference from variable aliases
+-- is that if a variable x has an alias y, it means that x and y use the same
+-- memory block, but if a memory block xmem has an alias ymem, it means that
+-- xmem and ymem refer to the same *memory*.  This is not commutative.
 module Futhark.Optimise.MemoryBlockMerging.MemoryAliases
-  (findMemAliases) where
+  ( findMemAliases
+  ) where
 
 import Data.Maybe (mapMaybe)
 import qualified Data.Map.Strict as M
@@ -49,7 +54,7 @@ findMemAliases fundef var_to_mem =
   let fundef' = analyseFun fundef
       m = unFindM $ lookInBody $ funDefBody fundef'
       mem_aliases = M.unionsWith S.union $ snd $ evalRWS m var_to_mem ()
-      mem_aliases' = cleanupMapping $ expandWithAliases mem_aliases mem_aliases
+      mem_aliases' = removeEmptyMaps $ expandWithAliases mem_aliases mem_aliases
   in mem_aliases'
 
 lookInBody :: LoreConstraints lore =>

@@ -30,7 +30,7 @@ reuseInFunDef fundef0 =
       debug0 = debugAuxiliaryInfo aux0 "Before reuse"
       fundef1 = coreReuseFunDef fundef0
                 (auxFirstUses aux0) (auxInterferences aux0) (auxVarMemMappings aux0)
-                (auxActualVariables aux0)
+                (auxActualVariables aux0) (auxExistentials aux0)
 
       debug = debug0
   in withDebug debug $ return fundef1
