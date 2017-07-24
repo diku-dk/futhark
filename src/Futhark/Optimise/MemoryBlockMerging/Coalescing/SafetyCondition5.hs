@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Find safety condition 5 for all statements.
 module Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition5
   ( findSafetyCondition5FunDef
   ) where
@@ -46,15 +47,8 @@ lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
 lookInStm :: Stm ExplicitMemory -> FindM ()
-lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
-  let new_decls0 = map patElemName (patctxelems ++ patvalelems)
-      new_decls1 = case e of
-        DoLoop _mergectxparams mergevalparams _loopform _body ->
-          -- Technically not a declaration for the current expression, but very
-          -- close, and hopefully okay to consider it as one.
-          map (paramName . fst) mergevalparams
-        _ -> []
-      new_decls = new_decls0 ++ new_decls1
+lookInStm stm@(Let _ _ e) = do
+  let new_decls = newDeclarationsStm stm
 
   first_uses <- ask
   declarations_so_far <- get

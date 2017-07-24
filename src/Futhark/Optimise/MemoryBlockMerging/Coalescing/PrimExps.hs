@@ -2,6 +2,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Get a mapping from statement name to PrimExp (if the statement has a
+-- primitive expression) for all statements.
 module Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps
   ( findPrimExpsFunDef
   ) where

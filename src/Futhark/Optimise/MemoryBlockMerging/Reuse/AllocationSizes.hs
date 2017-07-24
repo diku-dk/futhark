@@ -2,6 +2,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Find all Alloc statements and associate their memory blocks with the
+-- allocation size.
 module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
   (memBlockSizes, Sizes) where
 

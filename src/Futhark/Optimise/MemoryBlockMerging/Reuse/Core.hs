@@ -86,8 +86,9 @@ withLocalUses m = do
 
 coreReuseFunDef :: FunDef ExplicitMemory
                 -> FirstUses -> Interferences -> VarMemMappings MemorySrc
-                -> (ActualVariables, Names) -> FunDef ExplicitMemory
-coreReuseFunDef fundef first_uses interferences var_to_mem (actual_vars, existentials) =
+                -> ActualVariables -> Names -> FunDef ExplicitMemory
+coreReuseFunDef fundef first_uses interferences var_to_mem
+  actual_vars existentials =
   let sizes = memBlockSizes fundef
       context = Context first_uses interferences sizes var_to_mem
                 actual_vars existentials []

@@ -68,7 +68,7 @@ findFirstUses var_to_mem mem_aliases fundef =
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
-      first_uses = cleanupMapping $ expandWithAliases mem_aliases
+      first_uses = removeEmptyMaps $ expandWithAliases mem_aliases
                    $ getFirstUsesMap $ snd $ evalRWS m context ()
   in first_uses
 
@@ -151,7 +151,7 @@ lookInMergeCtxParam _ _ = return ()
 
 createsNewArrayWithoutKernel :: Exp ExplicitMemory -> Bool
 createsNewArrayWithoutKernel e = case e of
-  Op (ExpMem.Inner ExpMem.Kernel{}) -> True -- Necessary?
+  Op (ExpMem.Inner ExpMem.Kernel{}) -> True
   _ -> createsNewArrayBase e
 
 createsNewArrayInKernel :: Exp InKernel -> Bool

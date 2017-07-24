@@ -1,49 +1,45 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE ExistentialQuantification #-}
--- | Get a mapping from statement patterns to statement expression for all
--- statements.
-module Futhark.Optimise.MemoryBlockMerging.Coalescing.Exps
-  ( Exp'(..)
-  , findExpsFunDef
+-- | Find all existential variables.
+module Futhark.Optimise.MemoryBlockMerging.Existentials
+  ( findExistentials
   ) where
 
-import qualified Data.Map.Strict as M
+import qualified Data.Set as S
+import qualified Data.List as L
 import Control.Monad
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
+import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
--- | Describes the nth pattern and the statement expression.
-data Exp' = forall lore. Annotations lore => Exp Int (Exp lore)
-instance Show Exp' where
-  show (Exp _npattern e) = show e
 
-type Exps = M.Map VName Exp'
-
-newtype FindM lore a = FindM { unFindM :: Writer Exps a }
+newtype FindM lore a = FindM { unFindM :: Writer Names a }
   deriving (Monad, Functor, Applicative,
-            MonadWriter Exps)
+            MonadWriter Names)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
+
+record :: VName -> FindM lore ()
+record = tell . S.singleton
 
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-findExpsFunDef :: LoreConstraints lore =>
-                  FunDef lore -> Exps
-findExpsFunDef fundef =
+findExistentials :: LoreConstraints lore =>
+                    FunDef lore -> Names
+findExistentials fundef =
   let m = unFindM $ lookInBody $ funDefBody fundef
-      res = execWriter m
-  in res
+      existentials = execWriter m
+  in existentials
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
@@ -57,11 +53,24 @@ lookInKernelBody (KernelBody _ bnds _res) =
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
-lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
-  forM_ (zip patvalelems [0..]) $ \(PatElem var _ _, i) ->
-    tell $ M.singleton var $ Exp i e
+lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
+  forM_ patvalelems $ \(PatElem var _ membound) ->
+    case membound of
+      ExpMem.ArrayMem _ _ _ mem _ ->
+        when (mem `L.elem` map patElemName patctxelems)
+        $ record var
+      _ -> return ()
 
-  -- RECURSIVE BODY WALK.
+  case e of
+    DoLoop mergectxparams mergevalparams _loopform _body ->
+      forM_ mergevalparams $ \(Param var membound, _) ->
+        case membound of
+          ExpMem.ArrayMem _ _ _ mem _ ->
+            when (mem `L.elem` map (paramName . fst) mergectxparams)
+            $ record var
+          _ -> return ()
+    _ -> return ()
+
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }

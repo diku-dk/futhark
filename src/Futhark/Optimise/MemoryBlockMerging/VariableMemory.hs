@@ -2,6 +2,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Find all variable-to-memory mappings, so that other modules can lookup the
+-- relation.
 module Futhark.Optimise.MemoryBlockMerging.VariableMemory where
 
 import qualified Data.Map.Strict as M

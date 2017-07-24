@@ -4,7 +4,8 @@
 {-# LANGUAGE ConstraintKinds #-}
 -- | Find memory block interferences.
 module Futhark.Optimise.MemoryBlockMerging.Liveness.Interference
-  (findInterferences) where
+  ( findInterferences
+  ) where
 
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
@@ -13,7 +14,6 @@ import Control.Monad.RWS
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
--- import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
@@ -32,7 +32,8 @@ getInterferencesMap = M.unionsWith S.union
 
 type CurrentlyAlive = Names
 
-newtype FindM lore a = FindM { unFindM :: RWS Context InterferencesList CurrentlyAlive a }
+newtype FindM lore a = FindM
+  { unFindM :: RWS Context InterferencesList CurrentlyAlive a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
             MonadWriter InterferencesList,
@@ -46,20 +47,10 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 awaken :: VName -> FindM lore ()
-awaken mem = do
-  modify $ S.insert mem
-  cur <- get
-  doDebug $ do
-    putStrLn ("awaken " ++ pretty mem)
-    print cur
+awaken mem = modify $ S.insert mem
 
 kill :: VName -> FindM lore ()
-kill mem = do
-  modify $ S.delete mem
-  cur <- get
-  doDebug $ do
-    putStrLn ("kill " ++ pretty mem)
-    print cur
+kill mem = modify $ S.delete mem
 
 recordCurrentInterferences :: FindM lore ()
 recordCurrentInterferences = do
@@ -68,6 +59,7 @@ recordCurrentInterferences = do
   forM_ (S.toList current) $ \mem ->
     tell [M.singleton mem $ S.delete mem current]
 
+-- | Find all interferences.
 findInterferences :: LoreConstraints lore =>
                      MemAliases -> FirstUses -> LastUses -> FunDef lore
                   -> Interferences
@@ -76,7 +68,7 @@ findInterferences mem_aliases first_uses last_uses fundef =
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
-      interferences = cleanupMapping $ makeCommutativeMap
+      interferences = removeEmptyMaps $ makeCommutativeMap
                       $ expandWithAliases mem_aliases $ getInterferencesMap
                       $ snd $ evalRWS m context S.empty
   in interferences

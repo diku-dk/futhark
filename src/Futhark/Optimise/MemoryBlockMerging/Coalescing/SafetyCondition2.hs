@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Find safety condition 2 for all statements.
 module Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition2
   ( findSafetyCondition2FunDef
   ) where

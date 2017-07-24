@@ -48,6 +48,7 @@ data AuxiliaryInfo = AuxiliaryInfo
   , auxFirstUses :: FirstUses
   , auxLastUses :: LastUses
   , auxInterferences :: Interferences
-  , auxActualVariables :: (ActualVariables, Names) -- also existentials, a bit messy
+  , auxActualVariables :: ActualVariables
+  , auxExistentials :: Names
   }
   deriving (Show)
