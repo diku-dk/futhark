@@ -6,8 +6,8 @@ module Futhark.Optimise.MemoryBlockMerging.Miscellaneous where
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.List as L
-import Data.Monoid()
-import Data.Maybe (isJust, fromMaybe)
+import Control.Monad
+import Data.Maybe (isJust, fromMaybe, catMaybes)
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
 import Futhark.Representation.AST
@@ -107,6 +107,24 @@ fixpointIterate f x
 fromVar :: SubExp -> Maybe VName
 fromVar (Var v) = Just v
 fromVar _ = Nothing
+
+(<&&>) :: Monad m => m Bool -> m Bool -> m Bool
+m <&&> n = (&&) <$> m <*> n
+
+anyM :: Monad m => (a -> m Bool) -> [a] -> m Bool
+anyM f xs = or <$> mapM f xs
+
+findM :: Monad m => (a -> m Bool) -> [a] -> m (Maybe a)
+findM f xs = do
+  xs' <- filterM f xs
+  return $ case xs' of
+    x' : _ -> Just x'
+    _ -> Nothing
+
+mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
+mapMaybeM f xs = do
+  xs' <- mapM f xs
+  return $ catMaybes xs'
 
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where
