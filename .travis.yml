@@ -8,14 +8,14 @@ cache:
   directories:
     - $HOME/.ghc
     - $HOME/.cabal
-    - $HOME/.stack-default
+    - $HOME/.stack
     - $HOME/.stack-lts-7.22
     - $HOME/.stack-lts-8.13
 
 # We test against different Stackage snapshots.
 matrix:
   include:
-    - env: BUILD=stack STACK_YAML=stack.yaml STACK_ROOT=$HOME/.stack-default
+    - env: BUILD=stack STACK_YAML=stack.yaml STACK_ROOT=$HOME/.stack
     - env: BUILD=stack STACK_YAML=stack-lts-7.22.yaml STACK_ROOT=$HOME/.stack-lts-7.22
     - env: BUILD=stack STACK_YAML=stack-lts-8.13.yaml STACK_ROOT=$HOME/.stack-lts-8.13
 
@@ -35,20 +35,21 @@ before_install:
  - ./.travis-setup.sh
 
 install:
- - stack build --fast alex happy hlint -j 3
+ - stack build --fast alex happy
  - stack --no-terminal test --fast --only-dependencies -j 3
 
 script:
-# - stack --no-terminal test -j 3
+ - stack --no-terminal test -j 3
+ - stack install
 
 # Now for integration testing
-# - stack exec futhark-test --nobuffer tests examples # Run integration test suite.
+ - futhark-test --nobuffer tests examples # Run integration test suite.
 # Numpy is broken on Travis in a weird way I can't reproduce anywhere else.
 # - futhark-test tests examples --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
 
  # Check for style issues.
  - if [ "$STACK_YAML" = stack-lts-8.13.yaml ]; then
-     tools/style-check.sh src;
+     stack install hlint --fast && tools/style-check.sh src;
    fi
 
  # Check the automatic indentation feature of the futhark-mode.el Emacs
