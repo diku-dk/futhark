@@ -2,6 +2,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+-- | Find all variable aliases.  Avoids having to use the Aliases representation
+-- in other modules.
 module Futhark.Optimise.MemoryBlockMerging.VariableAliases where
 
 import qualified Data.Map.Strict as M
@@ -39,7 +41,7 @@ findVarAliases fundef =
   let fundef' = analyseFun fundef
       m = unFindM $ lookInBody $ funDefBody fundef'
       var_aliases = M.unionsWith S.union $ execWriter m
-      var_aliases' = cleanupMapping $ expandWithAliases var_aliases var_aliases
+      var_aliases' = removeEmptyMaps $ expandWithAliases var_aliases var_aliases
   in var_aliases'
 
 lookInBody :: LoreConstraints lore =>

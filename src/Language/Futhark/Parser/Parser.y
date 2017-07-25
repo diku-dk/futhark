@@ -243,8 +243,8 @@ Dec :: { [UncheckedDec] }
     | DefaultDec        { [] }
     | import stringlit
       { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s loc) [] NoInfo $1) $1] }
-    | open many1(ModExpAtom)
-      { [OpenDec (fst $2) (snd $2) NoInfo $1] }
+    | open ModExp
+      { [OpenDec $2 [] NoInfo $1] }
     | local Dec         { map (`LocalDec` $1) $2 }
     | doc Dec           { let L _ (DOC s) = $1 in map (addDoc s) $2 }
 ;
@@ -268,16 +268,17 @@ SigBind :: { SigBindBase NoInfo Name }
             in SigBind name $5 Nothing pos }
 
 ModExp :: { UncheckedModExp }
-        : import stringlit
-          { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
-        | ModExp ':' SigExp
+        : ModExp ':' SigExp
           { ModAscript $1 $3 NoInfo (srclocOf $1) }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
           { ModLambda $2 (fmap (,NoInfo) $3) $5 $1 }
+        | import stringlit
+          { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
         | ModExpApply
           { $1 }
         | ModExpAtom
           { $1 }
+
 
 ModExpApply :: { UncheckedModExp }
              : ModExpAtom ModExpAtom %prec juxtprec

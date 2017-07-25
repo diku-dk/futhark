@@ -1,6 +1,8 @@
-language: c
+language: minimal
 
 sudo: false
+
+dist: trusty
 
 cache:
   directories:
@@ -8,23 +10,26 @@ cache:
     - $HOME/.cabal
     - $HOME/.stack
     - $HOME/.stack-lts-7.22
+    - $HOME/.stack-ghc-8.2.1
+    - .stack
 
 # We test against different Stackage snapshots.
 matrix:
   include:
     - env: BUILD=stack STACK_YAML=stack.yaml STACK_ROOT=$HOME/.stack
     - env: BUILD=stack STACK_YAML=stack-lts-7.22.yaml STACK_ROOT=$HOME/.stack-lts-7.22
+    - env: BUILD=stack STACK_YAML=stack-ghc-8.2.1.yaml STACK_ROOT=$HOME/.stack-ghc-8.2.1
 
 addons:
   apt:
     sources:
-      - sourceline: 'ppa:ubuntu-elisp/ppa'
+      - sourceline: 'ppa:adrozdoff/emacs'
     packages:
     - hlint
     - python
     - python-numpy
     - libgmp-dev
-    - emacs-snapshot
+    - emacs25
 
 before_install:
  - export PATH=$HOME/.local/bin:$PATH
@@ -51,6 +56,7 @@ script:
  # Check the automatic indentation feature of the futhark-mode.el Emacs
  # editing mode.
  - if [ "$STACK_YAML" = stack.yaml ]; then
+     emacs --version;
      cd tools && ./futhark-mode.el-corpus-test.sh;
    fi
 

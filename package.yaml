@@ -27,8 +27,8 @@ dependencies:
   - mtl >= 2.2.1
   - transformers >= 0.3
   - srcloc >= 0.4
-  - language-c-quote >= 0.11
-  - mainland-pretty >= 0.4
+  - language-c-quote >= 0.12
+  - mainland-pretty >= 0.6
   - hashable >= 1.2.1.0
   - parsec >= 3
   - regex-tdfa >= 1.2

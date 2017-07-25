@@ -57,8 +57,11 @@ lookupVarMem var =
   <$> asks ctxVarToMem
 
 lookupActualVars :: VName -> FindM Names
-lookupActualVars var =
-  (fromMaybe (S.singleton var) . M.lookup var) <$> asks ctxActualVars
+lookupActualVars var = do
+  actual_vars <- asks ctxActualVars
+  -- Do this recursively.
+  let actual_vars' = expandWithAliases actual_vars actual_vars
+  return $ fromMaybe (S.singleton var) $ M.lookup var actual_vars'
 
 lookupSize :: VName -> FindM SubExp
 lookupSize var =
@@ -83,8 +86,9 @@ withLocalUses m = do
 
 coreReuseFunDef :: FunDef ExplicitMemory
                 -> FirstUses -> Interferences -> VarMemMappings MemorySrc
-                -> (ActualVariables, Names) -> FunDef ExplicitMemory
-coreReuseFunDef fundef first_uses interferences var_to_mem (actual_vars, existentials) =
+                -> ActualVariables -> Names -> FunDef ExplicitMemory
+coreReuseFunDef fundef first_uses interferences var_to_mem
+  actual_vars existentials =
   let sizes = memBlockSizes fundef
       context = Context first_uses interferences sizes var_to_mem
                 actual_vars existentials []

@@ -6,8 +6,8 @@ module Futhark.Optimise.MemoryBlockMerging.Miscellaneous where
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.List as L
-import Data.Monoid()
-import Data.Maybe (isJust, fromMaybe)
+import Control.Monad
+import Data.Maybe (isJust, fromMaybe, catMaybes)
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
 import Futhark.Representation.AST
@@ -16,8 +16,8 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Aliases
-import Text.PrettyPrint.Mainland (Pretty)
 import Futhark.Util (unixEnvironment)
+import Futhark.Util.Pretty (Pretty)
 
 import Futhark.Optimise.MemoryBlockMerging.Types
 
@@ -64,8 +64,20 @@ insertOrUpdate k v = M.alter (insertOrNew v) k
           Just s -> S.insert x s
           Nothing -> S.singleton x
 
-cleanupMapping :: Ord v => M.Map v (S.Set v) -> M.Map v (S.Set v)
-cleanupMapping = M.filter (not . S.null)
+removeEmptyMaps :: Ord k => M.Map k (S.Set v) -> M.Map k (S.Set v)
+removeEmptyMaps = M.filter (not . S.null)
+
+newDeclarationsStm :: Stm lore -> [VName]
+newDeclarationsStm (Let (Pattern patctxelems patvalelems) _ e) =
+  let new_decls0 = map patElemName (patctxelems ++ patvalelems)
+      new_decls1 = case e of
+        DoLoop mergectxparams mergevalparams _loopform _body ->
+          -- Technically not a declaration for the current expression, but very
+          -- close.
+          map (paramName . fst) (mergectxparams ++ mergevalparams)
+        _ -> []
+      new_decls = new_decls0 ++ new_decls1
+  in new_decls
 
 prettySet :: Pretty a => S.Set a -> String
 prettySet = L.intercalate ", " . map pretty . S.toList
@@ -107,6 +119,24 @@ fixpointIterate f x
 fromVar :: SubExp -> Maybe VName
 fromVar (Var v) = Just v
 fromVar _ = Nothing
+
+(<&&>) :: Monad m => m Bool -> m Bool -> m Bool
+m <&&> n = (&&) <$> m <*> n
+
+anyM :: Monad m => (a -> m Bool) -> [a] -> m Bool
+anyM f xs = or <$> mapM f xs
+
+findM :: Monad m => (a -> m Bool) -> [a] -> m (Maybe a)
+findM f xs = do
+  xs' <- filterM f xs
+  return $ case xs' of
+    x' : _ -> Just x'
+    _ -> Nothing
+
+mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
+mapMaybeM f xs = do
+  xs' <- mapM f xs
+  return $ catMaybes xs'
 
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where

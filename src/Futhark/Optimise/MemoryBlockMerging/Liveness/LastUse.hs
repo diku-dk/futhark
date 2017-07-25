@@ -35,7 +35,7 @@ type OptimisticLastUses = M.Map VName VName
 
 data Context = Context
   { _ctxVarToMem :: VarMemMappings MemorySrc
-  , _ctxMemAliases :: MemAliases
+  , ctxMemAliases :: MemAliases
   , ctxFirstUses :: FirstUses
   , ctxCurFirstUsesBeforeLoop :: Names
   }
@@ -103,7 +103,7 @@ findLastUses var_to_mem mem_aliases first_uses fundef =
         forM_ (M.assocs optimistics) $ \(mem, x_lu) ->
           recordMapping x_lu mem
 
-      last_uses = cleanupMapping $ expandWithAliases mem_aliases $ getLastUsesMap
+      last_uses = removeEmptyMaps $ expandWithAliases mem_aliases $ getLastUsesMap
                   $ snd $ evalRWS m context (Current M.empty S.empty)
   in last_uses
 
@@ -140,7 +140,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         modify $ \c -> c { curFirstUses = S.union first_uses_x $ curFirstUses c }
         -- When this is a new first use of a memory block, commit the previous
         -- optimistic last use of it, so that it can be considered unused in
-        -- the statements inbetween.  FIXME: Aliasing problems?  Edge cases?
+        -- the statements inbetween.
         when (S.member xmem first_uses_x) $ commitOptimistic xmem
       _ -> return ()
 
@@ -155,6 +155,16 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       first_uses_before_loop <- asks ctxCurFirstUsesBeforeLoop
       unless (mem `S.member` first_uses_before_loop) $
         setOptimistic mem x
+      when (mem `S.member` first_uses_before_loop) $ do
+        mem_aliases <- asks ctxMemAliases
+        let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
+        forM_ reverse_mem_aliases $ \mem' ->
+          -- FIXME: This is actually more conservative than it needs to be, in
+          -- that we set the last use of the memory aliasing mem to be at this
+          -- statement, which will later through aliasing cover all its aliased
+          -- memory blocks, including both mem -- which should be included --
+          -- and possibly some other memory block.
+          setOptimistic mem' x
 
   withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker

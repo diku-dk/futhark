@@ -3,7 +3,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 -- | Find the actual variables that need updating when a variable attribute
--- needs updating.
+-- needs updating.  This is different than variable aliasing: Variable aliasing
+-- is a theoretical concept, while this module has the practical purpose of
+-- finding any extra variables that also need a change when a variable has a
+-- change of memory block.
 module Futhark.Optimise.MemoryBlockMerging.ActualVariables
   ( findActualVariables
   ) where
@@ -11,7 +14,7 @@ module Futhark.Optimise.MemoryBlockMerging.ActualVariables
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, catMaybes)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -23,24 +26,16 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 
--- Apart from the obvious benefits of keeping the calculation of this in a
--- separate module, it also makes it easier to find variables that occur later
--- in a body but uses the same memory block as the source variable, e.g. if a
--- rearrange or a reshape.
-
 
 getFullMap :: [M.Map VName Names] -> M.Map VName Names
 getFullMap = M.unionsWith S.union
 
-data Context = Context { ctxFirstUses :: FirstUses
-                       , ctxVarToMem ::  VarMemMappings MemorySrc }
-  deriving (Show)
+type Context = VarMemMappings MemorySrc
 
-newtype FindM lore a = FindM { unFindM :: RWS Context [ActualVariables] Names a }
+newtype FindM lore a = FindM { unFindM :: RWS Context [ActualVariables] () a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
-            MonadWriter [ActualVariables],
-            MonadState Names)
+            MonadWriter [ActualVariables])
 
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore)
@@ -53,17 +48,13 @@ recordActuals :: VName -> Names -> FindM lore ()
 recordActuals stmt_var more_actuals = tell [M.singleton stmt_var more_actuals]
 
 findActualVariables :: LoreConstraints lore =>
-                       FirstUses -> VarMemMappings MemorySrc
-                    -> FunDef lore -> (ActualVariables, Names)
-findActualVariables first_uses var_mem_mappings fundef =
-  let context = Context first_uses var_mem_mappings
+                       VarMemMappings MemorySrc
+                    -> FunDef lore -> ActualVariables
+findActualVariables var_mem_mappings fundef =
+  let context = var_mem_mappings
       m = unFindM $ lookInBody $ funDefBody fundef
-      res = execRWS m context S.empty
-      actual_variables = getFullMap $ snd res
-      actual_variables' = expandWithAliases actual_variables actual_variables
-                          -- not actually "aliases", but same effect
-      existentials = fst res
-  in (actual_variables', existentials)
+      actual_variables = getFullMap $ snd $ execRWS m context ()
+  in actual_variables
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
@@ -89,17 +80,13 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
 
   -- Special handling of loops, ifs, etc.
   case e of
-    DoLoop mergectxparams mergevalparams _loopform body -> do
-      forM_ patvalelems $ \(PatElem var _ membound) ->
+    DoLoop _mergectxparams mergevalparams _loopform body ->
+      forM_ patvalelems $ \(PatElem var _ membound) -> do
         case membound of
           ExpMem.ArrayMem _ _ _ mem _ -> do
             -- If mem is existential, we need to find the return memory that it
             -- refers to.  We cannot just look at its memory aliases, since it
             -- likely aliases both the initial memory and the final memory.
-
-            when (mem `L.elem` map patElemName patctxelems) $
-              modify $ S.insert var -- existentials, fixme make clearer, why
-                                    -- even in this module?
 
             let zipped = zip patctxelems (bodyResult body)
                 mem_search = case L.find ((== mem) . patElemName . fst) zipped of
@@ -114,7 +101,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
             -- Find the ones using the same memory as the result of the loop
             -- expression.
             body_vars' <- filterM (\v -> do
-                                      m <- M.lookup v <$> asks ctxVarToMem
+                                      m <- M.lookup v <$> ask
                                       return $ Just mem_search == (memSrcName <$> m)
                                   ) body_vars
             -- Not only the result variable needs to change its memory block in case
@@ -132,14 +119,6 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
             -- memory blocks.  We want those to stay.
           _ -> return ()
 
-      forM_ mergevalparams $ \(Param var membound, _) -> do
-        case membound of
-          ExpMem.ArrayMem _ _ _ mem _ ->
-            when (mem `L.elem` map (paramName . fst) mergectxparams) $
-              modify $ S.insert var -- existentials, fixme make clearer, why
-                                    -- even in this module?
-          _ -> return ()
-
         -- It seems wrong to change the memory of merge variables, so we disable
         -- it.  If we were to accept it, we would need to record what other
         -- variables to change as well.  Seems hard.
@@ -155,34 +134,15 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
           ExpMem.ArrayMem _ _ _ mem _ ->
             if mem `L.elem` map patElemName patctxelems
               then do
-              modify $ S.insert var -- existentials, fixme make clearer, why
-                                    -- even in this module?
-
-              var_to_mem <- asks ctxVarToMem
-              first_uses_all <- asks ctxFirstUses
-              let ifBlocks body se = do
-                    res <- fromVar se
-                    res_mem <- memSrcName <$> M.lookup res var_to_mem
-                    let body_vars = concatMap (map patElemName . patternValueElements
-                                               . stmPattern)
-                                    $ bodyStms body
-                        body_first_uses = S.unions $ map (`lookupEmptyable` first_uses_all)
-                                          body_vars
-                    Just $ return (S.member res_mem body_first_uses, res)
-
-              case (ifBlocks body_then res_then,
-                    ifBlocks body_else res_else) of
-                (Just th, Just el) -> do -- prettify this stuff
-                  (alloc_inside_then, var_then) <- th
-                  (alloc_inside_else, var_else) <- el
-                  when (alloc_inside_then || alloc_inside_else) $ do
-                    let actuals = S.fromList [var, var_then, var_else]
-                    recordActuals var actuals
-                _ -> return ()
+              -- If the memory block is existential, we say that the If result
+              -- refers to all results in the If.
+              let actuals = S.fromList (var : catMaybes [fromVar res_then, fromVar res_else])
+              recordActuals var actuals
 
               else do
               -- If the memory block is not existential, we need to find all the
-              -- variables in any sub-bodies using the same memory block.
+              -- variables in any sub-bodies using the same memory block (like
+              -- with loops).
               let varFromStm stm = map patElemName (patternValueElements $ stmPattern stm)
                                  ++ foldExp folder [] (stmExp stm)
                   folder = identityFolder { foldOnBody = \vs fbody -> return (vs ++ concatMap varFromStm (bodyStms fbody)) }
@@ -192,7 +152,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
               -- Find the ones using the same memory as the result of the loop
               -- expression.
               body_vars' <- filterM (\v -> do
-                                        m <- M.lookup v <$> asks ctxVarToMem
+                                        m <- M.lookup v <$> ask
                                         return $ Just mem == (memSrcName <$> m)
                                     ) body_vars
               -- Not only the result variable needs to change its memory block in case

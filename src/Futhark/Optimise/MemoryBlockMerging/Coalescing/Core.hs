@@ -7,7 +7,7 @@ module Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
 import qualified Data.Set as S
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe (maybe, fromMaybe)
+import Data.Maybe (maybe, fromMaybe, mapMaybe, isJust)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -22,58 +22,35 @@ import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
 
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps (findPrimExpsFunDef)
+import Futhark.Optimise.MemoryBlockMerging.Coalescing.Exps
+import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition2
+import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition3
+import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition5
 
 
 -- Some of these attributes could be split into separate Coalescing helper
 -- modules if it becomes confusing.  Their computations are fairly independent.
 data Current = Current
-  { -- Safety condition 2 state.
-    curAllocatedBlocks :: Names
-  , curAllocatedBlocksBeforeCreation :: M.Map VName Names
-
-    -- Safety condition 3 state.
-  , curVarUsesAfterCreation :: M.Map VName Names
-
-    -- Safety condition 5 state.
-  , curDeclarationsSoFar :: Names
-  , curVarsInUseBeforeMem :: M.Map VName Names
-
-    -- Coalescings state.  Also save offsets and slices in the case that an
+  { -- Coalescings state.  Also save offsets and slices in the case that an
     -- optimistic coalescing later becomes part of a chain of coalescings, where
     -- it is offset yet again, and where it should maintain its old relative
     -- offset.
-  , curCoalescedIntos :: M.Map VName (S.Set (VName, PrimExp VName,
+    curCoalescedIntos :: M.Map VName (S.Set (VName, PrimExp VName,
                                              [Slice (PrimExp VName)]))
   , curMemsCoalesced :: M.Map VName MemoryLoc
-
-    -- WIP.  Keeps track of loops due to problem in
-    -- tests/coalescing/wip/loop/loop-0.fut.
-  , curLoopVars :: Names
-    -- Keeps track of If expressions to handle more cases with safety condition
-    -- 4.  A bit messy.
-  , curIfVars :: Names
   }
   deriving (Show)
 
 emptyCurrent :: Current
 emptyCurrent = Current
-  { curAllocatedBlocks = S.empty
-  , curAllocatedBlocksBeforeCreation = M.empty
-
-  , curVarUsesAfterCreation = M.empty
-
-  , curDeclarationsSoFar = S.empty
-  , curVarsInUseBeforeMem = M.empty
-
-  , curCoalescedIntos = M.empty
+  { curCoalescedIntos = M.empty
   , curMemsCoalesced = M.empty
-
-  , curLoopVars = S.empty
-  , curIfVars = S.empty
   }
 
 data Context = Context
-  { ctxVarToMem :: VarMemMappings MemorySrc
+  { ctxFunDef :: FunDef ExplicitMemory
+
+  , ctxVarToMem :: VarMemMappings MemorySrc
   , ctxMemAliases :: MemAliases
   , ctxVarAliases :: VarAliases
   , ctxFirstUses :: FirstUses
@@ -82,7 +59,7 @@ data Context = Context
     -- If and DoLoop statements have special requirements, as do some aliasing
     -- expressions.  We don't want to (just) use the obvious statement variable;
     -- sometimes updating the memory block of one variable actually means
-    -- updating the memory block of other variables!
+    -- updating the memory block of other variables as well!
   , ctxActualVars :: M.Map VName Names
 
     -- Sometimes it is convenient to treat existential memory blocks the same as
@@ -92,6 +69,12 @@ data Context = Context
   , ctxExistentials :: Names
 
   , ctxVarPrimExps :: M.Map VName (PrimExp VName)
+  , ctxVarExps :: M.Map VName Exp'
+
+    -- Safety condition 2.
+  , ctxAllocatedBlocksBeforeCreation :: M.Map VName Names
+    -- Safety condition 5.
+  , ctxVarsInUseBeforeMem :: M.Map VName Names
   }
   deriving (Show)
 
@@ -99,6 +82,25 @@ newtype FindM a = FindM { unFindM :: RWS Context () Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
             MonadState Current)
+
+ifExp :: VName -> FindM (Maybe Exp')
+ifExp var = do
+  var_exp <- M.lookup var <$> asks ctxVarExps
+  return $ case var_exp of
+    Just e@(Exp _ If{}) -> Just e
+    _ -> Nothing
+
+isIfExp :: VName -> FindM Bool
+isIfExp var = do
+  found <- ifExp var
+  return $ isJust found
+
+isLoopExp :: VName -> FindM Bool
+isLoopExp var = do
+  var_exp <- M.lookup var <$> asks ctxVarExps
+  return $ case var_exp of
+    Just (Exp _ DoLoop{}) -> True
+    _ -> False
 
 -- Lookup the memory block statically associated with a variable.
 lookupVarMem :: VName -> FindM MemorySrc
@@ -109,8 +111,11 @@ lookupVarMem var =
   <$> asks ctxVarToMem
 
 lookupActualVars :: VName -> FindM Names
-lookupActualVars var =
-  (fromMaybe (S.singleton var) . M.lookup var) <$> asks ctxActualVars
+lookupActualVars var = do
+  actual_vars <- asks ctxActualVars
+  -- Do this recursively.
+  let actual_vars' = expandWithAliases actual_vars actual_vars
+  return $ fromMaybe (S.singleton var) $ M.lookup var actual_vars'
 
 -- Lookup the memory block currenty associated with a variable.  In most cases
 -- (maybe all) this could probably replace 'lookupVarMem', though it would not
@@ -121,15 +126,22 @@ lookupCurrentVarMem var = do
         mem_cur <- M.lookup var <$> gets curMemsCoalesced
         -- ... or original result.
         --
-        -- This is why we save the variables after creation (in
-        -- 'curVarsInUseBeforeMem'), not the memory blocks: Variables stay the
-        -- same, but memory blocks may change, which is relevant in the case of
-        -- a chain of coalescings.
+        -- This is why we save the variables after creation, not the memory
+        -- blocks: Variables stay the same, but memory blocks may change, which
+        -- is relevant in the case of a chain of coalescings.
         mem_orig <- M.lookup var <$> asks ctxVarToMem
         return $ case (mem_cur, mem_orig) of
           (Just m, _) -> Just (memLocName m) -- priority choice
           (_, Just m) -> Just (memSrcName m)
           _ -> Nothing
+
+withMemAliases :: VName -> FindM Names
+withMemAliases mem = do
+  -- The only memory blocks with memory aliases are the existiential ones, so
+  -- using a static ctxMemAliases should be okay, as they will not change during
+  -- the transformation in this module.
+  mem_aliases <- lookupEmptyable mem <$> asks ctxMemAliases
+  return $ S.union (S.singleton mem) mem_aliases
 
 recordOptimisticCoalescing :: VName -> PrimExp VName
                            -> [Slice (PrimExp VName)]
@@ -160,13 +172,27 @@ recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
 
 coreCoalesceFunDef :: FunDef ExplicitMemory -> VarMemMappings MemorySrc
                    -> MemAliases -> VarAliases -> FirstUses -> LastUses
-                   -> (ActualVariables, Names) -> FunDef ExplicitMemory
-coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses last_uses (actual_vars, existentials) =
+                   -> ActualVariables -> Names -> FunDef ExplicitMemory
+coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
+  last_uses actual_vars existentials =
   let primexps = findPrimExpsFunDef fundef
-      context = Context var_to_mem mem_aliases var_aliases first_uses last_uses actual_vars existentials primexps
-      m = unFindM $ do
-        forM_ (funDefParams fundef) lookInFParam
-        lookInBody $ funDefBody fundef
+      exps = findExpsFunDef fundef
+      cond2 = findSafetyCondition2FunDef fundef
+      cond5 = findSafetyCondition5FunDef fundef first_uses
+      context = Context { ctxFunDef = fundef
+                        , ctxVarToMem = var_to_mem
+                        , ctxMemAliases = mem_aliases
+                        , ctxVarAliases = var_aliases
+                        , ctxFirstUses = first_uses
+                        , ctxLastUses = last_uses
+                        , ctxActualVars = actual_vars
+                        , ctxExistentials = existentials
+                        , ctxVarPrimExps = primexps
+                        , ctxVarExps = exps
+                        , ctxAllocatedBlocksBeforeCreation = cond2
+                        , ctxVarsInUseBeforeMem = cond5
+                        }
+      m = unFindM $ lookInBody $ funDefBody fundef
       var_to_mem_res = curMemsCoalesced $ fst $ execRWS m context emptyCurrent
       fundef' = transformFromVarMemMappings var_to_mem_res fundef
 
@@ -182,17 +208,6 @@ coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses last_use
 
   in withDebug debug fundef'
 
-lookInFParam :: FParam ExplicitMemory -> FindM ()
-lookInFParam (Param x membound) = do
-  modify $ \c -> c { curDeclarationsSoFar = S.insert x $ curDeclarationsSoFar c }
-
-  -- Unique array function parameters also count as "allocations" in which
-  -- memory can be coalesced.
-  case membound of
-    ExpMem.ArrayMem _ _ Unique mem _ ->
-      modify $ \c -> c { curAllocatedBlocks = S.insert mem $ curAllocatedBlocks c }
-    _ -> return ()
-
 lookInBody :: Body ExplicitMemory -> FindM ()
 lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
@@ -201,14 +216,7 @@ zeroOffset :: PrimExp VName
 zeroOffset = primExpFromSubExp (IntType Int32) (constant (0 :: Int32))
 
 lookInStm :: Stm ExplicitMemory -> FindM ()
-lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
-  case (patvalelems, e) of
-    ([PatElem dst _ ExpMem.ArrayMem{}], DoLoop{}) ->
-      modify $ \c -> c { curLoopVars = S.insert dst $ curLoopVars c }
-    ([PatElem dst _ ExpMem.ArrayMem{}], If{}) ->
-      modify $ \c -> c { curIfVars = S.insert dst $ curIfVars c }
-    _ -> return ()
-
+lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
   -- COALESCING-SPECIFIC HANDLING for Copy and Concat.
   case patvalelems of
     [PatElem dst bindage ExpMem.ArrayMem{}] -> do
@@ -244,83 +252,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) () e) = do
     _ -> return ()
 
 
-  -- GENERAL STATE UPDATING.
-  let new_decls0 = map patElemName (patctxelems ++ patvalelems)
-      new_decls1 = case e of
-        DoLoop _mergectxparams mergevalparams _loopform _body ->
-          -- Technically not a declaration for the current expression, but very
-          -- close, and hopefully okay to consider it as one.
-          map (paramName . fst) mergevalparams
-        _ -> []
-      new_decls = new_decls0 ++ new_decls1
-
-  -- Update attributes related to safety condition 2.
-  forM_ new_decls $ \x ->
-    modify $ \c -> c { curAllocatedBlocksBeforeCreation =
-                         M.insert x (curAllocatedBlocks c)
-                         $ curAllocatedBlocksBeforeCreation c }
-
-  case (patvalelems, e) of
-    ([PatElem mem _ _], Op ExpMem.Alloc{}) ->
-      modify $ \c -> c { curAllocatedBlocks = S.insert mem $ curAllocatedBlocks c }
-    _ -> return ()
-
-
-  -- Update attributes related to safety condition 3.
-  let e_free_vars = freeInExp e -- FIXME: should not include those consumed
-      e_used_vars = S.union e_free_vars (S.fromList new_decls)
-
-  -- Update the existing entries.
-  --
-  -- Note that "used after creation" refers both to used in subsequent
-  -- statements AND any statements in any sub-bodies (if and loop).
-  uses_after <- gets curVarUsesAfterCreation
-  forM_ (M.keys uses_after) $ \x ->
-    modify $ \c -> c { curVarUsesAfterCreation =
-                         M.adjust (S.union e_used_vars) x
-                         $ curVarUsesAfterCreation c }
-
-  -- Create the new entries for the current statement.
-  forM_ new_decls $ \x ->
-    modify $ \c -> c { curVarUsesAfterCreation =
-                         M.insert x S.empty
-                         $ curVarUsesAfterCreation c }
-
-
-  -- Update attributes related to safety condition 5.
-  first_uses <- asks ctxFirstUses
-  forM_ (S.toList $ S.unions $ map (`lookupEmptyable` first_uses) new_decls) $ \mem ->
-    modify $ \c -> c { curVarsInUseBeforeMem =
-                       M.insert mem (curDeclarationsSoFar c)
-                       $ curVarsInUseBeforeMem c }
-
-  forM_ new_decls $ \x ->
-    modify $ \c -> c { curDeclarationsSoFar = S.insert x $ curDeclarationsSoFar c }
-
-
   -- RECURSIVE BODY WALK.
-  let walker = identityWalker { walkOnBody = lookInBody
-                              , walkOnFParam = lookInFParam
-                              }
-  walkExpM walker e -- Maybe this needs to be run locally for some of the state
-                    -- fields.
-
-withMemAliases :: VName -> FindM Names
-withMemAliases mem = do
-  -- The only memory blocks with memory aliases are the existiential ones, so
-  -- using a static ctxMemAliases should be okay, as they will not change during
-  -- the transformation in this module.
-  mem_aliases <- lookupEmptyable mem <$> asks ctxMemAliases
-  return $ S.union (S.singleton mem) mem_aliases
-
--- Replace variables with subtrees of their constituents wherever possible.  It
--- is debatable whether this is "simplifying", but it can enable more
--- expressions to use the index function.
-simplifyIxFun :: ExpMem.IxFun -> FindM ExpMem.IxFun
-simplifyIxFun ixfun = do
-  var_to_pe <- asks ctxVarPrimExps
-  let ixfun' = fixpointIterate (IxFun.substituteInIxFun var_to_pe) ixfun
-  return ixfun'
+  walkExpM walker e
+  where walker = identityWalker { walkOnBody = lookInBody }
 
 tryCoalesce :: VName -> [Slice (PrimExp VName)] -> Bindage -> VName
             -> PrimExp VName -> FindM ()
@@ -364,12 +298,14 @@ tryCoalesce dst ixfun_slices bindage src offset = do
 
   -- Not everything supported yet.  This dials back the optimisation on areas
   -- where it fails.
-  loop_vars <- gets curLoopVars
   existentials <- asks ctxExistentials
-  let currentlyDisabled (src_local, ixfun_slices_local) =
+  let currentlyDisabled src_local ixfun_slices_local = do
         -- This case covers the problem described in
         -- tests/coalescing/wip/loop/loop-0.fut.
-        let res = src_local `L.elem` loop_vars
+
+        src_local_is_loop <- isLoopExp src_local
+
+        let res = src_local_is_loop
                   && src_local `L.elem` existentials
                   && not (L.null ixfun_slices_local)
 
@@ -378,13 +314,12 @@ tryCoalesce dst ixfun_slices bindage src offset = do
               putStrLn "currentlyDisabled:"
               putStrLn ("var: " ++ pretty src_local)
               putStrLn ("dst mem: " ++ show mem_dst)
-              putStrLn ("loop vars: " ++ show loop_vars)
               putStrLn ("existentials: " ++ show existentials)
               putStrLn ("ixfun_slices: " ++ show ixfun_slices_local)
               putStrLn $ replicate 70 '~'
-        in withDebug debug res
+        withDebug debug $ return res
 
-  let safe0 = not $ any currentlyDisabled $ zip srcs ixfun_slicess
+  safe0 <- (not . or) <$> zipWithM currentlyDisabled srcs ixfun_slicess
 
   -- Safety condition 1 is the same for all eventual previous arrays from srcs
   -- that also need to be coalesced into dst, so we check it here instead of
@@ -396,7 +331,7 @@ tryCoalesce dst ixfun_slices bindage src offset = do
   safe1 <- safetyCond1 dst mem_src_base
 
   when (safe0 && safe1) $ do
-    safes <- zipWithM (canBeCoalesced dst mem_dst) srcs ixfuns'
+    safes <- zipWithM (canBeCoalesced dst) srcs ixfuns'
     when (and safes) $ do
       -- Any previous src0s coalescings must be deleted.
       modify $ \c -> c { curCoalescedIntos = M.delete src $ curCoalescedIntos c }
@@ -437,25 +372,39 @@ tryCoalesce dst ixfun_slices bindage src offset = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return ()
 
-canBeCoalesced :: VName -> MemorySrc -> VName -> ExpMem.IxFun -> FindM Bool
-canBeCoalesced dst mem_dst src ixfun = do
+-- Replace variables with subtrees of their constituents wherever possible.  It
+-- is debatable whether this is "simplifying", but it can enable more
+-- expressions to use the index function.
+simplifyIxFun :: ExpMem.IxFun -> FindM ExpMem.IxFun
+simplifyIxFun ixfun = do
+  var_to_pe <- asks ctxVarPrimExps
+  let ixfun' = fixpointIterate (IxFun.substituteInIxFun var_to_pe) ixfun
+  return ixfun'
+
+canBeCoalesced :: VName -> VName -> ExpMem.IxFun -> FindM Bool
+canBeCoalesced dst src ixfun = do
+  mem_dst <- lookupVarMem dst
   mem_src <- lookupVarMem src
 
-  safe2 <- safetyCond2 mem_dst src
-  safe3 <- safetyCond3 mem_dst src
+  safe2 <- safetyCond2 src mem_dst
+  safe3 <- safetyCond3 src dst mem_dst
   safe4 <- safetyCond4 src
   safe5 <- safetyCond5 mem_src ixfun
 
-  let safe_all = safe2 && safe3 && safe4 && safe5
+  safe_if <- safetyIf src dst
+
+  let safe_all = safe2 && safe3 && safe4 && safe5 && safe_if
 
   let debug = safe_all `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "canBeCoalesced:"
         putStrLn ("dst: " ++ pretty dst ++ ", src: " ++ pretty src)
         putStrLn ("mem_dst: " ++ show mem_dst)
+        putStrLn ("mem_src: " ++ show mem_src)
         putStrLn ("safe: " ++ L.intercalate ", "
                   -- Safety condition 1 is true if canBeCoalesced is run.
-                  (map show [True, safe2, safe3, safe4, safe5]))
+                  (map show [True, safe2, safe3, safe4, safe5])
+                  ++ "; safe If: " ++ show safe_if)
         putStrLn $ replicate 70 '~'
   withDebug debug $ return safe_all
 
@@ -465,12 +414,12 @@ canBeCoalesced dst mem_dst src ixfun = do
 --    the statement.
 --
 -- 2. The allocation of mem_dst occurs before the creation of src, i.e. the
---    first use of mem_src.  Handle by checking curAllocatedBlocksBeforeCreation
---    (which depends on curAllocatedBlocks).
+--    first use of mem_src.  Handle by checking
+--    ctxAllocatedBlocksBeforeCreation.
 --
 -- 3. There is no use or creation of mem_dst after the creation of src and
---    before the current statement.  Handle by checking curVarUsesAfterCreation
---    and looking at both the original var-mem mappings *and* the new, temporary
+--    before the current statement.  Handle by calling getVarUsesBetween and
+--    looking at both the original var-mem mappings *and* the new, temporary
 --    ones.
 --
 -- 4. src (the variable, not the memory) does not alias anything.  Handle by
@@ -479,9 +428,9 @@ canBeCoalesced dst mem_dst src ixfun = do
 -- 5. The new index function of src only uses variables declared prior to the
 --    first use of mem_src.  Handle by first using curVarPrimExps and
 --    ExpMem.substituteInIxFun to create a (possibly larger) index function that
---    uses earlier variables.  Then use curVarsInUseBeforeMem (which depends on
---    curDeclarationsSoFar) to check that all the variables in the new index function
---    are available before the creation of mem_src.
+--    uses earlier variables.  Then use ctxVarsInUseBeforeMem to check that all
+--    the variables in the new index function are available before the creation
+--    of mem_src.
 --
 -- If an array src0 has been coalesced into mem_src, handle that by *also*
 -- checking src0 and mem_src0 where src and mem_src are checked.  We choose to
@@ -507,10 +456,10 @@ safetyCond1 dst mem_src = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond2 :: MemorySrc -> VName -> FindM Bool
-safetyCond2 mem_dst src = do
+safetyCond2 :: VName -> MemorySrc -> FindM Bool
+safetyCond2 src mem_dst = do
   allocs_before_src <- lookupEmptyable src
-                       <$> gets curAllocatedBlocksBeforeCreation
+                       <$> asks ctxAllocatedBlocksBeforeCreation
   let res = S.member (memSrcName mem_dst) allocs_before_src
 
   let debug = allocs_before_src `seq` do
@@ -522,15 +471,16 @@ safetyCond2 mem_dst src = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond3 :: MemorySrc -> VName -> FindM Bool
-safetyCond3 mem_dst src = do
-  uses_after_src_vars <- lookupEmptyable src <$> gets curVarUsesAfterCreation
+safetyCond3 :: VName -> VName -> MemorySrc -> FindM Bool
+safetyCond3 src dst mem_dst = do
+  fundef <- asks ctxFunDef
+  let uses_after_src_vars = getVarUsesBetween fundef src dst
   uses_after_src <- S.unions <$> mapM (maybe (return S.empty) withMemAliases
                                        <=< lookupCurrentVarMem)
                     (S.toList uses_after_src_vars)
   let res = not $ S.member (memSrcName mem_dst) uses_after_src
 
-  let debug = do
+  let debug = uses_after_src `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "safetyCond3:"
         putStrLn ("mem_dst: " ++ show mem_dst)
@@ -542,13 +492,10 @@ safetyCond3 mem_dst src = do
 
 safetyCond4 :: VName -> FindM Bool
 safetyCond4 src = do
-  -- Special If handling: If it has been assigned actual variables in the
-  -- ActualVariables pass, we know that it is okay for it to have one alias (one
-  -- of the branches).  Two aliases are wrong; the previous code has checked
-  -- that.
-  if_vars <- gets curIfVars
-  actual_vars <- asks ctxActualVars
-  let if_handling = S.member src if_vars && M.member src actual_vars
+  -- Special If handling: An If can have aliases, but that can be okay and is
+  -- checked in safe If: It is okay for it to have one alias (one of the
+  -- branches), while two aliases are wrong.
+  if_handling <- isIfExp src
 
   -- This needs to be extended if support for e.g. reshape coalescing is wanted:
   -- Some operations can be aliasing, but still be okay to coalesce if you also
@@ -567,7 +514,7 @@ safetyCond4 src = do
 safetyCond5 :: MemorySrc -> ExpMem.IxFun -> FindM Bool
 safetyCond5 mem_src ixfun = do
   in_use_before_mem_src <- lookupEmptyable (memSrcName mem_src)
-                           <$> gets curVarsInUseBeforeMem
+                           <$> asks ctxVarsInUseBeforeMem
   let used_vars = freeIn ixfun
       res = all (`S.member` in_use_before_mem_src) $ S.toList used_vars
 
@@ -578,5 +525,104 @@ safetyCond5 mem_src ixfun = do
         putStrLn ("ixfun: " ++ show ixfun)
         putStrLn ("in use before mem_src: " ++ prettySet in_use_before_mem_src)
         putStrLn ("used vars: " ++ prettySet used_vars)
+        putStrLn $ replicate 70 '~'
+  withDebug debug $ return res
+
+safetyIf :: VName -> VName -> FindM Bool
+safetyIf src dst = do
+  -- Special handling: If src refers to an If expression, we need to check that
+  -- not just is mem_dst not used after src and before dst, but neither is any
+  -- other memory that will be merged after the coalescing.  Normally this is
+  -- not an issue, since a coalescing means changing just one memory block --
+  -- but in the case of an If expression, each branches can have its own memory
+  -- block, and both of them will try to be coalesced.  This extra test only
+  -- applies to the actual memory blocks in the branches, not any existential
+  -- memory block in the If, which in any case will be "used" in both branches.
+  --
+  -- See tests/coalescing/if/if-neg-3.fut for an example of where this should
+  -- fail.
+  mem_src <- lookupVarMem src
+  actual_srcs <- S.toList <$> lookupActualVars src
+  existentials <- asks ctxExistentials
+  var_to_mem <- asks ctxVarToMem
+  first_uses_all <- asks ctxFirstUses
+
+  -- FIXME: Lookup nicer.
+  actual_vars <- asks ctxActualVars
+  let reverse_actual_srcs = S.toList $ S.unions $ M.elems
+                            $ M.filter (src `S.member`) actual_vars
+  outer <- mapMaybeM ifExp reverse_actual_srcs
+  let (is_in_if,
+       if_branch_results_from_outer,
+       at_least_one_creation_inside) = case outer of
+        -- This is the if expression of which we are currently looking at one of
+        -- its branch results.
+        [Exp npat (If _ body0 body1 _)] ->
+          let results_from_outer = S.fromList $ mapMaybe fromVar
+                                   $ concatMap bodyResult
+                                   $ filter (null . bodyStms) [body0, body1]
+
+              resultCreatedInside body se = fromMaybe False $ do
+                res <- fromVar se
+                res_mem <- memSrcName <$> M.lookup res var_to_mem
+                let body_vars = concatMap (map patElemName . patternValueElements
+                                           . stmPattern) $ bodyStms body
+                    body_first_uses = S.unions $ map (`lookupEmptyable` first_uses_all)
+                                      body_vars
+                return $ S.member res_mem body_first_uses
+
+              at_least = resultCreatedInside body0 (bodyResult body0 !! npat)
+                         || resultCreatedInside body1 (bodyResult body1 !! npat)
+          in (True, results_from_outer, at_least)
+        _ -> (False, S.empty, False)
+
+  -- This success requirement is independent of whichever branch we are in right
+  -- now.  We say that the results of an if-expression can be coalesced if the
+  -- branch-specific requirements hold *and* this general rule holds: Either the
+  -- If has no existentials (e.g. if it does in-place updates), or it has
+  -- existentials and at least one of the branches returns an array that was
+  -- created inside the branch.
+  let res_general = not is_in_if || (not (any (`S.member` existentials) actual_srcs)
+                                     || at_least_one_creation_inside)
+
+  -- Check if the branch described by 'src' needs special handling.
+  let if_handling =
+        -- We are sure this is an if.  This might not actually be necessary.
+        is_in_if
+        -- This does not refer to the result of a branch where the array is
+        -- created outside the if.  It is a requirement that there is at most
+        -- one such branch.  The extra safety here only relates to branches
+        -- whose result arrays are created inside.
+        && not (any (`S.member` if_branch_results_from_outer) actual_srcs)
+        -- Ignore existentials as well.
+        && not (src `S.member` existentials)
+
+  -- This success requirement is part is specific to this branch.
+  res_current <-
+    if if_handling
+    then do
+      -- Get the memory used in the other branch.  Use a reverse lookup.
+      mem_actual_srcs <- L.nub <$> mapM lookupVarMem reverse_actual_srcs
+      let mem_actual_srcs_cur = L.delete mem_src mem_actual_srcs
+      and <$> mapM (safetyCond3 src dst) mem_actual_srcs_cur
+    else return True
+
+  -- The full result.
+  let res = res_general && res_current
+
+  let debug = res `seq` do
+        putStrLn $ replicate 70 '~'
+        putStrLn "safeIf:"
+        putStrLn ("src: " ++ pretty src)
+        putStrLn ("actual_srcs: " ++ prettySet (S.fromList actual_srcs))
+        putStrLn ("reverse actual_srcs: " ++ prettySet (S.fromList reverse_actual_srcs))
+        putStrLn ("outer: " ++ show outer)
+        putStrLn ("if branch results from outer: "
+                  ++ prettySet if_branch_results_from_outer)
+        putStrLn ("at least one creation inside: "
+                  ++ show at_least_one_creation_inside)
+        putStrLn ("if handling: " ++ show if_handling
+                  ++ " (is in if: " ++ show is_in_if ++ ")")
+        putStrLn ("res safe: " ++ show res)
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
