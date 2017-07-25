@@ -10,16 +10,15 @@ attributes = (
     ('average runtime',
      'microseconds',
      lambda d: d['average_runtime']),
-    # FIXME
-    # ('average peak memory usage',
-    #  'bytes',
-    #  lambda d: np.mean(list(d['peak_memory_usages'].values()))),
-    # ('total cumulative allocations',
-    #  'bytes',
-    #  lambda d: d['total_cumulative_allocations']),
-    # ('total cumulative frees',
-    #  'bytes',
-    #  lambda d: d['total_cumulative_frees']),
+    ('average peak memory usage',
+     'bytes',
+     lambda d: np.mean(list(d['peak_memory_usages'].values()))),
+    ('total cumulative allocations',
+     'bytes',
+     lambda d: d['total_cumulative_allocations']),
+    ('total cumulative frees',
+     'bytes',
+     lambda d: d['total_cumulative_frees']),
 )
 
 def average_improvement(benchmark_info, val_func):

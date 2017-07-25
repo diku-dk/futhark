@@ -90,10 +90,9 @@ def get_dataset_info_base(benchmarks, benchmark_name, dataset_name):
     if average_runtime > runtime_limit_ignore:
         dataset_info_base = {
             'average_runtime': average_runtime,
-            # FIXME
-#            'total_cumulative_allocations': raw['total_allocated'],
-#            'total_cumulative_frees': raw['total_freed'],
-#            'peak_memory_usages': raw['peak_memory_usages']
+            'total_cumulative_allocations': raw['total_allocated'],
+            'total_cumulative_frees': raw['total_freed'],
+            'peak_memory_usages': raw['peak_memory_usages']
         }
         return dataset_info_base
     else:

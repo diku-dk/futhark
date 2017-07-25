@@ -6,7 +6,7 @@
 #     and reuse) disabled.
 #   + The other way round.
 #
-# The sole argument should be a directory name.  This script will then create
+# The first argument should be a directory name.  This script will then create
 # that directory and store gathered data in multiple JSON files in a
 # subdirectory "runs".
 #
@@ -21,13 +21,18 @@ if ! [ "$result_dir" ]; then
     exit 1
 fi
 
+flags='-p -M' # Also put memory footprint in the resulting JSON file.
+
 timeout_secs="$2"
-if ! [ "$timeout_secs" ]; then
-    # No limit on runtimes.
-    flags=''
-else
+if [ "$timeout_secs" ]; then
     # Effectively ignore too large datasets.
-    flags="--timeout $timeout_secs"
+    flags="$flags --timeout $timeout_secs"
+fi
+
+number_runs="$3"
+if [ "$number_runs" ]; then
+    # Change the default of 10 runs.
+    flags="$flags -r $number_runs"
 fi
 
 base="$(readlink -f "$result_dir")"
