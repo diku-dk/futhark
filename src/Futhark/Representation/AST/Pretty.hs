@@ -67,22 +67,22 @@ instance Pretty Commutativity where
   ppr Noncommutative = text "noncommutative"
 
 -- | Print an array value, using the given function for printing
--- elements.
-ppArray :: (PrimValue -> Doc) -> Value -> Doc
-ppArray pprim (PrimVal v) = pprim v
-ppArray _ (ArrayVal _ t shape)
-  | product shape == 0 = text "empty" <> parens (ppr row_t)
+-- elements and element types.
+ppArray :: (TypeBase Rank NoUniqueness -> Doc) -> (PrimValue -> Doc) -> Value -> Doc
+ppArray _ pprim (PrimVal v) = pprim v
+ppArray pt _ (ArrayVal _ t shape)
+  | product shape == 0 = text "empty" <> parens (pt row_t)
   where row_t = Array t (Rank $ length shape - 1) NoUniqueness
-ppArray pprim (ArrayVal a t (_:rowshape@(_:_))) =
+ppArray pt pprim (ArrayVal a t (_:rowshape@(_:_))) =
   brackets $ commastack
-  [ ppArray pprim $ ArrayVal (listArray (0, rowsize-1) a') t rowshape
+  [ ppArray pt pprim $ ArrayVal (listArray (0, rowsize-1) a') t rowshape
   | a' <- chunk rowsize $ elems a ]
   where rowsize = product rowshape
-ppArray pprim (ArrayVal a _ _) =
+ppArray _ pprim (ArrayVal a _ _) =
   brackets $ commasep $ map pprim $ elems a
 
 instance Pretty Value where
-  ppr = ppArray ppr
+  ppr = ppArray ppr ppr
 
 instance Pretty Shape where
   ppr = brackets . commasep . map ppr . shapeDims
