@@ -92,7 +92,9 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
   let sizes = memBlockSizes fundef
       context = Context first_uses interferences sizes var_to_mem
                 actual_vars existentials []
-      m = unFindM $ lookInBody $ funDefBody fundef
+      m = unFindM $ do
+        forM_ (funDefParams fundef) lookInFParam
+        lookInBody $ funDefBody fundef
       var_to_mem_res = curResult $ fst $ execRWS m context emptyCurrent
       fundef' = transformFromVarMemMappings var_to_mem_res fundef
 
@@ -107,6 +109,15 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
         putStrLn $ replicate 70 '='
 
   in withDebug debug fundef'
+
+lookInFParam :: FParam ExplicitMemory -> FindM ()
+lookInFParam (Param _ membound) =
+  -- Unique array function parameters also count as "allocations" in which
+  -- memory can be reused.
+  case membound of
+    ExpMem.ArrayMem _ _ Unique mem _ ->
+      insertUse mem mem
+    _ -> return ()
 
 lookInBody :: Body ExplicitMemory
            -> FindM ()
