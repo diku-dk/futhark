@@ -78,7 +78,7 @@ instance PP.Pretty KnownBound where
   ppr (MinimumBound b1 b2) =
     PP.text "min" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
   ppr (MaximumBound b1 b2) =
-    PP.text "min" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
+    PP.text "max" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
   ppr (ScalarBound e) =
     PP.ppr e
 
@@ -188,6 +188,11 @@ primOpRanges (BinOp (Mul t) x y) =
   [scalExpRange $ SE.STimes (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
 primOpRanges (BinOp (SDiv t) x y) =
   [scalExpRange $ SE.SDiv (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
+primOpRanges (BinOp (SMax t) x y) =
+  [(Just $ MaximumBound (ScalarBound x') (ScalarBound y'),
+    Just $ MaximumBound (ScalarBound x') (ScalarBound y'))]
+  where x' = SE.subExpToScalExp x $ IntType t
+        y' = SE.subExpToScalExp y $ IntType t
 
 primOpRanges (ConvOp (SExt from to) x)
   | from < to = [rangeOf x]

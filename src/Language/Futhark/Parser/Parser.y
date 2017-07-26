@@ -619,10 +619,10 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '('      ')'                { TupLit [] $1 }
      | '[' sepBy1(Exp, ',') ']'    { ArrayLit (fst $2:snd $2) NoInfo $1 }
 
-     | '[' Exp '...' Exp ']'          { Range $2 Nothing (UpToInclusive $4) $1 }
+     | '[' Exp '...' Exp ']'          { Range $2 Nothing (ToInclusive $4) $1 }
      | '[' Exp '..<' Exp ']'          { Range $2 Nothing (UpToExclusive $4) $1 }
      | '[' Exp '..>' Exp ']'          { Range $2 Nothing (DownToExclusive $4) $1 }
-     | '[' Exp '..' Exp '...' Exp ']' { Range $2 (Just $4) (UpToInclusive $6) $1 }
+     | '[' Exp '..' Exp '...' Exp ']' { Range $2 (Just $4) (ToInclusive $6) $1 }
      | '[' Exp '..' Exp '..<' Exp ']' { Range $2 (Just $4) (UpToExclusive $6) $1 }
      | '[' Exp '..' Exp '..>' Exp ']' { Range $2 (Just $4) (DownToExclusive $6) $1 }
 

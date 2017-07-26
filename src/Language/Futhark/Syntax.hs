@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 -- | This is an ever-changing syntax representation for Futhark.  Some
@@ -508,13 +507,13 @@ data BinOp = Plus -- Binary Ops for Numbers
 -- | Whether a bound for an end-point of a 'DimSlice' or a range
 -- literal is inclusive or exclusive.
 data Inclusiveness a = DownToExclusive a
-                     | UpToInclusive a -- ^ May still be "down to" if step is negative.
-                     | UpToExclusive a -- ^ May still be "down to" if step is negative.
+                     | ToInclusive a -- ^ May be "down to" if step is negative.
+                     | UpToExclusive a
                      deriving (Eq, Ord, Show)
 
 instance Located a => Located (Inclusiveness a) where
   locOf (DownToExclusive x) = locOf x
-  locOf (UpToInclusive x) = locOf x
+  locOf (ToInclusive x) = locOf x
   locOf (UpToExclusive x) = locOf x
 
 -- | An indexing of a single dimension.
