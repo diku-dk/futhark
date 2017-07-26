@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 -- | Facilities for type-checking Futhark terms.  Checking a term
 -- requires a little more context to track uniqueness and such.
 module Language.Futhark.TypeChecker.Terms
@@ -532,7 +532,7 @@ checkExp (ArrayLit es _ loc) = do
   return $ ArrayLit es' (Info et) loc
 
 checkExp (Range start maybe_step end loc) = do
-  start' <- require anySignedType =<< checkExp start
+  start' <- require anyIntType =<< checkExp start
   let start_t = toStructural $ typeOf start'
   maybe_step' <- case maybe_step of
     Nothing -> return Nothing
@@ -547,7 +547,7 @@ checkExp (Range start maybe_step end loc) = do
   end' <- case end of
     DownToExclusive e -> DownToExclusive <$> (require [start_t] =<< checkExp e)
     UpToExclusive e -> UpToExclusive <$> (require [start_t] =<< checkExp e)
-    UpToInclusive e -> UpToInclusive <$> (require [start_t] =<< checkExp e)
+    ToInclusive e -> ToInclusive <$> (require [start_t] =<< checkExp e)
 
   return $ Range start' maybe_step' end' loc
 
