@@ -78,7 +78,7 @@ instance PP.Pretty KnownBound where
   ppr (MinimumBound b1 b2) =
     PP.text "min" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
   ppr (MaximumBound b1 b2) =
-    PP.text "min" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
+    PP.text "max" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
   ppr (ScalarBound e) =
     PP.ppr e
 
