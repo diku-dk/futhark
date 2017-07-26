@@ -567,8 +567,14 @@ printStm (Imp.ArrayValue mem memsize space bt ept (outer:shape)) e = do
     ],
     puts "]"]
     where ppArrayType :: PrimType -> Int -> String
-          ppArrayType t 0 = pretty t
+          ppArrayType t 0 = prettyPrimType ept t
           ppArrayType t n = "[]" ++ ppArrayType t (n-1)
+
+          prettyPrimType Imp.TypeUnsigned (IntType Int8) = "u8"
+          prettyPrimType Imp.TypeUnsigned (IntType Int16) = "u16"
+          prettyPrimType Imp.TypeUnsigned (IntType Int32) = "u32"
+          prettyPrimType Imp.TypeUnsigned (IntType Int64) = "u64"
+          prettyPrimType _ t = pretty t
 
           puts s = Exp $ simpleCall "sys.stdout.write" [StringLiteral s]
 
