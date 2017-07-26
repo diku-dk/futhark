@@ -406,61 +406,92 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
 
 internaliseExp desc (E.Range start maybe_second end _) = do
   start' <- internaliseExp1 "range_start" start
-
-  start_t <- subExpType start'
-  it <- case start_t of
-          I.Prim (I.IntType it) -> return it
-          _ -> fail $ "Start value in range has type " ++ pretty start_t
-
-  let zero = intConst it 0
-      one = intConst it 1
-      negone = intConst it (-1)
-      default_step = case end of DownToExclusive{} -> negone
-                                 UpToInclusive{} -> one
-                                 UpToExclusive{} -> one
-
-  (step, step_invalid) <- case maybe_second of
-            Just second -> do
-              second' <- internaliseExp1 "range_second" second
-              subtracted_step <- letSubExp "subtracted_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
-              same_step <- letSubExp "same_step" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
-              return (subtracted_step, same_step)
-            Nothing -> do
-              same_step <- letSubExp "same_step" $ I.BasicOp $ I.SubExp $ constant False
-              return (default_step, same_step)
-
-  step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
-  let eDivRounding x y =
-        eBinOp (SQuot it) (eBinOp (Add it) x (eBinOp (Sub it) y (eSubExp step_sign))) y
-
-  downwards <- case end of
-    DownToExclusive{} -> return $ constant True
-    UpToExclusive{} -> return $ constant False
-    _ -> letSubExp "downwards" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
-
   end' <- internaliseExp1 "range_end" $ case end of
     DownToExclusive e -> e
-    UpToInclusive e -> e
+    ToInclusive e -> e
     UpToExclusive e -> e
 
-  end_exclusive <- case end of
-    UpToInclusive{} ->
-      letSubExp "range_end_exclusive" $ I.BasicOp $ I.BinOp (I.Add it) end' step_sign
-    _ -> return end'
+  (it, le_op) <-
+    case E.typeOf start of
+      E.Prim (E.Signed it) -> return (it, CmpSle it)
+      E.Prim (E.Unsigned it) -> return (it, CmpUle it)
+      start_t -> fail $ "Start value in range has type " ++ pretty start_t
 
-  end_from_above <- letSubExp "end_from_above" $ I.BasicOp $ I.BinOp (I.SMin it) start' end_exclusive
-  end_from_below <- letSubExp "end_from_below" $ I.BasicOp $ I.BinOp (I.SMax it) start' end_exclusive
+  let one = intConst it 1
+      negone = intConst it (-1)
+      default_step = case end of DownToExclusive{} -> negone
+                                 ToInclusive{} -> one
+                                 UpToExclusive{} -> one
 
-  end_constrained <- letSubExp "end_constrained" $
-                     I.If downwards (resultBody [end_from_above]) (resultBody [end_from_below])
-                     [I.Prim $ IntType it]
+  (step, step_zero) <- case maybe_second of
+    Just second -> do
+      second' <- internaliseExp1 "range_second" second
+      subtracted_step <- letSubExp "subtracted_step" $ I.BasicOp $ I.BinOp (I.Sub it) second' start'
+      step_zero <- letSubExp "step_zero" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
+      return (subtracted_step, step_zero)
+    Nothing ->
+      return (default_step, constant False)
 
-  distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (I.Sub it) end_constrained start'
-  num_elems_maybe_neg <- letSubExp "num_elems_maybe_neg" =<< eDivRounding (eSubExp distance) (eSubExp step)
-  num_elems_unless_step_invalid <- letSubExp "num_elems_unless_step_invalid" $
-                                   I.If step_invalid (resultBody [zero]) (resultBody [num_elems_maybe_neg])
-                                   [I.Prim $ IntType it]
-  num_elems <- letSubExp "num_elems" $ I.BasicOp $ I.BinOp (I.SMax it) zero num_elems_unless_step_invalid
+  step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
+  step_sign_i32 <- asIntS Int32 step_sign
+
+  bounds_invalid_downwards <- letSubExp "bounds_invalid_downwards" $
+                              I.BasicOp $ I.CmpOp le_op start' end'
+  bounds_invalid_upwards <- letSubExp "bounds_invalid_upwards" $
+                            I.BasicOp $ I.CmpOp le_op end' start'
+
+  (distance, step_wrong_dir, bounds_invalid) <- case end of
+    DownToExclusive{} -> do
+      step_wrong_dir <- letSubExp "step_wrong_dir" $
+                        I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign one
+      distance <- letSubExp "distance" $
+                  I.BasicOp $ I.BinOp (Sub it) start' end'
+      distance_i32 <- asIntZ Int32 distance
+      return (distance_i32, step_wrong_dir, bounds_invalid_downwards)
+    UpToExclusive{} -> do
+      step_wrong_dir <- letSubExp "step_wrong_dir" $
+                        I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+      distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (Sub it) end' start'
+      distance_i32 <- asIntZ Int32 distance
+      return (distance_i32, step_wrong_dir, bounds_invalid_upwards)
+    ToInclusive{} -> do
+      downwards <- letSubExp "downwards" $
+                   I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+      distance_downwards_exclusive <-
+        letSubExp "distance_downwards_exclusive" $
+        I.BasicOp $ I.BinOp (Sub it) start' end'
+      distance_upwards_exclusive <-
+        letSubExp "distance_upwards_exclusive" $
+        I.BasicOp $ I.BinOp (Sub it) end' start'
+
+      bounds_invalid <- letSubExp "bounds_invalid" $
+                        I.If downwards
+                        (resultBody [bounds_invalid_downwards])
+                        (resultBody [bounds_invalid_upwards])
+                        [I.Prim I.Bool]
+      distance_exclusive <- letSubExp "distance_exclusive" $
+                            I.If downwards
+                            (resultBody [distance_downwards_exclusive])
+                            (resultBody [distance_upwards_exclusive])
+                            [I.Prim $ IntType it]
+      distance_exclusive_i32 <- asIntZ Int32 distance_exclusive
+      distance <- letSubExp "distance" $
+                  I.BasicOp $ I.BinOp (Add Int32)
+                  distance_exclusive_i32 (intConst Int32 1)
+      return (distance, constant False, bounds_invalid)
+
+  step_invalid <- letSubExp "step_invalid" $
+                  I.BasicOp $ I.BinOp I.LogOr step_wrong_dir step_zero
+  invalid <- letSubExp "range_invalid" $
+             I.BasicOp $ I.BinOp I.LogOr step_invalid bounds_invalid
+
+  step_i32 <- asIntS Int32 step
+  pos_step <- letSubExp "pos_step" $
+              I.BasicOp $ I.BinOp (Mul Int32) step_i32 step_sign_i32
+  num_elems <- letSubExp "num_elems" =<<
+               eIf (eSubExp invalid)
+               (eBody [eSubExp $ intConst Int32 0])
+               (eBody [eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)])
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
 internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
