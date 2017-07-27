@@ -188,11 +188,6 @@ primOpRanges (BinOp (Mul t) x y) =
   [scalExpRange $ SE.STimes (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
 primOpRanges (BinOp (SDiv t) x y) =
   [scalExpRange $ SE.SDiv (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
-primOpRanges (BinOp (SMax t) x y) =
-  [(Just $ MaximumBound (ScalarBound x') (ScalarBound y'),
-    Just $ MaximumBound (ScalarBound x') (ScalarBound y'))]
-  where x' = SE.subExpToScalExp x $ IntType t
-        y' = SE.subExpToScalExp y $ IntType t
 
 primOpRanges (ConvOp (SExt from to) x)
   | from < to = [rangeOf x]

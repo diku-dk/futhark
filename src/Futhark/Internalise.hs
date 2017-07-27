@@ -411,10 +411,10 @@ internaliseExp desc (E.Range start maybe_second end _) = do
     ToInclusive e -> e
     UpToExclusive e -> e
 
-  (it, le_op) <-
+  (it, le_op, lt_op) <-
     case E.typeOf start of
-      E.Prim (E.Signed it) -> return (it, CmpSle it)
-      E.Prim (E.Unsigned it) -> return (it, CmpUle it)
+      E.Prim (E.Signed it) -> return (it, CmpSle it, CmpSlt it)
+      E.Prim (E.Unsigned it) -> return (it, CmpUle it, CmpUlt it)
       start_t -> fail $ "Start value in range has type " ++ pretty start_t
 
   let one = intConst it 1
@@ -438,7 +438,7 @@ internaliseExp desc (E.Range start maybe_second end _) = do
   bounds_invalid_downwards <- letSubExp "bounds_invalid_downwards" $
                               I.BasicOp $ I.CmpOp le_op start' end'
   bounds_invalid_upwards <- letSubExp "bounds_invalid_upwards" $
-                            I.BasicOp $ I.CmpOp le_op end' start'
+                            I.BasicOp $ I.CmpOp lt_op end' start'
 
   (distance, step_wrong_dir, bounds_invalid) <- case end of
     DownToExclusive{} -> do
