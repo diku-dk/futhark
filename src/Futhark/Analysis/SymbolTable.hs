@@ -57,6 +57,7 @@ import Data.Ord
 import Data.Maybe
 import Data.Monoid
 import Data.List hiding (elem, insert, lookup)
+import qualified Data.List as L
 import qualified Data.Set        as S
 import qualified Data.Map.Strict as M
 
@@ -89,17 +90,12 @@ instance Monoid (SymbolTable lore) where
 empty :: SymbolTable lore
 empty = SymbolTable 0 M.empty
 
-fromScope :: Scope lore -> SymbolTable lore
+fromScope :: Attributes lore => Scope lore -> SymbolTable lore
 fromScope = M.foldlWithKey' insertFreeVar' empty
   where insertFreeVar' m k attr = insertFreeVar k attr m
 
 toScope :: SymbolTable lore -> Scope lore
-toScope = M.map nameType . bindings
-  where nameType (LetBound entry) = LetInfo $ letBoundAttr entry
-        nameType (LoopVar entry) = IndexInfo $ loopVarType entry
-        nameType (FParam entry) = FParamInfo $ fparamAttr entry
-        nameType (LParam entry) = LParamInfo $ lparamAttr entry
-        nameType (FreeVar entry) = freeVarAttr entry
+toScope = M.map entryInfo . bindings
 
 -- | Try to convert a symbol table for one representation into a
 -- symbol table for another.  The two symbol tables will have the same
@@ -194,6 +190,16 @@ data FreeVarEntry lore =
                 -- ^ Index a delayed array, if possible.
                }
 
+entryInfo :: Entry lore -> NameInfo lore
+entryInfo (LetBound entry) = LetInfo $ letBoundAttr entry
+entryInfo (LoopVar entry) = IndexInfo $ loopVarType entry
+entryInfo (FParam entry) = FParamInfo $ fparamAttr entry
+entryInfo (LParam entry) = LParamInfo $ lparamAttr entry
+entryInfo (FreeVar entry) = freeVarAttr entry
+
+entryType :: Attributes lore => Entry lore -> Type
+entryType = typeOf . entryInfo
+
 isVarBound :: Entry lore -> Maybe (LetBoundEntry lore)
 isVarBound (LetBound entry)
   | BindVar <- letBoundBindage entry =
@@ -261,13 +267,6 @@ loopVariable _           = False
 asStm :: Entry lore -> Maybe (Stm lore)
 asStm = fmap letBoundStm . isVarBound
 
-entryType :: Annotations lore => Entry lore -> Type
-entryType (LetBound entry) = typeOf $ letBoundAttr entry
-entryType (LParam entry)   = typeOf $ lparamAttr entry
-entryType (FParam entry)   = typeOf $ fparamAttr entry
-entryType (LoopVar entry)  = Prim $ IntType $ loopVarType entry
-entryType (FreeVar entry)  = typeOf $ freeVarAttr entry
-
 elem :: VName -> SymbolTable lore -> Bool
 elem name = isJust . lookup name
 
@@ -280,10 +279,10 @@ lookupStm name vtable = asStm =<< lookup name vtable
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
 lookupExp name vtable = stmExp <$> lookupStm name vtable
 
-lookupType :: Annotations lore => VName -> SymbolTable lore -> Maybe Type
+lookupType :: Attributes lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
 
-lookupSubExpType :: Annotations lore => SubExp -> SymbolTable lore -> Maybe Type
+lookupSubExpType :: Attributes lore => SubExp -> SymbolTable lore -> Maybe Type
 lookupSubExpType (Var v) = lookupType v
 lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
 
@@ -294,7 +293,7 @@ lookupSubExp name vtable = do
     BasicOp (SubExp se) -> Just se
     _                  -> Nothing
 
-lookupScalExp :: Annotations lore => VName -> SymbolTable lore -> Maybe ScalExp
+lookupScalExp :: Attributes lore => VName -> SymbolTable lore -> Maybe ScalExp
 lookupScalExp name vtable =
   case (lookup name vtable, lookupRange name vtable) of
     -- If we know the lower and upper bound, and these are the same,
@@ -317,7 +316,7 @@ lookupVar name vtable = case lookupSubExp name vtable of
                           Just (Var v) -> Just v
                           _            -> Nothing
 
-index :: Annotations lore => VName -> [SubExp] -> SymbolTable lore -> Maybe (PrimExp VName)
+index :: Attributes lore => VName -> [SubExp] -> SymbolTable lore -> Maybe (PrimExp VName)
 index name is table = do
   is' <- mapM asPrimExp is
   index' name is' table
@@ -357,14 +356,14 @@ rangesRep = M.filter knownRange . M.map toRep . bindings
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
 class IndexOp op where
-  indexOp :: (Annotations lore, IndexOp (Op lore)) =>
+  indexOp :: (Attributes lore, IndexOp (Op lore)) =>
              SymbolTable lore -> Int -> op
           -> [PrimExp VName] -> Maybe (PrimExp VName)
   indexOp _ _ _ _ = Nothing
 
 instance IndexOp () where
 
-indexExp :: (IndexOp (Op lore), Annotations lore) =>
+indexExp :: (IndexOp (Op lore), Attributes lore) =>
             SymbolTable lore -> Exp lore -> Int -> IndexArray
 
 indexExp vtable (Op op) k is =
@@ -406,13 +405,13 @@ indexExp table (BasicOp (Index _ v slice)) _ is =
 
 indexExp _ _ _ _ = Nothing
 
-indexChunk :: Annotations lore => SymbolTable lore -> VName -> VName -> IndexArray
+indexChunk :: Attributes lore => SymbolTable lore -> VName -> VName -> IndexArray
 indexChunk table offset array (i:is) =
   index' array (offset'+i:is) table
   where offset' = primExpFromSubExp (IntType Int32) (Var offset)
 indexChunk _ _ _ _ = Nothing
 
-defBndEntry :: (Annotations lore, IndexOp (Op lore)) =>
+defBndEntry :: (Attributes lore, IndexOp (Op lore)) =>
                SymbolTable lore
             -> PatElem lore
             -> Range
@@ -473,19 +472,22 @@ bindingEntries bnd@(Let pat _ _) vtable =
   | pat_elem <- patternElements pat
   ]
 
-insertEntry :: VName -> Entry lore -> SymbolTable lore
+insertEntry :: Attributes lore =>
+               VName -> Entry lore -> SymbolTable lore
             -> SymbolTable lore
 insertEntry name entry =
   insertEntries [(name,entry)]
 
-insertEntries :: [(VName, Entry lore)] -> SymbolTable lore
+insertEntries :: Attributes lore =>
+                 [(VName, Entry lore)] -> SymbolTable lore
               -> SymbolTable lore
 insertEntries entries vtable =
-  vtable { bindings = foldl insertWithDepth (bindings vtable) entries
-         }
+  let vtable' = vtable { bindings = foldl insertWithDepth (bindings vtable) entries }
+  in foldr (`isAtLeast` 0) vtable' dim_vars
   where insertWithDepth bnds (name, entry) =
           let entry' = setStmDepth (loopDepth vtable) entry
           in M.insert name entry' bnds
+        dim_vars = subExpVars $ concatMap (arrayDims . entryType . snd) entries
 
 insertStm :: (IndexOp (Op lore), Ranged lore) =>
              Stm lore
@@ -495,7 +497,8 @@ insertStm bnd vtable =
   insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
   where names = patternNames $ stmPattern bnd
 
-insertFParam :: AST.FParam lore
+insertFParam :: Attributes lore =>
+                AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
 insertFParam fparam = insertEntry name entry
@@ -505,12 +508,13 @@ insertFParam fparam = insertEntry name entry
                                    , fparamStmDepth = 0
                                    }
 
-insertFParams :: [AST.FParam lore]
+insertFParams :: Attributes lore =>
+                 [AST.FParam lore]
               -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 
-insertLParamWithRange :: Annotations lore =>
+insertLParamWithRange :: Attributes lore =>
                          LParam lore -> ScalExpRange -> IndexArray -> SymbolTable lore
                       -> SymbolTable lore
 insertLParamWithRange param range indexf vtable =
@@ -526,12 +530,12 @@ insertLParamWithRange param range indexf vtable =
         name = AST.paramName param
         sizevars = subExpVars $ arrayDims $ AST.paramType param
 
-insertLParam :: Annotations lore =>
+insertLParam :: Attributes lore =>
                 LParam lore -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing) (const Nothing)
 
-insertArrayLParam :: Annotations lore =>
+insertArrayLParam :: Attributes lore =>
                      LParam lore -> Maybe VName -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =
@@ -546,7 +550,7 @@ insertArrayLParam param Nothing vtable =
   -- Well, we still know that it's a param...
   insertLParam param vtable
 
-insertChunkLParam :: Annotations lore =>
+insertChunkLParam :: Attributes lore =>
                      VName -> LParam lore -> VName -> SymbolTable lore
                   -> SymbolTable lore
 insertChunkLParam offset param array vtable =
@@ -559,7 +563,7 @@ insertChunkLParam offset param array vtable =
     Just (Var v:_) -> (v `isAtLeast` 1) vtable'
     _              -> vtable'
 
-insertLoopVar :: VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
+insertLoopVar :: Attributes lore => VName -> IntType -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name it bound = insertEntry name bind
   where bind = LoopVar LoopVarEntry {
             loopVarRange = (Just 0,
@@ -568,7 +572,7 @@ insertLoopVar name it bound = insertEntry name bind
           , loopVarType = it
           }
 
-insertFreeVar :: VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
+insertFreeVar :: Attributes lore => VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
 insertFreeVar name attr = insertEntry name entry
   where entry = FreeVar FreeVarEntry {
             freeVarAttr = attr
@@ -577,7 +581,7 @@ insertFreeVar name attr = insertEntry name entry
           , freeVarIndex  = \_ _ -> Nothing
           }
 
-updateBounds :: Annotations lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
+updateBounds :: Attributes lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
   case runReader (toScalExp (`lookupScalExp` vtable) $ BasicOp $ SubExp cond) types of
     Nothing    -> vtable
@@ -681,20 +685,31 @@ setUpperBound name bound vtable =
   vtable { bindings = M.adjust setUpperBound' name $ bindings vtable }
   where setUpperBound' entry =
           let (oldLowerBound, oldUpperBound) = valueRange entry
-          in setValueRange
-             (oldLowerBound,
-              Just $ maybe bound (MaxMin True . (:[bound])) oldUpperBound)
-             entry
+          in if alreadyTheBound bound True oldUpperBound
+             then entry
+             else setValueRange
+                  (oldLowerBound,
+                   Just $ maybe bound (MaxMin True . (:[bound])) oldUpperBound)
+                  entry
 
 setLowerBound :: VName -> ScalExp -> SymbolTable lore -> SymbolTable lore
 setLowerBound name bound vtable =
   vtable { bindings = M.adjust setLowerBound' name $ bindings vtable }
   where setLowerBound' entry =
           let (oldLowerBound, oldUpperBound) = valueRange entry
-          in setValueRange
-             (Just $ maybe bound (MaxMin False . (:[bound])) oldLowerBound,
-              oldUpperBound)
-             entry
+          in if alreadyTheBound bound False oldLowerBound
+             then entry
+             else setValueRange
+                  (Just $ maybe bound (MaxMin False . (:[bound])) oldLowerBound,
+                   oldUpperBound)
+                  entry
+
+alreadyTheBound :: ScalExp -> Bool -> Maybe ScalExp -> Bool
+alreadyTheBound _ _ Nothing = False
+alreadyTheBound new_bound b1 (Just cur_bound)
+  | cur_bound == new_bound = True
+  | MaxMin b2 ses <- cur_bound = b1 == b2 && (new_bound `L.elem` ses)
+  | otherwise = False
 
 isAtLeast :: VName -> Int -> SymbolTable lore -> SymbolTable lore
 isAtLeast name x =
