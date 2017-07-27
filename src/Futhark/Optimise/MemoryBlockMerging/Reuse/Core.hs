@@ -15,7 +15,9 @@ import Control.Monad.RWS
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Analysis.PrimExp.Convert
 
+import Futhark.Optimise.MemoryBlockMerging.PrimExps (findPrimExpsFunDef)
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
@@ -29,6 +31,7 @@ data Context = Context { ctxFirstUses :: FirstUses
                        , ctxVarToMem :: VarMemMappings MemorySrc
                        , ctxActualVars :: M.Map VName Names
                        , ctxExistentials :: Names
+                       , ctxVarPrimExps :: M.Map VName (PrimExp VName)
                        , ctxCurLoopBodyRes :: Result
                        }
   deriving (Show)
@@ -90,8 +93,17 @@ coreReuseFunDef :: FunDef ExplicitMemory
 coreReuseFunDef fundef first_uses interferences var_to_mem
   actual_vars existentials =
   let sizes = memBlockSizes fundef
-      context = Context first_uses interferences sizes var_to_mem
-                actual_vars existentials []
+      primexps = findPrimExpsFunDef fundef
+      context = Context
+        { ctxFirstUses = first_uses
+        , ctxInterferences = interferences
+        , ctxSizes = sizes
+        , ctxVarToMem = var_to_mem
+        , ctxActualVars = actual_vars
+        , ctxExistentials = existentials
+        , ctxVarPrimExps = primexps
+        , ctxCurLoopBodyRes = []
+        }
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef
@@ -193,7 +205,8 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
         $ S.toList used_mems
 
   let canBeUsed t = and <$> mapM ($ t) [notTheSame, sizesMatch, noneInterfere]
-  found_use <- catMaybes <$> (mapM (maybeFromBoolM canBeUsed) =<< (M.assocs <$> gets curUses))
+  cur_uses <- gets curUses
+  found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
 
   actual_vars <- lookupActualVars x
   existentials <- asks ctxExistentials
@@ -219,6 +232,7 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
         putStrLn ("actual vars: " ++ prettySet actual_vars)
         putStrLn ("mem: " ++ pretty xmem)
         putStrLn ("loop disabled: " ++ show loop_disabled)
+        putStrLn ("cur uses: " ++ show cur_uses)
         putStrLn ("found use: " ++ show found_use)
         putStrLn $ replicate 70 '~'
 

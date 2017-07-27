@@ -4,7 +4,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 -- | Get a mapping from statement name to PrimExp (if the statement has a
 -- primitive expression) for all statements.
-module Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps
+module Futhark.Optimise.MemoryBlockMerging.PrimExps
   ( findPrimExpsFunDef
   ) where
 
@@ -39,14 +39,19 @@ coerce = FindM . unFindM
 findPrimExpsFunDef :: LoreConstraints lore =>
                       FunDef lore -> PrimExps
 findPrimExpsFunDef fundef =
-  let m = unFindM $
-        -- We do not need to look in the function parameters.  That would likely
-        -- find more mappings, but none of them would be able to be transformed
-        -- to e.g. BinOps of other variables, so it would not be of much use to
-        -- the modules that use this module.
+  let m = unFindM $ do
+        mapM_ lookInFParam $ funDefParams fundef
         lookInBody $ funDefBody fundef
       res = snd $ evalRWS m () M.empty
   in res
+
+lookInFParam :: LoreConstraints lore =>
+                FParam lore -> FindM lore ()
+lookInFParam (Param var membound) =
+  case typeOf membound of
+    Prim pt ->
+      modify $ M.insert var pt
+    _ -> return ()
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()

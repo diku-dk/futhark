@@ -19,6 +19,7 @@ import Futhark.Representation.Aliases
 import Futhark.Util (unixEnvironment)
 import Futhark.Util.Pretty (Pretty)
 
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Optimise.MemoryBlockMerging.Types
 
 
@@ -119,6 +120,13 @@ fixpointIterate f x
 fromVar :: SubExp -> Maybe VName
 fromVar (Var v) = Just v
 fromVar _ = Nothing
+
+-- Replace variables with subtrees of their constituents wherever possible.  It
+-- naively expands an index function as much as the input map allows, and can
+-- enable more expressions to use the new index function, since it will likely
+-- consist of fewer variables.
+expandIxFun :: M.Map VName (ExpMem.PrimExp VName) -> ExpMem.IxFun -> ExpMem.IxFun
+expandIxFun var_to_pe = fixpointIterate (IxFun.substituteInIxFun var_to_pe)
 
 (<&&>) :: Monad m => m Bool -> m Bool -> m Bool
 m <&&> n = (&&) <$> m <*> n
