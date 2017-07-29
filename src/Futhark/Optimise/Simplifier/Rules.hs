@@ -631,6 +631,9 @@ simplifyConvOp lookupVar _ (ConvOp (SIToFP t2 t1) (Var v))
 simplifyConvOp lookupVar _ (ConvOp (UIToFP t2 t1) (Var v))
   | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v, t2 >= t3 =
       Just $ ConvOp (UIToFP t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (FPConv t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (FPConv t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (FPConv t3 t1) se
 simplifyConvOp _ _ _ =
   Nothing
 
