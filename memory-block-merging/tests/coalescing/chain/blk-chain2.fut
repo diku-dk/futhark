@@ -1,15 +1,15 @@
--- Example of Chaining Coalescing inside a block
+-- Example of chaining coalescing inside a block
 -- ==
 -- input { 0
 --         0
 --         0
---         [1,2]
---         [[1,2], [3,4]]
---         [ [ [1,2], [3,4] ]
---         , [ [5,6], [7,8] ] ]
+--         [1, 2]
+--         [[1, 2], [3, 4]]
+--         [ [ [1, 2], [3, 4] ]
+--         , [ [5, 6], [7, 8] ] ]
 --       }
--- output { [ [ [1i32, 2i32], [1i32, 2i32] ]
---          , [ [5i32, 6i32], [7i32, 8i32] ]
+-- output { [ [ [1, 2], [4, 5] ]
+--          , [ [5, 6], [7, 8] ]
 --          ]
 --        }
 -- structure cpu { Alloc 1 }
@@ -28,7 +28,7 @@ let main (i1: i32, i2: i32, k: i32
   let u          = map (\x -> map (+1) x) v
 
   let b          = map (+i1) a
-  let ind1       = z[k,i1,i2] - i1 -- i1 + 1
+  let ind1       = z[k,i1,i2] - b[0] -- i1 + 1
   let u[ind1]    = b -- Coalescing.
 
   let c          = map (+i2) a
