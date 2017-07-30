@@ -1,4 +1,15 @@
 -- A more complex example.
+--
+-- This is an example where too aggressive allocation hoisting is a bad thing.
+-- If implemented without the current limiter, this would happen: To enable an
+-- eventual coalescing into vss, both the allocation for the memory of vss,
+-- *and* the vss array creation statement itself, are hoisted upwards as much as
+-- possible.  This hinders the later coalescing into wsss, and was never useful
+-- to begin with, since there can be no coalescing into vss regardless.
+--
+-- To fix this in a nicer way, we could perform allocation hoisting while we do
+-- coalescing instead of before we do it, which would help at least for this
+-- program.  Maybe?
 -- ==
 -- input { [[[1, 1], [1, 1]], [[1, 1], [1, 1]]]
 --         [2, 4]
@@ -8,19 +19,7 @@
 -- output { [[[2, 2], [3, 5]], [[2, 2], [2, 2]]]
 --          [[[5, 5], [5, 5]], [[5, 5], [5, 5]]]
 --        }
-
 -- structure cpu { Alloc 3 }
-
--- FIXME: The coalescing part seems fine on this one, but the allocation
--- hoisting part is too aggressive: To enable an eventual coalescing into vss,
--- both the allocation for the memory of vss, *and* the vss array creation
--- statement itself, are hoisted upwards as much as possible.  This hinders the
--- later coalescing into wsss, and was not never useful to begin with, since
--- there can be no coalescing into vss regardless.
---
--- To fix this, we could perform allocation hoisting while we do coalescing
--- instead of before we do it, which would help at least for this program.
--- Watch out for code chaos!
 
 let main ( wsss0: [#n][#n][#n]i32
          , ns: [#n]i32
