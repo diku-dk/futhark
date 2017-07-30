@@ -29,13 +29,13 @@ def ashrN(x,y):
   return x >> y
 
 def sdivN(x,y):
-  return x / y
+  return x // y
 
 def smodN(x,y):
   return x % y
 
 def udivN(x,y):
-  return signed(unsigned(x) / unsigned(y))
+  return signed(unsigned(x) // unsigned(y))
 
 def umodN(x,y):
   return signed(unsigned(x) % unsigned(y))
