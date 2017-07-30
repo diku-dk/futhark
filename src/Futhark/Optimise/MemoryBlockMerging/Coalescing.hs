@@ -14,7 +14,7 @@ import Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
 import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
-import Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocHoisting
+import Futhark.Optimise.MemoryBlockMerging.Coalescing.AllocationHoisting
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
 
 

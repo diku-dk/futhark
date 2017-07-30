@@ -5,7 +5,9 @@
 -- | Find all Alloc statements and associate their memory blocks with the
 -- allocation size.
 module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
-  (memBlockSizes, Sizes) where
+  ( memBlockSizesFunDef, memBlockSizesParamsBodyNonRec
+  , Sizes
+  ) where
 
 import qualified Data.Map.Strict as M
 import Control.Monad.Writer
@@ -36,12 +38,21 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-memBlockSizes :: LoreConstraints lore =>
-                 FunDef lore -> Sizes
-memBlockSizes fundef =
+memBlockSizesFunDef :: LoreConstraints lore =>
+                       FunDef lore -> Sizes
+memBlockSizesFunDef fundef =
   let m = unFindM $ do
         mapM_ lookInFParam $ funDefParams fundef
         lookInBody $ funDefBody fundef
+      mem_sizes = execWriter m
+  in mem_sizes
+
+memBlockSizesParamsBodyNonRec :: LoreConstraints lore =>
+                           [FParam lore] -> Body lore -> Sizes
+memBlockSizesParamsBodyNonRec params body =
+  let m = unFindM $ do
+        mapM_ lookInFParam params
+        mapM_ lookInStm $ bodyStms body
       mem_sizes = execWriter m
   in mem_sizes
 
@@ -60,12 +71,12 @@ lookInLParam _ = return ()
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
-  mapM_ lookInStm bnds
+  mapM_ lookInStmRec bnds
 
 lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
 lookInKernelBody (KernelBody _ bnds _res) =
-  mapM_ lookInStm bnds
+  mapM_ lookInStmRec bnds
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
@@ -77,8 +88,13 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
           recordMapping mem size
         Nothing -> return ()
     _ -> return ()
-
   mapM_ lookInPatCtxElem patctxelems
+
+lookInStmRec :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
+lookInStmRec stm@(Let _ _ e) = do
+  lookInStm stm
+
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody
