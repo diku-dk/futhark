@@ -286,15 +286,16 @@ tryCoalesce dst ixfun_slices bindage src offset = do
                 -- Same as above, kind of.
                 ++ map (\slices0 -> ixfun_slices ++ slices0) ixfun_slice0ss
 
-  ixfuns' <- zipWithM (\offset_local islices -> do
-                          let ixfun0 = foldl IxFun.slice (memSrcIxFun mem_dst) islices
-                              ixfun1 = if offset_local == zeroOffset
-                                       then ixfun0 -- Should not be necessary,
-                                                   -- but it makes the type
-                                                   -- checker happy for now.
-                                       else IxFun.offsetIndex ixfun0 offset_local
-                          simplifyIxFun ixfun1
-                      ) offsets ixfun_slicess
+  var_to_pe <- asks ctxVarPrimExps
+  let ixfuns' = zipWith (\offset_local islices ->
+                           let ixfun0 = foldl IxFun.slice (memSrcIxFun mem_dst) islices
+                               ixfun1 = if offset_local == zeroOffset
+                                        then ixfun0 -- Should not be necessary,
+                                                    -- but it makes the type
+                                                    -- checker happy for now.
+                                        else IxFun.offsetIndex ixfun0 offset_local
+                           in expandIxFun var_to_pe ixfun1
+                        ) offsets ixfun_slicess
 
   -- Not everything supported yet.  This dials back the optimisation on areas
   -- where it fails.
@@ -371,15 +372,6 @@ tryCoalesce dst ixfun_slices bindage src offset = do
         putStrLn ("all ixfuns for " ++ pretty src ++ ":\n" ++ L.intercalate "\n" (map show ixfuns'))
         putStrLn $ replicate 70 '~'
   withDebug debug $ return ()
-
--- Replace variables with subtrees of their constituents wherever possible.  It
--- is debatable whether this is "simplifying", but it can enable more
--- expressions to use the index function.
-simplifyIxFun :: ExpMem.IxFun -> FindM ExpMem.IxFun
-simplifyIxFun ixfun = do
-  var_to_pe <- asks ctxVarPrimExps
-  let ixfun' = fixpointIterate (IxFun.substituteInIxFun var_to_pe) ixfun
-  return ixfun'
 
 canBeCoalesced :: VName -> VName -> ExpMem.IxFun -> FindM Bool
 canBeCoalesced dst src ixfun = do

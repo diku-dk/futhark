@@ -17,6 +17,7 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Aliases
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Util (unixEnvironment)
 import Futhark.Util.Pretty (Pretty)
 
@@ -123,9 +124,13 @@ fromVar (Var v) = Just v
 fromVar _ = Nothing
 
 -- Replace variables with subtrees of their constituents wherever possible.  It
--- naively expands an index function as much as the input map allows, and can
--- enable more expressions to use the new index function, since it will likely
--- consist of fewer variables.
+-- naively expands a PrimExp as much as the input map allows, and can enable
+-- more expressions to have it in scope, since it will likely consist of fewer
+-- variables.
+expandPrimExp :: M.Map VName (ExpMem.PrimExp VName) -> ExpMem.PrimExp VName
+              -> ExpMem.PrimExp VName
+expandPrimExp var_to_pe = fixpointIterate (substituteInPrimExp var_to_pe)
+
 expandIxFun :: M.Map VName (ExpMem.PrimExp VName) -> ExpMem.IxFun -> ExpMem.IxFun
 expandIxFun var_to_pe = fixpointIterate (IxFun.substituteInIxFun var_to_pe)
 
