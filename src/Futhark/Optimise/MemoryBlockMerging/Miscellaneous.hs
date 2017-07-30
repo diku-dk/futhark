@@ -8,6 +8,7 @@ import qualified Data.Set as S
 import qualified Data.List as L
 import Control.Monad
 import Data.Maybe (isJust, fromMaybe, catMaybes)
+import Data.Function (on)
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
 import Futhark.Representation.AST
@@ -131,8 +132,16 @@ expandIxFun var_to_pe = fixpointIterate (IxFun.substituteInIxFun var_to_pe)
 (<&&>) :: Monad m => m Bool -> m Bool -> m Bool
 m <&&> n = (&&) <$> m <*> n
 
+(<||>) :: Monad m => m Bool -> m Bool -> m Bool
+m <||> n = (||) <$> m <*> n
+
 anyM :: Monad m => (a -> m Bool) -> [a] -> m Bool
 anyM f xs = or <$> mapM f xs
+
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM b m = do
+  b' <- b
+  when b' m
 
 findM :: Monad m => (a -> m Bool) -> [a] -> m (Maybe a)
 findM f xs = do
@@ -145,6 +154,11 @@ mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
 mapMaybeM f xs = do
   xs' <- mapM f xs
   return $ catMaybes xs'
+
+sortByKeyM :: (Ord t, Monad m) => (a -> m t) -> [a] -> m [a]
+sortByKeyM f xs = do
+  rs <- mapM f xs
+  return $ map fst $ L.sortBy (compare `on` snd) $ zip xs rs
 
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where

@@ -14,6 +14,7 @@ import Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo
 import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
+import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeHoisting
 import Futhark.Optimise.MemoryBlockMerging.Reuse.Core
 
 
@@ -25,12 +26,16 @@ reuseInProg = intraproceduralTransformation reuseInFunDef
 reuseInFunDef :: MonadFreshNames m
                  => FunDef ExplicitMemory
                  -> m (FunDef ExplicitMemory)
-reuseInFunDef fundef0 =
+reuseInFunDef fundef0 = do
   let aux0 = getAuxiliaryInfo fundef0
       debug0 = debugAuxiliaryInfo aux0 "Before reuse"
-      fundef1 = coreReuseFunDef fundef0
-                (auxFirstUses aux0) (auxInterferences aux0) (auxVarMemMappings aux0)
-                (auxActualVariables aux0) (auxExistentials aux0)
+      fundef1 = hoistAllocSizesFunDef fundef0
 
-      debug = debug0
-  in withDebug debug $ return fundef1
+      aux1 = getAuxiliaryInfo fundef1
+      debug1 = debugAuxiliaryInfo aux1 "After allocation size hoisting"
+  fundef2 <- coreReuseFunDef fundef1
+    (auxFirstUses aux1) (auxInterferences aux1) (auxVarMemMappings aux1)
+    (auxActualVariables aux1) (auxExistentials aux1)
+
+  let debug = debug0 >> debug1
+  withDebug debug $ return fundef2
