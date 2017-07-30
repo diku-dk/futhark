@@ -9,6 +9,7 @@ module Futhark.Optimise.MemoryBlockMerging.PrimExps
   ) where
 
 import qualified Data.Map.Strict as M
+import Data.Maybe (mapMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -40,17 +41,31 @@ findPrimExpsFunDef :: LoreConstraints lore =>
                       FunDef lore -> PrimExps
 findPrimExpsFunDef fundef =
   let m = unFindM $ do
-        mapM_ lookInFParam $ funDefParams fundef
+        lookInFParams $ funDefParams fundef
         lookInBody $ funDefBody fundef
       res = snd $ evalRWS m () M.empty
   in res
 
-lookInFParam :: LoreConstraints lore =>
-                FParam lore -> FindM lore ()
-lookInFParam (Param var membound) =
+lookInFParams :: LoreConstraints lore =>
+                 [FParam lore] -> FindM lore ()
+lookInFParams params = forM_ params $ \(Param var membound) -> do
   case typeOf membound of
-    Prim pt ->
-      modify $ M.insert var pt
+    Prim pt -> modify $ M.insert var pt
+    _ -> return ()
+
+  case membound of
+    ExpMem.ArrayMem pt shape _ mem _ -> do
+      let matchingSizeVar (Param mem1 (ExpMem.MemMem (Var mem_size) _))
+            | mem1 == mem = Just mem_size
+          matchingSizeVar _ = Nothing
+      case mapMaybe matchingSizeVar params of
+        [mem_size] -> do
+          let prod_i32 = product (map (primExpFromSubExp (IntType Int32)) (shapeDims shape))
+          let prod_i64 = ConvOpExp (SExt Int32 Int64) prod_i32
+          let pe = prod_i64 * primByteSize pt
+          tell $ M.singleton mem_size pe
+        _ -> return ()
+
     _ -> return ()
 
 lookInBody :: LoreConstraints lore =>

@@ -16,9 +16,9 @@ import Control.Monad.State
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
+import Futhark.Analysis.PrimExp
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
-import Futhark.Analysis.PrimExp.Convert
 
 import Futhark.Optimise.MemoryBlockMerging.PrimExps (findPrimExpsFunDef)
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
@@ -42,6 +42,7 @@ data Context = Context { ctxFirstUses :: FirstUses
   deriving (Show)
 
 data Current = Current { curUses :: M.Map VName Names
+                       , curEqAsserts :: M.Map VName Names
 
                          -- Changes in memory blocks for variables.
                        , curVarToMemRes :: VarMemMappings MemoryLoc
@@ -53,7 +54,11 @@ data Current = Current { curUses :: M.Map VName Names
   deriving (Show)
 
 emptyCurrent :: Current
-emptyCurrent = Current M.empty M.empty M.empty
+emptyCurrent = Current { curUses = M.empty
+                       , curEqAsserts = M.empty
+                       , curVarToMemRes = M.empty
+                       , curVarToMaxExpRes = M.empty
+                       }
 
 newtype FindM a = FindM { unFindM :: RWS Context () Current a }
   deriving (Monad, Functor, Applicative,
@@ -159,6 +164,16 @@ lookInBody (Body () bnds _res) =
 
 lookInStm :: Stm ExplicitMemory -> FindM ()
 lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
+  var_to_pe <- asks ctxVarPrimExps
+  let eqs | BasicOp (Assert (Var v) _) <- e
+          , Just (CmpOpExp (CmpEq _) (LeafExp v0 _) (LeafExp v1 _)) <- M.lookup v var_to_pe = do
+              modify $ \c -> c { curEqAsserts = insertOrUpdate v0 v1
+                                                $ curEqAsserts c }
+              modify $ \c -> c { curEqAsserts = insertOrUpdate v1 v0
+                                                $ curEqAsserts c }
+          | otherwise = return ()
+  eqs
+
   forM_ patvalelems $ \(PatElem var _ membound) -> do
     first_uses <- lookupEmptyable var <$> asks ctxFirstUses
     forM_ first_uses $ handleNewArray var membound
@@ -210,7 +225,36 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
       sizesMatch used_mems = do
         ok_sizes <- mapM lookupSize $ S.toList used_mems
         new_size <- lookupSize xmem
-        return (new_size `L.elem` ok_sizes)
+        let eq_simple = new_size `L.elem` ok_sizes
+
+        var_to_pe <- asks ctxVarPrimExps
+        eq_asserts <- gets curEqAsserts
+        let sePrimExp se = do
+              v <- fromVar se
+              pe <- M.lookup v var_to_pe
+              let pe_expanded = expandPrimExp var_to_pe pe
+              traverse (\v_inner -> -- Has custom Eq instance.
+                                       pure $ VarWithAssertTracking v_inner
+                                       $ lookupEmptyable v eq_asserts
+                       ) pe_expanded
+        let ok_sizes_pe = map sePrimExp ok_sizes
+        let new_size_pe = sePrimExp new_size
+
+        let eq_advanced = new_size_pe `L.elem` ok_sizes_pe
+
+        let debug = do
+              putStrLn $ replicate 70 '~'
+              putStrLn "sizesMatch:"
+              putStrLn ("new: " ++ pretty new_size)
+              forM_ ok_sizes $ \ok_size ->
+                putStrLn (" ok: " ++ pretty ok_size)
+              putStrLn $ replicate 30 '~'
+              putStrLn ("new: " ++ show new_size_pe)
+              forM_ ok_sizes_pe $ \ok_size_pe ->
+                putStrLn (" ok: " ++ show ok_size_pe)
+              putStrLn $ replicate 70 '~'
+
+        withDebug debug $ return (eq_simple || eq_advanced)
 
   let sizesCanBeMaxed :: VName -> FindM Bool
       sizesCanBeMaxed kmem = do
@@ -340,3 +384,10 @@ insertAndReplace replaces0 fundef =
           let mapper = identityMapper { mapOnBody = const transformBody }
           e' <- mapExpM mapper e
           return [Let pat attr e']
+
+data VarWithAssertTracking = VarWithAssertTracking VName Names
+  deriving (Show)
+
+instance Eq VarWithAssertTracking where
+  VarWithAssertTracking v0 vs0 == VarWithAssertTracking v1 vs1 =
+    not $ S.null $ S.intersection (S.insert v0 vs0) (S.insert v1 vs1)
