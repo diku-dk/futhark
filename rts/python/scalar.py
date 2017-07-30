@@ -22,6 +22,13 @@ def unsigned(x):
   else:
     return np.uint64(x)
 
+def divide_dwim(x, y):
+  t = type(x)
+  if t == float or t == np.float16 or t == np.float32 or t == np.float64:
+    return x / y
+  else:
+    return x // y
+
 def shlN(x,y):
   return x << y
 
@@ -29,13 +36,13 @@ def ashrN(x,y):
   return x >> y
 
 def sdivN(x,y):
-  return x / y
+  return divide_dwim(x, y)
 
 def smodN(x,y):
   return x % y
 
 def udivN(x,y):
-  return signed(unsigned(x) / unsigned(y))
+  return signed(divide_dwim(unsigned(x), unsigned(y)))
 
 def umodN(x,y):
   return signed(unsigned(x) % unsigned(y))
