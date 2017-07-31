@@ -139,7 +139,7 @@ primOpType (Partition _ n _ arrays) =
 expExtType :: (HasScope lore m, TypedOp (Op lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
-expExtType (If _ _ _ rt)  = pure rt
+expExtType (If _ _ _ rt)  = pure $ ifExtType rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 expExtType (BasicOp op)    = staticShapes <$> primOpType op

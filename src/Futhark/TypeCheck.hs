@@ -798,18 +798,18 @@ checkExp :: Checkable lore =>
 
 checkExp (BasicOp op) = checkBasicOp op
 
-checkExp (If e1 e2 e3 ts) = do
+checkExp (If e1 e2 e3 info) = do
   require [Prim Bool] e1
   _ <- checkBody e2 `alternative` checkBody e3
   ts2 <- bodyExtType e2
   ts3 <- bodyExtType e3
-  unless ((ts2 `generaliseExtTypes` ts3) `subtypesOf` ts) $
+  unless ((ts2 `generaliseExtTypes` ts3) `subtypesOf` ifExtType info) $
     bad $ TypeError $
     unlines ["If-expression branches have types",
              "  " ++ prettyTuple ts2 ++ ", and",
              "  " ++ prettyTuple ts3,
              "But the annotation is",
-             "  " ++ prettyTuple ts]
+             "  " ++ prettyTuple (ifExtType info)]
 
 checkExp (Apply fname args rettype_annot) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args

@@ -653,9 +653,9 @@ transformSOAC pat (Scatter cs len lam ivs as) = do
           (fullSlice (identType arrayOut) [DimFix indexCur]) $ BasicOp $ SubExp valueCur
         return $ resultBody [Var res]
 
-      letExp "write_out"
-        $ If outside_bounds outside_bounds_branch in_bounds_branch
-        $ staticShapes [t]
+      letExp "write_out" $
+        If outside_bounds outside_bounds_branch in_bounds_branch $
+        ifCommon [t]
     return $ resultBody (map Var ress)
   letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
 

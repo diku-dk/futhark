@@ -428,12 +428,12 @@ evalBody (Body () (Let pat _ e:bnds) res) = do
   where patElems = patternElements pat
 
 evalExp :: Exp -> FutharkM [Value]
-evalExp (If e1 e2 e3 rettype) = do
+evalExp (If e1 e2 e3 info) = do
   v <- evalSubExp e1
   vs <- case v of PrimVal (BoolValue True)  -> evalBody e2
                   PrimVal (BoolValue False) -> evalBody e3
                   _                       -> bad $ TypeError "evalExp If"
-  return $ valueShapeContext rettype vs ++ vs
+  return $ valueShapeContext (ifExtType info) vs ++ vs
 evalExp (Apply fname args rettype) = do
   args' <- mapM (evalSubExp . fst) args
   vs <- evalFuncall fname args'

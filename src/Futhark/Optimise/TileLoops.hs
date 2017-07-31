@@ -225,7 +225,7 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
               not_smaller_body = Body () [] [inner_gdim]
               compute_tiled_group_size =
                 mkLet' [] [Ident inner_ldim $ Prim int32] $
-                If (Var smaller) smaller_body not_smaller_body [Prim int32]
+                If (Var smaller) smaller_body not_smaller_body $ ifCommon [Prim int32]
 
               structure = NestedThreadSpace $ outer ++ [(inner_gtid, inner_gdim,
                                                          inner_ltid, Var inner_ldim)]

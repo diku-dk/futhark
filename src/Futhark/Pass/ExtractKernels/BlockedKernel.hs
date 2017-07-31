@@ -562,9 +562,8 @@ scanKernel1 cs w scan_sizes lam foldlam nes arrs = do
         return $ resultBody carries
 
       new_carries <- letTupExp "new_carry" $ If is_first_thread
-        read_carry_outs
-        reset_carry_outs
-        (staticShapes $ map paramType acc_params)
+                     read_carry_outs reset_carry_outs $
+                     ifCommon $ map paramType acc_params
 
 
       return $ resultBody $ map Var $ scanout_arrs' ++ mapout_arrs' ++ new_carries
