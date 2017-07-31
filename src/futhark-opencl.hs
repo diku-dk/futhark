@@ -16,6 +16,7 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Futlib.Prelude
 
 main :: IO ()
 main = reportingIOErrors $
@@ -25,7 +26,7 @@ main = reportingIOErrors $
 
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
-  runCompilerOnProgram (futharkConfig config)
+  runCompilerOnProgram (futharkConfig config) preludeBasis
   gpuPipeline (openclCodeAction filepath config) filepath
 
 openclCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory

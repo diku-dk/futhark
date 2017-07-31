@@ -15,6 +15,7 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
+import Language.Futhark.Futlib.Prelude
 
 main :: IO ()
 main = reportingIOErrors $
@@ -24,7 +25,7 @@ main = reportingIOErrors $
 
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath =
-  runCompilerOnProgram (futharkConfig config)
+  runCompilerOnProgram (futharkConfig config) preludeBasis
   sequentialCpuPipeline (cCodeAction filepath config) filepath
 
 cCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory

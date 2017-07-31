@@ -904,8 +904,9 @@ simplifyConcat _ _ =
   cannotSimplify
 
 evaluateBranch :: MonadBinder m => TopDownRule m
-evaluateBranch _ (Let pat _ (If e1 tb fb (IfAttr t _)))
-  | Just branch <- checkBranch = do
+evaluateBranch _ (Let pat _ (If e1 tb fb (IfAttr t ifsort)))
+  | Just branch <- checkBranch,
+    ifsort /= IfFallback || isCt1 e1 = do
   let ses = bodyResult branch
   mapM_ addStm $ bodyStms branch
   ctx <- subExpShapeContext t ses
