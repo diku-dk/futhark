@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveLift         #-}
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -37,6 +38,8 @@ import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Loc
 import Data.List
 import qualified Data.Text as T
+import Language.Haskell.TH.Syntax (Lift)
+import Instances.TH.Lift()
 
 import Prelude
 
@@ -47,7 +50,7 @@ import Futhark.Util.Pretty
 -- to ordering, 'Unique' is greater than 'Nonunique'.
 data Uniqueness = Nonunique -- ^ May have references outside current function.
                 | Unique    -- ^ No references outside current function.
-                  deriving (Eq, Ord, Show)
+                  deriving (Eq, Ord, Show, Lift)
 
 instance Monoid Uniqueness where
   mempty = Unique
@@ -65,13 +68,13 @@ instance Hashable Uniqueness where
 
 data StreamOrd  = InOrder
                 | Disorder
-                    deriving (Eq, Ord, Show)
+                    deriving (Eq, Ord, Show, Lift)
 
 -- | Whether some operator is commutative or not.  The 'Monoid'
 -- instance returns the least commutative of its arguments.
 data Commutativity = Noncommutative
                    | Commutative
-                     deriving (Eq, Ord, Show)
+                     deriving (Eq, Ord, Show, Lift)
 
 instance Monoid Commutativity where
   mempty = Commutative
@@ -85,7 +88,7 @@ defaultEntryPoint = nameFromString "main"
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
 newtype Name = Name T.Text
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Lift)
 
 instance Pretty Name where
   ppr = text . nameToString
@@ -126,7 +129,7 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
 -- | A name tagged with some integer.  Only the integer is used in
 -- comparisons, no matter the type of @vn@.
 data VName = VName !Name !Int
-  deriving (Show)
+  deriving (Show, Lift)
 
 -- | Return the tag contained in the 'VName'.
 baseTag :: VName -> Int

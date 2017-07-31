@@ -33,6 +33,7 @@ import Futhark.Passes
 import Futhark.Compiler
 import Futhark.Internalise
 import Futhark.Util.Options
+import Language.Futhark.Futlib.Prelude
 
 banner :: String
 banner = unlines [
@@ -58,11 +59,11 @@ repl = do
   putStrLn ""
   putStrLn "Run :help for a list of commands."
   putStrLn ""
-  evalStateT (forever readEvalPrint) newInterpreterState
+  evalStateT (forever readEvalPrint) =<< newInterpreterState
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram newFutharkConfig standardPipeline $
+  runCompilerOnProgram newFutharkConfig preludeBasis standardPipeline $
   interpretAction' $ interpreterEntryPoint config
 
 newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
@@ -84,11 +85,19 @@ data InterpreterState =
                    , interpNameSource :: VNameSource
                    }
 
-newInterpreterState :: InterpreterState
-newInterpreterState = InterpreterState { interpProg = Prog []
-                                       , interpImports = mempty
-                                       , interpNameSource = blankNameSource
-                                       }
+newInterpreterState :: IO InterpreterState
+newInterpreterState = do
+  res <- runExceptT $ readProgram preludeBasis []
+  case res of
+    Right (prog, _, imports, src) ->
+      return InterpreterState { interpProg = prog
+                              , interpImports = imports
+                              , interpNameSource = src
+                              }
+    Left err -> do
+      putStrLn "Error doing initialisation:"
+      print err
+      exitFailure
 
 type FutharkiM = StateT InterpreterState IO
 
@@ -135,7 +144,7 @@ runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
 runProgram proglib imports src prog = liftIO $
   case checkProg imports src "" prog of
     Left err -> print err
-    Right ((_, prog'), _, src') ->
+    Right (FileModule _ prog', _, src') ->
       let full_prog = Prog $ progDecs proglib ++ progDecs prog'
       in case evalState (internaliseProg full_prog) src' of
            Left err -> print err
@@ -169,7 +178,7 @@ Quit futharki.
   where loadCommand :: Command
         loadCommand file = do
           liftIO $ T.putStrLn $ "Reading " <> file
-          res <- liftIO $ runExceptT (readProgram [T.unpack file])
+          res <- liftIO $ runExceptT (readProgram preludeBasis [T.unpack file])
                  `catch` \(err::IOException) ->
                  return (Left (ExternalError (T.pack $ show err)))
           case res of
