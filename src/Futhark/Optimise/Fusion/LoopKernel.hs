@@ -133,10 +133,15 @@ tryOptimizeSOAC :: Names -> [VName] -> SOAC -> Names -> FusedKer
                 -> TryFusion FusedKer
 tryOptimizeSOAC unfus_nms outVars soac consumed ker = do
   (soac', ots) <- optimizeSOAC Nothing soac mempty
-  let ker' = map (SOAC.addInitialTransforms ots) (inputs ker) `setInputs` ker
+  let ker' = map (addInitialTransformIfRelevant ots) (inputs ker) `setInputs` ker
       outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
       ker'' = fixInputTypes outIdents ker'
   applyFusionRules unfus_nms outVars soac' consumed ker''
+  where addInitialTransformIfRelevant ots inp
+          | SOAC.inputArray inp `elem` outVars =
+              SOAC.addInitialTransforms ots inp
+          | otherwise =
+              inp
 
 tryOptimizeKernel :: Names -> [VName] -> SOAC -> Names -> FusedKer
                   -> TryFusion FusedKer
@@ -754,21 +759,20 @@ pullReplicate _ _ = fail "Cannot pull replicate"
 
 exposeInputs :: [VName] -> FusedKer
              -> TryFusion (FusedKer, SOAC.ArrayTransforms)
-exposeInputs inpIds ker = do
-  let soac = fsoac ker
-  (exposeInputs' =<< pushRearrange' soac) <|>
-    (exposeInputs' =<< pullRearrange' soac) <|>
-    exposeInputs' ker
+exposeInputs inpIds ker =
+  (exposeInputs' =<< pushRearrange') <|>
+  (exposeInputs' =<< pullRearrange') <|>
+  exposeInputs' ker
   where ot = outputTransform ker
 
-        pushRearrange' soac = do
-          (soac', ot') <- pushRearrange inpIds soac ot
+        pushRearrange' = do
+          (soac', ot') <- pushRearrange inpIds (fsoac ker) ot
           return ker { fsoac = soac'
                      , outputTransform = ot'
                      }
 
-        pullRearrange' soac = do
-          (soac',ot') <- pullRearrange soac ot
+        pullRearrange' = do
+          (soac',ot') <- pullRearrange (fsoac ker) ot
           unless (SOAC.nullTransforms ot') $
             fail "pullRearrange was not enough"
           return ker { fsoac = soac'
