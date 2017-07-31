@@ -114,9 +114,9 @@ mapExpM tv (BasicOp (ConvOp conv x)) =
   BasicOp <$> (ConvOp conv <$> mapOnSubExp tv x)
 mapExpM tv (BasicOp (UnOp op x)) =
   BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
-mapExpM tv (If c texp fexp ts) =
-  pure If <*> mapOnSubExp tv c <*> mapOnBody tv mempty texp <*> mapOnBody tv mempty fexp <*>
-       mapM (mapOnExtType tv) ts
+mapExpM tv (If c texp fexp (IfAttr ts s)) =
+  If <$> mapOnSubExp tv c <*> mapOnBody tv mempty texp <*> mapOnBody tv mempty fexp <*>
+        (IfAttr <$> mapM (mapOnExtType tv) ts <*> pure s)
 mapExpM tv (Apply fname args ret) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d

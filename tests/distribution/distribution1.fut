@@ -12,7 +12,7 @@
 --     scan
 --
 -- ==
--- structure distributed { Kernel 2 }
+-- structure distributed { Kernel 1 }
 
 import "/futlib/math"
 

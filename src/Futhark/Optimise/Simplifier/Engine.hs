@@ -626,7 +626,7 @@ simplifyOp op = do f <- asks $ simplifyOpS . fst
 
 simplifyExp :: SimplifiableLore lore => Exp lore -> SimpleM lore (Exp (Wise lore))
 
-simplifyExp (If cond tbranch fbranch ts) = do
+simplifyExp (If cond tbranch fbranch (IfAttr ts ifsort)) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
@@ -636,7 +636,7 @@ simplifyExp (If cond tbranch fbranch ts) = do
   (tbranch',fbranch') <-
     hoistCommon (simplifyBody ds tbranch) (ST.updateBounds True cond)
                 (simplifyBody ds fbranch) (ST.updateBounds False cond)
-  return $ If cond' tbranch' fbranch' ts'
+  return $ If cond' tbranch' fbranch' $ IfAttr ts' ifsort
 
 simplifyExp (DoLoop ctx val form loopbody) = do
   let (ctxparams, ctxinit) = unzip ctx

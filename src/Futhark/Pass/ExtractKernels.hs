@@ -6,7 +6,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 -- | Kernel extraction.
 --
 -- In the following, I will use the term "width" to denote the amount
@@ -1269,8 +1268,7 @@ kernelAlternatives pat default_body ((cond,alt):alts) = runBinder_ $ do
   alt_stms <- kernelAlternatives alts_pat default_body alts
   let alt_body = mkBody alt_stms $ map Var $ patternValueNames alts_pat
 
-  letBind_ pat $ If cond alt alt_body rettype
-  where rettype = staticShapes $ patternTypes pat
+  letBind_ pat $ If cond alt alt_body $ ifCommon $ patternTypes pat
 
 kernelOrNot :: Stm -> KernelAcc
             -> PostKernels -> KernelAcc -> Maybe [KernelsStm]

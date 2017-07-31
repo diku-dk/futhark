@@ -467,13 +467,13 @@ internaliseExp desc (E.Range start maybe_second end _) = do
       bounds_invalid <- letSubExp "bounds_invalid" $
                         I.If downwards
                         (resultBody [bounds_invalid_downwards])
-                        (resultBody [bounds_invalid_upwards])
-                        [I.Prim I.Bool]
+                        (resultBody [bounds_invalid_upwards]) $
+                        ifCommon [I.Prim I.Bool]
       distance_exclusive <- letSubExp "distance_exclusive" $
                             I.If downwards
                             (resultBody [distance_downwards_exclusive])
-                            (resultBody [distance_upwards_exclusive])
-                            [I.Prim $ IntType it]
+                            (resultBody [distance_upwards_exclusive]) $
+                            ifCommon [I.Prim $ IntType it]
       distance_exclusive_i32 <- asIntZ Int32 distance_exclusive
       distance <- letSubExp "distance" $
                   I.BasicOp $ I.BinOp (Add Int32)
@@ -932,7 +932,7 @@ internaliseExp desc (E.If ce te fe (Info t) _) = do
   te' <- internaliseBody te
   fe' <- internaliseBody fe
   (t', _, _) <- internaliseReturnType $ E.vacuousShapeAnnotations t `setAliases` ()
-  letTupExp' desc $ I.If ce' te' fe' $ map I.fromDecl t'
+  letTupExp' desc $ I.If ce' te' fe' $ IfAttr (map I.fromDecl t') IfNormal
 
 -- Builtin operators are handled specially because they are
 -- overloaded.
@@ -965,10 +965,10 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
   w_minus_1 <- letSubExp "w_minus_1" $ BasicOp $ I.BinOp (Sub Int32) w one
   let i_def = letSubExp "i_def" $ I.If backwards
               (resultBody [w_minus_1])
-              (resultBody [zero]) [I.Prim int32]
+              (resultBody [zero]) $ ifCommon [I.Prim int32]
       j_def = letSubExp "j_def" $ I.If backwards
               (resultBody [negone])
-              (resultBody [w]) [I.Prim int32]
+              (resultBody [w]) $ ifCommon [I.Prim int32]
   i' <- maybe i_def (fmap fst . internaliseDimExp "i") i
   j' <- maybe j_def (fmap fst . internaliseDimExp "j") j
   j_m_i <- letSubExp "j_m_i" $ BasicOp $ I.BinOp (Sub Int32) j' i'
@@ -1007,8 +1007,8 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
 
     slice_ok <- letSubExp "slice_ok" $ I.If backwards
                 (resultBody [backwards_ok])
-                (resultBody [forwards_ok])
-                [I.Prim I.Bool]
+                (resultBody [forwards_ok]) $
+                ifCommon [I.Prim I.Bool]
     ok_or_empty <- letSubExp "ok_or_empty" $
                    I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
     letTupExp "slice_cert" $ I.BasicOp $ I.Assert ok_or_empty loc
@@ -1367,7 +1367,8 @@ isOverloadedFunction qname args loc = do
                       return $ resultBody [all_equal]
 
                     letSubExp "arrays_equal" $
-                      I.If shapes_match compare_elems_body (resultBody [constant False]) [I.Prim I.Bool]
+                      I.If shapes_match compare_elems_body (resultBody [constant False]) $
+                      ifCommon [I.Prim I.Bool]
 
     handle [x,y] name
       | Just bop <- find ((name==) . pretty) [minBound..maxBound::E.BinOp] =
@@ -1402,8 +1403,8 @@ isOverloadedFunction qname args loc = do
       case E.typeOf e of
         E.Prim E.Bool ->
           letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
-                                    (resultBody [intConst int_to 0])
-                                    [I.Prim $ I.IntType int_to]
+                                    (resultBody [intConst int_to 0]) $
+                                    ifCommon [I.Prim $ I.IntType int_to]
         E.Prim (E.Signed int_from) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SExt int_from int_to) e'
         E.Prim (E.Unsigned int_from) ->
@@ -1417,8 +1418,8 @@ isOverloadedFunction qname args loc = do
       case E.typeOf e of
         E.Prim E.Bool ->
           letTupExp' desc $ I.If e' (resultBody [intConst int_to 1])
-                                    (resultBody [intConst int_to 0])
-                                    [I.Prim $ I.IntType int_to]
+                                    (resultBody [intConst int_to 0]) $
+                                    ifCommon [I.Prim $ I.IntType int_to]
         E.Prim (E.Signed int_from) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.ZExt int_from int_to) e'
         E.Prim (E.Unsigned int_from) ->
@@ -1432,8 +1433,8 @@ isOverloadedFunction qname args loc = do
       case E.typeOf e of
         E.Prim E.Bool ->
           letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
-                                    (resultBody [floatConst float_to 0])
-                                    [I.Prim $ I.FloatType float_to]
+                                    (resultBody [floatConst float_to 0]) $
+                                    ifCommon [I.Prim $ I.FloatType float_to]
         E.Prim (E.Signed int_from) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
         E.Prim (E.Unsigned int_from) ->
@@ -1677,7 +1678,8 @@ partitionWithSOACS k lam arrs = do
   let empty_body = resultBody $ replicate k $ constant (0::Int32)
   is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int32) w $ constant (0::Int32)
   sizes <- letTupExp "partition_size" $
-           I.If is_empty empty_body nonempty_body $ replicate k $ I.Prim int32
+           I.If is_empty empty_body nonempty_body $
+           ifCommon $ replicate k $ I.Prim int32
 
   -- Compute total size of all partitions.
   sum_of_partition_sizes <- letSubExp "sum_of_partition_sizes" =<<
@@ -1721,4 +1723,4 @@ partitionWithSOACS k lam arrs = do
                   foldBinOp (Add Int32) (constant (-1::Int32))
                   (I.Var (I.paramName p) : take i sizes)
       letSubExp "total_res" $ I.If is_this_one
-        (resultBody [this_one]) (resultBody [next_one]) [I.Prim int32]
+        (resultBody [this_one]) (resultBody [next_one]) $ ifCommon [I.Prim int32]

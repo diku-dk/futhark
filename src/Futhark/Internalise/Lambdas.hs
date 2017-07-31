@@ -77,16 +77,16 @@ bindMapShapes inner_shapes sizefun args outer_shape
                 forM_ (zip inner_shapes ses) $ \(v, se) ->
                   letBind_ (basicPattern' [] [v]) $ I.BasicOp $ I.SubExp se
         else letBind_ (basicPattern' [] inner_shapes) =<<
-             eIf isempty emptybranch nonemptybranch
+             eIf' isnonempty nonemptybranch emptybranch IfFallback
 
   where emptybranch =
           pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
         nonemptybranch = insertStmsM $
           resultBody <$> (eLambda sizefun =<< mapM index0 args)
 
-        isempty = eCmpOp (I.CmpEq I.int32)
-                  (pure $ I.BasicOp $ I.SubExp outer_shape)
-                  (pure $ I.BasicOp $ SubExp zero)
+        isnonempty = eNot $ eCmpOp (I.CmpEq I.int32)
+                     (pure $ I.BasicOp $ I.SubExp outer_shape)
+                     (pure $ I.BasicOp $ SubExp zero)
         zero = constant (0::I.Int32)
         index0 arg = do
           arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
@@ -247,8 +247,8 @@ internalisePartitionLambdas internaliseLambda lams args = do
                     | (top,fromp) <- zip lam_params params ]
                   branchbnd = mkLet' [] intres $ I.If boolres
                               (result i)
-                              next_lam_body
-                              rettype
+                              next_lam_body $
+                              ifCommon rettype
               return $ mkBody (parambnds++bodybnds++[branchbnd]) $
                 map (I.Var . I.identName) intres
             _ ->

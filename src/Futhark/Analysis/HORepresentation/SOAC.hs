@@ -612,7 +612,7 @@ soacToStream soac = do
                    (mkBody [] nes)
                    (mkBody leltmpbnds $
                     map (Futhark.Var . identName) lastel_tmp_ids) $
-                   staticShapes $ map identType lastel_tmp_ids
+                   ifCommon $ map identType lastel_tmp_ids
       -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
       maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) lam
       let mapbnd = mkLet' [] strm_resids $ Op $

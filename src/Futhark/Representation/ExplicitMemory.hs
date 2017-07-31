@@ -801,7 +801,7 @@ instance Attributes ExplicitMemory where
   expContext pat e = do
     ext_context <- expExtContext pat e
     case e of
-      If _ tbranch fbranch rettype -> do
+      If _ tbranch fbranch (IfAttr rettype _) -> do
         treturns <- bodyReturns rettype tbranch
         freturns <- bodyReturns rettype fbranch
         combreturns <- generaliseReturns treturns freturns
@@ -1001,7 +1001,7 @@ expReturns (DoLoop ctx val _ _) =
 expReturns (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret
 
-expReturns (If _ b1 b2 ts) = do
+expReturns (If _ b1 b2 (IfAttr ts _)) = do
   b1t <- bodyReturns ts b1
   b2t <- bodyReturns ts b2
   map bodyReturnsToExpReturns <$>

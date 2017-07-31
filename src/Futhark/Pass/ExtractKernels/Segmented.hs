@@ -831,9 +831,9 @@ addFlagToLambda nes lam = do
     new_flag <- letSubExp "new_flag" $
                 BasicOp $ BinOp LogOr (Var x_flag) (Var y_flag)
     lhs <- fmap (map Var) $ letTupExp "seg_lhs" $ If (Var y_flag)
-      (resultBody nes)
-      (resultBody $ map (Var . paramName) x_params)
-      (staticShapes $ map paramType x_params)
+           (resultBody nes)
+           (resultBody $ map (Var . paramName) x_params) $
+           ifCommon $ map paramType x_params
     let rhs = map (Var . paramName) y_params
 
     lam' <- renameLambda lam -- avoid shadowing

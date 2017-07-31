@@ -13,6 +13,7 @@ module Futhark.Construct
 
   , eSubExp
   , eIf
+  , eIf'
   , eBinOp
   , eCmpOp
   , eNegate
@@ -40,6 +41,7 @@ module Futhark.Construct
   , cmpOpLambda
   , fullSlice
   , fullSliceNum
+  , ifCommon
 
   , module Futhark.Binder
 
@@ -133,12 +135,19 @@ eSubExp = pure . BasicOp . SubExp
 eIf :: MonadBinder m =>
        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
     -> m (Exp (Lore m))
-eIf ce te fe = do
+eIf ce te fe = eIf' ce te fe IfNormal
+
+-- | As 'eIf', but an 'IfSort' can be given.
+eIf' :: MonadBinder m =>
+        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
+     -> IfSort
+     -> m (Exp (Lore m))
+eIf' ce te fe if_sort = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertStmsM te
   fe' <- insertStmsM fe
   ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
-  return $ If ce' te' fe' ts
+  return $ If ce' te' fe' (IfAttr ts if_sort)
 
 eBinOp :: MonadBinder m =>
           BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -333,6 +342,9 @@ fullSlice t slice =
 fullSliceNum :: Num d => [d] -> [DimIndex d] -> Slice d
 fullSliceNum dims slice =
   slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
+
+ifCommon :: [Type] -> IfAttr
+ifCommon ts = IfAttr (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore
