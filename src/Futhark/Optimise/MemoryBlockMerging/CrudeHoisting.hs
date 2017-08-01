@@ -9,6 +9,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import Control.Monad
 import Control.Monad.RWS
+import Control.Monad.Writer
 
 import Futhark.Representation.AST
 import Futhark.Representation.Aliases
@@ -67,6 +68,36 @@ scopeBindingMap :: (VName, NameInfo ExplicitMemory)
                 -> BindingMap
 scopeBindingMap (x, _) = [(S.singleton x, PrimBinding S.empty FromFParam)]
 
+boundInKernelSpace :: ExpMem.KernelSpace -> Names
+boundInKernelSpace space =
+  -- This might do too much.
+  S.fromList ([ ExpMem.spaceGlobalId space
+              , ExpMem.spaceLocalId space
+              , ExpMem.spaceGroupId space]
+              ++ (case ExpMem.spaceStructure space of
+                    ExpMem.FlatThreadSpace ts ->
+                      map fst ts ++ mapMaybe (fromVar . snd) ts
+                    ExpMem.NestedThreadSpace ts ->
+                      map (\(x, _, _, _) -> x) ts
+                      ++ mapMaybe (fromVar . (\(_, x, _, _) -> x)) ts
+                      ++ map (\(_, _, x, _) -> x) ts
+                      ++ mapMaybe (fromVar . (\(_, _, _, x) -> x)) ts
+                 ))
+
+-- FIXME: The results of this should probably go in the core 'freeIn' function,
+-- and not just in this random module.
+boundInExpExtra :: Exp ExplicitMemory -> Names
+boundInExpExtra = execWriter . inExp
+  where inExp :: Exp ExplicitMemory -> Writer Names ()
+        inExp e = case e of
+          Op (ExpMem.Inner (ExpMem.Kernel _ _ space _ _)) ->
+            tell $ boundInKernelSpace space
+          _ -> walkExpM walker e
+
+        walker = identityWalker {
+          walkOnBody = mapM_ (inExp . stmExp) . bodyStms
+          }
+
 bodyBindingMap :: [Stm ExplicitMemory] -> BindingMap
 bodyBindingMap stms =
   concatMap createBindingStmt $ zip [0..] stms
@@ -80,7 +111,9 @@ bodyBindingMap stms =
           let -- Both free variables and consumed variables count as dependencies.
               stmt_vars = S.fromList (map patElemName (patctxelems ++ patvalelems))
               frees = S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
-              vars_binding = (stmt_vars, PrimBinding frees (FromLine line e))
+              bound_extra = boundInExpExtra e
+              frees' = frees `S.difference` bound_extra
+              vars_binding = (stmt_vars, PrimBinding frees' (FromLine line e))
 
               -- Some variables exist only in a shape declaration and so will
               -- have no PrimBinding.  If we hit the Nothing case, we assume
@@ -92,19 +125,7 @@ bodyBindingMap stms =
               -- body.
               param_vars = case e of
                 Op (ExpMem.Inner (ExpMem.Kernel _ _ space _ _)) ->
-                  -- This might do too much.
-                  S.fromList ([ ExpMem.spaceGlobalId space
-                              , ExpMem.spaceLocalId space
-                              , ExpMem.spaceGroupId space]
-                              ++ (case ExpMem.spaceStructure space of
-                                    ExpMem.FlatThreadSpace ts ->
-                                      map fst ts ++ mapMaybe (fromVar . snd) ts
-                                    ExpMem.NestedThreadSpace ts ->
-                                      map (\(x, _, _, _) -> x) ts
-                                      ++ mapMaybe (fromVar . (\(_, x, _, _) -> x)) ts
-                                      ++ map (\(_, _, x, _) -> x) ts
-                                      ++ mapMaybe (fromVar . (\(_, _, _, x) -> x)) ts
-                                 ))
+                  boundInKernelSpace space
                 _ -> S.empty
               params_binding = (param_vars, PrimBinding S.empty FromFParam)
 
@@ -148,6 +169,7 @@ hoistInBody scope_new bindingmap_old params findHoistees body =
       debug = hoistees `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "Hoistees found in body:"
+        print bindingmap
         forM_ hoistees $ \h -> putStrLn ("hoistee: " ++ pretty h)
         putStrLn $ replicate 70 '~'
 
@@ -189,7 +211,13 @@ hoist bindingmap_cur body hoistee =
 moveLetUpwards :: VName -> Body ExplicitMemory
                -> State BindingMap (Body ExplicitMemory)
 moveLetUpwards letname body = do
-  PrimBinding deps letorig <- lookupPrimBinding letname
+  let debug0 = do
+        putStrLn $ replicate 70 '~'
+        putStrLn "moveLetUpwards 0:"
+        print letname
+        putStrLn $ replicate 70 '~'
+
+  PrimBinding deps letorig <- withDebug debug0 $ lookupPrimBinding letname
   case letorig of
     FromFParam -> return body
     FromLine line_cur exp_cur ->
@@ -205,7 +233,20 @@ moveLetUpwards letname body = do
           -- Sort by how close they are to the beginning of the body.  The closest
           -- one should be the first one to hoist, so that the other ones can maybe
           -- exploit it.
-          deps' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t) $ S.toList deps
+
+          let debug1 = do
+                putStrLn $ replicate 70 '~'
+                putStrLn "moveLetUpwards 1:"
+                print letname
+                putStrLn $ prettySet deps
+                print line_cur
+                -- putStrLn $ replicate 70 '|'
+                -- putStrLn $ pretty body'
+                -- putStrLn $ replicate 70 '|'
+                putStrLn $ replicate 70 '~'
+
+          deps' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t)
+                   $ withDebug debug1 $ S.toList deps
           body' <- foldM (flip moveLetUpwards) body deps'
           origins <- mapM (\t -> pbOrigin <$> lookupPrimBinding t) deps'
           let line_dest = case foldl max FromFParam origins of
@@ -217,19 +258,7 @@ moveLetUpwards letname body = do
 
           stms' <- moveLetToLine letname line_cur line_dest $ bodyStms body'
 
-          let debug = stms' `seq` do
-                putStrLn $ replicate 70 '~'
-                putStrLn "moveLetUpwards:"
-                print letname
-                print deps'
-                print line_cur
-                print line_dest
-                -- putStrLn $ replicate 70 '|'
-                -- putStrLn $ pretty body'
-                -- putStrLn $ replicate 70 '|'
-                putStrLn $ replicate 70 '~'
-
-          withDebug debug $ return body' { bodyStms = stms' }
+          return body' { bodyStms = stms' }
 
 -- Both move the statement to the new line and update the BindingMap.
 moveLetToLine :: VName -> Line -> Line -> [Stm ExplicitMemory]
@@ -249,7 +278,13 @@ moveLetToLine stm_cur_name line_cur line_dest stms
                                      then (ns, PrimBinding vars (FromLine (l + 1) e))
                                      else t)
 
-  PrimBinding vars (FromLine _ exp_cur) <- lookupPrimBinding stm_cur_name -- fixme
+  let debug = do
+        putStrLn $ replicate 70 '~'
+        putStrLn "moveLetToLine:"
+        putStrLn $ pretty stm_cur_name
+        putStrLn $ replicate 70 '~'
+
+  PrimBinding vars (FromLine _ exp_cur) <- withDebug debug $ lookupPrimBinding stm_cur_name -- fixme
   modify $ replaceWhere stm_cur_name (PrimBinding vars (FromLine line_dest exp_cur))
 
   return stms2
