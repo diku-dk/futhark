@@ -103,6 +103,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
         walker_kernel = identityKernelWalker
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
 
 lookInCtx :: LoreConstraints lore =>

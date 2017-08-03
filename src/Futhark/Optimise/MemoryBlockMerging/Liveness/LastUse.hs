@@ -172,4 +172,5 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         walker_kernel = identityKernelWalker
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }

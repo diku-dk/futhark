@@ -31,12 +31,12 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              AllocSizeUtils lore,
                              FullWalk lore)
 
-recordMapping :: VName -> (SubExp, Space) -> FindM lore ()
-recordMapping var (size, space) = tell $ M.singleton var (size, space)
-
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
+
+recordMapping :: VName -> (SubExp, Space) -> FindM lore ()
+recordMapping var (size, space) = tell $ M.singleton var (size, space)
 
 memBlockSizesFunDef :: LoreConstraints lore =>
                        FunDef lore -> Sizes
@@ -104,6 +104,7 @@ lookInStmRec stm@(Let _ _ e) = do
         walker_kernel = identityKernelWalker
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInLambda
           , walkOnKernelLParam = lookInLParam
           }
 
@@ -112,6 +113,12 @@ lookInPatCtxElem :: LoreConstraints lore =>
 lookInPatCtxElem (PatElem mem _bindage (ExpMem.MemMem size space)) =
   recordMapping mem (size, space)
 lookInPatCtxElem _ = return ()
+
+lookInLambda :: LoreConstraints lore =>
+                Lambda lore -> FindM lore ()
+lookInLambda (Lambda params body _) = do
+  forM_ params lookInLParam
+  lookInBody body
 
 
 -- FIXME: Clean this up.

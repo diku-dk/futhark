@@ -121,6 +121,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         walker_kernel = identityKernelWalker
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
 
 -- Can the destination and source memory blocks share the same memory,
