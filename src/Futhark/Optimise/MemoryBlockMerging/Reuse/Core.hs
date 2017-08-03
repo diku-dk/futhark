@@ -48,7 +48,8 @@ data Current = Current { curUses :: M.Map VName Names
                        , curVarToMemRes :: VarMemMappings MemoryLoc
 
                          -- Changes in variable uses where allocation sizes are
-                         -- maxed from its elements.
+                         -- maxed from its elements.  Keyed by statement memory
+                         -- name.
                        , curVarToMaxExpRes :: M.Map VName Names
                        }
   deriving (Show)
@@ -82,7 +83,12 @@ lookupActualVars var = do
 
 lookupSize :: VName -> FindM SubExp
 lookupSize var =
-  (fromJust ("lookup size from " ++ pretty var) . M.lookup var)
+  (fst . fromJust ("lookup size from " ++ pretty var) . M.lookup var)
+  <$> asks ctxSizes
+
+lookupSpace :: VName -> FindM Space
+lookupSpace var =
+  (snd . fromJust ("lookup space from " ++ pretty var) . M.lookup var)
   <$> asks ctxSizes
 
 insertUse :: VName -> VName -> FindM ()
@@ -94,8 +100,8 @@ recordMemMapping x mem =
   modify $ \cur -> cur { curVarToMemRes = M.insert x mem $ curVarToMemRes cur }
 
 recordMaxMapping :: VName -> VName -> FindM ()
-recordMaxMapping x y =
-  modify $ \cur -> cur { curVarToMaxExpRes = insertOrUpdate x y
+recordMaxMapping mem y =
+  modify $ \cur -> cur { curVarToMaxExpRes = insertOrUpdate mem y
                                              $ curVarToMaxExpRes cur }
 
 withLocalUses :: FindM a -> FindM a
@@ -141,7 +147,7 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
                     ++ show (memLocIxFun dstmem))
         putStrLn ""
         forM_ (M.assocs (curVarToMaxExpRes res)) $ \(src, maxs) ->
-          putStrLn ("Size variable " ++ pretty src ++ " is now maximum of "
+          putStrLn ("Size of allocation of mem " ++ pretty src ++ " is now maximum of "
                     ++ prettySet maxs)
         putStrLn $ pretty fundef''
         putStrLn $ replicate 70 '='
@@ -182,7 +188,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
         DoLoop _ _ _ loopbody ->
           local (\ctx -> ctx { ctxCurLoopBodyRes = bodyResult loopbody })
         _ -> id
-  withLocalUses $ mMod $ walkExpM walker e
+  mMod $ walkExpM walker e
 
   let debug = do
         putStrLn $ replicate 70 '~'
@@ -193,7 +199,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
 
   withDebug debug $ return ()
 
-  where walker = identityWalker { walkOnBody = lookInBody }
+  where walker = identityWalker { walkOnBody = withLocalUses . lookInBody }
 
 handleNewArray :: VName -> ExpMem.MemBound u -> VName -> FindM ()
 handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
@@ -221,6 +227,12 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
                                    $ lookupEmptyable used_mem interferences)
         $ S.toList used_mems
 
+  let sameSpace :: VName -> Names -> FindM Bool
+      sameSpace kmem _used_mems = do
+        kspace <- lookupSpace kmem
+        xspace <- lookupSpace xmem
+        return (kspace == xspace)
+
   let sizesMatch :: Names -> FindM Bool
       sizesMatch used_mems = do
         ok_sizes <- mapM lookupSize $ S.toList used_mems
@@ -235,7 +247,7 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
               let pe_expanded = expandPrimExp var_to_pe pe
               traverse (\v_inner -> -- Has custom Eq instance.
                                        pure $ VarWithAssertTracking v_inner
-                                       $ lookupEmptyable v eq_asserts
+                                       $ lookupEmptyable v_inner eq_asserts
                        ) pe_expanded
         let ok_sizes_pe = map sePrimExp ok_sizes
         let new_size_pe = sePrimExp new_size
@@ -252,6 +264,8 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
               putStrLn ("new: " ++ show new_size_pe)
               forM_ ok_sizes_pe $ \ok_size_pe ->
                 putStrLn (" ok: " ++ show ok_size_pe)
+              putStrLn ("eq asserts: " ++ show eq_asserts)
+              putStrLn ("eq : " ++ show eq_simple ++ " " ++ show eq_advanced)
               putStrLn $ replicate 70 '~'
 
         withDebug debug $ return (eq_simple || eq_advanced)
@@ -261,12 +275,18 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
         ksize <- lookupSize kmem
         xsize <- lookupSize xmem
         uses_before <- asks ctxSizeVarsUsesBefore
-        return $ fromMaybe False $ do
-          ksize' <- fromVar ksize
-          xsize' <- fromVar xsize
-          return (xsize' `S.member` fromJust ("is recorded for all size variables "
-                                              ++ pretty ksize')
-                  (M.lookup ksize' uses_before))
+        let ok = fromMaybe False $ do
+              ksize' <- fromVar ksize
+              xsize' <- fromVar xsize
+              return (xsize' `S.member` fromJust ("is recorded for all size variables "
+                                                  ++ pretty ksize')
+                      (M.lookup ksize' uses_before))
+            debug = do
+              putStrLn $ replicate 70 '~'
+              putStrLn "sizesCanBeMaxed:"
+              print ok
+              putStrLn $ replicate 70 '~'
+        withDebug debug $ return ok
 
   let sizesWorkOut :: VName -> Names -> FindM Bool
       sizesWorkOut kmem used_mems =
@@ -275,7 +295,8 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
         -- of the two sizes.
         sizesMatch used_mems <||> sizesCanBeMaxed kmem
 
-  let canBeUsed t = and <$> mapM (($ t) . uncurry) [notTheSame, noneInterfere, sizesWorkOut]
+  let canBeUsed t = and <$> mapM (($ t) . uncurry) [notTheSame, noneInterfere,
+                                                    sameSpace, sizesWorkOut]
   cur_uses <- gets curUses
   found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
 
@@ -298,8 +319,8 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
           ksize' <- fromVar ksize
           xsize' <- fromVar xsize
           return $ do
-            recordMaxMapping ksize' ksize'
-            recordMaxMapping ksize' xsize'
+            recordMaxMapping kmem ksize'
+            recordMaxMapping kmem xsize'
     _ ->
       -- There is no previous memory block available for use.  Record that this
       -- memory block is available.
@@ -363,21 +384,21 @@ insertAndReplace replaces0 fundef =
 
         transformStm :: Stm ExplicitMemory
                      -> State (M.Map VName Replacement) [Stm ExplicitMemory]
-        transformStm stm@(Let (Pattern [] [PatElem pat_name BindVar
+        transformStm stm@(Let (Pattern [] [PatElem mem_name BindVar
                                            (ExpMem.MemMem _ pat_space)]) ()
-                          (Op (ExpMem.Alloc (Var size) space))) = do
+                          (Op (ExpMem.Alloc _ space))) = do
           replaces <- get
-          case M.lookup size replaces of
+          case M.lookup mem_name replaces of
             Just repl -> do
               let prev = map (\(name, e) ->
                                 Let (Pattern [] [PatElem name BindVar
                                                  (ExpMem.Scalar (IntType Int64))]) () e)
                          (replExps repl)
-                  new = Let (Pattern [] [PatElem pat_name BindVar
+                  new = Let (Pattern [] [PatElem mem_name BindVar
                                          (ExpMem.MemMem (Var (replName repl)) pat_space)]) ()
                         (Op (ExpMem.Alloc (Var (replName repl)) space))
               -- We should only generate the new statements once.
-              modify $ M.adjust (\repl0 -> repl0 { replExps = [] }) size
+              modify $ M.adjust (\repl0 -> repl0 { replExps = [] }) mem_name
               return (prev ++ [new])
             Nothing -> return [stm]
         transformStm (Let pat attr e) = do

@@ -102,6 +102,13 @@ isLoopExp var = do
     Just (Exp _ DoLoop{}) -> True
     _ -> False
 
+isReshapeExp :: VName -> FindM Bool
+isReshapeExp var = do
+  var_exp <- M.lookup var <$> asks ctxVarExps
+  return $ case var_exp of
+    Just (Exp _ (BasicOp Reshape{})) -> True
+    _ -> False
+
 -- Lookup the memory block statically associated with a variable.
 lookupVarMem :: VName -> FindM MemorySrc
 lookupVarMem var =
@@ -277,9 +284,9 @@ tryCoalesce dst ixfun_slices bindage src offset = do
       offsets = replicate (length src's) offset
                 -- The offsets of any previously optimistically coalesced src0s must be
                 -- re-offset relative to the offset of the newest coalescing.
-                ++ map (\o0 -> if o0 == zeroOffset || offset == zeroOffset
-                                  -- This should not be necessary, and maybe it
-                                  -- is not (but there were some problems).
+                ++ map (\o0 -> if o0 == zeroOffset && offset == zeroOffset
+                                    -- This should not be necessary, and maybe it
+                                    -- is not (but there were some problems).
                                then zeroOffset
                                else BinOpExp (Add Int32) offset o0) offset0s
       ixfun_slicess = replicate (length src's) ixfun_slices
@@ -489,11 +496,16 @@ safetyCond4 src = do
   -- branches), while two aliases are wrong.
   if_handling <- isIfExp src
 
+  -- Special Reshape handling: If a reshape has variables associated with it, it
+  -- is okay to use it.
+  src_actuals <- lookupEmptyable src <$> asks ctxActualVars
+  reshape_handling <- isReshapeExp src <&&> pure (not (S.null src_actuals))
+
   -- This needs to be extended if support for e.g. reshape coalescing is wanted:
   -- Some operations can be aliasing, but still be okay to coalesce if you also
   -- coalesce their aliased sources.
   src_aliases <- lookupEmptyable src <$> asks ctxVarAliases
-  let res = if_handling || S.null src_aliases
+  let res = if_handling || reshape_handling || S.null src_aliases
 
   let debug = do
         putStrLn $ replicate 70 '~'
