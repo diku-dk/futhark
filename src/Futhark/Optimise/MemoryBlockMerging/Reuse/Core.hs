@@ -1,5 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TupleSections #-}
 -- | Traverse a body to find memory blocks that can be allocated together.
 module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
@@ -17,8 +19,10 @@ import Control.Monad.State
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Analysis.PrimExp
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.ExplicitMemory (
+  ExplicitMemory, ExplicitMemorish)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.PrimExps (findPrimExpsFunDef)
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
@@ -61,50 +65,65 @@ emptyCurrent = Current { curUses = M.empty
                        , curVarToMaxExpRes = M.empty
                        }
 
-newtype FindM a = FindM { unFindM :: RWS Context () Current a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
             MonadState Current)
 
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             FullWalk lore)
+
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
+
 -- Lookup the memory block statically associated with a variable.
-lookupVarMem :: VName -> FindM MemorySrc
+lookupVarMem :: LoreConstraints lore =>
+                VName -> FindM lore MemorySrc
 lookupVarMem var =
   -- This should always be called from a place where it is certain that 'var'
   -- refers to a statement with an array expression.
   (fromJust ("lookup memory block from " ++ pretty var) . M.lookup var)
   <$> asks ctxVarToMem
 
-lookupActualVars :: VName -> FindM Names
+lookupActualVars :: LoreConstraints lore =>
+                    VName -> FindM lore Names
 lookupActualVars var = do
   actual_vars <- asks ctxActualVars
   -- Do this recursively.
   let actual_vars' = expandWithAliases actual_vars actual_vars
   return $ fromMaybe (S.singleton var) $ M.lookup var actual_vars'
 
-lookupSize :: VName -> FindM SubExp
+lookupSize :: LoreConstraints lore =>
+              VName -> FindM lore SubExp
 lookupSize var =
   (fst . fromJust ("lookup size from " ++ pretty var) . M.lookup var)
   <$> asks ctxSizes
 
-lookupSpace :: VName -> FindM Space
+lookupSpace :: LoreConstraints lore =>
+               VName -> FindM lore Space
 lookupSpace var =
   (snd . fromJust ("lookup space from " ++ pretty var) . M.lookup var)
   <$> asks ctxSizes
 
-insertUse :: VName -> VName -> FindM ()
+insertUse :: LoreConstraints lore =>
+             VName -> VName -> FindM lore ()
 insertUse new_mem old_mem =
   modify $ \cur -> cur { curUses = insertOrUpdate new_mem old_mem $ curUses cur }
 
-recordMemMapping :: VName -> MemoryLoc -> FindM ()
+recordMemMapping :: LoreConstraints lore =>
+                    VName -> MemoryLoc -> FindM lore ()
 recordMemMapping x mem =
   modify $ \cur -> cur { curVarToMemRes = M.insert x mem $ curVarToMemRes cur }
 
-recordMaxMapping :: VName -> VName -> FindM ()
+recordMaxMapping :: LoreConstraints lore =>
+                    VName -> VName -> FindM lore ()
 recordMaxMapping mem y =
   modify $ \cur -> cur { curVarToMaxExpRes = insertOrUpdate mem y
                                              $ curVarToMaxExpRes cur }
 
-withLocalUses :: FindM a -> FindM a
+withLocalUses :: LoreConstraints lore =>
+                 FindM lore a -> FindM lore a
 withLocalUses m = do
   uses <- gets curUses
   res <- m
@@ -154,7 +173,8 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
 
   withDebug debug $ return fundef''
 
-lookInFParam :: FParam ExplicitMemory -> FindM ()
+lookInFParam :: LoreConstraints lore =>
+                FParam lore -> FindM lore ()
 lookInFParam (Param _ membound) =
   -- Unique array function parameters also count as "allocations" in which
   -- memory can be reused.
@@ -163,13 +183,19 @@ lookInFParam (Param _ membound) =
       insertUse mem mem
     _ -> return ()
 
-lookInBody :: Body ExplicitMemory
-           -> FindM ()
-lookInBody (Body () bnds _res) =
+lookInBody :: LoreConstraints lore =>
+              Body lore -> FindM lore ()
+lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
-lookInStm :: Stm ExplicitMemory -> FindM ()
-lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody lore -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInStm :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
+lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   var_to_pe <- asks ctxVarPrimExps
   let eqs | BasicOp (Assert (Var v) _) <- e
           , Just (CmpOpExp (CmpEq _) (LeafExp v0 _) (LeafExp v1 _)) <- M.lookup v var_to_pe = do
@@ -188,7 +214,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
         DoLoop _ _ _ loopbody ->
           local (\ctx -> ctx { ctxCurLoopBodyRes = bodyResult loopbody })
         _ -> id
-  mMod $ walkExpM walker e
+  mMod $ fullWalkExpM walker walker_kernel e
 
   let debug = do
         putStrLn $ replicate 70 '~'
@@ -198,10 +224,16 @@ lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
         putStrLn $ replicate 70 '~'
 
   withDebug debug $ return ()
+  where walker = identityWalker
+          { walkOnBody = withLocalUses . lookInBody }
+        walker_kernel = identityKernelWalker
+          { walkOnKernelBody = coerce . withLocalUses . lookInBody
+          , walkOnKernelKernelBody = coerce . withLocalUses . lookInKernelBody
+          , walkOnKernelLambda = coerce . withLocalUses . lookInBody . lambdaBody
+          }
 
-  where walker = identityWalker { walkOnBody = withLocalUses . lookInBody }
-
-handleNewArray :: VName -> ExpMem.MemBound u -> VName -> FindM ()
+handleNewArray :: LoreConstraints lore =>
+                  VName -> ExpMem.MemBound u -> VName -> FindM lore ()
 handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
   interferences <- asks ctxInterferences
 
@@ -215,10 +247,12 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
   cur_loop_body_res <- asks ctxCurLoopBodyRes
   let loop_disabled = Var x `L.elem` cur_loop_body_res
 
-  let notTheSame :: VName -> Names -> FindM Bool
+  let notTheSame :: LoreConstraints lore =>
+                    VName -> Names -> FindM lore Bool
       notTheSame kmem _used_mems = return (kmem /= xmem)
 
-  let noneInterfere :: VName -> Names -> FindM Bool
+  let noneInterfere :: LoreConstraints lore =>
+                       VName -> Names -> FindM lore Bool
       noneInterfere _kmem used_mems =
         -- A memory block can have already been reused.  For safety's sake, we
         -- also check for interference with any previously merged blocks.  Might
@@ -227,13 +261,15 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
                                    $ lookupEmptyable used_mem interferences)
         $ S.toList used_mems
 
-  let sameSpace :: VName -> Names -> FindM Bool
+  let sameSpace :: LoreConstraints lore =>
+                   VName -> Names -> FindM lore Bool
       sameSpace kmem _used_mems = do
         kspace <- lookupSpace kmem
         xspace <- lookupSpace xmem
         return (kspace == xspace)
 
-  let sizesMatch :: Names -> FindM Bool
+  let sizesMatch :: LoreConstraints lore =>
+                    Names -> FindM lore Bool
       sizesMatch used_mems = do
         ok_sizes <- mapM lookupSize $ S.toList used_mems
         new_size <- lookupSize xmem
@@ -270,7 +306,8 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
 
         withDebug debug $ return (eq_simple || eq_advanced)
 
-  let sizesCanBeMaxed :: VName -> FindM Bool
+  let sizesCanBeMaxed :: LoreConstraints lore =>
+                         VName -> FindM lore Bool
       sizesCanBeMaxed kmem = do
         ksize <- lookupSize kmem
         xsize <- lookupSize xmem
@@ -288,7 +325,8 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
               putStrLn $ replicate 70 '~'
         withDebug debug $ return ok
 
-  let sizesWorkOut :: VName -> Names -> FindM Bool
+  let sizesWorkOut :: LoreConstraints lore =>
+                      VName -> Names -> FindM lore Bool
       sizesWorkOut kmem used_mems =
         -- The size of an allocation is okay to reuse if it is the same as the
         -- current memory size, or if it can be changed to be the maximum size
@@ -370,20 +408,19 @@ maxsToReplacement vs = do
   let emax = BasicOp $ BinOp (SMax Int64) (Var m0) (Var m1)
   return $ Replacement vmax (es0 ++ es1 ++ [(vmax, emax)])
 
-insertAndReplace :: M.Map VName Replacement -> FunDef ExplicitMemory
-                 -> FunDef ExplicitMemory
+insertAndReplace :: M.Map VName Replacement -> FunDef ExplicitMemory -> FunDef ExplicitMemory
 insertAndReplace replaces0 fundef =
   let body' = evalState (transformBody $ funDefBody fundef) replaces0
   in fundef { funDefBody = body' }
 
-  where transformBody :: Body ExplicitMemory
-                      -> State (M.Map VName Replacement) (Body ExplicitMemory)
+  where transformBody :: Body ExplicitMemory ->
+                         State (M.Map VName Replacement) (Body ExplicitMemory)
         transformBody body = do
           stms' <- concat <$> mapM transformStm (bodyStms body)
           return $ body { bodyStms = stms' }
 
-        transformStm :: Stm ExplicitMemory
-                     -> State (M.Map VName Replacement) [Stm ExplicitMemory]
+        transformStm :: Stm ExplicitMemory ->
+                        State (M.Map VName Replacement) [Stm ExplicitMemory]
         transformStm stm@(Let (Pattern [] [PatElem mem_name BindVar
                                            (ExpMem.MemMem _ pat_space)]) ()
                           (Op (ExpMem.Alloc _ space))) = do
