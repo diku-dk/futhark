@@ -61,7 +61,7 @@ lookupPrimBinding vname = do
   bm <- get
   return $ snd $
     fromJust (pretty vname ++ " was not found in BindingMap."
-              ++ "  This should not happen!  At least not with --cpu.")
+              ++ "  This should not happen!")
     $ L.find ((vname `S.member`) . fst) bm
 
 scopeBindingMap :: (VName, NameInfo ExplicitMemory)
@@ -110,7 +110,7 @@ bodyBindingMap stms =
         createBindingStmt (line, stmt@(Let (Pattern patctxelems patvalelems) () e)) =
           let -- Both free variables and consumed variables count as dependencies.
               stmt_vars = S.fromList (map patElemName (patctxelems ++ patvalelems))
-              frees = S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
+              frees = freeInStm stmt --S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
               bound_extra = boundInExpExtra e
               frees' = frees `S.difference` bound_extra
               vars_binding = (stmt_vars, PrimBinding frees' (FromLine line e))

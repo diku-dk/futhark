@@ -46,7 +46,7 @@ getAuxiliaryInfo fundef =
      }
 
 debugAuxiliaryInfo :: AuxiliaryInfo -> String -> IO ()
-debugAuxiliaryInfo aux desc = aux `seq` do
+debugAuxiliaryInfo aux desc = aux `seq` auxActualVariables aux `seq` do
   putStrLn $ replicate 70 '='
   putStrLn (desc ++ ": Helper info in " ++ pretty (auxName aux) ++ ":")
   putStrLn $ replicate 70 '-'

@@ -21,7 +21,7 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 
-type Sizes = M.Map VName SubExp
+type Sizes = M.Map VName (SubExp, Space) -- Also Space information
 
 newtype FindM lore a = FindM { unFindM :: Writer Sizes a }
   deriving (Monad, Functor, Applicative,
@@ -31,8 +31,8 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              AllocSizeUtils lore,
                              FullWalk lore)
 
-recordMapping :: VName -> SubExp -> FindM lore ()
-recordMapping var size = tell $ M.singleton var size
+recordMapping :: VName -> (SubExp, Space) -> FindM lore ()
+recordMapping var (size, space) = tell $ M.singleton var (size, space)
 
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
@@ -58,14 +58,14 @@ memBlockSizesParamsBodyNonRec params body =
 
 lookInFParam :: LoreConstraints lore =>
                 FParam lore -> FindM lore ()
-lookInFParam (Param mem (ExpMem.MemMem size _space)) =
-  recordMapping mem size
+lookInFParam (Param mem (ExpMem.MemMem size space)) =
+  recordMapping mem (size, space)
 lookInFParam _ = return ()
 
 lookInLParam :: LoreConstraints lore =>
                 LParam lore -> FindM lore ()
-lookInLParam (Param mem (ExpMem.MemMem size _space)) =
-  recordMapping mem size
+lookInLParam (Param mem (ExpMem.MemMem size space)) =
+  recordMapping mem (size, space)
 lookInLParam _ = return ()
 
 lookInBody :: LoreConstraints lore =>
@@ -84,8 +84,8 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   case patvalelems of
     [PatElem mem _ _] ->
       case lookForAllocSize e of
-        Just size ->
-          recordMapping mem size
+        Just (size, space) ->
+          recordMapping mem (size, space)
         Nothing -> return ()
     _ -> return ()
   mapM_ lookInPatCtxElem patctxelems
@@ -109,19 +109,19 @@ lookInStmRec stm@(Let _ _ e) = do
 
 lookInPatCtxElem :: LoreConstraints lore =>
                     PatElem lore -> FindM lore ()
-lookInPatCtxElem (PatElem mem _bindage (ExpMem.MemMem size _)) =
-  recordMapping mem size
+lookInPatCtxElem (PatElem mem _bindage (ExpMem.MemMem size space)) =
+  recordMapping mem (size, space)
 lookInPatCtxElem _ = return ()
 
 
 -- FIXME: Clean this up.
 class AllocSizeUtils lore where
-  lookForAllocSize :: Exp lore -> Maybe SubExp
+  lookForAllocSize :: Exp lore -> Maybe (SubExp, Space)
 
 instance AllocSizeUtils ExplicitMemory where
-  lookForAllocSize (Op (ExpMem.Alloc size _)) = Just size
+  lookForAllocSize (Op (ExpMem.Alloc size space)) = Just (size, space)
   lookForAllocSize _ = Nothing
 
 instance AllocSizeUtils InKernel where
-  lookForAllocSize (Op (ExpMem.Alloc size _)) = Just size
+  lookForAllocSize (Op (ExpMem.Alloc size space)) = Just (size, space)
   lookForAllocSize _ = Nothing

@@ -21,7 +21,8 @@ import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
 findAllocSizeHoistees :: Body ExplicitMemory -> Maybe [FParam ExplicitMemory]
                       -> [VName]
 findAllocSizeHoistees body params =
-  let subexps = M.elems $ memBlockSizesParamsBodyNonRec (fromMaybe [] params) body
+  let subexps = map fst $ M.elems
+                $ memBlockSizesParamsBodyNonRec (fromMaybe [] params) body
   in mapMaybe fromVar subexps
 
 hoistAllocSizesFunDef :: FunDef ExplicitMemory

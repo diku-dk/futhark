@@ -36,7 +36,7 @@ newtype FindM a = FindM { unFindM :: RWS SizeVars
 
 findSizeUsesFunDef :: FunDef ExplicitMemory -> UsesBefore
 findSizeUsesFunDef fundef  =
-  let size_vars = mapMaybe fromVar $ M.elems $ memBlockSizesFunDef fundef
+  let size_vars = mapMaybe (fromVar . fst) $ M.elems $ memBlockSizesFunDef fundef
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef

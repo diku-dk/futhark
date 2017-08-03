@@ -78,6 +78,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         walker_kernel = identityKernelWalker
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInLambda
           , walkOnKernelLParam = lookInLParam
           }
 
@@ -87,3 +88,9 @@ lookInPatValElem (PatElem x _bindage (ExpMem.ArrayMem _ shape _ xmem xixfun)) = 
   let memloc = MemorySrc xmem xixfun shape
   recordMapping x memloc
 lookInPatValElem _ = return ()
+
+lookInLambda :: LoreConstraints lore =>
+                Lambda lore -> FindM lore ()
+lookInLambda (Lambda params body _) = do
+  forM_ params lookInLParam
+  lookInBody body
