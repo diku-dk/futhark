@@ -23,6 +23,16 @@
 --   xs0 cannot use anything
 --   xs1 cannot use anything
 
+let interfering_map (k: i32) (t: [#n]i32): [n]i32 =
+  loop u = replicate n 0 for i < n - 1 do
+    let u[i + 1] = t[i] + k
+    in u
+
+let interfering_map2 (k: i32) (t0: [#n]i32) (t1: [#n]i32): [n]i32 =
+  loop u = replicate n 0 for i < n - 1 do
+    let u[i + 1] = t0[i] + t1[i] + k
+    in u
+
 let main (ns: [#n]i32): [n]i32 =
   let k0 = 1
   let xs0 = map (+ k0) ns
@@ -31,9 +41,9 @@ let main (ns: [#n]i32): [n]i32 =
   let xs1 = map (+ k1) ns
 
   let k2 = xs1[0]
-  let xs2 = map (+ k2) xs1
+  let xs2 = interfering_map k2 xs1
 
   let k3 = xs2[0]
-  let xs3 = map (\a b -> a + b + k3) xs0 xs2
+  let xs3 = interfering_map2 k3 xs0 xs2
 
   in xs3
