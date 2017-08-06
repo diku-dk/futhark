@@ -11,6 +11,7 @@ import Control.Monad
 import Control.Monad.Except hiding (forM_)
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import Data.Either
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -88,23 +89,32 @@ runBenchmarks opts paths = do
   -- us.
   hSetBuffering stdout LineBuffering
   benchmarks <- testSpecsFromPaths paths
-  compiled_benchmarks <- catMaybes <$> mapM (compileBenchmark opts) benchmarks
+  (skipped_benchmarks, compiled_benchmarks) <-
+    partitionEithers <$> mapM (compileBenchmark opts) benchmarks
+
+  when (anyFailedToCompile skipped_benchmarks) exitFailure
+
   results <- mapM (runBenchmark opts) compiled_benchmarks
   case optJSON opts of
     Nothing -> return ()
     Just file -> writeFile file $ JSON.encode $ resultsToJSON results
+  when (anyFailed results) exitFailure
 
-  when (anythingFailed results) $ exitWith $ ExitFailure 1
-
-anythingFailed :: [BenchResult] -> Bool
-anythingFailed = any failedBenchResult
+anyFailed :: [BenchResult] -> Bool
+anyFailed = any failedBenchResult
   where failedBenchResult (BenchResult _ xs) =
           any failedResult xs
         failedResult (DataResult _ Left{}) = True
         failedResult _                     = False
 
+anyFailedToCompile :: [SkipReason] -> Bool
+anyFailedToCompile = elem FailedToCompile
+
+data SkipReason = Skipped | FailedToCompile
+  deriving (Eq)
+
 compileBenchmark :: BenchOptions -> (FilePath, ProgramTest)
-                 -> IO (Maybe (FilePath, [InputOutputs]))
+                 -> IO (Either SkipReason (FilePath, [InputOutputs]))
 compileBenchmark opts (program, spec) =
   case testAction spec of
     RunCases cases | "nobench" `notElem` testTags spec,
@@ -117,14 +127,14 @@ compileBenchmark opts (program, spec) =
         [program, "-o", binaryName program] ""
 
       case futcode of
-        ExitSuccess     -> return $ Just (program, cases)
+        ExitSuccess     -> return $ Right (program, cases)
         ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
-                              return Nothing
+                              return $ Left FailedToCompile
         ExitFailure _   -> do putStrLn "Failed:\n"
                               SBS.putStrLn futerr
-                              return Nothing
+                              return $ Left FailedToCompile
     _ ->
-      return Nothing
+      return $ Left Skipped
   where compiler = optCompiler opts
 
         hasRuns (InputOutputs _ runs) = not $ null runs

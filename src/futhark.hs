@@ -18,6 +18,7 @@ import Prelude hiding (id)
 import Futhark.Pass
 import Futhark.Actions
 import Futhark.Compiler
+import Language.Futhark.Futlib.Prelude
 import Language.Futhark.Parser (parseFuthark)
 import Futhark.Util.Options
 import Futhark.Pipeline
@@ -311,7 +312,7 @@ main = mainWithOptions newConfig commandLineOptions compile
           case futharkPipeline config of
             TypeCheck -> do
               -- No pipeline; just read the program and type check
-              (_, warnings, _, _) <- readProgram [file]
+              (_, warnings, _, _) <- readProgram preludeBasis [file]
               liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
@@ -319,7 +320,7 @@ main = mainWithOptions newConfig commandLineOptions compile
                 Left err  -> fail $ show err
                 Right prog-> putStrLn $ pretty prog
             Pipeline{} -> do
-              prog <- runPipelineOnProgram (futharkConfig config) id file
+              prog <- runPipelineOnProgram (futharkConfig config) preludeBasis id file
               runPolyPasses config prog
 
 runPolyPasses :: Config -> SOACS.Prog -> FutharkM ()

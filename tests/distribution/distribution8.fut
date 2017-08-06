@@ -13,7 +13,7 @@
 --     scan
 --
 -- ==
--- structure distributed { DoLoop/Kernel 2 DoLoop 2 }
+-- structure distributed { DoLoop/Kernel 1 DoLoop 2 }
 
 import "/futlib/math"
 

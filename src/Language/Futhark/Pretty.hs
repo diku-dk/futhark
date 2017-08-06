@@ -164,7 +164,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     maybe mempty ((text ".." <>) . ppr) maybe_step <>
     case end of
       DownToExclusive end' -> text "..>" <> ppr end'
-      UpToInclusive   end' -> text "..." <> ppr end'
+      ToInclusive     end' -> text "..." <> ppr end'
       UpToExclusive   end' -> text "..<" <> ppr end'
   pprPrec p (BinOp bop (x,_) (y,_) _ _) = prettyBinOp p bop x y
   pprPrec _ (Project k e _ _) = text "#" <> ppr k <+> pprPrec 9 e

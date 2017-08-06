@@ -21,7 +21,7 @@ import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
 
-import Futhark.Optimise.MemoryBlockMerging.Coalescing.PrimExps (findPrimExpsFunDef)
+import Futhark.Optimise.MemoryBlockMerging.PrimExps (findPrimExpsFunDef)
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.Exps
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition2
 import Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition3
@@ -100,6 +100,13 @@ isLoopExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
     Just (Exp _ DoLoop{}) -> True
+    _ -> False
+
+isReshapeExp :: VName -> FindM Bool
+isReshapeExp var = do
+  var_exp <- M.lookup var <$> asks ctxVarExps
+  return $ case var_exp of
+    Just (Exp _ (BasicOp Reshape{})) -> True
     _ -> False
 
 -- Lookup the memory block statically associated with a variable.
@@ -277,24 +284,25 @@ tryCoalesce dst ixfun_slices bindage src offset = do
       offsets = replicate (length src's) offset
                 -- The offsets of any previously optimistically coalesced src0s must be
                 -- re-offset relative to the offset of the newest coalescing.
-                ++ map (\o0 -> if o0 == zeroOffset || offset == zeroOffset
-                                  -- This should not be necessary, and maybe it
-                                  -- is not (but there were some problems).
+                ++ map (\o0 -> if o0 == zeroOffset && offset == zeroOffset
+                                    -- This should not be necessary, and maybe it
+                                    -- is not (but there were some problems).
                                then zeroOffset
                                else BinOpExp (Add Int32) offset o0) offset0s
       ixfun_slicess = replicate (length src's) ixfun_slices
                 -- Same as above, kind of.
                 ++ map (\slices0 -> ixfun_slices ++ slices0) ixfun_slice0ss
 
-  ixfuns' <- zipWithM (\offset_local islices -> do
-                          let ixfun0 = foldl IxFun.slice (memSrcIxFun mem_dst) islices
-                              ixfun1 = if offset_local == zeroOffset
-                                       then ixfun0 -- Should not be necessary,
-                                                   -- but it makes the type
-                                                   -- checker happy for now.
-                                       else IxFun.offsetIndex ixfun0 offset_local
-                          simplifyIxFun ixfun1
-                      ) offsets ixfun_slicess
+  var_to_pe <- asks ctxVarPrimExps
+  let ixfuns' = zipWith (\offset_local islices ->
+                           let ixfun0 = foldl IxFun.slice (memSrcIxFun mem_dst) islices
+                               ixfun1 = if offset_local == zeroOffset
+                                        then ixfun0 -- Should not be necessary,
+                                                    -- but it makes the type
+                                                    -- checker happy for now.
+                                        else IxFun.offsetIndex ixfun0 offset_local
+                           in expandIxFun var_to_pe ixfun1
+                        ) offsets ixfun_slicess
 
   -- Not everything supported yet.  This dials back the optimisation on areas
   -- where it fails.
@@ -371,15 +379,6 @@ tryCoalesce dst ixfun_slices bindage src offset = do
         putStrLn ("all ixfuns for " ++ pretty src ++ ":\n" ++ L.intercalate "\n" (map show ixfuns'))
         putStrLn $ replicate 70 '~'
   withDebug debug $ return ()
-
--- Replace variables with subtrees of their constituents wherever possible.  It
--- is debatable whether this is "simplifying", but it can enable more
--- expressions to use the index function.
-simplifyIxFun :: ExpMem.IxFun -> FindM ExpMem.IxFun
-simplifyIxFun ixfun = do
-  var_to_pe <- asks ctxVarPrimExps
-  let ixfun' = fixpointIterate (IxFun.substituteInIxFun var_to_pe) ixfun
-  return ixfun'
 
 canBeCoalesced :: VName -> VName -> ExpMem.IxFun -> FindM Bool
 canBeCoalesced dst src ixfun = do
@@ -497,11 +496,16 @@ safetyCond4 src = do
   -- branches), while two aliases are wrong.
   if_handling <- isIfExp src
 
+  -- Special Reshape handling: If a reshape has variables associated with it, it
+  -- is okay to use it.
+  src_actuals <- lookupEmptyable src <$> asks ctxActualVars
+  reshape_handling <- isReshapeExp src <&&> pure (not (S.null src_actuals))
+
   -- This needs to be extended if support for e.g. reshape coalescing is wanted:
   -- Some operations can be aliasing, but still be okay to coalesce if you also
   -- coalesce their aliased sources.
   src_aliases <- lookupEmptyable src <$> asks ctxVarAliases
-  let res = if_handling || S.null src_aliases
+  let res = if_handling || reshape_handling || S.null src_aliases
 
   let debug = do
         putStrLn $ replicate 70 '~'

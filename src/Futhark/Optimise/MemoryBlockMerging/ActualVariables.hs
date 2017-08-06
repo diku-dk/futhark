@@ -19,12 +19,14 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
+import Futhark.Representation.ExplicitMemory (
+  ExplicitMemorish, ExplicitMemory, InKernel)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
+import Futhark.Optimise.MemoryBlockMerging.AllExpVars
 
 
 getFullMap :: [M.Map VName Names] -> M.Map VName Names
@@ -38,7 +40,8 @@ newtype FindM lore a = FindM { unFindM :: RWS Context [ActualVariables] () a }
             MonadWriter [ActualVariables])
 
 type LoreConstraints lore = (ExplicitMemorish lore,
-                             FullWalk lore)
+                             FullWalk lore,
+                             LookInKernelExp lore)
 
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
@@ -68,7 +71,7 @@ lookInKernelBody (KernelBody _ bnds _res) =
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
-lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
+lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
   forM_ patvalelems $ \(PatElem var bindage _) ->
     case bindage of
       BindInPlace _ orig _ -> do
@@ -80,7 +83,11 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
 
   -- Special handling of loops, ifs, etc.
   case e of
-    DoLoop _mergectxparams mergevalparams _loopform body ->
+    DoLoop _mergectxparams mergevalparams _loopform body -> do
+      let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
+          body_vars1 = map (paramName . fst) mergevalparams
+          body_vars2 = S.toList $ findAllExpVars e
+          body_vars = body_vars0 ++ body_vars1 ++ body_vars2
       forM_ patvalelems $ \(PatElem var _ membound) -> do
         case membound of
           ExpMem.ArrayMem _ _ _ mem _ -> do
@@ -92,18 +99,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
                 mem_search = case L.find ((== mem) . patElemName . fst) zipped of
                   Just (_, Var res_mem) -> res_mem
                   _ -> mem
-            let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
-                body_vars1 = map (paramName . fst) mergevalparams
-                body_vars2 = concatMap (map patElemName
-                                        . patternValueElements . stmPattern)
-                             $ bodyStms body
-                body_vars = body_vars0 ++ body_vars1 ++ body_vars2
             -- Find the ones using the same memory as the result of the loop
             -- expression.
-            body_vars' <- filterM (\v -> do
-                                      m <- M.lookup v <$> ask
-                                      return $ Just mem_search == (memSrcName <$> m)
-                                  ) body_vars
+            body_vars' <- filterM (lookupGivesMem mem_search) body_vars
             -- Not only the result variable needs to change its memory block in case
             -- of a future coalescing with it; also the variables extracted above.
             -- FIXME: This is probably an okay way to do it?  What if the memory is
@@ -129,38 +127,29 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
       -- However, if a branch result has a memory block that is firstly used
       -- inside the branch, it is okay to coalesce that in a future statement.
       forM_ (zip3 patvalelems (bodyResult body_then) (bodyResult body_else))
-        $ \(PatElem var _ membound, res_then, res_else) ->
+        $ \(PatElem var _ membound, res_then, res_else) -> do
+        let body_vars = S.toList $ findAllExpVars e
         case membound of
           ExpMem.ArrayMem _ _ _ mem _ ->
             if mem `L.elem` map patElemName patctxelems
-              then do
+              then
               -- If the memory block is existential, we say that the If result
               -- refers to all results in the If.
-              let actuals = S.fromList (var : catMaybes [fromVar res_then, fromVar res_else])
-              recordActuals var actuals
+              recordActuals var
+              $ S.fromList (var : catMaybes [fromVar res_then, fromVar res_else])
 
               else do
               -- If the memory block is not existential, we need to find all the
               -- variables in any sub-bodies using the same memory block (like
               -- with loops).
-              let varFromStm stm = map patElemName (patternValueElements $ stmPattern stm)
-                                 ++ foldExp folder [] (stmExp stm)
-                  folder = identityFolder { foldOnBody = \vs fbody -> return (vs ++ concatMap varFromStm (bodyStms fbody)) }
-                  body_vars = foldExp folder [] e -- Get all statements in the
-                                                  -- body *and* any sub-bodies,
-                                                  -- etc.
               -- Find the ones using the same memory as the result of the loop
               -- expression.
-              body_vars' <- filterM (\v -> do
-                                        m <- M.lookup v <$> ask
-                                        return $ Just mem == (memSrcName <$> m)
-                                    ) body_vars
+              body_vars' <- filterM (lookupGivesMem mem) body_vars
               -- Not only the result variable needs to change its memory block in case
               -- of a future coalescing with it; also the variables extracted above.
               -- FIXME: This is probably an okay way to do it?  What if the memory is
               -- used, but with a different index function?  Can that happen?
-              let actuals = S.fromList (var : body_vars')
-              recordActuals var actuals
+              recordActuals var $ S.fromList (var : body_vars')
 
           _ -> return ()
 
@@ -178,15 +167,21 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
         _ -> return ()
 
     -- Support reusing the memory of reshape operations by recording the origin
-    -- array that is being reshaped.  Unexpected behaviour if the source is also
-    -- a reshape or similar.
-    BasicOp (Reshape _ _ orig) ->
+    -- array that is being reshaped.
+    BasicOp (Reshape _ shapechange_var orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
-        -- let actuals = S.fromList [var, orig]
-        recordActuals var S.empty -- actuals -- FIXME
+        mem_orig <- M.lookup orig <$> ask
+        case (shapechange_var, mem_orig) of
+          ([_], Just (MemorySrc _ _ (Shape [_]))) ->
+            recordActuals var $ S.fromList [var, orig]
+            -- Works, but only in limited cases where the reshape is not even
+            -- that useful to begin with.
+          _ ->
+            recordActuals var S.empty
+            -- FIXME: The problem with these more complex cases is that a slice
+            -- is relative to the shape of the reshaped array, and not the
+            -- original array.  Disabled for now.
         recordActuals orig $ S.fromList [orig, var]
-        -- FIXME: The problem is that a slice is relative to the shape of the
-        -- reshaped array, and not the original array.  Disabled for now.
 
     -- For the other aliasing operations, disable their use for now.  If the
     -- source has a change of memory block, make sure to change this as well.
@@ -200,12 +195,25 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
         recordActuals var S.empty
         recordActuals orig $ S.fromList [orig, var]
 
+    BasicOp (Rotate _ _ orig) ->
+      forM_ (map patElemName patvalelems) $ \var -> do
+        recordActuals var S.empty
+        recordActuals orig $ S.fromList [orig, var]
+
     BasicOp (Opaque (Var orig)) ->
       forM_ (map patElemName patvalelems) $ \var -> do
         recordActuals var S.empty
         recordActuals orig $ S.fromList [orig, var]
 
-    _ -> return ()
+    _ -> forM_ patvalelems $ \(PatElem var _ membound) -> do
+      let body_vars = S.toList $ findAllExpVars e
+      case membound of
+        ExpMem.ArrayMem _ _ _ mem _ -> do
+          body_vars' <- filterM (lookupGivesMem mem) body_vars
+          recordActuals var $ S.fromList (var : body_vars')
+        _ -> return ()
+
+  lookInKernelExp stm
 
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
@@ -213,4 +221,58 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
         walker_kernel = identityKernelWalker
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
+
+lookupGivesMem :: VName -> VName -> FindM lore Bool
+lookupGivesMem mem v = do
+  m <- M.lookup v <$> ask
+  return (Just mem == (memSrcName <$> m))
+
+class LookInKernelExp lore where
+  lookInKernelExp :: Stm lore -> FindM lore ()
+
+instance LookInKernelExp ExplicitMemory where
+  lookInKernelExp (Let (Pattern _ patvalelems) _ e) = case e of
+    Op (ExpMem.Inner (Kernel _ _ _ _ (KernelBody _ _ ress))) ->
+      zipWithM_ (\(PatElem var _ _) res -> case res of
+                    WriteReturn _ arr _ _ ->
+                      recordActuals arr $ S.singleton var
+                    _ -> return ()
+                ) patvalelems ress
+    _ -> return ()
+
+instance LookInKernelExp InKernel where
+  lookInKernelExp (Let _ _ e) = case e of
+    Op (ExpMem.Inner ke) -> case ke of
+      ExpMem.GroupReduce _ _ input -> do
+        let arrs = map snd input
+        extendActualVarsInKernel e arrs
+      ExpMem.GroupScan _ _ input -> do
+        let arrs = map snd input
+        extendActualVarsInKernel e arrs
+      ExpMem.GroupStream _ _ _ _ arrs ->
+        extendActualVarsInKernel e arrs
+      _ -> return ()
+    _ -> return ()
+
+extendActualVarsInKernel :: Exp InKernel -> [VName] -> FindM InKernel ()
+extendActualVarsInKernel e arrs = forM_ arrs $ \var -> do
+  mem0 <- M.lookup var <$> ask
+  case mem0 of
+    Just mem -> do
+      let body_vars = S.toList $ findAllExpVars e
+      body_vars' <- filterM (lookupGivesMem $ memSrcName mem) body_vars
+      let actuals = S.fromList (var : body_vars')
+
+      body_vars_mems <- mapM (\v -> M.lookup v <$> ask) body_vars
+      let debug = do
+            putStrLn $ replicate 70 '~'
+            putStrLn "extendActualVarsInKernel:"
+            putStrLn $ pretty var
+            putStrLn $ prettySet (S.fromList body_vars)
+            print body_vars_mems
+            putStrLn $ prettySet (S.fromList body_vars')
+            putStrLn $ replicate 70 '~'
+      withDebug debug $ recordActuals var actuals
+    Nothing -> return ()

@@ -1,7 +1,5 @@
 -- Memory block merging with a concat of multiple arrays into a multidimensional
 -- array.  Requires allocation hoisting of the memory block for 't3'.
---
--- FIXME: This depends on better reshape coalescing support.
 -- ==
 -- input { [5, 15]
 --         0
@@ -9,7 +7,6 @@
 -- output { [[6, 16, 10, 30, 1, 5],
 --           [0,  0,  0,  0, 0, 0]]
 --        }
-
 -- structure cpu { Alloc 1 }
 
 let main (ns: [#n]i32, i: i32): [][]i32 =

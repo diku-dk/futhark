@@ -62,7 +62,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyReshapeReplicate
                , letRule improveReshape
                , removeScratchValue
-               , hackilySimplifyBranch
+               , simplifyFallbackBranch
                , removeIdentityInPlace
                , simplifyBranchContext
                , simplifyBranchResultComparison
@@ -631,6 +631,9 @@ simplifyConvOp lookupVar _ (ConvOp (SIToFP t2 t1) (Var v))
 simplifyConvOp lookupVar _ (ConvOp (UIToFP t2 t1) (Var v))
   | Just (BasicOp (ConvOp (ZExt t3 _) se)) <- lookupVar v, t2 >= t3 =
       Just $ ConvOp (UIToFP t3 t1) se
+simplifyConvOp lookupVar _ (ConvOp (FPConv t2 t1) (Var v))
+  | Just (BasicOp (ConvOp (FPConv t3 _) se)) <- lookupVar v, t2 >= t3 =
+      Just $ ConvOp (FPConv t3 t1) se
 simplifyConvOp _ _ _ =
   Nothing
 
@@ -789,7 +792,7 @@ simplifyIndexing vtable seType ocs idd inds consuming =
             thisbody <- mkBodyM thisbnds [thisres]
             (altres, altbnds) <- collectStms $ mkBranch xs_and_starts'
             altbody <- mkBodyM altbnds [altres]
-            letSubExp "index_concat_branch" $ If cmp thisbody altbody $ staticShapes [res_t]
+            letSubExp "index_concat_branch" $ If cmp thisbody altbody $ ifCommon [res_t]
       SubExpResult <$> mkBranch xs_and_starts
 
     Just (ArrayLit ses _)
@@ -901,8 +904,9 @@ simplifyConcat _ _ =
   cannotSimplify
 
 evaluateBranch :: MonadBinder m => TopDownRule m
-evaluateBranch _ (Let pat _ (If e1 tb fb t))
-  | Just branch <- checkBranch = do
+evaluateBranch _ (Let pat _ (If e1 tb fb (IfAttr t ifsort)))
+  | Just branch <- checkBranch,
+    ifsort /= IfFallback || isCt1 e1 = do
   let ses = bodyResult branch
   mapM_ addStm $ bodyStms branch
   ctx <- subExpShapeContext t ses
@@ -925,10 +929,10 @@ simplifyBoolBranch _
    (If cond
     (Body _ [] [Constant (BoolValue True)])
     (Body _ [] [se])
-    [Prim Bool])) =
+    (IfAttr [Prim Bool] _))) =
   letBind_ pat $ BasicOp $ BinOp LogOr cond se
 -- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
-simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
+simplifyBoolBranch _ (Let pat _ (If cond tb fb (IfAttr ts _)))
   | Body _ tstms [tres] <- tb,
     Body _ fstms [fres] <- fb,
     patternSize pat == length ts,
@@ -942,33 +946,19 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
   letBind_ pat e
 simplifyBoolBranch _ _ = cannotSimplify
 
--- XXX: this is a nasty ad-hoc rule for handling a pattern that occurs
--- due to limitations in shape analysis.  A better way would be proper
--- control flow analysis.
---
--- XXX: another hack is due to missing CSE.
-hackilySimplifyBranch :: MonadBinder m => TopDownRule m
-hackilySimplifyBranch vtable
-  (Let pat _
-   (If (Var cond_a)
-    (Body _ [] [se1_a])
-    (Body _ [] [Var v])
-    _))
-  | Just (If (Var cond_b)
-           (Body _ [] [se1_b])
-           (Body _ [] [_])
-           _) <- ST.lookupExp v vtable,
-    let cond_a_e = ST.lookupExp cond_a vtable,
-    let cond_b_e = ST.lookupExp cond_b vtable,
-    se1_a == se1_b,
-    cond_a == cond_b ||
-    (isJust cond_a_e && cond_a_e == cond_b_e) =
-      letBind_ pat $ BasicOp $ SubExp $ Var v
-hackilySimplifyBranch _ _ =
+simplifyFallbackBranch :: MonadBinder m => TopDownRule m
+simplifyFallbackBranch _ (Let pat _ (If _ tbranch _ (IfAttr _ IfFallback)))
+  | null $ patternContextNames pat,
+    all (safeExp . stmExp) $ bodyStms tbranch = do
+      let ses = bodyResult tbranch
+      mapM_ addStm $ bodyStms tbranch
+      sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
+                | (p,se) <- zip (patternElements pat) ses]
+simplifyFallbackBranch _ _ =
   cannotSimplify
 
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
-hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
+hoistBranchInvariant _ (Let pat _ (If e1 tb fb (IfAttr ret _)))
   | patternSize pat == length ret = do
   let tses = bodyResult tb
       fses = bodyResult fb
@@ -1005,7 +995,7 @@ simplifyBranchContext _ (Let pat _ (If cond tbranch fbranch _))
         free_ctx' <- forM free_ctx $ \(pe, t_se, f_se, p_t) -> do
           tbody <- mkBodyM [] [t_se]
           fbody <- mkBodyM [] [f_se]
-          branch_ctx <- letSubExp "branch_ctx" $ If cond tbody fbody [Prim p_t]
+          branch_ctx <- letSubExp "branch_ctx" $ If cond tbody fbody $ ifCommon [Prim p_t]
           return (pe, branch_ctx)
         let subst =
               M.fromList [ (patElemName pe, v) | (pe, Var v) <- free_ctx' ]
@@ -1018,7 +1008,7 @@ simplifyBranchContext _ (Let pat _ (If cond tbranch fbranch _))
           letBind_ (Pattern [] [name]) $ BasicOp $ SubExp se
         tbranch' <- reshapeBodyResults tbranch ret'
         fbranch' <- reshapeBodyResults fbranch ret'
-        letBind_ pat' $ If cond tbranch' fbranch' ret'
+        letBind_ pat' $ If cond tbranch' fbranch' $ IfAttr ret' IfNormal
   where ctxPatElemIsKnown pe (Just (se_t,se_f))
           | Prim p_t <- patElemType pe = Left (pe, se_t, se_f, p_t)
         ctxPatElemIsKnown pe _ =
@@ -1159,7 +1149,7 @@ removeScratchValue _ _ =
 -- if *none* of the return values are used, but this rule is more
 -- precise.
 removeDeadBranchResult :: MonadBinder m => BottomUpRule m
-removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
+removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb (IfAttr rettype _)))
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
     -- Figure out which of the names in 'pat' are used...

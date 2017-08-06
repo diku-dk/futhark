@@ -8,6 +8,7 @@ import qualified Data.Set as S
 import qualified Data.List as L
 import Control.Monad
 import Data.Maybe (isJust, fromMaybe, catMaybes)
+import Data.Function (on)
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
 import Futhark.Representation.AST
@@ -16,9 +17,11 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Aliases
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Util (unixEnvironment)
 import Futhark.Util.Pretty (Pretty)
 
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Optimise.MemoryBlockMerging.Types
 
 
@@ -120,11 +123,30 @@ fromVar :: SubExp -> Maybe VName
 fromVar (Var v) = Just v
 fromVar _ = Nothing
 
+-- Replace variables with subtrees of their constituents wherever possible.  It
+-- naively expands a PrimExp as much as the input map allows, and can enable
+-- more expressions to have it in scope, since it will likely consist of fewer
+-- variables.
+expandPrimExp :: M.Map VName (ExpMem.PrimExp VName) -> ExpMem.PrimExp VName
+              -> ExpMem.PrimExp VName
+expandPrimExp var_to_pe = fixpointIterate (substituteInPrimExp var_to_pe)
+
+expandIxFun :: M.Map VName (ExpMem.PrimExp VName) -> ExpMem.IxFun -> ExpMem.IxFun
+expandIxFun var_to_pe = fixpointIterate (IxFun.substituteInIxFun var_to_pe)
+
 (<&&>) :: Monad m => m Bool -> m Bool -> m Bool
 m <&&> n = (&&) <$> m <*> n
 
+(<||>) :: Monad m => m Bool -> m Bool -> m Bool
+m <||> n = (||) <$> m <*> n
+
 anyM :: Monad m => (a -> m Bool) -> [a] -> m Bool
 anyM f xs = or <$> mapM f xs
+
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM b m = do
+  b' <- b
+  when b' m
 
 findM :: Monad m => (a -> m Bool) -> [a] -> m (Maybe a)
 findM f xs = do
@@ -137,6 +159,11 @@ mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
 mapMaybeM f xs = do
   xs' <- mapM f xs
   return $ catMaybes xs'
+
+sortByKeyM :: (Ord t, Monad m) => (a -> m t) -> [a] -> m [a]
+sortByKeyM f xs = do
+  rs <- mapM f xs
+  return $ map fst $ L.sortBy (compare `on` snd) $ zip xs rs
 
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where
@@ -152,7 +179,28 @@ instance FullMap ExplicitMemory where
       _ -> mapExpM mapper e
 
 instance FullMap InKernel where
-  fullMapExpM mapper _ = mapExpM mapper
+  fullMapExpM mapper mapper_kernel e = case e of
+    Op (ExpMem.Inner ke) -> Op . ExpMem.Inner <$> case ke of
+      ExpMem.Combine a b c body ->
+        ExpMem.Combine a b c <$> mapOnKernelBody mapper_kernel body
+      ExpMem.GroupReduce a lambda b ->
+        ExpMem.GroupReduce a
+        <$> mapOnKernelLambda mapper_kernel lambda
+        <*> pure b
+      ExpMem.GroupScan a lambda b ->
+        ExpMem.GroupScan a
+        <$> mapOnKernelLambda mapper_kernel lambda
+        <*> pure b
+      ExpMem.GroupStream a b (ExpMem.GroupStreamLambda a1 b1 params0 params1 gsbody) c d ->
+        ExpMem.GroupStream a b
+        <$> (ExpMem.GroupStreamLambda a1 b1
+             <$> mapM (mapOnKernelLParam mapper_kernel) params0
+             <*> mapM (mapOnKernelLParam mapper_kernel) params1
+             <*> mapOnKernelBody mapper_kernel gsbody
+            )
+        <*> pure c <*> pure d
+      _ -> return ke
+    _ -> mapExpM mapper e
 
 -- Walk on both ExplicitMemory and InKernel.
 class FullWalk lore where
@@ -168,7 +216,18 @@ instance FullWalk ExplicitMemory where
       _ -> return ()
 
 instance FullWalk InKernel where
-  fullWalkExpM walker _ = walkExpM walker
+  fullWalkExpM walker walker_kernel e = case e of
+    Op (ExpMem.Inner ke) -> case ke of
+      ExpMem.Combine _ _ _ body ->
+        walkOnKernelBody walker_kernel body
+      ExpMem.GroupReduce _ lambda _ ->
+        walkOnKernelLambda walker_kernel lambda
+      ExpMem.GroupScan _ lambda _ ->
+        walkOnKernelLambda walker_kernel lambda
+      ExpMem.GroupStream _ _ gslambda _ _ ->
+        walkOnGroupStreamLambda walker_kernel gslambda
+      _ -> return ()
+    _ -> walkExpM walker e
 
 -- FIXME: Integrate this into the above type class.
 class FullWalkAliases lore where
@@ -185,4 +244,23 @@ instance FullWalkAliases ExplicitMemory where
       _ -> return ()
 
 instance FullWalkAliases InKernel where
-  fullWalkAliasesExpM walker _ = walkExpM walker
+  fullWalkAliasesExpM walker walker_kernel e = case e of
+    Op (ExpMem.Inner ke) -> case ke of
+      ExpMem.Combine _ _ _ body ->
+        walkOnKernelBody walker_kernel body
+      ExpMem.GroupReduce _ lambda _ ->
+        walkOnKernelLambda walker_kernel lambda
+      ExpMem.GroupScan _ lambda _ ->
+        walkOnKernelLambda walker_kernel lambda
+      ExpMem.GroupStream _ _ gslambda _ _ ->
+        walkOnGroupStreamLambda walker_kernel gslambda
+      _ -> return ()
+    _ -> walkExpM walker e
+
+walkOnGroupStreamLambda :: Monad m => KernelWalker lore m
+                        -> ExpMem.GroupStreamLambda lore -> m ()
+walkOnGroupStreamLambda walker_kernel (ExpMem.GroupStreamLambda _ _
+                                       params0 params1 gsbody) = do
+  mapM_ (walkOnKernelLParam walker_kernel) params0
+  mapM_ (walkOnKernelLParam walker_kernel) params1
+  walkOnKernelBody walker_kernel gsbody

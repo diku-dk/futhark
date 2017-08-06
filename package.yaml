@@ -45,6 +45,8 @@ dependencies:
   - parallel >= 3.2.1.0
   - bifunctors
   - blaze-html
+  - template-haskell
+  - th-lift-instances
   - json
 
 library:

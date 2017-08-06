@@ -234,9 +234,12 @@ instance Pretty (BasicOp lore) where
     parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 
 instance PrettyLore lore => Pretty (Exp lore) where
-  ppr (If c t f _) = text "if" <+> ppr c </>
-                     text "then" <+> align (ppr t) </>
-                     text "else" <+> align (ppr f)
+  ppr (If c t f info) = text "if" <+> info' <+> ppr c </>
+                        text "then" <+> align (ppr t) </>
+                        text "else" <+> align (ppr f)
+    where info' = case ifSort info of
+            IfNormal -> mempty
+            IfFallback -> text "<fallback>"
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args _) = text (nameToString fname) <>
                              apply (map (align . ppr . fst) args)

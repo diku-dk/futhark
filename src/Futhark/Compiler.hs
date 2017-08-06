@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveLift #-}
 module Futhark.Compiler
        (
          runPipelineOnProgram
@@ -10,6 +11,9 @@ module Futhark.Compiler
        , newFutharkConfig
        , dumpError
        , reportingIOErrors
+
+       , Basis(..)
+       , emptyBasis
        )
 where
 
@@ -17,6 +21,7 @@ import Data.Monoid
 import Data.Loc
 import Control.Exception
 import Control.Monad
+import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
@@ -29,6 +34,7 @@ import System.IO
 import System.IO.Error
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Language.Haskell.TH.Syntax (Lift)
 
 import Prelude
 
@@ -43,8 +49,9 @@ import qualified Futhark.TypeCheck as I
 
 import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
-import Futhark.Util.Log
 import Language.Futhark.Futlib
+import Language.Futhark.TH ()
+import Futhark.Util.Log
 
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: Maybe (Maybe FilePath)
@@ -95,11 +102,12 @@ reportingIOErrors = flip catches [Handler onExit, Handler onError]
               exitWith $ ExitFailure 1
 
 runCompilerOnProgram :: FutharkConfig
+                     -> Basis
                      -> Pipeline I.SOACS lore
                      -> Action lore
                      -> FilePath
                      -> IO ()
-runCompilerOnProgram config pipeline action file = do
+runCompilerOnProgram config b pipeline action file = do
   res <- runFutharkM compile $ isJust $ futharkVerbose config
   case res of
     Left err -> liftIO $ do
@@ -108,19 +116,20 @@ runCompilerOnProgram config pipeline action file = do
     Right () ->
       return ()
   where compile = do
-          prog <- runPipelineOnProgram config pipeline file
+          prog <- runPipelineOnProgram config b pipeline file
           when (isJust $ futharkVerbose config) $
             liftIO $ hPutStrLn stderr $ "Running action " ++ actionName action
           actionProcedure action prog
 
 runPipelineOnProgram :: FutharkConfig
+                     -> Basis
                      -> Pipeline I.SOACS tolore
                      -> FilePath
                      -> FutharkM (Prog tolore)
-runPipelineOnProgram config pipeline file = do
+runPipelineOnProgram config b pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (tagged_ext_prog, ws, _, namesrc) <- readProgram [file]
+  (tagged_ext_prog, ws, _, namesrc) <- readProgram b [file]
 
   when (futharkWarn config) $
     liftIO $ hPutStr stderr $ show ws
@@ -142,13 +151,26 @@ runPipelineOnProgram config pipeline file = do
                          }
 
 -- | A little monad for reading and type-checking a Futhark program.
-type CompilerM m = StateT ReaderState m
+type CompilerM m = ReaderT [FilePath] (StateT ReaderState m)
 
 data ReaderState = ReaderState { alreadyImported :: E.Imports
-                               , resultProgs :: [E.Prog]
                                , nameSource :: VNameSource
                                , warnings :: E.Warnings
                                }
+
+-- | Pre-typechecked imports, including a starting point for the name source.
+data Basis = Basis { basisImports :: E.Imports
+                   , basisNameSource :: VNameSource
+                   , basisRoots :: [String]
+                     -- ^ Files that should be implicitly opened.
+                   }
+           deriving (Lift)
+
+emptyBasis :: Basis
+emptyBasis = Basis { basisImports = mempty
+                   , basisNameSource = newNameSourceForCompiler
+                   , basisRoots = mempty
+                   }
 
 newtype SearchPath = SearchPath FilePath -- Make this a list, eventually.
 
@@ -212,24 +234,26 @@ handleFile search_path steps include file_contents file_name = do
     Left err -> externalErrorS $ show err
     Right prog -> return prog
 
-  mapM_ (readImport search_path (include:steps) . uncurry (mkInclude include)) $
+  mapM_ (readImport search_path steps' . uncurry (mkInclude include)) $
     E.progImports prog
 
   -- It is important to not read these before the above calls to
   -- readImport.
   imports <- gets alreadyImported
   src <- gets nameSource
+  prelude <- ask
 
-  case E.checkProg imports src (includePath include) prog of
+  case E.checkProg imports src (includePath include) $
+       prependPrelude prelude prog of
     Left err ->
       externalError $ T.pack $ show err
-    Right ((progmod, prog'), ws, src') ->
+    Right (m, ws, src') ->
       modify $ \s ->
-        s { alreadyImported = (includeToString include,progmod) : imports
+        s { alreadyImported = (includeToString include,m) : imports
           , nameSource      = src'
           , warnings        = warnings s <> ws
-          , resultProgs     = prog' : resultProgs s
           }
+  where steps' = include:steps
 
 readImportFile :: (MonadError CompilerError m, MonadIO m) =>
                   SearchPath -> FutharkInclude -> m (T.Text, FilePath)
@@ -243,30 +267,31 @@ readImportFile (SearchPath dir) include = do
     (Left Nothing, Just t)  -> return (t, "[builtin]" </> filepath)
     (Left Nothing, Nothing) -> externalErrorS not_found
     (Left (Just e), _)      -> externalErrorS e
-  where filepath = includeToFilePath dir include
-        abs_filepath = includeToFilePath "/" include
+   where filepath = includeToFilePath dir include
+         abs_filepath = includeToFilePath "/" include
+         couldNotRead e
+           | isDoesNotExistError e =
+               return $ Left Nothing
+           | otherwise             =
+               return $ Left $ Just $
+               "Could not import " ++ includeToString include ++ ": " ++ show e
 
-        couldNotRead e
-          | isDoesNotExistError e =
-              return $ Left Nothing
-          | otherwise             =
-              return $ Left $ Just $
-              "Could not import " ++ includeToString include ++ ": " ++ show e
+         not_found =
+           "Could not find import '" ++ includeToString include ++ "' at " ++
+           locStr (srclocOf include) ++ " in path '" ++ dir ++ "'."
 
-        not_found =
-          "Could not find import '" ++ includeToString include ++ "' at " ++
-          locStr (srclocOf include) ++ " in path '" ++ dir ++ "'."
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               [FilePath] -> m (E.Prog,
-                                E.Warnings,
-                                E.Imports,
-                                VNameSource)
-readProgram fps = do
-  let s = ReaderState mempty mempty newNameSourceForCompiler mempty
-  s' <- execStateT (mapM onFile fps) s
-  return (E.Prog $ concatMap E.progDecs $ reverse $ resultProgs s',
+               Basis -> [FilePath]
+            -> m (E.Prog,
+                  E.Warnings,
+                  E.Imports,
+                  VNameSource)
+readProgram (Basis imports src roots) fps = do
+  let s = ReaderState imports src mempty
+  s' <- execStateT (runReaderT (mapM onFile fps) roots) s
+  return (E.Prog $ concatMap (E.progDecs . E.fileProg . snd) $ reverse $ alreadyImported s',
           warnings s',
           reverse $ alreadyImported s',
           nameSource s')
@@ -276,6 +301,12 @@ readProgram fps = do
 
           handleFile (SearchPath ".") [] (mkInitialInclude name) fs fp
             where (name, _) = splitExtension fp
+
+prependPrelude :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
+prependPrelude prelude (E.Prog ds) =
+  E.Prog $ map mkImport prelude ++ ds
+  where mkImport fp =
+          E.LocalDec (E.OpenDec (E.ModImport fp noLoc) [] E.NoInfo noLoc) noLoc
 
 newNameSourceForCompiler :: VNameSource
 newNameSourceForCompiler = newNameSource $ succ $ maximum $ map baseTag $

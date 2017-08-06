@@ -47,6 +47,8 @@ module Futhark.Representation.AST.Syntax
   , ExpT(..)
   , Exp
   , LoopForm (..)
+  , IfAttr (..)
+  , IfSort (..)
   , LambdaT(..)
   , Lambda
   , ExtLambdaT (..)
@@ -257,7 +259,7 @@ data ExpT lore
 
   | Apply  Name [(SubExp, Diet)] (RetType lore)
 
-  | If     SubExp (BodyT lore) (BodyT lore) [ExtType]
+  | If     SubExp (BodyT lore) (BodyT lore) IfAttr
 
   | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
     -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
@@ -276,6 +278,23 @@ data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
 deriving instance Annotations lore => Eq (LoopForm lore)
 deriving instance Annotations lore => Show (LoopForm lore)
 deriving instance Annotations lore => Ord (LoopForm lore)
+
+
+-- | Data associated with a branch.
+data IfAttr = IfAttr { ifExtType :: [ExtType]
+                     , ifSort :: IfSort
+                     }
+              deriving (Eq, Show, Ord)
+
+data IfSort = IfNormal -- ^ An ordinary branch.
+            | IfFallback -- ^ A branch where the "true" case is what
+                         -- we are actually interested in, and the
+                         -- "false" case is only present as a fallback
+                         -- for when the true case cannot be safely
+                         -- evaluated.  the compiler is permitted to
+                         -- optimise away the branch if the true case
+                         -- contains only safe statements.
+            deriving (Eq, Show, Ord)
 
 -- | A type alias for namespace control.
 type Exp = ExpT

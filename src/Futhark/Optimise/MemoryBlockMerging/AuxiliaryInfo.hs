@@ -30,7 +30,7 @@ getAuxiliaryInfo fundef =
       var_aliases = findVarAliases fundef
       first_uses = findFirstUses var_to_mem mem_aliases fundef
       last_uses = findLastUses var_to_mem mem_aliases first_uses fundef
-      interferences = findInterferences mem_aliases first_uses last_uses fundef
+      interferences = findInterferences var_to_mem mem_aliases first_uses last_uses fundef
       actual_variables = findActualVariables var_to_mem fundef
       existentials = findExistentials fundef
   in AuxiliaryInfo
@@ -46,7 +46,11 @@ getAuxiliaryInfo fundef =
      }
 
 debugAuxiliaryInfo :: AuxiliaryInfo -> String -> IO ()
-debugAuxiliaryInfo aux desc = aux `seq` do
+debugAuxiliaryInfo aux desc =
+  aux `seq` auxVarMemMappings aux `seq` auxMemAliases aux `seq`
+  auxVarAliases aux `seq` auxFirstUses aux `seq` auxLastUses aux `seq`
+  auxInterferences aux `seq` auxActualVariables aux `seq`
+  auxExistentials aux `seq` do
   putStrLn $ replicate 70 '='
   putStrLn (desc ++ ": Helper info in " ++ pretty (auxName aux) ++ ":")
   putStrLn $ replicate 70 '-'

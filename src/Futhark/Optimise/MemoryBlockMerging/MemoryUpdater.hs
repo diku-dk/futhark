@@ -102,10 +102,15 @@ transformStm (Let (Pattern patctxelems patvalelems) () e) = do
     _ -> return e'
   return $ Let (Pattern patctxelems patvalelems') () e''
   where mapper = identityMapper
-          { mapOnBody = const transformBody }
+          { mapOnBody = const transformBody
+          , mapOnFParam = transformFParam
+          , mapOnLParam = transformLParam
+          }
         mapper_kernel = identityKernelMapper
           { mapOnKernelBody = coerce . transformBody
           , mapOnKernelKernelBody = coerce . transformKernelBody
+          , mapOnKernelLambda = coerce . transformLambda
+          , mapOnKernelLParam = transformLParam
           }
 
 -- Update the actual memory block referred to by a context memory block
@@ -131,6 +136,25 @@ transformPatValElem :: LoreConstraints lore =>
 transformPatValElem (PatElem x bindage membound) = do
   membound' <- newMemBound membound x
   return $ PatElem x bindage membound'
+
+transformFParam :: LoreConstraints lore =>
+                   FParam lore -> FindM lore (FParam lore)
+transformFParam (Param x membound) = do
+  membound' <- newMemBound membound x
+  return $ Param x membound'
+
+transformLParam :: LoreConstraints lore =>
+                   LParam lore -> FindM lore (LParam lore)
+transformLParam (Param x membound) = do
+  membound' <- newMemBound membound x
+  return $ Param x membound'
+
+transformLambda :: LoreConstraints lore =>
+                   Lambda lore -> FindM lore (Lambda lore)
+transformLambda (Lambda params body types) = do
+  params' <- mapM transformLParam params
+  body' <- transformBody body
+  return $ Lambda params' body' types
 
 newMemBound :: ExpMem.MemBound u -> VName -> FindM lore (ExpMem.MemBound u)
 newMemBound membound var = do
