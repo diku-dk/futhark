@@ -13,7 +13,7 @@
 # When this script has completed, you can run './merge-data.py' to gather all
 # the data into a single JSON file.
 
-set -e # Exit on first error.
+set -ex # Exit on first error, be verbose.
 
 result_dir="$1"
 if ! [ "$result_dir" ]; then
@@ -21,15 +21,22 @@ if ! [ "$result_dir" ]; then
     exit 1
 fi
 
-flags='-p -M' # Also put memory footprint in the resulting JSON file.
+flags=''
 
-timeout_secs="$2"
+compiler="$2"
+if ! [ "$compiler" ]; then
+    compiler='futhark-c'
+fi
+
+flags="$flags --compiler $compiler"
+
+timeout_secs="$3"
 if [ "$timeout_secs" ]; then
     # Effectively ignore too large datasets.
     flags="$flags --timeout $timeout_secs"
 fi
 
-number_runs="$3"
+number_runs="$4"
 if [ "$number_runs" ]; then
     # Change the default of 10 runs.
     flags="$flags -r $number_runs"
@@ -37,8 +44,11 @@ fi
 
 base="$(readlink -f "$result_dir")"
 
+cd "$(dirname "$0")/../../"
+stack install
+
 # Assumes your futhark-benchmarks directory is next to your futhark directory.
-cd "$(dirname "$0")/../../../futhark-benchmarks/"
+cd "../futhark-benchmarks/"
 
 mkdir "$base"
 base="$base/runs"

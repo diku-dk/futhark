@@ -9,7 +9,7 @@
 # When this script has completed, you can run './merge-data.py' to gather all
 # the data into a single JSON file.
 
-set -e # Exit on first error.
+set -ex # Exit on first error, be verbose.
 
 result_dir="$1"
 if ! [ "$result_dir" ]; then
@@ -17,19 +17,34 @@ if ! [ "$result_dir" ]; then
     exit 1
 fi
 
-timeout_secs="$2"
-if ! [ "$timeout_secs" ]; then
-    # No limit on runtimes.
-    flags=''
-else
+flags=''
+
+compiler="$2"
+if ! [ "$compiler" ]; then
+    compiler='futhark-c'
+fi
+
+flags="$flags --compiler $compiler"
+
+timeout_secs="$3"
+if [ "$timeout_secs" ]; then
     # Effectively ignore too large datasets.
-    flags="--timeout $timeout_secs"
+    flags="$flags --timeout $timeout_secs"
+fi
+
+number_runs="$4"
+if [ "$number_runs" ]; then
+    # Change the default of 10 runs.
+    flags="$flags -r $number_runs"
 fi
 
 base="$(readlink -f "$result_dir")"
 
+cd "$(dirname "$0")/../../"
+stack install
+
 # Assumes your futhark-benchmarks directory is next to your futhark directory.
-cd "$(dirname "$0")/../../../futhark-benchmarks/"
+cd "../futhark-benchmarks/"
 
 mkdir "$base"
 base="$base/runs"
@@ -37,6 +52,11 @@ mkdir "$base"
 
 # First get compilation information for every program, and put it in its own
 # JSON file.
+if [ "$compiler" = 'futhark-c' ]; then
+    target_flag='--cpu'
+else
+    target_flag='--gpu'
+fi
 get_compilation_info() {
     temp_storage="$(mktemp)"
     {
@@ -44,7 +64,7 @@ get_compilation_info() {
         echo '{'
         find -name '*.fut' | while read file; do
             echo "Getting compilation information for $file." > /dev/stderr
-            futhark --cpu $file 2> /dev/null > "$temp_storage" && \
+            futhark $target_flag $file 2> /dev/null > "$temp_storage" && \
                 {
                     echo ','
                     echo '"'"$file"'":'
