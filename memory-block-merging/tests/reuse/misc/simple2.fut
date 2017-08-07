@@ -8,6 +8,7 @@
 -- output { [31, 31]
 --        }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 let main (xs0: [#n]i32, ys0: [#n]i32, i: i32): [n]i32 =
   let xs = map (* 2) xs0

@@ -6,6 +6,7 @@
 -- output { [[2], [2]]
 --        }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 let main (xss: [#m][#n]i32): [n][m]i32 =
   -- Create a new array.

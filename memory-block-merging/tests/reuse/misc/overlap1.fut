@@ -7,6 +7,7 @@
 -- output { 41
 --        }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 let main (xs: [#n]i32): i32 =
   -- START a, START b
