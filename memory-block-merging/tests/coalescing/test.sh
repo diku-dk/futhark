@@ -5,18 +5,23 @@
 #
 # With -w, exclude the wip directory.
 
-cd "$(dirname "$0")"
+base="$(dirname "$0")"
 
-if [ "$1" = '-w' ]; then
+compiler="$1"
+if ! [ "$compiler" ]; then
+    compiler='futhark-c'
+fi
+
+if [ "$2" = '-w' ]; then
 dirs_and_files() {
-    ls *.fut 2>/dev/null
-    find -type d | grep -Ev -e '^\.$' -e '^\./wip$' -e '^\./wip/'
+    ls $base/*.fut 2>/dev/null
+    find $base -type d | grep -Ev -e '^\.$' -e '^\./wip$' -e '^\./wip/'
 }
 else
     dirs_and_files() {
-        echo .
+        echo $base
     }
 fi
 
 export MEMORY_BLOCK_MERGING_COALESCING=1
-futhark-test --compiler=futhark-c $(dirs_and_files)
+futhark-test --compiler=$compiler $(dirs_and_files)

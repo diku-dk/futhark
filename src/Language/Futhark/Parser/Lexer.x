@@ -349,7 +349,6 @@ data Token = ID Name
            | STREAM_MAPPER
            | STREAM_RED
            | STREAM_REDPER
-           | STREAM_SEQ
            | INCLUDE
            | IMPORT
            | ENTRY
