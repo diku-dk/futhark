@@ -63,7 +63,7 @@ data ProgramTest =
               , testAction ::
                    TestAction
               , testExpectedStructure ::
-                   Maybe StructureTest
+                   [StructureTest]
               }
   deriving (Show)
 
@@ -248,7 +248,7 @@ parseMetrics = braces $ fmap M.fromList $ many $
 
 testSpec :: Parser ProgramTest
 testSpec =
-  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> optional parseExpectedStructure
+  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> many parseExpectedStructure
 
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
