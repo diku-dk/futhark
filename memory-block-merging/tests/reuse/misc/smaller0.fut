@@ -11,6 +11,7 @@
 -- output { [4, 4]
 --        }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 let main (xs0: [#n]i32, i: i32): []i32 =
   let xs = map (+ 1) xs0

@@ -3,6 +3,7 @@
 -- input { [1, 2, 3] }
 -- output { [0, 2, 4] }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 let interfering_map (k: i32) (t: [#n]i32): [n]i32 =
   loop u = replicate n 0 for i < n - 1 do

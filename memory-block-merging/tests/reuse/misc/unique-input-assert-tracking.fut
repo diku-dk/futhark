@@ -7,6 +7,7 @@
 --       }
 -- output { [4, 5] }
 -- structure cpu { Alloc 0 }
+-- structure gpu { Alloc 0 }
 
 let main (x: *[#n]i32, y: [#n]i32): [n]i32 =
   let k = x[0]

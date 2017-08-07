@@ -4,6 +4,7 @@
 -- while an optimal analysis can reduce it to 2 allocations.
 -- ==
 -- structure cpu { Alloc 3 }
+-- structure gpu { Alloc 3 }
 
 -- Interference table:
 --   xs0 interferes with nothing

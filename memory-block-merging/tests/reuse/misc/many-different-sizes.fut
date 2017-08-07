@@ -8,6 +8,7 @@
 -- }
 -- output { 19 }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 let main (
   a: []i32, ai: i32,
