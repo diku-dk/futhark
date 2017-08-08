@@ -5,6 +5,7 @@
 -- output { [0, 12]
 --        }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 -- Kind of map, but do it with offset write indices.  The compiler should notice
 -- this.

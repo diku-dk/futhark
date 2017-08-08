@@ -58,6 +58,14 @@ lookInStm stm@(Let _ _ e) = do
   forM_ new_decls $ \x ->
     modify $ S.insert x
 
+  -- Special loop handling: Extract useful variables that are in use.
+  case e of
+    DoLoop _ _ loopform _ ->
+      case loopform of
+        ForLoop i _ _ _ -> modify $ S.insert i
+        WhileLoop c -> modify $ S.insert c
+    _ -> return ()
+
   -- RECURSIVE BODY WALK.
   walkExpM walker e
   where walker = identityWalker

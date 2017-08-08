@@ -22,5 +22,6 @@ else
     }
 fi
 
+export IN_PLACE_LOWERING=0
 export MEMORY_BLOCK_MERGING_REUSE=1
 futhark-test --compiler=$compiler $(dirs_and_files)
