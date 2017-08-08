@@ -6,7 +6,7 @@
 -- structure cpu { Alloc 0 }
 
 let mapper (xs: []i32) (ys: []i32) (zs: []i32) (i: i32): i32 =
-  xs[i] + ys[i] + zs[i]
+  unsafe (xs[i] + ys[i] + zs[i])
 
 -- Input arrays of not necessarily the same size.
 let main (xs: *[#n]i32, ys: []i32, zs: []i32): []i32 =
