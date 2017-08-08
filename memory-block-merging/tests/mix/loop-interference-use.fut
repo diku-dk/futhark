@@ -8,6 +8,7 @@
 -- output { [20, 21]
 --        }
 -- structure cpu { Alloc 3 }
+-- structure gpu { Alloc 3 }
 
 
 import "/futlib/array"

@@ -17,6 +17,7 @@
 --        }
 
 -- structure cpu { Alloc 0 }
+-- structure gpu { Alloc 0 }
 
 -- Should result in 7 successful coalescing operations:
 -- `y[0] = z`, `z = r1`, `z = r2`, `r1 = concat a1 b1`,

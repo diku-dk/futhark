@@ -10,6 +10,7 @@
 --          [[[5, 5], [5, 5]], [[5, 5], [5, 5]]]
 --        }
 -- structure cpu { Alloc 3 }
+-- structure gpu { Alloc 3 }
 
 let main ( wsss0: [#n][#n][#n]i32
          , ns: [#n]i32

@@ -8,6 +8,7 @@
 --           [0,  0,  0,  0, 0, 0]]
 --        }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 let main (ns: [#n]i32, i: i32): [][]i32 =
   let t0 = map (+ 1) ns -- Will use the memory of t3.
