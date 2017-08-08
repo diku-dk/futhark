@@ -11,7 +11,7 @@ module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.State
@@ -294,7 +294,7 @@ handleNewArray x xmem = do
         let ok_sizes_pe = map sePrimExp ok_sizes
         let new_size_pe = sePrimExp new_size
 
-        let eq_advanced = new_size_pe `L.elem` ok_sizes_pe
+        let eq_advanced = isJust new_size_pe && new_size_pe `L.elem` ok_sizes_pe
 
         let debug = do
               putStrLn $ replicate 70 '~'
