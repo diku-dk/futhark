@@ -479,7 +479,7 @@ canBeCoalesced dst src ixfun = do
 safetyCond1 :: LoreConstraints lore =>
                VName -> MemorySrc -> FindM lore Bool
 safetyCond1 dst mem_src = do
-  last_uses <- lookupEmptyable dst <$> asks ctxLastUses
+  last_uses <- lookupEmptyable (FromStm dst) <$> asks ctxLastUses
   let res = S.member (memSrcName mem_src) last_uses
 
   let debug = do

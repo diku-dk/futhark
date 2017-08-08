@@ -33,7 +33,12 @@ type MemAliases = M.Map VName Names
 type VarAliases = M.Map VName Names
 
 type FirstUses = M.Map VName Names
-type LastUses = M.Map VName Names
+
+-- A last use can occur in a statement OR in a body result.
+data StmOrRes = FromStm VName
+              | FromRes VName
+  deriving (Show, Eq, Ord)
+type LastUses = M.Map StmOrRes Names
 
 type Interferences = M.Map VName Names
 

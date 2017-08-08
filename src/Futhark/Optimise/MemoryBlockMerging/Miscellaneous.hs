@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | I didn't know where else to put this.  Perpetually in need of a cleanup.
 module Futhark.Optimise.MemoryBlockMerging.Miscellaneous where
 
@@ -105,13 +106,13 @@ onJust may f = case may of
   Just x -> f x
   Nothing -> return ()
 
-expandWithAliases :: MemAliases -> M.Map VName Names -> M.Map VName Names
+expandWithAliases :: forall v. Ord v => MemAliases -> M.Map v Names -> M.Map v Names
 expandWithAliases mem_aliases = fixpointIterate expand
-  where expand :: M.Map VName Names -> M.Map VName Names
+  where expand :: M.Map v Names -> M.Map v Names
         expand mems_map =
-          M.fromList (map (\(mem, mems) ->
-                             (mem, S.unions (mems : map (`lookupEmptyable` mem_aliases)
-                                             (S.toList mems))))
+          M.fromList (map (\(v, mems) ->
+                             (v, S.unions (mems : map (`lookupEmptyable` mem_aliases)
+                                           (S.toList mems))))
                       (M.assocs mems_map))
 
 fixpointIterate :: Eq a => (a -> a) -> a -> a

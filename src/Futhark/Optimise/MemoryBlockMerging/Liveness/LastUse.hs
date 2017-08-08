@@ -31,10 +31,10 @@ getLastUsesMap = M.unionsWith S.union
 
 -- Mapping from a memory block to its currently assumed last use statement
 -- variable.
-type OptimisticLastUses = M.Map VName VName
+type OptimisticLastUses = M.Map VName StmOrRes
 
 data Context = Context
-  { _ctxVarToMem :: VarMemMappings MemorySrc
+  { ctxVarToMem :: VarMemMappings MemorySrc
   , ctxMemAliases :: MemAliases
   , ctxFirstUses :: FirstUses
   , ctxCurFirstUsesBeforeLoop :: Names
@@ -75,11 +75,12 @@ withLocalCurFirstUses m = do
   modify $ \c -> c { curFirstUses = cur_first_uses }
   return res
 
-recordMapping :: VName -> VName -> FindM lore ()
-recordMapping stmt_var mem = tell [M.singleton stmt_var (S.singleton mem)]
+recordMapping :: StmOrRes -> VName -> FindM lore ()
+recordMapping var mem = tell [M.singleton var (S.singleton mem)]
 
-setOptimistic :: VName -> VName -> FindM lore ()
+setOptimistic :: VName -> StmOrRes -> FindM lore ()
 setOptimistic mem x_lu = modify $ \c ->
+  -- Will override any previous optimistic last use.
   c { curOptimisticLastUses = M.insert mem x_lu
                               $ curOptimisticLastUses c }
 
@@ -109,13 +110,15 @@ findLastUses var_to_mem mem_aliases first_uses fundef =
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
-lookInBody (Body _ bnds _res) =
+lookInBody (Body _ bnds res) = do
   mapM_ lookInStm bnds
+  mapM_ lookInRes res
 
 lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
-lookInKernelBody (KernelBody _ bnds _res) =
+lookInKernelBody (KernelBody _ bnds res) = do
   mapM_ lookInStm bnds
+  mapM_ (lookInRes . kernelResultSubExp) res
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
@@ -154,7 +157,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
     forM_ (S.toList e_mems) $ \mem -> do
       first_uses_before_loop <- asks ctxCurFirstUsesBeforeLoop
       unless (mem `S.member` first_uses_before_loop) $
-        setOptimistic mem x
+        setOptimistic mem (FromStm x)
       when (mem `S.member` first_uses_before_loop) $ do
         mem_aliases <- asks ctxMemAliases
         let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
@@ -164,7 +167,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           -- statement, which will later through aliasing cover all its aliased
           -- memory blocks, including both mem -- which should be included --
           -- and possibly some other memory block.
-          setOptimistic mem' x
+          setOptimistic mem' (FromStm x)
 
   withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
@@ -174,3 +177,12 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelKernelBody = coerce . lookInKernelBody
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
+
+lookInRes :: LoreConstraints lore =>
+             SubExp -> FindM lore ()
+lookInRes (Var v) = do
+  mem_v <- M.lookup v <$> asks ctxVarToMem
+  case mem_v of
+    Just mem -> setOptimistic (memSrcName mem) (FromRes v)
+    Nothing -> return ()
+lookInRes _ = return ()

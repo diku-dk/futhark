@@ -72,8 +72,11 @@ debugAuxiliaryInfo aux desc =
     putStrLn ("In " ++ pretty stmt_var ++ ": " ++ prettySet mems)
   putStrLn $ replicate 70 '-'
   putStrLn "Last uses of memory:"
-  forM_ (M.assocs $ auxLastUses aux) $ \(stmt_var, mems) ->
-    putStrLn ("In " ++ pretty stmt_var ++ ": " ++ prettySet mems)
+  forM_ (M.assocs $ auxLastUses aux) $ \(var, mems) -> do
+    let pret = case var of
+          FromStm stmt_var -> "stm@" ++ pretty stmt_var
+          FromRes res_var -> "res@" ++ pretty res_var
+    putStrLn ("In " ++ pret ++ ": " ++ prettySet mems)
   putStrLn $ replicate 70 '-'
   putStrLn "Interferences of memory blocks:"
   forM_ (M.assocs $ auxInterferences aux) $ \(mem, mems) ->

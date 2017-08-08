@@ -12,8 +12,6 @@ import Control.Monad.RWS
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
-import Futhark.Representation.Aliases
-import Futhark.Analysis.Alias (analyseStm)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
