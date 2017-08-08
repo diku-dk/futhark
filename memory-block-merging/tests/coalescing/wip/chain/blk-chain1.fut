@@ -26,6 +26,7 @@
 --        }
 
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 -- Without allocation hoisting, there is only one coalescing opportunity, i.e.
 -- `x[2] = b`.

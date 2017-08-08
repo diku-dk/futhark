@@ -2,7 +2,7 @@
 -- after the coalescing-enabling line (in 'zs').
 -- ==
 -- input { 3
---         4
+--         [0, 1, 2, 3]
 --       }
 -- output { [[0, 1, 2, 3],
 --           [4, 5, 6, 7],
@@ -11,9 +11,10 @@
 --          [2, 3, 4, 5]
 --        }
 -- structure cpu { Alloc 3 }
+-- structure gpu { Alloc 3 }
 
-let main (i: i32, n: i32): ([n][n]i32, [n]i32) =
-  let ys = map (+ 1) (iota n)
+let main (i: i32, ys0: [#n]i32): ([n][n]i32, [n]i32) =
+  let ys = map (+ 1) ys0
   let xs = reshape (n, n) (iota (n * n))
   let xs[i] = ys
   let zs = map (+ 1) ys

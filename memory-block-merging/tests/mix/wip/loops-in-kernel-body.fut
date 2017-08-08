@@ -9,6 +9,7 @@
 -- input {  }
 -- output {  }
 -- structure cpu { Alloc  }
+-- structure gpu { Alloc  }
 
 
 let reducer (x: [#n]i32) (y: [#n]i32): [n]i32 =

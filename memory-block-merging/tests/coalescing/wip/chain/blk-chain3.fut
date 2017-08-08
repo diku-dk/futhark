@@ -18,6 +18,7 @@
 --        }
 
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 -- Should result in 3 successful coalescing operations (all).
 let main(a: [#n]i32, y: *[#n][#n][#n]i32): [n][n][n]i32 =

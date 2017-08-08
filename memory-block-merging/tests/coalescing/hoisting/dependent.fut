@@ -1,6 +1,7 @@
 -- A small chain of coalescings.
 -- ==
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 import "/futlib/array"
 

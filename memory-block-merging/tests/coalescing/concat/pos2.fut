@@ -13,6 +13,7 @@
 --          ]
 --        }
 -- structure cpu { Alloc 0 }
+-- structure gpu { Alloc 0 }
 
 let main (y: *[#n][#q]i32, a: []i32, b: []i32): *[n][q]i32 =
   let a1 = map (+1) a -- Will use the memory of z, and thereby y[0].

@@ -9,6 +9,7 @@
 --           [0, 1, 2]]
 --        }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 import "/futlib/array"
 

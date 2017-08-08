@@ -4,6 +4,7 @@
 -- It is perhaps a pretty far-out case.
 -- ==
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 import "/futlib/array"
 

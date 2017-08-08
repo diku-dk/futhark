@@ -13,6 +13,7 @@
 --          ]
 --        }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 -- With the current code, there are only 2 coalescing opportunities, namely
 -- `u[i1+i2] = c` and `u[ind1] = b`.  This is because the use of `z` in the

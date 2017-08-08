@@ -5,6 +5,11 @@
 -- different parts of the program -- roughly speaking, the coalescing merging
 -- occurs in the first half, and the register allocation-inspired reuse merging
 -- occurs in the latter half.
+--
+-- In the CPU pipeline, we should get a reduction from 3 allocations to 1
+-- allocation.  In the GPU pipeline there are some auxiliary arrays, but we
+-- should get the same number of reductions, in this case from 7 to 5 (you need
+-- to check this manually).
 -- ==
 -- input { [8, 9]
 --         0
@@ -12,6 +17,7 @@
 -- output { [[19, 19], [19, 19]]
 --        }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 5 }
 
 import "/futlib/array"
 

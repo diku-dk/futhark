@@ -11,6 +11,7 @@
 --          ]
 --        }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 -- Number of coalescing is 1, but corresponds to 4 coalescing
 -- operations on the same memory block, i.e.,

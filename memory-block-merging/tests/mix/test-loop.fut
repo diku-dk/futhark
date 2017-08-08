@@ -3,6 +3,7 @@
 -- input { [0, 3, 5, 7, 9, 11] }
 -- output { [0, 384, 640, 896, 1152, 1408, 14, 18, 22] }
 -- structure cpu { Alloc 3 }
+-- structure gpu { Alloc 3 }
 
 -- This is the same test as the one in coalescing/loop/ (see that for coalescing
 -- comments), but here we run it with both coalescing and reuse.

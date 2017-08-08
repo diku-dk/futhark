@@ -3,6 +3,7 @@
 -- input { [0, 3, 5, 7, 9, 11] }
 -- output { [0, 384, 640, 896, 1152, 1408, 14, 18, 22] }
 -- structure cpu { Alloc 5 }
+-- structure gpu { Alloc 5 }
 
 -- We can remove two allocations (from 7 to 5) with coalescing.  More
 -- allocations can be removed by the register allocation reuse algorithm.

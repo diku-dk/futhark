@@ -3,6 +3,7 @@
 -- input { [1, 2] }
 -- output { [2, 3, 0, 1] }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 import "/futlib/array"
 
