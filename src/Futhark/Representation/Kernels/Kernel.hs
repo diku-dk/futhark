@@ -18,6 +18,7 @@ module Futhark.Representation.Kernels.Kernel
        , scopeOfKernelSpace
        , WhichThreads(..)
        , KernelResult(..)
+       , kernelResultSubExp
 
        , chunkedKernelNonconcatOutputs
 
