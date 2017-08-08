@@ -207,8 +207,14 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   eqs
 
   forM_ patvalelems $ \(PatElem var _ membound) -> do
-    first_uses <- lookupEmptyable var <$> asks ctxFirstUses
-    forM_ first_uses $ handleNewArray var membound
+    -- For every declaration with a first memory use, check (through
+    -- handleNewArray) if it can reuse some earlier memory block.
+    first_uses_var <- lookupEmptyable var <$> asks ctxFirstUses
+    case membound of
+      ExpMem.ArrayMem _ _ _ mem _ ->
+        when (mem `S.member` first_uses_var)
+        $ handleNewArray var mem
+      _ -> return ()
 
   let mMod = case e of
         DoLoop _ _ _ loopbody ->
@@ -233,8 +239,8 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           }
 
 handleNewArray :: LoreConstraints lore =>
-                  VName -> ExpMem.MemBound u -> VName -> FindM lore ()
-handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
+                  VName -> VName -> FindM lore ()
+handleNewArray x xmem = do
   interferences <- asks ctxInterferences
 
   -- If the statement is inside a loop body, and the loop result contains this
@@ -321,6 +327,8 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
             debug = do
               putStrLn $ replicate 70 '~'
               putStrLn "sizesCanBeMaxed:"
+              putStrLn $ pretty kmem
+              putStrLn $ pretty xmem
               print ok
               putStrLn $ replicate 70 '~'
         withDebug debug $ return ok
@@ -350,6 +358,7 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
       forM_ actual_vars $ \var -> do
         ixfun <- memSrcIxFun <$> lookupVarMem var
         recordMemMapping var $ MemoryLoc kmem ixfun
+
       whenM (sizesCanBeMaxed kmem) $ do
         ksize <- lookupSize kmem
         xsize <- lookupSize xmem
@@ -376,8 +385,6 @@ handleNewArray x (ExpMem.ArrayMem _ _ _ _ _xixfun) xmem = do
         putStrLn $ replicate 70 '~'
 
   withDebug debug $ return ()
-
-handleNewArray _ _ _ = return ()
 
 
 -- Replace certain allocation sizes in a program with new variables describing
