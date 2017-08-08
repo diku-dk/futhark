@@ -5,6 +5,7 @@
 -- output { [14, 12]
 --        }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 -- Similar to the function in neg0.fut, except this will be a kernel when
 -- possible, and not always a loop, so we can test the optimisation in the
