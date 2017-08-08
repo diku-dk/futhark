@@ -3,7 +3,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TupleSections #-}
--- | Traverse a body to find memory blocks that can be allocated together.
+-- | Find array creations that can be set to use existing memory blocks instead
+-- of new allocations.
 module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
   ( coreReuseFunDef
   ) where
@@ -106,10 +107,11 @@ lookupSpace var =
   (snd . fromJust ("lookup space from " ++ pretty var) . M.lookup var)
   <$> asks ctxSizes
 
+-- Record that the existing old_mem now also "is the same as" new_mem.
 insertUse :: LoreConstraints lore =>
              VName -> VName -> FindM lore ()
-insertUse new_mem old_mem =
-  modify $ \cur -> cur { curUses = insertOrUpdate new_mem old_mem $ curUses cur }
+insertUse old_mem new_mem =
+  modify $ \cur -> cur { curUses = insertOrUpdate old_mem new_mem $ curUses cur }
 
 recordMemMapping :: LoreConstraints lore =>
                     VName -> MemoryLoc -> FindM lore ()
@@ -122,6 +124,9 @@ recordMaxMapping mem y =
   modify $ \cur -> cur { curVarToMaxExpRes = insertOrUpdate mem y
                                              $ curVarToMaxExpRes cur }
 
+-- Run a monad with a local copy of the uses.  We don't want any new uses in
+-- nested bodies to be available for merging into when we are back in the main
+-- body.
 withLocalUses :: LoreConstraints lore =>
                  FindM lore a -> FindM lore a
 withLocalUses m = do
@@ -238,6 +243,8 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelLambda = coerce . withLocalUses . lookInBody . lambdaBody
           }
 
+-- Check if a new array declaration x with a first use of the memory xmem can be
+-- set to use a previously encountered memory block.
 handleNewArray :: LoreConstraints lore =>
                   VName -> VName -> FindM lore ()
 handleNewArray x xmem = do
@@ -247,9 +254,10 @@ handleNewArray x xmem = do
   -- array, abort!  That is a sign of trouble.
   --
   -- This can be described in more general terms with interference, but the
-  -- existing interference analysis is not good enough, since it has to be rerun
-  -- in the case of loop memory block mergings.  We *can* do that, but it might
-  -- get messy.
+  -- existing interference analysis is not good enough, since it would have to
+  -- be rerun in the middle of the analysis in the case of loop memory block
+  -- mergings.  We *can* do that, but it might get messy (or there might be a
+  -- different way).  This hack seems an okay compromise.
   cur_loop_body_res <- asks ctxCurLoopBodyRes
   let loop_disabled = Var x `L.elem` cur_loop_body_res
 
@@ -274,13 +282,20 @@ handleNewArray x xmem = do
         xspace <- lookupSpace xmem
         return (kspace == xspace)
 
+  -- Is the size of the new memory block (xmem) equal to any of the memory
+  -- blocks (used_mems) using an already used memory block?
   let sizesMatch :: LoreConstraints lore =>
                     Names -> FindM lore Bool
       sizesMatch used_mems = do
         ok_sizes <- mapM lookupSize $ S.toList used_mems
         new_size <- lookupSize xmem
+        -- Check for size equality by checking for variable name equality.
         let eq_simple = new_size `L.elem` ok_sizes
 
+        -- Check for size equality by constructing 'PrimExp's and comparing
+        -- those.  Use the custom VarWithAssertTracking type to compare inner
+        -- sizes: If an equality assert statement was found earlier, consider
+        -- its two operands to be the same.
         var_to_pe <- asks ctxVarPrimExps
         eq_asserts <- gets curEqAsserts
         let sePrimExp se = do
@@ -294,6 +309,9 @@ handleNewArray x xmem = do
         let ok_sizes_pe = map sePrimExp ok_sizes
         let new_size_pe = sePrimExp new_size
 
+        -- If new_size_pe actually denotes a PrimExp, check if it is among the
+        -- constructed 'PrimExp's of the sizes of the memory blocks that have
+        -- already been set to use the target memory block.
         let eq_advanced = isJust new_size_pe && new_size_pe `L.elem` ok_sizes_pe
 
         let debug = do
@@ -312,6 +330,8 @@ handleNewArray x xmem = do
 
         withDebug debug $ return (eq_simple || eq_advanced)
 
+  -- In case sizes do not match: Is it possible to change the size of the target
+  -- memory block to be a maximum of itself and the new memory block?
   let sizesCanBeMaxed :: LoreConstraints lore =>
                          VName -> FindM lore Bool
       sizesCanBeMaxed kmem = do
@@ -348,10 +368,13 @@ handleNewArray x xmem = do
 
   actual_vars <- lookupActualVars x
   existentials <- asks ctxExistentials
-  let base_error = loop_disabled
-                   || S.null actual_vars
-                   || any (`S.member` existentials) actual_vars
-  case (base_error, found_use) of
+  let base_disabled =
+        loop_disabled -- Described at its definition.
+        || S.null actual_vars -- If no variable will be changed, don't change
+                              -- any state.
+        || any (`S.member` existentials) actual_vars -- Don't mess with
+                                                     -- existentials!
+  case (base_disabled, found_use) of
     (False, (kmem, _) : _) -> do
       -- There is a previous memory block that we can use.  Record the mapping.
       insertUse kmem xmem
@@ -359,6 +382,8 @@ handleNewArray x xmem = do
         ixfun <- memSrcIxFun <$> lookupVarMem var
         recordMemMapping var $ MemoryLoc kmem ixfun
 
+      -- Record any size-maximum change in case of sizesCanBeMaxed returning
+      -- True.
       whenM (sizesCanBeMaxed kmem) $ do
         ksize <- lookupSize kmem
         xsize <- lookupSize xmem
@@ -386,6 +411,12 @@ handleNewArray x xmem = do
 
   withDebug debug $ return ()
 
+data VarWithAssertTracking = VarWithAssertTracking VName Names
+  deriving (Show)
+
+instance Eq VarWithAssertTracking where
+  VarWithAssertTracking v0 vs0 == VarWithAssertTracking v1 vs1 =
+    not $ S.null $ S.intersection (S.insert v0 vs0) (S.insert v1 vs1)
 
 -- Replace certain allocation sizes in a program with new variables describing
 -- the maximum of two or more allocation sizes.  This enables more reuse.
@@ -397,17 +428,22 @@ transformFromVarMaxExpMappings var_to_max fundef = do
                     (M.assocs var_to_max)
   return $ insertAndReplace var_to_new_var fundef
 
+-- A replacement is a new size variable and any new subexpressions that the new
+-- variable depends on.
 data Replacement = Replacement
-  { replName :: VName -- The main variable
+  { replName :: VName -- The new variable
   , replExps :: [(VName, Exp ExplicitMemory)] -- The new expressions
   }
   deriving (Show)
 
+-- Take a list of size variables.  Return a replacement consisting of a size
+-- variable denoting the maximum of the input sizes.
 maxsToReplacement :: MonadFreshNames m =>
                      [VName] -> m Replacement
 maxsToReplacement [] = error "maxsToReplacements: Cannot take max of zero variables"
 maxsToReplacement [v] = return $ Replacement v []
 maxsToReplacement vs = do
+  -- Should be O(lg N) number of new expressions.
   let (vs0, vs1) = splitAt (length vs `div` 2) vs
   Replacement m0 es0 <- maxsToReplacement vs0
   Replacement m1 es1 <- maxsToReplacement vs1
@@ -415,6 +451,7 @@ maxsToReplacement vs = do
   let emax = BasicOp $ BinOp (SMax Int64) (Var m0) (Var m1)
   return $ Replacement vmax (es0 ++ es1 ++ [(vmax, emax)])
 
+-- Modify a function to use the new replacements.
 insertAndReplace :: M.Map VName Replacement -> FunDef ExplicitMemory -> FunDef ExplicitMemory
 insertAndReplace replaces0 fundef =
   let body' = evalState (transformBody $ funDefBody fundef) replaces0
@@ -449,10 +486,3 @@ insertAndReplace replaces0 fundef =
           let mapper = identityMapper { mapOnBody = const transformBody }
           e' <- mapExpM mapper e
           return [Let pat attr e']
-
-data VarWithAssertTracking = VarWithAssertTracking VName Names
-  deriving (Show)
-
-instance Eq VarWithAssertTracking where
-  VarWithAssertTracking v0 vs0 == VarWithAssertTracking v1 vs1 =
-    not $ S.null $ S.intersection (S.insert v0 vs0) (S.insert v1 vs1)
