@@ -2,6 +2,10 @@
 -- a program to enable more memory block reuses.
 --
 -- This should be run *before* the reuse pass, as it enables more optimisations.
+-- Specifically, it helps with reusing memory whose size needs to be changed to
+-- be the maximum of itself and another size -- and so, that other size needs to
+-- have been hoisted so that is in scope at that point.  This module hoists all
+-- sizes as much as possible.
 module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeHoisting
   ( hoistAllocSizesFunDef
   ) where
