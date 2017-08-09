@@ -185,6 +185,8 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
       }
     }
   }|]
+copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
+  GenericC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
