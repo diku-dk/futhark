@@ -43,6 +43,7 @@ module Futhark.CodeGen.Backends.GenericC
   , atInit
   -- * Building Blocks
   , primTypeToCType
+  , copyMemoryDefaultSpace
   ) where
 
 import Control.Applicative
@@ -528,6 +529,13 @@ primTypeInfo (FloatType Float64) _ = [C.cexp|f64|]
 primTypeInfo Bool _ = [C.cexp|bool|]
 primTypeInfo Cert _ = [C.cexp|bool|]
 
+copyMemoryDefaultSpace :: C.Exp -> C.Exp -> C.Exp -> C.Exp -> C.Exp ->
+                          CompilerM op s ()
+copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
+  stm [C.cstm|memmove($exp:destmem + $exp:destidx,
+                      $exp:srcmem + $exp:srcidx,
+                      $exp:nbytes);|]
+
 printPrimStm :: (C.ToExp a, C.ToIdent b) => a -> b -> PrimType -> Signedness -> C.Stm
 printPrimStm dest val bt ept =
   [C.cstm|write_scalar($exp:dest, binary_output, &$exp:(primTypeInfo bt ept), &$id:val);|]
@@ -714,11 +722,7 @@ copyMemBeforeRun (MemParam name space) arg (Just arg_mem_copy) = do
   let size = [C.cexp|$id:name.size|]
       dest = rawMem' True arg_mem_copy
       src = rawMem' True arg
-  case space of
-    DefaultSpace ->
-      stm [C.cstm|memmove($exp:dest, $exp:src, $exp:size);|]
-    _ ->
-      copy dest [C.cexp|0|] space src [C.cexp|0|] space size
+  copy dest [C.cexp|0|] space src [C.cexp|0|] space size
   return [C.cexp|$id:arg_mem_copy|]
 copyMemBeforeRun _ arg _ = return arg
 

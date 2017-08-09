@@ -207,6 +207,9 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
      ArgKeyword "byte_count" $ asLong nbytes]
   finishIfSynchronous
 
+copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx Imp.DefaultSpace nbytes _ =
+  Py.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
+
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
