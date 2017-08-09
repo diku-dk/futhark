@@ -149,8 +149,9 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
             putStrLn "lookInStm:"
             print stm
             putStrLn ("exceptions: " ++ show stm_exceptions)
-            putStrLn ("interferences: " ++ show stm_interferences)
-            putStrLn ("interferences': " ++ show stm_interferences')
+            putStrLn "interferences': "
+            forM_ (M.assocs $ getInterferencesMap stm_interferences') $ \(v, ns) ->
+              putStrLn ("  " ++ pretty v ++ ": " ++ prettySet ns)
             putStrLn $ replicate 70 '~'
       doDebug debug
 

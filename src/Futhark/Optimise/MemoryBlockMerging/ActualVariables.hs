@@ -14,7 +14,7 @@ module Futhark.Optimise.MemoryBlockMerging.ActualVariables
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (mapMaybe, catMaybes)
+import Data.Maybe (fromMaybe, mapMaybe, catMaybes)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -29,15 +29,16 @@ import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.AllExpVars
 
 
-getFullMap :: [M.Map VName Names] -> M.Map VName Names
-getFullMap = M.unionsWith S.union
+data Context = Context
+  { ctxVarToMem :: VarMemMappings MemorySrc
+  , ctxFirstUses :: FirstUses
+  }
+  deriving (Show)
 
-type Context = VarMemMappings MemorySrc
-
-newtype FindM lore a = FindM { unFindM :: RWS Context [ActualVariables] () a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () ActualVariables a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
-            MonadWriter [ActualVariables])
+            MonadState ActualVariables)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalk lore,
@@ -48,15 +49,23 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 recordActuals :: VName -> Names -> FindM lore ()
-recordActuals stmt_var more_actuals = tell [M.singleton stmt_var more_actuals]
+recordActuals stmt_var more_actuals = do
+  -- If S.empty has already been recorded, keep it at that.  This is because the
+  -- ActualVariables system is currently also used for disabling memory block
+  -- optimisations -- if a variables resolves to the empty set, don't touch it.
+  -- This keeps some edge cases simple.  FIXME at some point.
+  current_actuals <- M.lookup stmt_var <$> get
+  case S.null <$> current_actuals of
+    Just True -> return ()
+    _ -> modify (insertOrUpdateMany stmt_var more_actuals)
 
 findActualVariables :: LoreConstraints lore =>
-                       VarMemMappings MemorySrc
-                    -> FunDef lore -> ActualVariables
-findActualVariables var_mem_mappings fundef =
-  let context = var_mem_mappings
+                       VarMemMappings MemorySrc -> FirstUses ->
+                       FunDef lore -> ActualVariables
+findActualVariables var_mem_mappings first_uses fundef =
+  let context = Context var_mem_mappings first_uses
       m = unFindM $ lookInBody $ funDefBody fundef
-      actual_variables = getFullMap $ snd $ execRWS m context ()
+      actual_variables = fst $ execRWS m context M.empty
   in actual_variables
 
 lookInBody :: LoreConstraints lore =>
@@ -142,14 +151,31 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
               -- If the memory block is not existential, we need to find all the
               -- variables in any sub-bodies using the same memory block (like
               -- with loops).
-              -- Find the ones using the same memory as the result of the loop
-              -- expression.
               body_vars' <- filterM (lookupGivesMem mem) body_vars
-              -- Not only the result variable needs to change its memory block in case
-              -- of a future coalescing with it; also the variables extracted above.
-              -- FIXME: This is probably an okay way to do it?  What if the memory is
-              -- used, but with a different index function?  Can that happen?
-              recordActuals var $ S.fromList (var : body_vars')
+
+              first_uses <- asks ctxFirstUses
+              case filter ((mem `S.member`) . (`lookupEmptyable` first_uses)) body_vars' of
+                [] ->
+                  -- Not just the result variable needs to change its memory
+                  -- block in case of a future coalescing with it; also the
+                  -- variables extracted above.  FIXME: This is probably an okay
+                  -- way to do it?  What if the memory is used, but with a
+                  -- different index function?  Can that happen?
+                  recordActuals var $ S.fromList (var : body_vars')
+                _ ->
+                  -- If we come across a non-existential If which can be said to
+                  -- create a new array *and* which has one or more bodies which
+                  -- can also be said to create a new array *in the same memory*
+                  -- (i.e. has first memory uses), then we disable it.  This is
+                  -- not at all an impossible case to handle, but such a loop is
+                  -- weird, since it would make more sense if it had existential
+                  -- memory, so maybe something needs to be done somewhere else
+                  -- in the compiler?  If this is naively enabled, we can get an
+                  -- error because the sub-body results are first uses while the
+                  -- main result is not.  This can be "fixed" by stating that
+                  -- the If as a whole is also a first use of the memory, but
+                  -- this seems too conservative.
+                  forM_ (var : body_vars') $ \v -> recordActuals v S.empty
 
           _ -> return ()
 
@@ -162,15 +188,17 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
           -- too restrictive.
           recordActuals var S.empty
           -- Make sure the source also updates the memory of the index when
-          -- updated.
-          recordActuals orig $ S.fromList [orig, var]
+          -- updated.  The array might be an aliasing operation, in which case
+          -- we try to find the original array.
+          orig' <- fromMaybe orig <$> aliasOpRoot orig
+          recordActuals orig' $ S.fromList [orig', var]
         _ -> return ()
 
     -- Support reusing the memory of reshape operations by recording the origin
     -- array that is being reshaped.
     BasicOp (Reshape _ shapechange_var orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
-        mem_orig <- M.lookup orig <$> ask
+        mem_orig <- M.lookup orig <$> asks ctxVarToMem
         case (shapechange_var, mem_orig) of
           ([_], Just (MemorySrc _ _ (Shape [_]))) ->
             recordActuals var $ S.fromList [var, orig]
@@ -186,24 +214,16 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
     -- For the other aliasing operations, disable their use for now.  If the
     -- source has a change of memory block, make sure to change this as well.
     BasicOp (Rearrange _ _ orig) ->
-      forM_ (map patElemName patvalelems) $ \var -> do
-        recordActuals var S.empty
-        recordActuals orig $ S.fromList [orig, var]
+      aliasOpHandle patvalelems orig
 
     BasicOp (Split _ _ _ orig) ->
-      forM_ (map patElemName patvalelems) $ \var -> do
-        recordActuals var S.empty
-        recordActuals orig $ S.fromList [orig, var]
+      aliasOpHandle patvalelems orig
 
     BasicOp (Rotate _ _ orig) ->
-      forM_ (map patElemName patvalelems) $ \var -> do
-        recordActuals var S.empty
-        recordActuals orig $ S.fromList [orig, var]
+      aliasOpHandle patvalelems orig
 
     BasicOp (Opaque (Var orig)) ->
-      forM_ (map patElemName patvalelems) $ \var -> do
-        recordActuals var S.empty
-        recordActuals orig $ S.fromList [orig, var]
+      aliasOpHandle patvalelems orig
 
     _ -> forM_ patvalelems $ \(PatElem var _ membound) -> do
       let body_vars = S.toList $ findAllExpVars e
@@ -224,9 +244,32 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
 
+-- If we have a rotate or similar, we want to find the original array and
+-- associate *that* with this aliasing array, so that changes to the original
+-- array will affect this one as well.
+aliasOpHandle :: [PatElem lore] -> VName -> FindM lore ()
+aliasOpHandle patvalelems orig =
+  forM_ (map patElemName patvalelems) $ \var -> do
+    recordActuals var S.empty
+    orig' <- fromJust "at some point there will have been a proper statement"
+             <$> aliasOpRoot orig
+    recordActuals orig' $ S.fromList [orig', var]
+
+aliasOpRoot :: VName -> FindM lore (Maybe VName)
+aliasOpRoot orig = do
+  current_actuals <- get
+  case S.null <$> M.lookup orig current_actuals of
+    -- If the original array is itself an aliasing operation, find the *actual*
+    -- original array.
+    Just True -> case M.keys (M.filter (orig `S.member`) current_actuals) of
+      [orig'] -> return $ Just orig'
+      _ -> return Nothing
+    -- Else, just return orig.
+    _ -> return $ Just orig
+
 lookupGivesMem :: VName -> VName -> FindM lore Bool
 lookupGivesMem mem v = do
-  m <- M.lookup v <$> ask
+  m <- M.lookup v <$> asks ctxVarToMem
   return (Just mem == (memSrcName <$> m))
 
 class LookInKernelExp lore where
@@ -258,21 +301,26 @@ instance LookInKernelExp InKernel where
 
 extendActualVarsInKernel :: Exp InKernel -> [VName] -> FindM InKernel ()
 extendActualVarsInKernel e arrs = forM_ arrs $ \var -> do
-  mem0 <- M.lookup var <$> ask
+  mem0 <- M.lookup var <$> asks ctxVarToMem
+
+  -- The array might be an aliasing operation, in which case we try to find the
+  -- original array.
+  var' <- fromMaybe var <$> aliasOpRoot var
   case mem0 of
     Just mem -> do
       let body_vars = S.toList $ findAllExpVars e
       body_vars' <- filterM (lookupGivesMem $ memSrcName mem) body_vars
-      let actuals = S.fromList (var : body_vars')
+      let actuals = S.fromList (var' : body_vars')
 
-      body_vars_mems <- mapM (\v -> M.lookup v <$> ask) body_vars
+      body_vars_mems <- mapM (\v -> M.lookup v <$> asks ctxVarToMem) body_vars
       let debug = do
             putStrLn $ replicate 70 '~'
             putStrLn "extendActualVarsInKernel:"
             putStrLn $ pretty var
+            putStrLn $ pretty var'
             putStrLn $ prettySet (S.fromList body_vars)
             print body_vars_mems
             putStrLn $ prettySet (S.fromList body_vars')
             putStrLn $ replicate 70 '~'
-      withDebug debug $ recordActuals var actuals
+      withDebug debug $ recordActuals var' actuals
     Nothing -> return ()

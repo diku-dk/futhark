@@ -106,9 +106,8 @@ bodyBindingMap stms =
   where createBindingStmt :: (Line, Stm ExplicitMemory)
                           -> BindingMap
         createBindingStmt (line, stmt@(Let (Pattern patctxelems patvalelems) () e)) =
-          let -- Both free variables and consumed variables count as dependencies.
-              stmt_vars = S.fromList (map patElemName (patctxelems ++ patvalelems))
-              frees = freeInStm stmt --S.union (freeInStm stmt) (consumedInStm $ analyseStm stmt)
+          let stmt_vars = S.fromList (map patElemName (patctxelems ++ patvalelems))
+              frees = freeInStm stmt
               bound_extra = boundInExpExtra e
               frees' = frees `S.difference` bound_extra
               vars_binding = (stmt_vars, PrimBinding frees' (FromLine line e))
