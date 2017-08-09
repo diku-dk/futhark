@@ -32,6 +32,13 @@ compileProg module_name =
                    Import "time" Nothing]
         defines = [Escape pyReader, Escape pyFunctions, Escape pyPanic]
         operations :: GenericPython.Operations Imp.Sequential ()
-        operations = GenericPython.defaultOperations {
-          GenericPython.opsCompiler = const $ return ()
-        }
+        operations = GenericPython.defaultOperations
+                     { GenericPython.opsCompiler = const $ return ()
+                     , GenericPython.opsCopy = copySequentialMemory
+                     }
+
+copySequentialMemory :: GenericPython.Copy Imp.Sequential ()
+copySequentialMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes _bt =
+  GenericPython.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
+copySequentialMemory _ _ destspace _ _ srcspace _ _ =
+  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace

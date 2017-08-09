@@ -39,6 +39,8 @@ module Futhark.CodeGen.Backends.GenericPython
   , simpleCall
 
   , compileSizeOfType
+
+  , copyMemoryDefaultSpace
   ) where
 
 import Control.Applicative
@@ -652,14 +654,17 @@ copyMemBeforeRun (Imp.MemParam name space) (Just mem_copy_name) = do
       dest = mem_copy_name
       src = name
       offset = Constant (value (0::Int32))
-  collect $ case space of
-    DefaultSpace -> do
-      let offset_call1 = simpleCall "addressOffset" [Var (compileName dest), offset, Var "ct.c_byte"]
-      let offset_call2 = simpleCall "addressOffset" [Var (compileName src), offset, Var "ct.c_byte"]
-      stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, size]
-    _ -> copy dest offset space src offset space size (IntType Int32) -- FIXME
-
+  collect $ copy dest offset space src offset space size (IntType Int32) -- FIXME
 copyMemBeforeRun _ _ = return []
+
+copyMemoryDefaultSpace :: VName -> PyExp -> VName -> PyExp -> PyExp ->
+                          CompilerM op s ()
+copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
+  let offset_call1 = simpleCall "addressOffset"
+                     [Var (compileName destmem), destidx, Var "ct.c_byte"]
+  let offset_call2 = simpleCall "addressOffset"
+                     [Var (compileName srcmem), srcidx, Var "ct.c_byte"]
+  stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, nbytes]
 
 compileEntryFun :: (Name, Imp.Function op)
                 -> CompilerM op s PyFunDef
