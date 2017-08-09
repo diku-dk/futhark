@@ -61,12 +61,18 @@ makeCommutativeMap m =
                       in (n, ns)) names
   in M.fromList assocs
 
-insertOrUpdate :: (Ord k, Ord v) => k -> v -> M.Map k (S.Set v) -> M.Map k (S.Set v)
-insertOrUpdate k v = M.alter (insertOrNew v) k
-  where insertOrNew :: Ord a => a -> Maybe (S.Set a) -> Maybe (S.Set a)
-        insertOrNew x m = Just $ case m of
-          Just s -> S.insert x s
-          Nothing -> S.singleton x
+insertOrUpdate :: (Ord k, Ord v) => k -> v ->
+                  M.Map k (S.Set v) -> M.Map k (S.Set v)
+insertOrUpdate k v = M.alter (insertOrNew (S.singleton v)) k
+
+insertOrUpdateMany :: (Ord k, Ord v) => k -> S.Set v ->
+                      M.Map k (S.Set v) -> M.Map k (S.Set v)
+insertOrUpdateMany k vs = M.alter (insertOrNew vs) k
+
+insertOrNew :: Ord a => S.Set a -> Maybe (S.Set a) -> Maybe (S.Set a)
+insertOrNew xs m = Just $ case m of
+  Just s -> S.union xs s
+  Nothing -> xs
 
 removeEmptyMaps :: Ord k => M.Map k (S.Set v) -> M.Map k (S.Set v)
 removeEmptyMaps = M.filter (not . S.null)

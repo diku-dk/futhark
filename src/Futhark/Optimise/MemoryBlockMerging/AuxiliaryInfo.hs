@@ -31,7 +31,7 @@ getAuxiliaryInfo fundef =
       first_uses = findFirstUses var_to_mem mem_aliases fundef
       last_uses = findLastUses var_to_mem mem_aliases first_uses fundef
       interferences = findInterferences var_to_mem mem_aliases first_uses last_uses fundef
-      actual_variables = findActualVariables var_to_mem fundef
+      actual_variables = findActualVariables var_to_mem first_uses fundef
       existentials = findExistentials fundef
   in AuxiliaryInfo
      { auxName = name
