@@ -597,65 +597,49 @@ printValue = fmap concat . mapM (uncurry printValue')
           p <- printStm r e
           return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
-prepareEntry :: (Name, Imp.Function op) -> [Maybe VName]
-             -> CompilerM op s
+prepareEntry :: (Name, Imp.Function op) -> CompilerM op s
                 (String, [String], [PyStmt], [PyStmt], [PyStmt],
-                 [(Imp.ExternalValue, PyExp)])
-prepareEntry (fname, Imp.Function _ outputs inputs _ results args) mem_copy_names = do
+                 [(Imp.ExternalValue, PyExp)], [PyStmt])
+prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
+
+  (argexps_mem_copies, prepare_run) <- collect' $ forM inputs $ \p -> case p of
+    Imp.MemParam name space -> do
+      -- A program might write to its input parameters, so create a new memory
+      -- block and copy the source there.  This way the program can be run more
+      -- than once.
+      name' <- newVName $ baseString name <> "_copy"
+      copy <- asks envCopy
+      allocate <- asks envAllocate
+      let size = Var (extName (compileName name) ++ ".nbytes") -- FIXME
+          dest = name'
+          src = name
+          offset = Constant (value (0::Int32))
+      case space of
+        DefaultSpace ->
+          stm $ Assign (Var (compileName name'))
+                       (simpleCall "allocateMem" [size]) -- FIXME
+        Space sid ->
+          allocate name' size sid
+      copy dest offset space src offset space size (IntType Int32) -- FIXME
+      return $ Just $ compileName name'
+    _ -> return Nothing
 
   prepareIn <- collect $ zipWithM_ entryPointInput args $
                map (Var . extValueDescName) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
-  let inputArgs = map (compileName . Imp.paramName) inputs
-      inputArgs' = zipWith (\param mem_copy_name ->
-                              compileName $ fromMaybe (Imp.paramName param) mem_copy_name)
-                   inputs mem_copy_names
+  let inputArgs = zipWith fromMaybe
+                  (map (compileName . Imp.paramName) inputs)
+                  argexps_mem_copies
       fname' = "self." ++ futharkFun (nameToString fname)
       funCall = simpleCall fname' (fmap Var inputArgs)
-      funCall' = simpleCall fname' (fmap Var inputArgs')
-      call = ifNeedsMemCopy
-             [Assign funTuple funCall']
-             [Assign funTuple funCall]
+      call = [Assign funTuple funCall]
 
   return (nameToString fname, map extValueDescName args,
           prepareIn, call, prepareOut,
-          zip results res)
-
-ifNeedsMemCopy :: [PyStmt] -> [PyStmt] -> [PyStmt]
-ifNeedsMemCopy then_body else_body =
-  [If (BinOp "or"
-       (Var "do_warmup_run")
-       (BinOp ">"
-        (simpleCall "int" [Var "num_runs"])
-        (Constant (value (1::Int32)))))
-   then_body
-   else_body]
-
-prepareMemCopy :: Imp.Param -> CompilerM op s (Maybe VName)
-prepareMemCopy (Imp.MemParam name space) = do
-  name_copy <- newVName $ baseString name <> "_copy"
-  allocate <- asks envAllocate
-  let size = Var (extName (compileName name) ++ ".nbytes")
-  case space of
-    DefaultSpace ->
-      stm $ Assign (Var (compileName name_copy)) (simpleCall "allocateMem" [size])
-    Space sid ->
-      allocate name_copy size sid
-  return $ Just name_copy
-prepareMemCopy _ = return Nothing
-
-copyMemBeforeRun :: Imp.Param -> Maybe VName -> CompilerM op s [PyStmt]
-copyMemBeforeRun (Imp.MemParam name space) (Just mem_copy_name) = do
-  copy <- asks envCopy
-  let size = Var (extName (compileName name) ++ ".nbytes")
-      dest = mem_copy_name
-      src = name
-      offset = Constant (value (0::Int32))
-  collect $ copy dest offset space src offset space size (IntType Int32) -- FIXME
-copyMemBeforeRun _ _ = return []
+          zip results res, prepare_run)
 
 copyMemoryDefaultSpace :: VName -> PyExp -> VName -> PyExp -> PyExp ->
                           CompilerM op s ()
@@ -669,20 +653,15 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
 compileEntryFun :: (Name, Imp.Function op)
                 -> CompilerM op s PyFunDef
 compileEntryFun entry = do
-  (fname', params, prepareIn, body, prepareOut, res) <-
-    prepareEntry entry (replicate (length $ Imp.functionInput $ snd entry) Nothing)
+  (fname', params, prepareIn, body, prepareOut, res, _) <- prepareEntry entry
   let ret = Return $ tupleOrSingle $ map snd res
   return $ Def fname' ("self" : params) $
     prepareIn ++ body ++ prepareOut ++ [ret]
 
 callEntryFun :: [PyStmt] -> (Name, Imp.Function op)
              -> CompilerM op s (PyFunDef, String, PyExp)
-callEntryFun pre_timing entry@(fname, Imp.Function _ _ inputs _ _ decl_args) = do
-  (mem_copy_names, prepare_mem_copies) <- collect' $ mapM prepareMemCopy inputs
-  let prepare_mem_copies' = ifNeedsMemCopy prepare_mem_copies []
-  (_, _, prepareIn, body, _, res) <- prepareEntry entry mem_copy_names
-  copy_mem_before_run <- concat <$> zipWithM copyMemBeforeRun inputs mem_copy_names
-  let copy_mem_before_run' = ifNeedsMemCopy copy_mem_before_run []
+callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
+  (_, _, prepareIn, body, _, res, prepare_run) <- prepareEntry entry
 
   let str_input = map readInput decl_args
 
@@ -697,18 +676,18 @@ callEntryFun pre_timing entry@(fname, Imp.Function _ _ inputs _ _ decl_args) = d
       errstate = Call (Var "np.errstate") $ map ignore ["divide", "over", "under", "invalid"]
 
       do_warmup_run =
-        If (Var "do_warmup_run") (copy_mem_before_run' ++ do_run) []
+        If (Var "do_warmup_run") (prepare_run ++ do_run) []
 
       do_num_runs =
         For "i" (simpleCall "range" [simpleCall "int" [Var "num_runs"]])
-        (copy_mem_before_run' ++ do_run_with_timing)
+        (prepare_run ++ do_run_with_timing)
 
   str_output <- printValue res
 
   let fname' = "entry_" ++ nameToString fname
 
   return (Def fname' [] $
-           str_input ++ prepareIn ++ prepare_mem_copies' ++
+           str_input ++ prepareIn ++
            [Try [With errstate [do_warmup_run, do_num_runs]] [except']] ++
            [close_runtime_file] ++
            str_output,
