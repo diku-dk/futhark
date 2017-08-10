@@ -15,6 +15,7 @@
 --          2
 --        }
 -- structure cpu { Alloc 0 }
+-- structure gpu { Alloc 0 }
 
 let main (cond: bool, x: *[#n][#n]i32, a: [#n]i32): (*[n][n]i32, i32) =
   let b = map (+ 1) a

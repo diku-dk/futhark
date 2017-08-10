@@ -11,6 +11,7 @@
 --            [1, 1]]]
 --        }
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 let main ( ns: [#n]i32
          , i: i32

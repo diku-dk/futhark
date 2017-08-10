@@ -43,6 +43,7 @@ module Futhark.CodeGen.Backends.GenericC
   , atInit
   -- * Building Blocks
   , primTypeToCType
+  , copyMemoryDefaultSpace
   ) where
 
 import Control.Applicative
@@ -536,6 +537,13 @@ primTypeInfo (FloatType Float64) _ = [C.cexp|f64|]
 primTypeInfo Bool _ = [C.cexp|bool|]
 primTypeInfo Cert _ = [C.cexp|bool|]
 
+copyMemoryDefaultSpace :: C.Exp -> C.Exp -> C.Exp -> C.Exp -> C.Exp ->
+                          CompilerM op s ()
+copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes =
+  stm [C.cstm|memmove($exp:destmem + $exp:destidx,
+                      $exp:srcmem + $exp:srcidx,
+                      $exp:nbytes);|]
+
 printPrimStm :: (C.ToExp a, C.ToIdent b) => a -> b -> PrimType -> Signedness -> C.Stm
 printPrimStm dest val bt ept =
   [C.cstm|write_scalar($exp:dest, binary_output, &$exp:(primTypeInfo bt ept), &$id:val);|]
@@ -587,7 +595,11 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   ret <- newVName "main_ret"
   refcount <- asks envFatMemory
   let readstms = readInputs refcount args
-  (argexps, prepare) <- collect' $ mapM prepareArg inputs
+  (argexps_mem_copies, prepare) <- collect' $ mapM prepareArg inputs
+  let argexps = zipWith fromMaybe
+                (map (\p -> [C.cexp|$id:(paramName p)|]) inputs)
+                argexps_mem_copies
+  free_mem_copies <- collect $ zipWithM_ freeMemCopy inputs argexps_mem_copies
   -- unpackResults may copy back to DefaultSpace.
   unpackstms <- unpackResults ret outputs
   free_out <- freeResults ret outputs
@@ -620,14 +632,15 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
     $items:inputdecls
     $ty:crettype $id:ret;
     $stms:readstms
-    $items:prepare
     $items:outputdecls
 
     /* Warmup run */
     if (perform_warmup) {
       time_runs = 0;
+      $items:prepare
       $items:run_it
       $items:free_out
+      $items:free_mem_copies
     }
     time_runs = 1;
     /* Proper run. */
@@ -635,9 +648,11 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
       if (run == num_runs-1) {
         detail_timing = 1;
       }
+      $items:prepare
       $items:run_it
       if (run < num_runs-1) {
         $items:free_out
+        $items:free_mem_copies
       }
     }
 
@@ -669,21 +684,25 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
         freeParam ScalarParam{} =
           return ()
 
-prepareArg :: Param -> CompilerM op s C.Exp
-prepareArg (MemParam name (Space sid)) = do
-  -- Futhark main expects some other memory space than default, so
-  -- create a new memory block and copy it there.
-  name' <- newVName $ baseString name <> "_" <> sid
+prepareArg :: Param -> CompilerM op s (Maybe C.Exp)
+prepareArg (MemParam name space) = do
+  -- A program might write to its input parameters, so create a new memory block
+  -- and copy the source there.  This way the program can be run more than once.
+  name' <- newVName $ baseString name <> "_copy"
   copy <- asks envCopy
   let size = [C.cexp|$id:name.size|]
       dest = rawMem' True name'
       src = rawMem' True name
-  declMem name' $ Space sid
-  allocMem name' size $ Space sid
-  copy dest [C.cexp|0|] (Space sid) src [C.cexp|0|] DefaultSpace size
-  return [C.cexp|$id:name'|]
+  declMem name' space
+  allocMem name' size space
+  copy dest [C.cexp|0|] space src [C.cexp|0|] DefaultSpace size
+  return $ Just [C.cexp|$id:name'|]
+prepareArg _ = return Nothing
 
-prepareArg p = return [C.cexp|$exp:(paramName p)|]
+freeMemCopy :: Param -> Maybe C.Exp -> CompilerM op s ()
+freeMemCopy (MemParam _ space) (Just mem_copy) =
+  unRefMem mem_copy space
+freeMemCopy _ _ = return ()
 
 readInputs :: Bool -> [ExternalValue] -> [C.Stm]
 readInputs refcount = snd . mapAccumL (readInput refcount) mempty

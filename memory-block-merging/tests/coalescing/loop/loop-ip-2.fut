@@ -7,6 +7,7 @@
 --          [ [1i32, 9i32], [1i32, 3i32] ]
 --        }
 -- structure cpu { Alloc 0 }
+-- structure gpu { Alloc 0 }
 
 import "/futlib/array"
 

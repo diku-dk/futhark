@@ -4,6 +4,10 @@
 --
 -- The last use analysis needs to report a last use for the entire loop and
 -- *not* for the statement inside the loop where it is seemingly lastly used.
+--
+-- Since this contains a nested map, and since we don't perform coalescing or
+-- in-place lowering in the memory reuse tests, the CPU pipeline will have an
+-- extra alloc for the inner loop.
 -- ==
 -- input {
 --   [[[1,7],[9,4],[8,6]],
@@ -12,7 +16,8 @@
 -- output {
 --   [[18, 17], [8, 10]]
 -- }
--- structure cpu { Alloc 3 }
+-- structure cpu { Alloc 4 }
+-- structure gpu { Alloc 3 }
 
 let main (a: [#n][#m][#k]i32): [n][k]i32 =
   let acc = replicate k 0 in

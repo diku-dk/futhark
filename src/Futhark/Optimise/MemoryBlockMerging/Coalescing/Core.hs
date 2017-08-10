@@ -1,5 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Optimise.MemoryBlockMerging.Coalescing.Core
   ( coreCoalesceFunDef
   ) where
@@ -12,8 +14,10 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.ExplicitMemory (
+  ExplicitMemory, ExplicitMemorish)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Tools
 
@@ -78,31 +82,42 @@ data Context = Context
   }
   deriving (Show)
 
-newtype FindM a = FindM { unFindM :: RWS Context () Current a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
             MonadState Current)
 
-ifExp :: VName -> FindM (Maybe Exp')
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             FullWalk lore)
+
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
+
+ifExp :: LoreConstraints lore =>
+         VName -> FindM lore (Maybe Exp')
 ifExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
     Just e@(Exp _ If{}) -> Just e
     _ -> Nothing
 
-isIfExp :: VName -> FindM Bool
+isIfExp :: LoreConstraints lore =>
+           VName -> FindM lore Bool
 isIfExp var = do
   found <- ifExp var
   return $ isJust found
 
-isLoopExp :: VName -> FindM Bool
+isLoopExp :: LoreConstraints lore =>
+             VName -> FindM lore Bool
 isLoopExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
     Just (Exp _ DoLoop{}) -> True
     _ -> False
 
-isReshapeExp :: VName -> FindM Bool
+isReshapeExp :: LoreConstraints lore =>
+                VName -> FindM lore Bool
 isReshapeExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
@@ -110,14 +125,16 @@ isReshapeExp var = do
     _ -> False
 
 -- Lookup the memory block statically associated with a variable.
-lookupVarMem :: VName -> FindM MemorySrc
+lookupVarMem :: LoreConstraints lore =>
+                VName -> FindM lore MemorySrc
 lookupVarMem var =
   -- This should always be called from a place where it is certain that 'var'
   -- refers to a statement with an array expression.
   (fromJust ("lookup memory block from " ++ pretty var) . M.lookup var)
   <$> asks ctxVarToMem
 
-lookupActualVars :: VName -> FindM Names
+lookupActualVars :: LoreConstraints lore =>
+                    VName -> FindM lore Names
 lookupActualVars var = do
   actual_vars <- asks ctxActualVars
   -- Do this recursively.
@@ -127,7 +144,8 @@ lookupActualVars var = do
 -- Lookup the memory block currenty associated with a variable.  In most cases
 -- (maybe all) this could probably replace 'lookupVarMem', though it would not
 -- always be necessary.
-lookupCurrentVarMem :: VName -> FindM (Maybe VName)
+lookupCurrentVarMem :: LoreConstraints lore =>
+                       VName -> FindM lore (Maybe VName)
 lookupCurrentVarMem var = do
         -- Current result...
         mem_cur <- M.lookup var <$> gets curMemsCoalesced
@@ -142,7 +160,8 @@ lookupCurrentVarMem var = do
           (_, Just m) -> Just (memSrcName m)
           _ -> Nothing
 
-withMemAliases :: VName -> FindM Names
+withMemAliases :: LoreConstraints lore =>
+                  VName -> FindM lore Names
 withMemAliases mem = do
   -- The only memory blocks with memory aliases are the existiential ones, so
   -- using a static ctxMemAliases should be okay, as they will not change during
@@ -150,9 +169,10 @@ withMemAliases mem = do
   mem_aliases <- lookupEmptyable mem <$> asks ctxMemAliases
   return $ S.union (S.singleton mem) mem_aliases
 
-recordOptimisticCoalescing :: VName -> PrimExp VName
+recordOptimisticCoalescing :: LoreConstraints lore =>
+                              VName -> PrimExp VName
                            -> [Slice (PrimExp VName)]
-                           -> VName -> MemoryLoc -> Bindage -> FindM ()
+                           -> VName -> MemoryLoc -> Bindage -> FindM lore ()
 recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
   modify $ \c -> c { curCoalescedIntos =
                      insertOrUpdate dst (src, offset, ixfun_slices)
@@ -215,15 +235,22 @@ coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
 
   in withDebug debug fundef'
 
-lookInBody :: Body ExplicitMemory -> FindM ()
+lookInBody :: LoreConstraints lore =>
+              Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody lore -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
   mapM_ lookInStm bnds
 
 zeroOffset :: PrimExp VName
 zeroOffset = primExpFromSubExp (IntType Int32) (constant (0 :: Int32))
 
-lookInStm :: Stm ExplicitMemory -> FindM ()
-lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
+lookInStm :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
+lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   -- COALESCING-SPECIFIC HANDLING for Copy and Concat.
   case patvalelems of
     [PatElem dst bindage ExpMem.ArrayMem{}] -> do
@@ -260,11 +287,18 @@ lookInStm (Let (Pattern _patctxelems patvalelems) () e) = do
 
 
   -- RECURSIVE BODY WALK.
-  walkExpM walker e
-  where walker = identityWalker { walkOnBody = lookInBody }
+  fullWalkExpM walker walker_kernel e
+  where walker = identityWalker
+          { walkOnBody = lookInBody }
+        walker_kernel = identityKernelWalker
+          { walkOnKernelBody = coerce . lookInBody
+          , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInBody . lambdaBody
+          }
 
-tryCoalesce :: VName -> [Slice (PrimExp VName)] -> Bindage -> VName
-            -> PrimExp VName -> FindM ()
+tryCoalesce :: LoreConstraints lore =>
+               VName -> [Slice (PrimExp VName)] -> Bindage ->
+               VName -> PrimExp VName -> FindM lore ()
 tryCoalesce dst ixfun_slices bindage src offset = do
   mem_dst <- lookupVarMem dst
 
@@ -380,7 +414,8 @@ tryCoalesce dst ixfun_slices bindage src offset = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return ()
 
-canBeCoalesced :: VName -> VName -> ExpMem.IxFun -> FindM Bool
+canBeCoalesced :: LoreConstraints lore =>
+                  VName -> VName -> ExpMem.IxFun -> FindM lore Bool
 canBeCoalesced dst src ixfun = do
   mem_dst <- lookupVarMem dst
   mem_src <- lookupVarMem src
@@ -441,9 +476,10 @@ canBeCoalesced dst src ixfun = do
 -- dst.  It does not make sense to coalesce only part of them, since in that
 -- case both memory blocks and related allocations will still be around.
 
-safetyCond1 :: VName -> MemorySrc -> FindM Bool
+safetyCond1 :: LoreConstraints lore =>
+               VName -> MemorySrc -> FindM lore Bool
 safetyCond1 dst mem_src = do
-  last_uses <- lookupEmptyable dst <$> asks ctxLastUses
+  last_uses <- lookupEmptyable (FromStm dst) <$> asks ctxLastUses
   let res = S.member (memSrcName mem_src) last_uses
 
   let debug = do
@@ -455,7 +491,8 @@ safetyCond1 dst mem_src = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond2 :: VName -> MemorySrc -> FindM Bool
+safetyCond2 :: LoreConstraints lore =>
+               VName -> MemorySrc -> FindM lore Bool
 safetyCond2 src mem_dst = do
   allocs_before_src <- lookupEmptyable src
                        <$> asks ctxAllocatedBlocksBeforeCreation
@@ -470,7 +507,8 @@ safetyCond2 src mem_dst = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond3 :: VName -> VName -> MemorySrc -> FindM Bool
+safetyCond3 :: LoreConstraints lore =>
+               VName -> VName -> MemorySrc -> FindM lore Bool
 safetyCond3 src dst mem_dst = do
   fundef <- asks ctxFunDef
   let uses_after_src_vars = getVarUsesBetween fundef src dst
@@ -489,7 +527,8 @@ safetyCond3 src dst mem_dst = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond4 :: VName -> FindM Bool
+safetyCond4 :: LoreConstraints lore =>
+               VName -> FindM lore Bool
 safetyCond4 src = do
   -- Special If handling: An If can have aliases, but that can be okay and is
   -- checked in safe If: It is okay for it to have one alias (one of the
@@ -515,7 +554,8 @@ safetyCond4 src = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond5 :: MemorySrc -> ExpMem.IxFun -> FindM Bool
+safetyCond5 :: LoreConstraints lore =>
+               MemorySrc -> ExpMem.IxFun -> FindM lore Bool
 safetyCond5 mem_src ixfun = do
   in_use_before_mem_src <- lookupEmptyable (memSrcName mem_src)
                            <$> asks ctxVarsInUseBeforeMem
@@ -532,7 +572,8 @@ safetyCond5 mem_src ixfun = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyIf :: VName -> VName -> FindM Bool
+safetyIf :: LoreConstraints lore =>
+            VName -> VName -> FindM lore Bool
 safetyIf src dst = do
   -- Special handling: If src refers to an If expression, we need to check that
   -- not just is mem_dst not used after src and before dst, but neither is any

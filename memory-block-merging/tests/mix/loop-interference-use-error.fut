@@ -9,6 +9,7 @@
 -- output { [31, 32]
 --        }
 -- structure cpu { Alloc 4 }
+-- structure gpu { Alloc 4 }
 
 
 import "/futlib/array"

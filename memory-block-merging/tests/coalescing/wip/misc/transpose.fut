@@ -10,6 +10,7 @@
 --        }
 
 -- structure cpu { Alloc ? }
+-- structure gpu { Alloc ? }
 
 import "/futlib/array"
 

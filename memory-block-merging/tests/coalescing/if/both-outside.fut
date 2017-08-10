@@ -9,6 +9,7 @@
 -- output { [[1, 4], [1, 2]]
 --        }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 let main (xs: *[#n][#n]i32, cond: bool, i: i32): [n][n]i32 =
   let ys0 = iota n

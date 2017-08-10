@@ -2,7 +2,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
--- | Find out where allocation sizes are used.
+-- | Find out where allocation sizes are used.  For each statement, which sizes
+-- are in scope?
 module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeUses
   ( findSizeUsesFunDef
   ) where

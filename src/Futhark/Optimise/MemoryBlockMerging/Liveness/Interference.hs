@@ -93,13 +93,15 @@ lookInFunDefFParam (Param var _) = do
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
-lookInBody (Body _ bnds _res) =
+lookInBody (Body _ bnds res) = do
   mapM_ lookInStm bnds
+  mapM_ lookInRes res
 
 lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
-lookInKernelBody (KernelBody _ bnds _res) =
+lookInKernelBody (KernelBody _ bnds res) = do
   mapM_ lookInStm bnds
+  mapM_ (lookInRes . kernelResultSubExp) res
 
 isNoOp :: Exp lore -> Bool
 isNoOp (BasicOp bop) = case bop of
@@ -139,7 +141,7 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       tell stm_interferences'
 
       forM_ patvalelems $ \(PatElem var _ _) -> do
-        last_uses_var <- lookupEmptyable var <$> asks ctxLastUses
+        last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
         mapM_ kill $ S.toList last_uses_var
 
       let debug = do
@@ -147,8 +149,9 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
             putStrLn "lookInStm:"
             print stm
             putStrLn ("exceptions: " ++ show stm_exceptions)
-            putStrLn ("interferences: " ++ show stm_interferences)
-            putStrLn ("interferences': " ++ show stm_interferences')
+            putStrLn "interferences': "
+            forM_ (M.assocs $ getInterferencesMap stm_interferences') $ \(v, ns) ->
+              putStrLn ("  " ++ pretty v ++ ": " ++ prettySet ns)
             putStrLn $ replicate 70 '~'
       doDebug debug
 
@@ -159,6 +162,13 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
                 , walkOnKernelKernelBody = coerce . lookInKernelBody
                 , walkOnKernelLambda = coerce . lookInBody . lambdaBody
                 }
+
+lookInRes :: LoreConstraints lore =>
+             SubExp -> FindM lore ()
+lookInRes (Var v) = do
+  last_uses_var <- lookupEmptyable (FromRes v) <$> asks ctxLastUses
+  mapM_ kill $ S.toList last_uses_var
+lookInRes _ = return ()
 
 -- Use index analysis to find any exceptions to the naive interference recorded
 -- for an expression.
@@ -193,7 +203,7 @@ lastUsesInStm stm@(Let _ _ e) = do
   where lookLUInStm :: Stm lore -> RWS LastUses Names () ()
         lookLUInStm (Let (Pattern _patctxelems patvalelems) _ _) =
           forM_ patvalelems $ \(PatElem patname _ _) -> do
-            lus <- lookupEmptyable patname <$> ask
+            lus <- lookupEmptyable (FromStm patname) <$> ask
             tell lus
 
         lu_walker = identityWalker

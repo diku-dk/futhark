@@ -3,6 +3,7 @@
 -- the same for the other hoisting tests).
 -- ==
 -- structure cpu { Alloc 1 }
+-- structure gpu { Alloc 1 }
 
 import "/futlib/array"
 

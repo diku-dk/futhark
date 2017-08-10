@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | I didn't know where else to put this.  Perpetually in need of a cleanup.
 module Futhark.Optimise.MemoryBlockMerging.Miscellaneous where
 
@@ -60,12 +61,18 @@ makeCommutativeMap m =
                       in (n, ns)) names
   in M.fromList assocs
 
-insertOrUpdate :: (Ord k, Ord v) => k -> v -> M.Map k (S.Set v) -> M.Map k (S.Set v)
-insertOrUpdate k v = M.alter (insertOrNew v) k
-  where insertOrNew :: Ord a => a -> Maybe (S.Set a) -> Maybe (S.Set a)
-        insertOrNew x m = Just $ case m of
-          Just s -> S.insert x s
-          Nothing -> S.singleton x
+insertOrUpdate :: (Ord k, Ord v) => k -> v ->
+                  M.Map k (S.Set v) -> M.Map k (S.Set v)
+insertOrUpdate k v = M.alter (insertOrNew (S.singleton v)) k
+
+insertOrUpdateMany :: (Ord k, Ord v) => k -> S.Set v ->
+                      M.Map k (S.Set v) -> M.Map k (S.Set v)
+insertOrUpdateMany k vs = M.alter (insertOrNew vs) k
+
+insertOrNew :: Ord a => S.Set a -> Maybe (S.Set a) -> Maybe (S.Set a)
+insertOrNew xs m = Just $ case m of
+  Just s -> S.union xs s
+  Nothing -> xs
 
 removeEmptyMaps :: Ord k => M.Map k (S.Set v) -> M.Map k (S.Set v)
 removeEmptyMaps = M.filter (not . S.null)
@@ -105,13 +112,13 @@ onJust may f = case may of
   Just x -> f x
   Nothing -> return ()
 
-expandWithAliases :: MemAliases -> M.Map VName Names -> M.Map VName Names
+expandWithAliases :: forall v. Ord v => MemAliases -> M.Map v Names -> M.Map v Names
 expandWithAliases mem_aliases = fixpointIterate expand
-  where expand :: M.Map VName Names -> M.Map VName Names
+  where expand :: M.Map v Names -> M.Map v Names
         expand mems_map =
-          M.fromList (map (\(mem, mems) ->
-                             (mem, S.unions (mems : map (`lookupEmptyable` mem_aliases)
-                                             (S.toList mems))))
+          M.fromList (map (\(v, mems) ->
+                             (v, S.unions (mems : map (`lookupEmptyable` mem_aliases)
+                                           (S.toList mems))))
                       (M.assocs mems_map))
 
 fixpointIterate :: Eq a => (a -> a) -> a -> a

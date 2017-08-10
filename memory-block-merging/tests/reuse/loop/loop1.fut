@@ -6,6 +6,7 @@
 -- output { [31, 32, 33]
 --        }
 -- structure cpu { Alloc 2 }
+-- structure gpu { Alloc 2 }
 
 let main (xs0: [#n]i32): [n]i32 =
   loop xs = xs0 for _i < n do

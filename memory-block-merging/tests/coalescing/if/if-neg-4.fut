@@ -9,6 +9,7 @@
 --          10 10
 --        }
 -- structure cpu { Alloc 3 }
+-- structure gpu { Alloc 3 }
 
 let main (cond0: bool, cond1: bool,
           y0: [#n]i32, z0: [#n]i32,
