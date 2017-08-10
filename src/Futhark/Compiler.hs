@@ -68,10 +68,10 @@ dumpError config err =
   case err of
     ExternalError s -> do
       T.hPutStrLn stderr s
-      T.hPutStrLn stderr "If you find this error message confusing, uninformative, or wrong, please open an issue at https://github.com/HIPERFIT/futhark/issues."
+      T.hPutStrLn stderr "If you find this error message confusing, uninformative, or wrong, please open an issue at https://github.com/diku-dk/futhark/issues."
     InternalError s info CompilerBug -> do
       T.hPutStrLn stderr "Internal compiler error."
-      T.hPutStrLn stderr "Please report this at https://github.com/HIPERFIT/futhark/issues."
+      T.hPutStrLn stderr "Please report this at https://github.com/diku-dk/futhark/issues."
       report s info
     InternalError s info CompilerLimitation -> do
       T.hPutStrLn stderr "Known compiler limitation encountered.  Sorry."
