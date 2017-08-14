@@ -20,7 +20,7 @@ import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
-
+-- | maps memory blocks to its size and space/type
 type Sizes = M.Map VName (SubExp, Space) -- Also Space information
 
 newtype FindM lore a = FindM { unFindM :: Writer Sizes a }
