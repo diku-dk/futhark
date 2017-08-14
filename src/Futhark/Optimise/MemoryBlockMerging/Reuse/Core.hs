@@ -35,27 +35,47 @@ import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeUses
 
 
 data Context = Context { ctxFirstUses :: FirstUses
+                         -- ^ array creation points; 
+                         --   maps statements to memory block names
                        , ctxInterferences :: Interferences
+                         -- ^ a memory block is mapped to its interference set
                        , ctxSizes :: Sizes
+                         -- ^ maps a memory block to its size and space
                        , ctxVarToMem :: VarMemMappings MemorySrc
+                         -- ^ maps array names to memory blocks
                        , ctxActualVars :: M.Map VName Names
+                         -- ^ maps an array name to (aliased) array names
+                         --   used in cases of loops/kernels. (equivalent patterns)
                        , ctxExistentials :: Names
+                         -- ^ names in the existential context
                        , ctxVarPrimExps :: M.Map VName (PrimExp VName)
+                         -- ^ maps a size variable to its primexp
                        , ctxSizeVarsUsesBefore :: M.Map VName Names
+                         -- ^ maps a memory name to size variables available
+                         --   at that memory block allocation point
                        , ctxCurLoopBodyRes :: Result
+                         -- ^ if inside of a loop: the result of the loop, 
+                         --   otherwise empty list
                        }
   deriving (Show)
 
 data Current = Current { curUses :: M.Map VName Names
+                         -- ^ maps a memory block to the memory blocks that
+                         --   were decided to be merged into it. 
                        , curEqAsserts :: M.Map VName Names
+                         -- ^ maps a variable name to other semantically equal 
+                         --   variable names
 
-                         -- Changes in memory blocks for variables.
                        , curVarToMemRes :: VarMemMappings MemoryLoc
+                         -- ^ The result of the core analysis: 
+                         --   an array name is mapped to its memory block (after merging)
+                         --   (Records changes in memory blocks for variables.)
 
-                         -- Changes in variable uses where allocation sizes are
-                         -- maxed from its elements.  Keyed by statement memory
-                         -- name.
                        , curVarToMaxExpRes :: M.Map VName Names
+                         -- ^ Changes in variable uses where allocation sizes are
+                         --   maxed from its elements.  Keyed by statement memory
+                         --   name (alloc stmt).
+                         --   Maps an alloc stmt to the sizes that need to be taken max for.
                        }
   deriving (Show)
 
