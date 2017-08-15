@@ -35,7 +35,7 @@ OPTIONS
 -s int
   Set the seed used for the RNG.  Zero by default.
 
---T-bounds=min:max
+--T-bounds=<min:max>
   Set inclusive lower and upper bounds on generated values of type
   ``T``.  ``T`` is any primitive type, e.g. ``i32`` or ``f32``.  The
   bounds apply to any following uses of the ``-g`` option.
@@ -46,7 +46,7 @@ before data generation (--generate):
 --text
   Output data in text format (must precede --generate). Default.
 
--b --binary
+-b, --binary
   Output data in binary Futhark format (must precede --generate).
 
 --binary-no-header
@@ -57,6 +57,10 @@ before data generation (--generate):
 
 EXAMPLES
 ========
+
+Generate a 4 by 2 integer matrix::
+
+  futhark-dataset -g [4][2]i32
 
 Generate an array of floating-point numbers and an array of indices into that array::
 
