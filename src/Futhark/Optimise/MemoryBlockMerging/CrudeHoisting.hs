@@ -12,6 +12,7 @@ import Control.Monad.RWS
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
@@ -27,7 +28,8 @@ data Origin = FromFParam
   deriving (Eq, Ord, Show)
 
 -- The dependencies and the location.
-data PrimBinding = PrimBinding { _pbVars :: Names
+data PrimBinding = PrimBinding { pbFrees :: Names
+                               , _pbConsumed :: Names
                                , pbOrigin :: Origin
                                }
   deriving (Show)
@@ -62,9 +64,15 @@ lookupPrimBinding vname = do
               ++ "  This should not happen!")
     $ L.find ((vname `S.member`) . fst) bm
 
+namesDependingOn :: VName -> State BindingMap Names
+namesDependingOn v = do
+  bm <- get
+  return $ S.unions $ map fst
+    $ filter (\(_, pb) -> v `S.member` pbFrees pb) bm
+
 scopeBindingMap :: (VName, NameInfo ExplicitMemory)
                 -> BindingMap
-scopeBindingMap (x, _) = [(S.singleton x, PrimBinding S.empty FromFParam)]
+scopeBindingMap (x, _) = [(S.singleton x, PrimBinding S.empty S.empty FromFParam)]
 
 boundInKernelSpace :: ExpMem.KernelSpace -> Names
 boundInKernelSpace space =
@@ -105,26 +113,25 @@ bodyBindingMap stms =
 
   where createBindingStmt :: (Line, Stm ExplicitMemory)
                           -> BindingMap
-        createBindingStmt (line, stmt@(Let (Pattern patctxelems patvalelems) () e)) =
+        createBindingStmt (line, stmt@(Let pat@(Pattern patctxelems patvalelems) () e)) =
           let stmt_vars = S.fromList (map patElemName (patctxelems ++ patvalelems))
               frees = freeInStm stmt
+              consumed = consumedInPattern pat
               bound_extra = boundInExpExtra e
               frees' = frees `S.difference` bound_extra
-              vars_binding = (stmt_vars, PrimBinding frees' (FromLine line e))
+              vars_binding = (stmt_vars, PrimBinding frees' consumed (FromLine line e))
 
-              -- Some variables exist only in a shape declaration and so will
-              -- have no PrimBinding.  If we hit the Nothing case, we assume
-              -- that's what happened.
+              -- Some variables exist only in a shape declaration.
               shape_sizes = S.fromList $ concatMap shapeSizes (patctxelems ++ patvalelems)
-              sizes_binding = (shape_sizes, PrimBinding frees (FromLine line e))
+              sizes_binding = (shape_sizes, PrimBinding frees' consumed (FromLine line e))
 
               -- Some expressions contain special identifiers that are used in a
-              -- body.
+              -- body.  This should go somewhere else than here.
               param_vars = case e of
                 Op (ExpMem.Inner (ExpMem.Kernel _ _ space _ _)) ->
                   boundInKernelSpace space
                 _ -> S.empty
-              params_binding = (param_vars, PrimBinding S.empty FromFParam)
+              params_binding = (param_vars, PrimBinding S.empty S.empty FromFParam)
 
               bmap = [vars_binding, sizes_binding, params_binding]
 
@@ -183,8 +190,8 @@ hoistRecursivelyStm bindingmap findHoistees (Let pat () e) =
         mapper scope_new = return . hoistInBody scope_new bindingmap' Nothing findHoistees
         -- The nested body cannot move to any of its locations of its parent's
         -- body, so we say that all its parent's bindings are parameters.
-        bindingmap' = map (\(ns, PrimBinding vs _) ->
-                             (ns, PrimBinding vs FromFParam))
+        bindingmap' = map (\(ns, PrimBinding frees consumed _) ->
+                             (ns, PrimBinding frees consumed FromFParam))
                       bindingmap
 
 hoist :: BindingMap
@@ -214,7 +221,14 @@ moveLetUpwards letname body = do
         print letname
         putStrLn $ replicate 70 '~'
 
-  PrimBinding deps letorig <- withDebug debug0 $ lookupPrimBinding letname
+  PrimBinding deps consumed letorig <- withDebug debug0 $ lookupPrimBinding letname
+
+  -- Extend the dependencies with all those statements that use the consumed
+  -- variables of this statement, except the current statement.
+  deps' <- S.delete letname
+           <$> (S.union deps
+                <$> (S.unions <$> mapM namesDependingOn (S.toList consumed)))
+
   case letorig of
     FromFParam -> return body
     FromLine line_cur exp_cur ->
@@ -227,30 +241,30 @@ moveLetUpwards letname body = do
         DoLoop{} -> return body
         Op ExpMem.Inner{} -> return body
         _ -> do
-          -- Sort by how close they are to the beginning of the body.  The closest
-          -- one should be the first one to hoist, so that the other ones can maybe
-          -- exploit it.
-
           let debug1 = do
                 putStrLn $ replicate 70 '~'
                 putStrLn "moveLetUpwards 1:"
                 print letname
-                putStrLn $ prettySet deps
+                putStrLn $ prettySet deps'
+                putStrLn $ prettySet consumed
                 print line_cur
                 -- putStrLn $ replicate 70 '|'
                 -- putStrLn $ pretty body'
                 -- putStrLn $ replicate 70 '|'
                 putStrLn $ replicate 70 '~'
 
-          deps' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t)
-                   $ withDebug debug1 $ S.toList deps
-          body' <- foldM (flip moveLetUpwards) body deps'
-          origins <- mapM (\t -> pbOrigin <$> lookupPrimBinding t) deps'
+          -- Sort by how close they are to the beginning of the body.  The closest
+          -- one should be the first one to hoist, so that the other ones can maybe
+          -- exploit it.
+          deps'' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t)
+                    $ withDebug debug1 $ S.toList deps'
+          body' <- foldM (flip moveLetUpwards) body deps''
+          origins <- mapM (\t -> pbOrigin <$> lookupPrimBinding t) deps''
           let line_dest = case foldl max FromFParam origins of
                 FromFParam -> 0
                 FromLine n _e -> n + 1
 
-          PrimBinding _ letorig' <- lookupPrimBinding letname
+          PrimBinding _ _ letorig' <- lookupPrimBinding letname
           when (letorig' /= letorig) $ error "Assertion: This should not happen."
 
           stms' <- moveLetToLine letname line_cur line_dest $ bodyStms body'
@@ -268,11 +282,12 @@ moveLetToLine stm_cur_name line_cur line_dest stms
       stms1 = take line_cur stms ++ drop (line_cur + 1) stms
       stms2 = take line_dest stms1 ++ [stm_cur] ++ drop line_dest stms1
 
-  modify $ map (\t@(ns, PrimBinding vars orig) ->
+  modify $ map (\t@(ns, PrimBinding frees consumed orig) ->
                    case orig of
                      FromFParam -> t
                      FromLine l e -> if l >= line_dest && l < line_cur
-                                     then (ns, PrimBinding vars (FromLine (l + 1) e))
+                                     then (ns, PrimBinding frees consumed
+                                               (FromLine (l + 1) e))
                                      else t)
 
   let debug = do
@@ -281,8 +296,10 @@ moveLetToLine stm_cur_name line_cur line_dest stms
         putStrLn $ pretty stm_cur_name
         putStrLn $ replicate 70 '~'
 
-  PrimBinding vars (FromLine _ exp_cur) <- withDebug debug $ lookupPrimBinding stm_cur_name -- fixme
-  modify $ replaceWhere stm_cur_name (PrimBinding vars (FromLine line_dest exp_cur))
+  PrimBinding frees consumed (FromLine _ exp_cur) <-
+    withDebug debug $ lookupPrimBinding stm_cur_name -- fixme
+  modify $ replaceWhere stm_cur_name (PrimBinding frees consumed
+                                      (FromLine line_dest exp_cur))
 
   return stms2
 

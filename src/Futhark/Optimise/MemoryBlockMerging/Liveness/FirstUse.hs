@@ -25,21 +25,18 @@ import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Types
 
 
-type FirstUsesList = [FirstUses]
--- Nicer approach: Make a new Monoid instance for a M.Map wrapper type.  We need
--- the 'M.unionsWith S.union' functionality; the default `M.unions` is too
--- destructive.
-
-getFirstUsesMap :: FirstUsesList -> FirstUses
-getFirstUsesMap = M.unionsWith S.union
-
-data Context = Context (VarMemMappings MemorySrc) MemAliases
+data Context = Context
+  { ctxVarToMem :: VarMemMappings MemorySrc
+  , ctxMemAliases :: MemAliases
+  , ctxCurOuterFirstUses :: Names
+  }
   deriving (Show)
 
-newtype FindM lore a = FindM { unFindM :: RWS Context FirstUsesList () a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () FirstUses a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
-            MonadWriter FirstUsesList)
+            MonadWriter (),
+            MonadState FirstUses)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
                              ArrayUtils lore,
@@ -52,24 +49,28 @@ coerce = FindM . unFindM
 -- Find the memory blocks used or aliased by a variable.
 varMems :: VName -> FindM lore Names
 varMems var = do
-  Context var_to_mem mem_aliases <- ask
+  Context var_to_mem mem_aliases _ <- ask
   return $ fromMaybe S.empty $ do
     mem <- memSrcName <$> M.lookup var var_to_mem
     return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
 
 recordMapping :: VName -> VName -> FindM lore ()
-recordMapping stmt_var mem = tell [M.singleton stmt_var (S.singleton mem)]
+recordMapping stmt_var mem =
+  modify $ M.unionWith S.union (M.singleton stmt_var $ S.singleton mem)
 
 findFirstUses :: LoreConstraints lore =>
                  VarMemMappings MemorySrc -> MemAliases
               -> FunDef lore -> FirstUses
 findFirstUses var_to_mem mem_aliases fundef =
-  let context = Context var_to_mem mem_aliases
+  let context = Context { ctxVarToMem = var_to_mem
+                        , ctxMemAliases = mem_aliases
+                        , ctxCurOuterFirstUses = S.empty
+                        }
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
       first_uses = removeEmptyMaps $ expandWithAliases mem_aliases
-                   $ getFirstUsesMap $ snd $ evalRWS m context ()
+                   $ fst $ execRWS m context M.empty
   in first_uses
 
 lookInFunDefFParam :: LoreConstraints lore =>
@@ -91,6 +92,7 @@ lookInKernelBody (KernelBody _ bnds _res) =
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
+  outer_first_uses <- asks ctxCurOuterFirstUses
   when (createsNewArray e) $ do
     let e_free_vars = freeInExp e
     e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
@@ -111,6 +113,16 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
             -- some point, so they will get their own FirstUses.  Putting
             -- them into first use here would probably also be too
             -- conservative.
+            --
+            -- If it is a first use of a memory inside a loop, and that memory
+            -- already has a first use outside the loop, ignore it, since it is
+            -- not a proper first use.  This can be an issue after the
+            -- coalescing transformation, where multidimensional maps are
+            -- first-order-transformed into nested loops, each loop having its
+            -- own Scratch expression.  FIXME: This might be too conservative
+            -- for multiple liveness intervals, but it does not seem to be a
+            -- problem with our tests.
+            $ unless (xmem `S.member` outer_first_uses)
             $ recordMapping x xmem
         _ -> return ()
 
@@ -128,7 +140,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
               $ \el -> lookInMergeCtxParam (patElemName el) p
     _ -> return ()
 
-  fullWalkExpM walker walker_kernel e
+  cur_first_uses <- get
+  local (\ctx -> ctx { ctxCurOuterFirstUses = S.unions $ M.elems cur_first_uses })
+    $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }
         walker_kernel = identityKernelWalker
