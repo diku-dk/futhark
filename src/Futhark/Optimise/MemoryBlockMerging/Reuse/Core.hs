@@ -367,8 +367,8 @@ handleNewArray x xmem = do
         -- of the two sizes.
         sizesMatch used_mems <||> sizesCanBeMaxed kmem
 
-  let canBeUsed t = and <$> mapM (($ t) . uncurry) [notTheSame, noneInterfere,
-                                                    sameSpace, sizesWorkOut]
+  let canBeUsed t = and <$> mapM (($ t) . uncurry)
+                    [notTheSame, noneInterfere, sameSpace, sizesWorkOut]
   cur_uses <- gets curUses
   found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
 

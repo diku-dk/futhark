@@ -19,6 +19,7 @@ import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
   (ExplicitMemory, InKernel, ExplicitMemorish)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
@@ -29,6 +30,10 @@ data Context = Context
   { ctxVarToMem :: VarMemMappings MemorySrc
   , ctxMemAliases :: MemAliases
   , ctxCurOuterFirstUses :: Names
+    -- ^ First uses found in outer bodies.
+  , ctxCurBodyOuterExpNames :: Names
+    -- ^ The names of the patterns in the statement with the expression
+    -- containing the current body.
   }
   deriving (Show)
 
@@ -49,7 +54,8 @@ coerce = FindM . unFindM
 -- Find the memory blocks used or aliased by a variable.
 varMems :: VName -> FindM lore Names
 varMems var = do
-  Context var_to_mem mem_aliases _ <- ask
+  var_to_mem <- asks ctxVarToMem
+  mem_aliases <- asks ctxMemAliases
   return $ fromMaybe S.empty $ do
     mem <- memSrcName <$> M.lookup var var_to_mem
     return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
@@ -65,6 +71,7 @@ findFirstUses var_to_mem mem_aliases fundef =
   let context = Context { ctxVarToMem = var_to_mem
                         , ctxMemAliases = mem_aliases
                         , ctxCurOuterFirstUses = S.empty
+                        , ctxCurBodyOuterExpNames = S.empty
                         }
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
@@ -98,7 +105,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
     e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
     forM_ patvalelems $ \(PatElem x bindage membound) ->
       case (bindage, membound) of
-        (BindVar, ExpMem.ArrayMem _ _ _ xmem _) -> do
+        (BindVar, ExpMem.ArrayMem _ _ _ xmem xixfun) -> do
           x_mems <- varMems xmem
 
           -- For the first use to be a proper first use, it must write to
@@ -114,16 +121,34 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
             -- them into first use here would probably also be too
             -- conservative.
             --
-            -- If it is a first use of a memory inside a loop, and that memory
-            -- already has a first use outside the loop, ignore it, since it is
-            -- not a proper first use.  This can be an issue after the
-            -- coalescing transformation, where multidimensional maps are
+            -- If it is a first use of a memory inside a loop or a kernel, and
+            -- that memory already has a first use outside the loop, ignore it,
+            -- since it is not a proper first use.  This can be an issue after
+            -- the coalescing transformation, where multidimensional maps are
             -- first-order-transformed into nested loops, each loop having its
             -- own Scratch expression.  FIXME: This might be too conservative
             -- for multiple liveness intervals, but it does not seem to be a
             -- problem with our tests.
             $ unless (xmem `S.member` outer_first_uses)
-            $ recordMapping x xmem
+            $ if ixFunHasIndex xixfun
+              -- If the index function of the memory annotation uses an index,
+              -- it means that the array creation does not refer to the entire
+              -- array.  It is an array creation, but only partially: It creates
+              -- part of the array, and another part is created in another loop
+              -- iteration or kernel thread.  The danger in declaring this
+              -- memory a first use lies in how it can then be reused later in
+              -- the iteration/thread by some memory with a *different* index in
+              -- its memory annotation index function, which can affect reads in
+              -- other threads.  We say, conservatively, that if a new array is
+              -- created inside this body, but it is not fully created, that
+              -- must mean that the outer expression containing this body fully
+              -- creates it.  FIXME: We could do a less conservative approach:
+              -- For example, if a subsequent array uses the same index
+              -- function, it should be fine to reuse this memory.
+              then do
+                outers <- asks ctxCurBodyOuterExpNames
+                forM_ outers $ \x_outer -> recordMapping x_outer xmem
+              else recordMapping x xmem
         _ -> return ()
 
   -- Find first uses of existential memory blocks.  Fairly conservative.
@@ -141,7 +166,9 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
     _ -> return ()
 
   cur_first_uses <- get
-  local (\ctx -> ctx { ctxCurOuterFirstUses = S.unions $ M.elems cur_first_uses })
+  local (\ctx -> ctx { ctxCurOuterFirstUses = S.unions $ M.elems cur_first_uses
+                     , ctxCurBodyOuterExpNames = S.fromList (map patElemName patvalelems)
+                     })
     $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }
@@ -150,6 +177,16 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
           , walkOnKernelKernelBody = coerce . lookInKernelBody
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
+
+-- Does an index function contain an Index expression?
+ixFunHasIndex :: ExpMem.IxFun -> Bool
+ixFunHasIndex ixfun = case ixfun of
+  IxFun.Direct _ -> False
+  IxFun.Permute ixfun' _ -> ixFunHasIndex ixfun'
+  IxFun.Rotate ixfun' _ -> ixFunHasIndex ixfun'
+  IxFun.Index{} -> True
+  IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
+  IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
 
 lookInPatCtxElem :: LoreConstraints lore =>
                     VName -> PatElem lore -> FindM lore ()

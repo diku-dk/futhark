@@ -37,7 +37,7 @@ data Context = Context
   { ctxVarToMem :: VarMemMappings MemorySrc
   , ctxMemAliases :: MemAliases
   , ctxFirstUses :: FirstUses
-  , ctxCurFirstUsesBeforeLoop :: Names
+  , ctxCurFirstUsesOuter :: Names
   }
   deriving (Show)
 
@@ -123,17 +123,14 @@ lookInKernelBody (KernelBody _ bnds res) = do
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
-  -- When an loop contains a use of an array that is created before the loop, it
-  -- must not reuse that memory, because there are cycles in loops.  This should
-  -- result in more interferences being recorded.  See
-  -- 'tests/reuse/loop/copy-from-outside.fut for an example of this.  We run
-  -- this at first to avoid it getting any of the new first uses, which might be
-  -- part of a loop, which means it is (kind of) created in the loop.
-  mMod <- case e of
-    DoLoop{} -> do
-      cur_first_uses <- gets curFirstUses
-      return $ local (\ctx -> ctx { ctxCurFirstUsesBeforeLoop = cur_first_uses })
-    _ -> return id
+  -- When an loop, a scan, a reduce, or a stream contains a use of an array that
+  -- is created before the expression body, it should not get a last use in a
+  -- statement inside the inner body, since loops can have cycles, and so its
+  -- proper last use should really be in the statement declaring the sub-body,
+  -- and not in some statement in the sub-body.  See
+  -- 'tests/reuse/loop/copy-from-outside.fut for an example of this.
+  cur_first_uses <- gets curFirstUses
+  let mMod = local $ \ctx -> ctx { ctxCurFirstUsesOuter = cur_first_uses }
 
   -- First handle all pattern elements by themselves.
   forM_ patvalelems $ \(PatElem x _ membound) ->
@@ -155,19 +152,23 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   forM_ patvalelems $ \(PatElem x _ _) ->
     -- Set all memory blocks being used as optimistic last uses.
     forM_ (S.toList e_mems) $ \mem -> do
-      first_uses_before_loop <- asks ctxCurFirstUsesBeforeLoop
-      unless (mem `S.member` first_uses_before_loop) $
+      first_uses_outer <- asks ctxCurFirstUsesOuter
+      unless (mem `S.member` first_uses_outer) $
         setOptimistic mem (FromStm x)
-      when (mem `S.member` first_uses_before_loop) $ do
-        mem_aliases <- asks ctxMemAliases
-        let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
-        forM_ reverse_mem_aliases $ \mem' ->
-          -- FIXME: This is actually more conservative than it needs to be, in
-          -- that we set the last use of the memory aliasing mem to be at this
-          -- statement, which will later through aliasing cover all its aliased
-          -- memory blocks, including both mem -- which should be included --
-          -- and possibly some other memory block.
-          setOptimistic mem' (FromStm x)
+
+      -- If memory block t aliases memory block u (meaning that the memory of
+      -- t *can* be the memory of u), and u has a potential last use here,
+      -- then t also has a potential last use here (the relation is not
+      -- commutative, so it does not work the other way round).
+      mem_aliases <- asks ctxMemAliases
+      let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
+      forM_ reverse_mem_aliases $ \mem' ->
+        -- FIXME: This is actually more conservative than it needs to be, in
+        -- that we set the last use of the memory aliasing mem to be at this
+        -- statement, which will later through aliasing cover all its aliased
+        -- memory blocks, including both mem -- which should be included --
+        -- and possibly some other memory block.
+        setOptimistic mem' (FromStm x)
 
   withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
