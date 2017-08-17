@@ -67,8 +67,8 @@ transformStm (Let (Pattern patctxelems patvalelems) () e) = do
     DoLoop mergectxparams mergevalparams loopform body -> do
       -- More special loop handling because of its extra
       -- pattern-like info.
+      mergectxparams' <- mapM (transformMergeCtxParam mergevalparams) mergectxparams
       mergevalparams' <- mapM transformMergeValParam mergevalparams
-      mergectxparams' <- mapM transformMergeCtxParam mergectxparams
 
       -- The body of a loop can return a memory block in its results.  This is
       -- the memory block used by a variable which is also part of the results.
@@ -113,16 +113,28 @@ transformStm (Let (Pattern patctxelems patvalelems) () e) = do
           , mapOnKernelLParam = transformLParam
           }
 
--- Update the actual memory block referred to by a context memory block
--- in a loop.
+-- Update the actual memory block referred to by a context (existential) memory
+-- block in a loop.
 transformMergeCtxParam :: LoreConstraints lore =>
+                          [(FParam ExplicitMemory, SubExp)] ->
                           (FParam ExplicitMemory, SubExp)
                        -> FindM lore (FParam ExplicitMemory, SubExp)
-transformMergeCtxParam (param@(Param ctxmem ExpMem.MemMem{}), mem) = do
+transformMergeCtxParam mergevalparams (param@(Param ctxmem ExpMem.MemMem{}), mem) = do
   var_to_mem <- ask
-  let mem' = fromMaybe mem ((Var . memLocName) <$> M.lookup ctxmem var_to_mem)
+
+  let usesCtxMem (Param _ (ExpMem.ArrayMem _ _ _ pmem _)) = ctxmem == pmem
+      usesCtxMem _ = False
+
+      -- If the initial value of a loop merge parameter is a memory block name,
+      -- we may have to update that.  If the context memory block is used in an
+      -- array in one of the value merge parameters, see if that array variable
+      -- refers to an array that has been set to reuse a memory block.
+      mem' = fromMaybe mem $ do
+        (_, Var orig_var) <- L.find (usesCtxMem . fst) mergevalparams
+        orig_mem <- M.lookup orig_var var_to_mem
+        return $ Var $ memLocName orig_mem
   return (param, mem')
-transformMergeCtxParam t = return t
+transformMergeCtxParam _ t = return t
 
 transformMergeValParam :: LoreConstraints lore =>
                           (FParam ExplicitMemory, SubExp)

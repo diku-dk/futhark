@@ -11,7 +11,7 @@ import qualified Futhark.Representation.ExplicitMemory as ExpMem
 data MemorySrc = MemorySrc
   { memSrcName :: VName -- ^ the memory block name
   , memSrcIxFun :: ExpMem.IxFun -- ^ the index function into the memory
-  , memSrcShape :: Shape -- ^ the shape of the memory block
+  , memSrcShape :: Shape -- ^ the shape of the original array
   }
   deriving (Show, Eq)
 

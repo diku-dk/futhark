@@ -94,30 +94,30 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-ifExp :: LoreConstraints lore =>
-         VName -> FindM lore (Maybe Exp')
+ifExp :: MonadReader Context m =>
+         VName -> m (Maybe Exp')
 ifExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
     Just e@(Exp _ If{}) -> Just e
     _ -> Nothing
 
-isIfExp :: LoreConstraints lore =>
-           VName -> FindM lore Bool
+isIfExp :: MonadReader Context m =>
+           VName -> m Bool
 isIfExp var = do
   found <- ifExp var
   return $ isJust found
 
-isLoopExp :: LoreConstraints lore =>
-             VName -> FindM lore Bool
+isLoopExp :: MonadReader Context m =>
+             VName -> m Bool
 isLoopExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
     Just (Exp _ DoLoop{}) -> True
     _ -> False
 
-isReshapeExp :: LoreConstraints lore =>
-                VName -> FindM lore Bool
+isReshapeExp :: MonadReader Context m =>
+                VName -> m Bool
 isReshapeExp var = do
   var_exp <- M.lookup var <$> asks ctxVarExps
   return $ case var_exp of
@@ -125,16 +125,16 @@ isReshapeExp var = do
     _ -> False
 
 -- Lookup the memory block statically associated with a variable.
-lookupVarMem :: LoreConstraints lore =>
-                VName -> FindM lore MemorySrc
+lookupVarMem :: MonadReader Context m =>
+                VName -> m MemorySrc
 lookupVarMem var =
   -- This should always be called from a place where it is certain that 'var'
   -- refers to a statement with an array expression.
   (fromJust ("lookup memory block from " ++ pretty var) . M.lookup var)
   <$> asks ctxVarToMem
 
-lookupActualVars :: LoreConstraints lore =>
-                    VName -> FindM lore Names
+lookupActualVars :: MonadReader Context m =>
+                    VName -> m Names
 lookupActualVars var = do
   actual_vars <- asks ctxActualVars
   -- Do this recursively.
@@ -160,8 +160,8 @@ lookupCurrentVarMem var = do
           (_, Just m) -> Just (memSrcName m)
           _ -> Nothing
 
-withMemAliases :: LoreConstraints lore =>
-                  VName -> FindM lore Names
+withMemAliases :: MonadReader Context m =>
+                  VName -> m Names
 withMemAliases mem = do
   -- The only memory blocks with memory aliases are the existiential ones, so
   -- using a static ctxMemAliases should be okay, as they will not change during
@@ -476,8 +476,8 @@ canBeCoalesced dst src ixfun = do
 -- dst.  It does not make sense to coalesce only part of them, since in that
 -- case both memory blocks and related allocations will still be around.
 
-safetyCond1 :: LoreConstraints lore =>
-               VName -> MemorySrc -> FindM lore Bool
+safetyCond1 :: MonadReader Context m =>
+               VName -> MemorySrc -> m Bool
 safetyCond1 dst mem_src = do
   last_uses <- lookupEmptyable (FromStm dst) <$> asks ctxLastUses
   let res = S.member (memSrcName mem_src) last_uses
@@ -491,8 +491,8 @@ safetyCond1 dst mem_src = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond2 :: LoreConstraints lore =>
-               VName -> MemorySrc -> FindM lore Bool
+safetyCond2 :: MonadReader Context m =>
+               VName -> MemorySrc -> m Bool
 safetyCond2 src mem_dst = do
   allocs_before_src <- lookupEmptyable src
                        <$> asks ctxAllocatedBlocksBeforeCreation
@@ -527,8 +527,8 @@ safetyCond3 src dst mem_dst = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond4 :: LoreConstraints lore =>
-               VName -> FindM lore Bool
+safetyCond4 :: MonadReader Context m =>
+               VName -> m Bool
 safetyCond4 src = do
   -- Special If handling: An If can have aliases, but that can be okay and is
   -- checked in safe If: It is okay for it to have one alias (one of the
@@ -554,8 +554,8 @@ safetyCond4 src = do
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
-safetyCond5 :: LoreConstraints lore =>
-               MemorySrc -> ExpMem.IxFun -> FindM lore Bool
+safetyCond5 :: MonadReader Context m =>
+               MemorySrc -> ExpMem.IxFun -> m Bool
 safetyCond5 mem_src ixfun = do
   in_use_before_mem_src <- lookupEmptyable (memSrcName mem_src)
                            <$> asks ctxVarsInUseBeforeMem

@@ -35,27 +35,44 @@ import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeUses
 
 
 data Context = Context { ctxFirstUses :: FirstUses
+                         -- ^ array creation points;
+                         --   maps statements to memory block names
                        , ctxInterferences :: Interferences
+                         -- ^ a memory block is mapped to its interference set
                        , ctxSizes :: Sizes
+                         -- ^ maps a memory block to its size and space
                        , ctxVarToMem :: VarMemMappings MemorySrc
+                         -- ^ maps array names to memory blocks
                        , ctxActualVars :: M.Map VName Names
+                         -- ^ maps an array name to (aliased) array names
+                         --   used in cases of loops/kernels. (equivalent patterns)
                        , ctxExistentials :: Names
+                         -- ^ names in the existential context
                        , ctxVarPrimExps :: M.Map VName (PrimExp VName)
+                         -- ^ maps a size variable to its primexp
                        , ctxSizeVarsUsesBefore :: M.Map VName Names
-                       , ctxCurLoopBodyRes :: Result
+                         -- ^ maps a memory name to size variables available
+                         --   at that memory block allocation point
                        }
   deriving (Show)
 
 data Current = Current { curUses :: M.Map VName Names
+                         -- ^ maps a memory block to the memory blocks that
+                         --   were decided to be merged into it.
                        , curEqAsserts :: M.Map VName Names
+                         -- ^ maps a variable name to other semantically equal
+                         --   variable names
 
-                         -- Changes in memory blocks for variables.
                        , curVarToMemRes :: VarMemMappings MemoryLoc
+                         -- ^ The result of the core analysis:
+                         --   an array name is mapped to its memory block (after merging)
+                         --   (Records changes in memory blocks for variables.)
 
-                         -- Changes in variable uses where allocation sizes are
-                         -- maxed from its elements.  Keyed by statement memory
-                         -- name.
                        , curVarToMaxExpRes :: M.Map VName Names
+                         -- ^ Changes in variable uses where allocation sizes are
+                         --   maxed from its elements.  Keyed by statement memory
+                         --   name (alloc stmt).
+                         --   Maps an alloc stmt to the sizes that need to be taken max for.
                        }
   deriving (Show)
 
@@ -79,30 +96,30 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 -- Lookup the memory block statically associated with a variable.
-lookupVarMem :: LoreConstraints lore =>
-                VName -> FindM lore MemorySrc
+lookupVarMem :: MonadReader Context m =>
+                VName -> m MemorySrc
 lookupVarMem var =
   -- This should always be called from a place where it is certain that 'var'
   -- refers to a statement with an array expression.
   (fromJust ("lookup memory block from " ++ pretty var) . M.lookup var)
   <$> asks ctxVarToMem
 
-lookupActualVars :: LoreConstraints lore =>
-                    VName -> FindM lore Names
+lookupActualVars :: MonadReader Context m =>
+                    VName -> m Names
 lookupActualVars var = do
   actual_vars <- asks ctxActualVars
   -- Do this recursively.
   let actual_vars' = expandWithAliases actual_vars actual_vars
   return $ fromMaybe (S.singleton var) $ M.lookup var actual_vars'
 
-lookupSize :: LoreConstraints lore =>
-              VName -> FindM lore SubExp
+lookupSize :: MonadReader Context m =>
+              VName -> m SubExp
 lookupSize var =
   (fst . fromJust ("lookup size from " ++ pretty var) . M.lookup var)
   <$> asks ctxSizes
 
-lookupSpace :: LoreConstraints lore =>
-               VName -> FindM lore Space
+lookupSpace :: MonadReader Context m =>
+               VName -> m Space
 lookupSpace var =
   (snd . fromJust ("lookup space from " ++ pretty var) . M.lookup var)
   <$> asks ctxSizes
@@ -126,13 +143,19 @@ recordMaxMapping mem y =
 
 -- Run a monad with a local copy of the uses.  We don't want any new uses in
 -- nested bodies to be available for merging into when we are back in the main
--- body.
+-- body, but we do want updates to existing uses to be propagated.
 withLocalUses :: LoreConstraints lore =>
                  FindM lore a -> FindM lore a
 withLocalUses m = do
-  uses <- gets curUses
+  uses_before <- gets curUses
   res <- m
-  modify $ \cur -> cur { curUses = uses }
+  uses_after <- gets curUses
+  -- Only take the results whose memory block keys were also present prior to
+  -- traversing the sub-body.
+  let uses_before_updated = M.filterWithKey
+                            (\mem _ -> mem `S.member` M.keysSet uses_before)
+                            uses_after
+  modify $ \cur -> cur { curUses = uses_before_updated }
   return res
 
 coreReuseFunDef :: MonadFreshNames m =>
@@ -153,7 +176,6 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
         , ctxExistentials = existentials
         , ctxVarPrimExps = primexps
         , ctxSizeVarsUsesBefore = size_uses
-        , ctxCurLoopBodyRes = []
         }
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
@@ -215,17 +237,20 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
     -- For every declaration with a first memory use, check (through
     -- handleNewArray) if it can reuse some earlier memory block.
     first_uses_var <- lookupEmptyable var <$> asks ctxFirstUses
+    actual_vars_var <- lookupActualVars var
+    existentials <- asks ctxExistentials
     case membound of
       ExpMem.ArrayMem _ _ _ mem _ ->
-        when (mem `S.member` first_uses_var)
+        when (-- We require that it must be a first use, i.e. an array creation.
+              mem `S.member` first_uses_var
+              -- If the array is existential or "aliases" something that is
+              -- existential, we do not try to make it reuse any memory.
+              && not (var `S.member` existentials)
+              && not (any (`S.member` existentials) actual_vars_var))
         $ handleNewArray var mem
       _ -> return ()
 
-  let mMod = case e of
-        DoLoop _ _ _ loopbody ->
-          local (\ctx -> ctx { ctxCurLoopBodyRes = bodyResult loopbody })
-        _ -> id
-  mMod $ fullWalkExpM walker walker_kernel e
+  fullWalkExpM walker walker_kernel e
 
   let debug = do
         putStrLn $ replicate 70 '~'
@@ -250,33 +275,19 @@ handleNewArray :: LoreConstraints lore =>
 handleNewArray x xmem = do
   interferences <- asks ctxInterferences
 
-  -- If the statement is inside a loop body, and the loop result contains this
-  -- array, abort!  That is a sign of trouble.
-  --
-  -- This can be described in more general terms with interference, but the
-  -- existing interference analysis is not good enough, since it would have to
-  -- be rerun in the middle of the analysis in the case of loop memory block
-  -- mergings.  We *can* do that, but it might get messy (or there might be a
-  -- different way).  This hack seems an okay compromise.
-  cur_loop_body_res <- asks ctxCurLoopBodyRes
-  let loop_disabled = Var x `L.elem` cur_loop_body_res
-
-  let notTheSame :: LoreConstraints lore =>
-                    VName -> Names -> FindM lore Bool
+  let notTheSame :: Monad m => VName -> Names -> m Bool
       notTheSame kmem _used_mems = return (kmem /= xmem)
 
-  let noneInterfere :: LoreConstraints lore =>
-                       VName -> Names -> FindM lore Bool
+  let noneInterfere :: Monad m => VName -> Names -> m Bool
       noneInterfere _kmem used_mems =
-        -- A memory block can have already been reused.  For safety's sake, we
-        -- also check for interference with any previously merged blocks.  Might
-        -- not be necessary?
+        -- A memory block can have already been reused.  We also check for
+        -- interference with any previously merged blocks.
         return $ all (\used_mem -> not $ S.member xmem
                                    $ lookupEmptyable used_mem interferences)
         $ S.toList used_mems
 
-  let sameSpace :: LoreConstraints lore =>
-                   VName -> Names -> FindM lore Bool
+  let sameSpace :: MonadReader Context m =>
+                   VName -> Names -> m Bool
       sameSpace kmem _used_mems = do
         kspace <- lookupSpace kmem
         xspace <- lookupSpace xmem
@@ -361,21 +372,14 @@ handleNewArray x xmem = do
         -- of the two sizes.
         sizesMatch used_mems <||> sizesCanBeMaxed kmem
 
-  let canBeUsed t = and <$> mapM (($ t) . uncurry) [notTheSame, noneInterfere,
-                                                    sameSpace, sizesWorkOut]
+  let canBeUsed t = and <$> mapM (($ t) . uncurry)
+                    [notTheSame, noneInterfere, sameSpace, sizesWorkOut]
   cur_uses <- gets curUses
   found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
 
   actual_vars <- lookupActualVars x
-  existentials <- asks ctxExistentials
-  let base_disabled =
-        loop_disabled -- Described at its definition.
-        || S.null actual_vars -- If no variable will be changed, don't change
-                              -- any state.
-        || any (`S.member` existentials) actual_vars -- Don't mess with
-                                                     -- existentials!
-  case (base_disabled, found_use) of
-    (False, (kmem, _) : _) -> do
+  case found_use of
+    (kmem, _) : _ -> do
       -- There is a previous memory block that we can use.  Record the mapping.
       insertUse kmem xmem
       forM_ actual_vars $ \var -> do
@@ -396,7 +400,7 @@ handleNewArray x xmem = do
     _ ->
       -- There is no previous memory block available for use.  Record that this
       -- memory block is available.
-      unless (S.member x existentials) $ insertUse xmem xmem
+      insertUse xmem xmem
 
   let debug = found_use `seq` do
         putStrLn $ replicate 70 '~'
@@ -404,7 +408,6 @@ handleNewArray x xmem = do
         putStrLn ("var: " ++ pretty x)
         putStrLn ("actual vars: " ++ prettySet actual_vars)
         putStrLn ("mem: " ++ pretty xmem)
-        putStrLn ("loop disabled: " ++ show loop_disabled)
         putStrLn ("cur uses: " ++ show cur_uses)
         putStrLn ("found use: " ++ show found_use)
         putStrLn $ replicate 70 '~'
