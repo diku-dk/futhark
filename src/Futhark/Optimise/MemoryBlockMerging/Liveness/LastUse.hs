@@ -150,27 +150,38 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   let e_free_vars = freeInExp e
   e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
 
+  first_uses_outer <- asks ctxCurFirstUsesOuter
   -- Then handle the pattern elements by themselves again.
   forM_ patvalelems $ \(PatElem x _ _) ->
     -- Set all memory blocks being used as optimistic last uses.
     forM_ (S.toList e_mems) $ \mem -> do
-      first_uses_outer <- asks ctxCurFirstUsesOuter
-      unless (mem `S.member` first_uses_outer) $
-        setOptimistic mem (FromStm x)
+      -- If the memory has its first use outside the current body, it is
+      -- dangerous to set its last use to be in a statement inside the body,
+      -- since the body can be run multiple times in cases of loops or kernels.
+      -- We only set the last use of a memory to this statement if it also has
+      -- its first use inside the current body.
+      unless (mem `S.member` first_uses_outer) $ setOptimistic mem (FromStm x)
 
-      -- If memory block t aliases memory block u (meaning that the memory of
-      -- t *can* be the memory of u), and u has a potential last use here,
-      -- then t also has a potential last use here (the relation is not
-      -- commutative, so it does not work the other way round).
-      mem_aliases <- asks ctxMemAliases
-      let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
-      forM_ reverse_mem_aliases $ \mem' ->
-        -- FIXME: This is actually more conservative than it needs to be, in
-        -- that we set the last use of the memory aliasing mem to be at this
-        -- statement, which will later through aliasing cover all its aliased
-        -- memory blocks, including both mem -- which should be included --
-        -- and possibly some other memory block.
-        setOptimistic mem' (FromStm x)
+      -- If the memory has its first use outside the current body, we need to
+      -- find its actual last use (if it occurs in the body) through memory
+      -- aliases.  Note that while it is not wrong to run the code below also
+      -- when the memory has its first use inside the body, in that case it
+      -- should not be necessary, and would result in a too conservative
+      -- analysis.  As an example, see tests/mix/loop-interference-use.fut.
+      when (mem `S.member` first_uses_outer) $ do
+        -- If memory block t aliases memory block u (meaning that the memory of
+        -- t *can* be the memory of u), and u has a potential last use here,
+        -- then t also has a potential last use here (the relation is not
+        -- commutative, so it does not work the other way round).
+        mem_aliases <- asks ctxMemAliases
+        let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
+        forM_ reverse_mem_aliases $ \mem' ->
+          -- FIXME: This is actually more conservative than it needs to be, in
+          -- that we set the last use of the memory aliasing mem to be at this
+          -- statement, which will later through aliasing cover all its aliased
+          -- memory blocks, including both mem -- which should be included --
+          -- and possibly some other memory block.
+          setOptimistic mem' (FromStm x)
 
   withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
