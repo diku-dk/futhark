@@ -59,9 +59,9 @@ futhark-bench $flags --json \
               "$base/measurements_without-coalescing_without-reuse.json" . \
     || true
 
-IN_PLACE_LOWERING=0 \
-                 MEMORY_BLOCK_MERGING_COALESCING=1 \
-                 MEMORY_BLOCK_MERGING_REUSE=1 \
-                 futhark-bench $flags --json \
-                 "$base/measurements_with-coalescing_with-reuse.json" . \
+export IN_PLACE_LOWERING=0
+export MEMORY_BLOCK_MERGING_COALESCING=1
+export MEMORY_BLOCK_MERGING_REUSE=1
+futhark-bench $flags --json \
+              "$base/measurements_with-coalescing_with-reuse.json" . \
     || true
