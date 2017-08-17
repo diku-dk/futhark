@@ -143,13 +143,19 @@ recordMaxMapping mem y =
 
 -- Run a monad with a local copy of the uses.  We don't want any new uses in
 -- nested bodies to be available for merging into when we are back in the main
--- body.
+-- body, but we do want updates to existing uses to be propagated.
 withLocalUses :: LoreConstraints lore =>
                  FindM lore a -> FindM lore a
 withLocalUses m = do
-  uses <- gets curUses
+  uses_before <- gets curUses
   res <- m
-  modify $ \cur -> cur { curUses = uses }
+  uses_after <- gets curUses
+  -- Only take the results whose memory block keys were also present prior to
+  -- traversing the sub-body.
+  let uses_before_updated = M.filterWithKey
+                            (\mem _ -> mem `S.member` M.keysSet uses_before)
+                            uses_after
+  modify $ \cur -> cur { curUses = uses_before_updated }
   return res
 
 coreReuseFunDef :: MonadFreshNames m =>
@@ -274,9 +280,8 @@ handleNewArray x xmem = do
 
   let noneInterfere :: Monad m => VName -> Names -> m Bool
       noneInterfere _kmem used_mems =
-        -- A memory block can have already been reused.  For safety's sake, we
-        -- also check for interference with any previously merged blocks.  Might
-        -- not be necessary?
+        -- A memory block can have already been reused.  We also check for
+        -- interference with any previously merged blocks.
         return $ all (\used_mem -> not $ S.member xmem
                                    $ lookupEmptyable used_mem interferences)
         $ S.toList used_mems

@@ -130,7 +130,9 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   -- and not in some statement in the sub-body.  See
   -- 'tests/reuse/loop/copy-from-outside.fut for an example of this.
   cur_first_uses <- gets curFirstUses
-  let mMod = local $ \ctx -> ctx { ctxCurFirstUsesOuter = cur_first_uses }
+  let mMod = case e of
+        If{} -> id -- If is the only other expression with a body.
+        _ -> local $ \ctx -> ctx { ctxCurFirstUsesOuter = cur_first_uses }
 
   -- First handle all pattern elements by themselves.
   forM_ patvalelems $ \(PatElem x _ membound) ->
