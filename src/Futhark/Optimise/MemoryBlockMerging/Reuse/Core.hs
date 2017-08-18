@@ -47,7 +47,9 @@ data Context = Context { ctxFirstUses :: FirstUses
                          -- ^ maps an array name to (aliased) array names
                          --   used in cases of loops/kernels. (equivalent patterns)
                        , ctxExistentials :: Names
-                         -- ^ names in the existential context
+                         -- ^ array names mapped to an existential memory block,
+                         --   an existential memory block is one appearing in the
+                         --   existential context of some pattern (stmt).
                        , ctxVarPrimExps :: M.Map VName (PrimExp VName)
                          -- ^ maps a size variable to its primexp
                        , ctxSizeVarsUsesBefore :: M.Map VName Names
