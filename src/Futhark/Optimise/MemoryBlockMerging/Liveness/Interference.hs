@@ -241,7 +241,9 @@ lastUsesInStm stm@(Let _ _ e) = do
 -- only the simplest of kernels (one input, one output, returns in thread).
 --
 -- FIXME: Add support for kernels with multiple gtids, and loop bodies with
--- nestings -- both required to support multidimensional maps.
+-- nestings -- both required to support multidimensional maps.  Remember to
+-- check that the index functions match, e.g. if one of the arrays is
+-- transposed.
 --
 -- FIXME: Add support for other 'KernelResult's?
 --

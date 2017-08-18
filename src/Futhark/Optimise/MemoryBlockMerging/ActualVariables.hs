@@ -68,6 +68,22 @@ findActualVariables var_mem_mappings first_uses fundef =
       actual_variables = fst $ execRWS m context M.empty
   in actual_variables
 
+lookInFParam :: LoreConstraints lore =>
+                FParam lore -> FindM lore ()
+lookInFParam (Param v _) =
+  recordActuals v $ S.singleton v
+
+lookInLParam :: LoreConstraints lore =>
+                LParam lore -> FindM lore ()
+lookInLParam (Param v _) =
+  recordActuals v $ S.singleton v
+
+lookInLambda :: LoreConstraints lore =>
+                Lambda lore -> FindM lore ()
+lookInLambda (Lambda params body _) = do
+  forM_ params lookInLParam
+  lookInBody body
+
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
@@ -183,22 +199,20 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
       let ielem = head patvalelems -- Should be okay.
           var = patElemName ielem
       case patElemAttr ielem of
-        ExpMem.ArrayMem{} -> do
+        ExpMem.ArrayMem{} ->
           -- Disable merging for index expressions that return arrays.  Maybe
-          -- too restrictive.
-          recordActuals var S.empty
-          -- Make sure the source also updates the memory of the index when
-          -- updated.  The array might be an aliasing operation, in which case
-          -- we try to find the original array.
-          orig' <- fromMaybe orig <$> aliasOpRoot orig
-          recordActuals orig' $ S.fromList [orig', var]
+          -- too restrictive.  Make sure the source also updates the memory of
+          -- the index when updated.  The array might be an aliasing operation,
+          -- in which case we try to find the original array.
+          aliasOpHandleVar orig var
         _ -> return ()
 
     -- Support reusing the memory of reshape operations by recording the origin
     -- array that is being reshaped.
     BasicOp (Reshape _ shapechange_var orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
-        mem_orig <- M.lookup orig <$> asks ctxVarToMem
+        orig' <- aliasOpRoot' orig
+        mem_orig <- M.lookup orig' <$> asks ctxVarToMem
         case (shapechange_var, mem_orig) of
           ([_], Just (MemorySrc _ _ (Shape [_]))) ->
             recordActuals var $ S.fromList [var, orig]
@@ -209,21 +223,21 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
             -- FIXME: The problem with these more complex cases is that a slice
             -- is relative to the shape of the reshaped array, and not the
             -- original array.  Disabled for now.
-        recordActuals orig $ S.fromList [orig, var]
+        recordActuals orig' $ S.fromList [orig', var]
 
     -- For the other aliasing operations, disable their use for now.  If the
     -- source has a change of memory block, make sure to change this as well.
     BasicOp (Rearrange _ _ orig) ->
-      aliasOpHandle patvalelems orig
+      aliasOpHandle orig patvalelems
 
     BasicOp (Split _ _ _ orig) ->
-      aliasOpHandle patvalelems orig
+      aliasOpHandle orig patvalelems
 
     BasicOp (Rotate _ _ orig) ->
-      aliasOpHandle patvalelems orig
+      aliasOpHandle orig patvalelems
 
     BasicOp (Opaque (Var orig)) ->
-      aliasOpHandle patvalelems orig
+      aliasOpHandle orig patvalelems
 
     _ -> forM_ patvalelems $ \(PatElem var _ membound) -> do
       let body_vars = S.toList $ findAllExpVars e
@@ -237,35 +251,48 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
 
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
-          { walkOnBody = lookInBody }
+          { walkOnBody = lookInBody
+          , walkOnFParam = lookInFParam
+          , walkOnLParam = lookInLParam
+          }
         walker_kernel = identityKernelWalker
           { walkOnKernelBody = coerce . lookInBody
           , walkOnKernelKernelBody = coerce . lookInKernelBody
-          , walkOnKernelLambda = coerce . lookInBody . lambdaBody
+          , walkOnKernelLambda = coerce . lookInLambda
+          , walkOnKernelLParam = lookInLParam
           }
 
 -- If we have a rotate or similar, we want to find the original array and
 -- associate *that* with this aliasing array, so that changes to the original
 -- array will affect this one as well.
-aliasOpHandle :: [PatElem lore] -> VName -> FindM lore ()
-aliasOpHandle patvalelems orig =
-  forM_ (map patElemName patvalelems) $ \var -> do
-    recordActuals var S.empty
-    orig' <- fromJust "at some point there will have been a proper statement"
-             <$> aliasOpRoot orig
-    recordActuals orig' $ S.fromList [orig', var]
+aliasOpHandle :: VName -> [PatElem lore] -> FindM lore ()
+aliasOpHandle orig patvalelems =
+  forM_ (map patElemName patvalelems) $ aliasOpHandleVar orig
+
+aliasOpHandleVar :: VName -> VName -> FindM lore ()
+aliasOpHandleVar orig var = do
+  recordActuals var S.empty
+  orig' <- aliasOpRoot' orig
+  recordActuals orig' $ S.fromList [orig', var]
 
 aliasOpRoot :: VName -> FindM lore (Maybe VName)
 aliasOpRoot orig = do
   current_actuals <- get
-  case S.null <$> M.lookup orig current_actuals of
+  return $ case S.null <$> M.lookup orig current_actuals of
     -- If the original array is itself an aliasing operation, find the *actual*
-    -- original array.
+    -- original array.  There can be more than one reference.  We just pick the
+    -- first one -- any one should do, since there is a transitive closure
+    -- calculation later on.
     Just True -> case M.keys (M.filter (orig `S.member`) current_actuals) of
-      [orig'] -> return $ Just orig'
-      _ -> return Nothing
+      orig' : _ -> Just orig'
+      _ -> Nothing
     -- Else, just return orig.
-    _ -> return $ Just orig
+    _ -> Just orig
+
+aliasOpRoot' :: VName -> FindM lore VName
+aliasOpRoot' orig =
+  fromJust ("at some point there will have been a proper statement: "
+            ++ pretty orig) <$> aliasOpRoot orig
 
 lookupGivesMem :: VName -> VName -> FindM lore Bool
 lookupGivesMem mem v = do

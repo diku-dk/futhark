@@ -1,4 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- | Safety condition 3 verification.
 module Futhark.Optimise.MemoryBlockMerging.Coalescing.SafetyCondition3
   ( getVarUsesBetween
@@ -10,7 +13,9 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.ExplicitMemory (
+  ExplicitMemory, ExplicitMemorish)
+import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
@@ -28,12 +33,19 @@ data Current = Current
   }
   deriving (Show)
 
-newtype FindM a = FindM { unFindM :: RWS Context () Current a }
+newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
             MonadState Current)
 
-modifyCurVars :: (Names -> Names) -> FindM ()
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             FullWalk lore)
+
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
+
+modifyCurVars :: (Names -> Names) -> FindM lore ()
 modifyCurVars f = modify $ \c -> c { curVars = f $ curVars c }
 
 -- Find all the variables present between the creations of two variables (not
@@ -47,11 +59,18 @@ getVarUsesBetween fundef src dst =
       res = curVars $ fst $ execRWS m context (Current False False S.empty)
   in res
 
-lookInBody :: Body ExplicitMemory -> FindM ()
+lookInBody :: LoreConstraints lore =>
+              Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
-lookInStm :: Stm ExplicitMemory -> FindM ()
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody lore -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInStm :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
 lookInStm stm@(Let _ _ e) = do
   let new_decls = newDeclarationsStm stm
 
@@ -109,6 +128,10 @@ lookInStm stm@(Let _ _ e) = do
       _ -> do
         -- In the general case, just look through any 'Body' you can find.  (This
         -- is the case for loops.)
-        let walker = identityWalker { walkOnBody = lookInBody
-                                    }
-        walkExpM walker e
+        let walker = identityWalker { walkOnBody = lookInBody }
+            walker_kernel = identityKernelWalker
+              { walkOnKernelBody = coerce . lookInBody
+              , walkOnKernelKernelBody = coerce . lookInKernelBody
+              , walkOnKernelLambda = coerce . lookInBody . lambdaBody
+              }
+        fullWalkExpM walker walker_kernel e
