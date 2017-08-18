@@ -216,17 +216,10 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
             return (gtid, gdim, ltid, gdim)
 
           inner_ltid <- newVName "inner_ltid"
-          smaller <- newVName "group_size_is_smaller"
           inner_ldim <- newVName "inner_ldim"
-          let is_group_size_smaller =
-                mkLet' [] [Ident smaller $ Prim Bool] $
-                BasicOp $ CmpOp (CmpSlt Int32) (spaceGroupSize kspace) inner_gdim
-              smaller_body = Body () [] [spaceGroupSize kspace]
-              not_smaller_body = Body () [] [inner_gdim]
-              compute_tiled_group_size =
+          let compute_tiled_group_size =
                 mkLet' [] [Ident inner_ldim $ Prim int32] $
-                If (Var smaller) smaller_body not_smaller_body $ ifCommon [Prim int32]
-
+                BasicOp $ BinOp (SMin Int32) (spaceGroupSize kspace) inner_gdim
               structure = NestedThreadSpace $ outer ++ [(inner_gtid, inner_gdim,
                                                          inner_ltid, Var inner_ldim)]
           ((num_threads, num_groups), num_bnds) <- runBinder $ do
@@ -247,7 +240,7 @@ is1_5dTileable branch_variant kspace variance block_size arr block_param = do
                                , spaceNumThreads = num_threads
                                , spaceStructure = structure
                                }
-          return ([is_group_size_smaller, compute_tiled_group_size] ++ num_bnds,
+          return (compute_tiled_group_size : num_bnds,
                   kspace')
   return $ do
     (outer_block_param, kstms) <- tile1d kspace block_size block_param
