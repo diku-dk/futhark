@@ -108,7 +108,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
 
   -- Special handling of loops, ifs, etc.
   case e of
-    DoLoop _mergectxparams mergevalparams _loopform body -> do
+    DoLoop _mergectxparams mergevalparams loopform body -> do
       let body_vars0 = mapMaybe (fromVar . snd) mergevalparams
           body_vars1 = map (paramName . fst) mergevalparams
           body_vars2 = S.toList $ findAllExpVars e
@@ -146,6 +146,13 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
         -- it.  If we were to accept it, we would need to record what other
         -- variables to change as well.  Seems hard.
         recordActuals var S.empty
+
+      case loopform of
+        ForLoop _ _ _ loop_vars ->
+          -- Link 'array' to 'lvar' in 'for lvar in array' loop expressions.
+          forM_ loop_vars $ \(Param lvar _, array) ->
+            aliasOpHandleVar array lvar
+        WhileLoop _ -> return ()
 
     If _se body_then body_else _types ->
       -- We don't want to coalesce the existiential memory block of the if.
