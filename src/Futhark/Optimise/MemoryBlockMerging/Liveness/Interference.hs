@@ -18,6 +18,7 @@ import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
   ExplicitMemorish, ExplicitMemory, InKernel)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
@@ -45,6 +46,7 @@ newtype FindM lore a = FindM
             MonadState CurrentlyAlive)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
+                             KernelInterferences lore,
                              CanShare lore,
                              FullWalk lore)
 
@@ -140,6 +142,9 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
             stm_interferences
       tell stm_interferences'
 
+      extra_kernel_interferences <- findKernelRaceConditionInterferences e
+      tell extra_kernel_interferences
+
       forM_ patvalelems $ \(PatElem var _ _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
         mapM_ kill $ S.toList last_uses_var
@@ -152,6 +157,9 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
             putStrLn "interferences': "
             forM_ (M.assocs $ getInterferencesMap stm_interferences') $ \(v, ns) ->
               putStrLn ("  " ++ pretty v ++ ": " ++ prettySet ns)
+            unless (L.null extra_kernel_interferences)
+              $ putStrLn ("extra kernel interferences: " ++
+                          show extra_kernel_interferences)
             putStrLn $ replicate 70 '~'
       doDebug debug
 
@@ -213,6 +221,88 @@ lastUsesInStm stm@(Let _ _ e) = do
           , walkOnKernelKernelBody = mapM_ lookLUInStm . kernelBodyStms
           , walkOnKernelLambda = mapM_ lookLUInStm . bodyStms . lambdaBody
           }
+
+firstUsesInExp :: LoreConstraints lore =>
+                  Exp lore -> FindM lore [(VName, ExpMem.IxFun)]
+firstUsesInExp e = do
+  let m = lookFUInExp e
+  first_uses <- asks ctxFirstUses
+  return $ snd $ evalRWS m first_uses ()
+  where lookFUInStm :: LoreConstraints lore =>
+                       Stm lore -> RWS FirstUses [(VName, ExpMem.IxFun)] () ()
+        lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
+          forM_ patvalelems $ \(PatElem patname _ membound) ->
+            case membound of
+              ExpMem.ArrayMem _ _ _ _ ixfun -> do
+                fus <- lookupEmptyable patname <$> ask
+                forM_ fus $ \fu -> tell [(fu, ixfun)]
+              _ -> return ()
+          lookFUInExp e_stm
+
+        lookFUInExp :: LoreConstraints lore =>
+                       Exp lore -> RWS FirstUses [(VName, ExpMem.IxFun)] () ()
+        lookFUInExp = fullWalkExpM fu_walker fu_walker_kernel
+          where fu_walker = identityWalker
+                  { walkOnBody = mapM_ lookFUInStm . bodyStms }
+                fu_walker_kernel = identityKernelWalker
+                  { walkOnKernelBody = mapM_ lookFUInStm . bodyStms
+                  , walkOnKernelKernelBody = mapM_ lookFUInStm . kernelBodyStms
+                  , walkOnKernelLambda = mapM_ lookFUInStm . bodyStms . lambdaBody
+                  }
+
+class KernelInterferences lore where
+  findKernelRaceConditionInterferences :: Exp lore -> FindM lore [(VName, Names)]
+
+instance KernelInterferences ExplicitMemory where
+  findKernelRaceConditionInterferences e = case e of
+    Op (ExpMem.Inner Kernel{}) -> do
+      fus <- firstUsesInExp e
+      return $ map (\(t, u) -> (fst t, S.singleton (fst u)))
+        $ filter interferes [(t, u) | t <- fus, u <- fus]
+    _ -> return []
+    where interferes ((v0, ixfun0), (v1, ixfun1)) =
+            v0 /= v1 && (ixFunHasIndex ixfun0 || ixFunHasIndex ixfun1) &&
+            not (ixFunsContained ixfun0 ixfun1)
+
+-- Does an index function contain an Index expression?
+--
+-- If the index function of the memory annotation uses an index, it means that
+-- the array creation does not refer to the entire array.  It is an array
+-- creation, but only partially: It creates part of the array, and another part
+-- is created in another loop iteration or kernel thread.  The danger in
+-- declaring this memory a first use lies in how it can then be reused later in
+-- the iteration/thread by some memory with a *different* index in its memory
+-- annotation index function, which can affect reads in other threads.
+ixFunHasIndex :: ExpMem.IxFun -> Bool
+ixFunHasIndex ixfun = case ixfun of
+  IxFun.Direct _ -> False
+  IxFun.Permute ixfun' _ -> ixFunHasIndex ixfun'
+  IxFun.Rotate ixfun' _ -> ixFunHasIndex ixfun'
+  IxFun.Index{} -> True
+  IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
+  IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
+
+-- FIXME: This can be less conservative.  The two index functions should fully
+-- overlap in their index ranges.
+ixFunsContained :: ExpMem.IxFun -> ExpMem.IxFun -> Bool
+ixFunsContained ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
+  where primEq a b = case (a, b) of
+          (IxFun.Direct sa, IxFun.Direct sb) ->
+            sa == sb
+          (IxFun.Permute a1 pa, IxFun.Permute b1 pb) ->
+            a1 `primEq` b1 && pa == pb
+          (IxFun.Rotate a1 ia, IxFun.Rotate b1 ib) ->
+            a1 `primEq` b1 && ia == ib
+          (IxFun.Index a1 sa, IxFun.Index b1 sb) ->
+            a1 `primEq` b1 && sa == sb
+          (IxFun.Reshape a1 sa, IxFun.Reshape b1 sb) ->
+            a1 `primEq` b1 && sa == sb
+          (IxFun.Repeat a1 ssa sa, IxFun.Repeat b1 ssb sb) ->
+            a1 `primEq` b1 && ssa == ssb && sa == sb
+          _ -> False
+
+instance KernelInterferences InKernel where
+  findKernelRaceConditionInterferences _ = return []
 
 -- If an expression reads from one array and writes to another array, we want to
 -- check if the two arrays can share the same memory.  If that is the case, we
