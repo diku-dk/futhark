@@ -98,7 +98,13 @@ transformStm (Let (Pattern patctxelems patvalelems) () e) = do
 
           res' = zipWith fixResRecord [(0::Int)..] res
           body' = body { bodyResult = res' }
-      return $ DoLoop mergectxparams' mergevalparams' loopform body'
+
+      loopform' <- case loopform of
+        ForLoop i it bound loop_vars -> do
+          loop_vars' <- mapM transformForLoopVar loop_vars
+          return $ ForLoop i it bound loop_vars'
+        WhileLoop _ -> return loopform
+      return $ DoLoop mergectxparams' mergevalparams' loopform' body'
     _ -> return e'
   return $ Let (Pattern patctxelems patvalelems') () e''
   where mapper = identityMapper
@@ -167,6 +173,13 @@ transformLambda (Lambda params body types) = do
   params' <- mapM transformLParam params
   body' <- transformBody body
   return $ Lambda params' body' types
+
+transformForLoopVar :: LoreConstraints lore =>
+                       (LParam lore, VName) ->
+                       FindM lore (LParam lore, VName)
+transformForLoopVar (Param x membound, array) = do
+  membound' <- newMemBound membound x
+  return (Param x membound', array)
 
 newMemBound :: ExpMem.MemBound u -> VName -> FindM lore (ExpMem.MemBound u)
 newMemBound membound var = do
