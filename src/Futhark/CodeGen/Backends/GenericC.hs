@@ -587,11 +587,11 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   ret <- newVName "main_ret"
   refcount <- asks envFatMemory
   let readstms = readInputs refcount args
-  (argexps, prepare) <- collect' $ mapM prepareArg inputs
-  (argnames_mem_copies, prepare_mem_copies) <- collect' $ mapM prepareMemCopy inputs
-  (argexps', copy_mem_before_run) <-
-    collect' $ sequence $ zipWith3 copyMemBeforeRun inputs argexps argnames_mem_copies
-  free_mem_copies <- collect $ zipWithM_ freeMemCopy inputs argnames_mem_copies
+  (argexps_mem_copies, prepare) <- collect' $ mapM prepareArg inputs
+  let argexps = zipWith fromMaybe
+                (map (\p -> [C.cexp|$id:(paramName p)|]) inputs)
+                argexps_mem_copies
+  free_mem_copies <- collect $ zipWithM_ freeMemCopy inputs argexps_mem_copies
   -- unpackResults may copy back to DefaultSpace.
   unpackstms <- unpackResults ret outputs
   free_out <- freeResults ret outputs
@@ -603,18 +603,8 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
 
   let run_it = [C.citems|
                   /* Run the program once. */
-                  if (perform_warmup || num_runs > 1) {
-                    /* When running the program more than once, make sure to
-                       copy the input memory, as it may be overwritten. */
-                    $items:copy_mem_before_run
-                  }
                   t_start = get_wall_time();
-                  if (perform_warmup || num_runs > 1) {
-                    $id:ret = $id:(funName fname)($args:argexps');
-                  }
-                  else {
-                    $id:ret = $id:(funName fname)($args:argexps);
-                  }
+                  $id:ret = $id:(funName fname)($args:argexps);
                   $stms:pre_timing
                   t_end = get_wall_time();
                   long int elapsed_usec = t_end - t_start;
@@ -634,15 +624,15 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
     $items:inputdecls
     $ty:crettype $id:ret;
     $stms:readstms
-    $items:prepare
-    $items:prepare_mem_copies
     $items:outputdecls
 
     /* Warmup run */
     if (perform_warmup) {
       time_runs = 0;
+      $items:prepare
       $items:run_it
       $items:free_out
+      $items:free_mem_copies
     }
     time_runs = 1;
     /* Proper run. */
@@ -650,9 +640,11 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
       if (run == num_runs-1) {
         detail_timing = 1;
       }
+      $items:prepare
       $items:run_it
       if (run < num_runs-1) {
         $items:free_out
+        $items:free_mem_copies
       }
     }
 
@@ -661,7 +653,6 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
     $items:unpackstms
     $stms:printstms
 
-    $items:free_mem_copies
     $items:free_out
   }
                 |],
@@ -685,50 +676,24 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
         freeParam ScalarParam{} =
           return ()
 
-prepareArg :: Param -> CompilerM op s C.Exp
-prepareArg (MemParam name (Space sid)) = do
-  -- Futhark main expects some other memory space than default, so
-  -- create a new memory block and copy it there.
-  name' <- newVName $ baseString name <> "_" <> sid
+prepareArg :: Param -> CompilerM op s (Maybe C.Exp)
+prepareArg (MemParam name space) = do
+  -- A program might write to its input parameters, so create a new memory block
+  -- and copy the source there.  This way the program can be run more than once.
+  name' <- newVName $ baseString name <> "_copy"
   copy <- asks envCopy
   let size = [C.cexp|$id:name.size|]
       dest = rawMem' True name'
       src = rawMem' True name
-  declMem name' $ Space sid
-  allocMem name' size $ Space sid
-  copy dest [C.cexp|0|] (Space sid) src [C.cexp|0|] DefaultSpace size
-  return [C.cexp|$id:name'|]
+  declMem name' space
+  allocMem name' size space
+  copy dest [C.cexp|0|] space src [C.cexp|0|] DefaultSpace size
+  return $ Just [C.cexp|$id:name'|]
+prepareArg _ = return Nothing
 
-prepareArg p = return [C.cexp|$exp:(paramName p)|]
-
-prepareMemCopy :: Param -> CompilerM op s (Maybe VName)
-prepareMemCopy (MemParam name space) = do
-  name_copy <- newVName $ baseString name <> "_copy"
-  declMem name_copy space
-  let size = [C.cexp|$id:name.size|]
-
-  alloc_mem <- collect $ allocMem name_copy size space
-  item [C.citem|
-        if (perform_warmup || num_runs > 1) {
-          $items:alloc_mem
-        }
-       |]
-  return $ Just name_copy
-prepareMemCopy _ = return Nothing
-
-copyMemBeforeRun :: Param -> C.Exp -> Maybe VName -> CompilerM op s C.Exp
-copyMemBeforeRun (MemParam name space) arg (Just arg_mem_copy) = do
-  copy <- asks envCopy
-  let size = [C.cexp|$id:name.size|]
-      dest = rawMem' True arg_mem_copy
-      src = rawMem' True arg
-  copy dest [C.cexp|0|] space src [C.cexp|0|] space size
-  return [C.cexp|$id:arg_mem_copy|]
-copyMemBeforeRun _ arg _ = return arg
-
-freeMemCopy :: Param -> Maybe VName -> CompilerM op s ()
-freeMemCopy (MemParam _ space) (Just name_copy) =
-  unRefMem name_copy space
+freeMemCopy :: Param -> Maybe C.Exp -> CompilerM op s ()
+freeMemCopy (MemParam _ space) (Just mem_copy) =
+  unRefMem mem_copy space
 freeMemCopy _ _ = return ()
 
 readInputs :: Bool -> [ExternalValue] -> [C.Stm]
