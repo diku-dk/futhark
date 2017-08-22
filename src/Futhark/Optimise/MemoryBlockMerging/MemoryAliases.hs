@@ -36,7 +36,7 @@ type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalkAliases lore)
 
 recordMapping :: VName -> Names -> FindM lore ()
-recordMapping mem names = tell [M.singleton mem names]
+recordMapping mem mems = tell [M.singleton mem (S.delete mem mems)]
 
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
@@ -91,8 +91,8 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
       var_to_mem <- ask
       let mems = map memSrcName $ mapMaybe (`M.lookup` var_to_mem) ress
       forM_ patctxelems $ \patelem -> case patelem of
-          (PatElem var _ (_, ExpMem.MemMem{})) ->
-            recordMapping var (S.fromList mems)
+          (PatElem patmem _ (_, ExpMem.MemMem{})) ->
+            recordMapping patmem $ S.fromList mems
           _ -> return ()
     _ -> return ()
 
