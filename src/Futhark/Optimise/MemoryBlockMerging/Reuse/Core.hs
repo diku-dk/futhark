@@ -47,7 +47,9 @@ data Context = Context { ctxFirstUses :: FirstUses
                          -- ^ maps an array name to (aliased) array names
                          --   used in cases of loops/kernels. (equivalent patterns)
                        , ctxExistentials :: Names
-                         -- ^ names in the existential context
+                         -- ^ array names mapped to an existential memory block,
+                         --   an existential memory block is one appearing in the
+                         --   existential context of some pattern (stmt).
                        , ctxVarPrimExps :: M.Map VName (PrimExp VName)
                          -- ^ maps a size variable to its primexp
                        , ctxSizeVarsUsesBefore :: M.Map VName Names
@@ -188,9 +190,10 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
         putStrLn $ replicate 70 '='
         putStrLn "coreReuseFunDef reuse results:"
         forM_ (M.assocs (curVarToMemRes res)) $ \(src, dstmem) ->
-          putStrLn ("Source " ++ pretty src ++ " reuses "
-                    ++ pretty (memLocName dstmem) ++ "; ixfun: "
-                    ++ show (memLocIxFun dstmem))
+          putStrLn ("Source " ++ pretty src ++ " (old: "
+                    ++ pretty (memSrcName $ fromJust "should exist" $ M.lookup src var_to_mem)
+                    ++ ") reuses " ++ pretty (memLocName dstmem) ++ ";\nixfun: "
+                    ++ pretty (memLocIxFun dstmem))
         putStrLn ""
         forM_ (M.assocs (curVarToMaxExpRes res)) $ \(src, maxs) ->
           putStrLn ("Size of allocation of mem " ++ pretty src ++ " is now maximum of "

@@ -598,7 +598,7 @@ printValue = fmap concat . mapM (uncurry printValue')
           return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
 prepareEntry :: (Name, Imp.Function op) -> CompilerM op s
-                (String, [String], [PyStmt], [PyStmt], [PyStmt],
+                (String, [String], [PyStmt], [PyStmt], [PyStmt], [PyStmt],
                  [(Imp.ExternalValue, PyExp)], [PyStmt])
 prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
@@ -630,15 +630,14 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
                map (Var . extValueDescName) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
-  let inputArgs = zipWith fromMaybe
-                  (map (compileName . Imp.paramName) inputs)
-                  argexps_mem_copies
+  let argexps_lib = map (compileName . Imp.paramName) inputs
+      argexps_bin = zipWith fromMaybe argexps_lib argexps_mem_copies
       fname' = "self." ++ futharkFun (nameToString fname)
-      funCall = simpleCall fname' (fmap Var inputArgs)
-      call = [Assign funTuple funCall]
+      call_lib = [Assign funTuple $ simpleCall fname' (fmap Var argexps_lib)]
+      call_bin = [Assign funTuple $ simpleCall fname' (fmap Var argexps_bin)]
 
   return (nameToString fname, map extValueDescName args,
-          prepareIn, call, prepareOut,
+          prepareIn, call_lib, call_bin, prepareOut,
           zip results res, prepare_run)
 
 copyMemoryDefaultSpace :: VName -> PyExp -> VName -> PyExp -> PyExp ->
@@ -653,21 +652,21 @@ copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
 compileEntryFun :: (Name, Imp.Function op)
                 -> CompilerM op s PyFunDef
 compileEntryFun entry = do
-  (fname', params, prepareIn, body, prepareOut, res, _) <- prepareEntry entry
+  (fname', params, prepareIn, body_lib, _, prepareOut, res, _) <- prepareEntry entry
   let ret = Return $ tupleOrSingle $ map snd res
   return $ Def fname' ("self" : params) $
-    prepareIn ++ body ++ prepareOut ++ [ret]
+    prepareIn ++ body_lib ++ prepareOut ++ [ret]
 
 callEntryFun :: [PyStmt] -> (Name, Imp.Function op)
              -> CompilerM op s (PyFunDef, String, PyExp)
 callEntryFun pre_timing entry@(fname, Imp.Function _ _ _ _ _ decl_args) = do
-  (_, _, prepareIn, body, _, res, prepare_run) <- prepareEntry entry
+  (_, _, prepareIn, _, body_bin, _, res, prepare_run) <- prepareEntry entry
 
   let str_input = map readInput decl_args
 
       exitcall = [Exp $ simpleCall "sys.exit" [Field (StringLiteral "Assertion.{} failed") "format(e)"]]
       except' = Catch (Var "AssertionError") exitcall
-      do_run = body ++ pre_timing
+      do_run = body_bin ++ pre_timing
       (do_run_with_timing, close_runtime_file) = addTiming do_run
 
       -- We ignore overflow errors and the like for executable entry
