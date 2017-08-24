@@ -767,13 +767,15 @@ internaliseExp _ (E.Reshape shape e loc) = do
   internaliseOperation "reshape" e $ \v -> do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
-    dims <- I.arrayDims <$> lookupType v
+    old_shape <- I.arrayShape <$> lookupType v
+    let changed_dims = take orig_rank $ I.shapeDims old_shape
     shapeOk <- assertingOne $
                letExp "shape_ok" =<<
-               eAssert (eCmpOp (I.CmpEq I.int32) (prod dims) (prod shape'))
+               eAssert (eCmpOp (I.CmpEq I.int32) (prod changed_dims) (prod shape'))
                loc
-    return $ I.Reshape shapeOk (DimNew <$> shape') v
+    return $ I.Reshape shapeOk (reshapeOuter (DimNew <$> shape') orig_rank old_shape) v
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
+        orig_rank = E.arrayRank $ E.typeOf e
 
 internaliseExp _ (E.Split i splitexp arrexp loc) = do
   splits' <- internaliseExp "n" splitexp
