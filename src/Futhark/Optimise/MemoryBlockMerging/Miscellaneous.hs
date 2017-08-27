@@ -77,6 +77,9 @@ insertOrNew xs m = Just $ case m of
 removeEmptyMaps :: Ord k => M.Map k (S.Set v) -> M.Map k (S.Set v)
 removeEmptyMaps = M.filter (not . S.null)
 
+removeKeyFromMapElems :: (Ord k) => M.Map k (S.Set k) -> M.Map k (S.Set k)
+removeKeyFromMapElems = M.mapWithKey S.delete
+
 newDeclarationsStm :: Stm lore -> [VName]
 newDeclarationsStm (Let (Pattern patctxelems patvalelems) _ e) =
   let new_decls0 = map patElemName (patctxelems ++ patvalelems)
@@ -121,6 +124,12 @@ expandWithAliases mem_aliases = fixpointIterate expand
                                            (S.toList mems))))
                       (M.assocs mems_map))
 
+expandWithAliases' :: MemAliases -> VName -> Names
+expandWithAliases' mem_aliases = fixpointIterate expand . S.singleton
+  where expand :: Names -> Names
+        expand mems =
+          S.unions (mems : map (`lookupEmptyable` mem_aliases) (S.toList mems))
+
 fixpointIterate :: Eq a => (a -> a) -> a -> a
 fixpointIterate f x
   | f x == x = x
@@ -129,6 +138,9 @@ fixpointIterate f x
 fromVar :: SubExp -> Maybe VName
 fromVar (Var v) = Just v
 fromVar _ = Nothing
+
+mapFromListSetUnion :: (Ord k, Ord v) => [(k, S.Set v)] -> M.Map k (S.Set v)
+mapFromListSetUnion = M.unionsWith S.union . map (uncurry M.singleton)
 
 -- Replace variables with subtrees of their constituents wherever possible.  It
 -- naively expands a PrimExp as much as the input map allows, and can enable
