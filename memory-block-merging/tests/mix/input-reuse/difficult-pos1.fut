@@ -1,10 +1,10 @@
--- Similar to difficult-pos0.fut, but with two dimensions.
+-- Similar to reuse/input-reuse/difficult-pos0.fut, but with two dimensions.
+-- Requires coalescing for the input and output memory blocks to have the same
+-- size.
 -- ==
 -- input { [[2, 5, 9], [1, 2, 3]] }
 -- output { [[25, 175, 585], [5, 25, 60]] }
 -- structure gpu { Alloc 0 }
-
--- FIXME: Make loops over more than one dimension work.
 -- structure cpu { Alloc 0 }
 
 let difficult (x: i32): i32 =

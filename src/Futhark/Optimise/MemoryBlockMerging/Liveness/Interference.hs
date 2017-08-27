@@ -10,7 +10,7 @@ module Futhark.Optimise.MemoryBlockMerging.Liveness.Interference
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (mapMaybe, isJust, fromMaybe)
+import Data.Maybe (mapMaybe, fromMaybe, catMaybes)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Writer
@@ -31,6 +31,7 @@ data Context = Context { ctxVarToMem :: VarMemMappings MemorySrc
                        , ctxFirstUses :: FirstUses
                        , ctxLastUses :: LastUses
                        , ctxExistentials :: Names
+                       , ctxLoopCorrespondingVar :: M.Map VName (VName, SubExp)
                        }
   deriving (Show)
 
@@ -90,6 +91,7 @@ findInterferences var_to_mem mem_aliases first_uses last_uses existentials funde
                         , ctxFirstUses = first_uses
                         , ctxLastUses = last_uses
                         , ctxExistentials = existentials
+                        , ctxLoopCorrespondingVar = M.empty
                         }
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
@@ -142,19 +144,29 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
   | otherwise = do
       awakenFirstUses patvalelems
       ctx <- ask
+      let ctx' = ctx { ctxLoopCorrespondingVar =
+                       M.union (ctxLoopCorrespondingVar ctx)
+                       (findLoopCorrespondingVar stm)
+                     }
       let stm_exceptions = fromMaybe [] $ do
             indices <- specialBodyIndices e
             let walker_exc =
                   identityWalker
-                  { walkOnBody = \body -> tell $ interferenceExceptions ctx
-                                          (bodyStms body) (bodyResult body)
-                                          indices Nothing }
+                  { walkOnBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                                              ctx'' = ctx' { ctxLoopCorrespondingVar =
+                                                             M.union (ctxLoopCorrespondingVar ctx') lcv }
+                                          in tell $ interferenceExceptions ctx''
+                                             (bodyStms body') (bodyResult body')
+                                             indices Nothing }
                 walker_kernel_exc =
                   identityKernelWalker
-                  { walkOnKernelBody = \body -> tell $ interferenceExceptions ctx
-                                                (bodyStms body) (bodyResult body)
-                                                indices Nothing
-                  , walkOnKernelKernelBody = \kbody -> tell $ interferenceExceptions ctx
+                  { walkOnKernelBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                                                    ctx'' = ctx' { ctxLoopCorrespondingVar =
+                                                                   M.union (ctxLoopCorrespondingVar ctx') lcv }
+                                                in tell $ interferenceExceptions ctx''
+                                                   (bodyStms body') (bodyResult body')
+                                                   indices Nothing
+                  , walkOnKernelKernelBody = \kbody -> tell $ interferenceExceptions ctx'
                                                        (kernelBodyStms kbody)
                                                        (mapMaybe (\kresult -> case kresult of
                                                                      ThreadsReturn _ se -> Just se
@@ -176,7 +188,7 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
 
       ((), stm_interferences) <- censor (const []) $ listen $ do
         recordNewInterferences stm_mems
-        fullWalkExpM walker walker_kernel e
+        local (const ctx') $ fullWalkExpM walker walker_kernel e
       let stm_interferences' =
             map (\(k, vs) ->
                     (k, S.fromList
@@ -218,6 +230,45 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
                 , walkOnKernelKernelBody = coerce . lookInKernelBody
                 , walkOnKernelLambda = coerce . lookInBody . lambdaBody
                 }
+
+-- For perfectly nested loops.  Make it possible to find the index function for
+-- the outer loop.
+findLoopCorrespondingVar :: LoreConstraints lore =>
+                            Stm lore -> M.Map VName (VName, SubExp)
+findLoopCorrespondingVar (Let (Pattern _patctxelems patvalelems) _
+                         (DoLoop _ _ _ (Body _ stms res))) =
+  M.fromList $ catMaybes $ zipWith findIt patvalelems res
+  where findIt (PatElem pat_v _ (ExpMem.ArrayMem _ _ _ pat_mem _)) (Var res_v)
+          | not (L.null stms) = case L.last stms of
+              -- This is how the program looks after coalescing.
+              Let (Pattern _ [PatElem _last_v
+                              (BindInPlace _ _ (DimFix slice_part : _))
+                              (ExpMem.ArrayMem _ _ _ last_stm_mem _)]) _
+                                (BasicOp bop) ->
+                let res_v'
+                      | Copy copy_v <- bop
+                      , pat_mem == last_stm_mem =
+                        copy_v
+                      | otherwise = res_v
+                in Just (res_v', (pat_v, slice_part))
+              _ -> Nothing
+          | otherwise = Nothing
+        findIt _ _ = Nothing
+findLoopCorrespondingVar _ = M.empty
+
+innermostLoopNestBody :: LoreConstraints lore =>
+                         Body lore -> (Body lore, M.Map VName (VName, SubExp))
+innermostLoopNestBody body = case body of
+  -- This checks for how perfect nested loops looks like after coalescing.  This
+  -- is very brittle.  If it detects such a nesting, it will ask the
+  -- interference exception algorithm to look in the innermost body.
+  Body _ (Let _ _ (BasicOp Scratch{}) :
+          loopstm@(Let _ _ (DoLoop _ _ _ body')) :
+          _) _ -> let (body'', loop_corresponding_var) = innermostLoopNestBody body'
+                  in (body'', M.union
+                              (findLoopCorrespondingVar loopstm)
+                              loop_corresponding_var)
+  _ -> (body, M.empty)
 
 lookInRes :: LoreConstraints lore =>
              [SubExp] -> FindM lore ()
@@ -371,23 +422,32 @@ interferenceExceptions ctx stms res indices output_mems_may =
         let fromread = case (bindage, e) of
               (BindVar, BasicOp (Index _ orig slice)) -> do
                 orig_mem <- M.lookup orig $ ctxVarToMem ctx
-                if indices_slice == slice &&
-                   -- These two extra requirements might be superfluous.
-                   memSrcName orig_mem `L.notElem` stms_first_uses &&
-                   not (memSrcName orig_mem `S.member` ctxExistentials ctx)
+                if
+                  -- These two extra requirements might be superfluous.
+                  memSrcName orig_mem `L.notElem` stms_first_uses &&
+                  not (memSrcName orig_mem `S.member` ctxExistentials ctx)
                   then return (v, typeOf membound, orig_mem, slice)
                   else Nothing
               _ -> Nothing
             fromwrite
-              | (BindInPlace _ orig slice,
+              | (BindInPlace _ _orig _slice,
                  ExpMem.ArrayMem pt _ _ _ _) <- (bindage, membound)
               = do
-                  orig_mem <- M.lookup orig $ ctxVarToMem ctx
-                  if indices_slice == slice &&
-                   -- These two extra requirements might be superfluous.
-                   memSrcName orig_mem `L.notElem` stms_first_uses &&
-                   not (memSrcName orig_mem `S.member` ctxExistentials ctx)
-                    then return (v, Prim pt, orig_mem, slice)
+                  -- The coalescing pass can have created a program where some
+                  -- dependencies are a bit indirect.  We find the core index function.
+                  let (orig', slice') =
+                        fixpointIterateMay
+                        (\(v0, ss0) -> do
+                            (v1, s1) <- M.lookup v0 (ctxLoopCorrespondingVar ctx)
+                            return (v1, DimFix s1 : ss0))
+                        (v, [])
+
+                  orig_mem <- M.lookup orig' $ ctxVarToMem ctx
+                  if
+                    -- These two extra requirements might be superfluous.
+                    memSrcName orig_mem `L.notElem` stms_first_uses &&
+                    not (memSrcName orig_mem `S.member` ctxExistentials ctx)
+                    then return (v, Prim pt, orig_mem, slice')
                     else Nothing
               | otherwise = Nothing
         in (fromread, fromwrite)
@@ -502,6 +562,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
         putStrLn ("mem slices: " ++ show mem_slices)
         putStrLn ("mem ixfuns: " ++ show mem_ixfuns)
         putStrLn ("mem primtypes: " ++ show mem_primtypes)
+        putStrLn ("ctxLoopCorrespondingVar: " ++ show (ctxLoopCorrespondingVar ctx))
         unless (L.null exceptions)
           $ putStrLn ("interference exception result: " ++ show exceptions)
         putStrLn $ replicate 70 '~'
@@ -528,21 +589,31 @@ interferenceExceptions ctx stms res indices output_mems_may =
                                RWS () [(VName, VName)] LocalDeaths ()
         recordNewExceptions mem_ins mem_outs mem_slices mem_ixfuns mem_primtypes fus_cur = do
           deaths <- get
-          forM_ (S.toList fus_cur) $ \mem_fu -> forM_ deaths $ \mem_killed -> do
-            let slice_fu = M.lookup mem_fu mem_slices
-                slice_killed = M.lookup mem_killed mem_slices
-                ixfun_fu = M.lookup mem_fu mem_ixfuns
-                ixfun_killed = M.lookup mem_killed mem_ixfuns
-                pt_fu = fromJust "should exist" $ M.lookup mem_fu mem_primtypes
-                pt_killed = fromJust "should exist" $ M.lookup mem_killed mem_primtypes
-            when
+          forM_ (S.toList fus_cur) $ \mem_fu -> forM_ deaths $ \mem_killed ->
+            fromMaybe (return ()) $ do
+            slice_fu <- M.lookup mem_fu mem_slices
+            slice_killed <- M.lookup mem_killed mem_slices
+            ixfun_fu <- M.lookup mem_fu mem_ixfuns
+            ixfun_killed <- M.lookup mem_killed mem_ixfuns
+            pt_fu <- M.lookup mem_fu mem_primtypes
+            pt_killed <- M.lookup mem_killed mem_primtypes
+
+            let debug = do
+                  putStrLn $ replicate 70 '~'
+                  putStrLn "recordNewExceptions:"
+                  putStrLn ("slice first use: " ++ pretty slice_fu)
+                  putStrLn ("slice killed: " ++ pretty slice_killed)
+                  putStrLn ("ixfun first use: " ++ pretty ixfun_fu)
+                  putStrLn ("ixfun killed: " ++ pretty ixfun_killed)
+                  putStrLn $ replicate 70 '~'
+            withDebug debug $ return $ when
               ( -- Is the killed memory read from and the first use memory
                 -- written to?
                 mem_fu `S.member` mem_outs && mem_killed `S.member` mem_ins &&
                 -- Same index functions?
-                isJust ixfun_fu && ixfun_fu == ixfun_killed && -- too conservative?
+                ixfun_fu == ixfun_killed && -- too conservative?
                 -- Same slices?
-                isJust slice_fu && slice_fu == slice_killed &&
+                slice_fu == slice_killed &&
                 -- Same primitive type byte sizes?
                 (primByteSize pt_fu :: Int) == primByteSize pt_killed
               ) $ tell [(mem_fu, mem_killed)]
