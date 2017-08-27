@@ -31,7 +31,7 @@ getLastUsesMap = M.unionsWith S.union
 
 -- Mapping from a memory block to its currently assumed last use statement
 -- variable.
-type OptimisticLastUses = M.Map VName StmOrRes
+type OptimisticLastUses = M.Map VName (StmOrRes, Bool)
 
 data Context = Context
   { ctxVarToMem :: VarMemMappings MemorySrc
@@ -63,10 +63,10 @@ coerce = FindM . unFindM
 -- Find the memory blocks used or aliased by a variable.
 varMems :: VName -> FindM lore Names
 varMems var = do
-  Context var_to_mem mem_aliases _ _ <- ask
+  var_to_mem <- asks ctxVarToMem
   return $ fromMaybe S.empty $ do
     mem <- memSrcName <$> M.lookup var var_to_mem
-    return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
+    return $ S.singleton mem
 
 withLocalCurFirstUses :: FindM lore a -> FindM lore a
 withLocalCurFirstUses m = do
@@ -78,17 +78,50 @@ withLocalCurFirstUses m = do
 recordMapping :: StmOrRes -> VName -> FindM lore ()
 recordMapping var mem = tell [M.singleton var (S.singleton mem)]
 
-setOptimistic :: VName -> StmOrRes -> FindM lore ()
-setOptimistic mem x_lu = modify $ \c ->
+setOptimistic :: VName -> StmOrRes -> Names -> FindM lore ()
+setOptimistic mem x_lu exclude = do
   -- Will override any previous optimistic last use.
-  c { curOptimisticLastUses = M.insert mem x_lu
-                              $ curOptimisticLastUses c }
+  mem_aliases <- asks ctxMemAliases
+  let mems = S.difference (S.union (S.singleton mem)
+                           $ lookupEmptyable mem mem_aliases) exclude
+
+      debug = do
+        putStrLn $ replicate 70 '~'
+        putStrLn "setOptimistic:"
+        putStrLn $ pretty mem
+        print x_lu
+        putStrLn ("exclude: " ++ prettySet exclude)
+        putStrLn $ prettySet mems
+        putStrLn $ replicate 70 '~'
+
+  withDebug debug $ forM_ mems $ \mem' -> modify $ \c ->
+    let is_indirect = mem' /= mem
+    in c { curOptimisticLastUses = M.insert mem' (x_lu, is_indirect)
+                                   $ curOptimisticLastUses c }
+
+removeIndirectOptimistic :: VName -> FindM lore ()
+removeIndirectOptimistic mem = do
+  res <- M.lookup mem <$> gets curOptimisticLastUses
+  case res of
+    Just (_, True) -> -- Means that is was added indirectly.
+      modify $ \c ->
+                 c { curOptimisticLastUses = M.delete mem
+                                             $ curOptimisticLastUses c }
+    _ -> return ()
 
 commitOptimistic :: VName -> FindM lore ()
 commitOptimistic mem = do
   res <- M.lookup mem <$> gets curOptimisticLastUses
   case res of
-    Just x_lu -> recordMapping x_lu mem
+    Just (x_lu, _) -> do
+      let debug = do
+            putStrLn $ replicate 70 '~'
+            putStrLn "commitOptimistic:"
+            putStrLn $ pretty mem
+            print x_lu
+            putStrLn $ replicate 70 '~'
+
+      withDebug debug $ recordMapping x_lu mem
     Nothing -> return ()
 
 findLastUses :: LoreConstraints lore =>
@@ -97,28 +130,31 @@ findLastUses :: LoreConstraints lore =>
 findLastUses var_to_mem mem_aliases first_uses fundef =
   let context = Context var_to_mem mem_aliases first_uses S.empty
       m = unFindM $ do
-        -- We do not need to look in the function parameters, as they should not
-        -- contain last uses -- in that case they would have been simplified away.
+        forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
         optimistics <- gets curOptimisticLastUses
-        forM_ (M.assocs optimistics) $ \(mem, x_lu) ->
-          recordMapping x_lu mem
+        forM_ (M.keys optimistics) $ \mem ->
+          commitOptimistic mem
 
-      last_uses = removeEmptyMaps $ expandWithAliases mem_aliases $ getLastUsesMap
+      last_uses = removeEmptyMaps $ getLastUsesMap
                   $ snd $ evalRWS m context (Current M.empty S.empty)
   in last_uses
 
+lookInFunDefFParam :: LoreConstraints lore =>
+                      FParam lore -> FindM lore ()
+lookInFunDefFParam (Param x _) = do
+  first_uses_x <- lookupEmptyable x <$> asks ctxFirstUses
+  modify $ \c -> c { curFirstUses = S.union first_uses_x $ curFirstUses c }
+
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
-lookInBody (Body _ bnds res) = do
+lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
-  mapM_ lookInRes res
 
 lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
-lookInKernelBody (KernelBody _ bnds res) = do
+lookInKernelBody (KernelBody _ bnds _res) =
   mapM_ lookInStm bnds
-  mapM_ (lookInRes . kernelResultSubExp) res
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
@@ -150,6 +186,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   let e_free_vars = freeInExp e
   e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
 
+  mem_aliases <- asks ctxMemAliases
   first_uses_outer <- asks ctxCurFirstUsesOuter
   -- Then handle the pattern elements by themselves again.
   forM_ patvalelems $ \(PatElem x _ _) ->
@@ -157,33 +194,61 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
     forM_ (S.toList e_mems) $ \mem -> do
       -- If the memory has its first use outside the current body, it is
       -- dangerous to set its last use to be in a statement inside the body,
-      -- since the body can be run multiple times in cases of loops or kernels.
-      -- We only set the last use of a memory to this statement if it also has
-      -- its first use inside the current body.
-      unless (mem `S.member` first_uses_outer) $ setOptimistic mem (FromStm x)
+      -- since the body can be run multiple times in cases of loops or kernels,
+      -- so we only set the last use of a memory to this statement if it also
+      -- has its first use inside the current body.
+      --
+      -- If it does have its first use outside the body, we remove any existing
+      -- optimistic last use, although only if such an optimistic last use was
+      -- added as a side effect of adding an existential optimistic last use
+      -- (i.e. it was aliased by the existential memory which had a last use).
+      if mem `S.member` first_uses_outer
+        then removeIndirectOptimistic mem
+        else setOptimistic mem (FromStm x) S.empty
 
-      -- If the memory has its first use outside the current body, we need to
-      -- find its actual last use (if it occurs in the body) through memory
-      -- aliases.  Note that while it is not wrong to run the code below also
-      -- when the memory has its first use inside the body, in that case it
-      -- should not be necessary, and would result in a too conservative
-      -- analysis.  As an example, see tests/mix/loop-interference-use.fut.
-      when (mem `S.member` first_uses_outer) $ do
-        -- If memory block t aliases memory block u (meaning that the memory of
-        -- t *can* be the memory of u), and u has a potential last use here,
-        -- then t also has a potential last use here (the relation is not
-        -- commutative, so it does not work the other way round).
-        mem_aliases <- asks ctxMemAliases
-        let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
-        forM_ reverse_mem_aliases $ \mem' ->
-          -- FIXME: This is actually more conservative than it needs to be, in
-          -- that we set the last use of the memory aliasing mem to be at this
-          -- statement, which will later through aliasing cover all its aliased
-          -- memory blocks, including both mem -- which should be included --
-          -- and possibly some other memory block.
-          setOptimistic mem' (FromStm x)
+      if S.null (lookupEmptyable mem mem_aliases)
+        then
+        -- If not existential, update the potential last use of any existential
+        -- memory aliasing it, but do not set the potential last use of the
+        -- memory itself, since there are cycles in loops, and it must also
+        -- contain the same data in the next iteration, so it can never be
+        -- reused inside the loop body, and must therefore always have its last
+        -- use outside the body.  But since the existential memory might in the
+        -- current iteration refer to it, its last use needs to be updated.
 
-  withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
+        -- Note that while it is not wrong to run the code below also when the
+        -- memory has its first use inside the body, in that case it should not
+        -- be necessary, since we would be outside the body by then, and it
+        -- would result in a too conservative analysis.  As an example, see
+        -- tests/mix/loop-interference-use.fut.
+        when (mem `S.member` first_uses_outer) $ do
+          -- If the memory has its first use outside the current body, we need
+          -- to find its actual last use (if it occurs in the body) through
+          -- memory aliases.
+          --
+          -- If memory block t aliases memory block u (meaning that the memory of
+          -- t *can* be the memory of u), and u has a potential last use here,
+          -- then t also has a potential last use here (the relation is not
+          -- commutative, so it does not work the other way round).
+          let reverse_mem_aliases = M.keys $ M.filter (mem `S.member`) mem_aliases
+              exclude = S.singleton mem
+          forM_ reverse_mem_aliases $ \mem' ->
+            setOptimistic mem' (FromStm x) exclude
+        else
+        -- Just set the last use.
+        setOptimistic mem (FromStm x) S.empty
+
+  cur_optis <- gets curOptimisticLastUses
+  let debug = do
+        putStrLn $ replicate 70 '~'
+        putStrLn "LastUse lookInStm:"
+        putStrLn ("stm: " ++ show patvalelems)
+        putStrLn ("first uses outer: " ++ prettySet first_uses_outer)
+        putStrLn ("e mems: " ++ prettySet e_mems)
+        putStrLn ("cur optimistics: " ++ show cur_optis)
+        putStrLn $ replicate 70 '~'
+
+  withDebug debug $ withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }
         walker_kernel = identityKernelWalker
@@ -191,12 +256,3 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelKernelBody = coerce . lookInKernelBody
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
-
-lookInRes :: LoreConstraints lore =>
-             SubExp -> FindM lore ()
-lookInRes (Var v) = do
-  mem_v <- M.lookup v <$> asks ctxVarToMem
-  case mem_v of
-    Just mem -> setOptimistic (memSrcName mem) (FromRes v)
-    Nothing -> return ()
-lookInRes _ = return ()

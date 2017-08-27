@@ -1,5 +1,5 @@
--- Similar to pos0.fut, just with an extra non-interfering array which can also
--- reuse the first memory block.
+-- Similar to multiple-pos0.fut, just with an extra non-interfering array which
+-- can also reuse the first memory block.
 -- ==
 -- input { [5, 7]
 --       }

@@ -7,8 +7,8 @@
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
--- Similar to the function in neg0.fut, except this will be a kernel when
--- possible, and not always a loop, so we can test the optimisation in the
+-- Similar to the function in interfering-neg0.fut, except this will be a kernel
+-- when possible, and not always a loop, so we can test the optimisation in the
 -- compiler's GPU pipeline.
 let interfering_map (k: i32) (t: [#n]i32): [n]i32 =
   map (\i -> t[n - i - 1] + k) [0..<n]

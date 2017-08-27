@@ -3,6 +3,10 @@
 -- transformed a lot and gets many new memory blocks, but it should help with
 -- discovering irregularities.  Also note that we only test the gpu structure;
 -- this is because the case we are interested in only occurs with kernels.
+--
+-- The large number of allocations is due to many small kernel-supporting memory
+-- blocks.  It might change if the compiler changes.  This is also the case with
+-- the other tests in this directory.
 -- ==
 -- structure gpu { Alloc 20 }
 

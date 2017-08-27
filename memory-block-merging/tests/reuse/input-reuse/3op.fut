@@ -1,5 +1,5 @@
--- Like plus.fut, but with three inputs, and with some index fiddlery (to try a
--- different approach).
+-- Like simple-pos0.fut, but with three inputs, and with some index fiddlery (to
+-- try a different approach).
 -- ==
 -- input { [3, 1] [2, 10] [5, 5] }
 -- output { [10, 16] }
