@@ -10,9 +10,10 @@ module Futhark.Optimise.MemoryBlockMerging.Liveness.Interference
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (catMaybes)
+import Data.Maybe (mapMaybe, fromMaybe, catMaybes)
 import Control.Monad
 import Control.Monad.RWS
+import Control.Monad.Writer
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
@@ -26,8 +27,11 @@ import Futhark.Optimise.MemoryBlockMerging.Types
 
 
 data Context = Context { ctxVarToMem :: VarMemMappings MemorySrc
+                       , ctxMemAliases :: MemAliases
                        , ctxFirstUses :: FirstUses
                        , ctxLastUses :: LastUses
+                       , ctxExistentials :: Names
+                       , ctxLoopCorrespondingVar :: M.Map VName (VName, SubExp)
                        }
   deriving (Show)
 
@@ -47,7 +51,7 @@ newtype FindM lore a = FindM
 
 type LoreConstraints lore = (ExplicitMemorish lore,
                              KernelInterferences lore,
-                             CanShare lore,
+                             SpecialBodyExceptions lore,
                              FullWalk lore)
 
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
@@ -64,24 +68,35 @@ recordCurrentInterferences :: FindM lore ()
 recordCurrentInterferences = do
   current <- get
   -- Interferences are commutative.  Reflect that in the resulting data.
-  forM_ (S.toList current) $ \mem -> do
-    let current' = S.delete mem current
-    tell [(mem, current')]
+  forM_ (S.toList current) $ \mem ->
+    tell [(mem, current)]
+
+recordNewInterferences :: Names -> FindM lore ()
+recordNewInterferences mems_in_stm = do
+  current <- get
+  -- Interferences are commutative.  Reflect that in the resulting data.
+  forM_ (S.toList current) $ \mem ->
+    tell [(mem, mems_in_stm)]
+  forM_ (S.toList mems_in_stm) $ \mem ->
+    tell [(mem, current)]
 
 -- | Find all interferences.
 findInterferences :: LoreConstraints lore =>
                      VarMemMappings MemorySrc -> MemAliases ->
-                     FirstUses -> LastUses -> FunDef lore
+                     FirstUses -> LastUses -> Names -> FunDef lore
                   -> Interferences
-findInterferences var_to_mem mem_aliases first_uses last_uses fundef =
+findInterferences var_to_mem mem_aliases first_uses last_uses existentials fundef =
   let context = Context { ctxVarToMem = var_to_mem
+                        , ctxMemAliases = mem_aliases
                         , ctxFirstUses = first_uses
                         , ctxLastUses = last_uses
+                        , ctxExistentials = existentials
+                        , ctxLoopCorrespondingVar = M.empty
                         }
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
-      interferences = removeEmptyMaps $ makeCommutativeMap
+      interferences = removeEmptyMaps $ removeKeyFromMapElems $ makeCommutativeMap
                       $ expandWithAliases mem_aliases $ getInterferencesMap
                       $ snd $ evalRWS m context S.empty
   in interferences
@@ -97,25 +112,25 @@ lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
 lookInBody (Body _ bnds res) = do
   mapM_ lookInStm bnds
-  mapM_ lookInRes res
+  lookInRes res
 
 lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
 lookInKernelBody (KernelBody _ bnds res) = do
   mapM_ lookInStm bnds
-  mapM_ (lookInRes . kernelResultSubExp) res
-
-isNoOp :: Exp lore -> Bool
-isNoOp (BasicOp bop) = case bop of
-  Scratch{} -> True
-  _ -> False
-isNoOp _ = False
+  lookInRes $ map kernelResultSubExp res
 
 awakenFirstUses :: [PatElem lore] -> FindM lore ()
 awakenFirstUses patvalelems =
   forM_ patvalelems $ \(PatElem var _ _) -> do
     first_uses_var <- lookupEmptyable var <$> asks ctxFirstUses
     mapM_ awaken $ S.toList first_uses_var
+
+isNoOp :: Exp lore -> Bool
+isNoOp (BasicOp bop) = case bop of
+  Scratch{} -> True
+  _ -> False
+isNoOp _ = False
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
@@ -128,11 +143,52 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
     -- result of a Scratch statement hanging around.
   | otherwise = do
       awakenFirstUses patvalelems
+      ctx <- ask
+      let ctx' = ctx { ctxLoopCorrespondingVar =
+                       M.union (ctxLoopCorrespondingVar ctx)
+                       (findLoopCorrespondingVar stm)
+                     }
+      let stm_exceptions = fromMaybe [] $ do
+            indices <- specialBodyIndices e
+            let walker_exc =
+                  identityWalker
+                  { walkOnBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                                              ctx'' = ctx' { ctxLoopCorrespondingVar =
+                                                             M.union (ctxLoopCorrespondingVar ctx') lcv }
+                                          in tell $ interferenceExceptions ctx''
+                                             (bodyStms body') (bodyResult body')
+                                             indices Nothing }
+                walker_kernel_exc =
+                  identityKernelWalker
+                  { walkOnKernelBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                                                    ctx'' = ctx' { ctxLoopCorrespondingVar =
+                                                                   M.union (ctxLoopCorrespondingVar ctx') lcv }
+                                                in tell $ interferenceExceptions ctx''
+                                                   (bodyStms body') (bodyResult body')
+                                                   indices Nothing
+                  , walkOnKernelKernelBody = \kbody -> tell $ interferenceExceptions ctx'
+                                                       (kernelBodyStms kbody)
+                                                       (mapMaybe (\kresult -> case kresult of
+                                                                     ThreadsReturn _ se -> Just se
+                                                                     _ -> Nothing)
+                                                        $ kernelBodyResult kbody)
+                                                       indices
+                                                       (specialBodyWriteMems stm)
+                  }
+            return $ execWriter $ fullWalkExpM walker_exc walker_kernel_exc e
 
-      stm_exceptions <- interferenceExceptions stm
+      first_uses <- asks ctxFirstUses
+      last_uses <- asks ctxLastUses
+      let stm_mems =
+            S.unions $ map (\pelem ->
+                              let v = patElemName pelem
+                              in S.union
+                                 (lookupEmptyable v first_uses)
+                                 (lookupEmptyable (FromStm v) last_uses)) patvalelems
+
       ((), stm_interferences) <- censor (const []) $ listen $ do
-        recordCurrentInterferences
-        fullWalkExpM walker walker_kernel e
+        recordNewInterferences stm_mems
+        local (const ctx') $ fullWalkExpM walker walker_kernel e
       let stm_interferences' =
             map (\(k, vs) ->
                     (k, S.fromList
@@ -142,18 +198,22 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
             stm_interferences
       tell stm_interferences'
 
-      extra_kernel_interferences <- findKernelRaceConditionInterferences e
+      extra_kernel_interferences <- findKernelDataRaceInterferences e
       tell extra_kernel_interferences
 
       forM_ patvalelems $ \(PatElem var _ _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
         mapM_ kill $ S.toList last_uses_var
 
+      current <- get
       let debug = do
             putStrLn $ replicate 70 '~'
-            putStrLn "lookInStm:"
+            putStrLn "Interference lookInStm:"
             print stm
-            putStrLn ("exceptions: " ++ show stm_exceptions)
+            putStrLn ("current live: " ++ prettySet current)
+            putStrLn ("stm mems: " ++ prettySet stm_mems)
+            unless (L.null stm_exceptions)
+              $ putStrLn ("exceptions: " ++ show stm_exceptions)
             putStrLn "interferences': "
             forM_ (M.assocs $ getInterferencesMap stm_interferences') $ \(v, ns) ->
               putStrLn ("  " ++ pretty v ++ ": " ++ prettySet ns)
@@ -171,98 +231,116 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
                 , walkOnKernelLambda = coerce . lookInBody . lambdaBody
                 }
 
+-- For perfectly nested loops.  Make it possible to find the index function for
+-- the outer loop.
+findLoopCorrespondingVar :: LoreConstraints lore =>
+                            Stm lore -> M.Map VName (VName, SubExp)
+findLoopCorrespondingVar (Let (Pattern _patctxelems patvalelems) _
+                         (DoLoop _ _ _ (Body _ stms res))) =
+  M.fromList $ catMaybes $ zipWith findIt patvalelems res
+  where findIt (PatElem pat_v _ (ExpMem.ArrayMem _ _ _ pat_mem _)) (Var res_v)
+          | not (L.null stms) = case L.last stms of
+              -- This is how the program looks after coalescing.
+              Let (Pattern _ [PatElem _last_v
+                              (BindInPlace _ _ (DimFix slice_part : _))
+                              (ExpMem.ArrayMem _ _ _ last_stm_mem _)]) _
+                                (BasicOp bop) ->
+                let res_v'
+                      | Copy copy_v <- bop
+                      , pat_mem == last_stm_mem =
+                        copy_v
+                      | otherwise = res_v
+                in Just (res_v', (pat_v, slice_part))
+              _ -> Nothing
+          | otherwise = Nothing
+        findIt _ _ = Nothing
+findLoopCorrespondingVar _ = M.empty
+
+innermostLoopNestBody :: LoreConstraints lore =>
+                         Body lore -> (Body lore, M.Map VName (VName, SubExp))
+innermostLoopNestBody body = case body of
+  -- This checks for how perfect nested loops looks like after coalescing.  This
+  -- is very brittle.  If it detects such a nesting, it will ask the
+  -- interference exception algorithm to look in the innermost body.
+  Body _ (Let _ _ (BasicOp Scratch{}) :
+          loopstm@(Let _ _ (DoLoop _ _ _ body')) :
+          _) _ -> let (body'', loop_corresponding_var) = innermostLoopNestBody body'
+                  in (body'', M.union
+                              (findLoopCorrespondingVar loopstm)
+                              loop_corresponding_var)
+  _ -> (body, M.empty)
+
 lookInRes :: LoreConstraints lore =>
-             SubExp -> FindM lore ()
-lookInRes (Var v) = do
-  last_uses_var <- lookupEmptyable (FromRes v) <$> asks ctxLastUses
-  mapM_ kill $ S.toList last_uses_var
-lookInRes _ = return ()
-
--- Use index analysis to find any exceptions to the naive interference recorded
--- for an expression.
-interferenceExceptions :: LoreConstraints lore =>
-                          Stm lore -> FindM lore [(VName, VName)]
-interferenceExceptions stm@(Let (Pattern _patctxelems patvalelems) _ e) = do
-  -- If a memory is lastly used in this expression, we want to check it.
-  readmems <- lastUsesInStm stm
-  -- For every last memory use, we check it with every currently live memory.
-  -- This is a bit broad, but easy.
-  writemems_potential <- get
-
-  concat <$>
-    mapM (\readmem ->
-            concat <$> mapM (
-             \writemem -> do
-               -- Can the read memory and the (potentially) written memory
-               -- coexist?
-               can_share <- canShare readmem writemem patvalelems e
-               return [(readmem, writemem) | can_share])
-            (S.toList writemems_potential))
-    (S.toList readmems)
-
-lastUsesInStm :: LoreConstraints lore =>
-                 Stm lore -> FindM lore Names
-lastUsesInStm stm@(Let _ _ e) = do
-  let m = do
-        lookLUInStm stm
-        fullWalkExpM lu_walker lu_walker_kernel e
+             [SubExp] -> FindM lore ()
+lookInRes ses = do
+  let vs = mapMaybe fromVar ses
   last_uses <- asks ctxLastUses
-  return $ snd $ evalRWS m last_uses ()
-  where lookLUInStm :: Stm lore -> RWS LastUses Names () ()
-        lookLUInStm (Let (Pattern _patctxelems patvalelems) _ _) =
-          forM_ patvalelems $ \(PatElem patname _ _) -> do
-            lus <- lookupEmptyable (FromStm patname) <$> ask
-            tell lus
+  let last_uses_v =
+        S.unions $ map (\v -> lookupEmptyable (FromRes v) last_uses) vs
+  recordNewInterferences last_uses_v
+  mapM_ kill $ S.toList last_uses_v
 
-        lu_walker = identityWalker
-          { walkOnBody = mapM_ lookLUInStm . bodyStms }
-        lu_walker_kernel = identityKernelWalker
-          { walkOnKernelBody = mapM_ lookLUInStm . bodyStms
-          , walkOnKernelKernelBody = mapM_ lookLUInStm . kernelBodyStms
-          , walkOnKernelLambda = mapM_ lookLUInStm . bodyStms . lambdaBody
-          }
+firstUsesInStm :: LoreConstraints lore => FirstUses ->
+                  Stm lore -> [(VName, PrimType, ExpMem.IxFun)]
+firstUsesInStm first_uses stm =
+  let m = lookFUInStm stm
+  in snd $ evalRWS m first_uses ()
 
 firstUsesInExp :: LoreConstraints lore =>
-                  Exp lore -> FindM lore [(VName, ExpMem.IxFun)]
+                  Exp lore -> FindM lore [(VName, PrimType, ExpMem.IxFun)]
 firstUsesInExp e = do
   let m = lookFUInExp e
   first_uses <- asks ctxFirstUses
   return $ snd $ evalRWS m first_uses ()
-  where lookFUInStm :: LoreConstraints lore =>
-                       Stm lore -> RWS FirstUses [(VName, ExpMem.IxFun)] () ()
-        lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
-          forM_ patvalelems $ \(PatElem patname _ membound) ->
-            case membound of
-              ExpMem.ArrayMem _ _ _ _ ixfun -> do
-                fus <- lookupEmptyable patname <$> ask
-                forM_ fus $ \fu -> tell [(fu, ixfun)]
-              _ -> return ()
-          lookFUInExp e_stm
 
-        lookFUInExp :: LoreConstraints lore =>
-                       Exp lore -> RWS FirstUses [(VName, ExpMem.IxFun)] () ()
-        lookFUInExp = fullWalkExpM fu_walker fu_walker_kernel
-          where fu_walker = identityWalker
-                  { walkOnBody = mapM_ lookFUInStm . bodyStms }
-                fu_walker_kernel = identityKernelWalker
-                  { walkOnKernelBody = mapM_ lookFUInStm . bodyStms
-                  , walkOnKernelKernelBody = mapM_ lookFUInStm . kernelBodyStms
-                  , walkOnKernelLambda = mapM_ lookFUInStm . bodyStms . lambdaBody
-                  }
+lookFUInStm :: LoreConstraints lore =>
+               Stm lore -> RWS FirstUses [(VName, PrimType, ExpMem.IxFun)] () ()
+lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
+  forM_ patvalelems $ \(PatElem patname _ membound) ->
+    case membound of
+      ExpMem.ArrayMem pt _ _ _ ixfun -> do
+        fus <- lookupEmptyable patname <$> ask
+        forM_ fus $ \fu -> tell [(fu, pt, ixfun)]
+      _ -> return ()
+  lookFUInExp e_stm
+
+lookFUInExp :: LoreConstraints lore =>
+               Exp lore -> RWS FirstUses [(VName, PrimType, ExpMem.IxFun)] () ()
+lookFUInExp = fullWalkExpM fu_walker fu_walker_kernel
+  where fu_walker = identityWalker
+          { walkOnBody = mapM_ lookFUInStm . bodyStms }
+        fu_walker_kernel = identityKernelWalker
+          { walkOnKernelBody = mapM_ lookFUInStm . bodyStms
+          , walkOnKernelKernelBody = mapM_ lookFUInStm . kernelBodyStms
+          , walkOnKernelLambda = mapM_ lookFUInStm . bodyStms . lambdaBody
+          }
 
 class KernelInterferences lore where
-  findKernelRaceConditionInterferences :: Exp lore -> FindM lore [(VName, Names)]
+  findKernelDataRaceInterferences :: Exp lore -> FindM lore [(VName, Names)]
 
 instance KernelInterferences ExplicitMemory where
-  findKernelRaceConditionInterferences e = case e of
+  findKernelDataRaceInterferences e = case e of
     Op (ExpMem.Inner Kernel{}) -> do
       fus <- firstUsesInExp e
-      return $ map (\(t, u) -> (fst t, S.singleton (fst u)))
-        $ filter interferes [(t, u) | t <- fus, u <- fus]
+      let all_pair_combinations = [(t, u) | t <- fus, u <- fus]
+      return $ map (\((t, _, _), (u, _, _)) -> (t, S.singleton u))
+        $ filter interferes all_pair_combinations
     _ -> return []
-    where interferes ((v0, ixfun0), (v1, ixfun1)) =
-            v0 /= v1 && (ixFunHasIndex ixfun0 || ixFunHasIndex ixfun1) &&
-            not (ixFunsContained ixfun0 ixfun1)
+    where interferes ((v0, pt0, ixfun0), (v1, pt1, ixfun1)) =
+            -- Must be different.
+            v0 /= v1 &&
+            (
+              -- Do the index functions range over different memory areas?
+              ((ixFunHasIndex ixfun0 || ixFunHasIndex ixfun1) &&
+               not (ixFunsCompatible ixfun0 ixfun1))
+              ||
+              -- Do the arrays have different base type size?  If so, they take
+              -- up different amounts of space, and will not be compatible.
+              ((primByteSize pt0 :: Int) /= primByteSize pt1)
+            )
+
+instance KernelInterferences InKernel where
+  findKernelDataRaceInterferences _ = return []
 
 -- Does an index function contain an Index expression?
 --
@@ -282,10 +360,12 @@ ixFunHasIndex ixfun = case ixfun of
   IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
   IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
 
--- FIXME: This can be less conservative.  The two index functions should fully
--- overlap in their index ranges.
-ixFunsContained :: ExpMem.IxFun -> ExpMem.IxFun -> Bool
-ixFunsContained ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
+-- Do the two index functions describe the same range?  In other words, does one
+-- array take up precisely the same location (offset) and size as another array
+-- relative to the beginning of their respective memory blocks?  FIXME: This can
+-- be less conservative.
+ixFunsCompatible :: ExpMem.IxFun -> ExpMem.IxFun -> Bool
+ixFunsCompatible ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
   where primEq a b = case (a, b) of
           (IxFun.Direct sa, IxFun.Direct sb) ->
             sa == sb
@@ -301,163 +381,242 @@ ixFunsContained ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
             a1 `primEq` b1 && ssa == ssb && sa == sb
           _ -> False
 
-instance KernelInterferences InKernel where
-  findKernelRaceConditionInterferences _ = return []
 
--- If an expression reads from one array and writes to another array, we want to
--- check if the two arrays can share the same memory.  If that is the case, we
--- can say that they do *not* interfere, which they otherwise would.
--- Conservatively, it is the case when a loop body looks like
---
---     ...
---     read from source at index i
---     ...
---     write to destination at index i
---     ...
---
--- where there are no additional reads or writes in the '...' parts, and when a
--- kernel body looks like
---
---     ...
---     read from source at index i
---     ...
---
--- and returns in the destination memory.
---
--- Essentially, if the index is the same for both operations, and neither array
--- is used anywhere else in the body, we're fine.
---
--- This is too conservative for some cases.  For instance, we currently handle
--- only the simplest of kernels (one input, one output, returns in thread).
---
--- FIXME: Add support for kernels with multiple gtids, and loop bodies with
--- nestings -- both required to support multidimensional maps.  Remember to
--- check that the index functions match, e.g. if one of the arrays is
--- transposed.
---
--- FIXME: Add support for other 'KernelResult's?
---
--- FIXME: Add support for other 'KernelExp's?
+class SpecialBodyExceptions lore where
+  specialBodyIndices :: Exp lore -> Maybe [VName]
+  specialBodyWriteMems :: Stm lore -> Maybe [(VName, ExpMem.IxFun, PrimType)]
 
-class CanShare lore where
-  canShare :: VName -> VName -> [PatElem lore] -> Exp lore -> FindM lore Bool
+instance SpecialBodyExceptions ExplicitMemory where
+  specialBodyIndices (Op (ExpMem.Inner (Kernel _ _ kernelspace _ _))) =
+    Just $ map fst $ spaceDimensions kernelspace
+  specialBodyIndices e = specialBodyIndicesBase e
 
-instance CanShare ExplicitMemory where
-  canShare readmem writemem patvalelems e = case e of
-    DoLoop _ _ loopform loopbody ->
-      canShareLoopBody readmem writemem loopform loopbody
-    Op (ExpMem.Inner (Kernel _ _ kernelspace _ kernelbody)) ->
-      coerce $ canShareKernel readmem writemem patvalelems kernelspace kernelbody
-    _ -> return False
+  specialBodyWriteMems (Let (Pattern _patctxelems patvalelems) _
+                        (Op (ExpMem.Inner Kernel{}))) =
+    Just $ mapMaybe (\p -> case patElemAttr p of
+                        ExpMem.ArrayMem t _ _ mem ixfun -> Just (mem, ixfun, t)
+                        _ -> Nothing) patvalelems
+  specialBodyWriteMems _ = Nothing
 
-instance CanShare InKernel where
-  canShare readmem writemem _patvalelems e = case e of
-    DoLoop _ _ loopform loopbody ->
-      canShareLoopBody readmem writemem loopform loopbody
-    Op (ExpMem.Inner _ke) -> return False -- FIXME
-    _ -> return False
+instance SpecialBodyExceptions InKernel where
+  specialBodyIndices = specialBodyIndicesBase
+  specialBodyWriteMems = const Nothing
 
-canShareLoopBody :: LoreConstraints lore =>
-                    VName -> VName -> LoopForm lore ->
-                    Body lore -> FindM lore Bool
-canShareLoopBody readmem writemem loopform body
-  | ForLoop i _ _ _ <- loopform =
-      canShareReadWriteCheck readmem writemem i $ bodyStms body
-  | otherwise = return False
+specialBodyIndicesBase :: Exp lore -> Maybe [VName]
+specialBodyIndicesBase (DoLoop _ _ (ForLoop i _ _ _) _) = Just [i]
+specialBodyIndicesBase _ = Nothing
 
-canShareKernel :: VName -> VName -> [PatElem InKernel] -> KernelSpace ->
-                  KernelBody InKernel -> FindM InKernel Bool
-canShareKernel readmem writemem patvalelems kernelspace kernelbody
-  -- Very conservative checks right now.
-  | [PatElem resvar _ _] <- patvalelems
-  , [(gtid, _gsize)] <- spaceDimensions kernelspace
-  , [ThreadsReturn{}] <- kernelBodyResult kernelbody = do
-      resvar_mem <- M.lookup resvar <$> asks ctxVarToMem
-      if (memSrcName <$> resvar_mem) == Just writemem
-        then canShareReadCheck readmem gtid $ kernelBodyStms kernelbody
-        else return False
-  | otherwise = return False
+-- Use first use analysis and last use analysis to find any exceptions to the
+-- naive interference recorded for a statement.
+interferenceExceptions :: LoreConstraints lore =>
+                          Context -> [Stm lore] -> [SubExp] -> [VName] ->
+                          Maybe [(VName, ExpMem.IxFun, PrimType)] -> [(VName, VName)]
+interferenceExceptions ctx stms res indices output_mems_may =
+  let output_vars = mapMaybe fromVar res
+      indices_slice = map (DimFix . Var) indices
+      stms_first_uses = map (\(mem, _, _) -> mem)
+                        $ concatMap (firstUsesInStm (ctxFirstUses ctx)) stms
+      results =
+        concat $ flip map stms $ \(Let (Pattern _patctxelems patvalelems) _ e) ->
+        flip map patvalelems $ \(PatElem v bindage membound) ->
+        let fromread = case (bindage, e) of
+              (BindVar, BasicOp (Index _ orig slice)) -> do
+                orig_mem <- M.lookup orig $ ctxVarToMem ctx
+                if
+                  -- These two extra requirements might be superfluous.
+                  memSrcName orig_mem `L.notElem` stms_first_uses &&
+                  not (memSrcName orig_mem `S.member` ctxExistentials ctx)
+                  then return (v, typeOf membound, orig_mem, slice)
+                  else Nothing
+              _ -> Nothing
+            fromwrite
+              | (BindInPlace _ _orig _slice,
+                 ExpMem.ArrayMem pt _ _ _ _) <- (bindage, membound)
+              = do
+                  -- The coalescing pass can have created a program where some
+                  -- dependencies are a bit indirect.  We find the core index function.
+                  let (orig', slice') =
+                        fixpointIterateMay
+                        (\(v0, ss0) -> do
+                            (v1, s1) <- M.lookup v0 (ctxLoopCorrespondingVar ctx)
+                            return (v1, DimFix s1 : ss0))
+                        (v, [])
 
-isBasicOp :: Exp lore -> Bool
-isBasicOp BasicOp{} = True
-isBasicOp _ = False
+                  orig_mem <- M.lookup orig' $ ctxVarToMem ctx
+                  if
+                    -- These two extra requirements might be superfluous.
+                    memSrcName orig_mem `L.notElem` stms_first_uses &&
+                    not (memSrcName orig_mem `S.member` ctxExistentials ctx)
+                    then return (v, Prim pt, orig_mem, slice')
+                    else Nothing
+              | otherwise = Nothing
+        in (fromread, fromwrite)
+      fromreads = mapMaybe fst results
+      fromwrites = mapMaybe snd results
+      fromwrites' = filter (\(v, _, _, _) -> v `L.elem` output_vars) fromwrites
 
-canShareReadCheck :: LoreConstraints lore =>
-                     VName -> VName -> [Stm lore] -> FindM lore Bool
-canShareReadCheck readmem index stms
-  | all (isBasicOp . stmExp) stms = do
-    stms' <- filterM (memUsedInExp readmem . stmExp) stms
+      fus_input_vars = M.fromList $ map (\(v, _, mem, _) ->
+                                           (v, S.singleton $ memSrcName mem)) fromreads
+      lus_input_vars = mapFromListSetUnion $ mapMaybe
+        (\(v, typ, mem, _) ->
+           let check e_pat =
+                 let frees = freeInExp e_pat
 
-    res <- case stms' of
-      [Let (Pattern [] [PatElem _ BindVar _]) _
-       (BasicOp (Index _ readvar [DimFix (Var e_index)]))] -> do
-        readvar_mem <- M.lookup readvar <$> asks ctxVarToMem
-        return (e_index == index
-                && (memSrcName <$> readvar_mem) == Just readmem)
-      _ -> return False
+                     -- We need to handle scalars and arrays differently: A last
+                     -- use of a scalar variable is the definite last use of the
+                     -- memory it represents, while the last use of an array can
+                     -- be distorted by reshapes and other aliasing operations,
+                     -- so in that case we need to find the last use of the
+                     -- memory block.
+                     b = case typ of
+                       Prim _ ->
+                         v `S.member` frees
+                       _ ->
+                         memSrcName mem `L.elem`
+                         mapMaybe ((memSrcName <$>) . (`M.lookup` ctxVarToMem ctx))
+                         (S.toList frees)
 
-    let debug = do
-          putStrLn $ replicate 70 '~'
-          putStrLn ("canShareReadCheck?  readmem: "
-                    ++ pretty readmem ++ "; index: "
-                    ++ pretty index)
-          print stms'
-          putStrLn $ replicate 70 '~'
-    withDebug debug $ return res
-  | otherwise = return False
+                     debug0 = do
+                       putStrLn $ replicate 70 '~'
+                       putStrLn "interferenceExceptions check:"
+                       putStrLn ("v: " ++ pretty v)
+                       putStrLn ("mem: " ++ pretty (memSrcName mem))
+                       putStrLn ("typ: " ++ show typ)
+                       putStrLn "***"
+                       putStrLn ("stm exp: " ++ show e_pat)
+                       putStrLn ("frees: " ++ prettySet frees)
+                       putStrLn ("result: " ++ show b)
+                       putStrLn $ replicate 70 '~'
 
-canShareReadWriteCheck :: LoreConstraints lore =>
-                          VName -> VName -> VName -> [Stm lore] -> FindM lore Bool
-canShareReadWriteCheck readmem writemem index stms
-  | all (isBasicOp . stmExp) stms = do
-    stms' <- filterM (\stm ->
-                        memUsedInExp readmem (stmExp stm) <||>
-                        memUsedInPatElems writemem
-                        (patternValueElements (stmPattern stm))
-                     ) stms
+                 in withDebug debug0 b
+               check' (Let _ _ e) = check e
+           in (\stm -> (FromStm $ patElemName $ head $ patternValueElements $ stmPattern stm,
+                        S.singleton $ memSrcName mem)) <$> L.find check' (reverse stms)) fromreads
 
-    res <- case stms' of
-      [Let (Pattern [] [PatElem _ BindVar _]) _
-       (BasicOp (Index _ readvar [DimFix (Var e_index_read)])),
+      -- 'Just' if in kernel, 'Nothing' otherwise.
+      fus_output_vars = mapFromListSetUnion $ case output_mems_may of
+        Just _ -> []
+        _ -> map (\(v, _, mem, _) -> (v, S.singleton $ memSrcName mem)) fromwrites'
+      fus_result = mapFromListSetUnion $ case output_mems_may of
+        Just mems -> zip output_vars $ map (S.singleton . (\(mem, _, _) -> mem)) mems
+        _ -> []
 
-       Let (Pattern [] [PatElem writevar (BindInPlace _ _ [DimFix (Var e_index_write)]) _]) _
-       (BasicOp SubExp{})] -> do
-        readvar_mem <- M.lookup readvar <$> asks ctxVarToMem
-        writevar_mem <- M.lookup writevar <$> asks ctxVarToMem
-        return (e_index_read == index
-                && e_index_write == index
-                && (memSrcName <$> readvar_mem) == Just readmem
-                && (memSrcName <$> writevar_mem) == Just writemem)
-      _ -> return False
+      -- Extended first uses and last uses.
+      fus = M.unionsWith S.union [ctxFirstUses ctx, fus_input_vars, fus_output_vars]
+      lus = M.unionsWith S.union [ctxLastUses ctx, lus_input_vars]
 
-    let debug = do
-          putStrLn $ replicate 70 '~'
-          putStrLn ("canShareReadWriteCheck?  readmem: "
-                    ++ pretty readmem ++ "; writemem: "
-                    ++ pretty writemem ++ "; index: "
-                    ++ pretty index)
-          print (length stms')
-          forM_ stms' print
-          print res
-          putStrLn $ replicate 70 '~'
-    withDebug debug $ return res
-  | otherwise = return False
+      -- Memory-to-slice mappings.
+      input_mem_slices = M.fromList $ map (\(_, _, mem, slice) ->
+                                             (memSrcName mem, slice)) fromreads
+      output_mem_slices = M.fromList $ case output_mems_may of
+        Just mems ->
+          map (\(mem, _, _) -> (mem, indices_slice)) mems
+        _ ->
+          map (\(_, _, mem, slice) -> (memSrcName mem, slice)) fromwrites'
+      mem_slices = M.union input_mem_slices output_mem_slices
 
-memUsedInExp :: LoreConstraints lore =>
-                VName -> Exp lore -> FindM lore Bool
-memUsedInExp mem e = do
-  e_mems <- catMaybes <$> mapM (\v -> M.lookup v <$> asks ctxVarToMem)
-            (S.toList $ freeInExp e)
-  return $ case e_mems of
-    [e_mem] -> memSrcName e_mem == mem
-    _ -> False
+      -- Memory-to-ixfun mappings.
+      input_mem_ixfuns = M.fromList $ map (\(_, _, mem, _) ->
+                                             (memSrcName mem, memSrcIxFun mem)) fromreads
+      output_mem_ixfuns = M.fromList $ case output_mems_may of
+        Just mems -> map (\(mem, ixfun, _) -> (mem, ixfun)) mems
+        _ -> map (\(_, _, mem, _) -> (memSrcName mem, memSrcIxFun mem)) fromwrites'
+      mem_ixfuns = M.union input_mem_ixfuns output_mem_ixfuns
 
-memUsedInPatElems :: LoreConstraints lore =>
-                     VName -> [PatElem lore] -> FindM lore Bool
-memUsedInPatElems mem patelems = do
-  patelems_mems <- catMaybes <$> mapM (\(PatElem v _ _) ->
-                                         M.lookup v <$> asks ctxVarToMem)
-                   patelems
-  return $ case patelems_mems of
-    [patelems_mem] -> memSrcName patelems_mem == mem
-    _ -> False
+      -- Memory-to-primtype-size mappings.
+      input_mem_primtypes = M.fromList
+        $ map (\(_, t, mem, _) -> (memSrcName mem, elemType t)) fromreads
+      output_mem_primtypes = M.fromList $ case output_mems_may of
+        Just mems -> map (\(mem, _, pt) -> (mem, pt)) mems
+        _ -> map (\(_, t, mem, _) -> (memSrcName mem, elemType t)) fromwrites'
+      mem_primtypes = M.union input_mem_primtypes output_mem_primtypes
+
+      -- Separation of input memory blocks and output memory blocks.
+      mem_ins0 = S.fromList $ map (\(_, _, mem, _) -> memSrcName mem) fromreads
+      mem_outs0 = S.fromList $ case output_mems_may of
+        Just mems -> map (\(mem, _, _) -> mem) mems
+        _ -> map (\(_, _, mem, _) -> memSrcName mem) fromwrites'
+      -- An input memory must not be an output memory, and vice versa.
+      mem_ins = S.difference mem_ins0 mem_outs0
+      mem_outs = S.difference mem_outs0 mem_ins0
+
+      exceptions = snd $ evalRWS (findExceptions fus fus_result lus
+                                  mem_ins mem_outs mem_slices mem_ixfuns
+                                  mem_primtypes output_vars) () S.empty
+
+      debug = lus_input_vars `seq` do
+        putStrLn $ replicate 70 '~'
+        putStrLn "interferenceExceptions:"
+        unless (L.null stms)
+          $ putStrLn ("first stm: " ++ show (head stms))
+        putStrLn ("indices: " ++ show indices)
+        putStrLn ("output vars: " ++ show output_vars)
+        putStrLn ("mem ins': " ++ prettySet mem_ins)
+        putStrLn ("mem outs': " ++ prettySet mem_outs)
+        putStrLn ("fromreads: " ++ show fromreads)
+        putStrLn ("first uses input vars: " ++ show fus_input_vars)
+        putStrLn ("first uses output vars: " ++ show fus_output_vars)
+        putStrLn ("last uses input vars: " ++ show lus_input_vars)
+        putStrLn ("first uses total: " ++ show fus)
+        putStrLn ("last uses total: " ++ show lus)
+        putStrLn ("mem slices: " ++ show mem_slices)
+        putStrLn ("mem ixfuns: " ++ show mem_ixfuns)
+        putStrLn ("mem primtypes: " ++ show mem_primtypes)
+        putStrLn ("ctxLoopCorrespondingVar: " ++ show (ctxLoopCorrespondingVar ctx))
+        unless (L.null exceptions)
+          $ putStrLn ("interference exception result: " ++ show exceptions)
+        putStrLn $ replicate 70 '~'
+  in withDebug debug exceptions
+
+  where findExceptions :: FirstUses -> FirstUses -> LastUses -> Names -> Names ->
+                          M.Map VName (Slice SubExp) -> M.Map VName ExpMem.IxFun ->
+                          M.Map VName PrimType -> [VName] ->
+                          RWS () [(VName, VName)] LocalDeaths ()
+        findExceptions fus fus_result lus mem_ins mem_outs mem_slices mem_ixfuns mem_primtypes output_vars = do
+          forM_ stms $ \(Let (Pattern _patctxelems patvalelems) _ _) -> do
+            let vs = map patElemName patvalelems
+                fus_stm = S.unions $ map (`lookupEmptyable` fus) vs
+                lus_stm = S.unions $ map ((`lookupEmptyable` lus) . FromStm) vs
+            recordNewExceptions mem_ins mem_outs mem_slices mem_ixfuns mem_primtypes fus_stm
+            modify $ S.union lus_stm
+          forM_ output_vars $ \ov -> do
+            let fus_ov = lookupEmptyable ov fus_result
+            recordNewExceptions mem_ins mem_outs mem_slices mem_ixfuns mem_primtypes fus_ov
+
+        recordNewExceptions :: Names -> Names ->
+                               M.Map VName (Slice SubExp) -> M.Map VName ExpMem.IxFun ->
+                               M.Map VName PrimType -> Names ->
+                               RWS () [(VName, VName)] LocalDeaths ()
+        recordNewExceptions mem_ins mem_outs mem_slices mem_ixfuns mem_primtypes fus_cur = do
+          deaths <- get
+          forM_ (S.toList fus_cur) $ \mem_fu -> forM_ deaths $ \mem_killed ->
+            fromMaybe (return ()) $ do
+            slice_fu <- M.lookup mem_fu mem_slices
+            slice_killed <- M.lookup mem_killed mem_slices
+            ixfun_fu <- M.lookup mem_fu mem_ixfuns
+            ixfun_killed <- M.lookup mem_killed mem_ixfuns
+            pt_fu <- M.lookup mem_fu mem_primtypes
+            pt_killed <- M.lookup mem_killed mem_primtypes
+
+            let debug = do
+                  putStrLn $ replicate 70 '~'
+                  putStrLn "recordNewExceptions:"
+                  putStrLn ("slice first use: " ++ pretty slice_fu)
+                  putStrLn ("slice killed: " ++ pretty slice_killed)
+                  putStrLn ("ixfun first use: " ++ pretty ixfun_fu)
+                  putStrLn ("ixfun killed: " ++ pretty ixfun_killed)
+                  putStrLn $ replicate 70 '~'
+            withDebug debug $ return $ when
+              ( -- Is the killed memory read from and the first use memory
+                -- written to?
+                mem_fu `S.member` mem_outs && mem_killed `S.member` mem_ins &&
+                -- Same index functions?
+                ixfun_fu == ixfun_killed && -- too conservative?
+                -- Same slices?
+                slice_fu == slice_killed &&
+                -- Same primitive type byte sizes?
+                (primByteSize pt_fu :: Int) == primByteSize pt_killed
+              ) $ tell [(mem_fu, mem_killed)]
+
+-- Memory blocks that have had their last use locally in the body.
+type LocalDeaths = Names
