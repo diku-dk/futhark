@@ -146,13 +146,13 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       ctx <- ask
       let ctx' = ctx { ctxLoopCorrespondingVar =
                        M.union (ctxLoopCorrespondingVar ctx)
-                       (findLoopCorrespondingVar stm)
+                       (findLoopCorrespondingVar ctx stm)
                      }
       let stm_exceptions = fromMaybe [] $ do
             indices <- specialBodyIndices e
             let walker_exc =
                   identityWalker
-                  { walkOnBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                  { walkOnBody = \body -> let (body', lcv) = innermostLoopNestBody ctx body
                                               ctx'' = ctx' { ctxLoopCorrespondingVar =
                                                              M.union (ctxLoopCorrespondingVar ctx') lcv }
                                           in tell $ interferenceExceptions ctx''
@@ -160,7 +160,7 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
                                              indices Nothing }
                 walker_kernel_exc =
                   identityKernelWalker
-                  { walkOnKernelBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                  { walkOnKernelBody = \body -> let (body', lcv) = innermostLoopNestBody ctx body
                                                     ctx'' = ctx' { ctxLoopCorrespondingVar =
                                                                    M.union (ctxLoopCorrespondingVar ctx') lcv }
                                                 in tell $ interferenceExceptions ctx''
@@ -234,8 +234,8 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
 -- For perfectly nested loops.  Make it possible to find the index function for
 -- the outer loop.
 findLoopCorrespondingVar :: LoreConstraints lore =>
-                            Stm lore -> M.Map VName (VName, SubExp)
-findLoopCorrespondingVar (Let (Pattern _patctxelems patvalelems) _
+                            Context -> Stm lore -> M.Map VName (VName, SubExp)
+findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
                          (DoLoop _ _ _ (Body _ stms res))) =
   M.fromList $ catMaybes $ zipWith findIt patvalelems res
   where findIt (PatElem pat_v _ (ExpMem.ArrayMem _ _ _ pat_mem _)) (Var res_v)
@@ -245,28 +245,33 @@ findLoopCorrespondingVar (Let (Pattern _patctxelems patvalelems) _
                               (BindInPlace _ _ (DimFix slice_part : _))
                               (ExpMem.ArrayMem _ _ _ last_stm_mem _)]) _
                                 (BasicOp bop) ->
-                let res_v'
-                      | Copy copy_v <- bop
-                      , pat_mem == last_stm_mem =
-                        copy_v
-                      | otherwise = res_v
-                in Just (res_v', (pat_v, slice_part))
+                if pat_mem == last_stm_mem
+                then let res_v'
+                           | Copy copy_v <- bop =
+                               if (memSrcName <$> M.lookup copy_v (ctxVarToMem ctx))
+                                  == Just last_stm_mem
+                               then Just copy_v
+                               else Nothing
+                           | otherwise = Just res_v
+                     in res_v' >>= \t -> Just (t, (pat_v, slice_part))
+                -- Fix this mess.
+                else Nothing
               _ -> Nothing
           | otherwise = Nothing
         findIt _ _ = Nothing
-findLoopCorrespondingVar _ = M.empty
+findLoopCorrespondingVar _ _ = M.empty
 
 innermostLoopNestBody :: LoreConstraints lore =>
-                         Body lore -> (Body lore, M.Map VName (VName, SubExp))
-innermostLoopNestBody body = case body of
+                         Context -> Body lore -> (Body lore, M.Map VName (VName, SubExp))
+innermostLoopNestBody ctx body = case body of
   -- This checks for how perfect nested loops looks like after coalescing.  This
   -- is very brittle.  If it detects such a nesting, it will ask the
   -- interference exception algorithm to look in the innermost body.
   Body _ (Let _ _ (BasicOp Scratch{}) :
           loopstm@(Let _ _ (DoLoop _ _ _ body')) :
-          _) _ -> let (body'', loop_corresponding_var) = innermostLoopNestBody body'
+          _) _ -> let (body'', loop_corresponding_var) = innermostLoopNestBody ctx body'
                   in (body'', M.union
-                              (findLoopCorrespondingVar loopstm)
+                              (findLoopCorrespondingVar ctx loopstm)
                               loop_corresponding_var)
   _ -> (body, M.empty)
 
