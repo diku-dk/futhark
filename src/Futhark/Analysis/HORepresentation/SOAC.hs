@@ -566,8 +566,9 @@ soacToStream soac = do
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
           strmlam= Lambda strmpar strmbdy loutps
+          empty_lam = Lambda [] (mkBody [] []) []
       -- map(f,a) creates a stream with NO accumulators
-      return (Stream cs w (MapLike Disorder) strmlam inps, [])
+      return (Stream cs w (Parallel Disorder Commutative empty_lam []) strmlam inps, [])
     -- Scan(+,nes,a) => is translated in strem's body to:
     -- 1. let scan0_ids   = scan(+, nes, a_ch)
     -- 2. let strm_resids = map (acc `+`,nes, scan0_ids)
@@ -651,7 +652,7 @@ soacToStream soac = do
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy accrtps
       lam0 <- renameLambda lam
-      return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
+      return (Stream cs w (Parallel InOrder comm lam0 nes) strmlam inps, [])
     -- Redomap(+,lam,nes,a) => is translated in strem's body to:
     -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
     -- 2. let acc'                   = acc + acc0_ids          in
@@ -680,7 +681,7 @@ soacToStream soac = do
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps')
       lam0 <- renameLambda lamin
-      return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
+      return (Stream cs w (Parallel InOrder comm lam0 nes) strmlam inps, [])
     -- FIXME? Scanomaps do not become seqstreams.
     Scanomap{} -> return (soac,[])
     -- If the soac is a stream then nothing to do, i.e., return it!

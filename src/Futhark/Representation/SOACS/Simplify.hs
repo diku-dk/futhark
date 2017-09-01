@@ -96,13 +96,11 @@ simplifySOAC (Stream cs outerdim form lam arr) = do
       parbnds  = [ (chunk, 0, se_outer) ]
   lam' <- Engine.simplifyExtLambda lam (getStreamAccums form) parbnds
   return $ Stream cs' outerdim' form' lam' arr'
-  where simplifyStreamForm (MapLike o) =
-          return $ MapLike o
-        simplifyStreamForm (RedLike o comm lam0 acc) = do
+  where simplifyStreamForm (Parallel o comm lam0 acc) = do
             acc'  <- mapM Engine.simplify acc
             lam0' <- Engine.simplifyLambda lam0 (Just acc) $
                      replicate (length $ lambdaParams lam0) Nothing
-            return $ RedLike o comm lam0' acc'
+            return $ Parallel o comm lam0' acc'
         simplifyStreamForm (Sequential acc) = do
             acc'  <- mapM Engine.simplify acc
             return $ Sequential acc'

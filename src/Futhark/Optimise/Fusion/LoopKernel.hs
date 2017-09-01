@@ -478,12 +478,9 @@ fuseStreamHelper out_kernms unfus_set outVars outPairs
           res_form <- mergeForms form2 form1
           return (  unfus_accs ++ out_kernms ++ unfus_arrs,
                     SOAC.Stream (cs1++cs2) w2 res_form res_lam'' new_inp )
-  where mergeForms (MapLike _) (MapLike o ) = return $ MapLike o
-        mergeForms (MapLike _) (RedLike o comm lam0 acc0) = return $ RedLike o comm lam0 acc0
-        mergeForms (RedLike o comm lam0 acc0) (MapLike _) = return $ RedLike o comm lam0 acc0
-        mergeForms (Sequential acc2) (Sequential acc1) = return $ Sequential (acc1++acc2)
-        mergeForms (RedLike _ comm2 lam2r acc2) (RedLike o1 comm1 lam1r acc1) =
-            return $ RedLike o1 (comm1<>comm2) (mergeReduceOps lam1r lam2r) (acc1++acc2)
+  where mergeForms (Sequential acc2) (Sequential acc1) = return $ Sequential (acc1++acc2)
+        mergeForms (Parallel _ comm2 lam2r acc2) (Parallel o1 comm1 lam1r acc1) =
+            return $ Parallel o1 (comm1<>comm2) (mergeReduceOps lam1r lam2r) (acc1++acc2)
         mergeForms _ _ = fail "Fusing sequential to parallel stream disallowed!"
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
@@ -491,9 +488,7 @@ fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 --   Sequential Stream; Otherwise it FAILS!
 toSeqStream :: SOAC -> TryFusion SOAC
 toSeqStream s@(SOAC.Stream _ _ (Sequential _) _ _) = return s
-toSeqStream (SOAC.Stream cs w (MapLike _) l inps) =
-    return $ SOAC.Stream cs w (Sequential  []) l inps
-toSeqStream (SOAC.Stream cs w (RedLike _ _ _ acc) l inps) =
+toSeqStream (SOAC.Stream cs w (Parallel _ _ _ acc) l inps) =
     return $ SOAC.Stream cs w (Sequential acc) l inps
 toSeqStream _ = fail "toSeqStream expects a string, but given a SOAC."
 

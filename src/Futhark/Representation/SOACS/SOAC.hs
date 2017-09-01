@@ -87,8 +87,8 @@ data SOAC lore =
     -- The original index arrays and value arrays are concatenated.
     deriving (Eq, Ord, Show)
 
-data StreamForm lore  = MapLike    StreamOrd
-  | RedLike    StreamOrd Commutativity (LambdaT lore) [SubExp]
+data StreamForm lore  =
+    Parallel StreamOrd Commutativity (LambdaT lore) [SubExp]
   | Sequential [SubExp]
   deriving (Eq, Ord, Show)
 
@@ -147,9 +147,8 @@ mapSOACM tv (Stream cs size form lam arrs) =
   mapOnSOACCertificates tv cs <*> mapOnSOACSubExp tv size <*>
   mapOnStreamForm form <*> mapOnSOACExtLambda tv lam <*>
   mapM (mapOnSOACVName tv) arrs
-  where mapOnStreamForm (MapLike o) = pure $ MapLike o
-        mapOnStreamForm (RedLike o comm lam0 acc) =
-            RedLike <$> pure o  <*> pure comm <*>
+  where mapOnStreamForm (Parallel o comm lam0 acc) =
+            Parallel <$> pure o  <*> pure comm <*>
             mapOnSOACLambda tv lam0 <*>
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
@@ -216,8 +215,7 @@ soacType (Stream _ outersize form lam _) =
         substs = M.fromList $ zip nms (outersize:accs)
         ExtLambda params _ rtp = lam
         accs = case form of
-                MapLike _ -> []
-                RedLike _ _ _ acc -> acc
+                Parallel _ _ _ acc -> acc
                 Sequential  acc -> acc
 soacType (Scatter _cs _w lam _ivs as) =
   staticShapes $ zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
@@ -241,8 +239,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     map (const mempty) $ lambdaReturnType innerfun
   opAliases (Stream _ _ form lam _) =
     let a1 = case form of
-               MapLike _          -> []
-               RedLike _ _ lam0 _ -> map (const mempty) $ lambdaReturnType lam0
+               Parallel _ _ lam0 _ -> map (const mempty) $ lambdaReturnType lam0
                Sequential _       -> []
     in a1 ++ map (const mempty) (extLambdaReturnType lam)
   opAliases (Scatter _cs _len lam _ivs _as) =
@@ -260,11 +257,9 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
           params_to_arrs = zip (map paramName $ drop (length nes) (lambdaParams foldlam)) arrs
   consumedInOp (Stream _ _ form lam arrs) =
     S.fromList $ subExpVars $
-    case form of MapLike{} ->
-                   map (consumedArray []) $ S.toList $ consumedByExtLambda lam
-                 Sequential accs ->
+    case form of Sequential accs ->
                    map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
-                 RedLike _ _ _ accs ->
+                 Parallel _ _ _ accs ->
                    map (consumedArray accs) $ S.toList $ consumedByExtLambda lam
     where consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
           -- Drop the chunk parameter, which cannot alias anything.
@@ -299,10 +294,9 @@ instance (Attributes lore,
   addOpAliases (Stream cs size form lam arr) =
     Stream cs size (analyseStreamForm form)
     (Alias.analyseExtLambda lam) arr
-    where analyseStreamForm (RedLike o comm lam0 acc) =
-              RedLike o comm (Alias.analyseLambda lam0) acc
+    where analyseStreamForm (Parallel o comm lam0 acc) =
+              Parallel o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
-          analyseStreamForm (MapLike    o  ) = MapLike    o
   addOpAliases (Scatter cs len lam ivs as) =
     Scatter cs len (Alias.analyseLambda lam) ivs as
 
@@ -359,13 +353,11 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
     (Range.runRangeM $ analyseStreamForm form)
     (Range.runRangeM $ Range.analyseExtLambda lam)
     arr
-    where analyseStreamForm (MapLike    o  ) =
-            return $ MapLike o
-          analyseStreamForm (Sequential acc) =
+    where analyseStreamForm (Sequential acc) =
             return $ Sequential acc
-          analyseStreamForm (RedLike o comm lam0 acc) = do
+          analyseStreamForm (Parallel o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
-              return $ RedLike o comm lam0' acc
+              return $ Parallel o comm lam0' acc
   addOpRanges (Scatter cs len lam ivs as) =
     Scatter cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as
 
@@ -449,7 +441,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
     TC.bad $ TC.TypeError "Stream with inconsistent accumulator type in lambda."
   -- check reduce's lambda, if any
   _ <- case form of
-        RedLike _ _ lam0 _ -> do
+        Parallel _ _ lam0 _ -> do
             let acct = map TC.argType accargs
                 outerRetType = lambdaReturnType lam0
             TC.checkLambda lam0 $ map TC.noArgAliases $ accargs ++ accargs
@@ -622,13 +614,11 @@ typeCheckScanomapRedomap ass size outerfun innerfun accexps arrexps = do
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
-getStreamAccums (MapLike _       ) = []
-getStreamAccums (RedLike _ _ _ accs) = accs
+getStreamAccums (Parallel _ _ _ accs) = accs
 getStreamAccums (Sequential  accs) = accs
 
 getStreamOrder :: StreamForm lore -> StreamOrd
-getStreamOrder (MapLike o    ) = o
-getStreamOrder (RedLike o _ _ _) = o
+getStreamOrder (Parallel o _ _ _) = o
 getStreamOrder (Sequential  _) = InOrder
 
 instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
@@ -668,16 +658,11 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                            Commutative -> "redomapComm"
   ppr (Stream cs size form lam arrs) =
     PP.ppCertificates' cs <> case form of
-       MapLike o ->
-         let ord_str = if o == Disorder then "Per" else ""
-         in  text ("streamMap"++ord_str) <>
-             parens (ppr size <> comma </> ppr lam <> comma </>
-                        commasep (map ppr arrs) )
-       RedLike o comm lam0 acc ->
+       Parallel o comm lam0 acc ->
          let ord_str = if o == Disorder then "Per" else ""
              comm_str = case comm of Commutative -> "Comm"
                                      Noncommutative -> ""
-         in  text ("streamRed"++ord_str++comm_str) <>
+         in  text ("streamPar"++ord_str++comm_str) <>
              parens (ppr size <> comma </> ppr lam0 </> comma </> ppr lam </>
                         commasep ( PP.braces (commasep $ map ppr acc) : map ppr arrs ))
        Sequential acc ->
