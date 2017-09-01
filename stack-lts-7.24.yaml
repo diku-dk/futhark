@@ -12,4 +12,4 @@ extra-deps:
 - process-extras-0.7.2
 - test-framework-quickcheck2-0.3.0.4
 - vector-0.12.0.1
-resolver: lts-7.22
+resolver: lts-7.24
