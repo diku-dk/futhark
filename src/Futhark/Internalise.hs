@@ -876,7 +876,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
   -- modify the internal representation of reduction streams?
   (form', lam'') <-
     case form of
-      E.MapLike o -> return (I.MapLike o, lam')
+      E.MapLike o -> return (I.Parallel o Commutative (Lambda [] (mkBody [] []) []) [], lam')
       E.RedLike o comm lam0 -> do
         -- Synthesize neutral elements by applying the fold function
         -- to an empty chunk.
@@ -915,7 +915,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
             return $ resultBody new_lam_res
 
         -- Make sure the chunk size parameter comes first.
-        return (I.RedLike o comm lam0' accs,
+        return (I.Parallel o comm lam0' accs,
                 lam' { extLambdaParams = take 1 (extLambdaParams lam') <>
                                          acc_params <>
                                          drop 1 (extLambdaParams lam')

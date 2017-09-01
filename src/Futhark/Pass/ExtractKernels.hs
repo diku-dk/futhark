@@ -330,9 +330,15 @@ transformStm (Let pat () (Op (Scan cs w fun input))) = do
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
+transformStm (Let pat () (Op (Stream cs w (Parallel _ _ _ []) map_fun arrs))) = do
+  -- No reduction part.  Remove the stream and leave the body
+  -- parallel.  It will be distributed.
+  types <- asksScope scopeForSOACs
+  transformStms =<<
+    (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
 transformStm (Let pat () (Op (Stream cs w
-                                  (RedLike _o comm red_fun nes) fold_fun arrs)))
+                               (Parallel _o comm red_fun nes) fold_fun arrs)))
   | any (not . primType) $ lambdaReturnType red_fun,
     Just fold_fun' <- extLambdaToLambda fold_fun  = do
   -- Split into a chunked map and a reduction, with the latter
@@ -358,7 +364,7 @@ transformStm (Let pat () (Op (Stream cs w
 
 
 transformStm (Let pat () (Op (Stream cs w
-                               (RedLike o comm red_fun nes) fold_fun arrs)))
+                               (Parallel o comm red_fun nes) fold_fun arrs)))
   | Just fold_fun' <- extLambdaToLambda fold_fun = do
   -- Generate a kernel immediately.
   red_fun_sequential <- Kernelise.transformLambda red_fun
@@ -373,13 +379,6 @@ transformStm (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs))) = do
   types <- asksScope scopeForSOACs
   transformStms =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w nes fold_fun arrs) types)
-
-transformStm (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
-  -- Remove the stream and leave the body parallel.  It will be
-  -- distributed.
-  types <- asksScope scopeForSOACs
-  transformStms =<<
-    (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
 transformStm (Let pat () (Op (Scatter cs w lam ivs as))) = runBinder_ $ do
   lam' <- Kernelise.transformLambda lam

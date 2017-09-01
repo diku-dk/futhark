@@ -629,8 +629,8 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
       let lambdas = case form of
-                        RedLike _ _ lout _ -> [lout, lam]
-                        _                  -> [lam]
+                        Parallel _ _ lout _ -> [lout, lam]
+                        _                   -> [lam]
       reduceLike soac lambdas $ getStreamAccums form
 
     _ | [pe] <- patternValueElements pat,
