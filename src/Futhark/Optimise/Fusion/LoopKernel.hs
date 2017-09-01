@@ -178,8 +178,8 @@ applyFusionRules :: Names -> [VName] -> SOAC -> Names -> FusedKer
 applyFusionRules    unfus_nms outVars soac consumed ker =
   tryOptimizeSOAC   unfus_nms outVars soac consumed ker <|>
   tryOptimizeKernel unfus_nms outVars soac consumed ker <|>
-  tryExposeInputs   unfus_nms outVars soac consumed ker <|>
-  fuseSOACwithKer   unfus_nms outVars soac consumed ker
+  fuseSOACwithKer   unfus_nms outVars soac consumed ker <|>
+  tryExposeInputs   unfus_nms outVars soac consumed ker
 
 attemptFusion :: MonadFreshNames m =>
                  Names -> [VName] -> SOAC -> Names -> FusedKer
