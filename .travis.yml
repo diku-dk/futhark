@@ -6,19 +6,14 @@ dist: trusty
 
 cache:
   directories:
-    - $HOME/.ghc
-    - $HOME/.cabal
     - $HOME/.stack
-    - $HOME/.stack-lts-7.24
-    - $HOME/.stack-lts-9.2
-    - .stack-work
 
 # We test against different Stackage snapshots.
 matrix:
   include:
-    - env: BUILD=stack STACK_YAML=stack.yaml STACK_ROOT=$HOME/.stack
-    - env: BUILD=stack STACK_YAML=stack-lts-7.24.yaml STACK_ROOT=$HOME/.stack-lts-7.24
-    - env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml STACK_ROOT=$HOME/.stack-lts-9.2
+    - env: BUILD=stack STACK_YAML=stack.yaml
+    - env: BUILD=stack STACK_YAML=stack-lts-7.24.yaml
+    - env: BUILD=stack STACK_YAML=stack-lts-9.2.yaml
 
 addons:
   apt:
@@ -40,8 +35,8 @@ install:
  - stack --no-terminal test --fast --only-dependencies -j 3
 
 script:
- - stack --no-terminal test -j 3
- - stack install
+# - stack --no-terminal test -j 3
+# - stack install
 
 # Now for integration testing
 # - futhark-test --nobuffer tests examples # Run integration test suite.
