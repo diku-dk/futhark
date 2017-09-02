@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TupleSections, FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings, FlexibleContexts #-}
 -- | This program is a convenience utility for running the Futhark
 -- test suite, and its test programs.
 module Main (main) where

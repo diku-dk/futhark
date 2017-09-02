@@ -256,10 +256,10 @@ moveLetUpwards letname body = do
           -- Sort by how close they are to the beginning of the body.  The closest
           -- one should be the first one to hoist, so that the other ones can maybe
           -- exploit it.
-          deps'' <- sortByKeyM (\t -> pbOrigin <$> lookupPrimBinding t)
+          deps'' <- sortByKeyM (fmap pbOrigin . lookupPrimBinding)
                     $ withDebug debug1 $ S.toList deps'
           body' <- foldM (flip moveLetUpwards) body deps''
-          origins <- mapM (\t -> pbOrigin <$> lookupPrimBinding t) deps''
+          origins <- mapM (fmap pbOrigin . lookupPrimBinding) deps''
           let line_dest = case foldl max FromFParam origins of
                 FromFParam -> 0
                 FromLine n _e -> n + 1
