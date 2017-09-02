@@ -13,6 +13,11 @@ roughly the same command line interface, but there may be minor
 differences and quirks due to characteristics of the specific
 backends.
 
+There are two main ways of compiling a Futhark program: to an
+executable, and to a library.  Executables can be run immediately, but
+are useful mostly for testing and benchmarking.  Libraries can be
+integrated with non-Futhark code.
+
 Compiling to Executable
 -----------------------
 
@@ -29,31 +34,40 @@ easy execution.  In general, when compiling file ``foo.fut``, the
 result will be written to a file ``foo`` (i.e. the extension will be
 stripped off).  This can be overridden using the ``-o`` option.
 
-When a Futhark program is run, execution starts at the function
-named ``main``.  If the program has no ``main`` function, the compiler
-will fail with an error.  If ``main`` takes any parameters, these will
-be read from standard input in Futhark syntax.  **Note:** Tuple value
-syntax is not supported.  Instead, pass the values comprising the
-tuple as if they were immediate parameters to the ``main`` function.
-We recommended using only primitive types and arrays of primitive
-types as parameter (and return) types in the ``main`` function.
+When a Futhark program is run, execution starts at the function named
+``main``.  An alternative entry point can be indicated by using the
+``-e`` option.  All entry point functions must be declared
+appropriately in the program (see :ref:`entry-points`).  If the entry
+point takes any parameters, these will be read from standard input in
+a subset of the Futhark syntax.  A binary input format is also
+supported; see :ref:`binary-data-format`.
+
+Only a subset of all Futhark values can be passed to an executable.
+Specifically, only primitives and arrays of primitive types are
+supported.  In particular, nested tuples and arrays of tuples are not
+permitted.  Non-nested tuples are supported are supported as simply
+flat values.  This restriction is not present for Futhark programs
+compiled to libraries.  If an entry point *returns* any such value,
+its printed representation is unspecified.  As a special case, an
+entry point is allowed to return a flat tuple.
 
 Instead of compiling, there is also an interpreter, ``futharki``.  Be
 aware that it is very slow, and does not produce better error messages
 than the compiler.  **Note:** If you run ``futharki`` without any
 options, you will see something that looks deceptively like a `REPL`_,
-but it is not yet finished, and useless in its present state.
+but it is not yet finished, and only marginally useful in its present
+state.
 
 Compiling to Library
 --------------------
 
 While compiling a Futhark program to an executable is useful for
-testing, it is not the intended use case.  Instead, a Futhark program
-should be compiled into a reusable library in some target language,
-enabling integration into a larger program.  At the moment, this work
-has only been done for the ``futhark-py`` and ``futhark-pyopencl``
-backends, and only the latter of these generates sufficiently
-performant code for it to be worthwhile.
+testing, it is not suitable for production use.  Instead, a Futhark
+program should be compiled into a reusable library in some target
+language, enabling integration into a larger program.  At the moment,
+this work has only been done for the ``futhark-py`` and
+``futhark-pyopencl`` backends, and only the latter of these generates
+code of sufficient performance to be worthwhile.
 
 We can use ``futhark-pyopencl`` to translate the program
 ``futlib.fut`` into a Python module ``futlib.py`` with the following
