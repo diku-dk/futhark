@@ -317,7 +317,7 @@ rearrangeWithOffset _ _ =
 
 isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isDirect =
-  maybe False (==0) . flip linearWithOffset 1
+  (==Just 0) . flip linearWithOffset 1
 
 
 -- | Substituting a name with a PrimExp in an index function.

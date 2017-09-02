@@ -51,7 +51,7 @@ internaliseProg prog = do
   prog' <- fmap (fmap I.Prog) $ runInternaliseM $ do
     addBuiltinFunctions
     internaliseDecs $ progDecs prog
-  sequence $ fmap I.renameProg prog'
+  traverse I.renameProg prog'
 
 addBuiltinFunctions :: InternaliseM ()
 addBuiltinFunctions = mapM_ addBuiltin $ M.toList E.intrinsics
