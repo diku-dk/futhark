@@ -41,7 +41,7 @@ install:
 
 script:
  - stack --no-terminal test -j 3
- - stack install
+# - stack install
 
 # Now for integration testing
 # - futhark-test --nobuffer tests examples # Run integration test suite.
