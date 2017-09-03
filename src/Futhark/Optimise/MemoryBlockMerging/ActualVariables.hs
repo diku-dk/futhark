@@ -190,14 +190,14 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
                   -- create a new array *and* which has one or more bodies which
                   -- can also be said to create a new array *in the same memory*
                   -- (i.e. has first memory uses), then we disable it.  This is
-                  -- not at all an impossible case to handle, but such a loop is
+                  -- not at all an impossible case to handle, but such an If is
                   -- weird, since it would make more sense if it had existential
                   -- memory, so maybe something needs to be done somewhere else
                   -- in the compiler?  If this is naively enabled, we can get an
                   -- error because the sub-body results are first uses while the
                   -- main result is not.  This can be "fixed" by stating that
                   -- the If as a whole is also a first use of the memory, but
-                  -- this seems too conservative.
+                  -- this seems too conservative.  FIXME.
                   forM_ (var : body_vars') $ \v -> recordActuals v S.empty
 
           _ -> return ()

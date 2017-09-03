@@ -7,6 +7,7 @@
 -- A memory block can have more than one first use.
 module Futhark.Optimise.MemoryBlockMerging.Liveness.FirstUse
   ( findFirstUses
+  , createsNewArrayBase
   ) where
 
 import qualified Data.Set as S
@@ -181,8 +182,7 @@ createsNewArrayInKernel e = case e of
   Op (ExpMem.Inner ExpMem.Combine{}) -> True
   _ -> createsNewArrayBase e
 
-createsNewArrayBase :: ExplicitMemorish lore
-                    => Exp lore -> Bool
+createsNewArrayBase :: Exp lore -> Bool
 createsNewArrayBase e = case e of
   BasicOp Partition{} -> True
   BasicOp Replicate{} -> True

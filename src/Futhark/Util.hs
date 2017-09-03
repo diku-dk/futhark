@@ -16,6 +16,7 @@ module Futhark.Util
         splitAt3,
         focusNth,
         unixEnvironment,
+        isEnvVarSet,
         directoryContents,
         zEncodeString
        )
@@ -90,6 +91,16 @@ focusNth i xs
 -- | The Unix environment when the Futhark compiler started.
 unixEnvironment :: [(String,String)]
 unixEnvironment = unsafePerformIO getEnvironment
+
+-- Is an environment variable set to 0 or 1?  If 0, return False; if 1, True;
+-- otherwise the default value.
+isEnvVarSet :: String -> Bool -> Bool
+isEnvVarSet name default_val = fromMaybe default_val $ do
+  val <- lookup name unixEnvironment
+  case val of
+    "0" -> return False
+    "1" -> return True
+    _ -> Nothing
 
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]

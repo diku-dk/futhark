@@ -12,7 +12,6 @@ module Futhark.Passes
 where
 
 import Control.Category ((>>>))
-import Data.Maybe (fromMaybe)
 
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -60,17 +59,6 @@ standardPipeline =
          , simplifySOACS
          , removeDeadFunctions
          ]
-
-
--- Is an environment variable set to 0 or 1?  If 0, return False; if 1, True;
--- otherwise the default value.
-isEnvVarSet :: String -> Bool -> Bool
-isEnvVarSet name default_val = fromMaybe default_val $ do
-  val <- lookup name unixEnvironment
-  case val of
-    "0" -> return False
-    "1" -> return True
-    _ -> Nothing
 
 -- Do we use in-place lowering?  Currently enabled by default.  Disable by
 -- setting the environment variable IN_PLACE_LOWERING=0.
