@@ -13,18 +13,30 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Representation.ExplicitMemory (
+  ExplicitMemory, InKernel, ExplicitMemorish)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
+import Futhark.Representation.Kernels.Kernel
+
+import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 
 type CurrentAllocatedBlocks = Names
 type AllocatedBlocksBeforeCreation = M.Map VName Names
 
-newtype FindM a = FindM { unFindM :: RWS ()
-                          AllocatedBlocksBeforeCreation CurrentAllocatedBlocks a }
+newtype FindM lore a = FindM { unFindM :: RWS ()
+                               AllocatedBlocksBeforeCreation CurrentAllocatedBlocks a }
   deriving (Monad, Functor, Applicative,
             MonadWriter AllocatedBlocksBeforeCreation,
             MonadState CurrentAllocatedBlocks)
+
+type LoreConstraints lore = (ExplicitMemorish lore,
+                             IsAlloc lore,
+                             FullWalk lore)
+
+coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
+          FindM flore a -> FindM tlore a
+coerce = FindM . unFindM
 
 findSafetyCondition2FunDef :: FunDef ExplicitMemory
                            -> AllocatedBlocksBeforeCreation
@@ -35,7 +47,8 @@ findSafetyCondition2FunDef fundef =
       res = snd $ evalRWS m () S.empty
   in res
 
-lookInFParam :: FParam ExplicitMemory -> FindM ()
+lookInFParam :: LoreConstraints lore =>
+                FParam ExplicitMemory -> FindM lore ()
 lookInFParam (Param _ membound) =
   -- Unique array function parameters also count as "allocations" in which
   -- memory can be coalesced.
@@ -44,11 +57,18 @@ lookInFParam (Param _ membound) =
       modify $ S.insert mem
     _ -> return ()
 
-lookInBody :: Body ExplicitMemory -> FindM ()
+lookInBody :: LoreConstraints lore =>
+              Body lore -> FindM lore ()
 lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
 
-lookInStm :: Stm ExplicitMemory -> FindM ()
+lookInKernelBody :: LoreConstraints lore =>
+                    KernelBody lore -> FindM lore ()
+lookInKernelBody (KernelBody _ bnds _res) =
+  mapM_ lookInStm bnds
+
+lookInStm :: LoreConstraints lore =>
+             Stm lore -> FindM lore ()
 lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   let new_decls0 = map patElemName (patctxelems ++ patvalelems)
       new_decls1 = case e of
@@ -63,14 +83,29 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   forM_ new_decls $ \x ->
     tell $ M.singleton x cur_allocated_blocks
 
-  case (patvalelems, e) of
-    ([PatElem mem _ _], Op ExpMem.Alloc{}) ->
-      modify $ S.insert mem
+  case patvalelems of
+    [PatElem mem _ _] ->
+      when (isAlloc e) $ modify $ S.insert mem
     _ -> return ()
 
   -- RECURSIVE BODY WALK.
-  walkExpM walker e
+  fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody
           , walkOnFParam = lookInFParam
           }
+        walker_kernel = identityKernelWalker
+          { walkOnKernelBody = coerce . lookInBody
+          , walkOnKernelKernelBody = coerce . lookInKernelBody
+          , walkOnKernelLambda = coerce . lookInBody . lambdaBody
+          }
+
+class IsAlloc lore where
+  isAlloc :: Exp lore -> Bool
+
+instance IsAlloc ExplicitMemory where
+  isAlloc (Op ExpMem.Alloc{}) = True
+  isAlloc _ = False
+
+instance IsAlloc InKernel where
+  isAlloc _ = False
