@@ -8,10 +8,11 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.List as L
 import Control.Monad
-import Data.Maybe (isJust, fromMaybe, catMaybes)
+import Data.Maybe (fromMaybe, catMaybes)
 import Data.Function (on)
 import System.IO.Unsafe (unsafePerformIO) -- Just for debugging!
 
+import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory
        (ExplicitMemory, InKernel)
@@ -19,7 +20,7 @@ import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Aliases
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Util (unixEnvironment)
+import Futhark.Util (isEnvVarSet)
 import Futhark.Util.Pretty (Pretty)
 
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
@@ -27,10 +28,11 @@ import Futhark.Optimise.MemoryBlockMerging.Types
 
 
 usesDebugging :: Bool
-usesDebugging = isJust $ lookup "FUTHARK_DEBUG" unixEnvironment
+usesDebugging = isEnvVarSet "FUTHARK_DEBUG" False &&
+                not (isEnvVarSet "MEMORY_BLOCK_MERGING_OVERVIEW_PRINT" False)
 
 usesDebuggingJSON :: Bool
-usesDebuggingJSON = isJust $ lookup "FUTHARK_DEBUG_JSON" unixEnvironment
+usesDebuggingJSON = isEnvVarSet "FUTHARK_DEBUG_JSON" False
 
 withDebug :: IO () -> a -> a
 withDebug debug x
@@ -94,6 +96,9 @@ newDeclarationsStm (Let (Pattern patctxelems patvalelems) _ e) =
 
 prettySet :: Pretty a => S.Set a -> String
 prettySet = L.intercalate ", " . map pretty . S.toList
+
+prettyList :: Pretty a => [a] -> String
+prettyList = L.intercalate ", " . map pretty
 
 lookupEmptyable :: (Ord a, Monoid b) => a -> M.Map a b -> b
 lookupEmptyable x m = fromMaybe mempty $ M.lookup x m
@@ -186,6 +191,15 @@ sortByKeyM :: (Ord t, Monad m) => (a -> m t) -> [a] -> m [a]
 sortByKeyM f xs = do
   rs <- mapM f xs
   return $ map fst $ L.sortBy (compare `on` snd) $ zip xs rs
+
+-- Pretty bad.
+intraproceduralTransformationWithLog ::
+  MonadFreshNames m =>
+  (FunDef ExplicitMemory -> m (FunDef ExplicitMemory, Log)) ->
+  Prog ExplicitMemory -> m (Prog ExplicitMemory, Log)
+intraproceduralTransformationWithLog f (Prog fundefs) = do
+  (fundefs', logs) <- unzip <$> mapM f fundefs
+  return (Prog fundefs', mconcat logs)
 
 -- Map on both ExplicitMemory and InKernel.
 class FullMap lore where

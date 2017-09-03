@@ -12,7 +12,7 @@ module Futhark.Optimise.MemoryBlockMerging.Reuse.Core
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
-import Data.Maybe (catMaybes, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromMaybe, isJust, mapMaybe)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.State
@@ -85,9 +85,10 @@ emptyCurrent = Current { curUses = M.empty
                        , curVarToMaxExpRes = M.empty
                        }
 
-newtype FindM lore a = FindM { unFindM :: RWS Context () Current a }
+newtype FindM lore a = FindM { unFindM :: RWS Context Log Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
+            MonadWriter Log,
             MonadState Current)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
@@ -96,6 +97,10 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
+
+writeLog :: VName -> String -> String -> FindM lore ()
+writeLog var_at topic content =
+  tell $ Log $ M.singleton var_at [(topic, content)]
 
 -- Lookup the memory block statically associated with a variable.
 lookupVarMem :: MonadReader Context m =>
@@ -163,7 +168,7 @@ withLocalUses m = do
 coreReuseFunDef :: MonadFreshNames m =>
                    FunDef ExplicitMemory
                 -> FirstUses -> Interferences -> VarMemMappings MemorySrc
-                -> ActualVariables -> Names -> m (FunDef ExplicitMemory)
+                -> ActualVariables -> Names -> m (FunDef ExplicitMemory, Log)
 coreReuseFunDef fundef first_uses interferences var_to_mem
   actual_vars existentials = do
   let sizes = memBlockSizesFunDef fundef
@@ -182,11 +187,15 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef
-      res = fst $ execRWS m context emptyCurrent
+      (res, proglog) = execRWS m context emptyCurrent
       fundef' = transformFromVarMemMappings (curVarToMemRes res) fundef
   fundef'' <- transformFromVarMaxExpMappings (curVarToMaxExpRes res) fundef'
 
-  let debug = fundef' `seq` do
+  let all_mems = S.fromList $ map memSrcName $ M.elems var_to_mem
+      mems_changed = S.fromList $ map memSrcName
+                     $ mapMaybe (`M.lookup` var_to_mem) $ M.keys $ curVarToMemRes res
+      mems_unchanged = S.difference all_mems mems_changed
+      debug = fundef' `seq` do
         putStrLn $ replicate 70 '='
         putStrLn "coreReuseFunDef reuse results:"
         forM_ (M.assocs (curVarToMemRes res)) $ \(src, dstmem) ->
@@ -198,10 +207,13 @@ coreReuseFunDef fundef first_uses interferences var_to_mem
         forM_ (M.assocs (curVarToMaxExpRes res)) $ \(src, maxs) ->
           putStrLn ("Size of allocation of mem " ++ pretty src ++ " is now maximum of "
                     ++ prettySet maxs)
+        putStrLn ""
+        putStrLn ("mems changed: " ++ prettySet mems_changed)
+        putStrLn ("mems unchanged: " ++ prettySet mems_unchanged)
         putStrLn $ pretty fundef''
         putStrLn $ replicate 70 '='
 
-  withDebug debug $ return fundef''
+  withDebug debug $ return (fundef'', proglog)
 
 lookInFParam :: LoreConstraints lore =>
                 FParam lore -> FindM lore ()
@@ -379,6 +391,28 @@ handleNewArray x xmem = do
                     [notTheSame, noneInterfere, sameSpace, sizesWorkOut]
   cur_uses <- gets curUses
   found_use <- catMaybes <$> mapM (maybeFromBoolM canBeUsed) (M.assocs cur_uses)
+
+  -- writeLog x "previously used"
+  --   (prettyList $ map (\(k, kuses) -> pretty k ++ " (used by: " ++ prettySet kuses ++ ")")
+  --    $ M.assocs cur_uses)
+  writeLog x "available for reuse" (prettyList found_use)
+  not_found_use <-
+    mapM (\(k, us) -> do
+             let t (s, f) = do
+                   r <- f k us
+                   return $ if r then [] else [s]
+             us' <- concat <$> mapM t [ ("interference", noneInterfere)
+                                      , ("different space", sameSpace)
+                                      , ("different size variables", \_ um -> sizesMatch um)
+                                      , ("size cannot be maxed", \k1 _ -> sizesCanBeMaxed k1)
+                                      ]
+             return (k, us'))
+    $ M.assocs $ M.filterWithKey (\k _ -> k `notElem` map fst found_use) cur_uses
+
+  zipWithM_ (\(t, ws) i ->
+               writeLog x ("not available for reuse (" ++ show i ++ ")")
+               (pretty t ++ " (failed on: " ++ L.intercalate ", " ws ++ ")")) not_found_use [(1::Int)..]
+  -- writeLog x "interferences" (prettySet $ lookupEmptyable xmem interferences)
 
   actual_vars <- lookupActualVars x
   case found_use of

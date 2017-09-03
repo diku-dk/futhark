@@ -57,3 +57,11 @@ data AuxiliaryInfo = AuxiliaryInfo
   , auxExistentials :: Names
   }
   deriving (Show)
+
+newtype Log = Log (M.Map VName [(String, String)])
+  deriving (Show, Eq, Ord)
+
+instance Monoid Log where
+  mempty = Log M.empty
+  mappend (Log a) (Log b) =
+    Log $ M.unionWith (++) a b

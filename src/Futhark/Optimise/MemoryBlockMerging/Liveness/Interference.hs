@@ -201,11 +201,11 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       extra_kernel_interferences <- findKernelDataRaceInterferences e
       tell extra_kernel_interferences
 
+      current <- get
       forM_ patvalelems $ \(PatElem var _ _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
-        mapM_ kill $ S.toList last_uses_var
+        mapM_ kill last_uses_var
 
-      current <- get
       let debug = do
             putStrLn $ replicate 70 '~'
             putStrLn "Interference lookInStm:"
