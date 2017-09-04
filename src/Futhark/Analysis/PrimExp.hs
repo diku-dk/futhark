@@ -28,7 +28,25 @@ data PrimExp v = LeafExp v PrimType
                | CmpOpExp CmpOp (PrimExp v) (PrimExp v)
                | UnOpExp UnOp (PrimExp v)
                | ConvOpExp ConvOp (PrimExp v)
-               deriving (Eq, Ord, Show)
+               deriving (Ord, Show)
+
+-- The Eq instance upcoerces all integer constants to their largest
+-- type before comparing for equality.  This is technically not a good
+-- idea, but solves annoying problems related to the Num instance
+-- always producing Int64s.
+instance Eq v => Eq (PrimExp v) where
+  LeafExp x xt == LeafExp y yt = x == y && xt == yt
+  ValueExp (IntValue x) == ValueExp (IntValue y) =
+    intToInt64 x == intToInt64 y
+  BinOpExp xop x1 x2 == BinOpExp yop y1 y2 =
+    xop == yop && x1 == y1 && x2 == y2
+  CmpOpExp xop x1 x2 == CmpOpExp yop y1 y2 =
+    xop == yop && x1 == y1 && x2 == y2
+  UnOpExp xop x == UnOpExp yop y =
+    xop == yop && x == y
+  ConvOpExp xop x == ConvOpExp yop y =
+    xop == yop && x == y
+  _ == _ = False
 
 instance Functor PrimExp where
   fmap = fmapDefault
