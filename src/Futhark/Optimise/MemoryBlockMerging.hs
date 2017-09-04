@@ -38,7 +38,7 @@ maybeOverviewPrint f prog
   | usesMemoryBlockMergingOverviewPrint = do
       proglog <- snd <$> f prog
       -- Print the most important parts of the program.  Will not result in a
-      -- *valid* program, but might give a better overview of the main structure
+      -- valid program, but might give a better overview of the main structure
       -- of the program.
       overviewPrintProg proglog prog
   | otherwise = fst <$> f prog
