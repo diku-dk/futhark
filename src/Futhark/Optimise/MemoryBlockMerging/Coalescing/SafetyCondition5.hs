@@ -14,7 +14,8 @@ import Control.Monad.RWS
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
-  ExplicitMemory, ExplicitMemorish)
+  InKernel, ExplicitMemory, ExplicitMemorish)
+import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Types
@@ -32,6 +33,7 @@ newtype FindM lore a = FindM { unFindM :: RWS FirstUses
             MonadState DeclarationsSoFar)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
+                             ExtractKernelDefVars lore,
                              FullWalk lore)
 
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
@@ -88,6 +90,8 @@ lookInStm stm@(Let _ _ e) = do
         WhileLoop c -> modify $ S.insert c
     _ -> return ()
 
+  modify $ S.union (extractKernelDefVars e)
+
   -- RECURSIVE BODY WALK.
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
@@ -107,3 +111,15 @@ lookInLambda :: LoreConstraints lore =>
 lookInLambda (Lambda params body _) = do
   forM_ params lookInLParam
   lookInBody body
+
+class ExtractKernelDefVars lore where
+  extractKernelDefVars :: Exp lore -> Names
+
+instance ExtractKernelDefVars ExplicitMemory where
+  extractKernelDefVars (Op (ExpMem.Inner (Kernel _ _ kernelspace _ _))) =
+    S.fromList $ map ($ kernelspace)
+    [spaceGlobalId, spaceLocalId, spaceGroupId]
+  extractKernelDefVars _ = S.empty
+
+instance ExtractKernelDefVars InKernel where
+  extractKernelDefVars _ = S.empty

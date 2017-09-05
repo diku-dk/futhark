@@ -298,7 +298,7 @@ linearWithOffset (Index ixfun is) element_size = do
   where m = length is
         inner_shape = shape ixfun
         fixingOuter (DimFix i:is') (_:ds) = (i:) <$> fixingOuter is' ds
-        fixingOuter (DimSlice off _ 1:is') ds
+        fixingOuter (DimSlice off _ 1:is') (_:ds)
           | is' == map (unitSlice 0) ds = Just [off]
         fixingOuter is' ds
           | is' == map (unitSlice 0) ds = Just []
@@ -317,7 +317,7 @@ rearrangeWithOffset _ _ =
 
 isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isDirect =
-  maybe False (==0) . flip linearWithOffset 1
+  (==Just 0) . flip linearWithOffset 1
 
 
 -- | Substituting a name with a PrimExp in an index function.

@@ -398,11 +398,13 @@ tryCoalesce dst ixfun_slices bindage src offset = do
           src_local offset_local ixfun_slices_local
           dst dst_memloc bindage
 
-  let debug = do
+  let debug = safe0 `seq` safe1 `seq` ixfun_slices `seq` coalesced_intos `seq` do
         putStrLn $ replicate 70 '~'
-        putStrLn "tryCoalesce:"
-        putStrLn ("actual vars for " ++ pretty src ++ ": "
+        putStrLn ("tryCoalesce: src " ++ pretty src ++ ", dst " ++ pretty dst)
+        putStrLn ("actual vars for src " ++ pretty src ++ ": "
                   ++ prettySet (S.fromList src's))
+        putStrLn ("safe0: " ++ show safe0)
+        putStrLn ("safe1: " ++ show safe1)
         putStrLn ("input slices: " ++ show ixfun_slices)
         putStrLn ("coalesced-intos full: " ++ show coalesced_intos)
         putStrLn ("coalesced-into vars for " ++ pretty src ++ ": "
@@ -429,13 +431,13 @@ canBeCoalesced dst src ixfun = do
 
   let safe_all = safe2 && safe3 && safe4 && safe5 && safe_if
 
-  let debug = safe_all `seq` do
+      debug = safe_all `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "canBeCoalesced:"
         putStrLn ("dst: " ++ pretty dst ++ ", src: " ++ pretty src)
         putStrLn ("mem_dst: " ++ show mem_dst)
         putStrLn ("mem_src: " ++ show mem_src)
-        putStrLn ("safe: " ++ L.intercalate ", "
+        putStrLn ("safe (" ++ pretty src ++ "): " ++ L.intercalate ", "
                   -- Safety condition 1 is true if canBeCoalesced is run.
                   (map show [True, safe2, safe3, safe4, safe5])
                   ++ "; safe If: " ++ show safe_if)
@@ -569,6 +571,7 @@ safetyCond5 mem_src ixfun = do
         putStrLn ("ixfun: " ++ show ixfun)
         putStrLn ("in use before mem_src: " ++ prettySet in_use_before_mem_src)
         putStrLn ("used vars: " ++ prettySet used_vars)
+        putStrLn ("remaining vars: " ++ prettySet (used_vars `S.difference` in_use_before_mem_src))
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 

@@ -14,6 +14,7 @@ import Data.Maybe (mapMaybe, fromMaybe, catMaybes)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Writer
+import Control.Arrow (second)
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
@@ -146,13 +147,13 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       ctx <- ask
       let ctx' = ctx { ctxLoopCorrespondingVar =
                        M.union (ctxLoopCorrespondingVar ctx)
-                       (findLoopCorrespondingVar stm)
+                       (findLoopCorrespondingVar ctx stm)
                      }
       let stm_exceptions = fromMaybe [] $ do
             indices <- specialBodyIndices e
             let walker_exc =
                   identityWalker
-                  { walkOnBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                  { walkOnBody = \body -> let (body', lcv) = innermostLoopNestBody ctx body
                                               ctx'' = ctx' { ctxLoopCorrespondingVar =
                                                              M.union (ctxLoopCorrespondingVar ctx') lcv }
                                           in tell $ interferenceExceptions ctx''
@@ -160,7 +161,7 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
                                              indices Nothing }
                 walker_kernel_exc =
                   identityKernelWalker
-                  { walkOnKernelBody = \body -> let (body', lcv) = innermostLoopNestBody body
+                  { walkOnKernelBody = \body -> let (body', lcv) = innermostLoopNestBody ctx body
                                                     ctx'' = ctx' { ctxLoopCorrespondingVar =
                                                                    M.union (ctxLoopCorrespondingVar ctx') lcv }
                                                 in tell $ interferenceExceptions ctx''
@@ -201,11 +202,11 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
       extra_kernel_interferences <- findKernelDataRaceInterferences e
       tell extra_kernel_interferences
 
+      current <- get
       forM_ patvalelems $ \(PatElem var _ _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
-        mapM_ kill $ S.toList last_uses_var
+        mapM_ kill last_uses_var
 
-      current <- get
       let debug = do
             putStrLn $ replicate 70 '~'
             putStrLn "Interference lookInStm:"
@@ -219,7 +220,9 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
               putStrLn ("  " ++ pretty v ++ ": " ++ prettySet ns)
             unless (L.null extra_kernel_interferences)
               $ putStrLn ("extra kernel interferences: " ++
-                          show extra_kernel_interferences)
+                          L.intercalate ", " (map (\(k, ms) ->
+                                                     pretty k ++ "<->" ++ prettySet ms)
+                                              extra_kernel_interferences))
             putStrLn $ replicate 70 '~'
       doDebug debug
 
@@ -234,8 +237,8 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
 -- For perfectly nested loops.  Make it possible to find the index function for
 -- the outer loop.
 findLoopCorrespondingVar :: LoreConstraints lore =>
-                            Stm lore -> M.Map VName (VName, SubExp)
-findLoopCorrespondingVar (Let (Pattern _patctxelems patvalelems) _
+                            Context -> Stm lore -> M.Map VName (VName, SubExp)
+findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
                          (DoLoop _ _ _ (Body _ stms res))) =
   M.fromList $ catMaybes $ zipWith findIt patvalelems res
   where findIt (PatElem pat_v _ (ExpMem.ArrayMem _ _ _ pat_mem _)) (Var res_v)
@@ -245,28 +248,33 @@ findLoopCorrespondingVar (Let (Pattern _patctxelems patvalelems) _
                               (BindInPlace _ _ (DimFix slice_part : _))
                               (ExpMem.ArrayMem _ _ _ last_stm_mem _)]) _
                                 (BasicOp bop) ->
-                let res_v'
-                      | Copy copy_v <- bop
-                      , pat_mem == last_stm_mem =
-                        copy_v
-                      | otherwise = res_v
-                in Just (res_v', (pat_v, slice_part))
+                if pat_mem == last_stm_mem
+                then let res_v'
+                           | Copy copy_v <- bop =
+                               if (memSrcName <$> M.lookup copy_v (ctxVarToMem ctx))
+                                  == Just last_stm_mem
+                               then Just copy_v
+                               else Nothing
+                           | otherwise = Just res_v
+                     in res_v' >>= \t -> Just (t, (pat_v, slice_part))
+                -- Fix this mess.
+                else Nothing
               _ -> Nothing
           | otherwise = Nothing
         findIt _ _ = Nothing
-findLoopCorrespondingVar _ = M.empty
+findLoopCorrespondingVar _ _ = M.empty
 
 innermostLoopNestBody :: LoreConstraints lore =>
-                         Body lore -> (Body lore, M.Map VName (VName, SubExp))
-innermostLoopNestBody body = case body of
+                         Context -> Body lore -> (Body lore, M.Map VName (VName, SubExp))
+innermostLoopNestBody ctx body = case body of
   -- This checks for how perfect nested loops looks like after coalescing.  This
   -- is very brittle.  If it detects such a nesting, it will ask the
   -- interference exception algorithm to look in the innermost body.
   Body _ (Let _ _ (BasicOp Scratch{}) :
           loopstm@(Let _ _ (DoLoop _ _ _ body')) :
-          _) _ -> let (body'', loop_corresponding_var) = innermostLoopNestBody body'
+          _) _ -> let (body'', loop_corresponding_var) = innermostLoopNestBody ctx body'
                   in (body'', M.union
-                              (findLoopCorrespondingVar loopstm)
+                              (findLoopCorrespondingVar ctx loopstm)
                               loop_corresponding_var)
   _ -> (body, M.empty)
 
@@ -323,7 +331,10 @@ instance KernelInterferences ExplicitMemory where
     Op (ExpMem.Inner Kernel{}) -> do
       fus <- firstUsesInExp e
       let all_pair_combinations = [(t, u) | t <- fus, u <- fus]
-      return $ map (\((t, _, _), (u, _, _)) -> (t, S.singleton u))
+      return $ map (second S.singleton)
+        $ L.nubBy (\(t0, u0) (t1, u1) ->
+                     (t0 == t1 && u0 == u1) || (t0 == u1 && u0 == t1))
+        $ map (\((t, _, _), (u, _, _)) -> (t, u))
         $ filter interferes all_pair_combinations
     _ -> return []
     where interferes ((v0, pt0, ixfun0), (v1, pt1, ixfun1)) =
@@ -332,7 +343,7 @@ instance KernelInterferences ExplicitMemory where
             (
               -- Do the index functions range over different memory areas?
               ((ixFunHasIndex ixfun0 || ixFunHasIndex ixfun1) &&
-               not (ixFunsCompatible ixfun0 ixfun1))
+               not (ixFunsCompatible v0 ixfun0 v1 ixfun1))
               ||
               -- Do the arrays have different base type size?  If so, they take
               -- up different amounts of space, and will not be compatible.
@@ -360,12 +371,54 @@ ixFunHasIndex ixfun = case ixfun of
   IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
   IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
 
+-- If a dimension has size 1, remove it.  Only look at this specific pattern,
+-- since it occurs in kernels.
+ixFunRemoveEmptyDimensions :: ExpMem.IxFun -> ExpMem.IxFun
+ixFunRemoveEmptyDimensions (IxFun.Index
+                            (IxFun.Permute
+                             (IxFun.Direct shape)
+                             permutation) slice) =
+  let shape_ix_removed = map snd $ filter (\(dim, _i) -> dim == one)
+        $ zip shape [0..]
+      shape' = filter (/= one) shape
+      (permutation', slice_ix_keep) = unzip
+        $ filter (\(perm, _i) -> perm `notElem` shape_ix_removed)
+        $ zip permutation [(0::Int)..]
+      permutation'' = map (\perm -> perm - length (filter (< perm)
+                                                   shape_ix_removed)) permutation'
+      slice' = map fst
+        $ filter (\(_s, i) -> i `elem` slice_ix_keep) $ zip slice [0..]
+  in IxFun.Index (IxFun.Permute (IxFun.Direct shape') permutation'') slice'
+  where one = ExpMem.ValueExp (IntValue (Int32Value 1))
+ixFunRemoveEmptyDimensions ixfun = ixfun
+
 -- Do the two index functions describe the same range?  In other words, does one
 -- array take up precisely the same location (offset) and size as another array
 -- relative to the beginning of their respective memory blocks?  FIXME: This can
 -- be less conservative.
-ixFunsCompatible :: ExpMem.IxFun -> ExpMem.IxFun -> Bool
-ixFunsCompatible ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
+ixFunsCompatible :: VName -> ExpMem.IxFun -> VName -> ExpMem.IxFun -> Bool
+ixFunsCompatible v0 ixfun0 v1 ixfun1 =
+  let ixfun0' = ixFunRemoveEmptyDimensions ixfun0
+      ixfun1' = ixFunRemoveEmptyDimensions ixfun1
+      res_raw = ixFunsCompatibleRaw ixfun0 ixfun1
+      res_simplified = ixFunsCompatibleRaw ixfun0' ixfun1'
+      res = res_raw || res_simplified
+
+      debug = do
+        putStrLn $ replicate 70 '~'
+        putStrLn "ixFunsCompatible:"
+        putStrLn ("ixfun0 " ++ pretty v0 ++ ": " ++ show ixfun0)
+        putStrLn ("ixfun1 " ++ pretty v1 ++ ": " ++ show ixfun1)
+        putStrLn "---"
+        putStrLn ("ixfun0': " ++ show ixfun0')
+        putStrLn ("ixfun1': " ++ show ixfun1')
+        putStrLn "---"
+        putStrLn ("res: " ++ L.intercalate ", " (map show [res_raw, res_simplified, res]))
+        putStrLn $ replicate 70 '~'
+  in withDebug debug res
+
+ixFunsCompatibleRaw :: ExpMem.IxFun -> ExpMem.IxFun -> Bool
+ixFunsCompatibleRaw ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
   where primEq a b = case (a, b) of
           (IxFun.Direct sa, IxFun.Direct sb) ->
             sa == sb

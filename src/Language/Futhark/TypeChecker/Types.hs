@@ -413,7 +413,7 @@ checkParams orig_ps m = do
   mapM_ isBoundTwice names
   bindSpaced (zip (repeat Term) names) $ descend [] orig_ps
   where names = mapMaybe paramName orig_ps
-        hasName v = maybe False (==v) . paramName
+        hasName v = (==Just v) . paramName
 
         isBoundTwice v
           | p1 : p2 : _ <- filter (hasName v) orig_ps =

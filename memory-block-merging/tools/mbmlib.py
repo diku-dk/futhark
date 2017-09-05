@@ -7,9 +7,9 @@ import numpy as np
 
 
 attributes = (
-    ('average runtime',
-     'microseconds',
-     lambda d: d['average_runtime']),
+    # ('average runtime',
+    #  'microseconds',
+    #  lambda d: d['average_runtime']),
     ('average peak memory usage',
      'bytes',
      lambda d: np.mean(list(d['peak_memory_usages'].values()))),

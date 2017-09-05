@@ -16,6 +16,7 @@ module Futhark.Util
         splitAt3,
         focusNth,
         unixEnvironment,
+        isEnvVarSet,
         directoryContents,
         zEncodeString,
         usesInPlaceLowering,
@@ -94,6 +95,16 @@ focusNth i xs
 unixEnvironment :: [(String,String)]
 unixEnvironment = unsafePerformIO getEnvironment
 
+-- Is an environment variable set to 0 or 1?  If 0, return False; if 1, True;
+-- otherwise the default value.
+isEnvVarSet :: String -> Bool -> Bool
+isEnvVarSet name default_val = fromMaybe default_val $ do
+  val <- lookup name unixEnvironment
+  case val of
+    "0" -> return False
+    "1" -> return True
+    _ -> Nothing
+
 -- | Every non-directory file contained in a directory tree.
 directoryContents :: FilePath -> IO [FilePath]
 directoryContents dir = do
@@ -168,16 +179,6 @@ encodeAsUnicodeCharar :: Char -> EncodedString
 encodeAsUnicodeCharar c = 'z' : if isDigit (head hex_str) then hex_str
                                                            else '0':hex_str
   where hex_str = showHex (ord c) "U"
-
--- Is an environment variable set to 0 or 1?  If 0, return False; if 1, True;
--- otherwise the default value.
-isEnvVarSet :: String -> Bool -> Bool
-isEnvVarSet name default_val = fromMaybe default_val $ do
-  val <- lookup name unixEnvironment
-  case val of
-    "0" -> return False
-    "1" -> return True
-    _ -> Nothing
 
 -- Do we use in-place lowering?  Currently enabled by default.  Disable by
 -- setting the environment variable IN_PLACE_LOWERING=0.

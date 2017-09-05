@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 -- | Optimisation pipelines.
 module Futhark.Passes
   ( standardPipeline
@@ -59,7 +58,6 @@ standardPipeline =
          , simplifySOACS
          , removeDeadFunctions
          ]
-
 
 inPlaceLoweringMaybe :: Pipeline Kernels Kernels
 inPlaceLoweringMaybe =
