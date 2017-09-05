@@ -11,7 +11,7 @@ if [ $# -ne 3 ]; then
     exit 1
 fi
 
-RESULTS_URL=http://futhark-lang.org/benchmark-results/
+RESULTS_URL=https://futhark-lang.org/benchmark-results/
 a_url=$RESULTS_URL/$1-$2.json
 b_url=$RESULTS_URL/$1-$3.json
 echo "Fetching $a_url"
