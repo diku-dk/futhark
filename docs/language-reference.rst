@@ -212,6 +212,12 @@ literals and variables, but also more complicated forms.
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
+   fun:   `qualid` `atom`*
+      : |  "#" `fieldid`
+      : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
+      : | "(" `qualbinop` ")"
+      : | "(" `exp` `qualbinop` ")"
+      : | "(" `qualbinop` `exp` ")"
 
 Some of the built-in expression forms have parallel semantics, but it
 is not guaranteed that the the parallel constructs in Futhark are
