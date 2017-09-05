@@ -673,6 +673,7 @@ lambdaReturnType (CurryFun _ _ (Info (_, t)) _)     = toStruct t
 lambdaReturnType (BinOpFun _ _ _ (Info t) _)        = toStruct t
 lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _)  = toStruct t
 lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
+lambdaReturnType (CurryProject _ (_, Info t) _)     = toStruct t
 
 -- | Is the type concrete, i.e, without any type variables?
 concreteType :: TypeBase f vn -> Bool

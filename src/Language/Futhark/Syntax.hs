@@ -770,6 +770,8 @@ data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase 
                       | CurryBinOpRight (QualName vn)
                         (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+2@; first type is operand, second is result.
+                      | CurryProject Name (f (CompTypeBase vn), f (CompTypeBase vn)) SrcLoc
+                      -- ^ @#field@.  First type is operand, second is result.
 deriving instance Showable f vn => Show (LambdaBase f vn)
 
 instance Located (LambdaBase f vn) where
@@ -778,6 +780,7 @@ instance Located (LambdaBase f vn) where
   locOf (BinOpFun _ _ _ _ loc)        = locOf loc
   locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
+  locOf (CurryProject _ _ loc)        = locOf loc
 
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).

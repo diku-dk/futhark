@@ -744,6 +744,8 @@ FunAbstr :: { UncheckedLambda }
            { CurryBinOpLeft $3 $2 (NoInfo, NoInfo) NoInfo $1 }
          | '(' BinOp ')'
            { BinOpFun $2 NoInfo NoInfo NoInfo $1 }
+         | '#' FieldId
+           { CurryProject (fst $2) (NoInfo, NoInfo) $1 }
 
 Value : IntValue { $1 }
       | FloatValue { $1 }

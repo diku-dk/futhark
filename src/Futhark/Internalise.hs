@@ -22,7 +22,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.List
 import Data.Ord
-import Data.Traversable (mapM, sequence)
+import Data.Traversable (mapM)
 import Data.Loc
 
 import Prelude hiding (mapM, sequence, mod)
@@ -1234,6 +1234,15 @@ internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rett
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
   internaliseLambda (AnonymFun [] params body Nothing (Info rettype') loc) rowts
+
+internaliseLambda (E.CurryProject k (Info rowt,Info t) loc) rowts = do
+  name <- newVName "not_curried"
+  let t' = E.vacuousShapeAnnotations t `E.setAliases` ()
+      lam = AnonymFun [] [E.Id $ E.Ident name (Info rowt) loc]
+            (E.Project k (E.Var (E.qualName name) (Info rowt) loc) (Info t) loc)
+            Nothing (Info t') loc
+  internaliseLambda lam rowts
+
 
 binOpFunToLambda :: E.QualName VName
                  -> E.Type -> E.Type -> E.Type

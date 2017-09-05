@@ -294,6 +294,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LambdaBase ty vn) where
     ppr x <+> ppr binop
   ppr (CurryBinOpRight binop x _ _ _) =
     ppr binop <+> ppr x
+  ppr (CurryProject k _ _) = text "#" <> ppr k
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppr . progDecs
