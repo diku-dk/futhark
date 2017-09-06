@@ -1193,7 +1193,7 @@ compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 compileCode (Assert e msg loc) = do
   e' <- compileExp e
   stm [C.cstm|if (!$exp:e') {
-                   fprintf(stderr, "Assertion failure at %s: \n",
+                   fprintf(stderr, "Assertion failed at %s: %s\n",
                                    $string:(locStr loc), $string:msg);
                    exit(1);
                  }|]

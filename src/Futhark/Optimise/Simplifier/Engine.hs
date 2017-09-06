@@ -262,8 +262,8 @@ addStmEngine :: SimplifiableLore lore => Stm (Wise lore) -> SimpleM lore ()
 addStmEngine bnd = do
   modifyVtable $ ST.insertStm bnd
   case stmExp bnd of
-    BasicOp (Assert se _) -> asserted se
-    _                    -> return ()
+    BasicOp (Assert se _ _) -> asserted se
+    _                       -> return ()
   needStm bnd
 
 collectStmsEngine :: SimpleM lore a -> SimpleM lore (a, [Stm (Wise lore)])

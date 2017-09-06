@@ -239,7 +239,7 @@ lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   var_to_pe <- asks ctxVarPrimExps
-  let eqs | BasicOp (Assert (Var v) _) <- e
+  let eqs | BasicOp (Assert (Var v) _ _) <- e
           , Just (CmpOpExp (CmpEq _) (LeafExp v0 _) (LeafExp v1 _)) <- M.lookup v var_to_pe = do
               modify $ \c -> c { curEqAsserts = insertOrUpdate v0 v1
                                                 $ curEqAsserts c }
