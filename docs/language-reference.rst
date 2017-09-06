@@ -56,6 +56,10 @@ and decimal literals are of type ``f64``.  Hexadecimal literals are
 supported by prefixing with ``0x``, and binary literals by prefixing
 with ``0b``.
 
+Floats can also be written in hexadecimal format such as ``0x1.fp3``,
+instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
+``1 15/16`` and the ``p3`` multiplies it by ``2^3 = 8``.
+
 .. productionlist::
    intnumber: (`decimal` | `hexadecimal` | `binary`) [`int_type`]
    decimal: `decdigit` (`decdigit` |"_")*
@@ -66,8 +70,11 @@ with ``0b``.
    floatnumber: (`pointfloat` | `exponentfloat`) [`float_type`]
    pointfloat: [`intpart`] `fraction`
    exponentfloat: (`intpart` | `pointfloat`) `exponent`
+   hexadecimalfloat: 0 ("x" | "X") `hexintpart` `hexfraction` ("p"|"P") ["+" | "-"] `decdigit`+
    intpart: `decdigit` (`decdigit` |"_")*
    fraction: "." `decdigit` (`decdigit` |"_")*
+   hexintpart: `hexdigit` (`hexdigit` | "_")*
+   hexfraction: "." `hexdigit` (`hexdigit` |"_")*
    exponent: ("e" | "E") ["+" | "-"] `decdigit`+
 
 .. productionlist::
