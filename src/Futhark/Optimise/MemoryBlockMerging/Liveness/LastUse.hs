@@ -61,7 +61,7 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 -- Find the memory blocks used or aliased by a variable.
-varMems :: VName -> FindM lore Names
+varMems :: VName -> FindM lore MNames
 varMems var = do
   var_to_mem <- asks ctxVarToMem
   return $ fromMaybe S.empty $ do
@@ -75,10 +75,10 @@ withLocalCurFirstUses m = do
   modify $ \c -> c { curFirstUses = cur_first_uses }
   return res
 
-recordMapping :: StmOrRes -> VName -> FindM lore ()
+recordMapping :: StmOrRes -> MName -> FindM lore ()
 recordMapping var mem = tell [M.singleton var (S.singleton mem)]
 
-setOptimistic :: VName -> StmOrRes -> Names -> FindM lore ()
+setOptimistic :: MName -> StmOrRes -> MNames -> FindM lore ()
 setOptimistic mem x_lu exclude = do
   -- Will override any previous optimistic last use.
   mem_aliases <- asks ctxMemAliases
@@ -99,7 +99,7 @@ setOptimistic mem x_lu exclude = do
     in c { curOptimisticLastUses = M.insert mem' (x_lu, is_indirect)
                                    $ curOptimisticLastUses c }
 
-removeIndirectOptimistic :: VName -> FindM lore ()
+removeIndirectOptimistic :: MName -> FindM lore ()
 removeIndirectOptimistic mem = do
   res <- M.lookup mem <$> gets curOptimisticLastUses
   case res of
@@ -109,7 +109,7 @@ removeIndirectOptimistic mem = do
                                              $ curOptimisticLastUses c }
     _ -> return ()
 
-commitOptimistic :: VName -> FindM lore ()
+commitOptimistic :: MName -> FindM lore ()
 commitOptimistic mem = do
   res <- M.lookup mem <$> gets curOptimisticLastUses
   case res of

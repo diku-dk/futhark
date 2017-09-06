@@ -76,9 +76,9 @@ data Context = Context
   , ctxVarExps :: M.Map VName Exp'
 
     -- Safety condition 2.
-  , ctxAllocatedBlocksBeforeCreation :: M.Map VName Names
+  , ctxAllocatedBlocksBeforeCreation :: M.Map VName MNames
     -- Safety condition 5.
-  , ctxVarsInUseBeforeMem :: M.Map VName Names
+  , ctxVarsInUseBeforeMem :: M.Map MName Names
   }
   deriving (Show)
 
