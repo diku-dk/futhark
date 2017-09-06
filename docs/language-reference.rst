@@ -212,7 +212,8 @@ literals and variables, but also more complicated forms.
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
-   fun:   `qualid` `atom`*
+   fun:   `qualid`
+      : | "(" `qualid` `atom`+ ")"
       : |  "#" `fieldid`
       : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
       : | "(" `qualbinop` ")"
