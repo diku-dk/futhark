@@ -18,11 +18,12 @@ import Futhark.Representation.ExplicitMemory (
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
+import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 
-type CurrentAllocatedBlocks = Names
-type AllocatedBlocksBeforeCreation = M.Map VName Names
+type CurrentAllocatedBlocks = MNames
+type AllocatedBlocksBeforeCreation = M.Map VName MNames
 
 newtype FindM lore a = FindM { unFindM :: RWS ()
                                AllocatedBlocksBeforeCreation CurrentAllocatedBlocks a }

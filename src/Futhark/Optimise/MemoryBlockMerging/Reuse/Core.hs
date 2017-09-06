@@ -58,7 +58,7 @@ data Context = Context { ctxFirstUses :: FirstUses
                        }
   deriving (Show)
 
-data Current = Current { curUses :: M.Map VName Names
+data Current = Current { curUses :: M.Map MName MNames
                          -- ^ maps a memory block to the memory blocks that
                          --   were decided to be merged into it.
                        , curEqAsserts :: M.Map VName Names

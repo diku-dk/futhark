@@ -36,7 +36,7 @@ data Context = Context { ctxVarToMem :: VarMemMappings MemorySrc
                        }
   deriving (Show)
 
-type InterferencesList = [(VName, Names)]
+type InterferencesList = [(MName, MNames)]
 
 getInterferencesMap :: InterferencesList -> Interferences
 getInterferencesMap = M.unionsWith S.union . map (uncurry M.singleton)
@@ -59,10 +59,10 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-awaken :: VName -> FindM lore ()
+awaken :: MName -> FindM lore ()
 awaken mem = modify $ S.insert mem
 
-kill :: VName -> FindM lore ()
+kill :: MName -> FindM lore ()
 kill mem = modify $ S.delete mem
 
 recordCurrentInterferences :: FindM lore ()
@@ -72,7 +72,7 @@ recordCurrentInterferences = do
   forM_ (S.toList current) $ \mem ->
     tell [(mem, current)]
 
-recordNewInterferences :: Names -> FindM lore ()
+recordNewInterferences :: MNames -> FindM lore ()
 recordNewInterferences mems_in_stm = do
   current <- get
   -- Interferences are commutative.  Reflect that in the resulting data.
@@ -289,20 +289,20 @@ lookInRes ses = do
   mapM_ kill $ S.toList last_uses_v
 
 firstUsesInStm :: LoreConstraints lore => FirstUses ->
-                  Stm lore -> [(VName, PrimType, ExpMem.IxFun)]
+                  Stm lore -> [(MName, PrimType, ExpMem.IxFun)]
 firstUsesInStm first_uses stm =
   let m = lookFUInStm stm
   in snd $ evalRWS m first_uses ()
 
 firstUsesInExp :: LoreConstraints lore =>
-                  Exp lore -> FindM lore [(VName, PrimType, ExpMem.IxFun)]
+                  Exp lore -> FindM lore [(MName, PrimType, ExpMem.IxFun)]
 firstUsesInExp e = do
   let m = lookFUInExp e
   first_uses <- asks ctxFirstUses
   return $ snd $ evalRWS m first_uses ()
 
 lookFUInStm :: LoreConstraints lore =>
-               Stm lore -> RWS FirstUses [(VName, PrimType, ExpMem.IxFun)] () ()
+               Stm lore -> RWS FirstUses [(MName, PrimType, ExpMem.IxFun)] () ()
 lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
   forM_ patvalelems $ \(PatElem patname _ membound) ->
     case membound of
@@ -313,7 +313,7 @@ lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
   lookFUInExp e_stm
 
 lookFUInExp :: LoreConstraints lore =>
-               Exp lore -> RWS FirstUses [(VName, PrimType, ExpMem.IxFun)] () ()
+               Exp lore -> RWS FirstUses [(MName, PrimType, ExpMem.IxFun)] () ()
 lookFUInExp = fullWalkExpM fu_walker fu_walker_kernel
   where fu_walker = identityWalker
           { walkOnBody = mapM_ lookFUInStm . bodyStms }
@@ -324,7 +324,7 @@ lookFUInExp = fullWalkExpM fu_walker fu_walker_kernel
           }
 
 class KernelInterferences lore where
-  findKernelDataRaceInterferences :: Exp lore -> FindM lore [(VName, Names)]
+  findKernelDataRaceInterferences :: Exp lore -> FindM lore [(MName, MNames)]
 
 instance KernelInterferences ExplicitMemory where
   findKernelDataRaceInterferences e = case e of
@@ -396,7 +396,7 @@ ixFunRemoveEmptyDimensions ixfun = ixfun
 -- array take up precisely the same location (offset) and size as another array
 -- relative to the beginning of their respective memory blocks?  FIXME: This can
 -- be less conservative.
-ixFunsCompatible :: VName -> ExpMem.IxFun -> VName -> ExpMem.IxFun -> Bool
+ixFunsCompatible :: MName -> ExpMem.IxFun -> MName -> ExpMem.IxFun -> Bool
 ixFunsCompatible v0 ixfun0 v1 ixfun1 =
   let ixfun0' = ixFunRemoveEmptyDimensions ixfun0
       ixfun1' = ixFunRemoveEmptyDimensions ixfun1
@@ -436,8 +436,8 @@ ixFunsCompatibleRaw ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
 
 
 class SpecialBodyExceptions lore where
-  specialBodyIndices :: Exp lore -> Maybe [VName]
-  specialBodyWriteMems :: Stm lore -> Maybe [(VName, ExpMem.IxFun, PrimType)]
+  specialBodyIndices :: Exp lore -> Maybe [MName]
+  specialBodyWriteMems :: Stm lore -> Maybe [(MName, ExpMem.IxFun, PrimType)]
 
 instance SpecialBodyExceptions ExplicitMemory where
   specialBodyIndices (Op (ExpMem.Inner (Kernel _ _ kernelspace _ _))) =
@@ -455,15 +455,15 @@ instance SpecialBodyExceptions InKernel where
   specialBodyIndices = specialBodyIndicesBase
   specialBodyWriteMems = const Nothing
 
-specialBodyIndicesBase :: Exp lore -> Maybe [VName]
+specialBodyIndicesBase :: Exp lore -> Maybe [MName]
 specialBodyIndicesBase (DoLoop _ _ (ForLoop i _ _ _) _) = Just [i]
 specialBodyIndicesBase _ = Nothing
 
 -- Use first use analysis and last use analysis to find any exceptions to the
 -- naive interference recorded for a statement.
 interferenceExceptions :: LoreConstraints lore =>
-                          Context -> [Stm lore] -> [SubExp] -> [VName] ->
-                          Maybe [(VName, ExpMem.IxFun, PrimType)] -> [(VName, VName)]
+                          Context -> [Stm lore] -> [SubExp] -> [MName] ->
+                          Maybe [(MName, ExpMem.IxFun, PrimType)] -> [(MName, MName)]
 interferenceExceptions ctx stms res indices output_mems_may =
   let output_vars = mapMaybe fromVar res
       indices_slice = map (DimFix . Var) indices

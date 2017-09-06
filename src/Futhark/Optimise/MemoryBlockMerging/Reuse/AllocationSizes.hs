@@ -18,10 +18,12 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
+import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
+
 -- | maps memory blocks to its size and space/type
-type Sizes = M.Map VName (SubExp, Space) -- Also Space information
+type Sizes = M.Map MName (SubExp, Space) -- Also Space information
 
 newtype FindM lore a = FindM { unFindM :: Writer Sizes a }
   deriving (Monad, Functor, Applicative,

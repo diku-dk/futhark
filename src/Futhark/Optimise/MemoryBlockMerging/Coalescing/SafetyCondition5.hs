@@ -23,7 +23,7 @@ import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 
 type DeclarationsSoFar = Names
-type VarsInUseBeforeMem = M.Map VName Names
+type VarsInUseBeforeMem = M.Map MName Names
 
 newtype FindM lore a = FindM { unFindM :: RWS FirstUses
                                VarsInUseBeforeMem DeclarationsSoFar a }
