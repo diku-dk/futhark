@@ -189,7 +189,8 @@ matchPattern ctx exts loc ses =
   forM (zip exts ses) $ \(et, se) -> do
   se_t <- I.subExpType se
   et' <- unExistentialise ctx et se_t
-  ensureExtShape asserting loc et' "correct_shape" se
+  ensureExtShape asserting "value cannot match pattern"
+    loc et' "correct_shape" se
 
 unExistentialise :: M.Map Int VName -> I.ExtType -> I.Type -> InternaliseM I.ExtType
 unExistentialise substs et t = do

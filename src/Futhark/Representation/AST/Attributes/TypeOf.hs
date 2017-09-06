@@ -128,7 +128,7 @@ primOpType (Copy v) =
   pure <$> lookupType v
 primOpType (Manifest _ v) =
   pure <$> lookupType v
-primOpType (Assert _ _) =
+primOpType Assert{} =
   pure [Prim Cert]
 primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays

@@ -314,7 +314,7 @@ inKernelCopy :: ImpGen.CopyCompiler InKernel Imp.KernelOp
 inKernelCopy = ImpGen.copyElementWise
 
 inKernelExpCompiler :: ImpGen.ExpCompiler InKernel Imp.KernelOp
-inKernelExpCompiler _ (BasicOp (Assert _ loc)) =
+inKernelExpCompiler _ (BasicOp (Assert _ _ loc)) =
   compilerLimitationS $
   unlines [ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
           , "As a workaround, surround the expression with 'unsafe'."]

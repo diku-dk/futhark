@@ -45,7 +45,8 @@ internaliseMapLambda internaliseLambda lam args = do
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
   body' <- bindingParamTypes params $
-           ensureResultShape asserting (srclocOf lam) rettype' body
+           ensureResultShape asserting "not all iterations produce same shape"
+           (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
 makeShapeFun :: [I.LParam] -> I.Body -> Int
@@ -106,7 +107,8 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
   body' <- bindingParamTypes params $
-           ensureResultShape asserting (srclocOf lam) rettype' body
+           ensureResultShape asserting
+           "shape of result does not match shape of initial value" (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
 
@@ -154,7 +156,8 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   --
   -- finally, place assertions and return result
   body' <- bindingParamTypes params $
-           ensureResultShape asserting (srclocOf lam) (acctype'++rettypearr') body
+           ensureResultShape asserting "shape of result does not match shape of initial value"
+           (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda
@@ -178,7 +181,8 @@ internaliseStreamLambda internaliseLambda lam rowts = do
   --
   let assertProperShape t se =
         let name = "result_stream_proper_shape"
-        in  ensureShape asserting (srclocOf lam) t name se
+        in  ensureShape asserting "shape of result does not match shape of initial value"
+            (srclocOf lam) t name se
 
   body' <- insertStmsM $ do
                 let mkArrType :: (VName, ExtType) -> InternaliseM I.Type

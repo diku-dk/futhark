@@ -156,8 +156,8 @@ mapExpM tv (BasicOp (Copy e)) =
   BasicOp <$> (pure Copy <*> mapOnVName tv e)
 mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
-mapExpM tv (BasicOp (Assert e loc)) =
-  BasicOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
+mapExpM tv (BasicOp (Assert e msg loc)) =
+  BasicOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure msg <*> pure loc)
 mapExpM tv (BasicOp (Opaque e)) =
   BasicOp <$> (Opaque <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (Partition cs n flags arr)) =

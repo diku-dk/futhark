@@ -77,8 +77,8 @@ setBodySpace space (Call dests fname args) =
   Call dests fname $ map setArgSpace args
   where setArgSpace (MemArg m) = MemArg m
         setArgSpace (ExpArg e) = ExpArg $ setExpSpace space e
-setBodySpace space (Assert e loc) =
-  Assert (setExpSpace space e) loc
+setBodySpace space (Assert e msg loc) =
+  Assert (setExpSpace space e) msg loc
 setBodySpace space (DebugPrint s t e) =
   DebugPrint s t (setExpSpace space e)
 setBodySpace _ (Op op) =

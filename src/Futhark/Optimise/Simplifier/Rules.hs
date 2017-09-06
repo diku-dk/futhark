@@ -639,7 +639,7 @@ simplifyConvOp _ _ _ =
 
 -- If expression is true then just replace assertion.
 simplifyAssert :: LetTopDownRule lore u
-simplifyAssert _ _ (Assert (Constant (BoolValue True)) _) =
+simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
   Just $ SubExp $ Constant Checked
 simplifyAssert _ _ _ =
   Nothing

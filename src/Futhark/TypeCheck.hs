@@ -778,7 +778,7 @@ checkBasicOp (Copy e) =
 checkBasicOp (Manifest perm arr) =
   checkBasicOp $ Rearrange [] perm arr -- Basically same thing!
 
-checkBasicOp (Assert e _) =
+checkBasicOp (Assert e _ _) =
   require [Prim Bool] e
 
 checkBasicOp (Partition cs _ flags arrs) = do
