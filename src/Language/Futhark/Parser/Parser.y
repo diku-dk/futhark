@@ -90,6 +90,7 @@ import Language.Futhark.Parser.Lexer
       u32lit          { L _ (U32LIT _) }
       u64lit          { L _ (U64LIT _) }
       reallit         { L _ (REALLIT _) }
+      hexreallit      { L _ (REALLIT _) }
       f32lit          { L _ (F32LIT _) }
       f64lit          { L _ (F64LIT _) }
       stringlit       { L _ (STRINGLIT _) }
@@ -803,6 +804,7 @@ FloatLit :: { (FloatValue, SrcLoc) }
          : f32lit { let L pos (F32LIT num) = $1 in (Float32Value num, pos) }
          | f64lit { let L pos (F64LIT num) = $1 in (Float64Value num, pos) }
          | reallit {% let L pos (REALLIT num) = $1 in do num' <- getRealValue num; return (num', pos) }
+         | hexreallit {% let L pos (REALLIT num) = $1 in do num' <- getRealValue num; return (num', pos)}
 
 PrimLit :: { (PrimValue, SrcLoc) }
         : SignedLit { let (x,loc) = $1 in (SignedValue x, loc) }
