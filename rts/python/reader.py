@@ -5,6 +5,7 @@
 import numpy as np
 import string
 import struct
+import sys
 
 lookahead_buffer = []
 
@@ -113,7 +114,7 @@ def parse_hex_int(f):
         else:
             unget_char(f, c)
             break
-    return s
+    return str(int(s, 16))
 
 
 def parse_int(f):
