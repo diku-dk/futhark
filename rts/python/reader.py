@@ -100,22 +100,28 @@ def sepBy(p, sep, *args):
             elems += [x]
     return elems
 
+# Assumes '0x' has already been read
+def parse_hex_int(f):
+    s = b''
+    c = get_char(f)
+    while c != None:
+        if c in string.hexdigits:
+            s += c
+            c = get_char(f)
+        elif c == '_':
+            c = get_char(f) # skip _
+        else:
+            unget_char(f, c)
+            break
+    return s
+
+
 def parse_int(f):
     s = b''
     c = get_char(f)
     if c == b'0' and peek_char(f) in [b'x', b'X']:
         c = get_char(f) # skip X
-        c = get_char(f)
-        while c != None:
-            if c in string.hexdigits:
-                s += c
-                c = get_char(f)
-            elif c == '_':
-                c = get_char(f) # skip _
-            else:
-                unget_char(f, c)
-                s = str(int(s, 16))
-                break
+        s += parse_hex_int(f)
     else:
         while c != None:
             if c.isdigit():
@@ -185,6 +191,24 @@ def read_char(f):
     parse_specific_char(f, b'\'')
     return c
 
+def read_str_hex_float(f, sign):
+    int_part = parse_hex_int(f)
+    parse_specific_char(f, b'.')
+    frac_part = parse_hex_int(f)
+    parse_specific_char(f, b'p')
+    exponent = parse_int(f)
+
+    int_val = int(int_part, 16)
+    frac_val = float(int(frac_part, 16)) / (16 ** len(frac_part))
+    exp_val = int(exponent)
+
+    total_val = (int_val + frac_val) * (2.0 ** exp_val)
+    if sign == b'-':
+        total_val = -1 * total_val
+
+    return float(total_val)
+
+
 def read_str_decimal(f):
     skip_spaces(f)
     c = get_char(f)
@@ -193,6 +217,15 @@ def read_str_decimal(f):
     else:
       unget_char(f,c)
       sign = b''
+
+    # Check for hexadecimal float
+    c = get_char(f)
+    if (c == '0' and (peek_char(f) in ['x', 'X'])):
+        get_char(f)
+        return read_str_hex_float(f, sign)
+    else:
+        unget_char(f, c)
+
     bef = optional(parse_int, f)
     if bef == None:
         bef = b'0'
