@@ -391,7 +391,7 @@ data Token = ID Name
 
            | EOF
 
-             deriving (Show, Eq)
+             deriving (Show, Eq, Ord)
 
 scanTokensText :: FilePath -> T.Text -> Either String [L Token]
 scanTokensText file = scanTokens file . BS.fromStrict . T.encodeUtf8
