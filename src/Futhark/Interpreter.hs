@@ -50,7 +50,7 @@ data InterpreterError =
       -- ^ First @Int@ is old shape, second is attempted new shape.
     | ZipError [Int]
       -- ^ The arguments to @zip@ were of different lengths.
-    | AssertFailed SrcLoc
+    | AssertFailed String SrcLoc
       -- ^ Assertion failed at this location.
     | TypeError String
       -- ^ Some value was of an unexpected type.
@@ -85,8 +85,8 @@ instance Show InterpreterError where
     ", from " ++ show shape ++ " to " ++ show newshape
   show (ZipError lengths) =
     "Array arguments to zip must have same length, but arguments have lengths " ++ intercalate ", " (map show lengths) ++ "."
-  show (AssertFailed loc) =
-    "Assertion failed at " ++ locStr loc ++ "."
+  show (AssertFailed msg loc) =
+    "Assertion failed at " ++ locStr loc ++ ": " ++ msg
   show DivisionByZero =
     "Division by zero."
 
@@ -610,12 +610,12 @@ evalBasicOp (Copy v) = single <$> lookupVar v
 
 evalBasicOp (Manifest _ v) = single <$> lookupVar v
 
-evalBasicOp (Assert e loc) = do
+evalBasicOp (Assert e msg loc) = do
   v <- evalSubExp e
   case v of PrimVal (BoolValue True) ->
               return [PrimVal Checked]
             _ ->
-              bad $ AssertFailed loc
+              bad $ AssertFailed msg loc
 
 evalBasicOp (Partition _ n flags arrs) = do
   flags_elems <- arrToList =<< lookupVar flags

@@ -49,7 +49,7 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 -- Find the memory blocks used or aliased by a variable.
-varMems :: VName -> FindM lore Names
+varMems :: VName -> FindM lore MNames
 varMems var = do
   var_to_mem <- asks ctxVarToMem
   mem_aliases <- asks ctxMemAliases
@@ -57,7 +57,7 @@ varMems var = do
     mem <- memSrcName <$> M.lookup var var_to_mem
     return $ S.union (S.singleton mem) $ lookupEmptyable mem mem_aliases
 
-recordMapping :: VName -> VName -> FindM lore ()
+recordMapping :: VName -> MName -> FindM lore ()
 recordMapping stmt_var mem =
   modify $ M.unionWith S.union (M.singleton stmt_var $ S.singleton mem)
 

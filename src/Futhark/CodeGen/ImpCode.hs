@@ -159,7 +159,7 @@ data Code a = Skip
               -- ^ Must be in same space.
             | Call [VName] Name [Arg]
             | If Exp (Code a) (Code a)
-            | Assert Exp SrcLoc
+            | Assert Exp String SrcLoc
             | Comment String (Code a)
               -- ^ Has the same semantics as the contained code, but
               -- the comment should show up in generated code for ease
@@ -312,8 +312,8 @@ instance Pretty op => Pretty (Code op) where
     ppr name <+> text "<-" <+> ppr val
   ppr (SetMem dest from space) =
     ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
-  ppr (Assert e _) =
-    text "assert" <> parens (ppr e)
+  ppr (Assert e msg _) =
+    text "assert" <> parens (commasep [text (show msg), ppr e])
   ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
     text "memcpy" <>
     parens (ppMemLoc dest destoffset <> ppr destspace <> comma </>
@@ -408,8 +408,8 @@ instance Traversable Code where
     pure $ SetScalar name val
   traverse _ (SetMem dest from space) =
     pure $ SetMem dest from space
-  traverse _ (Assert e loc) =
-    pure $ Assert e loc
+  traverse _ (Assert e msg loc) =
+    pure $ Assert e msg loc
   traverse _ (Call dests fname args) =
     pure $ Call dests fname args
   traverse f (Comment s code) =
@@ -457,7 +457,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn dests <> freeIn args
   freeIn (If cond t f) =
     freeIn cond <> freeIn t <> freeIn f
-  freeIn (Assert e _) =
+  freeIn (Assert e _ _) =
     freeIn e
   freeIn (Op op) =
     freeIn op

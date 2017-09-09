@@ -1,8 +1,8 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Futhark.Analysis.AlgSimplify
   ( ScalExp
-  , simplify
   , Error
+  , simplify
   , mkSuffConds
   , RangesRep
   , ppRangesRep
@@ -18,6 +18,7 @@ import qualified Data.Map.Strict as M
 import Data.List
 import Control.Monad
 import Control.Monad.Reader
+import Control.Monad.State
 import Data.Monoid
 
 import Prelude
@@ -46,20 +47,34 @@ ppRangesRep = unlines . sort . map ppRange . M.toList
 --   a list of variable-to-range bindings.
 data AlgSimplifyEnv = AlgSimplifyEnv { inSolveLTH0 :: Bool
                                      , ranges :: RangesRep
+                                     , maxSteps :: Int
+                                     -- ^ The number of
+                                     -- simplifications to do before
+                                     -- bailing out, to avoid spending
+                                     -- too much time.
                                      }
 
-type Error = String
+data Error = StepsExceeded | Error String
 
-type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
+type AlgSimplifyM = StateT Int (ReaderT AlgSimplifyEnv (Either Error))
 
 runAlgSimplifier :: Bool -> AlgSimplifyM a -> RangesRep -> Either Error a
-runAlgSimplifier s x r = runReaderT x env
+runAlgSimplifier s x r = runReaderT (evalStateT x 0) env
   where env = AlgSimplifyEnv { inSolveLTH0 = s
                              , ranges = r
+                             , maxSteps = 1000 -- heuristically chosen
                              }
 
+step :: AlgSimplifyM ()
+step = do modify (1+)
+          exceeded <- pure (>) <*> get <*> asks maxSteps
+          when exceeded stepsExceeded
+
+stepsExceeded :: AlgSimplifyM a
+stepsExceeded = lift $ lift $ Left StepsExceeded
+
 badAlgSimplifyM :: String -> AlgSimplifyM a
-badAlgSimplifyM = lift . Left
+badAlgSimplifyM = lift . lift . Left . Error
 
 -- | Binds an array name to the set of used-array vars
 markInSolve :: AlgSimplifyEnv -> AlgSimplifyEnv
@@ -99,8 +114,10 @@ type DNF     = [NAnd ]
 -- | Applies Simplification at Expression level:
 simplify :: ScalExp -> RangesRep -> ScalExp
 simplify e rangesrep = case runAlgSimplifier False (simplifyScal e) rangesrep of
-  Left err -> error $ "Error during algebraic simplification of: " ++ pretty e ++
-              "\n"  ++ err
+  Left (Error err) ->
+    error $ "Error during algebraic simplification of: " ++ pretty e ++
+    "\n"  ++ err
+  Left StepsExceeded -> e
   Right e' -> e'
 
 -- | Given a symbol i and a scalar expression e, it decomposes
@@ -219,6 +236,7 @@ primScalExpLTH0 _ = False
 type Prod = [ScalExp]
 gaussAllLTH0 :: Bool -> S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
 gaussAllLTH0 static_only el_syms sofp = do
+    step
     let tp  = typeOfNAlg sofp
     rangesrep <- asks ranges
     e_scal <- fromNumSofP sofp

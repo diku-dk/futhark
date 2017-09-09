@@ -6,17 +6,21 @@ import Futhark.Representation.AST
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 
 
+-- | Memory block VName.
+type MName = VName
 
--- FIXME: Better name.  Confusing that this can be a destination.
+-- | Memory block names.
+type MNames = Names
+
 data MemorySrc = MemorySrc
-  { memSrcName :: VName -- ^ the memory block name
+  { memSrcName :: MName -- ^ the memory block name
   , memSrcIxFun :: ExpMem.IxFun -- ^ the index function into the memory
   , memSrcShape :: Shape -- ^ the shape of the original array
   }
   deriving (Show, Eq)
 
 data MemoryLoc = MemoryLoc
-  { memLocName :: VName -- ^ the memory block name
+  { memLocName :: MName -- ^ the memory block name
   , memLocIxFun :: ExpMem.IxFun -- ^ the index function into the memory
   }
   deriving (Show, Eq)
@@ -26,22 +30,25 @@ type VarMemMappings t = M.Map VName t
 
 -- Aliasing of memory blocks, meaning multiple memory blocks refer to the same
 -- actualy memory.  Aliasing is not commutative.
-type MemAliases = M.Map VName Names
+type MemAliases = M.Map MName MNames
 
 -- Aliasing of variables, meaning the use the same memory blocks.  Aliasing is
 -- commutative?
 type VarAliases = M.Map VName Names
 
-type FirstUses = M.Map VName Names
+-- First uses of memory blocks in statement denoted by variable name.
+type FirstUses = M.Map VName MNames
 
 -- A last use can occur in a statement OR in a body result.
 data StmOrRes = FromStm VName
               | FromRes VName
   deriving (Show, Eq, Ord)
-type LastUses = M.Map StmOrRes Names
+type LastUses = M.Map StmOrRes MNames
 
-type Interferences = M.Map VName Names
+-- Interferences between memory blocks.
+type Interferences = M.Map MName MNames
 
+-- "Links" for handling how variables belong together.
 type ActualVariables = M.Map VName Names
 
 -- Information needed by multiple transformations.
@@ -58,6 +65,7 @@ data AuxiliaryInfo = AuxiliaryInfo
   }
   deriving (Show)
 
+-- Log keeping.  Statement variable names to a list of topic-content-mappings.
 newtype Log = Log (M.Map VName [(String, String)])
   deriving (Show, Eq, Ord)
 

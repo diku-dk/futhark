@@ -35,14 +35,14 @@ newtype FindM lore a = FindM { unFindM :: RWS (VarMemMappings MemorySrc) [MemAli
 type LoreConstraints lore = (ExplicitMemorish lore,
                              FullWalkAliases lore)
 
-recordMapping :: VName -> Names -> FindM lore ()
+recordMapping :: MName -> MNames -> FindM lore ()
 recordMapping mem mems = tell [M.singleton mem (S.delete mem mems)]
 
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-lookupMems :: Names -> FindM lore Names
+lookupMems :: Names -> FindM lore MNames
 lookupMems var_aliases = do
   var_to_mem <- ask
   return $ S.fromList $ mapMaybe ((memSrcName <$>) . flip M.lookup var_to_mem)

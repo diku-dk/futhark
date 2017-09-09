@@ -225,6 +225,7 @@ static int remove_underscores(char* buf) {
   char c = getchar();
   while (isxdigit(c) || c == '.' || c == '+' || c == '-' ||
          c == 'x' || c == 'X' ||
+         c == 'p' || c == 'P' || /* exponent for hex. floats */
          c == 'e' || c == 'E' || c == '_') {
     if (c == '_') {
       c = getchar();

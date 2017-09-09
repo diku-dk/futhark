@@ -1265,6 +1265,18 @@ checkLambda (CurryBinOpRight binop _ _ _ loc) args =
   bad $ ParameterMismatch (Just binop) loc (Left 1) $
   map (toStructural . argType) args
 
+checkLambda (CurryProject k _ loc) [(argt, dflow, argloc)] = do
+  maybeCheckOccurences dflow
+  occur dflow
+  case argt of
+    Record fs | Just t <- M.lookup k fs ->
+                  return $ CurryProject k (Info argt, Info t) loc
+    _ -> bad $ InvalidField argloc argt (pretty k)
+
+checkLambda (CurryProject _ _ loc) args =
+  bad $ ParameterMismatch Nothing loc (Left 1) $
+  map (toStructural . argType) args
+
 checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
                 -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg
                 -> TermTypeM (Exp, QualName VName, Type)

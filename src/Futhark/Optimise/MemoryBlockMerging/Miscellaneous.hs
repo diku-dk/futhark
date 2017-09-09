@@ -129,9 +129,9 @@ expandWithAliases mem_aliases = fixpointIterate expand
                                            (S.toList mems))))
                       (M.assocs mems_map))
 
-expandWithAliases' :: MemAliases -> VName -> Names
+expandWithAliases' :: MemAliases -> MName -> MNames
 expandWithAliases' mem_aliases = fixpointIterate expand . S.singleton
-  where expand :: Names -> Names
+  where expand :: MNames -> MNames
         expand mems =
           S.unions (mems : map (`lookupEmptyable` mem_aliases) (S.toList mems))
 

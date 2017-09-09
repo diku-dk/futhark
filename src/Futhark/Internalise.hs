@@ -22,7 +22,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.List
 import Data.Ord
-import Data.Traversable (mapM, sequence)
+import Data.Traversable (mapM)
 import Data.Loc
 
 import Prelude hiding (mapM, sequence, mod)
@@ -208,7 +208,9 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
 
         fname' <- internaliseFunName fname params
         body' <- localScope constscope $
-                 ensureResultExtShape asserting loc (map I.fromDecl rettype')
+                 ensureResultExtShape asserting
+                 "shape of function result does not match shapes in return type"
+                 loc (map I.fromDecl rettype')
                  =<< internaliseBody body
 
         let free_in_fun = freeInBody body' `S.difference` normal_param_names
@@ -390,7 +392,8 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
     e' : _ -> do
       rowtypes <- mapM subExpType e'
       let arraylit ks rt = do
-            ks' <- mapM (ensureShape asserting loc rt "elem_reshaped") ks
+            ks' <- mapM (ensureShape asserting "shape of element differs from shape of first element"
+                         loc rt "elem_reshaped") ks
             return $ I.BasicOp $ I.ArrayLit ks' rt
       letSubExps desc =<< zipWithM arraylit (transpose es') rowtypes
   where zeroDim t = t `I.setArrayShape`
@@ -507,7 +510,8 @@ internaliseExp desc (E.Ascript e (TypeDecl _ (Info et)) loc) = do
   (ts, _, cm) <- internaliseReturnType et
   mapM_ (uncurry internaliseDimConstant) cm
   forM (zip es ts) $ \(e',t') ->
-    ensureExtShape asserting loc (I.fromDecl t') desc e'
+    ensureExtShape asserting "value does not match shape in type"
+    loc (I.fromDecl t') desc e'
 
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
@@ -690,7 +694,8 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
         sname_t <- lookupType sname
         let slice = fullSlice sname_t idxs'
             rowtype = sname_t `setArrayDims` sliceDims slice
-        ve'' <- ensureShape asserting loc rowtype "lw_val_correct_shape" ve'
+        ve'' <- ensureShape asserting "shape of value does not match shape of source array"
+                loc rowtype "lw_val_correct_shape" ve'
         letInPlace "letwith_dst" (concat idx_cs) sname (fullSlice sname_t idxs') $
           BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
@@ -741,7 +746,7 @@ internaliseExp _ (E.Zip _ e es loc) = do
                        I.CmpOp (I.CmpEq I.int32) w outer
                 c   <- assertingOne $
                        letExp "zip_assert" $ I.BasicOp $
-                       I.Assert cmp loc
+                       I.Assert cmp "arrays differ in length" loc
                 letExp (postfix e_unchecked' "_zip_res") $
                   shapeCoerce c (w:inner) e_unchecked'
       es' <- mapM reshapeToOuter es_unchecked
@@ -772,7 +777,7 @@ internaliseExp _ (E.Reshape shape e loc) = do
     shapeOk <- assertingOne $
                letExp "shape_ok" =<<
                eAssert (eCmpOp (I.CmpEq I.int32) (prod changed_dims) (prod shape'))
-               loc
+               "new shape has different number of elements than old shape" loc
     return $ I.Reshape shapeOk (reshapeOuter (DimNew <$> shape') orig_rank old_shape) v
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
         orig_rank = E.arrayRank $ E.typeOf e
@@ -789,7 +794,7 @@ internaliseExp _ (E.Split i splitexp arrexp loc) = do
                      (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
     indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
     forM indexChecks$ \cnd ->
-      letExp "split_index_assert" $ BasicOp $ I.Assert cnd loc
+      letExp "split_index_assert" $ BasicOp $ I.Assert cnd "index out of bounds" loc
 
   -- Calculate diff between each split index
   let sizeExps = zipWith (\beg end -> BasicOp $ I.BinOp (I.Sub I.Int32) end beg)
@@ -813,7 +818,8 @@ internaliseExp desc (E.Concat i x ys loc) = do
         yts <- mapM lookupType yarrs
         let matches n m =
               letExp "match" =<<
-              eAssert (pure $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) n m) loc
+              eAssert (pure $ I.BasicOp $ I.CmpOp (I.CmpEq I.int32) n m)
+              "arguments do not have the same row shape" loc
             x_inner_dims  = dropAt i 1 $ I.arrayDims xt
             ys_inner_dims = map (dropAt i 1 . I.arrayDims) yts
             updims = zipWith3 updims' [0..] (I.arrayDims xt)
@@ -901,7 +907,8 @@ internaliseExp desc (E.Stream form lam arr _) = do
           return p { I.paramName = name }
 
         body_with_lam0 <-
-          ensureResultShape asserting (srclocOf lam) acctps <=< runBodyBinder $ do
+          ensureResultShape asserting "shape of result does not match shape of initial value"
+          (srclocOf lam) acctps <=< runBodyBinder $ do
             lam_res <- bodyBind $ extLambdaBody lam'
 
             let consumed = consumedByLambda $ Alias.analyseLambda lam0'
@@ -1013,7 +1020,7 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
                 ifCommon [I.Prim I.Bool]
     ok_or_empty <- letSubExp "ok_or_empty" $
                    I.BasicOp $ I.BinOp I.LogOr empty_slice slice_ok
-    letTupExp "slice_cert" $ I.BasicOp $ I.Assert ok_or_empty loc
+    letTupExp "slice_cert" $ I.BasicOp $ I.Assert ok_or_empty "slice out of bounds" loc
 
   return (I.DimSlice i' n s', checked)
   where zero = constant (0::Int32)
@@ -1029,7 +1036,9 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   nes <- internaliseExp (what++"_ne") ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
     rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape asserting loc rowtype (what++"_ne_right_shape") ne'
+    ensureShape asserting
+      "Row shape of input array does not match shape of neutral element"
+      loc rowtype (what++"_ne_right_shape") ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
@@ -1234,6 +1243,15 @@ internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rett
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
   internaliseLambda (AnonymFun [] params body Nothing (Info rettype') loc) rowts
+
+internaliseLambda (E.CurryProject k (Info rowt,Info t) loc) rowts = do
+  name <- newVName "not_curried"
+  let t' = E.vacuousShapeAnnotations t `E.setAliases` ()
+      lam = AnonymFun [] [E.Id $ E.Ident name (Info rowt) loc]
+            (E.Project k (E.Var (E.qualName name) (Info rowt) loc) (Info t) loc)
+            Nothing (Info t') loc
+  internaliseLambda lam rowts
+
 
 binOpFunToLambda :: E.QualName VName
                  -> E.Type -> E.Type -> E.Type
@@ -1513,7 +1531,7 @@ isOverloadedFunction qname args loc = do
           I.CmpOp (I.CmpEq I.int32) si_w sv_w
         c   <- assertingOne $
           letExp "write_cert" $ I.BasicOp $
-          I.Assert cmp loc
+          I.Assert cmp "length of index and value array does not match" loc
         sv' <- letExp (baseString sv ++ "_write_sv") $
           I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
@@ -1599,7 +1617,8 @@ funcall desc qfname (e_ts, i_ts) args loc = do
       constOrShape = const $ I.Prim int32
       paramts = map constOrShape constargs ++ closure_ts ++
                 map constOrShape shapeargs ++ map I.fromDecl value_paramts
-  args' <- ensureArgShapes asserting loc (map I.paramName fun_params)
+  args' <- ensureArgShapes asserting "function arguments of wrong shape"
+           loc (map I.paramName fun_params)
            paramts (constargs ++ map I.Var closure ++ shapeargs ++ args)
   argts' <- mapM subExpType args'
   case rettype_fun $ zip args' argts' of
@@ -1619,7 +1638,7 @@ boundsCheck loc w e = do
                    I.CmpOp (I.CmpSle I.Int32) (I.constant (0 :: I.Int32)) e
       upperBound = I.BasicOp $
                    I.CmpOp (I.CmpSlt I.Int32) e w
-  letExp "bounds_check" =<< eAssert check loc
+  letExp "bounds_check" =<< eAssert check "index out of bounds" loc
 
 shadowIdentsInExp :: [(VName, I.SubExp)] -> [Stm] -> I.SubExp
                   -> InternaliseM I.SubExp

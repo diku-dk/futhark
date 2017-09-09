@@ -39,6 +39,7 @@ import Language.Futhark.Syntax (BinOp(..))
 @romlit = 0[rR][IVXLCM][IVXLCM_]*
 @intlit = @hexlit|@binlit|@declit|@romlit
 @reallit = (([0-9][0-9_]*("."[0-9][0-9_]*)?))([eE][\+\-]?[0-9]+)?
+@hexreallit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*"."[0-9a-fA-F][0-9a-fA-F_]*([pP][\+\-]?[0-9]+)
 
 @field = [a-zA-Z0-9] [a-zA-Z0-9_]*
 
@@ -96,6 +97,9 @@ tokens :-
   @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit "f32" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f32") }
+  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
+  @hexreallit              { tokenM $ fmap REALLIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
 
@@ -247,6 +251,31 @@ fromRoman s =
   case find ((`T.isPrefixOf` s) . fst) romanNumerals of
     Nothing -> 0
     Just (d,n) -> n+fromRoman (T.drop (T.length d) s)
+
+fromHexRealLit :: RealFloat a => T.Text -> Maybe a
+fromHexRealLit s =
+  let num =  (T.drop 2 s) in
+  -- extract number into integer, fractional and (optional) exponent
+  let comps = (T.split (\x -> x == '.' || x == 'p' || x == 'P') num) in
+  case comps of
+    [i, f, p] ->
+        let int_part = readIntegral (T.pack ("0x" ++ (T.unpack i)))
+            frac_part = readIntegral (T.pack ("0x" ++ (T.unpack f)))
+            exponent = if ((T.pack "-") `T.isPrefixOf` p)
+                       then -1 * (readIntegral p)
+                       else readIntegral p
+
+            frac_len = T.length f
+            frac_val = (fromIntegral frac_part) / (16.0 ** (fromIntegral frac_len))
+            total_val = ((fromIntegral int_part) + frac_val) * (2.0 ** (fromIntegral exponent)) in
+        Just (total_val)
+    _ -> Nothing
+
+readHexRealLit :: RealFloat a => String -> T.Text -> Alex a
+readHexRealLit desc s =
+  case fromHexRealLit s of
+    Just (n) -> return n
+    Nothing -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
 
 alexEOF = return ((0,0,0), (0,0,0), EOF)
 

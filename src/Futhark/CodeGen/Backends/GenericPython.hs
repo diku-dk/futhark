@@ -936,9 +936,9 @@ compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment s code'
 
-compileCode (Imp.Assert e loc) = do
+compileCode (Imp.Assert e msg loc) = do
   e' <- compileExp e
-  stm $ Assert e' $ locStr loc
+  stm $ Assert e' ("At " ++ locStr loc ++ ": " ++ msg)
 
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args

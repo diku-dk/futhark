@@ -181,9 +181,9 @@ data BasicOp lore
   | ConvOp ConvOp SubExp
     -- ^ Conversion "casting".
 
-  | Assert SubExp SrcLoc
-  -- ^ Turn a boolean into a certificate, halting the
-  -- program if the boolean is false.
+  | Assert SubExp String SrcLoc
+  -- ^ Turn a boolean into a certificate, halting the program with the
+  -- given error message if the boolean is false.
 
   -- Primitive array operations
 
