@@ -513,19 +513,23 @@ safetyCond3 :: LoreConstraints lore =>
                VName -> VName -> MemorySrc -> FindM lore Bool
 safetyCond3 src dst mem_dst = do
   fundef <- asks ctxFunDef
-  let uses_after_src_vars = getVarUsesBetween fundef src dst
-  uses_after_src <- S.unions <$> mapM (maybe (return S.empty) withMemAliases
-                                       <=< lookupCurrentVarMem)
-                    (S.toList uses_after_src_vars)
-  let res = not $ S.member (memSrcName mem_dst) uses_after_src
+  let uses_after_src_vars = S.toList $ getVarUsesBetween fundef src dst
+  uses_after_src <- mapM (maybe (return S.empty) withMemAliases
+                          <=< lookupCurrentVarMem) uses_after_src_vars
+  let res = not $ S.member (memSrcName mem_dst) (S.unions uses_after_src)
 
-  let debug = uses_after_src `seq` do
+      dbg_vars_causing_mem_use =
+        map fst
+        $ filter (\(_var, mems) -> memSrcName mem_dst `S.member` mems)
+        $ zip uses_after_src_vars uses_after_src
+      debug = uses_after_src `seq` do
         putStrLn $ replicate 70 '~'
         putStrLn "safetyCond3:"
         putStrLn ("mem_dst: " ++ show mem_dst)
         putStrLn ("src: " ++ pretty src)
-        putStrLn ("uses after src vars: " ++ prettySet uses_after_src_vars)
-        putStrLn ("uses after src: " ++ prettySet uses_after_src)
+        putStrLn ("uses after src vars: " ++ prettyList uses_after_src_vars)
+        putStrLn ("uses after src: " ++ prettySet (S.unions uses_after_src))
+        putStrLn ("vars causing mem use: " ++ prettyList dbg_vars_causing_mem_use)
         putStrLn $ replicate 70 '~'
   withDebug debug $ return res
 
