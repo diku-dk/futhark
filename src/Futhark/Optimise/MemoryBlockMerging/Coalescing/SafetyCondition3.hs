@@ -17,7 +17,6 @@ import Futhark.Representation.ExplicitMemory (
   ExplicitMemory, ExplicitMemorish)
 import Futhark.Representation.Kernels.Kernel
 
-import Futhark.Optimise.MemoryBlockMerging.Types
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 
 
