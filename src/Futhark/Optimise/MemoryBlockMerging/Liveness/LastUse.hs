@@ -148,13 +148,15 @@ lookInFunDefFParam (Param x _) = do
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
-lookInBody (Body _ bnds _res) =
+lookInBody (Body _ bnds res) = do
   mapM_ lookInStm bnds
+  mapM_ lookInRes res
 
 lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
-lookInKernelBody (KernelBody _ bnds _res) =
+lookInKernelBody (KernelBody _ bnds res) = do
   mapM_ lookInStm bnds
+  mapM_ (lookInRes . kernelResultSubExp) res
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
@@ -256,3 +258,12 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelKernelBody = coerce . lookInKernelBody
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
+
+lookInRes :: LoreConstraints lore =>
+             SubExp -> FindM lore ()
+lookInRes (Var v) = do
+  mem_v <- M.lookup v <$> asks ctxVarToMem
+  case mem_v of
+    Just mem -> setOptimistic (memSrcName mem) (FromRes v) S.empty
+    Nothing -> return ()
+lookInRes _ = return ()
