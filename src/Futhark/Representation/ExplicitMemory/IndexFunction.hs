@@ -221,7 +221,7 @@ reshape (Permute ixfun perm) newshape
       Permute (reshape ixfun newshape') perm'
   where splitCoercions newshape' = do
           let (head_coercions, newshape'') = span isCoercion newshape'
-          let (reshapes, tail_coercions) = span (not . isCoercion) newshape''
+          let (reshapes, tail_coercions) = break isCoercion newshape''
           guard (all isCoercion tail_coercions)
           return (head_coercions, reshapes, tail_coercions)
 
