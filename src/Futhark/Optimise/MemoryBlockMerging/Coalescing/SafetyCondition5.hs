@@ -92,7 +92,7 @@ lookInStm stm@(Let _ _ e) = do
 
   modify $ S.union (extractKernelDefVars e)
 
-  -- RECURSIVE BODY WALK.
+  -- Recursive body walk.
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody
@@ -113,6 +113,7 @@ lookInLambda (Lambda params body _) = do
   lookInBody body
 
 class ExtractKernelDefVars lore where
+  -- Extract variables from a kernel definition.
   extractKernelDefVars :: Exp lore -> Names
 
 instance ExtractKernelDefVars ExplicitMemory where

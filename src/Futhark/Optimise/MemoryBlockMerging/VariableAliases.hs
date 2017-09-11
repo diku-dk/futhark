@@ -12,7 +12,8 @@ import Control.Monad.Writer
 
 import Futhark.Representation.AST
 import Futhark.Representation.Aliases (Aliases, unNames)
-import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
+import Futhark.Representation.ExplicitMemory
+       (ExplicitMemorish, ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Analysis.Alias (analyseFun)
@@ -35,8 +36,8 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-findVarAliases :: LoreConstraints lore =>
-                  FunDef lore -> VarAliases
+-- | Find all variable aliases in a function definition.
+findVarAliases :: FunDef ExplicitMemory -> VarAliases
 findVarAliases fundef =
   let fundef' = analyseFun fundef
       m = unFindM $ lookInBody $ funDefBody fundef'

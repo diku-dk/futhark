@@ -1,4 +1,4 @@
--- | Hoist everything asked for as much as possible.
+-- | Hoist variables as much as possible.
 module Futhark.Optimise.MemoryBlockMerging.CrudeHoisting
   ( hoistInFunDef
   ) where
@@ -38,7 +38,8 @@ data PrimBinding = PrimBinding { pbFrees :: Names
 -- a statement can have multiple patterns.
 type BindingMap = [(Names, PrimBinding)]
 
-
+-- | Call 'findHoistees' for every body, and then hoist every one of the found
+-- hoistees (variables).
 hoistInFunDef :: FunDef ExplicitMemory
               -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
               -> FunDef ExplicitMemory
@@ -74,6 +75,7 @@ scopeBindingMap :: (VName, NameInfo ExplicitMemory)
                 -> BindingMap
 scopeBindingMap (x, _) = [(S.singleton x, PrimBinding S.empty S.empty FromFParam)]
 
+-- Find all variables bound in a KernelSpace.
 boundInKernelSpace :: ExpMem.KernelSpace -> Names
 boundInKernelSpace space =
   -- This might do too much.
@@ -90,8 +92,8 @@ boundInKernelSpace space =
                       ++ mapMaybe (fromVar . (\(_, _, _, x) -> x)) ts
                  ))
 
--- FIXME: The results of this should probably go in the core 'freeIn' function,
--- and not just in this random module.
+-- FIXME: The results of this should maybe go in the core 'freeIn' function, and
+-- not in this arbitrary module.
 boundInExpExtra :: Exp ExplicitMemory -> Names
 boundInExpExtra = execWriter . inExp
   where inExp :: Exp ExplicitMemory -> Writer Names ()
@@ -194,6 +196,8 @@ hoistRecursivelyStm bindingmap findHoistees (Let pat () e) =
                              (ns, PrimBinding frees consumed FromFParam))
                       bindingmap
 
+-- Hoist the statement denoted by 'hoistee' as much upwards as possible in
+-- 'body', and return the new body.
 hoist :: BindingMap
       -> Body ExplicitMemory
       -> VName
@@ -205,7 +209,7 @@ hoist bindingmap_cur body hoistee =
 
       debug = do
         putStrLn $ replicate 70 '~'
-        putStrLn "hoist:"
+        putStrLn "CrudeHoisting hoist:"
         putStrLn ("Name: " ++ show hoistee)
         putStrLn $ replicate 70 '~'
 

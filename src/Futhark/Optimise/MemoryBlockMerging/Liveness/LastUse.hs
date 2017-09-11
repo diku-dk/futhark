@@ -16,7 +16,8 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
+import Futhark.Representation.ExplicitMemory
+       (ExplicitMemorish, ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
@@ -69,65 +70,26 @@ varMems var = do
     mem <- memSrcName <$> M.lookup var var_to_mem
     return $ S.singleton mem
 
+modifyCurOptimisticLastUses :: (OptimisticLastUses -> OptimisticLastUses) -> FindM lore ()
+modifyCurOptimisticLastUses f =
+  modify $ \c -> c { curOptimisticLastUses = f $ curOptimisticLastUses c }
+
+modifyCurFirstUses :: (Names -> Names) -> FindM lore ()
+modifyCurFirstUses f = modify $ \c -> c { curFirstUses = f $ curFirstUses c }
+
 withLocalCurFirstUses :: FindM lore a -> FindM lore a
 withLocalCurFirstUses m = do
   cur_first_uses <- gets curFirstUses
   res <- m
-  modify $ \c -> c { curFirstUses = cur_first_uses }
+  modifyCurFirstUses $ const cur_first_uses
   return res
 
 recordMapping :: StmOrRes -> MName -> FindM lore ()
 recordMapping var mem = tell [M.singleton var (S.singleton mem)]
 
-setOptimistic :: MName -> StmOrRes -> MNames -> FindM lore ()
-setOptimistic mem x_lu exclude = do
-  -- Will override any previous optimistic last use.
-  mem_aliases <- asks ctxMemAliases
-  let mems = S.difference (S.union (S.singleton mem)
-                           $ lookupEmptyable mem mem_aliases) exclude
-
-      debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "setOptimistic:"
-        putStrLn $ pretty mem
-        print x_lu
-        putStrLn ("exclude: " ++ prettySet exclude)
-        putStrLn $ prettySet mems
-        putStrLn $ replicate 70 '~'
-
-  withDebug debug $ forM_ mems $ \mem' -> modify $ \c ->
-    let is_indirect = mem' /= mem
-    in c { curOptimisticLastUses = M.insert mem' (x_lu, is_indirect)
-                                   $ curOptimisticLastUses c }
-
-removeIndirectOptimistic :: MName -> FindM lore ()
-removeIndirectOptimistic mem = do
-  res <- M.lookup mem <$> gets curOptimisticLastUses
-  case res of
-    Just (_, True) -> -- Means that is was added indirectly.
-      modify $ \c ->
-                 c { curOptimisticLastUses = M.delete mem
-                                             $ curOptimisticLastUses c }
-    _ -> return ()
-
-commitOptimistic :: MName -> FindM lore ()
-commitOptimistic mem = do
-  res <- M.lookup mem <$> gets curOptimisticLastUses
-  case res of
-    Just (x_lu, _) -> do
-      let debug = do
-            putStrLn $ replicate 70 '~'
-            putStrLn "commitOptimistic:"
-            putStrLn $ pretty mem
-            print x_lu
-            putStrLn $ replicate 70 '~'
-
-      withDebug debug $ recordMapping x_lu mem
-    Nothing -> return ()
-
-findLastUses :: LoreConstraints lore =>
-                VarMemMappings MemorySrc -> MemAliases -> FirstUses -> Names
-             -> FunDef lore -> LastUses
+-- | Find all last uses of *memory blocks* in a function definition.
+findLastUses :: VarMemMappings MemorySrc -> MemAliases -> FirstUses -> Names
+             -> FunDef ExplicitMemory -> LastUses
 findLastUses var_to_mem mem_aliases first_uses existentials fundef =
   let context = Context
                 { ctxVarToMem = var_to_mem
@@ -148,11 +110,61 @@ findLastUses var_to_mem mem_aliases first_uses existentials fundef =
                   $ snd $ evalRWS m context (Current M.empty S.empty)
   in last_uses
 
+-- Optimistically say that the last use of 'mem' and all its memory aliases is
+-- at 'x_lu'.  Exclude 'exclude' from the memory aliases (necessary in a few
+-- edge cases).
+setOptimistic :: MName -> StmOrRes -> MNames -> FindM lore ()
+setOptimistic mem x_lu exclude = do
+  -- Will override any previous optimistic last use.
+  mem_aliases <- asks ctxMemAliases
+  let mems = S.difference (S.union (S.singleton mem)
+                           $ lookupEmptyable mem mem_aliases) exclude
+
+  forM_ mems $ \mem' -> do
+    let is_indirect = mem' /= mem
+    modifyCurOptimisticLastUses $ M.insert mem' (x_lu, is_indirect)
+
+  let debug = do
+        putStrLn $ replicate 70 '~'
+        putStrLn "setOptimistic:"
+        putStrLn $ pretty mem
+        print x_lu
+        putStrLn ("exclude: " ++ prettySet exclude)
+        putStrLn $ prettySet mems
+        putStrLn $ replicate 70 '~'
+  doDebug debug
+
+-- If an optimistic last use 'mem' was added through a memory alias, forget
+-- about it.
+removeIndirectOptimistic :: MName -> FindM lore ()
+removeIndirectOptimistic mem = do
+  res <- M.lookup mem <$> gets curOptimisticLastUses
+  case res of
+    Just (_, True) -> -- Means that is was added indirectly.
+      modifyCurOptimisticLastUses $ M.delete mem
+    _ -> return ()
+
+-- Set the optimistic last use in stone.
+commitOptimistic :: MName -> FindM lore ()
+commitOptimistic mem = do
+  res <- M.lookup mem <$> gets curOptimisticLastUses
+  case res of
+    Just (x_lu, _) -> do
+      let debug = do
+            putStrLn $ replicate 70 '~'
+            putStrLn "commitOptimistic:"
+            putStrLn $ pretty mem
+            print x_lu
+            putStrLn $ replicate 70 '~'
+
+      withDebug debug $ recordMapping x_lu mem
+    Nothing -> return ()
+
 lookInFunDefFParam :: LoreConstraints lore =>
                       FParam lore -> FindM lore ()
 lookInFunDefFParam (Param x _) = do
   first_uses_x <- lookupEmptyable x <$> asks ctxFirstUses
-  modify $ \c -> c { curFirstUses = S.union first_uses_x $ curFirstUses c }
+  modifyCurFirstUses $ S.union first_uses_x
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
@@ -183,7 +195,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
     case membound of
       ExpMem.ArrayMem _ _ _ xmem _ -> do
         first_uses_x <- lookupEmptyable x <$> asks ctxFirstUses
-        modify $ \c -> c { curFirstUses = S.union first_uses_x $ curFirstUses c }
+        modifyCurFirstUses $ S.union first_uses_x
         -- When this is a new first use of a memory block, commit the previous
         -- optimistic last use of it, so that it can be considered unused in
         -- the statements inbetween.

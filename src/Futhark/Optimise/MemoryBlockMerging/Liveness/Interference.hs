@@ -2,7 +2,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
--- | Find memory block interferences.
+-- | Find memory block interferences.  Maps a memory block to its interference
+-- set.
+
 module Futhark.Optimise.MemoryBlockMerging.Liveness.Interference
   ( findInterferences
   ) where
@@ -81,10 +83,9 @@ recordNewInterferences mems_in_stm = do
   forM_ (S.toList mems_in_stm) $ \mem ->
     tell [(mem, current)]
 
--- | Find all interferences.
-findInterferences :: LoreConstraints lore =>
-                     VarMemMappings MemorySrc -> MemAliases ->
-                     FirstUses -> LastUses -> Names -> FunDef lore
+-- | Find all memory block interferences in a function definition.
+findInterferences :: VarMemMappings MemorySrc -> MemAliases ->
+                     FirstUses -> LastUses -> Names -> FunDef ExplicitMemory
                   -> Interferences
 findInterferences var_to_mem mem_aliases first_uses last_uses existentials fundef =
   let context = Context { ctxVarToMem = var_to_mem
@@ -395,7 +396,9 @@ ixFunRemoveEmptyDimensions ixfun = ixfun
 -- Do the two index functions describe the same range?  In other words, does one
 -- array take up precisely the same location (offset) and size as another array
 -- relative to the beginning of their respective memory blocks?  FIXME: This can
--- be less conservative.
+-- be less conservative, for example by handling that different reshapes of the
+-- same array can describe the same offset and space, but do we have any tests
+-- or benchmarks where this occurs?
 ixFunsCompatible :: MName -> ExpMem.IxFun -> MName -> ExpMem.IxFun -> Bool
 ixFunsCompatible v0 ixfun0 v1 ixfun1 =
   let ixfun0' = ixFunRemoveEmptyDimensions ixfun0
@@ -417,6 +420,8 @@ ixFunsCompatible v0 ixfun0 v1 ixfun1 =
         putStrLn $ replicate 70 '~'
   in withDebug debug res
 
+-- Are two index functions *identical*?  (Silly approach, but the Eq instance is
+-- used for something else.)
 ixFunsCompatibleRaw :: ExpMem.IxFun -> ExpMem.IxFun -> Bool
 ixFunsCompatibleRaw ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
   where primEq a b = case (a, b) of
@@ -434,7 +439,7 @@ ixFunsCompatibleRaw ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
             a1 `primEq` b1 && ssa == ssb && sa == sb
           _ -> False
 
-
+-- Base info for kernel bodies.
 class SpecialBodyExceptions lore where
   specialBodyIndices :: Exp lore -> Maybe [MName]
   specialBodyWriteMems :: Stm lore -> Maybe [(MName, ExpMem.IxFun, PrimType)]

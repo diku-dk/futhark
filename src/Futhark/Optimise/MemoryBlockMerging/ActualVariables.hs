@@ -7,6 +7,12 @@
 -- is a theoretical concept, while this module has the practical purpose of
 -- finding any extra variables that also need a change when a variable has a
 -- change of memory block.
+--
+-- If and DoLoop statements have special requirements, as do some aliasing
+-- expressions.  We don't want to (just) use the obvious statement variable;
+-- sometimes updating the memory block of one variable actually means updating
+-- the memory block of other variables as well.
+
 module Futhark.Optimise.MemoryBlockMerging.ActualVariables
   ( findActualVariables
   ) where
@@ -59,9 +65,9 @@ recordActuals stmt_var more_actuals = do
     Just True -> return ()
     _ -> modify (insertOrUpdateMany stmt_var more_actuals)
 
-findActualVariables :: LoreConstraints lore =>
-                       VarMemMappings MemorySrc -> FirstUses ->
-                       FunDef lore -> ActualVariables
+-- Find all the actual variables in a function definition.
+findActualVariables :: VarMemMappings MemorySrc -> FirstUses ->
+                       FunDef ExplicitMemory -> ActualVariables
 findActualVariables var_mem_mappings first_uses fundef =
   let context = Context var_mem_mappings first_uses
       m = unFindM $ lookInBody $ funDefBody fundef
@@ -127,10 +133,9 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
             -- Find the ones using the same memory as the result of the loop
             -- expression.
             body_vars' <- filterM (lookupGivesMem mem_search) body_vars
-            -- Not only the result variable needs to change its memory block in case
-            -- of a future coalescing with it; also the variables extracted above.
-            -- FIXME: This is probably an okay way to do it?  What if the memory is
-            -- used, but with a different index function?  Can that happen?
+            -- Not only the result variable needs to change its memory block in
+            -- case of a future memory merging with it; also the variables
+            -- extracted above.
             let actuals = var : body_vars'
             forM_ actuals $ \a -> recordActuals a (S.fromList actuals)
             -- Some of these can be changed later on to have an actual variable
@@ -180,10 +185,8 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
               case filter ((mem `S.member`) . (`lookupEmptyable` first_uses)) body_vars' of
                 [] ->
                   -- Not just the result variable needs to change its memory
-                  -- block in case of a future coalescing with it; also the
-                  -- variables extracted above.  FIXME: This is probably an okay
-                  -- way to do it?  What if the memory is used, but with a
-                  -- different index function?  Can that happen?
+                  -- block in case of a future memory block merging with it;
+                  -- also the variables extracted above.
                   recordActuals var $ S.fromList (var : body_vars')
                 _ ->
                   -- If we come across a non-existential If which can be said to
@@ -215,7 +218,9 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
         _ -> return ()
 
     -- Support reusing the memory of reshape operations by recording the origin
-    -- array that is being reshaped.
+    -- array that is being reshaped.  Only partial support for reshape
+    -- operations: If the shape is more than one-dimensional, mark the statement
+    -- as disabled for memory merging operations.
     BasicOp (Reshape _ shapechange_var orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
         orig' <- aliasOpRoot' orig
@@ -224,12 +229,13 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
           ([_], Just (MemorySrc _ _ (Shape [_]))) ->
             recordActuals var $ S.fromList [var, orig]
             -- Works, but only in limited cases where the reshape is not even
-            -- that useful to begin with.
+            -- that useful to begin with; mostly cases where a reshape was
+            -- inserted by the compiler in an assert-like manner.
           _ ->
             recordActuals var S.empty
-            -- FIXME: The problem with these more complex cases is that a slice
-            -- is relative to the shape of the reshaped array, and not the
-            -- original array.  Disabled for now.
+            -- FIXME: The problem with these more complex cases with more than
+            -- one dimension is that a slice is relative to the shape of the
+            -- reshaped array, and not the original array.  Disabled for now.
         recordActuals orig' $ S.fromList [orig', var]
 
     -- For the other aliasing operations, disable their use for now.  If the
@@ -254,8 +260,11 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
           recordActuals var $ S.fromList (var : body_vars')
         _ -> return ()
 
+  -- If we are inside a kernel, check for actual variables in the KernelExp of
+  -- the statement.
   lookInKernelExp stm
 
+  -- Recurse over any sub-bodies.
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody
@@ -301,12 +310,14 @@ aliasOpRoot' orig =
   fromJust ("at some point there will have been a proper statement: "
             ++ pretty orig) <$> aliasOpRoot orig
 
-lookupGivesMem :: VName -> VName -> FindM lore Bool
+-- Is the memory block of 'v' the same as 'mem'?
+lookupGivesMem :: MName -> VName -> FindM lore Bool
 lookupGivesMem mem v = do
   m <- M.lookup v <$> asks ctxVarToMem
   return (Just mem == (memSrcName <$> m))
 
 class LookInKernelExp lore where
+  -- Find actual vars in 'KernelExp's.
   lookInKernelExp :: Stm lore -> FindM lore ()
 
 instance LookInKernelExp ExplicitMemory where
@@ -333,28 +344,28 @@ instance LookInKernelExp InKernel where
       _ -> return ()
     _ -> return ()
 
+-- Record actual variables for input arrays to 'KernelExp's.
 extendActualVarsInKernel :: Exp InKernel -> [VName] -> FindM InKernel ()
 extendActualVarsInKernel e arrs = forM_ arrs $ \var -> do
-  mem0 <- M.lookup var <$> asks ctxVarToMem
-
   -- The array might be an aliasing operation, in which case we try to find the
   -- original array.
   var' <- fromMaybe var <$> aliasOpRoot var
-  case mem0 of
+  varmem <- M.lookup var <$> asks ctxVarToMem
+  case varmem of
     Just mem -> do
-      let body_vars = S.toList $ findAllExpVars e
-      body_vars' <- filterM (lookupGivesMem $ memSrcName mem) body_vars
-      let actuals = S.fromList (var' : body_vars')
+      let body_vars = findAllExpVars e
+      body_vars' <- filterSetM (lookupGivesMem $ memSrcName mem) body_vars
+      let actuals = S.insert var' body_vars'
 
-      body_vars_mems <- mapM (\v -> M.lookup v <$> asks ctxVarToMem) body_vars
+      dbg_body_vars_mems <- mapM (\v -> M.lookup v <$> asks ctxVarToMem) (S.toList body_vars)
       let debug = do
             putStrLn $ replicate 70 '~'
             putStrLn "extendActualVarsInKernel:"
             putStrLn $ pretty var
             putStrLn $ pretty var'
-            putStrLn $ prettySet (S.fromList body_vars)
-            print body_vars_mems
-            putStrLn $ prettySet (S.fromList body_vars')
+            putStrLn $ prettySet body_vars
+            print dbg_body_vars_mems
+            putStrLn $ prettySet body_vars'
             putStrLn $ replicate 70 '~'
       withDebug debug $ recordActuals var' actuals
     Nothing -> return ()

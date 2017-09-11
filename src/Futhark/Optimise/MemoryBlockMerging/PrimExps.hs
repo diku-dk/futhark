@@ -14,7 +14,8 @@ import Control.Monad
 import Control.Monad.RWS
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
+import Futhark.Representation.ExplicitMemory
+       (ExplicitMemorish, ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Tools
@@ -37,8 +38,8 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-findPrimExpsFunDef :: LoreConstraints lore =>
-                      FunDef lore -> PrimExps
+-- Find/construct all 'PrimExp's in a function definition.
+findPrimExpsFunDef :: FunDef ExplicitMemory -> PrimExps
 findPrimExpsFunDef fundef =
   let m = unFindM $ do
         lookInFParams $ funDefParams fundef
@@ -65,7 +66,6 @@ lookInFParams params = forM_ params $ \(Param var membound) -> do
           let pe = prod_i64 * primByteSize pt
           tell $ M.singleton mem_size pe
         _ -> return ()
-
     _ -> return ()
 
 lookInBody :: LoreConstraints lore =>
@@ -98,7 +98,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         modify $ M.insert var pt
       _ -> return ()
 
-  -- RECURSIVE BODY WALK.
+  -- Recursive body walk.
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }

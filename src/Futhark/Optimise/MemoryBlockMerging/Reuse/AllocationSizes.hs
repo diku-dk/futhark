@@ -50,7 +50,7 @@ memBlockSizesFunDef fundef =
   in mem_sizes
 
 memBlockSizesParamsBodyNonRec :: LoreConstraints lore =>
-                           [FParam lore] -> Body lore -> Sizes
+                                 [FParam lore] -> Body lore -> Sizes
 memBlockSizesParamsBodyNonRec params body =
   let m = unFindM $ do
         mapM_ lookInFParam params
@@ -122,8 +122,6 @@ lookInLambda (Lambda params body _) = do
   forM_ params lookInLParam
   lookInBody body
 
-
--- FIXME: Clean this up.
 class AllocSizeUtils lore where
   lookForAllocSize :: Exp lore -> Maybe (SubExp, Space)
 
@@ -132,5 +130,5 @@ instance AllocSizeUtils ExplicitMemory where
   lookForAllocSize _ = Nothing
 
 instance AllocSizeUtils InKernel where
-  lookForAllocSize (Op (ExpMem.Alloc size space)) = Just (size, space)
+  -- There can be no allocations inside kernels.
   lookForAllocSize _ = Nothing

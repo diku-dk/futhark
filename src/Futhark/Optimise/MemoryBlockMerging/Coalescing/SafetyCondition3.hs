@@ -82,7 +82,7 @@ lookInStm stm@(Let _ _ e) = do
   is_before_destination <- gets curHasReachedDestination
 
   unless is_before_destination $ do
-    let e_free_vars = freeInExp e -- FIXME: should maybe not include those consumed.
+    let e_free_vars = freeInExp e
         e_used_vars = S.union e_free_vars (S.fromList new_decls)
 
     -- If the source has been created, add the newly used variables.

@@ -4,6 +4,8 @@
 {-# LANGUAGE ConstraintKinds #-}
 -- | Find first uses for all memory blocks.
 --
+-- Array creation points.  Maps statements to memory block names.
+--
 -- A memory block can have more than one first use.
 module Futhark.Optimise.MemoryBlockMerging.Liveness.FirstUse
   ( findFirstUses
@@ -61,9 +63,9 @@ recordMapping :: VName -> MName -> FindM lore ()
 recordMapping stmt_var mem =
   modify $ M.unionWith S.union (M.singleton stmt_var $ S.singleton mem)
 
-findFirstUses :: LoreConstraints lore =>
-                 VarMemMappings MemorySrc -> MemAliases
-              -> FunDef lore -> FirstUses
+-- | Find all first uses of *memory blocks* in a function definition.
+findFirstUses :: VarMemMappings MemorySrc -> MemAliases
+              -> FunDef ExplicitMemory -> FirstUses
 findFirstUses var_to_mem mem_aliases fundef =
   let context = Context { ctxVarToMem = var_to_mem
                         , ctxMemAliases = mem_aliases
@@ -168,19 +170,9 @@ lookInMergeCtxParam x (Param xmem ExpMem.MemMem{}, _) =
   recordMapping x xmem
 lookInMergeCtxParam _ _ = return ()
 
-
-createsNewArrayWithoutKernel :: Exp ExplicitMemory -> Bool
-createsNewArrayWithoutKernel e = case e of
-  Op (ExpMem.Inner ExpMem.Kernel{}) -> True
-  _ -> createsNewArrayBase e
-
-createsNewArrayInKernel :: Exp InKernel -> Bool
-createsNewArrayInKernel e = case e of
-  Op (ExpMem.Inner ExpMem.GroupReduce{}) -> True
-  Op (ExpMem.Inner ExpMem.GroupScan{}) -> True
-  Op (ExpMem.Inner ExpMem.GroupStream{}) -> True
-  Op (ExpMem.Inner ExpMem.Combine{}) -> True
-  _ -> createsNewArrayBase e
+class ArrayUtils lore where
+  -- Does an expression constitute a new array?
+  createsNewArray :: Exp lore -> Bool
 
 createsNewArrayBase :: Exp lore -> Bool
 createsNewArrayBase e = case e of
@@ -194,11 +186,15 @@ createsNewArrayBase e = case e of
   BasicOp Scratch{} -> True
   _ -> False
 
-class ArrayUtils lore where
-  createsNewArray :: Exp lore -> Bool
-
 instance ArrayUtils ExplicitMemory where
-  createsNewArray = createsNewArrayWithoutKernel
+  createsNewArray e = case e of
+    Op (ExpMem.Inner ExpMem.Kernel{}) -> True
+    _ -> createsNewArrayBase e
 
 instance ArrayUtils InKernel where
-  createsNewArray = createsNewArrayInKernel
+  createsNewArray e = case e of
+    Op (ExpMem.Inner ExpMem.GroupReduce{}) -> True
+    Op (ExpMem.Inner ExpMem.GroupScan{}) -> True
+    Op (ExpMem.Inner ExpMem.GroupStream{}) -> True
+    Op (ExpMem.Inner ExpMem.Combine{}) -> True
+    _ -> createsNewArrayBase e

@@ -35,46 +35,41 @@ import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeUses
 
 
 data Context = Context { ctxFirstUses :: FirstUses
-                         -- ^ array creation points;
-                         --   maps statements to memory block names
+                         -- ^ From the module Liveness.FirstUses
                        , ctxInterferences :: Interferences
-                         -- ^ a memory block is mapped to its interference set
+                         -- ^ From the module Liveness.Interferences
                        , ctxSizes :: Sizes
                          -- ^ maps a memory block to its size and space
                        , ctxVarToMem :: VarMemMappings MemorySrc
-                         -- ^ maps array names to memory blocks
+                         -- ^ From the module VariableMemory
                        , ctxActualVars :: M.Map VName Names
-                         -- ^ maps an array name to (aliased) array names
-                         --   used in cases of loops/kernels. (equivalent patterns)
+                         -- ^ From the module ActualVariables
                        , ctxExistentials :: Names
-                         -- ^ array names mapped to an existential memory block,
-                         --   an existential memory block is one appearing in the
-                         --   existential context of some pattern (stmt).
+                         -- ^ From the module Existentials
                        , ctxVarPrimExps :: M.Map VName (PrimExp VName)
-                         -- ^ maps a size variable to its primexp
+                         -- ^ From the module PrimExps
                        , ctxSizeVarsUsesBefore :: M.Map VName Names
-                         -- ^ maps a memory name to size variables available
-                         --   at that memory block allocation point
+                         -- ^ maps a memory name to the size variables available
+                         -- at that memory block allocation point
                        }
   deriving (Show)
 
 data Current = Current { curUses :: M.Map MName MNames
                          -- ^ maps a memory block to the memory blocks that
-                         --   were decided to be merged into it.
+                         -- have been merged into it so far
                        , curEqAsserts :: M.Map VName Names
                          -- ^ maps a variable name to other semantically equal
-                         --   variable names
+                         -- variable names
 
                        , curVarToMemRes :: VarMemMappings MemoryLoc
-                         -- ^ The result of the core analysis:
-                         --   an array name is mapped to its memory block (after merging)
-                         --   (Records changes in memory blocks for variables.)
+                         -- ^ The result of the core analysis: maps an array
+                         -- name to its memory block.
 
                        , curVarToMaxExpRes :: M.Map VName Names
-                         -- ^ Changes in variable uses where allocation sizes are
-                         --   maxed from its elements.  Keyed by statement memory
-                         --   name (alloc stmt).
-                         --   Maps an alloc stmt to the sizes that need to be taken max for.
+                         -- ^ Changes in variable uses where allocation sizes
+                         -- are maxed from its elements.  Keyed by statement
+                         -- memory name (alloc stmt).  Maps an alloc stmt to the
+                         -- sizes that need to be taken max for.
                        }
   deriving (Show)
 
@@ -147,6 +142,9 @@ recordMaxMapping :: LoreConstraints lore =>
 recordMaxMapping mem y =
   modify $ \cur -> cur { curVarToMaxExpRes = insertOrUpdate mem y
                                              $ curVarToMaxExpRes cur }
+
+modifyCurEqAsserts :: (M.Map VName Names -> M.Map VName Names) -> FindM lore ()
+modifyCurEqAsserts f = modify $ \c -> c { curEqAsserts = f $ curEqAsserts c }
 
 -- Run a monad with a local copy of the uses.  We don't want any new uses in
 -- nested bodies to be available for merging into when we are back in the main
@@ -241,10 +239,8 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   var_to_pe <- asks ctxVarPrimExps
   let eqs | BasicOp (Assert (Var v) _ _) <- e
           , Just (CmpOpExp (CmpEq _) (LeafExp v0 _) (LeafExp v1 _)) <- M.lookup v var_to_pe = do
-              modify $ \c -> c { curEqAsserts = insertOrUpdate v0 v1
-                                                $ curEqAsserts c }
-              modify $ \c -> c { curEqAsserts = insertOrUpdate v1 v0
-                                                $ curEqAsserts c }
+              modifyCurEqAsserts $ insertOrUpdate v0 v1
+              modifyCurEqAsserts $ insertOrUpdate v1 v0
           | otherwise = return ()
   eqs
 
