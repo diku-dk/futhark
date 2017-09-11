@@ -11,6 +11,10 @@ module Language.Futhark.Parser
   , parseExpIncrIO
 
   , ParseError (..)
+
+  , scanTokensText
+  , L(..)
+  , Token(..)
   )
   where
 
@@ -19,6 +23,7 @@ import qualified Data.Text as T
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Parser.Parser
+import Language.Futhark.Parser.Lexer
 
 -- | Parse an entire Futhark program from the given 'T.Text', using
 -- the 'FilePath' as the source name for error messages.

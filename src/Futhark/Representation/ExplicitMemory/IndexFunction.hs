@@ -23,6 +23,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        )
        where
 
+import Control.Arrow (first)
 import Control.Applicative
 import Data.Maybe
 import Data.Monoid
@@ -38,13 +39,14 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax
-  (ShapeChange, DimIndex(..), Slice, sliceDims, unitSlice, VName)
+  (ShapeChange, DimChange(..), DimIndex(..), Slice, sliceDims, unitSlice, VName)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
+import Futhark.Util
 import Futhark.Analysis.PrimExp.Convert
 
 type Shape num = [num]
@@ -203,6 +205,47 @@ reshape Direct{} newshape =
 reshape (Reshape ixfun _) newshape =
   reshape ixfun newshape
 
+reshape (Permute ixfun perm) newshape
+  | Just (head_coercions, reshapes, tail_coercions) <-
+      splitCoercions newshape,
+    num_coercions <- length (head_coercions ++ tail_coercions),
+    (head_perms, mid_perms, end_perms) <-
+      splitAt3 (length head_coercions) (length perm - num_coercions) perm,
+    sequential mid_perms,
+    first_reshaped <- foldl min (rank ixfun) mid_perms,
+    extra_dims <- length newshape - length (shape ixfun),
+    perm' <- map (shiftDim first_reshaped extra_dims) head_perms ++
+             take (length reshapes) [first_reshaped..] ++
+             map (shiftDim first_reshaped extra_dims) end_perms,
+    newshape' <- rearrangeShape (rearrangeInverse perm') newshape =
+      Permute (reshape ixfun newshape') perm'
+  where splitCoercions newshape' = do
+          let (head_coercions, newshape'') = span isCoercion newshape'
+          let (reshapes, tail_coercions) = break isCoercion newshape''
+          guard (all isCoercion tail_coercions)
+          return (head_coercions, reshapes, tail_coercions)
+
+        isCoercion DimCoercion{} = True
+        isCoercion _ = False
+
+        shiftDim last_reshaped extra_dims x
+          | x > last_reshaped = x + extra_dims
+          | otherwise = x
+
+        sequential [] = True
+        sequential (x:xs) = and $ zipWith (==) xs [x+1, x+2..]
+
+reshape (Index ixfun slicing) newshape
+  | (is, rem_slicing) <- splitSlice slicing,
+    (fixed_ds, sliced_ds) <- splitAt (length is) $ shape ixfun,
+    and $ zipWith isSliceOf rem_slicing sliced_ds =
+      -- Move the reshape beneath the slicing.
+      let newshape' = map DimCoercion fixed_ds ++ newshape
+      in Index (reshape ixfun newshape') $
+         map DimFix is ++ map (unitSlice 0) (newDims newshape)
+  where isSliceOf (DimSlice _ d1 _) d2 = d1 == d2
+        isSliceOf _ _ = False
+
 reshape ixfun newshape
   | shape ixfun == map newDim newshape =
       ixfun
@@ -211,6 +254,11 @@ reshape ixfun newshape
       ixfun
   | otherwise =
       Reshape ixfun newshape
+
+splitSlice :: Slice num -> ([num], Slice num)
+splitSlice [] = ([], [])
+splitSlice (DimFix i:is) = first (i:) $ splitSlice is
+splitSlice is = ([], is)
 
 slice :: (Eq num, IntegralExp num) =>
          IxFun num -> Slice num -> IxFun num
