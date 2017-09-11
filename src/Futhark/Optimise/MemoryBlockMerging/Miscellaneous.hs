@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
--- | I didn't know where else to put this.  Perpetually in need of a cleanup.
+-- | Miscellaneous helper functions.  Perpetually in need of a cleanup.
 module Futhark.Optimise.MemoryBlockMerging.Miscellaneous where
 
 import qualified Data.Map.Strict as M
@@ -18,6 +18,7 @@ import Futhark.Representation.ExplicitMemory
        (ExplicitMemory, InKernel)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
+import Futhark.Representation.Kernels.KernelExp
 import Futhark.Representation.Aliases
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Util (isEnvVarSet)
@@ -192,6 +193,9 @@ sortByKeyM f xs = do
   rs <- mapM f xs
   return $ map fst $ L.sortBy (compare `on` snd) $ zip xs rs
 
+filterSetM :: (Ord a, Monad m) => (a -> m Bool) -> S.Set a -> m (S.Set a)
+filterSetM f xs = S.fromList <$> filterM f (S.toList xs)
+
 -- Pretty bad.
 intraproceduralTransformationWithLog ::
   MonadFreshNames m =>
@@ -243,6 +247,12 @@ class FullWalk lore where
   fullWalkExpM :: Monad m => Walker lore m -> KernelWalker InKernel m
                -> Exp lore -> m ()
 
+-- This can maybe be integrated into the above typeclass.
+class FullWalkAliases lore where
+  fullWalkAliasesExpM :: Monad m => Walker (Aliases lore) m
+                      -> KernelWalker (Aliases InKernel) m
+                      -> Exp (Aliases lore) -> m ()
+
 instance FullWalk ExplicitMemory where
   fullWalkExpM walker walker_kernel e = do
     walkExpM walker e
@@ -250,26 +260,6 @@ instance FullWalk ExplicitMemory where
       Op (ExpMem.Inner kernel) ->
         walkKernelM walker_kernel kernel
       _ -> return ()
-
-instance FullWalk InKernel where
-  fullWalkExpM walker walker_kernel e = case e of
-    Op (ExpMem.Inner ke) -> case ke of
-      ExpMem.Combine _ _ _ body ->
-        walkOnKernelBody walker_kernel body
-      ExpMem.GroupReduce _ lambda _ ->
-        walkOnKernelLambda walker_kernel lambda
-      ExpMem.GroupScan _ lambda _ ->
-        walkOnKernelLambda walker_kernel lambda
-      ExpMem.GroupStream _ _ gslambda _ _ ->
-        walkOnGroupStreamLambda walker_kernel gslambda
-      _ -> return ()
-    _ -> walkExpM walker e
-
--- FIXME: Integrate this into the above type class.
-class FullWalkAliases lore where
-  fullWalkAliasesExpM :: Monad m => Walker (Aliases lore) m
-                      -> KernelWalker (Aliases InKernel) m
-                      -> Exp (Aliases lore) -> m ()
 
 instance FullWalkAliases ExplicitMemory where
   fullWalkAliasesExpM walker walker_kernel e = do
@@ -279,24 +269,33 @@ instance FullWalkAliases ExplicitMemory where
         walkKernelM walker_kernel kernel
       _ -> return ()
 
-instance FullWalkAliases InKernel where
-  fullWalkAliasesExpM walker walker_kernel e = case e of
-    Op (ExpMem.Inner ke) -> case ke of
-      ExpMem.Combine _ _ _ body ->
-        walkOnKernelBody walker_kernel body
-      ExpMem.GroupReduce _ lambda _ ->
-        walkOnKernelLambda walker_kernel lambda
-      ExpMem.GroupScan _ lambda _ ->
-        walkOnKernelLambda walker_kernel lambda
-      ExpMem.GroupStream _ _ gslambda _ _ ->
-        walkOnGroupStreamLambda walker_kernel gslambda
-      _ -> return ()
+instance FullWalk InKernel where
+  fullWalkExpM walker walker_kernel e = case e of
+    Op (ExpMem.Inner ke) -> walkOnKernelExpM walker_kernel ke
     _ -> walkExpM walker e
 
-walkOnGroupStreamLambda :: Monad m => KernelWalker lore m
-                        -> ExpMem.GroupStreamLambda lore -> m ()
-walkOnGroupStreamLambda walker_kernel (ExpMem.GroupStreamLambda _ _
-                                       params0 params1 gsbody) = do
+instance FullWalkAliases InKernel where
+  fullWalkAliasesExpM walker walker_kernel e = case e of
+    Op (ExpMem.Inner ke) -> walkOnKernelExpM walker_kernel ke
+    _ -> walkExpM walker e
+
+walkOnKernelExpM :: Monad m => KernelWalker lore m ->
+                    KernelExp lore -> m ()
+walkOnKernelExpM walker_kernel ke = case ke of
+  ExpMem.Combine _ _ _ body ->
+    walkOnKernelBody walker_kernel body
+  ExpMem.GroupReduce _ lambda _ ->
+    walkOnKernelLambda walker_kernel lambda
+  ExpMem.GroupScan _ lambda _ ->
+    walkOnKernelLambda walker_kernel lambda
+  ExpMem.GroupStream _ _ gslambda _ _ ->
+    walkOnGroupStreamLambdaM walker_kernel gslambda
+  _ -> return ()
+
+walkOnGroupStreamLambdaM :: Monad m => KernelWalker lore m ->
+                            GroupStreamLambda lore -> m ()
+walkOnGroupStreamLambdaM walker_kernel (GroupStreamLambda _ _
+                                        params0 params1 gsbody) = do
   mapM_ (walkOnKernelLParam walker_kernel) params0
   mapM_ (walkOnKernelLParam walker_kernel) params1
   walkOnKernelBody walker_kernel gsbody

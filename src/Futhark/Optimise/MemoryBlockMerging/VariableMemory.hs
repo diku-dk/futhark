@@ -3,14 +3,16 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 -- | Find all variable-to-memory mappings, so that other modules can lookup the
--- relation.
+-- relation.  Maps array names to memory blocks.
+
 module Futhark.Optimise.MemoryBlockMerging.VariableMemory where
 
 import qualified Data.Map.Strict as M
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
-import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
+import Futhark.Representation.ExplicitMemory
+       (ExplicitMemorish, ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 
@@ -32,8 +34,8 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-findVarMemMappings :: LoreConstraints lore =>
-                      FunDef lore -> VarMemMappings MemorySrc
+-- | Find all variable-memory block mappings in a function definition.
+findVarMemMappings :: FunDef ExplicitMemory -> VarMemMappings MemorySrc
 findVarMemMappings fundef =
   let m = unFindM $ do
         mapM_ lookInFParam $ funDefParams fundef

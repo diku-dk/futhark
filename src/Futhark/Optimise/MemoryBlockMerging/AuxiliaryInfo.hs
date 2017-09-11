@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
--- | I didn't know where else to put this.
+-- | Helper information for the main optimisation passes.
 module Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo where
 
 import qualified Data.Map.Strict as M

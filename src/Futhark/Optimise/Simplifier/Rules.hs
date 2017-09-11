@@ -803,6 +803,12 @@ simplifyIndexing vtable seType ocs idd inds consuming =
           _ | Var v2 <- se  -> Just $ pure $ IndexResult ocs v2 inds'
           _ -> Nothing
 
+    -- Indexing single-element arrays.  We know the index must be 0.
+    _ | Just t <- seType $ Var idd, isCt1 $ arraySize 0 t,
+        DimFix i : inds' <- inds, not $ isCt0 i ->
+          Just $ pure $ IndexResult ocs idd $
+          DimFix (constant (0::Int32)) : inds'
+
     _ -> case ST.entryStm =<< ST.lookup idd vtable of
            Just (Let split_pat _ (BasicOp (Split cs2 0 ns idd2)))
              | DimFix first_index : rest_indices <- inds -> Just $ do

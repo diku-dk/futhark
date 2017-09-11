@@ -2,11 +2,12 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
--- | Transform a program (really, a function) based on a mapping from variable
--- to memory and index function: Change every variable in the mapping to its new
--- memory.
+-- | Transform a function based on a mapping from variable to memory and index
+-- function: Change every variable in the mapping to its possibly new memory
+-- block.
 module Futhark.Optimise.MemoryBlockMerging.MemoryUpdater
-  (transformFromVarMemMappings) where
+  ( transformFromVarMemMappings
+  ) where
 
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
@@ -36,10 +37,9 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
-
-transformFromVarMemMappings :: LoreConstraints lore =>
-                               VarMemMappings MemoryLoc -> FunDef lore
-                            -> FunDef lore
+-- | Transform a function to use new memory blocks.
+transformFromVarMemMappings :: VarMemMappings MemoryLoc ->
+                               FunDef ExplicitMemory -> FunDef ExplicitMemory
 transformFromVarMemMappings var_to_mem fundef =
   let m = unFindM $ transformBody $ funDefBody fundef
       body' = runReader m var_to_mem
@@ -61,6 +61,7 @@ transformStm :: LoreConstraints lore =>
                 Stm lore -> FindM lore (Stm lore)
 transformStm (Let (Pattern patctxelems patvalelems) () e) = do
   patvalelems' <- mapM transformPatValElem patvalelems
+
   e' <- fullMapExpM mapper mapper_kernel e
   var_to_mem <- ask
   e'' <- case e' of
@@ -74,8 +75,6 @@ transformStm (Let (Pattern patctxelems patvalelems) () e) = do
       -- the memory block used by a variable which is also part of the results.
       -- If the memory block of that variable is changed, we need a way to
       -- record that the memory block in the body result also needs to change.
-      --
-      -- Should be fine?  Should maybe be patvalelems', important?
       let zipped = zip [(0::Int)..] (patctxelems ++ patvalelems)
 
           findMemLinks (i, PatElem _x _binding (ExpMem.ArrayMem _ _ _ xmem _)) =
@@ -181,6 +180,7 @@ transformForLoopVar (Param x membound, array) = do
   membound' <- newMemBound membound x
   return (Param x membound', array)
 
+-- Find a new memory block and index function if they exist.
 newMemBound :: ExpMem.MemBound u -> VName -> FindM lore (ExpMem.MemBound u)
 newMemBound membound var = do
   var_to_mem <- ask
