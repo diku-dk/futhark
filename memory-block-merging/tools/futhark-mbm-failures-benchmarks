@@ -2,7 +2,7 @@
 
 set -e
 
-cd "$(dirname "$0")/../../../futhark-benchmarks/" # Makes assumption.
+cd "$(dirname "$0")/../../../" # Makes assumption.
 
 compiler="$1"
 if ! [ "$compiler" ]; then
