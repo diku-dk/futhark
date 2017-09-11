@@ -33,4 +33,4 @@ section Futhark benchmarks, futhark-c.
 time "$base"/futhark-mbm-failures-benchmarks
 
 section Futhark benchmarks, futhark-opencl.
-with_opencl time "$base"/futhark-mbm-failures-benchmarks
+with_opencl "$base"/futhark-mbm-failures-benchmarks
