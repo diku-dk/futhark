@@ -37,6 +37,7 @@ data Context = Context
   { ctxVarToMem :: VarMemMappings MemorySrc
   , ctxMemAliases :: MemAliases
   , ctxFirstUses :: FirstUses
+  , ctxExistentials :: Names
   , ctxCurFirstUsesOuter :: Names
   }
   deriving (Show)
@@ -125,13 +126,20 @@ commitOptimistic mem = do
     Nothing -> return ()
 
 findLastUses :: LoreConstraints lore =>
-                VarMemMappings MemorySrc -> MemAliases -> FirstUses
+                VarMemMappings MemorySrc -> MemAliases -> FirstUses -> Names
              -> FunDef lore -> LastUses
-findLastUses var_to_mem mem_aliases first_uses fundef =
-  let context = Context var_to_mem mem_aliases first_uses S.empty
+findLastUses var_to_mem mem_aliases first_uses existentials fundef =
+  let context = Context
+                { ctxVarToMem = var_to_mem
+                , ctxMemAliases = mem_aliases
+                , ctxFirstUses = first_uses
+                , ctxExistentials = existentials
+                , ctxCurFirstUsesOuter = S.empty
+                }
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
+        mapM_ lookInRes $ bodyResult $ funDefBody fundef
         optimistics <- gets curOptimisticLastUses
         forM_ (M.keys optimistics) $ \mem ->
           commitOptimistic mem
@@ -148,15 +156,13 @@ lookInFunDefFParam (Param x _) = do
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()
-lookInBody (Body _ bnds res) = do
+lookInBody (Body _ bnds _res) =
   mapM_ lookInStm bnds
-  mapM_ lookInRes res
 
 lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
-lookInKernelBody (KernelBody _ bnds res) = do
+lookInKernelBody (KernelBody _ bnds _res) =
   mapM_ lookInStm bnds
-  mapM_ (lookInRes . kernelResultSubExp) res
 
 lookInStm :: LoreConstraints lore =>
              Stm lore -> FindM lore ()
@@ -259,11 +265,19 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           , walkOnKernelLambda = coerce . lookInBody . lambdaBody
           }
 
+-- Look in body results.
 lookInRes :: LoreConstraints lore =>
              SubExp -> FindM lore ()
 lookInRes (Var v) = do
-  mem_v <- M.lookup v <$> asks ctxVarToMem
-  case mem_v of
-    Just mem -> setOptimistic (memSrcName mem) (FromRes v) S.empty
-    Nothing -> return ()
+  exis <- asks ctxExistentials
+  -- If v is a existential variable, there is no reason to record its last use,
+  -- as existential memory cannot be reused (this is also the case for other
+  -- setOptimistic calls, but not in a clear way).
+  unless (v `S.member` exis) $ do
+    mem_v <- M.lookup v <$> asks ctxVarToMem
+    case mem_v of
+      Just mem ->
+        setOptimistic (memSrcName mem) (FromRes v) S.empty
+      Nothing ->
+        return ()
 lookInRes _ = return ()
