@@ -805,7 +805,7 @@ simplifyIndexing vtable seType ocs idd inds consuming =
 
     -- Indexing single-element arrays.  We know the index must be 0.
     _ | Just t <- seType $ Var idd, isCt1 $ arraySize 0 t,
-        DimFix _ : inds' <- inds ->
+        DimFix i : inds' <- inds, not $ isCt0 i ->
           Just $ pure $ IndexResult ocs idd $
           DimFix (constant (0::Int32)) : inds'
 
