@@ -44,8 +44,15 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
 
+addDeclarations :: Names -> FindM lore ()
+addDeclarations = modify . S.union
+
+addUsesBefore :: VName -> Names -> FindM lore ()
+addUsesBefore var declarations_so_far =
+  tell $ M.singleton var declarations_so_far
+
 findSizeUsesFunDef :: FunDef ExplicitMemory -> UsesBefore
-findSizeUsesFunDef fundef  =
+findSizeUsesFunDef fundef =
   let size_vars = mapMaybe (fromVar . fst) $ M.elems $ memBlockSizesFunDef fundef
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
@@ -79,7 +86,7 @@ lookInStm stm@(Let _ _ e) = do
   let new_decls = S.fromList $ newDeclarationsStm stm
   lookAtNewDecls new_decls
 
-  -- RECURSIVE BODY WALK.
+  -- Recursive body walk.
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody
@@ -106,5 +113,5 @@ lookAtNewDecls new_decls = do
   declarations_so_far <- get
   let new_size_vars = S.intersection all_size_vars new_decls
   forM_ new_size_vars $ \var ->
-    tell $ M.singleton var declarations_so_far
-  modify $ S.union new_size_vars
+    addUsesBefore var declarations_so_far
+  addDeclarations new_size_vars

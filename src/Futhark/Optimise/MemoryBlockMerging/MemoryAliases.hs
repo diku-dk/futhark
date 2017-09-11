@@ -18,7 +18,8 @@ import Control.Monad.RWS
 
 import Futhark.Representation.AST
 import Futhark.Representation.Aliases
-import Futhark.Representation.ExplicitMemory (ExplicitMemorish)
+import Futhark.Representation.ExplicitMemory
+       (ExplicitMemorish, ExplicitMemory)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Analysis.Alias (analyseFun)
@@ -48,8 +49,8 @@ lookupMems var_aliases = do
   return $ S.fromList $ mapMaybe ((memSrcName <$>) . flip M.lookup var_to_mem)
     $ S.toList var_aliases
 
-findMemAliases :: LoreConstraints lore =>
-                  FunDef lore -> VarMemMappings MemorySrc -> MemAliases
+-- | Find all memory aliases in a function definition.
+findMemAliases :: FunDef ExplicitMemory -> VarMemMappings MemorySrc -> MemAliases
 findMemAliases fundef var_to_mem =
   let fundef' = analyseFun fundef
       m = unFindM $ lookInBody $ funDefBody fundef'
@@ -84,8 +85,8 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
       mapM_ (lookInBodyTuples patctxelems (map snd mergectxparams) (bodyResult body))
         patvalelems
     If _ body_then body_else _ -> do
-      -- Pretty conservative.  Too restrictive if the If works on
-      -- tuples of arrays.  FIXME (similar to the DoLoop FIXME).
+      -- Alias everything.  FIXME: Maybe more conservative than necessary if the
+      -- If works on tuples of arrays.
       let ress = mapMaybe fromVar
                  (bodyResult body_then ++ bodyResult body_else)
       var_to_mem <- ask
@@ -125,10 +126,9 @@ lookInMergeValParam :: LoreConstraints lore =>
                        Body (Aliases lore) -> (FParam (Aliases lore), SubExp)
                     -> FindM lore ()
 lookInMergeValParam body (Param _ (ExpMem.ArrayMem _ _ _ mem _), _t) = do
-  -- FIXME: This is probably more conservative than it needs to in case
-  -- you have more than one loop array.  Fixing this would require
-  -- either changing the Aliases representation, or building something
-  -- on top of it.
+  -- FIXME: This is maybe more conservative than necessary in case you have more
+  -- than one loop array.  Fixing this would require either changing the Aliases
+  -- representation, or building something on top of it.
   aliases <- S.unions
              <$> mapM (lookupMems . unNames) (fst $ fst $ bodyAttr body)
   recordMapping mem aliases

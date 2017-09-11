@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
--- |
+-- | Find all variables in a statement.
 module Futhark.Optimise.MemoryBlockMerging.AllExpVars
   ( findAllExpVars
   ) where

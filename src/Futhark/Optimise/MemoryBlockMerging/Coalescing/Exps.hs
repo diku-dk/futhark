@@ -61,7 +61,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   forM_ (zip patvalelems [0..]) $ \(PatElem var _ _, i) ->
     tell $ M.singleton var $ Exp i e
 
-  -- RECURSIVE BODY WALK.
+  -- Recursive body walk.
   fullWalkExpM walker walker_kernel e
   where walker = identityWalker
           { walkOnBody = lookInBody }

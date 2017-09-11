@@ -39,11 +39,14 @@ data Current = Current
     -- optimistic coalescing later becomes part of a chain of coalescings, where
     -- it is offset yet again, and where it should maintain its old relative
     -- offset.
-    curCoalescedIntos :: M.Map VName (S.Set (VName, PrimExp VName,
-                                             [Slice (PrimExp VName)]))
-  , curMemsCoalesced :: M.Map VName MemoryLoc
+    curCoalescedIntos :: CoalescedIntos
+  , curMemsCoalesced :: MemsCoalesced
   }
   deriving (Show)
+
+type CoalescedIntos = M.Map VName (S.Set (VName, PrimExp VName,
+                                          [Slice (PrimExp VName)]))
+type MemsCoalesced = M.Map VName MemoryLoc
 
 emptyCurrent :: Current
 emptyCurrent = Current
@@ -53,32 +56,29 @@ emptyCurrent = Current
 
 data Context = Context
   { ctxFunDef :: FunDef ExplicitMemory
-
+    -- ^ Keep the entire function definition around for lookup purposes.
   , ctxVarToMem :: VarMemMappings MemorySrc
+    -- ^ From the module VariableMemory.
   , ctxMemAliases :: MemAliases
+    -- ^ From the module MemoryAliases.
   , ctxVarAliases :: VarAliases
+    -- ^ From the module VariableAliases.
   , ctxFirstUses :: FirstUses
+    -- ^ From the module FirstUses.
   , ctxLastUses :: LastUses
-
-    -- If and DoLoop statements have special requirements, as do some aliasing
-    -- expressions.  We don't want to (just) use the obvious statement variable;
-    -- sometimes updating the memory block of one variable actually means
-    -- updating the memory block of other variables as well!
+    -- ^ From the module LastUses.
   , ctxActualVars :: M.Map VName Names
-
-    -- Sometimes it is convenient to treat existential memory blocks the same as
-    -- normal ones (e.g. putting them in curActualVars), but we still must keep
-    -- track of them so as to only change the index functions of variables using
-    -- them, not the memory block.
+    -- ^ From the module ActualVariables.
   , ctxExistentials :: Names
-
+    -- ^ From the module Existentials.
   , ctxVarPrimExps :: M.Map VName (PrimExp VName)
+    -- ^ From the module PrimExps.
   , ctxVarExps :: M.Map VName Exp'
-
-    -- Safety condition 2.
+    -- ^ Statement-name-to-expression mappins for the entire function.
   , ctxAllocatedBlocksBeforeCreation :: M.Map VName MNames
-    -- Safety condition 5.
+    -- ^ Safety condition 2.
   , ctxVarsInUseBeforeMem :: M.Map MName Names
+    -- ^ Safety condition 5.
   }
   deriving (Show)
 
@@ -93,6 +93,14 @@ type LoreConstraints lore = (ExplicitMemorish lore,
 coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
           FindM flore a -> FindM tlore a
 coerce = FindM . unFindM
+
+modifyCurCoalescedIntos :: (CoalescedIntos -> CoalescedIntos) -> FindM lore ()
+modifyCurCoalescedIntos f =
+  modify $ \c -> c { curCoalescedIntos = f $ curCoalescedIntos c }
+
+modifyCurMemsCoalesced :: (MemsCoalesced -> MemsCoalesced) -> FindM lore ()
+modifyCurMemsCoalesced f =
+  modify $ \c -> c { curMemsCoalesced = f $ curMemsCoalesced c }
 
 ifExp :: MonadReader Context m =>
          VName -> m (Maybe Exp')
@@ -174,9 +182,7 @@ recordOptimisticCoalescing :: LoreConstraints lore =>
                            -> [Slice (PrimExp VName)]
                            -> VName -> MemoryLoc -> Bindage -> FindM lore ()
 recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
-  modify $ \c -> c { curCoalescedIntos =
-                     insertOrUpdate dst (src, offset, ixfun_slices)
-                     $ curCoalescedIntos c }
+  modifyCurCoalescedIntos $ insertOrUpdate dst (src, offset, ixfun_slices)
 
   -- If this is an in-place operation, we future-proof future coalescings by
   -- recording that they also need to take a look at the original array, not
@@ -184,10 +190,9 @@ recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
   case bindage of
     BindVar -> return ()
     BindInPlace _ orig _ ->
-      modify $ \c -> c { curCoalescedIntos = insertOrUpdate dst (orig, zeroOffset, [])
-                                             $ curCoalescedIntos c }
+      modifyCurCoalescedIntos $ insertOrUpdate dst (orig, zeroOffset, [])
 
-  modify $ \c -> c { curMemsCoalesced = M.insert src dst_memloc $ curMemsCoalesced c }
+  modifyCurMemsCoalesced $ M.insert src dst_memloc
 
   let debug = do
         putStrLn $ replicate 70 '~'
@@ -376,7 +381,7 @@ tryCoalesce dst ixfun_slices bindage src offset = do
     safes <- zipWithM (canBeCoalesced dst) srcs ixfuns'
     when (and safes) $ do
       -- Any previous src0s coalescings must be deleted.
-      modify $ \c -> c { curCoalescedIntos = M.delete src $ curCoalescedIntos c }
+      modifyCurCoalescedIntos $ M.delete src
       -- The rest will be overwritten below.
 
       -- We then need to record that, from what we currently know, src and any
@@ -599,10 +604,11 @@ safetyIf src dst = do
   var_to_mem <- asks ctxVarToMem
   first_uses_all <- asks ctxFirstUses
 
-  -- FIXME: Lookup nicer.
-  actual_vars <- asks ctxActualVars
-  let reverse_actual_srcs = S.toList $ S.unions $ M.elems
-                            $ M.filter (src `S.member`) actual_vars
+  -- Find all variables that have 'src' as an actual var, and then check if one
+  -- of those is an If expression.
+  reverse_actual_srcs <-
+    (S.toList . S.unions . M.elems . M.filter (src `S.member`))
+    <$> asks ctxActualVars
   outer <- mapMaybeM ifExp reverse_actual_srcs
   let (is_in_if,
        if_branch_results_from_outer,
