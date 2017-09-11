@@ -98,7 +98,7 @@ findInterferences var_to_mem mem_aliases first_uses last_uses existentials funde
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
       interferences = removeEmptyMaps $ removeKeyFromMapElems $ makeCommutativeMap
-                      $ expandWithAliases mem_aliases $ getInterferencesMap
+                      $ getInterferencesMap
                       $ snd $ evalRWS m context S.empty
   in interferences
 
