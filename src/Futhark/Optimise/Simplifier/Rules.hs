@@ -67,6 +67,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyBranchContext
                , simplifyBranchResultComparison
                , simplifyReplicate
+               , arrayLitToReplicate
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -457,6 +458,14 @@ simplifyReplicate vtable (Let pat _ (BasicOp (Replicate shape (Var v))))
   | Just (BasicOp (Replicate shape2 se)) <- ST.lookupExp v vtable =
       letBind_ pat $ BasicOp $ Replicate (shape<>shape2) se
 simplifyReplicate _ _ = cannotSimplify
+
+-- | Turn array literals with identical elements into replicates.
+arrayLitToReplicate :: MonadBinder m => TopDownRule m
+arrayLitToReplicate _ (Let pat _ (BasicOp (ArrayLit (se:ses) _)))
+  | all (==se) ses =
+    let n = constant (genericLength ses + 1 :: Int32)
+    in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
+arrayLitToReplicate _ _ = cannotSimplify
 
 simplifyCmpOp :: LetTopDownRule lore u
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
