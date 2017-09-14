@@ -28,7 +28,7 @@ readBasis fpath entry = do
   all_files <- runIO $ futFiles $ takeDirectory fpath
   mapM_ qAddDependentFile all_files
 
-  res <- runIO $ runExceptT $ readProgram emptyBasis files
+  res <- runIO $ runExceptT $ readProgram False emptyBasis files
   case res of
     Right (_, _, imps, src) ->
       return $ Basis imps src [entry]

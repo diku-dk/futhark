@@ -1107,6 +1107,18 @@ consumeArg loc at _       = [observation (aliases at) loc]
 checkOneExp :: UncheckedExp -> TypeM Exp
 checkOneExp = fmap fst . runTermTypeM . checkExp
 
+maybePermitRecursion :: VName -> [TypeParam] -> [Pattern] -> Maybe StructType
+                     -> TermTypeM a -> TermTypeM a
+maybePermitRecursion fname tparams params (Just rettype) m = do
+  permit <- liftTypeM recursionPermitted
+  if permit then
+    let patternType' = toStruct . vacuousShapeAnnotations . patternType
+        entry = BoundF (tparams, map patternType' params, rettype) mempty
+        bindF scope = scope { scopeVtable = M.insert fname entry $ scopeVtable scope }
+    in local bindF m
+    else m
+maybePermitRecursion _ _ _ Nothing m = m
+
 checkFunDef :: (Name, Maybe UncheckedTypeExp,
                 [UncheckedTypeParam], [UncheckedPattern],
                 UncheckedExp, SrcLoc)
@@ -1137,7 +1149,8 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = do
                  "Fresh sizes may not be bound in return type."
         Nothing -> return Nothing
 
-    body' <- checkFunBody fname body (snd <$> maybe_retdecl') loc
+    body' <- maybePermitRecursion fname' tparams' params' (snd <$> maybe_retdecl') $
+             checkFunBody fname body (snd <$> maybe_retdecl') loc
     (maybe_retdecl'', rettype) <- case maybe_retdecl' of
       Just (retdecl', retdecl_type) -> do
         let rettype_structural = toStructural retdecl_type

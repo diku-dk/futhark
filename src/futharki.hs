@@ -87,7 +87,7 @@ data InterpreterState =
 
 newInterpreterState :: IO InterpreterState
 newInterpreterState = do
-  res <- runExceptT $ readProgram preludeBasis []
+  res <- runExceptT $ readProgram False preludeBasis []
   case res of
     Right (prog, _, imports, src) ->
       return InterpreterState { interpProg = prog
@@ -142,7 +142,7 @@ readEvalPrint = do
 
 runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
 runProgram proglib imports src prog = liftIO $
-  case checkProg imports src "" prog of
+  case checkProg False imports src "" prog of
     Left err -> print err
     Right (FileModule _ prog', _, src') ->
       let full_prog = Prog $ progDecs proglib ++ progDecs prog'
@@ -178,7 +178,7 @@ Quit futharki.
   where loadCommand :: Command
         loadCommand file = do
           liftIO $ T.putStrLn $ "Reading " <> file
-          res <- liftIO $ runExceptT (readProgram preludeBasis [T.unpack file])
+          res <- liftIO $ runExceptT (readProgram False preludeBasis [T.unpack file])
                  `catch` \(err::IOException) ->
                  return (Left (ExternalError (T.pack $ show err)))
           case res of

@@ -56,11 +56,13 @@ import Futhark.Util.Log
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: Maybe (Maybe FilePath)
                      , futharkWarn :: Bool -- ^ Warn if True.
+                     , futharkPermitRecursion :: Bool
                      }
 
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkWarn = True
+                                 , futharkPermitRecursion = True
                                  }
 
 dumpError :: FutharkConfig -> CompilerError -> IO ()
@@ -129,7 +131,7 @@ runPipelineOnProgram :: FutharkConfig
 runPipelineOnProgram config b pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (tagged_ext_prog, ws, _, namesrc) <- readProgram b [file]
+  (tagged_ext_prog, ws, _, namesrc) <- readProgram (futharkPermitRecursion config) b [file]
 
   when (futharkWarn config) $
     liftIO $ hPutStr stderr $ show ws
@@ -209,8 +211,8 @@ includePath :: FutharkInclude -> String
 includePath (FutharkInclude s _) = Posix.takeDirectory s
 
 readImport :: (MonadError CompilerError m, MonadIO m) =>
-              SearchPath -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
-readImport search_path steps include
+              Bool -> SearchPath -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
+readImport permit_recursion search_path steps include
   | include `elem` steps =
       throwError $ ExternalError $ T.pack $
       "Import cycle: " ++ intercalate " -> "
@@ -219,22 +221,23 @@ readImport search_path steps include
       already_done <- gets $ isJust . lookup (includeToString include) . alreadyImported
 
       unless already_done $
-        uncurry (handleFile search_path steps include) =<<
+        uncurry (handleFile permit_recursion search_path steps include) =<<
         readImportFile search_path include
 
 handleFile :: (MonadIO m, MonadError CompilerError m) =>
-              SearchPath
+              Bool
+           -> SearchPath
            -> [FutharkInclude]
            -> FutharkInclude
            -> T.Text
            -> FilePath
            -> CompilerM m ()
-handleFile search_path steps include file_contents file_name = do
+handleFile permit_recursion search_path steps include file_contents file_name = do
   prog <- case parseFuthark file_name file_contents of
     Left err -> externalErrorS $ show err
     Right prog -> return prog
 
-  mapM_ (readImport search_path steps' . uncurry (mkInclude include)) $
+  mapM_ (readImport permit_recursion search_path steps' . uncurry (mkInclude include)) $
     E.progImports prog
 
   -- It is important to not read these before the above calls to
@@ -243,7 +246,7 @@ handleFile search_path steps include file_contents file_name = do
   src <- gets nameSource
   prelude <- ask
 
-  case E.checkProg imports src (includePath include) $
+  case E.checkProg permit_recursion imports src (includePath include) $
        prependPrelude prelude prog of
     Left err ->
       externalError $ T.pack $ show err
@@ -283,12 +286,12 @@ readImportFile (SearchPath dir) include = do
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               Basis -> [FilePath]
+               Bool -> Basis -> [FilePath]
             -> m (E.Prog,
                   E.Warnings,
                   E.Imports,
                   VNameSource)
-readProgram (Basis imports src roots) fps = do
+readProgram permit_recursion (Basis imports src roots) fps = do
   let s = ReaderState imports src mempty
   s' <- execStateT (runReaderT (mapM onFile fps) roots) s
   return (E.Prog $ concatMap (E.progDecs . E.fileProg . snd) $ reverse $ alreadyImported s',
@@ -299,7 +302,7 @@ readProgram (Basis imports src roots) fps = do
 
           fs <- liftIO $ T.readFile fp
 
-          handleFile (SearchPath ".") [] (mkInitialInclude name) fs fp
+          handleFile permit_recursion (SearchPath ".") [] (mkInitialInclude name) fs fp
             where (name, _) = splitExtension fp
 
 prependPrelude :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg

@@ -23,12 +23,13 @@ import Futhark.Binder
 import Futhark.Pass
 
 aggInlining :: CallGraph -> [FunDef] -> [FunDef]
-aggInlining cg = filter (isJust . funDefEntryPoint) . recurse
+aggInlining cg = filter keep . recurse
   where noInterestingCalls :: S.Set Name -> FunDef -> Bool
         noInterestingCalls interesting fundec =
           case M.lookup (funDefName fundec) cg of
-            Just calls | not $ any (`elem` interesting) calls -> True
-            _                                                 -> False
+            Just calls | not $ any (`elem` interesting') calls -> True
+            _                                                  -> False
+            where interesting' = funDefName fundec `S.insert` interesting
 
         recurse funs =
           let interesting = S.fromList $ map funDefName funs
@@ -39,6 +40,12 @@ aggInlining cg = filter (isJust . funDefEntryPoint) . recurse
           in if null to_be_inlined then funs
              else inlined_but_entry_points ++
                   recurse (map (`doInlineInCaller` to_be_inlined) to_inline_in)
+
+        keep fundec = isJust (funDefEntryPoint fundec) || recursive fundec
+
+        recursive fundec = case M.lookup (funDefName fundec) cg of
+                             Just calls -> funDefName fundec `elem` calls
+                             Nothing -> False
 
 -- | @doInlineInCaller caller inlcallees@ inlines in @calleer@ the functions
 -- in @inlcallees@. At this point the preconditions are that if @inlcallees@
