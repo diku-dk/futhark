@@ -207,6 +207,8 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
             normal_param_names = S.fromList normal_params
 
         fname' <- internaliseFunName fname params
+        when (null tparams) $
+          maybeSpecialiseEarly fname fname' (concat params') rettype'
         body' <- localScope constscope $
                  ensureResultExtShape asserting
                  "shape of function result does not match shapes in return type"

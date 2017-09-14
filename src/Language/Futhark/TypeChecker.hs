@@ -49,13 +49,15 @@ type Imports = [(String, FileModule)]
 -- Accepts a mapping from file names (excluding extension) to
 -- previously type checker results.  The 'FilePath' is used to resolve
 -- relative @import@s.
-checkProg :: Imports
+checkProg :: Bool
+          -> Imports
           -> VNameSource
           -> FilePath
           -> UncheckedProg
           -> Either TypeError (FileModule, Warnings, VNameSource)
-checkProg files src fpath prog =
-  runTypeM initialEnv (M.map fileEnv $ M.fromList files) fpath src $ checkProgM prog
+checkProg permit_recursion files src fpath prog =
+  runTypeM permit_recursion initialEnv files' fpath src $ checkProgM prog
+  where files' = M.map fileEnv $ M.fromList files
 
 initialEnv :: Env
 initialEnv = intrinsicsModule
