@@ -64,6 +64,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , removeScratchValue
                , simplifyFallbackBranch
                , removeIdentityInPlace
+               , removeFullInPlace
                , simplifyBranchContext
                , simplifyBranchResultComparison
                , simplifyReplicate
@@ -1148,6 +1149,19 @@ removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
         arrayFrom _ _ _ =
           False
 removeIdentityInPlace _ _ =
+  cannotSimplify
+
+-- | Turn in-place updates that replace an entire array into just
+-- array literals.
+removeFullInPlace :: MonadBinder m => TopDownRule m
+removeFullInPlace vtable (Let (Pattern [] [d]) _ e)
+  | BindInPlace _ dest is <- patElemBindage d,
+    Just dest_t <- ST.lookupType dest vtable,
+    isFullSlice (arrayShape dest_t) is  = do
+      in_place_val <- letSubExp "in_place_val" e
+      letBind_ (Pattern [] [d { patElemBindage = BindVar}]) $
+        BasicOp $ ArrayLit [in_place_val] $ rowType dest_t
+removeFullInPlace _ _ =
   cannotSimplify
 
 removeScratchValue :: MonadBinder m => TopDownRule m
