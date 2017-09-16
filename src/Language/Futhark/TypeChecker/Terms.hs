@@ -1008,6 +1008,10 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         | unique pt = consume ploc $ aliases mt
       consumeMerge (TuplePattern pats _) t | Just ts <- isTupleRecord t =
         zipWithM_ consumeMerge pats ts
+      consumeMerge (PatternParens pat _) t =
+        consumeMerge pat t
+      consumeMerge (PatternAscription pat _) t =
+        consumeMerge pat t
       consumeMerge _ _ =
         return ()
   consumeMerge mergepat'' $ typeOf mergeexp'
