@@ -41,11 +41,14 @@ aggInlining cg = filter keep . recurse
              else inlined_but_entry_points ++
                   recurse (map (`doInlineInCaller` to_be_inlined) to_inline_in)
 
-        keep fundec = isJust (funDefEntryPoint fundec) || recursive fundec
+        keep fundec = isJust (funDefEntryPoint fundec) || callsRecursive fundec
 
-        recursive fundec = case M.lookup (funDefName fundec) cg of
-                             Just calls -> funDefName fundec `elem` calls
-                             Nothing -> False
+        callsRecursive fundec = maybe False (any recursive) $
+                                M.lookup (funDefName fundec) cg
+
+        recursive fname = case M.lookup fname cg of
+                            Just calls -> fname `elem` calls
+                            Nothing -> False
 
 -- | @doInlineInCaller caller inlcallees@ inlines in @calleer@ the functions
 -- in @inlcallees@. At this point the preconditions are that if @inlcallees@
