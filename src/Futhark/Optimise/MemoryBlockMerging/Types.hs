@@ -48,6 +48,16 @@ type LastUses = M.Map StmOrRes MNames
 -- Interferences between memory blocks.
 type Interferences = M.Map MName MNames
 
+-- Sets of potential interferences inside kernels because of potential data
+-- races.  For each set, every memory block *can* interfere with every other
+-- memory block, but only in dire edge cases.  Usually some of them can be said
+-- to not interfere, and sometimes array creation statements can be modified to
+-- have fewer interferences.  See Reuse/Core.hs.
+type PotentialKernelDataRaceInterferences =
+  [PotentialKernelDataRaceInterferenceGroup]
+type PotentialKernelDataRaceInterferenceGroup = [KernelFirstUse]
+type KernelFirstUse = (MName, VName, PrimType, ExpMem.IxFun)
+
 -- "Links" for handling how variables belong together.
 type ActualVariables = M.Map VName Names
 
@@ -60,6 +70,8 @@ data AuxiliaryInfo = AuxiliaryInfo
   , auxFirstUses :: FirstUses
   , auxLastUses :: LastUses
   , auxInterferences :: Interferences
+  , auxPotentialKernelDataRaceInterferences
+    :: PotentialKernelDataRaceInterferences
   , auxActualVariables :: ActualVariables
   , auxExistentials :: Names
   }

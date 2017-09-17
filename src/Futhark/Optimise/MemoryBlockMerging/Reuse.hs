@@ -33,7 +33,8 @@ reuseInFunDef fundef0 = do
       aux1 = getAuxiliaryInfo fundef1
       debug1 = debugAuxiliaryInfo aux1 "After allocation size hoisting"
   (fundef2, proglog) <- coreReuseFunDef fundef1
-    (auxFirstUses aux1) (auxInterferences aux1) (auxVarMemMappings aux1)
+    (auxFirstUses aux1) (auxInterferences aux1)
+    (auxPotentialKernelDataRaceInterferences aux1) (auxVarMemMappings aux1)
     (auxActualVariables aux1) (auxExistentials aux1)
 
   let debug = debug0 >> debug1

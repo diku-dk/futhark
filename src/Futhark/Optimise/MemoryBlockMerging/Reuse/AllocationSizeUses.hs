@@ -10,9 +10,10 @@ module Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizeUses
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Control.Monad
 import Control.Monad.RWS
+import Control.Monad.Writer
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
@@ -21,6 +22,7 @@ import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
 import Futhark.Optimise.MemoryBlockMerging.Reuse.AllocationSizes
+import Futhark.Optimise.MemoryBlockMerging.PrimExps
 
 
 type SizeVars = Names
@@ -54,10 +56,23 @@ addUsesBefore var declarations_so_far =
 findSizeUsesFunDef :: FunDef ExplicitMemory -> UsesBefore
 findSizeUsesFunDef fundef =
   let size_vars = mapMaybe (fromVar . fst) $ M.elems $ memBlockSizesFunDef fundef
+      var_to_pe = findPrimExpsFunDef fundef
+      -- We want to find 'uses before' for all size vars *and* which variables
+      -- they depend on.  This is a compromise between recording the
+      -- relationship for only size variables and all variables.  We need this
+      -- compromise for 'sizesCanBeMaxedKernelArray' in Reuse.Core.
+      find_pe_vars v0 = fromMaybe S.empty $ do
+        pe <- M.lookup v0 var_to_pe
+        return $ S.insert v0 $ execWriter $ traverse
+          (\v -> do
+              tell $ S.singleton v
+              tell $ find_pe_vars v
+              return v) pe
+      size_vars' = S.unions $ map find_pe_vars size_vars
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFParam
         lookInBody $ funDefBody fundef
-      res = snd $ evalRWS m (S.fromList size_vars) S.empty
+      res = snd $ evalRWS m size_vars' S.empty
   in res
 
 lookInFParam :: LoreConstraints lore =>

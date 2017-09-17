@@ -29,8 +29,11 @@ getAuxiliaryInfo fundef =
       mem_aliases = findMemAliases fundef var_to_mem
       var_aliases = findVarAliases fundef
       first_uses = findFirstUses var_to_mem mem_aliases fundef
-      last_uses = findLastUses var_to_mem mem_aliases first_uses existentials fundef
-      interferences = findInterferences var_to_mem mem_aliases first_uses last_uses existentials fundef
+      last_uses = findLastUses var_to_mem mem_aliases first_uses existentials
+                  fundef
+      (interferences, potential_kernel_interferences) =
+        findInterferences var_to_mem mem_aliases first_uses last_uses
+        existentials fundef
       actual_variables = findActualVariables var_to_mem first_uses fundef
       existentials = findExistentials fundef
   in AuxiliaryInfo
@@ -41,6 +44,7 @@ getAuxiliaryInfo fundef =
      , auxFirstUses = first_uses
      , auxLastUses = last_uses
      , auxInterferences = interferences
+     , auxPotentialKernelDataRaceInterferences = potential_kernel_interferences
      , auxActualVariables = actual_variables
      , auxExistentials = existentials
      }
@@ -49,8 +53,8 @@ debugAuxiliaryInfo :: AuxiliaryInfo -> String -> IO ()
 debugAuxiliaryInfo aux desc =
   aux `seq` auxVarMemMappings aux `seq` auxMemAliases aux `seq`
   auxVarAliases aux `seq` auxFirstUses aux `seq` auxLastUses aux `seq`
-  auxInterferences aux `seq` auxActualVariables aux `seq`
-  auxExistentials aux `seq` do
+  auxInterferences aux `seq` auxPotentialKernelDataRaceInterferences `seq`
+  auxActualVariables aux `seq` auxExistentials aux `seq` do
   putStrLn $ replicate 70 '='
   putStrLn (desc ++ ": Helper info in " ++ pretty (auxName aux) ++ ":")
   putStrLn $ replicate 70 '-'
@@ -81,6 +85,9 @@ debugAuxiliaryInfo aux desc =
   putStrLn "Interferences of memory blocks:"
   forM_ (M.assocs $ auxInterferences aux) $ \(mem, mems) ->
     putStrLn ("In " ++ pretty mem ++ ": " ++ prettySet mems)
+  putStrLn $ replicate 70 '-'
+  putStrLn "Potential kernel data race interferences of memory blocks:"
+  forM_ (auxPotentialKernelDataRaceInterferences aux) $ mapM_ print
   putStrLn $ replicate 70 '-'
   putStrLn "Actual variables:"
   forM_ (M.assocs $ auxActualVariables aux) $ \(var, vars) ->

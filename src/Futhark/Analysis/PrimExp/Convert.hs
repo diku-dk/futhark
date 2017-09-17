@@ -3,6 +3,7 @@
 module Futhark.Analysis.PrimExp.Convert
   (
     primExpToExp
+  , primExpToSubExp
   , primExpFromExp
   , primExpFromSubExp
   , substituteInPrimExp

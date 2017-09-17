@@ -367,7 +367,6 @@ isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isDirect =
   (==Just 0) . flip linearWithOffset 1
 
-
 -- | Substituting a name with a PrimExp in an index function.
 substituteInIxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
                   -> IxFun (PrimExp VName)
