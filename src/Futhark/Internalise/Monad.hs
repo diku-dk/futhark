@@ -20,6 +20,7 @@ module Futhark.Internalise.Monad
   , allSubsts
   , addFunction
 
+  , maybeSpecialiseEarly
   , lookupFunction
   , lookupFunction'
   , lookupMod
@@ -228,6 +229,18 @@ lookupFunction fname types@(_, i_types) = do
       return info
   where bad =
           fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
+
+-- Generate monomorphic specialisation early as a HACK to support
+-- recursive functions.
+maybeSpecialiseEarly :: VName -> Name -> [FParam] -> [DeclExtType] -> InternaliseM ()
+maybeSpecialiseEarly fname fname' params rettype = do
+  let info = (fname', mempty, mempty,
+              mempty, map declTypeOf params,
+              params,
+              applyRetType (ExtRetType rettype) params)
+      fb = FunBinding (M.singleton (map (rankShaped . paramType) params) info)
+           (\ts -> fail $ "Cannot have polymorphic recursive function. " ++ show ts)
+  modify $ \s -> s { stateFtable = M.insert fname fb $ stateFtable s }
 
 lookupMod :: VName -> InternaliseM ModBinding
 lookupMod mname = do

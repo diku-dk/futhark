@@ -64,9 +64,11 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , removeScratchValue
                , simplifyFallbackBranch
                , removeIdentityInPlace
+               , removeFullInPlace
                , simplifyBranchContext
                , simplifyBranchResultComparison
                , simplifyReplicate
+               , arrayLitToReplicate
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -457,6 +459,14 @@ simplifyReplicate vtable (Let pat _ (BasicOp (Replicate shape (Var v))))
   | Just (BasicOp (Replicate shape2 se)) <- ST.lookupExp v vtable =
       letBind_ pat $ BasicOp $ Replicate (shape<>shape2) se
 simplifyReplicate _ _ = cannotSimplify
+
+-- | Turn array literals with identical elements into replicates.
+arrayLitToReplicate :: MonadBinder m => TopDownRule m
+arrayLitToReplicate _ (Let pat _ (BasicOp (ArrayLit (se:ses) _)))
+  | all (==se) ses =
+    let n = constant (genericLength ses + 1 :: Int32)
+    in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
+arrayLitToReplicate _ _ = cannotSimplify
 
 simplifyCmpOp :: LetTopDownRule lore u
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
@@ -1139,6 +1149,19 @@ removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
         arrayFrom _ _ _ =
           False
 removeIdentityInPlace _ _ =
+  cannotSimplify
+
+-- | Turn in-place updates that replace an entire array into just
+-- array literals.
+removeFullInPlace :: MonadBinder m => TopDownRule m
+removeFullInPlace vtable (Let (Pattern [] [d]) _ e)
+  | BindInPlace _ dest is <- patElemBindage d,
+    Just dest_t <- ST.lookupType dest vtable,
+    isFullSlice (arrayShape dest_t) is  = do
+      in_place_val <- letSubExp "in_place_val" e
+      letBind_ (Pattern [] [d { patElemBindage = BindVar}]) $
+        BasicOp $ ArrayLit [in_place_val] $ rowType dest_t
+removeFullInPlace _ _ =
   cannotSimplify
 
 removeScratchValue :: MonadBinder m => TopDownRule m

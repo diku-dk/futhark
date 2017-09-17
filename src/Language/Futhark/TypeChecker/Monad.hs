@@ -6,6 +6,7 @@ module Language.Futhark.TypeChecker.Monad
   , TypeM
   , runTypeM
   , askEnv
+  , recursionPermitted
   , checkQualNameWithEnv
   , bindSpaced
 
@@ -266,6 +267,7 @@ type ImportTable = M.Map FilePath Env
 data Context = Context { contextEnv :: Env
                        , contextImportTable :: ImportTable
                        , contextFilePath :: FilePath
+                       , contextPermitRecursion :: Bool
                        }
 
 -- | The type checker runs in this monad.
@@ -281,14 +283,18 @@ newtype TypeM a = TypeM (RWST
             MonadState VNameSource,
             MonadError TypeError)
 
-runTypeM :: Env -> ImportTable -> FilePath -> VNameSource -> TypeM a
+runTypeM :: Bool -> Env -> ImportTable -> FilePath -> VNameSource
+         -> TypeM a
          -> Either TypeError (a, Warnings, VNameSource)
-runTypeM env imports fpath src (TypeM m) = do
-  (x, src', ws) <- runExcept $ runRWST m (Context env imports fpath) src
+runTypeM recurse env imports fpath src (TypeM m) = do
+  (x, src', ws) <- runExcept $ runRWST m (Context env imports fpath recurse) src
   return (x, ws, src')
 
 askEnv :: TypeM Env
 askEnv = asks contextEnv
+
+recursionPermitted :: TypeM Bool
+recursionPermitted = asks contextPermitRecursion
 
 class MonadError TypeError m => MonadTypeChecker m where
   bad :: TypeError -> m a
