@@ -16,13 +16,11 @@ import Data.Maybe (mapMaybe, fromMaybe, catMaybes)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Writer
-import Control.Arrow (second)
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (
   ExplicitMemorish, ExplicitMemory, InKernel)
 import qualified Futhark.Representation.ExplicitMemory as ExpMem
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Representation.Kernels.Kernel
 
 import Futhark.Optimise.MemoryBlockMerging.Miscellaneous
@@ -43,14 +41,19 @@ type InterferencesList = [(MName, MNames)]
 getInterferencesMap :: InterferencesList -> Interferences
 getInterferencesMap = M.unionsWith S.union . map (uncurry M.singleton)
 
-type CurrentlyAlive = Names
+data Current = Current { curAlive :: MNames
+
+                       , curResPotentialKernelInterferences
+                         :: PotentialKernelDataRaceInterferences
+                       }
+  deriving (Show)
 
 newtype FindM lore a = FindM
-  { unFindM :: RWS Context InterferencesList CurrentlyAlive a }
+  { unFindM :: RWS Context InterferencesList Current a }
   deriving (Monad, Functor, Applicative,
             MonadReader Context,
             MonadWriter InterferencesList,
-            MonadState CurrentlyAlive)
+            MonadState Current)
 
 type LoreConstraints lore = (ExplicitMemorish lore,
                              KernelInterferences lore,
@@ -62,21 +65,30 @@ coerce :: (ExplicitMemorish flore, ExplicitMemorish tlore) =>
 coerce = FindM . unFindM
 
 awaken :: MName -> FindM lore ()
-awaken mem = modify $ S.insert mem
+awaken mem = modifyCurAlive $ S.insert mem
 
 kill :: MName -> FindM lore ()
-kill mem = modify $ S.delete mem
+kill mem = modifyCurAlive $ S.delete mem
+
+modifyCurAlive :: (MNames -> MNames) -> FindM lore ()
+modifyCurAlive f = modify $ \c -> c { curAlive = f $ curAlive c }
+
+addPotentialKernelInterferenceGroup ::
+  PotentialKernelDataRaceInterferenceGroup -> FindM lore ()
+addPotentialKernelInterferenceGroup set =
+  modify $ \c -> c { curResPotentialKernelInterferences =
+                       curResPotentialKernelInterferences c ++ [set] }
 
 recordCurrentInterferences :: FindM lore ()
 recordCurrentInterferences = do
-  current <- get
+  current <- gets curAlive
   -- Interferences are commutative.  Reflect that in the resulting data.
   forM_ (S.toList current) $ \mem ->
     tell [(mem, current)]
 
 recordNewInterferences :: MNames -> FindM lore ()
 recordNewInterferences mems_in_stm = do
-  current <- get
+  current <- gets curAlive
   -- Interferences are commutative.  Reflect that in the resulting data.
   forM_ (S.toList current) $ \mem ->
     tell [(mem, mems_in_stm)]
@@ -86,7 +98,7 @@ recordNewInterferences mems_in_stm = do
 -- | Find all memory block interferences in a function definition.
 findInterferences :: VarMemMappings MemorySrc -> MemAliases ->
                      FirstUses -> LastUses -> Names -> FunDef ExplicitMemory
-                  -> Interferences
+                  -> (Interferences, PotentialKernelDataRaceInterferences)
 findInterferences var_to_mem mem_aliases first_uses last_uses existentials fundef =
   let context = Context { ctxVarToMem = var_to_mem
                         , ctxMemAliases = mem_aliases
@@ -98,10 +110,11 @@ findInterferences var_to_mem mem_aliases first_uses last_uses existentials funde
       m = unFindM $ do
         forM_ (funDefParams fundef) lookInFunDefFParam
         lookInBody $ funDefBody fundef
+      (cur, interferences_list) = execRWS m context (Current S.empty [])
       interferences = removeEmptyMaps $ removeKeyFromMapElems $ makeCommutativeMap
-                      $ getInterferencesMap
-                      $ snd $ evalRWS m context S.empty
-  in interferences
+                      $ getInterferencesMap interferences_list
+      potential_kernel_interferences = curResPotentialKernelInterferences cur
+  in (interferences, potential_kernel_interferences)
 
 lookInFunDefFParam :: LoreConstraints lore =>
                       FParam lore -> FindM lore ()
@@ -200,10 +213,10 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
             stm_interferences
       tell stm_interferences'
 
-      extra_kernel_interferences <- findKernelDataRaceInterferences e
-      tell extra_kernel_interferences
+      potential_kernel_interferences <- findKernelDataRaceInterferences e
+      onJust potential_kernel_interferences addPotentialKernelInterferenceGroup
 
-      current <- get
+      current <- gets curAlive
       forM_ patvalelems $ \(PatElem var _ _) -> do
         last_uses_var <- lookupEmptyable (FromStm var) <$> asks ctxLastUses
         mapM_ kill last_uses_var
@@ -219,11 +232,9 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
             putStrLn "interferences': "
             forM_ (M.assocs $ getInterferencesMap stm_interferences') $ \(v, ns) ->
               putStrLn ("  " ++ pretty v ++ ": " ++ prettySet ns)
-            unless (L.null extra_kernel_interferences)
-              $ putStrLn ("extra kernel interferences: " ++
-                          L.intercalate ", " (map (\(k, ms) ->
-                                                     pretty k ++ "<->" ++ prettySet ms)
-                                              extra_kernel_interferences))
+            onJust potential_kernel_interferences $ \is ->
+              unless (L.null is) $ putStrLn ("potential kernel interferences: " ++
+                                             show potential_kernel_interferences)
             putStrLn $ replicate 70 '~'
       doDebug debug
 
@@ -290,31 +301,31 @@ lookInRes ses = do
   mapM_ kill $ S.toList last_uses_v
 
 firstUsesInStm :: LoreConstraints lore => FirstUses ->
-                  Stm lore -> [(MName, PrimType, ExpMem.IxFun)]
+                  Stm lore -> [KernelFirstUse]
 firstUsesInStm first_uses stm =
   let m = lookFUInStm stm
   in snd $ evalRWS m first_uses ()
 
 firstUsesInExp :: LoreConstraints lore =>
-                  Exp lore -> FindM lore [(MName, PrimType, ExpMem.IxFun)]
+                  Exp lore -> FindM lore [KernelFirstUse]
 firstUsesInExp e = do
   let m = lookFUInExp e
   first_uses <- asks ctxFirstUses
   return $ snd $ evalRWS m first_uses ()
 
 lookFUInStm :: LoreConstraints lore =>
-               Stm lore -> RWS FirstUses [(MName, PrimType, ExpMem.IxFun)] () ()
+               Stm lore -> RWS FirstUses [KernelFirstUse] () ()
 lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
   forM_ patvalelems $ \(PatElem patname _ membound) ->
     case membound of
       ExpMem.ArrayMem pt _ _ _ ixfun -> do
         fus <- lookupEmptyable patname <$> ask
-        forM_ fus $ \fu -> tell [(fu, pt, ixfun)]
+        forM_ fus $ \fu -> tell [(fu, patname, pt, ixfun)]
       _ -> return ()
   lookFUInExp e_stm
 
 lookFUInExp :: LoreConstraints lore =>
-               Exp lore -> RWS FirstUses [(MName, PrimType, ExpMem.IxFun)] () ()
+               Exp lore -> RWS FirstUses [KernelFirstUse] () ()
 lookFUInExp = fullWalkExpM fu_walker fu_walker_kernel
   where fu_walker = identityWalker
           { walkOnBody = mapM_ lookFUInStm . bodyStms }
@@ -325,119 +336,16 @@ lookFUInExp = fullWalkExpM fu_walker fu_walker_kernel
           }
 
 class KernelInterferences lore where
-  findKernelDataRaceInterferences :: Exp lore -> FindM lore [(MName, MNames)]
+  findKernelDataRaceInterferences ::
+    Exp lore -> FindM lore (Maybe PotentialKernelDataRaceInterferenceGroup)
 
 instance KernelInterferences ExplicitMemory where
   findKernelDataRaceInterferences e = case e of
-    Op (ExpMem.Inner Kernel{}) -> do
-      fus <- firstUsesInExp e
-      let all_pair_combinations = [(t, u) | t <- fus, u <- fus]
-      return $ map (second S.singleton)
-        $ L.nubBy (\(t0, u0) (t1, u1) ->
-                     (t0 == t1 && u0 == u1) || (t0 == u1 && u0 == t1))
-        $ map (\((t, _, _), (u, _, _)) -> (t, u))
-        $ filter interferes all_pair_combinations
-    _ -> return []
-    where interferes ((v0, pt0, ixfun0), (v1, pt1, ixfun1)) =
-            -- Must be different.
-            v0 /= v1 &&
-            (
-              -- Do the index functions range over different memory areas?
-              ((ixFunHasIndex ixfun0 || ixFunHasIndex ixfun1) &&
-               not (ixFunsCompatible v0 ixfun0 v1 ixfun1))
-              ||
-              -- Do the arrays have different base type size?  If so, they take
-              -- up different amounts of space, and will not be compatible.
-              ((primByteSize pt0 :: Int) /= primByteSize pt1)
-            )
+    Op (ExpMem.Inner Kernel{}) -> Just <$> firstUsesInExp e
+    _ -> return Nothing
 
 instance KernelInterferences InKernel where
-  findKernelDataRaceInterferences _ = return []
-
--- Does an index function contain an Index expression?
---
--- If the index function of the memory annotation uses an index, it means that
--- the array creation does not refer to the entire array.  It is an array
--- creation, but only partially: It creates part of the array, and another part
--- is created in another loop iteration or kernel thread.  The danger in
--- declaring this memory a first use lies in how it can then be reused later in
--- the iteration/thread by some memory with a *different* index in its memory
--- annotation index function, which can affect reads in other threads.
-ixFunHasIndex :: ExpMem.IxFun -> Bool
-ixFunHasIndex ixfun = case ixfun of
-  IxFun.Direct _ -> False
-  IxFun.Permute ixfun' _ -> ixFunHasIndex ixfun'
-  IxFun.Rotate ixfun' _ -> ixFunHasIndex ixfun'
-  IxFun.Index{} -> True
-  IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
-  IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
-
--- If a dimension has size 1, remove it.  Only look at this specific pattern,
--- since it occurs in kernels.
-ixFunRemoveEmptyDimensions :: ExpMem.IxFun -> ExpMem.IxFun
-ixFunRemoveEmptyDimensions (IxFun.Index
-                            (IxFun.Permute
-                             (IxFun.Direct shape)
-                             permutation) slice) =
-  let shape_ix_removed = map snd $ filter (\(dim, _i) -> dim == one)
-        $ zip shape [0..]
-      shape' = filter (/= one) shape
-      (permutation', slice_ix_keep) = unzip
-        $ filter (\(perm, _i) -> perm `notElem` shape_ix_removed)
-        $ zip permutation [(0::Int)..]
-      permutation'' = map (\perm -> perm - length (filter (< perm)
-                                                   shape_ix_removed)) permutation'
-      slice' = map fst
-        $ filter (\(_s, i) -> i `elem` slice_ix_keep) $ zip slice [0..]
-  in IxFun.Index (IxFun.Permute (IxFun.Direct shape') permutation'') slice'
-  where one = ExpMem.ValueExp (IntValue (Int32Value 1))
-ixFunRemoveEmptyDimensions ixfun = ixfun
-
--- Do the two index functions describe the same range?  In other words, does one
--- array take up precisely the same location (offset) and size as another array
--- relative to the beginning of their respective memory blocks?  FIXME: This can
--- be less conservative, for example by handling that different reshapes of the
--- same array can describe the same offset and space, but do we have any tests
--- or benchmarks where this occurs?
-ixFunsCompatible :: MName -> ExpMem.IxFun -> MName -> ExpMem.IxFun -> Bool
-ixFunsCompatible v0 ixfun0 v1 ixfun1 =
-  let ixfun0' = ixFunRemoveEmptyDimensions ixfun0
-      ixfun1' = ixFunRemoveEmptyDimensions ixfun1
-      res_raw = ixFunsCompatibleRaw ixfun0 ixfun1
-      res_simplified = ixFunsCompatibleRaw ixfun0' ixfun1'
-      res = res_raw || res_simplified
-
-      debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "ixFunsCompatible:"
-        putStrLn ("ixfun0 " ++ pretty v0 ++ ": " ++ show ixfun0)
-        putStrLn ("ixfun1 " ++ pretty v1 ++ ": " ++ show ixfun1)
-        putStrLn "---"
-        putStrLn ("ixfun0': " ++ show ixfun0')
-        putStrLn ("ixfun1': " ++ show ixfun1')
-        putStrLn "---"
-        putStrLn ("res: " ++ L.intercalate ", " (map show [res_raw, res_simplified, res]))
-        putStrLn $ replicate 70 '~'
-  in withDebug debug res
-
--- Are two index functions *identical*?  (Silly approach, but the Eq instance is
--- used for something else.)
-ixFunsCompatibleRaw :: ExpMem.IxFun -> ExpMem.IxFun -> Bool
-ixFunsCompatibleRaw ixfun0 ixfun1 = ixfun0 `primEq` ixfun1
-  where primEq a b = case (a, b) of
-          (IxFun.Direct sa, IxFun.Direct sb) ->
-            sa == sb
-          (IxFun.Permute a1 pa, IxFun.Permute b1 pb) ->
-            a1 `primEq` b1 && pa == pb
-          (IxFun.Rotate a1 ia, IxFun.Rotate b1 ib) ->
-            a1 `primEq` b1 && ia == ib
-          (IxFun.Index a1 sa, IxFun.Index b1 sb) ->
-            a1 `primEq` b1 && sa == sb
-          (IxFun.Reshape a1 sa, IxFun.Reshape b1 sb) ->
-            a1 `primEq` b1 && sa == sb
-          (IxFun.Repeat a1 ssa sa, IxFun.Repeat b1 ssb sb) ->
-            a1 `primEq` b1 && ssa == ssb && sa == sb
-          _ -> False
+  findKernelDataRaceInterferences _ = return Nothing
 
 -- Base info for kernel bodies.
 class SpecialBodyExceptions lore where
@@ -472,7 +380,7 @@ interferenceExceptions :: LoreConstraints lore =>
 interferenceExceptions ctx stms res indices output_mems_may =
   let output_vars = mapMaybe fromVar res
       indices_slice = map (DimFix . Var) indices
-      stms_first_uses = map (\(mem, _, _) -> mem)
+      stms_first_uses = map (\(mem, _, _, _) -> mem)
                         $ concatMap (firstUsesInStm (ctxFirstUses ctx)) stms
       results =
         concat $ flip map stms $ \(Let (Pattern _patctxelems patvalelems) _ e) ->
