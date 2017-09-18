@@ -17,6 +17,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
 import System.IO
+import System.IO.Error
 import System.Exit
 import System.Console.GetOpt
 
@@ -59,7 +60,10 @@ repl = do
   putStrLn ""
   putStrLn "Run :help for a list of commands."
   putStrLn ""
-  evalStateT (forever readEvalPrint) =<< newInterpreterState
+  catch (evalStateT (forever readEvalPrint) =<< newInterpreterState) $ \err ->
+    if isEOFError err then
+      putStrLn "Leaving futharki."
+    else throwIO err
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config =
