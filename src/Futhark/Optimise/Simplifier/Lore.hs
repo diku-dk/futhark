@@ -208,7 +208,9 @@ addWisdomToPattern pat e =
   where (ctxals, valals) = Aliases.mkPatternAliases pat e
         addRanges patElem range =
           let (als, innerlore) = patElemAttr patElem
-          in patElem `setPatElemLore` (VarWisdom als range, innerlore)
+              range' = case patElemBindage patElem of BindVar -> range
+                                                      _       -> unknownRange
+          in patElem `setPatElemLore` (VarWisdom als range', innerlore)
         ranges = expRanges e
 
 mkWiseBody :: (Attributes lore, CanBeWise (Op lore)) =>
