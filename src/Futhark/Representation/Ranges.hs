@@ -151,7 +151,9 @@ mkPatternRanges pat e =
    zipWith addRanges (patternValueElements pat) ranges)
   where addRanges patElem range =
           let innerlore = patElemAttr patElem
-          in patElem `setPatElemLore` (range, innerlore)
+              range' = case patElemBindage patElem of BindVar -> range
+                                                      _       -> unknownRange
+          in patElem `setPatElemLore` (range', innerlore)
         ranges = expRanges e
 
 mkBodyRanges :: [Stm lore] -> Result -> [Range]
