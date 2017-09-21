@@ -102,7 +102,7 @@ instance Monoid (Functions a) where
 
 data Signedness = TypeUnsigned
                 | TypeDirect
-                deriving (Show)
+                deriving (Eq, Show)
 
 -- | A description of an externally meaningful value.
 data ValueDesc = ArrayValue VName MemSize Space PrimType Signedness [DimSize]
@@ -111,7 +111,7 @@ data ValueDesc = ArrayValue VName MemSize Space PrimType Signedness [DimSize]
                -- type (if applicable), and shape.
                | ScalarValue PrimType Signedness VName
                -- ^ A scalar value with signedness if applicable.
-               deriving (Show)
+               deriving (Eq, Show)
 
 -- | ^ An externally visible value.  This can be an opaque value
 -- (covering several physical internal values), or a single value that

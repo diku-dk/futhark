@@ -1,9 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
-  ( openClDecls
-  , openClInit
-  , openClReport
+  ( generateBoilerplate
 
   , kernelRuntime
   , kernelRuns
@@ -13,70 +11,196 @@ import Data.FileEmbed
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
+import Futhark.CodeGen.ImpCode.OpenCL
+import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.Util (chunk)
 
-openClDecls :: Int -> [String] -> String -> String
-            -> [C.Definition]
-openClDecls block_dim kernel_names opencl_program opencl_prelude =
-  openCL_prelude ++ openCL_boilerplate ++ kernel_declarations
+generateBoilerplate :: String -> String -> [String] -> GC.CompilerM OpenCL () ()
+generateBoilerplate opencl_code opencl_prelude kernel_names = do
+  ctx_ty <- GC.contextType
+  final_inits <- GC.contextFinalInits
+
+  let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
+        openClDecls ctx_ty final_inits kernel_names opencl_code opencl_prelude
+
+  GC.earlyDecls top_decls
+
+  cfg <- GC.publicName "context_config"
+  new_cfg <- GC.publicName "context_config_new"
+  free_cfg <- GC.publicName "context_config_free"
+  cfg_set_debugging <- GC.publicName "context_config_set_debugging"
+  cfg_set_device <- GC.publicName "context_config_set_device"
+  cfg_set_platform <- GC.publicName "context_config_set_platform"
+  cfg_dump_program_to <- GC.publicName "context_config_dump_program_to"
+  cfg_load_program_from <- GC.publicName "context_config_load_program_from"
+  cfg_set_group_size <- GC.publicName "context_config_set_group_size"
+  cfg_set_num_groups <- GC.publicName "context_config_set_num_groups"
+
+  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg;|]
+  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg();|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_device(struct $id:cfg* cfg, const char *s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_platform(struct $id:cfg* cfg, const char *s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_dump_program_to(struct $id:cfg* cfg, const char *path);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_load_program_from(struct $id:cfg* cfg, const char *path);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_group_size(struct $id:cfg* cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_num_groups(struct $id:cfg* cfg, int num);|]
+
+  GC.libDecl [C.cedecl|struct $id:cfg {
+                         struct opencl_config opencl;
+                       };|]
+  GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg() {
+                         struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
+                         if (cfg == NULL) {
+                           return NULL;
+                         }
+                         opencl_config_init(&cfg->opencl);
+                         cfg->opencl.transpose_block_dim = $int:(transposeBlockDim::Int);
+                         return cfg;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg) {
+                         free(cfg);
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_debugging(struct $id:cfg* cfg, int flag) {
+                         cfg->opencl.debugging = flag;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_device(struct $id:cfg* cfg, const char *s) {
+                         set_preferred_device(&cfg->opencl, s);
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_platform(struct $id:cfg* cfg, const char *s) {
+                         set_preferred_platform(&cfg->opencl, s);
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_dump_program_to(struct $id:cfg* cfg, const char *path) {
+                         cfg->opencl.dump_program_to = path;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_load_program_from(struct $id:cfg* cfg, const char *path) {
+                         cfg->opencl.load_program_from = path;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_group_size(struct $id:cfg* cfg, int size) {
+                         cfg->opencl.group_size = size;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_num_groups(struct $id:cfg* cfg, int num) {
+                         cfg->opencl.num_groups = num;
+                       }|]
+
+  ctx <- GC.publicName "context"
+  new_ctx <- GC.publicName "context_new"
+  free_ctx <- GC.publicName "context_free"
+  sync_ctx <- GC.publicName "context_sync"
+
+  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx;|]
+  GC.headerDecl GC.InitDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx);|]
+
+  (fields, init_fields) <- GC.contextContents
+
+  GC.libDecl [C.cedecl|struct $id:ctx {
+                         int detail_memory;
+                         int debugging;
+                         $sdecls:fields
+                         $sdecls:ctx_opencl_fields
+                         struct opencl_context opencl;
+                       };|]
+
+  mapM_ GC.libDecl later_top_decls
+
+  GC.libDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg) {
+                          struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
+                          if (ctx == NULL) {
+                            return NULL;
+                          }
+                          ctx->detail_memory = cfg->opencl.debugging;
+                          ctx->debugging = cfg->opencl.debugging;
+                          ctx->opencl.cfg = cfg->opencl;
+                          $stms:init_fields
+                          $stms:ctx_opencl_inits
+
+                          setup_opencl_and_load_kernels(ctx);
+
+                          return ctx;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:free_ctx(struct $id:ctx* ctx) {
+                                 free(ctx);
+                               }|]
+  GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {
+                         OPENCL_SUCCEED(clFinish(ctx->opencl.queue));
+                         return 0;
+                       }|]
+
+  mapM_ GC.debugReport $ openClReport kernel_names
+
+openClDecls :: C.Type -> [C.Stm] -> [String] -> String -> String
+            -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
+openClDecls ctx_ty final_inits kernel_names opencl_program opencl_prelude =
+  (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where opencl_program_fragments =
           -- Some C compilers limit the size of literal strings, so
           -- chunk the entire program into small bits here, and
           -- concatenate it again at runtime.
           [ [C.cinit|$string:s|] | s <- chunk 2000 (opencl_prelude++opencl_program) ]
         nullptr = [C.cinit|NULL|]
-        kernel_declarations =
-          [C.cedecl|static const char *fut_opencl_program[] =
-                    {$inits:(opencl_program_fragments++[nullptr])};|] :
-          concat
-          [ [ [C.cedecl|static typename cl_kernel $id:name;|]
-            , [C.cedecl|static int $id:(kernelRuntime name) = 0;|]
-            , [C.cedecl|static int $id:(kernelRuns name) = 0;|]
-            ]
-          | name <- kernel_names ] ++
-          [[C.cedecl|
-void setup_opencl_and_load_kernels() {
-  typename cl_int error;
-  typename cl_program prog = setup_opencl(fut_opencl_program);
 
+        ctx_fields =
+          [ [C.csdecl|int total_runs;|],
+            [C.csdecl|int total_runtime;|] ] ++
+          concat
+          [ [ [C.csdecl|typename cl_kernel $id:name;|]
+            , [C.csdecl|int $id:(kernelRuntime name);|]
+            , [C.csdecl|int $id:(kernelRuns name);|]
+            ]
+          | name <- kernel_names ]
+
+        ctx_inits =
+          [ [C.cstm|ctx->total_runs = 0;|],
+            [C.cstm|ctx->total_runtime = 0;|] ] ++
+          concat
+          [ [ [C.cstm|ctx->$id:(kernelRuntime name) = 0;|]
+            , [C.cstm|ctx->$id:(kernelRuns name) = 0;|]
+            ]
+          | name <- kernel_names ]
+
+        openCL_load = [
+          [C.cedecl|
+void setup_opencl_and_load_kernels($ty:ctx_ty *ctx) {
+  typename cl_int error;
+  typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program);
   // Load all the kernels.
   $stms:(map (loadKernelByName) kernel_names)
-}|]] ++ [[C.cedecl|
-void post_opencl_setup(struct opencl_device_option *option) {
+
+  $stms:final_inits
+}|],
+          [C.cedecl|
+void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *option) {
   $stms:(map lockstepWidthHeuristicsCode lockstepWidthHeuristicsTable)
 }|]]
 
-        openCL_prelude = [ [C.cedecl|$esc:("#define FUT_BLOCK_DIM " ++ show block_dim)|] ]
-
         openCL_h = $(embedStringFile "rts/c/opencl.h")
 
-        openCL_boilerplate = [C.cunit|$esc:openCL_h|]
+        openCL_boilerplate = [C.cunit|
+          $esc:openCL_h
+          const char *opencl_program[] =
+            {$inits:(opencl_program_fragments++[nullptr])};|]
 
 loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
-  $id:name = clCreateKernel(prog, $string:name, &error);
+  ctx->$id:name = clCreateKernel(prog, $string:name, &error);
   assert(error == 0);
-  if (debugging) {
+  if (ctx->debugging) {
     fprintf(stderr, "Created kernel %s.\n", $string:name);
   }
   }|]
 
-openClInit :: [C.Stm]
-openClInit =
-  [[C.cstm|setup_opencl_and_load_kernels();|]]
-
 kernelRuntime :: String -> String
-kernelRuntime = (++"total_runtime")
+kernelRuntime = (++"_total_runtime")
 
 kernelRuns :: String -> String
-kernelRuns = (++"runs")
+kernelRuns = (++"_runs")
 
 openClReport :: [String] -> [C.BlockItem]
-openClReport names =
-  declares ++
-  [[C.citem|if (debugging) { $items:report_kernels }|],
-   report_total]
+openClReport names = report_kernels ++ [report_total]
   where longest_name = foldl max 0 $ map length names
         report_kernels = concatMap reportKernel names
         format_string name =
@@ -90,19 +214,17 @@ openClReport names =
           in [[C.citem|
                fprintf(stderr,
                        $string:(format_string name),
-                       $id:runs,
-                       (long int) $id:total_runtime / ($id:runs != 0 ? $id:runs : 1),
-                       (long int) $id:total_runtime);
+                       ctx->$id:runs,
+                       (long int) ctx->$id:total_runtime / (ctx->$id:runs != 0 ? ctx->$id:runs : 1),
+                       (long int) ctx->$id:total_runtime);
               |],
-              [C.citem|total_runtime += $id:total_runtime;|],
-              [C.citem|total_runs += $id:runs;|]]
+              [C.citem|ctx->total_runtime += ctx->$id:total_runtime;|],
+              [C.citem|ctx->total_runs += ctx->$id:runs;|]]
 
-        declares = [[C.citem|int total_runtime = 0;|],
-                    [C.citem|int total_runs = 0;|]]
         report_total = [C.citem|
-                          if (debugging) {
+                          if (ctx->debugging) {
                             fprintf(stderr, "Ran %d kernels with cumulative runtime: %6ldus\n",
-                                    total_runs, total_runtime);
+                                    ctx->total_runs, ctx->total_runtime);
                           }
                         |]
 
@@ -112,9 +234,9 @@ lockstepWidthHeuristicsCode
   [C.cstm|
    if (strcmp(option->platform_name, $string:platform_name) == 0 &&
       option->device_type == $exp:(clDeviceType device_type)) {
-     cl_lockstep_width = $int:width;
-     if (debugging) {
-       fprintf(stderr, "Setting lockstep width to: %d\n", cl_lockstep_width);
+     ctx->lockstep_width = $int:width;
+     if (ctx->cfg.debugging) {
+       fprintf(stderr, "Setting lockstep width to: %d\n", ctx->lockstep_width);
      }
    }
    |]

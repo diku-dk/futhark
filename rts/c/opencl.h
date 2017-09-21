@@ -8,19 +8,44 @@
 
 #define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)
 
-static cl_context fut_cl_context;
-static cl_command_queue fut_cl_queue;
-static const char *cl_preferred_platform = "";
-static const char *cl_preferred_device = "";
-static int cl_preferred_device_num = 0;
-static int cl_debug = 0;
+struct opencl_config {
+  int debugging;
+  int preferred_device_num;
+  const char *preferred_platform;
+  const char *preferred_device;
 
-static size_t cl_group_size = 256;
-static size_t cl_num_groups = 128;
-static size_t cl_tile_size = 32;
-static size_t cl_lockstep_width = 1;
-static const char* cl_dump_program_to = NULL;
-static const char* cl_load_program_from = NULL;
+  const char* dump_program_to;
+  const char* load_program_from;
+
+  size_t group_size;
+  size_t num_groups;
+  size_t tile_size;
+  size_t transpose_block_dim;
+};
+
+void opencl_config_init(struct opencl_config *cfg) {
+  cfg->debugging = 0;
+  cfg->preferred_device_num = 0;
+  cfg->preferred_platform = "";
+  cfg->preferred_device = "";
+  cfg->dump_program_to = NULL;
+  cfg->load_program_from = NULL;
+
+  cfg->group_size = 256;
+  cfg->num_groups = 128;
+  cfg->tile_size = 32;
+  cfg->transpose_block_dim = 16;
+}
+
+struct opencl_context {
+  cl_context ctx;
+  cl_command_queue queue;
+
+  struct opencl_config cfg;
+
+  size_t lockstep_width;
+};
+
 
 struct opencl_device_option {
   cl_platform_id platform;
@@ -34,7 +59,7 @@ struct opencl_device_option {
    setup_opencl() after the platform and device has been found, but
    before the program is loaded.  Its intended use is to tune
    constants based on the selected platform and device. */
-static void post_opencl_setup(struct opencl_device_option*);
+static void post_opencl_setup(struct opencl_context*, struct opencl_device_option*);
 
 static char *strclone(const char *str) {
   size_t size = strlen(str) + 1;
@@ -101,20 +126,20 @@ static const char* opencl_error_string(unsigned int err)
 }
 
 static void opencl_succeed(unsigned int ret,
-                    const char *call,
-                    const char *file,
-                    int line) {
+                           const char *call,
+                           const char *file,
+                           int line) {
   if (ret != CL_SUCCESS) {
     panic(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
           file, line, call, ret, opencl_error_string(ret));
   }
 }
 
-void set_preferred_platform(const char *s) {
-  cl_preferred_platform = s;
+void set_preferred_platform(struct opencl_config *cfg, const char *s) {
+  cfg->preferred_platform = s;
 }
 
-void set_preferred_device(const char *s) {
+void set_preferred_device(struct opencl_config *cfg, const char *s) {
   int x = 0;
   if (*s == '#') {
     s++;
@@ -126,8 +151,8 @@ void set_preferred_device(const char *s) {
       s++;
     }
   }
-  cl_preferred_device = s;
-  cl_preferred_device_num = x;
+  cfg->preferred_device = s;
+  cfg->preferred_device_num = x;
 }
 
 static char* opencl_platform_info(cl_platform_id platform,
@@ -234,7 +259,7 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
   *num_devices_out = num_devices;
 }
 
-static struct opencl_device_option get_preferred_device() {
+static struct opencl_device_option get_preferred_device(const struct opencl_config *cfg) {
   struct opencl_device_option *devices;
   size_t num_devices;
 
@@ -245,9 +270,9 @@ static struct opencl_device_option get_preferred_device() {
 
   for (size_t i = 0; i < num_devices; i++) {
     struct opencl_device_option device = devices[i];
-    if (strstr(device.platform_name, cl_preferred_platform) != NULL &&
-        strstr(device.device_name, cl_preferred_device) != NULL &&
-        num_device_matches++ == cl_preferred_device_num) {
+    if (strstr(device.platform_name, cfg->preferred_platform) != NULL &&
+        strstr(device.device_name, cfg->preferred_device) != NULL &&
+        num_device_matches++ == cfg->preferred_device_num) {
       // Free all the platform and device names, except the ones we have chosen.
       for (size_t j = 0; j < num_devices; j++) {
         if (j != i) {
@@ -261,6 +286,7 @@ static struct opencl_device_option get_preferred_device() {
   }
 
   panic(1, "Could not find acceptable OpenCL device.\n");
+  exit(1); // Never reached
 }
 
 static void describe_device_option(struct opencl_device_option device) {
@@ -310,7 +336,8 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
 // C does not guarantee that the compiler supports particularly large
 // literals.  Notably, Visual C has a limit of 2048 characters.  The
 // array must be NULL-terminated.
-static cl_program setup_opencl(const char *srcs[]) {
+static cl_program setup_opencl(struct opencl_context *ctx,
+                               const char *srcs[]) {
 
   cl_int error;
   cl_platform_id platform;
@@ -318,9 +345,11 @@ static cl_program setup_opencl(const char *srcs[]) {
   cl_uint platforms, devices;
   size_t max_group_size;
 
-  struct opencl_device_option device_option = get_preferred_device();
+  ctx->lockstep_width = 1;
 
-  if (cl_debug) {
+  struct opencl_device_option device_option = get_preferred_device(&ctx->cfg);
+
+  if (ctx->cfg.debugging) {
     describe_device_option(device_option);
   }
 
@@ -332,16 +361,16 @@ static cl_program setup_opencl(const char *srcs[]) {
 
   size_t max_tile_size = sqrt(max_group_size);
 
-  if (max_group_size < cl_group_size) {
+  if (max_group_size < ctx->cfg.group_size) {
     fprintf(stderr, "Warning: Device limits group size to %zu (setting was %zu)\n",
-            max_group_size, cl_group_size);
-    cl_group_size = max_group_size;
+            max_group_size, ctx->cfg.group_size);
+    ctx->cfg.group_size = max_group_size;
   }
 
-  if (max_tile_size < cl_tile_size) {
+  if (max_tile_size < ctx->cfg.tile_size) {
     fprintf(stderr, "Warning: Device limits tile size to %zu (setting was %zu)\n",
-            max_tile_size, cl_tile_size);
-    cl_tile_size = max_tile_size;
+            max_tile_size, ctx->cfg.tile_size);
+    ctx->cfg.tile_size = max_tile_size;
   }
 
   cl_context_properties properties[] = {
@@ -350,21 +379,21 @@ static cl_program setup_opencl(const char *srcs[]) {
     0
   };
   // Note that nVidia's OpenCL requires the platform property
-  fut_cl_context = clCreateContext(properties, 1, &device, NULL, NULL, &error);
+  ctx->ctx = clCreateContext(properties, 1, &device, NULL, NULL, &error);
   assert(error == 0);
 
-  fut_cl_queue = clCreateCommandQueue(fut_cl_context, device, 0, &error);
+  ctx->queue = clCreateCommandQueue(ctx->ctx, device, 0, &error);
   assert(error == 0);
 
   // Make sure this function is defined.
-  post_opencl_setup(&device_option);
+  post_opencl_setup(ctx, &device_option);
 
   char *fut_opencl_src = NULL;
   size_t src_size = 0;
 
   // Maybe we have to read OpenCL source from somewhere else (used for debugging).
-  if (cl_load_program_from) {
-    FILE *f = fopen(cl_load_program_from, "r");
+  if (ctx->cfg.load_program_from != NULL) {
+    FILE *f = fopen(ctx->cfg.load_program_from, "r");
     assert(f != NULL);
     fseek(f, 0, SEEK_END);
     src_size = ftell(f);
@@ -393,17 +422,22 @@ static cl_program setup_opencl(const char *srcs[]) {
   error = 0;
   const char* src_ptr[] = {fut_opencl_src};
 
-  if (cl_dump_program_to) {
-    FILE *f = fopen(cl_dump_program_to, "w");
+  if (ctx->cfg.dump_program_to != NULL) {
+    FILE *f = fopen(ctx->cfg.dump_program_to, "w");
     assert(f != NULL);
     fputs(fut_opencl_src, f);
     fclose(f);
   }
 
-  prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
+  prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
   assert(error == 0);
   char compile_opts[1024];
-  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d -DDEFAULT_GROUP_SIZE=%d -DDEFAULT_NUM_GROUPS=%d  -DDEFAULT_TILE_SIZE=%d", FUT_BLOCK_DIM, cl_lockstep_width, cl_group_size, cl_num_groups, cl_tile_size);
+  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d -DDEFAULT_GROUP_SIZE=%d -DDEFAULT_NUM_GROUPS=%d  -DDEFAULT_TILE_SIZE=%d",
+           (int)ctx->cfg.transpose_block_dim,
+           (int)ctx->lockstep_width,
+           (int)ctx->cfg.group_size,
+           (int)ctx->cfg.num_groups,
+           (int)ctx->cfg.tile_size);
   OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
   free(fut_opencl_src);
 

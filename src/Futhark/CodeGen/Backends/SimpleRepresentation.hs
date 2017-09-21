@@ -10,6 +10,7 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , intTypeToCType
   , floatTypeToCType
   , primTypeToCType
+  , signedPrimTypeToCType
 
     -- * Primitive value operations
   , cIntOps
@@ -52,6 +53,11 @@ primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|char|]
 primTypeToCType Cert = [C.cty|char|]
 
+signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
+signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
+signedPrimTypeToCType TypeDirect (IntType t) = intTypeToCType t
+signedPrimTypeToCType _ t = primTypeToCType t
+
 -- | True if both types map to the same runtime representation.  This
 -- is the case if they are identical modulo uniqueness.
 sameRepresentation :: [Type] -> [Type] -> Bool
@@ -68,7 +74,7 @@ sameRepresentation' _ _ = False
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
-tupleField i = "elem_" ++ show i
+tupleField i = "v" ++ show i
 
 -- | @tupleFieldExp e i@ is the expression for accesing field @i@ of
 -- tuple @e@.  If @e@ is an lvalue, so will the resulting expression
@@ -79,7 +85,7 @@ tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 -- | @funName f@ is the name of the C function corresponding to
 -- the Futhark function @f@.
 funName :: Name -> String
-funName = ("futhark_"++) . zEncodeString . nameToString
+funName = ("futrts_"++) . zEncodeString . nameToString
 
 funName' :: String -> String
 funName' = funName . nameFromString
