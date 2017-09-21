@@ -246,10 +246,6 @@ commandLineOptions =
         opts { futharkPipeline = PrettyPrint })
     "Parse and pretty-print the AST of the given program."
 
-  , Option [] ["compile-sequential"]
-    (NoArg $ Right $ \opts ->
-       opts { futharkAction = ExplicitMemoryAction seqCodeGenAction })
-    "Translate program into sequential C and write it on standard output."
   , Option [] ["compile-imperative"]
     (NoArg $ Right $ \opts ->
        opts { futharkAction = ExplicitMemoryAction impCodeGenAction })
