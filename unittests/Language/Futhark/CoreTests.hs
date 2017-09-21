@@ -3,10 +3,6 @@
 module Language.Futhark.CoreTests ()
 where
 
-import Control.Applicative
-
-import Prelude
-
 import Test.QuickCheck
 
 import Language.Futhark.Core
