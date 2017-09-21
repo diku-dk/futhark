@@ -7,8 +7,7 @@ module Language.Futhark.Parser
   , parseValue
   , parseValues
 
-  , parseExpIncr
-  , parseExpIncrIO
+  , parseExpIncrM
 
   , ParseError (..)
 
