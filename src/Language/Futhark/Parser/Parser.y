@@ -8,18 +8,11 @@ module Language.Futhark.Parser.Parser
   , futharkType
   , anyValue
   , anyValues
-  , ParserEnv (..)
-  , ParserMonad
-  , ReadLineMonad(..)
-  , getLinesFromIO
-  , getLinesFromTexts
-  , getNoLines
-  , newParserEnv
 
+  , ParserMonad
   , parse
   , ParseError(..)
-  , parseExpIncr
-  , parseExpIncrIO
+  , parseExpIncrM
   )
   where
 
@@ -33,7 +26,6 @@ import Control.Applicative ((<$>), (<*>))
 import Control.Arrow
 import Data.Array
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import Data.Char (ord)
 import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
@@ -909,11 +901,11 @@ instance Functor ReadLineMonad where
 instance Applicative ReadLineMonad where
   (<*>) = ap
 
-getLinesFromIO :: ReadLineMonad a -> IO a
-getLinesFromIO (Value x) = return x
-getLinesFromIO (GetLine f) = do
-  s <- T.getLine
-  getLinesFromIO $ f s
+getLinesFromM :: Monad m => m T.Text -> ReadLineMonad a -> m a
+getLinesFromM _ (Value x) = return x
+getLinesFromM fetch (GetLine f) = do
+  s <- fetch
+  getLinesFromM fetch $ f s
 
 getLinesFromTexts :: [T.Text] -> ReadLineMonad a -> Either String a
 getLinesFromTexts _ (Value x) = Right x
@@ -1045,10 +1037,12 @@ parseInMonad p file program =
   (scanTokensText file program)
   where env = newParserEnv file Int32 Float64
 
-parseIncrementalIO :: ParserMonad a -> FilePath -> T.Text
-                   -> IO (Either ParseError a)
-parseIncrementalIO p file program =
-  getLinesFromIO $ parseInMonad p file program
+parseIncrementalM :: Monad m =>
+                     ParserMonad a
+                   -> m T.Text -> FilePath -> T.Text
+                   -> m (Either ParseError a)
+parseIncrementalM p fetch file program =
+  getLinesFromM fetch $ parseInMonad p file program
 
 parseIncremental :: ParserMonad a -> FilePath -> T.Text
                  -> Either ParseError a
@@ -1063,17 +1057,11 @@ parse p file program =
   either (Left . ParseError) id
   $ getNoLines $ parseInMonad p file program
 
--- | Parse an Futhark expression greedily from the given 'String', only parsing
--- enough lines to get a correct expression, using the 'FilePath' as the source
--- name for error messages.
-parseExpIncr :: FilePath -> T.Text
-             -> Either ParseError UncheckedExp
-parseExpIncr = parseIncremental expression
-
--- | Parse an Futhark expression incrementally from IO 'getLine' calls, using the
+-- | Parse an Futhark expression incrementally from monadic actions, using the
 -- 'FilePath' as the source name for error messages.
-parseExpIncrIO :: FilePath -> T.Text
-               -> IO (Either ParseError UncheckedExp)
-parseExpIncrIO = parseIncrementalIO expression
+parseExpIncrM :: Monad m =>
+                  m T.Text -> FilePath -> T.Text
+               -> m (Either ParseError UncheckedExp)
+parseExpIncrM = parseIncrementalM expression
 
 }
