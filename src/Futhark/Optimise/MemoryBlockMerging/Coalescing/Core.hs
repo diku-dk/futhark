@@ -238,7 +238,12 @@ coreCoalesceFunDef fundef var_to_mem mem_aliases var_aliases first_uses
         putStrLn $ pretty fundef'
         putStrLn $ replicate 70 '='
 
-  in withDebug debug fundef'
+      debug_json =
+        forM_ (M.assocs var_to_mem_res) $ \(src, dstmem) ->
+          putStrLn ("[\"coalescing\", \"" ++ pretty src ++
+                    "\", \"" ++ pretty (memLocName dstmem) ++ "\"]")
+
+  in withDebugJSON debug_json $ withDebug debug fundef'
 
 lookInBody :: LoreConstraints lore =>
               Body lore -> FindM lore ()

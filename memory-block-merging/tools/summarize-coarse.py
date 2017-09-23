@@ -97,10 +97,12 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
                     k.replace('-', ' ').replace('_', ', '), v))
 
             for name, _unit, val_func in attributes:
-                imp = dataset_improvement(dataset_info, val_func)
-                if abs(imp) > improvement_difference_threshold_ignore:
-                    print('<p>Improvement in {}: {}</p>'.format(
-                        name, percentage_format(imp)))
+                (kind, f) = val_func
+                if kind == 'datasets':
+                    imp = base_improvement(dataset_info, f)
+                    if abs(imp) > improvement_difference_threshold_ignore:
+                        print('<p>Improvement in {}: {}</p>'.format(
+                            name, percentage_format(imp)))
 
     print('''\
   </body>

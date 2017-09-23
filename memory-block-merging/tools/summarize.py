@@ -55,7 +55,7 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
         url = 'sorted_after_' + name.replace(' ', '_')
         title = 'Sorted after ' + name + ' improvement'
         print('<li><a href="#{}">{}</a></li>'.format(url, title))
-    print('<li><a href="#sorted_after_num_coalescings">Sorted after number of coalescings</a></li>')
+
     print('<li><a href="#per_benchmark_overview">Per-benchmark overview</a></li>')
     print('<ul>')
     benchmarks.sort()
@@ -79,17 +79,6 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
               + '\n{}\n'.format('<br>'.join('<a href="#{}">{}</a> ({})'.format(name, name, percentage_format(improvement_percent))
                                           for name, improvement_percent in temp)))
 
-    print('<a name="sorted_after_num_coalescings"></a>')
-    print('<h1>Sorted after number of coalescings</h1>')
-    temp = []
-    for benchmark_name, benchmark_info in benchmarks:
-        # FIXME: [0] only works for now.
-        num_coalescings = len(benchmark_info['compilation']['with-memory-block-merging_with-register-allocation'][0]['memory block merging'])
-        temp.append((benchmark_name, num_coalescings))
-    temp.sort(key=lambda t: t[1], reverse=True)
-    print('<br>'.join('<a href="#{}">{}</a> ({})'.format(
-        name, name, n) for name, n in temp))
-
     print('<a name="per_benchmark_overview"></a>')
     print('<h1>Per-benchmark overview (sorted alphabetically)</h1>')
     print('<p>Before: Both memory block merging and register allocation <b>disabled</b>.</p>')
@@ -105,9 +94,6 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
             if abs(imp) > improvement_difference_threshold_ignore:
                 print('<p>Average improvement in {} after enabling memory block merging and register allocation: {} (<a href="plots/{}-{}.pdf">see plot</a>)</p>'.format(
                     name, percentage_format(imp), benchmark_name, name.replace(' ', '_')))
-
-        num_coalescings = len(benchmark_info['compilation']['with-memory-block-merging_with-register-allocation'][0]['memory block merging'])
-        print('<p>Number of coalescings: {}</p>'.format(num_coalescings))
 
         datasets = list(benchmark_info['datasets'].items())
         datasets.sort()

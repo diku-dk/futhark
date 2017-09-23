@@ -50,11 +50,42 @@ stack install
 # Assumes your futhark-benchmarks directory is next to your futhark directory.
 cd "../futhark-benchmarks/"
 
+get_compilation_info() {
+    if [ "$compiler" = 'futhark-c' ]; then
+        target_flag='--cpu'
+    else
+        target_flag='--gpu'
+    fi
+
+    temp_storage="$(mktemp)"
+    {
+        export FUTHARK_DEBUG_JSON=1
+        echo '{'
+        find -name '*.fut' | while read file; do
+            echo "Getting compilation information for $file." > /dev/stderr
+            futhark $target_flag $file 2> /dev/null > "$temp_storage" && \
+                {
+                    echo ','
+                    echo '"'"$file"'":'
+                    echo '['
+                    cat "$temp_storage" | while read line; do
+                        echo ','
+                        echo "$line"
+                    done | tail -n +2 # Requires GNU tail.
+                    echo ']'
+                } || true
+        done | tail -n +2
+        echo '}'
+    }
+}
+
 mkdir "$base"
 base="$base/runs"
 mkdir "$base"
 
-# Get runtime measurements.
+# Get compilation information and runtime measurements.
+get_compilation_info > \
+                     "$base/compilation_without-coalescing_without-reuse.json"
 futhark-bench $flags --json \
               "$base/measurements_without-coalescing_without-reuse.json" . \
     || true
@@ -62,6 +93,8 @@ futhark-bench $flags --json \
 export IN_PLACE_LOWERING=0
 export MEMORY_BLOCK_MERGING_COALESCING=1
 export MEMORY_BLOCK_MERGING_REUSE=1
+get_compilation_info > \
+                     "$base/compilation_with-coalescing_with-reuse.json"
 futhark-bench $flags --json \
               "$base/measurements_with-coalescing_with-reuse.json" . \
     || true
