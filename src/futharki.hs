@@ -17,9 +17,9 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
 import System.IO
-import System.IO.Error
 import System.Exit
 import System.Console.GetOpt
+import qualified System.Console.Haskeline as Haskeline
 
 import Prelude
 
@@ -60,10 +60,9 @@ repl = do
   putStrLn ""
   putStrLn "Run :help for a list of commands."
   putStrLn ""
-  catch (evalStateT (forever readEvalPrint) =<< newInterpreterState) $ \err ->
-    if isEOFError err then
-      putStrLn "Leaving futharki."
-    else throwIO err
+  s <- newInterpreterState
+  Haskeline.runInputT Haskeline.defaultSettings
+    (evalStateT (forever readEvalPrint) s)
 
 interpret :: InterpreterConfig -> FilePath -> IO ()
 interpret config =
@@ -99,17 +98,15 @@ newInterpreterState = do
                               , interpNameSource = src
                               }
     Left err -> do
-      putStrLn "Error doing initialisation:"
+      putStrLn "Error when initialising interpreter state:"
       print err
       exitFailure
 
-type FutharkiM = StateT InterpreterState IO
+type FutharkiM = StateT InterpreterState (Haskeline.InputT IO)
 
 readEvalPrint :: FutharkiM ()
 readEvalPrint = do
-  liftIO $ putStr "> "
-  liftIO $ hFlush stdout
-  line <- liftIO T.getLine
+  line <- inputLine "> "
   case T.uncons line of
     Just (':', command) -> do
       let (cmdname, rest) = T.break isSpace command
@@ -122,7 +119,7 @@ readEvalPrint = do
       imports <- gets interpImports
       src <- gets interpNameSource
       -- Read an expression.
-      maybe_e <- liftIO $ parseExpIncrIO "input" line
+      maybe_e <- parseExpIncrM (inputLine "  ") "input" line
       case maybe_e of
         Left err -> liftIO $ print err
         Right e -> do
@@ -143,6 +140,12 @@ readEvalPrint = do
                                 }
               prog' = Prog $ opens ++ [FunDec mainfun]
           runProgram prog imports src prog'
+  where inputLine prompt = do
+          inp <- lift $ Haskeline.getInputLine prompt
+          case inp of
+            Just s -> return $ T.pack s
+            Nothing -> liftIO $ do putStrLn "Leaving futharki."
+                                   exitSuccess
 
 runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
 runProgram proglib imports src prog = liftIO $
@@ -183,7 +186,7 @@ Quit futharki.
         loadCommand file = do
           liftIO $ T.putStrLn $ "Reading " <> file
           res <- liftIO $ runExceptT (readProgram False preludeBasis [T.unpack file])
-                 `catch` \(err::IOException) ->
+                 `Haskeline.catch` \(err::IOException) ->
                  return (Left (ExternalError (T.pack $ show err)))
           case res of
             Left err -> liftIO $ dumpError newFutharkConfig err

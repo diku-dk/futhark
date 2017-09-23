@@ -347,7 +347,7 @@ static int read_str_u64(void* dest) {
   // FIXME: This is not correct, as SCNu64 only permits decimal
   // literals.  However, SCNi64 does not handle very large numbers
   // correctly (it's really for signed numbers, so that's fair).
-  if (sscanf(buf, "%"SCNu64, (int64_t*)dest) == 1) {
+  if (sscanf(buf, "%"SCNu64, (uint64_t*)dest) == 1) {
     scanf("u64");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -556,47 +556,47 @@ struct primtype_info_t {
   const reader read_bin; // Read in binary format.
 };
 
-const static struct primtype_info_t i8 =
+static const struct primtype_info_t i8 =
   {.binname = "  i8", .type_name = "i8",   .size = 1,
    .write_str = (writer)write_str_i8, .read_str = (reader)read_str_i8,
    .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
-const static struct primtype_info_t i16 =
+static const struct primtype_info_t i16 =
   {.binname = " i16", .type_name = "i16",  .size = 2,
    .write_str = (writer)write_str_i16, .read_str = (reader)read_str_i16,
    .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
-const static struct primtype_info_t i32 =
+static const struct primtype_info_t i32 =
   {.binname = " i32", .type_name = "i32",  .size = 4,
    .write_str = (writer)write_str_i32, .read_str = (reader)read_str_i32,
    .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-const static struct primtype_info_t i64 =
+static const struct primtype_info_t i64 =
   {.binname = " i64", .type_name = "i64",  .size = 8,
    .write_str = (writer)write_str_i64, .read_str = (reader)read_str_i64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-const static struct primtype_info_t u8 =
+static const struct primtype_info_t u8 =
   {.binname = "  u8", .type_name = "u8",   .size = 1,
    .write_str = (writer)write_str_u8, .read_str = (reader)read_str_u8,
    .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
-const static struct primtype_info_t u16 =
+static const struct primtype_info_t u16 =
   {.binname = " u16", .type_name = "u16",  .size = 2,
    .write_str = (writer)write_str_u16, .read_str = (reader)read_str_u16,
    .write_bin = (writer)write_le_2byte, .read_bin = (reader)read_le_2byte};
-const static struct primtype_info_t u32 =
+static const struct primtype_info_t u32 =
   {.binname = " u32", .type_name = "u32",  .size = 4,
    .write_str = (writer)write_str_u32, .read_str = (reader)read_str_u32,
    .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-const static struct primtype_info_t u64 =
+static const struct primtype_info_t u64 =
   {.binname = " u64", .type_name = "u64",  .size = 8,
    .write_str = (writer)write_str_u64, .read_str = (reader)read_str_u64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-const static struct primtype_info_t f32 =
+static const struct primtype_info_t f32 =
   {.binname = " f32", .type_name = "f32",  .size = 4,
    .write_str = (writer)write_str_f32, .read_str = (reader)read_str_f32,
    .write_bin = (writer)write_le_4byte, .read_bin = (reader)read_le_4byte};
-const static struct primtype_info_t f64 =
+static const struct primtype_info_t f64 =
   {.binname = " f64", .type_name = "f64",  .size = 8,
    .write_str = (writer)write_str_f64, .read_str = (reader)read_str_f64,
    .write_bin = (writer)write_le_8byte, .read_bin = (reader)read_le_8byte};
-const static struct primtype_info_t bool =
+static const struct primtype_info_t bool =
   {.binname = "bool", .type_name = "bool", .size = 1,
    .write_str = (writer)write_str_bool, .read_str = (reader)read_str_bool,
    .write_bin = (writer)write_byte, .read_bin = (reader)read_byte};
@@ -718,7 +718,7 @@ static int read_bin_array(const struct primtype_info_t *expected_type, void **da
     char* elems = (char*) *data;
     for (uint64_t i=0; i<elem_count; i++) {
       char* elem = elems+(i*elem_size);
-      for (int j=0; j<elem_size/2; j++) {
+      for (unsigned int j=0; j<elem_size/2; j++) {
         char head = elem[j];
         int tail_index = elem_size-1-j;
         elem[j] = elem[tail_index];
@@ -793,9 +793,9 @@ static int write_bin_array(FILE *out, const struct primtype_info_t *elem_type, u
   fwrite(shape, sizeof(int64_t), rank, out);
 
   if (IS_BIG_ENDIAN) {
-    for (size_t i = 0; i < num_elems; i++) {
+    for (int64_t i = 0; i < num_elems; i++) {
       unsigned char *elem = data+i*elem_type->size;
-      for (size_t j = 0; j < elem_type->size; j++) {
+      for (int64_t j = 0; j < elem_type->size; j++) {
         fwrite(&elem[elem_type->size-j], 1, 1, out);
       }
     }

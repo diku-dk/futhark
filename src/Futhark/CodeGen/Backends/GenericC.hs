@@ -434,7 +434,7 @@ defineMemorySpace space = do
   if ($id:usagename > $id:peakname) {
     $id:peakname = $id:usagename;
     if (detail_memory) {
-      fprintf(stderr, " (new peak).\n", $id:peakname);
+      fprintf(stderr, " (new peak).\n");
     }
   } else if (detail_memory) {
     fprintf(stderr, ".\n");
