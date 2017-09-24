@@ -34,7 +34,7 @@ OPTIONS
 
 --library
   Generate a library instead of an executable.  Appends ``.c``/``.h``
-  to thethe name indicated by the ``-o`` option to determine output
+  to the name indicated by the ``-o`` option to determine output
   file names.
 
 -v verbose
