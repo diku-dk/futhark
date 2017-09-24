@@ -35,16 +35,24 @@ cCodeAction filepath config =
          , actionProcedure = procedure
          }
   where procedure prog = do
-          cprog <- either (`internalError` prettyText prog) return =<< SequentialC.compileProg prog
+          cprog <- either (`internalError` prettyText prog) return =<<
+                   SequentialC.compileProg prog
           let binpath = outputFilePath filepath config
-              cpath = binpath `replaceExtension` "c"
-          liftIO $ writeFile cpath cprog
-          (gccCode, _, gccerr) <-
-            liftIO $ readProcessWithExitCode "gcc"
-            [cpath, "-o", binpath, "-lm", "-O3", "-std=c99"] ""
-          case gccCode of
-            ExitFailure code -> externalErrorS $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
-            ExitSuccess      -> return ()
+              cpath = binpath `addExtension` "c"
+              hpath = binpath `addExtension` "h"
+          if compilerModule config
+            then do let (header, impl) = SequentialC.asLibrary cprog
+                    liftIO $ writeFile hpath header
+                    liftIO $ writeFile cpath impl
+            else do
+              liftIO $ writeFile cpath $ SequentialC.asExecutable cprog
+              (gccCode, _, gccerr) <-
+                liftIO $ readProcessWithExitCode "gcc"
+                [cpath, "-O3", "-std=c99", "-lm", "-o", binpath] ""
+              case gccCode of
+                ExitFailure code -> externalErrorS $ "gcc failed with code " ++
+                                    show code ++ ":\n" ++ gccerr
+                ExitSuccess      -> return ()
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))
 
@@ -57,16 +65,21 @@ commandLineOptions =
   , Option "v" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
+  , Option [] ["library"]
+    (NoArg $ Right $ \config -> config { compilerModule = True })
+    "Generate a library instead of an executable."
   ]
 
 data CompilerConfig =
   CompilerConfig { compilerOutput :: Maybe FilePath
                  , compilerVerbose :: Maybe (Maybe FilePath)
+                 , compilerModule :: Bool
                  }
 
 newCompilerConfig :: CompilerConfig
 newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerVerbose = Nothing
+                                   , compilerModule = False
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath

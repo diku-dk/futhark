@@ -4,7 +4,6 @@ module Futhark.Actions
   , interpretAction
   , impCodeGenAction
   , kernelImpCodeGenAction
-  , seqCodeGenAction
   , rangeAction
   )
 where
@@ -31,7 +30,6 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Interpreter
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
-import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
 import Futhark.Util.Pretty (text, ppr, prettyDoc, prettyText, brackets, (<>))
 
@@ -58,16 +56,6 @@ rangeAction =
            , actionDescription = "Print the program with range annotations added."
            , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis
            }
-
-seqCodeGenAction :: Action ExplicitMemory
-seqCodeGenAction =
-  Action { actionName = "Compile sequentially"
-         , actionDescription = "Translate program into sequential C and write it on standard output."
-         , actionProcedure = \prog ->
-                               either (`internalError` prettyText prog) (liftIO . putStrLn) =<<
-                               SequentialC.compileProg prog
-         }
-
 
 impCodeGenAction :: Action ExplicitMemory
 impCodeGenAction =
