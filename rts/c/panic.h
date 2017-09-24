@@ -4,7 +4,7 @@
 
 static const char *fut_progname;
 
-void panic(int eval, const char *fmt, ...)
+static void panic(int eval, const char *fmt, ...)
 {
 	va_list ap;
 

@@ -36,22 +36,32 @@ openclCodeAction filepath config =
          , actionProcedure = procedure
          }
   where procedure prog = do
-          cprog <- either (`internalError` prettyText prog) return =<< COpenCL.compileProg prog
+          cprog <- either (`internalError` prettyText prog) return =<<
+                   COpenCL.compileProg prog
           let binpath = outputFilePath filepath config
-              cpath = binpath `replaceExtension` "c"
-          liftIO $ writeFile cpath cprog
-          let args
+              cpath = binpath `addExtension` "c"
+              hpath = binpath `addExtension` "h"
+              extra_options
                 | System.Info.os == "darwin" =
-                    [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-framework", "OpenCL"]
+                    ["-framework", "OpenCL"]
                 | System.Info.os == "mingw32" =
-                    [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL64"]
+                    ["-lOpenCL64"]
                 | otherwise =
-                    [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL"]
-          (gccCode, _, gccerr) <-
-            liftIO $ readProcessWithExitCode "gcc" args ""
-          case gccCode of
-            ExitFailure code -> externalErrorS $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
-            ExitSuccess      -> return ()
+                    ["-lOpenCL"]
+
+          if compilerModule config
+            then do let (header, impl) = COpenCL.asLibrary cprog
+                    liftIO $ writeFile hpath header
+                    liftIO $ writeFile cpath impl
+            else do
+              liftIO $ writeFile cpath $ COpenCL.asExecutable cprog
+              (gccCode, _, gccerr) <-
+                liftIO $ readProcessWithExitCode "gcc"
+                ([cpath, "-O3", "-std=c99", "-lm", "-o", binpath] ++ extra_options) ""
+              case gccCode of
+                ExitFailure code -> externalErrorS $ "gcc failed with code " ++
+                                    show code ++ ":\n" ++ gccerr
+                ExitSuccess      -> return ()
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))
 
@@ -64,16 +74,21 @@ commandLineOptions =
   , Option "v" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
+  , Option [] ["library"]
+    (NoArg $ Right $ \config -> config { compilerModule = True })
+    "Generate a library instead of an executable."
   ]
 
 data CompilerConfig =
   CompilerConfig { compilerOutput :: Maybe FilePath
                  , compilerVerbose :: Maybe (Maybe FilePath)
+                 , compilerModule :: Bool
                  }
 
 newCompilerConfig :: CompilerConfig
 newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerVerbose = Nothing
+                                   , compilerModule = False
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath

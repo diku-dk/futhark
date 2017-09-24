@@ -67,6 +67,7 @@ module Futhark.Representation.Primitive
 
        -- * Prettyprinting
        , convOpFun
+       , prettySigned
        )
        where
 
@@ -942,3 +943,8 @@ taggedF s Float64 = text $ s ++ "64"
 
 convOp :: (Pretty from, Pretty to) => String -> from -> to -> Doc
 convOp s from to = text s <> text "_" <> ppr from <> text "_" <> ppr to
+
+-- | True if signed.  Only makes a difference for integer types.
+prettySigned :: Bool -> PrimType -> String
+prettySigned True (IntType it) = 'u' : drop 1 (pretty it)
+prettySigned _ t = pretty t
