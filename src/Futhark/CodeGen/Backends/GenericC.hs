@@ -407,7 +407,7 @@ decl :: C.InitGroup -> CompilerM op s ()
 decl x = item [C.citem|$decl:x;|]
 
 addrOf :: C.Exp -> C.Exp
-addrOf e = [C.cexp|$exp:e|]
+addrOf e = [C.cexp|&$exp:e|]
 
 -- | Public names must have a consitent prefix.
 publicName :: String -> CompilerM op s String
@@ -971,7 +971,7 @@ onEntryPoint fname function@(Function _ outputs inputs _ results args) = do
 
 printPrimStm :: (C.ToExp a, C.ToExp b) => a -> b -> PrimType -> Signedness -> C.Stm
 printPrimStm dest val bt ept =
-  [C.cstm|write_scalar($exp:dest, binary_output, &$exp:(primTypeInfo bt ept), $exp:val);|]
+  [C.cstm|write_scalar($exp:dest, binary_output, &$exp:(primTypeInfo bt ept), &$exp:val);|]
 
 -- | Return a statement printing the given external value.
 printStm :: ExternalValue -> C.Exp -> CompilerM op s C.Stm
@@ -1059,7 +1059,7 @@ prepareOutputs = mapM prepareResult
           case ev of
             TransparentValue ScalarValue{} -> do
               item [C.citem|$ty:ty $id:result;|]
-              return ([C.cexp|&$id:result|], [C.cstm|;|])
+              return ([C.cexp|$id:result|], [C.cstm|;|])
             TransparentValue (ArrayValue _ _ _ t ept dims) -> do
               let name = arrayName t ept $ length dims
                   free_array = "futhark_free_" ++ name
