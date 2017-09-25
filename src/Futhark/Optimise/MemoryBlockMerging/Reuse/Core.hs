@@ -714,27 +714,6 @@ ixFunHasIndex ixfun = case ixfun of
   IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
   IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
 
--- If a dimension has size 1, remove it.  Only look at this specific pattern,
--- since it occurs in kernels.
-ixFunRemoveEmptyDimensions :: Eq v => IxFun.IxFun (PrimExp v) -> IxFun.IxFun (PrimExp v)
-ixFunRemoveEmptyDimensions (IxFun.Index
-                            (IxFun.Permute
-                             (IxFun.Direct shape)
-                             permutation) slice) =
-  let shape_ix_removed = map snd $ filter (\(dim, _i) -> dim == one)
-        $ zip shape [0..]
-      shape' = filter (/= one) shape
-      (permutation', slice_ix_keep) = unzip
-        $ filter (\(perm, _i) -> perm `notElem` shape_ix_removed)
-        $ zip permutation [(0::Int)..]
-      permutation'' = map (\perm -> perm - length (filter (< perm)
-                                                   shape_ix_removed)) permutation'
-      slice' = map fst
-        $ filter (\(_s, i) -> i `elem` slice_ix_keep) $ zip slice [0..]
-  in IxFun.Index (IxFun.Permute (IxFun.Direct shape') permutation'') slice'
-  where one = ExpMem.ValueExp (IntValue (Int32Value 1))
-ixFunRemoveEmptyDimensions ixfun = ixfun
-
 -- Do the two index functions describe the same range?  In other words, does one
 -- array take up precisely the same location (offset) and size as another array
 -- relative to the beginning of their respective memory blocks?  FIXME: This can
@@ -745,11 +724,7 @@ ixFunsCompatible :: (Eq v, Show v) =>
                     (MName, IxFun.IxFun (PrimExp v)) -> (MName, IxFun.IxFun (PrimExp v)) ->
                     Bool
 ixFunsCompatible (mem0, ixfun0) (mem1, ixfun1) =
-  let ixfun0' = ixFunRemoveEmptyDimensions ixfun0
-      ixfun1' = ixFunRemoveEmptyDimensions ixfun1
-      res_raw = ixFunsCompatibleRaw ixfun0 ixfun1
-      res_simplified = ixFunsCompatibleRaw ixfun0' ixfun1'
-      res = res_raw || res_simplified
+  let res = ixFunsCompatibleRaw ixfun0 ixfun1
 
       debug = do
         putStrLn $ replicate 70 '~'
@@ -757,10 +732,7 @@ ixFunsCompatible (mem0, ixfun0) (mem1, ixfun1) =
         putStrLn ("ixfun0 " ++ pretty mem0 ++ ": " ++ show ixfun0)
         putStrLn ("ixfun1 " ++ pretty mem1 ++ ": " ++ show ixfun1)
         putStrLn "---"
-        putStrLn ("ixfun0': " ++ show ixfun0')
-        putStrLn ("ixfun1': " ++ show ixfun1')
-        putStrLn "---"
-        putStrLn ("res: " ++ L.intercalate ", " (map show [res_raw, res_simplified, res]))
+        putStrLn ("res: " ++ show res)
         putStrLn $ replicate 70 '~'
   in withDebug debug res
 
