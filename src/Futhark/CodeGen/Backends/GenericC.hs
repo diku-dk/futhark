@@ -406,6 +406,9 @@ stms = mapM_ stm
 decl :: C.InitGroup -> CompilerM op s ()
 decl x = item [C.citem|$decl:x;|]
 
+addrOf :: C.Exp -> C.Exp
+addrOf e = [C.cexp|$exp:e|]
+
 -- | Public names must have a consitent prefix.
 publicName :: String -> CompilerM op s String
 publicName s = return $ "futhark_" ++ s
@@ -653,7 +656,6 @@ arrayLibraryFunctions space pt signed shape = do
       array_type = [C.cty|struct $id:("futhark_" ++ arrayName pt signed rank)|]
 
       new_array = "futhark_new_" ++ name
-      alloc_array = "futhark_alloc_" ++ name
       free_array = "futhark_free_" ++ name
       values_array = "futhark_values_" ++ name
       shape_array = "futhark_shape_" ++ name
@@ -675,8 +677,6 @@ arrayLibraryFunctions space pt signed shape = do
     forM_ [0..rank-1] $ \i ->
       stm [C.cstm|arr->shape[$int:i] = $id:("dim"++show i);|]
 
-  alloc_body <- collect $ resetMem [C.cexp|arr->mem|]
-
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
   values_body <- collect $
@@ -688,8 +688,6 @@ arrayLibraryFunctions space pt signed shape = do
 
   headerDecl (ArrayDecl name)
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, $ty:pt' *data, $params:shape_params);|]
-  headerDecl (ArrayDecl name)
-    [C.cedecl|$ty:array_type* $id:alloc_array($ty:ctx_ty *ctx);|]
   headerDecl (ArrayDecl name)
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   headerDecl (ArrayDecl name)
@@ -704,15 +702,6 @@ arrayLibraryFunctions space pt signed shape = do
               return NULL;
             }
             $items:new_body
-            return arr;
-          }
-
-          $ty:array_type* $id:alloc_array($ty:ctx_ty *ctx) {
-            $ty:array_type *arr = malloc(sizeof($ty:array_type));
-            if (arr == NULL) {
-              return NULL;
-            }
-            $items:alloc_body
             return arr;
           }
 
@@ -737,7 +726,6 @@ opaqueLibraryFunctions :: String -> [ValueDesc]
 opaqueLibraryFunctions desc vds = do
   let name = "futhark_" ++ opaqueName desc vds
       free_opaque = "futhark_free_" ++ opaqueName desc vds
-      alloc_opaque = "futhark_alloc_" ++ opaqueName desc vds
       opaque_type = [C.cty|struct $id:name|]
 
   let freeComponent _ ScalarValue{} =
@@ -755,8 +743,6 @@ opaqueLibraryFunctions desc vds = do
 
   headerDecl (OpaqueDecl desc)
     [C.cedecl|int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj);|]
-  headerDecl (OpaqueDecl desc)
-    [C.cedecl|$ty:opaque_type* $id:alloc_opaque();|]
 
   return [C.cunit|
           int $id:free_opaque($ty:ctx_ty *ctx, $ty:opaque_type *obj) {
@@ -765,9 +751,6 @@ opaqueLibraryFunctions desc vds = do
             free(obj);
             return ret;
           }
-         $ty:opaque_type* $id:alloc_opaque() {
-           return malloc(sizeof($ty:opaque_type));
-         }
            |]
 
 valueDescToCType :: ValueDesc -> CompilerM op s C.Type
@@ -874,23 +857,32 @@ prepareEntryOutputs :: [ExternalValue] -> CompilerM op s [C.Param]
 prepareEntryOutputs = zipWithM prepare [(0::Int)..]
   where prepare pno (TransparentValue vd) = do
           let pname = "out" ++ show pno
-          ty <- prepareValue [C.cexp|$id:("out" ++ show pno)|] vd
-          return [C.cparam|$ty:ty *$id:pname|]
+          ty <- valueDescToCType vd
+
+          case vd of
+            ArrayValue{} -> do
+              stm [C.cstm|assert((*$id:pname = malloc(sizeof($ty:ty))) != NULL);|]
+              prepareValue [C.cexp|*$id:("out" ++ show pno)|] vd
+              return [C.cparam|$ty:ty **$id:pname|]
+            ScalarValue{} -> do
+              prepareValue [C.cexp|$id:("out" ++ show pno)|] vd
+              return [C.cparam|$ty:ty *$id:pname|]
 
         prepare pno (OpaqueValue desc vds) = do
           let pname = "out" ++ show pno
           ty <- opaqueToCType desc vds
 
+          stm [C.cstm|assert((*$id:pname = malloc(sizeof($ty:ty))) != NULL);|]
+
           forM_ (zip [0..] vds) $ \(i,vd) ->
-            prepareValue [C.cexp|&($id:("out" ++ show pno)->$id:(tupleField i))|] vd
+            prepareValue [C.cexp|&((*$id:("out" ++ show pno))->$id:(tupleField i))|] vd
 
-          return [C.cparam|$ty:ty *$id:pname|]
+          return [C.cparam|$ty:ty **$id:pname|]
 
-        prepareValue dest (ScalarValue pt signed name) = do
+        prepareValue dest (ScalarValue _ _ name) =
           stm [C.cstm|*$exp:dest = $id:name;|]
-          return $ signedPrimTypeToCType signed pt
 
-        prepareValue dest vd@(ArrayValue mem _ _ _ _ shape) = do
+        prepareValue dest (ArrayValue mem _ _ _ _ shape) = do
           stm [C.cstm|$exp:dest->mem = $id:mem;|]
 
           let rank = length shape
@@ -899,9 +891,6 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
               maybeCopyDim (VarSize d) i =
                 [C.cstm|$exp:dest->shape[$int:i] = $id:d;|]
           stms $ zipWith maybeCopyDim shape [0..rank-1]
-
-          valueDescToCType vd
-
 
 unpackResults :: VName -> [Param] -> [C.Stm]
 unpackResults ret outparams =
@@ -1057,7 +1046,7 @@ readInput (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
           [C.cstm|free($id:arr);|],
           [C.cexp|$id:dest|])
 
-prepareOutputs :: [ExternalValue] -> CompilerM op s [(C.Exp, C.Stm, C.Stm)]
+prepareOutputs :: [ExternalValue] -> CompilerM op s [(C.Exp, C.Stm)]
 prepareOutputs = mapM prepareResult
   where prepareResult ev = do
           ty <- externalValueToCType ev
@@ -1066,21 +1055,17 @@ prepareOutputs = mapM prepareResult
           case ev of
             TransparentValue ScalarValue{} -> do
               item [C.citem|$ty:ty $id:result;|]
-              return ([C.cexp|&$id:result|], [C.cstm|;|], [C.cstm|;|])
+              return ([C.cexp|&$id:result|], [C.cstm|;|])
             TransparentValue (ArrayValue _ _ _ t ept dims) -> do
               let name = arrayName t ept $ length dims
                   free_array = "futhark_free_" ++ name
-                  alloc_array = "futhark_alloc_" ++ name
               item [C.citem|$ty:ty *$id:result;|]
               return ([C.cexp|$id:result|],
-                      [C.cstm|assert(($id:result = $id:alloc_array(ctx)) != NULL);|],
                       [C.cstm|assert($id:free_array(ctx, $exp:result) == 0);|])
             OpaqueValue desc vds -> do
-              let alloc_opaque = "futhark_alloc_" ++ opaqueName desc vds
-                  free_opaque = "futhark_free_" ++ opaqueName desc vds
+              let free_opaque = "futhark_free_" ++ opaqueName desc vds
               item [C.citem|$ty:ty *$id:result;|]
               return ([C.cexp|$id:result|],
-                      [C.cstm|assert(($id:result = $id:alloc_opaque()) != NULL);|],
                       [C.cstm|assert($id:free_opaque(ctx, $exp:result) == 0);|])
 
 printResult :: [(ExternalValue,C.Exp)] -> CompilerM op s [C.Stm]
@@ -1095,8 +1080,8 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
   ((pack_input, free_input, free_parsed, input_args), input_items) <-
     collect' $ unzip4 <$> readInputs args
 
-  ((output_vals, alloc_outputs, free_outputs), output_decls) <-
-    collect' $ unzip3 <$> prepareOutputs results
+  ((output_vals, free_outputs), output_decls) <-
+    collect' $ unzip <$> prepareOutputs results
   printstms <- printResult $ zip results output_vals
 
   ctx_ty <- contextType
@@ -1108,12 +1093,11 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
 
       run_it = [C.citems|
                   /* Run the program once. */
-                  $stms:alloc_outputs
                   $stms:pack_input
                   assert($id:sync_ctx(ctx) == 0);
                   t_start = get_wall_time();
                   assert($id:entry_point_function_name(ctx,
-                                                       $args:output_vals,
+                                                       $args:(map addrOf output_vals),
                                                        $args:input_args) == 0);
                   assert($id:sync_ctx(ctx) == 0);
                   t_end = get_wall_time();
