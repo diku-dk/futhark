@@ -91,7 +91,7 @@ import Futhark.Representation.AST.Attributes (isBuiltInFunction, builtInFunction
 data CompilerState s = CompilerState {
     compTypeStructs :: [([Type], (C.Type, C.Definition))]
   , compArrayStructs :: [((C.Type, Int), (C.Type, [C.Definition]))]
-  , compOpaqueStructs :: [((String, [ValueDesc]), (C.Type, [C.Definition]))]
+  , compOpaqueStructs :: [(String, (C.Type, [C.Definition]))]
   , compEarlyDecls :: DL.DList C.Definition
   , compInit :: [C.Stm]
   , compNameSrc :: VNameSource
@@ -645,7 +645,11 @@ arrayName pt signed rank =
   prettySigned (signed==TypeUnsigned) pt ++ "_" ++ show rank ++ "d"
 
 opaqueName :: String -> [ValueDesc] -> String
-opaqueName s vds = "opaque_" ++ zEncodeString (show (hash $ s ++ show vds)) -- FIXME
+opaqueName s vds = "opaque_" ++ zEncodeString (show (hash $ s ++ concatMap p vds)) -- FIXME
+  where p (ScalarValue pt signed _) =
+          show (pt, signed)
+        p (ArrayValue _ _ space pt signed dims) =
+          show (space, pt, signed, length dims)
 
 arrayLibraryFunctions :: Space -> PrimType -> Signedness -> [DimSize]
                       -> CompilerM op s [C.Definition]
@@ -776,19 +780,19 @@ valueDescToCType (ArrayValue _ _ space pt signed shape) = do
 
 opaqueToCType :: String -> [ValueDesc] -> CompilerM op s C.Type
 opaqueToCType desc vds = do
-  exists <- gets $ lookup (desc,vds) . compOpaqueStructs
+  let name = "futhark_" ++ opaqueName desc vds
+  exists <- gets $ lookup name . compOpaqueStructs
   case exists of
     Just (ty, _) -> return ty
     Nothing -> do
       ts <- mapM valueDescToCType vds
-      let name = "futhark_" ++ opaqueName desc vds
-          members = zipWith field ts [(0::Int)..]
+      let members = zipWith field ts [(0::Int)..]
           struct = [C.cedecl|struct $id:name { $sdecls:members };|]
           stype = [C.cty|struct $id:name|]
       headerDecl (OpaqueDecl desc) [C.cedecl|struct $id:name;|]
       library <- opaqueLibraryFunctions desc vds
       modify $ \s -> s { compOpaqueStructs =
-                           ((desc,vds), (stype, struct : library)) :
+                           (name, (stype, struct : library)) :
                            compOpaqueStructs s }
       return stype
   where field ct i = [C.csdecl|$ty:ct $id:(tupleField i);|]
