@@ -3,5 +3,5 @@
 -- ==
 -- structure { Assert 0 }
 
-let main(a: [#n]i32, b: [#m]i32): ([n]i32,[n]i32) =
+let main [n][m] (a: [n]i32, b: [m]i32): ([n]i32,[n]i32) =
   unzip(unsafe zip a b)

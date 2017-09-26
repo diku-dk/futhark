@@ -12,5 +12,5 @@
 -- input { empty(i32) 0 1 }
 -- error: failed
 
-let main(as: [#n]i32, i: i32, j: i32): []i32 =
+let main(as: []i32, i: i32, j: i32): []i32 =
   as[i:j]

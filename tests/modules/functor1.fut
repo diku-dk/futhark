@@ -28,14 +28,15 @@ module Float32 = {
 }
 
 module DotProd(T: NUMERIC) = {
-  let dotprod (xs: [#n]T.num) (ys: [#n]T.num): T.num =
+  let dotprod [n] (xs: [n]T.num) (ys: [n]T.num): T.num =
     reduce T.mult T.one (map T.plus xs ys)
 }
 
 module IntDotProd = DotProd(Int)
 module Float32DotProd = DotProd(Float32)
 
-let main(xs: [#n]i32, ys: [#n]i32,
-         as: [#m]f32, bs: [#n]f32): (i32, f32) =
+let main [n][m]
+        (xs: [n]i32, ys: [n]i32,
+         as: [m]f32, bs: [n]f32): (i32, f32) =
   (IntDotProd.dotprod xs ys,
    Float32DotProd.dotprod as bs)

@@ -9,5 +9,5 @@ import "/futlib/linalg"
 
 module i32LinAlg = linalg(i32)
 
-let main(as: [#n]i32, bs: [#n]i32): i32 =
+let main [n] (as: [n]i32, bs: [n]i32): i32 =
   i32LinAlg.dotprod as bs

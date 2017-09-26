@@ -8,7 +8,7 @@
 
 import "/futlib/array"
 
-let computefibs(arr: *[#n]i32): *[]i32 =
+let computefibs [n] (arr: *[n]i32): *[]i32 =
     let arr[0] = 0
     let arr[1] = 1 in
     loop (arr) for i < n-2 do

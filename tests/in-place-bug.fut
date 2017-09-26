@@ -8,8 +8,8 @@ import "/futlib/array"
 let tridagSeq(a:  []f64, b: []f64, c: []f64, y: []f64 ): []f64 =
   copy(concat a b c y)
 
-let explicitMethod(myD:  [][#m]f64,  myDD: [][]f64,
-                              myMu: [][]f64, myVar: [][]f64, result: [][]f64 ): [][]f64 =
+let explicitMethod [m] (myD:  [][m]f64,  myDD: [][]f64,
+                        myMu: [][]f64, myVar: [][]f64, result: [][]f64 ): [][]f64 =
   copy( map (\(tup:  ([]f64,[]f64,[]f64) ): []f64  ->
                let (mu_row, var_row, result_row) = tup in
                map (\(tup: ([]f64, []f64, f64, f64, i32)): f64  ->
@@ -19,9 +19,9 @@ let explicitMethod(myD:  [][#m]f64,  myDD: [][]f64,
                   )
            ) (zip myMu myVar result))
 
-let implicitMethod(myD:  [][]f64,  myDD: [][]f64,
-                              myMu: [][]f64, myVar: [][]f64,
-                             u: [][]f64,    dtInv: f64  ): [][]f64 =
+let implicitMethod (myD:  [][]f64,  myDD: [][]f64,
+                    myMu: [][]f64, myVar: [][]f64,
+                    u: [][]f64,    dtInv: f64  ): [][]f64 =
   map (\(tup:  ([]f64,[]f64,[]f64) ): []f64   ->
          let (mu_row,var_row,u_row) = tup
          let abc = map (\(tup: (f64,f64,[]f64,[]f64)): (f64,f64,f64)  ->

@@ -9,7 +9,7 @@
 -- output {
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
-let matmult(a: [#m][#o]i32, b: [#o][#n]i32): [m][n]i32 =
+let matmult [m][o][n] (a: [m][o]i32, b: [o][n]i32): [m][n]i32 =
   let res = replicate m (replicate n 0) in
   loop res for i < m do
       loop res for j < n do

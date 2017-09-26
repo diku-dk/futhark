@@ -9,7 +9,7 @@
 
 import "/futlib/array"
 
-let Gauss_Jordan (A: [#n][#m]f32): [n][m]f32 =
+let Gauss_Jordan [n][m] (A: [n][m]f32): [n][m]f32 =
   loop (A) for i < n do
     let irow = A[0]
     let Ap = A[1:n]
@@ -21,11 +21,11 @@ let Gauss_Jordan (A: [#n][#m]f32): [n][m]f32 =
                  Ap
     in concat Ap ([irow])
 
-let linear_solve (A: [#n][#m]f32) (b: [#n]f32): [n]f32 =
+let linear_solve [n][m] (A: [n][m]f32) (b: [n]f32): [n]f32 =
   -- Pad the matrix with b.
   let Ap = concat@1 A (transpose ([b]))
   let Ap' = Gauss_Jordan Ap
   -- Extract last column.
   in Ap'[0:n,m]
 
-let main(A: [#n][#m]f32) (b: [#n]f32): [n]f32 = linear_solve A b
+let main [n][m] (A: [n][m]f32) (b: [n]f32): [n]f32 = linear_solve A b

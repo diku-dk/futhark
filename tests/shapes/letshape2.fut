@@ -5,5 +5,5 @@
 -- error: cannot match
 
 let main (x: i32, y: []i32): i32 =
-  let ((_, elems: [#n]i32): (i32,[#m]i32)) = (x,y)
+  let [n][m] ((_, elems: [n]i32): (i32,[m]i32)) = (x,y)
   in n + m + elems[0]

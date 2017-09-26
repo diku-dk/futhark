@@ -11,7 +11,7 @@
 --
 -- structure distributed { Kernel 6 }
 
-let main(a: [][#n][#m]i32): [][][]i32 =
+let main [n][m] (a: [][n][m]i32): [][][]i32 =
   map (\(a_row: [][]i32): [m][n]i32  ->
         let b = map (\(a_row_row: []i32): []i32  ->
                       scan (+) 0 (a_row_row)

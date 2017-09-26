@@ -7,7 +7,7 @@
 -- output {
 --   [[1,2,3], [6,5,4], [7,8,9]]
 -- }
-let main(a: *[][#n]i32, b: []i32, i: i32): [][]i32 =
+let main [n] (a: *[][n]i32, b: []i32, i: i32): [][]i32 =
   let (br, _) = split (n) b
   let a[i] = br in
   a

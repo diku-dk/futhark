@@ -21,7 +21,7 @@ let take(n: i32, a: []f64): []f64 =
   let (first, rest) = unsafe split (n) a in
   first
 
-let fftmp(md_c: [#n][]f64): []f64 =
+let fftmp [n] (md_c: [n][]f64): []f64 =
   map (\(j: i32): f64  ->
          let x = take(j,md_c[j])
          in  reduce (+) (0.0) x) (
