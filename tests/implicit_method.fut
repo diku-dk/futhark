@@ -47,7 +47,7 @@ import "/futlib/array"
 
 default(f32)
 
-let tridagSeq(a:  [#n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
+let tridagSeq [n] (a:  [n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
     let (y,b) = loop ((y, b))
       for i < n-1 do
         let i    = i + 1
@@ -62,10 +62,10 @@ let tridagSeq(a:  [#n]f32,b: *[]f32,c: []f32,y: *[]f32 ): *[]f32 =
                let y[i] = (y[i] - c[i]*y[i+1]) / b[i]
                in  y
 
-let implicitMethod(myD:  [#m][3]f32,  myDD: [#m][3]f32,
-                   myMu: [#n][#m]f32, myVar: [#n][#m]f32,
-                   u: [#n][#m]f32)
-                  (dtInv: f32): *[n][m]f32 =
+let implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
+                           myMu: [n][m]f32, myVar: [n][m]f32,
+                           u: [n][m]f32)
+                          (dtInv: f32): *[n][m]f32 =
   map (\(tup:  ([]f32,[]f32,*[]f32) ): *[]f32   ->
          let (mu_row,var_row,u_row) = tup
          let abc = map (\(tup: (f32,f32,[]f32,[]f32)): (f32,f32,f32)  ->
@@ -81,9 +81,9 @@ let implicitMethod(myD:  [#m][3]f32,  myDD: [#m][3]f32,
      ) (zip myMu myVar (copy(u))
      )
 
-let main(myD:  [#m][3]f32,  myDD: [#m][3]f32,
-        myMu: [#n][#m]f32, myVar: [#n][#m]f32,
-        u: *[#n][#m]f32,    dtInv: f32,
-        num_samples: i32): *[num_samples][n][m]f32 =
+let main [m][n] (myD:  [m][3]f32,  myDD: [m][3]f32,
+                 myMu: [n][m]f32, myVar: [n][m]f32,
+                 u: *[n][m]f32,    dtInv: f32,
+                 num_samples: i32): *[num_samples][n][m]f32 =
   map (implicitMethod(myD,myDD,myMu,myVar,u)) (
       map (*dtInv) (map  (/f32(num_samples)) (map f32 (map (+1) (iota(num_samples))))))

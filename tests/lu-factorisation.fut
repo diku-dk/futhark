@@ -12,7 +12,7 @@
 
 import "/futlib/array"
 
-let lu_inplace(a: *[#n][]f64): (*[][]f64, *[][]f64) =
+let lu_inplace [n] (a: *[n][]f64): (*[][]f64, *[][]f64) =
   let (_,l,u) = loop (a,l,u) = (a,
                                 replicate n (replicate n 0.0),
                                 replicate n (replicate n 0.0)) for k < n do

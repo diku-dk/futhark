@@ -10,5 +10,5 @@
 -- input { [[1,2,3],[4,5,6]] 1 0 }
 -- error: Assertion.*failed
 
-let main(as: [#n][#m]i32, i: i32, j: i32): [n][]i32 =
+let main [n][m] (as: [n][m]i32, i: i32, j: i32): [n][]i32 =
   as[0:n,i:j]

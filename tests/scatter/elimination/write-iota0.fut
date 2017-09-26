@@ -9,6 +9,5 @@
 -- }
 -- structure { Scatter 1 }
 
-let main(values: [#k]i32,
-         array: *[#n]i32): [n]i32 =
+let main [k][n] (values: [k]i32, array: *[n]i32): [n]i32 =
   scatter array (iota k) values

@@ -8,17 +8,16 @@ default(f32)
 let iota32(num: i32): [num]f32 =
     map f32 (iota(num))
 
-let reduceBins(acc: *[#numBins]i64) (elm: *[#numBins]i64): *[numBins]i64 =
+let reduceBins [numBins] (acc: *[numBins]i64) (elm: *[numBins]i64): *[numBins]i64 =
     loop newVal = acc for i < numBins do
         let newVal[i] = newVal[i] + elm[i] in newVal
 
-let doCompute(data1:
-    [#num1]f32,
-    data2: [#num2]f32,
-    numBins: i32,
-    numBins2: i32,
-    bin: [#numBBins]f32
-): *[numBins2]i64 =
+let doCompute [num1][num2][numBBins] (data1: [num1]f32,
+                                      data2: [num2]f32,
+                                      numBins: i32,
+                                      numBins2: i32,
+                                      bin: [numBBins]f32
+                                     ): *[numBins2]i64 =
     let value = map (\(x: f32): *[numBins2]i64  ->
             let vals = map (\(y: f32): *[numBins2]i64  ->
                     let dot = x*y
@@ -35,7 +34,7 @@ let main(numBins: i32): *[]i64 =
     let binb = map (\(k: f32): f32  -> k) (iota32(numBins + 1))
     let datapoints = iota32(10)
     let randompoints = replicate 1 datapoints
-    let (rrs, drs) = unzip(map (\(random: [#numR]f32): (*[]i64, *[]i64)  ->
+    let (rrs, drs) = unzip(map (\[numR] (random: [numR]f32): (*[]i64, *[]i64)  ->
                                  (replicate (numBins+2) 0i64,
                                   doCompute(datapoints, random, numBins, numBins+2, binb))) randompoints)
     let (res, _, _) =

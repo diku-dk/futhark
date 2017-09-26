@@ -8,8 +8,8 @@ default (f32)
 
 let even(x: i32): bool = x % 2 == 0
 
-let main(xs: [#n]i32): (i32, []i32) =
-  let (evens: [#num_even]i32) =
-    loop (evens: [#num_even]i32) = replicate 0 0 for i < n do
+let main [n] (xs: [n]i32): (i32, []i32) =
+  let [num_even] (evens: [num_even]i32) =
+    loop [num_even] (evens: [num_even]i32) = replicate 0 0 for i < n do
       (if even xs[i] then concat evens [num_even] else evens)
   in (num_even, evens)

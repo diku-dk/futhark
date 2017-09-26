@@ -109,4 +109,4 @@ entry test_intersperse (x: i32) (xs: []i32) = intersperse x xs
 -- input { [1,0] [[1,2],[3,4]] } output { [1,2,1,0,3,4] }
 -- input { [1,0] [[1,2],[3,4],[5,6]] } output { [1,2,1,0,3,4,1,0,5,6] }
 
-entry test_intercalate (x: [#m]i32) (xs: [][#m]i32) = intercalate x xs
+entry test_intercalate [m] (x: [m]i32) (xs: [][m]i32) = intercalate x xs

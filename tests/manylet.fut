@@ -1,7 +1,7 @@
 -- Parser test.  'in' is optional except at the end of a chain of
 -- let-bindings.
 
-let main(a: *[#n]i32, x: i32): [n]i32 =
+let main [n] (a: *[n]i32, x: i32): [n]i32 =
   let y = x + 2
   let z = y + 3 + x
   let (a,_) = loop ((a,z)) for i < n do

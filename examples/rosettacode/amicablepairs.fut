@@ -13,7 +13,7 @@ let divisors(n: i32): []i32 =
 let amicable((n: i32, nd: i32), (m: i32, md: i32)): bool =
   n < m && nd == m && md == n
 
-let getPair (divs: [#upper](i32, i32)) (flat_i: i32): ((i32,i32), (i32,i32)) =
+let getPair [upper] (divs: [upper](i32, i32)) (flat_i: i32): ((i32,i32), (i32,i32)) =
   let i = flat_i / upper
   let j = flat_i % upper
   in unsafe (divs[i], divs[j])

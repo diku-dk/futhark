@@ -122,11 +122,11 @@ let main(nfeatures: i32, npoints: i32, nclusters: i32): [nclusters][nfeatures]f3
   let points = map (\(i: i32): [nfeatures]f32  ->
                      map (*100f32) (map f32.sin (map f32 (map (^i) (iota(nfeatures)))))
                   ) (iota(npoints)) in
-  stream_red_per (\(acc: *[#nclusters][#nfeatures]f32)
-                  (elem: *[#nclusters][#nfeatures]f32): *[nclusters][nfeatures]f32  ->
+  stream_red_per (\(acc: *[nclusters][nfeatures]f32)
+                  (elem: *[nclusters][nfeatures]f32): *[nclusters][nfeatures]f32  ->
                  map (\(x: []f32) (y: []f32): [nfeatures]f32  ->
                            map (+) x y) acc elem) (
-                 \(inp: [#chunk]([#nfeatures]f32,i32)): *[nclusters][nfeatures]f32  ->
+                 \[chunk] (inp: [chunk]([nfeatures]f32,i32)): *[nclusters][nfeatures]f32  ->
                    loop acc = replicate nclusters (replicate nfeatures 0.0f32) for i < chunk do
                      let (point, c) = inp[i] in
                      unsafe let acc[c] = map (+) (acc[c]) (map (/f32(features_in_cluster[c])) point) in

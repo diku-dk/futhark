@@ -11,5 +11,5 @@ import "/futlib/math"
 let intsqrt(x: i32): i32 =
     i32(f32.sqrt(f32(x)))
 
-let main (a: [#n]i32): [][]i32 =
+let main [n] (a: [n]i32): [][]i32 =
     reshape (intsqrt(n), intsqrt(n)) a

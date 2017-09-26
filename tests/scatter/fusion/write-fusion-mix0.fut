@@ -14,12 +14,12 @@
 -- }
 -- structure { Scatter 1 }
 
-let main(indexes0: [#k]i32,
-       indexes1: [#k]i32,
-       values0: [#k]i32,
-       values1: [#k]i32,
-       array0: *[#n]i32,
-       array1: *[#n]i32): ([n]i32, [n]i32) =
+let main [k][n] (indexes0: [k]i32,
+                 indexes1: [k]i32,
+                 values0: [k]i32,
+                 values1: [k]i32,
+                 array0: *[n]i32,
+                 array1: *[n]i32): ([n]i32, [n]i32) =
   let values0' = map (+4) values0
   let values1' = map (*3) values1
   let array0' = scatter array0 indexes0 values0'

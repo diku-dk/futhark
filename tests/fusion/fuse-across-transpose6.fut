@@ -42,23 +42,26 @@ import "/futlib/math"
 
 let take(n: i32, a: []f64): []f64 = let (first, rest) = split (n) a in first
 
-let correlateDeltas(md_c: [#num_und][#num_und]f64,
-                    zds: [#num_dates][#num_und]f64): [num_dates][num_und]f64 =
-  map (\(zi: [#num_und]f64): [num_und]f64  ->
+let correlateDeltas [num_und][num_dates]
+                   (md_c: [num_und][num_und]f64,
+                    zds: [num_dates][num_und]f64): [num_dates][num_und]f64 =
+  map (\(zi: [num_und]f64): [num_und]f64  ->
          map (\(j: i32): f64  ->
                 let x = map (*) (take(j+1,zi)) (take(j+1,md_c[j]) )
                 in  reduce (+) (0.0) x
             ) (iota(num_und) )
      ) zds
 
-let combineVs(n_row:   [#num_und]f64,
-              vol_row: [#num_und]f64,
-              dr_row: [#num_und]f64 ): [num_und]f64 =
+let combineVs [num_und]
+             (n_row:   [num_und]f64,
+              vol_row: [num_und]f64,
+              dr_row: [num_und]f64 ): [num_und]f64 =
   map (+) dr_row (map (*) n_row vol_row)
 
-let mkPrices(md_vols: [#num_dates][#num_und]f64,
-             md_drifts: [#num_dates][#num_und]f64,
-             noises: [#num_dates][#num_und]f64): [num_dates][num_und]f64 =
+let mkPrices [num_dates][num_und]
+            (md_vols: [num_dates][num_und]f64,
+             md_drifts: [num_dates][num_und]f64,
+             noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let c_rows = map combineVs (zip noises (md_vols) (md_drifts) )
   let e_rows = map (\(x: []f64): [num_und]f64  -> map f64.exp x
                   ) (c_rows
@@ -67,10 +70,11 @@ let mkPrices(md_vols: [#num_dates][#num_und]f64,
           ) (replicate num_und 1.0) (e_rows )
 
   -- Formerly blackScholes.
-let main(md_c: [#num_und][#num_und]f64,
-         md_vols: [#num_dates][#num_und]f64,
-         md_drifts: [#num_dates][#num_und]f64,
-         bb_arr: [#num_und][#num_dates]f64): [num_dates][num_und]f64 =
+let main [num_dates][num_und]
+        (md_c: [num_und][num_und]f64,
+         md_vols: [num_dates][num_und]f64,
+         md_drifts: [num_dates][num_und]f64,
+         bb_arr: [num_und][num_dates]f64): [num_dates][num_und]f64 =
   -- I don't want to import the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = rearrange (1,0) bb_arr
