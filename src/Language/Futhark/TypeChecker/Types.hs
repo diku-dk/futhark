@@ -165,8 +165,6 @@ checkTypeExp' (TEArray t d loc) = do
           return AnyDim
         checkDimDecl (ConstDim k) =
           return $ ConstDim k
-        checkDimDecl (BoundDim v) =
-          BoundDim <$> checkBoundDim loc v
         checkDimDecl (NamedDim v) =
           NamedDim <$> checkNamedDim loc v
 checkTypeExp' (TEUnique t loc) = do
@@ -188,10 +186,6 @@ checkTypeExp' (TEApply tname targs tloc) = do
           v' <- checkNamedDim loc v
           return (TypeArgExpDim (NamedDim v') loc,
                   M.singleton pv $ DimSub $ NamedDim v')
-        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (BoundDim v) loc) = do
-          v' <- checkBoundDim loc v
-          return (TypeArgExpDim (BoundDim v') loc,
-                  M.singleton pv $ DimSub $ BoundDim v')
         checkArgApply (TypeParamDim pv _) (TypeArgExpDim (ConstDim x) loc) =
           return (TypeArgExpDim (ConstDim x) loc,
                   M.singleton pv $ DimSub $ ConstDim x)
@@ -216,10 +210,6 @@ checkNamedDim loc v = do
   case t of
     Prim (Signed Int32) -> return v'
     _                   -> throwError $ DimensionNotInteger loc v
-
-checkBoundDim :: MonadTypeChecker m =>
-                 SrcLoc -> Name -> StateT ImplicitlyBound m VName
-checkBoundDim loc v = lift $ checkName Term v loc
 
 data InferredType = NoneInferred
                   | Inferred Type
@@ -378,7 +368,6 @@ lookAtDimDecl _ ConstDim{} = return ()
 lookAtDimDecl _ AnyDim{} = return ()
 lookAtDimDecl loc (NamedDim (QualName [] v)) = seeing UsedFree v loc
 lookAtDimDecl _ (NamedDim _) = return ()
-lookAtDimDecl loc (BoundDim v) = seeing BoundAsDim v loc
 
 seeing :: MonadTypeChecker m => Bindage -> Name -> SrcLoc
        -> StateT ImplicitlyBound m ()
@@ -522,8 +511,6 @@ applyType ps t args =
         -- We are assuming everything has already been type-checked for correctness.
         mkSubst (TypeParamDim pv _) (TypeArgDim (NamedDim v) _) =
           (pv, DimSub $ NamedDim v)
-        mkSubst (TypeParamDim pv _) (TypeArgDim (BoundDim v) _) =
-          (pv, DimSub $ BoundDim v)
         mkSubst (TypeParamDim pv _) (TypeArgDim (ConstDim x) _) =
           (pv, DimSub $ ConstDim x)
         mkSubst (TypeParamDim pv _) (TypeArgDim AnyDim  _) =
