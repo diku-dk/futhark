@@ -45,7 +45,6 @@ module Language.Futhark.Attributes
   , returnType
   , lambdaReturnType
   , concreteType
-  , dimsBoundByType
 
   -- * Operations on types
   , peelArray
@@ -690,14 +689,6 @@ concreteType (Array at) = concreteArrayType at
         concreteRecordArrayElem PolyArrayElem{} = False
         concreteRecordArrayElem (RecordArrayElem fs) = all concreteRecordArrayElem fs
 
--- | The dimension names bound by the shape declarations in the type.
-dimsBoundByType :: TypeBase (ShapeDecl VName) als -> S.Set VName
-dimsBoundByType = S.fromList . mapMaybe dimIdent . nestedDims
-  where dimIdent AnyDim          = Nothing
-        dimIdent (ConstDim _)    = Nothing
-        dimIdent (NamedDim _)    = Nothing
-        dimIdent (BoundDim name) = Just name
-
 -- | The set of identifiers bound in a pattern, including dimension declarations.
 patIdentSet :: PatternBase Info VName -> S.Set (IdentBase Info VName)
 patIdentSet (Id ident)              = S.singleton ident
@@ -705,9 +696,7 @@ patIdentSet (PatternParens p _)     = patIdentSet p
 patIdentSet (TuplePattern pats _)   = mconcat $ map patIdentSet pats
 patIdentSet (RecordPattern fs _)    = mconcat $ map (patIdentSet . snd) fs
 patIdentSet Wildcard{}              = mempty
-patIdentSet (PatternAscription p (TypeDecl _ (Info t))) =
-  patIdentSet p <> S.map asIdent (dimsBoundByType t)
-  where asIdent name = Ident name (Info $ Prim $ Signed Int32) (srclocOf p)
+patIdentSet (PatternAscription p _) = patIdentSet p
 
 -- | The type of values bound by the pattern.
 patternType :: PatternBase Info VName -> CompTypeBase VName

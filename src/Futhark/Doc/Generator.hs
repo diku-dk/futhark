@@ -246,7 +246,6 @@ modParamHtml (ModParam pname psig _ : mps) =
 
 prettyD :: DimDecl VName -> Html
 prettyD (NamedDim v) = prettyQualName v
-prettyD (BoundDim _) = mempty
 prettyD (ConstDim _) = mempty
 prettyD AnyDim = mempty
 
@@ -364,7 +363,6 @@ relativise dest src =
 prettyDimDecl :: DimDecl VName -> Html
 prettyDimDecl AnyDim = mempty
 prettyDimDecl (NamedDim v) = prettyQualName v
-prettyDimDecl (BoundDim v) = "#" <> vnameHtml v
 prettyDimDecl (ConstDim n) = toHtml (show n)
 
 prettyTypeArgExp :: TypeArgExp VName -> Html
