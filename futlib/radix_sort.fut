@@ -20,6 +20,6 @@ module mk_radix_sort (P: {
     let ps_actual = map (-1) ps
     in scatter (copy xs) ps_actual xs
 
-  let radix_sort(xs: [#n]P.t): [n]P.t =
+  let radix_sort [n] (xs: [n]P.t): [n]P.t =
     loop (xs) for i < 32 do radix_sort_step xs i
 }

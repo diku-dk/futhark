@@ -31,4 +31,4 @@ let matrix_inverse [n] (A: [n][n]f32): [n][n]f32 =
   -- Drop the identity matrix at the front.
   in Ap'[0:n,n:n*2]
 
-let main [n][n] (A: [n][n]f32): [n][n]f32 = matrix_inverse A
+let main [n] (A: [n][n]f32): [n][n]f32 = matrix_inverse A
