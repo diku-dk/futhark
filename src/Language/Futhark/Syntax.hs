@@ -204,10 +204,7 @@ class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
   unifyShapes :: shape -> shape -> Maybe shape
 
 -- | Declaration of a dimension size.
-data DimDecl vn = BoundDim vn
-                  -- ^ The size of the dimension is this name, in a
-                  -- binding position.
-                | NamedDim (QualName vn)
+data DimDecl vn = NamedDim (QualName vn)
                   -- ^ The size of the dimension is this name, which
                   -- must be in scope.  In a return type, this will
                   -- give rise to an assertion.
@@ -218,7 +215,6 @@ data DimDecl vn = BoundDim vn
                 deriving (Eq, Ord, Show)
 
 instance Functor DimDecl where
-  fmap f (BoundDim x)               = BoundDim $ f x
   fmap f (NamedDim (QualName qs x)) = NamedDim $ QualName qs $ f x
   fmap _ (ConstDim x)               = ConstDim x
   fmap _ AnyDim                     = AnyDim

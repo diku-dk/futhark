@@ -441,7 +441,6 @@ patternDims (PatternAscription p (TypeDecl _ (Info t))) =
   where dimIdent _ AnyDim            = Nothing
         dimIdent _ (ConstDim _)      = Nothing
         dimIdent _ NamedDim{}        = Nothing
-        dimIdent loc (BoundDim name) = Just $ Ident name (Info (Prim (Signed Int32))) loc
 patternDims _ = []
 
 data PatternUses = PatternUses { patternDimUses :: [QualName VName]

@@ -842,14 +842,10 @@ newNamesForMTy orig_mty = do
           ShapeDecl $ map substituteInDim ds
         substituteInDim (NamedDim (QualName qs v)) =
           NamedDim $ QualName qs $ substitute v
-        substituteInDim (BoundDim v) =
-          BoundDim $ substitute v
         substituteInDim d = d
 
         substituteInTypeArg (TypeArgDim (NamedDim (QualName qs v)) loc) =
           TypeArgDim (NamedDim $ QualName qs $ substitute v) loc
-        substituteInTypeArg (TypeArgDim (BoundDim v) loc) =
-          TypeArgDim (BoundDim $ substitute v) loc
         substituteInTypeArg (TypeArgDim (ConstDim x) loc) =
           TypeArgDim (ConstDim x) loc
         substituteInTypeArg (TypeArgDim AnyDim loc) =

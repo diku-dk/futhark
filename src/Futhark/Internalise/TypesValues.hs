@@ -53,12 +53,8 @@ internaliseUniqueness E.Unique = I.Unique
 newtype BoundInTypes = BoundInTypes (S.Set VName)
 
 -- | Determine the names bound for some types.
-boundInTypes :: [E.TypeParam] -> [E.TypeBase (E.ShapeDecl VName) ()]
-             -> BoundInTypes
-boundInTypes tparams ts =
-  case mapMaybe isTypeParam tparams of
-    [] -> BoundInTypes $ mconcat $ map E.dimsBoundByType ts
-    names -> BoundInTypes $ S.fromList names
+boundInTypes :: [E.TypeParam] -> BoundInTypes
+boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
   where isTypeParam (E.TypeParamDim v _) = Just v
         isTypeParam E.TypeParamType{} = Nothing
 
@@ -134,7 +130,6 @@ internaliseDim d =
   case d of
     E.AnyDim -> Ext <$> newId
     E.ConstDim n -> return $ Free $ intConst I.Int32 $ toInteger n
-    E.BoundDim name -> namedDim $ E.qualName name
     E.NamedDim name -> namedDim name
   where namedDim name = do
           name' <- liftInternaliseM $ lookupSubst name

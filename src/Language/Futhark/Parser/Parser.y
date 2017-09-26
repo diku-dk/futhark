@@ -447,9 +447,6 @@ FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 DimDecl :: { (DimDecl Name, SrcLoc) }
         : QualName
           { (NamedDim (fst $1), snd $1) }
-        | '#' id
-          { let L _ (ID name) = $2
-            in (BoundDim name, $1) }
         | declit
           { let L loc (DECLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
