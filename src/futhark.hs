@@ -264,6 +264,12 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
+  , Option "I" ["include"]
+    (ReqArg (\path -> Right $ changeFutharkConfig $ \opts ->
+                opts { futharkImportPaths =
+                         futharkImportPaths opts `mappend` importPath path })
+    "DIR")
+    "Add directory to search path."
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAndRemoveDeadFunctions []
@@ -308,7 +314,7 @@ main = mainWithOptions newConfig commandLineOptions compile
           case futharkPipeline config of
             TypeCheck -> do
               -- No pipeline; just read the program and type check
-              (_, warnings, _, _) <- readProgram False preludeBasis file
+              (_, warnings, _, _) <- readProgram False preludeBasis mempty file
               liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file

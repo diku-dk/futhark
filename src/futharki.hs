@@ -90,7 +90,7 @@ data InterpreterState =
 
 newInterpreterState :: IO InterpreterState
 newInterpreterState = do
-  res <- runExceptT $ readProgram False preludeBasis []
+  res <- runExceptT $ readProgram False preludeBasis mempty []
   case res of
     Right (prog, _, imports, src) ->
       return InterpreterState { interpProg = prog
@@ -185,7 +185,7 @@ Quit futharki.
   where loadCommand :: Command
         loadCommand file = do
           liftIO $ T.putStrLn $ "Reading " <> file
-          res <- liftIO $ runExceptT (readProgram False preludeBasis (T.unpack file))
+          res <- liftIO $ runExceptT (readProgram False preludeBasis mempty (T.unpack file))
                  `Haskeline.catch` \(err::IOException) ->
                  return (Left (ExternalError (T.pack $ show err)))
           case res of

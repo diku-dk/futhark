@@ -16,7 +16,7 @@ futFiles :: FilePath -> IO [FilePath]
 futFiles dir = filter isFut <$> directoryContents dir
   where isFut = (==".fut") . takeExtension
 
-readBasis :: SearchPath -> FilePath -> String -> Q Basis
+readBasis :: ImportPaths -> FilePath -> String -> Q Basis
 readBasis search_path fpath entry = do
   files <- runIO $ futFiles fpath
 
@@ -36,6 +36,6 @@ readBasis search_path fpath entry = do
 
 -- | At compile-time, produce an 'Exp' corresponding to a 'Basis'.
 -- The 'FilePath' must refer to a @.fut@ file.
-embedBasis :: SearchPath -> FilePath -> String -> Q Exp
+embedBasis :: ImportPaths -> FilePath -> String -> Q Exp
 embedBasis search_path fpath entry =
   lift =<< readBasis search_path fpath entry

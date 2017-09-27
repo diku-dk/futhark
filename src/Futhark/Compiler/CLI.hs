@@ -71,6 +71,13 @@ commandLineOptions =
   , Option [] ["executable"]
     (NoArg $ Right $ \config -> config { compilerMode = ToExecutable })
     "Generate an executable instead of a library (set by default)."
+  , Option "I" ["include"]
+    (ReqArg (\path -> Right $ \config ->
+                config { compilerImportPaths =
+                           compilerImportPaths config `mappend`
+                           importPath path } )
+    "DIR")
+    "Add directory to search path."
   ]
 
 wrapOption :: CompilerOption cfg -> CoreCompilerOption cfg
@@ -83,6 +90,7 @@ data CompilerConfig cfg =
   CompilerConfig { compilerOutput :: Maybe FilePath
                  , compilerVerbose :: Maybe (Maybe FilePath)
                  , compilerMode :: CompilerMode
+                 , compilerImportPaths :: ImportPaths
                  , compilerConfig :: cfg
                  }
 
@@ -94,6 +102,7 @@ newCompilerConfig :: cfg -> CompilerConfig cfg
 newCompilerConfig x = CompilerConfig { compilerOutput = Nothing
                                      , compilerVerbose = Nothing
                                      , compilerMode = ToExecutable
+                                     , compilerImportPaths = mempty
                                      , compilerConfig = x
                                      }
 
@@ -103,4 +112,6 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig cfg -> FutharkConfig
 futharkConfig config =
-  newFutharkConfig { futharkVerbose = compilerVerbose config }
+  newFutharkConfig { futharkVerbose = compilerVerbose config
+                   , futharkImportPaths = compilerImportPaths config
+                   }

@@ -14,8 +14,8 @@ module Futhark.Compiler
        , dumpError
        , reportingIOErrors
 
-       , SearchPath
-       , searchPath
+       , ImportPaths
+       , importPath
        , Basis(..)
        , emptyBasis
        )
@@ -61,12 +61,14 @@ import Futhark.Util.Log
 data FutharkConfig = FutharkConfig
                      { futharkVerbose :: Maybe (Maybe FilePath)
                      , futharkWarn :: Bool -- ^ Warn if True.
+                     , futharkImportPaths :: ImportPaths
                      , futharkPermitRecursion :: Bool
                      }
 
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkWarn = True
+                                 , futharkImportPaths = mempty
                                  , futharkPermitRecursion = True
                                  }
 
@@ -136,7 +138,8 @@ runPipelineOnProgram :: FutharkConfig
 runPipelineOnProgram config b pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (tagged_ext_prog, ws, _, namesrc) <- readProgram (futharkPermitRecursion config) b file
+  (tagged_ext_prog, ws, _, namesrc) <-
+    readProgram (futharkPermitRecursion config) b (futharkImportPaths config) file
 
   when (futharkWarn config) $
     liftIO $ hPutStr stderr $ show ws
@@ -179,14 +182,14 @@ emptyBasis = Basis { basisImports = mempty
                    , basisRoots = mempty
                    }
 
-newtype SearchPath = SearchPath [FilePath]
+newtype ImportPaths = ImportPaths [FilePath]
 
-searchPath :: FilePath -> SearchPath
-searchPath = SearchPath . pure
+importPath :: FilePath -> ImportPaths
+importPath = ImportPaths . pure
 
-instance Monoid SearchPath where
-  mempty = SearchPath mempty
-  SearchPath x `mappend` SearchPath y = SearchPath $ x <> y
+instance Monoid ImportPaths where
+  mempty = ImportPaths mempty
+  ImportPaths x `mappend` ImportPaths y = ImportPaths $ x <> y
 
 -- | Absolute reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  The 'FilePath' must be absolute.
@@ -223,7 +226,7 @@ includePath :: FutharkInclude -> String
 includePath (FutharkInclude s _) = Posix.takeDirectory s
 
 readImport :: (MonadError CompilerError m, MonadIO m) =>
-              Bool -> SearchPath -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
+              Bool -> ImportPaths -> [FutharkInclude] -> FutharkInclude -> CompilerM m ()
 readImport permit_recursion search_path steps include
   | include `elem` steps =
       throwError $ ExternalError $ T.pack $
@@ -238,7 +241,7 @@ readImport permit_recursion search_path steps include
 
 handleFile :: (MonadIO m, MonadError CompilerError m) =>
               Bool
-           -> SearchPath
+           -> ImportPaths
            -> [FutharkInclude]
            -> FutharkInclude
            -> T.Text
@@ -271,8 +274,8 @@ handleFile permit_recursion search_path steps include file_contents file_name = 
   where steps' = include:steps
 
 readImportFile :: (MonadError CompilerError m, MonadIO m) =>
-                  SearchPath -> FutharkInclude -> m (T.Text, FilePath)
-readImportFile (SearchPath dirs) include = do
+                  ImportPaths -> FutharkInclude -> m (T.Text, FilePath)
+readImportFile (ImportPaths dirs) include = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
@@ -301,23 +304,24 @@ readImportFile (SearchPath dirs) include = do
 
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
-               Bool -> Basis -> FilePath
+               Bool -> Basis -> ImportPaths -> FilePath
             -> m (E.Prog,
                   E.Warnings,
                   E.Imports,
                   VNameSource)
-readProgram permit_recursion basis fp =
+readProgram permit_recursion basis search_path fp =
   runCompilerM basis $ do
     fs <- liftIO $ T.readFile fp
 
-    handleFile permit_recursion (SearchPath [fp_dir]) [] (mkInitialInclude fp_name) fs fp
-      where (fp_dir, fp_file) = splitFileName fp
-            (fp_name, _) = splitExtension fp_file
+    handleFile permit_recursion (importPath fp_dir <> search_path)
+      [] (mkInitialInclude fp_name) fs fp
+  where (fp_dir, fp_file) = splitFileName fp
+        (fp_name, _) = splitExtension fp_file
 
 -- | Read and type-check a Futhark library (multiple files, relative
 -- to the same search path), including all imports.
 readLibrary :: (MonadError CompilerError m, MonadIO m) =>
-               Bool -> Basis -> SearchPath -> [FilePath]
+               Bool -> Basis -> ImportPaths -> [FilePath]
             -> m (E.Prog,
                   E.Warnings,
                   E.Imports,
