@@ -3,19 +3,13 @@
 import "/futlib/math"
 import "/futlib/array"
 
-module type linalg = {
-  type t
-
-  val dotprod: []t -> []t -> t
-}
-
 module linalg(T: numeric): {
   type t = T.t
-  val dotprod: []t -> []t -> t
-  val matvecmul: [][]t -> []t -> []t
-  val matmul: [][]t -> [][]t -> [][]t
-  val inv: [][]t -> [][]t
-  val ols: [][]t -> []t -> []t
+  val dotprod [n]: [n]t -> [n]t -> t
+  val matvecmul [n][m]: [n][m]t -> [m]t -> [n]t
+  val matmul [n][p][m]: [n][p]t -> [p][m]t -> [n][m]t
+  val inv [n]: [n][n]t -> [n][n]t
+  val ols [n][m]: [n][m]t -> [n]t -> [m]t
 } = {
   open T
   type t = T.t
@@ -29,7 +23,7 @@ module linalg(T: numeric): {
     map (\xs -> map (dotprod xs) (transpose yss)) xss
 
   -- Matrix inversion is implemented with Gauss-Jordan.
-  let gauss_jordan [n][m] (A: [n][m]t) (i: i32): [n][m]t =
+  let gauss_jordan [n][m] (A: [n][m]t): [n][m]t =
     loop A for i < n do
       let irow = A[0]
       let Ap = A[1:n]
@@ -48,7 +42,7 @@ module linalg(T: numeric): {
                   let padding[i] = from_i32 1
                   in concat row padding)
                  A (iota n)
-    let Ap' = gauss_jordan Ap 0
+    let Ap' = gauss_jordan Ap
     -- Drop the identity matrix at the front.
     in Ap'[0:n,n:n intrinsics.* 2]
 
