@@ -22,7 +22,7 @@ import Language.Futhark.TypeChecker (Imports, FileModule(..))
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark
 import Futhark.Doc.Generator
-import Futhark.Compiler (readProgram, dumpError, newFutharkConfig)
+import Futhark.Compiler (readLibrary, dumpError, newFutharkConfig)
 import Futhark.Pipeline (runFutharkM, FutharkM)
 import Futhark.Util.Options
 import Futhark.Util (directoryContents)
@@ -48,7 +48,8 @@ main = mainWithOptions initialDocConfig commandLineOptions f
               exitWith $ ExitFailure 1
             Just outdir -> do
               files <- liftIO $ futFiles dir
-              (Prog prog, _w, imports, _vns) <- readProgram False preludeBasis files
+              (Prog prog, _w, imports, _vns) <-
+                readLibrary False preludeBasis mempty files
               liftIO $ printDecs outdir imports prog
 
 futFiles :: FilePath -> IO [FilePath]

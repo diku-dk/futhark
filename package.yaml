@@ -47,6 +47,7 @@ dependencies:
   - blaze-html
   - template-haskell
   - th-lift-instances
+  - extra
 
 library:
   build-tools:
