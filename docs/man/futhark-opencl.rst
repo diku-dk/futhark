@@ -35,6 +35,10 @@ OPTIONS
   to the name indicated by the ``-o`` option to determine output
   file names.
 
+-I dir, --import dir
+  Add directory to the list of directories searched when locating
+  imported files.
+
 -v verbose
   Enable debugging output.  If compilation fails due to a compiler
   error, the result of the last successful compiler step will be
