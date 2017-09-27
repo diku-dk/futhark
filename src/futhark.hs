@@ -308,7 +308,7 @@ main = mainWithOptions newConfig commandLineOptions compile
           case futharkPipeline config of
             TypeCheck -> do
               -- No pipeline; just read the program and type check
-              (_, warnings, _, _) <- readProgram False preludeBasis [file]
+              (_, warnings, _, _) <- readProgram False preludeBasis file
               liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file

@@ -14,4 +14,4 @@ import Language.Futhark.Futlib()
 -- only a subset of the full futlib, but contains pre-type checked
 -- ASTs.
 preludeBasis :: Basis
-preludeBasis = $(embedBasis "futlib/prelude.fut" "/futlib/prelude")
+preludeBasis = $(embedBasis (searchPath ".") "futlib/prelude.fut" "/futlib/prelude")
