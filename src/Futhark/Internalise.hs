@@ -559,7 +559,7 @@ internaliseExp desc (E.LetPat tparams pat e body loc) = do
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
   internaliseFunBind $ E.FunBind False ofname retdecl (Info rettype) tparams params body Nothing loc
-  internaliseExp desc letbody
+  internaliseExp desc letbody <* unSubst ofname
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody _) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
