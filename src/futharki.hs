@@ -90,7 +90,7 @@ data InterpreterState =
 
 newInterpreterState :: IO InterpreterState
 newInterpreterState = do
-  res <- runExceptT $ readProgram False preludeBasis mempty []
+  res <- runExceptT $ readLibrary False preludeBasis mempty []
   case res of
     Right (prog, _, imports, src) ->
       return InterpreterState { interpProg = prog
