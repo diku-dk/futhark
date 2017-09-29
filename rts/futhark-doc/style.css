@@ -28,3 +28,7 @@ h3 {
 .comment {
     font-style: italic
 }
+
+.specs {
+    padding-left: 2ex;
+}
