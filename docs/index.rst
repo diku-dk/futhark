@@ -19,8 +19,6 @@ The particularly interested reader may also want to peruse the
 `publications <https://futhark-lang.org/docs.html#publications>`_, or
 the `development blog <https://futhark-lang.org/blog.html>`_.
 
-.. _`publications`: http://futhark-lang.org/docs.html#publications
-
 .. toctree::
    :caption: Table of Contents
    :maxdepth: 2
