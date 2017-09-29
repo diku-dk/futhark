@@ -7,6 +7,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State
 import Control.Monad.Reader
 import Data.FileEmbed
+import Data.List
 import Data.Monoid
 import qualified Data.Map as M
 import System.FilePath ((<.>), takeDirectory, takeExtension)
@@ -50,7 +51,9 @@ main = mainWithOptions initialDocConfig commandLineOptions f
               files <- liftIO $ futFiles dir
               (Prog prog, _w, imports, _vns) <-
                 readLibrary False preludeBasis mempty files
-              liftIO $ printDecs outdir imports prog
+              liftIO $ printDecs outdir (nubBy sameImport imports) prog
+
+        sameImport (x, _) (y, _) = x == y
 
 futFiles :: FilePath -> IO [FilePath]
 futFiles dir = filter isFut <$> directoryContents dir
