@@ -253,7 +253,7 @@ renderSigExp :: SigExpBase Info VName -> DocM Html
 renderSigExp e = case e of
   SigVar v _ -> renderQualName Signature v
   SigParens e' _ -> parens <$> renderSigExp e'
-  SigSpecs ss _ -> braces . mconcat <$> mapM specHtml ss
+  SigSpecs ss _ -> braces . (div ! A.class_ "specs") . mconcat <$> mapM specHtml ss
   SigWith s (TypeRef v t) _ ->
     do e' <- renderSigExp s
        --name <- renderQualName Type v
