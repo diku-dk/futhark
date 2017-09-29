@@ -146,9 +146,11 @@ visible ns vname@(VName name _) (FileModule env _)
   = vname == vname'
 visible _ _ _ = False
 
-renderDoc :: ToMarkup a => Maybe a -> Html
+renderDoc :: Maybe String -> Html
 renderDoc (Just doc) =
-  H.div ! A.class_ "comment" $ (fromString "-- | " <> toHtml doc)
+  H.div ! A.class_ "comment" $ toHtml $ comments $ lines doc
+  where comments [] = ""
+        comments (x:xs) = unlines $ ("-- | " ++ x) : map ("--"++) xs
 renderDoc Nothing = mempty
 
 renderEnv :: Env -> DocM Html
