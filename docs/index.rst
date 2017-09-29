@@ -10,12 +10,14 @@ Welcome to the documentation for the Futhark compiler and language.
 For a basic introduction, please see `the Futhark website
 <http://futhark-lang.org>`_.  To get started, read the page on
 :ref:`installation`.  Once the compiler has been installed, you might
-want to take a look at :ref:`language-overview` or
-:ref:`c-porting-guide`.  Documentation for the included basis library
-is also `available online <https://futhark-lang.org/docs/>`_.
+want to take a look at  :ref:`usage` or :ref:`language-overview`.
+
+Documentation for the included basis library is also `available online
+<https://futhark-lang.org/docs/>`_.
 
 The particularly interested reader may also want to peruse the
-`publications <https://futhark-lang.org/docs.html#publications>`_.
+`publications <https://futhark-lang.org/docs.html#publications>`_, or
+the `development blog <https://futhark-lang.org/blog.html>`_.
 
 .. _`publications`: http://futhark-lang.org/docs.html#publications
 
