@@ -20,7 +20,7 @@ documentation](https://futhark-lang.org/docs).
 Statistics
 ==========
 
-[![Issue Stats](http://issuestats.com/github/diku-dk/futhark/badge/pr)](http://issuestats.com/github/diku-dk/futhark) [![Issue Stats](http://issuestats.com/github/diku-dk/futhark/badge/issue)](http://issuestats.com/github/diku-dk/futhark) [![Build Status](https://travis-ci.org/diku-dk/futhark.svg?branch=master)](https://travis-ci.org/diku-dk/futhark) [![Project Stats](https://www.openhub.net/p/futharkcompiler/widgets/project_thin_badge.gif)](https://www.openhub.net/p/futharkcompiler)
+[![Build Status](https://travis-ci.org/diku-dk/futhark.svg?branch=master)](https://travis-ci.org/diku-dk/futhark) [![Project Stats](https://www.openhub.net/p/futharkcompiler/widgets/project_thin_badge.gif)](https://www.openhub.net/p/futharkcompiler)
 
 Installation
 ============
