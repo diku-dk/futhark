@@ -30,7 +30,7 @@ let drop [n] 't (i: i32) (x: [n]t) = x[i:]
 let reverse [n] 't (x: [n]t): [n]t = x[::-1]
 
 -- | Replace an element of the array with a new value.
-let update [n] 't (xs: *[n]t) (i: i32) (x: t): [n]t = xs with [i] <- x
+let update [n] 't (xs: *[n]t) (i: i32) (x: t): *[n]t = xs with [i] <- x
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
