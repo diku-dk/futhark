@@ -13,7 +13,7 @@ module type mt = {
 module f1(R: mt) = {
   type cell = R.cell
 
-  let init(bs: [#n]bool): [n]cell =
+  let init [n] (bs: [n]bool): [n]cell =
     map R.init bs
 }
 
@@ -31,5 +31,5 @@ module m1 = {
 
 module m2 = f2(m1)
 
-let main(bs: [#n]bool) =
+let main [n] (bs: [n]bool) =
   unzip (m2.init bs)

@@ -9,6 +9,5 @@
 -- }
 -- structure { Scatter 1 }
 
-let main(indexes: [#k]i32,
-         array: *[#n]i32): [n]i32 =
+let main [k][n] (indexes: [k]i32, array: *[n]i32): [n]i32 =
   scatter array indexes (replicate k 5)

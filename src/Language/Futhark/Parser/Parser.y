@@ -422,6 +422,13 @@ TypeExp :: { UncheckedTypeExp }
          | '['  ']' TypeExp          { TEArray $3 AnyDim $1 }
          | TypeExpAtom  { $1 }
 
+         -- Errors
+         | '[' DimDecl ']' %prec bottom
+           {% parseErrorAt (srclocOf ($3)) $ Just $
+                unlines ["missing array row type.",
+                         "Did you mean []"  ++ pretty (fst $2) ++ "?"]
+           }
+
 TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArgExp Name]) }
               : TypeExpApply TypeArg { (fst $1, snd $1 ++ [$2]) }
               | QualName TypeArg     { ($1, [$2]) }
@@ -447,15 +454,19 @@ FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 DimDecl :: { (DimDecl Name, SrcLoc) }
         : QualName
           { (NamedDim (fst $1), snd $1) }
-        | '#' id
-          { let L _ (ID name) = $2
-            in (BoundDim name, $1) }
         | declit
           { let L loc (DECLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
         | intlit
           { let L loc (INTLIT n) = $1
             in (ConstDim (fromIntegral n), loc) }
+
+        -- Errors
+        | '#' {% parseErrorAt (srclocOf $1) $ Just $
+                unlines ["found implicit size quantification.",
+                         "This is no longer supported.  Use explicit size parameters."]
+              }
+
 
 FunParam :: { PatternBase NoInfo Name }
 FunParam : InnerPattern { $1 }
@@ -627,6 +638,10 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | 'qid.(' Exp ')'
        { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
 
+     -- Errors
+     | '[' ']'
+       {% emptyArrayError $1 }
+
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordField (fst $1) $3 (snd $1) }
        | Exp             { RecordRecord $1 }
@@ -678,7 +693,7 @@ DimIndex :: { UncheckedDimIndex }
          | Exp2 ':' Exp2 ':' Exp2 { DimSlice (Just $1) (Just $3) (Just $5) }
          |      ':' Exp2 ':' Exp2 { DimSlice Nothing (Just $2) (Just $4) }
          | Exp2 ':'      ':' Exp2 { DimSlice (Just $1) Nothing (Just $4) }
-         |      ':'      ':' Exp2 {  DimSlice Nothing Nothing (Just $3) }
+         |      ':'      ':' Exp2 { DimSlice Nothing Nothing (Just $3) }
 
 VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
 
@@ -819,6 +834,10 @@ ArrayValue :  '[' Value ']'
            | empty '(' RowType ')'
              { ArrayValue (listArray (0,-1) []) $3 }
 
+           -- Errors
+           | '[' ']'
+             {% emptyArrayError $1 }
+
 RowType : '[' ']' RowType   { arrayOf $3 (Rank 1) Nonunique }
         | '[' ']' PrimType  { arrayOf (Prim $3) (Rank 1) Nonunique }
 
@@ -931,7 +950,7 @@ arrayFromList l = listArray (0, length l-1) l
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var (QualName [] (identName ident)) NoInfo $ srclocOf ident
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
-patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
 patternExp (PatternAscription pat _) = patternExp pat
 patternExp (PatternParens pat _) = patternExp pat
 patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
@@ -1018,8 +1037,17 @@ lexer cont = do
       cont x
 
 parseError :: L Token -> ParserMonad a
-parseError (L _ EOF) = throwError "Parse error: End of file"
-parseError tok       = throwError $ "Parse error at " ++ locStr (srclocOf tok)
+parseError (L loc EOF) = parseErrorAt (srclocOf loc) $ Just "unexpected end of file."
+parseError tok         = parseErrorAt (srclocOf tok) Nothing
+
+parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
+parseErrorAt loc Nothing = throwError $ locStr loc ++ ": Parse error.\n"
+parseErrorAt loc (Just s) = throwError $ locStr loc ++ ": " ++ s
+
+emptyArrayError :: SrcLoc -> ParserMonad a
+emptyArrayError loc =
+  parseErrorAt loc $
+  Just "write empty arrays as 'empty(t)', for element type 't'.\n"
 
 --- Now for the parser interface.
 

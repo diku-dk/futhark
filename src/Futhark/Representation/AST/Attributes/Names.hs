@@ -106,8 +106,8 @@ freeInStm :: (FreeAttr (ExpAttr lore),
               FreeIn (LetAttr lore),
               FreeIn (Op lore)) =>
              Stm lore -> Names
-freeInStm (Let pat attr e) =
-  precomputed attr $ freeIn attr <> freeInExp e <> freeIn pat
+freeInStm (Let pat (StmAux cs attr) e) =
+  freeIn cs <> precomputed attr (freeIn attr <> freeInExp e <> freeIn pat)
 
 -- | Return the set of variable names that are free in the given
 -- lambda, including shape annotations in the parameters.
@@ -204,8 +204,8 @@ instance FreeIn attr => FreeIn (PatElemT attr) where
 
 instance FreeIn Bindage where
   freeIn BindVar = mempty
-  freeIn (BindInPlace cs src is) =
-    freeIn cs <> freeIn src <> freeIn is
+  freeIn (BindInPlace src is) =
+    freeIn src <> freeIn is
 
 instance FreeIn ExtRetType where
   freeIn = mconcat . map freeIn . retTypeValues
@@ -224,6 +224,9 @@ instance FreeIn attr => FreeIn (PatternT attr) where
   freeIn (Pattern context values) =
     mconcat (map freeIn $ context ++ values) `S.difference` bound_here
     where bound_here = S.fromList $ map patElemName $ context ++ values
+
+instance FreeIn attr => FreeIn (StmAux attr) where
+  freeIn (StmAux cs attr) = freeIn cs <> freeIn attr
 
 -- | Either return precomputed free names stored in the attribute, or
 -- the freshly computed names.  Relies on lazy evaluation to avoid the

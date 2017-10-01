@@ -146,9 +146,11 @@ visible ns vname@(VName name _) (FileModule env _)
   = vname == vname'
 visible _ _ _ = False
 
-renderDoc :: ToMarkup a => Maybe a -> Html
+renderDoc :: Maybe String -> Html
 renderDoc (Just doc) =
-  H.div ! A.class_ "comment" $ (fromString "-- | " <> toHtml doc)
+  H.div ! A.class_ "comment" $ toHtml $ comments $ lines doc
+  where comments [] = ""
+        comments (x:xs) = unlines $ ("-- | " ++ x) : map ("--"++) xs
 renderDoc Nothing = mempty
 
 renderEnv :: Env -> DocM Html
@@ -246,7 +248,6 @@ modParamHtml (ModParam pname psig _ : mps) =
 
 prettyD :: DimDecl VName -> Html
 prettyD (NamedDim v) = prettyQualName v
-prettyD (BoundDim _) = mempty
 prettyD (ConstDim _) = mempty
 prettyD AnyDim = mempty
 
@@ -254,7 +255,7 @@ renderSigExp :: SigExpBase Info VName -> DocM Html
 renderSigExp e = case e of
   SigVar v _ -> renderQualName Signature v
   SigParens e' _ -> parens <$> renderSigExp e'
-  SigSpecs ss _ -> braces . mconcat <$> mapM specHtml ss
+  SigSpecs ss _ -> braces . (div ! A.class_ "specs") . mconcat <$> mapM specHtml ss
   SigWith s (TypeRef v t) _ ->
     do e' <- renderSigExp s
        --name <- renderQualName Type v
@@ -364,7 +365,6 @@ relativise dest src =
 prettyDimDecl :: DimDecl VName -> Html
 prettyDimDecl AnyDim = mempty
 prettyDimDecl (NamedDim v) = prettyQualName v
-prettyDimDecl (BoundDim v) = "#" <> vnameHtml v
 prettyDimDecl (ConstDim n) = toHtml (show n)
 
 prettyTypeArgExp :: TypeArgExp VName -> Html

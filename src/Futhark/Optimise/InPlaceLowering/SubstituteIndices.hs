@@ -70,11 +70,11 @@ substituteIndicesInPattern substs pat = do
   (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
   (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
   return (substs'', Pattern context values)
-  where sub substs' (PatElem name (BindInPlace cs src is) attr)
+  where sub substs' (PatElem name (BindInPlace src is) attr)
           | Just (cs2, src2, src2attr, is2) <- lookup src substs = do
               let attr' = attr `setType` typeOf src2attr
               return (update src name (cs2, name, attr', is2) substs',
-                      PatElem name (BindInPlace (cs++cs2) src2 $
+                      PatElem name (BindInPlace src2 $
                                     fullSlice (typeOf src2attr) $ is2++is) attr')
         sub substs' patElem =
           return (substs', patElem)
@@ -96,8 +96,9 @@ substituteIndicesInExp substs e = do
   where copyAnyConsumed =
           let consumingSubst substs' v
                 | Just (cs2, src2, src2attr, is2) <- lookup v substs = do
-                    row <- letExp (baseString v ++ "_row") $
-                           BasicOp $ Index cs2 src2 $ fullSlice (typeOf src2attr) is2
+                    row <- certifying cs2 $
+                           letExp (baseString v ++ "_row") $
+                           BasicOp $ Index src2 $ fullSlice (typeOf src2attr) is2
                     row_copy <- letExp (baseString v ++ "_row_copy") $
                                 BasicOp $ Copy row
                     return $ update v v ([],
@@ -124,7 +125,8 @@ substituteIndicesInVar substs v
   | Just ([], src2, _, []) <- lookup v substs =
     letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
   | Just (cs2, src2, src2_attr, is2) <- lookup v substs =
-    letExp "idx" $ BasicOp $ Index cs2 src2 $ fullSlice (typeOf src2_attr) is2
+    certifying cs2 $
+    letExp "idx" $ BasicOp $ Index src2 $ fullSlice (typeOf src2_attr) is2
   | otherwise =
     return v
 

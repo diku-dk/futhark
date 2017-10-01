@@ -5,5 +5,5 @@
 -- input { 1 [false, false] } output { false }
 -- input { 2 [false, false] } output { true }
 
-let main(i: i32, bs: [#n]bool): bool =
+let main [n] (i: i32, bs: [n]bool): bool =
   i >= n || bs[i]

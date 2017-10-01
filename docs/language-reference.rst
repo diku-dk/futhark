@@ -110,7 +110,7 @@ type ``()``.
    tuple_type: "(" ")" | "(" `type` ("[" "," `type` "]")* ")"
    record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
    type_arg: "[" [`dim`] "]" | `type`
-   dim: `qualid` | `decimal` | "#" `id`
+   dim: `qualid` | `decimal`
 
 An array value is written as a nonempty sequence of comma-separated
 values enclosed in square brackets: ``[1,2,3]``.  An array type is
@@ -219,6 +219,10 @@ literals and variables, but also more complicated forms.
    loopform :   "for" `id` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
+   index:   `exp` [":" [`exp`]] [":" [`exp`]]
+        : | [`exp`] ":" `exp` [":" [`exp`]]
+        : | [`exp`] [":" `exp`] ":" [`exp`]
+   nat_int : `decdigit`+
    fun:   `qualid`
       : | "(" `qualid` `atom`+ ")"
       : |  "#" `fieldid`
@@ -243,7 +247,7 @@ transformations.  For ease of understanding, they are presented here
 in natural text.
 
 * A type ascription (`exp` ``:`` `type`) cannot appear as an array
-  index, as it collides with the syntax for slicing.
+  index, as it conflicts with the syntax for slicing.
 
 * In ``f [x]``, there is am ambiguity between indexing the array ``f``
   at position ``x``, or calling the function ``f`` with the singleton
@@ -761,23 +765,14 @@ parameters), as well as in return types, *shape declarations* may be
 used to express invariants about the shapes of arrays
 that are accepted or produced by the function.  For example::
 
-  let f (a: [#n]i32) (b: [#n]i32): [n]i32 =
-    map (+) a b
-
-When prefixed with a ``#`` character, a name is *freshly bound*,
-whilst an unadorned name must be in scope.  In the example above,
-``#`` is not used in the return type, because we wish to refer to the
-``n`` bound by the parameters.  If we refer to the same freshly bound
-variable in multiple parameters (as above), each occurence must be
-prefixed with ``#``.  The sizes can also be explicitly quantified::
-
   let f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
     map (+) a b
 
-This has the same meaning as above.  It is an error to mix explicit
-and implicit sizes.  Note that the ``[n]`` parameter need not be
-explicitly passed when calling ``f``.  Any explicitly bound size must
-be used in a parameters.  This is an error::
+We use a *shape parameter*, ``[n]``, to explicitly quantify the names
+of shapes.  The ``[n]`` parameter need not be explicitly passed when
+calling ``f``.  Rather, its value is implicitly deduced from the
+arguments passed for the value parameters.  Any size parameter must be
+used in a value parameter.  This is an error::
 
   let f [n] (x: i32) = n
 

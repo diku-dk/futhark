@@ -43,12 +43,12 @@ optimiseBody (Body () stms res) =
   Body () <$> (concat <$> mapM optimiseStm stms) <*> pure res
 
 optimiseStm :: Stm Kernels -> UnstreamM [Stm Kernels]
-optimiseStm (Let pat () (Op (Kernel desc cs space ts body))) = do
+optimiseStm (Let pat aux (Op (Kernel desc space ts body))) = do
   stms' <- localScope (scopeOfKernelSpace space) $
            runBinder_ $ optimiseInKernelStms $ kernelBodyStms body
-  return [Let pat () $ Op $ Kernel desc cs space ts $ body { kernelBodyStms = stms' }]
-optimiseStm (Let pat () e) =
-  pure <$> (Let pat () <$> mapExpM optimise e)
+  return [Let pat aux $ Op $ Kernel desc space ts $ body { kernelBodyStms = stms' }]
+optimiseStm (Let pat aux e) =
+  pure <$> (Let pat aux <$> mapExpM optimise e)
   where optimise = identityMapper { mapOnBody = \scope -> localScope scope . optimiseBody }
 
 type InKernelM = Binder InKernel
@@ -57,23 +57,24 @@ optimiseInKernelStms :: [Stm InKernel] -> InKernelM ()
 optimiseInKernelStms = mapM_ optimiseInKernelStm
 
 optimiseInKernelStm :: Stm InKernel -> InKernelM ()
-optimiseInKernelStm (Let pat () (Op (GroupStream w max_chunk lam accs arrs)))
+optimiseInKernelStm (Let pat aux (Op (GroupStream w max_chunk lam accs arrs)))
   | max_chunk == w = do
       let GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
       letBindNames'_ [chunk_size] $ BasicOp $ SubExp $ constant (1::Int32)
 
       loop_body <- insertStmsM $ do
         forM_ (zip arr_params arrs) $ \(p,a) ->
-          letBindNames'_ [paramName p] $ BasicOp $ Index [] a $
-          fullSlice (paramType p)
+          letBindNames'_ [paramName p] $
+          BasicOp $ Index a $ fullSlice (paramType p)
           [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
         optimiseInBody body
 
       -- Accumulators are updated in-place and must hence be unique.
       let merge = zip (map (fmap (`toDecl` Unique)) acc_params) accs
-      letBind_ pat $ DoLoop [] merge (ForLoop chunk_offset Int32 w []) loop_body
-optimiseInKernelStm (Let pat () e) =
-  addStm =<< (Let pat () <$> mapExpM optimise e)
+      certifying (stmAuxCerts aux) $
+        letBind_ pat $ DoLoop [] merge (ForLoop chunk_offset Int32 w []) loop_body
+optimiseInKernelStm (Let pat aux e) =
+  addStm =<< (Let pat aux <$> mapExpM optimise e)
   where optimise = identityMapper
           { mapOnBody = \scope -> localScope scope . optimiseInBody }
 

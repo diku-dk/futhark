@@ -83,9 +83,9 @@ class ExpHandling lore where
 
 instance ExpHandling ExplicitMemory where
   opExp e = case e of
-    Op (ExpMem.Inner (ExpMem.Kernel a b c d kernelbody)) ->
+    Op (ExpMem.Inner (ExpMem.Kernel a c d kernelbody)) ->
       let kernelbody' = opKernelBody kernelbody
-      in Just $ Op (ExpMem.Inner (ExpMem.Kernel a b c d kernelbody'))
+      in Just $ Op (ExpMem.Inner (ExpMem.Kernel a c d kernelbody'))
     _ -> opExpBase e
 
 instance ExpHandling InKernel where
@@ -202,7 +202,7 @@ class OverviewPrintOp lore where
   opPrettyOp :: Exp lore -> Res lore String
 
 instance OverviewPrintOp ExplicitMemory where
-  opPrettyOp (Op (ExpMem.Inner (ExpMem.Kernel (KernelDebugHints name _) _ _ _ _))) =
+  opPrettyOp (Op (ExpMem.Inner (ExpMem.Kernel (KernelDebugHints name _) _ _ _))) =
     Res ("kernel " ++ name)
   opPrettyOp e = Res $ pretty e
 

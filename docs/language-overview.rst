@@ -227,29 +227,25 @@ type and parameter types of a function declaration.  These can be used
 to express invariants about the shapes of arrays that are accepted or
 produced by the function, e.g::
 
-  let f (a: [#n]i32): [n]i32 =
+  let f [n] (a: [n]i32): [n]i32 =
     map (+1) a
 
 The above declaration specifies a function that accepts an array
 containing ``n`` elements and returns an array likewise containing
-``n`` elements.  When prefixed with a ``#`` character, a name is
-*freshly bound*, whilst an unadorned name must be in scope.  In the
-example above, we do not use a ``#`` in the return type, because we
-wish to refer to the ``n`` bound by the parameters.  If we refer to
-the same freshly bound variable in multiple parameters (see below),
-each occurence must be prefixed with ``#``.  A shape declaration can
-also be an integer constant (with no suffix).
+``n`` elements.  The ``[n]`` notation indicates a *shape parameter*,
+which need not be passed explicitly when calling the function.  A
+shape declaration can also be an integer constant (with no suffix).
 
 The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  let dotProduct(a: [#n]i32, b: [#n]i32): i32 =
+  let dot_product [n][n] (a: [n]i32, b: [n]i32): i32 =
     reduce (+) 0 (map (*) a b)
 
 Or matrix multiplication::
 
-  let matMult(x: [#n][#m]i32, y: [#m][#n]i32): [n][n]i32 =
+  let matmult [n][m][p] (x: [n][m]i32, y: [m][p]i32): [n][p]i32 =
     ...
 
 The dimension names bound in a parameter shape declaration can be used
@@ -305,7 +301,7 @@ simply a case of normal name shadowing.
 For example, this loop implements the "imperative" version of matrix
 multiplication of an ``m * o`` with an ``o * n`` matrix::
 
-  let matmult(a: [#m][#o]f32,  b: [#o][#n]f32): [m][n]f32 =
+  let matmult [m][o][n] (a: [m][o]f32,  b: [o][n]f32): [m][n]f32 =
     let res = replicate(m, replicate(n,0f32)) in
     loop res for i < m do
         loop res for j < n do

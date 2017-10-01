@@ -6,7 +6,7 @@
 -- output {
 --   [8,9,12]
 -- }
-let main (xs: [#n]i32, ys: [#n]i32): []i32 =
+let main [n] (xs: [n]i32, ys: [n]i32): []i32 =
   map (\(x: i32, y: i32): i32  ->
          let tmp1 = iota(x)
          let tmp2 = map (*y) tmp1 in

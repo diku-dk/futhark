@@ -21,12 +21,11 @@ import Futhark.Tools
 -- @map(scan)
 iswim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
-      -> Certificates
       -> SubExp
       -> Lambda
       -> [(SubExp, VName)]
       -> Maybe (m ())
-iswim res_pat cs w scan_fun scan_input
+iswim res_pat w scan_fun scan_input
   | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun = Just $ do
       let (accs, arrs) = unzip scan_input
       arrs' <- transposedArrays arrs
@@ -47,33 +46,32 @@ iswim res_pat cs w scan_fun scan_input
           scan_input' = map (first Var) $
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
-          map_body = mkBody [Let (setPatternOuterDimTo w map_pat) () $
-                             Op $ Scan cs w scan_fun' scan_input'] $
+          map_body = mkBody [Let (setPatternOuterDimTo w map_pat) (defAux ()) $
+                             Op $ Scan w scan_fun' scan_input'] $
                             map Var $ patternNames map_pat
 
       res_pat' <- fmap (basicPattern' []) $
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
-      addStm $ Let res_pat' () $ Op $ Map map_cs map_w map_fun' map_arrs'
+      addStm $ Let res_pat' (StmAux map_cs ()) $ Op $ Map map_w map_fun' map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do
         let perm = [1,0] ++ [2..arrayRank (identType from)-1]
-        addStm $ Let (basicPattern' [] [to]) () $
-                     BasicOp $ Rearrange [] perm $ identName from
+        addStm $ Let (basicPattern' [] [to]) (defAux ()) $
+                     BasicOp $ Rearrange perm $ identName from
   | otherwise = Nothing
 
 -- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
 -- @map(reduce)
 irwim :: (MonadBinder m, Lore m ~ SOACS, LocalScope SOACS m) =>
          Pattern
-      -> Certificates
       -> SubExp
       -> Commutativity -> Lambda
       -> [(SubExp, VName)]
       -> Maybe (m ())
-irwim res_pat cs w comm red_fun red_input
+irwim res_pat w comm red_fun red_input
   | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible red_fun = Just $ do
       let (accs, arrs) = unzip red_input
       arrs' <- transposedArrays arrs
@@ -81,7 +79,7 @@ irwim res_pat cs w comm red_fun red_input
       -- replicate?  We also assume that it is non-empty.
       let indexAcc (Var v) = do
             v_t <- lookupType v
-            letSubExp "acc" $ BasicOp $ Index [] v $
+            letSubExp "acc" $ BasicOp $ Index v $
               fullSlice v_t [DimFix $ intConst Int32 0]
           indexAcc Constant{} =
             fail "irwim: array accumulator is a constant."
@@ -100,9 +98,9 @@ irwim res_pat cs w comm red_fun red_input
           red_pat = stripPatternOuterDim map_pat
 
       map_body <-
-        case irwim red_pat cs w comm red_fun' red_input' of
+        case irwim red_pat w comm red_fun' red_input' of
           Nothing ->
-            return $ mkBody [Let red_pat () $ Op $ Reduce cs w comm red_fun' red_input'] $
+            return $ mkBody [Let red_pat (defAux ()) $ Op $ Reduce w comm red_fun' red_input'] $
             map Var $ patternNames map_pat
           Just m -> localScope (scopeOfLParams map_params) $ do
             map_body_bnds <- collectStms_ m
@@ -110,7 +108,7 @@ irwim res_pat cs w comm red_fun red_input
 
       let map_fun' = Lambda map_params map_body map_rettype
 
-      addStm $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
+      addStm $ Let res_pat (StmAux map_cs ()) $ Op $ Map map_w map_fun' arrs'
   | otherwise = Nothing
 
 rwimPossible :: Lambda
@@ -119,9 +117,9 @@ rwimPossible fun
   | Body _ [bnd] res <- lambdaBody fun, -- Body has a single binding
     map_pat <- stmPattern bnd,
     map Var (patternNames map_pat) == res, -- Returned verbatim
-    Op (Map map_cs map_w map_fun map_arrs) <- stmExp bnd,
+    Op (Map map_w map_fun map_arrs) <- stmExp bnd,
     map paramName (lambdaParams fun) == map_arrs =
-      Just (map_pat, map_cs, map_w, map_fun)
+      Just (map_pat, stmCerts bnd, map_w, map_fun)
   | otherwise =
       Nothing
 
@@ -129,7 +127,7 @@ transposedArrays :: MonadBinder m => [VName] -> m [VName]
 transposedArrays arrs = forM arrs $ \arr -> do
   t <- lookupType arr
   let perm = [1,0] ++ [2..arrayRank t-1]
-  letExp (baseString arr) $ BasicOp $ Rearrange [] perm arr
+  letExp (baseString arr) $ BasicOp $ Rearrange perm arr
 
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =

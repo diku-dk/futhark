@@ -714,27 +714,6 @@ ixFunHasIndex ixfun = case ixfun of
   IxFun.Reshape ixfun' _ -> ixFunHasIndex ixfun'
   IxFun.Repeat ixfun' _ _ -> ixFunHasIndex ixfun'
 
--- If a dimension has size 1, remove it.  Only look at this specific pattern,
--- since it occurs in kernels.
-ixFunRemoveEmptyDimensions :: Eq v => IxFun.IxFun (PrimExp v) -> IxFun.IxFun (PrimExp v)
-ixFunRemoveEmptyDimensions (IxFun.Index
-                            (IxFun.Permute
-                             (IxFun.Direct shape)
-                             permutation) slice) =
-  let shape_ix_removed = map snd $ filter (\(dim, _i) -> dim == one)
-        $ zip shape [0..]
-      shape' = filter (/= one) shape
-      (permutation', slice_ix_keep) = unzip
-        $ filter (\(perm, _i) -> perm `notElem` shape_ix_removed)
-        $ zip permutation [(0::Int)..]
-      permutation'' = map (\perm -> perm - length (filter (< perm)
-                                                   shape_ix_removed)) permutation'
-      slice' = map fst
-        $ filter (\(_s, i) -> i `elem` slice_ix_keep) $ zip slice [0..]
-  in IxFun.Index (IxFun.Permute (IxFun.Direct shape') permutation'') slice'
-  where one = ExpMem.ValueExp (IntValue (Int32Value 1))
-ixFunRemoveEmptyDimensions ixfun = ixfun
-
 -- Do the two index functions describe the same range?  In other words, does one
 -- array take up precisely the same location (offset) and size as another array
 -- relative to the beginning of their respective memory blocks?  FIXME: This can
@@ -745,11 +724,7 @@ ixFunsCompatible :: (Eq v, Show v) =>
                     (MName, IxFun.IxFun (PrimExp v)) -> (MName, IxFun.IxFun (PrimExp v)) ->
                     Bool
 ixFunsCompatible (mem0, ixfun0) (mem1, ixfun1) =
-  let ixfun0' = ixFunRemoveEmptyDimensions ixfun0
-      ixfun1' = ixFunRemoveEmptyDimensions ixfun1
-      res_raw = ixFunsCompatibleRaw ixfun0 ixfun1
-      res_simplified = ixFunsCompatibleRaw ixfun0' ixfun1'
-      res = res_raw || res_simplified
+  let res = ixFunsCompatibleRaw ixfun0 ixfun1
 
       debug = do
         putStrLn $ replicate 70 '~'
@@ -757,10 +732,7 @@ ixFunsCompatible (mem0, ixfun0) (mem1, ixfun1) =
         putStrLn ("ixfun0 " ++ pretty mem0 ++ ": " ++ show ixfun0)
         putStrLn ("ixfun1 " ++ pretty mem1 ++ ": " ++ show ixfun1)
         putStrLn "---"
-        putStrLn ("ixfun0': " ++ show ixfun0')
-        putStrLn ("ixfun1': " ++ show ixfun1')
-        putStrLn "---"
-        putStrLn ("res: " ++ L.intercalate ", " (map show [res_raw, res_simplified, res]))
+        putStrLn ("res: " ++ show res)
         putStrLn $ replicate 70 '~'
   in withDebug debug res
 
@@ -817,7 +789,7 @@ maxsToReplacement vs = do
   vmax <- newVName "max"
   let emax = BasicOp $ BinOp (SMax Int64) (Var m0) (Var m1)
       new_stm = Let (Pattern [] [PatElem vmax BindVar
-                                 (ExpMem.Scalar (IntType Int64))]) () emax
+                                 (ExpMem.Scalar (IntType Int64))]) (defAux ()) emax
       prev_stms = es0 ++ es1 ++ [new_stm]
   return $ Replacement vmax prev_stms
 
@@ -837,7 +809,7 @@ insertAndReplace replaces0 fundef =
         transformStm :: Stm ExplicitMemory ->
                         State (M.Map VName Replacement) [Stm ExplicitMemory]
         transformStm stm@(Let (Pattern [] [PatElem mem_name BindVar
-                                           (ExpMem.MemMem _ pat_space)]) ()
+                                           (ExpMem.MemMem _ pat_space)]) _
                           (Op (ExpMem.Alloc _ space))) = do
           replaces <- get
           case M.lookup mem_name replaces of
@@ -845,7 +817,7 @@ insertAndReplace replaces0 fundef =
               let prev = replStms repl
                   new = Let (Pattern [] [PatElem mem_name BindVar
                                          (ExpMem.MemMem (Var (replName repl))
-                                          pat_space)]) ()
+                                          pat_space)]) (defAux ())
                         (Op (ExpMem.Alloc (Var (replName repl)) space))
               -- We should only generate the new statements once.
               modify $ M.adjust (\repl0 -> repl0 { replStms = [] }) mem_name
@@ -902,7 +874,7 @@ transformFromKernelMaxSizedMappings
             modifyNameSource $ runState $ runBinderT new_full_size_m mempty
           let alloc_size_fd_stm =
                 Let (Pattern [] [PatElem final_dim_max_v BindVar
-                                 (ExpMem.Scalar (IntType Int32))]) () final_dim_max_e
+                                 (ExpMem.Scalar (IntType Int32))]) (defAux ()) final_dim_max_e
               alloc_size_stms' = alloc_size_fd_stm : alloc_size_stms
 
               vars_kmem =

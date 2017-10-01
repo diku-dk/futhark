@@ -26,6 +26,7 @@ module Futhark.Internalise.Monad
   , lookupMod
   , lookupSubst
   , fulfillingPromise
+  , unSubst
 
   , bindingIdentTypes
   , bindingParamTypes
@@ -179,6 +180,8 @@ instance MonadBinder InternaliseM where
     InternaliseM . addStm
   collectStms (InternaliseM m) =
     InternaliseM $ collectStms m
+  certifying cs (InternaliseM m) =
+    InternaliseM $ certifying cs m
 
 runInternaliseM :: MonadFreshNames m =>
                    InternaliseM ()
@@ -289,6 +292,11 @@ fulfillingPromise name = do
               fulfill name' v' promises
           | otherwise =
               return ()
+
+-- HACK
+unSubst :: VName -> InternaliseM ()
+unSubst name =
+  modify $ \s -> s { stateDecSubsts = M.delete name $ stateDecSubsts s }
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a

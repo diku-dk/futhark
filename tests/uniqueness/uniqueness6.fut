@@ -5,7 +5,7 @@
 -- output {
 --   [1,2,3]
 -- }
-let main(arr:  [#n]i32): []i32 =
+let main [n] (arr:  [n]i32): []i32 =
   let  newarr  =
        (let notused  = arr
         in replicate n 0)

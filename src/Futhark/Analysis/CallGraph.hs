@@ -68,19 +68,19 @@ buildCGexp callees (Apply fname _ _)
   | fname `elem` callees = callees
   | otherwise            = S.insert fname callees
 buildCGexp callees (Op op) =
-  case op of Map _ _ lam _ ->
+  case op of Map _ lam _ ->
                buildCGbody callees $ lambdaBody lam
-             Reduce _ _ _ lam _ ->
+             Reduce _ _ lam _ ->
                buildCGbody callees $ lambdaBody lam
-             Scan _ _ lam _ ->
+             Scan _ lam _ ->
                buildCGbody callees $ lambdaBody lam
-             Redomap _ _ _ lam0 lam1 _ _ ->
+             Redomap _ _ lam0 lam1 _ _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (lambdaBody lam1)
-             Scanomap _ _ lam0 lam1 _ _ ->
+             Scanomap _ lam0 lam1 _ _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (lambdaBody lam1)
-             Stream _ _ (Parallel _ _ lam0 _) lam _ ->
+             Stream _ (Parallel _ _ lam0 _) lam _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (extLambdaBody lam)
-             Stream _ _ _ lam _ ->
+             Stream _ _ lam _ ->
                buildCGbody callees (extLambdaBody lam)
              Scatter {} ->
                callees

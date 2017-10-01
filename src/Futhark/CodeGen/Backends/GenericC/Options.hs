@@ -40,7 +40,7 @@ data OptionArgument = NoArgument
 -- terminate with error code 1.
 generateOptionParser :: String -> [Option] -> C.Func
 generateOptionParser fname options =
-  [C.cfun|int $id:fname(int argc, char* const argv[]) {
+  [C.cfun|int $id:fname(struct futhark_context_config *cfg, int argc, char* const argv[]) {
        int $id:chosen_option;
 
        static struct option long_options[] = { $inits:option_fields, {0, 0, 0, 0} };

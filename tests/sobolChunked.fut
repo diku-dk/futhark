@@ -30,7 +30,7 @@ let testBit(n: i32, ind: i32): bool =
 ----    Currently Futhark hoists it outside, but this will
 ----    not allow fusing the filter with reduce -> redomap,
 -----------------------------------------------------------------
-let xorInds(n: i32) (dir_vs: [#num_bits]i32): i32 =
+let xorInds [num_bits] (n: i32) (dir_vs: [num_bits]i32): i32 =
     let reldv_vals = map (\(dv: i32, i: i32): i32  ->
                             if testBit(grayCode(n),i)
                             then dv else 0
@@ -53,19 +53,19 @@ let index_of_least_significant_0(num_bits: i32, n: i32): i32 =
     else      (false,k,   n   )
   in k
 
-let sobolRecI(sob_dir_vs: [][#num_bits]i32, prev: []i32, n: i32): []i32 =
+let sobolRecI [num_bits] (sob_dir_vs: [][num_bits]i32, prev: []i32, n: i32): []i32 =
   let bit = index_of_least_significant_0(num_bits,n) in
   map  (\(vct_prev: ([]i32,i32)): i32  ->
          let (vct_row, prev) = vct_prev in
          vct_row[bit] ^ prev
       ) (zip (sob_dir_vs) prev)
 
-let recM(sob_dirs:  [][#num_bits]i32, i: i32 ): []i32 =
+let recM [num_bits] (sob_dirs:  [][num_bits]i32, i: i32 ): []i32 =
   let bit= index_of_least_significant_0(num_bits,i) in
   map (\(row: []i32): i32 -> unsafe row[bit]) (sob_dirs )
 
 -- computes sobol numbers: n,..,n+chunk-1
-let sobolChunk(dir_vs: [#len][#num_bits]i32, n: i32, chunk: i32): [chunk][]f64 =
+let sobolChunk [len] [num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32): [chunk][]f64 =
   let sob_fact= 1.0 / f64(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
   let contrbs = map (\(k: i32): []i32  ->
@@ -86,13 +86,13 @@ let sobolChunk(dir_vs: [#len][#num_bits]i32, n: i32, chunk: i32): [chunk][]f64 =
 -- MAIN
 ----------------------------------------
 
-let main(num_mc_it: i32,
-                  dir_vs_nosz: [][#num_bits]i32,
-                  num_dates: i32,
-                  num_und: i32): [][]f64 =
+let main [num_bits] (num_mc_it: i32,
+                     dir_vs_nosz: [][num_bits]i32,
+                     num_dates: i32,
+                     num_und: i32): [][]f64 =
   let sobvctsz  = num_dates*num_und
   let dir_vs    = reshape (sobvctsz,num_bits) dir_vs_nosz
-  let sobol_mat = stream_map (\(ns: [#chunk]i32): [][sobvctsz]f64  ->
+  let sobol_mat = stream_map (\[chunk] (ns: [chunk]i32): [][sobvctsz]f64  ->
                                 sobolChunk(dir_vs, ns[0], chunk)
                            ) (iota(num_mc_it) ) in
 

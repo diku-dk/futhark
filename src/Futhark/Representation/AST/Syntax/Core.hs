@@ -282,14 +282,12 @@ unitSlice offset n = DimSlice offset n 1
 -- | How a name in a let-binding is bound - either as a plain
 -- variable, or in the form of an in-place update.
 data Bindage = BindVar -- ^ Bind as normal.
-             | BindInPlace Certificates VName (Slice SubExp)
+             | BindInPlace VName (Slice SubExp)
                -- ^ Perform an in-place update, in which the value
                -- being bound is inserted at the given index in the
                -- array referenced by the 'VName'.  Note that the
                -- result of the binding is the entire array, not just
-               -- the value that has been inserted..  The
-               -- 'Certificates' contain bounds checking certificates
-               -- (if necessary).
+               -- the value that has been inserted.
                   deriving (Ord, Show, Eq)
 
 -- | An element of a pattern - consisting of an name (essentially a

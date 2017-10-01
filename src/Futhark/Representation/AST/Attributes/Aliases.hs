@@ -50,7 +50,7 @@ primOpAliases ConvOp{} = [mempty]
 primOpAliases CmpOp{} = [mempty]
 primOpAliases UnOp{} = [mempty]
 
-primOpAliases (Index _ ident _) =
+primOpAliases (Index ident _) =
   [vnameAliases ident]
 primOpAliases Iota{} =
   [mempty]
@@ -60,13 +60,13 @@ primOpAliases (Repeat _ _ v) =
   [vnameAliases v]
 primOpAliases Scratch{} =
   [mempty]
-primOpAliases (Reshape _ _ e) =
+primOpAliases (Reshape _ e) =
   [vnameAliases e]
-primOpAliases (Rearrange _ _ e) =
+primOpAliases (Rearrange _ e) =
   [vnameAliases e]
-primOpAliases (Rotate _ _ e) =
+primOpAliases (Rotate _ e) =
   [vnameAliases e]
-primOpAliases (Split _ _ sizeexps e) =
+primOpAliases (Split _ sizeexps e) =
   replicate (length sizeexps) (vnameAliases e)
 primOpAliases Concat{} =
   [mempty]
@@ -76,7 +76,7 @@ primOpAliases Manifest{} =
   [mempty]
 primOpAliases Assert{} =
   [mempty]
-primOpAliases (Partition _ n _ arr) =
+primOpAliases (Partition n _ arr) =
   replicate n mempty ++ map vnameAliases arr
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
@@ -151,7 +151,7 @@ consumedInPattern pat =
   mconcat (map (consumedInBindage . patElemBindage) $
            patternContextElements pat ++ patternValueElements pat)
   where consumedInBindage BindVar = mempty
-        consumedInBindage (BindInPlace _ src _) = vnameAliases src
+        consumedInBindage (BindInPlace src _) = vnameAliases src
 
 -- | Something that contains alias information.
 class AliasesOf a where

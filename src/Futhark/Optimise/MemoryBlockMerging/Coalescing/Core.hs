@@ -189,7 +189,7 @@ recordOptimisticCoalescing src offset ixfun_slices dst dst_memloc bindage = do
   -- just the result of an in-place update into it.
   case bindage of
     BindVar -> return ()
-    BindInPlace _ orig _ ->
+    BindInPlace orig _ ->
       modifyCurCoalescedIntos $ insertOrUpdate dst (orig, zeroOffset, [])
 
   modifyCurMemsCoalesced $ M.insert src dst_memloc
@@ -272,7 +272,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       -- updated.
       let ixfun_slices = case bindage of
             BindVar -> []
-            BindInPlace _ _ slice ->
+            BindInPlace _ slice ->
               let slice' = map (primExpFromSubExp (IntType Int32) <$>) slice
               in [slice']
       case e of
@@ -281,7 +281,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
           tryCoalesce dst ixfun_slices bindage src zeroOffset
 
         -- Concat.
-        BasicOp (Concat _ 0 src0 src0s _) -> do
+        BasicOp (Concat 0 src0 src0s _) -> do
           let srcs = src0 : src0s
           shapes <- mapM ((memSrcShape <$>) . lookupVarMem) srcs
           let getOffsets offset_prev shape =

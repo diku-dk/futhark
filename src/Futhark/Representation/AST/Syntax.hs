@@ -33,6 +33,7 @@ module Futhark.Representation.AST.Syntax
   , PatElemT (..)
   , PatternT (..)
   , Pattern
+  , StmAux(..)
   , Stm(..)
   , Result
   , BodyT(..)
@@ -98,9 +99,15 @@ instance Monoid (PatternT lore) where
 -- | A type alias for namespace control.
 type Pattern lore = PatternT (LetAttr lore)
 
+-- | Auxilliary Information associated with a statement.
+data StmAux attr = StmAux { stmAuxCerts :: !Certificates
+                          , stmAuxAttr :: attr
+                          }
+                  deriving (Ord, Show, Eq)
+
 -- | A local variable binding.
 data Stm lore = Let { stmPattern :: Pattern lore
-                    , stmAttr :: ExpAttr lore
+                    , stmAux :: StmAux (ExpAttr lore)
                     , stmExp :: Exp lore
                     }
 
@@ -187,18 +194,16 @@ data BasicOp lore
 
   -- Primitive array operations
 
-  | Index Certificates VName (Slice SubExp)
-  -- ^ 1st arg are (optional) certificates for bounds
-  -- checking.  If given (even as an empty list), no
-  -- run-time bounds checking is done.
+  | Index VName (Slice SubExp)
+  -- ^ The certificates for bounds-checking are part of the 'Stm'.
 
-  | Split Certificates Int [SubExp] VName
-  -- ^ 3rd arg is sizes of arrays you get back, which is
+  | Split Int [SubExp] VName
+  -- ^ 2nd arg is sizes of arrays you get back, which is
   -- different from what the external language does.
   -- In the core language,
   -- @a = [1,2,3,4]; split@0( (1,0,2) , a ) = {[1], [], [2,3]}@
 
-  | Concat Certificates Int VName [VName] SubExp
+  | Concat Int VName [VName] SubExp
   -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy VName
@@ -230,21 +235,21 @@ data BasicOp lore
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
-  | Reshape Certificates (ShapeChange SubExp) VName
+  | Reshape (ShapeChange SubExp) VName
    -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-  | Rearrange Certificates [Int] VName
+  | Rearrange [Int] VName
   -- ^ Permute the dimensions of the input array.  The list
   -- of integers is a list of dimensions (0-indexed), which
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Rotate Certificates [SubExp] VName
+  | Rotate [SubExp] VName
   -- ^ Rotate the dimensions of the input array.  The list of
   -- subexpressions specify how much each dimension is rotated.  The
   -- length of this list must be equal to the rank of the array.
 
-  | Partition Certificates Int VName [VName]
+  | Partition Int VName [VName]
     -- ^ First variable is the flag array, second is the element
     -- arrays.  If no arrays are given, the returned offsets are zero,
     -- and no arrays are returned.

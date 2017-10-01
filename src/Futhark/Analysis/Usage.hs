@@ -29,7 +29,7 @@ usageInStm (Let pat lore e) =
           <> mconcat (map consumptionInPatElem $ patternElements pat)
         usageInExpLore =
           UT.usages $ freeIn lore
-        consumptionInPatElem (PatElem _ (BindInPlace _ src _) _) =
+        consumptionInPatElem (PatElem _ (BindInPlace src _) _) =
           UT.consumedUsage src
         consumptionInPatElem _ =
           mempty

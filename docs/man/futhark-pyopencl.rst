@@ -48,6 +48,10 @@ OPTIONS
   point in the Futhark program, with matching parameters and return
   value.
 
+-I dir, --import dir
+  Add directory to the list of directories searched when locating
+  imported files.
+
 -h
   Print help text to standard output and exit.
 
