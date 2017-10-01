@@ -125,6 +125,7 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp _ = False
 
 safeExp (DoLoop _ _ _ body) = safeBody body
+safeExp (Apply fname _ _) = isBuiltInFunction fname
 safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . stmExp) (bodyStms tbranch) &&
