@@ -818,7 +818,7 @@ compilePrimValue (FloatValue (Float64Value v))
       Var "np.nan"
   | otherwise = Constant $ value v
 compilePrimValue (BoolValue v) = simpleCall "bool" [Constant $ BoolValue v]
-compilePrimValue Checked = Var "Cert"
+compilePrimValue Checked = Var "True"
 
 compileExp :: Imp.Exp -> CompilerM op s PyExp
 
@@ -917,6 +917,8 @@ compileCode (Imp.SetScalar vname exp1) = do
   stm $ Assign name' exp1'
 
 compileCode Imp.DeclareMem{} = return ()
+compileCode (Imp.DeclareScalar v Cert) =
+  stm $ Assign (Var $ compileName v) $ Var "True"
 compileCode Imp.DeclareScalar{} = return ()
 
 compileCode (Imp.DeclareArray name DefaultSpace t vs) = do
