@@ -98,6 +98,10 @@ instance Substitute attr => Substitute (PatternT attr) where
   substituteNames substs (Pattern context values) =
     Pattern (substituteNames substs context) (substituteNames substs values)
 
+instance Substitute Certificates where
+  substituteNames substs (Certificates cs) =
+    Certificates $ substituteNames substs cs
+
 instance Substitutable lore => Substitute (Stm lore) where
   substituteNames substs (Let pat annot e) =
     Let
@@ -117,7 +121,7 @@ replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = const $ return . substituteNames substs
-                 , mapOnCertificates = return . map (substituteNames substs)
+                 , mapOnCertificates = return . substituteNames substs
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
                  , mapOnLParam = return . substituteNames substs

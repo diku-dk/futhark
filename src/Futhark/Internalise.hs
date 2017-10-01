@@ -349,7 +349,7 @@ internaliseExp desc (E.Index e idxs loc) = do
   let index v = do
         v_t <- lookupType v
         return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
-  certifying (concat idx_cs) $
+  certifying (mconcat idx_cs) $
     letSubExps desc =<< mapM index vs
 
 internaliseExp desc (E.TupLit es _) =
@@ -699,7 +699,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
             rowtype = sname_t `setArrayDims` sliceDims slice
         ve'' <- ensureShape asserting "shape of value does not match shape of source array"
                 loc rowtype "lw_val_correct_shape" ve'
-        certifying (concat idx_cs) $
+        certifying (mconcat idx_cs) $
           letInPlace "letwith_dst" sname (fullSlice sname_t idxs') $ BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
@@ -798,7 +798,7 @@ internaliseExp _ (E.Split i splitexp arrexp loc) = do
     let indexConds = zipWith (\beg end -> BasicOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
                      (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
     indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
-    forM indexChecks$ \cnd ->
+    fmap Certificates $ forM indexChecks $ \cnd ->
       letExp "split_index_assert" $ BasicOp $ I.Assert cnd "index out of bounds" loc
 
   -- Calculate diff between each split index
@@ -830,8 +830,8 @@ internaliseExp desc (E.Concat i x ys loc) = do
             updims = zipWith3 updims' [0..] (I.arrayDims xt)
             updims' j xd yd | i == j    = yd
                             | otherwise = xd
-        matchcs <- asserting $
-                   concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
+        matchcs <- asserting $ Certificates . concat <$>
+                   mapM (zipWithM matches x_inner_dims) ys_inner_dims
         yarrs'  <- forM yarrs $ \yarr -> do
           yt <- lookupType yarr
           certifying matchcs $ letExp "concat_y_reshaped" $
@@ -989,7 +989,7 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
        (pure $ BasicOp $ I.UnOp (I.Abs Int32) j_m_i)
        (pure $ I.BasicOp $ I.UnOp (I.Abs Int32) s')
 
-  checked <- asserting $ do
+  checked <- asserting $ fmap Certificates $ do
     -- Bounds checks depend on whether we are slicing forwards or
     -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
     -- backwards, '-1 <= j && j <= i'.  In both cases, we check '0 <=

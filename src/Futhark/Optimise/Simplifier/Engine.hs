@@ -666,11 +666,13 @@ simplifyResult ds es = do
   where simplify' (Var name) = do
           bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
           case bnd of
-            Just (Constant v, []) -> do changed
-                                        return $ Constant v
-            Just (Var id', []) -> do changed
-                                     usedName id'
-                                     return $ Var id'
+            Just (Constant v, cs)
+              | cs == mempty -> do changed
+                                   return $ Constant v
+            Just (Var id', cs)
+              | cs == mempty -> do changed
+                                   usedName id'
+                                   return $ Var id'
             _              -> do usedName name
                                  return $ Var name
         simplify' (Constant v) =
@@ -976,11 +978,11 @@ consumeResult = mapM_ inspect
         inspect (Observe, _) = return ()
 
 instance Simplifiable Certificates where
-  simplify = fmap (nub . concat) . mapM check
+  simplify (Certificates ocs) = Certificates . nub . concat <$> mapM check ocs
     where check idd = do
             vv <- getsEngineState $ ST.lookupSubExp idd . stateVtable
             case vv of
-              Just (Constant Checked, cs) -> return cs
+              Just (Constant Checked, Certificates cs) -> return cs
               Just (Var idd', _) -> do usedName idd'
                                        return [idd']
               _ -> do usedName idd

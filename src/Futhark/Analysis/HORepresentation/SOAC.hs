@@ -205,7 +205,7 @@ identityTransform _ = False
 
 combineTransforms :: ArrayTransform -> ArrayTransform -> Maybe ArrayTransform
 combineTransforms (Rearrange cs2 perm2) (Rearrange cs1 perm1) =
-  Just $ Rearrange (cs1++cs2) $ perm2 `rearrangeCompose` perm1
+  Just $ Rearrange (cs1<>cs2) $ perm2 `rearrangeCompose` perm1
 combineTransforms _ _ = Nothing
 
 -- | Given an expression, determine whether the expression represents
@@ -254,7 +254,7 @@ isVarInput _                                  = Nothing
 isVarishInput :: Input -> Maybe VName
 isVarishInput (Input ts v t)
   | nullTransforms ts = Just v
-  | Reshape [] [DimCoercion _] :< ts' <- viewf ts =
+  | Reshape cs [DimCoercion _] :< ts' <- viewf ts, cs == mempty =
       isVarishInput $ Input ts' v t
 isVarishInput _ = Nothing
 
@@ -341,12 +341,12 @@ transformRows (ArrayTransforms ts) =
           addTransform (ReshapeInner cs shape) inp
         transformRows' inp (Replicate n)
           | inputRank inp == 1 =
-            Rearrange [] [1,0] `addTransform`
+            Rearrange mempty [1,0] `addTransform`
             (Replicate n `addTransform` inp)
           | otherwise =
-            Rearrange [] (2:0:1:[3..inputRank inp]) `addTransform`
+            Rearrange mempty (2:0:1:[3..inputRank inp]) `addTransform`
             (Replicate n `addTransform`
-             (Rearrange [] (1:0:[2..inputRank inp-1]) `addTransform` inp))
+             (Rearrange mempty (1:0:[2..inputRank inp-1]) `addTransform` inp))
         transformRows' inp nts =
           error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
@@ -355,7 +355,7 @@ transformRows (ArrayTransforms ts) =
 -- transformation list.
 transposeInput :: Int -> Int -> Input -> Input
 transposeInput k n inp =
-  addTransform (Rearrange [] $ transposeIndex k n [0..inputRank inp-1]) inp
+  addTransform (Rearrange mempty $ transposeIndex k n [0..inputRank inp-1]) inp
 
 -- | A definite representation of a SOAC expression.
 data SOAC lore = Map SubExp (Lambda lore) [Input]

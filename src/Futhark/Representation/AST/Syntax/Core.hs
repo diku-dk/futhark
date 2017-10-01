@@ -32,7 +32,7 @@ module Futhark.Representation.AST.Syntax.Core
 
          -- * Abstract syntax tree
          , Ident (..)
-         , Certificates
+         , Certificates(..)
          , SubExp(..)
          , ParamT (..)
          , Param
@@ -210,7 +210,12 @@ instance Hashable Ident where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of names used for certificates in some expressions.
-type Certificates = [VName]
+newtype Certificates = Certificates [VName]
+                     deriving (Eq, Ord, Show)
+
+instance Monoid Certificates where
+  mempty = Certificates mempty
+  Certificates x `mappend` Certificates y = Certificates (x `mappend` y)
 
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is

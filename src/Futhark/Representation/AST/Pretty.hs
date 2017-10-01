@@ -11,8 +11,6 @@ module Futhark.Representation.AST.Pretty
   , pretty
   , PrettyAnnot (..)
   , PrettyLore (..)
-  , ppCertificates
-  , ppCertificates'
   , ppTuple'
   , bindingAnnotation
   , ppArray
@@ -126,6 +124,10 @@ instance Pretty SubExp where
   ppr (Var v)      = ppr v
   ppr (Constant v) = ppr v
 
+instance Pretty Certificates where
+  ppr (Certificates []) = empty
+  ppr (Certificates cs) = text "<" <> commasep (map ppr cs) <> text ">"
+
 instance PrettyLore lore => Pretty (Body lore) where
   ppr (Body _ (bnd:bnds) res) =
     stack (map ppr (bnd:bnds)) </>
@@ -180,7 +182,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
       (_, Just ann) -> equals </>
                        indent 2 (ann </> e')
       (False, Nothing) -> equals <+> align e'
-    where e' = ppCertificates cs <> ppr e
+    where e' = ppr cs <> ppr e
           linebreak = case e of
                         DoLoop{}           -> True
                         Op{}               -> True
@@ -305,11 +307,3 @@ ppPattern as bs = braces $ commasep (map ppr as) <> semi <+> commasep (map ppr b
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
-
-ppCertificates :: Certificates -> Doc
-ppCertificates [] = empty
-ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
-
-ppCertificates' :: Certificates -> Doc
-ppCertificates' [] = empty
-ppCertificates' cs = ppCertificates cs <> line
