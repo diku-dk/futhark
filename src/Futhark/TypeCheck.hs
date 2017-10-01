@@ -694,8 +694,7 @@ checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convTypes op] e
 
-checkBasicOp (Index cs ident idxes) = do
-  mapM_ (requireI [Prim Cert]) cs
+checkBasicOp (Index ident idxes) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt /= length idxes) $
@@ -720,9 +719,8 @@ checkBasicOp (Repeat shapes innershape v) = do
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 
-checkBasicOp (Reshape cs newshape arrexp) = do
+checkBasicOp (Reshape newshape arrexp) = do
   rank <- arrayRank <$> checkArrIdent arrexp
-  mapM_ (requireI [Prim Cert]) cs
   mapM_ (require [Prim int32] . newDim) newshape
   zipWithM_ (checkDimChange rank) newshape [0..]
   where checkDimChange _ (DimNew _) _ =
@@ -735,23 +733,20 @@ checkBasicOp (Reshape cs newshape arrexp) = do
           | otherwise =
             return ()
 
-checkBasicOp (Rearrange cs perm arr) = do
-  mapM_ (requireI [Prim Cert]) cs
+checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError perm rank $ Just arr
 
-checkBasicOp (Rotate cs rots arr) = do
+checkBasicOp (Rotate rots arr) = do
   arrt <- lookupType arr
-  mapM_ (requireI [Prim Cert]) cs
   let rank = arrayRank arrt
   when (length rots /= rank) $
     bad $ TypeError $ "Cannot rotate " ++ show (length rots) ++
     " dimensions of " ++ show rank ++ "-dimensional array."
 
-checkBasicOp (Split cs i sizeexps arrexp) = do
-  mapM_ (requireI [Prim Cert]) cs
+checkBasicOp (Split i sizeexps arrexp) = do
   mapM_ (require [Prim int32]) sizeexps
   t <- checkArrIdent arrexp
   when (arrayRank t <= i) $
@@ -760,8 +755,7 @@ checkBasicOp (Split cs i sizeexps arrexp) = do
     ++ " of type " ++ pretty t
     ++ " along dimension " ++ pretty i ++ "."
 
-checkBasicOp (Concat cs i arr1exp arr2exps ressize) = do
-  mapM_ (requireI [Prim Cert]) cs
+checkBasicOp (Concat i arr1exp arr2exps ressize) = do
   arr1t  <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
   let success = all (== (dropAt i 1 $ arrayDims arr1t)) $
@@ -776,13 +770,12 @@ checkBasicOp (Copy e) =
   void $ checkArrIdent e
 
 checkBasicOp (Manifest perm arr) =
-  checkBasicOp $ Rearrange [] perm arr -- Basically same thing!
+  checkBasicOp $ Rearrange perm arr -- Basically same thing!
 
 checkBasicOp (Assert e _ _) =
   require [Prim Bool] e
 
-checkBasicOp (Partition cs _ flags arrs) = do
-  mapM_ (requireI [Prim Cert]) cs
+checkBasicOp (Partition _ flags arrs) = do
   flagst <- lookupType flags
   unless (rowType flagst == Prim int32) $
     bad $ TypeError $ "Flag array has type " ++ pretty flagst ++ "."
@@ -946,8 +939,7 @@ checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int32]) [i,n,s]
 checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()
 checkBindage BindVar = return ()
-checkBindage (BindInPlace cs src is) = do
-  mapM_ (requireI [Prim Cert]) cs
+checkBindage (BindInPlace src is) = do
   srct <- lookupType src
   mapM_ checkDimIndex is
 
@@ -960,7 +952,8 @@ checkStm :: Checkable lore =>
             Stm (Aliases lore)
          -> TypeM lore a
          -> TypeM lore a
-checkStm stm@(Let pat (_,attr) e) m = do
+checkStm stm@(Let pat (StmAux cs (_,attr)) e) m = do
+  mapM_ (requireI [Prim Cert]) cs
   checkExpLore attr
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern pat e

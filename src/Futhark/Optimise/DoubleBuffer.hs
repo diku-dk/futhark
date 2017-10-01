@@ -126,12 +126,13 @@ optimiseStms (e:es) = do
 
 optimiseStm :: LoreConstraints lore inner m =>
                Stm lore -> DoubleBufferM lore m [Stm lore]
-optimiseStm (Let pat () (DoLoop ctx val form body)) = do
+optimiseStm (Let pat aux (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOf form <> scopeOfFParams (map fst $ ctx++val)) $
            optimiseBody body
   (bnds, ctx', val', body'') <- optimiseLoop ctx val body'
-  return $ bnds ++ [Let pat () $ DoLoop ctx' val' form body'']
-optimiseStm (Let pat () e) = pure . Let pat () <$> mapExpM optimise e
+  return $ bnds ++ [Let pat aux $ DoLoop ctx' val' form body'']
+optimiseStm (Let pat aux e) =
+  pure . Let pat aux <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = const optimiseBody
                                   , mapOnOp = optimiseOp
                                   }
@@ -240,7 +241,7 @@ allocStms :: LoreConstraints lore inner m =>
                                     [Stm lore])
 allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
-          tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
+          tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) (defAux ()) $
                 Op $ Alloc size space]
           if b
             then return (Param pname $ MemMem size space, Var name)
@@ -252,7 +253,7 @@ allocStms merge = runWriterT . zipWithM allocation merge
               shape = arrayShape $ paramType f
               bound = ArrayMem bt shape NoUniqueness mem v_ixfun
           tell [Let (Pattern []
-                     [PatElem v_copy BindVar bound]) () $
+                     [PatElem v_copy BindVar bound]) (defAux ()) $
                 BasicOp $ Copy v]
           return (f, Var v_copy)
         allocation (f, se) _ =
@@ -275,7 +276,7 @@ doubleBufferResult valparams buffered (Body () bnds res) =
           -- based on the type of the function parameter.
           let t = resultType $ paramType fparam
               summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness bufname ixfun
-              copybnd = Let (Pattern [] [PatElem copyname BindVar summary]) () $
+              copybnd = Let (Pattern [] [PatElem copyname BindVar summary]) (defAux ()) $
                         BasicOp $ Copy v
           in (Just copybnd, Var copyname)
 

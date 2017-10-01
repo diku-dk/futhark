@@ -117,7 +117,7 @@ class ExtractKernelDefVars lore where
   extractKernelDefVars :: Exp lore -> Names
 
 instance ExtractKernelDefVars ExplicitMemory where
-  extractKernelDefVars (Op (ExpMem.Inner (Kernel _ _ kernelspace _ _))) =
+  extractKernelDefVars (Op (ExpMem.Inner (Kernel _ kernelspace _ _))) =
     S.fromList $ map ($ kernelspace)
     [spaceGlobalId, spaceLocalId, spaceGroupId]
   extractKernelDefVars _ = S.empty

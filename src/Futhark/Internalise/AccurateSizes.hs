@@ -108,5 +108,6 @@ ensureShapeVar asserting msg loc t name v
           letExp "shape_cert" =<<
           eAssert (pure $ BasicOp $ CmpOp (CmpEq int32) desired has) msg loc
     certs <- asserting $ zipWithM checkDim newshape oldshape
-    letExp name $ shapeCoerce certs newshape v
+    certifying certs $
+      letExp name $ shapeCoerce newshape v
   | otherwise = return v

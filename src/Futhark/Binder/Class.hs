@@ -68,11 +68,10 @@ class (Attributes (Lore m),
   mkLetNamesM :: [(VName, Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
   addStm      :: Stm (Lore m) -> m ()
   collectStms :: m a -> m (a, [Stm (Lore m)])
+  certifying :: Certificates -> m a -> m a
 
 mkLetM :: MonadBinder m => Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
-mkLetM pat e = do
-  attr <- mkExpAttrM pat e
-  return $ Let pat attr e
+mkLetM pat e = Let pat <$> (StmAux mempty <$> mkExpAttrM pat e) <*> pure e
 
 letBind :: MonadBinder m =>
            Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
@@ -89,7 +88,7 @@ mkLet :: Bindable lore => [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> 
 mkLet ctx val e =
   let pat = mkExpPat ctx val e
       attr = mkExpAttr pat e
-  in Let pat attr e
+  in Let pat (StmAux mempty attr) e
 
 mkLet' :: Bindable lore =>
           [Ident] -> [Ident] -> Exp lore -> Stm lore

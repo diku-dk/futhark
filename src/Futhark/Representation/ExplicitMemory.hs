@@ -925,27 +925,27 @@ expReturns (BasicOp (Repeat outer_shapes inner_shape v)) = do
           Shape $ concat (zipWith (++) (map shapeDims outer_shapes) (map pure ds)) ++
           shapeDims inner_shape
 
-expReturns (BasicOp (Reshape _ newshape v)) = do
+expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   return [ReturnsArray et (ExtShape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $
           IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape]
 
-expReturns (BasicOp (Rearrange _ perm v)) = do
+expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
       dims'  = rearrangeShape perm dims
   return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (BasicOp (Rotate _ offsets v)) = do
+expReturns (BasicOp (Rotate offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let offsets' = map (primExpFromSubExp int32) offsets
       ixfun' = IxFun.rotate ixfun offsets'
   return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (BasicOp (Split _ i sizeexps v)) = do
+expReturns (BasicOp (Split i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let offsets =  0 : scanl1 (+) (map (primExpFromSubExp int32) sizeexps)
       dims = map (primExpFromSubExp int32) $ shapeDims shape
@@ -960,7 +960,7 @@ expReturns (BasicOp (Split _ i sizeexps v)) = do
                          primExpFromSubExp int32 dim)
     offsets sizeexps
 
-expReturns (BasicOp (Index _ v slice)) = do
+expReturns (BasicOp (Index v slice)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   case sliceDims slice of
     []     ->
@@ -1018,7 +1018,7 @@ class TypedOp (Op lore) => OpReturns lore where
 instance OpReturns ExplicitMemory where
   opReturns (Alloc size space) =
     return [ReturnsMemory size space]
-  opReturns (Inner k@(Kernel _ _ _ _ body)) =
+  opReturns (Inner k@(Kernel _ _ _ body)) =
     zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
     where correct (WriteReturn _ arr _ _) _ = varReturns arr
           correct (KernelInPlaceReturn arr) _ =

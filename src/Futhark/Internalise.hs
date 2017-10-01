@@ -348,8 +348,9 @@ internaliseExp desc (E.Index e idxs loc) = do
   (idxs', idx_cs) <- unzip <$> zipWithM (internaliseDimIndex loc) dims idxs
   let index v = do
         v_t <- lookupType v
-        return $ I.BasicOp $ I.Index (concat idx_cs) v $ fullSlice v_t idxs'
-  letSubExps desc =<< mapM index vs
+        return $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
+  certifying (concat idx_cs) $
+    letSubExps desc =<< mapM index vs
 
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
@@ -698,8 +699,8 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
             rowtype = sname_t `setArrayDims` sliceDims slice
         ve'' <- ensureShape asserting "shape of value does not match shape of source array"
                 loc rowtype "lw_val_correct_shape" ve'
-        letInPlace "letwith_dst" (concat idx_cs) sname (fullSlice sname_t idxs') $
-          BasicOp $ SubExp ve''
+        certifying (concat idx_cs) $
+          letInPlace "letwith_dst" sname (fullSlice sname_t idxs') $ BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
   stmPattern [] (E.Id name) dstt $ \cm pat_names match -> do
@@ -749,8 +750,8 @@ internaliseExp _ (E.Zip _ e es loc) = do
                 c   <- assertingOne $
                        letExp "zip_assert" $ I.BasicOp $
                        I.Assert cmp "arrays differ in length" loc
-                letExp (postfix e_unchecked' "_zip_res") $
-                  shapeCoerce c (w:inner) e_unchecked'
+                certifying c $ letExp (postfix e_unchecked' "_zip_res") $
+                  shapeCoerce (w:inner) e_unchecked'
       es' <- mapM reshapeToOuter es_unchecked
       return $ map I.Var $ e_key : es'
     [] -> return []
@@ -759,7 +760,7 @@ internaliseExp _ (E.Zip _ e es loc) = do
 
 internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
-    return $ I.Rearrange [] perm v
+    return $ I.Rearrange perm v
 
 internaliseExp _ (E.Rotate d offset e _) = do
   offset' <- internaliseExp1 "rotation_offset" offset
@@ -767,11 +768,12 @@ internaliseExp _ (E.Rotate d offset e _) = do
     rank <- I.arrayRank <$> lookupType v
     let zero = constant (0::Int32)
         offsets = replicate d zero ++ [offset'] ++ replicate (rank-d-1) zero
-    return $ I.Rotate [] offsets v
+    return $ I.Rotate offsets v
 
 internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- internaliseShapeExp "shape" shape
-  internaliseOperation "reshape" e $ \v -> do
+  vs <- internaliseExpToVars "reshape_arg" e
+  forM vs $ \v -> do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
     old_shape <- I.arrayShape <$> lookupType v
@@ -780,7 +782,8 @@ internaliseExp _ (E.Reshape shape e loc) = do
                letExp "shape_ok" =<<
                eAssert (eCmpOp (I.CmpEq I.int32) (prod changed_dims) (prod shape'))
                "new shape has different number of elements than old shape" loc
-    return $ I.Reshape shapeOk (reshapeOuter (DimNew <$> shape') orig_rank old_shape) v
+    certifying shapeOk $ letSubExp "reshape" $
+      I.BasicOp $ I.Reshape (reshapeOuter (DimNew <$> shape') orig_rank old_shape) v
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
         orig_rank = E.arrayRank $ E.typeOf e
 
@@ -802,8 +805,8 @@ internaliseExp _ (E.Split i splitexp arrexp loc) = do
   let sizeExps = zipWith (\beg end -> BasicOp $ I.BinOp (I.Sub I.Int32) end beg)
                  (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
   sizeVars <- mapM (letSubExp "split_size") sizeExps
-  splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
-                                   BasicOp $ I.Split indexAsserts i sizeVars arr
+  splitExps <- certifying indexAsserts $ forM arrs $ \arr ->
+    letTupExp' "split_res" $ BasicOp $ I.Split i sizeVars arr
 
   return $ concat $ transpose splitExps
 
@@ -831,9 +834,9 @@ internaliseExp desc (E.Concat i x ys loc) = do
                    concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
         yarrs'  <- forM yarrs $ \yarr -> do
           yt <- lookupType yarr
-          letExp "concat_y_reshaped" $
-            shapeCoerce matchcs (updims $ I.arrayDims yt) yarr
-        return $ I.BasicOp $ I.Concat [] i xarr yarrs' ressize
+          certifying matchcs $ letExp "concat_y_reshaped" $
+            shapeCoerce (updims $ I.arrayDims yt) yarr
+        return $ I.BasicOp $ I.Concat i xarr yarrs' ressize
   letSubExps desc =<< zipWithM conc xs (transpose yss)
 
     where
@@ -849,11 +852,10 @@ internaliseExp desc (E.Map lam (arr:arrs) loc) = do
   arrs' <- internaliseExpToVars "map_arr" (Zip 0 arr arrs loc)
   lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
-  letTupExp' desc $ I.Op $ I.Map [] w lam' arrs'
+  letTupExp' desc $ I.Op $ I.Map w lam' arrs'
 
 internaliseExp desc (E.Reduce comm lam ne arr loc) =
-  internaliseScanOrReduce desc "reduce"
-    (\cs w -> I.Reduce cs w comm) (lam, ne, arr, loc)
+  internaliseScanOrReduce desc "reduce" (`I.Reduce` comm) (lam, ne, arr, loc)
 
 internaliseExp desc (E.Scan lam ne arr loc) =
   internaliseScanOrReduce desc "scan" I.Scan (lam, ne, arr, loc)
@@ -863,14 +865,14 @@ internaliseExp desc (E.Filter lam arr _) = do
   lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
   (partition_sizes, partitioned) <- partitionWithSOACS 1 lam' arrs
   fmap (map I.Var . concat . transpose) $ forM partitioned $
-    letTupExp desc . I.BasicOp . I.Split [] 0 partition_sizes
+    letTupExp desc . I.BasicOp . I.Split 0 partition_sizes
 
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
   (partition_sizes, partitioned) <- partitionWithSOACS (k+1) lam' arrs
   fmap (map I.Var . concat . transpose) $ forM partitioned $
-    letTupExp desc . I.BasicOp . I.Split [] 0 partition_sizes
+    letTupExp desc . I.BasicOp . I.Split 0 partition_sizes
   where k = length lams
 
 internaliseExp desc (E.Stream form lam arr _) = do
@@ -931,7 +933,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
                      , extLambdaBody = body_with_lam0
                      , extLambdaReturnType = staticShapes acctps })
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream [] w form' lam'' arrs
+  letTupExp' desc $ I.Op $ I.Stream w form' lam'' arrs
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
@@ -1030,7 +1032,7 @@ internaliseDimIndex loc w (E.DimSlice i j s) = do
         one = constant (1::Int32)
 
 internaliseScanOrReduce :: String -> String
-                        -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
+                        -> (SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
                         -> (E.Lambda, E.Exp, E.Exp, SrcLoc)
                         -> InternaliseM [SubExp]
 internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
@@ -1046,7 +1048,7 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ f [] w lam' input
+  letTupExp' desc $ I.Op $ f w lam' input
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -1375,17 +1377,17 @@ isOverloadedFunction qname args loc = do
                                      foldBinOp (I.Mul Int32) (constant (1::Int32)) x_dims
                       x' <- letExp "x" $ I.BasicOp $ I.SubExp x
                       y' <- letExp "x" $ I.BasicOp $ I.SubExp y
-                      x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] x'
-                      y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [] [I.DimNew x_num_elems] y'
+                      x_flat <- letExp "x_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] x'
+                      y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
                       -- Compare the elements.
                       cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
-                      cmps <- letExp "cmps" $ I.Op $ I.Map [] x_num_elems cmp_lam [x_flat, y_flat]
+                      cmps <- letExp "cmps" $ I.Op $ I.Map x_num_elems cmp_lam [x_flat, y_flat]
 
                       -- Check that all were equal.
                       and_lam <- binOpLambda I.LogAnd I.Bool
                       all_equal <- letSubExp "all_equal" $ I.Op $
-                                   I.Reduce [] x_num_elems Commutative and_lam [(constant True,cmps)]
+                                   I.Reduce x_num_elems Commutative and_lam [(constant True,cmps)]
                       return $ resultBody [all_equal]
 
                     letSubExp "arrays_equal" $
@@ -1534,8 +1536,8 @@ isOverloadedFunction qname args loc = do
         c   <- assertingOne $
           letExp "write_cert" $ I.BasicOp $
           I.Assert cmp "length of index and value array does not match" loc
-        sv' <- letExp (baseString sv ++ "_write_sv") $
-          I.BasicOp $ I.Reshape c (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
+        sv' <- certifying c $ letExp (baseString sv ++ "_write_sv") $
+          I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
         return (tv, sv')
 
@@ -1563,7 +1565,7 @@ isOverloadedFunction qname args loc = do
                        }
           sivs = si' : svs'
       aws <- mapM (fmap (arraySize 0) . lookupType) sas
-      letTupExp' desc $ I.Op $ I.Scatter [] si_w lam sivs $ zip aws sas
+      letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip aws sas
 
     shapeF e desc = do
       ks <- internaliseExp (desc<>"_shape") e
@@ -1670,7 +1672,7 @@ partitionWithSOACS :: Int -> I.Lambda -> [I.VName] -> InternaliseM ([I.SubExp], 
 partitionWithSOACS k lam arrs = do
   arr_ts <- mapM lookupType arrs
   let w = arraysSize 0 arr_ts
-  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Map [] w lam arrs
+  classes_and_increments <- letTupExp "increments" $ I.Op $ I.Map w lam arrs
   (classes, increments) <- case classes_and_increments of
                              classes : increments -> return (classes, take k increments)
                              _                    -> fail "partitionWithSOACS"
@@ -1690,14 +1692,14 @@ partitionWithSOACS k lam arrs = do
                          }
       scan_input = zip (repeat $ constant (0::Int32)) increments
 
-  all_offsets <- letTupExp "offsets" $ I.Op $ I.Scan [] w add_lam scan_input
+  all_offsets <- letTupExp "offsets" $ I.Op $ I.Scan w add_lam scan_input
 
   -- We have the offsets for each of the partitions, but we also need
   -- the total sizes, which are the last elements in the offests.  We
   -- just have to be careful in case the array is empty.
   last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int32) w $ constant (1::Int32)
   nonempty_body <- runBodyBinder $ fmap resultBody $ forM all_offsets $ \offset_array ->
-    letSubExp "last_offset" $ I.BasicOp $ I.Index [] offset_array [I.DimFix last_index]
+    letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array [I.DimFix last_index]
   let empty_body = resultBody $ replicate k $ constant (0::Int32)
   is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int32) w $ constant (0::Int32)
   sizes <- letTupExp "partition_size" $
@@ -1728,7 +1730,7 @@ partitionWithSOACS k lam arrs = do
                                      replicate (length arr_ts) offset ++
                                      map (I.Var . I.paramName) value_params
                     }
-  results <- letTupExp "partition_res" $ I.Op $ I.Scatter [] w
+  results <- letTupExp "partition_res" $ I.Op $ I.Scatter w
              write_lam (classes : all_offsets ++ arrs) $ zip (repeat sum_of_partition_sizes) blanks
   return (map I.Var sizes, results)
   where

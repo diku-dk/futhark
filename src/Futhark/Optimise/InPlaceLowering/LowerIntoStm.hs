@@ -55,17 +55,17 @@ lowerUpdate
   | patternNames pat == [src] =
     let is' = fullSlice (typeOf bindee_attr) is
     in Just $
-       return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
-                          BindInPlace cs v is')] $
+       return [certify cs $ mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
+                                       BindInPlace v is')] $
                BasicOp $ SubExp $ Var val]
 lowerUpdate
   (Let (Pattern [] [PatElem v BindVar v_attr]) _ e)
   [DesiredUpdate bindee_nm bindee_attr cs src is val]
   | v == val =
     let is' = fullSlice (typeOf bindee_attr) is
-    in Just $ return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
-                                 BindInPlace cs src is')] e,
-                      mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index cs bindee_nm is']
+    in Just $ return [certify cs $ mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
+                                              BindInPlace src is')] e,
+                      mkLet' [] [Ident v $ typeOf v_attr] $ BasicOp $ Index bindee_nm is']
 lowerUpdate _ _ =
   Nothing
 
@@ -137,12 +137,11 @@ lowerUpdateIntoLoop updates pat ctx val body = do
             let source_t = snd $ updateType update
                 updpat = [(Ident source source_t,
                            BindInPlace
-                           (updateCertificates update)
                            (updateSource update)
                            (fullSlice source_t $ updateIndices update))]
                 elmident = Ident (updateValue update) $ rowType source_t
             tell ([mkLet [] updpat $ BasicOp $ SubExp $ snd $ mergeParam summary],
-                  [mkLet' [] [elmident] $ BasicOp $ Index []
+                  [mkLet' [] [elmident] $ BasicOp $ Index
                    (updateName update) (fullSlice (typeOf $ updateType update) $ updateIndices update)])
             return $ Right (Param
                             mergename
@@ -232,5 +231,5 @@ manipulateResult summaries substs = do
     substRes res_se (_, (cs, nm, attr, is)) = do
       v' <- newIdent' (++"_updated") $ Ident nm $ typeOf attr
       let is' = fullSlice (typeOf attr) is
-      tell [mkLet [] [(v', BindInPlace cs nm is')] $ BasicOp $ SubExp res_se]
+      tell [certify cs $ mkLet [] [(v', BindInPlace nm is')] $ BasicOp $ SubExp res_se]
       return $ Var $ identName v'

@@ -257,7 +257,7 @@ findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
           | not (L.null stms) = case L.last stms of
               -- This is how the program looks after coalescing.
               Let (Pattern _ [PatElem _last_v
-                              (BindInPlace _ _ (DimFix slice_part : _))
+                              (BindInPlace _ (DimFix slice_part : _))
                               (ExpMem.ArrayMem _ _ _ last_stm_mem _)]) _
                                 (BasicOp bop) ->
                 if pat_mem == last_stm_mem
@@ -353,7 +353,7 @@ class SpecialBodyExceptions lore where
   specialBodyWriteMems :: Stm lore -> Maybe [(MName, ExpMem.IxFun, PrimType)]
 
 instance SpecialBodyExceptions ExplicitMemory where
-  specialBodyIndices (Op (ExpMem.Inner (Kernel _ _ kernelspace _ _))) =
+  specialBodyIndices (Op (ExpMem.Inner (Kernel _ kernelspace _ _))) =
     Just $ map fst $ spaceDimensions kernelspace
   specialBodyIndices e = specialBodyIndicesBase e
 
@@ -386,7 +386,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
         concat $ flip map stms $ \(Let (Pattern _patctxelems patvalelems) _ e) ->
         flip map patvalelems $ \(PatElem v bindage membound) ->
         let fromread = case (bindage, e) of
-              (BindVar, BasicOp (Index _ orig slice)) -> do
+              (BindVar, BasicOp (Index orig slice)) -> do
                 orig_mem <- M.lookup orig $ ctxVarToMem ctx
                 if
                   -- These two extra requirements might be superfluous.
@@ -396,7 +396,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
                   else Nothing
               _ -> Nothing
             fromwrite
-              | (BindInPlace _ _orig _slice,
+              | (BindInPlace _orig _slice,
                  ExpMem.ArrayMem pt _ _ _ _) <- (bindage, membound)
               = do
                   -- The coalescing pass can have created a program where some

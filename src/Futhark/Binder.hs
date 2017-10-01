@@ -19,6 +19,7 @@ module Futhark.Binder
   -- * Non-class interface
   , addBinderStm
   , collectBinderStms
+  , certifyingBinder
   -- * The 'MonadBinder' typeclass
   , module Futhark.Binder.Class
   )
@@ -106,6 +107,8 @@ instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
   addStm      = addBinderStm
   collectStms = collectBinderStms
 
+  certifying = certifyingBinder
+
 runBinderT :: (MonadFreshNames m, BinderOps lore) =>
               BinderT lore m a
            -> Scope lore
@@ -165,6 +168,11 @@ collectBinderStms m = pass $ do
   let bnds' = DL.toList bnds
   BinderT $ modify (`M.difference` scopeOf bnds')
   return ((x, bnds'), const DL.empty)
+
+certifyingBinder :: Monad m =>
+                    Certificates -> BinderT lore m a
+                 -> BinderT lore m a
+certifyingBinder = censor . fmap . certify
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

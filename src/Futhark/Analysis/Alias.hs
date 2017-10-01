@@ -44,12 +44,12 @@ analyseBody (Body lore origbnds result) =
 
 analyseStm :: (Attributes lore, CanBeAliased (Op lore)) =>
               Stm lore -> Stm (Aliases lore)
-analyseStm (Let pat lore e) =
+analyseStm (Let pat (StmAux cs attr) e) =
   let e' = analyseExp e
       pat' = addAliasesToPattern pat e'
       lore' = (Names' $ consumedInPattern pat' <> consumedInExp e',
-               lore)
-  in Let pat' lore' e'
+               attr)
+  in Let pat' (StmAux cs lore') e'
 
 analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
               Exp lore -> Exp (Aliases lore)

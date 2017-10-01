@@ -65,7 +65,7 @@ patElemRequires (PatElem _ bindage attr) =
 bindageRequires :: Type -> Bindage -> Type
 bindageRequires t BindVar =
   t
-bindageRequires t (BindInPlace _ _ slice) =
+bindageRequires t (BindInPlace _ slice) =
   Prim (elemType t) `arrayOfShape` Shape (sliceDims slice)
 
 -- | Set the lore of a 'PatElem'.

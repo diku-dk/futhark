@@ -58,24 +58,25 @@ nonuniqueParams params =
 -- add the new idents to the 'Scope'.
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
-redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore) =>
-                         Pattern lore -> ExpAttr lore
-                      -> ( Certificates, SubExp
+redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
+                          ExpAttr lore ~ (), Op lore ~ SOAC lore) =>
+                         Pattern lore
+                      -> ( SubExp
                          , Commutativity
                          , LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])
                       -> m (Stm lore, Stm lore)
-redomapToMapAndReduce (Pattern [] patelems) lore
-                      (certs, outersz, comm, redlam, redmap_lam, accs, arrs) = do
+redomapToMapAndReduce (Pattern [] patelems)
+                      (outersz, comm, redlam, redmap_lam, accs, arrs) = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
   map_accpat <- mapM accMapPatElem acc_patelems
   map_arrpat <- mapM arrMapPatElem arr_patelems
   let map_pat = map_accpat ++ map_arrpat
       map_bnd = mkLet [] map_pat $
-                Op $ Map certs outersz newmap_lam arrs
+                Op $ Map outersz newmap_lam arrs
       red_args = zip accs $ map (identName . fst) map_accpat
-      red_bnd = Let (Pattern [] acc_patelems) lore $
-                Op $ Reduce certs outersz comm redlam red_args
+      red_bnd = Let (Pattern [] acc_patelems) (defAux ()) $
+                Op $ Reduce outersz comm redlam red_args
   return (map_bnd, red_bnd)
   where
     accMapPatElem pe = do
@@ -95,8 +96,8 @@ redomapToMapAndReduce (Pattern [] patelems) lore
           bnds' = bndaccs ++ bodyStms body
           body' = body {bodyStms = bnds'}
       in redmap_lam { lambdaBody = body', lambdaParams = params' }
-redomapToMapAndReduce _ _ _ =
-  error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
+redomapToMapAndReduce _ _ =
+  error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
 
 sequentialStreamWholeArrayStms :: Bindable lore =>
                                   SubExp -> [SubExp]
@@ -109,7 +110,7 @@ sequentialStreamWholeArrayStms width accs lam arrs =
       acc_bnds = [ mkLet' [] [paramIdent acc_param] $ BasicOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
-                   BasicOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
+                   BasicOp $ Reshape (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
   in (chunk_bnd :
@@ -121,15 +122,14 @@ sequentialStreamWholeArrayStms width accs lam arrs =
 
 sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
                               Pattern (Lore m)
-                           -> Certificates
                            -> SubExp -> [SubExp]
                            -> ExtLambdaT (Lore m) -> [VName]
                            -> m ()
-sequentialStreamWholeArray pat cs width nes fun arrs = do
+sequentialStreamWholeArray pat width nes fun arrs = do
   let (body_bnds,res) = sequentialStreamWholeArrayStms width nes fun arrs
       reshapeRes t (Var v)
         | null (arrayDims t) = BasicOp $ SubExp $ Var v
-        | otherwise          = shapeCoerce cs (arrayDims t) v
+        | otherwise          = shapeCoerce (arrayDims t) v
       reshapeRes _ se        = BasicOp $ SubExp se
       res_bnds =
         [ mkLet' [] [ident] $ reshapeRes (identType ident) se

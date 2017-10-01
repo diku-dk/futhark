@@ -29,6 +29,9 @@ module Futhark.Representation.AST.Attributes
   , shapeVars
   , commutativeLambda
   , entryPointSize
+  , defAux
+  , stmCerts
+  , certify
 
   , IsOp (..)
   , Attributes (..)
@@ -37,6 +40,7 @@ module Futhark.Representation.AST.Attributes
 
 import Data.List
 import Data.Maybe (mapMaybe, isJust)
+import Data.Monoid
 import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Attributes.Reshape
@@ -175,6 +179,18 @@ entryPointSize :: EntryPointType -> Int
 entryPointSize (TypeOpaque _ x) = x
 entryPointSize TypeUnsigned = 1
 entryPointSize TypeDirect = 1
+
+-- | A 'StmAux' with empty 'Certificates'.
+defAux :: attr -> StmAux attr
+defAux = StmAux mempty
+
+-- | The certificates associated with a statement.
+stmCerts :: Stm lore -> Certificates
+stmCerts = stmAuxCerts . stmAux
+
+-- | Add certificates to a statement.
+certify :: Certificates -> Stm lore -> Stm lore
+certify cs1 (Let pat (StmAux cs2 attr) e) = Let pat (StmAux (cs2<>cs1) attr) e
 
 -- | A type class for operations.
 class (Eq op, Ord op, Show op,

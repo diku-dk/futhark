@@ -82,7 +82,6 @@ data Kernel lore =
   | SufficientParallelism SubExp -- ^ True if enough parallelism.
 
   | Kernel KernelDebugHints
-    Certificates
     KernelSpace
     [Type]
     (KernelBody lore)
@@ -166,7 +165,6 @@ data KernelMapper flore tlore m = KernelMapper {
   , mapOnKernelLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnKernelBody :: Body flore -> m (Body tlore)
   , mapOnKernelVName :: VName -> m VName
-  , mapOnKernelCertificates :: Certificates -> m Certificates
   , mapOnKernelLParam :: LParam flore -> m (LParam tlore)
   , mapOnKernelKernelBody :: KernelBody flore -> m (KernelBody tlore)
   }
@@ -177,7 +175,6 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
                                     , mapOnKernelLambda = return
                                     , mapOnKernelBody = return
                                     , mapOnKernelVName = return
-                                    , mapOnKernelCertificates = return
                                     , mapOnKernelLParam = return
                                     , mapOnKernelKernelBody = return
                                     }
@@ -192,9 +189,8 @@ mapKernelM _ GroupSize = pure GroupSize
 mapKernelM _ TileSize = pure TileSize
 mapKernelM tv (SufficientParallelism se) =
   SufficientParallelism <$> mapOnKernelSubExp tv se
-mapKernelM tv (Kernel desc cs space ts kernel_body) =
+mapKernelM tv (Kernel desc space ts kernel_body) =
   Kernel <$> mapOnKernelDebugHints desc <*>
-  mapOnKernelCertificates tv cs <*>
   mapOnKernelSpace space <*>
   mapM (mapOnKernelType tv) ts <*>
   mapOnKernelKernelBody tv kernel_body
@@ -232,7 +228,6 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
                               , mapOnKernelLambda = walk freeInLambda
                               , mapOnKernelBody = walk freeInBody
                               , mapOnKernelVName = walk freeIn
-                              , mapOnKernelCertificates = walk freeIn
                               , mapOnKernelLParam = walk freeIn
                               , mapOnKernelKernelBody = walk freeIn
                               }
@@ -243,7 +238,6 @@ data KernelWalker lore m = KernelWalker {
   , walkOnKernelLambda :: Lambda lore -> m ()
   , walkOnKernelBody :: Body lore -> m ()
   , walkOnKernelVName :: VName -> m ()
-  , walkOnKernelCertificates :: Certificates -> m ()
   , walkOnKernelLParam :: LParam lore -> m ()
   , walkOnKernelKernelBody :: KernelBody lore -> m ()
   }
@@ -255,7 +249,6 @@ identityKernelWalker = KernelWalker {
   , walkOnKernelLambda = const $ return ()
   , walkOnKernelBody = const $ return ()
   , walkOnKernelVName = const $ return ()
-  , walkOnKernelCertificates = const $ return ()
   , walkOnKernelLParam = const $ return ()
   , walkOnKernelKernelBody = const $ return ()
   }
@@ -267,7 +260,6 @@ walkKernelMapper f = KernelMapper {
   , mapOnKernelLambda = wrap walkOnKernelLambda
   , mapOnKernelBody = wrap walkOnKernelBody
   , mapOnKernelVName = wrap walkOnKernelVName
-  , mapOnKernelCertificates = wrap walkOnKernelCertificates
   , mapOnKernelLParam = wrap walkOnKernelLParam
   , mapOnKernelKernelBody = wrap walkOnKernelKernelBody
   }
@@ -350,9 +342,8 @@ instance Substitute SpaceStructure where
     NestedThreadSpace (map (substituteNames subst) dims)
 
 instance Attributes lore => Substitute (Kernel lore) where
-  substituteNames subst (Kernel desc cs space ts kbody) =
+  substituteNames subst (Kernel desc space ts kbody) =
     Kernel desc
-    (substituteNames subst cs)
     (substituteNames subst space)
     (substituteNames subst ts)
     (substituteNames subst kbody)
@@ -362,7 +353,6 @@ instance Attributes lore => Substitute (Kernel lore) where
                          , mapOnKernelLambda = return . substituteNames subst
                          , mapOnKernelBody = return . substituteNames subst
                          , mapOnKernelVName = return . substituteNames subst
-                         , mapOnKernelCertificates = return . substituteNames subst
                          , mapOnKernelLParam = return . substituteNames subst
                          , mapOnKernelKernelBody = return . substituteNames subst
                          }
@@ -393,10 +383,10 @@ scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
 
 instance Attributes lore => Rename (Kernel lore) where
   rename = mapKernelM renamer
-    where renamer = KernelMapper rename rename rename rename rename rename rename
+    where renamer = KernelMapper rename rename rename rename rename rename
 
 kernelType :: Kernel lore -> [Type]
-kernelType (Kernel _ _ space ts body) =
+kernelType (Kernel _ space ts body) =
   zipWith resultShape ts $ kernelBodyResult body
   where dims = map snd $ spaceDimensions space
         num_groups = spaceNumGroups space
@@ -437,7 +427,7 @@ instance TypedOp (Kernel lore) where
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases = map (const mempty) . kernelType
 
-  consumedInOp (Kernel _ _ _ _ kbody) =
+  consumedInOp (Kernel _ _ _ kbody) =
     consumedInKernelBody kbody <>
     mconcat (map consumedByReturn (kernelBodyResult kbody))
     where consumedByReturn (WriteReturn _ a _ _) = S.singleton a
@@ -459,12 +449,12 @@ instance (Attributes lore,
 
   addOpAliases = runIdentity . mapKernelM alias
     where alias = KernelMapper return (return . Alias.analyseLambda)
-                  (return . Alias.analyseBody) return return return
+                  (return . Alias.analyseBody) return return
                   (return . aliasAnalyseKernelBody)
 
   removeOpAliases = runIdentity . mapKernelM remove
     where remove = KernelMapper return (return . removeLambdaAliases)
-                   (return . removeBodyAliases) return return return
+                   (return . removeBodyAliases) return return
                    (return . removeKernelBodyAliases)
           removeKernelBodyAliases :: KernelBody (Aliases lore)
                                   -> KernelBody lore
@@ -484,12 +474,12 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
 
   removeOpRanges = runIdentity . mapKernelM remove
     where remove = KernelMapper return (return . removeLambdaRanges)
-                   (return . removeBodyRanges) return return return
+                   (return . removeBodyRanges) return return
                    (return . removeKernelBodyRanges)
           removeKernelBodyRanges = error "removeKernelBodyRanges"
   addOpRanges = Range.runRangeM . mapKernelM add
     where add = KernelMapper return Range.analyseLambda
-                Range.analyseBody return return return addKernelBodyRanges
+                Range.analyseBody return return addKernelBodyRanges
           addKernelBodyRanges (KernelBody attr stms res) =
             Range.analyseStms stms $ \stms' ->
             let attr' = (mkBodyRanges stms $ map kernelResultSubExp res, attr)
@@ -502,7 +492,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
     where remove = KernelMapper return
                    (return . removeLambdaWisdom)
                    (return . removeBodyWisdom)
-                   return return return
+                   return return
                    (return . removeKernelBodyWisdom)
           removeKernelBodyWisdom :: KernelBody (Wise lore)
                                  -> KernelBody lore
@@ -511,16 +501,16 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             in KernelBody attr' stms' res
 
 instance ST.IndexOp (Kernel lore) where
-  indexOp vtable k (Kernel _ _ space _ kbody) is = do
+  indexOp vtable k (Kernel _ space _ kbody) is = do
     ThreadsReturn which se <- maybeNth k $ kernelBodyResult kbody
 
     prim_table <- case (which, is) of
       (AllThreads, [i]) ->
-        Just $ M.singleton (spaceGlobalId space) i
+        Just $ M.singleton (spaceGlobalId space) (i,mempty)
       (ThreadsInSpace, _)
         | (gtids, _) <- unzip $ spaceDimensions space,
           length gtids == length is ->
-            Just $ M.fromList $ zip gtids is
+            Just $ M.fromList $ zip gtids $ zip is $ repeat mempty
       _ ->
         Nothing
 
@@ -530,22 +520,24 @@ instance ST.IndexOp (Kernel lore) where
       _ -> Nothing
     where expandPrimExpTable table stm
             | [v] <- patternNames $ stmPattern stm,
-              Just pe <- primExpFromExp (asPrimExp table) $ stmExp stm =
-                M.insert v pe table
+              Just (pe,cs) <-
+                  runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm =
+                M.insert v (pe, stmCerts stm <> cs) table
             | otherwise =
                 table
 
           asPrimExp table (BasicOp (SubExp (Var v)))
-            | Just e <- M.lookup v table = Just e
-            | Just (Prim pt) <- ST.lookupType v vtable = Just $ LeafExp v pt
+            | Just (e,cs) <- M.lookup v table = tell cs >> return e
+            | Just (Prim pt) <- ST.lookupType v vtable =
+                return $ LeafExp v pt
           asPrimExp _ (BasicOp (SubExp (Constant v))) =
-            Just $ ValueExp v
-          asPrimExp _ _ = Nothing
+            return $ ValueExp v
+          asPrimExp _ _ = lift Nothing
 
   indexOp _ _ _ _ = Nothing
 
 instance Aliased lore => UsageInOp (Kernel lore) where
-  usageInOp (Kernel _ _ _ _ kbody) =
+  usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
@@ -564,8 +556,7 @@ typeCheckKernel GroupSize = return ()
 typeCheckKernel TileSize = return ()
 typeCheckKernel SufficientParallelism{} = return ()
 
-typeCheckKernel (Kernel _ cs space kts kbody) = do
-  mapM_ (TC.requireI [Prim Cert]) cs
+typeCheckKernel (Kernel _ space kts kbody) = do
   checkSpace space
   mapM_ TC.checkType kts
   mapM_ (TC.require [Prim int32] . snd) $ spaceDimensions space
@@ -624,7 +615,7 @@ typeCheckKernel (Kernel _ cs space kts kbody) = do
           return ()
 
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
-  opMetrics (Kernel _ _ _ _ kbody) =
+  opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
     where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
@@ -639,8 +630,7 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr TileSize = text "$tile_size()"
   ppr (SufficientParallelism se) = text "$sufficientParallelism" <> parens (ppr se)
 
-  ppr (Kernel desc cs space ts body) =
-    ppCertificates' cs <>
+  ppr (Kernel desc space ts body) =
     text "kernel" <+> text (kernelName desc) <>
     PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> PP.nestedBlock "{" "}" (ppr body)

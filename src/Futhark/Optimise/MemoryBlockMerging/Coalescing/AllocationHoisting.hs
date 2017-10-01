@@ -47,8 +47,8 @@ findAllocHoistees body params =
         stms = bodyStms body
 
         findThemStm :: Stm ExplicitMemory -> Maybe (VName, [VName])
-        findThemStm (Let (Pattern _ [PatElem xmem _ _])
-                     () (Op ExpMem.Alloc{})) = usedByCopyOrConcat xmem
+        findThemStm (Let (Pattern _ [PatElem xmem _ _]) _ (Op ExpMem.Alloc{})) =
+          usedByCopyOrConcat xmem
         findThemStm _ = Nothing
 
         -- A function paramater can be a unique memory block.  While we cannot
@@ -84,7 +84,7 @@ findAllocHoistees body params =
                           (Pattern _
                            [PatElem _ bindage
                             (ExpMem.ArrayMem _ _ _ xmem_pat _)])
-                           ()
+                           _
                            (BasicOp bop))
                   | xmem_pat == xmem_alloc =
                       let vs = Just $ case bindage of
@@ -94,7 +94,7 @@ findAllocHoistees body params =
                              -- is initialized before it is used by the
                              -- coalesced party.  Any index variables are also
                              -- hoisted.
-                            BindInPlace _ v slice -> v : S.toList (freeIn slice)
+                            BindInPlace v slice -> v : S.toList (freeIn slice)
                       in case bop of
                         Copy{} -> vs
                         Concat{} -> vs

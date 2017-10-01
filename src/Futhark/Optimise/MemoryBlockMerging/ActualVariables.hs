@@ -105,7 +105,7 @@ lookInStm :: LoreConstraints lore =>
 lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
   forM_ patvalelems $ \(PatElem var bindage _) ->
     case bindage of
-      BindInPlace _ orig _ -> do
+      BindInPlace orig _ -> do
         -- Record that when coalescing an in-place update statement, also look
         -- at the original array.
         let actuals = S.fromList [var, orig]
@@ -205,7 +205,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
 
           _ -> return ()
 
-    BasicOp (Index _ orig _) -> do
+    BasicOp (Index orig _) -> do
       let ielem = head patvalelems -- Should be okay.
           var = patElemName ielem
       case patElemAttr ielem of
@@ -221,7 +221,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
     -- array that is being reshaped.  Only partial support for reshape
     -- operations: If the shape is more than one-dimensional, mark the statement
     -- as disabled for memory merging operations.
-    BasicOp (Reshape _ shapechange_var orig) ->
+    BasicOp (Reshape shapechange_var orig) ->
       forM_ (map patElemName patvalelems) $ \var -> do
         orig' <- aliasOpRoot' orig
         mem_orig <- M.lookup orig' <$> asks ctxVarToMem
@@ -240,13 +240,13 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
 
     -- For the other aliasing operations, disable their use for now.  If the
     -- source has a change of memory block, make sure to change this as well.
-    BasicOp (Rearrange _ _ orig) ->
+    BasicOp (Rearrange _ orig) ->
       aliasOpHandle orig patvalelems
 
-    BasicOp (Split _ _ _ orig) ->
+    BasicOp (Split _ _ orig) ->
       aliasOpHandle orig patvalelems
 
-    BasicOp (Rotate _ _ orig) ->
+    BasicOp (Rotate _ orig) ->
       aliasOpHandle orig patvalelems
 
     BasicOp (Opaque (Var orig)) ->
@@ -322,7 +322,7 @@ class LookInKernelExp lore where
 
 instance LookInKernelExp ExplicitMemory where
   lookInKernelExp (Let (Pattern _ patvalelems) _ e) = case e of
-    Op (ExpMem.Inner (Kernel _ _ _ _ (KernelBody _ _ ress))) ->
+    Op (ExpMem.Inner (Kernel _ _ _ (KernelBody _ _ ress))) ->
       zipWithM_ (\(PatElem var _ _) res -> case res of
                     WriteReturn _ arr _ _ ->
                       recordActuals arr $ S.singleton var

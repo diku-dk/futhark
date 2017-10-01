@@ -340,11 +340,11 @@ trackAliases (aliasmap, consumed) bnd =
 
 mkAliasedLetStm :: (Attributes lore, CanBeAliased (Op lore)) =>
                    Pattern lore
-                -> ExpAttr lore -> Exp (Aliases lore)
+                -> StmAux (ExpAttr lore) -> Exp (Aliases lore)
                 -> Stm (Aliases lore)
-mkAliasedLetStm pat explore e =
+mkAliasedLetStm pat (StmAux cs attr) e =
   Let (addAliasesToPattern pat e)
-  (Names' $ consumedInPattern pat <> consumedInExp e, explore)
+  (StmAux cs (Names' $ consumedInPattern pat <> consumedInExp e, attr))
   e
 
 instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where
@@ -358,8 +358,8 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
   mkLetNames names e = do
     env <- asksScope removeScopeAliases
     flip runReaderT env $ do
-      Let pat explore _ <- mkLetNames names $ removeExpAliases e
-      return $ mkAliasedLetStm pat explore e
+      Let pat attr _ <- mkLetNames names $ removeExpAliases e
+      return $ mkAliasedLetStm pat attr e
 
   mkBody bnds res =
     let Body bodylore _ _ = mkBody (map removeStmAliases bnds) res

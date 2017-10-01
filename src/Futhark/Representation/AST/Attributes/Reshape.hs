@@ -52,9 +52,9 @@ newShape = Shape . newDims
 
 -- ^ Construct a 'Reshape' where all dimension changes are
 -- 'DimCoercion's.
-shapeCoerce :: Certificates -> [SubExp] -> VName -> Exp lore
-shapeCoerce cs newdims arr =
-  BasicOp $ Reshape cs (map DimCoercion newdims) arr
+shapeCoerce :: [SubExp] -> VName -> Exp lore
+shapeCoerce newdims arr =
+  BasicOp $ Reshape (map DimCoercion newdims) arr
 
 -- | Construct a pair suitable for a @Repeat@.
 repeatShapes :: [Shape] -> Type -> ([Shape], Shape)

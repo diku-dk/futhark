@@ -233,12 +233,12 @@ constructKernel kernel_nest inner_body = do
       cs = loopNestingCertificates first_nest
 
   (ksize_bnds, k) <- inScopeOf w_bnds $
-    mapKernel cs w (FlatThreadSpace ispace) used_inps rts inner_body
+    mapKernel w (FlatThreadSpace ispace) used_inps rts inner_body
 
   let kbnds = w_bnds ++ ksize_bnds
   return (kbnds,
           w,
-          Let (loopNestingPattern first_nest) () $ Op k)
+          Let (loopNestingPattern first_nest) (StmAux cs ()) $ Op k)
   where
     first_nest = fst kernel_nest
     inputIsUsed input = kernelInputName input `S.member`

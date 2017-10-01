@@ -190,7 +190,7 @@ copyCopyToCopy :: (MonadBinder m,
                    LetAttr (Lore m) ~ (VarWisdom, MemBound u)) =>
                   TopDownRule m
 copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (BasicOp (Copy v1)))
-  | Just (BasicOp (Copy v2)) <- ST.lookupExp v1 vtable,
+  | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
 
     Just (_, ArrayMem _ _ _ srcmem src_ixfun) <-
       ST.entryLetBoundAttr =<< ST.lookup v1 vtable,
@@ -203,12 +203,13 @@ copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (BasicOp (Copy v1)))
 
     src_space == dest_space, dest_ixfun == src_ixfun =
 
-      letBind_ pat $ BasicOp $ Copy v2
+      certifying v1_cs $ letBind_ pat $ BasicOp $ Copy v2
 
 copyCopyToCopy vtable (Let pat _ (BasicOp (Copy v0)))
-  | Just (BasicOp (Rearrange cs perm v1)) <- ST.lookupExp v0 vtable,
-    Just (BasicOp (Copy v2)) <- ST.lookupExp v1 vtable = do
-      v0' <- letExp "rearrange_v0" $ BasicOp $ Rearrange cs perm v2
+  | Just (BasicOp (Rearrange perm v1), v0_cs) <- ST.lookupExp v0 vtable,
+    Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable = do
+      v0' <- certifying (v0_cs<>v1_cs) $
+             letExp "rearrange_v0" $ BasicOp $ Rearrange perm v2
       letBind_ pat $ BasicOp $ Copy v0'
 
 copyCopyToCopy _ _ = cannotSimplify

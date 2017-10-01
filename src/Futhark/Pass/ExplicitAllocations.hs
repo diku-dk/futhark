@@ -123,7 +123,7 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 
   mkLetNamesM names e = do
     pat <- patternWithAllocations names e
-    return $ Let pat () e
+    return $ Let pat (defAux ()) e
 
   mkBodyM bnds res = return $ Body () bnds res
 
@@ -131,6 +131,8 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
     AllocM $ addBinderStm binding
   collectStms (AllocM m) =
     AllocM $ collectBinderStms m
+  certifying cs (AllocM m) =
+    AllocM $ certifyingBinder cs m
 
 instance Allocable fromlore OutInKernel =>
          Allocator ExplicitMemory (AllocM fromlore ExplicitMemory) where
@@ -243,7 +245,7 @@ allocsForStm sizeidents validents e = do
   rts <- expReturns e
   hints <- expHints e
   (ctxElems, valElems, postbnds) <- allocsForPattern sizeidents validents rts hints
-  return (Let (Pattern ctxElems valElems) () e,
+  return (Let (Pattern ctxElems valElems) (defAux ()) e,
           postbnds)
 
 patternWithAllocations :: (Allocator lore m, ExpAttr lore ~ ()) =>
@@ -254,7 +256,7 @@ patternWithAllocations names e = do
   (ts',sizes) <- instantiateShapes' =<< expExtType e
   let identForBindage name t BindVar =
         pure (Ident name t, BindVar)
-      identForBindage name _ bindage@(BindInPlace _ src _) = do
+      identForBindage name _ bindage@(BindInPlace src _) = do
         t <- lookupType src
         pure (Ident name t, bindage)
   vals <- sequence [ identForBindage name t bindage  |
@@ -287,7 +289,7 @@ allocsForPattern sizeidents validents rts hints = do
             BindVar ->
               return $ PatElem (identName ident) bindage $
               ArrayMem bt shape u mem ixfun
-            BindInPlace _ src slice -> do
+            BindInPlace src slice -> do
               (destmem,destixfun) <- lift $ lookupArraySummary src
               if destmem == mem && destixfun == ixfun
                 then return $ PatElem (identName ident) bindage $
@@ -313,7 +315,7 @@ allocsForPattern sizeidents validents rts hints = do
             return $ PatElem (identName ident) bindage summary
 
         ReturnsArray bt _ u (Just ReturnsNewBlock{})
-          | BindInPlace _ _ slice <- bindage -> do
+          | BindInPlace _ slice <- bindage -> do
               -- The expression returns its own memory, but the pattern
               -- wants to store it somewhere else.  We first let it
               -- store the value where it wants, then we copy it to the
@@ -362,7 +364,7 @@ summaryForBindage t BindVar (Hint ixfun space) = do
            map (ConvOpExp (SExt Int32 Int64)) (IxFun.base ixfun)
   m <- allocateMemory "mem" bytes space
   return $ ArrayMem bt (arrayShape t) NoUniqueness m ixfun
-summaryForBindage _ (BindInPlace _ src _) _ =
+summaryForBindage _ (BindInPlace src _) _ =
   lookupMemBound src
 
 memForBindee :: (MonadFreshNames m) =>
@@ -498,7 +500,7 @@ allocLinearArray s v = do
   let pat = Pattern [] [PatElem (identName v') BindVar $
                         directIndexFunction (elemType t) (arrayShape t)
                         NoUniqueness mem t]
-  addStm $ Let pat () $ BasicOp $ Copy v
+  addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
   return (size, mem, Var $ identName v')
 
 funcallArgs :: (Allocable fromlore tolore,
@@ -554,8 +556,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner TileSize
           handleOp (SufficientParallelism se) =
             return $ Inner $ SufficientParallelism se
-          handleOp (Kernel desc cs space ts kbody) = subAllocM handleKernelExp $
-            Inner . Kernel desc cs space ts <$>
+          handleOp (Kernel desc space ts kbody) = subAllocM handleKernelExp $
+            Inner . Kernel desc space ts <$>
             localScope (scopeOfKernelSpace space)
             (allocInKernelBody kbody)
 
@@ -614,7 +616,7 @@ allocInStms origbnds m = allocInStms' origbnds []
             local (boundDims $ mconcat $ map sizeSubst allocbnds) $
             allocInStms' xs (bnds'++allocbnds)
         allocInStm' bnd = do
-          ((),bnds') <- collectStms $ allocInStm bnd
+          ((),bnds') <- collectStms $ certifying (stmCerts bnd) $ allocInStm bnd
           return bnds'
 
 allocInStm :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
@@ -811,7 +813,7 @@ mkLetNamesB' :: (ExpAttr (Lore m) ~ (),
 mkLetNamesB' names e = do
   scope <- askScope
   pat <- bindPatternWithAllocations scope names e
-  return $ Let pat () e
+  return $ Let pat (defAux ()) e
 
 instance BinderOps ExplicitMemory where
   mkExpAttrB _ _ = return ()
@@ -840,7 +842,7 @@ simplifiable simplifyInnerOp =
         mkLetNamesS' vtable names e = do
           pat' <- bindPatternWithAllocations env names $
                   removeExpWisdom e
-          return $ mkWiseLetStm pat' () e
+          return $ mkWiseLetStm pat' (defAux ()) e
           where env = removeScopeWisdom $ ST.toScope vtable
 
         simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
@@ -869,7 +871,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
       ixfun = IxFun.permute (IxFun.iota $ map (primExpFromSubExp int32) dims')
               perm_inv
   return [Hint ixfun DefaultSpace]
-kernelExpHints (Op (Inner (Kernel _ _ space rets kbody))) =
+kernelExpHints (Op (Inner (Kernel _ space rets kbody))) =
   zipWithM hint rets $ kernelBodyResult kbody
   where num_threads = spaceNumThreads space
 

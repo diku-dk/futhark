@@ -28,7 +28,7 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.RuleM
 
 -- | A function that, given a variable name, returns its definition.
-type VarLookup lore = VName -> Maybe (Exp lore)
+type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
 
 {-
 Motivation:
@@ -165,7 +165,7 @@ determineKnownBindings look lam accs arrs =
                   zip (map paramName arrparams) arrs
 
         isReplicate (p, v)
-          | Just (BasicOp (Replicate _ ve)) <- look v = Just (p, ve)
+          | Just (BasicOp (Replicate _ ve), []) <- look v = Just (p, ve)
         isReplicate _ = Nothing
 
 makeBindMap :: Body lore -> M.Map VName (Exp lore)

@@ -128,8 +128,8 @@ optimiseStms (bnd:bnds) m = do
 
   where boundHere = patternNames $ stmPattern bnd
 
-        checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
-            | [PatElem v (BindInPlace cs src (DimFix i:slice)) attr] <- patternElements pat,
+        checkIfForwardableUpdate bnd'@(Let pat (StmAux cs _) e) bnds'
+            | [PatElem v (BindInPlace src (DimFix i:slice)) attr] <- patternElements pat,
               slice == drop 1 (fullSlice (typeOf attr) [DimFix i]),
               BasicOp (SubExp (Var ve)) <- e = do
                 forwarded <- maybeForward ve v attr cs src i
@@ -183,7 +183,6 @@ updateStm :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Stm (Aliases Kernels)
 updateStm fwd =
   mkLet [] [(Ident (updateName fwd) $ typeOf $ updateType fwd,
              BindInPlace
-             (updateCertificates fwd)
              (updateSource fwd)
              (fullSlice (typeOf $ updateType fwd) $ updateIndices fwd))] $
   BasicOp $ SubExp $ Var $ updateValue fwd

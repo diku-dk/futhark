@@ -223,11 +223,11 @@ mkWiseBody innerlore bnds res =
 
 mkWiseLetStm :: (Attributes lore, CanBeWise (Op lore)) =>
                 Pattern lore
-             -> ExpAttr lore -> Exp (Wise lore)
+             -> StmAux (ExpAttr lore) -> Exp (Wise lore)
              -> Stm (Wise lore)
-mkWiseLetStm pat explore e =
+mkWiseLetStm pat (StmAux cs attr) e =
   let pat' = addWisdomToPattern pat e
-  in Let pat' (mkWiseExpAttr pat' explore e) e
+  in Let pat' (StmAux cs $ mkWiseExpAttr pat' attr e) e
 
 mkWiseExpAttr :: (Attributes lore, CanBeWise (Op lore)) =>
                  Pattern (Wise lore) -> ExpAttr lore -> Exp (Wise lore)
@@ -249,8 +249,8 @@ instance (Bindable lore,
   mkLetNames names e = do
     env <- asksScope removeScopeWisdom
     flip runReaderT env $ do
-      Let pat explore _ <- mkLetNames names $ removeExpWisdom e
-      return $ mkWiseLetStm pat explore e
+      Let pat attr _ <- mkLetNames names $ removeExpWisdom e
+      return $ mkWiseLetStm pat attr e
 
   mkBody bnds res =
     let Body bodylore _ _ = mkBody (map removeStmWisdom bnds) res

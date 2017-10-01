@@ -47,10 +47,10 @@ rephraseExp :: Monad m => Rephraser m from to -> Exp from -> m (Exp to)
 rephraseExp = mapExpM . mapper
 
 rephraseStm :: Monad m => Rephraser m from to -> Stm from -> m (Stm to)
-rephraseStm rephraser (Let pat lore e) =
+rephraseStm rephraser (Let pat (StmAux cs attr) e) =
   Let <$>
   rephrasePattern (rephraseLetBoundLore rephraser) pat <*>
-  rephraseExpLore rephraser lore <*>
+  (StmAux cs <$> rephraseExpLore rephraser attr) <*>
   rephraseExp rephraser e
 
 rephrasePattern :: Monad m =>
@@ -64,8 +64,8 @@ rephrasePattern f (Pattern context values) =
 rephrasePatElem :: Monad m => (from -> m to) -> PatElemT from -> m (PatElemT to)
 rephrasePatElem rephraser (PatElem ident BindVar from) =
   PatElem ident BindVar <$> rephraser from
-rephrasePatElem rephraser (PatElem ident (BindInPlace cs src is) from) =
-  PatElem ident (BindInPlace cs src is) <$> rephraser from
+rephrasePatElem rephraser (PatElem ident (BindInPlace src is) from) =
+  PatElem ident (BindInPlace src is) <$> rephraser from
 
 rephraseParam :: Monad m => (from -> m to) -> ParamT from -> m (ParamT to)
 rephraseParam rephraser (Param name from) =

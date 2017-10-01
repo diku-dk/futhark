@@ -44,12 +44,12 @@ optimiseBody (Body () bnds res) =
   Body () <$> (concat <$> mapM optimiseStm bnds) <*> pure res
 
 optimiseStm :: Stm Kernels -> TileM [Stm Kernels]
-optimiseStm (Let pat () (Op (Kernel desc cs space ts body))) = do
+optimiseStm (Let pat aux (Op (Kernel desc space ts body))) = do
   (extra_bnds, space', body') <- tileInKernelBody mempty initial_variance space body
-  return $ extra_bnds ++ [Let pat () $ Op $ Kernel desc cs space' ts body']
+  return $ extra_bnds ++ [Let pat aux $ Op $ Kernel desc space' ts body']
   where initial_variance = M.map mempty $ scopeOfKernelSpace space
-optimiseStm (Let pat () e) =
-  pure <$> (Let pat () <$> mapExpM optimise e)
+optimiseStm (Let pat aux e) =
+  pure <$> (Let pat aux <$> mapExpM optimise e)
   where optimise = identityMapper { mapOnBody = const optimiseBody }
 
 tileInKernelBody :: Names -> VarianceTable
@@ -269,13 +269,13 @@ tile1d kspace block_size block_param = do
     name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
     return $
       mkLet' [] [Ident name $ rowType $ paramType outer_block_param] $
-      BasicOp $ Index [] (paramName outer_block_param) [DimFix $ Var ltid]
+      BasicOp $ Index (paramName outer_block_param) [DimFix $ Var ltid]
 
   let block_cspace = [(ltid,block_size)]
       block_pe =
         PatElem (paramName block_param) BindVar $ paramType outer_block_param
       write_block_stms =
-        [ Let (Pattern [] [block_pe]) () $ Op $
+        [ Let (Pattern [] [block_pe]) (defAux ()) $ Op $
           Combine block_cspace [patElemType pe] [] $
           Body () [read_elem_bnd] [Var $ patElemName pe]
         | pe <- patternElements $ stmPattern read_elem_bnd ]
@@ -304,7 +304,7 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
 
     elem_name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
     let read_elem_bnd = mkLet' [] [Ident elem_name $ Prim pt] $
-                        BasicOp $ Index [] (paramName outer_block_param) $
+                        BasicOp $ Index (paramName outer_block_param) $
                         fullSlice (paramType outer_block_param) [DimFix $ Var invariant_i]
 
     let block_size_2d = Shape $ rearrangeShape inner_perm [tile_size, block_size]
@@ -315,7 +315,7 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
           PatElem block_name_2d BindVar $
           rowType (paramType outer_block_param) `arrayOfShape` block_size_2d
         write_block_stm =
-         Let (Pattern [] [block_pe]) () $
+         Let (Pattern [] [block_pe]) (defAux ()) $
           Op $ Combine block_cspace [Prim pt] [(global_i, global_d)] $
           Body () [read_elem_bnd] [Var elem_name]
 
@@ -324,9 +324,9 @@ is2dTileable branch_variant kspace variance block_size arr block_param = do
                           rearrangeType inner_perm $ patElemType block_pe
     let index_block_kstms =
           [mkLet' [] [block_param_aux] $
-            BasicOp $ Rearrange [] inner_perm block_name_2d,
+            BasicOp $ Rearrange inner_perm block_name_2d,
            mkLet' [] [paramIdent block_param] $
-            BasicOp $ Index [] (identName block_param_aux) $
+            BasicOp $ Index (identName block_param_aux) $
             fullSlice (identType block_param_aux) [DimFix $ Var variant_i]]
 
     return (outer_block_param, write_block_stm : index_block_kstms)

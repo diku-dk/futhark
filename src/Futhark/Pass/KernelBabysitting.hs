@@ -58,10 +58,10 @@ type ExpMap = M.Map VName (Stm Kernels)
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case M.lookup name m of
-    Just (Let _ _ (BasicOp (Rearrange _ perm _))) -> Just $ Just perm
-    Just (Let _ _ (BasicOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
+    Just (Let _ _ (BasicOp (Rearrange perm _))) -> Just $ Just perm
+    Just (Let _ _ (BasicOp (Reshape _ arr))) -> nonlinearInMemory arr m
     Just (Let _ _ (BasicOp (Manifest perm _))) -> Just $ Just perm
-    Just (Let pat _ (Op (Kernel _ _ _ ts _))) ->
+    Just (Let pat _ (Op (Kernel _ _ ts _))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
     _ -> Nothing
@@ -73,7 +73,7 @@ nonlinearInMemory name m =
 
 transformStm :: ExpMap -> Stm Kernels -> BabysitM ExpMap
 
-transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
+transformStm expmap (Let pat aux (Op (Kernel desc space ts kbody))) = do
   -- Go spelunking for accesses to arrays that are defined outside the
   -- kernel body and where the indices are kernel thread indices.
   scope <- askScope
@@ -87,14 +87,14 @@ transformStm expmap (Let pat () (Op (Kernel desc cs space ts kbody))) = do
                          kbody)
              mempty
 
-  let bnd' = Let pat () $ Op $ Kernel desc cs space ts kbody''
+  let bnd' = Let pat aux $ Op $ Kernel desc space ts kbody''
   addStm bnd'
   return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
   where num_threads = spaceNumThreads space
 
-transformStm expmap (Let pat () e) = do
+transformStm expmap (Let pat aux e) = do
   e' <- mapExpM transform e
-  let bnd' = Let pat () e'
+  let bnd' = Let pat aux e'
   addStm bnd'
   return $ M.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
 
@@ -135,12 +135,12 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
                 szsubst' = mkSizeSubsts stms <> szsubst
                 scope' = scope <> scopeOf stms
 
-        onStm (variance, szsubst, _) (Let pat attr (BasicOp (Index cs arr is))) =
+        onStm (variance, szsubst, _) (Let pat attr (BasicOp (Index arr is))) =
           Let pat attr . oldOrNew <$> f isThreadLocal sizeSubst outer_scope arr is
           where oldOrNew Nothing =
-                  BasicOp $ Index cs arr is
+                  BasicOp $ Index arr is
                 oldOrNew (Just (arr', is')) =
-                  BasicOp $ Index cs arr' is'
+                  BasicOp $ Index arr' is'
 
                 isThreadLocal v =
                   not $ S.null $
@@ -348,7 +348,7 @@ rearrangeSlice d w num_chunks arr = do
             letExp (baseString arr <> "_padding") $
             BasicOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
           letExp (baseString arr <> "_padded") $
-            BasicOp $ Concat [] d arr [arr_padding] w_padded
+            BasicOp $ Concat d arr [arr_padding] w_padded
 
         rearrange num_chunks' w_padded per_chunk arr_name arr_padded arr_t = do
           let arr_dims = arrayDims arr_t
@@ -358,15 +358,15 @@ rearrangeSlice d w num_chunks arr = do
               tr_perm = [0..d-1] ++ map (+d) ([1] ++ [2..shapeRank extradim_shape-1-d] ++ [0])
           arr_extradim <-
             letExp (arr_name <> "_extradim") $
-            BasicOp $ Reshape [] (map DimNew $ shapeDims extradim_shape) arr_padded
+            BasicOp $ Reshape (map DimNew $ shapeDims extradim_shape) arr_padded
           arr_extradim_tr <-
             letExp (arr_name <> "_extradim_tr") $
             BasicOp $ Manifest tr_perm arr_extradim
           arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
-            BasicOp $ Reshape [] (map DimCoercion pre_dims ++ map DimNew (w_padded : post_dims))
+            BasicOp $ Reshape (map DimCoercion pre_dims ++ map DimNew (w_padded : post_dims))
             arr_extradim_tr
           letExp (arr_name <> "_inv_tr_init") $
-            BasicOp $ Split [] d [w] arr_inv_tr
+            BasicOp $ Split d [w] arr_inv_tr
 
 paddedScanReduceInput :: MonadBinder m =>
                          SubExp -> SubExp

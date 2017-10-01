@@ -37,7 +37,7 @@ transformStms = mapM_ transformStm
 
 transformStm :: Transformer m => Stm -> m ()
 
-transformStm (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
+transformStm (Let pat aux (Op (Redomap w _ _ fold_lam nes arrs)))
   -- No map-out part
   | patternSize pat == length nes = do
   chunk_size <- newVName "chunk_size"
@@ -63,7 +63,7 @@ transformStm (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
 
   redomap_kstms <- collectStms_ $ localScope param_scope $ do
     fold_lam' <- transformLambda fold_lam
-    groupStreamMapAccumL redomap_pes cs (Var chunk_size) fold_lam'
+    groupStreamMapAccumL redomap_pes (Var chunk_size) fold_lam'
       (map (Var . paramName) fold_acc_params') (map paramName arr_chunk_params)
 
   let stream_kbody = Out.Body () redomap_kstms $
@@ -86,13 +86,13 @@ transformStm (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs)))
                 letSubExp "groupstream_mapaccum_copy" $ BasicOp $ Copy v
       _ -> return e
 
-  addStm $ Let pat () $ Op $ Out.GroupStream w w stream_lam nes' arrs
+  addStm $ Let pat aux $ Op $ Out.GroupStream w w stream_lam nes' arrs
 
   where mkArrChunkParam chunk_size arr_param =
           newParam (baseString (paramName arr_param) <> "_chunk") $
             arrayOfRow (paramType arr_param) chunk_size
 
-transformStm (Let pat _ (Op (Stream [] w (Sequential accs) fold_lam arrs)))
+transformStm (Let pat aux (Op (Stream w (Sequential accs) fold_lam arrs)))
   | Just ret <- hasStaticShapes $ extLambdaReturnType fold_lam = do
   -- Sequential streams can be transformed easily to a GroupStream.
   -- But we have to create accumulator parameters for mapout.
@@ -118,7 +118,7 @@ transformStm (Let pat _ (Op (Stream [] w (Sequential accs) fold_lam arrs)))
     mapout_res' <- forM (zip outarr_params mapout_res) $ \(p, r) ->
       let slice = fullSlice (paramType p)
                   [DimSlice (Var chunk_offset) (Var chunk_size) (constant (1::Int32))]
-      in fmap Var $ letInPlace "mapout_res" [] (paramName p) slice $ BasicOp $ SubExp r
+      in fmap Var $ letInPlace "mapout_res" (paramName p) slice $ BasicOp $ SubExp r
 
     return $ resultBody $ acc_res++mapout_res'
 
@@ -139,10 +139,10 @@ transformStm (Let pat _ (Op (Stream [] w (Sequential accs) fold_lam arrs)))
                 letSubExp "streamseq_acc_copy" $ BasicOp $ Copy v
       _     -> return acc
 
-  addStm $ Let pat () $ Op $
+  addStm $ Let pat aux $ Op $
     Out.GroupStream w w stream_lam (accs'++map Var mapout_arrs) arrs
 
-transformStm (Let pat _ (DoLoop [] val (ForLoop i Int32 bound []) body)) = do
+transformStm (Let pat aux (DoLoop [] val (ForLoop i Int32 bound []) body)) = do
   dummy_chunk_size <- newVName "dummy_chunk_size"
   body' <- localScope (scopeOfFParams (map fst val)) $ transformBody body
   let lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size
@@ -160,13 +160,13 @@ transformStm (Let pat _ (DoLoop [] val (ForLoop i Int32 bound []) body)) = do
                 letSubExp "streamseq_merge_copy" $ BasicOp $ Copy v
       _     -> return initial
 
-  addStm $ Let pat () $ Op $ Out.GroupStream
+  addStm $ Let pat aux $ Op $ Out.GroupStream
     bound (constant (1::Int32)) lam accs' []
 
-transformStm (Let pat _ (If cond tb fb ts)) = do
+transformStm (Let pat aux (If cond tb fb ts)) = do
   tb' <- transformBody tb
   fb' <- transformBody fb
-  addStm $ Let pat () $ If cond tb' fb' ts
+  addStm $ Let pat aux $ If cond tb' fb' ts
 
 transformStm bnd =
   FOT.transformStmRecursively bnd
@@ -188,13 +188,12 @@ transformLambda (Lambda params body rettype) = do
 
 groupStreamMapAccumL :: Transformer m =>
                         [Out.PatElem Out.InKernel]
-                     -> Certificates
                      -> SubExp
                      -> Out.Lambda Out.InKernel
                      -> [SubExp]
                      -> [VName]
                      -> m ()
-groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
+groupStreamMapAccumL pes w fold_lam accexps arrexps = do
   let acc_num     = length accexps
       res_tps     = lambdaReturnType fold_lam
       map_arr_tps = drop acc_num res_tps
@@ -206,7 +205,7 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
                              | t <- map_arr_tps ]
 
   (merge, i, redomap_loop) <-
-    FOT.doLoopMapAccumL' cs w fold_lam_aliases accexps [] mapout_arrs
+    FOT.doLoopMapAccumL' w fold_lam_aliases accexps [] mapout_arrs
 
   -- HACK: we manually inject the indexing here.
   dummy_chunk_size <- newVName "groupstream_mapaccum_dummy_chunk_size"
@@ -218,7 +217,7 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
         (p, arr, arr_t) <- zip3 arr_params (map paramName arr_params_chunked)
                            (map paramType arr_params_chunked)
         return $ mkLet' [] [paramIdent p] $
-          BasicOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
+          BasicOp $ Index arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
 
   let redomap_kbody = index_bnds `insertStms` redomap_loop
       acc_params = map (fmap fromDecl . fst) merge
@@ -263,7 +262,7 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
       outarr_param_new <- newParam' (<>"_new") outarr_param
       return (outarr_param_new,
               mkLet [] [(paramIdent outarr_param_new,
-                         BindInPlace [] (paramName outarr_param) $
+                         BindInPlace (paramName outarr_param) $
                          fullSlice (paramType outarr_param) [DimFix $ Var i])] $
               BasicOp $ SubExp se)
 
@@ -271,7 +270,7 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
         (p, arr, arr_t) <- zip3 params (map paramName params_chunked) $
                            map paramType params_chunked
         return $ mkLet' [] [paramIdent p] $
-          BasicOp $ Index cs arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
+          BasicOp $ Index arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
       kbody' = Out.Body () (index_stms++kstms++write_elems) $
                map (Var . paramName) outarr_params_new
 
@@ -281,5 +280,5 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
                                          , Out.groupStreamArrParams = params_chunked
                                          , Out.groupStreamLambdaBody = kbody'
                                          }
-  addStm $ Let pat () $ Op $ Out.GroupStream w (constant (1::Int32))
-    stream_lam (map Var outarrs) arrs
+  certifying cs $ addStm $ Let pat (StmAux cs ()) $
+    Op $ Out.GroupStream w (constant (1::Int32)) stream_lam (map Var outarrs) arrs

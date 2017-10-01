@@ -178,4 +178,4 @@ mkRangedLetStm :: (Attributes lore, CanBeRanged (Op lore)) =>
                -> Exp (Ranges lore)
                -> Stm (Ranges lore)
 mkRangedLetStm pat explore e =
-  Let (addRangesToPattern pat e) explore e
+  Let (addRangesToPattern pat e) (StmAux mempty explore) e
