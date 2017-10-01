@@ -6,14 +6,14 @@
 # Pass the reference version as the first argument.  You must run this
 # while standing in the Futhark directory.
 
-if [ $# -ne 3 ]; then
-    echo "Usage: $0 <machine> <rev_a> <rev_b>" >&2
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <machine_a> <rev_a> <machine_b> <rev_b>" >&2
     exit 1
 fi
 
 RESULTS_URL=https://futhark-lang.org/benchmark-results/
 a_url=$RESULTS_URL/$1-$2.json
-b_url=$RESULTS_URL/$1-$3.json
+b_url=$RESULTS_URL/$3-$4.json
 echo "Fetching $a_url"
 echo "     and $b_url"
 
