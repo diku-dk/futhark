@@ -122,11 +122,14 @@ safeExp (BasicOp op) = safeBasicOp op
         safeBasicOp UnOp{} = True
         safeBasicOp CmpOp{} = True
         safeBasicOp ConvOp{} = True
+        safeBasicOp Scratch{} = True
+        safeBasicOp Concat{} = True
+        safeBasicOp Reshape{} = True
+        safeBasicOp Manifest{} = True
         safeBasicOp _ = False
 
 safeExp (DoLoop _ _ _ body) = safeBody body
 safeExp (Apply fname _ _) = isBuiltInFunction fname
-safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . stmExp) (bodyStms tbranch) &&
   all (safeExp . stmExp) (bodyStms fbranch)
