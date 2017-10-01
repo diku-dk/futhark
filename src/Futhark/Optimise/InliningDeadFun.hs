@@ -91,7 +91,7 @@ inlineInBody
       reshapeIfNecessary ident se
         | t@Array{} <- identType ident,
           Var v <- se =
-            mkLet' [] [ident] $ shapeCoerce [] (arrayDims t) v
+            mkLet' [] [ident] $ shapeCoerce (arrayDims t) v
         | otherwise =
           mkLet' [] [ident] $ BasicOp $ SubExp se
 inlineInBody inlcallees (Body () (bnd:bnds) res) =
@@ -113,7 +113,8 @@ inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper
                           }
 
 inlineInStm :: [FunDef] -> Stm -> Stm
-inlineInStm inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
+inlineInStm inlcallees (Let pat aux e) =
+  Let pat aux $ mapExp (inliner inlcallees) e
 
 inlineInLambda :: [FunDef] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret) =

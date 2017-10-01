@@ -29,6 +29,7 @@ module Futhark.Optimise.Simplifier.Engine
 
        , addStmEngine
        , collectStmsEngine
+       , collectCerts
        , Env (envHoistBlockers, envRules)
        , emptyEnv
        , HoistBlockers(..)
@@ -108,11 +109,12 @@ type NeedSet lore = [Stm lore]
 
 data Need lore = Need { needStms :: NeedSet lore
                       , usageTable  :: UT.UsageTable
+                      , needCerts :: !Certificates
                       }
 
 instance Monoid (Need lore) where
-  Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
-  mempty = Need [] UT.empty
+  Need b1 f1 c1 `mappend` Need b2 f2 c2 = Need (b1 <> b2) (f1 <> f2) (c1 <> c2)
+  mempty = Need [] UT.empty mempty
 
 data HoistBlockers m = HoistBlockers
                        { blockHoistPar :: BlockPred (Lore m)
@@ -216,6 +218,8 @@ instance SimplifiableLore lore => MonadBinder (SimpleM lore) where
 
   addStm      = addStmEngine
   collectStms = collectStmsEngine
+  certifying cs =
+    censor (\need -> need { needStms = fmap (certify cs) (needStms need) })
 
 runSimpleM :: SimpleM lore a
            -> SimpleOps lore
@@ -272,6 +276,12 @@ collectStmsEngine m = passNeed $ do
   return ((x, needStms need),
           const mempty)
 
+collectCerts :: SimpleM lore a -> SimpleM lore (a, Certificates)
+collectCerts m = passNeed $ do
+  (x, need) <- listenNeed m
+  return ((x, needCerts need),
+          const need { needCerts = mempty })
+
 asksEngineEnv :: (Env (SimpleM lore) -> a) -> SimpleM lore a
 asksEngineEnv f = f <$> askEngineEnv
 
@@ -289,34 +299,37 @@ changed = modifyEngineState $ \s -> s { stateChanged = True }
 
 
 needStm :: Stm (Wise lore) -> SimpleM lore ()
-needStm bnd = tellNeed $ Need [bnd] UT.empty
+needStm bnd = tellNeed mempty { needStms = [bnd] }
+
+usedCerts :: Certificates -> SimpleM lore ()
+usedCerts cs = tellNeed mempty { needCerts = cs }
 
 boundFree :: Names -> SimpleM lore ()
-boundFree fs = tellNeed $ Need [] $ UT.usages fs
+boundFree fs = tellNeed mempty { usageTable = UT.usages fs }
 
 usedName :: VName -> SimpleM lore ()
 usedName = boundFree . S.singleton
 
 -- | Register the fact that the given name is consumed.
 consumedName :: VName -> SimpleM lore ()
-consumedName = tellNeed . Need [] . UT.consumedUsage
+consumedName v = tellNeed mempty { usageTable = UT.consumedUsage v }
 
 inResultName :: VName -> SimpleM lore ()
-inResultName = tellNeed . Need [] . UT.inResultUsage
+inResultName v = tellNeed mempty { usageTable = UT.inResultUsage v }
 
 asserted :: SubExp -> SimpleM lore ()
 asserted Constant{} =
   return ()
 asserted (Var name) = do
   se <- ST.lookupExp name <$> getVtable
-  case se of Just (BasicOp (CmpOp CmpEq{} x y)) -> do
+  case se of Just (BasicOp (CmpOp CmpEq{} x y), _) -> do
                case x of Var xvar ->
-                           tellNeed $ Need [] $
-                           UT.equalToUsage xvar y
+                           tellNeed $
+                           mempty { usageTable = UT.equalToUsage xvar y }
                          _ -> return ()
                case y of Var yvar ->
-                           tellNeed $ Need [] $
-                           UT.equalToUsage yvar x
+                           tellNeed $
+                           mempty { usageTable = UT.equalToUsage yvar x }
                          _ -> return ()
              _ -> return ()
 
@@ -492,9 +505,9 @@ blockIf block m = passNeed $ do
     hoistStms rules block vtable (usageTable needs) (needStms needs)
   putVtable $ foldl (flip ST.insertStm) vtable hoistable
   return ((x, hoisted),
-          const Need { needStms = hoistable
-                     , usageTable  = usages
-                     })
+          const mempty { needStms = hoistable
+                       , usageTable  = usages
+                       })
 
 insertAllStms :: SimplifiableLore lore =>
                  SimpleM lore Result -> SimpleM lore (Body (Wise lore))
@@ -557,9 +570,9 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   body1' <- mkBodyM body1_bnds' res1
   body2' <- mkBodyM body2_bnds' res2
   return ((body1', body2'),
-          const Need { needStms = hoistable
-                     , usageTable = f1 <> f2
-                     })
+          const mempty { needStms = hoistable
+                       , usageTable = f1 <> f2
+                       })
   where filterBnds is_alloc_fn getArrSz_fn all_bnds =
           let sz_nms     = mconcat $ map getArrSz_fn all_bnds
               sz_needs   = transClosSizes all_bnds sz_nms []
@@ -590,9 +603,23 @@ simplifyBody ds (Body _ bnds res) = do
 simplifyResult :: SimplifiableLore lore =>
                   [Diet] -> Result -> SimpleM lore Result
 simplifyResult ds es = do
-  es' <- mapM simplify es
+  -- Use a special copy propagation function to avoid copy propagation
+  -- when certificates are involved - there is nowhere to put them!
+  es' <- mapM simplify' es
   consumeResult $ zip ds es'
   return es'
+  where simplify' (Var name) = do
+          bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
+          case bnd of
+            Just (Constant v, []) -> do changed
+                                        return $ Constant v
+            Just (Var id', []) -> do changed
+                                     usedName id'
+                                     return $ Var id'
+            _              -> do usedName name
+                                 return $ Var name
+        simplify' (Constant v) =
+          return $ Constant v
 
 isDoLoopResult :: Result -> SimpleM lore ()
 isDoLoopResult = mapM_ checkForVar
@@ -605,10 +632,11 @@ isDoLoopResult = mapM_ checkForVar
 simplifyStm :: SimplifiableLore lore =>
                Stm lore -> SimpleM lore ()
 
-simplifyStm (Let pat _ e) = do
-  e' <- simplifyExp e
-  pat' <- simplifyPattern pat
-  inspectStm =<<
+simplifyStm (Let pat (StmAux stm_cs _) e) = do
+  stm_cs' <- simplify stm_cs
+  (e', e_cs) <- collectCerts $ simplifyExp e
+  (pat', pat_cs) <- collectCerts $ simplifyPattern pat
+  inspectStm . certify (stm_cs'<>e_cs<>pat_cs) =<<
     mkLetM (addWisdomToPattern pat' e') e'
 
 inspectStm :: SimplifiableLore lore => Stm (Wise lore) -> SimpleM lore ()
@@ -727,11 +755,13 @@ instance Simplifiable SubExp where
   simplify (Var name) = do
     bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
     case bnd of
-      Just (Constant v) -> do changed
-                              return $ Constant v
-      Just (Var id') -> do changed
-                           usedName id'
-                           return $ Var id'
+      Just (Constant v, cs) -> do changed
+                                  usedCerts cs
+                                  return $ Constant v
+      Just (Var id', cs) -> do changed
+                               usedName id'
+                               usedCerts cs
+                               return $ Var id'
       _              -> do usedName name
                            return $ Var name
   simplify (Constant v) =
@@ -755,11 +785,8 @@ simplifyPattern pat =
 instance Simplifiable Bindage where
   simplify BindVar =
     return BindVar
-  simplify (BindInPlace cs src is) =
-    BindInPlace <$>
-    simplify cs <*>
-    simplify src <*>
-    mapM simplify is
+  simplify (BindInPlace src is) =
+    BindInPlace <$> simplify src <*> mapM simplify is
 
 simplifyParam :: (attr -> SimpleM lore attr) -> ParamT attr -> SimpleM lore (ParamT attr)
 simplifyParam simplifyAttribute (Param name attr) = do
@@ -770,9 +797,10 @@ instance Simplifiable VName where
   simplify v = do
     se <- ST.lookupSubExp v <$> getVtable
     case se of
-      Just (Var v') -> do changed
-                          usedName v'
-                          return v'
+      Just (Var v', cs) -> do changed
+                              usedName v'
+                              usedCerts cs
+                              return v'
       _             -> do usedName v
                           return v
 
@@ -894,9 +922,9 @@ instance Simplifiable Certificates where
     where check idd = do
             vv <- getsEngineState $ ST.lookupSubExp idd . stateVtable
             case vv of
-              Just (Constant Checked) -> return []
-              Just (Var idd') -> do usedName idd'
-                                    return [idd']
+              Just (Constant Checked, cs) -> return cs
+              Just (Var idd', _) -> do usedName idd'
+                                       return [idd']
               _ -> do usedName idd
                       return [idd]
 

@@ -206,15 +206,15 @@ primOpRanges (Iota n x s Int32) =
           Constant val -> SE.Val val
 primOpRanges (Replicate _ v) =
   [rangeOf v]
-primOpRanges (Rearrange _ _ v) =
+primOpRanges (Rearrange _ v) =
   [rangeOf $ Var v]
-primOpRanges (Split _ _ sizeexps v) =
+primOpRanges (Split _ sizeexps v) =
   replicate (length sizeexps) $ rangeOf $ Var v
 primOpRanges (Copy se) =
   [rangeOf $ Var se]
-primOpRanges (Index _ v _) =
+primOpRanges (Index v _) =
   [rangeOf $ Var v]
-primOpRanges (Partition _ n _ arr) =
+primOpRanges (Partition n _ arr) =
   replicate n unknownRange ++ map (rangeOf . Var) arr
 primOpRanges (ArrayLit (e:es) _) =
   [(Just lower, Just upper)]

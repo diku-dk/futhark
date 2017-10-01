@@ -150,8 +150,7 @@ instance Pretty (PatElemT Type) where
     ppr t <+>
     ppr name
 
-  ppr (PatElem name (BindInPlace cs src is) t) =
-    ppCertificates cs <>
+  ppr (PatElem name (BindInPlace src is) t) =
     parens (ppr t <+>
             ppr name <+>
             text "<-" <+>
@@ -172,7 +171,7 @@ instance Pretty (ParamT Type) where
     ppr name
 
 instance PrettyLore lore => Pretty (Stm lore) where
-  ppr bnd@(Let pat attr e) =
+  ppr bnd@(Let pat (StmAux cs attr) e) =
     bindingAnnotation bnd $ align $
     text "let" <+> align (ppr pat) <+>
     case (linebreak, ppExpLore attr e) of
@@ -181,7 +180,7 @@ instance PrettyLore lore => Pretty (Stm lore) where
       (_, Just ann) -> equals </>
                        indent 2 (ann </> e')
       (False, Nothing) -> equals <+> align e'
-    where e' = ppr e
+    where e' = ppCertificates cs <> ppr e
           linebreak = case e of
                         DoLoop{}           -> True
                         Op{}               -> True
@@ -204,9 +203,8 @@ instance Pretty (BasicOp lore) where
     text (convOpFun conv) <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
     where (fromtype, totype) = convTypes conv
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
-  ppr (Index cs v idxs) =
-    ppCertificates cs <> ppr v <>
-    brackets (commasep (map ppr idxs))
+  ppr (Index v idxs) =
+    ppr v <> brackets (commasep (map ppr idxs))
   ppr (Iota e x s et) = text "iota" <> et' <> apply [ppr e, ppr x, ppr s]
     where et' = text $ show $ primBitSize $ IntType et
   ppr (Replicate ne ve) =
@@ -215,22 +213,21 @@ instance Pretty (BasicOp lore) where
     text "repeat" <> apply [apply $ map ppr $ shapes ++ [innershape], ppr v]
   ppr (Scratch t shape) =
     text "scratch" <> apply (ppr t : map ppr shape)
-  ppr (Reshape cs shape e) =
-    ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
-  ppr (Rearrange cs perm e) =
-    ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  ppr (Rotate cs es e) =
-    ppCertificates cs <> text "rotate" <> apply [apply (map ppr es), ppr e]
-  ppr (Split cs i sizeexps a) =
-    ppCertificates cs <> text "split" <> text "@" <> ppr i <> apply [apply (map ppr sizeexps), ppr a]
-  ppr (Concat cs i x ys _) =
-    ppCertificates cs <> text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
+  ppr (Reshape shape e) =
+    text "reshape" <> apply [apply (map ppr shape), ppr e]
+  ppr (Rearrange perm e) =
+    text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  ppr (Rotate es e) =
+    text "rotate" <> apply [apply (map ppr es), ppr e]
+  ppr (Split i sizeexps a) =
+    text "split" <> text "@" <> ppr i <> apply [apply (map ppr sizeexps), ppr a]
+  ppr (Concat i x ys _) =
+    text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
   ppr (Assert e msg loc) =
     text "assert" <> apply [ppr e, text (show msg), text $ show $ locStr loc]
-  ppr (Partition cs n flags arrs) =
-    ppCertificates' cs <>
+  ppr (Partition n flags arrs) =
     text "partition" <>
     parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 

@@ -95,11 +95,11 @@ letExp desc e = do
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
-              String -> Certificates -> VName -> Slice SubExp -> Exp (Lore m)
+              String -> VName -> Slice SubExp -> Exp (Lore m)
            -> m VName
-letInPlace desc cs src slice e = do
+letInPlace desc src slice e = do
   v <- newVName desc
-  idents <- letBindNames [(v,BindInPlace cs src slice)] e
+  idents <- letBindNames [(v,BindInPlace src slice)] e
   case idents of
     [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
@@ -479,11 +479,11 @@ simpleMkLetNames names e = do
                    ]
       mkValElem (name, BindVar) t =
         return $ PatElem name BindVar t
-      mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
+      mkValElem (name, bindage@(BindInPlace src _)) _ = do
         srct <- lookupType src
         return $ PatElem name bindage srct
   valElems <- zipWithM mkValElem names ts
-  return $ Let (Pattern shapeElems valElems) () e
+  return $ Let (Pattern shapeElems valElems) (StmAux mempty ()) e
 
 -- | Instances of this class can be converted to Futhark expressions
 -- within a 'MonadBinder'.

@@ -46,6 +46,8 @@ instance MonadBinder m => MonadBinder (RuleM m) where
     (x, bnds) <- collectStms $ runMaybeT m
     case x of Nothing -> return Nothing
               Just x' -> return $ Just (x', bnds)
+  certifying cs (RuleM m) = RuleM $ MaybeT $
+    certifying cs $ runMaybeT m
 
 instance MonadBinder m => Alternative (RuleM m) where
   empty = RuleM $ MaybeT $ return Nothing

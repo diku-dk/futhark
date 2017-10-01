@@ -593,7 +593,7 @@ defCompileBasicOp (Destination [_]) (Assert e msg loc) = do
   e' <- compileSubExp e
   emit $ Imp.Assert e' msg loc
 
-defCompileBasicOp (Destination [target]) (Index _ src slice)
+defCompileBasicOp (Destination [target]) (Index src slice)
   | Just idxs <- sliceIndices slice =
       copyDWIMDest target [] (Var src) $ map (primExpFromSubExp int32) idxs
 
@@ -634,7 +634,7 @@ defCompileBasicOp _ Split{} =
 
 defCompileBasicOp
   (Destination [ArrayDestination (CopyIntoMemory (MemLocation destmem destshape destixfun)) _])
-  (Concat _ i x ys _) = do
+  (Concat i x ys _) = do
     xtype <- lookupType x
     offs_glb <- newVName "tmp_offs"
     withPrimVar offs_glb int32 $ do
@@ -688,7 +688,7 @@ defCompileBasicOp _ Reshape{} =
 defCompileBasicOp _ Repeat{} =
   return ()
 
-defCompileBasicOp (Destination dests) (Partition _ n flags value_arrs)
+defCompileBasicOp (Destination dests) (Partition n flags value_arrs)
   | (sizedests, arrdest) <- splitAt n dests,
     Just sizenames <- mapM fromScalarDestination sizedests,
     Just destlocs <- mapM arrDestLoc arrdest = do
@@ -993,7 +993,7 @@ destinationFromPattern (Pattern ctxElems valElems) =
                         | isctx mem = SetMemory mem $ nullifyFreeDim memsize
                         | otherwise = CopyIntoMemory $ MemLocation mem shape ixfun
                   return $ ArrayDestination memdest shape'
-                BindInPlace _ _ slice ->
+                BindInPlace _ slice ->
                   case (length $ sliceDims slice,
                         sliceIndices slice) of
                     (_, Just is) -> do

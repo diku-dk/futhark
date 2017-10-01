@@ -128,7 +128,7 @@ bindVar :: Bindage -> Value
 bindVar BindVar val =
   return val
 
-bindVar (BindInPlace _ src slice) val = do
+bindVar (BindInPlace src slice) val = do
   srcv <- lookupVar src
   slice' <- mapM evalDimIndex slice
   case srcv of
@@ -525,7 +525,7 @@ evalBasicOp unop@(UnOp op e) = do
     Just v' -> return [PrimVal v']
     Nothing -> bad $ TypeError $ "Cannot UnOp: " ++ unwords [pretty unop, pretty v]
 
-evalBasicOp (Index _ ident slice) = do
+evalBasicOp (Index ident slice) = do
   v <- lookupVar ident
   slice' <- mapM evalDimIndex slice
   pure <$> indexArrayValue v slice'
@@ -577,7 +577,7 @@ evalBasicOp (Scratch bt shape) = do
   return [ArrayVal (listArray (0,fromIntegral nelems-1) vals) bt shape']
   where v = blankPrimValue bt
 
-evalBasicOp e@(Reshape _ shapeexp arrexp) = do
+evalBasicOp e@(Reshape shapeexp arrexp) = do
   shape <- mapM (asInt "evalBasicOp Reshape" <=< evalSubExp) $ newDims shapeexp
   arr <- lookupVar arrexp
   case arr of
@@ -589,19 +589,19 @@ evalBasicOp e@(Reshape _ shapeexp arrexp) = do
     _ ->
       bad $ TypeError "Reshape given a non-array argument"
 
-evalBasicOp (Rearrange _ perm arrexp) =
+evalBasicOp (Rearrange perm arrexp) =
   single . permuteArray perm <$> lookupVar arrexp
 
-evalBasicOp (Rotate _ offsets arrexp) = do
+evalBasicOp (Rotate offsets arrexp) = do
   offsets' <- mapM (asInt "evalBasicOp rotate" <=< evalSubExp) offsets
   single . rotateArray offsets' <$> lookupVar arrexp
 
-evalBasicOp (Split _ i sizeexps arrexp) = do
+evalBasicOp (Split i sizeexps arrexp) = do
   sizes <- mapM (asInt "evalBasicOp Split" <=< evalSubExp) sizeexps
   arr <- lookupVar arrexp
   return $ splitArray i sizes arr
 
-evalBasicOp (Concat _ i arr1exp arr2exps _) = do
+evalBasicOp (Concat i arr1exp arr2exps _) = do
   arr1  <- lookupVar arr1exp
   arr2s <- mapM lookupVar arr2exps
   return [foldl (concatArrays i) arr1 arr2s]
@@ -617,7 +617,7 @@ evalBasicOp (Assert e msg loc) = do
             _ ->
               bad $ AssertFailed msg loc
 
-evalBasicOp (Partition _ n flags arrs) = do
+evalBasicOp (Partition n flags arrs) = do
   flags_elems <- arrToList =<< lookupVar flags
   arrvs <- mapM lookupVar arrs
   let ets = map (elemType . valueType) arrvs
@@ -650,7 +650,7 @@ evalBasicOp (Partition _ n flags arrs) = do
 
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
-evalSOAC (Stream _ w form elam arrs) = do
+evalSOAC (Stream w form elam arrs) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
@@ -664,17 +664,17 @@ evalSOAC (Stream _ w form elam arrs) = do
   vs <- fun (chunkval:accvals++arrvals)
   return $ valueShapeContext elam_rtp vs ++ vs
 
-evalSOAC (Map _ w fun arrexps) = do
+evalSOAC (Map w fun arrexps) = do
   vss' <- mapM (applyLambda fun) =<< soacArrays w arrexps
   arrays (lambdaReturnType fun) vss'
 
-evalSOAC (Reduce _ w _ fun inputs) = do
+evalSOAC (Reduce w _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
   let foldfun acc x = applyLambda fun $ acc ++ x
   foldM foldfun startaccs =<< soacArrays w arrexps
 
-evalSOAC (Scan _ w fun inputs) = do
+evalSOAC (Scan w fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
   (acc, vals') <- foldM scanfun (startvals, []) =<<
@@ -684,10 +684,10 @@ evalSOAC (Scan _ w fun inputs) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalSOAC (Redomap cs w _ redfun foldfun accexp arrexps) = do
+evalSOAC (Redomap w _ redfun foldfun accexp arrexps) = do
   -- SO LAZY: redomap is scanomap, after which we index the last elements.
   w' <- asInt "evalBasicOp Redomap" =<< evalSubExp w
-  vs <- evalSOAC $  Scanomap cs w redfun foldfun accexp arrexps
+  vs <- evalSOAC $  Scanomap w redfun foldfun accexp arrexps
   let (acc_arrs, arrs) = splitAt (length accexp) vs
   accs <- if w' == 0
           then mapM evalSubExp accexp
@@ -696,7 +696,7 @@ evalSOAC (Redomap cs w _ redfun foldfun accexp arrexps) = do
                  map (unitSlice 0) (drop 1 $ valueShape acc_arr)
   return $ accs++arrs
 
-evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do
+evalSOAC (Scanomap w _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   if res_len == acc_len
   then do (acc, vals) <- foldM foldfun (startaccs, []) =<< soacArrays w arrexps
@@ -722,7 +722,7 @@ evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, res_acc:l, acc_arr)
 
-evalSOAC (Scatter _cs len lam ivs as) = do
+evalSOAC (Scatter len lam ivs as) = do
 
   let valInt :: Value -> FutharkM Int
       valInt (PrimVal (IntValue (Int32Value l))) = return $ fromIntegral l

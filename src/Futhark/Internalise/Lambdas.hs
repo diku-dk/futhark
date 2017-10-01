@@ -92,7 +92,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
         index0 arg = do
           arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
           arg_t <- lookupType arg'
-          letSubExp "elem" $ I.BasicOp $ I.Index [] arg' $ fullSlice arg_t [I.DimFix zero]
+          letSubExp "elem" $ I.BasicOp $ I.Index arg' $ fullSlice arg_t [I.DimFix zero]
 
 internaliseFoldLambda :: InternaliseLambda
                       -> E.Lambda

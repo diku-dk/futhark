@@ -202,14 +202,15 @@ instance Rename attr => Rename (PatElemT attr) where
   rename (PatElem ident bindage attr) =
     PatElem <$> rename ident <*> rename bindage <*> rename attr
 
+instance Rename attr => Rename (StmAux attr) where
+  rename (StmAux cs attr) =
+    StmAux <$> rename cs <*> rename attr
+
 instance Rename Bindage where
   rename BindVar =
     return BindVar
-  rename (BindInPlace cs src is) =
-    BindInPlace <$>
-    mapM rename cs <*>
-    rename src <*>
-    mapM rename is
+  rename (BindInPlace src is) =
+    BindInPlace <$> rename src <*> mapM rename is
 
 instance Renameable lore => Rename (Body lore) where
   rename (Body lore [] res) =

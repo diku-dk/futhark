@@ -50,6 +50,7 @@ module Futhark.Analysis.SymbolTable
   )
   where
 
+import Control.Arrow (second, (&&&))
 import Control.Applicative hiding (empty)
 import Control.Monad
 import Control.Monad.Reader
@@ -144,7 +145,7 @@ deepen :: SymbolTable lore -> SymbolTable lore
 deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
 
 -- | Indexing a delayed array if possible.
-type IndexArray = [PrimExp VName] -> Maybe (PrimExp VName)
+type IndexArray = [PrimExp VName] -> Maybe (PrimExp VName, Certificates)
 
 data Entry lore = LoopVar (LoopVarEntry lore)
                 | LetBound (LetBoundEntry lore)
@@ -276,8 +277,8 @@ lookup name = M.lookup name . bindings
 lookupStm :: VName -> SymbolTable lore -> Maybe (Stm lore)
 lookupStm name vtable = asStm =<< lookup name vtable
 
-lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
-lookupExp name vtable = stmExp <$> lookupStm name vtable
+lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore, Certificates)
+lookupExp name vtable = (stmExp &&& stmCerts) <$> lookupStm name vtable
 
 lookupType :: Attributes lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
@@ -286,12 +287,12 @@ lookupSubExpType :: Attributes lore => SubExp -> SymbolTable lore -> Maybe Type
 lookupSubExpType (Var v) = lookupType v
 lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
 
-lookupSubExp :: VName -> SymbolTable lore -> Maybe SubExp
+lookupSubExp :: VName -> SymbolTable lore -> Maybe (SubExp, Certificates)
 lookupSubExp name vtable = do
-  e <- lookupExp name vtable
+  (e,cs) <- lookupExp name vtable
   case e of
-    BasicOp (SubExp se) -> Just se
-    _                  -> Nothing
+    BasicOp (SubExp se) -> Just (se,cs)
+    _                   -> Nothing
 
 lookupScalExp :: Attributes lore => VName -> SymbolTable lore -> Maybe ScalExp
 lookupScalExp name vtable =
@@ -306,17 +307,18 @@ lookupScalExp name vtable =
     (Just entry, _) -> asScalExp entry
     _ -> Nothing
 
-lookupValue :: VName -> SymbolTable lore -> Maybe Value
+lookupValue :: VName -> SymbolTable lore -> Maybe (Value, Certificates)
 lookupValue name vtable = case lookupSubExp name vtable of
-                            Just (Constant val) -> Just $ PrimVal val
-                            _                   -> Nothing
+                            Just (Constant val, cs) -> Just (PrimVal val, cs)
+                            _                       -> Nothing
 
-lookupVar :: VName -> SymbolTable lore -> Maybe VName
+lookupVar :: VName -> SymbolTable lore -> Maybe (VName, Certificates)
 lookupVar name vtable = case lookupSubExp name vtable of
-                          Just (Var v) -> Just v
-                          _            -> Nothing
+                          Just (Var v, cs) -> Just (v, cs)
+                          _                -> Nothing
 
-index :: Attributes lore => VName -> [SubExp] -> SymbolTable lore -> Maybe (PrimExp VName)
+index :: Attributes lore => VName -> [SubExp] -> SymbolTable lore
+      -> Maybe (PrimExp VName, Certificates)
 index name is table = do
   is' <- mapM asPrimExp is
   index' name is' table
@@ -324,7 +326,8 @@ index name is table = do
           Prim t <- lookupSubExpType i table
           return $ primExpFromSubExp t i
 
-index' :: VName -> [PrimExp VName] -> SymbolTable lore -> Maybe (PrimExp VName)
+index' :: VName -> [PrimExp VName] -> SymbolTable lore
+       -> Maybe (PrimExp VName, Certificates)
 index' name is vtable = do
   entry <- lookup name vtable
   case entry of
@@ -358,7 +361,7 @@ rangesRep = M.filter knownRange . M.map toRep . bindings
 class IndexOp op where
   indexOp :: (Attributes lore, IndexOp (Op lore)) =>
              SymbolTable lore -> Int -> op
-          -> [PrimExp VName] -> Maybe (PrimExp VName)
+          -> [PrimExp VName] -> Maybe (PrimExp VName, Certificates)
   indexOp _ _ _ _ = Nothing
 
 instance IndexOp () where
@@ -371,19 +374,20 @@ indexExp vtable (Op op) k is =
 
 indexExp _ (BasicOp (Iota _ x s to_it)) _ [i]
   | IntType from_it <- primExpType i =
-      Just $ ConvOpExp (SExt from_it to_it) i
-      * primExpFromSubExp (IntType to_it) s
-      + primExpFromSubExp (IntType to_it) x
+      Just ( ConvOpExp (SExt from_it to_it) i
+             * primExpFromSubExp (IntType to_it) s
+             + primExpFromSubExp (IntType to_it) x
+           , mempty)
 
 indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
-      Just $ primExpFromSubExp t v
+      Just (primExpFromSubExp t v, mempty)
 
 indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_:is) =
   index' v is table
 
-indexExp table (BasicOp (Reshape _ newshape v)) _ is
+indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
       let is' =
             reshapeIndex (map (primExpFromSubExp int32) oldshape)
@@ -391,7 +395,7 @@ indexExp table (BasicOp (Reshape _ newshape v)) _ is
                          is
       in index' v is' table
 
-indexExp table (BasicOp (Index _ v slice)) _ is =
+indexExp table (BasicOp (Index v slice)) _ is =
   index' v (adjust slice is) table
   where adjust (DimFix j:js') is' =
           pe j : adjust js' is'
@@ -426,7 +430,8 @@ defBndEntry vtable patElem range bnd =
       runReader (toScalExp (`lookupScalExp` vtable) (stmExp bnd)) types
     , letBoundStmDepth = 0
     , letBoundBindage = patElemBindage patElem
-    , letBoundIndex = indexExp vtable $ stmExp bnd
+    , letBoundIndex = \k -> fmap (second (<>(stmAuxCerts $ stmAux bnd))) .
+                            indexExp vtable (stmExp bnd) k
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable

@@ -28,7 +28,7 @@ data SeqLoop = SeqLoop [Int] Pattern [(FParam, SubExp)] (LoopForm SOACS) Body
 
 seqLoopStm :: SeqLoop -> Stm
 seqLoopStm (SeqLoop _ pat merge form body) =
-  Let pat () $ DoLoop [] merge form body
+  Let pat (defAux ()) $ DoLoop [] merge form body
 
 interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
                    SeqLoop -> LoopNesting
@@ -57,8 +57,8 @@ interchangeLoop
       unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
     let lam = Lambda (params'<>new_params) body rettype
-        map_bnd = Let loop_pat_expanded () $
-                  Op $ Map cs w lam $ arrs' <> new_arrs
+        map_bnd = Let loop_pat_expanded (StmAux cs ()) $
+                  Op $ Map w lam $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
         pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 

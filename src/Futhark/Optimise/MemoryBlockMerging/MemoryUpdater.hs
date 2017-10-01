@@ -59,7 +59,7 @@ transformKernelBody (KernelBody () bnds res) = do
 
 transformStm :: LoreConstraints lore =>
                 Stm lore -> FindM lore (Stm lore)
-transformStm (Let (Pattern patctxelems patvalelems) () e) = do
+transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
   patvalelems' <- mapM transformPatValElem patvalelems
 
   e' <- fullMapExpM mapper mapper_kernel e
@@ -105,7 +105,7 @@ transformStm (Let (Pattern patctxelems patvalelems) () e) = do
         WhileLoop _ -> return loopform
       return $ DoLoop mergectxparams' mergevalparams' loopform' body'
     _ -> return e'
-  return $ Let (Pattern patctxelems patvalelems') () e''
+  return $ Let (Pattern patctxelems patvalelems') aux e''
   where mapper = identityMapper
           { mapOnBody = const transformBody
           , mapOnFParam = transformFParam

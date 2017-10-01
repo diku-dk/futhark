@@ -98,7 +98,7 @@ boundInExpExtra :: Exp ExplicitMemory -> Names
 boundInExpExtra = execWriter . inExp
   where inExp :: Exp ExplicitMemory -> Writer Names ()
         inExp e = case e of
-          Op (ExpMem.Inner (ExpMem.Kernel _ _ space _ _)) ->
+          Op (ExpMem.Inner (ExpMem.Kernel _ space _ _)) ->
             tell $ boundInKernelSpace space
           _ -> walkExpM walker e
 
@@ -115,7 +115,7 @@ bodyBindingMap stms =
 
   where createBindingStmt :: (Line, Stm ExplicitMemory)
                           -> BindingMap
-        createBindingStmt (line, stmt@(Let pat@(Pattern patctxelems patvalelems) () e)) =
+        createBindingStmt (line, stmt@(Let pat@(Pattern patctxelems patvalelems) _ e)) =
           let stmt_vars = S.fromList (map patElemName (patctxelems ++ patvalelems))
               frees = freeInStm stmt
               consumed = consumedInPattern pat
@@ -130,7 +130,7 @@ bodyBindingMap stms =
               -- Some expressions contain special identifiers that are used in a
               -- body.  This should go somewhere else than here.
               param_vars = case e of
-                Op (ExpMem.Inner (ExpMem.Kernel _ _ space _ _)) ->
+                Op (ExpMem.Inner (ExpMem.Kernel _ space _ _)) ->
                   boundInKernelSpace space
                 _ -> S.empty
               params_binding = (param_vars, PrimBinding S.empty S.empty FromFParam)
@@ -185,8 +185,8 @@ hoistRecursivelyStm :: BindingMap
                     -> (Body ExplicitMemory -> Maybe [FParam ExplicitMemory] -> [VName])
                     -> Stm ExplicitMemory
                     -> Stm ExplicitMemory
-hoistRecursivelyStm bindingmap findHoistees (Let pat () e) =
-  runIdentity (Let pat () <$> mapExpM transform e)
+hoistRecursivelyStm bindingmap findHoistees (Let pat aux e) =
+  runIdentity (Let pat aux <$> mapExpM transform e)
 
   where transform = identityMapper { mapOnBody = mapper }
         mapper scope_new = return . hoistInBody scope_new bindingmap' Nothing findHoistees

@@ -76,12 +76,15 @@ instance Substitute attr => Substitute (PatElemT attr) where
     (substituteNames substs bindage)
     (substituteNames substs attr)
 
+instance Substitute attr => Substitute (StmAux attr) where
+  substituteNames substs (StmAux cs attr) =
+    StmAux (substituteNames substs cs) (substituteNames substs attr)
+
 instance Substitute Bindage where
   substituteNames _ BindVar =
     BindVar
-  substituteNames substs (BindInPlace cs src is) =
+  substituteNames substs (BindInPlace src is) =
     BindInPlace
-    (map (substituteNames substs) cs)
     (substituteNames substs src)
     (map (substituteNames substs) is)
 
@@ -108,15 +111,7 @@ instance Substitutable lore => Substitute (Body lore) where
     (substituteNames substs attr)
     (substituteNames substs bnds)
     (substituteNames substs res)
-{-
-instance Substitutable lore => Substitute (FunDef lore) where
-  substituteNames substs (FunDef entry name ret ps body) =
-    FunDef entry
-      (substituteNames substs name)
-      (substituteNames substs ret)
-      (substituteNames substs ps)
-      (substituteNames substs body)
--}
+
 replace :: (Substitutable lore) => M.Map VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnVName = return . substituteNames substs

@@ -112,23 +112,25 @@ cseInStm :: Attributes lore =>
             Names -> Stm lore
          -> ([Stm lore] -> CSEM lore a)
          -> CSEM lore a
-cseInStm consumed (Let pat eattr e) m = do
+cseInStm consumed (Let pat (StmAux cs eattr) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if any (bad cse_arrays) $ patternValueElements pat then
-    m [Let pat' eattr e']
+    m [Let pat' (StmAux cs eattr) e']
     else
     case M.lookup (eattr, e') esubsts of
       Just subpat ->
         local (addNameSubst pat' subpat) $ do
           let lets =
-                [ Let (Pattern [] [patElem']) eattr $ BasicOp $ SubExp $ Var $ patElemName patElem
+                [ Let (Pattern [] [patElem']) (StmAux cs eattr) $
+                    BasicOp $ SubExp $ Var $ patElemName patElem
                 | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
                   let patElem' = patElem { patElemName = name }
                 ]
           m lets
-      _ -> local (addExpSubst pat' eattr e') $ m [Let pat' eattr e']
+      _ -> local (addExpSubst pat' eattr e') $
+           m [Let pat' (StmAux cs eattr) e']
 
   where bad cse_arrays pe
           | Mem{} <- patElemType pe = True
@@ -181,7 +183,7 @@ instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (Kernel.K
   cseInOp = subCSE .
             Kernel.mapKernelM
             (Kernel.KernelMapper return cseInLambda cseInBody
-             return return return cseInKernelBody)
+             return return cseInKernelBody)
 
 cseInKernelBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                    Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)
@@ -215,4 +217,4 @@ instance (Attributes lore,
           CSEInOp (OpWithAliases (Op lore))) =>
          CSEInOp (SOAC.SOAC (Aliases lore)) where
   cseInOp = subCSE . SOAC.mapSOACM
-            (SOAC.SOACMapper return cseInLambda cseInExtLambda return return)
+            (SOAC.SOACMapper return cseInLambda cseInExtLambda return)

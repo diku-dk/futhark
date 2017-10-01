@@ -88,7 +88,7 @@ primOpType CmpOp{} =
   pure [Prim Bool]
 primOpType (ConvOp conv _) =
   pure [Prim $ snd $ convTypes conv]
-primOpType (Index _ ident slice) =
+primOpType (Index ident slice) =
   result <$> lookupType ident
   where result t = [Prim (elemType t) `arrayOfShape` shape]
         shape = Shape $ mapMaybe dimSize slice
@@ -107,21 +107,21 @@ primOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 primOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
-primOpType (Reshape _ [] e) =
+primOpType (Reshape [] e) =
   result <$> lookupType e
   where result t = [Prim $ elemType t]
-primOpType (Reshape _ shape e) =
+primOpType (Reshape shape e) =
   result <$> lookupType e
   where result t = [t `setArrayShape` newShape shape]
-primOpType (Rearrange _ perm e) =
+primOpType (Rearrange perm e) =
   result <$> lookupType e
   where result t = [rearrangeType perm t]
-primOpType (Rotate _ _ e) =
+primOpType (Rotate _ e) =
   pure <$> lookupType e
-primOpType (Split _ i sizeexps e) =
+primOpType (Split i sizeexps e) =
   result <$> lookupType e
   where result t = map (setDimSize i t) sizeexps
-primOpType (Concat _ i x _ ressize) =
+primOpType (Concat i x _ ressize) =
   result <$> lookupType x
   where result xt = [setDimSize i xt ressize]
 primOpType (Copy v) =
@@ -130,7 +130,7 @@ primOpType (Manifest _ v) =
   pure <$> lookupType v
 primOpType Assert{} =
   pure [Prim Cert]
-primOpType (Partition _ n _ arrays) =
+primOpType (Partition n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Prim $ IntType Int32) ++ ts
 
