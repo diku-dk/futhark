@@ -952,7 +952,7 @@ checkStm :: Checkable lore =>
             Stm (Aliases lore)
          -> TypeM lore a
          -> TypeM lore a
-checkStm stm@(Let pat (StmAux cs (_,attr)) e) m = do
+checkStm stm@(Let pat (StmAux (Certificates cs) (_,attr)) e) m = do
   mapM_ (requireI [Prim Cert]) cs
   checkExpLore attr
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $

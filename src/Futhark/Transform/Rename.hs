@@ -202,6 +202,9 @@ instance Rename attr => Rename (PatElemT attr) where
   rename (PatElem ident bindage attr) =
     PatElem <$> rename ident <*> rename bindage <*> rename attr
 
+instance Rename Certificates where
+  rename (Certificates cs) = Certificates <$> rename cs
+
 instance Rename attr => Rename (StmAux attr) where
   rename (StmAux cs attr) =
     StmAux <$> rename cs <*> rename attr
@@ -261,7 +264,7 @@ instance Renameable lore => Rename (Exp lore) where
                       mapOnBody = const rename
                     , mapOnSubExp = rename
                     , mapOnVName = rename
-                    , mapOnCertificates = mapM rename
+                    , mapOnCertificates = rename
                     , mapOnRetType = rename
                     , mapOnFParam = rename
                     , mapOnLParam = rename

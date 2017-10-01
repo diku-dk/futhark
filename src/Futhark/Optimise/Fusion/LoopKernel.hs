@@ -663,7 +663,7 @@ pushRearrange inpIds soac ots = do
   nest <- join $ liftMaybe <$> MapNest.fromSOAC soac
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest
   if rearrangeReach perm <= mapDepth nest then do
-    let invertRearrange = SOAC.Rearrange [] $ rearrangeInverse perm
+    let invertRearrange = SOAC.Rearrange mempty $ rearrangeInverse perm
     soac' <- MapNest.toSOAC $
       inputs' `MapNest.setInputs`
       rearrangeReturnTypes nest perm
@@ -699,7 +699,7 @@ fixupInputs inpIds inps =
 
         fixupInput d perm inp
           | SOAC.inputRank inp >= d =
-              Just $ SOAC.addTransform (SOAC.Rearrange [] $ rearrangeInverse perm) inp
+              Just $ SOAC.addTransform (SOAC.Rearrange mempty $ rearrangeInverse perm) inp
           | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)

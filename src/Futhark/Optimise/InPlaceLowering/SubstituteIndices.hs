@@ -101,7 +101,7 @@ substituteIndicesInExp substs e = do
                            BasicOp $ Index src2 $ fullSlice (typeOf src2attr) is2
                     row_copy <- letExp (baseString v ++ "_row_copy") $
                                 BasicOp $ Copy row
-                    return $ update v v ([],
+                    return $ update v v (mempty,
                                          row_copy,
                                          src2attr `setType`
                                          stripArray (length is2) (typeOf src2attr),
@@ -122,8 +122,8 @@ substituteIndicesInVar :: MonadBinder m =>
                        -> VName
                        -> m VName
 substituteIndicesInVar substs v
-  | Just ([], src2, _, []) <- lookup v substs =
-    letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
+  | Just (cs2, src2, _, []) <- lookup v substs =
+    certifying cs2 $ letExp (baseString src2) $ BasicOp $ SubExp $ Var src2
   | Just (cs2, src2, src2_attr, is2) <- lookup v substs =
     certifying cs2 $
     letExp "idx" $ BasicOp $ Index src2 $ fullSlice (typeOf src2_attr) is2

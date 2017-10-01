@@ -402,13 +402,13 @@ asserting m = do
   doBoundsChecks <- asks envDoBoundsChecks
   if doBoundsChecks
   then m
-  else return []
+  else return mempty
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
 assertingOne :: InternaliseM VName
              -> InternaliseM Certificates
-assertingOne m = asserting $ fmap pure m
+assertingOne m = asserting $ Certificates . pure <$> m
 
 type DimTable = M.Map VName ExtDimSize
 

@@ -390,7 +390,7 @@ simplifyRearrange _ (Let pat _ (BasicOp (Rearrange perm v)))
 simplifyRearrange vtable (Let pat (StmAux cs _) (BasicOp (Rearrange perm v)))
   | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
       -- Rearranging a rearranging: compose the permutations.
-      certifying (cs++v_cs) $
+      certifying (cs<>v_cs) $
       letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
 
 simplifyRearrange vtable (Let pat (StmAux cs _) (BasicOp (Rearrange perm v)))
@@ -678,7 +678,7 @@ simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) (StmAux cs _) (BasicOp (
           certifying (cs<>cs') $ letBindNames'_ (patternNames pat) $
           BasicOp $ SubExp se
         IndexResult extra_cs idd' inds' ->
-          certifying (cs++extra_cs) $
+          certifying (cs<>extra_cs) $
           letBindNames'_ (patternNames pat) $ BasicOp $ Index idd' inds'
   where consumed = patElemName pe `UT.isConsumed` used
         seType (Var v) = ST.lookupType v vtable
@@ -914,7 +914,7 @@ simplifyConcat (vtable, _) (Let pat _ (BasicOp (Concat i x xs new_d)))
     Just (x',x_cs) <- transposedBy perm x,
     Just (xs',xs_cs) <- unzip <$> mapM (transposedBy perm) xs = do
       concat_rearrange <-
-        certifying (x_cs++concat xs_cs) $
+        certifying (x_cs<>mconcat xs_cs) $
         letExp "concat_rearrange" $ BasicOp $ Concat 0 x' xs' new_d
       letBind_ pat $ BasicOp $ Rearrange perm concat_rearrange
   where transposedBy perm1 v =
