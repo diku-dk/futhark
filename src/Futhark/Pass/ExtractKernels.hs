@@ -1190,7 +1190,9 @@ intraGroupParalleliseBody kspace body = do
                 Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
 
             Op (Scanomap w scanfun foldfun nes arrs) -> do
-              scan_input <- procInput w foldfun nes arrs
+              let (scan_pes, map_pes) =
+                    splitAt (length nes) $ patternElements pat
+              scan_input <- procInput (Pattern [] map_pes) w foldfun nes arrs
 
               scanfun' <- Kernelise.transformLambda scanfun
 
@@ -1203,10 +1205,13 @@ intraGroupParalleliseBody kspace body = do
                                                         other_index_param :
                                                         lambdaParams scanfun'
                                        }
-              letBind_ pat $ Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
+              letBind_ (Pattern [] scan_pes) $
+                Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
 
             Op (Redomap w _ redfun foldfun nes arrs) -> do
-              red_input <- procInput w foldfun nes arrs
+              let (red_pes, map_pes) =
+                    splitAt (length nes) $ patternElements pat
+              red_input <- procInput (Pattern [] map_pes) w foldfun nes arrs
 
               redfun' <- Kernelise.transformLambda redfun
 
@@ -1219,7 +1224,8 @@ intraGroupParalleliseBody kspace body = do
                                                       other_index_param :
                                                       lambdaParams redfun'
                                        }
-              letBind_ pat $ Op $ Out.GroupReduce w redfun'' $ zip nes red_input
+              letBind_ (Pattern [] red_pes) $
+                Op $ Out.GroupReduce w redfun'' $ zip nes red_input
 
             Op (Stream w (Sequential accs) lam arrs) -> do
 
@@ -1230,9 +1236,10 @@ intraGroupParalleliseBody kspace body = do
             _ ->
               Kernelise.transformStm stm
 
-          where procInput :: SubExp -> Lambda -> [SubExp] -> [VName]
+          where procInput :: Out.Pattern Out.InKernel
+                          -> SubExp -> Lambda -> [SubExp] -> [VName]
                           -> Binder Out.InKernel [VName]
-                procInput w foldfun nes arrs = do
+                procInput map_pat w foldfun nes arrs = do
                   fold_stms <- collectStms_ $ do
                     let (fold_acc_params, fold_arr_params) =
                           splitAt (length nes) $ lambdaParams foldfun
@@ -1247,8 +1254,11 @@ intraGroupParalleliseBody kspace body = do
 
                     Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
                   let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
-                  letTupExp "red_input" $ Op $
+
+                  op_inps <- replicateM (length nes) (newVName "op_input")
+                  letBindNames'_ (op_inps ++ patternNames map_pat) $ Op $
                     Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
+                  return op_inps
 
     processStms $ bodyStms body
 
