@@ -44,9 +44,15 @@ optimiseBody (Body () bnds res) =
   Body () <$> (concat <$> mapM optimiseStm bnds) <*> pure res
 
 optimiseStm :: Stm Kernels -> TileM [Stm Kernels]
-optimiseStm (Let pat aux (Op (Kernel desc space ts body))) = do
+optimiseStm (Let pat aux (Op old_kernel@(Kernel desc space ts body))) = do
   (extra_bnds, space', body') <- tileInKernelBody mempty initial_variance space body
-  return $ extra_bnds ++ [Let pat aux $ Op $ Kernel desc space' ts body']
+  let new_kernel = Kernel desc space' ts body'
+  -- XXX: we should not change the type of the kernel (such as by
+  -- changing the number of groups being used for a kernel that
+  -- returns a result-per-group).
+  if kernelType old_kernel == kernelType new_kernel
+    then return $ extra_bnds ++ [Let pat aux $ Op new_kernel]
+    else return [Let pat aux $ Op old_kernel]
   where initial_variance = M.map mempty $ scopeOfKernelSpace space
 optimiseStm (Let pat aux e) =
   pure <$> (Let pat aux <$> mapExpM optimise e)
