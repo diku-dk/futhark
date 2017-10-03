@@ -9,6 +9,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
+       , kernelType
        , KernelDebugHints(..)
        , KernelBody(..)
        , KernelSpace(..)
