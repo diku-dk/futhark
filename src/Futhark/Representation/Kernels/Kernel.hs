@@ -590,7 +590,9 @@ typeCheckKernel (Kernel _ space kts kbody) = do
           TC.require [t] e
           arr_t <- lookupType arr
           unless (arr_t == t `arrayOfRow` rw) $
-            TC.bad $ TC.TypeError "Invalid type of array destination for WriteReturn."
+            TC.bad $ TC.TypeError $ "WriteReturn returning " ++
+            pretty e ++ " of type " ++ pretty t ++ ", length=" ++ pretty rw ++
+            ", but destination array has type " ++ pretty arr_t
           TC.consume =<< TC.lookupAliases arr
         checkKernelResult (ConcatReturns o w per_thread_elems moffset v) t = do
           case o of
