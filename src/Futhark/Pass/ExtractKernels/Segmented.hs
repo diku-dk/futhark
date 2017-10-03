@@ -76,10 +76,9 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
   map_out_arrs <- forM (drop num_redres $ patternIdents pat) $ \(Ident name t) -> do
     tmp <- letExp (baseString name <> "_out_in") $
            BasicOp $ Scratch (elemType t) (arrayDims t)
-    -- This reshape will not always work. TODO
-    -- For example if the "map" part takes an input a 1D array and produces a 2D
-    -- array, this is clearly wrong. See ex3.fut
-    letExp (baseString name ++ "_out_in") $ BasicOp $ Reshape [DimNew w] tmp
+    -- This reshape will not always work.
+    letExp (baseString name ++ "_out_in") $
+      BasicOp $ Reshape (reshapeOuter [DimNew w] (length nest_sizes+1) $ arrayShape t) tmp
 
   -- Check that we're only dealing with arrays with dimension [w]
   forM_ arrs_flat $ \arr -> do
@@ -286,11 +285,14 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
 
     ----------------------------------------------------------------------------
     useSmallKernel map_out_arrs flag_reduce_lam' = do
-      red_scratch_arrs <- forM (take num_redres $ patternIdents pat) $ \(Ident name t) -> do
+      red_scratch_arrs <-
+        forM (take num_redres $ patternIdents pat) $ \(Ident name t) -> do
         tmp <- letExp (baseString name <> "_redres_scratch") $
                BasicOp $ Scratch (elemType t) (arrayDims t)
+        let shape_change = reshapeOuter [DimNew num_segments]
+                           (length nest_sizes) (arrayShape t)
         letExp (baseString name ++ "_redres_scratch") $
-                BasicOp $ Reshape [DimNew num_segments] tmp
+          BasicOp $ Reshape shape_change tmp
 
       let scratch_arrays = red_scratch_arrs ++ map_out_arrs
 
