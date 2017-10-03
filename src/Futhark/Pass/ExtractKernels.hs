@@ -1079,11 +1079,9 @@ isSegmentedOp nest perm segment_size ret free_in_op _free_in_fold_op nes arrs m 
           letExp "repeated" $ BasicOp $
             Repeat outer_shapes inner_shape $ kernelInputArray inp
 
-        determineRepeats ((gtid,n):ispace) (i:is)
-          | Var gtid == i =
-              Shape [] : determineRepeats ispace is
-          | otherwise =
-            Shape [n] : determineRepeats ispace (i:is)
+        determineRepeats ispace (i:is)
+          | (skipped_ispace, ispace') <- span ((/=i) . Var . fst) ispace =
+              Shape (map snd skipped_ispace) : determineRepeats (drop 1 ispace') is
         determineRepeats ispace _ =
           [Shape $ map snd ispace]
 
