@@ -73,10 +73,10 @@ generated executable.
     printed (one per line).  The :ref:`futhark-bench(1)` tool itself
     uses ``-t`` and ``-r`` to perform its measurements.
 
-  * Pass ``-m`` to have the program print information on allocation
+  * Pass ``-D`` to have the program print information on allocation
     and deallocation of memory.
 
-  * (:ref:`futhark-opencl(1)` only) Use the ``-s`` option to enable
+  * (:ref:`futhark-opencl(1)` only) Use the ``-D`` option to enable
     synchronous execution.  ``clFinish()`` will be called after most
     OpenCL operations, and a running log of kernel invocations will be
     printed.  At the end of execution, the program prints a table
