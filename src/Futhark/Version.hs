@@ -30,5 +30,5 @@ versionString = showVersion version ++ "\n" ++ gitversion
                         ]
     branch | $(gitBranch) == "master" = ""
            | otherwise = $(gitBranch) ++ " @ "
-    dirty | $(gitDirty) = " [modified]"
+    dirty | $(gitDirtyTracked) = " [modified]"
           | otherwise   = ""
