@@ -42,7 +42,7 @@ import "/futlib/array"
 -- operations would be incorrect! This last memory reuse
 -- can potentially be done by linear-scan register
 -- allocation later!
-let main(y: *[#n][#m]i32, a: [#m]i32): *[n][m]i32 =
+let main [n] [m] (y: *[n][m]i32, a: [m]i32): *[n][m]i32 =
   let y[0,1] = 9
   let a1 = loop a1 = a for _i < n do
     let x1 = map (+1) a1

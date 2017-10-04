@@ -15,7 +15,7 @@
 
 import "/futlib/array"
 
-let main (i: i32, ns: [#n]i32, mss: [#n][#n]i32): [n][n]i32 =
+let main [n] (i: i32, ns: [n]i32, mss: [n][n]i32): [n][n]i32 =
   -- This is the basis array in which everything will be put.
   let t1 = map (\ms -> map (+ 1) ms) mss
 

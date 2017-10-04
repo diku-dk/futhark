@@ -14,7 +14,7 @@
 -- There should be no coalescing here because `x` is
 -- used during the lifetime of `r`, which also prevents
 -- coalescing of the `z` in `x`!
-let main(x: *[#n][#n]i32, a : [#n]i32, b : [#n]i32): (*[n][n]i32, i32) =
+let main [n] (x: *[n][n]i32, a : [n]i32, b : [n]i32): (*[n][n]i32, i32) =
   let (z,s) = if (x[0,0]) > 0
               then let r = map (+1) a
                    let q = x[x[0,0],0]

@@ -12,7 +12,7 @@
 -- possible because we analyse the index access patterns in the arrays in the
 -- loop bodies.
 
-let main (x: [#n]i32): []i32 =
+let main [n] (x: [n]i32): []i32 =
   let y = map (*2) x in
   let y' = reshape (2, n/2) y
   let a = loop a = y for _i < n do

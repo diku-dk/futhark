@@ -15,7 +15,7 @@
 -- structure cpu { Alloc 0 }
 -- structure gpu { Alloc 0 }
 
-let main (y: *[#n][#q]i32, a: []i32, b: []i32): *[n][q]i32 =
+let main [n] [q] (y: *[n][q]i32, a: []i32, b: []i32): *[n][q]i32 =
   let a1 = map (+1) a -- Will use the memory of z, and thereby y[0].
   let b1 = map (+1) b -- Will use the memory of z, and thereby y[0].
   let z = concat a1 b1 -- Will use the memory of y[0].

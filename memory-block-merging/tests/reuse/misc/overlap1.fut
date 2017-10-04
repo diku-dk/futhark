@@ -9,7 +9,7 @@
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-let main (xs: [#n]i32): i32 =
+let main [n] (xs: [n]i32): i32 =
   -- START a, START b
   let (a, b) = (map (+ 1) xs, map (+ 10) xs)
 

@@ -9,7 +9,7 @@
 -- structure cpu { Alloc 0 }
 -- structure gpu { Alloc 0 }
 
-let main (x: *[#n]i32, y: [#n]i32): [n]i32 =
+let main [n] (x: *[n]i32, y: [n]i32): [n]i32 =
   let k = x[0]
   let z = map (+ k) y
   in z

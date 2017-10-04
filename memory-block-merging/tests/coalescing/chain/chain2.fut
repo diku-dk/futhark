@@ -12,11 +12,11 @@
 -- structure cpu { Alloc 3 }
 -- structure gpu { Alloc 3 }
 
-let main ( wsss0: [#n][#n][#n]i32
-         , ns: [#n]i32
-         , i: i32
-         , j: i32
-         ): ([n][n][n]i32, [n][n][n]i32) =
+let main [n] ( wsss0: [n][n][n]i32
+             , ns: [n]i32
+             , i: i32
+             , j: i32
+             ): ([n][n][n]i32, [n][n][n]i32) =
   -- Create arrays into which other arrays can be coalesced.
   let wsss = map (\wss -> map (\ws -> map (+ 1) ws) wss) wsss0
   let vss = replicate n (replicate n 2)

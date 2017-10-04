@@ -13,7 +13,7 @@
 
 import "/futlib/array"
 
-let main (i: i32, ns: [#n]i32): [n][n]i32 =
+let main [n] (i: i32, ns: [n]i32): [n][n]i32 =
   let t0 = map (+ 1) ns -- Will use the memory of t1[i].
 
   -- This is the basis array in which everything will be put.  Its creation uses

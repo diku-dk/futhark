@@ -46,13 +46,13 @@ let main (m: i32, n: i32, o: i32): [o][m]f32 =
   let membership = map (% o) (iota n)
   let values = map (\i -> map f32 (map (^ i) (iota m))) (iota n) in
 
-  let f
-    (acc: *[#o][#m]f32)
-    (elem: *[#o][#m]f32): *[o][m]f32 =
+  let f [o] [m]
+    (acc: *[o][m]f32)
+    (elem: *[o][m]f32): *[o][m]f32 =
     map (\xs ys -> map (+) xs ys) acc elem
 
-  let g
-    (inp: [#chunk]([#m]f32, i32)): *[o][m]f32 =
+  let g [chunk] [m]
+    (inp: [chunk]([m]f32, i32)): *[o][m]f32 =
     loop acc = replicate o (replicate m 0.0f32) for i < chunk do
       let (values, c) = inp[i] in
       unsafe let acc[c] = map (+) acc[c] values

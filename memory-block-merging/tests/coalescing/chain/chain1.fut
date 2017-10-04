@@ -13,10 +13,10 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-let main ( ns: [#n]i32
-         , i: i32
-         , j: i32
-         ): [n][n][n]i32 =
+let main [n] ( ns: [n]i32
+             , i: i32
+             , j: i32
+             ): [n][n][n]i32 =
   -- Create arrays into which other arrays can be coalesced.  Two allocations,
   -- but both will use the same allocation after coalescing.
   let wsss = replicate n (replicate n (replicate n 1))

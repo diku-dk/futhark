@@ -17,7 +17,7 @@
 
 import "/futlib/array"
 
-let main (i: i32, ns: [#n]i32, mss: [#n][#n]i32): [n][n]i32 =
+let main [n] (i: i32, ns: [n]i32, mss: [n][n]i32): [n][n]i32 =
   -- For the CPU pipeline, t1 and t0 can be fused into a single outer map.  This
   -- makes it impossible to coalesce, since mem_t1 is used after the creation of
   -- t0 through its use in the same map body as t0.

@@ -19,7 +19,7 @@
 -- structure cpu { Alloc 4 }
 -- structure gpu { Alloc 3 }
 
-let main (a: [#n][#m][#k]i32): [n][k]i32 =
+let main [n] [m] [k] (a: [n][m][k]i32): [n][k]i32 =
   let acc = replicate k 0 in
   map (\a_r ->
          loop acc for i < m do
