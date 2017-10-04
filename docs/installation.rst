@@ -22,7 +22,7 @@ We do not presently issue source releases of Futhark, so the only way
 to compile from source is to perform a checkout of our Git
 repository::
 
-  $ git clone https://github.com/HIPERFIT/futhark.git
+  $ git clone https://github.com/diku-dk/futhark.git
 
 This will create a directory ``futhark``, which you must enter::
 
@@ -234,6 +234,6 @@ Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_
     it.
 
 .. _`PyOpenCL repository`: https://github.com/pyopencl/pyopencl
-.. _`Mandelbrot Explorer`: https://github.com/HIPERFIT/futhark-benchmarks/tree/master/misc/mandelbrot-explorer
-.. _`Game of Life`: https://github.com/HIPERFIT/futhark-benchmarks/tree/master/misc/life
-.. _`issues page`: https://github.com/HIPERFIT/futhark/issues
+.. _`Mandelbrot Explorer`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/mandelbrot-explorer
+.. _`Game of Life`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/life
+.. _`issues page`: https://github.com/diku-dk/futhark/issues
