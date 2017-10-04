@@ -11,9 +11,9 @@
 -- structure cpu { Alloc 3 }
 -- structure gpu { Alloc 3 }
 
-let main (cond0: bool, cond1: bool,
-          y0: [#n]i32, z0: [#n]i32,
-          x: *[#n][#n]i32): (*[n][n]i32, i32, i32) =
+let main [n] (cond0: bool, cond1: bool,
+              y0: [n]i32, z0: [n]i32,
+              x: *[n][n]i32): (*[n][n]i32, i32, i32) =
   let y = map (+ 1) y0
   let z = map (+ 1) z0
   let (a, b, c) =

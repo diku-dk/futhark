@@ -20,7 +20,7 @@ import "/futlib/array"
 --   xs_mem, aliases ns_mem AND iteration_result_mem, the latter specifically
 --   because of the loop
 
-let main (ns: [#n]i32): [n]i32 =
+let main [n] (ns: [n]i32): [n]i32 =
   let loop_result = loop xs = ns for i < n do
     -- Create a new array using ys_mem.
     --

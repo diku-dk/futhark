@@ -9,7 +9,7 @@
 -- structure cpu { Alloc 0 }
 -- structure gpu { Alloc 0 }
 
-let main (xs: *[#n]i32): [n]i32 =
+let main [n] (xs: *[n]i32): [n]i32 =
   loop ys = replicate n 0 for i < n do
     let i' = i - 1
     let ys' = if i' >= 0

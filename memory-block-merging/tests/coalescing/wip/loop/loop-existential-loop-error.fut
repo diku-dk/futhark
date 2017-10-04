@@ -12,7 +12,7 @@
 
 import "/futlib/array"
 
-let main (a0: [#n]i32, n_iter: i32): []i32 =
+let main [n] (a0: [n]i32, n_iter: i32): []i32 =
   let a2 = loop a = a0 for _i < n_iter do
     let inner_loop_mem = replicate n 0
     let a' = loop mem = inner_loop_mem for j < n do

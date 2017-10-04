@@ -34,7 +34,7 @@
 -- The other one, i.e. `y = concat a2 x`, only succeeds if the allocation of `y`
 -- is hoisted to before the creation of `x` and `a2`.
 
-let main (a: [#n]i32): [][n]i32 =
+let main [n] (a: [n]i32): [][n]i32 =
   let x    = map (\i -> replicate n i) a
   -- let k = x[0, 0] -- uncomment to restrict fusion; also replace '1' with 'k'
   let b    = map (+ 1) a -- Will be merged.

@@ -8,7 +8,7 @@
 -- We can remove two allocations (from 7 to 5) with coalescing.  More
 -- allocations can be removed by the register allocation reuse algorithm.
 
-let main (x: [#n]i32): []i32 =
+let main [n] (x: [n]i32): []i32 =
   let y = map (*2) x in
   let y' = reshape (2, n/2) y
   let a = loop a = y for _i < n do

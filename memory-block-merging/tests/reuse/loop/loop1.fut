@@ -8,7 +8,7 @@
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-let main (xs0: [#n]i32): [n]i32 =
+let main [n] (xs0: [n]i32): [n]i32 =
   loop xs = xs0 for _i < n do
     let xs1 = map (+ 1) xs
     let xs2 = map (+ xs1[0]) xs

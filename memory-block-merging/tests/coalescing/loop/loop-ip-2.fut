@@ -13,7 +13,7 @@ import "/futlib/array"
 
 -- Code below should result in 1 mem-block coalescing,
 -- corresponding to 4 coalesced variables.
-let main(y: *[#n][#m]i32, a: [#m]i32): *[n][m]i32 =
+let main [n] [m] (y: *[n][m]i32, a: [m]i32): *[n][m]i32 =
   let y[0,1] = 9
   let a0 = copy a
   let a1 = loop a1 = a0 for i < m do

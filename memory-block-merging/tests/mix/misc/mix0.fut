@@ -22,7 +22,7 @@
 import "/futlib/array"
 
 
-let main (xs0: [#n]i32, i: i32): [n][n]i32 =
+let main [n] (xs0: [n]i32, i: i32): [n][n]i32 =
   -- This array (a single allocation) will end up containing all arrays of the
   -- function.
   let contents = replicate n (replicate n 0)

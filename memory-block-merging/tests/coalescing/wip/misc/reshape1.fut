@@ -18,7 +18,7 @@
 
 import "/futlib/array"
 
-let main (t1: *[2][1][#n]i32, ns: [#n]i32): [2][1][n]i32 =
+let main [n] (t1: *[2][1][n]i32, ns: [n]i32): [2][1][n]i32 =
   -- Will both use the memory of t1.
   let t0 = map (+ 1) ns
   let t0a = reshape (1, n) t0

@@ -7,7 +7,7 @@
 
 import "/futlib/array"
 
-let main (ns: [#n]i32): []i32 =
+let main [n] (ns: [n]i32): []i32 =
   let t0 = map (+ 1) ns
 
   -- Create an array whose memory block allocation depends on the *value* of t0,

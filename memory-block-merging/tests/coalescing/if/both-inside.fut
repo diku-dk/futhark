@@ -11,7 +11,7 @@
 -- structure cpu { Alloc 0 }
 -- structure gpu { Alloc 0 }
 
-let main (xs: *[#n][#n]i32, cond: bool, i: i32): [n][n]i32 =
+let main [n] (xs: *[n][n]i32, cond: bool, i: i32): [n][n]i32 =
   -- Both branches will use the memory of ys, which will use the memory of
   -- xs[i].
   let ys = if cond

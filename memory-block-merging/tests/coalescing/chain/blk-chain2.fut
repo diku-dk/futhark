@@ -22,10 +22,10 @@
 -- However if `ind1` is computed as `i1+1` (uncomment) then all three coalescing
 -- opportunities should be exploited, i.e., including `z[i1+i2+k] = u`.
 
-let main (i1: i32, i2: i32, k: i32
-         , a: [#n]i32, v: [#m][#n]i32
-         , z: *[#n][#m][#n]i32)
-         : *[n][m][n]i32 =
+let main [m] [n] (i1: i32, i2: i32, k: i32
+                 , a: [n]i32, v: [m][n]i32
+                 , z: *[n][m][n]i32)
+                 : *[n][m][n]i32 =
   let u          = map (\x -> map (+1) x) v
 
   let b          = map (+i1) a

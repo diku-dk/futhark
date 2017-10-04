@@ -5,12 +5,12 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-let interfering_map (k: i32) (t: [#n]i32): [n]i32 =
+let interfering_map [n] (k: i32) (t: [n]i32): [n]i32 =
   loop u = replicate n 0 for i < n - 1 do
     let u[i + 1] = t[i] + k
     in u
 
-let main (x: *[#n]i32): [n]i32 =
+let main [n] (x: *[n]i32): [n]i32 =
   -- z interferes with x and will not reuse the memory of x.
   let z = interfering_map 1 x
   let k = z[1]

@@ -14,7 +14,7 @@
 -- structure cpu { Alloc 2 }
 -- structure gpu { Alloc 2 }
 
-let main (xs: *[#n][#n]i32, ys0: [#n]i32, i: i32): ([n][n]i32, i32) =
+let main [n] (xs: *[n][n]i32, ys0: [n]i32, i: i32): ([n][n]i32, i32) =
   let ys = map (+ 1) ys0
   let zs = map (+ ys[0]) xs[i] -- Cannot be hoisted to exist before 'ys', which
                                -- would have solved the problem.

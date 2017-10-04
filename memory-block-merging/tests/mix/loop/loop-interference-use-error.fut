@@ -14,7 +14,7 @@
 
 import "/futlib/array"
 
-let main (ns: [#n]i32): [n]i32 =
+let main [n] (ns: [n]i32): [n]i32 =
   let xs0 = map (+ 1) ns
   let loop_result = loop xs = xs0 for i < n do
     let ys = map (+ 1) xs

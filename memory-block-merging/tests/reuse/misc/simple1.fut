@@ -10,7 +10,7 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-let main (xs0: [#n]i32, i: i32): [n]i32 =
+let main [n] (xs0: [n]i32, i: i32): [n]i32 =
   let xs = map (+ 1) xs0
   let xs_length = (shape xs)[0]
 

@@ -12,7 +12,7 @@
 
 import "/futlib/array"
 
-let main (ns: [#n]i32, t1: *[#n][#n]i32, i0: i32): [][]i32 =
+let main [n] (ns: [n]i32, t1: *[n][n]i32, i0: i32): [][]i32 =
   let t0 = map (+ 1) ns
 
   let i1 = t0[i0]
