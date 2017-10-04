@@ -264,7 +264,7 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
     let run (N:i32) : X.t =
       stream_red_per X.op (\ [sz] (ns:[sz]i32) : X.t ->
                            if sz > 0
-                           then reduce X.op X.ne (map X.f (chunk ns[0] sz))
+                           then reduce X.op X.ne (map X.f (unsafe chunk ns[0] sz))
                            else X.ne)
       (iota N)
 

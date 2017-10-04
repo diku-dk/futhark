@@ -403,6 +403,61 @@ bindLoopVar var it bound =
         clampUpper = case bound of Var v -> ST.isAtLeast v 1
                                    _     -> id
 
+-- | We are willing to hoist potentially unsafe statements out of
+-- loops, but they most be protected by adding a branch on top of
+-- them.
+protectLoopHoisted :: SimplifiableLore lore =>
+                      [(FParam (Wise lore),SubExp)]
+                   -> [(FParam (Wise lore),SubExp)]
+                   -> LoopForm (Wise lore)
+                   -> SimpleM lore a -> SimpleM lore a
+protectLoopHoisted ctx val form m = do
+  (x, stms) <- collectStms m
+  if any (not . safeExp . stmExp) stms
+    then do is_nonempty <- checkIfNonEmpty
+            mapM_ (protectUnsafe is_nonempty) stms
+    else mapM_ addStm stms
+  return x
+  where checkIfNonEmpty =
+          case form of
+            WhileLoop cond
+              | Just (_, cond_init) <-
+                  find ((==cond) . paramName . fst) $ ctx ++ val ->
+                    return cond_init
+              | otherwise -> return $ constant True -- infinite loop
+            ForLoop _ it bound _ ->
+              letSubExp "loop_nonempty" $
+              BasicOp $ CmpOp (CmpSlt it) (intConst it 0) bound
+
+        protectUnsafe is_nonempty (Let pat (StmAux cs _) e)
+          | not $ safeExp e = do
+              let if_ts = patternExtTypes pat
+              nonempty_body <- eBody [pure e]
+              empty_body <- eBody $ map (emptyOfType $ patternContextNames pat)
+                                        (patternValueTypes pat)
+              certifying cs $
+                letBind_ pat $ If is_nonempty nonempty_body empty_body $
+                IfAttr if_ts IfFallback
+        protectUnsafe _ stm =
+          addStm stm
+
+        emptyOfType _ Mem{} =
+          fail "protectLoopHoisted: Cannot hoist non-existential memory."
+        emptyOfType _ (Prim pt) =
+          return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
+        emptyOfType ctx_names (Array pt shape _) = do
+          let dims = map zeroIfContext $ shapeDims shape
+          return $ BasicOp $ Scratch pt dims
+          where zeroIfContext (Var v) | v `elem` ctx_names = intConst Int32 0
+                zeroIfContext se = se
+
+-- | Statements that are not worth hoisting out of loops, because they
+-- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
+-- further optimisation..
+notWorthHoisting :: Attributes lore => BlockPred lore
+notWorthHoisting _ (Let pat _ e) =
+  not (safeExp e) && any (>0) (map arrayRank $ patternTypes pat)
+
 hoistStms :: SimplifiableLore lore =>
              RuleBook (SimpleM lore) -> BlockPred (Wise lore)
           -> ST.SymbolTable (Wise lore) -> UT.UsageTable
@@ -554,7 +609,7 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
       -- "isNotHoistableBnd hoistbl_nms" ensures that only the (transitive closure)
       -- of the bindings used for allocations and shape computations are if-hoistable.
       block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound `orIf`
-                isNotHoistableBnd hoistbl_nms
+              isNotHoistableBnd hoistbl_nms
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (body1_bnds', safe1, f1) <-
@@ -611,11 +666,13 @@ simplifyResult ds es = do
   where simplify' (Var name) = do
           bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
           case bnd of
-            Just (Constant v, []) -> do changed
-                                        return $ Constant v
-            Just (Var id', []) -> do changed
-                                     usedName id'
-                                     return $ Var id'
+            Just (Constant v, cs)
+              | cs == mempty -> do changed
+                                   return $ Constant v
+            Just (Var id', cs)
+              | cs == mempty -> do changed
+                                   usedName id'
+                                   return $ Var id'
             _              -> do usedName name
                                  return $ Var name
         simplify' (Constant v) =
@@ -682,21 +739,24 @@ simplifyExp (DoLoop ctx val form loopbody) = do
       let (loop_params, loop_arrs) = unzip loopvars
       loop_params' <- mapM (simplifyParam simplify) loop_params
       loop_arrs' <- mapM simplify loop_arrs
-      return (ForLoop loopvar it boundexp' (zip loop_params' loop_arrs'),
+      let form' = ForLoop loopvar it boundexp' (zip loop_params' loop_arrs')
+      return (form',
               S.fromList (loopvar : map paramName loop_params') <> fparamnames,
               bindLoopVar loopvar it boundexp' .
-              bindArrayLParams (zip loop_params' $ map Just loop_arrs'))
+              protectLoopHoisted ctx' val' form' .
+              bindArrayLParams (zip loop_params' (map Just loop_arrs')))
     WhileLoop cond -> do
       cond' <- simplify cond
       return (WhileLoop cond',
               fparamnames,
-              id)
+              protectLoopHoisted ctx' val' (WhileLoop cond'))
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   (loopres', loopbnds') <-
     enterLoop $
     bindFParams (ctxparams'++valparams') $ wrapbody $
     blockIf
-    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker `orIf` isNotSafe) $ do
+    (hasFree boundnames `orIf` isConsumed
+     `orIf` seq_blocker `orIf` notWorthHoisting) $ do
       res <- simplifyBody diets loopbody
       isDoLoopResult res
       return res
@@ -918,11 +978,11 @@ consumeResult = mapM_ inspect
         inspect (Observe, _) = return ()
 
 instance Simplifiable Certificates where
-  simplify = fmap (nub . concat) . mapM check
+  simplify (Certificates ocs) = Certificates . nub . concat <$> mapM check ocs
     where check idd = do
             vv <- getsEngineState $ ST.lookupSubExp idd . stateVtable
             case vv of
-              Just (Constant Checked, cs) -> return cs
+              Just (Constant Checked, Certificates cs) -> return cs
               Just (Var idd', _) -> do usedName idd'
                                        return [idd']
               _ -> do usedName idd

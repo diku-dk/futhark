@@ -49,7 +49,7 @@ freeWalker = identityWalker {
                walkOnSubExp = tell . freeIn
              , walkOnBody = tell . freeInBody
              , walkOnVName = tell . S.singleton
-             , walkOnCertificates = tell . S.fromList
+             , walkOnCertificates = tell . freeIn
              , walkOnOp = tell . freeIn
              }
 
@@ -224,6 +224,9 @@ instance FreeIn attr => FreeIn (PatternT attr) where
   freeIn (Pattern context values) =
     mconcat (map freeIn $ context ++ values) `S.difference` bound_here
     where bound_here = S.fromList $ map patElemName $ context ++ values
+
+instance FreeIn Certificates where
+  freeIn (Certificates cs) = freeIn cs
 
 instance FreeIn attr => FreeIn (StmAux attr) where
   freeIn (StmAux cs attr) = freeIn cs <> freeIn attr

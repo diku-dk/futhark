@@ -111,7 +111,8 @@ deadCodeElimExp = mapExpM mapper
                    mapOnBody = const deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnVName = deadCodeElimVName
-                 , mapOnCertificates = mapM deadCodeElimVName
+                 , mapOnCertificates = \(Certificates cs) ->
+                     Certificates <$> mapM deadCodeElimVName cs
                  , mapOnRetType = \rt -> do
                    seen $ freeIn rt
                    return rt
