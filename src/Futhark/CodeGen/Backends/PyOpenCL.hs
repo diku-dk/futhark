@@ -10,7 +10,6 @@ import Data.List
 import Prelude
 
 import Futhark.Error
-import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
@@ -36,8 +35,8 @@ compileProg module_name prog = do
       let assign = unlines $ map (\x -> pretty $ Assign (Var ("self."++x++"_var")) (Var $ "program."++x)) kernel_names
 
       let defines =
-            [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
-             Assign (Var "synchronous") $ Constant $ value False,
+            [Assign (Var "FUT_BLOCK_DIM") $ String $ show (Imp.transposeBlockDim :: Int),
+             Assign (Var "synchronous") $ Bool False,
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
              Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
@@ -103,8 +102,8 @@ callKernel (Imp.HostCode c) =
 
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
-  let total_elements = foldl mult_exp (Constant $ value (1::Int32)) kernel_size'
-  let cond = BinOp "!=" total_elements (Constant $ value (0::Int32))
+  let total_elements = foldl mult_exp (Integer 1) kernel_size'
+  let cond = BinOp "!=" total_elements (Integer 0)
   workgroup_size' <- Tuple <$> mapM (fmap asLong . Py.compileExp) workgroup_size
   body <- Py.collect $ launchKernel name kernel_size' workgroup_size' args
   Py.stm $ If cond body []
@@ -147,21 +146,21 @@ readOpenCLScalar mem i bt "device" = do
   let val' = Var $ pretty val
   let mem' = Var $ Py.compileName mem
   let nparr = Call (Var "np.empty")
-              [Arg $ Constant $ value (1::Int32),
+              [Arg $ Integer 1,
                ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
   Py.stm $ Assign val' nparr
   Py.stm $ Exp $ Call (Var "cl.enqueue_copy")
     [Arg $ Var "self.queue", Arg val', Arg mem',
      ArgKeyword "device_offset" $ asLong i,
-     ArgKeyword "is_blocking" $ Constant $ BoolValue True]
-  return $ Index val' $ IdxExp $ Constant $ value (0::Int32)
+     ArgKeyword "is_blocking" $ Bool True]
+  return $ Index val' $ IdxExp $ Integer 0
 
 readOpenCLScalar _ _ _ space =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
-  let cond' = Cond (BinOp ">" size (Constant $ value (0::Int32))) (asLong size) (Constant $ value (1::Int32))
+  let cond' = Cond (BinOp ">" size (Integer 0)) (asLong size) (Integer 1)
   let call' = Call (Var "cl.Buffer")
               [Arg $ Var "self.ctx",
                Arg $ Var "cl.mem_flags.READ_WRITE",
@@ -175,7 +174,7 @@ copyOpenCLMemory :: Py.Copy Imp.OpenCL ()
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
   let srcmem'  = Var $ Py.compileName srcmem
   let destmem' = Var $ Py.compileName destmem
-  let divide = BinOp "//" nbytes (Var $ Py.compileSizeOfType bt)
+  let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
   let end = BinOp "+" destidx divide
   let dest = Index destmem' (IdxRange destidx end)
   Py.stm $ ifNotZeroSize nbytes $
@@ -187,7 +186,7 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
   let destmem' = Var $ Py.compileName destmem
   let srcmem'  = Var $ Py.compileName srcmem
-  let divide = BinOp "//" nbytes (Var $ Py.compileSizeOfType bt)
+  let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
   let end = BinOp "+" srcidx divide
   let src = Index srcmem' (IdxRange srcidx end)
   Py.stm $ ifNotZeroSize nbytes $
@@ -224,8 +223,7 @@ staticOpenCLArray name "device" t vs = do
 
     -- Create memory block on the device.
     static_mem <- newVName "static_mem"
-    let size = Constant $ IntValue $ Int32Value $
-               genericLength vs * primByteSize t
+    let size = Integer $ genericLength vs * Imp.primByteSize t
     allocateOpenCLBuffer static_mem size "device"
 
     -- Copy Numpy array to the device memory block.
@@ -293,7 +291,7 @@ unpackArrayInput _ _ sid _ _ _ _ =
 
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt
 ifNotZeroSize e s =
-  If (BinOp "!=" e (Constant $ value (0::Int32))) [s] []
+  If (BinOp "!=" e (Integer 0)) [s] []
 
 finishIfSynchronous :: Py.CompilerM op s ()
 finishIfSynchronous =

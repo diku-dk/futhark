@@ -4,7 +4,6 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   , PyArg (..)
   , PyStmt(..)
   , module Language.Futhark.Core
-  , module Futhark.Representation.Primitive
   , PyProg(..)
   , PyExcept(..)
   , PyFunDef(..)
@@ -13,7 +12,6 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   where
 
 import Language.Futhark.Core
-import Futhark.Representation.Primitive
 import Futhark.Util.Pretty hiding (space)
 
 
@@ -23,8 +21,10 @@ data UnOp = Not -- ^ Boolean negation.
           | Abs -- ^ Absolute/numerical value.
             deriving (Eq, Show)
 
-data PyExp = Constant PrimValue
-           | StringLiteral String
+data PyExp = Integer Integer
+           | Bool Bool
+           | Float Double
+           | String String
            | RawStringLiteral String
            | Var String
            | BinOp String PyExp PyExp
@@ -91,38 +91,32 @@ instance Pretty PyArg where
   ppr (ArgKeyword k e) = text k <> equals <> ppr e
   ppr (Arg e) = ppr e
 
-instance Pretty PyExp where
-    ppr (Constant (IntValue (Int8Value v))) = text "np.int8" <> parens (text $ show v)
-    ppr (Constant (IntValue (Int16Value v))) = text "np.int16" <> parens (text $ show v)
-    ppr (Constant (IntValue (Int32Value v))) = text "np.int32" <> parens (text $ show v)
-    ppr (Constant (IntValue (Int64Value v))) = text "np.int64" <> parens (text $ show v)
-    ppr (Constant (FloatValue (Float32Value v))) = text "np.float32" <> parens v'
-      where v' | isInfinite v = text $ if v > 0 then "np.inf" else "-np.inf"
-               | otherwise =  parens $ text $ show v
-    ppr (Constant (FloatValue (Float64Value v))) = text "np.float64" <> parens v'
-      where v' | isInfinite v = text $ if v > 0 then "np.inf" else "-np.inf"
-               | otherwise =  text $ show v
-    ppr (Constant Checked) = text "Checked"
-    ppr (Constant (BoolValue b)) = ppr b
-    ppr (StringLiteral s) = text $ show s
-    ppr (RawStringLiteral s) = text "\"\"\"" <> text s <> text "\"\"\""
-    ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
-    ppr (Field e s) = ppr e <> text "." <> text s
-    ppr (BinOp s e1 e2) = parens(ppr e1 <+> text s <+> ppr e2)
-    ppr (UnOp s e) = text s <> parens (ppr e)
-    ppr (Cond e1 e2 e3) = ppr e2 <+> text "if" <+> ppr e1 <+> text "else" <+> ppr e3
-    ppr (Cast src bt) = text "ct.cast" <>
-                        parens (ppr src <> text "," <+>
-                                text "ct.POINTER" <> parens(text bt))
-    ppr (Index src idx) = ppr src <> brackets(ppr idx)
-    ppr (Call fun exps) = ppr fun <> parens(commasep $ map ppr exps)
-    ppr (Tuple [dim]) = parens(ppr dim <> text ",")
-    ppr (Tuple dims) = parens(commasep $ map ppr dims)
-    ppr (List es) = brackets $ commasep $ map ppr es
-    ppr (Dict kvs) = braces $ commasep $ map ppElem kvs
-      where ppElem (k, v) = ppr k <> colon <+> ppr v
 
-    ppr None = text "None"
+instance Pretty PyExp where
+  ppr (Integer x) = ppr x
+  ppr (Bool x) = ppr x
+  ppr (Float x)
+    | isInfinite x = text $ if x > 0 then "float('inf')" else "float('-inf')"
+    | otherwise = ppr x
+  ppr (String x) = text $ show x
+  ppr (RawStringLiteral s) = text "\"\"\"" <> text s <> text "\"\"\""
+  ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
+  ppr (Field e s) = ppr e <> text "." <> text s
+  ppr (BinOp s e1 e2) = parens(ppr e1 <+> text s <+> ppr e2)
+  ppr (UnOp s e) = text s <> parens (ppr e)
+  ppr (Cond e1 e2 e3) = ppr e2 <+> text "if" <+> ppr e1 <+> text "else" <+> ppr e3
+  ppr (Cast src bt) = text "ct.cast" <>
+                      parens (ppr src <> text "," <+>
+                              text "ct.POINTER" <> parens(text bt))
+  ppr (Index src idx) = ppr src <> brackets(ppr idx)
+  ppr (Call fun exps) = ppr fun <> parens(commasep $ map ppr exps)
+  ppr (Tuple [dim]) = parens(ppr dim <> text ",")
+  ppr (Tuple dims) = parens(commasep $ map ppr dims)
+  ppr (List es) = brackets $ commasep $ map ppr es
+  ppr (Dict kvs) = braces $ commasep $ map ppElem kvs
+    where ppElem (k, v) = ppr k <> colon <+> ppr v
+
+  ppr None = text "None"
 
 instance Pretty PyStmt where
   ppr (If cond [] []) =
