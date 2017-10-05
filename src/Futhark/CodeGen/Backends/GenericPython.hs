@@ -416,12 +416,24 @@ entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ (Imp.Space sid) bt 
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
 
-entryPointInput :: Imp.ExternalValue -> PyExp -> CompilerM op s ()
-entryPointInput (Imp.OpaqueValue _ vs) e =
-  zipWithM_ entryPointInput (map Imp.TransparentValue vs)
-  (map (Index (Field e "data") . IdxExp . Constant . value) [(0::Int32)..])
+badInput :: Int -> PyExp -> String -> PyStmt
+badInput i e t =
+  Raise $ simpleCall "TypeError"
+  [Call (Field (StringLiteral err_msg) "format") [Arg (StringLiteral t), Arg e]]
+  where err_msg = unlines [ "Argument #" ++ show i ++ " has invalid value"
+                          , "Futhark type: {}"
+                          , "Type of given Python value: {}" ]
 
-entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
+
+entryPointInput :: (Int, Imp.ExternalValue, PyExp) -> CompilerM op s ()
+entryPointInput (i, Imp.OpaqueValue desc vs, e) = do
+  let type_is_ok = BinOp "and" (simpleCall "isinstance" [e, Var "opaque"])
+                               (BinOp "==" (Field e "desc") (StringLiteral desc))
+  stm $ If (UnOp "not" type_is_ok) [badInput i (simpleCall "type" [e]) desc] []
+  mapM_ entryPointInput $ zip3 (repeat i) (map Imp.TransparentValue vs) $
+    map (Index (Field e "data") . IdxExp . Constant . value) [(0::Int32)..]
+
+entryPointInput (i, Imp.TransparentValue (Imp.ScalarValue bt s name), e) = do
   let vname' = Var $ compileName name
       -- HACK: A Numpy int64 will signal an OverflowError if we pass
       -- it a number bigger than 2**63.  This does not happen if we
@@ -432,14 +444,20 @@ entryPointInput (Imp.TransparentValue (Imp.ScalarValue bt _ name)) e = do
       ctcall = simpleCall ctobject [e]
       npobject = compilePrimToNp bt
       npcall = simpleCall npobject [ctcall]
-  stm $ Assign vname' npcall
+  stm $ Try [Assign vname' npcall]
+    [Catch (Tuple [Var "TypeError", Var "AssertionError"])
+     [badInput i (simpleCall "type" [e]) $ prettySigned (s==Imp.TypeUnsigned) bt]]
 
-entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t s dims)) e = do
-  let type_is_ok =
+entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpace t s dims), e) = do
+  let type_is_wrong =
+        UnOp "not" $
         BinOp "and"
         (BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray"]))
         (BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s)))
-  stm $ Assert type_is_ok "Parameter has unexpected type"
+  stm $ If type_is_wrong
+    [badInput i (simpleCall "type" [e]) $ concat (replicate (length dims) "[]") ++
+     prettySigned (s==Imp.TypeUnsigned) t]
+    []
 
   zipWithM_ (unpackDim e) dims [0..]
   let dest = Var $ compileName mem
@@ -454,9 +472,13 @@ entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize Imp.DefaultSpa
 
   stm $ Assign dest unwrap_call
 
-entryPointInput (Imp.TransparentValue (Imp.ArrayValue mem memsize (Imp.Space sid) bt ept dims)) e = do
+entryPointInput (i, Imp.TransparentValue (Imp.ArrayValue mem memsize (Imp.Space sid) bt ept dims), e) = do
   unpack_input <- asks envEntryInput
-  unpack_input mem memsize sid bt ept dims e
+  unpack <- collect $ unpack_input mem memsize sid bt ept dims e
+  stm $ Try unpack
+    [Catch (Tuple [Var "TypeError", Var "AssertionError"])
+     [badInput i (simpleCall "type" [e]) $ concat (replicate (length dims) "[]") ++
+     prettySigned (ept==Imp.TypeUnsigned) bt]]
 
 extValueDescName :: Imp.ExternalValue -> String
 extValueDescName (Imp.TransparentValue v) = extName $ valueDescName v
@@ -626,7 +648,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
       return $ Just $ compileName name'
     _ -> return Nothing
 
-  prepareIn <- collect $ zipWithM_ entryPointInput args $
+  prepareIn <- collect $ mapM_ entryPointInput $ zip3 [0..] args $
                map (Var . extValueDescName) args
   (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
