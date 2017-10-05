@@ -346,15 +346,17 @@ tryCoalesce dst ixfun_slices bindage src offset = do
   -- Not everything supported yet.  This dials back the optimisation on areas
   -- where it fails.
   existentials <- asks ctxExistentials
-  let currentlyDisabled src_local ixfun_slices_local = do
+  let currentlyDisabled src_local offset_local ixfun_slices_local = do
         -- This case covers the problem described in
-        -- tests/coalescing/wip/loop/loop-0.fut.
+        -- tests/coalescing/wip/loop/loop-0.fut and ixfun-merge-param.fut.
 
         src_local_is_loop <- isLoopExp src_local
 
         let res = src_local_is_loop
                   && src_local `L.elem` existentials
-                  && not (L.null ixfun_slices_local)
+                  && (not (L.null ixfun_slices_local)
+                      ||
+                      (offset_local /= zeroOffset))
 
             debug = do
               putStrLn $ replicate 70 '~'
@@ -366,7 +368,7 @@ tryCoalesce dst ixfun_slices bindage src offset = do
               putStrLn $ replicate 70 '~'
         withDebug debug $ return res
 
-  safe0 <- (not . or) <$> zipWithM currentlyDisabled srcs ixfun_slicess
+  safe0 <- (not . or) <$> zipWithM3 currentlyDisabled srcs offsets ixfun_slicess
 
   -- Safety condition 1 is the same for all eventual previous arrays from srcs
   -- that also need to be coalesced into dst, so we check it here instead of
