@@ -38,16 +38,6 @@ import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
 import Futhark.Representation.AST.Attributes.Aliases
 
------------------------------------------------------
--- for Cosmin's sequentializer: work in progress
------------------------------------------------------
--- import Futhark.Transform.GlobalizeArrays
--- import qualified Futhark.Transform.FirstOrderTransfOpt as FOTopt
--- import Futhark.Analysis.LastUse
--- transformProg prg = do
---  let glob_arr_env = gatherGlobArrsProg prg
---  intraproceduralTransformation transformFunDef prg
-
 -- | Perform the first-order transformation on an Futhark program.
 transformProg :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                   LetAttr SOACS ~ LetAttr tolore,
