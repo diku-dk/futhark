@@ -22,7 +22,7 @@ We do not presently issue source releases of Futhark, so the only way
 to compile from source is to perform a checkout of our Git
 repository::
 
-  $ git clone https://github.com/HIPERFIT/futhark.git
+  $ git clone https://github.com/diku-dk/futhark.git
 
 This will create a directory ``futhark``, which you must enter::
 
@@ -51,13 +51,18 @@ Note that this does not install the Futhark manual pages.
 Installing from a precompiled snapshot
 --------------------------------------
 
-We do not yet have any proper releases as such, but every day a
-program automatically clones the Git repository, builds the compiler,
-and packages a simple tarball containing the resulting binaries, built
-manpages, and a simple ``Makefile`` for installing.  The implication
-is that these tarballs are not vetted in any way, nor more stable than
-Git HEAD at any particular moment in time.  They are provided merely
-for users who are unable or unwilling to compile Futhark themselves.
+Tarballs of binary releases can be `found online
+<https://futhark-lang.org/releases/>`_, but are available only for
+very few platforms (as of this writing, only GNU/Linux on x86_64).
+
+Furthermore, every day a program automatically clones the Git
+repository, builds the compiler, and packages a simple tarball
+containing the resulting binaries, built manpages, and a simple
+``Makefile`` for installing.  The implication is that these tarballs
+are not vetted in any way, nor more stable than Git HEAD at any
+particular moment in time.  They are provided for users who wish to
+use the most recent code, but are unable to compile Futhark
+themselves.
 
 At the moment, we build such snapshots only for a single operating
 system:
@@ -66,8 +71,7 @@ Linux (x86_64)
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
 In time, we hope to make snapshots available for more platforms, but
-we are limited by system availability.  We also intend to make proper
-releases once the language matures.
+we are limited by system availability.
 
 .. _`Haskell tool stack`: http://docs.haskellstack.org/
 .. _`installing Stack`: http://docs.haskellstack.org/#how-to-install
@@ -230,6 +234,6 @@ Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_
     it.
 
 .. _`PyOpenCL repository`: https://github.com/pyopencl/pyopencl
-.. _`Mandelbrot Explorer`: https://github.com/HIPERFIT/futhark-benchmarks/tree/master/misc/mandelbrot-explorer
-.. _`Game of Life`: https://github.com/HIPERFIT/futhark-benchmarks/tree/master/misc/life
-.. _`issues page`: https://github.com/HIPERFIT/futhark/issues
+.. _`Mandelbrot Explorer`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/mandelbrot-explorer
+.. _`Game of Life`: https://github.com/diku-dk/futhark-benchmarks/tree/master/misc/life
+.. _`issues page`: https://github.com/diku-dk/futhark/issues

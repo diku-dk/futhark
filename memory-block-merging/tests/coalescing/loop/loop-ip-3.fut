@@ -19,7 +19,7 @@ import "/futlib/array"
 -- because `a1` is used in the computation of `x = map (+1) (a1[i])`,
 -- hence `x` cannot share the memory block of `a1`.
 -- This can potentially be done during register allocation stage.
-let main(y: *[#n][#n][#n]i32, a: [#n][#n]i32): *[n][n][n]i32 =
+let main [n] (y: *[n][n][n]i32, a: [n][n]i32): *[n][n][n]i32 =
   let y[0,0,0] = 9
   let a0 = copy a
   let a1 = loop a1 = a0 for i < n do

@@ -12,12 +12,12 @@
 -- structure gpu { Alloc  }
 
 
-let reducer (x: [#n]i32) (y: [#n]i32): [n]i32 =
+let reducer [n] (x: [n]i32) (y: [n]i32): [n]i32 =
   let z = map (+) x y
   let v = map (+ z[0]) x
   let w = map (+ v[0]) y
   in w
 
-let main (xs: [#n][#n]i32): [n]i32 =
+let main [n] (xs: [n][n]i32): [n]i32 =
   let initial = replicate n 0
   in reduce reducer initial xs

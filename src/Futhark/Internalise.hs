@@ -295,7 +295,8 @@ entryPoint params (eret,crets) =
         entryPointType (E.Array PrimArray{}) _ =
           [I.TypeDirect]
         entryPointType t ts =
-          [I.TypeOpaque (pretty t) $ length ts]
+          [I.TypeOpaque (pretty t') $ length ts]
+          where t' = removeShapeAnnotations t `E.setUniqueness` Nonunique
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name (Info tp) loc) = do

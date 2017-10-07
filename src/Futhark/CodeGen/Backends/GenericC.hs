@@ -1742,7 +1742,7 @@ compileCode (Call dests fname args) = do
   let args'' | isBuiltInFunction fname = args'
              | otherwise = [C.cexp|ctx|] : args'
   case dests of
-    [dest] ->
+    [dest] | isBuiltInFunction fname ->
       stm [C.cstm|$id:dest = $id:(funName fname)($args:args'');|]
     _        -> do
       ret <- newVName "call_ret"

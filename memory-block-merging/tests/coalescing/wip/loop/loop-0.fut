@@ -1,4 +1,4 @@
--- Very Simple Example of Loop Coalescing.
+-- Very simple example of loop coalescing.
 -- ==
 -- input {  [ [1, 2], [0, 0] ]
 --          [1, 2]
@@ -25,8 +25,9 @@ import "/futlib/array"
 --
 -- A better solution is maybe to extend the DoLoop context merge parameters with
 -- index functions, so that each iteration can use different index functions.
+-- Currently this case is just disabled.
 --
--- Right now it just gives a wrong result...
+-- Also see ixfun-merge-param.fut.
 
 -- Code below should result in 2 successful coalescing
 -- operations in the memory block of `y`. These are:
@@ -42,7 +43,7 @@ import "/futlib/array"
 -- operations would be incorrect! This last memory reuse
 -- can potentially be done by linear-scan register
 -- allocation later!
-let main(y: *[#n][#m]i32, a: [#m]i32): *[n][m]i32 =
+let main [n] [m] (y: *[n][m]i32, a: [m]i32): *[n][m]i32 =
   let y[0,1] = 9
   let a1 = loop a1 = a for _i < n do
     let x1 = map (+1) a1

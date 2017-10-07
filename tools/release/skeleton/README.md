@@ -19,5 +19,5 @@ If you wish to install to a specific location, you can set the
 
     PREFIX=$HOME/.local make install
 
-[1]: http://futhark-lang.org
-[2]: https://github.com/HIPERFIT/futhark
+[1]: https://futhark-lang.org
+[2]: https://github.com/diku-dk/futhark

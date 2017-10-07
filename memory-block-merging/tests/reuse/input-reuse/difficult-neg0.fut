@@ -5,7 +5,7 @@
 -- structure cpu { Alloc 1 }
 -- structure gpu { Alloc 1 }
 
-let main (xs: *[#n]i32): [n]i32 =
+let main [n] (xs: *[n]i32): [n]i32 =
   -- xs and ys do not overlap "within" the map, but since xs is used again in a
   -- later statement, they do actually interfere.
   let ys = map (+ 1) xs

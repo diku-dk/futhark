@@ -13,7 +13,7 @@
 
 import "/futlib/array"
 
-let main (ns: [#n]i32): [n]i32 =
+let main [n] (ns: [n]i32): [n]i32 =
   -- An array whose memory we can reuse.
   let xs0 = copy ns
   let loop_result = loop xs = xs0 for i < n do

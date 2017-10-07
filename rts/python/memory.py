@@ -3,8 +3,7 @@
 import ctypes as ct
 
 def addressOffset(x, offset, bt):
-  offset = np.asscalar(offset)
-  return ct.cast(ct.addressof(x.contents)+offset, ct.POINTER(bt))
+  return ct.cast(ct.addressof(x.contents)+int(offset), ct.POINTER(bt))
 
 def allocateMem(size):
   return ct.cast((ct.c_byte * max(0,size))(), ct.POINTER(ct.c_byte))
@@ -27,8 +26,7 @@ def indexArray(x, offset, bt, nptype):
   return nptype(addressOffset(x, offset, bt)[0])
 
 def writeScalarArray(x, offset, v):
-  offset = np.asscalar(offset)
-  ct.memmove(ct.addressof(x.contents)+offset, ct.addressof(v), ct.sizeof(v))
+  ct.memmove(ct.addressof(x.contents)+int(offset), ct.addressof(v), ct.sizeof(v))
 
 # An opaque Futhark value.
 class opaque(object):

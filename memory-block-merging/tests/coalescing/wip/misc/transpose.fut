@@ -14,7 +14,7 @@
 
 import "/futlib/array"
 
-let main (x: [#n][#n]i32): [n][n]i32 =
+let main [n] (x: [n][n]i32): [n][n]i32 =
   let y = map (\t -> map (* 2) t) x
   let y' = transpose y
   let z = copy y'

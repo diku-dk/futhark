@@ -196,6 +196,9 @@ sortByKeyM f xs = do
 filterSetM :: (Ord a, Monad m) => (a -> m Bool) -> S.Set a -> m (S.Set a)
 filterSetM f xs = S.fromList <$> filterM f (S.toList xs)
 
+zipWithM3 :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
+zipWithM3 f as bs cs = sequence $ zipWith3 f as bs cs
+
 -- Pretty bad.
 intraproceduralTransformationWithLog ::
   MonadFreshNames m =>

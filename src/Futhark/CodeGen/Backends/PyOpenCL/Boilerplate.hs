@@ -10,7 +10,6 @@ import Data.FileEmbed
 import qualified Data.Text as T
 import NeatInterpolation (text)
 
-import Futhark.Representation.AST.Attributes.Constants (value)
 import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.Util.Pretty (pretty)
@@ -54,9 +53,9 @@ lockstepWidthHeuristicsCode :: LockstepWidthHeuristic -> PyStmt
 lockstepWidthHeuristicsCode
   (LockstepWidthHeuristic platform_name device_type width) =
   If (BinOp "and"
-      (BinOp "==" (Var "platform_name") (StringLiteral platform_name))
+      (BinOp "==" (Var "platform_name") (String platform_name))
       (BinOp "==" (Var "device_type") (clDeviceType device_type)))
-  [Assign (Var "lockstep_width") (Constant (value (fromIntegral width::Int32)))]
+  [Assign (Var "lockstep_width") (Integer $ toInteger width)]
   []
   where clDeviceType DeviceGPU = Var "cl.device_type.GPU"
         clDeviceType DeviceCPU = Var "cl.device_type.CPU"
