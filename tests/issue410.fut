@@ -14,6 +14,7 @@ type point = (i32,i32)
 type line = (point,point)
 
 let main [h][w][n] (grid:*[h][w]i32) (lines:[n]line) (nn: i32) (idxs: []i32) =
+  unsafe
   let iotan = iota n
   let nums = map (\i -> iotan[i]) idxs
   let flags = map (\i -> i != 0 && nums[i] != nums[i-1]) (iota nn)
