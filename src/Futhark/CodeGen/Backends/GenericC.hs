@@ -456,7 +456,7 @@ rawMem' :: C.ToExp a => Bool -> a -> C.Exp
 rawMem' True  e = [C.cexp|$exp:e.mem|]
 rawMem' False e = [C.cexp|$exp:e|]
 
-defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem)
+defineMemorySpace :: Space -> CompilerM op s (C.Definition, [C.Definition], C.BlockItem, C.BlockItem)
 defineMemorySpace space = do
   rm <- rawMemCType space
   let structdef =
@@ -516,6 +516,9 @@ defineMemorySpace space = do
   if (ctx->detail_memory) {
     fprintf(stderr, $string:("Allocated %d bytes in " ++ spacedesc ++ " (now allocated: %ld bytes)"), size, ctx->$id:usagename);
   }
+  if (detail_memory_simple) {
+    detail_memory_simple_total_allocated += block->size;
+  }
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
     if (ctx->detail_memory) {
@@ -538,6 +541,8 @@ defineMemorySpace space = do
   return (structdef,
           [unrefdef, allocdef, setdef],
           [C.citem|fprintf(stderr, $string:("Peak memory usage for " ++ spacedesc ++ ": %ld bytes.\n"),
+                           ctx->$id:peakname);|],
+          [C.citem|fprintf(stderr, $string:("%ld " ++ spacedesc ++ "\n"),
                            ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
@@ -1171,7 +1176,11 @@ benchmarkOptions =
    , Option { optionLongName = "memory-reporting-simple"
             , optionShortName = Just 'M'
             , optionArgument = NoArgument
-            , optionAction = [C.cstm|detail_memory_simple = 1;|]
+            , optionAction = [C.cstm|{
+detail_memory_simple = 1;
+detail_memory_simple_total_freed = 0;
+detail_memory_simple_total_allocated = 0;
+}|]
             }
    , Option { optionLongName = "entry-point"
             , optionShortName = Just 'e'
@@ -1237,6 +1246,10 @@ compileProg ops extra userstate spaces options prog@(Functions funs) = do
 
   let headerdefs = [C.cunit|
 $esc:("#include <stdint.h>")
+
+$esc:("int detail_memory_simple = 0;")
+$esc:("int detail_memory_simple_total_allocated = 0;")
+$esc:("int detail_memory_simple_total_freed = 0;")
 
 $esc:("\n/*\n * Initialisation\n*/\n")
 $edecls:(initDecls endstate)
@@ -1373,7 +1386,8 @@ $edecls:entry_point_decls
 
   return $ CParts (pretty headerdefs) (pretty utildefs) (pretty clidefs) (pretty libdefs)
   where compileProg' = do
-          (memstructs, memfuns, memreport) <- unzip3 <$> mapM defineMemorySpace spaces
+          (memstructs, memfuns, memreport, memreport_simple) <-
+            unzip4 <$> mapM defineMemorySpace spaces
 
           (prototypes, definitions) <- unzip <$> mapM compileFun funs
 
@@ -1387,6 +1401,11 @@ $edecls:entry_point_decls
           libDecl [C.cedecl|void futhark_debugging_report($ty:ctx_ty *ctx) {
   if (ctx->detail_memory) {
     $items:memreport
+  }
+  if (detail_memory_simple) {
+    fprintf(stderr, $string:("%ld\n"), detail_memory_simple_total_allocated);
+    fprintf(stderr, $string:("%ld\n"), detail_memory_simple_total_freed);
+    $items:memreport_simple
   }
   if (ctx->debugging) {
     $items:debugreport

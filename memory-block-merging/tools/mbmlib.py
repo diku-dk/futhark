@@ -23,6 +23,10 @@ attributes = (
      'amount', ('compilation',
                 lambda d: len(list(set(xs[2] for xs in d
                                        if xs[0] == 'coalescing'))))),
+    ('number of reuses',
+     'amount', ('compilation',
+                lambda d: len(list(set(xs[2] for xs in d
+                                       if xs[0] == 'reuse'))))),
 )
 
 def average_improvement(benchmark_info, val_func):

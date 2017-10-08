@@ -57,9 +57,9 @@ get_compilation_info() {
         target_flag='--gpu'
     fi
 
-    temp_storage="$(mktemp)"
     {
         export FUTHARK_DEBUG_JSON=1
+        temp_storage="$(mktemp)"
         echo '{'
         find -name '*.fut' | while read file; do
             echo "Getting compilation information for $file." > /dev/stderr

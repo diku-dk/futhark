@@ -252,7 +252,12 @@ coreReuseFunDef fundef first_uses interferences potential_kernel_interferences v
         putStrLn $ pretty fundef'''
         putStrLn $ replicate 70 '='
 
-  withDebug debug $ return (fundef''', proglog)
+      debug_json =
+        forM_ (M.assocs (curVarToMemRes res)) $ \(src, dstmem) ->
+          putStrLn ("[\"reuse\", \"" ++ pretty src ++
+                    "\", \"" ++ pretty (memLocName dstmem) ++ "\"]")
+
+  withDebugJSON debug_json $ withDebug debug $ return (fundef''', proglog)
 
 lookInFParam :: LoreConstraints lore =>
                 FParam lore -> FindM lore ()

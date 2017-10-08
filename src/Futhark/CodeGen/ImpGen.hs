@@ -667,7 +667,6 @@ defCompileBasicOp
                                in srcmem /= destmem)
           when needs_copy $
             copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
-
           emit $ Imp.SetScalar offs_glb $ Imp.var offs_glb int32 + rows
 
 defCompileBasicOp (Destination [dest]) (ArrayLit es _)
