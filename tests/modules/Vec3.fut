@@ -1,5 +1,3 @@
--- ==
--- tags { disable }
 module Vec3 = {
     module f32 = {
         type t = ( f32 , f32 , f32 )
