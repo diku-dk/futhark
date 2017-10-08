@@ -256,7 +256,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
                      , outNames = res_outnms
                      }
 
-  outPairs <- forM (zip outVars $ SOAC.typeOf soac1) $ \(outVar, t) -> do
+  outPairs <- forM (zip outVars $ map rowType $ SOAC.typeOf soac1) $ \(outVar, t) -> do
                 outVar' <- newVName $ baseString outVar ++ "_elem"
                 return (outVar, Ident outVar' t)
 
