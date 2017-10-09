@@ -51,7 +51,7 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
     print('<p>Raw results: <a href="full.json">full.json</a>.</p>')
     print('<h2>Table of contents</h2>')
     print('<ul>')
-    for name, _unit, _val_func in attributes:
+    for name, _unit, _val_func, _kind_format in attributes:
         url = 'sorted_after_' + name.replace(' ', '_')
         title = 'Sorted after ' + name + ' improvement'
         print('<li><a href="#{}">{}</a></li>'.format(url, title))
@@ -68,7 +68,7 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
     print('<p>Before: Both memory block merging and register allocation <b>disabled</b>.</p>')
     print('<p>After: Both memory block merging and register allocation <b>enabled</b>.</p>')
     print('<p>(See concrete sections for more distinctions.)</p>')
-    for name, _unit, val_func in attributes:
+    for name, _unit, val_func, kind_format in attributes:
         key_func = lambda i: average_improvement(i, val_func)
         temp = list(map(lambda b: (b[0], key_func(b[1])), benchmarks))
         temp.sort(key=lambda t: t[1], reverse=True)
@@ -76,8 +76,8 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
                                          + name.replace(' ', '_')))
         print('<h2>Sorted after {} improvement</h2>'.format(name))
         print('<p>Benchmarks sorted after the best average improvement across datasets in {} after enabling memory block merging:</p>'.format(name)
-              + '\n{}\n'.format('<br>'.join('<a href="#{}">{}</a> ({})'.format(name, name, percentage_format(improvement_percent))
-                                          for name, improvement_percent in temp)))
+              + '\n{}\n'.format('<br>'.join('<a href="#{}">{}</a> ({})'.format(name, name, kind_format(improvement))
+                                          for name, improvement in temp)))
 
     print('<a name="per_benchmark_overview"></a>')
     print('<h1>Per-benchmark overview (sorted alphabetically)</h1>')
@@ -89,11 +89,11 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
         print('<a name="{}"></h2>'.format(benchmark_name))
         print('<h2>{}</h2>'.format(benchmark_name))
 
-        for name, _unit, val_func in attributes:
+        for name, _unit, val_func, kind_format in attributes:
             imp = average_improvement(benchmark_info, val_func)
             if abs(imp) > improvement_difference_threshold_ignore:
                 print('<p>Average improvement in {} after enabling memory block merging and register allocation: {} (<a href="plots/{}-{}.pdf">see plot</a>)</p>'.format(
-                    name, percentage_format(imp), benchmark_name, name.replace(' ', '_')))
+                    name, kind_format(imp), benchmark_name, name.replace(' ', '_')))
 
         datasets = list(benchmark_info['datasets'].items())
         datasets.sort()
@@ -103,11 +103,13 @@ with open(os.path.join(data_dir, 'summary.html'), 'w') as sys.stdout:
                 print('<p>{}: <pre>{}</pre></p>'.format(
                     k.replace('-', ' ').replace('_', ', '), v))
 
-            for name, _unit, val_func in attributes:
-                imp = dataset_improvement(dataset_info, val_func)
-                if abs(imp) > improvement_difference_threshold_ignore:
-                    print('<p>Improvement in {}: {}</p>'.format(
-                        name, percentage_format(imp)))
+            for name, _unit, val_func, kind_format in attributes:
+                kind, f = val_func
+                if kind == 'datasets':
+                    imp = base_improvement(dataset_info, f, 'percentage')
+                    if abs(imp) > improvement_difference_threshold_ignore:
+                        print('<p>Improvement in {}: {}</p>'.format(
+                            name, kind_format(imp)))
 
     print('''\
   </body>
