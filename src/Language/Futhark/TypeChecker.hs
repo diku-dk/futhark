@@ -134,7 +134,7 @@ checkSpecs (ValSpec name tparams params rettype doc loc : specs) =
     (tparams', params', rettype') <-
       checkTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $
       checkParams params $ \params' -> do
-        rettype' <- checkTypeDecl loc rettype
+        rettype' <- checkTypeDecl rettype
         return (tparams', params', rettype')
     let paramtypes = map (unInfo . expandedType . paramType) params'
         rettype'' = unInfo $ expandedType rettype'
@@ -212,7 +212,7 @@ checkSigExp (SigSpecs specs loc) = do
   return (MTy abstypes $ ModEnv env, SigSpecs specs' loc)
 checkSigExp (SigWith s (TypeRef tname td) loc) = do
   (s_abs, s_env, s') <- checkSigExpToEnv s
-  td' <- checkTypeDecl loc td
+  td' <- checkTypeDecl td
   (tname', s_abs', s_env') <- refineEnv loc s_abs s_env tname $ unInfo $ expandedType td'
   return (MTy s_abs' $ ModEnv s_env', SigWith s' (TypeRef tname' td') loc)
 checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
@@ -411,7 +411,7 @@ checkTypeBind :: TypeBindBase NoInfo Name
               -> TypeM (Env, TypeBindBase Info VName)
 checkTypeBind (TypeBind name ps td doc loc) =
   checkTypeParams ps $ \ps' -> do
-    td' <- bindingTypeParams ps' $ checkTypeDecl loc td
+    td' <- bindingTypeParams ps' $ checkTypeDecl td
     bindSpaced [(Type, name)] $ do
       name' <- checkName Type name loc
       return (mempty { envTypeTable =
@@ -426,10 +426,7 @@ checkValBind (ValBind entry name maybe_t NoInfo e doc loc) = do
   name' <- bindSpaced [(Term, name)] $ checkName Term name loc
   (maybe_t', e') <- case maybe_t of
     Just t  -> do
-      (tdecl, tdecl_type, implicit) <- checkTypeExp t
-      unless (M.null $ implicitNameMap implicit) $
-        bad $ TypeError loc
-        "Type ascription for let-binding may not have shape declarations."
+      (tdecl, tdecl_type) <- checkTypeExp t
 
       let t_structural = toStructural tdecl_type
       when (anythingUnique t_structural) $
