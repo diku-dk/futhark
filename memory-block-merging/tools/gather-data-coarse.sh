@@ -42,6 +42,13 @@ if [ "$number_runs" ]; then
     flags="$flags -r $number_runs"
 fi
 
+benchmark_programs_file="$5"
+if [ "$benchmark_programs_file" ]; then
+    benchmark_programs="$(cat "$benchmark_programs_file")"
+else
+    benchmark_programs='.'
+fi
+
 base="$(readlink -f "$result_dir")"
 
 cd "$(dirname "$0")/../../"
@@ -87,7 +94,7 @@ mkdir "$base"
 get_compilation_info > \
                      "$base/compilation_without-coalescing_without-reuse.json"
 futhark-bench $flags --json \
-              "$base/measurements_without-coalescing_without-reuse.json" . \
+              "$base/measurements_without-coalescing_without-reuse.json" $benchmark_programs \
     || true
 
 export IN_PLACE_LOWERING=0
@@ -96,5 +103,5 @@ export MEMORY_BLOCK_MERGING_REUSE=1
 get_compilation_info > \
                      "$base/compilation_with-coalescing_with-reuse.json"
 futhark-bench $flags --json \
-              "$base/measurements_with-coalescing_with-reuse.json" . \
+              "$base/measurements_with-coalescing_with-reuse.json" $benchmark_programs \
     || true
