@@ -2,8 +2,6 @@
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp
   , checkTypeDecl
-  , ImplicitlyBound
-  , implicitNameMap
 
   , unifyTypes
 
@@ -99,45 +97,39 @@ unifyRecordArrayElemTypes (RecordArrayElem ts1) (RecordArrayElem ts2)
 unifyRecordArrayElemTypes _ _ =
   Nothing
 
-data Bindage = BoundAsDim | BoundAsVar | UsedFree
+data Bindage = BoundAsVar | UsedFree
              deriving (Show, Eq)
 
--- | The variables implicitly bound inside a pattern group (which can
--- include several types).
-newtype ImplicitlyBound = ImplicitlyBound (M.Map (Namespace, Name) (VName, Bindage, SrcLoc))
+-- | The variables bound or referenced by a pattern group.
+newtype PatternNames = PatternNames (M.Map (Namespace, Name) (VName, Bindage, SrcLoc))
                         deriving (Show)
 
-instance Monoid ImplicitlyBound where
-  mempty = ImplicitlyBound mempty
-  ImplicitlyBound x `mappend` ImplicitlyBound y = ImplicitlyBound (x <> y)
+instance Monoid PatternNames where
+  mempty = PatternNames mempty
+  PatternNames x `mappend` PatternNames y = PatternNames (x <> y)
 
-implicitNameMap :: ImplicitlyBound -> NameMap
-implicitNameMap (ImplicitlyBound m) = M.mapMaybe firstOne m
-  where firstOne (x, BoundAsDim, _) = Just x
-        firstOne (x, BoundAsVar, _) = Just x
+implicitNameMap :: PatternNames -> NameMap
+implicitNameMap (PatternNames m) = M.mapMaybe firstOne m
+  where firstOne (x, BoundAsVar, _) = Just x
         firstOne (_, UsedFree, _) = Nothing
 
 checkTypeDecl :: MonadTypeChecker m =>
-                 SrcLoc -> TypeDeclBase NoInfo Name -> m (TypeDeclBase Info VName)
-checkTypeDecl loc (TypeDecl t NoInfo) = do
-  (t', st, implicit) <- checkTypeExp t
-  if M.null $ implicitNameMap implicit
-    then return $ TypeDecl t' $ Info st
-    else throwError $ TypeError loc
-         "May not bind size variables in type here."
+                 TypeDeclBase NoInfo Name -> m (TypeDeclBase Info VName)
+checkTypeDecl (TypeDecl t NoInfo) = do
+  (t', st) <- checkTypeExp t
+  return $ TypeDecl t' $ Info st
 
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
-             -> m (TypeExp VName, StructType, ImplicitlyBound)
+             -> m (TypeExp VName, StructType)
 checkTypeExp te = do
   implicit <- checkForDuplicateNamesTypeExp mempty te
-  bindNameMap (implicitNameMap implicit) $ do
-    ((te', st), implicit') <- runStateT (checkTypeExp' te) implicit
-    return (te', st, implicit')
+  bindNameMap (implicitNameMap implicit) $
+    evalStateT (checkTypeExp' te) implicit
 
 checkTypeExp' :: MonadTypeChecker m =>
                  TypeExp Name
-              -> StateT ImplicitlyBound m (TypeExp VName, StructType)
+              -> StateT PatternNames m (TypeExp VName, StructType)
 checkTypeExp' (TEVar name loc) = do
   (name', ps, t) <- lift $ lookupType loc name
   case ps of
@@ -204,7 +196,7 @@ checkTypeExp' (TEApply tname targs tloc) = do
 
 
 checkNamedDim :: MonadTypeChecker m =>
-                 SrcLoc -> QualName Name -> StateT ImplicitlyBound m (QualName VName)
+                 SrcLoc -> QualName Name -> StateT PatternNames m (QualName VName)
 checkNamedDim loc v = do
   (v', t) <- lift $ lookupVar loc v
   case t of
@@ -235,7 +227,7 @@ checkPattern tps p t m = do
 
 checkPattern' :: MonadTypeChecker m =>
                  UncheckedPattern -> InferredType
-              -> StateT ImplicitlyBound m Pattern
+              -> StateT PatternNames m Pattern
 
 checkPattern' (PatternParens p loc) t =
   PatternParens <$> checkPattern' p t <*> pure loc
@@ -306,12 +298,10 @@ checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
 checkPattern' p NoneInferred =
   throwError $ TypeError (srclocOf p) $ "Cannot determine type of " ++ pretty p
 
--- | Check for duplication of names inside a pattern group.
--- Duplication of bound shape names are permitted, but only if they
--- are not also bound as values.  Also, a bound size must not also be
--- used as free.
+-- | Check for duplication of names inside a pattern group.  Produces
+-- a description of all names used in the pattern group.
 checkForDuplicateNames :: MonadTypeChecker m =>
-                          [TypeParam] -> [UncheckedPattern] -> m ImplicitlyBound
+                          [TypeParam] -> [UncheckedPattern] -> m PatternNames
 checkForDuplicateNames tps =
   sanityCheck <=< flip execStateT mempty . mapM_ check
   where check (Id v) = seeing BoundAsVar (identName v) (srclocOf v)
@@ -323,7 +313,7 @@ checkForDuplicateNames tps =
           check p
           checkForDuplicateNamesTypeExp' $ declaredType t
 
-        sanityCheck (ImplicitlyBound m)
+        sanityCheck (PatternNames m)
           | problem : _ <- mapMaybe problematic tps = throwError problem
           where problematic (TypeParamDim tpv tploc)
                   | not $ any uses m =
@@ -332,22 +322,17 @@ checkForDuplicateNames tps =
                   where uses (v, UsedFree, _) = v == tpv
                         uses _                = False
                 problematic _ = Nothing
-        sanityCheck (ImplicitlyBound m)
-          | tp : _ <- tps, Just (_, _, ploc) <- find binds m =
-              throwError $ TypeError ploc $ "Implicit shape declaration not permitted when explicit declarations are also used at " ++ locStr (srclocOf tp)
-          where binds (_, BoundAsDim, _) = True
-                binds _ = False
         sanityCheck implicit = return implicit
 
 checkForDuplicateNamesTypeExp :: MonadTypeChecker m =>
-                                 ImplicitlyBound
-                              -> TypeExp Name -> m ImplicitlyBound
+                                 PatternNames
+                              -> TypeExp Name -> m PatternNames
 checkForDuplicateNamesTypeExp implicit te =
   execStateT (checkForDuplicateNamesTypeExp' te) implicit
 
 checkForDuplicateNamesTypeExp' :: MonadTypeChecker m =>
                                   TypeExp Name
-                               -> StateT ImplicitlyBound m ()
+                               -> StateT PatternNames m ()
 checkForDuplicateNamesTypeExp' TEVar{} = return ()
 checkForDuplicateNamesTypeExp' (TERecord fs _) =
   mapM_ (checkForDuplicateNamesTypeExp' . snd) fs
@@ -363,28 +348,21 @@ checkForDuplicateNamesTypeExp' (TEArray te d loc) =
   checkForDuplicateNamesTypeExp' te >> lookAtDimDecl loc d
 
 lookAtDimDecl :: MonadTypeChecker m => SrcLoc -> DimDecl Name
-              -> StateT ImplicitlyBound m ()
+              -> StateT PatternNames m ()
 lookAtDimDecl _ ConstDim{} = return ()
 lookAtDimDecl _ AnyDim{} = return ()
 lookAtDimDecl loc (NamedDim (QualName [] v)) = seeing UsedFree v loc
 lookAtDimDecl _ (NamedDim _) = return ()
 
 seeing :: MonadTypeChecker m => Bindage -> Name -> SrcLoc
-       -> StateT ImplicitlyBound m ()
+       -> StateT PatternNames m ()
 seeing b v vloc = do
-  ImplicitlyBound seen <- get
+  PatternNames seen <- get
   case (b, M.lookup (Term, v) seen) of
-    (BoundAsDim, Just (_, BoundAsDim, _)) ->
-      return ()
-    (BoundAsDim, Just (_, UsedFree, loc)) ->
-      throwError $ TypeError vloc $ "Name " ++ pretty v ++
-        " previously used free at " ++ locStr loc
     (UsedFree, sb) -> do
       v' <- lift $ checkName Term v vloc
-      when (isNothing sb) $ modify $ \(ImplicitlyBound m) ->
-        ImplicitlyBound $ M.insert (Term, v) (v', b, vloc) m
-    (BoundAsVar, Just (_, BoundAsDim, loc)) ->
-      throwError $ DupPatternError v vloc loc
+      when (isNothing sb) $ modify $ \(PatternNames m) ->
+        PatternNames $ M.insert (Term, v) (v', b, vloc) m
     (BoundAsVar, Just (_, UsedFree, loc)) ->
       throwError $ TypeError vloc $ "Name " ++ pretty v ++
       "bound here, but also referenced at " ++ locStr loc
@@ -392,8 +370,8 @@ seeing b v vloc = do
       throwError $ DupPatternError v vloc loc
     (_, Nothing) -> do
       name' <- lift $ newID v
-      modify $ \(ImplicitlyBound m) ->
-        ImplicitlyBound $ M.insert (Term, v) (name', b, vloc) m
+      modify $ \(PatternNames m) ->
+        PatternNames $ M.insert (Term, v) (name', b, vloc) m
 
 checkParams :: [ParamBase NoInfo Name]
             -> ([ParamBase Info VName] -> TypeM a)
@@ -421,10 +399,10 @@ checkParams orig_ps m = do
               scope = mempty { envVtable = M.fromList $ mapMaybe inspect ps' }
           in localEnv scope $ m $ reverse ps'
         descend ps' (UnnamedParam t:ps) = do
-          t' <- checkTypeDecl (srclocOf t) t
+          t' <- checkTypeDecl t
           descend (UnnamedParam t':ps') ps
         descend ps' (NamedParam v t loc:ps) = do
-          t' <- checkTypeDecl (srclocOf t) t
+          t' <- checkTypeDecl t
           v' <- checkName Term v loc
           descend (NamedParam v' t' loc:ps') ps
 

@@ -551,11 +551,11 @@ checkExp (Range start maybe_step end loc) = do
   return $ Range start' maybe_step' end' loc
 
 checkExp (Empty decl loc) = do
-  decl' <- checkTypeDecl loc decl
+  decl' <- checkTypeDecl decl
   return $ Empty decl' loc
 
 checkExp (Ascript e decl loc) = do
-  decl' <- checkTypeDecl loc decl
+  decl' <- checkTypeDecl decl
   e' <- require [removeShapeAnnotations $ unInfo $ expandedType decl']
         =<< checkExp e
   return $ Ascript e' decl' loc
@@ -1142,15 +1142,7 @@ checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = do
     bad $ TypeError loc "The || operator may not be redefined."
 
   bindingPatternGroup tparams (zip params $ repeat NoneInferred) $ \tparams' params' -> do
-    maybe_retdecl' <-
-      case maybe_retdecl of
-        Just rettype -> do
-          (rettype', rettype_st, ret_implicit) <- checkTypeExp rettype
-          if M.null $ implicitNameMap ret_implicit
-            then return $ Just (rettype', rettype_st)
-            else throwError $ TypeError loc
-                 "Fresh sizes may not be bound in return type."
-        Nothing -> return Nothing
+    maybe_retdecl' <- traverse checkTypeExp maybe_retdecl
 
     body' <- maybePermitRecursion fname' tparams' params' (snd <$> maybe_retdecl') $
              checkFunBody fname body (snd <$> maybe_retdecl') loc
@@ -1218,7 +1210,7 @@ checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
       let params_with_ts = zip params $ map (Inferred . fromStruct . argType) args
       (maybe_ret', tparams', params', body') <-
         noUnique $ bindingPatternGroup tparams params_with_ts $ \tparams' params' -> do
-        maybe_ret' <- maybe (pure Nothing) (fmap Just . checkTypeDecl loc) maybe_ret
+        maybe_ret' <- traverse checkTypeDecl maybe_ret
         body' <- checkFunBody (nameFromString "<anonymous>") body
                  (unInfo . expandedType <$> maybe_ret') loc
         return (maybe_ret', tparams', params', body')
