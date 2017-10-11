@@ -39,32 +39,16 @@ bindingParams tparams params m = do
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
   (shape_ctx', shapesubst) <- makeShapeIdentsFromContext shape_ctx
 
-  (params_ts', unnamed_shape_params, ascriptsubsts) <-
-    fmap unzip3 $ forM (zip params_ts params_ascripts) $ \(param_ts, param_ascripts) -> do
-      (param_ts', param_unnamed_dims) <- instantiateShapesWithDecls shape_ctx' param_ts
-
-      -- Context does not matter for the ascription - we just want the
-      -- names so we can map them to the actually bound names from
-      -- param_ts'.
-      (ascripted_ts, ascript_ctx, _) <- internaliseParamTypes bound param_ascripts
-      let ascript_ctx_rev = M.fromList $ map (uncurry $ flip (,)) $ M.toList ascript_ctx
-      return (param_ts', param_unnamed_dims,
-              M.map pure $ mconcat $ zipWith (forwardDims ascript_ctx_rev) param_ts' $
-              transpose ascripted_ts)
+  (params_ts', unnamed_shape_params) <-
+    fmap unzip $ forM (zip params_ts params_ascripts) $ \(param_ts, _) ->
+      instantiateShapesWithDecls shape_ctx' param_ts
 
   let named_shape_params = map nonuniqueParamFromIdent (M.elems shape_ctx')
       shape_params = named_shape_params ++ concat unnamed_shape_params
   bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
     bindingIdentTypes (map I.paramIdent $ shape_params++concat valueparams) $
-    substitutingVars (mconcat ascriptsubsts `M.union` shapesubst) $
+    substitutingVars shapesubst $
     m cm shape_params $ chunks num_param_ts (concat valueparams)
-
-    where forwardDims ctx ref =
-            mconcat . map (mconcat . zipWith (forwardDim ctx) (I.arrayDims ref) .
-                            I.extShapeDims . I.arrayShape)
-          forwardDim ctx d (I.Ext i) | Just v <- M.lookup i ctx,
-                                       I.Var v /= d = M.singleton v d
-          forwardDim _ _ _ = M.empty
 
 bindingLambdaParams :: [E.TypeParam] ->[E.Pattern] -> [I.Type]
                     -> (ConstParams -> [I.LParam] -> InternaliseM a)
