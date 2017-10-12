@@ -200,7 +200,7 @@ prettyType t = case t of
     prettyTypeName et <> foldMap ((<> " ") . prettyTypeArg) targs
   Array arr -> prettyArray arr
 
-prettyArray :: ArrayTypeBase (ShapeDecl VName) () -> Html
+prettyArray :: ArrayTypeBase (DimDecl VName) () -> Html
 prettyArray arr = case arr of
   PrimArray et (ShapeDecl ds) u _ ->
     prettyU u <> foldMap (brackets . prettyD) ds <> primTypeHtml et
@@ -216,7 +216,7 @@ prettyArray arr = case arr of
           ppField (name, tp) = toHtml (nameToString name) <>
                                ":" <> prettyElem tp
 
-prettyElem :: RecordArrayElemTypeBase (ShapeDecl VName) () -> Html
+prettyElem :: RecordArrayElemTypeBase (DimDecl VName) () -> Html
 prettyElem e = case e of
   PrimArrayElem bt _ u -> prettyU u <> primTypeHtml bt
   PolyArrayElem bt targs _ u ->
@@ -231,11 +231,11 @@ prettyElem e = case e of
     where ppField (name, t) = toHtml (nameToString name) <>
             ":" <> prettyElem t
 
-prettyShapeDecl :: ShapeDecl VName -> Html
+prettyShapeDecl :: ShapeDecl (DimDecl VName) -> Html
 prettyShapeDecl (ShapeDecl ds) =
   foldMap (brackets . prettyDimDecl) ds
 
-prettyTypeArg :: TypeArg (ShapeDecl VName) () -> Html
+prettyTypeArg :: TypeArg (DimDecl VName) () -> Html
 prettyTypeArg (TypeArgDim d _) = brackets $ prettyDimDecl d
 prettyTypeArg (TypeArgType t _) = prettyType t
 

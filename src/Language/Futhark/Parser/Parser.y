@@ -706,7 +706,7 @@ Pattern : InnerPattern ':' TypeExpDecl { PatternAscription $1 $3 }
         | InnerPattern                 { $1 }
 
 InnerPattern :: { PatternBase NoInfo Name }
-InnerPattern : VarId                            { Id $1 }
+InnerPattern : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
              | '_'                              { Wildcard NoInfo $1 }
              | '(' ')'                          { TuplePattern [] $1 }
              | '(' Pattern ')'                  { PatternParens $2 $1 }
@@ -714,11 +714,12 @@ InnerPattern : VarId                            { Id $1 }
              | '{' sepBy(FieldPattern, ',') '}' { RecordPattern $2 $1 }
 
 FieldPattern :: { (Name, PatternBase NoInfo Name) }
-              : FieldId '=' Pattern     { (fst $1, $3) }
-              | FieldId ':' TypeExpDecl { (fst $1,
-                                           PatternAscription (Id $ Ident (fst $1) NoInfo (snd $1))
-                                                             $3) }
-              | FieldId                 { (fst $1, Id $ Ident (fst $1) NoInfo (snd $1)) }
+              : FieldId '=' Pattern
+                { (fst $1, $3) }
+              | FieldId ':' TypeExpDecl
+                { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3) }
+              | FieldId
+                { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
@@ -838,8 +839,8 @@ ArrayValue :  '[' Value ']'
            | '[' ']'
              {% emptyArrayError $1 }
 
-RowType : '[' ']' RowType   { arrayOf $3 (Rank 1) Nonunique }
-        | '[' ']' PrimType  { arrayOf (Prim $3) (Rank 1) Nonunique }
+RowType : '[' ']' RowType   { arrayOf $3 (rank 1) Nonunique }
+        | '[' ']' PrimType  { arrayOf (Prim $3) (rank 1) Nonunique }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }
@@ -948,7 +949,7 @@ arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
-patternExp (Id ident) = return $ Var (QualName [] (identName ident)) NoInfo $ srclocOf ident
+patternExp (Id v _ loc) = return $ Var (QualName [] v) NoInfo loc
 patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
 patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
 patternExp (PatternAscription pat _) = patternExp pat

@@ -14,7 +14,6 @@ import Control.Monad.Reader hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
 
 import qualified Data.Map.Strict as M
-import Data.List
 import Data.Loc
 import Data.Traversable (mapM)
 
@@ -32,63 +31,41 @@ bindingParams :: [E.TypeParam] -> [E.Pattern]
               -> InternaliseM a
 bindingParams tparams params m = do
   flattened_params <- mapM flattenPattern params
-  let (params_idents, params_ascripts, params_types) = unzip3 $ concat flattened_params
+  let (params_idents, params_types) = unzip $ concat flattened_params
       bound = boundInTypes tparams
   (params_ts, shape_ctx, cm) <- internaliseParamTypes bound params_types
   let num_param_idents = map length flattened_params
       num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
   (shape_ctx', shapesubst) <- makeShapeIdentsFromContext shape_ctx
 
-  (params_ts', unnamed_shape_params, ascriptsubsts) <-
-    fmap unzip3 $ forM (zip params_ts params_ascripts) $ \(param_ts, param_ascripts) -> do
+  (params_ts', unnamed_shape_params) <-
+    fmap unzip $ forM params_ts $ \param_ts -> do
       (param_ts', param_unnamed_dims) <- instantiateShapesWithDecls shape_ctx' param_ts
 
-      -- Context does not matter for the ascription - we just want the
-      -- names so we can map them to the actually bound names from
-      -- param_ts'.
-      (ascripted_ts, ascript_ctx, _) <- internaliseParamTypes bound param_ascripts
-      let ascript_ctx_rev = M.fromList $ map (uncurry $ flip (,)) $ M.toList ascript_ctx
-      return (param_ts', param_unnamed_dims,
-              M.map pure $ mconcat $ zipWith (forwardDims ascript_ctx_rev) param_ts' $
-              transpose ascripted_ts)
+      return (param_ts',
+              param_unnamed_dims)
 
   let named_shape_params = map nonuniqueParamFromIdent (M.elems shape_ctx')
       shape_params = named_shape_params ++ concat unnamed_shape_params
   bindingFlatPattern params_idents (concat params_ts') $ \valueparams ->
     bindingIdentTypes (map I.paramIdent $ shape_params++concat valueparams) $
-    substitutingVars (mconcat ascriptsubsts `M.union` shapesubst) $
-    m cm shape_params $ chunks num_param_ts (concat valueparams)
-
-    where forwardDims ctx ref =
-            mconcat . map (mconcat . zipWith (forwardDim ctx) (I.arrayDims ref) .
-                            I.extShapeDims . I.arrayShape)
-          forwardDim ctx d (I.Ext i) | Just v <- M.lookup i ctx,
-                                       I.Var v /= d = M.singleton v d
-          forwardDim _ _ _ = M.empty
+    substitutingVars shapesubst $ m cm shape_params $
+    chunks num_param_ts (concat valueparams)
 
 bindingLambdaParams :: [E.TypeParam] ->[E.Pattern] -> [I.Type]
                     -> (ConstParams -> [I.LParam] -> InternaliseM a)
                     -> InternaliseM a
 bindingLambdaParams tparams params ts m = do
-  (params_idents, params_ascripts, params_types) <-
-    unzip3 . concat <$> mapM flattenPattern params
+  (params_idents, params_types) <-
+    unzip . concat <$> mapM flattenPattern params
   let bound = boundInTypes tparams
-  (params_ts, _, cm) <- internaliseParamTypes bound params_types
+  (params_ts, shape_ctx, cm) <- internaliseParamTypes bound params_types
 
-  let ts_for_ps = typesForParams params_ts ts
-
-  ascript_substs <- fmap mconcat . forM (zip params_ascripts ts_for_ps) $ \(ascript, p_t) -> do
-    (ascript_ts, shape_ctx, _) <- internaliseParamTypes bound ascript
-    return $ lambdaShapeSubstitutions shape_ctx (concat ascript_ts)
-      (concat (replicate (length ascript) p_t))
+  let ascript_substs = lambdaShapeSubstitutions shape_ctx (concat params_ts) ts
 
   bindingFlatPattern params_idents ts $ \params' ->
     local (\env -> env { envSubsts = ascript_substs `M.union` envSubsts env }) $
     bindingIdentTypes (map I.paramIdent $ concat params') $ m cm $ concat params'
-
-  where typesForParams (p:ps) ts' = let (p_ts, ts'') = splitAt (length p) ts'
-                                    in p_ts : typesForParams ps ts''
-        typesForParams []     _  = []
 
 processFlatPattern :: [E.Ident] -> [t]
                    -> InternaliseM ([[I.Param t]], VarSubstitutions)
@@ -140,34 +117,24 @@ bindingFlatPattern idents ts m = do
   local (\env -> env { envSubsts = substs `M.union` envSubsts env}) $
     m ps
 
--- | Flatten a pattern.  Returns a list of identifiers.  Each
--- identifier is also associated with a (possibly empty) list of types
--- that indicate type ascriptions.  These are important for retaining
--- shape declarations.  The structural type of each identifier is also
--- returned separately.
-flattenPattern :: MonadFreshNames m => E.Pattern -> m [(E.Ident, [E.StructType], E.StructType)]
-flattenPattern = flattenPattern' []
-  where flattenPattern' ts (E.PatternParens p _) =
-          flattenPattern' ts p
-        flattenPattern' ts (E.Wildcard t loc) = do
+-- | Flatten a pattern.  Returns a list of identifiers.  The
+-- structural type of each identifier is returned separately.
+flattenPattern :: MonadFreshNames m => E.Pattern -> m [(E.Ident, E.StructType)]
+flattenPattern = flattenPattern'
+  where flattenPattern' (E.PatternParens p _) =
+          flattenPattern' p
+        flattenPattern' (E.Wildcard t loc) = do
           name <- newVName "nameless"
-          return [(E.Ident name t loc, ts,
-                   case ts of [] -> E.vacuousShapeAnnotations $ toStruct $ unInfo t
-                              st:_ -> st)]
-        flattenPattern' ts (E.Id v) =
-          return [(v, ts,
-                   case ts of [] -> E.vacuousShapeAnnotations $ toStruct $ unInfo $ identType v
-                              st:_ -> st)]
-        flattenPattern' ts (E.TuplePattern pats _) =
-          concat <$> zipWithM flattenPattern' (tupleComponents ts ++ repeat []) pats
-        flattenPattern' ts (E.RecordPattern fs loc) =
-          flattenPattern' ts $ E.TuplePattern (map snd $ sortFields $ M.fromList fs) loc
-        flattenPattern' ts (E.PatternAscription p td) =
-          flattenPattern' (unInfo (expandedType td):ts) p
-
-        tupleComponents = transpose . map tupleComponents'
-        tupleComponents' (E.Record ts) = map snd $ sortFields ts
-        tupleComponents' t             = [t]
+          flattenPattern' $ E.Id name t loc
+        flattenPattern' (E.Id v (Info t) loc) =
+          return [(E.Ident v (Info (E.removeShapeAnnotations t)) loc,
+                   t `E.setAliases` ())]
+        flattenPattern' (E.TuplePattern pats _) =
+          concat <$> mapM flattenPattern' pats
+        flattenPattern' (E.RecordPattern fs loc) =
+          flattenPattern' $ E.TuplePattern (map snd $ sortFields $ M.fromList fs) loc
+        flattenPattern' (E.PatternAscription p _) =
+          flattenPattern' p
 
 type MatchPattern = SrcLoc -> [I.SubExp] -> InternaliseM [I.SubExp]
 
@@ -175,7 +142,7 @@ stmPattern :: [E.TypeParam] -> E.Pattern -> [I.ExtType]
                -> (ConstParams -> [VName] -> MatchPattern -> InternaliseM a)
                -> InternaliseM a
 stmPattern tparams pat ts m = do
-  (pat', _, pat_types) <- unzip3 <$> flattenPattern pat
+  (pat', pat_types) <- unzip <$> flattenPattern pat
   (ts',_) <- instantiateShapes' ts
   (pat_types', ctx, cm) <- internaliseParamTypes (boundInTypes tparams) pat_types
   let ctx_rev = M.fromList $ map (uncurry $ flip (,)) $ M.toList ctx

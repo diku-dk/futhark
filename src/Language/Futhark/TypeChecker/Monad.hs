@@ -70,17 +70,17 @@ import qualified Futhark.FreshNames
 -- instance for this type produces a human-readable description.
 data TypeError =
     TypeError SrcLoc String
-  | UnifyError SrcLoc (TypeBase Rank ()) SrcLoc (TypeBase Rank ())
+  | UnifyError SrcLoc (TypeBase () ()) SrcLoc (TypeBase () ())
   | UnexpectedType SrcLoc
-    (TypeBase Rank ()) [TypeBase Rank ()]
-  | ReturnTypeError SrcLoc Name (TypeBase Rank ()) (TypeBase Rank ())
+    (TypeBase () ()) [TypeBase () ()]
+  | ReturnTypeError SrcLoc Name (TypeBase () ()) (TypeBase () ())
   | DupDefinitionError Namespace Name SrcLoc SrcLoc
   | DupPatternError Name SrcLoc SrcLoc
   | InvalidPatternError (PatternBase NoInfo Name)
-    (TypeBase (ShapeDecl Name) ()) (Maybe String) SrcLoc
+    (TypeBase (DimDecl Name) ()) (Maybe String) SrcLoc
   | UnknownVariableError Namespace (QualName Name) SrcLoc
   | ParameterMismatch (Maybe (QualName Name)) SrcLoc
-    (Either Int [TypeBase Rank ()]) [TypeBase Rank ()]
+    (Either Int [TypeBase () ()]) [TypeBase () ()]
   | UseAfterConsume Name SrcLoc SrcLoc
   | IndexingError Int Int SrcLoc
   | CurriedConsumption (QualName Name) SrcLoc
@@ -89,13 +89,13 @@ data TypeError =
   | UniqueReturnAliased Name SrcLoc
   | PermutationError SrcLoc [Int] Int
   | DimensionNotInteger SrcLoc (QualName Name)
-  | InvalidUniqueness SrcLoc (TypeBase Rank ())
+  | InvalidUniqueness SrcLoc (TypeBase () ())
   | UndefinedType SrcLoc (QualName Name)
   | InvalidField SrcLoc Type String
   | UnderscoreUse SrcLoc (QualName Name)
   | ValueIsNotFunction SrcLoc (QualName Name) Type
   | FunctionIsNotValue SrcLoc (QualName Name)
-  | UniqueConstType SrcLoc Name (TypeBase Rank ())
+  | UniqueConstType SrcLoc Name (TypeBase () ())
   | UndeclaredFunctionReturnType SrcLoc (QualName Name)
   | UnappliedFunctor SrcLoc
 
@@ -161,9 +161,9 @@ instance Show TypeError where
     "A unique tuple element of return value of function " ++
     nameToString fname ++ " at " ++ locStr loc ++
     " is aliased to some other tuple component."
-  show (PermutationError loc perm rank) =
+  show (PermutationError loc perm r) =
     "The permutation (" ++ intercalate ", " (map show perm) ++
-    ") is not valid for array argument of rank " ++ show rank ++ " at " ++
+    ") is not valid for array argument of rank " ++ show r ++ " at " ++
     locStr loc ++ "."
   show (DimensionNotInteger loc name) =
     "Dimension declaration " ++ pretty name ++ " at " ++ locStr loc ++
@@ -319,7 +319,7 @@ checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 
 -- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
-require :: MonadTypeChecker m => [TypeBase Rank ()] -> Exp -> m Exp
+require :: MonadTypeChecker m => [TypeBase () ()] -> Exp -> m Exp
 require ts e
   | any (toStruct (typeOf e) `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e)
@@ -410,22 +410,22 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
 badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
 badOnLeft = either bad return
 
-anySignedType :: [TypeBase Rank ()]
+anySignedType :: [TypeBase () ()]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]
 
-anyUnsignedType :: [TypeBase Rank ()]
+anyUnsignedType :: [TypeBase () ()]
 anyUnsignedType = map (Prim . Unsigned) [minBound .. maxBound]
 
-anyIntType :: [TypeBase Rank ()]
+anyIntType :: [TypeBase () ()]
 anyIntType = anySignedType ++ anyUnsignedType
 
-anyFloatType :: [TypeBase Rank ()]
+anyFloatType :: [TypeBase () ()]
 anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 
-anyNumberType :: [TypeBase Rank ()]
+anyNumberType :: [TypeBase () ()]
 anyNumberType = anyIntType ++ anyFloatType
 
-anyPrimType :: [TypeBase Rank ()]
+anyPrimType :: [TypeBase () ()]
 anyPrimType = Prim Bool : anyIntType ++ anyFloatType
 
 --- Name handling

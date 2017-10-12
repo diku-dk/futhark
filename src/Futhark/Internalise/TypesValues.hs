@@ -59,7 +59,7 @@ boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
         isTypeParam E.TypeParamType{} = Nothing
 
 internaliseParamTypes :: BoundInTypes
-                      -> [E.TypeBase (E.ShapeDecl VName) ()]
+                      -> [E.TypeBase (E.DimDecl VName) ()]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        M.Map VName Int,
                                        ConstParams)
@@ -67,7 +67,7 @@ internaliseParamTypes (BoundInTypes bound) ts = do
   (ts', subst, cm) <- runInternaliseTypeM bound $ mapM internaliseTypeM ts
   return (ts', subst, cm)
 
-internaliseReturnType :: E.TypeBase (E.ShapeDecl VName) ()
+internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
                       -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
                                        M.Map VName Int,
                                        ConstParams)
@@ -77,7 +77,7 @@ internaliseReturnType t = do
 
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
-internaliseEntryReturnType :: E.TypeBase (E.ShapeDecl VName) ()
+internaliseEntryReturnType :: E.TypeBase (E.DimDecl VName) ()
                            -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                             M.Map VName Int,
                                             ConstParams)
@@ -88,8 +88,8 @@ internaliseEntryReturnType t = do
     runInternaliseTypeM mempty $ mapM internaliseTypeM ts
   return (ts', subst', cm')
 
-internaliseTypes :: E.ArrayShape shape =>
-                    [E.TypeBase shape ()]
+internaliseTypes :: E.ArrayDim dim =>
+                    [E.TypeBase dim ()]
                  -> InternaliseM [[I.TypeBase I.ExtShape Uniqueness]]
 internaliseTypes ts = do
   (st', _, _) <-
@@ -97,7 +97,7 @@ internaliseTypes ts = do
     mapM (internaliseTypeM . E.vacuousShapeAnnotations) ts
   return st'
 
-internaliseType :: E.TypeBase E.Rank ()
+internaliseType :: E.TypeBase () ()
                 -> InternaliseM [I.TypeBase I.ExtShape Uniqueness]
 internaliseType t = do
   (t', _, _) <-
@@ -189,11 +189,11 @@ internaliseTypeM orig_t =
 
         internaliseShape = mapM internaliseDim . E.shapeDims
 
-internaliseSimpleType :: E.TypeBase E.Rank ()
+internaliseSimpleType :: E.TypeBase () ()
                       -> Maybe [I.TypeBase ExtShape NoUniqueness]
 internaliseSimpleType = fmap (map I.fromDecl) . internaliseTypeWithUniqueness
 
-internaliseTypeWithUniqueness :: E.TypeBase E.Rank ()
+internaliseTypeWithUniqueness :: E.TypeBase () ()
                               -> Maybe [I.TypeBase ExtShape Uniqueness]
 internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
   where internaliseType' E.TypeVar{} =
@@ -267,8 +267,8 @@ applyType tname targs = do
 
 -- | Map type variables from the first argument to corresponding types
 -- in the second argument.
-mapTypeVariables :: E.TypeBase E.Rank () -> E.TypeBase E.Rank ()
-                 -> InternaliseM (M.Map VName (E.TypeBase E.Rank ()))
+mapTypeVariables :: E.TypeBase () () -> E.TypeBase () ()
+                 -> InternaliseM (M.Map VName (E.TypeBase () ()))
 mapTypeVariables _ y_t@E.TypeVar{} =
   fail $ "mapTypeVariables: Type variable \"" ++ pretty y_t ++ "\" in second argument."
 mapTypeVariables _ y_t@(E.Array E.PolyArray{}) =
@@ -294,7 +294,7 @@ mapTypeVariables (E.Record fs_x) (E.Record fs_y) =
 mapTypeVariables _ _ =
   return mempty
 
-fullyApplyType :: E.TypeBase E.Rank () -> InternaliseM (E.TypeBase E.Rank ())
+fullyApplyType :: E.TypeBase () () -> InternaliseM (E.TypeBase () ())
 fullyApplyType t = do
   (t', _, _) <- runInternaliseTypeM mempty $ fullyApplyTypeM $ E.vacuousShapeAnnotations t
   return $ E.removeShapeAnnotations t'
@@ -327,8 +327,8 @@ fullyApplyTypeM (E.Array at) = inArray at
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
-internalisedTypeSize :: E.ArrayShape shape =>
-                        E.TypeBase shape () -> InternaliseM Int
+internalisedTypeSize :: E.ArrayDim dim =>
+                        E.TypeBase dim () -> InternaliseM Int
 internalisedTypeSize = fmap length . internaliseType . E.removeShapeAnnotations
 
 -- | Transform an external value to a number of internal values.

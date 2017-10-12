@@ -704,7 +704,10 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
           letInPlace "letwith_dst" sname (fullSlice sname_t idxs') $ BasicOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
-  stmPattern [] (E.Id name) dstt $ \cm pat_names match -> do
+  let pat = E.Id (E.identName name)
+            (E.vacuousShapeAnnotations <$> E.identType name)
+            (srclocOf name)
+  stmPattern [] pat dstt $ \cm pat_names match -> do
     mapM_ (uncurry internaliseDimConstant) cm
     dsts' <- match loc $ map I.Var dsts
     forM_ (zip pat_names dsts') $ \(v,dst) ->
@@ -719,7 +722,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
       dest_ident = E.Ident dest_name (E.Info src_t) loc
 
   internaliseExp desc $
-    E.LetPat [] (E.Id src_ident) src
+    E.LetPat [] (E.Id src_name (E.Info $ E.vacuousShapeAnnotations src_t) loc) src
     (E.LetWith dest_ident src_ident slice ve
       (E.Var (E.qualName dest_name) (E.Info src_t) loc)
       loc)
@@ -766,9 +769,9 @@ internaliseExp _ (E.Rearrange perm e _) =
 internaliseExp _ (E.Rotate d offset e _) = do
   offset' <- internaliseExp1 "rotation_offset" offset
   internaliseOperation "rotate" e $ \v -> do
-    rank <- I.arrayRank <$> lookupType v
+    r <- I.arrayRank <$> lookupType v
     let zero = constant (0::Int32)
-        offsets = replicate d zero ++ [offset'] ++ replicate (rank-d-1) zero
+        offsets = replicate d zero ++ [offset'] ++ replicate (r-d-1) zero
     return $ I.Rotate offsets v
 
 internaliseExp _ (E.Reshape shape e loc) = do
@@ -1223,16 +1226,14 @@ internaliseLambda (E.AnonymFun tparams params body _ (Info rettype) _) rowtypes 
     return (params', body', map I.fromDecl rettype')
 
 internaliseLambda (E.CurryFun qfname currargs (Info (ets, rettype)) loc) rowtypes = do
-  params <- forM (drop (length currargs) ets) $ \et -> do
+  (params, param_args) <- fmap unzip $ forM (drop (length currargs) ets) $ \et -> do
     name <- newVName "not_curried"
-    return $ E.Ident name (Info et) loc
-  let params' = map E.Id params
-      args = currargs ++ map paramToArg params
+    return (E.Id name (Info $ E.vacuousShapeAnnotations et) loc,
+            E.Var (E.qualName name) (Info et) loc)
+  let args = currargs ++ param_args
       body = E.Apply qfname (map (,E.Observe) args) (Info rettype) loc
       rettype' = E.vacuousShapeAnnotations rettype `E.setAliases` ()
-  internaliseLambda (E.AnonymFun [] params' body Nothing (Info rettype') loc) rowtypes
-  where paramToArg (E.Ident v (Info t) _) =
-          E.Var (E.qualName v) (Info t) loc
+  internaliseLambda (E.AnonymFun [] params body Nothing (Info rettype') loc) rowtypes
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
@@ -1252,7 +1253,7 @@ internaliseLambda (E.CurryBinOpRight binop e (Info _, Info paramtype) (Info rett
 internaliseLambda (E.CurryProject k (Info rowt,Info t) loc) rowts = do
   name <- newVName "not_curried"
   let t' = E.vacuousShapeAnnotations t `E.setAliases` ()
-      lam = AnonymFun [] [E.Id $ E.Ident name (Info rowt) loc]
+      lam = AnonymFun [] [E.Id name (Info $ E.vacuousShapeAnnotations rowt) loc]
             (E.Project k (E.Var (E.qualName name) (Info rowt) loc) (Info t) loc)
             Nothing (Info t') loc
   internaliseLambda lam rowts
@@ -1264,9 +1265,8 @@ binOpFunToLambda :: E.QualName VName
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
-  let ident_x = E.Ident x_name (Info xtype) noLoc
-      ident_y = E.Ident y_name (Info ytype) noLoc
-  return ([E.Id ident_x, E.Id ident_y],
+  return ([E.Id x_name (Info $ E.vacuousShapeAnnotations xtype) noLoc,
+           E.Id y_name (Info $ E.vacuousShapeAnnotations ytype) noLoc],
           E.BinOp op
            (E.Var (qualName x_name) (Info xtype) noLoc, E.Observe)
            (E.Var (qualName y_name) (Info ytype) noLoc, E.Observe)
@@ -1280,9 +1280,8 @@ binOpCurriedToLambda :: E.QualName VName
                      -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
-  let ident = E.Ident paramname (Info paramtype) noLoc
-      (x', y') = swap (E.Var (qualName paramname) (Info paramtype) noLoc, e)
-  return ([E.Id ident],
+  let (x', y') = swap (E.Var (qualName paramname) (Info paramtype) noLoc, e)
+  return ([E.Id paramname (Info $ E.vacuousShapeAnnotations paramtype) noLoc],
           E.BinOp op (x',E.Observe) (y',E.Observe) (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
