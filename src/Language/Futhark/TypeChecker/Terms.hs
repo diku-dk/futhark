@@ -379,33 +379,36 @@ bindingIdent (Ident v NoInfo vloc) t m =
 bindingPatternGroup :: [UncheckedTypeParam]
                     -> [(UncheckedPattern, InferredType)]
                     -> ([TypeParam] -> [Pattern] -> TermTypeM a) -> TermTypeM a
-bindingPatternGroup tps ps m =
-  checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
-  checkPatternGroup tps' ps $ \ps' ->
-  binding (S.toList $ S.unions $ map patIdentSet ps') $ do
-    -- Perform an observation of every type parameter and every
-    -- declared dimension.  This prevents unused-name warnings for
-    -- otherwise unused dimensions.
-    mapM_ observe $ concatMap patternDims ps' ++ mapMaybe typeParamIdent tps'
+bindingPatternGroup tps orig_ps m = do
+  checkForDuplicateNames $ map fst orig_ps
+  checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
+    let descend ps' ((p,t):ps) =
+          checkPattern p t $ \p' ->
+            binding (S.toList $ patIdentSet p') $ descend (p':ps') ps
+        descend ps' [] = do
+          -- Perform an observation of every type parameter.  This
+          -- prevents unused-name warnings for otherwise unused
+          -- dimensions.
+          mapM_ observe $ mapMaybe typeParamIdent tps'
+          checkTypeParamsUsed tps' ps'
 
-    checkTypeParamsUsed tps' ps'
+          m tps' $ reverse ps'
 
-    m tps' ps'
+    descend [] orig_ps
 
 bindingPattern :: [UncheckedTypeParam]
                -> PatternBase NoInfo Name -> InferredType
                -> ([TypeParam] -> Pattern -> TermTypeM a) -> TermTypeM a
-bindingPattern tps p t m =
+bindingPattern tps p t m = do
+  checkForDuplicateNames [p]
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $
-  checkPattern tps' p t $ \p' ->
-  binding (S.toList $ patIdentSet p') $ do
-    -- Perform an observation of every declared dimension.  This
-    -- prevents unused-name warnings for otherwise unused dimensions.
-    mapM_ observe $ patternDims p'
+    checkPattern p t $ \p' -> binding (S.toList $ patIdentSet p') $ do
+      -- Perform an observation of every declared dimension.  This
+      -- prevents unused-name warnings for otherwise unused dimensions.
+      mapM_ observe $ patternDims p'
+      checkTypeParamsUsed tps' [p']
 
-    checkTypeParamsUsed tps' [p']
-
-    m tps' p'
+      m tps' p'
 
 checkTypeParamsUsed :: [TypeParam] -> [Pattern] -> TermTypeM ()
 checkTypeParamsUsed tps ps = do

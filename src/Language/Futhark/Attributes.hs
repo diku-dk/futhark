@@ -691,9 +691,9 @@ concreteType (Array at) = concreteArrayType at
         concreteRecordArrayElem PolyArrayElem{} = False
         concreteRecordArrayElem (RecordArrayElem fs) = all concreteRecordArrayElem fs
 
--- | The set of identifiers bound in a pattern, including dimension declarations.
-patIdentSet :: PatternBase Info VName -> S.Set (IdentBase Info VName)
-patIdentSet (Id v (Info t) loc)     = S.singleton $ Ident v (Info $ removeShapeAnnotations t) loc
+-- | The set of identifiers bound in a pattern.
+patIdentSet :: (Functor f, Ord vn) => PatternBase f vn -> S.Set (IdentBase f vn)
+patIdentSet (Id v t loc)            = S.singleton $ Ident v (removeShapeAnnotations <$> t) loc
 patIdentSet (PatternParens p _)     = patIdentSet p
 patIdentSet (TuplePattern pats _)   = mconcat $ map patIdentSet pats
 patIdentSet (RecordPattern fs _)    = mconcat $ map (patIdentSet . snd) fs
@@ -719,8 +719,7 @@ patternStructType (RecordPattern fs _) = Record $ patternStructType <$> M.fromLi
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
 -- | Remove all shape annotations from a pattern, leaving them unnamed
--- instead.  Note that this will change the names bound by the
--- pattern.
+-- instead.
 patternNoShapeAnnotations :: PatternBase Info VName -> PatternBase Info VName
 patternNoShapeAnnotations (PatternAscription p (TypeDecl te (Info t))) =
   PatternAscription (patternNoShapeAnnotations p) $
