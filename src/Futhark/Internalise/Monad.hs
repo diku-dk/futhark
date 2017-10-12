@@ -88,7 +88,7 @@ type ConstParams = [(Name,VName)]
 type Closure = [VName]
 
 -- | The type arguments to a polymorhic function.
-type SpecArgs = ([E.TypeBase E.Rank ()], SpecParams)
+type SpecArgs = ([E.TypeBase () ()], SpecParams)
 
 -- | The type internalise arguments to a polymorphic function.
 type SpecParams = [TypeBase Rank NoUniqueness]

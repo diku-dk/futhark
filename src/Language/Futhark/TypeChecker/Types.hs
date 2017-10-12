@@ -29,6 +29,7 @@ import Data.Loc
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
@@ -39,15 +40,17 @@ import Language.Futhark.TypeChecker.Monad
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
-unifyTypes :: (Monoid als, ArrayShape shape) =>
-              TypeBase shape als
-           -> TypeBase shape als
-           -> Maybe (TypeBase shape als)
+unifyTypes :: (Monoid als, ArrayDim dim) =>
+              TypeBase dim als
+           -> TypeBase dim als
+           -> Maybe (TypeBase dim als)
 unifyTypes (Prim t1) (Prim t2)
   | t1 == t2  = Just $ Prim t1
   | otherwise = Nothing
 unifyTypes (TypeVar t1 targs1) (TypeVar t2 targs2)
-  | t1 == t2, targs1 == targs2 = Just $ TypeVar t1 targs1
+  | t1 == t2 = do
+      targs3 <- zipWithM unifyTypeArgs targs1 targs2
+      Just $ TypeVar t1 targs3
   | otherwise = Nothing
 unifyTypes (Array at1) (Array at2) =
   Array <$> unifyArrayTypes at1 at2
@@ -58,10 +61,19 @@ unifyTypes (Record ts1) (Record ts2)
       (M.intersectionWith (,) ts1 ts2)
 unifyTypes _ _ = Nothing
 
-unifyArrayTypes :: (Monoid als, ArrayShape shape) =>
-                   ArrayTypeBase shape als
-                -> ArrayTypeBase shape als
-                -> Maybe (ArrayTypeBase shape als)
+unifyTypeArgs :: (Monoid als, ArrayDim dim) =>
+                 TypeArg dim als -> TypeArg dim als -> Maybe (TypeArg dim als)
+unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim d2 _) =
+  TypeArgDim <$> unifyDims d1 d2 <*> pure loc
+unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
+  TypeArgType <$> unifyTypes t1 t2 <*> pure loc
+unifyTypeArgs _ _ =
+  Nothing
+
+unifyArrayTypes :: (Monoid als, ArrayDim dim) =>
+                   ArrayTypeBase dim als
+                -> ArrayTypeBase dim als
+                -> Maybe (ArrayTypeBase dim als)
 unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
   | Just shape <- unifyShapes shape1 shape2, bt1 == bt2 =
     Just $ PrimArray bt1 shape (u1 <> u2) (als1 <> als2)
@@ -78,10 +90,10 @@ unifyArrayTypes (RecordArray et1 shape1 u1) (RecordArray et2 shape2 u2)
 unifyArrayTypes _ _ =
   Nothing
 
-unifyRecordArrayElemTypes :: (Monoid als, ArrayShape shape) =>
-                             RecordArrayElemTypeBase shape als
-                          -> RecordArrayElemTypeBase shape als
-                          -> Maybe (RecordArrayElemTypeBase shape als)
+unifyRecordArrayElemTypes :: (Monoid als, ArrayDim dim) =>
+                             RecordArrayElemTypeBase dim als
+                          -> RecordArrayElemTypeBase dim als
+                          -> Maybe (RecordArrayElemTypeBase dim als)
 unifyRecordArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
   | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
@@ -205,7 +217,7 @@ checkNamedDim loc v = do
 
 data InferredType = NoneInferred
                   | Inferred Type
-                  | Ascribed (TypeBase (ShapeDecl VName) (Names VName))
+                  | Ascribed (TypeBase (DimDecl VName) (Names VName))
 
 checkPatternGroup :: MonadTypeChecker m =>
                      [TypeParam] -> [(UncheckedPattern, InferredType)]
@@ -232,19 +244,22 @@ checkPattern' :: MonadTypeChecker m =>
 checkPattern' (PatternParens p loc) t =
   PatternParens <$> checkPattern' p t <*> pure loc
 
-checkPattern' (Id (Ident name NoInfo loc)) (Inferred t) = do
+checkPattern' (Id name NoInfo loc) (Inferred t) = do
   name' <- lift $ checkName Term name loc
-  let t' = typeOf $ Var (qualName name') (Info t) loc
-  return $ Id $ Ident name' (Info $ t' `setUniqueness` Nonunique) loc
-checkPattern' (Id (Ident name NoInfo loc)) (Ascribed t) = do
+  let t' = vacuousShapeAnnotations $
+           case t of Record{} -> t
+                     _        -> t `addAliases` S.insert name'
+  return $ Id name' (Info $ t' `setUniqueness` Nonunique) loc
+checkPattern' (Id name NoInfo loc) (Ascribed t) = do
   name' <- lift $ checkName Term name loc
-  let t' = typeOf $ Var (qualName name') (Info $ removeShapeAnnotations t) loc
-  return $ Id $ Ident name' (Info t') loc
+  let t' = case t of Record{} -> t
+                     _        -> t `addAliases` S.insert name'
+  return $ Id name' (Info t') loc
 
 checkPattern' (Wildcard _ loc) (Inferred t) =
-  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
+  return $ Wildcard (Info $ vacuousShapeAnnotations $ t `setUniqueness` Nonunique) loc
 checkPattern' (Wildcard _ loc) (Ascribed t) =
-  return $ Wildcard (Info $ removeShapeAnnotations $ t `setUniqueness` Nonunique) loc
+  return $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
 
 checkPattern' (TuplePattern ps loc) (Inferred t)
   | Just ts <- isTupleRecord t, length ts == length ps =
@@ -304,7 +319,7 @@ checkForDuplicateNames :: MonadTypeChecker m =>
                           [TypeParam] -> [UncheckedPattern] -> m PatternNames
 checkForDuplicateNames tps =
   sanityCheck <=< flip execStateT mempty . mapM_ check
-  where check (Id v) = seeing BoundAsVar (identName v) (srclocOf v)
+  where check (Id v _ loc) = seeing BoundAsVar v loc
         check (PatternParens p _) = check p
         check Wildcard{} = return ()
         check (TuplePattern ps _) = mapM_ check ps
@@ -499,17 +514,17 @@ applyType ps t args =
           error $ "applyType mkSubst: cannot substitute " ++ pretty a ++ " for " ++ pretty p
 
 type InstantiateM = StateT
-                    (M.Map VName (TypeBase Rank (),SrcLoc))
+                    (M.Map VName (TypeBase () (),SrcLoc))
                     (Either (Maybe String))
 
-instantiatePolymorphic :: [VName] -> SrcLoc -> M.Map VName (TypeBase Rank (),SrcLoc)
-                       -> TypeBase Rank () -> TypeBase Rank ()
-                       -> Either (Maybe String) (M.Map VName (TypeBase Rank (),SrcLoc))
+instantiatePolymorphic :: [VName] -> SrcLoc -> M.Map VName (TypeBase () (),SrcLoc)
+                       -> TypeBase () () -> TypeBase () ()
+                       -> Either (Maybe String) (M.Map VName (TypeBase () (),SrcLoc))
 instantiatePolymorphic tnames loc orig_substs x y =
   execStateT (instantiate x y) orig_substs
   where
 
-    instantiate :: TypeBase Rank () -> TypeBase Rank ()
+    instantiate :: TypeBase () () -> TypeBase () ()
                 -> InstantiateM ()
     instantiate (TypeVar (TypeName [] tn) []) orig_arg_t
       | tn `elem` tnames = do

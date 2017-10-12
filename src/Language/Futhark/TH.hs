@@ -28,7 +28,6 @@ deriving instance Lift a => Lift (QualName a)
 deriving instance Lift a => Lift (DimDecl a)
 deriving instance Lift a => Lift (TypeArgExp a)
 deriving instance Lift a => Lift (TypeExp a)
-deriving instance Lift Rank
 deriving instance Lift TypeName
 deriving instance Lift IntType
 deriving instance Lift FloatType

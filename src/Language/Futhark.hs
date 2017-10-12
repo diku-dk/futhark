@@ -53,17 +53,17 @@ type Dec = DecBase Info VName
 type Prog = ProgBase Info VName
 
 -- | A known type with no shape annotations, but aliasing information.
-type Type = TypeBase Rank (Names VName)
+type Type = TypeBase () (Names VName)
 
 -- | A known type with shape annotations but no aliasing information.
-type StructType = TypeBase (ShapeDecl VName) ()
+type StructType = TypeBase (DimDecl VName) ()
 
 -- | A known type arg with shape annotations but no aliasing information.
-type StructTypeArg = TypeArg (ShapeDecl VName) ()
+type StructTypeArg = TypeArg (DimDecl VName) ()
 
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName
 
 -- | A known array type with no shape annotations, but aliasing
 -- information.
-type ArrayType = ArrayTypeBase Rank (Names VName)
+type ArrayType = ArrayTypeBase () (Names VName)

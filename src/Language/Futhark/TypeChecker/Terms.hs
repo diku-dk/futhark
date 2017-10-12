@@ -111,7 +111,7 @@ altOccurences occurs1 occurs2 =
 data ValBinding = BoundV Type
                 | BoundF FunBinding Occurences
                 -- ^ The occurences is non-empty only for local functions.
-                | OverloadedF [([TypeBase Rank ()],FunBinding)]
+                | OverloadedF [([TypeBase () ()],FunBinding)]
                 | EqualityF
                 | OpaqueF
                 | WasConsumed SrcLoc
@@ -713,19 +713,19 @@ checkExp (Reshape shapeexp arrexp loc) = do
 
 checkExp (Rearrange perm arrexp pos) = do
   arrexp' <- checkExp arrexp
-  let rank = arrayRank $ typeOf arrexp'
-  when (length perm /= rank || sort perm /= [0..rank-1]) $
-    bad $ PermutationError pos perm rank
+  let r = arrayRank $ typeOf arrexp'
+  when (length perm /= r || sort perm /= [0..r-1]) $
+    bad $ PermutationError pos perm r
   return $ Rearrange perm arrexp' pos
 
 checkExp (Rotate d offexp arrexp loc) = do
   arrexp' <- checkExp arrexp
   offexp' <- require [Prim $ Signed Int32] =<< checkExp offexp
-  let rank = arrayRank (typeOf arrexp')
-  when (rank <= d) $
+  let r= arrayRank (typeOf arrexp')
+  when (r <= d) $
     bad $ TypeError loc $ "Attempting to rotate dimension " ++ show d ++
     " of array " ++ pretty arrexp ++
-    " which has only " ++ show rank ++ " dimensions."
+    " which has only " ++ show r ++ " dimensions."
   return $ Rotate d offexp' arrexp' loc
 
 checkExp (Zip i e es loc) = do
@@ -951,14 +951,14 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         Wildcard (Info $ t `setUniqueness` Nonunique) wloc
       uniquePat (PatternParens p ploc) =
         PatternParens (uniquePat p) ploc
-      uniquePat (Id (Ident name (Info t) iloc))
+      uniquePat (Id name (Info t) iloc)
         | name `S.member` consumed_merge =
             let t' = t `setUniqueness` Unique `setAliases` mempty
-            in Id (Ident name (Info t') iloc)
+            in Id name (Info t') iloc
         | otherwise =
             let t' = case t of Record{} -> t
                                _        -> t `setUniqueness` Nonunique
-            in Id (Ident name (Info t') iloc)
+            in Id name (Info t') iloc
       uniquePat (TuplePattern pats ploc) =
         TuplePattern (map uniquePat pats) ploc
       uniquePat (RecordPattern fs ploc) =
@@ -980,21 +980,21 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   -- returned for a unique merge parameter does not alias anything
   -- else returned.
   bound_outside <- asks $ S.fromList . M.keys . scopeVtable
-  let checkMergeReturn (Id ident) t
-        | unique $ unInfo $ identType ident,
+  let checkMergeReturn (Id pat_v (Info pat_t) _) t
+        | unique pat_t,
           v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
             lift $ bad $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
-            pretty (identName ident) ++ " aliases " ++ pretty v ++ "."
+            pretty pat_v ++ " aliases " ++ pretty v ++ "."
         | otherwise = do
             (cons,obs) <- get
             unless (S.null $ aliases t `S.intersection` cons) $
               lift $ bad $ TypeError loc $ "Loop return value for merge parameter " ++
-              pretty (identName ident) ++ " aliases other consumed merge parameter."
-            when (unique (unInfo $ identType ident) &&
+              pretty pat_v ++ " aliases other consumed merge parameter."
+            when (unique pat_t &&
                   not (S.null (aliases t `S.intersection` (cons<>obs)))) $
               lift $ bad $ TypeError loc $ "Loop return value for consuming merge parameter " ++
-              pretty (identName ident) ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
-            if unique (unInfo $ identType ident)
+              pretty pat_v ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
+            if unique pat_t
               then put (cons<>aliases t, obs)
               else put (cons, obs<>aliases t)
       checkMergeReturn (TuplePattern pats _) t | Just ts <- isTupleRecord t =
@@ -1003,7 +1003,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         return ()
   evalStateT (checkMergeReturn mergepat'' $ typeOf loopbody') (mempty, mempty)
 
-  let consumeMerge (Id (Ident _ (Info pt) ploc)) mt
+  let consumeMerge (Id _ (Info pt) ploc) mt
         | unique pt = consume ploc $ aliases mt
       consumeMerge (TuplePattern pats _) t | Just ts <- isTupleRecord t =
         zipWithM_ consumeMerge pats ts
@@ -1057,8 +1057,8 @@ checkArg arg = do
 
 checkFuncall :: Maybe (QualName Name) -> SrcLoc
              -> FunBinding -> [Arg]
-             -> TermTypeM ([TypeBase (ShapeDecl VName) ()],
-                            TypeBase (ShapeDecl VName) (Names VName))
+             -> TermTypeM ([TypeBase (DimDecl VName) ()],
+                            TypeBase (DimDecl VName) (Names VName))
 checkFuncall fname loc funbind args = do
   (_, paramtypes, rettype) <-
     instantiatePolymorphicFunction fname loc funbind args

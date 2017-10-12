@@ -51,18 +51,19 @@ instance Pretty PrimValue where
   ppr (BoolValue False) = text "false"
   ppr (FloatValue v) = ppr v
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DimDecl vn) where
+instance Pretty vn => Pretty (DimDecl vn) where
   ppr AnyDim       = mempty
   ppr (NamedDim v) = ppr v
   ppr (ConstDim n) = ppr n
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ShapeDecl vn) where
+
+instance Pretty vn => Pretty (ShapeDecl (DimDecl vn)) where
   ppr (ShapeDecl ds) = mconcat (map (brackets . ppr) ds)
 
-instance Pretty Rank where
-  ppr (Rank n) = mconcat (replicate n (brackets mempty))
+instance Pretty (ShapeDecl ()) where
+  ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
-instance Pretty shape => Pretty (RecordArrayElemTypeBase shape as) where
+instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim as) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (PolyArrayElem bt targs _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt) <+>
                                      spread (map ppr targs)
@@ -74,7 +75,7 @@ instance Pretty shape => Pretty (RecordArrayElemTypeBase shape as) where
         braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
-instance Pretty shape => Pretty (ArrayTypeBase shape as) where
+instance Pretty (ShapeDecl dim) => Pretty (ArrayTypeBase dim as) where
   ppr (PrimArray et shape u _) =
     ppr u <> ppr shape <> ppr et
 
@@ -89,7 +90,7 @@ instance Pretty shape => Pretty (ArrayTypeBase shape as) where
     where prefix = ppr u <> ppr shape
           ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
-instance Pretty shape => Pretty (TypeBase shape as) where
+instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Prim et) = ppr et
   ppr (TypeVar et targs) = ppr (baseName <$> qualNameFromTypeName et) <+> spread (map ppr targs)
   ppr (Array at) = ppr at
@@ -100,13 +101,13 @@ instance Pretty shape => Pretty (TypeBase shape as) where
         braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
-instance Pretty shape => Pretty (TypeArg shape as) where
-  ppr (TypeArgDim d _) = brackets $ ppr d
+instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where
+  ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
   ppr (TypeArgType t _) = ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEUnique t _) = text "*" <> ppr t
-  ppr (TEArray at d _) = brackets (ppr d) <> ppr at
+  ppr (TEArray at d _) = ppr (ShapeDecl [d]) <> ppr at
   ppr (TETuple ts _) = parens $ commasep $ map ppr ts
   ppr (TERecord fs _) = braces $ commasep $ map ppField fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
@@ -114,7 +115,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TEApply t args _) = ppr t <+> spread (map ppr args)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeArgExp vn) where
-  ppr (TypeArgExpDim d _) = ppr d
+  ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]
   ppr (TypeArgExpType d) = ppr d
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
@@ -269,7 +270,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LoopFormBase ty vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (PatternAscription p t) = ppr p <> text ":" <+> ppr t
   ppr (PatternParens p _)     = parens $ ppr p
-  ppr (Id ident)              = ppr ident
+  ppr (Id v _ _)              = ppr v
   ppr (TuplePattern pats _)   = parens $ commasep $ map ppr pats
   ppr (RecordPattern fs _)    = braces $ commasep $ map ppField fs
     where ppField (name, t) = text (nameToString name) <> equals <> ppr t
