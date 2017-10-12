@@ -1634,7 +1634,6 @@ funcall desc qfname (e_ts, i_ts) args loc = do
       ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) (ExtRetType ts)
       return (ses, map I.fromDecl ts)
 
-
 boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc w e = do
   let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound)

@@ -59,12 +59,15 @@ boundInTypes = BoundInTypes . S.fromList . mapMaybe isTypeParam
         isTypeParam E.TypeParamType{} = Nothing
 
 internaliseParamTypes :: BoundInTypes
+                      -> M.Map VName VName
                       -> [E.TypeBase (E.DimDecl VName) ()]
                       -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        M.Map VName Int,
                                        ConstParams)
-internaliseParamTypes (BoundInTypes bound) ts = do
-  (ts', subst, cm) <- runInternaliseTypeM bound $ mapM internaliseTypeM ts
+internaliseParamTypes (BoundInTypes bound) pnames ts = do
+  (ts', subst, cm) <- runInternaliseTypeM bound $
+                      withDims (M.map (Free . Var) pnames) $
+                      mapM internaliseTypeM ts
   return (ts', subst, cm)
 
 internaliseReturnType :: E.TypeBase (E.DimDecl VName) ()
