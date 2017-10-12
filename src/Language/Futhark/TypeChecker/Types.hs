@@ -6,9 +6,9 @@ module Language.Futhark.TypeChecker.Types
   , unifyTypes
 
   , checkPattern
-  , checkPatternGroup
   , InferredType(..)
 
+  , checkForDuplicateNames
   , checkParams
   , checkTypeParams
 
@@ -112,19 +112,6 @@ unifyRecordArrayElemTypes _ _ =
 data Bindage = BoundAsVar | UsedFree
              deriving (Show, Eq)
 
--- | The variables bound or referenced by a pattern group.
-newtype PatternNames = PatternNames (M.Map (Namespace, Name) (VName, Bindage, SrcLoc))
-                        deriving (Show)
-
-instance Monoid PatternNames where
-  mempty = PatternNames mempty
-  PatternNames x `mappend` PatternNames y = PatternNames (x <> y)
-
-implicitNameMap :: PatternNames -> NameMap
-implicitNameMap (PatternNames m) = M.mapMaybe firstOne m
-  where firstOne (x, BoundAsVar, _) = Just x
-        firstOne (_, UsedFree, _) = Nothing
-
 checkTypeDecl :: MonadTypeChecker m =>
                  TypeDeclBase NoInfo Name -> m (TypeDeclBase Info VName)
 checkTypeDecl (TypeDecl t NoInfo) = do
@@ -134,35 +121,27 @@ checkTypeDecl (TypeDecl t NoInfo) = do
 checkTypeExp :: MonadTypeChecker m =>
                 TypeExp Name
              -> m (TypeExp VName, StructType)
-checkTypeExp te = do
-  implicit <- checkForDuplicateNamesTypeExp mempty te
-  bindNameMap (implicitNameMap implicit) $
-    evalStateT (checkTypeExp' te) implicit
-
-checkTypeExp' :: MonadTypeChecker m =>
-                 TypeExp Name
-              -> StateT PatternNames m (TypeExp VName, StructType)
-checkTypeExp' (TEVar name loc) = do
-  (name', ps, t) <- lift $ lookupType loc name
+checkTypeExp (TEVar name loc) = do
+  (name', ps, t) <- lookupType loc name
   case ps of
     [] -> return (TEVar name' loc, t)
     _  -> throwError $ TypeError loc $
           "Type constructor " ++ pretty name ++ " used without any arguments."
-checkTypeExp' (TETuple ts loc) = do
-  (ts', ts_s) <- unzip <$> mapM checkTypeExp' ts
+checkTypeExp (TETuple ts loc) = do
+  (ts', ts_s) <- unzip <$> mapM checkTypeExp ts
   return (TETuple ts' loc, tupleRecord ts_s)
-checkTypeExp' t@(TERecord fs loc) = do
+checkTypeExp t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nub field_names)) $
     throwError $ TypeError loc $ "Duplicate record fields in " ++ pretty t
 
-  fs_and_ts <- traverse checkTypeExp' $ M.fromList fs
+  fs_and_ts <- traverse checkTypeExp $ M.fromList fs
   let fs' = fmap fst fs_and_ts
       ts_s = fmap snd fs_and_ts
   return (TERecord (M.toList fs') loc, Record ts_s)
-checkTypeExp' (TEArray t d loc) = do
-  (t', st) <- checkTypeExp' t
+checkTypeExp (TEArray t d loc) = do
+  (t', st) <- checkTypeExp t
   d' <- checkDimDecl d
   return (TEArray t' d' loc, arrayOf st (ShapeDecl [d']) Nonunique)
   where checkDimDecl AnyDim =
@@ -171,13 +150,13 @@ checkTypeExp' (TEArray t d loc) = do
           return $ ConstDim k
         checkDimDecl (NamedDim v) =
           NamedDim <$> checkNamedDim loc v
-checkTypeExp' (TEUnique t loc) = do
-  (t', st) <- checkTypeExp' t
+checkTypeExp (TEUnique t loc) = do
+  (t', st) <- checkTypeExp t
   case st of
     Array{} -> return (t', st `setUniqueness` Unique)
     _       -> throwError $ InvalidUniqueness loc $ toStructural st
-checkTypeExp' (TEApply tname targs tloc) = do
-  (tname', ps, t) <- lift $ lookupType tloc tname
+checkTypeExp (TEApply tname targs tloc) = do
+  (tname', ps, t) <- lookupType tloc tname
   if length ps /= length targs
   then throwError $ TypeError tloc $
        "Type constructor " ++ pretty tname ++ " requires " ++ show (length ps) ++
@@ -198,7 +177,7 @@ checkTypeExp' (TEApply tname targs tloc) = do
                   M.singleton pv $ DimSub AnyDim)
 
         checkArgApply (TypeParamType pv _) (TypeArgExpType te) = do
-          (te', st) <- checkTypeExp' te
+          (te', st) <- checkTypeExp te
           return (TypeArgExpType te',
                   M.singleton pv $ TypeSub $ TypeAbbr [] st)
 
@@ -208,9 +187,9 @@ checkTypeExp' (TEApply tname targs tloc) = do
 
 
 checkNamedDim :: MonadTypeChecker m =>
-                 SrcLoc -> QualName Name -> StateT PatternNames m (QualName VName)
+                 SrcLoc -> QualName Name -> m (QualName VName)
 checkNamedDim loc v = do
-  (v', t) <- lift $ lookupVar loc v
+  (v', t) <- lookupVar loc v
   case t of
     Prim (Signed Int32) -> return v'
     _                   -> throwError $ DimensionNotInteger loc v
@@ -219,39 +198,34 @@ data InferredType = NoneInferred
                   | Inferred Type
                   | Ascribed (TypeBase (DimDecl VName) (Names VName))
 
-checkPatternGroup :: MonadTypeChecker m =>
-                     [TypeParam] -> [(UncheckedPattern, InferredType)]
-                  -> ([Pattern] -> m a)
-                  -> m a
-checkPatternGroup tps ps m = do
-  implicit <- checkForDuplicateNames tps $ map fst ps
-  bindNameMap (implicitNameMap implicit) $
-    m =<< evalStateT (mapM (uncurry checkPattern') ps) implicit
+bindPatternNames :: MonadTypeChecker m =>
+                    PatternBase NoInfo Name -> m a -> m a
+bindPatternNames = bindSpaced . map asTerm . S.toList . patIdentSet
+  where asTerm v = (Term, identName v)
 
 checkPattern :: MonadTypeChecker m =>
-                [TypeParam] -> UncheckedPattern -> InferredType
-             -> (Pattern -> m a)
+                UncheckedPattern -> InferredType -> (Pattern -> m a)
              -> m a
-checkPattern tps p t m = do
-  implicit <- checkForDuplicateNames tps [p]
-  bindNameMap (implicitNameMap implicit) $
-    m =<< evalStateT (checkPattern' p t) implicit
+checkPattern p t m = do
+  checkForDuplicateNames [p]
+  bindPatternNames p $
+    m =<< checkPattern' p t
 
 checkPattern' :: MonadTypeChecker m =>
                  UncheckedPattern -> InferredType
-              -> StateT PatternNames m Pattern
+              -> m Pattern
 
 checkPattern' (PatternParens p loc) t =
   PatternParens <$> checkPattern' p t <*> pure loc
 
 checkPattern' (Id name NoInfo loc) (Inferred t) = do
-  name' <- lift $ checkName Term name loc
+  name' <- checkName Term name loc
   let t' = vacuousShapeAnnotations $
            case t of Record{} -> t
                      _        -> t `addAliases` S.insert name'
   return $ Id name' (Info $ t' `setUniqueness` Nonunique) loc
 checkPattern' (Id name NoInfo loc) (Ascribed t) = do
-  name' <- lift $ checkName Term name loc
+  name' <- checkName Term name loc
   let t' = case t of Record{} -> t
                      _        -> t `addAliases` S.insert name'
   return $ Id name' (Info t') loc
@@ -292,7 +266,7 @@ checkPattern' (RecordPattern fs loc) NoneInferred =
   RecordPattern . M.toList <$> traverse (`checkPattern'` NoneInferred) (M.fromList fs) <*> pure loc
 
 checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
-  (t', st) <- checkTypeExp' t
+  (t', st) <- checkTypeExp t
   let maybe_outer_t' = case maybe_outer_t of
                          Inferred outer_t -> Just $ vacuousShapeAnnotations outer_t
                          Ascribed outer_t -> Just outer_t
@@ -316,77 +290,23 @@ checkPattern' p NoneInferred =
 -- | Check for duplication of names inside a pattern group.  Produces
 -- a description of all names used in the pattern group.
 checkForDuplicateNames :: MonadTypeChecker m =>
-                          [TypeParam] -> [UncheckedPattern] -> m PatternNames
-checkForDuplicateNames tps =
-  sanityCheck <=< flip execStateT mempty . mapM_ check
-  where check (Id v _ loc) = seeing BoundAsVar v loc
+                          [UncheckedPattern] -> m ()
+checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
+  where check (Id v _ loc) = seen v loc
         check (PatternParens p _) = check p
         check Wildcard{} = return ()
         check (TuplePattern ps _) = mapM_ check ps
         check (RecordPattern fs _) = mapM_ (check . snd) fs
-        check (PatternAscription p t) = do
-          check p
-          checkForDuplicateNamesTypeExp' $ declaredType t
+        check (PatternAscription p _) = check p
 
-        sanityCheck (PatternNames m)
-          | problem : _ <- mapMaybe problematic tps = throwError problem
-          where problematic (TypeParamDim tpv tploc)
-                  | not $ any uses m =
-                      Just $ TypeError tploc $
-                      "Type parameter " ++ pretty (baseName tpv) ++ " not used in parameters."
-                  where uses (v, UsedFree, _) = v == tpv
-                        uses _                = False
-                problematic _ = Nothing
-        sanityCheck implicit = return implicit
-
-checkForDuplicateNamesTypeExp :: MonadTypeChecker m =>
-                                 PatternNames
-                              -> TypeExp Name -> m PatternNames
-checkForDuplicateNamesTypeExp implicit te =
-  execStateT (checkForDuplicateNamesTypeExp' te) implicit
-
-checkForDuplicateNamesTypeExp' :: MonadTypeChecker m =>
-                                  TypeExp Name
-                               -> StateT PatternNames m ()
-checkForDuplicateNamesTypeExp' TEVar{} = return ()
-checkForDuplicateNamesTypeExp' (TERecord fs _) =
-  mapM_ (checkForDuplicateNamesTypeExp' . snd) fs
-checkForDuplicateNamesTypeExp' (TETuple ts _) =
-  mapM_ checkForDuplicateNamesTypeExp' ts
-checkForDuplicateNamesTypeExp' (TEUnique t _) =
-  checkForDuplicateNamesTypeExp' t
-checkForDuplicateNamesTypeExp' (TEApply _ targs _) =
-  mapM_ check targs
-  where check (TypeArgExpDim d loc) = lookAtDimDecl loc d
-        check (TypeArgExpType t) = checkForDuplicateNamesTypeExp' t
-checkForDuplicateNamesTypeExp' (TEArray te d loc) =
-  checkForDuplicateNamesTypeExp' te >> lookAtDimDecl loc d
-
-lookAtDimDecl :: MonadTypeChecker m => SrcLoc -> DimDecl Name
-              -> StateT PatternNames m ()
-lookAtDimDecl _ ConstDim{} = return ()
-lookAtDimDecl _ AnyDim{} = return ()
-lookAtDimDecl loc (NamedDim (QualName [] v)) = seeing UsedFree v loc
-lookAtDimDecl _ (NamedDim _) = return ()
-
-seeing :: MonadTypeChecker m => Bindage -> Name -> SrcLoc
-       -> StateT PatternNames m ()
-seeing b v vloc = do
-  PatternNames seen <- get
-  case (b, M.lookup (Term, v) seen) of
-    (UsedFree, sb) -> do
-      v' <- lift $ checkName Term v vloc
-      when (isNothing sb) $ modify $ \(PatternNames m) ->
-        PatternNames $ M.insert (Term, v) (v', b, vloc) m
-    (BoundAsVar, Just (_, UsedFree, loc)) ->
-      throwError $ TypeError vloc $ "Name " ++ pretty v ++
-      "bound here, but also referenced at " ++ locStr loc
-    (_, Just (_, BoundAsVar, loc)) ->
-      throwError $ DupPatternError v vloc loc
-    (_, Nothing) -> do
-      name' <- lift $ newID v
-      modify $ \(PatternNames m) ->
-        PatternNames $ M.insert (Term, v) (name', b, vloc) m
+        seen v loc = do
+          already <- gets $ M.lookup v
+          case already of
+            Just prev_loc ->
+              lift $ throwError $ TypeError loc $
+              "Name " ++ pretty v ++ " also bound at " ++ locStr prev_loc
+            Nothing ->
+              modify $ M.insert v loc
 
 checkParams :: [ParamBase NoInfo Name]
             -> ([ParamBase Info VName] -> TypeM a)
