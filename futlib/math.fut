@@ -580,5 +580,5 @@ module f32: (real with t = f32) = {
   let nan = 0f32 / 0f32
 
   let pi = f32 f64.pi
-  let e = f32 f64.pi
+  let e = f32 f64.e
 }
