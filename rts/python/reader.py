@@ -480,8 +480,8 @@ def read_bin_read_type_enum(f):
 def read_bin_ensure_scalar(f, expected_type):
   dims = read_bin_i8(f)
 
-  if bin_dims != 0:
-      panic(1, "binary-input: Expected scalar (0 dimensions), but got array with %i dimensions.\n", bin_dims)
+  if dims != 0:
+      panic(1, "binary-input: Expected scalar (0 dimensions), but got array with %i dimensions.\n", dims)
 
   bin_type_enum = read_bin_read_type_enum(f)
   if bin_type_enum != expected_type:
@@ -495,7 +495,7 @@ def read_bin_ensure_scalar(f, expected_type):
 
 def read_general(f, ty):
     if read_is_binary(f):
-        read_bin_ensure_scalar(ty)
+        read_bin_ensure_scalar(f, ty)
         return FUTHARK_PRIMTYPES[ty]['bin_reader'](f)
     return FUTHARK_PRIMTYPES[ty]['str_reader'](f)
 
