@@ -37,7 +37,6 @@ module Language.Futhark.TypeChecker.Monad
   , anyPrimType
 
   , Namespace(..)
-  , ppSpace
   , intrinsicsNameMap
   , topLevelNameMap
   )
