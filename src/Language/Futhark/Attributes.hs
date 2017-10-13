@@ -25,6 +25,7 @@ module Language.Futhark.Attributes
   , patIdentSet
   , patternType
   , patternStructType
+  , patternParam
   , patternNoShapeAnnotations
   , paramType
   , paramName
@@ -717,6 +718,16 @@ patternStructType (Id _ (Info t) _) = t `setAliases` ()
 patternStructType (TuplePattern ps _) = tupleRecord $ map patternStructType ps
 patternStructType (RecordPattern fs _) = Record $ patternStructType <$> M.fromList fs
 patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
+
+-- | When viewed as a function parameter, this this pattern correspond
+-- to a named parameter of some type?
+patternParam :: PatternBase Info VName -> (Maybe VName, StructTypeBase VName)
+patternParam (PatternParens p _) =
+  patternParam p
+patternParam (PatternAscription (Id v _ _) td) =
+  (Just v, unInfo $ expandedType td)
+patternParam p =
+  (Nothing, patternStructType p)
 
 -- | Remove all shape annotations from a pattern, leaving them unnamed
 -- instead.

@@ -78,7 +78,7 @@ prettyFun fm (FunBind _ name _retdecl _rettype _tparams _args _ doc _)
   , visible Term name fm = Just $
     renderDoc doc <> "val " <> vnameHtml name <>
     foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
-    foldMap (\t -> prettyType t <> " -> ") pts <> prettyType rett
+    foldMap (\t -> prettyParam t <> " -> ") pts <> prettyType rett
     where FileModule Env {envVtable = vtable} _ = fm
 prettyFun _ _ = Nothing
 
@@ -181,10 +181,14 @@ prettyValBind :: (VName, ValBinding) -> Html
 prettyValBind (name, BoundF (tps, pts, rettype)) =
   "val " <> vnameHtml name <>
   foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
-  foldMap (\t -> prettyType t <> " -> ") pts <> " " <>
+  foldMap (\t -> prettyParam t <> " -> ") pts <> " " <>
   prettyType rettype
 prettyValBind (name, BoundV t) =
   "val " <> vnameHtml name <> " : " <> prettyType t
+
+prettyParam :: (Maybe VName, StructType) -> Html
+prettyParam (Nothing, t) = prettyType t
+prettyParam (Just v, t) = parens $ vnameHtml v <> ": " <> prettyType t
 
 prettyType :: StructType -> Html
 prettyType t = case t of
