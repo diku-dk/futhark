@@ -72,3 +72,9 @@ let steps (start: i32) (num_steps: i32) (step: i32): [num_steps]i32 =
 let range (start: i32) (end: i32) (step: i32): []i32 =
   let w = (end-start)/step
   in steps start w step
+
+-- | True if all of the input elements are true.
+let and (xs: []bool): bool = reduce (&&) true xs
+
+-- | True if any of the input elements are true.
+let or (xs: []bool): bool = reduce (||) true xs
