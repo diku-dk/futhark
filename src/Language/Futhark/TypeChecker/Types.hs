@@ -415,7 +415,7 @@ substituteTypesInValBinding :: TypeSubs -> ValBinding -> ValBinding
 substituteTypesInValBinding substs (BoundV t) =
   BoundV $ substituteTypes substs t
 substituteTypesInValBinding substs (BoundF (tps, pts, t)) =
-  BoundF (tps, map (substituteTypes substs) pts, substituteTypes substs t)
+  BoundF (tps, map (fmap (substituteTypes substs)) pts, substituteTypes substs t)
 
 applyType :: [TypeParam] -> StructType -> [StructTypeArg] -> StructType
 applyType ps t args =

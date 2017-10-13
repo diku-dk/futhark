@@ -205,10 +205,10 @@ data Mod = ModEnv Env
 data FunSig = FunSig TySet Mod MTy
             deriving (Show)
 
--- | Type parameters, list of parameter types, and return type.  The
--- type parameters are in scope in both parameter types and the return
--- type.
-type FunBinding = ([TypeParam], [StructType], StructType)
+-- | Type parameters, list of parameter types (optinally named), and
+-- return type.  The type parameters are in scope in both parameter
+-- types and the return type.
+type FunBinding = ([TypeParam], [(Maybe VName,StructType)], StructType)
 
 -- | Representation of a module type.
 data MTy = MTy { mtyAbs :: TySet

@@ -142,7 +142,9 @@ checkSpecs (ValSpec name tparams params rettype doc loc : specs) =
           mempty { envVtable = M.singleton name' $
                                if null params'
                                then BoundV rettype''
-                               else BoundF (tparams', paramtypes, rettype'')
+                               else BoundF (tparams',
+                                            zip (map paramName params') paramtypes,
+                                            rettype'')
                  , envNameMap = M.singleton (Term, name) name'
                  }
     (abstypes, env, specs') <- localEnv valenv $ checkSpecs specs
@@ -457,7 +459,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body doc l
 
   return (mempty { envVtable =
                      M.singleton fname'
-                     (BoundF (tparams', map patternStructType params', rettype))
+                     (BoundF (tparams', map patternParam params', rettype))
                  , envNameMap =
                      M.singleton (Term, fname) fname'
                  },
@@ -654,7 +656,7 @@ matchMTys = matchMTys' mempty
       | length spec_pts == length pts,
         Just substs_and_locs <-
           foldM match mempty $
-          zip (map toStructural spec_pts) (map toStructural pts) =
+          zip (map (toStructural . snd) spec_pts) (map (toStructural . snd) pts) =
           let substs = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst)
                        substs_and_locs
               -- This relies on the property that there can be no new
@@ -700,7 +702,9 @@ matchMTys = matchMTys' mempty
 
     ppValBind (BoundV t) = pretty t
     ppValBind (BoundF (tps, pts, t)) =
-      unwords $ map pretty tps ++ intersperse "->" (map pretty $ pts ++ [t])
+      unwords $ map pretty tps ++ intersperse "->" (map ppParam $ pts ++ [(Nothing, t)])
+      where ppParam (Nothing, pt) = pretty pt
+            ppParam (Just v, pt) = "(" ++ pretty v ++ ": " ++ pretty pt ++ ")"
 
     ppTypeAbbr (ps, t) =
       "type " ++ unwords (map pretty ps) ++ " = " ++ pretty t
@@ -798,7 +802,7 @@ newNamesForMTy orig_mty = do
           BoundV $ substituteInType t
         substituteInBinding (BoundF (ps, pts,t)) =
           BoundF (map substituteInTypeParam ps,
-                  map substituteInType pts,
+                  map (fmap substituteInType) pts,
                   substituteInType t)
 
         substituteInMod (ModEnv env) =

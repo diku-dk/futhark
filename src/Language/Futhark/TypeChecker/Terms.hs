@@ -163,13 +163,15 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap
   where initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
-          Just (name, BoundF ([], map Prim ts, Prim t) mempty)
+          Just (name, BoundF ([], zip (repeat Nothing) $ map Prim ts, Prim t) mempty)
         addIntrinsicF (name, IntrinsicOverloadedFun variants) =
           Just (name, OverloadedF $ map frob variants)
-          where frob (pts, rt) = (map Prim pts, ([], map Prim pts, Prim rt))
+          where frob (pts, rt) = (map Prim pts,
+                                  ([], zip (repeat Nothing) $ map Prim pts, Prim rt))
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
           Just (name, BoundF (tvs,
-                              map vacuousShapeAnnotations pts,
+                              zip (repeat Nothing) $
+                               map vacuousShapeAnnotations pts,
                               vacuousShapeAnnotations rt)
                       mempty)
         addIntrinsicF (name, IntrinsicEquality) =
@@ -271,7 +273,11 @@ lookupFunction qn argtypes loc = do
     Just OpaqueF
       | [t] <- argtypes ->
           let t' = vacuousShapeAnnotations $ toStruct t
-          in return (qn', ([], [t' `setUniqueness` Nonunique], t' `setUniqueness` Nonunique), mempty)
+          in return (qn',
+                     ([],
+                      [(Nothing, t' `setUniqueness` Nonunique)],
+                      t' `setUniqueness` Nonunique),
+                     mempty)
       | otherwise ->
           bad $ TypeError loc "Opaque function takes just a single argument."
     Just EqualityF
@@ -280,7 +286,8 @@ lookupFunction qn argtypes loc = do
         concreteType t2,
         t1 == t2 ->
           return (qn', ([],
-                        map (vacuousShapeAnnotations . toStruct) [t1, t2],
+                        zip (repeat Nothing) $
+                         map (vacuousShapeAnnotations . toStruct) [t1, t2],
                         Prim Bool),
                        mempty)
       | otherwise ->
@@ -571,7 +578,7 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
     lookupFunction op (map argType [e1_arg,e2_arg]) loc
 
   case paramtypes of
-    [e1_pt, e2_pt] -> do
+    [(_, e1_pt), (_, e2_pt)] -> do
       occur closure
       (_, rettype') <-
         checkFuncall (Just op) loc (tparams, paramtypes, ftype) [e1_arg, e2_arg]
@@ -624,7 +631,7 @@ checkExp (Apply fname args _ loc) = do
   (_, rettype') <- checkFuncall (Just fname) loc (tparams, paramtypes, ftype) argflows
 
   return $ Apply fname'
-    (zip args' $ map diet paramtypes) (Info $ removeShapeAnnotations rettype') loc
+    (zip args' $ map (diet . snd) paramtypes) (Info $ removeShapeAnnotations rettype') loc
 
 checkExp (LetPat tparams pat e body pos) = do
   noTypeParamsPermitted tparams
@@ -640,8 +647,7 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
-    let patternType' = toStruct . vacuousShapeAnnotations . patternType
-        entry = BoundF (tparams', map patternType' params', rettype) closure
+    let entry = BoundF (tparams', map patternParam params', rettype) closure
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope }
     body' <- local bindF $ checkExp body
 
@@ -1066,13 +1072,15 @@ checkFuncall fname loc funbind args = do
   (_, paramtypes, rettype) <-
     instantiatePolymorphicFunction fname loc funbind args
 
-  forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
+  let diets = map (diet . snd) paramtypes
+
+  forM_ (zip diets args) $ \(d, (t, dflow, argloc)) -> do
     maybeCheckOccurences dflow
     let occurs = consumeArg argloc t d
     occur $ dflow `seqOccurences` occurs
 
-  return (paramtypes,
-          returnType rettype (map diet paramtypes) (map argType args))
+  return (map snd paramtypes,
+          returnType rettype diets (map argType args))
 
 -- | Find concrete types for a call to a polymorphic function.
 instantiatePolymorphicFunction :: MonadTypeChecker m =>
@@ -1085,10 +1093,10 @@ instantiatePolymorphicFunction maybe_fname call_loc (tparams, pts, ret) args = d
     "expecting " ++ pretty (length pts) ++ " arguments, but got " ++
     pretty (length args) ++ " arguments."
 
-  substs <- foldM instantiateArg mempty $ zip (map toStructural pts) args
+  substs <- foldM instantiateArg mempty $ zip (map (toStructural . snd) pts) args
   let substs' = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst) substs
   return ([],
-          map (substituteTypes substs') pts,
+          map (fmap $ substituteTypes substs') pts,
           substituteTypes substs' ret)
   where
     prefix = (("In call of function " ++ fname ++ ": ")++)
@@ -1119,7 +1127,8 @@ maybePermitRecursion fname tparams params (Just rettype) m = do
   permit <- liftTypeM recursionPermitted
   if permit then
     let patternType' = toStruct . vacuousShapeAnnotations . patternType
-        entry = BoundF (tparams, map patternType' params, rettype) mempty
+        pts = zip (repeat Nothing) $ map patternType' params
+        entry = BoundF (tparams, pts, rettype) mempty
         bindF scope = scope { scopeVtable = M.insert fname entry $ scopeVtable scope }
     in local bindF m
     else m
@@ -1220,14 +1229,15 @@ checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
       let ret' = case maybe_ret' of
                    Nothing -> toStruct $ vacuousShapeAnnotations $ typeOf body'
                    Just (TypeDecl _ (Info ret)) -> ret
-      (_, ret'') <- checkFuncall Nothing loc ([], map patternStructType params', ret') args
+          lamt = ([], zip (repeat Nothing) $ map patternStructType params', ret')
+      (_, ret'') <- checkFuncall Nothing loc lamt args
       return $ AnonymFun tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkLambda (CurryFun fname curryargexps _ loc) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   (fname', (tparams, paramtypes, rt), closure) <- lookupFunction fname (map argType $ curryargs++args) loc
-  case find (unique . snd) $ zip curryargexps paramtypes of
+  case find (unique . snd) $ zip curryargexps $ map snd paramtypes of
     Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
     _           -> return ()
 
@@ -1241,7 +1251,7 @@ checkLambda (CurryFun fname curryargexps _ loc) args = do
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) [x_arg,y_arg] = do
   (op', (tparams, paramtypes, rt), closure) <- lookupFunction op (map argType [x_arg,y_arg]) loc
-  let paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
+  let paramtypes' = map (fromStruct . removeShapeAnnotations . snd) paramtypes
 
   occur closure
   (_, rettype') <-
