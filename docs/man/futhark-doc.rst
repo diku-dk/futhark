@@ -27,6 +27,9 @@ OPTIONS
   The name of the directory that will contain the generated
   documentation.  This option is mandatory.
 
+-v, --verbose
+  Print status messages to stderr while running.
+
 -h
   Print help text to standard output and exit.
 
