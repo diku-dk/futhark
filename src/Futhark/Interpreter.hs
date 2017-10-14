@@ -24,6 +24,7 @@ import Data.List
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import Data.Binary.IEEE754 (floatToWord, wordToFloat, doubleToWord, wordToDouble)
 
 import Prelude
 
@@ -331,6 +332,8 @@ builtins = M.fromList $ map namify
            ,("atan2_32", builtin "atan2_32")
            ,("isinf32", builtin "isinf32")
            ,("isnan32", builtin "isnan32")
+           ,("to_bits32", builtin "to_bits32")
+           ,("from_bits32", builtin "from_bits32")
 
            ,("sqrt64", builtin "sqrt64")
            ,("log64", builtin "log64")
@@ -343,6 +346,8 @@ builtins = M.fromList $ map namify
            ,("atan2_64", builtin "atan2_64")
            ,("isinf64", builtin "isinf64")
            ,("isnan64", builtin "isnan64")
+           ,("to_bits64", builtin "to_bits64")
+           ,("from_bits64", builtin "from_bits64")
            ]
   where namify (k,v) = (nameFromString k, v)
 
@@ -370,6 +375,11 @@ builtin "isnan32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ BoolValue $ isNaN x]
 builtin "isinf32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ BoolValue $ isInfinite x]
+builtin "to_bits32" [PrimVal (FloatValue (Float32Value x))] =
+  return [PrimVal $ IntValue $ Int32Value $ fromIntegral $ floatToWord x]
+builtin "from_bits32" [PrimVal (IntValue (Int32Value x))] =
+  return [PrimVal $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x]
+
 builtin "sqrt64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ sqrt x]
 builtin "log64" [PrimVal (FloatValue (Float64Value x))] =
@@ -393,6 +403,11 @@ builtin "isnan64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ BoolValue $ isNaN x]
 builtin "isinf64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ BoolValue $ isInfinite x]
+builtin "to_bits64" [PrimVal (FloatValue (Float64Value x))] =
+  return [PrimVal $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x]
+builtin "from_bits64" [PrimVal (IntValue (Int64Value x))] =
+  return [PrimVal $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x]
+
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
         map (rankShaped . valueType) args

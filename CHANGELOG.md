@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.2.0]
 
+  * Add `num_bits`/`get_bit`/`set_bit` functions to numeric module
+    types, including a new `float` module type.
+
   * Retain parameter names in output of `futhark-doc`.
 
   * Add -v/--verbose option to `futhark-doc`.
