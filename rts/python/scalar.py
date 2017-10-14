@@ -1,6 +1,7 @@
 # Scalar functions.
 
 import numpy as np
+import struct
 
 def signed(x):
   if type(x) == np.uint8:
@@ -275,6 +276,14 @@ def futhark_isnan64(x):
 def futhark_isinf64(x):
   return np.isinf(x)
 
+def futhark_to_bits64(x):
+  s = struct.pack('>d', x)
+  return np.int64(struct.unpack('>q', s)[0])
+
+def futhark_from_bits64(x):
+  s = struct.pack('>q', x)
+  return np.float64(struct.unpack('>d', s)[0])
+
 def futhark_log32(x):
   return np.float32(np.log(x))
 
@@ -307,3 +316,11 @@ def futhark_isnan32(x):
 
 def futhark_isinf32(x):
   return np.isinf(x)
+
+def futhark_to_bits32(x):
+  s = struct.pack('>f', x)
+  return np.int32(struct.unpack('>l', s)[0])
+
+def futhark_from_bits32(x):
+  s = struct.pack('>l', x)
+  return np.float32(struct.unpack('>f', s)[0])
