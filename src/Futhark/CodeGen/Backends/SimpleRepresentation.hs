@@ -6,7 +6,6 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , tupleFieldExp
   , funName
   , defaultMemBlockType
-  , builtInFunctionDefs
   , intTypeToCType
   , floatTypeToCType
   , primTypeToCType
@@ -14,13 +13,10 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
 
     -- * Primitive value operations
   , cIntOps
-  , cFloat32Ops
-  , cFloat64Ops
+  , cFloat32Ops, cFloat32Funs
+  , cFloat64Ops, cFloat64Funs
   , cFloatConvOps
 
-    -- * Specific builtin functions
-  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32, c_asin32, c_atan32, c_acos32, c_atan2_32, c_isnan32, c_isinf32, c_to_bits32, c_from_bits32
-  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64, c_asin64, c_atan64, c_acos64, c_atan2_64, c_isnan64, c_isinf64, c_to_bits64, c_from_bits64
   )
   where
 
@@ -247,86 +243,52 @@ cFloatConvOps :: [C.Definition]
           [C.cedecl|static inline char $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = floatTypeToCType t
 
-c_log32 :: C.Func
-c_log32 = [C.cfun|
+cFloat32Funs :: [C.Definition]
+cFloat32Funs = [C.cunit|
     static inline float $id:(funName' "log32")(float x) {
       return log(x);
     }
-    |]
 
-c_sqrt32 :: C.Func
-c_sqrt32 = [C.cfun|
     static inline float $id:(funName' "sqrt32")(float x) {
       return sqrt(x);
     }
-    |]
 
-c_exp32 ::C.Func
-c_exp32 = [C.cfun|
     static inline float $id:(funName' "exp32")(float x) {
       return exp(x);
     }
-  |]
 
-c_cos32 ::C.Func
-c_cos32 = [C.cfun|
     static inline float $id:(funName' "cos32")(float x) {
       return cos(x);
     }
-  |]
 
-c_sin32 ::C.Func
-c_sin32 = [C.cfun|
     static inline float $id:(funName' "sin32")(float x) {
       return sin(x);
     }
-  |]
 
-c_acos32 ::C.Func
-c_acos32 = [C.cfun|
     static inline float $id:(funName' "acos32")(float x) {
       return acos(x);
     }
-  |]
 
-c_asin32 ::C.Func
-c_asin32 = [C.cfun|
     static inline float $id:(funName' "asin32")(float x) {
       return asin(x);
     }
-  |]
 
-c_atan32 ::C.Func
-c_atan32 = [C.cfun|
     static inline double $id:(funName' "atan32")(float x) {
       return atan(x);
     }
-  |]
 
-c_atan2_32 ::C.Func
-c_atan2_32 = [C.cfun|
     static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2(x,y);
     }
-  |]
 
-c_isnan32 ::C.Func
-c_isnan32 = [C.cfun|
     static inline char $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
-  |]
 
-c_isinf32 ::C.Func
-c_isinf32 = [C.cfun|
     static inline char $id:(funName' "isinf32")(float x) {
       return isinf(x);
     }
-  |]
 
-
-c_to_bits32 :: C.Func
-c_to_bits32 = [C.cfun|
     static inline typename int32_t $id:(funName' "to_bits32")(float x) {
       union {
         float f;
@@ -335,10 +297,7 @@ c_to_bits32 = [C.cfun|
       p.f = x;
       return p.t;
     }
-    |]
 
-c_from_bits32 :: C.Func
-c_from_bits32 = [C.cfun|
     static inline float $id:(funName' "from_bits32")(typename int32_t x) {
       union {
         typename int32_t f;
@@ -347,87 +306,54 @@ c_from_bits32 = [C.cfun|
       p.f = x;
       return p.t;
     }
-    |]
+|]
 
-c_log64 :: C.Func
-c_log64 = [C.cfun|
+cFloat64Funs :: [C.Definition]
+cFloat64Funs = [C.cunit|
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
     }
-    |]
 
-c_sqrt64 :: C.Func
-c_sqrt64 = [C.cfun|
     static inline double $id:(funName' "sqrt64")(double x) {
       return sqrt(x);
     }
-    |]
 
-c_exp64 ::C.Func
-c_exp64 = [C.cfun|
     static inline double $id:(funName' "exp64")(double x) {
       return exp(x);
     }
-  |]
 
-c_cos64 ::C.Func
-c_cos64 = [C.cfun|
     static inline double $id:(funName' "cos64")(double x) {
       return cos(x);
     }
-  |]
 
-c_sin64 ::C.Func
-c_sin64 = [C.cfun|
     static inline double $id:(funName' "sin64")(double x) {
       return sin(x);
     }
-  |]
 
-c_acos64 ::C.Func
-c_acos64 = [C.cfun|
     static inline double $id:(funName' "acos64")(double x) {
       return acos(x);
     }
-  |]
 
-c_asin64 ::C.Func
-c_asin64 = [C.cfun|
     static inline double $id:(funName' "asin64")(double x) {
       return asin(x);
     }
-  |]
 
-c_atan64 ::C.Func
-c_atan64 = [C.cfun|
     static inline double $id:(funName' "atan64")(double x) {
       return atan(x);
     }
-  |]
 
-c_atan2_64 ::C.Func
-c_atan2_64 = [C.cfun|
     static inline double $id:(funName' "atan2_64")(double x, double y) {
       return atan2(x,y);
     }
-  |]
 
-c_isnan64 ::C.Func
-c_isnan64 = [C.cfun|
     static inline char $id:(funName' "isnan64")(double x) {
       return isnan(x);
     }
-  |]
 
-c_isinf64 ::C.Func
-c_isinf64 = [C.cfun|
     static inline char $id:(funName' "isinf64")(double x) {
       return isinf(x);
     }
-  |]
 
-c_to_bits64 :: C.Func
-c_to_bits64 = [C.cfun|
     static inline typename int64_t $id:(funName' "to_bits64")(double x) {
       union {
         double f;
@@ -436,10 +362,7 @@ c_to_bits64 = [C.cfun|
       p.f = x;
       return p.t;
     }
-    |]
 
-c_from_bits64 :: C.Func
-c_from_bits64 = [C.cfun|
     static inline double $id:(funName' "from_bits64")(typename int64_t x) {
       union {
         typename int64_t f;
@@ -448,10 +371,4 @@ c_from_bits64 = [C.cfun|
       p.f = x;
       return p.t;
     }
-    |]
-
--- | C definitions of the Futhark "standard library".
-builtInFunctionDefs :: [C.Func]
-builtInFunctionDefs =
-  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32, c_acos32, c_asin32, c_atan32, c_atan2_32, c_isnan32, c_isinf32,  c_to_bits32, c_from_bits32,
-   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64, c_acos64, c_asin64, c_atan64, c_atan2_64, c_isnan64, c_isinf64, c_to_bits64, c_from_bits64]
+|]

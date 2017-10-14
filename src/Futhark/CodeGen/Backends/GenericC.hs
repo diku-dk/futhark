@@ -1393,9 +1393,8 @@ $edecls:entry_point_decls
                         C.OldFunc _ _ _ _ _ _ l -> l
                         C.Func _ _ _ _ _ l      -> l
 
-        builtin = map asDecl builtInFunctionDefs ++
-                  cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps
-          where asDecl fun = [C.cedecl|$func:fun|]
+        builtin = cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps ++
+                  cFloat32Funs ++ cFloat64Funs
 
         panic_h = $(embedStringFile "rts/c/panic.h")
         values_h = $(embedStringFile "rts/c/values.h")

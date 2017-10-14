@@ -47,7 +47,6 @@ module Futhark.CodeGen.ImpCode
   , memSizeToExp
 
     -- * Analysis
-  , functionsCalled
 
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
@@ -478,11 +477,3 @@ instance FreeIn Arg where
 instance FreeIn Size where
   freeIn (VarSize name) = S.singleton name
   freeIn (ConstSize _) = mempty
-
-functionsCalled :: Code a -> S.Set Name
-functionsCalled (If _ t f) = functionsCalled t <> functionsCalled f
-functionsCalled (x :>>: y) = functionsCalled x <> functionsCalled y
-functionsCalled (For _ _ _ body) = functionsCalled body
-functionsCalled (While _ body) = functionsCalled body
-functionsCalled (Call _ fname _) = S.singleton fname
-functionsCalled _ = mempty
