@@ -58,17 +58,15 @@ pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel addres
 type UsedFunctions = [(String,C.Func)] -- The ordering is important!
 
 data OpenClRequirements =
-  OpenClRequirements { _kernelUsedFunctions :: UsedFunctions
-                     , _kernelUsedTypes :: S.Set PrimType
+  OpenClRequirements { _kernelUsedTypes :: S.Set PrimType
                      , _kernelConstants :: [(VName, KernelConstExp)]
                      }
 
 instance Monoid OpenClRequirements where
-  mempty = OpenClRequirements mempty mempty mempty
+  mempty = OpenClRequirements mempty mempty
 
-  OpenClRequirements used1 ts1 consts1 `mappend` OpenClRequirements used2 ts2 consts2 =
-    OpenClRequirements (nubBy cmpFst $ used1 <> used2) (ts1 <> ts2) (consts1 <> consts2)
-    where cmpFst (x, _) (y, _) = x == y
+  OpenClRequirements ts1 consts1 `mappend` OpenClRequirements ts2 consts2 =
+    OpenClRequirements (ts1 <> ts2) (consts1 <> consts2)
 
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
@@ -95,18 +93,14 @@ onHostOp (ImpKernels.GetTileSize v) =
 onKernel :: CallKernel -> OnKernelM OpenCL
 
 onKernel called@(Map kernel) = do
-  let (funbody, s) =
+  let (funbody, _) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
           size <- GenericC.compileExp $ mapKernelSize kernel
           let check = [C.citem|if ($id:(mapKernelThreadNum kernel) >= $exp:size) return;|]
           body <- GenericC.blockScope $ GenericC.compileCode $ mapKernelBody kernel
           return $ check : body
 
-      used_funs = GenericC.compUserState s
-
       params = mapMaybe useAsParam $ mapKernelUses kernel
-
-      kernel_funs = functionsCalled $ mapKernelBody kernel
 
   tell ToOpenCL
     { clExtraFuns = mempty
@@ -116,7 +110,6 @@ onKernel called@(Map kernel) = do
                      $items:funbody
                   }|]
     , clRequirements = OpenClRequirements
-                       (used_funs ++ requiredFunctions kernel_funs)
                        (typesInKernel called)
                        (mapMaybe useAsConst $ mapKernelUses kernel)
     }
@@ -127,15 +120,11 @@ onKernel called@(Map kernel) = do
   where (kernel_size, workgroup_size) = kernelAndWorkgroupSize called
 
 onKernel called@(AnyKernel kernel) = do
-  let (kernel_body, s) =
+  let (kernel_body, _) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
         GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
 
-      used_funs = GenericC.compUserState s
-
       use_params = mapMaybe useAsParam $ kernelUses kernel
-
-      kernel_funs = functionsCalled $ kernelBody kernel
 
       (local_memory_params, local_memory_init) =
         unzip $
@@ -151,7 +140,6 @@ onKernel called@(AnyKernel kernel) = do
                                   $items:kernel_body
                                   }|]
                , clRequirements = OpenClRequirements
-                                  (used_funs ++ requiredFunctions kernel_funs)
                                   (typesInKernel called)
                                   (mapMaybe useAsConst $ kernelUses kernel)
                }
@@ -194,42 +182,6 @@ useAsConst :: KernelUse -> Maybe (VName, KernelConstExp)
 useAsConst (ConstUse v e) = Just (v,e)
 useAsConst _ = Nothing
 
-requiredFunctions :: S.Set Name -> [(String, C.Func)]
-requiredFunctions kernel_funs =
-  let used_in_kernel = (`S.member` kernel_funs) . nameFromString . fst
-      funs32_used = filter used_in_kernel funs32
-      funs64_used = filter used_in_kernel funs64
-
-      funs32 = [("log32", c_log32),
-                ("sqrt32", c_sqrt32),
-                ("exp32", c_exp32),
-                ("sin32", c_sin32),
-                ("cos32", c_cos32),
-                ("asin32", c_asin32),
-                ("acos32", c_acos32),
-                ("atan2", c_atan32),
-                ("atan2_32", c_atan2_32),
-                ("isnan32", c_isnan32),
-                ("isinf32", c_isinf32),
-                ("to_bits32", c_to_bits32),
-                ("from_bits32", c_from_bits32)]
-
-      funs64 = [("log64", c_log64),
-                ("sqrt64", c_sqrt64),
-                ("exp64", c_exp64),
-                ("sin64", c_sin64),
-                ("cos64", c_cos64),
-                ("asin64", c_asin64),
-                ("acos64", c_acos64),
-                ("atan64", c_atan64),
-                ("atan2_64", c_atan2_64),
-                ("isnan64", c_isnan64),
-                ("isinf64", c_isinf64),
-                ("to_bits64", c_to_bits64),
-                ("from_bits64", c_from_bits64)
-                ]
-  in funs32_used ++ funs64_used
-
 openClCode :: [C.Func] -> String
 openClCode kernels =
   pretty [C.cunit|$edecls:funcs|]
@@ -238,7 +190,7 @@ openClCode kernels =
            kernel_func <- kernels ]
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
-genOpenClPrelude (OpenClRequirements used_funs ts consts) =
+genOpenClPrelude (OpenClRequirements ts consts) =
   [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
 /* Some OpenCL programs dislike empty progams, or programs with no kernels.
@@ -261,9 +213,8 @@ typedef ulong uint64_t;
 
 $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attribute__ ((align))")
 |] ++
-  cIntOps ++ cFloat32Ops ++
-  (if uses_float64 then cFloat64Ops ++ cFloatConvOps else []) ++
-  [ [C.cedecl|$func:used_fun|] | (_, used_fun) <- used_funs ] ++
+  cIntOps ++ cFloat32Ops ++ cFloat32Funs ++
+  (if uses_float64 then cFloat64Ops ++ cFloat64Funs ++ cFloatConvOps else []) ++
   [ [C.cedecl|$esc:def|] | def <- map constToDefine consts ]
   where uses_float64 = FloatType Float64 `S.member` ts
         constToDefine (name, e) =
