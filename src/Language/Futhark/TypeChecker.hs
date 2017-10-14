@@ -704,7 +704,7 @@ matchMTys = matchMTys' mempty
     ppValBind (BoundF (tps, pts, t)) =
       unwords $ map pretty tps ++ intersperse "->" (map ppParam $ pts ++ [(Nothing, t)])
       where ppParam (Nothing, pt) = pretty pt
-            ppParam (Just v, pt) = "(" ++ pretty v ++ ": " ++ pretty pt ++ ")"
+            ppParam (Just v, pt) = "(" ++ pretty (baseName v) ++ ": " ++ pretty pt ++ ")"
 
     ppTypeAbbr (ps, t) =
       "type " ++ unwords (map pretty ps) ++ " = " ++ pretty t
