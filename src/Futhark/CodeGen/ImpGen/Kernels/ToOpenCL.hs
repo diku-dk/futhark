@@ -210,7 +210,9 @@ requiredFunctions kernel_funs =
                 ("atan2", c_atan32),
                 ("atan2_32", c_atan2_32),
                 ("isnan32", c_isnan32),
-                ("isinf32", c_isinf32)]
+                ("isinf32", c_isinf32),
+                ("to_bits32", c_to_bits32),
+                ("from_bits32", c_from_bits32)]
 
       funs64 = [("log64", c_log64),
                 ("sqrt64", c_sqrt64),
@@ -222,7 +224,10 @@ requiredFunctions kernel_funs =
                 ("atan64", c_atan64),
                 ("atan2_64", c_atan2_64),
                 ("isnan64", c_isnan64),
-                ("isinf64", c_isinf64)]
+                ("isinf64", c_isinf64),
+                ("to_bits64", c_to_bits64),
+                ("from_bits64", c_from_bits64)
+                ]
   in funs32_used ++ funs64_used
 
 openClCode :: [C.Func] -> String

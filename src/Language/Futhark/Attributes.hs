@@ -791,6 +791,8 @@ intrinsics = M.fromList $ zipWith namify [10..] $
              ,("atan2_32", ([FloatType Float32, FloatType Float32], FloatType Float32))
              ,("isinf32", ([FloatType Float32], Bool))
              ,("isnan32", ([FloatType Float32], Bool))
+             ,("to_bits32", ([FloatType Float32], Unsigned Int32))
+             ,("from_bits32", ([Unsigned Int32], FloatType Float32))
 
              ,("sqrt64", ([FloatType Float64], FloatType Float64))
              ,("log64", ([FloatType Float64], FloatType Float64))
@@ -803,6 +805,8 @@ intrinsics = M.fromList $ zipWith namify [10..] $
              ,("atan2_64", ([FloatType Float64, FloatType Float64], FloatType Float64))
              ,("isinf64", ([FloatType Float64], Bool))
              ,("isnan64", ([FloatType Float64], Bool))
+             ,("to_bits64", ([FloatType Float64], Unsigned Int64))
+             ,("from_bits64", ([Unsigned Int64], FloatType Float64))
 
              ] ++
 

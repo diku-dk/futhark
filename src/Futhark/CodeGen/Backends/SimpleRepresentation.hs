@@ -19,8 +19,8 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , cFloatConvOps
 
     -- * Specific builtin functions
-  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32, c_asin32, c_atan32, c_acos32, c_atan2_32, c_isnan32, c_isinf32
-  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64, c_asin64, c_atan64, c_acos64, c_atan2_64, c_isnan64, c_isinf64
+  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32, c_asin32, c_atan32, c_acos32, c_atan2_32, c_isnan32, c_isinf32, c_to_bits32, c_from_bits32
+  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64, c_asin64, c_atan64, c_acos64, c_atan2_64, c_isnan64, c_isinf64, c_to_bits64, c_from_bits64
   )
   where
 
@@ -324,6 +324,31 @@ c_isinf32 = [C.cfun|
     }
   |]
 
+
+c_to_bits32 :: C.Func
+c_to_bits32 = [C.cfun|
+    static inline typename int32_t $id:(funName' "to_bits32")(float x) {
+      union {
+        float f;
+        typename int32_t t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+    |]
+
+c_from_bits32 :: C.Func
+c_from_bits32 = [C.cfun|
+    static inline float $id:(funName' "from_bits32")(typename int32_t x) {
+      union {
+        typename int32_t f;
+        float t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+    |]
+
 c_log64 :: C.Func
 c_log64 = [C.cfun|
     static inline double $id:(funName' "log64")(double x) {
@@ -401,8 +426,32 @@ c_isinf64 = [C.cfun|
     }
   |]
 
+c_to_bits64 :: C.Func
+c_to_bits64 = [C.cfun|
+    static inline typename int64_t $id:(funName' "to_bits64")(double x) {
+      union {
+        double f;
+        typename int64_t t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+    |]
+
+c_from_bits64 :: C.Func
+c_from_bits64 = [C.cfun|
+    static inline double $id:(funName' "from_bits64")(typename int64_t x) {
+      union {
+        typename int64_t f;
+        double t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+    |]
+
 -- | C definitions of the Futhark "standard library".
 builtInFunctionDefs :: [C.Func]
 builtInFunctionDefs =
-  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32, c_acos32, c_asin32, c_atan32, c_atan2_32, c_isnan32, c_isinf32,
-   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64, c_acos64, c_asin64, c_atan64, c_atan2_64, c_isnan64, c_isinf64]
+  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32, c_acos32, c_asin32, c_atan32, c_atan2_32, c_isnan32, c_isinf32,  c_to_bits32, c_from_bits32,
+   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64, c_acos64, c_asin64, c_atan64, c_atan2_64, c_isnan64, c_isinf64, c_to_bits64, c_from_bits64]

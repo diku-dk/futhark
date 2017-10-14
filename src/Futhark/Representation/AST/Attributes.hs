@@ -77,6 +77,8 @@ builtInFunctions = M.fromList $ map namify
                    ,("atan2_32", (FloatType Float32, [FloatType Float32, FloatType Float32]))
                    ,("isinf32", (Bool, [FloatType Float32]))
                    ,("isnan32", (Bool, [FloatType Float32]))
+                   ,("to_bits32", (IntType Int32, [FloatType Float32]))
+                   ,("from_bits32", (FloatType Float32, [IntType Int32]))
 
                    ,("sqrt64", (FloatType Float64, [FloatType Float64]))
                    ,("log64", (FloatType Float64, [FloatType Float64]))
@@ -89,6 +91,8 @@ builtInFunctions = M.fromList $ map namify
                    ,("atan2_64", (FloatType Float64, [FloatType Float64, FloatType Float64]))
                    ,("isinf64", (Bool, [FloatType Float64]))
                    ,("isnan64", (Bool, [FloatType Float64]))
+                   ,("to_bits64", (IntType Int64, [FloatType Float64]))
+                   ,("from_bits64", (FloatType Float64, [IntType Int64]))
                    ]
   where namify (k,v) = (nameFromString k, v)
 
