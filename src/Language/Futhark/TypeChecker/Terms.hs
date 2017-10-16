@@ -718,6 +718,11 @@ checkExp (Reshape shapeexp arrexp loc) = do
     t -> bad $ TypeError loc $ "Shape argument " ++ pretty shapeexp ++
       " to reshape must be integer or tuple of integers, but is " ++ pretty t
 
+  case typeOf arrexp' of
+    Array{} -> return ()
+    t -> bad $ TypeError loc $
+         "Array argument to reshape must be an array, but has type " ++ pretty t
+
   return $ Reshape shapeexp' arrexp' loc
 
 checkExp (Rearrange perm arrexp pos) = do
