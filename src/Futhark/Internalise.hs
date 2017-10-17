@@ -564,26 +564,36 @@ internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, bo
   internaliseExp desc letbody <* unSubst ofname
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody _) = do
-  mergeinit <- internaliseExp "loop_init" mergeexp
+  -- We pretend that we saw a let-binding first to ensure that the
+  -- initial values for the merge parameters match their annotated
+  -- sizes
+  ses <- internaliseExp "loop_init" mergeexp
+  t <- I.staticShapes <$> mapM I.subExpType ses
+  stmPattern tparams mergepat t $ \cm mergepat_names match -> do
+    mapM_ (uncurry internaliseDimConstant) cm
+    ses' <- match (srclocOf mergepat) ses
+    forM_ (zip mergepat_names ses') $ \(v,se) ->
+      letBindNames'_ [v] $ I.BasicOp $ I.SubExp se
+    let mergeinit = map I.Var mergepat_names
 
-  (loopbody', (form', shapepat, mergepat', mergeinit', pre_stms)) <-
-    handleForm mergeinit form
+    (loopbody', (form', shapepat, mergepat', mergeinit', pre_stms)) <-
+      handleForm mergeinit form
 
-  mapM_ addStm pre_stms
+    mapM_ addStm pre_stms
 
-  mergeinit_ts' <- mapM subExpType mergeinit'
+    mergeinit_ts' <- mapM subExpType mergeinit'
 
-  let ctxinit = argShapes
-                (map I.paramName shapepat)
-                (map I.paramType mergepat')
-                mergeinit_ts'
-      ctxmerge = zip shapepat ctxinit
-      valmerge = zip mergepat' mergeinit'
-      dropCond = case form of E.While{} -> drop 1
-                              _         -> id
+    let ctxinit = argShapes
+                  (map I.paramName shapepat)
+                  (map I.paramType mergepat')
+                  mergeinit_ts'
+        ctxmerge = zip shapepat ctxinit
+        valmerge = zip mergepat' mergeinit'
+        dropCond = case form of E.While{} -> drop 1
+                                _         -> id
 
-  loop_res <- letTupExp desc $ I.DoLoop ctxmerge valmerge form' loopbody'
-  return $ map I.Var $ dropCond loop_res
+    loop_res <- letTupExp desc $ I.DoLoop ctxmerge valmerge form' loopbody'
+    return $ map I.Var $ dropCond loop_res
 
   where
     handleForm mergeinit (E.ForIn x arr) = do
