@@ -995,7 +995,7 @@ simplifyFallbackBranch _ _ =
   cannotSimplify
 
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
-hoistBranchInvariant _ (Let pat _ (If e1 tb fb (IfAttr ret _)))
+hoistBranchInvariant _ (Let pat _ (If e1 tb fb (IfAttr ret ifsort)))
   | patternSize pat == length ret = do
   let tses = bodyResult tb
       fses = bodyResult fb
@@ -1007,7 +1007,7 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb (IfAttr ret _)))
       fb' = fb { bodyResult = fses' }
   if invariant -- Was something hoisted?
      then letBind_ (Pattern [] pat') =<<
-          eIf (eSubExp e1) (pure tb') (pure fb')
+          eIf' (eSubExp e1) (pure tb') (pure fb') ifsort
      else cannotSimplify
   where branchInvariant (pat', res, invariant) (v, (tse, fse))
           | tse == fse = do
@@ -1197,7 +1197,7 @@ removeScratchValue _ _ =
 -- if *none* of the return values are used, but this rule is more
 -- precise.
 removeDeadBranchResult :: MonadBinder m => BottomUpRule m
-removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb (IfAttr rettype _)))
+removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb (IfAttr rettype ifsort)))
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
     -- Figure out which of the names in 'pat' are used...
@@ -1214,7 +1214,7 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb (IfAttr rettype _)))
       fb' = fb { bodyResult = pick fses }
       pat' = pick $ patternElements pat
   in letBind_ (Pattern [] pat') =<<
-     eIf (eSubExp e1) (pure tb') (pure fb')
+     eIf' (eSubExp e1) (pure tb') (pure fb') ifsort
 removeDeadBranchResult _ _ = cannotSimplify
 
 -- | If we are comparing X against the result of a branch of the form
