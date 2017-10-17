@@ -45,7 +45,12 @@ compileProg =
                                  int debugging;
                                };|]
           GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg() {
-                                 return malloc(sizeof(struct $id:cfg));
+                                 struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
+                                 if (cfg == NULL) {
+                                   return NULL;
+                                 }
+                                 cfg->debugging = 0;
+                                 return cfg;
                                }|]
           GC.libDecl [C.cedecl|void $id:free_cfg(struct $id:cfg* cfg) {
                                  free(cfg);
