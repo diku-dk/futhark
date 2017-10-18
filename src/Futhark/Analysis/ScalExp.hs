@@ -3,15 +3,11 @@ module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
   , scalExpType
+  , scalExpSize
   , subExpToScalExp
-  , intSubExpToScalExp
   , toScalExp
   , expandScalExp
   , LookupVar
-  , fromScalExp
-  , sproduct
-  , ssum
-  , freeIn
   , module Futhark.Representation.Primitive
   )
 where
@@ -19,7 +15,7 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.List
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Maybe
 import Data.Monoid
 
@@ -30,8 +26,6 @@ import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SSignum)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import Futhark.Construct
-import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty hiding (pretty)
 
 -----------------------------------------------------------------
@@ -71,10 +65,6 @@ data ScalExp= Val     PrimValue
             | RelExp  RelOp0  ScalExp
             | SLogAnd ScalExp ScalExp
             | SLogOr  ScalExp ScalExp
-
-            | SOneIfZero ScalExp
-            | SIfZero ScalExp ScalExp ScalExp
-            | SIfLessThan ScalExp ScalExp ScalExp ScalExp
               deriving (Eq, Ord, Show)
 
 instance Num ScalExp where
@@ -93,19 +83,8 @@ instance Num ScalExp where
 
   abs = SAbs
   signum = SSignum
-  fromInteger = Val . IntValue . Int32Value . fromInteger
+  fromInteger = Val . IntValue . Int32Value . fromInteger -- probably not OK
   negate = SNeg
-
-instance IntegralExp ScalExp where
-  quot = SQuot
-  rem = SRem
-  div = SDiv
-  mod = SMod
-
-instance IntegralCond ScalExp where
-  ifZero = SIfZero
-  ifLessThan = SIfLessThan
-  oneIfZero = SOneIfZero
 
 instance Pretty ScalExp where
   pprPrec _ (Val val) = ppr $ PrimVal val
@@ -124,20 +103,12 @@ instance Pretty ScalExp where
   pprPrec prec (SRem x y) = ppBinOp prec "%%" 5 10 x y
   pprPrec prec (SLogOr x y) = ppBinOp prec "||" 0 0 x y
   pprPrec prec (SLogAnd x y) = ppBinOp prec "&&" 1 1 x y
-  pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e 0
-  pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e 0
+  pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e (0::Int)
+  pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e (0::Int)
   pprPrec _ (MaxMin True es) = text "min" <> parens (commasep $ map ppr es)
   pprPrec _ (MaxMin False es) = text "max" <> parens (commasep $ map ppr es)
-  pprPrec prec (SIfLessThan a b t f) =
-    parensIf (prec >= 0) $
-    ppr a <+> text "<" <+> ppr b <+> text "?" <+> ppr t <+> text ":" <+> ppr f
-  pprPrec prec (SIfZero x t f) =
-    parensIf (prec >= 0) $
-    ppr x <+> text "== 0" <+> ppr t <+> text ":" <+> ppr f
-  pprPrec _ (SOneIfZero x) =
-    text "oneIfZero" <> parens (ppr x)
 
-ppBinOp :: Int -> String -> Int -> Int -> ScalExp -> ScalExp -> Doc
+ppBinOp :: (Pretty a, Pretty b) => Int -> String -> Int -> Int -> a -> b -> Doc
 ppBinOp p bop precedence rprecedence x y =
   parensIf (p > precedence) $
            pprPrec precedence x <+/>
@@ -164,21 +135,9 @@ instance Substitute ScalExp where
               RelExp r x -> RelExp r $ substituteNames subst x
               SLogAnd x y -> substituteNames subst x `SLogAnd` substituteNames subst y
               SLogOr x y -> substituteNames subst x `SLogOr` substituteNames subst y
-              SOneIfZero x -> SOneIfZero $ substituteNames subst x
-              SIfZero x t f -> SIfZero
-                               (substituteNames subst x)
-                               (substituteNames subst t)
-                               (substituteNames subst f)
-              SIfLessThan a b t f -> SIfLessThan
-                                     (substituteNames subst a)
-                                     (substituteNames subst b)
-                                     (substituteNames subst t)
-                                     (substituteNames subst f)
 
 instance Rename ScalExp where
-  rename se = do
-    substs <- renamerSubstitutions
-    return $ substituteNames substs se
+  rename = substituteRename
 
 scalExpType :: ScalExp -> PrimType
 scalExpType (Val v) = primValueType v
@@ -200,9 +159,28 @@ scalExpType (SLogOr  _ _) = Bool
 scalExpType (RelExp  _ _) = Bool
 scalExpType (MaxMin _ []) = IntType Int32 -- arbitrary and probably wrong.
 scalExpType (MaxMin _ (e:_)) = scalExpType e
-scalExpType (SOneIfZero e) = scalExpType e
-scalExpType (SIfZero _ t _) = scalExpType t
-scalExpType (SIfLessThan _ _ t _) = scalExpType t
+
+-- | Number of nodes in the scalar expression.
+scalExpSize :: ScalExp -> Int
+scalExpSize Val{} = 1
+scalExpSize Id{} = 1
+scalExpSize (SNeg    e) = scalExpSize e
+scalExpSize (SNot    e) = scalExpSize e
+scalExpSize (SAbs    e) = scalExpSize e
+scalExpSize (SSignum e) = scalExpSize e
+scalExpSize (SPlus   x y) = scalExpSize x + scalExpSize y
+scalExpSize (SMinus  x y) = scalExpSize x + scalExpSize y
+scalExpSize (STimes  x y) = scalExpSize x + scalExpSize y
+scalExpSize (SDiv x y) = scalExpSize x + scalExpSize y
+scalExpSize (SMod x y)    = scalExpSize x + scalExpSize y
+scalExpSize (SPow x y) = scalExpSize x + scalExpSize y
+scalExpSize (SQuot x y) = scalExpSize x + scalExpSize y
+scalExpSize (SRem x y) = scalExpSize x + scalExpSize y
+scalExpSize (SLogAnd x y) = scalExpSize x + scalExpSize y
+scalExpSize (SLogOr  x y) = scalExpSize x + scalExpSize y
+scalExpSize (RelExp  _ x) = scalExpSize x
+scalExpSize (MaxMin _ []) = 0
+scalExpSize (MaxMin _ es) = sum $ map scalExpSize es
 
 -- | A function that checks whether a variable name corresponds to a
 -- scalar expression.
@@ -214,49 +192,47 @@ subExpToScalExp :: SubExp -> PrimType -> ScalExp
 subExpToScalExp (Var v) t        = Id v t
 subExpToScalExp (Constant val) _ = Val val
 
--- | Non-recursively convert an integral subexpression to a 'ScalExp'.
-intSubExpToScalExp :: SubExp -> ScalExp
-intSubExpToScalExp se = subExpToScalExp se $ IntType Int32
-
 toScalExp :: (HasScope t f, Monad f) =>
              LookupVar -> Exp lore -> f (Maybe ScalExp)
-toScalExp look (PrimOp (SubExp (Var v)))
+toScalExp look (BasicOp (SubExp (Var v)))
   | Just se <- look v =
     return $ Just se
   | otherwise = do
     t <- lookupType v
     case t of
-      Prim bt | bt `elem` [Bool, int32] ->
+      Prim bt | typeIsOK bt ->
         return $ Just $ Id v bt
       _ ->
         return Nothing
-toScalExp _ (PrimOp (SubExp (Constant val)))
+toScalExp _ (BasicOp (SubExp (Constant val)))
   | typeIsOK $ primValueType val =
     return $ Just $ Val val
-toScalExp look (PrimOp (CmpOp (CmpSlt t) x y))
-  | typeIsOK $ IntType t =
-  Just <$> RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-toScalExp look (PrimOp (CmpOp (CmpSle t) x y))
-  | typeIsOK $ IntType t =
-  Just <$> RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-toScalExp look (PrimOp (CmpOp (CmpEq t) x y))
+toScalExp look (BasicOp (CmpOp (CmpSlt _) x y)) =
+  Just . RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
+toScalExp look (BasicOp (CmpOp (CmpSle _) x y)) =
+  Just . RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
+toScalExp look (BasicOp (CmpOp (CmpEq t) x y))
   | typeIsOK t = do
   x' <- subExpToScalExp' look x
   y' <- subExpToScalExp' look y
-  return $ Just $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
-toScalExp look (PrimOp (BinOp (Sub t) (Constant x) y))
+  return $ Just $ case t of
+    Bool ->
+      SLogAnd x' y' `SLogOr` SLogAnd (SNot x') (SNot y')
+    _ ->
+      RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
+toScalExp look (BasicOp (BinOp (Sub t) (Constant x) y))
   | typeIsOK $ IntType t, zeroIsh x =
-  Just <$> SNeg <$> subExpToScalExp' look y
-toScalExp look (PrimOp (UnOp AST.Not e)) =
-  Just <$> SNot <$> subExpToScalExp' look e
-toScalExp look (PrimOp (BinOp bop x y))
+  Just . SNeg <$> subExpToScalExp' look y
+toScalExp look (BasicOp (UnOp AST.Not e)) =
+  Just . SNot <$> subExpToScalExp' look e
+toScalExp look (BasicOp (BinOp bop x y))
   | Just f <- binOpScalExp bop =
   Just <$> (f <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 
 toScalExp _ _ = return Nothing
 
 typeIsOK :: PrimType -> Bool
-typeIsOK = (`elem` [Bool, int32])
+typeIsOK = (`elem` Bool : map IntType allIntTypes)
 
 subExpToScalExp' :: HasScope t f =>
                     LookupVar -> SubExp -> f ScalExp
@@ -295,16 +271,6 @@ expandScalExp look (SPow x y) = SPow (expandScalExp look x) (expandScalExp look 
 expandScalExp look (SLogAnd x y) = SLogAnd (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SLogOr x y) = SLogOr (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (RelExp relop x) = RelExp relop $ expandScalExp look x
-expandScalExp look (SOneIfZero x) = SOneIfZero $ expandScalExp look x
-expandScalExp look (SIfZero x t f) = SIfZero
-                                     (expandScalExp look x)
-                                     (expandScalExp look t)
-                                     (expandScalExp look f)
-expandScalExp look (SIfLessThan a b t f) = SIfLessThan
-                                           (expandScalExp look a)
-                                           (expandScalExp look b)
-                                           (expandScalExp look t)
-                                           (expandScalExp look f)
 
 -- | "Smart constructor" that checks whether we are subtracting zero,
 -- and if so just returns the first argument.
@@ -312,88 +278,21 @@ sminus :: ScalExp -> ScalExp -> ScalExp
 sminus x (Val v) | zeroIsh v = x
 sminus x y = x `SMinus` y
 
--- | Take the product of a list of 'ScalExp's, or the integer @1@ if
--- the list is empty.
-sproduct :: [ScalExp] -> ScalExp
-sproduct []       = Val $ IntValue $ Int32Value 1
-sproduct (se:ses) = foldl STimes se ses
-
--- | Take the sum of a list of 'ScalExp's, or the integer @0@ if the
--- list is empty.
-ssum :: [ScalExp] -> ScalExp
-ssum []       = Val $ IntValue $ Int32Value 0
-ssum (se:ses) = foldl SPlus se ses
-
  -- XXX: Only integers and booleans, OK?
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
-binOpScalExp bop = snd <$> find ((==bop) . fst)
-                   [ (Add Int32, SPlus)
-                   , (Sub Int32, SMinus)
-                   , (Mul Int32, STimes)
-                   , (AST.SDiv Int32, SDiv)
-                   , (AST.Pow Int32, SPow)
-                   , (LogAnd, SLogAnd)
-                   , (LogOr, SLogOr)
+binOpScalExp bop = fmap snd . find ((==bop) . fst) $
+                   concatMap intOps allIntTypes ++
+                   [ (LogAnd, SLogAnd), (LogOr, SLogOr) ]
+  where intOps t = [ (Add t, SPlus)
+                   , (Sub t, SMinus)
+                   , (Mul t, STimes)
+                   , (AST.SDiv t, SDiv)
+                   , (AST.Pow t, SPow)
                    ]
-
-fromScalExp :: MonadBinder m => ScalExp
-             -> m (Exp (Lore m))
-fromScalExp = convert
-  where convert (Val val) = return $ PrimOp $ SubExp $ Constant val
-        convert (Id v _)  = return $ PrimOp $ SubExp $ Var v
-        convert (SNeg se) = eNegate $ convert se
-        convert (SNot se) = eNot $ convert se
-        convert (SAbs se) = eAbs $ convert se
-        convert (SSignum se) = eSignum $ convert se
-        convert (SPlus x y) = arithBinOp (Add Int32) x y
-        convert (SMinus x y) = arithBinOp (Sub Int32) x y
-        convert (STimes x y) = arithBinOp (Mul Int32) x y
-        convert (SDiv x y)  = arithBinOp (AST.SDiv Int32) x y
-        convert (SMod x y) = arithBinOp (AST.SMod Int32) x y
-        convert (SQuot x y) = arithBinOp (AST.SQuot Int32) x y
-        convert (SRem x y) = arithBinOp (AST.SRem Int32) x y
-        convert (SPow x y) = arithBinOp (AST.Pow Int32) x y
-        convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y)
-        convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y)
-        convert (RelExp LTH0 x) = eCmpOp (CmpSlt Int32) (convert x) (pure zero)
-        convert (RelExp LEQ0 x) = eCmpOp (CmpSle Int32) (convert x) (pure zero)
-        convert (MaxMin _ []) = fail "ScalExp.fromScalExp: MaxMin empty list"
-        convert (MaxMin isMin (e:es)) = do
-          e'  <- convert e
-          es' <- mapM convert es
-          foldM (select isMin) e' es'
-        convert (SOneIfZero e) = do
-          e' <- letSubExp "one_if_zero_arg" =<< convert e
-          eIf
-            (eCmpOp (CmpEq int32) (eSubExp e') (pure zero))
-            (eBody [eSubExp $ intConst Int32 1])
-            (eBody [eSubExp e'])
-        convert (SIfZero x t f) =
-          eIf
-          (eCmpOp (CmpEq int32) (convert x) (pure zero))
-          (eBody [convert t])
-          (eBody [convert f])
-        convert (SIfLessThan a b t f) =
-          eIf
-          (eCmpOp (CmpSlt Int32) (convert a) (convert b))
-          (eBody [convert t])
-          (eBody [convert f])
-
-        arithBinOp bop x y =
-          eBinOp bop (convert x) (convert y)
-
-        select isMin cur next =
-          let cmp = eCmpOp (CmpSlt Int32) (pure cur) (pure next)
-              (pick, discard)
-                | isMin     = (cur, next)
-                | otherwise = (next, cur)
-          in eIf cmp (eBody [pure pick]) (eBody [pure discard])
-
-        zero = PrimOp $ SubExp $ intConst Int32 0
 
 instance FreeIn ScalExp where
   freeIn (Val   _) = mempty
-  freeIn (Id i _)  = HS.singleton i
+  freeIn (Id i _)  = S.singleton i
   freeIn (SNeg  e) = freeIn e
   freeIn (SNot  e) = freeIn e
   freeIn (SAbs  e) = freeIn e
@@ -411,6 +310,3 @@ instance FreeIn ScalExp where
   freeIn (RelExp LTH0 e) = freeIn e
   freeIn (RelExp LEQ0 e) = freeIn e
   freeIn (MaxMin _  es) = mconcat $ map freeIn es
-  freeIn (SOneIfZero e) = freeIn e
-  freeIn (SIfZero x t f) = freeIn x <> freeIn t <> freeIn f
-  freeIn (SIfLessThan a b t f) = freeIn a <> freeIn b <> freeIn t <> freeIn f

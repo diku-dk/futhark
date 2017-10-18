@@ -41,8 +41,9 @@ module Futhark.Representation.AST.Attributes.TypeOf
 import Control.Applicative
 import Control.Monad.Reader
 import Data.List
+import Data.Maybe
 import Data.Monoid
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Traversable hiding (mapM)
 
 import Prelude hiding (mapM)
@@ -71,8 +72,10 @@ mapType outersize f = [ arrayOf t (Shape [outersize]) NoUniqueness
 
 -- | The type of a primitive operation.
 primOpType :: HasScope t m =>
-              PrimOp lore -> m [Type]
+              BasicOp lore -> m [Type]
 primOpType (SubExp se) =
+  pure <$> subExpType se
+primOpType (Opaque se) =
   pure <$> subExpType se
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
@@ -85,51 +88,61 @@ primOpType CmpOp{} =
   pure [Prim Bool]
 primOpType (ConvOp conv _) =
   pure [Prim $ snd $ convTypes conv]
-primOpType (Index _ ident idx) =
+primOpType (Index ident slice) =
   result <$> lookupType ident
-  where result t = [stripArray (length idx) t]
-primOpType (Iota n _) =
-  pure [arrayOf (Prim $ IntType Int32) (Shape [n]) NoUniqueness]
-primOpType (Replicate ne e) =
-  result <$> subExpType e
-  where result t = [arrayOf t (Shape [ne]) NoUniqueness]
+  where result t = [Prim (elemType t) `arrayOfShape` shape]
+        shape = Shape $ mapMaybe dimSize slice
+        dimSize (DimSlice _ d _) = Just d
+        dimSize DimFix{}         = Nothing
+primOpType (Iota n _ _ et) =
+  pure [arrayOf (Prim (IntType et)) (Shape [n]) NoUniqueness]
+primOpType (Replicate (Shape []) e) =
+  pure <$> subExpType e
+primOpType (Repeat shape innershape v) =
+  pure . modifyArrayShape repeatDims <$> lookupType v
+  where repeatDims (Shape ds) =
+          Shape $ concat (zipWith (++) (map shapeDims shape) (map pure ds)) ++
+          shapeDims innershape
+primOpType (Replicate shape e) =
+  pure . flip arrayOfShape shape <$> subExpType e
 primOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
-primOpType (Reshape _ [] e) =
+primOpType (Reshape [] e) =
   result <$> lookupType e
   where result t = [Prim $ elemType t]
-primOpType (Reshape _ shape e) =
+primOpType (Reshape shape e) =
   result <$> lookupType e
   where result t = [t `setArrayShape` newShape shape]
-primOpType (Rearrange _ perm e) =
+primOpType (Rearrange perm e) =
   result <$> lookupType e
   where result t = [rearrangeType perm t]
-primOpType (Split _ sizeexps e) =
+primOpType (Rotate _ e) =
+  pure <$> lookupType e
+primOpType (Split i sizeexps e) =
   result <$> lookupType e
-  where result t = map (t `setOuterSize`) sizeexps
-primOpType (Concat _ x _ ressize) =
+  where result t = map (setDimSize i t) sizeexps
+primOpType (Concat i x _ ressize) =
   result <$> lookupType x
-  where result xt =
-          [xt `setOuterSize` ressize]
+  where result xt = [setDimSize i xt ressize]
 primOpType (Copy v) =
   pure <$> lookupType v
-primOpType (Assert _ _) =
+primOpType (Manifest _ v) =
+  pure <$> lookupType v
+primOpType Assert{} =
   pure [Prim Cert]
-primOpType (Partition _ n _ arrays) =
+primOpType (Partition n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Prim $ IntType Int32) ++ ts
 
+
 -- | The type of an expression.
-expExtType :: (HasScope lore m,
-               IsRetType (RetType lore),
-               Typed (FParamAttr lore),
-               TypedOp (Op lore)) =>
+expExtType :: (HasScope lore m, TypedOp (Op lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
-expExtType (If _ _ _ rt)  = pure rt
+expExtType (If _ _ _ rt)  = pure $ ifExtType rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
-expExtType (PrimOp op)    = staticShapes <$> primOpType op
+expExtType (BasicOp op)    = staticShapes <$> primOpType op
 expExtType (Op op)        = opType op
 
 -- | The number of values returned by an expression.
@@ -152,14 +165,14 @@ instance Annotations lore => HasScope lore (FeelBad lore) where
   askScope = pure mempty
 
 -- | The type of a body.
-bodyExtType :: (Annotations lore, HasScope lore m, Monad m) =>
+bodyExtType :: (HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
-  existentialiseExtTypes bound <$> staticShapes <$>
+  existentialiseExtTypes bound . staticShapes <$>
   extendedScope (traverse subExpType res) bndscope
   where bndscope = scopeOf bnds
         boundInLet (Let pat _ _) = patternNames pat
-        bound = HS.fromList $ concatMap boundInLet bnds
+        bound = S.fromList $ concatMap boundInLet bnds
 
 -- | Given an the return type of a function and the values returned by
 -- that function, return the size context.
@@ -172,7 +185,7 @@ valueShapeContext rettype values =
 subExpShapeContext :: HasScope t m =>
                       [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
-  extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
+  extractShapeContext rettype <$> traverse (fmap arrayDims . subExpType) ses
 
 -- | A loop returns not only its value merge parameters, but may also
 -- have an existential context.  Thus, @loopResult ctxmergeparams
@@ -180,7 +193,7 @@ subExpShapeContext rettype ses =
 -- constitute the returned context.
 loopResultContext :: FreeIn attr => [Param attr] -> [Param attr] -> [Param attr]
 loopResultContext ctx val = filter usedInValue ctx
-  where usedInValue = (`HS.member` used) . paramName
+  where usedInValue = (`S.member` used) . paramName
         used = freeIn val <> freeIn ctx
 
 -- | Given the context and value merge parameters of a Futhark @loop@,
@@ -188,8 +201,10 @@ loopResultContext ctx val = filter usedInValue ctx
 loopExtType :: [Ident] -> [Ident] -> [ExtType]
 loopExtType ctx val =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType val
-  where inaccessible = HS.fromList $ map identName ctx
+  where inaccessible = S.fromList $ map identName ctx
 
+-- | Any operation must define an instance of this class, which
+-- describes the type of the operation (at the value level).
 class TypedOp op where
   opType :: HasScope t m => op -> m [ExtType]
 

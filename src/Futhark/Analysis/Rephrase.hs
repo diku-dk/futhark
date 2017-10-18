@@ -1,93 +1,122 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- | Facilities for changing the lore of some fragment, with no context.
 module Futhark.Analysis.Rephrase
        ( rephraseProg
-       , rephraseFunDec
+       , rephraseFunDef
        , rephraseExp
        , rephraseBody
-       , rephraseBinding
+       , rephraseStm
        , rephraseLambda
        , rephraseExtLambda
        , rephrasePattern
+       , rephrasePatElem
        , Rephraser (..)
+
+       , castStm
        )
 where
 
-import Control.Monad.Identity
+import Control.Applicative
+
+import Prelude
+
 import Futhark.Representation.AST
 
-data Rephraser from to
-  = Rephraser { rephraseExpLore :: ExpAttr from -> ExpAttr to
-              , rephraseLetBoundLore :: LetAttr from -> LetAttr to
-              , rephraseFParamLore :: FParamAttr from -> FParamAttr to
-              , rephraseLParamLore :: LParamAttr from -> LParamAttr to
-              , rephraseBodyLore :: BodyAttr from -> BodyAttr to
-              , rephraseRetType :: RetType from -> RetType to
-              , rephraseOp :: Op from -> Op to
+data Rephraser m from to
+  = Rephraser { rephraseExpLore :: ExpAttr from -> m (ExpAttr to)
+              , rephraseLetBoundLore :: LetAttr from -> m (LetAttr to)
+              , rephraseFParamLore :: FParamAttr from -> m (FParamAttr to)
+              , rephraseLParamLore :: LParamAttr from -> m (LParamAttr to)
+              , rephraseBodyLore :: BodyAttr from -> m (BodyAttr to)
+              , rephraseRetType :: RetType from -> m (RetType to)
+              , rephraseOp :: Op from -> m (Op to)
               }
 
-rephraseProg :: Rephraser from to -> Prog from -> Prog to
-rephraseProg rephraser = Prog . map (rephraseFunDec rephraser) . progFunctions
+rephraseProg :: Monad m => Rephraser m from to -> Prog from -> m (Prog to)
+rephraseProg rephraser = fmap Prog . mapM (rephraseFunDef rephraser) . progFunctions
 
-rephraseFunDec :: Rephraser from to -> FunDec from -> FunDec to
-rephraseFunDec rephraser fundec =
-  fundec { funDecBody = rephraseBody rephraser $ funDecBody fundec
-         , funDecParams = map (rephraseParam $ rephraseFParamLore rephraser) $
-                          funDecParams fundec
-         , funDecRetType = rephraseRetType rephraser $ funDecRetType fundec
-         }
+rephraseFunDef :: Monad m => Rephraser m from to -> FunDef from -> m (FunDef to)
+rephraseFunDef rephraser fundec = do
+  body' <- rephraseBody rephraser $ funDefBody fundec
+  params' <- mapM (rephraseParam $ rephraseFParamLore rephraser) $ funDefParams fundec
+  rettype' <- rephraseRetType rephraser $ funDefRetType fundec
+  return fundec { funDefBody = body', funDefParams = params', funDefRetType = rettype' }
 
-rephraseExp :: Rephraser from to -> Exp from -> Exp to
-rephraseExp = mapExp . mapper
+rephraseExp :: Monad m => Rephraser m from to -> Exp from -> m (Exp to)
+rephraseExp = mapExpM . mapper
 
-rephraseBinding :: Rephraser from to -> Binding from -> Binding to
-rephraseBinding rephraser (Let pat lore e) =
-  Let
-  (rephrasePattern (rephraseLetBoundLore rephraser) pat)
-  (rephraseExpLore rephraser lore)
-  (rephraseExp rephraser e)
+rephraseStm :: Monad m => Rephraser m from to -> Stm from -> m (Stm to)
+rephraseStm rephraser (Let pat (StmAux cs attr) e) =
+  Let <$>
+  rephrasePattern (rephraseLetBoundLore rephraser) pat <*>
+  (StmAux cs <$> rephraseExpLore rephraser attr) <*>
+  rephraseExp rephraser e
 
-rephrasePattern :: (from -> to)
+rephrasePattern :: Monad m =>
+                   (from -> m to)
                 -> PatternT from
-                -> PatternT to
+                -> m (PatternT to)
 rephrasePattern f (Pattern context values) =
-  Pattern (rephrase context) (rephrase values)
-  where rephrase = map (rephrasePatElem f)
+  Pattern <$> rephrase context <*> rephrase values
+  where rephrase = mapM $ rephrasePatElem f
 
-rephrasePatElem :: (from -> to) -> PatElemT from -> PatElemT to
+rephrasePatElem :: Monad m => (from -> m to) -> PatElemT from -> m (PatElemT to)
 rephrasePatElem rephraser (PatElem ident BindVar from) =
-  PatElem ident BindVar $ rephraser from
-rephrasePatElem rephraser (PatElem ident (BindInPlace cs src is) from) =
-  PatElem ident (BindInPlace cs src is) $ rephraser from
+  PatElem ident BindVar <$> rephraser from
+rephrasePatElem rephraser (PatElem ident (BindInPlace src is) from) =
+  PatElem ident (BindInPlace src is) <$> rephraser from
 
-rephraseParam :: (from -> to) -> ParamT from -> ParamT to
+rephraseParam :: Monad m => (from -> m to) -> ParamT from -> m (ParamT to)
 rephraseParam rephraser (Param name from) =
-  Param name $ rephraser from
+  Param name <$> rephraser from
 
-rephraseBody :: Rephraser from to -> Body from -> Body to
+rephraseBody :: Monad m => Rephraser m from to -> Body from -> m (Body to)
 rephraseBody rephraser (Body lore bnds res) =
-  Body
-  (rephraseBodyLore rephraser lore)
-  (map (rephraseBinding rephraser) bnds)
-  res
+  Body <$>
+  rephraseBodyLore rephraser lore <*>
+  mapM (rephraseStm rephraser) bnds <*>
+  pure res
 
-rephraseLambda :: Rephraser from to -> Lambda from -> Lambda to
-rephraseLambda rephraser lam =
-  lam { lambdaBody = rephraseBody rephraser $ lambdaBody lam
-      , lambdaParams = map (rephraseParam $ rephraseLParamLore rephraser) $
-                       lambdaParams lam
-      }
+rephraseLambda :: Monad m => Rephraser m from to -> Lambda from -> m (Lambda to)
+rephraseLambda rephraser lam = do
+  body' <- rephraseBody rephraser $ lambdaBody lam
+  params' <- mapM (rephraseParam $ rephraseLParamLore rephraser) $ lambdaParams lam
+  return lam { lambdaBody = body', lambdaParams = params' }
 
-rephraseExtLambda :: Rephraser from to -> ExtLambda from -> ExtLambda to
-rephraseExtLambda rephraser lam =
-  lam { extLambdaBody = rephraseBody rephraser $ extLambdaBody lam
-      , extLambdaParams = map (rephraseParam $ rephraseLParamLore rephraser) $
-                          extLambdaParams lam
-      }
+rephraseExtLambda :: Monad m => Rephraser m from to -> ExtLambda from -> m (ExtLambda to)
+rephraseExtLambda rephraser lam = do
+  body' <- rephraseBody rephraser $ extLambdaBody lam
+  params' <- mapM (rephraseParam $ rephraseLParamLore rephraser) $ extLambdaParams lam
+  return lam { extLambdaBody = body', extLambdaParams = params' }
 
-mapper :: Rephraser from to -> Mapper from to Identity
+mapper :: Monad m => Rephraser m from to -> Mapper from to m
 mapper rephraser = identityMapper {
-    mapOnBody = return . rephraseBody rephraser
-  , mapOnRetType = return . rephraseRetType rephraser
-  , mapOnFParam = return . rephraseParam (rephraseFParamLore rephraser)
-  , mapOnOp = return . rephraseOp rephraser
+    mapOnBody = const $ rephraseBody rephraser
+  , mapOnRetType = rephraseRetType rephraser
+  , mapOnFParam = rephraseParam (rephraseFParamLore rephraser)
+  , mapOnLParam = rephraseParam (rephraseLParamLore rephraser)
+  , mapOnOp = rephraseOp rephraser
   }
+
+-- | Convert a binding from one lore to another, if possible.
+castStm :: (SameScope from to,
+            ExpAttr from ~ ExpAttr to,
+            BodyAttr from ~ BodyAttr to,
+            RetType from ~ RetType to) =>
+           Stm from -> Maybe (Stm to)
+castStm = rephraseStm caster
+
+caster :: (SameScope from to,
+           ExpAttr from ~ ExpAttr to,
+           BodyAttr from ~ BodyAttr to,
+           RetType from ~ RetType to) =>
+          Rephraser Maybe from to
+caster = Rephraser { rephraseExpLore = Just
+                   , rephraseBodyLore = Just
+                   , rephraseLetBoundLore = Just
+                   , rephraseFParamLore = Just
+                   , rephraseLParamLore = Just
+                   , rephraseOp = const Nothing
+                   , rephraseRetType = Just
+                   }

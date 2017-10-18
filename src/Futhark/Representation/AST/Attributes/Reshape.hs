@@ -7,6 +7,7 @@ module Futhark.Representation.AST.Attributes.Reshape
 
          -- * Construction
        , shapeCoerce
+       , repeatShapes
 
          -- * Execution
        , reshapeOuter
@@ -32,6 +33,7 @@ import Data.Foldable
 
 import Prelude hiding (sum, product, quot)
 
+import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Syntax
 import Futhark.Util.IntegralExp
 
@@ -50,9 +52,19 @@ newShape = Shape . newDims
 
 -- ^ Construct a 'Reshape' where all dimension changes are
 -- 'DimCoercion's.
-shapeCoerce :: Certificates -> [SubExp] -> VName -> Exp lore
-shapeCoerce cs newdims arr =
-  PrimOp $ Reshape cs (map DimCoercion newdims) arr
+shapeCoerce :: [SubExp] -> VName -> Exp lore
+shapeCoerce newdims arr =
+  BasicOp $ Reshape (map DimCoercion newdims) arr
+
+-- | Construct a pair suitable for a @Repeat@.
+repeatShapes :: [Shape] -> Type -> ([Shape], Shape)
+repeatShapes shapes t =
+  case splitAt t_rank shapes of
+    (outer_shapes, [inner_shape]) ->
+      (outer_shapes, inner_shape)
+    _ ->
+      (shapes ++ replicate (length shapes - t_rank) (Shape []), Shape [])
+  where t_rank = arrayRank t
 
 -- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the outer @n@ dimensions of @oldshape@ with @newshape@.

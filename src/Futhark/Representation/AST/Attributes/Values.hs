@@ -5,30 +5,25 @@ module Futhark.Representation.AST.Attributes.Values
        (
          valueType
        , valueShape
-       , valueSize
 
-         -- * Extracting
-       , valueInt
-
-         -- * Rearranging
+         -- * Frobbing arrays
        , permuteArray
-
-         -- * Miscellaneous
-       , arrayString
-       , zeroIsh
-       , oneIsh
+       , rotateArray
+       , concatArrays
+       , splitArray
+       , flatSlice
        )
        where
 
-import Data.Array
+import Data.Array hiding (indices)
 import Data.List
-
 
 import Prelude
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Rearrange
+import Futhark.Util (chunk)
 
 -- | Return the type of the given value.
 valueType :: Value -> Type
@@ -36,13 +31,6 @@ valueType (PrimVal v) =
   Prim $ primValueType v
 valueType (ArrayVal _ et shape) =
   Array et (Shape $ map constant shape) NoUniqueness
-
--- | Return the size of the first dimension of an array, or zero for
--- non-arrays.
-valueSize :: Value -> Int
-valueSize t = case valueShape t of
-                []  -> 0
-                n:_ -> n
 
 -- | Return a list of the sizes of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
@@ -52,13 +40,6 @@ valueSize t = case valueShape t of
 valueShape :: Value -> [Int]
 valueShape (ArrayVal _ _ shape) = shape
 valueShape _ = []
-
--- | Convert an 'IntValue' to an 'Integer'.
-valueInt :: IntValue -> Integer
-valueInt (Int8Value x) = toInteger x
-valueInt (Int16Value x) = toInteger x
-valueInt (Int32Value x) = toInteger x
-valueInt (Int64Value x) = toInteger x
 
 -- | Permute the dimensions of an array value.  If the given value is
 -- not an array, it is returned unchanged.  The length of the
@@ -78,12 +59,93 @@ permuteArray perm (ArrayVal inarr et oldshape) =
         picks (n:ns) = [ i:is | is <- picks ns, i <- [0..n-1] ]
 permuteArray _ v = v
 
--- | If the given value is a nonempty array containing only
--- characters, return the corresponding 'String', otherwise return
--- 'Nothing'.
-arrayString :: Value -> Maybe String
-arrayString (ArrayVal arr _ _)
-  | c:cs <- elems arr = mapM asChar $ c:cs
-  where asChar (CharValue c) = Just c
-        asChar _           = Nothing
-arrayString _ = Nothing
+-- | Rotate the elements of an array as per the 'Rotate' BasicOp.
+rotateArray :: [Int] -> Value -> Value
+rotateArray ks (ArrayVal inarr et shape) =
+  ArrayVal (listArray (bounds inarr) $ rotate ks shape $ elems inarr) et shape
+rotateArray _ v = v
+
+rotate :: [Int] -> [Int] -> [a] -> [a]
+rotate (k:ks) (d:ds) xs =
+  -- (0) Split xs into rows.
+  -- (1) Recursively rotate every row.
+  -- (2) Then rotate the order of rows.
+  let rows = chunk (product ds) xs
+      xs_rotated = map (rotate ks ds) rows
+      new_rows
+        | k > 0 = drop k xs_rotated ++ take k xs_rotated
+        | otherwise = drop (d+k) xs_rotated ++ take (d+k) xs_rotated
+  in concat new_rows
+rotate _ _ xs = xs
+
+-- | Concatenate two arrays as per the 'Concat' BasicOp.
+concatArrays :: Int -> Value -> Value -> Value
+concatArrays i (ArrayVal arr1 et shape1) (ArrayVal arr2 _ shape2) =
+  ArrayVal (listArray (0,product shape3-1) $ concatenate xcs xs ycs ys) et shape3
+  where xcs = product $ drop i shape1
+        xs = elems arr1
+        ycs = product $ drop i shape2
+        ys = elems arr2
+        shape3 = zipWith3 update shape1 shape2 [0..]
+        update x y j | i == j    = x + y
+                     | otherwise = x
+concatArrays _ x _ = x
+
+concatenate :: Int -> [a] -> Int -> [a] -> [a]
+concatenate _ [] _ ys = ys
+concatenate _ xs _ [] = xs
+concatenate xcs xs ycs ys =
+  let xs' = chunk xcs xs
+      ys' = chunk ycs ys
+  in concat $ zipWith (++) xs' ys'
+
+splitArray :: Int -> [Int] -> Value -> [Value]
+splitArray i splits (ArrayVal arr et shape) =
+  [ ArrayVal (listArray (0, product splitshape-1) splitarr) et splitshape
+  | (splitarr, splitshape) <- split i splits shape (elems arr) ]
+splitArray _ _ v = [v]
+
+split :: Int -> [Int] -> [Int] -> [a] -> [([a],[Int])]
+split 0 ss (_:ds) xs =
+  let rows = chunk (product ds) xs
+      mkSplit n m = (concat $ take (m-n) $ drop n rows,
+                     (m-n) : ds)
+  in zipWith mkSplit (scanl (+) 0 ss) (scanl1 (+) ss)
+split i ss (d:ds) xs =
+  let rows = chunk (product ds) xs
+  in case map (split (i-1) ss ds) rows of
+    [] -> []
+    r:rs -> let (splits, shapes) = unzip $ foldl combine r rs
+            in zip splits $ map (d:) shapes
+  where combine :: [([a],[Int])] -> [([a],[Int])] -> [([a],[Int])]
+        combine splits_and_shapes1 splits_and_shapes2 =
+          let (splits1, shapes1) = unzip splits_and_shapes1
+              (splits2, _) = unzip splits_and_shapes2
+          in zip (zipWith (++) splits1 splits2) shapes1
+split _ _ ds xs = [(xs, ds)]
+
+-- | The row-major flat indices of the given slice in an array of the
+-- given shape.
+flatSlice :: Slice Int -> [Int] -> [Int]
+flatSlice slice shape = indices slice shape [0..product shape-1]
+
+-- | @stride s@ takes every @s@'th element of a list.
+stride :: Int -> [b] -> [b]
+stride s = map snd . filter ((==) 0 . flip mod s . fst) . zip [0 ..]
+
+indices :: Slice Int -> [Int] -> [a] -> [a]
+indices (DimFix i:is) (_:ds) xs =
+  let rows = chunk (product ds) xs
+  in case drop i rows of
+       [] -> error "Values indices: out of bounds"
+       xs':_ -> indices is ds xs'
+indices (DimSlice i n s:is) (_:ds) xs
+  | s < 0 =
+      let rows = chunk (product ds) xs
+          sliced_rows = take n $ stride (negate s) $ reverse $ take (i+1) rows
+      in concatMap (indices is ds) sliced_rows
+  | s > 0 =
+      let rows = chunk (product ds) xs
+          sliced_rows = take n $ stride s $ drop i rows
+      in concatMap (indices is ds) sliced_rows
+indices _ _ xs = xs

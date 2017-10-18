@@ -1,352 +1,538 @@
 ;;; futhark-mode.el --- major mode for editing Futhark source files
 
-;; Copyright (C) DIKU, University of Copenhagen
-;;   Written by Troels Henriksen (athas@sigkill.dk) in 2013.
-;;   Improved by Niels G. W. Serup (ngws@metanohi.name) in 2014.
+;; Copyright (C) DIKU 2013-2017, University of Copenhagen
+;;
+;; URL: https://github.com/HIPERFIT/futhark
+;; Keywords: languages
+;; Version: 0.1
+;; Package-Requires: ((cl-lib "0.5"))
+
+;; This file is not part of GNU Emacs.
+
+;;; License:
+;; ICS <https://github.com/HIPERFIT/futhark/blob/master/LICENSE>
 
 ;;; Commentary:
-;; This mode provides syntax highlighting and automatic indentation
-;; for Futhark source files.  There is sadly yet no automatic
-;; recompilation or interactive environment, mostly because there is
-;; no good futharki yet.  Change keybindings in `futhark-mode-map` and add
-;; hooks to `futhark-mode-hook`.
+;; Futhark is a small programming language designed to be compiled to
+;; efficient GPU code.  This Emacs mode provides syntax highlighting and
+;; conservative automatic indentation for Futhark source code.
 ;;
-;; Provided this file is loaded, futhark-mode is automatically engaged when
-;; opening .fut files.
+;; Files with the ".fut" extension are automatically handled by this mode.
+;;
+;; For extensions: Define local keybindings in `futhark-mode-map'.  Add startup
+;; functions to `futhark-mode-hook'.
 
 ;;; Code:
 
-(require 'cl)
-(require 'flycheck nil t) ;; no error if not found
-
-(defvar futhark-mode-hook nil
-  "Hook for Futhark mode - run whenever the mode is entered.")
-
-(defvar futhark-mode-map
-  (let ((map (make-keymap)))
-    map)
-  "Keymap for Futhark major mode.")
-
-(defcustom futhark-indent-level 2
-  "Indentation of blocks in Futhark."
-  :group 'futhark
-  :type '(integer))
+(require 'cl-lib)
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
 
-(defconst futhark-keywords
-  '("if" "then" "else" "let" "loop" "in" "with"
-    "fun" "fn" "for" "while" "do" "do" "op" "not" "pow"
-    "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "reduceComm"
-    "zip" "unzip" "zipWith"
-    "scan" "split" "concat" "filter" "partition" "redomap"
-    "empty" "copy" "size" "unsafe" "default" "include")
-  "A list of Futhark keywords.")
+(defvar futhark-mode-hook nil
+  "Hook for `futhark-mode'.  Is run whenever the mode is entered.")
 
-(defconst futhark-types
-  '("i8" "i16" "i32" "i64"
-    "u8" "u16" "u32" "u64"
-    "int" "real" "bool" "char" "f32" "f64")
-  "A list of Futhark types.")
+(defvar futhark-mode-map
+  (make-keymap)
+  "Keymap for `futhark-mode'.")
 
-(defconst futhark-vars
-  "\\b[_'[:alnum:]]+\\b"
-  "A regex descriping Futhark variables.")
 
-(defconst futhark-font-lock-keywords-1
-  `(
-    ;; to recognize the whole of xs_zip_res as a variable
-    (,(concat futhark-vars (regexp-opt futhark-keywords t) futhark-vars) . font-lock-variable-name-face)
-    (,(concat futhark-vars (regexp-opt futhark-keywords t)             ) . font-lock-variable-name-face)
-    (,(concat              (regexp-opt futhark-keywords t) futhark-vars) . font-lock-variable-name-face)
-    (,(concat "\\b" (regexp-opt futhark-keywords t) "\\b") . font-lock-builtin-face)
-    (,(concat "\\b" (regexp-opt futhark-types t) "\\b") . font-lock-type-face)
-    (,(concat futhark-vars) . font-lock-variable-name-face)
-    )
-  "Minimal highlighting expressions for Futhark mode.")
+;;; Highlighting
 
-(defconst futhark-font-lock-keywords-2
-  (append futhark-font-lock-keywords-1
-          '(
-            ;; Character literals
-            ("'\\([^\\'\n]\\|\\\\[a-z']\\)'" . font-lock-constant-face)
-            ;; Boolean literals
-            ("\\<\\(True\\|False\\)\\>" . font-lock-constant-face)
-            ;; Numeric literals; both integers and floating-point.
-            ("-?\\([0-9]+\\|\\([0-9]+\\(\\.[0-9]*\\)?\\|\\.[0-9]+\\)\\([eE][\+\~]?[0-9]+\\)?\\)" . font-lock-constant-face)
-            ))
-  "As `futhark-font-lock-keywords-1`, but also highlight constants.")
+(let (
+      (ws "[[:space:]\n]*")
+      (ws1 "[[:space:]\n]+")
+      )
 
-(defvar futhark-font-lock-keywords futhark-font-lock-keywords-2
-  "Default highlighting expressions for Futhark mode.")
+  ;; FIXME: Backslash should also be a keyword (for anonymous functions), but
+  ;; Emacs Lisp is stupid.
+  (defconst futhark-keywords
+    '("if" "then" "else" "let" "loop" "in" "with" "type"
+      "fun" "val" "entry" "for" "while" "do"
+      "empty" "unsafe" "default" "include" "import" "module" "open" "local")
+    "All Futhark keywords.")
+
+  (defconst futhark-builtin-functions
+    '("iota" "shape" "replicate" "reshape" "rearrange" "transpose" "rotate"
+      "split" "concat" "zip" "unzip" "unsafe" "copy" "map" "reduce"
+      "reduce_comm" "scan" "filter" "partition" "scatter" "stream_map"
+      "stream_map_per" "stream_red" "stream_map_per" "stream_seq")
+    "All Futhark builtin SOACs, functions, and non-symbolic operators.")
+
+  (defconst futhark-builtin-types
+    '("i8" "i16" "i32" "i64"
+      "u8" "u16" "u32" "u64"
+      "f32" "f64"
+      "int" "real" "bool")
+    "A list of Futhark types.")
+
+  (defconst futhark-booleans
+    '("true" "false")
+    "All Futhark booleans.")
+
+  (defconst futhark-var
+    (concat "\\(?:" "[_'[:alnum:]]+" "\\)")
+    "A regex describing a Futhark variable.")
+
+  (defconst futhark-operator
+    (concat "["
+            "+*\\-/%!<>=&|@"
+            "]" "+"))
+
+  (defconst futhark-non-tuple-type
+    (concat "\\(?:"
+            "\\*" "?"
+            "\\(?:"
+            "\\["
+            "\\(?:"
+            ""
+            "\\|"
+            futhark-var
+            "\\)"
+            "\\]"
+            "\\)" "*"
+            futhark-var
+            "\\)"
+            )
+    "A regex describing a Futhark type which is not a tuple")
+
+  ;; This does not work with nested tuple types.
+  (defconst futhark-tuple-type
+    (concat "\\(?:"
+            "("
+            "\\(?:" ws futhark-non-tuple-type ws "," "\\)" "*"
+            ws futhark-non-tuple-type ws
+            ")"
+            "\\)"
+            )
+    "A regex describing a Futhark type which is a tuple")
+
+  (defconst futhark-type
+    (concat "\\(?:"
+            futhark-non-tuple-type
+            "\\|"
+            futhark-tuple-type
+            "\\)"
+            )
+    "A regex describing a Futhark type")
+
+
+  (defvar futhark-font-lock
+    `(
+
+      ;; Function declarations.
+      (,(concat "\\(?:" "fun" "\\|" "val" "\\|" "entry" "\\)"
+                ws1 "\\(" futhark-var "\\)")
+       . '(1 font-lock-function-name-face))
+
+      ;; Variable and tuple declarations.
+      ;;; Lets.
+      ;;;; Primitive values.
+      (,(concat "let" ws1
+                "\\(" futhark-var "\\)")
+       . '(1 font-lock-variable-name-face))
+      ;;;; Tuples.  FIXME: It would be nice to highlight only the variable names
+      ;;;; inside the parantheses, and not also the commas.
+      (,(concat "let" ws1 "("
+                "\\(" "[^)]+" "\\)")
+       . '(1 font-lock-variable-name-face))
+      ;;; Function parameters.
+      (,(concat "\\(" futhark-var "\\)" ws ":")
+       . '(1 font-lock-variable-name-face))
+
+      ;; Keywords.
+      (,(regexp-opt futhark-keywords 'words)
+       . font-lock-keyword-face)
+
+      ;; Types.
+      ;;; Type aliases.  FIXME: It would be nice to highlight also the right
+      ;;; hand side.
+      (,(concat "type" ws1 "\\(" futhark-type "\\)")
+       . '(1 font-lock-type-face))
+      ;;; Function parameters types and return type.
+      (,(concat ":" ws "\\(" "[^=,)]+" "\\)")
+       . '(1 font-lock-type-face))
+      ;;; Builtin types.
+      (,(regexp-opt futhark-builtin-types 'words)
+       . font-lock-type-face)
+
+      ;; Builtins.
+      ;;; Functions.
+      ;;;; Builtin functions.
+      (,(regexp-opt futhark-builtin-functions 'words)
+       . font-lock-builtin-face)
+      ;;;; Tuple accessors.
+      (,(concat "#" "[[:digit:]]+")
+       . font-lock-builtin-face)
+      ;;; Operators.
+      (,futhark-operator
+       . font-lock-builtin-face)
+
+      ;; Constants.
+      ;;; Booleans.
+      (,(regexp-opt futhark-booleans 'words)
+       . font-lock-constant-face)
+
+      )
+    "Highlighting expressions for Futhark.")
+  )
 
 (defvar futhark-mode-syntax-table
   (let ((st (make-syntax-table)))
     ;; Define the -- line comment syntax.
     (modify-syntax-entry ?- ". 123" st)
     (modify-syntax-entry ?\n ">" st)
-    ;; apostrophe can be used in variable names, should be in symbol class
-    (modify-syntax-entry ?' "_" st)
+    ;; Make apostrophe and underscore be part of variable names.
+    ;; Technically, they should probably be part of the symbol class,
+    ;; but it works out better for some of the regexpes if they are part
+    ;; of the word class.
+    (modify-syntax-entry ?' "w" st)
+    (modify-syntax-entry ?_ "w" st)
+    (modify-syntax-entry ?\\ "_" st)
     st)
   "Syntax table used in `futhark-mode'.")
 
 
 ;;; Indentation
 
+(defvar futhark-indent-level 2
+  "The basic indent level for `futhark-mode'.")
+
 (defun futhark-indent-line ()
   "Indent current line as Futhark code."
-  (interactive)
   (let ((savep (> (current-column) (current-indentation)))
-    (indent (or (futhark-calculate-indentation)
-                (current-indentation))))
-    (if savep
+        (indent (or (futhark-calculate-indentation)
+                    (current-indentation))))
+    (if savep ; The cursor is beyond leading whitespace.
         (save-excursion (indent-line-to indent))
       (indent-line-to indent))))
 
-;; Keywords on which to base indentation.
-(defstruct futhark-indkwd name level pos)
-
-(defun futhark-indkwd-column (k)
-  (save-excursion
-    (goto-char (futhark-indkwd-pos k))
-    (current-column)))
-
-(defun futhark-indkwd-linum (k)
-  (line-number-at-pos (futhark-indkwd-pos k)))
-
-(defun futhark-indkwd-compare (a b)
-  "Compare two positions of keywords to see which keyword should
-be indented against.  Prefer the keywords closest to you and with
-least existing indentation."
-  (or (> (futhark-indkwd-linum a) (futhark-indkwd-linum b))
-      (and (= (futhark-indkwd-linum a) (futhark-indkwd-linum b))
-           (< (futhark-indkwd-column a) (futhark-indkwd-column b)))))
-
-(defun futhark-backward-part ()
-  "Try to jump back one sexp.  The net effect seems to be that it
-works ok."
-  (ignore-errors (backward-sexp 1) t))
-
 (defun futhark-calculate-indentation ()
-  "Calculate the indentation for the current line.  In general,
-prefer as little indentation as possible to visually separate the
-code, but use more detailed indentation with \"if\", \"then\",
-and \"else\", and \"let\", \"loop\", and \"in\"."
+  "Calculate the indentation for the current line.
+In general, prefer as little indentation as possible."
   (let ((parse-sexp-lookup-properties t)
-        (parse-sexp-ignore-comments t)
-        (oldp (point)))
+        (parse-sexp-ignore-comments t))
+
     (save-excursion
-      (beginning-of-line-text)
+      (futhark-beginning-of-line-text)
 
-      ;; Align comment to next non-comment line.
-      (when (looking-at "--")
-        (forward-comment (buffer-size)))
+      ;; The following code is fickle and deceptive.  Don't change it
+      ;; unless you kind of know what you're doing!
+      (or
 
-      (or (cond
+       ;; Align comment to next non-comment line.
+       (and (looking-at comment-start)
+            (forward-comment (count-lines (point-min) (point)))
+            (current-column))
 
-           ;; Function definitions to column 0.
-           ((looking-at "fun\\>")
-            0)
-
-           ;; Closing paren and comma indents to opening paren.
-           ((looking-at ",\\|\\s)")
-            (ignore-errors
-              (backward-up-list 1)
-              (current-column)))
-
-           ;; Make "in" align to nearest "let" or "loop".
-           ((looking-at "in")
-            (when
-                ;; Do not use the first-on-line variant, as we're
-                ;; interested in a matching "let" or "loop", not in a
-                ;; short indentation.
-                (or (futhark-find-keyword-backward "let")
-                    (futhark-find-keyword-backward "loop"))
-              (current-column)))
-
-           ;; Make "then" align to nearest "if".
-           ((looking-at "then")
-            (when (futhark-find-keyword-first-on-line-backward "if")
-              (current-column)))
-
-           ;; Make "else if" align to nearest "else" or "if", instead
-           ;; of nearest "then", to avoid very long lines if chained.
-           ((looking-at "else[[:space:]]+if")
-            (let ((p
-                   (or
-                    (search-backward "else" 0 t)
-                    (search-backward "if" 0 t))))
-              (when p
-                (goto-char p)
-                (current-column))))
-
-           ;; Make "else" align to nearest "then".
-           ((looking-at "else")
-            (when (futhark-find-keyword-first-on-line-backward "then")
-              (current-column))))
-
-          ;; Otherwise, if the previous line ends with "in", indent to
-          ;; the matching "let" or "loop".
-          (save-excursion
-            (when (and (futhark-backward-part)
-                       (looking-at "in")
-                       (or (futhark-find-keyword-backward "let")
-                           (futhark-find-keyword-backward "loop")))
-              (current-column)))
-
-          ;; Otherwise, if the previous line ends with "=", indent to
-          ;; the matching "let" if it's close.
-          (save-excursion
-            (when (and (futhark-backward-part)
-                       (looking-at "=")
-                       (let ((linum (line-number-at-pos)))
-                         (when (futhark-find-keyword-backward "let")
-                           (= linum (line-number-at-pos)))))
-              (+ futhark-indent-level (current-column))))
-
-          ;; Otherwise, try to align to a control keyword if the
-          ;; previous line does not end with a comma.
-          (when (not (save-excursion
-                       (when (futhark-backward-part)
-                         (end-of-line)
-                         (goto-char (1- (point)))
-                         (looking-at ","))))
-            (let ((indkwds (list
-                            ;; Don't further indent lines after "in".
-                            (make-futhark-indkwd :name "in" :level 0)
-                            ;; In general, "do" shouldn't be the first
-                            ;; word on a line, but don't fret over it if
-                            ;; it is.
-                            (make-futhark-indkwd :name "do" :level 0)
-                            ;; Don't consider "let" heavy lines reason
-                            ;; to further indent.
-                            (make-futhark-indkwd :name "let" :level 0)
-                            ;; The rest is more obvious.
-                            (make-futhark-indkwd :name "else" :level 1)
-                            (make-futhark-indkwd :name "then" :level 1)
-                            (make-futhark-indkwd :name "loop" :level 1)
-                            (make-futhark-indkwd :name "for" :level 1)
-                            (make-futhark-indkwd :name "fn" :level 1)
-                            (make-futhark-indkwd :name "fun" :level 1))))
-              (mapc (lambda (k)
-                      (save-excursion
-                        (when (futhark-find-keyword-first-on-line-backward (futhark-indkwd-name k))
-                          (setf (futhark-indkwd-pos k) (point))))) indkwds)
-              (let ((indkwd-best
-                     (car (sort (remove-if
-                                 (lambda (k) (null (futhark-indkwd-pos k)))
-                                 indkwds)
-                                'futhark-indkwd-compare))))
-                (when indkwd-best
-                  (save-excursion
-                    (goto-char (futhark-indkwd-pos indkwd-best))
-                    (+ (* futhark-indent-level (futhark-indkwd-level indkwd-best))
-                       (current-column)))))))
-
-          ;; Otherwise, try to align to the top element in an array
-          ;; literal or similar structure.
-          (when (ignore-errors (backward-up-list 1) t)
-            (goto-char (1+ (point)))
+       ;; Align global definitions and headers to nearest module definition or
+       ;; column 0.
+       (and (or (futhark-looking-at-word "fun")
+                (futhark-looking-at-word "entry")
+                (futhark-looking-at-word "type")
+                (futhark-looking-at-word "val")
+                (futhark-looking-at-word "module")
+                (futhark-looking-at-word "include")
+                (futhark-looking-at-word "import")
+                (futhark-looking-at-word "default"))
             (or
              (save-excursion
-               (when (re-search-forward "[^[:space:]]" (line-end-position) t)
-                 (goto-char (1- (point)))
-                 (current-column)))
-             ;; If the top element is not on the same line as the opening paren,
-             ;; use 1 indent level relative to the previous line.
-             (save-excursion
-               (goto-char oldp)
-               (forward-line -1)
-               (beginning-of-line-text)
-               (+ futhark-indent-level (current-column)))
-             ))
+               (and
+                (ignore-errors (backward-up-list 1) t)
+                (looking-at "{")
+                (or
+                 (futhark-keyword-backward "module")
+                 (futhark-keyword-backward "open")
+                 (and
+                  (ignore-errors (backward-up-list 1) t)
+                  (or
+                   (futhark-keyword-backward "module")
+                   (futhark-keyword-backward "open"))))
+                (+ futhark-indent-level (current-column))))
+             0))
 
-          ;; In all remaining cases (what are those?), keep the current
-          ;; indentation.
-          ))))
+       ;; Align closing parentheses and commas to the matching opening
+       ;; parenthesis.
+       (save-excursion
+         (and (looking-at (regexp-opt '(")" "]" ",")))
+              (ignore-errors
+                (backward-up-list 1)
+                (current-column))))
 
-(defun futhark-find-keyword-first-on-line-backward (word &optional is-at-in)
-  "Do the same as `futhark-find-keyword-backward', except if one line
-  has several matching keywords, set the mark at the first one."
-  (let ((is-at-in (or is-at-in (looking-at "in"))))
-    (when (futhark-find-keyword-backward word is-at-in)
-      (let ((p (point)))
-        (while (and (when (futhark-find-keyword-backward word is-at-in)
-                      (not (= (point) p)))
-                    (= (line-number-at-pos) (line-number-at-pos p)))
-          (setq p (point)))
-        (goto-char p))
-      t)))
-
-(defun futhark-find-keyword-backward (word &optional is-at-in)
-  "Find a keyword before the current position.  Set mark and
-return t if found; return nil otherwise."
-  (let ((oldp (point))
-        ;; We need to count "if"s and "else"s to properly indent.
-        (missing-ifs 0)
-        ;; The same with "let", "loop" and "in", though only if we
-        ;; start at "in".
-        (missing-outs 0)
-        ;; "in" is special, since starting at it means aligning it to
-        ;; the correct "let" or "loop", which means counting.  In all
-        ;; other cases, we just want the least space-using
-        ;; indentation.
-        (orig-in (or is-at-in (looking-at "in")))
-        ;; Only look in the current paren-delimited code.
-        (topp (or (ignore-errors
-                    (save-excursion
+       ;; Align closing curly brackets to the matching opening 'module'
+       ;; keyword.
+       (save-excursion
+         (and (looking-at "}")
+              (ignore-errors
+                (backward-up-list 1)
+                (or
+                 (save-excursion
+                   (ignore-errors
+                     (and
                       (backward-up-list 1)
-                      (point)))
-                  -1)))
+                      (looking-at "(")
+                      (futhark-keyword-backward "module")
+                      (current-column))))
+                 (and
+                  (futhark-keyword-backward "module")
+                  (current-column))))))
+
+       ;; If the previous code line ends with "=", align to the matching "let"
+       ;; or "loop" column plus one indent level.
+       (save-excursion
+         (and (futhark-backward-part)
+              (looking-at "=[[:space:]]*$")
+              (let ((m
+                     (futhark-max
+                      (save-excursion
+                        (futhark-keyword-backward "let"))
+                      (save-excursion
+                        (futhark-keyword-backward "loop")))))
+                (and (not (eq nil m))
+                     (goto-char m)
+                     (+ (current-column) futhark-indent-level)))))
+
+       ;; Don't align "let" if the previous line is blank (be conservative!).
+       (save-excursion
+         (and (futhark-looking-at-word "let")
+              (let ((cur (current-column)))
+                (save-excursion
+                  (forward-line -1)
+                  (and
+                   (futhark-is-empty-line)
+                   cur)))))
+
+       ;; Align "in", "let", or "loop" to the closest previous "let" or "loop".
+       (save-excursion
+         (and (or (futhark-looking-at-word "in")
+                  (futhark-looking-at-word "let")
+                  (futhark-looking-at-word "loop"))
+              (let ((m
+                     (futhark-max
+                      (save-excursion
+                        (futhark-keyword-backward "let"))
+                      (save-excursion
+                        (futhark-keyword-backward "loop")))))
+                (and (not (eq nil m))
+                     (goto-char m)
+                     (current-column)))))
+
+       ;; Otherwise, if the previous code line ends with "in" align to
+       ;; the matching "let" or "loop" column.
+       (save-excursion
+         (and (futhark-backward-part)
+              (looking-at "\\<in[[:space:]]*$")
+              (let ((m
+                     (futhark-max
+                      (save-excursion
+                        (futhark-keyword-backward "let"))
+                      (save-excursion
+                        (futhark-keyword-backward "loop")))))
+                (and (not (eq nil m))
+                     (goto-char m)
+                     (current-column)))))
+
+       ;; Align "then" to nearest "else if" or "if".
+       (save-excursion
+         (and (futhark-looking-at-word "then")
+              (futhark-keyword-backward "if")
+              (or
+               (let ((curline (line-number-at-pos)))
+                 (save-excursion
+                   (and (futhark-backward-part)
+                        (= (line-number-at-pos) curline)
+                        (futhark-looking-at-word "else")
+                        (current-column))))
+               (current-column))))
+
+       ;; Align "else" to nearest "then" or "else if" or "if".
+       (save-excursion
+         (and (futhark-looking-at-word "else")
+              (let ((m
+                     (futhark-max
+                      (save-excursion
+                        (and
+                         (futhark-keyword-backward "then")
+                         (futhark-is-beginning-of-line-text)
+                         (point)))
+                      (save-excursion
+                        (let ((pos0 (futhark-keyword-backward "if")))
+                          (or
+                           (let ((curline (line-number-at-pos)))
+                             (and (futhark-backward-part)
+                                  (= (line-number-at-pos) curline)
+                                  (futhark-looking-at-word "else")
+                                  (point)))
+                           pos0))))))
+                (and (not (eq nil m))
+                     (goto-char m)
+                     (current-column)))))
+
+       ;; Align general content inside parentheses to the first general
+       ;; non-space content.
+       (save-excursion
+         (when (ignore-errors (backward-up-list 1) t)
+              (forward-char 1)
+              (futhark-goto-first-text)
+              (and
+               (not (futhark-is-looking-at-keyword))
+               (current-column))))
+
+       ;; Otherwise, keep the user-specified indentation level.
+       ))))
+
+(defun futhark-min (a b)
+  "Like `min', but also accepts nil values in A and B."
+  (or (and (eq nil a) b)
+      (and (eq nil b) a)
+      (and (not (eq nil a))
+           (not (eq nil b))
+           (min a b))))
+
+(defun futhark-max (a b)
+  "Like `max', but also accepts nil values in A and B."
+  (or (and (eq nil a) b)
+      (and (eq nil b) a)
+      (and (not (eq nil a))
+           (not (eq nil b))
+           (max a b))))
+
+(defun futhark-beginning-of-line-text ()
+  "Move to the beginning of the non-whitespace text on this line."
+  (beginning-of-line)
+  (futhark-goto-first-text))
+
+(defun futhark-goto-first-text ()
+  "Skip over whitespace."
+  (while (looking-at "[[:space:]\n]")
+    (forward-char)))
+
+(defun futhark-is-beginning-of-line-text ()
+  "Check if point is at the first word on a line."
+  (=
+   (point)
+   (save-excursion
+     (futhark-beginning-of-line-text)
+     (point))))
+
+(defun futhark-is-empty-line ()
+  "Check if the line of the current point is empty.
+It is considered empty if the line consists of zero or more
+whitespace characters."
+  (let ((cur (line-number-at-pos)))
+    (futhark-beginning-of-line-text)
+    (not (= cur (line-number-at-pos)))))
+
+(defun futhark-is-looking-at-keyword ()
+  "Check if we are currently looking at a keyword."
+  (cl-some 'futhark-looking-at-word futhark-keywords))
+
+(defun futhark-backward-part ()
+  "Try to jump back one sexp.
+The net effect seems to be that it works ok."
+  (and (not (bobp))
+       (ignore-errors (backward-sexp 1) t)))
+
+(defun futhark-looking-at-word (word)
+  "Do the same as `looking-at', but also check for blanks around WORD."
+  (looking-at (concat "\\<" word "\\>")))
+
+(defun futhark-back-actual-line ()
+  "Go back to the first non-empty line, or return nil trying."
+  (let (bound)
     (while (and (not (bobp))
-                (> (point) topp)
+                (forward-line -1)
+                (progn (beginning-of-line)
+                       (setq bound (point))
+                       (end-of-line)
+                       t)
+                (ignore-errors
+                  (re-search-backward "^[[:space:]]*$" bound))))))
+
+(defun futhark-keyword-backward (word)
+  "Go to a keyword WORD before the current position.
+Set mark and return t if found; return nil otherwise."
+  ;; FIXME: Support nested let-chains.  This used to work, but was removed
+  ;; because the code was too messy.
+  (let (;; Only look in the current paren-delimited code if present.
+        (startp (point))
+        (topp (or (save-excursion (ignore-errors
+                                    (backward-up-list 1)
+                                    (point)))
+                  (max
+                   (or (save-excursion (futhark-keyword-backward-raw "fun"))
+                       0)
+                   (or (save-excursion (futhark-keyword-backward-raw "entry"))
+                       0))))
+        (result nil))
+
+    (while (and (not result)
                 (futhark-backward-part)
-                (or (not (or (looking-at word)
-                             (looking-at "fun")))
-                    (> missing-ifs 0)
-                    (> missing-outs 0)
-                    ))
-      (cond ((looking-at "if")
-             (setq missing-ifs (max 0 (1- missing-ifs))))
-            ((looking-at "else")
-             (incf missing-ifs))
-            (orig-in
-              (cond
-               ((looking-at "let")
-                (setq missing-outs (max 0 (1- missing-outs))))
-               ((looking-at "loop")
-                (setq missing-outs (max 0 (1- missing-outs))))
-               ((looking-at "in")
-                (incf missing-outs))))))
-    (if (and (looking-at word)
-             (not (= (point) oldp)))
-        t
-      (goto-char oldp)
-      nil)))
+                (>= (point) topp))
+
+      (if (futhark-looking-at-word word)
+          (setq result (point))))
+
+    (or result
+        (progn
+          (goto-char startp)
+          nil))))
+
+(defun futhark-keyword-backward-raw (word)
+  "Go to a keyword WORD before the current position.
+Ignore any program structure."
+  (let ((pstart (point)))
+    (while (and (futhark-backward-part)
+                (not (futhark-looking-at-word word))))
+    (and (futhark-looking-at-word word)
+         (point))))
 
 
+;;; The silly section
+
+(defvar futhark-danger-zone-path nil
+  "A path to a sound file to be played when writing the `unsafe' keyword.
+If nil, no sound will be played.")
+;; For example, you can enter this in your Emacs init file:
+;;
+;;    (setq futhark-danger-zone-path "/path/to/danger-zone.wav")
+;;
+;; You may have to restart your Emacs.
+
+(defun futhark-check-unsafe (begin end length)
+  "Play a sound if the user has just written the `unsafe' keyword.
+Ignore BEGIN, END, and LENGTH (present to satisfy Emacs)."
+  (if (and
+       (string= major-mode "futhark-mode")
+       futhark-danger-zone-path)
+      (save-excursion
+        (ignore-errors (backward-sexp 1) t)
+        (if (looking-at "\\<unsafe\\>")
+            (futhark-play-sound-file-in-background
+             futhark-danger-zone-path)))))
+
+(defun futhark-play-sound-file-in-background (path)
+  "Play the sound in PATH in the background."
+  ;; It would be nice to just use `play-sound-file', but that function
+  ;; blocks.
+  (start-process "futhark-sound" nil "mplayer" path))
+
+
+;;; Actual mode declaration
+
+;;;###autoload
 (define-derived-mode futhark-mode fundamental-mode "Futhark"
   "Major mode for editing Futhark source files."
   :syntax-table futhark-mode-syntax-table
-  (set (make-local-variable 'font-lock-defaults) '(futhark-font-lock-keywords))
-  (set (make-local-variable 'indent-line-function) 'futhark-indent-line)
-  (set (make-local-variable 'comment-start) "--")
-  (set (make-local-variable 'comment-padding) " "))
-
-(when (featurep 'flycheck)
-  (flycheck-define-checker futhark
-    "A Futhark syntax and type checker.
-See URL `https://github.com/HIPERFIT/futhark'."
-    :command ("futhark" source)
-    :modes 'futhark-mode
-    :error-patterns
-    ((error line-start (message) "at " (file-name) ":" line ":" column "-")
-
-     ;; TODO -- this suppresses a warning from flycheck, but does not
-     ;; show an error to the user
-     (error line-start "No extra lines")))
-  (add-to-list 'flycheck-checkers 'futhark))
+  (setq-local font-lock-defaults '(futhark-font-lock))
+  (setq-local indent-line-function 'futhark-indent-line)
+  (setq-local indent-region-function nil)
+  (setq-local comment-start "--")
+  (setq-local comment-start-skip "--[ \t]*")
+  (setq-local paragraph-start (concat " *-- |\\| ==$\\|" page-delimiter))
+  (setq-local paragraph-separate (concat " *-- ==$\\|" page-delimiter))
+  (setq-local comment-padding " ")
+  (add-hook 'after-change-functions 'futhark-check-unsafe nil))
 
 (provide 'futhark-mode)
 

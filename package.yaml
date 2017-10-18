@@ -1,0 +1,116 @@
+name: futhark
+version: "0.2.0"
+synopsis: An optimising compiler for a functional, array-oriented language.
+description: See the website at https://futhark-lang.org
+homepage: https://futhark-lang.org
+maintainer: Troels Henriksen athas@sigkill.dk
+license: ISC
+github: HIPERFIT/futhark
+category: Language
+
+ghc-options: -Wall
+
+extra-source-files:
+  - rts/python/*.py
+  - rts/c/*.h
+
+  - futlib/*.fut
+
+dependencies:
+  - base >= 4 && < 5
+  - array >= 0.4
+  - binary
+  - data-binary-ieee754
+  - vector
+  - vector-binary-instances
+  - containers >= 0.5
+  - mtl >= 2.2.1
+  - transformers >= 0.3
+  - srcloc >= 0.4
+  - language-c-quote >= 0.12
+  - mainland-pretty >= 0.6
+  - hashable >= 1.2.1.0
+  - parsec >= 3
+  - regex-tdfa >= 1.2
+  - filepath
+  - dlist >= 0.6.0.1
+  - bytestring
+  - text
+  - raw-strings-qq
+  - neat-interpolation >= 0.3
+  - file-embed >= 0.0.9
+  - directory
+  - directory-tree
+  - gitrev >= 1.2.0
+  - parallel >= 3.2.1.0
+  - bifunctors
+  - blaze-html
+  - template-haskell
+  - th-lift-instances
+  - extra
+
+library:
+  build-tools:
+    - alex
+    - happy
+
+  source-dirs: src
+
+  other-modules:
+    - Language.Futhark.Parser.Parser
+    - Language.Futhark.Parser.Lexer
+    - Paths_futhark
+
+executables:
+  futhark: &futhark
+    main: src/futhark.hs
+    dependencies:
+      - futhark
+      - process
+      - random
+      - process-extras
+      - temporary
+      - json
+    ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg"
+  futharki:
+    <<: *futhark
+    dependencies:
+      - futhark
+      - haskeline
+    main: src/futharki.hs
+  futhark-c:
+    <<: *futhark
+    main: src/futhark-c.hs
+  futhark-opencl:
+    <<: *futhark
+    main: src/futhark-opencl.hs
+  futhark-py:
+    <<: *futhark
+    main: src/futhark-py.hs
+  futhark-pyopencl:
+    <<: *futhark
+    main: src/futhark-pyopencl.hs
+  futhark-test:
+    <<: *futhark
+    main: src/futhark-test.hs
+  futhark-bench:
+    <<: *futhark
+    main: src/futhark-bench.hs
+  futhark-dataset:
+    <<: *futhark
+    main: src/futhark-dataset.hs
+  futhark-doc:
+    <<: *futhark
+    main: src/futhark-doc.hs
+
+tests:
+  unit:
+    source-dirs: unittests
+    main: futhark_tests.hs
+    dependencies:
+      - QuickCheck >= 2.8
+      - test-framework >= 0.4.0
+      - test-framework-quickcheck2
+      - HUnit
+      - test-framework-hunit
+      - futhark

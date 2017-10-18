@@ -1,359 +1,384 @@
-{-# LANGUAGE GADTs, DataKinds, TypeOperators, KindSignatures, ScopedTypeVariables #-}
+-- | An index function represents a mapping from an array index space
+-- to a flat byte offset.
 module Futhark.Representation.ExplicitMemory.IndexFunction
        (
-         IxFun
-       , Shape
-       , ShapeChange
-       , Indices
+         IxFun(..)
        , index
        , iota
        , offsetIndex
+       , strideIndex
        , permute
+       , rotate
        , reshape
-       , applyInd
+       , slice
        , base
        , rebase
-       , codomain
+       , repeat
        , shape
+       , rank
        , linearWithOffset
        , rearrangeWithOffset
+       , isDirect
+       , substituteInIxFun
        )
        where
 
-import Data.Constraint (Dict (..))
-import Data.Type.Natural hiding (n1,n2)
-import Data.Vector.Sized hiding (index, map)
-import qualified Data.Vector.Sized as Vec
-import Proof.Equational
+import Control.Arrow (first)
+import Control.Applicative
+import Data.Maybe
 import Data.Monoid
-import Data.Type.Equality hiding (outer)
+import Data.List hiding (repeat)
+import Control.Monad.Identity
+import Control.Monad.Writer
 
-import Prelude hiding (div, quot)
+import Prelude hiding (div, mod, quot, rem, repeat)
+
+import qualified Data.Map.Strict as M
 
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 
-import Futhark.Representation.AST.Syntax (DimChange (..))
-import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
-import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
+import Futhark.Representation.AST.Syntax
+  (ShapeChange, DimChange(..), DimIndex(..), Slice, sliceDims, unitSlice, VName)
 import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Attributes.Reshape hiding (sliceSizes)
+import Futhark.Representation.AST.Attributes.Reshape
+import Futhark.Representation.AST.Attributes.Rearrange
+import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
+import Futhark.Util
+import Futhark.Analysis.PrimExp.Convert
 
-type Shape num = Vector num
-type ShapeChange num = Vector (DimChange num)
-type Indices num = Vector num
+type Shape num = [num]
+type Indices num = [num]
+type Permutation = [Int]
 
-data IxFun :: * -> Nat -> Nat -> * where
-  Direct :: Shape num c -> IxFun num c c
-  Offset :: IxFun num c n -> num -> IxFun num c n
-  Permute :: IxFun num c n -> Perm.Permutation n -> IxFun num c n
-  Index :: SNat n -> IxFun num c (m:+:n) -> Indices num m -> IxFun num c n
-  Reshape :: IxFun num c ('S m) -> ShapeChange num n -> IxFun num c n
+data IxFun num = Direct (Shape num)
+               | Permute (IxFun num) Permutation
+               | Rotate (IxFun num) (Indices num)
+               | Index (IxFun num) (Slice num)
+               | Reshape (IxFun num) (ShapeChange num)
+               | Repeat (IxFun num) [Shape num] (Shape num)
+               deriving (Show)
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
-instance (IntegralCond num, Eq num) => Eq (IxFun num c n) where
+instance (IntegralExp num, Eq num) => Eq (IxFun num) where
   Direct _ == Direct _ =
     True
-  Offset ixfun1 offset1 == Offset ixfun2 offset2 =
-    ixfun1 == ixfun2 && offset1 == offset2
   Permute ixfun1 perm1 == Permute ixfun2 perm2 =
     ixfun1 == ixfun2 && perm1 == perm2
-  Index _ (ixfun1 :: IxFun num c1 (m1 :+: n)) (is1 :: Indices nun m1)
-    == Index _ (ixfun2 :: IxFun num c2 (m2 :+: n)) (is2 :: Indices num m2) =
-    case testEquality m1' m2' of
-      Nothing -> False
-      Just Refl ->
-        ixfun1 == ixfun2 &&
-        Vec.toList is1 == Vec.toList is2
-    where m1' :: SNat m1
-          m1' = Vec.sLength is1
-          m2' :: SNat m2
-          m2' = Vec.sLength is2
+  Rotate ixfun1 offsets1 == Rotate ixfun2 offsets2 =
+    ixfun1 == ixfun2 && offsets1 == offsets2
+  Index ixfun1 is1 == Index ixfun2 is2 =
+    ixfun1 == ixfun2 && length is1 == length is2 && and (zipWith eqIndex is1 is2)
+    -- Two DimSlices are considered equal even if their slice lengths
+    -- are not equal, as this allows us to get rid of reshapes.
+    where eqIndex (DimFix i) (DimFix j) = i == j
+          eqIndex (DimSlice i _ s0) (DimSlice j _ s1) = i==j && s0==s1
+          eqIndex _ _ = False
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
-    case testEquality (rank ixfun1) (rank ixfun2) of
-      Just Refl ->
-        ixfun1 == ixfun2 && Vec.length shape1 == Vec.length shape2
-      _ -> False
+    ixfun1 == ixfun2 && length shape1 == length shape2
+  Repeat ixfun1 outer_shapes1 inner_shape1 == Repeat ixfun2 outer_shapes2 inner_shape2 =
+    ixfun1 == ixfun2 && outer_shapes1 == outer_shapes2 && inner_shape1 == inner_shape2
   _ == _ = False
 
-instance Show num => Show (IxFun num c n) where
-  show (Direct n) = "Direct (" ++ show n ++ ")"
-  show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
-  show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
-  show (Index _ fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
-  show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
-
-instance Pretty num => Pretty (IxFun num c n) where
+instance Pretty num => Pretty (IxFun num) where
   ppr (Direct dims) =
-    text "Direct" <> parens (commasep $ map ppr (Vec.toList dims))
-  ppr (Offset fun k) = ppr fun <+> text "+" <+> ppr k
+    text "Direct" <> parens (commasep $ map ppr dims)
   ppr (Permute fun perm) = ppr fun <> ppr perm
-  ppr (Index _ fun is) = ppr fun <> brackets (commasep $ map ppr $ Vec.toList is)
+  ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
+  ppr (Index fun is) = ppr fun <> brackets (commasep $ map ppr is)
   ppr (Reshape fun oldshape) =
-    ppr fun <> text "->" <>
-    parens (commasep (map ppr $ Vec.toList oldshape))
+    ppr fun <> text "->reshape" <>
+    parens (commasep (map ppr oldshape))
+  ppr (Repeat fun outer_shapes inner_shape) =
+    ppr fun <> text "->repeat" <> parens (commasep (map ppr $ outer_shapes++ [inner_shape]))
 
-instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num c n) where
-  substituteNames _ (Direct n) =
-    Direct n
-  substituteNames subst (Offset fun k) =
-    Offset (substituteNames subst fun) (substituteNames subst k)
-  substituteNames subst (Permute fun perm) =
-    Permute (substituteNames subst fun) perm
-  substituteNames subst (Index n fun is) =
-    Index n
-    (substituteNames subst fun)
-    (Vec.map (substituteNames subst) is)
-  substituteNames subst (Reshape fun newshape) =
-    reshape
-    (substituteNames subst fun)
-    (Vec.map (substituteNames subst) newshape)
+instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num) where
+  substituteNames substs = fmap $ substituteNames substs
 
-instance (Eq num, IntegralCond num, Substitute num, Rename num) => Rename (IxFun num c n) where
-  -- Because there is no mapM-like function on sized vectors, we
-  -- implement renaming by retrieving the substitution map, then using
-  -- 'substituteNames'.  This is safe as index functions do not
-  -- contain their own bindings.
-  rename ixfun = do
-    subst <- renamerSubstitutions
-    return $ substituteNames subst ixfun
+instance FreeIn num => FreeIn (IxFun num) where
+  freeIn = foldMap freeIn
 
-index :: forall c (n::Nat) num. IntegralCond num =>
-         IxFun num c ('S n) -> Indices num ('S n) -> num -> num
+instance Functor IxFun where
+  fmap f = runIdentity . traverse (return . f)
+
+instance Foldable IxFun where
+  foldMap f = execWriter . traverse (tell . f)
+
+instance Traversable IxFun where
+  traverse f (Direct dims) =
+    Direct <$> traverse f dims
+  traverse f (Permute ixfun perm) =
+    Permute <$> traverse f ixfun <*> pure perm
+  traverse f (Rotate ixfun offsets) =
+    Rotate <$> traverse f ixfun <*> traverse f offsets
+  traverse f (Index ixfun is) =
+    Index <$> traverse f ixfun <*> traverse (traverse f) is
+  traverse f (Reshape ixfun dims) =
+    Reshape <$> traverse f ixfun <*> traverse (traverse f) dims
+  traverse f (Repeat ixfun outer_shapes inner_shape) =
+    Repeat <$> traverse f ixfun <*>
+    traverse (traverse f) outer_shapes <*>
+    traverse f inner_shape
+
+instance (Eq num, IntegralExp num, Substitute num) => Rename (IxFun num) where
+  rename = substituteRename
+
+index :: (Pretty num, IntegralExp num) =>
+         IxFun num -> Indices num -> num -> num
 
 index (Direct dims) is element_size =
-  Vec.sum (Vec.zipWithSame (*) is slicesizes) * element_size
-  where slicesizes = Vec.tail $ sliceSizes dims
-
-index (Offset fun offset) (i :- is) element_size =
-  index fun ((i + offset) :- is) element_size
+  sum (zipWith (*) is slicesizes) * element_size
+  where slicesizes = drop 1 $ sliceSizes dims
 
 index (Permute fun perm) is_new element_size =
   index fun is_old element_size
-  where is_old = Perm.apply (Perm.invert perm) is_new
+  where is_old = rearrangeShape (rearrangeInverse perm) is_new
 
-index (Index _ fun (is1::Indices num m)) is2 element_size =
-  case (singInstance $ sLength is1,
-        singInstance $ sLength is2 %:- sOne) of
-    (SingInstance,SingInstance) ->
-      let is = is1 `Vec.append` is2
-          outer = succPlusR (sing :: SNat m) (sing :: SNat n)
-          proof :: (m :+ 'S n) :=: 'S (m :+ n)
-          proof = succPlusR (sing :: SNat m) (sing :: SNat n)
-      in case singInstance $ coerce proof (sLength is) %:- sOne of
-        SingInstance ->
-          index (coerce outer fun) (coerce outer is) element_size
+index (Rotate fun offsets) is element_size =
+  index fun (zipWith mod (zipWith (+) is offsets) dims) element_size
+  where dims = shape fun
 
-index (Reshape (fun :: IxFun num c ('S m)) newshape) is element_size =
-  -- First, compute a flat index based on the new shape.  Then, turn
-  -- that into an index set for the inner index function and apply the
-  -- inner index function to that set.
-  let oldshape = shape fun
-      flatidx = computeFlatIndex (Vec.map newDim newshape) is
-      innerslicesizes = Vec.tail $ sliceSizes oldshape
-      new_indices = computeNewIndices innerslicesizes flatidx
+index (Index fun js) is element_size =
+  index fun (adjust js is) element_size
+  where adjust (DimFix j:js') is' = j : adjust js' is'
+        adjust (DimSlice j _ s:js') (i:is') = j + i * s : adjust js' is'
+        adjust _ _ = []
+
+index (Reshape fun newshape) is element_size =
+  let new_indices = reshapeIndex (shape fun) (newDims newshape) is
   in index fun new_indices element_size
 
-computeNewIndices :: IntegralCond num =>
-                     Vector num k -> num -> Indices num k
-computeNewIndices Nil _ =
-  Nil
-computeNewIndices (size :- slices) i =
-  (i `quot` size) :-
-  computeNewIndices slices (i - (i `quot` size) * size)
+index (Repeat fun outer_shapes _) is element_size =
+  -- Discard those indices that are just repeats.  It is intentional
+  -- that we cut off those indices that correspond to the innermost
+  -- repeated dimensions.
+  index fun is' element_size
+  where flags dims = replicate (length dims) True ++ [False]
+        is' = map snd $ filter (not . fst) $ zip (concatMap flags outer_shapes) is
 
-computeFlatIndex :: IntegralCond num =>
-                    Shape num ('S k) -> Indices num ('S k) -> num
-computeFlatIndex dims is =
-  flattenIndex (Vec.toList dims) (Vec.toList is)
-
-sliceSizes :: IntegralCond num =>
-              Shape num m -> Vector num ('S m)
-sliceSizes Nil =
-  singleton 1
-sliceSizes (n :- ns) =
-  Vec.product (n :- ns) :-
-  sliceSizes ns
-
-iota :: IntegralCond num =>
-        Shape num n -> IxFun num n n
+iota :: Shape num -> IxFun num
 iota = Direct
 
-offsetIndex :: IntegralCond num =>
-               IxFun num c n -> num -> IxFun num c n
-offsetIndex = Offset
+offsetIndex :: (Eq num, IntegralExp num) =>
+               IxFun num -> num -> IxFun num
+offsetIndex ixfun i | i == 0 = ixfun
+offsetIndex ixfun i =
+  case shape ixfun of
+    d:ds -> slice ixfun (DimSlice i (d-i) 1 : map (unitSlice 0) ds)
+    []   -> error "offsetIndex: underlying index function has rank zero"
 
-permute :: IntegralCond num =>
-           IxFun num c n -> Perm.Permutation n -> IxFun num c n
+strideIndex :: (Eq num, IntegralExp num) =>
+               IxFun num -> num -> IxFun num
+strideIndex ixfun s =
+  case shape ixfun of
+    d:ds -> slice ixfun (DimSlice 0 d s : map (unitSlice 0) ds)
+    []   -> error "offsetIndex: underlying index function has rank zero"
+
+permute :: IntegralExp num =>
+           IxFun num -> Permutation -> IxFun num
 permute (Permute ixfun oldperm) perm
-  | Perm.invert oldperm == perm = ixfun
-permute ixfun perm = Permute ixfun perm
+  | rearrangeInverse oldperm == perm = ixfun
+  | otherwise = permute ixfun (rearrangeCompose perm oldperm)
+permute ixfun perm
+  | perm == sort perm = ixfun
+  | otherwise = Permute ixfun perm
 
-reshape :: forall num c m n.(Eq num, IntegralCond num) =>
-           IxFun num c ('S m) -> ShapeChange num n -> IxFun num c n
-reshape (Direct oldshape) newshape
-  | Just Refl <- Vec.sLength oldshape `testEquality` Vec.sLength newshape =
-      Direct $ Vec.map newDim newshape
+rotate :: IntegralExp num =>
+          IxFun num -> Indices num -> IxFun num
+rotate (Rotate ixfun old_offsets) offsets =
+  Rotate ixfun $ zipWith (+) old_offsets offsets
+rotate ixfun offsets = Rotate ixfun offsets
+
+repeat :: (Eq num, IntegralExp num) =>
+          IxFun num -> [Shape num] -> Shape num -> IxFun num
+repeat = Repeat
+
+reshape :: (Eq num, IntegralExp num) =>
+           IxFun num -> ShapeChange num -> IxFun num
+
+reshape Direct{} newshape =
+  Direct $ map newDim newshape
+
 reshape (Reshape ixfun _) newshape =
   reshape ixfun newshape
-reshape ixfun newshape =
-  case rank ixfun `testEquality` Vec.sLength newshape of
-    Just Refl
-      | shape ixfun == Vec.map newDim newshape ->
+
+reshape (Permute ixfun perm) newshape
+  | Just (head_coercions, reshapes, tail_coercions) <-
+      splitCoercions newshape,
+    num_coercions <- length (head_coercions ++ tail_coercions),
+    (head_perms, mid_perms, end_perms) <-
+      splitAt3 (length head_coercions) (length perm - num_coercions) perm,
+    sequential mid_perms,
+    first_reshaped <- foldl min (rank ixfun) mid_perms,
+    extra_dims <- length newshape - length (shape ixfun),
+    perm' <- map (shiftDim first_reshaped extra_dims) head_perms ++
+             take (length reshapes) [first_reshaped..] ++
+             map (shiftDim first_reshaped extra_dims) end_perms,
+    newshape' <- rearrangeShape (rearrangeInverse perm') newshape =
+      Permute (reshape ixfun newshape') perm'
+  where splitCoercions newshape' = do
+          let (head_coercions, newshape'') = span isCoercion newshape'
+          let (reshapes, tail_coercions) = break isCoercion newshape''
+          guard (all isCoercion tail_coercions)
+          return (head_coercions, reshapes, tail_coercions)
+
+        isCoercion DimCoercion{} = True
+        isCoercion _ = False
+
+        shiftDim last_reshaped extra_dims x
+          | x > last_reshaped = x + extra_dims
+          | otherwise = x
+
+        sequential [] = True
+        sequential (x:xs) = and $ zipWith (==) xs [x+1, x+2..]
+
+reshape (Index ixfun slicing) newshape
+  | (is, rem_slicing) <- splitSlice slicing,
+    (fixed_ds, sliced_ds) <- splitAt (length is) $ shape ixfun,
+    and $ zipWith isSliceOf rem_slicing sliced_ds =
+      -- Move the reshape beneath the slicing.
+      let newshape' = map DimCoercion fixed_ds ++ newshape
+      in Index (reshape ixfun newshape') $
+         map DimFix is ++ map (unitSlice 0) (newDims newshape)
+  where isSliceOf (DimSlice _ d1 _) d2 = d1 == d2
+        isSliceOf _ _ = False
+
+reshape ixfun newshape
+  | shape ixfun == map newDim newshape =
       ixfun
-      | Just _ <- shapeCoercion $ Vec.toList newshape ->
-        case ixfun of
-          Permute ixfun' perm ->
-            Permute (reshape ixfun' $ Perm.apply (Perm.invert perm) newshape) perm
-
-          Offset ixfun' offset ->
-            Offset (reshape ixfun' newshape) offset
-
-          Index sm (ixfun' :: IxFun num c (k :+: 'S m)) (is :: Indices num k)
-            | Dict <- propToBoolLeq $ plusLeqL (Vec.sLength is) sm ->
-            let ixfun'' :: IxFun num c ('S (k :+: m))
-                ixfun'' = coerce (sym $ plusSR (Vec.sLength is) (sm %- sOne)) ixfun'
-                unchanged_shape :: ShapeChange num k
-                unchanged_shape =
-                  Vec.map DimCoercion $ Vec.take (Vec.sLength is) $ shape ixfun'
-                newshape' :: ShapeChange num (k :+: 'S m)
-                newshape' = Vec.append unchanged_shape newshape
-            in applyInd sm (reshape ixfun'' newshape') is
-
-          Reshape _ _ ->
-            Reshape ixfun newshape
-
-          Direct _ ->
-            Direct $ Vec.map newDim newshape
-    _ ->
+  | rank ixfun == length newshape,
+    Just _ <- shapeCoercion newshape =
+      ixfun
+  | otherwise =
       Reshape ixfun newshape
 
-applyInd :: forall num c n m.
-            IntegralCond num =>
-            SNat n -> IxFun num c (m:+:n) -> Indices num m -> IxFun num c n
-applyInd _ ixfun Nil = ixfun
-applyInd n (Index m_plus_n (ixfun :: IxFun num c (k:+:(m:+:n))) (mis :: Indices num k)) is =
-  Index n ixfun' is'
-  where k :: SNat k
-        k = Vec.sLength mis
-        m :: SNat m
-        m = case propToBoolLeq $ plusLeqR m n of
-              Dict -> coerce (plusMinusEqL m n) $ m_plus_n %- n
-        is' :: Indices num (m:+:k)
-        is' = coerce (plusCommutative k m) $ Vec.append mis is
-        ixfun' :: IxFun num c ((m:+:k):+:n)
-        ixfun' = coerce (plusCongR n (plusCommutative k m)) $
-                 coerce (plusAssociative k m n) ixfun
-applyInd n ixfun is = Index n ixfun is
+splitSlice :: Slice num -> ([num], Slice num)
+splitSlice [] = ([], [])
+splitSlice (DimFix i:is) = first (i:) $ splitSlice is
+splitSlice is = ([], is)
 
-codomain :: IntegralCond num =>
-            IxFun num c n -> SymSet n
-codomain = undefined
+slice :: (Eq num, IntegralExp num) =>
+         IxFun num -> Slice num -> IxFun num
+slice ixfun is
+  -- Avoid identity slicing.
+  | is == map (unitSlice 0) (shape ixfun) = ixfun
+slice (Index ixfun mis) is =
+  Index ixfun $ reslice mis is
+  where reslice mis' [] = mis'
+        reslice (DimFix j:mis') is' =
+          DimFix j : reslice mis' is'
+        reslice (DimSlice orig_k _ orig_s:mis') (DimSlice new_k n new_s:is') =
+          DimSlice (orig_k + new_k * orig_s) n (orig_s*new_s) : reslice mis' is'
+        reslice (DimSlice orig_k _ orig_s:mis') (DimFix i:is') =
+          DimFix (orig_k+i*orig_s) : reslice mis' is'
+        reslice _ _ = error "IndexFunction slice: invalid arguments"
+slice ixfun [] = ixfun
+slice ixfun is = Index ixfun is
 
-rank :: IntegralCond num =>
-        IxFun num c n -> SNat n
-rank (Direct dims) = sLength dims
-rank (Offset ixfun _) = rank ixfun
-rank (Permute ixfun _) = rank ixfun
-rank (Index n _ _) = n
-rank (Reshape _ newshape) = sLength newshape
+rank :: IntegralExp num =>
+        IxFun num -> Int
+rank = length . shape
 
-shape :: IntegralCond num =>
-         IxFun num c n -> Shape num n
+shape :: IntegralExp num =>
+         IxFun num -> Shape num
 shape (Direct dims) =
   dims
 shape (Permute ixfun perm) =
-  Perm.apply perm $ shape ixfun
-shape (Offset ixfun _) =
+  rearrangeShape perm $ shape ixfun
+shape (Rotate ixfun _) =
   shape ixfun
-shape (Index n (ixfun::IxFun num c (m :+ n)) (indices::Indices num m)) =
-  let ixfunshape :: Shape num (m :+ n)
-      ixfunshape = shape ixfun
-      islen :: SNat m
-      islen = Vec.sLength indices
-      prop :: Leq m (m :+ n)
-      prop = plusLeqL islen n
-      prop2 :: ((m :+: n) :-: m) :=: n
-      prop2 = plusMinusEqR n islen
-  in
-   case (propToBoolLeq prop, prop2) of
-     (Dict,Refl) ->
-       let resshape :: Shape num ((m :+ n) :- m)
-           resshape = Vec.drop islen ixfunshape
-       in resshape
+shape (Index _ how) =
+  sliceDims how
 shape (Reshape _ dims) =
-  Vec.map newDim dims
+  map newDim dims
+shape (Repeat ixfun outer_shapes inner_shape) =
+  concat (zipWith repeated outer_shapes (shape ixfun)) ++ inner_shape
+  where repeated outer_ds d = outer_ds ++ [d]
 
-base :: IxFun num k c
-     -> Shape num k
+base :: IxFun num -> Shape num
 base (Direct dims) =
   dims
-base (Offset ixfun _) =
-  base ixfun
 base (Permute ixfun _) =
   base ixfun
-base (Index _ ixfun _) =
+base (Rotate ixfun _) =
+  base ixfun
+base (Index ixfun _) =
   base ixfun
 base (Reshape ixfun _) =
   base ixfun
+base (Repeat ixfun _ _) =
+  base ixfun
 
-rebase :: (Eq num, IntegralCond num) =>
-          IxFun num k c
-       -> IxFun num c n
-       -> IxFun num k n
-rebase new_base (Direct _) =
-  new_base
-rebase new_base (Offset ixfun o) =
-  offsetIndex (rebase new_base ixfun) o
+rebase :: (Eq num, IntegralExp num) =>
+          IxFun num
+       -> IxFun num
+       -> IxFun num
+rebase new_base (Direct old_shape)
+  | length old_shape == rank new_base = new_base
+  | otherwise = error "IndexFunction.rebase: bad rank for new base."
 rebase new_base (Permute ixfun perm) =
   permute (rebase new_base ixfun) perm
-rebase new_base (Index n ixfun is) =
-  applyInd n (rebase new_base ixfun) is
+rebase new_base (Rotate ixfun offsets) =
+  rotate (rebase new_base ixfun) offsets
+rebase new_base (Index ixfun is) =
+  slice (rebase new_base ixfun) is
 rebase new_base (Reshape ixfun new_shape) =
   reshape (rebase new_base ixfun) new_shape
+rebase new_base (Repeat ixfun outer_shapes inner_shape) =
+  Repeat (rebase new_base ixfun) outer_shapes inner_shape
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.
-linearWithOffset :: forall n c num. IntegralCond num =>
-                    IxFun num c n -> num -> Maybe num
+linearWithOffset :: (Eq num, IntegralExp num) =>
+                    IxFun num -> num -> Maybe num
 linearWithOffset (Direct _) _ =
   Just 0
-linearWithOffset (Offset ixfun n) element_size = do
-  inner_offset <- linearWithOffset ixfun element_size
-  case Vec.tail $ sliceSizes $ shape ixfun of
-    Nil -> Nothing
-    rowslice :- _ ->
-      return $ inner_offset + (n * rowslice * element_size)
 linearWithOffset (Reshape ixfun _) element_size =
  linearWithOffset ixfun element_size
-linearWithOffset (Index n ixfun (is :: Indices num m)) element_size = do
+linearWithOffset (Index ixfun is) element_size = do
+  is' <- fixingOuter is inner_shape
   inner_offset <- linearWithOffset ixfun element_size
-  case propToBoolLeq $ plusLeqL m n of
-    Dict ->
-      let slices :: Vector num m
-          slices = Vec.take m $ Vec.tail $ sliceSizes $ shape ixfun
-      in Just $ inner_offset + Vec.sum (Vec.zipWith (*) slices is) * element_size
-  where m :: SNat m
-        m = Vec.sLength is
+  let slices = take m $ drop 1 $ sliceSizes $ shape ixfun
+  return $ inner_offset + sum (zipWith (*) slices is') * element_size
+  where m = length is
+        inner_shape = shape ixfun
+        fixingOuter (DimFix i:is') (_:ds) = (i:) <$> fixingOuter is' ds
+        fixingOuter (DimSlice off _ 1:is') (_:ds)
+          | is' == map (unitSlice 0) ds = Just [off]
+        fixingOuter is' ds
+          | is' == map (unitSlice 0) ds = Just []
+        fixingOuter _ _ = Nothing
 linearWithOffset _ _ = Nothing
 
-rearrangeWithOffset :: IntegralCond num =>
-                       IxFun num c n -> num -> Maybe (num, Perm.Permutation n)
+rearrangeWithOffset :: (Eq num, IntegralExp num) =>
+                       IxFun num -> num -> Maybe (num, [(Int,num)])
+rearrangeWithOffset (Reshape ixfun _) element_size =
+  rearrangeWithOffset ixfun element_size
 rearrangeWithOffset (Permute ixfun perm) element_size = do
   offset <- linearWithOffset ixfun element_size
-  return (offset, perm)
+  return (offset, zip perm $ rearrangeShape perm $ shape ixfun)
 rearrangeWithOffset _ _ =
   Nothing
 
-instance FreeIn num => FreeIn (IxFun num c n) where
-  freeIn (Direct dims) = freeIn (Vec.toList dims)
-  freeIn (Offset ixfun e) = freeIn ixfun <> freeIn e
-  freeIn (Permute ixfun _) = freeIn ixfun
-  freeIn (Index _ ixfun is) =
-    freeIn ixfun <>
-    mconcat (map freeIn $ toList is)
-  freeIn (Reshape ixfun dims) =
-    freeIn ixfun <> mconcat (map freeIn $ Vec.toList dims)
+isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
+isDirect =
+  (==Just 0) . flip linearWithOffset 1
+
+-- | Substituting a name with a PrimExp in an index function.
+substituteInIxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
+                  -> IxFun (PrimExp VName)
+substituteInIxFun tab (Direct pes) =
+  Direct $ map (substituteInPrimExp tab) pes
+substituteInIxFun tab (Permute ixfun p) =
+  Permute (substituteInIxFun tab ixfun) p
+substituteInIxFun tab (Rotate  ixfun pes) =
+  Rotate (substituteInIxFun tab ixfun) $ map (substituteInPrimExp tab) pes
+substituteInIxFun tab (Index ixfun sl) =
+  Index (substituteInIxFun tab ixfun) $ map (fmap $ substituteInPrimExp tab) sl
+substituteInIxFun tab (Reshape ixfun newshape) =
+  Reshape (substituteInIxFun tab ixfun) $ map (fmap $ substituteInPrimExp tab) newshape
+substituteInIxFun tab (Repeat ixfun outer_shapes inner_shape) =
+  Repeat (substituteInIxFun tab ixfun) outer_shapes inner_shape

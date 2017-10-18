@@ -42,18 +42,20 @@ type Code = Imp.Code OpenCL
 type KernelName = String
 
 -- | An argument to be passed to a kernel.
-data KernelArg = ValueArg Exp PrimType
+data KernelArg = ValueKArg Exp PrimType
                  -- ^ Pass the value of this scalar expression as argument.
-               | MemArg VName
+               | MemKArg VName
                  -- ^ Pass this pointer as argument.
-               | SharedMemoryArg (Count Bytes)
+               | SharedMemoryKArg (Count Bytes)
                  -- ^ Create this much local memory per workgroup.
                deriving (Show)
 
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
+            | HostCode Code
             | GetNumGroups VName
             | GetGroupSize VName
+            | GetTileSize VName
             deriving (Show)
 
 -- | The block size when transposing.

@@ -1,0 +1,55 @@
+#!/bin/sh
+":"; exec emacs --quick --script "$0" "$(dirname "$0")" "$@" # -*-emacs-lisp-*-
+
+;; Suppress certain messages.  From <http://superuser.com/a/1025827>.
+(defun suppress-messages (old-fun &rest args)
+  (cl-flet ((silence (&rest args1) (ignore)))
+    (advice-add 'message :around #'silence)
+    (unwind-protect
+        (apply old-fun args)
+      (advice-remove 'message #'silence))))
+
+;; Having "Indenting region..." messages on stderr are silly.
+(when (fboundp 'advice-add)
+  (advice-add 'indent-region :around #'suppress-messages))
+
+;; "Wrote" messages (from `save-buffer') are also a bit annoying, but seem to
+;; originate in the `write-region' function from Emacs' C code (and not Emacs
+;; Lisp code), so they cannot easily be suppressed.
+
+(defun futfmt-print-help ()
+  (princ "Usage: futfmt [-i] FILE\n\n")
+  (princ "Indent a Futhark program.\n")
+  (princ "If not -i, output the indented buffer on standard out.\n")
+  (princ "If -i, write the indented buffer to the file.\n")
+  (princ "If FILE is '-', read from standard in (any -i is ignored).\n"))
+
+;; Load futhark-mode.
+(add-to-list 'load-path (elt argv 0))
+(require 'futhark-mode)
+
+;; Read file and indent.
+(let ((indent-tabs-mode nil)
+      (has-args (elt argv 1)))
+  (if (not has-args)
+      (futfmt-print-help)
+    (setq is-inline (string= (elt argv 1) "-i"))
+    (setq futhark-file-path (or (and is-inline (elt argv 2))
+                                (elt argv 1)))
+    (setq do-read-from-stdin (string= futhark-file-path "-"))
+    (if do-read-from-stdin
+        (let ((fut-buffer (get-buffer-create "temp.fut")))
+          (set-buffer fut-buffer)
+          (let (line)
+            (while (setq line (ignore-errors (read-from-minibuffer "")))
+              (insert (concat line "\n"))
+              )))
+      (find-file futhark-file-path))
+    (futhark-mode)
+    (indent-region (point-min) (point-max))
+    (if (and is-inline (not do-read-from-stdin))
+        (save-buffer)
+      (princ (buffer-string)))))
+
+;; Exit.
+(kill-emacs 0)

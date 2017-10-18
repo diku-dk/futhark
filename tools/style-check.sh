@@ -25,12 +25,12 @@ if [ "$#" = 0 ]; then
 fi
 
 hlintable() {
-    (echo "$1" | egrep -q ".l?hs$") && ! egrep -q '{-# LANGUAGE.*QuasiQuotes' "$1"
+    (echo "$1" | egrep -q ".l?hs$")
 }
 
 hlint_check() {
     # Some hlint-suggestions are terrible, so ignore them here.
-    hlint -i "Reduce duplication" -i "Use import/export shortcut" -i "Functor law"
+    hlint -i "Use import/export shortcut" "$1"
 }
 
 no_trailing_blank_lines() {

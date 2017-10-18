@@ -10,12 +10,14 @@ module Futhark.Transform.FirstOrderTransform
   ( transformProg
 
   , Transformer
-  , transformBindingRecursively
+  , transformStmRecursively
   , transformLambda
   , transformSOAC
+  , transformBody
 
   -- * Utility
   , doLoopMapAccumL
+  , doLoopMapAccumL'
   )
   where
 
@@ -23,8 +25,8 @@ import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.List
 import Prelude
 
@@ -36,39 +38,29 @@ import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
 import Futhark.Representation.AST.Attributes.Aliases
 
------------------------------------------------------
--- for Cosmin's sequentializer: work in progress
------------------------------------------------------
--- import Futhark.Transform.GlobalizeArrays
--- import qualified Futhark.Transform.FirstOrderTransfOpt as FOTopt
--- import Futhark.Analysis.LastUse
--- transformProg prg = do
---  let glob_arr_env = gatherGlobArrsProg prg
---  intraproceduralTransformation transformFunDec prg
-
 -- | Perform the first-order transformation on an Futhark program.
-transformProg :: (MonadFreshNames m, Bindable tolore,
+transformProg :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                   LetAttr SOACS ~ LetAttr tolore,
                   CanBeAliased (Op tolore)) =>
                  Prog -> m (AST.Prog tolore)
-transformProg = intraproceduralTransformation transformFunDec
+transformProg = intraproceduralTransformation transformFunDef
 
-transformFunDec :: (MonadFreshNames m, Bindable tolore,
+transformFunDef :: (MonadFreshNames m, Bindable tolore, BinderOps tolore,
                     LetAttr SOACS ~ LetAttr tolore,
                     CanBeAliased (Op tolore)) =>
-                   FunDec -> m (AST.FunDec tolore)
-transformFunDec (FunDec fname rettype params body) = do
+                   FunDef -> m (AST.FunDef tolore)
+transformFunDef (FunDef entry fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
     localScope (scopeOfFParams params) $
-    insertBindingsM $
+    insertStmsM $
     transformBody body
-  return $ FunDec fname rettype params body'
+  return $ FunDef entry fname rettype params body'
 
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.
 type Transformer m = (MonadBinder m,
-                      Bindable (Lore m),
+                      Bindable (Lore m), BinderOps (Lore m),
                       LocalScope (Lore m) m,
                       LetAttr SOACS ~ LetAttr (Lore m),
                       LParamAttr SOACS ~ LParamAttr (Lore m),
@@ -76,32 +68,29 @@ type Transformer m = (MonadBinder m,
 
 transformBody :: Transformer m =>
                  Body -> m (AST.Body (Lore m))
-transformBody (Body () bnds res) = insertBindingsM $ do
-  mapM_ transformBindingRecursively bnds
+transformBody (Body () bnds res) = insertStmsM $ do
+  mapM_ transformStmRecursively bnds
   return $ resultBody res
 
 -- | First transform any nested 'Body' or 'Lambda' elements, then
 -- apply 'transformSOAC' if the expression is a SOAC.
-transformBindingRecursively :: Transformer m =>
-                               Binding -> m ()
+transformStmRecursively :: Transformer m =>
+                               Stm -> m ()
 
-transformBindingRecursively (Let pat () (DoLoop ctx val form body)) = do
-  body' <- localScope (scopeOfLoopForm form) $
-           localScope (scopeOfFParams $ map fst $ ctx ++ val) $
-           transformBody body
-  letBind_ pat $ DoLoop ctx val form body'
-
-transformBindingRecursively (Let pat () (Op soac)) =
+transformStmRecursively (Let pat aux (Op soac)) =
+  certifying (stmAuxCerts aux) $
   transformSOAC pat =<< mapSOACM soacTransform soac
   where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda
                                            , mapOnSOACExtLambda = transformExtLambda
                                            }
 
-transformBindingRecursively (Let pat () e) =
+transformStmRecursively (Let pat aux e) =
+  certifying (stmAuxCerts aux) $
   letBind_ pat =<< mapExpM transform e
-  where transform = identityMapper { mapOnBody = transformBody
+  where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
                                    , mapOnFParam = return
+                                   , mapOnLParam = return
                                    , mapOnOp = fail "Unhandled Op in first order transform"
                                    }
 
@@ -112,60 +101,93 @@ transformSOAC :: Transformer m =>
                  AST.Pattern (Lore m)
               -> SOAC (Lore m)
               -> m ()
-transformSOAC pat (Map cs width fun arrs) = do
-  let i = lambdaIndex fun
-      out_ts = mapType width fun
+transformSOAC pat (Map width fun arrs) = do
+  i <- newVName "i"
+  let out_ts = mapType width fun
   resarr <- resultArray out_ts
   outarrs <- forM out_ts $ \t ->
              newIdent "map_outarr" t
   let outarrs_names = map identName outarrs
       merge = loopMerge outarrs (map Var resarr)
   loopbody <- runBodyBinder $
-              localScope (HM.insert i IndexInfo $
+              localScope (M.insert i (IndexInfo Int32) $
                           scopeOfFParams $ map fst merge) $ do
-    x <- bindLambda fun (index cs arrs (Var i))
-    dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
+    x <- bindLambda fun =<< index arrs (Var i)
+    dests <- letwith outarrs_names (pexp $ Var i) $
+             map (BasicOp . SubExp) x
     return $ resultBody $ map Var dests
-  letBind_ pat $ DoLoop [] merge (ForLoop i width) loopbody
+  letBind_ pat $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
 
-transformSOAC pat (Reduce cs width _ fun args) = do
-  (acc, initacc) <- newFold $ zip accexps accts
-  arrts <- mapM lookupType arrexps
-  inarrs <- mapM (newIdent "reduce_inarr") arrts
+transformSOAC pat (Reduce width _ fun args) = do
+  i <- newVName "i"
+  (acc, initacc, inarrs) <- newFold "reduce" (zip accexps accts) arrexps
   arrexps' <- mapM (copyIfArray . Var) arrexps
   let merge = loopMerge (inarrs++acc) (arrexps'++initacc)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
-    acc' <- bindLambda fun
-            (map (PrimOp . SubExp . Var . identName) acc ++
-             index cs (map identName inarrs) (Var i))
+    acc' <- bindLambda fun . (map (BasicOp . SubExp . Var . identName) acc ++) =<<
+            index (map identName inarrs) (Var i)
     return $ resultBody (map (Var . identName) inarrs ++ acc')
   pat' <- discardPattern (map identType inarrs) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
-  where i = lambdaIndex fun
-        (accexps, arrexps) = unzip args
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
+  where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
-transformSOAC pat (Scan cs width fun args) = do
-  (acc, initacc) <- newFold $ zip accexps accts
+transformSOAC pat (Scan width fun args) = do
+  i <- newVName "i"
+  (acc, initacc, arr) <- newFold "scan" (zip accexps accts) arrexps
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
-  arr <- mapM (newIdent "scan_arr" ) arrts
   let arr_names = map identName arr
       merge = loopMerge (acc++arr) (initacc++map Var initarr)
-  loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
-    x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
-                              index cs arrexps (Var i))
-    dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) x
-    irows <- letSubExps "row" $ index cs dests $ Var i
+  loopbody <- insertStmsM $ localScope (scopeOfFParams $ map fst merge) $ do
+    x <- bindLambda fun . (map (BasicOp . SubExp . Var . identName) acc++) =<<
+         index arrexps (Var i)
+    dests <- letwith arr_names (pexp (Var i)) $ map (BasicOp . SubExp) x
+    irows <- letSubExps "row" =<< index dests (Var i)
     rowcopies <- mapM copyIfArray irows
     return $ resultBody $ rowcopies ++ map Var dests
   pat' <- discardPattern (map identType acc) pat
-  letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
-  where i = lambdaIndex fun
-        (accexps, arrexps) = unzip args
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
+  where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
-transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
+transformSOAC pat (Scanomap width _ fun accexps arrexps) = do
+  i <- newVName "i"
+  -- Name accumulators, do something with the corresponding expressions
+  (acc, initacc, _) <- newFold "scanomap" (zip accexps accts) arrexps
+  -- Create output arrays.
+  initarr <- resultArray scan_res_ts
+  -- Name Outputarrays?
+  arr <- mapM (newIdent "scan_arr" ) scan_res_ts
+  -- Create arrays for our map results.
+  initmaparrs <- resultArray map_res_ts
+  mapoutarrs <- mapM (newIdent "scanomap_map_outarr") map_res_ts
+  -- Get the names
+  let arr_names = map identName arr
+      map_names = map identName mapoutarrs
+      merge = loopMerge (acc++arr++mapoutarrs) (initacc++map Var initarr ++ map Var initmaparrs)
+  loopbody <- insertStmsM $ localScope (scopeOfFParams $ map fst merge) $ do
+    -- Bind function parameters to arguments.
+    x <- bindLambda fun . (map (BasicOp . SubExp . Var . identName) acc ++) =<<
+         index arrexps (Var i)
+    -- Set function destinations
+    dests <- letwith arr_names (pexp (Var i)) $
+             map (BasicOp . SubExp) (take (length accexps) x)
+    mapdests <- letwith map_names (pexp (Var i)) $
+                map (BasicOp . SubExp) (drop (length accexps) x)
+    irows <- letSubExps "row" =<< index dests (Var i)
+    rowcopies <- mapM copyIfArray irows
+    return $ resultBody $ rowcopies ++ map Var dests ++ map Var mapdests
+  pat' <- discardPattern (map identType acc) pat
+  letBind_ pat' $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
+  where accts = map paramType $ take (length accexps) $  lambdaParams fun
+        scan_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
+                     | t <- take (length accexps) (lambdaReturnType fun)]
+        map_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
+                     | t <- drop (length accexps) (lambdaReturnType fun)]
+
+
+transformSOAC pat (Redomap width _ _ innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
   arr_ts <- mapM lookupType arrexps
   maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
@@ -175,13 +197,13 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
   arrexps' <- forM (zip
                     (drop (length accexps) (lambdaParams innerfun))
                     arrexps) $ \(p,a) ->
-    if paramName p `HS.member` consumed then
-      letExp (baseString a ++ "_fot_redomap_copy") $ PrimOp $ Copy a
+    if paramName p `S.member` consumed then
+      letExp (baseString a ++ "_fot_redomap_copy") $ BasicOp $ Copy a
     else return a
   pat' <- discardPattern arr_ts pat
   letBind_ pat' =<<
-    doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
-    (constant (0::Int32))
+    doLoopMapAccumL width innerfun' accexps arrexps' maparrs
+
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
@@ -237,7 +259,7 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
 -- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
 --
 -- Hope you got the idea at least because the code is terrible :-)
-transformSOAC respat (Stream cs outersz form lam arrexps) = do
+transformSOAC respat (Stream outersz form lam arrexps) = do
   -- 1.) trivial step: find and build some of the basic things you need
   let accexps = getStreamAccums    form
       lampars = extLambdaParams     lam
@@ -254,10 +276,10 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
   let chunkglb_val = case form of
                        Sequential{} -> constant (1 :: Int32)
                        _            -> outersz
-  chunkglb <- letExp (baseString $ paramName chunkloc) $ PrimOp $ SubExp chunkglb_val
+  chunkglb <- letExp (baseString $ paramName chunkloc) $ BasicOp $ SubExp chunkglb_val
   let acc_num = length accexps
       arrrtps = drop acc_num lamrtps
-      sub_chko= HM.fromList [(paramName chunkloc, outersz)]
+      sub_chko= M.fromList [(paramName chunkloc, outersz)]
   -- 2.) Make the existential induction variables, allocated-size variables,
   --       and all possible instantiations of the existential types, i.e.,
   --       inside and outside the loop body!
@@ -279,7 +301,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
   let (exszvar,    exszarres,  exszses  ) = unzip3 $ catMaybes mexistszs
       (exindvars,  indvarres,  exindses ) = unzip3 $ catMaybes mexistinds
       (lftedrtps1, lftedrtps2, exactrtps) = unzip3   botharrtps
-      patarrnms = map (textual . identName) (fst $ unzip assocs)
+      patarrnms = map (baseString . identName . fst) assocs
   -- various result array identifiers
   outarrinit <- forM (zip initrtps  patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_init") t
@@ -293,8 +315,8 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
   -- various stream array identifiers and outer sizes
   acc0     <- mapM (newIdent "acc" <=< subExpType) accexps
   initacc0 <- mapM copyIfArray accexps --WHY COPY???
-  let loopind  = extLambdaIndex lam
-      accres  = exindvars ++ acc0
+  loopind <- newVName "loopind"
+  let accres  = exindvars ++ acc0
       ctxmerge = loopMerge exszvar exszses
       valmerge = loopMerge
                  (accres++outarrloop)
@@ -303,9 +325,9 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
   loopcnt  <- newIdent "stream_N" $ Prim int32
   -- 3.) Transform the stream's lambda to a loop body
   loopbody <- runBodyBinder $
-              localScope (HM.singleton loopind IndexInfo) $
+              localScope (M.singleton loopind $ IndexInfo Int32) $
               localScope (scopeOfFParams $ map fst $ ctxmerge++valmerge) $ do
-      let argsacc = map (PrimOp . SubExp . Var . identName) acc0
+      let argsacc = map (BasicOp . SubExp . Var . identName) acc0
           accpars = take acc_num $ drop 1 lampars
           arrpars = drop (1 + acc_num) lampars
       accxis <- bodyBind =<< do
@@ -314,46 +336,46 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
               letBindNames' [paramName param] arg
           -- ilam := i*chunk_glb, the local chunk inside the loop
           ilamexp <- eBinOp (Mul Int32)
-                            (pure $ PrimOp $ SubExp $ Var loopind)
-                            (pure $ PrimOp $ SubExp $ Var chunkglb)
+                            (pure $ BasicOp $ SubExp $ Var loopind)
+                            (pure $ BasicOp $ SubExp $ Var chunkglb)
           myLetBind ilamexp ilam
           ---------------- changed from here --------------
           -- ilampch := (i+1)*chunk_glb
           ip1chgid <- newIdent "stream_ip1chg" $ Prim int32
           ip1chgexp<- eBinOp (Add Int32)
-                             (pure $ PrimOp $ SubExp $ Var $ identName ilam)
-                             (pure $ PrimOp $ SubExp $ Var chunkglb)
+                             (pure $ BasicOp $ SubExp $ Var $ identName ilam)
+                             (pure $ BasicOp $ SubExp $ Var chunkglb)
           myLetBind ip1chgexp ip1chgid
           -- diff0   := (i+1)*ghunk_glb - total_stream_size
           diff0id  <- newIdent "stream_diff0" $ Prim int32
           diff0exp <-eBinOp (Sub Int32)
-                            (pure $ PrimOp $ SubExp $ Var $ identName ip1chgid)
-                            (pure $ PrimOp $ SubExp outersz)
+                            (pure $ BasicOp $ SubExp $ Var $ identName ip1chgid)
+                            (pure $ BasicOp $ SubExp outersz)
           myLetBind diff0exp diff0id
           -- diff    := 0 < diff0 ? diff0 : 0
           diffid   <- newIdent "stream_diff" $ Prim int32
           ifdiffexp<- eIf (eCmpOp (CmpSlt Int32)
-                           (pure $ PrimOp $ SubExp $ constant (0 :: Int32))
-                           (pure $ PrimOp $ SubExp $ Var $ identName diff0id))
+                           (pure $ BasicOp $ SubExp $ constant (0 :: Int32))
+                           (pure $ BasicOp $ SubExp $ Var $ identName diff0id))
                           (pure $ resultBody [Var $ identName diff0id])
                           (pure $ resultBody [constant (0 :: Int32)])
           myLetBind ifdiffexp diffid
           -- chunk_loc := chunk_glb - diff
           chlexp   <- eBinOp (Sub Int32)
-                             (pure $ PrimOp $ SubExp $ Var chunkglb)
-                             (pure $ PrimOp $ SubExp $ Var $ identName diffid)
+                             (pure $ BasicOp $ SubExp $ Var chunkglb)
+                             (pure $ BasicOp $ SubExp $ Var $ identName diffid)
           myLetBind chlexp $ paramIdent chunkloc
           -- diff1   := chunk_glb*i - diff
           diff1id  <- newIdent "stream_diff1" $ Prim int32
           diff1exp <- eBinOp (Sub Int32)
-                             (pure $ PrimOp $ SubExp $ Var $ identName ilam)
-                             (pure $ PrimOp $ SubExp $ Var $ identName diffid)
+                             (pure $ BasicOp $ SubExp $ Var $ identName ilam)
+                             (pure $ BasicOp $ SubExp $ Var $ identName diffid)
           myLetBind diff1exp diff1id
           -- split input streams into current chunk and rest of stream
           forM_ (zip arrpars arrexps) $
             \(param, inarr) -> do
                 atp <- lookupType inarr
-                let anm = textual inarr
+                let anm = baseString inarr
                 (dt1,t2,dt4) <- case atp of
                     Array bt (Shape (_:dims)) _ ->
                         return ( Array bt (Shape $ Var (identName diff1id):dims) NoUniqueness
@@ -365,22 +387,22 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                 id3 <- newIdent (anm++"_chgu") t2
                 id4 <- newIdent "dead" dt4
                 -- (_,a_cg) = split((chunk_glb*i-diff, chunk_glb), inarr)
-                let split1= PrimOp $ Split [] [Var $ identName diff1id, Var chunkglb] inarr
+                let split1= BasicOp $ Split 0 [Var $ identName diff1id, Var chunkglb] inarr
                 _ <- letBindNames' [identName id1, identName id2] split1
                 -- a_cg* := copy(a_cg)
                 letBindNames'_ [identName id3] =<<
-                  eCopy (pure (PrimOp $ SubExp $ Var $ identName id2))
+                  eCopy (pure (BasicOp $ SubExp $ Var $ identName id2))
                 -- (_,a_cl) = split((diff,cg-diff), a_cg*)
-                let split2= PrimOp $ Split [] [Var $ identName diffid,
+                let split2= BasicOp $ Split 0 [Var $ identName diffid,
                                                Var $ paramName chunkloc] $
                                      identName id3
                 letBindNames' [identName id4, paramName param] split2
-          mkBodyM (bodyBindings lambody) (bodyResult lambody)
+          mkBodyM (bodyStms lambody) (bodyResult lambody)
       -- make copy-out epilogue for result arrays
       let (acc', xis) = splitAt acc_num accxis
           indszids = zip mexistszs mexistinds
       epilogue <- forM (zip3 indszids outarrloop xis) $
-                       mkOutArrEpilogue cs (Var $ identName ilam)
+                  mkOutArrEpilogue (Var $ identName ilam)
       let (mszvars,mindvars,dests) = unzip3 epilogue
           (indvars,szvars) = (catMaybes mindvars, catMaybes mszvars)
       return $
@@ -389,7 +411,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                     map (Var . identName) dests)
   -- 4.) Build the loop
   let loopres = DoLoop ctxmerge valmerge
-                       (ForLoop loopind (Var $ identName loopcnt)) loopbody
+                       (ForLoop loopind Int32 (Var $ identName loopcnt) []) loopbody
       loopbnd = mkLet' exszarres (indvarres++strmresacc++strmresarrl) loopres
   -- 5.) A stream needs prologue-loop-epilogue bindings, so we make a dummy
   --     IF exp to return one expression
@@ -399,41 +421,41 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
     case (malocsz,msz) of
       (Nothing, Nothing)    ->
         -- regular array case!
-        return $ mkLet' [] [arr] $ PrimOp $ SubExp $ Var $ identName arrl
+        return $ mkLet' [] [arr] $ BasicOp $ SubExp $ Var $ identName arrl
       (_, Just (_,indvar,_)) ->
         -- array with known upper bound case!
         return $ mkLet' [] [arr] $
-        PrimOp $ Split [] [Var $ identName indvar] $ identName arrl
+        BasicOp $ Split 0 [Var $ identName indvar] $ identName arrl
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   lUBexp <- eBinOp (SDiv Int32)
                    (eBinOp (Add Int32)
-                    (pure $ PrimOp $ SubExp outersz)
-                    (eBinOp (Sub Int32) (pure $ PrimOp $ SubExp $ Var chunkglb)
-                                        (pure $ PrimOp $ SubExp $ constant (1 :: Int32))))
-                   (pure $ PrimOp $ SubExp $ Var chunkglb)
+                    (pure $ BasicOp $ SubExp outersz)
+                    (eBinOp (Sub Int32) (pure $ BasicOp $ SubExp $ Var chunkglb)
+                                        (pure $ BasicOp $ SubExp $ constant (1 :: Int32))))
+                   (pure $ BasicOp $ SubExp $ Var chunkglb)
   myLetBind lUBexp loopcnt
   let outinibds= zipWith (\ idd tp ->
-                            mkLet' [] [idd] $ PrimOp $
+                            mkLet' [] [idd] $ BasicOp $
                             Scratch (elemType tp) (arrayDims tp)
                          ) outarrinit initrtps
-  mapM_ addBinding (outinibds++allbnds)
+  mapM_ addStm (outinibds++allbnds)
   forM_ (zip (patternValueNames respat) $ strmresacc ++ strmresarr) $ \(p, v) ->
-    letBindNames'_ [p] $ PrimOp $ SubExp $ Var $ identName v
+    letBindNames'_ [p] $ BasicOp $ SubExp $ Var $ identName v
   let mapping = shapeMapping (patternValueTypes respat) $
                 map identType $ strmresacc ++ strmresarr
-  forM_ (HM.toList mapping) $ \(p, se) ->
+  forM_ (M.toList mapping) $ \(p, se) ->
     when (p `elem` patternContextNames respat) $
-    letBindNames'_ [p] $ PrimOp $ SubExp se
+    letBindNames'_ [p] $ BasicOp $ SubExp se
   where myLetBind :: Transformer m =>
                      AST.Exp (Lore m) -> Ident -> m ()
-        myLetBind e idd = addBinding $ mkLet' [] [idd] e
+        myLetBind e idd = addStm $ mkLet' [] [idd] e
 
-        exToNormShapeDim :: SubExp -> HM.HashMap VName SubExp -> ExtDimSize -> SubExp
+        exToNormShapeDim :: SubExp -> M.Map VName SubExp -> ExtDimSize -> SubExp
         exToNormShapeDim d _ (Ext   _) = d
         exToNormShapeDim _ _ (Free c@(Constant _)) = c
         exToNormShapeDim _ subs (Free (Var idd)) =
-          HM.lookupDefault (Var idd) idd subs
+          M.findWithDefault (Var idd) idd subs
         existUpperBound :: SubExp -> Bool -> MEQType
         existUpperBound outerSize b =
             if not b then UnknownBd
@@ -469,18 +491,18 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
         mkAllExistIdAndTypes _ ((_, ExactBd _), initrtp) =
             return ( Nothing, Nothing, (initrtp,initrtp,initrtp) )
         mkAllExistIdAndTypes _ ((p,UpperBd _), Array bt (Shape (d:dims)) u) = do
-            idd1<- newIdent (textual (identName p)++"_outiv1") $ Prim int32
-            idd2<- newIdent (textual (identName p)++"_outiv2") $ Prim int32
+            idd1<- newIdent (baseString (identName p)++"_outiv1") $ Prim int32
+            idd2<- newIdent (baseString (identName p)++"_outiv2") $ Prim int32
             let initrtp   = Array bt (Shape $ d:dims) u
                 exacttype = Array bt (Shape $ Var (identName idd2):dims) u
             return ( Nothing
                    , Just (idd1,idd2,constant (0 :: Int32))
                    , (initrtp,initrtp,exacttype) )
         mkAllExistIdAndTypes strmsz ((p,UnknownBd), Array bt (Shape (_:dims)) u) = do
-            idd1 <- newIdent (textual (identName p)++"_outiv1") $ Prim int32
-            idd2 <- newIdent (textual (identName p)++"_outiv2") $ Prim int32
-            idal1<- newIdent (textual (identName p)++"_outsz1") $ Prim int32
-            idal2<- newIdent (textual (identName p)++"_outsz2") $ Prim int32
+            idd1 <- newIdent (baseString (identName p)++"_outiv1") $ Prim int32
+            idd2 <- newIdent (baseString (identName p)++"_outiv2") $ Prim int32
+            idal1<- newIdent (baseString (identName p)++"_outsz1") $ Prim int32
+            idal2<- newIdent (baseString (identName p)++"_outsz2") $ Prim int32
             let lftedtype1= Array bt (Shape $ Var (identName idal1): dims) u
                 lftedtype2= Array bt (Shape $ Var (identName idal2): dims) u
                 exacttype = Array bt (Shape $ Var (identName idd2) : dims) u
@@ -491,13 +513,13 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             fail "FirstOrderTransform(Stream): failed in mkAllExistIdAndTypes"
 
         mkOutArrEpilogue :: Transformer m =>
-                            Certificates -> SubExp
+                            SubExp
                          -> (( Maybe (Ident,Ident,SubExp)
                              , Maybe (Ident,Ident,SubExp))
                             , Ident
                             , SubExp)
                          -> m (Maybe Ident, Maybe Ident, Ident)
-        mkOutArrEpilogue css iv ((allocvars,indvars),glboutid,locoutarr) = do
+        mkOutArrEpilogue iv ((allocvars,indvars),glboutid,locoutarr) = do
             locoutid <- case locoutarr of
                           Var idd -> return idd
                           _ -> fail ("FirstOrderTransform(Stream), mkOutArrEpilogue:"++
@@ -508,9 +530,9 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                   Nothing ->               -- exact-size case
                     return (iv, glboutid, Nothing, Nothing)
                   Just (k,_,_) -> do
-                    newszid <- newIdent (textual (identName k)++"_new") $ Prim int32
-                    plexp <- eBinOp (Add Int32) (pure $ PrimOp $ SubExp $ Var $ identName k)
-                                                (pure $ PrimOp $ SubExp locoutid_size)
+                    newszid <- newIdent (baseString (identName k)++"_new") $ Prim int32
+                    plexp <- eBinOp (Add Int32) (pure $ BasicOp $ SubExp $ Var $ identName k)
+                                                (pure $ BasicOp $ SubExp locoutid_size)
                     myLetBind plexp newszid
                     let oldbtp = identType glboutid
                     newallocid <- newIdent "newallocsz" $ Prim int32
@@ -525,99 +547,149 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                       Just (alsz,_,_)-> do -- fully existential case, reallocate
                         alloclid <- newVName "allcloopiv"
                         let isempty = eCmpOp (CmpSlt Int32)
-                                      (pure $ PrimOp $ SubExp $ Var $ identName newszid)
-                                      (pure $ PrimOp $ SubExp $ Var $ identName alsz)
+                                      (pure $ BasicOp $ SubExp $ Var $ identName newszid)
+                                      (pure $ BasicOp $ SubExp $ Var $ identName alsz)
                             emptybranch = pure $ resultBody [Var $ identName glboutid]
                             otherbranch = runBodyBinder $ do
                                 alszt2exp<- eBinOp (Mul Int32)
-                                            (pure $ PrimOp $ SubExp $ Var $ identName newszid)
-                                            (pure $ PrimOp $ SubExp $ constant (2 :: Int32))
+                                            (pure $ BasicOp $ SubExp $ Var $ identName newszid)
+                                            (pure $ BasicOp $ SubExp $ constant (2 :: Int32))
                                 myLetBind alszt2exp newallocid
-                                bnew0<- letExp (textual (identName glboutid)++"_loop0") $
-                                               PrimOp $ Scratch (elemType oldbtp) (Var (identName newallocid):olddims)
-                                bnew <- newIdent (textual (identName glboutid)++"_loop") =<<
+                                bnew0<- letExp (baseString (identName glboutid)++"_loop0") $
+                                               BasicOp $ Scratch (elemType oldbtp) (Var (identName newallocid):olddims)
+                                bnew <- newIdent (baseString (identName glboutid)++"_loop") =<<
                                         lookupType bnew0
                                 let alloc_merge = loopMerge [bnew] [Var bnew0]
                                 allocloopbody <-
                                   runBodyBinder $
-                                  localScope (HM.singleton alloclid IndexInfo) $
+                                  localScope (M.singleton alloclid $ IndexInfo Int32) $
                                   localScope (scopeOfFParams $ map fst alloc_merge) $ do
-                                    (aldest:_) <- letwith css [identName bnew] (pexp $ Var alloclid)
-                                                  [PrimOp $ Index css (identName glboutid) [Var alloclid]]
+                                    (aldest:_) <- letwith [identName bnew] (pexp $ Var alloclid)
+                                                  [BasicOp $ Index (identName glboutid)
+                                                   [DimFix $ Var alloclid]]
                                     return $ resultBody [Var aldest]
                                 let alloopres = DoLoop []
                                                   (loopMerge [bnew] [Var bnew0])
-                                                  (ForLoop alloclid (Var $ identName k)) allocloopbody
-                                bnew' <- newIdent (textual (identName glboutid)++"_new0") =<<
+                                                  (ForLoop alloclid Int32 (Var $ identName k) []) allocloopbody
+                                bnew' <- newIdent (baseString (identName glboutid)++"_new0") =<<
                                          lookupType bnew0
                                 myLetBind alloopres bnew'
                                 return $ resultBody [Var $ identName bnew']
                         allocifexp <- eIf isempty emptybranch otherbranch
-                        bnew'' <- newIdent (textual (identName glboutid)++"_res") $
+                        bnew'' <- newIdent (baseString (identName glboutid)++"_res") $
                                            Array (elemType oldbtp)
                                            (Shape $ Var (identName resallocid):olddims) NoUniqueness
                         let patresbnd = mkLet' [resallocid] [bnew''] allocifexp
-                        addBinding patresbnd
+                        addStm patresbnd
                         return (Var $ identName k, bnew'', Just newszid, Just resallocid)
-            glboutLid <- newIdent (textual (identName glboutid)++"_loop") $ identType glboutid'
-            glboutBdId<- newIdent (textual (identName glboutid)++"_loopbd") $ identType glboutid'
+            glboutLid <- newIdent (baseString (identName glboutid)++"_loop") $ identType glboutid'
+            glboutBdId<- newIdent (baseString (identName glboutid)++"_loopbd") $ identType glboutid'
             loopid <- newVName "j"
             let outmerge = loopMerge [glboutLid] [Var $ identName glboutid']
             -- make copy-out what was written in the current iteration
             loopbody <- runBodyBinder $
-                        localScope (HM.singleton loopid IndexInfo) $
+                        localScope (M.singleton loopid $ IndexInfo Int32) $
                         localScope (scopeOfFParams $ map fst outmerge) $ do
                 ivvplid <- newIdent "jj" $ Prim int32
                 ivvplidexp <- eBinOp (Add Int32)
-                              (pure $ PrimOp $ SubExp ivv)
-                              (pure $ PrimOp $ SubExp $ Var loopid)
+                              (pure $ BasicOp $ SubExp ivv)
+                              (pure $ BasicOp $ SubExp $ Var loopid)
                 myLetBind ivvplidexp ivvplid
-                (dest:_) <- letwith css [identName glboutLid] (pexp (Var $ identName ivvplid))--[indexp]
-                                        [PrimOp $ Index css locoutid [Var loopid]]
+                locoutid_t <- lookupType locoutid
+                (dest:_) <- letwith [identName glboutLid] (pexp (Var $ identName ivvplid))
+                                        [BasicOp $ Index locoutid $
+                                         fullSlice locoutid_t [DimFix (Var loopid)]]
                 return $ resultBody [Var dest]
             -- make loop
             let loopres = DoLoop [] outmerge
-                          (ForLoop loopid locoutid_size) loopbody
+                          (ForLoop loopid Int32 locoutid_size []) loopbody
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
+transformSOAC pat (Scatter len lam ivs as) = do
+  iter <- newVName "write_iter"
+
+  ts <- mapM (lookupType . snd) as
+  asOuts <- mapM (newIdent "write_out") ts
+
+--  ivs' <- bindLambda lam (map (BasicOp . SubExp . Var) ivs)
+--  ivs'' <- mapM subExpToVName ivs'
+  let ivsLen = length (lambdaReturnType lam) `div` 2
+
+  -- Scatter is in-place, so we use the input array as the output array.
+  let merge = loopMerge asOuts $ map (Var . snd) as
+  loopBody <- runBodyBinder $
+    localScope (M.insert iter (IndexInfo Int32) $
+                scopeOfFParams $ map fst merge) $ do
+    ivs' <- forM ivs $ \iv -> do
+      iv_t <- lookupType iv
+      letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
+    ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
+
+    let indexes = take ivsLen ivs''
+        values = drop ivsLen ivs''
+
+    ress <- forM (zip4 indexes values asOuts ts) $ \(indexCur, valueCur, arrayOut, t) -> do
+      let lenA = arraySize 0 t
+      less_than_zero <- letSubExp "less_than_zero" $
+        BasicOp $ CmpOp (CmpSlt Int32) indexCur (constant (0::Int32))
+      greater_than_size <- letSubExp "greater_than_size" $
+        BasicOp $ CmpOp (CmpSle Int32) lenA indexCur
+      outside_bounds <- letSubExp "outside_bounds" $
+        BasicOp $ BinOp LogOr less_than_zero greater_than_size
+
+      outside_bounds_branch <- runBodyBinder $ do
+        res <- letExp "write_out_outside_bounds"
+          $ BasicOp $ SubExp $ Var $ identName arrayOut
+        return $ resultBody [Var res]
+
+      in_bounds_branch <- runBodyBinder $ do
+        res <- letInPlace "write_out_inside_bounds" (identName arrayOut)
+          (fullSlice (identType arrayOut) [DimFix indexCur]) $ BasicOp $ SubExp valueCur
+        return $ resultBody [Var res]
+
+      letExp "write_out" $
+        If outside_bounds outside_bounds_branch in_bounds_branch $
+        ifCommon [t]
+    return $ resultBody (map Var ress)
+  letBind_ pat $ DoLoop [] merge (ForLoop iter Int32 len []) loopBody
+
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
-                    Bindable lore,
-                    LocalScope lore m,
+                    Bindable lore, BinderOps lore,
+                    LocalScope somelore m,
+                    SameScope somelore lore,
                     LetAttr SOACS ~ LetAttr lore,
-                    LParamAttr SOACS ~ LParamAttr lore,
                     CanBeAliased (Op lore)) =>
                    Lambda -> m (AST.Lambda lore)
-transformLambda (Lambda i params body rettype) = do
+transformLambda (Lambda params body rettype) = do
   body' <- runBodyBinder $
-           localScope (HM.singleton i IndexInfo) $
            localScope (scopeOfLParams params) $
            transformBody body
-  return $ Lambda i params body' rettype
+  return $ Lambda params body' rettype
 
 -- | Recursively first-order-transform a lambda.
 transformExtLambda :: (MonadFreshNames m,
-                       Bindable lore,
+                       Bindable lore, BinderOps lore,
                        LocalScope lore m,
                        LetAttr SOACS ~ LetAttr lore,
-                       LParamAttr SOACS ~ LParamAttr lore,
                        CanBeAliased (Op lore)) =>
                       ExtLambda -> m (AST.ExtLambda lore)
-transformExtLambda (ExtLambda i params body rettype) = do
+transformExtLambda (ExtLambda params body rettype) = do
   body' <- runBodyBinder $
-           localScope (HM.singleton i IndexInfo) $
            localScope (scopeOfLParams params) $
            transformBody body
-  return $ ExtLambda i params body' rettype
+  return $ ExtLambda params body' rettype
 
 newFold :: Transformer m =>
-           [(SubExp,Type)]
-        -> m ([Ident], [SubExp])
-newFold accexps_and_types = do
+           String -> [(SubExp,Type)] -> [VName]
+        -> m ([Ident], [SubExp], [Ident])
+newFold what accexps_and_types arrexps = do
   initacc <- mapM copyIfArray acc_exps
   acc <- mapM (newIdent "acc") acc_types
-  return (acc, initacc)
+  arrts <- mapM lookupType arrexps
+  inarrs <- mapM (newIdent $ what ++ "_inarr") arrts
+  return (acc, initacc, inarrs)
   where (acc_exps, acc_types) = unzip accexps_and_types
 
 copyIfArray :: Transformer m =>
@@ -630,35 +702,37 @@ copyIfArrayName :: Transformer m =>
 copyIfArrayName v = do
   t <- lookupType v
   case t of
-   Array {} -> letExp (baseString v ++ "_first_order_copy") $ PrimOp $ Copy v
+   Array {} -> letExp (baseString v ++ "_first_order_copy") $ BasicOp $ Copy v
    _        -> return v
 
-index :: Certificates -> [VName] -> SubExp
-      -> [AST.Exp lore]
-index cs arrs i = flip map arrs $ \arr ->
-  PrimOp $ Index cs arr [i]
+index :: (HasScope lore m, Monad m) =>
+         [VName] -> SubExp -> m [AST.Exp lore]
+index arrs i = forM arrs $ \arr -> do
+  arr_t <- lookupType arr
+  return $ BasicOp $ Index arr $ fullSlice arr_t [DimFix i]
 
 resultArray :: Transformer m => [Type] -> m [VName]
 resultArray = mapM oneArray
-  where oneArray t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
+  where oneArray t = letExp "result" $ BasicOp $ Scratch (elemType t) (arrayDims t)
 
 letwith :: Transformer m =>
-           Certificates -> [VName] -> m (AST.Exp (Lore m)) -> [AST.Exp (Lore m)]
+           [VName] -> m (AST.Exp (Lore m)) -> [AST.Exp (Lore m)]
         -> m [VName]
-letwith cs ks i vs = do
+letwith ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
-  let update k v =
-        letInPlace "lw_dest" cs k [i'] $ PrimOp $ SubExp v
+  let update k v = do
+        k_t <- lookupType k
+        letInPlace "lw_dest" k (fullSlice k_t [DimFix i']) $ BasicOp $ SubExp v
   zipWithM update ks vs'
 
 pexp :: Applicative f => SubExp -> f (AST.Exp lore)
-pexp = pure . PrimOp . SubExp
+pexp = pure . BasicOp . SubExp
 
 bindLambda :: Transformer m =>
               AST.Lambda (Lore m) -> [AST.Exp (Lore m)]
            -> m [SubExp]
-bindLambda (Lambda _ params body _) args = do
+bindLambda (Lambda params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
     if primType $ paramType param
     then letBindNames' [paramName param] arg
@@ -686,19 +760,32 @@ data MEQType = ExactBd SubExp
 
 -- | Turn a Haskell-style mapAccumL into a sequential do-loop.  This
 -- is the guts of transforming a 'Redomap'.
-doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
+doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m,
+                    Bindable (Lore m), BinderOps (Lore m),
                     LetAttr (Lore m) ~ Type,
                     CanBeAliased (Op (Lore m))) =>
-                   Certificates
-                -> SubExp
+                   SubExp
                 -> AST.Lambda (Aliases (Lore m))
                 -> [SubExp]
                 -> [VName]
                 -> [VName]
-                -> SubExp
                 -> m (AST.Exp (Lore m))
-doLoopMapAccumL cs width innerfun accexps arrexps maparrs offset = do
-  arrts <- mapM lookupType arrexps
+doLoopMapAccumL width innerfun accexps arrexps mapout_arrs = do
+  (merge, i, loopbody) <-
+    doLoopMapAccumL' width innerfun accexps arrexps mapout_arrs
+  return $ DoLoop [] merge (ForLoop i Int32 width []) loopbody
+
+doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m,
+                     Bindable (Lore m), BinderOps (Lore m),
+                    LetAttr (Lore m) ~ Type,
+                    CanBeAliased (Op (Lore m))) =>
+                   SubExp
+                -> AST.Lambda (Aliases (Lore m))
+                -> [SubExp]
+                -> [VName]
+                -> [VName]
+                -> m ([(AST.FParam (Lore m), SubExp)], VName, AST.Body (Lore m))
+doLoopMapAccumL' width innerfun accexps arrexps mapout_arrs = do
   i <- newVName "i"
   -- for the MAP    part
   let acc_num     = length accexps
@@ -709,21 +796,19 @@ doLoopMapAccumL cs width innerfun accexps arrexps maparrs offset = do
   let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
   outarrs <- mapM (newIdent "redomap_outarr") res_ts
   -- for the REDUCE part
-  (acc, initacc) <- newFold $ zip accexps accts
-  inarrs <- mapM (newIdent "redomap_inarr") arrts
+  (acc, initacc, inarrs) <- newFold "redomap" (zip accexps accts) arrexps
   let consumed = consumedInBody $ lambdaBody innerfun
-      withUniqueness p | identName p `HS.member` consumed = (p, Unique)
+      withUniqueness p | identName p `S.member` consumed = (p, Unique)
                        | p `elem` outarrs = (p, Unique)
                        | otherwise = (p, Nonunique)
       merge = loopMerge' (map withUniqueness $ inarrs++acc++outarrs)
-              (map Var arrexps++initacc++map Var maparrs)
+              (map Var arrexps++initacc++map Var mapout_arrs)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
-    letBindNames'_ [lambdaIndex innerfun] $ PrimOp $ BinOp (Add Int32) (Var i) offset
-    accxis<- bindLambda (removeLambdaAliases innerfun)
-             (map (PrimOp . SubExp . Var . identName) acc ++
-              index cs (map identName inarrs) (Var i))
+    accxis<- bindLambda (removeLambdaAliases innerfun) .
+             (map (BasicOp . SubExp . Var . identName) acc ++) =<<
+              index (map identName inarrs) (Var i)
     let (acc', xis) = splitAt acc_num accxis
-    dests <- letwith cs (map identName outarrs) (pexp (Var i)) $
-             map (PrimOp . SubExp) xis
+    dests <- letwith (map identName outarrs) (pexp (Var i)) $
+             map (BasicOp . SubExp) xis
     return $ resultBody (map (Var . identName) inarrs ++ acc' ++ map Var dests)
-  return $ DoLoop [] merge (ForLoop i width) loopbody
+  return (merge, i, loopbody)

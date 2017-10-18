@@ -4,13 +4,14 @@ module Futhark.Optimise.DeadVarElim
        ( deadCodeElim
        , deadCodeElimFun
        , deadCodeElimBody
+       , deadCodeElimLambda
        )
   where
 
 import Control.Applicative
 import Control.Monad.Writer
 
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Prelude
 
@@ -31,8 +32,8 @@ data DCElimRes = DCElimRes {
 
 instance Monoid DCElimRes where
   DCElimRes s1 m1 `mappend` DCElimRes s2 m2 =
-    DCElimRes (s1 || s2) (m1 `HS.union` m2) --(io1 || io2)
-  mempty = DCElimRes False HS.empty -- False
+    DCElimRes (s1 || s2) (m1 `S.union` m2) --(io1 || io2)
+  mempty = DCElimRes False S.empty -- False
 
 type DCElimM = Writer DCElimRes
 
@@ -42,7 +43,7 @@ runDCElimM = runWriter
 collectRes :: [VName] -> DCElimM a -> DCElimM (a, Bool)
 collectRes mvars m = pass collect
   where wasNotUsed hashtab vnm =
-          return $ not (HS.member vnm hashtab)
+          return $ not (S.member vnm hashtab)
 
         collect = do
           (x,res) <- listen m
@@ -61,14 +62,19 @@ deadCodeElim :: Attributes lore => Prog lore -> Prog lore
 deadCodeElim = Prog . map deadCodeElimFun . progFunctions
 
 -- | Applies Dead-Code Elimination to just a single function.
-deadCodeElimFun :: Attributes lore => FunDec lore -> FunDec lore
-deadCodeElimFun (FunDec fname rettype args body) =
+deadCodeElimFun :: Attributes lore => FunDef lore -> FunDef lore
+deadCodeElimFun (FunDef entry fname rettype args body) =
   let body' = deadCodeElimBody body
-  in FunDec fname rettype args body'
+  in FunDef entry fname rettype args body'
 
 -- | Applies Dead-Code Elimination to just a single body.
 deadCodeElimBody :: Attributes lore => Body lore -> Body lore
 deadCodeElimBody = fst . runDCElimM . deadCodeElimBodyM
+
+-- | Applies Dead-Code Elimination to just a single lambda.
+deadCodeElimLambda :: Attributes lore => Lambda lore -> Lambda lore
+deadCodeElimLambda lam =
+  lam { lambdaBody = fst $ runDCElimM $ deadCodeElimBodyM $ lambdaBody lam }
 
 --------------------------------------------------------------------
 --------------------------------------------------------------------
@@ -100,36 +106,28 @@ deadCodeElimBodyM (Body bodylore [] es) = do
   Body bodylore [] <$> mapM deadCodeElimSubExp es
 
 deadCodeElimExp :: Attributes lore => Exp lore -> DCElimM (Exp lore)
-deadCodeElimExp (DoLoop ctx val form body) = do
-  let (ctxparams, ctxinit) = unzip ctx
-      (valparams, valinit) = unzip val
-  mapM_ deadCodeElimParam ctxparams
-  mapM_ deadCodeElimSubExp ctxinit
-  mapM_ deadCodeElimParam valparams
-  mapM_ deadCodeElimSubExp valinit
-  body' <- deadCodeElimBodyM body
-  case form of
-    ForLoop _ bound -> void $ deadCodeElimSubExp bound
-    WhileLoop cond  -> void $ deadCodeElimVName cond
-  return $ DoLoop ctx val form body'
-deadCodeElimExp e = mapExpM mapper e
+deadCodeElimExp = mapExpM mapper
   where mapper = Mapper {
-                   mapOnBody = deadCodeElimBodyM
+                   mapOnBody = const deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnVName = deadCodeElimVName
-                 , mapOnCertificates = mapM deadCodeElimVName
+                 , mapOnCertificates = \(Certificates cs) ->
+                     Certificates <$> mapM deadCodeElimVName cs
                  , mapOnRetType = \rt -> do
                    seen $ freeIn rt
                    return rt
                  , mapOnFParam = \fparam -> do
                    seen $ freeIn fparam
                    return fparam
+                 , mapOnLParam = \lparam -> do
+                   seen $ freeIn lparam
+                   return lparam
                  , mapOnOp = \op -> seen (freeIn op) >> return op
                  }
 
 deadCodeElimVName :: VName -> DCElimM VName
 deadCodeElimVName vnm = do
-  seen $ HS.singleton vnm
+  seen $ S.singleton vnm
   return vnm
 
 deadCodeElimPat :: FreeIn attr => PatternT attr -> DCElimM ()
@@ -137,11 +135,7 @@ deadCodeElimPat = mapM_ deadCodeElimPatElem . patternElements
 
 deadCodeElimPatElem :: FreeIn attr => PatElemT attr -> DCElimM ()
 deadCodeElimPatElem patelem =
-  seen $ patElemName patelem `HS.delete` freeIn patelem
-
-deadCodeElimParam :: FreeIn attr => ParamT attr -> DCElimM ()
-deadCodeElimParam fparam =
-  seen $ paramName fparam `HS.delete` freeIn fparam
+  seen $ patElemName patelem `S.delete` freeIn patelem
 
 seen :: Names -> DCElimM ()
 seen = tell . DCElimRes False

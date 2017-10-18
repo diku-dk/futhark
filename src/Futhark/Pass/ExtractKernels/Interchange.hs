@@ -1,4 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | It is well known that fully parallel loops can always be
+-- interchanged inwards with a sequential loop.  This module
+-- implements that transformation.
 module Futhark.Pass.ExtractKernels.Interchange
        (
          SeqLoop (..)
@@ -7,7 +10,7 @@ module Futhark.Pass.ExtractKernels.Interchange
 
 import Control.Applicative
 import Control.Monad.RWS.Strict
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 
@@ -19,18 +22,20 @@ import Futhark.Tools
 
 import Prelude
 
-data SeqLoop = SeqLoop Pattern [(FParam, SubExp)] LoopForm Body
+-- | An encoding of a sequential do-loop with no existential context,
+-- alongside its result pattern.
+data SeqLoop = SeqLoop [Int] Pattern [(FParam, SubExp)] (LoopForm SOACS) Body
 
-seqLoopBinding :: SeqLoop -> Binding
-seqLoopBinding (SeqLoop pat merge form body) =
-  Let pat () $ DoLoop [] merge form body
+seqLoopStm :: SeqLoop -> Stm
+seqLoopStm (SeqLoop _ pat merge form body) =
+  Let pat (defAux ()) $ DoLoop [] merge form body
 
 interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
                    SeqLoop -> LoopNesting
                 -> m SeqLoop
 interchangeLoop
-  (SeqLoop loop_pat merge form body)
-  (MapNesting pat cs w i params_and_arrs) = do
+  (SeqLoop perm loop_pat merge form body)
+  (MapNesting pat cs w params_and_arrs) = do
     merge_expanded <-
       localScope (scopeOfLParams $ map fst params_and_arrs) $
       mapM expand merge
@@ -49,20 +54,21 @@ interchangeLoop
     -- used just as the inital value of a merge parameter.
     ((params', arrs'), pre_copy_bnds) <-
       runBinder $ localScope (scopeOfLParams new_params) $
-      unzip <$> catMaybes <$> mapM copyOrRemoveParam params_and_arrs
+      unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
-    let lam = Lambda i (params'<>new_params) body rettype
-        map_bnd = Let loop_pat_expanded () $
-                  Op $ Map cs w lam $ arrs' <> new_arrs
+    let lam = Lambda (params'<>new_params) body rettype
+        map_bnd = Let loop_pat_expanded (StmAux cs ()) $
+                  Op $ Map w lam $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
+        pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
 
     return $
-      SeqLoop pat merge_expanded form $
+      SeqLoop [0..patternSize pat-1] pat' merge_expanded form $
       mkBody (pre_copy_bnds++[map_bnd]) res
   where free_in_body = freeInBody body
 
         copyOrRemoveParam (param, arr)
-          | not (paramName param `HS.member` free_in_body) =
+          | not (paramName param `S.member` free_in_body) =
             return Nothing
           | otherwise =
             return $ Just (param, arr)
@@ -73,7 +79,7 @@ interchangeLoop
               return $ Var arr
         expandedInit param_name se =
           letSubExp (param_name <> "_expanded_init") $
-            PrimOp $ Replicate w se
+            BasicOp $ Replicate (Shape [w]) se
 
         expand (merge_param, merge_init) = do
           expanded_param <-
@@ -87,10 +93,14 @@ interchangeLoop
         expandPatElem (PatElem name bindage t) =
           PatElem name bindage $ arrayOfRow t w
 
+-- | Given a (parallel) map nesting and an inner sequential loop, move
+-- the maps inside the sequential loop.  The result is several
+-- statements - one of these will be the loop, which will then contain
+-- statements with 'Map' expressions.
 interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                     KernelNest -> SeqLoop
-                 -> m [Binding]
+                 -> m [Stm]
 interchangeLoops nest loop = do
   (loop', bnds) <-
     runBinder $ foldM interchangeLoop loop $ reverse $ kernelNestLoops nest
-  return $ bnds ++ [seqLoopBinding loop']
+  return $ bnds ++ [seqLoopStm loop']

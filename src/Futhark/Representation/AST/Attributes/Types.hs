@@ -20,11 +20,15 @@ module Futhark.Representation.AST.Attributes.Types
        , arrayOfRow
        , arrayOfShape
        , setOuterSize
+       , setDimSize
        , setOuterDim
+       , setDim
        , setArrayDims
+       , setArrayExtDims
        , peelArray
        , stripArray
        , arrayDims
+       , arrayExtDims
        , shapeSize
        , arraySize
        , arraysSize
@@ -35,7 +39,6 @@ module Futhark.Representation.AST.Attributes.Types
        , rearrangeType
 
        , diet
-       , dietingAs
 
        , subtypeOf
        , subtypesOf
@@ -68,8 +71,8 @@ import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -130,8 +133,7 @@ uniqueness _ = Nonunique
 unique :: TypeBase shape Uniqueness -> Bool
 unique = (==Unique) . uniqueness
 
--- | Set the uniqueness attribute of a type.  If the type is a tuple,
--- the uniqueness of its components will be modified.
+-- | Set the uniqueness attribute of a type.
 setUniqueness :: TypeBase shape Uniqueness
               -> Uniqueness
               -> TypeBase shape Uniqueness
@@ -202,15 +204,28 @@ arrayOfShape t shape = arrayOf t shape NoUniqueness
 setArrayDims :: TypeBase oldshape u -> [SubExp] -> TypeBase Shape u
 setArrayDims t dims = t `setArrayShape` Shape dims
 
+-- | Set the existential dimensions of an array.  If the given type is
+-- not an array, return the type unchanged.
+setArrayExtDims :: TypeBase oldshape u -> [ExtDimSize] -> TypeBase ExtShape u
+setArrayExtDims t dims = t `setArrayShape` ExtShape dims
+
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setOuterSize :: TypeBase Shape u -> SubExp -> TypeBase Shape u
-setOuterSize t e = t `setArrayShape` setOuterDim (arrayShape t) e
+setOuterSize = setDimSize 0
+
+-- | Replace the size of the given dimension of an array.  If the
+-- given type is not an array, it is returned unchanged.
+setDimSize :: Int -> TypeBase Shape u -> SubExp -> TypeBase Shape u
+setDimSize i t e = t `setArrayShape` setDim i (arrayShape t) e
 
 -- | Replace the outermost dimension of an array shape.
 setOuterDim :: Shape -> SubExp -> Shape
-setOuterDim (Shape (_:es)) e = Shape (e : es)
-setOuterDim shape _          = shape
+setOuterDim = setDim 0
+
+-- | Replace the specified dimension of an array shape.
+setDim :: Int -> Shape -> SubExp -> Shape
+setDim i (Shape ds) e = Shape $ take i ds ++ e : drop (i+1) ds
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -243,6 +258,11 @@ shapeSize i shape = case drop i $ shapeDims shape of
 -- empty list.
 arrayDims :: TypeBase Shape u -> [SubExp]
 arrayDims = shapeDims . arrayShape
+
+-- | Return the existential dimensions of a type - for non-arrays,
+-- this is the empty list.
+arrayExtDims :: TypeBase ExtShape u -> [ExtDimSize]
+arrayExtDims = extShapeDims . arrayShape
 
 -- | Return the size of the given dimension.  If the dimension does
 -- not exist, the zero constant is returned.
@@ -294,15 +314,6 @@ diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem{} = Observe
 
--- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
--- reflect how it is consumed according to @d@ - if it is consumed, it
--- becomes 'Unique'.  Tuples are handled intelligently.
-dietingAs :: TypeBase shape Uniqueness -> Diet -> TypeBase shape Uniqueness
-t `dietingAs` Consume =
-  t `setUniqueness` Unique
-t `dietingAs` _ =
-  t `setUniqueness` Nonunique
-
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
 subtypeOf :: (Ord u, ArrayShape shape) =>
@@ -310,7 +321,7 @@ subtypeOf :: (Ord u, ArrayShape shape) =>
           -> TypeBase shape u
           -> Bool
 subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
-  u1 <= u2 &&
+  u2 <= u1 &&
   t1 == t2 &&
   shape1 `subShapeOf` shape2
 subtypeOf (Prim t1) (Prim t2) = t1 == t2
@@ -346,27 +357,27 @@ fromDecl (Mem size space) = Mem size space
 -- return type.
 extractShapeContext :: [TypeBase ExtShape u] -> [[a]] -> [a]
 extractShapeContext ts shapes =
-  evalState (concat <$> zipWithM extract ts shapes) HS.empty
+  evalState (concat <$> zipWithM extract ts shapes) S.empty
   where extract t shape =
           catMaybes <$> zipWithM extract' (extShapeDims $ arrayShape t) shape
         extract' (Ext x) v = do
-          seen <- gets $ HS.member x
+          seen <- gets $ S.member x
           if seen then return Nothing
-            else do modify $ HS.insert x
+            else do modify $ S.insert x
                     return $ Just v
         extract' (Free _) _ = return Nothing
 
 -- | The set of identifiers used for the shape context in the given
 -- 'ExtType's.
-shapeContext :: [TypeBase ExtShape u] -> HS.HashSet Int
-shapeContext = HS.fromList
+shapeContext :: [TypeBase ExtShape u] -> S.Set Int
+shapeContext = S.fromList
                . concatMap (mapMaybe ext . extShapeDims . arrayShape)
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
 -- | The size of the set that would be returned by 'shapeContext'.
 shapeContextSize :: [ExtType] -> Int
-shapeContextSize = HS.size . shapeContext
+shapeContextSize = S.size . shapeContext
 
 -- | If all dimensions of the given 'RetType' are statically known,
 -- return the corresponding list of 'Type'.
@@ -390,9 +401,9 @@ generaliseExtTypes :: [TypeBase ExtShape u]
                    -> [TypeBase ExtShape u]
                    -> [TypeBase ExtShape u]
 generaliseExtTypes rt1 rt2 =
-  evalState (zipWithM unifyExtShapes rt1 rt2) (0, HM.empty)
+  evalState (zipWithM unifyExtShapes rt1 rt2) (0, M.empty)
   where unifyExtShapes t1 t2 =
-          setArrayShape t1 <$> ExtShape <$>
+          setArrayShape t1 . ExtShape <$>
           zipWithM unifyExtDims
           (extShapeDims $ arrayShape t1)
           (extShapeDims $ arrayShape t2)
@@ -403,11 +414,11 @@ generaliseExtTypes rt1 rt2 =
                             return $ Ext n
         unifyExtDims (Ext x) (Ext y)
           | x == y = Ext <$> (maybe (new x) return =<<
-                              gets (HM.lookup x . snd))
+                              gets (M.lookup x . snd))
         unifyExtDims (Ext x) _ = Ext <$> new x
         unifyExtDims _ (Ext x) = Ext <$> new x
         new x = do (n,m) <- get
-                   put (n + 1, HM.insert x n m)
+                   put (n + 1, M.insert x n m)
                    return n
 
 -- | Given a list of 'ExtType's and a set of "forbidden" names, modify
@@ -417,26 +428,26 @@ generaliseExtTypes rt1 rt2 =
 existentialiseExtTypes :: Names -> [ExtType] -> [ExtType]
 existentialiseExtTypes inaccessible ts =
   evalState (mapM makeBoundShapesFree ts)
-  (firstavail, HM.empty, HM.empty)
-  where firstavail = 1 + HS.foldl' max (-1) (shapeContext ts)
+  (firstavail, M.empty, M.empty)
+  where firstavail = 1 + S.foldl' max (-1) (shapeContext ts)
         makeBoundShapesFree t = do
           shape <- mapM checkDim $ extShapeDims $ arrayShape t
           return $ t `setArrayShape` ExtShape shape
         checkDim (Free (Var v))
-          | v `HS.member` inaccessible =
+          | v `S.member` inaccessible =
             replaceVar v
         checkDim (Free se) = return $ Free se
         checkDim (Ext x)   = replaceExt x
         replaceExt x = do
           (n, extmap, varmap) <- get
-          case HM.lookup x extmap of
-            Nothing -> do put (n+1, HM.insert x (Ext n) extmap, varmap)
+          case M.lookup x extmap of
+            Nothing -> do put (n+1, M.insert x (Ext n) extmap, varmap)
                           return $ Ext n
             Just replacement -> return replacement
         replaceVar name = do
           (n, extmap, varmap) <- get
-          case HM.lookup name varmap of
-            Nothing -> do put (n+1, extmap, HM.insert name (Ext n) varmap)
+          case M.lookup name varmap of
+            Nothing -> do put (n+1, extmap, M.insert name (Ext n) varmap)
                           return $ Ext n
             Just replacement -> return replacement
 
@@ -449,12 +460,12 @@ existentialiseExtTypes inaccessible ts =
 -- This function is useful when @ts1@ are the value parameters of some
 -- function and @ts2@ are the value arguments, and we need to figure
 -- out which shape context to pass.
-shapeMapping :: [TypeBase Shape u0] -> [TypeBase Shape u1] -> HM.HashMap VName SubExp
+shapeMapping :: [TypeBase Shape u0] -> [TypeBase Shape u1] -> M.Map VName SubExp
 shapeMapping ts = shapeMapping' ts . map arrayDims
 
 -- | Like @shapeMapping@, but works with explicit dimensions.
-shapeMapping' :: [TypeBase Shape u] -> [[a]] -> HM.HashMap VName a
-shapeMapping' ts shapes = HM.fromList $ concat $ zipWith inspect ts shapes
+shapeMapping' :: [TypeBase Shape u] -> [[a]] -> M.Map VName a
+shapeMapping' ts shapes = M.fromList $ concat $ zipWith inspect ts shapes
   where inspect t shape =
           mapMaybe match $ zip (arrayDims t) shape
         match (Constant {}, _) = Nothing

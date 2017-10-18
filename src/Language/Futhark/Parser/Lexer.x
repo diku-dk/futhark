@@ -1,241 +1,285 @@
 {
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -w #-}
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
   ( Token(..)
-  , alexScanTokens
   , L(..)
+  , scanTokens
+  , scanTokensText
   ) where
 
-import Data.Char (ord)
+import qualified Data.ByteString.Lazy as BS
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import Data.Char (ord, toLower)
 import Data.Loc hiding (L)
 import Data.Int (Int8, Int16, Int32, Int64)
-
-import Language.Futhark.Core (nameFromString)
-import Language.Futhark.Parser.Tokens
-
 import Data.Word (Word8)
-
 import Data.Bits
+import Data.Function (fix)
+import Data.List
+import Data.Monoid
+
+import Language.Futhark.Core (Int8, Int16, Int32, Int64,
+                              Word8, Word16, Word32, Word64,
+                              Name, nameFromText, nameToText)
+import Language.Futhark.Attributes (leadingOperator)
+import Language.Futhark.Syntax (BinOp(..))
 
 }
 
+%wrapper "monad-bytestring"
+
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
 @stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+)|\n)
-@hexlit = 0[xX][0-9a-fA-F]+
-@declit = [0-9]+
-@intlit = @hexlit|@declit
-@reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
+@hexlit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*
+@declit = [0-9][0-9_]*
+@binlit = 0[bB][01][01_]*
+@romlit = 0[rR][IVXLCM][IVXLCM_]*
+@intlit = @hexlit|@binlit|@declit|@romlit
+@reallit = (([0-9][0-9_]*("."[0-9][0-9_]*)?))([eE][\+\-]?[0-9]+)?
+@hexreallit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*"."[0-9a-fA-F][0-9a-fA-F_]*([pP][\+\-]?[0-9]+)
+
+@field = [a-zA-Z0-9] [a-zA-Z0-9_]*
+
+@identifier = [a-zA-Z] [a-zA-Z0-9_']* | "_" [a-zA-Z0-9] [a-zA-Z0-9_']*
+@qualidentifier = (@identifier ".")+ @identifier
+
+@unop = ("!"|"~")
+@qualunop = (@identifier ".")+ @unop
+
+@opchar = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^"|".")
+@binop = ("+"|"-"|"*"|"/"|"%"|"="|"!"|">"|"<"|"|"|"&"|"^") @opchar*
+@qualbinop = (@identifier ".")+ @binop
+
+@doc = "-- |"[^\n]*(\n$white*"--"[^\n]*)*
 
 tokens :-
 
   $white+                               ;
+  @doc                     { tokenM $ return . DOC . T.unpack . T.unlines . map (T.drop 2 . T.stripStart) . T.split (== '\n') . T.drop 2 }
   "--"[^\n]*                            ;
-  "&&"                     { const AND }
-  "||"                     { const OR }
-  ">>"                     { const SHIFTR }
-  ">>>"                    { const ZSHIFTR }
-  "<<"                     { const SHIFTL }
-  "=>"                     { const ARROW }
-  "<-"                     { const SETTO }
-  "<="                     { const LEQ }
-  ">="                     { const GEQ }
-  "+"                      { const PLUS }
-  "-"                      { const MINUS }
-  "~"                      { const TILDE }
-  "*"                      { const TIMES }
-  "**"                     { const POW }
-  "/"                      { const DIVIDE }
-  "%"                      { const MOD }
-  "//"                     { const QUOT }
-  "%%"                     { const REM }
-  "="                      { const EQU }
-  "=="                     { const EQU2 }
-  "!="                     { const NEQU }
-  "<"                      { const LTH }
-  ">"                      { const GTH }
-  "&"                      { const BAND }
-  "|"                      { const BOR }
-  "^"                      { const XOR }
-  "("                      { const LPAR }
-  ")"                      { const RPAR }
-  "["                      { const LBRACKET }
-  "]"                      { const RBRACKET }
-  "{"                      { const LCURLY }
-  "}"                      { const RCURLY }
-  ","                      { const COMMA }
-  "_"                      { const UNDERSCORE }
-  "!"                      { const BANG }
-  @intlit i8               { I8LIT . readInt8 . takeWhile (/='i') }
-  @intlit i16              { I16LIT . readInt16 . takeWhile (/='i') }
-  @intlit i32              { I32LIT . readInt32 . takeWhile (/='i') }
-  @intlit i64              { I64LIT . readInt64 . takeWhile (/='i') }
-  @intlit u8               { U8LIT . readInt8 . takeWhile (/='u') }
-  @intlit u16              { U16LIT . readInt16 . takeWhile (/='u') }
-  @intlit u32              { U32LIT . readInt32 . takeWhile (/='u') }
-  @intlit u64              { U64LIT . readInt64 . takeWhile (/='u') }
-  @intlit                  { INTLIT . readInt64 }
-  @reallit f32             { F32LIT . read . takeWhile (/='f') }
-  @reallit f64             { F64LIT . read . takeWhile (/='f') }
-  @reallit                 { REALLIT . readReal }
-  [a-zA-Z] [a-zA-Z0-9_']*  { keyword }
-  "'" @charlit "'"         { CHARLIT . read }
-  \" @stringcharlit* \"    { STRINGLIT . read }
+  "="                      { tokenC EQU }
+  "("                      { tokenC LPAR }
+  ")"                      { tokenC RPAR }
+  ")["                     { tokenC RPAR_THEN_LBRACKET }
+  "["                      { tokenC LBRACKET }
+  "]"                      { tokenC RBRACKET }
+  "{"                      { tokenC LCURLY }
+  "}"                      { tokenC RCURLY }
+  ","                      { tokenC COMMA }
+  "_"                      { tokenC UNDERSCORE }
+  "->"                     { tokenC RIGHT_ARROW }
+  "<-"                     { tokenC LEFT_ARROW }
+  ":"                      { tokenC COLON }
+  "@"                      { tokenC AT }
+  "\"                      { tokenC BACKSLASH }
+  "'"                      { tokenC APOSTROPHE }
+  "#"                      { tokenC HASH }
+  "..<"                    { tokenC TWO_DOTS_LT }
+  "..>"                    { tokenC TWO_DOTS_GT }
+  "..."                    { tokenC THREE_DOTS }
+  ".."                     { tokenC TWO_DOTS }
 
+  @declit                  { tokenM $ return . DECLIT . readIntegral . T.filter (/= '_') }
+
+  @intlit i8               { tokenM $ return . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i16              { tokenM $ return . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i32              { tokenM $ return . I32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit i64              { tokenM $ return . I64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
+  @intlit u8               { tokenM $ return . U8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u16              { tokenM $ return . U16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u32              { tokenM $ return . U32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit u64              { tokenM $ return . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
+  @intlit                  { tokenM $ return . INTLIT . readIntegral . T.filter (/= '_') }
+  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit "f32" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f32") }
+  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') . fst . T.breakOn (T.pack "f64") }
+  @hexreallit              { tokenM $ fmap REALLIT . readHexRealLit "f64" . suffZero . T.filter (/= '_') }
+  "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
+  \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
+
+  @identifier              { tokenS keyword }
+  @identifier "["          { tokenM $ fmap INDEXING . indexing . T.takeWhile (/='[') }
+  @qualidentifier          { tokenM $ fmap (uncurry QUALID) . mkQualId }
+  @qualidentifier "["      { tokenM $ fmap (uncurry QUALINDEXING) . mkQualId . T.takeWhile (/='[') }
+  @identifier "." "("      { tokenM $ fmap (QUALPAREN []) . indexing . T.init . T.takeWhile (/='(') }
+  @qualidentifier "." "("  { tokenM $ fmap (uncurry QUALPAREN) . mkQualId . T.init . T.takeWhile (/='(') }
+
+  @unop                    { tokenS $ UNOP . nameFromText }
+  @qualunop                { tokenM $ fmap (uncurry QUALUNOP) . mkQualId }
+
+  @binop                   { tokenM $ return . symbol [] . nameFromText }
+  @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; return (symbol qs k) }
 {
 
-keyword :: String -> Token
+keyword :: T.Text -> Token
 keyword s =
   case s of
+    "true"         -> TRUE
+    "false"        -> FALSE
     "if"           -> IF
     "then"         -> THEN
     "else"         -> ELSE
     "let"          -> LET
     "loop"         -> LOOP
     "in"           -> IN
-    "with"         -> WITH
     "default"      -> DEFAULT
-    "int"          -> INT
-    "float"        -> FLOAT
-    "i8"           -> I8
-    "i16"          -> I16
-    "i32"          -> I32
-    "i64"          -> I64
-    "u8"           -> U8
-    "u16"          -> U16
-    "u32"          -> U32
-    "u64"          -> U64
-    "f32"          -> F32
-    "f64"          -> F64
-    "bool"         -> BOOL
-    "char"         -> CHAR
-    "fun"          -> FUN
-    "fn"           -> FN
+    "val"          -> VAL
     "for"          -> FOR
     "do"           -> DO
-    "True"         -> TRUE
-    "False"        -> FALSE
-    "abs"          -> ABS
-    "signum"       -> SIGNUM
+    "with"         -> WITH
+    "local"        -> LOCAL
+    "open"         -> OPEN
+    "include"      -> INCLUDE
+    "import"       -> IMPORT
+    "type"         -> TYPE
+    "entry"        -> ENTRY
+    "module"       -> MODULE
+    "empty"        -> EMPTY
+    "while"        -> WHILE
+    "unsafe"       -> UNSAFE
 
-    "iota"         -> IOTA
-    "size"         -> SIZE
-    "replicate"    -> REPLICATE
+-- In a perfect language, the remaining tokens would all be functions.
+-- Perhaps we can eventually permit their use as variable names anyway.
+
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
-    "transpose"    -> TRANSPOSE
+    "rotate"       -> ROTATE
     "map"          -> MAP
     "reduce"       -> REDUCE
-    "reduceComm"   -> REDUCECOMM
+    "reduce_comm"  -> REDUCECOMM
     "zip"          -> ZIP
-    "zipWith"      -> ZIPWITH
     "unzip"        -> UNZIP
-    "unsafe"       -> UNSAFE
     "scan"         -> SCAN
     "split"        -> SPLIT
     "concat"       -> CONCAT
     "filter"       -> FILTER
     "partition"    -> PARTITION
-    "empty"        -> EMPTY
-    "copy"         -> COPY
-    "while"        -> WHILE
-    "streamMap"    -> STREAM_MAP
-    "streamMapPer" -> STREAM_MAPPER
-    "streamRed"    -> STREAM_RED
-    "streamRedPer" -> STREAM_REDPER
-    "streamSeq"    -> STREAM_SEQ
-    "assert"       -> ASSERT
-    "include"      -> INCLUDE
-    _              -> ID $ nameFromString s
+    "stream_map"     -> STREAM_MAP
+    "stream_map_per" -> STREAM_MAPPER
+    "stream_red"     -> STREAM_RED
+    "stream_red_per" -> STREAM_REDPER
 
-type Byte = Word8
+    _              -> ID $ nameFromText s
 
-type Action result = String -> result
+indexing :: T.Text -> Alex Name
+indexing s = case keyword s of
+  ID v -> return v
+  _    -> fail $ "Cannot index keyword '" ++ T.unpack s ++ "'."
 
-data AlexPosn = AlexPn !Int  -- absolute character offset
-                       !Int  -- line number
-                       !Int  -- column number
+mkQualId :: T.Text -> Alex ([Name], Name)
+mkQualId s = case reverse $ T.splitOn "." s of
+  []   -> fail "mkQualId: no components"
+  k:qs -> return (map nameFromText (reverse qs), nameFromText k)
 
-type AlexInput = (AlexPosn,     -- current position,
-                  Char,         -- previous char
-                  [Byte],       -- rest of the bytes for the current char
-                  String)       -- current input string
+-- | Suffix a zero if the last character is dot.
+suffZero :: T.Text -> T.Text
+suffZero s = if T.last s == '.' then s <> "0" else s
 
-alexGetByte :: AlexInput -> Maybe (Byte,AlexInput)
-alexGetByte (p,c,(b:bs),s) = Just (b,(p,c,bs,s))
-alexGetByte (p,c,[],[]) = Nothing
-alexGetByte (p,_,[],(c:s))  = let p' = alexMove p c
-                                  (b:bs) = utf8Encode c
-                              in p' `seq`  Just (b, (p', c, bs, s))
+tryRead :: Read a => String -> T.Text -> Alex a
+tryRead desc s = case reads s' of
+  [(x, "")] -> return x
+  _         -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
+  where s' = T.unpack s
 
-alexInputPrevChar :: AlexInput -> Char
-alexInputPrevChar (p,c,bs,s) = c
+readIntegral :: Integral a => T.Text -> a
+readIntegral s
+  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s =
+      T.foldl (another hex_digits) 0 (T.drop 2 s)
+  | "0b" `T.isPrefixOf` s || "0b" `T.isPrefixOf` s =
+      T.foldl (another binary_digits) 0 (T.drop 2 s)
+  | "0r" `T.isPrefixOf` s =
+       fromRoman (T.drop 2 s)
+  | otherwise =
+      T.foldl (another decimal_digits) 0 s
+      where another digits acc c = acc * base + maybe 0 fromIntegral (elemIndex (toLower c) digits)
+              where base = genericLength digits
 
-alexStartPos :: AlexPosn
-alexStartPos = AlexPn 0 1 1
+            binary_digits = ['0', '1']
+            decimal_digits = ['0'..'9']
+            hex_digits = decimal_digits ++ ['a'..'f']
 
-alexMove :: AlexPosn -> Char -> AlexPosn
-alexMove (AlexPn a l c) '\t' = AlexPn (a+1)  l     (((c+7) `div` 8)*8+1)
-alexMove (AlexPn a l c) '\n' = AlexPn (a+1) (l+1)   1
-alexMove (AlexPn a l c) _    = AlexPn (a+1)  l     (c+1)
+tokenC v  = tokenS $ const v
 
--- | Encode a Haskell String to a list of Word8 values, in UTF8 format.
-utf8Encode :: Char -> [Word8]
-utf8Encode = map fromIntegral . go . ord
- where
-  go oc
-   | oc <= 0x7f       = [oc]
+tokenS f = tokenM $ return . f
 
-   | oc <= 0x7ff      = [ 0xc0 + (oc `shiftR` 6)
-                        , 0x80 + oc .&. 0x3f
-                        ]
+tokenM :: (T.Text -> Alex a)
+       -> (AlexPosn, b, ByteString.ByteString, c)
+       -> Int64
+       -> Alex ((Int, Int, Int), (Int, Int, Int), a)
+tokenM f (AlexPn addr line col, _, s, _) len = do
+  x <- f $ T.decodeUtf8 $ BS.toStrict $ BS.take len s
+  return (pos, pos, x)
+  where pos = (line, col, addr)
 
-   | oc <= 0xffff     = [ 0xe0 + (oc `shiftR` 12)
-                        , 0x80 + ((oc `shiftR` 6) .&. 0x3f)
-                        , 0x80 + oc .&. 0x3f
-                        ]
-   | otherwise        = [ 0xf0 + (oc `shiftR` 18)
-                        , 0x80 + ((oc `shiftR` 12) .&. 0x3f)
-                        , 0x80 + ((oc `shiftR` 6) .&. 0x3f)
-                        , 0x80 + oc .&. 0x3f
-                        ]
+symbol :: [Name] -> Name -> Token
+symbol [] q
+  | nameToText q == "*" = ASTERISK
+  | nameToText q == "-" = NEGATE
+  | nameToText q == "<" = LTH
+  | nameToText q == ">" = GTH
+  | nameToText q == "<=" = LEQ
+  | nameToText q == ">=" = GEQ
+  | otherwise = SYMBOL (leadingOperator q) [] q
+symbol qs q = SYMBOL (leadingOperator q) qs q
 
--- | Given a string, returns either a lexer error, or a finite stream
--- of tokens, each with embedded position information.  The
--- 'FilePath' is used solely for error messages and the position
--- information.
-alexScanTokens :: FilePath -> String -> Either String [L Token]
-alexScanTokens file str = go (alexStartPos,'\n',[],str)
-  where go inp@(pos,_,_,str) =
-          case alexScan inp 0 of
-                AlexEOF -> return []
-                AlexError ((AlexPn _ line column),_,_,_) -> Left $ "lexical error at line " ++ (show line) ++ ", column " ++ (show column) ++ "."
 
-                AlexSkip  inp' len     -> go inp'
-                AlexToken inp'@(pos',_,_,_) len act -> do
-                  let tok = L (loc pos pos') $ act (take len str)
-                  toks <- go inp'
-                  return $ tok : toks
-        loc beg end = SrcLoc $ Loc (posnToPos beg) (posnToPos end)
-        posnToPos (AlexPn offset line col) = Pos file line col offset
+romanNumerals :: Integral a => [(T.Text,a)]
+romanNumerals = reverse
+                [ ("I",     1)
+                , ("IV",    4)
+                , ("V",     5)
+                , ("IX",    9)
+                , ("X",    10)
+                , ("XL",   40)
+                , ("L",    50)
+                , ("XC",   90)
+                , ("C",   100)
+                , ("CD",  400)
+                , ("D",   500)
+                , ("CM",  900)
+                , ("M",  1000)
+                ]
 
-readReal :: String -> Double
-readReal = read
+fromRoman :: Integral a => T.Text -> a
+fromRoman s =
+  case find ((`T.isPrefixOf` s) . fst) romanNumerals of
+    Nothing -> 0
+    Just (d,n) -> n+fromRoman (T.drop (T.length d) s)
 
-readInt8 :: String -> Int8
-readInt8 = read
+fromHexRealLit :: RealFloat a => T.Text -> Maybe a
+fromHexRealLit s =
+  let num =  (T.drop 2 s) in
+  -- extract number into integer, fractional and (optional) exponent
+  let comps = (T.split (\x -> x == '.' || x == 'p' || x == 'P') num) in
+  case comps of
+    [i, f, p] ->
+        let int_part = readIntegral (T.pack ("0x" ++ (T.unpack i)))
+            frac_part = readIntegral (T.pack ("0x" ++ (T.unpack f)))
+            exponent = if ((T.pack "-") `T.isPrefixOf` p)
+                       then -1 * (readIntegral p)
+                       else readIntegral p
 
-readInt16 :: String -> Int16
-readInt16 = read
+            frac_len = T.length f
+            frac_val = (fromIntegral frac_part) / (16.0 ** (fromIntegral frac_len))
+            total_val = ((fromIntegral int_part) + frac_val) * (2.0 ** (fromIntegral exponent)) in
+        Just (total_val)
+    _ -> Nothing
 
-readInt32 :: String -> Int32
-readInt32 = read
+readHexRealLit :: RealFloat a => String -> T.Text -> Alex a
+readHexRealLit desc s =
+  case fromHexRealLit s of
+    Just (n) -> return n
+    Nothing -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
 
-readInt64 :: String -> Int64
-readInt64 = read
+alexEOF = return ((0,0,0), (0,0,0), EOF)
 
 -- | A value tagged with a source location.
-data L a = L SrcLoc a
+data L a = L SrcLoc a deriving (Show)
 
 instance Eq a => Eq (L a) where
   L _ x == L _ y = x == y
@@ -243,4 +287,124 @@ instance Eq a => Eq (L a) where
 instance Located (L a) where
   locOf (L (SrcLoc loc) _) = loc
 
+-- | A lexical token.  It does not itself contain position
+-- information, so in practice the parser will consume tokens tagged
+-- with a source position.
+data Token = ID Name
+           | INDEXING Name
+           | QUALID [Name] Name
+           | QUALINDEXING [Name] Name
+           | QUALPAREN [Name] Name
+           | UNOP Name
+           | QUALUNOP [Name] Name
+           | SYMBOL BinOp [Name] Name
+
+           | DECLIT Integer
+           | STRINGLIT String
+           | INTLIT Int64
+           | I8LIT Int8
+           | I16LIT Int16
+           | I32LIT Int32
+           | I64LIT Int64
+           | U8LIT Word8
+           | U16LIT Word16
+           | U32LIT Word32
+           | U64LIT Word64
+           | REALLIT Double
+           | F32LIT Float
+           | F64LIT Double
+           | CHARLIT Char
+
+           | COLON
+           | AT
+           | BACKSLASH
+           | APOSTROPHE
+           | HASH
+           | THREE_DOTS
+           | TWO_DOTS
+           | TWO_DOTS_LT
+           | TWO_DOTS_GT
+           | LPAR
+           | RPAR
+           | RPAR_THEN_LBRACKET
+           | LBRACKET
+           | RBRACKET
+           | LCURLY
+           | RCURLY
+           | COMMA
+           | UNDERSCORE
+           | RIGHT_ARROW
+           | LEFT_ARROW
+
+           | EQU
+           | ASTERISK
+           | NEGATE
+           | LTH
+           | GTH
+           | LEQ
+           | GEQ
+
+           | DEFAULT
+           | IF
+           | THEN
+           | ELSE
+           | LET
+           | LOOP
+           | IN
+           | FUN
+           | FOR
+           | DO
+           | WITH
+           | MAP
+           | REDUCE
+           | REDUCECOMM
+           | RESHAPE
+           | REARRANGE
+           | ROTATE
+           | ZIP
+           | UNZIP
+           | UNSAFE
+           | SCAN
+           | SPLIT
+           | CONCAT
+           | FILTER
+           | PARTITION
+           | TRUE
+           | FALSE
+           | EMPTY
+           | WHILE
+           | STREAM_MAP
+           | STREAM_MAPPER
+           | STREAM_RED
+           | STREAM_REDPER
+           | INCLUDE
+           | IMPORT
+           | ENTRY
+           | TYPE
+           | MODULE
+           | VAL
+           | OPEN
+           | LOCAL
+
+           | DOC String
+
+           | EOF
+
+             deriving (Show, Eq, Ord)
+
+scanTokensText :: FilePath -> T.Text -> Either String [L Token]
+scanTokensText file = scanTokens file . BS.fromStrict . T.encodeUtf8
+
+scanTokens :: FilePath -> BS.ByteString -> Either String [L Token]
+scanTokens file str = runAlex str $ do
+  fix $ \loop -> do
+    tok <- alexMonadScan
+    case tok of
+      (start, end, EOF) ->
+        return []
+      (start, end, t) -> do
+        rest <- loop
+        return $ L (pos start end) t : rest
+  where pos start end = SrcLoc $ Loc (posnToPos start) (posnToPos end)
+        posnToPos (line, col, addr) = Pos file line col addr
 }

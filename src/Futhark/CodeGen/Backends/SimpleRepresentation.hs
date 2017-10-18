@@ -6,20 +6,17 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , tupleFieldExp
   , funName
   , defaultMemBlockType
-  , builtInFunctionDefs
   , intTypeToCType
   , floatTypeToCType
   , primTypeToCType
+  , signedPrimTypeToCType
 
     -- * Primitive value operations
   , cIntOps
-  , cFloat32Ops
-  , cFloat64Ops
+  , cFloat32Ops, cFloat32Funs
+  , cFloat64Ops, cFloat64Funs
   , cFloatConvOps
 
-    -- * Specific builtin functions
-  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32, c_isnan32, c_isinf32
-  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64, c_isnan64, c_isinf64
   )
   where
 
@@ -28,6 +25,7 @@ import qualified Language.C.Quote.C as C
 
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty (pretty)
+import Futhark.Util (zEncodeString)
 
 intTypeToCType :: IntType -> C.Type
 intTypeToCType Int8 = [C.cty|typename int8_t|]
@@ -49,8 +47,12 @@ primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|char|]
-primTypeToCType Char = [C.cty|char|]
 primTypeToCType Cert = [C.cty|char|]
+
+signedPrimTypeToCType :: Signedness -> PrimType -> C.Type
+signedPrimTypeToCType TypeUnsigned (IntType t) = uintTypeToCType t
+signedPrimTypeToCType TypeDirect (IntType t) = intTypeToCType t
+signedPrimTypeToCType _ t = primTypeToCType t
 
 -- | True if both types map to the same runtime representation.  This
 -- is the case if they are identical modulo uniqueness.
@@ -68,32 +70,34 @@ sameRepresentation' _ _ = False
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
-tupleField i = "elem_" ++ show i
+tupleField i = "v" ++ show i
 
 -- | @tupleFieldExp e i@ is the expression for accesing field @i@ of
 -- tuple @e@.  If @e@ is an lvalue, so will the resulting expression
 -- be.
-tupleFieldExp :: C.Exp -> Int -> C.Exp
+tupleFieldExp :: C.ToExp a => a -> Int -> C.Exp
 tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 
 -- | @funName f@ is the name of the C function corresponding to
 -- the Futhark function @f@.
 funName :: Name -> String
-funName = ("futhark_"++) . nameToString
+funName = ("futrts_"++) . zEncodeString . nameToString
 
 funName' :: String -> String
 funName' = funName . nameFromString
 
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
-defaultMemBlockType = [C.cty|unsigned char*|]
+defaultMemBlockType = [C.cty|char*|]
 
 cIntOps :: [C.Definition]
-cIntOps = concatMap (flip map [minBound..maxBound]) ops
+cIntOps = concatMap (`map` [minBound..maxBound]) ops
   where ops = [mkAdd, mkSub, mkMul,
                mkUDiv, mkUMod,
                mkSDiv, mkSMod,
                mkSQuot, mkSRem,
+               mkSMin, mkUMin,
+               mkSMax, mkUMax,
                mkShl, mkLShr, mkAShr,
                mkAnd, mkOr, mkXor,
                mkUlt, mkUle,  mkSlt, mkSle,
@@ -112,6 +116,8 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
         mkMul = simpleIntOp "mul" [C.cexp|x * y|]
         mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
         mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
+        mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
+        mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
 
         mkSDiv t =
           let ct = intTypeToCType t
@@ -131,6 +137,8 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
 
         mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
         mkSRem = simpleIntOp "srem" [C.cexp|x % y|]
+        mkSMax = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
+        mkSMin = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
         mkShl = simpleUintOp "shl" [C.cexp|x << y|]
         mkLShr = simpleUintOp "lshr" [C.cexp|x >> y|]
         mkAShr = simpleIntOp "ashr" [C.cexp|x >> y|]
@@ -196,7 +204,7 @@ cFloatConvOps :: [C.Definition]
         taggedF s Float64 = s ++ "64"
         convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
-        mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkPow, mkCmpLt, mkCmpLe] ++
+        mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe] ++
                 map (mkFPConvIF "sitofp") [minBound..maxBound] ++
                 map (mkFPConvUF "uitofp") [minBound..maxBound] ++
                 map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
@@ -206,6 +214,8 @@ cFloatConvOps :: [C.Definition]
         mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
         mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
         mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
+        mkFMin = simpleFloatOp "fmin" [C.cexp|x < y ? x : y|]
+        mkFMax = simpleFloatOp "fmax" [C.cexp|x < y ? y : x|]
         mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
         mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
 
@@ -233,106 +243,132 @@ cFloatConvOps :: [C.Definition]
           [C.cedecl|static inline char $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
             where ct = floatTypeToCType t
 
-c_log32 :: C.Func
-c_log32 = [C.cfun|
+cFloat32Funs :: [C.Definition]
+cFloat32Funs = [C.cunit|
     static inline float $id:(funName' "log32")(float x) {
       return log(x);
     }
-    |]
 
-c_sqrt32 :: C.Func
-c_sqrt32 = [C.cfun|
     static inline float $id:(funName' "sqrt32")(float x) {
       return sqrt(x);
     }
-    |]
 
-c_exp32 ::C.Func
-c_exp32 = [C.cfun|
     static inline float $id:(funName' "exp32")(float x) {
       return exp(x);
     }
-  |]
 
-c_cos32 ::C.Func
-c_cos32 = [C.cfun|
     static inline float $id:(funName' "cos32")(float x) {
       return cos(x);
     }
-  |]
 
-c_sin32 ::C.Func
-c_sin32 = [C.cfun|
     static inline float $id:(funName' "sin32")(float x) {
       return sin(x);
     }
-  |]
 
-c_isnan32 ::C.Func
-c_isnan32 = [C.cfun|
+    static inline float $id:(funName' "acos32")(float x) {
+      return acos(x);
+    }
+
+    static inline float $id:(funName' "asin32")(float x) {
+      return asin(x);
+    }
+
+    static inline double $id:(funName' "atan32")(float x) {
+      return atan(x);
+    }
+
+    static inline float $id:(funName' "atan2_32")(float x, float y) {
+      return atan2(x,y);
+    }
+
     static inline char $id:(funName' "isnan32")(float x) {
       return isnan(x);
     }
-  |]
 
-c_isinf32 ::C.Func
-c_isinf32 = [C.cfun|
     static inline char $id:(funName' "isinf32")(float x) {
       return isinf(x);
     }
-  |]
 
-c_log64 :: C.Func
-c_log64 = [C.cfun|
+    static inline typename int32_t $id:(funName' "to_bits32")(float x) {
+      union {
+        float f;
+        typename int32_t t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    static inline float $id:(funName' "from_bits32")(typename int32_t x) {
+      union {
+        typename int32_t f;
+        float t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+|]
+
+cFloat64Funs :: [C.Definition]
+cFloat64Funs = [C.cunit|
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
     }
-    |]
 
-c_sqrt64 :: C.Func
-c_sqrt64 = [C.cfun|
     static inline double $id:(funName' "sqrt64")(double x) {
       return sqrt(x);
     }
-    |]
 
-c_exp64 ::C.Func
-c_exp64 = [C.cfun|
     static inline double $id:(funName' "exp64")(double x) {
       return exp(x);
     }
-  |]
 
-c_cos64 ::C.Func
-c_cos64 = [C.cfun|
     static inline double $id:(funName' "cos64")(double x) {
       return cos(x);
     }
-  |]
 
-c_sin64 ::C.Func
-c_sin64 = [C.cfun|
     static inline double $id:(funName' "sin64")(double x) {
       return sin(x);
     }
-  |]
 
-c_isnan64 ::C.Func
-c_isnan64 = [C.cfun|
+    static inline double $id:(funName' "acos64")(double x) {
+      return acos(x);
+    }
+
+    static inline double $id:(funName' "asin64")(double x) {
+      return asin(x);
+    }
+
+    static inline double $id:(funName' "atan64")(double x) {
+      return atan(x);
+    }
+
+    static inline double $id:(funName' "atan2_64")(double x, double y) {
+      return atan2(x,y);
+    }
+
     static inline char $id:(funName' "isnan64")(double x) {
       return isnan(x);
     }
-  |]
 
-c_isinf64 ::C.Func
-c_isinf64 = [C.cfun|
     static inline char $id:(funName' "isinf64")(double x) {
       return isinf(x);
     }
-  |]
 
--- | C definitions of the Futhark "standard library".
-builtInFunctionDefs :: [C.Func]
-builtInFunctionDefs =
-  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32, c_isnan32, c_isinf32,
-   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64, c_isnan64, c_isinf64]
+    static inline typename int64_t $id:(funName' "to_bits64")(double x) {
+      union {
+        double f;
+        typename int64_t t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+
+    static inline double $id:(funName' "from_bits64")(typename int64_t x) {
+      union {
+        typename int64_t f;
+        double t;
+      } p;
+      p.f = x;
+      return p.t;
+    }
+|]

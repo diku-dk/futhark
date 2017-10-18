@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
 -- | This module defines a generator for @getopt@ based command
 -- line argument parsing.  Each option is associated with arbitrary
 -- Python code that will perform side effects, usually by setting some
@@ -35,35 +34,36 @@ data OptionArgument = NoArgument
 generateOptionParser :: [Option] -> [PyStmt]
 generateOptionParser options =
   [Assign (Var "parser")
-   (Call "argparse.ArgumentParser"
+   (Call (Var "argparse.ArgumentParser")
     [ArgKeyword "description" $
-     StringLiteral "A compiled Futhark program."])] ++
+     String "A compiled Futhark program."])] ++
   map parseOption options ++
   [Assign (Var "parser_result") $
-   Call "vars" [Arg $ Call "parser.parse_args" [Arg $ Var "sys.argv[1:]"]]] ++
+   Call (Var "vars") [Arg $ Call (Var "parser.parse_args") [Arg $ Var "sys.argv[1:]"]]] ++
   map executeOption options
   where parseOption option =
-          Exp $ Call "parser.add_argument" $
-          map (Arg . StringLiteral) name_args ++ argument_args
-          where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option) $
+          Exp $ Call (Var "parser.add_argument") $
+          map (Arg . String) name_args ++ argument_args
+          where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option)
                             ["--" ++ optionLongName option]
                 argument_args = case optionArgument option of
                   RequiredArgument ->
-                    [ArgKeyword "action" (StringLiteral "append"),
+                    [ArgKeyword "action" (String "append"),
                      ArgKeyword "default" $ List []]
 
                   NoArgument ->
-                    [ArgKeyword "action" (StringLiteral "append_const"),
+                    [ArgKeyword "action" (String "append_const"),
+                     ArgKeyword "default" $ List [],
                      ArgKeyword "const" None]
 
                   OptionalArgument ->
-                    [ArgKeyword "action" (StringLiteral "append"),
+                    [ArgKeyword "action" (String "append"),
                      ArgKeyword "default" $ List [],
-                     ArgKeyword "nargs" $ StringLiteral "?"]
+                     ArgKeyword "nargs" $ String "?"]
 
         executeOption option =
           For "optarg" (Index (Var "parser_result") $
-                        IdxExp $ StringLiteral $ fieldName option) $
+                        IdxExp $ String $ fieldName option) $
             optionAction option
 
         fieldName = map escape . optionLongName

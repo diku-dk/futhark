@@ -7,11 +7,14 @@ module Futhark.CodeGen.ImpCode.Kernels
   , FunctionT (Function)
   , Code
   , KernelCode
+  , KernelConst (..)
+  , KernelConstExp
   , HostOp (..)
   , KernelOp (..)
   , CallKernel (..)
   , MapKernel (..)
   , Kernel (..)
+  , LocalMemoryUse
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
   -- * Utility functions
@@ -21,7 +24,7 @@ module Futhark.CodeGen.ImpCode.Kernels
 
 import Control.Monad.Writer
 import Data.List
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 import Data.Traversable
 
 import Prelude
@@ -39,20 +42,32 @@ type Code = Imp.Code CallKernel
 -- | Code inside a kernel.
 type KernelCode = Imp.Code KernelOp
 
+-- | A run-time constant related to kernels.
+data KernelConst = GroupSizeConst
+                 | NumGroupsConst
+                 | TileSizeConst
+                 deriving (Eq, Ord, Show)
+
+-- | An expression whose variables are kernel constants.
+type KernelConstExp = PrimExp KernelConst
+
 data HostOp = CallKernel CallKernel
             | GetNumGroups VName
             | GetGroupSize VName
+            | GetTileSize VName
             deriving (Show)
 
 data CallKernel = Map MapKernel
                 | AnyKernel Kernel
-                | MapTranspose PrimType VName Exp VName Exp Exp Exp Exp
+                | MapTranspose PrimType VName Exp VName Exp Exp Exp Exp Exp Exp
             deriving (Show)
 
 -- | A generic kernel containing arbitrary kernel code.
 data MapKernel = MapKernel { mapKernelThreadNum :: VName
-                             -- ^ Binding position - also serves as a unique
+                             -- ^ Stm position - also serves as a unique
                              -- name for the kernel.
+                           , mapKernelDesc :: String
+                           -- ^ Used to name the kernel for readability.
                            , mapKernelBody :: Imp.Code KernelOp
                            , mapKernelUses :: [KernelUse]
                            , mapKernelNumGroups :: DimSize
@@ -64,9 +79,8 @@ data MapKernel = MapKernel { mapKernelThreadNum :: VName
 
 data Kernel = Kernel
               { kernelBody :: Imp.Code KernelOp
-              , kernelLocalMemory :: [(VName, MemSize, PrimType)]
-                -- ^ In-kernel name, per-workgroup size in bytes, and
-                -- alignment restriction.
+              , kernelLocalMemory :: [LocalMemoryUse]
+              -- ^ The local memory used by this kernel.
 
               , kernelUses :: [KernelUse]
                 -- ^ The host variables referenced by the kernel.
@@ -75,11 +89,18 @@ data Kernel = Kernel
               , kernelGroupSize :: DimSize
               , kernelName :: VName
                 -- ^ Unique name for the kernel.
+              , kernelDesc :: String
+               -- ^ A short descriptive name - should be
+               -- alphanumeric and without spaces.
               }
             deriving (Show)
 
+-- ^ In-kernel name and per-workgroup size in bytes.
+type LocalMemoryUse = (VName, Either MemSize KernelConstExp)
+
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName Imp.DimSize
+               | ConstUse VName KernelConstExp
                  deriving (Eq, Show)
 
 getKernels :: Program -> [CallKernel]
@@ -88,15 +109,22 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
           tell [kernel]
         getFunKernels _ =
           return ()
-        sameKernel (MapTranspose bt1 _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _) =
+        sameKernel (MapTranspose bt1 _ _ _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _ _ _) =
           bt1 == bt2
         sameKernel _ _ = False
+
+instance Pretty KernelConst where
+  ppr NumGroupsConst = text "$num_groups()"
+  ppr GroupSizeConst = text "$group_size()"
+  ppr TileSizeConst = text "$tile_size()"
 
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =
     text "scalar_copy" <> parens (commasep [ppr name, ppr t])
   ppr (MemoryUse name size) =
     text "mem_copy" <> parens (commasep [ppr name, ppr size])
+  ppr (ConstUse name e) =
+    text "const" <> parens (commasep [ppr name, ppr e])
 
 instance Pretty HostOp where
   ppr (GetNumGroups dest) =
@@ -105,18 +133,25 @@ instance Pretty HostOp where
   ppr (GetGroupSize dest) =
     ppr dest <+> text "<-" <+>
     text "get_group_size()"
+  ppr (GetTileSize dest) =
+    ppr dest <+> text "<-" <+>
+    text "get_tile_size()"
   ppr (CallKernel c) =
     ppr c
 
 instance Pretty CallKernel where
   ppr (Map k) = ppr k
   ppr (AnyKernel k) = ppr k
-  ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y) =
+  ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y in_size out_size) =
     text "mapTranspose" <>
     parens (ppr bt <> comma </>
             ppMemLoc dest destoffset <> comma </>
             ppMemLoc src srcoffset <> comma </>
-            ppr num_arrays <> comma <+> ppr size_x <> comma <+> ppr size_y)
+            ppr num_arrays <> comma <+>
+            ppr size_x <> comma <+>
+            ppr size_y <> comma <+>
+            ppr in_size <> comma <+>
+            ppr out_size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
 
@@ -138,20 +173,21 @@ instance Pretty Kernel where
                                     kernelLocalMemory kernel) </>
      text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
-    where ppLocalMemory (name, size, bt) =
-            ppr name <+> parens (ppr size <+> text "bytes" <> comma <+>
-                                text "align to" <+> ppr bt)
+    where ppLocalMemory (name, Left size) =
+            ppr name <+> parens (ppr size <+> text "bytes")
+          ppLocalMemory (name, Right size) =
+            ppr name <+> parens (ppr size <+> text "bytes (const)")
 
 instance FreeIn MapKernel where
   freeIn kernel =
-    mapKernelThreadNum kernel `HS.delete` freeIn (mapKernelBody kernel)
+    mapKernelThreadNum kernel `S.delete` freeIn (mapKernelBody kernel)
 
 data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int
               | GetLocalSize VName Int
               | GetGlobalSize VName Int
               | GetGlobalId VName Int
-              | GetWaveSize VName
+              | GetLockstepWidth VName
               | Barrier
               deriving (Show)
 
@@ -171,9 +207,9 @@ instance Pretty KernelOp where
   ppr (GetGlobalId dest i) =
     ppr dest <+> text "<-" <+>
     text "get_global_id" <> parens (ppr i)
-  ppr (GetWaveSize dest) =
+  ppr (GetLockstepWidth dest) =
     ppr dest <+> text "<-" <+>
-    text "get_wave_size()"
+    text "get_lockstep_width()"
   ppr Barrier =
     text "barrier()"
 

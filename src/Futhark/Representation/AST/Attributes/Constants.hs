@@ -33,6 +33,18 @@ instance IsValue Int32 where
 instance IsValue Int64 where
   value = IntValue . Int64Value
 
+instance IsValue Word8 where
+  value = IntValue . Int8Value . fromIntegral
+
+instance IsValue Word16 where
+  value = IntValue . Int16Value . fromIntegral
+
+instance IsValue Word32 where
+  value = IntValue . Int32Value . fromIntegral
+
+instance IsValue Word64 where
+  value = IntValue . Int64Value . fromIntegral
+
 instance IsValue Double where
   value = FloatValue . Float64Value
 
@@ -41,9 +53,6 @@ instance IsValue Float where
 
 instance IsValue Bool where
   value = BoolValue
-
-instance IsValue Char where
-  value = CharValue
 
 instance IsValue PrimValue where
   value = id

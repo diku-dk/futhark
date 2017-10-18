@@ -37,7 +37,7 @@ import Prelude
 
 import Futhark.Representation.AST.Syntax
 import qualified Futhark.FreshNames as FreshNames
-import Futhark.FreshNames hiding (newName, newID, newVName)
+import Futhark.FreshNames hiding (newName, newVName)
 
 -- | A monad that stores a name source.  The following is a good
 -- instance for a monad in which the only state is a @NameSource vn@:
@@ -84,15 +84,15 @@ newName = modifyNameSource . flip FreshNames.newName
 
 -- | As @newName@, but takes a 'String' for the name template.
 newNameFromString :: MonadFreshNames m => String -> m VName
-newNameFromString s = newName $ varName s Nothing
+newNameFromString s = newName $ VName (nameFromString s) 0
 
 -- | Produce a fresh 'ID', using the given base name as a template.
 newID :: MonadFreshNames m => Name -> m VName
-newID s = newName $ ID (s, 0)
+newID s = newName $ VName s 0
 
 -- | As 'newID', but takes a 'String' for the name template.
 newIDFromString :: MonadFreshNames m => String -> m VName
-newIDFromString s = newID $ varName s Nothing
+newIDFromString = newID . nameFromString
 
 -- | Produce a fresh 'VName', using the given base name as a template.
 newVName :: MonadFreshNames m => String -> m VName
@@ -107,7 +107,7 @@ newVName' f = newID . nameFromString . f
 newIdent :: MonadFreshNames m =>
             String -> Type -> m Ident
 newIdent s t = do
-  s' <- newID $ varName s Nothing
+  s' <- newID $ nameFromString s
   return $ Ident s' t
 
 -- | Produce a fresh 'Ident', using the given 'Ident' as a template,
@@ -129,7 +129,7 @@ newIdents = mapM . newIdent
 newParam :: MonadFreshNames m =>
             String -> attr -> m (Param attr)
 newParam s t = do
-  s' <- newID $ varName s Nothing
+  s' <- newID $ nameFromString s
   return $ Param s' t
 
 -- | Produce a fresh 'Param', using the given 'Param' as a template,
@@ -158,7 +158,7 @@ instance (MonadFreshNames m, Monoid s) =>
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (MonadFreshNames m =>
-          MonadFreshNames (Control.Monad.Trans.Maybe.MaybeT m)) where
+instance MonadFreshNames m =>
+         MonadFreshNames (Control.Monad.Trans.Maybe.MaybeT m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource

@@ -23,10 +23,10 @@ module Futhark.Representation.AST.Attributes.Ranges
        )
        where
 
-import Control.Applicative
 import Data.Monoid
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
+
 import Prelude
 
 import Futhark.Representation.AST.Attributes
@@ -61,10 +61,7 @@ instance Substitute KnownBound where
     ScalarBound $ substituteNames substs se
 
 instance Rename KnownBound where
-  rename (VarBound v)         = VarBound <$> rename v
-  rename (MinimumBound b1 b2) = MinimumBound <$> rename b1 <*> rename b2
-  rename (MaximumBound b1 b2) = MaximumBound <$> rename b1 <*> rename b2
-  rename (ScalarBound e)      = ScalarBound <$> rename e
+  rename = substituteRename
 
 instance FreeIn KnownBound where
   freeIn (VarBound v)         = freeIn v
@@ -72,13 +69,16 @@ instance FreeIn KnownBound where
   freeIn (MaximumBound b1 b2) = freeIn b1 <> freeIn b2
   freeIn (ScalarBound e)      = freeIn e
 
+instance FreeAttr KnownBound where
+  precomputed _ = id
+
 instance PP.Pretty KnownBound where
   ppr (VarBound v) =
     PP.text "variable " <> PP.ppr v
   ppr (MinimumBound b1 b2) =
     PP.text "min" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
   ppr (MaximumBound b1 b2) =
-    PP.text "min" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
+    PP.text "max" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
   ppr (ScalarBound e) =
     PP.ppr e
 
@@ -141,7 +141,7 @@ class RangeOf a where
 instance RangeOf Range where
   rangeOf = id
 
-instance RangeOf attr => RangeOf (PatElem attr) where
+instance RangeOf attr => RangeOf (PatElemT attr) where
   rangeOf = rangeOf . patElemAttr
 
 instance RangeOf SubExp where
@@ -161,7 +161,7 @@ instance RangeOf attr => RangesOf (PatternT attr) where
   rangesOf = map rangeOf . patternElements
 
 instance Ranged lore => RangesOf (Body lore) where
-  rangesOf = rangesOf . bodyLore
+  rangesOf = rangesOf . bodyAttr
 
 subExpKnownRange :: SubExp -> (KnownBound, KnownBound)
 subExpKnownRange (Var v) =
@@ -176,7 +176,7 @@ scalExpRange :: SE.ScalExp -> Range
 scalExpRange se =
   (Just $ ScalarBound se, Just $ ScalarBound se)
 
-primOpRanges :: PrimOp lore -> [Range]
+primOpRanges :: BasicOp lore -> [Range]
 primOpRanges (SubExp se) =
   [rangeOf se]
 
@@ -189,26 +189,32 @@ primOpRanges (BinOp (Mul t) x y) =
 primOpRanges (BinOp (SDiv t) x y) =
   [scalExpRange $ SE.SDiv (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
 
-primOpRanges (Iota n x) =
+primOpRanges (ConvOp (SExt from to) x)
+  | from < to = [rangeOf x]
+
+primOpRanges (Iota n x s Int32) =
   [(Just $ ScalarBound x',
-    Just $ ScalarBound $ x' + n' - 1)]
+    Just $ ScalarBound $ x' + (n' - 1) * s')]
   where n' = case n of
           Var v        -> SE.Id v $ IntType Int32
           Constant val -> SE.Val val
         x' = case x of
           Var v        -> SE.Id v $ IntType Int32
           Constant val -> SE.Val val
+        s' = case s of
+          Var v        -> SE.Id v $ IntType Int32
+          Constant val -> SE.Val val
 primOpRanges (Replicate _ v) =
   [rangeOf v]
-primOpRanges (Rearrange _ _ v) =
+primOpRanges (Rearrange _ v) =
   [rangeOf $ Var v]
 primOpRanges (Split _ sizeexps v) =
   replicate (length sizeexps) $ rangeOf $ Var v
 primOpRanges (Copy se) =
   [rangeOf $ Var se]
-primOpRanges (Index _ v _) =
+primOpRanges (Index v _) =
   [rangeOf $ Var v]
-primOpRanges (Partition _ n _ arr) =
+primOpRanges (Partition n _ arr) =
   replicate n unknownRange ++ map (rangeOf . Var) arr
 primOpRanges (ArrayLit (e:es) _) =
   [(Just lower, Just upper)]
@@ -220,9 +226,9 @@ primOpRanges _ =
   [unknownRange]
 
 -- | Ranges of the value parts of the expression.
-expRanges :: (Ranged lore, TypedOp (Op lore)) =>
+expRanges :: Ranged lore =>
              Exp lore -> [Range]
-expRanges (PrimOp op) =
+expRanges (BasicOp op) =
   primOpRanges op
 expRanges (If _ tbranch fbranch _) =
   zip
@@ -230,11 +236,11 @@ expRanges (If _ tbranch fbranch _) =
   (zipWith maximumBound t_upper f_upper)
   where (t_lower, t_upper) = unzip $ rangesOf tbranch
         (f_lower, f_upper) = unzip $ rangesOf fbranch
-expRanges (DoLoop ctxmerge valmerge (ForLoop i iterations) body) =
+expRanges (DoLoop ctxmerge valmerge (ForLoop i Int32 iterations _) body) =
   zipWith returnedRange valmerge $ rangesOf body
   where bound_in_loop =
-          HS.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
-          concatMap (patternNames . bindingPattern) (bodyBindings body)
+          S.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
+          concatMap (patternNames . stmPattern) (bodyStms body)
 
         returnedRange mergeparam (lower, upper) =
           (returnedBound mergeparam lower,
@@ -244,12 +250,13 @@ expRanges (DoLoop ctxmerge valmerge (ForLoop i iterations) body) =
           | paramType param == Prim (IntType Int32),
             Just bound' <- boundToScalExp bound,
             let se_diff =
-                  AS.simplify (SE.SMinus (SE.Id (paramName param) $ IntType Int32) bound') HM.empty,
-            HS.null $ HS.intersection bound_in_loop $ freeIn se_diff =
+                  AS.simplify (SE.SMinus (SE.Id (paramName param) $ IntType Int32) bound') M.empty,
+            S.null $ S.intersection bound_in_loop $ freeIn se_diff =
               Just $ ScalarBound $ SE.SPlus (SE.subExpToScalExp mergeinit $ IntType Int32) $
               SE.STimes se_diff $ SE.MaxMin False
               [SE.subExpToScalExp iterations $ IntType Int32, 0]
         returnedBound _ _ = Nothing
+expRanges (Op ranges) = opRanges ranges
 expRanges e =
   replicate (expExtTypeSize e) unknownRange
 

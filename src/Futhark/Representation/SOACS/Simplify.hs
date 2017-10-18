@@ -8,151 +8,172 @@ module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
        , simplifyFun
        , simplifyLambda
+       , simplifyStms
+
+       , simpleSOACS
        )
 where
 
 import Control.Applicative
 import Control.Monad
+import Data.Foldable (any)
 import Data.Either
 import Data.List hiding (any, all)
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
+import qualified Data.Map.Strict as M
+import qualified Data.Set      as S
 
 import Prelude hiding (any, all)
 
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.AST as AST
+import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
-import Futhark.Optimise.Simplifier.Simple
+import Futhark.Optimise.Simplifier (simplifyProgWithRules)
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.ClosedForm
+import Futhark.Optimise.Simplifier.Lore
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
 
+simpleSOACS :: Simplifier.SimpleOps SOACS
+simpleSOACS = Simplifier.bindableSimpleOps simplifySOAC
+
 simplifySOACS :: MonadFreshNames m => Prog -> m Prog
 simplifySOACS =
-  simplifyProgWithRules bindableSimpleOps soacRules noExtraHoistBlockers
+  simplifyProgWithRules simpleSOACS soacRules blockers
+  where blockers =
+          Engine.HoistBlockers {
+            Engine.blockHoistPar = Engine.neverBlocks
+          , Engine.blockHoistSeq = Engine.neverBlocks
+          , Engine.getArraySizes = getShapeNames
+          , Engine.isAllocation  = const False
+          }
 
-simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
+-- | Getting the roots of what to hoist, for now only variable
+-- names that represent shapes/sizes.
+getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) =>
+                 AST.Stm lore -> Names
+getShapeNames bnd =
+  let tps1 = map patElemType $ patternElements $ stmPattern bnd
+      tps2 = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
+  in  S.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
+
+simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
-  Simplifier.simplifyFunWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
+  Simplifier.simplifyFunWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
-                  Lambda -> SubExp -> Maybe [SubExp] -> [Maybe VName] -> m Lambda
+                  Lambda -> Maybe [SubExp] -> [Maybe VName] -> m Lambda
 simplifyLambda =
-  Simplifier.simplifyLambdaWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
+  Simplifier.simplifyLambdaWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
-instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
-  simplifyOp (Stream cs outerdim form lam arr) = do
-    cs' <- Engine.simplify cs
-    outerdim' <- Engine.simplify outerdim
-    form' <- simplifyStreamForm outerdim' form
-    arr' <- mapM Engine.simplify arr
-    vtable <- Engine.getVtable
-    let (chunk:_) = extLambdaParams lam
-        se_outer = case outerdim of
-                      Var idd    -> fromMaybe (SE.Id idd int32) (ST.lookupScalExp idd vtable)
-                      Constant c -> SE.Val c
-        -- extension: one may similarly treat iota stream-array case,
-        -- by setting the bounds to [0, se_outer-1]
-        parbnds  = [ (chunk, 1, se_outer) ]
-    lam' <- Engine.simplifyExtLambda lam outerdim' (getStreamAccums form) parbnds
-    return $ Stream cs' outerdim' form' lam' arr'
-    where simplifyStreamForm _ (MapLike o) =
-            return $ MapLike o
-          simplifyStreamForm outerdim' (RedLike o comm lam0 acc) = do
-              acc'  <- mapM Engine.simplify acc
-              lam0' <- Engine.simplifyLambda lam0 outerdim' (Just acc) $
-                       replicate (length $ lambdaParams lam0) Nothing
-              return $ RedLike o comm lam0' acc'
-          simplifyStreamForm _ (Sequential acc) = do
-              acc'  <- mapM Engine.simplify acc
-              return $ Sequential acc'
+simplifyStms :: (HasScope SOACS m, MonadFreshNames m) =>
+                [Stm] -> m [Stm]
+simplifyStms =
+  Simplifier.simplifyStmsWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
-  simplifyOp (Map cs w fun arrs) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w Nothing $ map Just arrs'
-    return $ Map cs' w' fun' arrs'
+simplifySOAC :: Simplifier.SimplifyOp SOACS
+simplifySOAC (Stream outerdim form lam arr) = do
+  outerdim' <- Engine.simplify outerdim
+  form' <- simplifyStreamForm form
+  arr' <- mapM Engine.simplify arr
+  vtable <- Engine.getVtable
+  let (chunk:_) = extLambdaParams lam
+      se_outer = case outerdim of
+                    Var idd    -> fromMaybe (SE.Id idd int32) (ST.lookupScalExp idd vtable)
+                    Constant c -> SE.Val c
+      -- extension: one may similarly treat iota stream-array case,
+      -- by setting the bounds to [0, se_outer-1]
+      parbnds  = [ (chunk, 0, se_outer) ]
+  lam' <- Engine.simplifyExtLambda lam (getStreamAccums form) parbnds
+  return $ Stream outerdim' form' lam' arr'
+  where simplifyStreamForm (Parallel o comm lam0 acc) = do
+            acc'  <- mapM Engine.simplify acc
+            lam0' <- Engine.simplifyLambda lam0 (Just acc) $
+                     replicate (length $ lambdaParams lam0) Nothing
+            return $ Parallel o comm lam0' acc'
+        simplifyStreamForm (Sequential acc) = do
+            acc'  <- mapM Engine.simplify acc
+            return $ Sequential acc'
 
-  simplifyOp (Reduce cs w comm fun input) = do
-    let (acc, arrs) = unzip input
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    acc' <- mapM Engine.simplify acc
-    arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w (Just acc) $ map (const Nothing) arrs'
-    return $ Reduce cs' w' comm fun' (zip acc' arrs')
+simplifySOAC (Map w fun arrs) = do
+  w' <- Engine.simplify w
+  arrs' <- mapM Engine.simplify arrs
+  fun' <- Engine.simplifyLambda fun Nothing $ map Just arrs'
+  return $ Map w' fun' arrs'
 
-  simplifyOp (Scan cs w fun input) = do
-    let (acc, arrs) = unzip input
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    acc' <- mapM Engine.simplify acc
-    arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w (Just acc) $ map (const Nothing) arrs'
-    return $ Scan cs' w' fun' (zip acc' arrs')
+simplifySOAC (Reduce w comm fun input) =
+  Reduce <$> Engine.simplify w <*> pure comm <*>
+  Engine.simplifyLambda fun (Just acc) (map (const Nothing) arrs) <*>
+  (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
+  where (acc, arrs) = unzip input
 
-  simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    acc' <- mapM Engine.simplify acc
-    arrs' <- mapM Engine.simplify arrs
-    outerfun' <- Engine.simplifyLambda outerfun w (Just acc) $
-                 map (const Nothing) arrs'
-    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun w (Just acc) $ map Just arrs
-    (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-    return $ Redomap cs' w' comm outerfun' innerfun'' acc' arrs''
-    where removeUnusedParams used lam arrinps
-            | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
-                let (arrparams', arrinps') =
-                      unzip $ filter ((`UT.used` used) . paramName . fst) $
-                      zip arrparams arrinps
-                in return (lam { lambdaParams = accparams ++ arrparams' },
-                           arrinps')
-            | otherwise = return (lam, arrinps)
+simplifySOAC (Scan w fun input) =
+  Scan <$> Engine.simplify w <*>
+  Engine.simplifyLambda fun (Just acc) (map (const Nothing) arrs) <*>
+  (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
+  where (acc, arrs) = unzip input
+
+simplifySOAC (Redomap w comm outerfun innerfun acc arrs) =
+  Redomap <$> Engine.simplify w <*> pure comm <*>
+  Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
+  Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
+  mapM Engine.simplify acc <*> mapM Engine.simplify arrs
+
+simplifySOAC (Scanomap w outerfun innerfun acc arrs) =
+  Scanomap <$> Engine.simplify w <*>
+  Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
+  Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
+  mapM Engine.simplify acc <*> mapM Engine.simplify arrs
+
+simplifySOAC (Scatter len lam ivs as) = do
+  len' <- Engine.simplify len
+  lam' <- Engine.simplifyLambda lam Nothing $ map Just ivs
+  ivs' <- mapM Engine.simplify ivs
+  as' <- mapM Engine.simplify as
+  return $ Scatter len' lam' ivs' as'
 
 soacRules :: (MonadBinder m,
+              Aliased (Lore m),
               LocalScope (Lore m) m,
               Op (Lore m) ~ SOAC (Lore m)) => RuleBook m
-soacRules = (std_td_rules <> topDownRules,
-             std_bu_rules <> bottomUpRules)
-  where (std_td_rules, std_bu_rules) = standardRules
+soacRules = standardRules <> RuleBook topDownRules bottomUpRules
 
 topDownRules :: (MonadBinder m,
+                 Aliased (Lore m),
                  LocalScope (Lore m) m,
                  Op (Lore m) ~ SOAC (Lore m)) => TopDownRules m
-topDownRules = [liftIdentityMapping,
-                removeReplicateMapping,
+topDownRules = [removeReplicateMapping,
                 removeReplicateRedomap,
-                removeIotaMapping,
-                removeIotaRedomap,
-                removeIotaStream,
+                removeReplicateWrite,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
                 simplifyClosedFormReduce,
-                simplifyStream
+                simplifyStream,
+                simplifyKnownIterationSOAC
                ]
 
 bottomUpRules :: (MonadBinder m,
-                  LocalScope (Lore m) m,
+                  Aliased (Lore m),
                   Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
-bottomUpRules = [removeDeadMapping
+bottomUpRules = [removeDeadMapping,
+                 removeDeadWrite,
+                 removeUnnecessaryCopy,
+                 liftIdentityMapping,
+                 removeDuplicateMapOutput
                 ]
 
 liftIdentityMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
-                       TopDownRule m
-liftIdentityMapping _ (Let pat _ (Op (Map cs outersize fun arrs))) =
+                       BottomUpRule m
+liftIdentityMapping (_, usages) (Let pat _ (Op (Map outersize fun arrs))) =
   case foldr checkInvariance ([], [], []) $
        zip3 (patternElements pat) ses rettype of
     ([], _, _) -> cannotSimplify
@@ -162,22 +183,24 @@ liftIdentityMapping _ (Let pat _ (Op (Map cs outersize fun arrs))) =
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames'_ (map patElemName pat') $ Op $ Map cs outersize fun' arrs
-  where inputMap = HM.fromList $ zip (map paramName $ lambdaParams fun) arrs
+      letBindNames'_ (map patElemName pat') $ Op $ Map outersize fun' arrs
+  where inputMap = M.fromList $ zip (map paramName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
         ses = bodyResult $ lambdaBody fun
 
-        freeOrConst (Var v)    = v `HS.member` free
+        freeOrConst (Var v)    = v `S.member` free
         freeOrConst Constant{} = True
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
-          | Just inp <- HM.lookup v inputMap =
-            ((Pattern [] [outId], PrimOp $ SubExp $ Var inp) : invariant,
-             mapresult,
-             rettype')
+          | Just inp <- M.lookup v inputMap =
+              let e | patElemName outId `UT.isConsumed` usages = Copy inp
+                    | otherwise                                = SubExp $ Var inp
+              in ((Pattern [] [outId], BasicOp e) : invariant,
+                  mapresult,
+                  rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = ((Pattern [] [outId], PrimOp $ Replicate outersize e) : invariant,
+          | freeOrConst e = ((Pattern [] [outId], BasicOp $ Replicate (Shape [outersize]) e) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
@@ -187,97 +210,38 @@ liftIdentityMapping _ _ = cannotSimplify
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
-removeReplicateMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-removeReplicateMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
+removeReplicateMapping :: (MonadBinder m, Aliased (Lore m),
+                           Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateMapping vtable (Let pat _ (Op (Map outersize fun arrs)))
   | Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = do
-      mapM_ (uncurry letBindNames') bnds
-      letBind_ pat $ Op $ Map cs outersize fun' arrs'
+      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames' vs e
+      letBind_ pat $ Op $ Map outersize fun' arrs'
 
 removeReplicateMapping _ _ = cannotSimplify
 
--- | Remove all arguments to the map that are iotas.
--- These can be turned into references to the index variable instead.
-removeIotaMapping :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                     TopDownRule m
-removeIotaMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
-  | Just m <- removeIotaInput vtable fun arrs = do
-      (fun', arrs') <- m
-      letBind_ pat $ Op $ Map cs outersize fun' arrs'
-removeIotaMapping _ _ = cannotSimplify
-
--- | Like 'removeIotaMapping', but for 'Redomap'.
-removeIotaRedomap :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                     TopDownRule m
-removeIotaRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes arrs)))
-  | Just m <- removeIotaInput vtable foldfun arrs = do
-      (foldfun', arrs') <- m
-      letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
-removeIotaRedomap _ _ = cannotSimplify
-
--- | Like 'removeIotaMapping', but for 'Stream'.
-removeIotaStream :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                    TopDownRule m
-removeIotaStream vtable (Let pat _ (Op (Stream cs w form lam arrs)))
-  | ([chunk_param], params) <- splitAt 1 $ extLambdaParams lam,
-    (acc_params, arr_params) <- splitAt (length params - length arrs) params,
-    (iota_params, noniota_params) <- partition isIotaParam $ zip arr_params arrs,
-    not $ null iota_params = do
-      lam_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf lam $ do
-        forM_ iota_params $ \(p, _) ->
-          letBindNames'_ [paramName p] $
-          PrimOp $ Iota (Var $ paramName chunk_param) $ Var $ extLambdaIndex lam
-        mapM_ addBinding $ bodyBindings $ extLambdaBody lam
-        return $ bodyResult $ extLambdaBody lam
-      let lam' = lam { extLambdaBody = lam_body
-                     , extLambdaParams = [chunk_param] <> acc_params <> map fst noniota_params
-                     }
-      letBind_ pat $ Op $ Stream cs w form lam' $ map snd noniota_params
-  where isIotaParam (_, v)
-          | Just (PrimOp Iota{}) <- ST.lookupExp v vtable = True
-          | otherwise = False
-removeIotaStream _ _ = cannotSimplify
-
 -- | Like 'removeReplicateMapping', but for 'Redomap'.
-removeReplicateRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes arrs)))
+removeReplicateRedomap :: (MonadBinder m, Aliased (Lore m),
+                           Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateRedomap vtable (Let pat _ (Op (Redomap w comm redfun foldfun nes arrs)))
   | Just (bnds, foldfun', arrs') <- removeReplicateInput vtable foldfun arrs = do
-      mapM_ (uncurry letBindNames') bnds
-      letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
+      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames' vs e
+      letBind_ pat $ Op $ Redomap w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
 
-removeIotaInput :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                   ST.SymbolTable lore
-                -> AST.Lambda (Lore m) -> [VName] -> Maybe (m (AST.Lambda (Lore m), [VName]))
-removeIotaInput vtable fun arrs
-  | not $ null iota_params = Just $ do
-    let (arr_params', arrs') = unzip params_and_arrs
-    fun_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf fun $ do
-      forM_ iota_params $ \(p, x) ->
-        letBindNames'_ [p] $ PrimOp $
-        BinOp (Add Int32) (Var $ lambdaIndex fun) x
-      mapM_ addBinding $ bodyBindings $ lambdaBody fun
-      return $ bodyResult $ lambdaBody fun
-    let fun' = fun { lambdaParams = acc_params <> arr_params'
-                   , lambdaBody = fun_body }
-    return (fun', arrs')
-  | otherwise = Nothing
-  where params = lambdaParams fun
-        (acc_params, arr_params) =
-          splitAt (length params - length arrs) params
-        (params_and_arrs, iota_params) =
-          partitionEithers $ zipWith isIota arr_params arrs
+-- | Like 'removeReplicateMapping', but for 'Scatter'.
+removeReplicateWrite :: (MonadBinder m, Aliased (Lore m),
+                         Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateWrite vtable (Let pat _ (Op (Scatter len lam ivs as)))
+  | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = do
+      forM_ bnds $ \(vs,cs,e) -> certifying cs $ letBindNames' vs e
+      letBind_ pat $ Op $ Scatter len lam' ivs' as
+removeReplicateWrite _ _ = cannotSimplify
 
-        isIota p v
-          | Just (Iota _ x) <- asPrimOp =<< ST.lookupExp v vtable =
-              Right (paramName p, x)
-          | otherwise =
-              Left (p, v)
-
-removeReplicateInput :: Attributes lore =>
+removeReplicateInput :: Aliased lore =>
                         ST.SymbolTable lore
-                        -> AST.Lambda lore -> [VName]
-                     -> Maybe ([([VName], AST.Exp lore)],
-                               AST.Lambda lore, [VName])
+                     -> AST.Lambda lore -> [VName]
+                     -> Maybe ([([VName], Certificates, AST.Exp lore)],
+                                AST.Lambda lore, [VName])
 removeReplicateInput vtable fun arrs
   | not $ null parameterBnds = do
   let (arr_params', arrs') = unzip params_and_arrs
@@ -289,30 +253,35 @@ removeReplicateInput vtable fun arrs
         (acc_params, arr_params) =
           splitAt (length params - length arrs) params
         (params_and_arrs, parameterBnds) =
-          partitionEithers $ zipWith isReplicate arr_params arrs
+          partitionEithers $ zipWith isReplicateAndNotConsumed arr_params arrs
 
-        isReplicate p v
-          | Just (Replicate _ e) <-
-            asPrimOp =<< ST.lookupExp v vtable =
-              Right ([paramName p], PrimOp $ SubExp e)
+        isReplicateAndNotConsumed p v
+          | Just (BasicOp (Replicate (Shape (_:ds)) e), v_cs) <-
+              ST.lookupExp v vtable,
+            not $ paramName p `S.member` consumedByLambda fun =
+              Right ([paramName p],
+                     v_cs,
+                     case ds of
+                       [] -> BasicOp $ SubExp e
+                       _  -> BasicOp $ Replicate (Shape ds) e)
           | otherwise =
               Left (p, v)
 
 -- | Remove inputs that are not used inside the @map@.
 removeUnusedMapInput :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-removeUnusedMapInput _ (Let pat _ (Op (Map cs width fun arrs)))
+removeUnusedMapInput _ (Let pat _ (Op (Map width fun arrs)))
   | (used,unused) <- partition usedInput params_and_arrs,
     not (null unused) = do
       let (used_params, used_arrs) = unzip used
           fun' = fun { lambdaParams = used_params }
-      letBind_ pat $ Op $ Map cs width fun' used_arrs
+      letBind_ pat $ Op $ Map width fun' used_arrs
   where params_and_arrs = zip (lambdaParams fun) arrs
         used_in_body = freeInBody $ lambdaBody fun
-        usedInput (param, _) = paramName param `HS.member` used_in_body
+        usedInput (param, _) = paramName param `S.member` used_in_body
 removeUnusedMapInput _ _ = cannotSimplify
 
 removeDeadMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
-removeDeadMapping (_, used) (Let pat _ (Op (Map cs width fun arrs))) =
+removeDeadMapping (_, used) (Let pat _ (Op (Map width fun arrs))) =
   let ses = bodyResult $ lambdaBody fun
       isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
       (pat',ses', ts') = unzip3 $ filter isUsed $
@@ -321,20 +290,77 @@ removeDeadMapping (_, used) (Let pat _ (Op (Map cs width fun arrs))) =
                  , lambdaReturnType = ts'
                  }
   in if pat /= Pattern [] pat'
-     then letBind_ (Pattern [] pat') $ Op $ Map cs width fun' arrs
+     then letBind_ (Pattern [] pat') $ Op $ Map width fun' arrs
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
+removeDuplicateMapOutput :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
+removeDuplicateMapOutput (_, used) (Let pat _ (Op (Map width fun arrs))) =
+  let ses = bodyResult $ lambdaBody fun
+      ts = lambdaReturnType fun
+      pes = patternValueElements pat
+      ses_ts_pes = zip3 ses ts pes
+      (ses_ts_pes', copies) =
+        foldl checkForDuplicates (mempty,mempty) ses_ts_pes
+  in if null copies then cannotSimplify
+     else do
+       let (ses', ts', pes') = unzip3 ses_ts_pes'
+           pat' = Pattern [] pes'
+           fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = ses' }
+                      , lambdaReturnType = ts' }
+       letBind_ pat' $ Op $ Map width fun' arrs
+       forM_ copies $ \(from,to) ->
+         if UT.isConsumed (patElemName to) used then
+           letBind_ (Pattern [] [to]) $ BasicOp $ Copy $ patElemName from
+         else
+           letBind_ (Pattern [] [to]) $ BasicOp $ SubExp $ Var $ patElemName from
+  where checkForDuplicates (ses_ts_pes',copies) (se,t,pe)
+          | Just (_,_,pe') <- find (\(x,_,_) -> x == se) ses_ts_pes' =
+              -- This subexp has been returned before, producing the
+              -- array pe'.
+              (ses_ts_pes', (pe', pe) : copies)
+          | otherwise = (ses_ts_pes' ++ [(se,t,pe)], copies)
+removeDuplicateMapOutput _ _ = cannotSimplify
+
+-- | If we are writing to an array that is never used, get rid of it.
+removeDeadWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRule m
+removeDeadWrite (_, used) (Let pat _ (Op (Scatter w fun arrs dests))) =
+  let (i_ses, v_ses) = splitAt (length dests) $ bodyResult $ lambdaBody fun
+      (i_ts, v_ts) = splitAt (length dests) $ lambdaReturnType fun
+      isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
+      (pat', i_ses', v_ses', i_ts', v_ts', dests') =
+        unzip6 $ filter isUsed $
+        zip6 (patternElements pat) i_ses v_ses i_ts v_ts dests
+      fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = i_ses' ++ v_ses' }
+                 , lambdaReturnType = i_ts' ++ v_ts'
+                 }
+  in if pat /= Pattern [] pat'
+     then letBind_ (Pattern [] pat') $ Op $ Scatter w fun' arrs dests'
+     else cannotSimplify
+removeDeadWrite _ _ = cannotSimplify
+
 simplifyClosedFormRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-simplifyClosedFormRedomap vtable (Let pat _ (Op (Redomap _ _ _ _ innerfun acc arr))) =
+simplifyClosedFormRedomap vtable (Let pat _ (Op (Redomap _ _ _ innerfun acc arr))) =
   foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-simplifyClosedFormReduce vtable (Let pat _ (Op (Reduce _ _ _ fun args))) =
+simplifyClosedFormReduce vtable (Let pat _ (Op (Reduce _ _ fun args))) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify
+
+-- This simplistic rule is only valid here, and not after we introduce
+-- memory.
+removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
+removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (BasicOp (Copy v))) | False = do
+  t <- lookupType v
+  let originalNotUsedAnymore =
+        not (any (`UT.used` used) $ vnameAliases v)
+  if primType t || originalNotUsedAnymore
+    then letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
+    else cannotSimplify
+removeUnnecessaryCopy _ _ = cannotSimplify
 
 -- The simplifyStream stuff is something that Cosmin left lodged in
 -- the simplification engine itself at some point.  I moved it here
@@ -343,17 +369,17 @@ simplifyClosedFormReduce _ _ = cannotSimplify
 
 simplifyStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
                    LocalScope (Lore m) m) => TopDownRule m
-simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr))) = do
-  lss' <- frobStream vtable cs outerdim form lam arr
+simplifyStream vtable (Let pat _ lss@(Op (Stream outerdim form lam arr))) = do
+  lss' <- frobStream vtable outerdim form lam arr
   rtp <- expExtType lss
   rtp' <- expExtType lss'
   if rtp == rtp' then cannotSimplify
     else do
     let patels      = patternElements pat
         argpattps   = map patElemType $ drop (length patels - length rtp) patels
-    (newpats,newsubexps) <- unzip <$> reverse <$>
+    (newpats,newsubexps) <- unzip . reverse <$>
                             foldM gatherPat [] (zip3 rtp rtp' argpattps)
-    let newexps' = map (PrimOp . SubExp) newsubexps
+    let newexps' = map (BasicOp . SubExp) newsubexps
         rmvdpatels = concatMap patternElements newpats
         patels' = concatMap (\p-> if p `elem` rmvdpatels then [] else [p]) patels
         (ctx,vals) = splitAt (length patels' - length rtp') patels'
@@ -362,23 +388,23 @@ simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr))) = d
         newpats' = newpats ++ [pat']
         (_,newexps'') = unzip newpatexps'
         newpatexps''= zip newpats' newexps''
-    forM_ newpatexps'' $ \(p,e) -> addBinding =<< mkLetM p e
+    forM_ newpatexps'' $ \(p,e) -> addStm =<< mkLetM p e
       where gatherPat acc (_, Prim _, _) = return acc
             gatherPat acc (_, Mem {}, _) = return acc
             gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
               foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
             gatherPat _ _ =
-              fail $ "In simplifyBinding \"let pat = stream()\": "++
+              fail $ "In simplifyStm \"let pat = stream()\": "++
                      " reached unreachable case!"
             gatherShape acc (Ext i, Free se', Var pid) = do
               let patind  = elemIndex pid $
                             map patElemName $ patternElements pat
               case patind of
                 Just k -> return $ (Pattern [] [patternElements pat !! k], se') : acc
-                Nothing-> fail $ "In simplifyBinding \"let pat = stream()\": pat "++
+                Nothing-> fail $ "In simplifyStm \"let pat = stream()\": pat "++
                                  "element of known dim not found: "++pretty pid++" "++show i++" "++pretty se'++"."
             gatherShape _ (Free se, Ext i', _) =
-              fail $ "In simplifyBinding \"let pat = stream()\": "++
+              fail $ "In simplifyStm \"let pat = stream()\": "++
                      " previous known dimension: " ++ pretty se ++
                      " becomes existential: ?" ++ show i' ++ "!"
             gatherShape acc _ = return acc
@@ -387,23 +413,24 @@ simplifyStream _ _ = cannotSimplify
 frobStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
                LocalScope (Lore m) m) =>
               ST.SymbolTable (Lore m)
-           -> Certificates -> SubExp -> StreamForm (Lore m)
+           -> SubExp -> StreamForm (Lore m)
            -> AST.ExtLambda (Lore m) -> [VName]
            -> m (AST.Exp (Lore m))
-frobStream vtab cs outerdim form lam arr = do
+frobStream vtab outerdim form lam arr = do
   lam' <- frobExtLambda vtab lam
-  return $ Op $ Stream cs outerdim form lam' arr
+  return $ Op $ Stream outerdim form lam' arr
 
 frobExtLambda :: (MonadBinder m, LocalScope (Lore m) m) =>
                  ST.SymbolTable (Lore m)
               -> AST.ExtLambda (Lore m)
               -> m (AST.ExtLambda (Lore m))
-frobExtLambda vtable (ExtLambda index params body rettype) = do
+frobExtLambda vtable (ExtLambda params body rettype) = do
   let bodyres = bodyResult body
-      bodyenv = scopeOf $ bodyBindings body
+      bodyenv = scopeOf $ bodyStms body
       vtable' = foldr ST.insertLParam vtable params
-  rettype' <- zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
-  return $ ExtLambda index params body rettype'
+  rettype' <- localScope (scopeOfLParams params) $
+              zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
+  return $ ExtLambda params body rettype'
     where refineArrType :: (MonadBinder m, LocalScope (Lore m) m) =>
                            ST.SymbolTable (Lore m)
                         -> Scope (Lore m)
@@ -412,7 +439,7 @@ frobExtLambda vtable (ExtLambda index params body rettype) = do
           refineArrType vtable' bodyenv pars x (Array btp shp u) = do
             let vtab = ST.bindings vtable'
             dsx <- localScope bodyenv $
-                   shapeDims <$> arrayShape <$> subExpType x
+                   shapeDims . arrayShape <$> subExpType x
             let parnms = map paramName pars
                 dsrtpx = extShapeDims shp
                 (resdims,_) =
@@ -421,15 +448,32 @@ frobExtLambda vtable (ExtLambda index params body rettype) = do
                               (Free (Constant c), _) -> (lst++[Free (Constant c)], i)
                               ( _,      Constant c ) -> (lst++[Free (Constant c)], i)
                               (Free (Var tid), Var pid) ->
-                                if not (HM.member tid vtab) &&
-                                        HM.member pid vtab
+                                if not (M.member tid vtab) &&
+                                        M.member pid vtab
                                 then (lst++[Free (Var pid)], i)
                                 else (lst++[Free (Var tid)], i)
                               (Ext _, Var pid) ->
-                                if HM.member pid vtab ||
+                                if M.member pid vtab ||
                                    pid `elem` parnms
                                 then (lst ++ [Free (Var pid)], i)
                                 else (lst ++ [Ext i],        i+1)
                           ) ([],0) (zip dsrtpx dsx)
             return $ Array btp (ExtShape resdims) u
           refineArrType _ _ _ _ tp = return tp
+
+-- For now we just remove singleton maps.
+simplifyKnownIterationSOAC :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
+                              TopDownRule m
+simplifyKnownIterationSOAC _ (Let pat _ (Op (Map (Constant k) fun arrs)))
+  | oneIsh k = do
+      zipWithM_ bindParam (lambdaParams fun) arrs
+      ses <- bodyBind $ lambdaBody fun
+      zipWithM_ bindResult (patternValueElements pat) ses
+        where bindParam p a = do
+                a_t <- lookupType a
+                letBindNames'_ [paramName p] $
+                  BasicOp $ Index a $ fullSlice a_t [DimFix $ constant (0::Int32)]
+              bindResult pe se =
+                letBindNames'_ [patElemName pe] $
+                BasicOp $ ArrayLit [se] $ rowType $ patElemType pe
+simplifyKnownIterationSOAC _ _ = cannotSimplify

@@ -22,6 +22,7 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternContextNames
        , patternTypes
        , patternValueTypes
+       , patternExtTypes
        , patternSize
          -- * Bindage
        , bindageRequires
@@ -31,9 +32,12 @@ module Futhark.Representation.AST.Attributes.Patterns
        )
        where
 
+import qualified Data.Set as S
+
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
-  (stripArray, Typed(..), DeclTyped(..))
+  (elemType, arrayOfShape, existentialiseExtTypes, staticShapes,
+   Typed(..), DeclTyped(..))
 
 -- | The 'Type' of a parameter.
 paramType :: Typed attr => ParamT attr -> Type
@@ -65,8 +69,8 @@ patElemRequires (PatElem _ bindage attr) =
 bindageRequires :: Type -> Bindage -> Type
 bindageRequires t BindVar =
   t
-bindageRequires t (BindInPlace _ _ is) =
-  stripArray (length is) t
+bindageRequires t (BindInPlace _ slice) =
+  Prim (elemType t) `arrayOfShape` Shape (sliceDims slice)
 
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
@@ -105,9 +109,17 @@ patternValueNames = map patElemName . patternValueElements
 patternTypes :: Typed attr => PatternT attr -> [Type]
 patternTypes = map identType . patternIdents
 
--- | Return a list of the 'types's bound by the value part of the 'Pattern'.
+-- | Return a list of the 'Types's bound by the value part of the 'Pattern'.
 patternValueTypes :: Typed attr => PatternT attr -> [Type]
 patternValueTypes = map identType . patternValueIdents
+
+-- | Return a list of the 'ExtTypes's bound by the value part of the
+-- 'Pattern', with existentials where the sizes are part of the
+-- context part of the 'Pattern'.
+patternExtTypes :: Typed attr => PatternT attr -> [ExtType]
+patternExtTypes pat =
+  existentialiseExtTypes (S.fromList $ patternContextNames pat)
+  (staticShapes (patternValueTypes pat))
 
 -- | Return the number of names bound by the 'Pattern'.
 patternSize :: PatternT attr -> Int
