@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.2.0]
 
+  * `scatter` expressions nested in `map`s may now be parallelised
+    ("segmented scatter").
+
   * Add `num_bits`/`get_bit`/`set_bit` functions to numeric module
     types, including a new `float` module type.
 
