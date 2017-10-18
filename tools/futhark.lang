@@ -32,6 +32,7 @@
     <style id="builtin-functionlikes" _name="Functionlikes"  map-to="def:identifier" />
     <style id="variable"       _name="Variable"/> <!-- map to nothing -->
     <style id="identifier"     _name="Identifier"/> <!-- map to nothing -->
+    <style id="string"         _name="String"                map-to="def:string" />
 <!--    <style id="common-function" _name="Common Function" map-to="def:keyword"/>-->
     <style id="operator"       _name="Operator"              map-to="def:operator"/>
     <style id="boolean"        _name="Boolean"               map-to="def:boolean"/>
@@ -70,6 +71,14 @@
       <keyword>do</keyword>
       <keyword>in</keyword>
       
+      <keyword>local</keyword>
+      <keyword>type</keyword>
+      <keyword>val</keyword>
+      <keyword>module</keyword>
+      
+      <keyword>open</keyword>
+      <keyword>import</keyword>
+      
       <keyword>empty</keyword>
       
       <!-- Perhaps arbitrary, but these are keywords, because they do not
@@ -103,7 +112,7 @@
     </context>
 
     <context id="operators" style-ref="operator" extend-parent="false">
-      <match>[+\-\*/&gt;&lt;%\!=&amp;\|\^]</match>
+      <match>[+\-\*/&gt;&lt;%\!=&amp;\|\^:]</match>
     </context>
 
     <context id="type" style-ref="type">
@@ -156,6 +165,11 @@
         (?![\w\.])
       </match>
     </context>
+
+    <context id="double-quoted-string" style-ref="string">
+      <start>"</start>
+      <end>"</end>
+    </context>
     
     <context id="futhark" class="no-spell-check">
       <include>
@@ -168,6 +182,7 @@
         <context ref="float" />
         <context ref="hexadecimal-number" />
         <context ref="integer" />
+        <context ref="double-quoted-string" />
         <context ref="variable" />
       </include>
     </context>
