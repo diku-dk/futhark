@@ -1,22 +1,24 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- |
 --
--- Apply the simplification engine
--- ("Futhark.Optimise.Simplifier.Engine") to an entire program, using
--- some set of simplification rules.
+-- Apply the simplification engine to an entire program, using some
+-- set of simplification rules.
 --
 module Futhark.Optimise.Simplifier
   ( -- * Simple interface
     simplifyProgWithRules
   , simplifyFunWithRules
   , simplifyLambdaWithRules
-  , simplifyBindingsWithRules
+  , simplifyStmsWithRules
   , standardRules
-  , basicRules
   , RuleBook
   , noExtraHoistBlockers
   , HoistBlockers (..)
   , simplifyBasicish
+  , bindableSimpleOps
+  , SimpleOps
+  , SimplifyOp
   )
   where
 
@@ -28,18 +30,18 @@ import Futhark.Binder.Class (Bindable)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Lore
-  (removeProgWisdom, removeFunDecWisdom, removeLambdaWisdom, removeBindingWisdom)
+  (removeProgWisdom, removeFunDefWisdom, removeLambdaWisdom, removeStmWisdom)
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
 import Futhark.Optimise.Simplifier.Engine
-  (MonadEngine, HoistBlockers(..), noExtraHoistBlockers, Simplifiable, SimplifiableOp)
+  (SimplifiableLore, HoistBlockers(..), noExtraHoistBlockers)
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProgWithRules :: (MonadFreshNames m, MonadEngine (SimpleM lore)) =>
-                         SimpleOps (SimpleM lore)
+simplifyProgWithRules :: (MonadFreshNames m, SimplifiableLore lore) =>
+                         SimpleOps lore
                       -> RuleBook (SimpleM lore)
                       -> HoistBlockers (SimpleM lore)
                       -> Prog lore -> m (Prog lore)
@@ -48,51 +50,43 @@ simplifyProgWithRules simpl rules blockers =
   simplifyProg simpl rules blockers
 
 -- | Simplify just a single function declaration.
-simplifyFunWithRules :: (MonadFreshNames m, MonadEngine (SimpleM lore)) =>
-                        SimpleOps (SimpleM lore)
+simplifyFunWithRules :: (MonadFreshNames m, SimplifiableLore lore) =>
+                        SimpleOps lore
                      -> RuleBook (SimpleM lore)
                      -> HoistBlockers (SimpleM lore)
-                     -> FunDec lore
-                     -> m (FunDec lore)
+                     -> FunDef lore
+                     -> m (FunDef lore)
 simplifyFunWithRules simpl rules blockers =
-  fmap removeFunDecWisdom .
+  fmap removeFunDefWisdom .
   simplifyFun simpl rules blockers
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambdaWithRules :: (MonadFreshNames m,
-                            HasScope lore m,
-                            MonadEngine (SimpleM lore)) =>
-                           SimpleOps (SimpleM lore)
+simplifyLambdaWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
+                           SimpleOps lore
                         -> RuleBook (SimpleM lore)
                         -> HoistBlockers (SimpleM lore)
                         -> Lambda lore
-                        -> SubExp
                         -> Maybe [SubExp]
                         -> [Maybe VName]
                         -> m (Lambda lore)
-simplifyLambdaWithRules simpl rules blockers lam w nes =
+simplifyLambdaWithRules simpl rules blockers lam nes =
   fmap removeLambdaWisdom .
-  simplifyLambda simpl rules blockers lam w nes
+  simplifyLambda simpl rules blockers lam nes
 
--- | Simplify a list of 'Binding's.
-simplifyBindingsWithRules :: (MonadFreshNames m,
-                              HasScope lore m,
-                              MonadEngine (SimpleM lore)) =>
-                             SimpleOps (SimpleM lore)
+-- | Simplify a list of 'Stm's.
+simplifyStmsWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
+                             SimpleOps lore
                           -> RuleBook (SimpleM lore)
                           -> HoistBlockers (SimpleM lore)
-                          -> [Binding lore]
-                          -> m [Binding lore]
-simplifyBindingsWithRules simpl rules blockers bnds =
-  map removeBindingWisdom <$>
-  simplifyBindings simpl rules blockers bnds
+                          -> [Stm lore]
+                          -> m [Stm lore]
+simplifyStmsWithRules simpl rules blockers bnds =
+  map removeStmWisdom <$>
+  simplifyStms simpl rules blockers bnds
 
 simplifyBasicish :: (MonadFreshNames m, Bindable lore,
-                     Simplifiable (LetAttr lore),
-                     Simplifiable (FParamAttr lore),
-                     Simplifiable (LParamAttr lore),
-                     Simplifiable (RetType lore),
-                     SimplifiableOp lore (Op lore)) =>
+                     SimplifiableLore lore) =>
+                    SimplifyOp lore ->
                     Prog lore -> m (Prog lore)
-simplifyBasicish =
-  simplifyProgWithRules bindableSimpleOps standardRules noExtraHoistBlockers
+simplifyBasicish simplifyOp =
+  simplifyProgWithRules (bindableSimpleOps simplifyOp) standardRules noExtraHoistBlockers

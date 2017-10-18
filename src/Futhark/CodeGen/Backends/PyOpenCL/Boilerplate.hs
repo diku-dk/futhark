@@ -1,44 +1,61 @@
-{-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
-  ( openClDecls
-  , openClInit
---  , openClReport
+  ( openClInit
+  , openClPrelude
   ) where
 
-import NeatInterpolation
+import Data.FileEmbed
+import qualified Data.Text as T
+import NeatInterpolation (text)
 
-openClInit :: String
-openClInit = [string|
-c = cl.create_some_context(interactive=False)
-q = cl.CommandQueue(c)
-setup_opencl(c, q)
+import Futhark.CodeGen.OpenCL.Kernels
+import Futhark.CodeGen.Backends.GenericPython.AST
+import Futhark.Util.Pretty (pretty)
+
+openClPrelude :: String
+openClPrelude = $(embedStringFile "rts/python/opencl.py")
+
+openClInit :: String -> String
+openClInit assign = T.unpack [text|
+self.ctx = get_prefered_context(interactive, platform_pref, device_pref)
+self.queue = cl.CommandQueue(self.ctx)
+self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
+ # XXX: Assuming just a single device here.
+platform_name = self.ctx.get_info(cl.context_info.DEVICES)[0].platform.name
+device_type = self.device.type
+lockstep_width = 1
+$set_lockstep_width
+max_tile_size = int(np.sqrt(self.device.max_work_group_size))
+if (tile_size * tile_size > self.device.max_work_group_size):
+  sys.stderr.write('Warning: Device limits tile size to {} (setting was {})\n'.format(max_tile_size, tile_size))
+  tile_size = max_tile_size
+self.group_size = group_size
+self.num_groups = num_groups
+self.tile_size = tile_size
+if (len(fut_opencl_src) >= 0):
+  program = cl.Program(self.ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={}".format(FUT_BLOCK_DIM),
+                                                        "-DLOCKSTEP_WIDTH={}".format(lockstep_width),
+                                                        "-DDEFAULT_GROUP_SIZE={}".format(group_size),
+                                                        "-DDEFAULT_NUM_GROUPS={}".format(num_groups),
+                                                        "-DDEFAULT_TILE_SIZE={}".format(tile_size)])
+
+$assign'
 |]
-
-openClDecls ::String -> String -> String -> String
-openClDecls pyopencl_code assign declare =
-    kernelDeclarations ++ openclBoilerplate assign declare
-    where kernelDeclarations =
-            [string|fut_opencl_src = """
-            ${pyopencl_code}"""|]
-          openclBoilerplate assignBlock declareBlock = [string|
-
-cl_group_size = 512
+  where assign' = T.pack assign
+        set_lockstep_width =
+          T.pack $ unlines $
+          map (pretty . lockstepWidthHeuristicsCode) lockstepWidthHeuristicsTable
 
 
-def setup_opencl(context_set, queue_set):
-  global ctx
-  global queue
-  global program
-  $declareBlock
-
-  ctx = context_set
-  queue = queue_set
-
-  # Some drivers complain if we compile empty programs, so bail out early if so.
-  if (len(fut_opencl_src) == 0):
-    assert True
-
-  program = cl.Program(ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={}".format(FUT_BLOCK_DIM), "-DWAVE_SIZE=32"])
-
-  $assignBlock
-|]
+lockstepWidthHeuristicsCode :: LockstepWidthHeuristic -> PyStmt
+lockstepWidthHeuristicsCode
+  (LockstepWidthHeuristic platform_name device_type width) =
+  If (BinOp "and"
+      (BinOp "==" (Var "platform_name") (String platform_name))
+      (BinOp "==" (Var "device_type") (clDeviceType device_type)))
+  [Assign (Var "lockstep_width") (Integer $ toInteger width)]
+  []
+  where clDeviceType DeviceGPU = Var "cl.device_type.GPU"
+        clDeviceType DeviceCPU = Var "cl.device_type.CPU"

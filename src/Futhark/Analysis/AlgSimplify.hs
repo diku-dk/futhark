@@ -1,8 +1,8 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Futhark.Analysis.AlgSimplify
   ( ScalExp
-  , simplify
   , Error
+  , simplify
   , mkSuffConds
   , RangesRep
   , ppRangesRep
@@ -14,29 +14,32 @@ module Futhark.Analysis.AlgSimplify
 import Control.Applicative
 
 import qualified Data.Set as S
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.List
 import Control.Monad
 import Control.Monad.Reader
+import Control.Monad.State
 import Data.Monoid
 
 import Prelude
 
 import Futhark.Representation.AST hiding (SDiv, SMod, SQuot, SRem, SSignum)
 import Futhark.Analysis.ScalExp
+import qualified Futhark.Representation.Primitive as P
 
 -- | Ranges are inclusive.
-type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+type RangesRep = M.Map VName (Int, Maybe ScalExp, Maybe ScalExp)
 
 -- | Prettyprint a 'RangesRep'.  Do not rely on the format of this
 -- string.  Does not include the loop nesting depth information.
 ppRangesRep :: RangesRep -> String
-ppRangesRep = unlines . map ppRange . HM.toList
+ppRangesRep = unlines . sort . map ppRange . M.toList
   where ppRange (name, (_, lower, upper)) =
           pretty name ++ ": " ++
-          "[" ++ ppBound lower ++ ", " ++
-          ppBound upper ++ "]"
+          if lower == upper
+          then "== " ++ ppBound lower
+          else "[" ++ ppBound lower ++ ", " ++
+               ppBound upper ++ "]"
         ppBound Nothing = "?"
         ppBound (Just se) = pretty se
 
@@ -44,20 +47,34 @@ ppRangesRep = unlines . map ppRange . HM.toList
 --   a list of variable-to-range bindings.
 data AlgSimplifyEnv = AlgSimplifyEnv { inSolveLTH0 :: Bool
                                      , ranges :: RangesRep
+                                     , maxSteps :: Int
+                                     -- ^ The number of
+                                     -- simplifications to do before
+                                     -- bailing out, to avoid spending
+                                     -- too much time.
                                      }
 
-type Error = String
+data Error = StepsExceeded | Error String
 
-type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
+type AlgSimplifyM = StateT Int (ReaderT AlgSimplifyEnv (Either Error))
 
 runAlgSimplifier :: Bool -> AlgSimplifyM a -> RangesRep -> Either Error a
-runAlgSimplifier s x r = runReaderT x env
+runAlgSimplifier s x r = runReaderT (evalStateT x 0) env
   where env = AlgSimplifyEnv { inSolveLTH0 = s
                              , ranges = r
+                             , maxSteps = 1000 -- heuristically chosen
                              }
 
+step :: AlgSimplifyM ()
+step = do modify (1+)
+          exceeded <- pure (>) <*> get <*> asks maxSteps
+          when exceeded stepsExceeded
+
+stepsExceeded :: AlgSimplifyM a
+stepsExceeded = lift $ lift $ Left StepsExceeded
+
 badAlgSimplifyM :: String -> AlgSimplifyM a
-badAlgSimplifyM = lift . Left
+badAlgSimplifyM = lift . lift . Left . Error
 
 -- | Binds an array name to the set of used-array vars
 markInSolve :: AlgSimplifyEnv -> AlgSimplifyEnv
@@ -97,8 +114,10 @@ type DNF     = [NAnd ]
 -- | Applies Simplification at Expression level:
 simplify :: ScalExp -> RangesRep -> ScalExp
 simplify e rangesrep = case runAlgSimplifier False (simplifyScal e) rangesrep of
-  Left err -> error $ "Error during algebraic simplification of: " ++ pretty e ++
-              "\n"  ++ err
+  Left (Error err) ->
+    error $ "Error during algebraic simplification of: " ++ pretty e ++
+    "\n"  ++ err
+  Left StepsExceeded -> e
   Right e' -> e'
 
 -- | Given a symbol i and a scalar expression e, it decomposes
@@ -137,7 +156,7 @@ simplifyNRel inp_term@(NRelExp LTH0 inp_sofp) = do
     in_gauss <- asks inSolveLTH0
     let tp = typeOfNAlg inp_sofp
 
-    if in_gauss || isTrivialNRel term || (tp /= int32)
+    if in_gauss || isTrivialNRel term || tp `notElem` map IntType allIntTypes
     then return term
     else do ednf <- markGaussLTH0 $ gaussAllLTH0 True S.empty inp_sofp
             return $ case ednf of
@@ -168,8 +187,8 @@ gaussElimRel (RelExp LTH0 e) = do
     mapM (mapM (\f ->
                   case f of
                     LogCt c   -> return $ Val (BoolValue c)
-                    PosId i   -> return $ Id  i int32
-                    NegId i   -> return $ Id  i int32
+                    PosId i   -> return $ Id  i $ scalExpType e
+                    NegId i   -> return $ Id  i $ scalExpType e
                     NRelExp rel ee -> do
                       e_scal' <- fromNumSofP ee
                       return $ RelExp rel e_scal'
@@ -183,7 +202,7 @@ gaussElimRel _ =
 
 
 primScalExpLTH0 :: ScalExp -> Bool
-primScalExpLTH0 (Val (IntValue (Int32Value v))) = v < 0
+primScalExpLTH0 (Val (IntValue v)) = P.intToInt64 v < 0
 primScalExpLTH0 _ = False
 -----------------------------------------------------------
 -----------------------------------------------------------
@@ -217,6 +236,7 @@ primScalExpLTH0 _ = False
 type Prod = [ScalExp]
 gaussAllLTH0 :: Bool -> S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
 gaussAllLTH0 static_only el_syms sofp = do
+    step
     let tp  = typeOfNAlg sofp
     rangesrep <- asks ranges
     e_scal <- fromNumSofP sofp
@@ -318,7 +338,7 @@ gaussAllLTH0 static_only el_syms sofp = do
                                          return (mm, fs, [])
         findMinMaxTerm ii (NSum (t:ts) tp)= do
             rangesrep <- asks ranges
-            case HM.lookup ii rangesrep of
+            case M.lookup ii rangesrep of
                 Just (_, Just _, Just _) -> do
                     f <- findMinMaxFact ii t
                     case f of
@@ -333,7 +353,7 @@ gaussAllLTH0 static_only el_syms sofp = do
             case f of
                 MaxMin ismin ts -> do
                         let id_set = mconcat $ map freeIn ts
-                        if HS.member ii id_set
+                        if S.member ii id_set
                         then return (Just (MaxMin ismin ts), fs)
                         else do (mm, fs') <- findMinMaxFact ii (NProd fs tp)
                                 return (mm, f:fs')
@@ -365,7 +385,7 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
             aleq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms am1
             ageq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms mam1
 
-            case HM.lookup i rangesrep of
+            case M.lookup i rangesrep of
                 Nothing ->
                     badAlgSimplifyM "gaussOneDefaultLTH0: sym not in ranges!"
                 Just (_, Nothing, Nothing) ->
@@ -444,14 +464,14 @@ pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe VName
 pickSymToElim rangesrep elsyms0 e_scal =
 --    ranges <- asks ranges
 --    e_scal <- fromNumSofP e0
-    let ids0= HS.toList $ freeIn e_scal
+    let ids0= S.toList $ freeIn e_scal
         ids1= filter (\s -> not (S.member s elsyms0)) ids0
-        ids2= filter (\s -> case HM.lookup s rangesrep of
+        ids2= filter (\s -> case M.lookup s rangesrep of
                                 Nothing -> False
                                 Just _  -> True
                      ) ids1
-        ids = sortBy (\n1 n2 -> let n1p = HM.lookup n1 rangesrep
-                                    n2p = HM.lookup n2 rangesrep
+        ids = sortBy (\n1 n2 -> let n1p = M.lookup n1 rangesrep
+                                    n2p = M.lookup n2 rangesrep
                                 in case (n1p, n2p) of
                                      (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
                                      (_            , _            ) -> compare (1::Int) (1::Int)
@@ -486,7 +506,7 @@ linearForm idd (NSum terms tp) = do
                                             NProd (_:_) _ -> return t
                                             _ -> badAlgSimplifyM "linearForm: ILLEGAL111!!!!"
                                    t_scal <- fromNumSofP t0
-                                   simplifyScal $ SDiv t_scal (Id idd int32)
+                                   simplifyScal $ SDiv t_scal (Id idd (scalExpType t_scal))
                          ) terms
     let myiota  = [1..(length terms)]
     let ia_terms= filter (\(_,t)-> case t of
@@ -500,9 +520,11 @@ linearForm idd (NSum terms tp) = do
     -- check that b_terms do not contain idd
     b_succ <- foldM (\acc x ->
                         case x of
-                           NProd fs _ -> do let fs_scal = foldl STimes 1 fs
+                           NProd fs _ -> do let fs_scal = case fs of
+                                                            [] -> Val $ IntValue $ Int32Value 1
+                                                            f:fs' -> foldl STimes f fs'
                                             let b_ids = freeIn fs_scal
-                                            return $ acc && not (idd `HS.member` b_ids)
+                                            return $ acc && not (idd `S.member` b_ids)
                            _          -> badAlgSimplifyM "linearForm: ILLEGAL222!!!!"
                     ) True b_terms
 
@@ -527,17 +549,6 @@ simplifyScal :: ScalExp -> AlgSimplifyM ScalExp
 
 simplifyScal (Val v) = return $ Val v
 simplifyScal (Id  x t) = return $ Id  x t
-
-simplifyScal (SOneIfZero x) = SOneIfZero <$> simplifyScal x
-simplifyScal (SIfZero x t f) = SIfZero <$>
-                               simplifyScal x <*>
-                               simplifyScal t <*>
-                               simplifyScal f
-simplifyScal (SIfLessThan a b t f) = SIfLessThan <$>
-                                     simplifyScal a <*>
-                                     simplifyScal b <*>
-                                     simplifyScal t <*>
-                                     simplifyScal f
 
 simplifyScal e@SNot{} = fromDNF =<< simplifyDNF =<< toDNF e
 simplifyScal e@SLogAnd{} = fromDNF =<< simplifyDNF =<< toDNF e
@@ -608,9 +619,9 @@ simplifyScal (SPlus e1o e2o) = do
     where
       normalPlus :: ScalExp -> ScalExp -> AlgSimplifyM ScalExp
       normalPlus e1 e2 = do
-        let tp = scalExpType e1
         e1' <- toNumSofP e1
         e2' <- toNumSofP e2
+        let tp = scalExpType e1
         let terms = getTerms e1' ++ getTerms e2'
         splittedTerms <- mapM splitTerm terms
         let sortedTerms = sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
@@ -738,20 +749,14 @@ simplifyScal (SDiv e1o e2o) = do
         ee2' <- fromNumSofP ee2
         return $ SDiv ee1' ee2'
 
-simplifyScal (SMod e1o e2o) = do
-    e1' <- simplifyScal e1o
-    e2' <- simplifyScal e2o
-    return $ SQuot e1' e2'
+simplifyScal (SMod e1o e2o) =
+    SMod <$> simplifyScal e1o <*> simplifyScal e2o
 
-simplifyScal (SQuot e1o e2o) = do
-    e1' <- simplifyScal e1o
-    e2' <- simplifyScal e2o
-    return $ SQuot e1' e2'
+simplifyScal (SQuot e1o e2o) =
+    SQuot <$> simplifyScal e1o <*> simplifyScal e2o
 
-simplifyScal (SRem e1o e2o) = do
-    e1' <- simplifyScal e1o
-    e2' <- simplifyScal e2o
-    return $ SRem e1' e2'
+simplifyScal (SRem e1o e2o) =
+    SRem <$> simplifyScal e1o <*> simplifyScal e2o
 
 ---------------------------------------------------
 ---------------------------------------------------
@@ -772,24 +777,20 @@ simplifyScal (SPow e1 e2) = do
     else if isCt1 e2'
     then return e1'
     else case (e1', e2') of
-            (Val v1, Val v2)    -> do
-                v <- powVals v1 v2
-                return $ Val v
-            (_, Val (IntValue (Int32Value n))) ->
-                if n >= 1
+            (Val v1, Val v2)
+              | Just v <- powVals v1 v2 -> return $ Val v
+            (_, Val (IntValue n)) ->
+                if P.intToInt64 n >= 1
                 then -- simplifyScal =<< fromNumSofP $ NProd (replicate n e1') tp
-                        do new_e <- fromNumSofP $ NProd (genericReplicate n e1') tp
+                        do new_e <- fromNumSofP $ NProd (genericReplicate (P.intToInt64 n) e1') tp
                            simplifyScal new_e
                 else return $ SPow e1' e2'
             (_, _) -> return $ SPow e1' e2'
 
     where
-        powVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-        powVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2))
-            | v2 < 0, v1 == 0 = badAlgSimplifyM "powVals: Negative exponential with zero base"
-            | v2 < 0          = return $ value $ 1 `div` (v1 ^ (-v2))
-            | otherwise       = return $ value $ v1 ^ v2
-        powVals _ _ = badAlgSimplifyM  "powVals: operands not of (the same) integer type! "
+        powVals :: PrimValue -> PrimValue -> Maybe PrimValue
+        powVals (IntValue v1) (IntValue v2) = IntValue <$> P.doPow v1 v2
+        powVals _ _ = Nothing
 
 -----------------------------------------------------
 --- Helpers for simplifyScal: MinMax related, etc ---
@@ -890,9 +891,9 @@ negateBTerm (NegId i) = return $ PosId i
 negateBTerm (NRelExp rel e) = do
     let tp = typeOfNAlg e
     case (tp, rel) of
-        (IntType Int32, LTH0) -> do
+        (IntType it, LTH0) -> do
             se <- fromNumSofP e
-            ne <- toNumSofP =<< simplifyScal (SNeg $ SPlus se 1)
+            ne <- toNumSofP =<< simplifyScal (SNeg $ SPlus se (Val (value (P.intValue it (1::Int)))))
             return $ NRelExp LTH0 ne
         _ -> do
             e' <- toNumSofP =<< negateSimplified =<< fromNumSofP e;
@@ -923,9 +924,9 @@ toDNF (Id      idd  _ ) = return [[PosId idd]]
 toDNF (RelExp  rel  e ) = do
   let t = scalExpType e
   case t of
-    IntType Int32 -> do
+    IntType it -> do
       e' <- if rel == LEQ0
-            then do m1 <- getNeg1 int32
+            then do m1 <- getNeg1 $ IntType it
                     return $ SPlus e $ Val m1
             else return e
       ne   <- toNumSofP =<< simplifyScal e'
@@ -1040,11 +1041,11 @@ simplifyAndOr is_and fs =
                 e1' <- fromNumSofP e1
                 e2' <- fromNumSofP e2
                 case (rel1, rel2, btp) of
-                    (LTH0, LTH0, IntType Int32) -> do
+                    (LTH0, LTH0, IntType _) -> do
                         e2me1m1 <- toNumSofP =<< simplifyScal (SMinus e2' $ SPlus e1' $ Val one)
                         diffrel <- simplifyNRel $ NRelExp LTH0 e2me1m1
                         return $ diffrel == LogCt True
-                    (_, _, IntType Int32) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
+                    (_, _, IntType _) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
                     (_, _, _) -> badAlgSimplifyM "impliesRel: exp of illegal type!"
         impliesRel p1 p2
             | p1 == p2  = return True
@@ -1096,9 +1097,6 @@ negateSimplified :: ScalExp -> AlgSimplifyM ScalExp
 negateSimplified (SNeg e) = return e
 negateSimplified (SNot e) = return e
 negateSimplified (SAbs e) = return $ SAbs e
-negateSimplified (SOneIfZero e) = return $ SOneIfZero e
-negateSimplified (SIfZero x t f) = return $ SIfZero x t f
-negateSimplified (SIfLessThan a b t f) = return $ SIfLessThan a b t f
 negateSimplified (SSignum e) =
   SSignum <$> negateSimplified e
 negateSimplified e@(Val v) = do
@@ -1235,7 +1233,7 @@ joinTerm ( NProd (Val l:fs) tp, v) = do
     let v'Lit = Val v'
     return $ NProd (v'Lit:sort fs) tp
 joinTerm ( e@(NProd fs tp), v)
-  | isOne v   = return e
+  | P.oneIsh v   = return e
   | otherwise = let vExp = Val v
                 in return $ NProd (vExp:sort fs) tp
 
@@ -1265,44 +1263,45 @@ getNeg1 (IntType t)     = return $ value $ intValue t (-1::Int)
 getNeg1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 valLTHEQ0 :: RelOp0 -> PrimValue -> AlgSimplifyM Bool
-valLTHEQ0 rel (IntValue (Int32Value v)) = return $ if rel==LEQ0 then v <= 0   else v < 0
+valLTHEQ0 LEQ0 (IntValue iv) = return $ P.intToInt64 iv <= 0
+valLTHEQ0 LTH0 (IntValue iv) = return $ P.intToInt64 iv < 0
 valLTHEQ0 _ _ = badAlgSimplifyM "valLTHEQ0 for non-numeric type!"
 
-isOne :: PrimValue -> Bool
-isOne (IntValue (Int32Value v)) = v == 1
-isOne _ = False
-
 isCt1 :: ScalExp -> Bool
-isCt1 (Val (IntValue (Int32Value one))) = one == 1
+isCt1 (Val v) = P.oneIsh v
 isCt1 _ = False
 
 isCt0 :: ScalExp -> Bool
-isCt0 (Val (IntValue (Int32Value zr))) = zr == 0
-isCt0 __                    = False
+isCt0 (Val v) = P.zeroIsh v
+isCt0 _       = False
 
 
 addVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-addVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2)) =
-  return $ value $ v1+v2
+addVals (IntValue v1) (IntValue v2) =
+  return $ IntValue $ P.doAdd v1 v2
 addVals _ _ =
   badAlgSimplifyM "addVals: operands not of (the same) numeral type! "
 
 mulVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-mulVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2)) =
-  return $ value $ v1*v2
+mulVals (IntValue v1) (IntValue v2) =
+  return $ IntValue $ P.doMul v1 v2
 mulVals v1 v2 =
   badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++
   pretty (PrimVal v1)++" "++pretty (PrimVal v2)
 
 divVals :: PrimValue -> PrimValue -> AlgSimplifyM PrimValue
-divVals (IntValue (Int32Value v1)) (IntValue (Int32Value v2)) =
-  return $ value $ v1 `div` v2
+divVals (IntValue v1) (IntValue v2) =
+  case P.doSDiv v1 v2 of
+    Just v -> return $ IntValue v
+    Nothing -> badAlgSimplifyM "Division by zero"
 divVals _ _ =
   badAlgSimplifyM "divVals: operands not of (the same) numeral type! "
 
 canDivValsEvenly :: PrimValue -> PrimValue -> AlgSimplifyM Bool
-canDivValsEvenly (IntValue (Int32Value _))     (IntValue (Int32Value 0)) = return False
-canDivValsEvenly (IntValue (Int32Value v1))    (IntValue (Int32Value v2)) = return $ v1 `mod` v2 == 0
+canDivValsEvenly (IntValue v1) (IntValue v2) =
+  case P.doSMod v1 v2 of
+    Just v -> return $ P.zeroIsh $ IntValue v
+    Nothing -> return False
 canDivValsEvenly _ _ =
   badAlgSimplifyM "canDivValsEvenly: operands not of (the same) numeral type!"
 
@@ -1370,11 +1369,11 @@ tryDivTriv (SPow a e1) (SPow d e2)
           one <- getPos1 tp
           e1me2 <- simplifyScal $ SMinus e1 e2
           case (tp, e1me2) of
-            (IntType Int32, Val (IntValue (Int32Value 0))) ->
+            (IntType _, Val v) | P.zeroIsh v ->
               return (True, Val one)
-            (IntType Int32, Val (IntValue (Int32Value 1))) ->
+            (IntType _, Val v) | P.oneIsh v ->
               return (True, a)
-            (IntType Int32, _) -> do
+            (IntType _, _) -> do
               e2me1 <- negateSimplified e1me2
               e2me1_sop <- toNumSofP e2me1
               p' <- simplifyNRel $ NRelExp LTH0 e2me1_sop
@@ -1409,11 +1408,11 @@ mkRelExp 1 =
         (i,j,n,p,m) = (Id i', Id j', Id n', Id p', Id m')
         one = Val (IntVal 1)
         min_p_nm1 = MaxMin True [p, SMinus n one]
-        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+        hash = M.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
                                (identName p', ( 1::Int, Just (Val (IntVal 0)), Nothing ) ),
                                (identName i', ( 5::Int, Just (Val (IntVal 0)), Just min_p_nm1 ) )
                              , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just i ) )
-                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+                             ] -- M.Map VName (Int, Maybe ScalExp, Maybe ScalExp)
         ij_p_j_p_1_m_m = SMinus (SPlus (STimes i j) (SPlus j one)) m
         rel1 = RelExp LTH0 ij_p_j_p_1_m_m
         m_ij_m_j_m_2 = SNeg ( SPlus (STimes i j) (SPlus j (Val (IntVal 2))) )
@@ -1423,7 +1422,7 @@ mkRelExp 1 =
 mkRelExp 2 =
     let (i',a',b',l',u') = (tident "int i", tident "int a", tident "int b", tident "int l", tident "int u")
         (i,a,b,l,u) = (Id i', Id a', Id b', Id l', Id u')
-        hash = HM.fromList $ [ (identName i', ( 5::Int, Just l, Just u ) ) ]
+        hash = M.fromList $ [ (identName i', ( 5::Int, Just l, Just u ) ) ]
         ai_p_b = SPlus (STimes a i) b
         rel1 = RelExp LTH0 ai_p_b
 
@@ -1434,11 +1433,11 @@ mkRelExp 3 =
         one = Val (IntVal 1)
         two = Val (IntVal 2)
         min_j_nm1 = MaxMin True [MaxMin False [Val (IntVal 0), SMinus i (STimes two n)], SMinus n one]
-        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+        hash = M.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
                                (identName m', ( 2::Int, Just (Val (IntVal 1)), Nothing ) ),
                                (identName i', ( 5::Int, Just (Val (IntVal 0)), Just (SMinus m one) ) )
                              , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just min_j_nm1 ) )
-                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+                             ] -- M.Map VName (Int, Maybe ScalExp, Maybe ScalExp)
         ij_m_m = SMinus (STimes i j) m
         rel1 = RelExp LTH0 ij_m_m
 --        rel3 = RelExp LTH0 (SMinus i (SPlus (STimes two n) j))
@@ -1451,7 +1450,7 @@ mkRelExp 3 =
 
     in (hash, rel1, rel2)
 
-mkRelExp _ = let hash = HM.empty
+mkRelExp _ = let hash = M.empty
                  rel = RelExp LTH0 (Val (IntVal (-1)))
              in (hash, rel, rel)
 -}

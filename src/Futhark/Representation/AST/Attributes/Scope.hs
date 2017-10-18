@@ -20,7 +20,13 @@ module Futhark.Representation.AST.Attributes.Scope
        , inScopeOf
        , scopeOfLParams
        , scopeOfFParams
-       , scopeOfLoopForm
+       , scopeOfPattern
+       , scopeOfPatElem
+
+       , SameScope
+       , castScope
+       , castNameInfo
+
          -- * Extended type environment
        , ExtendedScope
        , extendedScope
@@ -33,7 +39,7 @@ import qualified Control.Monad.RWS.Lazy
 import Data.List
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -41,13 +47,12 @@ import Futhark.Representation.AST.Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
-import Futhark.Transform.Substitute
 
 -- | How some name in scope was bound.
 data NameInfo lore = LetInfo (LetAttr lore)
                    | FParamInfo (FParamAttr lore)
                    | LParamInfo (LParamAttr lore)
-                   | IndexInfo
+                   | IndexInfo IntType
 
 deriving instance Annotations lore => Show (NameInfo lore)
 
@@ -55,21 +60,11 @@ instance Annotations lore => Typed (NameInfo lore) where
   typeOf (LetInfo attr) = typeOf attr
   typeOf (FParamInfo attr) = typeOf attr
   typeOf (LParamInfo attr) = typeOf attr
-  typeOf IndexInfo = Prim $ IntType Int32
-
-instance Substitutable lore => Substitute (NameInfo lore) where
-  substituteNames subst (LetInfo attr) =
-    LetInfo $ substituteNames subst attr
-  substituteNames subst (FParamInfo attr) =
-    FParamInfo $ substituteNames subst attr
-  substituteNames subst (LParamInfo attr) =
-    LParamInfo $ substituteNames subst attr
-  substituteNames _ IndexInfo =
-    IndexInfo
+  typeOf (IndexInfo it) = Prim $ IntType it
 
 -- | A scope is a mapping from variable names to information about
 -- that name.
-type Scope lore = HM.HashMap VName (NameInfo lore)
+type Scope lore = M.Map VName (NameInfo lore)
 
 -- | The class of applicative functors (or more common in practice:
 -- monads) that permit the lookup of variable types.  A default method
@@ -80,15 +75,15 @@ class (Applicative m, Annotations lore) => HasScope lore m | m -> lore where
   -- | Return the type of the given variable, or fail if it is not in
   -- the type environment.
   lookupType :: VName -> m Type
-  lookupType = liftA typeOf . lookupInfo
+  lookupType = fmap typeOf . lookupInfo
 
   -- | Return the info of the given variable, or fail if it is not in
   -- the type environment.
   lookupInfo :: VName -> m (NameInfo lore)
   lookupInfo name =
-    asksScope (HM.lookupDefault notFound name)
+    asksScope (M.findWithDefault notFound name)
     where notFound =
-            error $ "Scope.lookupInfo: Name " ++ textual name ++
+            error $ "Scope.lookupInfo: Name " ++ pretty name ++
             " not found in type environment."
 
   -- | Return the type environment contained in the applicative
@@ -115,26 +110,26 @@ instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
 -- | The class of monads that not only provide a 'Scope', but also
 -- the ability to locally extend it.  A 'Reader' containing a
 -- 'Scope' is the prototypical example of such a monad.
-class (HasScope t m, Monad m) => LocalScope t m where
+class (HasScope lore m, Monad m) => LocalScope lore m where
   -- | Run a computation with an extended type environment.  Note that
   -- this is intended to *add* to the current type environment, it
   -- does not replace it.
-  localScope :: Scope t -> m a -> m a
+  localScope :: Scope lore -> m a -> m a
 
 instance (Applicative m, Monad m, Annotations lore) =>
          LocalScope lore (ReaderT (Scope lore) m) where
-  localScope = local . HM.union
+  localScope = local . M.union
 
 instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
          LocalScope lore (Control.Monad.RWS.Strict.RWST (Scope lore) w s m) where
-  localScope = local . HM.union
+  localScope = local . M.union
 
 instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
          LocalScope lore (Control.Monad.RWS.Lazy.RWST (Scope lore) w s m) where
-  localScope = local . HM.union
+  localScope = local . M.union
 
 -- | The class of things that can provide a scope.  There is no
--- overarching rule for what this means.  For a 'Binding', it is the
+-- overarching rule for what this means.  For a 'Stm', it is the
 -- corresponding pattern.  For a 'Lambda', is is the parameters
 -- (including index).
 class Scoped lore a | a -> lore where
@@ -143,49 +138,64 @@ class Scoped lore a | a -> lore where
 inScopeOf :: (Scoped lore a, LocalScope lore m) => a -> m b -> m b
 inScopeOf = localScope . scopeOf
 
-instance LetAttr lore ~ attr =>
-         Scoped lore (PatElemT attr) where
-  scopeOf (PatElem name _ attr) =
-    HM.singleton name $ LetInfo attr
-
-instance LetAttr lore ~ attr =>
-         Scoped lore (PatternT attr) where
-  scopeOf = mconcat . map scopeOf . patternElements
-
 instance Scoped lore a =>
          Scoped lore [a] where
   scopeOf = mconcat . map scopeOf
 
-instance Scoped lore (Binding lore) where
-  scopeOf = scopeOf . bindingPattern
+instance Scoped lore (Stm lore) where
+  scopeOf = scopeOfPattern . stmPattern
 
-instance Scoped lore (FunDec lore) where
-  scopeOf = scopeOfFParams . funDecParams
+instance Scoped lore (FunDef lore) where
+  scopeOf = scopeOfFParams . funDefParams
 
 instance Scoped lore (VName, NameInfo lore) where
-  scopeOf = uncurry HM.singleton
+  scopeOf = uncurry M.singleton
 
-scopeOfLoopForm :: LoopForm -> Scope lore
-scopeOfLoopForm (WhileLoop _) = mempty
-scopeOfLoopForm (ForLoop i _) = HM.singleton i IndexInfo
+instance Scoped lore (LoopForm lore) where
+  scopeOf (WhileLoop _) = mempty
+  scopeOf (ForLoop i it _ xs) =
+    M.insert i (IndexInfo it) $ scopeOfLParams (map fst xs)
+
+scopeOfPattern :: LetAttr lore ~ attr => PatternT attr -> Scope lore
+scopeOfPattern =
+  mconcat . map scopeOfPatElem . patternElements
+
+scopeOfPatElem :: LetAttr lore ~ attr => PatElemT attr -> Scope lore
+scopeOfPatElem (PatElem name _ attr) =
+  M.singleton name $ LetInfo attr
 
 scopeOfLParams :: LParamAttr lore ~ attr =>
                   [ParamT attr] -> Scope lore
-scopeOfLParams = HM.fromList . map f
+scopeOfLParams = M.fromList . map f
   where f param = (paramName param, LParamInfo $ paramAttr param)
 
 scopeOfFParams :: FParamAttr lore ~ attr =>
                   [ParamT attr] -> Scope lore
-scopeOfFParams = HM.fromList . map f
+scopeOfFParams = M.fromList . map f
   where f param = (paramName param, FParamInfo $ paramAttr param)
 
 instance Scoped lore (Lambda lore) where
-  scopeOf lam = HM.insert (lambdaIndex lam) IndexInfo $
-                scopeOfLParams $ lambdaParams lam
+  scopeOf lam = scopeOfLParams $ lambdaParams lam
 
 instance Scoped lore (ExtLambda lore) where
-  scopeOf lam = HM.insert (extLambdaIndex lam) IndexInfo $
-                scopeOfLParams $ extLambdaParams lam
+  scopeOf lam = scopeOfLParams $ extLambdaParams lam
+
+type SameScope lore1 lore2 = (LetAttr lore1 ~ LetAttr lore2,
+                              FParamAttr lore1 ~ FParamAttr lore2,
+                              LParamAttr lore1 ~ LParamAttr lore2)
+
+-- | If two scopes are really the same, then you can convert one to
+-- the other.
+castScope :: SameScope fromlore tolore =>
+             Scope fromlore -> Scope tolore
+castScope = M.map castNameInfo
+
+castNameInfo :: SameScope fromlore tolore =>
+                NameInfo fromlore -> NameInfo tolore
+castNameInfo (LetInfo attr) = LetInfo attr
+castNameInfo (FParamInfo attr) = FParamInfo attr
+castNameInfo (LParamInfo attr) = LParamInfo attr
+castNameInfo (IndexInfo it) = IndexInfo it
 
 -- | A monad transformer that carries around an extended 'Scope'.
 -- Its 'lookupType' method will first look in the extended 'Scope',
@@ -197,13 +207,12 @@ newtype ExtendedScope lore m a = ExtendedScope (ReaderT (Scope lore) m a)
 instance (HasScope lore m, Monad m) =>
          HasScope lore (ExtendedScope lore m) where
   lookupType name = do
-    res <- asks $ fmap typeOf . HM.lookup name
+    res <- asks $ fmap typeOf . M.lookup name
     maybe (ExtendedScope $ lift $ lookupType name) return res
-  askScope = HM.union <$> ask <*> ExtendedScope (lift askScope)
+  askScope = M.union <$> ask <*> ExtendedScope (lift askScope)
 
 -- | Run a computation in the extended type environment.
-extendedScope :: Annotations lore =>
-                 ExtendedScope lore m a
+extendedScope :: ExtendedScope lore m a
               -> Scope lore
               -> m a
 extendedScope (ExtendedScope m) = runReaderT m

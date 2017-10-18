@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveLift         #-}
 -- | This module contains very basic definitions for Futhark - so basic,
 -- that they can be shared between the internal and external
 -- representation.
@@ -13,37 +14,43 @@ module Language.Futhark.Core
   , Name
   , nameToString
   , nameFromString
-  , ID(..)
+  , nameToText
+  , nameFromText
+  , VName(..)
   , baseTag
   , baseName
   , baseString
-  , VName
-  , VarName(..)
-
+  , pretty
   -- * Special identifiers
   , defaultEntryPoint
 
     -- * Integer re-export
   , Int8, Int16, Int32, Int64
+  , Word8, Word16, Word32, Word64
   )
 
 where
 
-import Data.Char
+import Data.Monoid
 import Data.Hashable
 import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Loc
-import Data.Maybe
-import Data.Monoid
+import Data.List
 import qualified Data.Text as T
+import Language.Haskell.TH.Syntax (Lift)
+import Instances.TH.Lift()
 
-import Text.PrettyPrint.Mainland
+import Prelude
+
+import Futhark.Util.Pretty
 
 -- | The uniqueness attribute of a type.  This essentially indicates
--- whether or not in-place modifications are acceptable.
-data Uniqueness = Unique    -- ^ No references outside current function.
-                | Nonunique -- ^ May have references outside current function.
-                  deriving (Eq, Ord, Show)
+-- whether or not in-place modifications are acceptable.  With respect
+-- to ordering, 'Unique' is greater than 'Nonunique'.
+data Uniqueness = Nonunique -- ^ May have references outside current function.
+                | Unique    -- ^ No references outside current function.
+                  deriving (Eq, Ord, Show, Lift)
 
 instance Monoid Uniqueness where
   mempty = Unique
@@ -51,19 +58,23 @@ instance Monoid Uniqueness where
   Nonunique `mappend` _ = Nonunique
   u `mappend` _         = u
 
+instance Pretty Uniqueness where
+  ppr Unique = star
+  ppr Nonunique = empty
+
 instance Hashable Uniqueness where
   hashWithSalt salt Unique    = salt
   hashWithSalt salt Nonunique = salt * 2
 
 data StreamOrd  = InOrder
                 | Disorder
-                    deriving (Eq, Ord, Show)
+                    deriving (Eq, Ord, Show, Lift)
 
 -- | Whether some operator is commutative or not.  The 'Monoid'
 -- instance returns the least commutative of its arguments.
 data Commutativity = Noncommutative
                    | Commutative
-                     deriving (Eq, Ord, Show)
+                     deriving (Eq, Ord, Show, Lift)
 
 instance Monoid Commutativity where
   mempty = Commutative
@@ -77,7 +88,7 @@ defaultEntryPoint = nameFromString "main"
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
 newtype Name = Name T.Text
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Lift)
 
 instance Pretty Name where
   ppr = text . nameToString
@@ -97,6 +108,14 @@ nameToString (Name t) = T.unpack t
 nameFromString :: String -> Name
 nameFromString = Name . T.pack
 
+-- | Convert a name to the corresponding 'T.Text'.
+nameToText :: Name -> T.Text
+nameToText (Name t) = t
+
+-- | Convert a 'T.Text' to the corresponding name.
+nameFromText :: T.Text -> Name
+nameFromText = Name
+
 -- | A human-readable location string, of the form
 -- @filename:lineno:columnno@.
 locStr :: SrcLoc -> String
@@ -107,61 +126,31 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
   file ++ ":" ++ show line1 ++ ":" ++ show col1
        ++ "-" ++ show line2 ++ ":" ++ show col2
 
--- | An arbitrary value tagged with some integer.  Only the integer is
--- used in comparisons, no matter the type of @vn@.
-newtype ID vn = ID (vn, Int)
-  deriving (Show)
+-- | A name tagged with some integer.  Only the integer is used in
+-- comparisons, no matter the type of @vn@.
+data VName = VName !Name !Int
+  deriving (Show, Lift)
 
--- | Alias for a tagged 'Name'.  This is used as the name
--- representation in most the compiler.
-type VName = ID Name
+-- | Return the tag contained in the 'VName'.
+baseTag :: VName -> Int
+baseTag (VName _ tag) = tag
 
--- | Return the tag contained in the 'ID'.
-baseTag :: ID vn -> Int
-baseTag (ID (_, tag)) = tag
-
--- | Return the name contained in the 'ID'.
-baseName :: ID vn -> vn
-baseName (ID (vn, _)) = vn
+-- | Return the name contained in the 'VName'.
+baseName :: VName -> Name
+baseName (VName vn _) = vn
 
 -- | Return the base 'Name' converted to a string.
 baseString :: VName -> String
 baseString = nameToString . baseName
 
-instance Eq (ID vn) where
-  ID (_, x) == ID (_, y) = x == y
+instance Eq VName where
+  VName _ x == VName _ y = x == y
 
-instance Ord (ID vn) where
-  ID (_, x) `compare` ID (_, y) = x `compare` y
+instance Ord VName where
+  VName _ x `compare` VName _ y = x `compare` y
 
-instance Pretty vn => Pretty (ID vn) where
-  ppr (ID (vn, i)) = ppr vn <> text "_" <> text (show i)
+instance Pretty VName where
+  ppr (VName vn i) = ppr vn <> text "_" <> text (show i)
 
-instance Hashable (ID vn) where
-  hashWithSalt salt (ID (_,i)) = salt * i
-
--- | A type that can be used for representing variable names.  These
--- must support tagging, as well as conversion to a textual format.
-class (Ord vn, Show vn, Pretty vn, Hashable vn) => VarName vn where
-  -- | Set the numeric tag associated with this name.
-  setID :: vn -> Int -> vn
-  -- | Identity-preserving prettyprinting of a name.  This means that
-  -- if and only if @x == y@, @textual x == textual y@.
-  textual :: vn -> String
-  -- | Create a name based on a string and a numeric tag.
-  varName :: String -> Maybe Int -> vn
-
-instance VarName vn => VarName (ID vn) where
-  setID (ID (vn, _)) i = ID (vn, i)
-  textual (ID (vn, i)) = textual vn ++ '_' : show i
-  varName s i = ID (varName s Nothing, fromMaybe 0 i)
-
-instance VarName Name where
-  setID (Name t) i = Name $ stripSuffix t <> T.pack ('_' : show i)
-  textual = nameToString
-  varName s (Just i) = nameFromString s `setID` i
-  varName s Nothing = nameFromString s
-
--- | Chop off terminating underscore followed by numbers.
-stripSuffix :: T.Text -> T.Text
-stripSuffix = T.dropWhileEnd (=='_') . T.dropWhileEnd isDigit
+instance Hashable VName where
+  hashWithSalt salt (VName _ i) = salt * i

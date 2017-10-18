@@ -9,7 +9,7 @@ module Futhark.Representation.AST.Attributes.Aliases
        , Aliased (..)
        , AliasesOf (..)
          -- * Consumption
-       , consumedInBinding
+       , consumedInStm
        , consumedInExp
        , consumedInPattern
        , consumedByLambda
@@ -22,7 +22,7 @@ module Futhark.Representation.AST.Attributes.Aliases
 
 import Control.Arrow (first)
 import Data.Monoid
-import qualified Data.HashSet as HS
+import qualified Data.Set as S
 
 import Futhark.Representation.AST.Attributes (IsOp)
 import Futhark.Representation.AST.Syntax
@@ -35,31 +35,36 @@ class (Annotations lore, AliasedOp (Op lore),
   consumedInBody :: Body lore -> Names
 
 vnameAliases :: VName -> Names
-vnameAliases = HS.singleton
+vnameAliases = S.singleton
 
 subExpAliases :: SubExp -> Names
 subExpAliases Constant{} = mempty
 subExpAliases (Var v)    = vnameAliases v
 
-primOpAliases :: PrimOp lore -> [Names]
+primOpAliases :: BasicOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
-primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
+primOpAliases (Opaque se) = [subExpAliases se]
+primOpAliases (ArrayLit _ _) = [mempty]
 primOpAliases BinOp{} = [mempty]
 primOpAliases ConvOp{} = [mempty]
 primOpAliases CmpOp{} = [mempty]
 primOpAliases UnOp{} = [mempty]
 
-primOpAliases (Index _ ident _) =
+primOpAliases (Index ident _) =
   [vnameAliases ident]
 primOpAliases Iota{} =
   [mempty]
 primOpAliases Replicate{} =
   [mempty]
+primOpAliases (Repeat _ _ v) =
+  [vnameAliases v]
 primOpAliases Scratch{} =
   [mempty]
-primOpAliases (Reshape _ _ e) =
+primOpAliases (Reshape _ e) =
   [vnameAliases e]
-primOpAliases (Rearrange _ _ e) =
+primOpAliases (Rearrange _ e) =
+  [vnameAliases e]
+primOpAliases (Rotate _ e) =
   [vnameAliases e]
 primOpAliases (Split _ sizeexps e) =
   replicate (length sizeexps) (vnameAliases e)
@@ -67,15 +72,17 @@ primOpAliases Concat{} =
   [mempty]
 primOpAliases Copy{} =
   [mempty]
+primOpAliases Manifest{} =
+  [mempty]
 primOpAliases Assert{} =
   [mempty]
-primOpAliases (Partition _ n _ arr) =
+primOpAliases (Partition n _ arr) =
   replicate n mempty ++ map vnameAliases arr
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
-  map (HS.filter notConsumed) $ zipWith mappend als1 als2
-  where notConsumed = not . (`HS.member` cons)
+  map (S.filter notConsumed) $ zipWith mappend als1 als2
+  where notConsumed = not . (`S.member` cons)
         cons = cons1 <> cons2
 
 funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
@@ -87,10 +94,12 @@ expAliases (If _ tb fb _) =
   ifAliases
   (bodyAliases tb, consumedInBody tb)
   (bodyAliases fb, consumedInBody fb)
-expAliases (PrimOp op) = primOpAliases op
+expAliases (BasicOp op) = primOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`HS.difference` merge_names) $ bodyAliases loopbody
-  where merge_names = HS.fromList $
+  map (`S.difference` merge_names) val_aliases
+  where (_ctx_aliases, val_aliases) =
+          splitAt (length ctxmerge) $ bodyAliases loopbody
+        merge_names = S.fromList $
                       map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t) =
   funcallAliases args $ retTypeValues t
@@ -111,9 +120,9 @@ maskAliases :: Names -> Diet -> Names
 maskAliases _   Consume = mempty
 maskAliases als Observe = als
 
-consumedInBinding :: Aliased lore => Binding lore -> Names
-consumedInBinding binding = consumedInPattern (bindingPattern binding) <>
-                            consumedInExp (bindingExp binding)
+consumedInStm :: Aliased lore => Stm lore -> Names
+consumedInStm binding = consumedInPattern (stmPattern binding) <>
+                            consumedInExp (stmExp binding)
 
 consumedInExp :: (Aliased lore) => Exp lore -> Names
 consumedInExp (Apply _ args _) =
@@ -142,7 +151,7 @@ consumedInPattern pat =
   mconcat (map (consumedInBindage . patElemBindage) $
            patternContextElements pat ++ patternValueElements pat)
   where consumedInBindage BindVar = mempty
-        consumedInBindage (BindInPlace _ src _) = vnameAliases src
+        consumedInBindage (BindInPlace src _) = vnameAliases src
 
 -- | Something that contains alias information.
 class AliasesOf a where
@@ -151,6 +160,9 @@ class AliasesOf a where
 
 instance AliasesOf Names where
   aliasesOf = id
+
+instance AliasesOf attr => AliasesOf (PatElemT attr) where
+  aliasesOf = aliasesOf . patElemAttr
 
 class IsOp op => AliasedOp op where
   opAliases :: op -> [Names]

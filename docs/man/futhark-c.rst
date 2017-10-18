@@ -2,9 +2,9 @@
 
 .. _futhark-c(1):
 
-==========
+=========
 futhark-c
-==========
+=========
 
 SYNOPSIS
 ========
@@ -15,37 +15,41 @@ DESCRIPTION
 ===========
 
 ``futhark-c`` translates a Futhark program to sequential C code, and
-then compiles that C code with gcc(1) to an executable binary program.
-The standard Futhark optimisation pipeline is used, and GCC is invoked
-with ``-O3``, ``-lm``, and ``-std=c99``.
+either compiles that C code with gcc(1) to an executable binary
+program, or produces a ``.h`` and ``.c`` file that can be linked with
+other code..  The standard Futhark optimisation pipeline is used, and
+GCC is invoked with ``-O3``, ``-lm``, and ``-std=c99``.
 
-The resulting program will read the arguments to the ``main`` function
-from standard input and print its return value on standard output.
-The arguments are read and printed in Futhark syntax, just like
-futharki(1).
+The resulting program will read the arguments to the entry point
+(``main`` by default) from standard input and print its return value
+on standard output.  The arguments are read and printed in Futhark
+syntax, just like futharki(1).
 
 OPTIONS
 =======
 
 -o outfile
-  Where to write the resulting binary.  By default, if the source
-  program is named 'foo.fut', the binary will be named 'foo'.
+  Where to write the result.  If the source program is named
+  'foo.fut', this defaults to 'foo'.
 
--V verbose
+--library
+  Generate a library instead of an executable.  Appends ``.c``/``.h``
+  to the name indicated by the ``-o`` option to determine output
+  file names.
+
+-I dir, --import dir
+  Add directory to the list of directories searched when locating
+  imported files.
+
+-v verbose
   Enable debugging output.  If compilation fails due to a compiler
   error, the result of the last successful compiler step will be
   printed to standard error.
 
---real-as-double
-  Represent values of type ``real`` as 64-bit floating point.  This is the default.
-
---real-as-single
-  Represent values of type ``real`` as 32-bit floating point.
-
 -h
   Print help text to standard output and exit.
 
--v
+-V
   Print version information on standard output and exit.
 
 SEE ALSO

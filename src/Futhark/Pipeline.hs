@@ -1,15 +1,15 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, OverloadedStrings #-}
 module Futhark.Pipeline
-       ( CompileError (..)
-       , Pipeline
+       ( Pipeline
        , PipelineConfig (..)
        , Action (..)
 
        , FutharkM
        , runFutharkM
-       , compileError
-       , compileErrorS
-       , compileFail
+
+       , internalErrorS
+
+       , module Futhark.Error
 
        , onePass
        , passes
@@ -24,27 +24,31 @@ import Control.Monad
 import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
 import Control.Monad.State
+import Control.Monad.Reader
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import System.IO
 
 import Prelude hiding (id, (.))
 
-import Futhark.Representation.AST (Prog, pretty, PrettyLore)
+import Futhark.Error
+import Futhark.Representation.AST (Prog, PrettyLore)
 import Futhark.TypeCheck
 import Futhark.Pass
 import Futhark.Util.Log
+import Futhark.Util.Pretty (Pretty, prettyText)
 import Futhark.MonadFreshNames
-import qualified Futhark.Util.Pretty as PP
 
-data CompileError = CompileError {
-    errorDesc :: T.Text
-  , errorData :: T.Text
+newtype FutharkEnv = FutharkEnv {
+  futharkVerbose :: Bool
+  -- ^ If true, print log messages to standard error.
   }
 
-newtype FutharkM a = FutharkM (ExceptT CompileError (StateT VNameSource (WriterT Log IO)) a)
+newtype FutharkM a = FutharkM (ExceptT CompilerError (StateT VNameSource (ReaderT FutharkEnv IO)) a)
                      deriving (Applicative, Functor, Monad,
-                               MonadWriter Log,
-                               MonadError CompileError,
+                               MonadError CompilerError,
                                MonadState VNameSource,
+                               MonadReader FutharkEnv,
                                MonadIO)
 
 instance MonadFreshNames FutharkM where
@@ -52,22 +56,16 @@ instance MonadFreshNames FutharkM where
   putNameSource = put
 
 instance MonadLogger FutharkM where
-  addLog = tell
+  addLog msg = do verb <- asks futharkVerbose
+                  when verb $ liftIO $ T.hPutStr stderr $ toText msg
 
-runFutharkM :: FutharkM a -> IO (Either CompileError a, Log)
-runFutharkM (FutharkM m) =
-  runWriterT (evalStateT (runExceptT m) blankNameSource)
+runFutharkM :: FutharkM a -> Bool -> IO (Either CompilerError a)
+runFutharkM (FutharkM m) verbose =
+  runReaderT (evalStateT (runExceptT m) blankNameSource) newEnv
+  where newEnv = FutharkEnv verbose
 
-compileError :: (MonadError CompileError m, PP.Pretty err) =>
-                T.Text -> err -> m a
-compileError s e = throwError $ CompileError s $ T.pack $ pretty e
-
-compileErrorS :: (MonadError CompileError m) =>
-                 T.Text -> String -> m a
-compileErrorS s e = throwError $ CompileError s $ T.pack e
-
-compileFail :: String -> FutharkM a
-compileFail s = compileErrorS (T.pack s) "<nothing>"
+internalErrorS :: Pretty t => String -> t -> FutharkM a
+internalErrorS s p = throwError $ InternalError (T.pack s) (prettyText p) CompilerBug
 
 data Action lore =
   Action { actionName :: String
@@ -106,7 +104,7 @@ runPipeline p cfg prog a = do
     "Running action " <> T.pack (actionName a)
   actionProcedure a prog'
 
-onePass :: Checkable tolore =>
+onePass :: (Checkable fromlore, Checkable tolore) =>
            Pass fromlore tolore -> Pipeline fromlore tolore
 onePass pass = Pipeline perform
   where perform cfg prog = do
@@ -126,14 +124,15 @@ passes = foldl (>>>) id . map onePass
 validationError :: PrettyLore tolore =>
                    Pass fromlore tolore -> Prog tolore -> String -> FutharkM a
 validationError pass prog err =
-  compileError msg prog
+  throwError $ InternalError msg (prettyText prog) CompilerBug
   where msg = "Type error after pass '" <> T.pack (passName pass) <> "':\n" <> T.pack err
 
-runPass :: Pass fromlore tolore
+runPass :: PrettyLore fromlore =>
+           Pass fromlore tolore
         -> Prog fromlore
         -> FutharkM (Prog tolore)
 runPass pass prog = do
   (res, logged) <- runPassM (passFunction pass prog)
-  tell logged
-  case res of Left err -> compileError err ()
+  addLog logged
+  case res of Left err -> throwError $ InternalError err (prettyText prog) CompilerBug
               Right x  -> return x

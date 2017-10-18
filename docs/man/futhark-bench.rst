@@ -2,23 +2,33 @@
 
 .. _futhark-bench(1):
 
-============
+=============
 futhark-bench
-============
+=============
 
 SYNOPSIS
 ========
 
-futhark-bench [--runs=count | --compiler=program | --raw] infile
+futhark-bench [--runs=count | --compiler=program | --json | --no-validate] programs...
 
 DESCRIPTION
 ===========
 
-This program is used to benchmark the same kind of Futhark test
-programs that are taken as input by ``futhark-test(1)``.  The program
-will be compiled using the specified compiler (``futhark-c`` by
+This program is used to benchmark Futhark programs.  In addition to
+the notation used by ``futhark-test(1)``, this program also supports
+the dataset keyword ``nobench``.  This is used to indicate datasets
+that are worthwhile for testing, but too small to be worth
+benchmarking.
+
+Programs are compiled using the specified compiler (``futhark-c`` by
 default), then run a number of times for each data set, and the
-average runtime printed on standard output.
+average runtime printed on standard output.  A program will be ignored
+if it contains no data sets - it will not even be compiled.  Only data
+sets that use the default entry point (``main``) are considered.
+
+If compilation or running fails, an error message will be printed and
+benchmarking will continue, but a non-zero exit code will be returned
+at the end.
 
 OPTIONS
 =======
@@ -34,6 +44,27 @@ OPTIONS
   for each test case.  The specified program must support the same
   interface as ``futhark-c``.
 
+--json=file
+
+  Write raw results in JSON format to the specified file.
+
+--pass-option=opt
+
+  Pass an option to benchmark programs that are being run.  For
+  example, we might want to run OpenCL programs on a specific device::
+
+    futhark-bench prog.fut --compiler=futhark-opencl --pass-option=-dHawaii
+
+--timeout=seconds
+
+  If the runtime for a dataset exceeds this integral number of
+  seconds, it is aborted.  Note that the time is allotted not *per
+  run*, but for *all runs* for a dataset.  A twenty second limit for
+  ten runs thus means each run has only two seconds (minus
+  initialisation overhead).
+
+  A negative timeout means to wait indefinitely.
+
 EXAMPLES
 ========
 
@@ -43,7 +74,7 @@ different sizes::
   -- How quickly can we reduce arrays?
   --
   -- ==
-  -- input { 0 }
+  -- nobench input { 0 }
   -- output { 0 }
   -- input { 100 }
   -- output { 4950 }
@@ -52,8 +83,8 @@ different sizes::
   -- compiled input { 100000000 }
   -- output { 887459712 }
 
-  fun int main(int n) =
-    reduce(+, 0, iota(n))
+  let main(n: i32): i32 =
+    reduce (+) 0 (iota n)
 
 SEE ALSO
 ========

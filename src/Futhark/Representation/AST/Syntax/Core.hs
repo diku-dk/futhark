@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.Representation.AST.Syntax" in order for
--- "Futhark.Representation.AST.Lore" to use these definitions.  This
+-- "Futhark.Representation.AST.Annotations" to use these definitions.  This
 -- module is re-exported from "Futhark.Representation.AST.Syntax" and
 -- there should be no reason to include it explicitly.
 module Futhark.Representation.AST.Syntax.Core
@@ -32,13 +32,18 @@ module Futhark.Representation.AST.Syntax.Core
 
          -- * Abstract syntax tree
          , Ident (..)
-         , Certificates
+         , Certificates(..)
          , SubExp(..)
          , ParamT (..)
          , Param
          , Bindage (..)
-         , PatElemT (..),
-           PatElem
+         , DimIndex (..)
+         , Slice
+         , dimFix
+         , sliceIndices
+         , sliceDims
+         , unitSlice
+         , PatElemT (..)
 
          -- * Miscellaneous
          , Names
@@ -47,10 +52,13 @@ module Futhark.Representation.AST.Syntax.Core
 import Control.Applicative
 import Control.Monad.State
 import Data.Array
+import Data.Foldable hiding (and)
+import Data.Traversable hiding (mapM)
 import Data.Hashable
+import Data.Maybe
 import Data.Monoid
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 
 import Prelude
 
@@ -74,8 +82,8 @@ newtype ExtShape = ExtShape { extShapeDims :: [ExtDimSize] }
 
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
-data Rank = Rank Int
-            deriving (Show, Eq, Ord)
+newtype Rank = Rank Int
+             deriving (Show, Eq, Ord)
 
 -- | A class encompassing types containing array shape information.
 class (Monoid a, Eq a, Ord a) => ArrayShape a where
@@ -107,16 +115,16 @@ instance ArrayShape ExtShape where
     -- Must agree on Free dimensions, and ds1 may not be existential
     -- where ds2 is Free.  Existentials must also be congruent.
     length ds1 == length ds2 &&
-    evalState (and <$> zipWithM subDimOf ds1 ds2) HM.empty
+    evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
     where subDimOf (Free se1) (Free se2) = return $ se1 == se2
           subDimOf (Ext _)    (Free _)   = return False
           subDimOf (Free _)   (Ext _)    = return True
           subDimOf (Ext x)    (Ext y)    = do
             extmap <- get
-            case HM.lookup y extmap of
+            case M.lookup y extmap of
               Just ywas | ywas == x -> return True
                         | otherwise -> return False
-              Nothing -> do put $ HM.insert y x extmap
+              Nothing -> do put $ M.insert y x extmap
                             return True
 
 instance Monoid Rank where
@@ -202,7 +210,12 @@ instance Hashable Ident where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of names used for certificates in some expressions.
-type Certificates = [VName]
+newtype Certificates = Certificates [VName]
+                     deriving (Eq, Ord, Show)
+
+instance Monoid Certificates where
+  mempty = Certificates mempty
+  Certificates x `mappend` Certificates y = Certificates (x `mappend` y)
 
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
@@ -226,17 +239,60 @@ type Param = ParamT
 instance Functor ParamT where
   fmap f (Param name attr) = Param name (f attr)
 
+
+-- | How to index a single dimension of an array.
+data DimIndex d = DimFix
+                  d -- ^ Fix index in this dimension.
+                | DimSlice d d d
+                  -- ^ @DimSlice start_offset num_elems stride@.
+                  deriving (Eq, Ord, Show)
+
+instance Functor DimIndex where
+  fmap f (DimFix i) = DimFix $ f i
+  fmap f (DimSlice i j s) = DimSlice (f i) (f j) (f s)
+
+instance Foldable DimIndex where
+  foldMap f (DimFix d) = f d
+  foldMap f (DimSlice i j s) = f i <> f j <> f s
+
+instance Traversable DimIndex where
+  traverse f (DimFix d) = DimFix <$> f d
+  traverse f (DimSlice i j s) = DimSlice <$> f i <*> f j <*> f s
+
+-- | A list of 'DimFix's, indicating how an array should be sliced.
+-- Whenever a function accepts a 'Slice', that slice should be total,
+-- i.e, cover all dimensions of the array.  Deviators should be
+-- indicated by taking a list of 'DimIndex'es instead.
+type Slice d = [DimIndex d]
+
+-- | If the argument is a 'DimFix', return its component.
+dimFix :: DimIndex d -> Maybe d
+dimFix (DimFix d) = Just d
+dimFix _ = Nothing
+
+-- | If the slice is all 'DimFix's, return the components.
+sliceIndices :: Slice d -> Maybe [d]
+sliceIndices = mapM dimFix
+
+-- | The dimensions of the array produced by this slice.
+sliceDims :: Slice d -> [d]
+sliceDims = mapMaybe dimSlice
+  where dimSlice (DimSlice _ d _) = Just d
+        dimSlice DimFix{}         = Nothing
+
+-- | A slice with a stride of one.
+unitSlice :: Num d => d -> d -> DimIndex d
+unitSlice offset n = DimSlice offset n 1
+
 -- | How a name in a let-binding is bound - either as a plain
 -- variable, or in the form of an in-place update.
 data Bindage = BindVar -- ^ Bind as normal.
-             | BindInPlace Certificates VName [SubExp]
+             | BindInPlace VName (Slice SubExp)
                -- ^ Perform an in-place update, in which the value
                -- being bound is inserted at the given index in the
                -- array referenced by the 'VName'.  Note that the
                -- result of the binding is the entire array, not just
-               -- the value that has been inserted..  The
-               -- 'Certificates' contain bounds checking certificates
-               -- (if necessary).
+               -- the value that has been inserted.
                   deriving (Ord, Show, Eq)
 
 -- | An element of a pattern - consisting of an name (essentially a
@@ -252,11 +308,8 @@ data PatElemT attr = PatElem { patElemName :: VName
                              }
                    deriving (Ord, Show, Eq)
 
--- | A type alias for namespace control.
-type PatElem = PatElemT
-
 instance Functor PatElemT where
   fmap f (PatElem name bindage attr) = PatElem name bindage (f attr)
 
 -- | A set of names.
-type Names = HS.HashSet VName
+type Names = S.Set VName

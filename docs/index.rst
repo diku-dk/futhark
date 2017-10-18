@@ -6,44 +6,43 @@
 Futhark User's Guide
 ====================
 
-This document has been prepared as an informal overview of the Futhark
-(formerly L0) language.  In time, we hope to develop it into a formal
-specification, with accompanying proofs of correctness, but for now,
-words will have to suffice where formulae would be ideal.
+Welcome to the documentation for the Futhark compiler and language.
+For a basic introduction, please see `the Futhark website
+<http://futhark-lang.org>`_.  To get started, read the page on
+:ref:`installation`.  Once the compiler has been installed, you might
+want to take a look at  :ref:`usage` or :ref:`language-overview`.
 
-Futhark is an eagerly evaluated, purely functional language with
-built-in arrays and second-order array combinators, which is intended
-for use as an *intermediate language* (sometimes called a *core
-language*) with a focus towards efficient execution on vector hardware
-(GPUs).  While Futhark is not designed to be a pleasant programming
-experience for humans, it does have a textual syntax to facilitate the
-writing of benchmark programs.
+Documentation for the included basis library is also `available online
+<https://futhark-lang.org/docs/>`_.
 
-Contents:
+The particularly interested reader may also want to peruse the
+`publications <https://futhark-lang.org/docs.html#publications>`_, or
+the `development blog <https://futhark-lang.org/blog.html>`_.
 
 .. toctree::
-   :maxdepth: 1
+   :caption: Table of Contents
+   :maxdepth: 2
+   :numbered:
 
+   installation.rst
+   usage.rst
    language-overview.rst
-   uniqueness-types.rst
    language-reference.rst
    c-porting-guide.rst
-   publications.rst
-
-Manual pages:
+   hacking.rst
+   binary-data-format.rst
 
 .. toctree::
+   :caption: Manual Pages
    :maxdepth: 1
 
+   man/futhark.rst
    man/futhark-c.rst
    man/futhark-opencl.rst
+   man/futhark-py.rst
+   man/futhark-pyopencl.rst
    man/futharki.rst
    man/futhark-test.rst
    man/futhark-bench.rst
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   man/futhark-doc.rst
+   man/futhark-dataset.rst

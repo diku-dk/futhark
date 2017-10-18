@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -55,68 +56,53 @@
 module Futhark.Representation.ExplicitMemory
        ( -- * The Lore definition
          ExplicitMemory
+       , InKernel
        , MemOp (..)
        , MemBound (..)
        , MemReturn (..)
+       , IxFun
        , Returns (..)
        , ExpReturns
+       , BodyReturns
        , FunReturns
+       , bodyReturnsToExpReturns
+       , ExplicitMemorish
        , expReturns
        , bodyReturns
        , returnsToType
+       , extReturns
        , lookupMemBound
        , lookupArraySummary
-         -- * Syntax types
-       , Prog
-       , Body
-       , Binding
-       , Pattern
-       , PatElem
-       , PrimOp
-       , Exp
-       , Lambda
-       , ExtLambda
-       , FunDec
-       , FParam
-       , LParam
-       , RetType
+       , fullyDirect
+       , ixFunMatchesInnerShape
+       , findUnusedPatternPartsInExp
+
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
        , module Futhark.Representation.Kernels.Kernel
-       , AST.LambdaT(Lambda)
-       , AST.ExtLambdaT(ExtLambda)
-       , AST.BodyT(Body)
-       , AST.PatElemT(PatElem)
-       , AST.PatternT(Pattern)
-       , AST.ProgT(Prog)
-       , AST.ExpT(PrimOp)
-       , AST.FunDecT(FunDec)
-       , AST.ParamT(Param)
+       , module Futhark.Representation.Kernels.KernelExp
+       , module Futhark.Analysis.PrimExp.Convert
        )
 where
 
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import Data.Foldable (traverse_)
 import Data.Maybe
 import Data.List
 import Data.Monoid
 import Prelude
 
-import qualified Futhark.Representation.AST.Syntax as AST
-import Futhark.Representation.Kernels.Kernel
+import Futhark.Analysis.Metrics
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, Exp, Body, Binding,
-          Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, LParam,
-          RetType)
-import qualified Futhark.Analysis.ScalExp as SE
-
+import Futhark.Representation.Kernels.Kernel
+import Futhark.Representation.Kernels.KernelExp
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -124,32 +110,28 @@ import Futhark.Representation.AST.Pretty
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Analysis.PrimExp.Convert
+import Futhark.Analysis.PrimExp.Simplify
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Optimise.Simplifier.Lore
 import Futhark.Representation.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
-import Futhark.Representation.Ranges (Ranges)
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Analysis.Usage
+import qualified Futhark.Analysis.SymbolTable as ST
 
 -- | A lore containing explicit memory information.
-data ExplicitMemory = ExplicitMemory
+data ExplicitMemory
+data InKernel
 
-type Prog = AST.Prog ExplicitMemory
-type PrimOp = AST.PrimOp ExplicitMemory
-type Exp = AST.Exp ExplicitMemory
-type Body = AST.Body ExplicitMemory
-type Binding = AST.Binding ExplicitMemory
-type Pattern = AST.Pattern ExplicitMemory
-type Lambda = AST.Lambda ExplicitMemory
-type ExtLambda = AST.ExtLambda ExplicitMemory
-type FunDec = AST.FunDec ExplicitMemory
-type FParam = AST.FParam ExplicitMemory
-type LParam = AST.LParam ExplicitMemory
-type RetType = AST.RetType ExplicitMemory
-type PatElem = AST.PatElem (MemBound NoUniqueness)
+type ExplicitMemorish lore = (SameScope lore ExplicitMemory,
+                              RetType lore ~ [FunReturns],
+                              CanBeAliased (Op lore),
+                              Attributes lore, Annotations lore,
+                              TypeCheck.Checkable lore,
+                              OpReturns lore)
 
 instance IsRetType [FunReturns] where
   retTypeValues = map returnsToType
@@ -161,83 +143,98 @@ instance IsRetType [FunReturns] where
 data MemOp inner = Alloc SubExp Space
                    -- ^ Allocate a memory block.  This really should not be an
                    -- expression, but what are you gonna do...
-                 | Inner (Kernel inner)
+                 | Inner inner
             deriving (Eq, Ord, Show)
 
-instance Attributes inner => FreeIn (MemOp inner) where
+instance FreeIn inner => FreeIn (MemOp inner) where
   freeIn (Alloc size _) = freeIn size
   freeIn (Inner k) = freeIn k
 
-instance Attributes inner => TypedOp (MemOp inner) where
+instance TypedOp inner => TypedOp (MemOp inner) where
   opType (Alloc size space) = pure [Mem size space]
   opType (Inner k) = opType k
 
-instance (Attributes inner, Aliased inner) => AliasedOp (MemOp inner) where
+instance AliasedOp inner => AliasedOp (MemOp inner) where
   opAliases Alloc{} = [mempty]
   opAliases (Inner k) = opAliases k
 
   consumedInOp Alloc{} = mempty
   consumedInOp (Inner k) = consumedInOp k
 
-instance CanBeAliased (MemOp ExplicitMemory) where
-  type OpWithAliases (MemOp ExplicitMemory) = MemOp (Aliases ExplicitMemory)
+instance CanBeAliased inner => CanBeAliased (MemOp inner) where
+  type OpWithAliases (MemOp inner) = MemOp (OpWithAliases inner)
   removeOpAliases (Alloc se space) = Alloc se space
   removeOpAliases (Inner k) = Inner $ removeOpAliases k
 
   addOpAliases (Alloc se space) = Alloc se space
   addOpAliases (Inner k) = Inner $ addOpAliases k
 
-instance (Attributes inner, Ranged inner) => RangedOp (MemOp inner) where
+instance RangedOp inner => RangedOp (MemOp inner) where
   opRanges (Alloc _ _) =
     [unknownRange]
   opRanges (Inner k) =
     opRanges k
 
-instance CanBeRanged (MemOp ExplicitMemory) where
-  type OpWithRanges (MemOp ExplicitMemory) = MemOp (Ranges ExplicitMemory)
+instance CanBeRanged inner => CanBeRanged (MemOp inner) where
+  type OpWithRanges (MemOp inner) = MemOp (OpWithRanges inner)
   removeOpRanges (Alloc size space) = Alloc size space
   removeOpRanges (Inner k) = Inner $ removeOpRanges k
 
   addOpRanges (Alloc size space) = Alloc size space
   addOpRanges (Inner k) = Inner $ addOpRanges k
 
-instance Attributes inner => Rename (MemOp inner) where
+instance Rename inner => Rename (MemOp inner) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
   rename (Inner k) = Inner <$> rename k
 
-instance Attributes inner => Substitute (MemOp inner) where
+instance Substitute inner => Substitute (MemOp inner) where
   substituteNames subst (Alloc size space) = Alloc (substituteNames subst size) space
   substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
-instance PrettyLore inner => PP.Pretty (MemOp inner) where
+instance PP.Pretty inner => PP.Pretty (MemOp inner) where
   ppr (Alloc e DefaultSpace) = PP.text "alloc" <> PP.apply [PP.ppr e]
   ppr (Alloc e (Space sp)) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.text sp]
   ppr (Inner k) = PP.ppr k
 
-instance Attributes inner => IsOp (MemOp inner) where
+instance OpMetrics inner => OpMetrics (MemOp inner) where
+  opMetrics Alloc{} = seen "Alloc"
+  opMetrics (Inner k) = opMetrics k
+
+instance IsOp inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True
   safeOp (Inner k) = safeOp k
+  cheapOp (Inner k) = cheapOp k
+  cheapOp Alloc{} = True
 
-instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (MemOp lore) where
+instance UsageInOp inner => UsageInOp (MemOp inner) where
   usageInOp Alloc {} = mempty
   usageInOp (Inner k) = usageInOp k
 
-instance CanBeWise (MemOp ExplicitMemory) where
-  type OpWithWisdom (MemOp ExplicitMemory) = MemOp (Wise ExplicitMemory)
+instance CanBeWise inner => CanBeWise (MemOp inner) where
+  type OpWithWisdom (MemOp inner) = MemOp (OpWithWisdom inner)
   removeOpWisdom (Alloc size space) = Alloc size space
   removeOpWisdom (Inner k) = Inner $ removeOpWisdom k
 
-instance Engine.SimplifiableOp ExplicitMemory (Kernel ExplicitMemory) =>
-         Engine.SimplifiableOp ExplicitMemory (MemOp ExplicitMemory) where
-  simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
-  simplifyOp (Inner k) = Inner <$> Engine.simplifyOp k
+instance ST.IndexOp inner => ST.IndexOp (MemOp inner) where
+  indexOp vtable k (Inner op) is = ST.indexOp vtable k op is
+  indexOp _ _ _ _ = Nothing
 
 instance Annotations ExplicitMemory where
   type LetAttr    ExplicitMemory = MemBound NoUniqueness
   type FParamAttr ExplicitMemory = MemBound Uniqueness
   type LParamAttr ExplicitMemory = MemBound NoUniqueness
   type RetType    ExplicitMemory = [FunReturns]
-  type Op         ExplicitMemory = MemOp ExplicitMemory
+  type Op         ExplicitMemory = MemOp (Kernel InKernel)
+
+instance Annotations InKernel where
+  type LetAttr    InKernel = MemBound NoUniqueness
+  type FParamAttr InKernel = MemBound Uniqueness
+  type LParamAttr InKernel = MemBound NoUniqueness
+  type RetType    InKernel = [FunReturns]
+  type Op         InKernel = MemOp (KernelExp InKernel)
+
+-- | The index function representation used for memory annotations.
+type IxFun = IxFun.IxFun (PrimExp VName)
 
 -- | A summary of the memory information for every let-bound identifier
 -- and function parameter.
@@ -245,7 +242,8 @@ data MemBound u = Scalar PrimType
                  -- ^ The corresponding identifier is a
                  -- scalar.  It must not be of array type.
                | MemMem SubExp Space
-               | ArrayMem PrimType Shape u VName IxFun.IxFun
+                 -- ^ for an allocation + existential memory blook.
+               | ArrayMem PrimType Shape u VName IxFun
                  -- ^ The array is stored in the named memory block,
                  -- and with the given index function.  The index
                  -- function maps indices in the array to /element/
@@ -294,7 +292,7 @@ instance FreeIn (MemBound u) where
     freeIn shape <> freeIn mem <> freeIn ixfun
   freeIn (MemMem size _) =
     freeIn size
-  freeIn (Scalar _) = HS.empty
+  freeIn (Scalar _) = S.empty
 
 instance Substitute (MemBound u) where
   substituteNames subst (ArrayMem bt shape u mem f) =
@@ -308,12 +306,11 @@ instance Substitute (MemBound u) where
     Scalar bt
 
 instance Rename (MemBound u) where
-  rename (ArrayMem bt shape u mem f) =
-    ArrayMem bt <$> rename shape <*> pure u <*> rename mem <*> rename f
-  rename (MemMem size space) =
-    MemMem <$> rename size <*> pure space
-  rename (Scalar bt) =
-    return (Scalar bt)
+  rename = substituteRename
+
+simplifyIxFun :: Engine.SimplifiableLore lore =>
+                 IxFun.IxFun (PrimExp VName) -> Engine.SimpleM lore (IxFun.IxFun (PrimExp VName))
+simplifyIxFun = traverse simplifyPrimExp
 
 instance Engine.Simplifiable (MemBound u) where
   simplify (Scalar bt) =
@@ -321,7 +318,7 @@ instance Engine.Simplifiable (MemBound u) where
   simplify (MemMem size space) =
     MemMem <$> Engine.simplify size <*> pure space
   simplify (ArrayMem bt shape u mem ixfun) =
-    ArrayMem bt shape u <$> Engine.simplify mem <*> pure ixfun
+    ArrayMem bt shape u <$> Engine.simplify mem <*> simplifyIxFun ixfun
 
 instance PP.Pretty u => PP.Pretty (MemBound u) where
   ppr (Scalar bt) = PP.ppr bt
@@ -340,10 +337,8 @@ instance PP.Pretty (PatElemT (MemBound NoUniqueness)) where
   ppr = PP.ppr . fmap typeOf
 
 -- | A description of the memory properties of an array being returned
--- by an operation.  Note that the 'Eq' and 'Ord' instances are
--- useless (everything is equal).  This type is merely a building
--- block for 'Returns'.
-data MemReturn = ReturnsInBlock VName IxFun.IxFun
+-- by an operation.
+data MemReturn = ReturnsInBlock VName IxFun
                  -- ^ The array is located in a memory block that is
                  -- already in scope.
                | ReturnsNewBlock Int (Maybe SubExp)
@@ -358,10 +353,7 @@ instance Ord MemReturn where
   _ `compare` _ = EQ
 
 instance Rename MemReturn where
-  rename (ReturnsInBlock ident ixfun) =
-    ReturnsInBlock <$> rename ident <*> rename ixfun
-  rename (ReturnsNewBlock i size) =
-    ReturnsNewBlock i <$> rename size
+  rename = substituteRename
 
 instance Substitute MemReturn where
   substituteNames substs (ReturnsInBlock ident ixfun) =
@@ -418,13 +410,8 @@ instance FreeIn a => FreeIn (Returns u a) where
   freeIn (ReturnsArray _ shape _ summary) =
     freeIn shape <> freeIn summary
 
-instance Rename a => Rename (Returns u a) where
-  rename (ReturnsScalar bt) =
-    return $ ReturnsScalar bt
-  rename (ReturnsMemory size space) =
-    ReturnsMemory <$> rename size <*> pure space
-  rename (ReturnsArray bt shape u summary) =
-    ReturnsArray bt <$> rename shape <*> pure u <*> rename summary
+instance Substitute a => Rename (Returns u a) where
+  rename = substituteRename
 
 instance Engine.Simplifiable a => Engine.Simplifiable (Returns u a) where
   simplify (ReturnsScalar bt) =
@@ -441,7 +428,7 @@ instance Engine.Simplifiable MemReturn where
   simplify (ReturnsNewBlock i size) =
     ReturnsNewBlock i <$> Engine.simplify size
   simplify (ReturnsInBlock v ixfun) =
-    ReturnsInBlock <$> Engine.simplify v <*> pure ixfun
+    ReturnsInBlock <$> Engine.simplify v <*> simplifyIxFun ixfun
 
 instance Engine.Simplifiable [FunReturns] where
   simplify = mapM Engine.simplify
@@ -496,10 +483,11 @@ bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 -- | Similar to 'generaliseExtTypes', but also generalises the
 -- existentiality of memory returns.
-generaliseReturns :: (HasScope ExplicitMemory m, Monad m) =>
+generaliseReturns :: (HasScope lore m, Monad m,
+                      ExplicitMemorish lore) =>
                      [BodyReturns] -> [BodyReturns] -> m [BodyReturns]
 generaliseReturns r1s r2s =
-  evalStateT (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
+  evalStateT (zipWithM generaliseReturns' r1s r2s) (0, M.empty, M.empty)
   where generaliseReturns'
           (ReturnsArray bt shape1 _ summary1)
           (ReturnsArray _  shape2 _ summary2) =
@@ -551,10 +539,10 @@ generaliseReturns r1s r2s =
           ReturnsNewBlock <$> newMem x <*> pure Nothing
 
         newSize x = do (i, sizemap, memmap) <- get
-                       put (i + 1, HM.insert x i sizemap, memmap)
+                       put (i + 1, M.insert x i sizemap, memmap)
                        return i
         newMem x = do (i, sizemap, memmap) <- get
-                      put (i + 1, sizemap, HM.insert x i memmap)
+                      put (i + 1, sizemap, M.insert x i memmap)
                       return i
 
 instance TypeCheck.Checkable ExplicitMemory where
@@ -564,53 +552,85 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkLParamLore = checkMemBound
   checkLetBoundLore = checkMemBound
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  checkOp (Alloc size _) = TypeCheck.require [Prim int32] size
-  checkOp (Inner k) = typeCheckKernel k
+  checkOp (Alloc size _) = TypeCheck.require [Prim int64] size
+  checkOp (Inner k) = TypeCheck.subCheck $ typeCheckKernel k
+  primFParam name t = return $ Param name (Scalar t)
+  primLParam name t = return $ Param name (Scalar t)
+  matchPattern = matchPatternToExp
+  matchReturnType = matchFunctionReturnType
 
-  primFParam _ name t =
-    AST.Param name (Scalar t)
-  primLParam _ name t =
-    AST.Param name (Scalar t)
+instance TypeCheck.Checkable InKernel where
+  checkExpLore = return
+  checkBodyLore = return
+  checkFParamLore = checkMemBound
+  checkLParamLore = checkMemBound
+  checkLetBoundLore = checkMemBound
+  checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
+  checkOp (Alloc size _) = TypeCheck.require [Prim int64] size
+  checkOp (Inner k) = typeCheckKernelExp k
+  primFParam name t = return $ Param name (Scalar t)
+  primLParam name t = return $ Param name (Scalar t)
+  matchPattern = matchPatternToExp
+  matchReturnType = matchFunctionReturnType
 
-  matchPattern pat e = do
-    rt <- runReaderT (expReturns $ removeExpAliases e) =<<
-          asksScope removeScopeAliases
-    matchPatternToReturns (wrong rt) (removePatternAliases pat) rt
-    where wrong rt s = TypeCheck.bad $ TypeCheck.TypeError $
-                       ("Pattern\n" ++ TypeCheck.message "  " pat ++
-                        "\ncannot match result type\n") ++
-                       "  " ++ prettyTuple rt ++ "\n" ++ s
+matchFunctionReturnType :: (ExplicitMemorish lore) =>
+                           Name
+                        -> [Returns Uniqueness a]
+                        -> Result
+                        -> TypeCheck.TypeM lore ()
+matchFunctionReturnType fname rettype result = do
+  TypeCheck.matchExtReturnType fname (fromDecl <$> ts) result
+  mapM_ checkResultSubExp result
+  where ts = map returnsToType rettype
+        checkResultSubExp Constant{} =
+          return ()
+        checkResultSubExp (Var v) = do
+          attr <- varMemBound v
+          case attr of
+            Scalar _ -> return ()
+            MemMem{} -> return ()
+            ArrayMem _ _ _ _ ixfun
+              | IxFun.isDirect ixfun ->
+                return ()
+              | otherwise ->
+                  TypeCheck.bad $ TypeCheck.TypeError $
+                  "Array " ++ pretty v ++
+                  " returned by function, but has nontrivial index function " ++
+                  pretty ixfun ++ " " ++ show ixfun
 
-  matchReturnType fname rettype result = do
-    TypeCheck.matchExtReturnType fname (fromDecl <$> ts) result
-    mapM_ checkResultSubExp result
-    where ts = map returnsToType rettype
-          checkResultSubExp Constant{} =
-            return ()
-          checkResultSubExp (Var v) = do
-            attr <- varMemBound v
-            case attr of
-              Scalar _ -> return ()
-              MemMem{} -> return ()
-              ArrayMem _ _ _ _ ixfun
-                | IxFun.isDirect ixfun ->
-                  return ()
-                | otherwise ->
-                    TypeCheck.bad $ TypeCheck.TypeError $
-                    "Array " ++ pretty v ++
-                    " returned by function, but has nontrivial index function" ++
-                    pretty ixfun
+matchPatternToExp :: (ExplicitMemorish lore) =>
+                     Pattern (Aliases lore)
+                  -> Exp (Aliases lore)
+                  -> TypeCheck.TypeM lore ()
+matchPatternToExp pat e = do
+  scope <- asksScope removeScopeAliases
+  rt <- runReaderT (expReturns $ removeExpAliases e) scope
+  matchPatternToReturns (wrong rt) (removePatternAliases pat) rt
+  where wrong rt s = TypeCheck.bad $ TypeCheck.TypeError $
+                     ("Pattern\n" ++ TypeCheck.message "  " pat ++
+                      "\ncannot match result type\n") ++
+                     "  " ++ prettyTuple rt ++ "\n" ++ s
 
 matchPatternToReturns :: Monad m =>
                          (String -> m ())
-                      -> Pattern
+                      -> Pattern ExplicitMemory
                       -> [ExpReturns]
                       -> m ()
-matchPatternToReturns wrong (AST.Pattern ctxbindees valbindees) rt = do
-  remaining <- execStateT (zipWithM matchBindee valbindees rt) ctxbindees
+matchPatternToReturns wrong (Pattern ctxbindees valbindees) rt = do
+  remaining <- execStateT (zipWithM (matchBindeeEntry wrong ctxbindees) valbindees rt) ctxbindees
   unless (null remaining) $
     wrong $ "Unused parts of pattern: " ++
     intercalate ", " (map pretty remaining)
+
+matchBindeeEntry :: (PP.Pretty (PatElemT (MemBound u)), PP.Pretty (PatElemT lore),
+                     Typed (MemBound u), Typed lore,
+                     MonadTrans t, Monad m, MonadState [PatElemT lore] (t m))
+                 => (String -> m ())
+                 -> [PatElemT lore]
+                 -> PatElemT (MemBound u)
+                 -> Returns u (Maybe MemReturn)
+                 -> t m ()
+matchBindeeEntry wrong ctxbindees = matchBindee
   where
     inCtx = (`elem` map patElemName ctxbindees)
 
@@ -618,19 +638,18 @@ matchPatternToReturns wrong (AST.Pattern ctxbindees valbindees) rt = do
       | t' == bindeet =
         return ()
       | otherwise =
-        lift $ wrong $ "Bindee " ++ pretty (bindee :: PatElem) ++
+        lift $ wrong $ "Bindee " ++ pretty bindee ++
         " has type " ++ pretty bindeet ++
         ", but expression returns " ++ pretty t ++ "."
       where bindeet = rankShaped $ patElemRequires bindee
             t'      = rankShaped (t :: ExtType)
-
 
     matchBindee bindee (ReturnsScalar bt) =
       matchType bindee $ Prim bt
     matchBindee bindee (ReturnsMemory size@Constant{} space) =
       matchType bindee $ Mem size space
     matchBindee bindee (ReturnsMemory (Var size) space) = do
-      popSizeIfInCtx size
+      popSizeIfInCtx int64 size
       matchType bindee $ Mem (Var size) space
     matchBindee bindee (ReturnsArray et shape _ rets)
       | ArrayMem _ _ _ mem bindeeIxFun <- patElemAttr bindee = do
@@ -665,22 +684,22 @@ matchPatternToReturns wrong (AST.Pattern ctxbindees valbindees) rt = do
         lift $ wrong $ "Memory " ++ pretty name ++
         " is supposed to be existential, but not bound in pattern."
 
-    popSizeFromCtx name
-      | inCtx name = popSize name
+    popSizeFromCtx t name
+      | inCtx name = popSize t name
       | otherwise =
         lift $ wrong $ "Size " ++ pretty name ++
         " is supposed to be existential, but not bound in pattern."
 
-    popSizeIfInCtx name
-      | inCtx name = popSize name
+    popSizeIfInCtx t name
+      | inCtx name = popSize t name
       | otherwise  = return () -- Must be free, then.
 
-    popSize name = do
+    popSize t name = do
       ctxbindees' <- get
       case partition ((==name) . patElemName) ctxbindees' of
         ([nameBindee], ctxbindees'') -> do
           put ctxbindees''
-          unless (patElemType nameBindee == Prim int32) $
+          unless (patElemType nameBindee == Prim t) $
             lift $ wrong $ "Size " ++ pretty name ++
             " is not an integer."
         _ ->
@@ -693,7 +712,7 @@ matchPatternToReturns wrong (AST.Pattern ctxbindees valbindees) rt = do
           put ctxbindees''
           case patElemType memBindee of
             Mem (Var size) _ ->
-              popSizeIfInCtx size
+              popSizeIfInCtx int64 size
             Mem Constant{} _ ->
               return ()
             _ ->
@@ -702,25 +721,36 @@ matchPatternToReturns wrong (AST.Pattern ctxbindees valbindees) rt = do
           return () -- OK, already seen.
 
     matchArrayDim (Var v) (Free _) =
-      popSizeIfInCtx v --  *May* be bound here.
+      popSizeIfInCtx int32 v --  *May* be bound here.
     matchArrayDim (Var v) (Ext _) =
-      popSizeFromCtx v --  *Has* to be bound here.
+      popSizeFromCtx int32 v --  *Has* to be bound here.
     matchArrayDim Constant{} (Free _) =
       return ()
     matchArrayDim Constant{} (Ext _) =
       lift $ wrong
       "Existential dimension in expression return, but constant in pattern."
 
-varMemBound :: VName -> TypeCheck.TypeM ExplicitMemory (MemBound NoUniqueness)
+findUnusedPatternPartsInExp :: (ExplicitMemorish lore, Monad m,
+                                HasScope lore m)
+                            => Pattern lore
+                            -> Exp lore
+                            -> m [PatElemT (LetAttr ExplicitMemory)]
+findUnusedPatternPartsInExp (Pattern ctxbindees valbindees) e = do
+  scope <- askScope
+  rt <- runReaderT (expReturns e) scope
+  execStateT (zipWithM (matchBindeeEntry fail ctxbindees) valbindees rt) ctxbindees
+
+varMemBound :: ExplicitMemorish lore =>
+               VName -> TypeCheck.TypeM lore (MemBound NoUniqueness)
 varMemBound name = do
   attr <- TypeCheck.lookupVar name
   case attr of
     LetInfo (_, summary) -> return summary
     FParamInfo summary -> return $ fmap (const NoUniqueness) summary
     LParamInfo summary -> return summary
-    IndexInfo -> return $ Scalar int32
+    IndexInfo it -> return $ Scalar $ IntType it
 
-lookupMemBound :: (HasScope ExplicitMemory m, Monad m) =>
+lookupMemBound :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
                   VName -> m (MemBound NoUniqueness)
 lookupMemBound name = do
   info <- lookupInfo name
@@ -728,10 +758,10 @@ lookupMemBound name = do
     FParamInfo summary -> return $ fmap (const NoUniqueness) summary
     LParamInfo summary -> return summary
     LetInfo summary -> return summary
-    IndexInfo -> return $ Scalar int32
+    IndexInfo it -> return $ Scalar $ IntType it
 
-lookupArraySummary :: (HasScope ExplicitMemory m, Monad m) =>
-                      VName -> m (VName, IxFun.IxFun)
+lookupArraySummary :: (ExplicitMemorish lore, HasScope lore m, Monad m) =>
+                      VName -> m (VName, IxFun.IxFun (PrimExp VName))
 lookupArraySummary name = do
   summary <- lookupMemBound name
   case summary of
@@ -740,11 +770,12 @@ lookupArraySummary name = do
     _ ->
       fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
-checkMemBound :: VName -> MemBound u
-             -> TypeCheck.TypeM ExplicitMemory ()
+checkMemBound :: TypeCheck.Checkable lore =>
+                 VName -> MemBound u
+             -> TypeCheck.TypeM lore ()
 checkMemBound _ (Scalar _) = return ()
 checkMemBound _ (MemMem size _) =
-  TypeCheck.require [Prim int32] size
+  TypeCheck.require [Prim int64] size
 checkMemBound name (ArrayMem _ shape _ v ixfun) = do
   t <- lookupType v
   case t of
@@ -752,7 +783,7 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
       return ()
     _        ->
       TypeCheck.bad $ TypeCheck.TypeError $
-      "Variable " ++ textual v ++
+      "Variable " ++ pretty v ++
       " used as memory block, but is of type " ++
       pretty t ++ "."
 
@@ -767,23 +798,23 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
       " (" ++ show ident_rank ++ ")"
 
 instance Attributes ExplicitMemory where
-  representative = ExplicitMemory
-
   expContext pat e = do
     ext_context <- expExtContext pat e
     case e of
-      If _ tbranch fbranch rettype -> do
+      If _ tbranch fbranch (IfAttr rettype _) -> do
         treturns <- bodyReturns rettype tbranch
         freturns <- bodyReturns rettype fbranch
         combreturns <- generaliseReturns treturns freturns
         let ext_mapping =
               returnsMapping pat (map patElemAttr $ patternValueElements pat) combreturns
-        return $ map (`HM.lookup` ext_mapping) $ patternContextNames pat
+        return $ map (`M.lookup` ext_mapping) $ patternContextNames pat
       _ ->
         return ext_context
 
-returnsMapping :: Pattern -> [MemBound NoUniqueness] -> [BodyReturns]
-               -> HM.HashMap VName SubExp
+instance Attributes InKernel where
+
+returnsMapping :: Pattern ExplicitMemory -> [MemBound NoUniqueness] -> [BodyReturns]
+               -> M.Map VName SubExp
 returnsMapping pat bounds returns =
   mconcat $ zipWith inspect bounds returns
   where ctx = patternContextElements pat
@@ -793,27 +824,17 @@ returnsMapping pat bounds returns =
             | Just pat_mem_elem <- find ((==pat_mem) . patElemName) ctx,
               Mem (Var pat_mem_elem_size) _ <- patElemType pat_mem_elem,
               Just pat_mem_elem_size_elem <- find ((==pat_mem_elem_size) . patElemName) ctx =
-                HM.singleton (patElemName pat_mem_elem_size_elem) size
+                M.singleton (patElemName pat_mem_elem_size_elem) size
         inspect _ _ = mempty
 
+instance PP.Pretty u => PrettyAnnot (PatElemT (MemBound u)) where
+  ppAnnot = bindeeAnnot patElemName patElemAttr
+
+instance PP.Pretty u => PrettyAnnot (ParamT (MemBound u)) where
+  ppAnnot = bindeeAnnot paramName paramAttr
+
 instance PrettyLore ExplicitMemory where
-  ppBindingLore binding =
-    case mapMaybe patElemAnnot $ patternElements $ bindingPattern binding of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppFunDecLore fundec =
-    case mapMaybe fparamAnnot $ funDecParams fundec of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppLambdaLore lam =
-    case mapMaybe lparamAnnot $ lambdaParams lam of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore (DoLoop _ merge _ _) =
-    case mapMaybe (fparamAnnot . fst) merge of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore _ = Nothing
+instance PrettyLore InKernel where
 
 bindeeAnnot :: PP.Pretty u =>
                (a -> VName) -> (a -> MemBound u)
@@ -830,15 +851,6 @@ bindeeAnnot bindeeName bindeeLore bindee =
       Nothing
     Scalar _ ->
       Nothing
-
-fparamAnnot :: FParam -> Maybe PP.Doc
-fparamAnnot = bindeeAnnot paramName paramAttr
-
-lparamAnnot :: LParam -> Maybe PP.Doc
-lparamAnnot = bindeeAnnot paramName paramAttr
-
-patElemAnnot :: PatElem -> Maybe PP.Doc
-patElemAnnot = bindeeAnnot patElemName patElemAttr
 
 -- | Convet a 'Returns' to an 'Type' by throwing away memory
 -- information.
@@ -865,9 +877,9 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-arrayVarReturns :: (HasScope ExplicitMemory m, Monad m) =>
+arrayVarReturns :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
                    VName
-                -> m (PrimType, Shape, VName, IxFun.IxFun)
+                -> m (PrimType, Shape, VName, IxFun.IxFun (PrimExp VName))
 arrayVarReturns v = do
   summary <- lookupMemBound v
   case summary of
@@ -876,7 +888,7 @@ arrayVarReturns v = do
     _ ->
       fail $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
-varReturns :: (HasScope ExplicitMemory m, Monad m) =>
+varReturns :: (HasScope lore m, Monad m, ExplicitMemorish lore) =>
               VName -> m ExpReturns
 varReturns v = do
   summary <- lookupMemBound v
@@ -891,50 +903,76 @@ varReturns v = do
 
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
-expReturns :: (Monad m, HasScope ExplicitMemory m) =>
-              Exp -> m [ExpReturns]
+expReturns :: (Monad m, HasScope lore m,
+               ExplicitMemorish lore) =>
+              Exp lore -> m [ExpReturns]
 
-expReturns (AST.PrimOp (SubExp (Var v))) = do
-  r <- varReturns v
-  return [r]
+expReturns (BasicOp (SubExp (Var v))) =
+  pure <$> varReturns v
 
-expReturns (AST.PrimOp (Reshape _ newshape v)) = do
+expReturns (BasicOp (Opaque (Var v))) =
+  pure <$> varReturns v
+
+expReturns (BasicOp (Repeat outer_shapes inner_shape v)) = do
+  t <- modifyArrayShape repeatDims <$> lookupType v
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  let outer_shapes' = map (map (primExpFromSubExp int32) . shapeDims) outer_shapes
+      inner_shape' = map (primExpFromSubExp int32) $ shapeDims inner_shape
+  return [ReturnsArray et (ExtShape $ map Free $ arrayDims t) NoUniqueness $
+          Just $ ReturnsInBlock mem $
+          IxFun.repeat ixfun outer_shapes' inner_shape']
+  where repeatDims (Shape ds) =
+          Shape $ concat (zipWith (++) (map shapeDims outer_shapes) (map pure ds)) ++
+          shapeDims inner_shape
+
+expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   return [ReturnsArray et (ExtShape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $
-          IxFun.reshape ixfun newshape]
+          IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape]
 
-expReturns (AST.PrimOp (Rearrange _ perm v)) = do
+expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
       dims'  = rearrangeShape perm dims
   return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (AST.PrimOp (Split _ sizeexps v)) = do
-  (et, shape, mem, ixfun) <- arrayVarReturns v
-  let newShapes = map (shape `setOuterDim`) sizeexps
-      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n int32))
-                0 sizeexps
-  return $ zipWith (\new_shape offset
-                    -> ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
-                       NoUniqueness $
-                       Just $ ReturnsInBlock mem $ IxFun.offsetIndex ixfun offset)
-           newShapes offsets
+expReturns (BasicOp (Rotate offsets v)) = do
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
+  let offsets' = map (primExpFromSubExp int32) offsets
+      ixfun' = IxFun.rotate ixfun offsets'
+  return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
+          Just $ ReturnsInBlock mem ixfun']
 
-expReturns (AST.PrimOp (Index _ v is)) = do
+expReturns (BasicOp (Split i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
-  case stripDims (length is) shape of
-    Shape []     ->
+  let offsets =  0 : scanl1 (+) (map (primExpFromSubExp int32) sizeexps)
+      dims = map (primExpFromSubExp int32) $ shapeDims shape
+      mkSlice offset n = map (unitSlice 0) (take i dims) ++
+                         [unitSlice offset n] ++
+                         map (unitSlice 0) (drop (i+1) dims)
+  return $ zipWith (\offset dim ->
+                      let new_shape = setDim i shape dim
+                      in ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
+                         NoUniqueness $ Just $ ReturnsInBlock mem $
+                         IxFun.slice ixfun $ mkSlice offset $
+                         primExpFromSubExp int32 dim)
+    offsets sizeexps
+
+expReturns (BasicOp (Index v slice)) = do
+  (et, _, mem, ixfun) <- arrayVarReturns v
+  case sliceDims slice of
+    []     ->
       return [ReturnsScalar et]
-    Shape dims ->
+    dims ->
       return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
              Just $ ReturnsInBlock mem $
-             IxFun.applyInd ixfun
-             (map (`SE.subExpToScalExp` int32) is)]
+             IxFun.slice ixfun
+             (map (fmap (primExpFromSubExp int32)) slice)]
 
-expReturns (AST.PrimOp op) =
-  extReturns <$> staticShapes <$> primOpType op
+expReturns (BasicOp op) =
+  extReturns . staticShapes <$> primOpType op
 
 expReturns (DoLoop ctx val _ _) =
     return $
@@ -946,7 +984,7 @@ expReturns (DoLoop ctx val _ _) =
               (Array bt shape u, ArrayMem _ _ _ mem ixfun)
                 | isMergeVar mem -> do
                   i <- get
-                  put $ i + 1
+                  modify succ
                   return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i Nothing
                 | otherwise ->
                   return (ReturnsArray bt shape u $
@@ -963,25 +1001,62 @@ expReturns (DoLoop ctx val _ _) =
 expReturns (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret
 
-expReturns (If _ b1 b2 ts) = do
+expReturns (If _ b1 b2 (IfAttr ts _)) = do
   b1t <- bodyReturns ts b1
   b2t <- bodyReturns ts b2
   map bodyReturnsToExpReturns <$>
     generaliseReturns b1t b2t
 
-expReturns (Op (Alloc size space)) =
-  return [ReturnsMemory size space]
+expReturns (Op op) =
+  opReturns op
 
-expReturns (Op (Inner k)) =
-  extReturns <$> opType k
+class TypedOp (Op lore) => OpReturns lore where
+  opReturns :: (Monad m, HasScope lore m) =>
+               Op lore -> m [ExpReturns]
+  opReturns op = extReturns <$> opType op
+
+instance OpReturns ExplicitMemory where
+  opReturns (Alloc size space) =
+    return [ReturnsMemory size space]
+  opReturns (Inner k@(Kernel _ _ _ body)) =
+    zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
+    where correct (WriteReturn _ arr _ _) _ = varReturns arr
+          correct (KernelInPlaceReturn arr) _ =
+            extendedScope (varReturns arr)
+            (castScope $ scopeOf $ kernelBodyStms body)
+          correct _ ret = return ret
+  opReturns k =
+    extReturns <$> opType k
+
+instance OpReturns InKernel where
+  opReturns (Alloc size space) =
+    return [ReturnsMemory size space]
+
+  opReturns (Inner (GroupStream _ _ lam _ _)) =
+    forM (groupStreamAccParams lam) $ \param ->
+      case paramAttr param of
+        Scalar bt ->
+          return $ ReturnsScalar bt
+        ArrayMem et shape _ mem ixfun ->
+          return $ ReturnsArray et (ExtShape $ map Free $ shapeDims shape) NoUniqueness $
+          Just $ ReturnsInBlock mem ixfun
+        MemMem size space ->
+          return $ ReturnsMemory size space
+
+  opReturns (Inner (GroupScan _ _ input)) =
+    mapM varReturns arrs
+    where arrs = map snd input
+
+  opReturns k =
+    extReturns <$> opType k
 
 -- | The return information of a body.  This can be seen as the
 -- "return type with memory annotations" of the body.
-bodyReturns :: (Monad m, HasScope ExplicitMemory m) =>
-               [ExtType] -> Body
+bodyReturns :: (Monad m, HasScope lore m, ExplicitMemorish lore) =>
+               [ExtType] -> Body lore
             -> m [BodyReturns]
-bodyReturns ts (AST.Body _ bnds res) = do
-  let boundHere = boundInBindings bnds
+bodyReturns ts (Body _ bnds res) = do
+  let boundHere = boundInStms bnds
       inspect _ (Constant val) =
         return $ ReturnsScalar $ primValueType val
       inspect (Prim bt) (Var _) =
@@ -992,7 +1067,7 @@ bodyReturns ts (AST.Body _ bnds res) = do
       inspect (Array et shape u) (Var v) = do
 
         memsummary <- do
-          summary <- case HM.lookup v boundHere of
+          summary <- case M.lookup v boundHere of
             Nothing -> lift $ lookupMemBound v
             Just bindee -> return $ patElemAttr bindee
 
@@ -1003,12 +1078,12 @@ bodyReturns ts (AST.Body _ bnds res) = do
               fail "bodyReturns: inconsistent memory summary"
 
             ArrayMem _ _ NoUniqueness mem ixfun
-              | mem `HM.member` boundHere -> do
+              | mem `M.member` boundHere -> do
                 (i, memmap) <- get
 
-                case HM.lookup mem memmap of
+                case M.lookup mem memmap of
                   Nothing -> do
-                    put (i+1, HM.insert mem (i+1) memmap)
+                    put (i+1, M.insert mem (i+1) memmap)
                     return $ ReturnsNewBlock i Nothing
 
                   Just _ ->
@@ -1017,16 +1092,16 @@ bodyReturns ts (AST.Body _ bnds res) = do
                   return $ ReturnsInBlock mem ixfun
         return $ ReturnsArray et shape u memsummary
   evalStateT (zipWithM inspect ts res)
-    (0, HM.empty)
+    (0, M.empty)
 
-boundInBindings :: [Binding] -> HM.HashMap VName PatElem
-boundInBindings [] = HM.empty
-boundInBindings (bnd:bnds) =
-  boundInBinding `HM.union` boundInBindings bnds
-  where boundInBinding =
-          HM.fromList
+boundInStms :: [Stm lore] -> M.Map VName (PatElem lore)
+boundInStms [] = M.empty
+boundInStms (bnd:bnds) =
+  boundInStm `M.union` boundInStms bnds
+  where boundInStm =
+          M.fromList
           [ (patElemName bindee, bindee)
-          | bindee <- patternElements $ bindingPattern bnd
+          | bindee <- patternElements $ stmPattern bnd
           ]
 
 applyFunReturns :: Typed attr =>
@@ -1040,12 +1115,12 @@ applyFunReturns rets params args
   | otherwise =
     Nothing
   where rettype = ExtRetType $ map returnsToType rets
-        parammap :: HM.HashMap VName (SubExp, Type)
-        parammap = HM.fromList $
+        parammap :: M.Map VName (SubExp, Type)
+        parammap = M.fromList $
                    zip (map paramName params) args
 
         substSubExp (Var v)
-          | Just (se,_) <- HM.lookup v parammap = se
+          | Just (se,_) <- M.lookup v parammap = se
         substSubExp se = se
 
         correctDims (ReturnsScalar t) =
@@ -1065,6 +1140,17 @@ applyFunReturns rets params args
         correctSummary (ReturnsInBlock mem ixfun) =
           -- FIXME: we should also do a replacement in ixfun here.
           ReturnsInBlock mem' ixfun
-          where mem' = case HM.lookup mem parammap of
+          where mem' = case M.lookup mem parammap of
                   Just (Var v, _) -> v
                   _               -> mem
+
+-- | Is an array of the given shape stored fully flat row-major with
+-- the given index function?
+fullyDirect :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
+fullyDirect shape ixfun =
+  IxFun.isDirect ixfun && ixFunMatchesInnerShape shape ixfun
+
+ixFunMatchesInnerShape :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
+ixFunMatchesInnerShape shape ixfun =
+  drop 1 (IxFun.shape ixfun) == drop 1 shape'
+  where shape' = map (primExpFromSubExp int32) $ shapeDims shape

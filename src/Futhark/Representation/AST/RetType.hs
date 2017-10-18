@@ -5,10 +5,11 @@ module Futhark.Representation.AST.RetType
        (
          IsRetType (..)
        , ExtRetType (..)
+       , expectedTypes
        )
        where
 
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Types
@@ -39,6 +40,22 @@ class (Show rt, Eq rt, Ord rt) => IsRetType rt where
 newtype ExtRetType = ExtRetType [DeclExtType]
                    deriving (Eq, Ord, Show)
 
+-- | Given shape parameter names and value parameter types, produce the
+-- types of arguments accepted.
+expectedTypes :: Typed t => [VName] -> [t] -> [SubExp] -> [Type]
+expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
+    where parammap :: M.Map VName SubExp
+          parammap = M.fromList $ zip shapes args
+
+          correctDims t =
+            t `setArrayShape`
+            Shape (map correctDim $ shapeDims $ arrayShape t)
+
+          correctDim (Constant v) = Constant v
+          correctDim (Var v)
+            | Just se <- M.lookup v parammap = se
+            | otherwise                       = Var v
+
 instance IsRetType ExtRetType where
   primRetType = ExtRetType . staticShapes . return . Prim
 
@@ -46,28 +63,23 @@ instance IsRetType ExtRetType where
 
   applyRetType (ExtRetType extret) params args =
     if length args == length params &&
-       and (zipWith subtypeOf
-            (map rankShaped argtypes)
-            (map rankShaped paramtypes))
-    then Just $ ExtRetType $ map correctDims extret
+       and (zipWith subtypeOf argtypes $
+            expectedTypes (map paramName params) params $ map fst args)
+    then Just $ ExtRetType $ map correctExtDims extret
     else Nothing
     where argtypes = map snd args
-          paramtypes = map typeOf params
 
-          parammap :: HM.HashMap VName SubExp
-          parammap = HM.fromList $
-                     zip (map paramName params) (map fst args)
+          parammap :: M.Map VName SubExp
+          parammap = M.fromList $ zip (map paramName params) (map fst args)
 
-          correctDims t =
+          correctExtDims t =
             t `setArrayShape`
-            ExtShape (map correctDim $ extShapeDims $ arrayShape t)
+            ExtShape (map correctExtDim $ extShapeDims $ arrayShape t)
 
-          correctDim (Ext i) =
-            Ext i
-          correctDim (Free (Constant v)) =
-            Free $ Constant v
-          correctDim (Free (Var v))
-            | Just se <- HM.lookup v parammap =
-              Free se
-            | otherwise =
-              Free $ Var v
+          correctExtDim (Ext i)  = Ext i
+          correctExtDim (Free d) = Free $ correctDim d
+
+          correctDim (Constant v) = Constant v
+          correctDim (Var v)
+            | Just se <- M.lookup v parammap = se
+            | otherwise                       = Var v

@@ -3,9 +3,10 @@
 -- block specifies input- and output-sets.
 module Futhark.Test
        ( testSpecFromFile
-       , valuesFromString
+       , testSpecsFromPaths
+       , valuesFromByteString
        , getValues
-       , getValuesString
+       , getValuesBS
        , compareValues
        , Mismatch
 
@@ -14,19 +15,20 @@ module Futhark.Test
        , StructurePipeline (..)
        , TestAction (..)
        , ExpectedError (..)
+       , InputOutputs (..)
        , TestRun (..)
        , RunMode (..)
        , ExpectedResult (..)
        , Values (..)
+       , Value
        )
        where
 
-import Control.Category ((>>>))
 import Control.Applicative
+import qualified Data.ByteString.Lazy as BS
 import Control.Monad hiding (forM_)
 import Control.Monad.IO.Class
-import qualified Data.Array as A
-import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map.Strict as M
 import Data.Char
 import Data.Maybe
 import Data.Monoid
@@ -34,6 +36,7 @@ import Data.List hiding (foldl')
 import Data.Foldable (foldl')
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Encoding as T
 import System.IO
 import System.FilePath
 
@@ -44,18 +47,11 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Representation.AST.Attributes.Values (valueType)
-import Futhark.Representation.AST.Syntax.Core hiding (Prim)
-import Futhark.Internalise.TypesValues (internaliseValue)
-import qualified Language.Futhark.Parser as F
-import Futhark.Representation.SOACS (SOACS)
-import Futhark.Representation.Kernels (Kernels)
+
 import Futhark.Analysis.Metrics
-import Futhark.Pipeline
-import Futhark.Pass.Simplify
-import Futhark.Pass.ExtractKernels
-import Futhark.Passes
-import Futhark.Util.Pretty (Pretty, pretty)
+import Futhark.Util.Pretty (pretty, prettyText)
+import Futhark.Test.Values
+import Futhark.Util (directoryContents)
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -67,15 +63,21 @@ data ProgramTest =
               , testAction ::
                    TestAction
               , testExpectedStructure ::
-                   Maybe StructureTest
+                   [StructureTest]
               }
   deriving (Show)
 
+-- | How to test a program.
 data TestAction
   = CompileTimeFailure ExpectedError
-  | RunCases [TestRun]
+  | RunCases [InputOutputs]
   deriving (Show)
 
+-- | Input and output pairs for some entry point.
+data InputOutputs = InputOutputs T.Text [TestRun]
+  deriving (Show)
+
+-- | The error expected for a negative test.
 data ExpectedError = AnyError
                    | ThisError T.Text Regex
 
@@ -83,49 +85,59 @@ instance Show ExpectedError where
   show AnyError = "AnyError"
   show (ThisError r _) = "ThisError " ++ show r
 
-data StructurePipeline = KernelsPipeline (Pipeline SOACS Kernels)
-                       | SOACSPipeline (Pipeline SOACS SOACS)
+-- | How a program can be transformed.
+data StructurePipeline = KernelsPipeline
+                       | SOACSPipeline
+                       | SequentialCpuPipeline
+                       | GpuPipeline
 
+-- | A structure test specifies a compilation pipeline, as well as
+-- metrics for the program coming out the other end.
 data StructureTest = StructureTest StructurePipeline AstMetrics
 
 instance Show StructureTest where
   show (StructureTest _ metrics) =
     "StructureTest <config> " ++ show metrics
 
+-- | The conditions under which a test case is to be run.
 data RunMode
   = CompiledOnly -- ^ Cannot run with interpreter.
-  | InterpretedOnly -- ^ Only run with interpreter.
-  | NoTravis -- ^ Requires a lot of memory, do not run in Travis.
+  | NoBench -- ^ When benchmarking, don't run this.
   | InterpretedAndCompiled -- ^ Can be interpreted or compiled.
   deriving (Eq, Show)
 
+-- | A condition for execution, input, and expected result.
 data TestRun = TestRun
                { runMode :: RunMode
                , runInput :: Values
                , runExpectedResult :: ExpectedResult Values
+               , runDescription :: String
                }
              deriving (Show)
 
+-- | Several Values - either literally, or by reference to a file.
 data Values = Values [Value]
             | InFile FilePath
             deriving (Show)
 
+-- | How a test case is expected to terminate.
 data ExpectedResult values
-  = Succeeds values
-  | RunTimeFailure ExpectedError
+  = Succeeds (Maybe values) -- ^ Execution suceeds, with or without
+                            -- expected result values.
+  | RunTimeFailure ExpectedError -- ^ Execution fails with this error.
   deriving (Show)
 
 lexeme :: Parser a -> Parser a
 lexeme p = p <* spaces
 
 lexstr :: String -> Parser ()
-lexstr = void . lexeme . string
+lexstr = void . try . lexeme . string
 
 braces :: Parser a -> Parser a
 braces p = lexstr "{" *> p <* lexstr "}"
 
 parseNatural :: Parser Int
-parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 <$>
+parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 .
                map num <$> some digit
   where num c = ord c - ord '0'
 
@@ -145,19 +157,44 @@ parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
-              RunCases <$> parseRunCases
+              (RunCases . pure <$> parseInputOutputs)
+
+parseInputOutputs :: Parser InputOutputs
+parseInputOutputs = InputOutputs <$> parseEntryPoint <*> parseRunCases
+
+parseEntryPoint :: Parser T.Text
+parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constituent))) <|>
+                  pure (T.pack "main")
+  where constituent c = not (isSpace c) && c /= '}'
 
 parseRunMode :: Parser RunMode
 parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
-               (lexstr "notravis" *> pure NoTravis) <|>
+               (lexstr "nobench" *> pure NoBench) <|>
                pure InterpretedAndCompiled
 
 parseRunCases :: Parser [TestRun]
-parseRunCases = many $ TestRun <$> parseRunMode <*> parseInput <*> parseExpectedResult
+parseRunCases = parseRunCases' (0::Int)
+  where parseRunCases' i = (:) <$> parseRunCase i <*> parseRunCases' (i+1)
+                           <|> pure []
+        parseRunCase i = do
+          runmode <- parseRunMode
+          input <- parseInput
+          expr <- parseExpectedResult
+          return $ TestRun runmode input expr $ desc i input
+        desc _ (InFile path) = path
+        desc i (Values vs) =
+          -- Turn linebreaks into spaces.
+          "#" ++ show i ++ " (\"" ++ unwords (lines vs') ++ "\")"
+          where vs' = case unwords (map pretty vs) of
+                        s | length s > 50 -> take 50 s ++ "..."
+                          | otherwise     -> s
+
 
 parseExpectedResult :: Parser (ExpectedResult Values)
-parseExpectedResult = (Succeeds <$> (lexstr "output" *> parseValues)) <|>
-                 (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError))
+parseExpectedResult =
+  (Succeeds . Just <$> (lexstr "output" *> parseValues)) <|>
+  (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError)) <|>
+  pure (Succeeds Nothing)
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
@@ -173,10 +210,10 @@ parseInput = lexstr "input" *> parseValues
 
 parseValues :: Parser Values
 parseValues = do s <- parseBlock
-                 case valuesFromString "input" $ T.unpack s of
+                 case valuesFromByteString "input" $ BS.fromStrict $ T.encodeUtf8 s of
                    Left err -> fail $ show err
                    Right vs -> return $ Values vs
-              <|> lexstr "@" *> lexeme (InFile <$> T.unpack <$> restOfLine)
+              <|> lexstr "@" *> lexeme (InFile . T.unpack <$> restOfLine)
 
 parseBlock :: Parser T.Text
 parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
@@ -199,57 +236,99 @@ parseExpectedStructure =
   (StructureTest <$> optimisePipeline <*> parseMetrics)
 
 optimisePipeline :: Parser StructurePipeline
-optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
-                   pure defaultPipelineConfig
-  where defaultPipelineConfig =
-          SOACSPipeline standardPipeline
-        distributePipelineConfig =
-          KernelsPipeline $
-          standardPipeline >>>
-          onePass extractKernels >>>
-          onePass simplifyKernels
+optimisePipeline = lexstr "distributed" *> pure KernelsPipeline <|>
+                   lexstr "gpu" *> pure GpuPipeline <|>
+                   lexstr "cpu" *> pure SequentialCpuPipeline <|>
+                   pure SOACSPipeline
 
 parseMetrics :: Parser AstMetrics
-parseMetrics = braces $ fmap HM.fromList $ many $
+parseMetrics = braces $ fmap M.fromList $ many $
                (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
   where constituent c = isAlpha c || c == '/'
 
 testSpec :: Parser ProgramTest
 testSpec =
-  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> optional parseExpectedStructure
+  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> many parseExpectedStructure
 
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
 
+readInputOutputs :: SourceName -> T.Text -> Either ParseError InputOutputs
+readInputOutputs = parse $ parseDescription *> spaces *> parseInputOutputs <* eof
+
 commentPrefix :: T.Text
 commentPrefix = T.pack "--"
 
-fixPosition :: ParseError -> ParseError
-fixPosition err =
-  let newpos = incSourceColumn (errorPos err) $ T.length commentPrefix
+fixPosition :: Int -> ParseError -> ParseError
+fixPosition lineno err =
+  let newpos = incSourceLine
+               (incSourceColumn (errorPos err) $ T.length commentPrefix)
+               lineno
   in setErrorPos newpos err
 
 -- | Read the test specification from the given Futhark program.
 -- Note: will call 'error' on parse errors.
 testSpecFromFile :: FilePath -> IO ProgramTest
 testSpecFromFile path = do
-  s <- T.unlines <$>
-       map (T.drop 2) <$>
-       takeWhile (commentPrefix `T.isPrefixOf`) <$>
-       T.lines <$>
-       T.readFile path
-  case readTestSpec path s of
-    Left err -> error $ show $ fixPosition err
-    Right v  -> return v
+  blocks <- testBlocks <$> T.readFile path
+  let (first_spec_line, first_spec, rest_specs) =
+        case blocks of []       -> (0, mempty, [])
+                       (n,s):ss -> (n, s, ss)
+  case readTestSpec path first_spec of
+    Left err -> error $ show $ fixPosition first_spec_line err
+    Right v  -> foldM moreCases v rest_specs
 
--- | Try to parse a several core Futhark values from a string.  The
--- 'SourceName' parameter is used for error messages.
-valuesFromString :: SourceName -> String -> Either F.ParseError [Value]
-valuesFromString srcname s =
-  fmap concat $ mapM internalise =<< F.parseValues srcname s
-  where internalise v =
-          maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
-          internaliseValue v
+  where moreCases test (lineno, cases) =
+          case readInputOutputs path cases of
+            Left err     -> error $ show $ fixPosition lineno err
+            Right cases' ->
+              case testAction test of
+                RunCases old_cases ->
+                  return test { testAction = RunCases $ old_cases ++ [cases'] }
+                _ -> fail "Secondary test block provided, but primary test block specifies compilation error."
+
+testBlocks :: T.Text -> [(Int, T.Text)]
+testBlocks = mapMaybe isTestBlock . commentBlocks
+  where isTestBlock (n,block)
+          | any (T.pack (" " ++ descriptionSeparator) `T.isPrefixOf`) block =
+              Just (n, T.unlines block)
+          | otherwise =
+              Nothing
+
+commentBlocks :: T.Text -> [(Int, [T.Text])]
+commentBlocks = commentBlocks' . zip [0..] . T.lines
+  where isComment = (commentPrefix `T.isPrefixOf`)
+        commentBlocks' ls =
+          let ls' = dropWhile (not . isComment . snd) ls
+          in case ls' of
+            [] -> []
+            (n,_) : _ ->
+              let (block, ls'') = span (isComment . snd) ls'
+                  block' = map (T.drop 2 . snd) block
+              in (n, block') : commentBlocks' ls''
+
+-- | Read test specifications from the given path, which can be a file
+-- or directory containing @.fut@ files and further directories.
+-- Calls 'error' on parse errors.
+testSpecsFromPath :: FilePath -> IO [(FilePath, ProgramTest)]
+testSpecsFromPath path = do
+  programs <- testPrograms path
+  zip programs <$> mapM testSpecFromFile programs
+
+-- | Read test specifications from the given paths, which can be a files
+-- or directories containing @.fut@ files and further directories.
+-- Calls 'error' on parse errors.
+testSpecsFromPaths :: [FilePath] -> IO [(FilePath, ProgramTest)]
+testSpecsFromPaths = fmap concat . mapM testSpecsFromPath
+
+testPrograms :: FilePath -> IO [FilePath]
+testPrograms dir = filter isFut <$> directoryContents dir
+  where isFut = (==".fut") . takeExtension
+
+-- | Try to parse a several values from a byte string.  The 'SourceName'
+-- parameter is used for error messages.
+valuesFromByteString :: SourceName -> BS.ByteString -> Either String [Value]
+valuesFromByteString srcname = maybe (Left srcname) Right . readValues
 
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The 'FilePath' is the directory which file paths
@@ -258,89 +337,18 @@ getValues :: MonadIO m => FilePath -> Values -> m [Value]
 getValues _ (Values vs) =
   return vs
 getValues dir (InFile file) = do
-  s <- liftIO $ readFile file'
-  case valuesFromString file' s of
+  s <- liftIO $ BS.readFile file'
+  case valuesFromByteString file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
   where file' = dir </> file
 
-getValuesString :: MonadIO m => FilePath -> Values -> m String
-getValuesString _ (Values vs) =
-  return $ unlines $ map pretty vs
-getValuesString dir (InFile file) =
-  liftIO $ readFile file'
+-- | Extract a pretty representation of some 'Values'.  In the IO
+-- monad because this might involve reading from a file.  There is no
+-- guarantee that the resulting byte string yields a readable value.
+getValuesBS :: MonadIO m => FilePath -> Values -> m BS.ByteString
+getValuesBS _ (Values vs) =
+  return $ BS.fromStrict $ T.encodeUtf8 $ T.unlines $ map prettyText vs
+getValuesBS dir (InFile file) =
+  liftIO $ BS.readFile file'
   where file' = dir </> file
-
-data Mismatch = PrimValueMismatch Int PrimValue PrimValue
-              | ArrayLengthMismatch Int Int Int
-              | TypeMismatch Int Type Type
-              | ValueCountMismatch Int Int
-
-instance Show Mismatch where
-  show (PrimValueMismatch i got expected) =
-    explainMismatch i "" got expected
-  show (ArrayLengthMismatch i got expected) =
-    explainMismatch i "array of length" got expected
-  show (TypeMismatch i got expected) =
-    explainMismatch i "value of type" got expected
-  show (ValueCountMismatch got expected) =
-    "Expected " ++ show expected ++ " values, got " ++ show got
-
-explainMismatch :: Pretty a => Int -> String -> a -> a -> String
-explainMismatch i what got expected =
-  "Value " ++ show i ++ " expected " ++ what ++ pretty expected ++ ", got " ++ pretty got
-
-compareValues :: [Value] -> [Value] -> Maybe Mismatch
-compareValues got expected
-  | n /= m = Just $ ValueCountMismatch n m
-  | otherwise = case sequence $ zipWith3 compareValue [0..] got expected of
-    Just (e:_) -> Just e
-    _          -> Nothing
-  where n = length got
-        m = length expected
-
-compareValue :: Int -> Value -> Value -> Maybe Mismatch
-compareValue i (PrimVal got) (PrimVal expected)
-  | comparePrimValue minTolerance got expected = Nothing
-  | otherwise = Just $ PrimValueMismatch i got expected
-compareValue i (ArrayVal got _ _) (ArrayVal expected _ _)
-  | A.bounds got == A.bounds expected =
-      uncurry (PrimValueMismatch i) <$>
-        find (not . uncurry (comparePrimValue tol)) (zip (A.elems got) (A.elems expected))
-  | otherwise =
-      Just $ ArrayLengthMismatch i (snd $ A.bounds got) (snd $ A.bounds expected)
-  where tol = tolerance expected
-compareValue i got expected =
-  Just $ TypeMismatch i (valueType got) (valueType expected)
-
-comparePrimValue :: Double -> PrimValue -> PrimValue -> Bool
-comparePrimValue tol (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
-  compareFractional tol x y
-comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
-  compareFractional tol x y
-comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float32Value y)) =
-  compareFractional tol x (floatToDouble y)
-comparePrimValue tol  (FloatValue (Float32Value x)) (FloatValue (Float64Value y)) =
-  compareFractional tol (floatToDouble x) y
-comparePrimValue _ x y =
-  x == y
-
-compareFractional :: (Ord num, Fractional num, Real tol) =>
-                     tol -> num -> num -> Bool
-compareFractional tol x y =
-  diff < fromRational (toRational tol)
-  where diff = abs $ x - y
-
-minTolerance :: Fractional a => a
-minTolerance = 0.002 -- 0.2%
-
-tolerance :: A.Array Int PrimValue -> Double
-tolerance = foldl' tolerance' minTolerance
-  where tolerance' t (FloatValue (Float32Value v)) = max t $ 0.001 * floatToDouble v
-        tolerance' t (FloatValue (Float64Value v)) = max t $ 0.001 * v
-        tolerance' t _                             = t
-
-floatToDouble :: Float -> Double
-floatToDouble x =
-  let (m,n) = decodeFloat x
-  in encodeFloat m n
