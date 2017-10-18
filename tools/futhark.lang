@@ -68,46 +68,41 @@
       <keyword>while</keyword>
       <keyword>do</keyword>
       <keyword>in</keyword>
-      <keyword>op</keyword>
-      <keyword>not</keyword>
-      <keyword>pow</keyword>
-      <keyword>shape</keyword>
-      <keyword>reshape</keyword>
-      <keyword>transpose</keyword>
-      <keyword>split</keyword>
-      <keyword>redomap</keyword>
+      
       <keyword>empty</keyword>
-      <keyword>copy</keyword>
-      <keyword>size</keyword>
-      <keyword>unsafe</keyword>
-      <keyword>default</keyword>
-      <keyword>include</keyword>
-    </context>
-
-    <context id="builtin-functionlikes" style-ref="builtin-functionlikes">
-      <keyword>map</keyword>
-      <keyword>streamMap</keyword>
-      <keyword>streamMapPer</keyword>
-      <keyword>zipWith</keyword>
-      <keyword>filter</keyword>
-      <keyword>partition</keyword>
-      <keyword>reduce</keyword>
-      <keyword>reduceComm</keyword>
-      <keyword>streamRed</keyword>
-      <keyword>streamRedPer</keyword>
-      <keyword>scan</keyword>
-      <keyword>streamSeq</keyword>
       
-      <keyword>iota</keyword>
-      
-      <keyword>replicate</keyword>
+      <!-- Perhaps arbitrary, but these are keywords, because they do not
+      take the 'fun' syntax as their primary input. -->
+      <keyword>reshape</keyword>
+      <keyword>rearrange</keyword>
+      <keyword>rotate</keyword>
+      <keyword>split</keyword>
       <keyword>concat</keyword>
       <keyword>zip</keyword>
       <keyword>unzip</keyword>
+      <keyword>unsafe</keyword>
+    </context>
+
+    <context id="builtin-functionlikes" style-ref="builtin-functionlikes">
+      <!-- These 'behave' like builtin-functions, because they take the 'fun'
+      syntax as their primary input. -->
+      <keyword>map</keyword>
+      <keyword>reduce</keyword>
+      <keyword>reduce_comm</keyword>
+      <keyword>scan</keyword>
+      <keyword>filter</keyword>
+      <keyword>partition</keyword>
+      <keyword>stream_map</keyword>
+      <keyword>stream_map_per</keyword>
+      <keyword>stream_red</keyword>
+      <keyword>stream_red_per</keyword>
+      <keyword>stream_seq</keyword>
+      
+      <keyword>iota</keyword>
     </context>
 
     <context id="operators" style-ref="operator" extend-parent="false">
-      <match>[+\-\*/&gt;&lt;%=&amp;\|]</match>
+      <match>[+\-\*/&gt;&lt;%\!=&amp;\|\^]</match>
     </context>
 
     <context id="type" style-ref="type">
@@ -129,8 +124,8 @@
 
     <context id="boolean" style-ref="boolean">
       <prefix>(?&lt;![\w\.])</prefix>
-      <keyword>False</keyword>
-      <keyword>True</keyword>
+      <keyword>false</keyword>
+      <keyword>true</keyword>
     </context>
 
     <context id="float" style-ref="floating-point">
