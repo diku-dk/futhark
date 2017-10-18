@@ -197,14 +197,13 @@ literals and variables, but also more complicated forms.
       : | "map" `fun` `exp`+
       : | "reduce" `fun` `exp` `exp`
       : | "reduce_comm" `fun` `exp` `exp`
-      : | "reduce" `fun` `exp` `exp`
       : | "scan" `fun` `exp` `exp`
       : | "filter" `fun` `exp`
       : | "partition" "(" `fun`+ ")" `exp`
       : | "stream_map" `fun` `exp`
       : | "stream_map_per" `fun` `exp`
       : | "stream_red" `fun` `exp` `exp`
-      : | "stream_map_per" `fun` `exp` `exp`
+      : | "stream_red_per" `fun` `exp` `exp`
       : | "stream_seq" `fun` `exp` `exp`
    field:   `fieldid` "=" `exp`
         : | `exp`
