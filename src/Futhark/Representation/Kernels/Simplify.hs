@@ -217,11 +217,11 @@ instance Engine.Simplifiable SpaceStructure where
 instance Engine.Simplifiable KernelResult where
   simplify (ThreadsReturn threads what) =
     ThreadsReturn <$> Engine.simplify threads <*> Engine.simplify what
-  simplify (WriteReturn w a i v) =
+  simplify (WriteReturn ws a is v) =
     WriteReturn <$>
-    Engine.simplify w <*>
+    mapM Engine.simplify ws <*>
     Engine.simplify a <*>
-    Engine.simplify i <*>
+    mapM Engine.simplify is <*>
     Engine.simplify v
   simplify (ConcatReturns o w pte moffset what) =
     ConcatReturns
