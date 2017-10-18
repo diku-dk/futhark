@@ -612,11 +612,6 @@ bodyContainsParallelism = any (isMap . stmExp) . bodyStms
   where isMap Op{} = True
         isMap _ = False
 
-bodyContainsMap :: Body -> Bool
-bodyContainsMap = any (isMap . stmExp) . bodyStms
-  where isMap (Op Map{}) = True
-        isMap _ = False
-
 lambdaContainsParallelism :: Lambda -> Bool
 lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
 
@@ -759,7 +754,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Map w lam arrs))) acc =
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop (stmCerts bnd) w lam arrs) acc'
 
 maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form body)) acc
-  | null (patternContextElements pat), bodyContainsMap body =
+  | null (patternContextElements pat), bodyContainsParallelism body =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | S.null $ freeIn form `S.intersection` boundInKernelNest nest,
