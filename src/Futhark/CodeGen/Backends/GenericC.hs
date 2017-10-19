@@ -817,7 +817,7 @@ prepareEntryInputs = fmap snd . mapAccumLM prepare mempty . zip [(0::Int)..]
           ty <- opaqueToCType desc vds
           let pname = "in" ++ show pno
               field i ScalarValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
-              field i ArrayValue{} = [C.cexp|&($id:pname->$id:(tupleField i))|]
+              field i ArrayValue{} = [C.cexp|$id:pname->$id:(tupleField i)|]
           (known_sizes', _) <-
             mapAccumLM prepareValue known_sizes $ zip (zipWith field [0..] vds) vds
           return (known_sizes',
