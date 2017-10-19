@@ -737,7 +737,7 @@ opaqueLibraryFunctions desc vds = do
       freeComponent i (ArrayValue _ _ _ pt signed shape) = do
         let rank = length shape
             free_array = "futhark_free_" ++ arrayName pt signed rank
-        stm [C.cstm|if ((tmp = $id:free_array(ctx, &(obj->$id:(tupleField i)))) != 0) {
+        stm [C.cstm|if ((tmp = $id:free_array(ctx, obj->$id:(tupleField i))) != 0) {
                 ret = tmp;
              }|]
 
@@ -795,7 +795,7 @@ opaqueToCType desc vds = do
                            (name, (stype, struct : library)) :
                            compOpaqueStructs s }
       return stype
-  where field ct i = [C.csdecl|$ty:ct $id:(tupleField i);|]
+  where field ct i = [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
 externalValueToCType :: ExternalValue -> CompilerM op s C.Type
 externalValueToCType (TransparentValue vd) = valueDescToCType vd
@@ -875,11 +875,15 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
         prepare pno (OpaqueValue desc vds) = do
           let pname = "out" ++ show pno
           ty <- opaqueToCType desc vds
+          vd_ts <- mapM valueDescToCType vds
 
           stm [C.cstm|assert((*$id:pname = malloc(sizeof($ty:ty))) != NULL);|]
 
-          forM_ (zip [0..] vds) $ \(i,vd) ->
-            prepareValue [C.cexp|&((*$id:("out" ++ show pno))->$id:(tupleField i))|] vd
+
+          forM_ (zip3 [0..] vd_ts vds) $ \(i,ct,vd) -> do
+            let field = [C.cexp|(*$id:("out" ++ show pno))->$id:(tupleField i)|]
+            stm [C.cstm|assert(($exp:field = malloc(sizeof($ty:ct))) != NULL);|]
+            prepareValue field vd
 
           return [C.cparam|$ty:ty **$id:pname|]
 
