@@ -785,9 +785,8 @@ opaqueToCType desc vds = do
   case exists of
     Just (ty, _) -> return ty
     Nothing -> do
-      ts <- mapM valueDescToCType vds
-      let members = zipWith field ts [(0::Int)..]
-          struct = [C.cedecl|struct $id:name { $sdecls:members };|]
+      members <- zipWithM field vds [(0::Int)..]
+      let struct = [C.cedecl|struct $id:name { $sdecls:members };|]
           stype = [C.cty|struct $id:name|]
       headerDecl (OpaqueDecl desc) [C.cedecl|struct $id:name;|]
       library <- opaqueLibraryFunctions desc vds
@@ -795,7 +794,12 @@ opaqueToCType desc vds = do
                            (name, (stype, struct : library)) :
                            compOpaqueStructs s }
       return stype
-  where field ct i = [C.csdecl|$ty:ct *$id:(tupleField i);|]
+  where field vd@ScalarValue{} i = do
+          ct <- valueDescToCType vd
+          return [C.csdecl|$ty:ct $id:(tupleField i);|]
+        field vd i = do
+          ct <- valueDescToCType vd
+          return [C.csdecl|$ty:ct *$id:(tupleField i);|]
 
 externalValueToCType :: ExternalValue -> CompilerM op s C.Type
 externalValueToCType (TransparentValue vd) = valueDescToCType vd
