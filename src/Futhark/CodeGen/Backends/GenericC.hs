@@ -873,7 +873,7 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
               prepareValue [C.cexp|*$id:("out" ++ show pno)|] vd
               return [C.cparam|$ty:ty **$id:pname|]
             ScalarValue{} -> do
-              prepareValue [C.cexp|$id:("out" ++ show pno)|] vd
+              prepareValue [C.cexp|*$id:("out" ++ show pno)|] vd
               return [C.cparam|$ty:ty *$id:pname|]
 
         prepare pno (OpaqueValue desc vds) = do
@@ -886,13 +886,15 @@ prepareEntryOutputs = zipWithM prepare [(0::Int)..]
 
           forM_ (zip3 [0..] vd_ts vds) $ \(i,ct,vd) -> do
             let field = [C.cexp|(*$id:("out" ++ show pno))->$id:(tupleField i)|]
-            stm [C.cstm|assert(($exp:field = malloc(sizeof($ty:ct))) != NULL);|]
+            case vd of
+              ScalarValue{} -> return ()
+              _ -> stm [C.cstm|assert(($exp:field = malloc(sizeof($ty:ct))) != NULL);|]
             prepareValue field vd
 
           return [C.cparam|$ty:ty **$id:pname|]
 
         prepareValue dest (ScalarValue _ _ name) =
-          stm [C.cstm|*$exp:dest = $id:name;|]
+          stm [C.cstm|$exp:dest = $id:name;|]
 
         prepareValue dest (ArrayValue mem _ _ _ _ shape) = do
           stm [C.cstm|$exp:dest->mem = $id:mem;|]
