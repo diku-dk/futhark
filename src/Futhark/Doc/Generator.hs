@@ -59,7 +59,7 @@ moduleBoilerplate current bodyHtml =
 
 renderDecs :: [Dec] -> DocM Html
 renderDecs decs = asks snd >>= f
-  where f fm = H.div ! A.class_ "decs" <$> mconcat <$>
+  where f fm = (H.div ! A.class_ "decs") . mconcat <$>
                mapM (fmap $ H.div ! A.class_ "dec") (mapMaybe (prettyDec fm) decs)
 
 prettyDec :: FileModule -> Dec -> Maybe (DocM Html)
