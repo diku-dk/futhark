@@ -16,7 +16,7 @@ import System.Console.GetOpt
 import System.IO
 import System.Exit
 
-import Text.Blaze.Html5 (docTypeHtml, toHtml, h1)
+import Text.Blaze.Html5 (docTypeHtml)
 import Text.Blaze.Html.Renderer.String
 
 import Language.Futhark.TypeChecker (Imports, FileModule(..))
@@ -82,8 +82,7 @@ printDecs cfg dir imports decs = do
 
 render :: [Dec] -> (String, FileModule) -> State DocEnv String
 render decs (name,fm) = runReaderT m (name,fm)
-  where putName = h1 (toHtml name)
-        m = renderHtml . docTypeHtml . (putName <>) <$> renderFile decs
+  where m = renderHtml . docTypeHtml <$> renderFile decs
 
 cssFile :: String
 cssFile = $(embedStringFile "rts/futhark-doc/style.css")

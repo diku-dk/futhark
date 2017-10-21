@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Add -v/--verbose option to `futhark-doc`.
 
+  * `futhark-doc` now generates valid HTML.
+
   * Size annotations may now refer to preceding parameters, e.g:
 
         let f (n: i32) (xs: [n]i32) = ...
