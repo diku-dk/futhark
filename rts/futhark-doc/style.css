@@ -32,3 +32,14 @@ h3 {
 .specs {
     padding-left: 2ex;
 }
+
+.decs {
+    padding-left: 2ex;
+}
+
+.module {
+    font-family: monospace;
+    white-space: pre;
+    display: block;
+    unicode-bidi: embed;
+}
