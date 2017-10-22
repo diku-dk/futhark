@@ -143,20 +143,12 @@ The following program tests simple indexing and bounds checking::
   -- Test simple indexing of an array.
   -- ==
   -- tags { firsttag secondtag }
-  -- input {
-  --   [4,3,2,1]
-  --   1
-  -- }
-  -- output {
-  --   3
-  -- }
-  -- input {
-  --   [4,3,2,1]
-  --   5
-  -- }
+  -- input { [4,3,2,1] 1 }
+  -- output { 3 }
+  -- input { [4,3,2,1] 5 }
   -- error: Assertion.*failed
 
-  let main(a: []i32:, i: i32): i32 =
+  let main (a: []i32) (i: i32): i32 =
     a[i]
 
 The following program contains two entry points, both of which are
@@ -169,14 +161,14 @@ tested::
   -- entry: add1
   -- input { 1 } output { 2 }
 
-  entry add1(x: i32): i32 = add x 1
+  entry add1 (x: i32): i32 = add x 1
 
   -- Test the sub1 function.
   -- ==
   -- entry: sub1
   -- input { 1 } output { 0 }
 
-  entry sub1(x: i32): i32 = add x (-1)
+  entry sub1 (x: i32): i32 = add x (-1)
 
 SEE ALSO
 ========
