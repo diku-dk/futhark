@@ -54,8 +54,8 @@ compileProg module_name prog = do
                                        , "interactive=False"
                                        , "platform_pref=preferred_platform"
                                        , "device_pref=preferred_device"
-                                       , "group_size=256"
-                                       , "num_groups=128"
+                                       , "group_size=None"
+                                       , "num_groups=None"
                                        , "tile_size=32"]
                         [Escape $ openClInit assign]
           options = [ Option { optionLongName = "platform"

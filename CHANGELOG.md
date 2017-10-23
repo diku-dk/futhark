@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.2.0]
 
+  * Generated OpenCL code now picks more sensible group size and count
+    when running on a CPU.
+
   * `scatter` expressions nested in `map`s may now be parallelised
     ("segmented scatter").
 

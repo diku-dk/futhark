@@ -1,8 +1,10 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Futhark.CodeGen.OpenCL.Kernels
-       ( LockstepWidthHeuristic (..)
+       ( SizeHeuristic (..)
        , DeviceType (..)
-       , lockstepWidthHeuristicsTable
+       , WhichSize (..)
+       , HeuristicValue (..)
+       , sizeHeuristicsTable
 
        , mapTranspose
        , TransposeType(..)
@@ -20,24 +22,41 @@ import qualified Language.C.Quote.OpenCL as C
 -- figure out which size we should use for a specific platform and
 -- device.  If nothing matches here, the wave size should be set to
 -- one.
+--
+-- We also use this to select reasonable default group sizes and group
+-- counts.
 
 -- | The type of OpenCL device that this heuristic applies to.
 data DeviceType = DeviceCPU | DeviceGPU
 
--- | A rule for picking the lockstep width.  If the platform and device
--- type matches, then the lockstep width should be set to the given
--- integer.
-data LockstepWidthHeuristic =
-  LockstepWidthHeuristic { platformName :: String
-                         , deviceType :: DeviceType
-                         , lockstepWidth :: Int
-                         }
+-- | The value supplies by a heuristic can be a constant, or inferred
+-- from some device information.
+data HeuristicValue = HeuristicConst Int
+                    | HeuristicDeviceInfo String
+
+-- | A size that can be assigned a default.
+data WhichSize = LockstepWidth | NumGroups | GroupSize
+
+-- | A heuristic for setting the default value for something.
+data SizeHeuristic =
+    SizeHeuristic { platformName :: String
+                  , deviceType :: DeviceType
+                  , heuristicSize :: WhichSize
+                  , heuristicValue :: HeuristicValue
+                  }
 
 -- | All of our heuristics.
-lockstepWidthHeuristicsTable :: [LockstepWidthHeuristic]
-lockstepWidthHeuristicsTable =
-  [ LockstepWidthHeuristic "NVIDIA CUDA" DeviceGPU 32
-  , LockstepWidthHeuristic "AMD Accelerated Parallel Processing" DeviceGPU 64
+sizeHeuristicsTable :: [SizeHeuristic]
+sizeHeuristicsTable =
+  [ SizeHeuristic "NVIDIA CUDA" DeviceGPU LockstepWidth $ HeuristicConst 32
+  , SizeHeuristic "AMD Accelerated Parallel Processing" DeviceGPU LockstepWidth $ HeuristicConst 64
+  , SizeHeuristic "" DeviceGPU LockstepWidth $ HeuristicConst 1
+  , SizeHeuristic "" DeviceGPU NumGroups $ HeuristicConst 128
+  , SizeHeuristic "" DeviceGPU GroupSize $ HeuristicConst 256
+
+  , SizeHeuristic "" DeviceCPU LockstepWidth $ HeuristicConst 1
+  , SizeHeuristic "" DeviceCPU NumGroups $ HeuristicDeviceInfo "MAX_COMPUTE_UNITS"
+  , SizeHeuristic "" DeviceCPU GroupSize $ HeuristicConst 32
   ]
 
 data TransposeType = TransposeNormal

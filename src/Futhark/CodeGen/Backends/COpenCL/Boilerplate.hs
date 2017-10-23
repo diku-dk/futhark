@@ -174,7 +174,7 @@ void setup_opencl_and_load_kernels($ty:ctx_ty *ctx) {
 }|],
           [C.cedecl|
 void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *option) {
-  $stms:(map lockstepWidthHeuristicsCode lockstepWidthHeuristicsTable)
+  $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
 }|]]
 
         openCL_h = $(embedStringFile "rts/c/opencl.h")
@@ -228,17 +228,31 @@ openClReport names = report_kernels ++ [report_total]
                           }
                         |]
 
-lockstepWidthHeuristicsCode :: LockstepWidthHeuristic -> C.Stm
-lockstepWidthHeuristicsCode
-  (LockstepWidthHeuristic platform_name device_type width) =
+sizeHeuristicsCode :: SizeHeuristic -> C.Stm
+sizeHeuristicsCode
+  (SizeHeuristic platform_name device_type which what) =
   [C.cstm|
-   if (strcmp(option->platform_name, $string:platform_name) == 0 &&
-      option->device_type == $exp:(clDeviceType device_type)) {
-     ctx->lockstep_width = $int:width;
-     if (ctx->cfg.debugging) {
-       fprintf(stderr, "Setting lockstep width to: %d\n", ctx->lockstep_width);
-     }
-   }
-   |]
+   if ($exp:which' == 0 &&
+       strstr(option->platform_name, $string:platform_name) != NULL &&
+       option->device_type == $exp:(clDeviceType device_type)) {
+     $stm:get_size
+   }|]
   where clDeviceType DeviceGPU = [C.cexp|CL_DEVICE_TYPE_GPU|]
         clDeviceType DeviceCPU = [C.cexp|CL_DEVICE_TYPE_CPU|]
+
+        which' = case which of
+                   LockstepWidth -> [C.cexp|ctx->lockstep_width|]
+                   NumGroups -> [C.cexp|ctx->cfg.num_groups|]
+                   GroupSize -> [C.cexp|ctx->cfg.group_size|]
+
+        get_size = case what of
+                     HeuristicConst x ->
+                       [C.cstm|$exp:which' = $int:x;|]
+                     HeuristicDeviceInfo s ->
+                       -- This only works for device info that fits.
+                       let s' = "CL_DEVICE_" ++ s
+                       in [C.cstm|clGetDeviceInfo(ctx->device,
+                                                  $id:s',
+                                                  sizeof($exp:which'),
+                                                  &$exp:which',
+                                                  NULL);|]

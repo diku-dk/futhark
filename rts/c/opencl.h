@@ -31,13 +31,15 @@ void opencl_config_init(struct opencl_config *cfg) {
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
 
-  cfg->group_size = 256;
-  cfg->num_groups = 128;
+  cfg->group_size = 0;
+  cfg->num_groups = 0;
   cfg->tile_size = 32;
   cfg->transpose_block_dim = 16;
 }
 
 struct opencl_context {
+  cl_platform_id platform;
+  cl_device_id device;
   cl_context ctx;
   cl_command_queue queue;
 
@@ -45,7 +47,6 @@ struct opencl_context {
 
   size_t lockstep_width;
 };
-
 
 struct opencl_device_option {
   cl_platform_id platform;
@@ -345,7 +346,7 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   cl_uint platforms, devices;
   size_t max_group_size;
 
-  ctx->lockstep_width = 1;
+  ctx->lockstep_width = 0;
 
   struct opencl_device_option device_option = get_preferred_device(&ctx->cfg);
 
@@ -353,8 +354,8 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     describe_device_option(device_option);
   }
 
-  device = device_option.device;
-  platform = device_option.platform;
+  ctx->device = device = device_option.device;
+  ctx->platform = platform = device_option.platform;
 
   OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                                  sizeof(size_t), &max_group_size, NULL));
@@ -387,6 +388,12 @@ static cl_program setup_opencl(struct opencl_context *ctx,
 
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
+
+  if (ctx->cfg.debugging) {
+    fprintf(stderr, "Lockstep width: %d\n", ctx->lockstep_width);
+    fprintf(stderr, "Default group size: %d\n", ctx->cfg.group_size);
+    fprintf(stderr, "Default number of groups: %d\n", ctx->cfg.num_groups);
+  }
 
   char *fut_opencl_src = NULL;
   size_t src_size = 0;
