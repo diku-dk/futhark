@@ -1416,8 +1416,6 @@ isOverloadedFunction qname args loc = do
 
     handle [a, si, v] "scatter" = Just $ scatterF a si v
 
-    handle [e] "shape" = Just $ shapeF e
-
     handle [n, v] "replicate"  = Just $ replicateF n v
 
     handle [n] "iota"  = Just $ iotaF n
@@ -1576,13 +1574,6 @@ isOverloadedFunction qname args loc = do
           sivs = si' : svs'
       aws <- mapM (fmap (arraySize 0) . lookupType) sas
       letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip aws sas
-
-    shapeF e desc = do
-      ks <- internaliseExp (desc<>"_shape") e
-      case ks of
-        (k:_) -> do kt <- I.subExpType k
-                    letSubExps desc [I.BasicOp $ I.ArrayLit (I.arrayDims kt) $ I.Prim int32]
-        _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
 
     replicateF ne ve desc = do
       (ne', _) <- internaliseDimExp "n" ne

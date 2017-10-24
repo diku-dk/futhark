@@ -11,4 +11,4 @@
 let main (n: i32) (as: []i32): i32 =
   let as = loop (as) for _i < n do
     concat as as
-  in (shape as)[0]
+  in length as

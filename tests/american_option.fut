@@ -44,7 +44,7 @@ let binom(expiry: i32): f64 =
     let (_, dPow_end) = split (n+1-i) dPow
     let st = map (f64(s0())*) (map (*) uPow_start dPow_end)
     let (_, put_tail) = split (1) put
-    let (put_init, _) = split ((shape put)[0]-1) put in
+    let (put_init, _) = split (length put-1) put in
     map (\(x,y) -> f64.max x y)
     (zip
      (map (f64(strike())-) st)

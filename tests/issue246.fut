@@ -6,27 +6,32 @@
 
 import "/futlib/math"
 
+let dim_2 't [d0] [d1] (i: i32) (x: [d0][d1]t): i32 =
+  if (i == 1)
+  then d1
+  else d0
+
 let take_arrint (l: i32) (x: [][]i32): [][]i32 =
   if (0 <= l)
-  then if (l <= (shape (x))[0])
+  then if (l <= length x)
   then let (v1, _) = split (l) (x) in
   v1
-  else concat (x) (replicate ((i32.abs (l) - (shape (x))[0])) (replicate ((shape (x))[1]) (0)))
-  else if (0 <= (l + (shape (x))[0]))
-  then let (_, v2) = split ((l + (shape (x))[0])) (x) in
+  else concat (x) (replicate ((i32.abs (l) - length x)) (replicate (dim_2 1 x) (0)))
+  else if (0 <= (l + length x))
+  then let (_, v2) = split ((l + length x)) (x) in
   v2
-  else concat (replicate ((i32.abs (l) - (shape (x))[0])) (replicate ((shape (x))[1]) (0))) (x)
+  else concat (replicate ((i32.abs (l) - length x)) (replicate (dim_2 1 x) (0))) (x)
 let reshape_int (l: i32) (x: []i32): []i32 =
-  let roundUp = ((l + ((shape (x))[0] - 1)) / (shape (x))[0]) in
-  let extend = reshape ((((shape (x))[0] * roundUp))) (replicate (roundUp) (x)) in
+  let roundUp = ((l + (length x - 1)) / length x) in
+  let extend = reshape (((length x * roundUp))) (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in
   v1
 entry main (n: i32, m: i32): []i32 =
   let t_v1 = reshape ((n,
-                       m)) (reshape_int ((n * (m * 1))) (reshape (((shape (map (\(x: i32): i32 ->
-                                                                                (x + 1)) (iota (n*m))))[0] * 1)) (map (\(x: i32): i32 ->
+                       m)) (reshape_int ((n * (m * 1))) (reshape (((length (map (\(x: i32): i32 ->
+                                                                                (x + 1)) (iota (n*m)))) * 1)) (map (\(x: i32): i32 ->
                                                                                                                       (x + 1)) (iota (12))))) in
   let t_v2 = rearrange (1, 0) (t_v1) in
   let t_v3 = take_arrint (2) (t_v2) in
   let t_v4 = rearrange (1, 0) (t_v3) in
-  reshape (((shape (t_v4))[0] * ((shape (t_v4))[1] * 1))) (t_v4)
+  reshape ((length t_v4 * ((dim_2 1 t_v4) * 1))) (t_v4)

@@ -7,8 +7,8 @@
 let eqb (x: bool) (y: bool): bool =
   (! ((x || y)) || (x && y))
 let reshape_int (l: i32) (x: []i32): []i32 =
-  let roundUp = ((l + ((shape (x))[0] - 1)) / (shape (x))[0]) in
-  let extend = reshape ((((shape (x))[0] * roundUp))) (replicate (roundUp) (x)) in
+  let roundUp = ((l + (length x - 1)) / length x) in
+  let extend = reshape (((length x * roundUp))) (replicate (roundUp) (x)) in
   let (v1, _) = split (l) (extend) in
   v1
 entry main (nucleotides: []i32): bool =
@@ -17,10 +17,8 @@ entry main (nucleotides: []i32): bool =
   let t_v9 = reshape (4, 8, 6) (reshape_int (4*8*6) (reshape (8 * 6) t_v2)) in
   let t_v12 = let x = t_v8 in
               let y = t_v9 in
-              let n = (shape (x))[1] in
-              map (\(x: [][]i32) (y: [][]i32): [n][]bool ->
-                       let n = (shape (x))[1] in
-                       map (\(x: []i32) (y: []i32): [n]bool ->
+              map (\(x: [][]i32) (y: [][]i32): [][]bool ->
+                       map (\(x: []i32) (y: []i32): []bool ->
                                 map (==) (x) (y)) (x) (y)) (x) (y) in
   let t_v15 = map (\(x: [][]bool): []bool ->
                    map (\(x: []bool): bool ->
