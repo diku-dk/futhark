@@ -753,7 +753,7 @@ maybeDistributeStm bnd@(Let pat _ (Op (Map w lam arrs))) acc =
     Nothing -> addStmToKernel bnd acc
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop (stmCerts bnd) w lam arrs) acc'
 
-maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form body)) acc
+maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
   | null (patternContextElements pat), bodyContainsParallelism body =
   distributeSingleStm acc bnd >>= \case
     Just (kernels, res, nest, acc')
