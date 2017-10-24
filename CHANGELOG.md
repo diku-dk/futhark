@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.2.0]
 
+  * Removed the built-in `shape` function.
+
   * Generated OpenCL code now picks more sensible group size and count
     when running on a CPU.
 
