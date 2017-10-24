@@ -305,9 +305,8 @@ multiplication of an ``m * o`` with an ``o * n`` matrix::
     let res = replicate(m, replicate(n,0f32)) in
     loop res for i < m do
         loop res for j < n do
-            loop partsum = 0f32 = for k < o do
+            let res[i,j] = loop partsum = 0f32 for k < o do
               partsum + a[i,k] * b[k,j]
-            let res[i,j] = partsum
             in res
 
 With the naive implementation based on copying the source array,
