@@ -580,14 +580,8 @@ An array of the integers from ``0`` to ``n-1``.  The ``n`` argument
 can be any integral type.  The elements of the array will have the
 same type as ``n``.
 
-``shape a``
-..............
-
-The shape of array ``a`` as an integer array.  It is often more
-readable to use shape declaration names instead of ``shape``.
-
 ``replicate n x``
-...................
+.................
 
 An array consisting of ``n`` copies of ``a``.  The ``n`` argument must
 be of type ``i32``.
@@ -743,7 +737,7 @@ elements of the partitions retain their original relative positions.
 This ``scatter`` expression calculates the equivalent of this imperative
 code::
 
-  for index in 0..shape(is)[0]-1:
+  for index in 0..length is-1:
     i = is[index]
     v = vs[index]
     as[i] = v

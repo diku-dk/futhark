@@ -838,10 +838,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
                           [Array $ PolyArray tv_a' [] (rank 1) Unique (),
                            Array $ PrimArray (Signed Int32) (rank 1) Nonunique (),
                            Array $ PolyArray tv_a' [] (rank 1) Nonunique ()] $
-                          Array $ PolyArray tv_a' [] (rank 1) Unique ()),
-              ("shape", IntrinsicPolyFun [tp_a]
-                        [Array $ PolyArray tv_a' [] (rank 1) Nonunique ()] $
-                        Array $ PrimArray (Signed Int32) (rank 1) Unique ())]
+                          Array $ PolyArray tv_a' [] (rank 1) Unique ())]
 
   where tv_a = VName (nameFromString "a") 0
         tv_a' = typeName tv_a

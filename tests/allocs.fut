@@ -7,9 +7,9 @@
 let main [n] (a: [n]i32): i32 =
   let b = loop b = iota(10) for i < n do
     (let m = a[i]
-     in if m < (shape b)[0]
+     in if m < length b
         then b
         else map (\(j: i32): i32  ->
-                   j + unsafe b[j % (shape b)[0]]) (
+                   j + unsafe b[j % length b]) (
                  iota(m)))
   in reduce (+) 0 b
