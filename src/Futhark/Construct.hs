@@ -222,7 +222,7 @@ eCopy e = do e' <- letExp "copy_arg" =<< e
 eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> String -> SrcLoc -> m (Exp (Lore m))
 eAssert e msg loc = do e' <- letSubExp "assert_arg" =<< e
-                       return $ BasicOp $ Assert e' msg loc
+                       return $ BasicOp $ Assert e' msg (loc, mempty)
 
 eValue :: MonadBinder m => Value -> m (Exp (Lore m))
 eValue (PrimVal bv) =

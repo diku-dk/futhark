@@ -513,7 +513,7 @@ defCompileExp dest (If cond tbranch fbranch _) = do
   fcode <- collect $ compileBody dest fbranch
   emit $ Imp.If cond' tcode fcode
 
-defCompileExp dest (Apply fname args _) = do
+defCompileExp dest (Apply fname args _ _) = do
   targets <- funcallTargets dest
   args' <- catMaybes <$> mapM compileArg args
   emit $ Imp.Call targets fname args'

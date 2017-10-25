@@ -987,7 +987,7 @@ expReturns (DoLoop ctx val _ _) =
           isMergeVar = flip elem $ map paramName mergevars
           mergevars = map fst $ ctx ++ val
 
-expReturns (Apply _ _ ret) =
+expReturns (Apply _ _ ret _) =
   return $ map funReturnsToExpReturns ret
 
 expReturns (If _ b1 b2 (IfAttr ts _)) = do

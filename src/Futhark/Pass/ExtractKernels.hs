@@ -604,7 +604,7 @@ unbalancedLambda lam =
 
         unbalancedStm _ (BasicOp _) =
           False
-        unbalancedStm _ (Apply fname _ _) =
+        unbalancedStm _ (Apply fname _ _ _) =
           not $ isBuiltInFunction fname
 
 bodyContainsParallelism :: Body -> Bool

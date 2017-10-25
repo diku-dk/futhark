@@ -804,7 +804,7 @@ checkExp (If e1 e2 e3 info) = do
              "But the annotation is",
              "  " ++ prettyTuple (ifExtType info)]
 
-checkExp (Apply fname args rettype_annot) = do
+checkExp (Apply fname args rettype_annot _) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args
   when (rettype_derived /= rettype_annot) $

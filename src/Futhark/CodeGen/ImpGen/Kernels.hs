@@ -314,9 +314,11 @@ inKernelCopy :: ImpGen.CopyCompiler InKernel Imp.KernelOp
 inKernelCopy = ImpGen.copyElementWise
 
 inKernelExpCompiler :: ImpGen.ExpCompiler InKernel Imp.KernelOp
-inKernelExpCompiler _ (BasicOp (Assert _ _ loc)) =
+inKernelExpCompiler _ (BasicOp (Assert _ _ (loc, locs))) =
   compilerLimitationS $
-  unlines [ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
+  unlines [ "Cannot compile assertion at " ++
+            intercalate " -> " (reverse $ map locStr $ loc:locs) ++
+            " inside parallel kernel."
           , "As a workaround, surround the expression with 'unsafe'."]
 -- The static arrays stuff does not work inside kernels.
 inKernelExpCompiler (ImpGen.Destination [dest]) (BasicOp (ArrayLit es _)) =

@@ -10,6 +10,7 @@ import Control.Monad.Reader
 import Control.Monad.Identity
 
 import Data.List
+import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -64,11 +65,11 @@ doInlineInCaller (FunDef entry name rtp args body) inlcallees =
 inlineInBody :: [FunDef] -> Body -> Body
 inlineInBody
   inlcallees
-  (Body _ (bnd@(Let pat _ (Apply fname args rtp)):bnds) res) =
+  (Body _ (bnd@(Let pat _ (Apply fname args rtp (loc,locs))):bnds) res) =
   let continue callbnds =
         callbnds `insertStms` inlineInBody inlcallees (mkBody bnds res)
       continue' (Body _ callbnds res') =
-        continue $ callbnds ++
+        continue $ addLocations (loc:locs) callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
         (runReader (withShapes res') $ scopeOf callbnds)
   in case filter ((== fname) . funDefName) inlcallees of
@@ -94,6 +95,7 @@ inlineInBody
             mkLet' [] [ident] $ shapeCoerce (arrayDims t) v
         | otherwise =
           mkLet' [] [ident] $ BasicOp $ SubExp se
+
 inlineInBody inlcallees (Body () (bnd:bnds) res) =
   let bnd' = inlineInStm inlcallees bnd
       Body () bnds' res' = inlineInBody inlcallees $ Body () bnds res
@@ -123,6 +125,18 @@ inlineInLambda inlcallees (Lambda params body ret) =
 inlineInExtLambda :: [FunDef] -> ExtLambda -> ExtLambda
 inlineInExtLambda inlcallees (ExtLambda params body ret) =
   ExtLambda params (inlineInBody inlcallees body) ret
+
+addLocations :: [SrcLoc] -> [Stm] -> [Stm]
+addLocations more_locs = map onStm
+  where onStm stm = stm { stmExp = onExp $ stmExp stm }
+        onExp (Apply fname args t (loc,locs)) =
+          Apply fname args t (loc,locs++more_locs)
+        onExp (BasicOp (Assert cond desc (loc,locs))) =
+          BasicOp $ Assert cond desc (loc,locs++more_locs)
+        onExp e = mapExp identityMapper { mapOnBody = const $ return . onBody
+                                        } e
+        onBody body =
+          body { bodyStms = addLocations more_locs $ bodyStms body }
 
 -- | A composition of 'inlineAggressively' and 'removeDeadFunctions',
 -- to avoid the cost of type-checking the intermediate stage.

@@ -51,7 +51,7 @@ data InterpreterError =
       -- ^ First @Int@ is old shape, second is attempted new shape.
     | ZipError [Int]
       -- ^ The arguments to @zip@ were of different lengths.
-    | AssertFailed String SrcLoc
+    | AssertFailed String (SrcLoc, [SrcLoc])
       -- ^ Assertion failed at this location.
     | TypeError String
       -- ^ Some value was of an unexpected type.
@@ -86,8 +86,9 @@ instance Show InterpreterError where
     ", from " ++ show shape ++ " to " ++ show newshape
   show (ZipError lengths) =
     "Array arguments to zip must have same length, but arguments have lengths " ++ intercalate ", " (map show lengths) ++ "."
-  show (AssertFailed msg loc) =
-    "Assertion failed at " ++ locStr loc ++ ": " ++ msg
+  show (AssertFailed msg (loc,locs)) =
+    "Assertion failed at " ++ stacktrace ++ ":\n" ++ msg
+    where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
   show DivisionByZero =
     "Division by zero."
 
@@ -449,7 +450,8 @@ evalExp (If e1 e2 e3 info) = do
                   PrimVal (BoolValue False) -> evalBody e3
                   _                       -> bad $ TypeError "evalExp If"
   return $ valueShapeContext (ifExtType info) vs ++ vs
-evalExp (Apply fname args rettype) = do
+
+evalExp (Apply fname args rettype _) = do
   args' <- mapM (evalSubExp . fst) args
   vs <- evalFuncall fname args'
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs

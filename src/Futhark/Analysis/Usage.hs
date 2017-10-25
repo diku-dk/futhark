@@ -35,7 +35,7 @@ usageInStm (Let pat lore e) =
           mempty
 
 usageInExp :: (Aliased lore, UsageInOp (Op lore)) => Exp lore -> UT.UsageTable
-usageInExp (Apply _ args _) =
+usageInExp (Apply _ args _ _) =
   mconcat [ mconcat $ map UT.consumedUsage $
             S.toList $ subExpAliases arg
           | (arg,d) <- args, d == Consume ]

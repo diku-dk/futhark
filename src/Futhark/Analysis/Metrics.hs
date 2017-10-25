@@ -85,7 +85,7 @@ expMetrics (If _ tb fb _) =
   inside "If" $ do
     inside "True" $ bodyMetrics tb
     inside "False" $ bodyMetrics fb
-expMetrics (Apply fname _ _) =
+expMetrics (Apply fname _ _ _) =
   seen $ "Apply" <> fromString (nameToString fname)
 expMetrics (Op op) =
   opMetrics op
