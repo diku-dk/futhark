@@ -101,7 +101,7 @@ expAliases (DoLoop ctxmerge valmerge _ loopbody) =
           splitAt (length ctxmerge) $ bodyAliases loopbody
         merge_names = S.fromList $
                       map (paramName . fst) $ ctxmerge ++ valmerge
-expAliases (Apply _ args t) =
+expAliases (Apply _ args t _) =
   funcallAliases args $ retTypeValues t
 expAliases (Op op) = opAliases op
 
@@ -125,7 +125,7 @@ consumedInStm binding = consumedInPattern (stmPattern binding) <>
                             consumedInExp (stmExp binding)
 
 consumedInExp :: (Aliased lore) => Exp lore -> Names
-consumedInExp (Apply _ args _) =
+consumedInExp (Apply _ args _ _) =
   mconcat (map (consumeArg . first subExpAliases) args)
   where consumeArg (als, Consume) = als
         consumeArg (_,   Observe) = mempty

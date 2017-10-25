@@ -138,7 +138,7 @@ primOpType (Partition n _ arrays) =
 -- | The type of an expression.
 expExtType :: (HasScope lore m, TypedOp (Op lore)) =>
               Exp lore -> m [ExtType]
-expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
+expExtType (Apply _ _ rt _) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure $ ifExtType rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)

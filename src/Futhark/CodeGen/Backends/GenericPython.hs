@@ -48,7 +48,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import Data.Maybe
-
+import Data.List
 import qualified Data.Map.Strict as M
 
 import Prelude
@@ -948,9 +948,10 @@ compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment s code'
 
-compileCode (Imp.Assert e msg loc) = do
+compileCode (Imp.Assert e msg (loc,locs)) = do
   e' <- compileExp e
-  stm $ Assert e' ("At " ++ locStr loc ++ ": " ++ msg)
+  stm $ Assert e' ("At " ++ stacktrace ++ ": " ++ msg)
+  where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
 
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileArg args

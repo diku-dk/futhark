@@ -64,7 +64,7 @@ buildCGbody :: S.Set Name -> Body -> S.Set Name
 buildCGbody callees = foldl (\x -> buildCGexp x . stmExp) callees . bodyStms
 
 buildCGexp :: S.Set Name -> Exp -> S.Set Name
-buildCGexp callees (Apply fname _ _)
+buildCGexp callees (Apply fname _ _ _)
   | fname `elem` callees = callees
   | otherwise            = S.insert fname callees
 buildCGexp callees (Op op) =

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.2.0]
 
+  * Run-time errors due to failed assertions now include a stack
+    trace.
+
   * Removed the built-in `shape` function.
 
   * Generated OpenCL code now picks more sensible group size and count

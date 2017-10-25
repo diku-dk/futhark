@@ -158,7 +158,7 @@ data Code a = Skip
               -- ^ Must be in same space.
             | Call [VName] Name [Arg]
             | If Exp (Code a) (Code a)
-            | Assert Exp String SrcLoc
+            | Assert Exp String (SrcLoc, [SrcLoc])
             | Comment String (Code a)
               -- ^ Has the same semantics as the contained code, but
               -- the comment should show up in generated code for ease

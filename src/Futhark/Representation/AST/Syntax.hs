@@ -188,7 +188,7 @@ data BasicOp lore
   | ConvOp ConvOp SubExp
     -- ^ Conversion "casting".
 
-  | Assert SubExp String SrcLoc
+  | Assert SubExp String (SrcLoc, [SrcLoc])
   -- ^ Turn a boolean into a certificate, halting the program with the
   -- given error message if the boolean is false.
 
@@ -262,7 +262,7 @@ data ExpT lore
   = BasicOp (BasicOp lore)
     -- ^ A simple (non-recursive) operation.
 
-  | Apply  Name [(SubExp, Diet)] (RetType lore)
+  | Apply  Name [(SubExp, Diet)] (RetType lore) (SrcLoc, [SrcLoc])
 
   | If     SubExp (BodyT lore) (BodyT lore) IfAttr
 
@@ -283,7 +283,6 @@ data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
 deriving instance Annotations lore => Eq (LoopForm lore)
 deriving instance Annotations lore => Show (LoopForm lore)
 deriving instance Annotations lore => Ord (LoopForm lore)
-
 
 -- | Data associated with a branch.
 data IfAttr = IfAttr { ifExtType :: [ExtType]

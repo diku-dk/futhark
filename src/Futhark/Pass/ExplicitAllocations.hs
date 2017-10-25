@@ -649,9 +649,9 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
   where (_ctxparams, ctxinit) = unzip ctx
         (_valparams, valinit) = unzip val
         (ctxres, valres) = splitAt (length ctx) bodyres
-allocInExp (Apply fname args rettype) = do
+allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
-  return $ Apply fname args' (memoryInRetType rettype)
+  return $ Apply fname args' (memoryInRetType rettype) loc
 allocInExp e = mapExpM alloc e
   where alloc =
           identityMapper { mapOnBody = const allocInBody

@@ -1621,13 +1621,14 @@ compileCode c
 
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
-compileCode (Assert e msg loc) = do
+compileCode (Assert e msg (loc, locs)) = do
   e' <- compileExp e
   stm [C.cstm|if (!$exp:e') {
                    fprintf(stderr, "Assertion failed at %s: %s\n",
-                                   $string:(locStr loc), $string:msg);
+                                   $string:stacktrace, $string:msg);
                    exit(1);
                  }|]
+  where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e

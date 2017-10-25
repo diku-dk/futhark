@@ -117,11 +117,10 @@ mapExpM tv (BasicOp (UnOp op x)) =
 mapExpM tv (If c texp fexp (IfAttr ts s)) =
   If <$> mapOnSubExp tv c <*> mapOnBody tv mempty texp <*> mapOnBody tv mempty fexp <*>
         (IfAttr <$> mapM (mapOnExtType tv) ts <*> pure s)
-mapExpM tv (Apply fname args ret) = do
+mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
-  pure (Apply fname) <*> pure args' <*>
-    mapOnRetType tv ret
+  Apply fname <$> pure args' <*> mapOnRetType tv ret <*> pure loc
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp <$> (Index <$> mapOnVName tv arr <*>
               mapM (Data.Traversable.traverse (mapOnSubExp tv)) slice)

@@ -227,7 +227,7 @@ instance Pretty (BasicOp lore) where
     text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Manifest perm e) = text "manifest" <> apply [apply (map ppr perm), ppr e]
-  ppr (Assert e msg loc) =
+  ppr (Assert e msg (loc, _)) =
     text "assert" <> apply [ppr e, text (show msg), text $ show $ locStr loc]
   ppr (Partition n flags arrs) =
     text "partition" <>
@@ -241,8 +241,8 @@ instance PrettyLore lore => Pretty (Exp lore) where
             IfNormal -> mempty
             IfFallback -> text "<fallback>"
   ppr (BasicOp op) = ppr op
-  ppr (Apply fname args _) = text (nameToString fname) <>
-                             apply (map (align . ppr . fst) args)
+  ppr (Apply fname args _ _) =
+    text (nameToString fname) <> apply (map (align . ppr . fst) args)
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
     annot (mapMaybe ppAnnot (ctxparams++valparams)) $
