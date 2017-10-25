@@ -16,7 +16,6 @@ import Data.Maybe
 import Data.Monoid
 import Data.Ord
 import Data.Foldable (forM_)
-import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
@@ -337,20 +336,18 @@ runTests config paths = do
 
   let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
-      getResults remaining failed passed =
-        case S.toList remaining of
-          []      -> clear >> return (failed, passed)
-          first:_ -> do
-            report (testCaseProgram first) failed passed $ S.size remaining
-            (test, res) <- takeMVar resmvar
-            let next = getResults $ test `S.delete` remaining
-            case res of
-              Success -> next failed (passed+1)
-              Failure s -> do clear
-                              T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
-                              next (failed+1) passed
 
-  (failed, passed) <- getResults (S.fromList included) 0 0
+      getResults 0         failed passed = clear >> return (failed, passed)
+      getResults remaining failed passed = do
+        (test, res) <- takeMVar resmvar
+        report (testCaseProgram test) failed passed remaining
+        case res of
+          Success -> getResults (remaining-1) failed (passed+1)
+          Failure s -> do clear
+                          T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
+                          getResults (remaining-1) (failed+1) passed
+
+  (failed, passed) <- getResults (length included) 0 0
   let excluded_str = if null excluded
                      then ""
                      else " (" ++ show (length excluded) ++ " excluded)"
