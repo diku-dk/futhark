@@ -53,7 +53,7 @@
     "All Futhark keywords.")
 
   (defconst futhark-builtin-functions
-    '("iota" "shape" "replicate" "reshape" "rearrange" "transpose" "rotate"
+    '("reshape" "rearrange" "rotate"
       "split" "concat" "zip" "unzip" "unsafe" "copy" "map" "reduce"
       "reduce_comm" "scan" "filter" "partition" "scatter" "stream_map"
       "stream_map_per" "stream_red" "stream_map_per" "stream_seq")
