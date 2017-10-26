@@ -1531,11 +1531,11 @@ isOverloadedFunction qname args loc = do
 
       si_shape <- I.arrayShape <$> lookupType si'
       let si_w = shapeSize 0 si_shape
+      sv_ts <- mapM lookupType svs
 
-      (tvs, svs') <- fmap unzip $ forM svs $ \sv -> do
-        tv <- rowType <$> lookupType sv -- the element type
-        sv_shape <- I.arrayShape <$> lookupType sv
-        let sv_w = shapeSize 0 sv_shape
+      svs' <- forM (zip svs sv_ts) $ \(sv,sv_t) -> do
+        let sv_shape = I.arrayShape sv_t
+            sv_w = arraySize 0 sv_t
 
         -- Generate an assertion and reshapes to ensure that sv and si' are the same
         -- size.
@@ -1544,36 +1544,36 @@ isOverloadedFunction qname args loc = do
         c   <- assertingOne $
           letExp "write_cert" $ I.BasicOp $
           I.Assert cmp "length of index and value array does not match" (loc, mempty)
-        sv' <- certifying c $ letExp (baseString sv ++ "_write_sv") $
+        certifying c $ letExp (baseString sv ++ "_write_sv") $
           I.BasicOp $ I.Reshape (reshapeOuter [DimCoercion si_w] 1 sv_shape) sv
 
-        return (tv, sv')
-
       indexType <- rowType <$> lookupType si'
-      let bodyTypes = replicate (length tvs) indexType ++ tvs
-          paramTypes = indexType : tvs
-
       indexName <- newVName "write_index"
-      valueNames <- replicateM (length tvs) $ newVName "write_value"
+      valueNames <- replicateM (length sv_ts) $ newVName "write_value"
 
-      let bodyNames = indexName : valueNames
-      let bodyParams = zipWith I.Param bodyNames paramTypes
+      sa_ts <- mapM lookupType sas
+      let bodyTypes = replicate (length sv_ts) indexType ++ map rowType sa_ts
+          paramTypes = indexType : map rowType sv_ts
+          bodyNames = indexName : valueNames
+          bodyParams = zipWith I.Param bodyNames paramTypes
 
       -- This body is pretty boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
-      (body, _) <- runBinderEmptyEnv $ insertStmsM $ do
+      body <- localScope (scopeOfLParams bodyParams) $ insertStmsM $ do
         let outs = replicate (length valueNames) indexName ++ valueNames
         results <- forM outs $ \name ->
           letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
-        return $ resultBody results
+        ensureResultShape asserting "scatter value has wrong size" loc
+          bodyTypes $ resultBody results
 
       let lam = Lambda { I.lambdaParams = bodyParams
                        , I.lambdaReturnType = bodyTypes
                        , I.lambdaBody = body
                        }
           sivs = si' : svs'
-      aws <- mapM (fmap (arraySize 0) . lookupType) sas
-      letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip aws sas
+
+      let sa_ws = map (arraySize 0) sa_ts
+      letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip sa_ws sas
 
     replicateF ne ve desc = do
       (ne', _) <- internaliseDimExp "n" ne

@@ -488,7 +488,6 @@ typeCheckSOAC (Scatter w lam ivs as) = do
   --   2. Each index type must have the type i32.
   --
   --   3. Each array pair in @as@ and the value types must have the same type
-  --      (though not necessarily the same length).
   --
   --   4. Each array in @as@ is consumed.  This is not really a check, but more
   --      of a requirement, so that e.g. the source is not hoisted out of a
@@ -521,15 +520,7 @@ typeCheckSOAC (Scatter w lam ivs as) = do
     TC.require [Prim int32] aw
 
     -- 3.
-    aType <- lookupType a
-    case (rtV, rowType aType) of
-      (Prim pt0, Prim pt1) | pt0 == pt1 ->
-        return ()
-      (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
-        return ()
-      _ ->
-        TC.bad $ TC.TypeError
-        "Scatter values and input arrays do not have the same primitive type"
+    TC.requireI [rtV `arrayOfRow` aw] a
 
     -- 4.
     TC.consume =<< TC.lookupAliases a
