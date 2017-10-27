@@ -1048,8 +1048,12 @@ lexer cont = do
       cont x
 
 parseError :: L Token -> ParserMonad a
-parseError (L loc EOF) = parseErrorAt (srclocOf loc) $ Just "unexpected end of file."
-parseError tok         = parseErrorAt (srclocOf tok) Nothing
+parseError (L loc EOF) =
+  parseErrorAt (srclocOf loc) $ Just "unexpected end of file."
+parseError (L loc DOC{}) =
+  parseErrorAt (srclocOf loc) $
+  Just "documentation comments ('-- |') are only permitted when preceding declarations."
+parseError tok = parseErrorAt (srclocOf tok) Nothing
 
 parseErrorAt :: SrcLoc -> Maybe String -> ParserMonad a
 parseErrorAt loc Nothing = throwError $ locStr loc ++ ": Parse error.\n"
