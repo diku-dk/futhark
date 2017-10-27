@@ -279,15 +279,15 @@ qualNameFromTypeName (TypeName qs x) = QualName qs x
 
 -- | Types that can be elements of tuple-arrays.
 data RecordArrayElemTypeBase dim as =
-    PrimArrayElem PrimType as Uniqueness
+    PrimArrayElem PrimType as
   | ArrayArrayElem (ArrayTypeBase dim as)
   | PolyArrayElem TypeName [TypeArg dim as] as Uniqueness
   | RecordArrayElem (M.Map Name (RecordArrayElemTypeBase dim as))
   deriving (Show)
 
 instance Eq dim => Eq (RecordArrayElemTypeBase dim as) where
-  PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 =
-    bt1 == bt2 && u1 == u2
+  PrimArrayElem bt1 _ == PrimArrayElem bt2 _ =
+    bt1 == bt2
   PolyArrayElem bt1 targs1 _ u1 == PolyArrayElem bt2 targs2 _ u2 =
     bt1 == bt2 && targs1 == targs2 && u1 == u2
   ArrayArrayElem at1 == ArrayArrayElem at2 =
@@ -298,7 +298,7 @@ instance Eq dim => Eq (RecordArrayElemTypeBase dim as) where
     False
 
 instance Bitraversable RecordArrayElemTypeBase where
-  bitraverse _ g (PrimArrayElem t as u) = PrimArrayElem t <$> g as <*> pure u
+  bitraverse _ g (PrimArrayElem t as) = PrimArrayElem t <$> g as
   bitraverse f g (ArrayArrayElem a) = ArrayArrayElem <$> bitraverse f g a
   bitraverse f g (PolyArrayElem t args as u) =
     PolyArrayElem t <$> traverse (bitraverse f g) args <*> g as <*> pure u

@@ -228,7 +228,7 @@ prettyArray arr = case arr of
 
 prettyElem :: RecordArrayElemTypeBase (DimDecl VName) () -> Html
 prettyElem e = case e of
-  PrimArrayElem bt _ u -> prettyU u <> primTypeHtml bt
+  PrimArrayElem bt _ -> primTypeHtml bt
   PolyArrayElem bt targs _ u ->
     prettyU u <> prettyTypeName  bt <> foldMap (" " <>)
     (map prettyTypeArg targs)

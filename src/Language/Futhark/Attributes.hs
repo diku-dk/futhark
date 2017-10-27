@@ -247,7 +247,7 @@ uniqueness (Array (RecordArray _ _ u))   = u
 uniqueness _                             = Nonunique
 
 recordArrayElemUniqueness :: RecordArrayElemTypeBase shape as -> Uniqueness
-recordArrayElemUniqueness (PrimArrayElem _ _ u) = u
+recordArrayElemUniqueness (PrimArrayElem _ _) = Nonunique
 recordArrayElemUniqueness (PolyArrayElem _ _ _ u) = u
 recordArrayElemUniqueness (ArrayArrayElem (PrimArray _ _ u _)) = u
 recordArrayElemUniqueness (ArrayArrayElem (PolyArray _ _ _ u _)) = u
@@ -320,7 +320,7 @@ peelArray n (Array (PolyArray et targs shape _ _))
 peelArray n (Array (RecordArray ts shape _))
   | shapeRank shape == n =
     Just $ Record $ fmap asType ts
-  where asType (PrimArrayElem bt _ _) = Prim bt
+  where asType (PrimArrayElem bt _) = Prim bt
         asType (PolyArrayElem bt targs _ _) = TypeVar bt targs
         asType (ArrayArrayElem at)    = Array at
         asType (RecordArrayElem ts')  = Record $ fmap asType ts'
@@ -370,14 +370,14 @@ typeToRecordArrayElem :: Monoid as =>
                         TypeBase dim as
                      -> Uniqueness
                      -> RecordArrayElemTypeBase dim as
-typeToRecordArrayElem (Prim bt)    u        = PrimArrayElem bt mempty u
+typeToRecordArrayElem (Prim bt) _           = PrimArrayElem bt mempty
 typeToRecordArrayElem (TypeVar bt targs) u  = PolyArrayElem bt targs mempty u
 typeToRecordArrayElem (Record ts') u        = RecordArrayElem $ fmap (`typeToRecordArrayElem` u) ts'
 typeToRecordArrayElem (Array at)   _        = ArrayArrayElem at
 
 recordArrayElemToType :: RecordArrayElemTypeBase dim as
                      -> TypeBase dim as
-recordArrayElemToType (PrimArrayElem bt _ _)       = Prim bt
+recordArrayElemToType (PrimArrayElem bt _)         = Prim bt
 recordArrayElemToType (PolyArrayElem bt targs _ _) = TypeVar bt targs
 recordArrayElemToType (RecordArrayElem ts)         = Record $ fmap recordArrayElemToType ts
 recordArrayElemToType (ArrayArrayElem at)          = Array at
@@ -465,8 +465,8 @@ setArrayUniqueness (RecordArray et dims _) u =
 
 setRecordArrayElemUniqueness :: RecordArrayElemTypeBase dim as -> Uniqueness
                             -> RecordArrayElemTypeBase dim as
-setRecordArrayElemUniqueness (PrimArrayElem bt als _) u =
-  PrimArrayElem bt als u
+setRecordArrayElemUniqueness (PrimArrayElem bt als) _ =
+  PrimArrayElem bt als
 setRecordArrayElemUniqueness (PolyArrayElem bt targs als _) u =
   PolyArrayElem bt targs als u
 setRecordArrayElemUniqueness (ArrayArrayElem at) u =
@@ -656,8 +656,8 @@ recordArrayElemReturnType :: (Ord vn, Hashable vn) =>
                          -> [Diet]
                          -> [CompTypeBase vn]
                          -> RecordArrayElemTypeBase dim (Names vn)
-recordArrayElemReturnType (PrimArrayElem bt () u) ds args =
-  PrimArrayElem bt als u
+recordArrayElemReturnType (PrimArrayElem bt ()) ds args =
+  PrimArrayElem bt als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
 recordArrayElemReturnType (PolyArrayElem bt targs () u) ds args =
   PolyArrayElem bt (map (\arg -> typeArgReturnType arg ds args) targs) als u
