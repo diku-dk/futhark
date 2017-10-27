@@ -342,14 +342,16 @@ runCompilerM :: Monad m =>
 runCompilerM (Basis imports src roots) m = do
   let s = ReaderState imports src mempty
   s' <- execStateT (runReaderT m roots) s
-  return (E.Prog $ concatMap (E.progDecs . E.fileProg . snd) $ reverse $ alreadyImported s',
+  return (E.Prog Nothing $
+           concatMap (E.progDecs . E.fileProg . snd) $
+           reverse $ alreadyImported s',
           warnings s',
           reverse $ alreadyImported s',
           nameSource s')
 
 prependPrelude :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
-prependPrelude prelude (E.Prog ds) =
-  E.Prog $ map mkImport prelude ++ ds
+prependPrelude prelude (E.Prog doc ds) =
+  E.Prog doc $ map mkImport prelude ++ ds
   where mkImport fp =
           E.LocalDec (E.OpenDec (E.ModImport fp noLoc) [] E.NoInfo noLoc) noLoc
 

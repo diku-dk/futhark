@@ -52,9 +52,10 @@ main = mainWithOptions initialDocConfig commandLineOptions f
               when (docVerbose config) $ liftIO $ do
                 mapM_ (hPutStrLn stderr . ("Found source file "<>)) files
                 hPutStrLn stderr "Reading files..."
-              (Prog prog, _w, imports, _vns) <-
+              (prog, _w, imports, _vns) <-
                 readLibrary False preludeBasis mempty files
-              liftIO $ printDecs config outdir (nubBy sameImport imports) prog
+              liftIO $ printDecs config outdir (nubBy sameImport imports) $
+                progDecs prog
 
         sameImport (x, _) (y, _) = x == y
 

@@ -920,7 +920,7 @@ typeName :: VName -> TypeName
 typeName = typeNameFromQualName . qualName
 
 progImports :: ProgBase f vn -> [(String,SrcLoc)]
-progImports (Prog decs) = concatMap decImports decs
+progImports = concatMap decImports . progDecs
   where decImports (OpenDec x xs _ _) =
           concatMap modExpImports $ x:xs
         decImports (ModDec md) =

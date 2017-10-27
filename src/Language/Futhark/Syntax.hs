@@ -966,7 +966,9 @@ instance Located (DecBase f vn) where
   locOf (OpenDec _ _ _ loc) = locOf loc
   locOf (LocalDec _ loc)    = locOf loc
 
-newtype ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
+data ProgBase f vn = Prog { progDoc :: Maybe String
+                          , progDecs :: [DecBase f vn]
+                          }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 -- | A set of names.

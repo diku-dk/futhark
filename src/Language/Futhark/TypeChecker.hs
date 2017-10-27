@@ -80,10 +80,10 @@ initialEnv = intrinsicsModule
           Nothing
 
 checkProgM :: UncheckedProg -> TypeM FileModule
-checkProgM (Prog decs) = do
+checkProgM (Prog doc decs) = do
   checkForDuplicateDecs decs
   (_, env, decs') <- checkDecs decs
-  return (FileModule env $ Prog decs')
+  return (FileModule env $ Prog doc decs')
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =

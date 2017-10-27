@@ -1,4 +1,4 @@
--- Utility functions for arrays.
+-- | Utility functions for arrays.
 
 import "/futlib/math"
 

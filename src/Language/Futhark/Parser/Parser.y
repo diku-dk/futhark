@@ -221,25 +221,35 @@ sepBy2(p,s) : p s sepBy1(p,s) { $1 : fst $3 : snd $3 }
 
 -- The main parser.
 
+Doc :: { String }
+     : doc { let L _ (DOC s) = $1 in s }
 
+-- Three cases to avoid ambiguities.
 Prog :: { UncheckedProg }
-      : many(Dec) { Prog (concat $1) }
+      -- File begins with a file comment, followed by a Dec with a comment.
+      : Doc Doc Dec_ many(Dec) { Prog (Just $1) (map (addDoc $2) $3 ++ concat $4) }
+      -- File begins with a file comment, followed by a Dec with no comment.
+      | Doc Dec_ many(Dec)     { Prog (Just $1) ($2 ++ concat $3) }
+      -- File begins with a dec with no comment.
+      | Dec_ many(Dec)         { Prog Nothing ($1 ++ concat $2) }
 ;
 
-
 Dec :: { [UncheckedDec] }
+    : Dec_              { $1 }
+    | Doc Dec_          { map (addDoc $1) $2 }
+
+Dec_ :: { [UncheckedDec] }
     : Fun               { [FunDec $1] }
     | Val               { [ValDec $1] }
     | TypeAbbr          { [TypeDec $1] }
     | SigBind           { [SigDec $1 ] }
     | ModBind           { [ModDec $1 ] }
-    | DefaultDec        { [] }
-    | import stringlit
-      { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s loc) [] NoInfo $1) $1] }
     | open ModExp
       { [OpenDec $2 [] NoInfo $1] }
+    | import stringlit
+      { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s loc) [] NoInfo $1) $1] }
     | local Dec         { map (`LocalDec` $1) $2 }
-    | doc Dec           { let L _ (DOC s) = $1 in map (addDoc s) $2 }
+    | DefaultDec        { [] }
 ;
 
 SigExp :: { UncheckedSigExp }
@@ -319,8 +329,8 @@ Spec :: { SpecBase NoInfo Name }
           in ModSpec name $4 $1 }
       | include SigExp
         { IncludeSpec $2 $1 }
-      | doc Spec
-        { let L _ (DOC s) = $1 in addDocSpec s $2 }
+      | Doc Spec
+        { addDocSpec $1 $2 }
 ;
 
 TypeParam :: { TypeParamBase Name }

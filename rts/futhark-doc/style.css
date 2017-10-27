@@ -25,8 +25,13 @@ h3 {
     color: #5f021f;
 }
 
+#file_comment {
+    margin-bottom: 2ex;
+}
+
 .comment {
-    font-style: italic
+    font-style: italic;
+    margin-top: 1ex;
 }
 
 .specs {
