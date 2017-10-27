@@ -131,21 +131,6 @@ renderType fm tb
           TypeBind { typeAlias = name } = tb
 renderType _ _ = Nothing
 
-_ = let
-  renderModExp :: FileModule -> ModExpBase Info VName -> DocM Html
-  renderModExp fm e = case e of
-    ModVar v _ -> renderQualName Structure v
-    ModParens e' _ -> parens <$> renderModExp fm e'
-    ModImport v _ -> return $ toHtml $ show v
-    ModDecs ds _ ->
-      renderDecs ds --nestedBlock "{" "}" (stack $ punctuate line $ map ppr ds)
-    ModApply _f _a _ _ _ -> return mempty --parens $ ppr f <+> parens (ppr a)
-    ModAscript _me se _ _ -> ("{...}: " <>) <$> renderSigExp se
-    --ppr me <> colon <+> ppr se
-    ModLambda _param _maybe_sig _body _ ->
-      error "It should not be possible to open a lambda"
-  in renderModExp
-
 visible :: Namespace -> VName -> FileModule -> Bool
 visible ns vname@(VName name _) (FileModule env _)
   | Just vname' <- M.lookup (ns,name) (envNameMap env)
@@ -357,20 +342,6 @@ renderQualName ns (QualName names (VName name tag)) =
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
   concat (replicate (length (splitPath src) - 2) "../") ++ dest
-
---getVName :: Namespace -> QualName Name -> DocM VName
---getVName ns (QualName names name) = do
---  (FileModule env)  <- asks snd
---  let nm = envNameMap (go names env)
---      Just vname = M.lookup (ns,name) nm
---  return vname
---  --return . (M.! (ns,name)) . envNameMap $ go names env
---  where go [] e = e
---        go (x:xs) e = go xs (f x e) --  $ f $ envModTable e M.! (envNameMap e M.! (Structure,x))
---        --f (ModEnv env) = env
---        f x e | Just y <- M.lookup (Structure,x) (envNameMap e)
---              , Just (ModEnv env) <- M.lookup y (envModTable e)
---              = env
 
 prettyDimDecl :: DimDecl VName -> Html
 prettyDimDecl AnyDim = mempty
