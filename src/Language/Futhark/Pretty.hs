@@ -64,7 +64,7 @@ instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
 instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim as) where
-  ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (PrimArrayElem bt _) = ppr bt
   ppr (PolyArrayElem bt targs _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt) <+>
                                      spread (map ppr targs)
   ppr (ArrayArrayElem at)    = ppr at

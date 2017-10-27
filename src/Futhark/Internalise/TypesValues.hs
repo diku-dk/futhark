@@ -181,7 +181,7 @@ internaliseTypeM orig_t =
                         else I.uniqueness ct
                  | ct <- ts ]
 
-        internaliseRecordArrayElem (E.PrimArrayElem bt _ _) =
+        internaliseRecordArrayElem (E.PrimArrayElem bt _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseRecordArrayElem (E.PolyArrayElem v targs _ _) =
           map (`I.toDecl` Nonunique) <$> applyType v targs
@@ -225,7 +225,7 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
 
         internaliseRecordArrayElem E.PolyArrayElem{} =
           lift Nothing
-        internaliseRecordArrayElem (E.PrimArrayElem bt _ _) =
+        internaliseRecordArrayElem (E.PrimArrayElem bt _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseRecordArrayElem (E.ArrayArrayElem at) =
           internaliseArrayType at

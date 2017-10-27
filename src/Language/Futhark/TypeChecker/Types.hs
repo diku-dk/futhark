@@ -94,8 +94,8 @@ unifyRecordArrayElemTypes :: (Monoid als, ArrayDim dim) =>
                              RecordArrayElemTypeBase dim als
                           -> RecordArrayElemTypeBase dim als
                           -> Maybe (RecordArrayElemTypeBase dim als)
-unifyRecordArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
-  | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
+unifyRecordArrayElemTypes (PrimArrayElem bt1 als1) (PrimArrayElem bt2 als2)
+  | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2)
   | otherwise  = Nothing
 unifyRecordArrayElemTypes (PolyArrayElem bt1 targs1 als1 u1) (PolyArrayElem bt2 targs2 als2 u2)
   | bt1 == bt2, targs1 == targs2 = Just $ PolyArrayElem bt1 targs1 (als1 <> als2) (u1 <> u2)
@@ -487,9 +487,8 @@ instantiatePolymorphic tnames loc orig_substs x y =
     instantiateArrayType _ _ =
       lift $ Left Nothing
 
-    instantiateRecordArrayType (PrimArrayElem pt () u) (PrimArrayElem arg_pt () arg_u)
-      | pt == arg_pt, arg_u `subuniqueOf` u =
-          return ()
+    instantiateRecordArrayType (PrimArrayElem pt ()) (PrimArrayElem arg_pt ())
+      | pt == arg_pt = return ()
     instantiateRecordArrayType (ArrayArrayElem at) (ArrayArrayElem arg_at) =
       instantiateArrayType at arg_at
     instantiateRecordArrayType (PolyArrayElem tn targs () u) (PolyArrayElem arg_tn arg_targs () arg_u)
