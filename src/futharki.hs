@@ -138,7 +138,7 @@ readEvalPrint = do
                                 , funBindLocation = noLoc
                                 , funBindDoc = Nothing
                                 }
-              prog' = Prog $ opens ++ [FunDec mainfun]
+              prog' = Prog Nothing $ opens ++ [FunDec mainfun]
           runProgram prog imports src prog'
   where inputLine prompt = do
           inp <- lift $ Haskeline.getInputLine prompt
@@ -152,7 +152,7 @@ runProgram proglib imports src prog = liftIO $
   case checkProg False imports src "" prog of
     Left err -> print err
     Right (FileModule _ prog', _, src') ->
-      let full_prog = Prog $ progDecs proglib ++ progDecs prog'
+      let full_prog = Prog Nothing $ progDecs proglib ++ progDecs prog'
       in case evalState (internaliseProg full_prog) src' of
            Left err -> print err
            Right prog'' ->

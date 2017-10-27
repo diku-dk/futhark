@@ -29,7 +29,10 @@ type DocM = ReaderT Context (State DocEnv)
 renderFile :: [Dec] -> DocM Html
 renderFile ds = do
   current <- asks fst
-  moduleBoilerplate current <$> renderDecs ds
+  file_comment <- asks $ progDoc . fileProg . snd
+  moduleBoilerplate current .
+    ((H.div ! A.id "file_comment" $ renderDoc file_comment) <>) <$>
+    renderDecs ds
 
 indexPage :: [(String, String)] -> Html
 indexPage pages = docTypeHtml $ addBoilerplate "/" "Futhark Library Documentation" $

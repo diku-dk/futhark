@@ -1,7 +1,7 @@
--- A simple date library.  Inspired by code from LexiFi.
+-- | A simple date library.  Inspired by code from LexiFi.
 --
 -- This library does not handle any ancient calendars or anything like
--- that.  It's designed for simplicty (and therefore speed).
+-- that.  It's designed for simplicity (and thereby speed).
 
 -- The implementation is by a module which is immediately opened.  The
 -- intent is to make the type of dates abstract.  When Futhark gets

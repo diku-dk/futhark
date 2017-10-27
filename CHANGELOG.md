@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * `futhark-doc` now generates valid HTML.
 
+  * `futhark-doc` now permits files to contain a leading documentation
+    comment.
+
   * Size annotations may now refer to preceding parameters, e.g:
 
         let f (n: i32) (xs: [n]i32) = ...

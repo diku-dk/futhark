@@ -1,3 +1,5 @@
+-- | Basic mathematical modules and functions.
+
 local let const 'a 'b (x: a) (_: b): a = x
 
 module type numeric = {

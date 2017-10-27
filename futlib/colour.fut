@@ -1,4 +1,4 @@
--- Colour manipulation library.
+-- | Colour manipulation library.
 --
 -- Adapted from the gloss library by Ben Lippmeier:
 -- https://hackage.haskell.org/package/gloss

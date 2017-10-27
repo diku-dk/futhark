@@ -1,3 +1,7 @@
+-- | An implementation of complex numbers.  Divided into a module type
+-- for modules that implement complex numbers, and a parametric module
+-- that can construct such modules.
+
 import "/futlib/math"
 
 -- | The type of modules that implement a notion of complex numbers.

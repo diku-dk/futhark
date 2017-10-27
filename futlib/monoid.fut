@@ -1,3 +1,4 @@
+-- | A module type describing a monoid.
 module type monoid = {
   type t
 

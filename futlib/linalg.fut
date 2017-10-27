@@ -1,4 +1,4 @@
--- Small library of linear algebra-ish operations.
+-- | Small library of linear algebra-ish operations.
 
 import "/futlib/math"
 import "/futlib/array"
