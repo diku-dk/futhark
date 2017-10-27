@@ -798,15 +798,16 @@ checkExp (Scan fun startexp arrexp pos) = do
     bad $ TypeError pos $ "Array element value is of type " ++ pretty inrowt ++ ", but scan function returns type " ++ pretty scantype ++ "."
   return $ Scan fun' startexp' arrexp' pos
 
-checkExp (Filter fun arrexp pos) = do
+checkExp (Filter fun arrexp loc) = do
   (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
   fun' <- checkLambda fun [nonunique_arg]
-  when (lambdaReturnType fun' /= Prim Bool) $
-    bad $ TypeError pos "Filter function does not return bool."
+  let lam_t = lambdaReturnType fun'
+  when (lam_t /= Prim Bool) $
+    bad $ TypeError loc $ "Filter function must return bool, but returns " ++ pretty lam_t ++ "."
 
-  return $ Filter fun' arrexp' pos
+  return $ Filter fun' arrexp' loc
 
 checkExp (Partition funs arrexp pos) = do
   (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
