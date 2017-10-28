@@ -235,7 +235,8 @@ subSimpleM :: (SimplifiableLore lore,
                SameScope outerlore lore,
                ExpAttr outerlore ~ ExpAttr lore,
                BodyAttr outerlore ~ BodyAttr lore,
-               RetType outerlore ~ RetType lore) =>
+               RetType outerlore ~ RetType lore,
+               BranchType outerlore ~ BranchType lore) =>
               SimpleOps lore
            -> Env (SimpleM lore)
            -> ST.SymbolTable (Wise outerlore)
@@ -431,10 +432,10 @@ protectLoopHoisted ctx val form m = do
 
         protectUnsafe is_nonempty (Let pat (StmAux cs _) e)
           | not $ safeExp e = do
-              let if_ts = patternExtTypes pat
               nonempty_body <- eBody [pure e]
               empty_body <- eBody $ map (emptyOfType $ patternContextNames pat)
                                         (patternValueTypes pat)
+              if_ts <- expTypesFromPattern pat
               certifying cs $
                 letBind_ pat $ If is_nonempty nonempty_body empty_body $
                 IfAttr if_ts IfFallback
@@ -717,7 +718,7 @@ simplifyExp (If cond tbranch fbranch (IfAttr ts ifsort)) = do
   -- across branches.
   cond' <- simplify cond
   ts' <- mapM simplify ts
-  let ds = map (const Observe) ts'
+  let ds = map (const Observe) (bodyResult tbranch)
   (tbranch',fbranch') <-
     hoistCommon (simplifyBody ds tbranch) (ST.updateBounds True cond)
                 (simplifyBody ds fbranch) (ST.updateBounds False cond)
@@ -781,6 +782,7 @@ simplifyExpBase = mapExpM hoist
                 , mapOnVName = simplify
                 , mapOnCertificates = simplify
                 , mapOnRetType = simplify
+                , mapOnBranchType = simplify
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
                 , mapOnLParam =
@@ -794,6 +796,7 @@ type SimplifiableLore lore = (Attributes lore,
                               Simplifiable (FParamAttr lore),
                               Simplifiable (LParamAttr lore),
                               Simplifiable (RetType lore),
+                              Simplifiable (BranchType lore),
                               CanBeWise (Op lore),
                               ST.IndexOp (OpWithWisdom (Op lore)),
                               BinderOps lore)
@@ -867,7 +870,7 @@ instance Simplifiable VName where
 instance Simplifiable d => Simplifiable (ShapeBase d) where
   simplify = fmap Shape . simplify . shapeDims
 
-instance Simplifiable ExtDimSize where
+instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se
   simplify (Ext x)   = return $ Ext x
 
@@ -987,6 +990,7 @@ instance Simplifiable Certificates where
 simplifyFun :: SimplifiableLore lore => FunDef lore -> SimpleM lore (FunDef (Wise lore))
 simplifyFun (FunDef entry fname rettype params body) = do
   rettype' <- simplify rettype
-  body' <- bindFParams params $ insertAllStms $
-           simplifyBody (map diet $ retTypeValues rettype') body
+  let ds = replicate (length (bodyResult body) - length rettype) Observe ++
+           map diet (retTypeValues rettype')
+  body' <- bindFParams params $ insertAllStms $ simplifyBody ds body
   return $ FunDef entry fname rettype' params body'

@@ -162,8 +162,7 @@ kernelCompiler dest (Kernel desc space _ kernel_body) = do
 expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler
-  (ImpGen.Destination
-    [ImpGen.ArrayDestination (ImpGen.CopyIntoMemory destloc) _])
+  (ImpGen.Destination [ImpGen.ArrayDestination (Just destloc)])
   (BasicOp (Iota n x s et)) = do
   thread_gid <- newVName "thread_gid"
 
@@ -700,15 +699,13 @@ compileKernelExp constants dest (Combine cspace ts aspace body)
       ImpGen.emit $ Imp.Op Imp.Barrier
       ImpGen.emit $ Imp.If (Imp.BinOpExp LogAnd (isActive cspace) (isActive aspace)) copy mempty
       ImpGen.emit $ Imp.Op Imp.Barrier
-        where index t (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
+        where index t (ImpGen.ArrayDestination (Just loc)) =
                 let space_dims = map (ImpGen.varIndex . fst) cspace
                     t_dims = map (primExpFromSubExp int32) $ arrayDims t
-                in Just $ ImpGen.ArrayDestination
-                   (ImpGen.CopyIntoMemory
-                     (ImpGen.sliceArray loc $
-                      fullSliceNum (space_dims++t_dims) $
-                      map (DimFix . ImpGen.varIndex . fst) cspace))
-                   shape
+                in Just $ ImpGen.ArrayDestination $
+                   Just $ ImpGen.sliceArray loc $
+                   fullSliceNum (space_dims++t_dims) $
+                   map (DimFix . ImpGen.varIndex . fst) cspace
               index _ _ = Nothing
 
 compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) = do
@@ -1005,9 +1002,9 @@ compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
     write_result mempty
 
 compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_elems moffset what) = do
-  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
+  ImpGen.ArrayDestination (Just dest_loc) <- return dest
   let dest_loc_offset = ImpGen.offsetArray dest_loc offset
-      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
+      dest' = ImpGen.ArrayDestination $ Just dest_loc_offset
   ImpGen.copyDWIMDest dest' [] (Var what) []
   where offset = case moffset of
                    Nothing -> primExpFromSubExp int32 per_thread_elems *
@@ -1015,11 +1012,11 @@ compileKernelResult constants dest (ConcatReturns SplitContiguous _ per_thread_e
                    Just se -> primExpFromSubExp int32 se
 
 compileKernelResult constants dest (ConcatReturns (SplitStrided stride) _ _ moffset what) = do
-  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
+  ImpGen.ArrayDestination (Just dest_loc) <- return dest
   let dest_loc' = ImpGen.strideArray
                   (ImpGen.offsetArray dest_loc offset) $
                   primExpFromSubExp int32 stride
-      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
+      dest' = ImpGen.ArrayDestination $ Just dest_loc'
   ImpGen.copyDWIMDest dest' [] (Var what) []
   where offset = case moffset of
                    Nothing -> ImpGen.varIndex (kernelGlobalThreadId constants)

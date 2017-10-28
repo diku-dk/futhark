@@ -31,6 +31,7 @@ module Futhark.TypeCheck
   , checkExtType
   , matchExtPattern
   , matchExtReturnType
+  , matchExtBranchType
   , argType
   , argAliases
   , noArgAliases
@@ -61,6 +62,7 @@ import Data.Maybe
 
 import Prelude
 
+import Futhark.Construct (instantiateShapes)
 import Futhark.Representation.Aliases
 import Futhark.Analysis.Alias
 import Futhark.Util
@@ -286,9 +288,6 @@ message :: Pretty a =>
 message s x = prettyDoc 80 $
               text s <+> align (ppr x)
 
-liftEitherS :: Either String a -> TypeM lore a
-liftEitherS = either (bad . TypeError) return
-
 -- | Mark a name as bound.  If the name has been bound previously in
 -- the program, report a type error.
 bound :: VName -> TypeM lore ()
@@ -509,7 +508,7 @@ checkFun (FunDef _ fname rettype params body) =
                body) consumable $ do
       checkFunParams params
       checkRetType rettype
-      checkFunBody fname rettype body
+      checkFunBody rettype body
         where consumable = [ (paramName param, mempty)
                            | param <- params
                            , unique $ paramDeclType param
@@ -576,8 +575,9 @@ checkFun' (fname, rettype, params, body) consumable check = do
         tag u = S.map $ \name -> (u, name)
 
         returnAliasing expected got =
-          [ (uniqueness p, names) |
-            (p,names) <- zip expected got ]
+          reverse $
+          zip (reverse (map uniqueness expected) ++ repeat Nonunique) $
+          reverse got
 
 subCheck :: forall lore newlore a.
             (Checkable newlore,
@@ -624,14 +624,14 @@ checkResult :: Checkable lore =>
 checkResult = mapM_ checkSubExp
 
 checkFunBody :: Checkable lore =>
-                Name
-             -> [RetType lore]
+                [RetType lore]
              -> Body (Aliases lore)
              -> TypeM lore ()
-checkFunBody fname rt (Body (_,lore) bnds res) = do
+checkFunBody rt (Body (_,lore) bnds res) = do
   checkStms bnds $ do
-    checkResult res
-    matchReturnType fname rt res
+    context "When checking body result" $ checkResult res
+    context "When matching declared return type to result of body" $
+      matchReturnType rt res
   checkBodyLore lore
 
 checkLambdaBody :: Checkable lore =>
@@ -794,15 +794,8 @@ checkExp (BasicOp op) = checkBasicOp op
 checkExp (If e1 e2 e3 info) = do
   require [Prim Bool] e1
   _ <- checkBody e2 `alternative` checkBody e3
-  ts2 <- bodyExtType e2
-  ts3 <- bodyExtType e3
-  unless ((ts2 `generaliseExtTypes` ts3) `subtypesOf` ifExtType info) $
-    bad $ TypeError $
-    unlines ["If-expression branches have types",
-             "  " ++ prettyTuple ts2 ++ ", and",
-             "  " ++ prettyTuple ts3,
-             "But the annotation is",
-             "  " ++ prettyTuple (ifExtType info)]
+  context "in true branch" $ matchBranchType (ifReturns info) e2
+  context "in false branch" $ matchBranchType (ifReturns info) e3
 
 checkExp (Apply fname args rettype_annot _) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
@@ -962,53 +955,46 @@ checkStm stm@(Let pat (StmAux (Certificates cs) (_,attr)) e) m = do
     m
 
 matchExtPattern :: Checkable lore =>
-                   [PatElem (Aliases lore)]
-                -> [ExtType] -> TypeM lore ()
-matchExtPattern pat ts = do
-  (ts', restpat, _) <- liftEitherS $ patternContext pat ts
-  unless (length restpat == length ts') $
-    bad $ InvalidPatternError (Pattern [] pat) ts Nothing
-  evalStateT (zipWithM_ checkStm' restpat ts') []
-  where checkStm' patElem@(PatElem name _ _) t = do
-          lift $ checkAnnotation ("binding of variable " ++ pretty name)
-            (patElemRequires patElem) t
-          add name
-
-        add name = do
-          seen <- gets $ elem name
-          if seen
-            then lift $ bad $ DupPatternError name
-            else modify (name:)
+                   Pattern (Aliases lore) -> [ExtType] -> TypeM lore ()
+matchExtPattern pat ts =
+  unless (expExtTypesFromPattern pat == ts) $
+    bad $ InvalidPatternError pat ts Nothing
 
 matchExtReturnType :: Checkable lore =>
-                      Name -> [ExtType] -> Result
-                   -> TypeM lore ()
-matchExtReturnType fname rettype ses = do
-  ts <- staticShapes <$> mapM subExpType ses
-  unless (ts `subtypesOf` rettype) $
-    bad $ ReturnTypeError fname rettype ts
+                      [ExtType] -> Result -> TypeM lore ()
+matchExtReturnType rettype res = do
+  ts <- mapM subExpType res
+  matchExtReturns rettype res ts
 
-patternContext :: Typed attr =>
-                  [PatElemT attr] -> [ExtType] ->
-                  Either String ([Type], [PatElemT attr], [PatElemT attr])
-patternContext pat rt = do
-  (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, M.empty)
-  return (rt', restpat, shapepat)
-  where extract t = setArrayShape t . Shape <$>
-                    mapM extract' (shapeDims $ arrayShape t)
-        extract' (Free se) = return se
-        extract' (Ext x)   = correspondingVar x
-        correspondingVar x = do
-          (remnames, m) <- get
-          case (remnames, M.lookup x m) of
-            (_, Just v) -> return $ Var $ patElemName v
-            (v:vs, Nothing)
-              | Prim (IntType Int32) <- patElemType v -> do
-                tell [v]
-                put (vs, M.insert x v m)
-                return $ Var $ patElemName v
-            (_, Nothing) ->
-              lift $ Left "Pattern cannot match context"
+matchExtBranchType :: Checkable lore =>
+                      [ExtType] -> Body (Aliases lore) -> TypeM lore ()
+matchExtBranchType rettype (Body _ stms res) = do
+  ts <- extendedScope (traverse subExpType res) stmscope
+  matchExtReturns rettype res ts
+  where stmscope = scopeOf stms
+
+matchExtReturns :: Checkable lore =>
+                   [ExtType] -> Result -> [Type] -> TypeM lore ()
+matchExtReturns rettype res ts = do
+  let problem :: TypeM lore a
+      problem = bad $ TypeError $ unlines [ "Type annotation is"
+                                          , "  " ++ prettyTuple rettype
+                                          , "But result returns type"
+                                          , "  " ++ prettyTuple ts ]
+
+  let (ctx_res, val_res) = splitFromEnd (length rettype) res
+      (ctx_ts, val_ts) = splitFromEnd (length rettype) ts
+
+  unless (length val_res == length rettype) problem
+
+  let ctx_vals = zip ctx_res ctx_ts
+      instantiateExt i = case maybeNth i ctx_vals of
+                           Just (se, Prim (IntType Int32)) -> return se
+                           _ -> problem
+
+  rettype' <- instantiateShapes instantiateExt rettype
+
+  unless (rettype' == val_ts) problem
 
 validApply :: ArrayShape shape =>
               [TypeBase shape Uniqueness]
@@ -1086,7 +1072,7 @@ checkExtLambda (ExtLambda params body rettype) args =
                body) consumable $
       checkStms (bodyStms body) $ do
         checkResult $ bodyResult body
-        matchExtReturnType fname rettype $ bodyResult body
+        matchExtReturnType rettype $ bodyResult body
     else bad $ TypeError $
          "Existential lambda defined with " ++ show (length params) ++
          " parameters, but expected to take " ++ show (length args) ++ " arguments."
@@ -1103,4 +1089,5 @@ class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
   matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
   primFParam :: VName -> PrimType -> TypeM lore (FParam (Aliases lore))
   primLParam :: VName -> PrimType -> TypeM lore (LParam (Aliases lore))
-  matchReturnType :: Name -> [RetType lore] -> Result -> TypeM lore ()
+  matchReturnType :: [RetType lore] -> Result -> TypeM lore ()
+  matchBranchType :: [BranchType lore] -> Body (Aliases lore) -> TypeM lore ()

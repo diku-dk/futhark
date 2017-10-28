@@ -170,44 +170,7 @@ internaliseStreamLambda internaliseLambda lam rowts = do
       chunktypes = map (`arrayOfRow` I.Var chunk_size) rowts
   (params, body, rettype) <- localScope (scopeOfLParams [chunk_param]) $
                              internaliseLambda lam chunktypes
-
-
-  -- The accumulator result of the body must have the exact same
-  -- shape as the initial accumulator.  We accomplish this with
-  -- an assertion and reshape().  For the result arrays, we allow
-  -- the outermost dimension to be existential, but we require
-  -- all inner dimensions to be specified by the user, so we can
-  -- check them with an assertion and reshape().
-  --
-  let assertProperShape t se =
-        let name = "result_stream_proper_shape"
-        in  ensureShape asserting "shape of result does not match shape of initial value"
-            (srclocOf lam) t name se
-
-  body' <- insertStmsM $ do
-                let mkArrType :: (VName, ExtType) -> InternaliseM I.Type
-                    mkArrType (x, I.Array btp shp u) = do
-                      dsx <- I.shapeDims . I.arrayShape <$> I.lookupType x
-                      let dsrtpx =  I.shapeDims shp
-                          resdims= zipWith (\ dx drtpx ->
-                                                  case drtpx of
-                                                    Ext  _ -> dx
-                                                    Free s -> s
-                                           ) dsx dsrtpx
-                      return $ I.Array btp (I.Shape resdims) u
-                    mkArrType (_, I.Prim btp ) =
-                      return $ I.Prim btp
-                    mkArrType (_, I.Mem se sid) =
-                      return $ I.Mem se sid
-                lamres <- bodyBind body
-                let lamarr_idtps = concatMap (\(y,tp) -> case y of
-                                                           I.Var ii -> [(ii,tp)]
-                                                           _        -> []
-                                             ) (zip lamres rettype)
-                arrtype' <- mapM mkArrType lamarr_idtps
-                reses <- zipWithM assertProperShape arrtype' lamres
-                return $ resultBody reses
-  return $ I.ExtLambda (chunk_param:params) body' rettype
+  return $ I.ExtLambda (chunk_param:params) body rettype
 
 -- Given @k@ lambdas, this will return a lambda that returns an
 -- (k+2)-element tuple of integers.  The first element is the

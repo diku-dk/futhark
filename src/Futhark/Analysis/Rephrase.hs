@@ -30,6 +30,7 @@ data Rephraser m from to
               , rephraseLParamLore :: LParamAttr from -> m (LParamAttr to)
               , rephraseBodyLore :: BodyAttr from -> m (BodyAttr to)
               , rephraseRetType :: RetType from -> m (RetType to)
+              , rephraseBranchType :: BranchType from -> m (BranchType to)
               , rephraseOp :: Op from -> m (Op to)
               }
 
@@ -94,6 +95,7 @@ mapper :: Monad m => Rephraser m from to -> Mapper from to m
 mapper rephraser = identityMapper {
     mapOnBody = const $ rephraseBody rephraser
   , mapOnRetType = rephraseRetType rephraser
+  , mapOnBranchType = rephraseBranchType rephraser
   , mapOnFParam = rephraseParam (rephraseFParamLore rephraser)
   , mapOnLParam = rephraseParam (rephraseLParamLore rephraser)
   , mapOnOp = rephraseOp rephraser
@@ -103,20 +105,16 @@ mapper rephraser = identityMapper {
 castStm :: (SameScope from to,
             ExpAttr from ~ ExpAttr to,
             BodyAttr from ~ BodyAttr to,
-            RetType from ~ RetType to) =>
+            RetType from ~ RetType to,
+            BranchType from ~ BranchType to) =>
            Stm from -> Maybe (Stm to)
 castStm = rephraseStm caster
-
-caster :: (SameScope from to,
-           ExpAttr from ~ ExpAttr to,
-           BodyAttr from ~ BodyAttr to,
-           RetType from ~ RetType to) =>
-          Rephraser Maybe from to
-caster = Rephraser { rephraseExpLore = Just
-                   , rephraseBodyLore = Just
-                   , rephraseLetBoundLore = Just
-                   , rephraseFParamLore = Just
-                   , rephraseLParamLore = Just
-                   , rephraseOp = const Nothing
-                   , rephraseRetType = Just
-                   }
+  where caster = Rephraser { rephraseExpLore = Just
+                           , rephraseBodyLore = Just
+                           , rephraseLetBoundLore = Just
+                           , rephraseFParamLore = Just
+                           , rephraseLParamLore = Just
+                           , rephraseOp = const Nothing
+                           , rephraseRetType = Just
+                           , rephraseBranchType = Just
+                           }

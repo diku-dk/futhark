@@ -128,7 +128,7 @@ newId = do (i,m,cm) <- get
            return i
 
 internaliseDim :: E.DimDecl VName
-               -> InternaliseTypeM ExtDimSize
+               -> InternaliseTypeM ExtSize
 internaliseDim d =
   case d of
     E.AnyDim -> Ext <$> newId
@@ -236,7 +236,7 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
                     put $ i + 1
                     return i
 
-data TypeArg = TypeArgDim ExtDimSize | TypeArgType [I.ExtType]
+data TypeArg = TypeArgDim ExtSize | TypeArgType [I.ExtType]
 
 internaliseTypeArg :: E.StructTypeArg -> InternaliseTypeM TypeArg
 internaliseTypeArg (E.TypeArgDim d _) =

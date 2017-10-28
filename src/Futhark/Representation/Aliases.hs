@@ -110,6 +110,7 @@ instance (Annotations lore, CanBeAliased (Op lore)) =>
   type FParamAttr (Aliases lore) = FParamAttr lore
   type LParamAttr (Aliases lore) = LParamAttr lore
   type RetType (Aliases lore) = RetType lore
+  type BranchType (Aliases lore) = BranchType lore
   type Op (Aliases lore) = OpWithAliases (Op lore)
 
 instance AliasesOf (VarAliases, attr) where
@@ -117,10 +118,15 @@ instance AliasesOf (VarAliases, attr) where
 
 instance FreeAttr Names' where
 
+withoutAliases :: (HasScope (Aliases lore) m, Monad m) =>
+                 ReaderT (Scope lore) m a -> m a
+withoutAliases m = do
+  scope <- asksScope removeScopeAliases
+  runReaderT m scope
+
 instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) where
-  expContext pat e = do
-    env <- asksScope removeScopeAliases
-    return $ runReader (expContext (removePatternAliases pat) (removeExpAliases e)) env
+  expTypesFromPattern =
+    withoutAliases . expTypesFromPattern . removePatternAliases
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyAttr
@@ -192,6 +198,7 @@ removeAliases = Rephraser { rephraseExpLore = return . snd
                           , rephraseFParamLore = return
                           , rephraseLParamLore = return
                           , rephraseRetType = return
+                          , rephraseBranchType = return
                           , rephraseOp = return . removeOpAliases
                           }
 

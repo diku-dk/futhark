@@ -60,6 +60,7 @@ analyseExp = mapExp analyse
                  , mapOnVName = return
                  , mapOnBody = const $ return . analyseBody
                  , mapOnRetType = return
+                 , mapOnBranchType = return
                  , mapOnFParam = return
                  , mapOnLParam = return
                  , mapOnOp = return . addOpAliases

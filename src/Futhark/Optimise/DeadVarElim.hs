@@ -113,15 +113,10 @@ deadCodeElimExp = mapExpM mapper
                  , mapOnVName = deadCodeElimVName
                  , mapOnCertificates = \(Certificates cs) ->
                      Certificates <$> mapM deadCodeElimVName cs
-                 , mapOnRetType = \rt -> do
-                   seen $ freeIn rt
-                   return rt
-                 , mapOnFParam = \fparam -> do
-                   seen $ freeIn fparam
-                   return fparam
-                 , mapOnLParam = \lparam -> do
-                   seen $ freeIn lparam
-                   return lparam
+                 , mapOnRetType = \rt -> seen (freeIn rt) >> return rt
+                 , mapOnBranchType = \rt -> seen (freeIn rt) >> return rt
+                 , mapOnFParam = \fparam -> seen (freeIn fparam) >> return fparam
+                 , mapOnLParam = \lparam -> seen (freeIn lparam) >> return lparam
                  , mapOnOp = \op -> seen (freeIn op) >> return op
                  }
 

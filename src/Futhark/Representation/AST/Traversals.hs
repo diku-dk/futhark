@@ -34,6 +34,7 @@ module Futhark.Representation.AST.Traversals
   , mapExp
   , mapOnType
   , mapOnLoopForm
+  , mapOnExtType
 
   -- * Walking
   , Walker(..)
@@ -66,6 +67,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnVName :: VName -> m VName
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
+  , mapOnBranchType :: BranchType flore -> m (BranchType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
   , mapOnLParam :: LParam flore -> m (LParam tlore)
   , mapOnOp :: Op flore -> m (Op tlore)
@@ -79,6 +81,7 @@ identityMapper = Mapper {
                  , mapOnVName = return
                  , mapOnCertificates = return
                  , mapOnRetType = return
+                 , mapOnBranchType = return
                  , mapOnFParam = return
                  , mapOnLParam = return
                  , mapOnOp = return
@@ -109,7 +112,7 @@ mapExpM tv (BasicOp (UnOp op x)) =
   BasicOp <$> (UnOp op <$> mapOnSubExp tv x)
 mapExpM tv (If c texp fexp (IfAttr ts s)) =
   If <$> mapOnSubExp tv c <*> mapOnBody tv mempty texp <*> mapOnBody tv mempty fexp <*>
-        (IfAttr <$> mapM (mapOnExtType tv) ts <*> pure s)
+        (IfAttr <$> mapM (mapOnBranchType tv) ts <*> pure s)
 mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
@@ -207,6 +210,7 @@ data Walker lore m = Walker {
   , walkOnVName :: VName -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
+  , walkOnBranchType :: BranchType lore -> m ()
   , walkOnFParam :: FParam lore -> m ()
   , walkOnLParam :: LParam lore -> m ()
   , walkOnOp :: Op lore -> m ()
@@ -220,6 +224,7 @@ identityWalker = Walker {
                  , walkOnVName = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()
+                 , walkOnBranchType = const $ return ()
                  , walkOnFParam = const $ return ()
                  , walkOnLParam = const $ return ()
                  , walkOnOp = const $ return ()
@@ -232,6 +237,7 @@ walkMapper f = Mapper {
                , mapOnVName = wrap walkOnVName
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType
+               , mapOnBranchType = wrap walkOnBranchType
                , mapOnFParam = wrap walkOnFParam
                , mapOnLParam = wrap walkOnLParam
                , mapOnOp = wrap walkOnOp

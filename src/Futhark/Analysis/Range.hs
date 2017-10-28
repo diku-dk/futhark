@@ -76,6 +76,7 @@ analyseExp = mapExpM analyse
                     , mapOnVName = return
                     , mapOnBody = const analyseBody
                     , mapOnRetType = return
+                    , mapOnBranchType = return
                     , mapOnFParam = return
                     , mapOnLParam = return
                     , mapOnOp = return . addOpRanges

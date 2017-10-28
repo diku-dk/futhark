@@ -60,7 +60,8 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      BodyAttr outerlore ~ (), BodyAttr lore ~ (),
                      ExpAttr lore ~ ExpAttr outerlore,
                      SameScope lore outerlore,
-                     RetType lore ~ RetType outerlore) =>
+                     RetType lore ~ RetType outerlore,
+                     BranchType lore ~ BranchType outerlore) =>
                     Engine.SimpleOps lore -> Engine.Env (Engine.SimpleM lore)
                  -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore))
 simplifyKernelOp ops env (Kernel desc space ts kbody) = do
@@ -90,7 +91,9 @@ simplifyKernelOp _ _ (SufficientParallelism se) =
   SufficientParallelism <$> Engine.simplify se
 
 processHoistedStm :: (PrettyLore from, MonadBinder m, ExpAttr from ~ ExpAttr (Lore m),
-                      BodyAttr from ~ BodyAttr (Lore m), RetType from ~ RetType (Lore m),
+                      BodyAttr from ~ BodyAttr (Lore m),
+                      RetType from ~ RetType (Lore m),
+                      BranchType from ~ BranchType (Lore m),
                       LetAttr from ~ LetAttr (Lore m),
                       FParamAttr from ~ FParamAttr (Lore m),
                       LParamAttr from ~ LParamAttr (Lore m)) =>

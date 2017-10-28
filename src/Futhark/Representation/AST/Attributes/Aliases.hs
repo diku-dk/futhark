@@ -90,10 +90,12 @@ funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
 expAliases :: (Aliased lore) => Exp lore -> [Names]
-expAliases (If _ tb fb _) =
-  ifAliases
-  (bodyAliases tb, consumedInBody tb)
-  (bodyAliases fb, consumedInBody fb)
+expAliases (If _ tb fb attr) =
+  drop (length all_aliases - length ts) all_aliases
+  where ts = ifReturns attr
+        all_aliases = ifAliases
+                      (bodyAliases tb, consumedInBody tb)
+                      (bodyAliases fb, consumedInBody fb)
 expAliases (BasicOp op) = primOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
   map (`S.difference` merge_names) val_aliases

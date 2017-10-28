@@ -3,8 +3,8 @@
 --
 -- ==
 -- structure distributed {
---   Kernel 1
---   DoLoop 2
+--   Kernel 2
+--   DoLoop 3
 -- }
 
 import "/futlib/math"

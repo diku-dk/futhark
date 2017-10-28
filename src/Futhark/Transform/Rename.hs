@@ -266,6 +266,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnVName = rename
                     , mapOnCertificates = rename
                     , mapOnRetType = rename
+                    , mapOnBranchType = rename
                     , mapOnFParam = rename
                     , mapOnLParam = rename
                     , mapOnOp = rename
@@ -304,7 +305,7 @@ instance Rename Rank where
 instance Rename d => Rename (ShapeBase d) where
   rename (Shape l) = Shape <$> mapM rename l
 
-instance Rename ExtDimSize where
+instance Rename ExtSize where
   rename (Free se) = Free <$> rename se
   rename (Ext x)   = return $ Ext x
 
@@ -322,4 +323,5 @@ type Renameable lore = (Rename (LetAttr lore),
                         Rename (FParamAttr lore),
                         Rename (LParamAttr lore),
                         Rename (RetType lore),
+                        Rename (BranchType lore),
                         Rename (Op lore))

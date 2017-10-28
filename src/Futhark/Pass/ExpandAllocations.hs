@@ -211,6 +211,14 @@ offsetMemoryInMemBound offsets (MemArray bt shape u (ArrayIn mem ixfun))
 offsetMemoryInMemBound _ summary =
   summary
 
+offsetMemoryInBodyReturns :: RebaseMap -> BodyReturns -> BodyReturns
+offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem ixfun))
+  | Just ixfun' <- isStaticIxFun ixfun,
+    Just new_base <- lookupNewBase mem (IxFun.base ixfun') offsets =
+      MemArray pt shape u $ ReturnsInBlock mem $
+      IxFun.rebase (fmap (fmap Free) new_base) ixfun
+offsetMemoryInBodyReturns _ br = br
+
 offsetMemoryInExp :: RebaseMap -> Exp InKernel -> Exp InKernel
 offsetMemoryInExp offsets (DoLoop ctx val form body) =
   DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
@@ -235,5 +243,7 @@ offsetMemoryInExp offsets (Op (Inner (GroupReduce w lam input))) =
 offsetMemoryInExp offsets (Op (Inner (Combine cspace ts active body))) =
   Op $ Inner $ Combine cspace ts active $ offsetMemoryInBody offsets body
 offsetMemoryInExp offsets e = mapExp recurse e
-  where recurse = identityMapper { mapOnBody = const $ return . offsetMemoryInBody offsets
-                                 }
+  where recurse = identityMapper
+                  { mapOnBody = const $ return . offsetMemoryInBody offsets
+                  , mapOnBranchType = return . offsetMemoryInBodyReturns offsets
+                  }

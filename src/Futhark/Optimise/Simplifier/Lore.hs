@@ -7,6 +7,7 @@ module Futhark.Optimise.Simplifier.Lore
        (
          Wise
        , VarWisdom (..)
+       , ExpWisdom
        , removeStmWisdom
        , removeLambdaWisdom
        , removeExtLambdaWisdom
@@ -120,12 +121,19 @@ instance (Annotations lore,
   type FParamAttr (Wise lore) = FParamAttr lore
   type LParamAttr (Wise lore) = LParamAttr lore
   type RetType (Wise lore) = RetType lore
+  type BranchType (Wise lore) = BranchType lore
   type Op (Wise lore) = OpWithWisdom (Op lore)
 
+withoutWisdom :: (HasScope (Wise lore) m, Monad m) =>
+                 ReaderT (Scope lore) m a ->
+                 m a
+withoutWisdom m = do
+  scope <- asksScope removeScopeWisdom
+  runReaderT m scope
+
 instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
-  expContext pat e = do
-    types <- asksScope removeScopeWisdom
-    runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types
+  expTypesFromPattern =
+    withoutWisdom . expTypesFromPattern . removePatternWisdom
 
 instance PrettyAnnot (PatElemT attr) => PrettyAnnot (PatElemT (VarWisdom, attr)) where
   ppAnnot = ppAnnot . fmap snd
@@ -153,6 +161,7 @@ removeWisdom = Rephraser { rephraseExpLore = return . snd
                          , rephraseFParamLore = return
                          , rephraseLParamLore = return
                          , rephraseRetType = return
+                         , rephraseBranchType = return
                          , rephraseOp = return . removeOpWisdom
                          }
 
