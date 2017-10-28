@@ -64,7 +64,8 @@ where
 import qualified Data.Array as A
 import qualified Data.Map.Strict as M
 import Data.Loc (SrcLoc)
-
+import Data.List
+import Data.Ord
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
@@ -133,13 +134,13 @@ eSubExp :: MonadBinder m =>
            SubExp -> m (Exp (Lore m))
 eSubExp = pure . BasicOp . SubExp
 
-eIf :: MonadBinder m =>
+eIf :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
     -> m (Exp (Lore m))
 eIf ce te fe = eIf' ce te fe IfNormal
 
 -- | As 'eIf', but an 'IfSort' can be given.
-eIf' :: MonadBinder m =>
+eIf' :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
         m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
      -> IfSort
      -> m (Exp (Lore m))
@@ -147,8 +148,17 @@ eIf' ce te fe if_sort = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertStmsM te
   fe' <- insertStmsM fe
+  -- We need to construct the context.
   ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
-  return $ If ce' te' fe' (IfAttr ts if_sort)
+  te'' <- addContextForBranch ts te'
+  fe'' <- addContextForBranch ts fe'
+  return $ If ce' te'' fe'' $ IfAttr ts if_sort
+  where addContextForBranch ts (Body _ stms val_res) = do
+          body_ts <- extendedScope (traverse subExpType val_res) stmsscope
+          let ctx_res = map snd $ sortBy (comparing fst) $
+                        M.toList $ shapeExtMapping ts body_ts
+          mkBodyM stms $ ctx_res++val_res
+            where stmsscope = scopeOf stms
 
 eBinOp :: MonadBinder m =>
           BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
@@ -353,7 +363,7 @@ isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) slice
         allOfIt d (DimSlice _ n _) = d == n
         allOfIt _ _ = False
 
-ifCommon :: [Type] -> IfAttr
+ifCommon :: [Type] -> IfAttr ExtType
 ifCommon ts = IfAttr (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.

@@ -12,7 +12,6 @@ module Futhark.Representation.AST.Syntax
   -- * Types
   , Uniqueness(..)
   , NoUniqueness(..)
-  , ExtDimSize(..)
   , Rank(..)
   , ArrayShape(..)
   , Space (..)
@@ -262,7 +261,7 @@ data ExpT lore
 
   | Apply  Name [(SubExp, Diet)] [RetType lore] (SrcLoc, [SrcLoc])
 
-  | If     SubExp (BodyT lore) (BodyT lore) IfAttr
+  | If     SubExp (BodyT lore) (BodyT lore) (IfAttr (BranchType lore))
 
   | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] (LoopForm lore) (BodyT lore)
     -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
@@ -283,10 +282,10 @@ deriving instance Annotations lore => Show (LoopForm lore)
 deriving instance Annotations lore => Ord (LoopForm lore)
 
 -- | Data associated with a branch.
-data IfAttr = IfAttr { ifExtType :: [ExtType]
-                     , ifSort :: IfSort
-                     }
-              deriving (Eq, Show, Ord)
+data IfAttr rt = IfAttr { ifReturns :: [rt]
+                        , ifSort :: IfSort
+                        }
+                 deriving (Eq, Show, Ord)
 
 data IfSort = IfNormal -- ^ An ordinary branch.
             | IfFallback -- ^ A branch where the "true" case is what

@@ -36,6 +36,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplifier.Engine (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Pass
+import Futhark.Util (splitFromEnd)
 
 type InInKernel = Futhark.Representation.Kernels.InKernel
 type OutInKernel = Futhark.Representation.ExplicitMemory.InKernel
@@ -82,6 +83,7 @@ type Allocable fromlore tolore =
   (ExplicitMemorish tolore,
    SameScope fromlore Kernels,
    RetType fromlore ~ RetType Kernels,
+   BranchType fromlore ~ BranchType Kernels,
    BodyAttr fromlore ~ (),
    BodyAttr tolore ~ (),
    ExpAttr tolore ~ (),
@@ -273,7 +275,7 @@ allocsForPattern :: Allocator lore m =>
                        [AllocStm])
 allocsForPattern sizeidents validents rts hints = do
   let sizes' = [ PatElem size BindVar $ MemPrim int32 | size <- map identName sizeidents ]
-  (vals,(memsizes, mems, postbnds)) <-
+  (vals,(mems_and_sizes, postbnds)) <-
     runWriterT $ forM (zip3 validents rts hints) $ \((ident,bindage), rt, hint) -> do
       let shape = arrayShape $ identType ident
       case rt of
@@ -289,16 +291,17 @@ allocsForPattern sizeidents validents rts hints = do
           return $ PatElem (identName ident) bindage $
           MemMem (intConst Int32 0) space
 
-        MemArray bt _ u (Just (ReturnsInBlock mem ixfun)) ->
+        MemArray bt _ u (Just (ReturnsInBlock mem ixfun)) -> do
+          ixfun' <- instantiateIxFun ixfun
           case bindage of
             BindVar ->
               return $ PatElem (identName ident) bindage $
-              MemArray bt shape u $ ArrayIn mem ixfun
+              MemArray bt shape u $ ArrayIn mem ixfun'
             BindInPlace src slice -> do
               (destmem,destixfun) <- lift $ lookupArraySummary src
-              if destmem == mem && destixfun == ixfun
+              if destmem == mem && destixfun == ixfun'
                 then return $ PatElem (identName ident) bindage $
-                     MemArray bt shape u $ ArrayIn mem ixfun
+                     MemArray bt shape u $ ArrayIn mem ixfun'
                 else do
                 -- The expression returns at some specific memory
                 -- location, but we want to put the result somewhere
@@ -308,12 +311,12 @@ allocsForPattern sizeidents validents rts hints = do
                 tmp_buffer <- lift $
                               newIdent (baseString (identName ident)<>"_ext_buffer")
                               (identType ident `setArrayDims` sliceDims slice)
-                tell ([], [],
+                tell ([],
                       [ArrayCopy (identName ident) bindage $
                        identName tmp_buffer])
                 return $ PatElem (identName tmp_buffer) BindVar $
                   MemArray bt (arrayShape $ identType tmp_buffer) u $
-                  ArrayIn mem ixfun
+                  ArrayIn mem ixfun'
 
         MemArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
@@ -332,8 +335,8 @@ allocsForPattern sizeidents validents rts hints = do
                             newIdent (baseString (identName ident)<>"_ext_buffer")
                             (identType ident `setArrayDims` sliceDims slice)
               (memsize,mem,(_,ixfun)) <- lift $ memForBindee tmp_buffer
-              tell ([PatElem (identName memsize) BindVar $ MemPrim int64],
-                    [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
+              tell ([PatElem (identName memsize) BindVar $ MemPrim int64,
+                     PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                     [ArrayCopy (identName ident) bindage $
                      identName tmp_buffer])
               return $ PatElem (identName tmp_buffer) BindVar $
@@ -342,18 +345,23 @@ allocsForPattern sizeidents validents rts hints = do
 
         MemArray bt _ u _ -> do
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
-          tell ([PatElem (identName memsize) BindVar $ MemPrim int64],
-                [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
+          tell ([PatElem (identName memsize) BindVar $ MemPrim int64,
+                 PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                 [])
           return $ PatElem (identName ident') bindage $ MemArray bt shape u $
             ArrayIn (identName mem) ixfun
 
-  return (memsizes <> mems <> sizes',
+  return (sizes' <> mems_and_sizes,
           vals,
           postbnds)
   where knownShape = mapM known . shapeDims
         known (Free v) = Just v
         known Ext{} = Nothing
+
+instantiateIxFun :: Monad m => ExtIxFun -> m IxFun
+instantiateIxFun = traverse $ traverse inst
+  where inst Ext{} = fail "instantiateIxFun: not yet"
+        inst (Free x) = return x
 
 summaryForBindage :: (ExplicitMemorish lore, Allocator lore m) =>
                      Type -> Bindage -> ExpHint
@@ -399,15 +407,15 @@ allocInFParams :: (Allocable fromlore tolore) =>
                   ([FParam tolore] -> AllocM fromlore tolore a)
                -> AllocM fromlore tolore a
 allocInFParams params m = do
-  (valparams, (memsizeparams, memparams)) <-
+  (valparams, memparams) <-
     runWriterT $ mapM allocInFParam params
-  let params' = memsizeparams <> memparams <> valparams
+  let params' = memparams <> valparams
       summary = scopeOfFParams params'
   localScope summary $ m params'
 
 allocInFParam :: (Allocable fromlore tolore) =>
                  FParam fromlore
-              -> WriterT ([FParam tolore], [FParam tolore])
+              -> WriterT [FParam tolore]
                  (AllocM fromlore tolore) (FParam tolore)
 allocInFParam param =
   case paramDeclType param of
@@ -416,8 +424,8 @@ allocInFParam param =
           ixfun = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
       memsize <- lift $ newVName (memname <> "_size")
       mem <- lift $ newVName memname
-      tell ([Param memsize $ MemPrim int64],
-            [Param mem $ MemMem (Var memsize) DefaultSpace])
+      tell [ Param memsize $ MemPrim int64
+           , Param mem $ MemMem (Var memsize) DefaultSpace]
       return param { paramAttr =  MemArray bt shape u $ ArrayIn mem ixfun }
     Prim bt ->
       return param { paramAttr = MemPrim bt }
@@ -434,17 +442,17 @@ allocInMergeParams :: (Allocable fromlore tolore,
                        -> AllocM fromlore tolore a)
                    -> AllocM fromlore tolore a
 allocInMergeParams variant merge m = do
-  ((valparams, handle_loop_subexps), (memsizeparams, memparams)) <-
+  ((valparams, handle_loop_subexps), mem_and_size_params) <-
     runWriterT $ unzip <$> mapM allocInMergeParam merge
-  let mergeparams' = memsizeparams <> memparams <> valparams
+  let mergeparams' = mem_and_size_params <> valparams
       summary = scopeOfFParams mergeparams'
 
       mk_loop_res ses = do
-        (valargs, (memsizeargs, memargs)) <-
+        (valargs, memargs) <-
           runWriterT $ zipWithM ($) handle_loop_subexps ses
-        return (memsizeargs <> memargs, valargs)
+        return (memargs, valargs)
 
-  localScope summary $ m (memsizeparams<>memparams) valparams mk_loop_res
+  localScope summary $ m mem_and_size_params valparams mk_loop_res
   where allocInMergeParam (mergeparam, Var v)
           | Array bt shape Unique <- paramDeclType mergeparam,
             loopInvariantShape mergeparam = do
@@ -517,19 +525,19 @@ funcallArgs :: (Allocable fromlore tolore,
                 Allocator tolore (AllocM fromlore tolore)) =>
                [(SubExp,Diet)] -> AllocM fromlore tolore [(SubExp,Diet)]
 funcallArgs args = do
-  (valargs, (memsizeargs, memargs)) <- runWriterT $ forM args $ \(arg,d) -> do
+  (valargs, mem_and_size_args) <- runWriterT $ forM args $ \(arg,d) -> do
     t <- lift $ subExpType arg
     arg' <- linearFuncallArg t arg
     return (arg', d)
-  return $ map (,Observe) (memsizeargs <> memargs) <> valargs
+  return $ map (,Observe) mem_and_size_args <> valargs
 
 linearFuncallArg :: (Allocable fromlore tolore,
                      Allocator tolore (AllocM fromlore tolore)) =>
                     Type -> SubExp
-                 -> WriterT ([SubExp], [SubExp]) (AllocM fromlore tolore) SubExp
+                 -> WriterT [SubExp] (AllocM fromlore tolore) SubExp
 linearFuncallArg Array{} (Var v) = do
   (size, mem, arg') <- lift $ ensureDirectArray v
-  tell ([size], [Var mem])
+  tell [size, Var mem]
   return arg'
 linearFuncallArg _ arg =
   return arg
@@ -545,17 +553,20 @@ memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Prim t) = return $ MemPrim t
         addAttr Mem{} = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
-          i <- get
-          put $ i + 1
-          return $ MemArray bt shape u $ ReturnsNewBlock i Nothing
+          i <- get <* modify (+2)
+          return $ MemArray bt shape u $ ReturnsNewBlock DefaultSpace (i+1) (Ext i) $
+            IxFun.iota $ map convert $ shapeDims shape
+
+        convert (Ext i) = LeafExp (Ext i) int32
+        convert (Free v) = Free <$> primExpFromSubExp int32 v
 
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
-startOfFreeIDRange = (1+) . S.foldl' max 0 . shapeContext
+startOfFreeIDRange = S.size . shapeContext
 
 allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
 allocInFun (FunDef entry fname rettype params fbody) =
   runAllocM handleOp $ allocInFParams params $ \params' -> do
-    fbody' <- insertStmsM $ allocInBody fbody
+    fbody' <- insertStmsM $ allocInFunBody (length rettype) fbody
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
     where handleOp GroupSize =
             return $ Inner GroupSize
@@ -598,12 +609,29 @@ allocInBodyNoDirect (Body _ bnds res) =
   allocInStms bnds $ \bnds' ->
     return $ Body () bnds' res
 
-allocInBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-               Body fromlore -> AllocM fromlore tolore (Body tolore)
-allocInBody (Body _ bnds res) =
+bodyReturnMemCtx :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                    SubExp -> AllocM fromlore tolore [SubExp]
+bodyReturnMemCtx Constant{} =
+  return []
+bodyReturnMemCtx (Var v) = do
+  info <- lookupMemInfo v
+  case info of
+    MemPrim{} -> return []
+    MemMem{} -> return [] -- should not happen
+    MemArray _ _ _ (ArrayIn mem _) -> do
+      size <- lookupMemSize mem
+      return [size, Var mem]
+
+allocInFunBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
+                  Int -> Body fromlore -> AllocM fromlore tolore (Body tolore)
+allocInFunBody num_vals (Body _ bnds res) =
   allocInStms bnds $ \bnds' -> do
-    (ses, allocs) <- collectStms $ mapM ensureDirect res
-    return $ Body () (bnds'<>allocs) ses
+    (res'', allocs) <- collectStms $ do
+      res' <- mapM ensureDirect res
+      let (ctx_res, val_res) = splitFromEnd num_vals res'
+      mem_ctx_res <- concat <$> mapM bodyReturnMemCtx val_res
+      return $ ctx_res <> mem_ctx_res <> val_res
+    return $ Body () (bnds'<>allocs) res''
   where ensureDirect se@Constant{} = return se
         ensureDirect (Var v) = do
           bt <- primType <$> lookupType v
@@ -649,10 +677,10 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
     (valinit_ctx, valinit') <- mk_loop_val valinit
     body' <- insertStmsM $ allocInStms bodybnds $ \bodybnds' -> do
       ((val_ses,valres'),val_retbnds) <- collectStms $ mk_loop_val valres
-      return $ Body () (bodybnds'<>val_retbnds) (val_ses++ctxres++valres')
+      return $ Body () (bodybnds'<>val_retbnds) (ctxres++val_ses++valres')
     return $
       DoLoop
-      (zip (new_ctx_params++ctxparams') (valinit_ctx++ctxinit))
+      (zip (ctxparams'++new_ctx_params) (ctxinit++valinit_ctx))
       (zip valparams' valinit')
       form' body'
   where (_ctxparams, ctxinit) = unzip ctx
@@ -661,15 +689,36 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype) loc
+allocInExp (If cond tbranch fbranch (IfAttr rets ifsort)) = do
+  tbranch' <- allocInFunBody (length rets) tbranch
+  fbranch' <- allocInFunBody (length rets) fbranch
+  let rets' = createBodyReturns rets
+  return $ If cond tbranch' fbranch' $ IfAttr rets' ifsort
 allocInExp e = mapExpM alloc e
   where alloc =
-          identityMapper { mapOnBody = const allocInBody
+          identityMapper { mapOnBody = fail "Unhandled Body in ExplicitAllocations"
                          , mapOnRetType = fail "Unhandled RetType in ExplicitAllocations"
+                         , mapOnBranchType = fail "Unhandled BranchType in ExplicitAllocations"
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
                          , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
                          , mapOnOp = \op -> do handle <- asks allocInOp
                                                handle op
                          }
+
+createBodyReturns :: [ExtType] -> [BodyReturns]
+createBodyReturns ts =
+  evalState (mapM inspect ts) $ S.size $ shapeContext ts
+  where inspect (Array pt shape u) = do
+          i <- get <* modify (+2)
+          return $ MemArray pt shape u $ ReturnsNewBlock DefaultSpace (i+1) (Ext i) $
+            IxFun.iota $ map convert $ shapeDims shape
+        inspect (Prim pt) =
+          return $ MemPrim pt
+        inspect (Mem size space) =
+          return $ MemMem (Free size) space
+
+        convert (Ext i) = LeafExp (Ext i) int32
+        convert (Free v) = Free <$> primExpFromSubExp int32 v
 
 allocInLoopForm :: (Allocable fromlore tolore,
                     Allocator tolore (AllocM fromlore tolore)) =>

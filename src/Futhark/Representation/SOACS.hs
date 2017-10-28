@@ -36,6 +36,8 @@ module Futhark.Representation.SOACS
        )
 where
 
+import Control.Monad
+
 import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
@@ -62,6 +64,7 @@ instance Annotations SOACS where
   type Op SOACS = SOAC SOACS
 
 instance Attributes SOACS where
+  expTypesFromPattern = return . expExtTypesFromPattern
 
 type Prog = AST.Prog SOACS
 type BasicOp = AST.BasicOp SOACS
@@ -85,15 +88,13 @@ instance TypeCheck.Checkable SOACS where
   checkLetBoundLore _ = TypeCheck.checkType
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   checkOp = typeCheckSOAC
-  matchPattern pat e = do
-    et <- expExtType e
-    TypeCheck.matchExtPattern (patternElements pat) et
+  matchPattern pat = TypeCheck.matchExtPattern pat <=< expExtType
   primFParam name t =
     return $ AST.Param name (AST.Prim t)
   primLParam name t =
     return $ AST.Param name (AST.Prim t)
-  matchReturnType name ts =
-    TypeCheck.matchExtReturnType name $ map fromDecl ts
+  matchReturnType = TypeCheck.matchExtReturnType . map fromDecl
+  matchBranchType = TypeCheck.matchExtBranchType
 
 instance Bindable SOACS where
   mkBody = AST.Body ()

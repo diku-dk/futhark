@@ -14,7 +14,6 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.Attributes.Patterns
   , module Futhark.Representation.AST.Attributes.Names
   , module Futhark.Representation.AST.RetType
-  , module Futhark.Representation.AST.Attributes.Context
 
   -- * Built-in functions
   , isBuiltInFunction
@@ -32,6 +31,7 @@ module Futhark.Representation.AST.Attributes
   , defAux
   , stmCerts
   , certify
+  , expExtTypesFromPattern
 
   , IsOp (..)
   , Attributes (..)
@@ -51,7 +51,6 @@ import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.TypeOf
-import Futhark.Representation.AST.Attributes.Context
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Pretty
@@ -229,16 +228,17 @@ class (Annotations lore,
        FreeIn (FParamAttr lore),
        FreeIn (LParamAttr lore),
        FreeIn (RetType lore),
+       FreeIn (BranchType lore),
 
        IsOp (Op lore)) => Attributes lore where
-  -- | As far as possible, determine the subexpression to which each
-  -- context pattern element will be bound due to evaluation of the
-  -- given expression.  The resulting list must have the same number
-  -- of elements as there are context elements in the pattern.
-  --
-  -- The default method invokes 'expExtContext'.
-  expContext :: (HasScope lore m, Monad m) =>
-                Pattern lore ->
-                Exp lore ->
-                m [Maybe SubExp]
-  expContext = expExtContext
+  -- | Given a pattern, construct the type of a body that would match
+  -- it.  An implementation for many lores would be
+  -- 'expExtTypesFromPattern'.
+  expTypesFromPattern :: (HasScope lore m, Monad m) =>
+                         Pattern lore -> m [BranchType lore]
+
+-- | Construct the type of an expression that would match the pattern.
+expExtTypesFromPattern :: Typed attr => PatternT attr -> [ExtType]
+expExtTypesFromPattern pat =
+  existentialiseExtTypes (patternContextNames pat) $
+  staticShapes $ map patElemRequires $ patternValueElements pat

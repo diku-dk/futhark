@@ -63,15 +63,13 @@ doInlineInCaller (FunDef entry name rtp args body) inlcallees =
   in FunDef entry name rtp args body'
 
 inlineInBody :: [FunDef] -> Body -> Body
-inlineInBody
-  inlcallees
-  (Body _ (bnd@(Let pat _ (Apply fname args rtp (loc,locs))):bnds) res) =
+inlineInBody inlcallees
+             (Body _ (bnd@(Let pat _ (Apply fname args _ (loc,locs))):bnds) res) =
   let continue callbnds =
         callbnds `insertStms` inlineInBody inlcallees (mkBody bnds res)
       continue' (Body _ callbnds res') =
         continue $ addLocations (loc:locs) callbnds ++
-        zipWith reshapeIfNecessary (patternIdents pat)
-        (runReader (withShapes res') $ scopeOf callbnds)
+        zipWith reshapeIfNecessary (patternIdents pat) res'
   in case filter ((== fname) . funDefName) inlcallees of
        [] -> continue [bnd]
        fun:_ ->
@@ -82,12 +80,6 @@ inlineInBody
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
         reshapeIfNecessary farg aarg `insertStm` body
-
-      withShapes ses = do
-        ts <- mapM subExpType ses
-        return $
-          extractShapeContext (retTypeValues rtp) (map arrayDims ts) ++
-          ses
 
       reshapeIfNecessary ident se
         | t@Array{} <- identType ident,
