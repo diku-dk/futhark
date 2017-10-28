@@ -60,7 +60,7 @@ addBuiltinFunctions = mapM_ addBuiltin $ M.toList E.intrinsics
            return (baseName name,
                    [], [], [], map (I.Prim . internalisePrimType) paramts,
                    params,
-                   const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
+                   const $ Just [I.Prim $ internalisePrimType t])
           where params =
                   [Param (VName (nameFromString "x") i) (I.Prim $ internalisePrimType pt)
                   | (i,pt) <- zip [0..] paramts]
@@ -226,7 +226,7 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
             free_params = nub $ free_shape_params ++ used_free_params
             all_params = constparams ++ free_params ++ shapeparams ++ concat params'
 
-        addFunction $ I.FunDef Nothing fname' (ExtRetType rettype') all_params body'
+        addFunction $ I.FunDef Nothing fname' rettype' all_params body'
 
         return (fname',
                 pcm<>rcm,
@@ -234,7 +234,7 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
                 shapenames,
                 map declTypeOf $ concat params',
                 all_params,
-                applyRetType (ExtRetType rettype') all_params)
+                applyRetType rettype' all_params)
 
   -- For any nullary function we force immediate generation.  Note
   -- that this means value declarations are also generated here - this
@@ -262,7 +262,7 @@ generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
 
     addFunction $
       I.FunDef (Just entry') (baseName ofname)
-      (ExtRetType $ concat entry_rettype)
+      (concat entry_rettype)
       (shapeparams ++ concat params') entry_body
 
   -- XXX: We massage the parameters a little bit to handle the case
@@ -537,7 +537,7 @@ internaliseExp desc (E.Apply fname args _ loc)
   | Just (rettype, _) <- M.lookup fname' I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname' args'' (ExtRetType [I.Prim rettype]) (loc, [])
+  letTupExp' desc $ I.Apply fname' args'' [I.Prim rettype] (loc, [])
   where tag ses = [ (se, I.Observe) | se <- ses ]
         -- Builtin functions are special anyway, so it is OK to not
         -- use lookupSubst here.
@@ -1298,7 +1298,7 @@ binOpCurriedToLambda op paramtype rettype e swap = do
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
   letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
-  I.Apply fname [] (primRetType I.int32) (loc, mempty)
+  I.Apply fname [] [I.Prim I.int32] (loc, mempty)
 
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
@@ -1603,7 +1603,7 @@ constFunctionArgs :: SrcLoc -> ConstParams -> InternaliseM [(SubExp, I.Diet, I.D
 constFunctionArgs loc = mapM arg
   where arg (fname, name) = do
           se <- letSubExp (baseString name ++ "_arg") $
-                I.Apply fname [] (primRetType I.int32) (loc, [])
+                I.Apply fname [] [I.Prim I.int32] (loc, [])
           return (se, I.Observe, I.Prim I.int32)
 
 funcall :: String -> QualName VName -> SpecArgs -> [SubExp] -> SrcLoc
@@ -1631,8 +1631,8 @@ funcall desc qfname (e_ts, i_ts) args loc = do
                pretty args' ++ "\nof types\n " ++
                pretty argts' ++
                "\nFunction has parameters\n " ++ pretty fun_params
-    Just (ExtRetType ts) -> do
-      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) (ExtRetType ts) (loc, mempty)
+    Just ts -> do
+      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) ts (loc, mempty)
       return (ses, map I.fromDecl ts)
 
 boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName

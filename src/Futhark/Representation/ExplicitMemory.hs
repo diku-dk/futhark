@@ -126,16 +126,16 @@ data ExplicitMemory
 data InKernel
 
 type ExplicitMemorish lore = (SameScope lore ExplicitMemory,
-                              RetType lore ~ [FunReturns],
+                              RetType lore ~ FunReturns,
                               CanBeAliased (Op lore),
                               Attributes lore, Annotations lore,
                               TypeCheck.Checkable lore,
                               OpReturns lore)
 
-instance IsRetType [FunReturns] where
-  retTypeValues = map returnsToType
+instance IsRetType FunReturns where
+  retTypeValue = returnsToType
 
-  primRetType t = [ReturnsScalar t]
+  primRetType = ReturnsScalar
 
   applyRetType = applyFunReturns
 
@@ -222,14 +222,14 @@ instance Annotations ExplicitMemory where
   type LetAttr    ExplicitMemory = MemBound NoUniqueness
   type FParamAttr ExplicitMemory = MemBound Uniqueness
   type LParamAttr ExplicitMemory = MemBound NoUniqueness
-  type RetType    ExplicitMemory = [FunReturns]
+  type RetType    ExplicitMemory = FunReturns
   type Op         ExplicitMemory = MemOp (Kernel InKernel)
 
 instance Annotations InKernel where
   type LetAttr    InKernel = MemBound NoUniqueness
   type FParamAttr InKernel = MemBound Uniqueness
   type LParamAttr InKernel = MemBound NoUniqueness
-  type RetType    InKernel = [FunReturns]
+  type RetType    InKernel = FunReturns
   type Op         InKernel = MemOp (KernelExp InKernel)
 
 -- | The index function representation used for memory annotations.
@@ -1103,7 +1103,7 @@ applyFunReturns rets params args
     Just $ map correctDims rets
   | otherwise =
     Nothing
-  where rettype = ExtRetType $ map returnsToType rets
+  where rettype = map returnsToType rets
         parammap :: M.Map VName (SubExp, Type)
         parammap = M.fromList $
                    zip (map paramName params) args

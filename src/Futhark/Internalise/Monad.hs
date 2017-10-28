@@ -103,7 +103,7 @@ data FunBinding = FunBinding
 type FunInfo = (Name, ConstParams, Closure,
                 [VName], [DeclType],
                 [FParam],
-                [(SubExp,Type)] -> Maybe ExtRetType)
+                [(SubExp,Type)] -> Maybe [DeclExtType])
 
 type FunTable = M.Map VName FunBinding
 
@@ -240,7 +240,7 @@ maybeSpecialiseEarly fname fname' params rettype = do
   let info = (fname', mempty, mempty,
               mempty, map declTypeOf params,
               params,
-              applyRetType (ExtRetType rettype) params)
+              applyRetType rettype params)
       fb = FunBinding (M.singleton (map (rankShaped . paramType) params) info)
            (\ts -> fail $ "Cannot have polymorphic recursive function. " ++ show ts)
   modify $ \s -> s { stateFtable = M.insert fname fb $ stateFtable s }

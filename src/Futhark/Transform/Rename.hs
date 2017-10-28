@@ -314,9 +314,6 @@ instance Rename ExtDimSize where
 instance Rename () where
   rename = return
 
-instance Rename ExtRetType where
-  rename = fmap ExtRetType . mapM rename . retTypeValues
-
 instance Rename d => Rename (DimIndex d) where
   rename (DimFix i)       = DimFix <$> rename i
   rename (DimSlice i n s) = DimSlice <$> rename i <*> rename n <*> rename s

@@ -811,6 +811,9 @@ instance Simplifiable a => Simplifiable (Maybe a) where
   simplify Nothing = return Nothing
   simplify (Just x) = Just <$> simplify x
 
+instance Simplifiable a => Simplifiable [a] where
+  simplify = mapM simplify
+
 instance Simplifiable SubExp where
   simplify (Var name) = do
     bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
@@ -826,9 +829,6 @@ instance Simplifiable SubExp where
                            return $ Var name
   simplify (Constant v) =
     return $ Constant v
-
-instance Simplifiable ExtRetType where
-  simplify = fmap ExtRetType . mapM simplify . retTypeValues
 
 simplifyPattern :: (SimplifiableLore lore, Simplifiable attr) =>
                    PatternT attr
@@ -846,7 +846,7 @@ instance Simplifiable Bindage where
   simplify BindVar =
     return BindVar
   simplify (BindInPlace src is) =
-    BindInPlace <$> simplify src <*> mapM simplify is
+    BindInPlace <$> simplify src <*> simplify is
 
 simplifyParam :: (attr -> SimpleM lore attr) -> ParamT attr -> SimpleM lore (ParamT attr)
 simplifyParam simplifyAttribute (Param name attr) = do
@@ -869,7 +869,7 @@ instance Simplifiable (TypeBase ExtShape u) where
                   return $ t `setArrayShape` shape
 
 instance Simplifiable ExtShape where
-  simplify = fmap ExtShape . mapM simplify . extShapeDims
+  simplify = fmap ExtShape . simplify . extShapeDims
 
 instance Simplifiable ExtDimSize where
   simplify (Free se) = Free <$> simplify se
@@ -877,7 +877,7 @@ instance Simplifiable ExtDimSize where
 
 instance Simplifiable (TypeBase Shape u) where
   simplify (Array et shape u) = do
-    dims <- mapM simplify $ shapeDims shape
+    dims <- simplify $ shapeDims shape
     return $ Array et (Shape dims) u
   simplify (Mem size space) =
     Mem <$> simplify size <*> pure space
@@ -924,7 +924,7 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) nes arrs = do
     blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
       simplifyBody (map (const Observe) rettype) body
   body' <- mkBodyM body_bnds' body_res'
-  rettype' <- mapM simplify rettype
+  rettype' <- simplify rettype
   let consumed_in_body = consumedInBody body'
       paramWasConsumed p (Just (Var arr))
         | p `S.member` consumed_in_body = consumedName arr
@@ -947,7 +947,7 @@ simplifyExtLambda :: SimplifiableLore lore =>
 simplifyExtLambda lam@(ExtLambda params body rettype) nes parbnds = do
   params' <- mapM (simplifyParam simplify) params
   let paramnames = S.fromList $ boundByExtLambda lam
-  rettype' <- mapM simplify rettype
+  rettype' <- simplify rettype
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   (body_res', body_bnds') <-
     enterLoop $

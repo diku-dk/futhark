@@ -92,7 +92,7 @@ instance TypeCheck.Checkable SOACS where
     return $ AST.Param name (AST.Prim t)
   primLParam name t =
     return $ AST.Param name (AST.Prim t)
-  matchReturnType name (ExtRetType ts) =
+  matchReturnType name ts =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
 
 instance Bindable SOACS where

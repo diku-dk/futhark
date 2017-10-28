@@ -34,7 +34,7 @@ class (Show (LetAttr l), Show (ExpAttr l), Show (BodyAttr l), Show (FParamAttr l
 
   -- | The type of expressions and function calls.
   type RetType l :: *
-  type RetType l = ExtRetType
+  type RetType l = DeclExtType
   -- | Extensible operation.
   type Op l :: *
   type Op l = ()
