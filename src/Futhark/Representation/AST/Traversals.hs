@@ -35,12 +35,6 @@ module Futhark.Representation.AST.Traversals
   , mapOnType
   , mapOnLoopForm
 
-  -- * Folding
-  , Folder(..)
-  , foldExpM
-  , foldExp
-  , identityFolder
-
   -- * Walking
   , Walker(..)
   , identityWalker
@@ -54,7 +48,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
-import Control.Monad.State
 import qualified Data.Traversable
 
 import Prelude
@@ -204,59 +197,6 @@ mapOnType _ (Prim bt) = return $ Prim bt
 mapOnType f (Mem size space) = Mem <$> f size <*> pure space
 mapOnType f (Array bt shape u) =
   Array bt <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
-
--- | Reification of a left-reduction across a syntax tree.
-data Folder a lore m = Folder {
-    foldOnSubExp :: a -> SubExp -> m a
-  , foldOnBody :: a -> Body lore -> m a
-  , foldOnStm :: a -> Stm lore -> m a
-  , foldOnVName :: a -> VName -> m a
-  , foldOnCertificates :: a -> Certificates -> m a
-  , foldOnRetType :: a -> RetType lore -> m a
-  , foldOnFParam :: a -> FParam lore -> m a
-  , foldOnLParam :: a -> LParam lore -> m a
-  , foldOnOp :: a -> Op lore -> m a
-  }
-
--- | A folding operation where the accumulator is returned verbatim.
-identityFolder :: Monad m => Folder a lore m
-identityFolder = Folder {
-                   foldOnSubExp = const . return
-                 , foldOnBody = const . return
-                 , foldOnStm = const . return
-                 , foldOnVName = const . return
-                 , foldOnCertificates = const . return
-                 , foldOnRetType = const . return
-                 , foldOnFParam = const . return
-                 , foldOnLParam = const . return
-                 , foldOnOp = const . return
-                 }
-
-foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
-foldMapper f = Mapper {
-                 mapOnSubExp = wrap foldOnSubExp
-               , mapOnBody = const $ wrap foldOnBody
-               , mapOnVName = wrap foldOnVName
-               , mapOnCertificates = wrap foldOnCertificates
-               , mapOnRetType = wrap foldOnRetType
-               , mapOnFParam = wrap foldOnFParam
-               , mapOnLParam = wrap foldOnLParam
-               , mapOnOp = wrap foldOnOp
-               }
-  where wrap op k = do
-          v <- get
-          put =<< lift (op f v k)
-          return k
-
--- | Perform a left-reduction across the immediate children of a body.
--- The reduction does not descend recursively into subterms and is
--- done left-to-right.
-foldExpM :: Monad m => Folder a lore m -> a -> Exp lore -> m a
-foldExpM f x e = execStateT (mapExpM (foldMapper f) e) x
-
--- | As 'foldExpM', but in the 'Identity' monad.
-foldExp :: Folder a lore Identity -> a -> Exp lore -> a
-foldExp m x = runIdentity . foldExpM m x
 
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given

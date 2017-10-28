@@ -718,11 +718,8 @@ fusionGatherExp _ (Op Futhark.Scatter{}) = errorIllegal "write"
 ---- Generic Traversal         ----
 -----------------------------------
 
-fusionGatherExp fres e = do
-    let foldstct = identityFolder { foldOnStm = \x -> fusionGatherExp x . stmExp
-                                  , foldOnSubExp = fusionGatherSubExp
-                                  }
-    foldExpM foldstct fres e
+fusionGatherExp fres e =
+  foldM addVarToInfusible fres $ freeInExp e
 
 fusionGatherSubExp :: FusedRes -> SubExp -> FusionGM FusedRes
 fusionGatherSubExp fres (Var idd) = addVarToInfusible fres idd
