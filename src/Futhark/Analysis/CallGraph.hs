@@ -7,6 +7,7 @@ module Futhark.Analysis.CallGraph
   where
 
 import Control.Monad.Reader
+import Control.Monad.State
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe (isJust)
@@ -85,7 +86,8 @@ buildCGexp callees (Op op) =
              Scatter {} ->
                callees
 buildCGexp callees e =
-  foldExp folder callees e
-  where folder =
-          identityFolder { foldOnBody = \x body -> return $ buildCGbody x body
-                         }
+  execState (mapExpM folder e) callees
+  where folder = identityMapper {
+          mapOnBody = \_ body -> do put =<< (buildCGbody <$> get <*> pure body)
+                                    return body
+          }
