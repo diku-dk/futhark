@@ -277,9 +277,6 @@ instance PrettyLore lore => Pretty (ExtLambda lore) where
     parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
-instance Pretty ExtRetType where
-  ppr = ppTuple' . retTypeValues
-
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry name rettype fparams body) =
     annot (mapMaybe ppAnnot fparams) $

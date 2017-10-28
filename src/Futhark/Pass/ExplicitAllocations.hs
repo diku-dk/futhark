@@ -530,9 +530,8 @@ explicitAllocations = simplePass
                       "Transform program to explicit memory representation" $
                       intraproceduralTransformation allocInFun
 
-memoryInRetType :: RetType Kernels -> RetType ExplicitMemory
-memoryInRetType (ExtRetType ts) =
-  evalState (mapM addAttr ts) $ startOfFreeIDRange ts
+memoryInRetType :: [RetType Kernels] -> [RetType ExplicitMemory]
+memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Prim t) = return $ ReturnsScalar t
         addAttr Mem{} = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
@@ -655,7 +654,7 @@ allocInExp (Apply fname args rettype loc) = do
 allocInExp e = mapExpM alloc e
   where alloc =
           identityMapper { mapOnBody = const allocInBody
-                         , mapOnRetType = return . memoryInRetType
+                         , mapOnRetType = fail "Unhandled RetType in ExplicitAllocations"
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
                          , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
                          , mapOnOp = \op -> do handle <- asks allocInOp

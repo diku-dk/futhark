@@ -40,7 +40,7 @@ rephraseFunDef :: Monad m => Rephraser m from to -> FunDef from -> m (FunDef to)
 rephraseFunDef rephraser fundec = do
   body' <- rephraseBody rephraser $ funDefBody fundec
   params' <- mapM (rephraseParam $ rephraseFParamLore rephraser) $ funDefParams fundec
-  rettype' <- rephraseRetType rephraser $ funDefRetType fundec
+  rettype' <- mapM (rephraseRetType rephraser) $ funDefRetType fundec
   return fundec { funDefBody = body', funDefParams = params', funDefRetType = rettype' }
 
 rephraseExp :: Monad m => Rephraser m from to -> Exp from -> m (Exp to)

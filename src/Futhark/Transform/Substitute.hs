@@ -176,10 +176,6 @@ instance Substitute Ident where
       , identType = substituteNames substs $ identType v
       }
 
-instance Substitute ExtRetType where
-  substituteNames substs (ExtRetType ts) =
-    ExtRetType $ map (substituteNames substs) ts
-
 instance Substitute d => Substitute (DimChange d) where
   substituteNames substs = fmap $ substituteNames substs
 

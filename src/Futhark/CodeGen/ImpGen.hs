@@ -357,7 +357,7 @@ compileInParams params orig_epts = do
   where isArrayDecl x (ArrayDecl y _ _) = x == y
 
 compileOutParams :: ExplicitMemorish lore =>
-                    RetType lore -> [EntryPointType]
+                    [RetType lore] -> [EntryPointType]
                  -> ImpM lore op ([Imp.ExternalValue], [Imp.Param], Destination)
 compileOutParams orig_rts orig_epts = do
   ((extvs, dests), outparams) <-

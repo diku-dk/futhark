@@ -58,7 +58,7 @@ instance TypeCheck.Checkable Kernels where
     return $ Param name (Prim t)
   primLParam name t =
     return $ Param name (Prim t)
-  matchReturnType name (ExtRetType ts) =
+  matchReturnType name ts =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
 
 instance TypeCheck.Checkable InKernel where
@@ -76,7 +76,7 @@ instance TypeCheck.Checkable InKernel where
     return $ Param name (Prim t)
   primLParam name t =
     return $ Param name (Prim t)
-  matchReturnType name (ExtRetType ts) =
+  matchReturnType name ts =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
 
 instance Bindable Kernels where

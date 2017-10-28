@@ -158,7 +158,7 @@ instance Checkable lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding lore = (RetType (Aliases lore), [FParam (Aliases lore)])
+type FunBinding lore = ([RetType (Aliases lore)], [FParam (Aliases lore)])
 
 type VarBinding lore = NameInfo (Aliases lore)
 
@@ -417,7 +417,7 @@ subExpAliasesM (Var v)    = lookupAliases v
 lookupFun :: Checkable lore =>
              Name
           -> [SubExp]
-          -> TypeM lore (RetType lore, [DeclType])
+          -> TypeM lore ([RetType lore], [DeclType])
 lookupFun fname args = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -496,7 +496,7 @@ initialFtable :: Checkable lore =>
 initialFtable _ = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts
-          return (fname, (primRetType t, ps))
+          return (fname, ([primRetType t], ps))
         name = VName (nameFromString "x") 0
 
 checkFun :: Checkable lore =>
@@ -625,7 +625,7 @@ checkResult = mapM_ checkSubExp
 
 checkFunBody :: Checkable lore =>
                 Name
-             -> RetType lore
+             -> [RetType lore]
              -> Body (Aliases lore)
              -> TypeM lore ()
 checkFunBody fname rt (Body (_,lore) bnds res) = do
@@ -1098,9 +1098,9 @@ class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
   checkFParamLore :: VName -> FParamAttr lore -> TypeM lore ()
   checkLParamLore :: VName -> LParamAttr lore -> TypeM lore ()
   checkLetBoundLore :: VName -> LetAttr lore -> TypeM lore ()
-  checkRetType :: RetType lore -> TypeM lore ()
+  checkRetType :: [RetType lore] -> TypeM lore ()
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
   matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
   primFParam :: VName -> PrimType -> TypeM lore (FParam (Aliases lore))
   primLParam :: VName -> PrimType -> TypeM lore (LParam (Aliases lore))
-  matchReturnType :: Name -> RetType lore -> Result -> TypeM lore ()
+  matchReturnType :: Name -> [RetType lore] -> Result -> TypeM lore ()

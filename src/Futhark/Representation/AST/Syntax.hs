@@ -262,7 +262,7 @@ data ExpT lore
   = BasicOp (BasicOp lore)
     -- ^ A simple (non-recursive) operation.
 
-  | Apply  Name [(SubExp, Diet)] (RetType lore) (SrcLoc, [SrcLoc])
+  | Apply  Name [(SubExp, Diet)] [RetType lore] (SrcLoc, [SrcLoc])
 
   | If     SubExp (BodyT lore) (BodyT lore) IfAttr
 
@@ -340,7 +340,7 @@ data FunDefT lore = FunDef { funDefEntryPoint :: Maybe EntryPoint
                              -- ^ Contains a value if this function is
                              -- an entry point.
                            , funDefName :: Name
-                           , funDefRetType :: RetType lore
+                           , funDefRetType :: [RetType lore]
                            , funDefParams :: [FParam lore]
                            , funDefBody :: BodyT lore
                            }

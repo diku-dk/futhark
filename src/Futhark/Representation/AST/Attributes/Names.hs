@@ -207,9 +207,6 @@ instance FreeIn Bindage where
   freeIn (BindInPlace src is) =
     freeIn src <> freeIn is
 
-instance FreeIn ExtRetType where
-  freeIn = mconcat . map freeIn . retTypeValues
-
 instance FreeIn (LParamAttr lore) => FreeIn (LoopForm lore) where
   freeIn (ForLoop _ _ bound loop_vars) = freeIn bound <> freeIn loop_vars
   freeIn (WhileLoop cond) = freeIn cond
