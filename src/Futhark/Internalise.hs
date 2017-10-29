@@ -954,12 +954,9 @@ internaliseExp desc (E.Stream form lam arr _) = do
 internaliseExp _ (E.Literal v _) =
   return [I.Constant $ internalisePrimValue v]
 
-internaliseExp desc (E.If ce te fe (Info t) _) = do
-  ce' <- internaliseExp1 "cond" ce
-  te' <- internaliseBody te
-  fe' <- internaliseBody fe
-  (t', _, _) <- internaliseReturnType $ E.vacuousShapeAnnotations t `setAliases` ()
-  letTupExp' desc $ I.If ce' te' fe' $ IfAttr (map I.fromDecl t') IfNormal
+internaliseExp desc (E.If ce te fe _ _) =
+  letTupExp' desc =<< eIf (BasicOp . SubExp <$> internaliseExp1 "cond" ce)
+                          (internaliseBody te) (internaliseBody fe)
 
 -- Builtin operators are handled specially because they are
 -- overloaded.
