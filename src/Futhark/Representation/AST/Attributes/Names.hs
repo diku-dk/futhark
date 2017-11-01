@@ -181,13 +181,12 @@ instance FreeIn SubExp where
   freeIn (Var v) = freeIn v
   freeIn Constant{} = mempty
 
-instance FreeIn Shape where
+instance FreeIn d => FreeIn (ShapeBase d) where
   freeIn = mconcat . map freeIn . shapeDims
 
-instance FreeIn ExtShape where
-  freeIn = mconcat . map freeInExtDimSize . shapeDims
-    where freeInExtDimSize (Free se) = freeIn se
-          freeInExtDimSize (Ext _)   = mempty
+instance FreeIn ExtDimSize where
+  freeIn (Free se) = freeIn se
+  freeIn (Ext _)   = mempty
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Array _ shape _) = freeIn shape

@@ -144,7 +144,7 @@ bodyBindingMap stms =
                 putStrLn $ replicate 70 '~'
           in withDebug debug bmap
 
-        shapeSizes (PatElem _ _ (ExpMem.ArrayMem _ shape _ _ _)) =
+        shapeSizes (PatElem _ _ (ExpMem.MemArray _ shape _ _)) =
           mapMaybe fromVar $ shapeDims shape
         shapeSizes _ = []
 

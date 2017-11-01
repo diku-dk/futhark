@@ -80,7 +80,7 @@ findFirstUses var_to_mem mem_aliases fundef =
 
 lookInFunDefFParam :: LoreConstraints lore =>
                       FParam lore -> FindM lore ()
-lookInFunDefFParam (Param x (ExpMem.ArrayMem _ _ _ xmem _)) =
+lookInFunDefFParam (Param x (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _))) =
   recordMapping x xmem
 lookInFunDefFParam _ = return ()
 
@@ -103,7 +103,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
     e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
     forM_ patvalelems $ \(PatElem x bindage membound) ->
       case (bindage, membound) of
-        (BindVar, ExpMem.ArrayMem _ _ _ xmem _) -> do
+        (BindVar, ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _)) -> do
           x_mems <- varMems xmem
 
           -- For the first use to be a proper first use, it must write to

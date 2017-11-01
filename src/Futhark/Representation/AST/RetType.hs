@@ -18,13 +18,9 @@ import Futhark.Representation.AST.Attributes.Types
 -- a list of these will be used.  It should contain at least the
 -- information contained in an 'ExtType', but may have more, notably
 -- an existential context.
-class (Show rt, Eq rt, Ord rt) => IsRetType rt where
+class (Show rt, Eq rt, Ord rt, DeclExtTyped rt) => IsRetType rt where
   -- | Contruct a return type from a primitive type.
   primRetType :: PrimType -> rt
-
-  -- | Extract the simple type from the return type - although this
-  -- may still involve an existential shape context.
-  retTypeValue :: rt -> DeclExtType
 
   -- | Given a function return type, the parameters of the function,
   -- and the arguments for a concrete call, return the instantiated
@@ -36,7 +32,7 @@ class (Show rt, Eq rt, Ord rt) => IsRetType rt where
                -> Maybe [rt]
 
 retTypeValues :: IsRetType rt => [rt] -> [DeclExtType]
-retTypeValues = map retTypeValue
+retTypeValues = map declExtTypeOf
 
 -- | Given shape parameter names and value parameter types, produce the
 -- types of arguments accepted.
@@ -56,8 +52,6 @@ expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
 
 instance IsRetType DeclExtType where
   primRetType = Prim
-
-  retTypeValue = id
 
   applyRetType extret params args =
     if length args == length params &&

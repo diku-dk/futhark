@@ -77,7 +77,7 @@ transformStm (Let (Pattern patctxelems patvalelems) aux e) = do
       -- record that the memory block in the body result also needs to change.
       let zipped = zip [(0::Int)..] (patctxelems ++ patvalelems)
 
-          findMemLinks (i, PatElem _x _binding (ExpMem.ArrayMem _ _ _ xmem _)) =
+          findMemLinks (i, PatElem _x _binding (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _))) =
             case L.find (\(_, PatElem ymem _ _) -> ymem == xmem) zipped of
               Just (j, _) -> Just (j, i)
               Nothing -> Nothing
@@ -127,7 +127,7 @@ transformMergeCtxParam :: LoreConstraints lore =>
 transformMergeCtxParam mergevalparams (param@(Param ctxmem ExpMem.MemMem{}), mem) = do
   var_to_mem <- ask
 
-  let usesCtxMem (Param _ (ExpMem.ArrayMem _ _ _ pmem _)) = ctxmem == pmem
+  let usesCtxMem (Param _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn pmem _))) = ctxmem == pmem
       usesCtxMem _ = False
 
       -- If the initial value of a loop merge parameter is a memory block name,
@@ -186,9 +186,9 @@ newMemBound membound var = do
   var_to_mem <- ask
 
   let membound'
-        | ExpMem.ArrayMem pt shape u _ _ <- membound
+        | ExpMem.MemArray pt shape u _ <- membound
         , Just (MemoryLoc mem ixfun) <- M.lookup var var_to_mem =
-            Just $ ExpMem.ArrayMem pt shape u mem ixfun
+            Just $ ExpMem.MemArray pt shape u $ ExpMem.ArrayIn mem ixfun
         | otherwise = Nothing
 
   return $ fromMaybe membound membound'

@@ -45,14 +45,14 @@ findVarMemMappings fundef =
 
 lookInFParam :: LoreConstraints lore =>
                 FParam lore -> FindM lore ()
-lookInFParam (Param x (ExpMem.ArrayMem _ shape _ xmem xixfun)) = do
+lookInFParam (Param x (ExpMem.MemArray _ shape _ (ExpMem.ArrayIn xmem xixfun))) = do
   let memloc = MemorySrc xmem xixfun shape
   recordMapping x memloc
 lookInFParam _ = return ()
 
 lookInLParam :: LoreConstraints lore =>
                 LParam lore -> FindM lore ()
-lookInLParam (Param x (ExpMem.ArrayMem _ shape _ xmem xixfun)) = do
+lookInLParam (Param x (ExpMem.MemArray _ shape _ (ExpMem.ArrayIn xmem xixfun))) = do
   let memloc = MemorySrc xmem xixfun shape
   recordMapping x memloc
 lookInLParam _ = return ()
@@ -86,7 +86,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
 
 lookInPatValElem :: LoreConstraints lore =>
                     PatElem lore -> FindM lore ()
-lookInPatValElem (PatElem x _bindage (ExpMem.ArrayMem _ shape _ xmem xixfun)) = do
+lookInPatValElem (PatElem x _bindage (ExpMem.MemArray _ shape _ (ExpMem.ArrayIn xmem xixfun))) = do
   let memloc = MemorySrc xmem xixfun shape
   recordMapping x memloc
 lookInPatValElem _ = return ()

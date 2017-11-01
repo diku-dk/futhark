@@ -258,7 +258,7 @@ lookInStm :: LoreConstraints lore =>
 lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   -- COALESCING-SPECIFIC HANDLING for Copy and Concat.
   case patvalelems of
-    [PatElem dst bindage ExpMem.ArrayMem{}] -> do
+    [PatElem dst bindage ExpMem.MemArray{}] -> do
       -- We create a function and pass it around instead of just applying it to
       -- the memory of the MemBound.  We do this, since any source variables
       -- might have more actual variables with different index functions that

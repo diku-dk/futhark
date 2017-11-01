@@ -55,7 +55,7 @@ lookInFParams params = forM_ params $ \(Param var membound) -> do
     _ -> return ()
 
   case membound of
-    ExpMem.ArrayMem pt shape _ mem _ -> do
+    ExpMem.MemArray pt shape _ (ExpMem.ArrayIn mem _) -> do
       let matchingSizeVar (Param mem1 (ExpMem.MemMem (Var mem_size) _))
             | mem1 == mem = Just mem_size
           matchingSizeVar _ = Nothing

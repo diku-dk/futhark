@@ -253,12 +253,12 @@ findLoopCorrespondingVar :: LoreConstraints lore =>
 findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
                          (DoLoop _ _ _ (Body _ stms res))) =
   M.fromList $ catMaybes $ zipWith findIt patvalelems res
-  where findIt (PatElem pat_v _ (ExpMem.ArrayMem _ _ _ pat_mem _)) (Var res_v)
+  where findIt (PatElem pat_v _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn pat_mem _))) (Var res_v)
           | not (L.null stms) = case L.last stms of
               -- This is how the program looks after coalescing.
               Let (Pattern _ [PatElem _last_v
                               (BindInPlace _ (DimFix slice_part : _))
-                              (ExpMem.ArrayMem _ _ _ last_stm_mem _)]) _
+                              (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn last_stm_mem _))]) _
                                 (BasicOp bop) ->
                 if pat_mem == last_stm_mem
                 then let res_v'
@@ -318,7 +318,7 @@ lookFUInStm :: LoreConstraints lore =>
 lookFUInStm (Let (Pattern _patctxelems patvalelems) _ e_stm) = do
   forM_ patvalelems $ \(PatElem patname _ membound) ->
     case membound of
-      ExpMem.ArrayMem pt _ _ _ ixfun -> do
+      ExpMem.MemArray pt _ _ (ExpMem.ArrayIn _ ixfun) -> do
         fus <- lookupEmptyable patname <$> ask
         forM_ fus $ \fu -> tell [(fu, patname, pt, ixfun)]
       _ -> return ()
@@ -360,7 +360,7 @@ instance SpecialBodyExceptions ExplicitMemory where
   specialBodyWriteMems (Let (Pattern _patctxelems patvalelems) _
                         (Op (ExpMem.Inner Kernel{}))) =
     Just $ mapMaybe (\p -> case patElemAttr p of
-                        ExpMem.ArrayMem t _ _ mem ixfun -> Just (mem, ixfun, t)
+                        ExpMem.MemArray t _ _ (ExpMem.ArrayIn mem ixfun) -> Just (mem, ixfun, t)
                         _ -> Nothing) patvalelems
   specialBodyWriteMems _ = Nothing
 
@@ -397,7 +397,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
               _ -> Nothing
             fromwrite
               | (BindInPlace _orig _slice,
-                 ExpMem.ArrayMem pt _ _ _ _) <- (bindage, membound)
+                 ExpMem.MemArray pt _ _ _) <- (bindage, membound)
               = do
                   -- The coalescing pass can have created a program where some
                   -- dependencies are a bit indirect.  We find the core index function.

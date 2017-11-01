@@ -193,7 +193,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
   -- First handle all pattern elements by themselves.
   forM_ patvalelems $ \(PatElem x _ membound) ->
     case membound of
-      ExpMem.ArrayMem _ _ _ xmem _ -> do
+      ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _) -> do
         first_uses_x <- lookupEmptyable x <$> asks ctxFirstUses
         modifyCurFirstUses $ S.union first_uses_x
         -- When this is a new first use of a memory block, commit the previous

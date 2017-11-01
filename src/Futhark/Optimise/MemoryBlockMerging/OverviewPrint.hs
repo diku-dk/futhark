@@ -65,7 +65,7 @@ opStm :: LoreConstraints lore =>
 opStm stm@(Let (Pattern _ patvalelems) _ e)
   | any (isBindInPlace . patElemBindage) patvalelems && alsoPrintsIndexAccesses =
       Just $ stm { stmExp = fromMaybe e $ opExp e }
-  | any (isArrayMem . patElemAttr) patvalelems = do
+  | any (isMemArray . patElemAttr) patvalelems = do
       e' <- opExp e
       return stm { stmExp = e' }
   | otherwise = Nothing
@@ -74,9 +74,9 @@ isBindInPlace :: Bindage -> Bool
 isBindInPlace BindInPlace{} = True
 isBindInPlace BindVar = False
 
-isArrayMem :: ExpMem.MemBound u -> Bool
-isArrayMem ExpMem.ArrayMem{} = True
-isArrayMem _ = False
+isMemArray :: ExpMem.MemBound u -> Bool
+isMemArray ExpMem.MemArray{} = True
+isMemArray _ = False
 
 class ExpHandling lore where
   opExp :: Exp lore -> Maybe (Exp lore)
@@ -148,7 +148,7 @@ opPrettyBody body = opUnlines <$> mapM opPrettyStm (bodyStms body)
 opPrettyStm :: LoreConstraints lore => Stm lore -> Reader Log String
 opPrettyStm (Let (Pattern _ patvalelems) _ e) = do
   Log proglog <- ask
-  let patpretty (PatElem name _ (ExpMem.ArrayMem _ _ _ mem _)) =
+  let patpretty (PatElem name _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _))) =
         let attrs = ("memory block", pretty mem) : lookupEmptyable name proglog
         in map (\(topic, content) ->
                    let base = " | " ++ pretty name ++ " | " ++ topic ++ ": "

@@ -58,7 +58,7 @@ transformExp (Op (Inner (Kernel desc space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
       num_threads64 <- newVName "num_threads64"
-      let num_threads64_pat = Pattern [] [PatElem num_threads64 BindVar $ Scalar int64]
+      let num_threads64_pat = Pattern [] [PatElem num_threads64 BindVar $ MemPrim int64]
           num_threads64_bnd = Let num_threads64_pat (defAux ()) $ BasicOp $
                               ConvOp (SExt Int32 Int64) (spaceNumThreads space)
 
@@ -135,7 +135,7 @@ expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, grou
 
         expand (mem, (per_thread_size, space)) = do
           total_size <- newVName "total_size"
-          let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int64]
+          let sizepat = Pattern [] [PatElem total_size BindVar $ MemPrim int64]
               allocpat = Pattern [] [PatElem mem BindVar $
                                      MemMem (Var total_size) space]
           return ([Let sizepat (defAux ()) $
@@ -205,9 +205,9 @@ offsetMemoryInParam offsets fparam =
   fparam { paramAttr = offsetMemoryInMemBound offsets $ paramAttr fparam }
 
 offsetMemoryInMemBound :: RebaseMap -> MemBound u -> MemBound u
-offsetMemoryInMemBound offsets (ArrayMem bt shape u mem ixfun)
+offsetMemoryInMemBound offsets (MemArray bt shape u (ArrayIn mem ixfun))
   | Just new_base <- lookupNewBase mem (IxFun.base ixfun) offsets =
-      ArrayMem bt shape u mem $ IxFun.rebase new_base ixfun
+      MemArray bt shape u $ ArrayIn mem $ IxFun.rebase new_base ixfun
 offsetMemoryInMemBound _ summary =
   summary
 
