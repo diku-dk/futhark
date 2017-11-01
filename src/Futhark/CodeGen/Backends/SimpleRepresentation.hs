@@ -273,7 +273,7 @@ cFloat32Funs = [C.cunit|
       return asin(x);
     }
 
-    static inline double $id:(funName' "atan32")(float x) {
+    static inline float $id:(funName' "atan32")(float x) {
       return atan(x);
     }
 
