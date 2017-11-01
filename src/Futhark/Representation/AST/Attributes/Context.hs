@@ -30,8 +30,8 @@ ifExtContext :: (Annotations lore, HasScope lore m, Monad m) =>
 ifExtContext pat tbranch fbranch = do
   ttype <- bodyExtType tbranch
   ftype <- bodyExtType fbranch
-  let extdims_t = map (extShapeDims . arrayShape) ttype
-      extdims_f = map (extShapeDims . arrayShape) ftype
+  let extdims_t = map (shapeDims . arrayShape) ttype
+      extdims_f = map (shapeDims . arrayShape) ftype
       ext_mapping_t :: M.Map VName ExtDimSize
       ext_mapping_t = shapeMapping' (patternValueTypes pat) extdims_t
       ext_mapping_f :: M.Map VName ExtDimSize

@@ -864,21 +864,17 @@ instance Simplifiable VName where
       _             -> do usedName v
                           return v
 
-instance Simplifiable (TypeBase ExtShape u) where
-  simplify t = do shape <- simplify $ arrayShape t
-                  return $ t `setArrayShape` shape
-
-instance Simplifiable ExtShape where
-  simplify = fmap ExtShape . simplify . extShapeDims
+instance Simplifiable d => Simplifiable (ShapeBase d) where
+  simplify = fmap Shape . simplify . shapeDims
 
 instance Simplifiable ExtDimSize where
   simplify (Free se) = Free <$> simplify se
   simplify (Ext x)   = return $ Ext x
 
-instance Simplifiable (TypeBase Shape u) where
+instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) = do
-    dims <- simplify $ shapeDims shape
-    return $ Array et (Shape dims) u
+    shape' <- simplify shape
+    return $ Array et shape' u
   simplify (Mem size space) =
     Mem <$> simplify size <*> pure space
   simplify (Prim bt) =

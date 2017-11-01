@@ -492,10 +492,10 @@ generaliseReturns r1s r2s =
           (ReturnsArray _  shape2 _ summary2) =
             ReturnsArray bt
             <$>
-            (ExtShape <$>
+            (Shape <$>
              zipWithM unifyExtDims
-             (extShapeDims shape1)
-             (extShapeDims shape2))
+             (shapeDims shape1)
+             (shapeDims shape2))
             <*>
             pure NoUniqueness
             <*>
@@ -671,7 +671,7 @@ matchBindeeEntry wrong ctxbindees = matchBindee
             Just (ReturnsNewBlock _ _) ->
               popMemFromCtx mem
           zipWithM_ matchArrayDim (arrayDims $ patElemType bindee) $
-            extShapeDims shape
+            shapeDims shape
           matchType bindee $ Array et shape NoUniqueness
       | otherwise =
         lift $ wrong $ pretty bindee ++
@@ -885,7 +885,7 @@ varReturns v = do
     Scalar bt ->
       return $ ReturnsScalar bt
     ArrayMem et shape _ mem ixfun ->
-      return $ ReturnsArray et (ExtShape $ map Free $ shapeDims shape) NoUniqueness $
+      return $ ReturnsArray et (Shape $ map Free $ shapeDims shape) NoUniqueness $
               Just $ ReturnsInBlock mem ixfun
     MemMem size space ->
       return $ ReturnsMemory size space
@@ -907,7 +907,7 @@ expReturns (BasicOp (Repeat outer_shapes inner_shape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   let outer_shapes' = map (map (primExpFromSubExp int32) . shapeDims) outer_shapes
       inner_shape' = map (primExpFromSubExp int32) $ shapeDims inner_shape
-  return [ReturnsArray et (ExtShape $ map Free $ arrayDims t) NoUniqueness $
+  return [ReturnsArray et (Shape $ map Free $ arrayDims t) NoUniqueness $
           Just $ ReturnsInBlock mem $
           IxFun.repeat ixfun outer_shapes' inner_shape']
   where repeatDims (Shape ds) =
@@ -916,7 +916,7 @@ expReturns (BasicOp (Repeat outer_shapes inner_shape v)) = do
 
 expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
-  return [ReturnsArray et (ExtShape $ map (Free . newDim) newshape) NoUniqueness $
+  return [ReturnsArray et (Shape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $
           IxFun.reshape ixfun $ map (fmap $ primExpFromSubExp int32) newshape]
 
@@ -924,14 +924,14 @@ expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
       dims'  = rearrangeShape perm dims
-  return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
+  return [ReturnsArray et (Shape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
 expReturns (BasicOp (Rotate offsets v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let offsets' = map (primExpFromSubExp int32) offsets
       ixfun' = IxFun.rotate ixfun offsets'
-  return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
+  return [ReturnsArray et (Shape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
 expReturns (BasicOp (Split i sizeexps v)) = do
@@ -943,7 +943,7 @@ expReturns (BasicOp (Split i sizeexps v)) = do
                          map (unitSlice 0) (drop (i+1) dims)
   return $ zipWith (\offset dim ->
                       let new_shape = setDim i shape dim
-                      in ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
+                      in ReturnsArray et (Shape $ map Free $ shapeDims new_shape)
                          NoUniqueness $ Just $ ReturnsInBlock mem $
                          IxFun.slice ixfun $ mkSlice offset $
                          primExpFromSubExp int32 dim)
@@ -955,7 +955,7 @@ expReturns (BasicOp (Index v slice)) = do
     []     ->
       return [ReturnsScalar et]
     dims ->
-      return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
+      return [ReturnsArray et (Shape $ map Free dims) NoUniqueness $
              Just $ ReturnsInBlock mem $
              IxFun.slice ixfun
              (map (fmap (primExpFromSubExp int32)) slice)]
@@ -1027,7 +1027,7 @@ instance OpReturns InKernel where
         Scalar bt ->
           return $ ReturnsScalar bt
         ArrayMem et shape _ mem ixfun ->
-          return $ ReturnsArray et (ExtShape $ map Free $ shapeDims shape) NoUniqueness $
+          return $ ReturnsArray et (Shape $ map Free $ shapeDims shape) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun
         MemMem size space ->
           return $ ReturnsMemory size space
@@ -1117,10 +1117,10 @@ applyFunReturns rets params args
         correctDims (ReturnsMemory se space) =
           ReturnsMemory (substSubExp se) space
         correctDims (ReturnsArray et shape u memsummary) =
-          ReturnsArray et (correctExtShape shape) u $
+          ReturnsArray et (correctShape shape) u $
           correctSummary memsummary
 
-        correctExtShape = ExtShape . map correctDim . extShapeDims
+        correctShape = Shape . map correctDim . shapeDims
         correctDim (Ext i)   = Ext i
         correctDim (Free se) = Free $ substSubExp se
 

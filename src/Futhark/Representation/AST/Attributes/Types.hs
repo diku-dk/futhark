@@ -120,7 +120,7 @@ setArrayShape t ds = modifyArrayShape (const ds) t
 
 -- | True if the given type has a dimension that is existentially sized.
 existential :: ExtType -> Bool
-existential = any ext . extShapeDims . arrayShape
+existential = any ext . shapeDims . arrayShape
   where ext (Ext _)  = True
         ext (Free _) = False
 
@@ -164,7 +164,7 @@ staticShapes1 :: TypeBase Shape u -> TypeBase ExtShape u
 staticShapes1 (Prim bt) =
   Prim bt
 staticShapes1 (Array bt (Shape shape) u) =
-  Array bt (ExtShape $ map Free shape) u
+  Array bt (Shape $ map Free shape) u
 staticShapes1 (Mem size space) =
   Mem size space
 
@@ -207,7 +207,7 @@ setArrayDims t dims = t `setArrayShape` Shape dims
 -- | Set the existential dimensions of an array.  If the given type is
 -- not an array, return the type unchanged.
 setArrayExtDims :: TypeBase oldshape u -> [ExtDimSize] -> TypeBase ExtShape u
-setArrayExtDims t dims = t `setArrayShape` ExtShape dims
+setArrayExtDims t dims = t `setArrayShape` Shape dims
 
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
@@ -262,7 +262,7 @@ arrayDims = shapeDims . arrayShape
 -- | Return the existential dimensions of a type - for non-arrays,
 -- this is the empty list.
 arrayExtDims :: TypeBase ExtShape u -> [ExtDimSize]
-arrayExtDims = extShapeDims . arrayShape
+arrayExtDims = shapeDims . arrayShape
 
 -- | Return the size of the given dimension.  If the dimension does
 -- not exist, the zero constant is returned.
@@ -359,7 +359,7 @@ extractShapeContext :: [TypeBase ExtShape u] -> [[a]] -> [a]
 extractShapeContext ts shapes =
   evalState (concat <$> zipWithM extract ts shapes) S.empty
   where extract t shape =
-          catMaybes <$> zipWithM extract' (extShapeDims $ arrayShape t) shape
+          catMaybes <$> zipWithM extract' (shapeDims $ arrayShape t) shape
         extract' (Ext x) v = do
           seen <- gets $ S.member x
           if seen then return Nothing
@@ -371,7 +371,7 @@ extractShapeContext ts shapes =
 -- 'ExtType's.
 shapeContext :: [TypeBase ExtShape u] -> S.Set Int
 shapeContext = S.fromList
-               . concatMap (mapMaybe ext . extShapeDims . arrayShape)
+               . concatMap (mapMaybe ext . shapeDims . arrayShape)
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
@@ -386,7 +386,7 @@ hasStaticShape (Prim bt) =
   Just $ Prim bt
 hasStaticShape (Mem size space) =
   Just $ Mem size space
-hasStaticShape (Array bt (ExtShape shape) u) =
+hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
   where isFree (Free s) = Just s
         isFree (Ext _)  = Nothing
@@ -403,10 +403,10 @@ generaliseExtTypes :: [TypeBase ExtShape u]
 generaliseExtTypes rt1 rt2 =
   evalState (zipWithM unifyExtShapes rt1 rt2) (0, M.empty)
   where unifyExtShapes t1 t2 =
-          setArrayShape t1 . ExtShape <$>
+          setArrayShape t1 . Shape <$>
           zipWithM unifyExtDims
-          (extShapeDims $ arrayShape t1)
-          (extShapeDims $ arrayShape t2)
+          (shapeDims $ arrayShape t1)
+          (shapeDims $ arrayShape t2)
         unifyExtDims (Free se1) (Free se2)
           | se1 == se2 = return $ Free se1 -- Arbitrary
           | otherwise  = do (n,m) <- get
@@ -431,8 +431,8 @@ existentialiseExtTypes inaccessible ts =
   (firstavail, M.empty, M.empty)
   where firstavail = 1 + S.foldl' max (-1) (shapeContext ts)
         makeBoundShapesFree t = do
-          shape <- mapM checkDim $ extShapeDims $ arrayShape t
-          return $ t `setArrayShape` ExtShape shape
+          shape <- mapM checkDim $ shapeDims $ arrayShape t
+          return $ t `setArrayShape` Shape shape
         checkDim (Free (Var v))
           | v `S.member` inaccessible =
             replaceVar v

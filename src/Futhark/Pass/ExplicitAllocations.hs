@@ -343,7 +343,7 @@ allocsForPattern sizeidents validents rts hints = do
   return (memsizes <> mems <> sizes',
           vals,
           postbnds)
-  where knownShape = mapM known . extShapeDims
+  where knownShape = mapM known . shapeDims
         known (Free v) = Just v
         known Ext{} = Nothing
 

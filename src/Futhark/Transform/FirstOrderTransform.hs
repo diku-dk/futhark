@@ -291,7 +291,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                               ExactBd s -> s
                     deflt = if deflt0 == Var (paramName chunkloc)
                             then outersz else deflt0
-                    dims  = extShapeDims $ arrayShape tp
+                    dims  = shapeDims $ arrayShape tp
                     dims' = map (exToNormShapeDim deflt sub_chko) dims
                     restp :: Type
                     restp = Array (elemType tp) (Shape dims') NoUniqueness
@@ -474,7 +474,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
               arrpatels = drop (length patels - length rtps) patels
               processAssoc (rtp,patel) = do
                   let patid = patElemIdent patel
-                      rtpdim= extShapeDims $ arrayShape rtp
+                      rtpdim= shapeDims $ arrayShape rtp
                   case rtpdim of
                     Ext  _:_ -> return (patid, existUpperBound outerSize withUpperBound )
                     Free s:_ -> return (patid, ExactBd s            )

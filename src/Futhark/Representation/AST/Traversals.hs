@@ -170,8 +170,8 @@ mapOnShape tv (Shape ds) = Shape <$> mapM (mapOnSubExp tv) ds
 
 mapOnExtType :: Monad m =>
                 Mapper flore tlore m -> TypeBase ExtShape u -> m (TypeBase ExtShape u)
-mapOnExtType tv (Array bt (ExtShape shape) u) =
-  Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
+mapOnExtType tv (Array bt (Shape shape) u) =
+  Array bt <$> (Shape <$> mapM mapOnExtSize shape) <*>
   return u
   where mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se

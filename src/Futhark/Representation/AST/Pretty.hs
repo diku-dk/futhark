@@ -90,7 +90,7 @@ instance Pretty ExtDimSize where
   ppr (Ext x)  = text "?" <> text (show x)
 
 instance Pretty ExtShape where
-  ppr = brackets . commasep . map ppr . extShapeDims
+  ppr = brackets . commasep . map ppr . shapeDims
 
 instance Pretty Space where
   ppr DefaultSpace = mempty
@@ -105,7 +105,7 @@ instance Pretty u => Pretty (TypeBase Shape u) where
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
   ppr (Prim et) = ppr et
-  ppr (Array et (ExtShape ds) u) =
+  ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
