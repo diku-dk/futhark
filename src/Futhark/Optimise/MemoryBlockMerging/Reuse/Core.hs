@@ -260,7 +260,7 @@ lookInFParam (Param _ membound) =
   -- Unique array function parameters also count as "allocations" in which
   -- memory can be reused.
   case membound of
-    ExpMem.ArrayMem _ _ Unique mem _ ->
+    ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem _) ->
       insertUse mem mem
     _ -> return ()
 
@@ -292,7 +292,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
     actual_vars_var <- lookupActualVars var
     existentials <- asks ctxExistentials
     case membound of
-      ExpMem.ArrayMem _ _ _ mem _ ->
+      ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) ->
         when (-- We require that it must be a first use, i.e. an array creation.
               mem `S.member` first_uses_var
               -- If the array is existential or "aliases" something that is
@@ -789,7 +789,7 @@ maxsToReplacement vs = do
   vmax <- newVName "max"
   let emax = BasicOp $ BinOp (SMax Int64) (Var m0) (Var m1)
       new_stm = Let (Pattern [] [PatElem vmax BindVar
-                                 (ExpMem.Scalar (IntType Int64))]) (defAux ()) emax
+                                 (ExpMem.MemPrim (IntType Int64))]) (defAux ()) emax
       prev_stms = es0 ++ es1 ++ [new_stm]
   return $ Replacement vmax prev_stms
 
@@ -874,7 +874,7 @@ transformFromKernelMaxSizedMappings
             modifyNameSource $ runState $ runBinderT new_full_size_m mempty
           let alloc_size_fd_stm =
                 Let (Pattern [] [PatElem final_dim_max_v BindVar
-                                 (ExpMem.Scalar (IntType Int32))]) (defAux ()) final_dim_max_e
+                                 (ExpMem.MemPrim (IntType Int32))]) (defAux ()) final_dim_max_e
               alloc_size_stms' = alloc_size_fd_stm : alloc_size_stms
 
               vars_kmem =

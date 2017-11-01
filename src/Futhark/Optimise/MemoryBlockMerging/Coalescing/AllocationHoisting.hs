@@ -83,7 +83,7 @@ findAllocHoistees body params =
                 checkStm (Let
                           (Pattern _
                            [PatElem _ bindage
-                            (ExpMem.ArrayMem _ _ _ xmem_pat _)])
+                            (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem_pat _))])
                            _
                            (BasicOp bop))
                   | xmem_pat == xmem_alloc =

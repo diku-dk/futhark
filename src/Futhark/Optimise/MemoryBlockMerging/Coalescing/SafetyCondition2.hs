@@ -54,7 +54,7 @@ lookInFParam (Param _ membound) =
   -- Unique array function parameters also count as "allocations" in which
   -- memory can be coalesced.
   case membound of
-    ExpMem.ArrayMem _ _ Unique mem _ ->
+    ExpMem.MemArray _ _ Unique (ExpMem.ArrayIn mem _) ->
       modify $ S.insert mem
     _ -> return ()
 

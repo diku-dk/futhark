@@ -121,7 +121,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
           body_vars = body_vars0 ++ body_vars1 ++ body_vars2
       forM_ patvalelems $ \(PatElem var _ membound) -> do
         case membound of
-          ExpMem.ArrayMem _ _ _ mem _ -> do
+          ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) -> do
             -- If mem is existential, we need to find the return memory that it
             -- refers to.  We cannot just look at its memory aliases, since it
             -- likely aliases both the initial memory and the final memory.
@@ -167,7 +167,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
         $ \(PatElem var _ membound, res_then, res_else) -> do
         let body_vars = S.toList $ findAllExpVars e
         case membound of
-          ExpMem.ArrayMem _ _ _ mem _ ->
+          ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) ->
             if mem `L.elem` map patElemName patctxelems
               then
               -- If the memory block is existential, we say that the If result
@@ -209,7 +209,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
       let ielem = head patvalelems -- Should be okay.
           var = patElemName ielem
       case patElemAttr ielem of
-        ExpMem.ArrayMem{} ->
+        ExpMem.MemArray{} ->
           -- Disable merging for index expressions that return arrays.  Maybe
           -- too restrictive.  Make sure the source also updates the memory of
           -- the index when updated.  The array might be an aliasing operation,
@@ -255,7 +255,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
     _ -> forM_ patvalelems $ \(PatElem var _ membound) -> do
       let body_vars = S.toList $ findAllExpVars e
       case membound of
-        ExpMem.ArrayMem _ _ _ mem _ -> do
+        ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) -> do
           body_vars' <- filterM (lookupGivesMem mem) body_vars
           recordActuals var $ S.fromList (var : body_vars')
         _ -> return ()

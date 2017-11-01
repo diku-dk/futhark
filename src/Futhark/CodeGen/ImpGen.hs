@@ -288,11 +288,11 @@ compileProg ops ds prog =
 compileInParam :: ExplicitMemorish lore =>
                   FParam lore -> ImpM lore op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramAttr fparam of
-  Scalar bt ->
+  MemPrim bt ->
     return $ Left $ Imp.ScalarParam name bt
   MemMem _ space ->
     return $ Left $ Imp.MemParam name space
-  ArrayMem bt shape _ mem ixfun -> do
+  MemArray bt shape _ (ArrayIn mem ixfun) -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt $
       MemLocation mem shape' ixfun
@@ -383,13 +383,13 @@ compileOutParams orig_rts orig_epts = do
                   dest : more_dests)
         mkExts _ _ = return ([], [])
 
-        mkParam ReturnsMemory{} _ =
+        mkParam MemMem{} _ =
           compilerBugS "Functions may not explicitly return memory blocks."
-        mkParam (ReturnsScalar t) ept = do
+        mkParam (MemPrim t) ept = do
           out <- imp $ newVName "scalar_out"
           tell [Imp.ScalarParam out t]
           return (Imp.ScalarValue t ept out, ScalarDestination out)
-        mkParam (ReturnsArray t shape _ lore) ept = do
+        mkParam (MemArray t shape _ lore) ept = do
           space <- asks envDefaultSpace
           (memout, memsize, memdestf) <- case lore of
             ReturnsNewBlock x _ -> do
@@ -805,7 +805,7 @@ withArrays = flip $ foldr withArray
 withFParams :: ExplicitMemorish lore => [FParam lore] -> ImpM lore op a -> ImpM lore op a
 withFParams = flip $ foldr withFParam
   where withFParam fparam m = do
-          entry <- memBoundToVarEntry Nothing (const NoUniqueness <$> paramAttr fparam)
+          entry <- memBoundToVarEntry Nothing $ noUniquenessReturns $ paramAttr fparam
           local (insertInVtable (paramName fparam) entry) m
 
 declaringVars :: ExplicitMemorish lore =>
@@ -839,14 +839,14 @@ declaringPrimVars = flip $ foldr (uncurry declaringPrimVar)
 
 memBoundToVarEntry :: Maybe (Exp lore) -> MemBound NoUniqueness
                    -> ImpM lore op (VarEntry lore)
-memBoundToVarEntry e (Scalar bt) =
+memBoundToVarEntry e (MemPrim bt) =
   return $ ScalarVar e ScalarEntry { entryScalarType = bt }
 memBoundToVarEntry e (MemMem size space) = do
   size' <- subExpToDimSize size
   return $ MemVar e MemEntry { entryMemSize = size'
                              , entryMemSpace = space
                              }
-memBoundToVarEntry e (ArrayMem bt shape _ mem ixfun) = do
+memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) = do
   shape' <- mapM subExpToDimSize $ shapeDims shape
   let location = MemLocation mem shape' ixfun
   return $ ArrayVar e ArrayEntry { entryArrayLocation = location
@@ -859,9 +859,9 @@ declaringName e name info m = do
   entry <- memBoundToVarEntry e $ infoAttr info
   declaringVarEntry name entry m
   where infoAttr (LetInfo attr) = attr
-        infoAttr (FParamInfo attr) = const NoUniqueness <$> attr
+        infoAttr (FParamInfo attr) = noUniquenessReturns attr
         infoAttr (LParamInfo attr) = attr
-        infoAttr (IndexInfo it) = Scalar $ IntType it
+        infoAttr (IndexInfo it) = MemPrim $ IntType it
 
 declaringScope :: Maybe (Exp lore) -> Scope ExplicitMemory -> ImpM lore op a -> ImpM lore op a
 declaringScope e scope m = foldr (uncurry $ declaringName e) m $ M.toList scope
@@ -959,7 +959,7 @@ lookupMemory name = do
 
 destinationFromParam :: Param (MemBound u) -> ImpM lore op ValueDestination
 destinationFromParam param
-  | ArrayMem _ shape _ mem ixfun <- paramAttr param = do
+  | MemArray _ shape _ (ArrayIn mem ixfun) <- paramAttr param = do
       let dims = shapeDims shape
       memloc <- MemLocation mem <$> mapM subExpToDimSize dims <*> pure ixfun
       return $

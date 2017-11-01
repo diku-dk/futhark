@@ -63,6 +63,8 @@ module Futhark.Representation.AST.Attributes.Types
          -- * The Typed typeclass
        , Typed (..)
        , DeclTyped (..)
+       , ExtTyped (..)
+       , DeclExtTyped (..)
        , SetType (..)
        )
        where
@@ -520,6 +522,20 @@ instance DeclTyped DeclType where
 
 instance DeclTyped attr => DeclTyped (Param attr) where
   declTypeOf = declTypeOf . paramAttr
+
+-- | Typeclass for things that contain 'ExtType's.
+class ExtTyped t where
+  extTypeOf :: t -> ExtType
+
+instance ExtTyped ExtType where
+  extTypeOf = id
+
+-- | Typeclass for things that contain 'DeclExtType's.
+class DeclExtTyped t where
+  declExtTypeOf :: t -> DeclExtType
+
+instance DeclExtTyped DeclExtType where
+  declExtTypeOf = id
 
 -- | Typeclass for things whose type can be changed.
 class Typed a => SetType a where

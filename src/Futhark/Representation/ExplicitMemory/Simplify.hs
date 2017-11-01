@@ -65,9 +65,9 @@ getShapeNames bnd =
   let tps = map patElemType $ patternElements $ stmPattern bnd
       ats = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
       nms = mapMaybe (\attr -> case attr of
-                                 MemMem (Var nm) _   -> Just nm
-                                 ArrayMem _ _ _ nm _ -> Just nm
-                                 _                   -> Nothing
+                                 MemMem (Var nm) _ -> Just nm
+                                 MemArray _ _ _ (ArrayIn nm _) -> Just nm
+                                 _ -> Nothing
                      ) ats
   in  S.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
 
@@ -157,7 +157,7 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
         inContext = (`elem` patternContextNames pat)
 
         hasConcretisableMemory (ctx, concretised) pat_elem
-          | (_, ArrayMem _ shape _ mem _) <- patElemAttr pat_elem,
+          | (_, MemArray _ shape _ (ArrayIn mem _)) <- patElemAttr pat_elem,
             all knownSize (shapeDims shape),
             mem `onlyUsedIn` patElemName pat_elem,
             Just (size, space, ctx') <- getMemFromContext mem ctx,
@@ -192,12 +192,12 @@ copyCopyToCopy :: (MonadBinder m,
 copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (BasicOp (Copy v1)))
   | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
 
-    Just (_, ArrayMem _ _ _ srcmem src_ixfun) <-
+    Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
       ST.entryLetBoundAttr =<< ST.lookup v1 vtable,
 
     Just (Mem _ src_space) <- ST.lookupType srcmem vtable,
 
-    (_, ArrayMem _ _ _ destmem dest_ixfun) <- patElemAttr pat_elem,
+    (_, MemArray _ _ _ (ArrayIn destmem dest_ixfun)) <- patElemAttr pat_elem,
 
     Just (Mem _ dest_space) <- ST.lookupType destmem vtable,
 

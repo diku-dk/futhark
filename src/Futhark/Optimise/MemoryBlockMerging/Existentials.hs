@@ -56,7 +56,7 @@ lookInStm :: LoreConstraints lore =>
 lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
   forM_ patvalelems $ \(PatElem var _ membound) ->
     case membound of
-      ExpMem.ArrayMem _ _ _ mem _ ->
+      ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) ->
         when (mem `L.elem` map patElemName patctxelems)
         $ record var
       _ -> return ()
@@ -65,7 +65,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
     DoLoop mergectxparams mergevalparams _loopform _body ->
       forM_ mergevalparams $ \(Param var membound, _) ->
         case membound of
-          ExpMem.ArrayMem _ _ _ mem _ ->
+          ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _) ->
             when (mem `L.elem` map (paramName . fst) mergectxparams)
             $ record var
           _ -> return ()

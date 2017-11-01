@@ -272,28 +272,33 @@ allocsForPattern :: Allocator lore m =>
                        [PatElem ExplicitMemory],
                        [AllocStm])
 allocsForPattern sizeidents validents rts hints = do
-  let sizes' = [ PatElem size BindVar $ Scalar int32 | size <- map identName sizeidents ]
+  let sizes' = [ PatElem size BindVar $ MemPrim int32 | size <- map identName sizeidents ]
   (vals,(memsizes, mems, postbnds)) <-
     runWriterT $ forM (zip3 validents rts hints) $ \((ident,bindage), rt, hint) -> do
       let shape = arrayShape $ identType ident
       case rt of
-        ReturnsScalar _ -> do
+        MemPrim _ -> do
           summary <- lift $ summaryForBindage (identType ident) bindage hint
           return $ PatElem (identName ident) bindage summary
 
-        ReturnsMemory size space ->
-          return $ PatElem (identName ident) bindage $ MemMem size space
+        MemMem (Free size) space ->
+          return $ PatElem (identName ident) bindage $
+          MemMem size space
 
-        ReturnsArray bt _ u (Just (ReturnsInBlock mem ixfun)) ->
+        MemMem Ext{} space ->
+          return $ PatElem (identName ident) bindage $
+          MemMem (intConst Int32 0) space
+
+        MemArray bt _ u (Just (ReturnsInBlock mem ixfun)) ->
           case bindage of
             BindVar ->
               return $ PatElem (identName ident) bindage $
-              ArrayMem bt shape u mem ixfun
+              MemArray bt shape u $ ArrayIn mem ixfun
             BindInPlace src slice -> do
               (destmem,destixfun) <- lift $ lookupArraySummary src
               if destmem == mem && destixfun == ixfun
                 then return $ PatElem (identName ident) bindage $
-                     ArrayMem bt shape u mem ixfun
+                     MemArray bt shape u $ ArrayIn mem ixfun
                 else do
                 -- The expression returns at some specific memory
                 -- location, but we want to put the result somewhere
@@ -307,14 +312,15 @@ allocsForPattern sizeidents validents rts hints = do
                       [ArrayCopy (identName ident) bindage $
                        identName tmp_buffer])
                 return $ PatElem (identName tmp_buffer) BindVar $
-                  ArrayMem bt (arrayShape $ identType tmp_buffer) u mem ixfun
+                  MemArray bt (arrayShape $ identType tmp_buffer) u $
+                  ArrayIn mem ixfun
 
-        ReturnsArray _ extshape _ Nothing
+        MemArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
             summary <- lift $ summaryForBindage (identType ident) bindage hint
             return $ PatElem (identName ident) bindage summary
 
-        ReturnsArray bt _ u (Just ReturnsNewBlock{})
+        MemArray bt _ u (Just ReturnsNewBlock{})
           | BindInPlace _ slice <- bindage -> do
               -- The expression returns its own memory, but the pattern
               -- wants to store it somewhere else.  We first let it
@@ -326,19 +332,21 @@ allocsForPattern sizeidents validents rts hints = do
                             newIdent (baseString (identName ident)<>"_ext_buffer")
                             (identType ident `setArrayDims` sliceDims slice)
               (memsize,mem,(_,ixfun)) <- lift $ memForBindee tmp_buffer
-              tell ([PatElem (identName memsize) BindVar $ Scalar int64],
+              tell ([PatElem (identName memsize) BindVar $ MemPrim int64],
                     [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                     [ArrayCopy (identName ident) bindage $
                      identName tmp_buffer])
               return $ PatElem (identName tmp_buffer) BindVar $
-                ArrayMem bt (arrayShape $ identType tmp_buffer) u (identName mem) ixfun
+                MemArray bt (arrayShape $ identType tmp_buffer) u $
+                ArrayIn (identName mem) ixfun
 
-        ReturnsArray bt _ u _ -> do
+        MemArray bt _ u _ -> do
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
-          tell ([PatElem (identName memsize) BindVar $ Scalar int64],
+          tell ([PatElem (identName memsize) BindVar $ MemPrim int64],
                 [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                 [])
-          return $ PatElem (identName ident') bindage $ ArrayMem bt shape u (identName mem) ixfun
+          return $ PatElem (identName ident') bindage $ MemArray bt shape u $
+            ArrayIn (identName mem) ixfun
 
   return (memsizes <> mems <> sizes',
           vals,
@@ -351,7 +359,7 @@ summaryForBindage :: (ExplicitMemorish lore, Allocator lore m) =>
                      Type -> Bindage -> ExpHint
                   -> m (MemBound NoUniqueness)
 summaryForBindage (Prim bt) BindVar _ =
-  return $ Scalar bt
+  return $ MemPrim bt
 summaryForBindage (Mem size space) BindVar _ =
   return $ MemMem size space
 summaryForBindage t@(Array bt shape u) BindVar NoHint = do
@@ -363,9 +371,9 @@ summaryForBindage t BindVar (Hint ixfun space) = do
            fromIntegral (primByteSize (elemType t)::Int64) :
            map (ConvOpExp (SExt Int32 Int64)) (IxFun.base ixfun)
   m <- allocateMemory "mem" bytes space
-  return $ ArrayMem bt (arrayShape t) NoUniqueness m ixfun
+  return $ MemArray bt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
 summaryForBindage _ (BindInPlace src _) _ =
-  lookupMemBound src
+  lookupMemInfo src
 
 memForBindee :: (MonadFreshNames m) =>
                 Ident
@@ -383,7 +391,8 @@ memForBindee ident = do
 
 directIndexFunction :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIndexFunction bt shape u mem t =
-  ArrayMem bt shape u mem $ IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t
+  MemArray bt shape u $ ArrayIn mem $
+  IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t
 
 allocInFParams :: (Allocable fromlore tolore) =>
                   [FParam fromlore] ->
@@ -407,11 +416,11 @@ allocInFParam param =
           ixfun = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
       memsize <- lift $ newVName (memname <> "_size")
       mem <- lift $ newVName memname
-      tell ([Param memsize $ Scalar int64],
+      tell ([Param memsize $ MemPrim int64],
             [Param mem $ MemMem (Var memsize) DefaultSpace])
-      return param { paramAttr =  ArrayMem bt shape u mem ixfun }
+      return param { paramAttr =  MemArray bt shape u $ ArrayIn mem ixfun }
     Prim bt ->
-      return param { paramAttr = Scalar bt }
+      return param { paramAttr = MemPrim bt }
     Mem size space ->
       return param { paramAttr = MemMem size space }
 
@@ -441,7 +450,7 @@ allocInMergeParams variant merge m = do
             loopInvariantShape mergeparam = do
               (mem, ixfun) <- lift $ lookupArraySummary v
               if IxFun.isDirect ixfun
-                then return (mergeparam { paramAttr = ArrayMem bt shape Unique mem ixfun },
+                then return (mergeparam { paramAttr = MemArray bt shape Unique $ ArrayIn mem ixfun },
                              lift . ensureArrayIn (paramType mergeparam) mem ixfun)
                 else doDefault mergeparam
         allocInMergeParam (mergeparam, _) = doDefault mergeparam
@@ -465,7 +474,8 @@ ensureArrayIn t mem ixfun (Var v) = do
   if src_mem == mem && src_ixfun == ixfun
     then return $ Var v
     else do copy <- newIdent (baseString v ++ "_ensure_copy") t
-            let summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness mem ixfun
+            let summary = MemArray (elemType t) (arrayShape t) NoUniqueness $
+                          ArrayIn mem ixfun
                 pat = Pattern [] [PatElem (identName copy) BindVar summary]
             letBind_ pat $ BasicOp $ Copy v
             return $ Var $ identName copy
@@ -474,9 +484,9 @@ ensureDirectArray :: (Allocable fromlore tolore,
                       Allocator tolore (AllocM fromlore tolore)) =>
                      VName -> AllocM fromlore tolore (SubExp, VName, SubExp)
 ensureDirectArray v = do
-  res <- lookupMemBound v
+  res <- lookupMemInfo v
   case res of
-    ArrayMem _ shape _ mem ixfun
+    MemArray _ shape _ (ArrayIn mem ixfun)
       | fullyDirect shape ixfun -> do
         memt <- lookupType mem
         case memt of
@@ -532,12 +542,12 @@ explicitAllocations = simplePass
 
 memoryInRetType :: [RetType Kernels] -> [RetType ExplicitMemory]
 memoryInRetType ts = evalState (mapM addAttr ts) $ startOfFreeIDRange ts
-  where addAttr (Prim t) = return $ ReturnsScalar t
+  where addAttr (Prim t) = return $ MemPrim t
         addAttr Mem{} = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
           i <- get
           put $ i + 1
-          return $ ReturnsArray bt shape u $ ReturnsNewBlock i Nothing
+          return $ MemArray bt shape u $ ReturnsNewBlock i Nothing
 
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
 startOfFreeIDRange = (1+) . S.foldl' max 0 . shapeContext
@@ -579,8 +589,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
             arr_summaries <- mapM lookupArraySummary arrs
             lam' <- allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries
             return $ Inner $ GroupStream w maxchunk lam' accs arrs
-            where accSummary (Constant v) = return $ Scalar $ primValueType v
-                  accSummary (Var v) = lookupMemBound v
+            where accSummary (Constant v) = return $ MemPrim $ primValueType v
+                  accSummary (Var v) = lookupMemInfo v
 
 allocInBodyNoDirect :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
                        Body fromlore -> AllocM fromlore tolore (Body tolore)
@@ -673,9 +683,9 @@ allocInLoopForm (ForLoop i it n loopvars) =
             Array bt shape u ->
               let ixfun' = IxFun.slice ixfun $
                            fullSliceNum (IxFun.shape ixfun) [DimFix $ LeafExp i int32]
-              in return (p { paramAttr = ArrayMem bt shape u mem ixfun' }, a)
+              in return (p { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun' }, a)
             Prim bt ->
-              return (p { paramAttr = Scalar bt }, a)
+              return (p { paramAttr = MemPrim bt }, a)
             Mem size space ->
               return (p { paramAttr = MemMem size space }, a)
 
@@ -696,8 +706,8 @@ allocInReduceLambda lam input_summaries = do
     allocInReduceParameters this_index other_offset $
     zip arr_params input_summaries
 
-  allocInLambda (Param i (Scalar int32) :
-                 other_offset_param { paramAttr = Scalar int32 } :
+  allocInLambda (Param i (MemPrim int32) :
+                 other_offset_param { paramAttr = MemPrim int32 } :
                  acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
@@ -711,9 +721,9 @@ allocInReduceParameters my_id offset = mapM allocInReduceParameter
             (Array bt shape u) ->
               let ixfun' = IxFun.slice ixfun $
                            fullSliceNum (IxFun.shape ixfun) [DimFix $ my_id + offset]
-              in return p { paramAttr = ArrayMem bt shape u mem ixfun' }
+              in return p { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun' }
             Prim bt ->
-              return p { paramAttr = Scalar bt }
+              return p { paramAttr = MemPrim bt }
             Mem size space ->
               return p { paramAttr = MemMem size space }
 
@@ -725,9 +735,9 @@ allocInChunkedParameters offset = mapM allocInChunkedParameter
           case paramType p of
             Array bt shape u ->
               let ixfun' = IxFun.offsetIndex ixfun offset
-              in return p { paramAttr = ArrayMem bt shape u mem ixfun' }
+              in return p { paramAttr = MemArray bt shape u $ ArrayIn mem ixfun' }
             Prim bt ->
-              return p { paramAttr = Scalar bt }
+              return p { paramAttr = MemPrim bt }
             Mem size space ->
               return p { paramAttr = MemMem size space }
 
@@ -788,7 +798,7 @@ allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries = do
              mapM_ addStm (bodyStms body')
              let maybeCopyResult r p =
                    case paramAttr p of
-                     ArrayMem _ _ _ mem ixfun ->
+                     MemArray _ _ _ (ArrayIn mem ixfun) ->
                        ensureArrayIn (paramType p) mem ixfun r
                      _ ->
                        return r

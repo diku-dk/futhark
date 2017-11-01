@@ -125,7 +125,7 @@ lookInMergeCtxParam _ _ = return ()
 lookInMergeValParam :: LoreConstraints lore =>
                        Body (Aliases lore) -> (FParam (Aliases lore), SubExp)
                     -> FindM lore ()
-lookInMergeValParam body (Param _ (ExpMem.ArrayMem _ _ _ mem _), _t) = do
+lookInMergeValParam body (Param _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _)), _t) = do
   -- FIXME: This is maybe more conservative than necessary in case you have more
   -- than one loop array.  Fixing this would require either changing the Aliases
   -- representation, or building something on top of it.
@@ -143,7 +143,7 @@ lookInBodyTuples :: LoreConstraints lore =>
 -- which return memory in the loop that the existential memory refers
 -- to.
 lookInBodyTuples patctxelems body_params body_results
-  (PatElem _ _ (_, ExpMem.ArrayMem _ _ _ mem _)) = do
+  (PatElem _ _ (_, ExpMem.MemArray _ _ _ (ExpMem.ArrayIn mem _))) = do
   let zipped = zip3 patctxelems body_params body_results
   case L.find ((== mem) . patElemName . (\(x, _, _) -> x)) zipped of
     Just (_, Var param_mem, Var res_mem) ->
@@ -153,7 +153,7 @@ lookInBodyTuples _ _ _ _ = return ()
 
 lookInPatElem :: LoreConstraints lore =>
                  PatElem (Aliases lore) -> FindM lore ()
-lookInPatElem (PatElem _ _ (names', ExpMem.ArrayMem _ _ _ xmem _)) = do
+lookInPatElem (PatElem _ _ (names', ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem _))) = do
   aliases <- lookupMems $ unNames names'
   recordMapping xmem aliases
 lookInPatElem (PatElem xmem _ (names', ExpMem.MemMem {})) = do

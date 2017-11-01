@@ -89,6 +89,7 @@ type ExtShape = ShapeBase ExtDimSize
 -- with no further information.
 newtype Rank = Rank Int
              deriving (Show, Eq, Ord)
+
 -- | A class encompassing types containing array shape information.
 class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Return the rank of an array with the given size.
@@ -102,6 +103,9 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
 instance Monoid (ShapeBase d) where
   mempty = Shape mempty
   Shape l1 `mappend` Shape l2 = Shape $ l1 `mappend` l2
+
+instance Functor ShapeBase where
+  fmap f = Shape . map f . shapeDims
 
 instance ArrayShape (ShapeBase SubExp) where
   shapeRank (Shape l) = length l
