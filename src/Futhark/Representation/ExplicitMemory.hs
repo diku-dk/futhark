@@ -310,16 +310,8 @@ instance (Engine.Simplifiable d, Engine.Simplifiable ret) =>
   simplify (MemArray bt shape u ret) =
     MemArray bt <$> Engine.simplify shape <*> pure u <*> Engine.simplify ret
 
-instance (PP.Pretty u, PP.Pretty ret) => PP.Pretty (MemInfo SubExp u ret) where
-  ppr (MemPrim bt) = PP.ppr bt
-  ppr (MemMem s DefaultSpace) =
-    PP.text "mem" <> PP.parens (PP.ppr s)
-  ppr (MemMem s (Space sp)) =
-    PP.text "mem" <> PP.parens (PP.ppr s) <> PP.text "@" <> PP.text sp
-  ppr (MemArray bt shape u ret) =
-    PP.ppr (Array bt shape u) <> PP.ppr ret
-
-instance (PP.Pretty u, PP.Pretty ret) => PP.Pretty (MemInfo ExtDimSize u ret) where
+instance (PP.Pretty (TypeBase (ShapeBase d) u),
+          PP.Pretty d, PP.Pretty u, PP.Pretty ret) => PP.Pretty (MemInfo d u ret) where
   ppr (MemPrim bt) = PP.ppr bt
   ppr (MemMem s DefaultSpace) =
     PP.text "mem" <> PP.parens (PP.ppr s)
