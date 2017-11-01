@@ -12,9 +12,7 @@ module Futhark.Representation.AST.Syntax
   -- * Types
   , Uniqueness(..)
   , NoUniqueness(..)
-  , Shape(..)
   , ExtDimSize(..)
-  , ExtShape(..)
   , Rank(..)
   , ArrayShape(..)
   , Space (..)

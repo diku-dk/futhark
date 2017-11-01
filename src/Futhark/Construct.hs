@@ -402,7 +402,7 @@ instantiateShapes :: Monad m =>
                   -> m [TypeBase Shape u]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
   where instantiate t = do
-          shape <- mapM instantiate' $ extShapeDims $ arrayShape t
+          shape <- mapM instantiate' $ shapeDims $ arrayShape t
           return $ t `setArrayShape` Shape shape
         instantiate' (Ext x) = do
           m <- get
@@ -461,7 +461,7 @@ removeExistentials :: ExtType -> Type -> Type
 removeExistentials t1 t2 =
   t1 `setArrayDims`
   zipWith nonExistential
-  (extShapeDims $ arrayShape t1)
+  (shapeDims $ arrayShape t1)
   (arrayDims t2)
   where nonExistential (Ext _)    dim = dim
         nonExistential (Free dim) _   = dim

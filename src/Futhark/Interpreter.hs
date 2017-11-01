@@ -812,7 +812,7 @@ checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM ()
 checkReturnShapes = zipWithM_ checkShape
   where checkShape t val = do
           let valshape = map (PrimVal . IntValue . Int32Value . fromIntegral) $ valueShape val
-              retdims = extShapeDims $ arrayShape t
+              retdims = shapeDims $ arrayShape t
               evalExtDim (Free se) = do v <- evalSubExp se
                                         return $ Just (se, v)
               evalExtDim (Ext _)   = return Nothing

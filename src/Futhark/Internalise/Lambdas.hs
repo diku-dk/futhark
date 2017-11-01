@@ -188,7 +188,7 @@ internaliseStreamLambda internaliseLambda lam rowts = do
                 let mkArrType :: (VName, ExtType) -> InternaliseM I.Type
                     mkArrType (x, I.Array btp shp u) = do
                       dsx <- I.shapeDims . I.arrayShape <$> I.lookupType x
-                      let dsrtpx =  I.extShapeDims shp
+                      let dsrtpx =  I.shapeDims shp
                           resdims= zipWith (\ dx drtpx ->
                                                   case drtpx of
                                                     Ext  _ -> dx

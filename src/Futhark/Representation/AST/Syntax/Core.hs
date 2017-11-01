@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.Representation.AST.Syntax" in order for
 -- "Futhark.Representation.AST.Annotations" to use these definitions.  This
@@ -12,9 +13,10 @@ module Futhark.Representation.AST.Syntax.Core
          -- * Types
          , Uniqueness(..)
          , NoUniqueness(..)
-         , Shape(..)
+         , ShapeBase(..)
+         , Shape
          , ExtDimSize(..)
-         , ExtShape(..)
+         , ExtShape
          , Rank(..)
          , ArrayShape(..)
          , Space (..)
@@ -65,10 +67,14 @@ import Prelude
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
 
--- | The size of an array type as a list of its dimension sizes.  If a
--- variable, that variable must be in scope where this array is used.
-newtype Shape = Shape { shapeDims :: [SubExp] }
-              deriving (Eq, Ord, Show)
+-- | The size of an array type as a list of its dimension sizes, with
+-- the type of sizes being parametric.
+newtype ShapeBase d = Shape { shapeDims :: [d] }
+                    deriving (Eq, Ord, Show)
+
+-- | The size of an array as a list of subexpressions.  If a variable,
+-- that variable must be in scope where this array is used.
+type Shape = ShapeBase SubExp
 
 -- | The size of this dimension.
 data ExtDimSize = Free SubExp -- ^ Some known dimension.
@@ -77,14 +83,12 @@ data ExtDimSize = Free SubExp -- ^ Some known dimension.
 
 -- | Like 'Shape' but some of its elements may be bound in a local
 -- environment instead.  These are denoted with integral indices.
-newtype ExtShape = ExtShape { extShapeDims :: [ExtDimSize] }
-                 deriving (Eq, Ord, Show)
+type ExtShape = ShapeBase ExtDimSize
 
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
 newtype Rank = Rank Int
              deriving (Show, Eq, Ord)
-
 -- | A class encompassing types containing array shape information.
 class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Return the rank of an array with the given size.
@@ -95,23 +99,19 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
 
-instance Monoid Shape where
+instance Monoid (ShapeBase d) where
   mempty = Shape mempty
   Shape l1 `mappend` Shape l2 = Shape $ l1 `mappend` l2
 
-instance ArrayShape Shape where
+instance ArrayShape (ShapeBase SubExp) where
   shapeRank (Shape l) = length l
   stripDims n (Shape dims) = Shape $ drop n dims
   subShapeOf = (==)
 
-instance Monoid ExtShape where
-  mempty = ExtShape mempty
-  ExtShape l1 `mappend` ExtShape l2 = ExtShape $ l1 `mappend` l2
-
-instance ArrayShape ExtShape where
-  shapeRank (ExtShape l) = length l
-  stripDims n (ExtShape dims) = ExtShape $ drop n dims
-  subShapeOf (ExtShape ds1) (ExtShape ds2) =
+instance ArrayShape (ShapeBase ExtDimSize) where
+  shapeRank (Shape l) = length l
+  stripDims n (Shape dims) = Shape $ drop n dims
+  subShapeOf (Shape ds1) (Shape ds2) =
     -- Must agree on Free dimensions, and ds1 may not be existential
     -- where ds2 is Free.  Existentials must also be congruent.
     length ds1 == length ds2 &&

@@ -185,7 +185,7 @@ instance FreeIn Shape where
   freeIn = mconcat . map freeIn . shapeDims
 
 instance FreeIn ExtShape where
-  freeIn = mconcat . map freeInExtDimSize . extShapeDims
+  freeIn = mconcat . map freeInExtDimSize . shapeDims
     where freeInExtDimSize (Free se) = freeIn se
           freeInExtDimSize (Ext _)   = mempty
 

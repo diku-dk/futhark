@@ -902,7 +902,7 @@ checkType = mapM_ checkSubExp . arrayDims
 checkExtType :: Checkable lore =>
                 TypeBase ExtShape u
              -> TypeM lore ()
-checkExtType = mapM_ checkExtDim . extShapeDims . arrayShape
+checkExtType = mapM_ checkExtDim . shapeDims . arrayShape
   where checkExtDim (Free se) = void $ checkSubExp se
         checkExtDim (Ext _)   = return ()
 
@@ -995,7 +995,7 @@ patternContext pat rt = do
   (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, M.empty)
   return (rt', restpat, shapepat)
   where extract t = setArrayShape t . Shape <$>
-                    mapM extract' (extShapeDims $ arrayShape t)
+                    mapM extract' (shapeDims $ arrayShape t)
         extract' (Free se) = return se
         extract' (Ext x)   = correspondingVar x
         correspondingVar x = do

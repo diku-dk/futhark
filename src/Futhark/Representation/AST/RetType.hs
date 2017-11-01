@@ -72,7 +72,7 @@ instance IsRetType DeclExtType where
 
           correctExtDims t =
             t `setArrayShape`
-            ExtShape (map correctExtDim $ extShapeDims $ arrayShape t)
+            Shape (map correctExtDim $ shapeDims $ arrayShape t)
 
           correctExtDim (Ext i)  = Ext i
           correctExtDim (Free d) = Free $ correctDim d

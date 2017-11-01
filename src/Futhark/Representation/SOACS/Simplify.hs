@@ -392,7 +392,7 @@ simplifyStream vtable (Let pat _ lss@(Op (Stream outerdim form lam arr))) = do
       where gatherPat acc (_, Prim _, _) = return acc
             gatherPat acc (_, Mem {}, _) = return acc
             gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
-              foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
+              foldM gatherShape acc (zip3 (shapeDims shp) (shapeDims shp') (shapeDims pshp))
             gatherPat _ _ =
               fail $ "In simplifyStm \"let pat = stream()\": "++
                      " reached unreachable case!"
@@ -441,7 +441,7 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
             dsx <- localScope bodyenv $
                    shapeDims . arrayShape <$> subExpType x
             let parnms = map paramName pars
-                dsrtpx = extShapeDims shp
+                dsrtpx = shapeDims shp
                 (resdims,_) =
                     foldl (\ (lst,i) el ->
                             case el of
@@ -458,7 +458,7 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
                                 then (lst ++ [Free (Var pid)], i)
                                 else (lst ++ [Ext i],        i+1)
                           ) ([],0) (zip dsrtpx dsx)
-            return $ Array btp (ExtShape resdims) u
+            return $ Array btp (Shape resdims) u
           refineArrType _ _ _ _ tp = return tp
 
 -- For now we just remove singleton maps.

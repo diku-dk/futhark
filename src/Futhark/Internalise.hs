@@ -505,7 +505,7 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
   (ts, _, _) <- internaliseReturnType et
   let ts' = map (fromDecl . modifyArrayShape extToZero) ts
   letSubExps desc $ map (I.BasicOp . I.ArrayLit []) ts'
-  where extToZero (I.ExtShape dims) = I.Shape $ map extDimToZero dims
+  where extToZero (I.Shape dims) = I.Shape $ map extDimToZero dims
         extDimToZero I.Ext{} = constant (0::Int32)
         extDimToZero (I.Free d) = d
 

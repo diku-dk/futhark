@@ -407,7 +407,7 @@ compileOutParams orig_rts orig_epts = do
                       CopyIntoMemory $
                       MemLocation memout resultshape ixfun)
           (resultshape, destresultshape) <-
-            mapAndUnzipM inspectExtDimSize $ extShapeDims shape
+            mapAndUnzipM inspectExtDimSize $ shapeDims shape
           let memdest = memdestf resultshape
           return (Imp.ArrayValue memout memsize space t ept resultshape,
                   ArrayDestination memdest destresultshape)

@@ -171,8 +171,8 @@ matchPattern ctx exts loc ses =
 
 unExistentialise :: M.Map Int VName -> I.ExtType -> I.Type -> InternaliseM I.ExtType
 unExistentialise substs et t = do
-  new_dims <- zipWithM inspectDim (I.extShapeDims $ I.arrayShape et) (I.arrayDims t)
-  return $ t `I.setArrayShape` I.ExtShape new_dims
+  new_dims <- zipWithM inspectDim (I.shapeDims $ I.arrayShape et) (I.arrayDims t)
+  return $ t `I.setArrayShape` I.Shape new_dims
   where inspectDim (I.Ext i) d | Just v <- M.lookup i substs = do
           letBindNames'_ [v] $ I.BasicOp $ I.SubExp d
           return $ I.Free $ I.Var v
@@ -212,7 +212,7 @@ lambdaShapeSubstitutions shape_ctx param_ts ts =
   where ctx_to_names = M.fromList $ map (uncurry $ flip (,)) $ M.toList shape_ctx
 
         matchTypes pt t =
-          mconcat $ zipWith matchDims (I.extShapeDims $ I.arrayShape pt) (I.arrayDims t)
+          mconcat $ zipWith matchDims (I.shapeDims $ I.arrayShape pt) (I.arrayDims t)
         matchDims (I.Ext i) d
           | Just v <- M.lookup i ctx_to_names = M.singleton v [d]
         matchDims _ _ =

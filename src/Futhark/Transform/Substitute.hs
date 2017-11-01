@@ -134,13 +134,9 @@ instance Substitute Rank where
 instance Substitute () where
   substituteNames _ = id
 
-instance Substitute Shape where
+instance Substitute d => Substitute (ShapeBase d) where
   substituteNames substs (Shape es) =
     Shape $ map (substituteNames substs) es
-
-instance Substitute ExtShape where
-  substituteNames substs (ExtShape es) =
-    ExtShape $ map (substituteNames substs) es
 
 instance Substitute ExtDimSize where
   substituteNames substs (Free se) = Free $ substituteNames substs se

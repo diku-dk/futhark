@@ -301,11 +301,8 @@ instance Rename Names where
 instance Rename Rank where
   rename = return
 
-instance Rename Shape where
+instance Rename d => Rename (ShapeBase d) where
   rename (Shape l) = Shape <$> mapM rename l
-
-instance Rename ExtShape where
-  rename (ExtShape l) = ExtShape <$> mapM rename l
 
 instance Rename ExtDimSize where
   rename (Free se) = Free <$> rename se

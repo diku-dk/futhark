@@ -109,9 +109,9 @@ internaliseType t = do
   return t'
 
 reExt :: ExtType -> InternaliseTypeM ExtType
-reExt (Array t (ExtShape ds) u) = do
+reExt (Array t (Shape ds) u) = do
   (_, ds') <- mapAccumLM update mempty ds
-  return $ Array t (ExtShape ds') u
+  return $ Array t (Shape ds') u
   where update seen (Ext x)
           | Just x' <- M.lookup x seen =
               return (seen, Ext x')
@@ -163,17 +163,17 @@ internaliseTypeM orig_t =
       internaliseArrayType at
   where internaliseArrayType (E.PrimArray bt shape u _) = do
           dims <- internaliseShape shape
-          return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
+          return [I.arrayOf (I.Prim $ internalisePrimType bt) (Shape dims) $
                   internaliseUniqueness u]
 
         internaliseArrayType (E.PolyArray v targs shape u _) = do
           ts <- applyType v targs
           dims <- internaliseShape shape
           forM ts $ \t ->
-            return $ I.arrayOf t (ExtShape dims) $ internaliseUniqueness u
+            return $ I.arrayOf t (Shape dims) $ internaliseUniqueness u
 
         internaliseArrayType (E.RecordArray elemts shape u) = do
-          innerdims <- ExtShape <$> internaliseShape shape
+          innerdims <- Shape <$> internaliseShape shape
           ts <- concat <$> mapM (internaliseRecordArrayElem . snd) (E.sortFields elemts)
           return [ I.arrayOf ct innerdims $
                    if I.unique ct then Unique
@@ -212,12 +212,12 @@ internaliseTypeWithUniqueness = flip evalStateT 0 . internaliseType'
           lift Nothing
         internaliseArrayType (E.PrimArray bt shape u _) = do
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId'
-          return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
+          return [I.arrayOf (I.Prim $ internalisePrimType bt) (Shape dims) $
                   internaliseUniqueness u]
         internaliseArrayType (E.RecordArray elemts shape u) = do
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId'
           ts <- concat <$> mapM (internaliseRecordArrayElem . snd) (E.sortFields elemts)
-          return [ I.arrayOf t (ExtShape dims) $
+          return [ I.arrayOf t (Shape dims) $
                     if I.unique t then Unique
                     else if I.primType t then u
                          else I.uniqueness t

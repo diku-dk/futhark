@@ -31,7 +31,7 @@ subShapeTests =
   , shape [Ext 1, Ext 1] `isSubShapeOf` shape [Ext 1, Ext 2]
   ]
   where shape :: [ExtDimSize] -> ExtShape
-        shape = ExtShape
+        shape = Shape
 
         free :: Int -> ExtDimSize
         free = Free . Constant . IntValue . Int32Value . fromIntegral

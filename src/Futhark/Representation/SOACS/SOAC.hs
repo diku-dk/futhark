@@ -299,7 +299,7 @@ substNamesInExtType _ tp@(Prim _) = tp
 substNamesInExtType subs (Mem se space) =
   Mem (substNamesInSubExp subs se) space
 substNamesInExtType subs (Array btp shp u) =
-  let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
+  let shp' = Shape $ map (substNamesInExtDimSize subs) (shapeDims shp)
   in  Array btp shp' u
 substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
@@ -448,7 +448,7 @@ typeCheckSOAC (Stream size form lam arrexps) = do
       lamarr_ptp = map paramType $ drop (acc_len+1) $ extLambdaParams lam
       names_lamparams = S.fromList $ map paramName $ extLambdaParams lam
   _ <- mapM (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
-  _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp
+  _ <- mapM (checkInnerDim names_lamparams   . tail . shapeDims . arrayShape) lamarr_rtp
   return ()
     where checkOuterDim chunknm outdim = do
             let chunk_str = pretty chunknm
