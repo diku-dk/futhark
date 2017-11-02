@@ -1357,20 +1357,19 @@ isOverloadedFunction qname args loc = do
       | Just cmp_f <- isEqlOp op = Just $ \desc -> do
           xe' <- internaliseExp "x" xe
           ye' <- internaliseExp "y" ye
-          rs <- zipWithM (doComparison (cmp_f desc)) xe' ye'
-          letTupExp' desc =<< foldBinOp I.LogAnd (constant True) rs
-        where isEqlOp "!=" = Just $ \desc t x y -> do
-                eq <- letSubExp (desc++"true") $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
-                letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
-              isEqlOp "==" = Just $ \desc t x y ->
-                letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
+          rs <- zipWithM (doComparison desc) xe' ye'
+          cmp_f desc =<< letSubExp "eq" =<< foldBinOp I.LogAnd (constant True) rs
+        where isEqlOp "!=" = Just $ \desc eq ->
+                letTupExp' desc $ I.BasicOp $ I.UnOp I.Not eq
+              isEqlOp "==" = Just $ \_ eq ->
+                return [eq]
               isEqlOp _ = Nothing
 
-              doComparison cmp_f x y = do
+              doComparison desc x y = do
                 x_t <- I.subExpType x
                 y_t <- I.subExpType y
                 case x_t of
-                  I.Prim t -> cmp_f t x y
+                  I.Prim t -> letSubExp desc $ I.BasicOp $ I.CmpOp (I.CmpEq t) x y
                   _ -> do
                     let x_dims = I.arrayDims x_t
                         y_dims = I.arrayDims y_t
