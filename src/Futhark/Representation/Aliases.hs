@@ -290,7 +290,9 @@ mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
      else map (const mempty) $ patternContextElements pat
   where mergenames = map (paramName . fst) $ ctxmerge ++ valmerge
         mergenames_set = S.fromList mergenames
--- FIXME: handle If here as well.
+mkContextAliases pat (If _ tbranch fbranch _) =
+  take (length $ patternContextNames pat) $
+  zipWith (<>) (bodyAliases tbranch) (bodyAliases fbranch)
 mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty
 
