@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | A representation where all bindings are annotated with range
 -- information.
 module Futhark.Representation.Ranges
@@ -33,6 +34,7 @@ module Futhark.Representation.Ranges
 where
 
 import Control.Monad.Identity
+import Control.Monad.Reader
 import qualified Data.Set as S
 import Data.Hashable
 import Data.Maybe
@@ -59,10 +61,25 @@ instance (Annotations lore, CanBeRanged (Op lore)) =>
   type FParamAttr (Ranges lore) = FParamAttr lore
   type LParamAttr (Ranges lore) = LParamAttr lore
   type RetType (Ranges lore) = RetType lore
+  type BranchType (Ranges lore) = BranchType lore
   type Op (Ranges lore) = OpWithRanges (Op lore)
+
+withoutRanges :: (HasScope (Ranges lore) m, Monad m) =>
+                 ReaderT (Scope lore) m a ->
+                 m a
+withoutRanges m = do
+  scope <- asksScope $ fmap unRange
+  runReaderT m scope
+    where unRange :: NameInfo (Ranges lore) -> NameInfo lore
+          unRange (LetInfo (_, x)) = LetInfo x
+          unRange (FParamInfo x) = FParamInfo x
+          unRange (LParamInfo x) = LParamInfo x
+          unRange (IndexInfo x) = IndexInfo x
 
 instance (Attributes lore, CanBeRanged (Op lore)) =>
          Attributes (Ranges lore) where
+  expTypesFromPattern =
+    withoutRanges . expTypesFromPattern . removePatternRanges
 
 instance RangeOf (Range, attr) where
   rangeOf = fst
@@ -95,6 +112,7 @@ removeRanges = Rephraser { rephraseExpLore = return
                          , rephraseFParamLore = return
                          , rephraseLParamLore = return
                          , rephraseRetType = return
+                         , rephraseBranchType = return
                          , rephraseOp = return . removeOpRanges
                          }
 

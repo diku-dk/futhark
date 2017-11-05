@@ -44,6 +44,7 @@ instance PrettyAnnot () where
 -- | The class of lores whose annotations can be prettyprinted.
 class (Annotations lore,
        Pretty (RetType lore),
+       Pretty (BranchType lore),
        Pretty (ParamT (FParamAttr lore)),
        Pretty (ParamT (LParamAttr lore)),
        Pretty (PatElemT (LetAttr lore)),
@@ -52,7 +53,9 @@ class (Annotations lore,
        PrettyAnnot (LParam lore),
        Pretty (Op lore)) => PrettyLore lore where
   ppExpLore :: ExpAttr lore -> Exp lore -> Maybe Doc
-  ppExpLore = const $ const Nothing
+  ppExpLore _ (If _ _ _ (IfAttr ts _)) =
+    Just $ text "-- Branch returns:" <+> ppTuple' ts
+  ppExpLore _ _ = Nothing
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
@@ -85,7 +88,7 @@ instance Pretty Value where
 instance Pretty Shape where
   ppr = brackets . commasep . map ppr . shapeDims
 
-instance Pretty ExtDimSize where
+instance Pretty a => Pretty (Ext a) where
   ppr (Free e) = ppr e
   ppr (Ext x)  = text "?" <> text (show x)
 
@@ -234,12 +237,12 @@ instance Pretty (BasicOp lore) where
     parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 
 instance PrettyLore lore => Pretty (Exp lore) where
-  ppr (If c t f info) = text "if" <+> info' <+> ppr c </>
-                        text "then" <+> align (ppr t) </>
-                        text "else" <+> align (ppr f)
-    where info' = case ifSort info of
-            IfNormal -> mempty
-            IfFallback -> text "<fallback>"
+  ppr (If c t f (IfAttr _ ifsort)) =
+    text "if" <+> info' <+> ppr c </>
+    text "then" <+> align (ppr t) </>
+    text "else" <+> align (ppr f)
+    where info' = case ifsort of IfNormal -> mempty
+                                 IfFallback -> text "<fallback>"
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args _ _) =
     text (nameToString fname) <> apply (map (align . ppr . fst) args)
@@ -280,7 +283,7 @@ instance PrettyLore lore => Pretty (ExtLambda lore) where
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry name rettype fparams body) =
     annot (mapMaybe ppAnnot fparams) $
-    text fun <+> ppr rettype <+>
+    text fun <+> ppTuple' rettype <+>
     text (nameToString name) <//>
     apply (map ppr fparams) <+>
     equals </> indent 2 (ppr body)

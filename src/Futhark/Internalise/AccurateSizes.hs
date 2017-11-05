@@ -54,7 +54,7 @@ ensureResultShape asserting msg loc =
 
 ensureResultExtShape :: MonadBinder m =>
                         (m Certificates -> m Certificates)
-                     -> String -> SrcLoc-> [ExtType] -> Body (Lore m)
+                     -> String -> SrcLoc -> [ExtType] -> Body (Lore m)
                      -> m (Body (Lore m))
 ensureResultExtShape asserting msg loc rettype body =
   insertStmsM $ do
@@ -63,7 +63,9 @@ ensureResultExtShape asserting msg loc rettype body =
           let name = "result_proper_shape"
           in ensureExtShape asserting msg loc t name se
     reses <- zipWithM assertProperShape rettype es
-    mkBodyM [] reses
+    ts <- mapM subExpType reses
+    let ctx = extractShapeContext rettype $ map arrayDims ts
+    mkBodyM [] (ctx ++ reses)
 
 ensureExtShape :: MonadBinder m =>
                   (m Certificates -> m Certificates)

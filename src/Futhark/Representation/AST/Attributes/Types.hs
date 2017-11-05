@@ -55,6 +55,7 @@ module Futhark.Representation.AST.Attributes.Types
        , existentialiseExtTypes
        , shapeMapping
        , shapeMapping'
+       , shapeExtMapping
 
          -- * Abbreviations
        , int8, int16, int32, int64
@@ -66,6 +67,7 @@ module Futhark.Representation.AST.Attributes.Types
        , ExtTyped (..)
        , DeclExtTyped (..)
        , SetType (..)
+       , FixExt (..)
        )
        where
 
@@ -73,6 +75,7 @@ import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid
+import Data.List (elemIndex)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
@@ -208,25 +211,27 @@ setArrayDims t dims = t `setArrayShape` Shape dims
 
 -- | Set the existential dimensions of an array.  If the given type is
 -- not an array, return the type unchanged.
-setArrayExtDims :: TypeBase oldshape u -> [ExtDimSize] -> TypeBase ExtShape u
+setArrayExtDims :: TypeBase oldshape u -> [ExtSize] -> TypeBase ExtShape u
 setArrayExtDims t dims = t `setArrayShape` Shape dims
 
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
-setOuterSize :: TypeBase Shape u -> SubExp -> TypeBase Shape u
+setOuterSize :: ArrayShape (ShapeBase d) =>
+                TypeBase (ShapeBase d) u -> d -> TypeBase (ShapeBase d) u
 setOuterSize = setDimSize 0
 
 -- | Replace the size of the given dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
-setDimSize :: Int -> TypeBase Shape u -> SubExp -> TypeBase Shape u
+setDimSize :: ArrayShape (ShapeBase d) =>
+              Int -> TypeBase (ShapeBase d) u -> d -> TypeBase (ShapeBase d) u
 setDimSize i t e = t `setArrayShape` setDim i (arrayShape t) e
 
 -- | Replace the outermost dimension of an array shape.
-setOuterDim :: Shape -> SubExp -> Shape
+setOuterDim :: ShapeBase d -> d -> ShapeBase d
 setOuterDim = setDim 0
 
 -- | Replace the specified dimension of an array shape.
-setDim :: Int -> Shape -> SubExp -> Shape
+setDim :: Int -> ShapeBase d -> d -> ShapeBase d
 setDim i (Shape ds) e = Shape $ take i ds ++ e : drop (i+1) ds
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
@@ -263,7 +268,7 @@ arrayDims = shapeDims . arrayShape
 
 -- | Return the existential dimensions of a type - for non-arrays,
 -- this is the empty list.
-arrayExtDims :: TypeBase ExtShape u -> [ExtDimSize]
+arrayExtDims :: TypeBase ExtShape u -> [ExtSize]
 arrayExtDims = shapeDims . arrayShape
 
 -- | Return the size of the given dimension.  If the dimension does
@@ -423,35 +428,18 @@ generaliseExtTypes rt1 rt2 =
                    put (n + 1, M.insert x n m)
                    return n
 
--- | Given a list of 'ExtType's and a set of "forbidden" names, modify
--- the dimensions of the 'ExtType's such that they are 'Ext' where
--- they were previously 'Free' with a variable in the set of forbidden
--- names.
-existentialiseExtTypes :: Names -> [ExtType] -> [ExtType]
-existentialiseExtTypes inaccessible ts =
-  evalState (mapM makeBoundShapesFree ts)
-  (firstavail, M.empty, M.empty)
-  where firstavail = 1 + S.foldl' max (-1) (shapeContext ts)
-        makeBoundShapesFree t = do
-          shape <- mapM checkDim $ shapeDims $ arrayShape t
-          return $ t `setArrayShape` Shape shape
+-- | Given a list of 'ExtType's and a list of "forbidden" names,
+-- modify the dimensions of the 'ExtType's such that they are 'Ext'
+-- where they were previously 'Free' with a variable in the set of
+-- forbidden names.
+existentialiseExtTypes :: [VName] -> [ExtType] -> [ExtType]
+existentialiseExtTypes inaccessible = map makeBoundShapesFree
+  where makeBoundShapesFree =
+          modifyArrayShape $ fmap checkDim
         checkDim (Free (Var v))
-          | v `S.member` inaccessible =
-            replaceVar v
-        checkDim (Free se) = return $ Free se
-        checkDim (Ext x)   = replaceExt x
-        replaceExt x = do
-          (n, extmap, varmap) <- get
-          case M.lookup x extmap of
-            Nothing -> do put (n+1, M.insert x (Ext n) extmap, varmap)
-                          return $ Ext n
-            Just replacement -> return replacement
-        replaceVar name = do
-          (n, extmap, varmap) <- get
-          case M.lookup name varmap of
-            Nothing -> do put (n+1, extmap, M.insert name (Ext n) varmap)
-                          return $ Ext n
-            Just replacement -> return replacement
+          | Just i <- v `elemIndex` inaccessible =
+              Ext i
+        checkDim d = d
 
 -- | In the call @shapeMapping ts1 ts2@, the lists @ts1@ and @ts@ must
 -- be of equal length and their corresponding elements have the same
@@ -467,11 +455,22 @@ shapeMapping ts = shapeMapping' ts . map arrayDims
 
 -- | Like @shapeMapping@, but works with explicit dimensions.
 shapeMapping' :: [TypeBase Shape u] -> [[a]] -> M.Map VName a
-shapeMapping' ts shapes = M.fromList $ concat $ zipWith inspect ts shapes
-  where inspect t shape =
-          mapMaybe match $ zip (arrayDims t) shape
-        match (Constant {}, _) = Nothing
-        match (Var v, dim)     = Just (v, dim)
+shapeMapping' = dimMapping arrayDims id match
+  where match Constant{} _ = M.empty
+        match (Var v) dim  = M.singleton v dim
+
+-- | Like 'shapeMapping', but produces a mapping for the dimensions context.
+shapeExtMapping :: [TypeBase ExtShape u] -> [TypeBase Shape u1] -> M.Map Int SubExp
+shapeExtMapping = dimMapping arrayExtDims arrayDims match
+  where match Free{} _ =  mempty
+        match (Ext i) dim = M.singleton i dim
+
+dimMapping :: Monoid res =>
+              (t1 -> [dim1]) -> (t2 -> [dim2]) -> (dim1 -> dim2 -> res)
+           -> [t1] -> [t2]
+           -> res
+dimMapping getDims1 getDims2 f ts1 ts2 =
+  mconcat $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
 
 int8 :: PrimType
 int8 = IntType Int8
@@ -524,14 +523,14 @@ instance DeclTyped attr => DeclTyped (Param attr) where
   declTypeOf = declTypeOf . paramAttr
 
 -- | Typeclass for things that contain 'ExtType's.
-class ExtTyped t where
+class FixExt t => ExtTyped t where
   extTypeOf :: t -> ExtType
 
 instance ExtTyped ExtType where
   extTypeOf = id
 
 -- | Typeclass for things that contain 'DeclExtType's.
-class DeclExtTyped t where
+class FixExt t => DeclExtTyped t where
   declExtTypeOf :: t -> DeclExtType
 
 instance DeclExtTyped DeclExtType where
@@ -550,3 +549,28 @@ instance SetType b => SetType (a, b) where
 instance SetType attr => SetType (PatElemT attr) where
   setType (PatElem name bindage attr) t =
     PatElem name bindage $ setType attr t
+
+-- | Something with an existential context that can be (partially)
+-- fixed.
+class FixExt t where
+  -- | Fix the given existentional variable to the indicated free
+  -- value.
+  fixExt :: Int -> SubExp -> t -> t
+
+instance (FixExt shape, ArrayShape shape) => FixExt (TypeBase shape u) where
+  fixExt i se = modifyArrayShape $ fixExt i se
+
+instance FixExt d => FixExt (ShapeBase d) where
+  fixExt i se = fmap $ fixExt i se
+
+instance FixExt a => FixExt [a] where
+  fixExt i se = fmap $ fixExt i se
+
+instance FixExt ExtSize where
+  fixExt i se (Ext j) | j > i     = Ext $ j - 1
+                      | j == i    = Free se
+                      | otherwise = Ext j
+  fixExt _ _ (Free x) = Free x
+
+instance FixExt () where
+  fixExt _ _ () = ()

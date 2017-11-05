@@ -194,7 +194,8 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
       let mkEntry (tp, et) = (tp, (substs, [], E.vacuousShapeAnnotations et))
           types = map mkEntry $ M.toList mapping
       notingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
-        (rettype', _, rcm) <- internaliseReturnType rettype
+        (rettype_bad, _, rcm) <- internaliseReturnType rettype
+        let rettype' = zeroExts rettype_bad
 
         let mkConstParam name = Param name $ I.Prim int32
             constparams = map (mkConstParam . snd) $ pcm<>rcm
@@ -242,6 +243,11 @@ internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params bo
   when (null params) $ void $ lookupFunction fname ([],[])
 
   when entry $ generateEntryPoint fb
+  where
+    -- | Recompute existential sizes to start from zero.
+    -- Necessary because some convoluted constructions will start
+    -- them from somewhere else.
+    zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: E.FunBind -> InternaliseM ()
 generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
@@ -256,9 +262,12 @@ generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
         e_ts = map (flip setAliases () . E.patternType) orig_params
         i_ts = staticShapes $ map I.paramType $ concat params'
 
-    entry_body <- insertStmsM $
-      resultBody . fst <$> funcall "entry_result" (E.qualName ofname)
-                           (e_ts,map rankShaped i_ts) args loc
+    entry_body <- insertStmsM $ do
+      vals <- fst <$> funcall "entry_result" (E.qualName ofname)
+              (e_ts,map rankShaped i_ts) args loc
+      ctx <- extractShapeContext (concat entry_rettype) <$>
+             mapM (fmap I.arrayDims . subExpType) vals
+      resultBodyM (ctx ++ vals)
 
     addFunction $
       I.FunDef (Just entry') (baseName ofname)
@@ -900,7 +909,21 @@ internaliseExp desc (E.Stream form lam arr _) = do
   -- modify the internal representation of reduction streams?
   (form', lam'') <-
     case form of
-      E.MapLike o -> return (I.Parallel o Commutative (Lambda [] (mkBody [] []) []) [], lam')
+      E.MapLike o -> do
+        let (chunk_param, _, _) =
+              partitionChunkedFoldParameters 0 $ I.extLambdaParams lam'
+            ts = map (`setOuterSize` Free (I.Var $ I.paramName chunk_param)) $
+                 extLambdaReturnType lam'
+
+        body <- localScope (scopeOfLParams $ I.extLambdaParams lam') $
+                ensureResultExtShape asserting
+                "size of result not equal to chunk size" (srclocOf lam) ts $
+                extLambdaBody lam'
+
+        let lam'' = lam' { extLambdaReturnType = ts
+                         , extLambdaBody = body
+                         }
+        return (I.Parallel o Commutative (Lambda [] (mkBody [] []) []) [], lam'')
       E.RedLike o comm lam0 -> do
         -- Synthesize neutral elements by applying the fold function
         -- to an empty chunk.

@@ -15,7 +15,8 @@ module Futhark.Representation.AST.Syntax.Core
          , NoUniqueness(..)
          , ShapeBase(..)
          , Shape
-         , ExtDimSize(..)
+         , Ext(..)
+         , ExtSize
          , ExtShape
          , Rank(..)
          , ArrayShape(..)
@@ -76,14 +77,17 @@ newtype ShapeBase d = Shape { shapeDims :: [d] }
 -- that variable must be in scope where this array is used.
 type Shape = ShapeBase SubExp
 
+-- | Something that may be existential.
+data Ext a = Ext Int
+           | Free a
+           deriving (Eq, Ord, Show)
+
 -- | The size of this dimension.
-data ExtDimSize = Free SubExp -- ^ Some known dimension.
-                | Ext Int -- ^ Existentially quantified.
-                  deriving (Eq, Ord, Show)
+type ExtSize = Ext SubExp
 
 -- | Like 'Shape' but some of its elements may be bound in a local
 -- environment instead.  These are denoted with integral indices.
-type ExtShape = ShapeBase ExtDimSize
+type ExtShape = ShapeBase ExtSize
 
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
@@ -112,7 +116,7 @@ instance ArrayShape (ShapeBase SubExp) where
   stripDims n (Shape dims) = Shape $ drop n dims
   subShapeOf = (==)
 
-instance ArrayShape (ShapeBase ExtDimSize) where
+instance ArrayShape (ShapeBase ExtSize) where
   shapeRank (Shape l) = length l
   stripDims n (Shape dims) = Shape $ drop n dims
   subShapeOf (Shape ds1) (Shape ds2) =

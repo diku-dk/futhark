@@ -9,10 +9,10 @@ import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Types
 
-class (Show (LetAttr l), Show (ExpAttr l), Show (BodyAttr l), Show (FParamAttr l), Show (LParamAttr l), Show (RetType l), Show (Op l),
-       Eq (LetAttr l), Eq (ExpAttr l), Eq (BodyAttr l), Eq (FParamAttr l), Eq (LParamAttr l), Eq (RetType l), Eq (Op l),
-       Ord (LetAttr l), Ord (ExpAttr l), Ord (BodyAttr l), Ord (FParamAttr l), Ord (LParamAttr l), Ord (RetType l), Ord (Op l),
-       IsRetType (RetType l),
+class (Show (LetAttr l), Show (ExpAttr l), Show (BodyAttr l), Show (FParamAttr l), Show (LParamAttr l), Show (RetType l), Show (BranchType l), Show (Op l),
+       Eq (LetAttr l), Eq (ExpAttr l), Eq (BodyAttr l), Eq (FParamAttr l), Eq (LParamAttr l), Eq (RetType l), Eq (BranchType l), Eq (Op l),
+       Ord (LetAttr l), Ord (ExpAttr l), Ord (BodyAttr l), Ord (FParamAttr l), Ord (LParamAttr l), Ord (RetType l), Ord (BranchType l), Ord (Op l),
+       IsRetType (RetType l), IsBodyType (BranchType l),
        Typed (FParamAttr l), Typed (LParamAttr l), Typed (LetAttr l),
        DeclTyped (FParamAttr l))
       => Annotations l where
@@ -32,9 +32,14 @@ class (Show (LetAttr l), Show (ExpAttr l), Show (BodyAttr l), Show (FParamAttr l
   type LParamAttr l :: *
   type LParamAttr l = Type
 
-  -- | The type of expressions and function calls.
+  -- | The return type annotation of function calls.
   type RetType l :: *
   type RetType l = DeclExtType
+
+  -- | The return type annotation of branches.
+  type BranchType l :: *
+  type BranchType l = ExtType
+
   -- | Extensible operation.
   type Op l :: *
   type Op l = ()

@@ -105,7 +105,8 @@ toScope = M.map entryInfo . bindings
 castSymbolTable :: (SameScope from to,
                     ExpAttr from ~ ExpAttr to,
                     BodyAttr from ~ BodyAttr to,
-                    RetType from ~ RetType to) =>
+                    RetType from ~ RetType to,
+                    BranchType from ~ BranchType to) =>
                    SymbolTable from -> SymbolTable to
 castSymbolTable table = genCastSymbolTable loopVar letBound fParam lParam freeVar table
   where loopVar (LoopVarEntry r d it) = LoopVar $ LoopVarEntry r d it

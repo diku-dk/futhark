@@ -299,15 +299,15 @@ substNamesInExtType _ tp@(Prim _) = tp
 substNamesInExtType subs (Mem se space) =
   Mem (substNamesInSubExp subs se) space
 substNamesInExtType subs (Array btp shp u) =
-  let shp' = Shape $ map (substNamesInExtDimSize subs) (shapeDims shp)
+  let shp' = Shape $ map (substNamesInExtSize subs) (shapeDims shp)
   in  Array btp shp' u
 substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
   M.findWithDefault (Var idd) idd subs
-substNamesInExtDimSize :: M.Map VName SubExp -> ExtDimSize -> ExtDimSize
-substNamesInExtDimSize _ (Ext o) = Ext o
-substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
+substNamesInExtSize :: M.Map VName SubExp -> ExtSize -> ExtSize
+substNamesInExtSize _ (Ext o) = Ext o
+substNamesInExtSize subs (Free o) = Free $ substNamesInSubExp subs o
 
 instance (Ranged inner) => RangedOp (SOAC inner) where
   opRanges op = replicate (length $ soacType op) unknownRange

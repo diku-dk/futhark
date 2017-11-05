@@ -41,6 +41,7 @@ class (Attributes lore,
        FParamAttr lore ~ DeclType,
        LParamAttr lore ~ Type,
        RetType lore ~ DeclExtType,
+       BranchType lore ~ ExtType,
        SetType (LetAttr lore)) =>
       Bindable lore where
   mkExpPat :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Pattern lore

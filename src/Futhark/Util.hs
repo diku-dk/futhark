@@ -11,8 +11,11 @@ module Futhark.Util
         chunk,
         chunks,
         dropAt,
+        takeLast,
+        dropLast,
         mapEither,
         maybeNth,
+        splitFromEnd,
         splitAt3,
         focusNth,
         unixEnvironment,
@@ -63,6 +66,14 @@ chunks (n:ns) xs =
 dropAt :: Int -> Int -> [a] -> [a]
 dropAt i n xs = take i xs ++ drop (i+n) xs
 
+-- | @takeLast n l@ takes the last @n@ elements of @l@.
+takeLast :: Int -> [a] -> [a]
+takeLast n = reverse . take n . reverse
+
+-- | @dropLast n l@ drops the last @n@ elements of @l@.
+dropLast :: Int -> [a] -> [a]
+dropLast n = reverse . drop n . reverse
+
 -- | A combination of 'map' and 'partitionEithers'.
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
@@ -72,6 +83,10 @@ maybeNth :: Integral int => int -> [a] -> Maybe a
 maybeNth i l
   | i >= 0, v:_ <- genericDrop i l = Just v
   | otherwise                      = Nothing
+
+-- | Like 'splitAt', but from the end.
+splitFromEnd :: Int -> [a] -> ([a], [a])
+splitFromEnd i l = splitAt (length l - i) l
 
 -- | Like 'splitAt', but produces three lists.
 splitAt3 :: Int -> Int -> [a] -> ([a], [a], [a])

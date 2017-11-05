@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -13,8 +12,7 @@ import Control.Monad
 import qualified Data.Set as S
 import Data.Monoid
 import Data.Maybe
-
-import Prelude
+import Data.List
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
@@ -37,6 +35,7 @@ import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Lore
 import Futhark.MonadFreshNames
+import Futhark.Util
 
 simpleExplicitMemory :: Simplifier.SimpleOps ExplicitMemory
 simpleExplicitMemory = simplifiable (simplifyKernelOp simpleInKernel inKernelEnv)
@@ -98,57 +97,60 @@ callKernelRules = standardRules <>
 
 inKernelRules :: (MonadBinder m,
                   Aliased (Lore m),
-                  LetAttr (Lore m) ~ (VarWisdom, MemBound u),
-                  OpWithWisdom (Op lore) ~ MemOp inner,
-                  Lore m ~ Wise lore,
-                  ExplicitMemorish lore) => RuleBook m
+                  Lore m ~ Wise innerlore,
+                  Engine.SimplifiableLore innerlore,
+                  ExplicitMemorish innerlore,
+                  Op innerlore ~ MemOp inner,
+                  ExpAttr (Lore m) ~ (ExpWisdom, ())) => RuleBook m
 inKernelRules = standardRules <>
                 RuleBook [copyCopyToCopy, unExistentialiseMemory] []
 
--- | If a branch is returning some existential memory, but we know the
--- size of the corresponding array non-existentially, then we can
--- create a block of the proper size and always return there.
+-- | If a branch is returning some existential memory, but the size of
+-- the array is existential, then we can create a block of the proper
+-- size and always return there.
 unExistentialiseMemory :: (MonadBinder m,
-                           Op (Lore m) ~ MemOp inner,
-                           LetAttr (Lore m) ~ (VarWisdom, MemBound u)) =>
+                           Lore m ~ Wise innerlore,
+                           Engine.SimplifiableLore innerlore,
+                           ExplicitMemorish innerlore,
+                           Op innerlore ~ MemOp inner,
+                           ExpAttr (Lore m) ~ (ExpWisdom, ())) =>
                           TopDownRule m
-unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
-  | (remaining_ctx, concretised) <-
-      foldl hasConcretisableMemory
-      (patternContextElements pat, mempty)
-      (patternValueElements pat),
-    not $ null concretised = do
+unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ifattr))
+  | fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
+    not $ null fixable = do
 
       -- Create non-existential memory blocks big enough to hold the
       -- arrays.
-      forM_ concretised $ \(pat_elem, (mem, size, space)) -> do
-        case size of
-          Constant{} ->
-            return ()
-          Var size_v ->
-            letBindNames'_ [size_v] =<<
-            toExp (arraySizeInBytesExp $ patElemType pat_elem)
-        letBindNames'_ [mem] $ Op $ Alloc size space
+      (arr_to_mem, oldmem_to_mem, oldsize_to_size) <-
+        fmap unzip3 $ forM fixable $ \(arr_pe, oldmem, oldsize, space) -> do
+          size <- letSubExp "size" =<<
+                  toExp (arraySizeInBytesExp $ patElemType arr_pe)
+          mem <- letExp "mem" $ Op $ Alloc size space
+          return ((patElemName arr_pe, mem), (oldmem, mem), (oldsize, size))
 
       -- Update the branches to contain Copy expressions putting the
       -- arrays where they are expected.
       let updateBody body = insertStmsM $ do
             res <- bodyBind body
             resultBodyM =<<
-              zipWithM updateResult (patternValueElements pat) res
+              zipWithM updateResult (patternElements pat) res
           updateResult pat_elem (Var v)
-            | Just _ <- lookup pat_elem concretised = do
-                v_copy <- newVName $ pretty v <> "_copy"
-                letBind_ (Pattern [] [PatElem v_copy BindVar $ patElemAttr pat_elem]) $
-                  BasicOp $ Copy v
+            | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
+              (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemAttr pat_elem = do
+                v_copy <- newVName $ baseString v <> "_nonext_copy"
+                let v_pat = Pattern [] [PatElem v_copy BindVar $
+                                        MemArray pt shape u $ ArrayIn mem ixfun]
+                addStm $ mkWiseLetStm v_pat (defAux ()) $ BasicOp (Copy v)
                 return $ Var v_copy
+            | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
+                return $ Var mem
+            | Just size <- lookup (Var (patElemName pat_elem)) oldsize_to_size =
+                return size
           updateResult _ se =
             return se
       tbranch' <- updateBody tbranch
       fbranch' <- updateBody fbranch
-
-      letBind_ pat { patternContextElements = remaining_ctx} $
-        If cond tbranch' fbranch' ret
+      letBind_ pat $ If cond tbranch' fbranch' ifattr
   where onlyUsedIn name here = not $ any ((name `S.member`) . freeIn) $
                                           filter ((/=here) . patElemName) $
                                           patternValueElements pat
@@ -156,32 +158,19 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
         knownSize (Var v) = not $ inContext v
         inContext = (`elem` patternContextNames pat)
 
-        hasConcretisableMemory (ctx, concretised) pat_elem
+        hasConcretisableMemory fixable pat_elem
           | (_, MemArray _ shape _ (ArrayIn mem _)) <- patElemAttr pat_elem,
-            all knownSize (shapeDims shape),
+            Just (j, Mem old_size space) <-
+              fmap patElemType <$> find ((mem==) . patElemName . snd)
+                                        (zip [(0::Int)..] $ patternElements pat),
+            Just tse <- maybeNth j $ bodyResult tbranch,
+            Just fse <- maybeNth j $ bodyResult fbranch,
             mem `onlyUsedIn` patElemName pat_elem,
-            Just (size, space, ctx') <- getMemFromContext mem ctx,
-            let concretised' = (pat_elem, (mem, size, space)) : concretised =
-              case size of
-                Constant{} ->
-                  (ctx',
-                   concretised')
-                Var size_v | size_v `onlyUsedIn` mem ->
-                  (filter ((/=size_v) . patElemName) ctx',
-                   concretised')
-                _ ->
-                  (ctx,
-                   concretised)
+            all knownSize (shapeDims shape),
+            fse /= tse =
+              (pat_elem, mem, old_size, space) : fixable
           | otherwise =
-              (ctx, concretised)
-
-        getMemFromContext _ [] = Nothing
-        getMemFromContext mem (PatElem name _ (_, MemMem size space) : ctx)
-          | name == mem = Just (size, space, ctx)
-        getMemFromContext mem (pat_elem : ctx) = do
-          (size, space, ctx') <- getMemFromContext mem ctx
-          return (size, space, pat_elem : ctx')
-
+              fixable
 unExistentialiseMemory _ _ = cannotSimplify
 
 -- | If we are copying something that is itself a copy, just copy the

@@ -257,6 +257,7 @@ runFun fname mainargs prog = do
   case (funDefByName fname prog, M.lookup fname ftable) of
     (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
+      takeLast (length $ funDefRetType fundec) <$>
       runThisFun fundec mainargs ftable
     (_ , Just fun) -> -- It's a builtin function, it'll do its own
                       -- error checking.
@@ -275,7 +276,8 @@ runFunWithShapes fname valargs prog = do
     (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
       let args' = shapes (funDefParams fundec) ++ valargs
-      in runThisFun fundec args' ftable
+      in takeLast (length $ funDefRetType fundec) <$>
+         runThisFun fundec args' ftable
     (_ , Just fun) -> -- It's a builtin function, it'll do its own
                       -- error checking.
       runFutharkM (fun valargs) futharkenv
@@ -449,7 +451,7 @@ evalExp (If e1 e2 e3 info) = do
   vs <- case v of PrimVal (BoolValue True)  -> evalBody e2
                   PrimVal (BoolValue False) -> evalBody e3
                   _                       -> bad $ TypeError "evalExp If"
-  return $ valueShapeContext (ifExtType info) vs ++ vs
+  return $ valueShapeContext (bodyTypeValues $ ifReturns info) vs ++ vs
 
 evalExp (Apply fname args rettype _) = do
   args' <- mapM (evalSubExp . fst) args

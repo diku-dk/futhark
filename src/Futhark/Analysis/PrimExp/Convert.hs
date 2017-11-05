@@ -5,6 +5,7 @@ module Futhark.Analysis.PrimExp.Convert
     primExpToExp
   , primExpFromExp
   , primExpFromSubExp
+  , replaceInPrimExp
   , substituteInPrimExp
 
     -- * Module reexport
@@ -76,19 +77,24 @@ primExpFromSubExp :: PrimType -> SubExp -> PrimExp VName
 primExpFromSubExp t (Var v)      = LeafExp v t
 primExpFromSubExp _ (Constant v) = ValueExp v
 
+-- | Applying a transformation to the leaves in a 'PrimExp'.
+replaceInPrimExp :: (v -> PrimType -> PrimExp v) ->
+                    PrimExp v -> PrimExp v
+replaceInPrimExp f (LeafExp v pt) =
+  f v pt
+replaceInPrimExp _ (ValueExp v) =
+  ValueExp v
+replaceInPrimExp f (BinOpExp bop pe1 pe2) =
+  BinOpExp bop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
+replaceInPrimExp f (CmpOpExp cop pe1 pe2) =
+  CmpOpExp cop (replaceInPrimExp f pe1) (replaceInPrimExp f pe2)
+replaceInPrimExp f (UnOpExp uop pe) =
+  UnOpExp uop $ replaceInPrimExp f pe
+replaceInPrimExp f (ConvOpExp cop pe) =
+  ConvOpExp cop $ replaceInPrimExp f pe
+
 -- | Substituting names in a PrimExp with other PrimExps
 substituteInPrimExp :: Ord v => M.Map v (PrimExp v)
                     -> PrimExp v -> PrimExp v
-substituteInPrimExp tab pexp@(LeafExp v _) =
-    fromMaybe pexp $ M.lookup v tab
-substituteInPrimExp _ pexp@(ValueExp _) = pexp
-substituteInPrimExp tab (BinOpExp bop pe1 pe2) =
-    BinOpExp bop (substituteInPrimExp tab pe1)
-                 (substituteInPrimExp tab pe2)
-substituteInPrimExp tab (CmpOpExp cop pe1 pe2) =
-    CmpOpExp cop (substituteInPrimExp tab pe1)
-                 (substituteInPrimExp tab pe2)
-substituteInPrimExp tab (UnOpExp uop pe) =
-    UnOpExp uop $ substituteInPrimExp tab pe
-substituteInPrimExp tab (ConvOpExp cop pe) =
-    ConvOpExp cop $ substituteInPrimExp tab pe
+substituteInPrimExp tab = replaceInPrimExp $ \v t ->
+  fromMaybe (LeafExp v t) $ M.lookup v tab

@@ -3,7 +3,9 @@
 -- function return types.
 module Futhark.Representation.AST.RetType
        (
-         IsRetType (..)
+         IsBodyType (..)
+       , bodyTypeValues
+       , IsRetType (..)
        , retTypeValues
        , expectedTypes
        )
@@ -13,6 +15,19 @@ import qualified Data.Map.Strict as M
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Types
+
+-- | A type representing the return type of a body.  It should contain
+-- at least the information contained in a list of 'ExtType's, but may
+-- have more, notably an existential context.
+class (Show rt, Eq rt, Ord rt, ExtTyped rt) => IsBodyType rt where
+  -- | Construct a body type from a primitive type.
+  primBodyType :: PrimType -> rt
+
+bodyTypeValues :: IsBodyType rt => [rt] -> [ExtType]
+bodyTypeValues = map extTypeOf
+
+instance IsBodyType ExtType where
+  primBodyType = Prim
 
 -- | A type representing the return type of a function.  In practice,
 -- a list of these will be used.  It should contain at least the
