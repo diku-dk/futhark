@@ -55,35 +55,43 @@ foldClosedForm :: MonadBinder m =>
 
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
+
+  t <- case patternTypes pat of [Prim t] -> return t
+                                _ -> cannotSimplify
+
   closedBody <- checkResults (patternNames pat) inputsize mempty knownBnds
                 (map paramName (lambdaParams lam))
                 (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames'_ [isEmpty] $
     BasicOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
-  letBind_ pat =<<
-    eIf (eSubExp $ Var isEmpty)
-    (resultBodyM accs)
-    (renameBody closedBody)
+  letBind_ pat =<< (If (Var isEmpty)
+                    <$> resultBodyM accs
+                    <*> renameBody closedBody
+                    <*> pure (IfAttr [primBodyType t] IfNormal))
   where knownBnds = determineKnownBindings look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm :: MonadBinder m =>
-                  PatternT attr
+                  Pattern (Lore m)
                -> [(FParam (Lore m),SubExp)]
                -> Names -> SubExp -> Body (Lore m)
                -> RuleM m ()
 loopClosedForm pat merge i bound body = do
+  t <- case patternTypes pat of [Prim t] -> return t
+                                _ -> cannotSimplify
+
   closedBody <- checkResults mergenames bound i knownBnds
                 (map identName mergeidents) body mergeexp
   isEmpty <- newVName "bound_is_zero"
   letBindNames'_ [isEmpty] $
     BasicOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
-  letBindNames'_ (patternNames pat) =<<
-    eIf (eSubExp $ Var isEmpty)
-    (resultBodyM mergeexp)
-    (renameBody closedBody)
+
+  letBind_ pat =<< (If (Var isEmpty)
+                    <$> resultBodyM mergeexp
+                    <*> renameBody closedBody
+                    <*> pure (IfAttr [primBodyType t] IfNormal))
   where (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
         mergenames = map paramName mergepat

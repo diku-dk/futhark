@@ -410,7 +410,7 @@ assertingOne :: InternaliseM VName
              -> InternaliseM Certificates
 assertingOne m = asserting $ Certificates . pure <$> m
 
-type DimTable = M.Map VName ExtDimSize
+type DimTable = M.Map VName ExtSize
 
 data TypeEnv = TypeEnv { typeEnvTypes :: TypeTable
                        , typeEnvDims  :: DimTable
@@ -436,7 +436,7 @@ runInternaliseTypeM bound (InternaliseTypeM m) = do
   let bound' = M.fromList $ zip (S.toList bound) [0..]
       dims = M.map Ext bound'
       new_env = TypeEnv types dims
-      new_state = (S.size bound + 1, bound', mempty)
+      new_state = (S.size bound, bound', mempty)
   (x, (_, substs, cm)) <- runStateT (runReaderT m new_env) new_state
   return (x, substs, cm)
 
@@ -446,7 +446,7 @@ withTypes ttable = local $ \env -> env { typeEnvTypes = ttable <> typeEnvTypes e
 withDims :: DimTable -> InternaliseTypeM a -> InternaliseTypeM a
 withDims dtable = local $ \env -> env { typeEnvDims = dtable <> typeEnvDims env }
 
-lookupDim :: VName -> InternaliseTypeM (Maybe ExtDimSize)
+lookupDim :: VName -> InternaliseTypeM (Maybe ExtSize)
 lookupDim name = M.lookup name <$> asks typeEnvDims
 
 lookupTypeVar' :: VName -> InternaliseTypeM (Maybe TypeEntry)

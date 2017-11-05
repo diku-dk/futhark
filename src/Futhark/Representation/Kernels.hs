@@ -15,7 +15,7 @@ module Futhark.Representation.Kernels
        )
 where
 
-
+import Control.Monad
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Kernels.Kernel
@@ -36,11 +36,13 @@ data Kernels
 instance Annotations Kernels where
   type Op Kernels = Kernel InKernel
 instance Attributes Kernels where
+  expTypesFromPattern = return . expExtTypesFromPattern
 
 data InKernel
 instance Annotations InKernel where
   type Op InKernel = KernelExp InKernel
 instance Attributes InKernel where
+  expTypesFromPattern = return . expExtTypesFromPattern
 instance PrettyLore InKernel where
 
 instance TypeCheck.Checkable Kernels where
@@ -51,15 +53,13 @@ instance TypeCheck.Checkable Kernels where
   checkLetBoundLore _ = TypeCheck.checkType
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   checkOp = TypeCheck.subCheck . typeCheckKernel
-  matchPattern pat e = do
-    et <- expExtType e
-    TypeCheck.matchExtPattern (patternElements pat) et
+  matchPattern pat = TypeCheck.matchExtPattern pat <=< expExtType
   primFParam name t =
     return $ Param name (Prim t)
   primLParam name t =
     return $ Param name (Prim t)
-  matchReturnType name ts =
-    TypeCheck.matchExtReturnType name $ map fromDecl ts
+  matchReturnType = TypeCheck.matchExtReturnType . map fromDecl
+  matchBranchType = TypeCheck.matchExtBranchType
 
 instance TypeCheck.Checkable InKernel where
   checkExpLore = return
@@ -69,15 +69,13 @@ instance TypeCheck.Checkable InKernel where
   checkLetBoundLore _ = TypeCheck.checkType
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   checkOp = typeCheckKernelExp
-  matchPattern pat e = do
-    et <- expExtType e
-    TypeCheck.matchExtPattern (patternElements pat) et
+  matchPattern pat = TypeCheck.matchExtPattern pat <=< expExtType
   primFParam name t =
     return $ Param name (Prim t)
   primLParam name t =
     return $ Param name (Prim t)
-  matchReturnType name ts =
-    TypeCheck.matchExtReturnType name $ map fromDecl ts
+  matchReturnType = TypeCheck.matchExtReturnType . map fromDecl
+  matchBranchType = TypeCheck.matchExtBranchType
 
 instance Bindable Kernels where
   mkBody = Body ()

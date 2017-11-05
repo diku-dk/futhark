@@ -89,6 +89,7 @@ transformStmRecursively (Let pat aux e) =
   letBind_ pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = \scope -> localScope scope . transformBody
                                    , mapOnRetType = return
+                                   , mapOnBranchType = return
                                    , mapOnFParam = return
                                    , mapOnLParam = return
                                    , mapOnOp = fail "Unhandled Op in first order transform"
@@ -451,7 +452,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                      AST.Exp (Lore m) -> Ident -> m ()
         myLetBind e idd = addStm $ mkLet' [] [idd] e
 
-        exToNormShapeDim :: SubExp -> M.Map VName SubExp -> ExtDimSize -> SubExp
+        exToNormShapeDim :: SubExp -> M.Map VName SubExp -> ExtSize -> SubExp
         exToNormShapeDim d _ (Ext   _) = d
         exToNormShapeDim _ _ (Free c@(Constant _)) = c
         exToNormShapeDim _ subs (Free (Var idd)) =

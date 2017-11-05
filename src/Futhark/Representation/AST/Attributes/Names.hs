@@ -184,9 +184,9 @@ instance FreeIn SubExp where
 instance FreeIn d => FreeIn (ShapeBase d) where
   freeIn = mconcat . map freeIn . shapeDims
 
-instance FreeIn ExtDimSize where
-  freeIn (Free se) = freeIn se
-  freeIn (Ext _)   = mempty
+instance FreeIn d => FreeIn (Ext d) where
+  freeIn (Free x) = freeIn x
+  freeIn (Ext _)  = mempty
 
 instance FreeIn shape => FreeIn (TypeBase shape u) where
   freeIn (Array _ shape _) = freeIn shape

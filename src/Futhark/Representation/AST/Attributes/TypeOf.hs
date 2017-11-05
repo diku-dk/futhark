@@ -139,7 +139,7 @@ primOpType (Partition n _ arrays) =
 expExtType :: (HasScope lore m, TypedOp (Op lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt _) = pure $ map fromDecl $ retTypeValues rt
-expExtType (If _ _ _ rt)  = pure $ ifExtType rt
+expExtType (If _ _ _ rt)  = pure $ bodyTypeValues $ ifReturns rt
 expExtType (DoLoop ctxmerge valmerge _ _) =
   pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 expExtType (BasicOp op)    = staticShapes <$> primOpType op
@@ -164,7 +164,8 @@ instance Annotations lore => HasScope lore (FeelBad lore) where
   lookupType = const $ pure $ Prim $ IntType Int32
   askScope = pure mempty
 
--- | The type of a body.
+-- | The type of a body.  Watch out: this only works for the
+-- degenerate case where the body does not already return its context.
 bodyExtType :: (HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
@@ -172,7 +173,7 @@ bodyExtType (Body _ bnds res) =
   extendedScope (traverse subExpType res) bndscope
   where bndscope = scopeOf bnds
         boundInLet (Let pat _ _) = patternNames pat
-        bound = S.fromList $ concatMap boundInLet bnds
+        bound = concatMap boundInLet bnds
 
 -- | Given an the return type of a function and the values returned by
 -- that function, return the size context.
@@ -201,7 +202,7 @@ loopResultContext ctx val = filter usedInValue ctx
 loopExtType :: [Ident] -> [Ident] -> [ExtType]
 loopExtType ctx val =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType val
-  where inaccessible = S.fromList $ map identName ctx
+  where inaccessible = map identName ctx
 
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).

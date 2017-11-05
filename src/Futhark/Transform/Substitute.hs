@@ -116,13 +116,14 @@ instance Substitutable lore => Substitute (Body lore) where
     (substituteNames substs bnds)
     (substituteNames substs res)
 
-replace :: (Substitutable lore) => M.Map VName VName -> Mapper lore lore Identity
+replace :: Substitutable lore => M.Map VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = const $ return . substituteNames substs
                  , mapOnCertificates = return . substituteNames substs
                  , mapOnRetType = return . substituteNames substs
+                 , mapOnBranchType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
                  , mapOnLParam = return . substituteNames substs
                  , mapOnOp = return . substituteNames substs
@@ -138,9 +139,9 @@ instance Substitute d => Substitute (ShapeBase d) where
   substituteNames substs (Shape es) =
     Shape $ map (substituteNames substs) es
 
-instance Substitute ExtDimSize where
-  substituteNames substs (Free se) = Free $ substituteNames substs se
-  substituteNames _      (Ext x)   = Ext x
+instance Substitute d => Substitute (Ext d) where
+  substituteNames substs (Free x) = Free $ substituteNames substs x
+  substituteNames _      (Ext x)  = Ext x
 
 instance Substitute Names where
   substituteNames = S.map . substituteNames
@@ -200,4 +201,5 @@ type Substitutable lore = (Annotations lore,
                            Substitute (FParamAttr lore),
                            Substitute (LParamAttr lore),
                            Substitute (RetType lore),
+                           Substitute (BranchType lore),
                            Substitute (Op lore))
