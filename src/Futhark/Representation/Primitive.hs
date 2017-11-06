@@ -802,7 +802,7 @@ primFuns :: M.Map String ([PrimType], PrimType,
 primFuns = M.fromList
   [ f32 "sqrt32" sqrt, f64 "sqrt64" sqrt
   , f32 "log32" log, f64 "log64" log
-  , f32 "exp32" log, f64 "exp64" log
+  , f32 "exp32" exp, f64 "exp64" exp
   , f32 "sin32" sin, f64 "sin64" sin
   , f32 "cos32" cos, f64 "cos64" cos
   , f32 "tan32" tan, f64 "tan64" tan
