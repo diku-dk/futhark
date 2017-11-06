@@ -555,8 +555,8 @@ module f64: (float with t = f64 with int_t = u64) = {
 	  in if even t then t else floor_t0
 	else floor_t0
 
-  let to_bits (x: f64): u64 = intrinsics.to_bits64 x
-  let from_bits (x: u64): f64 = intrinsics.from_bits64 x
+  let to_bits (x: f64): u64 = u64 (intrinsics.to_bits64 x)
+  let from_bits (x: u64): f64 = intrinsics.from_bits64 (i64 x)
 
   let num_bits = 64
   let get_bit (bit: i32) (x: t) = u64.get_bit bit (to_bits x)
@@ -644,8 +644,8 @@ module f32: (float with t = f32 with int_t = u32) = {
 	else floor_t0
 
 
-  let to_bits (x: f32): u32 = intrinsics.to_bits32 x
-  let from_bits (x: u32): f32 = intrinsics.from_bits32 x
+  let to_bits (x: f32): u32 = u32 (intrinsics.to_bits32 x)
+  let from_bits (x: u32): f32 = intrinsics.from_bits32 (i32 x)
 
   let num_bits = 32
   let get_bit (bit: i32) (x: t) = u32.get_bit bit (to_bits x)

@@ -779,36 +779,8 @@ data Intrinsic = IntrinsicMonoFun [PrimType] PrimType
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
 intrinsics = M.fromList $ zipWith namify [10..] $
-             map (\(name, (ts,t)) -> (name, IntrinsicMonoFun ts t))
-             [("sqrt32", ([FloatType Float32], FloatType Float32))
-             ,("log32", ([FloatType Float32], FloatType Float32))
-             ,("exp32", ([FloatType Float32], FloatType Float32))
-             ,("cos32", ([FloatType Float32], FloatType Float32))
-             ,("sin32", ([FloatType Float32], FloatType Float32))
-             ,("acos32", ([FloatType Float32], FloatType Float32))
-             ,("asin32", ([FloatType Float32], FloatType Float32))
-             ,("atan32", ([FloatType Float32], FloatType Float32))
-             ,("atan2_32", ([FloatType Float32, FloatType Float32], FloatType Float32))
-             ,("isinf32", ([FloatType Float32], Bool))
-             ,("isnan32", ([FloatType Float32], Bool))
-             ,("to_bits32", ([FloatType Float32], Unsigned Int32))
-             ,("from_bits32", ([Unsigned Int32], FloatType Float32))
 
-             ,("sqrt64", ([FloatType Float64], FloatType Float64))
-             ,("log64", ([FloatType Float64], FloatType Float64))
-             ,("exp64", ([FloatType Float64], FloatType Float64))
-             ,("cos64", ([FloatType Float64], FloatType Float64))
-             ,("sin64", ([FloatType Float64], FloatType Float64))
-             ,("acos64", ([FloatType Float64], FloatType Float64))
-             ,("asin64", ([FloatType Float64], FloatType Float64))
-             ,("atan64", ([FloatType Float64], FloatType Float64))
-             ,("atan2_64", ([FloatType Float64, FloatType Float64], FloatType Float64))
-             ,("isinf64", ([FloatType Float64], Bool))
-             ,("isnan64", ([FloatType Float64], Bool))
-             ,("to_bits64", ([FloatType Float64], Unsigned Int64))
-             ,("from_bits64", ([Unsigned Int64], FloatType Float64))
-
-             ] ++
+             map primFun (M.toList Primitive.primFuns) ++
 
              [ ("~", IntrinsicOverloadedFun $
                      [([Signed t], Signed t) | t <- [minBound..maxBound] ] ++
@@ -845,6 +817,13 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         tp_a = TypeParamType tv_a noLoc
 
         namify i (k,v) = (VName (nameFromString k) i, v)
+
+        primFun (name, (ts,t, _)) =
+          (name, IntrinsicMonoFun (map primType ts) $ primType t)
+          where primType (Primitive.FloatType ft) = FloatType ft
+                primType (Primitive.IntType it) = Signed it
+                primType Primitive.Bool = Bool
+                primType Primitive.Cert = Bool
 
         convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
         convertFun from to = (pretty to, IntrinsicOverloadedFun $ zip (map pure from) (repeat to))

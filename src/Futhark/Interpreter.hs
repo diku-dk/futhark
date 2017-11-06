@@ -24,7 +24,6 @@ import Data.List
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Binary.IEEE754 (floatToWord, wordToFloat, doubleToWord, wordToDouble)
 
 import Prelude
 
@@ -355,62 +354,13 @@ builtins = M.fromList $ map namify
   where namify (k,v) = (nameFromString k, v)
 
 builtin :: String -> [Value] -> FutharkM [Value]
-builtin "sqrt32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ sqrt x]
-builtin "log32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ log x]
-builtin "exp32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ exp x]
-builtin "cos32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ cos x]
-builtin "sin32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ sin x]
-builtin "acos32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ acos x]
-builtin "asin32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ asin x]
-builtin "atan32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ atan x]
-builtin "atan2_32" [PrimVal (FloatValue (Float32Value x)),
-                    PrimVal (FloatValue (Float32Value y))] =
-  return [PrimVal $ FloatValue $ Float32Value $ atan2 x y]
-builtin "isnan32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ BoolValue $ isNaN x]
-builtin "isinf32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ BoolValue $ isInfinite x]
-builtin "to_bits32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ IntValue $ Int32Value $ fromIntegral $ floatToWord x]
-builtin "from_bits32" [PrimVal (IntValue (Int32Value x))] =
-  return [PrimVal $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x]
-
-builtin "sqrt64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ sqrt x]
-builtin "log64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ log x]
-builtin "exp64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ exp x]
-builtin "cos64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ cos x]
-builtin "sin64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ sin x]
-builtin "acos64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ acos x]
-builtin "asin64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ asin x]
-builtin "atan64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ atan x]
-builtin "atan2_64" [PrimVal (FloatValue (Float64Value x)),
-                    PrimVal (FloatValue (Float64Value y))] =
-  return [PrimVal $ FloatValue $ Float64Value $ atan2 x y]
-builtin "isnan64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ BoolValue $ isNaN x]
-builtin "isinf64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ BoolValue $ isInfinite x]
-builtin "to_bits64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x]
-builtin "from_bits64" [PrimVal (IntValue (Int64Value x))] =
-  return [PrimVal $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x]
-
+builtin fname args
+  | Just args' <- mapM isPrimValue args,
+    Just (_, _, fun) <- M.lookup fname primFuns,
+    Just result <- fun args' =
+      return [PrimVal result]
+  where isPrimValue (PrimVal v) = Just v
+        isPrimValue _ = Nothing
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
         map (rankShaped . valueType) args
