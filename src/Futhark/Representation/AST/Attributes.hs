@@ -64,36 +64,8 @@ isBuiltInFunction fnm = fnm `M.member` builtInFunctions
 
 -- | A map of all built-in functions and their types.
 builtInFunctions :: M.Map Name (PrimType,[PrimType])
-builtInFunctions = M.fromList $ map namify
-                   [("sqrt32", (FloatType Float32, [FloatType Float32]))
-                   ,("log32", (FloatType Float32, [FloatType Float32]))
-                   ,("exp32", (FloatType Float32, [FloatType Float32]))
-                   ,("cos32", (FloatType Float32, [FloatType Float32]))
-                   ,("sin32", (FloatType Float32, [FloatType Float32]))
-                   ,("acos32", (FloatType Float32, [FloatType Float32]))
-                   ,("asin32", (FloatType Float32, [FloatType Float32]))
-                   ,("atan32", (FloatType Float32, [FloatType Float32]))
-                   ,("atan2_32", (FloatType Float32, [FloatType Float32, FloatType Float32]))
-                   ,("isinf32", (Bool, [FloatType Float32]))
-                   ,("isnan32", (Bool, [FloatType Float32]))
-                   ,("to_bits32", (IntType Int32, [FloatType Float32]))
-                   ,("from_bits32", (FloatType Float32, [IntType Int32]))
-
-                   ,("sqrt64", (FloatType Float64, [FloatType Float64]))
-                   ,("log64", (FloatType Float64, [FloatType Float64]))
-                   ,("exp64", (FloatType Float64, [FloatType Float64]))
-                   ,("cos64", (FloatType Float64, [FloatType Float64]))
-                   ,("sin64", (FloatType Float64, [FloatType Float64]))
-                   ,("atan64", (FloatType Float64, [FloatType Float64]))
-                   ,("acos64", (FloatType Float64, [FloatType Float64]))
-                   ,("asin64", (FloatType Float64, [FloatType Float64]))
-                   ,("atan2_64", (FloatType Float64, [FloatType Float64, FloatType Float64]))
-                   ,("isinf64", (Bool, [FloatType Float64]))
-                   ,("isnan64", (Bool, [FloatType Float64]))
-                   ,("to_bits64", (IntType Int64, [FloatType Float64]))
-                   ,("from_bits64", (FloatType Float64, [IntType Int64]))
-                   ]
-  where namify (k,v) = (nameFromString k, v)
+builtInFunctions = M.fromList $ map namify $ M.toList primFuns
+  where namify (k,(paramts,ret,_)) = (nameFromString k, (ret, paramts))
 
 -- | Find the function of the given name in the Futhark program.
 funDefByName :: Name -> Prog lore -> Maybe (FunDef lore)

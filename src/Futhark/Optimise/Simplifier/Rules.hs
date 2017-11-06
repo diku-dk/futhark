@@ -51,6 +51,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyConvOp
                , letRule simplifyAssert
                , letRule copyScratchToScratch
+               , constantFoldPrimFun
                , simplifyIndexIntoReshape
                , removeEmptySplits
                , removeSingletonSplits
@@ -668,6 +669,16 @@ simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
   constRes Checked
 simplifyAssert _ _ _ =
   Nothing
+
+constantFoldPrimFun :: MonadBinder m => TopDownRule m
+constantFoldPrimFun _ (Let pat (StmAux cs _) (Apply fname args _ _))
+  | Just args' <- mapM (isConst . fst) args,
+    Just (_, _, fun) <- M.lookup (nameToString fname) primFuns,
+    Just result <- fun args' =
+      certifying cs $ letBind_ pat $ BasicOp $ SubExp $ Constant result
+  where isConst (Constant v) = Just v
+        isConst _ = Nothing
+constantFoldPrimFun _ _ = cannotSimplify
 
 simplifyIndex :: MonadBinder m => BottomUpRule m
 simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) (StmAux cs _) (BasicOp (Index idd inds)))

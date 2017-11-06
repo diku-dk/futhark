@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * `futhark-py`/`futhark-pyopencl`: Better dynamic type checking in
     entry points.
 
+  * Primitive functions (sqrt etc) can now be constant-folded.
+
 ### Removed
 
   * The built-in `shape` function has been removed.  Use `length` or

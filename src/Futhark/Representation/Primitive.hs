@@ -58,7 +58,10 @@ module Futhark.Representation.Primitive
        , unOpType
        , cmpOpType
 
-         -- * Utility
+       -- * Primitive functions
+       , primFuns
+
+       -- * Utility
        , zeroIsh
        , oneIsh
        , primBitSize
@@ -72,9 +75,11 @@ module Futhark.Representation.Primitive
        where
 
 import           Control.Applicative
+import           Data.Binary.IEEE754 (floatToWord, wordToFloat, doubleToWord, wordToDouble)
 import           Data.Bits
 import           Data.Hashable
 import           Data.Int            (Int16, Int32, Int64, Int8)
+import qualified Data.Map as M
 import           Data.Word
 
 import           Prelude
@@ -789,6 +794,93 @@ unOpType Not            = Bool
 unOpType (Complement t) = IntType t
 unOpType (Abs t)        = IntType t
 unOpType (FAbs t)       = FloatType t
+
+-- | A mapping from names of primitive functions to their parameter
+-- types, their result type, and a function for evaluating them.
+primFuns :: M.Map String ([PrimType], PrimType,
+                          [PrimValue] -> Maybe PrimValue)
+primFuns = M.fromList
+  [ f32 "sqrt32" sqrt, f64 "sqrt64" sqrt
+  , f32 "log32" log, f64 "log64" log
+  , f32 "exp32" log, f64 "exp64" log
+  , f32 "sin32" sin, f64 "sin64" sin
+  , f32 "cos32" cos, f64 "cos64" cos
+  , f32 "tan32" tan, f64 "tan64" tan
+  , f32 "asin32" asin, f64 "asin64" asin
+  , f32 "acos32" acos, f64 "acos64" acos
+  , f32 "atan32" atan, f64 "atan64" atan
+
+  , ("atan2_32",
+     ([FloatType Float32, FloatType Float32], FloatType Float32,
+      \args -> case args of
+        [FloatValue (Float32Value x), FloatValue (Float32Value y)] ->
+          Just $ FloatValue $ Float32Value $ atan2 x y
+        _ -> Nothing))
+  , ("atan2_64",
+     ([FloatType Float64, FloatType Float64], FloatType Float64,
+       \args -> case args of
+         [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
+           Just $ FloatValue $ Float64Value $ atan2 x y
+         _ -> Nothing))
+
+  , ("isinf32",
+     ([FloatType Float32], Bool,
+      \args -> case args of
+        [FloatValue (Float32Value x)] -> Just $ BoolValue $ isInfinite x
+        _ -> Nothing))
+  , ("isinf64",
+     ([FloatType Float64], Bool,
+      \args -> case args of
+        [FloatValue (Float64Value x)] -> Just $ BoolValue $ isInfinite x
+        _ -> Nothing))
+
+  , ("isnan32",
+     ([FloatType Float32], Bool,
+      \args -> case args of
+        [FloatValue (Float32Value x)] -> Just $ BoolValue $ isNaN x
+        _ -> Nothing))
+  , ("isnan64",
+     ([FloatType Float64], Bool,
+      \args -> case args of
+        [FloatValue (Float64Value x)] -> Just $ BoolValue $ isNaN x
+        _ -> Nothing))
+
+  , ("to_bits32",
+     ([FloatType Float32], IntType Int32,
+      \args -> case args of
+        [FloatValue (Float32Value x)] ->
+          Just $ IntValue $ Int32Value $ fromIntegral $ floatToWord x
+        _ -> Nothing))
+  , ("to_bits64",
+     ([FloatType Float64], IntType Int64,
+      \args -> case args of
+        [FloatValue (Float64Value x)] ->
+          Just $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x
+        _ -> Nothing))
+
+  , ("from_bits32",
+     ([IntType Int32], FloatType Float32,
+      \args -> case args of
+        [IntValue (Int32Value x)] ->
+          Just $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x
+        _ -> Nothing))
+  , ("from_bits64",
+     ([IntType Int64], FloatType Float64,
+      \args -> case args of
+        [IntValue (Int64Value x)] ->
+          Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
+        _ -> Nothing))
+  ]
+  where f32 s f = (s, ([FloatType Float32], FloatType Float32, f32PrimFun f))
+        f64 s f = (s, ([FloatType Float64], FloatType Float64, f64PrimFun f))
+
+        f32PrimFun f [FloatValue (Float32Value x)] =
+          Just $ FloatValue $ Float32Value $ f x
+        f32PrimFun _ _ = Nothing
+
+        f64PrimFun f [FloatValue (Float64Value x)] =
+          Just $ FloatValue $ Float64Value $ f x
+        f64PrimFun _ _ = Nothing
 
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool
