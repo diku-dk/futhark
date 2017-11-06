@@ -175,7 +175,7 @@ data ValueDestination = ScalarDestination VName
                       | ArrayElemDestination VName PrimType Imp.Space (Count Bytes)
                       | MemoryDestination VName
                       | ArrayDestination (Maybe MemLocation)
-                        -- | The 'MemLocation' is 'Just' if a copy if
+                        -- ^ The 'MemLocation' is 'Just' if a copy if
                         -- required.  If it is 'Nothing', then a
                         -- copy/assignment of a memory block somewhere
                         -- takes care of this array.
