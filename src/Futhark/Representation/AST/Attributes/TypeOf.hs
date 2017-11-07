@@ -87,7 +87,7 @@ primOpType (UnOp _ x) =
 primOpType CmpOp{} =
   pure [Prim Bool]
 primOpType (ConvOp conv _) =
-  pure [Prim $ snd $ convTypes conv]
+  pure [Prim $ snd $ convOpType conv]
 primOpType (Index ident slice) =
   result <$> lookupType ident
   where result t = [Prim (elemType t) `arrayOfShape` shape]

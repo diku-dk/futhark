@@ -10,7 +10,7 @@ module mktest (engine: rng_engine) (num: numeric)
     let rngs = engine.split_rng n rng
     let (_, xs) = unzip (map (dist.rand d) rngs)
     in (x,
-        num.(reduce (+) (from_i64 0i64) xs / from_i64 (i64 n)))
+        num.(reduce (+) (i32 0) xs / i32 n))
 }
 
 -- ==

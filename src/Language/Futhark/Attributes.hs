@@ -797,6 +797,12 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
              map cmpOpFun Primitive.allCmpOps ++
 
+             map convOpFun Primitive.allConvOps ++
+
+             map signFun Primitive.allIntTypes ++
+
+             map unsignFun Primitive.allIntTypes ++
+
              map intrinsicType (map Signed [minBound..maxBound] ++
                                 map Unsigned [minBound..maxBound] ++
                                 map FloatType [minBound..maxBound] ++
@@ -819,11 +825,7 @@ intrinsics = M.fromList $ zipWith namify [10..] $
         namify i (k,v) = (VName (nameFromString k) i, v)
 
         primFun (name, (ts,t, _)) =
-          (name, IntrinsicMonoFun (map primType ts) $ primType t)
-          where primType (Primitive.FloatType ft) = FloatType ft
-                primType (Primitive.IntType it) = Signed it
-                primType Primitive.Bool = Bool
-                primType Primitive.Cert = Bool
+          (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
 
         convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
         convertFun from to = (pretty to, IntrinsicOverloadedFun $ zip (map pure from) (repeat to))
@@ -836,6 +838,13 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
         cmpOpFun bop = (pretty bop, IntrinsicMonoFun [t, t] Bool)
           where t = unPrim $ Primitive.cmpOpType bop
+
+        convOpFun cop = (pretty cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
+          where (ft, tt) = Primitive.convOpType cop
+
+        signFun t = ("sign_" ++ pretty t, IntrinsicMonoFun [Unsigned t] $ Signed t)
+
+        unsignFun t = ("unsign_" ++ pretty t, IntrinsicMonoFun [Signed t] $ Unsigned t)
 
         unPrim (Primitive.IntType t) = Signed t
         unPrim (Primitive.FloatType t) = FloatType t

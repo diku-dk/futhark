@@ -80,18 +80,18 @@ module linear_congruential_engine (T: integral) (P: {
 
   let rng_from_seed [n] (seed: [n]i32) =
     let seed' =
-      loop seed' = T.from_i32 1 for i < n do
-        ((seed' T.>>> T.from_i32 16) T.^ seed') T.^
-        T.from_i32 (seed[i] ^ 0b1010101010101)
+      loop seed' = T.i32 1 for i < n do
+        ((seed' T.>>> T.i32 16) T.^ seed') T.^
+        T.i32 (seed[i] ^ 0b1010101010101)
     in #1 (rand seed')
 
   let split_rng (n: i32) (x: rng): [n]rng =
-    map (\i -> x T.^ T.from_i32 (hash i)) (iota n)
+    map (\i -> x T.^ T.i32 (hash i)) (iota n)
 
   let join_rng [n] (xs: [n]rng): rng =
-    reduce (T.^) (T.from_i32 0) xs
+    reduce (T.^) (T.i32 0) xs
 
-  let min = T.from_i32 0
+  let min = T.i32 0
   let max = P.m
 }
 
@@ -112,10 +112,10 @@ module xorshift128plus: rng_engine with int.t = u64 = {
     in ((new_x,new_y), mask (new_y + y))
 
   let rng_from_seed [n] (seed: [n]i32) =
-    loop (a,b) = (1u64,u64.from_i32 n) for i < n do
+    loop (a,b) = (1u64,u64.i32 n) for i < n do
       if n % 2 == 0
-      then #1 (rand (a^u64.from_i32 (hash seed[i]),b))
-      else #1 (rand (a, b^u64.from_i32 (hash seed[i])))
+      then #1 (rand (a^u64.i32 (hash seed[i]),b))
+      else #1 (rand (a, b^u64.i32 (hash seed[i])))
 
   let split_rng (n: i32) ((x,y): rng): [n]rng =
     map (\i -> let (a,b) = #1 (rand (rng_from_seed [hash (i^n)]))
@@ -163,7 +163,7 @@ module shuffle_order_engine
   type rng = (E.rng, [K.k]t)
 
   let build_table (rng: E.rng) =
-    let xs = replicate K.k (I.from_i32 0)
+    let xs = replicate K.k (I.i32 0)
     in loop (rng,xs) for i < K.k do
          let (rng,x) = E.rand rng
          in (rng, xs with [i] <- x)
@@ -181,7 +181,7 @@ module shuffle_order_engine
 
   let rand ((rng,table): rng): (rng, int.t) =
     let (rng,x) = E.rand rng
-    let i = i32 (I.to_i64 x) % K.k
+    let i = i32.i64 (I.to_i64 x) % K.k
     let (rng,y) = E.rand rng
     in ((rng, (copy table) with [i] <- y), table[i])
 
@@ -200,8 +200,8 @@ module uniform_int_distribution
 
   type t = D.t
 
-  let to_D (x: E.int.t) = D.from_i64 (E.int.to_i64 x)
-  let to_E (x: D.t) = E.int.from_i64 (D.to_i64 x)
+  let to_D (x: E.int.t) = D.i64 (E.int.to_i64 x)
+  let to_E (x: D.t) = E.int.i64 (D.to_i64 x)
 
   type rng = E.rng
   type distribution = (D.t,D.t) -- Lower and upper bounds.
@@ -210,8 +210,8 @@ module uniform_int_distribution
   let rand ((min,max): distribution) (rng: E.rng) =
     let min = to_E min
     let max = to_E max
-    let range = max E.int.- min E.int.+ E.int.from_i32 1
-    in if range E.int.<= E.int.from_i32 0
+    let range = max E.int.- min E.int.+ E.int.i32 1
+    in if range E.int.<= E.int.i32 0
        then (rng, to_D E.min) -- Avoid infinite loop below.
        else let secure_max = E.max E.int.- E.max E.int.%% range
             let (rng,x) = loop (rng, x) = E.rand rng
@@ -225,7 +225,7 @@ module uniform_real_distribution (R: real) (E: rng_engine):
   rng_distribution with t = R.t
                    with rng = E.rng
                    with distribution = (R.t,R.t) = {
-  let to_D (x: E.int.t) = R.from_i64 (E.int.to_i64 x)
+  let to_D (x: E.int.t) = R.i64 (E.int.to_i64 x)
 
   type t = R.t
   type rng = E.rng
@@ -243,7 +243,7 @@ module normal_distribution (R: real) (E: rng_engine):
   rng_distribution with t = R.t
                    with rng = E.rng
                    with distribution = {mean:R.t,stddev:R.t} = {
-  let to_R (x: E.int.t) = R.from_i64 (E.int.to_i64 x)
+  let to_R (x: E.int.t) = R.i64 (E.int.to_i64 x)
 
   type t = R.t
   type rng = E.rng
@@ -259,7 +259,7 @@ module normal_distribution (R: real) (E: rng_engine):
     let (rng, u2) = E.rand rng
     let u1 = to_R u1 / to_R E.max
     let u2 = to_R u2 / to_R E.max
-    let r = sqrt (from_i32 (-2) * log u1)
-    let theta = from_i32 2 * pi * u2
+    let r = sqrt (i32 (-2) * log u1)
+    let theta = i32 2 * pi * u2
     in (rng, mean + stddev * (r * cos theta))
 }

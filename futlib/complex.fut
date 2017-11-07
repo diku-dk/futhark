@@ -54,10 +54,10 @@ module complex(T: real): (complex with real = T.t) = {
   type complex = (T.t, T.t)
 
   let mk (a: real) (b: real) = (a,b)
-  let mk_re (a: real) = (a, T.from_i32 0)
-  let mk_im (b: real) = (T.from_i32 0, b)
+  let mk_re (a: real) = (a, T.i32 0)
+  let mk_im (b: real) = (T.i32 0, b)
 
-  let conj ((a,b): complex) = (a, T.from_i32 0 T.- b)
+  let conj ((a,b): complex) = (a, T.i32 0 T.- b)
   let re ((a,_b): complex) = a
   let im ((_a,b): complex) = b
 
@@ -76,11 +76,11 @@ module complex(T: real): (complex with real = T.t) = {
 
   let sqrt ((a,b): complex) =
     let gamma = T.sqrt ((a T.+ T.sqrt (a T.* a T.+ b T.* b)) T./
-                        T.from_i32 2)
-    let delta = T.from_i32 (T.to_i32 (T.sgn b)) T.*
-                T.sqrt (((T.from_i32 0 T.- a) T.+
+                        T.i32 2)
+    let delta = T.i32 (T.to_i32 (T.sgn b)) T.*
+                T.sqrt (((T.i32 0 T.- a) T.+
                          T.sqrt (a T.* a T.+ b T.* b)) T./
-                        T.from_i32 2)
+                        T.i32 2)
     in (gamma, delta)
 
   let exp ((a,b): complex) =
@@ -91,6 +91,6 @@ module complex(T: real): (complex with real = T.t) = {
     mk (T.log (mag z)) (arg z)
 
   let from_fraction (a: i32) (b: i32): complex =
-    mk (T.from_fraction a b) (T.from_i32 0)
+    mk (T.from_fraction a b) (T.i32 0)
   let from_i32 (a: i32) = from_fraction a 1
 }

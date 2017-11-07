@@ -215,7 +215,7 @@ primExpType (ValueExp v)      = primValueType v
 primExpType (BinOpExp op _ _) = binOpType op
 primExpType CmpOpExp{}        = Bool
 primExpType (UnOpExp op _)    = unOpType op
-primExpType (ConvOpExp op _)  = snd $ convTypes op
+primExpType (ConvOpExp op _)  = snd $ convOpType op
 
 -- | Is the expression a constant zero of some sort?
 zeroIshExp :: PrimExp v -> Bool

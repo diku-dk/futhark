@@ -206,7 +206,7 @@ instance Pretty (BasicOp lore) where
   ppr (CmpOp op x y) = ppr op <> parens (ppr x <> comma <+> ppr y)
   ppr (ConvOp conv x) =
     text (convOpFun conv) <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
-    where (fromtype, totype) = convTypes conv
+    where (fromtype, totype) = convOpType conv
   ppr (UnOp op e) = ppr op <+> pprPrec 9 e
   ppr (Index v idxs) =
     ppr v <> brackets (commasep (map ppr idxs))
