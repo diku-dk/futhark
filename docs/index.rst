@@ -10,7 +10,10 @@ Welcome to the documentation for the Futhark compiler and language.
 For a basic introduction, please see `the Futhark website
 <http://futhark-lang.org>`_.  To get started, read the page on
 :ref:`installation`.  Once the compiler has been installed, you might
-want to take a look at  :ref:`usage` or :ref:`language-overview`.
+want to take a look at :ref:`usage`.  This User's Guide contains a
+`ref:`language-reference`, but new Futhark programmers are probably
+better served by reading `the Futhark Book
+<https://github.com/diku-dk/futhark-book>` first.
 
 Documentation for the included basis library is also `available online
 <https://futhark-lang.org/docs/>`_.
@@ -26,7 +29,6 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
 
    installation.rst
    usage.rst
-   language-overview.rst
    language-reference.rst
    c-porting-guide.rst
    hacking.rst
