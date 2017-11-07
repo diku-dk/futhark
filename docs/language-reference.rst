@@ -11,7 +11,11 @@ be used before they are fully defined.  It is a good idea to have a
 basic grasp of Futhark (or some other functional programming language)
 before reading this reference.  An ambiguous grammar is given for the
 full language.  The text describes how ambiguities are resolved in
-practice (things like operator precedence).
+practice (for example by applying rules of operator precedence).
+
+This reference describes only the language itself.  Documentation for
+the basis library is `available elsewhere
+<https://futhark-lang.org/docs/>`_.
 
 Identifiers and Keywords
 ------------------------
