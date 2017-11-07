@@ -245,7 +245,7 @@ implementation is resolved via a combination of lexer and grammar
 transformations.  For ease of understanding, they are presented here
 in natural text.
 
-* A type ascription (`exp` ``:`` `type`) cannot appear as an array
+* A type ascription (``exp : type``) cannot appear as an array
   index, as it conflicts with the syntax for slicing.
 
 * In ``f [x]``, there is am ambiguity between indexing the array ``f``
@@ -559,7 +559,7 @@ See also `Shape Declarations`_.
 ``loop pat = initial for x < n do loopbody``
 ............................................
 
-Equivalent to ``loop (pat = initial) for x in iota n do loopbody``.
+Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
 
 ``loop pat = initial = while cond do loopbody``
 ...............................................
@@ -572,19 +572,6 @@ Equivalent to ``loop (pat = initial) for x in iota n do loopbody``.
 3. Return the final value of ``pat``.
 
 See also `Shape Declarations`_.
-
-``iota n``
-...........
-
-An array of the integers from ``0`` to ``n-1``.  The ``n`` argument
-can be any integral type.  The elements of the array will have the
-same type as ``n``.
-
-``replicate n x``
-.................
-
-An array consisting of ``n`` copies of ``a``.  The ``n`` argument must
-be of type ``i32``.
 
 ``reshape (d_1, ..., d_n) a``
 ...............................
