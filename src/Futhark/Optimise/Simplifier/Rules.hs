@@ -638,7 +638,7 @@ simplifyConvOp :: LetTopDownRule lore u
 simplifyConvOp _ _ (ConvOp op (Constant v)) =
   constRes =<< doConvOp op v
 simplifyConvOp _ _ (ConvOp op se)
-  | (from, to) <- convTypes op, from == to =
+  | (from, to) <- convOpType op, from == to =
   subExpRes se
 simplifyConvOp lookupVar _ (ConvOp (SExt t2 t1) (Var v))
   | Just (BasicOp (ConvOp (SExt t3 _) se), v_cs) <- lookupVar v,

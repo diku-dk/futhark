@@ -53,10 +53,10 @@ module Futhark.Representation.Primitive
        , doFCmpLt, doFCmpLe
 
         -- * Type Of
-       , convTypes
        , binOpType
        , unOpType
        , cmpOpType
+       , convOpType
 
        -- * Primitive functions
        , primFuns
@@ -733,16 +733,6 @@ floatToDouble :: FloatValue -> Double
 floatToDouble (Float32Value v) = fromRational $ toRational v
 floatToDouble (Float64Value v) = v
 
--- | Return respectively the source and destination types of a conversion operator.
-convTypes :: ConvOp -> (PrimType, PrimType)
-convTypes (ZExt t1 t2)   = (IntType t1, IntType t2)
-convTypes (SExt t1 t2)   = (IntType t1, IntType t2)
-convTypes (FPConv t1 t2) = (FloatType t1, FloatType t2)
-convTypes (FPToUI t1 t2) = (FloatType t1, IntType t2)
-convTypes (FPToSI t1 t2) = (FloatType t1, IntType t2)
-convTypes (UIToFP t1 t2) = (IntType t1, FloatType t2)
-convTypes (SIToFP t1 t2) = (IntType t1, FloatType t2)
-
 -- | The result type of a binary operator.
 binOpType :: BinOp -> PrimType
 binOpType (Add t)   = IntType t
@@ -794,6 +784,16 @@ unOpType Not            = Bool
 unOpType (Complement t) = IntType t
 unOpType (Abs t)        = IntType t
 unOpType (FAbs t)       = FloatType t
+
+-- | The input and output types of a conversion operator.
+convOpType :: ConvOp -> (PrimType, PrimType)
+convOpType (ZExt from to) = (IntType from, IntType to)
+convOpType (SExt from to) = (IntType from, IntType to)
+convOpType (FPConv from to) = (FloatType from, FloatType to)
+convOpType (FPToUI from to) = (FloatType from, IntType to)
+convOpType (FPToSI from to) = (FloatType from, IntType to)
+convOpType (UIToFP from to) = (IntType from, FloatType to)
+convOpType (SIToFP from to) = (IntType from, FloatType to)
 
 -- | A mapping from names of primitive functions to their parameter
 -- types, their result type, and a function for evaluating them.
@@ -1004,7 +1004,7 @@ instance Pretty CmpOp where
 
 instance Pretty ConvOp where
   ppr op = convOp (convOpFun op) from to
-    where (from, to) = convTypes op
+    where (from, to) = convOpType op
 
 instance Pretty UnOp where
   ppr Not            = text "!"

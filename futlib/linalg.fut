@@ -14,7 +14,7 @@ module linalg(T: numeric): {
   open T
   type t = T.t
   let dotprod [n] (xs: [n]t) (ys: [n]t): t =
-    reduce (+) (from_i32 0) (map (*) xs ys)
+    reduce (+) (i32 0) (map (*) xs ys)
 
   let matvecmul [n][m] (xss: [n][m]t) (ys: [m]t) =
     map (dotprod ys) xss
@@ -38,8 +38,8 @@ module linalg(T: numeric): {
   let inv [n] (A: [n][n]t): [n][n]t =
     -- Pad the matrix with the identity matrix.
     let Ap = map (\row i ->
-                  let padding = replicate n (from_i32 0)
-                  let padding[i] = from_i32 1
+                  let padding = replicate n (i32 0)
+                  let padding[i] = i32 1
                   in concat row padding)
                  A (iota n)
     let Ap' = gauss_jordan Ap

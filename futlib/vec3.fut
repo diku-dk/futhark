@@ -34,5 +34,5 @@ module mk_vec3(real: real): vec3 with real = real.t = {
 
   let normalise (v: vec): vec =
     let l = norm v
-    in scale (real.from_i32 1 real./ l) v
+    in scale (real.i32 1 real./ l) v
 }

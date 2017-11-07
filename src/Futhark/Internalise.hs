@@ -1338,6 +1338,16 @@ isOverloadedFunction qname args loc = do
     handle [x] "u32" = Just $ toUnsigned I.Int32 x
     handle [x] "u64" = Just $ toUnsigned I.Int64 x
 
+    handle [x] "sign_i8"  = Just $ toSigned I.Int8 x
+    handle [x] "sign_i16" = Just $ toSigned I.Int16 x
+    handle [x] "sign_i32" = Just $ toSigned I.Int32 x
+    handle [x] "sign_i64" = Just $ toSigned I.Int64 x
+
+    handle [x] "unsign_i8"  = Just $ toUnsigned I.Int8 x
+    handle [x] "unsign_i16" = Just $ toUnsigned I.Int16 x
+    handle [x] "unsign_i32" = Just $ toUnsigned I.Int32 x
+    handle [x] "unsign_i64" = Just $ toUnsigned I.Int64 x
+
     handle [x] "f32" = Just $ toFloat I.Float32 x
     handle [x] "f64" = Just $ toFloat I.Float64 x
 
@@ -1365,6 +1375,10 @@ isOverloadedFunction qname args loc = do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
           fmap pure $ letSubExp desc $ I.BasicOp $ I.CmpOp cmp x' y'
+    handle [x] s
+      | Just conv <- find ((==s) . pretty) allConvOps = Just $ \desc -> do
+          x' <- internaliseExp1 "x" x
+          fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
 
     -- Short-circuiting operators are magical.
     handle [x,y] "&&" = Just $ \desc ->

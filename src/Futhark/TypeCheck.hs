@@ -692,7 +692,7 @@ checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 
-checkBasicOp (ConvOp op e) = require [Prim $ fst $ convTypes op] e
+checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
 
 checkBasicOp (Index ident idxes) = do
   vt <- lookupType ident
