@@ -64,11 +64,11 @@ doInlineInCaller (FunDef entry name rtp args body) inlcallees =
 
 inlineInBody :: [FunDef] -> Body -> Body
 inlineInBody inlcallees
-             (Body _ (bnd@(Let pat _ (Apply fname args _ (loc,locs))):bnds) res) =
+             (Body _ (bnd@(Let pat _ (Apply fname args _ (safety,loc,locs))):bnds) res) =
   let continue callbnds =
         callbnds `insertStms` inlineInBody inlcallees (mkBody bnds res)
       continue' (Body _ callbnds res') =
-        continue $ addLocations (loc:locs) callbnds ++
+        continue $ addLocations safety (loc:locs) callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat) res'
   in case filter ((== fname) . funDefName) inlcallees of
        [] -> continue [bnd]
@@ -118,17 +118,19 @@ inlineInExtLambda :: [FunDef] -> ExtLambda -> ExtLambda
 inlineInExtLambda inlcallees (ExtLambda params body ret) =
   ExtLambda params (inlineInBody inlcallees body) ret
 
-addLocations :: [SrcLoc] -> [Stm] -> [Stm]
-addLocations more_locs = map onStm
+addLocations :: Safety -> [SrcLoc] -> [Stm] -> [Stm]
+addLocations caller_safety more_locs = map onStm
   where onStm stm = stm { stmExp = onExp $ stmExp stm }
-        onExp (Apply fname args t (loc,locs)) =
-          Apply fname args t (loc,locs++more_locs)
+        onExp (Apply fname args t (safety, loc,locs)) =
+          Apply fname args t (min caller_safety safety, loc,locs++more_locs)
         onExp (BasicOp (Assert cond desc (loc,locs))) =
-          BasicOp $ Assert cond desc (loc,locs++more_locs)
+          case caller_safety of
+            Safe -> BasicOp $ Assert cond desc (loc,locs++more_locs)
+            Unsafe -> BasicOp $ SubExp $ Constant Checked
         onExp e = mapExp identityMapper { mapOnBody = const $ return . onBody
                                         } e
         onBody body =
-          body { bodyStms = addLocations more_locs $ bodyStms body }
+          body { bodyStms = addLocations caller_safety more_locs $ bodyStms body }
 
 -- | A composition of 'inlineAggressively' and 'removeDeadFunctions',
 -- to avoid the cost of type-checking the intermediate stage.

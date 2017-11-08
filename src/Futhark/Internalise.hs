@@ -546,7 +546,7 @@ internaliseExp desc (E.Apply fname args _ loc)
   | Just (rettype, _) <- M.lookup fname' I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname' args'' [I.Prim rettype] (loc, [])
+  letTupExp' desc $ I.Apply fname' args'' [I.Prim rettype] (Safe, loc, [])
   where tag ses = [ (se, I.Observe) | se <- ses ]
         -- Builtin functions are special anyway, so it is OK to not
         -- use lookupSubst here.
@@ -1318,7 +1318,7 @@ binOpCurriedToLambda op paramtype rettype e swap = do
 internaliseDimConstant :: SrcLoc -> Name -> VName -> InternaliseM ()
 internaliseDimConstant loc fname name =
   letBind_ (basicPattern' [] [I.Ident name $ I.Prim I.int32]) $
-  I.Apply fname [] [I.Prim I.int32] (loc, mempty)
+  I.Apply fname [] [I.Prim I.int32] (Safe, loc, mempty)
 
 -- | Some operators and functions are overloaded or otherwise special
 -- - we detect and treat them here.
@@ -1625,18 +1625,20 @@ lookupConstant loc name = do
   case is_const of
     Just (fname, constparams, _, _, _, _, mk_rettype) -> do
       (constargs, const_ds, const_ts) <- unzip3 <$> constFunctionArgs loc constparams
+      safety <- askSafety
       case mk_rettype $ zip constargs $ map I.fromDecl const_ts of
         Nothing -> fail $ "lookupConstant: " ++ pretty name ++ " failed"
         Just rettype ->
-          fmap (Just . map I.Var) $
-          letTupExp (baseString name) $ I.Apply fname (zip constargs const_ds) rettype (loc, mempty)
+          fmap (Just . map I.Var) $ letTupExp (baseString name) $
+          I.Apply fname (zip constargs const_ds) rettype (safety, loc, mempty)
     Nothing -> return Nothing
 
 constFunctionArgs :: SrcLoc -> ConstParams -> InternaliseM [(SubExp, I.Diet, I.DeclType)]
 constFunctionArgs loc = mapM arg
   where arg (fname, name) = do
+          safety <- askSafety
           se <- letSubExp (baseString name ++ "_arg") $
-                I.Apply fname [] [I.Prim I.int32] (loc, [])
+                I.Apply fname [] [I.Prim I.int32] (safety, loc, [])
           return (se, I.Observe, I.Prim I.int32)
 
 funcall :: String -> QualName VName -> SpecArgs -> [SubExp] -> SrcLoc
@@ -1665,8 +1667,13 @@ funcall desc qfname (e_ts, i_ts) args loc = do
                pretty argts' ++
                "\nFunction has parameters\n " ++ pretty fun_params
     Just ts -> do
-      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) ts (loc, mempty)
+      safety <- askSafety
+      ses <- letTupExp' desc $ I.Apply fname' (zip args' diets) ts (safety, loc, mempty)
       return (ses, map I.fromDecl ts)
+
+askSafety :: InternaliseM Safety
+askSafety = do check <- asks envDoBoundsChecks
+               return $ if check then I.Safe else I.Unsafe
 
 boundsCheck :: SrcLoc -> I.SubExp -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc w e = do
