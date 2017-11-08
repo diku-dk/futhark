@@ -47,6 +47,7 @@ module Futhark.Representation.AST.Syntax
   , LoopForm (..)
   , IfAttr (..)
   , IfSort (..)
+  , Safety (..)
   , LambdaT(..)
   , Lambda
   , ExtLambdaT (..)
@@ -259,7 +260,7 @@ data ExpT lore
   = BasicOp (BasicOp lore)
     -- ^ A simple (non-recursive) operation.
 
-  | Apply  Name [(SubExp, Diet)] [RetType lore] (SrcLoc, [SrcLoc])
+  | Apply  Name [(SubExp, Diet)] [RetType lore] (Safety, SrcLoc, [SrcLoc])
 
   | If     SubExp (BodyT lore) (BodyT lore) (IfAttr (BranchType lore))
 
@@ -272,6 +273,13 @@ data ExpT lore
 deriving instance Annotations lore => Eq (ExpT lore)
 deriving instance Annotations lore => Show (ExpT lore)
 deriving instance Annotations lore => Ord (ExpT lore)
+
+-- | Whether something is safe or unsafe (mostly function calls, and
+-- in the context of whether operations are dynamically checked).
+-- When we inline an 'Unsafe' function, we remove all safety checks in
+-- its body.  The 'Ord' instance picks 'Unsafe' as being less than
+-- 'Safe'.
+data Safety = Unsafe | Safe deriving (Eq, Ord, Show)
 
 -- | For-loop or while-loop?
 data LoopForm lore = ForLoop VName IntType SubExp [(LParam lore,VName)]
