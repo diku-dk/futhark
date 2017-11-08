@@ -225,7 +225,8 @@ lookupFunction fname types@(_, i_types) = do
   case M.lookup i_types $ polymorphicSpecialisations fb of
     Just info -> return info
     Nothing -> do
-      info <- polymorphicSpecialise fb types
+      info <- local (\env -> env { envDoBoundsChecks = True }) $
+              polymorphicSpecialise fb types
       let fb' = fb { polymorphicSpecialisations =
                        M.insert i_types info $ polymorphicSpecialisations fb }
       modify $ \s -> s { stateFtable = M.insert fname fb' $ stateFtable s }
