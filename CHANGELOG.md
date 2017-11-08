@@ -44,6 +44,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * The built-in `shape` function has been removed.  Use `length` or
     size parameters.
 
+### Changed
+
+  * The `from_i32`/`from_i64` functions of the `numeric` module type
+    have been replaced with functions named `i32`/`i64`.  Similarly
+    functions have been added for all the other primitive types
+    (factored into a new `from_prim` module type).
+
 ### Fixed
 
   * The `!=` operator now works properly on arrays (#426).
