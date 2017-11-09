@@ -218,7 +218,7 @@ instance Hashable Ident where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of names used for certificates in some expressions.
-newtype Certificates = Certificates [VName]
+newtype Certificates = Certificates { unCertificates :: [VName] }
                      deriving (Eq, Ord, Show)
 
 instance Monoid Certificates where
