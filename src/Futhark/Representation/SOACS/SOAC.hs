@@ -382,7 +382,8 @@ instance Annotations lore => ST.IndexOp (SOAC lore) where
             expandPrimExpTable table stm
               | [v] <- patternNames $ stmPattern stm,
                 Just (pe,cs) <-
-                    runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm =
+                  runWriterT $ primExpFromExp (asPrimExp table) $ stmExp stm,
+                all (`ST.elem` vtable) (unCertificates $ stmCerts stm) =
                   M.insert v (pe, stmCerts stm <> cs) table
               | otherwise =
                   table
