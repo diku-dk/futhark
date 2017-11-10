@@ -15,7 +15,7 @@
 let main [l][m][n] (xsss : [l][m][n]f32): ([l][m]i32, [l][m][n]f64) =
   unzip (map (\xss ->
          unzip (map(\[n] (xs : [n]f32) : (i32, [n]f64) ->
-                       let (xs_int, xs_neg) = unzip (map( \(x : f32) : (i32, f64) -> (i32 x, f64(-x))) xs)
+                       let (xs_int, xs_neg) = unzip (map(\x -> (i32 x, f64.f32(-x))) xs)
                        in (reduce (+) 0 xs_int, xs_neg)
                    ) xss)
        ) xsss)

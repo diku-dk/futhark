@@ -200,20 +200,20 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
   -- direction vector for dimension j
   let dirvec (j:i32) : [L]u32 = unsafe
     if j == 0 then
-       map (\i -> 1u32 << (32u32-u32(i+1))
+       map (\i -> 1u32 << (32u32-u32.i32(i+1))
  	   ) (iota L)
     else
        let s = D.s[j-1]
        let a = D.a[j-1]
        let V = map (\i -> if i >= s then 0u32
-			  else D.m[j-1,i] << (32u32-u32(i+1))
+			  else D.m[j-1,i] << (32u32-u32.i32(i+1))
 		   ) (iota L) in
        #2 (loop (i,V) = (s, V) while i < L do
            let v = V[i-s]
-	   let vi0 = v ^ (v >> (u32(s)))
+	   let vi0 = v ^ (v >> (u32.i32(s)))
 	   let (_,vi) =
 	     loop (k,vi) = (1,vi0) while k <= s-1 do
-               (k+1, vi ^ (((a >> u32(s-1-k)) & 1u32) * V[i-k]))
+               (k+1, vi ^ (((a >> u32.i32(s-1-k)) & 1u32) * V[i-k]))
 	   in (i+1, V with [i] <- vi))
 
   let index_of_least_significant_0(x: i32): i32 =
@@ -256,7 +256,7 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
                        else recM (k+offs-1))
                     (iota n)
     let vct_ints = scan (\x y -> map (^) x y) (replicate D 0u32) contrbs
-    in map (\xs -> map (\x -> f64(x)/norm) xs) vct_ints
+    in map (\xs -> map (\x -> f64.u32(x)/norm) xs) vct_ints
 
   module Reduce (X : { include monoid
                        val f : [D]f64 -> t }) : { val run : i32 -> X.t } =
@@ -283,7 +283,7 @@ module R = S2.Reduce { type t = f64
 		       let f (v : [2]f64) : f64 =
                          let x = v[0]
 		 	 let y = v[1]
-			 in f64(x*x+y*y < 1f64) }
+			 in f64.bool(x*x+y*y < 1f64) }
 
 let pi (n:i32) : f64 =
   R.run n * 4.0 / f64(n)

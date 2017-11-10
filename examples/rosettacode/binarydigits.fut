@@ -15,5 +15,5 @@
 let main(x: i32): i64 =
   loop out = 0i64 for i < 32 do
     let digit = (x >> (31-i)) & 1
-    let out = (out * 10i64) + i64(digit)
+    let out = (out * 10i64) + i64.i32(digit)
     in out

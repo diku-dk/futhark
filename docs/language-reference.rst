@@ -86,13 +86,6 @@ instead of the usual decimal notation. Here, ``0x1.f`` evaluates to
    hexdigit: `decdigit` | "a"..."f" | "A"..."F"
    bindigit: "0" | "1"
 
-Numeric values can be converted between different types by using the
-desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
-the floating-point number ``1.0`` to a 32-bit signed integer.
-Conversion from floating-point to integers is done by truncation.
-
-Boolean values can also be converted to numbers (1 for true, 0 for
-false) by using the desired numeric type as a function.
 
 Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~

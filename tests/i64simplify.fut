@@ -6,4 +6,4 @@
 let main(b: bool) =
   let n = 3i64
   let i = if b then 0 else 1
-  in i64 i >= 0i64 && i64 i < n
+  in i64.i32 i >= 0i64 && i64.i32 i < n
