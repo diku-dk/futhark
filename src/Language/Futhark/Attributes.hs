@@ -789,7 +789,9 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
              [("opaque", IntrinsicOpaque)] ++
 
-             map (convertFun anyPrimType) anyPrimType ++
+             [convertFun [Signed Int32] (FloatType Float32),
+              convertFun [Signed Int32] (FloatType Float64),
+              convertFun [FloatType Float32, FloatType Float64] (Signed Int32)] ++
 
              map unOpFun Primitive.allUnOps ++
 

@@ -7,4 +7,4 @@
 import "/futlib/math"
 
 let main(n: i32): ([]i8, []i16, []i32, []i64) =
-  (i8.iota (i8 n), i16.iota (i16 n), i32.iota (i32 n), i64.iota (i64 n))
+  (i8.iota (i8.i32 n), i16.iota (i16.i32 n), i32.iota (i32.i32 n), i64.iota (i64.i32 n))

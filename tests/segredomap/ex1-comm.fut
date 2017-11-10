@@ -10,6 +10,6 @@
 -- }
 let main [m][n] (xss : [m][n]f32): ([m]i32, [m][n]f64) =
   unzip (map( \(xs : [n]f32) : (i32, [n]f64) ->
-         let (xs_int, xs_neg) = unzip (map( \(x : f32) : (i32, f64) -> (i32 x, f64(-x))) xs)
+         let (xs_int, xs_neg) = unzip (map(\x -> (i32 x, f64.f32(-x))) xs)
          in (reduce_comm (+) 0 xs_int, xs_neg)
      ) xss)

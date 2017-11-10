@@ -53,7 +53,7 @@ let checkList [d][m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): bool =
   reduce (&&) true (map (\x y -> checkClass w x * y != -1.0) xs ys)
 
 let accuracy [d][m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): f32 =
-  reduce (+) 0.0 (map (\x y -> f32 (checkClass w x * y != -1.0)) xs ys)
+  reduce (+) 0.0 (map (\x y -> f32.bool (checkClass w x * y != -1.0)) xs ys)
 
 let train [d] (w: [d]f32) (x: [d]f32) (y: f32) (eta: f32): [d]f32 =
   if checkClass w x == y then w
@@ -66,4 +66,4 @@ let main [d][m] (w: [d]f32) (xd: [m][d]f32) (yd: [m]f32) (limit: i32) (eta: f32)
     let x = xd[i%m]
     let y = yd[i%m]
     in (train w x y eta, i+1)
-  in (i, w, f32(accuracy w xd yd) / f32(m))
+  in (i, w, accuracy w xd yd / f32(m))

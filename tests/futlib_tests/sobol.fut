@@ -12,7 +12,7 @@ module R = S2.Reduce { type t = f64
                        let f (v : [2]f64) : f64 =
                          let x = v[0]
                          let y = v[1]
-                         in f64(x*x+y*y < 1f64) }
+                         in f64.bool(x*x+y*y < 1f64) }
 
 -- ==
 -- entry: test_chunk

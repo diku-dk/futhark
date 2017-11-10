@@ -9,4 +9,4 @@ import "/futlib/math"
 
 let main(x: u8, i: u8) =
   let a = u8.iota x
-  in a[i32 i:]
+  in a[i32.u8 i:]

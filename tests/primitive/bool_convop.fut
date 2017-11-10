@@ -5,4 +5,4 @@
 -- input {  true } output { true 1i8 1i16 1i32 1i64 1f32 1f64 }
 
 let main(b: bool): (bool,i8,i16,i32,i64,f32,f64) =
-  (bool b, i8 b, i16 b, i32 b, i64 b, f32 b, f64 b)
+  (bool.bool b, i8.bool b, i16.bool b, i32.bool b, i64.bool b, f32.bool b, f64.bool b)

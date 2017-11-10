@@ -10,15 +10,17 @@
 
 type md5 = (u32, u32, u32, u32)
 
+let us32 (x: i32) = u32.i32 x
+
 let rs: [64]u32 =
-  map u32
+  map us32
   ([ 7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
      5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
      4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
      6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21 ])
 
 let ks: [64]u32 =
-  map u32
+  map us32
   ([ 0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee ,
      0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501 ,
      0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be ,
@@ -38,16 +40,16 @@ let ks: [64]u32 =
 
 let rotate_left(x: u32, c: u32): u32 = (x << c) | (x >> (32u32 - c))
 
-let bytes(x: u32): [4]u8 = [u8(x),
-                            u8(x/0x100u32),
-                            u8(x/0x10000u32),
-                            u8(x/0x1000000u32)]
+let bytes(x: u32): [4]u8 = [u8.u32(x),
+                            u8.u32(x/0x100u32),
+                            u8.u32(x/0x10000u32),
+                            u8.u32(x/0x1000000u32)]
 
 let unbytes(bs: [4]u8): u32 =
-  u32(bs[0]) +
-  u32(bs[1]) * 0x100u32 +
-  u32(bs[2]) * 0x10000u32 +
-  u32(bs[3]) * 0x1000000u32
+  u32.u8(bs[0]) +
+  u32.u8(bs[1]) * 0x100u32 +
+  u32.u8(bs[2]) * 0x10000u32 +
+  u32.u8(bs[3]) * 0x1000000u32
 
 let unbytes_block(block: [64]u8): [16]u32 =
   map unbytes (reshape (16,4) block)
@@ -57,20 +59,20 @@ let md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
   loop (a,b,c,d) = (a0,b0,c0,d0) for i < 64 do
     let (f,g) =
       if      i < 16 then ((b & c) | ((~b) & d),
-                           i)
+                           u32.i32 i)
       else if i < 32 then ((d & b) | ((~d) & c),
-                           i32((5u32*u32(i) + 1u32) % 16u32))
+                           (5u32*u32.i32 i + 1u32) % 16u32)
       else if i < 48 then (b ^ c ^ d,
-                           i32((3u32*u32(i) + 5u32) % 16u32))
+                           (3u32*u32.i32 i + 5u32) % 16u32)
       else                (c ^ (b | (~d)),
-                           i32((7u32*u32(i))        % 16u32))
-    in (d, b + rotate_left(a + f + ks[i] + m[g], rs[i]), b, c)
+                           (7u32*u32.i32 i)        % 16u32)
+    in (d, b + rotate_left(a + f + ks[i] + m[i32.u32 g], rs[i]), b, c)
 
 let md5 [n] (ms: [n][16]u32): md5 =
-  let a0 = u32(0x67452301)
-  let b0 = u32(0xefcdab89)
-  let c0 = u32(0x98badcfe)
-  let d0 = u32(0x10325476)
+  let a0 = 0x67452301_u32
+  let b0 = 0xefcdab89_u32
+  let c0 = 0x98badcfe_u32
+  let d0 = 0x10325476_u32
   in loop ((a0,b0,c0,d0)) for i < n do
        let (a,b,c,d) = md5_chunk (a0,b0,c0,d0) ms[i]
        in (a0+a, b0+b, c0+c, d0+d)
@@ -78,6 +80,10 @@ let md5 [n] (ms: [n][16]u32): md5 =
 let main [n] (ms: [n]u8): [16]u8 =
   let padding = 64 - (n % 64)
   let n_padded = n + padding
-  let ms_padded = concat ms (bytes 0x80u32) (replicate (padding-12) 0x0u8) (bytes (u32(n*8))) ([0u8,0u8,0u8,0u8])
+  let ms_padded = concat ms
+                         (bytes 0x80u32)
+                         (replicate (padding-12) 0x0u8)
+                         (bytes (u32.i32(n*8)))
+                         [0u8,0u8,0u8,0u8]
   let (a,b,c,d) = md5 (map unbytes_block (reshape (n_padded / 64, 64) ms_padded))
   in reshape 16 (map bytes ([a,b,c,d]))

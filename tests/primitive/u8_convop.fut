@@ -8,6 +8,6 @@
 --                          255u8 255u16 255u32 255u64 }
 
 let main(x: u8): (bool,i8,i16,i32,i64, u8, u16, u32, u64) =
-  (bool(x),
-   i8(x), i16(x), i32(x), i64(x),
-   u8(x), u16(x), u32(x), u64(x))
+  (bool.u8(x),
+   i8.u8(x), i16.u8(x), i32.u8(x), i64.u8(x),
+   u8.u8(x), u16.u8(x), u32.u8(x), u64.u8(x))
