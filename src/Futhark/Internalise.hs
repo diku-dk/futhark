@@ -1328,16 +1328,6 @@ isOverloadedFunction qname args loc = do
   guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
   handle args $ baseString $ qualLeaf qname
   where
-    handle [x] "i8"  = Just $ toSigned I.Int8 x
-    handle [x] "i16" = Just $ toSigned I.Int16 x
-    handle [x] "i32" = Just $ toSigned I.Int32 x
-    handle [x] "i64" = Just $ toSigned I.Int64 x
-
-    handle [x] "u8"  = Just $ toUnsigned I.Int8 x
-    handle [x] "u16" = Just $ toUnsigned I.Int16 x
-    handle [x] "u32" = Just $ toUnsigned I.Int32 x
-    handle [x] "u64" = Just $ toUnsigned I.Int64 x
-
     handle [x] "sign_i8"  = Just $ toSigned I.Int8 x
     handle [x] "sign_i16" = Just $ toSigned I.Int16 x
     handle [x] "sign_i32" = Just $ toSigned I.Int32 x
@@ -1347,11 +1337,6 @@ isOverloadedFunction qname args loc = do
     handle [x] "unsign_i16" = Just $ toUnsigned I.Int16 x
     handle [x] "unsign_i32" = Just $ toUnsigned I.Int32 x
     handle [x] "unsign_i64" = Just $ toUnsigned I.Int64 x
-
-    handle [x] "f32" = Just $ toFloat I.Float32 x
-    handle [x] "f64" = Just $ toFloat I.Float64 x
-
-    handle [x] "bool" = Just $ toBool x
 
     handle [x] "sgn" = Just $ signumF x
     handle [x] "abs" = Just $ absF x
@@ -1492,38 +1477,6 @@ isOverloadedFunction qname args loc = do
         E.Prim (E.FloatType float_from) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
         _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
-
-    toFloat float_to e desc = do
-      e' <- internaliseExp1 "tofloat_arg" e
-      case E.typeOf e of
-        E.Prim E.Bool ->
-          letTupExp' desc $ I.If e' (resultBody [floatConst float_to 1])
-                                    (resultBody [floatConst float_to 0]) $
-                                    ifCommon [I.Prim $ I.FloatType float_to]
-        E.Prim (E.Signed int_from) ->
-          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.SIToFP int_from float_to) e'
-        E.Prim (E.Unsigned int_from) ->
-          letTupExp' desc $ I.BasicOp $ I.ConvOp (I.UIToFP int_from float_to) e'
-        E.Prim (E.FloatType float_from) ->
-          letTupExp' desc $ I.BasicOp $ I.ConvOp (FPConv float_from float_to) e'
-        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
-
-    toBool e desc = do
-      e' <- internaliseExp1 "tofloat_arg" e
-      case E.typeOf e of
-        E.Prim E.Bool ->
-          return [e']
-        E.Prim (E.Signed int_from) ->
-          letTupExp' desc =<<
-          eNot (pure $ I.BasicOp $ I.CmpOp (CmpEq $ I.IntType int_from) e' $ intConst int_from 0)
-        E.Prim (E.Unsigned int_from) ->
-          letTupExp' desc =<<
-          eNot (pure $ I.BasicOp $ I.CmpOp (CmpEq $ I.IntType int_from) e' $ intConst int_from 0)
-        E.Prim (E.FloatType float_from) ->
-          letTupExp' "is_zero" =<<
-          eNot (pure $ I.BasicOp $ I.CmpOp (CmpEq $ I.FloatType float_from) e' $ floatConst float_from 0)
-
-        _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in toBool"
 
     signumF e desc = do
       e' <- internaliseExp1 "signum_arg" e
