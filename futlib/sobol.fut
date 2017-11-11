@@ -26,7 +26,7 @@ module type sobol = {
              val f : [D]f64 -> t }) -> { val run : i32 -> X.t }
 }
 
-module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
+module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
   let D = X.D
 
   -- Compute direction vectors. In general, some work can be saved if
@@ -42,10 +42,10 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
     if j == 0 then
        map (\i -> 1u32 << (u32.i32 L-u32.i32 (i+1))) (iota L)
     else
-       let s = D.s[j-1]
-       let a = D.a[j-1]
+       let s = DM.s[j-1]
+       let a = DM.a[j-1]
        let V = map (\i -> if i >= s then 0u32
-                          else D.m[j-1,i] << (u32.i32 L-u32.i32(i+1))
+                          else DM.m[j-1,i] << (u32.i32 L-u32.i32(i+1))
                    ) (iota L)
        in loop (V) for i' < L-s do
             let i = i'+s

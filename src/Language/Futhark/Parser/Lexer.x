@@ -73,6 +73,7 @@ tokens :-
   "->"                     { tokenC RIGHT_ARROW }
   "<-"                     { tokenC LEFT_ARROW }
   ":"                      { tokenC COLON }
+  "."                      { tokenC DOT }
   "@"                      { tokenC AT }
   "\"                      { tokenC BACKSLASH }
   "'"                      { tokenC APOSTROPHE }
@@ -320,10 +321,11 @@ data Token = ID Name
            | BACKSLASH
            | APOSTROPHE
            | HASH
-           | THREE_DOTS
+           | DOT
            | TWO_DOTS
            | TWO_DOTS_LT
            | TWO_DOTS_GT
+           | THREE_DOTS
            | LPAR
            | RPAR
            | RPAR_THEN_LBRACKET

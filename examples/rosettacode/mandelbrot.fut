@@ -35,9 +35,9 @@ let addComplex(x: complex, y: complex): complex =
       b + d)
 
 let divergence(depth: i32, c0: complex): i32 =
-  #2 (loop (c, i) = (c0, 0) while i < depth && dot(c) < 4.0 do
+  (loop (c, i) = (c0, 0) while i < depth && dot(c) < 4.0 do
      (addComplex(c0, multComplex(c, c)),
-      i + 1))
+      i + 1)).2
 
 let mandelbrot(screenX: i32, screenY: i32, depth: i32, view: (f32,f32,f32,f32)): [screenX][screenY]i32 =
   let (xmin, ymin, xmax, ymax) = view

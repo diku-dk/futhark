@@ -227,7 +227,7 @@ checkQualNameWithEnv space qn@(QualName [q] _) loc
   | nameToString q == "intrinsics" = do
       -- Check if we are referring to the magical intrinsics
       -- module.
-      (_, QualName _ q') <- liftTypeM $ TypeM.checkQualNameWithEnv Structure (QualName [] q) loc
+      (_, QualName _ q') <- liftTypeM $ TypeM.checkQualNameWithEnv Term (QualName [] q) loc
       if baseTag q' <= maxIntrinsicTag
         then checkIntrinsic space qn loc
         else checkReallyQualName space qn loc
@@ -614,9 +614,31 @@ checkExp (QualParens modname e loc) = do
       bad $ TypeError loc $ "Module " ++ pretty modname ++ " is a parametric module."
 
 checkExp (Var qn NoInfo loc) = do
-  (qn'@(QualName _ name'), t) <- lookupVar loc qn
-  observe $ Ident name' (Info t) loc
-  return $ Var qn' (Info t) loc
+  -- The qualifiers of a variable is divided into two parts: first a
+  -- possibly-empty sequence of module qualifiers, followed by a
+  -- possible-empty sequence of record field accesses.  We use scope
+  -- information to perform the split, by taking qualifiers off the
+  -- end until we find a module.
+
+  (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
+  observe $ Ident (qualLeaf qn') (Info t) loc
+
+  foldM checkField (Var qn' (Info t) loc) fields
+  where findRootVar qs name = do
+          r <- (Right <$> lookupVar loc (QualName qs name))
+               `catchError` (return . Left)
+          case r of
+            Left err | null qs -> throwError err
+                     | otherwise -> do
+                         (qn', t, fields) <- findRootVar (init qs) (last qs)
+                         return (qn', t, fields++[name])
+            Right (qn', t) -> return (qn', t, [])
+
+        checkField e k =
+          case typeOf e of
+            Record fs | Just t <- M.lookup k fs ->
+                        return $ Project k e (Info t) loc
+            _ -> bad $ InvalidField loc (typeOf e) (pretty k)
 
 checkExp (Negate arg loc) = do
   arg' <- require anyNumberType =<< checkExp arg

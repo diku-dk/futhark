@@ -655,6 +655,9 @@ module f64: (float with t = f64 with int_t = u64) = {
   type t = f64
   type int_t = u64
 
+  module i64m = i64
+  module u64m = u64
+
   let (x: f64) + (y: f64) = intrinsics.fadd64 x y
   let (x: f64) - (y: f64) = intrinsics.fsub64 x y
   let (x: f64) * (y: f64) = intrinsics.fmul64 x y
@@ -712,7 +715,7 @@ module f64: (float with t = f64 with int_t = u64) = {
     let i = to_i64 x
     let ix = i64 i
     in if x >= 0.0 then
-         if ix < x then i64 (i i64.+ 1i64) else x
+         if ix < x then i64 (i i64m.+ 1i64) else x
        else if ix > x then ix else x
 
   let floor (x: f64) : f64 =
@@ -720,11 +723,11 @@ module f64: (float with t = f64 with int_t = u64) = {
     let ix = i64 i
     in if x >= 0.0 then
          if ix < x then ix else x
-       else if ix > x then i64 (i i64.- 1i64) else x
+       else if ix > x then i64 (i i64m.- 1i64) else x
 
-  let trunc (x: f64) : f64 = i64 (i64.f64 x)
+  let trunc (x: f64) : f64 = i64 (i64m.f64 x)
 
-  let even (x: f64) = i64.f64 x % 2i64 i64.== 0i64
+  let even (x: f64) = i64m.f64 x % 2i64 i64m.== 0i64
 
   let round (x: f64) : f64 =
     let t0 = x + 0.5f64
@@ -734,12 +737,12 @@ module f64: (float with t = f64 with int_t = u64) = {
 	  in if even t then t else floor_t0
 	else floor_t0
 
-  let to_bits (x: f64): u64 = u64.i64 (intrinsics.to_bits64 x)
+  let to_bits (x: f64): u64 = u64m.i64 (intrinsics.to_bits64 x)
   let from_bits (x: u64): f64 = intrinsics.from_bits64 (intrinsics.sign_i64 x)
 
   let num_bits = 64
-  let get_bit (bit: i32) (x: t) = u64.get_bit bit (to_bits x)
-  let set_bit (bit: i32) (x: t) (b: i32) = from_bits (u64.set_bit bit (to_bits x) b)
+  let get_bit (bit: i32) (x: t) = u64m.get_bit bit (to_bits x)
+  let set_bit (bit: i32) (x: t) (b: i32) = from_bits (u64m.set_bit bit (to_bits x) b)
 
   let isinf (x: f64) = intrinsics.isinf64 x
   let isnan (x: f64) = intrinsics.isnan64 x
@@ -754,6 +757,10 @@ module f64: (float with t = f64 with int_t = u64) = {
 module f32: (float with t = f32 with int_t = u32) = {
   type t = f32
   type int_t = u32
+
+  module i32m = i32
+  module u32m = u32
+  module f64m = f64
 
   let (x: f32) + (y: f32) = intrinsics.fadd32 x y
   let (x: f32) - (y: f32) = intrinsics.fsub32 x y
@@ -812,7 +819,7 @@ module f32: (float with t = f32 with int_t = u32) = {
     let i = to_i32 x
     let ix = i32 i
     in if x >= 0f32 then
-         if ix < x then i32 (i i32.+ 1i32) else x
+         if ix < x then i32 (i i32m.+ 1i32) else x
        else if ix > x then ix else x
 
   let floor (x: f32) : f32 =
@@ -820,11 +827,11 @@ module f32: (float with t = f32 with int_t = u32) = {
     let ix = i32 i
     in if x >= 0f32 then
          if ix < x then ix else x
-       else if ix > x then i32 (i i32.- 1i32) else x
+       else if ix > x then i32 (i i32m.- 1i32) else x
 
-  let trunc (x: f32) : f32 = i32 (i32.f32 x)
+  let trunc (x: f32) : f32 = i32 (i32m.f32 x)
 
-  let even (x: f32) = i32.f32 x % 2i32 i32.== 0i32
+  let even (x: f32) = i32m.f32 x % 2i32 i32m.== 0i32
 
   let round (x: f32) : f32 =
     let t0 = x + 0.5f32
@@ -834,12 +841,12 @@ module f32: (float with t = f32 with int_t = u32) = {
 	  in if even t then t else floor_t0
 	else floor_t0
 
-  let to_bits (x: f32): u32 = u32.i32 (intrinsics.to_bits32 x)
+  let to_bits (x: f32): u32 = u32m.i32 (intrinsics.to_bits32 x)
   let from_bits (x: u32): f32 = intrinsics.from_bits32 (intrinsics.sign_i32 x)
 
   let num_bits = 32
-  let get_bit (bit: i32) (x: t) = u32.get_bit bit (to_bits x)
-  let set_bit (bit: i32) (x: t) (b: i32) = from_bits (u32.set_bit bit (to_bits x) b)
+  let get_bit (bit: i32) (x: t) = u32m.get_bit bit (to_bits x)
+  let set_bit (bit: i32) (x: t) (b: i32) = from_bits (u32m.set_bit bit (to_bits x) b)
 
   let isinf (x: f32) = intrinsics.isinf32 x
   let isnan (x: f32) = intrinsics.isnan32 x
@@ -847,6 +854,6 @@ module f32: (float with t = f32 with int_t = u32) = {
   let inf = 1f32 / 0f32
   let nan = 0f32 / 0f32
 
-  let pi = f64 f64.pi
-  let e = f64 f64.pi
+  let pi = f64 f64m.pi
+  let e = f64 f64m.pi
 }

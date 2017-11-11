@@ -141,6 +141,7 @@ import Language.Futhark.Parser.Lexer
       '->'            { L $$ RIGHT_ARROW }
       '<-'            { L $$ LEFT_ARROW }
       ':'             { L $$ COLON }
+      '.'             { L $$ DOT }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -627,7 +628,10 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                              t <- lift $ gets parserIntType
                              return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
      | empty '(' TypeExpDecl ')'   { Empty $3 $1 }
-     | '(' Exp ')'                 { Parens $2 $1 }
+     | '(' Exp ')' many(FieldAccess)
+       { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
+               (Parens $2 $1)
+               $4 }
      | '(' Exp ')[' sepBy(DimIndex, ',') ']' { Index (Parens $2 $1) $4 $1 }
      | '(' sepBy2(Exp, ',') ')'    { TupLit $2 $1 }
      | '('      ')'                { TupLit [] $1 }
@@ -642,8 +646,10 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
 
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
-     | QualName { Var (fst $1) NoInfo (snd $1) }
-     | '#' FieldId Atom { Project (fst $2) $3 NoInfo $1 }
+     | QualName many(FieldAccess)
+       { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
+               (Var (fst $1) NoInfo (snd $1))
+               $2 }
      | '{' sepBy(Field, ',') '}' { RecordLit $2 $1 }
      | 'qid.(' Exp ')'
        { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
@@ -651,6 +657,9 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      -- Errors
      | '[' ']'
        {% emptyArrayError $1 }
+
+FieldAccess :: { (Name, SrcLoc) }
+             : '.' FieldId { (fst $2, $1) }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordField (fst $1) $3 (snd $1) }
@@ -763,8 +772,6 @@ FunAbstr :: { UncheckedLambda }
            { CurryBinOpLeft $3 $2 (NoInfo, NoInfo) NoInfo $1 }
          | '(' BinOp ')'
            { BinOpFun $2 NoInfo NoInfo NoInfo $1 }
-         | '#' FieldId
-           { CurryProject (fst $2) (NoInfo, NoInfo) $1 }
 
 Value : IntValue { $1 }
       | FloatValue { $1 }
