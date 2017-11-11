@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     functions have been added for all the other primitive types
     (factored into a new `from_prim` module type).
 
+  * The overloaded type conversion functions (`i32`, `f32`, `bool`,
+    etc) have been removed.  Four functions have been introduced for
+    the special cases of converting between `f32`/`f64` and `i32`:
+    `r32`, `r64`, `t32`, `t64`.
+
+  * Modules and variables now inhabit the same name space.
+
 ### Fixed
 
   * The `!=` operator now works properly on arrays (#426).
