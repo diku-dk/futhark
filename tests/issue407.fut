@@ -1,7 +1,7 @@
 module edge_handling (mapper: {}) = {
   let handle (g: i32): f32 =
 
-    let base (): f32 = r32 g
+    let base (): f32 = f32 g
 
     in base ()
 }

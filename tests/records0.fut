@@ -6,4 +6,4 @@ let f(x: i32) = {y=x+1,x=x-1}
 
 let main(x: i32) =
   let r = f x
-  in (r.x, r.y)
+  in (#x r, #y r)

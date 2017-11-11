@@ -4,4 +4,4 @@
 
 let main() =
   let r = {a=1,b=2}
-  in r.c
+  in #c r

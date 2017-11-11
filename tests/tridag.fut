@@ -59,7 +59,7 @@ let tridag(nn:   i32,
 let main(): ([]f64,[]f64) =
     let nn = reduce (+) 0 ([1,2,3,4])
     let a = replicate nn 3.33
-    let b = map (\x -> r64(x) + 1.0) (iota(nn))
-    let c = map (\x -> 1.11*r64(x) + 0.5) (iota(nn))
-    let d = map (\x -> 1.01*r64(x) + 0.25) (iota(nn)) in
+    let b = map (\(x: i32): f64  -> f64(x) + 1.0) (iota(nn))
+    let c = map (\(x: i32): f64  -> 1.11*f64(x) + 0.5) (iota(nn))
+    let d = map (\(x: i32): f64  -> 1.01*f64(x) + 0.25) (iota(nn)) in
         tridag(nn, b, d, a, c)

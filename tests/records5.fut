@@ -5,4 +5,4 @@
 let main(x: i32) =
   let r = {b=x-1, a=x+1}
   let r' = {r, a=x}
-  in (r'.a, r'.b)
+  in (#a r', #b r')
