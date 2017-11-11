@@ -115,8 +115,8 @@ prettySig _ _ = Nothing
 prettyMod :: FileModule -> ModBindBase Info VName -> Maybe (DocM Html)
 prettyMod fm (ModBind name ps sig _me doc _)
   | Just env <- M.lookup name modtable
-  , visible Structure name fm = Just $ div ! A.class_ "mod" <$> do
-    vname <- vnameHtmlM Structure name
+  , visible Term name fm = Just $ div ! A.class_ "mod" <$> do
+    vname <- vnameHtmlM Term name
     params <- modParamHtml ps
     s <- case sig of Nothing -> envSig env
                      Just (s,_) -> renderSigExp s
@@ -292,7 +292,7 @@ specHtml spec = case spec of
     foldMap (\tp -> paramBaseHtml tp <> " -> ") params <>
     typeDeclHtml rettype
   ModSpec name sig _ ->
-    do m <- vnameHtmlM Structure name
+    do m <- vnameHtmlM Term name
        s <- renderSigExp sig
        return $ "module " <> m <> ": "<> s
   IncludeSpec e _ -> H.div . ("include " <>) <$> renderSigExp e

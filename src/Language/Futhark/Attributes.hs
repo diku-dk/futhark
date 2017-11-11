@@ -789,10 +789,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
              [("opaque", IntrinsicOpaque)] ++
 
-             [convertFun [Signed Int32] (FloatType Float32),
-              convertFun [Signed Int32] (FloatType Float64),
-              convertFun [FloatType Float32, FloatType Float64] (Signed Int32)] ++
-
              map unOpFun Primitive.allUnOps ++
 
              map binOpFun Primitive.allBinOps ++
@@ -828,9 +824,6 @@ intrinsics = M.fromList $ zipWith namify [10..] $
 
         primFun (name, (ts,t, _)) =
           (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
-
-        convertFun :: [PrimType] -> PrimType -> (String,Intrinsic)
-        convertFun from to = (pretty to, IntrinsicOverloadedFun $ zip (map pure from) (repeat to))
 
         unOpFun bop = (pretty bop, IntrinsicMonoFun [t] t)
           where t = unPrim $ Primitive.unOpType bop

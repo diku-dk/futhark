@@ -358,9 +358,9 @@ instance MonadTypeChecker TypeM where
       Just (TypeAbbr ps def) -> return (qn', ps, def)
 
   lookupMod loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Structure qn loc
+    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envModTable scope of
-      Nothing -> bad $ UnknownVariableError Structure qn loc
+      Nothing -> bad $ UnknownVariableError Term qn loc
       Just m  -> return (qn', m)
 
   lookupMTy loc qn = do
@@ -398,7 +398,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
               bad $ UnknownVariableError space qn loc
 
         descend scope (q:qs)
-          | Just q' <- M.lookup (Structure, q) $ envNameMap scope,
+          | Just q' <- M.lookup (Term, q) $ envNameMap scope,
             Just res <- M.lookup q' $ envModTable scope =
               case res of
                 ModEnv q_scope -> descend q_scope qs
@@ -431,14 +431,12 @@ anyPrimType = Prim Bool : anyIntType ++ anyFloatType
 
 data Namespace = Term -- ^ Functions and values.
                | Type
-               | Structure
                | Signature
                deriving (Eq, Ord, Show, Enum)
 
 ppSpace :: Namespace -> String
 ppSpace Term = "value"
 ppSpace Type = "type"
-ppSpace Structure = "module"
 ppSpace Signature = "module type"
 
 instance Hashable Namespace where

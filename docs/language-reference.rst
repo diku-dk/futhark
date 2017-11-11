@@ -34,7 +34,9 @@ Many things in Futhark are named. When we are defining something, we
 give it an unqualified name (`id`).  When referencing something inside
 a module, we use a qualified name (`qualid`).  The fields of a record
 are named with `fieldid`.  Note that a `fieldid` can be a decimal
-number.
+number.  Futhark has three distinct name spaces: terms, module types,
+and types.  Modules (including parametric modules) and values both
+share the term namespace.
 
 Primitive Types and Values
 --------------------------
@@ -159,17 +161,16 @@ literals and variables, but also more complicated forms.
 
 .. productionlist::
    atom:   `literal`
-       : | `qualid`
+       : | `qualid` ("." `fieldid`)*
        : | `stringlit`
        : | "empty" "(" `type` ")"
        : | "(" ")"
-       : | "(" `exp` ")"
+       : | "(" `exp` ")" ("." `fieldid`)*
        : | "(" `exp` ("," `exp`)* ")"
        : | "{" "}"
        : | "{" field ("," `field`)* "}"
        : | `qualid` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
-       : | "#" `fieldid` `exp`
        : | `quals`."(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
        : | "[" `exp` [".." `exp`] "..." `exp` "]"
@@ -241,6 +242,11 @@ The above grammar contains some ambiguities, which in the concrete
 implementation is resolved via a combination of lexer and grammar
 transformations.  For ease of understanding, they are presented here
 in natural text.
+
+* An expression ``x.y`` may either be a reference to the name ``y`` in
+  the module ``x``, or the field ``y`` in the record ``x``.  Modules
+  and values occupy the same name space, so this is disambiguated by
+  the type of ``x``.
 
 * A type ascription (``exp : type``) cannot appear as an array
   index, as it conflicts with the syntax for slicing.
@@ -406,7 +412,7 @@ proceeds downwards with a stride of ``y`` until reaching ``z``
 -1 is used.  An empty array is returned in cases where ``z`` would
 never be reached or ``x`` and ``y`` are the same value.
 
-``#f e``
+``e.f``
 ........
 
 Access field ``f`` of the expression ``e``, which must be a record or

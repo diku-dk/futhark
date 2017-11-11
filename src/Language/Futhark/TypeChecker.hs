@@ -63,7 +63,7 @@ initialEnv :: Env
 initialEnv = intrinsicsModule
                { envModTable = initialModTable
                , envNameMap = M.insert
-                              (Structure, nameFromString "intrinsics")
+                              (Term, nameFromString "intrinsics")
                               intrinsics_v
                               topLevelNameMap
                }
@@ -107,7 +107,7 @@ checkForDuplicateDecs =
           check Signature name loc
 
         f (ModDec (ModBind name _ _ _ _ loc)) =
-          check Structure name loc
+          check Term name loc
 
         f OpenDec{} = return
 
@@ -181,10 +181,10 @@ checkSpecs (TypeSpec name ps doc loc : specs) =
               TypeArgType (TypeVar (typeName v) []) ploc
 
 checkSpecs (ModSpec name sig loc : specs) =
-  bindSpaced [(Structure, name)] $ do
-    name' <- checkName Structure name loc
+  bindSpaced [(Term, name)] $ do
+    name' <- checkName Term name loc
     (mty, sig') <- checkSigExp sig
-    let senv = mempty { envNameMap = M.singleton (Structure, name) name'
+    let senv = mempty { envNameMap = M.singleton (Term, name) name'
                       , envModTable = M.singleton name' $ mtyMod mty
                       }
     (abstypes, env, specs') <- localEnv senv $ checkSpecs specs
@@ -221,9 +221,9 @@ checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
   (MTy s_abs e1_mod, e1') <- checkSigExp e1
   (env_for_e2, maybe_pname') <-
     case maybe_pname of
-      Just pname -> bindSpaced [(Structure, pname)] $ do
-        pname' <- checkName Structure pname loc
-        return (mempty { envNameMap = M.singleton (Structure, pname) pname'
+      Just pname -> bindSpaced [(Term, pname)] $ do
+        pname' <- checkName Term pname loc
+        return (mempty { envNameMap = M.singleton (Term, pname) pname'
                        , envModTable = M.singleton pname' e1_mod
                        },
                 Just pname')
@@ -252,7 +252,7 @@ checkSigBind (SigBind name e doc loc) = do
     return (mempty { envSigTable = M.singleton name' env
                    , envModTable = M.singleton name' $ ModEnv sigmod
                    , envNameMap = M.fromList [((Signature, name), name'),
-                                               ((Structure, name), name')]
+                                               ((Term, name), name')]
                    },
             SigBind name' e' doc loc)
   where typeAbbrEnvFromSig (MTy _ (ModEnv env)) =
@@ -313,8 +313,8 @@ withModParam :: ModParamBase NoInfo Name
              -> TypeM a
 withModParam (ModParam pname psig_e loc) m = do
   (MTy p_abs p_mod, psig_e') <- checkSigExp psig_e
-  bindSpaced [(Structure, pname)] $ do
-    pname' <- checkName Structure pname loc
+  bindSpaced [(Term, pname)] $ do
+    pname' <- checkName Term pname loc
     let in_body_env = mempty { envModTable = M.singleton pname' p_mod }
     localEnv in_body_env $ m (ModParam pname' psig_e' loc) p_abs p_mod
 
@@ -360,10 +360,10 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
 checkModBind :: ModBindBase NoInfo Name -> TypeM (Env, ModBindBase Info VName)
 checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
   (maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
-  bindSpaced [(Structure, name)] $ do
-    name' <- checkName Structure name loc
+  bindSpaced [(Term, name)] $ do
+    name' <- checkName Term name loc
     return (mempty { envModTable = M.singleton name' $ mtyMod mty
-                   , envNameMap = M.singleton (Structure, name) name'
+                   , envNameMap = M.singleton (Term, name) name'
                    },
             ModBind name' [] maybe_fsig_e' e' doc loc)
 checkModBind (ModBind name (p:ps) maybe_fsig_e body_e doc loc) = do
@@ -375,12 +375,12 @@ checkModBind (ModBind name (p:ps) maybe_fsig_e body_e doc loc) = do
     let addParam (x,y) mty' = MTy mempty $ ModFun $ FunSig x y mty'
     return (p' : ps', maybe_fsig_e', body_e',
             FunSig p_abs p_mod $ foldr addParam mty $ zip ps_abs ps_mod)
-  bindSpaced [(Structure, name)] $ do
-    name' <- checkName Structure name loc
+  bindSpaced [(Term, name)] $ do
+    name' <- checkName Term name loc
     return (mempty { envModTable =
                        M.singleton name' $ ModFun funsig
                    , envNameMap =
-                       M.singleton (Structure, name) name'
+                       M.singleton (Term, name) name'
                    },
             ModBind name' params' maybe_fsig_e' body_e' doc loc)
 
@@ -404,7 +404,7 @@ checkForDuplicateSpecs =
           check Type name loc
 
         f (ModSpec name _ loc) =
-          check Structure name loc
+          check Term name loc
 
         f IncludeSpec{} =
           return
@@ -606,7 +606,7 @@ matchMTys = matchMTys' mempty
 
       -- Check for correct modules.
       mod_substs <- fmap M.unions $ forM (M.toList $ envModTable sig) $ \(name, modspec) ->
-        case findBinding envModTable Structure (baseName name) env of
+        case findBinding envModTable Term (baseName name) env of
           Just (name', mod) -> do
             mod_substs <- matchMods abs_subst_to_type mod modspec loc
             return (M.insert name name' mod_substs)
@@ -723,7 +723,7 @@ findTypeDef _ ModFun{} = Nothing
 findTypeDef (QualName [] name) (ModEnv the_env) =
   findBinding envTypeTable Type name the_env
 findTypeDef (QualName (q:qs) name) (ModEnv the_env) = do
-  (_, q_mod) <- findBinding envModTable Structure q the_env
+  (_, q_mod) <- findBinding envModTable Term q the_env
   findTypeDef (QualName qs name) q_mod
 
 substituteTypesInMod :: TypeSubs -> Mod -> Mod
