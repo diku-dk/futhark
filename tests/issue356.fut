@@ -192,7 +192,7 @@ module type sobol = {
              val f : [D]f64 -> t }) -> { val run : i32 -> X.t }
 }
 
-module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
+module Sobol (DM: sobol_dir) (X: { val D : i32 }) : sobol = {
   let D = X.D
 
   -- Compute direction vectors. In general, some work can be saved if
@@ -210,10 +210,10 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
        map (\i -> 1u32 << (u32.i32(L)-u32.i32(i+1))
            ) (iota L)
     else
-       let s = D.s[j-1]
-       let a = D.a[j-1]
+       let s = DM.s[j-1]
+       let a = DM.a[j-1]
        let V = map (\i -> if i >= s then 0u32
-                          else D.m[j-1,i] << (u32.i32(L)-u32.i32(i+1))
+                          else DM.m[j-1,i] << (u32.i32(L)-u32.i32(i+1))
                    ) (iota L)
        let (_,V) = loop (i,V) = (s, V) while i < L do
            let v = V[i-s]
@@ -227,7 +227,7 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
   let index_of_least_significant_0(x: i32): i32 =
     loop i = 0 while i < 32 && ((x>>i)&1) != 0 do i + 1
 
-  let norm = 2.0 f64.** f64(L)
+  let norm = 2.0 f64.** r64(L)
 
   let grayCode (x: i32): i32 = (x >> 1) ^ x
 
@@ -289,7 +289,7 @@ module Sobol (D: sobol_dir) (X: { val D : i32 }) : sobol = {
 module S2 = Sobol x.sobol_dir { let D = 2 }
 
 let mean [n] (xs: [n]f64) : f64 =
-  reduce (+) 0.0 xs / f64(n)
+  reduce (+) 0.0 xs / r64(n)
 
 module R = S2.Reduce { type t = i32
                        let ne = 0i32

@@ -83,7 +83,7 @@ module linear_congruential_engine (T: integral) (P: {
       loop seed' = T.i32 1 for i < n do
         ((seed' T.>>> T.i32 16) T.^ seed') T.^
         T.i32 (seed[i] ^ 0b1010101010101)
-    in #1 (rand seed')
+    in (rand seed').1
 
   let split_rng (n: i32) (x: rng): [n]rng =
     map (\i -> x T.^ T.i32 (hash i)) (iota n)
@@ -114,12 +114,12 @@ module xorshift128plus: rng_engine with int.t = u64 = {
   let rng_from_seed [n] (seed: [n]i32) =
     loop (a,b) = (1u64,u64.i32 n) for i < n do
       if n % 2 == 0
-      then #1 (rand (a^u64.i32 (hash seed[i]),b))
-      else #1 (rand (a, b^u64.i32 (hash seed[i])))
+      then (rand (a^u64.i32 (hash seed[i]),b)).1
+      else (rand (a, b^u64.i32 (hash seed[i]))).1
 
   let split_rng (n: i32) ((x,y): rng): [n]rng =
-    map (\i -> let (a,b) = #1 (rand (rng_from_seed [hash (i^n)]))
-               in #1 (rand (x^a,y^b))) (iota n)
+    map (\i -> let (a,b) = (rand (rng_from_seed [hash (i^n)])).1
+               in (rand (x^a,y^b)).1) (iota n)
 
   let join_rng [n] (xs: [n]rng): rng =
     reduce (\(x1,y1) (x2,y2) -> (x1^x2,y1^y2)) (0u64,0u64) xs

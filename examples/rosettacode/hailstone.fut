@@ -43,10 +43,10 @@ let hailstone_seq(x: i32): []i32 =
     let x = hailstone_step x
     let steps[i] = x
     in (capacity, i+1, steps, x)
-  in #1 (split i steps)
+  in (split i steps).1
 
 let hailstone_len(x: i32): i32 =
-  #1 (loop (i,x)=(1,x) while x != 1 do (i+1, hailstone_step x))
+  (loop (i,x)=(1,x) while x != 1 do (i+1, hailstone_step x)).1
 
 let max (x: i32) (y: i32): i32 = if x < y then y else x
 

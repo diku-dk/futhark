@@ -41,9 +41,9 @@ let sobolIndI (dir_vs:  [][]i32, n: i32 ): []i32 =
     map (xorInds(n)) (dir_vs )
 
 let sobolIndR [num_bits] (dir_vs:  [][num_bits]i32, n: i32 ): []f32 =
-    let divisor = 2.0 ** f32(num_bits)
+    let divisor = 2.0 ** r32(num_bits)
     let arri    = sobolIndI( dir_vs, n )     in
-        map (\(x: i32): f32  -> f32(x) / divisor) arri
+        map (\x -> r32(x) / divisor) arri
 
 --------------------------------/
 ---- STRENGTH-REDUCED FORMULA
@@ -51,19 +51,19 @@ let sobolIndR [num_bits] (dir_vs:  [][num_bits]i32, n: i32 ): []f32 =
 
 let index_of_least_significant_0(num_bits: i32, n: i32): i32 =
   let (goon,k) = (true,0) in
-  #2 (loop ((goon,k,n)) for i < num_bits do
-          if(goon)
-          then if (n & 1) == 1
-               then (true, k+1, n>>1)
-               else (false,k,   n   )
-          else      (false,k,   n   ))
+  (loop ((goon,k,n)) for i < num_bits do
+     if(goon)
+     then if (n & 1) == 1
+          then (true, k+1, n>>1)
+          else (false,k,   n   )
+     else      (false,k,   n   )).2
 
 let recM [len][num_bits] (sob_dirs:  [len][num_bits]i32, i: i32 ): [len]i32 =
   let bit= index_of_least_significant_0(num_bits,i) in
   map (\(row: []i32): i32 -> unsafe row[bit]) (sob_dirs )
 
 let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32, sobvctsz: i32): [chunk][sobvctsz]f32 =
-  let sob_fact= 1.0 / f32(1 << num_bits)
+  let sob_fact= 1.0 / r32(1 << num_bits)
   let sob_beg = sobolIndI(dir_vs, n+1)
   let contrbs = map (\(k: i32): [len]i32  ->
                         let sob = k + n in
@@ -75,7 +75,7 @@ let sobolChunk [len][num_bits] (dir_vs: [len][num_bits]i32, n: i32, chunk: i32, 
                     ) (replicate len 0) contrbs in
   map (\(xs: []i32): [len]f32  ->
              map  (\(x: i32): f32  ->
-                     f32(x) * sob_fact
+                     r32(x) * sob_fact
                  ) xs
          ) (vct_ints)
 
