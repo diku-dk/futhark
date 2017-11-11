@@ -6,13 +6,13 @@
 
 -- Divide first to improve numerical behaviour.
 let arithmetic_mean [n] (as: [n]f64): f64 =
-  reduce (+) 0.0 (map (/f64(n)) as)
+  reduce (+) 0.0 (map (/r64(n)) as)
 
 let geometric_mean [n] (as: [n]f64): f64 =
-  reduce (*) 1.0 (map (**(1.0/f64(n))) as)
+  reduce (*) 1.0 (map (**(1.0/r64(n))) as)
 
 let harmonic_mean [n] (as: [n]f64): f64 =
-  f64(n) / reduce (+) 0.0 (map (1.0/) as)
+  r64(n) / reduce (+) 0.0 (map (1.0/) as)
 
 let main(as: []f64): (f64,f64,f64) =
   (arithmetic_mean as,

@@ -71,7 +71,7 @@ let main [num_dates] (num_und: i32,
                      ): [][]f64 =
   let arr    = reshape (num_dates*num_und) arr_usz
   let bb_data= map (\(row: []i32): []f64  ->
-                        map f64 row
+                        map r64 row
                   ) (bb_inds )
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
   in  bb_mat

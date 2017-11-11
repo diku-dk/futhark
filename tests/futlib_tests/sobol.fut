@@ -26,4 +26,4 @@ entry test_chunk (n:i32) : [][]f64 =
 -- input { 1000 } output { true }
 
 entry test_pi (n:i32) : bool =
-  f64.abs(R.run n * 4.0 / f64(n) - 3.14) < 0.01
+  f64.abs(R.run n * 4.0 / r64(n) - 3.14) < 0.01
