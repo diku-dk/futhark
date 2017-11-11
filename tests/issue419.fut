@@ -14,13 +14,13 @@ import "/futlib/math"
 import "/futlib/array"
 
 let sgmPrefSum [n] (flags: [n]i32) (data: [n]i32) : [n]i32 =
-    #2 (unzip (scan (\(x_flag,x) (y_flag,y) ->
-                     let flag = x_flag | y_flag in
-                     if y_flag != 0
-                     then (flag, y)
-                     else (flag, x + y))
-                    (0, 0)
-                    (zip flags data)))
+    (unzip (scan (\(x_flag,x) (y_flag,y) ->
+                    let flag = x_flag | y_flag in
+                    if y_flag != 0
+                    then (flag, y)
+                    else (flag, x + y))
+            (0, 0)
+            (zip flags data))).2
 
 let bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
     let all_data = scatter (replicate q 0) all_perm all_data0

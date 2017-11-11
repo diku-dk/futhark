@@ -31,13 +31,13 @@ let main [h][w][n] (grid:*[h][w]i32) (lines:[n]line) (nn: i32) (idxs: []i32) =
                         else 0) xs1 xs2
   let slops = map (\x1 y1 x2 y2 ->
                         if x2 == x1 then
-                        if y2 > y1 then f32(1) else f32(-1)
-                        else f32(y2-y1) / f32.abs(f32(x2-x1))) xs1 ys1 xs2 ys2
+                        if y2 > y1 then r32(1) else r32(-1)
+                        else r32(y2-y1) / f32.abs(r32(x2-x1))) xs1 ys1 xs2 ys2
   let iotas = sgmIota flags
   let xs = map (\x1 dirx i ->
                      x1+dirx*i) xs1 dirxs iotas
   let ys = map (\y1 slop i ->
-                     y1+i32(slop*f32(i))) ys1 slops iotas
+                     y1+t32(slop*r32(i))) ys1 slops iotas
   let is = map (\x y -> w*y+x) xs ys
   let flatgrid = reshape (h*w) grid
   in scatter flatgrid is (replicate nn 1)

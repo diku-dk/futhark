@@ -66,4 +66,4 @@ let main [d][m] (w: [d]f32) (xd: [m][d]f32) (yd: [m]f32) (limit: i32) (eta: f32)
     let x = xd[i%m]
     let y = yd[i%m]
     in (train w x y eta, i+1)
-  in (i, w, accuracy w xd yd / f32(m))
+  in (i, w, accuracy w xd yd / r32(m))

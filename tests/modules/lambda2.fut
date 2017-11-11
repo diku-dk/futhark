@@ -17,7 +17,7 @@ module compose = \(P: {module F: operation module G: operation with a = F.b}):
 module i32_to_f64: operation with a = i32 with b = f64 = {
   type a = i32
   type b = f64
-  let f(x: a) = f64 x
+  let f(x: a) = r64 x
 }
 
 module f64_sqrt: operation with a = f64 with b = f64 = {
