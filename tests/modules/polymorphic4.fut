@@ -10,4 +10,4 @@ module pm (P: { type vector 't val reverse 't: vector t -> vector t }) = {
 module m = pm { type vector 't = []t let reverse 't (xs: []t) = xs[::-1] }
 
 let main (x: i32) =
-  unzip (m.reverse_triple (zip (iota x) (map r64 (iota x)) (iota x)))
+  unzip (m.reverse_triple (zip (iota x) (map f64 (iota x)) (iota x)))

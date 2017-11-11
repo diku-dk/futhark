@@ -6,7 +6,7 @@
 default(f32)
 
 let iota32(num: i32): [num]f32 =
-    map r32 (iota(num))
+    map f32 (iota(num))
 
 let reduceBins [numBins] (acc: *[numBins]i64) (elm: *[numBins]i64): *[numBins]i64 =
     loop newVal = acc for i < numBins do

@@ -58,7 +58,7 @@ open ({
 
   let hours_in_day = 24
   let minutes_in_day = hours_in_day * 60
-  let fminutes_in_day = r64 minutes_in_day
+  let fminutes_in_day = f64 minutes_in_day
   let minutes_to_noon = (hours_in_day / 2) * 60
 
   -- Communications of the ACM by Henry F. Fliegel and Thomas C. Van Flandern,
@@ -116,12 +116,12 @@ open ({
   let int_of_date (x: date) = x
   let date_of_int (x: i32) = x
 
-  let fminutes_in_365 = r64 (minutes_in_day * 365)
+  let fminutes_in_365 = f64 (minutes_in_day * 365)
   let inv_fminutes_in_365 = 1.0 / fminutes_in_365
   let inv_fminutes_in_day = 1.0 / fminutes_in_day
 
   let add_act_365 (t: date) (dt: f64) =
-    date_of_int (t64 (r64 (int_of_date t) + fminutes_in_365 * dt))
+    date_of_int (i32 (f64 (int_of_date t) + fminutes_in_365 * dt))
   let add_days (t1: date) (displ: i32) =
     date_of_int(int_of_date t1 + displ * minutes_in_day)
   let sub_days (t1: date) (displ: i32) =
@@ -139,7 +139,7 @@ open ({
                           minute=min}
 
   let days_between (t1: date) (t2: date) =
-    (r64 (int_of_date t2 - int_of_date t1)) * inv_fminutes_in_day
+    (f64 (int_of_date t2 - int_of_date t1)) * inv_fminutes_in_day
 
   let diff_dates (t1: date) (t2: date) =
     days_between t1 t2 / 365.0

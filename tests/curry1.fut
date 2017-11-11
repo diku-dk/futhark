@@ -8,7 +8,7 @@
 -- }
 
 let f(x: (i32, f64)) (y: f64): f64 =
-    let (a,b) = x in y*r64(a)+b
+    let (a,b) = x in y*f64(a)+b
 
 let g(x: [](f64,f64)) (y: f64): f64 =
     let (a,b) = unzip(x) in

@@ -6,4 +6,4 @@
 
 -- Divide first to improve numerical behaviour.
 let main [n] (as: [n]f64): f64 =
-  reduce (+) 0f64 (map (/r64(n)) as)
+  reduce (+) 0f64 (map (/f64(n)) as)
