@@ -34,16 +34,16 @@ module argb_colour: colour with colour = i32 = {
     if x < 0f32 then 0f32 else if x > 1f32 then 1f32 else x
 
   let from_rgba (r: f32) (g: f32) (b: f32) (a: f32): colour =
-    ((i32 (clamp_channel a * 255f32) << 24) |
-     (i32 (clamp_channel r * 255f32) << 16) |
-     (i32 (clamp_channel g * 255f32) << 8)  |
-     (i32 (clamp_channel b * 255f32)))
+    ((t32 (clamp_channel a * 255f32) << 24) |
+     (t32 (clamp_channel r * 255f32) << 16) |
+     (t32 (clamp_channel g * 255f32) << 8)  |
+     (t32 (clamp_channel b * 255f32)))
 
   let to_rgba (x: colour): (f32,f32,f32,f32) =
-    (f32 ((x>>16) & 0xFF) / 255f32,
-     f32 ((x>>8) & 0xFF) / 255f32,
-     f32 ((x>>0) & 0xFF) / 255f32,
-     f32 ((x>>24) & 0xFF) / 255f32)
+    (r32 ((x>>16) & 0xFF) / 255f32,
+     r32 ((x>>8) & 0xFF) / 255f32,
+     r32 ((x>>0) & 0xFF) / 255f32,
+     r32 ((x>>24) & 0xFF) / 255f32)
 }
 
 -- | A colour representation and a host of useful functions and constants.
