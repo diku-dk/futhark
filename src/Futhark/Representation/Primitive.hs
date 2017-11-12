@@ -1012,7 +1012,7 @@ instance Pretty UnOp where
   ppr (FAbs t)       = taggedF "fabs" t
   ppr (SSignum t)    = taggedI "ssignum" t
   ppr (USignum t)    = taggedI "usignum" t
-  ppr (Complement t) = taggedI "~" t
+  ppr (Complement t) = taggedI "complement" t
 
 convOpFun :: ConvOp -> String
 convOpFun ZExt{}   = "zext"
