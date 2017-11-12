@@ -313,6 +313,9 @@ Spec :: { SpecBase NoInfo Name }
       | val BindingBinOp ':' SigTypeDecl
         { let (ps, r) = $4
           in ValSpec $2 [] ps r Nothing $1 }
+      | val BindingUnOp ':' SigTypeDecl
+        { let (ps, r) = $4
+          in ValSpec $2 [] ps r Nothing $1 }
       | TypeAbbr
         { TypeAbbrSpec $1 }
       | type id many(TypeParam)
@@ -340,6 +343,9 @@ DefaultDec :: { () }
                 {% let L _ (ID s1) = $3; L _ (ID s2) = $5 in defaultType s1 >> defaultType s2 }
 ;
 
+UnOp :: { (QualName Name, SrcLoc) }
+      : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
+      | unop  { let L loc (UNOP v) = $1 in (QualName [] v, loc) }
 
 -- Note that this production does not include Minus.
 BinOp :: { QualName Name }
@@ -372,11 +378,17 @@ BinOp :: { QualName Name }
       | '>'     { QualName [] (nameFromString ">") }
       | '>='    { QualName [] (nameFromString ">=") }
 
+BindingUnOp :: { Name }
+      : UnOp {% let (QualName qs name, _) = $1 in do
+                   unless (null qs) $ fail "Cannot use a qualified name in binding position."
+                   return name }
+
 BindingBinOp :: { Name }
       : BinOp {% let QualName qs name = $1 in do
                    unless (null qs) $ fail "Cannot use a qualified name in binding position."
                    return name }
       | '-'   { nameFromString "-" }
+
 
 Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
@@ -391,6 +403,12 @@ Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=
 
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
           { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 Nothing $1
+          }
+
+        | let BindingUnOp many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
+          { let name = $2
+            in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
+               $3 (fst $4 : snd $4) $7 Nothing $1
           }
 ;
 
@@ -481,10 +499,6 @@ FunParam : InnerPattern { $1 }
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
           | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
-
-QualUnOpName :: { (QualName Name, SrcLoc) }
-          : qunop { let L loc (QUALUNOP qs v) = $1 in (QualName qs v, loc) }
-          | unop  { let L loc (UNOP v) = $1 in (QualName [] v, loc) }
 
 -- Expressions are divided into several layers.  The first distinction
 -- (between Exp and Exp2) is to factor out ascription, which we do not
@@ -614,7 +628,7 @@ Apply :: { (QualName Name, [UncheckedExp], SrcLoc) }
         { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
       | QualName Atom %prec juxtprec
         { (fst $1, [$2], snd $1) }
-      | QualUnOpName Atom %prec juxtprec
+      | UnOp Atom %prec juxtprec
         { (fst $1, [$2], snd $1) }
 
 Atom :: { UncheckedExp }
@@ -749,7 +763,7 @@ FunAbstr :: { UncheckedLambda }
            { AnonymFun $3 (fst $4 : snd $4) $7 $5 NoInfo $1 }
          | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }
-         | '(' QualUnOpName ')'
+         | '(' UnOp ')'
            { CurryFun (fst $2) [] NoInfo (snd $2) }
          | '(' Curry ')'
            { let (fname, args, loc) = $2 in CurryFun fname args NoInfo loc }
