@@ -177,7 +177,7 @@ import Language.Futhark.Parser.Lexer
       doc             { L _  (DOC _) }
 
 %left bottom
-%left ifprec letprec
+%left ifprec letprec unsafe
 %left ','
 %left ':'
 %left '<-'
@@ -185,18 +185,14 @@ import Language.Futhark.Parser.Lexer
 %left '&&...'
 %left '<=' '<=...' '>=' '>=...' '>' '>...' '<' '<...' '==...' '!=...'
 %left '&...' '^...' '|...'
-
 %left '<<...' '>>...' '>>>...'
 %left '+...' '-...' '-'
 
 %left '*...' '*' '/...' '%...' '//...' '%%...'
 %left '**...'
 %right '->'
-nonassoc with
-%nonassoc '~' '!' f32 f64 int i8 i16 i32 i64 unsafe default
-%nonassoc '['
-%nonassoc Id
 %left juxtprec
+%nonassoc with
 %left indexprec iota copy rotate rearrange split shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
 %%
 
