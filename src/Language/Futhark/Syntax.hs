@@ -728,14 +728,14 @@ instance Located (ExpBase f vn) where
   locOf (Unsafe _ loc)           = locOf loc
 
 -- | An entry in a record literal.
-data FieldBase f vn = RecordField Name (ExpBase f vn) SrcLoc
-                    | RecordRecord (ExpBase f vn)
+data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
+                    | RecordFieldImplicit vn (f (CompTypeBase vn)) SrcLoc
 
 deriving instance Showable f vn => Show (FieldBase f vn)
 
 instance Located (FieldBase f vn) where
-  locOf (RecordField _ _ loc) = locOf loc
-  locOf (RecordRecord e)      = locOf e
+  locOf (RecordFieldExplicit _ _ loc) = locOf loc
+  locOf (RecordFieldImplicit _ _ loc) = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For (IdentBase f vn) (ExpBase f vn)

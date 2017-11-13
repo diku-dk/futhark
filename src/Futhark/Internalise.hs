@@ -41,7 +41,7 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-import Futhark.Util (chunks, dropAt)
+import Futhark.Util (dropAt)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
@@ -367,18 +367,11 @@ internaliseExp desc (E.TupLit es _) =
 
 internaliseExp desc (E.RecordLit orig_fields _) =
   concatMap snd . sortFields . M.unions . reverse <$> mapM internaliseField orig_fields
-  where internaliseField (E.RecordField name e _) = do
-          e' <- internaliseExp desc e
-          return $ M.singleton name e'
-        internaliseField (E.RecordRecord e) = do
-          (field_names, field_types) <-
-            case E.typeOf e of
-              Record fs -> return $ unzip $ sortFields fs
-              _         -> fail $ "Type of " ++ pretty e ++ " is not record."
-          e' <- internaliseExp desc e
-          lens <- mapM (internalisedTypeSize . flip setAliases ()) field_types
-          return $ M.fromList $ zip field_names $ chunks lens e'
-
+  where internaliseField (E.RecordFieldExplicit name e _) =
+          M.singleton name <$> internaliseExp desc e
+        internaliseField (E.RecordFieldImplicit name t loc) =
+          internaliseField $ E.RecordFieldExplicit (baseName name)
+          (E.Var (E.qualName name) t loc) loc
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
   -- If this is a multidimensional array literal of primitives, we

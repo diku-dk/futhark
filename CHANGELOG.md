@@ -58,6 +58,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Modules and variables now inhabit the same name space.
 
+  * Record expression syntax has been simplified.  Record
+    concatenation and update is no longer directly supported.
+    However, fields can now be implicitly defined: `{x,y}` now creates
+    a record with field `x` and `y`, with values taken from the
+    variables `x` and `y` in scope.
+
 ### Fixed
 
   * The `!=` operator now works properly on arrays (#426).
