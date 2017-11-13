@@ -502,27 +502,22 @@ checkExp (RecordLit fs loc) = do
   fs' <- evalStateT (mapM checkField fs) mempty
 
   return $ RecordLit fs' loc
-  where checkField (RecordField f e rloc) = do
-          warnIfAlreadySet f rloc
+  where checkField (RecordFieldExplicit f e rloc) = do
+          errIfAlreadySet f rloc
           modify $ M.insert f rloc
-          RecordField f <$> lift (checkExp e) <*> pure rloc
-        checkField (RecordRecord e) = do
-          e' <- lift $ checkExp e
-          case typeOf e' of
-            Record rfs -> do
-              mapM_ (`warnIfAlreadySet` srclocOf e) $ M.keys rfs
-              return $ RecordRecord e'
-            t ->
-              lift $ bad $ TypeError loc $
-              "Expression in record literal must be of record type, but is " ++ pretty t
+          RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
+        checkField (RecordFieldImplicit name NoInfo rloc) = do
+          errIfAlreadySet name rloc
+          (QualName _ name', t) <- lift $ lookupVar rloc $ qualName name
+          modify $ M.insert name rloc
+          return $ RecordFieldImplicit name' (Info t) rloc
 
-        warnIfAlreadySet f rloc = do
+        errIfAlreadySet f rloc = do
           maybe_sloc <- gets $ M.lookup f
           case maybe_sloc of
             Just sloc ->
-              lift $ warn sloc $ "This value for field " ++ pretty f ++
-              " is redundant, due to an overriding definition of the same field at " ++
-              locStr rloc ++ "."
+              throwError $ TypeError rloc $ "Field '" ++ pretty f ++
+              " previously defined at " ++ locStr sloc ++ "."
             Nothing -> return ()
 
 checkExp (ArrayLit es _ loc) = do

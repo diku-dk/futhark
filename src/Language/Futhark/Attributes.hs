@@ -537,10 +537,8 @@ typeOf (TupLit es _) = tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
   -- Reverse, because M.unions is biased to the left.
   Record $ M.unions $ reverse $ map record fs
-  where record (RecordField name e _) = M.singleton name $ typeOf e
-        record (RecordRecord e) = case typeOf e of
-          Record rfs -> rfs
-          _          -> error "typeOf: RecordLit: the impossible happened."
+  where record (RecordFieldExplicit name e _) = M.singleton name $ typeOf e
+        record (RecordFieldImplicit name (Info t) _) = M.singleton (baseName name) t
 typeOf (ArrayLit _ (Info t) _) =
   arrayType 1 t Unique `setAliases` mempty
 typeOf (Range e _ _ _) =

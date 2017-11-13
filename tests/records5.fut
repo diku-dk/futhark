@@ -1,8 +1,7 @@
--- Record construction is right-biased.
+-- Implicit field expressions.
 -- ==
--- input { 2 } output { 2 1 }
+-- input { 1 2 } output { 1 2}
 
-let main(x: i32) =
-  let r = {b=x-1, a=x+1}
-  let r' = {r, a=x}
-  in (r'.a, r'.b)
+let main (x: i32) (y: 32) =
+  let r = {y,x}
+  in (r.x, r.y)

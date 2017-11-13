@@ -672,8 +672,8 @@ FieldAccess :: { (Name, SrcLoc) }
              : '.' FieldId { (fst $2, $1) }
 
 Field :: { FieldBase NoInfo Name }
-       : FieldId '=' Exp { RecordField (fst $1) $3 (snd $1) }
-       | Exp             { RecordRecord $1 }
+       : FieldId '=' Exp { RecordFieldExplicit (fst $1) $3 (snd $1) }
+       | id              { let L loc (ID s) = $1 in RecordFieldImplicit s NoInfo loc }
 
 -- The two productions for LetPat are split instead of using many() to
 -- avoid a shift/reduce-conflict.
@@ -982,7 +982,7 @@ patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here
 patternExp (PatternAscription pat _) = patternExp pat
 patternExp (PatternParens pat _) = patternExp pat
 patternExp (RecordPattern fs loc) = RecordLit <$> mapM field fs <*> pure loc
-  where field (name, pat) = RecordField name <$> patternExp pat <*> pure loc
+  where field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF

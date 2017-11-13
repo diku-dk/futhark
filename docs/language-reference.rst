@@ -204,7 +204,7 @@ literals and variables, but also more complicated forms.
       : | "stream_red_per" `fun` `exp` `exp`
       : | "stream_seq" `fun` `exp` `exp`
    field:   `fieldid` "=" `exp`
-        : | `exp`
+        : | `id`
    pat:   `id`
       : |  "_"
       : | "(" ")"
@@ -329,20 +329,16 @@ Evaluates to a tuple containing ``N`` values.  Equivalent to ``(1=e1,
 .....................
 
 A record expression consists of a comma-separated sequence of *field
-expressions*.  A record expression is evaluated by creating an empty
-record, then processing the field expressions from left to right.
-Each field expression adds fields to the record being constructed.  A
-field expression can take one of two forms:
+expressions*.  Each field expression defines the value of a field in
+the record.  A field expression can take one of two forms:
 
-  ``f = e``: adds a field with the name ``f`` and the value resulting
-  from evaluating ``e``.
+  ``f = e``: defines a field with the name ``f`` and the value
+  resulting from evaluating ``e``.
 
-  ``e``: the expression ``e`` must evaluate to a record, whose fields
-  are added to the record being constructed.
+  ``f``: defines a field with the name ``f`` and the value of the
+  variable ``f`` in scope.
 
-If a field expression attempts to add a field that already exists in
-the record being constructed, the new value for the field supercedes
-the old one.
+Each field may only be defined once.
 
 ``a[i]``
 ........
