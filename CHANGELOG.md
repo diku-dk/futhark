@@ -56,7 +56,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     the special cases of converting between `f32`/`f64` and `i32`:
     `r32`, `r64`, `t32`, `t64`.
 
-  * Modules and variables now inhabit the same name space.
+  * Modules and variables now inhabit the same name space.  As a
+    consequence, we now use `x.y` to access field `y` of record `x`.
 
   * Record expression syntax has been simplified.  Record
     concatenation and update is no longer directly supported.
