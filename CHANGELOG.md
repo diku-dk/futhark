@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   * Primitive functions (sqrt etc) can now be constant-folded.
 
+  * Futlib: /futlib/vec2 added.
+
 ### Removed
 
   * The built-in `shape` function has been removed.  Use `length` or
