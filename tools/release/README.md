@@ -27,7 +27,7 @@ corresponds exactly to the state of the Git repository at some point.
 
  * Run `tools/release/binary-tarball.sh . -X.Y.Z-linux-x86_64`.  This
    produces `futhark-0.1.0-linux-x86_64.xz`.  Put this tarball in some
-   public location.
+   public location and make sure its permissions make it readable.
 
  * Run `git tag vX.Y.Z`.
 
@@ -38,5 +38,5 @@ corresponds exactly to the state of the Git repository at some point.
    release notes from `CHANGELOG.md` and upload the binary tarball.
 
 You're done!  Congratulations!  Increment the version number in
-`package.yaml` and make room for a new release in `CHANGELOD.md` and
+`package.yaml` and make room for a new release in `CHANGELOG.md` and
 go hack some more on the compiler.
