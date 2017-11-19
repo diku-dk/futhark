@@ -26,7 +26,7 @@ corresponds exactly to the state of the Git repository at some point.
  * Verify the version number in `package.yaml`.
 
  * Run `tools/release/binary-tarball.sh . -X.Y.Z-linux-x86_64`.  This
-   produces `futhark-0.1.0-linux-x86_64.xz`.  Put this tarball in some
+   produces `futhark-X.Y.Z-linux-x86_64.xz`.  Put this tarball in some
    public location and make sure its permissions make it readable.
 
  * Run `git tag vX.Y.Z`.
