@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+  * futlib: the `complex` module now produces a non-abstract `complex`
+    type.
+
 ### Fixed
 
 ## [0.2.0]

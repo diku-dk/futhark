@@ -49,7 +49,8 @@ module type complex = {
 
 -- | Given a module describing a number type, construct a module
 -- implementing complex numbers.
-module complex(T: real): (complex with real = T.t) = {
+module complex(T: real): (complex with real = T.t
+                                  with complex = (T.t, T.t)) = {
   type real = T.t
   type complex = (T.t, T.t)
 
