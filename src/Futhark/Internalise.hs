@@ -1427,18 +1427,6 @@ isOverloadedFunction qname args loc = do
 
     handle [a, si, v] "scatter" = Just $ scatterF a si v
 
-    handle [n, v] "replicate"  = Just $ replicateF n v
-
-    handle [n] "iota"  = Just $ iotaF n
-    handle [n] "iota_i8"  = Just $ iotaF n
-    handle [n] "iota_i16" = Just $ iotaF n
-    handle [n] "iota_i32" = Just $ iotaF n
-    handle [n] "iota_i64" = Just $ iotaF n
-    handle [n] "iota_u8"  = Just $ iotaF n
-    handle [n] "iota_u16" = Just $ iotaF n
-    handle [n] "iota_u32" = Just $ iotaF n
-    handle [n] "iota_u64" = Just $ iotaF n
-
     handle _ _ = Nothing
 
     toSigned int_to e desc = do
@@ -1553,15 +1541,6 @@ isOverloadedFunction qname args loc = do
 
       let sa_ws = map (arraySize 0) sa_ts
       letTupExp' desc $ I.Op $ I.Scatter si_w lam sivs $ zip sa_ws sas
-
-    replicateF ne ve desc = do
-      (ne', _) <- internaliseDimExp "n" ne
-      ves <- internaliseExp "replicate_v" ve
-      letSubExps desc $ I.BasicOp . I.Replicate (I.Shape [ne']) <$> ves
-
-    iotaF e desc = do
-      (e', it) <- internaliseDimExp "n" e
-      letTupExp' desc $ I.BasicOp $ I.Iota e' (intConst it 0) (intConst it 1) it
 
 -- | Is the name a value constant?  If so, create the necessary
 -- function call and return the corresponding subexpressions.
