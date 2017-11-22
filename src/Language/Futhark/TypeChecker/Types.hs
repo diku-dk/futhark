@@ -195,8 +195,8 @@ checkNamedDim loc v = do
     _                   -> throwError $ DimensionNotInteger loc v
 
 data InferredType = NoneInferred
-                  | Inferred Type
-                  | Ascribed (TypeBase (DimDecl VName) (Names VName))
+                  | Inferred CompType
+                  | Ascribed PatternType
 
 bindPatternNames :: MonadTypeChecker m =>
                     PatternBase NoInfo Name -> m a -> m a

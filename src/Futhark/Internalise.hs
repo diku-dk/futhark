@@ -1283,7 +1283,7 @@ internaliseLambda (E.CurryProject k (Info rowt,Info t) loc) rowts = do
 
 
 binOpFunToLambda :: E.QualName VName
-                 -> E.Type -> E.Type -> E.Type
+                 -> E.CompType -> E.CompType -> E.CompType
                  -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
@@ -1297,7 +1297,7 @@ binOpFunToLambda op xtype ytype rettype = do
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpCurriedToLambda :: E.QualName VName
-                     -> E.Type -> E.Type
+                     -> E.CompType -> E.CompType
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
                      -> InternaliseM ([E.Pattern], E.Exp, E.StructType)

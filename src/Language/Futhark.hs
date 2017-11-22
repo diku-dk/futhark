@@ -7,7 +7,7 @@ module Language.Futhark
   , Ident, DimIndex, Exp, Lambda, Pattern
   , ModExp, SigExp, ModBind
   , FunBind, ValBind, Dec, Prog
-  , Type, StructType, StructTypeArg, ArrayType
+  , StructTypeArg, ArrayType
   , TypeParam
   )
   where
@@ -52,12 +52,6 @@ type Dec = DecBase Info VName
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName
 
--- | A known type with no shape annotations, but aliasing information.
-type Type = TypeBase () (Names VName)
-
--- | A known type with shape annotations but no aliasing information.
-type StructType = TypeBase (DimDecl VName) ()
-
 -- | A known type arg with shape annotations but no aliasing information.
 type StructTypeArg = TypeArg (DimDecl VName) ()
 
@@ -66,4 +60,4 @@ type TypeParam = TypeParamBase VName
 
 -- | A known array type with no shape annotations, but aliasing
 -- information.
-type ArrayType = ArrayTypeBase () (Names VName)
+type ArrayType = ArrayTypeBase () Names

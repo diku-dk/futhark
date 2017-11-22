@@ -93,7 +93,6 @@ module Language.Futhark.Attributes
 
 import           Control.Monad.Writer
 import           Data.Foldable
-import           Data.Hashable
 import qualified Data.Map.Strict       as M
 import qualified Data.Set            as S
 import           Data.List
@@ -302,7 +301,7 @@ toStruct t = t `setAliases` ()
 
 -- | Replace no aliasing with an empty alias set.
 fromStruct :: TypeBase dim as
-           -> TypeBase dim (Names vn)
+           -> TypeBase dim Names
 fromStruct t = t `setAliases` S.empty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
@@ -529,7 +528,7 @@ rank n = ShapeDecl $ replicate n ()
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: ExpBase Info VName -> CompTypeBase VName
+typeOf :: ExpBase Info VName -> CompType
 typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
 typeOf (QualParens _ e _) = typeOf e
@@ -608,11 +607,10 @@ typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
 -- the given diets.
-returnType :: (Ord vn, Hashable vn) =>
-              TypeBase dim ()
+returnType :: TypeBase dim ()
            -> [Diet]
-           -> [CompTypeBase vn]
-           -> TypeBase dim (Names vn)
+           -> [CompType]
+           -> TypeBase dim Names
 returnType (Array at) ds args =
   Array $ arrayReturnType at ds args
 returnType (Record fs) ds args =
@@ -621,19 +619,17 @@ returnType (Prim t) _ _ = Prim t
 returnType (TypeVar t targs) ds args =
   TypeVar t $ map (\arg -> typeArgReturnType arg ds args) targs
 
-typeArgReturnType :: (Ord vn, Hashable vn) =>
-                     TypeArg shape () -> [Diet] -> [CompTypeBase vn]
-                  -> TypeArg shape (Names vn)
+typeArgReturnType :: TypeArg shape () -> [Diet] -> [CompType]
+                  -> TypeArg shape Names
 typeArgReturnType (TypeArgDim v loc) _ _ =
   TypeArgDim v loc
 typeArgReturnType (TypeArgType t loc) ds args =
   TypeArgType (returnType t ds args) loc
 
-arrayReturnType :: (Ord vn, Hashable vn) =>
-                   ArrayTypeBase dim ()
+arrayReturnType :: ArrayTypeBase dim ()
                 -> [Diet]
-                -> [CompTypeBase vn]
-                -> ArrayTypeBase dim (Names vn)
+                -> [CompType]
+                -> ArrayTypeBase dim Names
 arrayReturnType (PrimArray bt sz Nonunique ()) ds args =
   PrimArray bt sz Nonunique als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
@@ -649,11 +645,10 @@ arrayReturnType (PolyArray et targs sz Unique ()) ds args =
 arrayReturnType (RecordArray et sz Unique) _ _ =
   RecordArray (fmap (`addRecordArrayElemAliases` const mempty) et) sz Unique
 
-recordArrayElemReturnType :: (Ord vn, Hashable vn) =>
-                            RecordArrayElemTypeBase dim ()
+recordArrayElemReturnType :: RecordArrayElemTypeBase dim ()
                          -> [Diet]
-                         -> [CompTypeBase vn]
-                         -> RecordArrayElemTypeBase dim (Names vn)
+                         -> [CompType]
+                         -> RecordArrayElemTypeBase dim Names
 recordArrayElemReturnType (PrimArrayElem bt ()) ds args =
   PrimArrayElem bt als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
@@ -700,7 +695,7 @@ patIdentSet Wildcard{}              = mempty
 patIdentSet (PatternAscription p _) = patIdentSet p
 
 -- | The type of values bound by the pattern.
-patternType :: PatternBase Info VName -> CompTypeBase VName
+patternType :: PatternBase Info VName -> CompType
 patternType (Wildcard (Info t) _)   = removeShapeAnnotations t
 patternType (PatternParens p _)     = patternType p
 patternType (Id _ (Info t) _)       = removeShapeAnnotations t
@@ -709,7 +704,7 @@ patternType (RecordPattern fs _)    = Record $ patternType <$> M.fromList fs
 patternType (PatternAscription p _) = patternType p
 
 -- | The type matched by the pattern, including shape declarations if present.
-patternStructType :: PatternBase Info VName -> StructTypeBase VName
+patternStructType :: PatternBase Info VName -> StructType
 patternStructType (PatternAscription _ td) = unInfo $ expandedType td
 patternStructType (PatternParens p _) = patternStructType p
 patternStructType (Id _ (Info t) _) = t `setAliases` ()
@@ -719,7 +714,7 @@ patternStructType (Wildcard (Info t) _) = vacuousShapeAnnotations $ toStruct t
 
 -- | When viewed as a function parameter, this this pattern correspond
 -- to a named parameter of some type?
-patternParam :: PatternBase Info VName -> (Maybe VName, StructTypeBase VName)
+patternParam :: PatternBase Info VName -> (Maybe VName, StructType)
 patternParam (PatternParens p _) =
   patternParam p
 patternParam (PatternAscription (Id v _ _) td) =

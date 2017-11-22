@@ -90,9 +90,9 @@ data TypeError =
   | DimensionNotInteger SrcLoc (QualName Name)
   | InvalidUniqueness SrcLoc (TypeBase () ())
   | UndefinedType SrcLoc (QualName Name)
-  | InvalidField SrcLoc Type String
+  | InvalidField SrcLoc CompType String
   | UnderscoreUse SrcLoc (QualName Name)
-  | ValueIsNotFunction SrcLoc (QualName Name) Type
+  | ValueIsNotFunction SrcLoc (QualName Name) CompType
   | FunctionIsNotValue SrcLoc (QualName Name)
   | UniqueConstType SrcLoc Name (TypeBase () ())
   | UndeclaredFunctionReturnType SrcLoc (QualName Name)
@@ -311,7 +311,7 @@ class MonadError TypeError m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
   lookupImport :: SrcLoc -> FilePath -> m Env
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, Type)
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, CompType)
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
