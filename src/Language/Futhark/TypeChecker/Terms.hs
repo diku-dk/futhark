@@ -35,8 +35,8 @@ data Usage = Consumed SrcLoc
            | Observed SrcLoc
            deriving (Eq, Ord, Show)
 
-data Occurence = Occurence { observed :: Names VName
-                           , consumed :: Names VName
+data Occurence = Occurence { observed :: Names
+                           , consumed :: Names
                            , location :: SrcLoc
                            }
              deriving (Eq, Show)
@@ -44,10 +44,10 @@ data Occurence = Occurence { observed :: Names VName
 instance Located Occurence where
   locOf = locOf . location
 
-observation :: Names VName -> SrcLoc -> Occurence
+observation :: Names -> SrcLoc -> Occurence
 observation = flip Occurence S.empty
 
-consumption :: Names VName -> SrcLoc -> Occurence
+consumption :: Names -> SrcLoc -> Occurence
 consumption = Occurence S.empty
 
 nullOccurence :: Occurence -> Bool
@@ -78,13 +78,13 @@ checkOccurences = void . M.traverseWithKey comb . usageMap
   where comb _    []     = Right ()
         comb name (u:us) = foldM_ (combineOccurences name) u us
 
-allObserved :: Occurences -> Names VName
+allObserved :: Occurences -> Names
 allObserved = S.unions . map observed
 
-allConsumed :: Occurences -> Names VName
+allConsumed :: Occurences -> Names
 allConsumed = S.unions . map consumed
 
-allOccuring :: Occurences -> Names VName
+allOccuring :: Occurences -> Names
 allOccuring occs = allConsumed occs <> allObserved occs
 
 seqOccurences :: Occurences -> Occurences -> Occurences
@@ -108,7 +108,7 @@ altOccurences occurs1 occurs2 =
 
 --- Scope management
 
-data ValBinding = BoundV Type
+data ValBinding = BoundV CompType
                 | BoundF FunBinding Occurences
                 -- ^ The occurences is non-empty only for local functions.
                 | OverloadedF [([TypeBase () ()],FunBinding)]
@@ -256,7 +256,8 @@ checkReallyQualName space qn loc = do
 
 -- | In a few rare cases (overloaded builtin functions), the type of
 -- the parameters actually matters.
-lookupFunction :: QualName Name -> [Type] -> SrcLoc -> TermTypeM (QualName VName, FunBinding, Occurences)
+lookupFunction :: QualName Name -> [CompType] -> SrcLoc
+               -> TermTypeM (QualName VName, FunBinding, Occurences)
 lookupFunction qn argtypes loc = do
   (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
   case M.lookup name $ scopeVtable scope of
@@ -299,7 +300,7 @@ lookupFunction qn argtypes loc = do
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
 -- one of them.
-unifyExpTypes :: Exp -> Exp -> TermTypeM Type
+unifyExpTypes :: Exp -> Exp -> TermTypeM CompType
 unifyExpTypes e1 e2 =
   maybe (bad $ UnifyError
          (srclocOf e1) (toStructural t1)
@@ -375,7 +376,7 @@ typeParamIdent (TypeParamDim v loc) =
 typeParamIdent TypeParamType{} =
   Nothing
 
-bindingIdent :: IdentBase NoInfo Name -> Type -> (Ident -> TermTypeM a)
+bindingIdent :: IdentBase NoInfo Name -> CompType -> (Ident -> TermTypeM a)
              -> TermTypeM a
 bindingIdent (Ident v NoInfo vloc) t m =
   bindSpaced [(Term, v)] $ do
@@ -1077,9 +1078,9 @@ sequentially m1 m2 = do
   occur $ m1flow `seqOccurences` m2flow
   return b
 
-type Arg = (Type, Occurences, SrcLoc)
+type Arg = (CompType, Occurences, SrcLoc)
 
-argType :: Arg -> Type
+argType :: Arg -> CompType
 argType (t, _, _) = t
 
 checkArg :: ExpBase NoInfo Name -> TermTypeM (Exp, Arg)
@@ -1090,7 +1091,7 @@ checkArg arg = do
 checkFuncall :: Maybe (QualName Name) -> SrcLoc
              -> FunBinding -> [Arg]
              -> TermTypeM ([TypeBase (DimDecl VName) ()],
-                            TypeBase (DimDecl VName) (Names VName))
+                            TypeBase (DimDecl VName) Names)
 checkFuncall fname loc funbind args = do
   (_, paramtypes, rettype) <-
     instantiatePolymorphicFunction fname loc funbind args
@@ -1135,7 +1136,7 @@ instantiatePolymorphicFunction maybe_fname call_loc (tparams, pts, ret) args = d
         Right v -> return v
 
 
-consumeArg :: SrcLoc -> Type -> Diet -> [Occurence]
+consumeArg :: SrcLoc -> CompType -> Diet -> [Occurence]
 consumeArg loc (Record ets) (RecordDiet ds) =
   concat $ M.elems $ M.intersectionWith (consumeArg loc) ets ds
 consumeArg loc at Consume = [consumption (aliases at) loc]
@@ -1323,7 +1324,7 @@ checkLambda (CurryProject _ _ loc) args =
 
 checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
                 -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg
-                -> TermTypeM (Exp, QualName VName, Type)
+                -> TermTypeM (Exp, QualName VName, CompType)
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
@@ -1348,7 +1349,7 @@ observe (Ident nm (Info t) loc) =
   in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
-consume :: SrcLoc -> Names VName -> TermTypeM ()
+consume :: SrcLoc -> Names -> TermTypeM ()
 consume loc als = occur [consumption als loc]
 
 -- | Proclaim that we have written to the given variable, and mark

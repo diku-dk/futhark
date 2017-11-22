@@ -31,8 +31,9 @@ module Language.Futhark.Syntax
   , TypeArgExp(..)
   , RecordArrayElemTypeBase(..)
   , ArrayTypeBase(..)
-  , CompTypeBase
-  , StructTypeBase
+  , CompType
+  , PatternType
+  , StructType
   , Diet(..)
   , TypeDeclBase (..)
 
@@ -106,14 +107,14 @@ import           Language.Futhark.Core
 
 -- | Convenience class for deriving 'Show' instances for the AST.
 class (Show vn,
-       Show (f vn),
+       Show (f VName),
        Show (f [VName]),
-       Show (f (TypeBase (DimDecl vn) (Names vn))),
-       Show (f (CompTypeBase vn)),
+       Show (f PatternType),
+       Show (f CompType),
        Show (f [TypeBase () ()]),
-       Show (f (StructTypeBase vn)),
+       Show (f StructType),
        Show (f (M.Map VName VName)),
-       Show (f ([CompTypeBase vn], CompTypeBase vn))) => Showable f vn where
+       Show (f ([CompType], CompType))) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
 -- aliasing information.
@@ -384,7 +385,11 @@ instance Bifoldable TypeArg where
 
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
-type CompTypeBase vn = TypeBase () (Names vn)
+type CompType = TypeBase () Names
+
+-- | A type with aliasing information and shape annotations, used for
+-- describing the type of a pattern.
+type PatternType = TypeBase (DimDecl VName) Names
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
@@ -414,13 +419,13 @@ instance Located (TypeArgExp vn) where
 
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
-type StructTypeBase vn = TypeBase (DimDecl vn) ()
+type StructType = TypeBase (DimDecl VName) ()
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
   TypeDecl { declaredType :: TypeExp vn
                              -- ^ The type declared by the user.
-           , expandedType :: f (StructTypeBase vn)
+           , expandedType :: f StructType
                              -- ^ The type deduced by the type checker.
            }
 deriving instance Showable f vn => Show (TypeDeclBase f vn)
@@ -449,7 +454,7 @@ data Value = PrimValue !PrimValue
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
 data IdentBase f vn = Ident { identName   :: vn
-                            , identType   :: f (CompTypeBase vn)
+                            , identType   :: f CompType
                             , identSrcLoc :: SrcLoc
                             }
 deriving instance Showable f vn => Show (IdentBase f vn)
@@ -548,7 +553,7 @@ data ExpBase f vn =
             | RecordLit [FieldBase f vn] SrcLoc
             -- ^ Record literals, e.g. @{x=2,y=3,z}@.
 
-            | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+            | ArrayLit  [ExpBase f vn] (f CompType) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
 
@@ -556,19 +561,19 @@ data ExpBase f vn =
 
             | Empty (TypeDeclBase f vn) SrcLoc
 
-            | Var    (QualName vn) (f (CompTypeBase vn)) SrcLoc
+            | Var    (QualName vn) (f CompType) SrcLoc
 
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
 
             | LetPat [TypeParamBase vn] (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
 
-            | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f (StructTypeBase vn), ExpBase f vn)
+            | LetFun vn ([TypeParamBase vn], [PatternBase f vn], Maybe (TypeExp vn), f StructType, ExpBase f vn)
               (ExpBase f vn) SrcLoc
 
-            | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
+            | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
 
-            | Apply (QualName vn) [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
+            | Apply (QualName vn) [(ExpBase f vn, Diet)] (f CompType) SrcLoc
 
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
@@ -582,9 +587,9 @@ data ExpBase f vn =
               SrcLoc
 
             | BinOp (QualName vn)
-              (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f (CompTypeBase vn)) SrcLoc
+              (ExpBase f vn, Diet) (ExpBase f vn, Diet) (f CompType) SrcLoc
 
-            | Project Name (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
+            | Project Name (ExpBase f vn) (f CompType) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase f vn) (IdentBase f vn)
@@ -675,7 +680,7 @@ data ExpBase f vn =
             -- ^ Conventional zip taking nonzero arrays as arguments.
             -- All arrays must have the exact same length.
 
-            | Unzip (ExpBase f vn) [f (CompTypeBase vn)] SrcLoc
+            | Unzip (ExpBase f vn) [f CompType] SrcLoc
             -- ^ Unzip that can unzip to tuples of arbitrary size.
             -- The types are the elements of the tuple.
 
@@ -729,7 +734,7 @@ instance Located (ExpBase f vn) where
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-                    | RecordFieldImplicit vn (f (CompTypeBase vn)) SrcLoc
+                    | RecordFieldImplicit vn (f CompType) SrcLoc
 
 deriving instance Showable f vn => Show (FieldBase f vn)
 
@@ -744,21 +749,21 @@ data LoopFormBase f vn = For (IdentBase f vn) (ExpBase f vn)
 deriving instance Showable f vn => Show (LoopFormBase f vn)
 
 -- | Anonymous function passed to a SOAC.
-data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f (StructTypeBase vn)) SrcLoc
+data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f StructType) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
                       | CurryFun (QualName vn)
-                        [ExpBase f vn] (f ([CompTypeBase vn], CompTypeBase vn)) SrcLoc
+                        [ExpBase f vn] (f ([CompType], CompType)) SrcLoc
                         -- ^ @f(4)@
                       | BinOpFun (QualName vn)
-                        (f (CompTypeBase vn)) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                        (f CompType) (f CompType) (f CompType) SrcLoc
                         -- ^ @+@; first two types are operands, third is result.
                       | CurryBinOpLeft (QualName vn)
-                        (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                        (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
                         -- ^ @2+@; first type is operand, second is result.
                       | CurryBinOpRight (QualName vn)
-                        (ExpBase f vn) (f (CompTypeBase vn), f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
+                        (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
                         -- ^ @+2@; first type is operand, second is result.
-                      | CurryProject Name (f (CompTypeBase vn), f (CompTypeBase vn)) SrcLoc
+                      | CurryProject Name (f CompType, f CompType) SrcLoc
                       -- ^ @#field@.  First type is operand, second is result.
 deriving instance Showable f vn => Show (LambdaBase f vn)
 
@@ -775,8 +780,8 @@ instance Located (LambdaBase f vn) where
 data PatternBase f vn = TuplePattern [PatternBase f vn] SrcLoc
                       | RecordPattern [(Name, PatternBase f vn)] SrcLoc
                       | PatternParens (PatternBase f vn) SrcLoc
-                      | Id vn (f (TypeBase (DimDecl vn) (Names vn))) SrcLoc
-                      | Wildcard (f (TypeBase (DimDecl vn) (Names vn))) SrcLoc -- Nothing, i.e. underscore.
+                      | Id vn (f PatternType) SrcLoc
+                      | Wildcard (f PatternType) SrcLoc -- Nothing, i.e. underscore.
                       | PatternAscription (PatternBase f vn) (TypeDeclBase f vn)
 deriving instance Showable f vn => Show (PatternBase f vn)
 
@@ -793,7 +798,7 @@ data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
                                 , funBindName       :: vn
                                 , funBindRetDecl    :: Maybe (TypeExp vn)
-                                , funBindRetType    :: f (StructTypeBase vn)
+                                , funBindRetType    :: f StructType
                                 , funBindTypeParams :: [TypeParamBase vn]
                                 , funBindParams     :: [PatternBase f vn]
                                 , funBindBody       :: ExpBase f vn
@@ -810,7 +815,7 @@ data ValBindBase f vn = ValBind { constBindEntryPoint :: Bool
                                 -- ^ True if this value is an entry point.
                                 , constBindName     :: vn
                                 , constBindTypeDecl :: Maybe (TypeExp vn)
-                                , constBindType     :: f (StructTypeBase vn)
+                                , constBindType     :: f StructType
                                 , constBindDef      :: ExpBase f vn
                                 , constDoc          :: Maybe String
                                 , constBindLocation :: SrcLoc
@@ -972,7 +977,7 @@ data ProgBase f vn = Prog { progDoc :: Maybe String
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 -- | A set of names.
-type Names = S.Set
+type Names = S.Set VName
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.
