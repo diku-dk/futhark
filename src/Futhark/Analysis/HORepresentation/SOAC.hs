@@ -97,7 +97,7 @@ data ArrayTransform = Rearrange Certificates [Int]
                     -- ^ A reshaping of the outer dimension.
                     | ReshapeInner Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of everything but the outer dimension.
-                    | Replicate Shape
+                    | Replicate Certificates Shape
                     -- ^ Replicate the rows of the array a number of times.
                       deriving (Show, Eq, Ord)
 
@@ -110,8 +110,8 @@ instance Substitute ArrayTransform where
     ReshapeOuter (substituteNames substs cs) (substituteNames substs ses)
   substituteNames substs (ReshapeInner cs ses) =
     ReshapeInner (substituteNames substs cs) (substituteNames substs ses)
-  substituteNames substs (Replicate se) =
-    Replicate $ substituteNames substs se
+  substituteNames substs (Replicate cs se) =
+    Replicate (substituteNames substs cs) (substituteNames substs se)
 
 -- | A sequence of array transformations, heavily inspired by
 -- "Data.Seq".  You can decompose it using 'viewF' and 'viewL', and
@@ -212,14 +212,14 @@ combineTransforms _ _ = Nothing
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Exp lore -> Maybe (VName, ArrayTransform)
-transformFromExp (BasicOp (Futhark.Rearrange perm v)) =
-  Just (v, Rearrange mempty perm)
-transformFromExp (BasicOp (Futhark.Reshape shape v)) =
-  Just (v, Reshape mempty shape)
-transformFromExp (BasicOp (Futhark.Replicate shape (Futhark.Var v))) =
-  Just (v, Replicate shape)
-transformFromExp _ = Nothing
+transformFromExp :: Certificates -> Exp lore -> Maybe (VName, ArrayTransform)
+transformFromExp cs (BasicOp (Futhark.Rearrange perm v)) =
+  Just (v, Rearrange cs perm)
+transformFromExp cs (BasicOp (Futhark.Reshape shape v)) =
+  Just (v, Reshape cs shape)
+transformFromExp cs (BasicOp (Futhark.Replicate shape (Futhark.Var v))) =
+  Just (v, Replicate cs shape)
+transformFromExp _ _ = Nothing
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
@@ -280,7 +280,8 @@ inputsToSubExps = mapM inputToExp'
   where inputToExp' (Input (ArrayTransforms ts) a _) =
           foldlM transform a ts
 
-        transform ia (Replicate n) =
+        transform ia (Replicate cs n) =
+          certifying cs $
           letExp "repeat" $ BasicOp $ Futhark.Replicate n (Futhark.Var ia)
 
         transform ia (Rearrange cs perm) =
@@ -309,7 +310,7 @@ inputArray (Input _ v _) = v
 inputType :: Input -> Type
 inputType (Input (ArrayTransforms ts) _ at) =
   Foldable.foldl transformType at ts
-  where transformType t (Replicate shape) =
+  where transformType t (Replicate _ shape) =
           arrayOfShape t shape
         transformType t (Rearrange _ perm) =
           rearrangeType perm t
@@ -339,13 +340,13 @@ transformRows (ArrayTransforms ts) =
           addTransform (Rearrange cs (0:map (+1) perm)) inp
         transformRows' inp (Reshape cs shape) =
           addTransform (ReshapeInner cs shape) inp
-        transformRows' inp (Replicate n)
+        transformRows' inp (Replicate cs n)
           | inputRank inp == 1 =
             Rearrange mempty [1,0] `addTransform`
-            (Replicate n `addTransform` inp)
+            (Replicate cs n `addTransform` inp)
           | otherwise =
             Rearrange mempty (2:0:1:[3..inputRank inp]) `addTransform`
-            (Replicate n `addTransform`
+            (Replicate cs n `addTransform`
              (Rearrange mempty (1:0:[2..inputRank inp-1]) `addTransform` inp))
         transformRows' inp nts =
           error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
