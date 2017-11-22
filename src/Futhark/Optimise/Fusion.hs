@@ -636,7 +636,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       reduceLike soac lambdas $ getStreamAccums form
 
     _ | [pe] <- patternValueElements pat,
-        Just (src,trns) <- SOAC.transformFromExp e ->
+        Just (src,trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
           bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
       | otherwise -> do
           let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat

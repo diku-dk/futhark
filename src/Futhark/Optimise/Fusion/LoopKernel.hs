@@ -71,8 +71,8 @@ applyTransform (SOAC.ReshapeOuter cs shape) v =
 applyTransform (SOAC.ReshapeInner cs shape) v =
   let shapes = reshapeInner shape 1 $ arrayShape $ identType v
   in (Reshape shapes $ identName v, cs)
-applyTransform (SOAC.Replicate n) v =
-  (Replicate n $ Var $ identName v, mempty)
+applyTransform (SOAC.Replicate cs n) v =
+  (Replicate n $ Var $ identName v, cs)
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia iat) =
@@ -740,10 +740,11 @@ pullReshape _ _ = fail "Cannot pull reshape"
 -- by adding another dimension to the SOAC.
 pullReplicate :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pullReplicate soac@SOAC.Map{} ots
-  | SOAC.Replicate (Shape [n]) SOAC.:< ots' <- SOAC.viewf ots = do
+  | SOAC.Replicate cs (Shape [n]) SOAC.:< ots' <- SOAC.viewf ots = do
       let rettype = SOAC.typeOf soac
       body <- runBodyBinder $ do
-        names <- letTupExp "pull_replicate" =<< SOAC.toExp soac
+        names <- certifying cs $
+                 letTupExp "pull_replicate" =<< SOAC.toExp soac
         resultBodyM $ map Var names
       let lam = Lambda { lambdaReturnType = rettype
                        , lambdaBody = body

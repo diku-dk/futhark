@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+  * Fusion would sometimes remove safety checks on e.g. `reshape`
+    (#436).
+
 ## [0.2.0]
 
 ### Added
