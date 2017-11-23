@@ -211,9 +211,15 @@ data DimDecl vn = NamedDim (QualName vn)
                 deriving (Eq, Ord, Show)
 
 instance Functor DimDecl where
-  fmap f (NamedDim (QualName qs x)) = NamedDim $ QualName qs $ f x
-  fmap _ (ConstDim x)               = ConstDim x
-  fmap _ AnyDim                     = AnyDim
+  fmap = fmapDefault
+
+instance Foldable DimDecl where
+  foldMap = foldMapDefault
+
+instance Traversable DimDecl where
+  traverse f (NamedDim qn) = NamedDim <$> traverse f qn
+  traverse _ (ConstDim x) = pure $ ConstDim x
+  traverse _ AnyDim = pure AnyDim
 
 instance (Eq vn, Ord vn) => ArrayDim (DimDecl vn) where
   unifyDims AnyDim y = Just y
@@ -221,7 +227,6 @@ instance (Eq vn, Ord vn) => ArrayDim (DimDecl vn) where
   unifyDims (NamedDim x) (NamedDim y) | x == y = Just $ NamedDim x
   unifyDims (ConstDim x) (ConstDim y) | x == y = Just $ ConstDim x
   unifyDims _ _ = Nothing
-
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
@@ -523,7 +528,13 @@ data QualName vn = QualName { qualQuals :: ![Name]
   deriving (Eq, Ord, Show)
 
 instance Functor QualName where
-  fmap f (QualName qs leaf) = QualName qs $ f leaf
+  fmap = fmapDefault
+
+instance Foldable QualName where
+  foldMap = foldMapDefault
+
+instance Traversable QualName where
+  traverse f (QualName qs v) = QualName qs <$> f v
 
 instance Hashable vn => Hashable (QualName vn) where
   hashWithSalt salt (QualName quals leaf) =
@@ -842,6 +853,16 @@ data TypeParamBase vn = TypeParamDim vn SrcLoc
                       | TypeParamType vn SrcLoc
                         -- ^ A type parameter that must be a type.
   deriving (Show)
+
+instance Functor TypeParamBase where
+  fmap = fmapDefault
+
+instance Foldable TypeParamBase where
+  foldMap = foldMapDefault
+
+instance Traversable TypeParamBase where
+  traverse f (TypeParamDim v loc) = TypeParamDim <$> f v <*> pure loc
+  traverse f (TypeParamType v loc) = TypeParamType <$> f v <*> pure loc
 
 instance Located (TypeParamBase vn) where
   locOf (TypeParamDim _ loc)  = locOf loc
