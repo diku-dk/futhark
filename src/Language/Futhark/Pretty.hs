@@ -285,9 +285,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname curryargs _ _) =
     ppr fname <+> apply (map ppr curryargs)
   ppr (AnonymFun tparams params body ascript _ _) =
-    text "fn" <+>
+    text "\\" <>
     apply (map ppr tparams ++ map ppr params) <> ppAscription ascript <+>
-    text "=>" </> indent 2 (ppr body)
+    text "->" </> indent 2 (ppr body)
   ppr (BinOpFun binop _ _ _ _) =
     ppr binop
   ppr (CurryBinOpLeft binop x _ _ _) =
@@ -425,4 +425,4 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence bop) $
 ppSOAC :: (Eq vn, Hashable vn, Pretty vn, Pretty fn) =>
           String -> [fn] -> [ExpBase ty vn] -> Doc
 ppSOAC name funs es =
-  text name <+> spread (map ppr funs) </> spread (map (pprPrec 10) es)
+  text name <+> spread (map (parens . ppr) funs) </> spread (map (pprPrec 10) es)
