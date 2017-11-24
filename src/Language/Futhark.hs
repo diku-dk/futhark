@@ -5,8 +5,9 @@ module Language.Futhark
   , module Language.Futhark.Pretty
 
   , Ident, DimIndex, Exp, Lambda, Pattern
-  , ModExp, SigExp, ModBind
+  , ModExp, ModParam, SigExp, ModBind
   , FunBind, ValBind, Dec, Prog
+  , TypeBind, TypeDecl
   , StructTypeArg, ArrayType
   , TypeParam
   )
@@ -16,7 +17,7 @@ import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Pretty
 
--- | An identifier with type- and aliasing information information.
+-- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName
 
 -- | An index with type information.
@@ -37,11 +38,20 @@ type FunBind = FunBindBase Info VName
 -- | An constant declaration with type information.
 type ValBind = ValBindBase Info VName
 
+-- | A type declaration with type information
+type TypeDecl = TypeDeclBase Info VName
+
+-- | A type binding with type information.
+type TypeBind = TypeBindBase Info VName
+
 -- | A type-checked module binding.
 type ModBind = ModBindBase Info VName
 
 -- | A type-checked module expression.
 type ModExp = ModExpBase Info VName
+
+-- | A type-checked module parameter.
+type ModParam = ModParamBase Info VName
 
 -- | A type-checked module type expression.
 type SigExp = SigExpBase Info VName
