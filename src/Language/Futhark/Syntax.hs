@@ -514,6 +514,17 @@ instance Located a => Located (Inclusiveness a) where
   locOf (ToInclusive x) = locOf x
   locOf (UpToExclusive x) = locOf x
 
+instance Functor Inclusiveness where
+  fmap = fmapDefault
+
+instance Foldable Inclusiveness where
+  foldMap = foldMapDefault
+
+instance Traversable Inclusiveness where
+  traverse f (DownToExclusive x) = DownToExclusive <$> f x
+  traverse f (ToInclusive x) = ToInclusive <$> f x
+  traverse f (UpToExclusive x) = UpToExclusive <$> f x
+
 -- | An indexing of a single dimension.
 data DimIndexBase f vn = DimFix (ExpBase f vn)
                        | DimSlice (Maybe (ExpBase f vn))
