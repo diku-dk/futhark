@@ -76,7 +76,7 @@ module Futhark.Representation.ExplicitMemory
        , lookupMemInfo
        , lookupMemSize
        , lookupArraySummary
-       , fullyDirect
+       , fullyLinear
        , ixFunMatchesInnerShape
 
          -- * Module re-exports
@@ -533,8 +533,8 @@ matchFunctionReturnType :: ExplicitMemorish lore =>
                            [FunReturns] -> Result -> TC.TypeM lore ()
 matchFunctionReturnType rettype result = do
   TC.matchExtReturnType (fromDecl <$> ts) result
-  result_ts <- do scope <- askScope
-                  runReaderT (mapM subExpMemInfo result) $ removeScopeAliases scope
+  scope <- askScope
+  result_ts <- runReaderT (mapM subExpMemInfo result) $ removeScopeAliases scope
   matchReturnType rettype result result_ts
   mapM_ checkResultSubExp result
   where ts = map declExtTypeOf rettype
@@ -546,7 +546,7 @@ matchFunctionReturnType rettype result = do
             MemPrim _ -> return ()
             MemMem{} -> return ()
             MemArray _ _ _ (ArrayIn _ ixfun)
-              | IxFun.isDirect ixfun ->
+              | IxFun.isLinear ixfun ->
                 return ()
               | otherwise ->
                   TC.bad $ TC.TypeError $
@@ -559,8 +559,8 @@ matchBranchReturnType :: ExplicitMemorish lore =>
                       -> Body (Aliases lore)
                       -> TC.TypeM lore ()
 matchBranchReturnType rettype (Body _ stms res) = do
-  ts <- do scope <- askScope
-           runReaderT (mapM subExpMemInfo res) $ removeScopeAliases (scope <> scopeOf stms)
+  scope <- askScope
+  ts <- runReaderT (mapM subExpMemInfo res) $ removeScopeAliases (scope <> scopeOf stms)
   matchReturnType rettype res ts
 
 matchReturnType :: (ExplicitMemorish lore, PP.Pretty u) =>
@@ -1022,9 +1022,9 @@ applyFunReturns rets params args
 
 -- | Is an array of the given shape stored fully flat row-major with
 -- the given index function?
-fullyDirect :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
-fullyDirect shape ixfun =
-  IxFun.isDirect ixfun && ixFunMatchesInnerShape shape ixfun
+fullyLinear :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
+fullyLinear shape ixfun =
+  IxFun.isLinear ixfun && ixFunMatchesInnerShape shape ixfun
 
 ixFunMatchesInnerShape :: Shape -> IxFun.IxFun (PrimExp VName) -> Bool
 ixFunMatchesInnerShape shape ixfun =

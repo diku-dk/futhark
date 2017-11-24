@@ -457,7 +457,7 @@ allocInMergeParams variant merge m = do
           | Array bt shape Unique <- paramDeclType mergeparam,
             loopInvariantShape mergeparam = do
               (mem, ixfun) <- lift $ lookupArraySummary v
-              if IxFun.isDirect ixfun
+              if IxFun.isLinear ixfun
                 then return (mergeparam { paramAttr = MemArray bt shape Unique $ ArrayIn mem ixfun },
                              lift . ensureArrayIn (paramType mergeparam) mem ixfun)
                 else doDefault mergeparam
@@ -495,7 +495,7 @@ ensureDirectArray v = do
   res <- lookupMemInfo v
   case res of
     MemArray _ shape _ (ArrayIn mem ixfun)
-      | fullyDirect shape ixfun -> do
+      | IxFun.isDirect ixfun -> do
         memt <- lookupType mem
         case memt of
           Mem size _ -> return (size, mem, Var v)

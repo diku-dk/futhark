@@ -18,6 +18,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , rank
        , linearWithOffset
        , rearrangeWithOffset
+       , isLinear
        , isDirect
        , substituteInIxFun
        )
@@ -363,9 +364,13 @@ rearrangeWithOffset (Permute ixfun perm) element_size = do
 rearrangeWithOffset _ _ =
   Nothing
 
-isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
-isDirect =
+isLinear :: (Eq num, IntegralExp num) => IxFun num -> Bool
+isLinear =
   (==Just 0) . flip linearWithOffset 1
+
+isDirect :: IxFun num -> Bool
+isDirect Direct{} = True
+isDirect _ = False
 
 -- | Substituting a name with a PrimExp in an index function.
 substituteInIxFun :: M.Map VName (PrimExp VName) -> IxFun (PrimExp VName)
