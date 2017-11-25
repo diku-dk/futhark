@@ -242,7 +242,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
   pprPrec _ (Zip 0 e es _) = text "zip" <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Zip i e es _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
-  pprPrec _ (Unzip e _ _) = text "unzip" <> pprPrec 10 e
+  pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec 10 e
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 10 e
   pprPrec _ (Split i e a _) =
     text "split@" <> ppr i <+> pprPrec 10 e <+> pprPrec 10 a
@@ -425,4 +425,5 @@ prettyBinOp p bop x y = parensIf (p > symPrecedence bop) $
 ppSOAC :: (Eq vn, Hashable vn, Pretty vn, Pretty fn) =>
           String -> [fn] -> [ExpBase ty vn] -> Doc
 ppSOAC name funs es =
-  text name <+> spread (map (parens . ppr) funs) </> spread (map (pprPrec 10) es)
+  text name <+> align (spread (map (parens . ppr) funs) </>
+                       spread (map (pprPrec 10) es))
