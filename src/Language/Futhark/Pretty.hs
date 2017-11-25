@@ -323,7 +323,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModExpBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBindBase ty vn) where
   ppr (TypeBind name params usertype _ _) =
-    text "type" <+> ppr name <+> spread (map ppr params) <> text " =" <+> ppr usertype
+    text "type" <+> ppr name <+> spread (map ppr params) <+> equals <+> ppr usertype
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ ppr name
