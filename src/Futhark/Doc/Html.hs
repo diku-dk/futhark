@@ -39,6 +39,4 @@ brackets :: Html -> Html
 brackets x = toHtml "[" <> x <> toHtml "]"
 
 prettyQualName :: QualName VName -> Html
-prettyQualName v = docToHtml (ppr v')
-  where v' = QualName names name
-        QualName names (VName name _) = v
+prettyQualName = docToHtml . ppr . fmap baseName

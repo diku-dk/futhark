@@ -458,8 +458,8 @@ instantiatePolymorphic tnames loc orig_substs x y =
             _ -> modify $ M.insert tn (arg_t, loc)
             -- Ignore uniqueness when dealing with type variables.
             where arg_t = orig_arg_t `setUniqueness` Nonunique
-    instantiate (TypeVar (TypeName [] tn) targs)
-                (TypeVar (TypeName [] arg_tn) arg_targs)
+    instantiate (TypeVar (TypeName _ tn) targs)
+                (TypeVar (TypeName _ arg_tn) arg_targs)
       | tn == arg_tn, length targs == length arg_targs =
           zipWithM_ instantiateTypeArg targs arg_targs
     instantiate (Record fs) (Record arg_fs)

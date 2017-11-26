@@ -201,21 +201,22 @@ instance MonadTypeChecker TermTypeM where
     return x
 
   lookupType loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Type qn loc
+    (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
       Nothing -> bad $ UndefinedType loc qn
-      Just (TypeAbbr ps def) -> return (qn', ps, def)
+      Just (TypeAbbr ps def) ->
+        return (qn', ps, qualifyTypeVars (map typeParamName ps) qs def)
 
   lookupMod loc name = liftTypeM $ TypeM.lookupMod loc name
   lookupMTy loc name = liftTypeM $ TypeM.lookupMTy loc name
   lookupImport loc name = liftTypeM $ TypeM.lookupImport loc name
 
   lookupVar loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
+    (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
       Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
-                      | otherwise -> return (qn', t)
+                      | otherwise -> return (qn', qualifyTypeVars [] qs t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
       Just EqualityF -> bad $ FunctionIsNotValue loc qn
       Just OpaqueF -> bad $ FunctionIsNotValue loc qn
@@ -233,19 +234,16 @@ checkQualNameWithEnv space qn@(QualName [q] _) loc
         else checkReallyQualName space qn loc
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
   scope <- ask
-  descend scope quals
-  where descend scope []
-          | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
-              return (scope, QualName quals name')
-
-        descend _ _ =
-          checkReallyQualName space qn loc
+  case quals of
+    [] | Just name' <- M.lookup (space, name) $ scopeNameMap scope ->
+           return (scope, QualName [] name')
+    _ -> checkReallyQualName space qn loc
 
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
       scope <- ask
-      return (scope, QualName [nameFromString "intrinsics"] v)
+      return (scope, QualName [VName (nameFromString "intrinsics") 0] v)
   | otherwise =
       bad $ UnknownVariableError space qn loc
 
@@ -259,12 +257,16 @@ checkReallyQualName space qn loc = do
 lookupFunction :: QualName Name -> [CompType] -> SrcLoc
                -> TermTypeM (QualName VName, FunBinding, Occurences)
 lookupFunction qn argtypes loc = do
-  (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
+  (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
   case M.lookup name $ scopeVtable scope of
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
     Just (BoundV t) -> bad $ ValueIsNotFunction loc qn t
-    Just (BoundF f closure) -> return (qn', f, closure)
+    Just (BoundF (tparams, params, rt) closure) ->
+      let qual = qualifyTypeVars (map typeParamName tparams) qs
+      in return (qn',
+                 (tparams, map (fmap qual) params, qual rt),
+                 closure)
     Just (OverloadedF overloads) ->
       case lookup (map toStructural argtypes) overloads of
         Nothing -> bad $ TypeError loc $ "Overloaded function " ++ pretty qn ++

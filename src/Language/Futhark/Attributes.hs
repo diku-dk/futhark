@@ -888,7 +888,7 @@ qualName :: v -> QualName v
 qualName = QualName []
 
 -- | Add another qualifier (at the head) to a qualified name.
-qualify :: Name -> QualName v -> QualName v
+qualify :: v -> QualName v -> QualName v
 qualify k (QualName ks v) = QualName (k:ks) v
 
 -- | Create a type name name with no qualifiers from a 'VName'.

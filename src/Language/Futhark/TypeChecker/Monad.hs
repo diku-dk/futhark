@@ -9,6 +9,7 @@ module Language.Futhark.TypeChecker.Monad
   , recursionPermitted
   , checkQualNameWithEnv
   , bindSpaced
+  , qualifyTypeVars
 
   , MonadTypeChecker(..)
   , checkName
@@ -48,6 +49,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS.Strict
+import Control.Monad.Identity
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -62,6 +64,7 @@ import qualified System.FilePath.Posix as Posix
 import Prelude hiding (mapM)
 
 import Language.Futhark
+import Language.Futhark.Traversals
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 
@@ -352,10 +355,10 @@ instance MonadTypeChecker TypeM where
   checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 
   lookupType loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Type qn loc
+    (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
       Nothing -> bad $ UndefinedType loc qn
-      Just (TypeAbbr ps def) -> return (qn', ps, def)
+      Just (TypeAbbr ps def) -> return (qn', ps, qualifyTypeVars mempty qs def)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
@@ -381,11 +384,12 @@ instance MonadTypeChecker TypeM where
                       ""
 
   lookupVar loc qn = do
-    (env, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
+    (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
       Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
-                      | otherwise -> return (qn', removeShapeAnnotations $ fromStruct t)
+                      | otherwise -> return (qn', removeShapeAnnotations $ fromStruct $
+                                                  qualifyTypeVars mempty qs t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
@@ -394,7 +398,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
   descend env quals
   where descend scope []
           | Just name' <- M.lookup (space, name) $ envNameMap scope =
-              return (scope, QualName quals name')
+              return (scope, QualName [] name')
           | otherwise =
               bad $ UnknownVariableError space qn loc
 
@@ -402,10 +406,23 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
           | Just q' <- M.lookup (Term, q) $ envNameMap scope,
             Just res <- M.lookup q' $ envModTable scope =
               case res of
-                ModEnv q_scope -> descend q_scope qs
+                ModEnv q_scope -> do
+                  (scope', QualName qs' name') <- descend q_scope qs
+                  return (scope', QualName (q':qs') name')
                 ModFun{} -> bad $ UnappliedFunctor loc
           | otherwise =
               bad $ UnknownVariableError space qn loc
+
+qualifyTypeVars :: ASTMappable t => [VName] -> [VName] -> t -> t
+qualifyTypeVars except qs = runIdentity . astMap mapper
+  where mapper = ASTMapper { mapOnExp = pure
+                           , mapOnLambda = pure
+                           , mapOnName = pure
+                           , mapOnQualName = pure . qual
+                           }
+        qual (QualName orig_qs name)
+          | name `elem` except = QualName orig_qs name
+          | otherwise          = QualName (qs<>orig_qs) name
 
 badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
 badOnLeft = either bad return
