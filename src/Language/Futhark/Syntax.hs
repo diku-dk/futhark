@@ -108,6 +108,7 @@ import           Language.Futhark.Core
 -- | Convenience class for deriving 'Show' instances for the AST.
 class (Show vn,
        Show (f VName),
+       Show (f String),
        Show (f [VName]),
        Show (f PatternType),
        Show (f CompType),
@@ -941,7 +942,7 @@ instance Located (SigBindBase f vn) where
 
 data ModExpBase f vn = ModVar (QualName vn) SrcLoc
                      | ModParens (ModExpBase f vn) SrcLoc
-                     | ModImport FilePath SrcLoc
+                     | ModImport FilePath (f FilePath) SrcLoc
                        -- ^ The contents of another file as a module.
                      | ModDecs [DecBase f vn] SrcLoc
                      | ModApply (ModExpBase f vn) (ModExpBase f vn) (f (M.Map VName VName)) (f (M.Map VName VName)) SrcLoc
@@ -956,7 +957,7 @@ deriving instance Showable f vn => Show (ModExpBase f vn)
 instance Located (ModExpBase f vn) where
   locOf (ModVar _ loc)         = locOf loc
   locOf (ModParens _ loc)      = locOf loc
-  locOf (ModImport _ loc)      = locOf loc
+  locOf (ModImport _ _ loc)    = locOf loc
   locOf (ModDecs _ loc)        = locOf loc
   locOf (ModApply _ _ _ _ loc) = locOf loc
   locOf (ModAscript _ _ _ loc) = locOf loc

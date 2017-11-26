@@ -310,7 +310,7 @@ class MonadError TypeError m => MonadTypeChecker m where
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructType)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupMTy :: SrcLoc -> QualName Name -> m (QualName VName, MTy)
-  lookupImport :: SrcLoc -> FilePath -> m Env
+  lookupImport :: SrcLoc -> FilePath -> m (FilePath, Env)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, CompType)
 
 checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
@@ -371,9 +371,10 @@ instance MonadTypeChecker TypeM where
   lookupImport loc file = do
     imports <- asks contextImportTable
     my_path <- asks contextFilePath
-    case M.lookup (my_path Posix.</> file) imports of
+    let abs_path = my_path Posix.</> file
+    case M.lookup abs_path imports of
       Nothing    -> bad $ TypeError loc $ "Unknown import \"" ++ file ++ "\"" ++ extra
-      Just scope -> return scope
+      Just scope -> return (abs_path, scope)
       where extra | ".." `elem` Posix.splitDirectories file =
                       "\nNote: '..' is not supported in file imports."
                   | otherwise =

@@ -8,6 +8,9 @@ module Futhark.Compiler
        , runCompilerOnProgram
        , readProgram
        , readLibrary
+       , E.Imports
+       , E.FileModule(..)
+
        , interpretAction'
        , FutharkConfig (..)
        , newFutharkConfig
@@ -340,7 +343,7 @@ runCompilerM :: Monad m =>
              -> m (E.ProgBase E.Info VName, E.Warnings,
                    [(String, E.FileModule)], VNameSource)
 runCompilerM (Basis imports src roots) m = do
-  let s = ReaderState imports src mempty
+  let s = ReaderState (reverse imports) src mempty
   s' <- execStateT (runReaderT m roots) s
   return (E.Prog Nothing $
            concatMap (E.progDecs . E.fileProg . snd) $
@@ -353,7 +356,7 @@ prependPrelude :: [FilePath] -> E.UncheckedProg -> E.UncheckedProg
 prependPrelude prelude (E.Prog doc ds) =
   E.Prog doc $ map mkImport prelude ++ ds
   where mkImport fp =
-          E.LocalDec (E.OpenDec (E.ModImport fp noLoc) [] E.NoInfo noLoc) noLoc
+          E.LocalDec (E.OpenDec (E.ModImport fp E.NoInfo noLoc) [] E.NoInfo noLoc) noLoc
 
 newNameSourceForCompiler :: VNameSource
 newNameSourceForCompiler = newNameSource $ succ $ maximum $ map baseTag $

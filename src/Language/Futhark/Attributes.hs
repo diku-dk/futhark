@@ -909,7 +909,7 @@ progImports = concatMap decImports . progDecs
 
         modExpImports ModVar{}              = []
         modExpImports (ModParens p _)       = modExpImports p
-        modExpImports (ModImport f loc)     = [(f,loc)]
+        modExpImports (ModImport f _ loc)   = [(f,loc)]
         modExpImports (ModDecs ds _)        = concatMap decImports ds
         modExpImports (ModApply _ me _ _ _) = modExpImports me
         modExpImports (ModAscript me _ _ _) = modExpImports me

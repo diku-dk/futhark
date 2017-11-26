@@ -244,7 +244,7 @@ Dec_ :: { [UncheckedDec] }
     | open ModExp
       { [OpenDec $2 [] NoInfo $1] }
     | import stringlit
-      { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s loc) [] NoInfo $1) $1] }
+      { let L loc (STRINGLIT s) = $2 in [LocalDec (OpenDec (ModImport s NoInfo loc) [] NoInfo $1) $1] }
     | local Dec         { map (`LocalDec` $1) $2 }
     | DefaultDec        { [] }
 ;
@@ -273,7 +273,7 @@ ModExp :: { UncheckedModExp }
         | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
           { ModLambda $2 (fmap (,NoInfo) $3) $5 $1 }
         | import stringlit
-          { let L _ (STRINGLIT s) = $2 in ModImport s $1 }
+          { let L _ (STRINGLIT s) = $2 in ModImport s NoInfo $1 }
         | ModExpApply
           { $1 }
         | ModExpAtom
