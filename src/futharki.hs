@@ -126,7 +126,7 @@ readEvalPrint = do
           -- Generate a 0-ary function with empty name with the
           -- expression as its body, append it to the stored program,
           -- then run it.
-          let mkOpen f = OpenDec (ModImport f noLoc) [] NoInfo noLoc
+          let mkOpen f = OpenDec (ModImport f NoInfo noLoc) [] NoInfo noLoc
               opens = map (mkOpen . fst) imports
               mainfun = FunBind { funBindEntryPoint = True
                                 , funBindName = nameFromString ""

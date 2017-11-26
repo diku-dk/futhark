@@ -278,9 +278,10 @@ checkModExp (ModVar v loc) = do
         baseTag (qualLeaf v') <= maxIntrinsicTag) $
     bad $ TypeError loc "The 'intrinsics' module may not be used in module expressions."
   return (MTy mempty env, ModVar v' loc)
-checkModExp (ModImport name loc) = do
-  env <- lookupImport loc name
-  return (MTy mempty $ ModEnv env, ModImport name loc)
+checkModExp (ModImport name NoInfo loc) = do
+  (name', env) <- lookupImport loc name
+  return (MTy mempty $ ModEnv env,
+          ModImport name (Info name') loc)
 checkModExp (ModApply f e NoInfo NoInfo loc) = do
   (f_mty, f') <- checkModExp f
   case mtyMod f_mty of
