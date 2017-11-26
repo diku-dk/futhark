@@ -26,12 +26,12 @@ module  MT1_plus: MT1 = {
 
 module M = {
   module T(P: MT3) = {
-    module P_T_I = P.T(MT1_plus)
+    module P_T_I = P.T MT1_plus
 
     let g(x: i32) = P_T_I.g x
   }
 }
 
-module MT_I = M.T(MT3_twice)
+module MT_I = M.T MT3_twice
 
 let main(x: i32) = MT1_plus.f x x + MT_I.g x
