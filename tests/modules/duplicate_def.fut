@@ -1,21 +1,21 @@
 -- testing that variable shadowing and chunking
 -- doesn't allow for duplicate definitions
 -- ==
--- error:
+-- error: Duplicate
 type foo = (i32, f32)
 
-module M0
+module M0 =
   {
     type foo = foo -- the type is defined from l. 1
     type bar = f32
   }
 
-module M1
+module M1 =
   {
     type foo = f32
     type bar = M0.bar -- type is defined from l.6
 
-    module M0
+    module M0 =
       {
         type foo = M0.foo -- is defined at l. 5
         type bar = (i32, i32, i32)
