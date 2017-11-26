@@ -323,7 +323,7 @@ qualNameHtml (QualName names (VName name tag)) =
       then prefix <> renderName name
       else prefix <> (a ! A.href (fromString ("#" ++ show tag)) $ renderName name)
   where prefix :: Html
-        prefix = foldMap ((<> ".") . renderName) names
+        prefix = foldMap ((<> ".") . renderName . baseName) names
 
 renderQualName :: Namespace -> QualName VName -> DocM Html
 renderQualName ns (QualName names (VName name tag)) =
@@ -331,7 +331,7 @@ renderQualName ns (QualName names (VName name tag)) =
       then return $ prefix <> renderName name
       else f <$> ref
   where prefix :: Html
-        prefix = mapM_ ((<> ".") . renderName) names
+        prefix = mapM_ ((<> ".") . renderName . baseName) names
         f s = prefix <> (a ! A.href (fromString s) $ renderName name)
 
         ref = do --vname <- getVName ns (QualName names name)

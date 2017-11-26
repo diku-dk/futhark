@@ -269,7 +269,7 @@ unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
 
 -- | A type name consists of qualifiers (for error messages) and a
 -- 'VName' (for equality checking).
-data TypeName = TypeName [Name] VName
+data TypeName = TypeName [VName] VName
               deriving (Show)
 
 instance Eq TypeName where
@@ -534,7 +534,7 @@ data DimIndexBase f vn = DimFix (ExpBase f vn)
 deriving instance Showable f vn => Show (DimIndexBase f vn)
 
 -- | A name qualified with a breadcrumb of module accesses.
-data QualName vn = QualName { qualQuals :: ![Name]
+data QualName vn = QualName { qualQuals :: ![vn]
                             , qualLeaf  :: !vn
                             }
   deriving (Eq, Ord, Show)
@@ -546,7 +546,7 @@ instance Foldable QualName where
   foldMap = foldMapDefault
 
 instance Traversable QualName where
-  traverse f (QualName qs v) = QualName qs <$> f v
+  traverse f (QualName qs v) = QualName <$> traverse f qs <*> f v
 
 instance Hashable vn => Hashable (QualName vn) where
   hashWithSalt salt (QualName quals leaf) =
