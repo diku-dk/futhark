@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * futlib: the `complex` module now produces a non-abstract `complex`
     type.
 
+  * Type errors involving abstract types from modules now use
+    qualified names (less "expected 't', got 't'", more "expected
+    'foo.t', got 'bar.t'").
+
 ### Fixed
 
   * Fusion would sometimes remove safety checks on e.g. `reshape`
