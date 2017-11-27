@@ -864,7 +864,7 @@ data TypeParamBase vn = TypeParamDim vn SrcLoc
                         -- ^ A type parameter that must be a size.
                       | TypeParamType vn SrcLoc
                         -- ^ A type parameter that must be a type.
-  deriving (Show)
+  deriving (Eq, Show)
 
 instance Functor TypeParamBase where
   fmap = fmapDefault
