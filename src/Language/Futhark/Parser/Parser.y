@@ -304,7 +304,7 @@ ModBind :: { ModBindBase NoInfo Name }
            }
 
 ModParam :: { ModParamBase NoInfo Name }
-          : '(' id ':' SigExp ')' { let L _ (ID name) = $2 in ModParam name $4 $1 }
+          : '(' id ':' SigExp ')' { let L _ (ID name) = $2 in ModParam name $4 NoInfo $1 }
 
 Spec :: { SpecBase NoInfo Name }
       : val id many(TypeParam) ':' SigTypeDecl

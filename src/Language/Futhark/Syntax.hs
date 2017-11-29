@@ -269,7 +269,7 @@ unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
 
 -- | A type name consists of qualifiers (for error messages) and a
 -- 'VName' (for equality checking).
-data TypeName = TypeName [VName] VName
+data TypeName = TypeName { typeQuals :: [VName], typeLeaf :: VName }
               deriving (Show)
 
 instance Eq TypeName where
@@ -978,6 +978,7 @@ instance Located (ModBindBase f vn) where
 
 data ModParamBase f vn = ModParam { modParamName     :: vn
                                   , modParamType     :: SigExpBase f vn
+                                  , modParamAbs      :: f [VName]
                                   , modParamLocation :: SrcLoc
                                   }
 deriving instance Showable f vn => Show (ModParamBase f vn)

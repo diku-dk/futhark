@@ -88,7 +88,7 @@ prettyFun fm (FunBind _ name _retdecl _rettype _tparams _args _ doc _)
     renderDoc doc <> "val " <> vnameHtml name <>
     foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
     foldMap (\t -> prettyParam t <> " -> ") pts <> prettyType rett
-    where FileModule Env {envVtable = vtable} _ = fm
+    where FileModule _abs Env {envVtable = vtable} _ = fm
 prettyFun _ _ = Nothing
 
 prettyVal :: FileModule -> ValBindBase Info VName -> Maybe (DocM Html)
@@ -98,7 +98,7 @@ prettyVal fm (ValBind _entry name maybe_t _ _e doc _)
     Just . return . H.div $
     renderDoc doc <> "let " <> vnameHtml name <> " : " <>
     maybe (prettyType st) typeExpHtml maybe_t
-    where (FileModule Env {envVtable = vtable} _) = fm
+    where (FileModule _abs Env {envVtable = vtable} _) = fm
 prettyVal _ _ = Nothing
 
 prettySig :: FileModule -> SigBindBase Info VName -> Maybe (DocM Html)
@@ -109,7 +109,7 @@ prettySig fm (SigBind vname se doc _)
       expHtml <- renderSigExp se
       return $ renderDoc doc <> "module type " <> name <>
         " = " <> expHtml
-    where (FileModule Env { envSigTable = sigtable } _) = fm
+    where (FileModule _abs Env { envSigTable = sigtable } _) = fm
 prettySig _ _ = Nothing
 
 prettyMod :: FileModule -> ModBindBase Info VName -> Maybe (DocM Html)
@@ -121,7 +121,7 @@ prettyMod fm (ModBind name ps sig _me doc _)
     s <- case sig of Nothing -> envSig env
                      Just (s,_) -> renderSigExp s
     return $ renderDoc doc <> "module " <> vname <> ": " <> params <> s
-    where FileModule Env { envModTable = modtable} _ = fm
+    where FileModule _abs Env { envModTable = modtable} _ = fm
           envSig (ModEnv e) = renderEnv e
           envSig (ModFun (FunSig _ _ (MTy _ m))) = envSig m
 prettyMod _ _ = Nothing
@@ -130,13 +130,13 @@ renderType :: FileModule -> TypeBindBase Info VName -> Maybe (DocM Html)
 renderType fm tb
   | M.member name typeTable
   , visible Type name fm = Just $ H.div <$> typeBindHtml tb
-    where (FileModule Env {envTypeTable = typeTable} _) = fm
+    where (FileModule _abs Env {envTypeTable = typeTable} _) = fm
           TypeBind { typeAlias = name } = tb
 renderType _ _ = Nothing
 
 visible :: Namespace -> VName -> FileModule -> Bool
-visible ns vname@(VName name _) (FileModule env _)
-  | Just vname' <- M.lookup (ns,name) (envNameMap env)
+visible ns vname@(VName name _) (FileModule _abs env _)
+  | Just (QualName _ vname') <- M.lookup (ns,name) (envNameMap env)
   = vname == vname'
 visible _ _ _ = False
 
@@ -239,7 +239,7 @@ prettyTypeArg (TypeArgType t _) = prettyType t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = return mempty
-modParamHtml (ModParam pname psig _ : mps) =
+modParamHtml (ModParam pname psig _ _ : mps) =
   liftM2 f (renderSigExp psig) (modParamHtml mps)
   where f se params = "(" <> vnameHtml pname <>
                       ": " <> se <> ") -> " <> params

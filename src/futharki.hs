@@ -151,7 +151,7 @@ runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
 runProgram proglib imports src prog = liftIO $
   case checkProg False imports src "" prog of
     Left err -> print err
-    Right (FileModule _ prog', _, src') ->
+    Right (FileModule _ _ prog', _, src') ->
       let full_prog = Prog Nothing $ progDecs proglib ++ progDecs prog'
       in case evalState (internaliseProg full_prog) src' of
            Left err -> print err
