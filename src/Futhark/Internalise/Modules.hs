@@ -45,15 +45,12 @@ data Scope = Scope { scopeSubsts :: Substitutions
 lookupSubstInScope :: QualName VName -> Scope -> (QualName VName, Scope)
 lookupSubstInScope qn@(QualName quals name) scope@(Scope substs mods) =
   case quals of
-    [] -> (QualName [] $ forward name, scope)
+    [] -> (QualName [] $ lookupSubst name substs, scope)
     q:qs ->
-      let q' = forward q
+      let q' = lookupSubst q substs
       in case M.lookup q' mods of
            Just (ModMod mod_scope) -> lookupSubstInScope (QualName qs name) mod_scope
            _ -> (qn, scope)
-  where forward v = case M.lookup v substs of
-                      Just v' | v' /= v -> forward v'
-                      _                 -> v
 
 instance Monoid Scope where
   Scope ss1 mt1 `mappend` Scope ss2 mt2 =
@@ -175,9 +172,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
                                        substituteInMod p_substs' arg_mod)) $ do
           substs <- scopeSubsts <$> askScope
           x <- evalModExp f_body
-          let y = substituteInMod (b_substs <> substs) x
-          return $
-            addSubsts abs abs_substs y
+          return $ addSubsts abs abs_substs $ substituteInMod (b_substs <> substs) x
   where addSubsts abs substs (ModFun mabs (Scope msubsts mods) mp me) =
           ModFun (abs<>mabs) (Scope (substs<>msubsts) mods) mp me
         addSubsts _ substs (ModMod (Scope msubsts mods)) =
