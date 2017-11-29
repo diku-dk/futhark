@@ -144,7 +144,7 @@ internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_su
               return $ Just (p, f_p_substs <> f_p_substs <> v_p_substs, body)
             _ ->
               return Nothing
-        evalModExp (E.ModLambda (ModParam p _ _) sig me loc) = do
+        evalModExp (E.ModLambda (ModParam p _ _ _) sig me loc) = do
           p_substs <- asks envFunctorSubsts
           return $ Just (p, p_substs, maybeAscript loc sig me)
         evalModExp (E.ModParens e _) =
