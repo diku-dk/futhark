@@ -21,7 +21,7 @@ module Futhark.Internalise.Monad
 
   , bindingIdentTypes
   , bindingParamTypes
-  , noteFunction
+  , bindingFunction
   , bindingType
   , bindingTypes
 
@@ -76,19 +76,14 @@ type SpecArgs = ([E.TypeBase () ()], SpecParams)
 -- | The type internalise arguments to a polymorphic function.
 type SpecParams = [TypeBase Rank NoUniqueness]
 
-data FunBinding = FunBinding
-  { polymorphicSpecialisations :: M.Map SpecParams FunInfo
-    -- ^ Already generated specialised functions.
-  , polymorphicSpecialise :: SpecArgs -> InternaliseM FunInfo
-    -- ^ Generate a new specialisation.
-  }
-
 type FunInfo = (Name, ConstParams, Closure,
                 [VName], [DeclType],
                 [FParam],
                 [(SubExp,Type)] -> Maybe [DeclExtType])
 
-type FunTable = M.Map VName FunBinding
+type FunTable = M.Map VName (SpecArgs -> InternaliseM FunInfo)
+
+type FunSpecs = M.Map (VName, SpecParams) FunInfo
 
 type TypeEntry = ([E.TypeParam], E.StructType)
 
@@ -102,10 +97,11 @@ data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
   , envTypeTable :: TypeTable
+  , envFunTable :: FunTable
   }
 
 data InternaliseState =
-  InternaliseState { stateFtable :: FunTable
+  InternaliseState { stateFunSpecs :: FunSpecs
                    , stateNameSource :: VNameSource
                    }
 
@@ -158,9 +154,10 @@ runInternaliseM (InternaliseM m) =
                    envSubsts = mempty
                  , envDoBoundsChecks = True
                  , envTypeTable = mempty
+                 , envFunTable = mempty
                  }
         newState src =
-          InternaliseState { stateFtable = mempty
+          InternaliseState { stateFunSpecs = mempty
                            , stateNameSource = src
                            }
 
@@ -172,23 +169,20 @@ addFunction :: FunDef -> InternaliseM ()
 addFunction = InternaliseM . lift . tell . InternaliseResult . pure
 
 lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)
-lookupFunction' fname =
-  gets $ M.lookup [] <=< fmap polymorphicSpecialisations . M.lookup fname . stateFtable
+lookupFunction' fname = gets $ M.lookup (fname, []) . stateFunSpecs
 
 lookupFunction :: VName -> SpecArgs -> InternaliseM FunInfo
 lookupFunction fname types@(_, i_types) = do
-  fb <- maybe bad return =<< gets (M.lookup fname . stateFtable)
-  case M.lookup i_types $ polymorphicSpecialisations fb of
+  maybe_info <- gets (M.lookup (fname, i_types) . stateFunSpecs)
+  case maybe_info of
     Just info -> return info
     Nothing -> do
+      specialise <- maybe bad return =<< asks (M.lookup fname . envFunTable)
       info <- local (\env -> env { envDoBoundsChecks = True }) $
-              polymorphicSpecialise fb types
-      let fb' = fb { polymorphicSpecialisations =
-                       M.insert i_types info $ polymorphicSpecialisations fb }
-      modify $ \s -> s { stateFtable = M.insert fname fb' $ stateFtable s }
+              specialise types
+      modify $ \s -> s { stateFunSpecs = M.insert (fname, i_types) info $ stateFunSpecs s }
       return info
-  where bad =
-          fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
+  where bad = fail $ "Internalise.lookupFunction: Function '" ++ pretty fname ++ "' not found."
 
 -- Generate monomorphic specialisation early as a HACK to support
 -- recursive functions.
@@ -198,9 +192,7 @@ maybeSpecialiseEarly fname fname' params rettype = do
               mempty, map declTypeOf params,
               params,
               applyRetType rettype params)
-      fb = FunBinding (M.singleton (map (rankShaped . paramType) params) info)
-           (\ts -> fail $ "Cannot have polymorphic recursive function. " ++ show ts)
-  modify $ \s -> s { stateFtable = M.insert fname fb $ stateFtable s }
+  modify $ \s -> s { stateFunSpecs = M.insert (fname, []) info $ stateFunSpecs s }
 
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
@@ -215,10 +207,16 @@ bindingParamTypes :: [LParam] -> InternaliseM a
                   -> InternaliseM a
 bindingParamTypes = bindingIdentTypes . map paramIdent
 
-noteFunction :: VName -> (SpecArgs -> InternaliseM FunInfo) -> InternaliseM ()
-noteFunction fname generate =
-  modify $ \s -> s { stateFtable = M.singleton fname entry <> stateFtable s }
-  where entry = FunBinding mempty generate
+bindingFunction :: VName -> (SpecArgs -> InternaliseM FunInfo)
+                -> InternaliseM a -> InternaliseM a
+bindingFunction fname generate m = do
+  -- Remove any old specialisations for a previous function of the
+  -- same name.  This may happen for local functions after
+  -- defunctorisation.
+  modify $ \s -> s { stateFunSpecs =
+                       M.filterWithKey (const . (/=fname) . fst) $ stateFunSpecs s
+                   }
+  local (\env -> env { envFunTable = M.insert fname generate $ envFunTable env }) m
 
 bindingTypes :: [(VName, TypeEntry)] -> InternaliseM a -> InternaliseM a
 bindingTypes types = local $ \env ->
