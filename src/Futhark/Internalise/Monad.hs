@@ -22,9 +22,8 @@ module Futhark.Internalise.Monad
   , bindingIdentTypes
   , bindingParamTypes
   , noteFunction
-  , noteType
-  , notingTypes
-  , notedTypes
+  , bindingType
+  , bindingTypes
 
   , asserting
   , assertingOne
@@ -102,11 +101,11 @@ type VarSubstitutions = M.Map VName [SubExp]
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
+  , envTypeTable :: TypeTable
   }
 
 data InternaliseState =
   InternaliseState { stateFtable :: FunTable
-                   , stateTtable :: TypeTable
                    , stateNameSource :: VNameSource
                    }
 
@@ -158,10 +157,10 @@ runInternaliseM (InternaliseM m) =
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
                  , envDoBoundsChecks = True
+                 , envTypeTable = mempty
                  }
         newState src =
           InternaliseState { stateFtable = mempty
-                           , stateTtable = mempty
                            , stateNameSource = src
                            }
 
@@ -221,22 +220,12 @@ noteFunction fname generate =
   modify $ \s -> s { stateFtable = M.singleton fname entry <> stateFtable s }
   where entry = FunBinding mempty generate
 
-noteType :: VName -> TypeEntry -> InternaliseM ()
-noteType name entry =
-  modify $ \s -> s { stateTtable = M.insert name entry $ stateTtable s }
+bindingTypes :: [(VName, TypeEntry)] -> InternaliseM a -> InternaliseM a
+bindingTypes types = local $ \env ->
+  env { envTypeTable = M.fromList types <> envTypeTable env }
 
--- | Expand the type table, run an action, and restore the old type
--- table.  Any calls to 'noteType' during the action will be lost.
-notingTypes :: [(VName, TypeEntry)] -> InternaliseM a -> InternaliseM a
-notingTypes types m = do
-  old <- gets stateTtable
-  mapM_ (uncurry noteType) types
-  x <- m
-  modify $ \s -> s { stateTtable = old }
-  return x
-
-notedTypes :: InternaliseM TypeTable
-notedTypes = gets stateTtable
+bindingType :: VName -> TypeEntry -> InternaliseM a -> InternaliseM a
+bindingType name t = bindingTypes [(name, t)]
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
@@ -276,7 +265,7 @@ runInternaliseTypeM :: S.Set VName
                     -> InternaliseTypeM a
                     -> InternaliseM (a, M.Map VName Int, ConstParams)
 runInternaliseTypeM bound (InternaliseTypeM m) = do
-  types <- gets stateTtable
+  types <- asks envTypeTable
   let bound' = M.fromList $ zip (S.toList bound) [0..]
       dims = M.map Ext bound'
       new_env = TypeEnv types dims
