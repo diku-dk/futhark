@@ -51,24 +51,8 @@ internaliseProg :: MonadFreshNames m =>
                    E.Imports -> m (Either String I.Prog)
 internaliseProg prog = do
   prog_decs <- Modules.transformProg prog
-  prog' <- fmap (fmap I.Prog) $ runInternaliseM $
-           withBuiltinFunctions $ internaliseDecs prog_decs
+  prog' <- fmap (fmap I.Prog) $ runInternaliseM $ internaliseDecs prog_decs
   traverse I.renameProg prog'
-
-withBuiltinFunctions :: InternaliseM a -> InternaliseM a
-withBuiltinFunctions m = addBuiltin $ M.toList E.intrinsics
-  where addBuiltin [] = m
-        addBuiltin ((name, E.IntrinsicMonoFun paramts t):bis) =
-          bindingFunction name generate $ addBuiltin bis
-          where generate _ =
-                  return (baseName name,
-                          [], [], [], map (I.Prim . internalisePrimType) paramts,
-                          params,
-                          const $ Just [I.Prim $ internalisePrimType t])
-                params =
-                  [Param (VName (nameFromString "x") i) (I.Prim $ internalisePrimType pt)
-                  | (i,pt) <- zip [0..] paramts]
-        addBuiltin (_:bis) = addBuiltin bis
 
 internaliseDecs :: [E.Dec] -> InternaliseM ()
 internaliseDecs ds =
