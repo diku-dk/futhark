@@ -4,9 +4,6 @@ module Futhark.Internalise.Monad
   , runInternaliseM
   , throwError
   , VarSubstitutions
-  , DecSubstitutions
-  , ModParamSubstitutions
-  , PromisedNames
   , InternaliseEnv (..)
   , ConstParams
   , Closure
@@ -14,32 +11,20 @@ module Futhark.Internalise.Monad
   , SpecArgs
   , SpecParams
   , TypeEntry
-  , ModBinding (..)
 
   , substitutingVars
-  , allSubsts
   , addFunction
 
   , maybeSpecialiseEarly
   , lookupFunction
   , lookupFunction'
-  , lookupMod
-  , lookupSubst
-  , fulfillingPromise
-  , unSubst
 
   , bindingIdentTypes
   , bindingParamTypes
   , noteFunction
-  , noteMod
   , noteType
   , notingTypes
   , notedTypes
-  , noteDecSubsts
-  , morePromises
-  , generatingFunctor
-  , withDecSubstitutions
-  , openedName
 
   , asserting
   , assertingOne
@@ -55,7 +40,6 @@ module Futhark.Internalise.Monad
   , withDims
   , DimTable
   , TypeTable
-  , withTypeDecSubstitutions
 
     -- * Convenient reexports
   , module Futhark.Tools
@@ -107,10 +91,7 @@ type FunInfo = (Name, ConstParams, Closure,
 
 type FunTable = M.Map VName FunBinding
 
-data ModBinding = ModBinding ModParamSubstitutions E.ModExp
-                deriving (Show)
-
-type TypeEntry = (DecSubstitutions, [E.TypeParam], E.StructType)
+type TypeEntry = ([E.TypeParam], E.StructType)
 
 type TypeTable = M.Map VName TypeEntry
 
@@ -118,33 +99,14 @@ type TypeTable = M.Map VName TypeEntry
 -- internalised subexpressions.
 type VarSubstitutions = M.Map VName [SubExp]
 
--- | Mapping from original top-level names to new top-level names.
-type DecSubstitutions = M.Map VName VName
-
--- | Mapping from original top-level names to new top-level names, for
--- things bound in a module parameter.
-type ModParamSubstitutions = M.Map VName VName
-
--- | Mapping from what we think somethings name is, to what we would
--- like to use it as.
-type PromisedNames = M.Map VName VName
-
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
   , envDoBoundsChecks :: Bool
-  , envGeneratingFunctor :: Bool
-  , envFunctorSubsts :: DecSubstitutions
-    -- ^ Mapping from names in functor parameters to their actual
-    -- realised names.
-  , envPromises :: PromisedNames
-    -- ^ We'll get around to it, promise!
   }
 
 data InternaliseState =
-  InternaliseState { stateDecSubsts :: DecSubstitutions
-                   , stateFtable :: FunTable
+  InternaliseState { stateFtable :: FunTable
                    , stateTtable :: TypeTable
-                   , stateModTable :: M.Map VName ModBinding
                    , stateNameSource :: VNameSource
                    }
 
@@ -196,15 +158,10 @@ runInternaliseM (InternaliseM m) =
   where newEnv = InternaliseEnv {
                    envSubsts = mempty
                  , envDoBoundsChecks = True
-                 , envGeneratingFunctor = False
-                 , envFunctorSubsts = mempty
-                 , envPromises = mempty
                  }
         newState src =
           InternaliseState { stateFtable = mempty
                            , stateTtable = mempty
-                           , stateModTable = mempty
-                           , stateDecSubsts = mempty
                            , stateNameSource = src
                            }
 
@@ -246,59 +203,6 @@ maybeSpecialiseEarly fname fname' params rettype = do
            (\ts -> fail $ "Cannot have polymorphic recursive function. " ++ show ts)
   modify $ \s -> s { stateFtable = M.insert fname fb $ stateFtable s }
 
-lookupMod :: VName -> InternaliseM ModBinding
-lookupMod mname = do
-  maybe_me <- gets $ M.lookup mname . stateModTable
-  case maybe_me of
-    Nothing -> fail $ "Internalise.lookupMod: Module '" ++
-               pretty mname ++ "' not found"
-    Just me -> return me
-
-allSubsts :: InternaliseM DecSubstitutions
-allSubsts = M.union <$> asks envFunctorSubsts <*> gets stateDecSubsts
-
--- | Substitution for any variable or defined name.  Used for functor
--- application.  Never pick apart QualNames directly in the
--- internaliser - use this function instead.  If there is no
--- substitution, the name is just returned.
-lookupSubst :: E.QualName VName -> InternaliseM VName
-lookupSubst (E.QualName _ name) = do
-  r <- M.lookup name <$> allSubsts
-  case r of
-    Just v | v /= name -> lookupSubst $ E.qualName v
-           | otherwise -> return v
-    _      -> return name
-
-lookupPromise :: VName -> InternaliseM VName
-lookupPromise name = do
-  promises <- asks envPromises
-  return $ findSubst name promises
-  where findSubst v promises
-          | Just v' <- M.lookup v promises = findSubst v' promises
-          | otherwise                      = v
-
-fulfillingPromise :: VName -> InternaliseM VName
-fulfillingPromise name = do
-  in_functor <- asks envGeneratingFunctor
-  if not in_functor
-    then return name
-    else do promises <- asks envPromises
-            name' <- newName name
-            noteDecSubsts $ M.singleton name name'
-            fulfill name' name promises
-            return name'
-  where fulfill name' v promises
-          | Just v' <- M.lookup v promises = do
-              noteDecSubsts $ M.singleton v' name'
-              fulfill name' v' promises
-          | otherwise =
-              return ()
-
--- HACK
-unSubst :: VName -> InternaliseM ()
-unSubst name =
-  modify $ \s -> s { stateDecSubsts = M.delete name $ stateDecSubsts s }
-
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
 bindingIdentTypes idents (InternaliseM m) =
@@ -317,11 +221,6 @@ noteFunction fname generate =
   modify $ \s -> s { stateFtable = M.singleton fname entry <> stateFtable s }
   where entry = FunBinding mempty generate
 
-noteMod :: VName -> E.ModExp -> InternaliseM ()
-noteMod name me = do
-  substs <- asks envFunctorSubsts
-  modify $ \s -> s { stateModTable = M.insert name (ModBinding substs me) $ stateModTable s }
-
 noteType :: VName -> TypeEntry -> InternaliseM ()
 noteType name entry =
   modify $ \s -> s { stateTtable = M.insert name entry $ stateTtable s }
@@ -338,62 +237,6 @@ notingTypes types m = do
 
 notedTypes :: InternaliseM TypeTable
 notedTypes = gets stateTtable
-
-noteDecSubsts :: M.Map VName VName -> InternaliseM ()
-noteDecSubsts substs =
-  modify $ \s -> s { stateDecSubsts = substs <> stateDecSubsts s }
-
-morePromises :: M.Map VName VName -> InternaliseM a -> InternaliseM a
-morePromises substs m = do
-  mapM_ (uncurry maybeForwardPromise <=< traverse lookupPromise) rev_substs
-  local (\env -> env { envPromises = M.fromList rev_substs <> envPromises env
-                     , envGeneratingFunctor = True
-           }) m
-  where rev_substs = map (uncurry $ flip (,)) $ M.toList substs
-        maybeForwardPromise k v = do
-          maybe_k <- asks $ M.lookup k . envFunctorSubsts
-          case maybe_k of
-            Just k_v ->
-              -- This means we are expected to make 'k' available under the
-              -- name 'v', but 'k' is actually bound by a functor parameter,
-              -- so we can't access its definition (which is 'k_v').  Thus, we
-              -- note that 'v', when seen, should be turned into 'k_v'.
-              noteDecSubsts $ M.singleton v k_v
-            Nothing -> return ()
-
-generatingFunctor :: ModParamSubstitutions
-                  -> PromisedNames
-                  -> InternaliseM a -> InternaliseM a
-generatingFunctor p_substs b_substs m = do
-  cur_substs <- allSubsts
-
-  let forward (k,v)
-        | Just v' <- M.lookup k cur_substs, v /= v' = Just (v',v)
-        | otherwise                                 = Nothing
-      contras = M.fromList $ mapMaybe forward $ M.toList b_substs
-      forwards = M.fromList $ mapMaybe forward $ M.toList p_substs
-
-  let update env =
-        env { envGeneratingFunctor = True
-            , envFunctorSubsts = forwards <> p_substs <> envFunctorSubsts env
-            , envPromises = forwards <> contras <> b_substs <> envPromises env
-            }
-
-  local update m
-
-withDecSubstitutions :: DecSubstitutions
-                     -> InternaliseM a -> InternaliseM a
-withDecSubstitutions p_substs m = do
-  let update env =
-        env { envFunctorSubsts = p_substs `M.union` envFunctorSubsts env }
-  local update m
-
-openedName :: VName -> InternaliseM ()
-openedName o = do
-  v <- lookupSubst $ E.qualName o
-  v' <- lookupPromise o
-  when (v /= v') $
-    noteDecSubsts $ M.fromList [(v',v)]
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
@@ -458,12 +301,3 @@ lookupTypeVar tname = do
   t <- lookupTypeVar' tname
   case t of Nothing -> fail $ "Internalise.lookupTypeVar: Type '" ++ pretty tname ++ "' not found"
             Just x -> return x
-
-withTypeDecSubstitutions :: DecSubstitutions
-                         -> InternaliseTypeM a -> InternaliseTypeM a
-withTypeDecSubstitutions substs (InternaliseTypeM m) = do
-  s <- get
-  e <- ask
-  (x, s') <- liftInternaliseM $ withDecSubstitutions substs $ runStateT (runReaderT m e) s
-  put s'
-  return x

@@ -83,8 +83,7 @@ options = [ Option "e" ["entry-point"]
           ]
 
 data InterpreterState =
-  InterpreterState { interpProg :: Prog
-                   , interpImports :: Imports
+  InterpreterState { interpImports :: Imports
                    , interpNameSource :: VNameSource
                    }
 
@@ -92,9 +91,8 @@ newInterpreterState :: IO InterpreterState
 newInterpreterState = do
   res <- runExceptT $ readLibrary False preludeBasis mempty []
   case res of
-    Right (prog, _, imports, src) ->
-      return InterpreterState { interpProg = prog
-                              , interpImports = imports
+    Right (_, imports, src) ->
+      return InterpreterState { interpImports = imports
                               , interpNameSource = src
                               }
     Left err -> do
@@ -115,7 +113,6 @@ readEvalPrint = do
         Nothing -> liftIO $ T.putStrLn $ "Unknown command '" <> cmdname <> "'"
         Just (cmdf, _) -> cmdf arg
     _ -> do
-      prog <- gets interpProg
       imports <- gets interpImports
       src <- gets interpNameSource
       -- Read an expression.
@@ -139,7 +136,7 @@ readEvalPrint = do
                                 , funBindDoc = Nothing
                                 }
               prog' = Prog Nothing $ opens ++ [FunDec mainfun]
-          runProgram prog imports src prog'
+          runProgram imports src prog'
   where inputLine prompt = do
           inp <- lift $ Haskeline.getInputLine prompt
           case inp of
@@ -147,18 +144,17 @@ readEvalPrint = do
             Nothing -> liftIO $ do putStrLn "Leaving futharki."
                                    exitSuccess
 
-runProgram :: Prog -> Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
-runProgram proglib imports src prog = liftIO $
+runProgram :: Imports -> VNameSource -> UncheckedProg -> FutharkiM ()
+runProgram imports src prog = liftIO $
   case checkProg False imports src "" prog of
     Left err -> print err
-    Right (FileModule _ _ prog', _, src') ->
-      let full_prog = Prog Nothing $ progDecs proglib ++ progDecs prog'
-      in case evalState (internaliseProg full_prog) src' of
-           Left err -> print err
-           Right prog'' ->
-             case runFun (nameFromString "") [] prog'' of
-               Left err -> print err
-               Right vs -> mapM_ (putStrLn . pretty) vs
+    Right (imp, _, src') ->
+      case evalState (internaliseProg $ imports ++ [("", imp)]) src' of
+        Left err -> print err
+        Right prog'' ->
+          case runFun (nameFromString "") [] prog'' of
+            Left err -> print err
+            Right vs -> mapM_ (putStrLn . pretty) vs
 
 type Command = T.Text -> FutharkiM ()
 
@@ -190,9 +186,8 @@ Quit futharki.
                  return (Left (ExternalError (T.pack $ show err)))
           case res of
             Left err -> liftIO $ dumpError newFutharkConfig err
-            Right (prog, _, imports, src) ->
-              modify $ \env -> env { interpProg = prog
-                                   , interpImports = imports
+            Right (_, imports, src) ->
+              modify $ \env -> env { interpImports = imports
                                    , interpNameSource = src
                                    }
 

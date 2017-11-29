@@ -28,6 +28,7 @@ import Data.Loc
 import Prelude hiding (mapM, sequence, mod)
 
 import Language.Futhark as E hiding (TypeArg)
+import Language.Futhark.TypeChecker as E (Imports)
 import Futhark.Representation.SOACS as I hiding (stmPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
@@ -41,16 +42,18 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
+import Futhark.Internalise.Modules as Modules
 import Futhark.Util (dropAt)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
 internaliseProg :: MonadFreshNames m =>
-                   E.Prog -> m (Either String I.Prog)
+                   E.Imports -> m (Either String I.Prog)
 internaliseProg prog = do
+  prog_decs <- Modules.transformProg prog
   prog' <- fmap (fmap I.Prog) $ runInternaliseM $ do
     addBuiltinFunctions
-    internaliseDecs $ progDecs prog
+    internaliseDecs prog_decs
   traverse I.renameProg prog'
 
 addBuiltinFunctions :: InternaliseM ()
@@ -72,105 +75,19 @@ internaliseDecs ds =
   case ds of
     [] ->
       return ()
-    LocalDec d _ : ds' ->
-      internaliseDecs $ d : ds'
     ValDec vdec : ds' -> do
       internaliseValBind vdec
       internaliseDecs ds'
     FunDec fdec : ds' -> do
       internaliseFunBind fdec
       internaliseDecs ds'
-    E.ModDec mb : ds' | null (modParams mb) -> do
-      let me = maybeAscript (srclocOf mb) (E.modSignature mb) $ modExp mb
-      internaliseModExp me
-      v <- lookupSubst $ E.qualName $ E.modName mb
-      noteMod v me
-      internaliseDecs ds'
-    E.ModDec mb : ds' -> do
-      v <- fulfillingPromise $ E.modName mb
-      let addParam p me = E.ModLambda p Nothing me $ srclocOf me
-      noteMod v $
-        foldr addParam (maybeAscript (srclocOf mb) (E.modSignature mb) $ E.modExp mb) $
-        modParams mb
-      internaliseDecs ds'
     E.TypeDec tb : ds' -> do
-      v <- fulfillingPromise $ E.typeAlias tb
-      substs <- allSubsts
-      noteType v (substs, E.typeParams tb,
-                  E.unInfo $ E.expandedType $ E.typeExp tb)
-      internaliseDecs ds'
-    E.OpenDec e es (Info added) _ : ds' -> do
-      mapM_ internaliseModExp (e:es)
-      mapM_ openedName added
+      noteType (E.typeAlias tb)
+        (E.typeParams tb,
+         E.unInfo $ E.expandedType $ E.typeExp tb)
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
-
-maybeAscript :: SrcLoc -> Maybe (SigExp, Info (M.Map VName VName)) -> ModExp
-             -> ModExp
-maybeAscript loc (Just (mtye, substs)) me = ModAscript me mtye substs loc
-maybeAscript _ Nothing me = me
-
-internaliseModExp :: E.ModExp
-                  -> InternaliseM ()
-internaliseModExp E.ModVar{} =
-  return ()
-internaliseModExp E.ModLambda{} =
-  return ()
-internaliseModExp (E.ModParens e _) =
-  internaliseModExp e
-internaliseModExp E.ModImport{} = return ()
-internaliseModExp (E.ModDecs ds _) =
-  internaliseDecs ds
-internaliseModExp (E.ModAscript me _ (Info substs) _) = do
-  noteDecSubsts substs
-  morePromises substs $ internaliseModExp me
-internaliseModExp (E.ModApply outer_f outer_arg (Info outer_p_substs) (Info b_substs) _) = do
-  internaliseModExp outer_arg
-  generatingFunctor mempty mempty $ do
-    f_e <- evalModExp outer_f
-    case f_e of
-      Just (p, f_p_substs, body) -> do
-        noteMod p outer_arg
-        generatingFunctor (outer_p_substs<>f_p_substs) b_substs $
-          internaliseModExp body
-      Nothing ->
-        fail $ "Cannot apply " ++ pretty outer_f ++ " to " ++ pretty outer_arg
-  where evalModExp (E.ModVar v _) = do
-          ModBinding v_p_substs me <- lookupMod =<< lookupSubst v
-          f_e <- evalModExp me
-          case f_e of
-            Just (p, f_p_substs, body) ->
-              return $ Just (p, f_p_substs <> f_p_substs <> v_p_substs, body)
-            _ ->
-              return Nothing
-        evalModExp (E.ModLambda (ModParam p _ _ _) sig me loc) = do
-          p_substs <- asks envFunctorSubsts
-          return $ Just (p, p_substs, maybeAscript loc sig me)
-        evalModExp (E.ModParens e _) =
-          evalModExp e
-        evalModExp (E.ModAscript me _ (Info substs) _) = do
-          noteDecSubsts substs
-          morePromises substs $ evalModExp me
-        evalModExp (E.ModApply f arg (Info p_substs) _ _) = do
-          -- Invariant guaranteed by the type checker - only an
-          -- application resulting in a non-parametric module will
-          -- have non-null result substitutions.  This is why we
-          -- ignore them here.
-          f_e <- evalModExp f
-          internaliseModExp arg
-          case f_e of
-            Just (p, f_p_substs, body) -> do
-              noteMod p arg
-              generatingFunctor (p_substs<>f_p_substs) mempty $
-                evalModExp body
-            Nothing ->
-              fail $ "Cannot apply " ++ pretty f ++ " to " ++ pretty arg
-        evalModExp (E.ModDecs ds _) = do
-          internaliseDecs ds
-          return Nothing
-        evalModExp E.ModImport{} =
-          return Nothing
 
 internaliseValBind :: E.ValBind -> InternaliseM ()
 internaliseValBind (E.ValBind entry name _ t e doc loc) =
@@ -181,61 +98,58 @@ internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
 internaliseFunName ofname _  = nameFromString . pretty <$> newVName (baseString ofname)
 
 internaliseFunBind :: E.FunBind -> InternaliseM ()
-internaliseFunBind fb@(E.FunBind entry ofname _ (Info rettype) tparams params body _ loc) = do
-  fname <- fulfillingPromise ofname
-  substs <- allSubsts
-  noteFunction fname $ \(e_ts, _) -> withDecSubstitutions substs $
-    generatingFunctor mempty mempty $ do
-      let param_ts = map (E.removeShapeAnnotations . E.patternStructType) params
+internaliseFunBind fb@(E.FunBind entry fname _ (Info rettype) tparams params body _ loc) = do
+  noteFunction fname $ \(e_ts, _) -> do
+    let param_ts = map (E.removeShapeAnnotations . E.patternStructType) params
 
-      mapping <- fmap mconcat $ zipWithM mapTypeVariables param_ts $
-                 map E.removeShapeAnnotations e_ts
+    mapping <- fmap mconcat $ zipWithM mapTypeVariables param_ts $
+               map E.removeShapeAnnotations e_ts
 
-      let mkEntry (tp, et) = (tp, (substs, [], E.vacuousShapeAnnotations et))
-          types = map mkEntry $ M.toList mapping
-      notingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
-        (rettype_bad, _, rcm) <- internaliseReturnType rettype
-        let rettype' = zeroExts rettype_bad
+    let mkEntry (tp, et) = (tp, ([], E.vacuousShapeAnnotations et))
+        types = map mkEntry $ M.toList mapping
+    notingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
+      (rettype_bad, _, rcm) <- internaliseReturnType rettype
+      let rettype' = zeroExts rettype_bad
 
-        let mkConstParam name = Param name $ I.Prim int32
-            constparams = map (mkConstParam . snd) $ pcm<>rcm
-            constnames = map I.paramName constparams
-            constscope = M.fromList $ zip constnames $ repeat $
-                         FParamInfo $ I.Prim $ IntType Int32
+      let mkConstParam name = Param name $ I.Prim int32
+          constparams = map (mkConstParam . snd) $ pcm<>rcm
+          constnames = map I.paramName constparams
+          constscope = M.fromList $ zip constnames $ repeat $
+                       FParamInfo $ I.Prim $ IntType Int32
 
-            shapenames = map I.paramName shapeparams
-            normal_params = map I.paramName constparams ++ shapenames ++ map I.paramName (concat params')
-            normal_param_names = S.fromList normal_params
+          shapenames = map I.paramName shapeparams
+          normal_params = map I.paramName constparams ++ shapenames ++ map I.paramName (concat params')
+          normal_param_names = S.fromList normal_params
 
-        fname' <- internaliseFunName fname params
-        when (null tparams) $
-          maybeSpecialiseEarly fname fname' (concat params') rettype'
-        body' <- localScope constscope $
-                 ensureResultExtShape asserting
-                 "shape of function result does not match shapes in return type"
-                 loc (map I.fromDecl rettype')
-                 =<< internaliseBody body
+      fname' <- internaliseFunName fname params
+      when (null tparams) $
+        maybeSpecialiseEarly fname fname' (concat params') rettype'
+      body' <- localScope constscope $
+               ensureResultExtShape asserting
+               "shape of function result does not match shapes in return type"
+               loc (map I.fromDecl rettype')
+               =<< internaliseBody body
 
-        let free_in_fun = freeInBody body' `S.difference` normal_param_names
+      let free_in_fun = freeInBody body' `S.difference` normal_param_names
 
-        used_free_params <- forM (S.toList free_in_fun) $ \v -> do
-          v_t <- lookupType v
-          return $ Param v $ toDecl v_t Nonunique
+      used_free_params <- forM (S.toList free_in_fun) $ \v -> do
+        v_t <- lookupType v
+        return $ Param v $ toDecl v_t Nonunique
 
-        let free_shape_params = map (`Param` I.Prim int32) $
-                                concatMap (I.shapeVars . I.arrayShape . I.paramType) used_free_params
-            free_params = nub $ free_shape_params ++ used_free_params
-            all_params = constparams ++ free_params ++ shapeparams ++ concat params'
+      let free_shape_params = map (`Param` I.Prim int32) $
+                              concatMap (I.shapeVars . I.arrayShape . I.paramType) used_free_params
+          free_params = nub $ free_shape_params ++ used_free_params
+          all_params = constparams ++ free_params ++ shapeparams ++ concat params'
 
-        addFunction $ I.FunDef Nothing fname' rettype' all_params body'
+      addFunction $ I.FunDef Nothing fname' rettype' all_params body'
 
-        return (fname',
-                pcm<>rcm,
-                map I.paramName free_params,
-                shapenames,
-                map declTypeOf $ concat params',
-                all_params,
-                applyRetType rettype' all_params)
+      return (fname',
+              pcm<>rcm,
+              map I.paramName free_params,
+              shapenames,
+              map declTypeOf $ concat params',
+              all_params,
+              applyRetType rettype' all_params)
 
   -- For any nullary function we force immediate generation.  Note
   -- that this means value declarations are also generated here - this
@@ -308,11 +222,10 @@ entryPoint params (eret,crets) =
           where t' = removeShapeAnnotations t `E.setUniqueness` Nonunique
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name (Info tp) loc) = do
-  substs <- allSubsts
+internaliseIdent (E.Ident name (Info tp) loc) =
   case tp of
     E.Prim{} -> return name
-    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '" ++ show substs
+    _        -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
                        ++ pretty name ++ " of type " ++ pretty tp ++
                        " at " ++ locStr loc ++ "."
 
@@ -336,8 +249,7 @@ internaliseExp desc (E.Parens e _) =
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
 
-internaliseExp _ (E.Var v t loc) = do
-  name <- lookupSubst v
+internaliseExp _ (E.Var (E.QualName _ name) t loc) = do
   -- If this identifier is the name of a constant, we have to turn it
   -- into a call to the corresponding function.
   is_const <- lookupConstant loc name
@@ -563,7 +475,7 @@ internaliseExp desc (E.LetPat tparams pat e body loc) = do
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) = do
   internaliseFunBind $ E.FunBind False ofname retdecl (Info rettype) tparams params body Nothing loc
-  internaliseExp desc letbody <* unSubst ofname
+  internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
   -- We pretend that we saw a let-binding first to ensure that the
@@ -1568,8 +1480,7 @@ constFunctionArgs loc = mapM arg
 
 funcall :: String -> QualName VName -> SpecArgs -> [SubExp] -> SrcLoc
         -> InternaliseM ([SubExp], [I.ExtType])
-funcall desc qfname (e_ts, i_ts) args loc = do
-  fname <- lookupSubst qfname
+funcall desc (QualName _ fname) (e_ts, i_ts) args loc = do
   e_ts' <- mapM fullyApplyType e_ts
   (fname', constparams, closure, shapes, value_paramts, fun_params, rettype_fun) <-
     lookupFunction fname (e_ts', i_ts)

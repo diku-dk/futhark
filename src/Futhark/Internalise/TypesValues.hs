@@ -134,19 +134,18 @@ internaliseDim d =
     E.AnyDim -> Ext <$> newId
     E.ConstDim n -> return $ Free $ intConst I.Int32 $ toInteger n
     E.NamedDim name -> namedDim name
-  where namedDim name = do
-          name' <- liftInternaliseM $ lookupSubst name
-          subst <- liftInternaliseM $ asks $ M.lookup name' . envSubsts
-          is_dim <- lookupDim name'
+  where namedDim (E.QualName _ name) = do
+          subst <- liftInternaliseM $ asks $ M.lookup name . envSubsts
+          is_dim <- lookupDim name
           case (is_dim, subst) of
             (Just dim, _) -> return dim
             (Nothing, Just [v]) -> return $ I.Free v
             _ -> do -- Then it must be a constant.
-              let fname = nameFromString $ pretty name' ++ "f"
+              let fname = nameFromString $ pretty name ++ "f"
               (i,m,cm) <- get
               case find ((==fname) . fst) cm of
                 Just (_, known) -> return $ I.Free $ I.Var known
-                Nothing -> do new <- liftInternaliseM $ newVName $ baseString name'
+                Nothing -> do new <- liftInternaliseM $ newVName $ baseString name
                               put (i, m, (fname,new):cm)
                               return $ I.Free $ I.Var new
 
@@ -247,25 +246,22 @@ internaliseTypeArg (E.TypeArgType t _) =
 internaliseTypeAbbr :: TypeEntry
                     -> [E.StructTypeArg]
                     -> InternaliseTypeM [I.ExtType]
-internaliseTypeAbbr (substs, ps, tb_t) targs = do
+internaliseTypeAbbr (ps, tb_t) targs = do
   targs' <- mapM internaliseTypeArg targs
-  cur_substs <- liftInternaliseM allSubsts
-  mapM (reExt . I.fromDecl) <=<
-    withTypeDecSubstitutions substs $ do
-    let dims = M.fromList $ mapMaybe dimSubst $ zip ps targs'
-        types = M.fromList $ mapMaybe (typeSubst cur_substs) $ zip ps targs
-    withDims dims $ withTypes types $ internaliseTypeM tb_t
+  let dims = M.fromList $ mapMaybe dimSubst $ zip ps targs'
+      types = M.fromList $ mapMaybe typeSubst $ zip ps targs
+  mapM (reExt . I.fromDecl) =<<
+    withDims dims (withTypes types $ internaliseTypeM tb_t)
   where dimSubst (E.TypeParamDim p _, TypeArgDim d) = Just (p, d)
         dimSubst _ = Nothing
-        typeSubst cur_substs (E.TypeParamType p _, E.TypeArgType t _) =
-          Just (p, (cur_substs, [], t))
-        typeSubst _ _ = Nothing
+        typeSubst (E.TypeParamType p _, E.TypeArgType t _) =
+          Just (p, ([], t))
+        typeSubst _ = Nothing
 
 applyType :: E.TypeName -> [E.StructTypeArg]
           -> InternaliseTypeM [I.ExtType]
-applyType tname targs = do
-  entry <-
-    lookupTypeVar =<< liftInternaliseM (lookupSubst (E.qualNameFromTypeName tname))
+applyType (E.TypeName _ tname) targs = do
+  entry <- lookupTypeVar tname
   internaliseTypeAbbr entry targs
 
 -- | Map type variables from the first argument to corresponding types
@@ -278,9 +274,8 @@ mapTypeVariables _ y_t@(E.Array E.PolyArray{}) =
   fail $ "mapTypeVariables: Polymorphic array " ++ pretty y_t ++ " in second argument."
 mapTypeVariables (E.TypeVar (E.TypeName _ tn) []) t =
   return $ M.singleton tn t
-mapTypeVariables (E.TypeVar tn targs) y_t = do
-  tn' <- lookupSubst $ E.qualNameFromTypeName tn
-  ((_, tn_ps, tn_t), _, _) <- runInternaliseTypeM mempty $ lookupTypeVar tn'
+mapTypeVariables (E.TypeVar (E.TypeName _ tn) targs) y_t = do
+  ((tn_ps, tn_t), _, _) <- runInternaliseTypeM mempty $ lookupTypeVar tn
   substs <- mapTypeVariables (E.removeShapeAnnotations tn_t) y_t
   mconcat <$> zipWithM (unify substs) tn_ps targs
   where unify substs (E.TypeParamType pv _) (E.TypeArgType at _)
@@ -304,11 +299,9 @@ fullyApplyType t = do
 
 fullyApplyTypeM :: E.StructType -> InternaliseTypeM E.StructType
 fullyApplyTypeM (E.TypeVar tn targs) = do
-  (tn_substs, tn_ps, tn_t) <-
-    lookupTypeVar =<< liftInternaliseM (lookupSubst $ E.qualNameFromTypeName tn)
+  (tn_ps, tn_t) <- lookupTypeVar $ E.typeLeaf tn
   let tsubsts = mconcat $ zipWith typeSubst tn_ps targs
-  withTypeDecSubstitutions tn_substs $
-    fullyApplyTypeM $ E.substituteTypes tsubsts tn_t
+  fullyApplyTypeM $ E.substituteTypes tsubsts tn_t
   where typeSubst (E.TypeParamType p _) (E.TypeArgType t _) =
           M.singleton p $ E.TypeSub $ E.TypeAbbr [] $ E.vacuousShapeAnnotations t
         typeSubst _ _ = mempty
