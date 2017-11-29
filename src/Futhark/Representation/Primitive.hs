@@ -64,6 +64,7 @@ module Futhark.Representation.Primitive
        -- * Utility
        , zeroIsh
        , oneIsh
+       , negativeIsh
        , primBitSize
        , primByteSize
        , commutativeBinOp
@@ -884,10 +885,7 @@ primFuns = M.fromList
 
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool
-zeroIsh (IntValue (Int8Value k))      = k == 0
-zeroIsh (IntValue (Int16Value k))     = k == 0
-zeroIsh (IntValue (Int32Value k))     = k == 0
-zeroIsh (IntValue (Int64Value k))     = k == 0
+zeroIsh (IntValue k)                  = zeroIshInt k
 zeroIsh (FloatValue (Float32Value k)) = k == 0
 zeroIsh (FloatValue (Float64Value k)) = k == 0
 zeroIsh (BoolValue False)             = True
@@ -903,6 +901,14 @@ oneIsh (FloatValue (Float32Value k)) = k == 1
 oneIsh (FloatValue (Float64Value k)) = k == 1
 oneIsh (BoolValue True)              = True
 oneIsh _                             = False
+
+-- | Is the given value kind of negative?
+negativeIsh :: PrimValue -> Bool
+negativeIsh (IntValue k)                  = negativeIshInt k
+negativeIsh (FloatValue (Float32Value k)) = k < 0
+negativeIsh (FloatValue (Float64Value k)) = k < 0
+negativeIsh (BoolValue _)                 = False
+negativeIsh Checked                       = False
 
 -- | Is the given integer value kind of zero?
 zeroIshInt :: IntValue -> Bool
