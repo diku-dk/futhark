@@ -6,6 +6,8 @@ module Language.Futhark.TypeChecker.Monad
   , TypeM
   , runTypeM
   , askEnv
+  , askRootEnv
+  , localTmpEnv
   , recursionPermitted
   , checkQualNameWithEnv
   , bindSpaced
@@ -61,7 +63,7 @@ import qualified Data.Set as S
 
 import qualified System.FilePath.Posix as Posix
 
-import Prelude hiding (mapM)
+import Prelude hiding (mapM, mod)
 
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -205,7 +207,10 @@ data Mod = ModEnv Env
 
 -- | A parametric functor consists of a set of abstract types, the
 -- environment of its parameter, and the resulting module type.
-data FunSig = FunSig TySet Mod MTy
+data FunSig = FunSig { funSigAbs :: TySet
+                     , funSigMod :: Mod
+                     , funSigMty :: MTy
+                     }
             deriving (Show)
 
 -- | Type parameters, list of parameter types (optinally named), and
@@ -222,13 +227,13 @@ data MTy = MTy { mtyAbs :: TySet
 
 -- | A binding from a name to its definition as a type.
 data TypeBinding = TypeAbbr [TypeParam] StructType
-                 deriving (Show)
+                 deriving (Eq, Show)
 
 data ValBinding = BoundV StructType
                 | BoundF FunBinding
                 deriving (Show)
 
-type NameMap = M.Map (Namespace, Name) VName
+type NameMap = M.Map (Namespace, Name) (QualName VName)
 
 -- | Modules produces environment with this representation.
 data Env = Env { envVtable :: M.Map VName ValBinding
@@ -267,6 +272,7 @@ singleWarning loc problem = Warnings [(loc, problem)]
 type ImportTable = M.Map FilePath Env
 
 data Context = Context { contextEnv :: Env
+                       , contextRootEnv :: Env
                        , contextImportTable :: ImportTable
                        , contextFilePath :: FilePath
                        , contextPermitRecursion :: Bool
@@ -289,11 +295,16 @@ runTypeM :: Bool -> Env -> ImportTable -> FilePath -> VNameSource
          -> TypeM a
          -> Either TypeError (a, Warnings, VNameSource)
 runTypeM recurse env imports fpath src (TypeM m) = do
-  (x, src', ws) <- runExcept $ runRWST m (Context env imports fpath recurse) src
+  (x, src', ws) <- runExcept $ runRWST m (Context env env imports fpath recurse) src
   return (x, ws, src')
 
-askEnv :: TypeM Env
+askEnv, askRootEnv :: TypeM Env
 askEnv = asks contextEnv
+askRootEnv = asks contextRootEnv
+
+localTmpEnv :: Env -> TypeM a -> TypeM a
+localTmpEnv env = local $ \ctx ->
+  ctx { contextEnv = env <> contextEnv ctx }
 
 recursionPermitted :: TypeM Bool
 recursionPermitted = asks contextPermitRecursion
@@ -330,7 +341,7 @@ require ts e
 bindSpaced :: MonadTypeChecker m => [(Namespace, Name)] -> m a -> m a
 bindSpaced names body = do
   names' <- mapM (newID . snd) names
-  let mapping = M.fromList (zip names names')
+  let mapping = M.fromList (zip names $ map qualName names')
   bindNameMap mapping body
 
 instance MonadTypeChecker TypeM where
@@ -350,15 +361,17 @@ instance MonadTypeChecker TypeM where
     in ctx { contextEnv = env { envNameMap = m <> envNameMap env } }
 
   localEnv env = local $ \ctx ->
-    ctx { contextEnv = env <> contextEnv ctx }
+    let env' = env <> contextEnv ctx
+    in ctx { contextEnv = env', contextRootEnv = env' }
 
   checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
 
   lookupType loc qn = do
+    outer_env <- askRootEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ envTypeTable scope of
       Nothing -> bad $ UndefinedType loc qn
-      Just (TypeAbbr ps def) -> return (qn', ps, qualifyTypeVars mempty qs def)
+      Just (TypeAbbr ps def) -> return (qn', ps, qualifyTypeVars outer_env mempty qs def)
 
   lookupMod loc qn = do
     (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
@@ -384,12 +397,13 @@ instance MonadTypeChecker TypeM where
                       ""
 
   lookupVar loc qn = do
+    outer_env <- askRootEnv
     (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
       Nothing -> bad $ UnknownVariableError Term qn loc
       Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
                       | otherwise -> return (qn', removeShapeAnnotations $ fromStruct $
-                                                  qualifyTypeVars mempty qs t)
+                                                  qualifyTypeVars outer_env mempty qs t)
       Just BoundF{} -> bad $ FunctionIsNotValue loc qn
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
@@ -398,12 +412,12 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
   descend env quals
   where descend scope []
           | Just name' <- M.lookup (space, name) $ envNameMap scope =
-              return (scope, QualName [] name')
+              return (scope, name')
           | otherwise =
               bad $ UnknownVariableError space qn loc
 
         descend scope (q:qs)
-          | Just q' <- M.lookup (Term, q) $ envNameMap scope,
+          | Just (QualName _ q') <- M.lookup (Term, q) $ envNameMap scope,
             Just res <- M.lookup q' $ envModTable scope =
               case res of
                 ModEnv q_scope -> do
@@ -413,16 +427,30 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
           | otherwise =
               bad $ UnknownVariableError space qn loc
 
-qualifyTypeVars :: ASTMappable t => [VName] -> [VName] -> t -> t
-qualifyTypeVars except qs = runIdentity . astMap mapper
+-- Try to prepend qualifiers to the type names such that they
+-- represent how to access the type in some scope.
+qualifyTypeVars :: ASTMappable t => Env -> [VName] -> [VName] -> t -> t
+qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
   where mapper = ASTMapper { mapOnExp = pure
                            , mapOnLambda = pure
                            , mapOnName = pure
                            , mapOnQualName = pure . qual
                            }
         qual (QualName orig_qs name)
-          | name `elem` except = QualName orig_qs name
-          | otherwise          = QualName (qs<>orig_qs) name
+          | name `elem` except ||
+            reachable orig_qs name outer_env = QualName orig_qs name
+          | otherwise                        = QualName (qs<>orig_qs) name
+
+        reachable [] name env =
+          isJust $ find matches $ M.elems (envTypeTable env)
+          where matches (TypeAbbr [] (TypeVar (TypeName x_qs name') [])) =
+                  null x_qs && name == name'
+                matches _ = False
+
+        reachable (q:qs') name env
+          | Just (ModEnv env') <- M.lookup q $ envModTable env =
+              reachable qs' name env'
+          | otherwise = False
 
 badOnLeft :: MonadTypeChecker m => Either TypeError a -> m a
 badOnLeft = either bad return
@@ -462,8 +490,9 @@ instance Hashable Namespace where
 
 intrinsicsNameMap :: NameMap
 intrinsicsNameMap = M.fromList $ map mapping $ M.toList intrinsics
-  where mapping (v, IntrinsicType{}) = ((Type, baseName v), v)
-        mapping (v, _)               = ((Term, baseName v), v)
+  where mapping (v, IntrinsicType{}) = ((Type, baseName v), QualName [mod] v)
+        mapping (v, _)               = ((Term, baseName v), QualName [mod] v)
+        mod = VName (nameFromString "intrinsics") 0
 
 topLevelNameMap :: NameMap
 topLevelNameMap = M.filterWithKey (\k _ -> atTopLevel k) intrinsicsNameMap

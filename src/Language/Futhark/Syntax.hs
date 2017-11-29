@@ -269,7 +269,7 @@ unifyShapes (ShapeDecl xs) (ShapeDecl ys) = do
 
 -- | A type name consists of qualifiers (for error messages) and a
 -- 'VName' (for equality checking).
-data TypeName = TypeName [VName] VName
+data TypeName = TypeName { typeQuals :: [VName], typeLeaf :: VName }
               deriving (Show)
 
 instance Eq TypeName where
@@ -978,6 +978,7 @@ instance Located (ModBindBase f vn) where
 
 data ModParamBase f vn = ModParam { modParamName     :: vn
                                   , modParamType     :: SigExpBase f vn
+                                  , modParamAbs      :: f [VName]
                                   , modParamLocation :: SrcLoc
                                   }
 deriving instance Showable f vn => Show (ModParamBase f vn)
@@ -1004,6 +1005,8 @@ instance Located (DecBase f vn) where
   locOf (OpenDec _ _ _ loc) = locOf loc
   locOf (LocalDec _ loc)    = locOf loc
 
+-- | The program described by a single Futhark file.  May depend on
+-- other files.
 data ProgBase f vn = Prog { progDoc :: Maybe String
                           , progDecs :: [DecBase f vn]
                           }

@@ -37,7 +37,8 @@ import Language.Futhark.TypeChecker.Types
 
 -- | The result of type checking some file.  Can be passed to further
 -- invocations of the type checker.
-data FileModule = FileModule { fileEnv :: Env
+data FileModule = FileModule { fileAbs :: TySet -- ^ Abstract types.
+                             , fileEnv :: Env
                              , fileProg :: Prog
                              }
 
@@ -64,7 +65,7 @@ initialEnv = intrinsicsModule
                { envModTable = initialModTable
                , envNameMap = M.insert
                               (Term, nameFromString "intrinsics")
-                              intrinsics_v
+                              (qualName intrinsics_v)
                               topLevelNameMap
                }
   where initialTypeTable = M.fromList $ mapMaybe addIntrinsicT $ M.toList intrinsics
@@ -82,8 +83,8 @@ initialEnv = intrinsicsModule
 checkProgM :: UncheckedProg -> TypeM FileModule
 checkProgM (Prog doc decs) = do
   checkForDuplicateDecs decs
-  (_, env, decs') <- checkDecs decs
-  return (FileModule env $ Prog doc decs')
+  (abs, env, decs') <- checkDecs decs
+  return (FileModule abs env $ Prog doc decs')
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -145,7 +146,7 @@ checkSpecs (ValSpec name tparams params rettype doc loc : specs) =
                                else BoundF (tparams',
                                             zip (map paramName params') paramtypes,
                                             rettype'')
-                 , envNameMap = M.singleton (Term, name) name'
+                 , envNameMap = M.singleton (Term, name) $ qualName name'
                  }
     (abstypes, env, specs') <- localEnv valenv $ checkSpecs specs
     return (abstypes,
@@ -164,15 +165,14 @@ checkSpecs (TypeSpec name ps doc loc : specs) =
   checkTypeParams ps $ \ps' ->
   bindSpaced [(Type, name)] $ do
     name' <- checkName Type name loc
-    abs_name <- newName name'
     let tenv = mempty
                { envNameMap =
-                   M.singleton (Type, name) name'
+                   M.singleton (Type, name) $ qualName name'
                , envTypeTable =
-                   M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName abs_name) $ map paramToArg ps'
+                   M.singleton name' $ TypeAbbr ps' $ TypeVar (typeName name') $ map paramToArg ps'
                }
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
-    return (S.insert (qualName abs_name) abstypes,
+    return (S.insert (qualName name') abstypes,
             tenv <> env,
             TypeSpec name' ps' doc loc : specs')
       where paramToArg (TypeParamDim v ploc) =
@@ -184,7 +184,7 @@ checkSpecs (ModSpec name sig loc : specs) =
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
     (mty, sig') <- checkSigExp sig
-    let senv = mempty { envNameMap = M.singleton (Term, name) name'
+    let senv = mempty { envNameMap = M.singleton (Term, name) $ qualName name'
                       , envModTable = M.singleton name' $ mtyMod mty
                       }
     (abstypes, env, specs') <- localEnv senv $ checkSpecs specs
@@ -223,7 +223,7 @@ checkSigExp (SigArrow maybe_pname e1 e2 loc) = do
     case maybe_pname of
       Just pname -> bindSpaced [(Term, pname)] $ do
         pname' <- checkName Term pname loc
-        return (mempty { envNameMap = M.singleton (Term, pname) pname'
+        return (mempty { envNameMap = M.singleton (Term, pname) $ qualName pname'
                        , envModTable = M.singleton pname' e1_mod
                        },
                 Just pname')
@@ -251,8 +251,8 @@ checkSigBind (SigBind name e doc loc) = do
     let sigmod = typeAbbrEnvFromSig env
     return (mempty { envSigTable = M.singleton name' env
                    , envModTable = M.singleton name' $ ModEnv sigmod
-                   , envNameMap = M.fromList [((Signature, name), name'),
-                                               ((Term, name), name')]
+                   , envNameMap = M.fromList [((Signature, name), qualName name'),
+                                               ((Term, name), qualName name')]
                    },
             SigBind name' e' doc loc)
   where typeAbbrEnvFromSig (MTy _ (ModEnv env)) =
@@ -261,7 +261,7 @@ checkSigBind (SigBind name e doc loc) = do
           in mempty { envNameMap = names
                     , envTypeTable = types }
         typeAbbrEnvFromSig _ = mempty
-        nameMapping (v, _) = ((Type, baseName v), v)
+        nameMapping (v, _) = ((Type, baseName v), qualName v)
 
 checkModExp :: ModExpBase NoInfo Name -> TypeM (MTy, ModExpBase Info VName)
 checkModExp (ModParens e loc) = do
@@ -312,12 +312,13 @@ checkModExpToEnv e = do
 withModParam :: ModParamBase NoInfo Name
              -> (ModParamBase Info VName -> TySet -> Mod -> TypeM a)
              -> TypeM a
-withModParam (ModParam pname psig_e loc) m = do
+withModParam (ModParam pname psig_e NoInfo loc) m = do
   (MTy p_abs p_mod, psig_e') <- checkSigExp psig_e
   bindSpaced [(Term, pname)] $ do
     pname' <- checkName Term pname loc
     let in_body_env = mempty { envModTable = M.singleton pname' p_mod }
-    localEnv in_body_env $ m (ModParam pname' psig_e' loc) p_abs p_mod
+    localEnv in_body_env $
+      m (ModParam pname' psig_e' (Info $ map qualLeaf $ S.toList p_abs) loc) p_abs p_mod
 
 withModParams :: [ModParamBase NoInfo Name]
               -> ([(ModParamBase Info VName, TySet, Mod)] -> TypeM a)
@@ -358,13 +359,14 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
   return (body_mty'', p_subst, body_subst)
 
-checkModBind :: ModBindBase NoInfo Name -> TypeM (Env, ModBindBase Info VName)
+checkModBind :: ModBindBase NoInfo Name -> TypeM (TySet, Env, ModBindBase Info VName)
 checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
   (maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    return (mempty { envModTable = M.singleton name' $ mtyMod mty
-                   , envNameMap = M.singleton (Term, name) name'
+    return (mtyAbs mty,
+            mempty { envModTable = M.singleton name' $ mtyMod mty
+                   , envNameMap = M.singleton (Term, name) $ qualName name'
                    },
             ModBind name' [] maybe_fsig_e' e' doc loc)
 checkModBind (ModBind name (p:ps) maybe_fsig_e body_e doc loc) = do
@@ -378,13 +380,13 @@ checkModBind (ModBind name (p:ps) maybe_fsig_e body_e doc loc) = do
             FunSig p_abs p_mod $ foldr addParam mty $ zip ps_abs ps_mod)
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
-    return (mempty { envModTable =
+    return (mempty,
+            mempty { envModTable =
                        M.singleton name' $ ModFun funsig
                    , envNameMap =
-                       M.singleton (Term, name) name'
+                       M.singleton (Term, name) $ qualName name'
                    },
             ModBind name' params' maybe_fsig_e' body_e' doc loc)
-
 
 checkForDuplicateSpecs :: [SpecBase NoInfo Name] -> TypeM ()
 checkForDuplicateSpecs =
@@ -420,7 +422,7 @@ checkTypeBind (TypeBind name ps td doc loc) =
       return (mempty { envTypeTable =
                          M.singleton name' $ TypeAbbr ps' $ unInfo $ expandedType td',
                        envNameMap =
-                         M.singleton (Type, name) name'
+                         M.singleton (Type, name) $ qualName name'
                      },
               TypeBind name' ps' td' doc loc)
 
@@ -443,7 +445,7 @@ checkValBind (ValBind entry name maybe_t NoInfo e doc loc) = do
   return (mempty { envVtable =
                      M.singleton name' (BoundV e_t)
                  , envNameMap =
-                     M.singleton (Term, name) name'
+                     M.singleton (Term, name) $ qualName name'
                  },
           ValBind entry name' maybe_t' (Info e_t) e' doc loc)
   where anythingUnique (Record fs) = any anythingUnique fs
@@ -462,7 +464,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body doc l
                      M.singleton fname'
                      (BoundF (tparams', map patternParam params', rettype))
                  , envNameMap =
-                     M.singleton (Term, fname) fname'
+                     M.singleton (Term, fname) $ qualName fname'
                  },
            FunBind entry fname' maybe_retdecl' (Info rettype) tparams' params' body' doc loc)
 
@@ -471,19 +473,16 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body doc l
 
 checkDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkDec (ModDec struct) = do
-  (modenv, struct') <- checkModBind struct
-  return (mempty, modenv,
-          ModDec struct')
+  (abs, modenv, struct') <- checkModBind struct
+  return (abs, modenv, ModDec struct')
 
 checkDec (SigDec sig) = do
   (sigenv, sig') <- checkSigBind sig
-  return (mempty, sigenv,
-          SigDec sig')
+  return (mempty, sigenv, SigDec sig')
 
 checkDec (TypeDec tdec) = do
   (tenv, tdec') <- checkTypeBind tdec
-  return (mempty, tenv,
-          TypeDec tdec')
+  return (mempty, tenv, TypeDec tdec')
 
 checkDec (OpenDec x xs NoInfo loc) = do
   (x_abs, x_env, x') <- checkModExpToEnv x
@@ -585,7 +584,7 @@ matchMTys = matchMTys' mempty
       -- XXX: we only want to create substitutions for visible names.
       -- This must be wrong in some cases.  Probably we need to
       -- rethink how we do shadowing for module types.
-      let visible = S.fromList $ M.elems $ envNameMap sig
+      let visible = S.fromList $ map qualLeaf $ M.elems $ envNameMap sig
           isVisible name = name `S.member` visible
 
       -- Check that all values are defined correctly, substituting the
@@ -715,7 +714,7 @@ findBinding :: (Env -> M.Map VName v)
             -> Env
             -> Maybe (VName, v)
 findBinding table namespace name the_env = do
-  name' <- M.lookup (namespace, name) $ envNameMap the_env
+  QualName _ name' <- M.lookup (namespace, name) $ envNameMap the_env
   (name',) <$> M.lookup name' (table the_env)
 
 findTypeDef :: QualName Name -> Mod -> Maybe (QualName VName, TypeBinding)
@@ -754,13 +753,12 @@ allNamesInMTy (MTy abs mod) =
 allNamesInMod :: Mod -> S.Set VName
 allNamesInMod (ModEnv env) = allNamesInEnv env
 allNamesInMod ModFun{} = mempty
--- allNamesInMod (ModFun (FunSig _abs mod mty)) = allNamesInMod mod <> allNamesInMTy mty
 
 -- All names defined anywhere in the env.
 allNamesInEnv :: Env -> S.Set VName
 allNamesInEnv (Env vtable ttable stable modtable _names) =
   S.fromList (M.keys vtable ++ M.keys ttable ++
-               M.keys stable ++ M.keys modtable) <>
+              M.keys stable ++ M.keys modtable) <>
   mconcat (map allNamesInMTy (M.elems stable) ++
            map allNamesInMod (M.elems modtable) ++
            map allNamesInType (M.elems ttable))
@@ -773,8 +771,9 @@ newNamesForMTy orig_mty = do
     v' <- newName v
     return (v, v')
   let substs = M.fromList pairs
+      rev_substs = M.fromList $ map (uncurry $ flip (,)) pairs
 
-  return (substituteInMTy substs orig_mty, substs)
+  return (substituteInMTy substs orig_mty, rev_substs)
 
   where
     substituteInMTy :: M.Map VName VName -> MTy -> MTy
@@ -789,7 +788,7 @@ newNamesForMTy orig_mty = do
                  , envTypeTable = ttable'
                  , envSigTable = mempty
                  , envModTable = mtable'
-                 , envNameMap = M.map substitute names
+                 , envNameMap = M.map (fmap substitute) names
                  }
 
         substitute v =
@@ -827,7 +826,7 @@ newNamesForMTy orig_mty = do
 
         substituteInType :: StructType -> StructType
         substituteInType (TypeVar (TypeName qs v) targs) =
-          TypeVar (TypeName qs $ substitute v) $ map substituteInTypeArg targs
+          TypeVar (TypeName (map substitute qs) $ substitute v) $ map substituteInTypeArg targs
         substituteInType (Prim t) =
           Prim t
         substituteInType (Record ts) =
@@ -835,7 +834,7 @@ newNamesForMTy orig_mty = do
         substituteInType (Array (PrimArray t shape u ())) =
           Array $ PrimArray t (substituteInShape shape) u ()
         substituteInType (Array (PolyArray (TypeName qs v) targs shape u ())) =
-          Array $ PolyArray (TypeName qs $ substitute v)
+          Array $ PolyArray (TypeName (map substitute qs) $ substitute v)
           (map substituteInTypeArg targs) (substituteInShape shape) u ()
         substituteInType (Array (RecordArray ts shape u)) =
           Array $ RecordArray ts' (substituteInShape shape) u
@@ -845,11 +844,11 @@ newNamesForMTy orig_mty = do
         substituteInShape (ShapeDecl ds) =
           ShapeDecl $ map substituteInDim ds
         substituteInDim (NamedDim (QualName qs v)) =
-          NamedDim $ QualName qs $ substitute v
+          NamedDim $ QualName (map substitute qs) $ substitute v
         substituteInDim d = d
 
         substituteInTypeArg (TypeArgDim (NamedDim (QualName qs v)) loc) =
-          TypeArgDim (NamedDim $ QualName qs $ substitute v) loc
+          TypeArgDim (NamedDim $ QualName (map substitute qs) $ substitute v) loc
         substituteInTypeArg (TypeArgDim (ConstDim x) loc) =
           TypeArgDim (ConstDim x) loc
         substituteInTypeArg (TypeArgDim AnyDim loc) =

@@ -6,7 +6,7 @@ import Data.Maybe
 import Control.Category (id)
 import Control.Applicative
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.State
 import Data.Monoid
 import qualified Data.Text.IO as T
 import System.IO
@@ -32,6 +32,7 @@ import Futhark.Representation.AST (Prog, pretty, nameFromString)
 import Futhark.TypeCheck (Checkable)
 import qualified Futhark.Util.Pretty as PP
 
+import Futhark.Internalise.Modules as Modules
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -54,6 +55,8 @@ data FutharkPipeline = PrettyPrint
                      -- ^ Run the type checker; print type errors.
                      | Pipeline [UntypedPass]
                      -- ^ Run this pipeline.
+                     | Demodularise
+                     -- ^ Partially evaluate away the module language.
 
 data Config = Config { futharkConfig :: FutharkConfig
                      , futharkPipeline :: FutharkPipeline
@@ -264,6 +267,9 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
+  , Option "m" ["print"]
+    (NoArg $ Right $ \opts -> opts { futharkPipeline = Demodularise })
+    "Partially evaluate all module constructs and print the residual program."
   , Option "I" ["include"]
     (ReqArg (\path -> Right $ changeFutharkConfig $ \opts ->
                 opts { futharkImportPaths =
@@ -314,13 +320,17 @@ main = mainWithOptions newConfig commandLineOptions compile
           case futharkPipeline config of
             TypeCheck -> do
               -- No pipeline; just read the program and type check
-              (_, warnings, _, _) <- readProgram False preludeBasis mempty file
+              (warnings, _, _) <- readProgram False preludeBasis mempty file
               liftIO $ hPutStr stderr $ show warnings
             PrettyPrint -> liftIO $ do
               maybe_prog <- parseFuthark file <$> T.readFile file
               case maybe_prog of
                 Left err  -> fail $ show err
                 Right prog-> putStrLn $ pretty prog
+            Demodularise -> do
+              (_, imports, src) <- readProgram False preludeBasis mempty file
+              liftIO $ mapM_ (putStrLn . pretty) $
+                evalState (Modules.transformProg imports) src
             Pipeline{} -> do
               prog <- runPipelineOnProgram (futharkConfig config) preludeBasis id file
               runPolyPasses config prog

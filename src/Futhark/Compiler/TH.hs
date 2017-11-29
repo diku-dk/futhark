@@ -30,7 +30,7 @@ readBasis search_path fpath entry = do
 
   res <- runIO $ runExceptT $ readLibrary False emptyBasis search_path files
   case res of
-    Right (_, _, imps, src) ->
+    Right (_, imps, src) ->
       return $ Basis imps src [entry]
     Left err -> error $ show err
 
