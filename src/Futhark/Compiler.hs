@@ -141,7 +141,7 @@ runPipelineOnProgram :: FutharkConfig
 runPipelineOnProgram config b pipeline file = do
   when (pipelineVerbose pipeline_config) $
     logMsg ("Reading and type-checking source program" :: String)
-  (tagged_ext_prog, ws, _, namesrc) <-
+  (ws, prog_imports, namesrc) <-
     readProgram (futharkPermitRecursion config) b (futharkImportPaths config) file
 
   when (futharkWarn config) $
@@ -149,10 +149,11 @@ runPipelineOnProgram config b pipeline file = do
   putNameSource namesrc
   when (pipelineVerbose pipeline_config) $
     logMsg ("Internalising program" :: String)
-  res <- internaliseProg tagged_ext_prog
+  res <- internaliseProg prog_imports
   case res of
     Left err ->
-      internalErrorS ("During internalisation: " <> pretty err) tagged_ext_prog
+      internalErrorS ("During internalisation: " <> pretty err) $ E.Prog mempty $
+      concatMap (E.progDecs . E.fileProg . snd) prog_imports
     Right int_prog -> do
       when (pipelineVerbose pipeline_config) $
         logMsg ("Type-checking internalised program" :: String)
@@ -308,8 +309,7 @@ readImportFile (ImportPaths dirs) include = do
 -- | Read and type-check a Futhark program, including all imports.
 readProgram :: (MonadError CompilerError m, MonadIO m) =>
                Bool -> Basis -> ImportPaths -> FilePath
-            -> m (E.Prog,
-                  E.Warnings,
+            -> m (E.Warnings,
                   E.Imports,
                   VNameSource)
 readProgram permit_recursion basis search_path fp =
@@ -325,8 +325,7 @@ readProgram permit_recursion basis search_path fp =
 -- to the same search path), including all imports.
 readLibrary :: (MonadError CompilerError m, MonadIO m) =>
                Bool -> Basis -> ImportPaths -> [FilePath]
-            -> m (E.Prog,
-                  E.Warnings,
+            -> m (E.Warnings,
                   E.Imports,
                   VNameSource)
 readLibrary permit_recursion basis search_path fps =
@@ -340,15 +339,11 @@ readLibrary permit_recursion basis search_path fps =
 
 runCompilerM :: Monad m =>
                 Basis -> CompilerM m a
-             -> m (E.ProgBase E.Info VName, E.Warnings,
-                   [(String, E.FileModule)], VNameSource)
+             -> m (E.Warnings, [(String, E.FileModule)], VNameSource)
 runCompilerM (Basis imports src roots) m = do
   let s = ReaderState (reverse imports) src mempty
   s' <- execStateT (runReaderT m roots) s
-  return (E.Prog Nothing $
-           concatMap (E.progDecs . E.fileProg . snd) $
-           reverse $ alreadyImported s',
-          warnings s',
+  return (warnings s',
           reverse $ alreadyImported s',
           nameSource s')
 

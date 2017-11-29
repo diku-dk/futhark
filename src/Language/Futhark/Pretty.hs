@@ -379,7 +379,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SigBindBase ty vn) where
     text "module type" <+> ppr name <+> equals <+> ppr e
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModParamBase ty vn) where
-  ppr (ModParam pname psig _) =
+  ppr (ModParam pname psig _ _) =
     parens (ppr pname <> colon <+> ppr psig)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ModBindBase ty vn) where
