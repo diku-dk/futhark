@@ -81,10 +81,9 @@ internaliseDecs ds =
     FunDec fdec : ds' -> do
       internaliseFunBind fdec
       internaliseDecs ds'
-    E.TypeDec tb : ds' -> do
-      noteType (E.typeAlias tb)
-        (E.typeParams tb,
-         E.unInfo $ E.expandedType $ E.typeExp tb)
+    E.TypeDec tb : ds' ->
+      bindingType (E.typeAlias tb)
+      (E.typeParams tb, E.unInfo $ E.expandedType $ E.typeExp tb) $
       internaliseDecs ds'
     _ :ds' ->
       internaliseDecs ds'
@@ -107,7 +106,7 @@ internaliseFunBind fb@(E.FunBind entry fname _ (Info rettype) tparams params bod
 
     let mkEntry (tp, et) = (tp, ([], E.vacuousShapeAnnotations et))
         types = map mkEntry $ M.toList mapping
-    notingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
+    bindingTypes types $ bindingParams tparams params $ \pcm shapeparams params' -> do
       (rettype_bad, _, rcm) <- internaliseReturnType rettype
       let rettype' = zeroExts rettype_bad
 
