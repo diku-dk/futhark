@@ -771,8 +771,9 @@ newNamesForMTy orig_mty = do
     v' <- newName v
     return (v, v')
   let substs = M.fromList pairs
+      rev_substs = M.fromList $ map (uncurry $ flip (,)) pairs
 
-  return (substituteInMTy substs orig_mty, substs)
+  return (substituteInMTy substs orig_mty, rev_substs)
 
   where
     substituteInMTy :: M.Map VName VName -> MTy -> MTy

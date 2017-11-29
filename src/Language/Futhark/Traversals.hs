@@ -235,7 +235,7 @@ instance ASTMappable StructType where
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
 
 instance ASTMappable PatternType where
-  astMap tv = traverseType f pure (astMap tv)
+  astMap tv = traverseType f (astMap tv) (astMap tv)
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
 
 instance ASTMappable (TypeDeclBase Info VName) where

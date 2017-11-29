@@ -1005,6 +1005,8 @@ instance Located (DecBase f vn) where
   locOf (OpenDec _ _ _ loc) = locOf loc
   locOf (LocalDec _ loc)    = locOf loc
 
+-- | The program described by a single Futhark file.  May depend on
+-- other files.
 data ProgBase f vn = Prog { progDoc :: Maybe String
                           , progDecs :: [DecBase f vn]
                           }
