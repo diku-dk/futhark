@@ -1,5 +1,4 @@
 {
-{-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE TupleSections #-}
 -- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
@@ -390,6 +389,7 @@ BindingBinOp :: { Name }
       | '-'   { nameFromString "-" }
 
 
+Fun    :: { FunBindBase NoInfo Name }
 Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
@@ -412,6 +412,7 @@ Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=
           }
 ;
 
+Val :: { ValBindBase NoInfo Name }
 Val : let id maybeAscription(TypeExpDecl) '=' Exp
       { let L _ (ID name) = $2
         in ValBind (name==defaultEntryPoint) name (fmap declaredType $3) NoInfo $5 Nothing $1 }
@@ -474,6 +475,7 @@ TypeArg :: { TypeArgExp Name }
          | '[' ']'         { TypeArgExpDim AnyDim $1 }
          | TypeExpAtom     { TypeArgExpType $1 }
 
+FieldType :: { (Name, UncheckedTypeExp) }
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
 DimDecl :: { (DimDecl Name, SrcLoc) }
@@ -695,6 +697,7 @@ LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
     | LetExp %prec letprec { $1 }
 
+LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp
            { For $2 $4 }
          | for Pattern in Exp
@@ -724,6 +727,7 @@ DimIndex :: { UncheckedDimIndex }
          | Exp2 ':'      ':' Exp2 { DimSlice (Just $1) Nothing (Just $4) }
          |      ':'      ':' Exp2 { DimSlice Nothing Nothing (Just $3) }
 
+VarId :: { IdentBase NoInfo Name }
 VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
 
 FieldId :: { (Name, SrcLoc) }
@@ -753,6 +757,7 @@ FieldPattern :: { (Name, PatternBase NoInfo Name) }
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
 
+Curry :: { (QualName Name, [UncheckedExp], SrcLoc) }
 Curry : Curry Atom
         { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
       | QualName Atom %prec indexprec
@@ -783,12 +788,14 @@ FunAbstr :: { UncheckedLambda }
          | '(' BinOp ')'
            { BinOpFun $2 NoInfo NoInfo NoInfo $1 }
 
+Value :: { Value }
 Value : IntValue { $1 }
       | FloatValue { $1 }
       | StringValue { $1 }
       | BoolValue { $1 }
       | ArrayValue { $1 }
 
+CatValues :: { [Value] }
 CatValues : many(Value) { $1 }
 
 NaturalInt :: { Int }
@@ -811,10 +818,13 @@ FloatValue :: { Value }
          : FloatLit { PrimValue (FloatValue (fst $1)) }
          | '-' FloatLit { PrimValue (FloatValue (floatNegate (fst $2))) }
 
+StringValue :: { Value }
 StringValue : stringlit  {% let L pos (STRINGLIT s) = $1 in do
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
                              return $ ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t }
+
+BoolValue :: { Value }
 BoolValue : true           { PrimValue $ BoolValue True }
           | false          { PrimValue $ BoolValue False }
 
@@ -849,6 +859,7 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | true   { (BoolValue True, $1) }
         | false  { (BoolValue False, $1) }
 
+ArrayValue :: { Value }
 ArrayValue :  '[' Value ']'
              {% return $ ArrayValue (arrayFromList [$2]) $ toStruct $ valueType $2
              }
@@ -866,9 +877,11 @@ ArrayValue :  '[' Value ']'
            | '[' ']'
              {% emptyArrayError $1 }
 
+RowType :: { TypeBase () () }
 RowType : '[' ']' RowType   { arrayOf $3 (rank 1) Nonunique }
         | '[' ']' PrimType  { arrayOf (Prim $3) (rank 1) Nonunique }
 
+Values :: { [Value] }
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }
        |                  { [] }
