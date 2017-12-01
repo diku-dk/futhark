@@ -51,7 +51,7 @@ entry test_f32_normal (x: i32) (n: i32) =
 -- compiled input { 1 10000 } output { 81.004059f32  52.509270f32 }
 
 module shuffle_m =
- shuffle_order_engine {let k = 10} u64 xorshift128plus
+ shuffle_order_engine {let k = 10} xorshift128plus
 
 module test_f32_shuffle_m =
   mktest shuffle_m f32 (normal_distribution f32 shuffle_m)
