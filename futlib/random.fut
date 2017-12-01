@@ -233,7 +233,7 @@ module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
     let (rng,x) = E.rand rng
     let i = i32.i64 (int.to_i64 x) % K.k
     let (rng,y) = E.rand rng
-    in ((rng, (copy table) with [i] <- y), table[i])
+    in unsafe ((rng, (copy table) with [i] <- y), table[i])
 
   let min = E.min
   let max = E.max
