@@ -517,6 +517,7 @@ checkExp (RecordLit fs loc) = do
           errIfAlreadySet name rloc
           (QualName _ name', t) <- lift $ lookupVar rloc $ qualName name
           modify $ M.insert name rloc
+          lift $ observe $ Ident name' (Info t) rloc
           return $ RecordFieldImplicit name' (Info t) rloc
 
         errIfAlreadySet f rloc = do
