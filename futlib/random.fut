@@ -95,6 +95,149 @@ module linear_congruential_engine (T: integral) (P: {
   let max = P.m
 }
 
+-- | A random number engine that uses the "subtract with carry"
+-- algorithm.  Presently quite slow.  The size of the state is
+-- proportional to the long lag.
+module subtract_with_carry_engine (T: integral) (P: {
+  -- | Word size: number of bits in each word of the state sequence.
+  -- Should be positive and less than the number of bits in T.t.
+  val w: i32
+  -- | Long lag: distance between operand values.
+  val r: i32
+  -- | Short lag: number of elements between advances.  Should be
+  -- positive and less than 'r'.
+  val s: i32
+}): rng_engine with int.t = T.t = {
+  let long_lag = P.r
+  let word_size = P.w
+  let short_lag = P.s
+  let modulus = T.i32 (1 << word_size)
+
+  -- We use this one for initialisation.
+  module e = linear_congruential_engine T {
+    let a = T.u32 40014u32
+    let c = T.u32 0u32
+    let m = T.u32 2147483563u32
+  }
+
+  module int = T
+  type t = T.t
+  type rng = {x: [P.r]T.t,
+              carry: bool,
+              k: i32}
+
+  let rand ({x, carry, k}: rng): (rng, t) =
+    let short_index = k - short_lag
+    let short_index = if short_index < 0
+                      then short_index + long_lag
+                      else short_index
+    let (xi, carry) =
+      if T.(x[short_index] >= x[k] + bool carry)
+      then (T.(x[short_index] - x[k] - bool carry),
+            false)
+      else (T.(modulus - x[k] - bool carry + x[short_index]),
+            true)
+    let x = (copy x) with [k] <- xi
+    let k = (k + 1) % long_lag
+    in ({x, carry, k}, xi)
+
+  let rng_from_seed [n] (seed: [n]i32): rng =
+    let rng = e.rng_from_seed seed
+    let (x, rng) = loop (x, rng) = (replicate P.r (T.i32 0), rng)
+                     for i < P.r do let (v, rng) = e.rand rng
+                                    in (x with [i] <- T.(v % modulus),
+                                        rng)
+    let carry = T.(last x == i32 0)
+    let k = 0
+    in {x, carry, k}
+
+  let split_rng (n: i32) ({x, carry, k}: rng): [n]rng =
+    map (\i -> {x=map (T.^(T.i32 (hash i))) x, carry, k}) (iota n)
+
+  let join_rng [n] (xs: [n]rng): rng =
+    xs[0] -- FIXME
+
+  let min = T.i32 0
+  let max = T.(modulus - i32 1)
+}
+
+-- | An engine adaptor class template that adapts a pseudo-random
+-- number generator Engine type by using only r elements of each block
+-- of p elements from the sequence it produces, discarding the rest.
+--
+-- The adaptor keeps and internal counter of how many elements have
+-- been produced in the current block.
+module discard_block_engine (K: {
+  -- | Block size: number of elements in each block.  Must be
+  -- positive.
+  val p: i32
+  -- | Used block: number of elements in the block that are used (not
+  -- discarded). The rest (p-r) are discarded. This parameter should
+  -- be greater than zero and lower than or equal to p.
+  val r: i32}) (E: rng_engine): rng_engine with int.t = E.int.t = {
+  type t = E.int.t
+  module int = E.int
+  type rng = (E.rng, i32)
+
+  let min = E.min
+  let max = E.max
+
+  let rng_from_seed (xs: []i32) =
+    (E.rng_from_seed xs, 0)
+
+  let split_rng (n: i32) ((rng, i): rng): [n]rng =
+    map (\rng' -> (rng', i)) (E.split_rng n rng)
+
+  let join_rng (rngs: []rng): rng =
+    let (rngs', is) = unzip rngs
+    in (E.join_rng rngs', reduce i32.max 0 is)
+
+  let rand ((rng,i): rng): (rng, t) =
+    let (rng, i) =
+      if i >= K.r then (loop rng for j < K.r - i do (E.rand rng).1, 0)
+                  else (rng, i+1)
+    let (rng, x) = E.rand rng
+    in ((rng, i), x)
+}
+
+-- | An engine adaptor that adapts an 'rng_engine' so that the
+-- elements are delivered in a different sequence.
+--
+-- The RNG keeps a buffer of 'k' generated numbers internally, and
+-- when requested, returns a randomly selected number within the
+-- buffer, replacing it with a value obtained from its base engine.
+module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
+                          : rng_engine with int.t = E.int.t = {
+  type t = E.int.t
+  module int = E.int
+  type rng = (E.rng, [K.k]t)
+
+  let build_table (rng: E.rng) =
+    let xs = replicate K.k (int.i32 0)
+    in loop (rng,xs) for i < K.k do
+         let (rng,x) = E.rand rng
+         in (rng, xs with [i] <- x)
+
+  let rng_from_seed (xs: []i32) =
+    build_table (E.rng_from_seed xs)
+
+  let split_rng (n: i32) ((rng, _): rng): [n]rng =
+    map build_table (E.split_rng n rng)
+
+  let join_rng (rngs: []rng) =
+    let (rngs', _) = unzip rngs
+    in build_table (E.join_rng rngs')
+
+  let rand ((rng,table): rng): (rng, int.t) =
+    let (rng,x) = E.rand rng
+    let i = i32.i64 (int.to_i64 x) % K.k
+    let (rng,y) = E.rand rng
+    in ((rng, (copy table) with [i] <- y), table[i])
+
+  let min = E.min
+  let max = E.max
+}
+
 -- | The xorshift128+ engine.  Uses two 64-bit words as state.
 module xorshift128plus: rng_engine with int.t = u64 = {
   module int = u64
@@ -148,43 +291,43 @@ module minstd_rand0: rng_engine with int.t = u32 =
     let m = 2147483647u32
 }
 
--- | An engine adaptor that adapts an 'rng_engine' so that the
--- elements are delivered in a different sequence.
+-- | A subtract-with-carry pseudo-random generator of 24-bit numbers,
+-- generally used as the base engine for the ranlux24 generator.  It
+-- is an instantiation of subtract_with_carry_engine with w=24, s=10,
+-- r=24.
+module ranlux24_base: rng_engine with int.t = u32 =
+  subtract_with_carry_engine u32 {
+    let w = 24
+    let s = 10
+    let r = 24
+  }
+
+-- | A subtract-with-carry pseudo-random generator of 48-bit numbers,
+-- generally used as the base engine for the ranlux24 generator.  It
+-- is an instantiation of subtract_with_carry_engine with w=48, s=5,
+-- r=12.
+module ranlux48_base: rng_engine with int.t = u64 =
+  subtract_with_carry_engine u64 {
+    let w = 48
+    let s = 5
+    let r = 12
+  }
+
+-- | A subtract-with-carry pseudo-random generator of 24-bit numbers
+-- with accelerated advancement.
 --
--- The RNG keeps a buffer of 'k' generated numbers internally, and
--- when requested, returns a randomly selected number within the
--- buffer, replacing it with a value obtained from its base engine.
-module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
-                          : rng_engine with int.t = E.int.t = {
-  type t = E.int.t
-  module int = E.int
-  type rng = (E.rng, [K.k]t)
+-- It is an instantiation of a discard_block_engine with
+-- ranlux24_base, with parameters p=223 and r=23.
+module ranlux24: rng_engine with int.t = u32 =
+  discard_block_engine {let p = 223 let r = 23} ranlux24_base
 
-  let build_table (rng: E.rng) =
-    let xs = replicate K.k (int.i32 0)
-    in loop (rng,xs) for i < K.k do
-         let (rng,x) = E.rand rng
-         in (rng, xs with [i] <- x)
-
-  let rng_from_seed (xs: []i32) =
-    build_table (E.rng_from_seed xs)
-
-  let split_rng (n: i32) ((rng, _): rng): [n]rng =
-    map build_table (E.split_rng n rng)
-
-  let join_rng (rngs: []rng) =
-    let (rngs', _) = unzip rngs
-    in build_table (E.join_rng rngs')
-
-  let rand ((rng,table): rng): (rng, int.t) =
-    let (rng,x) = E.rand rng
-    let i = i32.i64 (int.to_i64 x) % K.k
-    let (rng,y) = E.rand rng
-    in ((rng, (copy table) with [i] <- y), table[i])
-
-  let min = E.min
-  let max = E.max
-}
+-- | A subtract-with-carry pseudo-random generator of 48-bit numbers
+-- with accelerated advancement.
+--
+-- It is an instantiation of a discard_block_engine with
+-- ranlux48_base, with parameters p=223 and r=23.
+module ranlux48: rng_engine with int.t = u64 =
+  discard_block_engine {let p = 389 let r = 11} ranlux48_base
 
 -- | An engine adaptor that returns shuffled sequences generated with
 -- minstd_rand0.  It is not a good idea to use this RNG in a parallel
