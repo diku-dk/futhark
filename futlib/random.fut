@@ -186,6 +186,12 @@ module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
   let max = E.max
 }
 
+-- | An engine adaptor that returns shuffled sequences generated with
+-- minstd_rand0.  It is not a good idea to use this RNG in a parallel
+-- setting, as the state space is fairly large.
+module knuth_b: rng_engine with int.t = u32 =
+  shuffle_order_engine {let k = 256} minstd_rand0
+
 -- | This uniform integer distribution generates integers in a given
 -- range with equal probability for each.
 module uniform_int_distribution (D: integral) (E: rng_engine):
