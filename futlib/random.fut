@@ -193,8 +193,6 @@ module uniform_int_distribution (D: integral) (E: rng_engine):
                    with rng = E.rng
                    with distribution = (D.t,D.t) = {
 
-  type t = D.t
-
   let to_D (x: E.int.t) = D.i64 (E.int.to_i64 x)
   let to_E (x: D.t) = E.int.i64 (D.to_i64 x)
 
@@ -202,16 +200,20 @@ module uniform_int_distribution (D: integral) (E: rng_engine):
   type distribution = (D.t,D.t) -- Lower and upper bounds.
   let uniform (min: D.t) (max: D.t) = (min,max)
 
+  open E.int
+
   let rand ((min,max): distribution) (rng: E.rng) =
     let min = to_E min
     let max = to_E max
-    let range = max E.int.- min E.int.+ E.int.i32 1
-    in if range E.int.<= E.int.i32 0
+    let range = max - min + i32 1
+    in if range <= i32 0
        then (rng, to_D E.min) -- Avoid infinite loop below.
-       else let secure_max = E.max E.int.- E.max E.int.%% range
+       else let secure_max = E.max - E.max %% range
             let (rng,x) = loop (rng, x) = E.rand rng
-                          while x E.int.>= secure_max do E.rand rng
-            in (rng, to_D (min E.int.+ x E.int./ (secure_max E.int./ range)))
+                          while x >= secure_max do E.rand rng
+            in (rng, to_D (min + x / (secure_max / range)))
+
+  type t = D.t
 }
 
 -- | This uniform integer distribution generates floats in a given
