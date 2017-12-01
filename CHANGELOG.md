@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   * futlib: the `complex` module now produces a non-abstract `complex`
     type.
 
-  * futlib: the `shuffle_order_engine` now takes fewer parameters.
+  * futlib: the `random` module has been overhauled, with several new
+    engines and adaptors changed, and some of the module types
+    changed.  In particular, `rng_distribution` now contains a numeric
+    module instead of an abstract type.
 
   * Type errors involving abstract types from modules now use
     qualified names (less "expected 't', got 't'", more "expected

@@ -52,16 +52,17 @@ module type rng_engine = {
 }
 
 module type rng_distribution = {
-  -- | The type of values produced by this random distribution.
-  type t
+  -- | The random number engine underlying this distribution.
+  module engine: rng_engine
 
-  -- | The RNG engine state.
-  type rng
+  -- | A module describing the type of values produced by this random
+  -- distribution.
+  module num: numeric
 
   -- | The dynamic configuration of the distribution.
   type distribution
 
-  val rand: distribution -> rng -> (rng, t)
+  val rand: distribution -> engine.rng -> (engine.rng, num.t)
 }
 
 module linear_congruential_engine (T: integral) (P: {
@@ -338,14 +339,15 @@ module knuth_b: rng_engine with int.t = u32 =
 -- | This uniform integer distribution generates integers in a given
 -- range with equal probability for each.
 module uniform_int_distribution (D: integral) (E: rng_engine):
-  rng_distribution with t = D.t
-                   with rng = E.rng
+  rng_distribution with num.t = D.t
+                   with engine.rng = E.rng
                    with distribution = (D.t,D.t) = {
 
   let to_D (x: E.int.t) = D.i64 (E.int.to_i64 x)
   let to_E (x: D.t) = E.int.i64 (D.to_i64 x)
 
-  type rng = E.rng
+  module engine = E
+  module num = D
   type distribution = (D.t,D.t) -- Lower and upper bounds.
   let uniform (min: D.t) (max: D.t) = (min,max)
 
@@ -361,23 +363,21 @@ module uniform_int_distribution (D: integral) (E: rng_engine):
             let (rng,x) = loop (rng, x) = E.rand rng
                           while x >= secure_max do E.rand rng
             in (rng, to_D (min + x / (secure_max / range)))
-
-  type t = D.t
 }
 
 -- | This uniform integer distribution generates floats in a given
 -- range with "equal" probability for each.
 module uniform_real_distribution (R: real) (E: rng_engine):
-  rng_distribution with t = R.t
-                   with rng = E.rng
+  rng_distribution with num.t = R.t
+                   with engine.rng = E.rng
                    with distribution = (R.t,R.t) = {
   let to_D (x: E.int.t) = R.i64 (E.int.to_i64 x)
 
-  type t = R.t
-  type rng = E.rng
-  type distribution = (t,t) -- Lower and upper bounds.
+  module engine = E
+  module num = R
+  type distribution = (num.t, num.t) -- Lower and upper bounds.
 
-  let uniform (min: t) (max: t) = (min,max)
+  let uniform (min: num.t) (max: num.t) = (min, max)
 
   let rand ((min_r,max_r): distribution) (rng: E.rng) =
     let (rng', x) = E.rand rng
@@ -386,16 +386,16 @@ module uniform_real_distribution (R: real) (E: rng_engine):
 }
 
 module normal_distribution (R: real) (E: rng_engine):
-  rng_distribution with t = R.t
-                   with rng = E.rng
+  rng_distribution with num.t = R.t
+                   with engine.rng = E.rng
                    with distribution = {mean:R.t,stddev:R.t} = {
   let to_R (x: E.int.t) = R.i64 (E.int.to_i64 x)
 
-  type t = R.t
-  type rng = E.rng
-  type distribution = {mean:t,stddev:t}
+  module engine = E
+  module num = R
+  type distribution = {mean: num.t, stddev: num.t}
 
-  let normal (mean: t) (stddev: t) = {mean=mean,stddev=stddev}
+  let normal (mean: num.t) (stddev: num.t) = {mean=mean, stddev=stddev}
 
   open R
 
