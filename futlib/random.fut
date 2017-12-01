@@ -144,10 +144,10 @@ module subtract_with_carry_engine (T: integral) (P: {
 
   let rng_from_seed [n] (seed: [n]i32): rng =
     let rng = e.rng_from_seed seed
-    let (x, rng) = loop (x, rng) = (replicate P.r (T.i32 0), rng)
-                     for i < P.r do let (v, rng) = e.rand rng
-                                    in (x with [i] <- T.(v % modulus),
-                                        rng)
+    let (x, _) = loop (x, rng) = (replicate P.r (T.i32 0), rng)
+                   for i < P.r do let (v, rng) = e.rand rng
+                                  in (x with [i] <- T.(v % modulus),
+                                      rng)
     let carry = T.(last x == i32 0)
     let k = 0
     in {x, carry, k}
@@ -195,7 +195,7 @@ module discard_block_engine (K: {
 
   let rand ((rng,i): rng): (rng, t) =
     let (rng, i) =
-      if i >= K.r then (loop rng for j < K.r - i do (E.rand rng).1, 0)
+      if i >= K.r then (loop rng for _j < K.r - i do (E.rand rng).1, 0)
                   else (rng, i+1)
     let (rng, x) = E.rand rng
     in ((rng, i), x)
