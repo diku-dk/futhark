@@ -188,7 +188,7 @@ module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
 
 -- | An engine adaptor that returns shuffled sequences generated with
 -- minstd_rand0.  It is not a good idea to use this RNG in a parallel
--- setting, as the state space is fairly large.
+-- setting, as the state size is fairly large.
 module knuth_b: rng_engine with int.t = u32 =
   shuffle_order_engine {let k = 256} minstd_rand0
 
