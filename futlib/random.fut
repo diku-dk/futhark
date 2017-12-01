@@ -154,26 +154,23 @@ module minstd_rand0: rng_engine with int.t = u32 =
 -- The RNG keeps a buffer of 'k' generated numbers internally, and
 -- when requested, returns a randomly selected number within the
 -- buffer, replacing it with a value obtained from its base engine.
-module shuffle_order_engine
- (K: {val k: i32})
- (I: integral)
- (E: rng_engine with int.t = I.t): rng_engine with int.t = E.int.t = {
-  type t = I.t
-  module int = I
+module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
+                          : rng_engine with int.t = E.int.t = {
+  type t = E.int.t
+  module int = E.int
   type rng = (E.rng, [K.k]t)
 
   let build_table (rng: E.rng) =
-    let xs = replicate K.k (I.i32 0)
+    let xs = replicate K.k (int.i32 0)
     in loop (rng,xs) for i < K.k do
          let (rng,x) = E.rand rng
          in (rng, xs with [i] <- x)
 
   let rng_from_seed (xs: []i32) =
-    let rng = E.rng_from_seed xs
-    in build_table rng
+    build_table (E.rng_from_seed xs)
 
   let split_rng (n: i32) ((rng, _): rng): [n]rng =
-    map (\rng -> build_table rng) (E.split_rng n rng)
+    map build_table (E.split_rng n rng)
 
   let join_rng (rngs: []rng) =
     let (rngs', _) = unzip rngs
@@ -181,7 +178,7 @@ module shuffle_order_engine
 
   let rand ((rng,table): rng): (rng, int.t) =
     let (rng,x) = E.rand rng
-    let i = i32.i64 (I.to_i64 x) % K.k
+    let i = i32.i64 (int.to_i64 x) % K.k
     let (rng,y) = E.rand rng
     in ((rng, (copy table) with [i] <- y), table[i])
 
@@ -191,9 +188,7 @@ module shuffle_order_engine
 
 -- | This uniform integer distribution generates integers in a given
 -- range with equal probability for each.
-module uniform_int_distribution
-   (D: integral)
-   (E: rng_engine):
+module uniform_int_distribution (D: integral) (E: rng_engine):
   rng_distribution with t = D.t
                    with rng = E.rng
                    with distribution = (D.t,D.t) = {
