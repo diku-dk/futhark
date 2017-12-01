@@ -239,39 +239,6 @@ module shuffle_order_engine (K: {val k: i32}) (E: rng_engine)
   let max = E.max
 }
 
--- | The xorshift128+ engine.  Uses two 64-bit words as state.
-module xorshift128plus: rng_engine with int.t = u64 = {
-  module int = u64
-  type rng = (u64,u64)
-
-  -- We currently have a problem where everything that is produced
-  -- must be convertible (losslessly) to a i64.  Therefore, we mask
-  -- off the highest bit to avoid negative numbers.
-  let mask (x: u64) = x & (~(1u64<<63u64))
-
-  let rand ((x,y): rng): (rng, u64) =
-    let x = x ^ (x << 23u64)
-    let new_x = y
-    let new_y = x ^ y ^ (x >> 17u64) ^ (y >> 26u64)
-    in ((new_x,new_y), mask (new_y + y))
-
-  let rng_from_seed [n] (seed: [n]i32) =
-    loop (a,b) = (1u64,u64.i32 n) for i < n do
-      if n % 2 == 0
-      then (rand (a^u64.i32 (hash seed[i]),b)).1
-      else (rand (a, b^u64.i32 (hash seed[i]))).1
-
-  let split_rng (n: i32) ((x,y): rng): [n]rng =
-    map (\i -> let (a,b) = (rand (rng_from_seed [hash (i^n)])).1
-               in (rand (x^a,y^b)).1) (iota n)
-
-  let join_rng [n] (xs: [n]rng): rng =
-    reduce (\(x1,y1) (x2,y2) -> (x1^x2,y1^y2)) (0u64,0u64) xs
-
-  let min = 0u64
-  let max = mask 0xFF_FF_FF_FF_FF_FF_FF_FFu64
-}
-
 -- | A 'linear_congruential_engine' producing 'u32' values and
 -- initialised with a=48271, c=u and m=2147483647.  This is the same
 -- configuration as in C++.
@@ -335,6 +302,77 @@ module ranlux48: rng_engine with int.t = u64 =
 -- setting, as the state size is fairly large.
 module knuth_b: rng_engine with int.t = u32 =
   shuffle_order_engine {let k = 256} minstd_rand0
+
+
+-- | The xorshift128+ engine.  Uses two 64-bit words as state.
+module xorshift128plus: rng_engine with int.t = u64 = {
+  module int = u64
+  type rng = (u64,u64)
+
+  -- We currently have a problem where everything that is produced
+  -- must be convertible (losslessly) to a i64.  Therefore, we mask
+  -- off the highest bit to avoid negative numbers.
+  let mask (x: u64) = x & (~(1u64<<63u64))
+
+  let rand ((x,y): rng): (rng, u64) =
+    let x = x ^ (x << 23u64)
+    let new_x = y
+    let new_y = x ^ y ^ (x >> 17u64) ^ (y >> 26u64)
+    in ((new_x,new_y), mask (new_y + y))
+
+  let rng_from_seed [n] (seed: [n]i32) =
+    loop (a,b) = (1u64,u64.i32 n) for i < n do
+      if n % 2 == 0
+      then (rand (a^u64.i32 (hash seed[i]),b)).1
+      else (rand (a, b^u64.i32 (hash seed[i]))).1
+
+  let split_rng (n: i32) ((x,y): rng): [n]rng =
+    map (\i -> let (a,b) = (rand (rng_from_seed [hash (i^n)])).1
+               in (rand (x^a,y^b)).1) (iota n)
+
+  let join_rng [n] (xs: [n]rng): rng =
+    reduce (\(x1,y1) (x2,y2) -> (x1^x2,y1^y2)) (0u64,0u64) xs
+
+  let min = 0u64
+  let max = mask 0xFF_FF_FF_FF_FF_FF_FF_FFu64
+}
+
+
+-- | PCG32.  Has a state space of 128 bits, and produces uniformly
+-- distributed 32-bit integers.
+module pcg32: rng_engine with int.t = u32 = {
+  module int = u32
+  type rng = {state: u64, inc: u64}
+
+  let rand ({state, inc}: rng) =
+    let oldstate = state
+    let state = oldstate * 6364136223846793005u64 + (inc|1u64)
+    let xorshifted = u32.u64 (((oldstate >> 18u64) ^ oldstate) >> 27u64)
+    let rot = u32.u64 (oldstate >> 59u64)
+    in ({state, inc},
+        (xorshifted >> rot) | (xorshifted << ((-rot) & 31u32)))
+
+  let rng_from_seed (xs: []i32) =
+    let initseq = 0xda3e39cb94b95bdbu64 -- Should expose this somehow.
+    let state = 0u64
+    let inc = (initseq << 1u64) | 1u64
+    let {state, inc} = (rand {state, inc}).1
+    let state = loop state for x in xs do state + u64.i32 x
+    in (rand {state, inc}).1
+
+  let split_rng (n: i32) ({state,inc}: rng): [n]rng =
+    map (\i -> (rand {state = state * u64.i32 (hash (i^n)), inc}).1) (iota n)
+
+  let join_rng (rngs: []rng) =
+    let states = map (\x -> x.state) rngs
+    let incs = map (\x -> x.inc) rngs
+    let state = reduce (*) 1u64 states
+    let inc = reduce (|) 0u64 incs
+    in {state, inc}
+
+  let min = 0u32
+  let max = 0xFFFFFFFFu32
+}
 
 -- | This uniform integer distribution generates integers in a given
 -- range with equal probability for each.

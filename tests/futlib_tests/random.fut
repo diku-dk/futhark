@@ -48,6 +48,17 @@ entry test_i32_ranlux24 (x: i32) (n: i32) =
   test_i32_ranlux24_m.test x n (1,100)
 
 -- ==
+-- entry: test_i32_pcg32
+-- compiled input { 0 10000 } output { 5 50 }
+-- compiled input { 1 10000 } output { 94 50 }
+
+module test_i32_pcg32_m =
+  mktest (uniform_int_distribution i32 pcg32)
+
+entry test_i32_pcg32 (x: i32) (n: i32) =
+  test_i32_pcg32_m.test x n (1,100)
+
+-- ==
 -- entry: test_f32_rand
 -- compiled input { 0 10000 } output { 28.439787f32 50.383465f32 }
 -- compiled input { 1 10000 } output { 36.858000f32 50.435020f32 }
