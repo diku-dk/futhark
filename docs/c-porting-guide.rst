@@ -63,7 +63,7 @@ case, a C assignment can generally be translated to just a
 function for computing the modular multiplicative inverse of a 16-bit
 unsigned integer (part of the IDEA encryption algorithm):
 
-.. code:: c
+.. code-block:: c
 
   static uint16_t ideaInv(uint16_t a) {
     uint32_t b;
@@ -110,7 +110,9 @@ change value from one iteration of the loop to the next will need to
 be maintained as *merge parameters* of the Futhark ``do``-loop.
 
 The Futhark program resulting from a straightforward port looks as
-follows::
+follows:
+
+.. code-block:: none
 
   let main(a: u16): u16 =
     let b = 0x10001u32
