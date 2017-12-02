@@ -112,7 +112,7 @@ be maintained as *merge parameters* of the Futhark ``do``-loop.
 The Futhark program resulting from a straightforward port looks as
 follows:
 
-.. code-block:: none
+.. code-block:: futhark
 
   let main(a: u16): u16 =
     let b = 0x10001u32

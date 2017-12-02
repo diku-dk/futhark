@@ -16,6 +16,9 @@
 import sys
 import os
 import yaml
+from pygments.lexer import RegexLexer
+from pygments import token
+from sphinx.highlighting import lexers
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -91,6 +94,20 @@ exclude_patterns = ['_build']
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
+
+class FutharkLexer(RegexLexer):
+    name = 'Futhark'
+
+    tokens = {
+        'root': [
+            (r'if|then|else|let|loop|in|default|val|for|do|with|local|open|include|import|type|entry|module|empty|while|unsafe', token.Keyword),
+            (r"[a-zA-Z_][a-zA-Z0-9_']*", token.Name),
+            (r'.', token.Text)
+        ]
+    }
+
+
+lexers['futhark'] = FutharkLexer()
 
 # A list of ignored prefixes for module index sorting.
 #modindex_common_prefix = []
