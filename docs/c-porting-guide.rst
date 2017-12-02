@@ -114,23 +114,23 @@ follows:
 
 .. code-block:: futhark
 
-  let main(a: u16): u16 =
+  let main(a: u16): u32 =
     let b = 0x10001u32
     let u = 0i32
-    let v = 1i32
-    loop ((a,b,u,v)) = while a > 0u16 do
-      let q = b / u32(a)
-      let r = b % u32(a)
+    let v = 1i32 in
+    let (_,_,u,_) = loop ((a,b,u,v)) while a > 0u16 do
+      let q = b / u32.u16(a)
+      let r = b % u32.u16(a)
 
-      let b = u32(a)
-      let a = u16(r)
+      let b = u32.u16(a)
+      let a = u16.u32(r)
 
       let t = v
-      let v = u - i32(q) * v
-      let u = t
-      in (a,b,u,v)
+      let v = u - i32.u32 (q) * v
+      let u = t in
+      (a,b,u,v)
 
-    in u16(if u < 0 then u + 0x10001 else u)
+    in u32.i32(if u < 0 then u + 0x10001 else u)
 
 Note the heavy use of type conversion and type suffixes for constants.
 This is necessary due to Futhark's lack of implicit conversions.  Note
