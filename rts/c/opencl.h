@@ -359,6 +359,9 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     describe_device_option(device_option);
   }
 
+  ctx->device = device = device_option.device;
+  ctx->platform = platform = device_option.platform;
+
   if (required_types & OPENCL_F64) {
     cl_uint supported;
     OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
@@ -369,9 +372,6 @@ static cl_program setup_opencl(struct opencl_context *ctx,
             device_option.device_name);
     }
   }
-
-  ctx->device = device = device_option.device;
-  ctx->platform = platform = device_option.platform;
 
   OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                                  sizeof(size_t), &max_group_size, NULL));
