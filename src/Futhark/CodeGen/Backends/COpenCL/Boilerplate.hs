@@ -108,9 +108,8 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types = do
 
   mapM_ GC.libDecl later_top_decls
 
-  let set_required_types = if FloatType Float64 `elem` types
-                           then [[C.cstm|required_types |= OPENCL_F64; |]]
-                           else []
+  let set_required_types = [ [C.cstm|required_types |= OPENCL_F64; |]
+                           | FloatType Float64 `elem` types ]
   GC.libDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg) {
                           struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
