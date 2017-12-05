@@ -333,12 +333,17 @@ static cl_build_status build_opencl_program(cl_program program, cl_device_id dev
   return build_status;
 }
 
+/* Fields in a bitmask indicating which types we must be sure are
+   available. */
+enum opencl_required_type { OPENCL_F64 = 1 };
+
 // We take as input several strings representing the program, because
 // C does not guarantee that the compiler supports particularly large
 // literals.  Notably, Visual C has a limit of 2048 characters.  The
 // array must be NULL-terminated.
 static cl_program setup_opencl(struct opencl_context *ctx,
-                               const char *srcs[]) {
+                               const char *srcs[],
+                               int required_types) {
 
   cl_int error;
   cl_platform_id platform;
@@ -352,6 +357,17 @@ static cl_program setup_opencl(struct opencl_context *ctx,
 
   if (ctx->cfg.debugging) {
     describe_device_option(device_option);
+  }
+
+  if (required_types & OPENCL_F64) {
+    cl_uint supported;
+    OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE,
+                                   sizeof(cl_uint), &supported, NULL));
+    if (!supported) {
+      panic(1,
+            "Program uses double-precision floats, but this is not supported on chosen device: %s\n",
+            device_option.device_name);
+    }
   }
 
   ctx->device = device = device_option.device;

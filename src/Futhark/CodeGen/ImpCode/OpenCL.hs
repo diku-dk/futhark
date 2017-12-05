@@ -29,6 +29,8 @@ data Program = Program { openClProgram :: String
                        , openClPrelude :: String
                          -- ^ Must be prepended to the program.
                        , openClKernelNames :: [KernelName]
+                       , openClUsedTypes :: [PrimType]
+                         -- ^ So we can detect whether the device is capable.
                        , hostFunctions :: Functions OpenCL
                        }
 

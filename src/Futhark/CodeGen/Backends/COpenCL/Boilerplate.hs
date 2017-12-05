@@ -16,8 +16,9 @@ import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.Util (chunk)
 
-generateBoilerplate :: String -> String -> [String] -> GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_code opencl_prelude kernel_names = do
+generateBoilerplate :: String -> String -> [String] -> [PrimType]
+                    -> GC.CompilerM OpenCL () ()
+generateBoilerplate opencl_code opencl_prelude kernel_names types = do
   ctx_ty <- GC.contextType
   final_inits <- GC.contextFinalInits
 
@@ -107,6 +108,9 @@ generateBoilerplate opencl_code opencl_prelude kernel_names = do
 
   mapM_ GC.libDecl later_top_decls
 
+  let set_required_types = if FloatType Float64 `elem` types
+                           then [[C.cstm|required_types |= OPENCL_F64; |]]
+                           else []
   GC.libDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg) {
                           struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
@@ -118,7 +122,10 @@ generateBoilerplate opencl_code opencl_prelude kernel_names = do
                           $stms:init_fields
                           $stms:ctx_opencl_inits
 
-                          setup_opencl_and_load_kernels(ctx);
+                          int required_types = 0;
+                          $stms:set_required_types
+
+                          setup_opencl_and_load_kernels(ctx, required_types);
 
                           return ctx;
                        }|]
@@ -164,9 +171,9 @@ openClDecls ctx_ty final_inits kernel_names opencl_program opencl_prelude =
 
         openCL_load = [
           [C.cedecl|
-void setup_opencl_and_load_kernels($ty:ctx_ty *ctx) {
+void setup_opencl_and_load_kernels($ty:ctx_ty *ctx, int required_types) {
   typename cl_int error;
-  typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program);
+  typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types);
   // Load all the kernels.
   $stms:(map (loadKernelByName) kernel_names)
 

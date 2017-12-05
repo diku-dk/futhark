@@ -42,7 +42,8 @@ kernelsToOpenCL prog = do
   let kernel_names = M.keys kernels
       opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genOpenClPrelude requirements
-  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names $
+  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names
+    (S.toList $ kernelUsedTypes requirements) $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
@@ -58,7 +59,7 @@ pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel addres
 type UsedFunctions = [(String,C.Func)] -- The ordering is important!
 
 data OpenClRequirements =
-  OpenClRequirements { _kernelUsedTypes :: S.Set PrimType
+  OpenClRequirements { kernelUsedTypes :: S.Set PrimType
                      , _kernelConstants :: [(VName, KernelConstExp)]
                      }
 
