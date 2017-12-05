@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+   * A comprehensible error message is now issued when attempting to
+     run a Futhark program on an OpenCL that does not support the
+     types used by the program.  A common case was trying to use
+     double-precision floats on an Intel GPU.
+
 ### Removed
 
 ### Changed
