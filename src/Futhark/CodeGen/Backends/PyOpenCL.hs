@@ -30,7 +30,7 @@ compileProg module_name prog = do
   --could probably be a better why do to this..
   case res of
     Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names prog')  -> do
+    Right (Imp.Program opencl_code opencl_prelude kernel_names types prog')  -> do
       --prepare the strings for assigning the kernels and set them as global
       let assign = unlines $ map (\x -> pretty $ Assign (Var ("self."++x++"_var")) (Var $ "program."++x)) kernel_names
 
@@ -57,7 +57,7 @@ compileProg module_name prog = do
                                        , "group_size=None"
                                        , "num_groups=None"
                                        , "tile_size=32"]
-                        [Escape $ openClInit assign]
+                        [Escape $ openClInit types assign]
           options = [ Option { optionLongName = "platform"
                              , optionShortName = Just 'p'
                              , optionArgument = RequiredArgument

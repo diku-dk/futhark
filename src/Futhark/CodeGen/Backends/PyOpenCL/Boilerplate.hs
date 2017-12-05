@@ -10,6 +10,7 @@ import Data.FileEmbed
 import qualified Data.Text as T
 import NeatInterpolation (text)
 
+import Futhark.CodeGen.ImpCode.OpenCL (PrimType(..), FloatType(..))
 import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.Util.Pretty (pretty)
@@ -17,8 +18,8 @@ import Futhark.Util.Pretty (pretty)
 openClPrelude :: String
 openClPrelude = $(embedStringFile "rts/python/opencl.py")
 
-openClInit :: String -> String
-openClInit assign = T.unpack [text|
+openClInit :: [PrimType] -> String -> String
+openClInit types assign = T.unpack [text|
 self.ctx = get_prefered_context(interactive, platform_pref, device_pref)
 self.queue = cl.CommandQueue(self.ctx)
 self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
@@ -28,6 +29,7 @@ device_type = self.device.type
 lockstep_width = None
 $set_sizes
 max_tile_size = int(np.sqrt(self.device.max_work_group_size))
+$check_types
 if (tile_size * tile_size > self.device.max_work_group_size):
   sys.stderr.write('Warning: Device limits tile size to {} (setting was {})\n'.format(max_tile_size, tile_size))
   tile_size = max_tile_size
@@ -46,7 +48,12 @@ $assign'
   where assign' = T.pack assign
         set_sizes = T.pack $ unlines $
                     map (pretty . sizeHeuristicsCode) sizeHeuristicsTable
-
+        check_types = if FloatType Float64 `elem` types
+                      then check_f64 else ""
+        check_f64 = [text|
+if self.device.get_info(cl.device_info.PREFERRED_VECTOR_WIDTH_DOUBLE) == 0:
+  raise Exception('Program uses double-precision floats, but this is not supported on chosen device: %s' % self.device.name)
+|]
 
 sizeHeuristicsCode :: SizeHeuristic -> PyStmt
 sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
