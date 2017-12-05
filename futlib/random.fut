@@ -128,6 +128,7 @@ module subtract_with_carry_engine (T: integral) (P: {
               k: i32}
 
   let rand ({x, carry, k}: rng): (rng, t) =
+    unsafe
     let short_index = k - short_lag
     let short_index = if short_index < 0
                       then short_index + long_lag
