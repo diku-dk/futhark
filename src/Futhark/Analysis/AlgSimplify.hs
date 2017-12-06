@@ -62,7 +62,7 @@ runAlgSimplifier :: Bool -> AlgSimplifyM a -> RangesRep -> Either Error a
 runAlgSimplifier s x r = runReaderT (evalStateT x 0) env
   where env = AlgSimplifyEnv { inSolveLTH0 = s
                              , ranges = r
-                             , maxSteps = 1000 -- heuristically chosen
+                             , maxSteps = 100 -- heuristically chosen
                              }
 
 step :: AlgSimplifyM ()
