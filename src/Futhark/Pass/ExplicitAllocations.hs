@@ -494,7 +494,7 @@ ensureDirectArray :: (Allocable fromlore tolore,
 ensureDirectArray v = do
   res <- lookupMemInfo v
   case res of
-    MemArray _ shape _ (ArrayIn mem ixfun)
+    MemArray _ _ _ (ArrayIn mem ixfun)
       | IxFun.isDirect ixfun -> do
         memt <- lookupType mem
         case memt of
