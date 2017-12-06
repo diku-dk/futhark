@@ -1093,7 +1093,8 @@ simplifyScalExp vtable (Let pat _ e) = do
         all ((<size_bound) . SE.scalExpSize) ses,
         Right True <- and <$> mapM truish ses ->
         letBind_ pat $ BasicOp $ SubExp $ Constant $ BoolValue True
-      | isNothing $ valOrVar se,
+      | SE.scalExpType se == Bool,
+        isNothing $ valOrVar se,
         SE.scalExpSize se < size_bound,
         Just se' <- valOrVar $ AS.simplify se ranges ->
         letBind_ pat $ BasicOp $ SubExp se'
