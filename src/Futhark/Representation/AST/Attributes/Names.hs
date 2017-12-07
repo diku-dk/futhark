@@ -227,6 +227,9 @@ instance FreeIn Certificates where
 instance FreeIn attr => FreeIn (StmAux attr) where
   freeIn (StmAux cs attr) = freeIn cs <> freeIn attr
 
+instance FreeIn a => FreeIn (IfAttr a) where
+  freeIn (IfAttr r _) = freeIn r
+
 -- | Either return precomputed free names stored in the attribute, or
 -- the freshly computed names.  Relies on lazy evaluation to avoid the
 -- work.
