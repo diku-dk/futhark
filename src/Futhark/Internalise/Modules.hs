@@ -288,8 +288,20 @@ transformImports :: Imports -> TransformM ()
 transformImports [] = return ()
 transformImports ((name,imp):imps) = do
   let abs = S.fromList $ map qualLeaf $ S.toList $ fileAbs imp
-  scope <- bindingAbs abs $ transformDecs $ progDecs $ fileProg imp
+  scope <- censor (fmap maybeHideEntryPoint) $
+           bindingAbs abs $ transformDecs $ progDecs $ fileProg imp
   bindingAbs abs $ bindingImport name scope $ transformImports imps
+  where
+    -- Only the "main" file (last import) is allowed to have entry points.
+    permit_entry_points = null imps
+
+    maybeHideEntryPoint (FunDec fdec) =
+      FunDec fdec { funBindEntryPoint =
+                      funBindEntryPoint fdec && permit_entry_points }
+    maybeHideEntryPoint (ValDec vdec) =
+      ValDec vdec { constBindEntryPoint =
+                      constBindEntryPoint vdec && permit_entry_points }
+    maybeHideEntryPoint d = d
 
 transformProg :: MonadFreshNames m => Imports -> m [Dec]
 transformProg prog = modifyNameSource $ \namesrc ->
