@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     qualified names (less "expected 't', got 't'", more "expected
     'foo.t', got 'bar.t'").
 
+  * Only entry points defined directly in the file given to the
+    compiler will be visible.
+
 ### Fixed
 
   * Fusion would sometimes remove safety checks on e.g. `reshape`
