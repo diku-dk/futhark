@@ -1,11 +1,17 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | It is well known that fully parallel loops can always be
 -- interchanged inwards with a sequential loop.  This module
 -- implements that transformation.
+--
+-- This is also where we implement loop-switching (for branches),
+-- which is semantically similar to interchange.
 module Futhark.Pass.ExtractKernels.Interchange
        (
          SeqLoop (..)
        , interchangeLoops
+       , Branch (..)
+       , interchangeBranch
        ) where
 
 import Control.Applicative
@@ -18,6 +24,7 @@ import Futhark.Pass.ExtractKernels.Distribution
   (LoopNesting(..), KernelNest, kernelNestLoops)
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
+import Futhark.Transform.Rename
 import Futhark.Tools
 
 import Prelude
@@ -104,3 +111,52 @@ interchangeLoops nest loop = do
   (loop', bnds) <-
     runBinder $ foldM interchangeLoop loop $ reverse $ kernelNestLoops nest
   return $ bnds ++ [seqLoopStm loop']
+
+data Branch = Branch [Int] Pattern SubExp Body Body (IfAttr (BranchType SOACS))
+
+branchStm :: Branch -> Stm
+branchStm (Branch _ pat cond tbranch fbranch ret) =
+  Let pat (defAux ()) $ If cond tbranch fbranch ret
+
+interchangeBranch1 :: (MonadBinder m, LocalScope SOACS m) =>
+                      Branch -> LoopNesting -> m Branch
+interchangeBranch1
+  (Branch perm branch_pat cond tbranch fbranch (IfAttr ret if_sort))
+  (MapNesting pat cs w params_and_arrs) = do
+    let ret' = map (`arrayOfRow` Free w) ret
+        pat' = Pattern [] $ rearrangeShape perm $ patternValueElements pat
+
+        (params, arrs) = unzip params_and_arrs
+        lam_ret = map rowType $ patternTypes pat
+
+        branch_pat' =
+          Pattern [] $ map (fmap (`arrayOfRow` w)) $ patternElements branch_pat
+
+        mkBranch branch = (renameBody=<<) $ do
+          branch' <- case bodyStms branch of
+                       [] -> runBodyBinder $
+                             -- XXX: We need a temporary dummy binding to
+                             -- prevent an empty map body.  The kernel
+                             -- extractor does not like empty map bodies.
+                             resultBody <$> mapM dummyBind (bodyResult branch)
+                       _ -> return branch
+          let lam = Lambda params branch' lam_ret
+              res = map Var $ patternNames branch_pat'
+              map_bnd = Let branch_pat' (StmAux cs ()) $ Op $ Map w lam arrs
+          return $ mkBody [map_bnd] res
+
+    tbranch' <- mkBranch tbranch
+    fbranch' <- mkBranch fbranch
+    return $ Branch [0..patternSize pat-1] pat' cond tbranch' fbranch' $
+      IfAttr ret' if_sort
+  where dummyBind se = do
+          dummy <- newVName "dummy"
+          letBindNames'_ [dummy] (BasicOp $ SubExp se)
+          return $ Var dummy
+
+interchangeBranch :: (MonadFreshNames m, HasScope SOACS m) =>
+                     KernelNest -> Branch -> m [Stm]
+interchangeBranch nest loop = do
+  (loop', bnds) <-
+    runBinder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
+  return $ bnds ++ [branchStm loop']

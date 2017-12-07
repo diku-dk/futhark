@@ -762,19 +762,44 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
           -- We need to pretend pat_unused was used anyway, by adding
           -- it to the kernel nest.
           localScope (typeEnvFromKernelAcc acc') $ do
-          nest' <- expandKernelNest pat_unused nest
           addKernels kernels
+          nest' <- expandKernelNest pat_unused nest
           types <- asksScope scopeForSOACs
+          scope <- askScope
           bnds <- runReaderT
                   (interchangeLoops nest' (SeqLoop perm pat val form body)) types
           -- runDistribM starts out with an empty scope, so we have to
           -- immmediately insert the real one.
-          scope <- askScope
           bnds' <- runDistribM $ localScope scope $ transformStms bnds
           addKernel bnds'
           return acc'
     _ ->
       addStmToKernel bnd acc
+
+maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
+  | null (patternContextElements pat),
+    bodyContainsParallelism tbranch || bodyContainsParallelism fbranch =
+    distributeSingleStm acc stm >>= \case
+      Just (kernels, res, nest, acc')
+        | S.null $ (freeIn cond <> freeIn ret) `S.intersection`
+          boundInKernelNest nest,
+          Just (perm, pat_unused) <- permutationAndMissing pat res ->
+            -- We need to pretend pat_unused was used anyway, by adding
+            -- it to the kernel nest.
+            localScope (typeEnvFromKernelAcc acc') $ do
+            nest' <- expandKernelNest pat_unused nest
+            addKernels kernels
+            types <- asksScope scopeForSOACs
+            let branch = Branch perm pat cond tbranch fbranch ret
+            stms <- runReaderT (interchangeBranch nest' branch) types
+            -- runDistribM starts out with an empty scope, so we have to
+            -- immmediately insert the real one.
+            scope <- askScope
+            stms' <- runDistribM $ localScope scope $ transformStms stms
+            addKernel stms'
+            return acc'
+      _ ->
+        addStmToKernel stm acc
 
 maybeDistributeStm (Let pat (StmAux cs _) (Op (Reduce w comm lam input))) acc
   | Just m <- irwim pat w comm lam input = do

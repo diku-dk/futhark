@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
      types used by the program.  A common case was trying to use
      double-precision floats on an Intel GPU.
 
+   * Parallelism inside of a branch can now be exploited if the branch
+     condition and the size of its results is invariant to all
+     enclosing parallel loops.
+
 ### Removed
 
 ### Changed

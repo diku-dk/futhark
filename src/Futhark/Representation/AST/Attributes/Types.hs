@@ -193,9 +193,12 @@ arrayOf Mem{} _ _ =
   error "arrayOf Mem"
 
 -- | Construct an array whose rows are the given type, and the outer
--- size is the given 'SubExp'.  This is just a convenient wrapper
+-- size is the given dimension.  This is just a convenient wrapper
 -- around 'arrayOf'.
-arrayOfRow :: Type -> SubExp -> Type
+arrayOfRow :: ArrayShape (ShapeBase d) =>
+              TypeBase (ShapeBase d) NoUniqueness
+           -> d
+           -> TypeBase (ShapeBase d) NoUniqueness
 arrayOfRow t size = arrayOf t (Shape [size]) NoUniqueness
 
 -- | Construct an array whose rows are the given type, and the outer
