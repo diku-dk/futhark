@@ -778,7 +778,8 @@ maybeDistributeStm bnd@(Let pat _ (DoLoop [] val form@ForLoop{} body)) acc
 
 maybeDistributeStm stm@(Let pat _ (If cond tbranch fbranch ret)) acc
   | null (patternContextElements pat),
-    bodyContainsParallelism tbranch || bodyContainsParallelism fbranch =
+    bodyContainsParallelism tbranch || bodyContainsParallelism fbranch ||
+    any (not . primType) (ifReturns ret) =
     distributeSingleStm acc stm >>= \case
       Just (kernels, res, nest, acc')
         | S.null $ (freeIn cond <> freeIn ret) `S.intersection`
