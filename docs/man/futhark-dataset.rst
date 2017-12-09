@@ -49,6 +49,10 @@ before data generation (--generate):
 -b, --binary
   Output data in binary Futhark format (must precede --generate).
 
+-t, --type
+  Output the types of values (textually) instead of the values
+  themselves.  Mostly useful when reading values on stdin.
+
 --binary-no-header
   Output data in binary Futhark format without header (must precede --generate).
 
