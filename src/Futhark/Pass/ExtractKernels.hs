@@ -281,11 +281,15 @@ transformStm (Let pat aux (DoLoop ctx val form body)) =
 transformStm (Let pat (StmAux cs _) (Op (Map w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
-transformStm (Let pat (StmAux cs _) (Op (Scanomap w lam1 lam2 nes arrs))) = do
-  lam1_sequential <- Kernelise.transformLambda lam1
-  lam2_sequential <- Kernelise.transformLambda lam2
-  runBinder_ $ certifying cs $
-    blockedScan pat w lam1_sequential lam2_sequential (intConst Int32 1) [] [] nes arrs
+transformStm (Let pat (StmAux cs _) (Op (Scanomap w lam1 lam2 nes arrs)))
+  | lambdaContainsParallelism lam2 = do
+      (mapbnd, redbnd) <- scanomapToMapAndReduce pat (w, lam1, lam2, nes, arrs)
+      transformStms [certify cs mapbnd, certify cs redbnd]
+  | otherwise = do
+      lam1_sequential <- Kernelise.transformLambda lam1
+      lam2_sequential <- Kernelise.transformLambda lam2
+      runBinder_ $ certifying cs $
+        blockedScan pat w lam1_sequential lam2_sequential (intConst Int32 1) [] [] nes arrs
 
 transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs))) =
   if sequentialiseRedomapBody then do
