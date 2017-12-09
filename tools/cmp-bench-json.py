@@ -41,14 +41,18 @@ for prog,a_prog in a_json.items():
                 print('In %s but not %s: program %s dataset %s' % (a_file, b_file, prog, dataset))
             else:
                 b_dataset_results = b_prog_datasets[dataset]
-                a_runtimes = a_dataset_results['runtimes']
-                b_runtimes = b_dataset_results['runtimes']
-                speedup = np.mean(a_runtimes)/np.mean(b_runtimes)
-                diff = abs(np.mean(a_runtimes)-np.mean(b_runtimes))
-                significant = diff > np.std(a_runtimes)/2 + np.std(a_runtimes)/2
-                # Apart from speedups, we also calculate whether the
-                # change is statistically significant.
-                speedups[prog][dataset] = (speedup, significant)
+                if 'runtimes' in a_dataset_results:
+                    a_runtimes = a_dataset_results['runtimes']
+                    if not ('runtimes' in b_dataset_results):
+                        print('In %s but failed in %s: program %s dataset %s' % (a_file, b_file, prog, dataset))
+                        continue
+                    b_runtimes = b_dataset_results['runtimes']
+                    speedup = np.mean(a_runtimes)/np.mean(b_runtimes)
+                    diff = abs(np.mean(a_runtimes)-np.mean(b_runtimes))
+                    significant = diff > np.std(a_runtimes)/2 + np.std(a_runtimes)/2
+                    # Apart from speedups, we also calculate whether the
+                    # change is statistically significant.
+                    speedups[prog][dataset] = (speedup, significant)
 
 for prog,b_prog in b_json.items():
     if not prog in a_json:
