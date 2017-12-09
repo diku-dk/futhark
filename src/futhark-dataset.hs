@@ -42,6 +42,7 @@ main = mainWithOptions initialDataOptions commandLineOptions f
                   case format config of
                     Text -> mapM_ (putStrLn . pretty) vs
                     Binary{} -> mapM_ (BS.putStr . Bin.encode) vs
+                    Type -> mapM_ (putStrLn . valueType) vs
           | otherwise =
               Just $ zipWithM_ ($) (optOrders config) $ map mkStdGen [optSeed config..]
         f _ _ =
@@ -54,6 +55,7 @@ data BinaryOutputFormat = AllData
 
 data OutputFormat = Text
                   | Binary BinaryOutputFormat
+                  | Type
                   deriving (Eq, Ord, Show)
 
 data DataOptions = DataOptions
@@ -91,13 +93,15 @@ commandLineOptions = [
      "TYPE")
     "Generate a random value of this type."
   , Option [] ["text"]
-    (NoArg $ Right $ \opts ->
-        opts { format = Text })
+    (NoArg $ Right $ \opts -> opts { format = Text })
     "Output data in text format (must precede --generate)."
   , Option "b" ["binary"]
     (NoArg $ Right $ \opts ->
         opts { format = Binary AllData })
     "Output data in binary Futhark format (must precede --generate)."
+  , Option "t" ["type"]
+    (NoArg $ Right $ \opts -> opts { format = Type })
+    "Output the type (textually) rather than the value (must precede --generate)."
   , Option [] ["binary-no-header"]
     (NoArg $ Right $ \opts ->
         opts { format = Binary NoHeader })
@@ -145,6 +149,7 @@ tryMakeGenerator t = do
     case fmt of
       Text -> printSimpleValueT v
       Binary binfmt -> printSimpleValueB binfmt t' v
+      Type -> putStrLn t
   where name = "option " ++ t
 
 data SimpleType = SimpleArray SimpleType Int

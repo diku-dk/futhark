@@ -7,6 +7,7 @@
 -- for your test programs.
 module Futhark.Test.Values
        ( Value
+       , valueType
 
        -- * Reading Values
        , readValues
@@ -135,7 +136,7 @@ putBinaryValue tstr shape vs putv = do
 instance PP.Pretty Value where
   ppr v | product (valueShape v) == 0 =
             text "empty" <>
-            parens (dims <> text (valueType v))
+            parens (dims <> text (valueElemType v))
     where dims = mconcat $ replicate (length (valueShape v)-1) $ text "[]"
   ppr (Int8Value shape vs) = pprArray (UVec.toList shape) vs
   ppr (Int16Value shape vs) = pprArray (UVec.toList shape) vs
@@ -158,17 +159,21 @@ pprArray (d:ds) vs =
         slice i = UVec.slice (i*slice_size) slice_size vs
 
 valueType :: Value -> String
-valueType (Int8Value _ _) = "i8"
-valueType (Int16Value _ _) = "i16"
-valueType (Int32Value _ _) = "i32"
-valueType (Int64Value _ _) = "i64"
-valueType (Word8Value _ _) = "u8"
-valueType (Word16Value _ _) = "u16"
-valueType (Word32Value _ _) = "u32"
-valueType (Word64Value _ _) = "u64"
-valueType (Float32Value _ _) = "f32"
-valueType (Float64Value _ _) = "f64"
-valueType (BoolValue _ _) = "bool"
+valueType v = concatMap (\d -> "[" ++ show d ++ "]") (valueShape v) ++
+              valueElemType v
+
+valueElemType :: Value -> String
+valueElemType (Int8Value _ _) = "i8"
+valueElemType (Int16Value _ _) = "i16"
+valueElemType (Int32Value _ _) = "i32"
+valueElemType (Int64Value _ _) = "i64"
+valueElemType (Word8Value _ _) = "u8"
+valueElemType (Word16Value _ _) = "u16"
+valueElemType (Word32Value _ _) = "u32"
+valueElemType (Word64Value _ _) = "u64"
+valueElemType (Float32Value _ _) = "f32"
+valueElemType (Float64Value _ _) = "f64"
+valueElemType (BoolValue _ _) = "bool"
 
 valueShape :: Value -> [Int]
 valueShape (Int8Value shape _) = UVec.toList shape
@@ -496,7 +501,7 @@ compareValue i got_v expected_v
       (BoolValue _ got_vs, BoolValue _ expected_vs) ->
         compareGen compareBool got_vs expected_vs
       _ ->
-        Just $ TypeMismatch i (valueType got_v) (valueType expected_v)
+        Just $ TypeMismatch i (valueElemType got_v) (valueElemType expected_v)
   | otherwise =
       Just $ ArrayShapeMismatch i (valueShape got_v) (valueShape expected_v)
   where compareNum tol = compareGen $ compareElement tol
