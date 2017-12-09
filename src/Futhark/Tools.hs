@@ -6,6 +6,7 @@ module Futhark.Tools
 
   , nonuniqueParams
   , redomapToMapAndReduce
+  , scanomapToMapAndReduce
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
   , extLambdaToLambda
@@ -54,8 +55,7 @@ nonuniqueParams params =
 -- @map@ binding and a @reduce@ binding (returned in that order).
 --
 -- Reuses the original pattern for the @reduce@, and creates a new
--- pattern with new 'Ident's for the result of the @map@. Does /not/
--- add the new idents to the 'Scope'.
+-- pattern with new 'Ident's for the result of the @map@.
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
 redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
@@ -67,22 +67,56 @@ redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
                          , [VName])
                       -> m (Stm lore, Stm lore)
 redomapToMapAndReduce (Pattern [] patelems)
-                      (outersz, comm, redlam, redmap_lam, accs, arrs) = do
+                      (w, comm, redlam, redmap_lam, accs, arrs) = do
+  ((map_pat, newmap_lam), (red_pat, red_args)) <-
+    splitScanOrRedomap patelems w redmap_lam accs
+  let map_bnd = mkLet [] map_pat $
+                Op $ Map w newmap_lam arrs
+      red_bnd = Let red_pat (defAux ()) $
+                Op $ Reduce w comm redlam red_args
+  return (map_bnd, red_bnd)
+redomapToMapAndReduce _ _ =
+  error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
+
+-- | Like 'redomapToMapAndReduce', but for 'Scanomap'.
+scanomapToMapAndReduce :: (MonadFreshNames m, Bindable lore,
+                          ExpAttr lore ~ (), Op lore ~ SOAC lore) =>
+                         Pattern lore
+                      -> ( SubExp
+                         , LambdaT lore, LambdaT lore, [SubExp]
+                         , [VName])
+                      -> m (Stm lore, Stm lore)
+scanomapToMapAndReduce (Pattern [] patelems)
+                      (w, scanlam, scanmap_lam, accs, arrs) = do
+  ((map_pat, newmap_lam), (scan_pat, scan_args)) <-
+    splitScanOrRedomap patelems w scanmap_lam accs
+  let map_bnd = mkLet [] map_pat $
+                Op $ Map w newmap_lam arrs
+      scan_bnd = Let scan_pat (defAux ()) $
+                 Op $ Scan w scanlam scan_args
+  return (map_bnd, scan_bnd)
+scanomapToMapAndReduce _ _ =
+  error "scanomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
+
+splitScanOrRedomap :: (Typed attr, MonadFreshNames m,
+                       Bindable lore) =>
+                      [PatElemT attr]
+                   -> SubExp -> LambdaT lore -> [SubExp]
+                   -> m (([(Ident, Bindage)], LambdaT lore),
+                         (PatternT attr, [(SubExp, VName)]))
+splitScanOrRedomap patelems w redmap_lam accs = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
-  map_accpat <- mapM accMapPatElem acc_patelems
+      (acc_ts, _arr_ts) = splitAt (length accs) $ lambdaReturnType redmap_lam
+  map_accpat <- zipWithM accMapPatElem acc_patelems acc_ts
   map_arrpat <- mapM arrMapPatElem arr_patelems
   let map_pat = map_accpat ++ map_arrpat
-      map_bnd = mkLet [] map_pat $
-                Op $ Map outersz newmap_lam arrs
       red_args = zip accs $ map (identName . fst) map_accpat
-      red_bnd = Let (Pattern [] acc_patelems) (defAux ()) $
-                Op $ Reduce outersz comm redlam red_args
-  return (map_bnd, red_bnd)
+  return ((map_pat, newmap_lam),
+          (Pattern [] acc_patelems, red_args))
   where
-    accMapPatElem pe = do
-      let (Ident vn tp) = patElemIdent pe
-      let tp' = arrayOfRow tp outersz
-      i <- newIdent (baseString vn ++ "_map_acc") tp'
+    accMapPatElem pe acc_t = do
+      i <- newIdent (baseString (patElemName pe) ++ "_map_acc") $
+           acc_t `arrayOfRow` w
       return (i, patElemBindage pe)
     arrMapPatElem pe =
       return (patElemIdent pe, patElemBindage pe)
@@ -96,8 +130,6 @@ redomapToMapAndReduce (Pattern [] patelems)
           bnds' = bndaccs ++ bodyStms body
           body' = body {bodyStms = bnds'}
       in redmap_lam { lambdaBody = body', lambdaParams = params' }
-redomapToMapAndReduce _ _ =
-  error "redomapToMapAndReduce does not handle a non-empty 'patternContextElements'"
 
 sequentialStreamWholeArrayStms :: Bindable lore =>
                                   SubExp -> [SubExp]
