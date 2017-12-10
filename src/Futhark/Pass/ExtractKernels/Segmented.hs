@@ -132,8 +132,8 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
   -- TODO: 'blockedReductionStream' in BlockedKernel.hs which is very similar
   -- performs a copy here... however, I have not seen a need for it yet.
 
-  group_size <- letSubExp "group_size" $ Op GroupSize
-  num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
+  group_size <- getSize "group_size" SizeGroup
+  num_groups_hint <- getSize "num_groups_hint" SizeNumGroups
 
   -- Here we make a small optimization: if we will use the large kernel, and
   -- only one group per segment, we can simplify the calcualtions within the
@@ -252,7 +252,7 @@ regularSegmentedRedomap segment_size num_segments nest_sizes flat_pat
     -- large kernel with one group per segment.
     performFinalReduction new_segment_size new_total_elems tmp_redres
                           reduce_lam' kern_chunk_reduce_lam flag_reduce_lam' = do
-      group_size <- letSubExp "group_size" $ Op GroupSize
+      group_size <- getSize "group_size" SizeGroup
 
       -- Large kernel, using one group per segment (ogps)
       (large_ses, large_stms) <- runBinder $ do
@@ -322,8 +322,8 @@ largeKernel segment_size num_segments nest_sizes all_arrs comm
   let num_redres = length nes -- number of reduction results (tuple size for
                               -- reduction operator)
 
-  group_size <- letSubExp "group_size" $ Op GroupSize
-  num_groups_hint <- letSubExp "num_groups_hint" $ Op NumGroups
+  group_size <- getSize "group_size" SizeGroup
+  num_groups_hint <- getSize "num_groups_hint" SizeNumGroups
 
   (num_groups_per_segment, elements_per_thread) <-
     calcGroupsPerSegmentAndElementsPerThread segment_size num_segments num_groups_hint group_size segver
@@ -537,7 +537,7 @@ smallKernel segment_size num_segments in_arrs scratch_arrs
 
   fold_lam <- renameLambda fold_lam_unrenamed
 
-  group_size <- letSubExp "group_size" $ Op GroupSize
+  group_size <- getSize "group_size" SizeGroup
 
   num_segments_per_group <- letSubExp "num_segments_per_group" $
     BasicOp $ BinOp (SQuot Int32) group_size segment_size

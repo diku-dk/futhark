@@ -24,7 +24,7 @@ import Futhark.Representation.AST.Attributes.Types (int32)
 import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.SimpleRepresentation
-import Futhark.CodeGen.ImpCode.Kernels hiding (Program, GetNumGroups, GetGroupSize, GetTileSize)
+import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
@@ -37,13 +37,13 @@ import Futhark.Util.IntegralExp (quotRoundingUp)
 kernelsToOpenCL :: ImpKernels.Program
                 -> Either InternalError ImpOpenCL.Program
 kernelsToOpenCL prog = do
-  (prog', ToOpenCL extra_funs kernels requirements) <-
+  (prog', ToOpenCL extra_funs kernels requirements sizes) <-
     runWriterT $ traverse onHostOp prog
   let kernel_names = M.keys kernels
       opencl_code = openClCode $ M.elems kernels
       opencl_prelude = pretty $ genOpenClPrelude requirements
   return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names
-    (S.toList $ kernelUsedTypes requirements) $
+    (S.toList $ kernelUsedTypes requirements) sizes $
     ImpOpenCL.Functions (M.toList extra_funs) <> prog'
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
@@ -72,24 +72,22 @@ instance Monoid OpenClRequirements where
 data ToOpenCL = ToOpenCL { clExtraFuns :: M.Map Name ImpOpenCL.Function
                          , clKernels :: M.Map KernelName C.Func
                          , clRequirements :: OpenClRequirements
+                         , clSizes :: M.Map VName SizeClass
                          }
 
 instance Monoid ToOpenCL where
   mempty =
-    ToOpenCL mempty mempty mempty
-  ToOpenCL f1 k1 r1 `mappend` ToOpenCL f2 k2 r2 =
-    ToOpenCL (f1<>f2) (k1<>k2) (r1<>r2)
+    ToOpenCL mempty mempty mempty mempty
+  ToOpenCL f1 k1 r1 sz1 `mappend` ToOpenCL f2 k2 r2 sz2 =
+    ToOpenCL (f1<>f2) (k1<>k2) (r1<>r2) (sz1<>sz2)
 
 type OnKernelM = WriterT ToOpenCL (Either InternalError)
 
 onHostOp :: HostOp -> OnKernelM OpenCL
 onHostOp (CallKernel k) = onKernel k
-onHostOp (ImpKernels.GetNumGroups v) =
-  return $ GetNumGroups v
-onHostOp (ImpKernels.GetGroupSize v) =
-  return $ GetGroupSize v
-onHostOp (ImpKernels.GetTileSize v) =
-  return $ GetTileSize v
+onHostOp (ImpKernels.GetSize v key size_class) = do
+  tell mempty { clSizes = M.singleton key size_class }
+  return $ ImpOpenCL.GetSize v key
 
 onKernel :: CallKernel -> OnKernelM OpenCL
 
@@ -103,7 +101,7 @@ onKernel called@(Map kernel) = do
 
       params = mapMaybe useAsParam $ mapKernelUses kernel
 
-  tell ToOpenCL
+  tell mempty
     { clExtraFuns = mempty
     , clKernels = M.singleton (mapKernelName kernel)
                   [C.cfun|__kernel void $id:(mapKernelName kernel) ($params:params) {
@@ -134,7 +132,7 @@ onKernel called@(AnyKernel kernel) = do
 
       params = catMaybes local_memory_params ++ use_params
 
-  tell ToOpenCL { clExtraFuns = mempty
+  tell mempty { clExtraFuns = mempty
                 , clKernels = M.singleton name
                               [C.cfun|__kernel void $id:name ($params:params) {
                                   $items:local_memory_init
@@ -224,9 +222,7 @@ $esc:("#define ALIGNED_LOCAL_MEMORY(m,size) __local unsigned char m[size] __attr
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GenericC.compilePrimExp compileKernelConst e
-  where compileKernelConst GroupSizeConst = return [C.cexp|DEFAULT_GROUP_SIZE|]
-        compileKernelConst NumGroupsConst = return [C.cexp|DEFAULT_NUM_GROUPS|]
-        compileKernelConst TileSizeConst = return [C.cexp|DEFAULT_TILE_SIZE|]
+  where compileKernelConst (SizeConst key) = return [C.cexp|$id:(pretty key)|]
 
 mapKernelName :: MapKernel -> String
 mapKernelName k = "kernel_"++ mapKernelDesc k ++ "_" ++
@@ -345,7 +341,7 @@ generateTransposeFunction bt =
   -- width or low height, as this would cause very few threads to be active. See
   -- comment in Futhark.CodeGen.OpenCL.OpenCL.Kernels.hs for more details.
 
-  tell ToOpenCL
+  tell mempty
     { clExtraFuns = M.singleton (transposeName bt) $
                     ImpOpenCL.Function False [] params transpose_code [] []
     , clKernels = M.fromList $

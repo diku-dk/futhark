@@ -58,6 +58,7 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeBodyAliases, removeStmAliases)
 import Futhark.Representation.Kernels.KernelExp (SplitOrdering(..))
+import Futhark.Representation.Kernels.Sizes
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
@@ -77,16 +78,8 @@ data KernelDebugHints =
   deriving (Eq, Show, Ord)
 
 data Kernel lore =
-    NumGroups
-  | GroupSize
-  | TileSize
-  | SufficientParallelism SubExp -- ^ True if enough parallelism.
-
-  | Kernel KernelDebugHints
-    KernelSpace
-    [Type]
-    (KernelBody lore)
-
+    GetSize VName SizeClass -- ^ Produce some runtime-configurable size.
+  | Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
     deriving (Eq, Show, Ord)
 
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
@@ -185,11 +178,8 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
 -- and is done left-to-right.
 mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
-mapKernelM _ NumGroups = pure NumGroups
-mapKernelM _ GroupSize = pure GroupSize
-mapKernelM _ TileSize = pure TileSize
-mapKernelM tv (SufficientParallelism se) =
-  SufficientParallelism <$> mapOnKernelSubExp tv se
+mapKernelM _ (GetSize name size_class) =
+  pure $ GetSize name size_class
 mapKernelM tv (Kernel desc space ts kernel_body) =
   Kernel <$> mapOnKernelDebugHints desc <*>
   mapOnKernelSpace space <*>
@@ -407,14 +397,8 @@ kernelType (Kernel _ space ts body) =
         resultShape t KernelInPlaceReturn{} =
           t
 
-kernelType NumGroups =
+kernelType GetSize{} =
   [Prim int32]
-kernelType GroupSize =
-  [Prim int32]
-kernelType TileSize =
-  [Prim int32]
-kernelType SufficientParallelism{} =
-  [Prim Bool]
 
 chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
@@ -540,10 +524,7 @@ instance ST.IndexOp (Kernel lore) where
 instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
-  usageInOp NumGroups = mempty
-  usageInOp GroupSize = mempty
-  usageInOp TileSize = mempty
-  usageInOp SufficientParallelism{} = mempty
+  usageInOp GetSize{} = mempty
 
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
@@ -552,10 +533,7 @@ consumedInKernelBody (KernelBody attr stms _) =
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
-typeCheckKernel NumGroups = return ()
-typeCheckKernel GroupSize = return ()
-typeCheckKernel TileSize = return ()
-typeCheckKernel SufficientParallelism{} = return ()
+typeCheckKernel GetSize{} = return ()
 
 typeCheckKernel (Kernel _ space kts kbody) = do
   checkSpace space
@@ -622,16 +600,12 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "Kernel" $ kernelBodyMetrics kbody
     where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
-  opMetrics NumGroups = seen "NumGroups"
-  opMetrics GroupSize = seen "GroupSize"
-  opMetrics TileSize = seen "TileSize"
-  opMetrics SufficientParallelism{} = seen "SufficientParallelism"
+  opMetrics GetSize{} = seen "GetSize"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
-  ppr NumGroups = text "$num_groups()"
-  ppr GroupSize = text "$group_size()"
-  ppr TileSize = text "$tile_size()"
-  ppr (SufficientParallelism se) = text "$sufficientParallelism" <> parens (ppr se)
+  ppr (GetSize name size_class) = text "get_size" <>
+                                  parens (commasep [ppr name,
+                                                    ppr size_class])
 
   ppr (Kernel desc space ts body) =
     text "kernel" <+> text (kernelName desc) <>

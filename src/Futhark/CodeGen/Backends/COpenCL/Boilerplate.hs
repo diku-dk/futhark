@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ) where
 
 import Data.FileEmbed
+import qualified Data.Map as M
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
@@ -17,15 +18,39 @@ import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.Util (chunk)
 
 generateBoilerplate :: String -> String -> [String] -> [PrimType]
+                    -> M.Map VName SizeClass
                     -> GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_code opencl_prelude kernel_names types = do
-  ctx_ty <- GC.contextType
+generateBoilerplate opencl_code opencl_prelude kernel_names types sizes = do
   final_inits <- GC.contextFinalInits
 
   let (ctx_opencl_fields, ctx_opencl_inits, top_decls, later_top_decls) =
-        openClDecls ctx_ty final_inits kernel_names opencl_code opencl_prelude
+        openClDecls kernel_names opencl_code opencl_prelude
 
   GC.earlyDecls top_decls
+
+  let size_name_inits = map (\k -> [C.cinit|$string:(pretty k)|]) $ M.keys sizes
+      size_class_inits = map (\c -> [C.cinit|$string:(pretty c)|]) $ M.elems sizes
+
+  GC.libDecl [C.cedecl|static const char *size_names[] = { $inits:size_name_inits };|]
+  GC.libDecl [C.cedecl|static const char *size_classes[] = { $inits:size_class_inits };|]
+
+  get_num_sizes <- GC.publicName "get_num_sizes"
+  get_size_name <- GC.publicName "get_size_name"
+  get_size_class <- GC.publicName "get_size_class"
+
+  GC.headerDecl GC.InitDecl [C.cedecl|int $id:get_num_sizes();|]
+  GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_name(int);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|const char* $id:get_size_class(int);|]
+
+  GC.libDecl [C.cedecl|int $id:get_num_sizes() {
+                return $int:(M.size sizes);
+              }|]
+  GC.libDecl [C.cedecl|const char* $id:get_size_name(int i) {
+                return size_names[i];
+              }|]
+  GC.libDecl [C.cedecl|const char* $id:get_size_class(int i) {
+                return size_classes[i];
+              }|]
 
   cfg <- GC.publicName "context_config"
   new_cfg <- GC.publicName "context_config_new"
@@ -35,8 +60,11 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types = do
   cfg_set_platform <- GC.publicName "context_config_set_platform"
   cfg_dump_program_to <- GC.publicName "context_config_dump_program_to"
   cfg_load_program_from <- GC.publicName "context_config_load_program_from"
-  cfg_set_group_size <- GC.publicName "context_config_set_group_size"
-  cfg_set_num_groups <- GC.publicName "context_config_set_num_groups"
+  cfg_set_default_group_size <- GC.publicName "context_config_set_default_group_size"
+  cfg_set_default_num_groups <- GC.publicName "context_config_set_default_num_groups"
+  cfg_set_default_tile_size <- GC.publicName "context_config_set_default_tile_size"
+  cfg_set_default_threshold <- GC.publicName "context_config_set_default_threshold"
+  cfg_set_size <- GC.publicName "context_config_set_size"
 
   GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg;|]
   GC.headerDecl GC.InitDecl [C.cedecl|struct $id:cfg* $id:new_cfg();|]
@@ -46,18 +74,30 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types = do
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_platform(struct $id:cfg* cfg, const char *s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_dump_program_to(struct $id:cfg* cfg, const char *path);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_load_program_from(struct $id:cfg* cfg, const char *path);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_group_size(struct $id:cfg* cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_num_groups(struct $id:cfg* cfg, int num);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_group_size(struct $id:cfg* cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_num_groups(struct $id:cfg* cfg, int num);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_tile_size(struct $id:cfg* cfg, int num);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void $id:cfg_set_default_threshold(struct $id:cfg* cfg, int num);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|int $id:cfg_set_size(struct $id:cfg* cfg, const char *size_name, size_t size_value);|]
 
+  let size_decls = map (\k -> [C.csdecl|size_t $id:k;|]) $ M.keys sizes
+  GC.libDecl [C.cedecl|struct sizes { $sdecls:size_decls };|]
   GC.libDecl [C.cedecl|struct $id:cfg {
                          struct opencl_config opencl;
+                         size_t sizes[$int:(M.size sizes)];
                        };|]
+
+  let size_value_inits = map (\i -> [C.cstm|cfg->sizes[$int:i] = 0;|]) [0..M.size sizes-1]
   GC.libDecl [C.cedecl|struct $id:cfg* $id:new_cfg() {
                          struct $id:cfg *cfg = malloc(sizeof(struct $id:cfg));
                          if (cfg == NULL) {
                            return NULL;
                          }
-                         opencl_config_init(&cfg->opencl);
+
+                         $stms:size_value_inits
+                         opencl_config_init(&cfg->opencl, $int:(M.size sizes),
+                                            size_names, cfg->sizes, size_classes);
+
                          cfg->opencl.transpose_block_dim = $int:(transposeBlockDim::Int);
                          return cfg;
                        }|]
@@ -79,11 +119,27 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types = do
   GC.libDecl [C.cedecl|void $id:cfg_load_program_from(struct $id:cfg* cfg, const char *path) {
                          cfg->opencl.load_program_from = path;
                        }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_group_size(struct $id:cfg* cfg, int size) {
-                         cfg->opencl.group_size = size;
+  GC.libDecl [C.cedecl|void $id:cfg_set_default_group_size(struct $id:cfg* cfg, int size) {
+                         cfg->opencl.default_group_size = size;
                        }|]
-  GC.libDecl [C.cedecl|void $id:cfg_set_num_groups(struct $id:cfg* cfg, int num) {
-                         cfg->opencl.num_groups = num;
+  GC.libDecl [C.cedecl|void $id:cfg_set_default_num_groups(struct $id:cfg* cfg, int num) {
+                         cfg->opencl.default_num_groups = num;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_default_tile_size(struct $id:cfg* cfg, int size) {
+                         cfg->opencl.default_tile_size = size;
+                       }|]
+  GC.libDecl [C.cedecl|void $id:cfg_set_default_threshold(struct $id:cfg* cfg, int size) {
+                         cfg->opencl.default_threshold = size;
+                       }|]
+  GC.libDecl [C.cedecl|int $id:cfg_set_size(struct $id:cfg* cfg, const char *size_name, size_t size_value) {
+
+                         for (int i = 0; i < $int:(M.size sizes); i++) {
+                           if (strcmp(size_name, size_names[i]) == 0) {
+                             cfg->sizes[i] = size_value;
+                             return 0;
+                           }
+                         }
+                         return 1;
                        }|]
 
   ctx <- GC.publicName "context"
@@ -104,12 +160,15 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types = do
                          $sdecls:fields
                          $sdecls:ctx_opencl_fields
                          struct opencl_context opencl;
+                         struct sizes sizes;
                        };|]
 
   mapM_ GC.libDecl later_top_decls
 
   let set_required_types = [ [C.cstm|required_types |= OPENCL_F64; |]
                            | FloatType Float64 `elem` types ]
+      set_sizes = zipWith (\i k -> [C.cstm|ctx->sizes.$id:k = cfg->sizes[$int:i];|])
+                          [(0::Int)..] $ M.keys sizes
   GC.libDecl [C.cedecl|struct $id:ctx* $id:new_ctx(struct $id:cfg* cfg) {
                           struct $id:ctx* ctx = malloc(sizeof(struct $id:ctx));
                           if (ctx == NULL) {
@@ -124,7 +183,14 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types = do
                           int required_types = 0;
                           $stms:set_required_types
 
-                          setup_opencl_and_load_kernels(ctx, required_types);
+                          typename cl_int error;
+                          typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types);
+                          // Load all the kernels.
+                          $stms:(map (loadKernelByName) kernel_names)
+
+                          $stms:final_inits
+
+                          $stms:set_sizes
 
                           return ctx;
                        }|]
@@ -138,9 +204,9 @@ generateBoilerplate opencl_code opencl_prelude kernel_names types = do
 
   mapM_ GC.debugReport $ openClReport kernel_names
 
-openClDecls :: C.Type -> [C.Stm] -> [String] -> String -> String
+openClDecls :: [String] -> String -> String
             -> ([C.FieldGroup], [C.Stm], [C.Definition], [C.Definition])
-openClDecls ctx_ty final_inits kernel_names opencl_program opencl_prelude =
+openClDecls kernel_names opencl_program opencl_prelude =
   (ctx_fields, ctx_inits, openCL_boilerplate, openCL_load)
   where opencl_program_fragments =
           -- Some C compilers limit the size of literal strings, so
@@ -151,7 +217,7 @@ openClDecls ctx_ty final_inits kernel_names opencl_program opencl_prelude =
 
         ctx_fields =
           [ [C.csdecl|int total_runs;|],
-            [C.csdecl|int total_runtime;|] ] ++
+            [C.csdecl|long int total_runtime;|] ] ++
           concat
           [ [ [C.csdecl|typename cl_kernel $id:name;|]
             , [C.csdecl|int $id:(kernelRuntime name);|]
@@ -169,15 +235,6 @@ openClDecls ctx_ty final_inits kernel_names opencl_program opencl_prelude =
           | name <- kernel_names ]
 
         openCL_load = [
-          [C.cedecl|
-void setup_opencl_and_load_kernels($ty:ctx_ty *ctx, int required_types) {
-  typename cl_int error;
-  typename cl_program prog = setup_opencl(&ctx->opencl, opencl_program, required_types);
-  // Load all the kernels.
-  $stms:(map (loadKernelByName) kernel_names)
-
-  $stms:final_inits
-}|],
           [C.cedecl|
 void post_opencl_setup(struct opencl_context *ctx, struct opencl_device_option *option) {
   $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
@@ -235,8 +292,7 @@ openClReport names = report_kernels ++ [report_total]
                         |]
 
 sizeHeuristicsCode :: SizeHeuristic -> C.Stm
-sizeHeuristicsCode
-  (SizeHeuristic platform_name device_type which what) =
+sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
   [C.cstm|
    if ($exp:which' == 0 &&
        strstr(option->platform_name, $string:platform_name) != NULL &&
@@ -248,14 +304,15 @@ sizeHeuristicsCode
 
         which' = case which of
                    LockstepWidth -> [C.cexp|ctx->lockstep_width|]
-                   NumGroups -> [C.cexp|ctx->cfg.num_groups|]
-                   GroupSize -> [C.cexp|ctx->cfg.group_size|]
+                   NumGroups -> [C.cexp|ctx->cfg.default_num_groups|]
+                   GroupSize -> [C.cexp|ctx->cfg.default_group_size|]
+                   TileSize -> [C.cexp|ctx->cfg.default_tile_size|]
 
         get_size = case what of
                      HeuristicConst x ->
                        [C.cstm|$exp:which' = $int:x;|]
                      HeuristicDeviceInfo s ->
-                       -- This only works for device info that fits.
+                       -- This only works for device info that fits in the variable.
                        let s' = "CL_DEVICE_" ++ s
                        in [C.cstm|clGetDeviceInfo(ctx->device,
                                                   $id:s',

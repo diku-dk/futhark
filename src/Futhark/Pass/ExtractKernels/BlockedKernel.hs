@@ -16,6 +16,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , newKernelSpace
        , chunkLambda
        , splitArrays
+       , getSize
        )
        where
 
@@ -41,6 +42,12 @@ import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util
 import Futhark.Util.IntegralExp
 
+getSize :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
+           String -> SizeClass -> m SubExp
+getSize desc size_class = do
+  size_key <- newVName desc
+  letSubExp desc $ Op $ GetSize size_key size_class
+
 blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                           Pattern Kernels
                        -> SubExp
@@ -50,7 +57,7 @@ blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                        -> [VName]
                        -> m [Stm Kernels]
 blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
-  step_one_size <- blockedKernelSize w
+  (max_step_one_num_groups, step_one_size) <- blockedKernelSize w
 
   let one = constant (1 :: Int32)
       num_chunks = kernelWorkgroups step_one_size
@@ -89,11 +96,7 @@ blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   step_two_pat <- basicPattern' [] <$>
                   mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
 
-  -- Dynamically computed chunk sizes are a mess, so we always pick a
-  -- static one here.  This _must_ be at least as big as the chunk
-  -- size of the step one kernel.
-  group_size <- letSubExp "group_size" $ Op GroupSize
-  let step_two_size = KernelSize one group_size one num_chunks group_size
+  let step_two_size = KernelSize one max_step_one_num_groups one num_chunks max_step_one_num_groups
 
   step_two <- reduceKernel step_two_size reduce_lam' nes $ take (length nes) $ patternNames step_one_pat
 
@@ -302,7 +305,7 @@ blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
            -> StreamOrd -> Lambda InKernel -> [SubExp] -> [VName]
            -> m (Stm Kernels, [Stm Kernels])
 blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
-  kernel_size <- blockedKernelSize w
+  (_, kernel_size) <- blockedKernelSize w
   let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
       num_groups = kernelWorkgroups kernel_size
       group_size = kernelWorkgroupSize kernel_size
@@ -415,10 +418,10 @@ numberOfGroups w group_size max_num_groups = do
   return (num_groups, num_threads)
 
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
-                     SubExp -> m KernelSize
+                     SubExp -> m (SubExp, KernelSize)
 blockedKernelSize w = do
-  group_size <- letSubExp "group_size" $ Op GroupSize
-  max_num_groups <- letSubExp "max_num_groups" $ Op NumGroups
+  group_size <- getSize "group_size" SizeGroup
+  max_num_groups <- getSize "max_num_groups" SizeNumGroups
 
   (num_groups, num_threads) <- numberOfGroups w group_size max_num_groups
 
@@ -426,7 +429,8 @@ blockedKernelSize w = do
     letSubExp "per_thread_elements" =<<
     eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
 
-  return $ KernelSize num_groups group_size per_thread_elements w num_threads
+  return (max_num_groups,
+          KernelSize num_groups group_size per_thread_elements w num_threads)
 
 -- First stage scan kernel.
 scanKernel1 :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -642,7 +646,7 @@ blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
             -> [SubExp] -> [VName]
             -> m ()
 blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
-  first_scan_size <- blockedKernelSize w
+  (_, first_scan_size) <- blockedKernelSize w
   my_index <- newVName "my_index"
   other_index <- newVName "other_index"
   let num_groups = kernelWorkgroups first_scan_size
@@ -749,44 +753,37 @@ mapKernelSkeleton :: (HasScope Kernels m, MonadFreshNames m) =>
                         [Stm Kernels],
                         [Stm InKernel])
 mapKernelSkeleton w ispace inputs = do
-  group_size_v <- newVName "group_size"
-
-  ((num_threads, num_groups), ksize_bnds) <- runBinder $ do
-    letBindNames'_ [group_size_v] $ Op GroupSize
-    numThreadsAndGroups w $ Var group_size_v
+  ((group_size, num_threads, num_groups), ksize_bnds) <-
+    runBinder $ numThreadsAndGroups w
 
   read_input_bnds <- mapM readKernelInput inputs
 
-  let ksize = (num_groups, Var group_size_v, num_threads)
+  let ksize = (num_groups, group_size, num_threads)
 
   space <- newKernelSpace ksize ispace
   return (space, ksize_bnds, read_input_bnds)
 
--- Given the desired minium number of threads and the number of
--- threads per group, compute the number of groups and total number of
--- threads.
-numThreadsAndGroups :: MonadBinder m => SubExp -> SubExp -> m (SubExp, SubExp)
-numThreadsAndGroups w group_size = do
+-- Given the desired minium number of threads, compute the group size,
+-- number of groups and total number of threads.
+numThreadsAndGroups :: (MonadBinder m, Op (Lore m) ~ Kernel innerlore) =>
+                       SubExp -> m (SubExp, SubExp, SubExp)
+numThreadsAndGroups w = do
+  group_size <- getSize "group_size" SizeGroup
   num_groups <- letSubExp "num_groups" =<< eDivRoundingUp Int32
     (eSubExp w) (eSubExp group_size)
   num_threads <- letSubExp "num_threads" $
     BasicOp $ BinOp (Mul Int32) num_groups group_size
-  return (num_threads, num_groups)
+  return (group_size, num_threads, num_groups)
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
              SubExp -> SpaceStructure -> [KernelInput]
           -> [Type] -> KernelBody InKernel
           -> m ([Stm Kernels], Kernel InKernel)
 mapKernel w ispace inputs rts (KernelBody () kstms krets) = do
-  group_size_v <- newVName "group_size"
-
-  group_size_bnds <- runBinder_ $
-    letBindNames'_ [group_size_v] $ Op GroupSize
-
   (space, ksize_bnds, read_input_bnds) <- mapKernelSkeleton w ispace inputs
 
   let kbody' = KernelBody () (read_input_bnds ++ kstms) krets
-  return (group_size_bnds ++ ksize_bnds, Kernel (KernelDebugHints "map" []) space rts kbody')
+  return (ksize_bnds, Kernel (KernelDebugHints "map" []) space rts kbody')
 
 mapKernelFromBody :: (HasScope Kernels m, MonadFreshNames m) =>
                      SubExp -> SpaceStructure -> [KernelInput]

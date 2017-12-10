@@ -84,11 +84,7 @@ simplifyKernelOp ops env (Kernel desc space ts kbody) = do
         scope = scopeOfKernelSpace space
         bound_here = S.fromList $ M.keys scope
 
-simplifyKernelOp _ _ NumGroups = return NumGroups
-simplifyKernelOp _ _ GroupSize = return GroupSize
-simplifyKernelOp _ _ TileSize = return TileSize
-simplifyKernelOp _ _ (SufficientParallelism se) =
-  SufficientParallelism <$> Engine.simplify se
+simplifyKernelOp _ _ (GetSize key size_class) = return $ GetSize key size_class
 
 processHoistedStm :: (PrettyLore from, MonadBinder m, ExpAttr from ~ ExpAttr (Lore m),
                       BodyAttr from ~ BodyAttr (Lore m),

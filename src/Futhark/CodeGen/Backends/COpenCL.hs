@@ -13,7 +13,7 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.Error
-import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.ExplicitMemory hiding (GetSize)
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -26,11 +26,11 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opencl_code opencl_prelude kernel_names types prog') ->
+    Right (Program opencl_code opencl_prelude kernel_names types sizes prog') ->
       Right <$> GC.compileProg operations
-                (generateBoilerplate opencl_code opencl_prelude kernel_names types) ()
+                (generateBoilerplate opencl_code opencl_prelude kernel_names types sizes) ()
                 [Space "device", Space "local", DefaultSpace]
-                options prog'
+                cliOptions prog'
   where operations :: GC.Operations OpenCL ()
         operations = GC.Operations
                      { GC.opsCompiler = callKernel
@@ -44,37 +44,72 @@ compileProg prog = do
                      , GC.opsFatMemory = True
                      }
 
-        options = [ Option { optionLongName = "platform"
-                           , optionShortName = Just 'p'
-                           , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
-                           }
-                  , Option { optionLongName = "device"
-                           , optionShortName = Just 'd'
-                           , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
-                           }
-                  , Option { optionLongName = "group-size"
-                           , optionShortName = Nothing
-                           , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|futhark_context_config_set_group_size(cfg, atoi(optarg));|]
-                           }
-                  , Option { optionLongName = "num-groups"
-                           , optionShortName = Nothing
-                           , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|futhark_context_config_set_num_groups(cfg, atoi(optarg));|]
-                           }
-                  , Option { optionLongName = "dump-opencl"
-                           , optionShortName = Nothing
-                           , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
-                           }
-                  , Option { optionLongName = "load-opencl"
-                           , optionShortName = Nothing
-                           , optionArgument = RequiredArgument
-                           , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
-                           }
-                  ]
+cliOptions :: [Option]
+cliOptions = [ Option { optionLongName = "platform"
+                      , optionShortName = Just 'p'
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_platform(cfg, optarg);|]
+                      }
+             , Option { optionLongName = "device"
+                      , optionShortName = Just 'd'
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
+                      }
+             , Option { optionLongName = "default-group-size"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-num-groups"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "default-tile-size"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+                      }
+             , Option { optionLongName = "dump-opencl"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_dump_program_to(cfg, optarg);|]
+                      }
+             , Option { optionLongName = "load-opencl"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+                      }
+             , Option { optionLongName = "print-sizes"
+                      , optionShortName = Nothing
+                      , optionArgument = NoArgument
+                      , optionAction = [C.cstm|{
+                          int n = futhark_get_num_sizes();
+                          for (int i = 0; i < n; i++) {
+                            printf("%s (%s)\n", futhark_get_size_name(i),
+                                                futhark_get_size_class(i));
+                          }
+                          exit(0);
+                        }|]
+                      }
+             , Option { optionLongName = "size"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|{
+                          char *name = optarg;
+                          char *equals = strstr(optarg, "=");
+                          char *value_str = equals != NULL ? equals+1 : optarg;
+                          int value = atoi(value_str);
+                          if (equals != NULL) {
+                            *equals = 0;
+                            if (futhark_context_config_set_size(cfg, name, value) != 0) {
+                              panic(1, "Unknown size: %s\n", name);
+                            }
+                          } else {
+                            panic(1, "Invalid argument for size option: %s\n", optarg);
+                          }}|]
+                      }
+             ]
 
 writeOpenCLScalar :: GC.WriteScalar OpenCL ()
 writeOpenCLScalar mem i t "device" _ val = do
@@ -220,13 +255,8 @@ staticOpenCLArray _ space _ _ =
   fail $ "OpenCL backend cannot create static array in memory space '" ++ space ++ "'"
 
 callKernel :: GC.OpCompiler OpenCL ()
-callKernel (GetNumGroups v) =
-  -- Must be a power of two.
-  GC.stm [C.cstm|$id:v = ctx->opencl.cfg.num_groups;|]
-callKernel (GetGroupSize v) =
-  GC.stm [C.cstm|$id:v = ctx->opencl.cfg.group_size;|]
-callKernel (GetTileSize v) =
-  GC.stm [C.cstm|$id:v = ctx->opencl.cfg.tile_size;|]
+callKernel (GetSize v key) =
+  GC.stm [C.cstm|$id:v = ctx->sizes.$id:key;|]
 callKernel (HostCode c) =
   GC.compileCode c
 
@@ -284,7 +314,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         ctx->$id:(kernelRuntime kernel_name) += $id:time_diff;
         ctx->$id:(kernelRuns kernel_name)++;
         fprintf(stderr, "kernel %s runtime: %ldus\n",
-                $string:kernel_name, (int)$id:time_diff);
+                $string:kernel_name, $id:time_diff);
       }
     }|]
   where kernel_rank = length kernel_dims

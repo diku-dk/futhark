@@ -17,13 +17,23 @@ struct opencl_config {
   const char* dump_program_to;
   const char* load_program_from;
 
-  size_t group_size;
-  size_t num_groups;
-  size_t tile_size;
+  size_t default_group_size;
+  size_t default_num_groups;
+  size_t default_tile_size;
+  size_t default_threshold;
   size_t transpose_block_dim;
+
+  int num_sizes;
+  const char **size_names;
+  size_t *size_values;
+  const char **size_classes;
 };
 
-void opencl_config_init(struct opencl_config *cfg) {
+void opencl_config_init(struct opencl_config *cfg,
+                        int num_sizes,
+                        const char *size_names[],
+                        size_t *size_values,
+                        const char *size_classes[]) {
   cfg->debugging = 0;
   cfg->preferred_device_num = 0;
   cfg->preferred_platform = "";
@@ -31,10 +41,16 @@ void opencl_config_init(struct opencl_config *cfg) {
   cfg->dump_program_to = NULL;
   cfg->load_program_from = NULL;
 
-  cfg->group_size = 0;
-  cfg->num_groups = 0;
-  cfg->tile_size = 32;
+  cfg->default_group_size = 256;
+  cfg->default_num_groups = 128;
+  cfg->default_tile_size = 32;
+  cfg->default_threshold = 32*1024;
   cfg->transpose_block_dim = 16;
+
+  cfg->num_sizes = num_sizes;
+  cfg->size_names = size_names;
+  cfg->size_values = size_values;
+  cfg->size_classes = size_classes;
 }
 
 struct opencl_context {
@@ -347,7 +363,6 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   cl_int error;
   cl_platform_id platform;
   cl_device_id device;
-  cl_uint platforms, devices;
   size_t max_group_size;
 
   ctx->lockstep_width = 0;
@@ -377,16 +392,47 @@ static cl_program setup_opencl(struct opencl_context *ctx,
 
   size_t max_tile_size = sqrt(max_group_size);
 
-  if (max_group_size < ctx->cfg.group_size) {
-    fprintf(stderr, "Warning: Device limits group size to %zu (setting was %zu)\n",
-            max_group_size, ctx->cfg.group_size);
-    ctx->cfg.group_size = max_group_size;
+  if (max_group_size < ctx->cfg.default_group_size) {
+    fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
+            max_group_size, ctx->cfg.default_group_size);
+    ctx->cfg.default_group_size = max_group_size;
   }
 
-  if (max_tile_size < ctx->cfg.tile_size) {
-    fprintf(stderr, "Warning: Device limits tile size to %zu (setting was %zu)\n",
-            max_tile_size, ctx->cfg.tile_size);
-    ctx->cfg.tile_size = max_tile_size;
+  if (max_tile_size < ctx->cfg.default_tile_size) {
+    fprintf(stderr, "Note: Device limits default tile size to %zu (down from %zu).\n",
+            max_tile_size, ctx->cfg.default_tile_size);
+    ctx->cfg.default_tile_size = max_tile_size;
+  }
+
+  // Now we go through all the sizes, clamp them to the valid range,
+  // or set them to the default.
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    const char *size_class = ctx->cfg.size_classes[i];
+    size_t *size_value = &ctx->cfg.size_values[i];
+    const char* size_name = ctx->cfg.size_names[i];
+    int max_value, default_value;
+    if (strcmp(size_class, "group_size") == 0) {
+      max_value = max_group_size;
+      default_value = ctx->cfg.default_group_size;
+    } else if (strcmp(size_class, "num_groups") == 0) {
+      max_value = max_group_size; // Futhark assumes this constraint.
+      default_value = ctx->cfg.default_num_groups;
+    } else if (strcmp(size_class, "tile_size") == 0) {
+      max_value = sqrt(max_group_size);
+      default_value = ctx->cfg.default_tile_size;
+    } else if (strcmp(size_class, "threshold") == 0) {
+      max_value = 0; // No limit.
+      default_value = ctx->cfg.default_threshold;
+    } else {
+      panic(1, "Unknown size class for size '%s': %s\n", size_name, size_class);
+    }
+    if (*size_value == 0) {
+      *size_value = default_value;
+    } else if (max_value > 0 && *size_value > max_value) {
+      fprintf(stderr, "Note: Device limits %s to %d (down from %d)\n",
+              size_name, max_value, (int)*size_value);
+      *size_value = max_value;
+    }
   }
 
   cl_context_properties properties[] = {
@@ -405,9 +451,9 @@ static cl_program setup_opencl(struct opencl_context *ctx,
   post_opencl_setup(ctx, &device_option);
 
   if (ctx->cfg.debugging) {
-    fprintf(stderr, "Lockstep width: %d\n", ctx->lockstep_width);
-    fprintf(stderr, "Default group size: %d\n", ctx->cfg.group_size);
-    fprintf(stderr, "Default number of groups: %d\n", ctx->cfg.num_groups);
+    fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
+    fprintf(stderr, "Default group size: %d\n", (int)ctx->cfg.default_group_size);
+    fprintf(stderr, "Default number of groups: %d\n", (int)ctx->cfg.default_num_groups);
   }
 
   char *fut_opencl_src = NULL;
@@ -425,14 +471,14 @@ static cl_program setup_opencl(struct opencl_context *ctx,
     fclose(f);
   } else {
     // Build the OpenCL program.  First we have to concatenate all the fragments.
-    for (const char **src = srcs; *src; src++) {
+    for (const char **src = srcs; src && *src; src++) {
       src_size += strlen(*src);
     }
 
     fut_opencl_src = malloc(src_size + 1);
 
     size_t n, i;
-    for (i = 0, n = 0; srcs[i]; i++) {
+    for (i = 0, n = 0; srcs && srcs[i]; i++) {
       strncpy(fut_opencl_src+n, srcs[i], src_size-n);
       n += strlen(srcs[i]);
     }
@@ -453,14 +499,26 @@ static cl_program setup_opencl(struct opencl_context *ctx,
 
   prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
   assert(error == 0);
-  char compile_opts[1024];
-  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d -DDEFAULT_GROUP_SIZE=%d -DDEFAULT_NUM_GROUPS=%d  -DDEFAULT_TILE_SIZE=%d",
-           (int)ctx->cfg.transpose_block_dim,
-           (int)ctx->lockstep_width,
-           (int)ctx->cfg.group_size,
-           (int)ctx->cfg.num_groups,
-           (int)ctx->cfg.tile_size);
+
+  int compile_opts_size = 1024;
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    compile_opts_size += strlen(ctx->cfg.size_names[i]) + 20;
+  }
+  char *compile_opts = malloc(compile_opts_size);
+
+  int w = snprintf(compile_opts, compile_opts_size,
+                   "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d ",
+                   (int)ctx->cfg.transpose_block_dim,
+                   (int)ctx->lockstep_width);
+
+  for (int i = 0; i < ctx->cfg.num_sizes; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "-D%s=%d ", ctx->cfg.size_names[i],
+                  (int)ctx->cfg.size_values[i]);
+  }
+
   OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
+  free(compile_opts);
   free(fut_opencl_src);
 
   return prog;

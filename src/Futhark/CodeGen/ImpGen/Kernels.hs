@@ -73,23 +73,9 @@ compileInKernelOp constants dest (Inner op) =
 kernelCompiler :: ImpGen.Destination -> Kernel InKernel
                -> CallKernelGen ()
 
-kernelCompiler dest NumGroups = do
+kernelCompiler dest (GetSize key size_class) = do
   [v] <- ImpGen.funcallTargets dest
-  ImpGen.emit $ Imp.Op $ Imp.GetNumGroups v
-
-kernelCompiler dest GroupSize = do
-  [v] <- ImpGen.funcallTargets dest
-  ImpGen.emit $ Imp.Op $ Imp.GetGroupSize v
-
-
-kernelCompiler dest TileSize = do
-  [v] <- ImpGen.funcallTargets dest
-  ImpGen.emit $ Imp.Op $ Imp.GetTileSize v
-
-kernelCompiler dest (SufficientParallelism se) = do
-  [v] <- ImpGen.funcallTargets dest
-  se' <- ImpGen.compileSubExp se
-  ImpGen.emit $ Imp.SetScalar v $ Imp.CmpOpExp (CmpSlt Int32) (64*1024) se'
+  ImpGen.emit $ Imp.Op $ Imp.GetSize v key size_class
 
 kernelCompiler dest (Kernel desc space _ kernel_body) = do
 
@@ -389,9 +375,7 @@ isConstExp :: VName -> CallKernelGen (Maybe Imp.KernelConstExp)
 isConstExp v = do
   vtable <- asks ImpGen.envVtable
   let lookupConstExp name = constExp =<< hasExp =<< M.lookup name vtable
-      kernelConst (Op (Inner NumGroups)) = Just $ LeafExp Imp.NumGroupsConst int32
-      kernelConst (Op (Inner GroupSize)) = Just $ LeafExp Imp.GroupSizeConst int32
-      kernelConst (Op (Inner TileSize)) = Just $ LeafExp Imp.TileSizeConst int32
+      kernelConst (Op (Inner (GetSize key _))) = Just $ LeafExp (Imp.SizeConst key) int32
       kernelConst (BasicOp (SubExp (Var name))) = lookupConstExp name
       kernelConst _              = Nothing
       constExp = primExpFromExp kernelConst
@@ -424,7 +408,7 @@ computeMapKernelGroups kernel_size = do
   let group_size_var = Imp.var group_size int32
   ImpGen.emit $ Imp.DeclareScalar group_size int32
   ImpGen.emit $ Imp.DeclareScalar num_groups int32
-  ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
+  ImpGen.emit $ Imp.Op $ Imp.GetSize group_size group_size Imp.SizeGroup
   ImpGen.emit $ Imp.SetScalar num_groups $
     kernel_size `quotRoundingUp` Imp.ConvOpExp (SExt Int32 Int32) group_size_var
   return (group_size, num_groups)
