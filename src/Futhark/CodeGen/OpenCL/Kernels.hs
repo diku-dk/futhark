@@ -35,7 +35,7 @@ data HeuristicValue = HeuristicConst Int
                     | HeuristicDeviceInfo String
 
 -- | A size that can be assigned a default.
-data WhichSize = LockstepWidth | NumGroups | GroupSize
+data WhichSize = LockstepWidth | NumGroups | GroupSize | TileSize
 
 -- | A heuristic for setting the default value for something.
 data SizeHeuristic =
@@ -53,10 +53,12 @@ sizeHeuristicsTable =
   , SizeHeuristic "" DeviceGPU LockstepWidth $ HeuristicConst 1
   , SizeHeuristic "" DeviceGPU NumGroups $ HeuristicConst 128
   , SizeHeuristic "" DeviceGPU GroupSize $ HeuristicConst 256
+  , SizeHeuristic "" DeviceGPU TileSize $ HeuristicConst 32
 
   , SizeHeuristic "" DeviceCPU LockstepWidth $ HeuristicConst 1
   , SizeHeuristic "" DeviceCPU NumGroups $ HeuristicDeviceInfo "MAX_COMPUTE_UNITS"
   , SizeHeuristic "" DeviceCPU GroupSize $ HeuristicConst 32
+  , SizeHeuristic "" DeviceCPU TileSize $ HeuristicConst 4
   ]
 
 data TransposeType = TransposeNormal

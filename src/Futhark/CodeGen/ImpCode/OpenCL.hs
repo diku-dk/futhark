@@ -16,10 +16,14 @@ module Futhark.CodeGen.ImpCode.OpenCL
        , OpenCL (..)
        , transposeBlockDim
        , module Futhark.CodeGen.ImpCode
+       , module Futhark.Representation.Kernels.Sizes
        )
        where
 
+import qualified Data.Map as M
+
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
+import Futhark.Representation.Kernels.Sizes
 import qualified Futhark.CodeGen.ImpCode as Imp
 
 import Futhark.Util.Pretty hiding (space)
@@ -31,6 +35,8 @@ data Program = Program { openClProgram :: String
                        , openClKernelNames :: [KernelName]
                        , openClUsedTypes :: [PrimType]
                          -- ^ So we can detect whether the device is capable.
+                       , openClSizes :: M.Map VName SizeClass
+                         -- ^ Runtime-configurable constants.
                        , hostFunctions :: Functions OpenCL
                        }
 
@@ -55,9 +61,7 @@ data KernelArg = ValueKArg Exp PrimType
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | HostCode Code
-            | GetNumGroups VName
-            | GetGroupSize VName
-            | GetTileSize VName
+            | GetSize VName VName
             deriving (Show)
 
 -- | The block size when transposing.

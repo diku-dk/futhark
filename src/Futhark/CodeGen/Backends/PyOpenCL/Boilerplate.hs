@@ -7,71 +7,63 @@ module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   ) where
 
 import Data.FileEmbed
+import qualified Data.Map as M
 import qualified Data.Text as T
 import NeatInterpolation (text)
 
-import Futhark.CodeGen.ImpCode.OpenCL (PrimType(..), FloatType(..))
+import Futhark.CodeGen.ImpCode.OpenCL (PrimType(..), SizeClass(..))
 import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.CodeGen.Backends.GenericPython.AST
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (pretty, prettyText)
 
 openClPrelude :: String
 openClPrelude = $(embedStringFile "rts/python/opencl.py")
 
-openClInit :: [PrimType] -> String -> String
-openClInit types assign = T.unpack [text|
-self.ctx = get_prefered_context(interactive, platform_pref, device_pref)
-self.queue = cl.CommandQueue(self.ctx)
-self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
- # XXX: Assuming just a single device here.
-platform_name = self.ctx.get_info(cl.context_info.DEVICES)[0].platform.name
-device_type = self.device.type
-lockstep_width = None
-$set_sizes
-max_tile_size = int(np.sqrt(self.device.max_work_group_size))
-$check_types
-if (tile_size * tile_size > self.device.max_work_group_size):
-  sys.stderr.write('Warning: Device limits tile size to {} (setting was {})\n'.format(max_tile_size, tile_size))
-  tile_size = max_tile_size
-self.group_size = group_size
-self.num_groups = num_groups
-self.tile_size = tile_size
-if (len(fut_opencl_src) >= 0):
-  program = cl.Program(self.ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={}".format(FUT_BLOCK_DIM),
-                                                        "-DLOCKSTEP_WIDTH={}".format(lockstep_width),
-                                                        "-DDEFAULT_GROUP_SIZE={}".format(group_size),
-                                                        "-DDEFAULT_NUM_GROUPS={}".format(num_groups),
-                                                        "-DDEFAULT_TILE_SIZE={}".format(tile_size)])
-
+openClInit :: [PrimType] -> String -> M.Map VName SizeClass -> String
+openClInit types assign sizes = T.unpack [text|
+size_heuristics=$size_heuristics
+program = initialise_opencl_object(self,
+                                   program_src=fut_opencl_src,
+                                   interactive=interactive,
+                                   platform_pref=platform_pref,
+                                   device_pref=device_pref,
+                                   default_group_size=default_group_size,
+                                   default_num_groups=default_num_groups,
+                                   default_tile_size=default_tile_size,
+                                   size_heuristics=size_heuristics,
+                                   required_types=$types',
+                                   user_sizes=sizes,
+                                   all_sizes=$sizes')
 $assign'
 |]
   where assign' = T.pack assign
-        set_sizes = T.pack $ unlines $
-                    map (pretty . sizeHeuristicsCode) sizeHeuristicsTable
-        check_types = if FloatType Float64 `elem` types
-                      then check_f64 else ""
-        check_f64 = [text|
-if self.device.get_info(cl.device_info.PREFERRED_VECTOR_WIDTH_DOUBLE) == 0:
-  raise Exception('Program uses double-precision floats, but this is not supported on chosen device: %s' % self.device.name)
-|]
+        size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
+        types' = prettyText $ map (show . pretty) types -- Looks enough like Python.
+        sizes' = prettyText $ sizeClassesToPython sizes
 
-sizeHeuristicsCode :: SizeHeuristic -> PyStmt
-sizeHeuristicsCode (SizeHeuristic platform_name device_type which what) =
-  If (BinOp "and"
-      (BinOp "==" which' (Var "None"))
-      (BinOp "and"
-        (BinOp "!="
-         (Call (Field (Var "platform_name") "find") [Arg (String platform_name)])
-         (Var "None"))
-        (BinOp "==" (Var "device_type") (clDeviceType device_type))))
-  [Assign which' what'] []
-  where clDeviceType DeviceGPU = Var "cl.device_type.GPU"
-        clDeviceType DeviceCPU = Var "cl.device_type.CPU"
-        which' = case which of LockstepWidth -> Var "lockstep_width"
-                               NumGroups     -> Var "num_groups"
-                               GroupSize     -> Var "group_size"
-        what' = case what of
-                  HeuristicConst x -> Integer $ toInteger x
-                  HeuristicDeviceInfo s ->
-                    Call (Field (Var "self.device") "get_info")
-                    [Arg $ Var $ "cl.device_info." ++ s]
+sizeClassesToPython :: M.Map VName SizeClass -> PyExp
+sizeClassesToPython = Dict . map f . M.toList
+  where f (size_name, size_class) =
+          (String $ pretty size_name,
+           Dict [(String "class", String $ pretty size_class),
+                 (String "value", None)])
+
+sizeHeuristicsToPython :: [SizeHeuristic] -> PyExp
+sizeHeuristicsToPython = List . map f
+  where f (SizeHeuristic platform_name device_type which what) =
+          Tuple [String platform_name,
+                 clDeviceType device_type,
+                 which',
+                 what']
+
+          where clDeviceType DeviceGPU = Var "cl.device_type.GPU"
+                clDeviceType DeviceCPU = Var "cl.device_type.CPU"
+
+                which' = case which of LockstepWidth -> String "lockstep_width"
+                                       NumGroups     -> String "num_groups"
+                                       GroupSize     -> String "group_size"
+                                       TileSize      -> String "tile_size"
+
+                what' = case what of
+                          HeuristicConst x -> Integer $ toInteger x
+                          HeuristicDeviceInfo s -> String s

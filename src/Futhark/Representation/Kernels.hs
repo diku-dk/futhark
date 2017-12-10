@@ -12,6 +12,7 @@ module Futhark.Representation.Kernels
        , module Futhark.Representation.AST.Syntax
        , module Futhark.Representation.Kernels.Kernel
        , module Futhark.Representation.Kernels.KernelExp
+       , module Futhark.Representation.Kernels.Sizes
        )
 where
 
@@ -20,6 +21,7 @@ import Control.Monad
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.Kernels.KernelExp
+import Futhark.Representation.Kernels.Sizes
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty

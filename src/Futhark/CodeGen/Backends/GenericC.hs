@@ -1239,6 +1239,7 @@ compileProg ops extra userstate spaces options prog@(Functions funs) = do
 
   let headerdefs = [C.cunit|
 $esc:("#include <stdint.h>")
+$esc:("#include <stddef.h>")
 
 $esc:("\n/*\n * Initialisation\n*/\n")
 $edecls:(initDecls endstate)

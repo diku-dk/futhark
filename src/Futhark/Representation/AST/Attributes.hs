@@ -56,7 +56,7 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Pretty
 import Futhark.Transform.Rename (Rename, Renameable)
 import Futhark.Transform.Substitute (Substitute, Substitutable)
-import Futhark.Util.Pretty (Pretty)
+import Futhark.Util.Pretty
 
 -- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
 isBuiltInFunction :: Name -> Bool

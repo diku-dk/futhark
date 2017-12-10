@@ -568,14 +568,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
   runAllocM handleOp $ allocInFParams params $ \params' -> do
     fbody' <- insertStmsM $ allocInFunBody (length rettype) fbody
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
-    where handleOp GroupSize =
-            return $ Inner GroupSize
-          handleOp NumGroups =
-            return $ Inner NumGroups
-          handleOp TileSize =
-            return $ Inner TileSize
-          handleOp (SufficientParallelism se) =
-            return $ Inner $ SufficientParallelism se
+    where handleOp (GetSize key size_class) =
+            return $ Inner $ GetSize key size_class
           handleOp (Kernel desc space ts kbody) = subAllocM handleKernelExp $
             Inner . Kernel desc space ts <$>
             localScope (scopeOfKernelSpace space)

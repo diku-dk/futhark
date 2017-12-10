@@ -30,13 +30,12 @@ compileProg module_name prog = do
   --could probably be a better why do to this..
   case res of
     Left err -> return $ Left err
-    Right (Imp.Program opencl_code opencl_prelude kernel_names types prog')  -> do
+    Right (Imp.Program opencl_code opencl_prelude kernel_names types sizes prog')  -> do
       --prepare the strings for assigning the kernels and set them as global
       let assign = unlines $ map (\x -> pretty $ Assign (Var ("self."++x++"_var")) (Var $ "program."++x)) kernel_names
 
       let defines =
-            [Assign (Var "FUT_BLOCK_DIM") $ String $ show (Imp.transposeBlockDim :: Int),
-             Assign (Var "synchronous") $ Bool False,
+            [Assign (Var "synchronous") $ Bool False,
              Assign (Var "preferred_platform") None,
              Assign (Var "preferred_device") None,
              Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
@@ -54,10 +53,11 @@ compileProg module_name prog = do
                                        , "interactive=False"
                                        , "platform_pref=preferred_platform"
                                        , "device_pref=preferred_device"
-                                       , "group_size=None"
-                                       , "num_groups=None"
-                                       , "tile_size=32"]
-                        [Escape $ openClInit types assign]
+                                       , "default_group_size=None"
+                                       , "default_num_groups=None"
+                                       , "default_tile_size=None"
+                                       , "sizes={}"]
+                        [Escape $ openClInit types assign sizes]
           options = [ Option { optionLongName = "platform"
                              , optionShortName = Just 'p'
                              , optionArgument = RequiredArgument
@@ -91,12 +91,9 @@ asLong :: PyExp -> PyExp
 asLong x = Py.simpleCall "np.long" [x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
-callKernel (Imp.GetNumGroups v) =
-  Py.stm $ Assign (Var (Py.compileName v)) $ Var "self.num_groups"
-callKernel (Imp.GetGroupSize v) =
-  Py.stm $ Assign (Var (Py.compileName v)) $ Var "self.group_size"
-callKernel (Imp.GetTileSize v) =
-  Py.stm $ Assign (Var (Py.compileName v)) $ Var "self.tile_size"
+callKernel (Imp.GetSize v key) =
+  Py.stm $ Assign (Var (Py.compileName v)) $
+  Index (Var "self.sizes") (IdxExp $ String $ pretty key)
 callKernel (Imp.HostCode c) =
   Py.compileCode c
 

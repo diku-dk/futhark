@@ -17,6 +17,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , LocalMemoryUse
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
+  , module Futhark.Representation.Kernels.Sizes
   -- * Utility functions
   , getKernels
   )
@@ -31,6 +32,7 @@ import Prelude
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.Representation.Kernels.Sizes
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
@@ -43,18 +45,14 @@ type Code = Imp.Code CallKernel
 type KernelCode = Imp.Code KernelOp
 
 -- | A run-time constant related to kernels.
-data KernelConst = GroupSizeConst
-                 | NumGroupsConst
-                 | TileSizeConst
-                 deriving (Eq, Ord, Show)
+newtype KernelConst = SizeConst VName
+                    deriving (Eq, Ord, Show)
 
 -- | An expression whose variables are kernel constants.
 type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel CallKernel
-            | GetNumGroups VName
-            | GetGroupSize VName
-            | GetTileSize VName
+            | GetSize VName VName SizeClass
             deriving (Show)
 
 data CallKernel = Map MapKernel
@@ -114,9 +112,7 @@ getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
         sameKernel _ _ = False
 
 instance Pretty KernelConst where
-  ppr NumGroupsConst = text "$num_groups()"
-  ppr GroupSizeConst = text "$group_size()"
-  ppr TileSizeConst = text "$tile_size()"
+  ppr (SizeConst key) = text "get_size" <> parens (ppr key)
 
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =
@@ -127,15 +123,9 @@ instance Pretty KernelUse where
     text "const" <> parens (commasep [ppr name, ppr e])
 
 instance Pretty HostOp where
-  ppr (GetNumGroups dest) =
+  ppr (GetSize dest key size_class) =
     ppr dest <+> text "<-" <+>
-    text "get_num_groups()"
-  ppr (GetGroupSize dest) =
-    ppr dest <+> text "<-" <+>
-    text "get_group_size()"
-  ppr (GetTileSize dest) =
-    ppr dest <+> text "<-" <+>
-    text "get_tile_size()"
+    text "get_size" <> parens (commasep [ppr key, ppr size_class])
   ppr (CallKernel c) =
     ppr c
 

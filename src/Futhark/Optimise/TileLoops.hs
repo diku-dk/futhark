@@ -125,7 +125,8 @@ tileInStms branch_variant initial_variance initial_kspace kstms = do
               arrs arr_chunk_params = do
 
           ((tile_size, tiled_group_size), tile_size_bnds) <- runBinder $ do
-            tile_size <- letSubExp "tile_size" $ Op TileSize
+            tile_size_key <- newVName "tile_size"
+            tile_size <- letSubExp "tile_size" $ Op $ GetSize tile_size_key SizeTile
             tiled_group_size <- letSubExp "tiled_group_size" $
                                 BasicOp $ BinOp (Mul Int32) tile_size tile_size
             return (tile_size, tiled_group_size)

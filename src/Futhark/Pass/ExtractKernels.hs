@@ -410,6 +410,12 @@ data MapLoop = MapLoop Certificates SubExp Lambda [VName]
 mapLoopExp :: MapLoop -> Exp
 mapLoopExp (MapLoop _ w lam arrs) = Op $ Map w lam arrs
 
+sufficientParallelism :: (Op (Lore m) ~ Kernel innerlore, MonadBinder m) =>
+                         String -> SubExp -> m SubExp
+sufficientParallelism desc par = do
+  par_threshold <- getSize "par_threshold" Out.SizeThreshold
+  letSubExp desc $ BasicOp $ CmpOp (CmpSle Int32) par_threshold par
+
 distributeMap :: (HasScope Out.Kernels m,
                   MonadFreshNames m, MonadLogger m) =>
                  Pattern -> MapLoop -> m [KernelsStm]
@@ -437,18 +443,18 @@ distributeMap pat (MapLoop cs w lam arrs) = do
         addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
     seq_body <- renameBody $ mkBody seq_stms res
     (outer_suff, outer_suff_stms) <- runBinder $
-      letSubExp "outer_suff_par" $ Op $ SufficientParallelism w
+      sufficientParallelism "outer_suff_par" w
 
     intra_stms <- flip runReaderT types $ localScope (scopeOfLParams (lambdaParams lam)) $
                   intraGroupParallelise (newKernel loopnest) $ lambdaBody lam
     group_par_body <- renameBody $ mkBody intra_stms res
 
     (intra_suff, intra_suff_stms) <- runBinder $ do
-      group_size <- letSubExp "group_size" $ Op GroupSize
+      group_size <- getSize "group_size" Out.SizeGroup
       group_available_par <-
         letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
       if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
-        letSubExp "group_suff_par" $ Op $ SufficientParallelism group_available_par
+        sufficientParallelism "group_suff_par" group_available_par
       else return $ constant False
 
     ((outer_suff_stms++intra_suff_stms)++) <$>
@@ -687,7 +693,7 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
         seq_body <- renameBody $ mkBody [sequentialised_kernel] res'
         par_body <- renameBody $ mkBody (postKernelsStms distributed_kernels) res'
         (sufficient_parallelism, sufficient_stms) <- runBinder $
-          letSubExp "sufficient_parallelism" $ Op $ SufficientParallelism parw
+          sufficientParallelism "sufficient_parallelism" parw
         addKernel =<< kernelAlternatives outer_pat
           par_body [(sufficient_parallelism,seq_body)]
         addKernel $ parw_bnds ++ sufficient_stms
@@ -1227,17 +1233,16 @@ intraGroupParallelise knest body = do
         used_inps = filter inputIsUsed inps
 
     mapM_ addStm w_stms
-    group_size_v <- newVName "group_size"
-    letBindNames'_ [group_size_v] $ Op GroupSize
+    group_size <- getSize "group_size" Out.SizeGroup
 
     num_threads <- letSubExp "num_threads" $
-                   BasicOp $ BinOp (Mul Int32) num_groups (Var group_size_v)
+                   BasicOp $ BinOp (Mul Int32) num_groups group_size
 
-    let ksize = (num_groups, Var group_size_v, num_threads)
+    let ksize = (num_groups, group_size, num_threads)
 
     ltid <- newVName "ltid"
 
-    kspace <- newKernelSpace ksize $ FlatThreadSpace $ ispace ++ [(ltid,Var group_size_v)]
+    kspace <- newKernelSpace ksize $ FlatThreadSpace $ ispace ++ [(ltid,group_size)]
 
     read_input_stms <- mapM readKernelInput used_inps
 
