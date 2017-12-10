@@ -266,7 +266,6 @@ static struct opencl_device_option get_preferred_device(const struct opencl_conf
 
   opencl_all_device_options(&devices, &num_devices);
 
-  int num_platform_matches = 0;
   int num_device_matches = 0;
 
   for (size_t i = 0; i < num_devices; i++) {
