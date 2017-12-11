@@ -609,8 +609,9 @@ unbalancedLambda lam =
         unbalancedStm _ (DoLoop _ _ (WhileLoop _) _) =
           False
 
-        unbalancedStm bound (If _ tbranch fbranch _) =
-          unbalancedBody bound tbranch || unbalancedBody bound fbranch
+        unbalancedStm bound (If cond tbranch fbranch _) =
+          cond `subExpBound` bound &&
+          (unbalancedBody bound tbranch || unbalancedBody bound fbranch)
 
         unbalancedStm _ (BasicOp _) =
           False
