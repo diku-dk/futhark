@@ -332,7 +332,8 @@ runTests config paths = do
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
 
   let (excluded, included) = partition (excludedTest config) all_tests
-  _ <- forkIO $ mapM_ (putMVar testmvar) included
+      included_set = S.fromList included
+  _ <- forkIO $ mapM_ (putMVar testmvar) $ S.toList included_set
   isTTY <- (&& not (configUnbufferOutput config)) <$> hIsTerminalDevice stdout
 
   let report = if isTTY then reportInteractive else reportText
@@ -350,7 +351,7 @@ runTests config paths = do
                               T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
                               next (failed+1) passed
 
-  (failed, passed) <- getResults (S.fromList included) 0 0
+  (failed, passed) <- getResults included_set 0 0
   let excluded_str = if null excluded
                      then ""
                      else " (" ++ show (length excluded) ++ " excluded)"
