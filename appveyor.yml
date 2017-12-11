@@ -9,7 +9,6 @@ environment:
   matrix:
   - STACK_YAML: stack.yaml
   - STACK_YAML: stack-lts-7.24.yaml
-  - STACK_YAML: stack-lts-9.2.yaml
 cache:
 - "%STACK_ROOT%"
 
