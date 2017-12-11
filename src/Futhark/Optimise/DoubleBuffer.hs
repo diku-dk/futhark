@@ -192,13 +192,14 @@ data DoubleBuffer lore = BufferAlloc VName SubExp Space Bool
                        | NoBuffer
                     deriving (Show)
 
-doubleBufferMergeParams :: ExplicitMemorish lore =>
+doubleBufferMergeParams :: (ExplicitMemorish lore, MonadFreshNames m) =>
                            Bool -> [(FParam lore,SubExp)]
                         -> [FParam lore] -> Names
-                        -> DoubleBufferM lore [DoubleBuffer lore]
+                        -> m [DoubleBuffer lore]
 doubleBufferMergeParams copy_init ctx_and_res val_params bound_in_loop =
   evalStateT (mapM buffer val_params) M.empty
-  where loopVariant v = v `S.member` bound_in_loop || v `elem` map (paramName . fst) ctx_and_res
+  where loopVariant v = v `S.member` bound_in_loop ||
+                        v `elem` map (paramName . fst) ctx_and_res
 
         loopInvariantSize (Constant v) =
           Just (Constant v, copy_init)
@@ -238,9 +239,8 @@ allocStms merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) (defAux ()) $
                 Op $ Alloc size space]
-          if b
-            then return (Param pname $ MemMem size space, Var name)
-            else return m
+          if b then return (Param pname $ MemMem size space, Var name)
+               else return m
         allocation (f, Var v) (BufferCopy mem _ _ b) | b = do
           v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
           (_v_mem, v_ixfun) <- lift $ lookupArraySummary v
