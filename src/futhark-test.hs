@@ -212,7 +212,7 @@ compileTestProgram futharkc program = do
     ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
     ExitFailure _   -> throwError $ T.decodeUtf8 futerr
     ExitSuccess     -> return ()
-  where binOutputf = program `replaceExtension` "bin"
+  where binOutputf = dropExtension program
 
 runCompiledTestProgram :: [String] -> String -> T.Text -> TestRun -> TestM ()
 runCompiledTestProgram extra_options program entry (TestRun _ inputValues expectedResult _) = do
@@ -229,7 +229,7 @@ runCompiledTestProgram extra_options program entry (TestRun _ inputValues expect
       LBS.toStrict input
     withExceptT validating $
       compareResult program expectedResult' =<< runResult program progCode output progerr
-  where binOutputf = program `replaceExtension` "bin"
+  where binOutputf = dropExtension program
         dir = takeDirectory program
         validating = ("validating test result:\n"<>)
 

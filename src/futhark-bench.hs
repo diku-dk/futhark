@@ -46,7 +46,7 @@ initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1)
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
-binaryName = (`replaceExtension` "bin")
+binaryName = dropExtension
 
 newtype RunResult = RunResult { runMicroseconds :: Int }
 data DataResult = DataResult String (Either T.Text [RunResult])
