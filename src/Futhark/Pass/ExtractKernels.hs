@@ -644,9 +644,11 @@ nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
 containsNestedParallelism :: Lambda -> Bool
 containsNestedParallelism lam =
   not (null $ nestedParallelism $ lambdaBody lam) &&
-  not (perfectMapNest $ bodyStms $ lambdaBody lam)
-  where perfectMapNest [Let _ _ (Op Map{})] = True
-        perfectMapNest _                    = False
+  not (onlyMaps $ bodyStms $ lambdaBody lam)
+  where onlyMaps = all $ isMapOrSeq . stmExp
+        isMapOrSeq (Op Map{}) = True
+        isMapOrSeq (Op _) = False
+        isMapOrSeq _ = True
 
 -- Enable if you want the cool new versioned code.  Beware: may be
 -- slower in practice.  Caveat emptor (and you are the emptor).
