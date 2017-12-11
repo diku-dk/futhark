@@ -6,6 +6,7 @@
 
 \#*\#
 .#*
+*~
 
 # Ignore cabal build directory.
 dist
@@ -14,23 +15,12 @@ dist
 .stack-work
 
 # Ignore result of test suite.
-tests/*actual-*
-tests/**/*actual-*
-tests/*expected-*
-tests/**/*expected-*
-tests/*bin
-tests/**/*bin
-tests/*c
-tests/**/*.c
-examples/*actual-*
-examples/**/*actual-*
-examples/*expected-*
-examples/**/*expected-*
-examples/*bin
-examples/**/*bin
-examples/*c
-examples/**/*c
-*~
+tests/*
+!tests/*.fut
+!tests/**/*.fut
+examples/*
+!examples/*.fut
+!examples/**/*.fut
 
 # Ignore side-effects of compilation.
 *.aux
