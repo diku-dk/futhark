@@ -70,6 +70,11 @@ cliOptions = [ Option { optionLongName = "platform"
                       , optionArgument = RequiredArgument
                       , optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
                       }
+             , Option { optionLongName = "default-threshold"
+                      , optionShortName = Nothing
+                      , optionArgument = RequiredArgument
+                      , optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+                      }
              , Option { optionLongName = "dump-opencl"
                       , optionShortName = Nothing
                       , optionArgument = RequiredArgument
