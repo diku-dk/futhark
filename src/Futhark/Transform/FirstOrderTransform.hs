@@ -795,9 +795,9 @@ doLoopMapAccumL' width innerfun accexps arrexps mapout_arrs = do
   let res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                | t <- map_arr_tps ]
   let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
-  outarrs <- mapM (newIdent "redomap_outarr") res_ts
+  outarrs <- mapM (newIdent "mapaccum_outarr") res_ts
   -- for the REDUCE part
-  (acc, initacc, inarrs) <- newFold "redomap" (zip accexps accts) arrexps
+  (acc, initacc, inarrs) <- newFold "mapaccum" (zip accexps accts) arrexps
   let consumed = consumedInBody $ lambdaBody innerfun
       withUniqueness p | identName p `S.member` consumed = (p, Unique)
                        | p `elem` outarrs = (p, Unique)
