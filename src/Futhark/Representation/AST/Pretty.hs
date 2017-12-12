@@ -239,10 +239,12 @@ instance Pretty (BasicOp lore) where
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f (IfAttr _ ifsort)) =
     text "if" <+> info' <+> ppr c </>
-    text "then" <+> align (ppr t) </>
-    text "else" <+> align (ppr f)
+    text "then" <+> maybeNest t <+>
+    text "else" <+> maybeNest f
     where info' = case ifsort of IfNormal -> mempty
                                  IfFallback -> text "<fallback>"
+          maybeNest b | null $ bodyStms b = ppr b
+                      | otherwise         = nestedBlock "{" "}" $ ppr b
   ppr (BasicOp op) = ppr op
   ppr (Apply fname args _ _) =
     text (nameToString fname) <> apply (map (align . ppr . fst) args)
@@ -286,7 +288,7 @@ instance PrettyLore lore => Pretty (FunDef lore) where
     text fun <+> ppTuple' rettype <+>
     text (nameToString name) <//>
     apply (map ppr fparams) <+>
-    equals </> indent 2 (ppr body)
+    equals <+> nestedBlock "{" "}" (ppr body)
     where fun | isJust entry = "entry"
               | otherwise    = "fun"
 
