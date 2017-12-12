@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 -- | Kernel extraction.
 --
 -- In the following, I will use the term "width" to denote the amount
@@ -459,21 +460,21 @@ distributeMap' loopnest seq_stms par_stms pat w lam = do
   (outer_suff, outer_suff_stms) <- runBinder $
     sufficientParallelism "outer_suff" w
 
-  intra_stms <- flip runReaderT types $
-                localScope (scopeOfLParams (lambdaParams lam)) $
-                intraGroupParallelise loopnest $ lambdaBody lam
-
-  seq_body <- renameBody $ mkBody seq_stms res
-  par_body <- renameBody $ mkBody par_stms res
-  group_par_body <- renameBody $ mkBody intra_stms res
-
-  (intra_suff, intra_suff_stms) <- runBinder $ do
+  ((group_size, intra_suff), intra_suff_stms) <- runBinder $ do
     group_size <- getSize "group_size" Out.SizeGroup
     group_available_par <-
       letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
     if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
-      sufficientParallelism "group_suff_par" group_available_par
-    else return $ constant False
+      (group_size,) <$> sufficientParallelism "group_suff_par" group_available_par
+    else return (group_size, constant False)
+
+  intra_stms <- flip runReaderT types $
+                localScope (scopeOfLParams (lambdaParams lam)) $
+                intraGroupParallelise group_size loopnest $ lambdaBody lam
+
+  seq_body <- renameBody $ mkBody seq_stms res
+  par_body <- renameBody $ mkBody par_stms res
+  group_par_body <- renameBody $ mkBody intra_stms res
 
   ((outer_suff_stms++intra_suff_stms)++) <$>
     kernelAlternatives pat par_body [(outer_suff, seq_body),
@@ -1238,9 +1239,9 @@ expandKernelNest pes (outer_nest, inner_nests) = do
 -- to be exploited does not exceed the group size.
 intraGroupParallelise :: (MonadFreshNames m,
                           HasScope Out.Kernels m) =>
-                         KernelNest -> Body
+                         SubExp -> KernelNest -> Body
                       -> m [Out.Stm Out.Kernels]
-intraGroupParallelise knest body = do
+intraGroupParallelise group_size knest body = do
   (w_stms, w, ispace, inps, rts) <- flatKernel knest
   let num_groups = w
 
@@ -1249,7 +1250,6 @@ intraGroupParallelise knest body = do
         used_inps = filter inputIsUsed inps
 
     mapM_ addStm w_stms
-    group_size <- getSize "group_size" Out.SizeGroup
 
     num_threads <- letSubExp "num_threads" $
                    BasicOp $ BinOp (Mul Int32) num_groups group_size
