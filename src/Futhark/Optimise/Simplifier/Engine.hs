@@ -587,6 +587,7 @@ isNotCheap _ = not . cheapStm
         cheap (BasicOp UnOp{})         = True
         cheap (BasicOp CmpOp{})        = True
         cheap (BasicOp ConvOp{})       = True
+        cheap (BasicOp Copy{})         = False
         cheap DoLoop{}                 = False
         cheap (If _ tbranch fbranch _) = all cheapStm (bodyStms tbranch) &&
                                          all cheapStm (bodyStms fbranch)
