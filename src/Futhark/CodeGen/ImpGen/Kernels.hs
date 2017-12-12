@@ -958,13 +958,13 @@ streaming constants chunksize bound m = do
 
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
                     -> InKernelGen ()
-compileKernelResult constants dest (ThreadsReturn (OneThreadPerGroup who) what) = do
+compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
   write_result <-
     ImpGen.collect $
     ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
 
   let me = Imp.var (kernelLocalThreadId constants) int32
-  who' <- ImpGen.compileSubExp who
+  who' <- ImpGen.compileSubExp $ intConst Int32 0
   ImpGen.emit $
     Imp.If (Imp.CmpOpExp (CmpEq int32) me who')
     write_result mempty

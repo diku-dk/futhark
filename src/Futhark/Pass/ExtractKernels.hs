@@ -427,42 +427,58 @@ distributeMap pat (MapLoop cs w lam arrs) = do
                       , kernelScope =
                         scopeForKernels (scopeOf lam) <> types
                       }
-  let res = map Var $ patternNames pat
   par_stms <- fmap (postKernelsStms . snd) $ runKernelM env $
     distribute =<< distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
 
   if not versionedCode || not (containsNestedParallelism lam)
     then return par_stms
     else do
-    par_body <- renameBody $ mkBody par_stms res
-
     seq_stms <- do
       soactypes <- asksScope scopeForSOACs
       (seq_lam, _) <- runBinderT (Kernelise.transformLambda lam) soactypes
       fmap (postKernelsStms . snd) $ runKernelM env $ distribute $
         addStmsToKernel (bodyStms $ lambdaBody seq_lam) acc
-    seq_body <- renameBody $ mkBody seq_stms res
-    (outer_suff, outer_suff_stms) <- runBinder $
-      sufficientParallelism "outer_suff_par" w
 
-    intra_stms <- flip runReaderT types $ localScope (scopeOfLParams (lambdaParams lam)) $
-                  intraGroupParallelise (newKernel loopnest) $ lambdaBody lam
-    group_par_body <- renameBody $ mkBody intra_stms res
-
-    (intra_suff, intra_suff_stms) <- runBinder $ do
-      group_size <- getSize "group_size" Out.SizeGroup
-      group_available_par <-
-        letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
-      if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
-        sufficientParallelism "group_suff_par" group_available_par
-      else return $ constant False
-
-    ((outer_suff_stms++intra_suff_stms)++) <$>
-      kernelAlternatives pat par_body [(outer_suff, seq_body),
-                                       (intra_suff, group_par_body)]
+    distributeMap' (newKernel loopnest) seq_stms par_stms pat w lam
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelStms = mempty
                           }
+
+distributeMap' :: (HasScope Out.Kernels m, MonadFreshNames m) =>
+                  KernelNest
+               -> [Out.Stm Out.Kernels]
+               -> [Out.Stm Out.Kernels]
+               -> PatternT Type
+               -> SubExp
+               -> LambdaT SOACS
+               -> m [Out.Stm Out.Kernels]
+distributeMap' loopnest seq_stms par_stms pat w lam = do
+  let res = map Var $ patternNames pat
+
+  types <- askScope
+  (outer_suff, outer_suff_stms) <- runBinder $
+    sufficientParallelism "outer_suff" w
+
+  intra_stms <- flip runReaderT types $
+                localScope (scopeOfLParams (lambdaParams lam)) $
+                intraGroupParallelise loopnest $ lambdaBody lam
+
+  seq_body <- renameBody $ mkBody seq_stms res
+  par_body <- renameBody $ mkBody par_stms res
+  group_par_body <- renameBody $ mkBody intra_stms res
+
+  (intra_suff, intra_suff_stms) <- runBinder $ do
+    group_size <- getSize "group_size" Out.SizeGroup
+    group_available_par <-
+      letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
+    if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
+      sufficientParallelism "group_suff_par" group_available_par
+    else return $ constant False
+
+  ((outer_suff_stms++intra_suff_stms)++) <$>
+    kernelAlternatives pat par_body [(outer_suff, seq_body),
+                                     (intra_suff, group_par_body)]
+
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
                            , kernelScope :: Scope Out.Kernels
@@ -692,14 +708,11 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
           constructKernel nest' kbody
 
         let outer_pat = loopNestingPattern $ fst nest
-            res' = map Var $ patternNames outer_pat
-        seq_body <- renameBody $ mkBody [sequentialised_kernel] res'
-        par_body <- renameBody $ mkBody (postKernelsStms distributed_kernels) res'
-        (sufficient_parallelism, sufficient_stms) <- runBinder $
-          sufficientParallelism "sufficient_parallelism" parw
-        addKernel =<< kernelAlternatives outer_pat
-          par_body [(sufficient_parallelism,seq_body)]
-        addKernel $ parw_bnds ++ sufficient_stms
+        addKernel =<< (parw_bnds++) <$>
+          localScope extra_scope (distributeMap' nest' [sequentialised_kernel]
+                                  (postKernelsStms distributed_kernels)
+                                  outer_pat parw lam)
+
         return acc'
       where lam_bnds = bodyStms $ lambdaBody lam
             lam_res = bodyResult $ lambdaBody lam
@@ -1252,12 +1265,28 @@ intraGroupParallelise knest body = do
     return (kspace, read_input_stms)
 
   kbody <- intraGroupParalleliseBody kspace body
-
   let kbody' = kbody { kernelBodyStms = read_input_stms ++ kernelBodyStms kbody }
-      kstm = Let (loopNestingPattern first_nest) (StmAux cs ()) $ Op $
-             Kernel (KernelDebugHints "map_intra_group" []) kspace rts kbody'
 
-  return $ prelude_stms ++ [kstm]
+  -- The kernel itself is producing a "flat" result of shape
+  -- [num_groups].  We must explicitly reshape it to match the shapes
+  -- of our enclosing map-nests.
+  let nested_pat = loopNestingPattern first_nest
+      flatPatElem pat_elem = do
+        let t' = arrayOfRow (length ispace `stripArray` patElemType pat_elem) num_groups
+        name <- newVName $ baseString (patElemName pat_elem) ++ "_flat"
+        return $ PatElem name BindVar t'
+  flat_pat <- Pattern [] <$> mapM flatPatElem (patternValueElements nested_pat)
+
+  let kstm = Let flat_pat (StmAux cs ()) $ Op $
+             Kernel (KernelDebugHints "map_intra_group" []) kspace rts kbody'
+      reshapeStm nested_pe flat_pe =
+        Let (Pattern [] [nested_pe]) (StmAux cs ()) $
+        BasicOp $ Reshape (map DimNew $ arrayDims $ patElemType nested_pe) $
+        patElemName flat_pe
+      reshape_stms = zipWith reshapeStm (patternElements nested_pat)
+                                        (patternElements flat_pat)
+
+  return $ prelude_stms ++ [kstm] ++ reshape_stms
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
@@ -1358,7 +1387,7 @@ intraGroupParalleliseBody kspace body = do
 
     processStms $ bodyStms body
 
-  return $ KernelBody () kstms $ map (ThreadsReturn $ OneThreadPerGroup $ intConst Int32 0) $ bodyResult body
+  return $ KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body
 
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                       Out.Pattern Out.Kernels

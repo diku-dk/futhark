@@ -431,8 +431,7 @@ largeKernel segment_size num_segments nest_sizes all_arrs comm
   ((final_red_pes, map_pes, offset), stms) <- runBinder each_thread
 
   red_returns <- forM final_red_pes $ \pe ->
-    return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $
-                           Var $ patElemName pe
+    return $ ThreadsReturn OneResultPerGroup $ Var $ patElemName pe
   map_returns <- forM map_pes $ \pe ->
     return $ ConcatReturns ordering w elements_per_thread
                            (Just offset) $
