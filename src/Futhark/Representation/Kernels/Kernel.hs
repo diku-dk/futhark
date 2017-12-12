@@ -148,7 +148,7 @@ kernelResultSubExp (ConcatReturns _ _ _ _ v) = Var v
 kernelResultSubExp (KernelInPlaceReturn v) = Var v
 
 data WhichThreads = AllThreads
-                  | OneThreadPerGroup SubExp -- Which one.
+                  | OneResultPerGroup
                   | ThreadsPerGroup [(VName,SubExp)] -- All threads before this one.
                   | ThreadsInSpace
                   deriving (Eq, Show, Ord)
@@ -271,7 +271,7 @@ instance FreeIn KernelResult where
 
 instance FreeIn WhichThreads where
   freeIn AllThreads = mempty
-  freeIn (OneThreadPerGroup which) = freeIn which
+  freeIn OneResultPerGroup = mempty
   freeIn (ThreadsPerGroup limit) = freeIn limit
   freeIn ThreadsInSpace = mempty
 
@@ -307,14 +307,11 @@ instance Substitute KernelResult where
     KernelInPlaceReturn (substituteNames subst what)
 
 instance Substitute WhichThreads where
-  substituteNames _ AllThreads =
-    AllThreads
-  substituteNames subst (OneThreadPerGroup which) =
-    OneThreadPerGroup $ substituteNames subst which
+  substituteNames _ AllThreads = AllThreads
+  substituteNames _ OneResultPerGroup = OneResultPerGroup
+  substituteNames _ ThreadsInSpace = ThreadsInSpace
   substituteNames subst (ThreadsPerGroup limit) =
     ThreadsPerGroup $ substituteNames subst limit
-  substituteNames _ ThreadsInSpace =
-    ThreadsInSpace
 
 instance Substitute KernelSpace where
   substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
@@ -386,7 +383,7 @@ kernelType (Kernel _ space ts body) =
           t `arrayOfShape` Shape rws
         resultShape t (ThreadsReturn AllThreads _) =
           t `arrayOfRow` num_threads
-        resultShape t (ThreadsReturn OneThreadPerGroup{} _) =
+        resultShape t (ThreadsReturn OneResultPerGroup _) =
           t `arrayOfRow` num_groups
         resultShape t (ThreadsReturn (ThreadsPerGroup limit) _) =
           t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
@@ -585,15 +582,13 @@ typeCheckKernel (Kernel _ space kts kbody) = do
         checkKernelResult (KernelInPlaceReturn what) t =
           TC.requireI [t] what
 
-        checkWhich AllThreads =
-          return ()
-        checkWhich (OneThreadPerGroup which) =
-          TC.require [Prim int32] which
+        checkWhich AllThreads = return ()
+        checkWhich OneResultPerGroup = return ()
+        checkWhich ThreadsInSpace = return ()
         checkWhich (ThreadsPerGroup limit) = do
           mapM_ (TC.requireI [Prim int32] . fst) limit
           mapM_ (TC.require [Prim int32] . snd) limit
-        checkWhich ThreadsInSpace =
-          return ()
+
 
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (Kernel _ _ _ kbody) =
@@ -639,8 +634,8 @@ instance PrettyLore lore => Pretty (KernelBody lore) where
 instance Pretty KernelResult where
   ppr (ThreadsReturn AllThreads what) =
     ppr what
-  ppr (ThreadsReturn (OneThreadPerGroup who) what) =
-    text "thread" <+> ppr who <+> text "returns" <+> ppr what
+  ppr (ThreadsReturn OneResultPerGroup what) =
+    text "group" <+> "returns" <+> ppr what
   ppr (ThreadsReturn (ThreadsPerGroup limit) what) =
     text "thread <" <+> ppr limit <+> text "returns" <+> ppr what
   ppr (ThreadsReturn ThreadsInSpace what) =

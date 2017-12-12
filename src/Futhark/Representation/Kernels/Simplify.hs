@@ -233,14 +233,11 @@ instance Engine.Simplifiable KernelResult where
     KernelInPlaceReturn <$> Engine.simplify what
 
 instance Engine.Simplifiable WhichThreads where
-  simplify AllThreads =
-    pure AllThreads
-  simplify (OneThreadPerGroup which) =
-    OneThreadPerGroup <$> Engine.simplify which
+  simplify AllThreads = pure AllThreads
+  simplify OneResultPerGroup = pure OneResultPerGroup
+  simplify ThreadsInSpace = pure ThreadsInSpace
   simplify (ThreadsPerGroup limit) =
     ThreadsPerGroup <$> mapM Engine.simplify limit
-  simplify ThreadsInSpace =
-    pure ThreadsInSpace
 
 kernelRules :: (MonadBinder m,
                 LocalScope (Lore m) m,

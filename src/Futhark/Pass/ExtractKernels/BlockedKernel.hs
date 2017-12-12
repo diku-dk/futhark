@@ -152,7 +152,7 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs = do
                      zip nes $ map patElemName chunk_red_pes'
 
   red_rets <- forM final_red_pes $ \pe ->
-    return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
+    return $ ThreadsReturn OneResultPerGroup $ Var $ patElemName pe
   map_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering' w (kernelElementsPerThread step_one_size) Nothing $ patElemName pe
   let rets = red_rets ++ map_rets
@@ -204,7 +204,7 @@ reduceKernel step_two_size reduce_lam' nes arrs = do
       Op $ GroupReduce group_size reduce_lam' $ zip nes arrs'
 
     forM final_res_pes $ \pe ->
-      return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
+      return $ ThreadsReturn OneResultPerGroup $ Var $ patElemName pe
 
   return $ Kernel (KernelDebugHints "reduce" []) space (lambdaReturnType reduce_lam')  $
     KernelBody () kstms rets
@@ -573,7 +573,7 @@ scanKernel1 w scan_sizes lam foldlam nes arrs = do
     let (scanout_result, mapout_result, carry_result) =
           splitAt3 (length scanout_arrs) (length mapout_arrs) result
     return (map KernelInPlaceReturn scanout_result ++
-            map (ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) . Var) carry_result ++
+            map (ThreadsReturn OneResultPerGroup . Var) carry_result ++
             map KernelInPlaceReturn mapout_result)
 
   let kts = scanout_arr_ts ++ scan_ts ++ mapout_arr_ts
