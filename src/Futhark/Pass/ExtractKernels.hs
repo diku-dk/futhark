@@ -453,32 +453,44 @@ distributeMap' :: (HasScope Out.Kernels m, MonadFreshNames m) =>
                -> SubExp
                -> LambdaT SOACS
                -> m [Out.Stm Out.Kernels]
-distributeMap' loopnest seq_stms par_stms pat w lam = do
+distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
   let res = map Var $ patternNames pat
 
   types <- askScope
   (outer_suff, outer_suff_stms) <- runBinder $
-    sufficientParallelism "outer_suff" w
+    sufficientParallelism "outer_suff" nest_w
 
   ((group_size, intra_suff), intra_suff_stms) <- runBinder $ do
     group_size <- getSize "group_size" Out.SizeGroup
     group_available_par <-
-      letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) w group_size
+      letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w group_size
     if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
       (group_size,) <$> sufficientParallelism "group_suff_par" group_available_par
     else return (group_size, constant False)
 
-  intra_stms <- flip runReaderT types $
-                localScope (scopeOfLParams (lambdaParams lam)) $
-                intraGroupParallelise group_size loopnest $ lambdaBody lam
+  (intra_ws, intra_stms) <-
+    flip runReaderT types $
+    localScope (scopeOfLParams (lambdaParams lam)) $
+    intraGroupParallelise group_size loopnest $ lambdaBody lam
 
   seq_body <- renameBody $ mkBody seq_stms res
   par_body <- renameBody $ mkBody par_stms res
   group_par_body <- renameBody $ mkBody intra_stms res
 
-  ((outer_suff_stms++intra_suff_stms)++) <$>
-    kernelAlternatives pat par_body [(outer_suff, seq_body),
-                                     (intra_suff, group_par_body)]
+  if all (`M.member` types) $ freeIn intra_ws then do
+    -- We must check that all intra-group parallelism fits in a group,
+    -- which implies that it must be regular (known outside the
+    -- kernel).
+    (fit_and_suff, fits_stms) <- runBinder $ do
+      let checkFit w =
+            letSubExp "fits_in_group" $ BasicOp $ CmpOp (CmpSle Int32) w group_size
+      letSubExp "all_fit" =<< foldBinOp LogAnd intra_suff =<< mapM checkFit intra_ws
+
+    ((outer_suff_stms<>intra_suff_stms<>fits_stms)++) <$>
+      kernelAlternatives pat par_body [(outer_suff, seq_body),
+                                       (fit_and_suff, group_par_body)]
+  else
+    (outer_suff_stms<>) <$> kernelAlternatives pat par_body [(outer_suff, seq_body)]
 
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
@@ -1237,10 +1249,9 @@ expandKernelNest pes (outer_nest, inner_nests) = do
 -- contain maps, scans or reduction.  In the future, we could probably
 -- do something more clever.  Make sure that the amount of parallelism
 -- to be exploited does not exceed the group size.
-intraGroupParallelise :: (MonadFreshNames m,
-                          HasScope Out.Kernels m) =>
+intraGroupParallelise :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                          SubExp -> KernelNest -> Body
-                      -> m [Out.Stm Out.Kernels]
+                      -> m ([SubExp], [Out.Stm Out.Kernels])
 intraGroupParallelise group_size knest body = do
   (w_stms, w, ispace, inps, rts) <- flatKernel knest
   let num_groups = w
@@ -1264,7 +1275,7 @@ intraGroupParallelise group_size knest body = do
 
     return (kspace, read_input_stms)
 
-  kbody <- intraGroupParalleliseBody kspace body
+  (ws, kbody) <- intraGroupParalleliseBody kspace body
   let kbody' = kbody { kernelBodyStms = read_input_stms ++ kernelBodyStms kbody }
 
   -- The kernel itself is producing a "flat" result of shape
@@ -1286,21 +1297,21 @@ intraGroupParallelise group_size knest body = do
       reshape_stms = zipWith reshapeStm (patternElements nested_pat)
                                         (patternElements flat_pat)
 
-  return $ prelude_stms ++ [kstm] ++ reshape_stms
+  return (ws, prelude_stms ++ [kstm] ++ reshape_stms)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
-intraGroupParalleliseBody :: (MonadFreshNames m,
-                              HasScope Out.Kernels m) =>
-                             KernelSpace -> Body -> m (Out.KernelBody Out.InKernel)
+intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
+                             KernelSpace -> Body
+                          -> m ([SubExp], Out.KernelBody Out.InKernel)
 intraGroupParalleliseBody kspace body = do
   let ltid = spaceLocalId kspace
-  kstms <- runBinder_ $ do
-    let processStms = mapM_ processStm
+  (ws, kstms) <- runBinder $ do
+    let processStms = fmap concat . mapM processStm
 
         -- Without this type signature, the GHC 8.0.1 type checker
         -- enters an infinite loop.
-        processStm :: Stm -> Binder Out.InKernel ()
+        processStm :: Stm -> Binder Out.InKernel [SubExp]
         processStm stm@(Let pat _ e) =
           case e of
             Op (Map w fun arrs) -> do
@@ -1313,6 +1324,7 @@ intraGroupParalleliseBody kspace body = do
               let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
               letBind_ pat $ Op $
                 Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
+              return [w]
 
             Op (Scanomap w scanfun foldfun nes arrs) -> do
               let (scan_pes, map_pes) =
@@ -1332,6 +1344,7 @@ intraGroupParalleliseBody kspace body = do
                                        }
               letBind_ (Pattern [] scan_pes) $
                 Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
+              return [w]
 
             Op (Redomap w _ redfun foldfun nes arrs) -> do
               let (red_pes, map_pes) =
@@ -1351,15 +1364,18 @@ intraGroupParalleliseBody kspace body = do
                                        }
               letBind_ (Pattern [] red_pes) $
                 Op $ Out.GroupReduce w redfun'' $ zip nes red_input
+              return [w]
 
-            Op (Stream w (Sequential accs) lam arrs) -> do
-
+            Op (Stream w (Sequential accs) lam arrs)
+              | chunk_size_param : _ <- extLambdaParams lam -> do
               types <- asksScope castScope
               ((), stream_bnds) <-
                 runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
-              processStms stream_bnds
+              let replace (Var v) | v == paramName chunk_size_param = w
+                  replace se = se
+              map replace <$> processStms stream_bnds
             _ ->
-              Kernelise.transformStm stm
+              Kernelise.transformStm stm >> return []
 
           where procInput :: Out.Pattern Out.InKernel
                           -> SubExp -> Lambda -> [SubExp] -> [VName]
@@ -1387,7 +1403,8 @@ intraGroupParalleliseBody kspace body = do
 
     processStms $ bodyStms body
 
-  return $ KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body
+  return (nub ws,
+          KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body)
 
 kernelAlternatives :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                       Out.Pattern Out.Kernels
