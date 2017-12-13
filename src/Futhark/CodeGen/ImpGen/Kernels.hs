@@ -958,16 +958,38 @@ streaming constants chunksize bound m = do
 
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
                     -> InKernelGen ()
-compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
-  write_result <-
-    ImpGen.collect $
-    ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
 
+compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
+  i <- newVName "i"
+
+  what_t <- subExpType what
   let me = Imp.var (kernelLocalThreadId constants) int32
-  who' <- ImpGen.compileSubExp $ intConst Int32 0
-  ImpGen.emit $
-    Imp.If (Imp.CmpOpExp (CmpEq int32) me who')
-    write_result mempty
+
+  if primType what_t then do
+      write_result <-
+        ImpGen.collect $
+        ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
+
+      who' <- ImpGen.compileSubExp $ intConst Int32 0
+      ImpGen.emit $
+        Imp.If (Imp.CmpOpExp (CmpEq int32) me who') write_result mempty
+    else do
+    -- If the result of the group is an array, we store it by collective
+    -- copying among all the threads of the group.
+    w <- ImpGen.compileSubExp $ arraySize 0 what_t
+    let i' = ImpGen.varIndex i + ImpGen.varIndex (kernelLocalThreadId constants)
+
+    write_result <-
+      ImpGen.collect $
+      ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants, i']
+                          what [i']
+
+    -- num_iters may be too large, but we have a branch inside the body
+    -- to avoid out-of-bounds writes.
+    let num_iters = (w `quot` Imp.sizeToExp (kernelGroupSize constants)) +
+                    Imp.ValueExp (value (1::Int32))
+    ImpGen.emit $ Imp.For i Int32 num_iters $
+      Imp.If (CmpOpExp (CmpSlt Int32) (Imp.var i int32 + me) w) write_result mempty
 
 compileKernelResult constants dest (ThreadsReturn AllThreads what) =
   ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
