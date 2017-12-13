@@ -30,6 +30,7 @@ module Futhark.CodeGen.ImpGen
   , ArrayEntry (..)
 
     -- * Lookups
+  , lookupVar
   , lookupArray
   , arrayLocation
   , lookupMemory
