@@ -962,34 +962,36 @@ compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResul
 compileKernelResult constants dest (ThreadsReturn OneResultPerGroup what) = do
   i <- newVName "i"
 
-  what_t <- subExpType what
+  in_local_memory <- arrayInLocalMemory what
   let me = Imp.var (kernelLocalThreadId constants) int32
 
-  if primType what_t then do
-      write_result <-
-        ImpGen.collect $
-        ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
-
-      who' <- ImpGen.compileSubExp $ intConst Int32 0
-      ImpGen.emit $
-        Imp.If (Imp.CmpOpExp (CmpEq int32) me who') write_result mempty
-    else do
-    -- If the result of the group is an array, we store it by collective
-    -- copying among all the threads of the group.
-    w <- ImpGen.compileSubExp $ arraySize 0 what_t
-    let i' = ImpGen.varIndex i + ImpGen.varIndex (kernelLocalThreadId constants)
-
+  if not in_local_memory then do
     write_result <-
       ImpGen.collect $
-      ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants, i']
-                          what [i']
+      ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
 
-    -- num_iters may be too large, but we have a branch inside the body
-    -- to avoid out-of-bounds writes.
-    let num_iters = (w `quot` Imp.sizeToExp (kernelGroupSize constants)) +
-                    Imp.ValueExp (value (1::Int32))
-    ImpGen.emit $ Imp.For i Int32 num_iters $
-      Imp.If (CmpOpExp (CmpSlt Int32) (Imp.var i int32 + me) w) write_result mempty
+    who' <- ImpGen.compileSubExp $ intConst Int32 0
+    ImpGen.emit $
+      Imp.If (Imp.CmpOpExp (CmpEq int32) me who') write_result mempty
+    else do
+      -- If the result of the group is an array in local memory, we
+      -- store it by collective copying among all the threads of the
+      -- group.  TODO: also do this if the array is in global memory
+      -- (but this is a bit more tricky, synchronisation-wise).
+      w <- ImpGen.compileSubExp . arraySize 0 =<< subExpType what
+      let i' = ImpGen.varIndex i + ImpGen.varIndex (kernelLocalThreadId constants)
+
+      write_result <-
+        ImpGen.collect $
+        ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants, i']
+                            what [i']
+
+      -- num_iters may be too large, but we have a branch inside the body
+      -- to avoid out-of-bounds writes.
+      let num_iters = (w `quot` Imp.sizeToExp (kernelGroupSize constants)) +
+                      Imp.ValueExp (value (1::Int32))
+      ImpGen.emit $ Imp.For i Int32 num_iters $
+        Imp.If (CmpOpExp (CmpSlt Int32) (Imp.var i int32 + me) w) write_result mempty
 
 compileKernelResult constants dest (ThreadsReturn AllThreads what) =
   ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
@@ -1088,3 +1090,13 @@ unflattenNestedIndex global_dims group_dims global_id =
         group_is = unflattenIndex num_groups_dims group_id
         local_is = unflattenIndex group_dims local_id
         global_is = zipWith (+) local_is $ zipWith (*) group_is group_dims
+
+arrayInLocalMemory :: SubExp -> InKernelGen Bool
+arrayInLocalMemory (Var name) = do
+  res <- ImpGen.lookupVar name
+  case res of
+    ImpGen.ArrayVar _ entry ->
+      (Space "local"==) . ImpGen.entryMemSpace <$>
+      ImpGen.lookupMemory (ImpGen.memLocationName (ImpGen.entryArrayLocation entry))
+    _ -> return False
+arrayInLocalMemory Constant{} = return False
