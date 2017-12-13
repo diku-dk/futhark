@@ -24,6 +24,7 @@ import qualified Data.Map.Strict as M
 
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.Range as Range
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Representation.Aliases
 import Futhark.Representation.Ranges
 import Futhark.Transform.Substitute
@@ -195,7 +196,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (KernelExp lore) where
                            accs ++ map Var arrs
 
   consumedInOp SplitSpace{} = mempty
-  consumedInOp Combine{} = mempty
+  consumedInOp (Combine _ _ _ body) = consumedInBody body
 
 instance Substitute SplitOrdering where
   substituteNames _ SplitContiguous =
@@ -358,7 +359,9 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (KernelExp lore) wh
 
 instance ST.IndexOp (KernelExp lore) where
 
-instance UsageInOp (KernelExp lore) where
+instance Aliased lore => UsageInOp (KernelExp lore) where
+  usageInOp (Combine _ _ _ body) =
+    mconcat $ map UT.consumedUsage $ S.toList $ consumedInBody body
   usageInOp _ = mempty
 
 instance OpMetrics (Op lore) => OpMetrics (KernelExp lore) where
