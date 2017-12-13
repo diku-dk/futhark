@@ -713,7 +713,11 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) 
     ImpGen.emit $ Imp.SetScalar reduce_i $ Imp.var local_tid int32
 
     ImpGen.emit $ Imp.SetScalar offset 0
-    zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
+    set_init_params <- ImpGen.collect $
+      zipWithM_ (readReduceArgument offset) reduce_acc_params arrs
+    ImpGen.emit $
+      Imp.If (Imp.CmpOpExp (CmpSlt Int32) (Imp.var local_tid int32) w')
+      set_init_params mempty
 
     let read_reduce_args = zipWithM_ (readReduceArgument offset)
                            reduce_arr_params arrs
@@ -758,6 +762,7 @@ compileKernelExp constants (ImpGen.Destination dests) (GroupReduce w lam input) 
           (Imp.BinOpExp (And Int32) wave_id (2 * Imp.var skip_waves int32 - 1))
           0
         apply_in_cross_wave_iteration =
+          Imp.BinOpExp LogAnd arg_in_bounds $
           Imp.BinOpExp LogAnd is_first_thread_in_wave wave_not_skipped
         cross_wave_reductions =
           Imp.SetScalar skip_waves 1 <>
