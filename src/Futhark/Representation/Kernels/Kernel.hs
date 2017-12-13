@@ -79,6 +79,7 @@ data KernelDebugHints =
 
 data Kernel lore =
     GetSize VName SizeClass -- ^ Produce some runtime-configurable size.
+  | GetSizeMax SizeClass -- ^ The maximum size of some class.
   | Kernel KernelDebugHints KernelSpace [Type] (KernelBody lore)
     deriving (Eq, Show, Ord)
 
@@ -180,6 +181,8 @@ mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
 mapKernelM _ (GetSize name size_class) =
   pure $ GetSize name size_class
+mapKernelM _ (GetSizeMax size_class) =
+  pure $ GetSizeMax size_class
 mapKernelM tv (Kernel desc space ts kernel_body) =
   Kernel <$> mapOnKernelDebugHints desc <*>
   mapOnKernelSpace space <*>
@@ -394,8 +397,8 @@ kernelType (Kernel _ space ts body) =
         resultShape t KernelInPlaceReturn{} =
           t
 
-kernelType GetSize{} =
-  [Prim int32]
+kernelType GetSize{} = [Prim int32]
+kernelType GetSizeMax{} = [Prim int32]
 
 chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
@@ -522,6 +525,7 @@ instance Aliased lore => UsageInOp (Kernel lore) where
   usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ S.toList $ consumedInKernelBody kbody
   usageInOp GetSize{} = mempty
+  usageInOp GetSizeMax{} = mempty
 
 consumedInKernelBody :: Aliased lore =>
                         KernelBody lore -> Names
@@ -531,6 +535,7 @@ consumedInKernelBody (KernelBody attr stms _) =
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
 typeCheckKernel GetSize{} = return ()
+typeCheckKernel GetSizeMax{} = return ()
 
 typeCheckKernel (Kernel _ space kts kbody) = do
   checkSpace space
@@ -596,11 +601,14 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     where kernelBodyMetrics :: KernelBody lore -> MetricsM ()
           kernelBodyMetrics = mapM_ bindingMetrics . kernelBodyStms
   opMetrics GetSize{} = seen "GetSize"
+  opMetrics GetSizeMax{} = seen "GetSizeMax"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
-  ppr (GetSize name size_class) = text "get_size" <>
-                                  parens (commasep [ppr name,
-                                                    ppr size_class])
+  ppr (GetSize name size_class) =
+    text "get_size" <> parens (commasep [ppr name, ppr size_class])
+
+  ppr (GetSizeMax size_class) =
+    text "get_size_max" <> parens (ppr size_class)
 
   ppr (Kernel desc space ts body) =
     text "kernel" <+> text (kernelName desc) <>

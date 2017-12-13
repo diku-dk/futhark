@@ -6,7 +6,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 -- | Kernel extraction.
 --
 -- In the following, I will use the term "width" to denote the amount
@@ -460,36 +459,35 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
   (outer_suff, outer_suff_stms) <- runBinder $
     sufficientParallelism "outer_suff" nest_w
 
-  ((group_size, intra_suff), intra_suff_stms) <- runBinder $ do
-    group_size <- getSize "group_size" Out.SizeGroup
-    group_available_par <-
-      letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w group_size
-    (group_size,) <$> sufficientParallelism "group_suff_par" group_available_par
-
-  (intra_ws, intra_stms) <-
-    flip runReaderT types $
-    localScope (scopeOfLParams (lambdaParams lam)) $
-    intraGroupParallelise group_size loopnest $ lambdaBody lam
+  intra <- flip runReaderT types $
+           localScope (scopeOfLParams (lambdaParams lam)) $
+           intraGroupParallelise loopnest $ lambdaBody lam
 
   seq_body <- renameBody $ mkBody seq_stms res
   par_body <- renameBody $ mkBody par_stms res
-  group_par_body <- renameBody $ mkBody intra_stms res
 
-  if all (`M.member` types) $ freeIn intra_ws then do
-    -- We must check that all intra-group parallelism fits in a group,
-    -- which implies that it must be regular (known outside the
-    -- kernel).
-    (fit_and_suff, fits_stms) <- runBinder $ do
-      let checkFit w =
-            letSubExp "fits_in_group" $ BasicOp $ CmpOp (CmpSle Int32) w group_size
-      letSubExp "all_fit" =<< foldBinOp LogAnd intra_suff =<< mapM checkFit intra_ws
+  case intra of
+    Nothing ->
+      (outer_suff_stms<>) <$>
+      kernelAlternatives pat par_body [(outer_suff, seq_body)]
 
-    ((outer_suff_stms<>intra_suff_stms<>fits_stms)++) <$>
-      kernelAlternatives pat par_body [(outer_suff, seq_body),
-                                       (fit_and_suff, group_par_body)]
-  else
-    (outer_suff_stms<>) <$> kernelAlternatives pat par_body [(outer_suff, seq_body)]
+    Just (group_size, intra_stms) -> do
+      -- We must check that all intra-group parallelism fits in a group.
+      (intra_ok, intra_suff_stms) <- runBinder $ do
+        max_group_size <-
+          letSubExp "max_group_size" $ Op $ Out.GetSizeMax Out.SizeGroup
+        group_available_par <-
+          letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w group_size
+        fits <- letSubExp "fits" $ BasicOp $
+                CmpOp (CmpSle Int32) group_size max_group_size
+        suff <- sufficientParallelism "group_suff_par" group_available_par
+        letSubExp "intra_suff_and_fits" $ BasicOp $ BinOp LogAnd fits suff
 
+      group_par_body <- renameBody $ mkBody intra_stms res
+
+      ((outer_suff_stms<>intra_suff_stms)<>) <$>
+        kernelAlternatives pat par_body [(outer_suff, seq_body),
+                                         (intra_ok, group_par_body)]
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
                            , kernelScope :: Scope Out.Kernels
@@ -1248,13 +1246,26 @@ expandKernelNest pes (outer_nest, inner_nests) = do
 -- do something more clever.  Make sure that the amount of parallelism
 -- to be exploited does not exceed the group size.
 intraGroupParallelise :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                         SubExp -> KernelNest -> Body
-                      -> m ([SubExp], [Out.Stm Out.Kernels])
-intraGroupParallelise group_size knest body = do
-  (w_stms, w, ispace, inps, rts) <- flatKernel knest
+                         KernelNest -> Body
+                      -> m (Maybe (SubExp, [Out.Stm Out.Kernels]))
+intraGroupParallelise knest body = runMaybeT $ do
+  (w_stms, w, ispace, inps, rts) <- lift $ flatKernel knest
   let num_groups = w
 
-  ((kspace, read_input_stms), prelude_stms) <- runBinder $ do
+  ltid <- newVName "ltid"
+  (ws, kbody) <- lift $ intraGroupParalleliseBody ltid body
+
+  known_outside <- lift $ M.keys <$> askScope
+  unless (all (`elem` known_outside) $ freeIn ws) $
+    fail "Irregular parallelism"
+
+  ((kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
+    -- Compute a group size that is the maximum of the inner
+    -- parallelism exploited.
+    group_size <- case ws of
+      x:xs -> letSubExp "compute_group_size" =<< foldBinOp (SMax Int32) x xs
+      []    -> return $ intConst Int32 0
+
     let inputIsUsed input = kernelInputName input `S.member` freeInBody body
         used_inps = filter inputIsUsed inps
 
@@ -1265,15 +1276,12 @@ intraGroupParallelise group_size knest body = do
 
     let ksize = (num_groups, group_size, num_threads)
 
-    ltid <- newVName "ltid"
-
     kspace <- newKernelSpace ksize $ FlatThreadSpace $ ispace ++ [(ltid,group_size)]
 
     read_input_stms <- mapM readKernelInput used_inps
 
     return (kspace, read_input_stms)
 
-  (ws, kbody) <- intraGroupParalleliseBody kspace body
   let kbody' = kbody { kernelBodyStms = read_input_stms ++ kernelBodyStms kbody }
 
   -- The kernel itself is producing a "flat" result of shape
@@ -1284,7 +1292,7 @@ intraGroupParallelise group_size knest body = do
         let t' = arrayOfRow (length ispace `stripArray` patElemType pat_elem) num_groups
         name <- newVName $ baseString (patElemName pat_elem) ++ "_flat"
         return $ PatElem name BindVar t'
-  flat_pat <- Pattern [] <$> mapM flatPatElem (patternValueElements nested_pat)
+  flat_pat <- lift $ Pattern [] <$> mapM flatPatElem (patternValueElements nested_pat)
 
   let kstm = Let flat_pat (StmAux cs ()) $ Op $
              Kernel (KernelDebugHints "map_intra_group" []) kspace rts kbody'
@@ -1295,15 +1303,14 @@ intraGroupParallelise group_size knest body = do
       reshape_stms = zipWith reshapeStm (patternElements nested_pat)
                                         (patternElements flat_pat)
 
-  return (ws, prelude_stms ++ [kstm] ++ reshape_stms)
+  return (spaceGroupSize kspace, prelude_stms ++ [kstm] ++ reshape_stms)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                             KernelSpace -> Body
+                             VName -> Body
                           -> m ([SubExp], Out.KernelBody Out.InKernel)
-intraGroupParalleliseBody kspace body = do
-  let ltid = spaceLocalId kspace
+intraGroupParalleliseBody ltid body = do
   (ws, kstms) <- runBinder $ do
     let processStms = fmap concat . mapM processStm
 

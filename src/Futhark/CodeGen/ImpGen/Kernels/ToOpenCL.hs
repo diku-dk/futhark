@@ -88,6 +88,8 @@ onHostOp (CallKernel k) = onKernel k
 onHostOp (ImpKernels.GetSize v key size_class) = do
   tell mempty { clSizes = M.singleton key size_class }
   return $ ImpOpenCL.GetSize v key
+onHostOp (ImpKernels.GetSizeMax v size_class) =
+  return $ ImpOpenCL.GetSizeMax v size_class
 
 onKernel :: CallKernel -> OnKernelM OpenCL
 

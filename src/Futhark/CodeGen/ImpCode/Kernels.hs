@@ -53,6 +53,7 @@ type KernelConstExp = PrimExp KernelConst
 
 data HostOp = CallKernel CallKernel
             | GetSize VName VName SizeClass
+            | GetSizeMax VName SizeClass
             deriving (Show)
 
 data CallKernel = Map MapKernel
@@ -126,6 +127,8 @@ instance Pretty HostOp where
   ppr (GetSize dest key size_class) =
     ppr dest <+> text "<-" <+>
     text "get_size" <> parens (commasep [ppr key, ppr size_class])
+  ppr (GetSizeMax dest size_class) =
+    ppr dest <+> text "<-" <+> text "get_size_max" <> parens (ppr size_class)
   ppr (CallKernel c) =
     ppr c
 
