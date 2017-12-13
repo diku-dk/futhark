@@ -464,9 +464,7 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
     group_size <- getSize "group_size" Out.SizeGroup
     group_available_par <-
       letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w group_size
-    if isJust $ lookup "FUTHARK_INTRA_GROUP_PARALLELISM" unixEnvironment then
-      (group_size,) <$> sufficientParallelism "group_suff_par" group_available_par
-    else return (group_size, constant False)
+    (group_size,) <$> sufficientParallelism "group_suff_par" group_available_par
 
   (intra_ws, intra_stms) <-
     flip runReaderT types $
