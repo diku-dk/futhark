@@ -570,6 +570,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
     where handleOp (GetSize key size_class) =
             return $ Inner $ GetSize key size_class
+          handleOp (GetSizeMax size_class) =
+            return $ Inner $ GetSizeMax size_class
           handleOp (Kernel desc space ts kbody) = subAllocM handleKernelExp $
             Inner . Kernel desc space ts <$>
             localScope (scopeOfKernelSpace space)

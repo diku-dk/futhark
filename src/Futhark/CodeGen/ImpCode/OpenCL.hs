@@ -62,6 +62,7 @@ data KernelArg = ValueKArg Exp PrimType
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             | HostCode Code
             | GetSize VName VName
+            | GetSizeMax VName SizeClass
             deriving (Show)
 
 -- | The block size when transposing.

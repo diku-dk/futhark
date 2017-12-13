@@ -90,6 +90,11 @@ def initialise_opencl_object(self,
     max_group_size = int(self.device.max_work_group_size)
     max_tile_size = int(np.sqrt(self.device.max_work_group_size))
 
+    self.max_group_size = max_group_size
+    self.max_tile_size = max_tile_size
+    self.max_threshold = 0
+    self.max_num_groups = 0
+
     default_sizes = apply_size_heuristics(self, size_heuristics,
                                           {'group_size': default_group_size,
                                            'tile_size': default_tile_size,

@@ -85,6 +85,7 @@ simplifyKernelOp ops env (Kernel desc space ts kbody) = do
         bound_here = S.fromList $ M.keys scope
 
 simplifyKernelOp _ _ (GetSize key size_class) = return $ GetSize key size_class
+simplifyKernelOp _ _ (GetSizeMax size_class) = return $ GetSizeMax size_class
 
 processHoistedStm :: (PrettyLore from, MonadBinder m, ExpAttr from ~ ExpAttr (Lore m),
                       BodyAttr from ~ BodyAttr (Lore m),

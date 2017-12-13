@@ -77,6 +77,10 @@ kernelCompiler dest (GetSize key size_class) = do
   [v] <- ImpGen.funcallTargets dest
   ImpGen.emit $ Imp.Op $ Imp.GetSize v key size_class
 
+kernelCompiler dest (GetSizeMax size_class) = do
+  [v] <- ImpGen.funcallTargets dest
+  ImpGen.emit $ Imp.Op $ Imp.GetSizeMax v size_class
+
 kernelCompiler dest (Kernel desc space _ kernel_body) = do
 
   num_groups' <- ImpGen.subExpToDimSize $ spaceNumGroups space

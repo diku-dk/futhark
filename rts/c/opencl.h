@@ -61,6 +61,11 @@ struct opencl_context {
 
   struct opencl_config cfg;
 
+  size_t max_group_size;
+  size_t max_num_groups;
+  size_t max_tile_size;
+  size_t max_threshold;
+
   size_t lockstep_width;
 };
 
@@ -403,6 +408,10 @@ static cl_program setup_opencl(struct opencl_context *ctx,
             max_tile_size, ctx->cfg.default_tile_size);
     ctx->cfg.default_tile_size = max_tile_size;
   }
+
+  ctx->max_group_size = max_group_size;
+  ctx->max_tile_size = max_tile_size; // No limit.
+  ctx->max_threshold = ctx->max_num_groups = 0; // No limit.
 
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.
