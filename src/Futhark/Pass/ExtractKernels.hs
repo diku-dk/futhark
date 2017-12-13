@@ -471,9 +471,11 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
       (outer_suff_stms<>) <$>
       kernelAlternatives pat par_body [(outer_suff, seq_body)]
 
-    Just (group_size, intra_stms) -> do
+    Just (group_size, intra_prelude, intra_stms) -> do
       -- We must check that all intra-group parallelism fits in a group.
       (intra_ok, intra_suff_stms) <- runBinder $ do
+        mapM_ addStm intra_prelude
+
         max_group_size <-
           letSubExp "max_group_size" $ Op $ Out.GetSizeMax Out.SizeGroup
         group_available_par <-
@@ -1247,7 +1249,7 @@ expandKernelNest pes (outer_nest, inner_nests) = do
 -- to be exploited does not exceed the group size.
 intraGroupParallelise :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                          KernelNest -> Body
-                      -> m (Maybe (SubExp, [Out.Stm Out.Kernels]))
+                      -> m (Maybe (SubExp, [Out.Stm Out.Kernels], [Out.Stm Out.Kernels]))
 intraGroupParallelise knest body = runMaybeT $ do
   (w_stms, w, ispace, inps, rts) <- lift $ flatKernel knest
   let num_groups = w
@@ -1263,7 +1265,7 @@ intraGroupParallelise knest body = runMaybeT $ do
     -- Compute a group size that is the maximum of the inner
     -- parallelism exploited.
     group_size <- case ws of
-      x:xs -> letSubExp "compute_group_size" =<< foldBinOp (SMax Int32) x xs
+      x:xs -> letSubExp "computed_group_size" =<< foldBinOp (SMax Int32) x xs
       []    -> return $ intConst Int32 0
 
     let inputIsUsed input = kernelInputName input `S.member` freeInBody body
@@ -1303,7 +1305,7 @@ intraGroupParallelise knest body = runMaybeT $ do
       reshape_stms = zipWith reshapeStm (patternElements nested_pat)
                                         (patternElements flat_pat)
 
-  return (spaceGroupSize kspace, prelude_stms ++ [kstm] ++ reshape_stms)
+  return (spaceGroupSize kspace, prelude_stms, kstm : reshape_stms)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
