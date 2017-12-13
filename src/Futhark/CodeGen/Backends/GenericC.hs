@@ -70,6 +70,7 @@ import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import qualified Data.DList as DL
 import Data.List
+import Data.Loc
 import Data.Maybe
 import Data.FileEmbed
 import Data.Ord
@@ -475,12 +476,12 @@ defineMemorySpace space = do
                     collect $ free_mem [C.cexp|block->mem|] sid
     DefaultSpace -> return [[C.citem|free(block->mem);|]]
   ctx_ty <- contextType
-  let unrefdef = [C.cedecl|static void $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block) {
+  let unrefdef = [C.cedecl|static void $id:(fatMemUnRef space) ($ty:ctx_ty *ctx, $ty:mty *block, const char *desc) {
   if (block->references != NULL) {
     *(block->references) -= 1;
     if (ctx->detail_memory) {
-      fprintf(stderr, $string:("Unreferencing block in " ++ spacedesc ++ ": %d references remaining.\n"),
-              *(block->references));
+      fprintf(stderr, $string:("Unreferencing block %s in %s: %d references remaining.\n"),
+                               desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
       ctx->$id:usagename -= block->size;
@@ -503,15 +504,15 @@ defineMemorySpace space = do
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure sid
-  let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int32_t size) {
-  $id:(fatMemUnRef space)(ctx, block);
+  let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int32_t size, const char *desc) {
+  $id:(fatMemUnRef space)(ctx, block, desc);
   $items:alloc
   block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
   block->size = size;
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, $string:("Allocated %d bytes in " ++ spacedesc ++ " (now allocated: %ld bytes)"), size, ctx->$id:usagename);
+    fprintf(stderr, "Allocated %d bytes for %s in %s (now allocated: %ld bytes)", size, desc, $string:spacedesc, ctx->$id:usagename);
   }
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
@@ -525,8 +526,8 @@ defineMemorySpace space = do
 
   -- Memory setting - unreference the destination and increase the
   -- count of the source by one.
-  let setdef = [C.cedecl|static void $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs) {
-  $id:(fatMemUnRef space)(ctx, lhs);
+  let setdef = [C.cedecl|static void $id:(fatMemSet space) ($ty:ctx_ty *ctx, $ty:mty *lhs, $ty:mty *rhs, const char *lhs_desc) {
+  $id:(fatMemUnRef space)(ctx, lhs, lhs_desc);
   (*(rhs->references))++;
   *lhs = *rhs;
 }
@@ -564,19 +565,21 @@ setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
 setMem dest src space = do
   refcount <- asks envFatMemory
   if refcount
-    then stm [C.cstm|$id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src);|]
+    then stm [C.cstm|$id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
+                                           $string:(pretty $ C.toExp src noLoc));|]
     else stm [C.cstm|$exp:dest = $exp:src;|]
 
 unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
 unRefMem mem space =
-  stm [C.cstm|$id:(fatMemUnRef space)(ctx, &$exp:mem);|]
+  stm [C.cstm|$id:(fatMemUnRef space)(ctx, &$exp:mem, $string:(pretty $ C.toExp mem noLoc));|]
 
 allocMem :: (C.ToExp a, C.ToExp b) =>
             a -> b -> Space -> CompilerM op s ()
 allocMem name size space = do
   refcount <- asks envFatMemory
   if refcount
-    then stm [C.cstm|$id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size);|]
+    then stm [C.cstm|$id:(fatMemAlloc space)(ctx, &$exp:name, $exp:size,
+                                             $string:(pretty $ C.toExp name noLoc));|]
     else alloc name
   where alloc dest = case space of
           DefaultSpace ->
