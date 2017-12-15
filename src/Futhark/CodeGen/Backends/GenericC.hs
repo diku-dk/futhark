@@ -509,6 +509,10 @@ defineMemorySpace space = do
   $items:alloc
   block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
+  if (size < 0) {
+    panic(1, "Negative allocation of %d bytes attempted for %s in %s.\n",
+          size, desc, $string:spacedesc, ctx->$id:usagename);
+  }
   block->size = size;
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
