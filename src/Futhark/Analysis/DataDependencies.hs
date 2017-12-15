@@ -36,7 +36,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
                  S.unions $ [freeIn pe, cdeps, depsOf tdeps tres, depsOf fdeps fres] ++
                  map (depsOfVar deps) (S.toList $ freeIn pe))
               branchdeps =
-                M.fromList $ map comb $ zip3 (patternValueElements pat)
+                M.fromList $ map comb $ zip3 (patternElements pat)
                 (bodyResult tb)
                 (bodyResult fb)
           in M.unions [branchdeps, deps, tdeps, fdeps]
