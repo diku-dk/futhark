@@ -291,18 +291,37 @@ transformStm (Let pat (StmAux cs _) (Op (Scanomap w lam1 lam2 nes arrs)))
       runBinder_ $ certifying cs $
         blockedScan pat w lam1_sequential lam2_sequential (intConst Int32 1) [] [] nes arrs
 
-transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs))) =
-  if sequentialiseRedomapBody then do
-    lam1_sequential <- Kernelise.transformLambda lam1
-    lam2_sequential <- Kernelise.transformLambda lam2
-    map (certify cs) <$>
-      blockedReduction pat w comm' lam1_sequential lam2_sequential nes arrs
-  else do
-    (mapbnd, redbnd) <- redomapToMapAndReduce pat (w, comm', lam1, lam2, nes, arrs)
-    transformStms [certify cs mapbnd, certify cs redbnd]
-      where sequentialiseRedomapBody = True
-            comm' | commutativeLambda lam1 = Commutative
-                  | otherwise              = comm
+transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs))) | versionedCode = do
+  outer_stms <- paralleliseOuter
+  inner_stms <- paralleliseInner
+
+  (outer_suff, suff_stms) <-
+    runBinder $ sufficientParallelism "redomap_outer_suff" w
+  (suff_stms<>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+
+  where
+    paralleliseOuter = renameBody =<< do
+      lam1_sequential <- Kernelise.transformLambda lam1
+      lam2_sequential <- Kernelise.transformLambda lam2
+      stms <- map (certify cs) <$>
+        blockedReduction pat w comm' lam1_sequential lam2_sequential nes arrs
+      return $ mkBody stms $ map Var $ patternNames pat
+
+    paralleliseInner = renameBody =<< do
+      (mapbnd, redbnd) <- redomapToMapAndReduce pat (w, comm', lam1, lam2, nes, arrs)
+      stms <- transformStms [certify cs mapbnd, certify cs redbnd]
+      return $ mkBody stms $ map Var $ patternNames pat
+
+    comm' | commutativeLambda lam1 = Commutative
+          | otherwise              = comm
+
+transformStm (Let pat (StmAux cs _) (Op (Redomap w comm lam1 lam2 nes arrs))) = do
+  lam1_sequential <- Kernelise.transformLambda lam1
+  lam2_sequential <- Kernelise.transformLambda lam2
+  map (certify cs) <$>
+    blockedReduction pat w comm' lam1_sequential lam2_sequential nes arrs
+    where comm' | commutativeLambda lam1 = Commutative
+                | otherwise              = comm
 
 transformStm (Let res_pat (StmAux cs _) (Op (Reduce w comm red_fun red_input)))
   | Just do_irwim <- irwim res_pat w comm' red_fun red_input = do
