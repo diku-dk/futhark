@@ -43,7 +43,7 @@ import Futhark.Optimise.Simplifier.Engine
 simplifyProgWithRules :: (MonadFreshNames m, SimplifiableLore lore) =>
                          SimpleOps lore
                       -> RuleBook (SimpleM lore)
-                      -> HoistBlockers (SimpleM lore)
+                      -> HoistBlockers lore
                       -> Prog lore -> m (Prog lore)
 simplifyProgWithRules simpl rules blockers =
   fmap removeProgWisdom .
@@ -53,7 +53,7 @@ simplifyProgWithRules simpl rules blockers =
 simplifyFunWithRules :: (MonadFreshNames m, SimplifiableLore lore) =>
                         SimpleOps lore
                      -> RuleBook (SimpleM lore)
-                     -> HoistBlockers (SimpleM lore)
+                     -> HoistBlockers lore
                      -> FunDef lore
                      -> m (FunDef lore)
 simplifyFunWithRules simpl rules blockers =
@@ -64,7 +64,7 @@ simplifyFunWithRules simpl rules blockers =
 simplifyLambdaWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
                            SimpleOps lore
                         -> RuleBook (SimpleM lore)
-                        -> HoistBlockers (SimpleM lore)
+                        -> HoistBlockers lore
                         -> Lambda lore
                         -> Maybe [SubExp]
                         -> [Maybe VName]
@@ -77,7 +77,7 @@ simplifyLambdaWithRules simpl rules blockers lam nes =
 simplifyStmsWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
                              SimpleOps lore
                           -> RuleBook (SimpleM lore)
-                          -> HoistBlockers (SimpleM lore)
+                          -> HoistBlockers lore
                           -> [Stm lore]
                           -> m [Stm lore]
 simplifyStmsWithRules simpl rules blockers bnds =

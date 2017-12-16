@@ -29,7 +29,7 @@ import Futhark.Tools (intraproceduralTransformation)
 simplifyProg :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                 Engine.SimpleOps lore
              -> RuleBook (Engine.SimpleM lore)
-             -> Engine.HoistBlockers (Engine.SimpleM lore)
+             -> Engine.HoistBlockers lore
              -> Prog lore
              -> m (Prog (Engine.Wise lore))
 simplifyProg simpl rules blockers =
@@ -43,7 +43,7 @@ simplifyProg simpl rules blockers =
 simplifyFun :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                 Engine.SimpleOps lore
              -> RuleBook (Engine.SimpleM lore)
-             -> Engine.HoistBlockers (Engine.SimpleM lore)
+             -> Engine.HoistBlockers lore
              -> FunDef lore
              -> m (FunDef (Engine.Wise lore))
 simplifyFun simpl rules blockers =
@@ -55,7 +55,7 @@ simplifyFun simpl rules blockers =
 simplifyLambda :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lore) =>
                   Engine.SimpleOps lore
                -> RuleBook (Engine.SimpleM lore)
-               -> Engine.HoistBlockers (Engine.SimpleM lore)
+               -> Engine.HoistBlockers lore
                -> Lambda lore -> Maybe [SubExp] -> [Maybe VName]
                -> m (Lambda (Engine.Wise lore))
 simplifyLambda simpl rules blockers orig_lam nes args = do
@@ -70,7 +70,7 @@ simplifyLambda simpl rules blockers orig_lam nes args = do
 simplifyStms :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lore) =>
                 Engine.SimpleOps lore
              -> RuleBook (Engine.SimpleM lore)
-             -> Engine.HoistBlockers (Engine.SimpleM lore)
+             -> Engine.HoistBlockers lore
              -> [Stm lore]
              -> m [Stm (Engine.Wise lore)]
 simplifyStms simpl rules blockers orig_bnds = do
@@ -83,7 +83,7 @@ simplifyStms simpl rules blockers orig_bnds = do
   where env = Engine.emptyEnv rules blockers
 
 loopUntilConvergence :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
-                        Engine.Env (Engine.SimpleM lore)
+                        Engine.Env lore
                      -> Engine.SimpleOps lore
                      -> (a -> Engine.SimpleM lore b)
                      -> (b -> a)
