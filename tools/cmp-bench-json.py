@@ -66,7 +66,8 @@ for prog,b_prog in b_json.items():
 
 # Now we can report the speedups from a to b.
 
-for prog,prog_speedups in speedups.items():
+for prog in sorted(speedups.keys()):
+    prog_speedups = speedups[prog]
     if len(prog_speedups) > 0:
         print('\n%s%s%s' % (bcolors.HEADER+bcolors.BOLD, prog, bcolors.ENDC))
         for dataset,(dataset_speedup,significant) in prog_speedups.items():
