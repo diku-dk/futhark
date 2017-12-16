@@ -90,6 +90,7 @@ compileProg =
                                  free(ctx);
                                }|]
           GC.libDecl [C.cedecl|int $id:sync_ctx(struct $id:ctx* ctx) {
+                                 ctx=ctx;
                                  return 0;
                                }|]
 
