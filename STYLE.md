@@ -50,7 +50,7 @@ case foo of Just x  -> do a
 ```
 
 Tasteful alignment can made code easier to read, but do not go
-overboard.  The functions `inputs`, `lambda` and `certificates` in
+overboard.  The functions `inputs` and `lambda` in
 `Futhark.Analysis.HORepresentation.SOAC` are a good example of
 pointless use of alignment, and are retained to serve as a reminder of
 this.
