@@ -504,19 +504,20 @@ defineMemorySpace space = do
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure sid
-  let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int32_t size, const char *desc) {
+  let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   $id:(fatMemUnRef space)(ctx, block, desc);
   $items:alloc
   block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
   if (size < 0) {
-    panic(1, "Negative allocation of %d bytes attempted for %s in %s.\n",
-          size, desc, $string:spacedesc, ctx->$id:usagename);
+    panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
+          (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
   block->size = size;
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, "Allocated %d bytes for %s in %s (now allocated: %ld bytes)", size, desc, $string:spacedesc, ctx->$id:usagename);
+    fprintf(stderr, "Allocated %lu bytes for %s in %s (now allocated: %ld bytes)",
+            (unsigned long)size, desc, $string:spacedesc, ctx->$id:usagename);
   }
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
