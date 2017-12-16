@@ -62,7 +62,7 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      SameScope lore outerlore,
                      RetType lore ~ RetType outerlore,
                      BranchType lore ~ BranchType outerlore) =>
-                    Engine.SimpleOps lore -> Engine.Env (Engine.SimpleM lore)
+                    Engine.SimpleOps lore -> Engine.Env lore
                  -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore))
 simplifyKernelOp ops env (Kernel desc space ts kbody) = do
   space' <- Engine.simplify space
@@ -112,7 +112,7 @@ mkWiseKernelBody attr bnds res =
         resValue (ConcatReturns _ _ _ _ v) = Var v
         resValue (KernelInPlaceReturn v) = Var v
 
-inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
+inKernelEnv :: Engine.Env InKernel
 inKernelEnv = Engine.emptyEnv inKernelRules noExtraHoistBlockers
 
 instance Engine.Simplifiable SplitOrdering where

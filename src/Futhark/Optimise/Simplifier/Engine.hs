@@ -116,26 +116,26 @@ instance Monoid (Need lore) where
   Need b1 f1 c1 `mappend` Need b2 f2 c2 = Need (b1 <> b2) (f1 <> f2) (c1 <> c2)
   mempty = Need [] UT.empty mempty
 
-data HoistBlockers m = HoistBlockers
-                       { blockHoistPar :: BlockPred (Lore m)
-                         -- ^ Blocker for hoisting out of parallel loops.
-                       , blockHoistSeq :: BlockPred (Lore m)
-                         -- ^ Blocker for hoisting out of sequential loops.
-                       , getArraySizes :: Stm (Lore m) -> Names
-                         -- ^ gets the sizes of arrays from a binding.
-                       , isAllocation  :: Stm (Lore m) -> Bool
-                       }
+data HoistBlockers lore = HoistBlockers
+                          { blockHoistPar :: BlockPred (Wise lore)
+                            -- ^ Blocker for hoisting out of parallel loops.
+                          , blockHoistSeq :: BlockPred (Wise lore)
+                            -- ^ Blocker for hoisting out of sequential loops.
+                          , getArraySizes :: Stm (Wise lore) -> Names
+                            -- ^ gets the sizes of arrays from a binding.
+                          , isAllocation  :: Stm (Wise lore) -> Bool
+                          }
 
-noExtraHoistBlockers :: HoistBlockers m
+noExtraHoistBlockers :: HoistBlockers lore
 noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (const S.empty) (const False)
 
-data Env m = Env { envRules         :: RuleBook m
-                 , envHoistBlockers :: HoistBlockers m
-                 }
+data Env lore = Env { envRules         :: RuleBook (SimpleM lore)
+                    , envHoistBlockers :: HoistBlockers lore
+                    }
 
 emptyEnv :: RuleBook (SimpleM lore)
-         -> HoistBlockers (SimpleM lore)
-         -> Env (SimpleM lore)
+         -> HoistBlockers lore
+         -> Env lore
 emptyEnv rules blockers =
   Env { envRules = rules
       , envHoistBlockers = blockers
@@ -174,13 +174,13 @@ bindableSimpleOps = SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS'
 
 newtype SimpleM lore a =
   SimpleM (RWS
-           (SimpleOps lore, Env (SimpleM lore)) -- Reader
+           (SimpleOps lore, Env lore) -- Reader
            (Need (Wise lore))                             -- Writer
            (State (SimpleM lore), VNameSource)       -- State
            a)
   deriving (Applicative, Functor, Monad,
             MonadWriter (Need (Wise lore)),
-            MonadReader (SimpleOps lore, Env (SimpleM lore)),
+            MonadReader (SimpleOps lore, Env lore),
             MonadState (State (SimpleM lore), VNameSource))
 
 instance MonadFreshNames (SimpleM lore) where
@@ -223,7 +223,7 @@ instance SimplifiableLore lore => MonadBinder (SimpleM lore) where
 
 runSimpleM :: SimpleM lore a
            -> SimpleOps lore
-           -> Env (SimpleM lore)
+           -> Env lore
            -> VNameSource
            -> ((a, Bool), VNameSource)
 runSimpleM (SimpleM m) simpl env src =
@@ -238,7 +238,7 @@ subSimpleM :: (SimplifiableLore lore,
                RetType outerlore ~ RetType lore,
                BranchType outerlore ~ BranchType lore) =>
               SimpleOps lore
-           -> Env (SimpleM lore)
+           -> Env lore
            -> ST.SymbolTable (Wise outerlore)
            -> SimpleM lore a
            -> m (a, Bool, [Stm (Wise lore)])
@@ -250,7 +250,7 @@ subSimpleM simpl env outer_vtable m = do
   putNameSource src'
   return (x, stateChanged s, needStms need)
 
-askEngineEnv :: SimpleM lore (Env (SimpleM lore))
+askEngineEnv :: SimpleM lore (Env lore)
 askEngineEnv = snd <$> ask
 tellNeed :: Need (Wise lore) -> SimpleM lore ()
 tellNeed = tell
@@ -283,7 +283,7 @@ collectCerts m = passNeed $ do
   return ((x, needCerts need),
           const need { needCerts = mempty })
 
-asksEngineEnv :: (Env (SimpleM lore) -> a) -> SimpleM lore a
+asksEngineEnv :: (Env lore -> a) -> SimpleM lore a
 asksEngineEnv f = f <$> askEngineEnv
 
 getsEngineState :: (State (SimpleM lore) -> a) -> SimpleM lore a

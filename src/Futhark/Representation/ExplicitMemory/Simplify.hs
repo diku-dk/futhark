@@ -74,11 +74,11 @@ isAlloc0 :: Op lore ~ MemOp op => AST.Stm lore -> Bool
 isAlloc0 (Let _ _ (Op Alloc{})) = True
 isAlloc0 _                      = False
 
-inKernelEnv :: Engine.Env (Engine.SimpleM InKernel)
+inKernelEnv :: Engine.Env InKernel
 inKernelEnv = Engine.emptyEnv inKernelRules blockers
 
 blockers ::  (ExplicitMemorish lore, Op lore ~ MemOp op) =>
-             Simplifier.HoistBlockers (Engine.SimpleM lore)
+             Simplifier.HoistBlockers lore
 blockers = Engine.HoistBlockers {
     Engine.blockHoistPar = isAlloc
   , Engine.blockHoistSeq = isResultAlloc
