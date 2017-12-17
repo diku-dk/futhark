@@ -53,12 +53,6 @@ before data generation (--generate):
   Output the types of values (textually) instead of the values
   themselves.  Mostly useful when reading values on stdin.
 
---binary-no-header
-  Output data in binary Futhark format without header (must precede --generate).
-
---binary-only-header
-  Only output binary Futhark format header for data (must precede --generate).
-
 EXAMPLES
 ========
 
