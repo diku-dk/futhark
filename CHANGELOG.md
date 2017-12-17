@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+   * `futhark-dataset`: Removed `--binary-no-header` and
+     `--binary-only-header` options.
+
 ### Changed
 
   * futlib: the `complex` module now produces a non-abstract `complex`

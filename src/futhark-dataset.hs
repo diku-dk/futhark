@@ -41,20 +41,15 @@ main = mainWithOptions initialDataOptions commandLineOptions f
                 Just vs ->
                   case format config of
                     Text -> mapM_ (putStrLn . pretty) vs
-                    Binary{} -> mapM_ (BS.putStr . Bin.encode) vs
+                    Binary -> mapM_ (BS.putStr . Bin.encode) vs
                     Type -> mapM_ (putStrLn . valueType) vs
           | otherwise =
               Just $ zipWithM_ ($) (optOrders config) $ map mkStdGen [optSeed config..]
         f _ _ =
           Nothing
 
-data BinaryOutputFormat = AllData
-                        | NoHeader
-                        | OnlyHeader
-                        deriving (Eq, Ord, Show)
-
 data OutputFormat = Text
-                  | Binary BinaryOutputFormat
+                  | Binary
                   | Type
                   deriving (Eq, Ord, Show)
 
@@ -96,20 +91,11 @@ commandLineOptions = [
     (NoArg $ Right $ \opts -> opts { format = Text })
     "Output data in text format (must precede --generate)."
   , Option "b" ["binary"]
-    (NoArg $ Right $ \opts ->
-        opts { format = Binary AllData })
+    (NoArg $ Right $ \opts -> opts { format = Binary })
     "Output data in binary Futhark format (must precede --generate)."
   , Option "t" ["type"]
     (NoArg $ Right $ \opts -> opts { format = Type })
     "Output the type (textually) rather than the value (must precede --generate)."
-  , Option [] ["binary-no-header"]
-    (NoArg $ Right $ \opts ->
-        opts { format = Binary NoHeader })
-    "Output data in binary Futhark format without header (must precede --generate)."
-  , Option [] ["binary-only-header"]
-    (NoArg $ Right $ \opts ->
-        opts { format = Binary OnlyHeader })
-    "Only output binary Futhark format header for data (must precede --generate)."
   , setRangeOption "i8" seti8Range
   , setRangeOption "i16" seti16Range
   , setRangeOption "i32" seti32Range
@@ -148,7 +134,7 @@ tryMakeGenerator t = do
     let (v, _) = randomValue conf t' stdgen
     case fmt of
       Text -> printSimpleValueT v
-      Binary binfmt -> printSimpleValueB binfmt t' v
+      Binary -> printSimpleValueB t' v
       Type -> putStrLn t
   where name = "option " ++ t
 
@@ -206,13 +192,12 @@ printSimpleValueT = (>>putStrLn "") . flip evalStateT 0 . p
 binaryFormatVersion :: Int
 binaryFormatVersion = 2
 
-printSimpleValueB :: BinaryOutputFormat -> SimpleType -> SimpleValue -> IO ()
-printSimpleValueB fmt st sv =
-  BL.putStr $ runPut $ printHeader () >> printData ()
+printSimpleValueB :: SimpleType -> SimpleValue -> IO ()
+printSimpleValueB st sv =
+  BL.putStr $ runPut $ printHeader >> pSimpleValue sv
 
   where
-    printHeader _ | fmt == NoHeader = return ()
-    printHeader _ = do
+    printHeader = do
       Bin.put 'b'
       putWord8 $ fromIntegral binaryFormatVersion
       let dims = getDims st
@@ -221,9 +206,6 @@ printSimpleValueB fmt st sv =
       case sv of
         SimplePrimValue _ -> return ()
         SimpleArrayValue _ -> mapM_ (putWord64le . fromIntegral) dims
-
-    printData _ | fmt == OnlyHeader = return ()
-    printData _ = pSimpleValue sv
 
     -- Simply calling @Bin.put (" i8" :: String)@ would cause a lot of bytes to
     -- be written. Doing it this way will only write 4 bytes.
