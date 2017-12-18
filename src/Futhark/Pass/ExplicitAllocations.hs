@@ -980,11 +980,5 @@ inKernelExpHints (Op (Inner (Combine cspace ts _ _))) =
     return $ Hint ixfun $ Space "local"
   where dims = map snd cspace
 
-inKernelExpHints (Op (Inner (GroupReduce _ lam _))) =
-  forM (lambdaReturnType lam) $ \t -> do
-    dims <- mapM dimAllocationSize $ arrayDims t
-    let ixfun = IxFun.iota $ map (primExpFromSubExp int32) dims
-    return $ if primType t then NoHint else Hint ixfun $ Space "local"
-
 inKernelExpHints e =
   return $ replicate (expExtTypeSize e) NoHint
