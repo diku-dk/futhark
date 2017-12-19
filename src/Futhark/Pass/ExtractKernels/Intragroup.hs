@@ -6,11 +6,10 @@ module Futhark.Pass.ExtractKernels.Intragroup
   (intraGroupParallelise)
 where
 
-import Control.Monad.RWS.Strict
+import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List
 
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.Kernels as Out
@@ -100,119 +99,133 @@ intraGroupParallelise knest body = runMaybeT $ do
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
+data Env = Env { _localTID :: VName
+               , _dataDeps :: Dependencies
+               , _groupVariant :: Names
+               }
+
+type IntraGroupM = BinderT Out.InKernel (RWS Env (S.Set SubExp) VNameSource)
+
+runIntraGroupM :: (MonadFreshNames m, HasScope Out.Kernels m) =>
+                  Env -> IntraGroupM () -> m ([SubExp], [Out.Stm Out.InKernel])
+runIntraGroupM env m = do
+  scope <- castScope <$> askScope
+  modifyNameSource $ \src ->
+    let (((), kstms), src', ws) = runRWS (runBinderT m scope) env src
+    in ((S.toList ws, kstms), src')
+
+parallel :: SubExp -> IntraGroupM ()
+parallel = tell . S.singleton
+
+intraGroupStm :: Stm -> IntraGroupM ()
+intraGroupStm stm@(Let pat _ e) = do
+  Env ltid deps group_variant <- ask
+  let groupInvariant = S.null . S.intersection group_variant .
+                       flip (M.findWithDefault mempty) deps
+  case e of
+    DoLoop ctx val (ForLoop i it (Var bound) inps) loopbody
+      | groupInvariant bound ->
+          localScope (scopeOf form) $
+          localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
+            (ws, stms) <- collectStms $ mapM_ intraGroupStm $ bodyStms loopbody
+            letBind_ pat $ DoLoop ctx val form $ mkBody stms $ bodyResult loopbody
+            return ws
+              where form = ForLoop i it (Var bound) inps
+
+    Op (Map w fun arrs) -> do
+      body_stms <- collectStms_ $ do
+        forM_ (zip (lambdaParams fun) arrs) $ \(p, arr) -> do
+          arr_t <- lookupType arr
+          letBindNames' [paramName p] $ BasicOp $ Index arr $
+            fullSlice arr_t [DimFix $ Var ltid]
+        Kernelise.transformStms $ bodyStms $ lambdaBody fun
+      let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
+      letBind_ pat $ Op $
+        Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
+      parallel w
+
+    Op (Scanomap w scanfun foldfun nes arrs) -> do
+      let (scan_pes, map_pes) =
+            splitAt (length nes) $ patternElements pat
+      scan_input <- procInput ltid (Pattern [] map_pes) w foldfun nes arrs
+
+      scanfun' <- Kernelise.transformLambda scanfun
+
+      -- A GroupScan lambda needs two more parameters.
+      my_index <- newVName "my_index"
+      other_index <- newVName "other_index"
+      let my_index_param = Param my_index (Prim int32)
+          other_index_param = Param other_index (Prim int32)
+          scanfun'' = scanfun' { lambdaParams = my_index_param :
+                                                other_index_param :
+                                                lambdaParams scanfun'
+                               }
+      letBind_ (Pattern [] scan_pes) $
+        Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
+      parallel w
+
+    Op (Redomap w _ redfun foldfun nes arrs) -> do
+      let (red_pes, map_pes) =
+            splitAt (length nes) $ patternElements pat
+      red_input <- procInput ltid (Pattern [] map_pes) w foldfun nes arrs
+
+      redfun' <- Kernelise.transformLambda redfun
+
+      -- A GroupReduce lambda needs two more parameters.
+      my_index <- newVName "my_index"
+      other_index <- newVName "other_index"
+      let my_index_param = Param my_index (Prim int32)
+          other_index_param = Param other_index (Prim int32)
+          redfun'' = redfun' { lambdaParams = my_index_param :
+                                              other_index_param :
+                                              lambdaParams redfun'
+                               }
+      letBind_ (Pattern [] red_pes) $
+        Op $ Out.GroupReduce w redfun'' $ zip nes red_input
+      parallel w
+
+    Op (Stream w (Sequential accs) lam arrs)
+      | chunk_size_param : _ <- extLambdaParams lam -> do
+      types <- asksScope castScope
+      ((), stream_bnds) <-
+        runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
+      let replace (Var v) | v == paramName chunk_size_param = w
+          replace se = se
+      censor (S.map replace) $ mapM_ intraGroupStm stream_bnds
+
+    _ ->
+      Kernelise.transformStm stm
+
+  where procInput :: VName
+                  -> Out.Pattern Out.InKernel
+                  -> SubExp -> Lambda -> [SubExp] -> [VName]
+                  -> IntraGroupM [VName]
+        procInput ltid map_pat w foldfun nes arrs = do
+          fold_stms <- collectStms_ $ do
+            let (fold_acc_params, fold_arr_params) =
+                  splitAt (length nes) $ lambdaParams foldfun
+
+            forM_ (zip fold_acc_params nes) $ \(p, ne) ->
+              letBindNames'_ [paramName p] $ BasicOp $ SubExp ne
+
+            forM_ (zip fold_arr_params arrs) $ \(p, arr) -> do
+              arr_t <- lookupType arr
+              letBindNames' [paramName p] $ BasicOp $ Index arr $
+                fullSlice arr_t [DimFix $ Var ltid]
+
+            Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
+          let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
+
+          op_inps <- replicateM (length nes) (newVName "op_input")
+          letBindNames'_ (op_inps ++ patternNames map_pat) $ Op $
+            Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
+          return op_inps
+
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                              Dependencies -> Names -> VName -> Body
                           -> m ([SubExp], Out.KernelBody Out.InKernel)
 intraGroupParalleliseBody deps group_variant ltid body = do
-  (ws, kstms) <- runBinder $ do
-    let processStms = fmap concat . mapM processStm
-
-        -- Without this type signature, the GHC 8.0.1 type checker
-        -- enters an infinite loop.
-        processStm :: Stm -> Binder Out.InKernel [SubExp]
-        processStm stm@(Let pat _ e) =
-          case e of
-            DoLoop ctx val (ForLoop i it (Var bound) inps) loopbody
-              | groupInvariant bound ->
-                  localScope (scopeOf form) $
-                  localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
-                    (ws, stms) <- collectStms $ processStms $ bodyStms loopbody
-                    letBind_ pat $ DoLoop ctx val form $ mkBody stms $ bodyResult loopbody
-                    return ws
-                      where form = ForLoop i it (Var bound) inps
-
-            Op (Map w fun arrs) -> do
-              body_stms <- collectStms_ $ do
-                forM_ (zip (lambdaParams fun) arrs) $ \(p, arr) -> do
-                  arr_t <- lookupType arr
-                  letBindNames' [paramName p] $ BasicOp $ Index arr $
-                    fullSlice arr_t [DimFix $ Var ltid]
-                Kernelise.transformStms $ bodyStms $ lambdaBody fun
-              let comb_body = mkBody body_stms $ bodyResult $ lambdaBody fun
-              letBind_ pat $ Op $
-                Out.Combine [(ltid,w)] (lambdaReturnType fun) [] comb_body
-              return [w]
-
-            Op (Scanomap w scanfun foldfun nes arrs) -> do
-              let (scan_pes, map_pes) =
-                    splitAt (length nes) $ patternElements pat
-              scan_input <- procInput (Pattern [] map_pes) w foldfun nes arrs
-
-              scanfun' <- Kernelise.transformLambda scanfun
-
-              -- A GroupScan lambda needs two more parameters.
-              my_index <- newVName "my_index"
-              other_index <- newVName "other_index"
-              let my_index_param = Param my_index (Prim int32)
-                  other_index_param = Param other_index (Prim int32)
-                  scanfun'' = scanfun' { lambdaParams = my_index_param :
-                                                        other_index_param :
-                                                        lambdaParams scanfun'
-                                       }
-              letBind_ (Pattern [] scan_pes) $
-                Op $ Out.GroupScan w scanfun'' $ zip nes scan_input
-              return [w]
-
-            Op (Redomap w _ redfun foldfun nes arrs) -> do
-              let (red_pes, map_pes) =
-                    splitAt (length nes) $ patternElements pat
-              red_input <- procInput (Pattern [] map_pes) w foldfun nes arrs
-
-              redfun' <- Kernelise.transformLambda redfun
-
-              -- A GroupReduce lambda needs two more parameters.
-              my_index <- newVName "my_index"
-              other_index <- newVName "other_index"
-              let my_index_param = Param my_index (Prim int32)
-                  other_index_param = Param other_index (Prim int32)
-                  redfun'' = redfun' { lambdaParams = my_index_param :
-                                                      other_index_param :
-                                                      lambdaParams redfun'
-                                       }
-              letBind_ (Pattern [] red_pes) $
-                Op $ Out.GroupReduce w redfun'' $ zip nes red_input
-              return [w]
-
-            Op (Stream w (Sequential accs) lam arrs)
-              | chunk_size_param : _ <- extLambdaParams lam -> do
-              types <- asksScope castScope
-              ((), stream_bnds) <-
-                runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
-              let replace (Var v) | v == paramName chunk_size_param = w
-                  replace se = se
-              map replace <$> processStms stream_bnds
-
-            _ ->
-              Kernelise.transformStm stm >> return []
-
-          where procInput :: Out.Pattern Out.InKernel
-                          -> SubExp -> Lambda -> [SubExp] -> [VName]
-                          -> Binder Out.InKernel [VName]
-                procInput map_pat w foldfun nes arrs = do
-                  fold_stms <- collectStms_ $ do
-                    let (fold_acc_params, fold_arr_params) =
-                          splitAt (length nes) $ lambdaParams foldfun
-
-                    forM_ (zip fold_acc_params nes) $ \(p, ne) ->
-                      letBindNames'_ [paramName p] $ BasicOp $ SubExp ne
-
-                    forM_ (zip fold_arr_params arrs) $ \(p, arr) -> do
-                      arr_t <- lookupType arr
-                      letBindNames' [paramName p] $ BasicOp $ Index arr $
-                        fullSlice arr_t [DimFix $ Var ltid]
-
-                    Kernelise.transformStms $ bodyStms $ lambdaBody foldfun
-                  let fold_body = mkBody fold_stms $ bodyResult $ lambdaBody foldfun
-
-                  op_inps <- replicateM (length nes) (newVName "op_input")
-                  letBindNames'_ (op_inps ++ patternNames map_pat) $ Op $
-                    Out.Combine [(ltid,w)] (lambdaReturnType foldfun) [] fold_body
-                  return op_inps
-
-    processStms $ bodyStms body
-
-  return (nub ws,
+  (ws, kstms) <- runIntraGroupM (Env ltid deps group_variant) $
+                 mapM_ intraGroupStm $ bodyStms body
+  return (ws,
           KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body)
-
-  where groupInvariant = S.null . S.intersection group_variant .
-                         flip (M.findWithDefault mempty) deps
