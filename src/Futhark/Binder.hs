@@ -66,10 +66,28 @@ newtype BinderT lore m a = BinderT (RWST
                                      (Scope lore)
                                       m
                                     a)
-  deriving (Functor, Monad, Applicative,
-            MonadWriter (DL.DList (Stm lore)))
--- Cannot add MonadState instance, because it would
--- conflict with the utility instances.
+  deriving (Functor, Monad, Applicative)
+
+tellStms :: Monad m => DL.DList (Stm lore) -> BinderT lore m ()
+tellStms = BinderT . tell
+
+tellStm :: Monad m => Stm lore -> BinderT lore m ()
+tellStm = tellStms . DL.singleton
+
+listenStms :: Monad m =>
+              BinderT lore m a -> BinderT lore m (a, DL.DList (Stm lore))
+listenStms (BinderT m) = BinderT $ listen m
+
+passStms :: Monad m =>
+            BinderT lore m (a, DL.DList (Stm lore) -> DL.DList (Stm lore))
+         -> BinderT lore m a
+passStms (BinderT m) = BinderT $ pass m
+
+censorStms :: Monad m =>
+              (DL.DList (Stm lore) -> DL.DList (Stm lore))
+           -> BinderT lore m a
+           -> BinderT lore m a
+censorStms f (BinderT m) = BinderT $ censor f m
 
 instance MonadTrans (BinderT lore) where
   lift = BinderT . lift
@@ -157,14 +175,14 @@ runBinderEmptyEnv m =
 addBinderStm :: Monad m =>
                 Stm lore -> BinderT lore m ()
 addBinderStm binding = do
-  tell $ DL.singleton binding
+  tellStm binding
   BinderT $ modify (`M.union` scopeOf binding)
 
 collectBinderStms :: Monad m =>
                      BinderT lore m a
                   -> BinderT lore m (a, [Stm lore])
-collectBinderStms m = pass $ do
-  (x, bnds) <- listen m
+collectBinderStms m = passStms $ do
+  (x, bnds) <- listenStms m
   let bnds' = DL.toList bnds
   BinderT $ modify (`M.difference` scopeOf bnds')
   return ((x, bnds'), const DL.empty)
@@ -172,23 +190,39 @@ collectBinderStms m = pass $ do
 certifyingBinder :: Monad m =>
                     Certificates -> BinderT lore m a
                  -> BinderT lore m a
-certifyingBinder = censor . fmap . certify
+certifyingBinder = censorStms . fmap . certify
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.
+
+mapInner :: Monad m =>
+            (m (a, Scope lore, DL.DList (Stm lore))
+             -> m (b, M.Map VName (NameInfo lore), DL.DList (Stm lore)))
+         -> BinderT lore m a -> BinderT lore m b
+mapInner f (BinderT m) = BinderT $ do
+  r <- ask
+  s <- get
+  (x, s', w) <- lift $ f $ runRWST m r s
+  put s'
+  tell w
+  return x
+
 instance MonadReader r m => MonadReader r (BinderT lore m) where
   ask = BinderT $ lift ask
-  local f (BinderT m) = BinderT $ do
-    r <- ask
-    s <- get
-    (x, s', w) <- lift $ local f $ runRWST m r s
-    put s'
-    tell w
-    return x
+  local f = mapInner $ local f
 
 instance MonadState s m => MonadState s (BinderT lore m) where
   get = BinderT $ lift get
   put = BinderT . lift . put
+
+instance MonadWriter w m => MonadWriter w (BinderT lore m) where
+  tell = BinderT . lift . tell
+  pass = mapInner $ \m -> pass $ do
+    ((x, f), s', w) <- m
+    return ((x, s', w), f)
+  listen = mapInner $ \m -> do
+    ((x, s', w), y) <- listen m
+    return ((x, y), s', w)
 
 instance MonadError e m => MonadError e (BinderT lore m) where
   throwError = lift . throwError
