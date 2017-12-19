@@ -31,7 +31,8 @@ import Futhark.Pass.ExtractKernels.BlockedKernel
 -- to be exploited does not exceed the group size.
 intraGroupParallelise :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                          KernelNest -> Body
-                      -> m (Maybe (SubExp, [Out.Stm Out.Kernels], [Out.Stm Out.Kernels]))
+                      -> m (Maybe (SubExp, SubExp,
+                                   [Out.Stm Out.Kernels], [Out.Stm Out.Kernels]))
 intraGroupParallelise knest body = runMaybeT $ do
   (w_stms, w, ispace, inps, rts) <- lift $ flatKernel knest
   let num_groups = w
@@ -44,12 +45,18 @@ intraGroupParallelise knest body = runMaybeT $ do
   unless (all (`elem` known_outside) $ freeIn ws) $
     fail "Irregular parallelism"
 
-  ((kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
+  ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
     -- Compute a group size that is the maximum of the inner
     -- parallelism exploited.
     group_size <- case ws of
       x:xs -> letSubExp "computed_group_size" =<< foldBinOp (SMax Int32) x xs
-      []    -> return $ intConst Int32 0
+      []   -> return $ intConst Int32 0
+
+    -- The amount of parallelism available *in the worst case* is
+    -- equal to the smallest parallel loop.
+    intra_avail_par <- case ws of
+      x:xs -> letSubExp "intra_avail_par" =<< foldBinOp (SMin Int32) x xs
+      []   -> return $ intConst Int32 0
 
     let inputIsUsed input = kernelInputName input `S.member` freeInBody body
         used_inps = filter inputIsUsed inps
@@ -65,7 +72,7 @@ intraGroupParallelise knest body = runMaybeT $ do
 
     read_input_stms <- mapM readKernelInput used_inps
 
-    return (kspace, read_input_stms)
+    return (intra_avail_par, kspace, read_input_stms)
 
   let kbody' = kbody { kernelBodyStms = read_input_stms ++ kernelBodyStms kbody }
 
@@ -88,7 +95,8 @@ intraGroupParallelise knest body = runMaybeT $ do
       reshape_stms = zipWith reshapeStm (patternElements nested_pat)
                                         (patternElements flat_pat)
 
-  return (spaceGroupSize kspace, prelude_stms, kstm : reshape_stms)
+  return (intra_avail_par, spaceGroupSize kspace,
+          prelude_stms, kstm : reshape_stms)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 

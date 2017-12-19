@@ -490,7 +490,7 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
       (outer_suff_stms<>) <$>
       kernelAlternatives pat par_body [(outer_suff, seq_body)]
 
-    Just (group_size, intra_prelude, intra_stms) -> do
+    Just (intra_avail_par, group_size, intra_prelude, intra_stms) -> do
       -- We must check that all intra-group parallelism fits in a group.
       (intra_ok, intra_suff_stms) <- runBinder $ do
         mapM_ addStm intra_prelude
@@ -498,7 +498,7 @@ distributeMap' loopnest seq_stms par_stms pat nest_w lam = do
         max_group_size <-
           letSubExp "max_group_size" $ Op $ Out.GetSizeMax Out.SizeGroup
         group_available_par <-
-          letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w group_size
+          letSubExp "group_available_par" $ BasicOp $ BinOp (Mul Int32) nest_w intra_avail_par
         fits <- letSubExp "fits" $ BasicOp $
                 CmpOp (CmpSle Int32) group_size max_group_size
         suff <- sufficientParallelism "group_suff_par" group_available_par
