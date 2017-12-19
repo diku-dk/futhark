@@ -6,22 +6,18 @@ module Futhark.Pass.ExtractKernels.Intragroup
   (intraGroupParallelise)
 where
 
-
-import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Trans.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe
 import Data.List
-
-import Prelude
 
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.Kernels as Out
 import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import Futhark.Analysis.DataDependencies
 import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.BlockedKernel
@@ -41,7 +37,8 @@ intraGroupParallelise knest body = runMaybeT $ do
   let num_groups = w
 
   ltid <- newVName "ltid"
-  (ws, kbody) <- lift $ intraGroupParalleliseBody ltid body
+  let group_variant = S.fromList [ltid]
+  (ws, kbody) <- lift $ intraGroupParalleliseBody (dataDependencies body) group_variant ltid body
 
   known_outside <- lift $ M.keys <$> askScope
   unless (all (`elem` known_outside) $ freeIn ws) $
@@ -96,9 +93,9 @@ intraGroupParallelise knest body = runMaybeT $ do
         cs = loopNestingCertificates first_nest
 
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                             VName -> Body
+                             Dependencies -> Names -> VName -> Body
                           -> m ([SubExp], Out.KernelBody Out.InKernel)
-intraGroupParalleliseBody ltid body = do
+intraGroupParalleliseBody deps group_variant ltid body = do
   (ws, kstms) <- runBinder $ do
     let processStms = fmap concat . mapM processStm
 
@@ -107,6 +104,15 @@ intraGroupParalleliseBody ltid body = do
         processStm :: Stm -> Binder Out.InKernel [SubExp]
         processStm stm@(Let pat _ e) =
           case e of
+            DoLoop ctx val (ForLoop i it (Var bound) inps) loopbody
+              | groupInvariant bound ->
+                  localScope (scopeOf form) $
+                  localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
+                    (ws, stms) <- collectStms $ processStms $ bodyStms loopbody
+                    letBind_ pat $ DoLoop ctx val form $ mkBody stms $ bodyResult loopbody
+                    return ws
+                      where form = ForLoop i it (Var bound) inps
+
             Op (Map w fun arrs) -> do
               body_stms <- collectStms_ $ do
                 forM_ (zip (lambdaParams fun) arrs) $ \(p, arr) -> do
@@ -167,6 +173,7 @@ intraGroupParalleliseBody ltid body = do
               let replace (Var v) | v == paramName chunk_size_param = w
                   replace se = se
               map replace <$> processStms stream_bnds
+
             _ ->
               Kernelise.transformStm stm >> return []
 
@@ -198,3 +205,6 @@ intraGroupParalleliseBody ltid body = do
 
   return (nub ws,
           KernelBody () kstms $ map (ThreadsReturn OneResultPerGroup) $ bodyResult body)
+
+  where groupInvariant = S.null . S.intersection group_variant .
+                         flip (M.findWithDefault mempty) deps
