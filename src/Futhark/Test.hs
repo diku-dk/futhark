@@ -26,27 +26,22 @@ module Futhark.Test
 
 import Control.Applicative
 import qualified Data.ByteString.Lazy as BS
-import Control.Monad hiding (forM_)
+import Control.Monad
 import Control.Monad.IO.Class
 import qualified Data.Map.Strict as M
 import Data.Char
+import Data.Functor
 import Data.Maybe
-import Data.Monoid
-import Data.List hiding (foldl')
 import Data.Foldable (foldl')
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
-import System.IO
 import System.FilePath
 
-import Text.Parsec hiding ((<|>), many, optional)
+import Text.Parsec hiding ((<|>), many)
 import Text.Parsec.Text
 import Text.Parsec.Error
 import Text.Regex.TDFA
-
-import Prelude
-
 
 import Futhark.Analysis.Metrics
 import Futhark.Util.Pretty (pretty, prettyText)
@@ -168,8 +163,8 @@ parseEntryPoint = (lexstr "entry:" *> lexeme (T.pack <$> many1 (satisfy constitu
   where constituent c = not (isSpace c) && c /= '}'
 
 parseRunMode :: Parser RunMode
-parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
-               (lexstr "nobench" *> pure NoBench) <|>
+parseRunMode = (lexstr "compiled" $> CompiledOnly) <|>
+               (lexstr "nobench" $> NoBench) <|>
                pure InterpretedAndCompiled
 
 parseRunCases :: Parser [TestRun]
@@ -236,9 +231,9 @@ parseExpectedStructure =
   (StructureTest <$> optimisePipeline <*> parseMetrics)
 
 optimisePipeline :: Parser StructurePipeline
-optimisePipeline = lexstr "distributed" *> pure KernelsPipeline <|>
-                   lexstr "gpu" *> pure GpuPipeline <|>
-                   lexstr "cpu" *> pure SequentialCpuPipeline <|>
+optimisePipeline = lexstr "distributed" $> KernelsPipeline <|>
+                   lexstr "gpu" $> GpuPipeline <|>
+                   lexstr "cpu" $> SequentialCpuPipeline <|>
                    pure SOACSPipeline
 
 parseMetrics :: Parser AstMetrics

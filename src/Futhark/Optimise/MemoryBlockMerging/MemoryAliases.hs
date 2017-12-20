@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Find memory block aliases.  The conceptual difference from variable aliases
 -- is that if a variable x has an alias y, it means that x and y use the same
 -- memory block, but if a memory block xmem has an alias ymem, it means that
@@ -91,7 +92,7 @@ lookInStm (Let (Pattern patctxelems patvalelems) _ e) = do
                  (bodyResult body_then ++ bodyResult body_else)
       var_to_mem <- ask
       let mems = map memSrcName $ mapMaybe (`M.lookup` var_to_mem) ress
-      forM_ patctxelems $ \patelem -> case patelem of
+      forM_ patctxelems $ \case
           (PatElem patmem _ (_, ExpMem.MemMem{})) ->
             recordMapping patmem $ S.fromList mems
           _ -> return ()

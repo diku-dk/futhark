@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Find all variables in a statement.
 module Futhark.Optimise.MemoryBlockMerging.AllExpVars
   ( findAllExpVars
@@ -78,7 +79,7 @@ lookInKernelBody :: LoreConstraints lore =>
                     KernelBody lore -> FindM lore ()
 lookInKernelBody (KernelBody _ bnds res) = do
   mapM_ lookInStm bnds
-  forM_ res $ \kr -> case kr of
+  forM_ res $ \case
     ThreadsReturn{} -> return ()
     WriteReturn _ arr _ _ -> tell $ S.singleton arr
     ConcatReturns{} -> return ()

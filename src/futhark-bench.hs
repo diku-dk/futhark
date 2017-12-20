@@ -5,9 +5,8 @@
 -- flag for machine-readable output.
 module Main (main) where
 
-import Control.Applicative
 import Control.Monad
-import Control.Monad.Except hiding (forM_)
+import Control.Monad.Except
 import qualified Data.ByteString.Char8 as SBS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either
@@ -27,8 +26,6 @@ import System.Process.ByteString (readProcessWithExitCode)
 import System.Exit
 import qualified Text.JSON as JSON
 import Text.Printf
-
-import Prelude
 
 import Futhark.Test
 import Futhark.Util.Options

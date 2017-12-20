@@ -61,12 +61,9 @@ module Futhark.Optimise.InPlaceLowering
          inPlaceLowering
        ) where
 
-import Control.Applicative
-import Control.Monad.RWS hiding (mapM_)
+import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Foldable
-import Data.Maybe
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
@@ -76,8 +73,6 @@ import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Pass
 import Futhark.Tools (intraproceduralTransformation, fullSlice)
-
-import Prelude hiding (any, mapM_, elem, all)
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLowering :: Pass Kernels Kernels

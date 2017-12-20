@@ -12,7 +12,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   where
 
 import Language.Futhark.Core
-import Futhark.Util.Pretty hiding (space)
+import Futhark.Util.Pretty
 
 
 data UnOp = Not -- ^ Boolean negation.

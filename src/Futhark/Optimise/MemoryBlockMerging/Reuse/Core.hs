@@ -511,8 +511,8 @@ handleNewArray x xmem = do
                 getInfo xmem_ixfun
 
               let xmem_final_dim_before_kmem_final_dim =
-                    fromMaybe False $ (xmem_final_dim `S.member`)
-                    <$> M.lookup kmem_final_dim uses_before
+                    maybe False (xmem_final_dim `S.member`) $
+                    M.lookup kmem_final_dim uses_before
                   kmem_ixfun_start' = getIxFun' kmem_ixfun_start
                                       (M.singleton kmem_final_dim xmem_final_dim)
                   xmem_ixfun_start' = getIxFun' xmem_ixfun_start
