@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE LambdaCase #-}
 module Futhark.Representation.ExplicitMemory.Simplify
        ( simplifyExplicitMemory
        )
@@ -63,10 +64,10 @@ getShapeNames :: ExplicitMemorish lore =>
 getShapeNames bnd =
   let tps = map patElemType $ patternElements $ stmPattern bnd
       ats = map (snd . patElemAttr) $ patternElements $ stmPattern bnd
-      nms = mapMaybe (\attr -> case attr of
-                                 MemMem (Var nm) _ -> Just nm
-                                 MemArray _ _ _ (ArrayIn nm _) -> Just nm
-                                 _ -> Nothing
+      nms = mapMaybe (\case
+                         MemMem (Var nm) _ -> Just nm
+                         MemArray _ _ _ (ArrayIn nm _) -> Just nm
+                         _ -> Nothing
                      ) ats
   in  S.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
 

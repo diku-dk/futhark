@@ -12,7 +12,7 @@ module Futhark.CodeGen.ImpCode.Sequential
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 
-import Futhark.Util.Pretty hiding (space)
+import Futhark.Util.Pretty
 
 -- | An imperative program.
 type Program = Imp.Functions Sequential

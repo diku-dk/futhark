@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Find memory block interferences.  Maps a memory block to its interference
 -- set.
 
@@ -183,7 +184,7 @@ lookInStm stm@(Let (Pattern _patctxelems patvalelems) _ e)
                                                    indices Nothing
                   , walkOnKernelKernelBody = \kbody -> tell $ interferenceExceptions ctx'
                                                        (kernelBodyStms kbody)
-                                                       (mapMaybe (\kresult -> case kresult of
+                                                       (mapMaybe (\case
                                                                      ThreadsReturn _ se -> Just se
                                                                      _ -> Nothing)
                                                         $ kernelBodyResult kbody)
