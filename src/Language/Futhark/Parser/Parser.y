@@ -701,8 +701,12 @@ Field :: { FieldBase NoInfo Name }
        | id              { let L loc (ID s) = $1 in RecordFieldImplicit s NoInfo loc }
 
 Fields :: { [FieldBase NoInfo Name] }
-        : Field ',' Fields { $1 : $3 }
-        |                  { [] }
+        : Fields1 { $1 }
+        |         { [] }
+
+Fields1 :: { [FieldBase NoInfo Name] }
+        : Field ',' Fields1 { $1 : $3 }
+        | Field             { [$1] }
 
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
@@ -781,7 +785,7 @@ InnerPattern : id                               { let L loc (ID name) = $1 in Id
              | '(' ')'                          { TuplePattern [] $1 }
              | '(' Pattern ')'                  { PatternParens $2 $1 }
              | '(' Pattern ',' Patterns1 ')'    { TuplePattern ($2:$4) $1 }
-             | '{' FieldPatterns '}' { RecordPattern $2 $1 }
+             | '{' FieldPatterns '}'            { RecordPattern $2 $1 }
 
 FieldPattern :: { (Name, PatternBase NoInfo Name) }
               : FieldId '=' Pattern
@@ -792,8 +796,13 @@ FieldPattern :: { (Name, PatternBase NoInfo Name) }
                 { (fst $1, Id (fst $1) NoInfo (snd $1)) }
 
 FieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
-               : FieldPattern ',' FieldPatterns { $1 : $3 }
-               |                                { [] }
+               : FieldPatterns1 { $1 }
+               |                { [] }
+
+FieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
+               : FieldPattern ',' FieldPatterns1 { $1 : $3 }
+               | FieldPattern                    { [$1] }
+
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
