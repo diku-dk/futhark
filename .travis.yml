@@ -39,7 +39,7 @@ script:
  - stack install
 
  # Run integration test suite.
- # - if [ "$STACK_YAML" = stack.yaml ]; then futhark-test --nobuffer tests examples; fi
+ - if [ "$STACK_YAML" = stack.yaml ]; then futhark-test --nobuffer tests examples; fi
 
  # Numpy is broken on Travis in a weird way I can't reproduce anywhere else.
  # - futhark-test tests examples --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
