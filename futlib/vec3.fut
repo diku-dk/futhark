@@ -2,7 +2,7 @@ import "/futlib/math"
 
 module type vec3 = {
   type real
-  type vec = (real,real,real)
+  type vec = {x: real, y: real, z: real}
 
   val +: vec -> vec -> vec
   val -: vec -> vec -> vec
@@ -15,22 +15,22 @@ module type vec3 = {
 module mk_vec3(real: real): vec3 with real = real.t = {
   type real = real.t
 
-  type vec = (real,real,real)
+  type vec = {x: real, y: real, z: real}
 
-  let ((x1,y1,z1): vec) + ((x2,y2,z2): vec) =
-    (x1 real.+ x2, y1 real.+ y2, z1 real.+ z2)
+  let (a: vec) + (b: vec) =
+    real.({x=a.x+b.x, y=a.y+b.y, z=a.z+b.z})
 
-  let ((x1,y1,z1): vec) - ((x2,y2,z2): vec) =
-    (x1 real.- x2, y1 real.- y2, z1 real.- z2)
+  let (a: vec) - (b: vec) =
+    real.({x=a.x-b.x, y=a.y-b.y, z=a.z-b.z})
 
-  let dot ((x1,y1,z1): vec) ((x2,y2,z2): vec) =
-    (x1 real.* x2) real.+ (y1 real.* y2) real.+ (z1 real.* z2)
+  let dot (a: vec) (b: vec) =
+    real.(a.x*b.x + a.y*b.y + a.z*b.z)
 
-  let scale (s: real) ((x,y,z): vec) =
-    (x real.* s, y real.* s, z real.* s)
+  let scale (s: real) ({x,y,z}: vec) =
+    real.({x=x*s, y=y*s, z=z*s})
 
-  let norm ((x,y,z): vec): real =
-    real.sqrt (x real.* x real.+ y real.* y real.+ z real.* z)
+  let norm ({x,y,z}: vec): real =
+    real.(sqrt (x*x + y*y + z*z))
 
   let normalise (v: vec): vec =
     let l = norm v
