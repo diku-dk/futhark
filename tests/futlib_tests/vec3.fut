@@ -2,6 +2,7 @@ import "/futlib/math"
 import "/futlib/vec3"
 
 open (mk_vec3 f64)
+let unvec ({x,y,z}: vec) = (x,y,z)
 
 -- ==
 -- entry: test_add
@@ -9,7 +10,7 @@ open (mk_vec3 f64)
 -- output { 3.0 5.0 7.0 }
 
 entry test_add (x1: f64) (y1: f64) (z1: f64) (x2: f64) (y2: f64) (z2: f64) =
-  (x1,y1,z1) + (x2,y2,z2)
+  unvec ({x=x1,y=y1,z=z1} + {x=x2,y=y2,z=z2})
 
 -- ==
 -- entry: test_sub
@@ -17,7 +18,7 @@ entry test_add (x1: f64) (y1: f64) (z1: f64) (x2: f64) (y2: f64) (z2: f64) =
 -- output { 0.0 1.0 2.0 }
 
 entry test_sub (x1: f64) (y1: f64) (z1: f64) (x2: f64) (y2: f64) (z2: f64) =
-  (x1,y1,z1) - (x2,y2,z2)
+  unvec ({x=x1,y=y1,z=z1} - {x=x2,y=y2,z=z2})
 
 -- ==
 -- entry: test_dot
@@ -25,7 +26,7 @@ entry test_sub (x1: f64) (y1: f64) (z1: f64) (x2: f64) (y2: f64) (z2: f64) =
 -- output { 14.0 }
 
 entry test_dot (x1: f64) (y1: f64) (z1: f64) (x2: f64) (y2: f64) (z2: f64) =
-  dot (x1,y1,z1) (x2,y2,z2)
+  dot {x=x1,y=y1,z=z1} {x=x2,y=y2,z=z2}
 
 -- ==
 -- entry: test_scale
@@ -35,7 +36,7 @@ entry test_dot (x1: f64) (y1: f64) (z1: f64) (x2: f64) (y2: f64) (z2: f64) =
 -- output { 6.0 8.0 10.0 }
 
 entry test_scale (s: f64) (x1: f64) (y1: f64) (z1: f64) =
-  scale s (x1,y1,z1)
+  unvec (scale s {x=x1,y=y1,z=z1})
 
 -- ==
 -- entry: test_norm
@@ -47,7 +48,7 @@ entry test_scale (s: f64) (x1: f64) (y1: f64) (z1: f64) =
 -- output { 0.0 }
 
 entry test_norm (x1: f64) (y1: f64) (z1: f64) =
-  norm (x1,y1,z1)
+  norm {x=x1,y=y1,z=z1}
 
 -- This one would be nicer with property-based testing.
 -- ==
@@ -58,4 +59,4 @@ entry test_norm (x1: f64) (y1: f64) (z1: f64) =
 -- output { 0.267261 0.534522 0.801783 }
 
 entry test_normalise (x1: f64) (y1: f64) (z1: f64) =
-  normalise (x1,y1,z1)
+  unvec (normalise {x=x1,y=y1,z=z1})

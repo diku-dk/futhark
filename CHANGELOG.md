@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     changed.  In particular, `rng_distribution` now contains a numeric
     module instead of an abstract type.
 
+  * futlib: The `vec2` and `vec3` modules now represent vectors as
+    records rather than tuples.
+
   * Type errors involving abstract types from modules now use
     qualified names (less "expected 't', got 't'", more "expected
     'foo.t', got 'bar.t'").
