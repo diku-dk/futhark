@@ -7,6 +7,7 @@ dist: trusty
 cache:
   directories:
     - $HOME/.stack
+    - $TRAVIS_BUILD_DIR/.stack-work
   timeout: 300
 
 # We test against different Stackage snapshots.
