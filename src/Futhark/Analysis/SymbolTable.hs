@@ -57,7 +57,7 @@ import Control.Monad.Reader
 import Data.Ord
 import Data.Maybe
 import Data.Monoid
-import Data.List hiding (elem, insert, lookup)
+import Data.List hiding (elem, lookup)
 import qualified Data.List as L
 import qualified Data.Set        as S
 import qualified Data.Map.Strict as M
@@ -65,7 +65,7 @@ import qualified Data.Map.Strict as M
 import Prelude hiding (elem, lookup)
 
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, lookupType)
+import Futhark.Representation.AST hiding (FParam, ParamT (..), lookupType)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Analysis.ScalExp
 

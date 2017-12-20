@@ -45,24 +45,18 @@ module Futhark.Internalise.Monad
   )
   where
 
-import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
-import Control.Monad.RWS hiding (mapM)
-
+import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List
-import Data.Maybe
 
 import qualified Language.Futhark as E
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
-
-import Prelude hiding (mapM)
 
 type ConstParams = [(Name,VName)]
 

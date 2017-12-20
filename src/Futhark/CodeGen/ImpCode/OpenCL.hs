@@ -26,7 +26,7 @@ import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import Futhark.Representation.Kernels.Sizes
 import qualified Futhark.CodeGen.ImpCode as Imp
 
-import Futhark.Util.Pretty hiding (space)
+import Futhark.Util.Pretty
 
 -- | An program calling OpenCL kernels.
 data Program = Program { openClProgram :: String

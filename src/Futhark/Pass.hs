@@ -11,14 +11,11 @@ module Futhark.Pass
        , simplePass
        ) where
 
-import Control.Applicative
-import Control.Monad.Writer.Strict hiding (pass)
+import Control.Monad.Writer.Strict
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Char
 import qualified Data.Text as T
-
-import Prelude
 
 import Futhark.Representation.AST
 import Futhark.Util.Log

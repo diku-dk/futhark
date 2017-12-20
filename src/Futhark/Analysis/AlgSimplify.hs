@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, LambdaCase #-}
 module Futhark.Analysis.AlgSimplify
   ( ScalExp
   , Error
@@ -184,8 +184,7 @@ gaussElimRel (RelExp LTH0 e) = do
     e_sofp <- toNumSofP =<< simplifyScal e
     e_scal<- simplifyScal =<< gaussAllLTH0 False S.empty e_sofp
     e_dnf <- toDNF e_scal
-    mapM (mapM (\f ->
-                  case f of
+    mapM (mapM (\case
                     LogCt c   -> return $ Val (BoolValue c)
                     PosId i   -> return $ Id  i $ scalExpType e
                     NegId i   -> return $ Id  i $ scalExpType e
@@ -850,10 +849,10 @@ helperTimesDivMinMax isTimes isRev emo@MaxMin{} e = do
                             NProd _  _  -> return $ mkTimesDiv em e' -- simplifyScal =<< fromNumSofP (NProd (em:fs) tp)
                             NSum  ts tp -> do
                                 new_ts <-
-                                    mapM (\x -> case x of
-                                                  NProd fs _ -> return $ NProd (em:fs) tp
-                                                  _          -> badAlgSimplifyM
-                                                                "helperTimesDivMinMax: SofP invariant violated!"
+                                    mapM (\case
+                                             NProd fs _ -> return $ NProd (em:fs) tp
+                                             _          -> badAlgSimplifyM
+                                                           "helperTimesDivMinMax: SofP invariant violated!"
                                          ) ts
                                 simplifyScal =<< fromNumSofP ( NSum new_ts tp )
         _ -> simplifyScal $ mkTimesDiv em e

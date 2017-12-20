@@ -14,17 +14,14 @@ module Futhark.Representation.SOACS.Simplify
        )
 where
 
-import Control.Applicative
 import Control.Monad
-import Data.Foldable (any)
+import Data.Foldable
 import Data.Either
-import Data.List hiding (any, all)
+import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
-
-import Prelude hiding (any, all)
 
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.AST as AST

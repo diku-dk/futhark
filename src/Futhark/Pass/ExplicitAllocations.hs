@@ -10,16 +10,12 @@ module Futhark.Pass.ExplicitAllocations
        )
 where
 
-import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Monad.RWS.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe
-
-import Prelude hiding (div, mod, quot, rem)
 
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplifier.Lore

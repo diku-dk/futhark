@@ -448,8 +448,8 @@ typeCheckSOAC (Stream size form lam arrexps) = do
   let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
       lamarr_ptp = map paramType $ drop (acc_len+1) $ extLambdaParams lam
       names_lamparams = S.fromList $ map paramName $ extLambdaParams lam
-  _ <- mapM (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
-  _ <- mapM (checkInnerDim names_lamparams   . tail . shapeDims . arrayShape) lamarr_rtp
+  mapM_ (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
+  mapM_ (checkInnerDim names_lamparams   . tail . shapeDims . arrayShape) lamarr_rtp
   return ()
     where checkOuterDim chunknm outdim = do
             let chunk_str = pretty chunknm

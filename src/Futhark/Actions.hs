@@ -91,7 +91,7 @@ interpret parseValues entry prog =
         Left err  -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                         exitWith $ ExitFailure 2
         Right val -> putStrLn $ ppOutput val $
-                     fromMaybe (repeat TypeDirect) $ snd <$> funDefEntryPoint fundef
+                     maybe (repeat TypeDirect) snd $ funDefEntryPoint fundef
   where ppOutput vs epts = intercalate "\n" $ zipWith prettyRetVal epts vs
         prettyRetVal ept v = prettyDoc 80 $ ppArray (prettyType ept) (prettyPrim ept) v
         prettyPrim TypeUnsigned (IntValue (Int8Value v))  =

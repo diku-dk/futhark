@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, LambdaCase #-}
 module Futhark.CodeGen.Backends.GenericPython
   ( compileProg
   , Constructor (..)
@@ -56,7 +56,7 @@ import Prelude
 import Futhark.Representation.Primitive hiding (Bool)
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax (Space(..))
-import qualified Futhark.CodeGen.ImpCode as Imp hiding (dimSizeToExp)
+import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.GenericPython.Definitions
@@ -624,7 +624,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ results args) = do
   let output_paramNames = map (compileName . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
 
-  (argexps_mem_copies, prepare_run) <- collect' $ forM inputs $ \p -> case p of
+  (argexps_mem_copies, prepare_run) <- collect' $ forM inputs $ \case
     Imp.MemParam name space -> do
       -- A program might write to its input parameters, so create a new memory
       -- block and copy the source there.  This way the program can be run more

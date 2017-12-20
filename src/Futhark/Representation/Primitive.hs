@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Definitions of primitive types, the values that inhabit these
 -- types, and operations on these values.  A primitive value can also
 -- be called a scalar.
@@ -813,61 +814,61 @@ primFuns = M.fromList
 
   , ("atan2_32",
      ([FloatType Float32, FloatType Float32], FloatType Float32,
-      \args -> case args of
+      \case
         [FloatValue (Float32Value x), FloatValue (Float32Value y)] ->
           Just $ FloatValue $ Float32Value $ atan2 x y
         _ -> Nothing))
   , ("atan2_64",
      ([FloatType Float64, FloatType Float64], FloatType Float64,
-       \args -> case args of
+       \case
          [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
            Just $ FloatValue $ Float64Value $ atan2 x y
          _ -> Nothing))
 
   , ("isinf32",
      ([FloatType Float32], Bool,
-      \args -> case args of
+      \case
         [FloatValue (Float32Value x)] -> Just $ BoolValue $ isInfinite x
         _ -> Nothing))
   , ("isinf64",
      ([FloatType Float64], Bool,
-      \args -> case args of
+      \case
         [FloatValue (Float64Value x)] -> Just $ BoolValue $ isInfinite x
         _ -> Nothing))
 
   , ("isnan32",
      ([FloatType Float32], Bool,
-      \args -> case args of
+      \case
         [FloatValue (Float32Value x)] -> Just $ BoolValue $ isNaN x
         _ -> Nothing))
   , ("isnan64",
      ([FloatType Float64], Bool,
-      \args -> case args of
+      \case
         [FloatValue (Float64Value x)] -> Just $ BoolValue $ isNaN x
         _ -> Nothing))
 
   , ("to_bits32",
      ([FloatType Float32], IntType Int32,
-      \args -> case args of
+      \case
         [FloatValue (Float32Value x)] ->
           Just $ IntValue $ Int32Value $ fromIntegral $ floatToWord x
         _ -> Nothing))
   , ("to_bits64",
      ([FloatType Float64], IntType Int64,
-      \args -> case args of
+      \case
         [FloatValue (Float64Value x)] ->
           Just $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x
         _ -> Nothing))
 
   , ("from_bits32",
      ([IntType Int32], FloatType Float32,
-      \args -> case args of
+      \case
         [IntValue (Int32Value x)] ->
           Just $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x
         _ -> Nothing))
   , ("from_bits64",
      ([IntType Int64], FloatType Float64,
-      \args -> case args of
+      \case
         [IntValue (Int64Value x)] ->
           Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
         _ -> Nothing))
