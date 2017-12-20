@@ -195,26 +195,6 @@ import Language.Futhark.Parser.Lexer
 %left indexprec iota copy rotate rearrange split shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
 %%
 
--- Some parameterized productions.  Left-recursive, as this is faster
--- in Happy, but does require us to reverse lists at the end.  This
--- allows us to use a more EBNF-style grammar.
-
-many(p) :          { [] }
-        | many1(p) { fst $1 : snd $1 }
-
-many1(p) : many1_(p) { reverseNonempty $1 }
-many1_(p) : p           { ($1, []) }
-          | many1_(p) p { ($2, fst $1 : snd $1) }
-
-sepBy(p,s) :             { [] }
-           | sepBy1(p,s) { fst $1 : snd $1 }
-
-sepBy1(p,s) : sepBy1_(p,s) { reverseNonempty $1 }
-sepBy1_(p,s) : p                { ($1, []) }
-             | sepBy1_(p,s) s p { ($3, fst $1 : snd $1) }
-
-sepBy2(p,s) : p s sepBy1(p,s) { $1 : fst $3 : snd $3 }
-
 -- The main parser.
 
 Doc :: { String }
@@ -223,16 +203,20 @@ Doc :: { String }
 -- Three cases to avoid ambiguities.
 Prog :: { UncheckedProg }
       -- File begins with a file comment, followed by a Dec with a comment.
-      : Doc Doc Dec_ many(Dec) { Prog (Just $1) (map (addDoc $2) $3 ++ concat $4) }
+      : Doc Doc Dec_ Decs { Prog (Just $1) (map (addDoc $2) $3 ++ $4) }
       -- File begins with a file comment, followed by a Dec with no comment.
-      | Doc Dec_ many(Dec)     { Prog (Just $1) ($2 ++ concat $3) }
+      | Doc Dec_ Decs     { Prog (Just $1) ($2 ++ $3) }
       -- File begins with a dec with no comment.
-      | Dec_ many(Dec)         { Prog Nothing ($1 ++ concat $2) }
+      | Dec_ Decs         { Prog Nothing ($1 ++ $2) }
 ;
 
 Dec :: { [UncheckedDec] }
     : Dec_              { $1 }
     | Doc Dec_          { map (addDoc $1) $2 }
+
+Decs :: { [UncheckedDec] }
+      :          { [] }
+      | Dec Decs { $1 ++ $2 }
 
 Dec_ :: { [UncheckedDec] }
     : Fun               { [FunDec $1] }
@@ -250,7 +234,7 @@ Dec_ :: { [UncheckedDec] }
 
 SigExp :: { UncheckedSigExp }
         : QualName            { let (v, loc) = $1 in SigVar v loc }
-        | '{' many(Spec) '}'  { SigSpecs $2 $1 }
+        | '{' Specs '}'  { SigSpecs $2 $1 }
         | SigExp with TypeRef { SigWith $1 $3 $2 }
         | '(' SigExp ')'      { SigParens $2 $1 }
         | '(' id ':' SigExp ')' '->' SigExp
@@ -290,14 +274,14 @@ ModExpAtom :: { UncheckedModExp }
               { ModParens $2 $1 }
             | QualName
               { let (v, loc) = $1 in ModVar v loc }
-            | '{' many(Dec) '}' { ModDecs (concat $2) $1 }
+            | '{' Decs '}' { ModDecs $2 $1 }
 
 SimpleSigExp :: { UncheckedSigExp }
              : QualName            { let (v, loc) = $1 in SigVar v loc }
              | '(' SigExp ')'      { $2 }
 
 ModBind :: { ModBindBase NoInfo Name }
-         : module id many(ModParam) maybeAscription(SigExp) '=' ModExp
+         : module id ModParams maybeAscription(SigExp) '=' ModExp
            { let L floc (ID fname) = $2;
              in ModBind fname $3 (fmap (,NoInfo) $4) $6 Nothing $1
            }
@@ -305,8 +289,12 @@ ModBind :: { ModBindBase NoInfo Name }
 ModParam :: { ModParamBase NoInfo Name }
           : '(' id ':' SigExp ')' { let L _ (ID name) = $2 in ModParam name $4 NoInfo $1 }
 
+ModParams :: { [ModParamBase NoInfo Name] }
+           : ModParam ModParams { $1 : $2 }
+           |                    { [] }
+
 Spec :: { SpecBase NoInfo Name }
-      : val id many(TypeParam) ':' SigTypeDecl
+      : val id TypeParams ':' SigTypeDecl
         { let L loc (ID name) = $2; (ps, r) = $5
           in ValSpec name $3 ps r Nothing loc }
       | val BindingBinOp ':' SigTypeDecl
@@ -317,10 +305,10 @@ Spec :: { SpecBase NoInfo Name }
           in ValSpec $2 [] ps r Nothing $1 }
       | TypeAbbr
         { TypeAbbrSpec $1 }
-      | type id many(TypeParam)
+      | type id TypeParams
         { let L loc (ID name) = $2
           in TypeSpec name $3 Nothing loc }
-      | type 'id[' id ']' many(TypeParam)
+      | type 'id[' id ']' TypeParams
         { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
           in TypeSpec name (TypeParamDim pname ploc : $5) Nothing loc }
       | module id ':' SigExp
@@ -330,11 +318,21 @@ Spec :: { SpecBase NoInfo Name }
         { IncludeSpec $2 $1 }
       | Doc Spec
         { addDocSpec $1 $2 }
-;
+
+Specs :: { [SpecBase NoInfo Name] }
+       : Spec Specs { $1 : $2 }
+       |            { [] }
 
 TypeParam :: { TypeParamBase Name }
            : '[' id ']' { let L _ (ID name) = $2 in TypeParamDim name $1 }
            | '\'' id { let L _ (ID name) = $2 in TypeParamType name $1 }
+
+TypeParams :: { [TypeParamBase Name] }
+            : TypeParam TypeParams { $1 : $2 }
+            |                      { [] }
+
+TypeParams1 :: { (TypeParamBase Name, [TypeParamBase Name]) }
+            : TypeParam TypeParams { ($1, $2) }
 
 DefaultDec :: { () }
            :  default '(' id ')' {% let L _ (ID s) = $3 in defaultType s  }
@@ -390,13 +388,13 @@ BindingBinOp :: { Name }
 
 
 Fun    :: { FunBindBase NoInfo Name }
-Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
+Fun     : let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
                $3 (fst $4 : snd $4) $7 Nothing loc
           }
 
-        | entry id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
+        | entry id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
             in FunBind True name (fmap declaredType $5) NoInfo
                $3 (fst $4 : snd $4) $7 Nothing loc }
@@ -405,7 +403,7 @@ Fun     : let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=
           { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 Nothing $1
           }
 
-        | let BindingUnOp many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp
+        | let BindingUnOp TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp
           { let name = $2
             in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
                $3 (fst $4 : snd $4) $7 Nothing $1
@@ -434,10 +432,10 @@ TypeExpDecl :: { TypeDeclBase NoInfo Name }
              : TypeExp { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
-TypeAbbr : type id many(TypeParam) '=' TypeExpDecl
+TypeAbbr : type id TypeParams '=' TypeExpDecl
            { let L loc (ID name) = $2
               in TypeBind name $3 $5 Nothing loc }
-         | type 'id[' id ']' many(TypeParam) '=' TypeExpDecl
+         | type 'id[' id ']' TypeParams '=' TypeExpDecl
            { let L loc (INDEXING name) = $2; L ploc (ID pname) = $3
              in TypeBind name (TypeParamDim pname ploc:$5) $7 Nothing loc }
 
@@ -464,11 +462,12 @@ TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArgExp Name]) }
                                        in ((QualName qs v, loc), [TypeArgExpDim (fst $2) loc]) }
 
 TypeExpAtom :: { UncheckedTypeExp }
-             : '(' TypeExp ')'               { $2 }
-             | '(' ')'                       { TETuple [] $1 }
-             | '{' sepBy(FieldType, ',') '}' { TERecord $2 $1 }
-             | '(' sepBy2(TypeExp, ',') ')'  { TETuple $2 $1 }
-             | QualName                      { TEVar (fst $1) (snd $1) }
+             : '(' TypeExp ')'                { $2 }
+             | '(' ')'                        { TETuple [] $1 }
+             | '(' TypeExp ',' TupleTypes ')' { TETuple ($2:$4) $1 }
+             | '{' '}'                        { TERecord [] $1 }
+             | '{' FieldTypes1 '}'            { TERecord $2 $1 }
+             | QualName                       { TEVar (fst $1) (snd $1) }
 
 TypeArg :: { TypeArgExp Name }
          : '[' DimDecl ']' { TypeArgExpDim (fst $2) $1 }
@@ -477,6 +476,14 @@ TypeArg :: { TypeArgExp Name }
 
 FieldType :: { (Name, UncheckedTypeExp) }
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
+
+FieldTypes1 :: { [(Name, UncheckedTypeExp)] }
+FieldTypes1 : FieldType                 { [$1] }
+            | FieldType ',' FieldTypes1 { $1 : $3 }
+
+TupleTypes :: { [UncheckedTypeExp] }
+            : TypeExp                { [$1] }
+            | TypeExp ',' TupleTypes { $1 : $3 }
 
 DimDecl :: { (DimDecl Name, SrcLoc) }
         : QualName
@@ -498,6 +505,10 @@ DimDecl :: { (DimDecl Name, SrcLoc) }
 FunParam :: { PatternBase NoInfo Name }
 FunParam : InnerPattern { $1 }
 
+FunParams1 :: { (PatternBase NoInfo Name, [PatternBase NoInfo Name]) }
+FunParams1 : FunParam            { ($1, []) }
+           | FunParam FunParams1 { ($1, fst $2 : snd $2) }
+
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
           | id  { let L loc (ID v) = $1 in (QualName [] v, loc) }
@@ -514,10 +525,10 @@ Exp2 :: { UncheckedExp }
      : if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
 
-     | loop many(TypeParam) Pattern LoopForm do Exp %prec ifprec
+     | loop TypeParams Pattern LoopForm do Exp %prec ifprec
          {% fmap (\t -> DoLoop $2 $3 t $4 $6 $1) (patternExp $3) }
 
-     | loop many(TypeParam) Pattern '=' Exp LoopForm do Exp %prec ifprec
+     | loop TypeParams Pattern '=' Exp LoopForm do Exp %prec ifprec
          { DoLoop $2 $3 $5 $6 $8 $1 }
 
      | LetExp %prec letprec { $1 }
@@ -539,10 +550,10 @@ Exp2 :: { UncheckedExp }
      | split '@' NaturalInt Atom Atom
                       { Split $3 $4 $5 $1 }
 
-     | concat many1(Atom)
+     | concat Atoms1
                       { Concat 0 (fst $2) (snd $2) $1 }
 
-     | concat '@' NaturalInt many1(Atom)
+     | concat '@' NaturalInt Atoms1
                       { Concat $3 (fst $4) (snd $4) $1 }
 
 
@@ -553,16 +564,16 @@ Exp2 :: { UncheckedExp }
                       { Reduce Commutative $2 $3 $4 $1 }
 
 
-     | map FunAbstr many1(Atom)
+     | map FunAbstr Atoms1
                       { Map $2 (fst $3:snd $3) $1 }
 
      | scan FunAbstr Atom Atom
                       { Scan $2 $3 $4 $1 }
 
-     | zip many1(Atom)
+     | zip Atoms1
                       { Zip 0 (fst $2) (snd $2) $1 }
 
-     | zip '@' NaturalInt many1(Atom)
+     | zip '@' NaturalInt Atoms1
                       { Zip $3 (fst $4) (snd $4) $1 }
 
      | unzip Atom  { Unzip $2 [] $1 }
@@ -572,7 +583,7 @@ Exp2 :: { UncheckedExp }
      | filter FunAbstr Atom
                       { Filter $2 $3 $1 }
 
-     | partition '(' sepBy1(FunAbstr, ',') ')' Atom
+     | partition '(' FunAbstrs1 ')' Atom
                       { Partition (fst $3 : snd $3) $5 $1 }
 
      | stream_map       FunAbstr Atom
@@ -621,7 +632,7 @@ Exp2 :: { UncheckedExp }
      | '-' Exp2
        { Negate $2 $1 }
 
-     | Exp2 with '[' sepBy(DimIndex, ',') ']' '<-' Exp2
+     | Exp2 with '[' DimIndices ']' '<-' Exp2
        { Update $1 $4 $7 (srclocOf $1) }
 
 
@@ -640,14 +651,14 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                              t <- lift $ gets parserIntType
                              return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
      | empty '(' TypeExpDecl ')'   { Empty $3 $1 }
-     | '(' Exp ')' many(FieldAccess)
+     | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 $1)
                $4 }
-     | '(' Exp ')[' sepBy(DimIndex, ',') ']' { Index (Parens $2 $1) $4 $1 }
-     | '(' sepBy2(Exp, ',') ')'    { TupLit $2 $1 }
-     | '('      ')'                { TupLit [] $1 }
-     | '[' sepBy1(Exp, ',') ']'    { ArrayLit (fst $2:snd $2) NoInfo $1 }
+     | '(' Exp ')[' DimIndices ']'    { Index (Parens $2 $1) $4 $1 }
+     | '(' Exp ',' Exps1 ')'          { TupLit ($2 : fst $4 : snd $4) $1 }
+     | '('      ')'                   { TupLit [] $1 }
+     | '[' Exps1 ']'                  { ArrayLit (fst $2:snd $2) NoInfo $1 }
 
      | '[' Exp '...' Exp ']'          { Range $2 Nothing (ToInclusive $4) $1 }
      | '[' Exp '..<' Exp ']'          { Range $2 Nothing (UpToExclusive $4) $1 }
@@ -658,11 +669,11 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
 
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
-     | QualName many(FieldAccess)
+     | QualName FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Var (fst $1) NoInfo (snd $1))
                $2 }
-     | '{' sepBy(Field, ',') '}' { RecordLit $2 $1 }
+     | '{' Fields '}' { RecordLit $2 $1 }
      | 'qid.(' Exp ')'
        { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
 
@@ -670,22 +681,36 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '[' ']'
        {% emptyArrayError $1 }
 
+Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
+        : Atom Atoms1 { ($1, fst $2 : snd $2) }
+        | Atom        { ($1, []) }
+
+Exps1 :: { (UncheckedExp, [UncheckedExp]) }
+        : Exp ',' Exps1 { ($1, fst $3 : snd $3) }
+        | Exp           { ($1, []) }
+
 FieldAccess :: { (Name, SrcLoc) }
              : '.' FieldId { (fst $2, $1) }
+
+FieldAccesses :: { [(Name, SrcLoc)] }
+               : FieldAccess FieldAccesses { $1 : $2 }
+               |                           { [] }
 
 Field :: { FieldBase NoInfo Name }
        : FieldId '=' Exp { RecordFieldExplicit (fst $1) $3 (snd $1) }
        | id              { let L loc (ID s) = $1 in RecordFieldImplicit s NoInfo loc }
 
--- The two productions for LetPat are split instead of using many() to
--- avoid a shift/reduce-conflict.
+Fields :: { [FieldBase NoInfo Name] }
+        : Field ',' Fields { $1 : $3 }
+        |                  { [] }
+
 LetExp :: { UncheckedExp }
      : let Pattern '=' Exp LetBody
                       { LetPat [] $2 $4 $5 $1 }
-     | let many1(TypeParam) Pattern '=' Exp LetBody
+     | let TypeParams1 Pattern '=' Exp LetBody
                       { LetPat (fst $2 : snd $2) $3 $5 $6 $1 }
 
-     | let id many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '=' Exp LetBody
+     | let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp LetBody
        { let L _ (ID name) = $2
          in LetFun name ($3, fst $4 : snd $4, (fmap declaredType $5), NoInfo, $7) $8 $1 }
 
@@ -706,14 +731,14 @@ LoopForm : for VarId '<' Exp
            { While $2 }
 
 VarSlice :: { (Name, [UncheckedDimIndex], SrcLoc) }
-          : 'id[' sepBy(DimIndex, ',') ']'
+          : 'id[' DimIndices ']'
               { let L loc (INDEXING v) = $1
                 in (v, $2, loc) }
 
 QualVarSlice :: { (QualName Name, [UncheckedDimIndex], SrcLoc) }
               : VarSlice
                 { let (x, y, z) = $1 in (QualName [] x, y, z) }
-              | 'qid[' sepBy(DimIndex, ',') ']'
+              | 'qid[' DimIndices ']'
                 { let L loc (QUALINDEXING qs v) = $1 in (QualName qs v, $2, loc) }
 
 DimIndex :: { UncheckedDimIndex }
@@ -727,6 +752,14 @@ DimIndex :: { UncheckedDimIndex }
          | Exp2 ':'      ':' Exp2 { DimSlice (Just $1) Nothing (Just $4) }
          |      ':'      ':' Exp2 { DimSlice Nothing Nothing (Just $3) }
 
+DimIndices :: { [UncheckedDimIndex] }
+            :             { [] }
+            | DimIndices1 { fst $1 : snd $1 }
+
+DimIndices1 :: { (UncheckedDimIndex, [UncheckedDimIndex]) }
+             : DimIndex                 { ($1, []) }
+             | DimIndex ',' DimIndices1 { ($1, fst $3 : snd $3) }
+
 VarId :: { IdentBase NoInfo Name }
 VarId : id { let L pos (ID name) = $1 in Ident name NoInfo pos }
 
@@ -738,13 +771,17 @@ Pattern :: { PatternBase NoInfo Name }
 Pattern : InnerPattern ':' TypeExpDecl { PatternAscription $1 $3 }
         | InnerPattern                 { $1 }
 
+Patterns1 :: { [PatternBase NoInfo Name] }
+           : Pattern               { [$1] }
+           | Pattern ',' Patterns1 { $1 : $3 }
+
 InnerPattern :: { PatternBase NoInfo Name }
 InnerPattern : id                               { let L loc (ID name) = $1 in Id name NoInfo loc }
              | '_'                              { Wildcard NoInfo $1 }
              | '(' ')'                          { TuplePattern [] $1 }
              | '(' Pattern ')'                  { PatternParens $2 $1 }
-             | '(' sepBy2(Pattern, ',') ')'     { TuplePattern $2 $1 }
-             | '{' sepBy(FieldPattern, ',') '}' { RecordPattern $2 $1 }
+             | '(' Pattern ',' Patterns1 ')'    { TuplePattern ($2:$4) $1 }
+             | '{' FieldPatterns '}' { RecordPattern $2 $1 }
 
 FieldPattern :: { (Name, PatternBase NoInfo Name) }
               : FieldId '=' Pattern
@@ -753,6 +790,10 @@ FieldPattern :: { (Name, PatternBase NoInfo Name) }
                 { (fst $1, PatternAscription (Id (fst $1) NoInfo (snd $1)) $3) }
               | FieldId
                 { (fst $1, Id (fst $1) NoInfo (snd $1)) }
+
+FieldPatterns :: { [(Name, PatternBase NoInfo Name)] }
+               : FieldPattern ',' FieldPatterns { $1 : $3 }
+               |                                { [] }
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
@@ -764,7 +805,7 @@ Curry : Curry Atom
         { (fst $1, [$2], snd $1) }
 
 FunAbstr :: { UncheckedLambda }
-         : '(' '\\' many(TypeParam) many1(FunParam) maybeAscription(TypeExpDecl) '->' Exp ')'
+         : '(' '\\' TypeParams FunParams1 maybeAscription(TypeExpDecl) '->' Exp ')'
            { AnonymFun $3 (fst $4 : snd $4) $7 $5 NoInfo $1 }
          | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }
@@ -788,6 +829,10 @@ FunAbstr :: { UncheckedLambda }
          | '(' BinOp ')'
            { BinOpFun $2 NoInfo NoInfo NoInfo $1 }
 
+FunAbstrs1 :: { (UncheckedLambda, [UncheckedLambda]) }
+            : FunAbstr                { ($1, []) }
+            | FunAbstr ',' FunAbstrs1 { ($1, fst $3 : snd $3) }
+
 Value :: { Value }
 Value : IntValue { $1 }
       | FloatValue { $1 }
@@ -796,7 +841,8 @@ Value : IntValue { $1 }
       | ArrayValue { $1 }
 
 CatValues :: { [Value] }
-CatValues : many(Value) { $1 }
+CatValues : Value CatValues { $1 : $2 }
+          |                 { [] }
 
 NaturalInt :: { Int }
            : declit { let L _ (DECLIT num) = $1 in fromIntegral num  }
