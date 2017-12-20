@@ -142,7 +142,7 @@ fixpointIterate f x
   | otherwise = fixpointIterate f (f x)
 
 fixpointIterateMay :: (a -> Maybe a) -> a -> a
-fixpointIterateMay f x = fromMaybe x (fixpointIterateMay f <$> f x)
+fixpointIterateMay f x = maybe x (fixpointIterateMay f) (f x)
 
 fromVar :: SubExp -> Maybe VName
 fromVar (Var v) = Just v

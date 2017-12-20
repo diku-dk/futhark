@@ -3,19 +3,15 @@
 -- test suite, and its test programs.
 module Main (main) where
 
-import Control.Applicative
 import qualified Data.ByteString as SBS
 import qualified Data.ByteString.Lazy as LBS
 import Control.Concurrent
-import Control.Monad hiding (forM_)
-import Control.Exception hiding (try)
-import Control.Monad.Except hiding (forM_)
+import Control.Monad
+import Control.Exception
+import Control.Monad.Except
 
-import Data.List hiding (foldl')
-import Data.Maybe
+import Data.List
 import Data.Monoid
-import Data.Ord
-import Data.Foldable (forM_)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -28,8 +24,6 @@ import System.Exit
 import System.IO
 import System.FilePath
 import Text.Regex.TDFA
-
-import Prelude
 
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Analysis.Metrics

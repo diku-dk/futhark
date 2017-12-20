@@ -76,7 +76,6 @@ module Futhark.CodeGen.ImpGen
   )
   where
 
-import Control.Applicative
 import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM)
 import Control.Monad.Writer hiding (mapM, forM)
@@ -88,8 +87,6 @@ import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 import Data.Ord
-
-import Prelude hiding (div, quot, mod, rem, mapM)
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.ImpCode
@@ -445,8 +442,8 @@ compileFunDef ops ds src (FunDef entry fname rettype params body) = do
   return (src',
           (fname,
            Imp.Function (isJust entry) outparams inparams body' results args))
-  where params_entry = fromMaybe (replicate (length params) TypeDirect) $ fst <$> entry
-        ret_entry = fromMaybe (replicate (length rettype) TypeDirect) $ snd <$> entry
+  where params_entry = maybe (replicate (length params) TypeDirect) fst entry
+        ret_entry = maybe (replicate (length rettype) TypeDirect) snd entry
         compile = do
           (inparams, arraydecls, args) <- compileInParams params params_entry
           (results, outparams, dests) <- compileOutParams rettype ret_entry

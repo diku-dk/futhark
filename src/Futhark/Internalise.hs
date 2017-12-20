@@ -13,19 +13,13 @@ module Futhark.Internalise
   where
 
 import Control.Arrow ((***))
-import Control.Applicative
-import Control.Monad.State  hiding (mapM, sequence)
-import Control.Monad.Reader hiding (mapM, sequence)
+import Control.Monad.State
+import Control.Monad.Reader
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Maybe
 import Data.Monoid
 import Data.List
-import Data.Ord
-import Data.Traversable (mapM)
 import Data.Loc
-
-import Prelude hiding (mapM, sequence, mod)
 
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.TypeChecker as E (Imports)

@@ -32,7 +32,7 @@ import Data.List hiding (repeat)
 import Control.Monad.Identity
 import Control.Monad.Writer
 
-import Prelude hiding (div, mod, quot, rem, repeat)
+import Prelude hiding (mod, repeat)
 
 import qualified Data.Map.Strict as M
 

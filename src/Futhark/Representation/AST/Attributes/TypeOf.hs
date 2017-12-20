@@ -38,15 +38,9 @@ module Futhark.Representation.AST.Attributes.TypeOf
        )
        where
 
-import Control.Applicative
-import Control.Monad.Reader
-import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as S
-import Data.Traversable hiding (mapM)
-
-import Prelude hiding (mapM)
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Reshape

@@ -9,7 +9,7 @@ import Data.Monoid
 import Data.Maybe (maybe,mapMaybe)
 import qualified Data.Map as M
 import System.FilePath (splitPath, (-<.>), makeRelative)
-import Text.Blaze.Html5 as H hiding (text, map, main)
+import Text.Blaze.Html5 as H hiding (map)
 import qualified Text.Blaze.Html5.Attributes as A
 import Data.String (fromString)
 import Data.Version

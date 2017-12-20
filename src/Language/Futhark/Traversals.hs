@@ -24,12 +24,7 @@ module Language.Futhark.Traversals
   , ASTMappable(..)
   ) where
 
-import           Control.Applicative
-import           Control.Monad
-import           Data.Traversable        hiding (forM, mapM)
 import qualified Data.Set                as S
-
-import           Prelude
 
 import           Language.Futhark.Syntax
 
