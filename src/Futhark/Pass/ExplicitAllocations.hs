@@ -399,21 +399,22 @@ directIndexFunction bt shape u mem t =
   IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t
 
 allocInFParams :: (Allocable fromlore tolore) =>
-                  [FParam fromlore] ->
+                  [(FParam fromlore, Space)] ->
                   ([FParam tolore] -> AllocM fromlore tolore a)
                -> AllocM fromlore tolore a
 allocInFParams params m = do
   (valparams, memparams) <-
-    runWriterT $ mapM allocInFParam params
+    runWriterT $ mapM (uncurry allocInFParam) params
   let params' = memparams <> valparams
       summary = scopeOfFParams params'
   localScope summary $ m params'
 
 allocInFParam :: (Allocable fromlore tolore) =>
                  FParam fromlore
+              -> Space
               -> WriterT [FParam tolore]
                  (AllocM fromlore tolore) (FParam tolore)
-allocInFParam param =
+allocInFParam param pspace =
   case paramDeclType param of
     Array bt shape u -> do
       let memname = baseString (paramName param) <> "_mem"
@@ -421,7 +422,7 @@ allocInFParam param =
       memsize <- lift $ newVName (memname <> "_size")
       mem <- lift $ newVName memname
       tell [ Param memsize $ MemPrim int64
-           , Param mem $ MemMem (Var memsize) DefaultSpace]
+           , Param mem $ MemMem (Var memsize) pspace]
       return param { paramAttr =  MemArray bt shape u $ ArrayIn mem ixfun }
     Prim bt ->
       return param { paramAttr = MemPrim bt }
@@ -450,18 +451,19 @@ allocInMergeParams variant merge m = do
 
   localScope summary $ m mem_and_size_params valparams mk_loop_res
   where allocInMergeParam (mergeparam, Var v)
-          | Array bt shape Unique <- paramDeclType mergeparam,
-            loopInvariantShape mergeparam = do
+          | Array bt shape u <- paramDeclType mergeparam = do
               (mem, ixfun) <- lift $ lookupArraySummary v
-              if IxFun.isLinear ixfun
+              Mem _ space <- lift $ lookupType mem
+              if u == Unique && loopInvariantShape mergeparam && IxFun.isLinear ixfun
                 then return (mergeparam { paramAttr = MemArray bt shape Unique $ ArrayIn mem ixfun },
                              lift . ensureArrayIn (paramType mergeparam) mem ixfun)
-                else doDefault mergeparam
-        allocInMergeParam (mergeparam, _) = doDefault mergeparam
+                else doDefault mergeparam space
 
-        doDefault mergeparam = do
-          mergeparam' <- allocInFParam mergeparam
-          return (mergeparam', linearFuncallArg $ paramType mergeparam)
+        allocInMergeParam (mergeparam, _) = doDefault mergeparam DefaultSpace
+
+        doDefault mergeparam space = do
+          mergeparam' <- allocInFParam mergeparam space
+          return (mergeparam', linearFuncallArg (paramType mergeparam) space)
 
         variant_names = variant ++ map (paramName . fst) merge
         loopInvariantShape =
@@ -486,30 +488,34 @@ ensureArrayIn t mem ixfun (Var v) = do
 
 ensureDirectArray :: (Allocable fromlore tolore,
                       Allocator tolore (AllocM fromlore tolore)) =>
-                     VName -> AllocM fromlore tolore (SubExp, VName, SubExp)
-ensureDirectArray v = do
+                     Space -> VName -> AllocM fromlore tolore (SubExp, VName, SubExp)
+ensureDirectArray space v = do
   res <- lookupMemInfo v
   case res of
     MemArray _ _ _ (ArrayIn mem ixfun)
       | IxFun.isDirect ixfun -> do
         memt <- lookupType mem
         case memt of
-          Mem size _ -> return (size, mem, Var v)
+          Mem size mem_space
+            | space == mem_space -> return (size, mem, Var v)
+            | otherwise          -> needCopy
           _          -> fail $
                         pretty mem ++
                         " should be a memory block but has type " ++
                         pretty memt
-    _ ->
-      -- We need to do a new allocation, copy 'v', and make a new
-      -- binding for the size of the memory block.
-      allocLinearArray (baseString v) v
+    _ -> needCopy
+  where needCopy =
+          -- We need to do a new allocation, copy 'v', and make a new
+          -- binding for the size of the memory block.
+          allocLinearArray space (baseString v) v
+
 
 allocLinearArray :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-                    String -> VName
+                    Space -> String -> VName
                  -> AllocM fromlore tolore (SubExp, VName, SubExp)
-allocLinearArray s v = do
+allocLinearArray space s v = do
   t <- lookupType v
-  (size, mem) <- allocForArray t DefaultSpace
+  (size, mem) <- allocForArray t space
   v' <- newIdent s t
   let pat = Pattern [] [PatElem (identName v') BindVar $
                         directIndexFunction (elemType t) (arrayShape t)
@@ -523,19 +529,19 @@ funcallArgs :: (Allocable fromlore tolore,
 funcallArgs args = do
   (valargs, mem_and_size_args) <- runWriterT $ forM args $ \(arg,d) -> do
     t <- lift $ subExpType arg
-    arg' <- linearFuncallArg t arg
+    arg' <- linearFuncallArg t DefaultSpace arg
     return (arg', d)
   return $ map (,Observe) mem_and_size_args <> valargs
 
 linearFuncallArg :: (Allocable fromlore tolore,
                      Allocator tolore (AllocM fromlore tolore)) =>
-                    Type -> SubExp
+                    Type -> Space -> SubExp
                  -> WriterT [SubExp] (AllocM fromlore tolore) SubExp
-linearFuncallArg Array{} (Var v) = do
-  (size, mem, arg') <- lift $ ensureDirectArray v
+linearFuncallArg Array{} space (Var v) = do
+  (size, mem, arg') <- lift $ ensureDirectArray space v
   tell [size, Var mem]
   return arg'
-linearFuncallArg _ arg =
+linearFuncallArg _ _ arg =
   return arg
 
 explicitAllocations :: Pass Kernels ExplicitMemory
@@ -561,7 +567,8 @@ startOfFreeIDRange = S.size . shapeContext
 
 allocInFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef ExplicitMemory)
 allocInFun (FunDef entry fname rettype params fbody) =
-  runAllocM handleOp $ allocInFParams params $ \params' -> do
+  runAllocM handleOp $
+  allocInFParams (zip params $ repeat DefaultSpace) $ \params' -> do
     fbody' <- insertStmsM $ allocInFunBody (length rettype) fbody
     return $ FunDef entry fname (memoryInRetType rettype) params' fbody'
     where handleOp (GetSize key size_class) =
@@ -629,7 +636,7 @@ allocInFunBody num_vals (Body _ bnds res) =
           bt <- primType <$> lookupType v
           if bt
             then return $ Var v
-            else do (_, _, v') <- ensureDirectArray v
+            else do (_, _, v') <- ensureDirectArray DefaultSpace v
                     return v'
 
 allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
