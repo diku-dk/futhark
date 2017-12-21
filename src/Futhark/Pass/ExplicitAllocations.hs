@@ -371,9 +371,9 @@ summaryForBindage t@(Array bt shape u) BindVar NoHint = do
   return $ directIndexFunction bt shape u m t
 summaryForBindage t BindVar (Hint ixfun space) = do
   let bt = elemType t
-  bytes <- computeSize "bytes" $ product $
-           fromIntegral (primByteSize (elemType t)::Int64) :
-           map (ConvOpExp (SExt Int32 Int64)) (IxFun.base ixfun)
+  bytes <- computeSize "bytes" $
+           product [ConvOpExp (SExt Int32 Int64) (product (IxFun.base ixfun)),
+                    fromIntegral (primByteSize (elemType t)::Int64)]
   m <- allocateMemory "mem" bytes space
   return $ MemArray bt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
 summaryForBindage _ (BindInPlace src _) _ =
