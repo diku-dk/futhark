@@ -197,9 +197,9 @@
 -- }
 
 let main (start: u8) (step: u8) (end: u8) =
-  ([start...end],
-   [start..<end],
-   [start..>end],
-   [start..step...end],
-   [start..step..<end],
-   [start..step..>end])
+  (start...end,
+   start..<end,
+   start..>end,
+   start..step...end,
+   start..step..<end,
+   start..step..>end)
