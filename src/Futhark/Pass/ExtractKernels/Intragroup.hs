@@ -11,6 +11,7 @@ import Control.Monad.Trans.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.Kernels as Out
 import Futhark.Representation.Kernels.Kernel
@@ -38,24 +39,24 @@ intraGroupParallelise knest body = runMaybeT $ do
 
   ltid <- newVName "ltid"
   let group_variant = S.fromList [ltid]
-  (ws, kbody) <- lift $ intraGroupParalleliseBody (dataDependencies body) group_variant ltid body
+  (wss, kbody) <- lift $ intraGroupParalleliseBody (dataDependencies body) group_variant ltid body
 
   known_outside <- lift $ M.keys <$> askScope
-  unless (all (`elem` known_outside) $ freeIn ws) $
+  unless (all (`elem` known_outside) $ freeIn wss) $
     fail "Irregular parallelism"
 
   ((intra_avail_par, kspace, read_input_stms), prelude_stms) <- lift $ runBinder $ do
+    let foldBinOp' _    []    = eSubExp $ intConst Int32 0
+        foldBinOp' bop (x:xs) = foldBinOp bop x xs
+    ws <- mapM (letSubExp "one_intra_par" <=< foldBinOp' (Mul Int32)) wss
+
     -- Compute a group size that is the maximum of the inner
     -- parallelism exploited.
-    group_size <- case ws of
-      x:xs -> letSubExp "computed_group_size" =<< foldBinOp (SMax Int32) x xs
-      []   -> return $ intConst Int32 0
+    group_size <- letSubExp "computed_group_size" =<< foldBinOp' (SMax Int32) ws
 
     -- The amount of parallelism available *in the worst case* is
     -- equal to the smallest parallel loop.
-    intra_avail_par <- case ws of
-      x:xs -> letSubExp "intra_avail_par" =<< foldBinOp (SMin Int32) x xs
-      []   -> return $ intConst Int32 0
+    intra_avail_par <- letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int32) ws
 
     let inputIsUsed input = kernelInputName input `S.member` freeInBody body
         used_inps = filter inputIsUsed inps
@@ -104,10 +105,10 @@ data Env = Env { _localTID :: VName
                , _groupVariant :: Names
                }
 
-type IntraGroupM = BinderT Out.InKernel (RWS Env (S.Set SubExp) VNameSource)
+type IntraGroupM = BinderT Out.InKernel (RWS Env (S.Set [SubExp]) VNameSource)
 
 runIntraGroupM :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                  Env -> IntraGroupM () -> m ([SubExp], [Out.Stm Out.InKernel])
+                  Env -> IntraGroupM () -> m ([[SubExp]], [Out.Stm Out.InKernel])
 runIntraGroupM env m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->
@@ -115,22 +116,37 @@ runIntraGroupM env m = do
     in ((S.toList ws, kstms), src')
 
 parallel :: SubExp -> IntraGroupM ()
-parallel = tell . S.singleton
+parallel = tell . S.singleton . pure
+
+parallels :: [SubExp] -> IntraGroupM ()
+parallels = tell . S.singleton
+
+intraGroupBody :: Body -> IntraGroupM (Out.Body Out.InKernel)
+intraGroupBody body = do
+  stms <- collectStms_ $ mapM_ intraGroupStm $ bodyStms body
+  return $ mkBody stms $ bodyResult body
 
 intraGroupStm :: Stm -> IntraGroupM ()
 intraGroupStm stm@(Let pat _ e) = do
   Env ltid deps group_variant <- ask
-  let groupInvariant = S.null . S.intersection group_variant .
-                       flip (M.findWithDefault mempty) deps
+  let groupInvariant (Var v) =
+        S.null . S.intersection group_variant .
+        flip (M.findWithDefault mempty) deps $ v
+      groupInvariant Constant{} = True
   case e of
-    DoLoop ctx val (ForLoop i it (Var bound) inps) loopbody
+    DoLoop ctx val (ForLoop i it bound inps) loopbody
       | groupInvariant bound ->
           localScope (scopeOf form) $
           localScope (scopeOfFParams $ map fst $ ctx ++ val) $ do
-            (ws, stms) <- collectStms $ mapM_ intraGroupStm $ bodyStms loopbody
-            letBind_ pat $ DoLoop ctx val form $ mkBody stms $ bodyResult loopbody
-            return ws
-              where form = ForLoop i it (Var bound) inps
+          loopbody' <- intraGroupBody loopbody
+          letBind_ pat $ DoLoop ctx val form loopbody'
+              where form = ForLoop i it bound inps
+
+    If cond tbody fbody ifattr
+      | groupInvariant cond -> do
+          tbody' <- intraGroupBody tbody
+          fbody' <- intraGroupBody fbody
+          letBind_ pat $ If cond tbody' fbody' ifattr
 
     Op (Map w fun arrs) -> do
       body_stms <- collectStms_ $ do
@@ -191,7 +207,23 @@ intraGroupStm stm@(Let pat _ e) = do
         runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types
       let replace (Var v) | v == paramName chunk_size_param = w
           replace se = se
-      censor (S.map replace) $ mapM_ intraGroupStm stream_bnds
+      censor (S.map $ map replace) $ mapM_ intraGroupStm stream_bnds
+
+    BasicOp (Replicate (Shape outer_ws) se)
+      | [inner_ws] <- map (drop (length outer_ws) . arrayDims) $ patternTypes pat -> do
+      let ws = outer_ws ++ inner_ws
+      parallels ws
+      let new_inds = unflattenIndex (map (primExpFromSubExp int32) ws)
+                                    (primExpFromSubExp int32 $ Var ltid)
+      new_inds' <- mapM (letExp "new_local_index" <=< toExp) new_inds
+      let inner_inds' = drop (length outer_ws) new_inds'
+          space = zip new_inds' ws
+          index = case se of Var v -> BasicOp $ Index v $
+                                      map (DimFix . Var) inner_inds'
+                             Constant{} -> BasicOp $ SubExp se
+      body <- runBodyBinder $ eBody [pure index]
+      letBind_ pat $ Op $
+        Out.Combine space (map (Prim . elemType) $ patternTypes pat) [] body
 
     _ ->
       Kernelise.transformStm stm
@@ -223,7 +255,7 @@ intraGroupStm stm@(Let pat _ e) = do
 
 intraGroupParalleliseBody :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                              Dependencies -> Names -> VName -> Body
-                          -> m ([SubExp], Out.KernelBody Out.InKernel)
+                          -> m ([[SubExp]], Out.KernelBody Out.InKernel)
 intraGroupParalleliseBody deps group_variant ltid body = do
   (ws, kstms) <- runIntraGroupM (Env ltid deps group_variant) $
                  mapM_ intraGroupStm $ bodyStms body
