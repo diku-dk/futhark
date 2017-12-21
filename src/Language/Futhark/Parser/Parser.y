@@ -681,6 +681,8 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '[' ']'
        {% emptyArrayError $1 }
 
+     | '[' Exp '..' Exp ']' {% twoDotsRange $1 }
+
 Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
         : Atom Atoms1 { ($1, fst $2 : snd $2) }
         | Atom        { ($1, []) }
@@ -1148,6 +1150,9 @@ emptyArrayError :: SrcLoc -> ParserMonad a
 emptyArrayError loc =
   parseErrorAt loc $
   Just "write empty arrays as 'empty(t)', for element type 't'.\n"
+
+twoDotsRange :: SrcLoc -> ParserMonad a
+twoDotsRange loc = parseErrorAt loc $ Just "use '...' for ranges, not '..'.\n"
 
 --- Now for the parser interface.
 
