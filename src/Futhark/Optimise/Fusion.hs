@@ -2,6 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
@@ -542,17 +543,19 @@ horizontGreedyFuse rem_bnds res (out_idds, cs, soac, consumed) = do
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
 
 -- A reduce is translated to a redomap and treated from there.
-fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce w comm lam args)):bnds) res) = do
+fusionGatherBody fres (Body blore (stmsToList ->
+                                    Let pat bndtp (Op (Futhark.Reduce w comm lam args)):bnds) res) = do
   let (ne, arrs) = unzip args
       equivsoac = Futhark.Redomap w comm lam lam ne arrs
-  fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
+  fusionGatherBody fres $ Body blore (oneStm (Let pat bndtp (Op equivsoac))<>stmsFromList bnds) res
 
 -- Some forms of do-loops can profitably be considered streamSeqs.  We
 -- are careful to ensure that the generated nested loop cannot itself
 -- be considered a stream, to avoid infinite recursion.
-fusionGatherBody fres (Body blore (Let (Pattern [] pes) bndtp
-                                   (DoLoop [] merge (ForLoop i it w loop_vars) body)
-                                   :bnds) res) | not $ null loop_vars = do
+fusionGatherBody fres (Body blore (stmsToList ->
+                                    Let (Pattern [] pes) bndtp
+                                    (DoLoop [] merge (ForLoop i it w loop_vars) body)
+                                    :bnds) res) | not $ null loop_vars = do
   let (merge_params,merge_init) = unzip merge
       (loop_params,loop_arrs) = unzip loop_vars
   chunk_size <- newVName "chunk_size"
@@ -597,9 +600,9 @@ fusionGatherBody fres (Body blore (Let (Pattern [] pes) bndtp
   let discard_pe = PatElem discard BindVar $ Prim int32
 
   fusionGatherBody fres $ Body blore
-    (Let (Pattern [] (pes++[discard_pe])) bndtp (Op stream):bnds) res
+    (oneStm (Let (Pattern [] (pes<>[discard_pe])) bndtp (Op stream))<>stmsFromList bnds) res
 
-fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
+fusionGatherBody fres (Body _ (stmsToList -> (bnd@(Let pat _ e):bnds)) res) = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
     Right soac@(SOAC.Map _ lam _) ->
@@ -637,13 +640,13 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
 
     _ | [pe] <- patternValueElements pat,
         Just (src,trns) <- SOAC.transformFromExp (stmCerts bnd) e ->
-          bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
+          bindingTransform pe src trns $ fusionGatherBody fres body
       | otherwise -> do
           let pat_vars = map (BasicOp . SubExp . Var) $ patternNames pat
-          bres <- gatherStmPattern pat $ fusionGatherBody fres $ mkBody bnds res
+          bres <- gatherStmPattern pat $ fusionGatherBody fres body
           foldM fusionGatherExp bres (e:pat_vars)
 
-  where body = mkBody bnds res
+  where body = mkBody (stmsFromList bnds) res
         cs = stmCerts bnd
         rem_bnds = bnd : bnds
         consumed = consumedInExp $ Alias.analyseExp e
@@ -659,7 +662,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
           (used_lam, blres) <- fusionGatherLam (S.empty, bres) lambda
           greedyFuse rem_bnds used_lam blres (pat, cs, soac, consumed)
 
-fusionGatherBody fres (Body _ [] res) =
+fusionGatherBody fres (Body _ _ res) =
   foldM fusionGatherExp fres $ map (BasicOp . SubExp) res
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
@@ -759,13 +762,12 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
 
 fuseInBody :: Body -> FusionGM Body
 
-fuseInBody (Body _ (Let pat aux e:bnds) res) = do
-  body' <- bindingPat pat $ fuseInBody $ mkBody bnds res
-  soac_bnds <- replaceSOAC pat aux e
-  return $ insertStms soac_bnds body'
-
-fuseInBody (Body () [] res) =
-  return $ Body () [] res
+fuseInBody (Body _ stms res)
+  | Let pat aux e:bnds <- stmsToList stms = do
+      body' <- bindingPat pat $ fuseInBody $ mkBody (stmsFromList bnds) res
+      soac_bnds <- replaceSOAC pat aux e
+      return $ insertStms soac_bnds body'
+  | otherwise = return $ Body () mempty res
 
 fuseInExp :: Exp -> FusionGM Exp
 
@@ -803,8 +805,8 @@ fuseInExtLambda (ExtLambda params body rtp) = do
   body' <- binding (map paramIdent params) $ fuseInBody body
   return $ ExtLambda params body' rtp
 
-replaceSOAC :: Pattern -> StmAux () -> Exp -> FusionGM [Stm]
-replaceSOAC (Pattern _ []) _ _ = return []
+replaceSOAC :: Pattern -> StmAux () -> Exp -> FusionGM (Stms SOACS)
+replaceSOAC (Pattern _ []) _ _ = return mempty
 replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
   fres  <- asks fusedRes
   let pat_nm = patElemName patElem
@@ -812,7 +814,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
   case M.lookup pat_nm (outArr fres) of
     Nothing  -> do
       e'    <- fuseInExp e
-      return [Let pat aux e']
+      return $ oneStm $ Let pat aux e'
     Just knm ->
       case M.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ Error
@@ -825,7 +827,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) aux e = do
              ++"still in result: "++pretty names)
           insertKerSOAC (outNames ker) ker
 
-insertKerSOAC :: [VName] -> FusedKer -> FusionGM [Stm]
+insertKerSOAC :: [VName] -> FusedKer -> FusionGM (Stms SOACS)
 insertKerSOAC names ker = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
@@ -896,7 +898,7 @@ copyNewlyConsumed was_consumed soac =
         copyFree (bnds, subst) v = do
           v_copy <- newVName $ baseString v <> "_copy"
           copy <- mkLetNamesM' [v_copy] $ BasicOp $ Copy v
-          return (copy:bnds, M.insert v v_copy subst)
+          return (oneStm copy<>bnds, M.insert v v_copy subst)
 
 ---------------------------------------------------
 ---------------------------------------------------

@@ -29,9 +29,7 @@ module Futhark.Representation.AST.Attributes.Names
 import Control.Monad.Writer
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Foldable (foldMap)
-
-import Prelude
+import Data.Foldable
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
@@ -62,9 +60,10 @@ freeInStmsAndRes :: (FreeIn (Op lore),
                      FreeIn (FParamAttr lore),
                      FreeAttr (BodyAttr lore),
                      FreeAttr (ExpAttr lore)) =>
-                    [Stm lore] -> Result -> Names
+                    Stms lore -> Result -> Names
 freeInStmsAndRes stms res =
-  mconcat (freeIn res : map freeInStm stms) `S.difference` boundByStms stms
+  (freeIn res `mappend` fold (fmap freeInStm stms))
+  `S.difference` boundByStms stms
 
 -- | Return the set of variable names that are free in the given body.
 freeInBody :: (FreeAttr (ExpAttr lore),
@@ -160,7 +159,10 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
   freeIn (a,b,c) = freeIn a <> freeIn b <> freeIn c
 
 instance FreeIn a => FreeIn [a] where
-  freeIn = mconcat . map freeIn
+  freeIn = fold . fmap freeIn
+
+instance FreeIn (Stm lore) => FreeIn (Stms lore) where
+  freeIn = fold . fmap freeIn
 
 instance FreeIn Names where
   freeIn = id
@@ -259,8 +261,8 @@ boundByStm :: Stm lore -> Names
 boundByStm = S.fromList . patternNames . stmPattern
 
 -- | The names bound by the bindings.
-boundByStms :: [Stm lore] -> Names
-boundByStms = S.unions . map boundByStm
+boundByStms :: Stms lore -> Names
+boundByStms = fold . fmap boundByStm
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]

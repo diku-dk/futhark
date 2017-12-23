@@ -49,7 +49,6 @@ module Futhark.TypeCheck
   )
   where
 
-import Control.Applicative
 import Control.Parallel.Strategies
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -59,8 +58,6 @@ import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
-
-import Prelude
 
 import Futhark.Construct (instantiateShapes)
 import Futhark.Representation.Aliases
@@ -608,9 +605,9 @@ checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
   lookupType ident
 
 checkStms :: Checkable lore =>
-             [Stm (Aliases lore)] -> TypeM lore a
+             Stms (Aliases lore) -> TypeM lore a
           -> TypeM lore a
-checkStms origbnds m = delve origbnds
+checkStms origbnds m = delve $ stmsToList origbnds
   where delve (stm@(Let pat _ e):bnds) = do
           context ("In expression of statement " ++ pretty pat) $
             checkExp e

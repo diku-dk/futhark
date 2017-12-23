@@ -36,6 +36,9 @@ class Substitute a where
 instance Substitute a => Substitute [a] where
   substituteNames substs = map $ substituteNames substs
 
+instance Substitute (Stm lore) => Substitute (Stms lore) where
+  substituteNames substs = fmap $ substituteNames substs
+
 instance (Substitute a, Substitute b) => Substitute (a,b) where
   substituteNames substs (x,y) =
     (substituteNames substs x, substituteNames substs y)
@@ -110,10 +113,10 @@ instance Substitutable lore => Substitute (Stm lore) where
     (substituteNames substs e)
 
 instance Substitutable lore => Substitute (Body lore) where
-  substituteNames substs (Body attr bnds res) =
+  substituteNames substs (Body attr stms res) =
     Body
     (substituteNames substs attr)
-    (substituteNames substs bnds)
+    (substituteNames substs stms)
     (substituteNames substs res)
 
 replace :: Substitutable lore => M.Map VName VName -> Mapper lore lore Identity

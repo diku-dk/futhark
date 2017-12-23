@@ -38,6 +38,7 @@ import Control.Monad.Writer hiding (mapM_)
 import Control.Monad.Identity hiding (mapM_)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
+import Data.Foldable
 import Data.List
 
 import Futhark.Representation.AST
@@ -119,7 +120,7 @@ spaceDimensions = structureDimensions . spaceStructure
 
 -- | The body of a 'Kernel'.
 data KernelBody lore = KernelBody { kernelBodyLore :: BodyAttr lore
-                                  , kernelBodyStms :: [Stm lore]
+                                  , kernelBodyStms :: Stms lore
                                   , kernelBodyResult :: [KernelResult]
                                   }
 
@@ -281,9 +282,9 @@ instance FreeIn WhichThreads where
 instance Attributes lore => FreeIn (KernelBody lore) where
   freeIn (KernelBody attr stms res) =
     (freeIn attr <> free_in_stms <> free_in_res) `S.difference` bound_in_stms
-    where free_in_stms = mconcat $ map freeInStm stms
+    where free_in_stms = fold $ fmap freeInStm stms
           free_in_res = freeIn res
-          bound_in_stms = mconcat $ map boundByStm stms
+          bound_in_stms = fold $ fmap boundByStm stms
 
 instance Attributes lore => Substitute (KernelBody lore) where
   substituteNames subst (KernelBody attr stms res) =
@@ -349,13 +350,16 @@ instance Attributes lore => Substitute (Kernel lore) where
                          }
 
 instance Attributes lore => Rename (KernelBody lore) where
-  rename (KernelBody attr [] res) =
-    KernelBody <$> rename attr <*> pure [] <*> rename res
-  rename (KernelBody attr (stm:stms) res) =
-    bindingForRename (S.toList $ boundByStm stm) $ do
-      stm' <- rename stm
-      KernelBody attr' stms' res' <- rename $ KernelBody attr stms res
-      return $ KernelBody attr' (stm':stms') res'
+  rename (KernelBody attr stms res) = do
+    attr' <- rename attr
+    (stms', res') <- descend $ stmsToList stms
+    return $ KernelBody attr' (stmsFromList stms') res'
+    where descend [] = (,) [] <$> rename res
+          descend (stm:stms') =
+            bindingForRename (patternNames $ stmPattern stm) $ do
+              stm' <- rename stm
+              (stms'', res') <- descend stms'
+              return (stm':stms'', res')
 
 instance Rename KernelResult where
   rename = substituteRename
@@ -444,7 +448,7 @@ instance (Attributes lore,
           removeKernelBodyAliases :: KernelBody (Aliases lore)
                                   -> KernelBody lore
           removeKernelBodyAliases (KernelBody (_, attr) stms res) =
-            KernelBody attr (map removeStmAliases stms) res
+            KernelBody attr (fmap removeStmAliases stms) res
 
 instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = True
@@ -636,7 +640,7 @@ instance Pretty KernelSpace where
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody _ stms res) =
-    PP.stack (map ppr stms) </>
+    PP.stack (map ppr (stmsToList stms)) </>
     text "return" <+> PP.braces (PP.commasep $ map ppr res)
 
 instance Pretty KernelResult where

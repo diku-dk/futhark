@@ -459,7 +459,7 @@ compileBody dest body = do
 
 defCompileBody :: ExplicitMemorish lore => Destination -> Body lore -> ImpM lore op ()
 defCompileBody (Destination dest) (Body _ bnds ses) =
-  compileStms bnds $ zipWithM_ compileSubExpTo dest ses
+  compileStms (stmsToList bnds) $ zipWithM_ compileSubExpTo dest ses
 
 compileLoopBody :: ExplicitMemorish lore =>
                    [VName] -> Body lore -> ImpM lore op (Imp.Code op)
@@ -471,7 +471,7 @@ compileLoopBody mergenames (Body _ bnds ses) = do
   -- buffer to the merge parameters.  This is efficient, because the
   -- operations are all scalar operations.
   tmpnames <- mapM (newVName . (++"_tmp") . baseString) mergenames
-  collect $ compileStms bnds $ do
+  collect $ compileStms (stmsToList bnds) $ do
     copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
       subExpType se >>= \case
         Prim bt  -> do

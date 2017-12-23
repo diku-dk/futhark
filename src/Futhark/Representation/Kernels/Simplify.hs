@@ -16,16 +16,14 @@ module Futhark.Representation.Kernels.Simplify
        )
 where
 
-import Control.Applicative
 import Control.Monad
 import Data.Either
+import Data.Foldable
 import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
-
-import Prelude
 
 import Futhark.Representation.Kernels
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
@@ -102,7 +100,7 @@ processHoistedStm bnd
       fail $ "Cannot hoist binding: " ++ pretty bnd
 
 mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
-                    BodyAttr lore -> [Stm (Wise lore)] -> [KernelResult] -> KernelBody (Wise lore)
+                    BodyAttr lore -> Stms (Wise lore) -> [KernelResult] -> KernelBody (Wise lore)
 mkWiseKernelBody attr bnds res =
   let Body attr' _ _ = mkWiseBody attr bnds res_vs
   in KernelBody attr' bnds res
@@ -340,9 +338,9 @@ distributeKernelResults (vtable, used)
     cannotSimplify
 
   addStm $ Let (Pattern [] kpes') attr $
-    Op $ Kernel desc kspace kts' $ mkWiseKernelBody () (reverse kstms_rev) kres'
+    Op $ Kernel desc kspace kts' $ mkWiseKernelBody () (stmsFromList $ reverse kstms_rev) kres'
   where
-    free_in_kstms = mconcat $ map freeInStm kstms
+    free_in_kstms = fold $ fmap freeInStm kstms
 
     distribute (kpes', kts', kres', kstms_rev) bnd
       | Let (Pattern [] [pe]) _ (BasicOp (Index arr slice)) <- bnd,

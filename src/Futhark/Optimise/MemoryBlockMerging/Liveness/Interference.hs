@@ -255,7 +255,7 @@ findLoopCorrespondingVar ctx (Let (Pattern _patctxelems patvalelems) _
                          (DoLoop _ _ _ (Body _ stms res))) =
   M.fromList $ catMaybes $ zipWith findIt patvalelems res
   where findIt (PatElem pat_v _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn pat_mem _))) (Var res_v)
-          | not (L.null stms) = case L.last stms of
+          | not (null stms) = case L.last $ stmsToList stms of
               -- This is how the program looks after coalescing.
               Let (Pattern _ [PatElem _last_v
                               (BindInPlace _ (DimFix slice_part : _))
@@ -279,16 +279,15 @@ findLoopCorrespondingVar _ _ = M.empty
 
 innermostLoopNestBody :: LoreConstraints lore =>
                          Context -> Body lore -> (Body lore, M.Map VName (VName, SubExp))
-innermostLoopNestBody ctx body = case body of
+innermostLoopNestBody ctx body = case stmsToList $ bodyStms body of
   -- This checks for how perfect nested loops looks like after coalescing.  This
   -- is very brittle.  If it detects such a nesting, it will ask the
   -- interference exception algorithm to look in the innermost body.
-  Body _ (Let _ _ (BasicOp Scratch{}) :
-          loopstm@(Let _ _ (DoLoop _ _ _ body')) :
-          _) _ -> let (body'', loop_corresponding_var) = innermostLoopNestBody ctx body'
-                  in (body'', M.union
-                              (findLoopCorrespondingVar ctx loopstm)
-                              loop_corresponding_var)
+  Let _ _ (BasicOp Scratch{}) : loopstm@(Let _ _ (DoLoop _ _ _ body')) : _ ->
+    let (body'', loop_corresponding_var) = innermostLoopNestBody ctx body'
+    in (body'', M.union
+                (findLoopCorrespondingVar ctx loopstm)
+                loop_corresponding_var)
   _ -> (body, M.empty)
 
 lookInRes :: LoreConstraints lore =>
@@ -376,7 +375,7 @@ specialBodyIndicesBase _ = Nothing
 -- Use first use analysis and last use analysis to find any exceptions to the
 -- naive interference recorded for a statement.
 interferenceExceptions :: LoreConstraints lore =>
-                          Context -> [Stm lore] -> [SubExp] -> [MName] ->
+                          Context -> Stms lore -> [SubExp] -> [MName] ->
                           Maybe [(MName, ExpMem.IxFun, PrimType)] -> [(MName, MName)]
 interferenceExceptions ctx stms res indices output_mems_may =
   let output_vars = mapMaybe fromVar res
@@ -384,7 +383,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
       stms_first_uses = map (\(mem, _, _, _) -> mem)
                         $ concatMap (firstUsesInStm (ctxFirstUses ctx)) stms
       results =
-        concat $ flip map stms $ \(Let (Pattern _patctxelems patvalelems) _ e) ->
+        concat $ flip map (stmsToList stms) $ \(Let (Pattern _patctxelems patvalelems) _ e) ->
         flip map patvalelems $ \(PatElem v bindage membound) ->
         let fromread = case (bindage, e) of
               (BindVar, BasicOp (Index orig slice)) -> do
@@ -458,7 +457,8 @@ interferenceExceptions ctx stms res indices output_mems_may =
                  in withDebug debug0 b
                check' (Let _ _ e) = check e
            in (\stm -> (FromStm $ patElemName $ head $ patternValueElements $ stmPattern stm,
-                        S.singleton $ memSrcName mem)) <$> L.find check' (reverse stms)) fromreads
+                        S.singleton $ memSrcName mem)) <$>
+              L.find check' (reverse $ stmsToList stms)) fromreads
 
       -- 'Just' if in kernel, 'Nothing' otherwise.
       fus_output_vars = mapFromListSetUnion $ case output_mems_may of
@@ -515,7 +515,7 @@ interferenceExceptions ctx stms res indices output_mems_may =
         putStrLn $ replicate 70 '~'
         putStrLn "interferenceExceptions:"
         unless (L.null stms)
-          $ putStrLn ("first stm: " ++ show (head stms))
+          $ putStrLn ("first stm: " ++ show (head $ stmsToList stms))
         putStrLn ("indices: " ++ show indices)
         putStrLn ("output vars: " ++ show output_vars)
         putStrLn ("mem ins': " ++ prettySet mem_ins)

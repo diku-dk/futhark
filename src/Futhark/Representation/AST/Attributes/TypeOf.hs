@@ -40,6 +40,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
 
 import Data.Maybe
 import Data.Monoid
+import Data.Foldable
 import qualified Data.Set as S
 
 import Futhark.Representation.AST.Syntax
@@ -162,12 +163,12 @@ instance Annotations lore => HasScope lore (FeelBad lore) where
 -- degenerate case where the body does not already return its context.
 bodyExtType :: (HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
-bodyExtType (Body _ bnds res) =
+bodyExtType (Body _ stms res) =
   existentialiseExtTypes bound . staticShapes <$>
   extendedScope (traverse subExpType res) bndscope
-  where bndscope = scopeOf bnds
-        boundInLet (Let pat _ _) = patternNames pat
-        bound = concatMap boundInLet bnds
+  where bndscope = scopeOf stms
+        boundInLet (Let pat _ _) = S.fromList $ patternNames pat
+        bound = S.toList $ fold $ fmap boundInLet stms
 
 -- | Given an the return type of a function and the values returned by
 -- that function, return the size context.

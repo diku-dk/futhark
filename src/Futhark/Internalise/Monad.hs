@@ -127,12 +127,9 @@ instance MonadBinder InternaliseM where
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
-  addStm =
-    InternaliseM . addStm
-  collectStms (InternaliseM m) =
-    InternaliseM $ collectStms m
-  certifying cs (InternaliseM m) =
-    InternaliseM $ certifying cs m
+  addStms = InternaliseM . addStms
+  collectStms (InternaliseM m) = InternaliseM $ collectStms m
+  certifying cs (InternaliseM m) = InternaliseM $ certifying cs m
 
 runInternaliseM :: MonadFreshNames m =>
                    InternaliseM ()

@@ -37,10 +37,8 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import qualified Data.Set as S
 import Data.Hashable
-import Data.Maybe
 import Data.Monoid
-
-import Prelude
+import Data.Foldable
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
@@ -154,7 +152,7 @@ addRangesToPattern :: (Attributes lore, CanBeRanged (Op lore)) =>
 addRangesToPattern pat e =
   uncurry Pattern $ mkPatternRanges pat e
 
-mkRangedBody :: BodyAttr lore -> [Stm (Ranges lore)] -> Result
+mkRangedBody :: BodyAttr lore -> Stms (Ranges lore) -> Result
              -> Body (Ranges lore)
 mkRangedBody innerlore bnds res =
   Body (mkBodyRanges bnds res, innerlore) bnds res
@@ -174,10 +172,10 @@ mkPatternRanges pat e =
           in patElem `setPatElemLore` (range', innerlore)
         ranges = expRanges e
 
-mkBodyRanges :: [Stm lore] -> Result -> [Range]
+mkBodyRanges :: Stms lore -> Result -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
   where boundInBnds =
-          mconcat $ map (S.fromList . patternNames . stmPattern) bnds
+          fold $ fmap (S.fromList . patternNames . stmPattern) bnds
         removeUnknownBounds (lower,upper) =
           (removeUnknownBound lower,
            removeUnknownBound upper)

@@ -92,9 +92,9 @@ optimiseFunDef fundec =
 
 optimiseBody :: Body (Aliases Kernels) -> ForwardingM (Body (Aliases Kernels))
 optimiseBody (Body als bnds res) = do
-  bnds' <- deepen $ optimiseStms bnds $
+  bnds' <- deepen $ optimiseStms (stmsToList bnds) $
     mapM_ seen res
-  return $ Body als bnds' res
+  return $ Body als (stmsFromList bnds') res
   where seen Constant{} = return ()
         seen (Var v)    = seenVar v
 

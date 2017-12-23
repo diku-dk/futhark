@@ -104,8 +104,8 @@ type LoreConstraints lore inner =
 optimiseBody :: LoreConstraints lore inner =>
                 Body lore -> DoubleBufferM lore (Body lore)
 optimiseBody body = do
-  bnds' <- optimiseStms $ bodyStms body
-  return $ body { bodyStms = bnds' }
+  bnds' <- optimiseStms $ stmsToList $ bodyStms body
+  return $ body { bodyStms = stmsFromList bnds' }
 
 optimiseStms :: LoreConstraints lore inner =>
                 [Stm lore] -> DoubleBufferM lore [Stm lore]
@@ -136,8 +136,8 @@ optimiseOp op = do f <- asks envOptimiseOp
 optimiseKernelBody :: KernelBody InKernel
                    -> DoubleBufferM InKernel (KernelBody InKernel)
 optimiseKernelBody kbody = do
-  stms' <- optimiseStms $ kernelBodyStms kbody
-  return $ kbody { kernelBodyStms = stms' }
+  stms' <- optimiseStms $ stmsToList $ kernelBodyStms kbody
+  return $ kbody { kernelBodyStms = stmsFromList stms' }
 
 optimiseLambda :: Lambda InKernel -> DoubleBufferM InKernel (Lambda InKernel)
 optimiseLambda lam = do
@@ -261,7 +261,7 @@ doubleBufferResult valparams buffered (Body () bnds res) =
   let (ctx_res, val_res) = splitAt (length res - length valparams) res
       (copybnds,val_res') =
         unzip $ zipWith3 buffer valparams buffered val_res
-  in Body () (bnds++catMaybes copybnds) $ ctx_res ++ val_res'
+  in Body () (bnds<>stmsFromList (catMaybes copybnds)) $ ctx_res ++ val_res'
   where buffer _ (BufferAlloc bufname _ _ _) _ =
           (Nothing, Var bufname)
 

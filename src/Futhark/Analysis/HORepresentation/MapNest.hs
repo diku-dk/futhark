@@ -79,8 +79,9 @@ fromSOAC' :: (Bindable lore, MonadFreshNames m,
           -> m (Maybe (MapNest lore))
 
 fromSOAC' bound (SOAC.Map w lam inps) = do
-  maybenest <- case lambdaBody lam of
-    Body _ [Let pat _ e] res | res == map Var (patternNames pat) ->
+  maybenest <- case (stmsToList $ bodyStms $ lambdaBody lam,
+                     bodyResult $ lambdaBody lam) of
+    ([Let pat _ e], res) | res == map Var (patternNames pat) ->
       either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound') =<< SOAC.fromExp e
     _ ->
       return $ Right Nothing
@@ -137,7 +138,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw:ns) inps) = do
     toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
   bnd <- mkLetNames' nres e
   let outerlam = Lambda { lambdaParams = nparams
-                        , lambdaBody = mkBody (bnds++[bnd]) $ map Var nres
+                        , lambdaBody = mkBody (bnds<>oneStm bnd) $ map Var nres
                         , lambdaReturnType = nrettype
                         }
   return $ SOAC.Map w outerlam inps

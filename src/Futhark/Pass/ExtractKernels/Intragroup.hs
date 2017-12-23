@@ -32,7 +32,7 @@ import Futhark.Pass.ExtractKernels.BlockedKernel
 intraGroupParallelise :: (MonadFreshNames m, HasScope Out.Kernels m) =>
                          KernelNest -> Body
                       -> m (Maybe (SubExp, SubExp,
-                                   [Out.Stm Out.Kernels], [Out.Stm Out.Kernels]))
+                                   Out.Stms Out.Kernels, Out.Stms Out.Kernels))
 intraGroupParallelise knest body = runMaybeT $ do
   (w_stms, w, ispace, inps, rts) <- lift $ flatKernel knest
   let num_groups = w
@@ -61,7 +61,7 @@ intraGroupParallelise knest body = runMaybeT $ do
     let inputIsUsed input = kernelInputName input `S.member` freeInBody body
         used_inps = filter inputIsUsed inps
 
-    mapM_ addStm w_stms
+    addStms w_stms
 
     num_threads <- letSubExp "num_threads" $
                    BasicOp $ BinOp (Mul Int32) num_groups group_size
@@ -74,7 +74,7 @@ intraGroupParallelise knest body = runMaybeT $ do
 
     return (intra_avail_par, kspace, read_input_stms)
 
-  let kbody' = kbody { kernelBodyStms = read_input_stms ++ kernelBodyStms kbody }
+  let kbody' = kbody { kernelBodyStms = stmsFromList read_input_stms <> kernelBodyStms kbody }
 
   -- The kernel itself is producing a "flat" result of shape
   -- [num_groups].  We must explicitly reshape it to match the shapes
@@ -96,7 +96,7 @@ intraGroupParallelise knest body = runMaybeT $ do
                                         (patternElements flat_pat)
 
   return (intra_avail_par, spaceGroupSize kspace,
-          prelude_stms, kstm : reshape_stms)
+          prelude_stms, oneStm kstm <> stmsFromList reshape_stms)
   where first_nest = fst knest
         cs = loopNestingCertificates first_nest
 
@@ -108,7 +108,7 @@ data Env = Env { _localTID :: VName
 type IntraGroupM = BinderT Out.InKernel (RWS Env (S.Set [SubExp]) VNameSource)
 
 runIntraGroupM :: (MonadFreshNames m, HasScope Out.Kernels m) =>
-                  Env -> IntraGroupM () -> m ([[SubExp]], [Out.Stm Out.InKernel])
+                  Env -> IntraGroupM () -> m ([[SubExp]], Out.Stms Out.InKernel)
 runIntraGroupM env m = do
   scope <- castScope <$> askScope
   modifyNameSource $ \src ->

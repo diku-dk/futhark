@@ -125,12 +125,9 @@ instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) 
 
   mkBodyM bnds res = return $ Body () bnds res
 
-  addStm binding =
-    AllocM $ addBinderStm binding
-  collectStms (AllocM m) =
-    AllocM $ collectBinderStms m
-  certifying cs (AllocM m) =
-    AllocM $ certifyingBinder cs m
+  addStms binding = AllocM $ addBinderStms binding
+  collectStms (AllocM m) = AllocM $ collectBinderStms m
+  certifying cs (AllocM m) = AllocM $ certifyingBinder cs m
 
 instance Allocable fromlore OutInKernel =>
          Allocator ExplicitMemory (AllocM fromlore ExplicitMemory) where
@@ -640,17 +637,17 @@ allocInFunBody num_vals (Body _ bnds res) =
                     return v'
 
 allocInStms :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
-               [Stm fromlore] -> ([Stm tolore] -> AllocM fromlore tolore a)
+               Stms fromlore -> (Stms tolore -> AllocM fromlore tolore a)
             -> AllocM fromlore tolore a
-allocInStms origbnds m = allocInStms' origbnds []
+allocInStms origbnds m = allocInStms' (stmsToList origbnds) mempty
   where allocInStms' [] bnds' =
           m bnds'
         allocInStms' (x:xs) bnds' = do
           allocbnds <- allocInStm' x
           let summaries = scopeOf allocbnds
           localScope summaries $
-            local (boundDims $ mconcat $ map sizeSubst allocbnds) $
-            allocInStms' xs (bnds'++allocbnds)
+            local (boundDims $ mconcat $ map sizeSubst $ stmsToList allocbnds) $
+            allocInStms' xs (bnds'<>allocbnds)
         allocInStm' bnd = do
           ((),bnds') <- collectStms $ certifying (stmCerts bnd) $ allocInStm bnd
           return bnds'
@@ -843,7 +840,7 @@ allocInGroupStreamLambda maxchunk lam acc_summaries arr_summaries = do
            body' <- allocInBodyNoDirect body
            insertStmsM $ do
              -- We copy the result of the body to whereever the accumulators are stored.
-             mapM_ addStm (bodyStms body')
+             addStms (bodyStms body')
              let maybeCopyResult r p =
                    case paramAttr p of
                      MemArray _ _ _ (ArrayIn mem ixfun) ->

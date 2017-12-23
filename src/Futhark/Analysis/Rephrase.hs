@@ -17,10 +17,6 @@ module Futhark.Analysis.Rephrase
        )
 where
 
-import Control.Applicative
-
-import Prelude
-
 import Futhark.Representation.AST
 
 data Rephraser m from to
@@ -76,7 +72,7 @@ rephraseBody :: Monad m => Rephraser m from to -> Body from -> m (Body to)
 rephraseBody rephraser (Body lore bnds res) =
   Body <$>
   rephraseBodyLore rephraser lore <*>
-  mapM (rephraseStm rephraser) bnds <*>
+  (stmsFromList <$> mapM (rephraseStm rephraser) (stmsToList bnds)) <*>
   pure res
 
 rephraseLambda :: Monad m => Rephraser m from to -> Lambda from -> m (Lambda to)

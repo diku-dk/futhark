@@ -46,7 +46,7 @@ class (Attributes lore,
       Bindable lore where
   mkExpPat :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Pattern lore
   mkExpAttr :: Pattern lore -> Exp lore -> ExpAttr lore
-  mkBody :: [Stm lore] -> Result -> Body lore
+  mkBody :: Stms lore -> Result -> Body lore
   mkLetNames :: (MonadFreshNames m, HasScope lore m) =>
                 [(VName, Bindage)] -> Exp lore -> m (Stm lore)
 
@@ -65,10 +65,12 @@ class (Attributes (Lore m),
       MonadBinder m where
   type Lore m :: *
   mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
-  mkBodyM :: [Stm (Lore m)] -> Result -> m (Body (Lore m))
+  mkBodyM :: Stms (Lore m) -> Result -> m (Body (Lore m))
   mkLetNamesM :: [(VName, Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
   addStm      :: Stm (Lore m) -> m ()
-  collectStms :: m a -> m (a, [Stm (Lore m)])
+  addStm      = addStms . oneStm
+  addStms     :: Stms (Lore m) -> m ()
+  collectStms :: m a -> m (a, Stms (Lore m))
   certifying :: Certificates -> m a -> m a
 
 mkLetM :: MonadBinder m => Pattern (Lore m) -> Exp (Lore m) -> m (Stm (Lore m))
@@ -126,19 +128,18 @@ letBindNames'_ :: MonadBinder m =>
                   [VName] -> Exp (Lore m) -> m ()
 letBindNames'_ names e = void $ letBindNames' names e
 
-collectStms_ :: MonadBinder m => m a -> m [Stm (Lore m)]
+collectStms_ :: MonadBinder m => m a -> m (Stms (Lore m))
 collectStms_ = fmap snd . collectStms
 
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
 bodyBind (Body _ bnds es) = do
-  mapM_ addStm bnds
+  addStms bnds
   return es
 
 -- | Add several bindings at the outermost level of a 'Body'.
-insertStms :: Bindable lore => [Stm lore] -> Body lore -> Body lore
-insertStms bnds1 (Body _ bnds2 res) =
-  mkBody (bnds1++bnds2) res
+insertStms :: Bindable lore => Stms lore -> Body lore -> Body lore
+insertStms bnds1 (Body _ bnds2 res) = mkBody (bnds1<>bnds2) res
 
 -- | Add a single binding at the outermost level of a 'Body'.
 insertStm :: Bindable lore => Stm lore -> Body lore -> Body lore
-insertStm bnd = insertStms [bnd]
+insertStm = insertStms . oneStm

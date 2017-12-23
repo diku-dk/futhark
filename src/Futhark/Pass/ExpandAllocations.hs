@@ -38,18 +38,18 @@ type ExpandM = State VNameSource
 
 transformBody :: Body ExplicitMemory -> ExpandM (Body ExplicitMemory)
 transformBody (Body () bnds res) = do
-  bnds' <- concat <$> mapM transformStm bnds
+  bnds' <- mconcat <$> mapM transformStm (stmsToList bnds)
   return $ Body () bnds' res
 
-transformStm :: Stm ExplicitMemory -> ExpandM [Stm ExplicitMemory]
+transformStm :: Stm ExplicitMemory -> ExpandM (Stms ExplicitMemory)
 
 transformStm (Let pat aux e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
-  return $ bnds ++ [Let pat aux e']
+  return $ bnds <> oneStm (Let pat aux e')
   where transform = identityMapper { mapOnBody = const transformBody
                                    }
 
-transformExp :: Exp ExplicitMemory -> ExpandM ([Stm ExplicitMemory], Exp ExplicitMemory)
+transformExp :: Exp ExplicitMemory -> ExpandM (Stms ExplicitMemory, Exp ExplicitMemory)
 
 transformExp (Op (Inner (Kernel desc space ts kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
@@ -65,7 +65,7 @@ transformExp (Op (Inner (Kernel desc space ts kbody)))
         (spaceGlobalId space, spaceGroupId space, spaceLocalId space) thread_allocs
       let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
 
-      return (num_threads64_bnd : alloc_bnds,
+      return (oneStm num_threads64_bnd <> alloc_bnds,
               Op $ Inner $ Kernel desc space ts kbody'')
 
   where bound_in_kernel =
@@ -73,7 +73,7 @@ transformExp (Op (Inner (Kernel desc space ts kbody)))
           scopeOf (kernelBodyStms kbody)
 
 transformExp e =
-  return ([], e)
+  return (mempty, e)
 
 -- | Extract allocations from 'Thread' statements with
 -- 'extractThreadAllocations'.
@@ -81,17 +81,17 @@ extractKernelBodyAllocations :: Names -> KernelBody InKernel
                              -> Either String (KernelBody InKernel,
                                                M.Map VName (SubExp, Space))
 extractKernelBodyAllocations bound_before_body kbody = do
-  (allocs, stms) <- mapAccumLM extract M.empty $ kernelBodyStms kbody
-  return (kbody { kernelBodyStms = concat stms }, allocs)
+  (allocs, stms) <- mapAccumLM extract M.empty $ stmsToList $ kernelBodyStms kbody
+  return (kbody { kernelBodyStms = mconcat stms }, allocs)
   where extract allocs bnd = do
-          (bnds, body_allocs) <- extractThreadAllocations bound_before_body [bnd]
+          (bnds, body_allocs) <- extractThreadAllocations bound_before_body $ oneStm bnd
           return (allocs <> body_allocs, bnds)
 
-extractThreadAllocations :: Names -> [Stm InKernel]
-                         -> Either String ([Stm InKernel], M.Map VName (SubExp, Space))
+extractThreadAllocations :: Names -> Stms InKernel
+                         -> Either String (Stms InKernel, M.Map VName (SubExp, Space))
 extractThreadAllocations bound_before_body bnds = do
-  (allocs, bnds') <- mapAccumLM isAlloc M.empty bnds
-  return (catMaybes bnds', allocs)
+  (allocs, bnds') <- mapAccumLM isAlloc M.empty $ stmsToList bnds
+  return (stmsFromList $ catMaybes bnds', allocs)
   where bound_here = bound_before_body `S.union` boundByStms bnds
 
         isAlloc _ (Let (Pattern [] [patElem]) _ (Op (Alloc (Var v) _)))
@@ -110,7 +110,7 @@ extractThreadAllocations bound_before_body bnds = do
 expandedAllocations :: (SubExp,SubExp, SubExp)
                     -> (VName, VName, VName)
                     -> M.Map VName (SubExp, Space)
-                    -> ExpandM ([Stm ExplicitMemory], RebaseMap)
+                    -> ExpandM (Stms ExplicitMemory, RebaseMap)
 expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, group_id, local_id) thread_allocs = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
@@ -123,11 +123,12 @@ expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, grou
                   , indexVariable = (group_id, local_id)
                   , kernelWidth = (num_groups, group_size)
                   }
-  return (concat alloc_bnds, alloc_offsets)
+  return (mconcat alloc_bnds, alloc_offsets)
   where expand (mem, (per_thread_size, Space "local")) = do
           let allocpat = Pattern [] [PatElem mem BindVar $
                                      MemMem per_thread_size $ Space "local"]
-          return ([Let allocpat (defAux ()) $ Op $ Alloc per_thread_size $ Space "local"],
+          return (oneStm $ Let allocpat (defAux ()) $
+                   Op $ Alloc per_thread_size $ Space "local",
                   mempty)
 
         expand (mem, (per_thread_size, space)) = do
@@ -135,11 +136,12 @@ expandedAllocations (num_threads64, num_groups, group_size) (_thread_index, grou
           let sizepat = Pattern [] [PatElem total_size BindVar $ MemPrim int64]
               allocpat = Pattern [] [PatElem mem BindVar $
                                      MemMem (Var total_size) space]
-          return ([Let sizepat (defAux ()) $
+          return (stmsFromList
+                  [Let sizepat (defAux ()) $
                     BasicOp $ BinOp (Mul Int64) num_threads64 per_thread_size,
                    Let allocpat (defAux ()) $
                     Op $ Alloc (Var total_size) space],
-                   M.singleton mem newBase)
+                  M.singleton mem newBase)
 
         newBase old_shape =
           let num_dims = length old_shape
@@ -167,12 +169,13 @@ lookupNewBase name dims = fmap ($dims) . M.lookup name . rebaseMap
 offsetMemoryInKernelBody :: RebaseMap -> KernelBody InKernel
                          -> KernelBody InKernel
 offsetMemoryInKernelBody initial_offsets kbody =
-  kbody { kernelBodyStms = stms' }
-  where stms' = snd $ mapAccumL offsetMemoryInStm initial_offsets $ kernelBodyStms kbody
+  kbody { kernelBodyStms = stmsFromList stms' }
+  where stms' = snd $ mapAccumL offsetMemoryInStm initial_offsets $
+                stmsToList $ kernelBodyStms kbody
 
 offsetMemoryInBody :: RebaseMap -> Body InKernel -> Body InKernel
 offsetMemoryInBody offsets (Body attr bnds res) =
-  Body attr (snd $ mapAccumL offsetMemoryInStm offsets bnds) res
+  Body attr (stmsFromList $ snd $ mapAccumL offsetMemoryInStm offsets $ stmsToList bnds) res
 
 offsetMemoryInStm :: RebaseMap -> Stm InKernel
                       -> (RebaseMap, Stm InKernel)

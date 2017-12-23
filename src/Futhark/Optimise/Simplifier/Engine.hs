@@ -27,9 +27,6 @@ module Futhark.Optimise.Simplifier.Engine
        , SimplifyOp
        , bindableSimpleOps
 
-       , addStmEngine
-       , collectStmsEngine
-       , collectCerts
        , Env (envHoistBlockers, envRules)
        , emptyEnv
        , HoistBlockers(..)
@@ -105,16 +102,14 @@ import Control.Monad.RWS.Strict
 import Futhark.Optimise.Simplifier.Lore
 import qualified Futhark.Analysis.ScalExp as SE
 
-type NeedSet lore = [Stm lore]
-
-data Need lore = Need { needStms :: NeedSet lore
+data Need lore = Need { needStms :: Stms lore
                       , usageTable  :: UT.UsageTable
                       , needCerts :: !Certificates
                       }
 
 instance Monoid (Need lore) where
   Need b1 f1 c1 `mappend` Need b2 f2 c2 = Need (b1 <> b2) (f1 <> f2) (c1 <> c2)
-  mempty = Need [] UT.empty mempty
+  mempty = Need mempty UT.empty mempty
 
 data HoistBlockers lore = HoistBlockers
                           { blockHoistPar :: BlockPred (Wise lore)
@@ -155,7 +150,7 @@ data SimpleOps lore =
                          -> Pattern (Wise lore) -> Exp (Wise lore)
                          -> SimpleM lore (ExpAttr (Wise lore))
             , mkBodyS :: ST.SymbolTable (Wise lore)
-                      -> [Stm (Wise lore)] -> Result
+                      -> Stms (Wise lore) -> Result
                       -> SimpleM lore (Body (Wise lore))
             , mkLetNamesS :: ST.SymbolTable (Wise lore)
                           -> [(VName,Bindage)] -> Exp (Wise lore)
@@ -216,7 +211,7 @@ instance SimplifiableLore lore => MonadBinder (SimpleM lore) where
     simpl <- fst <$> ask
     mkLetNamesS simpl vtable names e
 
-  addStm      = addStmEngine
+  addStms     = addStmsEngine
   collectStms = collectStmsEngine
   certifying cs =
     censor (\need -> need { needStms = fmap (certify cs) (needStms need) })
@@ -241,7 +236,7 @@ subSimpleM :: (SimplifiableLore lore,
            -> Env lore
            -> ST.SymbolTable (Wise outerlore)
            -> SimpleM lore a
-           -> m (a, Bool, [Stm (Wise lore)])
+           -> m (a, Bool, Stms (Wise lore))
 subSimpleM simpl env outer_vtable m = do
   let inner_vtable = ST.castSymbolTable outer_vtable
   src <- getNameSource
@@ -263,15 +258,16 @@ putEngineState x = modify $ \(_, y) -> (x,y)
 passNeed :: SimpleM lore (a, Need (Wise lore) -> Need (Wise lore)) -> SimpleM lore a
 passNeed = pass
 
-addStmEngine :: SimplifiableLore lore => Stm (Wise lore) -> SimpleM lore ()
-addStmEngine bnd = do
-  modifyVtable $ ST.insertStm bnd
-  case stmExp bnd of
-    BasicOp (Assert se _ _) -> asserted se
-    _                       -> return ()
-  needStm bnd
+addStmsEngine :: SimplifiableLore lore => Stms (Wise lore) -> SimpleM lore ()
+addStmsEngine stms = do
+  modifyVtable $ \vtable -> foldl (flip ST.insertStm) vtable $ stmsToList stms
+  forM_ (stmsToList stms) $ \stm ->
+    case stmExp stm of
+      BasicOp (Assert se _ _) -> asserted se
+      _                       -> return ()
+  tellNeed mempty { needStms = stms }
 
-collectStmsEngine :: SimpleM lore a -> SimpleM lore (a, [Stm (Wise lore)])
+collectStmsEngine :: SimpleM lore a -> SimpleM lore (a, Stms (Wise lore))
 collectStmsEngine m = passNeed $ do
   (x, need) <- listenNeed m
   return ((x, needStms need),
@@ -297,10 +293,6 @@ modifyEngineState f = do x <- getEngineState
 -- to re-run the simplifier.
 changed :: SimpleM lore ()
 changed = modifyEngineState $ \s -> s { stateChanged = True }
-
-
-needStm :: Stm (Wise lore) -> SimpleM lore ()
-needStm bnd = tellNeed mempty { needStms = [bnd] }
 
 usedCerts :: Certificates -> SimpleM lore ()
 usedCerts cs = tellNeed mempty { needCerts = cs }
@@ -417,7 +409,7 @@ protectLoopHoisted ctx val form m = do
   if any (not . safeExp . stmExp) stms
     then do is_nonempty <- checkIfNonEmpty
             mapM_ (protectUnsafe is_nonempty) stms
-    else mapM_ addStm stms
+    else addStms stms
   return x
   where checkIfNonEmpty =
           case form of
@@ -462,15 +454,15 @@ notWorthHoisting _ (Let pat _ e) =
 hoistStms :: SimplifiableLore lore =>
              RuleBook (SimpleM lore) -> BlockPred (Wise lore)
           -> ST.SymbolTable (Wise lore) -> UT.UsageTable
-          -> [Stm (Wise lore)]
-          -> SimpleM lore ([Stm (Wise lore)],
-                            [Stm (Wise lore)],
-                            UT.UsageTable)
+          -> Stms (Wise lore)
+          -> SimpleM lore (Stms (Wise lore),
+                           Stms (Wise lore),
+                           UT.UsageTable)
 hoistStms rules block vtable uses needs = do
-  (uses', blocked, hoisted) <- simplifyStms vtable uses needs
+  (uses', blocked, hoisted) <- simplifyStms vtable uses $ stmsToList needs
   unless (null hoisted) changed
-  mapM_ addStm blocked
-  return (blocked, hoisted, uses')
+  addStms $ stmsFromList blocked
+  return (stmsFromList blocked, stmsFromList hoisted, uses')
   where simplifyStms vtable' uses' bnds = do
           (uses'', bnds') <- simplifyStms' vtable' uses' bnds
           -- We need to do a final pass to ensure that nothing is
@@ -497,7 +489,7 @@ hoistStms rules block vtable uses needs = do
                   return (expandUsage uses' bnd, Right bnd : bnds)
               Just optimbnds -> do
                 changed
-                (uses'',bnds') <- simplifyStms' vtable' uses' optimbnds
+                (uses'',bnds') <- simplifyStms' vtable' uses' $ stmsToList optimbnds
                 return (uses'', bnds'++bnds)
 
 blockUnhoistedDeps :: Attributes lore =>
@@ -552,7 +544,7 @@ isOp _ _ = False
 
 blockIf :: SimplifiableLore lore =>
            BlockPred (Wise lore)
-        -> SimpleM lore a -> SimpleM lore (a, [Stm (Wise lore)])
+        -> SimpleM lore a -> SimpleM lore (a, Stms (Wise lore))
 blockIf block m = passNeed $ do
   (x, needs) <- listenNeed m
   vtable <- getVtable
@@ -609,7 +601,8 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
   let needs1_bnds = needStms needs1
       needs2_bnds = needStms needs2
-      hoistbl_nms = filterBnds is_alloc_fun getArrSz_fun (needs1_bnds++needs2_bnds)
+      hoistbl_nms = filterBnds is_alloc_fun getArrSz_fun $
+                    stmsToList $ needs1_bnds<>needs2_bnds
       -- "isNotHoistableBnd hoistbl_nms" ensures that only the (transitive closure)
       -- of the bindings used for allocations and shape computations are if-hoistable.
       block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound `orIf`

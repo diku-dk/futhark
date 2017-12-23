@@ -8,12 +8,8 @@ module Futhark.Optimise.DeadVarElim
        )
   where
 
-import Control.Applicative
 import Control.Monad.Writer
-
 import qualified Data.Set as S
-
-import Prelude
 
 import Futhark.Representation.AST
 
@@ -88,22 +84,20 @@ deadCodeElimSubExp (Constant v) = return $ Constant v
 
 deadCodeElimBodyM :: Attributes lore => Body lore -> DCElimM (Body lore)
 
-deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
-  let idds = patternNames pat
-  seen $ freeIn explore
-  (Body _ bnds' res', noref) <-
-    collectRes idds $ do
-      deadCodeElimPat pat
-      deadCodeElimBodyM $ Body bodylore bnds res
-  if noref
-  then changed $ return $ Body bodylore bnds' res'
-  else do e' <- deadCodeElimExp e
-          return $ Body bodylore
-                   (Let pat explore e':bnds') res'
-
-deadCodeElimBodyM (Body bodylore [] es) = do
+deadCodeElimBodyM (Body bodylore stms res) = do
   seen $ freeIn bodylore
-  Body bodylore [] <$> mapM deadCodeElimSubExp es
+  stms' <- descend $ stmsToList stms
+  return $ Body bodylore (stmsFromList stms') res
+  where descend (Let pat explore e:bnds) = do
+          let idds = patternNames pat
+          seen $ freeIn explore
+          (bnds', noref) <- collectRes idds $ do deadCodeElimPat pat
+                                                 descend bnds
+          if noref
+          then changed $ return bnds'
+          else do e' <- deadCodeElimExp e
+                  return $ Let pat explore e':bnds'
+        descend [] = seen (freeIn res) >> return []
 
 deadCodeElimExp :: Attributes lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp = mapExpM mapper

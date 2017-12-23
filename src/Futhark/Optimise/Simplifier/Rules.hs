@@ -301,7 +301,7 @@ simplifyLoopVariables vtable (Let pat _
       if maybe_loop_vars == map Just loop_vars
         then cannotSimplify
         else do body' <- insertStmsM $ do
-                  mapM_ addStm $ concat body_prefix_stms
+                  addStms $ mconcat body_prefix_stms
                   resultBodyM =<< bodyBind body
                 letBind_ pat $ DoLoop ctx val
                   (ForLoop i it num_iters $ catMaybes maybe_loop_vars) body'
@@ -330,7 +330,7 @@ simplifyLoopVariables vtable (Let pat _
               | all (not . (i `S.member`) . freeInStm) x_stms,
                 DimFix (Var j) : slice' <- slice,
                 j == i, not $ i `S.member` freeIn slice -> do
-                  mapM_ addStm x_stms
+                  addStms x_stms
                   w <- arraySize 0 <$> lookupType arr'
                   for_in_partial <-
                     certifying cs $ letExp "for_in_partial" $ BasicOp $ Index arr' $
@@ -340,7 +340,7 @@ simplifyLoopVariables vtable (Let pat _
             SubExpResult cs se
               | all (safeExp . stmExp) x_stms -> do
                   x_stms' <- collectStms_ $ certifying cs $ do
-                    mapM_ addStm x_stms
+                    addStms x_stms
                     letBindNames'_ [paramName p] $ BasicOp $ SubExp se
                   return (Nothing, x_stms')
 
@@ -957,7 +957,7 @@ evaluateBranch _ (Let pat _ (If e1 tb fb (IfAttr t ifsort)))
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = do
   let ses = bodyResult branch
-  mapM_ addStm $ bodyStms branch
+  addStms $ bodyStms branch
   ctx <- subExpShapeContext (bodyTypeValues t) ses
   let ses' = ctx ++ ses
   sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
@@ -975,19 +975,19 @@ simplifyBoolBranch :: MonadBinder m => TopDownRule m
 -- if c then True else v == c || v
 simplifyBoolBranch _
   (Let pat _ (If cond
-              (Body _ [] [Constant (BoolValue True)])
-              (Body _ [] [se])
+              (Body _ tstms [Constant (BoolValue True)])
+              (Body _ fstms [se])
               (IfAttr ts _)))
-  | [Prim Bool] <- bodyTypeValues ts =
+  | null tstms, null fstms, [Prim Bool] <- bodyTypeValues ts =
       letBind_ pat $ BasicOp $ BinOp LogOr cond se
 -- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb (IfAttr ts _)))
   | Body _ tstms [tres] <- tb,
     Body _ fstms [fres] <- fb,
-    all (safeExp . stmExp) $ tstms ++ fstms,
+    all (safeExp . stmExp) $ tstms <> fstms,
     all (==Prim Bool) $ bodyTypeValues ts = do
-  mapM_ addStm tstms
-  mapM_ addStm fstms
+  addStms tstms
+  addStms fstms
   e <- eBinOp LogOr (pure $ BasicOp $ BinOp LogAnd cond tres)
                     (eBinOp LogAnd (pure $ BasicOp $ UnOp Not cond)
                      (pure $ BasicOp $ SubExp fres))
@@ -999,7 +999,7 @@ simplifyFallbackBranch _ (Let pat _ (If _ tbranch _ (IfAttr _ IfFallback)))
   | null $ patternContextNames pat,
     all (safeExp . stmExp) $ bodyStms tbranch = do
       let ses = bodyResult tbranch
-      mapM_ addStm $ bodyStms tbranch
+      addStms $ bodyStms tbranch
       sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
                 | (p,se) <- zip (patternElements pat) ses]
 simplifyFallbackBranch _ _ =
@@ -1033,7 +1033,7 @@ hoistBranchInvariant _ (Let pat _ (If cond tb fb (IfAttr ret ifsort))) = do
      else cannotSimplify
   where num_ctx = length $ patternContextElements pat
         bound_in_branches = S.fromList $ concatMap (patternNames . stmPattern) $
-                            bodyStms tb ++ bodyStms fb
+                            bodyStms tb <> bodyStms fb
         mem_sizes = freeIn $ filter (isMem . patElemType) $ patternElements pat
         invariant Constant{} = True
         invariant (Var v) = not $ v `S.member` bound_in_branches

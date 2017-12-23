@@ -44,7 +44,7 @@ findAllocHoistees body params =
       in reverse extras ++ reverse allocs
 
   where stms :: [Stm ExplicitMemory]
-        stms = bodyStms body
+        stms = stmsToList $ bodyStms body
 
         findThemStm :: Stm ExplicitMemory -> Maybe (VName, [VName])
         findThemStm (Let (Pattern _ [PatElem xmem _ _]) _ (Op ExpMem.Alloc{})) =

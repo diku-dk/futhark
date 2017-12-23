@@ -803,8 +803,8 @@ insertAndReplace replaces0 fundef =
   where transformBody :: Body ExplicitMemory ->
                          State (M.Map VName Replacement) (Body ExplicitMemory)
         transformBody body = do
-          stms' <- concat <$> mapM transformStm (bodyStms body)
-          return $ body { bodyStms = stms' }
+          stms' <- concat <$> mapM transformStm (stmsToList $ bodyStms body)
+          return $ body { bodyStms = stmsFromList stms' }
 
         transformStm :: Stm ExplicitMemory ->
                         State (M.Map VName Replacement) [Stm ExplicitMemory]
@@ -875,7 +875,7 @@ transformFromKernelMaxSizedMappings
           let alloc_size_fd_stm =
                 Let (Pattern [] [PatElem final_dim_max_v BindVar
                                  (ExpMem.MemPrim (IntType Int32))]) (defAux ()) final_dim_max_e
-              alloc_size_stms' = alloc_size_fd_stm : alloc_size_stms
+              alloc_size_stms' = oneStm alloc_size_fd_stm <> alloc_size_stms
 
               vars_kmem =
                 S.insert kmem_array $ lookupActualVars' actual_vars kmem_array
@@ -899,5 +899,5 @@ transformFromKernelMaxSizedMappings
                                       $ S.toList vars_xmem
               arr_to_mem_ixfun = arr_to_mem_ixfun_kmem ++ arr_to_mem_ixfun_xmem
 
-          return ((mem, Replacement alloc_size_var alloc_size_stms'),
+          return ((mem, Replacement alloc_size_var $ stmsToList alloc_size_stms'),
                   arr_to_mem_ixfun)

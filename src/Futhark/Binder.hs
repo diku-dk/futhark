@@ -17,7 +17,7 @@ module Futhark.Binder
   , runBodyBinder
   , runBinderEmptyEnv
   -- * Non-class interface
-  , addBinderStm
+  , addBinderStms
   , collectBinderStms
   , certifyingBinder
   -- * The 'MonadBinder' typeclass
@@ -25,7 +25,6 @@ module Futhark.Binder
   )
 where
 
-import qualified Data.DList as DL
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.State
@@ -44,7 +43,7 @@ class BinderOps lore where
   mkExpAttrB :: (MonadBinder m, Lore m ~ lore) =>
                 Pattern lore -> Exp lore -> m (ExpAttr lore)
   mkBodyB :: (MonadBinder m, Lore m ~ lore) =>
-             [Stm lore] -> Result -> m (Body lore)
+             Stms lore -> Result -> m (Body lore)
   mkLetNamesB :: (MonadBinder m, Lore m ~ lore) =>
                  [(VName,Bindage)] -> Exp lore -> m (Stm lore)
 
@@ -53,38 +52,30 @@ bindableMkExpAttrB :: (MonadBinder m, Bindable (Lore m)) =>
 bindableMkExpAttrB pat e = return $ mkExpAttr pat e
 
 bindableMkBodyB :: (MonadBinder m, Bindable (Lore m)) =>
-                   [Stm (Lore m)] -> Result -> m (Body (Lore m))
+                   Stms (Lore m) -> Result -> m (Body (Lore m))
 bindableMkBodyB stms res = return $ mkBody stms res
 
 bindableMkLetNamesB :: (MonadBinder m, Bindable (Lore m)) =>
                        [(VName,Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
 bindableMkLetNamesB = mkLetNames
 
-newtype BinderT lore m a = BinderT (RWST
-                                     ()
-                                     (DL.DList (Stm lore))
-                                     (Scope lore)
-                                      m
-                                    a)
+newtype BinderT lore m a = BinderT (RWST () (Stms lore) (Scope lore) m a)
   deriving (Functor, Monad, Applicative)
 
-tellStms :: Monad m => DL.DList (Stm lore) -> BinderT lore m ()
+tellStms :: Monad m => Stms lore -> BinderT lore m ()
 tellStms = BinderT . tell
 
-tellStm :: Monad m => Stm lore -> BinderT lore m ()
-tellStm = tellStms . DL.singleton
-
 listenStms :: Monad m =>
-              BinderT lore m a -> BinderT lore m (a, DL.DList (Stm lore))
+              BinderT lore m a -> BinderT lore m (a, Stms lore)
 listenStms (BinderT m) = BinderT $ listen m
 
 passStms :: Monad m =>
-            BinderT lore m (a, DL.DList (Stm lore) -> DL.DList (Stm lore))
+            BinderT lore m (a, Stms lore -> Stms lore)
          -> BinderT lore m a
 passStms (BinderT m) = BinderT $ pass m
 
 censorStms :: Monad m =>
-              (DL.DList (Stm lore) -> DL.DList (Stm lore))
+              (Stms lore -> Stms lore)
            -> BinderT lore m a
            -> BinderT lore m a
 censorStms f (BinderT m) = BinderT $ censor f m
@@ -122,7 +113,7 @@ instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
   mkBodyM = mkBodyB
   mkLetNamesM = mkLetNamesB
 
-  addStm      = addBinderStm
+  addStms     = addBinderStms
   collectStms = collectBinderStms
 
   certifying = certifyingBinder
@@ -130,16 +121,14 @@ instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
 runBinderT :: (MonadFreshNames m, BinderOps lore) =>
               BinderT lore m a
            -> Scope lore
-           -> m (a, [Stm lore])
-runBinderT (BinderT m) types = do
-  (x, bnds) <- evalRWST m () types
-  return (x, DL.toList bnds)
+           -> m (a, Stms lore)
+runBinderT (BinderT m) = evalRWST m ()
 
 runBinder :: (MonadFreshNames m,
               HasScope somelore m, SameScope somelore lore,
               BinderOps lore) =>
               Binder lore a
-           -> m (a, [Stm lore])
+           -> m (a, Stms lore)
 runBinder m = do
   types <- askScope
   modifyNameSource $ runState $ runBinderT m $ castScope types
@@ -150,7 +139,7 @@ runBinder_ :: (MonadFreshNames m,
                HasScope somelore m, SameScope somelore lore,
                BinderOps lore) =>
               Binder lore a
-           -> m [Stm lore]
+           -> m (Stms lore)
 runBinder_ = fmap snd . runBinder
 
 -- | As 'runBinder', but uses 'addStm' to add the returned
@@ -159,7 +148,7 @@ joinBinder :: (MonadBinder m, BinderOps (Lore m)) =>
               Binder (Lore m) a
            -> m a
 joinBinder m = do (x, bnds) <- runBinder m
-                  mapM_ addStm bnds
+                  addStms bnds
                   return x
 
 runBodyBinder :: (Bindable lore, BinderOps lore, MonadFreshNames m,
@@ -168,24 +157,23 @@ runBodyBinder :: (Bindable lore, BinderOps lore, MonadFreshNames m,
 runBodyBinder = fmap (uncurry $ flip insertStms) . runBinder
 
 runBinderEmptyEnv :: (MonadFreshNames m, BinderOps lore) =>
-                     Binder lore a -> m (a, [Stm lore])
+                     Binder lore a -> m (a, Stms lore)
 runBinderEmptyEnv m =
   modifyNameSource $ runState $ runBinderT m mempty
 
-addBinderStm :: Monad m =>
-                Stm lore -> BinderT lore m ()
-addBinderStm binding = do
-  tellStm binding
-  BinderT $ modify (`M.union` scopeOf binding)
+addBinderStms :: Monad m =>
+                 Stms lore -> BinderT lore m ()
+addBinderStms stms = do
+  tellStms stms
+  BinderT $ modify (`M.union` scopeOf stms)
 
 collectBinderStms :: Monad m =>
                      BinderT lore m a
-                  -> BinderT lore m (a, [Stm lore])
+                  -> BinderT lore m (a, Stms lore)
 collectBinderStms m = passStms $ do
   (x, bnds) <- listenStms m
-  let bnds' = DL.toList bnds
-  BinderT $ modify (`M.difference` scopeOf bnds')
-  return ((x, bnds'), const DL.empty)
+  BinderT $ modify (`M.difference` scopeOf bnds)
+  return ((x, bnds), const mempty)
 
 certifyingBinder :: Monad m =>
                     Certificates -> BinderT lore m a
@@ -196,8 +184,8 @@ certifyingBinder = censorStms . fmap . certify
 -- UndecidableInstances, but save on typing elsewhere.
 
 mapInner :: Monad m =>
-            (m (a, Scope lore, DL.DList (Stm lore))
-             -> m (b, M.Map VName (NameInfo lore), DL.DList (Stm lore)))
+            (m (a, Scope lore, Stms lore)
+             -> m (b, M.Map VName (NameInfo lore), Stms lore))
          -> BinderT lore m a -> BinderT lore m b
 mapInner f (BinderT m) = BinderT $ do
   r <- ask

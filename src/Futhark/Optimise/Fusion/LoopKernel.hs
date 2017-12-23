@@ -367,7 +367,7 @@ fuseSOACwithKer unfus_set outVars soac1 soac1_consumed ker = do
                       ys2  = drop leny ys
           let (body1, body2) = (lambdaBody lam1, lambdaBody lam2)
           let body' = Body { bodyAttr = bodyAttr body1 -- body1 and body2 have the same lores
-                           , bodyStms = bodyStms body1 ++ bodyStms body2
+                           , bodyStms = bodyStms body1 <> bodyStms body2
                            , bodyResult = zipW (bodyResult body1) (bodyResult body2)
                            }
           let lam' = Lambda { lambdaParams = lambdaParams lam1 ++ lambdaParams lam2
@@ -507,7 +507,7 @@ toNestedSeqStream   (SOAC.Stream w form lam arrs) = do
       instrm_inarrs = drop (1 + length nes) $ map paramName $ lambdaParams lam
       insoac   = Futhark.Stream w form inner_extlam instrm_inarrs
       lam_bind = mkLet' [] instrm_resids $ Op insoac
-      lam_body = mkBody [lam_bind] $ map (Futhark.Var . identName) instrm_resids
+      lam_body = mkBody (oneStm lam_bind) $ map (Futhark.Var . identName) instrm_resids
       lam' = lam { lambdaBody = lam_body }
   return $ SOAC.Stream w (Sequential nes) lam' arrs
 toNestedSeqStream _ = fail "In toNestedSeqStream: Input paramter not a stream"
@@ -566,8 +566,9 @@ iswim _ (SOAC.Scan w scan_fun scan_input) ots
           scan_input' = map (first Var) $
                         uncurry zip $ splitAt (length nes') $ map paramName map_params
 
-          map_body = mkBody [Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                             Op $ Futhark.Scan w scan_fun' scan_input'] $
+          map_body = mkBody (oneStm $
+                              Let (setPatternOuterDimTo w map_pat) (defAux ()) $
+                              Op $ Futhark.Scan w scan_fun' scan_input') $
                             map Var $ patternNames map_pat
 
       let perm = case lambdaReturnType map_fun of

@@ -472,7 +472,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
     (loopbody', (form', shapepat, mergepat', mergeinit', pre_stms)) <-
       handleForm mergeinit form
 
-    mapM_ addStm pre_stms
+    addStms pre_stms
 
     mergeinit_ts' <- mapM subExpType mergeinit'
 
@@ -514,7 +514,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                      shapepat,
                      mergepat',
                      mergeinit,
-                     []))
+                     mempty))
 
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
@@ -541,7 +541,7 @@ internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
                    shapepat,
                    mergepat',
                    mergeinit,
-                   []))
+                   mempty))
 
     handleForm mergeinit (E.While cond) =
       bindingParams tparams [mergepat] $ \mergecm shapepat nested_mergepat -> do
@@ -807,7 +807,7 @@ internaliseExp desc (E.Stream form lam arr _) = do
         let lam'' = lam' { extLambdaReturnType = ts
                          , extLambdaBody = body
                          }
-        return (I.Parallel o Commutative (Lambda [] (mkBody [] []) []) [], lam'')
+        return (I.Parallel o Commutative (Lambda [] (mkBody mempty []) []) [], lam'')
       E.RedLike o comm lam0 -> do
         -- Synthesize neutral elements by applying the fold function
         -- to an empty chunk.
@@ -1499,7 +1499,7 @@ boundsCheck loc w e = do
                    I.CmpOp (I.CmpSlt I.Int32) e w
   letExp "bounds_check" =<< eAssert check "index out of bounds" loc
 
-shadowIdentsInExp :: [(VName, I.SubExp)] -> [Stm] -> I.SubExp
+shadowIdentsInExp :: [(VName, I.SubExp)] -> Stms SOACS -> I.SubExp
                   -> InternaliseM I.SubExp
 shadowIdentsInExp substs bnds res = do
   body <- renameBody <=< insertStmsM $ do
@@ -1515,7 +1515,7 @@ shadowIdentsInExp substs bnds res = do
           letBindNames'_ [name] $ BasicOp $ SubExp se
           return nameSubsts
     nameSubsts <- foldM handleSubst M.empty substs
-    mapM_ addStm $ substituteNames nameSubsts bnds
+    addStms $ substituteNames nameSubsts bnds
     return $ resultBody [substituteNames nameSubsts res]
   res' <- bodyBind body
   case res' of

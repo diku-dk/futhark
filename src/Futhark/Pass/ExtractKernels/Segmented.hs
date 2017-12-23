@@ -404,19 +404,22 @@ largeKernel segment_size num_segments nest_sizes all_arrs comm
 
         -- we add the lets here, as we practially don't know if the resulting subexp
         -- is a Constant or a Var, so better be safe (?)
-        mapM_ addStm $ bodyStms (lambdaBody kern_chunk_fold_lam) ++
-              [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
-                | (pe,se) <- zip (red_pes ++ map_pes) (bodyResult $ lambdaBody kern_chunk_fold_lam) ]
+        addStms $ bodyStms (lambdaBody kern_chunk_fold_lam)
+        addStms $ stmsFromList
+          [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+          | (pe,se) <- zip (red_pes ++ map_pes)
+                       (bodyResult $ lambdaBody kern_chunk_fold_lam) ]
 
         -- Combine the reduction results from each thread. This will put results in
         -- local memory, so a GroupReduce can be performed on them
         combine_red_pes <- forM red_ts $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
-        mapM_ addStm [ Let (Pattern [] [pe']) (defAux ()) $
-                       Op $ Combine [(gtid_ln, group_size)] [patElemType pe] [] $
-                       Body () [] [Var $ patElemName pe]
-                     | (pe', pe) <- zip combine_red_pes red_pes ]
+        addStms $ stmsFromList
+          [ Let (Pattern [] [pe']) (defAux ()) $
+            Op $ Combine [(gtid_ln, group_size)] [patElemType pe] [] $
+            Body () mempty [Var $ patElemName pe]
+          | (pe', pe) <- zip combine_red_pes red_pes ]
 
         final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
           pe_name <- newVName "final_result"
@@ -508,7 +511,7 @@ calcGroupsPerSegmentAndElementsPerThread segment_size num_segments
       ManyGroupsOneSegment ->
         eIf (eCmpOp (CmpEq $ IntType Int32) (eSubExp elements_per_thread) (eSubExp one))
           (eBody [eDivRoundingUp Int32 (eSubExp segment_size) (eSubExp group_size)])
-          (mkBodyM [] [num_groups_per_segment_hint])
+          (mkBodyM mempty [num_groups_per_segment_hint])
 
   return (num_groups_per_segment, elements_per_thread)
 
@@ -617,12 +620,13 @@ smallKernel segment_size num_segments in_arrs scratch_arrs
           let pe = PatElem (paramName param) BindVar (paramType param)
           letBind_ (Pattern [] [pe]) $ BasicOp $ SubExp ne
 
-        mapM_ addStm $ bodyStms $ lambdaBody fold_lam
+        addStms $ bodyStms $ lambdaBody fold_lam
 
         -- we add the lets here, as we practially don't know if the resulting subexp
         -- is a Constant or a Var, so better be safe (?)
-        mapM_ addStm [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
-                    | (pe,se) <- zip (red_pes ++ map_pes) (bodyResult $ lambdaBody fold_lam) ]
+        addStms $ stmsFromList
+          [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
+          | (pe,se) <- zip (red_pes ++ map_pes) (bodyResult $ lambdaBody fold_lam) ]
 
         let mapoffset = offset
         let mapret_elems = map (Var . patElemName) map_pes
@@ -645,10 +649,10 @@ smallKernel segment_size num_segments in_arrs scratch_arrs
         combine_red_pes' <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "chunk_fold_red"
           return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
-        mapM_ addStm [ Let (Pattern [] [pe']) (defAux ()) $ Op $
-                       Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
-                       Body () [] [Var $ patElemName pe]
-                     | (pe', pe) <- zip combine_red_pes' red_pes_wflag ]
+        addStms $ stmsFromList [ Let (Pattern [] [pe']) (defAux ()) $ Op $
+                                 Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
+                                 Body () mempty [Var $ patElemName pe]
+                               | (pe', pe) <- zip combine_red_pes' red_pes_wflag ]
 
         scan_red_pes_wflag <- forM red_ts_wflag $ \red_t -> do
           pe_name <- newVName "scanned"
@@ -673,13 +677,13 @@ smallKernel segment_size num_segments in_arrs scratch_arrs
         redoffset <- letSubExp "redoffset" =<<
             eIf (eSubExp $ Var islastinsegment)
               (eBody [eSubExp segment_index])
-              (mkBodyM [] [negone])
+              (mkBodyM mempty [negone])
 
         redret_elems <- fmap (map Var) $ letTupExp "red_return_elem" =<<
           eIf (eSubExp $ Var islastinsegment)
             (eBody [return $ BasicOp $ Index (patElemName pe) (fullSlice (patElemType pe) [DimFix lid])
                    | pe <- scan_red_pes])
-            (mkBodyM [] nes)
+            (mkBodyM mempty nes)
 
         return (redoffset : redret_elems)
 
@@ -732,7 +736,7 @@ smallKernel segment_size num_segments in_arrs scratch_arrs
 
         e2 <- eIf (eSubExp isactive)
             (mkBodyM normal_stms2 normal_res2)
-            (mkBodyM [] (negone : nes))
+            (mkBodyM mempty (negone : nes))
         letBind_ (Pattern [] (redoffset_pe:red_pes)) e2
 
         return $ map (Var . patElemName) $ redoffset_pe:mapoffset_pe:red_pes++map_pes
@@ -865,7 +869,7 @@ regularSegmentedScan segment_size pat w lam fold_lam ispace inps nes arrs = do
       let flag = start_of_segment
       return $ resultBody [flag]
   (mapk_bnds, mapk) <- mapKernelFromBody w (FlatThreadSpace [(flags_i, w)]) [] [Prim Bool] flags_body
-  mapM_ addStm mapk_bnds
+  addStms mapk_bnds
   flags <- letExp "flags" $ Op mapk
 
   lam' <- addFlagToLambda nes lam

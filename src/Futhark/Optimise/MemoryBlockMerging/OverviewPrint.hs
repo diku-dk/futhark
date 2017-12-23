@@ -54,11 +54,11 @@ opFunDef fundef = fundef { funDefBody = opBody $ funDefBody fundef }
 
 opBody :: LoreConstraints lore =>
           Body lore -> Body lore
-opBody body = body { bodyStms = mapMaybe opStm $ bodyStms body }
+opBody body = body { bodyStms = stmsFromList $ mapMaybe opStm $ stmsToList $ bodyStms body }
 
 opKernelBody :: LoreConstraints lore =>
                 KernelBody lore -> KernelBody lore
-opKernelBody body = body { kernelBodyStms = mapMaybe opStm $ kernelBodyStms body }
+opKernelBody body = body { kernelBodyStms = stmsFromList $ mapMaybe opStm $ stmsToList $ kernelBodyStms body }
 
 opStm :: LoreConstraints lore =>
          Stm lore -> Maybe (Stm lore)
@@ -143,7 +143,7 @@ opPrettyFunDef fundef = do
   return $ pretty (funDefName fundef) ++ " =\n" ++ opIndent pbody
 
 opPrettyBody :: LoreConstraints lore => Body lore -> Reader Log String
-opPrettyBody body = opUnlines <$> mapM opPrettyStm (bodyStms body)
+opPrettyBody body = opUnlines <$> mapM opPrettyStm (stmsToList $ bodyStms body)
 
 opPrettyStm :: LoreConstraints lore => Stm lore -> Reader Log String
 opPrettyStm (Let (Pattern _ patvalelems) _ e) = do
@@ -177,8 +177,8 @@ opPrettyStm (Let (Pattern _ patvalelems) _ e) = do
 
                  line = opUnlines (expname : variable_details)
 
-                 opSubStms :: LoreConstraints lore => [Stm lore] -> Writer String ()
-                 opSubStms = tell . opIndent . opUnlines . map (\stm -> runReader (opPrettyStm stm) (Log proglog))
+                 opSubStms :: LoreConstraints lore => Stms lore -> Writer String ()
+                 opSubStms = tell . opIndent . opUnlines . map (\stm -> runReader (opPrettyStm stm) (Log proglog)) . stmsToList
                  walker = identityWalker
                    { walkOnBody = opSubStms . bodyStms }
                  walker_kernel = identityKernelWalker

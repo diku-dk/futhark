@@ -14,18 +14,14 @@ module Futhark.Interpreter
   , InterpreterError(..) )
 where
 
-import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.Except
-
 import Data.Array
 import Data.List
 import Data.Loc
 import qualified Data.Map.Strict as M
 import Data.Maybe
-
-import Prelude
 
 import Futhark.Construct (fullSliceNum)
 import Futhark.Representation.SOACS
@@ -383,17 +379,17 @@ evalDimIndex (DimSlice d n s) =
 
 evalBody :: Body -> FutharkM [Value]
 
-evalBody (Body _ [] es) =
-  mapM evalSubExp es
-
-evalBody (Body () (Let pat _ e:bnds) res) = do
-  v <- evalExp e
-  binding (zip3
-           (map patElemIdent patElems)
-           (map patElemBindage patElems)
-           v) $
-    evalBody $ Body () bnds res
-  where patElems = patternElements pat
+evalBody (Body () stms res) =
+  case stmsToList stms of
+    [] -> mapM evalSubExp res
+    Let pat _ e:bnds -> do
+      let patElems = patternElements pat
+      v <- evalExp e
+      binding (zip3
+               (map patElemIdent patElems)
+               (map patElemBindage patElems)
+               v) $
+        evalBody $ Body () (stmsFromList bnds) res
 
 evalExp :: Exp -> FutharkM [Value]
 evalExp (If e1 e2 e3 info) = do

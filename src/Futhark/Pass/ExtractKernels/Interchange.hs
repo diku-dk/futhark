@@ -71,7 +71,7 @@ interchangeLoop
 
     return $
       SeqLoop [0..patternSize pat-1] pat' merge_expanded form $
-      mkBody (pre_copy_bnds++[map_bnd]) res
+      mkBody (pre_copy_bnds<>oneStm map_bnd) res
   where free_in_body = freeInBody body
 
         copyOrRemoveParam (param, arr)
@@ -106,11 +106,11 @@ interchangeLoop
 -- statements with 'Map' expressions.
 interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                     KernelNest -> SeqLoop
-                 -> m [Stm]
+                 -> m (Stms SOACS)
 interchangeLoops nest loop = do
   (loop', bnds) <-
     runBinder $ foldM interchangeLoop loop $ reverse $ kernelNestLoops nest
-  return $ bnds ++ [seqLoopStm loop']
+  return $ bnds <> oneStm (seqLoopStm loop')
 
 data Branch = Branch [Int] Pattern SubExp Body Body (IfAttr (BranchType SOACS))
 
@@ -133,17 +133,17 @@ interchangeBranch1
           Pattern [] $ map (fmap (`arrayOfRow` w)) $ patternElements branch_pat
 
         mkBranch branch = (renameBody=<<) $ do
-          branch' <- case bodyStms branch of
-                       [] -> runBodyBinder $
-                             -- XXX: We need a temporary dummy binding to
-                             -- prevent an empty map body.  The kernel
-                             -- extractor does not like empty map bodies.
-                             resultBody <$> mapM dummyBind (bodyResult branch)
-                       _ -> return branch
+          branch' <- if null $ bodyStms branch
+                     then runBodyBinder $
+                          -- XXX: We need a temporary dummy binding to
+                          -- prevent an empty map body.  The kernel
+                          -- extractor does not like empty map bodies.
+                          resultBody <$> mapM dummyBind (bodyResult branch)
+                     else return branch
           let lam = Lambda params branch' lam_ret
               res = map Var $ patternNames branch_pat'
               map_bnd = Let branch_pat' (StmAux cs ()) $ Op $ Map w lam arrs
-          return $ mkBody [map_bnd] res
+          return $ mkBody (oneStm map_bnd) res
 
     tbranch' <- mkBranch tbranch
     fbranch' <- mkBranch fbranch
@@ -155,8 +155,8 @@ interchangeBranch1
           return $ Var dummy
 
 interchangeBranch :: (MonadFreshNames m, HasScope SOACS m) =>
-                     KernelNest -> Branch -> m [Stm]
+                     KernelNest -> Branch -> m (Stms SOACS)
 interchangeBranch nest loop = do
   (loop', bnds) <-
     runBinder $ foldM interchangeBranch1 loop $ reverse $ kernelNestLoops nest
-  return $ bnds ++ [branchStm loop']
+  return $ bnds <> oneStm (branchStm loop')

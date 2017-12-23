@@ -13,12 +13,9 @@ module Futhark.Pass.ExtractKernels.Kernelise
        )
        where
 
-import Control.Applicative
 import Control.Monad
 import Data.Monoid
 import qualified Data.Set as S
-
-import Prelude
 
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Transform.FirstOrderTransform as FOT
@@ -32,8 +29,8 @@ type Transformer m = (MonadBinder m,
                       Lore m ~ Out.InKernel,
                       LocalScope (Lore m) m)
 
-transformStms :: Transformer m => [Stm] -> m ()
-transformStms = mapM_ transformStm
+transformStms :: Transformer m => Stms SOACS -> m ()
+transformStms = mapM_ transformStm . stmsToList
 
 transformStm :: Transformer m => Stm -> m ()
 
@@ -219,7 +216,7 @@ groupStreamMapAccumL pes w fold_lam accexps arrexps = do
         return $ mkLet' [] [paramIdent p] $
           BasicOp $ Index arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
 
-  let redomap_kbody = index_bnds `insertStms` redomap_loop
+  let redomap_kbody = stmsFromList index_bnds `insertStms` redomap_loop
       acc_params = map (fmap fromDecl . fst) merge
       stream_lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size
                                          , Out.groupStreamChunkOffset = i
@@ -271,7 +268,7 @@ mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
                            map paramType params_chunked
         return $ mkLet' [] [paramIdent p] $
           BasicOp $ Index arr $ fullSlice arr_t [DimFix $ constant (0::Int32)]
-      kbody' = Out.Body () (index_stms++kstms++write_elems) $
+      kbody' = Out.Body () (stmsFromList index_stms <> kstms <> stmsFromList write_elems) $
                map (Var . paramName) outarr_params_new
 
   let stream_lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size

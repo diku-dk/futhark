@@ -48,14 +48,14 @@ transformFromVarMemMappings var_to_mem fundef =
 transformBody :: LoreConstraints lore =>
                  Body lore -> FindM lore (Body lore)
 transformBody (Body () bnds res) = do
-  bnds' <- mapM transformStm bnds
-  return $ Body () bnds' res
+  bnds' <- mapM transformStm $ stmsToList bnds
+  return $ Body () (stmsFromList bnds') res
 
 transformKernelBody :: LoreConstraints lore =>
                        KernelBody lore -> FindM lore (KernelBody lore)
 transformKernelBody (KernelBody () bnds res) = do
-  bnds' <- mapM transformStm bnds
-  return $ KernelBody () bnds' res
+  bnds' <- mapM transformStm $ stmsToList bnds
+  return $ KernelBody () (stmsFromList bnds') res
 
 transformStm :: LoreConstraints lore =>
                 Stm lore -> FindM lore (Stm lore)
