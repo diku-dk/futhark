@@ -8,15 +8,13 @@ module Futhark.Pass.KernelBabysitting
        where
 
 import Control.Arrow (first)
-import Control.Applicative
 import Control.Monad.State
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Data.Foldable
 import Data.List
 import Data.Maybe
 import Data.Monoid
-
-import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
@@ -114,10 +112,10 @@ traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                -> KernelBody InKernel
                                -> f (KernelBody InKernel)
 traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms kres) =
-  KernelBody () <$>
+  KernelBody () . stmsFromList <$>
   mapM (onStm (varianceInStms mempty kstms,
                mkSizeSubsts kstms,
-               outer_scope)) kstms <*>
+               outer_scope)) (stmsToList kstms) <*>
   pure kres
   where onLambda (variance, szsubst, scope) lam =
           (\body' -> lam { lambdaBody = body' }) <$>
@@ -129,8 +127,9 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
           onBody (variance, szsubst, scope') (groupStreamLambdaBody lam)
           where scope' = scope <> scopeOf lam
 
-        onBody (variance, szsubst, scope) (Body battr stms bres) =
-          Body battr <$> mapM (onStm (variance', szsubst', scope')) stms <*> pure bres
+        onBody (variance, szsubst, scope) (Body battr stms bres) = do
+          stms' <- stmsFromList <$> mapM (onStm (variance', szsubst', scope')) (stmsToList stms)
+          Body battr stms' <$> pure bres
           where variance' = varianceInStms variance stms
                 szsubst' = mkSizeSubsts stms <> szsubst
                 scope' = scope <> scopeOf stms
@@ -166,7 +165,7 @@ traverseKernelBodyArrayIndexes thread_variant outer_scope f (KernelBody () kstms
            GroupStream w maxchunk <$> onStreamLambda ctx lam <*> pure accs <*> pure arrs
         onOp _ stm = pure stm
 
-        mkSizeSubsts = mconcat . map mkStmSizeSubst
+        mkSizeSubsts = fold . fmap mkStmSizeSubst
           where mkStmSizeSubst (Let (Pattern [] [pe]) _ (Op (SplitSpace _ _ _ elems_per_i))) =
                   M.singleton (patElemName pe) elems_per_i
                 mkStmSizeSubst _ = mempty
@@ -381,8 +380,8 @@ paddedScanReduceInput w stride = do
 
 type VarianceTable = M.Map VName Names
 
-varianceInStms :: VarianceTable -> [Stm InKernel] -> VarianceTable
-varianceInStms = foldl varianceInStm
+varianceInStms :: VarianceTable -> Stms InKernel -> VarianceTable
+varianceInStms t = foldl varianceInStm t . stmsToList
 
 varianceInStm :: VarianceTable -> Stm InKernel -> VarianceTable
 varianceInStm variance bnd =

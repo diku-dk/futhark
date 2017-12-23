@@ -40,7 +40,7 @@ type UnstreamM = ReaderT (Scope Kernels) (State VNameSource)
 optimiseBody :: Body Kernels -> UnstreamM (Body Kernels)
 optimiseBody (Body () stms res) =
   localScope (scopeOf stms) $
-  Body () <$> (concat <$> mapM optimiseStm stms) <*> pure res
+  Body () <$> (stmsFromList . concat <$> mapM optimiseStm (stmsToList stms)) <*> pure res
 
 optimiseStm :: Stm Kernels -> UnstreamM [Stm Kernels]
 optimiseStm (Let pat aux (Op (Kernel desc space ts body))) = do
@@ -53,8 +53,8 @@ optimiseStm (Let pat aux e) =
 
 type InKernelM = Binder InKernel
 
-optimiseInKernelStms :: [Stm InKernel] -> InKernelM ()
-optimiseInKernelStms = mapM_ optimiseInKernelStm
+optimiseInKernelStms :: Stms InKernel -> InKernelM ()
+optimiseInKernelStms = mapM_ optimiseInKernelStm . stmsToList
 
 optimiseInKernelStm :: Stm InKernel -> InKernelM ()
 optimiseInKernelStm (Let pat aux (Op (GroupStream w max_chunk lam accs arrs)))

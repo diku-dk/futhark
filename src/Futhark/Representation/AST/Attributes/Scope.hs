@@ -32,16 +32,11 @@ module Futhark.Representation.AST.Attributes.Scope
        , extendedScope
        ) where
 
-import Control.Applicative
 import Control.Monad.Reader
 import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.RWS.Lazy
-import Data.List
-import Data.Maybe
-import Data.Monoid
+import Data.Foldable
 import qualified Data.Map.Strict as M
-
-import Prelude
 
 import Futhark.Representation.AST.Annotations
 import Futhark.Representation.AST.Syntax
@@ -138,9 +133,11 @@ class Scoped lore a | a -> lore where
 inScopeOf :: (Scoped lore a, LocalScope lore m) => a -> m b -> m b
 inScopeOf = localScope . scopeOf
 
-instance Scoped lore a =>
-         Scoped lore [a] where
+instance Scoped lore a => Scoped lore [a] where
   scopeOf = mconcat . map scopeOf
+
+instance Scoped lore (Stms lore) where
+  scopeOf = fold . fmap scopeOf
 
 instance Scoped lore (Stm lore) where
   scopeOf = scopeOfPattern . stmPattern

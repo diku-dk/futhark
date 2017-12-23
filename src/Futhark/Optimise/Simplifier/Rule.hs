@@ -62,7 +62,7 @@ topDownSimplifyStm :: MonadBinder m =>
                       RuleBook m
                    -> ST.SymbolTable (Lore m)
                    -> Stm (Lore m)
-                   -> m (Maybe [Stm (Lore m)])
+                   -> m (Maybe (Stms (Lore m)))
 topDownSimplifyStm = applyRules . bookTopDownRules
 
 -- | @simplifyStm uses bnd@ performs simplification of the binding
@@ -74,12 +74,12 @@ bottomUpSimplifyStm :: MonadBinder m =>
                        RuleBook m
                     -> (ST.SymbolTable (Lore m), UT.UsageTable)
                     -> Stm (Lore m)
-                    -> m (Maybe [Stm (Lore m)])
+                    -> m (Maybe (Stms (Lore m)))
 bottomUpSimplifyStm = applyRules . bookBottomUpRules
 
 applyRules :: MonadBinder m =>
               [SimplificationRule m a] -> a -> Stm (Lore m)
-           -> m (Maybe [Stm (Lore m)])
+           -> m (Maybe (Stms (Lore m)))
 applyRules []           _    _      = return Nothing
 applyRules (rule:rules) context bnd = do
   res <- simplify $ rule context bnd

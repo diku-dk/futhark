@@ -68,7 +68,7 @@ ensureResultExtShape asserting msg loc rettype body =
     reses <- zipWithM assertProperShape rettype' es
     ts <- mapM subExpType reses
     let ctx = extractShapeContext rettype $ map arrayDims ts
-    mkBodyM [] (ctx ++ reses)
+    mkBodyM mempty $ ctx ++ reses
 
 ensureExtShape :: MonadBinder m =>
                   (m Certificates -> m Certificates)

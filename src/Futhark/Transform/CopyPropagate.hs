@@ -14,7 +14,7 @@ import Futhark.Optimise.Simplifier (simplifyStmsWithRules)
 
 copyPropagateInStms :: (MonadFreshNames m, SimplifiableLore lore, HasScope lore m) =>
                        SimpleOps lore
-                    -> [Stm lore]
-                    -> m [Stm lore]
+                    -> Stms lore
+                    -> m (Stms lore)
 copyPropagateInStms simpl =
   simplifyStmsWithRules simpl mempty noExtraHoistBlockers

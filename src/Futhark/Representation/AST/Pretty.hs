@@ -132,11 +132,10 @@ instance Pretty Certificates where
   ppr (Certificates cs) = text "<" <> commasep (map ppr cs) <> text ">"
 
 instance PrettyLore lore => Pretty (Body lore) where
-  ppr (Body _ (bnd:bnds) res) =
-    stack (map ppr (bnd:bnds)) </>
-    text "in" <+> braces (commasep $ map ppr res)
-  ppr (Body _ [] res) =
-    braces (commasep $ map ppr res)
+  ppr (Body _ stms res)
+    | null stms = braces (commasep $ map ppr res)
+    | otherwise = stack (map ppr $ stmsToList stms) </>
+                  text "in" <+> braces (commasep $ map ppr res)
 
 bindingAnnotation :: PrettyLore lore => Stm lore -> Doc -> Doc
 bindingAnnotation bnd =

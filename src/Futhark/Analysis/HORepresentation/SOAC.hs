@@ -557,10 +557,10 @@ soacToStream soac = do
       strm_resids <- mapM (newIdent "res") loutps
       let insoac = Futhark.Map chvar lam' $ map paramName strm_inpids
           insbnd = mkLet' [] strm_resids $ Op insoac
-          strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
+          strmbdy= mkBody (oneStm insbnd) $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
           strmlam= Lambda strmpar strmbdy loutps
-          empty_lam = Lambda [] (mkBody [] []) []
+          empty_lam = Lambda [] (mkBody mempty []) []
       -- map(f,a) creates a stream with NO accumulators
       return (Stream w (Parallel Disorder Commutative empty_lam []) strmlam inps, [])
     -- Scan(+,nes,a) => is translated in strem's body to:
@@ -604,8 +604,8 @@ soacToStream soac = do
                               ) lastel_tmp_ids scan0_ids
           lelbnd = mkLet' [] lastel_ids $
                    If (Futhark.Var $ identName empty_arr)
-                   (mkBody [] nes)
-                   (mkBody leltmpbnds $
+                   (mkBody mempty nes)
+                   (mkBody (stmsFromList leltmpbnds) $
                     map (Futhark.Var . identName) lastel_tmp_ids) $
                    ifCommon $ map identType lastel_tmp_ids
       -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
@@ -617,7 +617,7 @@ soacToStream soac = do
                    map paramName inpacc_ids++map identName lastel_ids
       -- Finally, construct the stream
       let (addlelbnd,addlelres) = (bodyStms addlelbdy, bodyResult addlelbdy)
-          strmbdy= mkBody (insbnd:outszm1bnd:empty_arr_bnd:lelbnd:mapbnd:addlelbnd) $
+          strmbdy= mkBody (stmsFromList [insbnd,outszm1bnd,empty_arr_bnd,lelbnd,mapbnd]<>addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps)
@@ -642,7 +642,7 @@ soacToStream soac = do
                    map paramName inpacc_ids++map identName acc0_ids
       -- Construct the stream
       let (addaccbnd,addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
-          strmbdy= mkBody (insbnd : addaccbnd) addaccres
+          strmbdy= mkBody (oneStm insbnd <> addaccbnd) addaccres
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy accrtps
       lam0 <- renameLambda lam
@@ -670,7 +670,7 @@ soacToStream soac = do
                    map paramName inpacc_ids++map identName acc0_ids
       -- Construct the stream
       let (addaccbnd,addaccres) = (bodyStms addaccbdy, bodyResult addaccbdy)
-          strmbdy= mkBody (insbnd : addaccbnd) $
+          strmbdy= mkBody (oneStm insbnd <> addaccbnd) $
                           addaccres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps')
@@ -694,7 +694,7 @@ soacToStream soac = do
                                   ) accpars accs
                 plus_bdy = lambdaBody plus
                 newlambdy = Body (bodyAttr plus_bdy)
-                                 (parbnds ++ bodyStms plus_bdy)
+                                 (stmsFromList parbnds <> bodyStms plus_bdy)
                                  (bodyResult plus_bdy)
             renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
 
@@ -706,4 +706,4 @@ soacToStream soac = do
                                                          (BasicOp $ SubExp se)
                                   ) (lambdaParams plus') accels
                 body = lambdaBody plus'
-            return $ body { bodyStms = parbnds ++ bodyStms body }
+            return $ body { bodyStms = stmsFromList parbnds <> bodyStms body }

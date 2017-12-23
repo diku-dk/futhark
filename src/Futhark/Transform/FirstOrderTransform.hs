@@ -440,7 +440,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                             mkLet' [] [idd] $ BasicOp $
                             Scratch (elemType tp) (arrayDims tp)
                          ) outarrinit initrtps
-  mapM_ addStm (outinibds++allbnds)
+  addStms $ stmsFromList $ outinibds++allbnds
   forM_ (zip (patternValueNames respat) $ strmresacc ++ strmresarr) $ \(p, v) ->
     letBindNames'_ [p] $ BasicOp $ SubExp $ Var $ identName v
   let mapping = shapeMapping (patternValueTypes respat) $

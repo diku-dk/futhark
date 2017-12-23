@@ -223,7 +223,7 @@ addWisdomToPattern pat e =
         ranges = expRanges e
 
 mkWiseBody :: (Attributes lore, CanBeWise (Op lore)) =>
-              BodyAttr lore -> [Stm (Wise lore)] -> Result -> Body (Wise lore)
+              BodyAttr lore -> Stms (Wise lore) -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
   Body (BodyWisdom aliases consumed ranges (Names' $ freeInStmsAndRes bnds res),
         innerlore) bnds res
@@ -262,7 +262,7 @@ instance (Bindable lore,
       return $ mkWiseLetStm pat attr e
 
   mkBody bnds res =
-    let Body bodylore _ _ = mkBody (map removeStmWisdom bnds) res
+    let Body bodylore _ _ = mkBody (fmap removeStmWisdom bnds) res
     in mkWiseBody bodylore bnds res
 
 class (AliasedOp (OpWithWisdom op),

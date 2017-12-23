@@ -121,7 +121,7 @@ lowerUpdateIntoLoop updates pat ctx val body = do
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyStms body
     (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
-    let body' = mkBody (newbnds++res_bnds) body_res
+    let body' = mkBody (newbnds<>res_bnds) body_res
     return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
   where usedInBody = freeInBody body
         resmap = zip (bodyResult body) $ patternValueIdents pat
@@ -218,11 +218,11 @@ indexSubstitutions = mapMaybe getSubstitution
 manipulateResult :: (Bindable lore, MonadFreshNames m) =>
                     [LoopResultSummary (LetAttr lore)]
                  -> IndexSubstitutions (LetAttr lore)
-                 -> m (Result, [Stm lore])
+                 -> m (Result, Stms lore)
 manipulateResult summaries substs = do
   let (orig_ses,updated_ses) = partitionEithers $ map unchangedRes summaries
   (subst_ses, res_bnds) <- runWriterT $ zipWithM substRes updated_ses substs
-  return (orig_ses ++ subst_ses, res_bnds)
+  return (orig_ses ++ subst_ses, stmsFromList res_bnds)
   where
     unchangedRes summary =
       case relatedUpdate summary of

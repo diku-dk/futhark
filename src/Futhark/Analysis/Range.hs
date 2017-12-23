@@ -11,13 +11,10 @@ module Futhark.Analysis.Range
        )
        where
 
-import Control.Applicative
 import qualified Data.Map.Strict as M
 import Control.Monad.Reader
-import Data.Maybe
+import Data.Monoid
 import Data.List
-
-import Prelude
 
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.Ranges
@@ -48,16 +45,16 @@ analyseBody (Body lore origbnds result) =
     return $ mkRangedBody lore bnds' result
 
 analyseStms :: (Attributes lore, CanBeRanged (Op lore)) =>
-               [Stm lore]
-            -> ([Stm (Ranges lore)] -> RangeM a)
+               Stms lore
+            -> (Stms (Ranges lore) -> RangeM a)
             -> RangeM a
-analyseStms = analyseStms' []
+analyseStms = analyseStms' mempty . stmsToList
   where analyseStms' acc [] m =
-          m $ reverse acc
+          m acc
         analyseStms' acc (bnd:bnds) m = do
           bnd' <- analyseStm bnd
           bindPattern (stmPattern bnd') $
-            analyseStms' (bnd':acc) bnds m
+            analyseStms' (oneStm bnd' <> acc) bnds m
 
 analyseStm :: (Attributes lore, CanBeRanged (Op lore)) =>
               Stm lore -> RangeM (Stm (Ranges lore))

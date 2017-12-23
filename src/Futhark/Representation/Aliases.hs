@@ -40,15 +40,13 @@ module Futhark.Representation.Aliases
        )
 where
 
-import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.Reader
+import Data.Foldable
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-
-import Prelude
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
@@ -248,7 +246,7 @@ addAliasesToPattern pat e =
   uncurry Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: (Attributes lore, CanBeAliased (Op lore)) =>
-                 BodyAttr lore -> [Stm (Aliases lore)] -> Result -> Body (Aliases lore)
+                 BodyAttr lore -> Stms (Aliases lore) -> Result -> Body (Aliases lore)
 mkAliasedBody innerlore bnds res =
   Body (mkBodyAliases bnds res, innerlore) bnds res
 
@@ -297,7 +295,7 @@ mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty
 
 mkBodyAliases :: Aliased lore =>
-                 [Stm lore]
+                 Stms lore
               -> Result
               -> BodyAliasing
 mkBodyAliases bnds res =
@@ -307,16 +305,16 @@ mkBodyAliases bnds res =
   -- bound in bnds.
   let (aliases, consumed) = mkStmsAliases bnds res
       boundNames =
-        mconcat $ map (S.fromList . patternNames . stmPattern) bnds
+        fold $ fmap (S.fromList . patternNames . stmPattern) bnds
       bound = (`S.member` boundNames)
       aliases' = map (S.filter (not . bound)) aliases
       consumed' = S.filter (not . bound) consumed
   in (map Names' aliases', Names' consumed')
 
 mkStmsAliases :: Aliased lore =>
-                     [Stm lore] -> [SubExp]
-                  -> ([Names], Names)
-mkStmsAliases bnds res = delve mempty bnds
+                 Stms lore -> [SubExp]
+              -> ([Names], Names)
+mkStmsAliases bnds res = delve mempty $ stmsToList bnds
   where delve (aliasmap, consumed) [] =
           (map (aliasClosure aliasmap . subExpAliases) res,
            consumed)
@@ -327,7 +325,7 @@ mkStmsAliases bnds res = delve mempty bnds
           where look k = M.findWithDefault mempty k aliasmap
 
 -- | Everything consumed in the given bindings and result (even transitively).
-consumedInStms :: Aliased lore => [Stm lore] -> [SubExp] -> Names
+consumedInStms :: Aliased lore => Stms lore -> [SubExp] -> Names
 consumedInStms bnds res = snd $ mkStmsAliases bnds res
 
 type AliasesAndConsumed = (M.Map VName Names,
@@ -371,7 +369,7 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
       return $ mkAliasedLetStm pat attr e
 
   mkBody bnds res =
-    let Body bodylore _ _ = mkBody (map removeStmAliases bnds) res
+    let Body bodylore _ _ = mkBody (fmap removeStmAliases bnds) res
     in mkAliasedBody bodylore bnds res
 
 instance Bindable (Aliases lore) => BinderOps (Aliases lore) where

@@ -41,7 +41,7 @@ instance MonadBinder m => MonadBinder (RuleM m) where
   mkLetNamesM names e = RuleM $ lift $ mkLetNamesM names e
   mkBodyM bnds res = RuleM $ lift $ mkBodyM bnds res
 
-  addStm                = RuleM . lift . addStm
+  addStms               = RuleM . lift . addStms
   collectStms (RuleM m) = RuleM $ MaybeT $ do
     (x, bnds) <- collectStms $ runMaybeT m
     case x of Nothing -> return Nothing
@@ -54,7 +54,7 @@ instance MonadBinder m => Alternative (RuleM m) where
   RuleM m1 <|> RuleM m2 = RuleM $ do
     (x, bnds) <- lift $ collectStms $ runMaybeT m1
     case x of Nothing -> m2
-              Just x' -> do lift $ mapM_ addStm bnds
+              Just x' -> do lift $ addStms bnds
                             return x'
 
 -- | Execute a 'RuleM' action.  If succesful, returns the result and a
@@ -63,7 +63,7 @@ instance MonadBinder m => Alternative (RuleM m) where
 -- modified.
 simplify :: MonadBinder m =>
             RuleM m a
-         -> m (Maybe (a, [Stm (Lore m)]))
+         -> m (Maybe (a, Stms (Lore m)))
 simplify (RuleM m) = do
   (x, bnds) <- collectStms $ runMaybeT m
   case x of

@@ -73,7 +73,7 @@ simplifyLambda =
   Simplifier.simplifyLambdaWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyStms :: (HasScope SOACS m, MonadFreshNames m) =>
-                [Stm] -> m [Stm]
+                Stms SOACS -> m (Stms SOACS)
 simplifyStms =
   Simplifier.simplifyStmsWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 

@@ -256,7 +256,7 @@ eBody :: (MonadBinder m) =>
 eBody es = insertStmsM $ do
              es' <- sequence es
              xs <- mapM (letTupExp "x") es'
-             mkBodyM [] $ map Var $ concat xs
+             mkBodyM mempty $ map Var $ concat xs
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
@@ -368,14 +368,14 @@ ifCommon ts = IfAttr (staticShapes ts) IfNormal
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore
-resultBody = mkBody []
+resultBody = mkBody mempty
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
 resultBodyM :: MonadBinder m =>
                [SubExp]
             -> m (Body (Lore m))
-resultBodyM = mkBodyM []
+resultBodyM = mkBodyM mempty
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addStm'.
@@ -391,7 +391,7 @@ mapResultM :: MonadBinder m =>
               (Result -> m (Body (Lore m))) -> Body (Lore m) -> m (Body (Lore m))
 mapResultM f (Body _ bnds res) = do
   Body _ bnds2 res' <- f res
-  mkBodyM (bnds++bnds2) res'
+  mkBodyM (bnds<>bnds2) res'
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.  This a non-monadic variant of

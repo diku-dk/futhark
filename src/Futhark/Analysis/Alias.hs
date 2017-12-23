@@ -39,7 +39,7 @@ analyseBody :: (Attributes lore,
                 CanBeAliased (Op lore)) =>
                Body lore -> Body (Aliases lore)
 analyseBody (Body lore origbnds result) =
-  let bnds' = map analyseStm origbnds
+  let bnds' = fmap analyseStm origbnds
   in mkAliasedBody lore bnds' result
 
 analyseStm :: (Attributes lore, CanBeAliased (Op lore)) =>

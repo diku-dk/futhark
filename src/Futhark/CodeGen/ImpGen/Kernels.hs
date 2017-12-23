@@ -88,9 +88,9 @@ kernelCompiler dest (Kernel desc space _ kernel_body) = do
   num_threads' <- ImpGen.subExpToDimSize $ spaceNumThreads space
 
   let bound_in_kernel =
-        M.keys $ mconcat $
-        scopeOfKernelSpace space :
-        map scopeOf (kernelBodyStms kernel_body)
+        M.keys $
+        scopeOfKernelSpace space <>
+        scopeOf (kernelBodyStms kernel_body)
 
   let global_tid = spaceGlobalId space
       local_tid = spaceLocalId space
@@ -620,7 +620,7 @@ compileKernelBody :: ImpGen.Destination
                   -> KernelBody InKernel
                   -> InKernelGen ()
 compileKernelBody (ImpGen.Destination dest) constants kbody =
-  compileKernelStms constants (kernelBodyStms kbody) $
+  compileKernelStms constants (stmsToList $ kernelBodyStms kbody) $
   zipWithM_ (compileKernelResult constants) dest $
   kernelBodyResult kbody
 
@@ -629,7 +629,7 @@ compileNestedKernelBody :: KernelConstants
                         -> Body InKernel
                         -> InKernelGen ()
 compileNestedKernelBody constants (ImpGen.Destination dest) kbody =
-  compileKernelStms constants (bodyStms kbody) $
+  compileKernelStms constants (stmsToList $ bodyStms kbody) $
   zipWithM_ ImpGen.compileSubExpTo dest $ bodyResult kbody
 
 compileKernelStms :: KernelConstants -> [Stm InKernel]
@@ -888,9 +888,9 @@ compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w max
     zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
     ImpGen.declaringPrimVar block_size int32 $
       -- If the GroupStream is morally just a do-loop, generate simpler code.
-      case mapM isSimpleThreadInSpace $ bodyStms body of
+      case mapM isSimpleThreadInSpace $ stmsToList $ bodyStms body of
         Just stms' | ValueExp x <- max_block_size, oneIsh x -> do
-          let body' = body { bodyStms = stms' }
+          let body' = body { bodyStms = stmsFromList stms' }
           body'' <- ImpGen.withPrimVar block_offset int32 $
                     allThreads constants $ ImpGen.compileBody acc_dest body'
           ImpGen.emit $ Imp.SetScalar block_size 1

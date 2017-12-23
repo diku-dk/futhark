@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | This module implements a compiler pass for inlining functions,
 -- then removing those that have become dead.
 module Futhark.Optimise.InliningDeadFun
@@ -63,37 +64,23 @@ doInlineInCaller (FunDef entry name rtp args body) inlcallees =
   in FunDef entry name rtp args body'
 
 inlineInBody :: [FunDef] -> Body -> Body
-inlineInBody inlcallees
-             (Body _ (bnd@(Let pat _ (Apply fname args _ (safety,loc,locs))):bnds) res) =
-  let continue callbnds =
-        callbnds `insertStms` inlineInBody inlcallees (mkBody bnds res)
-      continue' (Body _ callbnds res') =
-        continue $ addLocations safety (loc:locs) callbnds ++
-        zipWith reshapeIfNecessary (patternIdents pat) res'
-  in case filter ((== fname) . funDefName) inlcallees of
-       [] -> continue [bnd]
-       fun:_ ->
-         let revbnds = zip (map paramIdent $ funDefParams fun) $ map fst args
-         in  continue' $ foldr addArgBnd (funDefBody fun) revbnds
-  where
+inlineInBody inlcallees (Body attr stms res) = Body attr stms' res
+  where stms' = stmsFromList (concatMap inline $ stmsToList stms)
 
-      addArgBnd :: (Ident, SubExp) -> Body -> Body
-      addArgBnd (farg, aarg) body =
-        reshapeIfNecessary farg aarg `insertStm` body
+        inline (Let pat _ (Apply fname args _ (safety,loc,locs)))
+          | fun:_ <- filter ((== fname) . funDefName) inlcallees =
+              let param_stms = zipWith reshapeIfNecessary (map paramIdent $ funDefParams fun) (map fst args)
+                  body_stms = stmsToList $ addLocations safety (loc:locs) $ bodyStms $ funDefBody fun
+                  res_stms = zipWith reshapeIfNecessary (patternIdents pat) (bodyResult $ funDefBody fun)
+              in param_stms ++ body_stms ++ res_stms
+        inline stm = [inlineInStm inlcallees stm]
 
-      reshapeIfNecessary ident se
-        | t@Array{} <- identType ident,
-          Var v <- se =
-            mkLet' [] [ident] $ shapeCoerce (arrayDims t) v
-        | otherwise =
-          mkLet' [] [ident] $ BasicOp $ SubExp se
-
-inlineInBody inlcallees (Body () (bnd:bnds) res) =
-  let bnd' = inlineInStm inlcallees bnd
-      Body () bnds' res' = inlineInBody inlcallees $ Body () bnds res
-  in Body () (bnd':bnds') res'
-inlineInBody _ (Body () [] res) =
-  Body () [] res
+        reshapeIfNecessary ident se
+          | t@Array{} <- identType ident,
+            Var v <- se =
+              mkLet' [] [ident] $ shapeCoerce (arrayDims t) v
+          | otherwise =
+            mkLet' [] [ident] $ BasicOp $ SubExp se
 
 inliner :: Monad m => [FunDef] -> Mapper SOACS SOACS m
 inliner funs = identityMapper { mapOnBody = const $ return . inlineInBody funs
@@ -118,8 +105,8 @@ inlineInExtLambda :: [FunDef] -> ExtLambda -> ExtLambda
 inlineInExtLambda inlcallees (ExtLambda params body ret) =
   ExtLambda params (inlineInBody inlcallees body) ret
 
-addLocations :: Safety -> [SrcLoc] -> [Stm] -> [Stm]
-addLocations caller_safety more_locs = map onStm
+addLocations :: Safety -> [SrcLoc] -> Stms SOACS -> Stms SOACS
+addLocations caller_safety more_locs = fmap onStm
   where onStm stm = stm { stmExp = onExp $ stmExp stm }
         onExp (Apply fname args t (safety, loc,locs)) =
           Apply fname args t (min caller_safety safety, loc,locs++more_locs)

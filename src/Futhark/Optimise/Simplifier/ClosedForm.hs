@@ -13,13 +13,10 @@ module Futhark.Optimise.Simplifier.ClosedForm
 where
 
 import Control.Monad
-import Control.Applicative
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Monoid
-
-import Prelude
 
 import Futhark.Construct
 import Futhark.Representation.AST
@@ -178,7 +175,7 @@ determineKnownBindings look lam accs arrs =
         isReplicate _ = Nothing
 
 makeBindMap :: Body lore -> M.Map VName (Exp lore)
-makeBindMap = M.fromList . mapMaybe isSingletonStm . bodyStms
+makeBindMap = M.fromList . mapMaybe isSingletonStm . stmsToList . bodyStms
   where isSingletonStm (Let pat _ e) = case patternNames pat of
           [v] -> Just (v,e)
           _   -> Nothing

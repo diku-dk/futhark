@@ -145,6 +145,9 @@ instance Rename VName where
 instance Rename a => Rename [a] where
   rename = mapM rename
 
+instance Rename (Stm lore) => Rename (Stms lore) where
+  rename = fmap stmsFromList . mapM rename . stmsToList
+
 instance (Rename a, Rename b) => Rename (a,b) where
   rename (a,b) = (,) <$> rename a <*> rename b
 
@@ -216,13 +219,16 @@ instance Rename Bindage where
     BindInPlace <$> rename src <*> mapM rename is
 
 instance Renameable lore => Rename (Body lore) where
-  rename (Body lore [] res) =
-    Body <$> rename lore <*> pure [] <*> rename res
-  rename (Body blore (bnd:bnds) res) =
-    bind (patternNames $ stmPattern bnd) $ do
-      bnd' <- rename bnd
-      Body blore' bnds' res' <- rename $ Body blore bnds res
-      return $ Body blore' (bnd':bnds') res'
+  rename (Body attr stms res) = do
+    attr' <- rename attr
+    (stms', res') <- descend $ stmsToList stms
+    return $ Body attr' (stmsFromList stms') res'
+    where descend [] = (,) [] <$> rename res
+          descend (stm:stms') =
+            bind (patternNames $ stmPattern stm) $ do
+              stm' <- rename stm
+              (stms'', res') <- descend stms'
+              return (stm':stms'', res')
 
 instance Renameable lore => Rename (Stm lore) where
   rename (Let pat elore e) = Let <$> rename pat <*> rename elore <*> rename e

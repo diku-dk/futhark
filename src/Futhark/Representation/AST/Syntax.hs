@@ -32,6 +32,7 @@ module Futhark.Representation.AST.Syntax
   , Pattern
   , StmAux(..)
   , Stm(..)
+  , Stms
   , Result
   , BodyT(..)
   , Body
@@ -63,6 +64,11 @@ module Futhark.Representation.AST.Syntax
   , EntryPointType(..)
   , ProgT(..)
   , Prog
+
+  -- * Utils
+  , oneStm
+  , stmsFromList
+  , stmsToList
   )
   where
 
@@ -71,6 +77,7 @@ import Data.Foldable
 import Data.Monoid
 import Data.Traversable
 import Data.Loc
+import qualified Data.Sequence as Seq
 
 import Prelude
 
@@ -113,13 +120,25 @@ deriving instance Annotations lore => Ord (Stm lore)
 deriving instance Annotations lore => Show (Stm lore)
 deriving instance Annotations lore => Eq (Stm lore)
 
+-- | A sequence of statements.
+type Stms lore = Seq.Seq (Stm lore)
+
+oneStm :: Stm lore -> Stms lore
+oneStm = Seq.singleton
+
+stmsFromList :: [Stm lore] -> Stms lore
+stmsFromList = Seq.fromList
+
+stmsToList :: Stms lore -> [Stm lore]
+stmsToList = toList
+
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
 data BodyT lore = Body { bodyAttr :: BodyAttr lore
-                       , bodyStms :: [Stm lore]
+                       , bodyStms :: Stms lore
                        , bodyResult :: Result
                        }
 

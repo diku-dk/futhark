@@ -70,19 +70,17 @@ simplifyLambdaWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore
                         -> [Maybe VName]
                         -> m (Lambda lore)
 simplifyLambdaWithRules simpl rules blockers lam nes =
-  fmap removeLambdaWisdom .
-  simplifyLambda simpl rules blockers lam nes
+  fmap removeLambdaWisdom . simplifyLambda simpl rules blockers lam nes
 
 -- | Simplify a list of 'Stm's.
 simplifyStmsWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
                              SimpleOps lore
                           -> RuleBook (SimpleM lore)
                           -> HoistBlockers lore
-                          -> [Stm lore]
-                          -> m [Stm lore]
+                          -> Stms lore
+                          -> m (Stms lore)
 simplifyStmsWithRules simpl rules blockers bnds =
-  map removeStmWisdom <$>
-  simplifyStms simpl rules blockers bnds
+  fmap removeStmWisdom <$> simplifyStms simpl rules blockers bnds
 
 simplifyBasicish :: (MonadFreshNames m, Bindable lore,
                      SimplifiableLore lore) =>

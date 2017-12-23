@@ -55,7 +55,7 @@ blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                        -> Lambda InKernel -> Lambda InKernel
                        -> [SubExp]
                        -> [VName]
-                       -> m [Stm Kernels]
+                       -> m (Stms Kernels)
 blockedReductionStream pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   (max_step_one_num_groups, step_one_size) <- blockedKernelSize w
 
@@ -141,7 +141,7 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs = do
     return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
   let combine_reds = [ Let (Pattern [] [pe']) (defAux ()) $ Op $
                        Combine [(spaceLocalId space, group_size)] [patElemType pe] [] $
-                       Body () [] [Var $ patElemName pe]
+                       Body () mempty [Var $ patElemName pe]
                      | (pe', pe) <- zip chunk_red_pes' chunk_red_pes ]
 
   final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
@@ -158,7 +158,7 @@ chunkedReduceKernel w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   let rets = red_rets ++ map_rets
 
   return $ Kernel (KernelDebugHints "chunked_reduce" [("input size", w)]) space ts $
-    KernelBody () (chunk_and_fold++combine_reds++[reduce_chunk]) rets
+    KernelBody () (chunk_and_fold<>stmsFromList combine_reds<>oneStm reduce_chunk) rets
 
 reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
                 KernelSize
@@ -272,7 +272,7 @@ kerneliseLambda nes lam = do
         | not $ primType $ paramType p =
             mkLet' [] [paramIdent p] $ BasicOp $ Copy v
       mkAccInit p x = mkLet' [] [paramIdent p] $ BasicOp $ SubExp x
-      acc_init_bnds = zipWith mkAccInit fold_acc_params nes
+      acc_init_bnds = stmsFromList $ zipWith mkAccInit fold_acc_params nes
   return lam { lambdaBody = insertStms acc_init_bnds $
                             lambdaBody lam
              , lambdaParams = thread_index_param :
@@ -287,7 +287,7 @@ blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                  -> Lambda InKernel -> Lambda InKernel
                  -> [SubExp]
                  -> [VName]
-                 -> m [Stm Kernels]
+                 -> m (Stms Kernels)
 blockedReduction pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   fold_lam' <- chunkLambda pat nes fold_lam
 
@@ -296,14 +296,14 @@ blockedReduction pat w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
     letExp (baseString name <> "_out_in") $
     BasicOp $ Scratch (elemType t) (arrayDims t)
 
-  mapM_ addStm =<<
+  addStms =<<
     blockedReductionStream pat w comm reduce_lam fold_lam' nes
     (arrs ++ map_out_arrs)
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
               Pattern Kernels -> SubExp
            -> StreamOrd -> Lambda InKernel -> [SubExp] -> [VName]
-           -> m (Stm Kernels, [Stm Kernels])
+           -> m (Stm Kernels, Stms Kernels)
 blockedMap concat_pat w ordering lam nes arrs = runBinder $ do
   (_, kernel_size) <- blockedKernelSize w
   let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
@@ -363,10 +363,12 @@ blockedPerThread thread_gtid w kernel_size ordering lam num_nonconcat arrs = do
   let (chunk_red_ses, chunk_map_ses) =
         splitAt num_nonconcat $ bodyResult $ lambdaBody lam
 
-  mapM_ addStm $
-    bodyStms (lambdaBody lam) ++
+  addStms $
+    bodyStms (lambdaBody lam) <>
+    stmsFromList
     [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
-    | (pe,se) <- zip chunk_red_pes chunk_red_ses ] ++
+    | (pe,se) <- zip chunk_red_pes chunk_red_ses ] <>
+    stmsFromList
     [ Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ SubExp se
     | (pe,se) <- zip chunk_map_pes chunk_map_ses ]
 
@@ -515,7 +517,7 @@ scanKernel1 w scan_sizes lam foldlam nes arrs = do
       -- Create an array of per-thread fold results and scan it.
       to_scan_arrs <- letTupExp "combined" $
                       Op $ Combine [(spaceLocalId kspace, group_size)] scan_ts [] $
-                      Body () [] $ map Var fold_accs
+                      Body () mempty $ map Var fold_accs
       scanned_arrs <- letTupExp "scanned" $
                       Op $ GroupScan group_size lam $ zip nes to_scan_arrs
 
@@ -662,11 +664,11 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
                       unflattenIndex (map (primExpFromSubExp int32 . snd) ispace)
                       (LeafExp (paramName my_index_param) int32 `quot`
                        primExpFromSubExp int32 segment_size)
-  read_inps <- mapM readKernelInput inps
+  read_inps <- stmsFromList <$> mapM readKernelInput inps
   first_scan_foldlam <- renameLambda
     foldlam { lambdaParams = my_index_param :
                              lambdaParams foldlam
-            , lambdaBody = insertStms (compute_segments++read_inps) $
+            , lambdaBody = insertStms (compute_segments<>read_inps) $
                            lambdaBody foldlam
             }
   first_scan_lam <- renameLambda
@@ -732,7 +734,7 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
     return $ resultBody $ map Var group_lasts
   (mapk_bnds, mapk) <- mapKernelFromBody w (FlatThreadSpace [(j, w)]) result_map_input
                        (lambdaReturnType lam) result_map_body
-  mapM_ addStm mapk_bnds
+  addStms mapk_bnds
   letBind_ final_res_pat $ Op mapk
   where one = constant (1 :: Int32)
         zero = constant (0 :: Int32)
@@ -750,13 +752,13 @@ blockedScan pat w lam foldlam segment_size ispace inps nes arrs = do
 mapKernelSkeleton :: (HasScope Kernels m, MonadFreshNames m) =>
                      SubExp -> SpaceStructure -> [KernelInput]
                   -> m (KernelSpace,
-                        [Stm Kernels],
-                        [Stm InKernel])
+                        Stms Kernels,
+                        Stms InKernel)
 mapKernelSkeleton w ispace inputs = do
   ((group_size, num_threads, num_groups), ksize_bnds) <-
     runBinder $ numThreadsAndGroups w
 
-  read_input_bnds <- mapM readKernelInput inputs
+  read_input_bnds <- stmsFromList <$> mapM readKernelInput inputs
 
   let ksize = (num_groups, group_size, num_threads)
 
@@ -778,17 +780,17 @@ numThreadsAndGroups w = do
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
              SubExp -> SpaceStructure -> [KernelInput]
           -> [Type] -> KernelBody InKernel
-          -> m ([Stm Kernels], Kernel InKernel)
+          -> m (Stms Kernels, Kernel InKernel)
 mapKernel w ispace inputs rts (KernelBody () kstms krets) = do
   (space, ksize_bnds, read_input_bnds) <- mapKernelSkeleton w ispace inputs
 
-  let kbody' = KernelBody () (read_input_bnds ++ kstms) krets
+  let kbody' = KernelBody () (read_input_bnds <> kstms) krets
   return (ksize_bnds, Kernel (KernelDebugHints "map" []) space rts kbody')
 
 mapKernelFromBody :: (HasScope Kernels m, MonadFreshNames m) =>
                      SubExp -> SpaceStructure -> [KernelInput]
                   -> [Type] -> Body InKernel
-                  -> m ([Stm Kernels], Kernel InKernel)
+                  -> m (Stms Kernels, Kernel InKernel)
 mapKernelFromBody w ispace inputs rts body =
   mapKernel w ispace inputs rts kbody
   where kbody = KernelBody () (bodyStms body) krets

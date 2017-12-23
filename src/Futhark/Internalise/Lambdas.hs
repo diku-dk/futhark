@@ -9,9 +9,8 @@ module Futhark.Internalise.Lambdas
   )
   where
 
-import Control.Applicative
 import Control.Monad
-import Data.List
+import Data.Monoid
 import Data.Loc
 import qualified Data.Set as S
 
@@ -23,8 +22,6 @@ import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
 import Futhark.Representation.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.DeadVarElim (deadCodeElimLambda)
-
-import Prelude hiding (mapM)
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
@@ -139,7 +136,7 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
                             mkLet' [] [paramIdent ac_var] (BasicOp $ SubExp ac_val)
                         ) (zip acc_params nes)
 
-      map_bindings= acc_bindings ++ bodyStms body
+      map_bindings= stmsFromList acc_bindings <> bodyStms body
       map_lore    = bodyAttr body
       map_body = I.Body map_lore map_bindings map_bodyres
   shape_body <- bindingParamTypes params $
@@ -216,7 +213,7 @@ internalisePartitionLambdas internaliseLambda lams args = do
                               (result i)
                               next_lam_body $
                               ifCommon rettype
-              return $ mkBody (parambnds++bodybnds++[branchbnd]) $
+              return $ mkBody (stmsFromList parambnds <> bodybnds <> oneStm branchbnd) $
                 map (I.Var . I.identName) intres
             _ ->
               fail "Partition lambda returns too many values."

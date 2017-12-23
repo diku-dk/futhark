@@ -37,8 +37,8 @@ typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
 
 substituteIndices :: (MonadFreshNames m, BinderOps lore, Bindable lore,
                       Aliased lore, LetAttr lore ~ attr) =>
-                     IndexSubstitutions attr -> [Stm lore]
-                  -> m (IndexSubstitutions attr, [Stm lore])
+                     IndexSubstitutions attr -> Stms lore
+                  -> m (IndexSubstitutions attr, Stms lore)
 substituteIndices substs bnds =
   runBinderT (substituteIndicesInStms substs bnds) types
   where types = typeEnvFromSubstitutions substs
@@ -46,7 +46,7 @@ substituteIndices substs bnds =
 substituteIndicesInStms :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
                              LocalScope (Lore m) m) =>
                            IndexSubstitutions (LetAttr (Lore m))
-                        -> [Stm (Lore m)]
+                        -> Stms (Lore m)
                         -> m (IndexSubstitutions (LetAttr (Lore m)))
 substituteIndicesInStms = foldM substituteIndicesInStm
 

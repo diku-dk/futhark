@@ -11,8 +11,6 @@ import Control.Arrow (first)
 import Control.Monad.State
 import Data.Monoid
 
-import Prelude
-
 import Futhark.MonadFreshNames
 import Futhark.Representation.SOACS
 import Futhark.Tools
@@ -46,8 +44,8 @@ iswim res_pat w scan_fun scan_input
           scan_input' = map (first Var) $
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
-          map_body = mkBody [Let (setPatternOuterDimTo w map_pat) (defAux ()) $
-                             Op $ Scan w scan_fun' scan_input'] $
+          map_body = mkBody (oneStm $ Let (setPatternOuterDimTo w map_pat) (defAux ()) $
+                             Op $ Scan w scan_fun' scan_input') $
                             map Var $ patternNames map_pat
 
       res_pat' <- fmap (basicPattern' []) $
@@ -100,7 +98,8 @@ irwim res_pat w comm red_fun red_input
       map_body <-
         case irwim red_pat w comm red_fun' red_input' of
           Nothing ->
-            return $ mkBody [Let red_pat (defAux ()) $ Op $ Reduce w comm red_fun' red_input'] $
+            return $ mkBody (oneStm $ Let red_pat (defAux ()) $
+                              Op $ Reduce w comm red_fun' red_input') $
             map Var $ patternNames map_pat
           Just m -> localScope (scopeOfLParams map_params) $ do
             map_body_bnds <- collectStms_ m
@@ -114,7 +113,8 @@ irwim res_pat w comm red_fun red_input
 rwimPossible :: Lambda
              -> Maybe (Pattern, Certificates, SubExp, Lambda)
 rwimPossible fun
-  | Body _ [bnd] res <- lambdaBody fun, -- Body has a single binding
+  | Body _ stms res <- lambdaBody fun,
+    [bnd] <- stmsToList stms, -- Body has a single binding
     map_pat <- stmPattern bnd,
     map Var (patternNames map_pat) == res, -- Returned verbatim
     Op (Map map_w map_fun map_arrs) <- stmExp bnd,

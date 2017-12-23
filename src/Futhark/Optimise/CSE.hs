@@ -32,12 +32,10 @@ module Futhark.Optimise.CSE
        )
        where
 
-import Control.Applicative
 import Control.Monad.Reader
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-
-import Prelude
+import Data.Monoid
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.AST
@@ -75,9 +73,9 @@ type CSEM lore = Reader (CSEState lore)
 cseInBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              Body lore -> CSEM lore (Body lore)
 cseInBody (Body bodyattr bnds res) =
-  cseInStms (consumedInStms bnds res) bnds $ do
+  cseInStms (consumedInStms bnds res) (stmsToList bnds) $ do
     CSEState (_, nsubsts) _ <- ask
-    return $ Body bodyattr [] $ substituteNames nsubsts res
+    return $ Body bodyattr mempty $ substituteNames nsubsts res
 
 cseInLambda :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                Lambda lore -> CSEM lore (Lambda lore)
@@ -100,7 +98,7 @@ cseInStms consumed (bnd:bnds) m =
   cseInStm consumed bnd $ \bnd' -> do
     Body bodyattr bnds' es <- cseInStms consumed bnds m
     bnd'' <- mapM nestedCSE bnd'
-    return $ Body bodyattr (bnd''++bnds') es
+    return $ Body bodyattr (stmsFromList bnd''<>bnds') es
   where nestedCSE bnd' = do
           e <- mapExpM cse $ stmExp bnd'
           return bnd' { stmExp = e }

@@ -89,7 +89,7 @@ identityMapper = Mapper {
 
 -- | Map across the bindings of a 'Body'.
 mapBody :: (Stm lore -> Stm lore) -> Body lore -> Body lore
-mapBody f (Body attr bnds res) = Body attr (map f bnds) res
+mapBody f (Body attr stms res) = Body attr (fmap f stms) res
 
 -- | Map a monadic action across the immediate children of an
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for

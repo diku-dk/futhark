@@ -21,7 +21,7 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Lore
-import Futhark.Tools (intraproceduralTransformation)
+import Futhark.Tools (intraproceduralTransformation, collectStms)
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
@@ -71,15 +71,15 @@ simplifyStms :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lor
                 Engine.SimpleOps lore
              -> RuleBook (Engine.SimpleM lore)
              -> Engine.HoistBlockers lore
-             -> [Stm lore]
-             -> m [Stm (Engine.Wise lore)]
+             -> Stms lore
+             -> m (Stms (Engine.Wise lore))
 simplifyStms simpl rules blockers orig_bnds = do
   types <- askScope
   let f bnds = Engine.localVtable
                (<> ST.fromScope (addScopeWisdom types)) $
-               fmap snd $ Engine.collectStmsEngine $
-               mapM_ Engine.simplifyStm bnds
-  loopUntilConvergence env simpl f (map removeStmWisdom) orig_bnds
+               fmap snd $ collectStms $
+               mapM_ Engine.simplifyStm $ stmsToList bnds
+  loopUntilConvergence env simpl f (fmap removeStmWisdom) orig_bnds
   where env = Engine.emptyEnv rules blockers
 
 loopUntilConvergence :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>

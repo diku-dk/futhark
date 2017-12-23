@@ -159,7 +159,7 @@ hoistInBody scope_new bindingmap_old params findHoistees body =
 
       -- We use the possibly non-empty scope to extend our BindingMap.
       bindingmap_fromscope = concatMap scopeBindingMap $ M.toList scope_new
-      bindingmap_body = bodyBindingMap (bodyStms body)
+      bindingmap_body = bodyBindingMap $ stmsToList $ bodyStms body
       bindingmap = bindingmap_old ++ bindingmap_fromscope ++ bindingmap_body
 
       -- Create a new body where all hoistees have been moved as much upwards in
@@ -169,7 +169,7 @@ hoistInBody scope_new bindingmap_old params findHoistees body =
         (body, bindingmap) hoistees
 
       -- Touch upon any subbodies.
-      bnds' = map (hoistRecursivelyStm bindingmap' findHoistees) bnds
+      bnds' = fmap (hoistRecursivelyStm bindingmap' findHoistees) bnds
       body' = Body () bnds' res
 
       debug = hoistees `seq` do
@@ -203,7 +203,7 @@ hoist :: BindingMap
       -> VName
       -> (Body ExplicitMemory, BindingMap)
 hoist bindingmap_cur body hoistee =
-  let bindingmap = bindingmap_cur ++ bodyBindingMap (bodyStms body)
+  let bindingmap = bindingmap_cur <> bodyBindingMap (stmsToList $ bodyStms body)
 
       body' = runState (moveLetUpwards hoistee body) bindingmap
 
@@ -271,9 +271,9 @@ moveLetUpwards letname body = do
           PrimBinding _ _ letorig' <- lookupPrimBinding letname
           when (letorig' /= letorig) $ error "Assertion: This should not happen."
 
-          stms' <- moveLetToLine letname line_cur line_dest $ bodyStms body'
+          stms' <- moveLetToLine letname line_cur line_dest $ stmsToList $ bodyStms body'
 
-          return body' { bodyStms = stms' }
+          return body' { bodyStms = stmsFromList stms' }
 
 -- Both move the statement to the new line and update the BindingMap.
 moveLetToLine :: VName -> Line -> Line -> [Stm ExplicitMemory]
