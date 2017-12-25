@@ -6,7 +6,7 @@
 -- a Futhark program.
 module Language.Futhark.Futlib.Prelude (preludeBasis) where
 
-import Futhark.Compiler
+import Futhark.Compiler.Program
 import Futhark.Compiler.TH
 import Language.Futhark.Futlib()
 

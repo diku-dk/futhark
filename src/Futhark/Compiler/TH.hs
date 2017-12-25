@@ -9,7 +9,7 @@ import Language.Futhark.TH ()
 import Language.Haskell.TH.Syntax (Exp, Q, runIO, lift, qAddDependentFile)
 import System.FilePath
 
-import Futhark.Compiler
+import Futhark.Compiler.Program
 import Futhark.Util (directoryContents)
 
 futFiles :: FilePath -> IO [FilePath]
