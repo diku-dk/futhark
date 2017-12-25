@@ -14,7 +14,6 @@ module Futhark.Optimise.Simplifier.Simplify
 
 import Data.Monoid
 
-import Futhark.Optimise.DeadVarElim
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
@@ -33,8 +32,7 @@ simplifyProg :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
              -> Prog lore
              -> m (Prog (Engine.Wise lore))
 simplifyProg simpl rules blockers =
-  intraproceduralTransformation $
-  simplifyFun simpl rules blockers
+  intraproceduralTransformation $ simplifyFun simpl rules blockers
 
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
@@ -47,8 +45,7 @@ simplifyFun :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
              -> FunDef lore
              -> m (FunDef (Engine.Wise lore))
 simplifyFun simpl rules blockers =
-  loopUntilConvergence env simpl
-  (Engine.simplifyFun . deadCodeElimFun) removeFunDefWisdom
+  loopUntilConvergence env simpl Engine.simplifyFun removeFunDefWisdom
   where env = Engine.emptyEnv rules blockers
 
 -- | Simplify just a single 'Lambda'.
