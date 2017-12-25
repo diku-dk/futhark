@@ -1076,11 +1076,6 @@ simplifyScalExp vtable pat _ e = do
   case res of
     -- If the sufficient condition is 'True', then it statically succeeds.
     Just se
-      | not $ isConstant se,
-        Just ses <- lth0s se,
-        all ((<size_bound) . SE.scalExpSize) ses,
-        Right True <- and <$> mapM truish ses ->
-        letBind_ pat $ BasicOp $ SubExp $ Constant $ BoolValue True
       | SE.scalExpType se == Bool,
         isNothing $ valOrVar se,
         SE.scalExpSize se < size_bound,
@@ -1089,25 +1084,10 @@ simplifyScalExp vtable pat _ e = do
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
         size_bound = 30 -- don't touch scalexps bigger than this.
-        lth0s se@(SE.RelExp SE.LTH0 _) = Just [se]
-        lth0s (SE.RelExp SE.LEQ0 x) = Just [SE.RelExp SE.LTH0 $ x - 1]
-        lth0s (SE.SLogAnd x y) = (++) <$> lth0s x <*> lth0s y
-        lth0s _ = Nothing
-
-        isConstant SE.Val{} = True
-        isConstant _        = False
 
         valOrVar (SE.Val v)  = Just $ Constant v
         valOrVar (SE.Id v _) = Just $ Var v
         valOrVar _           = Nothing
-
-        truish se =
-          (SE.Val (BoolValue True)==) . mkDisj <$> AS.mkSuffConds se ranges
-
-        mkDisj []     = SE.Val $ BoolValue False
-        mkDisj (x:xs) = foldl SE.SLogOr (mkConj x) $ map mkConj xs
-        mkConj []     = SE.Val $ BoolValue True
-        mkConj (x:xs) = foldl SE.SLogAnd x xs
 
 simplifyIdentityReshape :: LetTopDownRule lore
 simplifyIdentityReshape _ seType (Reshape newshape v)
