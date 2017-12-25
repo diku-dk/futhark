@@ -42,15 +42,11 @@ module Futhark.Optimise.Simplifier.Engine
        , changed
        , askVtable
        , localVtable
-       , insertAllStms
 
          -- * Building blocks
        , SimplifiableLore
        , Simplifiable (..)
-       , simplifyResult
-       , simplifyExp
        , simplifyStms
-       , simplifyPattern
        , simplifyFun
        , simplifyLambda
        , simplifyLambdaSeq
@@ -58,7 +54,6 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyExtLambda
        , simplifyParam
        , bindLParams
-       , bindArrayLParams
        , bindChunkLParams
        , bindLoopVar
        , enterLoop
