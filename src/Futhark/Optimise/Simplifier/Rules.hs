@@ -1083,7 +1083,7 @@ simplifyScalExp vtable pat _ e = do
         letBind_ pat $ BasicOp $ SubExp se'
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
-        size_bound = 30 -- don't touch scalexps bigger than this.
+        size_bound = 10 -- don't touch scalexps bigger than this.
 
         valOrVar (SE.Val v)  = Just $ Constant v
         valOrVar (SE.Id v _) = Just $ Var v
