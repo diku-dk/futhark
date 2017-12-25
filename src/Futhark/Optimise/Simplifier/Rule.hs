@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | This module defines the concept of a simplification rule for
 -- bindings.  The intent is that you pass some context (such as symbol
 -- table) and a binding, and is given back a sequence of bindings that
@@ -61,7 +62,17 @@ import Futhark.Binder
 -- | The monad in which simplification rules are evaluated.
 newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource Maybe) a)
   deriving (Functor, Applicative, Monad,
-            MonadBinder, MonadFreshNames, HasScope lore, LocalScope lore)
+            MonadFreshNames, HasScope lore, LocalScope lore)
+
+instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
+  type Lore (RuleM lore) = lore
+  mkExpAttrM pat e = RuleM $ mkExpAttrM pat e
+  mkBodyM bnds res = RuleM $ mkBodyM bnds res
+  mkLetNamesM pat e = RuleM $ mkLetNamesM pat e
+
+  addStms = RuleM . addStms
+  collectStms (RuleM m) = RuleM $ collectStms m
+  certifying cs (RuleM m) = RuleM $ certifying cs m
 
 -- | Execute a 'RuleM' action.  If succesful, returns the result and a
 -- list of new bindings.  Even if the action fail, there may still be
