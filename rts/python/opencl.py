@@ -152,4 +152,4 @@ def initialise_opencl_object(self,
         return cl.Program(self.ctx, program_src).build(
             ["-DFUT_BLOCK_DIM={}".format(transpose_block_dim),
              "-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
-            + map(lambda (s,v): "-D{}={}".format(s,v), self.sizes.items()))
+            + ["-D{}={}".format(s,v) for (s,v) in self.sizes.items()])
