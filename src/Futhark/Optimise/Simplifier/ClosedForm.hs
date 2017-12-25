@@ -21,8 +21,7 @@ import Data.Monoid
 import Futhark.Construct
 import Futhark.Representation.AST
 import Futhark.Transform.Rename
-import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplifier.RuleM
+import Futhark.Optimise.Simplifier.Rule
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
@@ -43,12 +42,12 @@ Motivation:
 
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
-foldClosedForm :: MonadBinder m =>
-                  VarLookup (Lore m)
-               -> Pattern (Lore m)
-               -> Lambda (Lore m)
+foldClosedForm :: (Attributes lore, BinderOps lore) =>
+                  VarLookup lore
+               -> Pattern lore
+               -> Lambda lore
                -> [SubExp] -> [VName]
-               -> RuleM m ()
+               -> RuleM lore ()
 
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
@@ -70,11 +69,11 @@ foldClosedForm look pat lam accs arrs = do
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
-loopClosedForm :: MonadBinder m =>
-                  Pattern (Lore m)
-               -> [(FParam (Lore m),SubExp)]
-               -> Names -> SubExp -> Body (Lore m)
-               -> RuleM m ()
+loopClosedForm :: (Attributes lore, BinderOps lore) =>
+                  Pattern lore
+               -> [(FParam lore,SubExp)]
+               -> Names -> SubExp -> Body lore
+               -> RuleM lore ()
 loopClosedForm pat merge i bound body = do
   t <- case patternTypes pat of [Prim t] -> return t
                                 _ -> cannotSimplify
@@ -94,15 +93,15 @@ loopClosedForm pat merge i bound body = do
         mergenames = map paramName mergepat
         knownBnds = M.fromList $ zip mergenames mergeexp
 
-checkResults :: MonadBinder m =>
+checkResults :: (Attributes lore, BinderOps lore) =>
                 [VName]
              -> SubExp
              -> Names
              -> M.Map VName SubExp
              -> [VName] -- ^ Lambda-bound
-             -> Body (Lore m)
+             -> Body lore
              -> [SubExp]
-             -> RuleM m (Body (Lore m))
+             -> RuleM lore (Body lore)
 checkResults pat size untouchable knownBnds params body accs = do
   ((), bnds) <- collectStms $
                 zipWithM_ checkResult (zip pat res) (zip accparams accs)

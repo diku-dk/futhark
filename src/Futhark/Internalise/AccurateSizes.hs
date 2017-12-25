@@ -11,16 +11,12 @@ module Futhark.Internalise.AccurateSizes
   )
   where
 
-import Control.Applicative
 import Control.Monad
 import Data.Loc
 import qualified Data.Map.Strict as M
 
-import Prelude
-
 import Futhark.Construct
 import Futhark.Representation.AST
-import Futhark.MonadFreshNames
 
 shapeBody :: (HasScope lore m, MonadFreshNames m, BinderOps lore, Bindable lore) =>
              [VName] -> [Type] -> Body lore

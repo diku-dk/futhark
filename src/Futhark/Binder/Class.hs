@@ -20,6 +20,8 @@ module Futhark.Binder.Class
   , letBindNames'_
   , collectStms_
   , bodyBind
+
+  , module Futhark.MonadFreshNames
   )
 where
 

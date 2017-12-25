@@ -20,7 +20,6 @@ import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
           Pattern, PatElem, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType)
-import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.Kernels.Simplify
   (simplifyKernelOp, simplifyKernelExp)
@@ -32,10 +31,8 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Construct
 import Futhark.Optimise.Simplifier.Rules
-import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Lore
-import Futhark.MonadFreshNames
 import Futhark.Util
 
 simpleExplicitMemory :: Simplifier.SimpleOps ExplicitMemory
@@ -88,35 +85,19 @@ blockers = Engine.HoistBlockers {
   }
 
 
-callKernelRules :: (MonadBinder m,
-                    Aliased (Lore m),
-                    LetAttr (Lore m) ~ (VarWisdom, MemBound u),
-                    Lore m ~ Wise lore,
-                    ExplicitMemorish lore) => RuleBook m
+callKernelRules :: RuleBook (Wise ExplicitMemory)
 callKernelRules = standardRules <>
-                  RuleBook [copyCopyToCopy] []
+                  ruleBook [RuleBasicOp copyCopyToCopy] []
 
-inKernelRules :: (MonadBinder m,
-                  Aliased (Lore m),
-                  Lore m ~ Wise innerlore,
-                  Engine.SimplifiableLore innerlore,
-                  ExplicitMemorish innerlore,
-                  Op innerlore ~ MemOp inner,
-                  ExpAttr (Lore m) ~ (ExpWisdom, ())) => RuleBook m
+inKernelRules :: RuleBook (Wise InKernel)
 inKernelRules = standardRules <>
-                RuleBook [copyCopyToCopy, unExistentialiseMemory] []
+                ruleBook [RuleBasicOp copyCopyToCopy, RuleIf unExistentialiseMemory] []
 
 -- | If a branch is returning some existential memory, but the size of
 -- the array is existential, then we can create a block of the proper
 -- size and always return there.
-unExistentialiseMemory :: (MonadBinder m,
-                           Lore m ~ Wise innerlore,
-                           Engine.SimplifiableLore innerlore,
-                           ExplicitMemorish innerlore,
-                           Op innerlore ~ MemOp inner,
-                           ExpAttr (Lore m) ~ (ExpWisdom, ())) =>
-                          TopDownRule m
-unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ifattr))
+unExistentialiseMemory :: TopDownRuleIf (Wise InKernel)
+unExistentialiseMemory _ pat _ (cond, tbranch, fbranch, ifattr)
   | fixable <- foldl hasConcretisableMemory mempty $ patternElements pat,
     not $ null fixable = do
 
@@ -172,14 +153,14 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ifattr))
               (pat_elem, mem, old_size, space) : fixable
           | otherwise =
               fixable
-unExistentialiseMemory _ _ = cannotSimplify
+unExistentialiseMemory _ _ _ _ = cannotSimplify
 
 -- | If we are copying something that is itself a copy, just copy the
 -- original one instead.
-copyCopyToCopy :: (MonadBinder m,
-                   LetAttr (Lore m) ~ (VarWisdom, MemBound u)) =>
-                  TopDownRule m
-copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (BasicOp (Copy v1)))
+copyCopyToCopy :: (BinderOps lore,
+                   LetAttr lore ~ (VarWisdom, MemBound u)) =>
+                  TopDownRuleBasicOp lore
+copyCopyToCopy vtable (pat@(Pattern [] [pat_elem])) _ (Copy v1)
   | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
 
     Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
@@ -195,11 +176,11 @@ copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (BasicOp (Copy v1)))
 
       certifying v1_cs $ letBind_ pat $ BasicOp $ Copy v2
 
-copyCopyToCopy vtable (Let pat _ (BasicOp (Copy v0)))
+copyCopyToCopy vtable pat _ (Copy v0)
   | Just (BasicOp (Rearrange perm v1), v0_cs) <- ST.lookupExp v0 vtable,
     Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable = do
       v0' <- certifying (v0_cs<>v1_cs) $
              letExp "rearrange_v0" $ BasicOp $ Rearrange perm v2
       letBind_ pat $ BasicOp $ Copy v0'
 
-copyCopyToCopy _ _ = cannotSimplify
+copyCopyToCopy _ _ _ _ = cannotSimplify

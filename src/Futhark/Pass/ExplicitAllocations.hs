@@ -83,7 +83,8 @@ type Allocable fromlore tolore =
    BodyAttr fromlore ~ (),
    BodyAttr tolore ~ (),
    ExpAttr tolore ~ (),
-   SizeSubst (Op tolore))
+   SizeSubst (Op tolore),
+   BinderOps tolore)
 
 -- | A mapping from chunk names to their maximum size.  XXX FIXME
 -- HACK: This is part of a hack to add loop-invariant allocations to
@@ -859,32 +860,55 @@ allocInAccParameters = zipWithM allocInAccParameter
   where allocInAccParameter p attr = return p { paramAttr = attr }
 
 
-mkLetNamesB' :: (ExpAttr (Lore m) ~ (),
-                 Op (Lore m) ~ MemOp inner,
-                 MonadBinder m,
+mkLetNamesB' :: (Op (Lore m) ~ MemOp inner,
+                 MonadBinder m, ExpAttr (Lore m) ~ (),
                  Allocator (Lore m) (PatAllocM (Lore m))) =>
-                [(VName, Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
-mkLetNamesB' names e = do
+                ExpAttr (Lore m) -> [(VName, Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
+mkLetNamesB' attr names e = do
   scope <- askScope
   pat <- bindPatternWithAllocations scope names e
-  return $ Let pat (defAux ()) e
+  return $ Let pat (defAux attr) e
+
+mkLetNamesB'' :: (Op (Lore m) ~ MemOp inner, ExpAttr lore ~ (),
+                   HasScope (Engine.Wise lore) m, Allocator lore (PatAllocM lore),
+                   MonadBinder m, Engine.CanBeWise (Op lore)) =>
+                 [(VName, Bindage)]
+              -> Exp (Engine.Wise lore)
+              -> m (Stm (Engine.Wise lore))
+mkLetNamesB'' names e = do
+  scope <- Engine.removeScopeWisdom <$> askScope
+  (pat, prestms) <- runPatAllocM (patternWithAllocations names $ Engine.removeExpWisdom e) scope
+  mapM_ bindAllocStm prestms
+  let pat' = Engine.addWisdomToPattern pat e
+      attr = Engine.mkWiseExpAttr pat' () e
+  return $ Let pat' (defAux attr) e
 
 instance BinderOps ExplicitMemory where
   mkExpAttrB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
-  mkLetNamesB = mkLetNamesB'
+  mkLetNamesB = mkLetNamesB' ()
 
 instance BinderOps OutInKernel where
   mkExpAttrB _ _ = return ()
   mkBodyB stms res = return $ Body () stms res
-  mkLetNamesB = mkLetNamesB'
+  mkLetNamesB = mkLetNamesB' ()
+
+instance BinderOps (Engine.Wise ExplicitMemory) where
+  mkExpAttrB pat e = return $ Engine.mkWiseExpAttr pat () e
+  mkBodyB stms res = return $ Engine.mkWiseBody () stms res
+  mkLetNamesB = mkLetNamesB''
+
+instance BinderOps (Engine.Wise OutInKernel) where
+  mkExpAttrB pat e = return $ Engine.mkWiseExpAttr pat () e
+  mkBodyB stms res = return $ Engine.mkWiseBody () stms res
+  mkLetNamesB = mkLetNamesB''
 
 simplifiable :: (Engine.SimplifiableLore lore,
                  ExpAttr lore ~ (),
                  BodyAttr lore ~ (),
                  Op lore ~ MemOp inner,
                  Allocator lore (PatAllocM lore)) =>
-                (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner))
+                (inner -> Engine.SimpleM lore (Engine.OpWithWisdom inner, Stms (Engine.Wise lore)))
              -> SimpleOps lore
 simplifiable simplifyInnerOp =
   SimpleOps mkExpAttrS' mkBodyS' mkLetNamesS' simplifyOp
@@ -894,13 +918,15 @@ simplifiable simplifyInnerOp =
         mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
 
         mkLetNamesS' vtable names e = do
-          pat' <- bindPatternWithAllocations env names $
-                  removeExpWisdom e
-          return $ mkWiseLetStm pat' (defAux ()) e
+          (pat', stms) <- runBinder $ bindPatternWithAllocations env names $
+                          removeExpWisdom e
+          return (mkWiseLetStm pat' (defAux ()) e, stms)
           where env = removeScopeWisdom $ ST.toScope vtable
 
-        simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
-        simplifyOp (Inner k) = Inner <$> simplifyInnerOp k
+        simplifyOp (Alloc size space) =
+          (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
+        simplifyOp (Inner k) = do (k', hoisted) <- simplifyInnerOp k
+                                  return (Inner k', hoisted)
 
 bindPatternWithAllocations :: (MonadBinder m,
                                ExpAttr lore ~ (),

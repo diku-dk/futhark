@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * Better error message when ranges written with two dots
      (`[x..y]`).
 
+   * Shorter compile times for most programs.
+
 ### Removed
 
    * `futhark-dataset`: Removed `--binary-no-header` and

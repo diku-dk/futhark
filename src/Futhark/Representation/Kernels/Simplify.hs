@@ -34,7 +34,6 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
 import Futhark.Optimise.Simplifier.Rule
-import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Rephrase (castStm)
@@ -61,12 +60,12 @@ simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      RetType lore ~ RetType outerlore,
                      BranchType lore ~ BranchType outerlore) =>
                     Engine.SimpleOps lore -> Engine.Env lore
-                 -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore))
+                 -> Kernel lore -> Engine.SimpleM outerlore (Kernel (Wise lore), Stms (Wise outerlore))
 simplifyKernelOp ops env (Kernel desc space ts kbody) = do
   space' <- Engine.simplify space
   ts' <- mapM Engine.simplify ts
-  outer_vtable <- Engine.getVtable
-  ((kbody_res', kbody_bnds'), again, kbody_hoisted) <-
+  outer_vtable <- Engine.askVtable
+  (((kbody_stms, kbody_res), kbody_hoisted), again) <-
     Engine.subSimpleM ops env outer_vtable $ do
       par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
       Engine.localVtable (<>scope_vtable) $
@@ -76,28 +75,29 @@ simplifyKernelOp ops env (Kernel desc space ts kbody) = do
                         `Engine.orIf` Engine.isConsumed) $
         simplifyKernelBody kbody
   when again Engine.changed
-  mapM_ processHoistedStm kbody_hoisted
-  return $ Kernel desc space' ts' $ mkWiseKernelBody () kbody_bnds' kbody_res'
+  kbody_hoisted' <- mapM processHoistedStm kbody_hoisted
+  return (Kernel desc space' ts' $ mkWiseKernelBody () kbody_stms kbody_res,
+          kbody_hoisted')
   where scope_vtable = ST.fromScope scope
         scope = scopeOfKernelSpace space
         bound_here = S.fromList $ M.keys scope
 
-simplifyKernelOp _ _ (GetSize key size_class) = return $ GetSize key size_class
-simplifyKernelOp _ _ (GetSizeMax size_class) = return $ GetSizeMax size_class
+simplifyKernelOp _ _ (GetSize key size_class) = return (GetSize key size_class, mempty)
+simplifyKernelOp _ _ (GetSizeMax size_class) = return (GetSizeMax size_class, mempty)
 
-processHoistedStm :: (PrettyLore from, MonadBinder m, ExpAttr from ~ ExpAttr (Lore m),
-                      BodyAttr from ~ BodyAttr (Lore m),
-                      RetType from ~ RetType (Lore m),
-                      BranchType from ~ BranchType (Lore m),
-                      LetAttr from ~ LetAttr (Lore m),
-                      FParamAttr from ~ FParamAttr (Lore m),
-                      LParamAttr from ~ LParamAttr (Lore m)) =>
-                     Stm from -> m ()
+processHoistedStm :: (Monad m,
+                      PrettyLore from,
+                      ExpAttr from ~ ExpAttr to,
+                      BodyAttr from ~ BodyAttr to,
+                      RetType from ~ RetType to,
+                      BranchType from ~ BranchType to,
+                      LetAttr from ~ LetAttr to,
+                      FParamAttr from ~ FParamAttr to,
+                      LParamAttr from ~ LParamAttr to) =>
+                     Stm from -> m (Stm to)
 processHoistedStm bnd
-  | Just bnd' <- castStm bnd =
-      addStm bnd'
-  | otherwise =
-      fail $ "Cannot hoist binding: " ++ pretty bnd
+  | Just bnd' <- castStm bnd = return bnd'
+  | otherwise                = fail $ "Cannot hoist binding: " ++ pretty bnd
 
 mkWiseKernelBody :: (Attributes lore, CanBeWise (Op lore)) =>
                     BodyAttr lore -> Stms (Wise lore) -> [KernelResult] -> KernelBody (Wise lore)
@@ -120,40 +120,37 @@ instance Engine.Simplifiable SplitOrdering where
     SplitStrided <$> Engine.simplify stride
 
 simplifyKernelExp :: Engine.SimplifiableLore lore =>
-                     KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore))
+                     KernelExp lore -> Engine.SimpleM lore (KernelExp (Wise lore), Stms (Wise lore))
 
 simplifyKernelExp (SplitSpace o w i elems_per_thread) =
-  SplitSpace
-  <$> Engine.simplify o
-  <*> Engine.simplify w
-  <*> Engine.simplify i
-  <*> Engine.simplify elems_per_thread
+  (,) <$> (SplitSpace <$> Engine.simplify o <*> Engine.simplify w
+           <*> Engine.simplify i <*> Engine.simplify elems_per_thread)
+      <*> pure mempty
 
 simplifyKernelExp (Combine cspace ts active body) = do
-  (body_res', body_bnds') <-
+  ((body_stms', body_res'), hoisted) <-
     Engine.blockIf Engine.isNotSafe $
     Engine.simplifyBody (map (const Observe) ts) body
-  body' <- mkBodyM body_bnds' body_res'
-  Combine
-    <$> mapM Engine.simplify cspace
-    <*> mapM Engine.simplify ts
-    <*> mapM Engine.simplify active
-    <*> pure body'
+  body' <- Engine.constructBody body_stms' body_res'
+  (,) <$> (Combine <$> mapM Engine.simplify cspace
+           <*> mapM Engine.simplify ts
+           <*> mapM Engine.simplify active
+           <*> pure body') <*> pure hoisted
 
 simplifyKernelExp (GroupReduce w lam input) = do
   arrs' <- mapM Engine.simplify arrs
   nes' <- mapM Engine.simplify nes
   w' <- Engine.simplify w
-  lam' <- Engine.simplifyLambdaSeq lam (Just nes') (map (const Nothing) arrs')
-  return $ GroupReduce w' lam' $ zip nes' arrs'
+  (lam', hoisted) <- Engine.simplifyLambdaSeq lam (map (const Nothing) arrs')
+  return (GroupReduce w' lam' $ zip nes' arrs', hoisted)
   where (nes,arrs) = unzip input
 
 simplifyKernelExp (GroupScan w lam input) = do
   w' <- Engine.simplify w
   nes' <- mapM Engine.simplify nes
   arrs' <- mapM Engine.simplify arrs
-  lam' <- Engine.simplifyLambdaSeq lam (Just nes') (map (const Nothing) arrs')
-  return $ GroupScan w' lam' $ zip nes' arrs'
+  (lam', hoisted) <- Engine.simplifyLambdaSeq lam (map (const Nothing) arrs')
+  return (GroupScan w' lam' $ zip nes' arrs', hoisted)
   where (nes,arrs) = unzip input
 
 simplifyKernelExp (GroupStream w maxchunk lam accs arrs) = do
@@ -161,25 +158,25 @@ simplifyKernelExp (GroupStream w maxchunk lam accs arrs) = do
   maxchunk' <- Engine.simplify maxchunk
   accs' <- mapM Engine.simplify accs
   arrs' <- mapM Engine.simplify arrs
-  lam' <- simplifyGroupStreamLambda lam w' maxchunk' arrs'
-  return $ GroupStream w' maxchunk' lam' accs' arrs'
+  (lam', hoisted) <- simplifyGroupStreamLambda lam w' maxchunk' arrs'
+  return (GroupStream w' maxchunk' lam' accs' arrs', hoisted)
 
 simplifyKernelBody :: Engine.SimplifiableLore lore =>
                       KernelBody lore
-                   -> Engine.SimpleM lore [KernelResult]
-simplifyKernelBody (KernelBody _ stms res) = do
-  mapM_ Engine.simplifyStm stms
-  mapM Engine.simplify res
+                   -> Engine.SimpleM lore (Engine.SimplifiedBody lore [KernelResult])
+simplifyKernelBody (KernelBody _ stms res) =
+  Engine.simplifyStms stms $ do res' <- mapM Engine.simplify res
+                                return ((res', UT.usages $ freeIn res'), mempty)
 
 simplifyGroupStreamLambda :: Engine.SimplifiableLore lore =>
                              GroupStreamLambda lore
                           -> SubExp -> SubExp -> [VName]
-                          -> Engine.SimpleM lore (GroupStreamLambda (Wise lore))
+                          -> Engine.SimpleM lore (GroupStreamLambda (Wise lore), Stms (Wise lore))
 simplifyGroupStreamLambda lam w max_chunk arrs = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
       bound_here = S.fromList $ block_size : block_offset :
                    map paramName (acc_params ++ arr_params)
-  (body_res', body_bnds') <-
+  ((body_stms', body_res'), hoisted) <-
     Engine.enterLoop $
     Engine.bindLoopVar block_size Int32 max_chunk $
     Engine.bindLoopVar block_offset Int32 w $
@@ -189,8 +186,8 @@ simplifyGroupStreamLambda lam w max_chunk arrs = do
     Engine.simplifyBody (repeat Observe) body
   acc_params' <- mapM (Engine.simplifyParam Engine.simplify) acc_params
   arr_params' <- mapM (Engine.simplifyParam Engine.simplify) arr_params
-  body' <- mkBodyM body_bnds' body_res'
-  return $ GroupStreamLambda block_size block_offset acc_params' arr_params' body'
+  body' <- Engine.constructBody body_stms' body_res'
+  return (GroupStreamLambda block_size block_offset acc_params' arr_params' body', hoisted)
 
 instance Engine.Simplifiable KernelSpace where
   simplify (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
@@ -238,16 +235,22 @@ instance Engine.Simplifiable WhichThreads where
   simplify (ThreadsPerGroup limit) =
     ThreadsPerGroup <$> mapM Engine.simplify limit
 
-kernelRules :: (MonadBinder m,
-                LocalScope (Lore m) m,
-                Lore m ~ Wise Kernels) => RuleBook m
-kernelRules = standardRules <>
-              RuleBook [ removeInvariantKernelResults ] [distributeKernelResults]
+instance BinderOps (Wise Kernels) where
+  mkExpAttrB = bindableMkExpAttrB
+  mkBodyB = bindableMkBodyB
+  mkLetNamesB = bindableMkLetNamesB
 
-fuseStreamIota :: (LocalScope (Lore m) m,
-                  MonadBinder m, Lore m ~ Wise InKernel) =>
-                 TopDownRule m
-fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
+instance BinderOps (Wise InKernel) where
+  mkExpAttrB = bindableMkExpAttrB
+  mkBodyB = bindableMkBodyB
+  mkLetNamesB = bindableMkLetNamesB
+
+kernelRules :: RuleBook (Wise Kernels)
+kernelRules = standardRules <>
+              ruleBook [RuleOp removeInvariantKernelResults] [RuleOp distributeKernelResults]
+
+fuseStreamIota :: TopDownRuleOp (Wise InKernel)
+fuseStreamIota vtable pat _ (GroupStream w max_chunk lam accs arrs)
   | ([(iota_cs, iota_param, iota_start, iota_stride, iota_t)], params_and_arrs) <-
       partitionEithers $ zipWith (isIota vtable) (groupStreamArrParams lam) arrs = do
 
@@ -269,7 +272,7 @@ fuseStreamIota vtable (Let pat _ (Op (GroupStream w max_chunk lam accs arrs)))
                        groupStreamLambdaBody = body'
                      }
       letBind_ pat $ Op $ GroupStream w max_chunk lam' accs arrs'
-fuseStreamIota _ _ = cannotSimplify
+fuseStreamIota _ _ _ _ = cannotSimplify
 
 isIota :: ST.SymbolTable lore -> a -> VName
        -> Either (Certificates, a, SubExp, SubExp, IntType) (a, VName)
@@ -281,13 +284,9 @@ isIota vtable chunk arr
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
-removeInvariantKernelResults :: (LocalScope (Lore m) m,
-                                 MonadBinder m,
-                                 Lore m ~ Wise Kernels) =>
-                                TopDownRule m
-
-removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
-                                      (Op (Kernel desc space ts (KernelBody _ kstms kres)))) = do
+removeInvariantKernelResults :: TopDownRuleOp (Wise Kernels)
+removeInvariantKernelResults vtable (Pattern [] kpes) attr
+                                    (Kernel desc space ts (KernelBody _ kstms kres)) = do
   (ts', kpes', kres') <-
     unzip3 <$> filterM checkForInvarianceResult (zip3 ts kpes kres)
 
@@ -318,16 +317,13 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
                 _ -> return True
         checkForInvarianceResult _ =
           return True
-removeInvariantKernelResults _ _ = cannotSimplify
+removeInvariantKernelResults _ _ _ _ = cannotSimplify
 
 -- Some kernel results can be moved outside the kernel, which can
 -- simplify further analysis.
-distributeKernelResults :: (LocalScope (Lore m) m, MonadBinder m,
-                            Lore m ~ Wise Kernels) =>
-                           BottomUpRule m
+distributeKernelResults :: BottomUpRuleOp (Wise Kernels)
 distributeKernelResults (vtable, used)
-  (Let (Pattern [] kpes) attr
-    (Op (Kernel desc kspace kts (KernelBody _ kstms kres)))) = do
+  (Pattern [] kpes) attr (Kernel desc kspace kts (KernelBody _ kstms kres)) = do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.
@@ -377,15 +373,12 @@ distributeKernelResults (vtable, used)
               Just (kpe, kpes'', kts'', kres'')
         _ -> Nothing
       where matches (_, _, kre) = kre == ThreadsReturn ThreadsInSpace (Var $ patElemName pe)
-distributeKernelResults _ _ = cannotSimplify
+distributeKernelResults _ _ _ _ = cannotSimplify
 
-simplifyKnownIterationStream :: (LocalScope (Lore m) m,
-                                 MonadBinder m, Lore m ~ Wise InKernel) =>
-                                TopDownRule m
+simplifyKnownIterationStream :: TopDownRuleOp (Wise InKernel)
 -- Remove GroupStreams over single-element arrays.  Not much to stream
 -- here, and no information to exploit.
-simplifyKnownIterationStream _ (Let pat _
-                                (Op (GroupStream (Constant v) _ lam accs arrs)))
+simplifyKnownIterationStream _ pat _ (GroupStream (Constant v) _ lam accs arrs)
   | oneIsh v = do
       let GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
 
@@ -404,12 +397,10 @@ simplifyKnownIterationStream _ (Let pat _
       res <- bodyBind body
       forM_ (zip (patternElements pat) res) $ \(pe,r) ->
         letBindNames'_ [patElemName pe] $ BasicOp $ SubExp r
-simplifyKnownIterationStream _ _ = cannotSimplify
+simplifyKnownIterationStream _ _ _ _ = cannotSimplify
 
-removeUnusedStreamInputs :: (LocalScope (Lore m) m,
-                              MonadBinder m, Lore m ~ Wise InKernel) =>
-                            TopDownRule m
-removeUnusedStreamInputs _ (Let pat _ (Op (GroupStream w maxchunk lam accs arrs)))
+removeUnusedStreamInputs :: TopDownRuleOp (Wise InKernel)
+removeUnusedStreamInputs _ pat _ (GroupStream w maxchunk lam accs arrs)
   | (used,unused) <- partition (isUsed . paramName . fst) $ zip arr_params arrs,
     not $ null unused = do
       let (arr_params', arrs') = unzip used
@@ -418,12 +409,10 @@ removeUnusedStreamInputs _ (Let pat _ (Op (GroupStream w maxchunk lam accs arrs)
   where GroupStreamLambda chunk_size chunk_offset acc_params arr_params body = lam
 
         isUsed = (`S.member` freeInBody body)
-removeUnusedStreamInputs _ _ = cannotSimplify
+removeUnusedStreamInputs _ _ _ _ = cannotSimplify
 
-inKernelRules :: (MonadBinder m,
-                  LocalScope (Lore m) m,
-                  Lore m ~ Wise InKernel) => RuleBook m
+inKernelRules :: RuleBook (Wise InKernel)
 inKernelRules = standardRules <>
-                RuleBook [fuseStreamIota,
-                          simplifyKnownIterationStream,
-                          removeUnusedStreamInputs] []
+                ruleBook [RuleOp fuseStreamIota,
+                          RuleOp simplifyKnownIterationStream,
+                          RuleOp removeUnusedStreamInputs] []
