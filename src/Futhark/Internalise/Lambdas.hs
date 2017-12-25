@@ -64,7 +64,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
   | null $ I.lambdaReturnType sizefun = return ()
   | otherwise = do
       let size_args = replicate (length $ lambdaParams sizefun) Nothing
-      sizefun' <- deadCodeElimLambda <$> simplifyLambda sizefun Nothing size_args
+      sizefun' <- deadCodeElimLambda <$> simplifyLambda sizefun size_args
       let sizefun_safe =
             all (I.safeExp . I.stmExp) $ I.bodyStms $ I.lambdaBody sizefun'
           sizefun_arg_invariant =

@@ -69,6 +69,7 @@ module Futhark.Representation.AST.Syntax
   , oneStm
   , stmsFromList
   , stmsToList
+  , stmsHead
   )
   where
 
@@ -131,6 +132,10 @@ stmsFromList = Seq.fromList
 
 stmsToList :: Stms lore -> [Stm lore]
 stmsToList = toList
+
+stmsHead :: Stms lore -> Maybe (Stm lore, Stms lore)
+stmsHead stms = case Seq.viewl stms of stm Seq.:< stms' -> Just (stm, stms')
+                                       Seq.EmptyL       -> Nothing
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExp]

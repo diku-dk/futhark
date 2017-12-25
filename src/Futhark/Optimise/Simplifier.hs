@@ -35,14 +35,14 @@ import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
 import Futhark.Optimise.Simplifier.Engine
-  (SimplifiableLore, HoistBlockers(..), noExtraHoistBlockers)
+  (SimplifiableLore, HoistBlockers(..), noExtraHoistBlockers, Wise)
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
 simplifyProgWithRules :: (MonadFreshNames m, SimplifiableLore lore) =>
                          SimpleOps lore
-                      -> RuleBook (SimpleM lore)
+                      -> RuleBook (Wise lore)
                       -> HoistBlockers lore
                       -> Prog lore -> m (Prog lore)
 simplifyProgWithRules simpl rules blockers =
@@ -52,7 +52,7 @@ simplifyProgWithRules simpl rules blockers =
 -- | Simplify just a single function declaration.
 simplifyFunWithRules :: (MonadFreshNames m, SimplifiableLore lore) =>
                         SimpleOps lore
-                     -> RuleBook (SimpleM lore)
+                     -> RuleBook (Wise lore)
                      -> HoistBlockers lore
                      -> FunDef lore
                      -> m (FunDef lore)
@@ -63,19 +63,18 @@ simplifyFunWithRules simpl rules blockers =
 -- | Simplify just a single 'Lambda'.
 simplifyLambdaWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
                            SimpleOps lore
-                        -> RuleBook (SimpleM lore)
+                        -> RuleBook (Wise lore)
                         -> HoistBlockers lore
                         -> Lambda lore
-                        -> Maybe [SubExp]
                         -> [Maybe VName]
                         -> m (Lambda lore)
-simplifyLambdaWithRules simpl rules blockers lam nes =
-  fmap removeLambdaWisdom . simplifyLambda simpl rules blockers lam nes
+simplifyLambdaWithRules simpl rules blockers lam =
+  fmap removeLambdaWisdom . simplifyLambda simpl rules blockers lam
 
 -- | Simplify a list of 'Stm's.
 simplifyStmsWithRules :: (MonadFreshNames m, HasScope lore m, SimplifiableLore lore) =>
                              SimpleOps lore
-                          -> RuleBook (SimpleM lore)
+                          -> RuleBook (Wise lore)
                           -> HoistBlockers lore
                           -> Stms lore
                           -> m (Stms lore)

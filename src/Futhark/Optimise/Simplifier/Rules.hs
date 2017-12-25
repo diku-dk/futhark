@@ -26,7 +26,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplifier.ClosedForm
 import Futhark.Optimise.Simplifier.Rule
-import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Analysis.PrimExp.Convert
@@ -38,46 +37,46 @@ import Futhark.Util
 
 import Prelude hiding (all)
 
-topDownRules :: (MonadBinder m, Aliased (Lore m)) => TopDownRules m
-topDownRules = [ hoistLoopInvariantMergeVariables
-               , simplifyClosedFormLoop
-               , simplifKnownIterationLoop
-               , simplifyLoopVariables
-               , simplifyRearrange
-               , simplifyRotate
+topDownRules :: (BinderOps lore, Aliased lore) => [TopDownRule lore]
+topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
+               , RuleDoLoop simplifyClosedFormLoop
+               , RuleDoLoop simplifKnownIterationLoop
+               , RuleDoLoop simplifyLoopVariables
+               , RuleBasicOp simplifyRearrange
+               , RuleBasicOp simplifyRotate
                , letRule simplifyBinOp
                , letRule simplifyCmpOp
                , letRule simplifyUnOp
                , letRule simplifyConvOp
                , letRule simplifyAssert
                , letRule copyScratchToScratch
-               , constantFoldPrimFun
-               , simplifyIndexIntoReshape
-               , removeEmptySplits
-               , removeSingletonSplits
-               , evaluateBranch
-               , simplifyBoolBranch
-               , hoistBranchInvariant
-               , simplifyScalExp
+               , RuleGeneric constantFoldPrimFun
+               , RuleBasicOp simplifyIndexIntoReshape
+               , RuleBasicOp removeEmptySplits
+               , RuleBasicOp removeSingletonSplits
+               , RuleIf evaluateBranch
+               , RuleIf simplifyBoolBranch
+               , RuleIf hoistBranchInvariant
+               , RuleBasicOp simplifyScalExp
                , letRule simplifyIdentityReshape
                , letRule simplifyReshapeReshape
                , letRule simplifyReshapeScratch
                , letRule simplifyReshapeReplicate
                , letRule improveReshape
-               , removeScratchValue
-               , simplifyFallbackBranch
-               , removeIdentityInPlace
-               , removeFullInPlace
-               , simplifyBranchResultComparison
-               , simplifyReplicate
-               , arrayLitToReplicate
+               , RuleBasicOp removeScratchValue
+               , RuleIf simplifyFallbackBranch
+               , RuleGeneric removeIdentityInPlace
+               , RuleGeneric removeFullInPlace
+               , RuleBasicOp simplifyBranchResultComparison
+               , RuleBasicOp simplifyReplicate
+               , RuleBasicOp arrayLitToReplicate
                ]
 
-bottomUpRules :: MonadBinder m => BottomUpRules m
-bottomUpRules = [ removeRedundantMergeVariables
-                , removeDeadBranchResult
-                , simplifyIndex
-                , simplifyConcat
+bottomUpRules :: BinderOps lore => [BottomUpRule lore]
+bottomUpRules = [ RuleDoLoop removeRedundantMergeVariables
+                , RuleIf removeDeadBranchResult
+                , RuleBasicOp simplifyIndex
+                , RuleBasicOp simplifyConcat
                 ]
 
 asInt32PrimExp :: PrimExp v -> PrimExp v
@@ -90,8 +89,8 @@ asInt32PrimExp pe
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (MonadBinder m, Aliased (Lore m)) => RuleBook m
-standardRules = RuleBook topDownRules bottomUpRules
+standardRules :: (BinderOps lore, Aliased lore) => RuleBook lore
+standardRules = ruleBook topDownRules bottomUpRules
 
 -- This next one is tricky - it's easy enough to determine that some
 -- loop result is not used after the loop, but here, we must also make
@@ -100,8 +99,8 @@ standardRules = RuleBook topDownRules bottomUpRules
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
-removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
-removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
+removeRedundantMergeVariables :: BinderOps lore => BottomUpRuleDoLoop lore
+removeRedundantMergeVariables (_, used) pat _ (ctx, val, form, body)
   | not $ all (usedAfterLoop . fst) val,
     null ctx = -- FIXME: things get tricky if we can remove all vals
                -- but some ctxs are still used.  We take the easy way
@@ -166,7 +165,7 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
           | unique (paramDeclType p),
             Var v <- e            = ([paramName p], BasicOp $ Copy v)
           | otherwise             = ([paramName p], BasicOp $ SubExp e)
-removeRedundantMergeVariables _ _ =
+removeRedundantMergeVariables _ _ _ _ =
   cannotSimplify
 
 findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
@@ -189,8 +188,8 @@ findNecessaryForReturned usedAfterLoop merge_and_res allDependencies =
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: forall m.MonadBinder m => TopDownRule m
-hoistLoopInvariantMergeVariables _ (Let pat _ (DoLoop ctx val form loopbody)) =
+hoistLoopInvariantMergeVariables :: BinderOps lore => TopDownRuleDoLoop lore
+hoistLoopInvariantMergeVariables _ pat _ (ctx, val, form, loopbody) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $
@@ -262,7 +261,6 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (DoLoop ctx val form loopbody)) =
         invariantOrNotMergeParam namesOfInvariant name =
           not (name `S.member` namesOfMergeParams) ||
           name `S.member` namesOfInvariant
-hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
@@ -270,27 +268,24 @@ type VarLookup lore = VName -> Maybe (Exp lore, Certificates)
 -- | A function that, given a subexpression, returns its type.
 type TypeLookup = SubExp -> Maybe Type
 
-type LetTopDownRule lore u = VarLookup lore -> TypeLookup
-                             -> BasicOp lore -> Maybe (BasicOp lore, Certificates)
+type LetTopDownRule lore = VarLookup lore -> TypeLookup
+                           -> BasicOp lore -> Maybe (BasicOp lore, Certificates)
 
-letRule :: MonadBinder m => LetTopDownRule (Lore m) u -> TopDownRule m
-letRule rule vtable (Let pat aux (BasicOp op)) = do
+letRule :: BinderOps lore => LetTopDownRule lore -> TopDownRule lore
+letRule rule = RuleBasicOp $ \vtable pat aux op -> do
+  let defOf = (`ST.lookupExp` vtable)
+      seType (Var v) = ST.lookupType v vtable
+      seType (Constant v) = Just $ Prim $ primValueType v
   (op', cs) <- liftMaybe $ rule defOf seType op
   certifying (cs <> stmAuxCerts aux) $ letBind_ pat $ BasicOp op'
-  where defOf = (`ST.lookupExp` vtable)
-        seType (Var v) = ST.lookupType v vtable
-        seType (Constant v) = Just $ Prim $ primValueType v
-letRule _ _ _ =
-  cannotSimplify
 
-simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
-simplifyClosedFormLoop _ (Let pat _ (DoLoop [] val (ForLoop i _ bound []) body)) =
+simplifyClosedFormLoop :: BinderOps lore => TopDownRuleDoLoop lore
+simplifyClosedFormLoop _ pat _ ([], val, ForLoop i _ bound [], body) =
   loopClosedForm pat val (S.singleton i) bound body
-simplifyClosedFormLoop _ _ = cannotSimplify
+simplifyClosedFormLoop _ _ _ _ = cannotSimplify
 
-simplifyLoopVariables :: (MonadBinder m, Aliased (Lore m)) => TopDownRule m
-simplifyLoopVariables vtable (Let pat _
-                              (DoLoop ctx val form@(ForLoop i it num_iters loop_vars) body))
+simplifyLoopVariables :: (BinderOps lore, Aliased lore) => TopDownRuleDoLoop lore
+simplifyLoopVariables vtable pat _ (ctx, val, form@(ForLoop i it num_iters loop_vars), body)
   | simplifiable <- map checkIfSimplifiable loop_vars,
     not $ all isNothing simplifiable = do
       -- Check if the simplifications throw away more information than
@@ -345,12 +340,10 @@ simplifyLoopVariables vtable (Let pat _
                   return (Nothing, x_stms')
 
             _ -> return (Just (p,arr), mempty)
-simplifyLoopVariables _ _ = cannotSimplify
+simplifyLoopVariables _ _ _ _ = cannotSimplify
 
-simplifKnownIterationLoop :: MonadBinder m => TopDownRule m
-simplifKnownIterationLoop _ (Let pat _
-                                (DoLoop ctx val
-                                 (ForLoop i it (Constant iters) loop_vars) body))
+simplifKnownIterationLoop :: BinderOps lore => TopDownRuleDoLoop lore
+simplifKnownIterationLoop _ pat _ (ctx, val, ForLoop i it (Constant iters) loop_vars, body)
   | zeroIsh iters = do
       let bindResult p r = letBindNames' [patElemName p] $ BasicOp $ SubExp r
       zipWithM_ bindResult (patternContextElements pat) (map snd ctx)
@@ -378,23 +371,23 @@ simplifKnownIterationLoop _ (Let pat _
     letBind_ (Pattern [] [pat_elem]) $ BasicOp $ SubExp $ Var v
   where asVar (Var v)      = return v
         asVar (Constant v) = letExp "named" $ BasicOp $ SubExp $ Constant v
-simplifKnownIterationLoop _ _ =
+simplifKnownIterationLoop _ _ _ _ =
   cannotSimplify
 
-simplifyRearrange :: MonadBinder m => TopDownRule m
+simplifyRearrange :: BinderOps lore => TopDownRuleBasicOp lore
 
 -- Handle identity permutation.
-simplifyRearrange _ (Let pat _ (BasicOp (Rearrange perm v)))
+simplifyRearrange _ pat _ (Rearrange perm v)
   | sort perm == perm =
       letBind_ pat $ BasicOp $ SubExp $ Var v
 
-simplifyRearrange vtable (Let pat (StmAux cs _) (BasicOp (Rearrange perm v)))
+simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v)
   | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
       -- Rearranging a rearranging: compose the permutations.
       certifying (cs<>v_cs) $
       letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm2) e
 
-simplifyRearrange vtable (Let pat (StmAux cs _) (BasicOp (Rearrange perm v)))
+simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v)
   | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = do
       let offsets' = rearrangeShape (rearrangeInverse perm3) offsets
@@ -402,7 +395,7 @@ simplifyRearrange vtable (Let pat (StmAux cs _) (BasicOp (Rearrange perm v)))
       certifying (cs<>v_cs<>v2_cs) $
         letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm3) rearrange_rotate
 
-simplifyRearrange vtable (Let pat (StmAux cs1 _) (BasicOp (Rearrange perm1 v1)))
+simplifyRearrange vtable pat (StmAux cs1 _) (Rearrange perm1 v1)
   | Just (to_drop, to_take, cs2, 0, v2) <- isDropTake v1 vtable,
     Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable,
     dim1:_ <- perm1,
@@ -414,7 +407,7 @@ simplifyRearrange vtable (Let pat (StmAux cs1 _) (BasicOp (Rearrange perm1 v1)))
       certifying v2_cs $ letBind_ pat $ BasicOp $ SubExp v
 
 -- Rearranging a replicate where the outer dimension is left untouched.
-simplifyRearrange vtable (Let pat (StmAux cs _) (BasicOp (Rearrange perm v1)))
+simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v1)
   | Just (BasicOp (Replicate dims (Var v2)), v1_cs) <- ST.lookupExp v1 vtable,
     num_dims <- shapeRank dims,
     (rep_perm, rest_perm) <- splitAt num_dims perm,
@@ -424,7 +417,7 @@ simplifyRearrange vtable (Let pat (StmAux cs _) (BasicOp (Rearrange perm v1)))
            BasicOp $ Rearrange (map (subtract num_dims) rest_perm) v2
       letBind_ pat $ BasicOp $ Replicate dims v
 
-simplifyRearrange _ _ = cannotSimplify
+simplifyRearrange _ _ _ _ = cannotSimplify
 
 isDropTake :: VName -> ST.SymbolTable lore
            -> Maybe (PrimExp VName, PrimExp VName,
@@ -437,12 +430,12 @@ isDropTake v vtable = do
           cs, dim, v')
   where offs = sum . map (primExpFromSubExp int32)
 
-simplifyRotate :: MonadBinder m => TopDownRule m
+simplifyRotate :: BinderOps lore => TopDownRuleBasicOp lore
 -- A zero-rotation is identity.
-simplifyRotate _ (Let pat _ (BasicOp (Rotate offsets v)))
+simplifyRotate _ pat _ (Rotate offsets v)
   | all isCt0 offsets = letBind_ pat $ BasicOp $ SubExp $ Var v
 
-simplifyRotate vtable (Let pat (StmAux cs _) (BasicOp (Rotate offsets v)))
+simplifyRotate vtable pat (StmAux cs _) (Rotate offsets v)
   | Just (BasicOp (Rearrange perm v2), v_cs) <- ST.lookupExp v vtable,
     Just (BasicOp (Rotate offsets2 v3), v2_cs) <- ST.lookupExp v2 vtable = do
       let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
@@ -453,30 +446,30 @@ simplifyRotate vtable (Let pat (StmAux cs _) (BasicOp (Rotate offsets v)))
       certifying (v_cs <> v2_cs) $
         letBind_ pat $ BasicOp $ Rotate offsets' rotate_rearrange
 
-simplifyRotate _ _ = cannotSimplify
+simplifyRotate _ _ _ _ = cannotSimplify
 
-simplifyReplicate :: MonadBinder m => TopDownRule m
-simplifyReplicate _ (Let pat _ (BasicOp (Replicate (Shape []) se@Constant{}))) =
+simplifyReplicate :: BinderOps lore => TopDownRuleBasicOp lore
+simplifyReplicate _ pat _ (Replicate (Shape []) se@Constant{}) =
   letBind_ pat $ BasicOp $ SubExp se
-simplifyReplicate _ (Let pat _ (BasicOp (Replicate (Shape []) (Var v)))) = do
+simplifyReplicate _ pat _ (Replicate (Shape []) (Var v)) = do
   v_t <- lookupType v
   letBind_ pat $ BasicOp $ if primType v_t
                           then SubExp $ Var v
                           else Copy v
-simplifyReplicate vtable (Let pat _ (BasicOp (Replicate shape (Var v))))
+simplifyReplicate vtable pat _  (Replicate shape (Var v))
   | Just (BasicOp (Replicate shape2 se), cs) <- ST.lookupExp v vtable =
       certifying cs $ letBind_ pat $ BasicOp $ Replicate (shape<>shape2) se
-simplifyReplicate _ _ = cannotSimplify
+simplifyReplicate _ _ _ _ = cannotSimplify
 
 -- | Turn array literals with identical elements into replicates.
-arrayLitToReplicate :: MonadBinder m => TopDownRule m
-arrayLitToReplicate _ (Let pat _ (BasicOp (ArrayLit (se:ses) _)))
+arrayLitToReplicate :: BinderOps lore => TopDownRuleBasicOp lore
+arrayLitToReplicate _ pat _ (ArrayLit (se:ses) _)
   | all (==se) ses =
     let n = constant (genericLength ses + 1 :: Int32)
     in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
-arrayLitToReplicate _ _ = cannotSimplify
+arrayLitToReplicate _ _ _ _ = cannotSimplify
 
-simplifyCmpOp :: LetTopDownRule lore u
+simplifyCmpOp :: LetTopDownRule lore
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
   | e1 == e2 = constRes $ BoolValue $
                case cmp of CmpEq{}  -> True
@@ -490,7 +483,7 @@ simplifyCmpOp _ _ (CmpOp cmp (Constant v1) (Constant v2)) =
   constRes =<< BoolValue <$> doCmpOp cmp v1 v2
 simplifyCmpOp _ _ _ = Nothing
 
-simplifyBinOp :: LetTopDownRule lore u
+simplifyBinOp :: LetTopDownRule lore
 
 simplifyBinOp _ _ (BinOp op (Constant v1) (Constant v2))
   | Just res <- doBinOp op v1 v2 =
@@ -625,7 +618,7 @@ constRes = Just . (,mempty) . SubExp . Constant
 subExpRes :: SubExp -> Maybe (BasicOp lore, Certificates)
 subExpRes = Just . (,mempty) . SubExp
 
-simplifyUnOp :: LetTopDownRule lore u
+simplifyUnOp :: LetTopDownRule lore
 simplifyUnOp _ _ (UnOp op (Constant v)) =
   constRes =<< doUnOp op v
 simplifyUnOp defOf _ (UnOp Not (Var v))
@@ -634,7 +627,7 @@ simplifyUnOp defOf _ (UnOp Not (Var v))
 simplifyUnOp _ _ _ =
   Nothing
 
-simplifyConvOp :: LetTopDownRule lore u
+simplifyConvOp :: LetTopDownRule lore
 simplifyConvOp _ _ (ConvOp op (Constant v)) =
   constRes =<< doConvOp op v
 simplifyConvOp _ _ (ConvOp op se)
@@ -664,13 +657,13 @@ simplifyConvOp _ _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
-simplifyAssert :: LetTopDownRule lore u
+simplifyAssert :: LetTopDownRule lore
 simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
   constRes Checked
 simplifyAssert _ _ _ =
   Nothing
 
-constantFoldPrimFun :: MonadBinder m => TopDownRule m
+constantFoldPrimFun :: BinderOps lore => TopDownRuleGeneric lore
 constantFoldPrimFun _ (Let pat (StmAux cs _) (Apply fname args _ _))
   | Just args' <- mapM (isConst . fst) args,
     Just (_, _, fun) <- M.lookup (nameToString fname) primFuns,
@@ -680,8 +673,8 @@ constantFoldPrimFun _ (Let pat (StmAux cs _) (Apply fname args _ _))
         isConst _ = Nothing
 constantFoldPrimFun _ _ = cannotSimplify
 
-simplifyIndex :: MonadBinder m => BottomUpRule m
-simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) (StmAux cs _) (BasicOp (Index idd inds)))
+simplifyIndex :: BinderOps lore => BottomUpRuleBasicOp lore
+simplifyIndex (vtable, used) (pat@(Pattern [] [pe])) (StmAux cs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed = do
       res <- m
       case res of
@@ -695,7 +688,7 @@ simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) (StmAux cs _) (BasicOp (
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
 
-simplifyIndex _ _ = cannotSimplify
+simplifyIndex _ _ _ _ = cannotSimplify
 
 data IndexResult = IndexResult Certificates VName (Slice SubExp)
                  | SubExpResult Certificates SubExp
@@ -873,8 +866,8 @@ simplifyIndexing vtable seType idd inds consuming =
     where defOf v = do (BasicOp op, def_cs) <- ST.lookupExp v vtable
                        return (op, def_cs)
 
-simplifyIndexIntoReshape :: MonadBinder m => TopDownRule m
-simplifyIndexIntoReshape vtable (Let pat (StmAux cs _) (BasicOp (Index idd slice)))
+simplifyIndexIntoReshape :: BinderOps lore => TopDownRuleBasicOp lore
+simplifyIndexIntoReshape vtable pat (StmAux cs _) (Index idd slice)
   | Just inds <- sliceIndices slice,
     Just (BasicOp (Reshape newshape idd2), idd_cs) <- ST.lookupExp idd vtable,
     length newshape == length inds =
@@ -893,11 +886,11 @@ simplifyIndexIntoReshape vtable (Let pat (StmAux cs _) (BasicOp (Index idd slice
             mapM (letSubExp "new_index" <=< toExp . asInt32PrimExp) new_inds
           certifying (cs<>idd_cs) $
             letBind_ pat $ BasicOp $ Index idd2 $ map DimFix new_inds'
-simplifyIndexIntoReshape _ _ =
+simplifyIndexIntoReshape _ _ _ _ =
   cannotSimplify
 
-removeEmptySplits :: MonadBinder m => TopDownRule m
-removeEmptySplits _ (Let pat (StmAux cs _) (BasicOp (Split i ns arr)))
+removeEmptySplits :: BinderOps lore => TopDownRuleBasicOp lore
+removeEmptySplits _ pat (StmAux cs _) (Split i ns arr)
   | (pointless,sane) <- partition (isCt0 . snd) $ zip (patternValueElements pat) ns,
     not (null pointless) = do
       rt <- rowType <$> lookupType arr
@@ -905,22 +898,22 @@ removeEmptySplits _ (Let pat (StmAux cs _) (BasicOp (Split i ns arr)))
         BasicOp $ Split i (map snd sane) arr
       forM_ pointless $ \(patElem,_) ->
         letBindNames' [patElemName patElem] $ BasicOp $ ArrayLit [] rt
-removeEmptySplits _ _ =
+removeEmptySplits _ _ _ _ =
   cannotSimplify
 
-removeSingletonSplits :: MonadBinder m => TopDownRule m
-removeSingletonSplits _ (Let pat _ (BasicOp (Split i [n] arr))) = do
+removeSingletonSplits :: BinderOps lore => TopDownRuleBasicOp lore
+removeSingletonSplits _ pat _ (Split i [n] arr) = do
   size <- arraySize i <$> lookupType arr
   if size == n then
     letBind_ pat $ BasicOp $ SubExp $ Var arr
     else cannotSimplify
-removeSingletonSplits _ _ =
+removeSingletonSplits _ _ _ _ =
   cannotSimplify
 
-simplifyConcat :: MonadBinder m => BottomUpRule m
+simplifyConcat :: BinderOps lore => BottomUpRuleBasicOp lore
 
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
-simplifyConcat (vtable, _) (Let pat _ (BasicOp (Concat i x xs new_d)))
+simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
   | Just r <- arrayRank <$> ST.lookupType x vtable,
     let perm = [i] ++ [0..i-1] ++ [i+1..r-1],
     Just (x',x_cs) <- transposedBy perm x,
@@ -936,7 +929,7 @@ simplifyConcat (vtable, _) (Let pat _ (BasicOp (Concat i x xs new_d)))
             _ -> Nothing
 
 -- concat of a split array is identity.
-simplifyConcat (vtable, used) (Let pat (StmAux cs _) (BasicOp (Concat i x xs new_d)))
+simplifyConcat (vtable, used) pat (StmAux cs _) (Concat i x xs new_d)
   | Just (Let split_pat (StmAux split_cs _) (BasicOp (Split split_i _ split_arr))) <-
       ST.lookupStm x vtable,
     i == split_i,
@@ -949,11 +942,11 @@ simplifyConcat (vtable, used) (Let pat (StmAux cs _) (BasicOp (Concat i x xs new
         then letBind_ pat $ BasicOp $ Copy split_arr'
         else letBind_ pat $ BasicOp $ SubExp $ Var split_arr'
 
-simplifyConcat _ _ =
+simplifyConcat _ _ _ _ =
   cannotSimplify
 
-evaluateBranch :: MonadBinder m => TopDownRule m
-evaluateBranch _ (Let pat _ (If e1 tb fb (IfAttr t ifsort)))
+evaluateBranch :: BinderOps lore => TopDownRuleIf lore
+evaluateBranch _ pat _ (e1, tb, fb, IfAttr t ifsort)
   | Just branch <- checkBranch,
     ifsort /= IfFallback || isCt1 e1 = do
   let ses = bodyResult branch
@@ -962,26 +955,25 @@ evaluateBranch _ (Let pat _ (If e1 tb fb (IfAttr t ifsort)))
   let ses' = ctx ++ ses
   sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
             | (p,se) <- zip (patternElements pat) ses']
+  | otherwise = cannotSimplify
   where checkBranch
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb
           | otherwise = Nothing
-evaluateBranch _ _ = cannotSimplify
 
 -- IMPROVE: This rule can be generalised to work in more cases,
 -- especially when the branches have bindings, or return more than one
 -- value.
-simplifyBoolBranch :: MonadBinder m => TopDownRule m
+simplifyBoolBranch :: BinderOps lore => TopDownRuleIf lore
 -- if c then True else v == c || v
-simplifyBoolBranch _
-  (Let pat _ (If cond
-              (Body _ tstms [Constant (BoolValue True)])
-              (Body _ fstms [se])
-              (IfAttr ts _)))
+simplifyBoolBranch _ pat _
+  (cond, Body _ tstms [Constant (BoolValue True)],
+         Body _ fstms [se], IfAttr ts _)
   | null tstms, null fstms, [Prim Bool] <- bodyTypeValues ts =
       letBind_ pat $ BasicOp $ BinOp LogOr cond se
+
 -- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
-simplifyBoolBranch _ (Let pat _ (If cond tb fb (IfAttr ts _)))
+simplifyBoolBranch _ pat _ (cond, tb, fb, IfAttr ts _)
   | Body _ tstms [tres] <- tb,
     Body _ fstms [fres] <- fb,
     all (safeExp . stmExp) $ tstms <> fstms,
@@ -992,24 +984,23 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb (IfAttr ts _)))
                     (eBinOp LogAnd (pure $ BasicOp $ UnOp Not cond)
                      (pure $ BasicOp $ SubExp fres))
   letBind_ pat e
-simplifyBoolBranch _ _ = cannotSimplify
+simplifyBoolBranch _ _ _ _ = cannotSimplify
 
-simplifyFallbackBranch :: MonadBinder m => TopDownRule m
-simplifyFallbackBranch _ (Let pat _ (If _ tbranch _ (IfAttr _ IfFallback)))
+simplifyFallbackBranch :: BinderOps lore => TopDownRuleIf lore
+simplifyFallbackBranch _ pat _ (_, tbranch, _, IfAttr _ IfFallback)
   | null $ patternContextNames pat,
     all (safeExp . stmExp) $ bodyStms tbranch = do
       let ses = bodyResult tbranch
       addStms $ bodyStms tbranch
       sequence_ [ letBind (Pattern [] [p]) $ BasicOp $ SubExp se
                 | (p,se) <- zip (patternElements pat) ses]
-simplifyFallbackBranch _ _ =
-  cannotSimplify
+simplifyFallbackBranch _ _ _ _ = cannotSimplify
 
 -- | Move out results of a conditional expression whose computation is
 -- either invariant to the branches (only done for results in the
 -- context), or the same in both branches.
-hoistBranchInvariant :: MonadBinder m => TopDownRule m
-hoistBranchInvariant _ (Let pat _ (If cond tb fb (IfAttr ret ifsort))) = do
+hoistBranchInvariant :: BinderOps lore => TopDownRuleIf lore
+hoistBranchInvariant _ pat _ (cond, tb, fb, IfAttr ret ifsort) = do
   let tses = bodyResult tb
       fses = bodyResult fb
   (hoistings, (pes, ts, res)) <-
@@ -1079,12 +1070,9 @@ hoistBranchInvariant _ (Let pat _ (If cond tb fb (IfAttr ret ifsort))) = do
         reshapeResult se _ =
           return se
 
-
-hoistBranchInvariant _ _ = cannotSimplify
-
-simplifyScalExp :: MonadBinder m => TopDownRule m
-simplifyScalExp vtable (Let pat _ e) = do
-  res <- SE.toScalExp (`ST.lookupScalExp` vtable) e
+simplifyScalExp :: BinderOps lore => TopDownRuleBasicOp lore
+simplifyScalExp vtable pat _ e = do
+  res <- SE.toScalExp (`ST.lookupScalExp` vtable) $ BasicOp e
   case res of
     -- If the sufficient condition is 'True', then it statically succeeds.
     Just se
@@ -1121,26 +1109,26 @@ simplifyScalExp vtable (Let pat _ e) = do
         mkConj []     = SE.Val $ BoolValue True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
 
-simplifyIdentityReshape :: LetTopDownRule lore u
+simplifyIdentityReshape :: LetTopDownRule lore
 simplifyIdentityReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
     newDims newshape == arrayDims t = -- No-op reshape.
       subExpRes $ Var v
 simplifyIdentityReshape _ _ _ = Nothing
 
-simplifyReshapeReshape :: LetTopDownRule lore u
+simplifyReshapeReshape :: LetTopDownRule lore
 simplifyReshapeReshape defOf _ (Reshape newshape v)
   | Just (BasicOp (Reshape oldshape v2), v_cs) <- defOf v =
     Just (Reshape (fuseReshape oldshape newshape) v2, v_cs)
 simplifyReshapeReshape _ _ _ = Nothing
 
-simplifyReshapeScratch :: LetTopDownRule lore u
+simplifyReshapeScratch :: LetTopDownRule lore
 simplifyReshapeScratch defOf _ (Reshape newshape v)
   | Just (BasicOp (Scratch bt _), v_cs) <- defOf v =
     Just (Scratch bt $ newDims newshape, v_cs)
 simplifyReshapeScratch _ _ _ = Nothing
 
-simplifyReshapeReplicate :: LetTopDownRule lore u
+simplifyReshapeReplicate :: LetTopDownRule lore
 simplifyReshapeReplicate defOf seType (Reshape newshape v)
   | Just (BasicOp (Replicate _ se), v_cs) <- defOf v,
     Just oldshape <- arrayShape <$> seType se,
@@ -1151,7 +1139,7 @@ simplifyReshapeReplicate defOf seType (Reshape newshape v)
 simplifyReshapeReplicate _ _ _ = Nothing
 
 
-improveReshape :: LetTopDownRule lore u
+improveReshape :: LetTopDownRule lore
 improveReshape _ seType (Reshape newshape v)
   | Just t <- seType $ Var v,
     newshape' <- informReshape (arrayDims t) newshape,
@@ -1161,7 +1149,7 @@ improveReshape _ _ _ = Nothing
 
 -- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
 -- itself.
-copyScratchToScratch :: LetTopDownRule lore u
+copyScratchToScratch :: LetTopDownRule lore
 copyScratchToScratch defOf seType (Copy src) = do
   t <- seType $ Var src
   if isActuallyScratch src then
@@ -1176,7 +1164,7 @@ copyScratchToScratch defOf seType (Copy src) = do
 copyScratchToScratch _ _ _ =
   Nothing
 
-removeIdentityInPlace :: MonadBinder m => TopDownRule m
+removeIdentityInPlace :: BinderOps lore => TopDownRuleGeneric lore
 removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
   | BindInPlace dest destis <- patElemBindage d,
     arrayFrom e dest destis =
@@ -1193,7 +1181,7 @@ removeIdentityInPlace _ _ =
 
 -- | Turn in-place updates that replace an entire array into just
 -- array literals.
-removeFullInPlace :: MonadBinder m => TopDownRule m
+removeFullInPlace :: BinderOps lore => TopDownRuleGeneric lore
 removeFullInPlace vtable (Let (Pattern [] [d]) _ e)
   | BindInPlace dest is <- patElemBindage d,
     Just dest_t <- ST.lookupType dest vtable,
@@ -1204,19 +1192,18 @@ removeFullInPlace vtable (Let (Pattern [] [d]) _ e)
 removeFullInPlace _ _ =
   cannotSimplify
 
-removeScratchValue :: MonadBinder m => TopDownRule m
-removeScratchValue _ (Let (Pattern [] [PatElem v (BindInPlace src _) _])
-                      _ (BasicOp Scratch{})) =
+removeScratchValue :: BinderOps lore => TopDownRuleBasicOp lore
+removeScratchValue _ (Pattern [] [PatElem v (BindInPlace src _) _]) _ Scratch{} =
     letBindNames'_ [v] $ BasicOp $ SubExp $ Var src
-removeScratchValue _ _ =
+removeScratchValue _ _ _ _ =
   cannotSimplify
 
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch
 -- if *none* of the return values are used, but this rule is more
 -- precise.
-removeDeadBranchResult :: MonadBinder m => BottomUpRule m
-removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb (IfAttr rettype ifsort)))
+removeDeadBranchResult :: BinderOps lore => BottomUpRuleIf lore
+removeDeadBranchResult (_, used) pat _ (e1, tb, fb, IfAttr rettype ifsort)
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
     -- Figure out which of the names in 'pat' are used...
@@ -1235,7 +1222,7 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb (IfAttr rettype ifsort)
       pat' = pick $ patternElements pat
       rettype' = pick rettype
   in letBind_ (Pattern [] pat') $ If e1 tb' fb' $ IfAttr rettype' ifsort
-removeDeadBranchResult _ _ = cannotSimplify
+  | otherwise = cannotSimplify
 
 -- | If we are comparing X against the result of a branch of the form
 -- @if P then Y else Z@ then replace comparison with '(P && X == Y) ||
@@ -1244,8 +1231,8 @@ removeDeadBranchResult _ _ = cannotSimplify
 -- should have some more checks to ensure that we only do this if that
 -- is actually the case, such as if we will obtain at least one
 -- constant-to-constant comparison?
-simplifyBranchResultComparison :: MonadBinder m => TopDownRule m
-simplifyBranchResultComparison vtable (Let pat _ (BasicOp (CmpOp (CmpEq t) se1 se2)))
+simplifyBranchResultComparison :: BinderOps lore => TopDownRuleBasicOp lore
+simplifyBranchResultComparison vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se1 se2 = m
   | Just m <- simplifyWith se2 se1 = m
   where simplifyWith (Var v) x
@@ -1275,8 +1262,7 @@ simplifyBranchResultComparison vtable (Let pat _ (BasicOp (CmpOp (CmpEq t) se1 s
           find ((==v) . patElemName . fst) $
           zip (patternValueElements ifpat) $
           zip (bodyResult tbranch) (bodyResult fbranch)
-
-simplifyBranchResultComparison _ _ =
+simplifyBranchResultComparison _ _ _ _ =
   cannotSimplify
 
 -- Some helper functions

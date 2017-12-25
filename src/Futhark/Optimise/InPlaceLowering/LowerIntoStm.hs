@@ -6,7 +6,6 @@ module Futhark.Optimise.InPlaceLowering.LowerIntoStm
        , DesiredUpdate (..)
        ) where
 
-import Control.Applicative
 import Control.Monad
 import Control.Monad.Writer
 import Data.List (find)
@@ -14,12 +13,9 @@ import Data.Maybe (mapMaybe)
 import Data.Either
 import qualified Data.Set as S
 
-import Prelude
-
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST
 import Futhark.Construct
-import Futhark.MonadFreshNames
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 import Futhark.Tools (fullSlice)
 

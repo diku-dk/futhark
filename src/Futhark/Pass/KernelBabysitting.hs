@@ -8,7 +8,7 @@ module Futhark.Pass.KernelBabysitting
        where
 
 import Control.Arrow (first)
-import Control.Monad.State
+import Control.Monad.State.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Foldable

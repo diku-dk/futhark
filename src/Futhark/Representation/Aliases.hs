@@ -372,7 +372,7 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
     let Body bodylore _ _ = mkBody (fmap removeStmAliases bnds) res
     in mkAliasedBody bodylore bnds res
 
-instance Bindable (Aliases lore) => BinderOps (Aliases lore) where
+instance (Attributes (Aliases lore), Bindable (Aliases lore)) => BinderOps (Aliases lore) where
   mkBodyB = bindableMkBodyB
   mkExpAttrB = bindableMkExpAttrB
   mkLetNamesB = bindableMkLetNamesB

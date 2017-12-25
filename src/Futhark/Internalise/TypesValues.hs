@@ -41,7 +41,6 @@ import qualified Language.Futhark.TypeChecker.Types as E
 import qualified Language.Futhark.TypeChecker.Monad as E
 import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
-import Futhark.MonadFreshNames
 import Futhark.Util
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness

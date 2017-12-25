@@ -85,7 +85,6 @@ import Futhark.Representation.AST
 import Futhark.Transform.Substitute
 import Futhark.Construct hiding (toExp)
 import Futhark.Transform.Rename (renameLambda)
-import Futhark.MonadFreshNames
 
 -- | A single, simple transformation.  If you want several, don't just
 -- create a list, use 'ArrayTransforms' instead.

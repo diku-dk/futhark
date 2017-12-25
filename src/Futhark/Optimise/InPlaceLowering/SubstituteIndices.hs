@@ -22,7 +22,6 @@ import Prelude
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST
 import Futhark.Construct
-import Futhark.MonadFreshNames
 import Futhark.Tools (fullSlice)
 import Futhark.Util
 

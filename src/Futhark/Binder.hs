@@ -27,9 +27,8 @@ where
 
 import Control.Applicative
 import Control.Monad.Writer
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Control.Monad.Reader
-import Control.Monad.RWS.Strict
 import Control.Monad.Error.Class
 import qualified Data.Map.Strict as M
 
@@ -37,9 +36,8 @@ import Prelude
 
 import Futhark.Binder.Class
 import Futhark.Representation.AST
-import Futhark.MonadFreshNames
 
-class BinderOps lore where
+class Attributes lore => BinderOps lore where
   mkExpAttrB :: (MonadBinder m, Lore m ~ lore) =>
                 Pattern lore -> Exp lore -> m (ExpAttr lore)
   mkBodyB :: (MonadBinder m, Lore m ~ lore) =>
@@ -59,26 +57,8 @@ bindableMkLetNamesB :: (MonadBinder m, Bindable (Lore m)) =>
                        [(VName,Bindage)] -> Exp (Lore m) -> m (Stm (Lore m))
 bindableMkLetNamesB = mkLetNames
 
-newtype BinderT lore m a = BinderT (RWST () (Stms lore) (Scope lore) m a)
+newtype BinderT lore m a = BinderT (StateT (Stms lore, Scope lore) m a)
   deriving (Functor, Monad, Applicative)
-
-tellStms :: Monad m => Stms lore -> BinderT lore m ()
-tellStms = BinderT . tell
-
-listenStms :: Monad m =>
-              BinderT lore m a -> BinderT lore m (a, Stms lore)
-listenStms (BinderT m) = BinderT $ listen m
-
-passStms :: Monad m =>
-            BinderT lore m (a, Stms lore -> Stms lore)
-         -> BinderT lore m a
-passStms (BinderT m) = BinderT $ pass m
-
-censorStms :: Monad m =>
-              (Stms lore -> Stms lore)
-           -> BinderT lore m a
-           -> BinderT lore m a
-censorStms f (BinderT m) = BinderT $ censor f m
 
 instance MonadTrans (BinderT lore) where
   lift = BinderT . lift
@@ -92,18 +72,18 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
 instance (Attributes lore, Monad m) =>
          HasScope lore (BinderT lore m) where
   lookupType name = do
-    t <- BinderT $ gets $ M.lookup name
+    t <- BinderT $ gets $ M.lookup name . snd
     case t of
       Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
       Just t' -> return $ typeOf t'
-  askScope = BinderT get
+  askScope = BinderT $ gets snd
 
 instance (Attributes lore, Monad m) =>
          LocalScope lore (BinderT lore m) where
   localScope types (BinderT m) = BinderT $ do
-    modify (`M.union` types)
+    modify $ \(stms, scope) -> (stms, scope `M.union` types)
     x <- m
-    modify (`M.difference` types)
+    modify $ \(stms, scope) -> (stms, scope `M.difference` types)
     return x
 
 instance (Attributes lore, MonadFreshNames m, BinderOps lore) =>
@@ -122,7 +102,9 @@ runBinderT :: (MonadFreshNames m, BinderOps lore) =>
               BinderT lore m a
            -> Scope lore
            -> m (a, Stms lore)
-runBinderT (BinderT m) = evalRWST m ()
+runBinderT (BinderT m) scope = do
+  (x, (stms, _)) <- runStateT m (mempty, scope)
+  return (x, stms)
 
 runBinder :: (MonadFreshNames m,
               HasScope somelore m, SameScope somelore lore,
@@ -163,36 +145,40 @@ runBinderEmptyEnv m =
 
 addBinderStms :: Monad m =>
                  Stms lore -> BinderT lore m ()
-addBinderStms stms = do
-  tellStms stms
-  BinderT $ modify (`M.union` scopeOf stms)
+addBinderStms stms = BinderT $
+  modify $ \(cur_stms,scope) -> (cur_stms<>stms,
+                                 scope `M.union` scopeOf stms)
 
 collectBinderStms :: Monad m =>
                      BinderT lore m a
                   -> BinderT lore m (a, Stms lore)
-collectBinderStms m = passStms $ do
-  (x, bnds) <- listenStms m
-  BinderT $ modify (`M.difference` scopeOf bnds)
-  return ((x, bnds), const mempty)
+collectBinderStms m = do
+  (old_stms, old_scope) <- BinderT get
+  BinderT $ put (mempty, old_scope)
+  x <- m
+  (new_stms, _) <- BinderT get
+  BinderT $ put (old_stms, old_scope)
+  return (x, new_stms)
 
-certifyingBinder :: Monad m =>
+certifyingBinder :: (MonadFreshNames m, BinderOps lore) =>
                     Certificates -> BinderT lore m a
                  -> BinderT lore m a
-certifyingBinder = censorStms . fmap . certify
+certifyingBinder cs m = do
+  (x, stms) <- collectStms m
+  addStms $ certify cs <$> stms
+  return x
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.
 
 mapInner :: Monad m =>
-            (m (a, Scope lore, Stms lore)
-             -> m (b, M.Map VName (NameInfo lore), Stms lore))
+            (m (a, (Stms lore, Scope lore))
+             -> m (b, (Stms lore, Scope lore)))
          -> BinderT lore m a -> BinderT lore m b
 mapInner f (BinderT m) = BinderT $ do
-  r <- ask
   s <- get
-  (x, s', w) <- lift $ f $ runRWST m r s
+  (x, s') <- lift $ f $ runStateT m s
   put s'
-  tell w
   return x
 
 instance MonadReader r m => MonadReader r (BinderT lore m) where
@@ -206,11 +192,11 @@ instance MonadState s m => MonadState s (BinderT lore m) where
 instance MonadWriter w m => MonadWriter w (BinderT lore m) where
   tell = BinderT . lift . tell
   pass = mapInner $ \m -> pass $ do
-    ((x, f), s', w) <- m
-    return ((x, s', w), f)
+    ((x, f), s) <- m
+    return ((x, s), f)
   listen = mapInner $ \m -> do
-    ((x, s', w), y) <- listen m
-    return ((x, y), s', w)
+    ((x, s), y) <- listen m
+    return ((x, y), s)
 
 instance MonadError e m => MonadError e (BinderT lore m) where
   throwError = lift . throwError
