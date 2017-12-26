@@ -55,19 +55,24 @@ import Data.Monoid
 import Control.Monad.State
 import qualified Data.Semigroup as Sem
 import qualified Control.Monad.Fail as Fail
+import Control.Monad.Except
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Representation.AST
 import Futhark.Binder
 
+data RuleError = CannotSimplify
+               | OtherError String
+
 -- | The monad in which simplification rules are evaluated.
-newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource Maybe) a)
+newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource (Except RuleError)) a)
   deriving (Functor, Applicative, Monad,
-            MonadFreshNames, HasScope lore, LocalScope lore)
+            MonadFreshNames, HasScope lore, LocalScope lore,
+            MonadError RuleError)
 
 instance Fail.MonadFail (RuleM lore) where
-  fail = RuleM . lift . fail
+  fail = throwError . OtherError
 
 instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
   type Lore (RuleM lore) = lore
@@ -89,15 +94,16 @@ simplify :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
 simplify (RuleM m) = do
   scope <- askScope
   modifyNameSource $ \src ->
-    case runStateT (runBinderT m scope) src of
-      Nothing        -> (Nothing, src)
-      Just (x, src') -> (Just x, src')
+    case runExcept $ runStateT (runBinderT m scope) src of
+      Left CannotSimplify -> (Nothing, src)
+      Left (OtherError err) -> error $ "simplify: " ++ err
+      Right (x, src') -> (Just x, src')
 
 cannotSimplify :: RuleM lore a
-cannotSimplify = fail "Cannot simplify"
+cannotSimplify = throwError CannotSimplify
 
 liftMaybe :: Maybe a -> RuleM lore a
-liftMaybe Nothing = fail "Nothing"
+liftMaybe Nothing = cannotSimplify
 liftMaybe (Just x) = return x
 
 type RuleGeneric lore a = a -> Stm lore -> RuleM lore ()

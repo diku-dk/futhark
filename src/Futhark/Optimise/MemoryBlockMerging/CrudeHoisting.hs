@@ -300,11 +300,12 @@ moveLetToLine stm_cur_name line_cur line_dest stms
         putStrLn $ pretty stm_cur_name
         putStrLn $ replicate 70 '~'
 
-  PrimBinding frees consumed (FromLine _ exp_cur) <-
-    withDebug debug $ lookupPrimBinding stm_cur_name -- fixme
-  modify $ replaceWhere stm_cur_name (PrimBinding frees consumed
-                                      (FromLine line_dest exp_cur))
-
+  r <- withDebug debug $ lookupPrimBinding stm_cur_name
+  case r of
+    PrimBinding frees consumed (FromLine _ exp_cur) ->
+      modify $ replaceWhere stm_cur_name (PrimBinding frees consumed
+                                          (FromLine line_dest exp_cur))
+    _ -> error "moveLetToLine: unhandled case" -- fixme
   return stms2
 
 replaceWhere :: VName -> PrimBinding -> BindingMap -> BindingMap
