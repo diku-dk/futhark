@@ -26,25 +26,24 @@ import qualified Data.Set      as S
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.AST.Attributes.Aliases
-import qualified Futhark.Optimise.Simplifier.Engine as Engine
-import qualified Futhark.Optimise.Simplifier as Simplifier
-import Futhark.Optimise.Simplifier.Rules
+import qualified Futhark.Optimise.Simplify.Engine as Engine
+import qualified Futhark.Optimise.Simplify as Simplify
+import Futhark.Optimise.Simplify.Rules
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplifier (simplifyProgWithRules)
-import Futhark.Optimise.Simplifier.Rule
-import Futhark.Optimise.Simplifier.ClosedForm
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplify.Rule
+import Futhark.Optimise.Simplify.ClosedForm
+import Futhark.Optimise.Simplify.Lore
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
 
-simpleSOACS :: Simplifier.SimpleOps SOACS
-simpleSOACS = Simplifier.bindableSimpleOps simplifySOAC
+simpleSOACS :: Simplify.SimpleOps SOACS
+simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
 
 simplifySOACS :: MonadFreshNames m => Prog -> m Prog
 simplifySOACS =
-  simplifyProgWithRules simpleSOACS soacRules blockers
+  Simplify.simplifyProg simpleSOACS soacRules blockers
   where blockers =
           Engine.HoistBlockers {
             Engine.blockHoistPar = Engine.neverBlocks
@@ -64,19 +63,19 @@ getShapeNames bnd =
 
 simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
-  Simplifier.simplifyFunWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
+  Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> [Maybe VName] -> m Lambda
 simplifyLambda =
-  Simplifier.simplifyLambdaWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
+  Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyStms :: (HasScope SOACS m, MonadFreshNames m) =>
                 Stms SOACS -> m (Stms SOACS)
 simplifyStms =
-  Simplifier.simplifyStmsWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
+  Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers
 
-simplifySOAC :: Simplifier.SimplifyOp SOACS
+simplifySOAC :: Simplify.SimplifyOp SOACS
 simplifySOAC (Stream outerdim form lam arr) = do
   outerdim' <- Engine.simplify outerdim
   (form', form_hoisted) <- simplifyStreamForm form

@@ -51,7 +51,7 @@ import Futhark.Util.Pretty
   ((</>), (<+>), ppr, commasep, Pretty, parens, text)
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplify.Lore
 import Futhark.Representation.Ranges
   (Ranges, removeLambdaRanges, removeBodyRanges, mkBodyRanges)
 import Futhark.Representation.AST.Attributes.Ranges

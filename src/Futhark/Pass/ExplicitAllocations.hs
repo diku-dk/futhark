@@ -18,7 +18,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Futhark.Representation.Kernels
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplify.Lore
   (mkWiseBody,
    mkWiseLetStm,
    removeExpWisdom,
@@ -29,8 +29,8 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplifier.Engine (SimpleOps (..))
-import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
+import qualified Futhark.Optimise.Simplify.Engine as Engine
 import Futhark.Pass
 import Futhark.Util (splitFromEnd)
 

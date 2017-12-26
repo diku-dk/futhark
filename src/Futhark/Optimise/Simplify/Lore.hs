@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
 -- | Definition of the lore used by the simplification engine.
-module Futhark.Optimise.Simplifier.Lore
+module Futhark.Optimise.Simplify.Lore
        (
          Wise
        , VarWisdom (..)
