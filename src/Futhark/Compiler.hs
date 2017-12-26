@@ -19,8 +19,6 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Reader
 import Data.Maybe
-import Data.List
-import System.FilePath
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 import qualified Data.Text as T
