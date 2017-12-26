@@ -80,6 +80,7 @@ import Control.Monad.RWS    hiding (mapM, forM)
 import Control.Monad.State  hiding (mapM, forM)
 import Control.Monad.Writer hiding (mapM, forM)
 import Control.Monad.Except hiding (mapM, forM)
+import qualified Control.Monad.Fail as Fail
 import Data.Either
 import Data.Traversable
 import qualified Data.Map.Strict as M
@@ -207,6 +208,9 @@ newtype ImpM lore op a = ImpM (RWST (Env lore op) (Imp.Code op) VNameSource (Eit
             MonadReader (Env lore op),
             MonadWriter (Imp.Code op),
             MonadError InternalError)
+
+instance Fail.MonadFail (ImpM lore op) where
+  fail = error . ("ImpM.fail: "++)
 
 instance MonadFreshNames (ImpM lore op) where
   getNameSource = get

@@ -50,6 +50,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
+import qualified Control.Monad.Fail as Fail
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import qualified Data.Semigroup as Sem
@@ -121,6 +122,9 @@ newtype InternaliseM  a = InternaliseM (BinderT SOACS
 instance (Monoid w, Monad m) => MonadFreshNames (RWST r w InternaliseState m) where
   getNameSource = gets stateNameSource
   putNameSource src = modify $ \s -> s { stateNameSource = src }
+
+instance Fail.MonadFail InternaliseM where
+  fail = InternaliseM . throwError
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS

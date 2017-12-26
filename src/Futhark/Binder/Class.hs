@@ -27,6 +27,7 @@ where
 
 import Control.Applicative
 import Control.Monad.Writer
+import qualified Control.Monad.Fail as Fail
 
 import Prelude
 
@@ -63,7 +64,8 @@ class (Attributes lore,
 -- bindings, however.
 class (Attributes (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
-       LocalScope (Lore m) m) =>
+       LocalScope (Lore m) m,
+       Fail.MonadFail m) =>
       MonadBinder m where
   type Lore m :: *
   mkExpAttrM :: Pattern (Lore m) -> Exp (Lore m) -> m (ExpAttr (Lore m))
