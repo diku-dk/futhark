@@ -25,7 +25,7 @@ import Data.Traversable (mapM)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Prelude hiding (abs, mod, mapM)
+import Prelude hiding (abs, mod)
 
 import Language.Futhark
 import Futhark.FreshNames hiding (newName)

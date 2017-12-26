@@ -9,13 +9,10 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
 import Control.Monad.State
 import Control.Monad.Identity
 import Control.Monad.Writer
-import Data.List
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
-
-import Prelude
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C

@@ -11,8 +11,6 @@ import Control.Monad
 import qualified Data.Map.Strict as M
 import Data.Monoid
 
-import Prelude
-
 import Futhark.Transform.Rename
 import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames

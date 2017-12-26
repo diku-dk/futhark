@@ -26,8 +26,6 @@ import System.IO
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
-import Prelude
-
 import Language.Futhark.Parser
 import Futhark.Internalise
 import Futhark.Pipeline

@@ -10,8 +10,6 @@ import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Prelude
-
 import Futhark.Representation.AST
 
 -- | A mapping from a variable name @v@, to those variables on which

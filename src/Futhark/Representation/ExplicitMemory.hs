@@ -90,16 +90,13 @@ module Futhark.Representation.ExplicitMemory
        )
 where
 
-import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
 import qualified Data.Map.Strict as M
 import Data.Foldable (traverse_)
-import Data.Maybe
 import Data.List
 import Data.Monoid
-import Prelude
 
 import Futhark.Analysis.Metrics
 import Futhark.Representation.AST.Syntax

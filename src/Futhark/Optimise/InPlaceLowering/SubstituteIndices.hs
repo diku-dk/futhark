@@ -11,13 +11,10 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
        , IndexSubstitutions
        ) where
 
-import Control.Applicative
 import Data.Monoid
 import Control.Monad
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-
-import Prelude
 
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST

@@ -8,12 +8,8 @@ module Futhark.Optimise.Unstream
        ( unstream )
        where
 
-import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
-import Data.List
-
-import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels

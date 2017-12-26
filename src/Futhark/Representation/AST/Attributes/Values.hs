@@ -18,8 +18,6 @@ module Futhark.Representation.AST.Attributes.Values
 import Data.Array hiding (indices)
 import Data.List
 
-import Prelude
-
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Rearrange

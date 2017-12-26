@@ -71,15 +71,12 @@ module Futhark.Representation.AST.Attributes.Types
        )
        where
 
-import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid
 import Data.List (elemIndex)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-
-import Prelude
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Constants

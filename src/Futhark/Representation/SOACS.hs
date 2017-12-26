@@ -38,8 +38,6 @@ where
 
 import Control.Monad
 
-import Prelude
-
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,

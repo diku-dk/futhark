@@ -18,8 +18,6 @@ import Data.Maybe
 import qualified Data.Text as T
 import Data.Word
 
-import Prelude
-
 import System.Console.GetOpt
 import System.Random
 

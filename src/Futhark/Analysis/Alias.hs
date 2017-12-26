@@ -22,8 +22,6 @@ import Data.Monoid
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.Aliases
 
-import Prelude
-
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis :: (Attributes lore, CanBeAliased (Op lore)) =>
                  Prog lore -> Prog (Aliases lore)

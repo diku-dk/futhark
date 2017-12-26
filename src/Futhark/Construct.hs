@@ -66,12 +66,9 @@ import qualified Data.Map.Strict as M
 import Data.Loc (SrcLoc)
 import Data.List
 import Data.Ord
-import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
-
-import Prelude
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames

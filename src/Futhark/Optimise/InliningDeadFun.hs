@@ -7,16 +7,12 @@ module Futhark.Optimise.InliningDeadFun
   )
   where
 
-import Control.Monad.Reader
 import Control.Monad.Identity
-
 import Data.List
 import Data.Loc
 import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-
-import Prelude
 
 import Futhark.Representation.SOACS
 import Futhark.Transform.Rename

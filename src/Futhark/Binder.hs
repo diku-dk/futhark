@@ -25,15 +25,12 @@ module Futhark.Binder
   )
 where
 
-import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.State.Strict
 import Control.Monad.Reader
 import Control.Monad.Error.Class
 import qualified Data.Map.Strict as M
 import qualified Control.Monad.Fail as Fail
-
-import Prelude
 
 import Futhark.Binder.Class
 import Futhark.Representation.AST

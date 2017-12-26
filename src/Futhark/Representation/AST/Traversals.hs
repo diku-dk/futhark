@@ -45,13 +45,10 @@ module Futhark.Representation.AST.Traversals
   )
   where
 
-import Control.Applicative
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
 import qualified Data.Traversable
-
-import Prelude
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Scope

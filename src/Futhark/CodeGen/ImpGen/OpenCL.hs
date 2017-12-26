@@ -2,10 +2,6 @@ module Futhark.CodeGen.ImpGen.OpenCL
   ( compileProg
   ) where
 
-import Control.Applicative
-
-import Prelude
-
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.OpenCL as OpenCL

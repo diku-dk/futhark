@@ -21,8 +21,6 @@ import System.Exit
 import System.Console.GetOpt
 import qualified System.Console.Haskeline as Haskeline
 
-import Prelude
-
 import Language.Futhark
 import Language.Futhark.Parser
 import Language.Futhark.TypeChecker

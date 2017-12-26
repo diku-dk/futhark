@@ -11,8 +11,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Control.Monad.Fail as Fail
 
-import Prelude
-
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 

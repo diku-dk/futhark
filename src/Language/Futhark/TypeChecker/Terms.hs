@@ -22,7 +22,7 @@ import qualified Data.Semigroup as Sem
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Prelude hiding (mod, mapM)
+import Prelude hiding (mod)
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (ValBinding, BoundV, BoundF, checkQualNameWithEnv)

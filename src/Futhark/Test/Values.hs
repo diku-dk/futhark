@@ -19,7 +19,6 @@ module Futhark.Test.Values
        )
        where
 
-import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import Data.Binary
@@ -30,13 +29,10 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Maybe
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Char (isSpace, ord, chr)
-import Data.List
 import Data.Vector.Binary
 import qualified Data.Vector.Unboxed.Mutable as UMVec
 import qualified Data.Vector.Unboxed as UVec
 import Data.Vector.Generic (freeze)
-
-import Prelude
 
 import qualified Language.Futhark.Syntax as F
 import Language.Futhark.Pretty()
