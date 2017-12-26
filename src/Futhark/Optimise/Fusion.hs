@@ -7,7 +7,6 @@ module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
 import Control.Monad.State
-import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Except
 
@@ -18,8 +17,6 @@ import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 import qualified Data.List         as L
-
-import Prelude
 
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.SOACS hiding (SOAC(..))

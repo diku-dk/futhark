@@ -26,9 +26,6 @@ module Futhark.CodeGen.ImpCode.Kernels
 import Control.Monad.Writer
 import Data.List
 import qualified Data.Set as S
-import Data.Traversable
-
-import Prelude
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp

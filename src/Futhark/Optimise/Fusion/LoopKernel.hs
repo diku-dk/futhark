@@ -24,8 +24,6 @@ import Data.Maybe
 import Data.Monoid
 import Data.List
 
-import Prelude
-
 import Futhark.Representation.SOACS hiding (SOAC(..))
 import qualified Futhark.Representation.SOACS as Futhark
 import Futhark.Transform.Rename (renameLambda)

@@ -73,15 +73,10 @@ module Futhark.Representation.AST.Syntax
   )
   where
 
-import Control.Applicative
 import Data.Foldable
-import Data.Monoid
-import Data.Traversable
 import Data.Loc
 import qualified Data.Sequence as Seq
 import qualified Data.Semigroup as Sem
-
-import Prelude
 
 import Language.Futhark.Core
 import Futhark.Representation.AST.Annotations

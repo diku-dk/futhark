@@ -25,11 +25,8 @@ module Futhark.Binder.Class
   )
 where
 
-import Control.Applicative
 import Control.Monad.Writer
 import qualified Control.Monad.Fail as Fail
-
-import Prelude
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames

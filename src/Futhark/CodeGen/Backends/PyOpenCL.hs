@@ -3,11 +3,8 @@ module Futhark.CodeGen.Backends.PyOpenCL
   ( compileProg
   ) where
 
-import Control.Applicative
 import Control.Monad
 import Data.List
-
-import Prelude
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)

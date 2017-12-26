@@ -16,7 +16,6 @@ module Futhark.Analysis.Metrics
        , lambdaMetrics
        ) where
 
-import Control.Applicative
 import Control.Monad.Writer
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -24,8 +23,6 @@ import Data.String
 import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Semigroup as Sem
-
-import Prelude
 
 import Futhark.Representation.AST
 

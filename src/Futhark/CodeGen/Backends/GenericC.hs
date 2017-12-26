@@ -61,7 +61,6 @@ module Futhark.CodeGen.Backends.GenericC
   , copyMemoryDefaultSpace
   ) where
 
-import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Reader
@@ -73,11 +72,8 @@ import Data.List
 import Data.Loc
 import Data.Maybe
 import Data.FileEmbed
-import Data.Ord
 import Data.Hashable
 import qualified Data.Semigroup as Sem
-
-import Prelude
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C

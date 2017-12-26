@@ -21,15 +21,12 @@ module Futhark.Representation.SOACS.SOAC
        )
        where
 
-import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.List
-
-import Prelude
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias

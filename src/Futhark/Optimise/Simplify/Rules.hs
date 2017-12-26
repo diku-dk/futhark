@@ -10,7 +10,6 @@ module Futhark.Optimise.Simplify.Rules
   )
 where
 
-import Control.Applicative
 import Control.Monad
 import Data.Either
 import Data.Foldable (all)
@@ -34,8 +33,6 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
 import Futhark.Transform.Substitute
 import Futhark.Util
-
-import Prelude hiding (all)
 
 topDownRules :: (BinderOps lore, Aliased lore) => [TopDownRule lore]
 topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables

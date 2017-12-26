@@ -3,7 +3,6 @@ module Futhark.CodeGen.Backends.SequentialPython
      ) where
 
 import Control.Monad
-import Data.Traversable
 
 import Futhark.Error
 import Futhark.Representation.ExplicitMemory
@@ -13,8 +12,6 @@ import qualified Futhark.CodeGen.Backends.GenericPython as GenericPython
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.MonadFreshNames
-
-import Prelude
 
 compileProg :: MonadFreshNames m =>
                Maybe String -> Prog ExplicitMemory -> m (Either InternalError String)

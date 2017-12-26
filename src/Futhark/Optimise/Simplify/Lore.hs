@@ -33,8 +33,6 @@ import Control.Monad.Reader
 import Data.Monoid
 import qualified Data.Map.Strict as M
 
-import Prelude
-
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases

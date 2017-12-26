@@ -161,7 +161,6 @@ module Futhark.Pass.ExtractKernels
        (extractKernels)
        where
 
-import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
@@ -170,8 +169,6 @@ import qualified Data.Set as S
 import Data.Maybe
 import Data.List
 import qualified Data.Semigroup as Sem
-
-import Prelude
 
 import Futhark.Representation.SOACS
 import Futhark.Representation.SOACS.Simplify (simplifyStms, simpleSOACS)

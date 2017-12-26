@@ -41,7 +41,6 @@ module Futhark.CodeGen.Backends.GenericPython
   , copyMemoryDefaultSpace
   ) where
 
-import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Reader
@@ -50,8 +49,6 @@ import Control.Monad.RWS
 import Data.Maybe
 import Data.List
 import qualified Data.Map.Strict as M
-
-import Prelude
 
 import Futhark.Representation.Primitive hiding (Bool)
 import Futhark.MonadFreshNames

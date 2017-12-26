@@ -8,17 +8,13 @@ module Futhark.Actions
   )
 where
 
-import Control.Monad
 import Control.Monad.IO.Class
 import Data.List
-import Data.Maybe
 import Data.Word
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
-
-import Prelude
 
 import Futhark.Pipeline
 import Futhark.Analysis.Alias

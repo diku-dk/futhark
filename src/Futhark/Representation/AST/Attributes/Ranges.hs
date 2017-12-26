@@ -27,8 +27,6 @@ import Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
-import Prelude
-
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
 import qualified Futhark.Analysis.ScalExp as SE

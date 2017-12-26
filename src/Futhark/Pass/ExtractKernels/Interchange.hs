@@ -14,7 +14,6 @@ module Futhark.Pass.ExtractKernels.Interchange
        , interchangeBranch
        ) where
 
-import Control.Applicative
 import Control.Monad.RWS.Strict
 import qualified Data.Set as S
 import Data.Maybe
@@ -26,8 +25,6 @@ import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Tools
-
-import Prelude
 
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.

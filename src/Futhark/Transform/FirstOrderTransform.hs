@@ -21,14 +21,12 @@ module Futhark.Transform.FirstOrderTransform
   )
   where
 
-import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List
-import Prelude
 
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.SOACS

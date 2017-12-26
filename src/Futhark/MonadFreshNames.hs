@@ -22,7 +22,6 @@ module Futhark.MonadFreshNames
   , module Futhark.FreshNames
   ) where
 
-import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 import qualified Control.Monad.Writer.Lazy
@@ -31,9 +30,6 @@ import qualified Control.Monad.RWS.Lazy
 import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.Trans.Maybe
 import Control.Monad.Reader
-import Data.Monoid
-
-import Prelude
 
 import Futhark.Representation.AST.Syntax
 import qualified Futhark.FreshNames as FreshNames

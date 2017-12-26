@@ -66,16 +66,11 @@ module Futhark.Analysis.HORepresentation.SOAC
   )
   where
 
-import Control.Applicative
-
 import Data.Foldable as Foldable
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Sequence as Seq
-import Data.Traversable
 import qualified Data.Semigroup as Sem
-
-import Prelude hiding (mapM)
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.SOACS.SOAC (StreamForm(..), getStreamAccums)

@@ -13,15 +13,12 @@ module Futhark.Analysis.HORepresentation.MapNest
   )
 where
 
-import Control.Applicative
 import Control.Monad
 import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-
-import Prelude
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
