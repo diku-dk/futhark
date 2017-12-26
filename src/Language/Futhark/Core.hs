@@ -36,12 +36,10 @@ import Data.Hashable
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Loc
-import Data.List
+import qualified Data.Semigroup as Sem
 import qualified Data.Text as T
 import Language.Haskell.TH.Syntax (Lift)
 import Instances.TH.Lift()
-
-import Prelude
 
 import Futhark.Util.Pretty
 
@@ -52,11 +50,12 @@ data Uniqueness = Nonunique -- ^ May have references outside current function.
                 | Unique    -- ^ No references outside current function.
                   deriving (Eq, Ord, Show, Lift)
 
+instance Sem.Semigroup Uniqueness where
+  (<>) = min
+
 instance Monoid Uniqueness where
   mempty = Unique
-  _ `mappend` Nonunique = Nonunique
-  Nonunique `mappend` _ = Nonunique
-  u `mappend` _         = u
+  mappend = (Sem.<>)
 
 instance Pretty Uniqueness where
   ppr Unique = star
@@ -76,9 +75,12 @@ data Commutativity = Noncommutative
                    | Commutative
                      deriving (Eq, Ord, Show, Lift)
 
+instance Sem.Semigroup Commutativity where
+  (<>) = min
+
 instance Monoid Commutativity where
   mempty = Commutative
-  mappend = min
+  mappend = (Sem.<>)
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name
@@ -96,9 +98,8 @@ instance Pretty Name where
 instance Hashable Name where
   hashWithSalt salt (Name t) = hashWithSalt salt t
 
-instance Monoid Name where
-  Name t1 `mappend` Name t2 = Name $ t1 <> t2
-  mempty = Name mempty
+instance Sem.Semigroup Name where
+  Name t1 <> Name t2 = Name $ t1 <> t2
 
 -- | Convert a name to the corresponding list of characters.
 nameToString :: Name -> String

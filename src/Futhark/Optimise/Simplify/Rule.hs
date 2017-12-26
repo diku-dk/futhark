@@ -53,6 +53,8 @@ module Futhark.Optimise.Simplify.Rule
 
 import Data.Monoid
 import Control.Monad.State
+import qualified Data.Semigroup as Sem
+import qualified Control.Monad.Fail as Fail
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -63,6 +65,9 @@ import Futhark.Binder
 newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource Maybe) a)
   deriving (Functor, Applicative, Monad,
             MonadFreshNames, HasScope lore, LocalScope lore)
+
+instance Fail.MonadFail (RuleM lore) where
+  fail = RuleM . lift . fail
 
 instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
   type Lore (RuleM lore) = lore
@@ -126,10 +131,13 @@ data Rules lore a = Rules { rulesAny :: [SimplificationRule lore a]
                        , rulesOp :: [SimplificationRule lore a]
                        }
 
+instance Sem.Semigroup (Rules lore a) where
+  Rules as1 bs1 cs1 ds1 es1 <> Rules as2 bs2 cs2 ds2 es2 =
+    Rules (as1<>as2) (bs1<>bs2) (cs1<>cs2) (ds1<>ds2) (es1<>es2)
+
 instance Monoid (Rules lore a) where
   mempty = Rules mempty mempty mempty mempty mempty
-  Rules as1 bs1 cs1 ds1 es1 `mappend` Rules as2 bs2 cs2 ds2 es2 =
-    Rules (as1<>as2) (bs1<>bs2) (cs1<>cs2) (ds1<>ds2) (es1<>es2)
+  mappend = (Sem.<>)
 
 -- | Context for a rule applied during top-down traversal of the
 -- program.  Takes a symbol table as argument.
@@ -164,9 +172,12 @@ data RuleBook lore = RuleBook { bookTopDownRules :: TopDownRules lore
                               , bookBottomUpRules :: BottomUpRules lore
                               }
 
+instance Sem.Semigroup (RuleBook lore) where
+  RuleBook ts1 bs1 <> RuleBook ts2 bs2 = RuleBook (ts1<>ts2) (bs1<>bs2)
+
 instance Monoid (RuleBook lore) where
   mempty = RuleBook mempty mempty
-  RuleBook ts1 bs1 `mappend` RuleBook ts2 bs2 = RuleBook (ts1<>ts2) (bs1<>bs2)
+  mappend = (Sem.<>)
 
 -- | Construct a rule book from a collection of rules.
 ruleBook :: [TopDownRule m]

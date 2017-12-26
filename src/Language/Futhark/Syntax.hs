@@ -97,6 +97,7 @@ import           Data.Monoid
 import           Data.Ord
 import qualified Data.Set                         as S
 import           Data.Traversable
+import qualified Data.Semigroup as Sem
 import           Prelude
 
 import           Futhark.Representation.Primitive (FloatType (..),
@@ -129,9 +130,6 @@ instance Foldable NoInfo where
   foldr _ b NoInfo = b
 instance Traversable NoInfo where
   traverse _ NoInfo = pure NoInfo
-instance Monoid (NoInfo a) where
-  mempty = NoInfo
-  _ `mappend` _ = NoInfo
 
 -- | Some information.  The dual to 'NoInfo'
 newtype Info a = Info { unInfo :: a }
@@ -243,9 +241,12 @@ instance Traversable ShapeDecl where
 instance Functor ShapeDecl where
   fmap f (ShapeDecl ds) = ShapeDecl $ map f ds
 
+instance Sem.Semigroup (ShapeDecl dim) where
+  ShapeDecl l1 <> ShapeDecl l2 = ShapeDecl $ l1 ++ l2
+
 instance Monoid (ShapeDecl dim) where
   mempty = ShapeDecl []
-  ShapeDecl l1 `mappend` ShapeDecl l2 = ShapeDecl $ l1 ++ l2
+  mappend = (Sem.<>)
 
 -- | The number of dimensions contained in a shape.
 shapeRank :: ShapeDecl dim -> Int
