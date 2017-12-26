@@ -6,7 +6,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Data.List (sort)
 import Data.Monoid
-import Data.Maybe (maybe,mapMaybe)
+import Data.Maybe
 import qualified Data.Map as M
 import System.FilePath (splitPath, (-<.>), makeRelative)
 import Text.Blaze.Html5 as H hiding (map)
@@ -334,8 +334,7 @@ renderQualName ns (QualName names (VName name tag)) =
         prefix = mapM_ ((<> ".") . renderName . baseName) names
         f s = prefix <> (a ! A.href (fromString s) $ renderName name)
 
-        ref = do --vname <- getVName ns (QualName names name)
-                 Just file <- gets (M.lookup (ns, VName name tag))
+        ref = do file <- fromJust <$> gets (M.lookup (ns, VName name tag))
                  current <- asks fst
                  if file == current
                      then return ("#" ++ show tag)

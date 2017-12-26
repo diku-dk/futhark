@@ -169,6 +169,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
 import Data.List
+import qualified Data.Semigroup as Sem
 
 import Prelude
 
@@ -522,18 +523,24 @@ data KernelRes = KernelRes { accPostKernels :: PostKernels
                            , accLog :: Log
                            }
 
-instance Monoid KernelRes where
-  KernelRes ks1 log1 `mappend` KernelRes ks2 log2 =
+instance Sem.Semigroup KernelRes where
+  KernelRes ks1 log1 <> KernelRes ks2 log2 =
     KernelRes (ks1 <> ks2) (log1 <> log2)
+
+instance Monoid KernelRes where
   mempty = KernelRes mempty mempty
+  mappend = (Sem.<>)
 
 newtype PostKernel = PostKernel { unPostKernel :: KernelsStms }
 
 newtype PostKernels = PostKernels [PostKernel]
 
+instance Sem.Semigroup PostKernels where
+  PostKernels xs <> PostKernels ys = PostKernels $ ys ++ xs
+
 instance Monoid PostKernels where
   mempty = PostKernels mempty
-  PostKernels xs `mappend` PostKernels ys = PostKernels $ ys ++ xs
+  mappend = (Sem.<>)
 
 postKernelsStms :: PostKernels -> KernelsStms
 postKernelsStms (PostKernels kernels) = mconcat $ map unPostKernel kernels

@@ -53,16 +53,26 @@ module Futhark.Optimise.Simplify.Rule
 
 import Data.Monoid
 import Control.Monad.State
+import qualified Data.Semigroup as Sem
+import qualified Control.Monad.Fail as Fail
+import Control.Monad.Except
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Representation.AST
 import Futhark.Binder
 
+data RuleError = CannotSimplify
+               | OtherError String
+
 -- | The monad in which simplification rules are evaluated.
-newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource Maybe) a)
+newtype RuleM lore a = RuleM (BinderT lore (StateT VNameSource (Except RuleError)) a)
   deriving (Functor, Applicative, Monad,
-            MonadFreshNames, HasScope lore, LocalScope lore)
+            MonadFreshNames, HasScope lore, LocalScope lore,
+            MonadError RuleError)
+
+instance Fail.MonadFail (RuleM lore) where
+  fail = throwError . OtherError
 
 instance (Attributes lore, BinderOps lore) => MonadBinder (RuleM lore) where
   type Lore (RuleM lore) = lore
@@ -84,15 +94,16 @@ simplify :: (MonadFreshNames m, HasScope lore m, BinderOps lore) =>
 simplify (RuleM m) = do
   scope <- askScope
   modifyNameSource $ \src ->
-    case runStateT (runBinderT m scope) src of
-      Nothing        -> (Nothing, src)
-      Just (x, src') -> (Just x, src')
+    case runExcept $ runStateT (runBinderT m scope) src of
+      Left CannotSimplify -> (Nothing, src)
+      Left (OtherError err) -> error $ "simplify: " ++ err
+      Right (x, src') -> (Just x, src')
 
 cannotSimplify :: RuleM lore a
-cannotSimplify = fail "Cannot simplify"
+cannotSimplify = throwError CannotSimplify
 
 liftMaybe :: Maybe a -> RuleM lore a
-liftMaybe Nothing = fail "Nothing"
+liftMaybe Nothing = cannotSimplify
 liftMaybe (Just x) = return x
 
 type RuleGeneric lore a = a -> Stm lore -> RuleM lore ()
@@ -126,10 +137,13 @@ data Rules lore a = Rules { rulesAny :: [SimplificationRule lore a]
                        , rulesOp :: [SimplificationRule lore a]
                        }
 
+instance Sem.Semigroup (Rules lore a) where
+  Rules as1 bs1 cs1 ds1 es1 <> Rules as2 bs2 cs2 ds2 es2 =
+    Rules (as1<>as2) (bs1<>bs2) (cs1<>cs2) (ds1<>ds2) (es1<>es2)
+
 instance Monoid (Rules lore a) where
   mempty = Rules mempty mempty mempty mempty mempty
-  Rules as1 bs1 cs1 ds1 es1 `mappend` Rules as2 bs2 cs2 ds2 es2 =
-    Rules (as1<>as2) (bs1<>bs2) (cs1<>cs2) (ds1<>ds2) (es1<>es2)
+  mappend = (Sem.<>)
 
 -- | Context for a rule applied during top-down traversal of the
 -- program.  Takes a symbol table as argument.
@@ -164,9 +178,12 @@ data RuleBook lore = RuleBook { bookTopDownRules :: TopDownRules lore
                               , bookBottomUpRules :: BottomUpRules lore
                               }
 
+instance Sem.Semigroup (RuleBook lore) where
+  RuleBook ts1 bs1 <> RuleBook ts2 bs2 = RuleBook (ts1<>ts2) (bs1<>bs2)
+
 instance Monoid (RuleBook lore) where
   mempty = RuleBook mempty mempty
-  RuleBook ts1 bs1 `mappend` RuleBook ts2 bs2 = RuleBook (ts1<>ts2) (bs1<>bs2)
+  mappend = (Sem.<>)
 
 -- | Construct a rule book from a collection of rules.
 ruleBook :: [TopDownRule m]

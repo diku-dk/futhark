@@ -52,18 +52,14 @@ module Futhark.Representation.AST.Syntax.Core
          , Names
          ) where
 
-import Control.Applicative
 import Control.Monad.State
 import Data.Array
-import Data.Foldable hiding (and)
-import Data.Traversable hiding (mapM)
 import Data.Hashable
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-
-import Prelude
+import qualified Data.Semigroup as Sem
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
@@ -104,9 +100,12 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
 
+instance Sem.Semigroup (ShapeBase d) where
+  Shape l1 <> Shape l2 = Shape $ l1 `mappend` l2
+
 instance Monoid (ShapeBase d) where
   mempty = Shape mempty
-  Shape l1 `mappend` Shape l2 = Shape $ l1 `mappend` l2
+  mappend = (Sem.<>)
 
 instance Functor ShapeBase where
   fmap f = Shape . map f . shapeDims
@@ -135,9 +134,12 @@ instance ArrayShape (ShapeBase ExtSize) where
               Nothing -> do put $ M.insert y x extmap
                             return True
 
+instance Sem.Semigroup Rank where
+  Rank x <> Rank y = Rank $ x + y
+
 instance Monoid Rank where
   mempty = Rank 0
-  Rank x `mappend` Rank y = Rank $ x + y
+  mappend = (Sem.<>)
 
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
@@ -221,9 +223,12 @@ instance Hashable Ident where
 newtype Certificates = Certificates { unCertificates :: [VName] }
                      deriving (Eq, Ord, Show)
 
+instance Sem.Semigroup Certificates where
+  Certificates x <> Certificates y = Certificates (x <> y)
+
 instance Monoid Certificates where
   mempty = Certificates mempty
-  Certificates x `mappend` Certificates y = Certificates (x `mappend` y)
+  mappend = (Sem.<>)
 
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is

@@ -58,6 +58,7 @@ import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Maybe
+import qualified Data.Semigroup as Sem
 
 import Futhark.Construct (instantiateShapes)
 import Futhark.Representation.Aliases
@@ -221,17 +222,20 @@ data Consumption = ConsumptionError String
                  | Consumption Occurences
                  deriving (Show)
 
-instance Monoid Consumption where
-  mempty = Consumption mempty
-  ConsumptionError e `mappend` _ = ConsumptionError e
-  _ `mappend` ConsumptionError e = ConsumptionError e
-  Consumption o1 `mappend` Consumption o2
+instance Sem.Semigroup Consumption where
+  ConsumptionError e <> _ = ConsumptionError e
+  _ <> ConsumptionError e = ConsumptionError e
+  Consumption o1 <> Consumption o2
     | v:_ <- S.toList $ consumed_in_o1 `S.intersection` used_in_o2 =
         ConsumptionError $ "Variable " <> pretty v <> " referenced after being consumed."
     | otherwise =
         Consumption $ o1 `seqOccurences` o2
     where consumed_in_o1 = mconcat $ map consumed o1
           used_in_o2 = mconcat $ map consumed o2 <> map observed o2
+
+instance Monoid Consumption where
+  mempty = Consumption mempty
+  mappend = (Sem.<>)
 
 -- | The environment contains a variable table and a function table.
 -- Type checking happens with access to this environment.  The

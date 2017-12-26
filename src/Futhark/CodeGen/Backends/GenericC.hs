@@ -75,6 +75,7 @@ import Data.Maybe
 import Data.FileEmbed
 import Data.Ord
 import Data.Hashable
+import qualified Data.Semigroup as Sem
 
 import Prelude
 
@@ -224,10 +225,13 @@ data CompilerAcc op s = CompilerAcc {
   , accDeclaredMem :: [(VName,Space)]
   }
 
-instance Monoid (CompilerAcc op s) where
-  CompilerAcc items1 declared1 `mappend` CompilerAcc items2 declared2 =
+instance Sem.Semigroup (CompilerAcc op s) where
+  CompilerAcc items1 declared1 <> CompilerAcc items2 declared2 =
     CompilerAcc (items1<>items2) (declared1<>declared2)
+
+instance Monoid (CompilerAcc op s) where
   mempty = CompilerAcc mempty mempty
+  mappend = (Sem.<>)
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
 envOpCompiler = opsCompiler . envOperations

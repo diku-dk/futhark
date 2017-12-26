@@ -115,8 +115,8 @@ checkResults pat size untouchable knownBnds params body accs = do
                   S.fromList params <>
                   untouchable
 
-        checkResult (p, Var v) (accparam, acc) = do
-          (BasicOp (BinOp bop x y)) <- liftMaybe $ M.lookup v bndMap
+        checkResult (p, Var v) (accparam, acc)
+          | Just (BasicOp (BinOp bop x y)) <- M.lookup v bndMap = do
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
           let isThisAccum = (==Var accparam)

@@ -31,6 +31,7 @@ import Control.Monad.State.Strict
 import Control.Monad.Reader
 import Control.Monad.Error.Class
 import qualified Data.Map.Strict as M
+import qualified Control.Monad.Fail as Fail
 
 import Prelude
 
@@ -62,6 +63,9 @@ newtype BinderT lore m a = BinderT (StateT (Stms lore, Scope lore) m a)
 
 instance MonadTrans (BinderT lore) where
   lift = BinderT . lift
+
+instance Monad m => Fail.MonadFail (BinderT lore m) where
+  fail = error . ("BinderT.fail: "++)
 
 type Binder lore = BinderT lore (State VNameSource)
 

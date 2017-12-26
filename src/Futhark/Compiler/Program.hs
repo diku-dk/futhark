@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.Compiler.Program
        ( readProgram
        , readLibrary
@@ -32,6 +33,7 @@ import System.IO.Error
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Language.Haskell.TH.Syntax (Lift)
+import qualified Data.Semigroup as Sem
 
 import Futhark.Error
 import Futhark.FreshNames
@@ -65,13 +67,10 @@ emptyBasis = Basis { basisImports = mempty
   where src = newNameSource $ succ $ maximum $ map E.baseTag $ M.keys E.intrinsics
 
 newtype ImportPaths = ImportPaths [FilePath]
+  deriving (Sem.Semigroup, Monoid)
 
 importPath :: FilePath -> ImportPaths
 importPath = ImportPaths . pure
-
-instance Monoid ImportPaths where
-  mempty = ImportPaths mempty
-  ImportPaths x `mappend` ImportPaths y = ImportPaths $ x <> y
 
 -- | Absolute reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  The 'FilePath' must be absolute.

@@ -79,6 +79,7 @@ import Data.Monoid
 import Data.Traversable
 import Data.Loc
 import qualified Data.Sequence as Seq
+import qualified Data.Semigroup as Sem
 
 import Prelude
 
@@ -98,9 +99,12 @@ data PatternT attr =
           }
   deriving (Ord, Show, Eq)
 
+instance Sem.Semigroup (PatternT lore) where
+  Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
+
 instance Monoid (PatternT lore) where
   mempty = Pattern [] []
-  Pattern cs1 vs1 `mappend` Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
+  mappend = (Sem.<>)
 
 -- | A type alias for namespace control.
 type Pattern lore = PatternT (LetAttr lore)
