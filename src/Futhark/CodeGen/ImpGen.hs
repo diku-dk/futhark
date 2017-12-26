@@ -165,10 +165,6 @@ data VarEntry lore = ArrayVar (Maybe (Exp lore)) ArrayEntry
 newtype Destination = Destination { valueDestinations :: [ValueDestination] }
                     deriving (Show)
 
-instance Monoid Destination where
-  Destination ds1 `mappend` Destination ds2 = Destination $ ds1 <> ds2
-  mempty = Destination mempty
-
 data ValueDestination = ScalarDestination VName
                       | ArrayElemDestination VName PrimType Imp.Space (Count Bytes)
                       | MemoryDestination VName

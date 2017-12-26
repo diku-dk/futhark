@@ -12,19 +12,20 @@ module Futhark.Util.Log
 
 where
 
-import Control.Applicative
 import Control.Monad.Writer
 import qualified Control.Monad.RWS.Strict
 import qualified Control.Monad.RWS.Lazy
 import qualified Data.Text as T
 import qualified Data.DList as DL
-
-import Prelude
+import qualified Data.Semigroup as Sem
 
 newtype Log = Log { unLog :: DL.DList T.Text }
 
+instance Sem.Semigroup Log where
+  Log l1 <> Log l2 = Log $ l1 <> l2
+
 instance Monoid Log where
-  Log l1 `mappend` Log l2 = Log $ l1 `mappend` l2
+  mappend = (Sem.<>)
   mempty = Log mempty
 
 -- | Transform a log into text.  Every log entry becomes its own line

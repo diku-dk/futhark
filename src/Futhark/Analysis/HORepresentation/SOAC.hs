@@ -73,6 +73,7 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.Sequence as Seq
 import Data.Traversable
+import qualified Data.Semigroup as Sem
 
 import Prelude hiding (mapM)
 
@@ -126,12 +127,14 @@ instance Substitute ArrayTransform where
 newtype ArrayTransforms = ArrayTransforms (Seq.Seq ArrayTransform)
   deriving (Eq, Ord, Show)
 
+instance Sem.Semigroup ArrayTransforms where
+  ts1 <> ts2 = case viewf ts2 of
+                 t :< ts2' -> (ts1 |> t) <> ts2'
+                 EmptyF    -> ts1
+
 instance Monoid ArrayTransforms where
   mempty = noTransforms
-  ts1 `mappend` ts2 =
-    case viewf ts2 of
-      t :< ts2' -> (ts1 |> t) `mappend` ts2'
-      EmptyF    -> ts1
+  mappend = (Sem.<>)
 
 instance Substitute ArrayTransforms where
   substituteNames substs (ArrayTransforms ts) =

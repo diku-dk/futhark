@@ -60,7 +60,7 @@ import Data.Ord
 import Data.Hashable
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-
+import qualified Data.Semigroup as Sem
 import qualified System.FilePath.Posix as Posix
 
 import Prelude hiding (mapM, mod)
@@ -243,18 +243,24 @@ data Env = Env { envVtable :: M.Map VName ValBinding
                , envNameMap :: NameMap
                } deriving (Show)
 
+instance Sem.Semigroup Env where
+  Env vt1 tt1 st1 mt1 nt1 <> Env vt2 tt2 st2 mt2 nt2 =
+    Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
+
 instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
-  Env vt1 tt1 st1 mt1 nt1 `mappend` Env vt2 tt2 st2 mt2 nt2 =
-    Env (vt1<>vt2) (tt1<>tt2) (st1<>st2) (mt1<>mt2) (nt1<>nt2)
+  mappend = (Sem.<>)
 
 -- | The warnings produced by the type checker.  The 'Show' instance
 -- produces a human-readable description.
 newtype Warnings = Warnings [(SrcLoc, String)]
 
+instance Sem.Semigroup Warnings where
+  Warnings ws1 <> Warnings ws2 = Warnings $ ws1 <> ws2
+
 instance Monoid Warnings where
   mempty = Warnings mempty
-  Warnings ws1 `mappend` Warnings ws2 = Warnings $ ws1 <> ws2
+  mappend = (Sem.<>)
 
 instance Show Warnings where
   show (Warnings []) = ""
