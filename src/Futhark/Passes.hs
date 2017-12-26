@@ -7,7 +7,6 @@ module Futhark.Passes
   , kernelsPipeline
   , sequentialCpuPipeline
   , gpuPipeline
-  , CompilationMode (..)
   )
 where
 
@@ -32,17 +31,6 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.Kernels (Kernels)
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Util
-
-
--- | Are we compiling the Futhark program as an executable or a
--- library?  This affects which functions are considered as roots for
--- dead code elimination and ultimately exist in generated code.
-data CompilationMode = Executable
-                     -- ^ Only the top-level function named @main@ is
-                       -- alive.
-                     | Library
-                       -- ^ Only top-level functions marked @entry@
-                       -- are alive.
 
 standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
