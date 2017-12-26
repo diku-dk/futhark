@@ -6,7 +6,7 @@
 -- Right now, the module can detect only trivial cases.  In the
 -- future, we would like to make it more powerful, as well as possibly
 -- also being able to analyse sequential loops.
-module Futhark.Optimise.Simplifier.ClosedForm
+module Futhark.Optimise.Simplify.ClosedForm
   ( foldClosedForm
   , loopClosedForm
   )
@@ -21,7 +21,7 @@ import Data.Monoid
 import Futhark.Construct
 import Futhark.Representation.AST
 import Futhark.Transform.Rename
-import Futhark.Optimise.Simplifier.Rule
+import Futhark.Optimise.Simplify.Rule
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup lore = VName -> Maybe (Exp lore, Certificates)

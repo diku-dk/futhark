@@ -11,7 +11,7 @@
 -- state or look at the program as a whole.  Compare this to the
 -- fusion algorithm in @Futhark.Optimise.Fusion.Fusion@, which must be implemented
 -- as its own pass.
-module Futhark.Optimise.Simplifier.Rule
+module Futhark.Optimise.Simplify.Rule
        ( -- * The rule monad
          RuleM
        , cannotSimplify

@@ -5,7 +5,7 @@ module Futhark.Analysis.PrimExp.Simplify
 where
 
 import           Futhark.Analysis.PrimExp
-import           Futhark.Optimise.Simplifier.Engine as Engine
+import           Futhark.Optimise.Simplify.Engine as Engine
 import           Futhark.Representation.AST
 
 -- | Simplify a 'PrimExp', including copy propagation.  If a 'LeafExp'

@@ -1,14 +1,19 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Futhark.Optimise.Simplifier.Simplify
-  ( Engine.SimpleOps (..)
-  , Engine.SimpleM
-  , Engine.SimplifyOp
-  , Engine.bindableSimpleOps
-  , simplifyProg
+module Futhark.Optimise.Simplify
+  ( simplifyProg
   , simplifyFun
   , simplifyLambda
   , simplifyStms
+
+  , Engine.SimpleOps (..)
+  , Engine.SimpleM
+  , Engine.SimplifyOp
+  , Engine.bindableSimpleOps
+  , Engine.noExtraHoistBlockers
+  , Engine.SimplifiableLore
+  , Engine.HoistBlockers
+  , RuleBook
   )
   where
 
@@ -16,10 +21,10 @@ import Data.Monoid
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
-import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import qualified Futhark.Optimise.Simplify.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplifier.Rule
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplify.Rule
+import Futhark.Optimise.Simplify.Lore
 import Futhark.Tools (intraproceduralTransformation)
 
 -- | Simplify the given program.  Even if the output differs from the
@@ -30,7 +35,7 @@ simplifyProg :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
              -> RuleBook (Engine.Wise lore)
              -> Engine.HoistBlockers lore
              -> Prog lore
-             -> m (Prog (Engine.Wise lore))
+             -> m (Prog lore)
 simplifyProg simpl rules blockers =
   intraproceduralTransformation $ simplifyFun simpl rules blockers
 
@@ -43,7 +48,7 @@ simplifyFun :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
              -> RuleBook (Engine.Wise lore)
              -> Engine.HoistBlockers lore
              -> FunDef lore
-             -> m (FunDef (Engine.Wise lore))
+             -> m (FunDef lore)
 simplifyFun simpl rules blockers =
   loopUntilConvergence env simpl Engine.simplifyFun removeFunDefWisdom
   where env = Engine.emptyEnv rules blockers
@@ -54,7 +59,7 @@ simplifyLambda :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore l
                -> RuleBook (Engine.Wise lore)
                -> Engine.HoistBlockers lore
                -> Lambda lore -> [Maybe VName]
-               -> m (Lambda (Engine.Wise lore))
+               -> m (Lambda lore)
 simplifyLambda simpl rules blockers orig_lam args = do
   types <- askScope
   let f lam = Engine.localVtable
@@ -69,7 +74,7 @@ simplifyStms :: (MonadFreshNames m, HasScope lore m, Engine.SimplifiableLore lor
              -> RuleBook (Engine.Wise lore)
              -> Engine.HoistBlockers lore
              -> Stms lore
-             -> m (Stms (Engine.Wise lore))
+             -> m (Stms lore)
 simplifyStms simpl rules blockers orig_bnds = do
   types <- askScope
   let f bnds = Engine.localVtable
@@ -84,7 +89,7 @@ loopUntilConvergence :: (MonadFreshNames m, Engine.SimplifiableLore lore) =>
                      -> (a -> Engine.SimpleM lore b)
                      -> (b -> a)
                      -> a
-                     -> m b
+                     -> m a
 loopUntilConvergence env simpl f g x = do
   (x', changed) <- modifyNameSource $ Engine.runSimpleM (f x) simpl env
-  if changed then loopUntilConvergence env simpl f g (g x') else return x'
+  if changed then loopUntilConvergence env simpl f g (g x') else return $ g x'

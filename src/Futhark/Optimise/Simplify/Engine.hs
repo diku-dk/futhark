@@ -15,9 +15,9 @@
 --    "Futhark.Optimise.Simplification.Rules").
 --
 -- If you just want to run the simplifier as simply as possible, you
--- may prefer to use the "Futhark.Optimise.Simplifier" module.
+-- may prefer to use the "Futhark.Optimise.Simplify" module.
 --
-module Futhark.Optimise.Simplifier.Engine
+module Futhark.Optimise.Simplify.Engine
        ( -- * Monadic interface
          SimpleM
        , runSimpleM
@@ -63,7 +63,7 @@ module Futhark.Optimise.Simplifier.Engine
        , blockIf
        , constructBody
 
-       , module Futhark.Optimise.Simplifier.Lore
+       , module Futhark.Optimise.Simplify.Lore
        ) where
 
 import Control.Monad.Writer
@@ -76,12 +76,12 @@ import qualified Data.Set as S
 
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Optimise.Simplifier.Rule
+import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Construct
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplify.Lore
 import qualified Futhark.Analysis.ScalExp as SE
 
 data HoistBlockers lore = HoistBlockers

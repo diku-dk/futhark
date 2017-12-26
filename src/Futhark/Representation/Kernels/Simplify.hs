@@ -26,31 +26,30 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set      as S
 
 import Futhark.Representation.Kernels
-import qualified Futhark.Optimise.Simplifier.Engine as Engine
-import qualified Futhark.Optimise.Simplifier as Simplifier
-import Futhark.Optimise.Simplifier.Rules
-import Futhark.Optimise.Simplifier.Lore
+import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify.Rules
+import Futhark.Optimise.Simplify.Lore
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
-import Futhark.Optimise.Simplifier.Rule
+import qualified Futhark.Optimise.Simplify as Simplify
+import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Rephrase (castStm)
 
-simpleKernels :: Simplifier.SimpleOps Kernels
-simpleKernels = Simplifier.bindableSimpleOps (simplifyKernelOp simpleInKernel inKernelEnv)
+simpleKernels :: Simplify.SimpleOps Kernels
+simpleKernels = Simplify.bindableSimpleOps (simplifyKernelOp simpleInKernel inKernelEnv)
 
-simpleInKernel :: Simplifier.SimpleOps InKernel
-simpleInKernel = Simplifier.bindableSimpleOps simplifyKernelExp
+simpleInKernel :: Simplify.SimpleOps InKernel
+simpleInKernel = Simplify.bindableSimpleOps simplifyKernelExp
 
 simplifyKernels :: MonadFreshNames m => Prog Kernels -> m (Prog Kernels)
 simplifyKernels =
-  simplifyProgWithRules simpleKernels kernelRules noExtraHoistBlockers
+  Simplify.simplifyProg simpleKernels kernelRules Simplify.noExtraHoistBlockers
 
 simplifyFun :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 simplifyFun =
-  Simplifier.simplifyFunWithRules simpleKernels kernelRules noExtraHoistBlockers
+  Simplify.simplifyFun simpleKernels kernelRules Simplify.noExtraHoistBlockers
 
 simplifyKernelOp :: (Engine.SimplifiableLore lore,
                      Engine.SimplifiableLore outerlore,
@@ -111,7 +110,7 @@ mkWiseKernelBody attr bnds res =
         resValue (KernelInPlaceReturn v) = Var v
 
 inKernelEnv :: Engine.Env InKernel
-inKernelEnv = Engine.emptyEnv inKernelRules noExtraHoistBlockers
+inKernelEnv = Engine.emptyEnv inKernelRules Simplify.noExtraHoistBlockers
 
 instance Engine.Simplifiable SplitOrdering where
   simplify SplitContiguous =

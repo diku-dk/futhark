@@ -39,7 +39,7 @@ import Futhark.Util.Pretty
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplify.Lore
 import Futhark.Representation.Ranges
   (Ranges, removeLambdaRanges, removeExtLambdaRanges)
 import Futhark.Representation.AST.Attributes.Ranges

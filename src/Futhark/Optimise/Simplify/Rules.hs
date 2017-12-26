@@ -3,9 +3,9 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | This module defines a collection of simplification rules, as per
--- "Futhark.Optimise.Simplifier.Rule".  They are used in the
+-- "Futhark.Optimise.Simplify.Rule".  They are used in the
 -- simplifier.
-module Futhark.Optimise.Simplifier.Rules
+module Futhark.Optimise.Simplify.Rules
   ( standardRules
   )
 where
@@ -24,8 +24,8 @@ import qualified Data.Set      as S
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.DataDependencies
-import Futhark.Optimise.Simplifier.ClosedForm
-import Futhark.Optimise.Simplifier.Rule
+import Futhark.Optimise.Simplify.ClosedForm
+import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Analysis.PrimExp.Convert

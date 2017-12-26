@@ -29,7 +29,7 @@ import Futhark.Representation.Aliases
 import Futhark.Representation.Ranges
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplify.Lore
 import Futhark.Analysis.Usage
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.ScalExp as SE

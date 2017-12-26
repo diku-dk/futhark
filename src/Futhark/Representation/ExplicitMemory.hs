@@ -117,8 +117,8 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.PrimExp.Simplify
 import Futhark.Util
 import qualified Futhark.Util.Pretty as PP
-import qualified Futhark.Optimise.Simplifier.Engine as Engine
-import Futhark.Optimise.Simplifier.Lore
+import qualified Futhark.Optimise.Simplify.Engine as Engine
+import Futhark.Optimise.Simplify.Lore
 import Futhark.Representation.Aliases
   (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
 import Futhark.Representation.AST.Attributes.Ranges
