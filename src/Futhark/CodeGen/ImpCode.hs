@@ -62,6 +62,7 @@ import Data.Loc
 import Data.Traversable
 import Data.Foldable
 import qualified Data.Set as S
+import qualified Data.Semigroup as Sem
 
 import Prelude hiding (foldr)
 
@@ -95,9 +96,12 @@ paramName (ScalarParam name _) = name
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
 
+instance Sem.Semigroup (Functions a) where
+  Functions x <> Functions y = Functions $ x ++ y
+
 instance Monoid (Functions a) where
   mempty = Functions []
-  Functions x `mappend` Functions y = Functions $ x ++ y
+  mappend = (Sem.<>)
 
 data Signedness = TypeUnsigned
                 | TypeDirect
@@ -176,11 +180,14 @@ data Code a = Skip
 data Volatility = Volatile | Nonvolatile
                 deriving (Eq, Ord, Show)
 
+instance Sem.Semigroup (Code a) where
+  Skip <> y    = y
+  x    <> Skip = x
+  x    <> y    = x :>>: y
+
 instance Monoid (Code a) where
   mempty = Skip
-  Skip `mappend` y    = y
-  x    `mappend` Skip = x
-  x    `mappend` y    = x :>>: y
+  mappend = (Sem.<>)
 
 data ExpLeaf = ScalarVar VName
              | SizeOf PrimType

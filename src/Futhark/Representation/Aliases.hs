@@ -47,6 +47,7 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import qualified Data.Semigroup as Sem
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
@@ -68,9 +69,12 @@ data Aliases lore
 newtype Names' = Names' { unNames :: Names }
                deriving (Show)
 
+instance Sem.Semigroup Names' where
+  x <> y = Names' $ unNames x <> unNames y
+
 instance Monoid Names' where
   mempty = Names' mempty
-  x `mappend` y = Names' $ unNames x <> unNames y
+  mappend = (Sem.<>)
 
 instance Eq Names' where
   _ == _ = True

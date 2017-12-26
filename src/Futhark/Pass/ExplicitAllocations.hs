@@ -16,6 +16,7 @@ import Control.Monad.Reader
 import Control.Monad.RWS.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import qualified Control.Monad.Fail as Fail
 
 import Futhark.Representation.Kernels
 import Futhark.Optimise.Simplify.Lore
@@ -113,6 +114,9 @@ newtype AllocM fromlore tolore a =
              HasScope tolore,
              LocalScope tolore,
              MonadReader (AllocEnv fromlore tolore))
+
+instance Fail.MonadFail (AllocM fromlore tolore) where
+  fail = error . ("AllocM.fail: "++)
 
 instance (Allocable fromlore tolore, Allocator tolore (AllocM fromlore tolore)) =>
          MonadBinder (AllocM fromlore tolore) where

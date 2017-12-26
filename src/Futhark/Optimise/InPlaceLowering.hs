@@ -64,6 +64,7 @@ module Futhark.Optimise.InPlaceLowering
 import Control.Monad.RWS
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import qualified Data.Semigroup as Sem
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
@@ -169,10 +170,13 @@ data BottomUp = BottomUp { bottomUpSeen :: Names
                          , forwardThese :: [DesiredUpdate (LetAttr (Aliases Kernels))]
                          }
 
+instance Sem.Semigroup BottomUp where
+  BottomUp seen1 forward1 <> BottomUp seen2 forward2 =
+    BottomUp (seen1 <> seen2) (forward1 <> forward2)
+
 instance Monoid BottomUp where
-  BottomUp seen1 forward1 `mappend` BottomUp seen2 forward2 =
-    BottomUp (seen1 `mappend` seen2) (forward1 `mappend` forward2)
   mempty = BottomUp mempty mempty
+  mappend = (Sem.<>)
 
 updateStm :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Stm (Aliases Kernels)
 updateStm fwd =

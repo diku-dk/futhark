@@ -8,7 +8,7 @@ license: ISC
 github: HIPERFIT/futhark
 category: Language
 
-ghc-options: -Wall
+ghc-options: -Wall -Wcompat
 
 extra-source-files:
   - rts/python/*.py
@@ -48,6 +48,10 @@ dependencies:
   - template-haskell
   - th-lift-instances
   - extra
+
+when:
+- condition: "!impl(ghc >= 8.0)"
+  dependencies: semigroups == 0.18.*
 
 library:
   build-tools:

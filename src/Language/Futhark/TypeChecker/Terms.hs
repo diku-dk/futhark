@@ -18,7 +18,7 @@ import Data.Maybe
 import Data.Either
 import Data.Ord
 import Data.Traversable (mapM)
-
+import qualified Data.Semigroup as Sem
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
@@ -125,10 +125,13 @@ data TermScope = TermScope { scopeVtable  :: M.Map VName ValBinding
                            , scopeNameMap :: NameMap
                            } deriving (Show)
 
+instance Sem.Semigroup TermScope where
+  TermScope vt1 tt1 nt1 <> TermScope vt2 tt2 nt2 =
+    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (nt2 `M.union` nt1)
+
 instance Monoid TermScope where
   mempty = TermScope mempty mempty mempty
-  TermScope vt1 tt1 nt1 `mappend` TermScope vt2 tt2 nt2 =
-    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (nt2 `M.union` nt1)
+  mappend = (Sem.<>)
 
 envToTermScope :: Env -> TermScope
 envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env)
@@ -464,10 +467,13 @@ data PatternUses = PatternUses { patternDimUses :: [QualName VName]
                                , patternTypeUses :: [QualName VName]
                                }
 
+instance Sem.Semigroup PatternUses where
+  PatternUses x1 y1 <> PatternUses x2 y2 =
+    PatternUses (x1<>x2) (y1<>y2)
+
 instance Monoid PatternUses where
   mempty = PatternUses mempty mempty
-  PatternUses x1 y1 `mappend` PatternUses x2 y2 =
-    PatternUses (x1<>x2) (y1<>y2)
+  mappend = (Sem.<>)
 
 patternUses :: Pattern -> PatternUses
 patternUses Id{} = mempty

@@ -23,6 +23,7 @@ import qualified Data.Text as T
 import Data.String
 import Data.List
 import qualified Data.Map.Strict as M
+import qualified Data.Semigroup as Sem
 
 import Prelude
 
@@ -38,10 +39,12 @@ instance OpMetrics () where
 
 newtype CountMetrics = CountMetrics [([Text], Text)]
 
+instance Sem.Semigroup CountMetrics where
+  CountMetrics x <> CountMetrics y = CountMetrics $ x <> y
+
 instance Monoid CountMetrics where
   mempty = CountMetrics mempty
-
-  mappend (CountMetrics x) (CountMetrics y) = CountMetrics $ x <> y
+  mappend = (Sem.<>)
 
 actualMetrics :: CountMetrics -> AstMetrics
 actualMetrics (CountMetrics metrics) =

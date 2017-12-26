@@ -9,6 +9,7 @@ module Futhark.FreshNames
   , newVNameFromName
   ) where
 
+import qualified Data.Semigroup as Sem
 import Language.Haskell.TH.Syntax (Lift)
 
 import Language.Futhark.Core
@@ -20,9 +21,12 @@ import Language.Futhark.Core
 newtype VNameSource = VNameSource Int
   deriving (Lift)
 
+instance Sem.Semigroup VNameSource where
+  VNameSource x <> VNameSource y = VNameSource (x `max` y)
+
 instance Monoid VNameSource where
   mempty = blankNameSource
-  VNameSource x `mappend` VNameSource y = VNameSource (x `max` y)
+  mappend = (Sem.<>)
 
 -- | Produce a fresh name, using the given name as a template.
 newName :: VNameSource -> VName -> (VName, VNameSource)

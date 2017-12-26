@@ -27,6 +27,7 @@ import qualified Data.Foldable as Foldable
 import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import qualified Data.Semigroup as Sem
 
 import Prelude hiding (lookup)
 
@@ -36,10 +37,13 @@ import Futhark.Representation.AST
 newtype UsageTable = UsageTable (M.Map VName Usages)
                    deriving (Eq, Show)
 
+instance Sem.Semigroup UsageTable where
+  UsageTable table1 <> UsageTable table2 =
+    UsageTable $ M.unionWith S.union table1 table2
+
 instance Monoid UsageTable where
   mempty = empty
-  UsageTable table1 `mappend` UsageTable table2 =
-    UsageTable $ M.unionWith S.union table1 table2
+  mappend = (Sem.<>)
 
 instance Substitute UsageTable where
   substituteNames subst (UsageTable table)
