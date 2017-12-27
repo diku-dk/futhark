@@ -16,7 +16,6 @@ import Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import NeatInterpolation (text)
-import System.IO
 import System.Exit
 import System.Console.GetOpt
 import qualified System.Console.Haskeline as Haskeline
