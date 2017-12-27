@@ -293,11 +293,12 @@ excludedTest config =
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
 
-reportInteractive :: String -> Int -> Int -> Int -> IO ()
-reportInteractive first failed passed remaining = do
+reportInteractive :: Int -> String -> Int -> Int -> Int -> IO ()
+reportInteractive longest first failed passed remaining = do
   clearLine
   putStr $
-    "\rWaiting for " ++ first ++ " (" ++
+    "\rWaiting for " ++ first ++ replicate (1+longest - length first) ' '
+    ++ "(" ++
     show failed ++ " failed, " ++
     show passed ++ " passed, " ++
     show remaining ++ " to go.)\r"
@@ -330,7 +331,8 @@ runTests config paths = do
   _ <- forkIO $ mapM_ (putMVar testmvar) $ S.toList included_set
   isTTY <- (&& not (configUnbufferOutput config)) <$> hIsTerminalDevice stdout
 
-  let report = if isTTY then reportInteractive else reportText
+  let longest = foldl' max 0 $ map (length . testCaseProgram) included
+      report = if isTTY then reportInteractive longest else reportText
       clear  = if isTTY then clearLine else putStr "\n"
       getResults remaining failed passed =
         case S.toList remaining of
