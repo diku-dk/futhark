@@ -3,7 +3,6 @@
 -- specified type and shape.
 module Main (main) where
 
-import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State
@@ -14,7 +13,6 @@ import Data.Binary.Put
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as M
 import Data.List
-import Data.Maybe
 import qualified Data.Text as T
 import Data.Word
 
