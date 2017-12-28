@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * Shorter compile times for most programs.
 
+   * `futhark-bench`: Add ``--skip-compilation`` flag.
+
 ### Removed
 
    * `futhark-dataset`: Removed `--binary-no-header` and
