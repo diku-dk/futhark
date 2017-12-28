@@ -36,10 +36,11 @@ data BenchOptions = BenchOptions
                    , optExtraOptions :: [String]
                    , optJSON :: Maybe FilePath
                    , optTimeout :: Int
+                   , optSkipCompilation :: Bool
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1)
+initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing (-1) False
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -104,20 +105,26 @@ compileBenchmark opts (program, spec) =
   case testAction spec of
     RunCases cases | "nobench" `notElem` testTags spec,
                      "disable" `notElem` testTags spec,
-                     any hasRuns cases -> do
+                     any hasRuns cases ->
+      if optSkipCompilation opts
+        then do
+        exists <- doesFileExist $ binaryName program
+        if exists
+          then return $ Right (program, cases)
+          else do putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
+                  return $ Left FailedToCompile
+        else do
+        putStr $ "Compiling " ++ program ++ "...\n"
+        (futcode, _, futerr) <- liftIO $ readProcessWithExitCode compiler
+                                [program, "-o", binaryName program] ""
 
-      putStr $ "Compiling " ++ program ++ "...\n"
-      (futcode, _, futerr) <-
-        liftIO $ readProcessWithExitCode compiler
-        [program, "-o", binaryName program] ""
-
-      case futcode of
-        ExitSuccess     -> return $ Right (program, cases)
-        ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
-                              return $ Left FailedToCompile
-        ExitFailure _   -> do putStrLn "Failed:\n"
-                              SBS.putStrLn futerr
-                              return $ Left FailedToCompile
+        case futcode of
+          ExitSuccess     -> return $ Right (program, cases)
+          ExitFailure 127 -> do putStrLn $ "Failed:\n" ++ progNotFound compiler
+                                return $ Left FailedToCompile
+          ExitFailure _   -> do putStrLn "Failed:\n"
+                                SBS.putStrLn futerr
+                                return $ Left FailedToCompile
     _ ->
       return $ Left Skipped
   where compiler = optCompiler opts
@@ -305,6 +312,9 @@ commandLineOptions = [
                    "' is not an integer smaller than" ++ show max_timeout ++ ".")
     "SECONDS")
     "Number of seconds before a dataset is aborted."
+  , Option [] ["skip-compilation"]
+    (NoArg $ Right $ \config -> config { optSkipCompilation = True })
+    "Use already compiled program."
   ]
   where max_timeout :: Int
         max_timeout = maxBound `div` 1000000

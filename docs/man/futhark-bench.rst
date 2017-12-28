@@ -65,6 +65,11 @@ OPTIONS
 
   A negative timeout means to wait indefinitely.
 
+--skip-compilation
+
+  Do not run the compiler, and instead assume that each benchmark
+  program has already been compiled.  Use with caution.
+
 EXAMPLES
 ========
 
