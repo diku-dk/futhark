@@ -1,0 +1,115 @@
+#!/usr/bin/env python
+#
+# A simple autotuner for calibrating parameters of Futhark programs.
+# Based on OpenTuner.  Requires Python 2.  Still quite crude.
+
+import opentuner
+from opentuner import ConfigurationManipulator
+from opentuner.search.manipulator import IntegerParameter, LogIntegerParameter, PowerOfTwoParameter
+from opentuner import MeasurementInterface
+from opentuner import Result
+
+import tempfile
+import json
+import os
+import re
+
+class FutharkTuner(MeasurementInterface):
+  def __init__(self, args, *pargs, **kwargs):
+    kwargs['program_name'] = args.program
+    super(FutharkTuner, self).__init__(args, *pargs, **kwargs)
+
+    # We only compile the program once, since the parameters we are
+    # tuning can be given at run-time.  This saves a lot of time for
+    # programs that take a long time to compile.
+    compile_cmd = '{} {}'.format(self.args.compiler, self.program_name())
+    compile_res = self.call_program(compile_cmd)
+    assert compile_res['returncode'] == 0
+
+  def program_bin_name(self):
+      return os.path.splitext(self.program_name())[0]
+
+  def interesting_class(self, p_class):
+      return len(self.args.only) == 0 or p_class in self.args.only
+
+  def manipulator(self):
+    """
+    Define the search space by creating a
+    ConfigurationManipulator
+    """
+
+    # Run the program once to extract the configurable parameters.
+    sizes_cmd = './{} --print-sizes'.format(self.program_bin_name())
+    sizes_res = self.call_program(sizes_cmd)
+    assert sizes_res['returncode'] == 0
+
+    parameters = {}
+    size_p = re.compile('([^ ]*) \\(([^ ]*)\\)')
+    for line in sizes_res['stdout'].splitlines():
+        m = size_p.search(line)
+        parameters[m.group(1)] = m.group(2)
+
+    manipulator = ConfigurationManipulator()
+
+    for p_name in parameters:
+        p_class = parameters[p_name]
+        if self.interesting_class(p_class):
+          if p_class in ['group_size', 'num_groups']:
+            manipulator.add_parameter(PowerOfTwoParameter(p_name, 8, 1024))
+          elif p_class in ['tile_size']:
+            manipulator.add_parameter(IntegerParameter(p_name, 1, 32))
+          elif p_class in ['threshold']:
+            manipulator.add_parameter(LogIntegerParameter(p_name, 0, 1000000))
+    return manipulator
+
+  def futhark_bench_cmd(self, cfg):
+    def sizeOption(size):
+        return '--pass-option --size={}={}'.format(size, cfg[size])
+    size_options = ' '.join(map(sizeOption, cfg.keys()))
+    return 'futhark-bench --skip-compilation {} {}'.format(
+      self.program_name(), size_options)
+
+  def run(self, desired_result, input, limit):
+    """
+    Compile and run a given configuration then
+    return performance
+    """
+    with tempfile.NamedTemporaryFile() as bench_json:
+        bench_cmd = '{} --json {} --timeout {}'.format(
+          self.futhark_bench_cmd(desired_result.configuration.data),
+          bench_json.name, self.args.timeout)
+        run_res = self.call_program(bench_cmd)
+
+        if run_res['returncode'] != 0:
+          return Result(state='ERROR', time=float('inf'))
+
+        # Sum all the runtimes together to quantify the performance of
+        # this configuration.  This may be too crude, as it heavily
+        # favours the longer-running data sets.
+        json_data = json.load(bench_json)
+        datasets = json_data[self.program_name()]['datasets']
+        runtime = 0
+        for dataset in datasets:
+            runtime += sum(datasets[dataset]['runtimes'])
+
+    return Result(time=runtime)
+
+  def save_final_config(self, configuration):
+    """called at the end of tuning"""
+    print "Optimal block size written to mmm_final_config.json:", configuration.data
+    self.manipulator().save_to_file(configuration.data,
+                                    'mmm_final_config.json')
+    print "Reproduce with command:"
+    print self.futhark_bench_cmd(configuration.data)
+
+SIZE_CLASSES = ['group_size', 'num_groups', 'tile_size', 'threshold']
+
+if __name__ == '__main__':
+  argparser = opentuner.default_argparser()
+  argparser.add_argument('program', type=str, metavar='PROGRAM')
+  argparser.add_argument('--compiler', type=str, metavar='COMPILER', default='futhark-opencl')
+  argparser.add_argument('--timeout', type=int, metavar='TIMEOUT', default='60')
+  argparser.add_argument('--only', choices=SIZE_CLASSES, metavar='CLASS', action='append', default=[])
+  args = argparser.parse_args()
+
+  FutharkTuner.main(args)
