@@ -1013,27 +1013,28 @@ printStm (TransparentValue (ArrayValue _ _ _ bt ept shape)) e =
         values_array = "futhark_values_" ++ name
         shape_array = "futhark_shape_" ++ name
 
-readPrimStm :: C.ToExp a => a -> PrimType -> Signedness -> C.Stm
-readPrimStm place t ept =
+readPrimStm :: C.ToExp a => a -> Int -> PrimType -> Signedness -> C.Stm
+readPrimStm place i t ept =
   [C.cstm|if (read_scalar(&$exp:(primTypeInfo t ept),&$exp:place) != 0) {
-        panic(1, "Error when reading input of type %s (errno: %s).\n",
+        panic(1, "Error when reading input #%d of type %s (errno: %s).\n",
+              $int:i,
               $exp:(primTypeInfo t ept).type_name,
               strerror(errno));
       }|]
 
 readInputs :: [ExternalValue] -> CompilerM op s [(C.Stm, C.Stm, C.Stm, C.Exp)]
-readInputs = mapM readInput
+readInputs = zipWithM readInput [0..]
 
-readInput :: ExternalValue -> CompilerM op s (C.Stm, C.Stm, C.Stm, C.Exp)
-readInput (OpaqueValue desc _) = do
-  stm [C.cstm|panic(1, "Cannot read value of type %s\n", $string:desc);|]
+readInput :: Int -> ExternalValue -> CompilerM op s (C.Stm, C.Stm, C.Stm, C.Exp)
+readInput i (OpaqueValue desc _) = do
+  stm [C.cstm|panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:desc);|]
   return ([C.cstm|;|], [C.cstm|;|], [C.cstm|;|], [C.cexp|NULL|])
-readInput (TransparentValue (ScalarValue t ept _)) = do
+readInput i (TransparentValue (ScalarValue t ept _)) = do
   dest <- newVName "read_value"
   item [C.citem|$ty:(primTypeToCType t) $id:dest;|]
-  stm $ readPrimStm dest t ept
+  stm $ readPrimStm dest i t ept
   return ([C.cstm|;|], [C.cstm|;|], [C.cstm|;|], [C.cexp|$id:dest|])
-readInput (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
+readInput i (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
   dest <- newVName "read_value"
   shape <- newVName "read_shape"
   arr <- newVName "read_arr"
@@ -1045,7 +1046,7 @@ readInput (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
       name = arrayName t ept rank
       new_array = "futhark_new_" ++ name
       free_array = "futhark_free_" ++ name
-      dims_exps = [ [C.cexp|$id:shape[$int:i]|] | i <- [0..rank-1] ]
+      dims_exps = [ [C.cexp|$id:shape[$int:j]|] | j <- [0..rank-1] ]
 
   stm [C.cstm|{
      typename int64_t $id:shape[$int:rank];
@@ -1056,7 +1057,8 @@ readInput (TransparentValue vd@(ArrayValue _ _ _ t ept dims)) = do
                     $id:shape,
                     $int:(length dims))
          != 0) {
-       panic(1, "Failed reading input of type %s%s (errno: %s).\n",
+       panic(1, "Cannot read input #%d of type %s%s (errno: %s).\n",
+                 $int:i,
                  $string:(concat $ replicate rank "[]"),
                  $exp:(primTypeInfo t ept).type_name,
                  strerror(errno));
