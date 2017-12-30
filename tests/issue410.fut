@@ -8,7 +8,7 @@ let sgmScanSum [n] (vals:[n]i32) (flags:[n]bool) : [n]i32 =
 
 let sgmIota [n] (flags:[n]bool) : [n]i32 =
   let iotas = sgmScanSum (replicate n 1) flags
-  in map (-1) iotas
+  in map (\x -> x-1) iotas
 
 type point = (i32,i32)
 type line = (point,point)

@@ -17,7 +17,7 @@ module mk_radix_sort (P: {
     let ps1_clean = map (+ps0_offset) ps1
     let ps1_clean' = map (*) bits ps1_clean
     let ps = map (+) ps0_clean ps1_clean'
-    let ps_actual = map (-1) ps
+    let ps_actual = map (\x -> x-1) ps
     in scatter (copy xs) ps_actual xs
 
   let radix_sort [n] (xs: [n]P.t): [n]P.t =

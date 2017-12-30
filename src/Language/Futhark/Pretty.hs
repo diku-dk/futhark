@@ -248,12 +248,21 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "split@" <> ppr i <+> pprPrec 10 e <+> pprPrec 10 a
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
+  pprPrec p (Lambda tparams params body ascript _ _) =
+    parensIf (p /= -1) $
+    text "\\" <>
+    apply (map ppr tparams ++ map ppr params) <> ppAscription ascript <+>
+    text "->" </> indent 2 (ppr body)
+  pprPrec _ (OpSection binop _ _ _ _) =
+    parens $ ppr binop
+  pprPrec _ (OpSectionLeft binop x _ _ _) =
+    parens $ ppr x <+> ppr binop
+  pprPrec _ (OpSectionRight binop x _ _ _) =
+    parens $ ppr binop <+> ppr x
   pprPrec _ (DoLoop tparams pat initexp form loopbody _) =
     text "loop" <+> parens (spread (map ppr tparams ++ [ppr pat]) <+> equals
                             <+> ppr initexp) <+> equals <+>
-    ppr form <+>
-    text "do" </>
-    indent 2 (ppr loopbody)
+    ppr form <+> text "do" </> indent 2 (ppr loopbody)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FieldBase ty vn) where
   ppr (RecordFieldExplicit name e _) = ppr name <> equals <> ppr e
@@ -279,20 +288,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
 ppAscription :: (Eq vn, Hashable vn, Pretty vn) => Maybe (TypeDeclBase ty vn) -> Doc
 ppAscription Nothing  = mempty
 ppAscription (Just t) = text ":" <> ppr t
-
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LambdaBase ty vn) where
-  ppr (CurryFun e _ _) = ppr e
-  ppr (AnonymFun tparams params body ascript _ _) =
-    text "\\" <>
-    apply (map ppr tparams ++ map ppr params) <> ppAscription ascript <+>
-    text "->" </> indent 2 (ppr body)
-  ppr (BinOpFun binop _ _ _ _) =
-    ppr binop
-  ppr (CurryBinOpLeft binop x _ _ _) =
-    ppr x <+> ppr binop
-  ppr (CurryBinOpRight binop x _ _ _) =
-    ppr binop <+> ppr x
-  ppr (CurryProject k _ _) = text "#" <> ppr k
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppr . progDecs

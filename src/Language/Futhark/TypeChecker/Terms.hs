@@ -636,7 +636,7 @@ checkExp (Var qn NoInfo loc) = do
   (qn', t, fields) <- findRootVar (qualQuals qn) (qualLeaf qn)
   observe $ Ident (qualLeaf qn') (Info t) loc
 
-  foldM checkField (Var qn' (Info t) loc) fields
+  foldM checkField (Var qn' (Info ([], t)) loc) fields
   where findRootVar qs name = do
           r <- (Right <$> lookupVar loc (QualName qs name))
                `catchError` (return . Left)
@@ -813,14 +813,13 @@ checkExp (Unsafe e loc) =
 
 checkExp (Map fun arrexps pos) = do
   (arrexps', args) <- unzip <$> mapM checkSOACArrayArg arrexps
-  fun' <- checkLambda fun args
+  (fun', _) <- checkFunExp fun args
   return $ Map fun' arrexps' pos
 
 checkExp (Reduce comm fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg) <- checkSOACArrayArg arrexp
-  fun' <- checkLambda fun [startarg, arrarg]
-  let redtype = lambdaReturnType fun'
+  (fun', redtype) <- checkFunExp fun [startarg, arrarg]
   unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   unless (argType arrarg `subtypeOf` redtype) $
@@ -830,8 +829,7 @@ checkExp (Reduce comm fun startexp arrexp pos) = do
 checkExp (Scan fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
-  fun' <- checkLambda fun [startarg, arrarg]
-  let scantype = lambdaReturnType fun'
+  (fun', scantype) <- checkFunExp fun [startarg, arrarg]
   unless (typeOf startexp' `subtypeOf` scantype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
   unless (inrowt `subtypeOf` scantype) $
@@ -842,8 +840,7 @@ checkExp (Filter fun arrexp loc) = do
   (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
-  fun' <- checkLambda fun [nonunique_arg]
-  let lam_t = lambdaReturnType fun'
+  (fun', lam_t) <- checkFunExp fun [nonunique_arg]
   when (lam_t /= Prim Bool) $
     bad $ TypeError loc $ "Filter function must return bool, but returns " ++ pretty lam_t ++ "."
 
@@ -854,8 +851,8 @@ checkExp (Partition funs arrexp pos) = do
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
   funs' <- forM funs $ \fun -> do
-    fun' <- checkLambda fun [nonunique_arg]
-    when (lambdaReturnType fun' /= Prim Bool) $
+    (fun', fun_t) <- checkFunExp fun [nonunique_arg]
+    when (fun_t /= Prim Bool) $
       bad $ TypeError (srclocOf fun') "Partition function does not return bool."
     return fun'
 
@@ -876,8 +873,8 @@ checkExp (Stream form lam arr pos) = do
                     Nothing        -> ([arrarg],        [fakearg])
                     Just(_,accarg) -> ([accarg, arrarg],[accarg, fakearg])
 
-  lam' <- checkLambda lam aas
-  (_, dflow)<- collectOccurences $ checkLambda lam faas
+  (lam', lam_t) <- checkFunExp lam aas
+  (_, dflow)<- collectOccurences $ checkFunExp lam faas
   let arr_aliasses = S.toList $ aliases $ typeOf arr'
   let usages = usageMap dflow
   when (any (`M.member` usages) arr_aliasses) $
@@ -889,7 +886,7 @@ checkExp (Stream form lam arr pos) = do
   -- check that the result type of lambda matches the accumulator part
   case macctup of
     Just (acc',_) ->
-      case lambdaReturnType lam' of
+      case lam_t of
         t | Just (acctp:_) <- isTupleRecord t ->
           unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
           bad $ TypeError pos ("Stream with accumulator-type missmatch"++
@@ -904,10 +901,9 @@ checkExp (Stream form lam arr pos) = do
       MapLike o -> return $ MapLike o
       RedLike o comm lam0 -> do
         let accarg :: Arg
-            accarg = (fromStruct $ lambdaReturnType lam', mempty, srclocOf lam')
+            accarg = (fromStruct lam_t, mempty, srclocOf lam')
 
-        lam0' <- checkLambda lam0 [accarg, accarg]
-        let redtype = lambdaReturnType lam0'
+        (lam0', redtype) <- checkFunExp lam0 [accarg, accarg]
         unless (argType accarg `subtypeOf` redtype) $
             bad $ TypeError pos $ "Stream's fold fun: Fold function returns type type " ++
                   pretty (argType accarg) ++ ", but reduce fun returns type "++pretty redtype++"."
@@ -945,6 +941,22 @@ checkExp (Concat i arr1exp arr2exps loc) = do
               ++ " across dimension " ++ pretty i ++ "."
           | otherwise = return ()
           where t = typeOf e
+
+checkExp e@Lambda{} =
+  bad $ TypeError (srclocOf e)
+  "Lambda expressions are only permitted directly in applications."
+
+checkExp e@OpSection{} =
+  bad $ TypeError (srclocOf e)
+  "Operator sections are only permitted directly in applications."
+
+checkExp e@OpSectionLeft{} =
+  bad $ TypeError (srclocOf e)
+  "Operator sections are only permitted directly in applications."
+
+checkExp e@OpSectionRight{} =
+  bad $ TypeError (srclocOf e)
+  "Operator sections are only permitted directly in applications."
 
 checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
@@ -1101,6 +1113,8 @@ sequentially m1 m2 = do
   return b
 
 findFuncall :: UncheckedExp -> TermTypeM (QualName Name, [UncheckedExp])
+findFuncall (Parens e _) =
+  findFuncall e
 findFuncall (Var fname _ _) =
   return (fname, [])
 findFuncall (Apply f arg _ _ _) = do
@@ -1109,17 +1123,14 @@ findFuncall (Apply f arg _ _ _) = do
 findFuncall e =
   bad $ TypeError (srclocOf e) "Invalid function expression in application."
 
-constructFuncall :: SrcLoc
-                 -> QualName VName
-                 -> [Exp]
-                 -> [TypeBase shape as]
-                 -> TypeBase dim Names
+constructFuncall :: SrcLoc -> QualName VName
+                 -> [Exp] -> [StructType] -> TypeBase dim Names
                  -> TermTypeM Exp
 constructFuncall loc fname args paramtypes rettype = do
-  let rettype' = Info $ removeShapeAnnotations rettype
-  return $ foldl (\f (arg,d) -> Apply f arg (Info d) rettype' loc)
-                 (Var fname rettype' loc)
-                 (zip args $ map diet paramtypes)
+  let rettype' = removeShapeAnnotations rettype
+  return $ foldl (\f (arg,d,remnant) -> Apply f arg (Info d) (Info (remnant, rettype')) loc)
+                 (Var fname (Info (paramtypes, rettype')) loc)
+                 (zip3 args (map diet paramtypes) $ drop 1 $ tails paramtypes)
 
 type Arg = (CompType, Occurences, SrcLoc)
 
@@ -1282,9 +1293,14 @@ checkFunBody fname body maybe_rettype loc = do
 
   return body'
 
-checkLambda :: LambdaBase NoInfo Name -> [Arg]
-            -> TermTypeM Lambda
-checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
+-- | Checking an expression that is in function position, like the
+-- functional argument to a map.
+checkFunExp :: UncheckedExp -> [Arg] -> TermTypeM (Exp, TypeBase () ())
+checkFunExp (Parens e loc) args = do
+  (e', t) <- checkFunExp e args
+  return (Parens e' loc, t)
+
+checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
   | length params == length args = do
       let params_with_ts = zip params $ map (Inferred . fromStruct . argType) args
       (maybe_ret', tparams', params', body') <-
@@ -1298,30 +1314,16 @@ checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
                    Just (TypeDecl _ (Info ret)) -> ret
           lamt = ([], zip (repeat Nothing) $ map patternStructType params', ret')
       (_, ret'') <- checkFuncall Nothing loc lamt args
-      return $ AnonymFun tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc
-  | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+      return (Lambda tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc,
+              removeShapeAnnotations $ toStruct ret'')
+  | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++
+                show (length params) ++ " parameters, but expected to take " ++
+                show (length args) ++ " arguments."
 
-checkLambda (CurryFun e _ loc) args = do
-  (fname, curryargexps) <- findFuncall e
-  (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  (fname', (tparams, paramtypes, rt), closure) <- lookupFunction fname (map argType $ curryargs++args) loc
-  case find (unique . snd) $ zip curryargexps $ map snd paramtypes of
-    Just (arg, _) -> bad $ CurriedConsumption fname $ srclocOf arg
-    _             -> return ()
-
-  occur closure
-  (paramtypes', rettype') <-
-    checkFuncall Nothing loc (tparams, paramtypes, rt) (curryargs ++ args)
-
-  let paramtypes'' = map (removeShapeAnnotations . (`setAliases` mempty)) paramtypes'
-      rettype'' = removeShapeAnnotations rettype'
-  e' <- constructFuncall loc fname' curryargexps' paramtypes'' rettype''
-  return $ CurryFun e' (Info (drop (length curryargexps) paramtypes'',
-                              rettype''))
-                       loc
-
-checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) [x_arg,y_arg] = do
-  (op', (tparams, paramtypes, rt), closure) <- lookupFunction op (map argType [x_arg,y_arg]) loc
+checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
+  | [x_arg,y_arg] <- args = do
+  (op', (tparams, paramtypes, rt), closure) <-
+    lookupFunction op (map argType [x_arg,y_arg]) loc
   let paramtypes' = map (fromStruct . removeShapeAnnotations . snd) paramtypes
 
   occur closure
@@ -1330,44 +1332,53 @@ checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) [x_arg,y_arg] = do
 
   case paramtypes' of
     [x_t, y_t] ->
-      return $ BinOpFun op'
-        (Info x_t) (Info y_t) (Info $ removeShapeAnnotations rettype') loc
+      return (OpSection op'
+              (Info x_t) (Info y_t) (Info $ removeShapeAnnotations rettype') loc,
+              removeShapeAnnotations rettype' `setAliases` mempty)
     _ ->
       fail "Internal type checker error: BinOpFun got bad parameter type."
 
-checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
-  bad $ ParameterMismatch (Just op) loc (Left 2) $
-  map (toStructural . argType) args
+  | otherwise =
+      bad $ ParameterMismatch (Just op) loc (Left 2) $
+      map (toStructural . argType) args
 
-checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] = do
-  (x', binop', ret) <- checkCurryBinOp id binop x loc arg
-  return $ CurryBinOpLeft binop'
-    x' (Info (typeOf x'), Info (argType arg)) (Info ret) loc
+checkFunExp (OpSectionLeft binop x _ _ loc) args
+  | [arg] <- args = do
+      (x', binop', ret) <- checkCurryBinOp id binop x loc arg
+      return (OpSectionLeft binop'
+              x' (Info (typeOf x'), Info (argType arg)) (Info ret) loc,
+              ret `setAliases` mempty)
+  | otherwise =
+      bad $ ParameterMismatch (Just binop) loc (Left 1) $
+      map (toStructural . argType) args
 
-checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just binop) loc (Left 1) $
-  map (toStructural . argType) args
+checkFunExp (OpSectionRight binop x _ _ loc) args
+  | [arg] <- args = do
+      (x', binop', ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
+      return (OpSectionRight binop'
+               x' (Info (argType arg), Info (typeOf x')) (Info ret) loc,
+              ret `setAliases` mempty)
+  | otherwise =
+      bad $ ParameterMismatch (Just binop) loc (Left 1) $
+      map (toStructural . argType) args
 
-checkLambda (CurryBinOpRight binop x _ _ loc) [arg] = do
-  (x', binop', ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
-  return $ CurryBinOpRight binop'
-    x' (Info (argType arg), Info (typeOf x')) (Info ret) loc
+checkFunExp e args = do
+  (fname, curryargexps) <- findFuncall e
+  (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
+  (fname', (tparams, paramtypes, rt), closure) <-
+    lookupFunction fname (map argType $ curryargs++args) loc
+  case find (unique . snd) $ zip curryargexps $ map snd paramtypes of
+    Just (arg, _) -> bad $ CurriedConsumption fname $ srclocOf arg
+    _             -> return ()
 
-checkLambda (CurryBinOpRight binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just binop) loc (Left 1) $
-  map (toStructural . argType) args
+  occur closure
+  (paramtypes', rettype') <-
+    checkFuncall Nothing loc (tparams, paramtypes, rt) (curryargs ++ args)
 
-checkLambda (CurryProject k _ loc) [(argt, dflow, argloc)] = do
-  maybeCheckOccurences dflow
-  occur dflow
-  case argt of
-    Record fs | Just t <- M.lookup k fs ->
-                  return $ CurryProject k (Info argt, Info t) loc
-    _ -> bad $ InvalidField argloc argt (pretty k)
-
-checkLambda (CurryProject _ _ loc) args =
-  bad $ ParameterMismatch Nothing loc (Left 1) $
-  map (toStructural . argType) args
+  let rettype'' = removeShapeAnnotations rettype'
+  e' <- constructFuncall loc fname' curryargexps' paramtypes' rettype''
+  return (e', rettype'' `setAliases` mempty)
+  where loc = srclocOf e
 
 checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
                 -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg

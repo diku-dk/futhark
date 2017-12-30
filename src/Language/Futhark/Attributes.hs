@@ -44,7 +44,6 @@ module Language.Futhark.Attributes
   , nestedDims
   , arrayShape
   , returnType
-  , lambdaReturnType
   , concreteType
 
   -- * Operations on types
@@ -82,7 +81,6 @@ module Language.Futhark.Attributes
   , UncheckedExp
   , UncheckedModExp
   , UncheckedSigExp
-  , UncheckedLambda
   , UncheckedTypeParam
   , UncheckedPattern
   , UncheckedFunBind
@@ -528,6 +526,11 @@ rank n = ShapeDecl $ replicate n ()
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
+--
+-- HACK: For terms that are really in a function position (such as the
+-- functional argument to a @Map@), the type will be the *return
+-- type*, even if the function is not fully applied.  This will change
+-- once Futhark gets proper support for higher-order functions.
 typeOf :: ExpBase Info VName -> CompType
 typeOf (Literal val _) = Prim $ primValueType val
 typeOf (Parens e _) = typeOf e
@@ -547,10 +550,10 @@ typeOf (Empty (TypeDecl _ (Info t)) _) =
 typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (Project _ _ (Info t) _) = t
 typeOf (If _ _ _ (Info t) _) = t
-typeOf (Var _ (Info (Record ets)) _) = Record ets
-typeOf (Var qn (Info t) _) = t `addAliases` S.insert (qualLeaf qn)
+typeOf (Var _ (Info (_, Record ets)) _) = Record ets
+typeOf (Var qn (Info (_, t)) _) = t `addAliases` S.insert (qualLeaf qn)
 typeOf (Ascript e _ _) = typeOf e
-typeOf (Apply _ _ _ (Info t) _) = t
+typeOf (Apply _ _ _ (Info (_, t)) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ _ body _) = typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
@@ -566,10 +569,6 @@ typeOf (Reshape shape  e _) =
                                  _         -> 1
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Rotate _ _ e _) = typeOf e
-typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` S.empty
-  where et = lambdaReturnType f
-typeOf (Reduce _ fun _ _ _) =
-  lambdaReturnType fun `setAliases` mempty
 typeOf (Zip i e es _) =
   Array $ RecordArray (M.fromList $ zip tupleFieldNames $
                        zipWith typeToRecordArrayElem es_ts es_us) (rank (1+i)) u
@@ -581,21 +580,21 @@ typeOf (Unzip _ ts _) =
   tupleRecord $ map unInfo ts
 typeOf (Unsafe e _) =
   typeOf e
+typeOf (Map f _ _) =
+  arrayType 1 (typeOf f) Unique
+typeOf (Reduce _ fun _ _ _) =
+  typeOf fun
 typeOf (Scan fun _ _ _) =
   arrayType 1 et Unique
-  where et = lambdaReturnType fun `setAliases` mempty
+  where et = typeOf fun
 typeOf (Filter _ arr _) =
   typeOf arr
 typeOf (Partition funs arr _) =
   tupleRecord $ replicate (length funs + 1) $ typeOf arr
 typeOf (Stream form lam _ _) =
   case form of
-    MapLike{}    -> lambdaReturnType lam
-                    `setAliases` S.empty
-                    `setUniqueness` Unique
-    RedLike{}    -> lambdaReturnType lam
-                    `setAliases` S.empty
-                    `setUniqueness` Unique
+    MapLike{}    -> typeOf lam `setUniqueness` Unique
+    RedLike{}    -> typeOf lam `setUniqueness` Unique
 typeOf (Concat _ x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` S.empty
 typeOf (Split _ splitexps e _) =
@@ -603,6 +602,11 @@ typeOf (Split _ splitexps e _) =
   where n = case typeOf splitexps of Record ts -> length ts
                                      _         -> 1
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
+typeOf (Lambda _ _ _ _ (Info t) _) =
+  removeShapeAnnotations t `setAliases` mempty
+typeOf (OpSection _ _ _ (Info t) _)      = toStruct t `setAliases` mempty
+typeOf (OpSectionLeft _ _ _ (Info t) _)  = toStruct t `setAliases` mempty
+typeOf (OpSectionRight _ _ _ (Info t) _) = toStruct t `setAliases` mempty
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -659,16 +663,6 @@ recordArrayElemReturnType (ArrayArrayElem at) ds args =
   ArrayArrayElem $ arrayReturnType at ds args
 recordArrayElemReturnType (RecordArrayElem ts) ds args =
   RecordArrayElem $ fmap (\t -> recordArrayElemReturnType t ds args) ts
-
--- | The specified return type of a lambda.
-lambdaReturnType :: Ord vn =>
-                    LambdaBase Info vn -> TypeBase () ()
-lambdaReturnType (AnonymFun _ _ _ _ (Info t) _)     = removeShapeAnnotations t
-lambdaReturnType (CurryFun _ (Info (_, t)) _)       = toStruct t
-lambdaReturnType (BinOpFun _ _ _ (Info t) _)        = toStruct t
-lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _)  = toStruct t
-lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
-lambdaReturnType (CurryProject _ (_, Info t) _)     = toStruct t
 
 -- | Is the type concrete, i.e, without any type variables?
 concreteType :: TypeBase f vn -> Bool
@@ -950,9 +944,6 @@ type UncheckedModExp = ModExpBase NoInfo Name
 
 -- | A module type expression with no type annotations.
 type UncheckedSigExp = SigExpBase NoInfo Name
-
--- | A lambda with no type annotations.
-type UncheckedLambda = LambdaBase NoInfo Name
 
 -- | A type parameter with no type annotations.
 type UncheckedTypeParam = TypeParamBase Name
