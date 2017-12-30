@@ -67,10 +67,9 @@ renderDecs decs = asks snd >>= f
 
 prettyDec :: FileModule -> Dec -> Maybe (DocM Html)
 prettyDec fileModule dec = case dec of
-  FunDec f -> return <$> prettyFun fileModule f
   SigDec s -> prettySig fileModule s
   ModDec m -> prettyMod fileModule m
-  ValDec v -> prettyVal fileModule v
+  ValDec v -> return <$> prettyVal fileModule v
   TypeDec t -> renderType fileModule t
   OpenDec _x _xs (Info _names) _ -> Nothing
                             --Just $ prettyOpen fileModule (x:xs) names
@@ -81,24 +80,14 @@ prettyDec fileModule dec = case dec of
 --  where FileModule (Env { envModTable = modtable }) = fm
     --envs = foldMap (renderEnv . (\(ModEnv e) -> e) . (modtable M.!)) names
 
-prettyFun :: FileModule -> FunBindBase t VName -> Maybe Html
-prettyFun fm (FunBind _ name _retdecl _rettype _tparams _args _ doc _)
+prettyVal :: FileModule -> ValBindBase t VName -> Maybe Html
+prettyVal fm (ValBind _ name _retdecl _rettype _tparams _args _ doc _)
   | Just (BoundF (tps,pts,rett)) <- M.lookup name vtable
   , visible Term name fm = Just $
     renderDoc doc <> "val " <> vnameHtml name <>
     foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
     foldMap (\t -> prettyParam t <> " -> ") pts <> prettyType rett
     where FileModule _abs Env {envVtable = vtable} _ = fm
-prettyFun _ _ = Nothing
-
-prettyVal :: FileModule -> ValBindBase Info VName -> Maybe (DocM Html)
-prettyVal fm (ValBind _entry name maybe_t _ _e doc _)
-  | Just (BoundV st) <- M.lookup name vtable
-  , visible Term name fm =
-    Just . return . H.div $
-    renderDoc doc <> "let " <> vnameHtml name <> " : " <>
-    maybe (prettyType st) typeExpHtml maybe_t
-    where (FileModule _abs Env {envVtable = vtable} _) = fm
 prettyVal _ _ = Nothing
 
 prettySig :: FileModule -> SigBindBase Info VName -> Maybe (DocM Html)

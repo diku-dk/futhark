@@ -294,7 +294,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ProgBase ty vn) where
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (DecBase ty vn) where
   ppr (ValDec dec)       = ppr dec
-  ppr (FunDec dec)       = ppr dec
   ppr (TypeDec dec)      = ppr dec
   ppr (SigDec sig)       = ppr sig
   ppr (ModDec sd)        = ppr sd
@@ -322,8 +321,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeParamBase vn) where
   ppr (TypeParamDim name _) = brackets $ ppr name
   ppr (TypeParamType name _) = text "'" <> ppr name
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
-  ppr (FunBind entry name retdecl _ tparams args body _ _) =
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
+  ppr (ValBind entry name retdecl _ tparams args body _ _) =
     text fun <+> ppr name <+>
     spread (map ppr tparams ++ map ppr args) <> retdecl' <> text " =" </>
     indent 2 (ppr body)
@@ -332,14 +331,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (FunBindBase ty vn) where
           retdecl' = case retdecl of
                        Just rettype -> text ":" <+> ppr rettype
                        Nothing      -> mempty
-
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
-  ppr (ValBind entry name maybe_t _ e _ _) =
-    text s <+> ppr name <> t' <> text " =" <+> ppr e
-    where t' = case maybe_t of Just t  -> text ":" <+> ppr t
-                               Nothing -> mempty
-          s | entry     = "entry"
-            | otherwise = "let"
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase ty vn) where
   ppr (NamedParam v t _) = parens $ ppr v <> colon <+> ppr t

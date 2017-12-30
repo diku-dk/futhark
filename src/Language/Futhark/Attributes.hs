@@ -83,7 +83,7 @@ module Language.Futhark.Attributes
   , UncheckedSigExp
   , UncheckedTypeParam
   , UncheckedPattern
-  , UncheckedFunBind
+  , UncheckedValBind
   , UncheckedDec
   , UncheckedProg
   )
@@ -898,7 +898,6 @@ progImports = concatMap decImports . progDecs
         decImports SigDec{} = []
         decImports TypeDec{} = []
         decImports ValDec{} = []
-        decImports FunDec{} = []
         decImports (LocalDec d _) = decImports d
 
         modExpImports ModVar{}              = []
@@ -952,7 +951,7 @@ type UncheckedTypeParam = TypeParamBase Name
 type UncheckedPattern = PatternBase NoInfo Name
 
 -- | A function declaration with no type annotations.
-type UncheckedFunBind = FunBindBase NoInfo Name
+type UncheckedValBind = ValBindBase NoInfo Name
 
 -- | A declaration with no type annotations.
 type UncheckedDec = DecBase NoInfo Name

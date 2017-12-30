@@ -220,23 +220,15 @@ transformStructType = transformNames
 transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
 
-transformValBits :: VName -> Maybe (TypeExp VName) -> StructType -> Exp
-                 -> TransformM (VName, Maybe (TypeExp VName), StructType, Exp)
-transformValBits name tdecl t e =
-  (,,,) <$> transformName name <*> traverse transformTypeExp tdecl <*>
-  transformStructType t <*> transformExp e
-
 transformValBind :: ValBind -> TransformM ()
-transformValBind (ValBind entry name tdecl (Info t) e doc loc) = do
-  (name', tdecl', t', e') <- transformValBits name tdecl t e
-  emit $ ValDec $ ValBind entry name' tdecl' (Info t') e' doc loc
-
-transformFunBind :: FunBind -> TransformM ()
-transformFunBind (FunBind entry name tdecl (Info t) tparams params e doc loc) = do
-  (name', tdecl', t', e') <- transformValBits name tdecl t e
+transformValBind (ValBind entry name tdecl (Info t) tparams params e doc loc) = do
+  name' <- transformName name
+  tdecl' <- traverse transformTypeExp tdecl
+  t' <- transformStructType t
+  e' <- transformExp e
   tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ FunDec $ FunBind entry name' tdecl' (Info t') tparams' params' e' doc loc
+  emit $ ValDec $ ValBind entry name' tdecl' (Info t') tparams' params' e' doc loc
 
 transformTypeDecl :: TypeDecl -> TransformM TypeDecl
 transformTypeDecl (TypeDecl dt (Info et)) =
@@ -264,13 +256,9 @@ transformDecs ds =
       return mempty
     LocalDec d _ : ds' ->
       transformDecs $ d : ds'
-    ValDec vdec : ds' ->
-      bindingNames [constBindName vdec] $ do
-        transformValBind vdec
-        transformDecs ds'
-    FunDec fdec : ds' ->
-      bindingNames [funBindName fdec] $ do
-        transformFunBind fdec
+    ValDec fdec : ds' ->
+      bindingNames [valBindName fdec] $ do
+        transformValBind fdec
         transformDecs ds'
     TypeDec tb : ds' ->
       bindingNames [typeAlias tb] $ do
@@ -298,12 +286,9 @@ transformImports ((name,imp):imps) = do
     -- Only the "main" file (last import) is allowed to have entry points.
     permit_entry_points = null imps
 
-    maybeHideEntryPoint (FunDec fdec) =
-      FunDec fdec { funBindEntryPoint =
-                      funBindEntryPoint fdec && permit_entry_points }
     maybeHideEntryPoint (ValDec vdec) =
-      ValDec vdec { constBindEntryPoint =
-                      constBindEntryPoint vdec && permit_entry_points }
+      ValDec vdec { valBindEntryPoint =
+                      valBindEntryPoint vdec && permit_entry_points }
     maybeHideEntryPoint d = d
 
 transformProg :: MonadFreshNames m => Imports -> m [Dec]
