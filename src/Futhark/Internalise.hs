@@ -37,7 +37,7 @@ import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Modules as Modules
-import Futhark.Util (dropAt)
+import Futhark.Util (dropAt, takeLast)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
@@ -419,28 +419,35 @@ internaliseExp desc (E.Negate e _) = do
                letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
              _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
--- Some functions are magical (overloaded) and we handle that here.
--- Note that polymorphic functions (which are not magical) are not
--- handled here.
-internaliseExp desc (E.Apply fname args _ loc)
-  | Just internalise <- isOverloadedFunction fname (map fst args) loc =
-      internalise desc
+internaliseExp desc e@E.Apply{} = do
+  (qfname, args) <- findFuncall e
+  let fname = nameFromString $ pretty $ baseName $ qualLeaf qfname
+      loc = srclocOf e
 
-internaliseExp desc (E.Apply fname args _ loc)
-  | Just (rettype, _) <- M.lookup fname' I.builtInFunctions = do
-  args' <- mapM (internaliseExp "arg" . fst) args
-  let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname' args'' [I.Prim rettype] (Safe, loc, [])
-  where tag ses = [ (se, I.Observe) | se <- ses ]
-        -- Builtin functions are special anyway, so it is OK to not
-        -- use lookupSubst here.
-        fname' = nameFromString $ pretty $ baseName $ qualLeaf fname
+  -- Some functions are magical (overloaded) and we handle that here.
+  -- Note that polymorphic functions (which are not magical) are not
+  -- handled here.
+  case () of
+    () | Just internalise <- isOverloadedFunction qfname args loc ->
+           internalise desc
+       | Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+           let tag ses = [ (se, I.Observe) | se <- ses ]
+           args' <- mapM (internaliseExp "arg") args
+           let args'' = concatMap tag args'
+           letTupExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+       | otherwise -> do
+           args' <- concat <$> mapM (internaliseExp "arg") args
+           i_ts <- staticShapes <$> mapM subExpType args'
+           let e_ts = map (flip setAliases () . E.typeOf) args
+           fst <$> funcall desc qfname (e_ts, map I.rankShaped i_ts) args' loc
 
-internaliseExp desc (E.Apply qfname args _ loc) = do
-  args' <- concat <$> mapM (internaliseExp "arg" . fst) args
-  i_ts <- staticShapes <$> mapM subExpType args'
-  let e_ts = map (flip setAliases () . E.typeOf . fst) args
-  fst <$> funcall desc qfname (e_ts, map I.rankShaped i_ts) args' loc
+  where findFuncall (E.Var fname _ _) =
+          return (fname, [])
+        findFuncall (E.Apply f arg _ _ _) = do
+          (fname, args) <- findFuncall f
+          return (fname, args ++ [arg])
+        findFuncall _ =
+          fail $ "Invalid function expression in application: " ++ pretty e
 
 internaliseExp desc (E.LetPat tparams pat e body loc) = do
   ses <- internaliseExp desc e
@@ -872,8 +879,10 @@ internaliseExp desc (E.BinOp op (xe,_) (ye,_) _ loc)
       internalise desc
 
 -- User-defined operators are just the same as a function call.
-internaliseExp desc (E.BinOp op xarg yarg ret loc) =
-  internaliseExp desc $ E.Apply op [xarg,yarg] ret loc
+internaliseExp desc (E.BinOp op (xarg,xd) (yarg,yd) ret loc) =
+  internaliseExp desc $
+  E.Apply (E.Apply (E.Var op ret loc) xarg (Info xd) ret loc)
+          yarg (Info yd) ret loc
 
 internaliseExp desc (E.Project k e (Info rt) _) = do
   n <- internalisedTypeSize $ rt `setAliases` ()
@@ -1139,13 +1148,14 @@ internaliseLambda (E.AnonymFun tparams params body _ (Info rettype) loc) rowtype
     mapM_ (uncurry (internaliseDimConstant loc)) $ pcm<>rcm
     return (params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.CurryFun qfname currargs (Info (ets, rettype)) loc) rowtypes = do
-  (params, param_args) <- fmap unzip $ forM (drop (length currargs) ets) $ \et -> do
+internaliseLambda (E.CurryFun e (Info (ets, rettype)) loc) rowtypes = do
+  (params, param_args) <- fmap unzip $ forM ets $ \et -> do
     name <- newVName "not_curried"
     return (E.Id name (Info $ E.vacuousShapeAnnotations et) loc,
             E.Var (E.qualName name) (Info et) loc)
-  let args = currargs ++ param_args
-      body = E.Apply qfname (map (,E.Observe) args) (Info rettype) loc
+  let body = foldl (\f arg -> E.Apply f arg (Info E.Observe) (Info rettype) loc)
+                   e
+                   param_args
       rettype' = E.vacuousShapeAnnotations rettype `E.setAliases` ()
   internaliseLambda (E.AnonymFun [] params body Nothing (Info rettype') loc) rowtypes
 
@@ -1171,7 +1181,6 @@ internaliseLambda (E.CurryProject k (Info rowt,Info t) loc) rowts = do
             (E.Project k (E.Var (E.qualName name) (Info rowt) loc) (Info t) loc)
             Nothing (Info t') loc
   internaliseLambda lam rowts
-
 
 binOpFunToLambda :: E.QualName VName
                  -> E.CompType -> E.CompType -> E.CompType

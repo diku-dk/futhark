@@ -109,6 +109,7 @@ import           Language.Futhark.Core
 -- | Convenience class for deriving 'Show' instances for the AST.
 class (Show vn,
        Show (f VName),
+       Show (f Diet),
        Show (f String),
        Show (f [VName]),
        Show (f PatternType),
@@ -597,7 +598,7 @@ data ExpBase f vn =
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
 
-            | Apply (QualName vn) [(ExpBase f vn, Diet)] (f CompType) SrcLoc
+            | Apply (ExpBase f vn) (ExpBase f vn) (f Diet) (f CompType) SrcLoc
 
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
@@ -734,7 +735,7 @@ instance Located (ExpBase f vn) where
   locOf (Var _ _ loc)            = locOf loc
   locOf (Ascript _ _ loc)        = locOf loc
   locOf (Negate _ pos)           = locOf pos
-  locOf (Apply _ _ _ pos)        = locOf pos
+  locOf (Apply _ _ _ _ pos)      = locOf pos
   locOf (LetPat _ _ _ _ pos)     = locOf pos
   locOf (LetFun _ _ _ loc)       = locOf loc
   locOf (LetWith _ _ _ _ _ pos)  = locOf pos
@@ -775,9 +776,11 @@ deriving instance Showable f vn => Show (LoopFormBase f vn)
 -- | Anonymous function passed to a SOAC.
 data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f StructType) SrcLoc
                       -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
-                      | CurryFun (QualName vn)
-                        [ExpBase f vn] (f ([CompType], CompType)) SrcLoc
-                        -- ^ @f(4)@
+                      | CurryFun (ExpBase f vn) (f ([CompType], CompType)) SrcLoc
+                        -- ^ @f(4)@.  The type annotations are the
+                        -- types of the *remaining* (not curried)
+                        -- parameters, as well as the return type of
+                        -- the function.
                       | BinOpFun (QualName vn)
                         (f CompType) (f CompType) (f CompType) SrcLoc
                         -- ^ @+@; first two types are operands, third is result.
@@ -793,7 +796,7 @@ deriving instance Showable f vn => Show (LambdaBase f vn)
 
 instance Located (LambdaBase f vn) where
   locOf (AnonymFun _ _ _ _ _ loc)     = locOf loc
-  locOf (CurryFun  _ _ _ loc)         = locOf loc
+  locOf (CurryFun _ _ loc)            = locOf loc
   locOf (BinOpFun _ _ _ _ loc)        = locOf loc
   locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
