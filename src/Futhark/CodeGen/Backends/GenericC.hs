@@ -489,8 +489,8 @@ defineMemorySpace space = do
       free(block->references);
       block->references = NULL;
       if (ctx->detail_memory) {
-        fprintf(stderr, "%ld bytes freed (now allocated: %ld bytes)\n",
-                block->size, ctx->$id:usagename);
+        fprintf(stderr, "%lld bytes freed (now allocated: %lld bytes)\n",
+                (long long) block->size, (long long) ctx->$id:usagename);
       }
     }
   }
@@ -516,8 +516,10 @@ defineMemorySpace space = do
   block->size = size;
   ctx->$id:usagename += size;
   if (ctx->detail_memory) {
-    fprintf(stderr, "Allocated %lu bytes for %s in %s (now allocated: %ld bytes)",
-            (unsigned long)size, desc, $string:spacedesc, ctx->$id:usagename);
+    fprintf(stderr, "Allocated %lld bytes for %s in %s (now allocated: %lld bytes)",
+            (long long) size,
+            desc, $string:spacedesc,
+            (long long) ctx->$id:usagename);
   }
   if (ctx->$id:usagename > ctx->$id:peakname) {
     ctx->$id:peakname = ctx->$id:usagename;
@@ -540,8 +542,8 @@ defineMemorySpace space = do
 
   return (structdef,
           [unrefdef, allocdef, setdef],
-          [C.citem|fprintf(stderr, $string:("Peak memory usage for " ++ spacedesc ++ ": %ld bytes.\n"),
-                           ctx->$id:peakname);|])
+          [C.citem|fprintf(stderr, $string:("Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"),
+                           (long long) ctx->$id:peakname);|])
   where mty = fatMemType space
         (peakname, usagename, sname, spacedesc) = case space of
           DefaultSpace -> ("peak_mem_usage_default",
@@ -1127,7 +1129,7 @@ cliEntryPoint fname (Function _ _ _ _ results args) = do
                   t_end = get_wall_time();
                   long int elapsed_usec = t_end - t_start;
                   if (time_runs && runtime_file != NULL) {
-                    fprintf(runtime_file, "%ld\n", elapsed_usec);
+                    fprintf(runtime_file, "%lld\n", (long long) elapsed_usec);
                   }
                   $stms:free_input
                 |]
