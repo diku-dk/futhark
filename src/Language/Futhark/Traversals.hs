@@ -76,10 +76,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (If c texp fexp t loc) =
     If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
     traverse (astMap tv) t <*> pure loc
-  astMap tv (Apply fname args t loc) =
-    Apply <$> mapOnQualName tv fname <*> mapM mapOnArg args <*>
-    traverse (astMap tv) t <*> pure loc
-    where mapOnArg (arg,d) = (,) <$> mapOnExp tv arg <*> pure d
+  astMap tv (Apply f arg d t loc) =
+    Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*>
+    pure d <*> traverse (astMap tv) t <*> pure loc
   astMap tv (LetPat tparams pat e body loc) =
     LetPat <$> mapM (astMap tv) tparams <*>
     astMap tv pat <*> mapOnExp tv e <*>
@@ -258,8 +257,8 @@ instance ASTMappable (LambdaBase Info VName) where
   astMap tv (AnonymFun tparams params body ret t loc) =
     AnonymFun <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
     astMap tv body <*> traverse (astMap tv) ret <*> astMap tv t <*> pure loc
-  astMap tv (CurryFun name args t loc) =
-    CurryFun <$> mapOnQualName tv name <*> astMap tv args <*> astMap tv t <*> pure loc
+  astMap tv (CurryFun e t loc) =
+    CurryFun <$> mapOnExp tv e <*> astMap tv t <*> pure loc
   astMap tv (BinOpFun name t1 t2 t3 loc) =
     BinOpFun <$> mapOnQualName tv name <*>
     astMap tv t1 <*> astMap tv t2 <*> astMap tv t3 <*> pure loc

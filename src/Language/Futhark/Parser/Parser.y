@@ -625,24 +625,22 @@ Exp2 :: { UncheckedExp }
      | Exp2 '<=' Exp2      { binOp $1 (L $2 (SYMBOL Leq [] (nameFromString "<="))) $3 }
      | Exp2 '<' Exp2       { binOp $1 (L $2 (SYMBOL Less [] (nameFromString "<"))) $3 }
 
-     | Apply
-       { let (fname, args, loc) = $1 in Apply fname [ (arg, Observe) | arg <- args ] NoInfo loc }
-     | Atom %prec juxtprec { $1 }
-
      | '-' Exp2
        { Negate $2 $1 }
 
      | Exp2 with '[' DimIndices ']' '<-' Exp2
        { Update $1 $4 $7 (srclocOf $1) }
 
+     | Apply
+       { $1 }
 
-Apply :: { (QualName Name, [UncheckedExp], SrcLoc) }
+Apply :: { UncheckedExp }
       : Apply Atom %prec juxtprec
-        { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
-      | QualName Atom %prec juxtprec
-        { (fst $1, [$2], snd $1) }
+        { Apply $1 $2 NoInfo NoInfo (srclocOf $1) }
+      | Atom %prec juxtprec
+        { $1 }
       | UnOp Atom %prec juxtprec
-        { (fst $1, [$2], snd $1) }
+        { Apply (Var (fst $1) NoInfo (snd $1)) $2 NoInfo NoInfo (snd $1) }
 
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (snd $1) }
@@ -809,21 +807,15 @@ FieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
 
-Curry :: { (QualName Name, [UncheckedExp], SrcLoc) }
-Curry : Curry Atom
-        { let (fname, args, loc) = $1 in (fname, args ++ [$2], loc) }
-      | QualName Atom %prec indexprec
-        { (fst $1, [$2], snd $1) }
-
 FunAbstr :: { UncheckedLambda }
          : '(' '\\' TypeParams FunParams1 maybeAscription(TypeExpDecl) '->' Exp ')'
            { AnonymFun $3 (fst $4 : snd $4) $7 $5 NoInfo $1 }
          | QualName
-           { CurryFun (fst $1) [] NoInfo (snd $1) }
+           { CurryFun (Var (fst $1) NoInfo (snd $1)) NoInfo (snd $1) }
          | '(' UnOp ')'
-           { CurryFun (fst $2) [] NoInfo (snd $2) }
-         | '(' Curry ')'
-           { let (fname, args, loc) = $2 in CurryFun fname args NoInfo loc }
+           { CurryFun (Var (fst $2) NoInfo (snd $2)) NoInfo (snd $2) }
+         | '(' Apply ')'
+           { CurryFun $2 NoInfo (srclocOf $2) }
            -- Minus is handed explicitly here because I could not
            -- figure out how to resolve the ambiguity with negation.
          | '(' '-' Exp2 ')'

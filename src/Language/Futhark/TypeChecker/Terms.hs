@@ -657,16 +657,21 @@ checkExp (Negate arg loc) = do
   arg' <- require anyNumberType =<< checkExp arg
   return $ Negate arg' loc
 
-checkExp (Apply fname args _ loc) = do
-  (args', argflows) <- unzip <$> mapM (\(arg,_) -> checkArg arg) args
+-- HACK: We fake the types and such on applications quite severely,
+-- because Futhark does not have the capacity to express higher-order
+-- types.  All type annotations simply become the final (first-order)
+-- result of the application.
+checkExp e@Apply{} = do
+  (fname, args) <- findFuncall e
+  (args', argflows) <- unzip <$> mapM checkArg args
   (fname', (tparams, paramtypes, ftype), closure) <-
     lookupFunction fname (map argType argflows) loc
 
   occur closure
   (_, rettype') <- checkFuncall (Just fname) loc (tparams, paramtypes, ftype) argflows
 
-  return $ Apply fname'
-    (zip args' $ map (diet . snd) paramtypes) (Info $ removeShapeAnnotations rettype') loc
+  constructFuncall loc fname' args' (map snd paramtypes) rettype'
+  where loc = srclocOf e
 
 checkExp (LetPat tparams pat e body pos) = do
   noTypeParamsPermitted tparams
@@ -1095,12 +1100,33 @@ sequentially m1 m2 = do
   occur $ m1flow `seqOccurences` m2flow
   return b
 
+findFuncall :: UncheckedExp -> TermTypeM (QualName Name, [UncheckedExp])
+findFuncall (Var fname _ _) =
+  return (fname, [])
+findFuncall (Apply f arg _ _ _) = do
+  (fname, args) <- findFuncall f
+  return (fname, args ++ [arg])
+findFuncall e =
+  bad $ TypeError (srclocOf e) "Invalid function expression in application."
+
+constructFuncall :: SrcLoc
+                 -> QualName VName
+                 -> [Exp]
+                 -> [TypeBase shape as]
+                 -> TypeBase dim Names
+                 -> TermTypeM Exp
+constructFuncall loc fname args paramtypes rettype = do
+  let rettype' = Info $ removeShapeAnnotations rettype
+  return $ foldl (\f (arg,d) -> Apply f arg (Info d) rettype' loc)
+                 (Var fname rettype' loc)
+                 (zip args $ map diet paramtypes)
+
 type Arg = (CompType, Occurences, SrcLoc)
 
 argType :: Arg -> CompType
 argType (t, _, _) = t
 
-checkArg :: ExpBase NoInfo Name -> TermTypeM (Exp, Arg)
+checkArg :: UncheckedExp -> TermTypeM (Exp, Arg)
 checkArg arg = do
   (arg', dflow) <- collectOccurences $ checkExp arg
   return (arg', (typeOf arg', dflow, srclocOf arg'))
@@ -1275,20 +1301,24 @@ checkLambda (AnonymFun tparams params body maybe_ret NoInfo loc) args
       return $ AnonymFun tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc
   | otherwise = bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun fname curryargexps _ loc) args = do
+checkLambda (CurryFun e _ loc) args = do
+  (fname, curryargexps) <- findFuncall e
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   (fname', (tparams, paramtypes, rt), closure) <- lookupFunction fname (map argType $ curryargs++args) loc
   case find (unique . snd) $ zip curryargexps $ map snd paramtypes of
-    Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
-    _           -> return ()
+    Just (arg, _) -> bad $ CurriedConsumption fname $ srclocOf arg
+    _             -> return ()
 
   occur closure
   (paramtypes', rettype') <-
     checkFuncall Nothing loc (tparams, paramtypes, rt) (curryargs ++ args)
 
-  return $ CurryFun fname'
-    curryargexps' (Info (map (removeShapeAnnotations . (`setAliases` mempty)) paramtypes',
-                         removeShapeAnnotations rettype')) loc
+  let paramtypes'' = map (removeShapeAnnotations . (`setAliases` mempty)) paramtypes'
+      rettype'' = removeShapeAnnotations rettype'
+  e' <- constructFuncall loc fname' curryargexps' paramtypes'' rettype''
+  return $ CurryFun e' (Info (drop (length curryargexps) paramtypes'',
+                              rettype''))
+                       loc
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) [x_arg,y_arg] = do
   (op', (tparams, paramtypes, rt), closure) <- lookupFunction op (map argType [x_arg,y_arg]) loc

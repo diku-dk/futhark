@@ -550,7 +550,7 @@ typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var _ (Info (Record ets)) _) = Record ets
 typeOf (Var qn (Info t) _) = t `addAliases` S.insert (qualLeaf qn)
 typeOf (Ascript e _ _) = typeOf e
-typeOf (Apply _ _ (Info t) _) = t
+typeOf (Apply _ _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (LetPat _ _ _ body _) = typeOf body
 typeOf (LetFun _ _ body _) = typeOf body
@@ -664,7 +664,7 @@ recordArrayElemReturnType (RecordArrayElem ts) ds args =
 lambdaReturnType :: Ord vn =>
                     LambdaBase Info vn -> TypeBase () ()
 lambdaReturnType (AnonymFun _ _ _ _ (Info t) _)     = removeShapeAnnotations t
-lambdaReturnType (CurryFun _ _ (Info (_, t)) _)     = toStruct t
+lambdaReturnType (CurryFun _ (Info (_, t)) _)       = toStruct t
 lambdaReturnType (BinOpFun _ _ _ (Info t) _)        = toStruct t
 lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _)  = toStruct t
 lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t

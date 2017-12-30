@@ -171,8 +171,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
-  pprPrec _ (Apply fname args _ _) =
-    ppr fname <+> spread (map (ppr . fst) args)
+  pprPrec _ (Apply f arg _ _ _) =
+    ppr f <+> pprPrec 10 arg
   pprPrec _ (Negate e _) = text "-" <> ppr e
   pprPrec p (LetPat tparams pat e body _) =
     mparens $ align $
@@ -281,9 +281,7 @@ ppAscription Nothing  = mempty
 ppAscription (Just t) = text ":" <> ppr t
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (LambdaBase ty vn) where
-  ppr (CurryFun fname [] _ _) = text $ pretty fname
-  ppr (CurryFun fname curryargs _ _) =
-    ppr fname <+> apply (map ppr curryargs)
+  ppr (CurryFun e _ _) = ppr e
   ppr (AnonymFun tparams params body ascript _ _) =
     text "\\" <>
     apply (map ppr tparams ++ map ppr params) <> ppAscription ascript <+>
