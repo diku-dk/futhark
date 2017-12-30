@@ -33,7 +33,6 @@ import           Language.Futhark.Syntax
 -- given child.
 data ASTMapper m = ASTMapper {
     mapOnExp      :: ExpBase Info VName -> m (ExpBase Info VName)
-  , mapOnLambda   :: LambdaBase Info VName -> m (LambdaBase Info VName)
   , mapOnName     :: VName -> m VName
   , mapOnQualName :: QualName VName -> m (QualName VName)
   }
@@ -76,10 +75,11 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (If c texp fexp t loc) =
     If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
     traverse (astMap tv) t <*> pure loc
-  astMap tv (Apply fname args t loc) =
-    Apply <$> mapOnQualName tv fname <*> mapM mapOnArg args <*>
-    traverse (astMap tv) t <*> pure loc
-    where mapOnArg (arg,d) = (,) <$> mapOnExp tv arg <*> pure d
+  astMap tv (Apply f arg d (Info (remnant, t)) loc) =
+    Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*>
+    pure d <*> (Info <$> ((,) <$> traverse (astMap tv) remnant <*>
+                                  astMap tv t)) <*>
+    pure loc
   astMap tv (LetPat tparams pat e body loc) =
     LetPat <$> mapM (astMap tv) tparams <*>
     astMap tv pat <*> mapOnExp tv e <*>
@@ -112,9 +112,9 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Rearrange perm e loc) =
     pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
   astMap tv (Map fun e loc) =
-    pure Map <*> mapOnLambda tv fun <*> mapM (mapOnExp tv) e <*> pure loc
+    pure Map <*> mapOnExp tv fun <*> mapM (mapOnExp tv) e <*> pure loc
   astMap tv (Reduce comm fun startexp arrexp loc) =
-    Reduce comm <$> mapOnLambda tv fun <*>
+    Reduce comm <$> mapOnExp tv fun <*>
          mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
   astMap tv (Zip i e es loc) =
     Zip i <$> mapOnExp tv e <*> mapM (mapOnExp tv) es <*> pure loc
@@ -123,23 +123,35 @@ instance ASTMappable (ExpBase Info VName) where
   astMap tv (Unsafe e loc) =
     Unsafe <$> mapOnExp tv e <*> pure loc
   astMap tv (Scan fun startexp arrexp loc) =
-    pure Scan <*> mapOnLambda tv fun <*>
+    pure Scan <*> mapOnExp tv fun <*>
          mapOnExp tv startexp <*> mapOnExp tv arrexp <*>
          pure loc
   astMap tv (Filter fun arrexp loc) =
-    pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
+    pure Filter <*> mapOnExp tv fun <*> mapOnExp tv arrexp <*> pure loc
   astMap tv (Partition funs arrexp loc) =
-    pure Partition <*> mapM (mapOnLambda tv) funs <*> mapOnExp tv arrexp <*> pure loc
+    pure Partition <*> mapM (mapOnExp tv) funs <*> mapOnExp tv arrexp <*> pure loc
   astMap tv (Stream form fun arr loc) =
-    pure Stream <*> mapOnStreamForm form <*> mapOnLambda tv fun <*>
+    pure Stream <*> mapOnStreamForm form <*> mapOnExp tv fun <*>
          mapOnExp tv arr <*> pure loc
     where mapOnStreamForm (MapLike o) = pure $ MapLike o
           mapOnStreamForm (RedLike o comm lam) =
-              RedLike o comm <$> mapOnLambda tv lam
+              RedLike o comm <$> mapOnExp tv lam
   astMap tv (Split i splitexps arrexp loc) =
     Split i <$> mapOnExp tv splitexps <*> mapOnExp tv arrexp <*> pure loc
   astMap tv (Concat i x ys loc) =
     Concat i <$> mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
+  astMap tv (Lambda tparams params body ret t loc) =
+    Lambda <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
+    astMap tv body <*> traverse (astMap tv) ret <*> astMap tv t <*> pure loc
+  astMap tv (OpSection name t1 t2 t3 loc) =
+    OpSection <$> mapOnQualName tv name <*>
+    astMap tv t1 <*> astMap tv t2 <*> astMap tv t3 <*> pure loc
+  astMap tv (OpSectionLeft name arg t1 t2 loc) =
+    OpSectionLeft <$> mapOnQualName tv name <*> mapOnExp tv arg <*>
+    astMap tv t1 <*> astMap tv t2 <*> pure loc
+  astMap tv (OpSectionRight name arg t1 t2 loc) =
+    OpSectionRight <$> mapOnQualName tv name <*> mapOnExp tv arg <*>
+    astMap tv t1 <*> astMap tv t2 <*> pure loc
   astMap tv (DoLoop tparams mergepat mergeexp form loopbody loc) =
     DoLoop <$> mapM (astMap tv) tparams <*> astMap tv mergepat <*>
     mapOnExp tv mergeexp <*> astMap tv form <*>
@@ -253,24 +265,6 @@ instance ASTMappable (PatternBase Info VName) where
     PatternAscription <$> astMap tv pat <*> astMap tv t
   astMap tv (Wildcard t loc) =
     Wildcard <$> astMap tv t <*> pure loc
-
-instance ASTMappable (LambdaBase Info VName) where
-  astMap tv (AnonymFun tparams params body ret t loc) =
-    AnonymFun <$> mapM (astMap tv) tparams <*> mapM (astMap tv) params <*>
-    astMap tv body <*> traverse (astMap tv) ret <*> astMap tv t <*> pure loc
-  astMap tv (CurryFun name args t loc) =
-    CurryFun <$> mapOnQualName tv name <*> astMap tv args <*> astMap tv t <*> pure loc
-  astMap tv (BinOpFun name t1 t2 t3 loc) =
-    BinOpFun <$> mapOnQualName tv name <*>
-    astMap tv t1 <*> astMap tv t2 <*> astMap tv t3 <*> pure loc
-  astMap tv (CurryBinOpLeft name arg t1 t2 loc) =
-    CurryBinOpLeft <$> mapOnQualName tv name <*> mapOnExp tv arg <*>
-    astMap tv t1 <*> astMap tv t2 <*> pure loc
-  astMap tv (CurryBinOpRight name arg t1 t2 loc) =
-    CurryBinOpRight <$> mapOnQualName tv name <*> mapOnExp tv arg <*>
-    astMap tv t1 <*> astMap tv t2 <*> pure loc
-  astMap tv (CurryProject name t loc) =
-    CurryProject name <$> astMap tv t <*> pure loc
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =

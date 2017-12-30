@@ -11,4 +11,4 @@
 -- structure { Scatter 1 }
 
 let main [n] (k: i32, array: *[n]i32): [n]i32 =
-  scatter array (iota k) (map (-9) (iota k))
+  scatter array (iota k) (map (\x -> x-9) (iota k))

@@ -52,7 +52,6 @@ module Language.Futhark.Syntax
   , ExpBase(..)
   , FieldBase(..)
   , LoopFormBase (..)
-  , LambdaBase(..)
   , PatternBase(..)
   , StreamForm(..)
 
@@ -109,12 +108,14 @@ import           Language.Futhark.Core
 -- | Convenience class for deriving 'Show' instances for the AST.
 class (Show vn,
        Show (f VName),
+       Show (f Diet),
        Show (f String),
        Show (f [VName]),
        Show (f PatternType),
        Show (f CompType),
        Show (f [TypeBase () ()]),
        Show (f StructType),
+       Show (f ([StructType], CompType)),
        Show (f (M.Map VName VName)),
        Show (f ([CompType], CompType))) => Showable f vn where
 
@@ -585,7 +586,9 @@ data ExpBase f vn =
 
             | Empty (TypeDeclBase f vn) SrcLoc
 
-            | Var    (QualName vn) (f CompType) SrcLoc
+            | Var    (QualName vn) (f ([StructType], CompType)) SrcLoc
+            -- ^ The @[StructType]@ list indicates the type of any
+            -- remaining parameters, if this is the name of a function.
 
             | Ascript (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
             -- ^ Type ascription: @e : t@.
@@ -597,10 +600,25 @@ data ExpBase f vn =
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f CompType) SrcLoc
 
-            | Apply (QualName vn) [(ExpBase f vn, Diet)] (f CompType) SrcLoc
+            | Apply (ExpBase f vn) (ExpBase f vn) (f Diet) (f ([StructType], CompType)) SrcLoc
+            -- ^ The @[StructType]@ list indicates the type of any
+            -- remaining parameters.
 
             | Negate (ExpBase f vn) SrcLoc
               -- ^ Numeric negation (ugly special case; Haskell did it first).
+
+            | Lambda [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn)
+              (Maybe (TypeDeclBase f vn)) (f StructType) SrcLoc
+
+            | OpSection (QualName vn)
+              (f CompType) (f CompType) (f CompType) SrcLoc
+              -- ^ @+@; first two types are operands, third is result.
+            | OpSectionLeft (QualName vn)
+              (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
+              -- ^ @2+@; first type is operand, second is result.
+            | OpSectionRight (QualName vn)
+              (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
+              -- ^ @+2@; first type is operand, second is result.
 
             | DoLoop
               [TypeParamBase vn]
@@ -651,31 +669,31 @@ data ExpBase f vn =
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
-            | Map (LambdaBase f vn) [ExpBase f vn] SrcLoc
+            | Map (ExpBase f vn) [ExpBase f vn] SrcLoc
              -- ^ @map (+1) ([1, 2, ..., n]) = [2, 3, ..., n+1]@.
              -- OR
              -- ^ @zipWith (+) ([1, 2, ..., n]) ([1, 2, ..., n]) = [2, 4, ... , 2*n]@.
              --
              -- @map@ when exactly one array argument, otherwise @zipWith@.
 
-            | Reduce Commutativity (LambdaBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | Reduce Commutativity (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ @reduce (+) 0 ([1,2,...,n]) = (0+1+2+...+n)@.
 
-            | Scan (LambdaBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | Scan (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
              -- ^ @scan (+) 0 ([ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
 
-            | Filter (LambdaBase f vn) (ExpBase f vn) SrcLoc
+            | Filter (ExpBase f vn) (ExpBase f vn) SrcLoc
             -- ^ Return those elements of the array that satisfy the
             -- predicate.
 
-            | Partition [LambdaBase f vn] (ExpBase f vn) SrcLoc
+            | Partition [ExpBase f vn] (ExpBase f vn) SrcLoc
             -- ^ @partition (f_1, ..., f_n) a@ returns @n+1@ arrays, with
             -- the @i@th array consisting of those elements for which
             -- function @f_1@ returns 'True', and no previous function
             -- has returned 'True'.  The @n+1@th array contains those
             -- elements for which no function returns 'True'.
 
-            | Stream (StreamForm f vn) (LambdaBase f vn) (ExpBase f vn) SrcLoc
+            | Stream (StreamForm f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
             -- ^ Streaming: intuitively, this gives a size-parameterized
             -- composition for SOACs that cannot be fused, e.g., due to scan.
             -- For example, assuming @A : [int], f : int->int, g : real->real@,
@@ -716,45 +734,49 @@ data ExpBase f vn =
 deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
-                     | RedLike    StreamOrd Commutativity (LambdaBase f vn)
+                     | RedLike    StreamOrd Commutativity (ExpBase f vn)
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
-  locOf (Literal _ loc)          = locOf loc
-  locOf (Parens _ loc)           = locOf loc
-  locOf (QualParens _ _ loc)     = locOf loc
-  locOf (TupLit _ pos)           = locOf pos
-  locOf (RecordLit _ pos)        = locOf pos
-  locOf (Project _ _ _ pos)      = locOf pos
-  locOf (ArrayLit _ _ pos)       = locOf pos
-  locOf (Range _ _ _ pos)        = locOf pos
-  locOf (Empty _ pos)            = locOf pos
-  locOf (BinOp _ _ _ _ pos)      = locOf pos
-  locOf (If _ _ _ _ pos)         = locOf pos
-  locOf (Var _ _ loc)            = locOf loc
-  locOf (Ascript _ _ loc)        = locOf loc
-  locOf (Negate _ pos)           = locOf pos
-  locOf (Apply _ _ _ pos)        = locOf pos
-  locOf (LetPat _ _ _ _ pos)     = locOf pos
-  locOf (LetFun _ _ _ loc)       = locOf loc
-  locOf (LetWith _ _ _ _ _ pos)  = locOf pos
-  locOf (Index _ _ pos)          = locOf pos
-  locOf (Update _ _ _ pos)       = locOf pos
-  locOf (Reshape _ _ pos)        = locOf pos
-  locOf (Rearrange _ _ pos)      = locOf pos
-  locOf (Rotate _ _ _ pos)       = locOf pos
-  locOf (Map _ _ pos)            = locOf pos
-  locOf (Reduce _ _ _ _ pos)     = locOf pos
-  locOf (Zip _ _ _ pos)          = locOf pos
-  locOf (Unzip _ _ pos)          = locOf pos
-  locOf (Scan _ _ _ pos)         = locOf pos
-  locOf (Filter _ _ pos)         = locOf pos
-  locOf (Partition _ _ pos)      = locOf pos
-  locOf (Split _ _ _ pos)        = locOf pos
-  locOf (Concat _ _ _ pos)       = locOf pos
-  locOf (DoLoop _ _ _ _ _ pos)   = locOf pos
-  locOf (Stream _ _ _  pos)      = locOf pos
-  locOf (Unsafe _ loc)           = locOf loc
+  locOf (Literal _ loc)              = locOf loc
+  locOf (Parens _ loc)               = locOf loc
+  locOf (QualParens _ _ loc)         = locOf loc
+  locOf (TupLit _ pos)               = locOf pos
+  locOf (RecordLit _ pos)            = locOf pos
+  locOf (Project _ _ _ pos)          = locOf pos
+  locOf (ArrayLit _ _ pos)           = locOf pos
+  locOf (Range _ _ _ pos)            = locOf pos
+  locOf (Empty _ pos)                = locOf pos
+  locOf (BinOp _ _ _ _ pos)          = locOf pos
+  locOf (If _ _ _ _ pos)             = locOf pos
+  locOf (Var _ _ loc)                = locOf loc
+  locOf (Ascript _ _ loc)            = locOf loc
+  locOf (Negate _ pos)               = locOf pos
+  locOf (Apply _ _ _ _ pos)          = locOf pos
+  locOf (LetPat _ _ _ _ pos)         = locOf pos
+  locOf (LetFun _ _ _ loc)           = locOf loc
+  locOf (LetWith _ _ _ _ _ pos)      = locOf pos
+  locOf (Index _ _ pos)              = locOf pos
+  locOf (Update _ _ _ pos)           = locOf pos
+  locOf (Reshape _ _ pos)            = locOf pos
+  locOf (Rearrange _ _ pos)          = locOf pos
+  locOf (Rotate _ _ _ pos)           = locOf pos
+  locOf (Map _ _ pos)                = locOf pos
+  locOf (Reduce _ _ _ _ pos)         = locOf pos
+  locOf (Zip _ _ _ pos)              = locOf pos
+  locOf (Unzip _ _ pos)              = locOf pos
+  locOf (Scan _ _ _ pos)             = locOf pos
+  locOf (Filter _ _ pos)             = locOf pos
+  locOf (Partition _ _ pos)          = locOf pos
+  locOf (Split _ _ _ pos)            = locOf pos
+  locOf (Concat _ _ _ pos)           = locOf pos
+  locOf (Lambda _ _ _ _ _ loc)       = locOf loc
+  locOf (OpSection _ _ _ _ loc)      = locOf loc
+  locOf (OpSectionLeft _ _ _ _ loc)  = locOf loc
+  locOf (OpSectionRight _ _ _ _ loc) = locOf loc
+  locOf (DoLoop _ _ _ _ _ pos)       = locOf pos
+  locOf (Stream _ _ _  pos)          = locOf pos
+  locOf (Unsafe _ loc)               = locOf loc
 
 -- | An entry in a record literal.
 data FieldBase f vn = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
@@ -771,33 +793,6 @@ data LoopFormBase f vn = For (IdentBase f vn) (ExpBase f vn)
                        | ForIn (PatternBase f vn) (ExpBase f vn)
                        | While (ExpBase f vn)
 deriving instance Showable f vn => Show (LoopFormBase f vn)
-
--- | Anonymous function passed to a SOAC.
-data LambdaBase f vn = AnonymFun [TypeParamBase vn] [PatternBase f vn] (ExpBase f vn) (Maybe (TypeDeclBase f vn)) (f StructType) SrcLoc
-                      -- ^ @fn (x: bool, z: char):int => if x then ord z else ord z + 1@
-                      | CurryFun (QualName vn)
-                        [ExpBase f vn] (f ([CompType], CompType)) SrcLoc
-                        -- ^ @f(4)@
-                      | BinOpFun (QualName vn)
-                        (f CompType) (f CompType) (f CompType) SrcLoc
-                        -- ^ @+@; first two types are operands, third is result.
-                      | CurryBinOpLeft (QualName vn)
-                        (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
-                        -- ^ @2+@; first type is operand, second is result.
-                      | CurryBinOpRight (QualName vn)
-                        (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
-                        -- ^ @+2@; first type is operand, second is result.
-                      | CurryProject Name (f CompType, f CompType) SrcLoc
-                      -- ^ @#field@.  First type is operand, second is result.
-deriving instance Showable f vn => Show (LambdaBase f vn)
-
-instance Located (LambdaBase f vn) where
-  locOf (AnonymFun _ _ _ _ _ loc)     = locOf loc
-  locOf (CurryFun  _ _ _ loc)         = locOf loc
-  locOf (BinOpFun _ _ _ _ loc)        = locOf loc
-  locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
-  locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
-  locOf (CurryProject _ _ loc)        = locOf loc
 
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).

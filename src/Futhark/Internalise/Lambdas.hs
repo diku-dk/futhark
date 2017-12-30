@@ -24,10 +24,10 @@ import Futhark.Representation.SOACS.Simplify (simplifyLambda)
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
-  E.Lambda -> [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
+  E.Exp -> [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 
 internaliseMapLambda :: InternaliseLambda
-                     -> E.Lambda
+                     -> E.Exp
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
 internaliseMapLambda internaliseLambda lam args = do
@@ -91,7 +91,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
           letSubExp "elem" $ I.BasicOp $ I.Index arg' $ fullSlice arg_t [I.DimFix zero]
 
 internaliseFoldLambda :: InternaliseLambda
-                      -> E.Lambda
+                      -> E.Exp
                       -> [I.Type] -> [I.Type]
                       -> InternaliseM I.Lambda
 internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
@@ -109,7 +109,7 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
 
 
 internaliseRedomapInnerLambda :: InternaliseLambda
-                              -> E.Lambda
+                              -> E.Exp
                               -> [I.SubExp]
                               -> [I.SubExp]
                               -> InternaliseM I.Lambda
@@ -157,7 +157,7 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   return $ I.Lambda params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda
-                        -> E.Lambda
+                        -> E.Exp
                         -> [I.Type]
                         -> InternaliseM I.ExtLambda
 internaliseStreamLambda internaliseLambda lam rowts = do
@@ -173,7 +173,7 @@ internaliseStreamLambda internaliseLambda lam rowts = do
 -- equivalence class ID in the range [0,k].  The remaining are all zero
 -- except for possibly one element.
 internalisePartitionLambdas :: InternaliseLambda
-                            -> [E.Lambda]
+                            -> [E.Exp]
                             -> [I.SubExp]
                             -> InternaliseM I.Lambda
 internalisePartitionLambdas internaliseLambda lams args = do
