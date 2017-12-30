@@ -4,7 +4,7 @@ module Language.Futhark
   , module Language.Futhark.Attributes
   , module Language.Futhark.Pretty
 
-  , Ident, DimIndex, Exp, Lambda, Pattern
+  , Ident, DimIndex, Exp, Pattern
   , ModExp, ModParam, SigExp, ModBind
   , FunBind, ValBind, Dec, Prog
   , TypeBind, TypeDecl
@@ -25,9 +25,6 @@ type DimIndex = DimIndexBase Info VName
 
 -- | An expression with type information.
 type Exp = ExpBase Info VName
-
--- | A lambda with type information.
-type Lambda = LambdaBase Info VName
 
 -- | A pattern with type information.
 type Pattern = PatternBase Info VName

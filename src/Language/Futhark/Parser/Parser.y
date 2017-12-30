@@ -41,7 +41,6 @@ import Language.Futhark.Parser.Lexer
 %name prog Prog
 %name futharkType TypeExp
 %name expression Exp
-%name lambda FunAbstr
 %name anyValue Value
 %name anyValues CatValues
 
@@ -557,17 +556,17 @@ Exp2 :: { UncheckedExp }
                       { Concat $3 (fst $4) (snd $4) $1 }
 
 
-     | reduce FunAbstr Atom Atom
+     | reduce Atom Atom Atom
                       { Reduce Noncommutative $2 $3 $4 $1 }
 
-     | reduceComm FunAbstr Atom Atom
+     | reduceComm Atom Atom Atom
                       { Reduce Commutative $2 $3 $4 $1 }
 
 
-     | map FunAbstr Atoms1
+     | map Atom Atoms1
                       { Map $2 (fst $3:snd $3) $1 }
 
-     | scan FunAbstr Atom Atom
+     | scan Atom Atom Atom
                       { Scan $2 $3 $4 $1 }
 
      | zip Atoms1
@@ -580,19 +579,19 @@ Exp2 :: { UncheckedExp }
 
      | unsafe Exp2     { Unsafe $2 $1 }
 
-     | filter FunAbstr Atom
+     | filter Atom Atom
                       { Filter $2 $3 $1 }
 
-     | partition '(' FunAbstrs1 ')' Atom
+     | partition '(' CommaAtoms1 ')' Atom
                       { Partition (fst $3 : snd $3) $5 $1 }
 
-     | stream_map       FunAbstr Atom
+     | stream_map       Atom Atom
                          { Stream (MapLike InOrder)  $2 $3 $1 }
-     | stream_map_per    FunAbstr Atom
+     | stream_map_per    Atom Atom
                          { Stream (MapLike Disorder) $2 $3 $1 }
-     | stream_red       FunAbstr FunAbstr Atom
+     | stream_red       Atom Atom Atom
                          { Stream (RedLike InOrder Noncommutative $2) $3 $4 $1 }
-     | stream_red_per    FunAbstr FunAbstr Atom
+     | stream_red_per    Atom Atom Atom
                          { Stream (RedLike Disorder Commutative $2) $3 $4 $1 }
 
      | Exp2 '+...' Exp2    { binOp $1 $2 $3 }
@@ -631,16 +630,18 @@ Exp2 :: { UncheckedExp }
      | Exp2 with '[' DimIndices ']' '<-' Exp2
        { Update $1 $4 $7 (srclocOf $1) }
 
-     | Apply
-       { $1 }
+     | '\\' TypeParams FunParams1 maybeAscription(TypeExpDecl) '->' Exp
+       { Lambda $2 (fst $3 : snd $3) $6 $4 NoInfo $1 }
+
+     | Apply { $1 }
 
 Apply :: { UncheckedExp }
       : Apply Atom %prec juxtprec
         { Apply $1 $2 NoInfo NoInfo (srclocOf $1) }
-      | Atom %prec juxtprec
-        { $1 }
       | UnOp Atom %prec juxtprec
         { Apply (Var (fst $1) NoInfo (snd $1)) $2 NoInfo NoInfo (snd $1) }
+      | Atom %prec juxtprec
+        { $1 }
 
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (snd $1) }
@@ -675,6 +676,21 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | 'qid.(' Exp ')'
        { let L loc (QUALPAREN qs name) = $1 in QualParens (QualName qs name) $2 loc }
 
+     -- Operator sections.
+     | '(' UnOp ')'
+        { Var (fst $2) NoInfo (snd $2) }
+     | '(' '-' ')'
+        { OpSection (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo $1 }
+     | '(' Exp2 '-' ')'
+        { OpSectionLeft (QualName [] (nameFromString "-"))
+          $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
+     | '(' BinOp Exp2 ')'
+       { OpSectionRight $2 $3 (NoInfo, NoInfo) NoInfo $1 }
+     | '(' Exp2 BinOp ')'
+       { OpSectionLeft $3 $2 (NoInfo, NoInfo) NoInfo $1 }
+     | '(' BinOp ')'
+       { OpSection $2 NoInfo NoInfo NoInfo $1 }
+
      -- Errors
      | '[' ']'
        {% emptyArrayError $1 }
@@ -684,6 +700,10 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
 Atoms1 :: { (UncheckedExp, [UncheckedExp]) }
         : Atom Atoms1 { ($1, fst $2 : snd $2) }
         | Atom        { ($1, []) }
+
+CommaAtoms1 :: { (UncheckedExp, [UncheckedExp]) }
+             : Atom ',' CommaAtoms1 { ($1, fst $3 : snd $3) }
+             | Atom                 { ($1, []) }
 
 Exps1 :: { (UncheckedExp, [UncheckedExp]) }
         : Exp ',' Exps1 { ($1, fst $3 : snd $3) }
@@ -806,35 +826,6 @@ FieldPatterns1 :: { [(Name, PatternBase NoInfo Name)] }
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
-
-FunAbstr :: { UncheckedLambda }
-         : '(' '\\' TypeParams FunParams1 maybeAscription(TypeExpDecl) '->' Exp ')'
-           { AnonymFun $3 (fst $4 : snd $4) $7 $5 NoInfo $1 }
-         | QualName
-           { CurryFun (Var (fst $1) NoInfo (snd $1)) NoInfo (snd $1) }
-         | '(' UnOp ')'
-           { CurryFun (Var (fst $2) NoInfo (snd $2)) NoInfo (snd $2) }
-         | '(' Apply ')'
-           { CurryFun $2 NoInfo (srclocOf $2) }
-           -- Minus is handed explicitly here because I could not
-           -- figure out how to resolve the ambiguity with negation.
-         | '(' '-' Exp2 ')'
-           { CurryBinOpRight (QualName [] (nameFromString "-")) $3 (NoInfo, NoInfo) NoInfo $1 }
-         | '(' '-' ')'
-           { BinOpFun (QualName [] (nameFromString "-")) NoInfo NoInfo NoInfo $1 }
-         | '(' Exp2 '-' ')'
-           { CurryBinOpLeft (QualName [] (nameFromString "-"))
-             $2 (NoInfo, NoInfo) NoInfo (srclocOf $1) }
-         | '(' BinOp Exp2 ')'
-           { CurryBinOpRight $2 $3 (NoInfo, NoInfo) NoInfo $1 }
-         | '(' Exp2 BinOp ')'
-           { CurryBinOpLeft $3 $2 (NoInfo, NoInfo) NoInfo $1 }
-         | '(' BinOp ')'
-           { BinOpFun $2 NoInfo NoInfo NoInfo $1 }
-
-FunAbstrs1 :: { (UncheckedLambda, [UncheckedLambda]) }
-            : FunAbstr                { ($1, []) }
-            | FunAbstr ',' FunAbstrs1 { ($1, fst $3 : snd $3) }
 
 Value :: { Value }
 Value : IntValue { $1 }

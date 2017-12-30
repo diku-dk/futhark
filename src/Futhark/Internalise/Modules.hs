@@ -196,7 +196,6 @@ transformNames x = do
   return $ runIdentity $ astMap (substituter scope) x
   where substituter scope =
           ASTMapper { mapOnExp = onExp scope
-                    , mapOnLambda = astMap $ substituter scope
                     , mapOnName = \v ->
                         return $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope
                     , mapOnQualName = \v ->
