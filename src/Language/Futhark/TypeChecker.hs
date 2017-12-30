@@ -95,10 +95,7 @@ checkForDuplicateDecs =
               bad $ DupDefinitionError namespace name loc loc'
             _ -> return $ M.insert (namespace, name) loc known
 
-        f (FunDec (FunBind _ name _ _ _ _ _ _ loc)) =
-          check Term name loc
-
-        f (ValDec (ValBind _ name _ _ _ _ loc)) =
+        f (ValDec (ValBind _ name _ _ _ _ _ _ loc)) =
           check Term name loc
 
         f (TypeDec (TypeBind name _ _ _ loc)) =
@@ -427,9 +424,14 @@ checkTypeBind (TypeBind name ps td doc loc) =
               TypeBind name' ps' td' doc loc)
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
-checkValBind (ValBind entry name maybe_t NoInfo e doc loc) = do
+
+checkValBind (ValBind entry name maybe_tdecl NoInfo tparams [] e doc loc) = do
+  unless (null tparams) $
+    throwError $ TypeError loc
+    "Value bindings without parameters may not have type parameters."
+
   name' <- bindSpaced [(Term, name)] $ checkName Term name loc
-  (maybe_t', e') <- case maybe_t of
+  (maybe_tdecl', e') <- case maybe_tdecl of
     Just t  -> do
       (tdecl, tdecl_type) <- checkTypeExp t
 
@@ -447,15 +449,14 @@ checkValBind (ValBind entry name maybe_t NoInfo e doc loc) = do
                  , envNameMap =
                      M.singleton (Term, name) $ qualName name'
                  },
-          ValBind entry name' maybe_t' (Info e_t) e' doc loc)
+          ValBind entry name' maybe_tdecl' (Info e_t) [] [] e' doc loc)
   where anythingUnique (Record fs) = any anythingUnique fs
         anythingUnique et          = unique et
 
-checkFunBind :: FunBindBase NoInfo Name -> TypeM (Env, FunBind)
-checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body doc loc) = do
-  (fname', tparams', params', maybe_retdecl', rettype, body') <-
+checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc) = do
+  (fname', tparams', params', maybe_tdecl', rettype, body') <-
     bindSpaced [(Term, fname)] $
-    checkFunDef (fname, maybe_retdecl, tparams, params, body, loc)
+    checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   when (entry && any isTypeParam tparams) $
     throwError $ TypeError loc "Entry point functions may not be polymorphic."
@@ -466,7 +467,7 @@ checkFunBind (FunBind entry fname maybe_retdecl NoInfo tparams params body doc l
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
-           FunBind entry fname' maybe_retdecl' (Info rettype) tparams' params' body' doc loc)
+           ValBind entry fname' maybe_tdecl' (Info rettype) tparams' params' body' doc loc)
 
   where isTypeParam TypeParamType{} = True
         isTypeParam _ = False
@@ -501,10 +502,6 @@ checkDec (LocalDec d loc) = do
 checkDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
   return (mempty, env, ValDec vb')
-
-checkDec (FunDec fb) = do
-  (env, fb') <- checkFunBind fb
-  return (mempty, env, FunDec fb')
 
 checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
 checkDecs (LocalDec d loc:ds) = do

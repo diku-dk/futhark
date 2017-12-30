@@ -122,17 +122,17 @@ readEvalPrint = do
           -- then run it.
           let mkOpen f = OpenDec (ModImport f NoInfo noLoc) [] NoInfo noLoc
               opens = map (mkOpen . fst) imports
-              mainfun = FunBind { funBindEntryPoint = True
-                                , funBindName = nameFromString ""
-                                , funBindRetType = NoInfo
-                                , funBindRetDecl = Nothing
-                                , funBindTypeParams = []
-                                , funBindParams = []
-                                , funBindBody = e
-                                , funBindLocation = noLoc
-                                , funBindDoc = Nothing
+              mainfun = ValBind { valBindEntryPoint = True
+                                , valBindName = nameFromString ""
+                                , valBindRetType = NoInfo
+                                , valBindRetDecl = Nothing
+                                , valBindTypeParams = []
+                                , valBindParams = []
+                                , valBindBody = e
+                                , valBindLocation = noLoc
+                                , valBindDoc = Nothing
                                 }
-              prog' = Prog Nothing $ opens ++ [FunDec mainfun]
+              prog' = Prog Nothing $ opens ++ [ValDec mainfun]
           runProgram imports src prog'
   where inputLine prompt = do
           inp <- lift $ Haskeline.getInputLine prompt

@@ -66,7 +66,6 @@ module Language.Futhark.Syntax
   , ModParamBase(..)
 
   -- * Definitions
-  , FunBindBase(..)
   , ValBindBase(..)
   , TypeBindBase(..)
   , TypeParamBase(..)
@@ -813,36 +812,21 @@ instance Located (PatternBase f vn) where
   locOf (PatternAscription p _) = locOf p
 
 -- | Function Declarations
-data FunBindBase f vn = FunBind { funBindEntryPoint :: Bool
+data ValBindBase f vn = ValBind { valBindEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
-                                , funBindName       :: vn
-                                , funBindRetDecl    :: Maybe (TypeExp vn)
-                                , funBindRetType    :: f StructType
-                                , funBindTypeParams :: [TypeParamBase vn]
-                                , funBindParams     :: [PatternBase f vn]
-                                , funBindBody       :: ExpBase f vn
-                                , funBindDoc        :: Maybe String
-                                , funBindLocation   :: SrcLoc
-                                }
-deriving instance Showable f vn => Show (FunBindBase f vn)
-
-instance Located (FunBindBase f vn) where
-  locOf = locOf . funBindLocation
-
--- | Value declaration.
-data ValBindBase f vn = ValBind { constBindEntryPoint :: Bool
-                                -- ^ True if this value is an entry point.
-                                , constBindName     :: vn
-                                , constBindTypeDecl :: Maybe (TypeExp vn)
-                                , constBindType     :: f StructType
-                                , constBindDef      :: ExpBase f vn
-                                , constDoc          :: Maybe String
-                                , constBindLocation :: SrcLoc
+                                , valBindName       :: vn
+                                , valBindRetDecl    :: Maybe (TypeExp vn)
+                                , valBindRetType    :: f StructType
+                                , valBindTypeParams :: [TypeParamBase vn]
+                                , valBindParams     :: [PatternBase f vn]
+                                , valBindBody       :: ExpBase f vn
+                                , valBindDoc        :: Maybe String
+                                , valBindLocation   :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (ValBindBase f vn)
 
 instance Located (ValBindBase f vn) where
-  locOf = locOf . constBindLocation
+  locOf = locOf . valBindLocation
 
 -- | Type Declarations
 data TypeBindBase f vn = TypeBind { typeAlias        :: vn
@@ -984,7 +968,6 @@ instance Located (ModParamBase f vn) where
 
 -- | A top-level binding.
 data DecBase f vn = ValDec (ValBindBase f vn)
-                  | FunDec (FunBindBase f vn)
                   | TypeDec (TypeBindBase f vn)
                   | SigDec (SigBindBase f vn)
                   | ModDec (ModBindBase f vn)
@@ -994,7 +977,6 @@ deriving instance Showable f vn => Show (DecBase f vn)
 
 instance Located (DecBase f vn) where
   locOf (ValDec d)          = locOf d
-  locOf (FunDec d)          = locOf d
   locOf (TypeDec d)         = locOf d
   locOf (SigDec d)          = locOf d
   locOf (ModDec d)          = locOf d

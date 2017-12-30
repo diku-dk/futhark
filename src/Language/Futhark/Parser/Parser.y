@@ -218,8 +218,7 @@ Decs :: { [UncheckedDec] }
       | Dec Decs { $1 ++ $2 }
 
 Dec_ :: { [UncheckedDec] }
-    : Fun               { [FunDec $1] }
-    | Val               { [ValDec $1] }
+    : Val               { [ValDec $1] }
     | TypeAbbr          { [TypeDec $1] }
     | SigBind           { [SigDec $1 ] }
     | ModBind           { [ModDec $1 ] }
@@ -386,36 +385,27 @@ BindingBinOp :: { Name }
       | '-'   { nameFromString "-" }
 
 
-Fun    :: { FunBindBase NoInfo Name }
-Fun     : let id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp
+Val    :: { ValBindBase NoInfo Name }
+Val     : let id TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
-            in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
-               $3 (fst $4 : snd $4) $7 Nothing loc
+            in ValBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
+               $3 $4 $7 Nothing loc
           }
 
-        | entry id TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp
+        | entry id TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let L loc (ID name) = $2
-            in FunBind True name (fmap declaredType $5) NoInfo
-               $3 (fst $4 : snd $4) $7 Nothing loc }
+            in ValBind True name (fmap declaredType $5) NoInfo
+               $3 $4 $7 Nothing loc }
 
         | let FunParam BindingBinOp FunParam maybeAscription(TypeExpDecl) '=' Exp
-          { FunBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 Nothing $1
+          { ValBind False $3 (fmap declaredType $5) NoInfo [] [$2,$4] $7 Nothing $1
           }
 
-        | let BindingUnOp TypeParams FunParams1 maybeAscription(TypeExpDecl) '=' Exp
+        | let BindingUnOp TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
           { let name = $2
-            in FunBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
-               $3 (fst $4 : snd $4) $7 Nothing $1
+            in ValBind (name==defaultEntryPoint) name (fmap declaredType $5) NoInfo
+               $3 $4 $7 Nothing $1
           }
-;
-
-Val :: { ValBindBase NoInfo Name }
-Val : let id maybeAscription(TypeExpDecl) '=' Exp
-      { let L _ (ID name) = $2
-        in ValBind (name==defaultEntryPoint) name (fmap declaredType $3) NoInfo $5 Nothing $1 }
-    | entry id maybeAscription(TypeExpDecl) '=' Exp
-      { let L _ (ID name) = $2
-        in ValBind True name (fmap declaredType $3) NoInfo $5 Nothing $1 }
 
 Param :: { ParamBase NoInfo Name }
        : '(' id ':' TypeExpDecl ')' { let L _ (ID v) = $2 in NamedParam v $4 $1 }
@@ -507,6 +497,10 @@ FunParam : InnerPattern { $1 }
 FunParams1 :: { (PatternBase NoInfo Name, [PatternBase NoInfo Name]) }
 FunParams1 : FunParam            { ($1, []) }
            | FunParam FunParams1 { ($1, fst $2 : snd $2) }
+
+FunParams :: { [PatternBase NoInfo Name] }
+FunParams :                     { [] }
+           | FunParam FunParams { $1 : $2 }
 
 QualName :: { (QualName Name, SrcLoc) }
           : qid { let L loc (QUALID qs v) = $1 in (QualName qs v, loc) }
@@ -929,8 +923,7 @@ Values : Value ',' Values { $1 : $3 }
 {
 
 addDoc :: String -> UncheckedDec -> UncheckedDec
-addDoc doc (ValDec val) = ValDec (val { constDoc = Just doc })
-addDoc doc (FunDec fun) = FunDec (fun { funBindDoc = Just doc })
+addDoc doc (ValDec val) = ValDec (val { valBindDoc = Just doc })
 addDoc doc (TypeDec tp) = TypeDec (tp { typeDoc = Just doc })
 addDoc doc (SigDec sig) = SigDec (sig { sigDoc = Just doc })
 addDoc doc (ModDec mod) = ModDec (mod { modDoc = Just doc })

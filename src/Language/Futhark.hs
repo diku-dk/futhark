@@ -6,7 +6,7 @@ module Language.Futhark
 
   , Ident, DimIndex, Exp, Pattern
   , ModExp, ModParam, SigExp, ModBind
-  , FunBind, ValBind, Dec, Prog
+  , ValBind, Dec, Prog
   , TypeBind, TypeDecl
   , StructTypeArg, ArrayType
   , TypeParam
@@ -28,9 +28,6 @@ type Exp = ExpBase Info VName
 
 -- | A pattern with type information.
 type Pattern = PatternBase Info VName
-
--- | An function declaration with type information.
-type FunBind = FunBindBase Info VName
 
 -- | An constant declaration with type information.
 type ValBind = ValBindBase Info VName

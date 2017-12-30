@@ -55,8 +55,6 @@ internaliseDecs ds =
       return ()
     ValDec vdec : ds' ->
       internaliseValBind vdec $ internaliseDecs ds'
-    FunDec fdec : ds' ->
-      internaliseFunBind fdec $ internaliseDecs ds'
     E.TypeDec tb : ds' ->
       bindingType (E.typeAlias tb)
       (E.typeParams tb, E.unInfo $ E.expandedType $ E.typeExp tb) $
@@ -64,16 +62,12 @@ internaliseDecs ds =
     _:ds' ->
       internaliseDecs ds'
 
-internaliseValBind :: E.ValBind -> InternaliseM a -> InternaliseM a
-internaliseValBind (E.ValBind entry name _ t e doc loc) =
-  internaliseFunBind $ E.FunBind entry name Nothing t [] [] e doc loc
-
 internaliseFunName :: VName -> [E.Pattern] -> InternaliseM Name
 internaliseFunName ofname [] = return $ nameFromString $ pretty ofname ++ "f"
 internaliseFunName ofname _  = nameFromString . pretty <$> newVName (baseString ofname)
 
-internaliseFunBind :: E.FunBind -> InternaliseM a -> InternaliseM a
-internaliseFunBind fb@(E.FunBind entry fname _ (Info rettype) tparams params body _ loc) m = do
+internaliseValBind :: E.ValBind -> InternaliseM a -> InternaliseM a
+internaliseValBind fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ loc) m = do
   let specialise (e_ts,_) = do
         let param_ts = map (E.removeShapeAnnotations . E.patternStructType) params
 
@@ -142,8 +136,8 @@ internaliseFunBind fb@(E.FunBind entry fname _ (Info rettype) tparams params bod
     -- them from somewhere else.
     zeroExts ts = generaliseExtTypes ts ts
 
-generateEntryPoint :: E.FunBind -> InternaliseM ()
-generateEntryPoint (E.FunBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
+generateEntryPoint :: E.ValBind -> InternaliseM ()
+generateEntryPoint (E.ValBind _ ofname _ (Info rettype) _ orig_params _ _ loc) =
   -- We remove all shape annotations, so there should be no constant
   -- parameters here.
   bindingParams [] (map E.patternNoShapeAnnotations params) $
@@ -452,7 +446,7 @@ internaliseExp desc (E.LetPat tparams pat e body loc) = do
     internaliseExp desc body
 
 internaliseExp desc (E.LetFun ofname (tparams, params, retdecl, Info rettype, body) letbody loc) =
-  internaliseFunBind (E.FunBind False ofname retdecl (Info rettype) tparams params body Nothing loc) $
+  internaliseValBind (E.ValBind False ofname retdecl (Info rettype) tparams params body Nothing loc) $
   internaliseExp desc letbody
 
 internaliseExp desc (E.DoLoop tparams mergepat mergeexp form loopbody loc) = do
