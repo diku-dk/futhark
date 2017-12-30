@@ -174,6 +174,10 @@ literals and variables, but also more complicated forms.
        : | `quals`."(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
        : | "[" `exp` [".." `exp`] "..." `exp` "]"
+       : | "(" `qualid` `atom`+ ")"
+       : | "(" `qualbinop` ")"
+       : | "(" `exp` `qualbinop` ")"
+       : | "(" `qualbinop` `exp` ")"
    exp:   `atom`
       : | `exp` `qualbinop` `exp`
       : | `exp` `exp`
@@ -182,6 +186,7 @@ literals and variables, but also more complicated forms.
       : | "let" `type_param`* `pat` "=" `exp` "in" `exp`
       : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
       : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
+      : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `type_param`* `pat` [("=" `exp`)] `loopform` "do" `exp`
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
@@ -220,13 +225,6 @@ literals and variables, but also more complicated forms.
         : | [`exp`] ":" `exp` [":" [`exp`]]
         : | [`exp`] [":" `exp`] ":" [`exp`]
    nat_int : `decdigit`+
-   fun:   `qualid`
-      : | "(" `qualid` `atom`+ ")"
-      : |  "#" `fieldid`
-      : | "(" "\" `type_param`* `pat`+ [":" `type`] "->" `exp` ")"
-      : | "(" `qualbinop` ")"
-      : | "(" `exp` `qualbinop` ")"
-      : | "(" `qualbinop` `exp` ")"
 
 Some of the built-in expression forms have parallel semantics, but it
 is not guaranteed that the the parallel constructs in Futhark are
@@ -260,6 +258,10 @@ in natural text.
 
     * Otherwise, it is an array index operation.
 
+* An expression ``(-x)`` is parsed as the variable ``x`` negated and
+  enclosed in parentheses, rather than an operator section partially
+  applying the infix operator ``-``.
+
 * The following table describes the precedence and associativity of
   infix operators.  All operators in the same row have the same
   precedence.  The rows are listed in increasing order of precedence.
@@ -279,10 +281,11 @@ in natural text.
   left               ``+`` ``-``
   left               ``*`` ``/`` ``%`` ``//`` ``%%``
   right              ``->``
+  left               juxtaposition
   =================  =============
 
-Semantics
-~~~~~~~~~
+Semantics of Simple Expressions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `literal`
 .........
@@ -477,11 +480,10 @@ Short-circuiting logical conjunction; both operands must be of type
 Short-circuiting logical disjunction; both operands must be of type
 ``bool``.
 
-``f x y z``
-...........
+``f x``
+.......
 
-Apply the function ``f`` to the arguments ``x``, ``y`` and ``z``.  Any
-number of arguments can be passed.
+Apply the function ``f`` to the argument ``x``.
 
 ``e : t``
 .........
@@ -508,69 +510,6 @@ Numerical negation of ``x``, which must be of numeric type.
 .......
 
 Bitwise negation of ``x``, which must be of integral type.
-
-``if c then a else b``
-......................
-
-If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
-
-``let pat = e in body``
-.......................
-
-Evaluate ``e`` and bind the result to the pattern ``pat`` while
-evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
-``let`` expression. See also `Shape Declarations`_.
-
-``let a[i] = v in body``
-........................................
-
-Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
-not be complete and can also be a slice, but in these cases, the value
-of ``v`` must be an array of the proper size.  Syntactic sugar for
-``let a = a with [i] <- v in a``.
-
-``let f params... = e in body``
-...............................
-
-Bind ``f`` to a function with the given parameters and definition
-(``e``) and evaluate ``body``.  The function will be treated as
-aliasing any free variables in ``e``.  The function is not in scope of
-itself, and hence cannot be recursive.  See also `Shape
-Declarations`_.
-
-``loop pat = initial for x in a do loopbody``
-.............................................
-
-1. Bind ``pat`` to the initial values given in ``initial``.
-
-2. For each element ``x`` in ``a``, evaluate ``loopbody`` and rebind
-   ``pat`` to the result of the evaluation.
-
-3. Return the final value of ``pat``.
-
-The ``= initial`` can be left out, in which case initial values for
-the pattern are taken from equivalently named variables in the
-environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
-= ...``.
-
-See also `Shape Declarations`_.
-
-``loop pat = initial for x < n do loopbody``
-............................................
-
-Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
-
-``loop pat = initial = while cond do loopbody``
-...............................................
-
-1. Bind ``pat`` to the initial values given in ``initial``.
-
-2. If ``cond`` evaluates to true, bind ``pat`` to the result of
-   evaluating ``loopbody``, and repeat the step.
-
-3. Return the final value of ``pat``.
-
-See also `Shape Declarations`_.
 
 ``reshape (d_1, ..., d_n) a``
 ...............................
@@ -667,6 +606,94 @@ do not want them here.
 Return ``a``, but with the element at position ``i`` changed to
 contain the result of evaluating ``e``.  Consumes ``a``.
 
+``scatter as is vs``
+....................
+
+This ``scatter`` expression calculates the equivalent of this imperative
+code::
+
+  for index in 0..length is-1:
+    i = is[index]
+    v = vs[index]
+    as[i] = v
+
+The ``is`` and ``vs`` arrays must have the same outer size.  ``scatter``
+acts in-place and consumes the ``as`` array, returning a new array
+that has the same type and elements as ``as``, except for the indices
+in ``is``.  If ``is`` contains duplicates (i.e. several writes are
+performed to the same location), the result is unspecified.  It is not
+guaranteed that one of the duplicate writes will complete atomically -
+they may be interleaved.
+
+``if c then a else b``
+......................
+
+If ``c`` evaluates to ``True``, evaluate ``a``, else evaluate ``b``.
+
+Binding Expressions
+~~~~~~~~~~~~~~~~~~~
+
+``let pat = e in body``
+.......................
+
+Evaluate ``e`` and bind the result to the pattern ``pat`` while
+evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
+``let`` expression. See also `Shape Declarations`_.
+
+``let a[i] = v in body``
+........................................
+
+Write ``v`` to ``a[i]`` and evaluate ``body``.  The given index need
+not be complete and can also be a slice, but in these cases, the value
+of ``v`` must be an array of the proper size.  Syntactic sugar for
+``let a = a with [i] <- v in a``.
+
+``let f params... = e in body``
+...............................
+
+Bind ``f`` to a function with the given parameters and definition
+(``e``) and evaluate ``body``.  The function will be treated as
+aliasing any free variables in ``e``.  The function is not in scope of
+itself, and hence cannot be recursive.  See also `Shape
+Declarations`_.
+
+``loop pat = initial for x in a do loopbody``
+.............................................
+
+1. Bind ``pat`` to the initial values given in ``initial``.
+
+2. For each element ``x`` in ``a``, evaluate ``loopbody`` and rebind
+   ``pat`` to the result of the evaluation.
+
+3. Return the final value of ``pat``.
+
+The ``= initial`` can be left out, in which case initial values for
+the pattern are taken from equivalently named variables in the
+environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
+= ...``.
+
+See also `Shape Declarations`_.
+
+``loop pat = initial for x < n do loopbody``
+............................................
+
+Equivalent to ``loop (pat = initial) for x in [0..1..<n] do loopbody``.
+
+``loop pat = initial = while cond do loopbody``
+...............................................
+
+1. Bind ``pat`` to the initial values given in ``initial``.
+
+2. If ``cond`` evaluates to true, bind ``pat`` to the result of
+   evaluating ``loopbody``, and repeat the step.
+
+3. Return the final value of ``pat``.
+
+See also `Shape Declarations`_.
+
+SOACs
+~~~~~
+
 ``map f a_1 ... a_n``
 .....................
 
@@ -717,25 +744,6 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``scatter as is vs``
-....................
-
-This ``scatter`` expression calculates the equivalent of this imperative
-code::
-
-  for index in 0..length is-1:
-    i = is[index]
-    v = vs[index]
-    as[i] = v
-
-The ``is`` and ``vs`` arrays must have the same outer size.  ``scatter``
-acts in-place and consumes the ``as`` array, returning a new array
-that has the same type and elements as ``as``, except for the indices
-in ``is``.  If ``is`` contains duplicates (i.e. several writes are
-performed to the same location), the result is unspecified.  It is not
-guaranteed that one of the duplicate writes will complete atomically -
-they may be interleaved.
-
 Shape Declarations
 ------------------
 
@@ -769,6 +777,30 @@ example, this will fail::
 While this will succeed and bind ``n`` to ``2``::
 
   let [n] x: [n]i32 = iota 2
+
+Function Expressions
+~~~~~~~~~~~~~~~~~~~~
+
+``\x y z: t -> e``
+..................
+
+Produces an anonymous function taking parameters ``x``, ``y``, and
+``z``, returns type ``t``, and whose body is ``e``.
+
+``(*binop*)``
+...............
+
+An *operator section* that is equivalent to ``\x y -> x *binop* y``.
+
+``(x *binop*)``
+...............
+
+An *operator section* that is equivalent to ``\y -> x *binop* y``.
+
+``(*binop* y)``
+...............
+
+An *operator section* that is equivalent to ``\x -> x *binop* y``.
 
 Declarations
 ------------

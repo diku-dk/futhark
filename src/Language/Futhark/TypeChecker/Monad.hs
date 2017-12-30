@@ -438,7 +438,6 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
 qualifyTypeVars :: ASTMappable t => Env -> [VName] -> [VName] -> t -> t
 qualifyTypeVars outer_env except qs = runIdentity . astMap mapper
   where mapper = ASTMapper { mapOnExp = pure
-                           , mapOnLambda = pure
                            , mapOnName = pure
                            , mapOnQualName = pure . qual
                            }
