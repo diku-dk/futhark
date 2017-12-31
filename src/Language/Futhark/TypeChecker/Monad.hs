@@ -86,6 +86,7 @@ data TypeError =
   | ParameterMismatch (Maybe (QualName Name)) SrcLoc
     (Either Int [TypeBase () ()]) [TypeBase () ()]
   | UseAfterConsume Name SrcLoc SrcLoc
+  | ConsumeAfterConsume Name SrcLoc SrcLoc
   | IndexingError Int Int SrcLoc
   | CurriedConsumption (QualName Name) SrcLoc
   | BadLetWithValue SrcLoc
@@ -149,6 +150,9 @@ instance Show TypeError where
   show (UseAfterConsume name rloc wloc) =
     "Variable " ++ pretty name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+  show (ConsumeAfterConsume name loc1 loc2) =
+    "Variable " ++ pretty name ++ " consumed at both " ++ locStr loc1 ++
+    " and " ++ locStr loc2 ++ ".  (Possibly through aliasing)"
   show (IndexingError dims got pos) =
     show got ++ " indices given at " ++ locStr pos ++
     ", but type of indexee  has " ++ show dims ++ " dimension(s)."
