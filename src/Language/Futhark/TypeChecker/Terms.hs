@@ -911,24 +911,6 @@ checkExp (Stream form lam arr pos) = do
 
   return $ Stream form' lam' arr' pos
 
-checkExp (Split i splitexp arrexp loc) = do
-  splitexp' <- checkExp splitexp
-  arrexp' <- checkExp arrexp
-
-  case typeOf splitexp' of
-    t | Just ts <- isTupleRecord t,
-        all (==(Prim $ Signed Int32)) ts -> return ()
-    Prim (Signed Int32) -> return ()
-    _ -> bad $ TypeError loc $ "Argument " ++ pretty splitexp ++
-         " to split must be integer or tuple of integers."
-
-  let t = typeOf arrexp'
-  when (arrayRank t <= i) $
-    bad $ TypeError loc $ "Cannot split array " ++ pretty arrexp'
-    ++ " of type " ++ pretty t
-    ++ " across dimension " ++ pretty i ++ "."
-  return $ Split i splitexp' arrexp' loc
-
 checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp
   arr2exps' <- mapM (require [toStructural $ typeOf arr1exp'] <=< checkExp) arr2exps

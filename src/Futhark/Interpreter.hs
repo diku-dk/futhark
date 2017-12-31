@@ -35,9 +35,6 @@ data InterpreterError =
       -- ^ The arguments given to a function were mistyped.
     | IndexOutOfBounds String [Int] (Slice Int)
       -- ^ First @Int@ is array shape, second is attempted index.
-    | SplitOutOfBounds String [Int] [Int]
-      -- ^ First @[Int]@ is array shape, second is attempted split
-      -- sizes.
     | NegativeIota Int
       -- ^ Called @iota(n)@ where @n@ was negative.
     | NegativeReplicate Int
@@ -67,9 +64,6 @@ instance Show InterpreterError where
   show (IndexOutOfBounds var arrsz slice) =
     "Array index " ++ pretty slice ++ " out of bounds in array '" ++
     var ++ "', of size " ++ show arrsz ++ "."
-  show (SplitOutOfBounds var arrsz sizes) =
-    "Split not valid for sizes " ++ show sizes ++
-    " on array '" ++ var ++ "', with shape " ++ show arrsz ++ "."
   show (NegativeIota n) =
     "Length argument " ++ show n ++ " to iota at is negative."
   show (NegativeReplicate n) =
@@ -560,11 +554,6 @@ evalBasicOp (Rearrange perm arrexp) =
 evalBasicOp (Rotate offsets arrexp) = do
   offsets' <- mapM (asInt "evalBasicOp rotate" <=< evalSubExp) offsets
   single . rotateArray offsets' <$> lookupVar arrexp
-
-evalBasicOp (Split i sizeexps arrexp) = do
-  sizes <- mapM (asInt "evalBasicOp Split" <=< evalSubExp) sizeexps
-  arr <- lookupVar arrexp
-  return $ splitArray i sizes arr
 
 evalBasicOp (Concat i arr1exp arr2exps _) = do
   arr1  <- lookupVar arr1exp

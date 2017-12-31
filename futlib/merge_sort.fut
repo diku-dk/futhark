@@ -47,6 +47,6 @@ module mk_merge_sort(C: {
   -- all be at the end, so we can easily cut it off.
   let merge_sort [n] (data: [n]C.t): *[n]C.t =
     let (data, d) = ensure_pow_2 data
-    in (split (n) (loop data for i < d do
-                     loop data for j < i+1 do kernel_par data i j)).1
+    in (loop data for i < d do
+          loop data for j < i+1 do kernel_par data i j)[:n]
 }

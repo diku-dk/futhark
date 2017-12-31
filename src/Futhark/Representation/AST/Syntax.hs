@@ -218,12 +218,6 @@ data BasicOp lore
   | Index VName (Slice SubExp)
   -- ^ The certificates for bounds-checking are part of the 'Stm'.
 
-  | Split Int [SubExp] VName
-  -- ^ 2nd arg is sizes of arrays you get back, which is
-  -- different from what the external language does.
-  -- In the core language,
-  -- @a = [1,2,3,4]; split@0( (1,0,2) , a ) = {[1], [], [2,3]}@
-
   | Concat Int VName [VName] SubExp
   -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 

@@ -191,7 +191,6 @@ literals and variables, but also more complicated forms.
       : | "reshape" `exp` `exp`
       : | "rearrange" "(" `nat_int`+ ")" `exp`
       : | "rotate" ["@" `nat_int`] `exp` `exp`
-      : | "split" ["@" `nat_int`] `exp` `exp`
       : | "concat" ["@" `nat_int`] `exp`+
       : | "zip" ["@" `nat_int`] `exp`+
       : | "unzip" `exp`
@@ -536,22 +535,6 @@ Intuitively, you can think of it as subtracting ``i`` from every index
 (modulo the size of the array).
 
 For example, if ``b==rotate 1 i a``, then ``b[x,y+1] = a[x,y]``.
-
-``split (i_1, ..., i_n) a``
-.............................
-
-Partitions the given array ``a`` into ``n+1`` disjoint arrays
-``(a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...])``, returned as a tuple.
-The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
-
-Example: ``split (1,1,3) [5,6,7,8] == ([5],[],[6,7],[8])``
-
-``split@i (i_1, ..., i_n) a``
-.............................
-
-Splits an array across dimension ``i``, with the outermost dimension
-being ``0``.  The ``i`` must be a compile-time integer constant,
-i.e. ``i`` cannot be a variable.
 
 ``concat a_1 ..., a_n``
 .........................

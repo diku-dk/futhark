@@ -223,8 +223,6 @@ instance Pretty (BasicOp lore) where
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate es e) =
     text "rotate" <> apply [apply (map ppr es), ppr e]
-  ppr (Split i sizeexps a) =
-    text "split" <> text "@" <> ppr i <> apply [apply (map ppr sizeexps), ppr a]
   ppr (Concat i x ys _) =
     text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)

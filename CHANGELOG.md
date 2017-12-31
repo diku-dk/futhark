@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
    * `futhark-dataset`: Removed `--binary-no-header` and
      `--binary-only-header` options.
 
+   * The `split` language construct has been removed.  There is a
+     library function `split` that does approximately the same.
+
 ### Changed
 
   * futlib: the `complex` module now produces a non-abstract `complex`

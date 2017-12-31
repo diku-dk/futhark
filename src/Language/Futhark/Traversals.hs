@@ -136,8 +136,6 @@ instance ASTMappable (ExpBase Info VName) where
     where mapOnStreamForm (MapLike o) = pure $ MapLike o
           mapOnStreamForm (RedLike o comm lam) =
               RedLike o comm <$> mapOnExp tv lam
-  astMap tv (Split i splitexps arrexp loc) =
-    Split i <$> mapOnExp tv splitexps <*> mapOnExp tv arrexp <*> pure loc
   astMap tv (Concat i x ys loc) =
     Concat i <$> mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
   astMap tv (Lambda tparams params body ret t loc) =

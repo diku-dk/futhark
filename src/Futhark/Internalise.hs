@@ -687,29 +687,6 @@ internaliseExp _ (E.Reshape shape e loc) = do
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
         orig_rank = E.arrayRank $ E.typeOf e
 
-internaliseExp _ (E.Split i splitexp arrexp loc) = do
-  splits' <- internaliseExp "n" splitexp
-  -- Note that @arrs@ is an array, because of array-of-tuples transformation
-  arrs <- internaliseExpToVars "split_arr" arrexp
-  split_dim <- arraysSize i <$> mapM lookupType arrs
-
-  -- Assertions
-  indexAsserts <- asserting $ do
-    let indexConds = zipWith (\beg end -> BasicOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
-                     (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
-    indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
-    fmap Certificates $ forM indexChecks $ \cnd ->
-      letExp "split_index_assert" $ BasicOp $ I.Assert cnd "index out of bounds" (loc, mempty)
-
-  -- Calculate diff between each split index
-  let sizeExps = zipWith (\beg end -> BasicOp $ I.BinOp (I.Sub I.Int32) end beg)
-                 (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
-  sizeVars <- mapM (letSubExp "split_size") sizeExps
-  splitExps <- certifying indexAsserts $ forM arrs $ \arr ->
-    letTupExp' "split_res" $ BasicOp $ I.Split i sizeVars arr
-
-  return $ concat $ transpose splitExps
-
 internaliseExp desc (E.Concat i x ys loc) = do
   xs  <- internaliseExpToVars "concat_x" x
   yss <- mapM (internaliseExpToVars "concat_y") ys
@@ -764,15 +741,15 @@ internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
   (partition_sizes, partitioned) <- partitionWithSOACS 1 lam' arrs
-  fmap (map I.Var . concat . transpose) $ forM partitioned $
-    letTupExp desc . I.BasicOp . I.Split 0 partition_sizes
+  fmap (map I.Var . concat . transpose) $ forM partitioned $ \arr' ->
+    mapM (letExp desc) =<< eSplitArray arr' (map eSubExp partition_sizes)
 
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
   (partition_sizes, partitioned) <- partitionWithSOACS (k+1) lam' arrs
-  fmap (map I.Var . concat . transpose) $ forM partitioned $
-    letTupExp desc . I.BasicOp . I.Split 0 partition_sizes
+  fmap (map I.Var . concat . transpose) $ forM partitioned $ \arr' ->
+    mapM (letExp desc) =<< eSplitArray arr' (map eSubExp partition_sizes)
   where k = length lams
 
 internaliseExp desc (E.Stream form lam arr _) = do

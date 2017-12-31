@@ -27,6 +27,8 @@ module Futhark.Construct
   , eLambda
   , eDivRoundingUp
   , eRoundToMultipleOf
+  , eSliceArray
+  , eSplitArray
 
   , asIntZ, asIntS
 
@@ -277,6 +279,30 @@ eRoundToMultipleOf t x d =
   where eMod = eBinOp (SMod t)
         eMinus = eBinOp (Sub t)
         ePlus = eBinOp (Add t)
+
+-- | Construct an 'Index' expressions that slices an array with unit stride.
+eSliceArray :: MonadBinder m =>
+               Int -> VName -> m (Exp (Lore m)) -> m (Exp (Lore m))
+            -> m (Exp (Lore m))
+eSliceArray d arr i n = do
+  arr_t <- lookupType arr
+  let skips = map (slice (constant (0::Int32))) $ take d $ arrayDims arr_t
+  i' <- letSubExp "slice_i" =<< i
+  n' <- letSubExp "slice_n" =<< n
+  return $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
+  where slice j m = DimSlice j m (constant (1::Int32))
+
+-- | Construct an 'Index' expressions that splits an array in different parts along the outer dimension.
+eSplitArray :: MonadBinder m =>
+               VName -> [m (Exp (Lore m))] -> m [Exp (Lore m)]
+eSplitArray arr sizes = do
+  sizes' <- mapM (letSubExp "split_size") =<< sequence sizes
+  -- Compute the starting offset for each slice.
+  (_, offsets) <- mapAccumLM increase (intConst Int32 0) sizes'
+  zipWithM (eSliceArray 0 arr) (map eSubExp offsets) (map eSubExp sizes')
+  where increase offset size = do
+          offset' <- letSubExp "offset" $ BasicOp $ BinOp (Add Int32) offset size
+          return (offset', offset)
 
 -- | Sign-extend to the given integer type.
 asIntS :: MonadBinder m => IntType -> SubExp -> m SubExp

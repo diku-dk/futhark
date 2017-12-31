@@ -66,8 +66,6 @@ primOpAliases (Rearrange _ e) =
   [vnameAliases e]
 primOpAliases (Rotate _ e) =
   [vnameAliases e]
-primOpAliases (Split _ sizeexps e) =
-  replicate (length sizeexps) (vnameAliases e)
 primOpAliases Concat{} =
   [mempty]
 primOpAliases Copy{} =

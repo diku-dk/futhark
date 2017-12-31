@@ -244,8 +244,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Zip i e es _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec 10 e
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 10 e
-  pprPrec _ (Split i e a _) =
-    text "split@" <> ppr i <+> pprPrec 10 e <+> pprPrec 10 a
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <+> pprPrec 10 x <+> pprPrec 10 y
   pprPrec p (Lambda tparams params body ascript _ _) =

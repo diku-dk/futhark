@@ -153,7 +153,6 @@ import Language.Futhark.Parser.Lexer
       unzip           { L $$ UNZIP }
       unsafe          { L $$ UNSAFE }
       scan            { L $$ SCAN }
-      split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
       partition       { L $$ PARTITION }
@@ -191,7 +190,7 @@ import Language.Futhark.Parser.Lexer
 %right '->'
 %left juxtprec
 %nonassoc with
-%left indexprec iota copy rotate rearrange split shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
+%left indexprec iota copy rotate rearrange shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
 %%
 
 -- The main parser.
@@ -536,12 +535,6 @@ Exp2 :: { UncheckedExp }
 
      | rotate Atom Atom
                       { Rotate 0 $2 $3 $1 }
-
-     | split Atom Atom
-                      { Split 0 $2 $3 $1 }
-
-     | split '@' NaturalInt Atom Atom
-                      { Split $3 $4 $5 $1 }
 
      | concat Atoms1
                       { Concat 0 (fst $2) (snd $2) $1 }

@@ -156,7 +156,6 @@ keyword s =
     "zip"          -> ZIP
     "unzip"        -> UNZIP
     "scan"         -> SCAN
-    "split"        -> SPLIT
     "concat"       -> CONCAT
     "filter"       -> FILTER
     "partition"    -> PARTITION

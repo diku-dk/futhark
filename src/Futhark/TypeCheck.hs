@@ -747,15 +747,6 @@ checkBasicOp (Rotate rots arr) = do
     bad $ TypeError $ "Cannot rotate " ++ show (length rots) ++
     " dimensions of " ++ show rank ++ "-dimensional array."
 
-checkBasicOp (Split i sizeexps arrexp) = do
-  mapM_ (require [Prim int32]) sizeexps
-  t <- checkArrIdent arrexp
-  when (arrayRank t <= i) $
-    bad $ TypeError $ "Cannot split array "
-    ++ pretty arrexp
-    ++ " of type " ++ pretty t
-    ++ " along dimension " ++ pretty i ++ "."
-
 checkBasicOp (Concat i arr1exp arr2exps ressize) = do
   arr1t  <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
