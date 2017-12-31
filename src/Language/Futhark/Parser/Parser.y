@@ -190,7 +190,7 @@ import Language.Futhark.Parser.Lexer
 %right '->'
 %left juxtprec
 %nonassoc with
-%left indexprec iota copy rotate rearrange shape reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per streamSeq
+%left indexprec rotate rearrange reduce map scan filter partition stream_red stream_red_per stream_map stream_map_per
 %%
 
 -- The main parser.
