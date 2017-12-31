@@ -10,7 +10,6 @@ module Futhark.Representation.AST.Attributes.Values
        , permuteArray
        , rotateArray
        , concatArrays
-       , splitArray
        , flatSlice
        )
        where
@@ -96,31 +95,6 @@ concatenate xcs xs ycs ys =
   let xs' = chunk xcs xs
       ys' = chunk ycs ys
   in concat $ zipWith (++) xs' ys'
-
-splitArray :: Int -> [Int] -> Value -> [Value]
-splitArray i splits (ArrayVal arr et shape) =
-  [ ArrayVal (listArray (0, product splitshape-1) splitarr) et splitshape
-  | (splitarr, splitshape) <- split i splits shape (elems arr) ]
-splitArray _ _ v = [v]
-
-split :: Int -> [Int] -> [Int] -> [a] -> [([a],[Int])]
-split 0 ss (_:ds) xs =
-  let rows = chunk (product ds) xs
-      mkSplit n m = (concat $ take (m-n) $ drop n rows,
-                     (m-n) : ds)
-  in zipWith mkSplit (scanl (+) 0 ss) (scanl1 (+) ss)
-split i ss (d:ds) xs =
-  let rows = chunk (product ds) xs
-  in case map (split (i-1) ss ds) rows of
-    [] -> []
-    r:rs -> let (splits, shapes) = unzip $ foldl combine r rs
-            in zip splits $ map (d:) shapes
-  where combine :: [([a],[Int])] -> [([a],[Int])] -> [([a],[Int])]
-        combine splits_and_shapes1 splits_and_shapes2 =
-          let (splits1, shapes1) = unzip splits_and_shapes1
-              (splits2, _) = unzip splits_and_shapes2
-          in zip (zipWith (++) splits1 splits2) shapes1
-split _ _ ds xs = [(xs, ds)]
 
 -- | The row-major flat indices of the given slice in an array of the
 -- given shape.

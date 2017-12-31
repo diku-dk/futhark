@@ -364,8 +364,8 @@ rearrangeSlice d w num_chunks arr = do
           arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
             BasicOp $ Reshape (map DimCoercion pre_dims ++ map DimNew (w_padded : post_dims))
             arr_extradim_tr
-          letExp (arr_name <> "_inv_tr_init") $
-            BasicOp $ Split d [w] arr_inv_tr
+          letExp (arr_name <> "_inv_tr_init") =<<
+            eSliceArray d  arr_inv_tr (eSubExp $ constant (0::Int32)) (eSubExp w)
 
 paddedScanReduceInput :: MonadBinder m =>
                          SubExp -> SubExp

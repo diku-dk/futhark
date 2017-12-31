@@ -641,12 +641,6 @@ data ExpBase f vn =
 
             | Update (ExpBase f vn) [DimIndexBase f vn] (ExpBase f vn) SrcLoc
 
-            | Split Int (ExpBase f vn) (ExpBase f vn) SrcLoc
-            -- ^ @split@0( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2,
-            -- 3], [4]}@.  Note that this is different from in the
-            -- core language.  The static integer indicates which
-            -- dimension to concatenate across.
-
             | Concat Int (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.  The
             -- static integer indicates which dimension to concatenate
@@ -767,7 +761,6 @@ instance Located (ExpBase f vn) where
   locOf (Scan _ _ _ pos)             = locOf pos
   locOf (Filter _ _ pos)             = locOf pos
   locOf (Partition _ _ pos)          = locOf pos
-  locOf (Split _ _ _ pos)            = locOf pos
   locOf (Concat _ _ _ pos)           = locOf pos
   locOf (Lambda _ _ _ _ _ loc)       = locOf loc
   locOf (OpSection _ _ _ _ loc)      = locOf loc

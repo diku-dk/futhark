@@ -597,10 +597,6 @@ typeOf (Stream form lam _ _) =
     RedLike{}    -> typeOf lam `setUniqueness` Unique
 typeOf (Concat _ x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` S.empty
-typeOf (Split _ splitexps e _) =
-  tupleRecord $ replicate (1 + n) (typeOf e)
-  where n = case typeOf splitexps of Record ts -> length ts
-                                     _         -> 1
 typeOf (DoLoop _ pat _ _ _ _) = patternType pat
 typeOf (Lambda _ _ _ _ (Info t) _) =
   removeShapeAnnotations t `setAliases` mempty

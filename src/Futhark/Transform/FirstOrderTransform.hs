@@ -381,21 +381,17 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                                , Array bt (Shape $ Var chunkglb           :dims) NoUniqueness
                                , Array bt (Shape $ Var (identName diffid ):dims) NoUniqueness)
                     _ -> fail "FirstOrderTransform(Stream): array of not array type"
-                id1 <- newIdent "dead" dt1
-                id2 <- newIdent (anm++"_chg" ) t2
-                id3 <- newIdent (anm++"_chgu") t2
-                id4 <- newIdent "dead" dt4
                 -- (_,a_cg) = split((chunk_glb*i-diff, chunk_glb), inarr)
-                let split1= BasicOp $ Split 0 [Var $ identName diff1id, Var chunkglb] inarr
-                _ <- letBindNames' [identName id1, identName id2] split1
+                id2 <- letExp (anm++"_chg") =<<
+                       eSliceArray 0 inarr (eSubExp $ Var $ identName diff1id) (eSubExp $ Var chunkglb)
                 -- a_cg* := copy(a_cg)
-                letBindNames'_ [identName id3] =<<
-                  eCopy (pure (BasicOp $ SubExp $ Var $ identName id2))
+                id3 <- letExp (anm++"_chgu") =<<
+                       eCopy (pure (BasicOp $ SubExp $ Var id2))
                 -- (_,a_cl) = split((diff,cg-diff), a_cg*)
-                let split2= BasicOp $ Split 0 [Var $ identName diffid,
-                                               Var $ paramName chunkloc] $
-                                     identName id3
-                letBindNames' [identName id4, paramName param] split2
+                id3_t <- lookupType id3
+                letBindNames'_ [paramName param] =<<
+                  eSliceArray 0 id3 (eSubExp $ Var $ identName diffid) (eSubExp $ Var $ paramName chunkloc)
+
           mkBodyM (bodyStms lambody) (bodyResult lambody)
       -- make copy-out epilogue for result arrays
       let (acc', xis) = splitAt acc_num accxis
@@ -423,8 +419,8 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
         return $ mkLet' [] [arr] $ BasicOp $ SubExp $ Var $ identName arrl
       (_, Just (_,indvar,_)) ->
         -- array with known upper bound case!
-        return $ mkLet' [] [arr] $
-        BasicOp $ Split 0 [Var $ identName indvar] $ identName arrl
+        mkLetNamesM' [identName arr] =<<
+        eSliceArray 0 (identName arrl) (eSubExp $ intConst Int32 0) (eSubExp $ Var $ identName indvar)
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   lUBexp <- eBinOp (SDiv Int32)

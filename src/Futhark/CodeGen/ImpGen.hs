@@ -623,9 +623,6 @@ defCompileBasicOp (Destination [target]) (Copy src) =
 defCompileBasicOp (Destination [target]) (Manifest _ src) =
   compileSubExpTo target $ Var src
 
-defCompileBasicOp _ Split{} =
-  return () -- Yes, really.
-
 defCompileBasicOp
   (Destination [ArrayDestination (Just (MemLocation destmem destshape destixfun))])
   (Concat i x ys _) = do

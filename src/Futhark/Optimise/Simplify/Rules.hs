@@ -49,8 +49,6 @@ topDownRules = [ RuleDoLoop hoistLoopInvariantMergeVariables
                , letRule copyScratchToScratch
                , RuleGeneric constantFoldPrimFun
                , RuleBasicOp simplifyIndexIntoReshape
-               , RuleBasicOp removeEmptySplits
-               , RuleBasicOp removeSingletonSplits
                , RuleIf evaluateBranch
                , RuleIf simplifyBoolBranch
                , RuleIf hoistBranchInvariant
@@ -392,17 +390,6 @@ simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v)
       certifying (cs<>v_cs<>v2_cs) $
         letBind_ pat $ BasicOp $ Rearrange (perm `rearrangeCompose` perm3) rearrange_rotate
 
-simplifyRearrange vtable pat (StmAux cs1 _) (Rearrange perm1 v1)
-  | Just (to_drop, to_take, cs2, 0, v2) <- isDropTake v1 vtable,
-    Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable,
-    dim1:_ <- perm1,
-    perm1 == rearrangeInverse perm3 = do
-      to_drop' <- letSubExp "drop" =<< toExp (asInt32PrimExp to_drop)
-      to_take' <- letSubExp "take" =<< toExp (asInt32PrimExp to_take)
-      [_, v] <- certifying (cs2<>cs1) $ letTupExp' "simplify_rearrange" $
-                BasicOp $ Split dim1 [to_drop', to_take'] v3
-      certifying v2_cs $ letBind_ pat $ BasicOp $ SubExp v
-
 -- Rearranging a replicate where the outer dimension is left untouched.
 simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v1)
   | Just (BasicOp (Replicate dims (Var v2)), v1_cs) <- ST.lookupExp v1 vtable,
@@ -415,17 +402,6 @@ simplifyRearrange vtable pat (StmAux cs _) (Rearrange perm v1)
       letBind_ pat $ BasicOp $ Replicate dims v
 
 simplifyRearrange _ _ _ _ = cannotSimplify
-
-isDropTake :: VName -> ST.SymbolTable lore
-           -> Maybe (PrimExp VName, PrimExp VName,
-                     Certificates, Int, VName)
-isDropTake v vtable = do
-  Let pat (StmAux cs _) (BasicOp (Split dim splits v')) <- ST.entryStm =<< ST.lookup v vtable
-  i <- elemIndex v $ patternValueNames pat
-  return (offs $ take i splits,
-          offs $ take 1 $ drop i splits,
-          cs, dim, v')
-  where offs = sum . map (primExpFromSubExp int32)
 
 simplifyRotate :: BinderOps lore => TopDownRuleBasicOp lore
 -- A zero-rotation is identity.
@@ -839,26 +815,7 @@ simplifyIndexing vtable seType idd inds consuming =
           Just $ pure $ IndexResult mempty idd $
           DimFix (constant (0::Int32)) : inds'
 
-    _ -> case ST.entryStm =<< ST.lookup idd vtable of
-           Just (Let split_pat (StmAux cs2 _) (BasicOp (Split 0 ns idd2)))
-             | DimFix first_index : rest_indices <- inds -> Just $ do
-               -- Figure out the extra offset that we should add to the first index.
-               let plus = eBinOp (Add Int32)
-                   esum [] = return $ BasicOp $ SubExp $ constant (0 :: Int32)
-                   esum (x:xs) = foldl plus x xs
-
-               patElem_and_offset <-
-                 zip (patternValueElements split_pat) <$>
-                 mapM esum (inits $ map eSubExp ns)
-               case find ((==idd) . patElemName . fst) patElem_and_offset of
-                 Nothing ->
-                   fail "simplifyIndexing: could not find pattern element."
-                 Just (_, offset_e) -> do
-                   offset <- letSubExp "offset" offset_e
-                   offset_index <- letSubExp "offset_index" $
-                                   BasicOp $ BinOp (Add Int32) first_index offset
-                   return $ IndexResult cs2 idd2 $ DimFix offset_index:rest_indices
-           _ -> Nothing
+    _ -> Nothing
 
     where defOf v = do (BasicOp op, def_cs) <- ST.lookupExp v vtable
                        return (op, def_cs)
@@ -886,27 +843,6 @@ simplifyIndexIntoReshape vtable pat (StmAux cs _) (Index idd slice)
 simplifyIndexIntoReshape _ _ _ _ =
   cannotSimplify
 
-removeEmptySplits :: BinderOps lore => TopDownRuleBasicOp lore
-removeEmptySplits _ pat (StmAux cs _) (Split i ns arr)
-  | (pointless,sane) <- partition (isCt0 . snd) $ zip (patternValueElements pat) ns,
-    not (null pointless) = do
-      rt <- rowType <$> lookupType arr
-      certifying cs $ letBind_ (Pattern [] $ map fst sane) $
-        BasicOp $ Split i (map snd sane) arr
-      forM_ pointless $ \(patElem,_) ->
-        letBindNames' [patElemName patElem] $ BasicOp $ ArrayLit [] rt
-removeEmptySplits _ _ _ _ =
-  cannotSimplify
-
-removeSingletonSplits :: BinderOps lore => TopDownRuleBasicOp lore
-removeSingletonSplits _ pat _ (Split i [n] arr) = do
-  size <- arraySize i <$> lookupType arr
-  if size == n then
-    letBind_ pat $ BasicOp $ SubExp $ Var arr
-    else cannotSimplify
-removeSingletonSplits _ _ _ _ =
-  cannotSimplify
-
 simplifyConcat :: BinderOps lore => BottomUpRuleBasicOp lore
 
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
@@ -924,23 +860,7 @@ simplifyConcat (vtable, _) pat _ (Concat i x xs new_d)
             Just (BasicOp (Rearrange perm2 v'), vcs)
               | perm1 == perm2 -> Just (v', vcs)
             _ -> Nothing
-
--- concat of a split array is identity.
-simplifyConcat (vtable, used) pat (StmAux cs _) (Concat i x xs new_d)
-  | Just (Let split_pat (StmAux split_cs _) (BasicOp (Split split_i _ split_arr))) <-
-      ST.lookupStm x vtable,
-    i == split_i,
-    x:xs == patternNames split_pat = do
-      split_arr_t <- lookupType split_arr
-      let reshape = map DimCoercion $ arrayDims $ setDimSize i split_arr_t new_d
-      split_arr' <- certifying  (cs<>split_cs) $ letExp "concat_reshape" $
-                    BasicOp $ Reshape reshape split_arr
-      if any (`UT.isConsumed` used) $ patternNames pat
-        then letBind_ pat $ BasicOp $ Copy split_arr'
-        else letBind_ pat $ BasicOp $ SubExp $ Var split_arr'
-
-simplifyConcat _ _ _ _ =
-  cannotSimplify
+simplifyConcat _ _ _  _ = cannotSimplify
 
 evaluateBranch :: BinderOps lore => TopDownRuleIf lore
 evaluateBranch _ pat _ (e1, tb, fb, IfAttr t ifsort)

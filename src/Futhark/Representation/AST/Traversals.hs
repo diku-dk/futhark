@@ -134,8 +134,6 @@ mapExpM tv (BasicOp (Rearrange perm e)) =
   BasicOp <$> (Rearrange <$> pure perm <*> mapOnVName tv e)
 mapExpM tv (BasicOp (Rotate es e)) =
   BasicOp <$> (Rotate <$> mapM (mapOnSubExp tv) es <*> mapOnVName tv e)
-mapExpM tv (BasicOp (Split i sizeexps arrexp)) =
-  BasicOp <$> (Split <$> pure i <*> mapM (mapOnSubExp tv) sizeexps <*> mapOnVName tv arrexp)
 mapExpM tv (BasicOp (Concat i x ys size)) =
   BasicOp <$> (Concat <$> pure i <*>
               mapOnVName tv x <*> mapM (mapOnVName tv) ys <*>

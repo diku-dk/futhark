@@ -243,9 +243,6 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
     BasicOp (Rearrange _ orig) ->
       aliasOpHandle orig patvalelems
 
-    BasicOp (Split _ _ orig) ->
-      aliasOpHandle orig patvalelems
-
     BasicOp (Rotate _ orig) ->
       aliasOpHandle orig patvalelems
 

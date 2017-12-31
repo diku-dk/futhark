@@ -872,21 +872,6 @@ expReturns (BasicOp (Rotate offsets v)) = do
   return [MemArray et (Shape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem $ existentialiseIxFun [] ixfun']
 
-expReturns (BasicOp (Split i sizeexps v)) = do
-  (et, shape, mem, ixfun) <- arrayVarReturns v
-  let offsets =  0 : scanl1 (+) (map (primExpFromSubExp int32) sizeexps)
-      dims = map (primExpFromSubExp int32) $ shapeDims shape
-      mkSlice offset n = map (unitSlice 0) (take i dims) ++
-                         [unitSlice offset n] ++
-                         map (unitSlice 0) (drop (i+1) dims)
-  return $ zipWith (\offset dim ->
-                      let new_shape = setDim i shape dim
-                      in MemArray et (Shape $ map Free $ shapeDims new_shape)
-                         NoUniqueness $ Just $ ReturnsInBlock mem $
-                         existentialiseIxFun [] $ IxFun.slice ixfun $ mkSlice offset $
-                         primExpFromSubExp int32 dim)
-    offsets sizeexps
-
 expReturns (BasicOp (Index v slice)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   case sliceDims slice of

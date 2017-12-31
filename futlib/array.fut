@@ -26,6 +26,14 @@ let take [n] 't (i: i32) (x: [n]t): [i]t = x[0:i]
 -- | Remove some number of elements from the head of the array.
 let drop [n] 't (i: i32) (x: [n]t) = x[i:]
 
+-- | Split an array at a given position.
+let split 't (n: i32) (xs: []t): ([n]t, []t) =
+  (xs[:n], xs[n:])
+
+-- | Split an array at two given positions.
+let split2 't (i: i32) (j: i32) (xs: []t): ([i]t, []t, []t) =
+  (xs[:i], xs[i:j], xs[j:])
+
 -- | Return the elements of the array in reverse order.
 let reverse [n] 't (x: [n]t): [n]t = x[::-1]
 
