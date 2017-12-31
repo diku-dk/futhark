@@ -1144,7 +1144,7 @@ checkArg arg = do
 
 checkFuncall :: Maybe (QualName Name) -> SrcLoc
              -> FunBinding -> [Arg]
-             -> TermTypeM ([TypeBase (DimDecl VName) ()],
+             -> TermTypeM ([StructType],
                             TypeBase (DimDecl VName) Names)
 checkFuncall fname loc funbind args = do
   (_, paramtypes, rettype) <-
