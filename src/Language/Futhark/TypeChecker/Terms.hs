@@ -71,7 +71,7 @@ combineOccurences name (Consumed wloc) (Observed rloc) =
 combineOccurences name (Observed rloc) (Consumed wloc) =
   Left $ UseAfterConsume (baseName name) rloc wloc
 combineOccurences name (Consumed loc1) (Consumed loc2) =
-  Left $ UseAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
+  Left $ ConsumeAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
 checkOccurences :: Occurences -> Either TypeError ()
 checkOccurences = void . M.traverseWithKey comb . usageMap
