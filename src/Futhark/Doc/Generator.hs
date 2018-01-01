@@ -303,8 +303,8 @@ typeExpHtml e = case e of
     where ppField (name, t) = toHtml (nameToString name) <>
             "=" <> typeExpHtml t
   TEVar name  _ -> qualNameHtml name
-  TEApply t args _ ->
-    qualNameHtml t <> foldMap (" " <>) (map prettyTypeArgExp args)
+  TEApply t arg _ ->
+    typeExpHtml t <> " " <> prettyTypeArgExp arg
 
 qualNameHtml :: QualName VName -> Html
 qualNameHtml (QualName names (VName name tag)) =

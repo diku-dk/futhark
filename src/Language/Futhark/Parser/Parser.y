@@ -428,11 +428,10 @@ TypeAbbr : type id TypeParams '=' TypeExpDecl
              in TypeBind name (TypeParamDim pname ploc:$5) $7 Nothing loc }
 
 TypeExp :: { UncheckedTypeExp }
-         : TypeExpApply { TEApply (fst (fst $1)) (snd $1) (snd (fst $1)) }
-         | '*' TypeExp  { TEUnique $2 $1 }
-         | '[' DimDecl ']' TypeExp   { TEArray $4 (fst $2) $1 }
+         : '*' TypeExp  { TEUnique $2 $1 }
+         | '[' DimDecl ']' TypeExp %prec indexprec   { TEArray $4 (fst $2) $1 }
          | '['  ']' TypeExp          { TEArray $3 AnyDim $1 }
-         | TypeExpAtom  { $1 }
+         | TypeExpApply { $1 }
 
          -- Errors
          | '[' DimDecl ']' %prec bottom
@@ -441,13 +440,17 @@ TypeExp :: { UncheckedTypeExp }
                          "Did you mean []"  ++ pretty (fst $2) ++ "?"]
            }
 
-TypeExpApply :: { ((QualName Name, SrcLoc), [TypeArgExp Name]) }
-              : TypeExpApply TypeArg { (fst $1, snd $1 ++ [$2]) }
-              | QualName TypeArg     { ($1, [$2]) }
-              | 'id[' DimDecl ']'    { let L loc (INDEXING v) = $1
-                                       in ((QualName [] v, loc), [TypeArgExpDim (fst $2) loc]) }
-              | 'qid[' DimDecl ']'   { let L loc (QUALINDEXING qs v) = $1
-                                       in ((QualName qs v, loc), [TypeArgExpDim (fst $2) loc]) }
+TypeExpApply :: { UncheckedTypeExp }
+              : TypeExpApply TypeArg %prec juxtprec
+                { TEApply $1 $2 (srclocOf $1) }
+              | 'id[' DimDecl ']'
+                { let L loc (INDEXING v) = $1
+                  in TEApply (TEVar (qualName v) loc) (TypeArgExpDim (fst $2) loc) loc }
+              | 'qid[' DimDecl ']'
+                { let L loc (QUALINDEXING qs v) = $1
+                  in TEApply (TEVar (QualName qs v) loc) (TypeArgExpDim (fst $2) loc) loc }
+              | TypeExpAtom %prec juxtprec
+                { $1 }
 
 TypeExpAtom :: { UncheckedTypeExp }
              : '(' TypeExp ')'                { $2 }

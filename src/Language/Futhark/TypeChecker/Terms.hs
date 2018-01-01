@@ -488,8 +488,7 @@ patternUses (PatternAscription p (TypeDecl declte _)) =
         typeExpUses (TERecord fs _) = mconcat $ map (typeExpUses . snd) fs
         typeExpUses (TEArray te d _) = typeExpUses te <> dimDeclUses d
         typeExpUses (TEUnique te _) = typeExpUses te
-        typeExpUses (TEApply qn targs _) =
-          PatternUses [] [qn] <> mconcat (map typeArgUses targs)
+        typeExpUses (TEApply te targ _) = typeExpUses te <> typeArgUses targ
 
         typeArgUses (TypeArgExpDim d _) = dimDeclUses d
         typeArgUses (TypeArgExpType te) = typeExpUses te
