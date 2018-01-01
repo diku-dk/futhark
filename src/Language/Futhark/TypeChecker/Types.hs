@@ -155,17 +155,28 @@ checkTypeExp (TEUnique t loc) = do
   case st of
     Array{} -> return (t', st `setUniqueness` Unique)
     _       -> throwError $ InvalidUniqueness loc $ toStructural st
-checkTypeExp (TEApply tname targs tloc) = do
+checkTypeExp ote@TEApply{} = do
+  (tname, tname_loc, targs) <- rootAndArgs ote
   (tname', ps, t) <- lookupType tloc tname
   if length ps /= length targs
   then throwError $ TypeError tloc $
        "Type constructor " ++ pretty tname ++ " requires " ++ show (length ps) ++
-       " arguments, but use at " ++ locStr tloc ++ " provides only " ++ show (length targs)
+       " arguments, but application at " ++ locStr tloc ++ " provides " ++ show (length targs)
   else do
     (targs', substs) <- unzip <$> zipWithM checkArgApply ps targs
-    return (TEApply tname' targs' tloc,
+    return (foldl (\x y -> TEApply x y tloc)
+            (TEVar tname' tname_loc) targs',
             substituteTypes (mconcat substs) t)
-  where checkArgApply (TypeParamDim pv _) (TypeArgExpDim (NamedDim v) loc) = do
+  where tloc = srclocOf ote
+
+        rootAndArgs :: MonadTypeChecker m => TypeExp Name -> m (QualName Name, SrcLoc, [TypeArgExp Name])
+        rootAndArgs (TEVar qn loc) = return (qn, loc, [])
+        rootAndArgs (TEApply op arg _) = do (op', loc, args) <- rootAndArgs op
+                                            return (op', loc, args++[arg])
+        rootAndArgs te' = throwError $ TypeError (srclocOf te') $
+                          "Type '" ++ pretty te' ++ "' is not a type constructor."
+
+        checkArgApply (TypeParamDim pv _) (TypeArgExpDim (NamedDim v) loc) = do
           v' <- checkNamedDim loc v
           return (TypeArgExpDim (NamedDim v') loc,
                   M.singleton pv $ DimSub $ NamedDim v')

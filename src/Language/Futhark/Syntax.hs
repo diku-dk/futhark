@@ -405,7 +405,7 @@ data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TERecord [(Name, TypeExp vn)] SrcLoc
                 | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
-                | TEApply (QualName vn) [TypeArgExp vn] SrcLoc
+                | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
                  deriving (Eq, Show)
 
 instance Located (TypeExp vn) where

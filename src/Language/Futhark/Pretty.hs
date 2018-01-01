@@ -112,7 +112,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
   ppr (TERecord fs _) = braces $ commasep $ map ppField fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
   ppr (TEVar name _) = ppr name
-  ppr (TEApply t args _) = ppr t <+> spread (map ppr args)
+  ppr (TEApply t arg _) = ppr t <+> ppr arg
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]

@@ -168,8 +168,8 @@ instance ASTMappable (TypeExp VName) where
   astMap tv (TEArray te dim loc) =
     TEArray <$> astMap tv te <*> astMap tv dim <*> pure loc
   astMap tv (TEUnique t loc) = TEUnique <$> astMap tv t <*> pure loc
-  astMap tv (TEApply qn ts loc) =
-    TEApply <$> mapOnQualName tv qn <*> traverse (astMap tv) ts <*> pure loc
+  astMap tv (TEApply t1 t2 loc) =
+    TEApply <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
 
 instance ASTMappable (TypeArgExp VName) where
   astMap tv (TypeArgExpDim dim loc) =
