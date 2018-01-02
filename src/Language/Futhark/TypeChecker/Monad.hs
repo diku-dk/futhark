@@ -26,9 +26,8 @@ module Language.Futhark.TypeChecker.Monad
   , FunSig(..)
   , ImportTable
   , NameMap
-  , ValBinding(..)
+  , BoundV(..)
   , Mod(..)
-  , FunBinding
   , TypeBinding(..)
   , MTy(..)
 
@@ -217,11 +216,6 @@ data FunSig = FunSig { funSigAbs :: TySet
                      }
             deriving (Show)
 
--- | Type parameters, list of parameter types (optinally named), and
--- return type.  The type parameters are in scope in both parameter
--- types and the return type.
-type FunBinding = ([TypeParam], [(Maybe VName,StructType)], StructType)
-
 -- | Representation of a module type.
 data MTy = MTy { mtyAbs :: TySet
                  -- ^ Abstract types in the module type.
@@ -233,14 +227,17 @@ data MTy = MTy { mtyAbs :: TySet
 data TypeBinding = TypeAbbr [TypeParam] StructType
                  deriving (Eq, Show)
 
-data ValBinding = BoundV StructType
-                | BoundF FunBinding
+-- | Type parameters, list of parameter types (optinally named), and
+-- return type.  The type parameters are in scope in both parameter
+-- types and the return type.  Non-functional values have only a
+-- return type.
+data BoundV = BoundV [TypeParam] [(Maybe VName,StructType)] StructType
                 deriving (Show)
 
 type NameMap = M.Map (Namespace, Name) (QualName VName)
 
 -- | Modules produces environment with this representation.
-data Env = Env { envVtable :: M.Map VName ValBinding
+data Env = Env { envVtable :: M.Map VName BoundV
                , envTypeTable :: M.Map VName TypeBinding
                , envSigTable :: M.Map VName MTy
                , envModTable :: M.Map VName Mod
@@ -411,10 +408,11 @@ instance MonadTypeChecker TypeM where
     (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
       Nothing -> bad $ UnknownVariableError Term qn loc
-      Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
-                      | otherwise -> return (qn', removeShapeAnnotations $ fromStruct $
-                                                  qualifyTypeVars outer_env mempty qs t)
-      Just BoundF{} -> bad $ FunctionIsNotValue loc qn
+      Just (BoundV [] [] t)
+        | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
+        | otherwise -> return (qn', removeShapeAnnotations $ fromStruct $
+                                    qualifyTypeVars outer_env mempty qs t)
+      Just _ -> bad $ FunctionIsNotValue loc qn
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do

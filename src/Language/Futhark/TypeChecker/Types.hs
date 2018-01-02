@@ -9,15 +9,17 @@ module Language.Futhark.TypeChecker.Types
   , InferredType(..)
 
   , checkForDuplicateNames
-  , checkParams
   , checkTypeParams
 
   , TypeSub(..)
   , TypeSubs
   , substituteTypes
-  , substituteTypesInValBinding
+  , substituteTypesInBoundV
 
   , instantiatePolymorphic
+
+  , getType
+  , arrayOfM
   )
 where
 
@@ -33,7 +35,7 @@ import qualified Data.Set as S
 
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad
-
+import Futhark.Util.Pretty (Pretty)
 
 -- | @t1 `unifyTypes` t2@ attempts to unify @t1@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -52,8 +54,9 @@ unifyTypes (TypeVar t1 targs1) (TypeVar t2 targs2)
       targs3 <- zipWithM unifyTypeArgs targs1 targs2
       Just $ TypeVar t1 targs3
   | otherwise = Nothing
-unifyTypes (Array at1) (Array at2) =
-  Array <$> unifyArrayTypes at1 at2
+unifyTypes (Array et1 shape1 u1) (Array et2 shape2 u2) =
+  Array <$> unifyArrayElemTypes et1 et2 <*>
+  unifyShapes shape1 shape2 <*> pure (u1 <> u2)
 unifyTypes (Record ts1) (Record ts2)
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
@@ -70,42 +73,32 @@ unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
 unifyTypeArgs _ _ =
   Nothing
 
-unifyArrayTypes :: (Monoid als, ArrayDim dim) =>
-                   ArrayTypeBase dim als
-                -> ArrayTypeBase dim als
-                -> Maybe (ArrayTypeBase dim als)
-unifyArrayTypes (PrimArray bt1 shape1 u1 als1) (PrimArray bt2 shape2 u2 als2)
-  | Just shape <- unifyShapes shape1 shape2, bt1 == bt2 =
-    Just $ PrimArray bt1 shape (u1 <> u2) (als1 <> als2)
-unifyArrayTypes (PolyArray bt1 targs1 shape1 u1 als1) (PolyArray bt2 targs2 shape2 u2 als2)
-  | Just shape <- unifyShapes shape1 shape2,
-    bt1 == bt2, targs1 == targs2 =
-    Just $ PolyArray bt1 targs1 shape (u1 <> u2) (als1 <> als2)
-unifyArrayTypes (RecordArray et1 shape1 u1) (RecordArray et2 shape2 u2)
-  | Just shape <- unifyShapes shape1 shape2,
-    sort (M.keys et1) == sort (M.keys et2) =
-    RecordArray <$>
-    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) et1 et2) <*>
-    pure shape <*> pure (u1 <> u2)
-unifyArrayTypes _ _ =
+unifyArrayElemTypes :: (Monoid als, ArrayDim dim) =>
+                       ArrayElemTypeBase dim als
+                    -> ArrayElemTypeBase dim als
+                    -> Maybe (ArrayElemTypeBase dim als)
+unifyArrayElemTypes (ArrayPrimElem bt1 als1) (ArrayPrimElem bt2 als2)
+  | bt1 == bt2 =
+      Just $ ArrayPrimElem bt1 (als1 <> als2)
+unifyArrayElemTypes (ArrayPolyElem bt1 targs1 als1) (ArrayPolyElem bt2 targs2 als2)
+  | bt1 == bt2, targs1 == targs2 =
+      Just $ ArrayPolyElem bt1 targs1 (als1 <> als2)
+unifyArrayElemTypes (ArrayRecordElem et1) (ArrayRecordElem et2)
+  | sort (M.keys et1) == sort (M.keys et2) =
+    ArrayRecordElem <$>
+    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) et1 et2)
+unifyArrayElemTypes _ _ =
   Nothing
 
 unifyRecordArrayElemTypes :: (Monoid als, ArrayDim dim) =>
                              RecordArrayElemTypeBase dim als
                           -> RecordArrayElemTypeBase dim als
                           -> Maybe (RecordArrayElemTypeBase dim als)
-unifyRecordArrayElemTypes (PrimArrayElem bt1 als1) (PrimArrayElem bt2 als2)
-  | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2)
-  | otherwise  = Nothing
-unifyRecordArrayElemTypes (PolyArrayElem bt1 targs1 als1 u1) (PolyArrayElem bt2 targs2 als2 u2)
-  | bt1 == bt2, targs1 == targs2 = Just $ PolyArrayElem bt1 targs1 (als1 <> als2) (u1 <> u2)
-  | otherwise  = Nothing
-unifyRecordArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
-  ArrayArrayElem <$> unifyArrayTypes at1 at2
-unifyRecordArrayElemTypes (RecordArrayElem ts1) (RecordArrayElem ts2)
-  | sort (M.keys ts1) == sort (M.keys ts2) =
-    RecordArrayElem <$>
-    traverse (uncurry unifyRecordArrayElemTypes) (M.intersectionWith (,) ts1 ts2)
+unifyRecordArrayElemTypes (RecordArrayElem et1) (RecordArrayElem et2) =
+  RecordArrayElem <$> unifyArrayElemTypes et1 et2
+unifyRecordArrayElemTypes (RecordArrayArrayElem et1 shape1 u1) (RecordArrayArrayElem et2 shape2 u2) =
+  RecordArrayArrayElem <$> unifyArrayElemTypes et1 et2 <*>
+  unifyShapes shape1 shape2 <*> pure (u1<>u2)
 unifyRecordArrayElemTypes _ _ =
   Nothing
 
@@ -115,6 +108,7 @@ data Bindage = BoundAsVar | UsedFree
 checkTypeDecl :: MonadTypeChecker m =>
                  TypeDeclBase NoInfo Name -> m (TypeDeclBase Info VName)
 checkTypeDecl (TypeDecl t NoInfo) = do
+  checkForDuplicateNamesInType t
   (t', st) <- checkTypeExp t
   return $ TypeDecl t' $ Info st
 
@@ -143,7 +137,10 @@ checkTypeExp t@(TERecord fs loc) = do
 checkTypeExp (TEArray t d loc) = do
   (t', st) <- checkTypeExp t
   d' <- checkDimDecl d
-  return (TEArray t' d' loc, arrayOf st (ShapeDecl [d']) Nonunique)
+  case arrayOf st (ShapeDecl [d']) Nonunique of
+    Just st' -> return (TEArray t' d' loc, st')
+    Nothing -> throwError $ TypeError loc $
+               "Cannot create array with elements of type " ++ pretty st
   where checkDimDecl AnyDim =
           return AnyDim
         checkDimDecl (ConstDim k) =
@@ -155,6 +152,20 @@ checkTypeExp (TEUnique t loc) = do
   case st of
     Array{} -> return (t', st `setUniqueness` Unique)
     _       -> throwError $ InvalidUniqueness loc $ toStructural st
+checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
+  (t1', st1) <- checkTypeExp t1
+  bindSpaced [(Term, v)] $ do
+    v' <- checkName Term v loc
+    let env = mempty { envVtable = M.singleton v' $ BoundV [] [] st1 }
+    localEnv env $ do
+      (t2', st2) <- checkTypeExp t2
+      return (TEArrow (Just v') t1' t2' loc,
+              Arrow (Just v') st1 st2)
+checkTypeExp (TEArrow Nothing t1 t2 loc) = do
+  (t1', st1) <- checkTypeExp t1
+  (t2', st2) <- checkTypeExp t2
+  return (TEArrow Nothing t1' t2' loc,
+          Arrow Nothing st1 st2)
 checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
   (tname', ps, t) <- lookupType tloc tname
@@ -278,6 +289,12 @@ checkPattern' (RecordPattern fs loc) NoneInferred =
 
 checkPattern' fullp@(PatternAscription p (TypeDecl t NoInfo)) maybe_outer_t = do
   (t', st) <- checkTypeExp t
+
+  r <- getType (srclocOf fullp) st
+  case r of
+    Left _ -> throwError $ TypeError (srclocOf fullp) "Cannot bind a function in a pattern."
+    Right _ -> return ()
+
   let maybe_outer_t' = case maybe_outer_t of
                          Inferred outer_t -> Just $ vacuousShapeAnnotations outer_t
                          Ascribed outer_t -> Just outer_t
@@ -319,38 +336,23 @@ checkForDuplicateNames = (`evalStateT` mempty) . mapM_ check
             Nothing ->
               modify $ M.insert v loc
 
-checkParams :: [ParamBase NoInfo Name]
-            -> ([ParamBase Info VName] -> TypeM a)
-            -> TypeM a
-checkParams orig_ps m = do
-  mapM_ isBoundTwice names
-  bindSpaced (zip (repeat Term) names) $ descend [] orig_ps
-  where names = mapMaybe paramName orig_ps
-        hasName v = (==Just v) . paramName
-
-        isBoundTwice v
-          | p1 : p2 : _ <- filter (hasName v) orig_ps =
-              throwError $ TypeError (srclocOf p1) $
-              "Parameter named '" ++ pretty v ++ "' also declared at " ++
-              locStr (srclocOf p2) ++ "."
-          | otherwise = return ()
-
-        -- The parameter names are only bound at the end, to avoid
-        -- invalid types like '(n: i32) -> [n]bool -> bool'.
-        descend ps' [] =
-          let inspect (NamedParam v t _) =
-                Just (v, BoundV $ unInfo $ expandedType t )
-              inspect UnnamedParam{} =
-                Nothing
-              scope = mempty { envVtable = M.fromList $ mapMaybe inspect ps' }
-          in localEnv scope $ m $ reverse ps'
-        descend ps' (UnnamedParam t:ps) = do
-          t' <- checkTypeDecl t
-          descend (UnnamedParam t':ps') ps
-        descend ps' (NamedParam v t loc:ps) = do
-          t' <- checkTypeDecl t
-          v' <- checkName Term v loc
-          descend (NamedParam v' t' loc:ps') ps
+-- | Check whether the type contains arrow types that define the same
+-- parameter.  These might also exist further down, but that's not
+-- really a problem - we mostly do this checking to help the user,
+-- since it is likely an error, but it's easy to assign a semantics to
+-- it (normal name shadowing).
+checkForDuplicateNamesInType :: MonadTypeChecker m =>
+                                TypeExp Name -> m ()
+checkForDuplicateNamesInType = checkForDuplicateNames . pats
+  where pats (TEArrow (Just v) t1 t2 loc) = Id v NoInfo loc : pats t1 ++ pats t2
+        pats (TEArrow Nothing t1 t2 _) = pats t1 ++ pats t2
+        pats (TETuple ts _) = concatMap pats ts
+        pats (TERecord fs _) = concatMap (pats . snd) fs
+        pats (TEArray t _ _) = pats t
+        pats (TEUnique t _) = pats t
+        pats (TEApply t1 (TypeArgExpType t2) _) = pats t1 ++ pats t2
+        pats (TEApply t1 TypeArgExpDim{} _) = pats t1
+        pats TEVar{} = []
 
 checkTypeParams :: MonadTypeChecker m =>
                    [TypeParamBase Name]
@@ -385,7 +387,8 @@ type TypeSubs = M.Map VName TypeSub
 
 substituteTypes :: TypeSubs -> StructType -> StructType
 substituteTypes substs ot = case ot of
-  Array at -> substituteTypesInArray at
+  Array at shape u ->
+    fromMaybe nope $ arrayOf (substituteTypesInArrayElem at) (substituteInShape shape) u
   Prim t -> Prim t
   TypeVar v targs
     | Just (TypeSub (TypeAbbr ps t)) <-
@@ -394,20 +397,21 @@ substituteTypes substs ot = case ot of
     | otherwise -> TypeVar v $ map substituteInTypeArg targs
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
-  where substituteTypesInArray (PrimArray t shape u ()) =
-          Array $ PrimArray t (substituteInShape shape) u ()
-        substituteTypesInArray (PolyArray v targs shape u ())
+  Arrow v t1 t2 ->
+    Arrow v (substituteTypes substs t1) (substituteTypes substs t2)
+  where nope = error "substituteTypes: Cannot create array after substitution."
+
+        substituteTypesInArrayElem (ArrayPrimElem t ()) =
+          Prim t
+        substituteTypesInArrayElem (ArrayPolyElem v targs ())
           | Just (TypeSub (TypeAbbr ps t)) <-
               M.lookup (qualLeaf (qualNameFromTypeName v)) substs =
-              arrayOf (applyType ps t $ map substituteInTypeArg targs)
-                      (substituteInShape shape) u
+              applyType ps t (map substituteInTypeArg targs)
           | otherwise =
-              Array $ PolyArray v (map substituteInTypeArg targs)
-                                  (substituteInShape shape) u ()
-        substituteTypesInArray (RecordArray ts shape u) =
-          Array $ RecordArray ts' (substituteInShape shape) u
-          where ts' = fmap (flip typeToRecordArrayElem u .
-                            substituteTypes substs .
+              TypeVar v (map substituteInTypeArg targs)
+        substituteTypesInArrayElem (ArrayRecordElem ts) =
+          Record ts'
+          where ts' = fmap (substituteTypes substs .
                             recordArrayElemToType) ts
 
         substituteInTypeArg (TypeArgDim d loc) =
@@ -422,11 +426,9 @@ substituteTypes substs ot = case ot of
           | Just (DimSub d) <- M.lookup (qualLeaf v) substs = d
         substituteInDim d = d
 
-substituteTypesInValBinding :: TypeSubs -> ValBinding -> ValBinding
-substituteTypesInValBinding substs (BoundV t) =
-  BoundV $ substituteTypes substs t
-substituteTypesInValBinding substs (BoundF (tps, pts, t)) =
-  BoundF (tps, map (fmap (substituteTypes substs)) pts, substituteTypes substs t)
+substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
+substituteTypesInBoundV substs (BoundV tps pts t) =
+  BoundV tps (map (fmap (substituteTypes substs)) pts) (substituteTypes substs t)
 
 applyType :: [TypeParam] -> StructType -> [StructTypeArg] -> StructType
 applyType ps t args =
@@ -476,44 +478,31 @@ instantiatePolymorphic tnames loc orig_substs x y =
     instantiate (Record fs) (Record arg_fs)
       | M.keys fs == M.keys arg_fs =
         mapM_ (uncurry instantiate) $ M.intersectionWith (,) fs arg_fs
-    instantiate (Array at) (Array p_at) =
-      instantiateArrayType at p_at
+    instantiate (Array et shape u) arg_t@(Array _ _ p_u)
+      | Just arg_t' <- peelArray (shapeRank shape) arg_t,
+        p_u `subuniqueOf` u =
+          instantiateArrayElemType et arg_t'
     instantiate (Prim pt) (Prim p_pt)
       | pt == p_pt = return ()
     instantiate _ _ =
       lift $ Left Nothing
 
-    instantiateArrayType (PrimArray pt shape u ()) (PrimArray arg_pt arg_shape arg_u ())
-      | shape == arg_shape, arg_u `subuniqueOf` u, pt == arg_pt =
+    instantiateArrayElemType (ArrayPrimElem pt ()) (Prim arg_pt)
+      | pt == arg_pt =
           return ()
-    instantiateArrayType (RecordArray fs shape u) (RecordArray arg_fs arg_shape arg_u)
-      | shape == arg_shape, arg_u `subuniqueOf` u,
-        M.keys fs == M.keys arg_fs =
-          mapM_ (uncurry instantiateRecordArrayType) $
+    instantiateArrayElemType (ArrayRecordElem fs) (Record arg_fs)
+      | M.keys fs == M.keys arg_fs =
+          mapM_ (uncurry instantiateRecordArrayElemType) $
           M.intersectionWith (,) fs arg_fs
-    instantiateArrayType (PolyArray tn [] shape u ()) arg_t
-      | uniqueness (Array arg_t) `subuniqueOf` u,
-        Just arg_t' <- peelArray (shapeRank shape) $ Array arg_t =
-          instantiate (TypeVar tn []) arg_t'
-    instantiateArrayType _ _ =
+    instantiateArrayElemType (ArrayPolyElem tn [] ()) arg_t =
+      instantiate (TypeVar tn []) arg_t
+    instantiateArrayElemType _ _ =
       lift $ Left Nothing
 
-    instantiateRecordArrayType (PrimArrayElem pt ()) (PrimArrayElem arg_pt ())
-      | pt == arg_pt = return ()
-    instantiateRecordArrayType (ArrayArrayElem at) (ArrayArrayElem arg_at) =
-      instantiateArrayType at arg_at
-    instantiateRecordArrayType (PolyArrayElem tn targs () u) (PolyArrayElem arg_tn arg_targs () arg_u)
-      | arg_u `subuniqueOf` u,
-        tn == arg_tn, length targs == length arg_targs =
-          zipWithM_ instantiateTypeArg targs arg_targs
-    instantiateRecordArrayType (PolyArrayElem tn [] () u) arg_t
-      | recordArrayElemUniqueness arg_t `subuniqueOf` u =
-          instantiate (TypeVar tn []) (recordArrayElemToType arg_t)
-    instantiateRecordArrayType (RecordArrayElem fs) (RecordArrayElem arg_fs)
-      | M.keys fs == M.keys arg_fs =
-          mapM_ (uncurry instantiateRecordArrayType) $ M.intersectionWith (,) fs arg_fs
-    instantiateRecordArrayType _ _ =
-      lift $ Left Nothing
+    instantiateRecordArrayElemType (RecordArrayElem et) arg_t =
+      instantiateArrayElemType et arg_t
+    instantiateRecordArrayElemType (RecordArrayArrayElem et shape u) arg_t =
+      instantiate (Array et shape u) arg_t
 
     instantiateTypeArg TypeArgDim{} TypeArgDim{} =
       return ()
@@ -521,3 +510,29 @@ instantiatePolymorphic tnames loc orig_substs x y =
       instantiate t arg_t
     instantiateTypeArg _ _ =
       lift $ Left Nothing
+
+-- | Extract from a type either a function type comprising a list of
+-- parameter types and a return type (all of which must be
+-- first-order), or a first-order type.
+getType :: MonadTypeChecker m =>
+           SrcLoc -> TypeBase dim as
+        -> m (Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
+                     (TypeBase dim as))
+getType loc (Arrow v t1 t2) = do
+  t1' <- getType loc t1
+  t2' <- getType loc t2
+  case (t1', t2') of
+    (Left _, _) -> throwError $ TypeError loc "Higher-order functions are not supported yet."
+    (Right t1'', Left (ps, r)) -> return $ Left ((v,t1'') : ps, r)
+    (Right t1'', Right t2'') -> return $ Left ([(v,t1'')], t2'')
+getType _ t = return $ Right t
+
+arrayOfM :: (MonadTypeChecker m, Pretty (ShapeDecl dim), ArrayDim dim, Monoid as) =>
+            SrcLoc
+         -> TypeBase dim as
+         -> ShapeDecl dim
+         -> Uniqueness
+         -> m (TypeBase dim as)
+arrayOfM loc t shape u = maybe nope return $ arrayOf t shape u
+  where nope = throwError $ TypeError loc $
+               "Cannot form an array with elements of type " ++ pretty t

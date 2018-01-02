@@ -57,15 +57,15 @@ instance ASTMappable (ExpBase Info VName) where
     TupLit <$> mapM (mapOnExp tv) els <*> pure loc
   astMap tv (RecordLit fields loc) =
     RecordLit <$> mapM (astMap tv) fields <*> pure loc
-  astMap tv (ArrayLit els elt loc) =
-    ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (astMap tv) elt <*> pure loc
-  astMap tv (Range start next end loc) =
+  astMap tv (ArrayLit els t loc) =
+    ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (astMap tv) t <*> pure loc
+  astMap tv (Range start next end t loc) =
     Range <$> mapOnExp tv start <*> traverse (mapOnExp tv) next <*>
-    traverse (mapOnExp tv) end <*> pure loc
+    traverse (mapOnExp tv) end <*> traverse (astMap tv) t <*> pure loc
   astMap tv (Ascript e tdecl loc) =
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
-  astMap tv (Empty tdecl loc) =
-    Empty <$> astMap tv tdecl <*> pure loc
+  astMap tv (Empty tdecl t loc) =
+    Empty <$> astMap tv tdecl <*> traverse (astMap tv) t <*> pure loc
   astMap tv (BinOp fname (x,xd) (y,yd) t loc) =
     BinOp <$> mapOnQualName tv fname <*>
     ((,) <$> mapOnExp tv x <*> pure xd) <*> ((,) <$> mapOnExp tv y <*> pure yd)  <*>
@@ -111,13 +111,15 @@ instance ASTMappable (ExpBase Info VName) where
     Rotate d <$> mapOnExp tv e <*> mapOnExp tv a <*> pure loc
   astMap tv (Rearrange perm e loc) =
     pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
-  astMap tv (Map fun e loc) =
-    pure Map <*> mapOnExp tv fun <*> mapM (mapOnExp tv) e <*> pure loc
+  astMap tv (Map fun e t loc) =
+    pure Map <*> mapOnExp tv fun <*> mapM (mapOnExp tv) e <*>
+    traverse (astMap tv) t <*> pure loc
   astMap tv (Reduce comm fun startexp arrexp loc) =
     Reduce comm <$> mapOnExp tv fun <*>
          mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
-  astMap tv (Zip i e es loc) =
-    Zip i <$> mapOnExp tv e <*> mapM (mapOnExp tv) es <*> pure loc
+  astMap tv (Zip i e es t u loc) =
+    Zip i <$> mapOnExp tv e <*> mapM (mapOnExp tv) es <*>
+    traverse (traverse (astMap tv)) t <*> pure u <*> pure loc
   astMap tv (Unzip e ts loc) =
     Unzip <$> mapOnExp tv e <*> mapM (traverse $ astMap tv) ts <*> pure loc
   astMap tv (Unsafe e loc) =
@@ -170,6 +172,8 @@ instance ASTMappable (TypeExp VName) where
   astMap tv (TEUnique t loc) = TEUnique <$> astMap tv t <*> pure loc
   astMap tv (TEApply t1 t2 loc) =
     TEApply <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
+  astMap tv (TEArrow v t1 t2 loc) =
+    TEArrow v <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
 
 instance ASTMappable (TypeArgExp VName) where
   astMap tv (TypeArgExpDim dim loc) =
@@ -203,28 +207,29 @@ type TypeTraverser f t dim1 als1 dim2 als2 =
 traverseType :: Applicative f =>
                 TypeTraverser f TypeBase dim1 als1 dims als2
 traverseType _ _ _ (Prim t) = pure $ Prim t
-traverseType f g h (Array a) = Array <$> traverseArrayType f g h a
+traverseType f g h (Array et shape u) =
+  Array <$> traverseArrayElemType f g h et <*> traverse g shape <*> pure u
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseType f g h (TypeVar t args) = TypeVar <$> f t <*> traverse (traverseTypeArg f g h) args
+traverseType f g h (Arrow v t1 t2) =
+  Arrow v <$> traverseType f g h t1 <*> traverseType f g h t2
 
-traverseArrayType :: Applicative f =>
-                     TypeTraverser f ArrayTypeBase dim1 als1 dim2 als2
-traverseArrayType _ g h (PrimArray t dims u as) =
-  PrimArray t <$> traverse g dims <*> pure u <*> h as
-traverseArrayType f g h (PolyArray t args dims u as) =
-  PolyArray <$> f t <*> traverse (traverseTypeArg f g h) args <*>
-  traverse g dims <*> pure u <*> h as
-traverseArrayType f g h (RecordArray fs dims u) =
-  RecordArray <$> traverse (traverseRecordArrayElemType f g h) fs <*> traverse g dims <*> pure u
+traverseArrayElemType :: Applicative f =>
+                         TypeTraverser f ArrayElemTypeBase dim1 als1 dim2 als2
+traverseArrayElemType _ _ h (ArrayPrimElem t as) =
+  ArrayPrimElem t <$> h as
+traverseArrayElemType f g h (ArrayPolyElem t args as) =
+  ArrayPolyElem <$> f t <*> traverse (traverseTypeArg f g h) args <*> h as
+traverseArrayElemType f g h (ArrayRecordElem fs) =
+  ArrayRecordElem <$> traverse (traverseRecordArrayElemType f g h) fs
 
 traverseRecordArrayElemType :: Applicative f =>
                                TypeTraverser f RecordArrayElemTypeBase dim1 als1 dim2 als2
-traverseRecordArrayElemType _ _ h (PrimArrayElem t as) = PrimArrayElem t <$> h as
-traverseRecordArrayElemType f g h (ArrayArrayElem a) = ArrayArrayElem <$> traverseArrayType f g h a
-traverseRecordArrayElemType f g h (PolyArrayElem t args as u) =
-  PolyArrayElem <$> f t <*> traverse (traverseTypeArg f g h) args <*> h as <*> pure u
-traverseRecordArrayElemType f g h (RecordArrayElem fs) =
-  RecordArrayElem <$> traverse (traverseRecordArrayElemType f g h) fs
+traverseRecordArrayElemType f g h (RecordArrayElem et) =
+  RecordArrayElem <$> traverseArrayElemType f g h et
+traverseRecordArrayElemType f g h (RecordArrayArrayElem et shape u) =
+  RecordArrayArrayElem <$> traverseArrayElemType f g h et <*>
+  traverse g shape <*> pure u
 
 traverseTypeArg :: Applicative f =>
                    TypeTraverser f TypeArg dim1 als1 dim2 als2
@@ -241,6 +246,10 @@ instance ASTMappable StructType where
 
 instance ASTMappable PatternType where
   astMap tv = traverseType f (astMap tv) (astMap tv)
+    where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
+
+instance ASTMappable (RecordArrayElemTypeBase () Names) where
+  astMap tv = traverseRecordArrayElemType f pure (astMap tv)
     where f = fmap typeNameFromQualName . mapOnQualName tv . qualNameFromTypeName
 
 instance ASTMappable (TypeDeclBase Info VName) where

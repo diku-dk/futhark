@@ -26,7 +26,7 @@ import Control.Arrow
 import Data.Array
 import qualified Data.Text as T
 import Data.Char (ord)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Loc hiding (L) -- Lexer has replacements.
 import qualified Data.Map.Strict as M
 import Data.Monoid
@@ -240,7 +240,7 @@ SigExp :: { UncheckedSigExp }
         | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srclocOf $1) }
 
 TypeRef :: { TypeRefBase NoInfo Name }
-         : QualName '=' TypeExpDecl { TypeRef (fst $1) $3 }
+         : QualName '=' TypeExpTerm { TypeRef (fst $1) (TypeDecl $3 NoInfo) }
 
 SigBind :: { SigBindBase NoInfo Name }
          : module type id '=' SigExp
@@ -291,15 +291,13 @@ ModParams :: { [ModParamBase NoInfo Name] }
            |                    { [] }
 
 Spec :: { SpecBase NoInfo Name }
-      : val id TypeParams ':' SigTypeDecl
-        { let L loc (ID name) = $2; (ps, r) = $5
-          in ValSpec name $3 ps r Nothing loc }
-      | val BindingBinOp ':' SigTypeDecl
-        { let (ps, r) = $4
-          in ValSpec $2 [] ps r Nothing $1 }
-      | val BindingUnOp ':' SigTypeDecl
-        { let (ps, r) = $4
-          in ValSpec $2 [] ps r Nothing $1 }
+      : val id TypeParams ':' TypeExpDecl
+        { let L loc (ID name) = $2
+          in ValSpec name $3 $5 Nothing loc }
+      | val BindingBinOp ':' TypeExpDecl
+        { ValSpec $2 [] $4 Nothing $1 }
+      | val BindingUnOp ':' TypeExpDecl
+        { ValSpec $2 [] $4 Nothing $1 }
       | TypeAbbr
         { TypeAbbrSpec $1 }
       | type id TypeParams
@@ -406,18 +404,8 @@ Val     : let id TypeParams FunParams maybeAscription(TypeExpDecl) '=' Exp
                $3 $4 $7 Nothing $1
           }
 
-Param :: { ParamBase NoInfo Name }
-       : '(' id ':' TypeExpDecl ')' { let L _ (ID v) = $2 in NamedParam v $4 $1 }
-       | TypeExpDecl                { UnnamedParam $1 }
-
-SigTypeDecl :: { ([ParamBase NoInfo Name], TypeDeclBase NoInfo Name) }
-             : TypeExpDecl
-               { ([], $1) }
-             | Param '->' SigTypeDecl
-               { let (ts, t) = $3 in ($1 : ts, t) }
-
 TypeExpDecl :: { TypeDeclBase NoInfo Name }
-             : TypeExp { TypeDecl $1 NoInfo }
+             : TypeExp %prec bottom { TypeDecl $1 NoInfo }
 
 TypeAbbr :: { TypeBindBase NoInfo Name }
 TypeAbbr : type id TypeParams '=' TypeExpDecl
@@ -428,9 +416,20 @@ TypeAbbr : type id TypeParams '=' TypeExpDecl
              in TypeBind name (TypeParamDim pname ploc:$5) $7 Nothing loc }
 
 TypeExp :: { UncheckedTypeExp }
-         : '*' TypeExp  { TEUnique $2 $1 }
-         | '[' DimDecl ']' TypeExp %prec indexprec   { TEArray $4 (fst $2) $1 }
-         | '['  ']' TypeExp          { TEArray $3 AnyDim $1 }
+         : '(' id ':' TypeExp ')' '->' TypeExp
+           { let L _ (ID v) = $2 in TEArrow (Just v) $4 $7 $1 }
+         | TypeExpTerm '->' TypeExp
+           { TEArrow Nothing $1 $3 (srclocOf $1) }
+         | TypeExpTerm { $1 }
+
+
+TypeExpTerm :: { UncheckedTypeExp }
+         : '*' TypeExpTerm
+           { TEUnique $2 $1 }
+         | '[' DimDecl ']' TypeExpTerm %prec indexprec
+           { TEArray $4 (fst $2) $1 }
+         | '['  ']' TypeExpTerm %prec indexprec
+           { TEArray $3 AnyDim $1 }
          | TypeExpApply { $1 }
 
          -- Errors
@@ -441,7 +440,7 @@ TypeExp :: { UncheckedTypeExp }
            }
 
 TypeExpApply :: { UncheckedTypeExp }
-              : TypeExpApply TypeArg %prec juxtprec
+              : TypeExpApply TypeArg
                 { TEApply $1 $2 (srclocOf $1) }
               | 'id[' DimDecl ']'
                 { let L loc (INDEXING v) = $1
@@ -449,7 +448,7 @@ TypeExpApply :: { UncheckedTypeExp }
               | 'qid[' DimDecl ']'
                 { let L loc (QUALINDEXING qs v) = $1
                   in TEApply (TEVar (QualName qs v) loc) (TypeArgExpDim (fst $2) loc) loc }
-              | TypeExpAtom %prec juxtprec
+              | TypeExpAtom
                 { $1 }
 
 TypeExpAtom :: { UncheckedTypeExp }
@@ -552,18 +551,17 @@ Exp2 :: { UncheckedExp }
      | reduceComm Atom Atom Atom
                       { Reduce Commutative $2 $3 $4 $1 }
 
-
      | map Atom Atoms1
-                      { Map $2 (fst $3:snd $3) $1 }
+                      { Map $2 (fst $3:snd $3) NoInfo $1 }
 
      | scan Atom Atom Atom
                       { Scan $2 $3 $4 $1 }
 
      | zip Atoms1
-                      { Zip 0 (fst $2) (snd $2) $1 }
+                      { Zip 0 (fst $2) (snd $2) NoInfo NoInfo $1 }
 
      | zip '@' NaturalInt Atoms1
-                      { Zip $3 (fst $4) (snd $4) $1 }
+                      { Zip $3 (fst $4) (snd $4) NoInfo NoInfo $1 }
 
      | unzip Atom  { Unzip $2 [] $1 }
 
@@ -620,8 +618,8 @@ Exp2 :: { UncheckedExp }
      | Exp2 with '[' DimIndices ']' '<-' Exp2
        { Update $1 $4 $7 (srclocOf $1) }
 
-     | '\\' TypeParams FunParams1 maybeAscription(TypeExpDecl) '->' Exp
-       { Lambda $2 (fst $3 : snd $3) $6 $4 NoInfo $1 }
+     | '\\' TypeParams FunParams1 maybeAscription(TypeExpTerm) '->' Exp
+       { Lambda $2 (fst $3 : snd $3) $6 (fmap (flip TypeDecl NoInfo) $4) NoInfo $1 }
 
      | Apply { $1 }
 
@@ -639,7 +637,7 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
                              return $ ArrayLit (map (flip Literal pos . SignedValue) s') NoInfo pos }
-     | empty '(' TypeExpDecl ')'   { Empty $3 $1 }
+     | empty '(' TypeExpDecl ')'   { Empty $3 NoInfo $1 }
      | '(' Exp ')' FieldAccesses
        { foldl (\x (y, _) -> Project y x NoInfo (srclocOf x))
                (Parens $2 $1)
@@ -649,12 +647,12 @@ Atom : PrimLit        { Literal (fst $1) (snd $1) }
      | '('      ')'                   { TupLit [] $1 }
      | '[' Exps1 ']'                  { ArrayLit (fst $2:snd $2) NoInfo $1 }
 
-     | '[' Exp '...' Exp ']'          { Range $2 Nothing (ToInclusive $4) $1 }
-     | '[' Exp '..<' Exp ']'          { Range $2 Nothing (UpToExclusive $4) $1 }
-     | '[' Exp '..>' Exp ']'          { Range $2 Nothing (DownToExclusive $4) $1 }
-     | '[' Exp '..' Exp '...' Exp ']' { Range $2 (Just $4) (ToInclusive $6) $1 }
-     | '[' Exp '..' Exp '..<' Exp ']' { Range $2 (Just $4) (UpToExclusive $6) $1 }
-     | '[' Exp '..' Exp '..>' Exp ']' { Range $2 (Just $4) (DownToExclusive $6) $1 }
+     | '[' Exp '...' Exp ']'          { Range $2 Nothing (ToInclusive $4) NoInfo $1 }
+     | '[' Exp '..<' Exp ']'          { Range $2 Nothing (UpToExclusive $4) NoInfo $1 }
+     | '[' Exp '..>' Exp ']'          { Range $2 Nothing (DownToExclusive $4) NoInfo $1 }
+     | '[' Exp '..' Exp '...' Exp ']' { Range $2 (Just $4) (ToInclusive $6) NoInfo $1 }
+     | '[' Exp '..' Exp '..<' Exp ']' { Range $2 (Just $4) (UpToExclusive $6) NoInfo $1 }
+     | '[' Exp '..' Exp '..>' Exp ']' { Range $2 (Just $4) (DownToExclusive $6) NoInfo $1 }
 
      | QualVarSlice  { let (v,slice,loc) = $1
                        in Index (Var v NoInfo loc) slice loc }
@@ -908,8 +906,8 @@ ArrayValue :  '[' Value ']'
              {% emptyArrayError $1 }
 
 RowType :: { TypeBase () () }
-RowType : '[' ']' RowType   { arrayOf $3 (rank 1) Nonunique }
-        | '[' ']' PrimType  { arrayOf (Prim $3) (rank 1) Nonunique }
+RowType : '[' ']' RowType   { fromJust $ arrayOf $3 (rank 1) Nonunique }
+        | '[' ']' PrimType  { fromJust $ arrayOf (Prim $3) (rank 1) Nonunique }
 
 Values :: { [Value] }
 Values : Value ',' Values { $1 : $3 }

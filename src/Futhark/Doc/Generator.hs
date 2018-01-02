@@ -82,7 +82,7 @@ prettyDec fileModule dec = case dec of
 
 prettyVal :: FileModule -> ValBindBase t VName -> Maybe Html
 prettyVal fm (ValBind _ name _retdecl _rettype _tparams _args _ doc _)
-  | Just (BoundF (tps,pts,rett)) <- M.lookup name vtable
+  | Just (BoundV tps pts rett) <- M.lookup name vtable
   , visible Term name fm = Just $
     renderDoc doc <> "val " <> vnameHtml name <>
     foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
@@ -153,21 +153,19 @@ renderMod :: (VName, Mod) -> Html
 renderMod (name, _mod) =
   "module " <> vnameHtml name
 
-renderValBind :: (VName, ValBinding) -> Html
+renderValBind :: (VName, BoundV) -> Html
 renderValBind = H.div . prettyValBind
 
 renderTypeBind :: (VName, TypeBinding) -> Html
 renderTypeBind (name, TypeAbbr tps tp) =
   H.div $ typeHtml name tps <> prettyType tp
 
-prettyValBind :: (VName, ValBinding) -> Html
-prettyValBind (name, BoundF (tps, pts, rettype)) =
+prettyValBind :: (VName, BoundV) -> Html
+prettyValBind (name, BoundV tps pts rettype) =
   "val " <> vnameHtml name <>
   foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
   foldMap (\t -> prettyParam t <> " -> ") pts <> " " <>
   prettyType rettype
-prettyValBind (name, BoundV t) =
-  "val " <> vnameHtml name <> " : " <> prettyType t
 
 prettyParam :: (Maybe VName, StructType) -> Html
 prettyParam (Nothing, t) = prettyType t
@@ -185,38 +183,28 @@ prettyType t = case t of
             toHtml (nameToString name) <> ":" <> prettyType tp
   TypeVar et targs ->
     prettyTypeName et <> foldMap ((<> " ") . prettyTypeArg) targs
-  Array arr -> prettyArray arr
+  Array et shape u -> prettyU u <> prettyShapeDecl shape <> prettyElem et
+  Arrow (Just v) t1 t2 ->
+    parens (vnameHtml v <> ": " <> prettyType t1) <> " -> " <> prettyType t2
+  Arrow Nothing t1 t2 ->
+    prettyType t1 <> " -> " <> prettyType t2
 
-prettyArray :: ArrayTypeBase (DimDecl VName) () -> Html
-prettyArray arr = case arr of
-  PrimArray et (ShapeDecl ds) u _ ->
-    prettyU u <> foldMap (brackets . prettyD) ds <> primTypeHtml et
-  PolyArray et targs shape u _ ->
-    prettyU u <> prettyShapeDecl shape <> prettyTypeName et <>
-    foldMap (<> " ") (map prettyTypeArg targs)
-  RecordArray fs shape u
-    | Just ts <- areTupleFields fs ->
-        prefix <> parens (commas $ map prettyElem ts)
-    | otherwise ->
-        prefix <> braces (commas $ map ppField $ M.toList fs)
-    where prefix = prettyU u <> prettyShapeDecl shape
-          ppField (name, tp) = toHtml (nameToString name) <>
-                               ":" <> prettyElem tp
+prettyElem :: ArrayElemTypeBase (DimDecl VName) () -> Html
+prettyElem (ArrayPrimElem et _) = primTypeHtml et
+prettyElem (ArrayPolyElem et targs _) =
+  prettyTypeName et <> foldMap (<> " ") (map prettyTypeArg targs)
+prettyElem (ArrayRecordElem fs)
+  | Just ts <- areTupleFields fs =
+      parens (commas $ map prettyRecordElem ts)
+  | otherwise =
+      braces (commas $ map ppField $ M.toList fs)
+  where ppField (name, tp) = toHtml (nameToString name) <>
+                             ":" <> prettyRecordElem tp
 
-prettyElem :: RecordArrayElemTypeBase (DimDecl VName) () -> Html
-prettyElem e = case e of
-  PrimArrayElem bt _ -> primTypeHtml bt
-  PolyArrayElem bt targs _ u ->
-    prettyU u <> prettyTypeName  bt <> foldMap (" " <>)
-    (map prettyTypeArg targs)
-  ArrayArrayElem at -> prettyArray at
-  RecordArrayElem fs
-    | Just ts <- areTupleFields fs
-      -> parens $ commas $ map prettyElem ts
-    | otherwise
-      -> braces . commas $ map ppField $ M.toList fs
-    where ppField (name, t) = toHtml (nameToString name) <>
-            ":" <> prettyElem t
+prettyRecordElem :: RecordArrayElemTypeBase (DimDecl VName) () -> Html
+prettyRecordElem (RecordArrayElem et) = prettyElem et
+prettyRecordElem (RecordArrayArrayElem et shape u) =
+  prettyType $ Array et shape u
 
 prettyShapeDecl :: ShapeDecl (DimDecl VName) -> Html
 prettyShapeDecl (ShapeDecl ds) =
@@ -232,11 +220,6 @@ modParamHtml (ModParam pname psig _ _ : mps) =
   liftM2 f (renderSigExp psig) (modParamHtml mps)
   where f se params = "(" <> vnameHtml pname <>
                       ": " <> se <> ") -> " <> params
-
-prettyD :: DimDecl VName -> Html
-prettyD (NamedDim v) = prettyQualName v
-prettyD (ConstDim _) = mempty
-prettyD AnyDim = mempty
 
 renderSigExp :: SigExpBase Info VName -> DocM Html
 renderSigExp e = case e of
@@ -274,22 +257,16 @@ specHtml spec = case spec of
   TypeSpec name ps doc _ -> return . H.div $
     renderDoc doc <> "type " <> vnameHtml name <>
     joinBy " " (map prettyTypeParam ps)
-  ValSpec name tparams params rettype doc _ -> return . H.div $
+  ValSpec name tparams rettype doc _ -> return . H.div $
     renderDoc doc <>
     "val " <> vnameHtml name <>
     foldMap (" " <>) (map prettyTypeParam tparams) <> " : " <>
-    foldMap (\tp -> paramBaseHtml tp <> " -> ") params <>
     typeDeclHtml rettype
   ModSpec name sig _ ->
     do m <- vnameHtmlM Term name
        s <- renderSigExp sig
        return $ "module " <> m <> ": "<> s
   IncludeSpec e _ -> H.div . ("include " <>) <$> renderSigExp e
-
-paramBaseHtml :: ParamBase Info VName -> Html
-paramBaseHtml (NamedParam v t _) =
-  parens $ vnameHtml v <> ": " <> typeDeclHtml t
-paramBaseHtml (UnnamedParam t) = typeDeclHtml t
 
 typeDeclHtml :: TypeDeclBase f VName -> Html
 typeDeclHtml = typeExpHtml . declaredType
@@ -305,6 +282,10 @@ typeExpHtml e = case e of
   TEVar name  _ -> qualNameHtml name
   TEApply t arg _ ->
     typeExpHtml t <> " " <> prettyTypeArgExp arg
+  TEArrow (Just v) t1 t2 _ ->
+    parens (vnameHtml v <> ": " <> typeExpHtml t1) <> " -> " <> typeExpHtml t2
+  TEArrow Nothing t1 t2 _ ->
+    typeExpHtml t1 <> " -> " <> typeExpHtml t2
 
 qualNameHtml :: QualName VName -> Html
 qualNameHtml (QualName names (VName name tag)) =
