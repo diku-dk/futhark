@@ -373,14 +373,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
           -- split input streams into current chunk and rest of stream
           forM_ (zip arrpars arrexps) $
             \(param, inarr) -> do
-                atp <- lookupType inarr
                 let anm = baseString inarr
-                (dt1,t2,dt4) <- case atp of
-                    Array bt (Shape (_:dims)) _ ->
-                        return ( Array bt (Shape $ Var (identName diff1id):dims) NoUniqueness
-                               , Array bt (Shape $ Var chunkglb           :dims) NoUniqueness
-                               , Array bt (Shape $ Var (identName diffid ):dims) NoUniqueness)
-                    _ -> fail "FirstOrderTransform(Stream): array of not array type"
                 -- (_,a_cg) = split((chunk_glb*i-diff, chunk_glb), inarr)
                 id2 <- letExp (anm++"_chg") =<<
                        eSliceArray 0 inarr (eSubExp $ Var $ identName diff1id) (eSubExp $ Var chunkglb)
@@ -388,7 +381,6 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                 id3 <- letExp (anm++"_chgu") =<<
                        eCopy (pure (BasicOp $ SubExp $ Var id2))
                 -- (_,a_cl) = split((diff,cg-diff), a_cg*)
-                id3_t <- lookupType id3
                 letBindNames'_ [paramName param] =<<
                   eSliceArray 0 id3 (eSubExp $ Var $ identName diffid) (eSubExp $ Var $ paramName chunkloc)
 
