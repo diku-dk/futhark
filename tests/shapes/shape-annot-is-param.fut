@@ -1,3 +1,9 @@
+-- ==
+-- input { 2 [1,2] }
+-- output { [1,2] }
+-- input { 1 [1,2] }
+-- error: wrong shape
+
 let f (n: i32) (xs: [n]i32): [n]i32 = xs
 
 let main (n: i32) (xs: []i32) = f n xs

@@ -64,42 +64,35 @@ instance Pretty (ShapeDecl ()) where
   ppr (ShapeDecl ds) = mconcat $ replicate (length ds) $ text "[]"
 
 instance Pretty (ShapeDecl dim) => Pretty (RecordArrayElemTypeBase dim as) where
-  ppr (PrimArrayElem bt _) = ppr bt
-  ppr (PolyArrayElem bt targs _ u) = ppr u <> ppr (baseName <$> qualNameFromTypeName bt) <+>
-                                     spread (map ppr targs)
-  ppr (ArrayArrayElem at)    = ppr at
-  ppr (RecordArrayElem fs)
-    | Just ts <- areTupleFields fs =
-        parens $ commasep $ map ppr ts
-    | otherwise =
-        braces $ commasep $ map ppField $ M.toList fs
-    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
-
-instance Pretty (ShapeDecl dim) => Pretty (ArrayTypeBase dim as) where
-  ppr (PrimArray et shape u _) =
+  ppr (RecordArrayElem et) = ppr et
+  ppr (RecordArrayArrayElem et shape u) =
     ppr u <> ppr shape <> ppr et
 
-  ppr (PolyArray et targs shape u _) =
-    ppr u <> ppr shape <> ppr (baseName <$> qualNameFromTypeName et) <+> spread (map ppr targs)
-
-  ppr (RecordArray fs shape u)
+instance Pretty (ShapeDecl dim) => Pretty (ArrayElemTypeBase dim as) where
+  ppr (ArrayPrimElem pt _) = ppr pt
+  ppr (ArrayPolyElem v args _) =
+    ppr (baseName <$> qualNameFromTypeName v) <+> spread (map ppr args)
+  ppr (ArrayRecordElem fs)
     | Just ts <- areTupleFields fs =
-        prefix <> parens (commasep $ map ppr ts)
+        parens (commasep $ map ppr ts)
     | otherwise =
-        prefix <> braces (commasep $ map ppField $ M.toList fs)
-    where prefix = ppr u <> ppr shape
-          ppField (name, t) = text (nameToString name) <> colon <> ppr t
+        braces (commasep $ map ppField $ M.toList fs)
+    where ppField (name, t) = text (nameToString name) <> colon <> ppr t
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
   ppr (Prim et) = ppr et
   ppr (TypeVar et targs) = ppr (baseName <$> qualNameFromTypeName et) <+> spread (map ppr targs)
-  ppr (Array at) = ppr at
+  ppr (Array at shape u) = ppr u <> ppr shape <> ppr at
   ppr (Record fs)
     | Just ts <- areTupleFields fs =
         parens $ commasep $ map ppr ts
     | otherwise =
         braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
+  ppr (Arrow (Just v) t1 t2) =
+    parens (ppr v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
+  ppr (Arrow Nothing t1 t2) =
+    ppr t1 <+> text "->" <+> ppr t2
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where
   ppr (TypeArgDim d _) = ppr $ ShapeDecl [d]
@@ -113,6 +106,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeExp vn) where
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
   ppr (TEVar name _) = ppr name
   ppr (TEApply t arg _) = ppr t <+> ppr arg
+  ppr (TEArrow (Just v) t1 t2 _) = parens v' <+> text "->" <+> ppr t2
+    where v' = ppr v <> colon <+> ppr t1
+  ppr (TEArrow Nothing t1 t2 _) = ppr t1 <+> text "->" <+> ppr t2
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeArgExp vn) where
   ppr (TypeArgExpDim d _) = ppr $ ShapeDecl [d]
@@ -154,11 +150,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     | otherwise                     = braces $ commasep $ map ppr fs
     where fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
           fieldArray RecordFieldImplicit{} = False
-  pprPrec _ (Empty (TypeDecl t _) _) =
+  pprPrec _ (Empty (TypeDecl t _) _ _) =
     text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
-  pprPrec _ (Range start maybe_step end _) =
+  pprPrec _ (Range start maybe_step end _ _) =
     brackets $
     ppr start <>
     maybe mempty ((text ".." <>) . ppr) maybe_step <>
@@ -222,7 +218,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   pprPrec _ (Rotate d x e _) =
     text "rotate@" <> ppr d <> apply [ppr x, ppr e]
-  pprPrec _ (Map lam as _) = ppSOAC "map" [lam] as
+  pprPrec _ (Map lam as _ _) = ppSOAC "map" [lam] as
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduce_comm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Stream form lam arr _) =
@@ -240,8 +236,8 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
-  pprPrec _ (Zip 0 e es _) = text "zip" <+> spread (map (pprPrec 10) (e:es))
-  pprPrec _ (Zip i e es _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
+  pprPrec _ (Zip 0 e es _ _ _) = text "zip" <+> spread (map (pprPrec 10) (e:es))
+  pprPrec _ (Zip i e es _ _ _) = text "zip@" <> ppr i <+> spread (map (pprPrec 10) (e:es))
   pprPrec _ (Unzip e _ _) = text "unzip" <+> pprPrec 10 e
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 10 e
   pprPrec _ (Concat i x y _) =
@@ -330,16 +326,11 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ValBindBase ty vn) where
                        Just rettype -> text ":" <+> ppr rettype
                        Nothing      -> mempty
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase ty vn) where
-  ppr (NamedParam v t _) = parens $ ppr v <> colon <+> ppr t
-  ppr (UnnamedParam t)   = ppr t
-
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (SpecBase ty vn) where
   ppr (TypeAbbrSpec tpsig) = ppr tpsig
   ppr (TypeSpec name ps _ _) = text "type" <+> ppr name <+> spread (map ppr ps)
-  ppr (ValSpec name tparams params rettype _ _) =
-    text "val" <+> ppr name <+> spread (map ppr tparams) <> colon <+>
-    mconcat (map (\p -> ppr p <+> text "-> ") params) <+> ppr rettype
+  ppr (ValSpec name tparams vtype _ _) =
+    text "val" <+> ppr name <+> spread (map ppr tparams) <> colon <+> ppr vtype
   ppr (ModSpec name sig _) =
     text "module" <+> ppr name <> colon <+> ppr sig
   ppr (IncludeSpec e _) =

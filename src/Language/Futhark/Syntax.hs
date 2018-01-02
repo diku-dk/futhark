@@ -30,7 +30,7 @@ module Language.Futhark.Syntax
   , TypeExp(..)
   , TypeArgExp(..)
   , RecordArrayElemTypeBase(..)
-  , ArrayTypeBase(..)
+  , ArrayElemTypeBase(..)
   , CompType
   , PatternType
   , StructType
@@ -56,7 +56,6 @@ module Language.Futhark.Syntax
   , StreamForm(..)
 
   -- * Module language
-  , ParamBase(..)
   , SpecBase(..)
   , SigExpBase(..)
   , TypeRefBase(..)
@@ -116,6 +115,8 @@ class (Show vn,
        Show (f StructType),
        Show (f ([StructType], CompType)),
        Show (f (M.Map VName VName)),
+       Show (f [RecordArrayElemTypeBase () Names]),
+       Show (f Uniqueness),
        Show (f ([CompType], CompType))) => Showable f vn where
 
 -- | No information functor.  Usually used for placeholder type- or
@@ -287,31 +288,14 @@ qualNameFromTypeName (TypeName qs x) = QualName qs x
 
 -- | Types that can be elements of tuple-arrays.
 data RecordArrayElemTypeBase dim as =
-    PrimArrayElem PrimType as
-  | ArrayArrayElem (ArrayTypeBase dim as)
-  | PolyArrayElem TypeName [TypeArg dim as] as Uniqueness
-  | RecordArrayElem (M.Map Name (RecordArrayElemTypeBase dim as))
-  deriving (Show)
-
-instance Eq dim => Eq (RecordArrayElemTypeBase dim as) where
-  PrimArrayElem bt1 _ == PrimArrayElem bt2 _ =
-    bt1 == bt2
-  PolyArrayElem bt1 targs1 _ u1 == PolyArrayElem bt2 targs2 _ u2 =
-    bt1 == bt2 && targs1 == targs2 && u1 == u2
-  ArrayArrayElem at1 == ArrayArrayElem at2 =
-    at1 == at2
-  RecordArrayElem ts1 == RecordArrayElem ts2 =
-    ts1 == ts2
-  _ == _ =
-    False
+    RecordArrayElem (ArrayElemTypeBase dim as)
+  | RecordArrayArrayElem (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
+  deriving (Eq, Show)
 
 instance Bitraversable RecordArrayElemTypeBase where
-  bitraverse _ g (PrimArrayElem t as) = PrimArrayElem t <$> g as
-  bitraverse f g (ArrayArrayElem a) = ArrayArrayElem <$> bitraverse f g a
-  bitraverse f g (PolyArrayElem t args as u) =
-    PolyArrayElem t <$> traverse (bitraverse f g) args <*> g as <*> pure u
-  bitraverse f g (RecordArrayElem fs) =
-    RecordArrayElem <$> traverse (bitraverse f g) fs
+  bitraverse f g (RecordArrayElem t) = RecordArrayElem <$> bitraverse f g t
+  bitraverse f g (RecordArrayArrayElem a shape u) =
+    RecordArrayArrayElem <$> bitraverse f g a <*> traverse f shape <*> pure u
 
 instance Bifunctor RecordArrayElemTypeBase where
   bimap = bimapDefault
@@ -319,56 +303,54 @@ instance Bifunctor RecordArrayElemTypeBase where
 instance Bifoldable RecordArrayElemTypeBase where
   bifoldMap = bifoldMapDefault
 
--- | An array type.
-data ArrayTypeBase dim as =
-    PrimArray PrimType (ShapeDecl dim) Uniqueness as
-    -- ^ An array whose elements are primitive types.
-  | PolyArray TypeName [TypeArg dim as] (ShapeDecl dim) Uniqueness as
-    -- ^ An array whose elements are some polymorphic type, possibly with arguments.
-  | RecordArray (M.Map Name (RecordArrayElemTypeBase dim as)) (ShapeDecl dim) Uniqueness
-    -- ^ An array whose elements are records.  Note that tuples are
-    -- also just records.
-    deriving (Show)
+data ArrayElemTypeBase dim as =
+    ArrayPrimElem PrimType as
+  | ArrayPolyElem TypeName [TypeArg dim as] as
+  | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim as))
+  deriving (Show)
 
-instance Eq dim =>
-         Eq (ArrayTypeBase dim as) where
-  PrimArray et1 dims1 u1 _ == PrimArray et2 dims2 u2 _ =
-    et1 == et2 && dims1 == dims2 && u1 == u2
-  PolyArray et1 args1 dims1 u1 _ == PolyArray et2 args2 dims2 u2 _ =
-    et1 == et2 && args1 == args2 && dims1 == dims2 && u1 == u2
-  RecordArray ts1 dims1 u1 == RecordArray ts2 dims2 u2 =
-    ts1 == ts2 && dims1 == dims2 && u1 == u2
+instance Eq dim => Eq (ArrayElemTypeBase dim as) where
+  ArrayPrimElem et1 _ == ArrayPrimElem et2 _ =
+    et1 == et2
+  ArrayPolyElem et1 args1 _ == ArrayPolyElem et2 args2 _ =
+    et1 == et2 && args1 == args2
+  ArrayRecordElem ts1 == ArrayRecordElem ts2 =
+    ts1 == ts2
   _ == _ =
     False
 
-instance Bitraversable ArrayTypeBase where
-  bitraverse f g (PrimArray t dims u as) =
-    PrimArray t <$> traverse f dims <*> pure u <*> g as
-  bitraverse f g (PolyArray t args dims u as) =
-    PolyArray t <$> traverse (bitraverse f g) args <*> traverse f dims <*> pure u <*> g as
-  bitraverse f g (RecordArray fs dims u) =
-    RecordArray <$> traverse (bitraverse f g) fs <*> traverse f dims <*> pure u
+instance Bitraversable ArrayElemTypeBase where
+  bitraverse _ g (ArrayPrimElem t as) =
+    ArrayPrimElem t <$> g as
+  bitraverse f g (ArrayPolyElem t args as) =
+    ArrayPolyElem t <$> traverse (bitraverse f g) args <*> g as
+  bitraverse f g (ArrayRecordElem fs) =
+    ArrayRecordElem <$> traverse (bitraverse f g) fs
 
-instance Bifunctor ArrayTypeBase where
+instance Bifunctor ArrayElemTypeBase where
   bimap = bimapDefault
 
-instance Bifoldable ArrayTypeBase where
+instance Bifoldable ArrayElemTypeBase where
   bifoldMap = bifoldMapDefault
 
 -- | An expanded Futhark type is either an array, a prim type, a
 -- tuple, or a type variable.  When comparing types for equality with
 -- '==', aliases are ignored, but dimensions much match.
 data TypeBase dim as = Prim PrimType
-                     | Array (ArrayTypeBase dim as)
+                     | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
                      | TypeVar TypeName [TypeArg dim as]
+                     | Arrow (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      deriving (Eq, Show)
 
 instance Bitraversable TypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
-  bitraverse f g (Array a) = Array <$> bitraverse f g a
+  bitraverse f g (Array a shape u) =
+    Array <$> bitraverse f g a <*> traverse f shape <*> pure u
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar t args) = TypeVar t <$> traverse (bitraverse f g) args
+  bitraverse f g (Arrow v t1 t2) =
+    Arrow v <$> bitraverse f g t1 <*> bitraverse f g t2
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
@@ -406,15 +388,17 @@ data TypeExp vn = TEVar (QualName vn) SrcLoc
                 | TEArray (TypeExp vn) (DimDecl vn) SrcLoc
                 | TEUnique (TypeExp vn) SrcLoc
                 | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
+                | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
                  deriving (Eq, Show)
 
 instance Located (TypeExp vn) where
-  locOf (TEArray _ _ loc) = locOf loc
-  locOf (TETuple _ loc)   = locOf loc
-  locOf (TERecord _ loc)  = locOf loc
-  locOf (TEVar _ loc)     = locOf loc
-  locOf (TEUnique _ loc)  = locOf loc
-  locOf (TEApply _ _ loc) = locOf loc
+  locOf (TEArray _ _ loc)   = locOf loc
+  locOf (TETuple _ loc)     = locOf loc
+  locOf (TERecord _ loc)    = locOf loc
+  locOf (TEVar _ loc)       = locOf loc
+  locOf (TEUnique _ loc)    = locOf loc
+  locOf (TEApply _ _ loc)   = locOf loc
+  locOf (TEArrow _ _ _ loc) = locOf loc
 
 data TypeArgExp vn = TypeArgExpDim (DimDecl vn) SrcLoc
                    | TypeArgExpType (TypeExp vn)
@@ -455,7 +439,7 @@ data Diet = RecordDiet (M.Map Name Diet) -- ^ Consumes these fields in the recor
 data Value = PrimValue !PrimValue
            | ArrayValue !(Array Int Value) (TypeBase () ())
              -- ^ It is assumed that the array is 0-indexed.  The type
-             -- is the row type.
+             -- is the full type.
              deriving (Eq, Show)
 
 -- | An identifier consists of its name and the type of the value
@@ -581,9 +565,9 @@ data ExpBase f vn =
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the row type of the rows of the array.
 
-            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) SrcLoc
+            | Range (ExpBase f vn) (Maybe (ExpBase f vn)) (Inclusiveness (ExpBase f vn)) (f CompType) SrcLoc
 
-            | Empty (TypeDeclBase f vn) SrcLoc
+            | Empty (TypeDeclBase f vn) (f CompType) SrcLoc
 
             | Var    (QualName vn) (f ([StructType], CompType)) SrcLoc
             -- ^ The @[StructType]@ list indicates the type of any
@@ -662,7 +646,7 @@ data ExpBase f vn =
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
-            | Map (ExpBase f vn) [ExpBase f vn] SrcLoc
+            | Map (ExpBase f vn) [ExpBase f vn] (f CompType) SrcLoc
              -- ^ @map (+1) ([1, 2, ..., n]) = [2, 3, ..., n+1]@.
              -- OR
              -- ^ @zipWith (+) ([1, 2, ..., n]) ([1, 2, ..., n]) = [2, 4, ... , 2*n]@.
@@ -711,7 +695,7 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Zip Int (ExpBase f vn) [ExpBase f vn] SrcLoc
+            | Zip Int (ExpBase f vn) [ExpBase f vn] (f [RecordArrayElemTypeBase () Names]) (f Uniqueness) SrcLoc
             -- ^ Conventional zip taking nonzero arrays as arguments.
             -- All arrays must have the exact same length.
 
@@ -738,8 +722,8 @@ instance Located (ExpBase f vn) where
   locOf (RecordLit _ pos)            = locOf pos
   locOf (Project _ _ _ pos)          = locOf pos
   locOf (ArrayLit _ _ pos)           = locOf pos
-  locOf (Range _ _ _ pos)            = locOf pos
-  locOf (Empty _ pos)                = locOf pos
+  locOf (Range _ _ _ _ pos)          = locOf pos
+  locOf (Empty _ _ pos)              = locOf pos
   locOf (BinOp _ _ _ _ pos)          = locOf pos
   locOf (If _ _ _ _ pos)             = locOf pos
   locOf (Var _ _ loc)                = locOf loc
@@ -754,9 +738,9 @@ instance Located (ExpBase f vn) where
   locOf (Reshape _ _ pos)            = locOf pos
   locOf (Rearrange _ _ pos)          = locOf pos
   locOf (Rotate _ _ _ pos)           = locOf pos
-  locOf (Map _ _ pos)                = locOf pos
+  locOf (Map _ _ _ pos)              = locOf pos
   locOf (Reduce _ _ _ _ pos)         = locOf pos
-  locOf (Zip _ _ _ pos)              = locOf pos
+  locOf (Zip _ _ _ _ _ loc)          = locOf loc
   locOf (Unzip _ _ pos)              = locOf pos
   locOf (Scan _ _ _ pos)             = locOf pos
   locOf (Filter _ _ pos)             = locOf pos
@@ -857,18 +841,9 @@ typeParamName :: TypeParamBase vn -> vn
 typeParamName (TypeParamDim v _)  = v
 typeParamName (TypeParamType v _) = v
 
-data ParamBase f vn = NamedParam vn (TypeDeclBase f vn) SrcLoc
-                    | UnnamedParam (TypeDeclBase f vn)
-deriving instance Showable f vn => Show (ParamBase f vn)
-
-instance Located (ParamBase f vn) where
-  locOf (NamedParam _ _ loc) = locOf loc
-  locOf (UnnamedParam t)     = locOf t
-
 data SpecBase f vn = ValSpec  { specName       :: vn
                               , specTypeParams :: [TypeParamBase vn]
-                              , specParams     :: [ParamBase f vn]
-                              , specRettype    :: TypeDeclBase f vn
+                              , specType       :: TypeDeclBase f vn
                               , specDoc        :: Maybe String
                               , specLocation   :: SrcLoc
                               }
@@ -879,7 +854,7 @@ data SpecBase f vn = ValSpec  { specName       :: vn
 deriving instance Showable f vn => Show (SpecBase f vn)
 
 instance Located (SpecBase f vn) where
-  locOf (ValSpec _ _ _ _ _ loc) = locOf loc
+  locOf (ValSpec _ _ _ _ loc)   = locOf loc
   locOf (TypeAbbrSpec tbind)    = locOf tbind
   locOf (TypeSpec _ _ _ loc)    = locOf loc
   locOf (ModSpec _ _ loc)       = locOf loc

@@ -184,11 +184,11 @@ entryPoint params (eret,crets) =
                        -> [EntryPointType]
         entryPointType (E.Prim E.Unsigned{}) _ =
           [I.TypeUnsigned]
-        entryPointType (E.Array (PrimArray Unsigned{} _ _ _)) _ =
+        entryPointType (E.Array (ArrayPrimElem Unsigned{} _) _ _) _ =
           [I.TypeUnsigned]
         entryPointType E.Prim{} _ =
           [I.TypeDirect]
-        entryPointType (E.Array PrimArray{}) _ =
+        entryPointType (E.Array ArrayPrimElem{} _ _) _ =
           [I.TypeDirect]
         entryPointType t ts =
           [I.TypeOpaque (pretty t') $ length ts]
@@ -298,7 +298,7 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) loc)
         isArrayLiteral e =
           Just ([], [e])
 
-internaliseExp desc (E.Range start maybe_second end _) = do
+internaliseExp desc (E.Range start maybe_second end _ _) = do
   start' <- internaliseExp1 "range_start" start
   end' <- internaliseExp1 "range_end" $ case end of
     DownToExclusive e -> e
@@ -388,7 +388,7 @@ internaliseExp desc (E.Range start maybe_second end _) = do
                (eBody [eDivRoundingUp Int32 (eSubExp distance) (eSubExp pos_step)])
   pure <$> letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
 
-internaliseExp desc (E.Empty (TypeDecl _(Info et)) _) = do
+internaliseExp desc (E.Empty (TypeDecl _(Info et)) _ _) = do
   (ts, _, _) <- internaliseReturnType et
   let ts' = map (fromDecl . modifyArrayShape extToZero) ts
   letSubExps desc $ map (I.BasicOp . I.ArrayLit []) ts'
@@ -631,7 +631,7 @@ internaliseExp desc (E.Unsafe e _) =
   local (\env -> env { envDoBoundsChecks = False }) $
   internaliseExp desc e
 
-internaliseExp _ (E.Zip _ e es loc) = do
+internaliseExp _ (E.Zip _ e es _ _ loc) = do
   e' <- internaliseExpToVars "zip_arg" $ TupLit (e:es) loc
   case e' of
     e_key:es_unchecked -> do
@@ -720,13 +720,13 @@ internaliseExp desc (E.Concat i x ys loc) = do
         sumdims xsize ysize = letSubExp "conc_tmp" $ I.BasicOp $
                                         I.BinOp (I.Add I.Int32) xsize ysize
 
-internaliseExp _ (E.Map _ [] _) = return []
+internaliseExp _ (E.Map _ [] _ _) = return []
 
-internaliseExp desc (E.Map lam (arr:arrs) loc) = do
+internaliseExp desc (E.Map lam (arr:arrs) _ loc) = do
   -- Pretend the arrs were zipped to get the necessary reshapes in.
   -- This would be a type error in the source language, but it's the
   -- same in the core language.
-  arrs' <- internaliseExpToVars "map_arr" (Zip 0 arr arrs loc)
+  arrs' <- internaliseExpToVars "map_arr" (Zip 0 arr arrs (Info []) (Info Unique) loc)
   lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $ I.Op $ I.Map w lam' arrs'

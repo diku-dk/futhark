@@ -8,7 +8,7 @@ module Language.Futhark
   , ModExp, ModParam, SigExp, ModBind
   , ValBind, Dec, Prog
   , TypeBind, TypeDecl
-  , StructTypeArg, ArrayType
+  , StructTypeArg, ArrayElemType
   , TypeParam
   )
   where
@@ -62,6 +62,6 @@ type StructTypeArg = TypeArg (DimDecl VName) ()
 -- | A type-checked type parameter.
 type TypeParam = TypeParamBase VName
 
--- | A known array type with no shape annotations, but aliasing
+-- | A known array element type with no shape annotations, but aliasing
 -- information.
-type ArrayType = ArrayTypeBase () Names
+type ArrayElemType = ArrayElemTypeBase () Names

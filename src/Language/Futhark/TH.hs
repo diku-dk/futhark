@@ -34,7 +34,7 @@ deriving instance Lift FloatType
 deriving instance Lift PrimType
 deriving instance (Lift a, Lift b) => Lift (TypeArg a b)
 deriving instance (Lift a, Lift b) => Lift (RecordArrayElemTypeBase a b)
-deriving instance (Lift a, Lift b) => Lift (ArrayTypeBase a b)
+deriving instance (Lift a, Lift b) => Lift (ArrayElemTypeBase a b)
 deriving instance (Lift a, Lift b) => Lift (TypeBase a b)
 deriving instance Lift a => Lift (ShapeDecl a)
 deriving instance Lift a => Lift (Inclusiveness a)
@@ -55,7 +55,6 @@ deriving instance Lift (TypeParamBase VName)
 deriving instance Lift (StreamForm Info VName)
 deriving instance Lift (ExpBase Info VName)
 deriving instance Lift (TypeBindBase Info VName)
-deriving instance Lift (ParamBase Info VName)
 deriving instance Lift (SpecBase Info VName)
 deriving instance Lift (TypeRefBase Info VName)
 deriving instance Lift (SigExpBase Info VName)
@@ -67,7 +66,7 @@ deriving instance Lift (DecBase Info VName)
 deriving instance Lift (ProgBase Info VName)
 
 -- Typechecker instances
-deriving instance Lift ValBinding
+deriving instance Lift BoundV
 deriving instance Lift TypeBinding
 deriving instance Lift MTy
 deriving instance Lift FunSig
