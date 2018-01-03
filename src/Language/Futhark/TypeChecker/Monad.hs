@@ -12,6 +12,7 @@ module Language.Futhark.TypeChecker.Monad
   , checkQualNameWithEnv
   , bindSpaced
   , qualifyTypeVars
+  , getType
 
   , MonadTypeChecker(..)
   , checkName
@@ -231,7 +232,7 @@ data TypeBinding = TypeAbbr [TypeParam] StructType
 -- return type.  The type parameters are in scope in both parameter
 -- types and the return type.  Non-functional values have only a
 -- return type.
-data BoundV = BoundV [TypeParam] [(Maybe VName,StructType)] StructType
+data BoundV = BoundV [TypeParam] StructType
                 deriving (Show)
 
 type NameMap = M.Map (Namespace, Name) (QualName VName)
@@ -408,11 +409,29 @@ instance MonadTypeChecker TypeM where
     (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ envVtable env of
       Nothing -> bad $ UnknownVariableError Term qn loc
-      Just (BoundV [] [] t)
+      Just (BoundV _ t)
         | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
-        | otherwise -> return (qn', removeShapeAnnotations $ fromStruct $
-                                    qualifyTypeVars outer_env mempty qs t)
-      Just _ -> bad $ FunctionIsNotValue loc qn
+        | otherwise -> do
+            r <- getType loc t
+            case r of Left{} -> bad $ FunctionIsNotValue loc qn
+                      Right t' -> return (qn', removeShapeAnnotations $ fromStruct $
+                                           qualifyTypeVars outer_env mempty qs t')
+
+-- | Extract from a type either a function type comprising a list of
+-- parameter types and a return type (all of which must be
+-- first-order), or a first-order type.
+getType :: MonadTypeChecker m =>
+           SrcLoc -> TypeBase dim as
+        -> m (Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
+                     (TypeBase dim as))
+getType loc (Arrow v t1 t2) = do
+  t1' <- getType loc t1
+  t2' <- getType loc t2
+  case (t1', t2') of
+    (Left _, _) -> throwError $ TypeError loc "Higher-order functions are not supported yet."
+    (Right t1'', Left (ps, r)) -> return $ Left ((v,t1'') : ps, r)
+    (Right t1'', Right t2'') -> return $ Left ([(v,t1'')], t2'')
+getType _ t = return $ Right t
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do

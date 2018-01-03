@@ -1165,28 +1165,34 @@ internaliseLambda e rowtypes = do
   where loc = srclocOf e
 
 binOpFunToLambda :: E.QualName VName
-                 -> E.CompType -> E.CompType -> E.CompType
+                 -> E.StructType -> E.StructType -> E.CompType
                  -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
-  return ([E.Id x_name (Info $ E.vacuousShapeAnnotations xtype) noLoc,
-           E.Id y_name (Info $ E.vacuousShapeAnnotations ytype) noLoc],
+  let xtype' = xtype `setAliases` mempty
+      ytype' = ytype `setAliases` mempty
+      xtype'' = removeShapeAnnotations xtype'
+      ytype'' = removeShapeAnnotations ytype'
+  return ([E.Id x_name (Info xtype') noLoc,
+           E.Id y_name (Info xtype') noLoc],
           E.BinOp op
-           (E.Var (qualName x_name) (Info ([], xtype)) noLoc, E.Observe)
-           (E.Var (qualName y_name) (Info ([], ytype)) noLoc, E.Observe)
+           (E.Var (qualName x_name) (Info ([], xtype'')) noLoc, E.Observe)
+           (E.Var (qualName y_name) (Info ([], ytype'')) noLoc, E.Observe)
            (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpCurriedToLambda :: E.QualName VName
-                     -> E.CompType -> E.CompType
+                     -> E.StructType -> E.CompType
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
                      -> InternaliseM ([E.Pattern], E.Exp, E.StructType)
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
-  let (x', y') = swap (E.Var (qualName paramname) (Info ([], paramtype)) noLoc, e)
-  return ([E.Id paramname (Info $ E.vacuousShapeAnnotations paramtype) noLoc],
+  let paramtype' = E.removeShapeAnnotations $ paramtype `setAliases` mempty
+      (x', y') = swap (E.Var (qualName paramname) (Info ([], paramtype')) noLoc, e)
+  return ([E.Id paramname (Info $ E.vacuousShapeAnnotations $
+                           paramtype `setAliases` mempty) noLoc],
           E.BinOp op (x',E.Observe) (y',E.Observe) (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
 

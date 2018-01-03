@@ -594,13 +594,13 @@ data ExpBase f vn =
               (Maybe (TypeDeclBase f vn)) (f StructType) SrcLoc
 
             | OpSection (QualName vn)
-              (f CompType) (f CompType) (f CompType) SrcLoc
+              (f StructType) (f StructType) (f CompType) SrcLoc
               -- ^ @+@; first two types are operands, third is result.
             | OpSectionLeft (QualName vn)
-              (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
+              (ExpBase f vn) (f StructType, f StructType) (f CompType) SrcLoc
               -- ^ @2+@; first type is operand, second is result.
             | OpSectionRight (QualName vn)
-              (ExpBase f vn) (f CompType, f CompType) (f CompType) SrcLoc
+              (ExpBase f vn) (f StructType, f StructType) (f CompType) SrcLoc
               -- ^ @+2@; first type is operand, second is result.
 
             | DoLoop

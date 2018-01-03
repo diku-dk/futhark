@@ -7,17 +7,14 @@ module Language.Futhark.TypeChecker.Terms
   )
 where
 
-import Control.Applicative
-import Control.Monad.Except hiding (mapM)
-import Control.Monad.Reader hiding (mapM)
-import Control.Monad.Writer hiding (mapM)
-import Control.Monad.State hiding (mapM)
+import Control.Monad.Except
+import Control.Monad.Reader
+import Control.Monad.Writer
+import Control.Monad.State
+import qualified Control.Monad.Fail as Fail
 import Data.List
 import Data.Loc
 import Data.Maybe
-import Data.Either
-import Data.Ord
-import Data.Traversable (mapM)
 import qualified Data.Semigroup as Sem
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -136,10 +133,10 @@ instance Monoid TermScope where
 envToTermScope :: Env -> TermScope
 envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env)
   where vtable = M.map valBinding $ envVtable env
-        valBinding (TypeM.BoundV [] [] v) =
-          BoundV $ removeShapeAnnotations $ v `setAliases` mempty
-        valBinding f =
+        valBinding f@(TypeM.BoundV _ Arrow{}) =
           BoundF f mempty
+        valBinding (TypeM.BoundV _ v) =
+          BoundV $ removeShapeAnnotations $ v `setAliases` mempty
 
 newtype TermTypeM a = TermTypeM (ReaderT
                                  TermScope
@@ -151,6 +148,9 @@ newtype TermTypeM a = TermTypeM (ReaderT
             MonadReader TermScope,
             MonadWriter Occurences,
             MonadError TypeError)
+
+instance Fail.MonadFail TermTypeM where
+  fail = throwError . TypeError noLoc
 
 runTermTypeM :: TermTypeM a -> TypeM (a, Occurences)
 runTermTypeM (TermTypeM m) = do
@@ -165,7 +165,7 @@ initialTermScope :: TermScope
 initialTermScope = TermScope initialVtable mempty topLevelNameMap
   where initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
-        funF ts t = TypeM.BoundV [] (zip (repeat Nothing) $ map Prim ts) (Prim t)
+        funF ts t = TypeM.BoundV [] $ foldr (Arrow Nothing . Prim) (Prim t) ts
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
           Just (name, BoundF (funF ts t) mempty)
@@ -173,11 +173,8 @@ initialTermScope = TermScope initialVtable mempty topLevelNameMap
           Just (name, OverloadedF $ map frob variants)
           where frob (pts, rt) = (map Prim pts, funF pts rt)
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
-          Just (name, BoundF (TypeM.BoundV
-                              tvs
-                              (zip (repeat Nothing) $
-                               map vacuousShapeAnnotations pts)
-                              (vacuousShapeAnnotations rt))
+          Just (name, BoundF (TypeM.BoundV tvs $ vacuousShapeAnnotations $
+                              foldr (Arrow Nothing) rt pts)
                       mempty)
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
@@ -271,11 +268,17 @@ lookupFunction qn argtypes loc = do
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
     Just (BoundV t) -> bad $ ValueIsNotFunction loc qn t
-    Just (BoundF (TypeM.BoundV tparams params rt) closure) ->
+    Just (BoundF (TypeM.BoundV tparams t) closure) -> do
       let qual = qualifyTypeVars outer_env (map typeParamName tparams) qs
-      in return (qn',
-                 TypeM.BoundV tparams (map (fmap qual) params) (qual rt),
-                 closure)
+      r <- getType loc t
+      case r of
+        Left (params, rt) ->
+          return (qn',
+                   TypeM.BoundV tparams $
+                   foldr (uncurry Arrow . fmap qual) (qual rt) params,
+                   closure)
+        Right{} -> bad $ ValueIsNotFunction loc qn $
+                   removeShapeAnnotations $ t `setAliases` mempty
     Just (OverloadedF overloads) ->
       case lookup (map toStructural argtypes) overloads of
         Nothing -> bad $ TypeError loc $ "Overloaded function " ++ pretty qn ++
@@ -286,9 +289,9 @@ lookupFunction qn argtypes loc = do
       | [t] <- argtypes ->
           let t' = vacuousShapeAnnotations $ toStruct t
           in return (qn',
-                     TypeM.BoundV []
-                      [(Nothing, t' `setUniqueness` Nonunique)]
-                      (t' `setUniqueness` Nonunique),
+                     TypeM.BoundV [] $
+                     Arrow Nothing (t' `setUniqueness` Nonunique)
+                     (t' `setUniqueness` Nonunique),
                      mempty)
       | otherwise ->
           bad $ TypeError loc "Opaque function takes just a single argument."
@@ -297,10 +300,9 @@ lookupFunction qn argtypes loc = do
         concreteType t1,
         concreteType t2,
         t1 == t2 ->
-          return (qn', TypeM.BoundV []
-                       (zip (repeat Nothing) $
-                        map (vacuousShapeAnnotations . toStruct) [t1, t2])
-                       (Prim Bool),
+          return (qn', TypeM.BoundV [] $
+                       vacuousShapeAnnotations $ toStruct $
+                       Arrow Nothing t1 $ Arrow Nothing t2 $ Prim Bool,
                        mempty)
       | otherwise ->
           bad $ TypeError loc $ "Equality not defined for arguments of types " ++
@@ -590,14 +592,16 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', TypeM.BoundV tparams paramtypes ftype, closure) <-
+  (op', TypeM.BoundV tparams ftype, closure) <-
     lookupFunction op (map argType [e1_arg,e2_arg]) loc
 
-  case paramtypes of
-    [(_, e1_pt), (_, e2_pt)] -> do
+  r <- getType loc ftype
+
+  case r of
+    Left ([(_, e1_pt), (_, e2_pt)], _) -> do
       occur closure
       (_, rettype') <-
-        checkFuncall (Just op) loc (TypeM.BoundV tparams paramtypes ftype) [e1_arg, e2_arg]
+        checkFuncall (Just op) loc (TypeM.BoundV tparams ftype) [e1_arg, e2_arg]
       return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt)
         (Info $ removeShapeAnnotations rettype') loc
     _ ->
@@ -671,14 +675,15 @@ checkExp (Negate arg loc) = do
 checkExp e@Apply{} = do
   (fname, args) <- findFuncall e
   (args', argflows) <- unzip <$> mapM checkArg args
-  (fname', TypeM.BoundV tparams paramtypes ftype, closure) <-
+  (fname', TypeM.BoundV tparams ftype, closure) <-
     lookupFunction fname (map argType argflows) loc
 
   occur closure
-  (_, rettype') <- checkFuncall (Just fname) loc
-                   (TypeM.BoundV tparams paramtypes ftype) argflows
 
-  constructFuncall loc fname' args' (map snd paramtypes) rettype'
+  (paramtypes, rettype) <-
+    checkFuncall (Just fname) loc (TypeM.BoundV tparams ftype) argflows
+
+  constructFuncall loc fname' args' paramtypes rettype
   where loc = srclocOf e
 
 checkExp (LetPat tparams pat e body pos) = do
@@ -695,7 +700,8 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
-    let entry = BoundF (TypeM.BoundV tparams' (map patternParam params') rettype) closure
+    let ftype = foldr (uncurry Arrow . patternParam) rettype params'
+        entry = BoundF (TypeM.BoundV tparams' ftype) closure
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope }
     body' <- local bindF $ checkExp body
 
@@ -1162,7 +1168,9 @@ instantiatePolymorphicFunction :: MonadTypeChecker m =>
                                   Maybe (QualName Name) -> SrcLoc
                                -> TypeM.BoundV -> [Arg]
                                -> m ([(Maybe VName,StructType)], StructType)
-instantiatePolymorphicFunction maybe_fname call_loc (TypeM.BoundV tparams pts ret) args = do
+instantiatePolymorphicFunction maybe_fname call_loc (TypeM.BoundV tparams ftype) args = do
+  (pts, ret) <- either pure (const nope) =<< getType call_loc ftype
+
   unless (length pts == length args) $
     throwError $ TypeError call_loc $ prefix $
     "expecting " ++ pretty (length pts) ++ " arguments, but got " ++
@@ -1173,6 +1181,7 @@ instantiatePolymorphicFunction maybe_fname call_loc (TypeM.BoundV tparams pts re
   return (map (fmap $ substituteTypes substs') pts,
           substituteTypes substs' ret)
   where
+    nope = throwError $ TypeError call_loc "Not a function."
     prefix = (("In call of function " ++ fname ++ ": ")++)
     fname = maybe "anonymous function" pretty maybe_fname
     tnames = map typeParamName tparams
@@ -1201,8 +1210,8 @@ maybePermitRecursion fname tparams params (Just rettype) m = do
   permit <- liftTypeM recursionPermitted
   if permit then
     let patternType' = toStruct . vacuousShapeAnnotations . patternType
-        pts = zip (repeat Nothing) $ map patternType' params
-        entry = BoundF (TypeM.BoundV tparams pts rettype) mempty
+        entry = BoundF (TypeM.BoundV tparams (foldr (Arrow Nothing . patternType')
+                                              rettype params)) mempty
         bindF scope = scope { scopeVtable = M.insert fname entry $ scopeVtable scope }
     in local bindF m
     else m
@@ -1308,7 +1317,7 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
       let ret' = case maybe_ret' of
                    Nothing -> toStruct $ vacuousShapeAnnotations $ typeOf body'
                    Just (TypeDecl _ (Info ret)) -> ret
-          lamt = TypeM.BoundV [] (zip (repeat Nothing) $ map patternStructType params') ret'
+          lamt = TypeM.BoundV [] $ foldr (Arrow Nothing . patternStructType) ret' params'
       (_, ret'') <- checkFuncall Nothing loc lamt args
       return (Lambda tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc,
               removeShapeAnnotations $ toStruct ret'')
@@ -1318,18 +1327,17 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
 
 checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
   | [x_arg,y_arg] <- args = do
-  (op', TypeM.BoundV tparams paramtypes rt, closure) <-
+  (op', TypeM.BoundV tparams ftype, closure) <-
     lookupFunction op (map argType [x_arg,y_arg]) loc
-  let paramtypes' = map (fromStruct . removeShapeAnnotations . snd) paramtypes
-
   occur closure
-  (_, rettype') <-
-    checkFuncall Nothing loc (TypeM.BoundV tparams paramtypes rt) [x_arg,y_arg]
+  (paramtypes', rettype') <-
+    checkFuncall Nothing loc (TypeM.BoundV tparams ftype) [x_arg,y_arg]
 
   case paramtypes' of
     [x_t, y_t] ->
       return (OpSection op'
-              (Info x_t) (Info y_t) (Info $ removeShapeAnnotations rettype') loc,
+              (Info x_t) (Info y_t)
+              (Info $ removeShapeAnnotations rettype') loc,
               removeShapeAnnotations rettype' `setAliases` mempty)
     _ ->
       fail "Internal type checker error: BinOpFun got bad parameter type."
@@ -1340,9 +1348,9 @@ checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
 
 checkFunExp (OpSectionLeft binop x _ _ loc) args
   | [arg] <- args = do
-      (x', binop', ret) <- checkCurryBinOp id binop x loc arg
+      (x', binop', xt, yt, ret) <- checkCurryBinOp id binop x loc arg
       return (OpSectionLeft binop'
-              x' (Info (typeOf x'), Info (argType arg)) (Info ret) loc,
+              x' (Info xt, Info yt) (Info ret) loc,
               ret `setAliases` mempty)
   | otherwise =
       bad $ ParameterMismatch (Just binop) loc (Left 1) $
@@ -1350,9 +1358,9 @@ checkFunExp (OpSectionLeft binop x _ _ loc) args
 
 checkFunExp (OpSectionRight binop x _ _ loc) args
   | [arg] <- args = do
-      (x', binop', ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
+      (x', binop', xt, yt, ret) <- checkCurryBinOp (uncurry $ flip (,)) binop x loc arg
       return (OpSectionRight binop'
-               x' (Info (argType arg), Info (typeOf x')) (Info ret) loc,
+               x' (Info xt, Info yt) (Info ret) loc,
               ret `setAliases` mempty)
   | otherwise =
       bad $ ParameterMismatch (Just binop) loc (Left 1) $
@@ -1361,15 +1369,16 @@ checkFunExp (OpSectionRight binop x _ _ loc) args
 checkFunExp e args = do
   (fname, curryargexps) <- findFuncall e
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  (fname', TypeM.BoundV tparams paramtypes rt, closure) <-
+  (fname', TypeM.BoundV tparams ftype, closure) <-
     lookupFunction fname (map argType $ curryargs++args) loc
-  case find (unique . snd) $ zip curryargexps $ map snd paramtypes of
-    Just (arg, _) -> bad $ CurriedConsumption fname $ srclocOf arg
-    _             -> return ()
 
   occur closure
   (paramtypes', rettype') <-
-    checkFuncall Nothing loc (TypeM.BoundV tparams paramtypes rt) (curryargs ++ args)
+    checkFuncall Nothing loc (TypeM.BoundV tparams ftype) (curryargs ++ args)
+
+  case find (unique . snd) $ zip curryargexps paramtypes' of
+    Just (arg, _) -> bad $ CurriedConsumption fname $ srclocOf arg
+    _             -> return ()
 
   let rettype'' = removeShapeAnnotations rettype'
   e' <- constructFuncall loc fname' curryargexps' paramtypes' rettype''
@@ -1378,7 +1387,7 @@ checkFunExp e args = do
 
 checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
                 -> QualName Name -> ExpBase NoInfo Name -> SrcLoc -> Arg
-                -> TermTypeM (Exp, QualName VName, CompType)
+                -> TermTypeM (Exp, QualName VName, StructType, StructType, CompType)
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
@@ -1386,10 +1395,10 @@ checkCurryBinOp arg_ordering binop x loc y_arg = do
     lookupFunction binop [argType first_arg, argType second_arg] loc
 
   occur closure
-  (_, rettype) <-
+  ([xt, yt], rettype) <-
     checkFuncall Nothing loc fun [first_arg,second_arg]
 
-  return (x', binop', removeShapeAnnotations rettype)
+  return (x', binop', xt, yt, removeShapeAnnotations rettype)
 
 --- Consumption
 
