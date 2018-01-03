@@ -159,12 +159,12 @@ checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
     localEnv env $ do
       (t2', st2) <- checkTypeExp t2
       return (TEArrow (Just v') t1' t2' loc,
-              Arrow (Just v') st1 st2)
+              Arrow mempty (Just v') st1 st2)
 checkTypeExp (TEArrow Nothing t1 t2 loc) = do
   (t1', st1) <- checkTypeExp t1
   (t2', st2) <- checkTypeExp t2
   return (TEArrow Nothing t1' t2' loc,
-          Arrow Nothing st1 st2)
+          Arrow mempty Nothing st1 st2)
 checkTypeExp ote@TEApply{} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
   (tname', ps, t) <- lookupType tloc tname
@@ -396,8 +396,8 @@ substituteTypes substs ot = case ot of
     | otherwise -> TypeVar v $ map substituteInTypeArg targs
   Record ts ->
     Record $ fmap (substituteTypes substs) ts
-  Arrow v t1 t2 ->
-    Arrow v (substituteTypes substs t1) (substituteTypes substs t2)
+  Arrow als v t1 t2 ->
+    Arrow als v (substituteTypes substs t1) (substituteTypes substs t2)
   where nope = error "substituteTypes: Cannot create array after substitution."
 
         substituteTypesInArrayElem (ArrayPrimElem t ()) =

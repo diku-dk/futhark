@@ -136,7 +136,7 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     rettype'' <- getType (srclocOf rettype') $ unInfo $ expandedType rettype'
     binding <- case rettype'' of
                  Left (params, rt) ->
-                   return $ BoundV tparams' $ foldr (uncurry Arrow) rt params
+                   return $ BoundV tparams' $ foldr (uncurry $ Arrow ()) rt params
                  Right rt -> do
                    unless (null tparams') $
                      throwError $ TypeError loc "Non-functional bindings may not be polymorphic."
@@ -469,7 +469,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
 
   return (mempty { envVtable =
                      M.singleton fname' $
-                     BoundV tparams' $ foldr (uncurry Arrow . patternParam) rettype params'
+                     BoundV tparams' $ foldr (uncurry (Arrow ()) . patternParam) rettype params'
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
@@ -659,7 +659,7 @@ matchMTys = matchMTys' mempty
       match mempty orig_spec_t orig_t
       where tnames = map typeParamName tps
 
-            match substs_and_locs (Arrow _ spec_pt spec_rt) (Arrow _ pt rt) =
+            match substs_and_locs (Arrow _ _ spec_pt spec_rt) (Arrow _ _ pt rt) =
               case instantiatePolymorphic tnames loc substs_and_locs pt' spec_pt' of
                 Right substs_and_locs' -> match substs_and_locs' spec_rt rt
                 Left _                 -> False
@@ -839,8 +839,8 @@ newNamesForMTy orig_mty = do
           in case arrayOf (Record ts') (substituteInShape shape) u of
             Just t' -> t'
             _ -> error "substituteInType: Cannot create array after substitution."
-        substituteInType (Arrow v t1 t2) =
-          Arrow v (substituteInType t1) (substituteInType t2)
+        substituteInType (Arrow als v t1 t2) =
+          Arrow als v (substituteInType t1) (substituteInType t2)
 
         substituteInShape (ShapeDecl ds) =
           ShapeDecl $ map substituteInDim ds

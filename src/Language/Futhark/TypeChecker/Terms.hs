@@ -105,10 +105,10 @@ altOccurences occurs1 occurs2 =
 
 --- Scope management
 
-data ValBinding = BoundV CompType
-                | BoundF TypeM.BoundV Occurences
-                -- ^ The occurences is non-empty only for local functions.
-                | OverloadedF [([TypeBase () ()], TypeM.BoundV)]
+data ValBinding = BoundV [TypeParam] PatternType
+                -- ^ Aliases in parameters indicate the lexical
+                -- closure.
+                | OverloadedF [([TypeBase () ()], PatternType)]
                 | EqualityF
                 | OpaqueF
                 | WasConsumed SrcLoc
@@ -133,10 +133,7 @@ instance Monoid TermScope where
 envToTermScope :: Env -> TermScope
 envToTermScope env = TermScope vtable (envTypeTable env) (envNameMap env)
   where vtable = M.map valBinding $ envVtable env
-        valBinding f@(TypeM.BoundV _ Arrow{}) =
-          BoundF f mempty
-        valBinding (TypeM.BoundV _ v) =
-          BoundV $ removeShapeAnnotations $ v `setAliases` mempty
+        valBinding (TypeM.BoundV tps v) = BoundV tps $ v `setAliases` mempty
 
 newtype TermTypeM a = TermTypeM (ReaderT
                                  TermScope
@@ -157,7 +154,6 @@ runTermTypeM (TermTypeM m) = do
   initial_scope <- (initialTermScope<>) <$> (envToTermScope <$> askEnv)
   runWriterT (runReaderT m initial_scope)
 
-
 liftTypeM :: TypeM a -> TermTypeM a
 liftTypeM = TermTypeM . lift . lift
 
@@ -165,17 +161,17 @@ initialTermScope :: TermScope
 initialTermScope = TermScope initialVtable mempty topLevelNameMap
   where initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
-        funF ts t = TypeM.BoundV [] $ foldr (Arrow Nothing . Prim) (Prim t) ts
+        funF ts t = foldr (Arrow mempty Nothing . Prim) (Prim t) ts
 
         addIntrinsicF (name, IntrinsicMonoFun ts t) =
-          Just (name, BoundF (funF ts t) mempty)
+          Just (name, BoundV [] $ funF ts t)
         addIntrinsicF (name, IntrinsicOverloadedFun variants) =
           Just (name, OverloadedF $ map frob variants)
           where frob (pts, rt) = (map Prim pts, funF pts rt)
         addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
-          Just (name, BoundF (TypeM.BoundV tvs $ vacuousShapeAnnotations $
-                              foldr (Arrow Nothing) rt pts)
-                      mempty)
+          Just (name, BoundV tvs $
+                      fromStruct $ vacuousShapeAnnotations $
+                      foldr (Arrow mempty Nothing) rt pts)
         addIntrinsicF (name, IntrinsicEquality) =
           Just (name, EqualityF)
         addIntrinsicF (name, IntrinsicOpaque) =
@@ -219,10 +215,10 @@ instance MonadTypeChecker TermTypeM where
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     case M.lookup name $ scopeVtable scope of
       Nothing -> bad $ UnknownVariableError Term qn loc
-      Just (BoundV t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
-                      | otherwise ->
-                          return (qn', qualifyTypeVars outer_env [] qs t)
-      Just BoundF{} -> bad $ FunctionIsNotValue loc qn
+      Just (BoundV _ Arrow{}) -> bad $ FunctionIsNotValue loc qn
+      Just (BoundV _ t) | "_" `isPrefixOf` pretty name -> bad $ UnderscoreUse loc qn
+                        | otherwise -> return (qn', qualifyTypeVars outer_env [] qs $
+                                                    removeShapeAnnotations t)
       Just EqualityF -> bad $ FunctionIsNotValue loc qn
       Just OpaqueF -> bad $ FunctionIsNotValue loc qn
       Just OverloadedF{} -> bad $ FunctionIsNotValue loc qn
@@ -260,39 +256,30 @@ checkReallyQualName space qn loc = do
 -- | In a few rare cases (overloaded builtin functions), the type of
 -- the parameters actually matters.
 lookupFunction :: QualName Name -> [CompType] -> SrcLoc
-               -> TermTypeM (QualName VName, TypeM.BoundV, Occurences)
+               -> TermTypeM (QualName VName, ([TypeParam], PatternType))
 lookupFunction qn argtypes loc = do
   outer_env <- liftTypeM askRootEnv
   (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
   case M.lookup name $ scopeVtable scope of
     Nothing -> bad $ UnknownVariableError Term qn loc
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) loc wloc
-    Just (BoundV t) -> bad $ ValueIsNotFunction loc qn t
-    Just (BoundF (TypeM.BoundV tparams t) closure) -> do
+    Just (BoundV tparams t@Arrow{}) -> do
       let qual = qualifyTypeVars outer_env (map typeParamName tparams) qs
-      r <- getType loc t
-      case r of
-        Left (params, rt) ->
-          return (qn',
-                   TypeM.BoundV tparams $
-                   foldr (uncurry Arrow . fmap qual) (qual rt) params,
-                   closure)
-        Right{} -> bad $ ValueIsNotFunction loc qn $
-                   removeShapeAnnotations $ t `setAliases` mempty
+      return (qn', (tparams, qual t))
+    Just (BoundV _ t) -> bad $ ValueIsNotFunction loc qn $ removeShapeAnnotations t
     Just (OverloadedF overloads) ->
       case lookup (map toStructural argtypes) overloads of
         Nothing -> bad $ TypeError loc $ "Overloaded function " ++ pretty qn ++
                    " not defined for arguments of types " ++
                    intercalate ", " (map pretty argtypes)
-        Just f -> return (qn', f, mempty)
+        Just f -> return (qn', ([], f))
     Just OpaqueF
       | [t] <- argtypes ->
-          let t' = vacuousShapeAnnotations $ toStruct t
+          let t' = vacuousShapeAnnotations t
           in return (qn',
-                     TypeM.BoundV [] $
-                     Arrow Nothing (t' `setUniqueness` Nonunique)
-                     (t' `setUniqueness` Nonunique),
-                     mempty)
+                     ([],
+                      Arrow mempty Nothing (t' `setUniqueness` Nonunique)
+                      (t' `setUniqueness` Nonunique)))
       | otherwise ->
           bad $ TypeError loc "Opaque function takes just a single argument."
     Just EqualityF
@@ -300,10 +287,9 @@ lookupFunction qn argtypes loc = do
         concreteType t1,
         concreteType t2,
         t1 == t2 ->
-          return (qn', TypeM.BoundV [] $
-                       vacuousShapeAnnotations $ toStruct $
-                       Arrow Nothing t1 $ Arrow Nothing t2 $ Prim Bool,
-                       mempty)
+          return (qn', ([],
+                        vacuousShapeAnnotations $
+                        Arrow mempty Nothing t1 $ Arrow mempty Nothing t2 $ Prim Bool))
       | otherwise ->
           bad $ TypeError loc $ "Equality not defined for arguments of types " ++
           intercalate ", " (map pretty argtypes)
@@ -332,14 +318,14 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar :: TermScope -> Ident -> TermScope
         bindVar scope (Ident name (Info tp) _) =
           let inedges = S.toList $ aliases tp
-              update (BoundV tp')
+              update (BoundV tparams tp')
               -- If 'name' is record-typed, don't alias the components
               -- to 'name', because records have no identity beyond
               -- their components.
-                | Record _ <- tp = BoundV tp'
-                | otherwise = BoundV (tp' `addAliases` S.insert name)
+                | Record _ <- tp = BoundV tparams tp'
+                | otherwise = BoundV tparams (tp' `addAliases` S.insert name)
               update b = b
-          in scope { scopeVtable = M.insert name (BoundV tp) $
+          in scope { scopeVtable = M.insert name (BoundV [] $ vacuousShapeAnnotations tp) $
                                    adjustSeveral update inedges $
                                    scopeVtable scope
                    }
@@ -592,10 +578,8 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', ftype, closure) <-
-    lookupFunction op (map argType [e1_arg,e2_arg]) loc
+  (op', ftype) <- lookupFunction op (map argType [e1_arg,e2_arg]) loc
 
-  occur closure
   ([e1_pt, e2_pt], rettype') <-
     checkFuncall (Just op) loc ftype [e1_arg, e2_arg]
   return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt)
@@ -669,14 +653,8 @@ checkExp (Negate arg loc) = do
 checkExp e@Apply{} = do
   (fname, args) <- findFuncall e
   (args', argflows) <- unzip <$> mapM checkArg args
-  (fname', ftype, closure) <-
-    lookupFunction fname (map argType argflows) loc
-
-  occur closure
-
-  (paramtypes, rettype) <-
-    checkFuncall (Just fname) loc ftype argflows
-
+  (fname', ftype) <- lookupFunction fname (map argType argflows) loc
+  (paramtypes, rettype) <- checkFuncall (Just fname) loc ftype argflows
   constructFuncall loc fname' args' paramtypes rettype
   where loc = srclocOf e
 
@@ -694,8 +672,8 @@ checkExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) =
   sequentially (checkFunDef' (name, maybe_retdecl, tparams, params, e, loc)) $
     \(name', tparams', params', maybe_retdecl', rettype, e') closure -> do
 
-    let ftype = foldr (uncurry Arrow . patternParam) rettype params'
-        entry = BoundF (TypeM.BoundV tparams' ftype) closure
+    let ftype = foldr (uncurry (Arrow ()) . patternParam) rettype params'
+        entry = BoundV tparams' $ ftype `setAliases` allOccuring closure
         bindF scope = scope { scopeVtable = M.insert name' entry $ scopeVtable scope }
     body' <- local bindF $ checkExp body
 
@@ -1140,15 +1118,14 @@ checkArg arg = do
   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
 checkFuncall :: Maybe (QualName Name) -> SrcLoc
-             -> TypeM.BoundV -> [Arg]
+             -> ([TypeParam], PatternType) -> [Arg]
              -> TermTypeM ([StructType],
                             TypeBase (DimDecl VName) Names)
 checkFuncall fname loc funbind args = do
-  (paramtypes, rettype) <-
-    instantiatePolymorphicFunction fname loc funbind args
+  (closure, paramtypes, rettype) <- instantiatePolymorphicFunction fname loc funbind args
+  occur closure
 
   let diets = map (diet . snd) paramtypes
-
   forM_ (zip diets args) $ \(d, (t, dflow, argloc)) -> do
     maybeCheckOccurences dflow
     let occurs = consumeArg argloc t d
@@ -1160,9 +1137,9 @@ checkFuncall fname loc funbind args = do
 -- | Find concrete types for a call to a polymorphic function.
 instantiatePolymorphicFunction :: MonadTypeChecker m =>
                                   Maybe (QualName Name) -> SrcLoc
-                               -> TypeM.BoundV -> [Arg]
-                               -> m ([(Maybe VName,StructType)], StructType)
-instantiatePolymorphicFunction maybe_fname call_loc (TypeM.BoundV tparams ftype) args = do
+                               -> ([TypeParam], PatternType) -> [Arg]
+                               -> m (Occurences, [(Maybe VName,StructType)], StructType)
+instantiatePolymorphicFunction maybe_fname call_loc (tparams, ftype) args = do
   (pts, ret) <- either pure (const nope) =<< getType call_loc ftype
 
   unless (length pts == length args) $
@@ -1172,8 +1149,9 @@ instantiatePolymorphicFunction maybe_fname call_loc (TypeM.BoundV tparams ftype)
 
   substs <- foldM instantiateArg mempty $ zip (map (toStructural . snd) pts) args
   let substs' = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst) substs
-  return (map (fmap $ substituteTypes substs') pts,
-          substituteTypes substs' ret)
+  return ([observation (aliases ftype) call_loc],
+          map (fmap $ substituteTypes substs' . toStruct) pts,
+          substituteTypes substs' $ toStruct ret)
   where
     nope = throwError $ TypeError call_loc "Not a function."
     prefix = (("In call of function " ++ fname ++ ": ")++)
@@ -1204,8 +1182,8 @@ maybePermitRecursion fname tparams params (Just rettype) m = do
   permit <- liftTypeM recursionPermitted
   if permit then
     let patternType' = toStruct . vacuousShapeAnnotations . patternType
-        entry = BoundF (TypeM.BoundV tparams (foldr (Arrow Nothing . patternType')
-                                              rettype params)) mempty
+        entry = BoundV tparams $
+                foldr (Arrow () Nothing . patternType') rettype params `setAliases` mempty
         bindF scope = scope { scopeVtable = M.insert fname entry $ scopeVtable scope }
     in local bindF m
     else m
@@ -1221,7 +1199,7 @@ checkFunDef' :: (Name, Maybe UncheckedTypeExp,
                  [UncheckedTypeParam], [UncheckedPattern],
                  UncheckedExp, SrcLoc)
              -> TermTypeM (VName, [TypeParam], [Pattern], Maybe (TypeExp VName), StructType, Exp)
-checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = do
+checkFunDef' (fname, maybe_retdecl, tparams, params, body, loc) = noUnique $ do
   fname' <- checkName Term fname loc
 
   when (baseString fname' == "&&") $
@@ -1309,9 +1287,9 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
                  (unInfo . expandedType <$> maybe_ret') loc
         return (maybe_ret', tparams', params', body')
       let ret' = case maybe_ret' of
-                   Nothing -> toStruct $ vacuousShapeAnnotations $ typeOf body'
+                   Nothing -> vacuousShapeAnnotations $ typeOf body' `setAliases` ()
                    Just (TypeDecl _ (Info ret)) -> ret
-          lamt = TypeM.BoundV [] $ foldr (Arrow Nothing . patternStructType) ret' params'
+          lamt = ([], foldr (Arrow () Nothing . patternStructType) ret' params' `setAliases` mempty)
       (_, ret'') <- checkFuncall Nothing loc lamt args
       return (Lambda tparams' params' body' maybe_ret' (Info $ toStruct ret'') loc,
               removeShapeAnnotations $ toStruct ret'')
@@ -1321,11 +1299,8 @@ checkFunExp (Lambda tparams params body maybe_ret NoInfo loc) args
 
 checkFunExp (OpSection op NoInfo NoInfo NoInfo loc) args
   | [x_arg,y_arg] <- args = do
-  (op', TypeM.BoundV tparams ftype, closure) <-
-    lookupFunction op (map argType [x_arg,y_arg]) loc
-  occur closure
-  (paramtypes', rettype') <-
-    checkFuncall Nothing loc (TypeM.BoundV tparams ftype) [x_arg,y_arg]
+  (op', ftype) <- lookupFunction op (map argType [x_arg,y_arg]) loc
+  (paramtypes', rettype') <- checkFuncall Nothing loc ftype [x_arg,y_arg]
 
   case paramtypes' of
     [x_t, y_t] ->
@@ -1363,12 +1338,9 @@ checkFunExp (OpSectionRight binop x _ _ loc) args
 checkFunExp e args = do
   (fname, curryargexps) <- findFuncall e
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  (fname', TypeM.BoundV tparams ftype, closure) <-
-    lookupFunction fname (map argType $ curryargs++args) loc
+  (fname', ftype) <- lookupFunction fname (map argType $ curryargs++args) loc
 
-  occur closure
-  (paramtypes', rettype') <-
-    checkFuncall Nothing loc (TypeM.BoundV tparams ftype) (curryargs ++ args)
+  (paramtypes', rettype') <- checkFuncall Nothing loc ftype (curryargs ++ args)
 
   case find (unique . snd) $ zip curryargexps paramtypes' of
     Just (arg, _) -> bad $ CurriedConsumption fname $ srclocOf arg
@@ -1385,13 +1357,8 @@ checkCurryBinOp :: ((Arg,Arg) -> (Arg,Arg))
 checkCurryBinOp arg_ordering binop x loc y_arg = do
   (x', x_arg) <- checkArg x
   let (first_arg, second_arg) = arg_ordering (x_arg, y_arg)
-  (binop', fun, closure) <-
-    lookupFunction binop [argType first_arg, argType second_arg] loc
-
-  occur closure
-  ([xt, yt], rettype) <-
-    checkFuncall Nothing loc fun [first_arg,second_arg]
-
+  (binop', fun) <- lookupFunction binop [argType first_arg, argType second_arg] loc
+  ([xt, yt], rettype) <- checkFuncall Nothing loc fun [first_arg,second_arg]
   return (x', binop', xt, yt, removeShapeAnnotations rettype)
 
 --- Consumption
@@ -1450,8 +1417,7 @@ alternative m1 m2 = pass $ do
 -- | Make all bindings nonunique.
 noUnique :: TermTypeM a -> TermTypeM a
 noUnique = local (\scope -> scope { scopeVtable = M.map set $ scopeVtable scope})
-  where set (BoundV t)         = BoundV $ t `setUniqueness` Nonunique
-        set (BoundF f closure) = BoundF f closure
+  where set (BoundV tparams t) = BoundV tparams $ t `setUniqueness` Nonunique
         set (OverloadedF f)    = OverloadedF f
         set EqualityF          = EqualityF
         set OpaqueF            = OpaqueF
@@ -1459,8 +1425,7 @@ noUnique = local (\scope -> scope { scopeVtable = M.map set $ scopeVtable scope}
 
 onlySelfAliasing :: TermTypeM a -> TermTypeM a
 onlySelfAliasing = local (\scope -> scope { scopeVtable = M.mapWithKey set $ scopeVtable scope})
-  where set k (BoundV t)         = BoundV $ t `addAliases` S.intersection (S.singleton k)
-        set _ (BoundF f closure) = BoundF f closure
+  where set k (BoundV tparams t) = BoundV tparams $ t `addAliases` S.intersection (S.singleton k)
         set _ (OverloadedF f)    = OverloadedF f
         set _ EqualityF          = EqualityF
         set _ OpaqueF            = OpaqueF
