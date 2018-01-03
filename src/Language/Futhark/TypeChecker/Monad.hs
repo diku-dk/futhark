@@ -424,7 +424,7 @@ getType :: MonadTypeChecker m =>
            SrcLoc -> TypeBase dim as
         -> m (Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
                      (TypeBase dim as))
-getType loc (Arrow v t1 t2) = do
+getType loc (Arrow _ v t1 t2) = do
   t1' <- getType loc t1
   t2' <- getType loc t2
   case (t1', t2') of

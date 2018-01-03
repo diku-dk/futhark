@@ -89,9 +89,9 @@ instance Pretty (ShapeDecl dim) => Pretty (TypeBase dim as) where
     | otherwise =
         braces $ commasep $ map ppField $ M.toList fs
     where ppField (name, t) = text (nameToString name) <> colon <> ppr t
-  ppr (Arrow (Just v) t1 t2) =
+  ppr (Arrow _ (Just v) t1 t2) =
     parens (ppr v <> colon <+> ppr t1) <+> text "->" <+> ppr t2
-  ppr (Arrow Nothing t1 t2) =
+  ppr (Arrow _ Nothing t1 t2) =
     ppr t1 <+> text "->" <+> ppr t2
 
 instance Pretty (ShapeDecl dim) => Pretty (TypeArg dim as) where

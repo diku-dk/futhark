@@ -128,7 +128,7 @@ nestedDims t =
             Record fs       -> nub $ fold $ fmap nestedDims fs
             Prim{}          -> mempty
             TypeVar _ targs -> concatMap typeArgDims targs
-            Arrow v t1 t2   -> filter (notV v) $ nestedDims t1 <> nestedDims t2
+            Arrow _ v t1 t2 -> filter (notV v) $ nestedDims t1 <> nestedDims t2
   where arrayNestedDims ArrayPrimElem{} =
           mempty
         arrayNestedDims (ArrayPolyElem _ targs _) =
@@ -536,8 +536,8 @@ returnType (Record fs) ds args =
 returnType (Prim t) _ _ = Prim t
 returnType (TypeVar t targs) ds args =
   TypeVar t $ map (\arg -> typeArgReturnType arg ds args) targs
-returnType (Arrow v t1 t2) ds args =
-  Arrow v (bimap id (const mempty) t1) (returnType t2 ds args)
+returnType (Arrow _ v t1 t2) ds args =
+  Arrow mempty v (bimap id (const mempty) t1) (returnType t2 ds args)
 
 typeArgReturnType :: TypeArg shape () -> [Diet] -> [CompType]
                   -> TypeArg shape Names

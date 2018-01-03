@@ -340,8 +340,23 @@ data TypeBase dim as = Prim PrimType
                      | Array (ArrayElemTypeBase dim as) (ShapeDecl dim) Uniqueness
                      | Record (M.Map Name (TypeBase dim as))
                      | TypeVar TypeName [TypeArg dim as]
-                     | Arrow (Maybe VName) (TypeBase dim as) (TypeBase dim as)
-                     deriving (Eq, Show)
+                     | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
+                     -- ^ The aliasing corresponds to the lexical
+                     -- closure of the function.
+                     deriving (Show)
+
+instance Eq dim => Eq (TypeBase dim as) where
+  Prim pt1 == Prim pt2 =
+    pt1 == pt2
+  Array et1 shape1 u1 == Array et2 shape2 u2 =
+    et1 == et2 && shape1 == shape2 && u1 == u2
+  Record fs1 == Record fs2 =
+    fs1 == fs2
+  TypeVar v1 args1 == TypeVar v2 args2 =
+    v1 == v2 && args1 == args2
+  Arrow _ _ tp1 tr1 == Arrow _ _ tp2 tr2 =
+    tp1 == tp2 && tr1 == tr2
+  _ == _ = False
 
 instance Bitraversable TypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
@@ -349,8 +364,8 @@ instance Bitraversable TypeBase where
     Array <$> bitraverse f g a <*> traverse f shape <*> pure u
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar t args) = TypeVar t <$> traverse (bitraverse f g) args
-  bitraverse f g (Arrow v t1 t2) =
-    Arrow v <$> bitraverse f g t1 <*> bitraverse f g t2
+  bitraverse f g (Arrow als v t1 t2) =
+    Arrow <$> g als <*> pure v <*> bitraverse f g t1 <*> bitraverse f g t2
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault

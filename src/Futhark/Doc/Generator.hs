@@ -179,9 +179,9 @@ prettyType t = case t of
   TypeVar et targs ->
     prettyTypeName et <> foldMap ((<> " ") . prettyTypeArg) targs
   Array et shape u -> prettyU u <> prettyShapeDecl shape <> prettyElem et
-  Arrow (Just v) t1 t2 ->
+  Arrow _ (Just v) t1 t2 ->
     parens (vnameHtml v <> ": " <> prettyType t1) <> " -> " <> prettyType t2
-  Arrow Nothing t1 t2 ->
+  Arrow _ Nothing t1 t2 ->
     prettyType t1 <> " -> " <> prettyType t2
 
 prettyElem :: ArrayElemTypeBase (DimDecl VName) () -> Html

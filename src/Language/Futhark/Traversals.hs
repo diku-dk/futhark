@@ -211,8 +211,8 @@ traverseType f g h (Array et shape u) =
   Array <$> traverseArrayElemType f g h et <*> traverse g shape <*> pure u
 traverseType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseType f g h (TypeVar t args) = TypeVar <$> f t <*> traverse (traverseTypeArg f g h) args
-traverseType f g h (Arrow v t1 t2) =
-  Arrow v <$> traverseType f g h t1 <*> traverseType f g h t2
+traverseType f g h (Arrow als v t1 t2) =
+  Arrow <$> h als <*> pure v <*> traverseType f g h t1 <*> traverseType f g h t2
 
 traverseArrayElemType :: Applicative f =>
                          TypeTraverser f ArrayElemTypeBase dim1 als1 dim2 als2
