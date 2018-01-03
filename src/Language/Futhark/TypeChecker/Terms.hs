@@ -592,20 +592,14 @@ checkExp (BinOp op (e1,_) (e2,_) NoInfo loc) = do
   (e1', e1_arg) <- checkArg e1
   (e2', e2_arg) <- checkArg e2
 
-  (op', TypeM.BoundV tparams ftype, closure) <-
+  (op', ftype, closure) <-
     lookupFunction op (map argType [e1_arg,e2_arg]) loc
 
-  r <- getType loc ftype
-
-  case r of
-    Left ([(_, e1_pt), (_, e2_pt)], _) -> do
-      occur closure
-      (_, rettype') <-
-        checkFuncall (Just op) loc (TypeM.BoundV tparams ftype) [e1_arg, e2_arg]
-      return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt)
-        (Info $ removeShapeAnnotations rettype') loc
-    _ ->
-      fail $ "Internal typechecker error: got invalid parameter types back from type checking binary operator " ++ pretty op
+  occur closure
+  ([e1_pt, e2_pt], rettype') <-
+    checkFuncall (Just op) loc ftype [e1_arg, e2_arg]
+  return $ BinOp op' (e1', diet e1_pt) (e2', diet e2_pt)
+    (Info $ removeShapeAnnotations rettype') loc
 
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
@@ -675,13 +669,13 @@ checkExp (Negate arg loc) = do
 checkExp e@Apply{} = do
   (fname, args) <- findFuncall e
   (args', argflows) <- unzip <$> mapM checkArg args
-  (fname', TypeM.BoundV tparams ftype, closure) <-
+  (fname', ftype, closure) <-
     lookupFunction fname (map argType argflows) loc
 
   occur closure
 
   (paramtypes, rettype) <-
-    checkFuncall (Just fname) loc (TypeM.BoundV tparams ftype) argflows
+    checkFuncall (Just fname) loc ftype argflows
 
   constructFuncall loc fname' args' paramtypes rettype
   where loc = srclocOf e
