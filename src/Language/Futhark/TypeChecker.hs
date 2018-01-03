@@ -117,7 +117,7 @@ bindingTypeParams tparams = localEnv env
 
         typeParamEnv (TypeParamDim v _) =
           mempty { envVtable =
-                     M.singleton v $ BoundV [] [] (Prim (Signed Int32)) }
+                     M.singleton v $ BoundV [] (Prim (Signed Int32)) }
         typeParamEnv (TypeParamType v _) =
           mempty { envTypeTable =
                      M.singleton v $ TypeAbbr [] $ TypeVar (typeName v) [] }
@@ -136,11 +136,11 @@ checkSpecs (ValSpec name tparams vtype doc loc : specs) =
     rettype'' <- getType (srclocOf rettype') $ unInfo $ expandedType rettype'
     binding <- case rettype'' of
                  Left (params, rt) ->
-                   return $ BoundV tparams' params rt
+                   return $ BoundV tparams' $ foldr (uncurry Arrow) rt params
                  Right rt -> do
                    unless (null tparams') $
                      throwError $ TypeError loc "Non-functional bindings may not be polymorphic."
-                   return $ BoundV [] [] rt
+                   return $ BoundV [] rt
 
     let valenv =
           mempty { envVtable = M.singleton name' binding
@@ -451,7 +451,7 @@ checkValBind (ValBind entry name maybe_tdecl NoInfo tparams [] e doc loc) = do
       return (Nothing, e')
   let e_t = vacuousShapeAnnotations $ toStructural $ typeOf e'
   return (mempty { envVtable =
-                     M.singleton name' $ BoundV [] [] e_t
+                     M.singleton name' $ BoundV [] e_t
                  , envNameMap =
                      M.singleton (Term, name) $ qualName name'
                  },
@@ -469,7 +469,7 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc loc
 
   return (mempty { envVtable =
                      M.singleton fname' $
-                     BoundV tparams' (map patternParam params') rettype
+                     BoundV tparams' $ foldr (uncurry Arrow . patternParam) rettype params'
                  , envNameMap =
                      M.singleton (Term, fname) $ qualName fname'
                  },
@@ -644,34 +644,35 @@ matchMTys = matchMTys' mempty
              -> VName -> BoundV
              -> VName -> BoundV
              -> Either TypeError (VName, VName)
-    matchVal _ spec_name (BoundV [] [] spec_t) name (BoundV [] [] t)
-      | toStructural t `subtypeOf` toStructural spec_t =
-          return (spec_name, name)
-    matchVal loc spec_name spec_f name f
+    matchVal loc spec_name spec_f@(BoundV _ Arrow{}) name f@(BoundV _ Arrow{})
       | matchFunBinding loc spec_f f =
+          return (spec_name, name)
+    matchVal _ spec_name (BoundV [] spec_t) name (BoundV [] t)
+      | toStructural t `subtypeOf` toStructural spec_t =
           return (spec_name, name)
     matchVal loc spec_name spec_v _ v =
       Left $ TypeError loc $ "Value " ++ baseString spec_name ++ " specified as type " ++
       ppValBind spec_v ++ " in signature, but has " ++ ppValBind v ++ " in structure."
 
     matchFunBinding :: SrcLoc -> BoundV -> BoundV -> Bool
-    matchFunBinding loc (BoundV _ spec_pts spec_ret) (BoundV tps pts ret)
-      | length spec_pts == length pts,
-        Just substs_and_locs <-
-          foldM match mempty $
-          zip (map (toStructural . snd) spec_pts) (map (toStructural . snd) pts) =
-          let substs = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst)
-                       substs_and_locs
-              -- This relies on the property that there can be no new
-              -- type variables in the return type.
-          in toStructural (substituteTypes substs ret)
-             `subtypeOf` toStructural spec_ret
+    matchFunBinding loc (BoundV _ orig_spec_t) (BoundV tps orig_t) =
+      match mempty orig_spec_t orig_t
       where tnames = map typeParamName tps
-            match substs (spec_t, t) =
-              case instantiatePolymorphic tnames loc substs t spec_t of
-                Right substs' -> Just substs'
-                Left _        -> Nothing
-    matchFunBinding _ _ _ = False
+
+            match substs_and_locs (Arrow _ spec_pt spec_rt) (Arrow _ pt rt) =
+              case instantiatePolymorphic tnames loc substs_and_locs pt' spec_pt' of
+                Right substs_and_locs' -> match substs_and_locs' spec_rt rt
+                Left _                 -> False
+                where pt' = toStructural pt
+                      spec_pt' = toStructural spec_pt
+
+            -- The base case relies on the property that there can be
+            -- no new type variables in the return type.
+            match substs_and_locs spec_t t =
+              let substs = M.map (TypeSub . TypeAbbr [] . vacuousShapeAnnotations . fst)
+                           substs_and_locs
+              in toStructural (substituteTypes substs t)
+                 `subtypeOf` toStructural spec_t
 
     missingType loc name =
       Left $ TypeError loc $
@@ -703,11 +704,7 @@ matchMTys = matchMTys' mempty
           _ ->
             missingType loc $ fmap baseName name
 
-    ppValBind (BoundV [] [] t) = pretty t
-    ppValBind (BoundV tps pts t) =
-      unwords $ map pretty tps ++ intersperse "->" (map ppParam $ pts ++ [(Nothing, t)])
-      where ppParam (Nothing, pt) = pretty pt
-            ppParam (Just v, pt) = "(" ++ pretty (baseName v) ++ ": " ++ pretty pt ++ ")"
+    ppValBind (BoundV tps t) = unwords $ map pretty tps ++ [pretty t]
 
     ppTypeAbbr (ps, t) =
       "type " ++ unwords (map pretty ps) ++ " = " ++ pretty t
@@ -803,10 +800,8 @@ newNamesForMTy orig_mty = do
              zip (map (\k -> fromMaybe k $ M.lookup k substs) ks)
                  (map f vs)
 
-        substituteInBinding (BoundV ps pts t) =
-          BoundV (map substituteInTypeParam ps)
-                 (map (fmap substituteInType) pts)
-                 (substituteInType t)
+        substituteInBinding (BoundV ps t) =
+          BoundV (map substituteInTypeParam ps) (substituteInType t)
 
         substituteInMod (ModEnv env) =
           ModEnv $ substituteInEnv env

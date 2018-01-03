@@ -82,11 +82,11 @@ prettyDec fileModule dec = case dec of
 
 prettyVal :: FileModule -> ValBindBase t VName -> Maybe Html
 prettyVal fm (ValBind _ name _retdecl _rettype _tparams _args _ doc _)
-  | Just (BoundV tps pts rett) <- M.lookup name vtable
+  | Just (BoundV tps t) <- M.lookup name vtable
   , visible Term name fm = Just $
     renderDoc doc <> "val " <> vnameHtml name <>
     foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
-    foldMap (\t -> prettyParam t <> " -> ") pts <> prettyType rett
+    prettyType t
     where FileModule _abs Env {envVtable = vtable} _ = fm
 prettyVal _ _ = Nothing
 
@@ -161,15 +161,10 @@ renderTypeBind (name, TypeAbbr tps tp) =
   H.div $ typeHtml name tps <> prettyType tp
 
 prettyValBind :: (VName, BoundV) -> Html
-prettyValBind (name, BoundV tps pts rettype) =
+prettyValBind (name, BoundV tps t) =
   "val " <> vnameHtml name <>
   foldMap (" " <>) (map prettyTypeParam tps) <> ": " <>
-  foldMap (\t -> prettyParam t <> " -> ") pts <> " " <>
-  prettyType rettype
-
-prettyParam :: (Maybe VName, StructType) -> Html
-prettyParam (Nothing, t) = prettyType t
-prettyParam (Just v, t) = parens $ vnameHtml v <> ": " <> prettyType t
+  prettyType t
 
 prettyType :: StructType -> Html
 prettyType t = case t of

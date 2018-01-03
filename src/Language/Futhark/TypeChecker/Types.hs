@@ -18,7 +18,6 @@ module Language.Futhark.TypeChecker.Types
 
   , instantiatePolymorphic
 
-  , getType
   , arrayOfM
   )
 where
@@ -156,7 +155,7 @@ checkTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', st1) <- checkTypeExp t1
   bindSpaced [(Term, v)] $ do
     v' <- checkName Term v loc
-    let env = mempty { envVtable = M.singleton v' $ BoundV [] [] st1 }
+    let env = mempty { envVtable = M.singleton v' $ BoundV [] st1 }
     localEnv env $ do
       (t2', st2) <- checkTypeExp t2
       return (TEArrow (Just v') t1' t2' loc,
@@ -427,8 +426,8 @@ substituteTypes substs ot = case ot of
         substituteInDim d = d
 
 substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
-substituteTypesInBoundV substs (BoundV tps pts t) =
-  BoundV tps (map (fmap (substituteTypes substs)) pts) (substituteTypes substs t)
+substituteTypesInBoundV substs (BoundV tps t) =
+  BoundV tps (substituteTypes substs t)
 
 applyType :: [TypeParam] -> StructType -> [StructTypeArg] -> StructType
 applyType ps t args =
@@ -510,22 +509,6 @@ instantiatePolymorphic tnames loc orig_substs x y =
       instantiate t arg_t
     instantiateTypeArg _ _ =
       lift $ Left Nothing
-
--- | Extract from a type either a function type comprising a list of
--- parameter types and a return type (all of which must be
--- first-order), or a first-order type.
-getType :: MonadTypeChecker m =>
-           SrcLoc -> TypeBase dim as
-        -> m (Either ([(Maybe VName, TypeBase dim as)], TypeBase dim as)
-                     (TypeBase dim as))
-getType loc (Arrow v t1 t2) = do
-  t1' <- getType loc t1
-  t2' <- getType loc t2
-  case (t1', t2') of
-    (Left _, _) -> throwError $ TypeError loc "Higher-order functions are not supported yet."
-    (Right t1'', Left (ps, r)) -> return $ Left ((v,t1'') : ps, r)
-    (Right t1'', Right t2'') -> return $ Left ([(v,t1'')], t2'')
-getType _ t = return $ Right t
 
 arrayOfM :: (MonadTypeChecker m, Pretty (ShapeDecl dim), ArrayDim dim, Monoid as) =>
             SrcLoc
