@@ -98,13 +98,12 @@ let map_tridag_par
          myMu: [outer][inner]f32,  myVar: [outer][inner]f32,
          u:   *[outer][inner]f32,  dtInv: f32  ): *[][]f32 =
   map (\mu_row var_row (u_row: *[]f32): *[inner]f32  ->
-             let abc = map (\mu var d dd: (f32,f32,f32)  ->
-                                  ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
-                                  , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
-                                  , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])
-                                  )
-                               ) mu_row var_row myD myDD
-             let (a,b,c) = unzip(abc)
+             let (a,b,c) = unzip (map (\mu var d dd: (f32,f32,f32)  ->
+                                       ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
+                                       , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
+                                       , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])
+                                       )
+                                      ) mu_row var_row myD myDD)
              in tridagPar( a, b, c, u_row )
           ) myMu myVar u
 

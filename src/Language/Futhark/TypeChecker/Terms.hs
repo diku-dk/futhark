@@ -809,15 +809,18 @@ checkExp (Unzip e _ loc) = do
   e' <- checkExp e
   case typeOf e' of
     Array (ArrayRecordElem fs) shape u
-      | Just ets <- mapM (componentType shape u) =<< areTupleFields fs ->
+      | Just ets <- map (componentType shape u) <$> areTupleFields fs ->
           return $ Unzip e' (map Info ets) loc
     t ->
       bad $ TypeError loc $
       "Argument to unzip is not an array of tuples, but " ++
       pretty t ++ "."
   where componentType shape u et =
-          let u' = max u $ recordArrayElemUniqueness et
-          in arrayOf (recordArrayElemToType et) shape u'
+          case et of
+            RecordArrayElem et' ->
+              Array et' shape u
+            RecordArrayArrayElem et' et_shape et_u ->
+              Array et' (shape <> et_shape) (u `max` et_u)
 
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
