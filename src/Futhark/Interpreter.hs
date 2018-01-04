@@ -312,48 +312,18 @@ buildFunTable = foldl expand builtins . progFunctions
 --------------------------------------------
 
 builtins :: M.Map Name ([Value] -> FutharkM [Value])
-builtins = M.fromList $ map namify
-           [("sqrt32", builtin "sqrt32")
-           ,("log32", builtin "log32")
-           ,("exp32", builtin "exp32")
-           ,("cos32", builtin "cos32")
-           ,("sin32", builtin "sin32")
-           ,("acos32", builtin "acos32")
-           ,("asin32", builtin "asin32")
-           ,("atan32", builtin "atan32")
-           ,("atan2_32", builtin "atan2_32")
-           ,("isinf32", builtin "isinf32")
-           ,("isnan32", builtin "isnan32")
-           ,("to_bits32", builtin "to_bits32")
-           ,("from_bits32", builtin "from_bits32")
+builtins = M.mapWithKey builtin $ M.mapKeys nameFromString primFuns
+  where builtin _ (_, _, fun) args
+          | Just args' <- mapM isPrimValue args,
+            Just result <- fun args' =
+              return [PrimVal result]
 
-           ,("sqrt64", builtin "sqrt64")
-           ,("log64", builtin "log64")
-           ,("exp64", builtin "exp64")
-           ,("cos64", builtin "cos64")
-           ,("sin64", builtin "sin64")
-           ,("acos64", builtin "acos64")
-           ,("asin64", builtin "asin64")
-           ,("atan64", builtin "atan64")
-           ,("atan2_64", builtin "atan2_64")
-           ,("isinf64", builtin "isinf64")
-           ,("isnan64", builtin "isnan64")
-           ,("to_bits64", builtin "to_bits64")
-           ,("from_bits64", builtin "from_bits64")
-           ]
-  where namify (k,v) = (nameFromString k, v)
+        builtin fname _ args =
+          bad $ InvalidFunctionArguments fname Nothing $
+          map (rankShaped . valueType) args
 
-builtin :: String -> [Value] -> FutharkM [Value]
-builtin fname args
-  | Just args' <- mapM isPrimValue args,
-    Just (_, _, fun) <- M.lookup fname primFuns,
-    Just result <- fun args' =
-      return [PrimVal result]
-  where isPrimValue (PrimVal v) = Just v
+        isPrimValue (PrimVal v) = Just v
         isPrimValue _ = Nothing
-builtin fname args =
-  bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
-        map (rankShaped . valueType) args
 
 single :: Value -> [Value]
 single v = [v]
