@@ -211,12 +211,14 @@ subargOf (TypeArgType t1 _) (TypeArgType t2 _) = t1 `subtypeOf` t2
 subargOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
--- ignoring uniqueness.
+-- ignoring uniqueness and aliasing.
 similarTo :: ArrayDim dim =>
              TypeBase dim as1
           -> TypeBase dim as2
           -> Bool
-similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
+similarTo t1 t2 = t1' `subtypeOf` t2' || t2' `subtypeOf` t1'
+  where t1' = toStruct t1
+        t2' = toStruct t2
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness

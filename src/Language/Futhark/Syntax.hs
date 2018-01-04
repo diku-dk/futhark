@@ -307,17 +307,7 @@ data ArrayElemTypeBase dim as =
     ArrayPrimElem PrimType as
   | ArrayPolyElem TypeName [TypeArg dim as] as
   | ArrayRecordElem (M.Map Name (RecordArrayElemTypeBase dim as))
-  deriving (Show)
-
-instance Eq dim => Eq (ArrayElemTypeBase dim as) where
-  ArrayPrimElem et1 _ == ArrayPrimElem et2 _ =
-    et1 == et2
-  ArrayPolyElem et1 args1 _ == ArrayPolyElem et2 args2 _ =
-    et1 == et2 && args1 == args2
-  ArrayRecordElem ts1 == ArrayRecordElem ts2 =
-    ts1 == ts2
-  _ == _ =
-    False
+  deriving (Eq, Show)
 
 instance Bitraversable ArrayElemTypeBase where
   bitraverse _ g (ArrayPrimElem t as) =
@@ -343,20 +333,7 @@ data TypeBase dim as = Prim PrimType
                      | Arrow as (Maybe VName) (TypeBase dim as) (TypeBase dim as)
                      -- ^ The aliasing corresponds to the lexical
                      -- closure of the function.
-                     deriving (Show)
-
-instance Eq dim => Eq (TypeBase dim as) where
-  Prim pt1 == Prim pt2 =
-    pt1 == pt2
-  Array et1 shape1 u1 == Array et2 shape2 u2 =
-    et1 == et2 && shape1 == shape2 && u1 == u2
-  Record fs1 == Record fs2 =
-    fs1 == fs2
-  TypeVar v1 args1 == TypeVar v2 args2 =
-    v1 == v2 && args1 == args2
-  Arrow _ _ tp1 tr1 == Arrow _ _ tp2 tr2 =
-    tp1 == tp2 && tr1 == tr2
-  _ == _ = False
+                     deriving (Eq, Show)
 
 instance Bitraversable TypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
