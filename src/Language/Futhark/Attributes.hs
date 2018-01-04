@@ -38,9 +38,7 @@ module Language.Futhark.Attributes
   , subtypeOf
   , similarTo
   , arrayRank
-  , arrayDims
   , nestedDims
-  , arrayShape
   , returnType
   , concreteType
 
@@ -115,10 +113,6 @@ arrayRank = shapeRank . arrayShape
 arrayShape :: TypeBase dim as -> ShapeDecl dim
 arrayShape (Array _ ds _) = ds
 arrayShape _ = mempty
-
--- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims :: TypeBase dim as -> [dim]
-arrayDims = shapeDims . arrayShape
 
 -- | Return any shape declarations in the type, with duplicates
 -- removed.
