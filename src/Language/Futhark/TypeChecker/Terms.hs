@@ -286,7 +286,7 @@ lookupFunction qn argtypes loc = do
       | [t1,t2] <- argtypes,
         concreteType t1,
         concreteType t2,
-        t1 == t2 ->
+        t1 `similarTo` t2 ->
           return (qn', ([],
                         vacuousShapeAnnotations $
                         Arrow mempty Nothing t1 $ Arrow mempty Nothing t2 $ Prim Bool))

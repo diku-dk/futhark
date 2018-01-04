@@ -41,7 +41,7 @@ import Futhark.Util.Pretty (Pretty)
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
-unifyTypes :: (Monoid als, ArrayDim dim) =>
+unifyTypes :: (Monoid als, Eq als, ArrayDim dim) =>
               TypeBase dim als
            -> TypeBase dim als
            -> Maybe (TypeBase dim als)
@@ -63,7 +63,7 @@ unifyTypes (Record ts1) (Record ts2)
       (M.intersectionWith (,) ts1 ts2)
 unifyTypes _ _ = Nothing
 
-unifyTypeArgs :: (Monoid als, ArrayDim dim) =>
+unifyTypeArgs :: (Monoid als, Eq als, ArrayDim dim) =>
                  TypeArg dim als -> TypeArg dim als -> Maybe (TypeArg dim als)
 unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim d2 _) =
   TypeArgDim <$> unifyDims d1 d2 <*> pure loc
@@ -72,7 +72,7 @@ unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
 unifyTypeArgs _ _ =
   Nothing
 
-unifyArrayElemTypes :: (Monoid als, ArrayDim dim) =>
+unifyArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
                        ArrayElemTypeBase dim als
                     -> ArrayElemTypeBase dim als
                     -> Maybe (ArrayElemTypeBase dim als)
@@ -89,7 +89,7 @@ unifyArrayElemTypes (ArrayRecordElem et1) (ArrayRecordElem et2)
 unifyArrayElemTypes _ _ =
   Nothing
 
-unifyRecordArrayElemTypes :: (Monoid als, ArrayDim dim) =>
+unifyRecordArrayElemTypes :: (Monoid als, Eq als, ArrayDim dim) =>
                              RecordArrayElemTypeBase dim als
                           -> RecordArrayElemTypeBase dim als
                           -> Maybe (RecordArrayElemTypeBase dim als)

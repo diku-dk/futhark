@@ -342,7 +342,7 @@ checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 require :: MonadTypeChecker m => [TypeBase () ()] -> Exp -> m Exp
 require ts e
-  | any (toStruct (typeOf e) `similarTo`) ts = return e
+  | any (typeOf e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e)
                       (toStructural $ typeOf e) ts
 
