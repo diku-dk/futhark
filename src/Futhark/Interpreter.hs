@@ -41,8 +41,6 @@ data InterpreterError =
       -- ^ Called @replicate(n, x)@ where @n@ was negative.
     | InvalidArrayShape Exp [Int] [Int]
       -- ^ First @Int@ is old shape, second is attempted new shape.
-    | ZipError [Int]
-      -- ^ The arguments to @zip@ were of different lengths.
     | AssertFailed String (SrcLoc, [SrcLoc])
       -- ^ Assertion failed at this location.
     | TypeError String
@@ -73,8 +71,6 @@ instance Show InterpreterError where
   show (InvalidArrayShape e shape newshape) =
     "Invalid array reshaping " ++ pretty e ++
     ", from " ++ show shape ++ " to " ++ show newshape
-  show (ZipError lengths) =
-    "Array arguments to zip must have same length, but arguments have lengths " ++ intercalate ", " (map show lengths) ++ "."
   show (AssertFailed msg (loc,locs)) =
     "Assertion failed at " ++ stacktrace ++ ":\n" ++ msg
     where stacktrace = intercalate " -> " (reverse $ map locStr $ loc:locs)
