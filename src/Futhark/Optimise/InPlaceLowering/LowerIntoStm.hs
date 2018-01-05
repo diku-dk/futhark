@@ -181,12 +181,8 @@ summariseLoop updates usedInBody resmap merge =
                                                                updateType update)
                                        }
             else Nothing
-        summariseLoopResult (se, patpart) (fparam, mergeinit) =
-          Just $ return LoopResultSummary { resultSubExp = se
-                                          , inPatternAs = patpart
-                                          , mergeParam = (fparam, mergeinit)
-                                          , relatedUpdate = Nothing
-                                          }
+        summariseLoopResult _ _ =
+          Nothing -- XXX: conservative; but this entire pass is going away.
 
         hasLoopInvariantShape = all loopInvariant . arrayDims . paramType
 
