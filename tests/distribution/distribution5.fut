@@ -5,9 +5,7 @@
 -- map
 --   map
 --     map
--- map
---   map
---     concat
+-- concat
 -- map
 --   map
 --     reduce (which becomes a segmented reduction)
@@ -15,7 +13,8 @@
 -- ==
 --
 -- structure distributed {
---   Kernel 8
+--   Kernel 7
+--   Concat 1
 -- }
 
 let main [n][an][bn] (a: [n][an][]i32, b: [n][bn]i32): ([][]i32,[][]i32) =
