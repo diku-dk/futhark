@@ -14,14 +14,6 @@ dist
 # Ignore Stack junk
 .stack-work
 
-# Ignore result of test suite.
-tests/*
-!tests/*.fut
-!tests/**/*.fut
-examples/*
-!examples/*.fut
-!examples/**/*.fut
-
 # Ignore side-effects of compilation.
 *.aux
 *.log
@@ -35,8 +27,6 @@ examples/*
 *.toc
 *.vrb
 *.nav
-
-!tests/**/*.out
 
 # Ignore core dumps.
 core
