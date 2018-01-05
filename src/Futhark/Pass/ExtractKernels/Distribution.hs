@@ -11,6 +11,7 @@ module Futhark.Pass.ExtractKernels.Distribution
        , ppTargets
        , singleTarget
        , outerTarget
+       , innerTarget
        , pushInnerTarget
        , popInnerTarget
        , targetsScope
@@ -66,7 +67,7 @@ type Target = (Pattern Kernels, Result)
 -- element of a pattern must be present as the result of the
 -- immediately enclosing target.  This is ensured by 'pushInnerTarget'
 -- by removing unused pattern elements.
-data Targets = Targets { innerTarget :: Target
+data Targets = Targets { _innerTarget :: Target
                        , _outerTargets :: [Target]
                        }
 
@@ -82,6 +83,9 @@ singleTarget = flip Targets []
 outerTarget :: Targets -> Target
 outerTarget (Targets inner_target []) = inner_target
 outerTarget (Targets _ (outer_target : _)) = outer_target
+
+innerTarget :: Targets -> Target
+innerTarget (Targets inner_target _) = inner_target
 
 pushOuterTarget :: Target -> Targets -> Targets
 pushOuterTarget target (Targets inner_target targets) =

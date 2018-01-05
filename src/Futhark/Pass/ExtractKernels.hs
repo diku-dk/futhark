@@ -444,8 +444,14 @@ distributeMap pat (MapLoop cs w lam arrs) = do
                       , kernelScope =
                         scopeForKernels (scopeOf lam) <> types
                       }
-  par_stms <- fmap (postKernelsStms . snd) $ runKernelM env $
+  (acc', postkernels) <- runKernelM env $
     distribute =<< distributeMapBodyStms acc (stmsToList $ bodyStms $ lambdaBody lam)
+
+  -- There may be a few final targets remaining - these correspond to
+  -- arrays that are identity mapped, and must have statements
+  -- inserted here.
+  let par_stms = postKernelsStms postkernels <>
+                 identityStms (outerTarget $ kernelTargets acc')
 
   if not versionedCode || not (containsNestedParallelism lam)
     then return par_stms
@@ -460,6 +466,15 @@ distributeMap pat (MapLoop cs w lam arrs) = do
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelStms = mempty
                           }
+
+          params_to_arrs = zip (map paramName $ lambdaParams lam) arrs
+          identityStms (rem_pat, res) =
+            stmsFromList $ zipWith identityStm (patternValueElements rem_pat) res
+          identityStm pe (Var v)
+            | Just arr <- lookup v params_to_arrs =
+                Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Copy arr
+          identityStm pe se =
+            Let (Pattern [] [pe]) (defAux ()) $ BasicOp $ Replicate (Shape [w]) se
 
 distributeMap' :: (HasScope Out.Kernels m, MonadFreshNames m) =>
                   KernelNest
