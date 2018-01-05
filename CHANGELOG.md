@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
    * `futhark-bench`: Add ``--skip-compilation`` flag.
 
+   * `scatter` expressions nested in `map`s are now parallelised.
+
 ### Removed
 
    * `futhark-dataset`: Removed `--binary-no-header` and

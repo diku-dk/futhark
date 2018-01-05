@@ -991,6 +991,20 @@ maybeDistributeStm bnd@(Let _ aux (BasicOp (Reshape reshape _))) acc =
                    map DimNew (newDims reshape)
     addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
 
+maybeDistributeStm stm@(Let _ aux (BasicOp (Concat d _ _ w))) acc =
+  distributeSingleStm acc stm >>= \case
+    Just (kernels, _, nest, acc')
+      | (outer, _) <- nest,
+        x:xs <- map snd $ loopNestingParamsAndArrs outer ->
+        localScope (typeEnvFromKernelAcc acc') $ do
+          let d' = d + length (snd nest) + 1
+              outerpat = loopNestingPattern $ fst nest
+          addKernels kernels
+          addKernel $ oneStm $ Let outerpat aux $ BasicOp $ Concat d' x xs w
+          return acc'
+    _ ->
+      addStmToKernel stm acc
+
 maybeDistributeStm bnd acc =
   addStmToKernel bnd acc
 
