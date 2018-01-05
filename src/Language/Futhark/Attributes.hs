@@ -484,7 +484,7 @@ typeOf (Index ident idx _) =
   stripArray (length $ filter isFix idx) (typeOf ident)
   where isFix DimFix{} = True
         isFix _        = False
-typeOf (Update e _ _ _) = typeOf e
+typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
 typeOf (Reshape shape  e _) =
   typeOf e `setArrayShape` rank n
   where n = case typeOf shape of Record ts -> length ts
