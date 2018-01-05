@@ -987,63 +987,8 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
                   While cond',
                   loopbody')
 
-  let consumed_merge = S.map identName (patIdentSet mergepat') `S.intersection`
-                       allConsumed bodyflow
-      uniquePat (Wildcard (Info t) wloc) =
-        Wildcard (Info $ t `setUniqueness` Nonunique) wloc
-      uniquePat (PatternParens p ploc) =
-        PatternParens (uniquePat p) ploc
-      uniquePat (Id name (Info t) iloc)
-        | name `S.member` consumed_merge =
-            let t' = t `setUniqueness` Unique `setAliases` mempty
-            in Id name (Info t') iloc
-        | otherwise =
-            let t' = case t of Record{} -> t
-                               _        -> t `setUniqueness` Nonunique
-            in Id name (Info t') iloc
-      uniquePat (TuplePattern pats ploc) =
-        TuplePattern (map uniquePat pats) ploc
-      uniquePat (RecordPattern fs ploc) =
-        RecordPattern (map (fmap uniquePat) fs) ploc
-      uniquePat (PatternAscription p t) =
-        PatternAscription (uniquePat p) t
-
-      -- Make the pattern unique where needed.
-      mergepat'' = uniquePat mergepat'
-
-  -- Now check that the loop returned the right type.
-  unless (typeOf loopbody' `subtypeOf` patternType mergepat'') $
-    bad $ UnexpectedType (srclocOf loopbody')
-    (toStructural $ typeOf loopbody')
-    [toStructural $ patternType mergepat'']
-
-  -- Check that the new values of consumed merge parameters do not
-  -- alias something bound outside the loop, AND that anything
-  -- returned for a unique merge parameter does not alias anything
-  -- else returned.
-  bound_outside <- asks $ S.fromList . M.keys . scopeVtable
-  let checkMergeReturn (Id pat_v (Info pat_t) _) t
-        | unique pat_t,
-          v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
-            lift $ bad $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
-            pretty pat_v ++ " aliases " ++ pretty v ++ "."
-        | otherwise = do
-            (cons,obs) <- get
-            unless (S.null $ aliases t `S.intersection` cons) $
-              lift $ bad $ TypeError loc $ "Loop return value for merge parameter " ++
-              pretty pat_v ++ " aliases other consumed merge parameter."
-            when (unique pat_t &&
-                  not (S.null (aliases t `S.intersection` (cons<>obs)))) $
-              lift $ bad $ TypeError loc $ "Loop return value for consuming merge parameter " ++
-              pretty pat_v ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
-            if unique pat_t
-              then put (cons<>aliases t, obs)
-              else put (cons, obs<>aliases t)
-      checkMergeReturn (TuplePattern pats _) t | Just ts <- isTupleRecord t =
-        zipWithM_ checkMergeReturn pats ts
-      checkMergeReturn _ _ =
-        return ()
-  evalStateT (checkMergeReturn mergepat'' $ typeOf loopbody') (mempty, mempty)
+  mergepat'' <- convergePattern mergepat'
+                (allConsumed bodyflow) (typeOf loopbody') (srclocOf loopbody')
 
   let consumeMerge (Id _ (Info pt) ploc) mt
         | unique pt = consume ploc $ aliases mt
@@ -1057,6 +1002,70 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
         return ()
   consumeMerge mergepat'' $ typeOf mergeexp'
   return $ DoLoop tparams' mergepat'' mergeexp' form' loopbody' loc
+
+  where
+    convergePattern pat body_cons body_t body_loc = do
+      let consumed_merge = S.map identName (patIdentSet pat) `S.intersection`
+                           body_cons
+          uniquePat (Wildcard (Info t) wloc) =
+            Wildcard (Info $ t `setUniqueness` Nonunique) wloc
+          uniquePat (PatternParens p ploc) =
+            PatternParens (uniquePat p) ploc
+          uniquePat (Id name (Info t) iloc)
+            | name `S.member` consumed_merge =
+                let t' = t `setUniqueness` Unique `setAliases` mempty
+                in Id name (Info t') iloc
+            | otherwise =
+                let t' = case t of Record{} -> t
+                                   _        -> t `setUniqueness` Nonunique
+                in Id name (Info t') iloc
+          uniquePat (TuplePattern pats ploc) =
+            TuplePattern (map uniquePat pats) ploc
+          uniquePat (RecordPattern fs ploc) =
+            RecordPattern (map (fmap uniquePat) fs) ploc
+          uniquePat (PatternAscription p t) =
+            PatternAscription (uniquePat p) t
+
+          -- Make the pattern unique where needed.
+          pat' = uniquePat pat
+
+      -- Now check that the loop returned the right type.
+      unless (body_t `subtypeOf` patternType pat') $
+        bad $ UnexpectedType body_loc
+        (toStructural body_t)
+        [toStructural $ patternType pat']
+
+      -- Check that the new values of consumed merge parameters do not
+      -- alias something bound outside the loop, AND that anything
+      -- returned for a unique merge parameter does not alias anything
+      -- else returned.
+      bound_outside <- asks $ S.fromList . M.keys . scopeVtable
+      let checkMergeReturn (Id pat_v (Info pat_t) _) t
+            | unique pat_t,
+              v:_ <- S.toList $ aliases t `S.intersection` bound_outside =
+                lift $ bad $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
+                pretty pat_v ++ " aliases " ++ pretty v ++ "."
+            | otherwise = do
+                (cons,obs) <- get
+                unless (S.null $ aliases t `S.intersection` cons) $
+                  lift $ bad $ TypeError loc $ "Loop return value for merge parameter " ++
+                  pretty pat_v ++ " aliases other consumed merge parameter."
+                when (unique pat_t &&
+                      not (S.null (aliases t `S.intersection` (cons<>obs)))) $
+                  lift $ bad $ TypeError loc $ "Loop return value for consuming merge parameter " ++
+                  pretty pat_v ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
+                if unique pat_t
+                  then put (cons<>aliases t, obs)
+                  else put (cons, obs<>aliases t)
+          checkMergeReturn (TuplePattern pats _) t | Just ts <- isTupleRecord t =
+            zipWithM_ checkMergeReturn pats ts
+          checkMergeReturn _ _ =
+            return ()
+      (pat_cons, _) <- execStateT (checkMergeReturn pat' body_t) (mempty, mempty)
+      let body_cons' = body_cons <> pat_cons
+      if body_cons' == body_cons
+        then return pat'
+        else convergePattern pat' body_cons' body_t body_loc
 
 checkSOACArrayArg :: ExpBase NoInfo Name
                   -> TermTypeM (Exp, Arg)
