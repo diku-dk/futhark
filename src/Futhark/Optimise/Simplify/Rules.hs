@@ -7,6 +7,7 @@
 -- simplifier.
 module Futhark.Optimise.Simplify.Rules
   ( standardRules
+  , removeUnnecessaryCopy
   )
 where
 
@@ -441,6 +442,20 @@ arrayLitToReplicate _ pat _ (ArrayLit (se:ses) _)
     let n = constant (genericLength ses + 1 :: Int32)
     in letBind_ pat $ BasicOp $ Replicate (Shape [n]) se
 arrayLitToReplicate _ _ _ _ = cannotSimplify
+
+-- This simplistic rule is only valid before we introduce memory.
+removeUnnecessaryCopy :: BinderOps lore => BottomUpRuleBasicOp lore
+removeUnnecessaryCopy (vtable,used) (Pattern [] [d]) _ (Copy v)
+  | not (v `UT.used` used) && consumable =
+    letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
+  where -- We need to make sure we can even consume the original.
+        -- This is currently a hacky check, much too conservative,
+        -- because we don't have the information conveniently
+        -- available.
+        consumable = case M.lookup v $ ST.toScope vtable of
+                       Just (FParamInfo info) -> unique $ declTypeOf info
+                       _ -> False
+removeUnnecessaryCopy _ _ _ _ = cannotSimplify
 
 simplifyCmpOp :: LetTopDownRule lore
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)

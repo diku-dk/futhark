@@ -246,7 +246,9 @@ instance BinderOps (Wise InKernel) where
 
 kernelRules :: RuleBook (Wise Kernels)
 kernelRules = standardRules <>
-              ruleBook [RuleOp removeInvariantKernelResults] [RuleOp distributeKernelResults]
+              ruleBook [RuleOp removeInvariantKernelResults]
+                       [RuleOp distributeKernelResults,
+                        RuleBasicOp removeUnnecessaryCopy]
 
 fuseStreamIota :: TopDownRuleOp (Wise InKernel)
 fuseStreamIota vtable pat _ (GroupStream w max_chunk lam accs arrs)

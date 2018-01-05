@@ -347,18 +347,6 @@ simplifyClosedFormReduce vtable pat _ (Reduce _ _ fun args) =
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ _ _ = cannotSimplify
 
--- This simplistic rule is only valid here, and not after we introduce
--- memory.
-removeUnnecessaryCopy :: BottomUpRuleBasicOp (Wise SOACS)
-removeUnnecessaryCopy (_,used) (Pattern [] [d]) _ (Copy v) | False = do
-  t <- lookupType v
-  let originalNotUsedAnymore =
-        not (any (`UT.used` used) $ vnameAliases v)
-  if primType t || originalNotUsedAnymore
-    then letBind_ (Pattern [] [d]) $ BasicOp $ SubExp $ Var v
-    else cannotSimplify
-removeUnnecessaryCopy _ _ _ _ = cannotSimplify
-
 -- The simplifyStream stuff is something that Cosmin left lodged in
 -- the simplification engine itself at some point.  I moved it here
 -- and turned it into a rule, but I don't really understand what's
