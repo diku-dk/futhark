@@ -92,10 +92,13 @@ data PatternT attr =
           }
   deriving (Ord, Show, Eq)
 
-instance Sem.Semigroup (PatternT lore) where
+instance Functor PatternT where
+  fmap f (Pattern ctx val) = Pattern (map (fmap f) ctx) (map (fmap f) val)
+
+instance Sem.Semigroup (PatternT attr) where
   Pattern cs1 vs1 <> Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
-instance Monoid (PatternT lore) where
+instance Monoid (PatternT attr) where
   mempty = Pattern [] []
   mappend = (Sem.<>)
 

@@ -551,7 +551,7 @@ iswim _ (SOAC.Scan w scan_fun scan_input) ots
             splitAt (length arrs) $ lambdaParams scan_fun
           map_params = map removeParamOuterDim scan_acc_params ++
                        map (setParamOuterDimTo w) scan_elem_params
-          map_rettype = map (setOuterDimTo w) $ lambdaReturnType scan_fun
+          map_rettype = map (`setOuterSize` w) $ lambdaReturnType scan_fun
           map_fun' = Lambda map_params map_body map_rettype
 
           scan_params = lambdaParams map_fun
@@ -583,7 +583,6 @@ scanToScanomap _ (SOAC.Scan w scan_fun scan_input) ots = do
 scanToScanomap _ _ _ =
   fail "Only turn scan into scanomaps"
 
-
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =
   let t = rowType $ paramType param
@@ -591,21 +590,11 @@ removeParamOuterDim param =
 
 setParamOuterDimTo :: SubExp -> LParam -> LParam
 setParamOuterDimTo w param =
-  let t = setOuterDimTo w $ paramType param
+  let t = paramType param `setOuterSize` w
   in param { paramAttr = t }
 
-setIdentOuterDimTo :: SubExp -> Ident -> Ident
-setIdentOuterDimTo w ident =
-  let t = setOuterDimTo w $ identType ident
-  in ident { identType = t }
-
-setOuterDimTo :: SubExp -> Type -> Type
-setOuterDimTo w t =
-  arrayOfRow (rowType t) w
-
 setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
-setPatternOuterDimTo w pat =
-  basicPattern' [] $ map (setIdentOuterDimTo w) $ patternValueIdents pat
+setPatternOuterDimTo w = fmap (`setOuterSize` w)
 
 -- Now for fiddling with transpositions...
 
