@@ -30,8 +30,7 @@ internaliseMapLambda :: InternaliseLambda
                      -> E.Exp
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
-internaliseMapLambda =
-  internaliseSomeMapLambda index0 id I.rowType
+internaliseMapLambda = internaliseSomeMapLambda index0 id I.rowType
   where index0 arg = do
           arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
           arg_t <- lookupType arg'
@@ -44,9 +43,11 @@ internaliseStreamMapLambda :: InternaliseLambda
                            -> InternaliseM I.Lambda
 internaliseStreamMapLambda internaliseLambda lam args = do
   chunk_size <- newVName "chunk_size"
-  lam' <- internaliseSomeMapLambda slice0 (`setOuterSize` I.Var chunk_size) id
-          internaliseLambda lam args
-  return lam' { lambdaParams = I.Param chunk_size (I.Prim int32) : lambdaParams lam' }
+  let chunk_param = I.Param chunk_size (I.Prim int32)
+      outer = (`setOuterSize` I.Var chunk_size)
+  lam' <- localScope (scopeOfLParams [chunk_param]) $
+          internaliseSomeMapLambda slice0 outer outer internaliseLambda lam args
+  return lam' { lambdaParams = chunk_param : lambdaParams lam' }
   where slice0 arg = do
           arg' <- letExp "arg" $ I.BasicOp $ I.SubExp arg
           arg_t <- lookupType arg'
