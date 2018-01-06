@@ -95,6 +95,9 @@ type ChunkMap = M.Map VName SubExp
 
 data AllocEnv fromlore tolore  =
   AllocEnv { chunkMap :: ChunkMap
+           , aggressiveReuse :: Bool
+             -- ^ Aggressively try to reuse memory in do-loops -
+             -- should be True inside kernels, False outside.
            , allocInOp :: Op fromlore -> AllocM fromlore tolore (Op tolore)
            }
 
@@ -175,16 +178,16 @@ runAllocM :: (MonadFreshNames m, BinderOps tolore) =>
           -> AllocM fromlore tolore a -> m a
 runAllocM handleOp (AllocM m) =
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBinderT m mempty) env
-  where env = AllocEnv mempty handleOp
+  where env = AllocEnv mempty False handleOp
 
 subAllocM :: (SameScope tolore1 tolore2, ExplicitMemorish tolore2, BinderOps tolore1) =>
-             (Op fromlore1 -> AllocM fromlore1 tolore1 (Op tolore1))
+             (Op fromlore1 -> AllocM fromlore1 tolore1 (Op tolore1)) -> Bool
           -> AllocM fromlore1 tolore1 a
           -> AllocM fromlore2 tolore2 a
-subAllocM handleOp (AllocM m) = do
+subAllocM handleOp b (AllocM m) = do
   scope <- castScope <$> askScope
   chunks <- asks chunkMap
-  let env = AllocEnv chunks handleOp
+  let env = AllocEnv chunks b handleOp
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBinderT m scope) env
 
 -- | Monad for adding allocations to a single pattern.
@@ -456,7 +459,8 @@ allocInMergeParams variant merge m = do
           | Array bt shape u <- paramDeclType mergeparam = do
               (mem, ixfun) <- lift $ lookupArraySummary v
               Mem _ space <- lift $ lookupType mem
-              if u == Unique && loopInvariantShape mergeparam && IxFun.isLinear ixfun
+              reuse <- asks aggressiveReuse
+              if reuse && u == Unique && loopInvariantShape mergeparam && IxFun.isLinear ixfun
                 then return (mergeparam { paramAttr = MemArray bt shape Unique $ ArrayIn mem ixfun },
                              lift . ensureArrayIn (paramType mergeparam) mem ixfun)
                 else doDefault mergeparam space
@@ -577,7 +581,7 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner $ GetSize key size_class
           handleOp (GetSizeMax size_class) =
             return $ Inner $ GetSizeMax size_class
-          handleOp (Kernel desc space ts kbody) = subAllocM handleKernelExp $
+          handleOp (Kernel desc space ts kbody) = subAllocM handleKernelExp True $
             Inner . Kernel desc space ts <$>
             localScope (scopeOfKernelSpace space)
             (allocInKernelBody kbody)
