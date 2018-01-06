@@ -4,7 +4,7 @@
 module Futhark.Optimise.MemoryBlockMerging.AuxiliaryInfo where
 
 import qualified Data.Map.Strict as M
-import Control.Monad
+import qualified Data.List as L
 
 import Futhark.Representation.AST
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
@@ -54,46 +54,51 @@ debugAuxiliaryInfo aux desc =
   aux `seq` auxVarMemMappings aux `seq` auxMemAliases aux `seq`
   auxVarAliases aux `seq` auxFirstUses aux `seq` auxLastUses aux `seq`
   auxInterferences aux `seq` auxPotentialKernelDataRaceInterferences `seq`
-  auxActualVariables aux `seq` auxExistentials aux `seq` do
-  putStrLn $ replicate 70 '='
-  putStrLn (desc ++ ": Helper info in " ++ pretty (auxName aux) ++ ":")
-  putStrLn $ replicate 70 '-'
-  putStrLn "Variable-to-memory mappings:"
-  forM_ (M.assocs $ auxVarMemMappings aux) $ \(var, memloc) ->
-    putStrLn ("For " ++ pretty var ++ ": " ++
-              pretty (memSrcName memloc) ++ ", " ++ show (memSrcIxFun memloc))
-  putStrLn $ replicate 70 '-'
-  putStrLn "Memory aliases:"
-  forM_ (M.assocs $ auxMemAliases aux) $ \(mem, aliases) ->
-    putStrLn ("For " ++ pretty mem ++ ": " ++ prettySet aliases)
-  putStrLn $ replicate 70 '-'
-  putStrLn "Variables aliases:"
-  forM_ (M.assocs $ auxVarAliases aux) $ \(var, aliases) ->
-    putStrLn ("For " ++ pretty var ++ ": " ++ prettySet aliases)
-  putStrLn $ replicate 70 '-'
-  putStrLn "First uses of memory:"
-  forM_ (M.assocs $ auxFirstUses aux) $ \(stmt_var, mems) ->
-    putStrLn ("In " ++ pretty stmt_var ++ ": " ++ prettySet mems)
-  putStrLn $ replicate 70 '-'
-  putStrLn "Last uses of memory:"
-  forM_ (M.assocs $ auxLastUses aux) $ \(var, mems) -> do
-    let pret = case var of
-          FromStm stmt_var -> "stm@" ++ pretty stmt_var
-          FromRes res_var -> "res@" ++ pretty res_var
-    putStrLn ("In " ++ pret ++ ": " ++ prettySet mems)
-  putStrLn $ replicate 70 '-'
-  putStrLn "Interferences of memory blocks:"
-  forM_ (M.assocs $ auxInterferences aux) $ \(mem, mems) ->
-    putStrLn ("In " ++ pretty mem ++ ": " ++ prettySet mems)
-  putStrLn $ replicate 70 '-'
-  putStrLn "Potential kernel data race interferences of memory blocks:"
-  forM_ (auxPotentialKernelDataRaceInterferences aux) $ mapM_ print
-  putStrLn $ replicate 70 '-'
-  putStrLn "Actual variables:"
-  forM_ (M.assocs $ auxActualVariables aux) $ \(var, vars) ->
-    putStrLn ("For " ++ pretty var ++ ": " ++ prettySet vars)
-  putStrLn $ replicate 70 '-'
-  putStrLn "Existentials:"
-  putStrLn $ prettySet $ auxExistentials aux
-  putStrLn $ replicate 70 '='
-  putStrLn ""
+  auxActualVariables aux `seq` auxExistentials aux `seq`
+  putBlock [ desc ++ ": Helper info in " ++ pretty (auxName aux) ++ ":"
+           , replicate 70 '-'
+           , "Variable-to-memory mappings:"
+           , L.intercalate "\n" $ flip map (M.assocs $ auxVarMemMappings aux)
+             $ \(var, memloc) ->
+               "For " ++ pretty var ++ ": " ++
+               pretty (memSrcName memloc) ++ ", " ++ show (memSrcIxFun memloc)
+           , replicate 70 '-'
+           , "Memory aliases:"
+           , L.intercalate "\n" $ flip map (M.assocs $ auxMemAliases aux)
+             $ \(mem, aliases) ->
+               "For " ++ pretty mem ++ ": " ++ prettySet aliases
+           , replicate 70 '-'
+           , "Variables aliases:"
+           , L.intercalate "\n" $ flip map (M.assocs $ auxVarAliases aux)
+             $ \(var, aliases) ->
+               "For " ++ pretty var ++ ": " ++ prettySet aliases
+           , replicate 70 '-'
+           , "First uses of memory:"
+           , L.intercalate "\n" $ flip map (M.assocs $ auxFirstUses aux)
+             $ \(stmt_var, mems) ->
+               "In " ++ pretty stmt_var ++ ": " ++ prettySet mems
+           , replicate 70 '-'
+           , "Last uses of memory:"
+           , L.intercalate "\n" $ flip map (M.assocs $ auxLastUses aux)
+             $ \(var, mems) ->
+               let pret = case var of
+                     FromStm stmt_var -> "stm@" ++ pretty stmt_var
+                     FromRes res_var -> "res@" ++ pretty res_var
+               in "In " ++ pret ++ ": " ++ prettySet mems
+           , replicate 70 '-'
+           , "Interferences of memory blocks:"
+           , L.intercalate "\n" $ flip map (M.assocs $ auxInterferences aux)
+             $ \(mem, mems) ->
+               "In " ++ pretty mem ++ ": " ++ prettySet mems
+           , replicate 70 '-'
+           , "Potential kernel data race interferences of memory blocks:"
+           , L.intercalate "\n" $ map show (auxPotentialKernelDataRaceInterferences aux)
+           , replicate 70 '-'
+           , "Actual variables:"
+           , L.intercalate "\n" $ flip map (M.assocs $ auxActualVariables aux)
+             $ \(var, vars) ->
+               "For " ++ pretty var ++ ": " ++ prettySet vars
+           , replicate 70 '-'
+           , "Existentials:"
+           , prettySet $ auxExistentials aux
+           ]

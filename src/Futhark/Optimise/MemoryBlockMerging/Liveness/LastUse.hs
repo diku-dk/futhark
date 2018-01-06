@@ -11,7 +11,7 @@ module Futhark.Optimise.MemoryBlockMerging.Liveness.LastUse
 
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Control.Monad
 import Control.Monad.RWS
 
@@ -124,14 +124,13 @@ setOptimistic mem x_lu exclude = do
     let is_indirect = mem' /= mem
     modifyCurOptimisticLastUses $ M.insert mem' (x_lu, is_indirect)
 
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "setOptimistic:"
-        putStrLn $ pretty mem
-        print x_lu
-        putStrLn ("exclude: " ++ prettySet exclude)
-        putStrLn $ prettySet mems
-        putStrLn $ replicate 70 '~'
+  let debug =
+        putBlock [ "setOptimistic:"
+                 , pretty mem
+                 , show x_lu
+                 , "exclude: " ++ prettySet exclude
+                 , prettySet mems
+                 ]
   doDebug debug
 
 -- If an optimistic last use 'mem' was added through a memory alias, forget
@@ -150,12 +149,11 @@ commitOptimistic mem = do
   res <- M.lookup mem <$> gets curOptimisticLastUses
   case res of
     Just (x_lu, _) -> do
-      let debug = do
-            putStrLn $ replicate 70 '~'
-            putStrLn "commitOptimistic:"
-            putStrLn $ pretty mem
-            print x_lu
-            putStrLn $ replicate 70 '~'
+      let debug =
+            putBlock [ "commitOptimistic:"
+                     , pretty mem
+                     , show x_lu
+                     ]
 
       withDebug debug $ recordMapping x_lu mem
     Nothing -> return ()
@@ -203,7 +201,7 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
       _ -> return ()
 
   -- Then find the new memory blocks.
-  let e_free_vars = freeInExp e
+  let e_free_vars = freeInExp e `S.difference` S.fromList (freeExcludes e)
   e_mems <- S.unions <$> mapM varMems (S.toList e_free_vars)
 
   mem_aliases <- asks ctxMemAliases
@@ -259,14 +257,14 @@ lookInStm (Let (Pattern _patctxelems patvalelems) _ e) = do
         setOptimistic mem (FromStm x) S.empty
 
   cur_optis <- gets curOptimisticLastUses
-  let debug = do
-        putStrLn $ replicate 70 '~'
-        putStrLn "LastUse lookInStm:"
-        putStrLn ("stm: " ++ show patvalelems)
-        putStrLn ("first uses outer: " ++ prettySet first_uses_outer)
-        putStrLn ("e mems: " ++ prettySet e_mems)
-        putStrLn ("cur optimistics: " ++ show cur_optis)
-        putStrLn $ replicate 70 '~'
+  let debug =
+        putBlock [ "LastUse lookInStm:"
+                 , "stm: " ++ show patvalelems
+                 , "first uses outer: " ++ prettySet first_uses_outer
+                 , "e free vars: " ++ prettySet e_free_vars
+                 , "e mems: " ++ prettySet e_mems
+                 , "cur optimistics: " ++ show cur_optis
+                 ]
 
   withDebug debug $ withLocalCurFirstUses $ mMod $ fullWalkExpM walker walker_kernel e
   where walker = identityWalker
@@ -293,3 +291,22 @@ lookInRes (Var v) = do
       Nothing ->
         return ()
 lookInRes _ = return ()
+
+-- Some freeInExp results are too limiting and give us too conservative last use
+-- results (especially in the CPU pipeline).  We only care about a free variable
+-- if we *read* from it.  If it only exists for *writing*, then we don't have to
+-- look at its memory, since whatever is there we overwrite, and so there cannot
+-- be any last *use*.
+freeExcludes :: LoreConstraints lore =>
+                Exp lore -> [VName]
+freeExcludes e = case e of
+  DoLoop _ mergevalparams _ _ ->
+    -- FIXME: This can end up doing something wrong if the returned memory
+    -- block-associated mergevalparams do not come directly from a Scratch
+    -- creation.
+    mapMaybe (fromVar . snd) mergevalparams
+
+  BasicOp (Update orig _ _) ->
+    [orig]
+
+  _ -> []

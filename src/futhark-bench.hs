@@ -47,7 +47,7 @@ binaryName :: FilePath -> FilePath
 binaryName = dropExtension
 
 newtype RunResult = RunResult { runMicroseconds :: Int }
-data DataResult = DataResult String (Either T.Text [RunResult])
+data DataResult = DataResult String (Either T.Text ([RunResult], T.Text))
 data BenchResult = BenchResult FilePath [DataResult]
 
 resultsToJSON :: [BenchResult] -> JSON.JSValue
@@ -64,9 +64,10 @@ resultsToJSON = JSON.JSObject . JSON.toJSObject . map benchResultToJSObject
           -> (String, JSON.JSValue)
         dataResultToJSObject (DataResult desc (Left err)) =
           (desc, JSON.showJSON err)
-        dataResultToJSObject (DataResult desc (Right runtimes)) =
+        dataResultToJSObject (DataResult desc (Right (runtimes, progerr))) =
           (desc, JSON.JSObject $ JSON.toJSObject
-                 [("runtimes", JSON.showJSON $ map runMicroseconds runtimes)])
+                 [("runtimes", JSON.showJSON $ map runMicroseconds runtimes),
+                  ("stderr", JSON.showJSON progerr)])
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -206,7 +207,7 @@ runBenchmarkCase opts program (TestRun _ input_spec (Succeeds expected_spec) dat
           Nothing -> itWentWrong $ "Runtime file has invalid contents:\n" <> runtime_result
 
         io $ reportResult runtimes
-        return runtimes
+        return (runtimes, T.decodeUtf8 progerr)
     Nothing ->
       itWentWrong $ T.pack $ "Execution exceeded " ++ show (optTimeout opts) ++ " seconds."
 

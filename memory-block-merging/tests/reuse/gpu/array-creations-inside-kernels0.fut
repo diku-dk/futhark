@@ -44,7 +44,7 @@
 
 let main (m: i32, n: i32, o: i32): [o][m]f32 =
   let membership = map (% o) (iota n)
-  let values = map (\i -> map f32 (map (^ i) (iota m))) (iota n) in
+  let values = map (\i -> map f32.i32 (map (^ i) (iota m))) (iota n) in
 
   let f [o] [m]
     (acc: *[o][m]f32)

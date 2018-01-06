@@ -48,6 +48,11 @@ withDebugJSON debug x
   | usesDebuggingJSON = unsafePerformIO debug `seq` x
   | otherwise = x
 
+putBlock :: [String] -> IO ();
+putBlock ss = putStrLn $ L.intercalate "\n" ss'
+  where ss' = ["", r] ++ ss ++ [r, ""]
+        r = replicate 70 '~'
+
 -- If a property is commutative in a map, build a map that reflects it.  A bit
 -- crude.  We could also just use a function that calculates this whenever
 -- needed.

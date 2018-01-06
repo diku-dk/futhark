@@ -111,6 +111,9 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
       recordActuals var actuals
     _ -> return ()
 
+  -- Ignore the existential memory blocks.
+  let bodyResult' = drop (length patctxelems) . bodyResult
+
   -- Special handling of loops, ifs, etc.
   case e of
     DoLoop _mergectxparams mergevalparams loopform body -> do
@@ -162,7 +165,7 @@ lookInStm stm@(Let (Pattern patctxelems patvalelems) _ e) = do
       -- We don't want to coalesce the existiential memory block of the if.
       -- However, if a branch result has a memory block that is firstly used
       -- inside the branch, it is okay to coalesce that in a future statement.
-      forM_ (zip3 patvalelems (bodyResult body_then) (bodyResult body_else))
+      forM_ (zip3 patvalelems (bodyResult' body_then) (bodyResult' body_else))
         $ \(PatElem var membound, res_then, res_else) -> do
         let body_vars = S.toList $ findAllExpVars e
         case membound of
@@ -354,14 +357,12 @@ extendActualVarsInKernel e arrs = forM_ arrs $ \var -> do
       let actuals = S.insert var' body_vars'
 
       dbg_body_vars_mems <- mapM (\v -> M.lookup v <$> asks ctxVarToMem) (S.toList body_vars)
-      let debug = do
-            putStrLn $ replicate 70 '~'
-            putStrLn "extendActualVarsInKernel:"
-            putStrLn $ pretty var
-            putStrLn $ pretty var'
-            putStrLn $ prettySet body_vars
-            print dbg_body_vars_mems
-            putStrLn $ prettySet body_vars'
-            putStrLn $ replicate 70 '~'
+      let debug = putBlock [ "extendActualVarsInKernel:"
+                           , pretty var
+                           , pretty var'
+                           , prettySet body_vars
+                           , show dbg_body_vars_mems
+                           , prettySet body_vars'
+                           ]
       withDebug debug $ recordActuals var' actuals
     Nothing -> return ()

@@ -4,6 +4,6 @@
 
 cd "$(dirname "$0")"
 
-./coalescing/test.sh "$@" \
-    && ./reuse/test.sh "$@" \
-    && ./mix/test.sh "$@"
+./coalescing/test.sh "$@"
+./reuse/test.sh "$@"
+./mix/test.sh "$@"

@@ -5,6 +5,8 @@
 --
 -- Enable by setting the environment variable
 -- MEMORY_BLOCK_MERGING_OVERVIEW_PRINT=1.
+--
+-- FIXME: This module can be removed.
 module Futhark.Optimise.MemoryBlockMerging.OverviewPrint
   ( overviewPrintProg
   ) where

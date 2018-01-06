@@ -69,13 +69,12 @@ findAllocHoistees body params =
           let vs = mapMaybe checkStm stms
               vs' = if null vs then Nothing else Just (xmem_alloc, concat vs)
 
-              debug = do
-                putStrLn $ replicate 70 '~'
-                putStrLn "usedByCopyOrConcat:"
-                putStrLn ("xmem_alloc: " ++ pretty xmem_alloc)
-                putStrLn ("vars: " ++ prettySet (S.fromList vs))
-                putStrLn ("vars': " ++ show vs')
-                putStrLn $ replicate 70 '~'
+              debug =
+                putBlock [ "usedByCopyOrConcat:"
+                         , "xmem_alloc: " ++ pretty xmem_alloc
+                         , "vars: " ++ prettySet (S.fromList vs)
+                         , "vars': " ++ show vs'
+                         ]
 
           in withDebug debug vs'
 
@@ -84,13 +83,18 @@ findAllocHoistees body params =
                           (Pattern _
                            [PatElem _ (ExpMem.MemArray _ _ _ (ExpMem.ArrayIn xmem_pat _))])
                            _
-                           (BasicOp (Update v slice _)))
+                           (BasicOp bop))
                   | xmem_pat == xmem_alloc =
-                      -- The source array must also be hoisted so that it
-                      -- is initialized before it is used by the
-                      -- coalesced party.  Any index variables are also
-                      -- hoisted.
-                      Just $ v : S.toList (freeIn slice)
+                    case bop of
+                      Update v slice _ ->
+                        -- The source array must also be hoisted so that it
+                        -- is initialized before it is used by the
+                        -- coalesced party.  Any index variables are also
+                        -- hoisted.
+                        Just $ v : S.toList (freeIn slice)
+                      Copy{} -> Just []
+                      Concat{} -> Just []
+                      _ -> Nothing
                 checkStm _ = Nothing
 
 hoistAllocsFunDef :: FunDef ExplicitMemory

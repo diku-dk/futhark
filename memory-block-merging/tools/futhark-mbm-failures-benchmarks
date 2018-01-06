@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -e
+
+cd "$(dirname "$0")/../../../" # Makes assumption.
+
+compiler="$1"
+if ! [ "$compiler" ]; then
+    compiler=futhark-c
+fi
+
+do_all_combinations="$2"
+
+ftest() {
+    futhark-test --nobuffer -c --compiler=$compiler futhark-benchmarks 2>&1
+}
+
+fproc() {
+    grep -E '^futhark-benchmarks/[^.]+\.fut:$' | sort
+}
+
+# Path assumptions.
+without=$HOME/temp/futhark/futhark-mbm-failures-benchmarks-$compiler-without
+with=$HOME/temp/futhark/futhark-mbm-failures-benchmarks-$compiler-with
+if ! [ -f $without ]; then
+    ftest > $without || true
+fi
+export IN_PLACE_LOWERING=0
+if [ "$do_all_combinations" ]; then
+    with=$HOME/temp/futhark/futhark-mbm-failures-benchmarks-$compiler-with-coalescing
+    MEMORY_BLOCK_MERGING_COALESCING=1 ftest > $with || true
+    echo $compiler coalescing
+    comm -3 <(fproc < $without) <(fproc < $with)
+
+    with=$HOME/temp/futhark/futhark-mbm-failures-benchmarks-$compiler-with-reuse
+    MEMORY_BLOCK_MERGING_REUSE=1 ftest > $with || true
+    echo $compiler reuse
+    comm -3 <(fproc < $without) <(fproc < $with)
+
+    with=$HOME/temp/futhark/futhark-mbm-failures-benchmarks-$compiler-with-both
+    MEMORY_BLOCK_MERGING_COALESCING=1 MEMORY_BLOCK_MERGING_REUSE=1 ftest > $with || true
+    echo $compiler both
+    comm -3 <(fproc < $without) <(fproc < $with)
+else
+    export MEMORY_BLOCK_MERGING_COALESCING=1
+    export MEMORY_BLOCK_MERGING_REUSE=1
+    ftest > $with || true
+    echo $compiler
+    comm -3 <(fproc < $without) <(fproc < $with)
+fi

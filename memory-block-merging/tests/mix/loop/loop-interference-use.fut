@@ -10,7 +10,6 @@
 -- structure cpu { Alloc 3 }
 -- structure gpu { Alloc 3 }
 
-
 import "/futlib/array"
 
 let main [n] (ns: [n]i32): [n]i32 =

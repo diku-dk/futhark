@@ -4,6 +4,10 @@
 {-# LANGUAGE ConstraintKinds #-}
 -- | Find all variable aliases.  Avoids having to use the Aliases representation
 -- in other modules.
+--
+-- FIXME: This module is silly.  It should be able to go away, with the other
+-- modules getting variable aliases by using the Aliases representation
+-- directly.
 module Futhark.Optimise.MemoryBlockMerging.VariableAliases where
 
 import qualified Data.Map.Strict as M

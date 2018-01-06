@@ -78,6 +78,7 @@ module Futhark.Representation.ExplicitMemory
        , lookupArraySummary
        , fullyLinear
        , ixFunMatchesInnerShape
+       , existentialiseIxFun
 
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
@@ -638,7 +639,7 @@ matchPatternToExp pat e = do
   let pat_ts = bodyReturnsFromPattern $ removePatternAliases pat
   unless (length pat_ts == length rt &&
                       and (zipWith matches pat_ts rt)) $
-    TC.bad $ TC.TypeError $ "Cannot match result type: " ++ pretty rt
+    TC.bad $ TC.TypeError $ "Cannot match result type: " ++ pretty rt ++ " (" ++ pretty pat_ts ++ ")"
   where matches (MemPrim x) (MemPrim y) = x == y
         matches (MemMem x_size x_space) (MemMem y_size y_space) =
           x_size == y_size && x_space == y_space
