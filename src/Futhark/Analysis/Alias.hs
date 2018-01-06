@@ -13,7 +13,6 @@ module Futhark.Analysis.Alias
        , analyseExp
        , analyseBody
        , analyseLambda
-       , analyseExtLambda
        )
        where
 
@@ -70,11 +69,4 @@ analyseLambda lam =
   let body = analyseBody $ lambdaBody lam
   in lam { lambdaBody = body
          , lambdaParams = lambdaParams lam
-         }
-analyseExtLambda :: (Attributes lore, CanBeAliased (Op lore)) =>
-                    ExtLambda lore -> ExtLambda (Aliases lore)
-analyseExtLambda lam =
-  let body = analyseBody $ extLambdaBody lam
-  in lam { extLambdaBody = body
-         , extLambdaParams = extLambdaParams lam
          }

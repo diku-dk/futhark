@@ -362,12 +362,11 @@ transformStm (Let pat (StmAux cs _) (Op (Stream w (Parallel _ _ _ []) map_fun ar
     (stmsToList . snd <$> runBinderT (certifying cs $ sequentialStreamWholeArray pat w [] map_fun arrs) types)
 
 transformStm (Let pat aux (Op (Stream w (Parallel _o comm red_fun nes) fold_fun arrs)))
-  | any (not . primType) $ lambdaReturnType red_fun,
-    Just fold_fun' <- extLambdaToLambda fold_fun  = do
+  | any (not . primType) $ lambdaReturnType red_fun = do
   -- Split into a chunked map and a reduction, with the latter
   -- distributed.
 
-  fold_fun_sequential <- Kernelise.transformLambda fold_fun'
+  fold_fun_sequential <- Kernelise.transformLambda fold_fun
 
   let (red_pat_elems, concat_pat_elems) =
         splitAt (length nes) $ patternValueElements pat
@@ -386,12 +385,10 @@ transformStm (Let pat aux (Op (Stream w (Parallel _o comm red_fun nes) fold_fun 
                 | otherwise                 = comm
 
 
-transformStm (Let pat _ (Op (Stream w
-                               (Parallel o comm red_fun nes) fold_fun arrs)))
-  | Just fold_fun' <- extLambdaToLambda fold_fun = do
+transformStm (Let pat _ (Op (Stream w (Parallel o comm red_fun nes) fold_fun arrs))) = do
   -- Generate a kernel immediately.
   red_fun_sequential <- Kernelise.transformLambda red_fun
-  fold_fun_sequential <- Kernelise.transformLambda fold_fun'
+  fold_fun_sequential <- Kernelise.transformLambda fold_fun
   blockedReductionStream pat w comm' red_fun_sequential fold_fun_sequential nes arrs
   where comm' | commutativeLambda red_fun, o /= InOrder = Commutative
               | otherwise                               = comm
@@ -700,10 +697,10 @@ nestedParallelism = concatMap (parallelism . stmExp) . bodyStms
         parallelism (Op (Redomap w _ _ _ _ _)) = [w]
         parallelism (Op (Map w _ _)) = [w]
         parallelism (Op (Stream w Sequential{} lam _))
-          | chunk_size_param : _ <- extLambdaParams lam =
+          | chunk_size_param : _ <- lambdaParams lam =
               let update (Var v) | v == paramName chunk_size_param = w
                   update se = se
-              in map update $ nestedParallelism $ extLambdaBody lam
+              in map update $ nestedParallelism $ lambdaBody lam
         parallelism _ = []
 
 containsNestedParallelism :: Lambda -> Bool

@@ -9,7 +9,6 @@ module Futhark.Tools
   , scanomapToMapAndReduce
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
-  , extLambdaToLambda
   , partitionChunkedFoldParameters
   , partitionChunkedKernelLambdaParameters
   , partitionChunkedKernelFoldParameters
@@ -130,11 +129,11 @@ splitScanOrRedomap patelems w redmap_lam accs = do
 
 sequentialStreamWholeArrayStms :: Bindable lore =>
                                   SubExp -> [SubExp]
-                               -> ExtLambdaT lore -> [VName]
+                               -> LambdaT lore -> [VName]
                                -> (Stms lore, [SubExp])
 sequentialStreamWholeArrayStms width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
-        partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
+        partitionChunkedFoldParameters (length accs) $ lambdaParams lam
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $ BasicOp $ SubExp width
       acc_bnds = [ mkLet' [] [paramIdent acc_param] $ BasicOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
@@ -145,14 +144,14 @@ sequentialStreamWholeArrayStms width accs lam arrs =
   in (oneStm chunk_bnd <>
       stmsFromList acc_bnds <>
       stmsFromList arr_bnds <>
-      bodyStms (extLambdaBody lam),
+      bodyStms (lambdaBody lam),
 
-      bodyResult $ extLambdaBody lam)
+      bodyResult $ lambdaBody lam)
 
 sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
                               Pattern (Lore m)
                            -> SubExp -> [SubExp]
-                           -> ExtLambdaT (Lore m) -> [VName]
+                           -> LambdaT (Lore m) -> [VName]
                            -> m ()
 sequentialStreamWholeArray pat width nes fun arrs = do
   let (body_bnds,res) = sequentialStreamWholeArrayStms width nes fun arrs
@@ -172,12 +171,12 @@ sequentialStreamWholeArray pat width nes fun arrs = do
   addStms $ stmsFromList res_bnds
 
 singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
-                                     [Type] -> ExtLambda lore -> m (Lambda lore)
+                                     [Type] -> Lambda lore -> m (Lambda lore)
 singletonChunkRedLikeStreamLambda acc_ts lam = do
   -- The accumulator params are OK, but we need array params without
   -- the chunk part.
   let (chunk_param, acc_params, arr_params) =
-        partitionChunkedFoldParameters (length acc_ts) $ extLambdaParams lam
+        partitionChunkedFoldParameters (length acc_ts) $ lambdaParams lam
   unchunked_arr_params <- forM arr_params $ \arr_param ->
     Param <$>
     newVName (baseString (paramName arr_param) <> "_unchunked") <*>
@@ -191,20 +190,10 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
                    Var $ paramName unchunked_arr_param |
                    (arr_param, unchunked_arr_param) <-
                      zip arr_params unchunked_arr_params ]
-      unchunked_body = chunk_bnd `insertStm` (arr_bnds `insertStms` extLambdaBody lam)
+      unchunked_body = chunk_bnd `insertStm` (arr_bnds `insertStms` lambdaBody lam)
   return Lambda { lambdaBody = unchunked_body
                 , lambdaParams = acc_params <> unchunked_arr_params
                 , lambdaReturnType = acc_ts
-                }
-
--- | Convert an 'ExtLambda' to a 'Lambda' if the return type is
--- non-existential anyway.
-extLambdaToLambda :: ExtLambda lore -> Maybe (Lambda lore)
-extLambdaToLambda lam = do
-  ret <- hasStaticShapes $ extLambdaReturnType lam
-  return Lambda { lambdaReturnType = ret
-                , lambdaBody = extLambdaBody lam
-                , lambdaParams = extLambdaParams lam
                 }
 
 partitionChunkedFoldParameters :: Int -> [Param attr]

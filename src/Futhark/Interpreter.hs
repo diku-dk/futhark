@@ -574,15 +574,14 @@ evalSOAC (Stream w form elam arrs) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
-  let ExtLambda elam_params elam_body elam_rtp = elam
-  let fun funargs = binding (zip3 (map paramIdent elam_params)
+  let Lambda elam_params elam_body _ = elam
+      fun funargs = binding (zip3 (map paramIdent elam_params)
                                   (repeat BindVar)
                                   funargs) $
                     evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
   chunkval <- evalSubExp w
-  vs <- fun (chunkval:accvals++arrvals)
-  return $ valueShapeContext elam_rtp vs ++ vs
+  fun (chunkval:accvals++arrvals)
 
 evalSOAC (Map w fun arrexps) = do
   vss' <- mapM (applyLambda fun) =<< soacArrays w arrexps

@@ -174,9 +174,6 @@ scopeOfFParams = M.fromList . map f
 instance Scoped lore (Lambda lore) where
   scopeOf lam = scopeOfLParams $ lambdaParams lam
 
-instance Scoped lore (ExtLambda lore) where
-  scopeOf lam = scopeOfLParams $ extLambdaParams lam
-
 type SameScope lore1 lore2 = (LetAttr lore1 ~ LetAttr lore2,
                               FParamAttr lore1 ~ FParamAttr lore2,
                               LParamAttr lore1 ~ LParamAttr lore2)

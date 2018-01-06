@@ -89,15 +89,15 @@ transformStm (Let pat aux (Op (Redomap w _ _ fold_lam nes arrs)))
           newParam (baseString (paramName arr_param) <> "_chunk") $
             arrayOfRow (paramType arr_param) chunk_size
 
-transformStm (Let pat aux (Op (Stream w (Sequential accs) fold_lam arrs)))
-  | Just ret <- hasStaticShapes $ extLambdaReturnType fold_lam = do
+transformStm (Let pat aux (Op (Stream w (Sequential accs) fold_lam arrs))) = do
+  let ret = lambdaReturnType fold_lam
   -- Sequential streams can be transformed easily to a GroupStream.
   -- But we have to create accumulator parameters for mapout.
 
   chunk_offset <- newVName "streamseq_chunk_offset"
 
   let (chunk_size_param, fold_acc_params, arr_chunk_params) =
-        partitionChunkedFoldParameters (length accs) $ extLambdaParams fold_lam
+        partitionChunkedFoldParameters (length accs) $ lambdaParams fold_lam
       chunk_size = paramName chunk_size_param
       map_arr_tps = map (`setOuterSize` w) $ drop (length accs) ret
 
@@ -107,7 +107,7 @@ transformStm (Let pat aux (Op (Stream w (Sequential accs) fold_lam arrs)))
 
   lam_body <- localScope (castScope (scopeOf fold_lam) <>
                           scopeOfLParams outarr_params) $ insertStmsM $ do
-    res <- bodyBind =<< transformBody (extLambdaBody fold_lam)
+    res <- bodyBind =<< transformBody (lambdaBody fold_lam)
     -- Some results are to be returned; others to be copied into the
     -- map-out arrays.
     let (acc_res, mapout_res) = splitAt (length accs) res
@@ -128,7 +128,7 @@ transformStm (Let pat aux (Op (Stream w (Sequential accs) fold_lam arrs)))
                    }
 
   -- Only copy the accs that were not consumed in the original stream.
-  let consumed = consumedByExtLambda $ Alias.analyseExtLambda fold_lam
+  let consumed = consumedByLambda $ Alias.analyseLambda fold_lam
   accs' <- forM (zip fold_acc_params accs) $ \(p, acc) ->
     case acc of
       Var v | not $ paramName p `S.member` consumed,

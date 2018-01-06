@@ -13,7 +13,6 @@ module Futhark.Representation.AST.Attributes.Aliases
        , consumedInExp
        , consumedInPattern
        , consumedByLambda
-       , consumedByExtLambda
        -- * Extensibility
        , AliasedOp (..)
        , CanBeAliased (..)
@@ -139,9 +138,6 @@ consumedInExp _ = mempty
 
 consumedByLambda :: Aliased lore => Lambda lore -> Names
 consumedByLambda = consumedInBody . lambdaBody
-
-consumedByExtLambda :: Aliased lore => ExtLambda lore -> Names
-consumedByExtLambda = consumedInBody . extLambdaBody
 
 patternAliases :: AliasesOf attr => PatternT attr -> [Names]
 patternAliases = map (aliasesOf . patElemAttr) . patternElements

@@ -752,79 +752,79 @@ internaliseExp desc (E.Partition lams arr _) = do
     mapM (letExp desc) =<< eSplitArray arr' (map eSubExp partition_sizes)
   where k = length lams
 
-internaliseExp desc (E.Stream form lam arr _) = do
+internaliseExp desc (E.Stream (E.MapLike o) lam arr _) = do
   arrs <- internaliseExpToVars "stream_input" arr
+  lam' <- internaliseStreamMapLambda internaliseLambda lam $ map I.Var arrs
+  let (chunk_param, _, _) =
+        partitionChunkedFoldParameters 0 $ I.lambdaParams lam'
+      ts = map (`setOuterSize` I.Var (I.paramName chunk_param)) $
+           lambdaReturnType lam'
 
-  rowts <- mapM (fmap I.rowType . lookupType) arrs
-  lam' <- internaliseStreamLambda internaliseLambda lam rowts
+  body <- localScope (scopeOfLParams $ I.lambdaParams lam') $
+          ensureResultShape asserting
+          "size of result not equal to chunk size" (srclocOf lam) ts $
+          lambdaBody lam'
 
-  -- If the stream form is a reduce, we also have to fiddle with the
-  -- lambda to incorporate the reduce function.  FIXME: can't we just
-  -- modify the internal representation of reduction streams?
-  (form', lam'') <-
-    case form of
-      E.MapLike o -> do
-        let (chunk_param, _, _) =
-              partitionChunkedFoldParameters 0 $ I.extLambdaParams lam'
-            ts = map (`setOuterSize` Free (I.Var $ I.paramName chunk_param)) $
-                 extLambdaReturnType lam'
+  let lam'' = lam' { lambdaReturnType = ts
+                   , lambdaBody = body
+                   }
 
-        body <- localScope (scopeOfLParams $ I.extLambdaParams lam') $
-                ensureResultExtShape asserting
-                "size of result not equal to chunk size" (srclocOf lam) ts $
-                extLambdaBody lam'
-
-        let lam'' = lam' { extLambdaReturnType = ts
-                         , extLambdaBody = body
-                         }
-        return (I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) [], lam'')
-      E.RedLike o comm lam0 -> do
-        -- Synthesize neutral elements by applying the fold function
-        -- to an empty chunk.
-        accs <- do
-          let (chunk_param, _, lam_params) =
-                partitionChunkedFoldParameters 0 $ I.extLambdaParams lam'
-          letBindNames'_ [I.paramName chunk_param] $
-            I.BasicOp $ I.SubExp $ constant (0::Int32)
-          forM_ lam_params $ \p ->
-            letBindNames'_ [I.paramName p] $
-            I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
-            I.arrayDims $ I.paramType p
-          bodyBind =<< renameBody (I.extLambdaBody lam')
-
-        acctps <- mapM I.subExpType accs
-        outsz  <- arraysSize 0 <$> mapM lookupType arrs
-        let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
-        lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
-        let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
-        acc_params <- forM lam0_acc_params $ \p -> do
-          name <- newVName $ baseString $ I.paramName p
-          return p { I.paramName = name }
-
-        body_with_lam0 <-
-          ensureResultShape asserting "shape of result does not match shape of initial value"
-          (srclocOf lam) acctps <=< runBodyBinder $ do
-            lam_res <- bodyBind $ extLambdaBody lam'
-
-            let consumed = consumedByLambda $ Alias.analyseLambda lam0'
-                copyIfConsumed p (I.Var v)
-                  | I.paramName p `S.member` consumed =
-                      letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
-                copyIfConsumed _ x = return x
-
-            accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
-            new_lam_res <- eLambda lam0' $ accs' ++ lam_res
-            return $ resultBody new_lam_res
-
-        -- Make sure the chunk size parameter comes first.
-        return (I.Parallel o comm lam0' accs,
-                lam' { extLambdaParams = take 1 (extLambdaParams lam') <>
-                                         acc_params <>
-                                         drop 1 (extLambdaParams lam')
-                     , extLambdaBody = body_with_lam0
-                     , extLambdaReturnType = staticShapes acctps })
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Stream w form' lam'' arrs
+  let form = I.Parallel o Commutative (I.Lambda [] (mkBody mempty []) []) []
+  letTupExp' desc $ I.Op $ I.Stream w form lam'' arrs
+
+-- If the stream form is a reduce, we also have to fiddle with the
+-- lambda to incorporate the reduce function.  FIXME: can't we just
+-- modify the internal representation of reduction streams?
+internaliseExp desc (E.Stream (E.RedLike o comm lam0) lam arr _) = do
+  arrs <- internaliseExpToVars "stream_input" arr
+  rowts <- mapM (fmap I.rowType . lookupType) arrs
+  (lam_params, lam_body) <-
+    internaliseStreamLambda internaliseLambda lam rowts
+  let (chunk_param, _, lam_val_params) =
+        partitionChunkedFoldParameters 0 lam_params
+
+  -- Synthesize neutral elements by applying the fold function
+  -- to an empty chunk.
+  letBindNames'_ [I.paramName chunk_param] $
+    I.BasicOp $ I.SubExp $ constant (0::Int32)
+  forM_ lam_val_params $ \p ->
+    letBindNames'_ [I.paramName p] $
+    I.BasicOp $ I.Scratch (I.elemType $ I.paramType p) $
+    I.arrayDims $ I.paramType p
+  accs <- bodyBind =<< renameBody lam_body
+
+  acctps <- mapM I.subExpType accs
+  outsz  <- arraysSize 0 <$> mapM lookupType arrs
+  let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
+  lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
+  let lam0_acc_params = fst $ splitAt (length accs) $ I.lambdaParams lam0'
+  acc_params <- forM lam0_acc_params $ \p -> do
+    name <- newVName $ baseString $ I.paramName p
+    return p { I.paramName = name }
+
+  body_with_lam0 <-
+    ensureResultShape asserting "shape of result does not match shape of initial value"
+    (srclocOf lam) acctps <=< runBodyBinder $ do
+      lam_res <- bodyBind lam_body
+
+      let consumed = consumedByLambda $ Alias.analyseLambda lam0'
+          copyIfConsumed p (I.Var v)
+            | I.paramName p `S.member` consumed =
+                letSubExp "acc_copy" $ I.BasicOp $ I.Copy v
+          copyIfConsumed _ x = return x
+
+      accs' <- zipWithM copyIfConsumed (I.lambdaParams lam0') accs
+      new_lam_res <- eLambda lam0' $ accs' ++ lam_res
+      return $ resultBody new_lam_res
+
+  -- Make sure the chunk size parameter comes first.
+  let form = I.Parallel o comm lam0' accs
+      lam' = I.Lambda { lambdaParams = chunk_param : acc_params ++ lam_val_params
+                      , lambdaBody = body_with_lam0
+                      , lambdaReturnType = acctps }
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.Op $ I.Stream w form lam' arrs
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 

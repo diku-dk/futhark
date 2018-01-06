@@ -55,9 +55,7 @@ buildCGexp (Apply fname _ _ _) = S.singleton fname
 buildCGexp (Op op) = execWriter $ mapSOACM folder op
   where folder = identitySOACMapper {
           mapOnSOACLambda = \lam -> do tell $ buildCGbody $ lambdaBody lam
-                                       return lam,
-          mapOnSOACExtLambda = \lam -> do tell $ buildCGbody $ extLambdaBody lam
-                                          return lam
+                                       return lam
           }
 buildCGexp e = execWriter $ mapExpM folder e
   where folder = identityMapper {

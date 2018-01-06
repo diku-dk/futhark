@@ -38,7 +38,6 @@ module Futhark.TypeCheck
   , checkArg
   , checkSOACArrayArgs
   , checkLambda
-  , checkExtLambda
   , checkFun'
   , checkLambdaParams
   , checkBody
@@ -1048,26 +1047,6 @@ checkLambda (Lambda params body rettype) args = do
       mapM_ checkType rettype
       checkLambdaBody rettype body
   else bad $ TypeError $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
-
-checkExtLambda :: Checkable lore =>
-                  ExtLambda (Aliases lore) -> [Arg] -> TypeM lore ()
-checkExtLambda (ExtLambda params body rettype) args =
-  if length params == length args then do
-    checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
-    let fname = nameFromString "<anonymous>"
-        consumable = zip (map paramName params) (map argAliases args)
-    checkFun' (fname,
-               map (`toDecl` Nonunique) rettype,
-               [ (paramName param,
-                  LParamInfo $ paramAttr param)
-               | param <- params ],
-               body) consumable $
-      checkStms (bodyStms body) $ do
-        checkResult $ bodyResult body
-        matchExtReturnType rettype $ bodyResult body
-    else bad $ TypeError $
-         "Existential lambda defined with " ++ show (length params) ++
-         " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.
 class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where

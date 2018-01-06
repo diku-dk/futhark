@@ -51,7 +51,6 @@ module Futhark.Optimise.Simplify.Engine
        , simplifyLambda
        , simplifyLambdaSeq
        , simplifyLambdaNoHoisting
-       , simplifyExtLambda
        , simplifyParam
        , bindLParams
        , bindChunkLParams
@@ -82,7 +81,6 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Construct
 import Futhark.Optimise.Simplify.Lore
-import qualified Futhark.Analysis.ScalExp as SE
 
 data HoistBlockers lore = HoistBlockers
                           { blockHoistPar :: BlockPred (Wise lore)
@@ -768,38 +766,6 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) arrs = do
   body' <- constructBody lamstms lamres
   rettype' <- simplify rettype
   return (Lambda params' body' rettype', hoisted)
-
-simplifyExtLambda :: SimplifiableLore lore =>
-                     ExtLambda lore
-                  -> [SubExp]
-                  -> [(LParam (Wise lore), SE.ScalExp, SE.ScalExp)]
-                  -> SimpleM lore (ExtLambda (Wise lore), UT.UsageTable, Stms (Wise lore))
-simplifyExtLambda lam@(ExtLambda params body rettype) nes parbnds = do
-  params' <- mapM (simplifyParam simplify) params
-  let paramnames = S.fromList $ boundByExtLambda lam
-  rettype' <- simplify rettype
-  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  ((lamstms, lamres), hoisted) <-
-    enterLoop $
-    bindLParams params' $
-    localVtable extendSymTab $
-    blockIf (hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
-    simplifyBody (map (const Observe) rettype) body
-  body' <- constructBody lamstms lamres
-
-  let consumed_in_body = consumedInBody body'
-      paramWasConsumed p (Var arr)
-        | p `S.member` consumed_in_body = UT.consumedUsage arr
-      paramWasConsumed _ _              = mempty
-      accparams = take (length nes) $ drop 1 params
-      usage = mconcat $ zipWith paramWasConsumed (map paramName accparams) nes
-  return (ExtLambda params' body' rettype', usage, hoisted)
-  where extendSymTab vtb =
-          foldl (\ vt (i,l,u) ->
-                   let i_name = paramName i
-                   in  ST.setUpperBound i_name u $
-                       ST.setLowerBound i_name l vt
-                ) vtb parbnds
 
 consumeResult :: [(Diet, SubExp)] -> UT.UsageTable
 consumeResult = mconcat . map inspect

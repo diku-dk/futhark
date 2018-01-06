@@ -290,14 +290,6 @@ instance Renameable lore => Rename (Lambda lore) where
       ret' <- mapM rename ret
       return $ Lambda params' body' ret'
 
-instance Renameable lore => Rename (ExtLambda lore) where
-  rename (ExtLambda params body rettype) =
-    bind (map paramName params) $ do
-      params' <- mapM rename params
-      body' <- rename body
-      rettype' <- rename rettype
-      return $ ExtLambda params' body' rettype'
-
 instance Rename Names where
   rename = fmap S.fromList . mapM rename . S.toList
 

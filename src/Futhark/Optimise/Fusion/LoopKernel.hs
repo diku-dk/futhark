@@ -498,12 +498,9 @@ toNestedSeqStream :: SOAC -> TryFusion SOAC
 toNestedSeqStream   (SOAC.Stream w form lam arrs) = do
   innerlam      <- renameLambda lam
   instrm_resids <- mapM (newIdent "res_instream") $ lambdaReturnType lam
-  let inner_extlam = ExtLambda (lambdaParams innerlam)
-                               (lambdaBody   innerlam)
-                               (staticShapes $ lambdaReturnType innerlam)
-      nes      = getStreamAccums form
+  let nes      = getStreamAccums form
       instrm_inarrs = drop (1 + length nes) $ map paramName $ lambdaParams lam
-      insoac   = Futhark.Stream w form inner_extlam instrm_inarrs
+      insoac   = Futhark.Stream w form innerlam instrm_inarrs
       lam_bind = mkLet' [] instrm_resids $ Op insoac
       lam_body = mkBody (oneStm lam_bind) $ map (Futhark.Var . identName) instrm_resids
       lam' = lam { lambdaBody = lam_body }

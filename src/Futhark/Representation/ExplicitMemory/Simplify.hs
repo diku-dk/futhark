@@ -18,8 +18,7 @@ import Data.List
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
-          Pattern, PatElem, Lambda, ExtLambda, FunDef, FParam, LParam,
-          RetType)
+          Pattern, PatElem, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.Kernels.Simplify
   (simplifyKernelOp, simplifyKernelExp)

@@ -78,9 +78,7 @@ transformStmRecursively :: Transformer m =>
 transformStmRecursively (Let pat aux (Op soac)) =
   certifying (stmAuxCerts aux) $
   transformSOAC pat =<< mapSOACM soacTransform soac
-  where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda
-                                           , mapOnSOACExtLambda = transformExtLambda
-                                           }
+  where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda }
 
 transformStmRecursively (Let pat aux e) =
   certifying (stmAuxCerts aux) $
@@ -260,10 +258,10 @@ transformSOAC pat (Redomap width _ _ innerfun accexps arrexps) = do
 -- Hope you got the idea at least because the code is terrible :-)
 transformSOAC respat (Stream outersz form lam arrexps) = do
   -- 1.) trivial step: find and build some of the basic things you need
-  let accexps = getStreamAccums    form
-      lampars = extLambdaParams     lam
-      lamrtps = extLambdaReturnType lam
-      lambody = extLambdaBody       lam
+  let accexps = getStreamAccums  form
+      lampars = lambdaParams     lam
+      lamrtps = lambdaReturnType lam
+      lambody = lambdaBody       lam
   -- a) ilam becomes the loop_index*chunkglb,
   -- b) chunkloc is the chunk used inside the loop body
   -- c) chunkglb is the global chunk (set to 1 or a convenient number)
@@ -282,7 +280,7 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
   -- 2.) Make the existential induction variables, allocated-size variables,
   --       and all possible instantiations of the existential types, i.e.,
   --       inside and outside the loop body!
-  assocs   <- mkExistAssocs outersz arrrtps respat
+  assocs   <- mkExistAssocs arrrtps respat
   initrtps <- forM (zip arrrtps assocs) $ \ (tp,(_,mub)) -> do
                 let deflt0= case mub of
                               UnknownBd -> outersz
@@ -438,24 +436,19 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                      AST.Exp (Lore m) -> Ident -> m ()
         myLetBind e idd = addStm $ mkLet' [] [idd] e
 
-        exToNormShapeDim :: SubExp -> M.Map VName SubExp -> ExtSize -> SubExp
-        exToNormShapeDim d _ (Ext   _) = d
-        exToNormShapeDim _ _ (Free c@(Constant _)) = c
-        exToNormShapeDim _ subs (Free (Var idd)) =
+        exToNormShapeDim :: SubExp -> M.Map VName SubExp -> SubExp -> SubExp
+        exToNormShapeDim _ _ c@(Constant _) = c
+        exToNormShapeDim _ subs (Var idd) =
           M.findWithDefault (Var idd) idd subs
-        existUpperBound :: SubExp -> Bool -> MEQType
-        existUpperBound outerSize b =
-            if not b then UnknownBd
-            else UpperBd outerSize
 
         -- | Assumes rtps are the array result types and pat is the
         -- pattern result of stream in let bound.  Result is a list of
         -- tuples: (1st) the ident of the array in pattern, (2rd) the
         -- exact/upper bound/unknown shape of the outer dim.
         mkExistAssocs :: MonadBinder m =>
-                         SubExp -> [ExtType] -> AST.Pattern (Lore m)
+                         [Type] -> AST.Pattern (Lore m)
                       -> m [(Ident, MEQType)]
-        mkExistAssocs outerSize rtps pat = do
+        mkExistAssocs rtps pat = do
           let patels    = patternElements pat
               -- keep only the patterns corresponding to the array types
               arrpatels = drop (length patels - length rtps) patels
@@ -463,9 +456,8 @@ transformSOAC respat (Stream outersz form lam arrexps) = do
                   let patid = patElemIdent patel
                       rtpdim= shapeDims $ arrayShape rtp
                   case rtpdim of
-                    Ext  _:_ -> return (patid, existUpperBound outerSize withUpperBound )
-                    Free s:_ -> return (patid, ExactBd s            )
-                    _        ->
+                    s:_ -> return (patid, ExactBd s            )
+                    _   ->
                         fail "FirstOrderTrabsform(Stream), mkExistAssocs: Empty Array Shape!"
           forM (zip rtps arrpatels) processAssoc
 
@@ -655,19 +647,6 @@ transformLambda (Lambda params body rettype) = do
            transformBody body
   return $ Lambda params body' rettype
 
--- | Recursively first-order-transform a lambda.
-transformExtLambda :: (MonadFreshNames m,
-                       Bindable lore, BinderOps lore,
-                       LocalScope lore m,
-                       LetAttr SOACS ~ LetAttr lore,
-                       CanBeAliased (Op lore)) =>
-                      ExtLambda -> m (AST.ExtLambda lore)
-transformExtLambda (ExtLambda params body rettype) = do
-  body' <- runBodyBinder $
-           localScope (scopeOfLParams params) $
-           transformBody body
-  return $ ExtLambda params body' rettype
-
 newFold :: Transformer m =>
            String -> [(SubExp,Type)] -> [VName]
         -> m ([Ident], [SubExp], [Ident])
@@ -739,8 +718,6 @@ discardPattern discard pat = do
   discard_pat <- basicPattern' [] <$> mapM (newIdent "discard") discard
   return $ discard_pat <> pat
 
-withUpperBound :: Bool
-withUpperBound = False
 data MEQType = ExactBd SubExp
              | UpperBd SubExp
              | UnknownBd

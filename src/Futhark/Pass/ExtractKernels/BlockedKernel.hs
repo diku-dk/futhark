@@ -32,7 +32,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.Representation.AST
 import Futhark.Representation.Kernels
        hiding (Prog, Body, Stm, Pattern, PatElem,
-               BasicOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
+               BasicOp, Exp, Lambda, FunDef, FParam, LParam, RetType)
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename

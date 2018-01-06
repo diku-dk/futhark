@@ -10,7 +10,6 @@ module Futhark.Optimise.Simplify.Lore
        , ExpWisdom
        , removeStmWisdom
        , removeLambdaWisdom
-       , removeExtLambdaWisdom
        , removeProgWisdom
        , removeFunDefWisdom
        , removeExpWisdom
@@ -188,9 +187,6 @@ removeStmWisdom = runIdentity . rephraseStm removeWisdom
 
 removeLambdaWisdom :: CanBeWise (Op lore) => Lambda (Wise lore) -> Lambda lore
 removeLambdaWisdom = runIdentity . rephraseLambda removeWisdom
-
-removeExtLambdaWisdom :: CanBeWise (Op lore) => ExtLambda (Wise lore) -> ExtLambda lore
-removeExtLambdaWisdom = runIdentity . rephraseExtLambda removeWisdom
 
 removeBodyWisdom :: CanBeWise (Op lore) => Body (Wise lore) -> Body lore
 removeBodyWisdom = runIdentity . rephraseBody removeWisdom

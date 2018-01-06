@@ -86,7 +86,6 @@ inliner funs = identityMapper { mapOnBody = const $ return . inlineInBody funs
 inlineInSOAC :: [FunDef] -> SOAC SOACS -> SOAC SOACS
 inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper
                           { mapOnSOACLambda = return . inlineInLambda inlcallees
-                          , mapOnSOACExtLambda = return . inlineInExtLambda inlcallees
                           }
 
 inlineInStm :: [FunDef] -> Stm -> Stm
@@ -96,10 +95,6 @@ inlineInStm inlcallees (Let pat aux e) =
 inlineInLambda :: [FunDef] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret) =
   Lambda params (inlineInBody inlcallees body) ret
-
-inlineInExtLambda :: [FunDef] -> ExtLambda -> ExtLambda
-inlineInExtLambda inlcallees (ExtLambda params body ret) =
-  ExtLambda params (inlineInBody inlcallees body) ret
 
 addLocations :: Safety -> [SrcLoc] -> Stms SOACS -> Stms SOACS
 addLocations caller_safety more_locs = fmap onStm

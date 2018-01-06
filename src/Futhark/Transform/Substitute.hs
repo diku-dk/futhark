@@ -163,13 +163,6 @@ instance Substitutable lore => Substitute (Lambda lore) where
     (substituteNames substs body)
     (map (substituteNames substs) rettype)
 
-instance Substitutable lore => Substitute (ExtLambda lore) where
-  substituteNames substs (ExtLambda params body rettype) =
-    ExtLambda
-    (substituteNames substs params)
-    (substituteNames substs body)
-    (map (substituteNames substs) rettype)
-
 instance Substitute Ident where
   substituteNames substs v =
     v { identName = substituteNames substs $ identName v

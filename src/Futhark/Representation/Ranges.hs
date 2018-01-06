@@ -28,7 +28,6 @@ module Futhark.Representation.Ranges
        , removeBodyRanges
        , removeStmRanges
        , removeLambdaRanges
-       , removeExtLambdaRanges
        , removePatternRanges
        )
 where
@@ -137,10 +136,6 @@ removeStmRanges = runIdentity . rephraseStm removeRanges
 removeLambdaRanges :: CanBeRanged (Op lore) =>
                       Lambda (Ranges lore) -> Lambda lore
 removeLambdaRanges = runIdentity . rephraseLambda removeRanges
-
-removeExtLambdaRanges :: CanBeRanged (Op lore) =>
-                         ExtLambda (Ranges lore) -> ExtLambda lore
-removeExtLambdaRanges = runIdentity . rephraseExtLambda removeRanges
 
 removePatternRanges :: PatternT (Range, a)
                     -> PatternT a

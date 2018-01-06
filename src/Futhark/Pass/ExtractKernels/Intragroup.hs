@@ -201,7 +201,7 @@ intraGroupStm stm@(Let pat _ e) = do
       parallel w
 
     Op (Stream w (Sequential accs) lam arrs)
-      | chunk_size_param : _ <- extLambdaParams lam -> do
+      | chunk_size_param : _ <- lambdaParams lam -> do
       types <- asksScope castScope
       ((), stream_bnds) <-
         runBinderT (sequentialStreamWholeArray pat w accs lam arrs) types

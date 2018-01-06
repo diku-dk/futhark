@@ -12,7 +12,6 @@ module Futhark.Representation.SOACS
        , BasicOp
        , Exp
        , Lambda
-       , ExtLambda
        , FunDef
        , FParam
        , LParam
@@ -25,7 +24,6 @@ module Futhark.Representation.SOACS
        , module Futhark.Representation.AST.Syntax
        , module Futhark.Representation.SOACS.SOAC
        , AST.LambdaT(Lambda)
-       , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
        , AST.PatternT(Pattern)
        , AST.PatElemT(PatElem)
@@ -41,8 +39,7 @@ import Control.Monad
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, BasicOp, Exp, Body, Stm,
-          Pattern, Lambda, ExtLambda, FunDef, FParam, LParam,
-          RetType, PatElem)
+          Pattern, Lambda, FunDef, FParam, LParam, RetType, PatElem)
 import Futhark.Representation.SOACS.SOAC
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
@@ -71,7 +68,6 @@ type Body = AST.Body SOACS
 type Stm = AST.Stm SOACS
 type Pattern = AST.Pattern SOACS
 type Lambda = AST.Lambda SOACS
-type ExtLambda = AST.ExtLambda SOACS
 type FunDef = AST.FunDefT SOACS
 type FParam = AST.FParam SOACS
 type LParam = AST.LParam SOACS

@@ -14,13 +14,11 @@ module Futhark.Representation.AST.Attributes.Names
          , freeInExp
          , freeInStm
          , freeInLambda
-         , freeInExtLambda
          -- * Bound Names
          , boundInBody
          , boundByStm
          , boundByStms
          , boundByLambda
-         , boundByExtLambda
 
          , FreeAttr(..)
        )
@@ -118,26 +116,6 @@ freeInLambda :: (FreeAttr (ExpAttr lore),
                  FreeIn (Op lore)) =>
                 Lambda lore -> Names
 freeInLambda (Lambda params body rettype) =
-    freeInLambdaIsh params body rettype
-
--- | Return the set of identifiers that are free in the given
--- existential lambda, including shape annotations in the parameters.
-freeInExtLambda :: (FreeAttr (ExpAttr lore),
-                    FreeAttr (BodyAttr lore),
-                    FreeIn (FParamAttr lore),
-                    FreeIn (LParamAttr lore),
-                    FreeIn (LetAttr lore),
-                    FreeIn (Op lore)) =>
-                   ExtLambda lore -> Names
-freeInExtLambda (ExtLambda params body rettype) =
-  freeInLambdaIsh params body rettype
-
-freeInLambdaIsh :: (FreeIn attr, FreeIn a, FreeAttr (ExpAttr lore),
-                    FreeAttr (BodyAttr lore), FreeIn (FParamAttr lore),
-                    FreeIn (LParamAttr lore), FreeIn (LetAttr lore),
-                    FreeIn (Op lore)) =>
-                   [ParamT attr] -> Body lore -> [a] -> Names
-freeInLambdaIsh params body rettype =
   S.filter (`notElem` paramnames) $ inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeIn params
@@ -267,7 +245,3 @@ boundByStms = fold . fmap boundByStm
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]
 boundByLambda lam = map paramName (lambdaParams lam)
-
--- | The names of the lambda parameters plus the index parameter.
-boundByExtLambda :: ExtLambda lore -> [VName]
-boundByExtLambda lam = map paramName (extLambdaParams lam)
