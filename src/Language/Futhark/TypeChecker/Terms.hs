@@ -1024,7 +1024,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
           uniquePat (RecordPattern fs ploc) =
             RecordPattern (map (fmap uniquePat) fs) ploc
           uniquePat (PatternAscription p t) =
-            PatternAscription (uniquePat p) t
+            PatternAscription p t
 
           -- Make the pattern unique where needed.
           pat' = uniquePat pat
@@ -1063,7 +1063,7 @@ checkExp (DoLoop tparams mergepat mergeexp form loopbody loc) =
             return ()
       (pat_cons, _) <- execStateT (checkMergeReturn pat' body_t) (mempty, mempty)
       let body_cons' = body_cons <> pat_cons
-      if body_cons' == body_cons
+      if body_cons' == body_cons && patternType pat' == patternType pat
         then return pat'
         else convergePattern pat' body_cons' body_t body_loc
 
